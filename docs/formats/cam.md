@@ -188,6 +188,16 @@ into the middle of keyframe data. The descriptors they should name do exist:
 the structural pool walk finds exactly six descriptors the table never
 mentions, and both lists are ascending, so the pairing is unambiguous.
 `hod2lib` repairs them and reports each substitution in `CamFile.repairs`.
+
+Separately, four files carry **individual bytes smashed to `0xFF`** inside
+keyframe data. Where the top byte is hit the float decodes to NaN or ~1e38;
+where a mantissa byte is hit it decodes to an ordinary-looking number, so a
+finiteness test alone is not enough. The files over-determine themselves —
+channels of a path share a time base, keys sharing a time are duplicates, and
+`st1evtbl`'s `cam_play` extents state each path's duration independently — and
+`hod2lib.cam` uses that to restore 90 fields, 81 of them exactly, recording the
+evidence for each in `Curve.damage`. Channels with no evidence left are
+zero-filled and flagged in `Path.damaged`.
 See [`../re/anomalies.md`](../re/anomalies.md).
 
 ## Export

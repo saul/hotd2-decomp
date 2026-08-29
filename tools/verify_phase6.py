@@ -47,11 +47,13 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
     total_bytes = covered_bytes = 0
     n_paths = n_curves = n_keys = n_repairs = 0
     padded = 0
-    # Damaged keyframe words, repaired by Curve.real_keys. Distinct from
+    # Smashed keyframe words, restored by Curve.real_keys. Distinct from
     # CamFile.repairs, which counts repaired *offset-table* entries. Both are
     # reported so neither repair is silent -- see docs/re/anomalies.md.
     key_repairs = 0
     key_repair_files: list[str] = []
+    how = Counter()
+    lost: list[str] = []
 
     print("cam/ -- Hermite spline paths")
     print(f"  {'file':<16}{'paths':>6}{'curves':>8}{'keys':>8}{'coverage':>11}")
@@ -69,6 +71,11 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
         n_keys += sum(len(c.keys) for c in f.curves.values())
         n_repairs += len(f.repairs)
         padded += sum(1 for c in f.curves.values() if len(c.real_keys) != len(c.keys))
+        for path in f.paths:
+            for ch, ds in path.damage.items():
+                how.update(d.how for d in ds)
+            for ch, fields in path.damaged.items():
+                lost.append(f"{p.name} path {path.index} {ch}.{'/'.join(fields)}")
         here = sum(c.repairs for c in f.curves.values())
         if here:
             key_repairs += here
@@ -100,8 +107,17 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
           f"({covered_bytes:,} / {total_bytes:,})")
     print(f"  curves with padded key slots: {padded}")
     print(f"  repaired offset-table entries: {n_repairs}")
-    print(f"  repaired damaged keyframe words: {key_repairs}"
+    print(f"  restored keyframe words: {key_repairs}"
           + (f"  [{', '.join(key_repair_files)}]" if key_repair_files else ""))
+    if how:
+        exact = sum(v for k, v in how.items() if k != "nearest")
+        print(f"    by evidence: " + ", ".join(f"{k} {v}" for k, v in how.most_common()))
+        print(f"    {exact} determined by the file itself, "
+              f"{how.get('nearest', 0)} reconstructed from neighbours")
+    if lost:
+        print(f"  channels with no evidence left, zero-filled and flagged: {len(lost)}")
+        for x in lost:
+            print(f"    {x}")
     print(f"  keyframe times off the 60 Hz frame grid: {off_grid}")
     return (1 if problems else 0), problems
 

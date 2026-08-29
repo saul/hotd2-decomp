@@ -1397,3 +1397,102 @@ it walks a `s16` list from an object field and enqueues a slot per entry via a
 record table at `0x004EC748`.
 
 Do that before touching the data again.
+
+### Addendum 4 — stage geometry streaming: regions
+
+Solved, decompilation-first as instructed. The user's observation that stage 2's
+geometry overlaps in an export but never on screen was the correct diagnosis and
+pointed straight at it.
+
+**A stage is a sequence of overlapping *regions*.** `DAT_009A2224` holds the
+current region id. Each region names up to 12 asset slots, and that one set is
+used for **both drawing and streaming**:
+
+```
+RegionDrawResidentSet  0x00401260   bounding sphere -> frustum cull -> draw
+RegionLoadDelta        0x00401510   load  (new \ old)
+RegionUnloadDelta      0x004015A0   free  (old \ new)
+```
+
+The two halves are exact mirrors — the same set-difference walk, one calling the
+load enqueues and the other the free enqueues. Consecutive regions share most of
+their contents and swap one or two, a sliding window along the rail. Stage 2:
+
+```
+region 5 : st2_10[0], st2_10[1], st2_10[2]
+region 6 : st2_04[0], st2_04[2], st2_10[1], st2_10[2], st2_11[0]
+region 7 : st2_04[0], st2_04[2], st2_07[1], st2_10[2], st2_11[0], st2_07[7]
+```
+
+#### Another two mis-namings corrected
+
+Opcodes `0x28`/`0x29` were in the table as `bgm_restore`/`bgm_set`. They are
+`region_load`/`region_enter`. That is the **third** pair of opcodes this project
+named from neighbouring addresses and got wrong (after `0x52`/`0x53`). The
+lesson is now Rule 1 corollary 5 in `method.md`; it keeps being earned.
+
+#### How it was found
+
+Followed the plan recorded last session rather than searching data again: every
+geometry load must pass `FUN_0041D5D0`, whose callers are a closed set of 12.
+`FUN_00401510` was the second one read. Total cost: two decompilations.
+
+The two earlier data-first attempts at this question — a u16 scan for stage
+tables, and the `0x004E7C90` group table — had consumed far more effort and
+produced one confident wrong answer.
+
+#### Validation
+
+The region table's length is not stored; it ends where the next scene's begins.
+Bounded that way the counts are 13/59/26/39/10/14 for stages 1-6, and **the
+largest region id any script passes to `0x28`/`0x29` is exactly `count - 1` for
+every stage**, no operand out of range. Six independent exact fits.
+
+Then the check the user predicted. Spawn positions against the geometry
+bounding box:
+
+```
+stage 3   glob 77 %   ->   region set 100 %
+stage 2   512/513     ->   513/513
+stage 4   199/201     ->   201/201
+```
+
+Stage 3's long-standing 77 % was exactly what was diagnosed: the glob missing
+`st3.bin`. All six stages are now 100 %.
+
+Stage 6 initially *regressed* to 85 % on the region set alone, which turned out
+to be informative rather than a bug: stage 6 loads `st5_01/01b/02/02b` through
+the event script's `0x50` slot loads, not through its regions. So the correct
+rule is **regions ∪ opcode-0x50 slots**; whole-file `0x52` loads are excluded
+because those are spawnable actors, not placed scenery.
+
+#### Exporter
+
+`export_level.py --stage N` now uses the region tables. `--glob-geometry` keeps
+the old behaviour for comparison. Every model node carries
+`extras.hod2_regions`; a `<stage>_regions.json` sidecar lists each region's
+contents, which is what makes the overlapping geometry intelligible in Blender.
+
+Also fixed a false positive I introduced last session: `blender_check.py`
+counted the camera rails as geometry and failed on "34 objects without UVs".
+Rails are edge-only `LINE_STRIP` meshes with no UVs by design; they are now
+excluded. Verified the 34 were all rails before changing the check.
+
+#### Named in Ghidra
+
+`RegionLoadDelta`, `RegionUnloadDelta`, `RegionDrawResidentSet`,
+`RegionBindSceneTables`, `RegionInit`, `EvtOpRegionEnter29`,
+`EvtOpRegionLoad28`, `AssetDrawSlot`, `AssetGetBoundingSphere`,
+`CheckSphereInFrustum` — plus the 15 from the previous addendum.
+`ApplyKnownTables.java` now carries a FIXED list of these core routines so a
+fresh import reproduces them.
+
+#### Next
+
+1. `draw_mode` — the second `s16` of a region id entry. Values 0/1/2 select
+   different paths in `RegionDrawResidentSet`; only mode 0 is understood.
+2. The mode-1 region tables at `0x00576A8C`/`0x00576ABC` — a second full set,
+   presumably the alternate game mode. Unexamined.
+3. Region → camera path correlation: both are now recoverable, so the intended
+   view for any point in a stage can be reconstructed. That would settle
+   question 13 (whether collapsed-UV faces are ever on screen).

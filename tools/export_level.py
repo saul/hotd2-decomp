@@ -18,7 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import cam, container as C, exetab, gltf, nl1, texbank  # noqa: E402
+from hod2lib import cam, container as C, evt, exetab, gltf, nl1, texbank  # noqa: E402
+
+#: stage number -> scene id, the event system's own index
+STAGE_TO_SCENE = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5}
 
 _TABLES: exetab.ExeTables | None = None
 
@@ -86,6 +89,96 @@ def load_cam_paths(game: Path, stage: int | None, name: str | None):
     return out
 
 
+def stage_geometry(game: Path, stage: int, scene: int):
+    """The authoritative geometry set for a stage, from Hod2.exe.
+
+    Globbing `st<N>_*` is wrong in both directions: it misses files the stage
+    genuinely draws (`st3.bin`, and all of stage 6's reused `st5_*` geometry)
+    and includes entries no region ever draws.
+
+    The real set is the union of
+
+      * every asset slot named by any of the scene's *regions* -- the sliding
+        window the game streams and draws along the rail
+        (`ExeTables.scene_regions`), and
+      * every slot the event script loads with opcode 0x50.
+
+    Whole-file loads (opcode 0x52) are deliberately excluded: those are
+    spawnable actors -- enemies, characters -- instantiated at runtime from
+    spawn descriptors, not placed scenery.
+
+    Returns (parts, model_regions, regions) where *parts* is the usual
+    (name, models, bank) list, *model_regions* maps (part, model index) to the
+    region ids that draw it, and *regions* is the raw region table.
+    """
+    tables = get_tables(game)
+    if tables is None:
+        raise SystemExit("Hod2.exe is required to resolve the stage geometry set")
+
+    slots = tables.asset_slots()
+    regions = tables.scene_regions(scene)
+
+    wanted: dict[str, set[int]] = {}
+    slot_regions: dict[tuple[str, int], set[int]] = {}
+    for ri, region in enumerate(regions):
+        for slot, _mode in region:
+            rec = slots.get(slot)
+            if not rec:
+                continue
+            wanted.setdefault(rec[0], set()).add(rec[1])
+            slot_regions.setdefault(rec, set()).add(ri)
+
+    evt_name = tables.scene_evt_file(scene)
+    if evt_name and (game / "evt" / evt_name).exists():
+        ev = evt.load(str(game / "evt" / evt_name), tables.scene_block_count(scene))
+        for blk in ev.blocks:
+            if blk.offset < 0:
+                continue
+            for prog in blk.programs:
+                for ins in prog:
+                    if ins.opcode in evt.SLOT_OPCODES and ins.raw:
+                        rec = slots.get(ins.raw[0])
+                        if rec:
+                            wanted.setdefault(rec[0], set()).add(rec[1])
+
+    parts, model_regions = [], {}
+    for fname in sorted(wanted):
+        stem = fname[:-4] if fname.endswith(".bin") else fname
+        pol = game / "pol" / fname
+        if not pol.exists():
+            continue
+        cont = C.load(pol.read_bytes())
+        bank = _bank_for(game, stem, cont)
+        models, order = [], sorted(wanted[fname])
+        for entry in order:
+            if entry >= cont.model_count:
+                continue
+            try:
+                got = nl1.parse(cont.model(entry))
+            except Exception:
+                continue
+            for m in (got if isinstance(got, list) else [got]):
+                model_regions[(stem, len(models))] = sorted(
+                    slot_regions.get((fname, entry), ()))
+                models.append(m)
+        if models:
+            parts.append((stem, models, bank))
+    return parts, model_regions, regions
+
+
+def _bank_for(game: Path, stem: str, cont):
+    tex = game / "tex" / f"{stem}.bin"
+    if not tex.exists():
+        return None
+    tc = C.load(tex.read_bytes())
+    data = tc.data if tc.kind == C.COMPRESSED else tex.read_bytes()
+    tables = get_tables(game)
+    entries = tables.entries(stem) if tables else []
+    if entries:
+        return texbank.bank_from_exe(data, entries)
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", required=True, type=Path)
@@ -98,6 +191,9 @@ def main() -> int:
     ap.add_argument("--keep-collapsed-uv", action="store_true",
                     help="keep triangles whose UV area is zero (they render as "
                          "hard directional streaks; dropped by default)")
+    ap.add_argument("--glob-geometry", action="store_true",
+                    help="use the old st<N>_* glob instead of the exe's region "
+                         "tables. Wrong in both directions; kept for comparison")
     ap.add_argument("--no-cameras", action="store_true",
                     help="skip cam/ camera and object paths")
     ap.add_argument("--cam-step", type=float, default=2.0,
@@ -130,10 +226,16 @@ def main() -> int:
         if not targets:
             raise SystemExit(f"no assets for stage {args.stage}")
 
-        parts = []
-        for n in targets:
-            models, bank = load_asset(game, n)
-            parts.append((n, models, bank))
+        scene = STAGE_TO_SCENE.get(args.stage)
+        model_regions, regions = {}, []
+        if args.glob_geometry or scene is None:
+            parts = []
+            for n in targets:
+                models, bank = load_asset(game, n)
+                parts.append((n, models, bank))
+        else:
+            parts, model_regions, regions = stage_geometry(game, args.stage, scene)
+        for n, models, _b in parts:
             print(f"  + {n}: {len(models)} models, "
                   f"{sum(m.vertex_count for m in models):,} verts, "
                   f"{sum(m.triangle_count for m in models):,} tris")
@@ -146,7 +248,24 @@ def main() -> int:
                                  uv_check=args.uv_check,
                                  keep_collapsed_uv=args.keep_collapsed_uv,
                                  cam_files=cam_files, cam_step=args.cam_step,
-                                 unlit=args.unlit)
+                                 unlit=args.unlit, model_regions=model_regions)
+        if regions:
+            import json
+            slots = get_tables(game).asset_slots()
+            side = out_dir / f"{name}_regions.json"
+            side.write_text(json.dumps({
+                "scene": scene,
+                "note": "region id -> asset slots resident and drawn. Set by evt "
+                        "opcode 0x29; consecutive regions overlap, which is why "
+                        "a whole-stage export shows interpenetrating geometry "
+                        "the game never displays.",
+                "regions": [
+                    [{"slot": s_, "draw_mode": m,
+                      "file": slots.get(s_, ("?", 0))[0],
+                      "entry": slots.get(s_, ("?", 0))[1]} for s_, m in reg]
+                    for reg in regions],
+            }, indent=1))
+            print(f"  {len(regions)} regions -> {side.name}")
         vert = sum(m.vertex_count for _, ms, _ in parts for m in ms)
         tri = sum(m.triangle_count for _, ms, _ in parts for m in ms)
         print(f"\n{name}: {len(parts)} segments, {vert:,} verts, "

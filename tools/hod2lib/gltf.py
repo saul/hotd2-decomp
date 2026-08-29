@@ -382,7 +382,7 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
 
 def export_level(name, parts, out_dir, collision=None, write_textures=True,
                  uv_check=False, keep_collapsed_uv=False, cam_files=None,
-                 cam_step=2.0, unlit=False):
+                 cam_step=2.0, unlit=False, model_regions=None):
     """Write one or more parts to <out_dir>/<name>.gltf plus .bin and textures/.
 
     ``parts`` is a list of (part_name, models, bank). A stage is split across
@@ -591,7 +591,15 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
             if prims:
                 mesh_name = f"{part_name}_model_{mi:03d}"
                 meshes.append({"name": mesh_name, "primitives": prims})
-                nodes.append({"mesh": len(meshes) - 1, "name": mesh_name})
+                node = {"mesh": len(meshes) - 1, "name": mesh_name}
+                # Which streaming regions draw this model. Consecutive regions
+                # overlap, so a whole-stage export shows geometry the game
+                # never displays together; this is how to tell them apart.
+                if model_regions:
+                    regs = model_regions.get((part_name, mi))
+                    if regs is not None:
+                        node["extras"] = {"hod2_regions": regs}
+                nodes.append(node)
                 child_nodes.append(len(nodes) - 1)
 
         if child_nodes:

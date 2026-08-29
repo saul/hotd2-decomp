@@ -84,6 +84,19 @@ stage2.bin           geometry buffer
 textures/st2_01/*.png   PNGs, one folder per segment
 ```
 
+### Stage geometry and regions
+
+The set of models a stage draws comes from the **region tables in `Hod2.exe`**,
+not from globbing `st<N>_*` — which misses files (stage 3's `st3.bin`, all of
+stage 6's reused `st5_*`) and includes entries no region draws.
+
+A stage is a sequence of overlapping **regions**; only one is resident and drawn
+at a time. That is why a whole-stage export shows segments interpenetrating that
+the game never displays together. Every model node carries
+`extras.hod2_regions`, and `<stage>_regions.json` lists each region's contents.
+
+`--glob-geometry` restores the old behaviour for comparison.
+
 ### Camera paths
 
 Stage exports include the stage's `cam/` data, grouped under three parent nodes:

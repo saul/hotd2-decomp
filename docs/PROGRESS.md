@@ -109,7 +109,11 @@ translation has not been decompiled yet.
 - [x] Asset streaming: job queue, handler tables, slot→pol-file map
       (326/326 entry counts validated), opcodes `0x50`–`0x57` identified
 - [x] `tools/dump_stage_script.py` — event script as a readable timeline
-- [ ] What loads the bulk of a stage's geometry segments (see `pipeline.md`)
+- [x] **Stage geometry streaming solved** — regions. Per-scene region tables at
+      `0x00576A2C`/`0x00576A5C`; evt opcodes `0x28`/`0x29` (previously
+      mis-named BGM) enter/preload a region; load and unload are set
+      differences between consecutive regions. Validated: max region operand ==
+      region count - 1 on all six stages
 - [ ] `evt/` semantics — ~30 opcodes named only by the global they write
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [ ] `coli/` — record layout + hit-test semantics
@@ -132,6 +136,9 @@ translation has not been decompiled yet.
       camera and getting a recognisable stage-2 shot
 - [x] `--unlit` (`KHR_materials_unlit`) — the game bakes lighting into its
       textures and ships no lights, so a lit render is black
+- [x] Correct stage geometry set from the exe region tables, replacing the
+      `st<N>_*` glob; `<stage>_regions.json` sidecar and `extras.hod2_regions`
+      per model node
 - [ ] Camera FOV — not recovered; exported cameras use a neutral 60°
 - [ ] `evt` / `coli` JSON sidecars — `evt/` unblocked
 
@@ -154,12 +161,10 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 8. How does the game decide a file is compressed? `LoadCommonPolTexBanks`
    decompresses unconditionally, yet 192 `pol/` files are raw. (Phase 3)
 9. What are the four 987-byte placeholder files? (low priority)
-10. **When are stage segments streamed in?** Partly answered — see
-    [`formats/pipeline.md`](formats/pipeline.md). The asset job queue and the
-    slot→file map are solved, and evt opcodes `0x50`–`0x57` are the load/unload
-    vocabulary. But the stage-2 script touches only 2 of its 18 `st2_*` files,
-    so **what loads the rest is still open**. (`0x0F`/`0x12` turned out to be
-    LOD model lists, not streaming.)
+10. ~~**When are stage segments streamed in?**~~ **SOLVED** — regions. A stage
+    is a sequence of overlapping resident sets; opcode `0x29` enters one and
+    frees what it no longer needs, `0x28` preloads. See
+    [`formats/pipeline.md`](formats/pipeline.md).
 11. Is the twiddle Morton convention correct, or transposed? (needs visual check)
 12. **What is the 16-bit UV vertex layout?** `parameter_control` bit 0 selects
     it, 128 stage meshes use it, and neither `hod2lib` nor the reference addon

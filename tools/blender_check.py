@@ -28,7 +28,13 @@ except Exception as e:  # noqa: BLE001
     print(f"CHECK-FAIL: import raised {e}")
     sys.exit(1)
 
-objs = [o for o in bpy.context.scene.objects if o.type == "MESH"]
+# Camera and object path rails are edge-only LINE_STRIP meshes with no UVs
+# and no faces by design; they are not geometry and must not be checked as if
+# they were. See hod2lib.gltf._emit_paths.
+objs = [o for o in bpy.context.scene.objects
+        if o.type == "MESH" and not o.name.endswith("_rail")]
+rails = [o for o in bpy.context.scene.objects
+         if o.type == "MESH" and o.name.endswith("_rail")]
 if not objs:
     print("CHECK-FAIL: no mesh objects imported")
     sys.exit(1)

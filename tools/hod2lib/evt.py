@@ -129,8 +129,11 @@ OPCODES: dict[int, Op] = {
     0x25: ("view2_tween_rate", "tween", 0),  # FUN_0040B650(1)
     0x26: ("view2_stop", "fix", 2),         # FUN_0040C1F0(1)
     0x27: ("view2_tween_time", "tween", 0),  # FUN_0040BA90(1)
-    0x28: ("bgm_restore", "fix", 2),        # FUN_00401670
-    0x29: ("bgm_set", "fix", 2),            # FUN_00401630
+    # Region streaming, NOT sound. 0x29 switches the current region and frees
+    # what the new one does not need; 0x28 loads a region's assets. See
+    # docs/formats/pipeline.md.
+    0x28: ("region_load", "fix", 2),        # FUN_00401670 -> FUN_00401510
+    0x29: ("region_enter", "fix", 2),       # FUN_00401630 -> FUN_004015A0
     0x2A: ("unused_2a", "bad", 0),
     0x2B: ("score_bonus_sweep", "fix", 1),  # FUN_0045FE40
     0x2C: ("set_skip_flag", "fix", 2),      # FUN_0045FD90
@@ -227,6 +230,11 @@ SLOT_OPCODES = (0x50, 0x51)
 
 #: Opcodes whose single operand is a pol/tex file index.
 FILE_OPCODES = (0x52, 0x53, 0x54, 0x55)
+
+#: Opcodes whose single operand is a *region* id, indexing the per-scene
+#: region table (ExeTables.scene_regions). 0x29 enters a region, 0x28 preloads
+#: one.
+REGION_OPCODES = (0x28, 0x29)
 
 TERM = 0xFFFFFFFF
 TERM2 = 0xFFFFFFFE

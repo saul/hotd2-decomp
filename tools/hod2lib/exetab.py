@@ -376,3 +376,116 @@ class ExeTables:
         fi = struct.unpack_from("<b", self.data, r)[0]
         rec = self.cam_files().get(fi)
         return rec[0] if rec else None
+
+    # -- stage regions --------------------------------------------------
+    #
+    # A stage is divided into *regions*. The current region id lives in
+    # DAT_009A2224 and is set by evt opcode 0x29; opcode 0x28 preloads a
+    # region's assets. Each region names a small set of asset slots, and that
+    # set is used for BOTH drawing and streaming:
+    #
+    #   FUN_00401260  draw:   for each id in region -> frustum cull -> draw
+    #   FUN_00401510  load:   load  (new region \ old region)
+    #   FUN_004015A0  unload: free  (old region \ new region)
+    #
+    # Consecutive regions overlap heavily -- a sliding window along the rail.
+    # That is why a whole-stage export shows geometry interpenetrating while
+    # the game never does: only one region is ever resident and drawn.
+    #
+    #   0x00576A2C  ptr  scene -> region table, 0x18 bytes per region,
+    #                    s16 ids terminated by -1 (max 12 entries)
+    #   0x00576A5C  ptr  scene -> id table, 4 bytes: {s16 asset_slot, s16 draw_mode}
+    #   0x00576A8C / 0x00576ABC   the same pair for game mode 1
+    #
+    # The indirection means several regions can share an id entry.
+
+    SCENE_REGION_TABLE = 0x00576A2C
+    SCENE_REGION_IDS = 0x00576A5C
+    SCENE_REGION_TABLE_MODE1 = 0x00576A8C
+    SCENE_REGION_IDS_MODE1 = 0x00576ABC
+    REGION_STRIDE = 0x18
+    REGION_MAX_ENTRIES = 12
+
+    def _region_table_bounds(self, va: int) -> int:
+        """Where the region table starting at *va* ends.
+
+        The region and id tables for every scene and both game modes are packed
+        contiguously, so a table ends where the next-highest one begins. The
+        count is not stored anywhere -- reading a fixed maximum instead walks
+        off into the neighbouring table and invents regions.
+        """
+        starts = set()
+        for base in (self.SCENE_REGION_TABLE, self.SCENE_REGION_IDS,
+                     self.SCENE_REGION_TABLE_MODE1, self.SCENE_REGION_IDS_MODE1):
+            for s in range(self.SCENE_COUNT):
+                v = self._u32(base + s * 4)
+                if v:
+                    starts.add(v)
+        starts.add(self.SCENE_REGION_TABLE)      # the pointer tables follow
+        after = [v for v in starts if v > va]
+        return min(after) if after else va + self.REGION_STRIDE * 64
+
+    def scene_regions(self, scene: int, mode1: bool = False
+                      ) -> list[list[tuple[int, int]]]:
+        """Region list for a scene: [[(asset_slot, draw_mode), ...], ...].
+
+        Index into the result is the region id written by evt opcode 0x29.
+        """
+        rt = self._u32((self.SCENE_REGION_TABLE_MODE1 if mode1
+                        else self.SCENE_REGION_TABLE) + scene * 4)
+        it = self._u32((self.SCENE_REGION_IDS_MODE1 if mode1
+                        else self.SCENE_REGION_IDS) + scene * 4)
+        if not rt or not it:
+            return []
+        r0, i0 = self._v2r(rt), self._v2r(it)
+        if r0 is None or i0 is None:
+            return []
+        max_regions = max(0, (self._region_table_bounds(rt) - rt) // self.REGION_STRIDE)
+        out: list[list[tuple[int, int]]] = []
+        blank = 0
+        for r in range(max_regions):
+            base = r0 + r * self.REGION_STRIDE
+            if base + self.REGION_STRIDE > len(self.data):
+                break
+            ids = []
+            for k in range(self.REGION_MAX_ENTRIES):
+                e = struct.unpack_from("<h", self.data, base + k * 2)[0]
+                if e == -1:
+                    break
+                ids.append(e)
+            entries = []
+            for e in ids:
+                off = i0 + e * 4
+                if off + 4 > len(self.data):
+                    continue
+                slot, mode = struct.unpack_from("<2h", self.data, off)
+                entries.append((slot, mode))
+            blank = blank + 1 if not entries else 0
+            out.append(entries)
+        while out and not out[-1]:
+            out.pop()
+        return out
+
+    def scene_geometry_slots(self, scene: int, mode1: bool = False) -> list[int]:
+        """Every asset slot any region of a scene draws, in first-use order."""
+        seen: dict[int, None] = {}
+        for region in self.scene_regions(scene, mode1):
+            for slot, _mode in region:
+                seen.setdefault(slot, None)
+        return list(seen)
+
+    def scene_geometry_files(self, scene: int, mode1: bool = False
+                             ) -> dict[str, list[int]]:
+        """pol filename -> sorted entry indices the scene actually draws.
+
+        This is the authoritative stage geometry set. It supersedes globbing
+        `st<N>_*`, which both misses files (st3.bin, st_org01) and includes
+        entries no region ever draws.
+        """
+        slots = self.asset_slots()
+        out: dict[str, set] = {}
+        for slot in self.scene_geometry_slots(scene, mode1):
+            rec = slots.get(slot)
+            if rec:
+                out.setdefault(rec[0], set()).add(rec[1])
+        return {k: sorted(v) for k, v in sorted(out.items())}

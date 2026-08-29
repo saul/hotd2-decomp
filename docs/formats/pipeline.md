@@ -126,37 +126,87 @@ times across the stage.
 
 ---
 
-## Does an event load and unload stage geometry?
+## Stage geometry: regions — SOLVED
 
-**Partly, and much less than expected.**
+**[proved]** A stage is divided into **regions**. The current region id lives in
+`DAT_009A2224`. Each region names a small set of asset slots, and that set is
+used for **both drawing and streaming**:
 
-**[measured]** Of stage 2's **18** `st2_*` geometry files, the event script
-references only **two**:
+| Fn | Role |
+|---|---|
+| `RegionDrawResidentSet` `0x00401260` | for each slot in the current region: bounding sphere → frustum cull → draw |
+| `RegionLoadDelta` `0x00401510` | load **(new region \ old region)** |
+| `RegionUnloadDelta` `0x004015A0` | free **(old region \ new region)** |
+| `RegionBindSceneTables` `0x004014C0` | point the region tables at the current scene |
+
+Two event opcodes drive it — they were previously mis-named as BGM control:
+
+| Op | Name | Effect |
+|---|---|---|
+| `0x29` | `region_enter` | `prev = cur; cur = arg;` then `RegionUnloadDelta(prev, cur)` |
+| `0x28` | `region_load` | `RegionLoadDelta(arg, cur)` — preload a region's assets |
+
+Tables, per scene:
 
 ```
-st2_02.bin   blocks 0, 1, 11     (asset_load_slot / asset_unload_slot)
-st2_07.bin   blocks 14,15,16,21,22,35,37,39,41
+0x00576A2C  ptr  scene -> region table, 0x18 bytes per region,
+                 s16 slot-list ids terminated by -1 (max 12)
+0x00576A5C  ptr  scene -> id table, 4 bytes: {s16 asset_slot, s16 draw_mode}
+0x00576A8C / 0x00576ABC     the same pair for game mode 1
 ```
 
-So the event VM pages *some* geometry — including individual models out of
-`st2_07`, which is real slot-level streaming — but it is not what brings in the
-bulk of the stage.
+The count is not stored: each table ends where the next-highest begins.
 
-**[open] What loads the other 16 segments is not established.** A promising
-table at `0x004E7C90` (20 pointers into a grouped u16 list) decodes as
-`st1_1b, st1_01 … st2_03` and looked exactly like per-stage segment lists. It is
-not: checking the same values against the *slot* table shows the groups are
-contiguous slot-id runs covering one model file each — group 0 is every model
-in `boss6.bin`, group 8 every model in `boss3_hod1.bin`. The apparent stage
-lists were the alphabetical-ordering trap described above. Recorded here so the
-next session does not spend the same hour on it.
+**[measured]** Bounded that way, the region counts are 13 / 59 / 26 / 39 / 10 /
+14 for stages 1–6 — and the largest region id any script passes to opcode
+`0x28`/`0x29` is exactly `count - 1` for **every** stage, with no operand out of
+range. An exact fit on six independent tables.
 
-Remaining candidates, untested: a load path in stage init
-(`FUN_00460030` drives a load-until-drained loop `DAT_00598028` times); the
-`0x56`/`0x57` job kinds, whose role is unconfirmed; or a per-scene list reached
-through a pointer not yet traced.
+### Why stage geometry overlaps but is never seen to
 
----
+Consecutive regions share most of their models and swap one or two — a sliding
+window along the rail. Stage 2:
+
+```
+region  5 : st2_10[0], st2_10[1], st2_10[2]
+region  6 : st2_04[0], st2_04[2], st2_10[1], st2_10[2], st2_11[0]
+region  7 : st2_04[0], st2_04[2], st2_07[1], st2_10[2], st2_11[0], st2_07[7]
+region  8 : st2_04[2], st2_07[1], st2_10[2], st2_11[0], st2_07[7]
+```
+
+Only one region is ever resident and drawn, so segments that interpenetrate in
+a whole-stage export are never on screen together. `export_level.py` writes a
+`<stage>_regions.json` sidecar and tags every model node with
+`extras.hod2_regions` so the sets can be told apart.
+
+### The real stage geometry set
+
+**Globbing `st<N>_*` is wrong in both directions.** The authoritative set is
+
+> the union of every asset slot named by any of the scene's regions, plus every
+> slot the event script loads with opcode `0x50`.
+
+Whole-file loads (`0x52`) are excluded — those are spawnable actors, not placed
+scenery.
+
+**[measured]** Spawn positions checked against the bounding box of the geometry
+set, per stage:
+
+| Stage | glob | region set |
+|---|---|---|
+| 1 | 100 % | 100 % |
+| 2 | 512/513 | **513/513** |
+| 3 | **77 %** | **100 %** |
+| 4 | 199/201 | **201/201** |
+| 5 | 100 % | 100 % |
+| 6 | 100 % | 100 % |
+
+Stage 3's long-standing 77 % was the glob missing `st3.bin`. Stage 6 draws
+`st5_01`, `st5_01b`, `st5_02`, `st5_02b` — it genuinely reuses stage 5
+geometry, which no `st6_*` glob can find.
+
+`ExeTables.scene_regions()`, `.scene_geometry_slots()`,
+`.scene_geometry_files()`.
 
 ## Camera, script and geometry during play
 

@@ -61,7 +61,7 @@ public class ApplyKnownTables extends GhidraScript {
         "set_g_a090", "set_g_8e50", "set_g_8a78", "set_g_a0f4",
         "view1_set", "view1_tween_rate", "view1_stop", "view1_tween_time",
         "view2_set", "view2_tween_rate", "view2_stop", "view2_tween_time",
-        "bgm_restore", "bgm_set", "unused_2a", "score_bonus_sweep",
+        "region_load", "region_enter", "unused_2a", "score_bonus_sweep",
         "set_skip_flag", "call_35b80_u16", "se_if_skipping", "set_g_5c48",
         "queue_event", "cut_to", "cut_to_when_idle", "set_mode_and_pending",
         "unused_34", "set_g_21b0", "set_g_70f4", "set_g_a098",
@@ -86,6 +86,31 @@ public class ApplyKnownTables extends GhidraScript {
     private static final String[] JOB_SUBS = {
         "load_one_slot", "sub1", "read_polfile", "lz_decompress",
         "read_texfile", "bank_setup", "register_models",
+    };
+
+    /* Functions reached by call, not by table, but central enough to name. */
+    private static final String[][] FIXED = {
+        {"00401260", "RegionDrawResidentSet"},
+        {"00401470", "RegionInit"},
+        {"004014C0", "RegionBindSceneTables"},
+        {"00401510", "RegionLoadDelta"},
+        {"004015A0", "RegionUnloadDelta"},
+        {"00402320", "EvtRunQueuedActions"},
+        {"00403360", "EvtActionCamPlay40"},
+        {"004033B0", "CamEvalStaticPose"},
+        {"00404000", "CamBindPathSlots"},
+        {"004040F0", "CamEvalHermiteCurve"},
+        {"004041E0", "CamEvalPath7"},
+        {"004042D0", "CamEvalObjectPath6"},
+        {"00406310", "CheckSphereInFrustum"},
+        {"00413120", "EvtRelocatePointers"},
+        {"00418560", "AssetDrawSlot"},
+        {"00418820", "AssetLoadOneSlot"},
+        {"00418BA0", "AssetUnloadSlot"},
+        {"00419200", "AssetGetBoundingSphere"},
+        {"0041D5A0", "AssetRunJob"},
+        {"0045ECC0", "EvtInterpreterLoop"},
+        {"0045F000", "EvtAdvanceBlockOrRoute"},
     };
 
     /* queue_event selector -> name, for the 9 selectors the scripts use */
@@ -144,6 +169,10 @@ public class ApplyKnownTables extends GhidraScript {
             handle(u32(sub + (sel & 0xF) * 4),
                     "EvtAction" + pascal(e.getValue()) + String.format("%02X", sel),
                     "queue_event selector 0x" + String.format("%02X", sel));
+        }
+
+        for (String[] fx : FIXED) {
+            handle(Long.parseLong(fx[0], 16), fx[1], "core routine");
         }
 
         long after = countCovered();

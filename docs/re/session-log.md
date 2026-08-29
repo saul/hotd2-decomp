@@ -1563,3 +1563,71 @@ existing name only by appended tokens, which hides *why* they differ. Settled on
 2. Import the DX7 GDT and map the render states in `RenderInitStates`; that
    feeds Phase 5 directly.
 3. Region → camera path correlation, to reconstruct the intended view.
+
+### Addendum 6 — DX7 SDK imported; three inferences confirmed, Phase 1 item closed
+
+The user supplied `dx7sdk-7001.exe`. It is a WinZip self-extractor, so `7z x`
+works on macOS; only `include/*.h` is needed.
+
+The SDK headers cannot be committed (Microsoft licensing) and cannot be fed to
+Ghidra directly either — they pull in `windows.h`, COM macros and packing
+pragmas the CParser rejects. `tools/dx7_types.py` extracts a self-contained
+subset instead. **The script is the committed artefact**; its output lands in
+the gitignored `extract/`.
+
+#### The inferences held
+
+Last session I claimed three vtable offsets and a struct size from indirect
+evidence — the 0–15 enable loop and an array stride. All four now check out
+against the authoritative header:
+
+| Claim | Basis last session | SDK |
+|---|---|---|
+| `+0x48` `SetLight` | position in the call sequence | confirmed |
+| `+0x50` `SetRenderState` | (state, value) call shape | confirmed |
+| `+0xB0` `LightEnable` | 0..15 loop | confirmed |
+| `sizeof(D3DLIGHT7)` = 104 | measured array stride `0x1A` dwords | Ghidra reports **104** |
+
+Worth noting because the inference was sound *and* cheap; the headers upgraded
+it from "strong" to "proved" rather than overturning it. That is the right
+outcome for the method rule — infer from code, then confirm when the
+authority becomes available.
+
+`IID_IDirect3DDevice7` is **not** in the binary, which initially looked like a
+contradiction of the README. It is not: DX7 obtains a device by passing a
+device-*type* GUID to `CreateDevice`. Checking every `DEFINE_GUID` in the SDK
+against `.rdata` found seven present — the four the README lists, plus
+`IID_IDirectDraw7`, `IID_IDirect3DRefDevice`, `IID_IDirect3DNullDevice`.
+
+#### Phase 5 payoff: the global device state
+
+`RenderInitStates` decodes completely now. Three results change how materials
+should be exported:
+
+1. **`CULLMODE` is `D3DCULL_NONE` globally.** Backface culling is not a device
+   state — it comes from the per-mesh NL1 `culling` field, which is exactly
+   what Session 6 concluded empirically after getting the winding wrong twice.
+2. **`COLORVERTEX` is off and all four material sources are
+   `D3DMCS_MATERIAL`.** Vertex colour does not enter the lighting equation.
+   The per-mesh base colour must be a *material* — which is why Session 8's fix
+   worked.
+3. **A global alpha test discards alpha-0 texels** (`ALPHAFUNC` =
+   `D3DCMP_GREATEREQUAL`, `ALPHAREF` = 1). That is how the game gets
+   punch-through behaviour without ever using the PowerVR2 punch-through list —
+   and explains the standing observation in `materials.md` that *no mesh in the
+   game sets punch-through*.
+
+Two independent empirical findings from earlier sessions are now explained by
+one register write each. That is the value of the headers.
+
+#### In the program
+
+`D3DRENDERSTATETYPE` (82 members), `D3DCMPFUNC`, `D3DCULL`, `D3DSHADEMODE`,
+`D3DBLEND`, `D3DMATERIALCOLORSOURCE`, `D3DTEXTUREADDRESS`, plus `D3DLIGHT7`,
+`D3DMATERIAL7`, `D3DMATRIX`, `D3DVECTOR`, `D3DCOLORVALUE`, `D3DVIEWPORT7`.
+
+#### Next
+
+`RenderEnqueueCommand`'s per-command state work is still unread — that is the
+actual PVR2 → D3D7 translation Phase 5 wants, and the enums are now in place to
+make it readable.

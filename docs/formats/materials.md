@@ -113,6 +113,53 @@ modulate does, so the base colour maps across directly.
 Under **decal** (3 meshes) the texture replaces the colour outright, so there
 the factor must stay white.
 
+## The global D3D7 render state — SOLVED
+
+`RenderInitStates` (`0x004A7630`) sets the device state once, and per-draw code
+only overrides parts of it. Decoded against the real DX7 SDK headers (see
+`tools/dx7_types.py`), it is:
+
+| State | Value | Meaning |
+|---|---|---|
+| `ZENABLE` | 1 | `D3DZB_TRUE` |
+| `ALPHATESTENABLE` | 1 | on |
+| `ALPHAFUNC` | 7 | `D3DCMP_GREATEREQUAL` |
+| `ALPHAREF` | 1 | so a texel with alpha 0 is discarded |
+| `DITHERENABLE` | 1 | on |
+| `SPECULARENABLE` | 1 | on |
+| `CULLMODE` | 1 | **`D3DCULL_NONE`** |
+| `SHADEMODE` | 2 | `D3DSHADE_GOURAUD` |
+| `COLORVERTEX` | 0 | **off** |
+| `DIFFUSE/SPECULAR/AMBIENT/EMISSIVEMATERIALSOURCE` | 0 | all `D3DMCS_MATERIAL` |
+| `COLORKEYBLENDENABLE` | 0 | off |
+| `TEXTUREFACTOR` | `0xFF000000` | opaque black |
+
+Three of these matter for the export:
+
+1. **`CULLMODE` is `D3DCULL_NONE` globally.** Backface culling is therefore not
+   a device state — it comes from the per-mesh `culling` field in the NL1 data,
+   exactly as [`nl1.md`](nl1.md) concluded empirically.
+2. **`COLORVERTEX` is off and every material source is `D3DMCS_MATERIAL`.**
+   Vertex colour does not feed the lighting equation at all; the per-mesh base
+   colour must be applied as a *material*, which is what
+   *Baked static lighting lives in the base colour* above found the hard way.
+3. **A global alpha test discards alpha-0 texels** (`GREATEREQUAL`, ref 1).
+   That is how the game gets punch-through behaviour without ever using the
+   PowerVR2 punch-through list — which is why no mesh in the game sets it.
+
+**[open]** Whether any per-draw path overrides `ALPHAFUNC`/`ALPHAREF` has not
+been checked; `RenderEnqueueCommand`'s per-command state work is not yet read.
+
+### Lighting
+
+Two setups, selected by bit `0x04000000` of the draw command — see
+[`pipeline.md`](pipeline.md) for how a region entry chooses between them:
+
+- `SetLightingDefaultSingle` — ambient + **one** directional light.
+- `SetLightingSceneArray` — ambient + up to **16** lights from an array of
+  `D3DLIGHT7` at `0x007E7AA8`. Ghidra confirms `sizeof(D3DLIGHT7)` is **104**,
+  matching the stride measured from the loop before the headers were available.
+
 ## Debugging exported materials
 
 Two tools exist for tracing a visual problem back to source data:

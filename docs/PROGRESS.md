@@ -36,7 +36,9 @@ raised from 52% to 70%. See [`re/session-log.md`](re/session-log.md).
       coverage **52% → 69.9%**
 - [x] Find the `pol/` loader (`LoadCommonPolTexBanks` at `0x00418200`)
 - [x] Identify the import at `0x4C40A4` — `OutputDebugStringA`
-- [ ] Import DX7 SDK headers as a GDT (deferred; needed for Phase 5 materials)
+- [x] Import DX7 SDK headers — `tools/dx7_types.py` extracts a Ghidra-parseable
+      subset from `dx7sdk-7001.exe`; `D3DRENDERSTATETYPE` + value enums and the
+      `D3DLIGHT7`/`D3DMATERIAL7`/`D3DMATRIX` structs are in the program
 - [ ] Map the `.data` tables adjacent to the filename tables (Phase 4 needs these)
 - [ ] Remaining 30% of `.text` — real code, but Ghidra cannot form function
       bodies for it. See the session log; likely truncated-flow damage.
@@ -84,7 +86,10 @@ Alpha, blending and list assignment are resolved from measured usage;
 see [`formats/materials.md`](formats/materials.md). The D3D7 state
 translation has not been decompiled yet.
 
-- [ ] Locate the PVR2 → D3D7 state translation
+- [x] Global device state decoded (`RenderInitStates`) — `CULLMODE` is
+      `D3DCULL_NONE`, `COLORVERTEX` off, all material sources `D3DMCS_MATERIAL`,
+      global alpha test at `GREATEREQUAL`/ref 1
+- [ ] Locate the per-draw PVR2 → D3D7 state translation
 - [x] Document culling (settled empirically, see `formats/nl1.md`)
 - [x] Document blend factors — two modes in use, standard and additive
 - [x] Document list assignment — no punch-through anywhere in the game

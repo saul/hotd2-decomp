@@ -276,6 +276,26 @@ free anchors into real code paths.
 The first is the most valuable: it places `evt` loading near `0x413133` and
 confirms paths are built at runtime rather than stored whole.
 
+## Direct3D 7 interface
+
+Device object at `0x007DEB74`. Vtable offsets, confirmed against the DX7 SDK
+`IDirect3DDevice7` declaration order:
+
+| Offset | Method |
+|---|---|
+| `+0x2C` | `SetTransform` |
+| `+0x48` | `SetLight` |
+| `+0x50` | `SetRenderState` |
+| `+0xB0` | `LightEnable` |
+
+GUIDs present in `.rdata` (checked against the SDK's `DEFINE_GUID` list):
+`IID_IDirectDraw7`, `IID_IDirect3D7`, `IID_IDirect3DHALDevice`,
+`IID_IDirect3DTnLHalDevice`, `IID_IDirect3DRGBDevice`,
+`IID_IDirect3DRefDevice`, `IID_IDirect3DNullDevice`.
+
+`IID_IDirect3DDevice7` is **not** present — normal DX7 usage, since the device
+is obtained by passing a device-*type* GUID to `CreateDevice`.
+
 ## Diagnostic strings worth pivoting on
 
 `CD3duContext::Resize`, `CD3duContext::_CreateZBuffer`,

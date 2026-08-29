@@ -117,10 +117,36 @@ class _Buf:
 # camera and object paths
 # ---------------------------------------------------------------------------
 
-#: The game's field of view is not yet recovered -- the one unread curve index
-#: in a cp_ descriptor is the obvious candidate but is unconfirmed. 60 degrees
-#: is a neutral stand-in that makes the framing legible in a viewport.
-DEFAULT_YFOV = 1.0472  # 60 deg in radians
+#: The game's projection, recovered from `SetupSceneProjection` (0x004184C0):
+#:
+#:     SetMatrixMode(3);                                  /* PROJECTION */
+#:     MatrixLoadIdentity();
+#:     MatrixTranslate(0, 0, 0);                          /* screen offset */
+#:     BuildPerspectiveProjection(0x1D3B, 4.0/3.0, 0.8, 8000.0);
+#:     SetMatrixMode(1);                                  /* commits it */
+#:
+#: `BuildPerspectiveProjection` takes the FULL vertical FOV in BAMS, halves it
+#: through __ftol (so it truncates), and builds a left-handed D3D matrix with
+#: m11 = cot(half). There are exactly two call sites and both pass 0x1D3B, so
+#: the FOV is a compile-time constant for the whole game -- there is no zoom
+#: and no per-camera FOV.
+#:
+#:     0x1D3B = 7483 BAMS   half = (int)3741.5 = 3741
+#:     yfov = 2 * 3741 * tau/65536 = 0.7173277659 rad = 41.100 deg
+#:     xfov (at 4:3)                                   = 53.115 deg
+#:
+#: Confirmed independently: the same function computes
+#: `240.0 / tan(0.35866388296751145)` = 640.21, the projection distance in
+#: pixels for a 480-tall viewport, and 0.35866388296751145 is *bit for bit*
+#: 3741 * tau/65536. Two constants, one FOV.
+CAM_FOV_BAMS = 0x1D3B
+CAM_YFOV = 2.0 * int(CAM_FOV_BAMS * 0.5) * (math.tau / 65536.0)
+CAM_ASPECT = 4.0 / 3.0
+CAM_ZNEAR = 0.8
+CAM_ZFAR = 8000.0
+
+#: Kept as the old name so nothing silently reverts to the 60-degree guess.
+DEFAULT_YFOV = CAM_YFOV
 
 #: cam/ roll is stored as an integer and is read through __ftol, like every
 #: other angle in the game, so it is treated as BAMS (65536 = 360 deg). Only
@@ -354,8 +380,8 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
             # animated camera
             cameras.append({
                 "type": "perspective", "name": nm + "_cam",
-                "perspective": {"yfov": DEFAULT_YFOV, "znear": 0.1,
-                                "zfar": 20000.0},
+                "perspective": {"yfov": CAM_YFOV, "aspectRatio": CAM_ASPECT,
+                                "znear": CAM_ZNEAR, "zfar": CAM_ZFAR},
             })
             nodes.append({
                 "camera": len(cameras) - 1, "name": nm + "_cam",
@@ -363,7 +389,8 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
                 "extras": {"hod2_kind": "camera", "hod2_file": stem,
                            "hod2_path": path.index,
                            "hod2_duration_frames": path.duration,
-                           "hod2_yfov_is_a_guess": True},
+                           "hod2_fov_bams": CAM_FOV_BAMS,
+                           "hod2_yfov_deg": math.degrees(CAM_YFOV)},
             })
             cam_node = len(nodes) - 1
             cam_nodes.append(cam_node)

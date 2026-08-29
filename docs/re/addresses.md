@@ -298,6 +298,51 @@ confirms paths are built at runtime rather than stored whole.
 | `0x004A9880` | `MatrixStackPush` | 16 dwords per level at `0x007E7990` |
 | `0x004A9840` | `MatrixStackPop` | |
 
+### Matrix stack and projection
+
+| Address | Name | Notes |
+|---|---|---|
+| `0x004A9250` | `SetMatrixMode` | 3 = PROJECTION, 1 = WORLD; the 3→1 transition is the only `SetTransform(PROJECTION)` in the program |
+| `0x004A9E10` | `MatrixLoadIdentity` | copies `g_identity_matrix` at `0x00571210` |
+| `0x004A9D80` | `MatrixTranslate` | |
+| `0x004A99F0` | `MatrixRotateX` | BAMS |
+| `0x004A9AE0` | `MatrixRotateY` | BAMS |
+| `0x004A92A0` | `MatrixMultiply` | top = top × M |
+| `0x004ABD40` | `BuildPerspectiveProjection` | `(fov_bams, aspect, znear, zfar)`, left-handed |
+| `0x004184C0` | `SetupSceneProjection` | the game's one 3D projection: `0x1D3B`, 4:3, 0.8, 8000 |
+| `0x004194C0` | `SetProjectionNearPlane` | same but a caller-supplied near plane, for HUD layers |
+| `0x004A8440` | `DrawModelWithForcedAlphaBlend` | mesh walker variant: forces `SRC_ALPHA`/`INV_SRC_ALPHA` and scales alpha by the command's `+0x10` |
+| `0x004B73CC` | `D3duBuildPerspectiveMatrix` | **dead** — stock d3du scaffolding, its output is never used |
+
+Constants: `0x004C4C98` = 0.5 (the FOV halving), `0x004C4370` = 2π/65536.
+
+### Scripted actions and the `evt` → `cam` link
+
+| Address | Name | Notes |
+|---|---|---|
+| `0x00402320` | `EvtRunQueuedActions` | drains the opcode-`0x30` ring; two-level dispatch through `0x005776EC` |
+| `0x00403360` | `EvtActionCamPlay40` | selector `0x40` — plays a `cam/` path |
+| `0x00403510` | `CamStartPathPlayback` | |
+| `0x004035E0` | `CamAdvancePathFrame` | calls `CamEvalPath7` once per frame |
+| `0x00403830` | `EvtActionSetPlayerFlag10` | selector `0x10` |
+| `0x004036B0` | `EvtActionSceneState11` | `0x11` |
+| `0x00403780` | `EvtActionSetUpdateRoutine12` | `0x12` |
+| `0x00403250` | `EvtActionSetContinuation13` | `0x13`, never used in shipped data |
+| `0x004037E0` | `EvtActionSetGlobal14` | `0x14` |
+| `0x00403930` | `EvtActionSetFlag15` | `0x15` |
+| `0x004032E0` | `EvtActionHoldCameraPreset20` | `0x20` |
+| `0x00403710` | `EvtActionFinishSequence21` | `0x21`, 418 uses |
+| `0x004038A0` | `EvtActionStoreSixOperands60` | `0x60` |
+| `0x00403BD0` | `EvtEnterSceneState` | jumps through the 2-D state table at `0x00576C14` (9 columns) |
+
+| Table | Entries | Contents |
+|---|---|---|
+| `0x005776EC` | 7 (4 null) | scripted-action index table, grouped by operand count |
+| `0x005776C4` / `0x5776DC` / `0x5776E4` / `0x5776E8` | 6 / 2 / 1 / 1 | the sub-tables, laid out before the index |
+| `0x004C479C` | 418 bytes | global cam path index → cam file id, one run per file |
+| `0x00576C14` | 2-D | scene state machine, 9 columns |
+| `0x00576CF0` | 0x18 each | camera presets for selector `0x20` |
+
 ### Lookup tables used by the translation
 
 | Address | Entries | Contents | Meaning |
@@ -314,6 +359,13 @@ confirms paths are built at runtime rather than stored whole.
 | Address | Name | Notes |
 |---|---|---|
 | `0x009CA08C` | `g_game_mode` | mode-select index; **1 = Original Mode** |
+| `0x007E7994` | `g_matrix_mode` | 3 = PROJECTION, 1 = WORLD |
+| `0x007E7948` | `g_projection_matrix_cache` | the installed projection |
+| `0x00571210` | `g_identity_matrix` | |
+| `0x009A2D70` | `g_projection_distance_px` | 640.21 = 240/tan(fovY/2) |
+| `0x009C7300` / `0x009C7304` | `g_screen_offset_x` / `_y` | both 0 |
+| `0x009A2D78` | `g_active_cam_path` | global cam path index |
+| `0x009A6184` | `g_evt_action_operands` | 8-dword scratch for a queued action |
 | `0x009A2224` | current region id | written by evt opcode `0x29` |
 | `0x009A1A08` | current scene id | |
 | `0x007E7990` | `g_matrix_stack_top` | 16 dwords per level |

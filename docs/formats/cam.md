@@ -229,3 +229,39 @@ space in one go. `tools/blender_camview.py` automates this.
    garbage for those slots? Their slot ids (304, 306, 309, 320, 322, 324) are
    ordinary members of the file's contiguous run and nothing in the EXE marks
    them special.
+
+## What starts a path — SOLVED
+
+**[proved]** `evt` opcode `0x30` (`queue_event`) with selector `0x40`:
+
+```
+queue_event 0x40, start_frame, end_frame, path_index, flags
+```
+
+`EvtActionCamPlay40` → `CamStartPathPlayback` → `CamAdvancePathFrame`, which
+calls `CamEvalPath7(path_index, frame, &eye, &lookat, &roll, &_)` once per
+frame and increments `frame` until it passes `end_frame`. `start_frame == -1`
+resumes from where the previous path left off; `start_frame == end_frame`
+takes the `CamEvalStaticPose` branch and holds a fixed pose.
+
+The earlier suspects, opcodes `0x18`/`0x19`, are not it.
+
+### Path indices are global, not per file
+
+`CamEvalPath7` looks the descriptor up in `DAT_0059C9F8` and the owning file in
+`DAT_004C479C`, a byte-per-path table with one contiguous run per `cam/` file,
+`cp_*` first then `op_*`. It is exactly as long as the total path count and has
+no terminator.
+
+**[measured]** 23 files, 418 paths, 23 distinct file ids with no id repeated.
+Stage ranges: `cp_st1` 32–54, `cp_st2` 55–120, `cp_st3` 121–162,
+`cp_st4` 163–202, `cp_st5` 203–216, `cp_st6` 217–232.
+
+**[proved by measurement]** 751/751 camera-play actions in stages 1–6 name a
+path from their own stage. `tools/verify_evt_cam.py`.
+
+## Field of view — SOLVED
+
+41.100° vertical (`0x1D3B` BAMS), 53.115° horizontal, 4:3, near 0.8, far 8000,
+constant for the whole game. Recovered from `SetupSceneProjection`; see
+[`pipeline.md`](pipeline.md). The exporter writes it into every glTF camera.

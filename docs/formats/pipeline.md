@@ -266,6 +266,83 @@ alongside the four `st_org*` files.
 Export it with `export_level.py --original`; output lands in
 `extract/stage<N>_original/` and the sidecar records `"game_mode": 1`.
 
+### The projection matrix and the field of view — SOLVED
+
+**[proved]** `SetupSceneProjection` (`0x004184C0`), called from the per-frame
+scene update, builds the game's one 3D projection through an OpenGL-style
+matrix API:
+
+```c
+SetMatrixMode(3);                                   /* PROJECTION */
+MatrixLoadIdentity();
+MatrixTranslate(g_screen_offset_x, g_screen_offset_y, 0);   /* both 0 */
+BuildPerspectiveProjection(0x1D3B, 4.0f/3.0f, 0.8f, 8000.0f);
+SetMatrixMode(1);                                   /* commits it */
+```
+
+`SetMatrixMode` (`0x004A9250`) is the whole mechanism: the projection is built
+on the same matrix stack used for object transforms, and installed on the
+3 → 1 transition —
+
+```c
+if (mode == 1 && current == 3) {
+    SetTransform(D3DTRANSFORMSTATE_PROJECTION, g_MatrixStackTop);
+    memcpy(g_projection_matrix_cache, g_MatrixStackTop, 64);
+}
+```
+
+— which is the only place `D3DTRANSFORMSTATE_PROJECTION` is ever set.
+
+`BuildPerspectiveProjection(fov_bams, aspect, znear, zfar)` (`0x004ABD40`)
+takes the **full vertical FOV in BAMS**, halves it through `__ftol` (so the
+halving truncates), and builds a left-handed D3D matrix:
+
+```
+half = (int)(fov_bams * 0.5)
+cot  = cot(half * 2*PI/65536)
+m00 = cot/aspect   m11 = cot
+m22 = zf/(zf-zn)   m23 = 1   m32 = -zn*zf/(zf-zn)
+```
+
+It has **exactly two call sites**, `SetupSceneProjection` and
+`SetProjectionNearPlane(zn)` (`0x004194C0`, used for HUD/overlay layers with a
+near plane of 1e-5 or 0.001), and **both pass the same FOV and aspect**. So:
+
+| | |
+|---|---|
+| vertical FOV | `0x1D3B` BAMS = **41.100°** = 0.7173277659 rad |
+| horizontal FOV | **53.115°** |
+| aspect | 4:3 |
+| near / far | 0.8 / 8000.0 |
+
+There is no zoom and no per-camera FOV anywhere in the game.
+
+**Confirmed independently.** The same function also computes
+`g_projection_distance_px = 240.0 / tan(0.35866388296751145)` = 640.21 — the
+projection distance in pixels for a 480-tall viewport, `(480/2)/tan(fovY/2)` —
+and `0.35866388296751145` is *bit for bit* `3741 * 2π/65536`, the halved BAMS
+angle. Two constants, one FOV.
+
+> ⚠️ **A 60° red herring.** `InitD3DDeviceAndTextureStages` builds a second
+> perspective matrix from `DAT_00598778` = 60.0 degrees, aspect 0.9, near 1.0,
+> far 6000.0, into `DAT_007DE5C8`. That matrix is never handed to the device —
+> `DAT_007DE5C8` has exactly one xref, the call that fills it, and
+> `DAT_00598778` has exactly one read. It is stock `d3du` sample scaffolding
+> and is dead code. The exporter's earlier 60° placeholder matched it by
+> coincidence.
+
+The matrix API, all angles in BAMS (65536 = 360°):
+
+| Address | Name |
+|---|---|
+| `0x004A9250` | `SetMatrixMode` |
+| `0x004A9880` / `0x004A9840` | `MatrixStackPush` / `MatrixStackPop` |
+| `0x004A9E10` | `MatrixLoadIdentity` (from `g_identity_matrix`, `0x00571210`) |
+| `0x004A9D80` | `MatrixTranslate` |
+| `0x004A99F0` / `0x004A9AE0` | `MatrixRotateX` / `MatrixRotateY` |
+| `0x004A92A0` | `MatrixMultiply` (top = top × M) |
+| `0x004ABD40` | `BuildPerspectiveProjection` |
+
 ### The draw command — 0x1D dwords
 
 `AssetDrawSlot` → `RenderSubmitModelDefaultLight` builds a 116-byte command on
@@ -278,6 +355,7 @@ buffer and appends a pointer to a sort list. `RenderFlushCommandList`
 | `+0x00` | 1 | flags — `0x04000000` scene lights, `0x20000000` sprite, `0x40000000` model, low nibble = draw layer |
 | `+0x04` | 1 | sort depth; seeded from the world matrix's `_43` and refined to the nearest mesh Z by the walker |
 | `+0x0C` | 1 | **model pointer** |
+| `+0x10` | 1 | alpha multiplier, used only by `DrawModelWithForcedAlphaBlend` |
 | `+0x14` | 4 | fog / ambient parameters |
 | `+0x24` | 1 | light-set generation id |
 | `+0x28` | 3 | fog colour |
@@ -286,6 +364,15 @@ buffer and appends a pointer to a sort list. `RenderFlushCommandList`
 The world matrix is copied from the top of a matrix stack at `g_MatrixStackTop`
 (`0x007E7990`), 16 dwords per level, pushed by `MatrixStackPush` (`0x004A9880`)
 and popped by `MatrixStackPop` (`0x004A9840`).
+
+`RenderFlushCommandList` picks the walker from the command flags: bit
+`0x20000000` selects `DrawSpriteQuadCommand`, otherwise
+`WalkMeshChainAndDraw`, except that flag `0x20000000` on a *model* command
+routes to `DrawModelWithForcedAlphaBlend` (`0x004A8440`). That variant is the
+mesh walker with two overrides: it rewrites each mesh's TSP as
+`(tsp & 0x03FFFF7F) | 0x94000080` — forcing `SRCBLEND = SRC_ALPHA`,
+`DESTBLEND = INV_SRC_ALPHA` — and multiplies the material alpha by the
+command's `+0x10` word. It is the fade / ghost path.
 
 **[proved]** `RegionDrawResidentSet` brackets every slot draw with
 `MatrixStackPush(NULL)` / `MatrixStackPop(1)` and modifies nothing in between —

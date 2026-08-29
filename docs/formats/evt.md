@@ -166,7 +166,7 @@ immediately. 76 distinct opcodes are actually used.
 | `0x21`/`0x25` | `view_tween_rate` | tween a channel at a given rate |
 | `0x23`/`0x27` | `view_tween_time` | tween a channel over a given duration; the handler pre-divides to a per-frame step |
 | `0x22`/`0x26` | `view_stop` | clear a channel's tween |
-| `0x30` | `queue_event` | push a scripted action onto a 16-slot ring; `FUN_00402320` dispatches it through a two-level table at `0x005776EC`. The selector's **high nibble is the operand count** |
+| `0x30` | `queue_event` | push a scripted action onto a 16-slot ring; `EvtRunQueuedActions` (`0x00402320`) dispatches it through a two-level table at `0x005776EC`. The selector's **high nibble is both the operand count and the group index** — see below |
 | `0x40`–`0x47` | `wait_*` | the blocking opcodes; they set the yield flag and do not advance `pc` until their condition holds |
 | `0x49`/`0x4A`/`0x4B` | `variant_*` | pick one of several operand lists by a global — difficulty or player count |
 | `0x4D` | `checkpoint` | resets view state and records progress |
@@ -177,6 +177,106 @@ The `0x20`–`0x27` family targets one of two **view structs** (`DAT_009A3540`,
 `DAT_009A59E0` — one per player) via a 0x24-dword tween block laid out as
 `{enabled, from, to, rate}` per channel. Channels 5 and 9 are "all three axes at
 once" forms of 2/3/4 and 6/7/8.
+
+## `queue_event` — the scripted-action table, SOLVED
+
+**[proved]** `EvtRunQueuedActions` copies an action's operands into the scratch
+block at `0x009A6184` and fetches its handler from
+
+```c
+handler = table[selector >> 4][selector & 0xF];      /* table = 0x005776EC */
+```
+
+The high nibble is *both* the group index and the operand count — the groups
+are organised by arity, which is why the instruction length is
+`2 + (selector >> 4)` dwords. The index table has seven slots, four of them
+null, and the sub-tables are laid out immediately **before** it:
+
+| Group | Sub-table | Handlers | Selectors |
+|---|---|---|---|
+| 1 | `0x005776C4` | 6 | `0x10`–`0x15` |
+| 2 | `0x005776DC` | 2 | `0x20`–`0x21` |
+| 4 | `0x005776E4` | 1 | `0x40` |
+| 6 | `0x005776E8` | 1 | `0x60` |
+
+> ⚠️ **Correction.** An earlier revision of this document said the table "names
+> 100+ scripted actions". It names **ten**. The estimate came from the size of
+> the surrounding region, not from reading the table.
+
+| Sel | Name | Effect |
+|---|---|---|
+| `0x10` | `set_player_flag` | `DAT_009A5EBC` bit 0 = op0, mirrored to `DAT_009A5D8C` |
+| `0x11` | `scene_state` | `EvtEnterSceneState(current_major, op0)` — a transition in the 2-D state table at `0x00576C14` |
+| `0x12` | `set_update_routine` | `DAT_009A5CE0 = PTR_FUN_00579E90[op0]` (two routines exist) |
+| `0x13` | `set_continuation` | per-player continuation = `op0 ? LAB_00403290 : FUN_00420810`. **Defined but never used in shipped data** |
+| `0x14` | `set_global` | `DAT_009C6F00 = op0` |
+| `0x15` | `set_flag` | `DAT_009C6F33 = 1`; the operand is ignored |
+| `0x20` | `hold_camera_preset` | op0 is a frame countdown; each frame copies 6 dwords from `0x00576CF0 + op1 * 0x18` into the player's camera block |
+| `0x21` | `finish_sequence` | `EvtEnterSceneState(2, op0)`; sets `DAT_009A5900 \| 1` |
+| `0x40` | **`cam_play`** | **plays a `cam/` path** — see below |
+| `0x60` | `store_six` | copies six operands to `DAT_009C6FD8`… |
+
+**[measured]** Across stages 1–6 the only selectors that occur are exactly
+those ten, minus `0x13`:
+
+```
+0x10 x3   0x11 x4   0x12 x2   0x14 x2   0x15 x6
+0x20 x1   0x21 x418   0x40 x751   0x60 x13
+```
+
+### `0x40` — this is the `evt` → `cam` link
+
+```
+queue_event 0x40, start_frame, end_frame, path_index, flags
+```
+
+`EvtActionCamPlay40` (`0x00403360`) → `CamStartPathPlayback` (`0x00403510`) →
+`CamAdvancePathFrame` (`0x004035E0`), which each frame calls
+
+```c
+CamEvalPath7(g_active_cam_path, (float)frame, &eye, &lookat, &roll, &_);
+```
+
+and increments the frame counter until it passes `end_frame`.
+
+| Operand | Meaning |
+|---|---|
+| 0 | start frame; **`-1` means resume from the current frame** rather than seek |
+| 1 | end frame |
+| 2 | **path index** — written to `g_active_cam_path` (`0x009A2D78`) |
+| 3 | flags: bit 1 defer (stash into `DAT_009C70AC/B0` for a later `0x40`), bit 2 consume the stashed values |
+
+When `start_frame == end_frame` the handler calls `CamEvalStaticPose` instead —
+a held camera rather than a moving one.
+
+#### The path index is global across every `cam/` file
+
+`CamEvalPath7` indexes `DAT_0059C9F8 + path * 8` for the descriptor and
+`DAT_004C479C[path]` for which loaded file it belongs to. `DAT_004C479C` is one
+byte per global path, exactly as long as the total path count and with no
+terminator.
+
+**[measured]** 23 `cam/` files, 418 paths, and the table resolves to **23 file
+ids with no id occurring twice** — one contiguous run per file, `cp_*` first
+then `op_*`:
+
+| Global range | File | Paths |
+|---|---|---|
+| 0–17 | `cp_demo` | 18 |
+| 18–28 | `cp_demo2` | 11 |
+| 29, 30, 31 | single-path files | 1 each |
+| **32–54** | **`cp_st1`** | 23 |
+| **55–120** | **`cp_st2`** | 66 |
+| **121–162** | **`cp_st3`** | 42 |
+| **163–202** | **`cp_st4`** | 40 |
+| **203–216** | **`cp_st5`** | 14 |
+| **217–232** | **`cp_st6`** | 16 |
+| 233+ | `cp_end`, `cp_train`, … then every `op_*` | |
+
+**[proved by measurement]** All **751 / 751** selector-`0x40` instructions in
+stages 1–6 name a path inside their own stage's range. A wrong operand order
+would scatter those indices across the whole 418-path space, so this is a
+metric that collapses. `tools/verify_evt_cam.py`.
 
 ## Spawn descriptor
 
@@ -300,10 +400,10 @@ block in the corpus does this, which is exactly why it is easy to miss.
 1. What loads a stage's geometry segments? The event script references only 2
    of stage 2's 18 `st2_*` files, so it is not the main path. See
    [`pipeline.md`](pipeline.md).
-2. What do the `queue_event` selectors mean? The two-level table at
-   `0x005776EC` names 100+ scripted actions; decoding it would give the
-   cutscene vocabulary.
-3. Which opcode selects a `cam/` path slot? See `cam.md`.
+2. ~~What do the `queue_event` selectors mean?~~ **SOLVED** — there are ten
+   handlers, not 100+, and they are tabulated above.
+3. ~~Which opcode selects a `cam/` path slot?~~ **SOLVED** — `queue_event`
+   selector `0x40`, operand 2, a global path index. 751/751 verified.
 4. Semantics of the ~30 opcodes still named only by the global they write.
 5. `+0x14` / `+0x1C` of the spawn descriptor.
 6. What are the two "no file" scenes (7 and 8)? Scene 7 runs an inline stub

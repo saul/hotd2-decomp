@@ -57,6 +57,8 @@ remain. Phase 8 exports whole textured stages with camera animation.
   resuming.** Where the last session stopped and what to do next.
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) — phase checklist
 - [`docs/PLAN.md`](docs/PLAN.md) — the full plan
+- [`docs/PLAYER_PLAN.md`](docs/PLAYER_PLAN.md) — planned browser stage player
+  (step/play/free-roam through a stage, driven by its own event script)
 
 ## Usage
 
@@ -200,6 +202,10 @@ To verify an export without opening the GUI:
 /Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_camview.py \
     -- extract/stage2/stage2.gltf cp_st2_50_cam 90
 ```
+
+Exported cameras carry the game's real projection — **41.1° vertical FOV**,
+4:3, near 0.8, far 8000 — recovered from `SetupSceneProjection`. It is a
+compile-time constant: the game has no zoom and no per-camera FOV.
 
 `blender_camview.py` reports what the camera is aimed at and the mean luminance
 of the result, so "it came out black" is a measurement rather than an

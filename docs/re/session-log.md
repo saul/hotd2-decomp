@@ -2008,3 +2008,185 @@ vertices is correct, now proved rather than assumed.
    finding suggests a good fraction are authored and the filter could be
    narrowed to genuinely-degenerate cases.
 4. The golden-file regression suite in `tests/`, still the one Phase 3 gap.
+
+---
+
+## Session 14 — the projection matrix, and the `evt` → `cam` link
+
+Two questions: how the projection matrices are set up and where the FOV comes
+from, and whether the `evt/` tables are actually fully understood. Both are now
+answered, one completely and one honestly.
+
+### 1. Field of view: 41.1°, and the 60° was a red herring
+
+The first thing found was the wrong thing. `InitD3DDeviceAndTextureStages`
+builds a perspective matrix from `DAT_00598778`, which reads **60.0 degrees**,
+with aspect 0.9, near 1.0, far 6000. That is exactly the placeholder the
+exporter had been using, which made it look like a confirmation.
+
+It is dead code. `DAT_007DE5C8` — the matrix it fills — has **one** xref, the
+call that fills it. `DAT_00598778` has **one** read. The builder `0x004B73CC`
+has one caller. Nothing hands any of it to the device. It is stock `d3du`
+sample scaffolding that the port never removed.
+
+The real projection is built through an **OpenGL-style matrix API** that had
+not been recognised:
+
+```c
+SetMatrixMode(3);                                   /* PROJECTION */
+MatrixLoadIdentity();
+MatrixTranslate(g_screen_offset_x, g_screen_offset_y, 0);    /* both 0 */
+BuildPerspectiveProjection(0x1D3B, 4.0f/3.0f, 0.8f, 8000.0f);
+SetMatrixMode(1);                                   /* commits it */
+```
+
+`SetMatrixMode` (`0x004A9250`) is the trick: the projection is built on the
+same matrix stack the renderer uses for world transforms, and installed on the
+**3 → 1 transition**, which is the only `SetTransform(D3DTRANSFORMSTATE_PROJECTION)`
+in the program. That is why searching for the projection by looking for
+`SetTransform` sites found nothing interesting.
+
+Ghidra's decompilation of `BuildPerspectiveProjection` had dropped an FPU
+argument, showing `iVar1 = __ftol()` with no operand and making the angle look
+like a full 41°. The disassembly has it:
+
+```asm
+FILD  [ESP+0x44]            ; fov_bams
+FMUL  double [0x004C4C98]   ; * 0.5      <- the halving
+CALL  __ftol
+FILD  ...
+FMUL  double [0x004C4370]   ; * 2*PI/65536
+FCOS / FSIN / FDIVP         ; cot(half)
+```
+
+So the argument is the **full vertical FOV in BAMS**, halved with truncation:
+
+```
+0x1D3B = 7483   half = (int)3741.5 = 3741
+fovY = 2 * 3741 * 2*PI/65536 = 0.7173277659 rad = 41.100 deg
+fovX (4:3)                                      = 53.115 deg
+```
+
+`BuildPerspectiveProjection` has exactly two call sites —
+`SetupSceneProjection` and `SetProjectionNearPlane(zn)` for HUD layers — and
+**both pass `0x1D3B` and 4:3**. There is no zoom and no per-camera FOV.
+
+**Cross-checked independently.** `SetupSceneProjection` also computes
+`240.0 / tan(0.35866388296751145)` = 640.21, the projection distance in pixels
+for a 480-tall viewport. `0.35866388296751145` is *bit for bit* equal to
+`3741 * 2π/65536` — the compiler folded the same half-angle. Two constants
+arrived at by different routes, one FOV.
+
+Written into every exported glTF camera along with the real near/far
+(0.8 / 8000) and 4:3 aspect. The framing is noticeably tighter and reads as an
+arcade rail shot rather than a wide-angle one
+(`extract/compare/session13/15_fov_41deg.png`).
+
+Also mapped while in there: the whole matrix API (`MatrixLoadIdentity`,
+`MatrixTranslate`, `MatrixRotateX/Y`, `MatrixMultiply`, push/pop, all angles
+BAMS), and `DrawModelWithForcedAlphaBlend` (`0x004A8440`) — a second mesh
+walker that rewrites each mesh's TSP to `(tsp & 0x03FFFF7F) | 0x94000080`
+(forcing `SRC_ALPHA`/`INV_SRC_ALPHA`) and scales material alpha by the draw
+command's `+0x10` word. That fills in the last unknown field of the draw
+command: it is a per-command fade alpha.
+
+### 2. Are the `evt` tables fully understood? Structurally yes, semantically no
+
+Worth stating plainly, because the docs were overclaiming in one place and
+underclaiming in another.
+
+**Solid:** all 96 dispatch slots enumerated, 76 used, 5 stubs never reached,
+operand length known for every opcode, 17,150 instructions decode with zero
+errors. The container, fixups, routing graph, spawn descriptors and the asset
+vocabulary are all recovered.
+
+**Not solid:** ~30 opcodes are named only by the global they write, and 20.6%
+of `evt/` bytes are still unattributed (90% of that being spawn behaviour
+tails).
+
+So I went after the biggest single gap — `queue_event`, opcode `0x30` — which
+`evt.md` described as a two-level table naming "100+ scripted actions".
+
+**It names ten.** The "100+" was an estimate from the size of the surrounding
+region, never a count. The index table at `0x005776EC` has seven slots, four of
+them null, and its sub-tables are laid out immediately *before* it:
+
+```
+group 1 @ 0x005776C4  6 handlers  selectors 0x10..0x15
+group 2 @ 0x005776DC  2 handlers  0x20..0x21
+group 4 @ 0x005776E4  1 handler   0x40
+group 6 @ 0x005776E8  1 handler   0x60
+```
+
+The high nibble is *both* the group index and the operand count, which is why
+the instruction length is `2 + (selector >> 4)` — the groups are organised by
+arity. All ten are now named and tabulated in `evt.md`. Measured across stages
+1–6, the only selectors that occur are exactly those ten minus `0x13`.
+
+#### Selector `0x40` is the `evt` → `cam` link
+
+Open since Session 11, and the previous guess (`0x18`/`0x19`) was wrong.
+
+```
+queue_event 0x40, start_frame, end_frame, path_index, flags
+```
+
+`EvtActionCamPlay40` → `CamStartPathPlayback` → `CamAdvancePathFrame`, which
+calls `CamEvalPath7(g_active_cam_path, (float)frame, &eye, &lookat, &roll, &_)`
+once per frame and increments until it passes `end_frame`. `start_frame == -1`
+resumes rather than seeks; `start_frame == end_frame` takes the
+`CamEvalStaticPose` branch and holds a pose.
+
+**`path_index` is global across every `cam/` file**, not per-file.
+`DAT_004C479C` is one byte per global path giving its owning file, with one
+contiguous run per file, `cp_*` first then `op_*`.
+
+Two metrics that collapse:
+
+- 23 `cam/` files, 418 paths total, and the table resolves to **23 distinct
+  file ids with no id repeated** — every run length equals a real file's path
+  count.
+- **751 / 751** selector-`0x40` instructions in stages 1–6 name a path inside
+  their own stage's range. With 418 paths in the global space and a stage
+  owning 14–66 of them, a wrong operand order scatters immediately.
+
+`tools/verify_evt_cam.py`.
+
+#### A bug worth recording
+
+The first version of that verifier read a fixed 512 bytes of `DAT_004C479C`.
+The table is 418 bytes with no terminator, so the slop past its end produced
+extra runs that reused the same small file ids and silently overwrote every
+base — reporting 0/751 and six one-path stages. The fix is to derive the length
+from the corpus (total paths across all `cam/` files) rather than guess it.
+
+Same shape as `_region_table_bounds` in `exetab.py`: **these tables end where
+something else begins, and nothing marks it.** Worth assuming by default in
+this binary.
+
+### Named this session
+
+`BuildPerspectiveProjection`, `SetupSceneProjection`, `SetProjectionNearPlane`,
+`SetMatrixMode`, `MatrixLoadIdentity`, `MatrixTranslate`, `MatrixRotateX`,
+`MatrixRotateY`, `MatrixMultiply`, `DrawModelWithForcedAlphaBlend`,
+`EvtEnterSceneState`, `CamStartPathPlayback`, `CamAdvancePathFrame`, and the
+ten `EvtAction*` handlers. Labels for `g_matrix_mode`,
+`g_projection_matrix_cache`, `g_identity_matrix`, `g_projection_distance_px`,
+`g_screen_offset_x/y`, `g_active_cam_path`, `g_evt_action_operands`,
+`g_evt_action_table`, `g_scene_state_table`, `g_camera_preset_table`,
+`g_cam_path_file_id`, and the two dead `d3du` globals, flagged as dead.
+
+`EvtActionSetContinuation13` had no function body — nothing references it
+except the action table, which had not been fed to Ghidra.
+
+### Next
+
+1. `mot/` — rigid transforms vs vertex morphs. The last unsolved format, and
+   the draw command's world matrix is now understood, which is where per-object
+   animation has to land.
+2. `coli/` — record layout and hit-test semantics.
+3. The ~28 remaining `evt` opcodes named only by the global they write. The
+   scene state machine at `0x00576C14` (2-D, 9 columns) is the next free
+   function inventory and should name a lot of them at once.
+4. Spawn behaviour tails — 90% of the uncovered `evt/` bytes; the class table
+   is the way in.

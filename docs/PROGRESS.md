@@ -123,7 +123,7 @@ translation has not been decompiled yet.
 - [x] Opaque/translucent two-pass selector decoded
       (`(tsp & 0x180000) != 0x80000`)
 
-## Phase 6 — Remaining formats 🔶 `evt/` and `cam/` solved
+## Phase 6 — Remaining formats 🔶 `evt/` and `cam/` solved; `mot/`+`coli/` open
 
 - [x] `cam/` — **solved.** Not a keyframe struct: a pool of independent scalar
       **cubic Hermite** curves plus a per-path descriptor naming one curve per
@@ -149,7 +149,13 @@ translation has not been decompiled yet.
       region membership, different id→slot mapping, swapping in the
       `st_org00`–`st_org03` models no region draws in Arcade mode. Every
       substituted model's bounding box lies inside its stage's
-- [ ] `evt/` semantics — ~30 opcodes named only by the global they write
+- [x] **`queue_event` (`0x30`) fully decoded** — the two-level table at
+      `0x005776EC` holds **ten** handlers, not the 100+ previously claimed;
+      every selector used anywhere in the game is one of them
+- [x] **`evt` → `cam` link solved** — selector `0x40` plays a `cam/` path;
+      operand 2 is a *global* path index. **751/751** camera-play actions in
+      stages 1–6 name a path from their own stage (`tools/verify_evt_cam.py`)
+- [ ] `evt/` semantics — ~28 opcodes still named only by the global they write
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [ ] `coli/` — record layout + hit-test semantics
 - [ ] `mot/` — rigid transforms vs vertex morphs
@@ -181,7 +187,10 @@ translation has not been decompiled yet.
 - [x] Correct stage geometry set from the exe region tables, replacing the
       `st<N>_*` glob; `<stage>_regions.json` sidecar and `extras.hod2_regions`
       per model node
-- [ ] Camera FOV — not recovered; exported cameras use a neutral 60°
+- [x] **Camera FOV recovered** — 41.100° vertical (`0x1D3B` BAMS), 53.115°
+      horizontal, 4:3, near 0.8, far 8000, constant for the whole game. From
+      `SetupSceneProjection`; the 60° in `InitD3DDeviceAndTextureStages` is
+      dead `d3du` scaffolding. Written into every exported glTF camera
 - [ ] `evt` / `coli` JSON sidecars — `evt/` unblocked
 
 ## Open questions
@@ -222,12 +231,12 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     [`formats/materials.md`](formats/materials.md).
 15. What is the eighth curve index in a `cp_` path descriptor? Neither
     evaluator reads it, and it always points at a real curve. (Phase 6)
-16. Which `evt/` opcode selects a `cam/` path slot? Opcodes `0x18`/`0x19` are
-    the prime suspects — they write the two view fields the camera evaluator is
-    called with. Answering this reconstructs the camera rail, which would also
-    settle question 13. (Phase 6)
-17. What do the `queue_event` (`0x30`) selectors mean? The two-level table at
-    `0x005776EC` holds 100+ scripted actions — the cutscene vocabulary.
+16. ~~Which `evt/` opcode selects a `cam/` path slot?~~ **SOLVED** — not
+    `0x18`/`0x19`. It is `queue_event` (`0x30`) selector `0x40`:
+    `(start_frame, end_frame, global_path_index, flags)`. 751/751 verified.
+17. ~~What do the `queue_event` (`0x30`) selectors mean?~~ **SOLVED** — ten
+    handlers, tabulated in [`formats/evt.md`](formats/evt.md). The "100+" in
+    the old note was an estimate from the region size, not a count.
 18. Are `+0x14` / `+0x1C` of the spawn descriptor really the other two Euler
     angles? They sit either side of a confirmed BAMS yaw but do not look like
     angles. (Phase 6)

@@ -355,6 +355,26 @@ class ExeTables:
                     out.setdefault(slot, (name, k))
         return out
 
+    #: One dword per global cam path slot: how many frames the game plays that
+    #: path for. Object draw routines clamp with it -- `FUN_0048E600` and
+    #: `FUN_0048F050` both do `n = min(current_frame, CAM_PATH_LENGTH[slot])`
+    #: before calling `CamEvalObjectPath6`.
+    CAM_PATH_LENGTH = 0x00576D38
+
+    def cam_path_length(self, slot: int) -> int:
+        """Authored play length of a global cam path slot, in 60 Hz frames.
+
+        This is *not* the same as the curve's key extent, and the difference is
+        the point: the curves say where the path goes, this says how much of it
+        the game runs. **[measured]** over all 418 slots, 417 are non-zero and
+        323 equal the parsed duration to within 2 frames; the rest clamp short
+        of the last key or hold past it.
+        """
+        off = self._v2r(self.CAM_PATH_LENGTH)
+        if off is None:
+            return 0
+        return struct.unpack_from("<i", self.data, off + slot * 4)[0]
+
     def cam_slots_for(self, cam_name: str) -> list[int]:
         """The global slot ids a cam file owns, in path order."""
         stem = cam_name[:-4] if cam_name.endswith(".bin") else cam_name

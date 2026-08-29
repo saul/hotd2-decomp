@@ -117,19 +117,41 @@ if render:
     scn.collection.objects.link(light)
     light.location = centre + mathutils.Vector((radius, -radius, radius * 2))
 
-    # Workbench with texture colour: shows the asset regardless of scene
-    # lighting. Game interiors have no lights of their own, so a lit render
-    # comes out almost black and tells you nothing.
+    # Engine choice matters and is not cosmetic.
+    #
+    # Blender's glTF importer cannot put two different wrap modes on an Image
+    # Texture node, so for anything but plain REPEAT it sets
+    # `extension = EXTEND` and emulates the real mode with shader nodes.
+    # **Workbench does not evaluate shader nodes**, so under Workbench every
+    # material with a clamped or mirrored axis renders clamped on *both* axes:
+    # one row or column of texels smeared across the face. It looks exactly
+    # like a UV bug in the exporter and is not one.
+    #
+    # So prefer EEVEE whenever the file is unlit -- KHR_materials_unlit shows
+    # up as an Emission shader, which EEVEE renders without needing lights.
+    # Fall back to Workbench only for lit files, where EEVEE would come out
+    # almost black because the game ships no lights of its own.
     engines = scn.render.bl_rna.properties["engine"].enum_items.keys()
-    scn.render.engine = ("BLENDER_WORKBENCH" if "BLENDER_WORKBENCH" in engines
-                         else list(engines)[0])
-    try:
-        shading = scn.display.shading
-        shading.light = "FLAT"
-        shading.color_type = "TEXTURE"
-        shading.show_backface_culling = False
-    except Exception:  # noqa: BLE001
-        pass
+    unlit = any(any(n.type == "EMISSION" for n in m.node_tree.nodes)
+                for m in bpy.data.materials if m.use_nodes)
+    eevee = next((e for e in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE")
+                  if e in engines), None)
+    if unlit and eevee:
+        scn.render.engine = eevee
+        print("engine          : %s (unlit; Workbench would fake every "
+              "non-REPEAT wrap mode)" % eevee)
+    else:
+        scn.render.engine = ("BLENDER_WORKBENCH" if "BLENDER_WORKBENCH" in engines
+                             else list(engines)[0])
+        print("engine          : Workbench (file is not unlit). Mirrored and "
+              "clamped UV axes will render as if clamped on both.")
+        try:
+            shading = scn.display.shading
+            shading.light = "FLAT"
+            shading.color_type = "TEXTURE"
+            shading.show_backface_culling = False
+        except Exception:  # noqa: BLE001
+            pass
     scn.render.resolution_x = 960
     scn.render.resolution_y = 540
     scn.render.filepath = str(path.with_suffix("")) + "_preview.png"

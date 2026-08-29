@@ -123,7 +123,11 @@ def _objects_json(st) -> dict:
             continue
         paths.append({
             "slot": ref.slot, "file": ref.file, "index": ref.index,
+            # The curve's key extent, and separately how many frames the game
+            # actually plays it for -- object draw routines clamp with the
+            # second. They differ on 95 of the 418 slots.
             "duration_frames": ref.duration,
+            "play_frames": st.tables.cam_path_length(ref.slot),
             "start_frame": ref.start_frame,
             "node": f"{ref.file}_{ref.index:02d}_obj",
         })

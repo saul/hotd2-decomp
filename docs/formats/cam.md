@@ -372,6 +372,27 @@ complete car with a legible number plate — `extract/compare/session18/`. That
 is the check that the transform chain is right: a wrong rotation order or a
 mis-composed translation scatters the parts.
 
+> ⚠️ Render it with **EEVEE**. `03_workbench_WRONG.png` is the same rig under
+> Workbench: the rear reads as a stretched smear because several body materials
+> set `flip_uv = 2` → `wrapS = MIRROR`, and Workbench does not evaluate the
+> importer's wrap-emulation nodes. The export is correct; the renderer was not.
+> `tools/blender_nodeview.py` defaults to EEVEE for this reason.
+
+### There is no rig data to parse — [proved]
+
+The transforms and slot ids are `PUSH imm32` in the instruction stream
+(`FUN_0048E600` at `0x0048E7C7` is `68 79 15 00 00`, `PUSH 0x1579`), **168
+distinct functions call `AssetDrawSlot`**, and the engine's only table-driven
+draw path is `RegionDrawResidentSet` for static scenery. NL1 has no node
+hierarchy either. So a rig exists only as instructions, and each one has to be
+read by hand — 31 functions call `CamEvalObjectPath6`; one is transcribed.
+
+What *is* data is the play length: `0x00576D38` holds one dword per global path
+slot saying how many frames the game runs that path for, and the draw routines
+clamp with it. **[measured]** 417 of 418 slots are non-zero and 323 equal the
+parsed curve duration to within 2 frames — the other 95 stop short of the last
+key or hold past it. `ExeTables.cam_path_length`, exported as `play_frames`.
+
 Two part names were corrected by measuring rather than assuming:
 
 | Part | Evidence |

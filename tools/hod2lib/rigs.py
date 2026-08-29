@@ -7,9 +7,29 @@ walks the matrix stack, pushing a transform and calling ``AssetDrawSlot`` for
 each part. There is no rig data in the asset files at all -- the hierarchy only
 exists as instructions.
 
+### Why this is a transcription and not a parser
+
+**[proved]** There is no rig data to parse. The evidence:
+
+* The transforms and slot ids are `PUSH imm32` **in the instruction stream**.
+  `FUN_0048E600` at 0x0048E7C7 is `68 79 15 00 00` -- `PUSH 0x1579` -- with no
+  table load anywhere near it.
+* **168 distinct functions call `AssetDrawSlot`.** A data-driven rig format
+  would have one interpreter looping over a part table, not 168 call sites
+  spread across the gameplay code.
+* The engine does have exactly one table-driven draw path, and it is for
+  static scenery: `RegionDrawResidentSet` walks the region tables. Objects do
+  not use it.
+* NL1 has no node hierarchy either (see `docs/formats/nl1.md`), so the
+  hierarchy is not hiding in the model files.
+
 So reproducing one means transcribing its routine. This module holds the
 transcriptions, as data, with the routine each came from named so it can be
-checked.
+checked -- and the cost is that each rig has to be read by hand. There are 31
+functions calling `CamEvalObjectPath6`; one is transcribed.
+
+What *is* data, and is read rather than transcribed: the per-path play length
+at `0x00576D38` (`ExeTables.cam_path_length`), which these routines clamp with.
 
 Conventions, all established in ``docs/formats/cam.md``:
 

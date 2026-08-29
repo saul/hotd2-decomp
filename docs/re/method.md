@@ -120,8 +120,20 @@ clamped on *both* axes — one row or column of texels smeared across the face,
 and solid black wherever the UVs run negative.
 
 That is indistinguishable from a UV bug in the exporter, and Session 13 spent
-hours on it. `blender_camview.py` now defaults to EEVEE for unlit exports.
-Before concluding anything from a render, know what the renderer is faking.
+hours on it. Before concluding anything from a render, know what the renderer
+is faking.
+
+**And it recurred.** Session 18 rendered a reconstructed rig with a hand-rolled
+Workbench script and shipped the image as evidence. The car's rear read as a
+stretched smear — which the user spotted, not the checks. The export was
+correct: several body materials set `flip_uv = 2` → `wrapS = MIRROR`, and
+Workbench was faking it.
+
+Writing the corollary down was not enough, because the trap is in the *next*
+script, not the one that was fixed. So the rule is carried by the tools now:
+`blender_camview.py`, `blender_check.py` and `blender_nodeview.py` all default
+to EEVEE for unlit files and print which engine they used. **Do not hand-roll
+another render script — use one of those.**
 
 ### Corollary 3: when a face looks wrong, bisect the pipeline, don't stare
 

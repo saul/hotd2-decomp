@@ -260,6 +260,14 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       node, so the object rides its route. The assembled rig is 26.5 × 17.3 ×
       51.0 units and renders as a complete car — the check that the transform
       chain is right. Runtime rotations are recorded in `extras`, never baked
+- [x] **No rig data exists to parse** — transforms and slot ids are `PUSH
+      imm32` in the instruction stream, 168 distinct functions call
+      `AssetDrawSlot`, and the engine's only table-driven draw path is
+      `RegionDrawResidentSet` for scenery. Rigs must be transcribed one at a
+      time; 1 of 31 done
+- [x] **Per-path play length recovered** — `0x00576D38`, one dword per global
+      path slot; 417/418 non-zero and 323 match the parsed curve duration.
+      Exported as `play_frames`
 - [ ] The other 30 `CamEvalObjectPath6` callers — which spawn classes they
       belong to, and which take their path slot from the object rather than a
       literal

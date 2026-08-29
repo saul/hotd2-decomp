@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------------
+# Game assets MUST NEVER be committed to this repository.
+# This project documents formats; it does not redistribute content.
+# ---------------------------------------------------------------------------
+extract/
+game/
+*.bin
+*.exe
+*.dll
+*.wav
+*.pvr
+*.pvp
+*.pal
+*.png
+*.bmp
+*.tga
+*.gltf
+*.glb
+
+# Explicit allowances (generated metadata and docs, no asset content)
+!manifest.csv
+!inventory.csv
+!extract/README.md
+
+# Ghidra
+*.gpr
+*.rep/
+ghidra/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

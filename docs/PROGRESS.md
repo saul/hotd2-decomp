@@ -1,0 +1,95 @@
+# Progress
+
+Phase detail lives in [`PLAN.md`](PLAN.md).
+
+## Phase 0 — Baseline ✅
+
+- [x] Repo initialised, `.gitignore` blocks all asset types
+- [x] `tools/baseline.py` written
+- [x] `manifest.csv` generated (SHA-256 + size for every input file)
+- [x] `inventory.csv` generated (classification, `dword0`, table entries, model
+      count, texture-size delta)
+- [x] `pol_`-prefixed duplicates identified and the 3 anomalies flagged in
+      `re/anomalies.md`
+- [x] Format specs stubbed with everything confirmed so far
+- [x] Build provenance recorded in `re/provenance.md` (stray `pol/files.txt` build listing)
+
+## Phase 1 — Ghidra environment
+
+- [ ] Import `Hod2.exe`, base `0x400000`
+- [ ] Apply MSVC 6.0 FLIRT / Function ID signatures
+- [ ] Identify and excise the `d3du` / D3DX utility library
+- [ ] Import DX7 SDK headers as a GDT
+- [ ] Seed anchors from `re/addresses.md`
+- [ ] Map the `.data` tables adjacent to the filename tables
+
+## Phase 2 — Compression codec ⚠️ critical path
+
+- [ ] Trace each loader's `ReadFile` buffer to its consumer
+- [ ] Triage the candidate sliding-window sites
+- [ ] Build the Unicorn function harness in `tools/emu/`
+- [ ] Produce ground-truth plaintext for a sample of compressed files
+- [ ] Clean-room `tools/hod2lib/lz.py`
+- [ ] `src/lz.c` reference implementation
+- [ ] All 788 compressed files decompress to exactly `dword0` bytes and re-parse
+
+## Phase 3 — `hod2lib` core
+
+- [ ] `container.py` — offset table + transparent decompression
+- [ ] `nl1.py` — independent NL1 parser
+- [ ] Resolve the packed s8 normal byte-order ambiguity empirically
+- [ ] Cross-validation harness against the Blender addon
+- [ ] Golden-file regression suite in `tests/`
+
+## Phase 4 — Textures
+
+- [ ] Global `(bank, texID) → descriptor` map from all `pol/` files
+- [ ] Constraint solver for banks with unreferenced gaps
+- [ ] Decoder for twiddled / VQ / SmallVQ / all pixel formats
+- [ ] BMP and empty-file outliers handled
+- [ ] Emit `TexID_%03d.PVR` + PNG
+- [ ] Cross-check against the RE'd D3D7 upload path
+
+## Phase 5 — Materials
+
+- [ ] Locate the PVR2 → D3D7 state translation
+- [ ] Document culling / depth / Z-write
+- [ ] Document blend factors
+- [ ] Document texture shading, UV clamp/flip, filtering, fog
+- [ ] Document list assignment (opaque / translucent / punch-through)
+- [ ] Document shading modes and environment mapping
+
+## Phase 6 — Remaining formats
+
+- [ ] `cam/` — keyframe struct + interpolation
+- [ ] `coli/` — record layout + hit-test semantics
+- [ ] `mot/` — rigid transforms vs vertex morphs
+- [ ] `evt/` — pointer fixup pass, then event struct walk
+
+## Phase 7 — Documentation & C reference
+
+- [ ] Complete `docs/formats/*.md` with worked hex examples
+- [ ] Annotated function inventory + Ghidra export
+- [ ] `src/` reference implementations compile cleanly
+
+## Phase 8 — glTF exporter
+
+- [ ] Mesh + UV + vertex colour export
+- [ ] Materials with `extras.pvr2` raw state words
+- [ ] Camera splines as glTF animations
+- [ ] `evt` / `coli` JSON sidecars
+- [ ] Blender stage-assembly script
+
+## Open questions
+
+Tracked as they arise; each should end up answered in `docs/formats/` or
+`docs/re/`.
+
+1. What is the compression codec? (Phase 2)
+2. How are unreferenced texture-bank slots sized? (Phase 4)
+3. Packed s8 normal byte order — reader convention or writer convention?
+   (Phase 3)
+4. Are the 3 anomalous `pol_*` files corrupt, or differently encoded? (Phase 2)
+5. Do `mot/` blocks drive rigid transforms or vertex morphs? (Phase 6)
+6. What is the `evt/` pointer-relocation scheme? (Phase 6)
+7. What distinguishes `cam/cp_*` from `cam/op_*`? (Phase 6)

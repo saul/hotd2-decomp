@@ -162,6 +162,11 @@ class Mesh:
         return (self.tsp >> 26) & 7
 
     @property
+    def additive(self) -> bool:
+        """src_alpha / one -- additive blending, used for glows and effects."""
+        return self.translucent and self.src_blend == 4 and self.dst_blend == 1
+
+    @property
     def clamp_uv(self) -> int:
         return (self.tsp >> 15) & 3
 

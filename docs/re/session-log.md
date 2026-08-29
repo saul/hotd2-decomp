@@ -626,3 +626,72 @@ stage2: 18 segments, 141,802 verts, 97,799 tris, 947 textures -> CHECK-OK
 
 Stage 1 spans 7200 x 8198 x 2024 units, stage 2 spans 6698 x 3516 x 812 — both
 already laid out in world space.
+
+---
+
+## Session 7 — texture alpha
+
+**Reported:** `stage1` texture 46 should have transparency but did not.
+
+**Confirmed.** The texture decode was already correct; the bug was in the
+**material**.
+
+### Diagnosis
+
+`tex_046` is a different texture in every bank, which briefly muddied things:
+
+| bank | tex 46 | list | IgnoreTexAlpha |
+|---|---|---|---|
+| `st1_01` | 64×64 RGB565 VQ | 0 | 1 |
+| `st1_01c` | 128×64 RGB565 | 0 | 1 |
+| `st1_02` | 64×256 RGB565 | 0 | 1 |
+| **`st1_05`** | **64×128 ARGB4444** | **2** | **0** |
+
+Only `st1_05` is meant to be transparent; the RGB565 ones have no alpha bits
+and are genuinely opaque.
+
+Its alpha *was* decoding correctly — 16 distinct values, soft gradient, 96.2%
+opaque with an anti-aliased edge — and *was* present in the PNG (colour type 6,
+RGBA). But the material said `alphaMode: OPAQUE`, so Blender ignored it.
+
+### Cause
+
+`alphaMode` was gated on the TSP **UseAlpha** bit (bit 20). That bit governs
+whether the *vertex / base colour* alpha participates. It does not decide
+whether blending happens — the **list type** does.
+
+Requiring it marked **8,554** translucent meshes as opaque: most of the game's
+glass, foliage and smoke. `alphaMode` now derives from the list type alone.
+
+### Second problem, found while fixing the first
+
+The corpus survey turned up **2,126 ARGB4444 meshes on the opaque list with
+IgnoreTexAlpha set**, plus 1,698 ARGB1555. These textures carry real alpha that
+the hardware discards. Emitting it would punch holes in solid geometry — the
+mirror image of the reported bug, and one that would have been much harder to
+attribute.
+
+The exporter now writes a separate fully-opaque variant (`tex_NNN_opaque.png`)
+when `IgnoreTexAlpha` is set, keying the texture cache on
+`(part, texture_id, strip_alpha)` so a texture used both ways produces both. In
+stage 1 that is 576 of 822 images.
+
+### Also learned
+
+- **Punch-through (list 4) never occurs anywhere.** No alpha testing in this
+  game; cutouts use ordinary blending.
+- **Additive blending (`src_alpha`/`one`) is real** — 2,704 meshes — but
+  entirely confined to `eff_*` and boss assets. Stage geometry has none, which
+  is why stages 1 and 2 report `additive=0`. glTF has no additive mode, so it
+  exports as `BLEND` with `extras.pvr2.additive` set.
+- The opaque list is perfectly uniform: `one`/`zero` + `IgnoreTexAlpha`, always.
+
+Written up in [`../formats/materials.md`](../formats/materials.md).
+
+### Result
+
+```
+stage1: 1520 materials -> 1125 OPAQUE, 395 BLEND, 822 images (576 opaque variants)
+stage2: 1811 materials -> 1607 OPAQUE, 204 BLEND, 972 images (816 opaque variants)
+both CHECK-OK
+```

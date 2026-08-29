@@ -136,8 +136,15 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
     sampler_cache: dict[tuple, int] = {}
     mat_cache: dict[tuple, int] = {}
 
-    def get_texture(part: str, bank, tex_id: int) -> int | None:
-        key = (part, tex_id)
+    def get_texture(part: str, bank, tex_id: int, strip_alpha: bool) -> int | None:
+        """Decode a texture, optionally forcing it fully opaque.
+
+        ARGB1555/ARGB4444 textures are also used on meshes whose TSP sets
+        IgnoreTexAlpha, where the hardware discards the alpha channel. Emitting
+        the stored alpha for those would punch spurious holes, so they get a
+        separate fully-opaque image variant.
+        """
+        key = (part, tex_id, strip_alpha)
         if key in tex_written:
             return tex_written[key]
         if bank is None:
@@ -146,9 +153,13 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
         if got is None:
             return None
         w, h, rgba = got
+        if strip_alpha:
+            rgba = bytearray(rgba)
+            rgba[3::4] = b"\xff" * (len(rgba) // 4)
         sub = f"textures/{part}"
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
-        fn = f"{sub}/tex_{tex_id:03d}.png"
+        suffix = "_opaque" if strip_alpha else ""
+        fn = f"{sub}/tex_{tex_id:03d}{suffix}.png"
         if write_textures:
             png.write_rgba(out_dir / fn, w, h, rgba)
         images.append({"uri": fn})
@@ -178,7 +189,9 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
         if key in mat_cache:
             return mat_cache[key]
 
-        tex_idx = get_texture(part, bank, mesh.texture_id) if mesh.textured else None
+        strip_alpha = mesh.ignore_texture_alpha
+        tex_idx = (get_texture(part, bank, mesh.texture_id, strip_alpha)
+                   if mesh.textured else None)
 
         a, r, g, b = mesh.base_colour
         pbr: dict = {
@@ -201,11 +214,18 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
             "doubleSided": mesh.double_sided,
         }
 
-        # Alpha mode from the PowerVR2 list type.
+        # Alpha mode follows the PowerVR2 *list type*, which is what selects
+        # the hardware's blending pass.
+        #
+        # It must not depend on the TSP UseAlpha bit: that governs whether the
+        # vertex/base colour alpha participates, not whether blending happens.
+        # Keying on it marked every translucent mesh with UseAlpha=0 as opaque
+        # -- 8554 meshes in this game, including most of the glass and
+        # foliage.
         if mesh.punch_through:
             mat["alphaMode"] = "MASK"
             mat["alphaCutoff"] = 0.5
-        elif mesh.translucent and mesh.use_alpha:
+        elif mesh.translucent:
             mat["alphaMode"] = "BLEND"
         else:
             mat["alphaMode"] = "OPAQUE"
@@ -222,6 +242,10 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
                 "shading_mode": mesh.shading_mode_name,
                 "src_blend": mesh.src_blend,
                 "dst_blend": mesh.dst_blend,
+                # src_alpha / one. glTF has no additive alphaMode, so this is
+                # exported as BLEND and flagged for the target engine.
+                "additive": mesh.additive,
+                "texture_alpha_used": mesh.textured and not strip_alpha,
                 "clamp_uv": mesh.clamp_uv,
                 "flip_uv": mesh.flip_uv,
                 "filter_mode": mesh.filter_mode,

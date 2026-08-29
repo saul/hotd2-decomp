@@ -73,13 +73,18 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] BMP and empty-file outliers handled
 - [ ] Confirm the twiddle transpose visually (needs a texture with legible text)
 
-## Phase 5 — Materials
+## Phase 5 — Materials 🔶 partly done
+
+Alpha, blending and list assignment are resolved from measured usage;
+see [`formats/materials.md`](formats/materials.md). The D3D7 state
+translation has not been decompiled yet.
 
 - [ ] Locate the PVR2 → D3D7 state translation
-- [ ] Document culling / depth / Z-write
-- [ ] Document blend factors
+- [x] Document culling (settled empirically, see `formats/nl1.md`)
+- [x] Document blend factors — two modes in use, standard and additive
+- [x] Document list assignment — no punch-through anywhere in the game
+- [x] Alpha handling incl. `IgnoreTexAlpha` opaque variants
 - [ ] Document texture shading, UV clamp/flip, filtering, fog
-- [ ] Document list assignment (opaque / translucent / punch-through)
 - [ ] Document shading modes and environment mapping
 
 ## Phase 6 — Remaining formats

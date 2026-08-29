@@ -146,8 +146,16 @@ export class SceneLighting {
     this.refresh();
   }
 
+  private lastKey = "";
+
+  /** Called every frame while a tween runs, so it no-ops when unchanged. */
   set(state: Partial<SceneLightState>): void {
-    this.state = { ...this.state, ...state };
+    const next = { ...this.state, ...state };
+    const key = `${next.rgb.join(",")}|${next.ambient}|` +
+      `${next.pitchDeg}|${next.yawDeg}`;
+    if (key === this.lastKey) return;
+    this.lastKey = key;
+    this.state = next;
     this.refresh();
   }
 

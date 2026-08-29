@@ -561,6 +561,10 @@ class ExeTables:
     # `EvtOpBgmEntryPlay5F` -> `BgmStopThenPlay` consumes four operands and
     # uses only the third: `PlaySoundId(0x80000000)` then `PlaySoundId(op2)`.
 
+    BACKDROP_PRESETS = 0x00579968
+    BACKDROP_STRIDE = 0x10
+    BACKDROP_COUNT = 12
+
     VOICE_RECORDS = 0x0058044A
     VOICE_STRIDE = 0x24
 
@@ -625,6 +629,57 @@ class ExeTables:
                 out[sid] = name.decode("ascii")
             except UnicodeDecodeError:
                 continue
+        return out
+
+    def backdrop_presets(self) -> list[dict]:
+        """The 12 camera-following backdrop domes, indexed by evt opcode 0x1B.
+
+        16 bytes each::
+
+            +0x00  s16  asset slot A -- the dome that is drawn
+            +0x02  s16  asset slot B -- a second slot, drawn by the variant
+                                        paths for presets 8, 10 and 11
+            +0x04  f32  dy           -- Y offset from the camera, 0 .. -3000
+            +0x08  s32  spin         -- BAMS added to the angle every frame
+            +0x0C  s32  angle0       -- BAMS the angle resets to on a change
+
+        The draw is straightforward once read (the code at 0x004132D0, which
+        Ghidra leaves as an undefined block):
+
+            translate(camera.x, camera.y + dy, camera.z)
+            if (mode != 2) angle += spin          /* mode 2 = drawn, frozen */
+            if (preset == 5) { rotZ(180 deg); rotY(-angle); }
+            else               rotY(angle)
+            scale(1.2, 1.2, -1.2)                 /* note the negative Z */
+            AssetDrawSlot(assetA)
+
+        So it follows the camera in all three axes, spins about Y, and is
+        turned inside out by the negative Z scale -- a sky dome seen from
+        within. Opcode 0x1C is the mode: 0 off, 2 drawn but frozen, anything
+        else drawn and animating.
+        """
+        r = self._v2r(self.BACKDROP_PRESETS)
+        out: list[dict] = []
+        if r is None:
+            return out
+        slots = self.asset_slots()
+        for i in range(self.BACKDROP_COUNT):
+            o = r + i * self.BACKDROP_STRIDE
+            if o + self.BACKDROP_STRIDE > len(self.data):
+                break
+            a, b = struct.unpack_from("<2h", self.data, o)
+            dy, = struct.unpack_from("<f", self.data, o + 4)
+            spin, angle0 = struct.unpack_from("<2i", self.data, o + 8)
+            entry = {
+                "preset": i, "slot_a": a, "slot_b": b,
+                "dy": dy, "spin_bams": spin, "angle0_bams": angle0,
+            }
+            for key, sl in (("a", a), ("b", b)):
+                rec = slots.get(sl)
+                if rec:
+                    entry[f"file_{key}"] = rec[0]
+                    entry[f"entry_{key}"] = rec[1]
+            out.append(entry)
         return out
 
     def voice_names(self) -> dict[int, str]:

@@ -242,6 +242,78 @@ inference; **[open]** = undetermined.
 > `2E` — is unreachable, and `2C` only registers the request into a variable
 > nothing reads.
 
+### `1B` / `1C` — the backdrop dome, read out
+
+**[proved]** The draw lives at `0x004132D0`, in a block Ghidra leaves
+undefined (no function is created there, so it does not appear in any xref
+listing by name). Transcribed:
+
+```c
+esi = &g_camera_pose[player];                  /* 0x009A60C0 + player*0x69 */
+if (preset != last_preset) { angle = table[preset].angle0; last = preset; }
+if (backdrop_mode == 0) return;                /* 0x1C == 0 is off */
+
+MatrixStackPush(0);
+MatrixTranslate(esi->x, esi->y + table[preset].dy, esi->z);
+if (backdrop_mode != 2) angle += table[preset].spin;   /* 2 = drawn, frozen */
+if (preset == 5) { MatrixRotateZ(0x8000); MatrixRotateY(-angle); }
+else               MatrixRotateY(angle);
+MatrixScale(1.2f, 1.2f, -1.2f);
+AssetDrawSlot(table[preset].slot_a);
+```
+
+Two details are easy to miss and both matter:
+
+- **It follows the camera in all three axes**, not just horizontally, so it
+  can never be approached.
+- **The Z scale is negative.** The dome is turned inside out — it is modelled
+  to be seen from within.
+
+`angle` and `spin` are BAMS; the shipped spins are 0, 1, 2, 4 and 12 per
+frame, so the fastest dome turns about 4°/s.
+
+| Preset | slot A | dy | spin | Resolves to |
+|---|---|---|---|---|
+| 0 | 6048 | 0 | 12 | `st1_1[20]` |
+| 1 | 6048 | −200 | 4 | `st1_1[20]` |
+| 2 | 6049 | −300 | 2 | `st1_1[21]` |
+| 3 | 6047 | −300 | 0 | `etc_1[65]` |
+| 4 | 6048 | 0 | 4 | `st1_1[20]` |
+| 5 | 6048 | 0 | 4 | `st1_1[20]` — the flipped one |
+| 6 | 6049 | 0 | 2 | `st1_1[21]` |
+| 7 | 6307 | −450 | 1 | `st5_01b[0]` |
+| 8 | 6312 | −1050 | 1 | `st5_01b[5]` |
+| 9 | 6309 | −2400 | 2 | `st5_01b[2]` |
+| 10 | 6310 | −3000 | 0 | `st5_01b[3]` |
+| 11 | 6311 | −3000 | 0 | `st5_01b[4]` |
+
+Note every dome lives in `st1_1`, `etc_1` or `st5_01b` regardless of which
+stage uses it — the sky is shared geometry. No region draws these slots; the
+script pulls them in with opcode `0x50` like any other prop.
+
+### `20`–`27` — the tween block, read out
+
+**[proved]** `FUN_0040B650` (`0x21`, by rate) and `FUN_0040BA90` (`0x23`, over
+a duration) both fill the same 4-dword-per-channel record
+`{enabled, from, to, rate}`:
+
+- `from` is read from the light block, so a tween always starts where the
+  channel currently is;
+- `to` comes from the first operand — **dereferenced as a float pointer**,
+  except on the fog *colour* channels (2, 3, 4 and the 5 that sets all three),
+  which read it inline and convert int → float;
+- `rate` is a per-frame step. `0x21` takes it from a second float pointer;
+  `0x23` takes a frame count and **pre-divides**, `rate = |to − from| / frames`,
+  falling through to an immediate set when the count is 0.
+
+This independently confirms the channel map, because each case reads `from`
+from the exact block offset the channel table claims: case 0 from `+0x30`,
+case 2 from `+0x24`, case 6 from `+0x240`, case 10 from `+0x24C`, and so on.
+
+**[measured]** `st2evtbl` alone runs **247** `0x23` tweens, every one of them
+over 30 frames. Fog and scene light are *ramped* throughout the game, never
+switched — a consumer that jumps to the target looks visibly wrong.
+
 ### Correction: `0x20`–`0x27` are fog and light tweens, not view tweens
 
 An earlier revision of this document said the `0x20`–`0x27` family targets

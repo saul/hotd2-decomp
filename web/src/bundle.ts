@@ -129,6 +129,10 @@ export interface OpJson {
   channel?: number;
   channel_name?: string;
   components?: number[];
+  /** `0x21` animates by a per-frame rate, `0x23` over a frame count. */
+  tween?: "rate" | "time";
+  rate?: number;
+  frames?: number;
   pitch_deg?: number;
   yaw_deg?: number;
   raw?: string[];
@@ -178,6 +182,29 @@ export interface SoundJson {
   voice: Record<string, string>;
 }
 
+export interface BackdropPreset {
+  preset: number;
+  slot_a: number;
+  slot_b: number;
+  /** Y offset from the camera, 0 … −3000. */
+  dy: number;
+  /** BAMS added to the dome's Y rotation every frame. */
+  spin_bams: number;
+  /** BAMS the angle resets to when the preset changes. */
+  angle0_bams: number;
+  file_a?: string;
+  entry_a?: number;
+  file_b?: string;
+  entry_b?: number;
+}
+
+export interface BackdropJson {
+  presets: BackdropPreset[];
+  /** The presets this scene's script actually selects with `0x1B`. */
+  used: number[];
+  note: string;
+}
+
 export interface ScriptJson {
   scene: number;
   stage: number | null;
@@ -192,6 +219,7 @@ export interface ScriptJson {
   cam_slots_used: number[];
   bgm?: BgmJson;
   sound?: SoundJson;
+  backdrop?: BackdropJson;
   warnings: string[];
 }
 

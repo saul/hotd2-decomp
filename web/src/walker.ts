@@ -63,6 +63,28 @@ export interface FogState {
   rgb: [number, number, number];
 }
 
+/**
+ * One channel of the scene light block, mid-tween.
+ *
+ * The game's block is `{enabled, from, to, rate}` per channel, and **both**
+ * tween opcodes end up in that shape: `0x21` takes the per-frame `rate`
+ * straight from an operand, and `0x23` takes a frame count and pre-divides,
+ * `rate = |to - from| / frames`. So one stepper serves both.
+ */
+export interface ChannelTween {
+  to: number;
+  /** Per-frame step magnitude, always positive. */
+  rate: number;
+}
+
+/** Light-block channel indices, as the tween handlers number them. */
+export const CH_FOG_NEAR = 0;
+export const CH_FOG_FAR = 1;
+export const CH_FOG_R = 2;
+export const CH_LIGHT_R = 6;
+export const CH_AMBIENT = 10;
+export const CHANNEL_COUNT = 11;
+
 export interface CamCommand {
   slot: number;
   startFrame: number;
@@ -143,6 +165,16 @@ export interface WalkerHost {
   playSound(id: number): string | undefined;
 }
 
+/** Fog off (a range past the 8000 far plane) and a neutral white light. */
+function defaultChannels(): number[] {
+  const c = new Array(CHANNEL_COUNT).fill(0);
+  c[CH_FOG_NEAR] = 65000;
+  c[CH_FOG_FAR] = 65001;
+  c[CH_LIGHT_R] = c[CH_LIGHT_R + 1] = c[CH_LIGHT_R + 2] = 1;
+  c[CH_AMBIENT] = 0.5;
+  return c;
+}
+
 /** How far a wait opcode can be honoured from the bundle alone. */
 const WAIT_NOTES: Record<number, string> = {
   0x40: "approximated: resolves when the current camera move ends",
@@ -172,6 +204,9 @@ export class Walker {
   groundY: number | null = null;
   /** 0x37: advance the camera path every frame, bypassing the room gate. */
   forcePathAdvance = false;
+  /** The backdrop dome: 0x1B picks the preset, 0x1C the mode. */
+  backdropPreset = -1;
+  backdropMode = 0;
   /**
    * `branch_choice` (`DAT_009C88A4`). Every writer in the binary is gameplay
    * code, and it is reset to 0 on every block change -- so with no gameplay a
@@ -185,7 +220,17 @@ export class Walker {
    * beyond it draws nothing, which is what the scripts themselves use
    * (65000/65001) to disable fog.
    */
-  fog: FogState = { near: 65000, far: 65001, rgb: [0, 0, 0] };
+  /**
+   * The scene light block, as 11 channels -- the same numbering the tween
+   * handlers use. Keeping the raw channels (rather than separate fog and
+   * light structs) is what lets one stepper animate all of them, which is
+   * how the game does it.
+   *
+   *   0 fog near   1 fog far   2,3,4 fog RGB (0-255)   5 = 2,3,4 together
+   *   6,7,8 light RGB (0..1)   9 = 6,7,8 together      10 ambient
+   */
+  channels: number[] = defaultChannels();
+  tweens: (ChannelTween | null)[] = new Array(CHANNEL_COUNT).fill(null);
   /** True once the script has actually set a fog channel. */
   fogSet = false;
   /**
@@ -194,9 +239,35 @@ export class Walker {
    * immediately). Fed to `SetLightingDefaultSingle`'s single directional
    * light in the game.
    */
-  light = { rgb: [1, 1, 1] as [number, number, number], ambient: 0.5,
-            pitchDeg: 0, yawDeg: 0 };
+  lightDir = { pitchDeg: 0, yawDeg: 0 };
   lightSet = false;
+
+  /** Fog, derived from channels 0-4. */
+  get fog(): FogState {
+    const c = this.channels;
+    return {
+      near: c[CH_FOG_NEAR],
+      far: c[CH_FOG_FAR],
+      rgb: [c[CH_FOG_R], c[CH_FOG_R + 1], c[CH_FOG_R + 2]],
+    };
+  }
+
+  /** The directional light, derived from channels 6-8 and 10 plus 0x18. */
+  get light(): { rgb: [number, number, number]; ambient: number;
+                 pitchDeg: number; yawDeg: number } {
+    const c = this.channels;
+    return {
+      rgb: [c[CH_LIGHT_R], c[CH_LIGHT_R + 1], c[CH_LIGHT_R + 2]],
+      ambient: c[CH_AMBIENT],
+      pitchDeg: this.lightDir.pitchDeg,
+      yawDeg: this.lightDir.yawDeg,
+    };
+  }
+
+  /** True while any channel is still animating. */
+  get tweening(): boolean {
+    return this.tweens.some((t) => t !== null);
+  }
   /** A `cam_play` with `flags & 2` stashes its range for a later 0x21. */
   stashedCam: { slot: number; start: number; end: number } | null = null;
   /**
@@ -270,13 +341,16 @@ export class Walker {
     this.fixedEyeY = 0;
     this.groundY = null;
     this.forcePathAdvance = false;
+    this.backdropPreset = -1;
+    this.backdropMode = 0;
     this.branchChoice = 0;
     this.parked = false;
     this.stashedCam = null;
     this.branchPreview = null;
-    this.fog = { near: 65000, far: 65001, rgb: [0, 0, 0] };
+    this.channels = defaultChannels();
+    this.tweens = new Array(CHANNEL_COUNT).fill(null);
     this.fogSet = false;
-    this.light = { rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 0, yawDeg: 0 };
+    this.lightDir = { pitchDeg: 0, yawDeg: 0 };
     this.lightSet = false;
     this.checkpointBlock = this.script.entry_block;
     this.flags.clear();
@@ -360,6 +434,9 @@ export class Walker {
       this.cam.frame += used;
       if (this.cam.frame >= this.cam.endFrame) this.cam.done = true;
     }
+
+    // Light and fog animate on the same 60 Hz clock as everything else.
+    this.stepTweens(dt * fps);
 
     if (this.options.simulateCombat) {
       for (const s of this.spawns) {
@@ -481,16 +558,22 @@ export class Walker {
       case 0x18: // set_light0_direction -- block 0 is the one that renders
       case 0x17: // slerp_light0_direction: taken as an immediate set
         if (op.pitch_deg !== undefined) {
-          this.light = {
-            ...this.light,
+          this.lightDir = {
             pitchDeg: op.pitch_deg,
-            yawDeg: op.yaw_deg ?? this.light.yawDeg,
+            yawDeg: op.yaw_deg ?? this.lightDir.yawDeg,
           };
           this.lightSet = true;
         }
         return op.op === 0x17 ? "slerp target taken immediately" : undefined;
       case 0x19: // set_light1_direction -- block 1 never reaches the device
         return undefined;
+      case 0x1b: // set_backdrop_preset
+        this.backdropPreset = op.value ?? -1;
+        return `dome preset ${this.backdropPreset}`;
+      case 0x1c: // set_backdrop_mode: 0 off, 2 frozen, else animating
+        this.backdropMode = op.value ?? 0;
+        return this.backdropMode === 0 ? "dome off"
+          : this.backdropMode === 2 ? "dome frozen" : undefined;
       case 0x20:  // light0_set / tweens -- block 0 is the one the renderer
       case 0x21:  // is pushed every frame, so it is the one that shows.
       case 0x23:
@@ -553,49 +636,87 @@ export class Walker {
   }
 
   /**
-   * A fog/light channel write on block 0.
+   * A fog / scene-light channel write on block 0.
    *
-   * `set` (0x20) is immediate. The two tween forms (0x21 by rate, 0x23 over a
-   * duration) animate toward the value; the walker jumps straight to the
-   * target and says so, because the tween block's `{enabled, from, to, rate}`
-   * layout has been read but the per-frame stepping has not.
+   * `0x20` sets immediately. `0x21` and `0x23` start a tween, and the game
+   * *animates* those over frames -- a hard swap is visibly wrong, most
+   * obviously on fog, which stage 2 alone ramps 247 times. Both opcodes end
+   * up as `{to, per-frame rate}`, so one stepper serves both:
+   *
+   *   0x21 tween_rate  rate comes straight from the operand
+   *   0x23 tween_time  the handler pre-divides, rate = |to - from| / frames
+   *
+   * Channel 5 is "all three fog components at once" and 9 the same for the
+   * light colour, which is why they fan out to three channels here.
    */
   private applyLightChannel(op: OpJson): string | undefined {
     const ch = op.channel;
-    if (ch === undefined) return undefined;
-    const tween = op.op !== 0x20;
-    const set = (f: Partial<FogState>) => {
-      this.fog = { ...this.fog, ...f };
-      this.fogSet = true;
-    };
-    if (ch === 0 && op.value !== undefined) set({ near: op.value });
-    else if (ch === 1 && op.value !== undefined) set({ far: op.value });
-    else if (ch === 5 && op.components?.length === 3) {
-      set({ rgb: [op.components[0], op.components[1], op.components[2]] });
-    } else if (ch === 2 || ch === 3 || ch === 4) {
-      if (op.value === undefined && !op.components) return undefined;
-      const v = op.value ?? op.components?.[0] ?? 0;
-      const rgb: [number, number, number] = [...this.fog.rgb];
-      rgb[ch - 2] = v;
-      set({ rgb });
-    } else if (ch >= 6 && ch <= 8 && op.value !== undefined) {
-      const rgb: [number, number, number] = [...this.light.rgb];
-      rgb[ch - 6] = op.value;
-      this.light = { ...this.light, rgb };
-      this.lightSet = true;
-    } else if (ch === 9 && op.components?.length === 3) {
-      this.light = {
-        ...this.light,
-        rgb: [op.components[0], op.components[1], op.components[2]],
-      };
-      this.lightSet = true;
-    } else if (ch === 10 && op.value !== undefined) {
-      this.light = { ...this.light, ambient: op.value };
-      this.lightSet = true;
-    } else {
-      return undefined;
+    if (ch === undefined || ch < 0 || ch > 10) return undefined;
+
+    const targets: number[] =
+      ch === 5 ? [CH_FOG_R, CH_FOG_R + 1, CH_FOG_R + 2]
+      : ch === 9 ? [CH_LIGHT_R, CH_LIGHT_R + 1, CH_LIGHT_R + 2]
+      : [ch];
+
+    // Channel 5/9 with an explicit per-component triple (the `set` form)
+    // carries `components`; otherwise one value covers every target.
+    const values: (number | null)[] =
+      op.components && op.components.length === 3 && ch === 5
+        ? op.components
+        : targets.map(() => (op.value ?? null));
+
+    let touched = false;
+    for (let i = 0; i < targets.length; i++) {
+      const c = targets[i];
+      const to = values[i];
+      if (to === null || to === undefined || !Number.isFinite(to)) continue;
+      touched = true;
+
+      if (op.tween === "rate" && op.rate) {
+        this.tweens[c] = { to, rate: Math.abs(op.rate) };
+      } else if (op.tween === "time" && op.frames) {
+        const rate = Math.abs(to - this.channels[c]) / op.frames;
+        // The handler falls through to an immediate set when frames is 0.
+        this.tweens[c] = rate > 0 ? { to, rate } : null;
+        if (rate <= 0) this.channels[c] = to;
+      } else {
+        this.tweens[c] = null;
+        this.channels[c] = to;
+      }
     }
-    return tween ? `${op.channel_name} -> target (tween not stepped)` : undefined;
+    if (!touched) return undefined;
+
+    if (ch <= 5) this.fogSet = true;
+    else this.lightSet = true;
+
+    if (op.tween === "time" && op.frames) {
+      return `${op.channel_name} -> ${op.value} over ${op.frames} frames`;
+    }
+    if (op.tween === "rate") return `${op.channel_name} -> ${op.value}`;
+    return undefined;
+  }
+
+  /**
+   * Advance every running channel tween by `frames`.
+   *
+   * Steps toward the target and stops exactly on it, which is what clearing
+   * the block's `enabled` word amounts to.
+   */
+  private stepTweens(frames: number): void {
+    if (frames <= 0) return;
+    for (let c = 0; c < CHANNEL_COUNT; c++) {
+      const t = this.tweens[c];
+      if (!t) continue;
+      const cur = this.channels[c];
+      const delta = t.to - cur;
+      const step = t.rate * frames;
+      if (Math.abs(delta) <= step) {
+        this.channels[c] = t.to;
+        this.tweens[c] = null;
+      } else {
+        this.channels[c] = cur + Math.sign(delta) * step;
+      }
+    }
   }
 
   private applyQueueEvent(op: OpJson): string | undefined {

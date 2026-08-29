@@ -580,18 +580,44 @@ class Program:
         vals = ins.raw[1:]
         if not vals:
             return out
-        # The "all three at once" channels take three INLINE integers -- the
-        # fog and light colour components. Every other channel takes ONE
-        # operand, and it is a *relocated pointer* to a float constant living
-        # in the same file. Those float pools are 1,888 bytes of what the
-        # coverage analysis lists as unattributed residue; dereferencing them
-        # here is what turns them into values.
+
+        # The tween block is `{enabled, from, to, rate}` per channel, and the
+        # two handlers fill it differently:
+        #
+        #   0x21 tween_rate  [op][ch][to][rate]    rate is a per-frame step
+        #   0x23 tween_time  [op][ch][to][frames]  rate = |to - from| / frames,
+        #                                          pre-divided by the handler
+        #   0x20 set         [op][ch][value]       immediate
+        #
+        # Which operands are pointers to float constants and which are inline
+        # integers depends on the channel, and the handlers are explicit about
+        # it: the fog *colour* channels (2, 3, 4 and the 5 that sets all three)
+        # read their target inline and convert int -> float, everything else
+        # dereferences. `frames` is always inline.
+        inline_target = sub in (2, 3, 4, 5)
+
+        def target(word: int):
+            return float(word) if inline_target else self._deref_f32(word)
+
         if sub in (5, 9):
-            out["components"] = list(vals)
+            if ins.opcode == 0x20:
+                out["components"] = list(vals)
+                return out
+            # One target applied to all three components.
+            t = target(vals[0])
+            out["components"] = [t, t, t] if t is not None else None
+            out["value"] = t
         else:
-            out["value"] = self._deref_f32(vals[0])
+            out["value"] = target(vals[0])
             if out["value"] is None:
                 out["raw_value"] = f"0x{vals[0]:08X}"
+
+        if ins.opcode == 0x21 and len(vals) >= 2:
+            out["tween"] = "rate"
+            out["rate"] = self._deref_f32(vals[1])
+        elif ins.opcode == 0x23 and len(vals) >= 2:
+            out["tween"] = "time"
+            out["frames"] = vals[1]
         return out
 
     def _deref_f32(self, word: int) -> float | None:

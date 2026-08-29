@@ -38,6 +38,7 @@ import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary } from "./ui"
 import { Bgm } from "./bgm";
 import { SceneFog, type FogMode } from "./fog";
 import { SceneLighting, type LightingMode } from "./lighting";
+import { Backdrop } from "./backdrop";
 
 const TICK = 1 / 60;
 
@@ -73,6 +74,7 @@ class Player {
   private readonly bgm = new Bgm();
   private readonly sceneFog: SceneFog;
   private readonly lighting: SceneLighting;
+  private readonly backdrop = new Backdrop();
 
   private state: PlayerState = readState();
   private playing = false;
@@ -101,6 +103,7 @@ class Player {
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
     this.sceneFog = new SceneFog(this.scene);
     this.lighting = new SceneLighting(this.scene);
+    this.scene.add(this.backdrop.group);
     this.scene.add(this.spawns.group);
 
     this.wireUi();
@@ -172,6 +175,9 @@ class Player {
     this.stage = await StageScene.load(bundle.geometryUrl, bundle.script);
     // Honour the per-mesh fog bit and compile the radial-fog variant.
     this.sceneFog.prepare(this.stage.root);
+    // Adopt the dome models before lighting, so its material swap sees the
+    // clones the backdrop made rather than the shared originals.
+    this.backdrop.attach(this.stage.root, bundle.script.backdrop);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
 
@@ -284,6 +290,9 @@ class Player {
     });
     $<HTMLInputElement>("#show-aim").addEventListener("change", (e) => {
       this.rails?.setAimRailsVisible((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#show-sky").addEventListener("change", (e) => {
+      this.backdrop.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-spawns").addEventListener("change", (e) => {
       this.spawns.setVisible((e.target as HTMLInputElement).checked);
@@ -724,9 +733,13 @@ class Player {
 
     if (this.walker) {
       this.spawns.update(this.walker.spawns);
+      // Both animate: the script ramps fog and light over frames rather than
+      // switching them. `update`/`set` no-op when nothing actually moved.
       const f = this.walker.fog;
       this.sceneFog.update(f.near, f.far, f.rgb, this.walker.fogSet);
-      if (this.walker.lightSet) this.lighting.set(this.walker.light);
+      this.lighting.set(this.walker.light);
+      this.backdrop.update(this.walker.backdropPreset, this.walker.backdropMode,
+                           this.camera.position, this.state.freeze ? 0 : dt * 60);
     }
     this.renderer.render(this.scene, this.camera);
   };
@@ -778,6 +791,7 @@ class Player {
       ["bgm", w.bgmTrack === null ? "—" : `track ${w.bgmTrack}`],
       ["fog", this.sceneFog.describe],
       ["light", this.lighting.describe],
+      ["sky", this.backdrop.describe],
       ["last se", w.lastSound === null ? "—"
         : `0x${w.lastSound.toString(16).toUpperCase()}`],
       ["eye", fmtVec(this.camera.position)],

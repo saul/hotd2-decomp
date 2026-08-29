@@ -104,6 +104,32 @@ def sound_json(tables) -> dict:
     }
 
 
+def backdrop_json(tables, prog) -> dict:
+    """The backdrop dome presets, plus the ones this scene's script selects.
+
+    The dome models need no special export: every preset a stage uses is
+    already pulled in, because the script loads its asset slot with opcode
+    0x50 and `Stage.geometry()` includes those. The client finds them by the
+    `hod2_slot` extras the glTF nodes already carry.
+    """
+    used: dict[int, int] = {}
+    for b in prog.live_blocks():
+        for st in b.steps:
+            for op in st.ops:
+                if op.opcode == 0x1B:
+                    v = op.detail.get("value")
+                    if isinstance(v, int):
+                        used[v] = used.get(v, 0) + 1
+    return {
+        "presets": tables.backdrop_presets(),
+        "used": sorted(used),
+        "note": "evt 0x1B selects a preset, 0x1C the mode (0 off, 2 frozen, "
+                "else animating). Drawn at (camera.x, camera.y + dy, "
+                "camera.z), spun about Y by spin_bams per frame, scaled "
+                "(1.2, 1.2, -1.2) -- the negative Z turns it inside out.",
+    }
+
+
 def build_stage(stage, out_root: Path, *, glb: bool = True,
                 write_textures: bool = True, unlit: bool = True,
                 cam_step: float = 2.0, progress=None) -> dict:
@@ -143,6 +169,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["cam_slots_used"] = prog.cam_slots_used()
     script_json["bgm"] = bgm_json(stage.tables, stage.stage, stage.game_mode)
     script_json["sound"] = sound_json(stage.tables)
+    script_json["backdrop"] = backdrop_json(stage.tables, prog)
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))

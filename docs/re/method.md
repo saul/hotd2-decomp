@@ -94,6 +94,22 @@ crash" is not a metric.
 
 `tools/verify_*.py` are the runnable form of this. Add to them.
 
+### Corollary: appearance has no such metric
+
+Coverage and decode-error counts collapse when a *parsing* interpretation is
+wrong. Nothing equivalent exists for a change that alters which pixels get
+sampled. A UV change that flattened the texture off a whole wall moved mean
+luminance by 0.0001 (0.3194 → 0.3193) and passed every numeric check in the
+repo.
+
+**So: any change affecting appearance gets a before/after render through a game
+camera, looked at, before it is committed as the default.**
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_camview.py \
+    -- extract/stage2/stage2.gltf cp_st2_50_cam 90
+```
+
 ---
 
 ## Rule 4: the session log is the deliverable

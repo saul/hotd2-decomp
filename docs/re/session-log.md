@@ -1707,3 +1707,85 @@ the index. **Do the arithmetic, do not eyeball the shifts.**
    `parameter_control` bits for list/strip.
 2. Environment mapping, the last unticked Phase 5 line.
 3. Re-measure the Session 9 stretched-face tail now that clamp+flip is right.
+
+### Addendum 8 — the vertex path; a fix written, tested and rejected
+
+Went after the 16-bit UV question (Phase 3, question 12) through the render
+path, as planned. Did not solve it, but ruled out most of the search space and
+found — then discarded — a plausible-looking change to the exporter.
+
+#### The vertex submission format
+
+`WalkMeshChainAndDraw` submits with
+
+```c
+DrawPrimitive(D3DPT_TRIANGLESTRIP, 0x112, verts, count, 0);
+DrawPrimitive(D3DPT_TRIANGLELIST,  0x112, verts, count, 0);
+```
+
+FVF `0x112` = `XYZ | NORMAL | TEX1`: 8 dwords, UV at dwords 6–7. Exactly what
+`_read_vertex()` already assumes, and the only format reaching the device.
+
+**So there is no 16-bit UV path at draw time.** The walker's other vertex
+stride — 2 dwords for a back-reference, 14 inline — sits behind
+`global_flag & 0x10`, and **no model in the game sets that bit** (0 of 9,112).
+Dead code.
+
+That leaves a load-time conversion. `FUN_00419270` runs over every model after
+load and does `*strip_ctrl ^= 1` — it toggles bit 0 of each strip control word,
+which is what an expand-in-place would look like with the toggle as a "done"
+marker. That is where to look next, not the renderer.
+
+#### The fold: found, implemented, measured, rejected
+
+The walker has a CPU-side UV fixup for mirrored axes:
+
+```c
+frac = u - trunc(u);
+u    = (frac >= 0 ? 1.0 : -1.0) - frac;
+```
+
+It is **not** equivalent to hardware mirroring — that is a period-2 triangle
+wave, so 4.7 maps to 0.7, while this always gives `1 - frac` and maps it to
+0.3. They agree only for odd positive tile indices. It looked like a real
+divergence worth reproducing: 2,328 stage meshes, 107,275 vertices.
+
+I implemented it and made it the default. Then checked it.
+
+**It is visibly wrong.** Rendering stage 2 through `cp_st2_50_cam` strips the
+stonework off the canal wall — a triangle straddling a tile boundary has both
+ends folded to the same coordinate. Collapsed-UV drops rose 6,036 → 6,899.
+
+Re-reading the guard explains it: the fold only runs when
+`(DAT_007DE6B0 & 2) == 0`. When that capability bit *is* set the game plain-copies
+and lets the address mode do the work. **It is a fallback for devices without
+`D3DTADDRESS_MIRROR`**, not the normal path. Exporting to a target that mirrors
+correctly must not apply it.
+
+Now `--fold-mirror-uv`, off by default, kept and documented because it is a
+real reachable path and reproducing one machine's output may matter later.
+
+#### The lesson, and it is a new one
+
+Mean luminance was **0.3194 raw vs 0.3193 folded**. Every numeric check I had
+would have passed this change. The corpus statistics were fine, the Blender
+import check was fine, the triangle count moved in a direction I had a story
+for. Only looking at the two images side by side showed the wall had gone flat.
+
+`method.md` Rule 3 says to pick a metric that collapses when the interpretation
+is wrong. For *geometry and parsing* that works — byte coverage, decode errors.
+**For appearance there is no such metric, and I should stop pretending
+otherwise.** Added as a corollary: a change that alters what pixels are
+sampled gets a before/after render through a game camera, compared visually,
+before it is committed as default.
+
+Also worth stating plainly: I had already written the change in as the default
+and moved on to documenting it. The check happened only because the
+collapsed-UV count moved and I chased it. That is luck, not process.
+
+#### Next
+
+1. `FUN_00419270` and its caller — the load-time strip fixup, best remaining
+   lead on 16-bit UVs.
+2. Environment mapping, the last unticked Phase 5 line.
+3. The mode-1 region tables at `0x00576A8C`.

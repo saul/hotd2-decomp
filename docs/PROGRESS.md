@@ -178,9 +178,12 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     frees what it no longer needs, `0x28` preloads. See
     [`formats/pipeline.md`](formats/pipeline.md).
 11. Is the twiddle Morton convention correct, or transposed? (needs visual check)
-12. **What is the 16-bit UV vertex layout?** `parameter_control` bit 0 selects
-    it, 128 stage meshes use it, and neither `hod2lib` nor the reference addon
-    decodes it. Read the branch out of `Hod2.exe`. (Phase 3)
+12. **What is the 16-bit UV vertex layout?** Narrowed. The renderer has no
+    16-bit path — it always submits FVF `0x112` (two `f32` UVs), and the
+    alternate vertex stride it does have is behind a model flag no model sets.
+    So it is either a load-time conversion (`FUN_00419270` toggles bit 0 of
+    every strip control word) or bit 0 does not mean what the PVR2 docs say.
+    See [`formats/nl1.md`](formats/nl1.md). (Phase 3)
 13. Why does the game not display collapsed-UV triangles? Hardware rejection of
     zero-UV-area polygons, or hidden by the camera rail? (Phase 5/6)
 14. Are the reported stretched faces among the 128 16-bit-UV meshes, or is the

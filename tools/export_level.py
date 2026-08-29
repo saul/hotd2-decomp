@@ -203,6 +203,10 @@ def main() -> int:
                     help="skip cam/ camera and object paths")
     ap.add_argument("--cam-step", type=float, default=2.0,
                     help="frames between baked camera keys (default 2, i.e. 30 Hz)")
+    ap.add_argument("--fold-mirror-uv", action="store_true",
+                    help="apply the CPU UV fold the game uses on devices "
+                         "without D3DTADDRESS_MIRROR. Off by default because "
+                         "it destroys texturing on targets that mirror properly")
     ap.add_argument("--unlit", action="store_true",
                     help="mark materials KHR_materials_unlit. The game bakes "
                          "all lighting into its textures and ships no lights, "
@@ -253,7 +257,8 @@ def main() -> int:
                                  uv_check=args.uv_check,
                                  keep_collapsed_uv=args.keep_collapsed_uv,
                                  cam_files=cam_files, cam_step=args.cam_step,
-                                 unlit=args.unlit, model_regions=model_regions)
+                                 unlit=args.unlit, model_regions=model_regions,
+                                 fold_mirror_uv=args.fold_mirror_uv)
         if regions:
             import json
             slots = get_tables(game).asset_slots()
@@ -279,6 +284,9 @@ def main() -> int:
         if info['dropped_collapsed_uv']:
             print(f"  dropped {info['dropped_collapsed_uv']:,} collapsed-UV "
                   f"triangles ({100 * info['dropped_collapsed_uv'] / max(tri, 1):.1f}%)")
+        if info['folded_mirror_uv']:
+            print(f"  folded {info['folded_mirror_uv']:,} out-of-range UVs on "
+                  f"mirrored axes")
         if info['paths']:
             print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
                   f"cameras + rails ({', '.join(c.name for c in cam_files)})")
@@ -296,7 +304,7 @@ def main() -> int:
                              write_textures=not args.no_textures,
                              uv_check=args.uv_check,
                              cam_files=cam_files, cam_step=args.cam_step,
-                             unlit=args.unlit)
+                             unlit=args.unlit, fold_mirror_uv=args.fold_mirror_uv)
     tri = sum(m.triangle_count for m in models)
     vert = sum(m.vertex_count for m in models)
     bank_note = f"  bank: {len(bank.offsets)} textures" if bank else ""

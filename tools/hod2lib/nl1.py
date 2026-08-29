@@ -17,7 +17,7 @@ deliberately fixes four defects present there:
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 __all__ = ["Model", "Mesh", "Strip", "Vertex", "parse", "NL1Error"]
 
@@ -463,3 +463,63 @@ def parse_container(c) -> list[Model]:
         except NL1Error:
             pass
     return out
+
+
+def apply_mirror_uv_fold(mesh: "Mesh") -> int:
+    """Reproduce the CPU-side UV fold in ``WalkMeshChainAndDraw``.
+
+    Before submitting a strip whose control word has bit 5 set, the game walks
+    its vertices and folds any UV outside [-1, 1] on an axis whose D3D texture
+    address mode came out as ``D3DTADDRESS_MIRROR``::
+
+        frac = u - trunc(u)
+        u    = (frac >= 0 ? 1.0 : -1.0) - frac
+
+    This is **not** the same as letting the hardware mirror an out-of-range
+    coordinate. Hardware mirroring is a period-2 triangle wave, so 4.7 maps to
+    0.7; this fold always produces ``1 - frac``, so 4.7 maps to 0.3. The two
+    agree only when the truncated tile index is odd and the value is positive.
+
+    **Do not apply this by default.** The game guards it with
+    ``(DAT_007DE6B0 & 2) == 0``: when that capability bit *is* set it takes a
+    plain copy and lets the hardware address mode do the work. Folding is
+    therefore a fallback for devices that cannot do ``D3DTADDRESS_MIRROR``, not
+    the normal path.
+
+    Applying it unconditionally is visibly wrong: rendering stage 2 through
+    ``cp_st2_50_cam`` with the fold on strips the stonework off the canal wall,
+    because a triangle straddling a tile boundary has both of its ends folded
+    to the same coordinate. It also raises the collapsed-UV triangle count from
+    6,036 to 6,899. Exporters should emit raw UVs with ``MIRRORED_REPEAT`` and
+    let the target's sampler mirror properly.
+
+    Kept because it is a real, reachable code path worth documenting, and
+    because reproducing a specific machine's output may matter later.
+
+    Returns the number of coordinates changed.
+    """
+    # The address table is indexed (clamp << 1) | flip and reads
+    # WRAP, MIRROR, CLAMP, MIRROR -- so an axis is mirrored whenever its flip
+    # bit is set, regardless of clamp.
+    def mirrored(clamp_bit: int, flip_bit: int) -> bool:
+        return bool(flip_bit)
+
+    cu, cv = (mesh.clamp_uv >> 1) & 1, mesh.clamp_uv & 1
+    fu, fv = (mesh.flip_uv >> 1) & 1, mesh.flip_uv & 1
+    mu, mv = mirrored(cu, fu), mirrored(cv, fv)
+    if not (mu or mv):
+        return 0
+
+    changed = 0
+    for i, v in enumerate(mesh.vertices):
+        u, w = v.uv
+        if mu and abs(u) > 1.0:
+            frac = u - int(u)
+            u = (1.0 if frac >= 0.0 else -1.0) - frac
+            changed += 1
+        if mv and abs(w) > 1.0:
+            frac = w - int(w)
+            w = (1.0 if frac >= 0.0 else -1.0) - frac
+            changed += 1
+        mesh.vertices[i] = replace(v, uv=(u, w))
+    return changed

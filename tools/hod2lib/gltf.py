@@ -396,7 +396,8 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
 
 def export_level(name, parts, out_dir, collision=None, write_textures=True,
                  uv_check=False, keep_collapsed_uv=False, cam_files=None,
-                 cam_step=2.0, unlit=False, model_regions=None):
+                 cam_step=2.0, unlit=False, model_regions=None,
+                 fold_mirror_uv=False):
     """Write one or more parts to <out_dir>/<name>.gltf plus .bin and textures/.
 
     ``parts`` is a list of (part_name, models, bank). A stage is split across
@@ -572,7 +573,16 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
 
     # ---- geometry ------------------------------------------------------
     dropped_tris = 0
+    folded_uvs = 0
     for part_name, models, bank in parts:
+        for model in models:
+            for mesh in model.meshes:
+                # Off by default: the fold is the game's fallback for devices
+                # without D3DTADDRESS_MIRROR, and applying it to a target that
+                # mirrors correctly destroys texturing. See
+                # nl1.apply_mirror_uv_fold.
+                if fold_mirror_uv:
+                    folded_uvs += nl1.apply_mirror_uv_fold(mesh)
         if not keep_collapsed_uv:
             for model in models:
                 for mesh in model.meshes:
@@ -692,6 +702,7 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
     return {
         "gltf": str(out_dir / f"{name}.gltf"),
         "dropped_collapsed_uv": dropped_tris,
+        "folded_mirror_uv": folded_uvs,
         "nodes": len(nodes),
         "meshes": len(meshes),
         "materials": len(materials),

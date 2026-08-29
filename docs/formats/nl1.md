@@ -314,8 +314,37 @@ the vertex stride and the UV values are wrong. The reference Blender addon has
 the same gap — it never honours the flag either — so it cannot be used as an
 oracle here.
 
-The correct layout should be read out of `Hod2.exe` rather than guessed: the
-renderer must branch on this bit near the vertex submission path.
+### What the render path rules out
+
+`WalkMeshChainAndDraw` (`0x004A7EF0`) is the mesh-chain walker, and it submits
+vertices with:
+
+```c
+DrawPrimitive(D3DPT_TRIANGLESTRIP /*5*/, 0x112, verts, count, 0);   // strips
+DrawPrimitive(D3DPT_TRIANGLELIST  /*4*/, 0x112, verts, count, 0);   // lists
+```
+
+FVF `0x112` is `D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1` — 8 dwords, UV at
+dwords 6–7. That is exactly the 32-byte layout `_read_vertex()` already
+assumes, and it is the *only* format handed to D3D.
+
+So there is **no 16-bit UV path at draw time**. Whatever bit 0 does, the
+vertices reaching the device are always two `f32` UVs. Two possibilities
+remain, in order of likelihood:
+
+1. **A load-time conversion.** `FUN_00419270`, run on every model after load,
+   walks the mesh chain and does `*strip_ctrl ^= 1` — it *toggles bit 0* of
+   each strip control word. A load-time expand-in-place of packed UVs would fit
+   that exactly, with the toggle marking "already converted".
+2. **Bit 0 does not mean 16-bit UV here.** The bit assignment in the table
+   above came from PowerVR2 documentation, not from this binary.
+
+The walker's second vertex path — 2 dwords for a back-reference, 14 inline —
+is guarded by `global_flag & 0x10`, and **no model in the game sets that bit**
+(0 of 9,112). It is dead code and not the answer.
+
+Next step is `FUN_00419270` and its caller in the asset load path, not the
+renderer.
 
 ## UV anisotropy is authored, not an export fault
 

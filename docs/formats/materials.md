@@ -113,6 +113,26 @@ modulate does, so the base colour maps across directly.
 Under **decal** (3 meshes) the texture replaces the colour outright, so there
 the factor must stay white.
 
+## Debugging exported materials
+
+Two tools exist for tracing a visual problem back to source data:
+
+```sh
+# whole level with every texture replaced by a UV checkerboard
+python3 tools/export_level.py --game-dir "..." --stage 2 --uv-check
+
+# everything known about one Blender material
+python3 tools/inspect_material.py --game-dir "..." --material st2_07_tex12_lambert
+```
+
+`tools/blender_whatsthis.py` pastes into Blender's Scripting tab and reports the
+selected face's UV bounds, world-space area and per-axis texel density, writing
+to `~/hod2_whatsthis.txt`.
+
+**Interpreting `--uv-check`:** if a face is still wrong with a checkerboard on
+it, the texture pipeline is not at fault — look at UVs, geometry or material
+state instead. That single distinction eliminates most of the search space.
+
 ## glTF mapping
 
 | PowerVR2 | glTF |

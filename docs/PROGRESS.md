@@ -55,12 +55,17 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] 18,027 models parse out of the decompressed containers
 - [ ] `src/lz.c` reference implementation (deferred to Phase 7)
 
-## Phase 3 — `hod2lib` core ✅ complete
+## Phase 3 — `hod2lib` core 🔶 one known gap
 
 - [x] `container.py` — offset table + transparent decompression
 - [x] `nl1.py` — independent NL1 parser
 - [x] Validated: 9,112 models, 1.49M verts, 1.32M tris, zero structural problems
 - [x] ~~Packed s8 normal byte order~~ — **moot**: no vertex-colour meshes exist
+- [x] Cross-validated against the reference `NLimporter.parse_nl()` — UVs match
+      byte for byte
+- [x] Collapsed-UV triangles (5.1%) identified and dropped at export
+- [ ] **16-bit UVs (`parameter_control` bit 0) are not decoded** — 128 stage
+      meshes affected; the reference addon has the same gap
 - [ ] Golden-file regression suite in `tests/`
 
 ## Phase 4 — Textures ✅ complete
@@ -129,3 +134,10 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     already positioned in world space; `evt/` and `cam/` almost certainly drive
     load order. Key to reconstructing a playable level. (Phase 6)
 11. Is the twiddle Morton convention correct, or transposed? (needs visual check)
+12. **What is the 16-bit UV vertex layout?** `parameter_control` bit 0 selects
+    it, 128 stage meshes use it, and neither `hod2lib` nor the reference addon
+    decodes it. Read the branch out of `Hod2.exe`. (Phase 3)
+13. Why does the game not display collapsed-UV triangles? Hardware rejection of
+    zero-UV-area polygons, or hidden by the camera rail? (Phase 5/6)
+14. Are the reported stretched faces among the 128 16-bit-UV meshes, or is the
+    anisotropy genuinely authored? (Phase 3)

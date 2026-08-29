@@ -296,6 +296,53 @@ Culling 0 or 1 means double-sided; 2 or 3 means single-sided.
 UVs are stored with `v` inverted relative to the usual convention — flip on
 import.
 
+## 16-bit UVs are not decoded ⚠️ known bug
+
+`parameter_control` bit 0 selects **16-bit UV** instead of two `f32`. Across
+stage1+2 geometry:
+
+| | meshes |
+|---|---|
+| 32-bit UV | 5,957 |
+| **16-bit UV** | **128** (2.1%) |
+
+Worst files: `st2_02` (13), `st1_03b` (12), `st2_07` (11), `st1_1` (10),
+`st2_03` (9).
+
+`_read_vertex()` always reads two 32-bit floats, so for those 128 meshes both
+the vertex stride and the UV values are wrong. The reference Blender addon has
+the same gap — it never honours the flag either — so it cannot be used as an
+oracle here.
+
+The correct layout should be read out of `Hod2.exe` rather than guessed: the
+renderer must branch on this bit near the vertex submission path.
+
+## UV anisotropy is authored, not an export fault
+
+Worth recording because it was investigated at length. For every triangle,
+world-units-per-texel along u versus along v, via the texel→world Jacobian:
+
+```
+geometric mean 0.937   median 0.955   n = 72,209
+```
+
+Centred on 1.0 and symmetric — 24.2% below 0.55, 15.6% above 2.2. A global
+aspect error would skew this to one side; it does not.
+
+Competing hypotheses, by median anisotropy (lower is better):
+
+| hypothesis | median |
+|---|---|
+| as-is, exe texture dimensions | **1.81** |
+| VQ half dimensions | 1.81 |
+| square 1:1 | 2.15 |
+| u/v swapped | 2.50 |
+
+The parser's UV values were also verified **identical** to the reference
+`NLimporter.parse_nl()` on `st2_07` model 12. So heavily anisotropic faces are
+present in the source art; the game presumably hides them behind its fixed
+camera rail.
+
 ## Collapsed-UV triangles
 
 **5.1% of triangles have real 3D area but near-zero UV area** — all three

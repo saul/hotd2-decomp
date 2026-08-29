@@ -834,3 +834,128 @@ binary rather than inferring, but dropping them is safe regardless — they carr
 no displayable texture information.
 
 Also still open: 60 meshes with a clamped axis and a UV span beyond one tile.
+
+---
+
+## Session 10 — stretched faces: what was proved, and what is still open
+
+**Reported:** faces look very stretched. Persists after the collapsed-UV fix,
+after a clean re-import, and — critically — **under `--uv-check` as well**, which
+rules out texture content entirely.
+
+**Not solved.** Two real bugs were found and fixed along the way, but neither
+fully explains the report. This entry records the evidence so the next session
+does not re-tread it.
+
+### Ground truth: my UVs match the reference implementation exactly
+
+The cross-check planned back in Phase 3 and repeatedly deferred. Extracted
+`st2_07` model 12 to a standalone NL1 file and ran the reference
+`NLimporter.parse_nl()` inside Blender:
+
+```
+reference : (2.0000, -1.0000) (0.0000, -1.0000) (1.8434, -0.0000) (0.1566, -0.0000)
+hod2lib   : (2.000,  -1.000)  (0.000,  -1.000)  (1.843,  -0.000)  (0.157,  -0.000)
+```
+
+Identical. **UV parsing is correct**, and the reference addon would render the
+same apparent stretching. To re-run:
+
+```sh
+mkdir -p /tmp/nlpkg && ln -sfn ~/blender-NaomiLib /tmp/nlpkg/naomilib
+# then inside Blender: sys.path.insert(0,"/tmp/nlpkg"); from naomilib.NLimporter import parse_nl
+```
+
+### No systematic u/v bias
+
+For every triangle, world-units-per-texel along u versus along v, via the
+texel→world Jacobian:
+
+```
+geometric mean 0.937      median 0.955      n = 72,209
+
+  <0.55     24.2%
+  0.55-0.9  22.9%
+  ~1.0      14.6%
+  1.1-1.8   16.6%
+  ~2.0       6.1%
+  >2.2      15.6%
+```
+
+Centred on 1.0 and **symmetric in both directions**. A global aspect error — a
+factor of 2 somewhere, u/v transposed, VQ half-size mishandled — would skew this
+distribution hard to one side. It does not. Competing hypotheses scored worse on
+median anisotropy: as-is 1.81, VQ-half-dims 1.81, square-1:1 2.15, u/v-swapped
+2.50.
+
+So the anisotropy is **in the source data**, spread symmetrically, i.e. it looks
+authored.
+
+### Ruled out this session
+
+| Hypothesis | Disproved by |
+|---|---|
+| UV parsing wrong | matches reference `parse_nl()` byte for byte |
+| u/v transposed | median anisotropy worsens 1.81 → 2.50 |
+| VQ half-size affects UVs | identical result to as-is |
+| systematic aspect factor | geometric mean 0.937, symmetric spread |
+| duplicate geometry in one export | 14/14, 3/3, 3/3 models distinct by vertex hash |
+| texture content streaking | `--uv-check` is stretched too |
+| vertex stride wrong | 100% of sampled normals unit length |
+
+### Two real bugs found and fixed
+
+1. **Collapsed-UV triangles** (previous entry) — 5.1% of triangles have real 3D
+   area but ~zero UV area, concentrated 4.5x at strip boundaries. Now dropped.
+2. **Base colour discarded** — 32% of meshes carry baked lighting below 0.95.
+   Now applied under `modulate`.
+
+Neither accounts for widespread stretching.
+
+### The live lead: 16-bit UVs are never decoded
+
+`parameter_control` bit 0 selects **16-bit UV** instead of two `f32`. Across
+stage1+2:
+
+```
+32-bit UV : 5,957 meshes
+16-bit UV :   128 meshes   (2.1%)
+```
+
+Worst files: `st2_02` (13), `st1_03b` (12), `st2_07` (11), `st1_1` (10),
+`st2_03` (9).
+
+**Neither `hod2lib` nor the reference addon honours this flag** — both always
+read two 32-bit floats. For those 128 meshes the vertex stride and the UV values
+are therefore both wrong, which would produce exactly this kind of garbage
+mapping.
+
+Caveat, stated plainly: **2.1% of meshes cannot explain stretching seen across
+many surfaces.** This is worth fixing because it is definitely wrong, but it
+should not be presented as the answer until it is measured. `st2_07` — the file
+the reported face lives in — is third worst, so check whether the reported mesh
+is one of the 128 before assuming.
+
+### Next steps
+
+1. Determine the 16-bit UV vertex layout from `Hod2.exe` rather than guessing.
+   The renderer must branch on PCW bit 0 somewhere near the vertex submission
+   path. Fix `_read_vertex` and re-measure anisotropy on the affected meshes.
+2. Check whether the specific reported faces are among those 128 meshes.
+3. If they are not, the remaining explanation is that the anisotropy is genuine
+   and the game hides it behind its fixed camera rail — which would make `cam/`
+   and `evt/` (Phase 6) the way to confirm, by reconstructing the intended view.
+
+### Process note
+
+This took far too long. The pattern of failure was consistent: corpus-wide
+statistics kept coming back healthy because the artefacts sit in a small tail
+that does not move a median, and the two per-face reports supplied happened to
+sample clean faces. Progress only came from dumping raw records for specific bad
+triangles, and from finally running the reference implementation instead of
+reasoning about whether it would agree.
+
+Worse, I asserted a wrong root cause (duplicate imports z-fighting) from a
+`.002` suffix in a screenshot. It was a plausible candidate; it was not proof,
+and I stated it as though it were. **Offer candidates as candidates until a
+measurement settles them.**

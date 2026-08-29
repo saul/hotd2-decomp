@@ -101,6 +101,21 @@ Notes:
   viewport **End** clip distance in the N-panel > View.
 - UVs deliberately run outside 0..1; the game relies on texture REPEAT.
 
+### Diagnosing a visual problem
+
+```sh
+# replace all textures with a UV checkerboard -- if it still looks wrong,
+# the problem is NOT the textures
+python3 tools/export_level.py --game-dir "..." --stage 2 --uv-check
+
+# everything known about one material, from its Blender name
+python3 tools/inspect_material.py --game-dir "..." --material st2_07_tex12_lambert
+```
+
+Paste `tools/blender_whatsthis.py` into Blender's Scripting tab with a face
+selected (Tab for Edit Mode, 3 for face select) to dump that face's UVs, area
+and texel density to `~/hod2_whatsthis.txt`.
+
 To verify an export without opening the GUI:
 
 ```sh

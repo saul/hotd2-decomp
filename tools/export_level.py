@@ -71,6 +71,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path,
                     default=Path(__file__).resolve().parent.parent / "extract")
     ap.add_argument("--no-textures", action="store_true")
+    ap.add_argument("--keep-collapsed-uv", action="store_true",
+                    help="keep triangles whose UV area is zero (they render as "
+                         "hard directional streaks; dropped by default)")
     ap.add_argument("--uv-check", action="store_true",
                     help="replace every texture with a UV checkerboard, so "
                          "stretched or rotated faces are visually obvious")
@@ -106,11 +109,16 @@ def main() -> int:
         out_dir = args.out / name
         info = gltf.export_level(name, parts, out_dir,
                                  write_textures=not args.no_textures,
-                                 uv_check=args.uv_check)
+                                 uv_check=args.uv_check,
+                                 keep_collapsed_uv=args.keep_collapsed_uv)
         vert = sum(m.vertex_count for _, ms, _ in parts for m in ms)
         tri = sum(m.triangle_count for _, ms, _ in parts for m in ms)
-        print(f"\n{name}: {len(parts)} segments, {vert:,} verts, {tri:,} tris, "
+        print(f"\n{name}: {len(parts)} segments, {vert:,} verts, "
+              f"{tri - info['dropped_collapsed_uv']:,} tris, "
               f"{info['materials']} materials, {info['textures']} textures")
+        if info['dropped_collapsed_uv']:
+            print(f"  dropped {info['dropped_collapsed_uv']:,} collapsed-UV "
+                  f"triangles ({100 * info['dropped_collapsed_uv'] / max(tri, 1):.1f}%)")
         print(f"  -> {info['gltf']}")
         return 0
 

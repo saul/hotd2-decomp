@@ -23,7 +23,7 @@ import json
 import struct
 from pathlib import Path
 
-from . import png, texbank
+from . import nl1, png, texbank
 
 __all__ = ["export_level"]
 
@@ -137,7 +137,7 @@ def _checker(size=128, cells=8):
 
 
 def export_level(name, parts, out_dir, collision=None, write_textures=True,
-                 uv_check=False):
+                 uv_check=False, keep_collapsed_uv=False):
     """Write one or more parts to <out_dir>/<name>.gltf plus .bin and textures/.
 
     ``parts`` is a list of (part_name, models, bank). A stage is split across
@@ -303,7 +303,12 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
         return mat_cache[key]
 
     # ---- geometry ------------------------------------------------------
+    dropped_tris = 0
     for part_name, models, bank in parts:
+        if not keep_collapsed_uv:
+            for model in models:
+                for mesh in model.meshes:
+                    dropped_tris += nl1.drop_collapsed_uv_triangles(mesh)
         child_nodes: list[int] = []
         for mi, model in enumerate(models):
             prims = []
@@ -390,6 +395,7 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
 
     return {
         "gltf": str(out_dir / f"{name}.gltf"),
+        "dropped_collapsed_uv": dropped_tris,
         "nodes": len(nodes),
         "meshes": len(meshes),
         "materials": len(materials),

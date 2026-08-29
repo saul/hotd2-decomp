@@ -296,6 +296,27 @@ Culling 0 or 1 means double-sided; 2 or 3 means single-sided.
 UVs are stored with `v` inverted relative to the usual convention — flip on
 import.
 
+## Collapsed-UV triangles
+
+**5.1% of triangles have real 3D area but near-zero UV area** — all three
+vertices collinear in UV space. One row or column of texels then stretches
+across the whole face, giving a hard directional streak, or a solid-looking
+face when those texels are uniform.
+
+They cluster at strip boundaries:
+
+| position in strip | share collapsed |
+|---|---|
+| first triangle | 4.9% |
+| middle | 1.1% |
+| last | 4.8% |
+
+Only 8.6% involve a back-reference, so this is not a vertex-reuse fault — it
+looks like stitching artifacts at strip joins.
+
+`drop_collapsed_uv_triangles()` removes them; the exporter does so by default.
+Why the hardware does not display them is unresolved.
+
 ## Skeleton
 
 There is none. NL1 has no bones, no skin weights and no node hierarchy.

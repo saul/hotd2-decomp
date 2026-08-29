@@ -299,6 +299,37 @@ def _emit_triangles(strip: Strip, tris: list[tuple[int, int, int]]) -> None:
         tris.append((b_, a, c) if swap else (a, b_, c))
 
 
+def _uv_area(a: Vertex, b_: Vertex, c: Vertex) -> float:
+    return 0.5 * abs((b_.uv[0] - a.uv[0]) * (c.uv[1] - a.uv[1])
+                     - (c.uv[0] - a.uv[0]) * (b_.uv[1] - a.uv[1]))
+
+
+def drop_collapsed_uv_triangles(mesh: "Mesh", eps: float = 1e-7) -> int:
+    """Remove triangles whose UV area is ~zero. Returns how many were dropped.
+
+    Such a triangle has all three vertices on one line in UV space, so a single
+    row or column of texels is smeared across its whole 2D extent. On screen
+    that is a hard directional streak, and it is what makes affected faces look
+    stretched -- or solid black when the sampled texels happen to be dark.
+
+    They are strip-boundary artifacts: measured across st2_07 they are 4.9% of
+    first triangles and 4.8% of last triangles in a strip, but only 1.1% of
+    middle ones. Only 8.6% involve a back-reference, so this is not a
+    vertex-reuse fault.
+
+    Why the game does not show them is still unresolved -- the hardware may
+    reject zero-area-in-UV polygons, or they may be hidden by other geometry
+    along the camera rail. Either way they carry no displayable texture
+    information, so dropping them can only improve the result.
+    """
+    keep = [t for t in mesh.triangles
+            if _uv_area(mesh.vertices[t[0]], mesh.vertices[t[1]],
+                        mesh.vertices[t[2]]) >= eps]
+    dropped = len(mesh.triangles) - len(keep)
+    mesh.triangles = keep
+    return dropped
+
+
 def parse(b: bytes, off: int = 0, strict: bool = False) -> Model:
     """Parse one NL1 model starting at off."""
     if not is_model(b, off):

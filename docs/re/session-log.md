@@ -754,3 +754,83 @@ One open item remains: **60 meshes have a clamped axis with a UV span beyond
 one tile**, which smears by construction. The game clamps them too, so this may
 be authentic rather than an export fault; resolving it needs the PowerVR clamp
 semantics from the binary rather than inference.
+
+---
+
+## Session 9 — collapsed-UV triangles: the stretched/black faces
+
+**Reported:** faces looking very stretched and very dark, persisting across a
+clean re-import.
+
+**Found and fixed.** 5.1% of triangles have real 3D area but **near-zero UV
+area** — all three vertices collinear in UV space, so one row or column of
+texels is smeared across the face's whole 2D extent.
+
+### Evidence
+
+```
+mesh 0x12818  3D area 1079.1   uv v = 0.0000 on all three vertices, u 10.0 -> 0.0
+mesh 0x19b68  3D area   39.3   uv u = 4.9186 on all three vertices, v varies
+```
+
+One UV axis pinned to a constant. That produces a hard directional streak, and a
+solid-looking face when the sampled texels are uniform — which is exactly why
+the affected faces rendered identically under `--uv-check` (solid grey rather
+than a checkerboard).
+
+Distribution across stage1+2: **8,500 of 166,440** triangles (5.1%), worst in
+`st1_03` (1,250) and `st2_07` (1,197).
+
+Position within the strip is the diagnostic:
+
+```
+first triangle   bad 4.9%
+middle           bad 1.1%
+last             bad 4.8%
+```
+
+**~4.5x concentration at strip boundaries** — the signature of stitching
+artifacts. Only 8.6% involve a back-reference, so vertex reuse is not the cause.
+
+Now dropped at export (`--keep-collapsed-uv` to retain). stage1 loses 3,615
+triangles (5.5%), stage2 loses 5,452 (5.9%).
+
+### Wrong turns, recorded so they are not repeated
+
+This took far longer than it should have. Hypotheses pursued and disproved:
+
+| Hypothesis | Disproved by |
+|---|---|
+| non-square texture decode | coherence 0.294 vs 0.270/0.315 for square |
+| env-mapped UVs | zero env-mapped strips in stage geometry |
+| clamp/flip axis swap | `clamp==1` has V fitting one tile 83% vs U 32% |
+| back-reference resolution | 26,170 back-refs, zero failures |
+| VQ sizing in that bank | offsets consistent at 6144 per 128x128 entry |
+| base colour over-darkening | the face's mesh has base 1.00 |
+| texture decoding dark | near-black textures are 36/972, spread across all formats |
+| **duplicate imports z-fighting** | **user re-imported clean; identical result** |
+
+The duplicate-import call was the worst of these: I read `.002`/`.003` object
+suffixes in a screenshot as proof and asserted it confidently instead of
+treating it as one candidate among several. The user had already been deleting
+old imports. **A suffix is evidence of a name collision, not proof of its
+cause.**
+
+What actually solved it was giving up on aggregate statistics and dumping the
+raw vertex data of specific bad triangles. The corpus-level metrics all looked
+healthy — median anisotropy 1.76, 0.35% degenerate 3D triangles, uniform texel
+density on the sampled faces — because a 5% tail does not move a median. The
+per-face reports the user sent were also clean, because the faces they happened
+to sample were not the collapsed ones.
+
+**Lesson: when aggregate health contradicts a consistent visual report, stop
+computing aggregates and print the raw records of the outliers.**
+
+### Still unresolved
+
+Why the game does not display these. Either the hardware rejects polygons with
+zero UV area, or they are hidden along the camera rail. Worth settling from the
+binary rather than inferring, but dropping them is safe regardless — they carry
+no displayable texture information.
+
+Also still open: 60 meshes with a clamped axis and a UV span beyond one tile.

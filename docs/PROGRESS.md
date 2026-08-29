@@ -18,24 +18,28 @@ Phase detail lives in [`PLAN.md`](PLAN.md).
 - [x] Format specs stubbed with everything confirmed so far
 - [x] Build provenance recorded in `re/provenance.md` (stray `pol/files.txt` build listing)
 
-## Phase 1 — Ghidra environment 🔶 in progress
+## Phase 1 — Ghidra environment ✅ complete
 
-Environment is up and reproducible; analysis proper has not started.
-See [`re/session-log.md`](re/session-log.md) for state and next actions.
+Environment reproducible, library noise identified and tagged, code coverage
+raised from 52% to 70%. See [`re/session-log.md`](re/session-log.md).
 
 - [x] Import `Hod2.exe`, base `0x400000` — auto-analysis succeeded
 - [x] Reproducible headless driver (`ghidra/run.sh`) + Java script template
 - [x] Baseline inventory exported: **1891 functions**, 73 non-default names,
       417259 of 798720 `.text` bytes covered (**~52%**)
 - [x] Ghidra MCP registered in opencode config (needs restart to take effect)
-- [ ] Apply MSVC 6.0 FLIRT / Function ID signatures ← **highest leverage next**
-- [ ] Identify and excise the `d3du` / D3DX utility library
-- [ ] Force disassembly over the ~380 KB of uncovered `.text`
-- [ ] Import DX7 SDK headers as a GDT
-- [ ] Seed anchors from `re/addresses.md` (as a committed `SeedAnchors.java`)
-- [ ] Find the `pol/` loader via the dir-template table at `0x57A008`
-- [ ] Identify the import at `0x4C40A4` called before every `CreateFileA`
-- [ ] Map the `.data` tables adjacent to the filename tables
+- [x] MSVC 6.0 Function ID signatures — already applied by auto-analysis via
+      `vsOlder_x86.fidbf`; ~35 CRT functions named (`__ftol` alone has 308 xrefs)
+- [x] Identify and tag the `d3du`/D3DX utility library — **30 functions named
+      exactly** from their diagnostic strings, all tagged `D3DX_LIB`
+- [x] Recover missed functions in uncovered `.text` — **1891 → 2278 functions**,
+      coverage **52% → 69.9%**
+- [x] Find the `pol/` loader (`LoadCommonPolTexBanks` at `0x00418200`)
+- [x] Identify the import at `0x4C40A4` — `OutputDebugStringA`
+- [ ] Import DX7 SDK headers as a GDT (deferred; needed for Phase 5 materials)
+- [ ] Map the `.data` tables adjacent to the filename tables (Phase 4 needs these)
+- [ ] Remaining 30% of `.text` — real code, but Ghidra cannot form function
+      bodies for it. See the session log; likely truncated-flow damage.
 
 ## Phase 2 — Compression codec ✅ SOLVED
 

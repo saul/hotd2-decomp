@@ -97,6 +97,26 @@ Notably absent: `IID_IDirect3DDevice7` and `IID_IDirectDrawSurface7`. The device
 is created via `IDirect3D7::CreateDevice` with one of the three device GUIDs
 above rather than by `QueryInterface`, which is the normal `d3du` pattern.
 
+## Library vs game code
+
+`.text` splits cleanly. Everything from roughly `0x004ACF50` upward is library
+code that can be ignored; game code lives below it.
+
+| Range | Contents | How identified |
+|---|---|---|
+| `0x00401000` – `~0x004AC000` | **game code** | everything else |
+| `~0x004ACF50` – `0x004B74xx` | statically linked MSVC 6.0 CRT | Ghidra Function ID (`vsOlder_x86`) |
+| `0x004B74FC` – `0x004BC063` | DX7 SDK `d3du`/D3DX utility library | diagnostic strings, see below |
+| `0x004C31xx` – `0x004C3FFF` | CRT tail, exception unwind helpers | Function ID + PE exception analyser |
+
+The `d3du`/D3DX block is stock Microsoft sample code. Its diagnostic strings
+carry literal `Class::Method - message` text, so `TagLibraryFunctions.java`
+names the owning functions exactly rather than guessing, and tags each with
+**`D3DX_LIB`**. 30 functions were recovered this way, listed in
+`ghidra/out/d3dx_lib.txt`.
+
+Filter `D3DX_LIB` out of any function listing before looking for game logic.
+
 ## Identified functions
 
 | Address | Name | Notes |

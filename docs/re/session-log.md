@@ -300,3 +300,138 @@ docs/re/addresses.md         identified functions; dead-end list retained
 docs/re/anomalies.md         blobs resolved
 docs/PROGRESS.md, docs/PLAN.md, tests/README.md
 ```
+
+---
+
+## Session 4 — Phase 1 closed: signatures, library tagging, code recovery
+
+**Outcome:** Phase 1 complete. Library noise identified and tagged, function
+coverage raised from 52% to 70%.
+
+### MSVC 6.0 signatures — already done, no action needed
+
+Ghidra ships `vsOlder_x86.fidbf`, the Function ID database covering VS6, and the
+Function ID analyser is **enabled by default**. It had already run during the
+Session 2 auto-analysis.
+
+Result is thin but real: ~35 genuine CRT functions (`__ftol` with 308 xrefs,
+`_malloc`, `_memset`, `_strlen`, `_strcmp`, `__CxxThrowException@8`, the
+`__local_unwind2` family), plus a large set of `Catch@`/`Unwind@` labels from the
+PE exception-handling analyser.
+
+Do not expect more from FID here. MSVC 6.0 coverage in `vsOlder_x86` is limited,
+and there is no PDB. The remaining CRT is identifiable by *position* instead —
+see the library map below.
+
+### The d3du/D3DX library — 30 functions named exactly
+
+The much bigger win. The DX7 SDK utility library is stock Microsoft sample code
+compiled in, and its diagnostic strings carry literal `Class::Method - message`
+text. That means the owning function can be named **exactly**, not guessed.
+
+`ghidra/scripts/TagLibraryFunctions.java` does this: match the diagnostic
+pattern over defined strings, walk xrefs to the containing function, vote on the
+most frequent candidate name, rename, and tag `D3DX_LIB`.
+
+70 strings matched, 30 functions named — `D3DXInitialize`, `d3dxCreateContext`,
+`CD3duContext__Resize`, `CD3duContext___CreateZBuffer`, `_ChooseZBuffer`,
+`CD3duGlobals__FindBestMatchForHWLevel` and so on. Full list in
+`ghidra/out/d3dx_lib.txt`. Idempotent — re-running renames nothing already named.
+
+### Library vs game code
+
+The single most useful structural fact learned this session: **`.text` splits
+cleanly.**
+
+| Range | Contents |
+|---|---|
+| `0x00401000` – `~0x004AC000` | **game code** |
+| `~0x004ACF50` – `0x004B74xx` | statically linked MSVC 6.0 CRT |
+| `0x004B74FC` – `0x004BC063` | DX7 SDK `d3du`/D3DX library (tagged `D3DX_LIB`) |
+| `0x004C31xx` – `0x004C3FFF` | CRT tail, exception unwind helpers |
+
+Everything from roughly `0x004ACF50` upward is library. Filter `D3DX_LIB` and
+ignore that range when hunting game logic. This is consistent with
+`LzDecompress` at `0x0040ACD0` and every asset loader sitting well below the
+boundary.
+
+### Code recovery — 52% to 70%
+
+Auto-analysis left ~380 KB of `.text` outside any function.
+`ghidra/scripts/RecoverCodeGaps.java` recovers it, deliberately conservatively.
+
+Inspecting a gap showed what was actually wrong: the bytes at `0x004023C6` are
+**already disassembled** — a `CALL`/`JMP` stub pair followed by a state machine
+on a global. Real game code that Ghidra never wrapped in a function. The gap
+report flags this as `has_orphaned_instructions`.
+
+The fix exploits an MSVC convention visible in that dump: **runs of `NOP`/`int3`
+padding delimit functions.** So a gap qualifies if, after skipping padding, it
+either starts with a known MSVC prologue *or* is already disassembled and sat
+behind padding.
+
+Run repeatedly — each pass exposes new gaps as bodies form:
+
+```sh
+HOTD2_APPLY=1 ./ghidra/run.sh script RecoverCodeGaps.java   # repeat until 0
+./ghidra/run.sh script ExportInventory.java
+```
+
+| Metric | Session 2 | Now |
+|---|---|---|
+| functions | 1891 | **2278** |
+| bytes in functions | 417,259 | **557,972** |
+| `.text` coverage | 52.2% | **69.9%** |
+| non-default names | 73 | 105 |
+
+### The remaining 30%
+
+240,789 bytes still uncovered across 1859 ranges. Composition: ~26 KB already
+disassembled but orphaned, ~27 KB defined data, ~12 KB padding — so roughly
+175 KB is undisassembled bytes.
+
+Recovery converges asymptotically (one function per pass at the end), so the
+easy wins are taken. The residue is most likely **flow-truncation damage**: a
+callee wrongly marked non-returning cuts its caller short, leaving the tail
+orphaned. Ghidra's `clear_flow_and_repair` addresses exactly this, but its own
+documentation warns it can clear healthy code and is not idempotent. **Do not
+run it broadly** — apply per-function, verify, and only where a specific
+function is visibly truncated.
+
+This is not blocking. Every function needed so far — the loaders, the
+decompressor — is fully formed.
+
+### Gotchas
+
+- **Script execution over MCP is disabled** (`GHIDRA_MCP_ALLOW_SCRIPTS` unset),
+  so scripts must be run headless via `./ghidra/run.sh`.
+- **Headless cannot open a project the GUI holds.** Save via MCP, `pkill -f
+  ghidra.GhidraRun`, run the scripts, then relaunch. Batch headless work rather
+  than alternating.
+- `createFunction` returning null is normal in damaged regions; the script
+  reports the first ten failures rather than swallowing them.
+
+### Next actions
+
+Phase 1 and Phase 2 are both closed. The critical path is now Phase 3/4.
+
+1. **Phase 3: `nl1.py`.** The container parser already yields 18,027 models.
+   Parsing them needs no new RE and is the shortest path to visible geometry.
+   Spec is written; mind the four known reference-implementation bugs.
+2. **Phase 4: textures.** Now unblocked for compressed banks too, which should
+   shrink the unreferenced-slot gap problem substantially.
+3. **Map the `.data` filename/count tables** (`0x4D1410`, `0x4D1B00`,
+   `0x4D1BC8`, and neighbours). Phase 4 needs the per-bank texture counts.
+4. **Import DX7 SDK headers as a GDT** before Phase 5 materials work, so COM
+   vtable dispatch resolves.
+5. Optional: resolve how the game picks raw vs compressed — the other two
+   `0x57A008` consumers at `0x0041887D` and `0x00418C80`.
+
+### Files added/changed
+
+```
+ghidra/scripts/TagLibraryFunctions.java   name + tag the d3du/D3DX library  (new)
+ghidra/scripts/RecoverCodeGaps.java       recover missed functions          (new)
+docs/re/addresses.md                      library vs game code map
+docs/PROGRESS.md                          Phase 1 closed
+```

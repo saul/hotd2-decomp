@@ -170,6 +170,7 @@ immediately. 76 distinct opcodes are actually used.
 | `0x40`–`0x47` | `wait_*` | the blocking opcodes; they set the yield flag and do not advance `pc` until their condition holds |
 | `0x49`/`0x4A`/`0x4B` | `variant_*` | pick one of several operand lists by a global — difficulty or player count |
 | `0x4D` | `checkpoint` | resets view state and records progress |
+| `0x50`–`0x57` | `asset_*` | **asset load/unload.** Each pushes a job onto the 64-entry ring at `0x007DA220`; `0x50`/`0x51` take an asset *slot* id, `0x52`–`0x57` a pol/tex *file* index. See [`pipeline.md`](pipeline.md) |
 | `0x4F` | `end_block` | hands control to the route table |
 
 The `0x20`–`0x27` family targets one of two **view structs** (`DAT_009A3540`,
@@ -296,12 +297,15 @@ block in the corpus does this, which is exactly why it is easy to miss.
 
 ## Open questions
 
-1. What do the `queue_event` selectors mean? The two-level table at
+1. What loads a stage's geometry segments? The event script references only 2
+   of stage 2's 18 `st2_*` files, so it is not the main path. See
+   [`pipeline.md`](pipeline.md).
+2. What do the `queue_event` selectors mean? The two-level table at
    `0x005776EC` names 100+ scripted actions; decoding it would give the
    cutscene vocabulary.
-2. Which opcode selects a `cam/` path slot? See `cam.md`.
-3. Semantics of the ~40 opcodes currently named only by the global they write.
-4. `+0x14` / `+0x1C` of the spawn descriptor.
-5. What are the two "no file" scenes (7 and 8)? Scene 7 runs an inline stub
+3. Which opcode selects a `cam/` path slot? See `cam.md`.
+4. Semantics of the ~30 opcodes still named only by the global they write.
+5. `+0x14` / `+0x1C` of the spawn descriptor.
+6. What are the two "no file" scenes (7 and 8)? Scene 7 runs an inline stub
    inside `comevtbl` and is used as the fallback when a scene's route table
    ends (`FUN_0045F000` calls `EvtGetEntry(7, 0, 0)`).

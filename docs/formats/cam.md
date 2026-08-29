@@ -172,10 +172,13 @@ space in one go. `tools/blender_camview.py` automates this.
    **Field of view is the obvious candidate** — it is the one per-path scalar a
    camera needs that no other channel supplies. Unverified, so the exporter
    uses a neutral 60° and flags it.
-2. Which `evt/` opcode selects a path slot? Opcodes `0x18`/`0x19` write the two
-   fields at view+0x18/+0x1C that `FUN_004041E0` is called with
-   (`FUN_00401F40` passes `DAT_009A3558`/`DAT_009A355C`), so those are the
-   prime suspects, but the mapping from operand to slot id is not yet traced.
+2. Which `evt/` opcode selects a path slot? **Still open.** Opcodes
+   `0x18`/`0x19` were the earlier suspect and are **wrong**: they write
+   view+0x18/+0x1C, which `FUN_00401F40` hands to `FUN_0040E0B0`, and that
+   passes them to the matrix rotation helpers `FUN_004A99F0`/`FUN_004A9AE0` —
+   they are camera *angles*, not path ids. `FUN_004041E0`'s slot argument comes
+   from its 15 callers; none has been traced yet. See
+   [`pipeline.md`](pipeline.md).
 3. Are the six corrupt `op_st1` entries dead data, or does the game read
    garbage for those slots? Their slot ids (304, 306, 309, 320, 322, 324) are
    ordinary members of the file's contiguous run and nothing in the EXE marks

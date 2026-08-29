@@ -1241,3 +1241,87 @@ Field of view. The exported cameras use a neutral 60° and carry
 `extras.hod2_yfov_is_a_guess`. The unread eighth curve index in every `cp_`
 descriptor is the obvious candidate — it is the one per-path scalar a camera
 needs that no channel supplies — but that is a hypothesis, not a finding.
+
+### Addendum 2 — the asset pipeline, and how three guesses died
+
+Asked whether an event stipulates which parts of a stage load and unload, and
+how `cam`/`evt`/`pol`/stages relate during play. New doc:
+[`formats/pipeline.md`](../formats/pipeline.md), and
+`tools/dump_stage_script.py` renders a stage's script as a readable timeline.
+
+**Answer: partly, and less than expected.** Opcodes `0x50`–`0x57` are the asset
+load/unload vocabulary and the whole job queue is now mapped — but the stage-2
+script references only **2 of its 18** `st2_*` geometry files. What brings in
+the rest is still unknown.
+
+#### What was established
+
+Loading runs through a 64-entry job ring at `0x007DA220`,
+`{kind, _, arg, state}`, dispatched by `FUN_0041D5A0` through a handler table
+at `0x00588C20`. `FUN_00418820` loads **one model** out of a pol file by reading
+its offset table, seeking, and reading just that entry — genuine slot-level
+streaming.
+
+The id plumbing is four EXE tables (file→name, file→count, file→slot list,
+slot→file). Validated: for all **326** live pol files the EXE's entry count
+equals the container's model count. Indices ≥328 are a disabled duplicate name
+range with count 0 — which incidentally explains the `pol_`-prefixed duplicates
+from Phase 0: they are switched-off table entries.
+
+`dump_stage_script.py` resolves every operand to a filename. Stage 2: 405 slot
+ops and 794 file ops, **zero unresolved**.
+
+#### Three wrong answers, in order
+
+1. **`0x0F`/`0x12` "set_pending_ids" as segment streaming.** They write an id
+   list that `FUN_00456650` reads while comparing an object's distance to
+   camera against three radii — it is **LOD model selection**, not loading.
+
+2. **`0x52`/`0x53` as voice calls.** I had named them `voice_a`/`voice_b` in the
+   opcode table last session purely from their handler addresses sitting near
+   other sound code. They are `asset_load_polfile` / `asset_free_polfile`. The
+   giveaway was `FUN_0041D5A0` indexing a handler table that contains the
+   **unload** routine `FUN_00418BA0`. Naming a function from its neighbours is
+   not evidence.
+
+3. **A "per-stage segment list" at `0x004E7C90`.** This one is the instructive
+   failure. The table decoded as
+   `st1_1b, st1_01, st1_01b … st2_01, st2_02, st2_03`, in perfect stage order.
+   It looked conclusive. It is wrong: the values are **asset slot ids**, not pol
+   file indices, and the groups are contiguous slot runs covering one model file
+   each — group 0 is every model in `boss6.bin`.
+
+   **pol file indices are assigned alphabetically, so *any* run of consecutive
+   integers decodes through that table into a plausible sequence of related
+   filenames.** The "evidence" was an artefact of the lookup table's ordering,
+   not of the data. Caught only by decoding the same run through the *other* id
+   space and seeing it make equally good sense there.
+
+   This is the same failure as the `evt` "span problem" and the `0x0Cxxxxxx`
+   filter: **a decoding that cannot fail is not a decoding.** Both id spaces had
+   to be tried before either could be believed.
+
+#### Also corrected
+
+`cam.md` claimed opcodes `0x18`/`0x19` were the likely camera-path selectors.
+They are not — they write view+0x18/+0x1C, which `FUN_0040E0B0` feeds to the
+matrix rotation helpers. They are camera *angles*. How a `cam/` path slot gets
+selected is still untraced; `FUN_004041E0` has 15 callers and none has been
+looked at.
+
+#### Bug fixed on the way
+
+Attributing every uncovered byte to the opcode pointing at it showed the biggest
+run sitting immediately after `st1evtbl.bin`'s root table — the wrong place for
+operand data. A step-table entry that resolves outside the file is an external
+reference into the shared `comevtbl` buffer, not a terminator. Fixing it
+recovered 4 steps, 159 instructions and 9 spawn descriptors. Corpus coverage
+78.8 % → 79.4 %.
+
+#### Next
+
+1. Find what loads the bulk of stage geometry. Untried: the load-until-drained
+   loop in `FUN_00460030`, job kinds 8/9, and a per-scene list behind an
+   untraced pointer.
+2. Trace `FUN_004041E0`'s callers to link `evt` → `cam`.
+3. The `queue_event` action table at `0x005776EC`.

@@ -169,14 +169,17 @@ OPCODES: dict[int, Op] = {
     0x4D: ("checkpoint", "fix", 1),         # FUN_0045EEC0
     0x4E: ("halt", "halt", 0),              # FUN_0045EFF0
     0x4F: ("end_block", "next", 0),         # FUN_0045F000
-    0x50: ("call_1d5d0", "fix", 2),
-    0x51: ("call_1d610", "fix", 2),
-    0x52: ("voice_a", "fix", 2),            # FUN_0045F500 -> FUN_0041D650
-    0x53: ("voice_b", "fix", 2),            # FUN_0045F580 -> FUN_0041D690
-    0x54: ("call_1d6d0", "fix", 2),
-    0x55: ("call_1d710", "fix", 2),
-    0x56: ("call_1d750", "fix", 2),
-    0x57: ("call_1d790", "fix", 2),
+    # 0x50-0x57 are the asset streaming vocabulary. Each pushes a job onto
+    # the 64-entry ring at DAT_007DA220 with a fixed job kind; see
+    # ASSET_JOB_KIND and docs/formats/pipeline.md.
+    0x50: ("asset_load_slot", "fix", 2),    # FUN_0041D5D0, kind 0/1
+    0x51: ("asset_unload_slot", "fix", 2),  # FUN_0041D610, kind 2
+    0x52: ("asset_load_polfile", "fix", 2),  # FUN_0041D650, kind 3
+    0x53: ("asset_free_polfile", "fix", 2),  # FUN_0041D690, kind 4
+    0x54: ("asset_load_texbank", "fix", 2),  # FUN_0041D6D0, kind 6
+    0x55: ("asset_free_texbank", "fix", 2),  # FUN_0041D710, kind 7
+    0x56: ("asset_job_8", "fix", 2),        # FUN_0041D750, kind 8
+    0x57: ("asset_job_9", "fix", 2),        # FUN_0041D790, kind 9
     0x58: ("call_1d970", "fix", 1),
     0x59: ("call_1d9d0", "fix", 1),
     0x5A: ("call_1da70", "fix", 1),
@@ -211,6 +214,19 @@ CHANNELS = {
     9: "float_0x240_0x244_0x248",
     10: "float_0x24c",
 }
+
+#: evt opcode -> job kind pushed onto the asset queue at DAT_007DA220.
+#: The queue is 64 x 16 bytes {u32 kind, _, u32 arg, u32 state}; FUN_0041D5A0
+#: runs one job by calling handler[kind](job) from the table at 0x00588C20.
+ASSET_JOB_KIND = {0x50: (0, 1), 0x51: (2,), 0x52: (3,), 0x53: (4,),
+                  0x54: (6,), 0x55: (7,), 0x56: (8,), 0x57: (9,)}
+
+#: Opcodes whose single operand is an asset slot id (resolvable to a pol file
+#: and entry index through ExeTables.asset_slots()).
+SLOT_OPCODES = (0x50, 0x51)
+
+#: Opcodes whose single operand is a pol/tex file index.
+FILE_OPCODES = (0x52, 0x53, 0x54, 0x55)
 
 TERM = 0xFFFFFFFF
 TERM2 = 0xFFFFFFFE

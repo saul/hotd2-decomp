@@ -224,3 +224,73 @@ class ExeTables:
 
     def scene_block_count(self, scene: int) -> int:
         return len(self.scene_routes(scene))
+
+    # -- asset slots and streaming --------------------------------------
+    #
+    # A pol/ file is a bundle of numbered *asset slots*. The streaming loader
+    # FUN_00418820 loads one slot at a time by seeking into its file, so a
+    # stage's segments are not all resident at once -- the event script pages
+    # them in and out. Four parallel tables map it:
+    #
+    #   0x004D0EF4  ptr  pol file index -> filename
+    #   0x004E803C  u16  pol file index -> number of entries in that file
+    #   0x004E794C  ptr  pol file index -> s16[count], the slot id of each
+    #                    entry, in container order
+    #   0x004E83B4  u16  slot id -> owning pol file index
+    #
+    # Indices >= 328 are a second, disabled copy of the name list with a count
+    # of 0 -- the pol_-prefixed duplicates. They are never loaded.
+
+    POL_NAME_TABLE = 0x004D0EF4
+    POL_ENTRY_COUNT = 0x004E803C
+    POL_SLOT_LIST = 0x004E794C
+    SLOT_TO_POL = 0x004E83B4
+    MAX_POL_FILES = 400
+
+    def _u16(self, va: int) -> int | None:
+        r = self._v2r(va)
+        if r is None or r + 2 > len(self.data):
+            return None
+        return struct.unpack_from("<H", self.data, r)[0]
+
+    def pol_files(self) -> dict[int, tuple[str, int]]:
+        """pol file index -> (filename, entry count). Live entries only."""
+        out: dict[int, tuple[str, int]] = {}
+        for i in range(self.MAX_POL_FILES):
+            ptr = self._u32(self.POL_NAME_TABLE + i * 4)
+            if not ptr:
+                continue
+            name = self._cstr(ptr)
+            if not name or not name.endswith(".bin"):
+                continue
+            cnt = self._u16(self.POL_ENTRY_COUNT + i * 2) or 0
+            if cnt:
+                out[i] = (name, cnt)
+        return out
+
+    def asset_slots(self) -> dict[int, tuple[str, int]]:
+        """asset slot id -> (pol filename, entry index within that file).
+
+        The entry index is the slot's position in the file's slot list, which
+        is also its index in the container's offset table -- so it selects a
+        model directly.
+        """
+        out: dict[int, tuple[str, int]] = {}
+        for fi, (name, cnt) in self.pol_files().items():
+            lst = self._u32(self.POL_SLOT_LIST + fi * 4)
+            if not lst:
+                continue
+            r = self._v2r(lst)
+            if r is None:
+                continue
+            for k in range(cnt):
+                slot = struct.unpack_from("<h", self.data, r + k * 2)[0]
+                out.setdefault(slot, (name, k))
+        return out
+
+    def slot_pol_file(self, slot: int) -> str | None:
+        fi = self._u16(self.SLOT_TO_POL + slot * 2)
+        if fi is None:
+            return None
+        rec = self.pol_files().get(fi)
+        return rec[0] if rec else None

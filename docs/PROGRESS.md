@@ -106,7 +106,11 @@ translation has not been decompiled yet.
 - [x] Stage routing graph recovered (`0x00597890`) — the branching-path mechanism
 - [x] Spawn descriptors: 1,410 recovered; **1216/1216** stage-1/2/4/5/6 spawns
       verified inside their own level geometry
-- [ ] `evt/` semantics — ~40 opcodes named only by the global they write
+- [x] Asset streaming: job queue, handler tables, slot→pol-file map
+      (326/326 entry counts validated), opcodes `0x50`–`0x57` identified
+- [x] `tools/dump_stage_script.py` — event script as a readable timeline
+- [ ] What loads the bulk of a stage's geometry segments (see `pipeline.md`)
+- [ ] `evt/` semantics — ~30 opcodes named only by the global they write
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [ ] `coli/` — record layout + hit-test semantics
 - [ ] `mot/` — rigid transforms vs vertex morphs
@@ -150,10 +154,12 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 8. How does the game decide a file is compressed? `LoadCommonPolTexBanks`
    decompresses unconditionally, yet 192 `pol/` files are raw. (Phase 3)
 9. What are the four 987-byte placeholder files? (low priority)
-10. **When are stage segments streamed in?** Partly answered: block order comes
-    from the per-scene route table at `0x00597890`, and `evt/` opcodes
-    `0x0F`/`0x12` set a pending-id list. The id → `pol/` segment mapping is
-    still open.
+10. **When are stage segments streamed in?** Partly answered — see
+    [`formats/pipeline.md`](formats/pipeline.md). The asset job queue and the
+    slot→file map are solved, and evt opcodes `0x50`–`0x57` are the load/unload
+    vocabulary. But the stage-2 script touches only 2 of its 18 `st2_*` files,
+    so **what loads the rest is still open**. (`0x0F`/`0x12` turned out to be
+    LOD model lists, not streaming.)
 11. Is the twiddle Morton convention correct, or transposed? (needs visual check)
 12. **What is the 16-bit UV vertex layout?** `parameter_control` bit 0 selects
     it, 128 stage meshes use it, and neither `hod2lib` nor the reference addon

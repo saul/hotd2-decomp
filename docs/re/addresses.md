@@ -209,6 +209,38 @@ classic ring-buffer initialisation.
 | `0x00593358` | `{class_id, handler}` pair list, 56 entries, terminated by a negative id |
 | `0x004A6FA0` | object allocator: `alloc(size)`, zero, link, store *handler* at +0x00 |
 
+## Asset streaming — Phase 6
+
+| Address | Role |
+|---|---|
+| `0x0041D5A0` | run asset job `i & 0x3F` — `handler[kind](job)` |
+| `0x0041D5D0` | enqueue **load slot** (evt opcode `0x50`) |
+| `0x0041D610` | enqueue **unload slot** (`0x51`) |
+| `0x0041D650` | enqueue **load pol file** (`0x52`) |
+| `0x0041D690` | enqueue **free pol file** (`0x53`) |
+| `0x0041D6D0` / `0x0041D710` | enqueue tex bank load / free (`0x54`/`0x55`) |
+| `0x0041D750` / `0x0041D790` | enqueue job kinds 8 / 9 (`0x56`/`0x57`) |
+| `0x00418820` | load ONE slot: read offset table, seek, read just that model |
+| `0x00418BA0` | unload one slot: unlink, free, clear state |
+| `0x00418C20` | read a whole pol file into staging |
+| `0x00418D20` | LZ-decompress staging into a fresh buffer |
+| `0x00419020` | release a whole pol file, mark its slots absent |
+| `0x0041CD00` | texture bank teardown |
+| `0x004A6FA0` | object allocator: `alloc(size)`, zero, link, handler at +0x00 |
+
+| Data | Contents |
+|---|---|
+| `0x007DA220` | asset job ring, 64 x 16 bytes `{kind, _, arg, state}` |
+| `0x007D9E1C` | job ring write cursor (`& 0x3F`) |
+| `0x00588C20` | job kind -> handler (8 entries) |
+| `0x0057A29C` | sub-handler table for kinds 0/1 (7 entries) |
+| `0x009A66A0` | asset slot state, 16-byte records |
+| `0x004D0EF4` | pol file index -> filename |
+| `0x004E803C` | pol file index -> entry count |
+| `0x004E794C` | pol file index -> `s16[count]` slot ids, container order |
+| `0x004E83B4` | slot id -> owning pol file index |
+| `0x004E7C90` | 20 pointers to grouped slot-id runs (one model file each) |
+
 ## Camera / object paths (`cam/`) — Phase 6
 
 | Address | Role |

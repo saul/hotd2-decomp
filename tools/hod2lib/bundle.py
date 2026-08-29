@@ -101,6 +101,15 @@ def sound_json(tables) -> dict:
     return {
         "se": {str(k): v for k, v in sorted(tables.se_names().items())},
         "voice": {str(k): v for k, v in sorted(tables.voice_names().items())},
+        # evt 0x2D's message groups. The sprite is an asset id the player has
+        # no 2D pipeline for, but the voice is an ordinary sound id and the
+        # frame count and screen position are exact, so the line can be played
+        # and the caption placed.
+        "messages": {str(m["group"]): m["variants"]
+                     for m in tables.screen_messages()},
+        "screen": {"width": 640, "height": 480,
+                   "note": "message x/y are pixels in the game's 640x480 "
+                           "screen space"},
     }
 
 

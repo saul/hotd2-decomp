@@ -124,6 +124,8 @@ export interface OpJson {
   roll_enabled?: boolean;
   enabled?: boolean;
   ground_y?: number;
+  /** evt `0x2D`: the message group to look up. */
+  message_group?: number;
   value?: number;
   light_block?: number;
   channel?: number;
@@ -177,9 +179,25 @@ export interface BgmJson {
 }
 
 /** The SE and voice name tables. Keys are decimal ids as strings. */
+export interface MessageVariant {
+  variant: number;
+  /** 0 = 1P/player 1, 1 = 1P/player 2, 2 = 2P. */
+  player_cfg: number;
+  sprite: number;
+  frames: number;
+  /** Screen position in the game's 640x480 space. */
+  x: number;
+  y: number;
+  voice: number;
+  voice_file: string | null;
+}
+
 export interface SoundJson {
   se: Record<string, string>;
   voice: Record<string, string>;
+  /** evt 0x2D groups; each holds three variants, one per player config. */
+  messages?: Record<string, (MessageVariant | null)[]>;
+  screen?: { width: number; height: number; note: string };
 }
 
 export interface BackdropPreset {

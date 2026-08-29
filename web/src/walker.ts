@@ -163,6 +163,10 @@ export interface WalkerHost {
   onBranch(choice: BranchChoice | null): void;
   /** Any sound id, dispatched by namespace as `PlaySoundId` does. */
   playSound(id: number): string | undefined;
+  /** evt `0x1F`: the HUD shutter state. */
+  setShutter(state: number): string | undefined;
+  /** evt `0x2D`: show a message group. */
+  showMessage(group: number): string | undefined;
 }
 
 /** Fog off (a range past the 8000 far plane) and a neutral white light. */
@@ -207,6 +211,12 @@ export class Walker {
   /** The backdrop dome: 0x1B picks the preset, 0x1C the mode. */
   backdropPreset = -1;
   backdropMode = 0;
+  /** evt 0x1F: the HUD shutter state, 0..8. */
+  shutterState = 2;
+  /** evt 0x15: the two players' gun spotlights. Gated by 0x14. */
+  gunLights = false;
+  /** evt 0x14: the scene light array, which gates 0x15 and 0x16. */
+  sceneLighting = false;
   /**
    * `branch_choice` (`DAT_009C88A4`). Every writer in the binary is gameplay
    * code, and it is reset to 0 on every block change -- so with no gameplay a
@@ -343,6 +353,9 @@ export class Walker {
     this.forcePathAdvance = false;
     this.backdropPreset = -1;
     this.backdropMode = 0;
+    this.shutterState = 2;
+    this.gunLights = false;
+    this.sceneLighting = false;
     this.branchChoice = 0;
     this.parked = false;
     this.stashedCam = null;
@@ -567,6 +580,22 @@ export class Walker {
         return op.op === 0x17 ? "slerp target taken immediately" : undefined;
       case 0x19: // set_light1_direction -- block 1 never reaches the device
         return undefined;
+      case 0x14: // set_scene_lighting -- gates 0x15 and 0x16
+        this.sceneLighting = !!op.enabled;
+        return undefined;
+      case 0x1f: // set_hud_shutter_state
+        this.shutterState = op.value ?? 0;
+        return quiet ? undefined : this.host.setShutter(this.shutterState);
+      case 0x2d: // show_screen_message
+        return quiet || op.message_group === undefined
+          ? undefined
+          : this.host.showMessage(op.message_group);
+      case 0x15: // enable_entity_spotlights -- the two players' gun lights
+        // Decoded as a raw operand: 0x15's handler only writes a global, so
+        // `script.py` leaves it in `raw` rather than naming a field.
+        this.gunLights = (op.raw?.length
+          ? Number.parseInt(op.raw[0], 16) : (op.value ?? 0)) !== 0;
+        return this.gunLights ? "gun lights on" : "gun lights off";
       case 0x1b: // set_backdrop_preset
         this.backdropPreset = op.value ?? -1;
         return `dome preset ${this.backdropPreset}`;

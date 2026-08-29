@@ -125,6 +125,30 @@ that selects which prop is drawn comes from a pointer that is not the spawn
 descriptor, so there is nothing to place it against yet. The bundle carries
 the reason and the player shows it rather than guessing.
 
+## Which instructions the UI strikes through
+
+The script tree and the event feed **strike through any instruction the player
+does not act on**, and dot-underline the ones it approximates, so it is
+obvious at a glance how much of a stage is really being honoured. The map
+lives in `web/src/opstatus.ts` — in TypeScript rather than the bundle, because
+it describes the *client*, and only the client knows what it has implemented.
+
+Ranked by how often they occur across the six arcade stages, what is still
+struck through:
+
+| Op | Name | Uses | Worth doing? |
+|---|---|---|---|
+| `52`/`53`/`54`/`55`/`56`/`57` | `asset_*` file traffic | 2717 | No — the bundle already holds every model and texture |
+| `31` | `goto_scene_state` | 274 | Only with a scene state machine |
+| `28` | `region_load` | 262 | No — preloads what is already resident |
+| `59`/`58`/`5A` | asset job drains | 188 | No — nothing is ever pending |
+| `1D` | `enable_rain` | 132 | **Yes** — camera-attached particles, the biggest remaining visual |
+| `2C` | `set_skippable_region` | 126 | No — proved dead in this build |
+| `33` | `set_action_drain_mode` | 125 | Only with the action ring |
+| `10`/`11` | collision sets | 113 | Only with collision |
+| `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
+| `49`/`4A`/`4B` | `variant_*` | — | **Worth checking** — a global picks which operand list runs, so some spawns may never appear |
+
 ## Deliberate non-goals
 
 - **It is a script walker, not the event VM.** The blocking opcodes gate on
@@ -176,8 +200,8 @@ missed. Meanings and confidence marks live in
 | `11` | `set_collision_set_ray_only` | collision | shown | collision-set pointers, resolved to coli/ blobs; collision is not simulated |
 | `12` | `set_approach_steps_2p_bias` | spawn | shown | enemy approach pacing; operands decoded as floats |
 | `13` | `set_scene_lighting_override` | light | *tracked* | lighting override; values decoded, not applied to the render |
-| `14` | `set_scene_lighting` | light | *tracked* | lighting override; values decoded, not applied to the render |
-| `15` | `enable_entity_spotlights` | light | *tracked* | lighting override; values decoded, not applied to the render |
+| `14` | `set_scene_lighting` | light | **done** | gates `15` and `16`, as the game does |
+| `15` | `enable_entity_spotlights` | light | **done** | **the two players' gun lights** — not one per enemy; the array is two entries wide |
 | `16` | `set_ambient_light_rgb` | light | *tracked* | lighting override; values decoded, not applied to the render |
 | `17` | `slerp_light0_direction` | light | ~approx~ | the slerp target is taken immediately rather than stepped |
 | `18` | `set_light0_direction` | light | **done** | **drives the directional light** in `+ scene light` mode |
@@ -187,7 +211,7 @@ missed. Meanings and confidence marks live in
 | `1C` | `set_backdrop_mode` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
 | `1D` | `enable_rain` | scenery | shown | rain particles; not drawn |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
-| `1F` | `set_hud_shutter_state` | hud | shown | HUD shutter state; the player draws no HUD |
+| `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**, all 9 states with the 40-frame slide |
 | `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour, light colour and ambient all applied** |
 | `21` | `light0_tween_rate` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `22` | `light0_stop` | light | shown | clears a channel tween |
@@ -201,7 +225,7 @@ missed. Meanings and confidence marks live in
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
 | `2C` | `set_skippable_region` | flow | n/a | proved dead: it never sets the flag, and nothing else does either |
-| `2D` | `show_screen_message` | hud | shown | screen message + voice; the group id is shown, the record table is not read |
+| `2D` | `show_screen_message` | hud | **done** | **plays the voice** and holds a caption for the record's frame count at its screen position; the sprite artwork is not drawn |
 | `2E` | `resume_bgm_if_skipped` | audio | n/a | guarded by the dead skip flag — a no-op in this build |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
 | `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |

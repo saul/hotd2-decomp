@@ -9,6 +9,7 @@
 
 import type { BlockJson, OpJson, ScriptJson } from "./bundle";
 import type { FeedEntry } from "./walker";
+import { STATUS_TITLE, opStatus } from "./opstatus";
 
 const $ = <T extends HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
@@ -118,15 +119,18 @@ export class ScriptTree {
       s.appendChild(lbl);
       for (const op of step.ops) {
         const summary = opSummary(op);
+        const status = opStatus(op.op);
         const row = document.createElement("div");
-        row.className = `op cat-${op.cat}`;
+        row.className = `op cat-${op.cat} st-${status}`;
         row.dataset.b = String(blk.index);
         row.dataset.s = String(step.index);
         row.dataset.o = String(op.i);
         row.dataset.q = `${op.name} ${op.cat} ${summary}`.toLowerCase();
         // The panel is narrow and the operand summary ellipsizes, so the whole
-        // row is also its own tooltip.
-        row.title = `${op.i}  ${op.name}${summary ? "  " + summary : ""}`;
+        // row is also its own tooltip -- and it says whether the player acts
+        // on the instruction at all.
+        row.title = `${op.i}  ${op.name}${summary ? "  " + summary : ""}` +
+          `\n${STATUS_TITLE[status]}`;
         row.innerHTML =
           `<span class="oi">${op.i}</span>` +
           `<span class="nm">${op.name}</span>` +
@@ -200,7 +204,8 @@ export class EventFeed {
 
   push(e: FeedEntry): void {
     const row = document.createElement("div");
-    row.className = `fe cat-${e.op.cat}`;
+    row.className = `fe cat-${e.op.cat} st-${opStatus(e.op.op)}`;
+    row.title = STATUS_TITLE[opStatus(e.op.op)];
     row.dataset.b = String(e.block);
     row.dataset.s = String(e.step);
     row.dataset.o = String(e.opIndex);

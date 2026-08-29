@@ -561,6 +561,10 @@ class ExeTables:
     # `EvtOpBgmEntryPlay5F` -> `BgmStopThenPlay` consumes four operands and
     # uses only the third: `PlaySoundId(0x80000000)` then `PlaySoundId(op2)`.
 
+    MESSAGE_VARIANTS = 0x0058B6B8
+    MESSAGE_RECORDS = 0x00589DA8
+    MESSAGE_RECORD_STRIDE = 0x10
+
     BACKDROP_PRESETS = 0x00579968
     BACKDROP_STRIDE = 0x10
     BACKDROP_COUNT = 12
@@ -629,6 +633,73 @@ class ExeTables:
                 out[sid] = name.decode("ascii")
             except UnicodeDecodeError:
                 continue
+        return out
+
+    def screen_messages(self, max_groups: int = 512) -> list[dict]:
+        """evt opcode 0x2D's message groups.
+
+        `FUN_00435B80` picks a variant by player configuration and then a
+        record::
+
+            variant = s16[0x0058B6B8 + (group * 3 + player_cfg) * 2]
+            if (variant == 0) return;                 /* group unused here */
+            rec     = 0x00589DA8 + variant * 0x10
+            if (rec.voice) PlaySoundId(rec.voice);
+            task = {sprite: variant, frames: rec.frames}
+
+        so a group holds three variants -- 1P/player 1, 1P/player 2, and 2P --
+        and `player_cfg` (`DAT_009C7000`) selects between them. Scenes 10 and
+        11 take a separate branch that always uses variant 0.
+
+        Record, 16 bytes::
+
+            +0x00  u16  sprite
+            +0x02  u16  frames     how long it stays up
+            +0x04  f32  x          screen position
+            +0x08  f32  y
+            +0x0C  u32  voice      a sound id for PlaySoundId, or 0
+
+        Neither table stores a count. The **record** table is bounded by the
+        variant table that follows it -- the same contiguous-tables pattern as
+        the BGM and voice tables -- giving 401 records; a group whose variants
+        all fall outside that range ends the group list. Stopping at the first
+        all-zero group would be wrong: group 0 is unused (0, 0, 0) and group 6
+        is (0, 0, 12), and the shipped scripts request groups up to 229.
+        """
+        vr = self._v2r(self.MESSAGE_VARIANTS)
+        rr = self._v2r(self.MESSAGE_RECORDS)
+        if vr is None or rr is None:
+            return []
+        n_records = ((self.MESSAGE_VARIANTS - self.MESSAGE_RECORDS)
+                     // self.MESSAGE_RECORD_STRIDE)
+        out: list[dict] = []
+        for g in range(max_groups):
+            o = vr + g * 6
+            if o + 6 > len(self.data):
+                break
+            variants = list(struct.unpack_from("<3h", self.data, o))
+            if any(v < 0 or v >= n_records for v in variants):
+                break
+            entry: dict = {"group": g, "variants": []}
+            for cfg, v in enumerate(variants):
+                if v == 0:
+                    entry["variants"].append(None)
+                    continue
+                ro = rr + v * self.MESSAGE_RECORD_STRIDE
+                if v >= n_records or ro + self.MESSAGE_RECORD_STRIDE > len(self.data):
+                    entry["variants"].append(None)
+                    continue
+                sprite, frames = struct.unpack_from("<2H", self.data, ro)
+                x, y = struct.unpack_from("<2f", self.data, ro + 4)
+                voice, = struct.unpack_from("<I", self.data, ro + 12)
+                entry["variants"].append({
+                    "variant": v, "player_cfg": cfg, "sprite": sprite,
+                    "frames": frames, "x": x, "y": y, "voice": voice,
+                    "voice_file": (self.voice_names().get(voice & 0xFFF)
+                                   if voice >> 28 == self.SOUND_NS_VOICE
+                                   else None),
+                })
+            out.append(entry)
         return out
 
     def backdrop_presets(self) -> list[dict]:

@@ -186,6 +186,19 @@ body.resizing { cursor: col-resize; user-select: none; }
 .op .nm { color: var(--text); flex: none; }
 .op .ar { color: var(--dim); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
+/* An instruction the player does not act on is struck through, so it is
+   obvious at a glance which of the script is actually being honoured and
+   which is passing by as text. */
+.op.st-shown .nm, .op.st-none .nm,
+.fe.st-shown .nm, .fe.st-none .nm { text-decoration: line-through; }
+.op.st-shown, .op.st-none, .fe.st-shown, .fe.st-none { opacity: 0.55; }
+.op.st-none .nm, .fe.st-none .nm { color: #4a5763 !important; }
+/* Approximated is honoured, but not the game's rule -- dotted, not struck. */
+.op.st-approx .nm, .fe.st-approx .nm {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
 .cat-camera .nm { color: var(--accent); }
 .cat-spawn .nm { color: var(--spawn); }
 .cat-region .nm { color: var(--ok); }
@@ -246,6 +259,34 @@ body.resizing { cursor: col-resize; user-select: none; }
   color: var(--ok); border-color: var(--ok);
 }
 #transport button.sound[aria-pressed="false"] { color: var(--dim); }
+
+/* ---- HUD layer (evt 0x1F shutter, 0x2D message) ---- */
+
+/* The game draws both as view-space geometry at z = -1, i.e. a screen
+   overlay. DOM keeps them crisp at any canvas size and out of the depth
+   buffer, which is what the game's draw layer achieves. */
+.hud-layer { position: absolute; inset: 0; pointer-events: none; }
+.hud-layer[hidden] { display: none; }
+.shutter {
+  position: absolute; left: 0; right: 0; height: 0;
+  background: #000;
+  transition: none;
+}
+.shutter-top { top: 0; }
+.shutter-bottom { bottom: 0; }
+.screen-message {
+  position: absolute;
+  transform: translate(-100%, -50%);
+  background: rgba(6, 10, 14, 0.8);
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+  color: var(--accent-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.screen-message[hidden] { display: none; }
 
 /* ---- overlays ---- */
 

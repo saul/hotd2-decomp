@@ -40,6 +40,7 @@ import { SceneFog, type FogMode } from "./fog";
 import { SceneLighting, type LightingMode } from "./lighting";
 import { Backdrop } from "./backdrop";
 import { RigLayer } from "./rigs";
+import { Hud as HudLayer } from "./hud";
 
 const TICK = 1 / 60;
 
@@ -77,6 +78,7 @@ class Player {
   private readonly lighting: SceneLighting;
   private readonly backdrop = new Backdrop();
   private readonly rigs = new RigLayer();
+  private readonly hudLayer = new HudLayer($("#viewport"));
 
   private state: PlayerState = readState();
   private playing = false;
@@ -91,6 +93,7 @@ class Player {
   /** Set while the frame slider is driving the camera by hand. */
   private scrubbing = false;
   private pillarbox = true;
+  private readonly _fwd = new Vector3();
 
   constructor() {
     this.renderer = new WebGLRenderer({
@@ -199,8 +202,17 @@ class Player {
       onFeed: (e) => this.onFeed(e),
       onBranch: (b) => this.showBranch(b),
       playSound: (id) => this.bgm.play(id),
+      setShutter: (st) => this.hudLayer.setShutterState(st),
+      showMessage: (g) => {
+        // Variant 0 is the 1P / player-1 configuration, which is what a
+        // single-viewer playback corresponds to.
+        const v = bundle.script.sound?.messages?.[String(g)]?.[0] ?? null;
+        if (v?.voice) this.bgm.play(v.voice);
+        return this.hudLayer.showMessage(g, v);
+      },
     }, { seed: this.state.seed ?? 1 });
 
+    this.hudLayer.reset();
     this.bgm.setTable(bundle.script.bgm, entry.game_mode);
     this.bgm.setSoundTables(bundle.script.sound);
     this.tree.build(bundle.script);
@@ -750,6 +762,12 @@ class Player {
       // g_active_cam_path, so object and shot run in lockstep.
       const cam = this.walker.cam;
       this.rigs.update(cam ? cam.slot : null, cam ? cam.frame : 0);
+      this.hudLayer.tick(this.state.freeze ? 0 : dt * 60);
+      this.lighting.setGunLights(this.walker.gunLights);
+      this.lighting.setSceneLighting(this.walker.sceneLighting);
+      this.lighting.updateGunLights(
+        this.camera.position,
+        this.camera.getWorldDirection(this._fwd));
     }
     this.renderer.render(this.scene, this.camera);
   };
@@ -803,6 +821,7 @@ class Player {
       ["light", this.lighting.describe],
       ["sky", this.backdrop.describe],
       ["rigs", this.rigs.describe],
+      ["shutter", this.hudLayer.describe],
       ["last se", w.lastSound === null ? "—"
         : `0x${w.lastSound.toString(16).toUpperCase()}`],
       ["eye", fmtVec(this.camera.position)],

@@ -89,13 +89,41 @@ Ranked by what they would actually change on screen.
 
 | Open | Effect | Where the work is |
 |---|---|---|
-| Backdrop dome (`0x1B`/`0x1C`) | **the sky is missing** — now the biggest visual gap; the table at `0x00579968` is documented but not read | client + a small `exetab` reader |
-| Light/fog **tweens** are not stepped | `0x21`/`0x23` animate a channel over time; the player jumps to the target and says so in the feed | client |
 | What starts a stage's own BGM | the player names the stage track by convention and says so | decomp — the scene-entry path, not an xref sweep over 496 callers |
 | `path.y - 15` compensation | nothing today; the player is correct without it | decomp — what `0x009A60C0` is, and whether `g_camera_eye_y` is the final world eye |
 | `0x40C790` | whether deferred (state 6/7) shots are yaw-only | decomp, small |
 | Spawn class → model | enemies stay markers | decomp, large — the class table holds handler addresses |
 | W6 harness | no regression safety net | client |
+
+### Object rigs
+
+`op_` paths move *things*, and those things are rigs assembled in code — 168
+functions call `AssetDrawSlot` and there is no rig format to parse, so
+`hod2lib.rigs` transcribes the draw routines by hand. Nine of the 31
+`CamEvalObjectPath6` callers are done.
+
+The player renders them, and adds the motion. Rig roots ship **unparented**,
+tagged `hod2_path_slot`, because the bundle carries no baked animation — so
+the client evaluates the `op_` curve itself. That is what lets it honour three
+things exactly rather than approximately:
+
+- **the frame clamp**, `min(frame, CAM_PATH_LENGTH[slot])` — the object stops
+  at the end of its path instead of extrapolating along the last segment;
+- **the position bias**, added *before* the pose rotations, which a child node
+  cannot express (`T(p+b)·R` is not `T(p)·R·T(b)`);
+- **the camera gate** — routines dispatch on `g_active_cam_path`, so an
+  instance is present only while the camera is on a shot that selects it. The
+  object and the shot run on one clock, which is the point.
+
+Parts whose rotation is driven at runtime are **not** baked: `rigs.py` records
+the rule, the bundle carries it, and the inspector shows it. Stage 1's vehicle
+has nine such parts — wheels, occupants, a swing arm, and four trail effects
+that cycle their model every frame.
+
+`obj_484ff0_props` is transcribed but deliberately **not placed**: the variant
+that selects which prop is drawn comes from a pointer that is not the spawn
+descriptor, so there is nothing to place it against yet. The bundle carries
+the reason and the player shows it rather than guessing.
 
 ## Deliberate non-goals
 
@@ -155,7 +183,7 @@ missed. Meanings and confidence marks live in
 | `18` | `set_light0_direction` | light | **done** | **drives the directional light** in `+ scene light` mode |
 | `19` | `set_light1_direction` | light | *tracked* | scene light direction, in degrees; not applied |
 | `1A` | `set_ground_plane_y` | camera | *tracked* | ground plane / g_camera_fixed_eye_y; see the eye-height note |
-| `1B` | `set_backdrop_preset` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
+| `1B` | `set_backdrop_preset` | scenery | **done** | **the backdrop dome is drawn**, following the camera |
 | `1C` | `set_backdrop_mode` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
 | `1D` | `enable_rain` | scenery | shown | rain particles; not drawn |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |

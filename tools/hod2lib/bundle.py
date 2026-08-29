@@ -33,7 +33,7 @@ import json
 import time
 from pathlib import Path
 
-from . import __version__, gltf, script as scriptlib
+from . import __version__, gltf, rigs as rigslib, script as scriptlib
 
 __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
 
@@ -130,6 +130,60 @@ def backdrop_json(tables, prog) -> dict:
     }
 
 
+def rigs_json(instances, blocked, campaths) -> dict:
+    """The rig routes, gates and animation rules the client needs.
+
+    The **geometry** goes into the glTF as ordinary nodes; this is the part
+    that cannot: which `op_` path each instance rides, which `cp_` camera
+    paths select it, and the runtime rules the transcription records but
+    cannot bake.
+
+    The player evaluates the path itself rather than riding a baked animation,
+    which is why the bundle keeps the *slot* -- it can then honour the frame
+    clamp and the position bias exactly, at any frame, including while
+    scrubbing.
+    """
+    out = []
+    for inst in instances:
+        rig = inst["rig"]
+        routes = []
+        for r in inst["routes"]:
+            ref = campaths.get(r["slot"])
+            routes.append({
+                "slot": r["slot"],
+                "bias": list(r["bias"]),
+                # Empty means ungated: the rig is present whatever the camera
+                # is doing. Otherwise it rides only while one of these cp_
+                # slots is the active camera path.
+                "cam_paths": r["cam_paths"],
+                "file": ref.file if ref else None,
+                "index": ref.index if ref else None,
+                "duration": ref.duration if ref else None,
+            })
+        out.append({
+            "name": rig.name,
+            "routine": rig.routine,
+            "note": rig.note,
+            "routes": routes,
+            "world_space": rig.world_space,
+            "spawn_class": rig.spawn_class,
+            # Rules the transcription records rather than bakes, so the client
+            # can show them instead of pretending the part is static.
+            "animated_parts": [
+                {"part": p.name, "rule": p.animated, "condition": p.condition}
+                for p, _models in inst["parts"] if p.animated or p.condition
+            ],
+        })
+    return {
+        "rigs": out,
+        "blocked": [{"name": r.name, "routine": r.routine,
+                     "reason": r.placement_blocked} for r in blocked],
+        "note": "Object rigs are transcribed draw routines, not asset data -- "
+                "there is no rig format. See docs/formats/rigs.md and "
+                "hod2lib/rigs.py.",
+    }
+
+
 def build_stage(stage, out_root: Path, *, glb: bool = True,
                 write_textures: bool = True, unlit: bool = True,
                 cam_step: float = 2.0, progress=None) -> dict:
@@ -148,8 +202,20 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
 
     say(f"  {name}: geometry")
     parts, model_regions, regions = stage.geometry()
+
+    # Rig geometry travels in the glTF, but *unparented*: the bundle exports
+    # no camera nodes, so there is no baked animation to hang a rig under.
+    # Passing `anchors = {slot: None}` makes the writer emit each instance as
+    # a scene node tagged `hod2_path_slot`, which the client then drives from
+    # the raw `op_` curve -- the same trick the camera rails use.
+    say(f"  {name}: object rigs")
+    rig_instances, rig_blocked = rigslib.resolve_for_stage(stage)
+    rig_data = [dict(inst, anchors={r["slot"]: None for r in inst["routes"]},
+                     biases={})
+                for inst in rig_instances]
+
     info = gltf.export_level(
-        name, parts, out_dir,
+        name, parts, out_dir, rigs=rig_data,
         write_textures=write_textures,
         cam_files=[],                  # rails are drawn client-side
         unlit=unlit, model_regions=model_regions, glb=glb)
@@ -170,6 +236,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["bgm"] = bgm_json(stage.tables, stage.stage, stage.game_mode)
     script_json["sound"] = sound_json(stage.tables)
     script_json["backdrop"] = backdrop_json(stage.tables, prog)
+    script_json["rigs"] = rigs_json(rig_instances, rig_blocked, stage.campaths())
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))
@@ -194,6 +261,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
             "branch_points": len(prog.branch_blocks()),
             "cam_paths": len(stage.campaths()),
             "spawns": n_spawns,
+            "rigs": info.get("rigs", 0),
         },
         "sources": {},
     }

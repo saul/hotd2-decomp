@@ -605,3 +605,130 @@ def rig_for_slot(path_slot: int) -> Rig | None:
         if path_slot in rig.all_path_slots:
             return rig
     return None
+
+
+# ---------------------------------------------------------------------------
+# resolution against a stage
+# ---------------------------------------------------------------------------
+
+
+def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
+    """Which rigs this stage holds, with their part models loaded.
+
+    Returns ``(instances, blocked)``. Each instance is::
+
+        {"rig": Rig,
+         "routes":     [{"slot": int, "bias": Vec3, "cam_paths": [int]}],
+         "fixed":      [{"translation", "rotation_bams", "cam_paths", "note"}],
+         "placements": [spawn descriptor dicts],
+         "world":      bool,
+         "parts":      [(RigPart, [(model, bank, file_stem)])]}
+
+    A rig's parts name **asset slots**, which resolve through the EXE's slot
+    table to a pol file and an entry index -- and those files are deliberately
+    *not* in the stage geometry set, because they are spawnable actors rather
+    than placed scenery. So they are loaded here on demand.
+
+    This lives in the library rather than in ``export_level.py`` because two
+    consumers need it: the glTF exporter, which parents each rig under the
+    baked animation node of its route, and the browser player's bundle, which
+    keeps the route as a *path slot* and evaluates it at runtime. Duplicating
+    the resolution would let the two disagree about which rigs a stage has.
+    """
+    from . import stage as stagelib, script as scriptlib
+
+    cp = stage.campaths()
+    if cp is None:
+        return [], []
+    slots = stage.tables.asset_slots()
+    have = {r.slot for r in cp.by_slot.values() if r.is_object_path}
+    # The cp_ slots this stage owns. Routines dispatch on `g_active_cam_path`
+    # to pick a route, and those ids live in the same 418-slot space as the
+    # object paths, so a rig belongs to a stage iff the stage owns the camera
+    # path that selects it.
+    have_cam = {r.slot for r in cp.by_slot.values() if not r.is_object_path}
+
+    cache: dict[str, tuple] = {}
+
+    def asset(file_stem: str):
+        if file_stem not in cache:
+            try:
+                cache[file_stem] = stagelib.load_asset(stage.game, file_stem)
+            except Exception:
+                cache[file_stem] = ([], None)
+        return cache[file_stem]
+
+    # Spawn descriptors, grouped by class, so a rig that is a class handler can
+    # be placed at every instance the event script puts in the stage.
+    placements: dict[int, list[dict]] = {}
+    wanted = {r.spawn_class for r in RIGS if r.spawn_class is not None}
+    if wanted:
+        try:
+            prog = scriptlib.load(stage)
+        except Exception:
+            prog = None
+        if prog is not None:
+            for blk in prog.blocks:
+                for step in blk.steps:
+                    for op in step.ops:
+                        for sp in op.detail.get("spawns", []) or []:
+                            if sp["class"] in wanted:
+                                placements.setdefault(sp["class"], []).append(sp)
+
+    out: list[dict] = []
+    blocked: list[Rig] = []
+    for rig in RIGS:
+        routes: list[dict] = []
+
+        def take(slot, cam_paths, bias=(0.0, 0.0, 0.0)):
+            if slot not in have:
+                return
+            if cam_paths and not (set(cam_paths) & have_cam):
+                return
+            routes.append({"slot": slot, "bias": tuple(bias),
+                           "cam_paths": [c for c in cam_paths]})
+
+        for slot in rig.path_slots:          # flat spelling, no cam gate
+            take(slot, ())
+        for route in rig.routes:
+            take(route.slot, route.cam_paths, route.bias)
+
+        fixed = [{"kind": "fixed", "translation": list(fp.translation),
+                  "rotation_bams": list(fp.rotation_bams),
+                  "cam_paths": list(fp.cam_paths), "note": fp.note}
+                 for fp in rig.fixed_poses
+                 if not fp.cam_paths or (set(fp.cam_paths) & have_cam)]
+
+        # A world-space rig has no root to place: its part translations are
+        # already absolute, so it needs a gate saying which stage holds it.
+        # Without a confirmed gate it is transcribed but not placed.
+        world = bool(rig.world_space and bbox is not None
+                     and not rig.placement_blocked)
+
+        if rig.placement_blocked:
+            blocked.append(rig)
+            continue
+        if not routes and not fixed and not world \
+                and not placements.get(rig.spawn_class):
+            continue
+
+        parts = []
+        for part in ordered_parts(rig):
+            models = []
+            for sid in part.slots:
+                rec = slots.get(sid)
+                if not rec:
+                    continue
+                stem = rec[0][:-4] if rec[0].endswith(".bin") else rec[0]
+                ms, bank = asset(stem)
+                if rec[1] < len(ms):
+                    models.append((ms[rec[1]], bank, stem))
+            if models:
+                parts.append((part, models))
+        if parts:
+            out.append({"rig": rig, "routes": routes, "parts": parts,
+                        "blocked": rig.placement_blocked,
+                        "fixed": fixed, "world": world,
+                        "placements": (placements.get(rig.spawn_class, [])
+                                       if not rig.world_space else [])})
+    return out, blocked

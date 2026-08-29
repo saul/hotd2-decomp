@@ -182,6 +182,16 @@ export class CamPath {
   }
 
   /**
+   * One raw channel by index, in this path's own channel order.
+   *
+   * Needed for `op_` paths, whose channels 3-5 are a BAMS Euler triple rather
+   * than a look-at point, so they cannot go through `pose`.
+   */
+  channel(i: number, t: number): number {
+    return this.ch(i, t);
+  }
+
+  /**
    * Eye, look-at and roll at frame *t*.
    *
    * `CamEvalPath7` always evaluates channels 0-5. It evaluates channel 6 --

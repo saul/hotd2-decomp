@@ -39,6 +39,7 @@ import { Bgm } from "./bgm";
 import { SceneFog, type FogMode } from "./fog";
 import { SceneLighting, type LightingMode } from "./lighting";
 import { Backdrop } from "./backdrop";
+import { RigLayer } from "./rigs";
 
 const TICK = 1 / 60;
 
@@ -75,6 +76,7 @@ class Player {
   private readonly sceneFog: SceneFog;
   private readonly lighting: SceneLighting;
   private readonly backdrop = new Backdrop();
+  private readonly rigs = new RigLayer();
 
   private state: PlayerState = readState();
   private playing = false;
@@ -178,6 +180,7 @@ class Player {
     // Adopt the dome models before lighting, so its material swap sees the
     // clones the backdrop made rather than the shared originals.
     this.backdrop.attach(this.stage.root, bundle.script.backdrop);
+    this.rigs.attach(this.stage.root, bundle.script.rigs, this.paths);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
 
@@ -290,6 +293,9 @@ class Player {
     });
     $<HTMLInputElement>("#show-aim").addEventListener("change", (e) => {
       this.rails?.setAimRailsVisible((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#show-rigs").addEventListener("change", (e) => {
+      this.rigs.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-sky").addEventListener("change", (e) => {
       this.backdrop.setEnabled((e.target as HTMLInputElement).checked);
@@ -740,6 +746,10 @@ class Player {
       this.lighting.set(this.walker.light);
       this.backdrop.update(this.walker.backdropPreset, this.walker.backdropMode,
                            this.camera.position, this.state.freeze ? 0 : dt * 60);
+      // Rigs ride the camera's clock: the routines dispatch on
+      // g_active_cam_path, so object and shot run in lockstep.
+      const cam = this.walker.cam;
+      this.rigs.update(cam ? cam.slot : null, cam ? cam.frame : 0);
     }
     this.renderer.render(this.scene, this.camera);
   };
@@ -792,6 +802,7 @@ class Player {
       ["fog", this.sceneFog.describe],
       ["light", this.lighting.describe],
       ["sky", this.backdrop.describe],
+      ["rigs", this.rigs.describe],
       ["last se", w.lastSound === null ? "—"
         : `0x${w.lastSound.toString(16).toUpperCase()}`],
       ["eye", fmtVec(this.camera.position)],

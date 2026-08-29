@@ -30,124 +30,38 @@ STAGE_TO_SCENE = stagelib.STAGE_TO_SCENE
 
 
 def _resolve_rigs(game: Path, st, bbox=None) -> list[dict]:
-    """Load the models a transcribed rig draws, for every route this stage has.
+    """glTF-flavoured rig resolution: `hod2lib.rigs` plus anchor node names.
 
-    A rig's parts name **asset slots**, which resolve through the EXE's slot
-    table to a pol file and an entry index -- and those files are deliberately
-    *not* in the stage geometry set, because they are spawnable actors rather
-    than placed scenery. So they are loaded here on demand.
+    The resolution itself -- which rigs this stage holds, which routes survive
+    the camera-path gate, which spawn descriptors place them, and loading the
+    part models -- lives in `hod2lib.rigs.resolve_for_stage`, because the
+    browser player's bundle needs exactly the same answer. What is added here
+    is glTF-specific: each route is turned into the *name* of the animated
+    object-path node the exporter emits, so the rig can be parented under it
+    and ride the baked animation. The player keeps the path slot instead and
+    evaluates the curve at runtime.
     """
     cp = st.campaths()
     if cp is None:
         return []
-    slots = st.tables.asset_slots()
-    have = {r.slot for r in cp.by_slot.values() if r.is_object_path}
-    # The cp_ slots this stage owns. Routines dispatch on `g_active_cam_path`
-    # to pick a route, and those ids live in the same 418-slot space as the
-    # object paths -- verified: all 28 gate ids seen so far resolve to cp_
-    # files and all 21 route ids to op_ files. So a rig belongs to a stage iff
-    # the stage owns the camera path that selects it.
-    have_cam = {r.slot for r in cp.by_slot.values() if not r.is_object_path}
-
-    cache: dict[str, tuple] = {}
-
-    def asset(file_stem: str):
-        if file_stem not in cache:
-            try:
-                cache[file_stem] = stagelib.load_asset(game, file_stem)
-            except Exception:
-                cache[file_stem] = ([], None)
-        return cache[file_stem]
-
-    # Spawn descriptors, grouped by class, so a rig that is a class handler can
-    # be placed at every instance the event script puts in the stage.
-    placements: dict[int, list[dict]] = {}
-    wanted = {r.spawn_class for r in rigslib.RIGS if r.spawn_class is not None}
-    if wanted:
-        try:
-            prog = scriptlib.load(st)
-        except Exception:
-            prog = None
-        if prog is not None:
-            for blk in prog.blocks:
-                for step in blk.steps:
-                    for op in step.ops:
-                        for sp in op.detail.get("spawns", []) or []:
-                            if sp["class"] in wanted:
-                                placements.setdefault(sp["class"], []).append(sp)
+    instances, blocked = rigslib.resolve_for_stage(st, bbox)
+    _resolve_rigs.blocked = blocked
 
     out: list[dict] = []
-    blocked: list = []
-    for rig in rigslib.RIGS:
+    for inst in instances:
         anchors: dict[int, str] = {}
         biases: dict[str, tuple] = {}
-
-        def bind(slot, cam_paths, bias=(0.0, 0.0, 0.0)):
-            """Bind one route to its anchor node, if this stage has both."""
-            if slot not in have:
-                return
-            if cam_paths and not (set(cam_paths) & have_cam):
-                return
-            ref = cp.by_slot[slot]
+        for route in inst["routes"]:
+            ref = cp.by_slot.get(route["slot"])
+            if ref is None:
+                continue
             base = f"{ref.file}_{ref.index:02d}"
             nm = f"{base}_obj"
-            if tuple(bias) != (0.0, 0.0, 0.0):
-                nm = f"{base}_obj_b{gltf._bias_tag(bias)}"
-                biases[base] = tuple(bias)
-            anchors[slot] = nm
-
-        for slot in rig.path_slots:          # flat spelling, no cam gate
-            bind(slot, ())
-        for route in rig.routes:
-            bind(route.slot, route.cam_paths, route.bias)
-
-        # Poses the routine hardcodes, gated the same way.
-        fixed = [{"kind": "fixed", "translation": list(fp.translation),
-                  "rotation_bams": list(fp.rotation_bams),
-                  "cam_paths": list(fp.cam_paths), "note": fp.note}
-                 for fp in rig.fixed_poses
-                 if not fp.cam_paths or (set(fp.cam_paths) & have_cam)]
-
-        # A world-space rig has no root to place: its part translations are
-        # already absolute. The spawn class is the wrong gate for it -- class
-        # 0x25 is a generic scripted-actor interpreter present in every stage,
-        # while the props themselves sit at one fixed set of coordinates. So
-        # the gate is geometric: the parts have to land inside this stage.
-        # A world-space rig has no root to place: its part translations are
-        # already absolute, so it needs a gate saying which stage holds it.
-        # The stage bounding box is not that gate -- levels span thousands of
-        # units and would accept the props everywhere. Without a confirmed
-        # gate the rig is transcribed but not placed.
-        world = bool(rig.world_space and bbox is not None
-                     and not rig.placement_blocked)
-
-        if rig.placement_blocked:
-            blocked.append(rig)
-            continue
-        if not anchors and not fixed and not world \
-                and not placements.get(rig.spawn_class):
-            continue
-
-        parts = []
-        for part in rigslib.ordered_parts(rig):
-            models = []
-            for sid in part.slots:
-                rec = slots.get(sid)
-                if not rec:
-                    continue
-                stem = rec[0][:-4] if rec[0].endswith(".bin") else rec[0]
-                ms, bank = asset(stem)
-                if rec[1] < len(ms):
-                    models.append((ms[rec[1]], bank, stem))
-            if models:
-                parts.append((part, models))
-        if parts:
-            out.append({"rig": rig, "anchors": anchors, "parts": parts,
-                        "blocked": rig.placement_blocked,
-                        "biases": biases, "fixed": fixed, "world": world,
-                        "placements": (placements.get(rig.spawn_class, [])
-                                       if not rig.world_space else [])})
-    _resolve_rigs.blocked = blocked
+            if tuple(route["bias"]) != (0.0, 0.0, 0.0):
+                nm = f"{base}_obj_b{gltf._bias_tag(route['bias'])}"
+                biases[base] = tuple(route["bias"])
+            anchors[route["slot"]] = nm
+        out.append(dict(inst, anchors=anchors, biases=biases))
     return out
 
 

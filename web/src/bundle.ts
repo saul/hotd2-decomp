@@ -205,6 +205,36 @@ export interface BackdropJson {
   note: string;
 }
 
+export interface RigRoute {
+  /** Global `op_` path slot the instance rides. */
+  slot: number;
+  /** Added to the path position *before* the pose rotations. */
+  bias: [number, number, number];
+  /** `cp_` slots that select this route. Empty means ungated. */
+  cam_paths: number[];
+  file: string | null;
+  index: number | null;
+  duration: number | null;
+}
+
+export interface RigJson {
+  name: string;
+  routine: string;
+  note: string;
+  routes: RigRoute[];
+  world_space: boolean;
+  spawn_class: number | null;
+  /** Rules the transcription records rather than bakes. */
+  animated_parts: { part: string; rule: string; condition: string }[];
+}
+
+export interface RigsJson {
+  rigs: RigJson[];
+  /** Rigs read but not placeable, with the reason. */
+  blocked: { name: string; routine: string; reason: string }[];
+  note: string;
+}
+
 export interface ScriptJson {
   scene: number;
   stage: number | null;
@@ -220,6 +250,7 @@ export interface ScriptJson {
   bgm?: BgmJson;
   sound?: SoundJson;
   backdrop?: BackdropJson;
+  rigs?: RigsJson;
   warnings: string[];
 }
 

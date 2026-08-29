@@ -139,6 +139,19 @@ so is the event feed.
   `wait_camera_path_frame`, which are exact frame counts.
 - **Spawn descriptors** — position, BAMS yaw, class and hit points are all
   confirmed values, drawn as placed.
+- **Object rigs.** The things that ride `op_` paths are assembled in code, not
+  data — `hod2lib.rigs` transcribes the draw routines. The client evaluates
+  the object path itself, so it honours the routines' frame clamp
+  (`min(frame, CAM_PATH_LENGTH[slot])`), their position bias (added *before*
+  the pose rotations, so a child node cannot express it), and their camera
+  gate: a rig is present only while the camera is on a shot that selects it,
+  because the routines dispatch on `g_active_cam_path`.
+- **The backdrop dome.** Follows the camera in all three axes, offset by the
+  preset's `dy`, spun about Y, and scaled `(1.2, 1.2, -1.2)` — the negative Z
+  turns it inside out, as the game does.
+- **Fog and scene light are ramped, not switched.** Both tween opcodes fill
+  `{enabled, from, to, rate}`, and `0x23` pre-divides a frame count into a
+  per-frame step. Stage 2 alone runs 247 of them.
 
 ### Not faithful, and labelled as such
 
@@ -151,6 +164,13 @@ so is the event feed.
   instant / 0.5 s / 1 s / 2 s / pass through), and every wait the walker could
   not honour appears in the feed with the condition it *would* have blocked on
   and what happened instead.
+- **Runtime-driven rig parts are not animated.** `rigs.py` records the rule —
+  "RotY by obj+0x1334", "model cycles `DAT_009A32A0 % 12 + 0x8CE`" — rather
+  than baking a frame of it, because the globals driving them are gameplay
+  state. The parts are drawn in their rest pose and the rule is shown in the
+  inspector. One rig, `obj_484ff0_props`, is transcribed but not placed at
+  all: what selects its variant is not the spawn descriptor, so there is
+  nothing to place it against.
 - **Enemies are markers, not models.** The class → model mapping is genuinely
   unsolved: the class table at `0x009A2280` holds *handler code addresses*, not
   model ids, so there is nothing to look a model up by yet. Class and hit

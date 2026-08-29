@@ -109,20 +109,24 @@ ST1_VEHICLE = Rig(
         RigPart("spinner_rear", (0x1580,),
                 translation=(0.0, 3.8497, -12.6732),
                 animated="RotX by obj+0x1330"),
-        # Wheels: AssetDrawSlot(DAT_009A32A0 % 0xC + 0x8CE) -- a 12-frame cycle
-        # on a global counter. Frame 0 is emitted. The right pair is the left
-        # model mirrored with MatrixScale(-1, 1, 1).
-        RigPart("wheel_fl", (0x08CE,), translation=(-9.63, 0.0, 15.989),
+        # AssetDrawSlot(DAT_009A32A0 % 0xC + 0x8CE) -- a 12-frame cycle on a
+        # global counter, frame 0 emitted; the right pair is the left model
+        # mirrored with MatrixScale(-1, 1, 1). Measured, each is 11.7 long
+        # along the travel axis, 2.9 wide and 2.6 tall, sitting at ground level
+        # just outside the body -- and it is drawn only while moving. That is a
+        # ground effect, not a wheel: the wheels are modelled into the body.
+        RigPart("trail_fl", (0x08CE,), translation=(-9.63, 0.0, 15.989),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
-                condition=_MOVING),
-        RigPart("wheel_fr", (0x08CE,), translation=(9.63, 0.0, 15.989),
+                condition=_MOVING,
+                note="[likely] a dust/spray trail behind a wheel"),
+        RigPart("trail_fr", (0x08CE,), translation=(9.63, 0.0, 15.989),
                 scale=(-1.0, 1.0, 1.0),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
                 condition=_MOVING),
-        RigPart("wheel_rl", (0x08CE,), translation=(-9.63, 0.0, -12.9132),
+        RigPart("trail_rl", (0x08CE,), translation=(-9.63, 0.0, -12.9132),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
                 condition=_MOVING),
-        RigPart("wheel_rr", (0x08CE,), translation=(9.63, 0.0, -12.9132),
+        RigPart("trail_rr", (0x08CE,), translation=(9.63, 0.0, -12.9132),
                 scale=(-1.0, 1.0, 1.0),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
                 condition=_MOVING),

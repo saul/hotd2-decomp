@@ -255,9 +255,14 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] **Object export** — every `op_` path is now an animated node
       (translation + rotation), not just a rail; `<stage>_objects.json` carries
       the spawns the event script places and the routes together
-- [ ] Path-following objects are hand-coded rigs (a set of asset slots with
-      relative transforms in the draw routine), so the animated nodes carry no
-      model yet. `FUN_0048E600` is decoded as the worked example
+- [x] **One rig reproduced.** `hod2lib/rigs.py` transcribes `FUN_0048E600` as
+      data and the exporter instantiates its 11 parts under the animated path
+      node, so the object rides its route. The assembled rig is 26.5 × 17.3 ×
+      51.0 units and renders as a complete car — the check that the transform
+      chain is right. Runtime rotations are recorded in `extras`, never baked
+- [ ] The other 30 `CamEvalObjectPath6` callers — which spawn classes they
+      belong to, and which take their path slot from the object rather than a
+      literal
 - [ ] `evt` JSON sidecar — `dump_stage_script.py --json` covers it for now
 
 ## Open questions

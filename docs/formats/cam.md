@@ -348,6 +348,37 @@ draws a composite rig by matrix chain:
 turning and its passengers looking around, on a route synchronised to the
 camera.
 
+### Reproducing a rig
+
+`hod2lib/rigs.py` transcribes a draw routine as data, and the exporter
+instantiates it as a node hierarchy under the animated path node — so the
+object rides its route. `RIGS` holds one so far, `st1_vehicle` from
+`FUN_0048E600`, with eleven parts.
+
+Two things make the transcription mechanical rather than interpretive:
+
+* `MatrixStackPush(0)` duplicates the top, so every part in a routine is a
+  **sibling** of the object root, not a link in a chain. The hierarchy is one
+  level deep.
+* Two consecutive `MatrixTranslate` calls compose by addition, because
+  `top = top * T1 * T2` and both are pure translations.
+
+Runtime-driven rotations are **recorded, not baked** — the export has no frame
+to bake from. Each carries `extras.hod2_animated` with the rule, and parts the
+routine draws conditionally carry `extras.hod2_condition`.
+
+**[measured]** the assembled rig is 26.5 x 17.3 x 51.0 units and renders as a
+complete car with a legible number plate — `extract/compare/session18/`. That
+is the check that the transform chain is right: a wrong rotation order or a
+mis-composed translation scatters the parts.
+
+Two part names were corrected by measuring rather than assuming:
+
+| Part | Evidence |
+|---|---|
+| `spinner_front` / `spinner_rear` | 20.8 wide — the full track — spun about X at `0x2000` a frame (7.5 turns a second at 60 Hz). Originally called "axle"; the routine does not say which |
+| `trail_fl` … `trail_rr` | 11.7 long along the travel axis, 2.9 wide, 2.6 tall, at ground level just outside the body, drawn **only while moving**, model cycling 12 frames. Originally called "wheel" — but the wheels are modelled into the body, so these are **[likely]** a dust or spray trail |
+
 > A path-following object is therefore **not one model**. It is a hand-coded
 > rig: a set of asset slots with relative transforms baked into the draw
 > routine. Exporting one faithfully means reproducing that routine, not

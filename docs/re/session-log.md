@@ -1789,3 +1789,222 @@ collapsed-UV count moved and I chased it. That is luck, not process.
    lead on 16-bit UVs.
 2. Environment mapping, the last unticked Phase 5 line.
 3. The mode-1 region tables at `0x00576A8C`.
+
+---
+
+## Session 13 — the mesh path, end to end; and a stretched-face bug that was real
+
+Three things were on the list: `FUN_00419270`, environment mapping, and the
+mode-1 region tables at `0x00576A8C`. All three are closed. A fourth problem
+turned up on the way and mattered more than any of them.
+
+Screenshots for everything below were written to
+`extract/compare/session13/`. `extract/` is gitignored — they are derived from
+game assets and are not committed — so regenerate them with the commands in
+each section if you need them again.
+
+### 1. `FUN_00419270` is not a 16-bit-UV conversion — and there is no 16-bit UV
+
+The lead was that it "toggles bit 0 of every strip control word", which looked
+like an expand-in-place with the toggle as a done-marker. It is not. Read
+properly it is:
+
+```c
+ModelFlipStripCullingParity(model)   /* 0x00419270 */
+    *strip_ctrl ^= 1;                /* culling 2 <-> 3, 0 <-> 1 */
+```
+
+Bit 0 of a *strip* control word is the low bit of the 2-bit culling field, so
+this flips backface↔frontface culling. Its only caller is `AssetLoadTexBankStep`
+(`0x00418A00`, entry 1 of the job sub-step table), and it runs **only for the
+four asset slots listed at `0x0057A280`** — `0x17A0, 0x17A1, 0x18A3, 0x18A5`.
+Its sibling `ModelForceFogControlNone` (`0x00419300`) forces those same models'
+fog control to *none*. Two per-asset content patches, not a load step.
+
+**But the function answers the actual question by accident**, because it is the
+canonical statement of the NL1 chain walk. Three rules and nothing else:
+
+```
+bit 31 set   -> mesh header, 0x50 bytes, skip geometry by (mesh_data_size & ~3)
+bit 31 clear -> strip header {flags,count}, 8 bytes; count*3 when flags & 8
+vertex       -> 32 bytes when bit 0 of its first dword is set, else 8 (back-ref)
+```
+
+No `parameter_control`, no shading mode, no 16-bit-UV flag. `WalkMeshChainAndDraw`
+uses exactly the same rules.
+
+`tools/verify_walk.py` replays that walk over the whole corpus:
+
+```
+models walked : 9112
+  meshes  41463   strips 278807   vertices 1488301   back-references 447930
+clean: the binary's walk lands exactly on every declared mesh end
+```
+
+Zero desyncs. A wrong stride desynchronises immediately, so this settles it.
+
+Then the correlation that closes question 12 outright:
+
+| | meshes | `texture_id` |
+|---|---|---|
+| `parameter_control` bit 0 clear | 40,560 | all `>= 0` |
+| `parameter_control` bit 0 set | **903** | **all `-1`** |
+
+Perfect 1:1 with *untextured*. `isp_tsp` bit 22 agrees on all 41,463. Every one
+of the 33,875 vertices in those meshes has `u == v == 0`. **So the bit marks a
+mesh with no texture coordinates, `_read_vertex` was right all along, and the
+"128 affected stage meshes" alarm was a false one.**
+
+Two more results fall out and are now documented in `nl1.md`: the back-reference
+test is `(word0 & 1) == 0` (the addon's `(w >> 20) == 0x5FF` agrees on all
+447,930 but is not what the binary does), and `mesh_data_size` is masked to a
+4-byte boundary by both walkers.
+
+#### The bit was hiding a real bug in the exporter
+
+An untextured mesh has all-zero UVs, so **every** triangle in it has zero UV
+area, and `drop_collapsed_uv_triangles()` — on by default — deleted the whole
+mesh. Stage 2 was losing 811 triangles and **43 entire materials**: flat-black
+shadow panels, dark window recesses, wall inserts. Fixed with an early return
+for `texture_id < 0`. Stage 2 went 94,875 → 97,029 triangles, 2,179 → 2,222
+materials.
+
+Before/after through `cp_st2_35_cam`: the restored black panels correctly
+occlude bright fixtures that were showing through the wall
+(`03_untextured_before.png` / `04_untextured_after.png`).
+
+### 2. Environment mapping: proved absent, not merely unfound
+
+263 models set `globalFlag` bit 2 and 2,976 strips set strip-flag bit 8. The
+port reads neither. This is a closed set rather than a failure to find:
+
+- `SetTextureStageState` (`dev+0x94`) has exactly **three** call sites in the
+  whole binary. Between them they set `COLOROP`, `COLORARG1/2`, `ALPHAOP`,
+  `ALPHAARG1/2`, `ADDRESSU`, `ADDRESSV`, `MAGFILTER`, `MINFILTER`, `MIPFILTER`
+  — and nothing else. **`TEXCOORDINDEX` (11) and `TEXTURETRANSFORMFLAGS` (24)
+  are never set**, so texgen keeps its defaults: coordinate set 0 straight from
+  the vertex, no transform. Neither DX7 texgen selector constant (`0x20000`,
+  `0x30000`) appears anywhere in `.text`.
+- No UV is ever computed. The walker hands D3D a pointer into the model file,
+  or copies 8 dwords per vertex unchanged.
+- Stage 1 is disabled at init and never re-enabled, so there is nowhere for a
+  reflection map to live.
+
+Two corrections to `materials.md` came out of the same read:
+
+- **Shade mode is per *strip*, from strip flag bit 6** — not
+  `parameter_control & 0x40`. `TranslatePvr2StateToD3D` never reads
+  `parameter_control` at all.
+- **Opaque and translucent are two passes over the same chain**, selected by
+  `(tsp & 0x180000) != 0x80000`.
+
+Strip flags measured over all 278,807 strips: bit 2 (sprite/quad) is set on
+65,494 and **never tested by this port**; bit 5 (super index) on 153,889, and
+zero back-references occur outside a bit-5 strip; bit 7 (reuse previous state)
+on 225,744, and its inherited culling/shade mode is **always identical** to the
+strip's own bits, so reading them per strip is safe here.
+
+### 3. Mode-1 region tables = Original Mode
+
+`RegionBindSceneTables` selects the `0x00576A8C`/`0x00576ABC` pair when
+`g_GameMode` (`0x009CA08C`) is 1. Diffing the tables:
+
+- the **region tables are the same pointers** in both modes on all 12 scenes;
+- five scenes get a different **id table**, differing in 2, 2, 2, 9 and 1
+  entries respectively;
+- what changes is which asset slot an id resolves to, and the substitutes are
+  `st_org00`–`st_org03` — *stage, original mode* — plus alternate `st1_*`
+  entries on stage 1. `draw_mode` is preserved every time.
+
+Cross-checks: every substituted model's bounding box lies strictly inside its
+stage's mode-0 bounding box; `FUN_004040A0` appends slot `0x16` to every scene
+slot only when `g_GameMode == 1`; and `pol/` carries a whole `_org` family.
+
+Exported with `export_level.py --original`.
+
+### 4. The one that mattered: stretched faces were a texture/sampler bug
+
+Reported by the user against a stage-2 screenshot: faces on the left of the
+canal view "completely stretched". They were.
+
+The path there is worth recording because most of it was wasted:
+
+- Probed the pixels by eye, got faces with anisotropy 1.0–1.8 and clean UVs,
+  and concluded the mapping was fine. Wrong location — reading pixel
+  coordinates off a screenshot by eye is guesswork. Wrote
+  `tools/blender_probe.py` (raycast a pixel; `--sweep` ranks a frame) to stop
+  doing that.
+- `--uv-check` showed the checkerboard degenerating into 1-D bands on exactly
+  those faces, which is equally consistent with degenerate UVs *and* with a
+  clamped axis. Spent a long time on the first.
+- Dumped the worst meshes: mostly 4-vertex strips of two coincident vertex
+  pairs — authored 0.1-unit rim polygons, sub-pixel, harmless.
+- **Then turned one thing off.** Forcing every sampler to `REPEAT` and
+  re-rendering made the plinths render as carved marble with gold panels
+  (`07_zoom_all_repeat.png`). Isolating further: CLAMP was the cause,
+  MIRROR was not.
+
+The bug: **in glTF a `texture` is an (image, sampler) pair**, and the exporter
+cached textures on the decoded image alone, then stamped
+`textures[i]["sampler"]` as each material was written. Last writer wins. One
+mesh with a clamped axis retroactively clamped every other mesh in the segment
+sharing that image, smearing a single row or column of texels across whole
+walls. Stage 2 had 2,176 textured materials over 1,241 textures.
+
+Fixed by splitting the caches — images on `(part, tex_id, opaque)`, textures on
+`(image, sampler)`. Stage 2 now emits 1,754 textures over the same 1,241 images
+and **2,176 / 2,176 materials carry the addressing their own `tsp_instruction`
+demands**, asserted directly against `extras.pvr2.clamp_uv` / `flip_uv`.
+
+#### And a second cause, in the check itself
+
+After the fix one block was still streaked and one face had gone solid black.
+Dumping Blender's imported node graph explained it:
+
+```
+st2_14_tex10_lambert       extension=REPEAT      (plain wrap -- correct)
+st2_14_tex10_lambert.001   extension=EXTEND  + Math/SeparateXYZ/CombineXYZ
+st2_14_tex18_lambert       extension=EXTEND  + Math/SeparateXYZ/CombineXYZ
+```
+
+Blender's glTF importer cannot express two different wrap modes on an Image
+Texture node, so it sets `extension = EXTEND` and emulates the real mode with
+shader nodes. **Workbench does not evaluate shader nodes.** So under Workbench
+every material with a clamped *or mirrored* axis renders clamped on **both**
+axes — the exact same streaks, plus solid black wherever UVs run negative.
+
+`blender_camview.py` defaulted to Workbench. The diagnostic was manufacturing
+the artifact it was being used to diagnose. It now defaults to EEVEE for unlit
+exports; `11_zoom_eevee_correct.png` is the same crop rendered correctly.
+
+Two corollaries added to `method.md`: *the renderer you check with is part of
+the experiment*, and *bisect the pipeline, don't stare* — turning one feature
+off found in one step what an hour of probing correct UV values did not.
+
+### Named this session
+
+`ModelFlipStripCullingParity`, `ModelForceFogControlNone`,
+`AssetLoadTexBankStep`, `BindModelTextureHandles`, `DrawTriangleListPrimitive`,
+`DrawSpriteQuadCommand`, `RenderFlushCommandList`, `MatrixStackPush`,
+`MatrixStackPop`, `InitD3DDeviceAndTextureStages`, plus the five translation
+lookup tables, `g_game_mode`, `g_matrix_stack_top` and
+`g_model_fixup_slot_list`. `AssetLoadTexBankStep` had no function body — the
+job sub-step table at `0x0057A29C` had not been fed to Ghidra.
+
+Also decoded: the **draw command** is 0x1D dwords, `+0x0C` model pointer and
+`+0x34` a 4×4 world matrix from a matrix stack at `0x007E7990`.
+`RegionDrawResidentSet` brackets each slot draw with a push/pop that modifies
+nothing, so **region scenery carries no per-model transform** — exporting raw
+vertices is correct, now proved rather than assumed.
+
+### Next
+
+1. `mot/` — rigid transforms vs vertex morphs. The last unsolved format, and
+   the draw command's world matrix is now understood, which is where per-object
+   animation would land.
+2. `coli/` — record layout and hit-test semantics.
+3. Re-measure the collapsed-UV tail now that untextured meshes are exempt and
+   samplers are right. 4.9% of stage-2 triangles still go; the rim-polygon
+   finding suggests a good fraction are authored and the filter could be
+   narrowed to genuinely-degenerate cases.
+4. The golden-file regression suite in `tests/`, still the one Phase 3 gap.

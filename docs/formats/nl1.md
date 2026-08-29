@@ -94,7 +94,7 @@ authoritative source for material state; see [`../PLAN.md`](../PLAN.md) Phase 5.
 
 | Bits | Field | Values |
 |---|---|---|
-| 0 | 16-bit UV | 0 = two `f32` UVs, 1 = 16-bit |
+| 0 | 16-bit / absent UV | **set iff `texture_id == -1`** — does *not* change the vertex layout, see below |
 | 1 | Gouraud | |
 | 2 | offset colour enable | |
 | 3 | texture enable | |
@@ -115,7 +115,7 @@ for correct export.
 |---|---|---|
 | 20 | D-calc control | |
 | 21 | cache bypass | |
-| 22 | 16-bit UV | |
+| 22 | 16-bit / absent UV | mirrors `parameter_control` bit 0 on all 41,463 meshes |
 | 23 | Gouraud | |
 | 24 | offset colour | |
 | 25 | texture | |
@@ -185,13 +185,16 @@ vertex count is `count * 3`. Otherwise `count` is the vertex count directly.
 | Bit | Meaning |
 |---|---|
 | 0–1 | **culling**: 0 none, 1 double-sided, 2 backface culled, 3 frontface culled |
-| 2 | sprite / quad |
+| 2 | sprite / quad — **never tested by this port** |
 | 3 | independent triangle list |
 | 4 | triangle strip |
 | 5 | super-index format — back-references may appear |
-| 6 | Gouraud |
-| 7 | reuse previous global parameters |
-| 8 | environment mapping |
+| 6 | Gouraud — selects `D3DRENDERSTATE_SHADEMODE`, **per strip** |
+| 7 | reuse previous global parameters — see below |
+| 8 | environment mapping — **never tested by this port** |
+
+Measured frequencies and the exact semantics the binary gives each bit are in
+*Strip control word* below.
 
 ## Vertex records
 
@@ -296,55 +299,135 @@ Culling 0 or 1 means double-sided; 2 or 3 means single-sided.
 UVs are stored with `v` inverted relative to the usual convention — flip on
 import.
 
-## 16-bit UVs are not decoded ⚠️ known bug
+## How the game itself walks a model — [proved]
 
-`parameter_control` bit 0 selects **16-bit UV** instead of two `f32`. Across
-stage1+2 geometry:
+Two independent routines in `Hod2.exe` walk a loaded model's mesh chain, and
+they agree exactly:
 
-| | meshes |
-|---|---|
-| 32-bit UV | 5,957 |
-| **16-bit UV** | **128** (2.1%) |
+| Address | Name | Role |
+|---|---|---|
+| `0x00419270` | `ModelFlipStripCullingParity` | load-time patch for four asset slots |
+| `0x004A7EF0` | `WalkMeshChainAndDraw` | the renderer |
 
-Worst files: `st2_02` (13), `st1_03b` (12), `st2_07` (11), `st1_1` (10),
-`st2_03` (9).
-
-`_read_vertex()` always reads two 32-bit floats, so for those 128 meshes both
-the vertex stride and the UV values are wrong. The reference Blender addon has
-the same gap — it never honours the flag either — so it cannot be used as an
-oracle here.
-
-### What the render path rules out
-
-`WalkMeshChainAndDraw` (`0x004A7EF0`) is the mesh-chain walker, and it submits
-vertices with:
+Between them they state the whole traversal, and it is **three rules**:
 
 ```c
-DrawPrimitive(D3DPT_TRIANGLESTRIP /*5*/, 0x112, verts, count, 0);   // strips
-DrawPrimitive(D3DPT_TRIANGLELIST  /*4*/, 0x112, verts, count, 0);   // lists
+p = model + 0x18;
+while ((w = *p) != 0) {
+    if (w & 0x80000000) {                 /* mesh header, 0x50 bytes */
+        size = p[0x13];                   /* +0x4C mesh_data_size    */
+        q    = p + 0x50;
+        end  = q + (size & ~3);           /* masked to 4 bytes       */
+        while (q < end) {
+            flags = q[0]; count = q[1]; q += 8;      /* strip header */
+            n = (flags & 8) ? count * 3 : count;
+            while (n--)
+                q += (*q & 1) ? 32 : 8;   /* vertex : back-reference */
+        }
+        p = end;
+    }
+}
 ```
 
-FVF `0x112` is `D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1` — 8 dwords, UV at
-dwords 6–7. That is exactly the 32-byte layout `_read_vertex()` already
-assumes, and it is the *only* format handed to D3D.
+Nothing else is consulted. Not `parameter_control`, not the shading mode, not
+any 16-bit-UV flag. **There are only two record sizes in an NL1 model: 32 bytes
+and 8 bytes, selected by bit 0 of the record's first dword.**
 
-So there is **no 16-bit UV path at draw time**. Whatever bit 0 does, the
-vertices reaching the device are always two `f32` UVs. Two possibilities
-remain, in order of likelihood:
+`tools/verify_walk.py` replays exactly this over the whole corpus:
 
-1. **A load-time conversion.** `FUN_00419270`, run on every model after load,
-   walks the mesh chain and does `*strip_ctrl ^= 1` — it *toggles bit 0* of
-   each strip control word. A load-time expand-in-place of packed UVs would fit
-   that exactly, with the toggle marking "already converted".
-2. **Bit 0 does not mean 16-bit UV here.** The bit assignment in the table
-   above came from PowerVR2 documentation, not from this binary.
+```
+models walked : 9112
+  meshes                 41463      strips            278807
+  vertices             1488301      back-references   447930
+clean: the binary's walk lands exactly on every declared mesh end
+```
 
-The walker's second vertex path — 2 dwords for a back-reference, 14 inline —
-is guarded by `global_flag & 0x10`, and **no model in the game sets that bit**
-(0 of 9,112). It is dead code and not the answer.
+Zero desyncs. A wrong stride desynchronises a linear walk immediately, so this
+is a metric that collapses — see [`../re/method.md`](../re/method.md) Rule 3.
 
-Next step is `FUN_00419270` and its caller in the asset load path, not the
-renderer.
+Three corollaries fall out, all **[proved]**:
+
+- **The back-reference test is `(word0 & 1) == 0`.** The reference addon's
+  `(word0 >> 20) == 0x5FF` heuristic happens to agree on every one of the
+  447,930 back-references in the game, but the binary's test is the simple one,
+  and it is the one to implement.
+- **`mesh_data_size` is masked to a 4-byte boundary** by both walkers
+  (`& ~3` in the loader, an arithmetic `>> 2` in the renderer). No mesh in the
+  game actually has the low bits set, but honour the mask.
+- **Bump (`shading == -2`) and vertex-colour (`shading == -3`) layouts are
+  unreachable here.** A 56-byte bump vertex would desynchronise this walk on
+  its first record. No HOD2 mesh uses either mode.
+
+## 16-bit UVs — SOLVED: the bit marks an untextured mesh
+
+**[proved]** `parameter_control` bit 0 does **not** change the vertex layout,
+and the 903 meshes that set it were never being mis-parsed.
+
+Three independent lines of evidence:
+
+1. **The walk above.** Both the loader and the renderer step vertices with a
+   fixed 32-byte stride keyed only on bit 0 of the record. If bit 0 of
+   `parameter_control` selected a different stride, the walk would desynchronise
+   on the first such mesh. It does not, on any of 9,112 models.
+2. **Submission.** `WalkMeshChainAndDraw` hands D3D `DrawPrimitive(..., 0x112,
+   verts, count, 0)`. FVF `0x112` is `XYZ | NORMAL | TEX1` — 32 bytes with two
+   `f32` UVs at dwords 6–7 — and for a non-super-index strip the pointer passed
+   is *into the model file itself*. The bytes in the file are the vertex buffer.
+3. **What the bit actually correlates with.** Measured over every model:
+
+   | | meshes | `texture_id` |
+   |---|---|---|
+   | `parameter_control` bit 0 clear | 40,560 | **all `>= 0`** |
+   | `parameter_control` bit 0 set | 903 | **all `-1`** |
+
+   A perfect 1:1 correlation with **untextured**. `isp_tsp_instruction` bit 22
+   agrees with it on all 41,463 meshes — the two PowerVR2 words carry the same
+   flag, as the hardware requires.
+
+   Every one of the 33,875 vertices in those meshes has `u == 0.0` and
+   `v == 0.0` (stored as `0x00000001`, the end-of-vertex marker, which reads
+   back as a denormal and clamps to zero).
+
+So the bit reads naturally as "this polygon carries reduced/absent texture
+coordinates", set on meshes that sample no texture. `_read_vertex()` reading two
+`f32` from those meshes yields `(0, 0)`, which is exactly right, and exactly
+what the game submits.
+
+> ⚠️ **Consequence: do not run a UV-area filter over an untextured mesh.**
+> All its UVs are zero, so every triangle has zero UV area and
+> `drop_collapsed_uv_triangles()` deleted the whole mesh. On stage 2 that was
+> 811 triangles and 43 entire materials — flat-black shadow panels, dark window
+> recesses and wall inserts — silently removed from the export. Fixed: the
+> filter now returns early for `texture_id < 0`.
+
+## Strip control word — measured over all 278,807 strips
+
+| Bit | Meaning | Set on | Notes |
+|---|---|---|---|
+| 0–1 | culling | — | `NONE, NONE, CCW, CW` after the table at `0x00598B20` |
+| 2 | sprite / quad | 65,494 (23.5%) | **never tested by this port** — no effect |
+| 3 | independent triangle list | — | `count` is a triangle count |
+| 4 | triangle strip | — | |
+| 5 | super index | 153,889 (55.2%) | back-references may appear |
+| 6 | Gouraud | — | drives `D3DRENDERSTATE_SHADEMODE`, **per strip** |
+| 7 | reuse previous global parameters | 225,744 (81.0%) | see below |
+| 8 | environment mapping | 2,976 strips | **never tested by this port** |
+
+**Bit 7 — reuse previous global parameters.** When set, `WalkMeshChainAndDraw`
+skips the state block entirely: it neither reads the strip's own culling and
+Gouraud bits nor updates its cached copy. The strip therefore renders with the
+culling and shade mode of the last strip that *did not* set bit 7 — which can
+be in a previous mesh.
+
+**[measured]** In this game that never changes anything: across all 225,744
+bit-7 strips, the strip's own bits 0–1 and bit 6 are **always identical** to the
+inherited ones. So reading them per strip, as `nl1.py` does, is safe here. It
+would not be safe on other NaomiLib content.
+
+**Bit 5 — super index.** Only a bit-5 strip may contain back-references; a
+bit-5-clear strip is handed to D3D as a flat array, so every record in it must
+be a 32-byte vertex. **[measured]** zero back-references appear in a
+bit-5-clear strip anywhere in the game, so the two rules never conflict.
 
 ## UV anisotropy is authored, not an export fault
 
@@ -390,8 +473,19 @@ They cluster at strip boundaries:
 Only 8.6% involve a back-reference, so this is not a vertex-reuse fault — it
 looks like stitching artifacts at strip joins.
 
+Some of them are not artifacts at all. Sampling the worst meshes shows a
+recurring shape: a 4-vertex strip whose vertices are two coincident *pairs* —
+a rim polygon a tenth of a world unit wide, giving a flat card a nominal
+thickness. Those are authored, sub-pixel, and harmless either way.
+
 `drop_collapsed_uv_triangles()` removes them; the exporter does so by default.
-Why the hardware does not display them is unresolved.
+It **skips untextured meshes**, whose UVs are all legitimately zero — see the
+16-bit UV section. Why the hardware does not display the rest is unresolved.
+
+> A collapsed UV triangle and a *clamped* texture axis look identical on screen
+> — both smear one row or column of texels across a face. Session 13 spent a
+> long time treating the second as the first. If a face reads as a 1-D smear,
+> check its sampler before you look at its UVs.
 
 ## Skeleton
 
@@ -431,7 +525,13 @@ correctly.
    approximate.
 2. `texture_control` bits 21–26: palette selector width and its overlap with
    stride select and scan order.
-3. Sprite/quad strips (flag bit 2) — do they occur in HOD2 at all?
-4. 16-bit UVs (PCW bit 0) — do they occur? The reference importer never honours
-   the flag.
+3. ~~Sprite/quad strips (flag bit 2) — do they occur in HOD2 at all?~~
+   **ANSWERED** — 65,494 strips (23.5%) set it, and this port never reads it.
+   Whatever it meant on NAOMI, it has no effect here.
+4. ~~16-bit UVs (PCW bit 0) — do they occur?~~ **SOLVED** — the bit marks an
+   untextured mesh and does not change the vertex layout. See above.
 5. The exact meaning of the `tex_ambient` bit-0 flag.
+6. Why does `ModelFlipStripCullingParity` patch exactly four asset slots
+   (`0x17A0`, `0x17A1`, `0x18A3`, `0x18A5`)? A content fix for four models that
+   shipped with inverted culling and fog enabled, presumably — but the four
+   have not been identified.

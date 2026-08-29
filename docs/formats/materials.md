@@ -190,8 +190,107 @@ through table `0x00598B20`:
 This confirms the winding fix made empirically in Session 6 — the reversal
 belongs on culling 3, not 2 — from the binary rather than from screenshots.
 
-`parameter_control & 0x40` selects `SHADEMODE`: clear → `D3DSHADE_FLAT`,
-set → `D3DSHADE_GOURAUD`. `& 8` selects triangle list (count × 3) over strip.
+### Shade mode is per *strip*, not per mesh — correction
+
+An earlier revision of this document said `parameter_control & 0x40` selects
+`SHADEMODE`. It does not. `TranslatePvr2StateToD3D` never reads
+`parameter_control` at all — it takes `isp_tsp_instruction`,
+`tsp_instruction` and `texture_control`, and merely caches the first word.
+
+`SHADEMODE` and `CULLMODE` are both set by `WalkMeshChainAndDraw` from the
+**strip control word**:
+
+```c
+if (!(strip & 0x80)) {                       /* bit 7: reuse previous state */
+    if ((strip ^ prev) & 3)
+        SetRenderState(CULLMODE,  cull_table[strip & 3]);
+    if ((strip ^ prev) & 0x40)
+        SetRenderState(SHADEMODE, (strip & 0x40) ? 2 : 1);   /* GOURAUD : FLAT */
+    prev = strip;
+}
+```
+
+`strip & 8` selects triangle list (count × 3) over triangle strip. Strip flag
+frequencies and the bit-7 inheritance rule are in
+[`nl1.md`](nl1.md#strip-control-word--measured-over-all-278807-strips).
+
+### Environment mapping is not implemented in this port — [proved]
+
+263 models set `globalFlag` bit 2 ("environment mapping used") and 2,976 strips
+set strip-flag bit 8 ("environment mapping"). **The PC port reads neither.**
+The proof is a closed set, not an absence of evidence:
+
+1. **Only three call sites of `SetTextureStageState` exist in the whole
+   binary** — `InitD3DDeviceAndTextureStages` (`0x004A4DA0`),
+   `TranslatePvr2StateToD3D` (`0x004A7780`) and `DrawSpriteQuadCommand`
+   (`0x004A7AB0`). Between them they set exactly six states:
+
+   | State | # | Set by |
+   |---|---|---|
+   | `COLOROP` (1) / `COLORARG1` (2) / `COLORARG2` (3) | | init, translate |
+   | `ALPHAOP` (4) / `ALPHAARG1` (5) / `ALPHAARG2` (6) | | init, translate |
+   | `ADDRESSU` (13) / `ADDRESSV` (14) | | translate |
+   | `MAGFILTER` (16) / `MINFILTER` (17) / `MIPFILTER` (18) | | init, translate |
+
+   **`TEXCOORDINDEX` (11) and `TEXTURETRANSFORMFLAGS` (24) are never set**, so
+   they keep their D3D defaults: coordinate set 0 taken straight from the
+   vertex, and no texture transform. Searching the binary for the DX7
+   texgen selectors `D3DTSS_TCI_CAMERASPACENORMAL` (`0x20000`) and
+   `D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR` (`0x30000`) finds no use of either.
+2. **No UV is ever computed.** `WalkMeshChainAndDraw` either hands D3D a
+   pointer into the model file or copies 8 dwords per vertex unmodified. The
+   only arithmetic it ever performs on a UV is the mirror fold, and that is a
+   fallback for devices without `D3DTADDRESS_MIRROR` (see `nl1.md`).
+3. **Neither flag is read.** The walker loads `globalFlag` and tests only
+   bit 4. Nothing in the program tests `0x100` against a strip control word.
+
+Only stage 0 is ever configured; `InitD3DDeviceAndTextureStages` disables
+stage 1 (`COLOROP`/`ALPHAOP` = `D3DTOP_DISABLE`) and nothing re-enables it.
+So there is no second texture stage for a reflection map to live in either.
+
+**For the exporter this is a decision, not a gap:** the faithful reproduction
+of this port ignores both flags. `nl1.Strip.env_mapped` is kept so the flag
+survives into `extras`, but nothing acts on it.
+
+### The addressing table, read from the binary
+
+`0x00598AF0` holds four `D3DTEXTUREADDRESS` values: **`1, 2, 3, 2`** =
+`WRAP, MIRROR, CLAMP, MIRROR`. It is indexed per axis, and the index is
+built by substitution (not by eyeballing the shifts):
+
+| Axis | State | Index | tsp bits |
+|---|---|---|---|
+| V | `ADDRESSV` (14) | `(bit15 << 1) \| bit17` | 15 clamp V, 17 flip V |
+| U | `ADDRESSU` (13) | `(bit16 << 1) \| bit18` | 16 clamp U, 18 flip U |
+
+So clamp **and** flip together gives `MIRROR`, not clamp.
+
+> ⚠️ **A clamped axis whose UVs leave `[0,1]` smears one row or column of
+> texels across the whole face.** That is reachable in this data and it is what
+> a "stretched face" usually turns out to be. In glTF this makes the sampler
+> part of a material's identity — see *A glTF texture is (image, sampler)*
+> below.
+
+### The mesh fog patch
+
+`ModelForceFogControlNone` (`0x00419300`) rewrites every mesh header of four
+specific asset slots to `tsp = (tsp & 0xFFBFFFFF) | 0x00800000`, forcing fog
+control (bits 22–23) to 2 = *none*. It is a per-asset content patch applied at
+load, not a global rule — see [`nl1.md`](nl1.md).
+
+### Opaque and translucent are two passes over the same chain
+
+`RenderEnqueueCommand` calls `WalkMeshChainAndDraw(cmd, 0)` and the flush pass
+calls it again with `1`. The per-mesh selector is
+
+```c
+is_translucent = (tsp_instruction & 0x180000) != 0x80000;
+```
+
+— a mesh is drawn in the opaque pass only when `IgnoreTexAlpha` (bit 19) is set
+*and* `UseAlpha` (bit 20) is clear. Everything else is translucent. Meshes for
+the other pass are skipped by `mesh_data_size` and contribute only their
+transformed Z to the command's sort key.
 
 ## The global D3D7 render state — SOLVED
 
@@ -268,7 +367,7 @@ state instead. That single distinction eliminates most of the search space.
 | list 2/3 (translucent) | `alphaMode: BLEND` |
 | list 4 (punch-through) | `alphaMode: MASK`, cutoff 0.5 (unused in practice) |
 | `IgnoreTexAlpha` | opaque image variant |
-| clamp / flip UV | sampler `wrapS` / `wrapT` |
+| clamp / flip UV | sampler `wrapS` / `wrapT` — part of the texture's identity, see below |
 | filter mode 0 | `NEAREST`, else `LINEAR` |
 | culling | `doubleSided` |
 
@@ -280,3 +379,32 @@ look slightly dark.
 Every material also carries the raw register words in `extras.pvr2` —
 `parameter_control`, `isp_tsp_instruction`, `tsp_instruction`,
 `texture_control` — so nothing is lost to the approximate PBR mapping.
+
+### A glTF texture is (image, sampler) — a fixed exporter bug
+
+In glTF a `texture` binds one `image` to one `sampler`, and the *material*
+references the texture. The exporter used to cache textures on the decoded
+image alone — `(part, texture_id, opaque)` — and then stamp the sampler onto
+the shared texture as each material was written.
+
+That is last-writer-wins. A single mesh with a clamped or mirrored axis
+retroactively gave its addressing to **every** other mesh in the segment using
+the same image. On stage 2, 2,176 textured materials shared 1,241 textures, and
+a large fraction ended up clamped when their own TSP said wrap — smearing one
+row or column of texels across whole walls. The carved marble plinths on the
+canal rendered as flat grey streaks because of it.
+
+Fixed by splitting the caches: images are still deduplicated on
+`(part, texture_id, opaque)`, textures on `(image, sampler)`. Stage 2 now emits
+1,754 textures over the same 1,241 images, and **2,176 / 2,176 materials carry
+the addressing modes their own `tsp_instruction` demands**.
+
+> ⚠️ **Blender's Workbench engine cannot show this correctly.** The glTF
+> importer cannot express two different wrap modes on an Image Texture node, so
+> it sets `extension = EXTEND` and emulates the real modes with shader math
+> nodes. Workbench does not evaluate shader nodes — it reads `extension`
+> directly — so under Workbench *every* material with a non-`REPEAT` axis
+> renders clamped on **both** axes, producing exactly the streaks and
+> solid-black faces the real bug produced. `blender_camview.py` now defaults to
+> EEVEE for unlit exports for this reason. Use `--engine workbench` only for
+> geometry checks.

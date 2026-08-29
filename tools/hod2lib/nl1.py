@@ -343,7 +343,17 @@ def drop_collapsed_uv_triangles(mesh: "Mesh", eps: float = 1e-7) -> int:
     reject zero-area-in-UV polygons, or they may be hidden by other geometry
     along the camera rail. Either way they carry no displayable texture
     information, so dropping them can only improve the result.
+
+    **Untextured meshes are exempt.** A mesh with `texture_id == -1` stores all
+    its UVs as literal zero, so every one of its triangles has zero UV area and
+    this filter would delete the mesh entirely. It samples no texture at all --
+    it is drawn in its flat base colour -- so UV area carries no information
+    about it. Game-wide that is 903 meshes / 33,875 vertices, and on stage 2 it
+    was 15% of everything this function was dropping. See `16-bit UVs` in
+    `docs/formats/nl1.md`.
     """
+    if mesh.texture_id < 0:
+        return 0
     keep = [t for t in mesh.triangles
             if _uv_area(mesh.vertices[t[0]], mesh.vertices[t[1]],
                         mesh.vertices[t[2]]) >= eps]

@@ -44,7 +44,21 @@ if len(argv) < 2:
 path = Path(argv[0])
 camname = argv[1]
 frame = int(argv[2]) if len(argv) > 2 and argv[2].isdigit() else 0
-engine = "workbench"
+# Default to EEVEE when the file is unlit.
+#
+# Blender's glTF importer cannot express a non-REPEAT wrap mode on the Image
+# Texture node when the two axes differ, so it sets `extension = EXTEND` and
+# emulates the real mode with Math/SeparateXYZ/CombineXYZ nodes. **Workbench
+# does not evaluate shader nodes** -- it reads the image node's `extension`
+# directly -- so under Workbench every material with a clamped or mirrored
+# axis renders clamped on *both* axes. That smears one row or column of texels
+# across the whole face, and turns faces whose UVs run negative solid black.
+#
+# It is a convincing artifact: it looks exactly like a UV bug in the exporter,
+# and cost most of Session 13 to run down. EEVEE evaluates the nodes and is
+# correct. Workbench is still available with --engine workbench and is fine
+# for geometry-only checks.
+engine = "eevee"
 if "--engine" in argv:
     engine = argv[argv.index("--engine") + 1].lower()
 show_rails = "--rails" in argv
@@ -58,6 +72,11 @@ except Exception as e:  # noqa: BLE001
 
 sc = bpy.context.scene
 sc.render.fps = 60
+
+# KHR_materials_unlit shows up as an Emission shader; a lit render of this
+# game is black because it ships no light sources.
+_unlit = any(any(n.type == "EMISSION" for n in m.node_tree.nodes)
+             for m in bpy.data.materials if m.use_nodes)
 
 cam = bpy.data.objects.get(camname)
 if cam is None:
@@ -87,6 +106,11 @@ print(f"camera   {camname}  game frame {frame}  ({frame / 60.0:.2f}s)")
 print(f"  eye    ({eye.x:9.1f},{eye.y:9.1f},{eye.z:9.1f})  [Blender Z-up]")
 print(f"  fwd    ({fwd.x:6.2f},{fwd.y:6.2f},{fwd.z:6.2f})")
 print(f"  looks at: {obj.name + ' @ ' + format((loc - eye).length, '.1f') + ' units' if hit else 'NOTHING'}")
+
+if engine.startswith("eevee") and not _unlit:
+    print("  note: file is not unlit -- EEVEE will render it black (the game "
+          "ships no lights). Re-export with --unlit, or use --engine workbench.")
+    engine = "workbench"
 
 if engine.startswith("eevee"):
     sc.render.engine = [e for e in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE")

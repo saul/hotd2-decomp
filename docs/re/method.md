@@ -110,6 +110,34 @@ camera, looked at, before it is committed as the default.**
     -- extract/stage2/stage2.gltf cp_st2_50_cam 90
 ```
 
+### Corollary 2: the renderer you check with is part of the experiment
+
+Blender's glTF importer cannot put two different wrap modes on an Image
+Texture node, so it sets `extension = EXTEND` and emulates the real modes with
+shader math nodes. **Workbench does not evaluate shader nodes.** Under
+Workbench every material with a clamped or mirrored axis therefore renders
+clamped on *both* axes — one row or column of texels smeared across the face,
+and solid black wherever the UVs run negative.
+
+That is indistinguishable from a UV bug in the exporter, and Session 13 spent
+hours on it. `blender_camview.py` now defaults to EEVEE for unlit exports.
+Before concluding anything from a render, know what the renderer is faking.
+
+### Corollary 3: when a face looks wrong, bisect the pipeline, don't stare
+
+Three cheap, decisive tools, in the order they should be used:
+
+1. `tools/blender_probe.py <gltf> <cam> <frame> <sx> <sy> …` — raycast a pixel
+   and print the object, material, image, the face's UVs and its world-units
+   per texel. `--sweep` ranks the whole frame by texel aspect. Reading pixel
+   coordinates off a screenshot by eye is guesswork; this is not.
+2. `export_level.py --uv-check` — replace every texture with a checkerboard.
+   Distinguishes "the UVs are degenerate" from "the texture decoded wrong" in
+   one render.
+3. **Turn one thing off.** Forcing every sampler to `REPEAT` and re-rendering
+   located Session 13's bug in a single step, after a long time spent probing
+   UV values that were correct all along.
+
 ---
 
 ## Rule 4: the session log is the deliverable

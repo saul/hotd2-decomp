@@ -276,6 +276,50 @@ free anchors into real code paths.
 The first is the most valuable: it places `evt` loading near `0x413133` and
 confirms paths are built at runtime rather than stored whole.
 
+## Model load, walk and draw — Phase 3/5
+
+| Address | Name | Notes |
+|---|---|---|
+| `0x00418A00` | `AssetLoadTexBankStep` | `tex\%s` load step (entry 1 of the job sub-step table at `0x0057A29C`); binds the bank and, for four slots, applies the two model patches below |
+| `0x00419270` | `ModelFlipStripCullingParity` | XORs bit 0 of every **strip** control word — flips culling 2↔3. The canonical statement of the NL1 chain walk |
+| `0x00419300` | `ModelForceFogControlNone` | forces every mesh's `tsp` fog control (bits 22–23) to 2 = none |
+| `0x004AC980` | `BindModelTextureHandles` | rewrites each mesh's `texture_id` to a global texture handle \| `0x40000000`; skips `-1` and already-bound |
+| `0x004A7EF0` | `WalkMeshChainAndDraw` | the mesh-chain renderer; two passes, opaque then translucent |
+| `0x004A7780` | `TranslatePvr2StateToD3D` | the PowerVR2 → D3D7 state translation |
+| `0x004A59C0` | `DrawStripPrimitive` | `DrawPrimitive(D3DPT_TRIANGLESTRIP, 0x112, …)` |
+| `0x004A5A40` | `DrawTriangleListPrimitive` | `DrawPrimitive(D3DPT_TRIANGLELIST, 0x112, …)` |
+| `0x004A7AB0` | `DrawSpriteQuadCommand` | 2D/billboard quad path — four corners, BAMS rotation |
+| `0x004A7630` | `RenderInitStates` | one-time device render state |
+| `0x004A4DA0` | `InitD3DDeviceAndTextureStages` | device creation; the only other `SetTextureStageState` site |
+| `0x004AA2B0` | `RenderSubmitModelDefaultLight` | builds a 0x1D-dword draw command |
+| `0x004AA500` | `RenderSubmitModelSceneLights` | same, with flag `0x04000000` |
+| `0x004A7E50` | `RenderEnqueueCommand` | opaque pass + copy into the sort list |
+| `0x004A88E0` | `RenderFlushCommandList` | sorts and replays; translucent pass |
+| `0x004A9880` | `MatrixStackPush` | 16 dwords per level at `0x007E7990` |
+| `0x004A9840` | `MatrixStackPop` | |
+
+### Lookup tables used by the translation
+
+| Address | Entries | Contents | Meaning |
+|---|---|---|---|
+| `0x00598AB0` | 8 | `1,2,9,10,5,6,7,8` | `SRCBLEND` |
+| `0x00598AD0` | 8 | `1,2,3,4,5,6,7,8` | `DESTBLEND` |
+| `0x00598AF0` | 4 | `1,2,3,2` | texture address: `WRAP, MIRROR, CLAMP, MIRROR` |
+| `0x00598B00` | 8 | `1,7,3,5,4,6,2,8` | `ZFUNC` |
+| `0x00598B20` | 4 | `1,1,3,2` | `CULLMODE`: `NONE, NONE, CCW, CW` |
+| `0x0057A280` | 4 + `-1` | `0x17A0, 0x17A1, 0x18A3, 0x18A5` | `g_model_fixup_slot_list` — the only slots that get the two model patches |
+
+### Globals
+
+| Address | Name | Notes |
+|---|---|---|
+| `0x009CA08C` | `g_game_mode` | mode-select index; **1 = Original Mode** |
+| `0x009A2224` | current region id | written by evt opcode `0x29` |
+| `0x009A1A08` | current scene id | |
+| `0x007E7990` | `g_matrix_stack_top` | 16 dwords per level |
+| `0x007DEB74` | `IDirect3DDevice7 *` | |
+| `0x00576A8C` / `0x00576ABC` | mode-1 region / id table pointers | |
+
 ## Direct3D 7 interface
 
 Device object at `0x007DEB74`. Vtable offsets, confirmed against the DX7 SDK
@@ -284,9 +328,20 @@ Device object at `0x007DEB74`. Vtable offsets, confirmed against the DX7 SDK
 | Offset | Method |
 |---|---|
 | `+0x2C` | `SetTransform` |
+| `+0x40` | `SetMaterial` |
 | `+0x48` | `SetLight` |
 | `+0x50` | `SetRenderState` |
+| `+0x64` | `DrawPrimitive` |
+| `+0x84` | `ComputeSphereVisibility` |
+| `+0x94` | `SetTextureStageState` |
 | `+0xB0` | `LightEnable` |
+
+`SetTextureStageState` has exactly **three** call sites in the binary
+(`InitD3DDeviceAndTextureStages`, `TranslatePvr2StateToD3D`,
+`DrawSpriteQuadCommand`) and between them they touch only `COLOROP`,
+`COLORARG1/2`, `ALPHAOP`, `ALPHAARG1/2`, `ADDRESSU`, `ADDRESSV`, `MAGFILTER`,
+`MINFILTER` and `MIPFILTER`. `TEXCOORDINDEX` and `TEXTURETRANSFORMFLAGS` are
+never set — which is what proves the port implements no environment mapping.
 
 GUIDs present in `.rdata` (checked against the SDK's `DEFINE_GUID` list):
 `IID_IDirectDraw7`, `IID_IDirect3D7`, `IID_IDirect3DHALDevice`,

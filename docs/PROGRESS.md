@@ -57,7 +57,7 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] 18,027 models parse out of the decompressed containers
 - [ ] `src/lz.c` reference implementation (deferred to Phase 7)
 
-## Phase 3 — `hod2lib` core 🔶 one known gap
+## Phase 3 — `hod2lib` core ✅ (one test suite outstanding)
 
 - [x] `container.py` — offset table + transparent decompression
 - [x] `nl1.py` — independent NL1 parser
@@ -66,8 +66,17 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] Cross-validated against the reference `NLimporter.parse_nl()` — UVs match
       byte for byte
 - [x] Collapsed-UV triangles (5.1%) identified and dropped at export
-- [ ] **16-bit UVs (`parameter_control` bit 0) are not decoded** — 128 stage
-      meshes affected; the reference addon has the same gap
+- [x] **Untextured meshes exempted from the collapsed-UV drop** — their UVs are
+      all legitimately zero, so the filter was deleting 903 meshes outright
+      (811 triangles / 43 materials on stage 2 alone)
+- [x] **16-bit UVs — SOLVED, and there was no bug.** `parameter_control` bit 0
+      is set on exactly the 903 meshes with `texture_id == -1` and does not
+      change the vertex layout. Both of the game's own mesh-chain walkers use a
+      fixed 32/8-byte stride keyed only on bit 0 of the vertex record;
+      `tools/verify_walk.py` replays that walk over all 9,112 models and lands
+      exactly on every declared mesh end
+- [x] Vertex stride, back-reference test and `mesh_data_size` masking taken
+      from the binary rather than the reference addon
 - [ ] Golden-file regression suite in `tests/`
 
 ## Phase 4 — Textures ✅ complete
@@ -80,7 +89,7 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] BMP and empty-file outliers handled
 - [ ] Confirm the twiddle transpose visually (needs a texture with legible text)
 
-## Phase 5 — Materials 🔶 partly done
+## Phase 5 — Materials ✅ complete
 
 Alpha, blending and list assignment are resolved from measured usage;
 see [`formats/materials.md`](formats/materials.md). The D3D7 state
@@ -102,7 +111,17 @@ translation has not been decompiled yet.
 - [x] Texture shading, UV clamp/flip, filtering, fog, blend, ZFUNC — all mapped
 - [x] Culling table confirms the Session 6 winding fix from the binary
 - [x] Shading modes (`parameter_control & 0x40` → FLAT/GOURAUD)
-- [ ] Environment mapping
+- [x] **Environment mapping — proved absent.** 263 models and 2,976 strips set
+      the flags; the port reads neither. Only three `SetTextureStageState` call
+      sites exist and none touches `TEXCOORDINDEX` or `TEXTURETRANSFORMFLAGS`,
+      so texgen keeps its D3D defaults and no UV is ever computed
+- [x] Shade mode corrected — it comes from **strip** flag bit 6, not
+      `parameter_control`; `TranslatePvr2StateToD3D` never reads
+      `parameter_control` at all
+- [x] Strip flag bit 7 (reuse previous state) and bit 5 (super index)
+      semantics measured corpus-wide
+- [x] Opaque/translucent two-pass selector decoded
+      (`(tsp & 0x180000) != 0x80000`)
 
 ## Phase 6 — Remaining formats 🔶 `evt/` and `cam/` solved
 
@@ -126,6 +145,10 @@ translation has not been decompiled yet.
       mis-named BGM) enter/preload a region; load and unload are set
       differences between consecutive regions. Validated: max region operand ==
       region count - 1 on all six stages
+- [x] **Mode-1 region tables at `0x00576A8C` — solved: Original Mode.** Same
+      region membership, different id→slot mapping, swapping in the
+      `st_org00`–`st_org03` models no region draws in Arcade mode. Every
+      substituted model's bounding box lies inside its stage's
 - [ ] `evt/` semantics — ~30 opcodes named only by the global they write
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [ ] `coli/` — record layout + hit-test semantics
@@ -148,6 +171,13 @@ translation has not been decompiled yet.
       camera and getting a recognisable stage-2 shot
 - [x] `--unlit` (`KHR_materials_unlit`) — the game bakes lighting into its
       textures and ships no lights, so a lit render is black
+- [x] **Texture/sampler split** — a glTF texture is (image, sampler); caching
+      on the image alone gave every material sharing an image the addressing
+      of whichever mesh was written last. 2,176/2,176 stage-2 materials now
+      carry their own `wrapS`/`wrapT`
+- [x] `--original` — export Original Mode geometry
+- [x] `tools/blender_probe.py` — headless "what is at this pixel", with
+      `--sweep` to rank a frame by texel aspect
 - [x] Correct stage geometry set from the exe region tables, replacing the
       `st<N>_*` glob; `<stage>_regions.json` sidecar and `extras.hod2_regions`
       per model node
@@ -178,16 +208,18 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     frees what it no longer needs, `0x28` preloads. See
     [`formats/pipeline.md`](formats/pipeline.md).
 11. Is the twiddle Morton convention correct, or transposed? (needs visual check)
-12. **What is the 16-bit UV vertex layout?** Narrowed. The renderer has no
-    16-bit path — it always submits FVF `0x112` (two `f32` UVs), and the
-    alternate vertex stride it does have is behind a model flag no model sets.
-    So it is either a load-time conversion (`FUN_00419270` toggles bit 0 of
-    every strip control word) or bit 0 does not mean what the PVR2 docs say.
-    See [`formats/nl1.md`](formats/nl1.md). (Phase 3)
+12. ~~**What is the 16-bit UV vertex layout?**~~ **SOLVED** — there isn't one.
+    `parameter_control` bit 0 marks an *untextured* mesh (perfect 1:1 with
+    `texture_id == -1` over 41,463 meshes) and the vertex stride is a fixed 32
+    bytes everywhere. `FUN_00419270` turned out to be
+    `ModelFlipStripCullingParity`, a content patch for four asset slots.
 13. Why does the game not display collapsed-UV triangles? Hardware rejection of
     zero-UV-area polygons, or hidden by the camera rail? (Phase 5/6)
-14. Are the reported stretched faces among the 128 16-bit-UV meshes, or is the
-    anisotropy genuinely authored? (Phase 3)
+14. ~~Are the reported stretched faces among the 128 16-bit-UV meshes, or is
+    the anisotropy genuinely authored?~~ **SOLVED** — neither. They were a
+    texture/sampler aliasing bug in the exporter, amplified by Blender's
+    Workbench engine ignoring the importer's wrap-mode emulation nodes. See
+    [`formats/materials.md`](formats/materials.md).
 15. What is the eighth curve index in a `cp_` path descriptor? Neither
     evaluator reads it, and it always points at a real curve. (Phase 6)
 16. Which `evt/` opcode selects a `cam/` path slot? Opcodes `0x18`/`0x19` are

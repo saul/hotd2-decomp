@@ -50,8 +50,8 @@ against a known-good input set; it contains no asset content.
 
 ## Status
 
-Phases 0-2 and 4 complete. Phase 6 solved `evt/` and `cam/`; `mot/` and `coli/`
-remain. Phases 3, 5 and 8 have known gaps.
+Phases 0–5 complete. Phase 6 solved `evt/` and `cam/`; `mot/` and `coli/`
+remain. Phase 8 exports whole textured stages with camera animation.
 
 - [`docs/re/session-log.md`](docs/re/session-log.md) — **start here when
   resuming.** Where the last session stopped and what to do next.
@@ -68,6 +68,10 @@ python3 tools/export_level.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --st
 
 # ...with unlit materials, so a Rendered view is not black (see Lighting below)
 python3 tools/export_level.py --game-dir "..." --stage 2 --unlit
+
+# Original Mode geometry (game mode 1) instead of Arcade -- same regions, but
+# a few slots resolve to the st_org* models Arcade never draws
+python3 tools/export_level.py --game-dir "..." --stage 2 --unlit --original
 
 # a single segment
 python3 tools/export_level.py --game-dir "..." --name st2_01
@@ -96,6 +100,11 @@ the game never displays together. Every model node carries
 `extras.hod2_regions`, and `<stage>_regions.json` lists each region's contents.
 
 `--glob-geometry` restores the old behaviour for comparison.
+
+The game has a **second** set of region id tables, selected when the mode-select
+index is 1 — **Original Mode**. Region membership is identical; a handful of
+ids resolve to different models, bringing in `st_org00`–`st_org03`, which no
+region draws in Arcade mode. `--original` exports that variant.
 
 ### Camera paths
 
@@ -168,6 +177,19 @@ Paste `tools/blender_whatsthis.py` into Blender's Scripting tab with a face
 selected (Tab for Edit Mode, 3 for face select) to dump that face's UVs, area
 and texel density to `~/hod2_whatsthis.txt`.
 
+`tools/blender_probe.py` is the headless equivalent: give it the pixel you are
+suspicious about and it tells you which mesh is there.
+
+```sh
+# what is at 8% across, 60% down, in this camera's view?
+/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_probe.py \
+    -- extract/stage2/stage2.gltf cp_st2_50_cam 90 0.08 0.60
+
+# rank the whole frame by texel aspect ratio, worst first
+/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_probe.py \
+    -- extract/stage2/stage2.gltf cp_st2_50_cam 90 0 0 --sweep
+```
+
 To verify an export without opening the GUI:
 
 ```sh
@@ -183,6 +205,15 @@ To verify an export without opening the GUI:
 of the result, so "it came out black" is a measurement rather than an
 impression — and it distinguishes a lighting problem from a camera pointing at
 nothing.
+
+> ⚠️ **Render unlit exports with EEVEE, which is now the default.** Blender's
+> glTF importer cannot put two different wrap modes on an Image Texture node,
+> so it sets `extension = EXTEND` and emulates the real modes with shader
+> nodes. Workbench does not evaluate shader nodes, so under Workbench every
+> material with a clamped or mirrored axis renders clamped on *both* — one row
+> of texels smeared across the face, and solid black where the UVs go
+> negative. It looks exactly like a UV bug in the exporter and is not one.
+> `--engine workbench` is still right for geometry-only checks.
 
 ### Regenerate the baseline CSVs
 

@@ -89,7 +89,7 @@ def load_cam_paths(game: Path, stage: int | None, name: str | None):
     return out
 
 
-def stage_geometry(game: Path, stage: int, scene: int):
+def stage_geometry(game: Path, stage: int, scene: int, original: bool = False):
     """The authoritative geometry set for a stage, from Hod2.exe.
 
     Globbing `st<N>_*` is wrong in both directions: it misses files the stage
@@ -107,6 +107,12 @@ def stage_geometry(game: Path, stage: int, scene: int):
     spawnable actors -- enemies, characters -- instantiated at runtime from
     spawn descriptors, not placed scenery.
 
+    With *original* set, the mode-1 region id tables are used instead --
+    Original Mode. Region membership is byte-identical between the two modes;
+    only a handful of id entries point at different models, swapping in the
+    `st_org00..st_org03` files (and on stage 1, alternate `st1_*` entries) that
+    Arcade Mode never draws. See `docs/formats/pipeline.md`.
+
     Returns (parts, model_regions, regions) where *parts* is the usual
     (name, models, bank) list, *model_regions* maps (part, model index) to the
     region ids that draw it, and *regions* is the raw region table.
@@ -116,7 +122,7 @@ def stage_geometry(game: Path, stage: int, scene: int):
         raise SystemExit("Hod2.exe is required to resolve the stage geometry set")
 
     slots = tables.asset_slots()
-    regions = tables.scene_regions(scene)
+    regions = tables.scene_regions(scene, original)
 
     wanted: dict[str, set[int]] = {}
     slot_regions: dict[tuple[str, int], set[int]] = {}
@@ -141,7 +147,7 @@ def stage_geometry(game: Path, stage: int, scene: int):
                         if rec:
                             wanted.setdefault(rec[0], set()).add(rec[1])
 
-    draw_modes = tables.scene_draw_modes(scene)
+    draw_modes = tables.scene_draw_modes(scene, original)
     slot_of: dict[tuple[str, int], int] = {v: k for k, v in slots.items()}
     parts, model_regions = [], {}
     for fname in sorted(wanted):
@@ -196,6 +202,10 @@ def main() -> int:
     ap.add_argument("--keep-collapsed-uv", action="store_true",
                     help="keep triangles whose UV area is zero (they render as "
                          "hard directional streaks; dropped by default)")
+    ap.add_argument("--original", action="store_true",
+                    help="export Original Mode geometry (game mode 1) instead "
+                         "of Arcade. Same regions, but a few slots resolve to "
+                         "the st_org* models Arcade never draws")
     ap.add_argument("--glob-geometry", action="store_true",
                     help="use the old st<N>_* glob instead of the exe's region "
                          "tables. Wrong in both directions; kept for comparison")
@@ -243,14 +253,17 @@ def main() -> int:
                 models, bank = load_asset(game, n)
                 parts.append((n, models, bank))
         else:
-            parts, model_regions, regions = stage_geometry(game, args.stage, scene)
+            parts, model_regions, regions = stage_geometry(
+                game, args.stage, scene, original=args.original)
         for n, models, _b in parts:
             print(f"  + {n}: {len(models)} models, "
                   f"{sum(m.vertex_count for m in models):,} verts, "
                   f"{sum(m.triangle_count for m in models):,} tris")
 
         cam_files = [] if args.no_cameras else load_cam_paths(game, args.stage, None)
-        name = f"stage{args.stage}" + ("_uvcheck" if args.uv_check else "")
+        name = (f"stage{args.stage}"
+                + ("_original" if args.original and not args.glob_geometry else "")
+                + ("_uvcheck" if args.uv_check else ""))
         out_dir = args.out / name
         info = gltf.export_level(name, parts, out_dir,
                                  write_textures=not args.no_textures,
@@ -265,6 +278,7 @@ def main() -> int:
             side = out_dir / f"{name}_regions.json"
             side.write_text(json.dumps({
                 "scene": scene,
+                "game_mode": 1 if args.original else 0,
                 "note": "region id -> asset slots resident and drawn. Set by evt "
                         "opcode 0x29; consecutive regions overlap, which is why "
                         "a whole-stage export shows interpenetrating geometry "

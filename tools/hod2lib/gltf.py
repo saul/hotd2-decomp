@@ -420,21 +420,27 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
     nodes: list[dict] = []
     scene_nodes: list[int] = []
 
-    tex_written: dict[tuple, int] = {}     # (part, texture_id) -> glTF texture
+    img_written: dict[tuple, int] = {}     # (part, texture_id, opaque) -> glTF image
+    tex_written: dict[tuple, int] = {}     # image + sampler -> glTF texture
     sampler_cache: dict[tuple, int] = {}
     mat_cache: dict[tuple, int] = {}
 
-    def get_texture(part: str, bank, tex_id: int, strip_alpha: bool) -> int | None:
-        """Decode a texture, optionally forcing it fully opaque.
+    def get_image(part: str, bank, tex_id: int, strip_alpha: bool) -> int | None:
+        """Decode a texture to a PNG and return its glTF *image* index.
 
         ARGB1555/ARGB4444 textures are also used on meshes whose TSP sets
         IgnoreTexAlpha, where the hardware discards the alpha channel. Emitting
         the stored alpha for those would punch spurious holes, so they get a
         separate fully-opaque image variant.
+
+        Note this returns an **image**, not a texture. In glTF a texture is a
+        (image, sampler) pair, and the same image is routinely used by meshes
+        with different TSP addressing bits -- so images and textures must be
+        cached separately. See `get_texture`.
         """
         key = (part, tex_id, strip_alpha)
-        if key in tex_written:
-            return tex_written[key]
+        if key in img_written:
+            return img_written[key]
         if bank is None:
             return None
         got = bank.decode(tex_id)
@@ -454,8 +460,28 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
         if write_textures:
             png.write_rgba(out_dir / fn, w, h, rgba)
         images.append({"uri": fn})
-        textures.append({"source": len(images) - 1})
-        tex_written[key] = len(textures) - 1
+        img_written[key] = len(images) - 1
+        return img_written[key]
+
+    def get_texture(part: str, bank, mesh, strip_alpha: bool) -> int | None:
+        """glTF texture = (image, sampler) for this mesh's TSP addressing bits.
+
+        Deduplicating on the image alone and then stamping the sampler onto the
+        shared texture is wrong, and was a real bug: every material sharing an
+        image ended up with the addressing modes of whichever mesh happened to
+        be written last. One clamped mesh anywhere in a segment retroactively
+        clamped every other mesh using that image, smearing a single row or
+        column of texels across whole walls. The carved marble plinths in
+        stage 2 rendered as flat streaks because of it.
+        """
+        img = get_image(part, bank, mesh.texture_id, strip_alpha)
+        if img is None:
+            return None
+        smp = get_sampler(mesh)
+        key = (img, smp)
+        if key not in tex_written:
+            textures.append({"source": img, "sampler": smp})
+            tex_written[key] = len(textures) - 1
         return tex_written[key]
 
     def get_sampler(mesh) -> int:
@@ -481,7 +507,7 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
             return mat_cache[key]
 
         strip_alpha = mesh.ignore_texture_alpha
-        tex_idx = (get_texture(part, bank, mesh.texture_id, strip_alpha)
+        tex_idx = (get_texture(part, bank, mesh, strip_alpha)
                    if mesh.textured else None)
 
         a, r, g, b = mesh.base_colour
@@ -494,7 +520,6 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
             "roughnessFactor": 1.0,
         }
         if tex_idx is not None:
-            textures[tex_idx]["sampler"] = get_sampler(mesh)
             pbr["baseColorTexture"] = {"index": tex_idx}
             # glTF multiplies baseColorTexture by baseColorFactor, which is
             # exactly what D3DTOP_MODULATE does. The per-mesh base colour is

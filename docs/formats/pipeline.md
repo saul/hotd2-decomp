@@ -157,6 +157,13 @@ Tables, per scene:
 
 The count is not stored: each table ends where the next-highest begins.
 
+`RegionBindSceneTables` (`0x004014C0`) picks the pair:
+
+```c
+if (g_GameMode /* 0x009CA08C */ == 1) { region = mode1_rt[scene]; ids = mode1_it[scene]; }
+else                                  { region = rt[scene];       ids = it[scene];       }
+```
+
 **[measured]** Bounded that way, the region counts are 13 / 59 / 26 / 39 / 10 /
 14 for stages 1–6 — and the largest region id any script passes to opcode
 `0x28`/`0x29` is exactly `count - 1` for **every** stage, with no operand out of
@@ -222,6 +229,69 @@ it, all in stage 1 (`st1_01b[0]`, `st1_05[0]`).
 Exported as `extras.hod2_draw_mode` on every model node. Stage 2 has 9 mode-1
 models (`st2_13[0..3]`, `st2_12[0..1]`, `st2_06[3..4]`, `st2_02b[1]`) and no
 mode-2.
+
+### Game mode 1 is Original Mode — [proved]
+
+`g_GameMode` (`0x009CA08C`) is the mode-select menu index, written in
+`FUN_00496960` from the cursor `DAT_009A2226` for entries 0–3 and reset to 0
+everywhere a game starts from elsewhere.
+
+**Mode 1 shares the region tables and changes only the id tables.** Region
+membership — which id each region names — is byte-identical between the two
+modes on every scene; four scenes reuse the mode-0 id table outright. What the
+mode-1 id table changes is which *asset slot* an id resolves to:
+
+| Scene | Stage | ids differing | substituted models |
+|---|---|---|---|
+| 0 | 1 | 2 of 17 | `st1_03[0]→st1_03[1]`, `st1_03c[0]→st1_1[0]` |
+| 1 | 2 | 2 of 59 | `st2_03[2]`, `st2_10[0]` → `st_org00[0..1]` |
+| 2 | 3 | 2 of 28 | `st3_08[1]`, `st3_08[5]` → `st_org01[0..1]` |
+| 3 | 4 | 9 of 39 | `st4_*` → `st_org02[1,2,5,6,8]` |
+| 5 | 6 | 1 of 12 | `st6_01b[7]` → `st_org03[0]` |
+| 4, 6–11 | — | none | mode-1 pointer equals the mode-0 one |
+
+`st_org00`–`st_org03` — **st**age, **org**inal mode — are drawn by no region in
+mode 0, which is why globbing `st<N>_*` never found them. `draw_mode` is
+preserved by every substitution; only the slot changes.
+
+**[measured]** Every substituted model's bounding box lies strictly inside the
+mode-0 geometry bounding box of the same stage, on all five stages. A wrong
+id→slot mapping would put a model somewhere else in the world.
+
+`FUN_004040A0` gives a second, independent tell: while loading a scene's slot
+list it appends slot `0x16` to every entry **only when `g_GameMode == 1`**. And
+the `pol/` directory carries a whole `_org` family (`car_org`, `eff_org*`)
+alongside the four `st_org*` files.
+
+Export it with `export_level.py --original`; output lands in
+`extract/stage<N>_original/` and the sidecar records `"game_mode": 1`.
+
+### The draw command — 0x1D dwords
+
+`AssetDrawSlot` → `RenderSubmitModelDefaultLight` builds a 116-byte command on
+the stack and hands it to `RenderEnqueueCommand`, which copies it into a ring
+buffer and appends a pointer to a sort list. `RenderFlushCommandList`
+(`0x004A88E0`) sorts that list and replays it.
+
+| Offset | Dwords | Field |
+|---|---|---|
+| `+0x00` | 1 | flags — `0x04000000` scene lights, `0x20000000` sprite, `0x40000000` model, low nibble = draw layer |
+| `+0x04` | 1 | sort depth; seeded from the world matrix's `_43` and refined to the nearest mesh Z by the walker |
+| `+0x0C` | 1 | **model pointer** |
+| `+0x14` | 4 | fog / ambient parameters |
+| `+0x24` | 1 | light-set generation id |
+| `+0x28` | 3 | fog colour |
+| `+0x34` | 16 | **4×4 world matrix**, installed with `SetTransform(D3DTRANSFORMSTATE_WORLD, …)` |
+
+The world matrix is copied from the top of a matrix stack at `g_MatrixStackTop`
+(`0x007E7990`), 16 dwords per level, pushed by `MatrixStackPush` (`0x004A9880`)
+and popped by `MatrixStackPop` (`0x004A9840`).
+
+**[proved]** `RegionDrawResidentSet` brackets every slot draw with
+`MatrixStackPush(NULL)` / `MatrixStackPop(1)` and modifies nothing in between —
+a push that duplicates the top. **So region scenery is drawn with an unmodified
+scene-root matrix; placed geometry carries no per-model transform**, and
+exporting its vertices as-is is correct.
 
 ### The real stage geometry set
 

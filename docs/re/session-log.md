@@ -562,3 +562,67 @@ tools/export_level.py      CLI
 tools/verify_nl1.py        corpus-wide parser validation
 tools/blender_check.py     headless Blender import check + preview render
 ```
+
+---
+
+## Session 6 — face winding fix
+
+**Reported:** exported levels showed back-faces almost everywhere.
+
+**Confirmed and fixed.** Corpus-wide agreement went from **3.4% → 97.81%**.
+
+### Diagnosis
+
+NL1 stores per-vertex normals, which makes winding objectively testable rather
+than a matter of taste: compare the geometric normal `(b-a) x (c-a)` against the
+summed vertex normals and count sign agreement.
+
+First measurement, before any change:
+
+```
+agree     3.4%
+disagree 96.6%
+
+by culling flag:
+  cull=1  agree 84.7%      <- base winding already correct
+  cull=2  agree  1.8%      <- reversal applied here, wrongly
+  cull=3  agree  0.7%      <- reversal belongs here
+```
+
+The per-flag split is what identified the bug: `cull=1` was already right, so
+the base winding was fine and only the *reversal condition* was misplaced. That
+matches the flag semantics — mode 2 is "clock", mode 3 is "**r**clock", i.e.
+reversed clockwise. The reversal was keyed on 2 instead of 3.
+
+Triangle lists needed separate treatment. `cull==2` and "always reverse" both
+scored 100% at first because the initial sample contained only `cull=2`
+triangle lists. Widening to the whole corpus found 279 `cull=1` triangle lists,
+which disambiguated cleanly:
+
+```
+TRIANGLE LISTS, agreement by base winding
+  cull=1 base=(a,b,c)    0.0%      cull=1 base=(b,a,c)  100.0%
+  cull=2 base=(a,b,c)    0.0%      cull=2 base=(b,a,c)  100.0%
+```
+
+So both primitive types share one base winding (first two indices swapped) and
+both reverse on `culling == 3`.
+
+> Worth noting the near-miss: had I stopped at the first sample I would have
+> "confirmed" a rule that only held because the sample was homogeneous. Check
+> the distribution of the discriminating variable before trusting a 100%.
+
+No `cull==3` triangle lists exist anywhere in the game, so that combination is
+inferred from strip behaviour, not measured. Flagged in `nl1.md`.
+
+### Exports
+
+Both stages re-exported and re-verified:
+
+```
+stage1: 13 segments, 99,580 verts, 69,223 tris, 784 textures  -> CHECK-OK
+stage2: 18 segments, 141,802 verts, 97,799 tris, 947 textures -> CHECK-OK
+```
+
+Stage 1 spans 7200 x 8198 x 2024 units, stage 2 spans 6698 x 3516 x 812 — both
+already laid out in world space.

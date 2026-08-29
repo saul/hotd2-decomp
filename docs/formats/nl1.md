@@ -262,12 +262,34 @@ the strip's first slot.
 **Triangle list:** for each `j`, `i = base + 3j`. Emit `(i, i+1, i+2)`, or
 `(i+1, i, i+2)` when culling is 2.
 
-**Strip:** for `j` in `0 .. n-3`, `i = base + j`, alternating parity:
+Both primitive types share one base winding — **the first two indices are
+swapped** — and reversal keys on **culling mode 3** (`rclock`, reversed
+clockwise), *not* mode 2.
 
-| Parity | culling == 2 | otherwise |
-|---|---|---|
-| even | `(i, i+1, i+2)` | `(i+1, i, i+2)` |
-| odd | `(i+1, i, i+2)` | `(i, i+1, i+2)` |
+**Triangle list:** emit `(i+1, i, i+2)`, or `(i, i+1, i+2)` when `culling == 3`.
+
+**Strip:** for `j` in `0 .. n-3`, swap the first two indices when
+`(j is even) != (culling == 3)`.
+
+> ⚠️ An earlier revision of this document had the reversal on `culling == 2`.
+> That is wrong and produces almost entirely back-facing geometry.
+
+This was settled empirically rather than by reading the flag names. NL1 stores
+per-vertex normals, so for each candidate rule the geometric normal
+`(b-a) x (c-a)` can be compared against the summed vertex normals:
+
+| Rule | Agreement |
+|---|---|
+| triangle lists, base `(b,a,c)` | **100.0%** (at both `cull=1` and `cull=2`) |
+| strips, swap-on-even + reverse on `cull==3` | **99.6%** |
+| strips, no reversal at all | 77.8% |
+| strips, reverse on `cull==2` (the old rule) | 2.0% |
+
+Corpus-wide after the fix: **97.81%** of 1,305,883 triangles agree. The residual
+~2% is source data whose stored normals genuinely disagree with face winding.
+
+No `culling == 3` triangle lists occur anywhere in the game, so that combination
+is inferred from the strip behaviour rather than measured.
 
 Culling 0 or 1 means double-sided; 2 or 3 means single-sided.
 

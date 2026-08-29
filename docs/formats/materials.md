@@ -113,6 +113,86 @@ modulate does, so the base colour maps across directly.
 Under **decal** (3 meshes) the texture replaces the colour outright, so there
 the factor must stay white.
 
+## The PowerVR2 → Direct3D 7 translation — SOLVED
+
+`TranslatePvr2StateToD3D` (`0x004A7780`) is the function the README calls this
+project's Rosetta stone. It takes the mesh's four PVR2 words and issues D3D7
+state changes, skipping any whose bits are unchanged from the previous mesh.
+Every mapping below is read from that function and its lookup tables; the D3D
+constants are resolved against the real SDK headers.
+
+### From `isp_tsp_instruction`
+
+| Bits | D3D7 state | Mapping |
+|---|---|---|
+| 31–29 | `ZFUNC` | table `0x00598B00` |
+| 26 | `ZWRITEENABLE` | **inverted** — the PVR2 bit is *disable* |
+
+`ZFUNC` table: `NEVER, GREATEREQUAL, EQUAL, GREATER, LESSEQUAL, NOTEQUAL, LESS,
+ALWAYS`.
+
+### From `tsp_instruction`
+
+| Bits | D3D7 state | Mapping |
+|---|---|---|
+| 31–29 | `SRCBLEND` | table `0x00598AB0` |
+| 28–26 | `DESTBLEND` | table `0x00598AD0` |
+| 23 | `FOGENABLE` | **inverted** |
+| 20–19 | `ALPHATESTENABLE` | enabled unless the field is `0b01` |
+| 16 / 18 | `D3DTSS_ADDRESSU` | table `0x00598AF0`, index `(clamp<<1)\|flip` |
+| 15 / 17 | `D3DTSS_ADDRESSV` | same table |
+| 14–13 | `MAGFILTER`, `MINFILTER` | `0` → `POINT`, anything else → `LINEAR` |
+| 7–6 | `COLOROP`, `ALPHAOP` | see below |
+
+Blend tables:
+
+```
+SRCBLEND  : ZERO, ONE, DESTCOLOR, INVDESTCOLOR, SRCALPHA, INVSRCALPHA, DESTALPHA, INVDESTALPHA
+DESTBLEND : ZERO, ONE, SRCCOLOR,  INVSRCCOLOR,  SRCALPHA, INVSRCALPHA, DESTALPHA, INVDESTALPHA
+```
+
+UV address table: `WRAP, MIRROR, CLAMP, MIRROR`. **The last row matters** —
+clamp *and* flip together resolves to `MIRROR`, not `CLAMP`. It is reachable:
+157 mesh-axes set both on U, 90 on V.
+
+### Texture shading is not what its name suggests
+
+The four PVR2 shading modes collapse to:
+
+| Mode | `COLOROP` | `ALPHAOP` | Meshes |
+|---|---|---|---|
+| 0 "decal" | `MODULATE` | `MODULATE` | 1,111 |
+| 1 "modulate" | `MODULATE` | `SELECTARG1` | 33,429 |
+| 2 "decal alpha" | `MODULATE` | `MODULATE` | 0 |
+| 3 "modulate alpha" | `MODULATE` | `MODULATE` | 6,923 |
+
+**`COLOROP` is `MODULATE` unconditionally.** The port does not implement decal
+at all — the base colour multiplies the texture in every mode. Only the alpha
+op varies, and only for mode 1, which takes texture alpha alone and ignores the
+material alpha.
+
+This corrects an earlier assumption here that mode 0 replaced the colour
+outright; 1,111 meshes were being exported with their baked lighting flattened
+to white.
+
+### Culling
+
+`WalkMeshChainAndDraw` sets `CULLMODE` per mesh from `parameter_control & 3`
+through table `0x00598B20`:
+
+| Value | D3D7 |
+|---|---|
+| 0 | `D3DCULL_NONE` |
+| 1 | `D3DCULL_NONE` |
+| 2 | `D3DCULL_CCW` |
+| 3 | `D3DCULL_CW` |
+
+This confirms the winding fix made empirically in Session 6 — the reversal
+belongs on culling 3, not 2 — from the binary rather than from screenshots.
+
+`parameter_control & 0x40` selects `SHADEMODE`: clear → `D3DSHADE_FLAT`,
+set → `D3DSHADE_GOURAUD`. `& 8` selects triangle list (count × 3) over strip.
+
 ## The global D3D7 render state — SOLVED
 
 `RenderInitStates` (`0x004A7630`) sets the device state once, and per-draw code

@@ -172,7 +172,29 @@ class Mesh:
 
     @property
     def modulates_base_colour(self) -> bool:
-        return self.texture_shading in (1, 3)
+        """Always true on the PC port.
+
+        PowerVR2 has four texture-shading modes and "decal" is supposed to
+        replace the colour outright. The D3D7 translation
+        (``FUN_004A7780``) does not implement that: it sets
+        ``D3DTSS_COLOROP = D3DTOP_MODULATE`` for **every** mode and varies only
+        the alpha op. So on this port the base colour always multiplies the
+        texture, including for the 1111 mode-0 meshes.
+
+        Kept as a property rather than deleted because it documents a real
+        divergence between the arcade hardware and the port.
+        """
+        return True
+
+    @property
+    def texture_alpha_only(self) -> bool:
+        """True when the alpha op ignores the material alpha.
+
+        ``FUN_004A7780`` sets ``D3DTSS_ALPHAOP = D3DTOP_SELECTARG1`` for
+        shading mode 1 and ``D3DTOP_MODULATE`` for 0, 2 and 3. Mode 1 is by far
+        the most common (33,429 of 41,463 meshes).
+        """
+        return self.texture_shading == 1
 
     @property
     def additive(self) -> bool:

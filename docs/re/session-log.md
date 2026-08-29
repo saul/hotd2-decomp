@@ -1631,3 +1631,79 @@ one register write each. That is the value of the headers.
 `RenderEnqueueCommand`'s per-command state work is still unread — that is the
 actual PVR2 → D3D7 translation Phase 5 wants, and the enums are now in place to
 make it readable.
+
+### Addendum 7 — the PVR2 → D3D7 translation, the project's stated Rosetta stone
+
+`TranslatePvr2StateToD3D` (`0x004A7780`), reached from
+`WalkMeshChainAndDraw` (`0x004A7EF0`) which is the NL1 mesh-chain walker.
+Together they are the thing the README has claimed since Phase 0 exists: an
+authoritative, complete PowerVR2 → Direct3D 7 mapping, so material behaviour
+can be *recovered* rather than inferred.
+
+It is now fully decoded, with all five lookup tables resolved against the SDK
+headers imported last addendum. Full table in `formats/materials.md`; the
+shape is:
+
+```
+isp_tsp  31-29 -> ZFUNC (table)          26 -> ZWRITEENABLE (inverted)
+tsp      31-29 -> SRCBLEND (table)    28-26 -> DESTBLEND (table)
+            23 -> FOGENABLE (inverted) 20-19 -> ALPHATESTENABLE
+       16/18 -> ADDRESSU   15/17 -> ADDRESSV   14-13 -> MIN/MAGFILTER
+          7-6 -> COLOROP / ALPHAOP
+param_ctl  &3 -> CULLMODE (table)      &0x40 -> SHADEMODE      &8 -> list/strip
+```
+
+#### It confirmed one earlier finding and overturned two assumptions
+
+**Confirmed.** The culling table is `NONE, NONE, CCW, CW`. Session 6 changed the
+winding reversal from culling 2 to culling 3 on the strength of screenshots.
+The binary agrees exactly. Good to have that closed from the code.
+
+**Overturned 1 — texture shading.** `materials.md` described modes as
+decal / modulate / decal-alpha / modulate-alpha, and the exporter withheld the
+base colour under "decal". The port sets `COLOROP = D3DTOP_MODULATE`
+**unconditionally** and varies only the alpha op. There is no decal path. 1,111
+meshes were being exported with their baked lighting flattened to white.
+
+Only mode 1 differs, taking `ALPHAOP = SELECTARG1` — texture alpha alone,
+ignoring material alpha — and it is by far the most common (33,429 of 41,463).
+
+**Overturned 2 — UV addressing.** The table is `WRAP, MIRROR, CLAMP, MIRROR`
+indexed by `(clamp << 1) | flip`. Clamp *and* flip together gives **MIRROR**,
+not clamp. `_wrap_mode` returned `CLAMP_TO_EDGE` whenever clamp was set. The
+row is reachable — 157 mesh-axes on U, 90 on V — and this is a strong candidate
+for the Session 9 loose end "60 meshes with a clamped axis and a UV span beyond
+one tile", which is exactly what a wrongly-clamped mirror axis looks like.
+
+#### A near miss worth recording
+
+I first read the ADDRESSU/ADDRESSV bit extraction backwards and was about to
+report that `nl1.py` had clamp and flip swapped. Recomputing the shifts on
+paper — `((tsp >> 3) & 0x4000 | tsp & 0x8000) >> 14` puts **bit 15** at index
+bit 1, not bit 0 — showed `nl1.py` was right all along.
+
+Two bit-twiddling reads of the same expression, opposite conclusions. The one
+that survived was the one done by substituting single-bit values and printing
+the index. **Do the arithmetic, do not eyeball the shifts.**
+
+#### Fixed
+
+- `_wrap_mode`: clamp+flip → `MIRRORED_REPEAT`.
+- `modulates_base_colour`: now documents that it is unconditionally true on
+  this port, with the reason. Added `texture_alpha_only` for the mode-1 alpha
+  behaviour.
+- Exporter no longer withholds `baseColorFactor` for mode 0.
+
+#### Named
+
+`TranslatePvr2StateToD3D`, `WalkMeshChainAndDraw`, `DrawStripPrimitive`,
+`BindTextureStage`.
+
+#### Next
+
+1. `WalkMeshChainAndDraw`'s per-vertex path (`FUN_004A59C0` / `FUN_004A5A40`)
+   and the 16-bit UV branch — Phase 3's last open item, question 12. The mesh
+   walker is the right place to find it: it already branches on
+   `parameter_control` bits for list/strip.
+2. Environment mapping, the last unticked Phase 5 line.
+3. Re-measure the Session 9 stretched-face tail now that clamp+flip is right.

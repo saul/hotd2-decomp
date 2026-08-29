@@ -89,7 +89,9 @@ translation has not been decompiled yet.
 - [x] Global device state decoded (`RenderInitStates`) — `CULLMODE` is
       `D3DCULL_NONE`, `COLORVERTEX` off, all material sources `D3DMCS_MATERIAL`,
       global alpha test at `GREATEREQUAL`/ref 1
-- [ ] Locate the per-draw PVR2 → D3D7 state translation
+- [x] **PVR2 → D3D7 translation located and fully decoded** —
+      `TranslatePvr2StateToD3D` at `0x004A7780`, with all five lookup tables
+      resolved against the SDK. See [`formats/materials.md`](formats/materials.md)
 - [x] Document culling (settled empirically, see `formats/nl1.md`)
 - [x] Document blend factors — two modes in use, standard and additive
 - [x] Document list assignment — no punch-through anywhere in the game
@@ -97,8 +99,10 @@ translation has not been decompiled yet.
 - [x] Two lighting setups identified: `SetLightingDefaultSingle` (one
       directional) vs `SetLightingSceneArray` (up to 16 `D3DLIGHT7`), selected
       by draw-command bit `0x04000000` — see `formats/pipeline.md`
-- [ ] Document texture shading, UV clamp/flip, filtering, fog
-- [ ] Document shading modes and environment mapping
+- [x] Texture shading, UV clamp/flip, filtering, fog, blend, ZFUNC — all mapped
+- [x] Culling table confirms the Session 6 winding fix from the binary
+- [x] Shading modes (`parameter_control & 0x40` → FLAT/GOURAUD)
+- [ ] Environment mapping
 
 ## Phase 6 — Remaining formats 🔶 `evt/` and `cam/` solved
 

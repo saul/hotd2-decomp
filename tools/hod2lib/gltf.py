@@ -214,6 +214,20 @@ def _sample_path(path, channels, step):
 
 
 def _wrap_mode(clamp_bit: bool, flip_bit: bool) -> int:
+    """PVR2 clamp/flip -> D3D7 texture address, as FUN_004A7780 does it.
+
+    The game indexes a 4-entry table with ``(clamp << 1) | flip``:
+
+        0 neither  -> D3DTADDRESS_WRAP
+        1 flip     -> D3DTADDRESS_MIRROR
+        2 clamp    -> D3DTADDRESS_CLAMP
+        3 both     -> D3DTADDRESS_MIRROR      <- mirror wins, not clamp
+
+    That last row is not what "clamp overrides everything" would predict, and
+    it is reachable: 157 mesh-axes set clamp+flip on U and 90 on V.
+    """
+    if clamp_bit and flip_bit:
+        return MIRRORED_REPEAT
     if clamp_bit:
         return CLAMP_TO_EDGE
     if flip_bit:
@@ -482,14 +496,15 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
             textures[tex_idx]["sampler"] = get_sampler(mesh)
             pbr["baseColorTexture"] = {"index": tex_idx}
             # glTF multiplies baseColorTexture by baseColorFactor, which is
-            # exactly what the hardware's "modulate" texture-shading mode does.
-            # The per-mesh base colour is this game's baked static lighting --
-            # 32% of stage meshes carry a value below 0.95, down to 0.0 -- so
-            # forcing it to white flattens all of that away.
+            # exactly what D3DTOP_MODULATE does. The per-mesh base colour is
+            # this game's baked static lighting -- 32% of stage meshes carry a
+            # value below 0.95, down to 0.0 -- so forcing it to white flattens
+            # all of that away.
             #
-            # Under decal the texture replaces the colour outright, so there
-            # the factor must stay white.
-            if uv_check or not mesh.modulates_base_colour:
+            # This applies to EVERY shading mode. The port's translation sets
+            # COLOROP = MODULATE unconditionally and only varies the alpha op,
+            # so PowerVR2 "decal" does not replace the colour here.
+            if uv_check:
                 pbr["baseColorFactor"] = [1.0, 1.0, 1.0, pbr["baseColorFactor"][3]]
 
         mat: dict = {

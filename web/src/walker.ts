@@ -425,11 +425,20 @@ export class Walker {
    */
   primeToFirstWait(maxOps = 4096): void {
     let n = 0;
-    while (!this.finished && !this.parked && !this.wait && !this.branch &&
-           n++ < maxOps) {
-      // Stop as soon as there is both something resident and somewhere to
-      // look from; running further would silently skip past the opening.
-      if (this.cam && this.region >= 0) break;
+    while (!this.finished && !this.parked && !this.branch && n++ < maxOps) {
+      if (this.wait) {
+        // Stop at a wait only once the scene is actually set up. The first
+        // wait in a stage comes very early -- stage 1 blocks on
+        // `wait_queued_events_done` at instruction 9 -- and everything that
+        // makes the opening frame look right runs after it: the region, the
+        // scene light, the ground plane, the backdrop preset, the rain. The
+        // game reaches those a second or two later, once the camera move it
+        // is waiting on finishes; opening there would just show a black
+        // screen with no sky.
+        if (this.cam && this.region >= 0) break;
+        this.wait = null;
+        this.opIndex++;
+      }
       if (!this.executeOne(false)) break;
     }
   }

@@ -435,3 +435,130 @@ ghidra/scripts/RecoverCodeGaps.java       recover missed functions          (new
 docs/re/addresses.md                      library vs game code map
 docs/PROGRESS.md                          Phase 1 closed
 ```
+
+---
+
+## Session 5 — Phase 3/4: levels, textures and glTF export
+
+**Outcome:** whole stages export to glTF with correct textures and verify in
+Blender. Phases 3 and 4 are functionally complete.
+
+### NL1 parser
+
+`tools/hod2lib/nl1.py`, written from the spec with the four known
+reference-implementation bugs fixed. Validated across the corpus:
+
+```
+327 files, 9,112 models, 1,488,301 vertices, 1,317,805 triangles
+no structural problems (indices in range, all positions/UVs finite)
+```
+
+That run also closed several open questions outright — the game uses a much
+narrower slice of the hardware than NL1 allows:
+
+| | |
+|---|---|
+| shading modes | lambert and constant only — **no bump, no vertex colour** |
+| pixel formats | RGB565, ARGB4444, ARGB1555 — **no palettised, no YUV422** |
+| mipmaps | **none** |
+| list types | opaque and translucent — **no punch-through** |
+
+So the packed-s8-normal byte-order question is moot (vertex-colour meshes never
+occur), the 56-byte bump vertex path is never exercised, and there are no
+palettes to find.
+
+### Textures — the hard part
+
+The Phase 0 hypothesis (concatenated in ID order, offsets = prefix sum of
+computed sizes) was **wrong**, and wrong in a way that looked right: 115 banks
+summed exactly. Decoding an actual image is what exposed it — `st2_01` texture 0
+was a clean gradient, texture 1 was pure noise.
+
+Two independent bugs, both invisible without looking at pixels:
+
+1. **Sizes are padded to 2048-byte boundaries.** 64×64 VQ needs 3072 bytes and
+   occupies 4096. Sizes already on a 2048 boundary are unpadded, so a prefix sum
+   works for some banks and silently drifts in others.
+2. **For VQ, the TSP size field is half the real dimensions.** It describes the
+   index array; each index covers a 2×2 block.
+
+The tell: **all 115 exactly-summing banks were non-VQ; every VQ bank was wrong.**
+
+#### What actually solved it
+
+Reading the game's own code, not more statistics. `FUN_00418E40` sets
+`DAT_00960720 = *(u32 *)(0x0055B9B8 + bank_index * 4)`, and `FUN_004AC980`
+indexes it as `table + texture_id * 16`.
+
+**Texture metadata is compiled into `Hod2.exe`, not stored in `tex/` at all.**
+16-byte descriptors: width, height, pixel format, PVR layout code, bank offset,
+global slot id. `exetab.py` extracts them straight from the PE.
+
+Result: **303/303 banks resolve exactly** — mean coverage 1.000, zero overflow.
+
+> I burned a lot of this session on statistical proxies (adjacent-pixel
+> coherence, brute-forced base offsets, SmallVQ hypotheses) that were all
+> inconclusive or actively misleading — one metric scored flat black regions as
+> perfect. The Phase 2 lesson applied here too and I was slow to reach for it:
+> **trace the data path in the binary.** Reach for the decompiler first when a
+> layout question resists two quick experiments.
+
+### Export
+
+`tools/hod2lib/gltf.py` writes glTF 2.0 + `.bin` + PNGs, with raw PowerVR2 state
+preserved in `material.extras.pvr2` so a target engine can be exact rather than
+relying on the approximate PBR mapping.
+
+Stages span many `pol/` files, so `--stage N` merges them into **one** glTF with
+a parent node per segment. Texture IDs are per-bank — tex 0 of `st2_01` is
+unrelated to tex 0 of `st2_02` — so everything keyed by texture is keyed by
+`(part, texture_id)` and PNGs go in per-part subfolders. Getting this wrong
+silently cross-wires textures between segments.
+
+Segments are already positioned in **world space**: stage 2 spans x ±3384 with
+no per-segment transform needed.
+
+```
+stage2: 18 segments, 141,802 verts, 97,799 tris, 1811 materials, 947 textures
+Blender: 51 mesh objects, 0 broken images, 0 objects without UVs -> CHECK-OK
+```
+
+`tools/blender_check.py` runs Blender headless to verify an export and render a
+preview. Worth keeping — it caught the texture bug immediately and is much
+faster than opening the GUI.
+
+### Still to verify visually
+
+- **Twiddle transpose.** Morton A (y even, x odd) is implemented. For square
+  textures the alternative is an exact transpose, and my symmetric coherence
+  metric cannot distinguish them by construction. Decoded images look correct,
+  but a definitive check needs a texture with legible text or a known logo.
+- **UV V orientation.** Written as stored; Blender's importer flips it, matching
+  the reference addon. UV ranges well outside [0,1] are normal here — the game
+  relies on REPEAT wrapping.
+
+### Next actions
+
+1. **`coli/` collision.** Structure is partly visible: a 216-byte repeating
+   record `[tag][count=52][52 floats]` containing unit normals and plane
+   distances, but the leading records do not fit that stride. Needs the hit-test
+   routine RE'd rather than guessed — `FUN_0048A310` is the loader.
+2. **`evt/` and `cam/` for segment streaming.** Stage segments exist as separate
+   `pol/` files and are almost certainly loaded on demand; the event tables and
+   camera paths should say when. This is the missing piece for reconstructing a
+   playable level rather than a static dump.
+3. **DX7 SDK headers as a GDT** before Phase 5 materials work.
+4. Trailing bytes in banks where the descriptor table stops short of the file.
+
+### Files added
+
+```
+tools/hod2lib/nl1.py       NL1 model parser
+tools/hod2lib/texbank.py   bank layout + PowerVR2 decode
+tools/hod2lib/exetab.py    descriptor tables extracted from Hod2.exe
+tools/hod2lib/gltf.py      glTF 2.0 writer
+tools/hod2lib/png.py       minimal PNG writer (no PIL dependency)
+tools/export_level.py      CLI
+tools/verify_nl1.py        corpus-wide parser validation
+tools/blender_check.py     headless Blender import check + preview render
+```

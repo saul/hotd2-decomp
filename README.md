@@ -59,7 +59,56 @@ Phase 0 complete; Phase 1 (Ghidra environment) in progress.
 
 ## Usage
 
-Regenerate the baseline CSVs from your own copy of the game:
+### Export a level to glTF
+
+```sh
+# one whole stage merged into a single file (recommended)
+python3 tools/export_level.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --stage 2
+
+# a single segment
+python3 tools/export_level.py --game-dir "..." --name st2_01
+
+# list available level assets
+python3 tools/export_level.py --game-dir "..." --list
+```
+
+Output lands in `extract/stage2/`:
+
+```
+stage2.gltf          the scene
+stage2.bin           geometry buffer
+textures/st2_01/*.png   PNGs, one folder per segment
+```
+
+### Open it in Blender
+
+**File > Import > glTF 2.0**, pick `extract/stage2/stage2.gltf`.
+
+Keep the `.bin` and `textures/` folder next to the `.gltf` — they are referenced
+by relative path.
+
+Notes:
+
+- Each stage segment (`st2_01`, `st2_02`, ...) is a **parent empty** with its
+  models as children, so segments can be shown or hidden independently in the
+  Outliner.
+- Segments are already positioned in **world space**; no manual placement is
+  needed.
+- Switch the viewport to **Material Preview** to see textures. Game interiors
+  carry no lights of their own, so Rendered view looks almost black until you
+  add one.
+- Levels are large (stage 2 spans ~6700 units). If geometry clips, raise the
+  viewport **End** clip distance in the N-panel > View.
+- UVs deliberately run outside 0..1; the game relies on texture REPEAT.
+
+To verify an export without opening the GUI:
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_check.py \
+    -- extract/stage2/stage2.gltf --render
+```
+
+### Regenerate the baseline CSVs
 
 ```sh
 python3 tools/baseline.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2"

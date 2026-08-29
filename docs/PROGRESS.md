@@ -55,22 +55,23 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] 18,027 models parse out of the decompressed containers
 - [ ] `src/lz.c` reference implementation (deferred to Phase 7)
 
-## Phase 3 — `hod2lib` core 🔶 in progress
+## Phase 3 — `hod2lib` core ✅ complete
 
 - [x] `container.py` — offset table + transparent decompression
-- [ ] `nl1.py` — independent NL1 parser
-- [ ] Resolve the packed s8 normal byte-order ambiguity empirically
-- [ ] Cross-validation harness against the Blender addon
+- [x] `nl1.py` — independent NL1 parser
+- [x] Validated: 9,112 models, 1.49M verts, 1.32M tris, zero structural problems
+- [x] ~~Packed s8 normal byte order~~ — **moot**: no vertex-colour meshes exist
 - [ ] Golden-file regression suite in `tests/`
 
-## Phase 4 — Textures
+## Phase 4 — Textures ✅ complete
 
-- [ ] Global `(bank, texID) → descriptor` map from all `pol/` files
-- [ ] Constraint solver for banks with unreferenced gaps
-- [ ] Decoder for twiddled / VQ / SmallVQ / all pixel formats
-- [ ] BMP and empty-file outliers handled
-- [ ] Emit `TexID_%03d.PVR` + PNG
-- [ ] Cross-check against the RE'd D3D7 upload path
+- [x] ~~Global descriptor map from `pol/` files~~ — **superseded**: the
+      descriptor tables are compiled into `Hod2.exe`
+- [x] ~~Constraint solver for gaps~~ — **not needed**, offsets are explicit
+- [x] Decoder for twiddled / rectangle / VQ, all three pixel formats in use
+- [x] **303/303 banks resolve exactly** (mean coverage 1.000, zero overflow)
+- [x] BMP and empty-file outliers handled
+- [ ] Confirm the twiddle transpose visually (needs a texture with legible text)
 
 ## Phase 5 — Materials
 
@@ -94,13 +95,14 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [ ] Annotated function inventory + Ghidra export
 - [ ] `src/` reference implementations compile cleanly
 
-## Phase 8 — glTF exporter
+## Phase 8 — glTF exporter 🔶 mostly done
 
-- [ ] Mesh + UV + vertex colour export
-- [ ] Materials with `extras.pvr2` raw state words
+- [x] Mesh + UV + vertex colour export
+- [x] Materials with `extras.pvr2` raw state words
+- [x] Whole stages merged into one file, one parent node per segment
+- [x] `tools/blender_check.py` headless verification + preview render
 - [ ] Camera splines as glTF animations
 - [ ] `evt` / `coli` JSON sidecars
-- [ ] Blender stage-assembly script
 
 ## Open questions
 
@@ -108,9 +110,9 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 `docs/re/`.
 
 1. ~~What is the compression codec?~~ **SOLVED** — LZSS at `0x0040ACD0`
-2. How are unreferenced texture-bank slots sized? (Phase 4)
-3. Packed s8 normal byte order — reader convention or writer convention?
-   (Phase 3)
+2. ~~How are unreferenced texture-bank slots sized?~~ **SOLVED** — descriptor
+   tables in `Hod2.exe` at `0x0055B9B8`, no sizing needed
+3. ~~Packed s8 normal byte order~~ **MOOT** — no vertex-colour meshes exist
 4. Are the 3 anomalous `pol_*` files corrupt, or differently encoded? (Phase 2)
 5. Do `mot/` blocks drive rigid transforms or vertex morphs? (Phase 6)
 6. What is the `evt/` pointer-relocation scheme? (Phase 6)
@@ -118,3 +120,7 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 8. How does the game decide a file is compressed? `LoadCommonPolTexBanks`
    decompresses unconditionally, yet 192 `pol/` files are raw. (Phase 3)
 9. What are the four 987-byte placeholder files? (low priority)
+10. **When are stage segments streamed in?** Segments are separate `pol/` files
+    already positioned in world space; `evt/` and `cam/` almost certainly drive
+    load order. Key to reconstructing a playable level. (Phase 6)
+11. Is the twiddle Morton convention correct, or transposed? (needs visual check)

@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path as _Path
 
-from . import cam as camlib, container as C, evt, exetab, nl1, texbank
+from . import cam as camlib, coli as colilib, container as C, evt, exetab, nl1, texbank
 from .campaths import CamPaths
 
 __all__ = ["STAGE_TO_SCENE", "SCENE_TO_STAGE", "Stage", "Part",
@@ -164,6 +164,7 @@ class Stage:
         self._cam_files = None
         self._campaths = None
         self._evt = None
+        self._colisets = None
 
     # -- identity ---------------------------------------------------------
 
@@ -194,6 +195,29 @@ class Stage:
     @property
     def draw_modes(self) -> dict[int, int]:
         return self.tables.scene_draw_modes(self.scene, self.original)
+
+    # -- collision ---------------------------------------------------------
+
+    def colisets(self) -> tuple | None:
+        """``(common, per_scene)`` -- the two `coli/` files this scene loads.
+
+        `ColiLoadForScene` (0x0048A3B0) loads `coli0.bin` for every scene plus
+        `coli<scene+1>.bin`, and it guards `0 <= scene < 7`; scenes outside
+        that range get no collision and this returns None.
+        """
+        if self._colisets is None:
+            try:
+                common_name, scene_name = colilib.scene_files(self.scene)
+            except colilib.ColiError:
+                self._colisets = ()
+                return None
+            d = self.game / "coli"
+            try:
+                self._colisets = (colilib.load(d / common_name),
+                                  colilib.load(d / scene_name))
+            except OSError:
+                self._colisets = ()
+        return self._colisets or None
 
     # -- event script ------------------------------------------------------
 

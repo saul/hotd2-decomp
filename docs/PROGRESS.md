@@ -27,7 +27,6 @@ raised from 52% to 70%. See [`re/session-log.md`](re/session-log.md).
 - [x] Reproducible headless driver (`ghidra/run.sh`) + Java script template
 - [x] Baseline inventory exported: **1891 functions**, 73 non-default names,
       417259 of 798720 `.text` bytes covered (**~52%**)
-- [x] Ghidra MCP registered in opencode config (needs restart to take effect)
 - [x] MSVC 6.0 Function ID signatures — already applied by auto-analysis via
       `vsOlder_x86.fidbf`; ~35 CRT functions named (`__ftol` alone has 308 xrefs)
 - [x] Identify and tag the `d3du`/D3DX utility library — **30 functions named
@@ -40,8 +39,13 @@ raised from 52% to 70%. See [`re/session-log.md`](re/session-log.md).
       subset from `dx7sdk-7001.exe`; `D3DRENDERSTATETYPE` + value enums and the
       `D3DLIGHT7`/`D3DMATERIAL7`/`D3DMATRIX` structs are in the program
 - [ ] Map the `.data` tables adjacent to the filename tables (Phase 4 needs these)
-- [ ] Remaining 30% of `.text` — real code, but Ghidra cannot form function
-      bodies for it. See the session log; likely truncated-flow damage.
+- [ ] Remaining ~30% of `.text` — real code Ghidra cannot form function bodies
+      for. **[measured]** of 204,510 bytes in enumerated gaps, **94% is game
+      code** and only 11.5 KB is CRT/d3du; most large gaps carry orphaned
+      instructions, so it is code rather than data. It is concentrated in
+      `0x420000–0x450000`, `0x460000–0x480000` and `0x490000+` — enemy and boss
+      logic, effects, HUD and menus. **None of it is in the asset or render
+      pipeline**, which is this project's scope
 
 ## Phase 2 — Compression codec ✅ SOLVED
 
@@ -91,9 +95,9 @@ Spec: [`formats/lz.md`](formats/lz.md).
 
 ## Phase 5 — Materials ✅ complete
 
-Alpha, blending and list assignment are resolved from measured usage;
-see [`formats/materials.md`](formats/materials.md). The D3D7 state
-translation has not been decompiled yet.
+Alpha, blending and list assignment are resolved from measured usage, and the
+PowerVR2 → D3D7 state translation is fully decompiled. See
+[`formats/materials.md`](formats/materials.md).
 
 - [x] Global device state decoded (`RenderInitStates`) — `CULLMODE` is
       `D3DCULL_NONE`, `COLORVERTEX` off, all material sources `D3DMCS_MATERIAL`,
@@ -110,7 +114,8 @@ translation has not been decompiled yet.
       by draw-command bit `0x04000000` — see `formats/pipeline.md`
 - [x] Texture shading, UV clamp/flip, filtering, fog, blend, ZFUNC — all mapped
 - [x] Culling table confirms the Session 6 winding fix from the binary
-- [x] Shading modes (`parameter_control & 0x40` → FLAT/GOURAUD)
+- [x] ~~Shading modes (`parameter_control & 0x40` → FLAT/GOURAUD)~~ —
+      **superseded**, see the correction two lines below
 - [x] **Environment mapping — proved absent.** 263 models and 2,976 strips set
       the flags; the port reads neither. Only three `SetTextureStageState` call
       sites exist and none touches `TEXCOORDINDEX` or `TEXTURETRANSFORMFLAGS`,
@@ -129,13 +134,19 @@ translation has not been decompiled yet.
       **cubic Hermite** curves plus a per-path descriptor naming one curve per
       channel. `cp_` = 7 channels (eye, look-at, roll), `op_` = 6 (position +
       BAMS Euler). Times are 60 Hz frame numbers. **100.0000 % byte coverage on
-      all 24 files.** Spec: [`formats/cam.md`](formats/cam.md)
+      all 23 files** — 418 paths, 3,018 curves, 44,800 keyframes.
+      Spec: [`formats/cam.md`](formats/cam.md)
+- [x] **119 damaged keyframe words in three shipped `cam/` files** (`cp_demo`
+      20, `cp_st1` 91, `cp_title` 8) repaired on read, and the repair counted
+      and printed rather than silent. Distinct from the 12 trailing padding
+      slots, which are part of the format. See
+      [`re/anomalies.md`](re/anomalies.md)
 - [x] `evt/` — **solved structurally.** Fixup is a one-line mask
       (`FUN_00413120`); the payload is a 96-opcode bytecode VM
-      (`FUN_0045ECC0`, dispatch table at `0x005931D8`). 16,991 instructions
-      decode with zero errors. Spec: [`formats/evt.md`](formats/evt.md)
+      (`FUN_0045ECC0`, dispatch table at `0x005931D8`). **17,150 instructions
+      decode with zero errors**, 77 distinct opcodes, no stub ever reached. Spec: [`formats/evt.md`](formats/evt.md)
 - [x] Stage routing graph recovered (`0x00597890`) — the branching-path mechanism
-- [x] Spawn descriptors: 1,410 recovered; **1216/1216** stage-1/2/4/5/6 spawns
+- [x] Spawn descriptors: 1,419 recovered; **1216/1216** stage-1/2/4/5/6 spawns
       verified inside their own level geometry
 - [x] Asset streaming: job queue, handler tables, slot→pol-file map
       (326/326 entry counts validated), opcodes `0x50`–`0x57` identified
@@ -191,6 +202,11 @@ translation has not been decompiled yet.
       vertices lie inside their group's AABB; and **86/86** evt `0x10`/`0x11`
       pointers land exactly on a blob header. Surface ids 5 and 55 are wet.
       Spec: [`formats/coli.md`](formats/coli.md)
+- [x] `hod2lib/coli.py` — the parser as a library module; `Stage.colisets()`
+      loads a scene's pair, and `script.py` resolves opcode `0x10`/`0x11`
+      operands to `file + blob offset + quad count + surface ids`, so
+      `dump_stage_script.py` prints
+      `set_collision_set_full  full: coli2.bin+0xb148(6q surf 52,53)`
 - [ ] `mot/` — rigid transforms vs vertex morphs
 
 ## Phase 7 — Documentation & C reference
@@ -224,7 +240,11 @@ translation has not been decompiled yet.
       horizontal, 4:3, near 0.8, far 8000, constant for the whole game. From
       `SetupSceneProjection`; the 60° in `InitD3DDeviceAndTextureStages` is
       dead `d3du` scaffolding. Written into every exported glTF camera
-- [ ] `evt` / `coli` JSON sidecars — `evt/` unblocked
+- [x] `coli` JSON sidecar — `<stage>_coli.json` carries both files the scene
+      loads, every quad's plane/verts/surface, and the blobs the script
+      actually activates. **[measured]** the collision bounding box lies inside
+      the exported geometry's, so the coordinate spaces match
+- [ ] `evt` JSON sidecar — `dump_stage_script.py --json` covers it for now
 
 ## Open questions
 

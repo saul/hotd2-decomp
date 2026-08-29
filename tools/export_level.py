@@ -28,6 +28,70 @@ from hod2lib import gltf, stage as stagelib  # noqa: E402
 STAGE_TO_SCENE = stagelib.STAGE_TO_SCENE
 
 
+def _coli_json(st, sets) -> dict:
+    """The stage's collision meshes, as a sidecar.
+
+    Both files the scene loads are emitted whole, with every quad's plane,
+    vertices and surface id, so a consumer can build a debug mesh and lay it
+    over the exported geometry -- the coordinate space is the same.
+
+    `activated` lists the blobs the event script actually switches on with
+    opcodes 0x10/0x11, because a file holds more blobs than any one run uses
+    and the script is what selects them.
+    """
+    from hod2lib import coli as colilib, script as scriptlib
+
+    files = {}
+    for f in sets:
+        files[f.name] = [
+            {
+                "offset": b.offset,
+                "aabb_min": list(g.aabb_min),
+                "aabb_max": list(g.aabb_max),
+                "quads": [
+                    {"plane": list(q.normal) + [q.plane_d],
+                     "axis": q.axis,
+                     "verts": [list(v) for v in q.verts],
+                     "surface": q.surface}
+                    for q in g.quads
+                ],
+            }
+            for b in f.blobs for g in b.groups
+        ]
+
+    activated: list[dict] = []
+    try:
+        prog = scriptlib.load(st)
+    except Exception:                      # no evt for this scene
+        prog = None
+    if prog is not None:
+        for blk in prog.blocks:
+            for step in blk.steps:
+                for op in step.ops:
+                    if op.opcode in scriptlib.COLLISION_SET_OPCODES:
+                        for m in op.detail.get("meshes", []):
+                            if "file" in m:
+                                activated.append({
+                                    "block": blk.index, "offset": op.offset,
+                                    "set": op.detail.get("set"),
+                                    "file": m["file"], "blob": m["offset"],
+                                    "quads": m.get("quads"),
+                                    "surfaces": m.get("surfaces", []),
+                                })
+
+    return {
+        "scene": st.scene,
+        "note": "coli/ collision meshes. ColiLoadForScene loads coli0.bin for "
+                "every scene plus coli<scene+1>.bin. Quads are 4 coplanar "
+                "verts with a stored plane and a surface id; ids 5 and 55 are "
+                "wet. Coordinates match the exported geometry. See "
+                "docs/formats/coli.md.",
+        "wet_surfaces": list(colilib.WET_SURFACES),
+        "files": files,
+        "activated": activated,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", required=True, type=Path)
@@ -47,6 +111,8 @@ def main() -> int:
     ap.add_argument("--glob-geometry", action="store_true",
                     help="use the old st<N>_* glob instead of the exe's region "
                          "tables. Wrong in both directions; kept for comparison")
+    ap.add_argument("--no-coli", action="store_true",
+                    help="skip the coli/ collision sidecar")
     ap.add_argument("--no-cameras", action="store_true",
                     help="skip cam/ camera and object paths")
     ap.add_argument("--cam-step", type=float, default=2.0,
@@ -132,6 +198,15 @@ def main() -> int:
                 "regions": st.region_json(),
             }, indent=1))
             print(f"  {len(regions)} regions -> {side.name}")
+
+        if st is not None and not args.no_coli:
+            sets = st.colisets()
+            if sets:
+                side = out_dir / f"{name}_coli.json"
+                side.write_text(json.dumps(_coli_json(st, sets), indent=1))
+                nq = sum(len(f.quads) for f in sets)
+                print(f"  collision: {sets[0].name} + {sets[1].name}, "
+                      f"{nq} quads -> {side.name}")
         vert = sum(m.vertex_count for _, ms, _ in parts for m in ms)
         tri = sum(m.triangle_count for _, ms, _ in parts for m in ms)
         print(f"\n{name}: {len(parts)} segments, {vert:,} verts, "

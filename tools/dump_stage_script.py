@@ -121,7 +121,8 @@ def main() -> int:
                 if not args.full and op.opcode not in interesting:
                     continue
                 print(f"    {op.offset:06X}  {op.opcode:02X} "
-                      f"{op.name:<22} {resolver.operand_text(op)}")
+                      f"{op.name:<22} "
+                      f"{scriptlib.Resolver.detail_text(op) or resolver.operand_text(op)}")
         print()
     return 0
 

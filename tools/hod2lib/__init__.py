@@ -14,10 +14,11 @@ texbank     tex/ texture bank layout + PowerVR2 decoding        [Phase 4]
 exetab      descriptor / scene / route tables compiled into Hod2.exe
 cam         camera and object paths: cubic Hermite curves       [Phase 6]
 evt         event tables: pointer fixup + 96-opcode bytecode VM [Phase 6]
+coli        collision meshes: AABB groups of planar quads       [Phase 6]
 gltf        glTF 2.0 writer
 png         minimal PNG writer
 
-Not yet implemented: ``mot`` (motion), ``coli`` (collision).
+Not yet implemented: ``mot`` (motion) -- the last unsolved format.
 
 See ``docs/PROGRESS.md`` for phase status and ``docs/re/session-log.md`` for
 where the last session stopped.

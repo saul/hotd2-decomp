@@ -164,6 +164,36 @@ script hits one.
 The `|n·v + d|` tail is float precision on large coordinates, not a layout
 error — the p99 is 5e-03 and the vertices still sit inside their AABB.
 
+## Tooling
+
+`hod2lib/coli.py` implements the format; `tools/verify_coli.py` only checks it.
+
+```python
+from hod2lib import coli
+f = coli.load("coli/coli2.bin")
+f.coverage          # 1.0 -- the blob walk tiled the file
+f.blobs[0].quads    # [Quad(normal=..., plane_d=..., axis=..., verts=..., surface=...)]
+coli.scene_files(1) # ('coli0.bin', 'coli2.bin') -- what scene 1 loads
+```
+
+`Stage.colisets()` loads a scene's pair, and `hod2lib/script.py` resolves an
+opcode `0x10`/`0x11` operand through `coli.pointer_to_offset`, so the script
+dump reads:
+
+```
+001438  10 set_collision_set_full  full: coli2.bin+0xb148(6q surf 52,53)
+001920  10 set_collision_set_full  full: clear
+```
+
+**[measured]** Across stages 1–6 there are 113 collision-set instructions: 41
+clear the set and 72 carry 86 pointers, all 86 of which resolve.
+
+`export_level.py` writes `<stage>_coli.json`: both files the scene loads, every
+quad's plane, vertices and surface id, plus an `activated` list of the blobs the
+event script actually switches on. **[measured]** the collision bounding box for
+stage 2 lies inside the exported geometry's bounding box, so the two coordinate
+spaces really are the same — `--no-coli` skips it.
+
 ## Open questions
 
 1. What do surface ids other than 5 and 55 mean? They form a palette
@@ -174,5 +204,7 @@ error — the p99 is 5e-03 and the vertices still sit inside their AABB.
    `obj+0x14C`, or a default set installed outside the script?
 3. Two quads have an `axis` tag that is not the largest normal component, and a
    handful have a zero-length normal. Authoring slack, or a deliberate marker?
-4. Export: the quads are directly renderable as a debug mesh, which would let
-   the collision be checked visually against the exported stage geometry.
+4. Export: the sidecar carries the geometry, but nothing yet builds a debug
+   mesh from it. Overlaying it on the exported stage in Blender would be the
+   visual confirmation, and would show whether the surface palette lines up
+   with visible materials.

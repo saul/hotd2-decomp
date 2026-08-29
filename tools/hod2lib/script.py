@@ -27,7 +27,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass, field
 
-from . import evt, exetab
+from . import coli as colilib, evt, exetab
 
 
 def _as_f32(word: int) -> float:
@@ -83,6 +83,12 @@ for _op in (0x0E, 0x0F, 0x12, 0x4B, 0x49, 0x4A):
     CATEGORY[_op] = "spawn"
 for _op in (0x10, 0x11, 0x1A):
     CATEGORY[_op] = "collision"
+
+#: The two collision-set opcodes. Their operands are relocated absolute
+#: pointers into the coli/ load buffers, not indices -- 0x10 selects the set
+#: consulted by both the ray and the sphere queries, 0x11 the ray-only set.
+#: See docs/formats/coli.md.
+COLLISION_SET_OPCODES = (0x10, 0x11)
 for _op in (0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, *range(0x20, 0x28)):
     CATEGORY[_op] = "light"
 for _op in (0x1B, 0x1C, 0x1D, 0x1F, 0x2D):
@@ -154,6 +160,30 @@ class Resolver:
         if ins.opcode in (0x54, 0x55, 0x56, 0x57):
             return f"tex {v} = {self.tex.get(v, '?')}"
         return " ".join("%08X" % w for w in ins.words)
+
+    @staticmethod
+    def detail_text(op) -> str | None:
+        """A line rendered from an already-decoded :class:`Op`, or None.
+
+        ``operand_text`` above only sees the raw instruction, so it cannot
+        resolve anything that needed more than the EXE tables. Collision-set
+        pointers need the `coli/` files, and those are decoded into
+        ``op.detail`` when the Program is built.
+        """
+        if op.opcode not in COLLISION_SET_OPCODES:
+            return None
+        meshes = op.detail.get("meshes") or []
+        if not meshes:
+            return f"{op.detail.get('set', '?')}: clear"
+        parts = []
+        for m in meshes:
+            if "file" in m:
+                parts.append(f"{m['file']}+{m['offset']:#x}"
+                             f"({m.get('quads', '?')}q "
+                             f"surf {','.join(str(x) for x in m.get('surfaces', []))})")
+            else:
+                parts.append(f"{m['address']:#010x}=UNRESOLVED")
+        return f"{op.detail.get('set', '?')}: " + " ".join(parts)
 
     def asset_name(self, ins: evt.Instr) -> str | None:
         """The file an asset opcode touches, or None if it touches none."""
@@ -304,6 +334,9 @@ class Program:
                 d["file"] = name
         elif ins.opcode in evt.REGION_OPCODES:
             d["region"] = arg0
+        elif ins.opcode in COLLISION_SET_OPCODES:
+            d["set"] = "full" if ins.opcode == 0x10 else "ray_only"
+            d["meshes"] = self._decode_collision_set(ins)
         elif ins.opcode == 0x30:
             d.update(self._decode_queue(ins, campaths))
         elif ins.opcode in evt.SPAWN_OPCODES:
@@ -359,6 +392,34 @@ class Program:
         if not d and ins.raw:
             d["raw"] = [f"0x{w:08X}" for w in ins.words]
         return op
+
+    def _decode_collision_set(self, ins: evt.Instr) -> list[dict]:
+        """Resolve an opcode-0x10/0x11 operand list to `coli/` blobs.
+
+        The operands are *relocated absolute pointers* into the two collision
+        buffers, not indices. Each should land exactly on a blob header --
+        across the shipped scripts all 86 do -- so a missing ``file`` here
+        means the reading is wrong, not that the data is unusual.
+        """
+        out: list[dict] = []
+        sets = self.stage.colisets()
+        for word in ins.raw:
+            if word == 0xFFFFFFFF:
+                continue
+            entry: dict = {"operand": word,
+                           "address": colilib.resolve_pointer(word)}
+            hit = colilib.pointer_to_offset(word, *sets) if sets else None
+            if hit:
+                fname, off = hit
+                entry["file"], entry["offset"] = fname, off
+                f = next(x for x in sets if x.name == fname)
+                blob = next((b for b in f.blobs if b.offset == off), None)
+                if blob is not None:
+                    quads = blob.quads
+                    entry["quads"] = len(quads)
+                    entry["surfaces"] = sorted({q.surface for q in quads})
+            out.append(entry)
+        return out
 
     def _decode_queue(self, ins: evt.Instr, campaths) -> dict:
         """``queue_event`` -- the scripted-action ring.

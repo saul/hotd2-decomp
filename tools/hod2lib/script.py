@@ -58,6 +58,15 @@ ROUTE_KIND = {0: "goto", 1: "branch", 2: "end"}
 #: cannot drift.
 QUEUE_ACTIONS = evt.QUEUE_ACTIONS
 
+#: Row 2 of the scene state table at 0x00576C14 -- the camera row, reached by
+#: ``queue_event`` selector 0x21. Only 4, 6 and 7 occur in shipped data.
+CAMERA_STATES: dict[int, str] = {
+    4: "snap_to_path_eye",
+    5: "path_with_impulse_shake",
+    6: "play_stashed_path",          # publishes the current frame
+    7: "play_stashed_path_exclusive",  # as 6, but `<` on the end frame
+}
+
 #: What each blocking opcode waits on, from the recovered handlers. These are
 #: what make the script a timeline rather than a batch: they set the
 #: interpreter's yield flag and do not advance ``pc`` until the condition
@@ -73,39 +82,53 @@ WAIT_CONDITIONS: dict[int, str] = {
     0x47: "camera settled and no live targetable entity",
 }
 
-#: Coarse categories, for the player's event feed. The 0x20-0x27 family is
-#: *fog and light*, not view -- an earlier reading called those two blocks
-#: per-player view structs and was overturned at the renderer end.
-CATEGORY: dict[int, str] = {}
-for _op in range(0x01, 0x0E):
-    CATEGORY[_op] = "spawn"
-for _op in (0x0E, 0x0F, 0x12, 0x4B, 0x49, 0x4A):
-    CATEGORY[_op] = "spawn"
-for _op in (0x10, 0x11, 0x1A):
-    CATEGORY[_op] = "collision"
-
 #: The two collision-set opcodes. Their operands are relocated absolute
 #: pointers into the coli/ load buffers, not indices -- 0x10 selects the set
 #: consulted by both the ray and the sphere queries, 0x11 the ray-only set.
 #: See docs/formats/coli.md.
 COLLISION_SET_OPCODES = (0x10, 0x11)
-for _op in (0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, *range(0x20, 0x28)):
-    CATEGORY[_op] = "light"
-for _op in (0x1B, 0x1C, 0x1D, 0x1F, 0x2D):
-    CATEGORY[_op] = "scenery"
-for _op in (0x30, 0x35, 0x36, 0x37):
-    CATEGORY[_op] = "camera"
-for _op in (0x28, 0x29):
-    CATEGORY[_op] = "region"
-for _op in (0x38, 0x39, 0x3A, 0x3B, 0x2E, 0x5D, 0x5E, 0x5F):
-    CATEGORY[_op] = "audio"
-for _op in range(0x40, 0x48):
-    CATEGORY[_op] = "wait"
-for _op in (0x48, 0x4D, 0x4E, 0x4F, 0x2B, 0x2C, 0x2F, 0x31, 0x32, 0x33):
-    CATEGORY[_op] = "flow"
-for _op in (*range(0x50, 0x58), 0x58, 0x59, 0x5A):
-    CATEGORY[_op] = "assets"
-del _op
+
+#: Coarse categories, for the player's event feed. Two of these groupings are
+#: corrections that cost real time to establish, so they are worth stating:
+#: the 0x20-0x27 family is **fog and light**, not the per-player view structs
+#: an earlier reading called them; and 0x1A is filed under *camera* because
+#: that is what the player does with it -- it is `g_camera_fixed_eye_y` as
+#: well as the ground plane, and opcode 0x36 selects between them.
+_CATEGORIES: dict[str, tuple[int, ...]] = {
+    "spawn":     (*range(0x01, 0x0E), 0x0E, 0x0F, 0x12, 0x4B),
+    "collision": (0x10, 0x11),
+    "light":     (0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, *range(0x20, 0x28)),
+    "scenery":   (0x1B, 0x1C, 0x1D),
+    "hud":       (0x1F, 0x2D),
+    "camera":    (0x1A, 0x30, 0x35, 0x36, 0x37),
+    "region":    (0x28, 0x29),
+    "audio":     (0x38, 0x39, 0x3A, 0x3B, 0x2E, 0x5D, 0x5E, 0x5F),
+    "wait":      tuple(range(0x40, 0x48)),
+    "flow":      (0x2B, 0x2C, 0x2F, 0x31, 0x32, 0x33, 0x48, 0x49, 0x4A,
+                  0x4D, 0x4E, 0x4F),
+    "assets":    tuple(range(0x50, 0x5B)),
+    # Proved no-ops, and the one opcode whose global has no readers anywhere
+    # in the binary. Grouped so the feed can render them quietly rather than
+    # implying something happened.
+    "nop":       (0x1E, 0x3D, 0x3E, 0x3F, 0x5B, 0x5C),
+    # Dispatch slots that map to the empty stub. No shipped file encodes one;
+    # seeing one in a feed means the decoder went wrong.
+    "unused":    (0x00, 0x2A, 0x34, 0x3C, 0x4C),
+}
+
+CATEGORY: dict[int, str] = {
+    op: name for name, ops in _CATEGORIES.items() for op in ops
+}
+
+#: Every opcode the interpreter can dispatch must be categorised, or the
+#: player silently files a real instruction under "misc". Checked at import
+#: because the opcode table is edited far more often than this map.
+_uncategorised = sorted(set(evt.OPCODES) - set(CATEGORY))
+if _uncategorised:  # pragma: no cover - a developer error, not a data one
+    raise RuntimeError(
+        "hod2lib.script.CATEGORY is missing opcodes: "
+        + ", ".join(f"0x{o:02X} ({evt.OPCODES[o][0]})" for o in _uncategorised))
+del _uncategorised
 
 
 # ---------------------------------------------------------------------------
@@ -368,9 +391,26 @@ class Program:
             # must gate roll on it rather than always applying the curve.
             d["roll_enabled"] = bool(arg0)
         elif ins.opcode == 0x36:                      # pin_view_to_ground_plane
-            d["enabled"] = bool(arg0)
+            # Selects g_camera_fixed_eye_y over the default. Three camera
+            # hooks share one line:
+            #     if (g_camera_use_fixed_y == 1) eye.y = g_camera_fixed_eye_y;
+            #     else                           eye.y = path.y - 15.0f;
+            d["use_fixed_eye_y"] = arg0 == 1
+            d["enabled"] = arg0 == 1
         elif ins.opcode == 0x1A:                      # set_ground_plane_y
-            d["ground_y"] = self._deref_f32(arg0)
+            # One global, two jobs: the height QueryGroundHeightAt falls back
+            # to and blob shadows project onto, *and* the fixed camera eye
+            # height opcode 0x36 selects.
+            v = self._deref_f32(arg0)
+            d["ground_y"] = v
+            d["camera_fixed_eye_y"] = v
+        elif ins.opcode == 0x37:                      # force_camera_path_advance
+            d["force_path_advance"] = bool(arg0)
+        elif ins.opcode == 0x33:                      # set_action_drain_mode
+            d["drain_mode"] = arg0
+            d["pending_delta"] = ins.raw[1] if len(ins.raw) > 1 else None
+        elif ins.opcode == 0x2D:                      # show_screen_message
+            d["message_group"] = arg0
         elif ins.opcode in (0x18, 0x19):              # set_lightN_direction
             d["pitch_deg"] = _bams_deg(ins.raw[0])
             d["yaw_deg"] = _bams_deg(ins.raw[1]) if len(ins.raw) > 1 else None
@@ -456,15 +496,45 @@ class Program:
                               "duration": ref.duration}
             else:
                 out["cam"] = None
+        elif sel == 0x21 and args:
+            # EvtEnterSceneState(2, op0). Row 2 of the state table at
+            # 0x00576C14 is the camera row, and its live cells are exactly the
+            # operands that occur: 4 CameraSnapToPathEye, 6 and 7 the two
+            # routines that play the range a deferred 0x40 stashed.
+            #
+            # This is NOT "hand control back from a path", which an earlier
+            # reading of the same selector claimed.
+            out["scene_state"] = {"major": 2, "minor": args[0]}
+            out["camera_state"] = CAMERA_STATES.get(args[0])
+        elif sel == 0x11 and args:
+            out["scene_state"] = {"major": "current", "minor": args[0]}
         elif sel == 0x20 and len(args) >= 2:
             out["frames"], out["preset"] = args[0], args[1]
         elif sel == 0x60 and len(args) >= 6:
-            # Hypothesis, not a finding: FUN_00403DB0 reads back
-            # &DAT_009C6FDC + branch*8, which would make these three
-            # (slot, frame) pairs indexed by the branch choice -- the arcade
-            # branch-preview shots. Flagged so the client can label it.
-            out["preview_pairs_hypothesis"] = [
-                [args[i], args[i + 1]] for i in range(0, 6, 2)]
+            # The arcade branch-preview shots -- one camera pose per route the
+            # branch can take. **Proved**, by reading both halves:
+            #
+            # EvtActionStoreSixOperands60 scatters the operands
+            #     009C6FE0 = args[0]   009C6FDC = args[1]
+            #     009C6FE8 = args[2]   009C6FE4 = args[3]
+            #     009C6FF0 = args[4]   009C6FEC = args[5]
+            # and FUN_00403DB0 reads them back as
+            #     path  = *(&009C6FDC + branch_choice * 8)
+            #     frame = *(&009C6FE0 + branch_choice * 8)
+            #
+            # so they are three (frame, slot) pairs indexed by the branch
+            # choice -- note the order, which is frame first. An earlier note
+            # in PLAYER_PLAN.md guessed "(slot, frame)" and had it backwards.
+            out["branch_preview"] = [
+                {
+                    "choice": i // 2,
+                    "frame": args[i],
+                    "slot": args[i + 1],
+                    "cam": (lambda ref: {"file": ref.file, "path": ref.index}
+                            if ref else None)(campaths.get(args[i + 1])),
+                }
+                for i in range(0, 6, 2)
+            ]
         return out
 
     def _decode_spawns(self, ins: evt.Instr) -> list[dict]:
@@ -555,6 +625,32 @@ class Program:
                 return b.index
         return 0
 
+    def entry_step(self) -> int:
+        """Which step of the entry block runs first.
+
+        Not 0. ``FUN_0045EBC0`` picks it by game mode and scene state:
+
+        ===========================================  ====
+        scene state 5 or 9 (continue / checkpoint)     0
+        game mode 3 (a training or demo mode)          0
+        game mode 2                                    0
+        game mode 1 (Original) **and scene 0**         5
+        everything else -- normal Arcade play          1
+        ===========================================  ====
+
+        This is the same rule ``EvtAdvanceBlockOrRoute`` follows on every
+        later block change, where it sets the step index to 1 outright. Step 0
+        is reached only through the checkpoint path, which is why it is
+        presented as checkpoint state rather than run inline.
+        """
+        if self.stage_game_mode == 1 and self.scene == 0:
+            return 5
+        return 1
+
+    @property
+    def stage_game_mode(self) -> int:
+        return self.stage.game_mode
+
     def cam_slots_used(self) -> list[int]:
         out: set[int] = set()
         for b in self.live_blocks():
@@ -571,6 +667,7 @@ class Program:
             "game_mode": self.stage.game_mode,
             "evt_file": self.evt_name,
             "entry_block": self.entry_block(),
+            "entry_step": self.entry_step(),
             "routes": [{"kind": ROUTE_KIND.get(k, f"?{k}"), "next": [a, b, c]}
                        for k, a, b, c in self.routes],
             "blocks": [b.to_json() for b in self.blocks],

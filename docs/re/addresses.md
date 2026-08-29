@@ -484,3 +484,21 @@ is obtained by passing a device-*type* GUID to `CreateDevice`.
 All except `Texture Skipped.` belong to the stock DX7 SDK utility library and can
 be excised. **`Texture Skipped.`** is game code and sits in the texture upload
 path — a direct route to the Phase 4/5 oracle.
+
+## Sound
+
+One id space for every sound, split by the top nibble of the id. Full write-up
+in [`../formats/sound.md`](../formats/sound.md).
+
+| Address | Symbol | Role |
+|---|---|---|
+| `0x0041CFD0` | `PlaySoundId` | the single dispatcher: `id >> 28` selects SE (0), BGM (1), voice (2), control (8) |
+| `0x0041D450` | `BgmStopThenPlay` | evt `0x5F`'s target — `PlaySoundId(0x80000000)` then `PlaySoundId(op[2])` |
+| `0x0041D3E0` | — | stop, reached through nibble 8 |
+| `0x00580354` | `g_bgm_names_ar` | `char *[41]`, the `_AR` mix, indexed by `id & 0xFFF` |
+| `0x005803F8` | `g_bgm_names_plain` | `char *[20]`, the plain mix. **Contiguous with the AR table**, which is what fixes both lengths |
+| `0x005845F8` | `g_se_name_list` | `{u32 id; char[0x30]}`, stride `0x34`, `0xFFFF`-terminated |
+| `0x0058044A` | `g_voice_records` | `0x24`-byte records; `s16 == -1` marks an empty slot |
+| `0x00588B58` | `s_sound_bgm_prefix` | the `Sound\BGM\` path prefix |
+| `0x009C8FB8` | `g_current_bgm_id` | id currently playing; cleared by the stop control |
+| `0x009C8E98` | — | selects plain vs `_AR` when `== 6` and `g_GameMode == 0`. Also read by `EvtInterpreterLoop`'s scene-5 special case and by `FUN_0045EBC0`; its meaning is **open** |

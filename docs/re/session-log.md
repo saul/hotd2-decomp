@@ -2538,3 +2538,138 @@ six code literals resolve to `op_` files.
    to, and which take their slot from the object rather than a literal.
 3. `mot/` — still the last unsolved format, and the obvious source of the
    per-object animation these rigs do by hand.
+
+---
+
+## Session — the browser stage player, and sound
+
+**Outcome:** the player from [`../PLAYER_PLAN.md`](../PLAYER_PLAN.md) is built
+and working (R0–W5; W6 deferred as planned). Running notes and the open list
+live in [`../PLAYER_PROGRESS.md`](../PLAYER_PROGRESS.md); how to use it is in
+[`../../web/README.md`](../../web/README.md).
+
+The player turned out to be a good oracle for the RE. Several readings that
+looked right on paper produced visibly wrong behaviour, and reading the
+binary settled each one.
+
+### Corrections to previously documented behaviour
+
+**`EvtAdvanceBlockOrRoute` — three separate mistakes, all mine.**
+
+1. **A block's steps run in sequence.** `end_block` (`0x4F`) increments the
+   step index and runs the next step; only an *exhausted step table* reaches
+   the route table. Treating every `end_block` as a block exit runs one step
+   per block and skips most of a stage — including the `region_enter` and
+   `cam_play` instructions that live in the later steps. This is what made
+   region streaming and camera playback look broken.
+2. **Route kind 2 is not "the scene ends".** It falls through to `block + 1`.
+   The scene ends when the block it lands on is a hole, i.e. when
+   `EvtGetBlock` returns -1.
+3. **A branch takes `next[branch_choice]`**, not an arbitrary target.
+   `branch_choice` (`DAT_009C88A4`) is reset to 0 at the tail of every block
+   change and **every writer of it is gameplay code** — 25 xrefs, all in the
+   entity/enemy handlers. With no gameplay a branch always takes `next[0]`.
+
+**`FUN_0045EBC0` picks the scene's first step by game mode:** 1 for normal
+Arcade play, **5** for Original Mode on scene 0, 0 only on the continue and
+checkpoint paths.
+
+**`queue_event` selector `0x21` is a camera *state selector*.** It is
+`EvtEnterSceneState(2, minor)`, and row 2's live cells are 4
+(`CameraSnapToPathEye`), 6 and 7 (the two routines that play a stashed path).
+It does **not** "hand control back from a path", which an earlier note said.
+Relatedly, **`cam_play` with `flags & 2` does not play** — it stashes the
+frame range for a later `0x21, 6|7`. All 208 deferred plays follow that idiom.
+
+### `0x60` is the arcade branch preview — [proved]
+
+`EvtActionStoreSixOperands60` scatters the six operands and `FUN_00403DB0`
+gathers them back as `frame = *(&DAT_009C6FE0 + choice*8)`,
+`path = *(&DAT_009C6FDC + choice*8)` — three **`(frame, slot)`** pairs indexed
+by `branch_choice`, the shot the arcade shows for each route. Note the order:
+frame first. `PLAYER_PLAN.md` guessed `(slot, frame)` and had it backwards.
+Written up in [`../formats/evt.md`](../formats/evt.md).
+
+### Sound — solved, and a new format doc
+
+[`../formats/sound.md`](../formats/sound.md). `PlaySoundId` (`0x0041CFD0`) is
+the single entry point for every sound, dispatching on the **top nibble** of
+the id: 0 SE, 1 BGM, 2 voice, 8 control (`0x80000000` stops). All three name
+tables are now read by `hod2lib.exetab`:
+
+| Table | Address | Entries | Bounded by |
+|---|---|---|---|
+| `g_bgm_names_ar` | `0x00580354` | 41 | the plain table immediately after it |
+| `g_bgm_names_plain` | `0x005803F8` | 20 | — |
+| `g_voice_records` | `0x0058044A` | 467 | the SE list two bytes past its end |
+| `g_se_name_list` | `0x005845F8` | 324 | `id == 0xFFFF` |
+
+**None of these tables stores its own count.** Three of the four are bounded
+only by the table that follows them — the same pattern as the scene route and
+region tables. Reading any of them with a guessed length invents entries.
+
+**[measured]** 288/324 SE names resolve under `sound/SE/`; the 36 that do not
+all end in `_OFF` and are not shipped. 463 of the non-empty voice names
+resolve. Every non-null BGM name resolves. Match case-insensitively — the
+tables spell `.WAV`, the files are `.wav`.
+
+**`se_play` is not restricted to SE.** Its operand goes through the same
+dispatcher, and across the six stage scripts it names 9 BGM tracks, 6 voice
+lines and one stop as well as SE.
+
+**[open] What starts a stage's own music.** No `bgm_entry_play` in any of the
+six stage scripts names its stage track — they only switch to boss and
+transition music. Recorded as open question 19 in
+[`../PROGRESS.md`](../PROGRESS.md).
+
+### Fog is per-mesh, and its values were already in the data
+
+TSP bit 23 → `D3DRENDERSTATE_FOGENABLE`, **inverted**, so fog is on when the
+bit is clear — which is what `ModelForceFogControlNone` exploits. Exposed as
+`Mesh.fog_enabled` / `.fog_control` and in the glTF material extras;
+2197/2219 stage-2 materials are fogged.
+
+The colour and range are scene state, from the `0x20`–`0x27` light block.
+Their operands are **pointers to float constants inside the evt file**, and
+dereferencing them turns what the coverage analysis lists as 1,888 bytes of
+unattributed residue into values: stage 2 block 3 opens with fog near 21, far
+507, light RGB (1.0, 0.9, 0.77), ambient 0.5.
+
+### A shipped-data defect: `cp_st1.bin`
+
+119 keyframe words across `cp_st1`, `cp_demo` and `cp_title` decode to NaN or
+~1e38, and `st1evtbl` plays the affected paths. Both retail copies checked are
+byte-identical, so it is how the game ships. `hod2lib.cam` repairs and counts
+them. Before that, **stage 1 could not be exported at all** — the glTF writer
+died packing a non-finite float.
+
+### Recorded but NOT applied: `eye.y = path.y - 15`
+
+Every camera hook that plays a path contains
+`eye.y = use_fixed_y ? fixed_eye_y : path.y - 15.0f`, unambiguously, in three
+functions. Applying it to the `cp_` curve's eye Y is nevertheless wrong:
+measured over all 201 camera paths in stages 1–6 it puts **173 of them looking
+upward at their own aim point**, and on stage 2's opening path the eye lands
+below the floor. The raw value agrees with the established-good oracle (the
+exported glTF cameras, validated against the Venice plaza shot).
+
+Something compensates for that line which has not been traced. The lead:
+`CameraPathWithImpulseShake` reads eye **x/z** from `0x009A60C0` but eye **y**
+from `0x009C70C4` — two different pose blocks. Reasoning and a switch to
+re-enable it are in `web/src/campath.ts`.
+
+Note also that `0x36`, which selects the fixed-height branch, occurs **zero**
+times in any shipped script, so that half is unreachable from the data.
+
+### Next actions
+
+1. Apply the scene light and fog values to the render — they are decoded and
+   shown in the inspector but only fog is drawn. Biggest visual gap.
+2. Backdrop dome (`0x1B`/`0x1C`): the table at `0x00579968` is documented but
+   not read; the sky is currently missing.
+3. Trace what starts a stage's BGM (open question 19) — the scene-entry path,
+   not an xref sweep over `PlaySoundId`'s 496 callers.
+4. Trace `0x009A60C0` to settle the `path.y - 15` question (open question in
+   `PLAYER_PROGRESS.md`).
+5. `0x40C790`, the follow-on hook for deferred camera plays: settles whether
+   state 6/7 shots are yaw-only.

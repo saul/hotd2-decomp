@@ -78,7 +78,12 @@ lands at 379 KB as JSON, which gzips hard.
 | **Play** | `2` | 60 Hz with a speed control, pausing at every branch point |
 | **Free roam** | `3` | orbit and fly, detached from the rail |
 
-Space plays/pauses, `→` and `←` step one instruction.
+Space plays/pauses, `→` and `←` step one instruction, `1`/`2`/`3` switch mode.
+
+The script panel is deliberately narrow — the viewport is the point of the
+tool and the tree is a navigator, not the content. Drag the splitter to widen
+it, double-click the splitter to reset, or focus it and use the arrow keys.
+The width is remembered per browser.
 
 Free roam drags to look, `WASD` to move, `Q`/`E` for world up and down, shift
 to sprint, alt to crawl, and the scroll wheel sets the base speed.
@@ -111,6 +116,19 @@ so is the event feed.
 - **Roll is gated.** `CamEvalPath7` evaluates a `cp_` path's 7th channel only
   while `DAT_009A21B0` is set, which evt opcode `0x35` writes. The curve exists
   in every path; the client honours the gate rather than always applying it.
+- **Block, step and route flow**, transcribed from `EvtAdvanceBlockOrRoute`.
+  Three things there are easy to get wrong and were all wrong here first:
+  a block's steps run **in sequence** (`end_block` advances to the next step,
+  and only an exhausted step table reaches the route table); route kind 2 is
+  **not** "the scene ends" but a fall-through to `block + 1`; and a branch
+  takes `next[branch_choice]`, where `branch_choice` resets to 0 on every
+  block change. Getting the first of those wrong skips most of a stage,
+  including the `region_enter` and `cam_play` instructions in the later steps.
+- **Deferred camera plays.** `cam_play` with `flags & 2` does not play — it
+  stashes the frame range, and a later `queue_event 0x21, 6|7` enters the
+  scene state whose camera hook steps it. All 208 in the game follow that
+  idiom. Selector `0x21` is a camera *state selector*, not "hand control back
+  from a path", which is what an earlier reading of it claimed.
 - **Region streaming.** `region_enter` (`0x29`) switches the resident set;
   `asset_load_slot` / `asset_unload_slot` (`0x50` / `0x51`) stream the props
   that no region lists.
@@ -140,18 +158,49 @@ so is the event feed.
   yaw. The other two orientation words reach the object's other rotation
   fields but their value distributions do not look like angles, so they are
   carried raw and not applied.
-- **Branch choice.** Real branching is a player decision made under time
-  pressure. The player pauses, offers the valid non-`-1` route targets, and
-  runs a 5-second countdown before a **seeded** RNG picks — so an unattended
-  playthrough is reproducible.
+- **Branch choice.** `branch_choice` (`DAT_009C88A4`) is genuinely runtime
+  state: every writer in the binary is gameplay code — shooting a door, taking
+  a route — and it resets to 0 on every block change. With no gameplay a
+  branch would always take `next[0]`, so the player asks instead. A bar along
+  the bottom of the rendered view offers the valid route targets, and in Play
+  mode a 5-second countdown runs before a **seeded** RNG picks, so an
+  unattended playthrough is reproducible — and hovering the bar freezes that
+  countdown, because deciding is not a race.
+
+  Routes marked ◉ have an **arcade preview shot**: the `store_six` (`0x60`)
+  operands are three `(frame, slot)` camera poses indexed by exactly that
+  `branch_choice`, and hovering one poses the camera there. A preview belongs
+  to the block that stored it — all four in stage 2 sit inside branch blocks —
+  and is discarded on any block change, so a branch never shows a shot left
+  over from an earlier one. Unused choices store slot 0 and get no preview.
+
+  The bar is not a modal: a branch is a fact about where playback has got to,
+  not a question that blocks everything else, so the script, the scrubber and
+  free roam stay usable.
 - **Materials are unlit.** The game bakes its illumination into textures and
   the per-mesh base colour, and level geometry ships with no light sources at
   all, so unlit is the faithful default rather than a shortcut. The scene light
   values the script *does* set — light direction, light RGB, ambient, fog near
   and far — are decoded and shown in the inspector, but not yet applied.
-- **Step 0 is inference.** `EvtAdvanceBlockOrRoute` sets the step index to 1 on
-  every block change, which is read from the binary; that step 0 is therefore
-  the checkpoint entry is a reading, not a finding. The tree labels it as such.
+- **The `path.y - 15` eye rule is recorded, not applied.** Every camera hook
+  that plays a path contains `eye.y = use_fixed_y ? fixed_eye_y : path.y - 15`
+  — unambiguously, in three separate functions. Applying it to the `cp_`
+  curve's eye Y is nevertheless wrong: measured over all 201 camera paths in
+  stages 1–6, it puts **173 of them looking upward at their own aim point**,
+  and on stage 2's opening path the eye lands below the floor. The raw value
+  also matches the established-good oracle — the exported glTF cameras use it
+  unmodified and produce the Venice plaza shot the format work was validated
+  against. So something compensates for that line which has not been traced
+  yet, and until it is, the measurement wins over the disassembly. The
+  reasoning and a switch to re-enable it live in `src/campath.ts`.
+  (`0x36`, which selects the fixed-height branch, occurs **zero** times in any
+  shipped script, so that half is unreachable from the data regardless.)
+- **Step 0 is inference.** `EvtAdvanceBlockOrRoute` sets the step index to 1
+  on every block change and `FUN_0045EBC0` picks the scene's first step by game
+  mode — 1 for Arcade, 5 for Original Mode on scene 0, 0 only on the continue
+  and checkpoint paths. Those are read from the binary. That step 0 is
+  *therefore* the checkpoint entry is a reading, not a finding; the tree labels
+  it as such.
 - **Sound is shown, not played.** BGM track ids from `bgm_entry_play` (`0x5F`)
   and SE ids appear in the feed and the HUD.
 

@@ -517,3 +517,166 @@ class ExeTables:
             if rec:
                 out.setdefault(rec[0], set()).add(rec[1])
         return {k: sorted(v) for k, v in sorted(out.items())}
+
+    # -- sound ----------------------------------------------------------
+    #
+    # One id space for every sound in the game. `PlaySoundId` (0x0041CFD0)
+    # switches on the **top nibble**:
+    #
+    #   0  SE      linked list at 0x005845F8, stride 0x34 {u32 id; char[0x30]}
+    #   1  BGM     `id & 0xFFF` indexes a table of filename pointers
+    #   2  voice   `(id & 0xFFF) * 0x24` into the records at 0x0058044A
+    #   8  control 0x80000000 stops whatever is playing
+    #
+    # BGM has *two* parallel filename tables and picks between them:
+    #
+    #   if (DAT_009C8E98 == 6 && g_GameMode == 0) name = plain[id & 0xFFF];
+    #   else                                      name = ar[id & 0xFFF];
+    #
+    # The tables are contiguous -- `BGM_NAMES_AR + 41*4 == BGM_NAMES_PLAIN` --
+    # which is what fixes their lengths, since neither is terminated. The AR
+    # table's 41 entries cover every track; the plain table's 20 are the same
+    # tracks without the `_AR` mix.
+    #
+    # `EvtOpBgmEntryPlay5F` -> `BgmStopThenPlay` consumes four operands and
+    # uses only the third: `PlaySoundId(0x80000000)` then `PlaySoundId(op2)`.
+
+    VOICE_RECORDS = 0x0058044A
+    VOICE_STRIDE = 0x24
+
+    SE_NAME_LIST = 0x005845F8
+    SE_RECORD_STRIDE = 0x34
+    SE_TERMINATOR = 0xFFFF
+
+    BGM_NAMES_AR = 0x00580354
+    BGM_NAMES_PLAIN = 0x005803F8
+    BGM_AR_COUNT = 41
+    BGM_PLAIN_COUNT = 20
+
+    SOUND_NS_SE = 0
+    SOUND_NS_BGM = 1
+    SOUND_NS_VOICE = 2
+    SOUND_NS_CONTROL = 8
+    SOUND_STOP = 0x80000000
+
+    def _ptr_names(self, base: int, count: int) -> list[str | None]:
+        out: list[str | None] = []
+        for i in range(count):
+            p = self._u32(base + i * 4)
+            out.append(self._cstr(p) if p else None)
+        return out
+
+    def bgm_names(self) -> dict[str, list[str | None]]:
+        """The two BGM filename tables, indexed by ``id & 0xFFF``.
+
+        Holes are real: indices 2, 4 and 7 have a null pointer in both tables
+        and no shipped script names them.
+        """
+        return {
+            "ar": self._ptr_names(self.BGM_NAMES_AR, self.BGM_AR_COUNT),
+            "plain": self._ptr_names(self.BGM_NAMES_PLAIN, self.BGM_PLAIN_COUNT),
+        }
+
+    def se_names(self) -> dict[int, str]:
+        """SE sound id -> path under ``sound/SE/``.
+
+        A flat array of ``{u32 id; char name[0x30]}`` records walked linearly
+        by ``PlaySoundId`` comparing the id, terminated by ``id == 0xFFFF``.
+        Names carry their subdirectory (``COMMON\\BLOOD01_16.WAV``), so the
+        full path is the prefix at 0x00588B7C plus the stored name.
+
+        The low half of an id is a category and the high half an index within
+        it -- 0x0001_15A9 and 0x0002_15A9 are the second and third entries of
+        category 0x15A9.
+        """
+        r = self._v2r(self.SE_NAME_LIST)
+        out: dict[int, str] = {}
+        if r is None:
+            return out
+        for i in range(4096):
+            o = r + i * self.SE_RECORD_STRIDE
+            if o + self.SE_RECORD_STRIDE > len(self.data):
+                break
+            sid = struct.unpack_from("<I", self.data, o)[0]
+            if sid == self.SE_TERMINATOR:
+                break
+            name = self.data[o + 4:o + self.SE_RECORD_STRIDE].split(b"\0")[0]
+            try:
+                out[sid] = name.decode("ascii")
+            except UnicodeDecodeError:
+                continue
+        return out
+
+    def voice_names(self) -> dict[int, str]:
+        """Voice id (``id & 0xFFF``) -> path under ``sound/voice/``.
+
+        ``0x24``-byte records: a ``s16`` that is -1 for an empty slot, then
+        the name. The count is not stored -- the table simply runs up to the
+        SE list at :attr:`SE_NAME_LIST`, two bytes past its last record, which
+        is the same "contiguous tables bound each other" pattern the two BGM
+        name tables use. That gives **467** entries, and 463 of the non-empty
+        ones resolve to files in ``sound/voice/`` (which holds 468).
+        """
+        r = self._v2r(self.VOICE_RECORDS)
+        out: dict[int, str] = {}
+        if r is None:
+            return out
+        count = (self.SE_NAME_LIST - self.VOICE_RECORDS) // self.VOICE_STRIDE
+        for i in range(count):
+            o = r + i * self.VOICE_STRIDE
+            if o + self.VOICE_STRIDE > len(self.data):
+                break
+            if struct.unpack_from("<h", self.data, o)[0] == -1:
+                continue
+            name = self.data[o + 2:o + self.VOICE_STRIDE].split(b"\0")[0]
+            try:
+                out[i] = name.decode("ascii")
+            except UnicodeDecodeError:
+                continue
+        return out
+
+    def sound_file(self, sound_id: int) -> tuple[str, str] | None:
+        """``(kind, path)`` for any sound id, dispatched the way the game does.
+
+        ``PlaySoundId`` switches on the top nibble, so a single ``se_play``
+        operand can name an SE, a BGM track or a voice line -- and in the
+        shipped scripts it does all three. Returns None for the stop control,
+        for id 0 (the early-out), and for ids with no table entry.
+        """
+        ns = sound_id >> 28
+        if sound_id == 0:
+            return None
+        if ns == self.SOUND_NS_SE:
+            n = self.se_names().get(sound_id)
+            return ("se", n) if n else None
+        if ns == self.SOUND_NS_BGM:
+            n = self.bgm_file(sound_id)
+            return ("bgm", n) if n else None
+        if ns == self.SOUND_NS_VOICE:
+            n = self.voice_names().get(sound_id & 0xFFF)
+            return ("voice", n) if n else None
+        return None
+
+    def se_file(self, sound_id: int) -> str | None:
+        """Filename for an SE id, or None.
+
+        SE is namespace 0, and ``id == 0`` is ``PlaySoundId``'s early-out --
+        the script's way of saying "no sound", not a real entry.
+        """
+        if sound_id == 0 or sound_id >> 28 != self.SOUND_NS_SE:
+            return None
+        return self.se_names().get(sound_id)
+
+    def bgm_file(self, track_id: int, plain: bool = False) -> str | None:
+        """Filename for a `bgm_entry_play` operand, or None.
+
+        Returns None for the stop control, for the SE namespace (which is what
+        a track id of 0 is -- `PlaySoundId` early-outs on it), and for the
+        holes in the tables.
+        """
+        if track_id >> 28 != self.SOUND_NS_BGM:
+            return None
+        idx = track_id & 0xFFF
+        names = self.bgm_names()
+        table = names["plain"] if plain else names["ar"]
+        return table[idx] if idx < len(table) else None

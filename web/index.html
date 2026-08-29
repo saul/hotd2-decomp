@@ -24,39 +24,62 @@
         <label title="Draw every region at once. Consecutive regions overlap heavily, so this is how the interpenetration becomes legible as a deliberate mechanism rather than an export bug.">
           <input type="checkbox" id="all-regions" /> All regions
         </label>
-        <label><input type="checkbox" id="show-rails" checked /> Rails</label>
+        <label title="Camera eye rails, one polyline per cam/ path."><input type="checkbox" id="show-rails" checked /> Rails</label>
+        <label title="The look-at track: where each camera path is aimed, as opposed to where it sits."><input type="checkbox" id="show-aim" /> Look-at</label>
         <label><input type="checkbox" id="show-spawns" checked /> Spawns</label>
         <label title="The game is 4:3 and its projection is a compile-time constant: 41.1 degrees vertical.">
           <input type="checkbox" id="pillarbox" checked /> 4:3
+        </label>
+        <label title="Fog colour and range come from the script (evt 0x20-0x27). Radial uses true distance from the eye; planar reproduces the game's view-space-Z falloff, which fogs the screen corners less than the centre.">
+          Fog
+          <select id="fog-mode">
+            <option value="radial" selected>radial</option>
+            <option value="planar">planar (as the game)</option>
+            <option value="off">off</option>
+          </select>
         </label>
         <span class="grow"></span>
         <span id="status" class="dim"></span>
       </header>
 
       <main id="stagearea">
+        <aside id="left">
+          <div class="panel-head">
+            <strong>Script</strong>
+            <input type="search" id="tree-filter" placeholder="filter…" />
+          </div>
+          <div id="tree" class="scroll"></div>
+        </aside>
+
+        <div
+          id="left-resize"
+          class="resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the script panel"
+          aria-valuemin="130"
+          aria-valuemax="620"
+          tabindex="0"
+          title="Drag to resize · double-click to reset"
+        ></div>
+
         <div id="viewport">
           <canvas id="view"></canvas>
-          <div id="branch-overlay" hidden>
-            <div class="branch-card">
-              <h3>Branch point</h3>
-              <p class="dim" id="branch-sub"></p>
-              <div id="branch-buttons"></div>
-              <div class="countdown"><span id="branch-countdown"></span></div>
-            </div>
-          </div>
           <div id="loading">
             <div class="spinner"></div>
             <p id="loading-text">loading bundle…</p>
           </div>
-        </div>
 
-        <aside id="left">
-          <div class="panel-head">
-            <strong>Script</strong>
-            <input type="search" id="tree-filter" placeholder="filter ops…" />
+          <!-- Anchored to the bottom of the rendered view, not a modal over
+               it: a branch point is a fact about where playback has got to,
+               so the script, the scrubber and free roam all stay usable. -->
+          <div id="branchbar" hidden>
+            <span class="tag">Branch</span>
+            <span id="branch-sub" class="dim"></span>
+            <span id="branch-buttons"></span>
+            <span id="branch-countdown" class="countdown"></span>
           </div>
-          <div id="tree" class="scroll"></div>
-        </aside>
+        </div>
 
         <aside id="right">
           <div id="hud" class="panel"></div>
@@ -103,6 +126,12 @@
             <option value="-1">pass through</option>
           </select>
         </label>
+        <span class="sep"></span>
+        <button id="btn-sound" class="sound" aria-pressed="false"
+                title="Sound on / off. Browsers block audio until the page is clicked, so this is also the gesture that unblocks it."><span id="sound-icon">🔇</span> <span id="sound-text">Muted</span></button>
+        <input type="range" id="volume" min="0" max="100" step="1" value="60"
+               title="BGM volume" />
+        <span id="bgm-label" class="dim"></span>
         <span class="sep"></span>
         <label class="framebar">
           <span id="frame-label" class="dim">no camera path</span>

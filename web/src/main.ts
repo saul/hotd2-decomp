@@ -28,15 +28,23 @@ import {
   type StageEntry,
   type OpJson,
 } from "./bundle";
-import { CamPaths, applyPose, type CameraPose } from "./campath";
+import { CamPaths, applyPose, cameraEyeY, type CameraPose } from "./campath";
 import { StageScene } from "./stagescene";
 import { RailLayer, SpawnLayer } from "./overlays";
 import { FreeRoam, isTyping } from "./freeroam";
 import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "./walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary } from "./ui";
+import { Bgm } from "./bgm";
+import { SceneFog, type FogMode } from "./fog";
 
 const TICK = 1 / 60;
+
+/** Script-panel width: narrow by default, dragged by the splitter. */
+const LEFT_MIN = 130;
+const LEFT_MAX = 620;
+const LEFT_DEFAULT = 190;
+const LEFT_KEY = "hod2.leftWidth";
 
 const $ = <T extends HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
@@ -61,6 +69,8 @@ class Player {
   private readonly inspector = new Inspector();
   private readonly minimap = new Minimap();
   private readonly freeRoam = new FreeRoam($("#viewport"));
+  private readonly bgm = new Bgm();
+  private readonly sceneFog: SceneFog;
 
   private state: PlayerState = readState();
   private playing = false;
@@ -87,10 +97,14 @@ class Player {
 
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+    this.sceneFog = new SceneFog(this.scene);
     this.scene.add(this.spawns.group);
 
     this.wireUi();
-    window.addEventListener("resize", () => this.resize());
+    this.wireResizer();
+    // Watching the viewport rather than the window catches the splitter drag
+    // and the branch bar appearing, neither of which resizes the window.
+    new ResizeObserver(() => this.resize()).observe(this.viewport);
     this.resize();
   }
 
@@ -153,11 +167,14 @@ class Player {
     const bundle = await loadStage(entry);
     this.paths = new CamPaths(bundle.cam);
     this.stage = await StageScene.load(bundle.geometryUrl, bundle.script);
+    // Honour the per-mesh fog bit and compile the radial-fog variant.
+    this.sceneFog.prepare(this.stage.root);
     this.scene.add(this.stage.root);
 
     this.rails = new RailLayer(this.paths);
     this.scene.add(this.rails.group);
     this.rails.setVisible($<HTMLInputElement>("#show-rails").checked);
+    this.rails.setAimRailsVisible($<HTMLInputElement>("#show-aim").checked);
 
     this.walker = new Walker(bundle.script, {
       enterRegion: (r) => this.stage?.enterRegion(r),
@@ -168,8 +185,11 @@ class Player {
       releaseCamera: () => {},
       onFeed: (e) => this.onFeed(e),
       onBranch: (b) => this.showBranch(b),
+      playSound: (id) => this.bgm.play(id),
     }, { seed: this.state.seed ?? 1 });
 
+    this.bgm.setTable(bundle.script.bgm, entry.game_mode);
+    this.bgm.setSoundTables(bundle.script.sound);
     this.tree.build(bundle.script);
     this.minimap.build(bundle.script);
     this.feed.clear();
@@ -187,6 +207,11 @@ class Player {
     }
 
     this.applyIncomingState();
+    // No `bgm_entry_play` in any stage script starts the stage's own track --
+    // they only switch to boss and transition music -- so the opening track
+    // is started here and labelled as not script-driven.
+    const st = bundle.script.bgm?.stage_track;
+    if (st) this.bgm.play(st.id, "stage");
     this.setLoading(null);
     $("#status").textContent =
       `${entry.name} · ${entry.counts.models} models · ` +
@@ -204,6 +229,7 @@ class Player {
     } else if (this.state.block !== undefined) {
       w.seek(this.state.block, this.state.step ?? 1, this.state.op ?? 0);
       this.syncCameraToWalker();
+      this.syncBgmToWalker();
     } else {
       w.reset();
       // Instruction 0 of block 0 has entered no region and issued no camera
@@ -252,6 +278,9 @@ class Player {
     $<HTMLInputElement>("#show-rails").addEventListener("change", (e) => {
       this.rails?.setVisible((e.target as HTMLInputElement).checked);
     });
+    $<HTMLInputElement>("#show-aim").addEventListener("change", (e) => {
+      this.rails?.setAimRailsVisible((e.target as HTMLInputElement).checked);
+    });
     $<HTMLInputElement>("#show-spawns").addEventListener("change", (e) => {
       this.spawns.setVisible((e.target as HTMLInputElement).checked);
     });
@@ -259,6 +288,43 @@ class Player {
       this.pillarbox = (e.target as HTMLInputElement).checked;
       this.resize();
     });
+    $<HTMLSelectElement>("#fog-mode").addEventListener("change", (e) => {
+      this.sceneFog.setMode((e.target as HTMLSelectElement).value as FogMode);
+      this.refreshUi();
+    });
+
+    // Deciding is not a race. Hovering the bar -- to read the routes, or to
+    // preview a shot -- stops the arcade countdown until the pointer leaves.
+    const bar = $("#branchbar");
+    bar.addEventListener("pointerenter", () => {
+      this.branchHover = true;
+      this.refreshBranchCountdown();
+    });
+    bar.addEventListener("pointerleave", () => {
+      this.branchHover = false;
+      this.refreshBranchCountdown();
+    });
+
+    const sound = $("#btn-sound");
+    sound.addEventListener("click", () => this.bgm.setMuted(!this.bgm.muted));
+    $<HTMLInputElement>("#volume").addEventListener("input", (e) =>
+      this.bgm.setVolume(Number((e.target as HTMLInputElement).value) / 100));
+    this.bgm.onChange = (bs) => {
+      const on = !this.bgm.muted;
+      // The button states what it currently IS, not what pressing it does.
+      sound.setAttribute("aria-pressed", String(on));
+      $("#sound-icon").textContent = on ? "🔊" : "🔇";
+      $("#sound-text").textContent = on
+        ? (bs.playing ? "Sound on" : "Sound on…")
+        : "Muted";
+      const label = $("#bgm-label");
+      label.classList.toggle("blocked", bs.blocked && !this.bgm.muted);
+      label.textContent = !bs.file
+        ? "no bgm"
+        : bs.blocked && !this.bgm.muted
+          ? "click 🔇 to allow audio"
+          : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`;
+    };
 
     $("#btn-play").addEventListener("click", () => this.togglePlay());
     $("#btn-step").addEventListener("click", () => this.stepOnce());
@@ -312,6 +378,75 @@ class Player {
     window.addEventListener("popstate", () => {
       this.state = readState();
       void this.loadStage();
+    });
+  }
+
+  /**
+   * The splitter between the script panel and the viewport.
+   *
+   * The panel starts narrow because the viewport is the point of the tool;
+   * the tree is a navigator, not the content. Width is a per-viewer
+   * convenience, so it lives in `localStorage` and nowhere else.
+   */
+  private wireResizer(): void {
+    const bar = $("#left-resize");
+    const area = $("#stagearea");
+    const set = (px: number) => {
+      const w = Math.round(Math.max(LEFT_MIN, Math.min(LEFT_MAX, px)));
+      document.documentElement.style.setProperty("--left-w", `${w}px`);
+      bar.setAttribute("aria-valuenow", String(w));
+      return w;
+    };
+
+    let w = LEFT_DEFAULT;
+    try {
+      const saved = Number(localStorage.getItem(LEFT_KEY));
+      if (Number.isFinite(saved) && saved > 0) w = saved;
+    } catch {
+      // Private windows and blocked site data both throw here. A default
+      // width is a perfectly good outcome, so there is nothing to report.
+    }
+    set(w);
+
+    const save = (px: number) => {
+      try {
+        localStorage.setItem(LEFT_KEY, String(px));
+      } catch {
+        /* see above */
+      }
+    };
+
+    let dragging = false;
+    bar.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      bar.setPointerCapture(e.pointerId);
+      bar.classList.add("dragging");
+      document.body.classList.add("resizing");
+      e.preventDefault();
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      set(e.clientX - area.getBoundingClientRect().left);
+    });
+    const end = (e: PointerEvent) => {
+      if (!dragging) return;
+      dragging = false;
+      bar.releasePointerCapture(e.pointerId);
+      bar.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      save(set(e.clientX - area.getBoundingClientRect().left));
+    };
+    bar.addEventListener("pointerup", end);
+    bar.addEventListener("pointercancel", end);
+    bar.addEventListener("dblclick", () => save(set(LEFT_DEFAULT)));
+    bar.addEventListener("keydown", (e) => {
+      const step = e.shiftKey ? 40 : 10;
+      const cur = $("#left").getBoundingClientRect().width;
+      if (e.key === "ArrowLeft") save(set(cur - step));
+      else if (e.key === "ArrowRight") save(set(cur + step));
+      else if (e.key === "Home") save(set(LEFT_DEFAULT));
+      else return;
+      e.preventDefault();
     });
   }
 
@@ -390,6 +525,7 @@ class Player {
     this.feed.clear();
     w.seek(block, step, op);
     this.syncCameraToWalker();
+    this.syncBgmToWalker();
     this.state.block = block;
     this.state.step = step;
     this.state.op = op;
@@ -403,9 +539,11 @@ class Player {
     const p = this.paths?.paths.get(slot);
     if (!p) return;
     p.pose(frame, this.walker?.rollEnabled ?? false, this.pose);
-    applyPose(this.camera, this.pose);
+    applyPose(this.camera, this.pose,
+              cameraEyeY(this.pose, this.walker?.useFixedEyeY ?? false,
+                         this.walker?.fixedEyeY ?? 0));
     this.rails?.highlight(slot, p.start, p.end);
-    this.rails?.setCameraPose(this.pose.eye, this.pose.target);
+    this.rails?.setCameraPose(this.camera.position, this.pose.target);
   }
 
   // -- walker callbacks --------------------------------------------------
@@ -430,32 +568,107 @@ class Player {
     this.feed.push(e);
   }
 
-  private showBranch(b: BranchChoice | null): void {
-    const overlay = $("#branch-overlay");
+  /**
+   * Show a branch point in the bar at the bottom of the window.
+   *
+   * Not a modal. A branch is a fact about where playback has got to, not a
+   * question that has to be answered before anything else can happen -- so
+   * the script, the scrubber and free roam all stay usable while it is up,
+   * and it never covers the shot you are choosing between.
+   */
+  private shownBranch: string | null = null;
+  /** True while the pointer is over the branch bar; freezes the countdown. */
+  private branchHover = false;
+
+  /**
+   * The countdown label. Three states, and each says what it means: running,
+   * frozen because the pointer is over the bar, or simply waiting because
+   * only Play mode runs the arcade timer at all.
+   */
+  private refreshBranchCountdown(): void {
+    const b = this.walker?.branch;
+    const el = $("#branch-countdown");
     if (!b) {
-      overlay.hidden = true;
+      el.textContent = "";
       return;
     }
-    overlay.hidden = false;
+    if (!this.playing) el.textContent = "waiting for a choice";
+    else if (this.branchHover) el.textContent = "countdown paused";
+    else el.textContent = `picking in ${Math.max(0, b.countdown).toFixed(1)} s`;
+    el.classList.toggle("paused", this.playing && this.branchHover);
+  }
+
+  private showBranch(b: BranchChoice | null): void {
+    const bar = $("#branchbar");
+    if (!b) {
+      bar.hidden = true;
+      this.shownBranch = null;
+      return;
+    }
+    // Rebuilding the buttons while one is being clicked destroys the click.
+    // Only a different branch point is worth redrawing for.
+    const key = `${b.block}:${b.targets.join(",")}`;
+    if (this.shownBranch === key && !bar.hidden) return;
+    this.shownBranch = key;
+    bar.hidden = false;
+    const route = this.walker?.currentBlock?.route;
     $("#branch-sub").textContent =
-      `block ${b.block} routes to ${b.targets.join(" or ")}. ` +
-      `The arcade picks on a timer; here you can choose.`;
+      `block ${b.block} → ${b.targets.join(" or ")}`;
+
     const box = $("#branch-buttons");
     box.replaceChildren(
       ...b.targets.map((t) => {
         const btn = document.createElement("button");
-        btn.textContent = `→ block ${t}`;
+        const choice = route ? route.next.indexOf(t) : -1;
+        btn.textContent = `→ ${t}`;
+        btn.title = `Take route to block ${t}` +
+          (choice >= 0 ? ` (branch_choice ${choice})` : "");
+        // The arcade shows a preview of each route before you commit. Those
+        // shots are the store_six operands, indexed by branch_choice.
+        // Unused choices are stored as slot 0 / frame 0 and resolve to no
+        // path; those get no preview rather than a shot of somewhere else.
+        const shot = b.preview?.find((p) => p.choice === choice && p.cam);
+        if (shot) {
+          btn.classList.add("has-preview");
+          btn.addEventListener("pointerenter", () =>
+            this.poseFromSlot(shot.slot, shot.frame));
+          btn.addEventListener("pointerleave", () => {
+            this.syncCameraToWalker();
+            // poseFromSlot moved the rail highlight to the preview path; put
+            // it back on whatever the script is actually playing.
+            const c = this.walker?.cam;
+            if (c) this.onCamera(c);
+            else this.rails?.highlight(null);
+          });
+        }
         btn.addEventListener("click", () => {
           this.walker?.takeBranch(t);
           this.feed.clear();
+          this.syncCameraToWalker();
           this.refreshUi();
         });
         return btn;
       }),
     );
+    this.refreshBranchCountdown();
+
+    // The bar is a grid row, so showing it shortens the viewport. The
+    // ResizeObserver on #viewport picks that up; nothing to do here.
   }
 
   // -- per-frame ---------------------------------------------------------
+
+  /**
+   * After a seek, play whatever track the replay last passed.
+   *
+   * The replay itself is silent -- retriggering audio for every instruction
+   * skipped over would be a burst of stops and starts -- so the walker records
+   * the track and the result is applied once, here.
+   */
+  private syncBgmToWalker(): void {
+    const t = this.walker?.bgmTrack;
+    if (t !== null && t !== undefined && t !== 0) this.bgm.play(t);
+  }
 
   private syncCameraToWalker(): void {
     const w = this.walker;
@@ -465,8 +678,11 @@ class Player {
     const p = this.paths?.paths.get(cam.slot);
     if (!p) return;
     p.pose(cam.frame, w.rollEnabled, this.pose);
-    applyPose(this.camera, this.pose);
-    this.rails?.setCameraPose(this.pose.eye, this.pose.target);
+    // The orientation comes from the raw curve pair; only the eye's height is
+    // adjusted, and only after. Doing it the other way round tilts the shot.
+    applyPose(this.camera, this.pose,
+              cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY));
+    this.rails?.setCameraPose(this.camera.position, this.pose.target);
   }
 
   private frame = (now: number) => {
@@ -481,12 +697,8 @@ class Player {
         this.freeRoam.update(dt, this.camera);
       } else if (this.playing && this.walker) {
         if (this.walker.branch) {
-          this.walker.tickBranchCountdown(dt);
-          const c = this.walker.branch;
-          if (c) {
-            $("#branch-countdown").textContent =
-              `picking in ${Math.max(0, c.countdown).toFixed(1)} s`;
-          }
+          if (!this.branchHover) this.walker.tickBranchCountdown(dt);
+          this.refreshBranchCountdown();
         } else {
           this.accum += dt * this.speed;
           let guard = 0;
@@ -501,7 +713,11 @@ class Player {
       }
     }
 
-    if (this.walker) this.spawns.update(this.walker.spawns);
+    if (this.walker) {
+      this.spawns.update(this.walker.spawns);
+      const f = this.walker.fog;
+      this.sceneFog.update(f.near, f.far, f.rgb, this.walker.fogSet);
+    }
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -550,6 +766,9 @@ class Player {
       ["spawns", `${w.liveEnemies} live / ${w.spawns.length} placed`],
       ["waiting on", w.wait ? w.wait.blocksOn : "—", !!w.wait],
       ["bgm", w.bgmTrack === null ? "—" : `track ${w.bgmTrack}`],
+      ["fog", this.sceneFog.describe],
+      ["last se", w.lastSound === null ? "—"
+        : `0x${w.lastSound.toString(16).toUpperCase()}`],
       ["eye", fmtVec(this.camera.position)],
     ]);
 

@@ -48,6 +48,21 @@ export interface ActiveSpawn extends SpawnJson {
   secondsLeft: number | null;
 }
 
+/**
+ * The scene fog, from the light block that evt opcodes `0x20`-`0x27` drive.
+ *
+ * Channels 0 and 1 are near and far (floats, reached through a pointer to a
+ * constant in the evt file); 2/3/4 are the colour components as 0-255 ints,
+ * and channel 5 sets all three at once. It is a linear D3D fog model, which
+ * is the same model three.js `Fog` implements.
+ */
+export interface FogState {
+  near: number;
+  far: number;
+  /** 0-255 per component, as stored. */
+  rgb: [number, number, number];
+}
+
 export interface CamCommand {
   slot: number;
   startFrame: number;
@@ -79,6 +94,8 @@ export interface BranchChoice {
   targets: number[];
   /** Seconds left on the arcade countdown before the RNG picks. */
   countdown: number;
+  /** The arcade preview shot for each route, when a `store_six` supplied one. */
+  preview: NonNullable<OpJson["branch_preview"]> | null;
 }
 
 export interface FeedEntry {
@@ -95,7 +112,10 @@ export interface WalkerOptions {
   secondsPerEnemy: number;
   /** Simulate the enemy-count waits at all, or pass straight through them. */
   simulateCombat: boolean;
-  /** Seconds a branch point waits before the seeded RNG picks. */
+  /**
+   * Seconds a branch point waits before the seeded RNG picks. Hovering the
+   * branch bar freezes it, so this is the unattended pace, not a deadline.
+   */
   branchCountdown: number;
   /** Clear spawn markers when the block changes. */
   clearSpawnsOnBlock: boolean;
@@ -105,7 +125,7 @@ export interface WalkerOptions {
 export const DEFAULT_OPTIONS: WalkerOptions = {
   secondsPerEnemy: 1,
   simulateCombat: true,
-  branchCountdown: 5,
+  branchCountdown: 1.5,
   clearSpawnsOnBlock: true,
   seed: 1,
 };
@@ -119,6 +139,8 @@ export interface WalkerHost {
   releaseCamera(): void;
   onFeed(entry: FeedEntry): void;
   onBranch(choice: BranchChoice | null): void;
+  /** Any sound id, dispatched by namespace as `PlaySoundId` does. */
+  playSound(id: number): string | undefined;
 }
 
 /** How far a wait opcode can be honoured from the bundle alone. */
@@ -142,7 +164,38 @@ export class Walker {
 
   region = -1;
   rollEnabled = false;
+  /** `g_camera_use_fixed_y` (0x36) and `g_camera_fixed_eye_y` (0x1A). */
+  useFixedEyeY = false;
+  fixedEyeY = 0;
+  /** `g_ground_plane_y` -- the same global as `fixedEyeY`, named for its
+   *  other job: the height a missed downward ray falls back to. */
   groundY: number | null = null;
+  /** 0x37: advance the camera path every frame, bypassing the room gate. */
+  forcePathAdvance = false;
+  /**
+   * `branch_choice` (`DAT_009C88A4`). Every writer in the binary is gameplay
+   * code, and it is reset to 0 on every block change -- so with no gameplay a
+   * branch always takes `next[0]` until the UI sets it.
+   */
+  branchChoice = 0;
+  /** `halt` (0x4E) parks the interpreter; it does not end the scene. */
+  parked = false;
+  /**
+   * Scene fog. Starts effectively off -- the far plane is 8000, so a range
+   * beyond it draws nothing, which is what the scripts themselves use
+   * (65000/65001) to disable fog.
+   */
+  fog: FogState = { near: 65000, far: 65001, rgb: [0, 0, 0] };
+  /** True once the script has actually set a fog channel. */
+  fogSet = false;
+  /** A `cam_play` with `flags & 2` stashes its range for a later 0x21. */
+  stashedCam: { slot: number; start: number; end: number } | null = null;
+  /**
+   * The arcade branch-preview shots, from the most recent `store_six`
+   * (`queue_event` sel 0x60): one camera pose per route the next branch can
+   * take, indexed by `branch_choice`.
+   */
+  branchPreview: NonNullable<OpJson["branch_preview"]> | null = null;
   checkpointBlock = 0;
   readonly flags = new Set<number>();
   readonly loadedSlots = new Set<number>();
@@ -152,6 +205,8 @@ export class Walker {
   branch: BranchChoice | null = null;
   finished = false;
   bgmTrack: number | null = null;
+  /** The most recent `se_play` operand, for the HUD. */
+  lastSound: number | null = null;
 
   private rng: () => number;
   private seq = 0;
@@ -192,17 +247,26 @@ export class Walker {
   reset(seed = this.options.seed): void {
     this.rng = mulberry32(seed);
     this.block = this.script.entry_block;
-    // A block is entered at step 1, not step 0: EvtAdvanceBlockOrRoute sets
-    // the step index to 1 on every block change, so step 0 is reached only
-    // through the checkpoint path. The steps of a block are alternative
-    // programs rather than a sequence -- each one ends with `end_block` --
-    // which is why entering at the wrong one skips the block's real content.
-    this.step = (this.blockAt(this.script.entry_block)?.steps?.length ?? 0) > 1
-      ? 1 : 0;
+    // FUN_0045EBC0 picks the first step by game mode: 1 for normal Arcade
+    // play, 5 for Original Mode on scene 0, 0 only on the continue and
+    // checkpoint paths. The exporter resolves that rule; the walker just
+    // honours it.
+    const entry = this.script.entry_step ?? 1;
+    const n = this.blockAt(this.script.entry_block)?.steps?.length ?? 0;
+    this.step = n > entry ? entry : 0;
     this.opIndex = 0;
     this.region = -1;
     this.rollEnabled = false;
+    this.useFixedEyeY = false;
+    this.fixedEyeY = 0;
     this.groundY = null;
+    this.forcePathAdvance = false;
+    this.branchChoice = 0;
+    this.parked = false;
+    this.stashedCam = null;
+    this.branchPreview = null;
+    this.fog = { near: 65000, far: 65001, rgb: [0, 0, 0] };
+    this.fogSet = false;
     this.checkpointBlock = this.script.entry_block;
     this.flags.clear();
     this.loadedSlots.clear();
@@ -212,6 +276,7 @@ export class Walker {
     this.branch = null;
     this.finished = false;
     this.bgmTrack = null;
+    this.lastSound = null;
     this.seq = 0;
     this.host.onBranch(null);
     this.host.releaseCamera();
@@ -259,7 +324,8 @@ export class Walker {
    */
   primeToFirstWait(maxOps = 4096): void {
     let n = 0;
-    while (!this.finished && !this.wait && !this.branch && n++ < maxOps) {
+    while (!this.finished && !this.parked && !this.wait && !this.branch &&
+           n++ < maxOps) {
       // Stop as soon as there is both something resident and somewhere to
       // look from; running further would silently skip past the opening.
       if (this.cam && this.region >= 0) break;
@@ -272,7 +338,7 @@ export class Walker {
    * every frame-valued quantity in the data is on that clock.
    */
   tick(dt: number, fps = 60): void {
-    if (this.finished || this.branch) return;
+    if (this.finished || this.branch || this.parked) return;
     let frames = dt * fps;
 
     // A camera move runs one frame per tick, exactly as CamAdvancePathFrame
@@ -310,7 +376,8 @@ export class Walker {
     }
 
     let guard = 0;
-    while (!this.finished && !this.wait && !this.branch && guard++ < 4096) {
+    while (!this.finished && !this.parked && !this.wait && !this.branch &&
+           guard++ < 4096) {
       if (!this.executeOne(false)) break;
     }
   }
@@ -333,20 +400,16 @@ export class Walker {
   // -- execution ---------------------------------------------------------
 
   private executeOne(quiet: boolean): boolean {
-    if (this.finished || this.branch || this.wait) return false;
+    if (this.finished || this.parked || this.branch || this.wait) return false;
     const blk = this.currentBlock;
     if (!blk || blk.hole || !blk.steps || blk.steps.length === 0) {
-      return this.leaveBlock(quiet);
+      return this.advanceStepOrRoute(quiet);
     }
-    if (this.step >= blk.steps.length) return this.leaveBlock(quiet);
+    if (this.step >= blk.steps.length) return this.advanceStepOrRoute(quiet);
     const step = blk.steps[this.step];
-    if (this.opIndex >= step.ops.length) {
-      this.step++;
-      this.opIndex = 0;
-      // A block's step list running out is what hands control to the route
-      // table (FUN_0045F000), so only the last step falls through.
-      return this.step < blk.steps.length ? true : this.leaveBlock(quiet);
-    }
+    // Falling off the end of a step's instructions is the same thing
+    // `end_block` does explicitly: move to the next step.
+    if (this.opIndex >= step.ops.length) return this.advanceStepOrRoute(quiet);
 
     const op = step.ops[this.opIndex];
     const note = this.apply(op, quiet);
@@ -360,7 +423,7 @@ export class Walker {
         note,
       });
     }
-    if (this.wait || this.branch || this.finished) return true;
+    if (this.wait || this.branch || this.finished || this.parked) return true;
     this.opIndex++;
     return true;
   }
@@ -392,26 +455,57 @@ export class Walker {
       case 0x35: // enable_camera_path_roll
         this.rollEnabled = !!op.roll_enabled;
         return this.rollEnabled ? "roll channel on" : "roll channel off";
-      case 0x1a: // set_ground_plane_y
+      case 0x1a: // set_ground_plane_y / g_camera_fixed_eye_y
         this.groundY = op.ground_y ?? null;
+        this.fixedEyeY = op.camera_fixed_eye_y ?? op.ground_y ?? 0;
+        return undefined;
+      case 0x36: // pin_view_to_ground_plane
+        this.useFixedEyeY = !!op.use_fixed_eye_y;
+        return this.useFixedEyeY
+          ? `camera eye Y pinned to ${this.fixedEyeY}`
+          : "camera eye Y back to path.y - 15";
+      case 0x37: // force_camera_path_advance
+        this.forcePathAdvance = !!op.force_path_advance;
+        return undefined;
+      case 0x20:  // light0_set / tweens -- block 0 is the one the renderer
+      case 0x21:  // is pushed every frame, so it is the one that shows.
+      case 0x23:
+        return this.applyLightChannel(op);
+      case 0x24:  // block 1 is pushed only at scene init; tracked, not drawn.
+      case 0x25:
+      case 0x27:
         return undefined;
       case 0x48: // set_script_flag
         if (op.flag !== undefined) this.flags.add(op.flag);
         return undefined;
       case 0x5f: // bgm_entry_play
         this.bgmTrack = op.track ?? null;
-        return undefined;
+        // The handler is a stop followed by a play, and only the third
+        // operand is used. `quiet` is a replay, where re-triggering audio for
+        // every instruction skipped over would be wrong.
+        return quiet || op.track === undefined || op.track === null
+          ? undefined
+          : this.host.playSound(op.track);
       case 0x4d: // checkpoint
         this.checkpointBlock = this.block;
         return "checkpoint";
       case 0x4e: // halt
-        this.finished = true;
-        return "halt";
+        // The handler does not advance pc, so the VM sits here re-running it
+        // forever. That is a park, not the end of the scene.
+        this.parked = true;
+        return "halt — the script parks here";
       case 0x4f: // end_block
-        this.leaveBlock(quiet);
+        this.advanceStepOrRoute(quiet);
         return undefined;
       default:
         break;
+    }
+
+    // 0x38/0x3A se_play, 0x39/0x3B se_play_3d. The "unless skip" variants are
+    // gated on a flag nothing in the binary ever sets, so all four always run.
+    if (op.op >= 0x38 && op.op <= 0x3b) {
+      this.lastSound = op.sound ?? null;
+      return quiet || !op.sound ? undefined : this.host.playSound(op.sound);
     }
 
     if (op.spawns && op.spawns.length) {
@@ -434,38 +528,113 @@ export class Walker {
     return undefined;
   }
 
+  /**
+   * A fog/light channel write on block 0.
+   *
+   * `set` (0x20) is immediate. The two tween forms (0x21 by rate, 0x23 over a
+   * duration) animate toward the value; the walker jumps straight to the
+   * target and says so, because the tween block's `{enabled, from, to, rate}`
+   * layout has been read but the per-frame stepping has not.
+   */
+  private applyLightChannel(op: OpJson): string | undefined {
+    const ch = op.channel;
+    if (ch === undefined) return undefined;
+    const tween = op.op !== 0x20;
+    const set = (f: Partial<FogState>) => {
+      this.fog = { ...this.fog, ...f };
+      this.fogSet = true;
+    };
+    if (ch === 0 && op.value !== undefined) set({ near: op.value });
+    else if (ch === 1 && op.value !== undefined) set({ far: op.value });
+    else if (ch === 5 && op.components?.length === 3) {
+      set({ rgb: [op.components[0], op.components[1], op.components[2]] });
+    } else if (ch === 2 || ch === 3 || ch === 4) {
+      if (op.value === undefined && !op.components) return undefined;
+      const v = op.value ?? op.components?.[0] ?? 0;
+      const rgb: [number, number, number] = [...this.fog.rgb];
+      rgb[ch - 2] = v;
+      set({ rgb });
+    } else {
+      return undefined;   // light colour and ambient: tracked by the UI only
+    }
+    return tween ? `${op.channel_name} -> target (tween not stepped)` : undefined;
+  }
+
   private applyQueueEvent(op: OpJson): string | undefined {
     if (op.action === "cam_play") {
       const slot = op.slot ?? -1;
       const start = op.start ?? 0;
       const end = op.end ?? 0;
+
+      // `flags & 2` does NOT play. EvtActionCamPlay40 stashes the range in
+      // g_stashed_path_frame / _end_frame and returns; a later
+      // `queue_event 0x21, 6|7` enters the scene state whose camera hook
+      // steps it. All 208 deferred plays in the game are followed within
+      // three queued actions by exactly that, so the idiom is reliable.
+      if (((op.flags ?? 0) & 2) !== 0) {
+        this.stashedCam = { slot, start, end };
+        return "stashed for a later scene state 6/7";
+      }
+
       // start == -1 resumes from the frame the previous command left at,
       // rather than seeking; start == end holds a static pose.
-      const resumeFrom = this.cam && op.resume ? this.cam.frame : start;
-      const cmd: CamCommand = {
+      const from = op.resume && this.cam ? this.cam.frame : start;
+      this.cam = {
         slot,
-        startFrame: op.resume ? resumeFrom : start,
+        startFrame: from,
         endFrame: end,
-        frame: op.resume ? resumeFrom : start,
+        frame: from,
         flags: op.flags ?? 0,
         isStatic: !!op.static,
-        deferred: ((op.flags ?? 0) & 2) !== 0,
+        deferred: false,
         file: op.cam?.file ?? null,
         pathIndex: op.cam?.path ?? null,
         done: !!op.static,
       };
-      this.cam = cmd;
-      this.host.startCamera(cmd);
-      if (cmd.deferred) {
-        // The game stashes these and a later scene-state transition plays
-        // them. The walker plays them now so the shot is visible, and says so.
-        return "deferred by flags & 2; played here anyway";
-      }
-      return cmd.isStatic ? "static pose" : undefined;
+      this.host.startCamera(this.cam);
+      return this.cam.isStatic ? "static pose" : undefined;
     }
+
+    if (op.action === "store_six" && op.branch_preview) {
+      // FUN_00403DB0 reads these back indexed by branch_choice, so they are
+      // the shot the arcade shows for each route the branch can take.
+      this.branchPreview = op.branch_preview;
+      return `${op.branch_preview.length} branch preview shots`;
+    }
+
     if (op.action === "finish_sequence") {
-      this.host.releaseCamera();
-      return "camera released";
+      // Selector 0x21 is EvtEnterSceneState(2, minor) -- it picks a *camera
+      // routine*, it does not hand control back from a path. Row 2's live
+      // cells are 4, 6 and 7, and those are the only operands that occur.
+      const minor = op.args?.[0];
+      if (minor === 6 || minor === 7) {
+        const st = this.stashedCam;
+        if (!st) return "state 6/7 with nothing stashed";
+        this.cam = {
+          slot: st.slot,
+          startFrame: st.start,
+          endFrame: st.end,
+          frame: st.start,
+          flags: 0,
+          // State 7 uses `<` rather than `<=` on the end frame; one frame.
+          isStatic: st.start === st.end,
+          deferred: true,
+          file: op.cam?.file ?? null,
+          pathIndex: op.cam?.path ?? null,
+          done: st.start === st.end,
+        };
+        this.stashedCam = null;
+        this.host.startCamera(this.cam);
+        return `plays the stashed range ${st.start}..${st.end}`;
+      }
+      if (minor === 4 && this.cam) {
+        // CameraSnapToPathEye: hold where the path is now.
+        this.cam.done = true;
+        this.cam.isStatic = true;
+        this.host.startCamera(this.cam);
+        return "snap to path eye";
+      }
+      return op.camera_state ? `camera state ${op.camera_state}` : undefined;
     }
     return undefined;
   }
@@ -504,78 +673,141 @@ export class Walker {
   // -- routing -----------------------------------------------------------
 
   /**
-   * The route table decides what runs next when a block's steps run out.
-   * `kind` 0 goes to `next[0]`, 1 branches on the player's choice, 2 ends the
-   * scene.
+   * `end_block` (0x4F), transcribed from `EvtAdvanceBlockOrRoute` (0x0045F000):
+   *
+   * ```c
+   * step += 1;
+   * if (EvtGetStep(scene, block, step) == -1) {      // step table exhausted
+   *     kind = route[block].kind;
+   *     if      (kind == 0) block = route[block].next[0];
+   *     else if (kind == 1) block = route[block].next[branch_choice];
+   *     else if (kind == 2) block = block + 1;
+   *     step = 1;
+   * }
+   * if (EvtGetBlock(scene, block) == -1) { ...scene over... }
+   * pc = EvtGetStep(scene, block, step);
+   * branch_choice = 0;
+   * ```
+   *
+   * Three things in there are easy to get wrong, and this walker had all
+   * three wrong before it was read properly:
+   *
+   * 1. **A block's steps run in sequence.** `end_block` advances to the next
+   *    *step*, not out of the block. Only when the step table is exhausted
+   *    does the route table get consulted. Treating every `end_block` as a
+   *    block exit skips most of a stage -- including the `region_enter` and
+   *    `cam_play` instructions that live in the later steps.
+   * 2. **`kind == 2` is not "the scene ends".** It falls through to
+   *    `block + 1`. The scene ends when the block it lands on is a hole.
+   * 3. **A branch takes `next[branch_choice]`**, and `branch_choice` is reset
+   *    to 0 at the end of every block change. Nothing in the script sets it:
+   *    every writer is in gameplay code (shooting a door, taking a route),
+   *    so with no gameplay a branch always takes `next[0]`. That is what the
+   *    branch UI is for -- it sets the choice the player would have made.
    */
-  private leaveBlock(quiet: boolean): boolean {
+  private advanceStepOrRoute(quiet: boolean): boolean {
+    this.step += 1;
+    this.opIndex = 0;
     const blk = this.currentBlock;
+    if (blk?.steps && this.step < blk.steps.length) return true;
+
     const route = blk?.route ?? this.script.routes[this.block];
     if (!route) {
       this.finished = true;
       return false;
     }
-    if (route.kind === "end") {
+
+    if (route.kind === "branch" && !quiet) {
+      const targets = route.next.filter((n) => n >= 0);
+      if (targets.length > 1) {
+        // Pause and ask. Resolved by takeBranch(), which is what actually
+        // performs the transition.
+        this.branch = {
+          block: this.block,
+          targets,
+          countdown: this.options.branchCountdown,
+          preview: this.branchPreview,
+        };
+        this.host.onBranch(this.branch);
+        return true;
+      }
+    }
+
+    let next: number;
+    if (route.kind === "goto") next = route.next[0];
+    else if (route.kind === "branch") next = route.next[this.branchChoice] ?? -1;
+    else next = this.block + 1;              // kind 2: fall through
+
+    return this.goToBlock(next);
+  }
+
+  /**
+   * Enter a block at **step 1**, as every route transition does.
+   *
+   * Step 0 is reached only at scene entry (and then only in some game modes)
+   * or through the checkpoint path, which is why the tree presents it as
+   * checkpoint state rather than running it inline.
+   *
+   * Returns false when the scene is over -- the block does not exist, or is a
+   * hole, which is exactly the `EvtGetBlock() == -1` test.
+   */
+  goToBlock(index: number, step = 1): boolean {
+    const blk = this.blockAt(index);
+    if (index < 0 || !blk || blk.hole) {
       this.finished = true;
+      this.branch = null;
       this.host.onBranch(null);
       return false;
     }
-    const targets = route.next.filter((n) => n >= 0);
-    if (route.kind === "branch" && targets.length > 1 && !quiet) {
-      this.branch = {
-        block: this.block,
-        targets,
-        countdown: this.options.branchCountdown,
-      };
-      this.host.onBranch(this.branch);
-      return true;
-    }
-    const next = route.kind === "branch"
-      ? targets[Math.floor(this.rng() * targets.length)] ?? targets[0]
-      : targets[0];
-    if (next === undefined) {
-      this.finished = true;
-      return false;
-    }
-    this.goToBlock(next);
+    if (this.options.clearSpawnsOnBlock) this.spawns = [];
+    // The preview shots belong to the branch in the block that stored them --
+    // every `store_six` in the game sits in a branch block. Carrying one
+    // across a block change offers an unrelated shot for the next branch,
+    // which is exactly as wrong as it sounds.
+    this.branchPreview = null;
+    this.block = index;
+    this.step = (blk.steps?.length ?? 0) > step ? step : 0;
+    this.opIndex = 0;
+    this.branch = null;
+    // Reset last, matching the tail of EvtAdvanceBlockOrRoute: a choice
+    // applies to exactly one transition and never carries forward.
+    this.branchChoice = 0;
+    this.host.onBranch(null);
     return true;
   }
 
   /**
-   * Enter a block at **step 1**.
-   *
-   * `EvtAdvanceBlockOrRoute` sets the step index to 1 on every block change,
-   * so step 0 is reached only through the checkpoint path. Step 0 is
-   * therefore presented as checkpoint state rather than run inline.
-   * *(The block-change behaviour is read from the binary; the checkpoint
-   * reading is inference.)*
+   * Resolve a paused branch by setting `branch_choice` and taking the
+   * transition. Passing nothing lets the seeded RNG pick, which is what the
+   * arcade countdown does.
    */
-  goToBlock(index: number, step = 1): void {
-    if (this.options.clearSpawnsOnBlock) this.spawns = [];
-    this.block = index;
-    const blk = this.blockAt(index);
-    const n = blk?.steps?.length ?? 0;
-    this.step = n > step ? step : 0;
-    this.opIndex = 0;
-    this.branch = null;
-    this.host.onBranch(null);
-  }
-
-  /** Resolve a paused branch. Passing nothing lets the seeded RNG pick. */
   takeBranch(target?: number): void {
     const b = this.branch;
     if (!b) return;
-    const pick = target !== undefined && b.targets.includes(target)
-      ? target
-      : b.targets[Math.floor(this.rng() * b.targets.length)] ?? b.targets[0];
-    this.goToBlock(pick);
+    const route = this.currentBlock?.route ?? this.script.routes[this.block];
+    let choice: number;
+    if (target !== undefined && route) {
+      choice = route.next.indexOf(target);
+      if (choice < 0) choice = 0;
+    } else {
+      const pick = b.targets[Math.floor(this.rng() * b.targets.length)];
+      choice = route ? Math.max(0, route.next.indexOf(pick)) : 0;
+    }
+    this.branchChoice = choice;
+    this.branch = null;
+    const next = route?.next[choice] ?? -1;
+    this.goToBlock(next);
   }
 
   tickBranchCountdown(dt: number): void {
     if (!this.branch) return;
     this.branch.countdown -= dt;
+    // Deliberately does NOT re-notify the host. Re-announcing an unchanged
+    // branch every frame made the UI rebuild its route buttons 60 times a
+    // second, so a button was always destroyed between pointerdown and
+    // pointerup and no click ever landed. The countdown is readable from
+    // `branch.countdown`; only a *change* of branch is an event.
     if (this.branch.countdown <= 0) this.takeBranch();
-    else this.host.onBranch(this.branch);
   }
 
   get blockCount(): number {

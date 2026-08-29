@@ -105,6 +105,17 @@ export interface OpJson {
   cam?: { file: string; path: number; duration: number } | null;
 
   spawns?: SpawnJson[];
+  scene_state?: { major: number | string; minor: number };
+  camera_state?: string | null;
+  branch_preview?: {
+    choice: number;
+    frame: number;
+    slot: number;
+    cam: { file: string; path: number } | null;
+  }[];
+  use_fixed_eye_y?: boolean;
+  camera_fixed_eye_y?: number | null;
+  force_path_advance?: boolean;
   arg?: number;
   blocks_on?: string;
   flag?: number;
@@ -146,16 +157,41 @@ export interface RegionEntryJson {
   entry: number;
 }
 
+export interface BgmJson {
+  /** Both filename tables, indexed by `id & 0xFFF`. Holes are real nulls. */
+  names: { ar: (string | null)[]; plain: (string | null)[] };
+  default_table: "ar" | "plain";
+  /** The stage's own track — named by convention, not started by the script. */
+  stage_track: {
+    index: number;
+    id: number;
+    ar: string | null;
+    plain: string | null;
+    note: string;
+  } | null;
+  game_mode: number;
+}
+
+/** The SE and voice name tables. Keys are decimal ids as strings. */
+export interface SoundJson {
+  se: Record<string, string>;
+  voice: Record<string, string>;
+}
+
 export interface ScriptJson {
   scene: number;
   stage: number | null;
   game_mode: number;
   evt_file: string;
   entry_block: number;
+  /** Which step of the entry block runs first; the game picks it by mode. */
+  entry_step: number;
   routes: { kind: string; next: number[] }[];
   blocks: BlockJson[];
   regions: RegionEntryJson[][];
   cam_slots_used: number[];
+  bgm?: BgmJson;
+  sound?: SoundJson;
   warnings: string[];
 }
 

@@ -96,6 +96,7 @@ export class RailLayer {
     this.activeGroup.add(this.marker, this.aimMarker, this.link);
     this.group.add(this.activeGroup);
     this.setCameraMarkerVisible(false);
+    this.setAimRailsVisible(false);
   }
 
   setVisible(v: boolean): void {
@@ -105,6 +106,20 @@ export class RailLayer {
   setObjectRailsVisible(v: boolean): void {
     for (const l of this.objLines.values()) l.visible = v;
   }
+
+  /**
+   * The look-at track of every camera path. Off by default: it doubles the
+   * line count and mostly clutters, because what a path is aimed at is
+   * usually obvious from where it points.
+   */
+  setAimRailsVisible(v: boolean): void {
+    this.aimVisible = v;
+    for (const l of this.aimLines.values()) l.visible = v;
+    this.aimMarker.visible = v;
+    this.link.visible = v;
+  }
+
+  private aimVisible = false;
 
   setCameraMarkerVisible(v: boolean): void {
     this.activeGroup.visible = v;
@@ -127,6 +142,7 @@ export class RailLayer {
         s === slot ? RAIL_AIM : dimColor,
       );
       (line.material as LineBasicMaterial).opacity = s === slot ? 0.7 : 0.2;
+      line.visible = this.aimVisible;
     }
     for (const line of this.objLines.values()) {
       (line.material as LineBasicMaterial).color.set(RAIL_OBJ);

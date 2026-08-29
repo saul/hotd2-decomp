@@ -94,11 +94,15 @@ export class ScriptTree {
 
     const targets = blk.route.next.filter((n) => n >= 0);
     const sum = document.createElement("summary");
+    sum.title =
+      `block ${blk.index} — ${blk.route.kind}` +
+      `${targets.length ? " → " + targets.join(", ") : ""}, ` +
+      `${blk.steps?.length ?? 0} steps`;
     sum.innerHTML =
       `<span class="bid">${blk.index}</span>` +
       `<span class="route ${blk.route.kind}">${blk.route.kind}` +
-      `${targets.length ? " → " + targets.join(", ") : ""}</span>` +
-      `<span class="dim">${blk.steps?.length ?? 0} steps</span>`;
+      `${targets.length ? " → " + targets.join(",") : ""}</span>` +
+      `<span class="nsteps">${blk.steps?.length ?? 0}s</span>`;
     d.appendChild(sum);
 
     for (const step of blk.steps ?? []) {
@@ -113,16 +117,20 @@ export class ScriptTree {
         : `step ${step.index}`;
       s.appendChild(lbl);
       for (const op of step.ops) {
+        const summary = opSummary(op);
         const row = document.createElement("div");
         row.className = `op cat-${op.cat}`;
         row.dataset.b = String(blk.index);
         row.dataset.s = String(step.index);
         row.dataset.o = String(op.i);
-        row.dataset.q = `${op.name} ${op.cat} ${opSummary(op)}`.toLowerCase();
+        row.dataset.q = `${op.name} ${op.cat} ${summary}`.toLowerCase();
+        // The panel is narrow and the operand summary ellipsizes, so the whole
+        // row is also its own tooltip.
+        row.title = `${op.i}  ${op.name}${summary ? "  " + summary : ""}`;
         row.innerHTML =
           `<span class="oi">${op.i}</span>` +
           `<span class="nm">${op.name}</span>` +
-          `<span class="ar">${escapeHtml(opSummary(op))}</span>`;
+          `<span class="ar">${escapeHtml(summary)}</span>`;
         s.appendChild(row);
       }
       d.appendChild(s);

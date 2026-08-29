@@ -154,6 +154,27 @@ class Mesh:
         return bool((self.tsp >> 19) & 1)
 
     @property
+    def fog_control(self) -> int:
+        """TSP bits 22-23: 0 LUT, 1 per-vertex, 2 none, 3 LUT mode 2."""
+        return (self.tsp >> 22) & 3
+
+    @property
+    def fog_enabled(self) -> bool:
+        """Whether this mesh is fogged.
+
+        The PC port maps TSP bit 23 to ``D3DRENDERSTATE_FOGENABLE``
+        **inverted** -- the PowerVR2 bit means *disable*, so fog is on when it
+        is clear. ``ModelForceFogControlNone`` (0x00419300) exploits exactly
+        that, ORing 0x00800000 into four asset slots' meshes at load to force
+        fog control to 2 = none.
+
+        The fog colour and near/far it uses are not per-mesh: they live in the
+        scene light block and are set by evt opcodes 0x20-0x27, channels 0-5.
+        See docs/formats/materials.md and docs/formats/evt.md.
+        """
+        return not (self.tsp >> 23) & 1
+
+    @property
     def src_blend(self) -> int:
         return (self.tsp >> 29) & 7
 

@@ -721,6 +721,10 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
                 "use_alpha": mesh.use_alpha,
                 "ignore_texture_alpha": mesh.ignore_texture_alpha,
                 "gouraud": mesh.gouraud,
+                # TSP bit 23 -> D3DRENDERSTATE_FOGENABLE, inverted. The colour
+                # and range are scene state, not per-mesh; see evt 0x20-0x27.
+                "fog_enabled": mesh.fog_enabled,
+                "fog_control": mesh.fog_control,
                 "texture_shading": ["decal", "modulate",
                                     "decal_alpha", "modulate_alpha"][mesh.texture_shading],
             }

@@ -57,10 +57,34 @@ remain. Phase 8 exports whole textured stages with camera animation.
   resuming.** Where the last session stopped and what to do next.
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) — phase checklist
 - [`docs/PLAN.md`](docs/PLAN.md) — the full plan
-- [`docs/PLAYER_PLAN.md`](docs/PLAYER_PLAN.md) — planned browser stage player
-  (step/play/free-roam through a stage, driven by its own event script)
+- [`docs/PLAYER_PLAN.md`](docs/PLAYER_PLAN.md) — the browser stage player's plan
+  and rationale; [`web/README.md`](web/README.md) is how to run it
 
 ## Usage
+
+### Play a stage in the browser
+
+A web client that steps, plays and free-roams through a stage, driven by the
+game's own event script — its branching route graph, its region streaming, its
+camera paths and its enemy placements.
+
+```sh
+# 1. build the bundle (Python parses every format; the browser parses none)
+python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
+
+# 2. run the client
+cd web && npm install && npm run dev     # http://localhost:5173
+```
+
+Add `--original` to build the Original Mode variants too. All player state is
+URL-addressable — `?stage=2&block=3&step=1&op=14`, or `?stage=2&slot=59&frame=170`
+to pose straight off a camera path.
+
+Full documentation, and an explicit account of what is faithful and what is
+approximated, is in [`web/README.md`](web/README.md). The short version: the
+client is a script **walker**, not the event VM — it executes everything the
+data determines and *reports* everything that would need the game's runtime,
+rather than guessing at it.
 
 ### Export a level to glTF
 
@@ -236,6 +260,8 @@ ghidra/         headless driver + GhidraScripts (project DB is not committed)
 tools/hod2lib/  the format library
 tools/emu/      Unicorn-based function harness (Phase 2)
 src/            readable C reference implementations
+web/            browser stage player (Vite + TypeScript + three.js)
 tests/          golden-file regression suite
 extract/        gitignored scratch space for extracted assets
+extract/player/ gitignored bundle the web player loads
 ```

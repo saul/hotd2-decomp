@@ -1,0 +1,249 @@
+# Browser stage player — progress
+
+Running state of the web player. The plan and its rationale are in
+[`PLAYER_PLAN.md`](PLAYER_PLAN.md); how to run it is in
+[`../web/README.md`](../web/README.md). This file is the checklist and, more
+usefully, the record of **what was got wrong and how it was caught** — the
+player is a consumer of the RE, so it is where reading errors surface as
+visible misbehaviour.
+
+**Status:** R0–W5 shipped and working. W6 (visual regression) deferred, as
+planned.
+
+---
+
+## Phases
+
+| # | Deliverable | State |
+|---|---|---|
+| **R0** | Library refactor — `hod2lib/{stage,script,campaths,bundle}.py`, CLI tools reduced to argparse shells | ✅ glTF, `.bin`, region sidecars and `dump_stage_script` text all **byte-identical** across 6 stages × 2 game modes; `verify_*` all pass |
+| **E1** | `tools/export_player.py`, `hod2lib/bundle.py`, cam + script serialisers | ✅ 12 stage bundles, 166 MB; `manifest.json` carries a `format` the client checks and the SHA-256 of every source file |
+| **E2** | GLB packaging in `gltf.py` | ✅ one 24 MB `stage2.glb` replaces `.gltf` + `.bin` + 1241 PNGs |
+| **W1** | Vite + TS + Three scaffold, bundle loader, static render, URL state | ✅ typechecks and builds clean; all state URL-addressable including `freeze=1` |
+| **W2** | Hermite eval, rails, free-roam camera | ✅ curves evaluated client-side; rails per path with the active sub-range highlighted |
+| **W3** | Script walker, region visibility, step mode | ✅ every op reachable and seekable; only the current region drawn |
+| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; branch points pause with a seeded countdown; combat on a tunable per-enemy timer |
+| **W5** | Audio, fog, route minimap, Arcade/Original toggle, event feed, inspector | ✅ BGM, SE and voice all play, dispatched by namespace; scene fog rendered radially |
+| **W6** | Visual regression harness | deferred — `freeze=1` and the URL state it needs are already in place |
+
+---
+
+## What the player consumes, and what it exposed
+
+The player turned out to be a good oracle for the RE. Five readings that
+looked right on paper produced visibly wrong behaviour, and the binary settled
+each one.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Most of a stage never ran; regions and camera barely changed | **A block's steps are sequential.** `end_block` advances to the next *step*; only an exhausted step table reaches the route table. Treating every `end_block` as a block exit ran one step per block | read `EvtAdvanceBlockOrRoute` |
+| Scene ended early | Route **kind 2 is not "end"** — it falls through to `block + 1`. The scene ends when that block is a hole | same |
+| Branch buttons picked the wrong route | A branch takes `next[branch_choice]`, not "a target"; `branch_choice` resets to 0 on every block change and every writer of it is gameplay code | same |
+| Clicking a branch button did nothing | The countdown re-announced the branch every frame, so the UI rebuilt the buttons 60×/s and the click never landed between `pointerdown` and `pointerup` | notify on *change*, not on tick |
+| Branch preview showed an unrelated shot | The `store_six` preview was carried across block changes. All four in stage 2 sit *inside* branch blocks | discard on block change, same lifetime as `branch_choice` |
+| Whole view tilted down | `eye.y = path.y - 15` was applied **before** the look-at, but the game derives pitch and yaw from the *unshifted* `eye - target` and only then overwrites `eye.y` | translate after orienting |
+| Camera still too low | The `-15` should not be applied at all — see below | reverted, with the measurement |
+
+## Findings the player produced
+
+Things established while building it, now folded back into the format docs.
+
+- **`store_six` (`0x60`) is the arcade branch preview.** `[proved]` — three
+  `(frame, slot)` camera poses indexed by `branch_choice`, from reading the
+  scatter in `EvtActionStoreSixOperands60` against the gather in
+  `FUN_00403DB0`. Note the order: frame first. Recorded in
+  [`formats/evt.md`](formats/evt.md).
+- **`queue_event` sel `0x21` is a camera *state selector***, not "hand control
+  back from a path", and `cam_play` with `flags & 2` **stashes rather than
+  plays** — a later `0x21, 6|7` runs the stashed range. 208/208 follow that
+  idiom.
+- **The BGM tables.** `[proved]` — one sound id space split by the top nibble,
+  two contiguous BGM filename tables whose lengths are fixed by their
+  adjacency. Recorded in [`formats/sound.md`](formats/sound.md), and as a
+  plate comment on `PlaySoundId` in the Ghidra database.
+- **`cp_st1.bin`, `cp_demo.bin` and `cp_title.bin` ship damaged.** 119
+  keyframe words decode to NaN or ~1e38, and `st1evtbl` plays the affected
+  paths. Both retail copies checked are byte-identical, so it is how the game
+  ships. `hod2lib.cam` repairs and counts them; before that, stage 1 could not
+  be exported at all.
+- **Fog is per-mesh, and its values were in the data all along.** TSP bit 23
+  is `FOGENABLE` **inverted**, so fog is on when the bit is clear — which is
+  what `ModelForceFogControlNone` exploits. 2197/2219 stage-2 materials are
+  fogged. The client renders it **radially** (fog factor from true distance)
+  rather than reproducing D3D's default view-space-Z falloff, which fogs the
+  screen corners less than the centre; `planar` is a toggle for comparison.
+- **The sound tables.** `[proved]` — one id space split by the top nibble, and
+  all four name tables read out. Three of the four store no count and are
+  bounded only by the table that follows them. `se_play` is **not** restricted
+  to SE: across the six stage scripts its operand names 9 BGM tracks, 6 voice
+  lines and a stop as well. [`formats/sound.md`](formats/sound.md).
+- **Light and fog values are readable.** The `0x20`–`0x27` operands are
+  pointers to float constants in the evt file; dereferencing them turns 1,888
+  bytes of "unattributed residue" into real values — stage 2 block 3 opens with
+  fog near 21, far 507, light RGB (1.0, 0.9, 0.77), ambient 0.5.
+
+## Open, and what each costs
+
+Ranked by what they would actually change on screen.
+
+| Open | Effect | Where the work is |
+|---|---|---|
+| Scene **lights** applied | fog is rendered; the light direction, colour and ambient the same opcodes set are still only shown in the inspector | **client** |
+| Backdrop dome (`0x1B`/`0x1C`) | the sky is missing; table at `0x00579968` is documented | client + a small `exetab` reader |
+| What starts a stage's own BGM | the player names the stage track by convention and says so | decomp — the scene-entry path, not an xref sweep over 496 callers |
+| `path.y - 15` compensation | nothing today; the player is correct without it | decomp — what `0x009A60C0` is, and whether `g_camera_eye_y` is the final world eye |
+| `0x40C790` | whether deferred (state 6/7) shots are yaw-only | decomp, small |
+| Spawn class → model | enemies stay markers | decomp, large — the class table holds handler addresses |
+| W6 harness | no regression safety net | client |
+
+## Deliberate non-goals
+
+- **It is a script walker, not the event VM.** The blocking opcodes gate on
+  live state that is still being decompiled. Everything the data determines is
+  executed; everything else is *reported* in the feed with the condition it
+  would have blocked on. A guess dressed as an interpreter would be worse than
+  an honest walker.
+- **Opcodes without a meaning show raw operands**, never an invented label.
+- **Enemies are markers.** The class → model mapping is unsolved, so there is
+  nothing to look a model up by.
+- **The bundle is never committed.** It is game-derived data;
+  `extract/player/` is gitignored, and BGM streams from the user's own install
+  rather than being copied.
+
+---
+
+## Every opcode, and what the player does with it
+
+All 96 dispatch slots, generated against `hod2lib.evt.OPCODES` so none can be
+missed. Meanings and confidence marks live in
+[`formats/evt.md`](formats/evt.md); this table is only about the **client**.
+
+
+- **done** — the client acts on it — you can see or hear the result
+- ~approx~ — acted on, but by a rule the client can evaluate rather than the game's
+- *tracked* — state is kept and shown in the HUD or inspector; nothing is drawn from it yet
+- shown — decoded into the event feed with its operands; no state, no effect
+- n/a — a proved no-op, a dead opcode, or a dispatch slot no shipped file encodes
+
+| Op | Name | Category | Status | Notes |
+|---|---|---|---|---|
+| `00` | `nop_stub` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
+| `01` | `spawn_if_mode1_a` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `02` | `spawn_if_mode1_b` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `03` | `spawn_if_mode1_c` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `04` | `spawn_if_mode1_d` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `05` | `spawn_if_mode2_a` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `06` | `spawn_if_mode2_b` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `07` | `spawn_if_mode2_c` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `08` | `spawn_if_mode2_d` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `09` | `spawn_placed` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
+| `0A` | `spawn_simple` | spawn | shown | same descriptor family; not resolved to markers |
+| `0B` | `spawn_obj` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
+| `0C` | `spawn_obj_c` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
+| `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
+| `0E` | `set_approach_rings` | spawn | shown | enemy approach pacing; operands decoded as floats |
+| `0F` | `set_approach_steps` | spawn | shown | enemy approach pacing; operands decoded as floats |
+| `10` | `set_collision_set_full` | collision | shown | collision-set pointers, resolved to coli/ blobs; collision is not simulated |
+| `11` | `set_collision_set_ray_only` | collision | shown | collision-set pointers, resolved to coli/ blobs; collision is not simulated |
+| `12` | `set_approach_steps_2p_bias` | spawn | shown | enemy approach pacing; operands decoded as floats |
+| `13` | `set_scene_lighting_override` | light | *tracked* | lighting override; values decoded, not applied to the render |
+| `14` | `set_scene_lighting` | light | *tracked* | lighting override; values decoded, not applied to the render |
+| `15` | `enable_entity_spotlights` | light | *tracked* | lighting override; values decoded, not applied to the render |
+| `16` | `set_ambient_light_rgb` | light | *tracked* | lighting override; values decoded, not applied to the render |
+| `17` | `slerp_light0_direction` | light | *tracked* | scene light direction, in degrees; not applied |
+| `18` | `set_light0_direction` | light | *tracked* | scene light direction, in degrees; not applied |
+| `19` | `set_light1_direction` | light | *tracked* | scene light direction, in degrees; not applied |
+| `1A` | `set_ground_plane_y` | camera | *tracked* | ground plane / g_camera_fixed_eye_y; see the eye-height note |
+| `1B` | `set_backdrop_preset` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
+| `1C` | `set_backdrop_mode` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
+| `1D` | `enable_rain` | scenery | shown | rain particles; not drawn |
+| `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
+| `1F` | `set_hud_shutter_state` | hud | shown | HUD shutter state; the player draws no HUD |
+| `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour are applied**; light colour and ambient are tracked only |
+| `21` | `light0_tween_rate` | light | **done** | light block 0: **fog near/far and colour are applied**; light colour and ambient are tracked only |
+| `22` | `light0_stop` | light | shown | clears a channel tween |
+| `23` | `light0_tween_time` | light | **done** | light block 0: **fog near/far and colour are applied**; light colour and ambient are tracked only |
+| `24` | `light1_set` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `25` | `light1_tween_rate` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `26` | `light1_stop` | light | shown | clears a channel tween |
+| `27` | `light1_tween_time` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `28` | `region_load` | region | shown | preloads a region's assets; everything is already resident here |
+| `29` | `region_enter` | region | **done** | **switches the drawn region** — the core of the streaming model |
+| `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
+| `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
+| `2C` | `set_skippable_region` | flow | n/a | proved dead: it never sets the flag, and nothing else does either |
+| `2D` | `show_screen_message` | hud | shown | screen message + voice; the group id is shown, the record table is not read |
+| `2E` | `resume_bgm_if_skipped` | audio | n/a | guarded by the dead skip flag — a no-op in this build |
+| `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
+| `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |
+| `31` | `goto_scene_state` | flow | shown | scene state transition; the player has no state machine |
+| `32` | `goto_scene_state_when_alive` | flow | shown | scene state transition; the player has no state machine |
+| `33` | `set_action_drain_mode` | flow | shown | action-ring drain mode |
+| `34` | `unused_34` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
+| `35` | `enable_camera_path_roll` | camera | **done** | **gates the camera roll channel**, exactly as CamEvalPath7 does |
+| `36` | `pin_view_to_ground_plane` | camera | *tracked* | selects the fixed camera eye height; see the eye-height note |
+| `37` | `force_camera_path_advance` | camera | *tracked* | forces camera path advance past the room-cleared gate |
+| `38` | `se_play` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
+| `39` | `se_play_3d` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
+| `3A` | `se_play_unless_skip` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
+| `3B` | `se_play_3d_unless_skip` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
+| `3C` | `unused_3c` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
+| `3D` | `nop3` | nop | n/a | proved no-ops |
+| `3E` | `nop1` | nop | n/a | proved no-ops |
+| `3F` | `nop0` | nop | n/a | proved no-ops |
+| `40` | `wait_queued_events_done` | wait | ~approx~ | resolves when the current camera move ends |
+| `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path |
+| `42` | `wait_frames` | wait | **done** | **exact** frame countdown |
+| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate — simulated on the per-enemy timer, and the feed says so |
+| `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate — simulated on the per-enemy timer, and the feed says so |
+| `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
+| `46` | `wait_scripted_actors` | wait | shown | runtime counter; passed, with the condition reported |
+| `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |
+| `48` | `set_script_flag` | flow | *tracked* | writes the script flag array 0x45 reads |
+| `49` | `variant_call_a` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
+| `4A` | `variant_call_b` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
+| `4B` | `variant_spawn` | spawn | shown | a global picks which operand list runs; the client does not evaluate it |
+| `4C` | `unused_4c` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
+| `4D` | `checkpoint` | flow | *tracked* | records the checkpoint block |
+| `4E` | `halt` | flow | **done** | **parks playback** — it does not end the scene |
+| `4F` | `end_block` | flow | **done** | **next step, or the route table** when the step list is exhausted |
+| `50` | `asset_load_slot` | assets | **done** | **streams a model in / out** of the drawn set |
+| `51` | `asset_unload_slot` | assets | **done** | **streams a model in / out** of the drawn set |
+| `52` | `asset_load_polfile` | assets | shown | whole-file asset traffic; the bundle already holds every model |
+| `53` | `asset_free_polfile` | assets | shown | whole-file asset traffic; the bundle already holds every model |
+| `54` | `asset_load_texbank` | assets | shown | whole-file asset traffic; the bundle already holds every model |
+| `55` | `asset_free_texbank` | assets | shown | whole-file asset traffic; the bundle already holds every model |
+| `56` | `asset_job_8` | assets | shown | whole-file asset traffic; the bundle already holds every model |
+| `57` | `asset_job_9` | assets | shown | whole-file asset traffic; the bundle already holds every model |
+| `58` | `asset_wait_all_jobs` | assets | shown | drains the asset job ring; instant here, nothing is pending |
+| `59` | `asset_wait_tex_pol_jobs` | assets | shown | drains the asset job ring; instant here, nothing is pending |
+| `5A` | `asset_wait_motion_jobs` | assets | shown | drains the asset job ring; instant here, nothing is pending |
+| `5B` | `nop0_b` | nop | n/a | proved no-ops |
+| `5C` | `nop0_c` | nop | n/a | proved no-ops |
+| `5D` | `snd_load_pack_stub` | audio | n/a | OutputDebugStringA stubs — the PC port streams .wav instead |
+| `5E` | `snd_free_pack_stub` | audio | n/a | OutputDebugStringA stubs — the PC port streams .wav instead |
+| `5F` | `bgm_entry_play` | audio | **done** | **plays a BGM track** |
+
+### `queue_event` (`0x30`) selectors
+
+| Sel | Action | Status | Notes |
+|---|---|---|---|
+| `10` | `set_player_flag` | shown |  |
+| `11` | `scene_state` | shown |  |
+| `12` | `set_update_routine` | shown |  |
+| `13` | `set_continuation` | n/a | defined, never used in shipped data |
+| `14` | `set_global` | shown |  |
+| `15` | `set_flag` | shown |  |
+| `20` | `hold_camera_preset` | shown | the preset table at 0x00576CF0 is not read |
+| `21` | `finish_sequence` | **done** | camera state: 4 snaps to the path eye, 6/7 play the stashed range |
+| `40` | `cam_play` | **done** | start..end at 60 Hz; `-1` resumes, `start == end` holds, `flags & 2` stashes |
+| `60` | `store_six` | **done** | the branch preview shots, offered on hover at a branch |
+
+### The eye-height note
+
+`0x1A` and `0x36` are marked *tracked* rather than **done** on purpose. Every
+camera hook applies `eye.y = use_fixed_y ? fixed_eye_y : path.y - 15`, but
+applying that to the `cp_` curve puts 173 of 201 paths looking upward at their
+own aim point, so the client records both values and applies neither. The
+measurement and a switch to re-enable it are in `web/src/campath.ts`.
+

@@ -4,7 +4,19 @@
 and free-roam through it, driven by the game's own event script — including its
 branching paths, enemy encounters and per-keyframe events.
 
-**Status:** not started. This document is the plan only.
+**Status:** built. R0–W5 are done and the client runs; W6 (visual regression)
+is deferred, as planned. Usage lives in [`../web/README.md`](../web/README.md);
+this document remains the plan and the rationale.
+
+Two decisions changed during the build, both recorded in place below:
+
+- **The client walks the script; it does not interpret it.** The event VM's
+  blocking opcodes gate on live state that is still being decompiled, so the
+  client executes everything the *data* determines and reports everything that
+  needs the runtime, rather than guessing. See *The event VM*.
+- **Free roam draws every region**, not the current one. A region holds only
+  the handful of models the game draws from one point on the rail; off that
+  point, most of the level is not there.
 
 Related: [`PLAN.md`](PLAN.md) (the RE plan), [`formats/pipeline.md`](formats/pipeline.md)
 (how the formats relate — read this first), [`formats/cam.md`](formats/cam.md),
@@ -39,7 +51,7 @@ every format.
 The **event VM**. It is stateful — branch choice, flags, live enemy count — and
 the `wait_*` opcodes gate on conditions that only exist at runtime.
 Pre-flattening the timeline would mean materialising every branch combination;
-stage 2 has 15 branch points. So the client interprets the script. That is
+stage 2 has 13 branch points. So the client interprets the script. That is
 ~300 lines, and it is the interesting part.
 
 Everything else in the client is `GLTFLoader`, a ~20-line cubic Hermite
@@ -268,15 +280,15 @@ visual tests need, so it is built in W1 rather than bolted on later.
 
 | # | Deliverable | Done when |
 |---|---|---|
-| **R0** | Library refactor | pre/post output byte-identical; all `verify_*` pass |
-| **E1** | `tools/export_player.py`, `hod2lib/bundle.py`, cam + script serialisers | stage 2 bundle validates against a JSON schema |
-| **E2** | GLB packaging in `gltf.py` | one file replaces `.gltf` + `.bin` + ~1300 PNGs |
-| **W1** | Vite + TS + Three scaffold, bundle loader, static render, URL state | stage 2 matches the `--unlit` glTF export |
-| **W2** | Hermite eval, rails, free-roam camera | `cp_st2` slot 110 at frame 90 reproduces the known Venice plaza shot |
-| **W3** | Event VM, region visibility, step mode | every op reachable and seekable; only the current region drawn |
-| **W4** | Play mode, branching, enemy simulation | stage 2 plays end to end through all 15 branch points |
-| **W5** | BGM, route minimap, Arcade/Original toggle, polish | — |
-| **W6** | Visual regression harness | below — **deferred; W1–W5 ship without it** |
+| **R0** ✅ | Library refactor — `hod2lib/{stage,script,campaths,bundle}.py`, CLI tools reduced to argparse shells | glTF, `.bin`, region sidecars and `dump_stage_script` text all **byte-identical** across six stages × two game modes; all `verify_*` pass |
+| **E1** ✅ | `tools/export_player.py`, `hod2lib/bundle.py`, cam + script serialisers | 12 stage bundles build; `manifest.json` carries a `format` the client checks and the SHA-256 of every source file |
+| **E2** ✅ | GLB packaging in `gltf.py` | one 24 MB `stage2.glb` replaces `.gltf` + `.bin` + 1241 PNGs |
+| **W1** ✅ | Vite + TS + Three scaffold, bundle loader, static render, URL state | typechecks and builds clean; all state URL-addressable including `freeze=1` |
+| **W2** ✅ | Hermite eval, rails, free-roam camera | curves evaluated client-side; rails drawn per path with the active sub-range highlighted |
+| **W3** ✅ | Script walker, region visibility, step mode | every op reachable and seekable; only the current region drawn |
+| **W4** ✅ | Play mode, branching, enemy simulation | route graph walked; branch points pause with a 5 s seeded countdown; combat simulated on a tunable per-enemy timer |
+| **W5** ✅ | Route minimap, Arcade/Original toggle, event feed, inspector, polish | BGM is **shown, not played** — the track-id → `sound/bgm/*.wav` mapping is still open |
+| **W6** | Visual regression harness | below — **deferred; W1–W5 ship without it**, as planned |
 
 ---
 

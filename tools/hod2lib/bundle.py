@@ -51,6 +51,59 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+#: Stage number -> the index in the BGM tables of that stage's own track.
+#: The event script never plays these: every `bgm_entry_play` in the six
+#: stage scripts names a *boss* or *transition* track, so the opening track is
+#: started outside the event system by a path that has not been traced. The
+#: names are unambiguous (`ST1_AR.WAV` ... `ST6_AR.WAV`), so the player offers
+#: the stage track by name and labels it as not script-driven.
+STAGE_BGM_INDEX = {1: 1, 2: 0, 3: 17, 4: 16, 5: 18, 6: 19}
+
+
+def bgm_json(tables, stage_number: int | None, game_mode: int) -> dict:
+    """The BGM mapping a stage needs: ids to filenames, plus its own track.
+
+    Both tables travel, because which one the game picks depends on runtime
+    state (`DAT_009C8E98 == 6 && g_GameMode == 0` selects the plain names, and
+    everything else the `_AR` mix). The client defaults to the same rule it
+    can actually evaluate -- Arcade gets `_AR`, which is what every stage
+    scene resolves to -- and can be pointed at the other.
+    """
+    names = tables.bgm_names()
+    idx = STAGE_BGM_INDEX.get(stage_number or -1)
+    return {
+        "names": names,
+        "default_table": "ar",
+        "stage_track": (
+            None if idx is None else {
+                "index": idx,
+                "id": 0x10000000 | idx,
+                "ar": names["ar"][idx],
+                "plain": names["plain"][idx] if idx < len(names["plain"]) else None,
+                "note": "the stage's own track, named by convention rather "
+                        "than by the script -- no bgm_entry_play in any stage "
+                        "script starts it",
+            }
+        ),
+        "game_mode": game_mode,
+    }
+
+
+def sound_json(tables) -> dict:
+    """The SE and voice name tables, for the ids `se_play` can carry.
+
+    `se_play` (0x38) is not restricted to SE: its operand goes through
+    `PlaySoundId`, which dispatches on the top nibble, and the shipped scripts
+    use all three namespaces through it -- 9 BGM ids, 6 voice ids and one stop
+    control across the six stages. So the client needs every table, not just
+    the SE one.
+    """
+    return {
+        "se": {str(k): v for k, v in sorted(tables.se_names().items())},
+        "voice": {str(k): v for k, v in sorted(tables.voice_names().items())},
+    }
+
+
 def build_stage(stage, out_root: Path, *, glb: bool = True,
                 write_textures: bool = True, unlit: bool = True,
                 cam_step: float = 2.0, progress=None) -> dict:
@@ -88,6 +141,8 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     # extras.hod2_regions for the same join from the other side.
     script_json["regions"] = stage.region_json()
     script_json["cam_slots_used"] = prog.cam_slots_used()
+    script_json["bgm"] = bgm_json(stage.tables, stage.stage, stage.game_mode)
+    script_json["sound"] = sound_json(stage.tables)
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))

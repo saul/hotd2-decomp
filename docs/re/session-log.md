@@ -2757,3 +2757,41 @@ arguments to the matrix calls (every constant re-read from raw bytes);
 `CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}` though Ghidra types
 all six as float; and on `FUN_0048F560` it renders a jump table as an indirect
 call and leaves `0x48F796`–`0x48F80F` undisassembled.
+
+### Session 19, continued — the stage-2 car
+
+The user asked whether the car at the start of stage 2 was among the rigs. It
+was not, and stage 2 had zero rigs. The reason is the flaw in my own split: I
+filtered the 31 `CamEvalObjectPath6` callers by whether they also call
+`AssetDrawSlot` and treated the 9 that do as "the rigs". For this car the poser
+and the drawer are different functions — `FUN_004521B0` evaluates the path and
+never draws, and the rig is in `FUN_00452320`. The survey agent had flagged it;
+I had filed it under "positioners" and moved on. **When hunting a rig, follow
+the poser to its `obj[0]`.**
+
+It is `[proved]` a car, by sound record rather than by shape: `FUN_00452930`
+plays `0x719A9` = `STAGE2_SE\CAR_SRIP_22.wav`. It renders as a red hatchback
+with its wheels in place.
+
+Three more findings from the same pass:
+
+* **The verifier earned its keep.** The same-stage-file check added earlier in
+  the session immediately caught a bad transcription: `FUN_00432840`'s cam
+  `0x2F` gate is cp_st1 while two of its routes are op_st2. The gate controls
+  when the object starts *moving*, not which route it takes — that is
+  `obj+0x11C`. A camera-path gate is not always a route selector.
+* **`obj+0x1390` is not the evt spawn descriptor**, now confirmed from two
+  independent classes: `0x25` wants `+6` as a variant (it is 0 in all 142
+  descriptors) and `0x33` wants `+0x0C` as a path slot (it is float data in all
+  44). It is a per-class parameter block, `[open]` where. Two rigs stay
+  unplaced because of it.
+* `RigPart.slots` means "draw all of these at this transform". The car's part
+  literals list two slots each, but those are the two *variants* of one part —
+  pasting them as-is would have drawn the intact and wrecked models
+  superimposed. Only variant 0 is exported.
+
+`[open]`: the car body carries 17 primitives and `part_002f` 5, of which
+several are untextured with a black base colour, and they render as large flat
+black wedges projecting from the model. They are inside the models' own mesh
+lists, not a rig error, but whether the engine draws them at all — and in what
+mode — is unresolved.

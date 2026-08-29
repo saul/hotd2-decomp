@@ -49,7 +49,7 @@ never fire.
 | `0x004185E0` vs `AssetDrawSlot` | a **lighting** variant of the same slot, not a transform variant |
 | `Translate(p.x, p.y + k, p.z)` before the rotations | a pose **bias**: `T(p+b).R`, which a child node cannot express |
 
-## Transcribed (9)
+## Transcribed (12)
 
 | routine | rig | routes | notes |
 |---|---|---|---|
@@ -62,8 +62,51 @@ never fire.
 | `0x00470B70` | `obj_470b70` | `0x179` | actor state 412 |
 | `0x00470080` | `obj_470080` | `0x196`–`0x198` | actor state 406; slot is runtime, nothing to place |
 | `0x00416B00` | `obj_416b00` | `0x194` | [likely] per-shot gunfire effects; a 6-record ring, all runtime |
+| `0x00452320` | `obj_452320` | `0x148`, `0x14D`, `0x14E`, `0x19A`–`0x1A1` | **[proved] a car** — the stage-2 opening vehicle. See below. |
+| `0x00432840` | `obj_432840` | `0x145`, `0x146`, `0x149`, `0x14A` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path |
+| `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed**, see below |
 
-### Why `obj_484ff0_props` is not placed
+### The stage-2 car, and why the 9-vs-22 split nearly lost it
+
+`FUN_00452320` is **[proved] a car**: its poser `FUN_00452930` plays sound
+`0x719A9`, whose SE record at `0x005868B4` names `STAGE2_SE\CAR_SRIP_22.wav`,
+a tyre skid. The neighbouring record `0x619A9` is `STAGE2_SE\CAR_CRASH1.wav` —
+both are in the stage-2 preload list at `0x00569C98`, but **no code site plays
+the crash**, so if one sounds, the event script fires it.
+
+It is bound to the opening shots: camera `0x38`/`0x39`/`0x3A` select object
+paths `0x148`/`0x14E`/`0x14D`. At the end of shot `0x39` the asset set swaps to
+variant 1 and the think pointer becomes `FUN_004522A0`, which never re-samples
+a path — so the body pose **freezes permanently**. An intact→wrecked swap is
+the obvious reading, `[likely]`. At shot `0x3A` frame 80 the wheel spin flag is
+cleared for good.
+
+Every part draws `dword[0x00565F2C + obj+0x13F0 * 0x10 + column]`, a 2×4 int
+table; variant 0 is exported and variant 1 is the post-crash set.
+
+Eight further instances run as traffic on `0x19A`–`0x1A1`, which are
+**`op_train` paths** — so they are not in any numbered stage export.
+
+None of this was reachable from the 9 direct drawers. Its posers evaluate the
+path and never draw; only following `obj[0]` gets you here.
+
+### Why `obj_4331d0` and `obj_484ff0_props` are not placed
+
+Both need `obj+0x1390`, and **[proved] that pointer does not reach the evt
+spawn descriptor**. Two independent checks:
+
+* class `0x25` wants `+6` as a variant. At `+6` in the descriptor sits the high
+  half of `init_flags`, which is `0` for all 142 class-`0x25` descriptors in all
+  six stages — and variant 0 draws nothing.
+* class `0x33` wants `+0x0C` as an object-path slot. At `+0x0C` in the
+  descriptor sit float bit patterns (`0xC0DA0000` and the like) across all 44
+  class-`0x33` descriptors, not slot ids in the 253–417 range.
+
+So `obj+0x1390` is a **per-class parameter block distinct from the evt
+descriptor**, and `[open]` where it lives. Without it neither rig has a route,
+so neither is placed.
+
+### Why `obj_484ff0_props` is not placed (detail)
 
 Its prop is chosen by `*(int16*)(*(int*)(obj+0x1390) + 6)`, and `obj+0x1390`
 does **not** point at the evt spawn descriptor: reading `+6` there (the high
@@ -90,7 +133,7 @@ unless the source column says otherwise.
 | `0x00440130` | `0x151`,`0x15E`–`0x161`,`0x175`–`0x177` | pure setter; callers pass literals | each caller draws | small |
 | `0x0044E5D0` | `0x14F` | literal | `FUN_00449EF0` | no — class `0x31` |
 | `0x00451E50` / `0x00451EB0` | `0x148`,`0x14D`,`0x14E`,`0x19A`–`0x1A1` | table `0x00565EF4` | `FUN_00451FF0` | no — near-identical pair |
-| `0x004521B0` | `0x148`/`0x14E`/`0x14D` | cam `0x38`/`0x39`/`0x3A` = cp_st2 1/2/3 | `FUN_00452320` | **yes** — 4 slots, table `0x00565F2C` stride `0x10` |
+| `0x004521B0` | `0x148`/`0x14E`/`0x14D` | cam `0x38`/`0x39`/`0x3A` = cp_st2 1/2/3 | `FUN_00452320` | **transcribed** — the stage-2 car |
 | `0x004522A0` | `0x153` | literal | `FUN_00452320` | **yes** (same rig) |
 | `0x004525C0` | `0x00565EF4[obj+0x4D4]` | table | `FUN_00451FF0` | no |
 | `0x00452930` | same table | table | `FUN_00452320` | **yes** (same rig) |
@@ -103,6 +146,12 @@ unless the source column says otherwise.
 
 ### Notes on the survey
 
+* **A camera-path gate is not always a route selector.** `FUN_00432840` is
+  gated on cam `0x2F` (cp_st1 15), but two of its four routes are `op_st2`.
+  The gate controls when the object starts *moving*; the route is chosen per
+  instance by `obj+0x11C`. Recording `0x2F` as a route gate produced a cp_st1
+  gate on op_st2 routes — a gate that could never fire — which is exactly what
+  the same-stage-file check in `verify_objects.py` caught.
 * **Latent bug in `0x004521B0`** `[proved]`: if `g_active_cam_path` is not
   `0x38`/`0x39`/`0x3A`, `ECX` still holds the *object pointer* and is
   sign-extended as the slot id. Unreachable only because the object spawns

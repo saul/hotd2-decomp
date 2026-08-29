@@ -571,12 +571,254 @@ OBJ_416B00 = Rig(
     ),
 )
 
-#: Every transcribed rig. Nine of the 31 CamEvalObjectPath6 callers; the other
+#: `FUN_00432840`, spawn class 0x28 (table entry 0x005933F8 -> FUN_00432610).
+#: The route is chosen per instance by obj+0x11C through the 4-entry table at
+#: 0x00589AE0, NOT by the camera path -- cp_st1 15 (0x2F) gates when the object
+#: starts *moving*, which is a different thing. Conflating the two would claim
+#: a cp_st1 gate on op_st2 routes, a gate that could never fire.
+OBJ_432840 = Rig(
+    name="obj_432840",
+    routine="FUN_00432840",
+    spawn_class=0x28,
+    routes=(
+        Route(0x145, note="obj+0x11C == 0; held at frame 0x29F before launch"),
+        Route(0x146, note="obj+0x11C == 1; held at frame 0x29B before launch"),
+        Route(0x149, note="obj+0x11C == 2; held at frame 0"),
+        Route(0x14A, note="obj+0x11C == 3; held at frame 0"),
+    ),
+    note="Max matrix depth 1, 3 balanced push/pop pairs, all parts siblings. "
+         "No SetDrawLayerNibble, so everything is on the default layer. "
+         "Until obj+0x1320 flips the pose is the route sampled ONCE at the "
+         "table's freeze frame and held; it flips on the first frame where "
+         "g_active_cam_path == 0x2F and g_frame >= that freeze frame, and the "
+         "pose then tracks the live frame. Killed once "
+         "cam_path_length[route] <= g_frame. In g_mode(0x009C8E98) == 10 the "
+         "route is replaced by a literal pose from 0x0055DD18 and the object "
+         "is killed once the camera reaches path 8; only sub-types 0 and 1 "
+         "have plausible records there, so those poses are recorded in the "
+         "note rather than emitted. [open] what mode 10 denotes.",
+    parts=(
+        RigPart("part_0033", (0x33,),
+                note="drawn at the object root with no scale of its own, so it "
+                     "inherits the incoming scale. Slot is the literal 0x33 "
+                     "stored into obj+0x13F0 at init."),
+        # Both sprite parts bias the path position before the billboard yaw, so
+        # neither offset can be expressed as a child of the rotated root.
+        RigPart("part_135f", (0x135F,),
+                translation=(0.0, 5.0, 0.0),
+                scale=(1.5, 2.0, 1.0),
+                animated="slot = 0x135F + (frame counter 0x009A32A0 % 15), a "
+                         "15-slot loop 0x135F..0x136D. RotY is a pure "
+                         "camera-facing yaw from VecToAngles(camX - obj.x, 0.0, "
+                         "camZ - obj.z) -- a billboard with no pitch. The "
+                         "object's own rotations are NOT applied to this part. "
+                         "The +5.0 is a bias on the path position, applied "
+                         "before the yaw.",
+                condition="only while obj+0x1320 == 0, i.e. before launch"),
+        RigPart("part_0b67", (0xB67,),
+                translation=(0.0, 0.0, 12.0),
+                scale=(7.0, 7.0, 7.0),
+                animated="slot = 0xB67 + (frame counter 0x009A32A0 & 7), an "
+                         "8-slot loop 0xB67..0xB6E, advancing in step with "
+                         "part_135f. Reuses the same yaw, not recomputed. Its "
+                         "path-position bias is +8.0 in Y, NOT the 5.0 that "
+                         "part_135f uses; the (0,0,12) here is a genuine "
+                         "post-rotation offset, since the yaw sits between the "
+                         "two translates and so they do not compose.",
+                condition="only while obj+0x1320 == 0, i.e. before launch"),
+    ),
+)
+
+#: `SUB_004331D0`, spawn class 0x33, selected when obj+0x11C == 1 inside the
+#: class handler FUN_00432FF0. The largest rig found: 9 draw sites.
+#: Not placed -- see `placement_blocked`.
+OBJ_4331D0 = Rig(
+    name="obj_4331d0",
+    routine="SUB_004331D0",
+    spawn_class=0x33,
+    placement_blocked=(
+        "the route is *(int*)(obj+0x1390 + 0x0C), and obj+0x1390 does not "
+        "point at the evt spawn descriptor: reading +0x0C at all 44 class-0x33 "
+        "descriptors gives float bit patterns (0xC0DA0000 and the like), not "
+        "slot ids in the 253..417 object-path range. Same record as the one "
+        "obj_484ff0_props needs, and the second independent confirmation that "
+        "obj+0x1390 is a per-class parameter block distinct from the evt "
+        "descriptor. Without it there is no route, so nothing is placed."),
+    note="Max matrix depth 1, 8 balanced push/pop pairs, no nesting -- every "
+         "part is a sibling. Two of the pushed blocks draw nothing; one caches "
+         "the object's camera-space position. No SetDrawLayerNibble anywhere. "
+         "The parts split into two MUTUALLY EXCLUSIVE sets by the main asset "
+         "id at obj+0x13F0: 0x1B0E gets part_0899/part_08cb_a/part_08cb_b/"
+         "part_1b0a/part_1b0d and never the sprite loops; anything else gets "
+         "the sprite loops and never those five. Every configuration draws "
+         "part_main_13f0, and part_1aab once detonated.",
+    parts=(
+        RigPart("part_main_13f0", (),
+                animated="slot is obj+0x13F0, taken from the spawn parameter "
+                         "block, so it is runtime and nothing is exported. "
+                         "Uniform scale is 1.0, or 2.5 for assets 0x1A35/"
+                         "0x1A36; asset 0x1A36 also gets ry += 0x4000."),
+        RigPart("part_1aab", (),
+                animated="a 40-frame loop over slots 0x1AAB..0x1AD2. Placed in "
+                         "WORLD space -- it is drawn before the object's own "
+                         "push -- at a pose copied from the spawn parameter "
+                         "block, with RotY set to face the live camera by "
+                         "VecToAngles and RotX forced to 0. [likely] fire or "
+                         "smoke: it is triggered 20 frames after detonation, "
+                         "which also spawns an explosion FX and a sound, and "
+                         "once set the flag never clears.",
+                condition="obj+0x34 & 0x00200000, set 20 frames after the "
+                          "object detonates"),
+        RigPart("part_024a", (),
+                translation=(0.0, 0.0, 25.0), scale=(0.6, 0.5, 0.7),
+                animated="a 22-slot loop 0x24A..0x25F, +1 per draw",
+                condition="main asset != 0x1B0E, and only while the path plays"),
+        RigPart("part_0260", (),
+                translation=(0.0, 0.0, 25.0), scale=(0.6, 0.5, 0.7),
+                animated="a 22-slot loop 0x260..0x275, +1 per draw",
+                condition="main asset != 0x1B0E, and only while the path plays",
+                note="transform is byte-for-byte identical to part_024a: two "
+                     "co-located sprite loops running different sequences"),
+        RigPart("part_0899", (0x899,),
+                translation=(-5.2664, 8.3328, 6.717),
+                rotation_bams=(-11578, 0, 0),
+                condition="main asset == 0x1B0E",
+                note="raw x=0xC0A88659 y=0x41055326 z=0x40D6F1AA; "
+                     "rotX 0xFFFFD2C6 = -11578 = -63.5999 deg"),
+        RigPart("part_08cb_a", (0x8CB,),
+                translation=(0.0, 3.5437, 17.0281),
+                animated="RotX by obj+0x135C, which gains 0x2000 BAMS (45 deg) "
+                         "once per draw immediately before this part",
+                condition="main asset == 0x1B0E"),
+        RigPart("part_08cb_b", (0x8CB,),
+                translation=(0.0, 3.5437, -12.384),
+                animated="RotX by obj+0x135C -- the same value part_08cb_a "
+                         "just advanced, read and not incremented again, so "
+                         "the two are always in phase",
+                condition="main asset == 0x1B0E"),
+        RigPart("part_1b0a", (0x1B0A,),
+                translation=(10.0, 6.216, 6.878),
+                condition="main asset == 0x1B0E"),
+        RigPart("part_1b0d", (0x1B0D,),
+                translation=(-10.0, 6.216, 6.878),
+                condition="main asset == 0x1B0E",
+                note="[likely] a mirrored pair with part_1b0a -- same y and z, "
+                     "x negated -- but they are different asset ids, so they "
+                     "are two distinct models rather than one mirrored twice"),
+    ),
+)
+
+#: `FUN_00452320`, the stage-2 opening vehicle. **[proved] a car**: its poser
+#: `FUN_00452930` plays sound 0x719A9, whose SE record at 0x005868B4 names
+#: ``STAGE2_SE\CAR_SRIP_22.wav`` -- a tyre skid. The neighbouring record
+#: 0x619A9 is ``STAGE2_SE\CAR_CRASH1.wav``; both are in the stage-2 preload
+#: list at 0x00569C98, but no code site plays the crash, so if one sounds it is
+#: fired by the event script.
+#:
+#: This rig is why the 9-vs-22 split in `docs/re/rig-survey.md` is a filter and
+#: not a definition: the posers evaluate the path and never draw, while the rig
+#: lives here.
+OBJ_452320 = Rig(
+    name="obj_452320",
+    routine="FUN_00452320",
+    routes=(
+        Route(0x148, cam_paths=(0x38,),
+              note="poser FUN_004521B0; playlen 200, no end-of-path transition"),
+        Route(0x14E, cam_paths=(0x39,),
+              note="playlen 370. At frame >= 370 the asset set swaps to "
+                   "variant 1 and the think pointer becomes FUN_004522A0, "
+                   "which never re-samples a path -- so the body pose freezes "
+                   "there permanently. [likely] the crash."),
+        Route(0x14D, cam_paths=(0x3A,),
+              note="playlen 130. At frame >= 80 the X-spin flag obj+0x1320 is "
+                   "cleared permanently; at 130 the think pointer becomes "
+                   "FUN_004522A0 and the variant stays 0."),
+    ) + tuple(
+        Route(slot, note="traffic instance %d, poser FUN_00452930, route from "
+                         "int16[0x00565EF4 + obj+0x1350 * 2]; these are "
+                         "op_train paths, so they are not in a numbered stage "
+                         "export" % (i + 3))
+        for i, slot in enumerate(range(0x19A, 0x1A2))
+    ),
+    note="Max matrix depth 2, balanced. No SetDrawLayerNibble, no MatrixScale, "
+         "no lit-submit variant and NO pose bias anywhere -- every pose is "
+         "written verbatim from CamEvalObjectPath6. "
+         "Spawned by FUN_00452120 -> FUN_004A6FA0(FUN_00452150, 0x13F4), which "
+         "sets obj+0x1350 to the instance index; the think pointer is "
+         "FUN_004521B0, or FUN_00452930 when g_GameMode == 2. "
+         "ASSET VARIANT: every part draws "
+         "dword[0x00565F2C + obj+0x13F0 * 0x10 + column], a 2x4 int table. "
+         "Variant 0 is exported; variant 1 is the set it swaps to after shot "
+         "0x39 ends. Only two rows exist. "
+         "LATENT BUG [proved], same shape as FUN_0048F560's: on a camera path "
+         "other than 0x38/0x39/0x3A, FUN_004521B0 leaves the actor pointer in "
+         "ECX and sign-extends its low 16 bits as the path index. Harmless "
+         "only because the actor exists solely during those three shots. "
+         "[open] asset identities -- slots 0x2D..0x35 are runtime indices with "
+         "no static name table in the exe.",
+    parts=(
+        RigPart("part_002d", (0x2D,),
+                note="the object root itself: Translate(pose) then RotZ, RotY, "
+                     "RotX from obj+0x40/44/48 and 0x6C/68/64. "
+                     "Variant 1 draws 0x2E instead."),
+        # A genuine nested push: this one is inside part_002d's, not a sibling.
+        RigPart("part_002f", (0x2F,),
+                translation=(9.0582619, 6.368186, 8.9433079),
+                parent="part_002d",
+                animated="RotY by obj+0x1334, applied only while obj+0x1324 is "
+                         "non-zero -- which happens only under FUN_004522A0, "
+                         "after the shot-0x39 freeze. obj+0x1334 is then "
+                         "0x4000 - CamEvalObjectPath6(0x153, t + 100.0).ry for "
+                         "t = 1..39, and frozen after. So this part only moves "
+                         "once the body has stopped.",
+                note="raw z=0x410F17C2, y=0x40CBC84B, x=0x4110EECC. "
+                     "Variant 1 draws 0x30. [open] what it is: the geometry "
+                     "and the timing would fit a panel swinging open, but "
+                     "nothing in the code or any string says so."),
+        # Both of these are really children of a second, non-drawing root that
+        # re-applies the body orientation with the roll passed through a
+        # limiter. That root is identical to the object root whenever the roll
+        # is inside the limiter's deadzone, so they are exported as children of
+        # the rig root and the limiter is recorded here instead.
+        RigPart("part_0034", (0x34,),
+                translation=(0.0, 3.1674952, 13.6489019),
+                animated="RotX by obj+0x1330, applied only while obj+0x1320 is "
+                         "set. obj+0x1330 gains 0x1000 BAMS (22.5 deg) every "
+                         "frame under FUN_004521B0 and FUN_00452930, and is "
+                         "never reset; FUN_004522A0 does not advance it, so "
+                         "the spin freezes there.",
+                note="raw z=0x415A61E5, y=0x404AB852, x=0.0. Variant 1 draws "
+                     "0x35. Its true parent is a roll-limited copy of the body "
+                     "frame: FUN_004018E0 decomposes Rz.Ry.Rx into a YXZ "
+                     "triple, then the roll r (&0xFFFF) is remapped -- "
+                     "r<=0x800 -> 0; 0x800<r<=0x4000 -> r-0x800; "
+                     "0x4000<r<0xC000 -> r; 0xC000<=r<0xE800 -> r-0xE800; "
+                     "r>=0xE800 -> 0. An asymmetric deadzone over "
+                     "-33.75..+11.25 deg, identity at rest."),
+        RigPart("part_0031", (0x31,),
+                translation=(0.0, 3.1674952, -9.4799995),
+                animated="RotX by obj+0x1330, same rule and same gate as "
+                         "part_0034",
+                note="raw z=0xC117AE14, y=0x404AB852, x=0.0. Variant 1 draws "
+                     "0x32. [likely] this and part_0034 are the wheels or "
+                     "axles: both sit on the centreline at x=0 and the same "
+                     "height, 23.13 apart in Z, both spin about X only at a "
+                     "constant rate under one shared flag, and their parent "
+                     "carries a roll limiter of exactly the kind you write so "
+                     "wheels do not cut through the ground when the body "
+                     "rolls. Note there are only TWO such parts and both are "
+                     "at x=0, so they are not four wheels; and the code gives "
+                     "no forward axis, so neither is named front or rear."),
+    ),
+)
+
+#: Every transcribed rig. Twelve of the 31 CamEvalObjectPath6 callers; the other
 #: 22 evaluate a path but never call AssetDrawSlot, so they position an object
 #: that some other routine draws.
 RIGS: tuple[Rig, ...] = (
     ST1_VEHICLE, OBJ_48EAD0, OBJ_48F050, OBJ_48F190, OBJ_48F560,
     OBJ_484FF0_PROPS, OBJ_470B70, OBJ_470080, OBJ_416B00,
+    OBJ_432840, OBJ_4331D0, OBJ_452320,
 )
 
 

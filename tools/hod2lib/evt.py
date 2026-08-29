@@ -89,6 +89,15 @@ def relocate(word: int) -> int:
 Op = tuple[str, str, int]
 
 OPCODES: dict[int, Op] = {
+    # Names and semantics are recovered from each handler and, where the
+    # handler only writes a global, from that global's *consumers*. The
+    # authoritative write-up with per-row evidence and confidence marks is
+    # docs/formats/evt.md; a condensed copy is the plate comment on
+    # EvtInterpreterLoop (0x0045ECC0) in the Ghidra database.
+    #
+    # Operand sizes below were validated independently of the names: 17,150
+    # instructions across every shipped file decode with zero errors and no
+    # stub opcode is ever reached.
     0x00: ("nop_stub", "bad", 0),
     0x01: ("spawn_if_mode1_a", "list", 0),
     0x02: ("spawn_if_mode1_b", "list", 0),
@@ -103,74 +112,116 @@ OPCODES: dict[int, Op] = {
     0x0B: ("spawn_obj", "list", 0),         # FUN_00408AA0
     0x0C: ("spawn_obj_c", "list", 0),       # FUN_00408C40
     0x0D: ("spawn_obj_unless_skip", "list", 0),  # FUN_00408B70
-    0x0E: ("set_slot_xyz", "fix", 6),       # FUN_00408D10
-    0x0F: ("set_pending_ids", "list", 0),   # FUN_00408C80
-    0x10: ("mark_list_a", "list", 0),       # FUN_0045F130
-    0x11: ("mark_list_b", "list", 0),       # FUN_0045F160
-    0x12: ("set_pending_ids_bias", "list", 0),  # FUN_00408CC0
-    0x13: ("set_stage_params", "list", 0),  # FUN_0045F190
-    # DAT_009A2BB4: enables the scene light array for draw_mode 1 region
-    # entries. Operand is 0/1. See docs/formats/pipeline.md.
+    # 0x0E/0x0F/0x12 are the enemy approach-distance pacing table, not spawn
+    # ids. A zombie's attack budget is chosen by its XZ distance to the camera
+    # against three rings; the budget is how many walk cycles it may take to
+    # close before attacking. 0x0E's operands are FLOATS -- the ROM defaults
+    # decode as {25,38,51}, which as integers would be 0x41C80000.
+    0x0E: ("set_approach_rings", "fix", 6),      # EvtOpSetApproachRings0E
+    0x0F: ("set_approach_steps", "list", 0),     # EvtOpSetApproachSteps0F
+    # 0x10/0x11 carry *relocated absolute pointers* to collision-mesh blobs --
+    # legal because EvtRelocatePointers has already rewritten them. Set A is
+    # consulted by both the ray and the sphere queries; set B by rays only.
+    0x10: ("set_collision_set_full", "list", 0),      # EvtOpSetCollisionSetFull10
+    0x11: ("set_collision_set_ray_only", "list", 0),  # EvtOpSetCollisionSetRayOnly11
+    0x12: ("set_approach_steps_2p_bias", "list", 0),  # as 0x0F, +1 for 2 players
+    0x13: ("set_scene_lighting_override", "list", 0),  # (enable, r, g, b, ambient)
+    # 0x14 enables the scene light array for draw_mode 1 region entries, and
+    # also gates 0x15 and 0x16. See docs/formats/pipeline.md.
     0x14: ("set_scene_lighting", "fix", 2),
-    0x15: ("set_g_8d4c", "fix", 2),
-    0x16: ("set_fog_or_clear3", "fix", 4),  # FUN_00480D20, 3 deref'd args
-    0x17: ("cam_pair_c", "fix", 4),         # FUN_0045F2A0 -> FUN_0040E370
-    0x18: ("cam_pair_a", "fix", 3),         # FUN_0045F240 -> FUN_0040E140(p1)
-    0x19: ("cam_pair_b", "fix", 3),         # FUN_0045F270 -> FUN_0040E140(p2)
-    0x1A: ("set_g_8e58", "fix", 2),
-    0x1B: ("set_g_2c34", "fix", 2),
-    0x1C: ("set_g_a090", "fix", 2),
-    0x1D: ("set_g_8e50", "fix", 2),
-    0x1E: ("set_g_8a78", "fix", 2),
-    0x1F: ("set_g_a0f4", "fix", 2),
-    0x20: ("view1_set", "set", 0),          # FUN_0040B3F0(0)
-    0x21: ("view1_tween_rate", "tween", 0),  # FUN_0040B650(0)
-    0x22: ("view1_stop", "fix", 2),         # FUN_0040C1F0(0)
-    0x23: ("view1_tween_time", "tween", 0),  # FUN_0040BA90(0)
-    0x24: ("view2_set", "set", 0),          # FUN_0040B3F0(1)
-    0x25: ("view2_tween_rate", "tween", 0),  # FUN_0040B650(1)
-    0x26: ("view2_stop", "fix", 2),         # FUN_0040C1F0(1)
-    0x27: ("view2_tween_time", "tween", 0),  # FUN_0040BA90(1)
+    # One D3DLIGHT7 SPOT per entity (theta = phi = pi/8) into the 16-entry
+    # array at 0x009A1A20. Only effective while 0x14 is on.
+    0x15: ("enable_entity_spotlights", "fix", 2),
+    # Three float refs -> the D3D ambient colour. NOT fog: the old name
+    # "set_fog_or_clear3" was wrong, nothing on this path touches fog.
+    0x16: ("set_ambient_light_rgb", "fix", 4),
+    # 0x17-0x19 drive the two scene light/fog blocks (0x009A3540, 0x009A59E0).
+    # These are NOT per-player view structs -- see the correction in evt.md.
+    0x17: ("slerp_light0_direction", "fix", 4),   # (pitch, yaw, frames), async
+    0x18: ("set_light0_direction", "fix", 3),     # (pitch, yaw) BAMS
+    0x19: ("set_light1_direction", "fix", 3),
+    # Ground plane: the fallback height when a downward raycast misses, and the
+    # plane blob shadows project onto. Also what 0x36 pins the view Y to.
+    0x1A: ("set_ground_plane_y", "fix", 2),
+    # Camera-following backdrop dome, index 0..11 into a 12 x 16-byte table at
+    # 0x00579968 {s16 assetA, s16 assetB, f32 dy, s32 spin, s32 angle0}.
+    0x1B: ("set_backdrop_preset", "fix", 2),
+    0x1C: ("set_backdrop_mode", "fix", 2),   # 0 off, 2 frozen, else animating
+    0x1D: ("enable_rain", "fix", 2),
+    # DEAD: DAT_009C8A78 has no readers anywhere in the binary.
+    0x1E: ("set_unread_global", "fix", 2),
+    # 9-state HUD shutter; also drives the gate on firing and ammo decrement.
+    0x1F: ("set_hud_shutter_state", "fix", 2),
+    # 0x20-0x27 tween the two light/fog blocks, NOT view structs. Channels:
+    # 0/1 fog near/far, 2-4 fog RGB, 5 fog RGB triple, 6-8 light RGB,
+    # 9 light RGB triple, 10 ambient.
+    0x20: ("light0_set", "set", 0),          # FUN_0040B3F0(0)
+    0x21: ("light0_tween_rate", "tween", 0),  # FUN_0040B650(0)
+    0x22: ("light0_stop", "fix", 2),         # FUN_0040C1F0(0)
+    0x23: ("light0_tween_time", "tween", 0),  # FUN_0040BA90(0)
+    0x24: ("light1_set", "set", 0),          # FUN_0040B3F0(1)
+    0x25: ("light1_tween_rate", "tween", 0),  # FUN_0040B650(1)
+    0x26: ("light1_stop", "fix", 2),         # FUN_0040C1F0(1)
+    0x27: ("light1_tween_time", "tween", 0),  # FUN_0040BA90(1)
     # Region streaming, NOT sound. 0x29 switches the current region and frees
     # what the new one does not need; 0x28 loads a region's assets. See
     # docs/formats/pipeline.md.
     0x28: ("region_load", "fix", 2),        # FUN_00401670 -> FUN_00401510
     0x29: ("region_enter", "fix", 2),       # FUN_00401630 -> FUN_004015A0
     0x2A: ("unused_2a", "bad", 0),
-    0x2B: ("score_bonus_sweep", "fix", 1),  # FUN_0045FE40
-    0x2C: ("set_skip_flag", "fix", 2),      # FUN_0045FD90
-    0x2D: ("call_35b80_u16", "fix", 2),     # FUN_0045FDD0
-    0x2E: ("se_if_skipping", "fix", 1),     # FUN_0045FE00
-    0x2F: ("set_g_5c48", "fix", 2),         # FUN_0045FE20
+    # End-of-stage accuracy bonus: pct = hits*100/shots (needs shots > 0x13),
+    # bonus = table[pct/10] at 0x00567990 = {0,0,0,0,500,1000,1500,2000,2500,
+    # 3000,4000}.
+    0x2B: ("award_accuracy_bonus", "fix", 1),
+    # Opens/closes a "skippable" region -- but the skip flag DAT_009A2D74 is
+    # never written non-zero anywhere in the binary, so the whole feature, and
+    # every `if (skip)` branch in this opcode family, is dead code.
+    0x2C: ("set_skippable_region", "fix", 2),
+    # u16 message group -> variant by player configuration, then a voice id and
+    # a timed sprite from the 0x10-byte records at 0x00589DA8.
+    0x2D: ("show_screen_message", "fix", 2),
+    0x2E: ("resume_bgm_if_skipped", "fix", 1),   # dead: see 0x2C
+    0x2F: ("suppress_accuracy_stats", "fix", 2),  # gates the counters 0x2B grades
     0x30: ("queue_event", "queue", 0),      # FUN_0045F7F0
-    0x31: ("cut_to", "fix", 2),             # FUN_0045F870
-    0x32: ("cut_to_when_idle", "fix", 2),   # FUN_0045F900
-    0x33: ("set_mode_and_pending", "fix", 3),  # FUN_0045F9F0
+    0x31: ("goto_scene_state", "fix", 2),          # major fixed at 1
+    0x32: ("goto_scene_state_when_alive", "fix", 2),  # parks until players live
+    0x33: ("set_action_drain_mode", "fix", 3),     # (mode, pending delta)
     0x34: ("unused_34", "bad", 0),
-    0x35: ("set_g_21b0", "fix", 2),
-    0x36: ("set_g_70f4", "fix", 2),
-    0x37: ("set_g_a098", "fix", 2),
+    # CamEvalPath7 evaluates curve channel 6 (roll/bank) only when set.
+    0x35: ("enable_camera_path_roll", "fix", 2),
+    # Take the view Y from the ground plane (0x1A) instead of path.y - 15.
+    0x36: ("pin_view_to_ground_plane", "fix", 2),
+    # Advance the camera path every frame, bypassing the room-cleared gate.
+    0x37: ("force_camera_path_advance", "fix", 2),
     0x38: ("se_play", "fix", 2),            # FUN_0045F700 -> FUN_0041CFD0
     0x39: ("se_play_3d", "fix", 4),         # FUN_0045F720 -> FUN_00435EE0
     0x3A: ("se_play_unless_skip", "fix", 2),
     0x3B: ("se_play_3d_unless_skip", "fix", 4),
     0x3C: ("unused_3c", "bad", 0),
-    0x3D: ("skip4", "fix", 4),              # FUN_0045FEC0
-    0x3E: ("skip2", "fix", 2),              # FUN_0045FEB0
-    0x3F: ("skip1", "fix", 1),              # FUN_0045FED0
-    0x40: ("wait_pending", "fix", 1),       # FUN_0045FA80
-    0x41: ("wait_cond_a", "fix", 2),        # FUN_0045FAC0
-    0x42: ("wait_frames", "fix", 2),        # FUN_0045FB30
-    0x43: ("wait_cond_b", "fix", 2),        # FUN_0045FBC0
-    0x44: ("wait_cond_c", "fix", 2),        # FUN_0045FC10
-    0x45: ("wait_flag", "fix", 2),          # FUN_0045FC80
-    0x46: ("wait_cond_d", "fix", 2),        # FUN_0045FCD0
-    0x47: ("wait_ready", "fix", 1),         # FUN_0045FD20
-    0x48: ("set_flag", "fix", 2),           # FUN_0045FD70
+    # Pure no-ops that only advance pc. 0x3F, 0x5B and 0x5C share ONE handler
+    # which never reads the opcode, so all three are identical.
+    0x3D: ("nop3", "fix", 4),
+    0x3E: ("nop1", "fix", 2),
+    0x3F: ("nop0", "fix", 1),
+    0x40: ("wait_queued_events_done", "fix", 1),
+    # operand 0 = wait for end of path; else wait until the path frame passes it
+    0x41: ("wait_camera_path_frame", "fix", 2),
+    0x42: ("wait_frames", "fix", 2),        # an external routine may shorten it
+    # Two distinct enemy counters: "alive" drops at kill time, "present" at
+    # death-animation end, so present >= alive.
+    0x43: ("wait_enemies_present", "fix", 2),
+    0x44: ("wait_enemies_alive", "fix", 2),
+    0x45: ("wait_script_flag", "fix", 2),   # 256-byte array at 0x009C7200
+    0x46: ("wait_scripted_actors", "fix", 2),
+    0x47: ("wait_targets_clear", "fix", 1),
+    0x48: ("set_script_flag", "fix", 2),    # the writer half of 0x45
     0x49: ("variant_call_a", "var", 0),     # FUN_0045F3E0
     0x4A: ("variant_call_b", "var", 0),     # FUN_0045F470
     0x4B: ("variant_spawn", "var", 0),      # FUN_00408AE0
     0x4C: ("unused_4c", "bad", 0),
+    # Appends the current room id to the per-stage route history the
+    # stage-clear map animates, reseeds the CRT RNG with 0 during gameplay, and
+    # restores the default approach rings.
     0x4D: ("checkpoint", "fix", 1),         # FUN_0045EEC0
     0x4E: ("halt", "halt", 0),              # FUN_0045EFF0
     0x4F: ("end_block", "next", 0),         # FUN_0045F000
@@ -185,14 +236,43 @@ OPCODES: dict[int, Op] = {
     0x55: ("asset_free_texbank", "fix", 2),  # FUN_0041D710, kind 7
     0x56: ("asset_job_8", "fix", 2),        # FUN_0041D750, kind 8
     0x57: ("asset_job_9", "fix", 2),        # FUN_0041D790, kind 9
-    0x58: ("call_1d970", "fix", 1),
-    0x59: ("call_1d9d0", "fix", 1),
-    0x5A: ("call_1da70", "fix", 1),
-    0x5B: ("skip1_b", "fix", 1),
-    0x5C: ("skip1_c", "fix", 1),
-    0x5D: ("call_1d3a0", "fix", 3),         # FUN_0045F6B0
-    0x5E: ("call_1d3b0", "fix", 2),         # FUN_0045F6E0
-    0x5F: ("call_1d450_4", "fix", 5),       # FUN_0045F7C0
+    # Drain the asset job ring: everything, only tex\+pol\ (types < 8), or
+    # only mot\ (types 8..10). The others are compacted and left pending.
+    0x58: ("asset_wait_all_jobs", "fix", 1),
+    0x59: ("asset_wait_tex_pol_jobs", "fix", 1),
+    0x5A: ("asset_wait_motion_jobs", "fix", 1),
+    0x5B: ("nop0_b", "fix", 1),             # same handler as 0x3F
+    0x5C: ("nop0_c", "fix", 1),             # same handler as 0x3F
+    # NAOMI sound-driver calls stubbed out for the PC port: the handlers are
+    # OutputDebugStringA("SS_SndLoadPack") and nothing else. The PC build
+    # streams individual .wav files instead.
+    0x5D: ("snd_load_pack_stub", "fix", 3),
+    0x5E: ("snd_free_pack_stub", "fix", 2),
+    # Consumes four operands but uses ONLY the third: stop the current BGM,
+    # then play that track id.
+    0x5F: ("bgm_entry_play", "fix", 5),
+}
+
+#: queue_event (0x30) selectors. EvtRunQueuedActions dispatches through a
+#: two-level table at 0x005776EC: handler = table[sel >> 4][sel & 0xF]. The
+#: high nibble is BOTH the group index and the operand count, so the
+#: instruction is 2 + (sel >> 4) dwords and the groups are organised by arity.
+#: There are exactly ten handlers; 0x13 is defined but never used in shipped
+#: data. See docs/formats/evt.md.
+QUEUE_ACTIONS: dict[int, str] = {
+    0x10: "set_player_flag",
+    0x11: "scene_state",            # EvtEnterSceneState(current_major, op0)
+    0x12: "set_update_routine",
+    0x13: "set_continuation",       # never used
+    0x14: "set_global",
+    0x15: "set_flag",
+    0x20: "hold_camera_preset",     # op0 frames, op1 indexes 0x00576CF0
+    0x21: "finish_sequence",        # EvtEnterSceneState(2, op0)
+    # (start_frame, end_frame, global_cam_path_index, flags)
+    #   start_frame == -1  resume rather than seek
+    #   flags & 2          stash for a later camera state 6/7 to play
+    0x40: "cam_play",
+    0x60: "store_six",
 }
 
 #: Sub-opcode sizes for the "set" class (FUN_0040B3F0), in dwords, including

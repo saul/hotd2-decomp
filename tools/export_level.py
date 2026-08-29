@@ -23,9 +23,75 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import gltf, stage as stagelib  # noqa: E402
+from hod2lib import coli as colilib, script as scriptlib, gltf, stage as stagelib  # noqa: E402
 
 STAGE_TO_SCENE = stagelib.STAGE_TO_SCENE
+
+
+def _objects_json(st) -> dict:
+    """The stage's objects: what the event script spawns, and the routes.
+
+    Two independent things, both from the game's own data:
+
+    * ``spawns`` -- every spawn descriptor the event script reaches, with its
+      class, world position, BAMS yaw and hit points. This is the authoritative
+      list of what is in the stage: it comes from the event tables, not from a
+      guess about which models look like enemies. `+0x14`/`+0x1C` are carried
+      raw as ``orient`` because they are *not* confirmed to be Euler angles.
+
+    * ``object_paths`` -- every `op_` path the stage's cam file holds, with the
+      **global** path slot the code addresses it by. A path-following object is
+      bound to its route by a slot constant in its draw routine, e.g.
+      `FUN_0048E600` passes 0xFD/0xFE/0xFF, which are op_st1 local 0/1/2.
+
+    The glTF carries the same routes as animated nodes, so this sidecar is for
+    cross-referencing rather than for geometry.
+    """
+    prog = None
+    try:
+        prog = scriptlib.load(st)
+    except Exception:
+        pass
+
+    spawns: list[dict] = []
+    if prog is not None:
+        for blk in prog.blocks:
+            for step in blk.steps:
+                for op in step.ops:
+                    for sp in op.detail.get("spawns", []) or []:
+                        spawns.append(dict(sp, block=blk.index, step=step.index,
+                                           opcode=op.opcode, op=op.name))
+
+    paths: list[dict] = []
+    cp = st.campaths()
+    for ref in cp.by_slot.values() if cp else []:
+        if not ref.is_object_path:
+            continue
+        paths.append({
+            "slot": ref.slot, "file": ref.file, "index": ref.index,
+            "duration_frames": ref.duration,
+            "start_frame": ref.start_frame,
+            "node": f"{ref.file}_{ref.index:02d}_obj",
+        })
+    paths.sort(key=lambda d: d["slot"])
+
+    by_class: dict[str, int] = {}
+    for sp in spawns:
+        by_class[str(sp["class"])] = by_class.get(str(sp["class"]), 0) + 1
+
+    return {
+        "scene": st.scene,
+        "note": "Objects in the stage. `spawns` is what the event script "
+                "places (class id -> handler via the table at 0x00593358); "
+                "`object_paths` is every op_ route, addressed by the global "
+                "cam path slot the code uses. Rotation on the animated nodes "
+                "is Rz*Ry*Rx from the op_ BAMS Euler triple -- see "
+                "docs/formats/cam.md.",
+        "spawn_count": len(spawns),
+        "spawns_by_class": dict(sorted(by_class.items(), key=lambda kv: -kv[1])),
+        "spawns": spawns,
+        "object_paths": paths,
+    }
 
 
 def _coli_json(st, sets) -> dict:
@@ -39,7 +105,6 @@ def _coli_json(st, sets) -> dict:
     opcodes 0x10/0x11, because a file holds more blobs than any one run uses
     and the script is what selects them.
     """
-    from hod2lib import coli as colilib, script as scriptlib
 
     files = {}
     for f in sets:
@@ -111,6 +176,8 @@ def main() -> int:
     ap.add_argument("--glob-geometry", action="store_true",
                     help="use the old st<N>_* glob instead of the exe's region "
                          "tables. Wrong in both directions; kept for comparison")
+    ap.add_argument("--no-objects", action="store_true",
+                    help="skip the objects/spawns sidecar")
     ap.add_argument("--no-coli", action="store_true",
                     help="skip the coli/ collision sidecar")
     ap.add_argument("--no-cameras", action="store_true",
@@ -198,6 +265,13 @@ def main() -> int:
                 "regions": st.region_json(),
             }, indent=1))
             print(f"  {len(regions)} regions -> {side.name}")
+
+        if st is not None and not args.no_objects:
+            side = out_dir / f"{name}_objects.json"
+            objs = _objects_json(st)
+            side.write_text(json.dumps(objs, indent=1))
+            print(f"  objects: {objs['spawn_count']} spawns, "
+                  f"{len(objs['object_paths'])} object paths -> {side.name}")
 
         if st is not None and not args.no_coli:
             sets = st.colisets()

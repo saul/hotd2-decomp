@@ -288,6 +288,43 @@ def _checker(size=128, cells=8):
     return px
 
 
+#: BAMS: 65536 units to a full turn, the engine's angle unit everywhere.
+BAMS_TO_RAD = math.tau / 65536.0
+
+
+def _bams_euler_to_quat(rx: float, ry: float, rz: float
+                        ) -> tuple[float, float, float, float]:
+    """The engine's object rotation triple as a glTF quaternion (x, y, z, w).
+
+    The order is not a guess. Every object that follows an `op_` path is drawn
+    by the same chain -- `FUN_0048E600` is the clearest example::
+
+        MatrixTranslate(pos);
+        MatrixRotateZ(rot_z);   /* 0x004A9BD0, rotates rows 0 and 1 */
+        MatrixRotateY(rot_y);
+        MatrixRotateX(rot_x);
+
+    The matrix stack is column-major and `MatrixMultiply` computes
+    ``top = top * M``, i.e. exactly OpenGL's ``glMultMatrix`` -- so the
+    composite is ``T * Rz * Ry * Rx`` acting on column vectors, and **Rx is
+    applied to the vertex first**. In quaternion terms that is ``qZ * qY * qX``.
+
+    ``PlacePlayerEntityFromViewPose`` builds the view pose with the same chain,
+    which is a second, independent sighting of the convention.
+    """
+    hx, hy, hz = (rx * BAMS_TO_RAD) / 2, (ry * BAMS_TO_RAD) / 2, (rz * BAMS_TO_RAD) / 2
+    cx, sx = math.cos(hx), math.sin(hx)
+    cy, sy = math.cos(hy), math.sin(hy)
+    cz, sz = math.cos(hz), math.sin(hz)
+    # qZ * qY * qX
+    return (
+        sx * cy * cz - cx * sy * sz,
+        cx * sy * cz + sx * cy * sz,
+        cx * cy * sz - sx * sy * cz,
+        cx * cy * cz + sx * sy * sz,
+    )
+
+
 def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
                 fps=60.0, step=2.0):
     """Add camera/object paths to a glTF document under three parent nodes.
@@ -297,10 +334,12 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
         path is visible in the viewport without playing anything;
       * an animated perspective camera.
 
-    and per op_ path a single rail polyline. op_ paths carry a BAMS Euler
-    triple rather than a look-at, and what the three components actually mean
-    is not settled (see docs/formats/evt.md), so no rotation is emitted for
-    them -- only the translation, which is confirmed.
+    and per op_ path a rail polyline **and an animated node**. op_ paths carry
+    a BAMS Euler triple rather than a look-at; the triple's meaning and
+    application order are now recovered from the draw chain every path-following
+    object shares -- see :func:`_bams_euler_to_quat` -- so both translation and
+    rotation are emitted. Attach a model to the animated node to see an object
+    run its route.
 
     Returns the node indices to add to the scene.
     """
@@ -338,18 +377,53 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
 
         if cf.is_object_path:
             for path in cf.paths:
-                pts = [v[:3] for _, v in _sample_path(path, camlib.OP_CHANNELS, step)]
-                if len(pts) < 2:
+                samples = _sample_path(path, camlib.OP_CHANNELS, step)
+                if len(samples) < 2:
                     continue
-                nm = f"{stem}_{path.index:02d}_rail"
-                meshes.append({"name": nm, "primitives": [polyline(pts, m_obj)]})
+                times = [t / fps for t, _ in samples]
+                pts = [(v[0], v[1], v[2]) for _, v in samples]
+                quats = [_bams_euler_to_quat(v[3], v[4], v[5]) for _, v in samples]
+                slot = getattr(path, "slot", None)
+                extras = {"hod2_kind": "object_path", "hod2_file": stem,
+                          "hod2_path": path.index,
+                          "hod2_duration_frames": path.duration}
+                if slot is not None:
+                    extras["hod2_path_slot"] = slot
+
+                nm = f"{stem}_{path.index:02d}"
+                meshes.append({"name": nm + "_rail",
+                               "primitives": [polyline(pts, m_obj)]})
                 nodes.append({
-                    "mesh": len(meshes) - 1, "name": nm,
-                    "extras": {"hod2_kind": "object_path", "hod2_file": stem,
-                               "hod2_path": path.index,
-                               "hod2_duration_frames": path.duration},
+                    "mesh": len(meshes) - 1, "name": nm + "_rail",
+                    "extras": dict(extras),
                 })
                 obj_nodes.append(len(nodes) - 1)
+
+                # the moving node: parent a model under this to watch it run
+                nodes.append({
+                    "name": nm + "_obj",
+                    "translation": list(pts[0]), "rotation": list(quats[0]),
+                    "extras": dict(extras, hod2_kind="object"),
+                })
+                obj_node = len(nodes) - 1
+                obj_nodes.append(obj_node)
+
+                t_in = buf.scalar_f32(times)
+                animations.append({
+                    "name": nm,
+                    "samplers": [
+                        {"input": t_in, "output": buf.vec3(pts),
+                         "interpolation": "LINEAR"},
+                        {"input": t_in, "output": buf.vec4(quats),
+                         "interpolation": "LINEAR"},
+                    ],
+                    "channels": [
+                        {"sampler": 0,
+                         "target": {"node": obj_node, "path": "translation"}},
+                        {"sampler": 1,
+                         "target": {"node": obj_node, "path": "rotation"}},
+                    ],
+                })
             continue
 
         for path in cf.paths:
@@ -413,7 +487,7 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
     out = []
     for children, label in ((rail_nodes, "camera_rails"),
                             (cam_nodes, "cameras"),
-                            (obj_nodes, "object_rails")):
+                            (obj_nodes, "object_paths")):
         if children:
             nodes.append({"name": label, "children": children,
                           "extras": {"hod2_kind": label}})

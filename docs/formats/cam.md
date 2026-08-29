@@ -273,3 +273,109 @@ look-at. It evaluates channel **6** — roll/bank — only when `DAT_009A21B0` i
 non-zero, and forces roll to 0 otherwise. That global is written by `evt`
 opcode `0x35`. So a `cp_` path's roll curve exists in every file but is only
 honoured when the script asks for it.
+
+## Object paths — how an object is bound to a route, and its rotation
+
+`op_` files hold the routes objects follow. `CamEvalObjectPath6`
+(`0x004042D0`) evaluates one into a 6-float pose — three positions and three
+**BAMS Euler** angles, the last three passed through `__ftol` so they are
+integers.
+
+### The rotation order is settled — [proved]
+
+Every path-following object is drawn by the same chain. `FUN_0048E600` is the
+clearest instance:
+
+```c
+CamEvalObjectPath6(slot, frame, pose);
+obj+0x40..0x48 = pose[0..2];          /* position          */
+obj+0x64,0x68,0x6C = pose[3..5];      /* rot_x, rot_y, rot_z */
+...
+MatrixTranslate(obj+0x40, obj+0x44, obj+0x48);
+MatrixRotateZ(obj+0x6C);              /* 0x004A9BD0 -- rotates rows 0 and 1 */
+MatrixRotateY(obj+0x68);
+MatrixRotateX(obj+0x64);
+```
+
+The matrix stack is **column-major** and `MatrixMultiply` computes
+`top = top * M` — exactly `glMultMatrix`. `MatrixTranslate` likewise does
+`top = top * T`. So the composite is `T · Rz · Ry · Rx` acting on column
+vectors, and **`Rx` reaches the vertex first**. As a quaternion that is
+`qZ · qY · qX`.
+
+`PlacePlayerEntityFromViewPose` builds the view pose with the same chain, which
+is an independent sighting of the convention.
+
+**[measured]** `hod2lib.gltf._bams_euler_to_quat` reproduces an explicitly
+built `Rz·Ry·Rx` matrix to 4.4e-16 across a grid of angles.
+
+The channels really are BAMS, not radians: over all `op_` files they span
+−71,867 … +80,202, i.e. more than a full 65,536-unit turn.
+
+### Binding: a slot constant in the object's draw routine
+
+An object names its route by the **global** path slot, the same index space the
+cameras use. `CamEvalObjectPath6` has 48 call sites in 31 functions; some pass
+a slot from the object, others a literal:
+
+| Call site | Slot | Resolves to |
+|---|---|---|
+| `0x0048E64D` | `0xFE` | `op_st1` local 1 |
+| `0x00415C48` | `0xFE` | `op_st1` local 1 |
+| `0x0048F5AF` | `0x182` | `op_st6` local 0 |
+| `0x0048F091` | `0x173` | `op_st4` local 0 |
+| `0x00426BA3` | `0x185` | `op_st6` local 3 (class 45, game mode 3 only) |
+| `0x0047F715` | `0x180` | `op_st5` local 6 (class 50) |
+
+**[measured]** every one lands in an `op_` file and none in a `cp_` one.
+
+### Worked example — the stage-1 jeep
+
+`FUN_0048E600` follows `op_st1` paths 0/1/2 (global `0xFD`/`0xFE`/`0xFF`),
+selected by which `cp_st1` path the camera is on (`0x20`/`0x21`/`0x22` =
+`cp_st1` local 0/1/2) — **the object route tracks the camera route**. It then
+draws a composite rig by matrix chain:
+
+| Slot | Asset | Role |
+|---|---|---|
+| `0x1579`, `0x157E` | `char_adv00.bin[49]`, `[54]` | body |
+| `0x157A`–`0x157D` | `char_adv00.bin[50..53]` | two occupants, each yawed by `obj+0x1334` |
+| `0x157F`, `0x1580` | `char_adv00.bin[55..56]` | pitched by `obj+0x1330`, incremented `0x2000`/frame |
+| `0x898` | `car_pl.bin[8]` | |
+| `0x8CE + (n % 12)` | `car_pl.bin[16..]` | wheels, 12-frame spin, mirrored on the left side |
+
+`car_pl.bin` is the player's car. So this is the opening jeep ride, its wheels
+turning and its passengers looking around, on a route synchronised to the
+camera.
+
+> A path-following object is therefore **not one model**. It is a hand-coded
+> rig: a set of asset slots with relative transforms baked into the draw
+> routine. Exporting one faithfully means reproducing that routine, not
+> attaching a single mesh to the animated node.
+
+### Global path slots
+
+| Range | File | | Range | File |
+|---|---|---|---|---|
+| 0–17 | `cp_demo` | | 253–327 | `op_st1` |
+| 18–28 | `cp_demo2` | | 328–339 | `op_st2` |
+| 32–54 | `cp_st1` | | 340–370 | `op_st3` |
+| 55–120 | `cp_st2` | | 371–377 | `op_st4` |
+| 121–162 | `cp_st3` | | 378–385 | `op_st5` |
+| 163–202 | `cp_st4` | | 386–403 | `op_st6` |
+| 203–216 | `cp_st5` | | 404–405 | `op_org` |
+| 217–232 | `cp_st6` | | 406–417 | `op_train` |
+| 233–238 | `cp_end` | | | |
+| 239–250 | `cp_train` | | | |
+
+29, 30, 31, 251, 252 are the single-path files (`cp_gmovr`, `cp_test`,
+`cp_title`, `cp_tuto`, `op_demo`); the run lengths alone do not separate them.
+
+## Export
+
+`export_level.py` emits every `op_` path twice: a green rail polyline, and an
+**animated node** `<file>_<nn>_obj` carrying translation and rotation. Parent a
+model under that node to watch it run its route.
+
+`<stage>_objects.json` carries the spawns and the routes together — see
+[`evt.md`](evt.md). `tools/verify_objects.py` checks both.

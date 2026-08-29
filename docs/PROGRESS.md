@@ -146,8 +146,16 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       (`FUN_0045ECC0`, dispatch table at `0x005931D8`). **17,150 instructions
       decode with zero errors**, 77 distinct opcodes, no stub ever reached. Spec: [`formats/evt.md`](formats/evt.md)
 - [x] Stage routing graph recovered (`0x00597890`) — the branching-path mechanism
-- [x] Spawn descriptors: 1,419 recovered; **1216/1216** stage-1/2/4/5/6 spawns
-      verified inside their own level geometry
+- [x] Spawn descriptors: 1,419 recovered; **1546/1546** spawns across all six
+      stages verified inside their own level geometry, and **35/35** distinct
+      class ids defined in the handler table (`tools/verify_objects.py`)
+- [x] **Object paths solved.** `op_` routes are addressed by the same global
+      path slot as the cameras; an object binds to one with a slot constant in
+      its draw routine. The BAMS Euler triple's application order is recovered
+      from the draw chain every path-follower shares — `T·Rz·Ry·Rx`, so
+      `q = qZ·qY·qX` — and reproduces an explicit matrix to 4.4e-16. Worked
+      example: the stage-1 jeep (`car_pl.bin` + occupants) follows `op_st1`
+      0/1/2 in lockstep with `cp_st1` 0/1/2
 - [x] Asset streaming: job queue, handler tables, slot→pol-file map
       (326/326 entry counts validated), opcodes `0x50`–`0x57` identified
 - [x] `tools/dump_stage_script.py` — event script as a readable timeline
@@ -244,6 +252,12 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       loads, every quad's plane/verts/surface, and the blobs the script
       actually activates. **[measured]** the collision bounding box lies inside
       the exported geometry's, so the coordinate spaces match
+- [x] **Object export** — every `op_` path is now an animated node
+      (translation + rotation), not just a rail; `<stage>_objects.json` carries
+      the spawns the event script places and the routes together
+- [ ] Path-following objects are hand-coded rigs (a set of asset slots with
+      relative transforms in the draw routine), so the animated nodes carry no
+      model yet. `FUN_0048E600` is decoded as the worked example
 - [ ] `evt` JSON sidecar — `dump_stage_script.py --json` covers it for now
 
 ## Open questions
@@ -293,3 +307,13 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 18. Are `+0x14` / `+0x1C` of the spawn descriptor really the other two Euler
     angles? They sit either side of a confirmed BAMS yaw but do not look like
     angles. (Phase 6)
+19. What starts a stage's own BGM? No `bgm_entry_play` in any of the six stage
+    scripts names its stage track — they only switch to boss and transition
+    music. The tables and the dispatcher are solved
+    ([`formats/sound.md`](formats/sound.md)); the scene-entry path that plays
+    `ST1_AR`..`ST6_AR` is not. `PlaySoundId` has 496 callers, so this wants the
+    scene-entry path, not an xref sweep.
+20. What is `DAT_009C8E98`? It selects the plain vs `_AR` BGM mix
+    (`== 6`), gates `EvtInterpreterLoop`'s hardcoded scene-5 skip (`== 5`), and
+    picks the entry step in `FUN_0045EBC0` (`== 5 || == 9`). Read as "scene id"
+    in one place and "scene state" in another; the two readings disagree.

@@ -2448,3 +2448,93 @@ that lands.
    materials.
 3. `coli0.bin` is loaded for every scene but **no** script pointer references
    it. Find what installs it.
+
+---
+
+## Session 17 — objects: what is in a stage, and the routes they take
+
+Asked for the objects' assets and paths, exported, and checked against the
+event tables. Both halves are data the project already had but had never
+connected.
+
+### Object routes
+
+`op_` paths were exported as **static green polylines only**. The reason was in
+the exporter's own docstring: "op_ paths carry a BAMS Euler triple ... what the
+three components actually mean is not settled, so no rotation is emitted".
+
+It is settled now, from the draw chain every path-following object shares —
+`FUN_0048E600` being the clearest:
+
+```c
+CamEvalObjectPath6(slot, frame, pose);
+obj+0x40..0x48     = pose[0..2];     /* position            */
+obj+0x64,0x68,0x6C = pose[3..5];     /* rot_x, rot_y, rot_z */
+MatrixTranslate(pos); MatrixRotateZ(rz); MatrixRotateY(ry); MatrixRotateX(rx);
+```
+
+The missing piece was the matrix convention. `MatrixMultiply` computes
+`top = top * M` over **column-major** storage — `new[0] = old[0]M[0] +
+old[4]M[1] + old[8]M[2] + old[12]M[3]` is `row0(old)·col0(M)` — and
+`MatrixTranslate` updates the translation *column*. That is `glMultMatrix` and
+`glTranslatef` exactly, so the composite is `T·Rz·Ry·Rx` on column vectors and
+`Rx` reaches the vertex first. As a quaternion, `qZ·qY·qX`.
+
+Checked rather than asserted: the quaternion reproduces an explicitly built
+`Rz·Ry·Rx` matrix to **4.4e-16** over a grid of angles. And the channels really
+are BAMS — they span −71,867…+80,202 across the corpus, more than a full
+65,536-unit turn, so they cannot be radians.
+
+`_emit_paths` now emits an animated node per `op_` path alongside the rail.
+Stage 1 gets 75.
+
+### Binding an object to a route
+
+An object names its route by the **global** path slot — the same index space
+the cameras use, which last session's `DAT_004C479C` decode established.
+`CamEvalObjectPath6` has 48 call sites in 31 functions; some take the slot from
+the object, six pass a literal. All six land in `op_` files and none in a `cp_`
+one.
+
+`FUN_0048E600` is worth recording in full because it shows what a
+path-following object actually *is*. It follows `op_st1` 0/1/2 (`0xFD`–`0xFF`),
+**selected by which `cp_st1` path the camera is on** — the object route tracks
+the camera route. Then it draws a rig by matrix chain: body, two occupants each
+yawed by a per-object angle, parts pitched by a counter incremented `0x2000` a
+frame, and wheels picked from a 12-frame cycle and mirrored on the left side.
+The slots resolve to `car_pl.bin` and `char_adv00.bin` — the opening jeep.
+
+So a path-following object is **not one model**. It is a hand-coded rig: a set
+of asset slots with relative transforms baked into its draw routine. The
+animated nodes are therefore emitted empty, and that limitation is recorded
+rather than papered over.
+
+### What is in a stage
+
+The authoritative list is the event tables, not a guess about which models look
+like enemies: every spawn descriptor the script reaches, with class, world
+position, BAMS yaw and hit points. `<stage>_objects.json` now carries those
+plus the routes.
+
+`tools/verify_objects.py` checks both, with two metrics that collapse:
+
+- **1546 / 1546** spawns across all six stages fall inside the bounding box of
+  their own stage's geometry. A wrong descriptor stride scatters them at once.
+  (The old figure was 1216/1216 over five stages; PROGRESS carried the stale
+  one.)
+- **35 distinct class ids used, all 35 defined** in the handler table at
+  `0x00593358`. An undefined id dispatches to the empty stub, so this is a real
+  check.
+
+Plus: every exported `op_` slot resolves to its own stage's `op_` file, and the
+six code literals resolve to `op_` files.
+
+### Next
+
+1. Reproduce a rig. `FUN_0048E600` is fully decoded — emitting its slot
+   hierarchy as glTF child nodes would put the jeep on its route and prove the
+   whole chain end to end.
+2. The other 30 `CamEvalObjectPath6` callers: which spawn classes they belong
+   to, and which take their slot from the object rather than a literal.
+3. `mot/` — still the last unsolved format, and the obvious source of the
+   per-object animation these rigs do by hand.

@@ -316,7 +316,7 @@ null, and the sub-tables are laid out immediately **before** it:
 | `0x20` | `hold_camera_preset` | op0 is a frame countdown; each frame copies 6 dwords from `0x00576CF0 + op1 * 0x18` into the player's camera block |
 | `0x21` | `finish_sequence` | `EvtEnterSceneState(2, op0)`; sets `DAT_009A5900 \| 1` |
 | `0x40` | **`cam_play`** | **plays a `cam/` path** — see below |
-| `0x60` | `store_six` | copies six operands to `DAT_009C6FD8`… |
+| `0x60` | `store_branch_previews` | **[proved]** the arcade **branch-preview shots** — one camera pose per route the next branch can take. See below |
 
 **[measured]** Across stages 1–6 the only selectors that occur are exactly
 those ten, minus `0x13`:
@@ -325,6 +325,35 @@ those ten, minus `0x13`:
 0x10 x3   0x11 x4   0x12 x2   0x14 x2   0x15 x6
 0x20 x1   0x21 x418   0x40 x751   0x60 x13
 ```
+
+### `0x60` — the branch-preview shots
+
+**[proved]** by reading both halves. `EvtActionStoreSixOperands60` sets a
+validity flag at `0x009C6FD8` and then scatters the six operands:
+
+```
+009C6FE0 = args[0]      009C6FDC = args[1]
+009C6FE8 = args[2]      009C6FE4 = args[3]
+009C6FF0 = args[4]      009C6FEC = args[5]
+```
+
+`FUN_00403DB0` reads them back indexed by the branch choice:
+
+```c
+frame = *(&DAT_009C6FE0 + branch_choice * 8);
+path  = *(&DAT_009C6FDC + branch_choice * 8);       /* -> g_active_cam_path */
+CamEvalPath7(path, (float)frame, &eye, &lookat, &roll, &_);
+```
+
+So the six operands are **three `(frame, slot)` pairs indexed by
+`branch_choice`** — the shot the arcade shows for each route a branch can
+take. Note the order: **frame first, then the global camera path slot**. The
+scatter is what makes it look otherwise; reading only the store, the pairs
+appear to be `(slot, frame)`.
+
+`branch_choice` is `DAT_009C88A4`, the same global `EvtAdvanceBlockOrRoute`
+indexes `next[]` with — so the preview and the route it previews are keyed
+identically, which is the check that this reading is right.
 
 ### `0x40` — this is the `evt` → `cam` link
 
@@ -543,10 +572,14 @@ data: 65 (347 descriptors), 48 (283), 37 (169), 68 (132).
 
 **Confirmed:**
 
-- Position is float and in level space. Sampled against the bounding box of the
-  matching `pol/` geometry, **1216 of 1216** stage-1/2/4/5/6 spawns fall inside
-  their own stage. That is the strongest available check that the offsets are
-  right.
+- Position is float and in level space. Sampled against the bounding box of
+  each stage's own geometry set, **1546 of 1546** spawns across all six stages
+  fall inside their own stage — `tools/verify_objects.py`. That is the
+  strongest available check that the offsets are right. (An earlier revision
+  reported 1216/1216 over five stages.)
+- **35 distinct class ids are used and every one is defined** in the handler
+  table at `0x00593358`; an undefined id would dispatch to the empty stub, so
+  this is a real check rather than a tautology.
 - `+0x22` is hit points: it is written to *both* a current and a maximum field,
   and takes values 0–18 across 1410 descriptors.
 - `+0x18` is a BAMS yaw — its range covers ±65536 (`0x4000` = 90°), while the

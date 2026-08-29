@@ -23,9 +23,63 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import coli as colilib, script as scriptlib, gltf, stage as stagelib  # noqa: E402
+from hod2lib import (coli as colilib, gltf, rigs as rigslib,
+                     script as scriptlib, stage as stagelib)  # noqa: E402
 
 STAGE_TO_SCENE = stagelib.STAGE_TO_SCENE
+
+
+def _resolve_rigs(game: Path, st) -> list[dict]:
+    """Load the models a transcribed rig draws, for every route this stage has.
+
+    A rig's parts name **asset slots**, which resolve through the EXE's slot
+    table to a pol file and an entry index -- and those files are deliberately
+    *not* in the stage geometry set, because they are spawnable actors rather
+    than placed scenery. So they are loaded here on demand.
+    """
+    cp = st.campaths()
+    if cp is None:
+        return []
+    slots = st.tables.asset_slots()
+    have = {r.slot for r in cp.by_slot.values() if r.is_object_path}
+
+    cache: dict[str, tuple] = {}
+
+    def asset(file_stem: str):
+        if file_stem not in cache:
+            try:
+                cache[file_stem] = stagelib.load_asset(game, file_stem)
+            except Exception:
+                cache[file_stem] = ([], None)
+        return cache[file_stem]
+
+    out: list[dict] = []
+    for rig in rigslib.RIGS:
+        anchors = {}
+        for slot in rig.path_slots:
+            if slot not in have:
+                continue
+            ref = cp.by_slot[slot]
+            anchors[slot] = f"{ref.file}_{ref.index:02d}_obj"
+        if not anchors:
+            continue
+
+        parts = []
+        for part in rig.parts:
+            models = []
+            for sid in part.slots:
+                rec = slots.get(sid)
+                if not rec:
+                    continue
+                stem = rec[0][:-4] if rec[0].endswith(".bin") else rec[0]
+                ms, bank = asset(stem)
+                if rec[1] < len(ms):
+                    models.append((ms[rec[1]], bank, stem))
+            if models:
+                parts.append((part, models))
+        if parts:
+            out.append({"rig": rig, "anchors": anchors, "parts": parts})
+    return out
 
 
 def _objects_json(st) -> dict:
@@ -245,7 +299,8 @@ def main() -> int:
                 + ("_original" if args.original and not args.glob_geometry else "")
                 + ("_uvcheck" if args.uv_check else ""))
         out_dir = args.out / name
-        info = gltf.export_level(name, parts, out_dir,
+        rig_data = _resolve_rigs(game, st) if st is not None else []
+        info = gltf.export_level(name, parts, out_dir, rigs=rig_data,
                                  write_textures=not args.no_textures,
                                  uv_check=args.uv_check,
                                  keep_collapsed_uv=args.keep_collapsed_uv,
@@ -292,6 +347,9 @@ def main() -> int:
         if info['folded_mirror_uv']:
             print(f"  folded {info['folded_mirror_uv']:,} out-of-range UVs on "
                   f"mirrored axes")
+        if info.get('rigs'):
+            names = ", ".join(sorted({e['rig'].name for e in rig_data}))
+            print(f"  {info['rigs']} object rigs instantiated ({names})")
         if info['paths']:
             print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
                   f"cameras + rails ({', '.join(c.name for c in cam_files)})")

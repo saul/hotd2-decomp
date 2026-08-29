@@ -20,10 +20,27 @@
  * less than the centre at the same true distance.
  *
  * `RADIAL` patches that one line to use `length(mvPosition.xyz)` instead, so
- * the fog factor is real distance from the eye. The near/far range stays
- * exactly as the script sets it — only the quantity being compared changes.
- * `PLANAR` is kept so the two can be compared against each other and against
- * the game.
+ * the fog factor is real distance from the eye. `PLANAR` is kept so the two
+ * can be compared against each other and against the game.
+ *
+ * **Two things had to be corrected before the density matched the game.**
+ *
+ * 1. The game **doubles** both values before handing them to D3D.
+ *    `FUN_004ABDF0` is, from the disassembly:
+ *
+ *    ```
+ *    [esp+4] = near + near;  [esp+8] = far + far;
+ *    if (near*2 < far*2) { FOGSTART = near*2; FOGEND = far*2; }
+ *    else                { FOGSTART = far*2;  FOGEND = near*2; }   // swap guard
+ *    ```
+ *
+ *    So stage 2's `near 21, far 507` is really `42 .. 1014`. Using the raw
+ *    values halves the ramp and the fog comes out far too thick.
+ *
+ * 2. three.js's fog factor is `smoothstep(near, far, depth)`. D3D's
+ *    `D3DFOG_LINEAR` is a straight ramp, `(end - d) / (end - start)`.
+ *    smoothstep is an S-curve, so it saturates well before the far plane.
+ *    The fragment chunk is patched to the linear form.
  */
 
 import { Color, Fog, Scene, ShaderChunk, type Material, type Mesh } from "three";
@@ -54,7 +71,26 @@ function patchShaderChunk(): void {
   );
   ShaderChunk.fog_pars_vertex =
     "uniform float vFogRadial;\n" + ShaderChunk.fog_pars_vertex;
+
+  // D3DFOG_LINEAR is a straight ramp; three.js uses smoothstep, which
+  // saturates far too early against the same near/far pair.
+  const frag = ShaderChunk.fog_fragment;
+  if (frag.includes("smoothstep( fogNear, fogFar, vFogDepth )")) {
+    ShaderChunk.fog_fragment = frag.replace(
+      "smoothstep( fogNear, fogFar, vFogDepth )",
+      "clamp( ( vFogDepth - fogNear ) / ( fogFar - fogNear ), 0.0, 1.0 )",
+    );
+  } else {
+    console.warn("three.js fog_fragment is not the expected shape; " +
+                 "fog falloff stays smoothstep rather than linear");
+  }
 }
+
+/**
+ * The game doubles the near and far plane before setting FOGSTART/FOGEND.
+ * See the note above -- this is the single biggest reason fog looked wrong.
+ */
+export const FOG_RANGE_SCALE = 2;
 
 /**
  * three.js has no uniform hook for a custom fog term, so the mode travels as
@@ -112,12 +148,13 @@ export class SceneFog {
   update(near: number, far: number, rgb: [number, number, number],
          active: boolean): void {
     const key = `${this.mode}|${active}|${near}|${far}|${rgb.join(",")}`;
+    // near/far arrive as the script set them; the doubling happens below.
     if (key === this.last) return;
     this.last = key;
-    this.fog.near = near;
-    this.fog.far = far;
+    this.fog.near = near * FOG_RANGE_SCALE;
+    this.fog.far = far * FOG_RANGE_SCALE;
     this.fog.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
-    this.activeRange = active && far > near && near < 8000;
+    this.activeRange = active && far > near && near * FOG_RANGE_SCALE < 8000;
     this.apply();
   }
 

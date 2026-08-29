@@ -37,6 +37,7 @@ import { readState, writeState, type PlayerState } from "./urlstate";
 import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary } from "./ui";
 import { Bgm } from "./bgm";
 import { SceneFog, type FogMode } from "./fog";
+import { SceneLighting, type LightingMode } from "./lighting";
 
 const TICK = 1 / 60;
 
@@ -71,6 +72,7 @@ class Player {
   private readonly freeRoam = new FreeRoam($("#viewport"));
   private readonly bgm = new Bgm();
   private readonly sceneFog: SceneFog;
+  private readonly lighting: SceneLighting;
 
   private state: PlayerState = readState();
   private playing = false;
@@ -98,6 +100,7 @@ class Player {
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
     this.sceneFog = new SceneFog(this.scene);
+    this.lighting = new SceneLighting(this.scene);
     this.scene.add(this.spawns.group);
 
     this.wireUi();
@@ -169,6 +172,7 @@ class Player {
     this.stage = await StageScene.load(bundle.geometryUrl, bundle.script);
     // Honour the per-mesh fog bit and compile the radial-fog variant.
     this.sceneFog.prepare(this.stage.root);
+    this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
 
     this.rails = new RailLayer(this.paths);
@@ -287,6 +291,11 @@ class Player {
     $<HTMLInputElement>("#pillarbox").addEventListener("change", (e) => {
       this.pillarbox = (e.target as HTMLInputElement).checked;
       this.resize();
+    });
+    $<HTMLSelectElement>("#light-mode").addEventListener("change", (e) => {
+      this.lighting.setMode(
+        (e.target as HTMLSelectElement).value as LightingMode);
+      this.refreshUi();
     });
     $<HTMLSelectElement>("#fog-mode").addEventListener("change", (e) => {
       this.sceneFog.setMode((e.target as HTMLSelectElement).value as FogMode);
@@ -717,6 +726,7 @@ class Player {
       this.spawns.update(this.walker.spawns);
       const f = this.walker.fog;
       this.sceneFog.update(f.near, f.far, f.rgb, this.walker.fogSet);
+      if (this.walker.lightSet) this.lighting.set(this.walker.light);
     }
     this.renderer.render(this.scene, this.camera);
   };
@@ -767,6 +777,7 @@ class Player {
       ["waiting on", w.wait ? w.wait.blocksOn : "—", !!w.wait],
       ["bgm", w.bgmTrack === null ? "—" : `track ${w.bgmTrack}`],
       ["fog", this.sceneFog.describe],
+      ["light", this.lighting.describe],
       ["last se", w.lastSound === null ? "—"
         : `0x${w.lastSound.toString(16).toUpperCase()}`],
       ["eye", fmtVec(this.camera.position)],

@@ -519,7 +519,7 @@ def _pack_glb(doc: dict, blob: bytes) -> bytes:
     return bytes(out)
 
 
-def export_level(name, parts, out_dir, collision=None, write_textures=True,
+def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures=True,
                  uv_check=False, keep_collapsed_uv=False, cam_files=None,
                  cam_step=2.0, unlit=False, model_regions=None,
                  fold_mirror_uv=False, glb=False):
@@ -843,6 +843,87 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
                                        cameras, animations, step=cam_step))
         n_paths = sum(len(c.paths) for c in cam_files)
 
+    # ---- hand-coded object rigs -----------------------------------------
+    #
+    # An object that follows an op_ path is not one model: its draw routine
+    # walks the matrix stack pushing a transform per part. There is no rig data
+    # in the assets, so `hod2lib.rigs` transcribes the routine and this
+    # instantiates it as a node hierarchy under the animated path node.
+    #
+    # Parts are siblings, not a chain -- MatrixStackPush(0) duplicates the top,
+    # so each part's transform is relative to the object root.
+    n_rigs = 0
+    for entry in rigs or ():
+        rig = entry["rig"]
+        by_name = {n.get("name"): i for i, n in enumerate(nodes)}
+        for slot in rig.path_slots:
+            anchor = entry["anchors"].get(slot)
+            if anchor is None or anchor not in by_name:
+                continue
+            part_nodes: list[int] = []
+            for part, models in entry["parts"]:
+                prims = []
+                for model, bank, label in models:
+                    for mesh in model.meshes:
+                        if not mesh.triangles or not mesh.vertices:
+                            continue
+                        attrs = {
+                            "POSITION": buf.vec3([v.pos for v in mesh.vertices]),
+                            "TEXCOORD_0": buf.vec2([v.uv for v in mesh.vertices]),
+                        }
+                        nrm = [v.normal for v in mesh.vertices]
+                        if any(any(c) for c in nrm):
+                            attrs["NORMAL"] = buf.vec3(nrm)
+                        prims.append({
+                            "attributes": attrs,
+                            "indices": buf.indices(
+                                [i for tri in mesh.triangles for i in tri]),
+                            "material": get_material(label, bank, mesh),
+                            "mode": TRIANGLES,
+                        })
+                if not prims:
+                    continue
+                mesh_name = f"{rig.name}_{slot:03d}_{part.name}"
+                meshes.append({"name": mesh_name, "primitives": prims})
+                node = {
+                    "mesh": len(meshes) - 1, "name": mesh_name,
+                    "translation": list(part.translation),
+                    "rotation": list(_bams_euler_to_quat(*part.rotation_bams)),
+                    "extras": {
+                        "hod2_kind": "rig_part",
+                        "hod2_rig": rig.name, "hod2_routine": rig.routine,
+                        "hod2_slots": [f"0x{x:04X}" for x in part.slots],
+                    },
+                }
+                if part.scale != (1.0, 1.0, 1.0):
+                    node["scale"] = list(part.scale)
+                if part.draw_layer is not None:
+                    node["extras"]["hod2_draw_layer"] = part.draw_layer
+                if part.condition:
+                    node["extras"]["hod2_condition"] = part.condition
+                if part.animated:
+                    # Recorded, never baked: these are runtime-driven and the
+                    # export has no frame to bake from.
+                    node["extras"]["hod2_animated"] = part.animated
+                if part.note:
+                    node["extras"]["hod2_note"] = part.note
+                nodes.append(node)
+                part_nodes.append(len(nodes) - 1)
+
+            if part_nodes:
+                nodes.append({
+                    "name": f"{rig.name}_{slot:03d}",
+                    "children": part_nodes,
+                    "extras": {"hod2_kind": "rig", "hod2_rig": rig.name,
+                               "hod2_routine": rig.routine,
+                               "hod2_path_slot": slot,
+                               "hod2_note": rig.note},
+                })
+                # parent it under the animated object-path node so it rides
+                nodes[by_name[anchor]].setdefault("children", []).append(
+                    len(nodes) - 1)
+                n_rigs += 1
+
     # ---- assemble ------------------------------------------------------
     bin_name = f"{name}.bin"
     if not glb:
@@ -896,4 +977,5 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
         "cameras": len(cameras),
         "animations": len(animations),
         "paths": n_paths,
+        "rigs": n_rigs,
     }

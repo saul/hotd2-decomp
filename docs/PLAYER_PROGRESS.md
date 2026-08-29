@@ -43,6 +43,7 @@ each one.
 | Branch preview showed an unrelated shot | The `store_six` preview was carried across block changes. All four in stage 2 sit *inside* branch blocks | discard on block change, same lifetime as `branch_choice` |
 | Whole view tilted down | `eye.y = path.y - 15` was applied **before** the look-at, but the game derives pitch and yaw from the *unshifted* `eye - target` and only then overwrites `eye.y` | translate after orienting |
 | Camera still too low | The `-15` should not be applied at all — see below | reverted, with the measurement |
+| Fog far too thick | `SetFogRange` **doubles** near and far before the device sees them, and three.js's fog factor is `smoothstep` where D3D's is a straight ramp | double the range, patch the fragment chunk |
 
 ## Findings the player produced
 
@@ -88,8 +89,8 @@ Ranked by what they would actually change on screen.
 
 | Open | Effect | Where the work is |
 |---|---|---|
-| Scene **lights** applied | fog is rendered; the light direction, colour and ambient the same opcodes set are still only shown in the inspector | **client** |
-| Backdrop dome (`0x1B`/`0x1C`) | the sky is missing; table at `0x00579968` is documented | client + a small `exetab` reader |
+| Backdrop dome (`0x1B`/`0x1C`) | **the sky is missing** — now the biggest visual gap; the table at `0x00579968` is documented but not read | client + a small `exetab` reader |
+| Light/fog **tweens** are not stepped | `0x21`/`0x23` animate a channel over time; the player jumps to the target and says so in the feed | client |
 | What starts a stage's own BGM | the player names the stage track by convention and says so | decomp — the scene-entry path, not an xref sweep over 496 callers |
 | `path.y - 15` compensation | nothing today; the player is correct without it | decomp — what `0x009A60C0` is, and whether `g_camera_eye_y` is the final world eye |
 | `0x40C790` | whether deferred (state 6/7) shots are yaw-only | decomp, small |
@@ -150,8 +151,8 @@ missed. Meanings and confidence marks live in
 | `14` | `set_scene_lighting` | light | *tracked* | lighting override; values decoded, not applied to the render |
 | `15` | `enable_entity_spotlights` | light | *tracked* | lighting override; values decoded, not applied to the render |
 | `16` | `set_ambient_light_rgb` | light | *tracked* | lighting override; values decoded, not applied to the render |
-| `17` | `slerp_light0_direction` | light | *tracked* | scene light direction, in degrees; not applied |
-| `18` | `set_light0_direction` | light | *tracked* | scene light direction, in degrees; not applied |
+| `17` | `slerp_light0_direction` | light | ~approx~ | the slerp target is taken immediately rather than stepped |
+| `18` | `set_light0_direction` | light | **done** | **drives the directional light** in `+ scene light` mode |
 | `19` | `set_light1_direction` | light | *tracked* | scene light direction, in degrees; not applied |
 | `1A` | `set_ground_plane_y` | camera | *tracked* | ground plane / g_camera_fixed_eye_y; see the eye-height note |
 | `1B` | `set_backdrop_preset` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
@@ -159,10 +160,10 @@ missed. Meanings and confidence marks live in
 | `1D` | `enable_rain` | scenery | shown | rain particles; not drawn |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
 | `1F` | `set_hud_shutter_state` | hud | shown | HUD shutter state; the player draws no HUD |
-| `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour are applied**; light colour and ambient are tracked only |
-| `21` | `light0_tween_rate` | light | **done** | light block 0: **fog near/far and colour are applied**; light colour and ambient are tracked only |
+| `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour, light colour and ambient all applied** |
+| `21` | `light0_tween_rate` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `22` | `light0_stop` | light | shown | clears a channel tween |
-| `23` | `light0_tween_time` | light | **done** | light block 0: **fog near/far and colour are applied**; light colour and ambient are tracked only |
+| `23` | `light0_tween_time` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `24` | `light1_set` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
 | `25` | `light1_tween_rate` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
 | `26` | `light1_stop` | light | shown | clears a channel tween |

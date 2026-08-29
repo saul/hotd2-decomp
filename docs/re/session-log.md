@@ -2661,15 +2661,46 @@ re-enable it are in `web/src/campath.ts`.
 Note also that `0x36`, which selects the fixed-height branch, occurs **zero**
 times in any shipped script, so that half is unreachable from the data.
 
+### Fog range is doubled, and the light setup is transcribed — [proved]
+
+Two more findings from making the player's fog match the game, both now in
+[`../formats/materials.md`](../formats/materials.md).
+
+**`SetFogRange` (`0x004ABDF0`) doubles both values** before setting
+`FOGSTART`/`FOGEND`, with a swap guard if they arrive the wrong way round.
+The disassembly is unambiguous where the decompiler's FPU tracking is not. So
+a script's `near 21, far 507` is really a **42 … 1014** ramp — using the raw
+pair makes fog about twice as thick, which is exactly how the player looked
+until this was read. `FOGSTART`/`FOGEND` also fix the model as
+`D3DFOG_LINEAR`, a straight ramp rather than a curve.
+
+**`SetLightingDefaultSingle` (`0x004AA120`)** is the whole default lighting
+setup: `diffuse = colour × 1.4`, `specular = diffuse`,
+`light.ambient = colour × 0.3`, plus `D3DRENDERSTATE_AMBIENT` from the block's
+`+0x24C`, one directional light enabled and lights 1–15 disabled.
+`BuildSceneLightDirection` (`0x0040E0B0`) makes the direction by rotating
+`(0,0,1)` through `RotateY(yaw)` then `RotateX(pitch)`; those rotators
+pre-multiply and the transform is row-vector, so pitch applies first and
+
+    dir = ( cos(pitch)·sin(yaw), −sin(pitch), cos(pitch)·cos(yaw) )
+
+`SetRenderLightDirection` negates it, so `dir` is where the light comes
+**from**. The rotators multiply by `9.58738e-05` = 2π/65536, confirming BAMS.
+
+Renamed in Ghidra: `SetFogRange`, `PushSceneFogFromLightBlock`,
+`BuildSceneLightDirection`, `SetRenderLightDirection`, `SetRenderLightColour`,
+`SetRenderAmbient`, plus seven labelled light-block globals.
+
 ### Next actions
 
-1. Apply the scene light and fog values to the render — they are decoded and
-   shown in the inspector but only fog is drawn. Biggest visual gap.
-2. Backdrop dome (`0x1B`/`0x1C`): the table at `0x00579968` is documented but
-   not read; the sky is currently missing.
-3. Trace what starts a stage's BGM (open question 19) — the scene-entry path,
+1. Backdrop dome (`0x1B`/`0x1C`): the table at `0x00579968` is documented but
+   not read; **the sky is currently missing** and is now the biggest visual
+   gap in the player.
+2. Trace what starts a stage's BGM (open question 19) — the scene-entry path,
    not an xref sweep over `PlaySoundId`'s 496 callers.
-4. Trace `0x009A60C0` to settle the `path.y - 15` question (open question in
+3. Trace `0x009A60C0` to settle the `path.y - 15` question (open question in
    `PLAYER_PROGRESS.md`).
-5. `0x40C790`, the follow-on hook for deferred camera plays: settles whether
+4. `0x40C790`, the follow-on hook for deferred camera plays: settles whether
    state 6/7 shots are yaw-only.
+5. The `0x21`/`0x23` tween stepping — the `{enabled, from, to, rate}` block is
+   read but the per-frame step is not, so the player jumps to the target.

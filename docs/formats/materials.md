@@ -271,6 +271,59 @@ So clamp **and** flip together gives `MIRROR`, not clamp.
 > part of a material's identity — see *A glTF texture is (image, sampler)*
 > below.
 
+### Scene fog and the single directional light
+
+Fog and lighting are **scene** state, not per-mesh — only the *enable* is per
+mesh (TSP bit 23, inverted). Both live in the light block evt opcodes
+`0x17`–`0x27` drive, and both are pushed to the device from the per-frame
+scene update `FUN_00401F40`.
+
+#### Fog range is doubled — [proved]
+
+`PushSceneFogFromLightBlock` (`0x0040C320`) hands the block's `+0x30` and
+`+0x34` — the near and far that tween channels 0 and 1 write — to
+`SetFogRange` (`0x004ABDF0`), which **doubles both** before the device sees
+them:
+
+```
+[esp+4] = near * 2 ;  [esp+8] = far * 2
+if (near*2 < far*2) { FOGSTART = near*2; FOGEND = far*2; }
+else                { FOGSTART = far*2;  FOGEND = near*2; }   /* swap guard */
+```
+
+So a script's `near 21, far 507` is really a **42 … 1014** ramp. Rendering
+with the raw pair halves the ramp and the fog comes out roughly twice as
+thick. `FOGSTART`/`FOGEND` also fix the model as `D3DFOG_LINEAR` — a straight
+ramp `(end − d) / (end − start)`, not a curve.
+
+#### The directional light — [proved]
+
+`SetLightingDefaultSingle` (`0x004AA120`) is short enough to give in full:
+
+```c
+SetRenderState(D3DRENDERSTATE_AMBIENT, pack_argb(ambient));
+light.diffuse  = light_colour * 1.4;      /* block +0x240..+0x248 */
+light.specular = light.diffuse;
+light.ambient  = light_colour * 0.3;
+light.direction = g_render_light_dir;
+SetLight(0, &light);  LightEnable(0, TRUE);
+for (i = 1; i < 16; i++) LightEnable(i, FALSE);
+```
+
+`BuildSceneLightDirection` (`0x0040E0B0`) makes the direction by rotating
+`(0, 0, 1)` — `MatrixRotateY(yaw)` then `MatrixRotateX(pitch)`, both BAMS
+(the rotators multiply by `9.58738e-05` = 2π/65536). Those rotators
+pre-multiply and the transform is D3D's row-vector form, so pitch applies
+first:
+
+```
+dir = ( cos(pitch)·sin(yaw), −sin(pitch), cos(pitch)·cos(yaw) )
+```
+
+`SetRenderLightDirection` negates it, so `dir` is the direction the light
+comes **from**. Note the caller passes the **view-space** vector, not the
+world one.
+
 ### The mesh fog patch
 
 `ModelForceFogControlNone` (`0x00419300`) rewrites every mesh header of four

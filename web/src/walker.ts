@@ -188,6 +188,15 @@ export class Walker {
   fog: FogState = { near: 65000, far: 65001, rgb: [0, 0, 0] };
   /** True once the script has actually set a fog channel. */
   fogSet = false;
+  /**
+   * The scene light: colour from tween channels 6/7/8, ambient from 10, and
+   * the direction from opcodes 0x18/0x19 (and 0x17's slerp target, taken
+   * immediately). Fed to `SetLightingDefaultSingle`'s single directional
+   * light in the game.
+   */
+  light = { rgb: [1, 1, 1] as [number, number, number], ambient: 0.5,
+            pitchDeg: 0, yawDeg: 0 };
+  lightSet = false;
   /** A `cam_play` with `flags & 2` stashes its range for a later 0x21. */
   stashedCam: { slot: number; start: number; end: number } | null = null;
   /**
@@ -267,6 +276,8 @@ export class Walker {
     this.branchPreview = null;
     this.fog = { near: 65000, far: 65001, rgb: [0, 0, 0] };
     this.fogSet = false;
+    this.light = { rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 0, yawDeg: 0 };
+    this.lightSet = false;
     this.checkpointBlock = this.script.entry_block;
     this.flags.clear();
     this.loadedSlots.clear();
@@ -467,6 +478,19 @@ export class Walker {
       case 0x37: // force_camera_path_advance
         this.forcePathAdvance = !!op.force_path_advance;
         return undefined;
+      case 0x18: // set_light0_direction -- block 0 is the one that renders
+      case 0x17: // slerp_light0_direction: taken as an immediate set
+        if (op.pitch_deg !== undefined) {
+          this.light = {
+            ...this.light,
+            pitchDeg: op.pitch_deg,
+            yawDeg: op.yaw_deg ?? this.light.yawDeg,
+          };
+          this.lightSet = true;
+        }
+        return op.op === 0x17 ? "slerp target taken immediately" : undefined;
+      case 0x19: // set_light1_direction -- block 1 never reaches the device
+        return undefined;
       case 0x20:  // light0_set / tweens -- block 0 is the one the renderer
       case 0x21:  // is pushed every frame, so it is the one that shows.
       case 0x23:
@@ -554,8 +578,22 @@ export class Walker {
       const rgb: [number, number, number] = [...this.fog.rgb];
       rgb[ch - 2] = v;
       set({ rgb });
+    } else if (ch >= 6 && ch <= 8 && op.value !== undefined) {
+      const rgb: [number, number, number] = [...this.light.rgb];
+      rgb[ch - 6] = op.value;
+      this.light = { ...this.light, rgb };
+      this.lightSet = true;
+    } else if (ch === 9 && op.components?.length === 3) {
+      this.light = {
+        ...this.light,
+        rgb: [op.components[0], op.components[1], op.components[2]],
+      };
+      this.lightSet = true;
+    } else if (ch === 10 && op.value !== undefined) {
+      this.light = { ...this.light, ambient: op.value };
+      this.lightSet = true;
     } else {
-      return undefined;   // light colour and ambient: tracked by the UI only
+      return undefined;
     }
     return tween ? `${op.channel_name} -> target (tween not stepped)` : undefined;
   }

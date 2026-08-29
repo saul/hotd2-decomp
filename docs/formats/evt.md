@@ -1,114 +1,240 @@
 # `evt/` event tables
 
-**Status:** largely unknown, and the highest-risk format. Phase 6.
+**Status:** solved structurally. The relocation scheme, the container, the
+routing graph and the bytecode are all recovered; 16,991 instructions across all
+13 files decode with zero errors. What remains is *semantics* — most opcodes are
+identified only by which global they touch.
 
-13 files. One per stage plus shared and cutscene tables.
+Implemented in [`tools/hod2lib/evt.py`](../../tools/hod2lib/evt.py); checked by
+`tools/verify_phase6.py`.
 
-| File | Size |
-|---|---|
-| `st1evtbl.bin` … `st6evtbl.bin` | 17636 – 92472 |
-| `advevtbl.bin`, `adv2evtbl.bin` | 11580, 3542 |
-| `comevtbl.bin` | 296 |
-| `endevtbl.bin` | 9372 |
-| `trnevtbl.bin` | 21560 |
-| `st1evtbl - Copy.bin` | 27722 — a stray duplicate, ignore |
+The files are raw Dreamcast RAM images. They are not serialised: they contain
+absolute SH-4 pointers, and the PC port patches them at load.
 
-## The defining property: baked Dreamcast pointers
+## The fixup — solved
 
-These are **not** a serialised format. They are raw memory images captured from
-the Dreamcast build, still containing absolute SH-4 RAM pointers.
+`FUN_00413120` at `0x00413120`, called on the whole buffer right after
+`ReadFile`:
 
-Dreamcast main RAM is mapped at `0x0C000000`–`0x0CFFFFFF`. Dwords in that range
-are everywhere:
-
-| File | Size | Dwords in DC RAM range | Share |
-|---|---|---|---|
-| `st1evtbl.bin` | 27722 | 560 / 6930 | 8.1% |
-| `st2evtbl.bin` | 92472 | 1774 / 23118 | 7.7% |
-| `comevtbl.bin` | 296 | 17 / 74 | 23.0% |
-
-`st1evtbl.bin` opens with a run of them:
-
-```
-0x0CEB5A4C  0x0CEB63F4  0x0CEB79C4  0x0CEB7D98
-0x0CEB87EC  0x0CEB97C8  0x0CEB8F40  0x0CEB9994
+```c
+void evt_relocate(u32 *p, int n_dwords) {
+    for (; n_dwords; n_dwords--, p++)
+        if ((*p & 0xFFF80000) == 0x0CE80000)
+            *p += 0xF3AC1A00;            /* i.e. -= 0x0C53E600 */
+}
 ```
 
-Monotonically increasing at the start, which reads like a table of pointers to
-per-event records.
+That is the entire scheme. **Any dword in the 512 KB window
+`0x0CE80000..0x0CEFFFFF` is a pointer; everything else is payload.** There is no
+relocation table and no tagging — the format simply relies on no genuine
+non-pointer ever landing in that window.
 
-The PC port must apply a fixup pass at load: subtract the original Dreamcast base
-and add the actual allocation address. Recovering that routine is the key to the
-format.
+This is what the earlier analysis could not have guessed from the data: the
+`0x0Cxxxxxx` heuristic in the old notes was far too wide. The exact mask cuts
+the candidate set down to something that is **99.95 % dword-aligned** (6619 of
+6622 across all files) — a coincidence rate that confirms the mask is right.
 
-## The span problem
+Two buffers receive event data at fixed PC addresses:
 
-The pointer ranges do not fit inside the files:
+| Buffer | PC address | Dreamcast address |
+|---|---|---|
+| `comevtbl.bin` | `0x00977200` | `0x0CEB5800` |
+| the current scene's table | `0x00977400` | `0x0CEB5A00` |
 
-| File | Size | Pointer range | Span |
-|---|---|---|---|
-| `st1evtbl.bin` | 27722 | `0x0CEB5834` – `0x0CED0918` | 110820 |
-| `st2evtbl.bin` | 92472 | `0x0C0B0200` – `0x0CEDBC28` | 14858792 |
-| `comevtbl.bin` | 296 | `0x0CEB58F0` – `0x0CEB5A00` | 272 |
+So a pointer maps to a file offset by subtracting the DC base of its buffer.
+`comevtbl` gets 0x200 bytes immediately before the scene table, and scene tables
+**do** point back into it (offsets as low as −460), which answers the old
+question about whether the two link: they do.
 
-`comevtbl` fits neatly — 272 ≤ 296. The others do not: 4× and 160× the file size.
+### The "span problem" was an artefact
 
-So either:
-
-- pointers target **other** loaded structures — models, motion data, other event
-  tables — which the `st2evtbl` range starting at `0x0C0B0200` (far below the
-  `0x0CEBxxxx` cluster) strongly suggests; or
-- only a subset of `0x0Cxxxxxx`-looking dwords are genuine pointers, and the rest
-  are float or integer payload that coincidentally lands in that window.
-
-Both are probably true. At ~8% density, many of these must be coincidence — a
-small positive float has an exponent byte around `0x0C` only in narrow ranges,
-but packed RGBA or fixed-point data could easily collide.
-
-**Distinguishing real pointers from coincidence requires the loader's fixup
-routine.** There is no reliable way to do it from the data alone. This is why
-`evt` is the highest-risk item in the plan.
+The old note recorded pointer spans of 4× and 160× the file size. Those were
+computed over all `0x0Cxxxxxx`-looking dwords. Under the real mask every
+in-range dword in every file resolves to a sane offset, and the walk closes.
 
 ## Loader
 
-Not yet located precisely, but `exception.log` places it: a crash at `Eip =
-0x413133` has the ASCII `\evt\st1evtbl.bin` on the stack. The path template
-`evt\%s` is at `0x57995C`, reached through a table at `0x579958`.
+| Address | Role |
+|---|---|
+| `0x00413070` | loads `comevtbl.bin` into `0x00977200`, relocates, then loads the scene table |
+| `0x00413160` | loads `evt\<scene table>` into `0x00977400`, relocates; early-outs if already loaded |
+| `0x00413120` | the relocation pass |
 
-Start from `0x413133` and work outwards.
+Filenames come from the table at `0x004D1C7C`, indexed through a
+scene → file-index table at `0x00579928`.
 
-## What the format should contain
+## Scenes
 
-By analogy with other rail shooters, and given the game's structure:
+Everything is keyed by a small **scene id** in `DAT_009A1A08`:
 
-- Enemy spawn tables — type, position, timing, entry animation
-- Branch points — the game's multi-path stage routing
-- Trigger volumes and score events
-- Civilian rescue events
-- Boss phase scripting
-- Links into `cam/` for scripted camera moves, and into `mot/` for animations
+| Scene | evt file | Blocks |
+|---|---|---|
+| 0 | `st1evtbl.bin` | 17 |
+| 1 | `st2evtbl.bin` | 42 |
+| 2 | `st3evtbl.bin` | 18 |
+| 3 | `st4evtbl.bin` | 30 |
+| 4 | `st5evtbl.bin` | 10 |
+| 5 | `st6evtbl.bin` | 15 |
+| 6 | `trnevtbl.bin` | 20 |
+| 7 | — (inline stub inside `comevtbl`) | — |
+| 8 | — | 1 |
+| 9 | `endevtbl.bin` | 8 |
+| 10 | `advevtbl.bin` | 1 |
+| 11 | `adv2evtbl.bin` | 1 |
 
-## Approach
+`st1evtbl - Copy.bin` is a stray duplicate and is not referenced.
 
-1. RE the fixup routine to recover the exact pointer map — which words are
-   relocated and by how much.
-2. Rebase the file to offset 0 and re-examine. Real pointers become valid
-   internal offsets; coincidental matches become obviously wrong.
-3. Walk the record structs from the head table.
-4. Cross-reference with `mot/`, `pol/` and `cam/` indices to identify fields.
+## Container
 
-## Export
+Three levels of indirection, read by `FUN_0045EB60/70/90`:
 
-JSON sidecars alongside the glTF, since none of this maps to a standard glTF
-concept.
+```
+comevtbl[scene]            -> block table for that scene   (FUN_0045EB60)
+block_table[block]         -> step table                   (FUN_0045EB70)
+step_table[step]           -> bytecode stream              (FUN_0045EB90)
+```
+
+The first 12 dwords of `comevtbl.bin` are the per-scene roots. For a scene with
+its own file the entry is `0x0CEB5A00` — the start of the scene buffer — so the
+scene table *begins* with its block-pointer array.
+
+**`-1` in the root array is a hole, not a terminator.** A scene whose route
+graph never visits block *i* stores `-1` there. Sizing the array by stopping at
+the first `-1` loses blocks (17 → 15 for stage 1). Two independent ways to get
+the real count, which agree on all 10 files:
+
+- scan while entries are pointer-or-hole (what `hod2lib` does by default);
+- read the length of the scene's route table out of `Hod2.exe`.
+
+## Stage routing
+
+`0x00597890` is a scene-indexed pointer to a **route table** — the flow graph
+between blocks, and the mechanism behind the game's branching paths. Read by
+`FUN_0045F000` when a block's step list runs out. Records are 8 bytes:
+
+```
++0x00  s16 kind      0 = go to next[0]
+                     1 = branch, take next[branch_choice]
+                     2 = end of scene
++0x02  s16 next[0]
++0x04  s16 next[1]
++0x06  s16 next[2]
+```
+
+`branch_choice` is `DAT_009C88A4`, reset to 0 on every block change. Stage 2 has
+42 route nodes with 15 branch points — comfortably the most branch-heavy stage,
+which matches the game.
+
+Exposed as `ExeTables.scene_routes(scene)`.
+
+## Bytecode
+
+`FUN_0045ECC0` is the interpreter:
+
+```c
+do {
+    op = *pc;
+    dispatch[op]();          /* 96 handlers at 0x005931D8 */
+} while (!yield);
+```
+
+Everything is dword-granular: an instruction is one opcode dword followed by
+operands. Each handler advances `pc` itself, so operand length is per-opcode.
+The full table is transcribed in `evt.OPCODES`; the length classes are:
+
+| Class | Encoding |
+|---|---|
+| `fix` | fixed number of dwords |
+| `list` | `[op][arg …][-1]` |
+| `var` | several `-1`-separated lists, whole run closed by `-2`; a global picks which list runs |
+| `queue` | `[op][selector][args]`, length `2 + (selector >> 4)` dwords |
+| `set` / `tween` | `[op][sub-op][…]`, length depends on the sub-opcode |
+| `halt` / `next` | terminators |
+
+Five dispatch slots (`0x00`, `0x2A`, `0x34`, `0x3C`, `0x4C`) point at an empty
+stub. **No shipped file ever encodes one** — a useful integrity check, since a
+mis-sized instruction would land on a stub or an out-of-range opcode almost
+immediately. 76 distinct opcodes are actually used.
+
+### Notable opcodes
+
+| Op | Name | Notes |
+|---|---|---|
+| `0x09` | `spawn_placed` | list of pointers to spawn descriptors — the main enemy placement opcode |
+| `0x0B`/`0x0C` | `spawn_obj` | same descriptor, different object base class |
+| `0x20`/`0x24` | `view_set` | set a view channel immediately (sub-opcode picks the channel) |
+| `0x21`/`0x25` | `view_tween_rate` | tween a channel at a given rate |
+| `0x23`/`0x27` | `view_tween_time` | tween a channel over a given duration; the handler pre-divides to a per-frame step |
+| `0x22`/`0x26` | `view_stop` | clear a channel's tween |
+| `0x30` | `queue_event` | push a scripted action onto a 16-slot ring; `FUN_00402320` dispatches it through a two-level table at `0x005776EC`. The selector's **high nibble is the operand count** |
+| `0x40`–`0x47` | `wait_*` | the blocking opcodes; they set the yield flag and do not advance `pc` until their condition holds |
+| `0x49`/`0x4A`/`0x4B` | `variant_*` | pick one of several operand lists by a global — difficulty or player count |
+| `0x4D` | `checkpoint` | resets view state and records progress |
+| `0x4F` | `end_block` | hands control to the route table |
+
+The `0x20`–`0x27` family targets one of two **view structs** (`DAT_009A3540`,
+`DAT_009A59E0` — one per player) via a 0x24-dword tween block laid out as
+`{enabled, from, to, rate}` per channel. Channels 5 and 9 are "all three axes at
+once" forms of 2/3/4 and 6/7/8.
+
+## Spawn descriptor
+
+Header is 0x24 bytes, identical for opcodes `0x09`, `0x0B`, `0x0C`, `0x0D`
+(`FUN_004088A0`, `FUN_00408A20`, `FUN_00408BC0`):
+
+```
++0x00  u32  class index   selects the object size from DAT_009A2280
++0x04  u32  init flags    OR'd with 1 into object +0x34   (always 0 in shipped data)
++0x08  f32  position x    -> object +0x40
++0x0C  f32  position y    -> object +0x44
++0x10  f32  position z    -> object +0x48
++0x14  s32  orientation a -> object +0x64
++0x18  s32  orientation b -> object +0x68
++0x1C  s32  orientation c -> object +0x6C
++0x20  u16  (always 0)
++0x22  u16  hit points    -> object +0x11C *and* +0x11E
++0x24  ...  variable behaviour tail
+```
+
+The tail is class-specific: `0x0B`/`0x0C` store its address in the object
+(+0x1390 / +0x130C) and leave interpretation to the class, while `0x09` reads
+two bytes from it inline. `0x09` records are laid out contiguously at a **0x28**
+stride in every shipped file, i.e. a two-byte tail.
+
+**Confirmed:**
+
+- Position is float and in level space. Sampled against the bounding box of the
+  matching `pol/` geometry, **1216 of 1216** stage-1/2/4/5/6 spawns fall inside
+  their own stage. That is the strongest available check that the offsets are
+  right.
+- `+0x22` is hit points: it is written to *both* a current and a maximum field,
+  and takes values 0–18 across 1410 descriptors.
+- `+0x18` is a BAMS yaw — its range covers ±65536 (`0x4000` = 90°), while the
+  other two orientation words are almost always 0 with a small integer tail.
+
+**Not confirmed:** the exact meaning of `+0x14` and `+0x1C`. They reach object
++0x64 and +0x6C, and are plausibly the other two Euler angles, but their value
+distributions (mostly 0, otherwise 1–10) do not look like angles. Do not export
+them as rotations without checking.
+
+1410 descriptors are reachable; class ids fall in the bands 16–27, 32–51, 64–70,
+80–86 and 109, with class 65 accounting for 347 of them.
+
+## Coverage
+
+78.8 % of `evt/` bytes are reached by walking root → blocks → steps → bytecode
+→ `0x09`-family descriptors. The remainder is operand data behind opcodes whose
+targets are not yet followed — chiefly the behaviour tails of `0x0B`/`0x0C`
+descriptors and the float constants that the tween opcodes point at.
 
 ## Open questions
 
-1. What is the exact fixup scheme, and how does the loader know which words to
-   patch?
-2. What was the original Dreamcast load base? `0x0CEB0000` fits `st1evtbl` but
-   not `st2evtbl`.
-3. Do pointers cross between files — does `st2evtbl` reference data loaded from
-   `pol/` or `mot/`?
-4. Is `comevtbl` a shared table the per-stage ones link into? Its self-contained
-   pointer range suggests it is a good place to start.
+1. What do the `queue_event` selectors mean? The two-level table at
+   `0x005776EC` names 100+ scripted actions; decoding it would give the
+   cutscene vocabulary.
+2. Which opcode selects a `cam/` path slot? See `cam.md`.
+3. Semantics of the ~40 opcodes currently named only by the global they write.
+4. `+0x14` / `+0x1C` of the spawn descriptor.
+5. What are the two "no file" scenes (7 and 8)? Scene 7 runs an inline stub
+   inside `comevtbl` and is used as the fallback when a scene's route table
+   ends (`FUN_0045F000` calls `EvtGetEntry(7, 0, 0)`).

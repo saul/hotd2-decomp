@@ -165,6 +165,69 @@ function, close to the `tex` loaders at `0x41C8DA` / `0x41CDC2`.
 No `0xFEE` constant is present, so this is **not** stock Okumura LZSS with the
 classic ring-buffer initialisation.
 
+## Event system (`evt/`) — Phase 6
+
+| Address | Role |
+|---|---|
+| `0x00413070` | loads `comevtbl.bin` into `0x00977200`, then the scene table |
+| `0x00413160` | loads `evt\<scene table>` into `0x00977400`; early-outs if already loaded |
+| `0x00413120` | **pointer fixup**: `if ((w & 0xFFF80000) == 0x0CE80000) w += 0xF3AC1A00` |
+| `0x0045EB60` | `SceneRoot(scene)` — `*(u32 *)(0x00977200 + scene * 4)` |
+| `0x0045EB70` | `BlockTable(scene, block)` |
+| `0x0045EB90` | `Step(scene, block, step)` — the bytecode stream pointer |
+| `0x0045EBC0` | block entry: initialises interpreter state |
+| `0x0045ECC0` | **the interpreter loop** — `dispatch[*pc]()` until yield |
+| `0x0045F000` | end of block: consults the route table, advances or ends the scene |
+| `0x004088A0` | opcode `0x09` handler — spawn from placed descriptors |
+| `0x00408A20` | opcode `0x0B` object constructor from a descriptor |
+| `0x00408BC0` | opcode `0x0C` object constructor (smaller base class) |
+| `0x0040B3F0` | `view_set` (opcodes `0x20`/`0x24`) |
+| `0x0040B650` | `view_tween_rate` (`0x21`/`0x25`) |
+| `0x0040BA90` | `view_tween_time` (`0x23`/`0x27`) |
+| `0x0040C1F0` | `view_stop` (`0x22`/`0x26`) |
+| `0x00402320` | dispatches queued scripted actions pushed by opcode `0x30` |
+| `0x0041EBB0` | the empty stub five unused dispatch slots point at |
+
+| Data | Contents |
+|---|---|
+| `0x005931D8` | **opcode dispatch table**, 96 entries (`0x00`–`0x5F`) |
+| `0x005776EC` | two-level table of queued scripted actions, indexed by `sel>>4`, `sel&0xF` |
+| `0x00597890` | scene → route table pointer (8-byte records: `kind`, `next[3]`) |
+| `0x00579928` | scene → index into the `evt/` filename table (`-1` = no file) |
+| `0x004D1C7C` | `evt/` filename pointer table |
+| `0x00977200` | `comevtbl.bin` load buffer (DC `0x0CEB5800`), 0x200 bytes |
+| `0x00977400` | scene event table load buffer (DC `0x0CEB5A00`) |
+| `0x009C7108` | interpreter `pc` |
+| `0x009A1A08` | current scene id |
+| `0x009A2BC0` | current block index |
+| `0x009A2BB0` | current step index |
+| `0x009C88A4` | branch choice for route `kind == 1` |
+| `0x009C8EA0` | yield flag — set by the `wait_*` opcodes |
+| `0x009A3540` | view struct, player 1 |
+| `0x009A59E0` | view struct, player 2 |
+| `0x009A2280` | class index → object allocation size |
+
+## Camera / object paths (`cam/`) — Phase 6
+
+| Address | Role |
+|---|---|
+| `0x00403EC0` | opens `cam\%s`, allocates `size + 0x20`, aligns to 32, stores base at `0x0059C9EC` |
+| `0x00403FB0` | the deferred `ReadFile` |
+| `0x00404000` | binds each table entry to its global slot: `slot[i].ptr = base + offset[i]` |
+| `0x004040F0` | **cubic Hermite curve evaluator** |
+| `0x004041E0` | 7-channel consumer — eye, look-at, roll. Used for `cp_*` |
+| `0x004042D0` | 6-channel consumer — position + BAMS Euler triple. Used for `op_*` |
+| `0x00401F40` | per-frame camera update; calls `FUN_0040E0B0(DAT_009A3558, DAT_009A355C, ...)` |
+
+| Data | Contents |
+|---|---|
+| `0x004D1BC8` | `cam/` filename pointer table |
+| `0x004C476C` | `u16` path count per cam file |
+| `0x004C470C` | pointer to `s16[count]` — the global slot id of each path |
+| `0x004C479C` | `s8` slot → owning cam file index |
+| `0x0059C9EC` | aligned load buffer base for the current cam file |
+| `0x0059C9F8` | slot → `{u32 ptr; u16 state}`, 8-byte records |
+
 ## Crash sites (from `exception.log`)
 
 Three `c0000005` access violations recorded by the game's own handler. Useful as

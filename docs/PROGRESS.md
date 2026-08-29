@@ -92,12 +92,24 @@ translation has not been decompiled yet.
 - [ ] Document texture shading, UV clamp/flip, filtering, fog
 - [ ] Document shading modes and environment mapping
 
-## Phase 6 — Remaining formats
+## Phase 6 — Remaining formats 🔶 `evt/` and `cam/` solved
 
-- [ ] `cam/` — keyframe struct + interpolation
+- [x] `cam/` — **solved.** Not a keyframe struct: a pool of independent scalar
+      **cubic Hermite** curves plus a per-path descriptor naming one curve per
+      channel. `cp_` = 7 channels (eye, look-at, roll), `op_` = 6 (position +
+      BAMS Euler). Times are 60 Hz frame numbers. **100.0000 % byte coverage on
+      all 24 files.** Spec: [`formats/cam.md`](formats/cam.md)
+- [x] `evt/` — **solved structurally.** Fixup is a one-line mask
+      (`FUN_00413120`); the payload is a 96-opcode bytecode VM
+      (`FUN_0045ECC0`, dispatch table at `0x005931D8`). 16,991 instructions
+      decode with zero errors. Spec: [`formats/evt.md`](formats/evt.md)
+- [x] Stage routing graph recovered (`0x00597890`) — the branching-path mechanism
+- [x] Spawn descriptors: 1,410 recovered; **1216/1216** stage-1/2/4/5/6 spawns
+      verified inside their own level geometry
+- [ ] `evt/` semantics — ~40 opcodes named only by the global they write
+- [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [ ] `coli/` — record layout + hit-test semantics
 - [ ] `mot/` — rigid transforms vs vertex morphs
-- [ ] `evt/` — pointer fixup pass, then event struct walk
 
 ## Phase 7 — Documentation & C reference
 
@@ -111,8 +123,9 @@ translation has not been decompiled yet.
 - [x] Materials with `extras.pvr2` raw state words
 - [x] Whole stages merged into one file, one parent node per segment
 - [x] `tools/blender_check.py` headless verification + preview render
-- [ ] Camera splines as glTF animations
-- [ ] `evt` / `coli` JSON sidecars
+- [ ] Camera splines as glTF animations — unblocked, `cam/` maps directly onto
+      `CUBICSPLINE`
+- [ ] `evt` / `coli` JSON sidecars — `evt/` unblocked
 
 ## Open questions
 
@@ -125,14 +138,18 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 3. ~~Packed s8 normal byte order~~ **MOOT** — no vertex-colour meshes exist
 4. Are the 3 anomalous `pol_*` files corrupt, or differently encoded? (Phase 2)
 5. Do `mot/` blocks drive rigid transforms or vertex morphs? (Phase 6)
-6. What is the `evt/` pointer-relocation scheme? (Phase 6)
-7. What distinguishes `cam/cp_*` from `cam/op_*`? (Phase 6)
+6. ~~What is the `evt/` pointer-relocation scheme?~~ **SOLVED** — one mask at
+   `0x00413120`: dwords in `0x0CE80000..0x0CEFFFFF` get `-0x0C53E600`
+7. ~~What distinguishes `cam/cp_*` from `cam/op_*`?~~ **SOLVED** — same
+   container, different consumers: 7 channels (camera) vs 6 (object, with the
+   last three converted by `__ftol` to BAMS angles)
 8. How does the game decide a file is compressed? `LoadCommonPolTexBanks`
    decompresses unconditionally, yet 192 `pol/` files are raw. (Phase 3)
 9. What are the four 987-byte placeholder files? (low priority)
-10. **When are stage segments streamed in?** Segments are separate `pol/` files
-    already positioned in world space; `evt/` and `cam/` almost certainly drive
-    load order. Key to reconstructing a playable level. (Phase 6)
+10. **When are stage segments streamed in?** Partly answered: block order comes
+    from the per-scene route table at `0x00597890`, and `evt/` opcodes
+    `0x0F`/`0x12` set a pending-id list. The id → `pol/` segment mapping is
+    still open.
 11. Is the twiddle Morton convention correct, or transposed? (needs visual check)
 12. **What is the 16-bit UV vertex layout?** `parameter_control` bit 0 selects
     it, 128 stage meshes use it, and neither `hod2lib` nor the reference addon
@@ -141,3 +158,14 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     zero-UV-area polygons, or hidden by the camera rail? (Phase 5/6)
 14. Are the reported stretched faces among the 128 16-bit-UV meshes, or is the
     anisotropy genuinely authored? (Phase 3)
+15. What is the eighth curve index in a `cp_` path descriptor? Neither
+    evaluator reads it, and it always points at a real curve. (Phase 6)
+16. Which `evt/` opcode selects a `cam/` path slot? Opcodes `0x18`/`0x19` are
+    the prime suspects — they write the two view fields the camera evaluator is
+    called with. Answering this reconstructs the camera rail, which would also
+    settle question 13. (Phase 6)
+17. What do the `queue_event` (`0x30`) selectors mean? The two-level table at
+    `0x005776EC` holds 100+ scripted actions — the cutscene vocabulary.
+18. Are `+0x14` / `+0x1C` of the spawn descriptor really the other two Euler
+    angles? They sit either side of a confirmed BAMS yaw but do not look like
+    angles. (Phase 6)

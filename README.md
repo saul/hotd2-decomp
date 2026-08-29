@@ -50,7 +50,8 @@ against a known-good input set; it contains no asset content.
 
 ## Status
 
-Phase 0 complete; Phase 1 (Ghidra environment) in progress.
+Phases 0-2 and 4 complete. Phase 6 solved `evt/` and `cam/`; `mot/` and `coli/`
+remain. Phases 3, 5 and 8 have known gaps.
 
 - [`docs/re/session-log.md`](docs/re/session-log.md) — **start here when
   resuming.** Where the last session stopped and what to do next.

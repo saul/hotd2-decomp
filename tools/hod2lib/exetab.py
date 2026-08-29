@@ -157,3 +157,70 @@ class ExeTables:
                     out.append(TexEntry(i, w, h, pf, lay, off, slot))
         self._cache[bank] = out
         return out
+
+    # -- scene / event routing ------------------------------------------
+    #
+    # The event system indexes everything by "scene", a small id held in
+    # DAT_009A1A08. Three parallel tables in .data key off it:
+    #
+    #   0x00579928   s32  scene -> index into the evt/ filename table
+    #                     (-1 = the scene has no file of its own)
+    #   0x004D1C7C   ptr  evt/ filename table
+    #   0x00597890   ptr  scene -> route table (block flow graph)
+    #
+    # A route record is 8 bytes, read by FUN_0045F000 when a block's step
+    # list runs out:
+    #
+    #   +0x00  s16  kind   0 = go to next[0]
+    #                      1 = branch, go to next[branch_choice]
+    #                      2 = end of scene
+    #   +0x02  s16  next[0]
+    #   +0x04  s16  next[1]
+    #   +0x06  s16  next[2]
+    #
+    # The record count is not stored; consecutive scenes' table pointers are
+    # adjacent in address order, so each table ends where the next begins.
+
+    SCENE_FILE_INDEX = 0x00579928
+    EVT_NAME_TABLE = 0x004D1C7C
+    SCENE_ROUTE_TABLE = 0x00597890
+    SCENE_COUNT = 12
+
+    ROUTE_GOTO = 0
+    ROUTE_BRANCH = 1
+    ROUTE_END = 2
+
+    def scene_evt_file(self, scene: int) -> str | None:
+        """evt/ filename for a scene, or None if it has no file."""
+        idx = self._u32(self.SCENE_FILE_INDEX + scene * 4)
+        if idx is None or idx == 0xFFFFFFFF:
+            return None
+        ptr = self._u32(self.EVT_NAME_TABLE + idx * 4)
+        return self._cstr(ptr) if ptr else None
+
+    def scene_routes(self, scene: int) -> list[tuple[int, int, int, int]]:
+        """Route records for a scene: [(kind, next0, next1, next2), ...].
+
+        The list length is also the number of event blocks the scene's evt
+        file must supply, which is what makes it useful to the evt parser --
+        the root pointer array uses -1 as a *hole* marker, not a terminator,
+        so it cannot be sized from the file alone.
+        """
+        starts = [self._u32(self.SCENE_ROUTE_TABLE + s * 4) or 0
+                  for s in range(self.SCENE_COUNT)]
+        va = starts[scene]
+        if not va:
+            return []
+        # The tables sit contiguously below the pointer table itself, so each
+        # one ends where the next-highest starts.
+        after = [v for v in starts if v > va] + [self.SCENE_ROUTE_TABLE]
+        end = min(after)
+        r = self._v2r(va)
+        if r is None:
+            return []
+        n = (end - va) // 8
+        return [tuple(struct.unpack_from("<4h", self.data, r + i * 8))
+                for i in range(n)]
+
+    def scene_block_count(self, scene: int) -> int:
+        return len(self.scene_routes(scene))

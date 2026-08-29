@@ -959,3 +959,216 @@ Worse, I asserted a wrong root cause (duplicate imports z-fighting) from a
 `.002` suffix in a screenshot. It was a plausible candidate; it was not proof,
 and I stated it as though it were. **Offer candidates as candidates until a
 measurement settles them.**
+
+---
+
+## Session 11 — Phase 6: `evt/` and `cam/` both solved
+
+Both formats went from "highest-risk, largely unknown" to parsed and validated
+in one session. The reason is worth recording, because it contradicts how the
+plan framed the work: **neither needed the data-first analysis the plan
+proposed.** Both fell out of reading the binary directly, and both of the
+"hard problems" the plan warned about turned out to be artefacts of guessing
+from data instead of reading code.
+
+New code: `tools/hod2lib/evt.py`, `tools/hod2lib/cam.py`,
+`tools/verify_phase6.py`, plus scene/route tables in `tools/hod2lib/exetab.py`.
+
+### `evt/` — the fixup routine was three functions from the known crash site
+
+`docs/re/addresses.md` already recorded a crash at `0x413133` with
+`\evt\st1evtbl.bin` on the stack. The containing function is `FUN_00413160`,
+whose last call before returning is:
+
+```c
+FUN_00413120(PTR_DAT_005798EC, (int)nBytes >> 2);
+```
+
+and that is the entire relocation scheme:
+
+```c
+for (; n; n--, p++)
+    if ((*p & 0xFFF80000) == 0x0CE80000)
+        *p += 0xF3AC1A00;          /* -= 0x0C53E600 */
+```
+
+Total elapsed: two tool calls. The plan had budgeted `evt/` as the highest-risk
+item in the project.
+
+**The "span problem" never existed.** `docs/formats/evt.md` recorded pointer
+ranges 4x and 160x the file size and concluded that pointers must cross into
+other loaded structures. They do not. That analysis filtered on `0x0Cxxxxxx` —
+a 16 MB window. The program's own test is a 512 KB window,
+`0x0CE80000..0x0CEFFFFF`. Under the correct mask every candidate resolves
+inside its buffer and 6619 of 6622 are dword-aligned.
+
+**Lesson, and it is the same one as Session 10 in a different costume: a
+heuristic filter wider than the program's own test manufactures anomalies that
+do not exist.** Both times the fix was to stop reasoning about the data and go
+read what the code actually does.
+
+The load addresses are fixed and adjacent, which is what makes the offsets
+recoverable: `comevtbl.bin` at `0x00977200` (DC `0x0CEB5800`), the scene table
+at `0x00977400` (DC `0x0CEB5A00`). `comevtbl` is 0x200 bytes of scratch
+immediately below the scene table, and scene tables do point back into it —
+answering the old question about whether the two link.
+
+#### The event VM
+
+`FUN_0045ECC0` is an interpreter over a **96-entry dispatch table at
+`0x005931D8`**, opcodes `0x00`–`0x5F`, dword-granular, each handler advancing
+`pc` itself. Transcribing the operand length of all 96 handlers is the bulk of
+the session's manual work and is captured in `evt.OPCODES`.
+
+Validation is by exhaustion and it is sharp: **16,991 instructions across all
+13 files decode with zero errors, and none of the five empty-stub dispatch
+slots is ever encoded.** A single wrong operand length desynchronises the
+decoder and lands it on garbage within a few instructions, so this is a real
+test rather than an absence of crashes.
+
+Three levels of indirection: `comevtbl[scene]` → block table → step table →
+bytecode.
+
+#### Two traps in the container
+
+1. **`-1` in the root array is a hole, not a terminator.** Stopping at the
+   first one loses blocks (17 → 15 for stage 1) and silently drops ~10 % of
+   each file. Two independent fixes agree on all 10 files: scan while entries
+   are pointer-or-hole, or read the block count from the EXE route table.
+2. `FUN_0045EBB0`, which every handler calls on pointer operands, is
+   `mov eax,[esp+4]; ret` — a no-op left over from the Dreamcast build. It
+   looks like an ID→pointer translation and is not one. Do not read meaning
+   into it.
+
+#### Stage routing — bonus result
+
+`0x00597890` is a scene-indexed **route table**: 8-byte records
+`{kind, next[3]}` where kind 0 = goto, 1 = branch on `DAT_009C88A4`, 2 = end.
+This is the branching-path mechanism the game is known for. Stage 2 has 42
+nodes with 15 branch points. This also answers open question 10 in part —
+block order, and therefore segment order, is driven from here.
+
+#### Spawn descriptors, and the check that mattered
+
+Header is 0x24 bytes (`FUN_004088A0` / `FUN_00408A20` / `FUN_00408BC0`):
+class, flags, `f32 pos[3]`, `s32 orient[3]`, `u16 hp`, variable tail.
+
+The falsifiable test: sample every spawn position against the bounding box of
+the matching `pol/` geometry. **1216 of 1216** stage-1/2/4/5/6 spawns land
+inside their own stage. Stage 3 scores 77 % — its geometry bounds come out as
+z ∈ [−4486, −493] while spawns run to z = +4, so the `st3_*` prefix probably
+does not cover every segment of that stage. Worth a look, not alarming.
+
+`+0x22` is hit points: it is written to *both* a current and a maximum field,
+and ranges 0–18 over 1410 descriptors. `+0x18` is a BAMS yaw (range covers
+±65536, `0x4000` = 90°).
+
+**Stated as unresolved rather than guessed:** `+0x14` and `+0x1C`. They reach
+object +0x64 and +0x6C and sit either side of a confirmed angle, so "the other
+two Euler angles" is the obvious reading — but their distributions (mostly 0,
+otherwise 1–10) do not look like angles at all. Flagged in `evt.md`; do not
+export them as rotations without settling it.
+
+### `cam/` — the container was never an offset table
+
+The old spec read the leading `u32` array as "start of data" and hypothesised a
+keyframe struct with interleaved channels. Both were wrong.
+
+`FUN_004041E0` gives the whole structure away:
+
+```c
+p    = slot[index].ptr;                       /* -> 7 curve indices */
+base = file_base;
+out_pos[0] = eval(base + p[0]*4, t);          /* eye.x   */
+...
+out_tgt[2] = eval(base + p[5]*4, t);          /* target.z */
+roll       = (int)eval(base + p[6]*4, t);
+```
+
+So a file is a **pool of independent scalar curves** plus a small descriptor per
+path naming one curve per channel. Channels are not interleaved.
+
+`FUN_004040F0` is a textbook **cubic Hermite** evaluator with independent
+in/out tangents — which maps onto glTF `CUBICSPLINE` with no reshaping beyond
+scaling tangents by the segment length.
+
+```
++0x00  u16 key_count       always a power of two
++0x02  u16 search_steps    log2(key_count)
++0x04  key[]               {f32 time, value, tangent_out, tangent_in}
+```
+
+`key_count` is a power of two because the search runs a fixed `log2(count)`
+steps rather than a bounded loop.
+
+**`cp_` vs `op_` — answered.** Identical container, two consumers.
+`FUN_004041E0` reads 7 channels (eye, look-at, roll) — camera path.
+`FUN_004042D0` reads 6 and pushes the last three through `__ftol` — object
+path, position plus a BAMS Euler triple. That the integer conversion is visible
+in the decompilation is what settles it; the naming alone never could.
+
+**Timebase — answered.** Times are frame numbers at 60 Hz. 99.68 % of 44,750
+keyframe times sit within 0.01 of an integer; the residue is f32 accumulation
+error, not a finer grid. Longest curve ends at frame 3600 = exactly 60 s.
+
+Validation: **100.0000 % byte coverage on all 24 files.** Every byte is claimed
+by exactly one of {offset table, curve, descriptor}. This is an unusually
+strong check — a wrong keyframe stride or descriptor size desynchronises the
+linear pool walk immediately and coverage collapses.
+
+Camera eye positions sampled against level geometry land inside the stage
+90–100 % of the time.
+
+### Dead ends and wrong turns
+
+- **Assuming a fixed descriptor size.** First pass hardcoded 8 dwords for `cp_`
+  and 6 for `op_`. `cp_` was right; `op_` broke on `op_st1` and `op_st6`
+  (71.7 % and 91.9 % coverage). The fix was to stop assuming and derive the
+  span structurally — run to the next valid curve header. Curve headers are
+  unambiguous (`key_count` a power of two *and* `search_steps == log2` of it),
+  so this is safe, and it took coverage to exactly 100 % on every file.
+- **Trusting the offset table to locate descriptors.** A table-driven pool walk
+  desynchronises on `op_st1`, because six of its entries are corrupt. Table-free
+  structural walking is strictly better here.
+- **`E.spawns()` returned 0 on the first run.** `Instr.words` holds *relocated*
+  operands, so `is_pointer()` on them is always false. Pointer resolution has to
+  use `Instr.raw`. Silent wrong answer, not a crash — the kind of bug that
+  survives a smoke test.
+- **Reading `+0x22` of the spawn descriptor as "flags" and `+0x24` as hp.**
+  Backwards. Corrected by dumping raw descriptors at a 0x28 stride rather than
+  trusting the first field assignment that looked plausible.
+- Ghidra could not form function bodies for **31 of the 84** dispatch targets —
+  the Phase 1 coverage gap, still unfixed. The dispatch table is itself the
+  cure: it is 96 known-good entry points. Created them by hand via MCP.
+  `run_script_inline` is disabled (`GHIDRA_MCP_ALLOW_SCRIPTS` unset), so this
+  was one call per address rather than one script.
+
+### State
+
+`tools/verify_phase6.py --game-dir "..."` — passes with no structural problems.
+
+```
+cam/  418 paths, 3018 curves, 44,800 keyframes, 100.0000 % byte coverage
+evt/  141 blocks, 583 steps, 16,991 instructions, 1,410 spawn descriptors,
+      76 distinct opcodes all inside the 96-entry table, 78.8 % byte coverage
+```
+
+`evt/` coverage is 78.8 % rather than ~100 % because operand data behind
+opcodes whose targets are not yet followed is unaccounted for — chiefly the
+behaviour tails of `0x0B`/`0x0C` descriptors and the float constant pool the
+tween opcodes point into. The structure is solved; the residue is semantics.
+
+### Next actions, in order
+
+1. **Export.** Both formats now have everything the exporter needs.
+   `cam/` → glTF `CUBICSPLINE` animations; `evt/` spawns → a JSON sidecar.
+   This is the highest-value next step and closes two Phase 8 boxes.
+2. **Link `evt` → `cam`.** Opcodes `0x18`/`0x19` write the two view fields that
+   `FUN_00401F40` passes to the camera evaluator. Tracing operand → slot id
+   would let a whole stage be reconstructed as a playable camera rail — and
+   would settle open question 13 (whether collapsed-UV faces are simply never
+   on screen) by reconstructing the intended view.
+3. **Decode the `queue_event` action table** at `0x005776EC`. 100+ named
+   scripted actions; this is the cutscene vocabulary.
+4. Chase the remaining 21 % of `evt/` bytes by following `0x0B`/`0x0C` tails.
+5. Stage 3's spawn/geometry mismatch — probably a missing `pol/` prefix.

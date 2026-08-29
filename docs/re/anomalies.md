@@ -95,30 +95,28 @@ for the boot logos.
 23 `tex/` files are effectively empty — `tex/bg_adv10.bin` is 4 bytes of zero,
 i.e. a valid compressed file whose uncompressed size is 0.
 
-## 4. `evt/` pointer ranges
+## 4. `evt/` pointer ranges — RESOLVED (Session 11)
 
-`evt/*.bin` are Dreamcast RAM images with absolute `0x0Cxxxxxx` SH-4 pointers
-still baked in. But the pointer span does not fit the file:
+**Not an anomaly.** The apparent problem was an artefact of too wide a filter.
 
-| File | Size | Pointer range | Span |
-|---|---|---|---|
-| `st1evtbl.bin` | 27722 | `0x0CEB5834` – `0x0CED0918` | 110820 |
-| `st2evtbl.bin` | 92472 | `0x0C0B0200` – `0x0CEDBC28` | 14858792 |
-| `comevtbl.bin` | 296 | `0x0CEB58F0` – `0x0CEB5A00` | 272 |
+The old reading counted every dword that looked like `0x0Cxxxxxx` and got spans
+4x and 160x the file size. The loader's fixup routine (`FUN_00413120`) shows the
+real test is much narrower:
 
-`comevtbl` fits neatly. The other two do not — spans are 4× and 160× the file
-size. So either:
+```c
+if ((w & 0xFFF80000) == 0x0CE80000) w += 0xF3AC1A00;
+```
 
-- the pointers target *other* loaded structures (models, motion data) and not
-  just the event table itself, which the `st2evtbl` range starting at
-  `0x0C0B0200` strongly suggests; or
-- only a subset of the `0x0Cxxxxxx`-looking dwords are genuine pointers and the
-  rest are float or integer payload that happens to land in that range.
+Only the 512 KB window `0x0CE80000..0x0CEFFFFF` is relocated. Under that mask
+every in-range dword in every file resolves to a sane offset, 99.95 % of them
+are dword aligned (6619 of 6622), and the whole structure walks cleanly.
 
-Roughly 8% of all dwords fall in the Dreamcast RAM window, which is far too many
-to all be pointers in a table this dense. Distinguishing real pointers from
-coincidence requires the loader's fixup routine — hence Phase 6, and why `evt` is
-the highest-risk format.
+The `st2evtbl` value at `0x0C0B0200` that suggested cross-file pointers is
+outside the mask and is therefore ordinary payload, not a pointer.
+
+Kept here because the lesson generalises: **a heuristic filter that is wider
+than the program's own test will manufacture anomalies that do not exist.**
+See [`../formats/evt.md`](../formats/evt.md).
 
 ## 5. `pol/files.txt`
 
@@ -136,3 +134,31 @@ Most raw `pol/` offset tables start `800, 800, ...`. `etc_1.bin` starts
 `800, 800, 1000, 1000, ...` — a much smaller first span. Either it holds many
 small models, or the table has a different meaning here. Low priority; noted so
 the `container.py` parser is tested against it.
+
+## 7. `cam/op_st1.bin` corrupt offset-table entries
+
+Six of the 75 entries in `op_st1.bin`'s path offset table are corrupt:
+
+| Entry | Table offset | Alignment | Real descriptor |
+|---|---|---|---|
+| 51 | `0xA7EE` | 2 mod 4 | `0xA758` |
+| 53 | `0xAFEE` | 2 mod 4 | `0xAF38` |
+| 56 | `0xB9EE` | 2 mod 4 | `0xB988` |
+| 67 | `0xDBEE` | 2 mod 4 | `0xDB98` |
+| 69 | `0xDFEE` | 2 mod 4 | `0xDFB8` |
+| 71 | `0xE5EE` | 2 mod 4 | `0xE558` |
+
+Every one is misaligned and points into the middle of keyframe data. The
+descriptors they should name do exist: a structural walk of the curve pool finds
+exactly six descriptors the table never mentions, and both lists are ascending,
+so the pairing is unambiguous. `hod2lib.cam` repairs them and reports each
+substitution in `CamFile.repairs`.
+
+Nothing in `Hod2.exe` marks these six as special — their slot ids (304, 306,
+309, 320, 322, 324) are ordinary members of the file's contiguous run 253-327.
+So the game would bind them and read garbage if anything ever selected them.
+Whether anything does is unknown; no other cam file has the defect.
+
+The deltas between corrupt and real offsets (150, 182, 102, 86, 54, 150 bytes)
+are not constant, so this is not a uniform off-by-N — it looks like an exporter
+bug or a partially rewritten table.

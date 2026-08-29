@@ -71,6 +71,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path,
                     default=Path(__file__).resolve().parent.parent / "extract")
     ap.add_argument("--no-textures", action="store_true")
+    ap.add_argument("--uv-check", action="store_true",
+                    help="replace every texture with a UV checkerboard, so "
+                         "stretched or rotated faces are visually obvious")
     args = ap.parse_args()
 
     game = args.game_dir.expanduser().resolve()
@@ -99,10 +102,11 @@ def main() -> int:
                   f"{sum(m.vertex_count for m in models):,} verts, "
                   f"{sum(m.triangle_count for m in models):,} tris")
 
-        name = f"stage{args.stage}"
+        name = f"stage{args.stage}" + ("_uvcheck" if args.uv_check else "")
         out_dir = args.out / name
         info = gltf.export_level(name, parts, out_dir,
-                                 write_textures=not args.no_textures)
+                                 write_textures=not args.no_textures,
+                                 uv_check=args.uv_check)
         vert = sum(m.vertex_count for _, ms, _ in parts for m in ms)
         tri = sum(m.triangle_count for _, ms, _ in parts for m in ms)
         print(f"\n{name}: {len(parts)} segments, {vert:,} verts, {tri:,} tris, "
@@ -117,7 +121,8 @@ def main() -> int:
     models, bank = load_asset(game, name)
     out_dir = args.out / name
     info = gltf.export_level(name, [(name, models, bank)], out_dir,
-                             write_textures=not args.no_textures)
+                             write_textures=not args.no_textures,
+                             uv_check=args.uv_check)
     tri = sum(m.triangle_count for m in models)
     vert = sum(m.vertex_count for m in models)
     bank_note = f"  bank: {len(bank.offsets)} textures" if bank else ""

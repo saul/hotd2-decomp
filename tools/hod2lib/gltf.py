@@ -109,7 +109,35 @@ def _wrap_mode(clamp_bit: bool, flip_bit: bool) -> int:
     return REPEAT
 
 
-def export_level(name, parts, out_dir, collision=None, write_textures=True):
+def _checker(size=128, cells=8):
+    """UV diagnostic texture: a checkerboard with per-axis colour bias.
+
+    Red increases along u, blue along v, so a stretched or rotated face is
+    obvious at a glance -- squares become rectangles and the colour gradient
+    runs the wrong way.
+    """
+    px = bytearray(size * size * 4)
+    step = size // cells
+    for y in range(size):
+        for x in range(size):
+            dark = ((x // step) + (y // step)) & 1
+            base = 60 if dark else 200
+            o = (y * size + x) * 4
+            px[o] = min(255, base + (x * 55) // size)
+            px[o + 1] = base
+            px[o + 2] = min(255, base + (y * 55) // size)
+            px[o + 3] = 255
+    # solid border lines each cell, to make shear visible too
+    for y in range(size):
+        for x in range(size):
+            if x % step == 0 or y % step == 0:
+                o = (y * size + x) * 4
+                px[o] = px[o + 1] = px[o + 2] = 255
+    return px
+
+
+def export_level(name, parts, out_dir, collision=None, write_textures=True,
+                 uv_check=False):
     """Write one or more parts to <out_dir>/<name>.gltf plus .bin and textures/.
 
     ``parts`` is a list of (part_name, models, bank). A stage is split across
@@ -153,12 +181,15 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
         if got is None:
             return None
         w, h, rgba = got
+        if uv_check:
+            w = h = 128
+            rgba = _checker()
         if strip_alpha:
             rgba = bytearray(rgba)
             rgba[3::4] = b"\xff" * (len(rgba) // 4)
         sub = f"textures/{part}"
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
-        suffix = "_opaque" if strip_alpha else ""
+        suffix = "_uvcheck" if uv_check else ("_opaque" if strip_alpha else "")
         fn = f"{sub}/tex_{tex_id:03d}{suffix}.png"
         if write_textures:
             png.write_rgba(out_dir / fn, w, h, rgba)
@@ -213,7 +244,7 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
             #
             # Under decal the texture replaces the colour outright, so there
             # the factor must stay white.
-            if not mesh.modulates_base_colour:
+            if uv_check or not mesh.modulates_base_colour:
                 pbr["baseColorFactor"] = [1.0, 1.0, 1.0, pbr["baseColorFactor"][3]]
 
         mat: dict = {

@@ -130,7 +130,7 @@ def backdrop_json(tables, prog) -> dict:
     }
 
 
-def rigs_json(instances, blocked, campaths) -> dict:
+def rigs_json(instances, blocked, campaths, campaths_tables) -> dict:
     """The rig routes, gates and animation rules the client needs.
 
     The **geometry** goes into the glTF as ordinary nodes; this is the part
@@ -152,6 +152,21 @@ def rigs_json(instances, blocked, campaths) -> dict:
             routes.append({
                 "slot": r["slot"],
                 "bias": list(r["bias"]),
+                # The routines clamp with the EXE's per-path play length, NOT
+                # the curve's own extent -- and only at the top:
+                #     n = min(current_frame, CAM_PATH_LENGTH[slot])
+                # For op_ slot 334 the curve runs 40..370.2 while the table
+                # says 370, so clamping to the curve's *start* would hold the
+                # object still for the first 40 frames instead of letting the
+                # evaluator extrapolate back along the opening segment, which
+                # is what the game does.
+                "length": campaths_tables.cam_path_length(r["slot"]),
+                # What the routine does when the path runs out. The
+                # transcription records it per route; it is the difference
+                # between "the object vanishes" and "the object freezes and
+                # swaps model", which look very different on screen.
+                "note": next((rt.note for rt in inst["rig"].routes
+                              if rt.slot == r["slot"]), ""),
                 # Empty means ungated: the rig is present whatever the camera
                 # is doing. Otherwise it rides only while one of these cp_
                 # slots is the active camera path.
@@ -236,7 +251,8 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["bgm"] = bgm_json(stage.tables, stage.stage, stage.game_mode)
     script_json["sound"] = sound_json(stage.tables)
     script_json["backdrop"] = backdrop_json(stage.tables, prog)
-    script_json["rigs"] = rigs_json(rig_instances, rig_blocked, stage.campaths())
+    script_json["rigs"] = rigs_json(rig_instances, rig_blocked,
+                                    stage.campaths(), stage.tables)
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))

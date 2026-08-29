@@ -215,6 +215,10 @@ export interface RigRoute {
   file: string | null;
   index: number | null;
   duration: number | null;
+  /** `CAM_PATH_LENGTH[slot]` — the frame the routines clamp at. */
+  length: number | null;
+  /** What the routine does at the end of this route, from the transcription. */
+  note?: string;
 }
 
 export interface RigJson {

@@ -162,6 +162,19 @@ class Mesh:
         return (self.tsp >> 26) & 7
 
     @property
+    def texture_shading(self) -> int:
+        """TSP bits 6-7: 0 decal, 1 modulate, 2 decal-alpha, 3 modulate-alpha.
+
+        Under modulate the hardware multiplies the texture by the polygon's
+        base colour, which is how this game bakes its static lighting.
+        """
+        return (self.tsp >> 6) & 3
+
+    @property
+    def modulates_base_colour(self) -> bool:
+        return self.texture_shading in (1, 3)
+
+    @property
     def additive(self) -> bool:
         """src_alpha / one -- additive blending, used for glows and effects."""
         return self.translucent and self.src_blend == 4 and self.dst_blend == 1

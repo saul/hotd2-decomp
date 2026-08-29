@@ -695,3 +695,62 @@ stage1: 1520 materials -> 1125 OPAQUE, 395 BLEND, 822 images (576 opaque variant
 stage2: 1811 materials -> 1607 OPAQUE, 204 BLEND, 972 images (816 opaque variants)
 both CHECK-OK
 ```
+
+---
+
+## Session 8 — baked lighting was being discarded
+
+**Reported:** a face looked stretched, and separately looked black.
+
+**Stretch: not a bug.** Measured texel density on the reported face
+(`st2_03_model_002`, `st2_03_tex8_lambert`): u 6.94/unit, v 5.63/unit, ratio
+**1.23 — uniform**. The texture is 128x128 square and decodes cleanly. Whatever
+looked stretched there is authored tiling, not an export fault.
+
+Getting to that took a script fix: `blender_whatsthis.py` was reading
+`mesh.uv_layers` after re-entering Edit Mode, where the data is stale, so every
+report silently omitted its UV section. Now reads in Object Mode and also
+reports world-space face area and per-axis texel density — the metric that
+actually distinguishes a stretched face from a legitimately tiled one.
+
+### The real bug
+
+The per-mesh **base colour** at mesh header `+0x2C` is the game's baked static
+lighting, and the exporter was throwing it away.
+
+`tsp_instruction` bits 6-7 select texture shading: **5,971 of 6,085** stage
+meshes use **modulate**, i.e. `final = texture x base_colour`. And **32.2%** of
+meshes carry a base colour below 0.95 — 281 at 0.50, 279 at 0.20, 117 at 0.10,
+**80 at 0.00**.
+
+The exporter forced `baseColorFactor` to white whenever a texture was present,
+reasoning that the texture already supplied the colour and the base would
+double-modulate. That reasoning was wrong: modulate *is* a multiply, and glTF's
+`baseColorTexture x baseColorFactor` matches it exactly. The result was every
+surface rendering at full brightness with all baked shading flattened out.
+
+Now preserved, except under **decal** (3 meshes) where the texture genuinely
+replaces the colour and white is correct.
+
+```
+stage2 baseColorFactor: 1437 white, 318 mid, 56 below 0.2
+```
+
+### Ruled out along the way
+
+Chasing the stretch report eliminated a lot, all recorded so they are not
+re-checked:
+
+- non-square textures decode as well as square (coherence 0.294 vs 0.270/0.315)
+- zero env-mapped strips in stage geometry
+- clamp/flip axis mapping is correct (`clamp==1` has V fitting one tile 83% of
+  the time vs U at 32%; `clamp==2` inverts)
+- strip parsing is clean: 26,170 back-references, zero failures, zero abandoned
+- degenerate triangles are only 0.35% of stage1+2 geometry
+- per-triangle texel anisotropy: median 1.76, p90 5.68 (extremes are the
+  degenerates)
+
+One open item remains: **60 meshes have a clamped axis with a UV span beyond
+one tile**, which smears by construction. The game clamps them too, so this may
+be authentic rather than an export fault; resolving it needs the PowerVR clamp
+semantics from the binary rather than inference.

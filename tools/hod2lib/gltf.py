@@ -205,8 +205,16 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
         if tex_idx is not None:
             textures[tex_idx]["sampler"] = get_sampler(mesh)
             pbr["baseColorTexture"] = {"index": tex_idx}
-            # A texture supplies the colour; the base colour would double-modulate.
-            pbr["baseColorFactor"] = [1.0, 1.0, 1.0, pbr["baseColorFactor"][3]]
+            # glTF multiplies baseColorTexture by baseColorFactor, which is
+            # exactly what the hardware's "modulate" texture-shading mode does.
+            # The per-mesh base colour is this game's baked static lighting --
+            # 32% of stage meshes carry a value below 0.95, down to 0.0 -- so
+            # forcing it to white flattens all of that away.
+            #
+            # Under decal the texture replaces the colour outright, so there
+            # the factor must stay white.
+            if not mesh.modulates_base_colour:
+                pbr["baseColorFactor"] = [1.0, 1.0, 1.0, pbr["baseColorFactor"][3]]
 
         mat: dict = {
             "name": f"{part}_tex{mesh.texture_id}_{mesh.shading_mode_name}",
@@ -255,6 +263,8 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True):
                 "use_alpha": mesh.use_alpha,
                 "ignore_texture_alpha": mesh.ignore_texture_alpha,
                 "gouraud": mesh.gouraud,
+                "texture_shading": ["decal", "modulate",
+                                    "decal_alpha", "modulate_alpha"][mesh.texture_shading],
             }
         }
         materials.append(mat)

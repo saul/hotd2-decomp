@@ -83,6 +83,36 @@ Decoded alpha has **16 distinct values** with a soft gradient (255, 153, 221,
 anti-aliased cutout rather than a hard mask. Exported as `alphaMode: BLEND`
 with the alpha channel intact.
 
+## Baked static lighting lives in the base colour
+
+The per-mesh **base colour** at mesh header `+0x2C` is not decoration — it is
+this game's baked static lighting.
+
+**5,971 of 6,085** stage meshes use texture shading mode **modulate**
+(`tsp_instruction` bits 6-7), where the hardware computes
+`final = texture x base_colour`. Across stages 1 and 2:
+
+| base colour (R=G=B) | meshes |
+|---|---|
+| 1.00 | 4,114 |
+| 0.50 | 281 |
+| 0.20 | 279 |
+| 0.80 | 147 |
+| 0.10 | 117 |
+| 0.00 | 80 |
+| … | … |
+
+**32.2%** of meshes carry a value below 0.95, down to 0.00. Forcing the factor
+to white — on the reasoning that "the texture already supplies the colour" —
+flattens every bit of that away and makes dim corridors render as brightly as
+lit rooms.
+
+glTF multiplies `baseColorTexture` by `baseColorFactor`, which is exactly what
+modulate does, so the base colour maps across directly.
+
+Under **decal** (3 meshes) the texture replaces the colour outright, so there
+the factor must stay white.
+
 ## glTF mapping
 
 | PowerVR2 | glTF |

@@ -40,6 +40,33 @@ The other three differing pairs, for completeness:
 | `komono_title` | 1773 | 1587 |
 | `zabat` | 4148 | 4161 |
 
+## 1b. Resolved: the opaque `pol/` blobs
+
+With the codec solved, exactly **6** `pol/` files fail to parse as either a
+container or a compressed stream:
+
+| File | Size | `dword0` |
+|---|---|---|
+| `bg_adv19.bin` | 987 | `0x00000000` |
+| `komono_0.bin` | 987 | `0xC5947546` |
+| `tv2.bin` | 987 | `0x37496368` |
+| `pol_boss2_hane_hod1.bin` | 148295 | `0xBE112208` |
+| `pol_komono_suimonie.bin` | 18479 | `0xEE9B3EB7` |
+| `pol_znonoo.bin` | 71053 | `0x4EF40115` |
+
+The last three are exactly the anomalous `pol_` twins identified in Phase 0, now
+**confirmed corrupt**: their unprefixed counterparts decompress cleanly while
+these do not.
+
+The three 987-byte files are placeholders. A fourth,
+`tex/scr_tod_itm_itamidome2.bin`, is also 987 bytes. All four have distinct
+hashes, so they are not copies of one dummy — but all four are referenced by
+name in `Hod2.exe`, so the game does try to load them. `bg_adv19.bin` has
+`dword0 == 0`, which under the codec means "empty".
+
+Best guess: cut content whose asset slots were filled with junk of a fixed size
+rather than removed. Low priority.
+
 ## 2. Texture banks that sum exactly
 
 Of 85 raw `pol`/`tex` pairs, **7** have referenced-texture sizes summing exactly

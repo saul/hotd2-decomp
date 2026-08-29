@@ -1,132 +1,133 @@
 # Compression codec
 
-**Status: UNSOLVED. This is the critical path.** 788 of 1148 `pol/`+`tex/` files are
-compressed with it.
+**Status: SOLVED.** Located at `0x0040ACD0` in `Hod2.exe`, reimplemented in
+[`tools/hod2lib/lz.py`](../../tools/hod2lib/lz.py), and verified against every
+compressed asset in the game.
 
-## What is known
+## Verification
+
+```
+793 compressed files (458 pol/ + 335 tex/)
+  0 failures
+  60,571,242 bytes in -> 131,562,208 bytes out   (2.17x)
+18,027 models parsed from the decompressed containers
+```
+
+Every file produces **exactly** the byte count its header declares. Reproduce
+with:
+
+```sh
+python3 tools/verify_lz.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2"
+```
+
+## Container form
 
 ```
 +0x000   u32   uncompressed size
 +0x004   ...   bitstream
 ```
 
-`dword0` is greater than the file size in every case, and the decompressed result
-is expected to be one of the raw layouts in [`container.md`](container.md).
+Callers read the `u32` themselves and pass `src = file + 4` to the decompressor.
+A size of 0 means an empty file (23 `tex/` entries are exactly this).
 
-Affected files:
+## Algorithm
 
-| Directory | Compressed | Total |
-|---|---|---|
-| `pol/` | 463 | 656 |
-| `tex/` | 325 | 492 |
+An LZSS variant with an 8192-byte window.
 
-## Sample streams
+Flag bits are read **LSB-first** from the *same* byte stream that carries
+literal and match payload bytes. A payload byte is fetched from the current
+read position even if the flag byte is only partly consumed; a fresh flag byte
+is loaded only once its 8-bit budget is exhausted. Flags and data are therefore
+interleaved, not separated into blocks.
 
 ```
-pol/zabat.bin       C0 17 00 00 | 03 20 00 FF DD FC C0 17 00 F8 FF 14 01 FA E5 FF
-pol/bg_adv10.bin    C0 03 00 00 | 03 20 00 FF DD FC C0 03 00 F8 FF 14 01 FA E5 FF
-pol/bg_adv00.bin    20 3C 02 00 | 03 20 00 FF DD FC C0 03 00 F8 FF 14
-pol/komono_title    80 0E 00 00 | 03 40 00 FF ED FC 00 02 E4 FF 40 04
-pol/komono_suimonie 00 8B 00 00 | 03 60 00 FF 77 FC 0E E4 FF A0 2D 77
-pol/boss1z.bin      00 CE 02 00 | CF 20 01 00 00 FC ED 0B E5 FF 15 E4 FF 40 17 76
-pol/znonoo.bin      40 CC 01 00 | CF 80 01 00 00 FC DD 0E E4 FF E0 12
-tex/boss1z.bin      00 60 01 00 | 5D 00 F8 FF 14 20 08 E4 FF 65 D7 FF
+loop:
+    while flag_bit() == 1:
+        emit_literal(read_u8())
+
+    # flag bit was 0, so a match follows
+    if flag_bit() == 1:
+        # long form
+        w = read_u16()
+        if w == 0:
+            return                          # end of stream
+        offset = (w >> 3) - 8192            # 13 bits, always negative
+        n      = w & 7
+        length = n + 2      if n != 0
+        length = read_u8() + 1   if n == 0
+    else:
+        # short form
+        hi = flag_bit()
+        lo = flag_bit()                     # 2-bit length, MSB first
+        offset = read_u8() - 256            # 8 bits, always negative
+        length = ((hi << 1) | lo) + 2
+
+    src = out_pos + offset
+    for i in range(length):
+        emit(out[src + i])                  # byte at a time
 ```
 
-### Observations
+### Notes
 
-- **`bg_adv00` and `bg_adv10` share a near-identical opening stream** despite
-  uncompressed sizes of `0x23C20` and `0x3C0` — a factor of 96 apart. Their first
-  twelve stream bytes are identical. This is a strong crib: whatever the first
-  several output bytes are, they are the same for both.
-- The byte pair `FC` appears at stream offset 5 in several files, and `E4 FF` /
-  `E5 FF` recur constantly throughout. If the format interleaves flag bytes with
-  data, these are candidates for flag positions.
-- Files starting `03 20 00 FF DD FC` vs `CF 20 01 00 00 FC` vs `03 40 00 FF ED FC`
-  suggest the first byte is not a fixed magic.
-- Floating-point exponent bytes (`3F`, `BF`, `C0`, `42`, `43`) appear scattered
-  through the streams, consistent with a byte-oriented LZ over data that is
-  largely `f32` vertex arrays.
+- **Offsets are always negative**, relative to the current output position.
+  The `| 0xFFFFE000` / `| 0xFFFFFF00` sign-extension in the original makes this
+  explicit.
+- **Matches are copied one byte at a time**, so overlapping copies are
+  intentional: an offset of `-1` is a legal run fill, which is how the codec
+  encodes runs of a repeated byte.
+- **Length ranges.** Short form 2–5. Long form 3–9 when `n != 0`, or 1–256 via
+  the extra length byte when `n == 0`.
+- **Termination** is a long-form match whose `u16` is zero. There is no length
+  field in the container beyond the leading `u32`, so the end marker is
+  load-bearing.
+- The routine returns the number of bytes written, which callers can compare
+  against the header.
 
-### Corroboration from `pol/files.txt`
+## Why it took a while to find
 
-A stray build listing shipped in `pol/` records the same 327 files a year before
-release. 225 of them differ in size from the shipped versions by small amounts in
-**both** directions, while 102 are size-identical.
+The initial static sweep looked for a 4 KB sliding window (`& 0xFFF`) based on
+the assumption of a stock LZSS. The window here is **8 KB** and the mask is
+never materialised — the offset is produced by sign-extending a 13-bit field, so
+no window-size constant appears in the code at all. None of the fourteen
+`0xFFF` candidate sites was the decompressor.
 
-That pattern is the signature of recompression, not of content change: a codec
-whose match-search effort or window parameters were tweaked between builds
-produces identical output on simple inputs and small bidirectional wobble on
-complex ones. Genuine asset edits would give large, mostly one-directional
-differences.
+What actually found it was following the asset loader. `LoadCommonPolTexBanks`
+at `0x00418200` reads a file, takes `*buffer` as the size, and calls
+`LzDecompress(buffer + 1, dst)` — twice, once for `pol/` and once for `tex/`.
+The `+ 1` on a `u32*` is the header skip, and that shape identified the callee
+immediately.
 
-It is independent evidence that these files are LZ-compressed. See
+**Lesson recorded:** trace the data path from the loader rather than pattern
+matching on constants.
+
+## Corroboration
+
+The `pol/files.txt` build listing predicted this. 225 of its 327 entries differ
+in size from the shipped files by small amounts in both directions while 102 are
+identical — the signature of recompression rather than content change. See
 [`../re/provenance.md`](../re/provenance.md).
 
-## Attack plan
+## Classification caveat
 
-### 2a. Static RE — primary
+Do **not** classify files by `dword0 > filesize`. Raw texture banks routinely
+begin with pixel data whose first dword exceeds the file size —
+`tex/etc_boy_kao.bin` starts `0xA32992E8` and is entirely uncompressed.
 
-Follow the buffer from each loader's `ReadFile` to its consumer. The
-decompressor should be a small leaf function taking `(src, dst)` with a
-shift-register inner loop — distinctive in the Ghidra decompiler.
+Classify by trial instead, as [`container.py`](../../tools/hod2lib/container.py)
+does: check for a valid container first, then attempt decompression, and only
+fall back to "opaque blob" if both fail. Using the naive heuristic produced 24
+false positives.
 
-Candidate sites masking with `0xFFF` (a 4 KB sliding window) are listed in
-[`../re/addresses.md`](../re/addresses.md). The cluster at
-`0x41D15D` – `0x41D25D` is the strongest lead: four masks in one function, close
-to the `tex` loaders at `0x41C8DA` and `0x41CDC2`.
+## Reference implementation
 
-The constant `0xFEE` does **not** appear anywhere in the binary, so this is not
-stock Okumura LZSS with its classic ring-buffer initialisation.
+- [`tools/hod2lib/lz.py`](../../tools/hod2lib/lz.py) — Python
+- `src/lz.c` — C, still to be written (Phase 7)
 
-### 2b. Unicorn function harness
+## Remaining questions
 
-Rather than running the game, lift the decompressor's bytes out of `.text` and
-execute that single function in isolation under a Unicorn x86 emulator: map a
-scratch stack, point the argument registers at input and output buffers, run to
-`ret`, read the output.
-
-This gives bit-for-bit correct ground truth on real inputs with no Windows, no
-Wine and no game execution, and is fully deterministic. It doubles as the
-differential-test oracle for the clean-room reimplementation.
-
-Lives in `tools/emu/`.
-
-### 2c. Cryptanalysis — validation
-
-The constraints are unusually tight, so a wrong guess fails immediately:
-
-- Output length must equal `dword0` **exactly**.
-- Output must begin with either a `0x800` offset table
-  (`00 08 00 00 | 00 08 00 00 | ...`) or an NL1 header
-  (`01 00 00 00 | 01 00 00 00 | <centroid f32 × 3> <radius f32>`).
-- Every NL1 mesh chain must terminate cleanly on a zero dword.
-- Centroid and radius floats must be finite and physically plausible.
-- The `bg_adv00` / `bg_adv10` pair must produce a common prefix.
-
-Worth testing standard Sega-era codecs before assuming the format is bespoke:
-LZSS variants with differing window and match-length encodings, PRS, and LZ11.
-
-## Acceptance criteria
-
-1. All 788 compressed files decompress to exactly `dword0` bytes.
-2. Every decompressed `pol/` file parses as a valid container and its models
-   parse as valid NL1.
-3. Every decompressed `tex/` file's size is consistent with the texture
-   descriptors harvested from its paired `pol/` file.
-4. `tools/hod2lib/lz.py` and `src/lz.c` produce identical output on all inputs.
-
-## Deliverables
-
-- `tools/hod2lib/lz.py`
-- `src/lz.c`
-- `tools/emu/` harness
-- A regression test over all 788 files
-
-## Open questions
-
-1. Is `dword0` the only header field, or is part of what looks like stream data
-   actually a second header word?
-2. How does the loader decide a file is compressed at all?
-3. Are the three anomalous `pol_*` files a second encoding, or corruption? See
-   [`../re/anomalies.md`](../re/anomalies.md).
+1. How does the *game* decide a file is compressed? `LoadCommonPolTexBanks`
+   decompresses unconditionally, yet 192 `pol/` files are stored raw. Either a
+   different loader handles those, or a flag lives in a `.data` table. Worth
+   resolving, though it no longer blocks anything.
+2. The 6 opaque `pol/` blobs — see [`../re/anomalies.md`](../re/anomalies.md).
+   Four are 987-byte placeholders; three are the known-corrupt `pol_*` twins.

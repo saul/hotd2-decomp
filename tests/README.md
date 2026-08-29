@@ -12,7 +12,7 @@ asset content.
 | Phase | Test |
 |---|---|
 | 0 | `baseline.py` reproduces `inventory.csv` byte-for-byte from a known install |
-| 2 | all 788 compressed files decompress to exactly `dword0` bytes |
+| 2 | all 793 compressed files decompress to exactly `dword0` bytes ✅ passing |
 | 2 | `hod2lib.lz` and `src/lz.c` agree on every input |
 | 2 | every decompressed `pol/` file parses as a valid container + NL1 |
 | 3 | `hod2lib.nl1` matches the Blender addon on vertex/triangle counts, centroids and radii |
@@ -24,8 +24,16 @@ asset content.
 
 Established in Phase 0 and already true of the shipped game:
 
-- `pol/`: 192 `raw_table`, 1 `raw_blob`, 463 `compressed`
-- `tex/`: 29 `raw_table`, 68 `raw_blob`, 325 `compressed`, 47 `bmp`, 23 `empty`
+Superseded by the trial-based classifier once the codec was solved. Current
+truth, from `tools/verify_lz.py`:
+
+- `pol/`: 458 `compressed`, 192 `raw`, 6 `blob`
+- `tex/`: 335 `compressed`, 87 `blob`, 47 `bmp`, 23 `empty`
+- 18,027 models parse out of the `pol/` containers
+- compression ratio 2.17x (60,571,242 -> 131,562,208 bytes)
+
+The Phase 0 figures below used a `dword0 == 0x800` / `dword0 > filesize`
+heuristic that is now known to be unsafe, and are kept only for comparison:
 - 326 `pol_`-prefixed files; 320 byte-identical to their twin, 6 differing
 - 85 raw `pol`/`tex` pairs analysed; **7 sum exactly**; **zero negative deltas**
 

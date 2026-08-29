@@ -37,19 +37,23 @@ See [`re/session-log.md`](re/session-log.md) for state and next actions.
 - [ ] Identify the import at `0x4C40A4` called before every `CreateFileA`
 - [ ] Map the `.data` tables adjacent to the filename tables
 
-## Phase 2 — Compression codec ⚠️ critical path
+## Phase 2 — Compression codec ✅ SOLVED
 
-- [ ] Trace each loader's `ReadFile` buffer to its consumer
-- [ ] Triage the candidate sliding-window sites
-- [ ] Build the Unicorn function harness in `tools/emu/`
-- [ ] Produce ground-truth plaintext for a sample of compressed files
-- [ ] Clean-room `tools/hod2lib/lz.py`
-- [ ] `src/lz.c` reference implementation
-- [ ] All 788 compressed files decompress to exactly `dword0` bytes and re-parse
+Found at `0x0040ACD0` by tracing the data path from the asset loader, not by
+constant matching. LZSS, 8 KB window, LSB-first interleaved flag bits.
+Spec: [`formats/lz.md`](formats/lz.md).
 
-## Phase 3 — `hod2lib` core
+- [x] Trace each loader's `ReadFile` buffer to its consumer ← this is what worked
+- [x] ~~Triage the candidate sliding-window sites~~ — dead end, all 14 were wrong
+- [x] ~~Unicorn function harness~~ — **not needed**, static RE was sufficient
+- [x] Clean-room `tools/hod2lib/lz.py`
+- [x] **793 compressed files decompress to exactly `dword0` bytes, 0 failures**
+- [x] 18,027 models parse out of the decompressed containers
+- [ ] `src/lz.c` reference implementation (deferred to Phase 7)
 
-- [ ] `container.py` — offset table + transparent decompression
+## Phase 3 — `hod2lib` core 🔶 in progress
+
+- [x] `container.py` — offset table + transparent decompression
 - [ ] `nl1.py` — independent NL1 parser
 - [ ] Resolve the packed s8 normal byte-order ambiguity empirically
 - [ ] Cross-validation harness against the Blender addon
@@ -99,7 +103,7 @@ See [`re/session-log.md`](re/session-log.md) for state and next actions.
 Tracked as they arise; each should end up answered in `docs/formats/` or
 `docs/re/`.
 
-1. What is the compression codec? (Phase 2)
+1. ~~What is the compression codec?~~ **SOLVED** — LZSS at `0x0040ACD0`
 2. How are unreferenced texture-bank slots sized? (Phase 4)
 3. Packed s8 normal byte order — reader convention or writer convention?
    (Phase 3)
@@ -107,3 +111,6 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 5. Do `mot/` blocks drive rigid transforms or vertex morphs? (Phase 6)
 6. What is the `evt/` pointer-relocation scheme? (Phase 6)
 7. What distinguishes `cam/cp_*` from `cam/op_*`? (Phase 6)
+8. How does the game decide a file is compressed? `LoadCommonPolTexBanks`
+   decompresses unconditionally, yet 192 `pol/` files are raw. (Phase 3)
+9. What are the four 987-byte placeholder files? (low priority)

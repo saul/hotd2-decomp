@@ -30,9 +30,9 @@ align the result up to 32, then `ReadFile`.
 | `0x48A326` | `coli\%s` | |
 | `0x4A7400` | — | shared allocator, called with `size + 0x20` |
 
-The `pol\%s` template is **not** referenced directly from code — it is reached
-through the table at `0x57A008`. Finding that table's consumer is the first
-Phase 1 task, since it is the entry point for the largest asset set.
+The `pol\%s` template is reached through the pointer table at `0x57A008`. Its
+consumers are `0x00418205` (inside `LoadCommonPolTexBanks`), `0x0041887D` and
+`0x00418C80` — the last two are not yet inside recognised functions.
 
 ## String constants
 
@@ -74,7 +74,7 @@ in order to size unreferenced texture slots.
 | `0x4C409C` | `ReadFile` |
 | `0x4C4098` | `SetFilePointer` |
 | `0x4C40A0` | `CloseHandle` |
-| `0x4C40A4` | called on the path buffer immediately before `CreateFileA` — resolve this early |
+| `0x4C40A4` | `OutputDebugStringA` — resolved; debug logging, not path processing |
 | `0x4C4208` | `sprintf` (or equivalent) |
 | `0x4C4000` | `DirectDrawCreateEx` |
 | `0x4C400C` | `DirectInputCreateEx` |
@@ -97,7 +97,27 @@ Notably absent: `IID_IDirect3DDevice7` and `IID_IDirectDrawSurface7`. The device
 is created via `IDirect3D7::CreateDevice` with one of the three device GUIDs
 above rather than by `QueryInterface`, which is the normal `d3du` pattern.
 
-## Decompressor candidates ⚠️ Phase 2
+## Identified functions
+
+| Address | Name | Notes |
+|---|---|---|
+| `0x0040ACD0` | `LzDecompress` | **The compression codec.** `int LzDecompress(u8 *src, u8 *dst)`, returns bytes written. LZSS, 8 KB window, LSB-first interleaved flag bits. Spec in [`../formats/lz.md`](../formats/lz.md) |
+| `0x00418200` | `LoadCommonPolTexBanks` | Loads `pol/common.bin` + `tex/common.bin`. The clearest example of the asset load path; every other loader is a variation. Calls `LzDecompress` twice |
+| `0x004C40A4` | `OutputDebugStringA` | Import. Called on the path buffer before every `CreateFileA` — it is debug logging, not path processing |
+
+## Superseded: decompressor candidates
+
+Kept as a record of what did **not** work.
+
+The sweep below looked for a 4 KB sliding window (`& 0xFFF`). **None of these
+was the decompressor.** The real window is 8 KB and its size never appears as a
+constant: the offset is produced by sign-extending a 13-bit field, so there is
+no mask to find.
+
+What worked instead was following the data path from the loader — see
+[`../formats/lz.md`](../formats/lz.md).
+
+### Original candidate list
 
 Sites masking with `0xFFF`, consistent with a 4 KB sliding window. Unverified —
 some are certainly unrelated.

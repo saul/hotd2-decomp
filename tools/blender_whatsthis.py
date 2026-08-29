@@ -47,6 +47,28 @@ def uv_bounds(poly, uv_layer):
     return min(us), max(us), min(vs), max(vs)
 
 
+def uv_area(poly, uv_layer):
+    """Shoelace area of the face in UV space."""
+    pts = [tuple(uv_layer[li].uv) for li in poly.loop_indices]
+    a = 0.0
+    for i in range(len(pts)):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % len(pts)]
+        a += x1 * y2 - x2 * y1
+    return abs(a) * 0.5
+
+
+def edge_lengths(obj, poly):
+    """World-space edge lengths of the face."""
+    me = obj.data
+    mw = obj.matrix_world
+    vs = [mw @ me.vertices[vi].co for vi in poly.vertices]
+    out = []
+    for i in range(len(vs)):
+        out.append((vs[(i + 1) % len(vs)] - vs[i]).length)
+    return out
+
+
 def report(obj, polys):
     me = obj.data
     uv = me.uv_layers.active.data if me.uv_layers.active else None
@@ -81,18 +103,36 @@ def report(obj, polys):
             su, sv = u1 - u0, v1 - v0
             out(f"face UV u    : [{u0:.3f}, {u1:.3f}]  span {su:.3f}")
             out(f"face UV v    : [{v0:.3f}, {v1:.3f}]  span {sv:.3f}")
-            if img and sv > 1e-6 and img.size[1]:
-                uv_a = su / sv
-                tex_a = img.size[0] / img.size[1]
-                ratio = uv_a / tex_a if tex_a else 0
-                if 0.7 < ratio < 1.4:
-                    verdict = "looks correct"
-                elif ratio < 1:
-                    verdict = f"STRETCHED {1 / ratio:.1f}x"
-                else:
-                    verdict = f"STRETCHED {ratio:.1f}x"
+            area3 = poly.area * (obj.matrix_world.to_scale().length / 3 ** 0.5) ** 2
+            edges = edge_lengths(obj, poly)
+            out(f"face 3D area : {area3:.2f}   edges "
+                f"{', '.join(f'{e:.1f}' for e in edges)}")
+
+            if img and img.size[0] and img.size[1]:
+                # Texel density per axis: how many texels the face spans in
+                # each direction, divided by its world size. If the two differ
+                # a lot, the texture is stretched on this face.
+                tw, th = img.size
+                lu = su * tw
+                lv = sv * th
+                w3 = max(edges) if edges else 0.0
+                h3 = min(edges) if edges else 0.0
+                out(f"texels u x v : {lu:.1f} x {lv:.1f}")
+                if w3 > 1e-6 and h3 > 1e-6:
+                    du = lu / w3
+                    dv = lv / h3
+                    if min(du, dv) > 1e-9:
+                        r = max(du, dv) / min(du, dv)
+                        axis = "u" if du > dv else "v"
+                        verdict = ("looks uniform" if r < 1.5
+                                   else f"STRETCHED ~{r:.1f}x (denser in {axis})")
+                        out(f"texel density: u {du:.2f}/unit  v {dv:.2f}/unit"
+                            f"   ratio {r:.2f}  -> {verdict}")
+
+                uv_a = su / sv if sv > 1e-6 else 0
+                tex_a = tw / th
                 out(f"UV aspect    : {uv_a:.3f}   texel aspect {tex_a:.3f}"
-                    f"   ratio {ratio:.2f}  -> {verdict}")
+                    f"   (tiling, not necessarily a fault)")
 
         if "_tex" in name:
             out("")
@@ -136,15 +176,17 @@ if obj is None or obj.type != "MESH":
 else:
     me = obj.data
     if obj.mode == "EDIT":
+        # Stay in Object Mode while reading: mesh.uv_layers/polygons are stale
+        # in Edit Mode, which silently produced reports with no UV data.
         bpy.ops.object.mode_set(mode="OBJECT")
         sel = [p for p in me.polygons if p.select]
+        if sel:
+            out(f"{len(sel)} face(s) selected")
+            report(obj, sel)
         bpy.ops.object.mode_set(mode="EDIT")
         if not sel:
             out("no faces selected -- in Edit Mode press 3 for face mode, "
                 "Alt+A to deselect, then click a face")
-        else:
-            out(f"{len(sel)} face(s) selected")
-            report(obj, sel)
     else:
         out(f"object mode: reporting all materials on {obj.name} "
             f"({len(me.polygons)} faces)")

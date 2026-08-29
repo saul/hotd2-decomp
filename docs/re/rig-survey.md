@@ -106,15 +106,10 @@ So `obj+0x1390` is a **per-class parameter block distinct from the evt
 descriptor**, and `[open]` where it lives. Without it neither rig has a route,
 so neither is placed.
 
-### Why `obj_484ff0_props` is not placed (detail)
-
-Its prop is chosen by `*(int16*)(*(int*)(obj+0x1390) + 6)`, and `obj+0x1390`
-does **not** point at the evt spawn descriptor: reading `+6` there (the high
-half of `init_flags`) gives `0` for all 142 class-`0x25` descriptors across all
-six stages, and variant `0` draws nothing. Gating by stage bounding box was
-tried and rejected — levels span thousands of units, so the box accepts the
-props in every stage. Six wrong placements are worse than none. `[open]`: what
-record `obj+0x1390` actually points at.
+Gating `obj_484ff0_props` by stage bounding box instead was tried and
+rejected: levels span thousands of units, so the box accepts the props in
+**every** stage. Six wrong placements are worse than none, so the exporter
+reports the reason instead.
 
 ## The 22 positioners
 

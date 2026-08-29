@@ -255,12 +255,16 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] **Object export** — every `op_` path is now an animated node
       (translation + rotation), not just a rail; `<stage>_objects.json` carries
       the spawns the event script places and the routes together
-- [x] **Nine rigs transcribed**, of the 31 `CamEvalObjectPath6` callers.
+- [x] **Twelve rigs transcribed**, of the 31 `CamEvalObjectPath6` callers.
       `hod2lib/rigs.py` holds them; [`re/rig-survey.md`](re/rig-survey.md)
       surveys all 31 and maps the other 22 to the routines that draw them.
-      21 instances are placed across five stages. Two assemble into
-      recognisable objects on sight — a convertible and a speedboat — which is
-      the check that the transforms compose correctly.
+      34 instances are placed across all six stages. Three assemble into
+      recognisable vehicles on sight — a convertible, a speedboat and the
+      stage-2 car — which is the check that the transforms compose correctly.
+- [x] **The stage-2 opening car** — `FUN_00452320`, `[proved]` a car by its
+      tyre-skid sound record rather than by shape. Found only by following a
+      *positioner* to its `obj[0]`: the 9-vs-22 split by "does it call
+      `AssetDrawSlot`" is a filter for finding rigs, not a definition of one.
 - [x] **A rig is gated by camera path, not just bound to a route.** Routines
       dispatch on `g_active_cam_path` and pick a different `op_` slot per shot.
       The gate ids are `cp_` slots in the same 418-slot space as the routes, and

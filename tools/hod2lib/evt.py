@@ -250,6 +250,10 @@ class Block:
     offset: int
     steps: list[int] = field(default_factory=list)      # file offsets
     programs: list[list[Instr]] = field(default_factory=list)
+    #: (slot, dreamcast pointer) for step entries that resolve outside this
+    #: file -- in practice into the shared comevtbl buffer, which sits
+    #: immediately below the scene table.
+    external_steps: list[tuple[int, int]] = field(default_factory=list)
 
 
 class EvtFile:
@@ -318,6 +322,17 @@ class EvtFile:
         return self
 
     def _parse_block(self, blk: Block) -> None:
+        """Read a block's step table.
+
+        A step entry that resolves outside this file is an **external**
+        reference, not a terminator: the shared ``comevtbl`` buffer sits
+        immediately below the scene table, so a scene can hand control to a
+        stream living there. ``st1evtbl.bin`` block 0 does exactly that, and
+        treating it as the end of the list silently drops the four steps that
+        follow it.
+
+        Only TERM, or a word that is not a pointer at all, ends the table.
+        """
         if blk.offset < 0:
             return
         j = 0
@@ -326,8 +341,12 @@ class EvtFile:
             if word == TERM:
                 break
             off = self.to_offset(word)
+            if off is None:
+                break                      # not a pointer: end of table
             if not self.readable(off):
-                break
+                blk.external_steps.append((j, word))
+                j += 1
+                continue
             blk.steps.append(off)
             try:
                 blk.programs.append(list(self.disasm(off)))

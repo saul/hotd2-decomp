@@ -183,7 +183,7 @@ Header is 0x24 bytes, identical for opcodes `0x09`, `0x0B`, `0x0C`, `0x0D`
 (`FUN_004088A0`, `FUN_00408A20`, `FUN_00408BC0`):
 
 ```
-+0x00  u32  class index   selects the object size from DAT_009A2280
++0x00  u32  class index   selects the handler from the class table (below)
 +0x04  u32  init flags    OR'd with 1 into object +0x34   (always 0 in shipped data)
 +0x08  f32  position x    -> object +0x40
 +0x0C  f32  position y    -> object +0x44
@@ -200,6 +200,53 @@ The tail is class-specific: `0x0B`/`0x0C` store its address in the object
 (+0x1390 / +0x130C) and leave interpretation to the class, while `0x09` reads
 two bytes from it inline. `0x09` records are laid out contiguously at a **0x28**
 stride in every shipped file, i.e. a two-byte tail.
+
+Tails are **not** self-terminating and their length is **not** a function of the
+class: the gap between consecutive descriptors of the same class varies (class
+48, for instance, appears with 40, 44, 48, 52, 56 and 60 byte spacing). Tails
+also contain further relocated pointers, so there is a second layer below them.
+Sizing a tail requires the consuming class handler.
+
+## Class table
+
+Spawn objects are allocated by `FUN_004A6FA0(handler, size)`, which stores
+*handler* at object +0x00 — a vtable-less virtual. The size is a literal at the
+call site (`0x13F4` for `0x09`/`0x0B`, `0x1314` for `0x0C`); the **handler**
+comes from a 112-entry table at `0x009A2280`, indexed by the descriptor's class
+field.
+
+`FUN_0040AC90` builds it: fill all 112 slots with the empty stub
+`FUN_0041EBB0`, then apply a `{class_id, handler}` pair list terminated by a
+negative id. The shipped list lives at `0x00593358` — immediately after the
+opcode dispatch table — and has 56 entries:
+
+| Class | Handler | Class | Handler | Class | Handler |
+|---|---|---|---|---|---|
+| 16 | `0x0048A3E0` | 38 | `0x0048E290` | 70 | `0x0042D9C0` |
+| 17 | `0x0043A080` | 39 | `0x004329D0` | 71 | `0x0043BE60` |
+| 18 | `0x0043F9D0` | 40 | `0x00432610` | 72 | `0x0042E0F0` |
+| 19 | `0x0043FE10` | 41 | `0x00432C80` | 80 | `0x004997E0` |
+| 20 | `0x00475E90` | 42 | `0x00432D40` | 81 | `0x00438540` |
+| 21 | `0x00441750` | 43 | `0x00438060` | 82 | `0x0043F4C0` |
+| 22 | `0x00442290` | 44 | `0x00432D50` | 83 | `0x00431250` |
+| 23 | `0x004422D0` | 45 | `0x00426A70` | 84 | `0x00431780` |
+| 24 | `0x0045CD60` | 48 | `0x00452DA0` | 85 | `0x00431C90` |
+| 25 | `0x004917E0` | 49 | `0x00449620` | 86 | `0x00431BF0` |
+| 26 | `0x00498FF0` | 50 | `0x0047F5F0` | 96 | `0x004342E0` |
+| 27 | `0x00499420` | 51 | `0x00432FF0` | 97 | `0x00434EF0` |
+| 32 | `0x00448ED0` | 64 | `0x0043BD30` | 98 | `0x00435930` |
+| 33 | `0x00451720` | 65 | `0x00461CD0` | 99 | `0x00435F20` |
+| 34 | `0x0049B0D0` | 66 | `0x0042F9B0` | 100 | `0x00435FB0` |
+| 35 | `0x0048FD90` | 67 | `0x00445DB0` | 101 | `0x00436140` |
+| 36 | `0x00482CE0` | 68 | `0x00472B10` | 102 | `0x00435A10` |
+| 37 | `0x004840D0` | 69 | `0x0041FC00` | 108 | `0x00425010` |
+| | | | | 109 | `0x00496BA0` |
+| | | | | 110 | `0x00488820` |
+
+**This is the route to the remaining 20 % of the bytes.** Each handler reads its
+descriptor tail through object +0x1390 (`0x0B`) or +0x130C (`0x0C`), so the tail
+layout is recoverable one class at a time. Ten classes account for most of the
+data: 65 (347 descriptors), 48 (283), 37 (169), 68 (132).
 
 **Confirmed:**
 
@@ -222,10 +269,30 @@ them as rotations without checking.
 
 ## Coverage
 
-78.8 % of `evt/` bytes are reached by walking root → blocks → steps → bytecode
-→ `0x09`-family descriptors. The remainder is operand data behind opcodes whose
-targets are not yet followed — chiefly the behaviour tails of `0x0B`/`0x0C`
-descriptors and the float constants that the tween opcodes point at.
+79.4 % of `evt/` bytes are reached by walking root → blocks → steps → bytecode →
+spawn descriptor headers. The uncovered 20.6 % (60,296 bytes) attributes as:
+
+| Source | Bytes | Share of residue |
+|---|---|---|
+| `0x0B` `spawn_obj` behaviour tails | 43,178 | 71.6 % |
+| `0x0C` `spawn_obj_c` behaviour tails | 11,464 | 19.0 % |
+| `0x20`/`0x24` `view_set` float constants | 1,888 | 3.1 % |
+| `0x23` `view_tween_time` float constants | 916 | 1.5 % |
+| `0x0D`, `0x03`, `0x04`, `0x07`, `0x09`, `0x0A` descriptors | 1,522 | 2.5 % |
+| `0x1A` `set_g_8e58` operands | 532 | 0.9 % |
+| no pointer within 1 KB — unexplained | 796 | 1.3 % |
+
+So **90.6 % of the residue is spawn behaviour tails**, and the class table above
+is the way in. The float-constant pools are trivially markable; the 796
+unexplained bytes are the only part with no identified owner.
+
+### A trap worth knowing
+
+A step-table entry that resolves *outside* the file is an external reference,
+not a terminator. `st1evtbl.bin` block 0 hands control to a stream in the shared
+`comevtbl` buffer, and stopping at it silently drops the four steps that follow
+— 159 instructions and 9 spawn descriptors, about 7 % of that file. Only one
+block in the corpus does this, which is exactly why it is easy to miss.
 
 ## Open questions
 

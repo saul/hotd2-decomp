@@ -205,7 +205,9 @@ classic ring-buffer initialisation.
 | `0x009C8EA0` | yield flag — set by the `wait_*` opcodes |
 | `0x009A3540` | view struct, player 1 |
 | `0x009A59E0` | view struct, player 2 |
-| `0x009A2280` | class index → object allocation size |
+| `0x009A2280` | class index → per-class handler fn (112 slots, built by `FUN_0040AC90`) |
+| `0x00593358` | `{class_id, handler}` pair list, 56 entries, terminated by a negative id |
+| `0x004A6FA0` | object allocator: `alloc(size)`, zero, link, store *handler* at +0x00 |
 
 ## Camera / object paths (`cam/`) — Phase 6
 

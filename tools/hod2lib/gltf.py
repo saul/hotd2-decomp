@@ -325,8 +325,14 @@ def _bams_euler_to_quat(rx: float, ry: float, rz: float
     )
 
 
+def _bias_tag(bias) -> str:
+    """A short, filename-safe tag naming a pose bias."""
+    return "_".join(f"{v:g}".replace("-", "n").replace(".", "p")
+                    for v in bias)
+
+
 def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
-                fps=60.0, step=2.0):
+                fps=60.0, step=2.0, obj_biases=None):
     """Add camera/object paths to a glTF document under three parent nodes.
 
     Produces, per cp_ path:
@@ -424,6 +430,39 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
                          "target": {"node": obj_node, "path": "rotation"}},
                     ],
                 })
+
+                # Some routines bias the path *position* before applying the
+                # pose rotations: `Translate(p.x, p.y + 2.0, p.z); RotZ; RotY;
+                # RotX`. That is T(p+b).R, which a child node with translation
+                # b cannot express -- it would give T(p).R.T(b). So each
+                # distinct bias gets its own anchor with shifted samples.
+                for bias in (obj_biases or {}).get(nm, ()):
+                    bpts = [(x + bias[0], y + bias[1], z + bias[2])
+                            for x, y, z in pts]
+                    nodes.append({
+                        "name": f"{nm}_obj_b{_bias_tag(bias)}",
+                        "translation": list(bpts[0]),
+                        "rotation": list(quats[0]),
+                        "extras": dict(extras, hod2_kind="object",
+                                       hod2_pose_bias=list(bias)),
+                    })
+                    bnode = len(nodes) - 1
+                    obj_nodes.append(bnode)
+                    animations.append({
+                        "name": f"{nm}_b{_bias_tag(bias)}",
+                        "samplers": [
+                            {"input": t_in, "output": buf.vec3(bpts),
+                             "interpolation": "LINEAR"},
+                            {"input": t_in, "output": buf.vec4(quats),
+                             "interpolation": "LINEAR"},
+                        ],
+                        "channels": [
+                            {"sampler": 0,
+                             "target": {"node": bnode, "path": "translation"}},
+                            {"sampler": 1,
+                             "target": {"node": bnode, "path": "rotation"}},
+                        ],
+                    })
             continue
 
         for path in cf.paths:
@@ -839,8 +878,16 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
     animations: list[dict] = []
     n_paths = 0
     if cam_files:
+        # A rig whose routine biases the path pose needs its own anchor.
+        biases: dict[str, list] = {}
+        for entry in rigs or ():
+            for base, b in (entry.get("biases") or {}).items():
+                biases.setdefault(base, [])
+                if b not in biases[base]:
+                    biases[base].append(b)
         scene_nodes.extend(_emit_paths(cam_files, buf, nodes, meshes, materials,
-                                       cameras, animations, step=cam_step))
+                                       cameras, animations, step=cam_step,
+                                       obj_biases=biases))
         n_paths = sum(len(c.paths) for c in cam_files)
 
     # ---- hand-coded object rigs -----------------------------------------
@@ -853,16 +900,26 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
     # Parts are siblings, not a chain -- MatrixStackPush(0) duplicates the top,
     # so each part's transform is relative to the object root.
     n_rigs = 0
+    rig_counts: dict[str, int] = {}
     for entry in rigs or ():
         rig = entry["rig"]
         by_name = {n.get("name"): i for i, n in enumerate(nodes)}
         # A rig reaches the scene two ways: parented to the animated node of a
         # route it follows, or placed at every spawn descriptor of its class.
+        # A rig reaches the scene four ways: parented to the animated node of
+        # a route it follows, placed at a pose the routine hardcodes, placed at
+        # every spawn descriptor of its class, or -- for a routine that draws
+        # straight off the view matrix with no root push -- left in world space
+        # with the part transforms already absolute.
         targets: list[tuple[str, dict | None, str | None]] = [
-            (f"{slot:03d}", None, entry["anchors"].get(slot))
-            for slot in rig.path_slots if entry["anchors"].get(slot)]
+            (f"{slot:03d}", None, anchor)
+            for slot, anchor in sorted(entry["anchors"].items())]
         targets += [(f"spawn{i:03d}", sp, None)
                     for i, sp in enumerate(entry.get("placements") or ())]
+        targets += [(f"fixed{i:03d}", fp, None)
+                    for i, fp in enumerate(entry.get("fixed") or ())]
+        if rig.world_space and entry.get("world"):
+            targets.append(("world", None, None))
 
         for tag, spawn, anchor in targets:
             if anchor is not None and anchor not in by_name:
@@ -937,7 +994,20 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                                "hod2_routine": rig.routine,
                                "hod2_note": rig.note},
                 }
-                if spawn is not None:
+                if spawn is not None and spawn.get("kind") == "fixed":
+                    # A pose the routine hardcodes instead of evaluating a
+                    # path -- already a full BAMS Euler triple, so it is
+                    # applied as one.
+                    root["translation"] = list(spawn["translation"])
+                    root["rotation"] = list(
+                        _bams_euler_to_quat(*spawn["rotation_bams"]))
+                    root["extras"].update({
+                        "hod2_placement": "fixed_pose",
+                        "hod2_cam_paths": spawn["cam_paths"],
+                    })
+                    if spawn.get("note"):
+                        root["extras"]["hod2_note_pose"] = spawn["note"]
+                elif spawn is not None:
                     # Placed instance: position and BAMS yaw from the spawn
                     # descriptor. The other two orientation words are NOT
                     # confirmed to be angles, so they are carried raw only.
@@ -950,6 +1020,10 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                         "hod2_spawn_hp": spawn["hp"],
                         "hod2_spawn_orient": spawn["orient"],
                     })
+                elif tag == "world":
+                    # The routine draws with no root push, so the part
+                    # transforms are already absolute world coordinates.
+                    root["extras"]["hod2_placement"] = "world_space"
                 else:
                     root["extras"]["hod2_path_slot"] = int(tag)
                 nodes.append(root)
@@ -960,6 +1034,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                 else:
                     scene_nodes.append(len(nodes) - 1)
                 n_rigs += 1
+                rig_counts[rig.name] = rig_counts.get(rig.name, 0) + 1
 
     # ---- assemble ------------------------------------------------------
     bin_name = f"{name}.bin"
@@ -1015,4 +1090,5 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
         "animations": len(animations),
         "paths": n_paths,
         "rigs": n_rigs,
+        "rig_counts": rig_counts,
     }

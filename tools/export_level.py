@@ -29,7 +29,7 @@ from hod2lib import (coli as colilib, gltf, rigs as rigslib,
 STAGE_TO_SCENE = stagelib.STAGE_TO_SCENE
 
 
-def _resolve_rigs(game: Path, st) -> list[dict]:
+def _resolve_rigs(game: Path, st, bbox=None) -> list[dict]:
     """Load the models a transcribed rig draws, for every route this stage has.
 
     A rig's parts name **asset slots**, which resolve through the EXE's slot
@@ -42,6 +42,12 @@ def _resolve_rigs(game: Path, st) -> list[dict]:
         return []
     slots = st.tables.asset_slots()
     have = {r.slot for r in cp.by_slot.values() if r.is_object_path}
+    # The cp_ slots this stage owns. Routines dispatch on `g_active_cam_path`
+    # to pick a route, and those ids live in the same 418-slot space as the
+    # object paths -- verified: all 28 gate ids seen so far resolve to cp_
+    # files and all 21 route ids to op_ files. So a rig belongs to a stage iff
+    # the stage owns the camera path that selects it.
+    have_cam = {r.slot for r in cp.by_slot.values() if not r.is_object_path}
 
     cache: dict[str, tuple] = {}
 
@@ -71,16 +77,55 @@ def _resolve_rigs(game: Path, st) -> list[dict]:
                                 placements.setdefault(sp["class"], []).append(sp)
 
     out: list[dict] = []
+    blocked: list = []
     for rig in rigslib.RIGS:
-        anchors = {}
-        if rig.spawn_class is None and not rig.path_slots:
-            continue
-        for slot in rig.path_slots:
+        anchors: dict[int, str] = {}
+        biases: dict[str, tuple] = {}
+
+        def bind(slot, cam_paths, bias=(0.0, 0.0, 0.0)):
+            """Bind one route to its anchor node, if this stage has both."""
             if slot not in have:
-                continue
+                return
+            if cam_paths and not (set(cam_paths) & have_cam):
+                return
             ref = cp.by_slot[slot]
-            anchors[slot] = f"{ref.file}_{ref.index:02d}_obj"
-        if not anchors and not placements.get(rig.spawn_class):
+            base = f"{ref.file}_{ref.index:02d}"
+            nm = f"{base}_obj"
+            if tuple(bias) != (0.0, 0.0, 0.0):
+                nm = f"{base}_obj_b{gltf._bias_tag(bias)}"
+                biases[base] = tuple(bias)
+            anchors[slot] = nm
+
+        for slot in rig.path_slots:          # flat spelling, no cam gate
+            bind(slot, ())
+        for route in rig.routes:
+            bind(route.slot, route.cam_paths, route.bias)
+
+        # Poses the routine hardcodes, gated the same way.
+        fixed = [{"kind": "fixed", "translation": list(fp.translation),
+                  "rotation_bams": list(fp.rotation_bams),
+                  "cam_paths": list(fp.cam_paths), "note": fp.note}
+                 for fp in rig.fixed_poses
+                 if not fp.cam_paths or (set(fp.cam_paths) & have_cam)]
+
+        # A world-space rig has no root to place: its part translations are
+        # already absolute. The spawn class is the wrong gate for it -- class
+        # 0x25 is a generic scripted-actor interpreter present in every stage,
+        # while the props themselves sit at one fixed set of coordinates. So
+        # the gate is geometric: the parts have to land inside this stage.
+        # A world-space rig has no root to place: its part translations are
+        # already absolute, so it needs a gate saying which stage holds it.
+        # The stage bounding box is not that gate -- levels span thousands of
+        # units and would accept the props everywhere. Without a confirmed
+        # gate the rig is transcribed but not placed.
+        world = bool(rig.world_space and bbox is not None
+                     and not rig.placement_blocked)
+
+        if rig.placement_blocked:
+            blocked.append(rig)
+            continue
+        if not anchors and not fixed and not world \
+                and not placements.get(rig.spawn_class):
             continue
 
         parts = []
@@ -98,7 +143,11 @@ def _resolve_rigs(game: Path, st) -> list[dict]:
                 parts.append((part, models))
         if parts:
             out.append({"rig": rig, "anchors": anchors, "parts": parts,
-                        "placements": placements.get(rig.spawn_class, [])})
+                        "blocked": rig.placement_blocked,
+                        "biases": biases, "fixed": fixed, "world": world,
+                        "placements": (placements.get(rig.spawn_class, [])
+                                       if not rig.world_space else [])})
+    _resolve_rigs.blocked = blocked
     return out
 
 
@@ -323,7 +372,14 @@ def main() -> int:
                 + ("_original" if args.original and not args.glob_geometry else "")
                 + ("_uvcheck" if args.uv_check else ""))
         out_dir = args.out / name
-        rig_data = _resolve_rigs(game, st) if st is not None else []
+        # The stage's world bounds, used to gate world-space rigs.
+        bbox = None
+        pts = [v.pos for _, models, _ in parts for m in models
+               for mesh in m.meshes for v in mesh.vertices]
+        if pts:
+            bbox = (tuple(min(q[i] for q in pts) for i in range(3)),
+                    tuple(max(q[i] for q in pts) for i in range(3)))
+        rig_data = _resolve_rigs(game, st, bbox) if st is not None else []
         info = gltf.export_level(name, parts, out_dir, rigs=rig_data,
                                  write_textures=not args.no_textures,
                                  uv_check=args.uv_check,
@@ -372,8 +428,13 @@ def main() -> int:
             print(f"  folded {info['folded_mirror_uv']:,} out-of-range UVs on "
                   f"mirrored axes")
         if info.get('rigs'):
-            names = ", ".join(sorted({e['rig'].name for e in rig_data}))
-            print(f"  {info['rigs']} object rigs instantiated ({names})")
+            names = ", ".join(f"{k} x{v}" for k, v in
+                              sorted(info.get('rig_counts', {}).items()))
+            print(f"  {info['rigs']} object rig instances ({names})")
+        for rig in getattr(_resolve_rigs, "blocked", []):
+            if rig.placement_blocked:
+                print(f"  rig {rig.name} transcribed but NOT placed: "
+                      f"{rig.placement_blocked.split(':')[0]}")
         if info['paths']:
             print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
                   f"cameras + rails ({', '.join(c.name for c in cam_files)})")

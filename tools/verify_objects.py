@@ -149,7 +149,10 @@ def main() -> int:
     # -- transcribed rigs ---------------------------------------------------
     slots_tbl = tables.asset_slots()
     print()
-    print(f"transcribed rigs: {len(rigslib.RIGS)} of 31 CamEvalObjectPath6 callers")
+    n_drawable = sum(1 for r in rigslib.RIGS
+                     if any(pt.slots for pt in r.parts))
+    print(f"transcribed rigs: {len(rigslib.RIGS)} of 31 CamEvalObjectPath6 "
+          f"callers, {n_drawable} with drawable geometry")
     for rig in rigslib.RIGS:
         names = {p.name for p in rig.parts}
         n_slots = sum(len(p.slots) for p in rig.parts)
@@ -172,17 +175,46 @@ def main() -> int:
                 if s not in slots_tbl:
                     problems.append(f"{rig.name}: part {part.name} draws slot "
                                     f"{s:#06x}, which no asset slot defines")
-        route = ", ".join(f"{s:#05x}" for s in rig.path_slots) or "-"
-        print(f"  {rig.name:<16} {rig.routine:<14} {len(rig.parts):>2} parts, "
+        route = ", ".join(f"{s:#05x}" for s in rig.all_path_slots) or "-"
+        tags = []
+        if rig.spawn_class is not None:
+            tags.append(f"class {rig.spawn_class:#04x}")
+        if rig.world_space:
+            tags.append("world")
+        if rig.fixed_poses:
+            tags.append(f"{len(rig.fixed_poses)} fixed")
+        if rig.placement_blocked:
+            tags.append("NOT PLACED")
+        print(f"  {rig.name:<17}{rig.routine:<15}{len(rig.parts):>2} parts, "
               f"{n_slots:>2} slots  routes {route}"
-              f"{'  class ' + str(rig.spawn_class) if rig.spawn_class is not None else ''}")
+              f"{'  [' + ', '.join(tags) + ']' if tags else ''}")
         if unresolved:
             print(f"      unresolved slots: {[hex(x) for x in unresolved]}")
-        for slot in rig.path_slots:
+
+        # A route slot must name an op_ file and a camera-path gate must name a
+        # cp_ one. This is the invariant that makes per-stage gating possible:
+        # a rig belongs to a stage iff the stage owns the cp_ file that selects
+        # it, so if the two ever mixed, rigs would land in the wrong levels.
+        for slot in rig.all_path_slots:
             stem = slot_file.get(slot, "?")
             if not stem.startswith("op_"):
                 problems.append(f"{rig.name}: route slot {slot} is {stem}, "
                                 f"not an object path")
+        for cam in rig.cam_paths:
+            stem = slot_file.get(cam, "?")
+            if not stem.startswith("cp_"):
+                problems.append(f"{rig.name}: camera gate {cam:#05x} is {stem}, "
+                                f"not a camera path")
+        # Every camera path that selects a route must live in the same stage
+        # file as the route it selects, or the gate could never fire.
+        for r in rig.routes:
+            rf = slot_file.get(r.slot, "?").replace("op_", "")
+            for cam in r.cam_paths:
+                cf = slot_file.get(cam, "?").replace("cp_", "")
+                if rf != "?" and cf != "?" and rf != cf:
+                    problems.append(
+                        f"{rig.name}: route {r.slot:#05x} is in {rf} but its "
+                        f"gate {cam:#05x} is in {cf} -- it could never fire")
 
     print()
     print("object-path slot constants found in the draw routines:")

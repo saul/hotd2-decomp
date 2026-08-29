@@ -111,14 +111,16 @@ ST1_VEHICLE = Rig(
                 translation=(-4.6755, 9.0, 6.239),
                 rotation_bams=(0xD000, 0, 0),
                 note="two consecutive MatrixTranslate calls, composed here"),
+        # RotX(-0x1C00) . RotZ(sin-driven) . RotX(+0x1C00): a rotation about an
+        # axis tilted -39.375 deg from Z, and IDENTITY when the sin term is 0.
+        # Baking only the first RotX would leave the part half-rotated, which
+        # is what an earlier revision of this file did.
         RigPart("part_8cc", (0x08CC,),
                 translation=(0.0, 10.739, 11.4021),
-                rotation_bams=(-7168, 0, 0),
-                animated="RotZ by ftol(sin(DAT_009A32A0 << 9)) between the two "
-                         "RotX steps, then RotX(+7168); only the first RotX is "
-                         "baked here",
-                note="the second RotX(+0x1C00) cancels the first when the "
-                     "sin-driven RotZ is zero"),
+                animated="RotX(-0x1C00) . RotZ(ftol(sin(DAT_009A32A0 << 9))) . "
+                         "RotX(+0x1C00) -- a swing about an axis tilted "
+                         "-39.375 deg from Z. Identity while the sin term is 0, "
+                         "which is the pose exported here"),
         # 11.3 tall, 11.7 deep, seated either side at y 9.4 -- they read as
         # the two occupants, but that is inference from the shape and place.
         RigPart("side_left", (0x157C, 0x157D),

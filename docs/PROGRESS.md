@@ -181,8 +181,8 @@ translation has not been decompiled yet.
 - [ ] `evt/` remaining unknowns: the actor class counted by `0x46`, `0x16`'s
       numeric scale, `0x2D`'s sprite-vs-text mode flag, `0x33`'s second
       operand, and `0x1E` (unrecoverable — nothing reads it)
-- [ ] `tools/hod2lib/evt.py`'s `OPCODES` table still carries the old
-      placeholder names; `formats/evt.md` is now the authoritative list
+- [x] `tools/hod2lib/evt.py`'s `OPCODES` table updated with the recovered
+      names, plus `QUEUE_ACTIONS` for the ten `queue_event` selectors
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [x] **`coli/` — SOLVED.** Quad-soup collision meshes: per-group AABB
       (stored max-then-min) plus 72-byte quads of `{plane, dominant axis, 4

@@ -33,7 +33,8 @@ import json
 import time
 from pathlib import Path
 
-from . import __version__, gltf, rigs as rigslib, script as scriptlib
+from . import (__version__, gltf, rigs as rigslib,
+               script as scriptlib, stage as stagelib)
 
 __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
 
@@ -110,6 +111,52 @@ def sound_json(tables) -> dict:
         "screen": {"width": 640, "height": 480,
                    "note": "message x/y are pixels in the game's 640x480 "
                            "screen space"},
+    }
+
+
+#: The rain particle asset, from `FUN_004136A0`'s `AssetDrawSlotAlpha(0x53, 0.5)`.
+#: No region draws it and no script opcode loads it, so it has to be pulled in
+#: explicitly or the effect has no model.
+RAIN_SLOT = 0x53
+
+
+def rain_json(tables, prog) -> dict:
+    """evt `0x1D`'s rain, transcribed from `FUN_004136A0`.
+
+    Every constant here is read, not chosen::
+
+        50 particles at 0x007C1EB8, three floats each, up to 0x007C2114
+        y -= 2.0 every frame
+        respawn when y <= -7:
+            x = rand() % 0x14 - 10     ->  [-10,  9]
+            y = rand() % 0x32 - 25     ->  [-25, 24]
+            z = rand() % 0x19 - 35     ->  [-35,-11]
+        world = RotY(camera_yaw) * (x, y, z) + camera_eye
+        yaw   = horizontal angle from the camera to that point (dy forced 0)
+        draw: Translate(world), RotY(yaw), RotZ(0x100), Scale(1.5, 3.5, 1.0),
+              AssetDrawSlotAlpha(0x53, 0.5), inside draw layer 0xE
+    """
+    used = 0
+    for b in prog.live_blocks():
+        for st in b.steps:
+            for op in st.ops:
+                if op.opcode == 0x1D and op.detail.get("value"):
+                    used += 1
+    rec = tables.asset_slots().get(RAIN_SLOT)
+    return {
+        "slot": RAIN_SLOT,
+        "file": rec[0] if rec else None,
+        "entry": rec[1] if rec else None,
+        "count": 50,
+        "fall_per_frame": 2.0,
+        "respawn_below": -7.0,
+        # (modulo, offset) exactly as the routine spells them.
+        "spawn": {"x": [0x14, -10.0], "y": [0x32, -25.0], "z": [0x19, -35.0]},
+        "scale": [1.5, 3.5, 1.0],
+        "roll_bams": 0x100,
+        "alpha": 0.5,
+        "draw_layer": 0xE,
+        "enabled_by_script": used,
     }
 
 
@@ -232,6 +279,25 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     # Passing `anchors = {slot: None}` makes the writer emit each instance as
     # a scene node tagged `hod2_path_slot`, which the client then drives from
     # the raw `op_` curve -- the same trick the camera rails use.
+    # The rain particle model is drawn by FUN_004136A0, which no region lists
+    # and no asset opcode loads -- it is referenced only as a literal slot id
+    # in the effect routine. Append it as its own part with an empty region
+    # list so the client can adopt it by slot, exactly as it does the dome.
+    rain = rain_json(stage.tables, scriptlib.Program(stage))
+    if rain["file"]:
+        try:
+            models, bank = stagelib.load_asset(
+                stage.game, rain["file"].removesuffix(".bin"))
+        except Exception:
+            models = []
+        if rain["entry"] is not None and rain["entry"] < len(models):
+            parts = list(parts) + [("rain_fx", [models[rain["entry"]]], bank)]
+            model_regions = dict(model_regions)
+            model_regions[("rain_fx", 0)] = {
+                "regions": [], "draw_mode": 0,
+                "slot": rain["slot"], "entry": rain["entry"],
+            }
+
     say(f"  {name}: object rigs")
     rig_instances, rig_blocked = rigslib.resolve_for_stage(stage)
     rig_data = [dict(inst, anchors={r["slot"]: None for r in inst["routes"]},
@@ -262,6 +328,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["backdrop"] = backdrop_json(stage.tables, prog)
     script_json["rigs"] = rigs_json(rig_instances, rig_blocked,
                                     stage.campaths(), stage.tables)
+    script_json["rain"] = rain
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))

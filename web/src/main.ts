@@ -41,6 +41,7 @@ import { SceneLighting, type LightingMode } from "./lighting";
 import { Backdrop } from "./backdrop";
 import { RigLayer } from "./rigs";
 import { Hud as HudLayer } from "./hud";
+import { Rain } from "./rain";
 
 const TICK = 1 / 60;
 
@@ -78,6 +79,7 @@ class Player {
   private readonly lighting: SceneLighting;
   private readonly backdrop = new Backdrop();
   private readonly rigs = new RigLayer();
+  private readonly rain = new Rain();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
   private state: PlayerState = readState();
@@ -109,6 +111,7 @@ class Player {
     this.sceneFog = new SceneFog(this.scene);
     this.lighting = new SceneLighting(this.scene);
     this.scene.add(this.backdrop.group);
+    this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
 
     this.wireUi();
@@ -184,6 +187,7 @@ class Player {
     // clones the backdrop made rather than the shared originals.
     this.backdrop.attach(this.stage.root, bundle.script.backdrop);
     this.rigs.attach(this.stage.root, bundle.script.rigs, this.paths);
+    this.rain.attach(this.stage.root, bundle.script.rain);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
 
@@ -310,7 +314,10 @@ class Player {
       this.rigs.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-sky").addEventListener("change", (e) => {
-      this.backdrop.setEnabled((e.target as HTMLInputElement).checked);
+      const on = (e.target as HTMLInputElement).checked;
+      this.backdrop.setEnabled(on);
+      this.rain.setEnabled(on);
+      this.hudLayer.setEnabled(on);
     });
     $<HTMLInputElement>("#show-spawns").addEventListener("change", (e) => {
       this.spawns.setVisible((e.target as HTMLInputElement).checked);
@@ -763,6 +770,10 @@ class Player {
       const cam = this.walker.cam;
       this.rigs.update(cam ? cam.slot : null, cam ? cam.frame : 0);
       this.hudLayer.tick(this.state.freeze ? 0 : dt * 60);
+      // The volume follows the camera's yaw only, so it stays world-vertical.
+      this.rain.update(this.walker.rain, this.camera.position,
+                       Math.atan2(-this._fwd.x, -this._fwd.z),
+                       this.state.freeze ? 0 : dt * 60);
       this.lighting.setGunLights(this.walker.gunLights);
       this.lighting.setSceneLighting(this.walker.sceneLighting);
       this.lighting.updateGunLights(
@@ -822,6 +833,7 @@ class Player {
       ["sky", this.backdrop.describe],
       ["rigs", this.rigs.describe],
       ["shutter", this.hudLayer.describe],
+      ["rain", this.rain.describe],
       ["last se", w.lastSound === null ? "—"
         : `0x${w.lastSound.toString(16).toUpperCase()}`],
       ["eye", fmtVec(this.camera.position)],

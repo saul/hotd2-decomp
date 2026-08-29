@@ -142,12 +142,16 @@ struck through:
 | `31` | `goto_scene_state` | 274 | Only with a scene state machine |
 | `28` | `region_load` | 262 | No — preloads what is already resident |
 | `59`/`58`/`5A` | asset job drains | 188 | No — nothing is ever pending |
-| `1D` | `enable_rain` | 132 | **Yes** — camera-attached particles, the biggest remaining visual |
 | `2C` | `set_skippable_region` | 126 | No — proved dead in this build |
 | `33` | `set_action_drain_mode` | 125 | Only with the action ring |
 | `10`/`11` | collision sets | 113 | Only with collision |
 | `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
 | `49`/`4A`/`4B` | `variant_*` | — | **Worth checking** — a global picks which operand list runs, so some spawns may never appear |
+
+With rain in, the remaining struck-through opcodes are all either moot in a
+bundle that already holds every asset, dead in this build, or gated on
+machinery the player does not have (a scene state machine, the action ring,
+collision). The one genuine unknown left is `variant_*`.
 
 ## Deliberate non-goals
 
@@ -209,7 +213,7 @@ missed. Meanings and confidence marks live in
 | `1A` | `set_ground_plane_y` | camera | *tracked* | ground plane / g_camera_fixed_eye_y; see the eye-height note |
 | `1B` | `set_backdrop_preset` | scenery | **done** | **the backdrop dome is drawn**, following the camera |
 | `1C` | `set_backdrop_mode` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
-| `1D` | `enable_rain` | scenery | shown | rain particles; not drawn |
+| `1D` | `enable_rain` | scenery | **done** | **50 particles**, transcribed from `DrawRainParticles` — only stage 1 ever turns it on |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
 | `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**, all 9 states with the 40-frame slide |
 | `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour, light colour and ambient all applied** |

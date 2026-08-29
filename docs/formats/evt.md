@@ -196,7 +196,7 @@ inference; **[open]** = undetermined.
 | `1A` | `set_ground_plane_y` | **[proved]** `g_ground_plane_y`. `QueryGroundHeightAt` returns it when a downward ray misses, and it is the plane blob shadows project onto. Also the value opcode `36` pins the view pose to |
 | `1B` | `set_backdrop_preset` | **[likely]** index 0–11 into a 12 × 16-byte table at `0x00579968` `{s16 assetA, s16 assetB, f32 dy, s32 spin, s32 angle0}` — a camera-following dome at dy 0…−3000. Presets 8, 10, 11 also scroll V by −0.005/frame. "sky" is inference |
 | `1C` | `set_backdrop_mode` | **[proved]** 0 = off, 2 = drawn but frozen, else drawn and animating. The mode selector for `1B` |
-| `1D` | `enable_rain` | **[likely]** particles falling 2.0/frame in a camera-attached volume, drawn as asset `0x53` scaled `(1.5, 3.5, 1.0)`; also swaps the impact effect to a wet variant. "rain" is inference from the fall speed and the 3.5× vertical stretch |
+| `1D` | `enable_rain` | **[proved]** `FUN_004136A0`: 50 particles falling 2.0/frame in a camera-attached volume, drawn as asset `0x53` at alpha 0.5 in draw layer `0xE`. See below. Also swaps the impact effect to a wet variant. "rain" is still inference from the fall speed and the 3.5× vertical stretch |
 | `1E` | *(dead)* | **[proved]** `DAT_009C8A78` has **no readers anywhere in the binary**. Vestigial; its intent is unrecoverable |
 | `1F` | `set_hud_shutter_state` | **[proved]** 9 states. Draws asset `0x93E` at view-space `y = ±0.35, z = −1.0` and drives `DAT_009C8E00`, the gate on firing and ammo decrement. States 4/5 hide the HUD and lock out shooting; 1/2/6 show it |
 | `20`–`27` | **fog / light tweens** | see the correction below |
@@ -241,6 +241,51 @@ inference; **[open]** = undetermined.
 > So every `if (skip_flag)` branch in this opcode family — including all of
 > `2E` — is unreachable, and `2C` only registers the request into a variable
 > nothing reads.
+
+### `1D` — the rain, read out
+
+**[proved]** `FUN_004136A0`, in full:
+
+```c
+if (rain_enabled == 1) {
+  SetDrawLayerNibble(0xE);
+  for (p = 0x007C1EB8; p < 0x007C2114; p += 3 floats) {   /* 50 particles */
+    p.y -= 2.0;
+    if (p.y <= -7.0) {                       /* respawn */
+      p.x = rand() % 0x14 - 10.0;            /* [-10,  9] */
+      p.y = rand() % 0x32 - 25.0;            /* [-25, 24] */
+      p.z = rand() % 0x19 - 35.0;            /* [-35,-11] */
+    }
+    world = RotY(g_camera_pose[player].yaw) * p + g_camera_pose[player].eye;
+    yaw   = angle_of(world - eye, with dy passed as a literal 0);
+    Translate(world); RotateY(yaw); RotateZ(0x100); Scale(1.5, 3.5, 1.0);
+    AssetDrawSlotAlpha(0x53, 0.5);
+  }
+  SetDrawLayerNibble(8);
+}
+```
+
+The particle count is **not stored**: the array runs `0x007C1EB8` to
+`0x007C2114` at 12 bytes each, which is 50.
+
+Three details are worth stating because they are not what a from-scratch
+particle system would do:
+
+- The volume is rotated by the camera's **yaw only** before the eye is added,
+  so it follows where the camera looks horizontally while staying
+  world-vertical. Rain never tilts when the camera pitches.
+- The spawn box is 20 × 50 × 25 sitting **in front of** the camera — `z` runs
+  −35 to −11 — so drops are only ever created ahead of the view.
+- The per-drop yaw is computed with the vertical component passed as a literal
+  `0`, so a drop's facing does not change as it falls.
+
+Asset slot `0x53` is `stage1.bin[0]`. **No region draws it and no asset opcode
+loads it** — the effect routine names the slot as a literal, so anything
+reconstructing the scene has to pull it in explicitly or the effect has no
+model.
+
+**[measured]** Only stage 1 ever turns rain on: 18 `enable_rain 1` in
+`st1evtbl`, and every other stage's uses are all `0`.
 
 ### `1B` / `1C` — the backdrop dome, read out
 

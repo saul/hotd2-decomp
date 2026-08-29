@@ -213,6 +213,8 @@ export class Walker {
   backdropMode = 0;
   /** evt 0x1F: the HUD shutter state, 0..8. */
   shutterState = 2;
+  /** evt 0x1D: rain. Only stage 1 ever turns it on. */
+  rain = false;
   /** evt 0x15: the two players' gun spotlights. Gated by 0x14. */
   gunLights = false;
   /** evt 0x14: the scene light array, which gates 0x15 and 0x16. */
@@ -354,6 +356,7 @@ export class Walker {
     this.backdropPreset = -1;
     this.backdropMode = 0;
     this.shutterState = 2;
+    this.rain = false;
     this.gunLights = false;
     this.sceneLighting = false;
     this.branchChoice = 0;
@@ -596,6 +599,9 @@ export class Walker {
         this.gunLights = (op.raw?.length
           ? Number.parseInt(op.raw[0], 16) : (op.value ?? 0)) !== 0;
         return this.gunLights ? "gun lights on" : "gun lights off";
+      case 0x1d: // enable_rain
+        this.rain = !!op.value;
+        return this.rain ? "rain on" : "rain off";
       case 0x1b: // set_backdrop_preset
         this.backdropPreset = op.value ?? -1;
         return `dome preset ${this.backdropPreset}`;

@@ -257,6 +257,25 @@ export interface RigsJson {
   note: string;
 }
 
+export interface RainJson {
+  /** Asset slot the effect draws; `stage1.bin[0]`. */
+  slot: number;
+  file: string | null;
+  entry: number | null;
+  /** 50 — the extent of the particle array, not a stored count. */
+  count: number;
+  fall_per_frame: number;
+  respawn_below: number;
+  /** `[modulo, offset]` per axis, exactly as the routine spells them. */
+  spawn: { x: [number, number]; y: [number, number]; z: [number, number] };
+  scale: [number, number, number];
+  roll_bams: number;
+  alpha: number;
+  draw_layer: number;
+  /** How many times this scene's script turns rain on. */
+  enabled_by_script: number;
+}
+
 export interface ScriptJson {
   scene: number;
   stage: number | null;
@@ -273,6 +292,7 @@ export interface ScriptJson {
   sound?: SoundJson;
   backdrop?: BackdropJson;
   rigs?: RigsJson;
+  rain?: RainJson;
   warnings: string[];
 }
 

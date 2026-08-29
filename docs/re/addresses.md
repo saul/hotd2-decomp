@@ -58,7 +58,7 @@ in order to size unreferenced texture slots.
 | `0x4D1410` | `ecx * 4` | `tex/` filename pointers |
 | `0x4D1B00` | `eax * 4` | `mot/` filename pointers |
 | `0x4D1BC8` | `edi * 4` | `cam/` filename pointers |
-| `0x4C476C` | `edi * 2` | `u16` count, parallel to the `cam` table |
+| `0x4C476C` | `edi * 2` | `u16` count, parallel to the `cam` table (**u16 stride, not u32**) |
 | `0x4E2BDC` | `eax * 2` | `u16` count, parallel to the `mot` table |
 | `0x4E2B14` | `eax * 4` | pointer table, parallel to the `mot` table |
 | `0x9C7320` | `(ecx * 3) * 4` | 12-byte-stride `tex/` slot records; byte at `+0x08` is a load-state flag |
@@ -255,10 +255,10 @@ classic ring-buffer initialisation.
 
 | Data | Contents |
 |---|---|
-| `0x004D1BC8` | `cam/` filename pointer table |
-| `0x004C476C` | `u16` path count per cam file |
-| `0x004C470C` | pointer to `s16[count]` — the global slot id of each path |
-| `0x004C479C` | `s8` slot → owning cam file index |
+| `0x004D1BC8` | `cam/` filename pointer table — `u32`, `+ file * 4` |
+| `0x004C476C` | path count per cam file — **`u16`, `+ file * 2`** (a `u32` read returns garbage, not an error) |
+| `0x004C470C` | pointer to `s16[count]` slot ids — `u32`, `+ file * 4` |
+| `0x004C479C` | slot → owning cam file index — **`s8`, `+ slot * 1`** |
 | `0x0059C9EC` | aligned load buffer base for the current cam file |
 | `0x0059C9F8` | slot → `{u32 ptr; u16 state}`, 8-byte records |
 

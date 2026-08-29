@@ -294,3 +294,85 @@ class ExeTables:
             return None
         rec = self.pol_files().get(fi)
         return rec[0] if rec else None
+
+    # -- cam/ path slot binding -----------------------------------------
+    #
+    # Which global path slot a cam file's entry k occupies is not in the file.
+    # FUN_00404000 applies three tables at load:
+    #
+    #   ptr = base + offset_table[k];  slot = slot_list[file][k];
+    #   slot_record[slot] = {ptr, state}
+    #
+    # NOTE THE STRIDES. They differ, and reading the count table with a u32
+    # stride silently yields garbage rather than failing:
+    #
+    #   0x004C476C   u16   [file * 2]   path count        <- TWO bytes
+    #   0x004C470C   u32   [file * 4]   -> s16[count], slot id of each entry
+    #   0x004C479C   s8    [slot * 1]   owning cam file index
+    #   0x004D1BC8   u32   [file * 4]   filename
+    #
+    # cp_st2.bin is file 7: the u16 read gives 66 paths, a u32 read gives
+    # 65537.
+
+    CAM_NAME_TABLE = 0x004D1BC8
+    CAM_PATH_COUNT = 0x004C476C      # u16 stride
+    CAM_SLOT_LIST = 0x004C470C       # u32 stride -> s16[]
+    SLOT_TO_CAM = 0x004C479C         # s8 stride
+    MAX_CAM_FILES = 32
+
+    def cam_files(self) -> dict[int, tuple[str, int]]:
+        """cam file index -> (filename, path count)."""
+        out: dict[int, tuple[str, int]] = {}
+        for i in range(self.MAX_CAM_FILES):
+            ptr = self._u32(self.CAM_NAME_TABLE + i * 4)
+            if not ptr:
+                continue
+            name = self._cstr(ptr)
+            if not name or not name.endswith(".bin"):
+                continue
+            cnt = self._u16(self.CAM_PATH_COUNT + i * 2) or 0
+            if cnt:
+                out[i] = (name, cnt)
+        return out
+
+    def cam_path_slots(self) -> dict[int, tuple[str, int]]:
+        """global path slot id -> (cam filename, path index within that file).
+
+        The path index is the entry's position in the file's leading offset
+        table, i.e. ``CamFile.paths[index]``.
+        """
+        out: dict[int, tuple[str, int]] = {}
+        for fi, (name, cnt) in self.cam_files().items():
+            lst = self._u32(self.CAM_SLOT_LIST + fi * 4)
+            if not lst:
+                continue
+            r = self._v2r(lst)
+            if r is None:
+                continue
+            for k in range(cnt):
+                slot = struct.unpack_from("<h", self.data, r + k * 2)[0]
+                if slot >= 0:
+                    out.setdefault(slot, (name, k))
+        return out
+
+    def cam_slots_for(self, cam_name: str) -> list[int]:
+        """The global slot ids a cam file owns, in path order."""
+        stem = cam_name[:-4] if cam_name.endswith(".bin") else cam_name
+        for fi, (name, cnt) in self.cam_files().items():
+            if name[:-4] == stem:
+                lst = self._u32(self.CAM_SLOT_LIST + fi * 4)
+                r = self._v2r(lst) if lst else None
+                if r is None:
+                    return []
+                return [struct.unpack_from("<h", self.data, r + k * 2)[0]
+                        for k in range(cnt)]
+        return []
+
+    def slot_cam_file(self, slot: int) -> str | None:
+        """Owning cam file for a path slot, via the s8 reverse table."""
+        r = self._v2r(self.SLOT_TO_CAM + slot)
+        if r is None or r >= len(self.data):
+            return None
+        fi = struct.unpack_from("<b", self.data, r)[0]
+        rec = self.cam_files().get(fi)
+        return rec[0] if rec else None

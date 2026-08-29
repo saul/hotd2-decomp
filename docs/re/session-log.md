@@ -1325,3 +1325,75 @@ recovered 4 steps, 159 instructions and 9 spawn descriptors. Corpus coverage
    untraced pointer.
 2. Trace `FUN_004041E0`'s callers to link `evt` → `cam`.
 3. The `queue_event` action table at `0x005776EC`.
+
+### Addendum 3 — method rule recorded; evt→cam link closed
+
+Pulled up for guessing from data files instead of reading the code. Correct
+call: every real result this session came from the binary, every dead end came
+from statistics over bytes. Written down as
+[`docs/re/method.md`](method.md) — **Rule 1: read the code before you read the
+data** — with the four project-specific traps that produced wrong answers
+(the `0x0Cxxxxxx` filter, the alphabetical-table artefact, naming a function
+from its neighbours, and mistaking LOD id lists for streaming).
+
+Applying the rule immediately paid off.
+
+#### evt → cam is solved, and it was never an opcode
+
+I had been looking for a dedicated "select camera path" opcode and had already
+burnt one wrong candidate (`0x18`/`0x19`, which are angles). Reading
+`EvtRunQueuedActions` instead of hunting for more candidates gave it in one
+step: camera playback is a **queued action**, `queue_event` (`0x30`) with
+selector `0x40`. Its handler resolves to `CamEvalPath7(args[2], args[0], …)`.
+
+```
+[0x30][0x40][ t ][ ? ][ cam path slot ][ flags ]
+```
+
+**880 of 885** occurrences carry a valid path slot, and **every script
+references only its own cam file** — `st2evtbl`→`cp_st2`, `trnevtbl`→`cp_train`,
+and so on, with zero cross-references. That is not a coincidence one can
+manufacture.
+
+Also corrected a claim I made two addenda ago: the `queue_event` table holds
+**nine** selectors, not "100+ scripted actions". That estimate came from
+eyeballing the size of the table region — data-guessing again, in the same
+session I was writing up the dangers of it.
+
+The five exceptions all name slot **418**, one past the end of the 0–417 range,
+all in `trnevtbl` block 7. Recorded as anomaly 8.
+
+#### Other work
+
+- **`cam` slot binding** added to `exetab.py`: `cam_files()`,
+  `cam_path_slots()`, `cam_slots_for()`, `slot_cam_file()`. Validated 23/23 —
+  the EXE count matches the parsed path count for every file, the forward and
+  reverse tables agree, and the slots tile 0–417 with no gaps or overlaps.
+- **`cam.md` stride hazard fixed.** The binding table listed addresses with an
+  "indexed by" column and no element size, which reads as a uniform `u32`
+  stride. `0x004C476C` is `u16`. A `u32` read does not fail — for `cp_st2` it
+  returns 65537 instead of 66. Every table now carries its element size *and*
+  the exact addressing expression, with the failure mode spelled out.
+- **`ApplyKnownTables.java`** — one script that turns all five recovered
+  dispatch tables (96 opcodes, 56 class handlers, 8 job kinds, 7 sub-steps, 9
+  queued actions) into created + named functions, and reports the `.text`
+  coverage delta. This is the reproducible form of what has been done by hand
+  over MCP for three sessions. Run it first after a fresh import.
+- 15 functions named in the live database, PascalCase to match the existing
+  convention (`LzDecompress`, `LoadCommonPolTexBanks`).
+
+#### Still open, and how to attack it *from the code*
+
+**What loads the bulk of a stage's geometry.** 55 of 72 stage-geometry pol
+files are never named by any event script, so a separate path exists. Two
+data-first attempts already failed (a scan for u16 stage tables, and the
+`0x004E7C90` group table that turned out to be slot runs).
+
+The code-first attack, not yet done: every geometry load *must* pass
+`FUN_0041D5D0`, whose callers are a **closed set of 12**. Four are already
+accounted for (the evt opcode, stage init, and two attract-mode setups).
+Reading the remaining eight settles it. `FUN_00412440` is the most promising —
+it walks a `s16` list from an object field and enqueues a slot per entry via a
+record table at `0x004EC748`.
+
+Do that before touching the data again.

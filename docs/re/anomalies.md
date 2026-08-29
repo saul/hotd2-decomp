@@ -162,3 +162,16 @@ Whether anything does is unknown; no other cam file has the defect.
 The deltas between corrupt and real offsets (150, 182, 102, 86, 54, 150 bytes)
 are not constant, so this is not a uniform off-by-N — it looks like an exporter
 bug or a partially rewritten table.
+
+## 8. `trnevtbl.bin` references cam path slot 418
+
+Five `queue_event` camera actions in `trnevtbl.bin` block 7 (offsets `0x231C`,
+`0x238C`, `0x23A8`, `0x23C4`, `0x23E0`) name cam path slot **418**. The
+allocated slot space is exactly 0–417: the 23 cam files tile it with no gaps,
+`op_train.bin` owning the last run 406–417. 418 is one past the end.
+
+Everything else agrees perfectly — the other 880 of 885 camera actions name a
+valid slot, and every script references only its own cam file — so this is an
+isolated off-by-one in the data, not a misreading of the format. What the game
+does when it binds slot 418 is unknown; `0x0059C9F8 + 418 * 8` is whatever
+follows the slot array.

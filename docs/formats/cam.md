@@ -20,7 +20,8 @@ channels are not interleaved, they are separate curves.
 
 The terminator makes the file self-describing: `n` can be recovered without
 reference to `Hod2.exe`. It agrees with the EXE's per-file count table
-(`0x004C476C`) for all 24 files.
+(`0x004C476C`, **`u16` stride** — see the warning under *Binding*) for all
+24 files.
 
 Curve indices inside a descriptor are **dword indices relative to `base`**:
 
@@ -99,6 +100,41 @@ The binary search cannot leave the key array, so querying outside a curve's
 range extrapolates along the end segment rather than clamping. `Curve.evaluate`
 reproduces that.
 
+## Selection: how the event script drives a path
+
+**[proved]** Not a dedicated opcode. Camera playback is a **queued action**:
+`evt` opcode `0x30` (`queue_event`) with selector `0x40` pushes a job whose
+operands are copied to `0x009A6184`, and `EvtRunQueuedActions`
+(`FUN_00402320`) installs `EvtActionCamPlay40` (`FUN_00403360`) as the
+per-frame handler. That resolves to `CamEvalStaticPose` / `FUN_00403510`,
+which call the evaluator:
+
+```c
+CamEvalPath7(args[2],            /* cam path slot   */
+             (float)args[0],     /* time, in frames */
+             &eye, &target, &roll, ...);
+```
+
+So the operand layout of the camera action is:
+
+```
+[0x30][0x40][ t ][ ? ][ path slot ][ flags ]
+```
+
+**[measured]** Of the **885** `sel=0x40` occurrences across all event scripts,
+**880 (99.4 %)** have an `args[2]` that is a valid cam path slot, and every
+script references **only its own** cam file — `st1evtbl`→`cp_st1`,
+`st2evtbl`→`cp_st2`, … `trnevtbl`→`cp_train`, `endevtbl`→`cp_end`,
+`advevtbl`→`cp_demo`, `adv2evtbl`→`cp_demo2`. No cross-references at all.
+
+The five exceptions are all in `trnevtbl.bin` block 7 and all name slot
+**418** — exactly one past the end of the allocated range 0–417. A data defect,
+recorded in [`../re/anomalies.md`](../re/anomalies.md).
+
+`sel=0x21` (`FUN_00403710`, 444 uses) hands control back from a path;
+`sel=0x60` (`FUN_004038A0`, 13 uses) sets a six-component pose directly.
+Only **nine** selectors exist in total, not the 100+ estimated earlier.
+
 ## Timebase
 
 Times are **frame numbers at 60 Hz**. 99.68 % of the 44,750 real keyframe times
@@ -113,16 +149,31 @@ Path durations run from 55 frames (0.9 s) to 1810 frames (30 s).
 Which global **slot** a file's path *k* occupies is not in the file. Three
 parallel tables in `Hod2.exe` hold it, and `FUN_00404000` applies them at load:
 
-| Address | Indexed by | Contents |
-|---|---|---|
-| `0x004C476C` | cam file | `u16` path count |
-| `0x004C470C` | cam file | pointer to `s16[count]` — the global slot id of each path |
-| `0x004C479C` | slot | `s8` owning cam file index |
-| `0x004D1BC8` | cam file | filename pointer |
-| `0x0059C9F8` | slot | runtime `{u32 ptr; u16 state}`, 8 bytes |
+> **The strides differ. Read them exactly as written.**
+> `0x004C476C` is indexed `[file * 2]`, not `[file * 4]`. A `u32` read does not
+> fail — it silently returns garbage. For `cp_st2.bin` (file 7) the correct
+> `u16` read gives **66** paths; a `u32` read gives **65537** (`0x00010001`),
+> whose low word is 1. Every table below is annotated with its element size and
+> the exact addressing expression for this reason.
 
-Slot ids are allocated as one contiguous ascending run per file
-(`op_st1` owns 253–327, for example).
+| Address | Element | Address expression | Contents |
+|---|---|---|---|
+| `0x004D1BC8` | `u32` | `+ file * 4` | filename pointer |
+| `0x004C476C` | **`u16`** | **`+ file * 2`** | path count |
+| `0x004C470C` | `u32` | `+ file * 4` | pointer to `s16[count]` — the global slot id of each path |
+| `0x004C479C` | **`s8`** | **`+ slot * 1`** | owning cam file index |
+| `0x0059C9F8` | 8 bytes | `+ slot * 8` | runtime `{u32 ptr; u16 state}` |
+
+Slot ids partition cleanly: each file owns one contiguous ascending run, and
+the runs tile 0–417 with no gaps or overlaps (`cp_demo` 0–17, `cp_st2` 55–120,
+`op_st1` 253–327, `op_train` 406–417).
+
+**[measured]** For all **23** cam files listed in the EXE, the `u16` count
+equals the number of paths the file parser finds, and every slot in the
+forward list maps back to the same file through the `s8` reverse table.
+
+In `hod2lib`: `ExeTables.cam_files()`, `.cam_path_slots()`,
+`.cam_slots_for(name)`, `.slot_cam_file(slot)`.
 
 Loader: `0x00403EC0` opens the file, allocates `size + 0x20`, aligns the buffer
 up to 32 and stores the base at `0x0059C9EC`; `0x00403FB0` performs the
@@ -172,13 +223,8 @@ space in one go. `tools/blender_camview.py` automates this.
    **Field of view is the obvious candidate** — it is the one per-path scalar a
    camera needs that no other channel supplies. Unverified, so the exporter
    uses a neutral 60° and flags it.
-2. Which `evt/` opcode selects a path slot? **Still open.** Opcodes
-   `0x18`/`0x19` were the earlier suspect and are **wrong**: they write
-   view+0x18/+0x1C, which `FUN_00401F40` hands to `FUN_0040E0B0`, and that
-   passes them to the matrix rotation helpers `FUN_004A99F0`/`FUN_004A9AE0` —
-   they are camera *angles*, not path ids. `FUN_004041E0`'s slot argument comes
-   from its 15 callers; none has been traced yet. See
-   [`pipeline.md`](pipeline.md).
+2. ~~Which `evt/` opcode selects a path slot?~~ **SOLVED** — see *Selection*
+   below.
 3. Are the six corrupt `op_st1` entries dead data, or does the game read
    garbage for those slots? Their slot ids (304, 306, 309, 320, 322, 324) are
    ordinary members of the file's contiguous run and nothing in the EXE marks

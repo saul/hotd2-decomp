@@ -335,8 +335,24 @@ Constants: `0x004C4C98` = 0.5 (the FOV halving), `0x004C4370` = 2π/65536.
 | `0x004038A0` | `EvtActionStoreSixOperands60` | `0x60` |
 | `0x00403BD0` | `EvtEnterSceneState` | jumps through the 2-D state table at `0x00576C14` (9 columns) |
 
+### The scene state machine
+
+| Address | Name | Notes |
+|---|---|---|
+| `0x00403BD0` | `EvtEnterSceneState` | `goto g_scene_state_table[major*9 + minor]` |
+| `0x00402710` | `SceneStateInvalidHang` | `while(1);` — every unused cell points here |
+| `0x0040C370` | `CameraUpdateTick` | calls `g_camera_update_hook` each frame |
+| `0x0040C340` | `CameraClearHookAndPose` | |
+| `0x0040C9C0` | `CameraFollowPlayerMidpoint` | state (1,1) |
+| `0x0040C380` | `CameraFromViewAngles` | state (1,3) |
+| `0x0040C430` | `CameraSnapToPathEye` | state (2,4) |
+| `0x0040C4C0` | `CameraPathWithImpulseShake` | state (2,5) |
+| `0x0040C770` | `CameraStepDeferredRailWithFrameExport` | state (2,6) |
+| `0x0040C8A0` | `CameraPlayStashedPath` | state (2,7) |
+
 | Table | Entries | Contents |
 |---|---|---|
+| `0x00576C14` | 6 × 9 | scene state machine; unused cells are a hang loop |
 | `0x005776EC` | 7 (4 null) | scripted-action index table, grouped by operand count |
 | `0x005776C4` / `0x5776DC` / `0x5776E4` / `0x5776E8` | 6 / 2 / 1 / 1 | the sub-tables, laid out before the index |
 | `0x004C479C` | 418 bytes | global cam path index → cam file id, one run per file |
@@ -366,6 +382,11 @@ Constants: `0x004C4C98` = 0.5 (the FOV halving), `0x004C4370` = 2π/65536.
 | `0x009C7300` / `0x009C7304` | `g_screen_offset_x` / `_y` | both 0 |
 | `0x009A2D78` | `g_active_cam_path` | global cam path index |
 | `0x009A6184` | `g_evt_action_operands` | 8-dword scratch for a queued action |
+| `0x009C71E0`…`0x009C71F4` | `g_camera_eye_x/y/z`, `g_camera_pitch/yaw/roll_bams` | the resolved camera pose |
+| `0x009C7080` | `g_camera_update_hook` | installed by a scene state cell |
+| `0x009C6F0C` / `0x009C6F14` | `g_scene_state_major` / `_minor` | |
+| `0x009C8E58` / `0x009C70F4` | `g_camera_fixed_eye_y` / `g_camera_use_fixed_y` | written by evt opcodes `0x1A` and `0x36` |
+| `0x009C70AC` / `0x009C70B0` | `g_stashed_path_frame` / `_end_frame` | stashed by `queue_event 0x40` with `flags & 2` |
 | `0x009A2224` | current region id | written by evt opcode `0x29` |
 | `0x009A1A08` | current scene id | |
 | `0x007E7990` | `g_matrix_stack_top` | 16 dwords per level |

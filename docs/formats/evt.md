@@ -278,6 +278,96 @@ stages 1–6 name a path inside their own stage's range. A wrong operand order
 would scatter those indices across the whole 418-path space, so this is a
 metric that collapses. `tools/verify_evt_cam.py`.
 
+## The scene state machine — SOLVED
+
+**[proved]** Selectors `0x11` and `0x21` both call `EvtEnterSceneState(major,
+minor)` (`0x00403BD0`), which records the state and jumps straight into a cell
+of a 6 × 9 table at `0x00576C14`:
+
+```c
+g_scene_state_minor = minor;
+g_scene_state_major = major;
+goto g_scene_state_table[major * 9 + minor];
+```
+
+The `* 9` is from the disassembly (`LEA ECX,[ECX+EAX*8]; ADD EAX,ECX`), not
+from the decompiler. `0x21` always passes `major = 2`; `0x11` passes the
+*current* major.
+
+A cell does no work of its own — it **installs the hooks for that phase**:
+
+| Global | Role |
+|---|---|
+| `g_camera_update_hook` (`0x009C7080`) | camera update, run every frame by `CameraUpdateTick` |
+| `_DAT_009A5CDC` / `_DAT_009A5E0C` | per-player update (P1 / P2, 0x130 apart) |
+| `_DAT_009A5CE0` / `_DAT_009A5E10` | per-player sub-routine — **also writable from script**, via `queue_event` selector `0x12` |
+
+> **Unused cells point at `SceneStateInvalidHang` (`0x00402710`), which is
+> `while(1);`.** An invalid transition deliberately locks the game up, so the
+> live cells are an exact statement of which states exist — not a guess.
+
+| major | live minors | what it installs |
+|---|---|---|
+| 0 | 0 | no camera hook |
+| 1 | 1, 2, 3 | player-relative cameras |
+| 2 | 4, 5, 6, 7 | `cam/` path cameras |
+| 3 | *none* | every cell hangs — major 3 does not exist |
+| 4 | 0–5 (no-op), 8 | |
+| 5 | 0, 3, 4, 6, 7, 8 | |
+
+### The camera modes
+
+All of them write the same six globals — `g_camera_eye_x/y/z` and
+`g_camera_pitch/yaw/roll_bams` (`0x009C71E0`…`0x009C71F4`):
+
+| State | Routine | Behaviour |
+|---|---|---|
+| (0,0) | — | no camera hook |
+| (1,1) | `CameraFollowPlayerMidpoint` | midpoint of the two players, or player `DAT_009C7000` alone when `DAT_009C8E80 == 1` |
+| (1,2) | — | no camera hook; installs the player-B sub-routine |
+| (1,3) | `CameraFromViewAngles` | pose built from the view struct: `RotateY(yaw-0x8000)`, `RotateX(-pitch)`, roll, then a `(0,-15,0)` translate |
+| (2,4) | `CameraSnapToPathEye` | snap to the path eye, then re-install itself as `0x0040C470` |
+| (2,5) | `CameraPathWithImpulseShake` | path pose plus a 30-frame decaying impulse, gated on `_DAT_009C9028 & 0x20000` |
+| (2,6) | `CameraStepDeferredRailWithFrameExport` | plays the stashed path, publishing the current frame |
+| (2,7) | `CameraPlayStashedPath` | same, `<` instead of `<=` on the end frame |
+
+### How `0x40` and the state machine fit together
+
+(2,6) and (2,7) call `CamEvalPath7(g_active_cam_path, frame, …)` themselves,
+stepping `g_stashed_path_frame` toward `g_stashed_path_end_frame` — and those
+are exactly the globals `EvtActionCamPlay40`'s `flags & 2` branch stashes. So a
+deferred camera play is a two-instruction idiom:
+
+```
+queue_event 0x40, start, end, path, 2     ; stash the range
+queue_event 0x21, 6 (or 7)                ; enter the state that plays it
+```
+
+**[measured]** All **208 / 208** deferred (`flags & 2`) camera plays in the
+game are followed within three queued actions by a `0x21` to state 6 or 7.
+Zero exceptions. Flags are only ever 0 (677 uses) or 2 (208).
+
+### Two script opcodes fixed by this
+
+Three camera hooks share this line:
+
+```c
+if (g_camera_use_fixed_y == 1) eye.y = g_camera_fixed_eye_y;
+else                           eye.y = path.y - 15.0f;
+```
+
+`g_camera_fixed_eye_y` (`0x009C8E58`) is written by opcode **`0x1A`** and
+`g_camera_use_fixed_y` (`0x009C70F4`) by opcode **`0x36`**. So `0x1A` sets a
+fixed camera eye height and `0x36` selects it over the default
+"path height minus 15".
+
+### Validation
+
+**[measured]** Every state transition in the shipped scripts lands on a live
+cell. Selector `0x21`'s 444 operands across all stages are only 4, 6 and 7 —
+inside row 2's live set `{4,5,6,7}`. Selector `0x11`'s are 1 and 3 — inside
+row 1's `{1,2,3}`. A wrong row width would drop these onto the hang loop.
+
 ## Spawn descriptor
 
 Header is 0x24 bytes, identical for opcodes `0x09`, `0x0B`, `0x0C`, `0x0D`

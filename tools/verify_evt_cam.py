@@ -47,6 +47,24 @@ STAGE_CAM = {
 
 QUEUE_EVENT = 0x30
 SEL_CAM_PLAY = 0x40
+SEL_SCENE_STATE = 0x11        # major = current, minor = operand
+SEL_FINISH_SEQ = 0x21         # major = 2 (fixed), minor = operand
+
+#: Live cells of the 6x9 scene state machine at 0x00576C14, per major.
+#: Every other cell points at SceneStateInvalidHang (0x00402710), a `while(1);`
+#: loop -- so an out-of-range transition locks the game up, which makes this a
+#: hard statement about which states exist rather than a guess.
+SCENE_STATE_LIVE = {
+    0: {0},
+    1: {1, 2, 3},
+    2: {4, 5, 6, 7},
+    3: set(),                 # every cell hangs; major 3 does not exist
+    4: {0, 1, 2, 3, 4, 5, 8},
+    5: {0, 3, 4, 6, 7, 8},
+}
+
+#: The two camera states that play a path stashed by `0x40` with flags & 2.
+STASHED_PATH_STATES = {6, 7}
 
 
 def path_bases(tables: exetab.ExeTables, n_paths: int) -> dict[int, tuple[int, int]]:
@@ -91,6 +109,9 @@ def main() -> int:
 
     sel_hist: Counter = Counter()
     total = in_range = resumes = held = 0
+    state_ops: Counter = Counter()
+    deferred = deferred_followed = 0
+    flag_hist: Counter = Counter()
     problems: list[str] = []
 
     for scene, (stem, fid) in STAGE_CAM.items():
@@ -108,15 +129,37 @@ def main() -> int:
             if blk.offset < 0:
                 continue
             for prog in blk.programs:
-                for ins in prog:
-                    if ins.opcode != QUEUE_EVENT or not ins.raw:
-                        continue
+                queued = [i for i in prog if i.opcode == QUEUE_EVENT and i.raw]
+                for k, ins in enumerate(queued):
                     sel_hist[ins.raw[0]] += 1
+
+                    # -- scene state transitions land on a live cell ---------
+                    if ins.raw[0] == SEL_FINISH_SEQ and len(ins.raw) > 1:
+                        state_ops[(2, ins.raw[1])] += 1
+                        if ins.raw[1] not in SCENE_STATE_LIVE[2]:
+                            problems.append(
+                                f"{name} @{ins.offset:#06x}: finish_sequence to "
+                                f"state (2,{ins.raw[1]}) -- a hang-loop cell")
+
                     if ins.raw[0] != SEL_CAM_PLAY or len(ins.raw) < 5:
                         continue
                     a = ins.raw[1:]
                     start = a[0] - (1 << 32) if a[0] >= (1 << 31) else a[0]
-                    end, pidx = a[1], a[2]
+                    end, pidx, flags = a[0:4][1], a[2], a[3]
+                    flag_hist[flags] += 1
+
+                    # -- a deferred play must be followed by the state that
+                    #    consumes the stash ---------------------------------
+                    if flags & 2:
+                        deferred += 1
+                        nxt = [j.raw[1] for j in queued[k + 1:k + 4]
+                               if j.raw[0] == SEL_FINISH_SEQ and len(j.raw) > 1]
+                        if any(v in STASHED_PATH_STATES for v in nxt):
+                            deferred_followed += 1
+                        else:
+                            problems.append(
+                                f"{name} @{ins.offset:#06x}: deferred cam play "
+                                f"not followed by a state 6/7 transition")
                     total += 1
                     if lo <= pidx < lo + count:
                         in_range += 1
@@ -141,7 +184,15 @@ def main() -> int:
     print(f"  all {len(sel_hist)} distinct selectors have a handler "
           f"in the two-level table at 0x005776EC: {not unknown}")
     print()
+    print(f"scene state transitions (selector 0x21, major 2): "
+          + ", ".join(f"minor {m} x{n}" for (_, m), n in sorted(state_ops.items())))
+    print(f"  all land on a live cell of the 6x9 table (the rest is a hang "
+          f"loop): {not any('hang-loop' in p for p in problems)}")
+    print()
     print(f"selector 0x40 (play a cam/ path): {total} instructions")
+    print(f"  flags histogram: {dict(sorted(flag_hist.items()))}")
+    print(f"  deferred (flags & 2) followed by a state 6/7 transition : "
+          f"{deferred_followed}/{deferred}")
     print(f"  path index inside the stage's own cp_ file : {in_range}/{total}")
     print(f"  start_frame == -1 (resume)                 : {resumes}")
     print(f"  end_frame past the path duration (held)    : {held}")

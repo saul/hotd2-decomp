@@ -155,7 +155,14 @@ translation has not been decompiled yet.
 - [x] **`evt` → `cam` link solved** — selector `0x40` plays a `cam/` path;
       operand 2 is a *global* path index. **751/751** camera-play actions in
       stages 1–6 name a path from their own stage (`tools/verify_evt_cam.py`)
-- [ ] `evt/` semantics — ~28 opcodes still named only by the global they write
+- [x] **Scene state machine at `0x00576C14` decoded** — a 6×9 table of
+      behaviour installers reached by `queue_event` selectors `0x11`/`0x21`.
+      Unused cells are a `while(1);` hang loop, so the live set is exact; all
+      444 transitions in the shipped scripts land on a live cell. Rows 0–2 are
+      the camera modes, including the two that play a path stashed by
+      `0x40 flags&2` — **196/196** deferred plays are followed by a transition
+      to one of them
+- [ ] `evt/` semantics — ~26 opcodes still named only by the global they write
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [ ] `coli/` — record layout + hit-test semantics
 - [ ] `mot/` — rigid transforms vs vertex morphs

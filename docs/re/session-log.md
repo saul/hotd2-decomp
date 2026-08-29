@@ -2704,3 +2704,56 @@ Renamed in Ghidra: `SetFogRange`, `PushSceneFogFromLightBlock`,
    state 6/7 shots are yaw-only.
 5. The `0x21`/`0x23` tween stepping — the `{enabled, from, to, rate}` block is
    read but the per-frame step is not, so the player jumps to the target.
+
+## Session 19 — the rest of the object rigs
+
+Fanned out four read-only agents over the `CamEvalObjectPath6` callers. Eight
+new transcriptions in `hod2lib/rigs.py`, a survey of all 31 in
+[`rig-survey.md`](rig-survey.md), and three placement modes the one-rig version
+could not express.
+
+**The big structural finding.** A rig is not simply attached to a route. Draw
+routines dispatch on `g_active_cam_path` through a jump table and select a
+different `op_` slot per camera shot. Those camera ids turn out to share the
+418-slot space with the object paths — every gate resolves to a `cp_` file,
+every route to an `op_` file, and a gate always sits in the same stage file as
+the route it selects. That makes the gate the per-stage binding: a stage owns a
+rig iff it owns the camera path that selects it. `verify_objects.py` now
+enforces all three halves.
+
+**A transform I had wrong.** `st1_vehicle`'s `part_8cc` is
+`RotX(-0x1C00) · RotZ(θ) · RotX(+0x1C00)` — a swing about a tilted axis, and
+identity at θ=0. I had baked only the first `RotX`, leaving the part
+permanently 39° off. Found by re-reading my own transcription, not by a check:
+the bounding box and the render both looked fine with it wrong, because the
+part is small and mostly hidden. Independently corroborated by the sibling
+routine `FUN_0048F190`, where the middle term is a literal `RotZ(0x4000)` and
+the sandwich collapses to `Rz(90)·Ry(a)·Rx(a)` exactly.
+
+**A placement I refused to make.** `obj_484ff0_props` draws world-space props
+selected by `*(int16*)(*(int*)(obj+0x1390) + 6)`. `obj+0x1390` does *not* point
+at the evt spawn descriptor: `+6` there is the high half of `init_flags`, which
+is 0 for all 142 class-`0x25` descriptors in all six stages, and variant 0
+draws nothing. I tried gating by stage bounding box instead and rejected it —
+levels span thousands of units, so the box accepted the props in every stage,
+which is exactly the failure mode of guessing. The rig is transcribed and the
+exporter prints why it is not placed. `[open]`: what `obj+0x1390` points at.
+
+**The 9-vs-22 split is a filter, not a definition.** I split the 31 callers by
+whether they also call `AssetDrawSlot`, and gave the 22 that don't to a survey
+agent. That was right for finding rigs quickly and wrong as a stopping rule:
+the stage-2 opening vehicle's poser (`FUN_004521B0`) evaluates the path and
+never draws, while its rig lives in `FUN_00452320`. The user asked about that
+car directly, which is how it surfaced. When hunting a rig, follow the poser to
+its `obj[0]`.
+
+**Verification that actually bit.** Rendering each rig in EEVEE:
+`obj_48f190` assembles into a clean convertible and `obj_48ead0` into a
+speedboat with an outboard motor. A wrong parent or a dropped FPU argument does
+not produce a recognisable vehicle, so this is a real check and not decoration.
+
+**Ghidra hazards, recorded in the survey**: the decompiler silently drops FPU
+arguments to the matrix calls (every constant re-read from raw bytes);
+`CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}` though Ghidra types
+all six as float; and on `FUN_0048F560` it renders a jump table as an indirect
+call and leaves `0x48F796`–`0x48F80F` undisassembled.

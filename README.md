@@ -255,7 +255,8 @@ python3 tools/baseline.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2"
 
 ```
 docs/formats/   byte-exact format specs
-docs/re/        session log, annotated addresses, anomalies, build provenance
+docs/re/        session log, annotated addresses, anomalies, build provenance,
+                rig survey (the 31 object-path followers)
 ghidra/         headless driver + GhidraScripts (project DB is not committed)
 tools/hod2lib/  the format library
 tools/emu/      Unicorn-based function harness (Phase 2)

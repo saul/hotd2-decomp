@@ -255,11 +255,20 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] **Object export** — every `op_` path is now an animated node
       (translation + rotation), not just a rail; `<stage>_objects.json` carries
       the spawns the event script places and the routes together
-- [x] **One rig reproduced.** `hod2lib/rigs.py` transcribes `FUN_0048E600` as
-      data and the exporter instantiates its 11 parts under the animated path
-      node, so the object rides its route. The assembled rig is 26.5 × 17.3 ×
-      51.0 units and renders as a complete car — the check that the transform
-      chain is right. Runtime rotations are recorded in `extras`, never baked
+- [x] **Nine rigs transcribed**, of the 31 `CamEvalObjectPath6` callers.
+      `hod2lib/rigs.py` holds them; [`re/rig-survey.md`](re/rig-survey.md)
+      surveys all 31 and maps the other 22 to the routines that draw them.
+      21 instances are placed across five stages. Two assemble into
+      recognisable objects on sight — a convertible and a speedboat — which is
+      the check that the transforms compose correctly.
+- [x] **A rig is gated by camera path, not just bound to a route.** Routines
+      dispatch on `g_active_cam_path` and pick a different `op_` slot per shot.
+      The gate ids are `cp_` slots in the same 418-slot space as the routes, and
+      always in the same stage file, so the gate doubles as the per-stage
+      binding. `verify_objects.py` enforces it.
+- [x] **Three placement modes**: parented to a route anchor, at a pose the
+      routine hardcodes, or world-space with absolute part translations. Plus a
+      pose *bias* applied before the rotations, which needs its own anchor.
 - [x] **No rig data exists to parse** — transforms and slot ids are `PUSH
       imm32` in the instruction stream, 168 distinct functions call
       `AssetDrawSlot`, and the engine's only table-driven draw path is

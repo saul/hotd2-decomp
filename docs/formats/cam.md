@@ -431,3 +431,28 @@ model under that node to watch it run its route.
 
 `<stage>_objects.json` carries the spawns and the routes together — see
 [`evt.md`](evt.md). `tools/verify_objects.py` checks both.
+
+### Which route an object takes, and in which stage
+
+A path-following object does not simply own a route. Its draw routine
+dispatches on `g_active_cam_path` (`0x009A2D78`) through a jump table and picks
+a different `op_` slot **per camera shot** — so the same object runs a
+different route depending on which shot is playing, and is absent entirely on
+the shots the table does not cover.
+
+**[proved]** those camera ids share the 418-slot space with the object paths:
+every id used as a gate resolves to a `cp_` file, every id used as a route
+resolves to an `op_` file, and a gate always sits in the same stage file as the
+route it selects. So the gate doubles as the per-stage binding — **a stage owns
+a rig iff it owns the camera path that selects it** — which is how
+`export_level.py` decides where a rig belongs. `verify_objects.py` enforces all
+three halves of that claim.
+
+Some routines also **bias the pose**: `Translate(p.x, p.y + 2.0, p.z)` before
+`RotZ; RotY; RotX`. That is `T(p+b) · R`, and a child node with translation `b`
+cannot express it — that would give `T(p) · R · T(b)`. The exporter emits a
+separate anchor with shifted translation samples per distinct bias, named
+`<file>_<nn>_obj_b<tag>`.
+
+The full picture of which routine drives which route is in
+[`../re/rig-survey.md`](../re/rig-survey.md).

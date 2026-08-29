@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HOTD2 stage player</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <span class="brand">HOTD2 <span class="dim">stage player</span></span>
+        <label>Stage <select id="stage-select"></select></label>
+        <label title="Game mode 1. Same regions; a few slots resolve to the st_org* models Arcade never draws.">
+          <input type="checkbox" id="original-toggle" /> Original
+        </label>
+        <span class="sep"></span>
+        <div class="modes" role="tablist">
+          <button data-mode="step" class="mode">Step</button>
+          <button data-mode="play" class="mode">Play</button>
+          <button data-mode="free" class="mode">Free roam</button>
+        </div>
+        <span class="sep"></span>
+        <label title="Draw every region at once. Consecutive regions overlap heavily, so this is how the interpenetration becomes legible as a deliberate mechanism rather than an export bug.">
+          <input type="checkbox" id="all-regions" /> All regions
+        </label>
+        <label><input type="checkbox" id="show-rails" checked /> Rails</label>
+        <label><input type="checkbox" id="show-spawns" checked /> Spawns</label>
+        <label title="The game is 4:3 and its projection is a compile-time constant: 41.1 degrees vertical.">
+          <input type="checkbox" id="pillarbox" checked /> 4:3
+        </label>
+        <span class="grow"></span>
+        <span id="status" class="dim"></span>
+      </header>
+
+      <main id="stagearea">
+        <div id="viewport">
+          <canvas id="view"></canvas>
+          <div id="branch-overlay" hidden>
+            <div class="branch-card">
+              <h3>Branch point</h3>
+              <p class="dim" id="branch-sub"></p>
+              <div id="branch-buttons"></div>
+              <div class="countdown"><span id="branch-countdown"></span></div>
+            </div>
+          </div>
+          <div id="loading">
+            <div class="spinner"></div>
+            <p id="loading-text">loading bundle…</p>
+          </div>
+        </div>
+
+        <aside id="left">
+          <div class="panel-head">
+            <strong>Script</strong>
+            <input type="search" id="tree-filter" placeholder="filter ops…" />
+          </div>
+          <div id="tree" class="scroll"></div>
+        </aside>
+
+        <aside id="right">
+          <div id="hud" class="panel"></div>
+          <div class="panel">
+            <div class="panel-head"><strong>Route graph</strong></div>
+            <canvas id="minimap" height="150"></canvas>
+          </div>
+          <div class="panel grow-panel">
+            <div class="panel-head">
+              <strong>Event feed</strong>
+              <button id="feed-clear" class="mini">clear</button>
+            </div>
+            <div id="feed" class="scroll"></div>
+          </div>
+          <div class="panel" id="inspector-panel">
+            <div class="panel-head"><strong>Inspector</strong></div>
+            <div id="inspector" class="scroll"></div>
+          </div>
+        </aside>
+      </main>
+
+      <footer id="transport">
+        <button id="btn-reset" title="Back to the entry block">⏮</button>
+        <button id="btn-stepback" title="Previous instruction">◀</button>
+        <button id="btn-play" title="Play / pause (space)">▶</button>
+        <button id="btn-step" title="Next instruction (→)">▶|</button>
+        <label class="speed">Speed
+          <select id="speed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+            <option value="8">8×</option>
+          </select>
+        </label>
+        <label class="speed" title="The live-enemy waits are the combat gate. There is no combat here, so they are paced by this instead -- and the feed says so.">
+          Combat
+          <select id="combat">
+            <option value="0">instant</option>
+            <option value="0.5">0.5 s/enemy</option>
+            <option value="1" selected>1 s/enemy</option>
+            <option value="2">2 s/enemy</option>
+            <option value="-1">pass through</option>
+          </select>
+        </label>
+        <span class="sep"></span>
+        <label class="framebar">
+          <span id="frame-label" class="dim">no camera path</span>
+          <input type="range" id="frame-slider" min="0" max="1" step="1" value="0" />
+        </label>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -8,186 +8,24 @@ Export a HOTD2 level (or any pol/ asset) to glTF 2.0 with textures.
 
 Output goes to extract/<name>/<name>.gltf plus <name>.bin and textures/*.png.
 Open the .gltf directly in Blender.
+
+The "what is a stage" resolution -- regions, geometry set, draw modes, cam
+files -- lives in `hod2lib.stage`, shared with the browser player's bundle
+builder so the two cannot disagree about what a stage contains.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import cam, container as C, evt, exetab, gltf, nl1, texbank  # noqa: E402
+from hod2lib import gltf, stage as stagelib  # noqa: E402
 
-#: stage number -> scene id, the event system's own index
-STAGE_TO_SCENE = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5}
-
-_TABLES: exetab.ExeTables | None = None
-
-
-def get_tables(game: Path) -> exetab.ExeTables | None:
-    global _TABLES
-    if _TABLES is None:
-        exe = game / "Hod2.exe"
-        if exe.exists():
-            _TABLES = exetab.ExeTables(exe)
-    return _TABLES
-
-
-def load_asset(game: Path, name: str):
-    """Return (models, bank) for a pol/ asset and its paired tex/ bank."""
-    pol = game / "pol" / f"{name}.bin"
-    if not pol.exists():
-        raise SystemExit(f"no such asset: {pol}")
-
-    c = C.load(pol.read_bytes())
-    if not c.models:
-        raise SystemExit(f"{name}: no models ({c.kind})")
-    models = nl1.parse_container(c)
-
-    bank = None
-    tex = game / "tex" / f"{name}.bin"
-    if tex.exists():
-        tc = C.load(tex.read_bytes())
-        data = tc.data if tc.kind == C.COMPRESSED else tex.read_bytes()
-
-        # The exe's descriptor table is authoritative; fall back to the
-        # prefix-sum guess only for banks it does not list.
-        tables = get_tables(game)
-        entries = tables.entries(name) if tables else []
-        if entries:
-            bank = texbank.bank_from_exe(data, entries)
-        else:
-            descs = texbank.harvest_descriptors(models)
-            if descs:
-                bank = texbank.solve_layout(data, descs)
-    return models, bank
-
-
-def load_cam_paths(game: Path, stage: int | None, name: str | None):
-    """cam/ files belonging to a stage: cp_stN (camera) and op_stN (objects).
-
-    Returns [] when the asset has no matching camera file, which is normal --
-    only the six stages and a handful of cutscenes have one.
-    """
-    stems: list[str] = []
-    if stage is not None:
-        stems = [f"cp_st{stage}", f"op_st{stage}"]
-    elif name:
-        # st2_07 -> stage 2
-        import re
-        m = re.match(r"st(\d+)_", name)
-        if m:
-            stems = [f"cp_st{m.group(1)}", f"op_st{m.group(1)}"]
-
-    out = []
-    for stem in stems:
-        p = game / "cam" / f"{stem}.bin"
-        if p.exists():
-            out.append(cam.load(str(p)))
-    return out
-
-
-def stage_geometry(game: Path, stage: int, scene: int, original: bool = False):
-    """The authoritative geometry set for a stage, from Hod2.exe.
-
-    Globbing `st<N>_*` is wrong in both directions: it misses files the stage
-    genuinely draws (`st3.bin`, and all of stage 6's reused `st5_*` geometry)
-    and includes entries no region ever draws.
-
-    The real set is the union of
-
-      * every asset slot named by any of the scene's *regions* -- the sliding
-        window the game streams and draws along the rail
-        (`ExeTables.scene_regions`), and
-      * every slot the event script loads with opcode 0x50.
-
-    Whole-file loads (opcode 0x52) are deliberately excluded: those are
-    spawnable actors -- enemies, characters -- instantiated at runtime from
-    spawn descriptors, not placed scenery.
-
-    With *original* set, the mode-1 region id tables are used instead --
-    Original Mode. Region membership is byte-identical between the two modes;
-    only a handful of id entries point at different models, swapping in the
-    `st_org00..st_org03` files (and on stage 1, alternate `st1_*` entries) that
-    Arcade Mode never draws. See `docs/formats/pipeline.md`.
-
-    Returns (parts, model_regions, regions) where *parts* is the usual
-    (name, models, bank) list, *model_regions* maps (part, model index) to the
-    region ids that draw it, and *regions* is the raw region table.
-    """
-    tables = get_tables(game)
-    if tables is None:
-        raise SystemExit("Hod2.exe is required to resolve the stage geometry set")
-
-    slots = tables.asset_slots()
-    regions = tables.scene_regions(scene, original)
-
-    wanted: dict[str, set[int]] = {}
-    slot_regions: dict[tuple[str, int], set[int]] = {}
-    for ri, region in enumerate(regions):
-        for slot, _mode in region:
-            rec = slots.get(slot)
-            if not rec:
-                continue
-            wanted.setdefault(rec[0], set()).add(rec[1])
-            slot_regions.setdefault(rec, set()).add(ri)
-
-    evt_name = tables.scene_evt_file(scene)
-    if evt_name and (game / "evt" / evt_name).exists():
-        ev = evt.load(str(game / "evt" / evt_name), tables.scene_block_count(scene))
-        for blk in ev.blocks:
-            if blk.offset < 0:
-                continue
-            for prog in blk.programs:
-                for ins in prog:
-                    if ins.opcode in evt.SLOT_OPCODES and ins.raw:
-                        rec = slots.get(ins.raw[0])
-                        if rec:
-                            wanted.setdefault(rec[0], set()).add(rec[1])
-
-    draw_modes = tables.scene_draw_modes(scene, original)
-    slot_of: dict[tuple[str, int], int] = {v: k for k, v in slots.items()}
-    parts, model_regions = [], {}
-    for fname in sorted(wanted):
-        stem = fname[:-4] if fname.endswith(".bin") else fname
-        pol = game / "pol" / fname
-        if not pol.exists():
-            continue
-        cont = C.load(pol.read_bytes())
-        bank = _bank_for(game, stem, cont)
-        models, order = [], sorted(wanted[fname])
-        for entry in order:
-            if entry >= cont.model_count:
-                continue
-            try:
-                got = nl1.parse(cont.model(entry))
-            except Exception:
-                continue
-            for m in (got if isinstance(got, list) else [got]):
-                slot_id = slot_of.get((fname, entry))
-                model_regions[(stem, len(models))] = {
-                    "regions": sorted(slot_regions.get((fname, entry), ())),
-                    "draw_mode": draw_modes.get(slot_id, 0) if slot_id is not None else 0,
-                }
-                models.append(m)
-        if models:
-            parts.append((stem, models, bank))
-    return parts, model_regions, regions
-
-
-def _bank_for(game: Path, stem: str, cont):
-    tex = game / "tex" / f"{stem}.bin"
-    if not tex.exists():
-        return None
-    tc = C.load(tex.read_bytes())
-    data = tc.data if tc.kind == C.COMPRESSED else tex.read_bytes()
-    tables = get_tables(game)
-    entries = tables.entries(stem) if tables else []
-    if entries:
-        return texbank.bank_from_exe(data, entries)
-    return None
+STAGE_TO_SCENE = stagelib.STAGE_TO_SCENE
 
 
 def main() -> int:
@@ -225,6 +63,9 @@ def main() -> int:
     ap.add_argument("--uv-check", action="store_true",
                     help="replace every texture with a UV checkerboard, so "
                          "stretched or rotated faces are visually obvious")
+    ap.add_argument("--glb", action="store_true",
+                    help="write a single self-contained .glb instead of "
+                         ".gltf + .bin + a directory of PNGs")
     args = ap.parse_args()
 
     game = args.game_dir.expanduser().resolve()
@@ -239,28 +80,34 @@ def main() -> int:
     if args.stage is not None:
         # A stage is split across many pol/ files. Merge them into one glTF,
         # each segment its own parent node, so the whole level opens at once.
-        targets = sorted(
-            p.stem for p in (game / "pol").glob(f"st{args.stage}_*.bin")
-            if not p.stem.startswith("pol_"))
-        if not targets:
-            raise SystemExit(f"no assets for stage {args.stage}")
-
         scene = STAGE_TO_SCENE.get(args.stage)
         model_regions, regions = {}, []
+        st = None
         if args.glob_geometry or scene is None:
+            targets = sorted(
+                p.stem for p in (game / "pol").glob(f"st{args.stage}_*.bin")
+                if not p.stem.startswith("pol_"))
+            if not targets:
+                raise SystemExit(f"no assets for stage {args.stage}")
             parts = []
             for n in targets:
-                models, bank = load_asset(game, n)
+                models, bank = stagelib.load_asset(game, n)
                 parts.append((n, models, bank))
         else:
-            parts, model_regions, regions = stage_geometry(
-                game, args.stage, scene, original=args.original)
+            st = stagelib.Stage(game, stage=args.stage, scene=scene,
+                                original=args.original)
+            parts, model_regions, regions = st.geometry()
         for n, models, _b in parts:
             print(f"  + {n}: {len(models)} models, "
                   f"{sum(m.vertex_count for m in models):,} verts, "
                   f"{sum(m.triangle_count for m in models):,} tris")
 
-        cam_files = [] if args.no_cameras else load_cam_paths(game, args.stage, None)
+        if args.no_cameras:
+            cam_files = []
+        elif st is not None:
+            cam_files = st.cam_files()
+        else:
+            cam_files = stagelib.load_cam_paths(game, args.stage, None)
         name = (f"stage{args.stage}"
                 + ("_original" if args.original and not args.glob_geometry else "")
                 + ("_uvcheck" if args.uv_check else ""))
@@ -271,10 +118,9 @@ def main() -> int:
                                  keep_collapsed_uv=args.keep_collapsed_uv,
                                  cam_files=cam_files, cam_step=args.cam_step,
                                  unlit=args.unlit, model_regions=model_regions,
-                                 fold_mirror_uv=args.fold_mirror_uv)
+                                 fold_mirror_uv=args.fold_mirror_uv,
+                                 glb=args.glb)
         if regions:
-            import json
-            slots = get_tables(game).asset_slots()
             side = out_dir / f"{name}_regions.json"
             side.write_text(json.dumps({
                 "scene": scene,
@@ -283,11 +129,7 @@ def main() -> int:
                         "opcode 0x29; consecutive regions overlap, which is why "
                         "a whole-stage export shows interpenetrating geometry "
                         "the game never displays.",
-                "regions": [
-                    [{"slot": s_, "draw_mode": m,
-                      "file": slots.get(s_, ("?", 0))[0],
-                      "entry": slots.get(s_, ("?", 0))[1]} for s_, m in reg]
-                    for reg in regions],
+                "regions": st.region_json(),
             }, indent=1))
             print(f"  {len(regions)} regions -> {side.name}")
         vert = sum(m.vertex_count for _, ms, _ in parts for m in ms)
@@ -311,14 +153,18 @@ def main() -> int:
         raise SystemExit("give --name, --stage or --list")
 
     name = args.name
-    models, bank = load_asset(game, name)
+    try:
+        models, bank = stagelib.load_asset(game, name)
+    except (FileNotFoundError, ValueError) as exc:
+        raise SystemExit(str(exc))
     out_dir = args.out / name
-    cam_files = [] if args.no_cameras else load_cam_paths(game, None, name)
+    cam_files = [] if args.no_cameras else stagelib.load_cam_paths(game, None, name)
     info = gltf.export_level(name, [(name, models, bank)], out_dir,
                              write_textures=not args.no_textures,
                              uv_check=args.uv_check,
                              cam_files=cam_files, cam_step=args.cam_step,
-                             unlit=args.unlit, fold_mirror_uv=args.fold_mirror_uv)
+                             unlit=args.unlit, fold_mirror_uv=args.fold_mirror_uv,
+                             glb=args.glb)
     tri = sum(m.triangle_count for m in models)
     vert = sum(m.vertex_count for m in models)
     bank_note = f"  bank: {len(bank.offsets)} textures" if bank else ""

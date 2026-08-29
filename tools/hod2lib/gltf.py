@@ -421,11 +421,41 @@ def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
     return out
 
 
+GLB_MAGIC = 0x46546C67          # 'glTF'
+GLB_CHUNK_JSON = 0x4E4F534A     # 'JSON'
+GLB_CHUNK_BIN = 0x004E4942      # 'BIN\0'
+
+
+def _pack_glb(doc: dict, blob: bytes) -> bytes:
+    """Wrap a glTF document and its buffer in the binary container.
+
+    12-byte header, then a JSON chunk padded with spaces and a BIN chunk
+    padded with zeros -- both to a 4-byte boundary, as the spec requires.
+    """
+    js = json.dumps(doc, separators=(",", ":")).encode("utf-8")
+    js += b" " * (-len(js) % 4)
+    bin_pad = blob + b"\0" * (-len(blob) % 4)
+
+    out = bytearray()
+    total = 12 + 8 + len(js) + (8 + len(bin_pad) if bin_pad else 0)
+    out += struct.pack("<III", GLB_MAGIC, 2, total)
+    out += struct.pack("<II", len(js), GLB_CHUNK_JSON) + js
+    if bin_pad:
+        out += struct.pack("<II", len(bin_pad), GLB_CHUNK_BIN) + bin_pad
+    return bytes(out)
+
+
 def export_level(name, parts, out_dir, collision=None, write_textures=True,
                  uv_check=False, keep_collapsed_uv=False, cam_files=None,
                  cam_step=2.0, unlit=False, model_regions=None,
-                 fold_mirror_uv=False):
+                 fold_mirror_uv=False, glb=False):
     """Write one or more parts to <out_dir>/<name>.gltf plus .bin and textures/.
+
+    With *glb* set, everything -- geometry buffer and every PNG -- is packed
+    into a single self-contained ``<name>.glb`` instead. A whole stage is
+    around 1300 separate texture files, and a browser fetching them one at a
+    time is the slowest part of loading a bundle; one file removes the fetch
+    storm entirely.
 
     ``parts`` is a list of (part_name, models, bank). A stage is split across
     many pol/ files, so a whole stage is exported as a single glTF with one
@@ -436,7 +466,10 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
     (part_name, texture_id), and PNGs are written per part.
     """
     out_dir = Path(out_dir)
-    (out_dir / "textures").mkdir(parents=True, exist_ok=True)
+    if glb:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        (out_dir / "textures").mkdir(parents=True, exist_ok=True)
 
     buf = _Buf()
     images: list[dict] = []
@@ -481,12 +514,19 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
             rgba = bytearray(rgba)
             rgba[3::4] = b"\xff" * (len(rgba) // 4)
         sub = f"textures/{part}"
-        (out_dir / sub).mkdir(parents=True, exist_ok=True)
         suffix = "_uvcheck" if uv_check else ("_opaque" if strip_alpha else "")
         fn = f"{sub}/tex_{tex_id:03d}{suffix}.png"
-        if write_textures:
-            png.write_rgba(out_dir / fn, w, h, rgba)
-        images.append({"uri": fn})
+        if glb:
+            # In a GLB the image is a buffer view, not a file. The name is
+            # kept so a material can still be traced back to its bank slot.
+            view = buf.add(png.encode_rgba(w, h, rgba))
+            images.append({"bufferView": view, "mimeType": "image/png",
+                           "name": f"{part}/tex_{tex_id:03d}{suffix}"})
+        else:
+            (out_dir / sub).mkdir(parents=True, exist_ok=True)
+            if write_textures:
+                png.write_rgba(out_dir / fn, w, h, rgba)
+            images.append({"uri": fn})
         img_written[key] = len(images) - 1
         return img_written[key]
 
@@ -680,6 +720,12 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
                             # 0 default, 1 lit by the scene light array when the
                             # opcode-0x14 toggle is on, 2 drawn in an earlier layer
                             "hod2_draw_mode": info["draw_mode"],
+                            # The asset slot this model occupies. A model with
+                            # an empty region list is not scenery any region
+                            # draws -- it is pulled in by the script with
+                            # opcode 0x50, and this is what that operand names.
+                            "hod2_slot": info.get("slot"),
+                            "hod2_entry": info.get("entry"),
                         }
                 nodes.append(node)
                 child_nodes.append(len(nodes) - 1)
@@ -721,7 +767,8 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
 
     # ---- assemble ------------------------------------------------------
     bin_name = f"{name}.bin"
-    (out_dir / bin_name).write_bytes(bytes(buf.data))
+    if not glb:
+        (out_dir / bin_name).write_bytes(bytes(buf.data))
 
     doc = {
         "asset": {
@@ -735,7 +782,9 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
         "materials": materials,
         "accessors": buf.accessors,
         "bufferViews": buf.views,
-        "buffers": [{"uri": bin_name, "byteLength": len(buf.data)}],
+        # A GLB's single buffer is the BIN chunk and carries no URI.
+        "buffers": ([{"byteLength": len(buf.data)}] if glb
+                    else [{"uri": bin_name, "byteLength": len(buf.data)}]),
     }
     if images:
         doc["images"] = images
@@ -749,10 +798,16 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
     if unlit:
         doc["extensionsUsed"] = ["KHR_materials_unlit"]
 
-    (out_dir / f"{name}.gltf").write_text(json.dumps(doc, indent=1))
+    if glb:
+        out_path = out_dir / f"{name}.glb"
+        out_path.write_bytes(_pack_glb(doc, bytes(buf.data)))
+    else:
+        out_path = out_dir / f"{name}.gltf"
+        out_path.write_text(json.dumps(doc, indent=1))
 
     return {
-        "gltf": str(out_dir / f"{name}.gltf"),
+        "gltf": str(out_path),
+        "glb": glb,
         "dropped_collapsed_uv": dropped_tris,
         "folded_mirror_uv": folded_uvs,
         "nodes": len(nodes),

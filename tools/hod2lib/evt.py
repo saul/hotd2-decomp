@@ -284,20 +284,22 @@ SET_DEFAULT = 2
 TWEEN_SIZES = {s: 4 for s in range(11)}
 TWEEN_DEFAULT = 2
 
-#: Which view field each tween/set channel targets. Channels 5 and 9 are
-#: "all three axes at once" forms of 2/3/4 and 6/7/8 respectively.
+#: Which field of a scene light/fog block each 0x20-0x27 channel targets.
+#: Channels 5 and 9 are the "all three components at once" forms of 2/3/4 and
+#: 6/7/8. The block offsets are given because the mapping was recovered from
+#: them; see the correction in docs/formats/evt.md.
 CHANNELS = {
-    0: "field_0x30",
-    1: "field_0x34",
-    2: "int_0x24",
-    3: "int_0x28",
-    4: "int_0x2c",
-    5: "int_0x24_0x28_0x2c",
-    6: "float_0x240",
-    7: "float_0x244",
-    8: "float_0x248",
-    9: "float_0x240_0x244_0x248",
-    10: "float_0x24c",
+    0: "fog_near",          # +0x30
+    1: "fog_far",           # +0x34
+    2: "fog_r",             # +0x24
+    3: "fog_g",             # +0x28
+    4: "fog_b",             # +0x2c
+    5: "fog_rgb",           # +0x24/+0x28/+0x2c together
+    6: "light_r",           # +0x240
+    7: "light_g",           # +0x244
+    8: "light_b",           # +0x248
+    9: "light_rgb",         # +0x240/+0x244/+0x248 together
+    10: "ambient",          # +0x24c
 }
 
 #: evt opcode -> job kind pushed onto the asset queue at DAT_007DA220.

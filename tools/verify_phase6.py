@@ -47,6 +47,11 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
     total_bytes = covered_bytes = 0
     n_paths = n_curves = n_keys = n_repairs = 0
     padded = 0
+    # Damaged keyframe words, repaired by Curve.real_keys. Distinct from
+    # CamFile.repairs, which counts repaired *offset-table* entries. Both are
+    # reported so neither repair is silent -- see docs/re/anomalies.md.
+    key_repairs = 0
+    key_repair_files: list[str] = []
 
     print("cam/ -- Hermite spline paths")
     print(f"  {'file':<16}{'paths':>6}{'curves':>8}{'keys':>8}{'coverage':>11}")
@@ -64,6 +69,10 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
         n_keys += sum(len(c.keys) for c in f.curves.values())
         n_repairs += len(f.repairs)
         padded += sum(1 for c in f.curves.values() if len(c.real_keys) != len(c.keys))
+        here = sum(c.repairs for c in f.curves.values())
+        if here:
+            key_repairs += here
+            key_repair_files.append(f"{p.name} ({here})")
 
         pct = 100.0 * cov / len(f.raw)
         print(f"  {p.name:<16}{len(f.paths):>6}{len(f.curves):>8}"
@@ -91,6 +100,8 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
           f"({covered_bytes:,} / {total_bytes:,})")
     print(f"  curves with padded key slots: {padded}")
     print(f"  repaired offset-table entries: {n_repairs}")
+    print(f"  repaired damaged keyframe words: {key_repairs}"
+          + (f"  [{', '.join(key_repair_files)}]" if key_repair_files else ""))
     print(f"  keyframe times off the 60 Hz frame grid: {off_grid}")
     return (1 if problems else 0), problems
 

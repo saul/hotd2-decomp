@@ -64,6 +64,16 @@ from dataclasses import dataclass, field
 TERMINATOR = 0xFFFFFFFF
 KEY_SIZE = 16
 
+#: Anything beyond this is not a coordinate in a level that spans ~6700 units;
+#: the damaged words in ``cp_st1.bin`` decode to around 1e38. See
+#: :func:`_is_sane` and docs/re/anomalies.md.
+FLOAT_LIMIT = 1e30
+
+
+def _is_sane(v: float) -> bool:
+    """True if *v* is a value a keyframe could legitimately hold."""
+    return v == v and -FLOAT_LIMIT < v < FLOAT_LIMIT
+
 #: Channel order for the two path families.
 CP_CHANNELS = ("eye_x", "eye_y", "eye_z", "target_x", "target_y", "target_z", "roll")
 OP_CHANNELS = ("pos_x", "pos_y", "pos_z", "rot_x", "rot_y", "rot_z")
@@ -85,12 +95,21 @@ class Key:
     tangent_in: float
 
 
+def _with(k: "Key", field_name: str, value: float) -> "Key":
+    d = {"time": k.time, "value": k.value,
+         "tangent_out": k.tangent_out, "tangent_in": k.tangent_in}
+    d[field_name] = value
+    return Key(**d)
+
+
 @dataclass
 class Curve:
     offset: int          # byte offset in the file
     index: int           # dword index relative to the curve base
     search_steps: int
     keys: list[Key] = field(default_factory=list)
+    _clean: list[Key] | None = field(default=None, repr=False, compare=False)
+    _repairs: int = field(default=0, repr=False, compare=False)
 
     @property
     def size(self) -> int:
@@ -98,21 +117,101 @@ class Curve:
 
     @property
     def real_keys(self) -> list[Key]:
-        """Keys up to the first padding slot.
+        """Keys with padding trimmed and damaged fields repaired.
 
-        ``key_count`` is always a power of two because the binary search in
-        FUN_004040F0 does a fixed ``log2(count)`` steps. Curves with fewer
-        real keys are padded out, and a padding slot is marked by storing
-        ``0xFFFF0000`` -- a NaN -- in its time field. Only five curves in one
-        file (``cp_st1.bin``) are padded, but the evaluator would return NaN
-        if a padding slot were ever selected, so they must be trimmed.
+        Two separate things are being handled here, and they must not be
+        confused with each other.
+
+        **Padding** is part of the format. ``key_count`` is always a power of
+        two because the binary search in ``FUN_004040F0`` does a fixed
+        ``log2(count)`` steps, so curves with fewer real keys are padded out
+        and a padding slot is marked by storing ``0xFFFF0000`` -- a NaN -- in
+        its time field. Padding is always a **trailing** run, and the
+        evaluator would return NaN if one were selected, so it is trimmed.
+
+        **Damage** is a defect in three shipped files. Measured over the whole
+        corpus (``verify_phase6.py`` prints it):
+
+            cp_demo.bin    20 damaged words
+            cp_st1.bin     91 damaged words, plus 12 trailing padding slots
+            cp_title.bin    8 damaged words
+            ------------------------------------------------
+            total         119 damaged interior words
+
+        They decode to NaN or to ~1e38. In ``cp_st1.bin`` they are scattered
+        through the first four paths -- and those paths *are* played by
+        ``st1evtbl``. (An earlier revision of this docstring said cp_st1 had
+        103; that was its 91 damaged words plus the 12 padding slots counted
+        together, which is exactly the conflation this docstring warns
+        against.)
+        Both retail copies checked are byte-identical, so this is how the game
+        ships, not local corruption. A damaged interior time is repaired by
+        interpolating between its finite neighbours (times are a monotone
+        frame sequence, so that is determined); a damaged value or tangent is
+        held from the nearest finite key, which the flat neighbouring keys in
+        those curves show to be the intended shape. :attr:`repairs` counts
+        them and ``verify_phase6.py`` reports them, so the repair is never
+        silent.
+
+        See docs/re/anomalies.md.
         """
-        out: list[Key] = []
-        for k in self.keys:
-            if k.time != k.time or k.time in (float("inf"), float("-inf")):
-                break
-            out.append(k)
-        return out
+        if self._clean is None:
+            self._clean, self._repairs = self._clean_keys()
+        return self._clean
+
+    @property
+    def repairs(self) -> int:
+        """How many damaged keyframe fields :attr:`real_keys` had to repair."""
+        if self._clean is None:
+            self._clean, self._repairs = self._clean_keys()
+        return self._repairs
+
+    def _clean_keys(self) -> tuple[list[Key], int]:
+        ks = list(self.keys)
+        # Trailing padding: the format's own convention.
+        end = len(ks)
+        while end and not _is_sane(ks[end - 1].time):
+            end -= 1
+        ks = ks[:end]
+        if not ks:
+            return [], 0
+
+        repairs = 0
+        # Interior damaged times: interpolate across the gap.
+        for i, k in enumerate(ks):
+            if _is_sane(k.time):
+                continue
+            lo = next((j for j in range(i - 1, -1, -1)
+                       if _is_sane(ks[j].time)), None)
+            hi = next((j for j in range(i + 1, len(ks))
+                       if _is_sane(ks[j].time)), None)
+            if lo is None or hi is None:
+                continue                       # left for the drop pass below
+            span = ks[hi].time - ks[lo].time
+            ks[i] = Key(ks[lo].time + span * (i - lo) / (hi - lo),
+                        k.value, k.tangent_out, k.tangent_in)
+            repairs += 1
+        before = len(ks)
+        ks = [k for k in ks if _is_sane(k.time)]
+        repairs += before - len(ks)
+
+        # Damaged values and tangents: hold the nearest finite key.
+        for field in ("value", "tangent_out", "tangent_in"):
+            good = [i for i, k in enumerate(ks) if _is_sane(getattr(k, field))]
+            if len(good) == len(ks):
+                continue
+            if not good:
+                for i, k in enumerate(ks):
+                    ks[i] = _with(k, field, 0.0)
+                repairs += len(ks)
+                continue
+            for i, k in enumerate(ks):
+                if _is_sane(getattr(k, field)):
+                    continue
+                j = min(good, key=lambda g: abs(g - i))
+                ks[i] = _with(k, field, getattr(ks[j], field))
+                repairs += 1
+        return ks, repairs
 
     @property
     def duration(self) -> float:

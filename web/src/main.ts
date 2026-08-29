@@ -1,0 +1,608 @@
+/**
+ * The stage player.
+ *
+ * Three modes over one scene and one script walker:
+ *
+ *   Step       block -> step -> instruction, every one of them seekable, with
+ *              a frame slider inside a camera move
+ *   Play       60 Hz with a speed control, pausing at every branch point
+ *   Free roam  orbit and fly, detached from the rail
+ *
+ * The camera is the game's own: 41.100 degrees vertical, 4:3, near 0.8, far
+ * 8000, recovered from `SetupSceneProjection`. It is a compile-time constant
+ * for the whole game -- there is no zoom and no per-camera FOV -- so the only
+ * choice the player offers is whether to pillarbox to 4:3 or fill the window.
+ */
+
+import {
+  Color,
+  PerspectiveCamera,
+  Scene,
+  Vector3,
+  WebGLRenderer,
+} from "three";
+import {
+  loadManifest,
+  loadStage,
+  type Manifest,
+  type StageEntry,
+  type OpJson,
+} from "./bundle";
+import { CamPaths, applyPose, type CameraPose } from "./campath";
+import { StageScene } from "./stagescene";
+import { RailLayer, SpawnLayer } from "./overlays";
+import { FreeRoam, isTyping } from "./freeroam";
+import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "./walker";
+import { readState, writeState, type PlayerState } from "./urlstate";
+import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary } from "./ui";
+
+const TICK = 1 / 60;
+
+const $ = <T extends HTMLElement>(sel: string): T =>
+  document.querySelector(sel) as T;
+
+class Player {
+  private readonly renderer: WebGLRenderer;
+  private readonly scene = new Scene();
+  private readonly camera: PerspectiveCamera;
+  private readonly viewport = $("#viewport");
+  private readonly canvas = $<HTMLCanvasElement>("#view");
+
+  private manifest!: Manifest;
+  private stage: StageScene | null = null;
+  private rails: RailLayer | null = null;
+  private spawns = new SpawnLayer();
+  private paths: CamPaths | null = null;
+  private walker: Walker | null = null;
+
+  private readonly tree = new ScriptTree();
+  private readonly feed = new EventFeed();
+  private readonly hud = new Hud();
+  private readonly inspector = new Inspector();
+  private readonly minimap = new Minimap();
+  private readonly freeRoam = new FreeRoam($("#viewport"));
+
+  private state: PlayerState = readState();
+  private playing = false;
+  private speed = 1;
+  private accum = 0;
+  private last = 0;
+  private pose: CameraPose = {
+    eye: new Vector3(0, 0, 0),
+    target: new Vector3(0, 0, -1),
+    roll: 0,
+  };
+  /** Set while the frame slider is driving the camera by hand. */
+  private scrubbing = false;
+  private pillarbox = true;
+
+  constructor() {
+    this.renderer = new WebGLRenderer({
+      canvas: this.canvas,
+      antialias: true,
+      powerPreference: "high-performance",
+    });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.scene.background = new Color(0x05070a);
+
+    // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
+    this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+    this.scene.add(this.spawns.group);
+
+    this.wireUi();
+    window.addEventListener("resize", () => this.resize());
+    this.resize();
+  }
+
+  // -- bootstrap ---------------------------------------------------------
+
+  async start(): Promise<void> {
+    try {
+      this.manifest = await loadManifest();
+    } catch (err) {
+      return this.fail(
+        `${err instanceof Error ? err.message : String(err)}\n\n` +
+          "Build a bundle first:\n" +
+          '  python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all',
+      );
+    }
+
+    const sel = $<HTMLSelectElement>("#stage-select");
+    const stages = [
+      ...new Set(this.manifest.stages.map((s) => s.stage ?? s.scene)),
+    ].sort((a, b) => a - b);
+    sel.replaceChildren(
+      ...stages.map((n) => {
+        const o = document.createElement("option");
+        o.value = String(n);
+        o.textContent = String(n);
+        return o;
+      }),
+    );
+    if (!stages.includes(this.state.stage)) this.state.stage = stages[0];
+    sel.value = String(this.state.stage);
+
+    await this.loadStage();
+    this.setMode(this.state.mode);
+    this.last = performance.now();
+    requestAnimationFrame(this.frame);
+  }
+
+  private entryFor(stage: number, original: boolean): StageEntry | undefined {
+    return this.manifest.stages.find(
+      (s) => (s.stage ?? s.scene) === stage &&
+        (s.game_mode === 1) === original,
+    );
+  }
+
+  private async loadStage(): Promise<void> {
+    const entry = this.entryFor(this.state.stage, this.state.original) ??
+      this.entryFor(this.state.stage, false);
+    if (!entry) return this.fail(`stage ${this.state.stage} is not in this bundle`);
+
+    this.setLoading(`loading ${entry.name}…`);
+    this.playing = false;
+    this.setPlayButton();
+
+    if (this.stage) {
+      this.scene.remove(this.stage.root);
+      this.stage.dispose();
+    }
+    if (this.rails) this.scene.remove(this.rails.group);
+
+    const bundle = await loadStage(entry);
+    this.paths = new CamPaths(bundle.cam);
+    this.stage = await StageScene.load(bundle.geometryUrl, bundle.script);
+    this.scene.add(this.stage.root);
+
+    this.rails = new RailLayer(this.paths);
+    this.scene.add(this.rails.group);
+    this.rails.setVisible($<HTMLInputElement>("#show-rails").checked);
+
+    this.walker = new Walker(bundle.script, {
+      enterRegion: (r) => this.stage?.enterRegion(r),
+      loadRegion: () => {},
+      loadSlot: (s) => this.stage?.loadSlot(s),
+      unloadSlot: (s) => this.stage?.unloadSlot(s),
+      startCamera: (c) => this.onCamera(c),
+      releaseCamera: () => {},
+      onFeed: (e) => this.onFeed(e),
+      onBranch: (b) => this.showBranch(b),
+    }, { seed: this.state.seed ?? 1 });
+
+    this.tree.build(bundle.script);
+    this.minimap.build(bundle.script);
+    this.feed.clear();
+
+    if (bundle.script.warnings.length) {
+      // Decoder warnings are surfaced, not swallowed: a step that failed to
+      // disassemble is a hole in the timeline and the user should know.
+      for (const w of bundle.script.warnings) {
+        this.onFeed({
+          seq: -1, block: -1, step: -1, opIndex: -1,
+          op: { i: -1, at: 0, op: -1, name: "decoder warning", cat: "flow" },
+          note: w,
+        });
+      }
+    }
+
+    this.applyIncomingState();
+    this.setLoading(null);
+    $("#status").textContent =
+      `${entry.name} · ${entry.counts.models} models · ` +
+      `${entry.counts.triangles.toLocaleString()} tris · ` +
+      `${entry.counts.regions} regions · ${entry.counts.blocks} blocks · ` +
+      `${entry.counts.branch_points} branch points`;
+  }
+
+  /** Honour the deep link: either an op address, or a raw camera pose. */
+  private applyIncomingState(): void {
+    const w = this.walker;
+    if (!w) return;
+    if (this.state.slot !== undefined) {
+      this.poseFromSlot(this.state.slot, this.state.frame ?? 0);
+    } else if (this.state.block !== undefined) {
+      w.seek(this.state.block, this.state.step ?? 1, this.state.op ?? 0);
+      this.syncCameraToWalker();
+    } else {
+      w.reset();
+      // Instruction 0 of block 0 has entered no region and issued no camera
+      // command, so opening there is a truthful black screen. Prime to where
+      // the stage actually starts instead.
+      w.primeToFirstWait();
+      this.syncCameraToWalker();
+    }
+    if (this.state.all) {
+      $<HTMLInputElement>("#all-regions").checked = true;
+      this.stage?.setVisibility("all");
+    }
+    this.refreshUi();
+  }
+
+  // -- ui wiring ---------------------------------------------------------
+
+  private wireUi(): void {
+    $<HTMLSelectElement>("#stage-select").addEventListener("change", (e) => {
+      this.state.stage = Number((e.target as HTMLSelectElement).value);
+      this.state.block = this.state.step = this.state.op = undefined;
+      this.state.slot = this.state.frame = undefined;
+      this.pushUrl();
+      void this.loadStage();
+    });
+
+    $<HTMLInputElement>("#original-toggle").addEventListener("change", (e) => {
+      this.state.original = (e.target as HTMLInputElement).checked;
+      this.pushUrl();
+      void this.loadStage();
+    });
+
+    for (const b of document.querySelectorAll<HTMLButtonElement>(".mode")) {
+      b.addEventListener("click", () =>
+        this.setMode(b.dataset.mode as PlayerState["mode"]));
+    }
+
+    $<HTMLInputElement>("#all-regions").addEventListener("change", (e) => {
+      const all = (e.target as HTMLInputElement).checked;
+      this.state.all = all || undefined;
+      this.stage?.setVisibility(all ? "all" : "region");
+      this.pushUrl();
+      this.refreshUi();
+    });
+
+    $<HTMLInputElement>("#show-rails").addEventListener("change", (e) => {
+      this.rails?.setVisible((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#show-spawns").addEventListener("change", (e) => {
+      this.spawns.setVisible((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#pillarbox").addEventListener("change", (e) => {
+      this.pillarbox = (e.target as HTMLInputElement).checked;
+      this.resize();
+    });
+
+    $("#btn-play").addEventListener("click", () => this.togglePlay());
+    $("#btn-step").addEventListener("click", () => this.stepOnce());
+    $("#btn-stepback").addEventListener("click", () => this.stepBack());
+    $("#btn-reset").addEventListener("click", () => {
+      this.feed.clear();
+      this.walker?.reset();
+      this.walker?.primeToFirstWait();
+      this.syncCameraToWalker();
+      this.refreshUi();
+      this.pushUrl();
+    });
+
+    $<HTMLSelectElement>("#speed").addEventListener("change", (e) => {
+      this.speed = Number((e.target as HTMLSelectElement).value);
+    });
+
+    $<HTMLSelectElement>("#combat").addEventListener("change", (e) => {
+      const v = Number((e.target as HTMLSelectElement).value);
+      if (!this.walker) return;
+      this.walker.options.simulateCombat = v >= 0;
+      this.walker.options.secondsPerEnemy = Math.max(0, v);
+    });
+
+    const slider = $<HTMLInputElement>("#frame-slider");
+    slider.addEventListener("input", () => {
+      this.scrubbing = true;
+      const w = this.walker;
+      if (!w?.cam) return;
+      w.cam.frame = Number(slider.value);
+      this.syncCameraToWalker();
+      this.state.frame = w.cam.frame;
+      this.pushUrl();
+    });
+    slider.addEventListener("change", () => { this.scrubbing = false; });
+
+    this.tree.onSeek = (t) => this.seekTo(t.block, t.step, t.op);
+    this.feed.onSeek = (t) => this.seekTo(t.block, t.step, t.op);
+    this.minimap.onSeek = (b) => this.seekTo(b, 1, 0);
+
+    window.addEventListener("keydown", (e) => {
+      if (isTyping(e.target)) return;
+      if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
+      else if (e.code === "ArrowRight") { e.preventDefault(); this.stepOnce(); }
+      else if (e.code === "ArrowLeft") { e.preventDefault(); this.stepBack(); }
+      else if (e.code === "Digit1") this.setMode("step");
+      else if (e.code === "Digit2") this.setMode("play");
+      else if (e.code === "Digit3") this.setMode("free");
+    });
+
+    window.addEventListener("popstate", () => {
+      this.state = readState();
+      void this.loadStage();
+    });
+  }
+
+  private setMode(mode: PlayerState["mode"]): void {
+    this.state.mode = mode;
+    for (const b of document.querySelectorAll<HTMLButtonElement>(".mode")) {
+      b.classList.toggle("active", b.dataset.mode === mode);
+    }
+    this.freeRoam.enabled = mode === "free";
+    if (mode === "free") {
+      this.freeRoam.adoptFrom(this.camera);
+      // A region holds only the few models the game draws from one point on
+      // the rail. Free roam therefore shows the whole level -- otherwise most
+      // of it simply is not there.
+      this.stage?.setVisibility("all");
+      this.rails?.setCameraMarkerVisible(true);
+    } else {
+      const all = $<HTMLInputElement>("#all-regions").checked;
+      this.stage?.setVisibility(all ? "all" : "region");
+      this.rails?.setCameraMarkerVisible(false);
+      this.syncCameraToWalker();
+    }
+    this.playing = mode === "play" ? this.playing : false;
+    this.setPlayButton();
+    this.pushUrl();
+    this.refreshUi();
+  }
+
+  private togglePlay(): void {
+    if (this.state.mode === "free") this.setMode("play");
+    this.playing = !this.playing;
+    if (this.playing && this.state.mode === "step") this.setMode("play");
+    this.setPlayButton();
+  }
+
+  private setPlayButton(): void {
+    const b = $("#btn-play");
+    b.textContent = this.playing ? "❚❚" : "▶";
+    b.classList.toggle("playing", this.playing);
+  }
+
+  private stepOnce(): void {
+    const w = this.walker;
+    if (!w) return;
+    this.playing = false;
+    this.setPlayButton();
+    w.stepOnce();
+    this.syncCameraToWalker();
+    this.refreshUi();
+    this.pushUrl();
+  }
+
+  /**
+   * "Previous instruction" replays from the entry block to the op before this
+   * one. There is no undo: an instruction's effect on the region set, the
+   * streamed slots and the camera is not invertible, so the only correct way
+   * back is to run forward again.
+   */
+  private stepBack(): void {
+    const w = this.walker;
+    if (!w) return;
+    this.playing = false;
+    this.setPlayButton();
+    if (w.opIndex > 0) this.seekTo(w.block, w.step, w.opIndex - 1);
+    else if (w.step > 0) {
+      const ops = w.currentBlock?.steps?.[w.step - 1]?.ops?.length ?? 1;
+      this.seekTo(w.block, w.step - 1, Math.max(0, ops - 1));
+    }
+  }
+
+  private seekTo(block: number, step: number, op: number): void {
+    const w = this.walker;
+    if (!w) return;
+    this.playing = false;
+    this.setPlayButton();
+    this.feed.clear();
+    w.seek(block, step, op);
+    this.syncCameraToWalker();
+    this.state.block = block;
+    this.state.step = step;
+    this.state.op = op;
+    this.state.slot = this.state.frame = undefined;
+    this.pushUrl();
+    this.refreshUi();
+  }
+
+  /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
+  private poseFromSlot(slot: number, frame: number): void {
+    const p = this.paths?.paths.get(slot);
+    if (!p) return;
+    p.pose(frame, this.walker?.rollEnabled ?? false, this.pose);
+    applyPose(this.camera, this.pose);
+    this.rails?.highlight(slot, p.start, p.end);
+    this.rails?.setCameraPose(this.pose.eye, this.pose.target);
+  }
+
+  // -- walker callbacks --------------------------------------------------
+
+  private onCamera(cmd: CamCommand): void {
+    const p = this.paths?.paths.get(cmd.slot);
+    this.rails?.highlight(
+      cmd.slot,
+      Math.min(cmd.startFrame, cmd.endFrame),
+      Math.max(cmd.startFrame, cmd.endFrame),
+    );
+    if (!p) {
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: 0x30, name: "cam_play", cat: "camera" },
+        note: `slot ${cmd.slot} is not in this stage's cam file`,
+      });
+    }
+  }
+
+  private onFeed(e: FeedEntry): void {
+    this.feed.push(e);
+  }
+
+  private showBranch(b: BranchChoice | null): void {
+    const overlay = $("#branch-overlay");
+    if (!b) {
+      overlay.hidden = true;
+      return;
+    }
+    overlay.hidden = false;
+    $("#branch-sub").textContent =
+      `block ${b.block} routes to ${b.targets.join(" or ")}. ` +
+      `The arcade picks on a timer; here you can choose.`;
+    const box = $("#branch-buttons");
+    box.replaceChildren(
+      ...b.targets.map((t) => {
+        const btn = document.createElement("button");
+        btn.textContent = `→ block ${t}`;
+        btn.addEventListener("click", () => {
+          this.walker?.takeBranch(t);
+          this.feed.clear();
+          this.refreshUi();
+        });
+        return btn;
+      }),
+    );
+  }
+
+  // -- per-frame ---------------------------------------------------------
+
+  private syncCameraToWalker(): void {
+    const w = this.walker;
+    if (!w || this.state.mode === "free") return;
+    const cam = w.cam;
+    if (!cam) return;
+    const p = this.paths?.paths.get(cam.slot);
+    if (!p) return;
+    p.pose(cam.frame, w.rollEnabled, this.pose);
+    applyPose(this.camera, this.pose);
+    this.rails?.setCameraPose(this.pose.eye, this.pose.target);
+  }
+
+  private frame = (now: number) => {
+    requestAnimationFrame(this.frame);
+    const dt = Math.min(0.1, (now - this.last) / 1000);
+    this.last = now;
+
+    // `?freeze=1` halts the clock and renders exactly one frame, so a test can
+    // assert against a state rather than against a race.
+    if (!this.state.freeze) {
+      if (this.state.mode === "free") {
+        this.freeRoam.update(dt, this.camera);
+      } else if (this.playing && this.walker) {
+        if (this.walker.branch) {
+          this.walker.tickBranchCountdown(dt);
+          const c = this.walker.branch;
+          if (c) {
+            $("#branch-countdown").textContent =
+              `picking in ${Math.max(0, c.countdown).toFixed(1)} s`;
+          }
+        } else {
+          this.accum += dt * this.speed;
+          let guard = 0;
+          while (this.accum >= TICK && guard++ < 600) {
+            this.accum -= TICK;
+            this.walker.tick(TICK);
+            if (this.walker.branch || this.walker.finished) break;
+          }
+          if (!this.scrubbing) this.syncCameraToWalker();
+        }
+        this.refreshUi();
+      }
+    }
+
+    if (this.walker) this.spawns.update(this.walker.spawns);
+    this.renderer.render(this.scene, this.camera);
+  };
+
+  private refreshUi(): void {
+    const w = this.walker;
+    if (!w || !this.stage) return;
+    this.tree.mark(w.block, w.step, w.opIndex);
+    this.minimap.draw(w.block);
+
+    const cam = w.cam;
+    const slider = $<HTMLInputElement>("#frame-slider");
+    const path = cam ? this.paths?.paths.get(cam.slot) : undefined;
+    if (cam && path) {
+      const lo = Math.min(cam.startFrame, cam.endFrame);
+      const hi = Math.max(cam.startFrame, cam.endFrame, lo + 1);
+      slider.min = String(Math.floor(lo));
+      slider.max = String(Math.ceil(hi));
+      if (!this.scrubbing) slider.value = String(cam.frame);
+      slider.disabled = false;
+      $("#frame-label").textContent =
+        `${path.file}[${path.index}] slot ${cam.slot}  ` +
+        `frame ${cam.frame.toFixed(0)} / ${hi.toFixed(0)}` +
+        (cam.isStatic ? "  (static pose)" : "");
+    } else {
+      slider.disabled = true;
+      $("#frame-label").textContent = "no camera path";
+    }
+
+    const op: OpJson | undefined = w.currentOp;
+    this.inspector.show(op ?? null, op ? { summary: opSummary(op) } : undefined);
+
+    const route = w.currentBlock?.route;
+    this.hud.set([
+      ["mode", this.state.mode],
+      ["block", `${w.block}  (${route?.kind ?? "?"}` +
+        `${route && route.next.some((n) => n >= 0)
+          ? " → " + route.next.filter((n) => n >= 0).join(",") : ""})`],
+      ["step / op", `${w.step} / ${w.opIndex}`],
+      ["region", w.region < 0 ? "—" : String(w.region),
+        this.stage.visibility === "all"],
+      ["drawn", `${this.stage.visibleCount} models, ` +
+        `${this.stage.visibleTriangles.toLocaleString()} tris`],
+      ["cam slot", cam ? String(cam.slot) : "—"],
+      ["cam frame", cam ? cam.frame.toFixed(1) : "—"],
+      ["roll channel", w.rollEnabled ? "on (opcode 0x35)" : "off"],
+      ["spawns", `${w.liveEnemies} live / ${w.spawns.length} placed`],
+      ["waiting on", w.wait ? w.wait.blocksOn : "—", !!w.wait],
+      ["bgm", w.bgmTrack === null ? "—" : `track ${w.bgmTrack}`],
+      ["eye", fmtVec(this.camera.position)],
+    ]);
+
+    this.state.block = w.block;
+    this.state.step = w.step;
+    this.state.op = w.opIndex;
+  }
+
+  // -- chrome ------------------------------------------------------------
+
+  private resize(): void {
+    const w = this.viewport.clientWidth;
+    const h = this.viewport.clientHeight;
+    if (w === 0 || h === 0) return;
+    if (this.pillarbox) {
+      // The game is 4:3 and its vertical FOV is fixed, so filling a wide
+      // window would either stretch the image or silently widen the shot.
+      const aspect = 4 / 3;
+      const cw = Math.min(w, h * aspect);
+      const ch = cw / aspect;
+      this.renderer.setSize(cw, ch, true);
+      this.canvas.style.margin = `${(h - ch) / 2}px ${(w - cw) / 2}px`;
+      this.camera.aspect = aspect;
+    } else {
+      this.renderer.setSize(w, h, true);
+      this.canvas.style.margin = "0";
+      this.camera.aspect = w / h;
+    }
+    this.camera.updateProjectionMatrix();
+  }
+
+  private setLoading(text: string | null): void {
+    const el = $("#loading");
+    el.hidden = text === null;
+    if (text !== null) $("#loading-text").textContent = text;
+  }
+
+  private fail(msg: string): void {
+    const el = $("#loading");
+    el.hidden = false;
+    el.querySelector(".spinner")?.remove();
+    const p = $("#loading-text");
+    p.className = "err";
+    p.textContent = msg;
+  }
+
+  private pushUrl(): void {
+    writeState(this.state);
+  }
+}
+
+function fmtVec(v: Vector3): string {
+  return `${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)}`;
+}
+
+void new Player().start();

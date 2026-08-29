@@ -175,3 +175,36 @@ valid slot, and every script references only its own cam file — so this is an
 isolated off-by-one in the data, not a misreading of the format. What the game
 does when it binds slot 418 is unknown; `0x0059C9F8 + 418 * 8` is whatever
 follows the slot array.
+
+## `cam/` — 119 damaged keyframe words in three shipped files
+
+**[measured]** Three `cam/` files carry keyframe words that decode to NaN or to
+~1e38, in **interior** slots that the evaluator can select:
+
+| File | Damaged words | Trailing padding slots |
+|---|---|---|
+| `cp_demo.bin` | 20 | 0 |
+| `cp_st1.bin` | 91 | 12 |
+| `cp_title.bin` | 8 | 0 |
+| **total** | **119** | **12** |
+
+Both retail copies checked are byte-identical here, so this is how the game
+ships, not local corruption. `cp_st1.bin`'s damage is scattered through its
+first four paths, and `st1evtbl` does play those paths.
+
+> ⚠️ **Padding and damage are different things and must not be counted
+> together.** Padding is part of the format: `key_count` is always a power of
+> two because the binary search in `FUN_004040F0` runs a fixed `log2(count)`
+> steps, so short curves are padded and a padding slot is marked by storing
+> `0xFFFF0000` in its time field. Padding is always a *trailing* run. Damage is
+> interior. An earlier note recorded "103 damaged words in cp_st1", which was
+> its 91 damaged words plus its 12 padding slots added together.
+
+`hod2lib.cam.Curve.real_keys` trims the padding and repairs the damage: a
+damaged interior *time* is interpolated between its finite neighbours (times
+are a monotone frame sequence, so the value is determined), and a damaged
+*value* or *tangent* is held from the nearest finite key, which the flat
+neighbouring keys in those curves show to be the intended shape.
+
+`Curve.repairs` counts them and `verify_phase6.py` prints the per-file
+breakdown, so the repair is never silent.

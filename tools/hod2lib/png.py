@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 import zlib
 
-__all__ = ["write_rgba"]
+__all__ = ["write_rgba", "encode_rgba"]
 
 
 def _chunk(tag: bytes, data: bytes) -> bytes:
@@ -13,8 +13,12 @@ def _chunk(tag: bytes, data: bytes) -> bytes:
             + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
 
 
-def write_rgba(path, width: int, height: int, pixels: bytes | bytearray) -> None:
-    """Write RGBA8888 pixel data (len == width*height*4) as a PNG."""
+def encode_rgba(width: int, height: int, pixels: bytes | bytearray) -> bytes:
+    """Encode RGBA8888 pixel data (len == width*height*4) as a PNG in memory.
+
+    Split out from :func:`write_rgba` because GLB packaging embeds the same
+    bytes in a buffer view rather than writing them to a file.
+    """
     if len(pixels) != width * height * 4:
         raise ValueError(
             f"expected {width * height * 4} bytes, got {len(pixels)}")
@@ -29,6 +33,10 @@ def write_rgba(path, width: int, height: int, pixels: bytes | bytearray) -> None
     out += _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
     out += _chunk(b"IDAT", zlib.compress(bytes(raw), 6))
     out += _chunk(b"IEND", b"")
+    return out
 
+
+def write_rgba(path, width: int, height: int, pixels: bytes | bytearray) -> None:
+    """Write RGBA8888 pixel data (len == width*height*4) as a PNG."""
     with open(path, "wb") as fh:
-        fh.write(out)
+        fh.write(encode_rgba(width, height, pixels))

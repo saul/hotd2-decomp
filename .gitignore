@@ -22,6 +22,24 @@ game/
 !inventory.csv
 !extract/README.md
 
+# Web player
+# The client's source is committed; nothing it consumes or produces is.
+# `extract/player/` is game-derived data and is already covered by `extract/`
+# above -- it is named again here because it is the one directory a reader is
+# most likely to be tempted to commit.
+extract/player/
+web/node_modules/
+web/dist/
+web/.vite/
+web/test-results/
+web/playwright-report/
+# Local-only visual diff output. tests/README.md sets the policy: assertions
+# are against hashes and derived metrics, never against embedded asset
+# content -- and a screenshot of a stage IS derived game art.
+web/test/visual/**/*-actual.png
+web/test/visual/**/*-diff.png
+web/test/visual/screenshots/
+
 # Ghidra
 # Project databases and analysis output are local; the scripts that produce
 # them are committed, because reproducibility is the point.

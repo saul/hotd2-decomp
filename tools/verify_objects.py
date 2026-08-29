@@ -41,7 +41,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import cam, exetab, script as scriptlib, stage as stagelib  # noqa: E402
+from hod2lib import (cam, exetab, rigs as rigslib,  # noqa: E402
+                     script as scriptlib, stage as stagelib)
 
 #: FUN_0040AC90's {class_id, handler} pair list, terminated by a negative id.
 CLASS_TABLE = 0x00593358
@@ -144,6 +145,44 @@ def main() -> int:
           f"all defined: {set(classes) <= known_classes}")
     print(f"  most common: "
           + ", ".join(f"{c}x{k}" for k, c in classes.most_common(6)))
+
+    # -- transcribed rigs ---------------------------------------------------
+    slots_tbl = tables.asset_slots()
+    print()
+    print(f"transcribed rigs: {len(rigslib.RIGS)} of 31 CamEvalObjectPath6 callers")
+    for rig in rigslib.RIGS:
+        names = {p.name for p in rig.parts}
+        n_slots = sum(len(p.slots) for p in rig.parts)
+        unresolved = [s for p in rig.parts for s in p.slots if s not in slots_tbl]
+        # every parent reference must name a real part, and the graph must be
+        # acyclic -- ordered_parts() would loop forever otherwise
+        for part in rig.parts:
+            if part.parent and part.parent not in names:
+                problems.append(f"{rig.name}: part {part.name} names a parent "
+                                f"{part.parent!r} that does not exist")
+        try:
+            ordered = rigslib.ordered_parts(rig)
+        except RecursionError:
+            problems.append(f"{rig.name}: parent references form a cycle")
+            ordered = []
+        if len(ordered) != len(rig.parts):
+            problems.append(f"{rig.name}: ordered_parts dropped a part")
+        for part in rig.parts:
+            for s in part.slots:
+                if s not in slots_tbl:
+                    problems.append(f"{rig.name}: part {part.name} draws slot "
+                                    f"{s:#06x}, which no asset slot defines")
+        route = ", ".join(f"{s:#05x}" for s in rig.path_slots) or "-"
+        print(f"  {rig.name:<16} {rig.routine:<14} {len(rig.parts):>2} parts, "
+              f"{n_slots:>2} slots  routes {route}"
+              f"{'  class ' + str(rig.spawn_class) if rig.spawn_class is not None else ''}")
+        if unresolved:
+            print(f"      unresolved slots: {[hex(x) for x in unresolved]}")
+        for slot in rig.path_slots:
+            stem = slot_file.get(slot, "?")
+            if not stem.startswith("op_"):
+                problems.append(f"{rig.name}: route slot {slot} is {stem}, "
+                                f"not an object path")
 
     print()
     print("object-path slot constants found in the draw routines:")

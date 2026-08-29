@@ -63,6 +63,11 @@ class RigPart:
     draw_layer: int | None = None          #: SetDrawLayerNibble, if overridden
     animated: str = ""                     #: runtime rule, not baked
     condition: str = ""                    #: when the routine draws it at all
+    #: Name of the part this one hangs off, when the routine nests a push
+    #: inside another without popping. Empty means a child of the object root,
+    #: which is the usual case -- MatrixStackPush(0) duplicates the top, so
+    #: parts are normally siblings.
+    parent: str = ""
     note: str = ""
 
 
@@ -70,7 +75,16 @@ class RigPart:
 class Rig:
     name: str
     routine: str                           #: the draw routine transcribed
-    path_slots: tuple[int, ...]            #: global cam path slots it follows
+    #: Global cam path slots the routine passes to CamEvalObjectPath6 as a
+    #: literal. Empty when it takes the slot from the object at runtime -- the
+    #: rig is still exported, just parented at the origin rather than to a
+    #: route.
+    path_slots: tuple[int, ...] = ()
+    #: Spawn class this rig belongs to, when the routine is a class handler
+    #: from the table at 0x00593358. A rig with a class can be placed at every
+    #: spawn descriptor of that class, which is how objects that take their
+    #: path slot from the object at runtime still get exported.
+    spawn_class: int | None = None
     parts: tuple[RigPart, ...] = field(default_factory=tuple)
     note: str = ""
 
@@ -155,6 +169,25 @@ ST1_VEHICLE = Rig(
 
 #: Every transcribed rig. One so far -- the others need their routines read.
 RIGS: tuple[Rig, ...] = (ST1_VEHICLE,)
+
+
+def ordered_parts(rig: Rig) -> list[RigPart]:
+    """Parts in an order where a parent always precedes its children."""
+    by_name = {p.name: p for p in rig.parts}
+    out: list[RigPart] = []
+    seen: set[str] = set()
+
+    def emit(p: RigPart, guard: frozenset) -> None:
+        if p.name in seen:
+            return
+        if p.parent and p.parent in by_name and p.parent not in guard:
+            emit(by_name[p.parent], guard | {p.name})
+        seen.add(p.name)
+        out.append(p)
+
+    for part in rig.parts:
+        emit(part, frozenset())
+    return out
 
 
 def rig_for_slot(path_slot: int) -> Rig | None:

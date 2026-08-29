@@ -53,19 +53,38 @@ def _resolve_rigs(game: Path, st) -> list[dict]:
                 cache[file_stem] = ([], None)
         return cache[file_stem]
 
+    # Spawn descriptors, grouped by class, so a rig that is a class handler can
+    # be placed at every instance the event script puts in the stage.
+    placements: dict[int, list[dict]] = {}
+    wanted = {r.spawn_class for r in rigslib.RIGS if r.spawn_class is not None}
+    if wanted:
+        try:
+            prog = scriptlib.load(st)
+        except Exception:
+            prog = None
+        if prog is not None:
+            for blk in prog.blocks:
+                for step in blk.steps:
+                    for op in step.ops:
+                        for sp in op.detail.get("spawns", []) or []:
+                            if sp["class"] in wanted:
+                                placements.setdefault(sp["class"], []).append(sp)
+
     out: list[dict] = []
     for rig in rigslib.RIGS:
         anchors = {}
+        if rig.spawn_class is None and not rig.path_slots:
+            continue
         for slot in rig.path_slots:
             if slot not in have:
                 continue
             ref = cp.by_slot[slot]
             anchors[slot] = f"{ref.file}_{ref.index:02d}_obj"
-        if not anchors:
+        if not anchors and not placements.get(rig.spawn_class):
             continue
 
         parts = []
-        for part in rig.parts:
+        for part in rigslib.ordered_parts(rig):
             models = []
             for sid in part.slots:
                 rec = slots.get(sid)
@@ -78,7 +97,8 @@ def _resolve_rigs(game: Path, st) -> list[dict]:
             if models:
                 parts.append((part, models))
         if parts:
-            out.append({"rig": rig, "anchors": anchors, "parts": parts})
+            out.append({"rig": rig, "anchors": anchors, "parts": parts,
+                        "placements": placements.get(rig.spawn_class, [])})
     return out
 
 

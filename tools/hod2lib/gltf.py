@@ -856,11 +856,19 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
     for entry in rigs or ():
         rig = entry["rig"]
         by_name = {n.get("name"): i for i, n in enumerate(nodes)}
-        for slot in rig.path_slots:
-            anchor = entry["anchors"].get(slot)
-            if anchor is None or anchor not in by_name:
+        # A rig reaches the scene two ways: parented to the animated node of a
+        # route it follows, or placed at every spawn descriptor of its class.
+        targets: list[tuple[str, dict | None, str | None]] = [
+            (f"{slot:03d}", None, entry["anchors"].get(slot))
+            for slot in rig.path_slots if entry["anchors"].get(slot)]
+        targets += [(f"spawn{i:03d}", sp, None)
+                    for i, sp in enumerate(entry.get("placements") or ())]
+
+        for tag, spawn, anchor in targets:
+            if anchor is not None and anchor not in by_name:
                 continue
             part_nodes: list[int] = []
+            node_by_part: dict[str, int] = {}
             for part, models in entry["parts"]:
                 prims = []
                 for model, bank, label in models:
@@ -883,7 +891,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                         })
                 if not prims:
                     continue
-                mesh_name = f"{rig.name}_{slot:03d}_{part.name}"
+                mesh_name = f"{rig.name}_{tag}_{part.name}"
                 meshes.append({"name": mesh_name, "primitives": prims})
                 node = {
                     "mesh": len(meshes) - 1, "name": mesh_name,
@@ -908,20 +916,49 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                 if part.note:
                     node["extras"]["hod2_note"] = part.note
                 nodes.append(node)
-                part_nodes.append(len(nodes) - 1)
+                idx = len(nodes) - 1
+                node_by_part[part.name] = idx
+                # A part is normally a sibling of the object root, because
+                # MatrixStackPush(0) duplicates the top. A routine that nests a
+                # push inside another without popping makes a real chain, and
+                # `parent` carries that.
+                if part.parent and part.parent in node_by_part:
+                    nodes[node_by_part[part.parent]].setdefault(
+                        "children", []).append(idx)
+                    node["extras"]["hod2_parent"] = part.parent
+                else:
+                    part_nodes.append(idx)
 
             if part_nodes:
-                nodes.append({
-                    "name": f"{rig.name}_{slot:03d}",
+                root = {
+                    "name": f"{rig.name}_{tag}",
                     "children": part_nodes,
                     "extras": {"hod2_kind": "rig", "hod2_rig": rig.name,
                                "hod2_routine": rig.routine,
-                               "hod2_path_slot": slot,
                                "hod2_note": rig.note},
-                })
-                # parent it under the animated object-path node so it rides
-                nodes[by_name[anchor]].setdefault("children", []).append(
-                    len(nodes) - 1)
+                }
+                if spawn is not None:
+                    # Placed instance: position and BAMS yaw from the spawn
+                    # descriptor. The other two orientation words are NOT
+                    # confirmed to be angles, so they are carried raw only.
+                    root["translation"] = list(spawn["pos"])
+                    root["rotation"] = list(
+                        _bams_euler_to_quat(0, spawn["orient"][1], 0))
+                    root["extras"].update({
+                        "hod2_spawn_class": spawn["class"],
+                        "hod2_spawn_at": spawn["at"],
+                        "hod2_spawn_hp": spawn["hp"],
+                        "hod2_spawn_orient": spawn["orient"],
+                    })
+                else:
+                    root["extras"]["hod2_path_slot"] = int(tag)
+                nodes.append(root)
+                if anchor is not None:
+                    # parent under the animated object-path node so it rides
+                    nodes[by_name[anchor]].setdefault("children", []).append(
+                        len(nodes) - 1)
+                else:
+                    scene_nodes.append(len(nodes) - 1)
                 n_rigs += 1
 
     # ---- assemble ------------------------------------------------------

@@ -66,6 +66,9 @@ remain. Phases 3, 5 and 8 have known gaps.
 # one whole stage merged into a single file (recommended)
 python3 tools/export_level.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --stage 2
 
+# ...with unlit materials, so a Rendered view is not black (see Lighting below)
+python3 tools/export_level.py --game-dir "..." --stage 2 --unlit
+
 # a single segment
 python3 tools/export_level.py --game-dir "..." --name st2_01
 
@@ -80,6 +83,41 @@ stage2.gltf          the scene
 stage2.bin           geometry buffer
 textures/st2_01/*.png   PNGs, one folder per segment
 ```
+
+### Camera paths
+
+Stage exports include the stage's `cam/` data, grouped under three parent nodes:
+
+| Node | Contents |
+|---|---|
+| `camera_rails` | one polyline per camera path — cyan is where the camera goes, orange is what it looks at |
+| `cameras` | one animated perspective camera per path (`cp_st2_00_cam`, …) |
+| `object_rails` | `op_` object paths, green. Translation only — their rotation encoding is not settled |
+
+The rails are ordinary edge-only meshes, so the whole camera layout is visible
+in the viewport without playing anything. To fly a path, pick its camera in the
+Outliner, `Ctrl+Numpad0` to make it active, and scrub.
+
+Two things to know:
+
+- **glTF animation time is in seconds, and Blender's scene defaults to 24 fps.**
+  The game runs at 60. Set the scene to 60 fps (Output Properties > Frame Rate)
+  and Blender frame numbers line up with game frame numbers.
+- Camera keys are baked every 2 game frames by default. `--cam-step 1` gives
+  exact 60 Hz; `--no-cameras` skips the whole thing.
+
+Field of view is **not** recovered yet — the exported cameras use a neutral 60°.
+Each camera node carries `extras.hod2_yfov_is_a_guess`.
+
+### Lighting: why a Rendered view is black
+
+HOTD2 bakes all illumination into its textures and per-mesh base colour, and
+level geometry ships with **no light sources at all**. So:
+
+- **Material Preview** works out of the box — it uses Blender's built-in HDRI.
+- **Rendered** is black unless you export with `--unlit`, which marks materials
+  `KHR_materials_unlit`. That is the faithful model for this game, not a
+  workaround.
 
 ### Open it in Blender
 
@@ -122,7 +160,16 @@ To verify an export without opening the GUI:
 ```sh
 /Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_check.py \
     -- extract/stage2/stage2.gltf --render
+
+# render through one of the game's own camera paths
+/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_camview.py \
+    -- extract/stage2/stage2.gltf cp_st2_50_cam 90
 ```
+
+`blender_camview.py` reports what the camera is aimed at and the mean luminance
+of the result, so "it came out black" is a measurement rather than an
+impression — and it distinguishes a lighting problem from a camera pointing at
+nothing.
 
 ### Regenerate the baseline CSVs
 

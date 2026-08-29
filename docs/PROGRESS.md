@@ -123,8 +123,12 @@ translation has not been decompiled yet.
 - [x] Materials with `extras.pvr2` raw state words
 - [x] Whole stages merged into one file, one parent node per segment
 - [x] `tools/blender_check.py` headless verification + preview render
-- [ ] Camera splines as glTF animations — unblocked, `cam/` maps directly onto
-      `CUBICSPLINE`
+- [x] Camera splines as glTF animations — `cam/` paths export as visible rail
+      polylines plus animated cameras; verified by rendering through a game
+      camera and getting a recognisable stage-2 shot
+- [x] `--unlit` (`KHR_materials_unlit`) — the game bakes lighting into its
+      textures and ships no lights, so a lit render is black
+- [ ] Camera FOV — not recovered; exported cameras use a neutral 60°
 - [ ] `evt` / `coli` JSON sidecars — `evt/` unblocked
 
 ## Open questions

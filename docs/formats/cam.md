@@ -141,15 +141,37 @@ See [`../re/anomalies.md`](../re/anomalies.md).
 
 ## Export
 
-Each channel becomes a glTF `CUBICSPLINE` sampler. `cp_` paths target a camera
-node — eye from the first three channels, and a look-at built from the next
-three (glTF has no look-at, so the exporter must compose a rotation). `op_`
-paths target ordinary node translation/rotation, with the rotation channels
-converted from BAMS (`65536 = 360°`).
+Implemented in `hod2lib.gltf._emit_paths`, reached from
+`tools/export_level.py --stage N`.
+
+glTF has no look-at, so the exporter composes a rotation per sample: the
+camera's local −Z is set to `normalize(target − eye)`, +Y up, and roll applied
+about the view axis. Because that rotation is a non-linear function of two
+curves, it cannot be expressed as a `CUBICSPLINE` over the source tangents —
+so both translation and rotation are **baked** on a fixed frame grid
+(default every 2 frames) and emitted as `LINEAR`. Times are converted to
+seconds (`frame / 60`).
+
+Each path also produces a visible **rail**: an edge-only `LINE_STRIP` mesh with
+two polylines, the eye track and the look-at track. That makes the camera
+layout inspectable without playback.
+
+`op_` paths export as a translation-only rail. Their three integer channels
+reach the same object fields as the `evt/` spawn descriptor's `+0x14`/`+0x1C`,
+whose meaning is **not** settled — so no rotation is emitted for them rather
+than guessing.
+
+Verified by rendering through an exported camera: `cp_st2_50_cam` at frame 90
+produces a recognisable stage-2 Venice plaza shot, which exercises the keyframe
+layout, the Hermite evaluation, the look-at construction and the coordinate
+space in one go. `tools/blender_camview.py` automates this.
 
 ## Open questions
 
 1. What is the eighth `cp_` descriptor index for? It is always a valid curve.
+   **Field of view is the obvious candidate** — it is the one per-path scalar a
+   camera needs that no other channel supplies. Unverified, so the exporter
+   uses a neutral 60° and flags it.
 2. Which `evt/` opcode selects a path slot? Opcodes `0x18`/`0x19` write the two
    fields at view+0x18/+0x1C that `FUN_004041E0` is called with
    (`FUN_00401F40` passes `DAT_009A3558`/`DAT_009A355C`), so those are the

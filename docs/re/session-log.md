@@ -1172,3 +1172,72 @@ tween opcodes point into. The structure is solved; the residue is semantics.
    scripted actions; this is the cutscene vocabulary.
 4. Chase the remaining 21 % of `evt/` bytes by following `0x0B`/`0x0C` tails.
 5. Stage 3's spawn/geometry mismatch — probably a missing `pol/` prefix.
+
+### Addendum — camera paths in the glTF export
+
+Asked whether the splines were in the stage glTF. They were not: `cam/` parsing
+landed but the exporter had never been wired to it. Now done, and closing two
+Phase 8 boxes.
+
+Per `cp_` path the exporter emits **both** an animated camera and a visible
+**rail** — an edge-only `LINE_STRIP` mesh with two polylines, eye track and
+look-at track. The rail is the more useful half: it shows the whole camera
+layout over the level without playing anything.
+
+**Rotation cannot be a `CUBICSPLINE`.** The plan assumed `cam/` curves would
+map one-for-one onto glTF samplers, and for translation they do. But glTF has
+no look-at, so orientation has to be composed from *two* curves
+(`-Z = normalize(target - eye)`), and that composition is non-linear — the
+source tangents do not carry through it. Both channels are therefore baked on a
+fixed frame grid (default every 2 frames) and emitted `LINEAR`. Faithfulness is
+in the sampling rate, not the interpolation mode.
+
+`op_` paths export translation only. Their three integer channels land in the
+same object fields as the `evt/` spawn descriptor's `+0x14`/`+0x1C`, which this
+session explicitly declined to identify — so emitting them as rotation would be
+guessing twice over.
+
+#### The check that mattered
+
+Rendering through `cp_st2_50_cam` at frame 90 produces a recognisable stage-2
+Venice canal-side plaza. That single image exercises the keyframe layout, the
+Hermite evaluation, the look-at construction and the coordinate space at once,
+and none of them can be wrong if the frame looks like the game.
+`tools/blender_camview.py` is that check, committed.
+
+#### Black renders — a real bug, found by making a wrong assumption first
+
+First render attempt came out black. My initial explanation was the one already
+in the README ("interiors carry no lights, add one"), so I added a sun and
+re-rendered — still black.
+
+**That explanation was incomplete and adding a light was the wrong fix.** HOTD2
+bakes all illumination into its textures and per-mesh base colour and ships
+*no* light sources; the geometry is not meant to be lit at all. The correct
+model is `KHR_materials_unlit`, now available as `export_level.py --unlit`.
+With it, EEVEE renders correctly with **zero** lights in the scene — verified.
+
+Two process notes:
+
+- I very nearly reported "it's just lighting, add a sun" without testing it.
+  Diagnosing with Workbench + FLAT + TEXTURE first removes lighting as a
+  variable entirely, which is why `blender_camview.py` defaults to it and why
+  it ray-casts down the view axis: a camera aimed at nothing and a camera in
+  the dark look identical in a PNG, and they are completely different bugs.
+- `blender_camview.py` prints mean luminance, so "it rendered black" is a
+  number rather than an impression.
+
+#### Smaller traps
+
+- glTF animation time is **seconds**; Blender's scene default is 24 fps while
+  the game runs at 60, so game frame numbers and Blender frame numbers do not
+  agree until the scene is set to 60 fps. The tool sets it; the README says so.
+- Blender 5.2 dropped `BLENDER_EEVEE_NEXT` back to `BLENDER_EEVEE`. The tool
+  picks whichever the running build actually offers instead of hardcoding.
+
+#### Still guessed, and flagged as such
+
+Field of view. The exported cameras use a neutral 60° and carry
+`extras.hod2_yfov_is_a_guess`. The unread eighth curve index in every `cp_`
+descriptor is the obvious candidate — it is the one per-path scalar a camera
+needs that no channel supplies — but that is a hypothesis, not a finding.

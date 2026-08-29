@@ -20,10 +20,11 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import struct
 from pathlib import Path
 
-from . import nl1, png, texbank
+from . import cam as camlib, nl1, png, texbank
 
 __all__ = ["export_level"]
 
@@ -33,6 +34,7 @@ UNSIGNED_INT = 5125
 ARRAY_BUFFER = 34962
 ELEMENT_ARRAY_BUFFER = 34963
 TRIANGLES = 4
+LINE_STRIP = 3
 
 NEAREST, LINEAR = 9728, 9729
 REPEAT, CLAMP_TO_EDGE, MIRRORED_REPEAT = 10497, 33071, 33648
@@ -90,6 +92,16 @@ class _Buf:
         })
         return len(self.accessors) - 1
 
+    def scalar_f32(self, vals: list[float]) -> int:
+        raw = struct.pack("<%df" % len(vals), *vals)
+        view = self.add(raw)
+        self.accessors.append({
+            "bufferView": view, "componentType": FLOAT,
+            "count": len(vals), "type": "SCALAR",
+            "min": [min(vals)], "max": [max(vals)],
+        })
+        return len(self.accessors) - 1
+
     def indices(self, idx: list[int]) -> int:
         raw = struct.pack("<%dI" % len(idx), *idx)
         view = self.add(raw, ELEMENT_ARRAY_BUFFER)
@@ -99,6 +111,106 @@ class _Buf:
             "min": [min(idx) if idx else 0], "max": [max(idx) if idx else 0],
         })
         return len(self.accessors) - 1
+
+
+# ---------------------------------------------------------------------------
+# camera and object paths
+# ---------------------------------------------------------------------------
+
+#: The game's field of view is not yet recovered -- the one unread curve index
+#: in a cp_ descriptor is the obvious candidate but is unconfirmed. 60 degrees
+#: is a neutral stand-in that makes the framing legible in a viewport.
+DEFAULT_YFOV = 1.0472  # 60 deg in radians
+
+#: cam/ roll is stored as an integer and is read through __ftol, like every
+#: other angle in the game, so it is treated as BAMS (65536 = 360 deg). Only
+#: cp_st3 uses it at all, peaking at ~876 = 4.8 deg, which is a plausible
+#: camera tilt; degrees would give 876 deg, which is not.
+BAMS_TO_RAD = math.tau / 65536.0
+
+
+def _norm(v):
+    n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    return (v[0] / n, v[1] / n, v[2] / n) if n > 1e-9 else (0.0, 0.0, -1.0)
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0])
+
+
+def _look_at_quat(eye, target, roll_bams=0.0):
+    """Rotation putting a glTF camera at *eye* looking at *target*.
+
+    glTF cameras look down -Z with +Y up, so the camera's local Z axis is the
+    backward direction. Roll is applied about the view axis.
+    """
+    fwd = _norm((target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]))
+    zax = (-fwd[0], -fwd[1], -fwd[2])
+    up = (0.0, 1.0, 0.0)
+    if abs(fwd[1]) > 0.9999:                      # looking straight up/down
+        up = (0.0, 0.0, 1.0)
+    xax = _norm(_cross(up, zax))
+    yax = _cross(zax, xax)
+
+    if roll_bams:
+        a = roll_bams * BAMS_TO_RAD
+        c, s_ = math.cos(a), math.sin(a)
+        xr = (xax[0] * c + yax[0] * s_, xax[1] * c + yax[1] * s_, xax[2] * c + yax[2] * s_)
+        yr = (yax[0] * c - xax[0] * s_, yax[1] * c - xax[1] * s_, yax[2] * c - xax[2] * s_)
+        xax, yax = xr, yr
+
+    # rotation matrix (columns are the basis vectors) -> quaternion
+    m00, m01, m02 = xax[0], yax[0], zax[0]
+    m10, m11, m12 = xax[1], yax[1], zax[1]
+    m20, m21, m22 = xax[2], yax[2], zax[2]
+    tr = m00 + m11 + m22
+    if tr > 0:
+        s_ = math.sqrt(tr + 1.0) * 2
+        w = 0.25 * s_
+        x = (m21 - m12) / s_
+        y = (m02 - m20) / s_
+        z = (m10 - m01) / s_
+    elif m00 > m11 and m00 > m22:
+        s_ = math.sqrt(1.0 + m00 - m11 - m22) * 2
+        w = (m21 - m12) / s_
+        x = 0.25 * s_
+        y = (m01 + m10) / s_
+        z = (m02 + m20) / s_
+    elif m11 > m22:
+        s_ = math.sqrt(1.0 + m11 - m00 - m22) * 2
+        w = (m02 - m20) / s_
+        x = (m01 + m10) / s_
+        y = 0.25 * s_
+        z = (m12 + m21) / s_
+    else:
+        s_ = math.sqrt(1.0 + m22 - m00 - m11) * 2
+        w = (m10 - m01) / s_
+        x = (m02 + m20) / s_
+        y = (m12 + m21) / s_
+        z = 0.25 * s_
+    n = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
+    return (x / n, y / n, z / n, w / n)
+
+
+def _sample_path(path, channels, step):
+    """Sample a cam/ path on a fixed frame grid, always including the end."""
+    curves = [path.channels.get(c) for c in channels]
+    if any(c is None for c in curves):
+        return []
+    keys = curves[0].real_keys
+    if len(keys) < 2:
+        t0 = keys[0].time if keys else 0.0
+        return [(t0, [c.evaluate(t0) for c in curves])]
+    t0, t1 = keys[0].time, keys[-1].time
+    times = []
+    t = t0
+    while t < t1:
+        times.append(t)
+        t += step
+    times.append(t1)
+    return [(t, [c.evaluate(t) for c in curves]) for t in times]
 
 
 def _wrap_mode(clamp_bit: bool, flip_bit: bool) -> int:
@@ -136,8 +248,141 @@ def _checker(size=128, cells=8):
     return px
 
 
+def _emit_paths(cam_files, buf, nodes, meshes, materials, cameras, animations,
+                fps=60.0, step=2.0):
+    """Add camera/object paths to a glTF document under three parent nodes.
+
+    Produces, per cp_ path:
+      * a two-polyline mesh -- the eye rail and the look-at rail -- so the
+        path is visible in the viewport without playing anything;
+      * an animated perspective camera.
+
+    and per op_ path a single rail polyline. op_ paths carry a BAMS Euler
+    triple rather than a look-at, and what the three components actually mean
+    is not settled (see docs/formats/evt.md), so no rotation is emitted for
+    them -- only the translation, which is confirmed.
+
+    Returns the node indices to add to the scene.
+    """
+    def line_material(rgba, mname):
+        for i, m in enumerate(materials):
+            if m.get("name") == mname:
+                return i
+        materials.append({
+            "name": mname,
+            "pbrMetallicRoughness": {
+                "baseColorFactor": list(rgba),
+                "metallicFactor": 0.0, "roughnessFactor": 1.0,
+            },
+            "emissiveFactor": list(rgba[:3]),
+            "doubleSided": True,
+        })
+        return len(materials) - 1
+
+    def polyline(points, material):
+        return {
+            "attributes": {"POSITION": buf.vec3(points)},
+            "indices": buf.indices(list(range(len(points)))),
+            "material": material,
+            "mode": LINE_STRIP,
+        }
+
+    m_eye = line_material((0.15, 0.85, 1.0, 1.0), "hod2_cam_rail")
+    m_aim = line_material((1.0, 0.55, 0.1, 1.0), "hod2_cam_aim")
+    m_obj = line_material((0.3, 1.0, 0.35, 1.0), "hod2_object_rail")
+
+    rail_nodes, cam_nodes, obj_nodes = [], [], []
+
+    for cf in cam_files:
+        stem = cf.name[:-4] if cf.name.endswith(".bin") else cf.name
+
+        if cf.is_object_path:
+            for path in cf.paths:
+                pts = [v[:3] for _, v in _sample_path(path, camlib.OP_CHANNELS, step)]
+                if len(pts) < 2:
+                    continue
+                nm = f"{stem}_{path.index:02d}_rail"
+                meshes.append({"name": nm, "primitives": [polyline(pts, m_obj)]})
+                nodes.append({
+                    "mesh": len(meshes) - 1, "name": nm,
+                    "extras": {"hod2_kind": "object_path", "hod2_file": stem,
+                               "hod2_path": path.index,
+                               "hod2_duration_frames": path.duration},
+                })
+                obj_nodes.append(len(nodes) - 1)
+            continue
+
+        for path in cf.paths:
+            samples = _sample_path(path, camlib.CP_CHANNELS, step)
+            if len(samples) < 2:
+                continue
+            eyes = [(v[0], v[1], v[2]) for _, v in samples]
+            aims = [(v[3], v[4], v[5]) for _, v in samples]
+            times = [t / fps for t, _ in samples]
+            quats = [_look_at_quat(e, a, v[6])
+                     for (e, a, (_, v)) in zip(eyes, aims, samples)]
+
+            nm = f"{stem}_{path.index:02d}"
+
+            # visible rail: eye polyline + aim polyline in one mesh
+            meshes.append({
+                "name": nm + "_rail",
+                "primitives": [polyline(eyes, m_eye), polyline(aims, m_aim)],
+            })
+            nodes.append({
+                "mesh": len(meshes) - 1, "name": nm + "_rail",
+                "extras": {"hod2_kind": "camera_rail", "hod2_file": stem,
+                           "hod2_path": path.index,
+                           "hod2_duration_frames": path.duration},
+            })
+            rail_nodes.append(len(nodes) - 1)
+
+            # animated camera
+            cameras.append({
+                "type": "perspective", "name": nm + "_cam",
+                "perspective": {"yfov": DEFAULT_YFOV, "znear": 0.1,
+                                "zfar": 20000.0},
+            })
+            nodes.append({
+                "camera": len(cameras) - 1, "name": nm + "_cam",
+                "translation": list(eyes[0]), "rotation": list(quats[0]),
+                "extras": {"hod2_kind": "camera", "hod2_file": stem,
+                           "hod2_path": path.index,
+                           "hod2_duration_frames": path.duration,
+                           "hod2_yfov_is_a_guess": True},
+            })
+            cam_node = len(nodes) - 1
+            cam_nodes.append(cam_node)
+
+            t_in = buf.scalar_f32(times)
+            animations.append({
+                "name": nm,
+                "samplers": [
+                    {"input": t_in, "output": buf.vec3(eyes),
+                     "interpolation": "LINEAR"},
+                    {"input": t_in, "output": buf.vec4(quats),
+                     "interpolation": "LINEAR"},
+                ],
+                "channels": [
+                    {"sampler": 0, "target": {"node": cam_node, "path": "translation"}},
+                    {"sampler": 1, "target": {"node": cam_node, "path": "rotation"}},
+                ],
+            })
+
+    out = []
+    for children, label in ((rail_nodes, "camera_rails"),
+                            (cam_nodes, "cameras"),
+                            (obj_nodes, "object_rails")):
+        if children:
+            nodes.append({"name": label, "children": children,
+                          "extras": {"hod2_kind": label}})
+            out.append(len(nodes) - 1)
+    return out
+
+
 def export_level(name, parts, out_dir, collision=None, write_textures=True,
-                 uv_check=False, keep_collapsed_uv=False):
+                 uv_check=False, keep_collapsed_uv=False, cam_files=None,
+                 cam_step=2.0, unlit=False):
     """Write one or more parts to <out_dir>/<name>.gltf plus .bin and textures/.
 
     ``parts`` is a list of (part_name, models, bank). A stage is split across
@@ -298,6 +543,14 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
                                     "decal_alpha", "modulate_alpha"][mesh.texture_shading],
             }
         }
+        if unlit:
+            # HOTD2 does no runtime lighting on level geometry: illumination is
+            # baked into the textures and the per-mesh base colour, and the
+            # levels ship with no light sources at all. KHR_materials_unlit is
+            # therefore the faithful model, not a shortcut -- and it is what
+            # stops a Rendered view from coming out black.
+            mat.setdefault("extensions", {})["KHR_materials_unlit"] = {}
+
         materials.append(mat)
         mat_cache[key] = len(materials) - 1
         return mat_cache[key]
@@ -367,6 +620,15 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
                           "extras": {"hod2_kind": "collision"}})
             scene_nodes.append(len(nodes) - 1)
 
+    # ---- camera and object paths ---------------------------------------
+    cameras: list[dict] = []
+    animations: list[dict] = []
+    n_paths = 0
+    if cam_files:
+        scene_nodes.extend(_emit_paths(cam_files, buf, nodes, meshes, materials,
+                                       cameras, animations, step=cam_step))
+        n_paths = sum(len(c.paths) for c in cam_files)
+
     # ---- assemble ------------------------------------------------------
     bin_name = f"{name}.bin"
     (out_dir / bin_name).write_bytes(bytes(buf.data))
@@ -390,6 +652,12 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
         doc["textures"] = textures
     if samplers:
         doc["samplers"] = samplers
+    if cameras:
+        doc["cameras"] = cameras
+    if animations:
+        doc["animations"] = animations
+    if unlit:
+        doc["extensionsUsed"] = ["KHR_materials_unlit"]
 
     (out_dir / f"{name}.gltf").write_text(json.dumps(doc, indent=1))
 
@@ -401,4 +669,7 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
         "materials": len(materials),
         "textures": len(textures),
         "buffer_bytes": len(buf.data),
+        "cameras": len(cameras),
+        "animations": len(animations),
+        "paths": n_paths,
     }

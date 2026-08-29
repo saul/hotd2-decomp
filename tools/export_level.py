@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import container as C, exetab, gltf, nl1, texbank  # noqa: E402
+from hod2lib import cam, container as C, exetab, gltf, nl1, texbank  # noqa: E402
 
 _TABLES: exetab.ExeTables | None = None
 
@@ -62,6 +62,30 @@ def load_asset(game: Path, name: str):
     return models, bank
 
 
+def load_cam_paths(game: Path, stage: int | None, name: str | None):
+    """cam/ files belonging to a stage: cp_stN (camera) and op_stN (objects).
+
+    Returns [] when the asset has no matching camera file, which is normal --
+    only the six stages and a handful of cutscenes have one.
+    """
+    stems: list[str] = []
+    if stage is not None:
+        stems = [f"cp_st{stage}", f"op_st{stage}"]
+    elif name:
+        # st2_07 -> stage 2
+        import re
+        m = re.match(r"st(\d+)_", name)
+        if m:
+            stems = [f"cp_st{m.group(1)}", f"op_st{m.group(1)}"]
+
+    out = []
+    for stem in stems:
+        p = game / "cam" / f"{stem}.bin"
+        if p.exists():
+            out.append(cam.load(str(p)))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", required=True, type=Path)
@@ -74,6 +98,15 @@ def main() -> int:
     ap.add_argument("--keep-collapsed-uv", action="store_true",
                     help="keep triangles whose UV area is zero (they render as "
                          "hard directional streaks; dropped by default)")
+    ap.add_argument("--no-cameras", action="store_true",
+                    help="skip cam/ camera and object paths")
+    ap.add_argument("--cam-step", type=float, default=2.0,
+                    help="frames between baked camera keys (default 2, i.e. 30 Hz)")
+    ap.add_argument("--unlit", action="store_true",
+                    help="mark materials KHR_materials_unlit. The game bakes "
+                         "all lighting into its textures and ships no lights, "
+                         "so this is the faithful model - and it stops "
+                         "Blender's Rendered view from being black")
     ap.add_argument("--uv-check", action="store_true",
                     help="replace every texture with a UV checkerboard, so "
                          "stretched or rotated faces are visually obvious")
@@ -105,12 +138,15 @@ def main() -> int:
                   f"{sum(m.vertex_count for m in models):,} verts, "
                   f"{sum(m.triangle_count for m in models):,} tris")
 
+        cam_files = [] if args.no_cameras else load_cam_paths(game, args.stage, None)
         name = f"stage{args.stage}" + ("_uvcheck" if args.uv_check else "")
         out_dir = args.out / name
         info = gltf.export_level(name, parts, out_dir,
                                  write_textures=not args.no_textures,
                                  uv_check=args.uv_check,
-                                 keep_collapsed_uv=args.keep_collapsed_uv)
+                                 keep_collapsed_uv=args.keep_collapsed_uv,
+                                 cam_files=cam_files, cam_step=args.cam_step,
+                                 unlit=args.unlit)
         vert = sum(m.vertex_count for _, ms, _ in parts for m in ms)
         tri = sum(m.triangle_count for _, ms, _ in parts for m in ms)
         print(f"\n{name}: {len(parts)} segments, {vert:,} verts, "
@@ -119,6 +155,9 @@ def main() -> int:
         if info['dropped_collapsed_uv']:
             print(f"  dropped {info['dropped_collapsed_uv']:,} collapsed-UV "
                   f"triangles ({100 * info['dropped_collapsed_uv'] / max(tri, 1):.1f}%)")
+        if info['paths']:
+            print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
+                  f"cameras + rails ({', '.join(c.name for c in cam_files)})")
         print(f"  -> {info['gltf']}")
         return 0
 
@@ -128,14 +167,20 @@ def main() -> int:
     name = args.name
     models, bank = load_asset(game, name)
     out_dir = args.out / name
+    cam_files = [] if args.no_cameras else load_cam_paths(game, None, name)
     info = gltf.export_level(name, [(name, models, bank)], out_dir,
                              write_textures=not args.no_textures,
-                             uv_check=args.uv_check)
+                             uv_check=args.uv_check,
+                             cam_files=cam_files, cam_step=args.cam_step,
+                             unlit=args.unlit)
     tri = sum(m.triangle_count for m in models)
     vert = sum(m.vertex_count for m in models)
     bank_note = f"  bank: {len(bank.offsets)} textures" if bank else ""
     print(f"{name}: {len(models)} models, {vert:,} verts, {tri:,} tris, "
           f"{info['materials']} materials, {info['textures']} textures{bank_note}")
+    if info['paths']:
+        print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
+              f"cameras + rails ({', '.join(c.name for c in cam_files)})")
     print(f"  -> {info['gltf']}")
     return 0
 

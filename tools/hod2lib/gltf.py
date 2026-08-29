@@ -596,9 +596,14 @@ def export_level(name, parts, out_dir, collision=None, write_textures=True,
                 # overlap, so a whole-stage export shows geometry the game
                 # never displays together; this is how to tell them apart.
                 if model_regions:
-                    regs = model_regions.get((part_name, mi))
-                    if regs is not None:
-                        node["extras"] = {"hod2_regions": regs}
+                    info = model_regions.get((part_name, mi))
+                    if info is not None:
+                        node["extras"] = {
+                            "hod2_regions": info["regions"],
+                            # 0 default, 1 lit by the scene light array when the
+                            # opcode-0x14 toggle is on, 2 drawn in an earlier layer
+                            "hod2_draw_mode": info["draw_mode"],
+                        }
                 nodes.append(node)
                 child_nodes.append(len(nodes) - 1)
 

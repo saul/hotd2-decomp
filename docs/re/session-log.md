@@ -1496,3 +1496,70 @@ fresh import reproduces them.
 3. Region → camera path correlation: both are now recoverable, so the intended
    view for any point in a stage can be reconstructed. That would settle
    question 13 (whether collapsed-UV faces are ever on screen).
+
+### Addendum 5 — `draw_mode` solved: it is a lighting selector
+
+The second `s16` of a region id entry. Three values, distribution across all
+scenes: **470 mode 0, 90 mode 1, 4 mode 2**.
+
+#### Mode 1 — scene light array
+
+`RegionDrawResidentSet` sends mode-1 entries through a different submit routine
+when the opcode-`0x14` toggle `DAT_009A2BB4` is set. The two submit routines are
+**identical except for one field**:
+
+```c
+RenderSubmitModelDefaultLight:  cmd.flags = 0
+RenderSubmitModelSceneLights:   cmd.flags = 0x04000000
+```
+
+`RenderEnqueueCommand` tests that bit and swaps the D3D7 lighting setup:
+
+```c
+if ((flags ^ prev) & 0x0C000000)
+    (flags & 0x04000000) ? SetLightingSceneArray()      /* up to 16 lights */
+                         : SetLightingDefaultSingle();  /* one directional */
+```
+
+The identification is anchored on a measurement rather than a guess: the light
+array at `0x007E7AA8` has a stride of `0x1A` dwords = **104 bytes**, which is
+exactly `sizeof(D3DLIGHT7)`, and the enable loop runs 0–15. That fixes the
+device vtable offsets `+0x48 SetLight`, `+0x50 SetRenderState`,
+`+0xB0 LightEnable`, and `0x8B` = `D3DRENDERSTATE_AMBIENT`.
+
+Opcode `0x14` — previously `set_g_2bb4` — is `set_scene_lighting`, operand 0/1
+(19 zeros, 39 ones across the corpus). So the script turns the richer lighting
+on and off, and region entries opt in per model.
+
+#### Mode 2 — draw layer
+
+`SetDrawLayerNibble(n)` stores `n & 0xF`; `RenderEnqueueCommand` ORs it into the
+command header. `RenderInitStates` sets the default to **8**, and mode 2
+brackets the draw with 7 then 8 — an *earlier* layer. Only four entries in the
+game use it, all stage 1.
+
+#### Not claimed
+
+The other render-state numbers in `RenderInitStates` are left unmapped. They
+need the DX7 GDT, which is still the deferred Phase 1 item. Guessing enum names
+from memory is exactly the failure mode `method.md` warns about.
+
+#### Exported
+
+`extras.hod2_draw_mode` on every model node. Stage 2: 108 mode-0, 9 mode-1
+(`st2_13[0..3]`, `st2_12[0..1]`, `st2_06[3..4]`, `st2_02b[1]`), no mode-2.
+
+#### Note on the naming gate
+
+The MCP rejected `AssetDrawSlotSceneLights` and `AssetDrawSlotLitByScene` as
+token-subset collisions with `AssetDrawSlot` — correctly. Both differ from the
+existing name only by appended tokens, which hides *why* they differ. Settled on
+`SubmitSlotWithSceneLightArray`.
+
+#### Next
+
+1. Mode-1 region tables at `0x00576A8C`/`0x00576ABC` — a complete second set for
+   game mode 1, still unexamined.
+2. Import the DX7 GDT and map the render states in `RenderInitStates`; that
+   feeds Phase 5 directly.
+3. Region → camera path correlation, to reconstruct the intended view.

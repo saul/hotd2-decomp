@@ -179,6 +179,50 @@ a whole-stage export are never on screen together. `export_level.py` writes a
 `<stage>_regions.json` sidecar and tags every model node with
 `extras.hod2_regions` so the sets can be told apart.
 
+### `draw_mode` — how a region entry is submitted
+
+**[proved]** The second `s16` of a region id entry selects one of three paths in
+`RegionDrawResidentSet`.
+
+| Mode | Count | Path |
+|---|---|---|
+| 0 | 470 | `AssetDrawSlot` → `RenderSubmitModelDefaultLight`, draw command flags `0` |
+| 1 | 90 | when the opcode-`0x14` toggle `DAT_009A2BB4` is set: `SubmitSlotWithSceneLightArray` → `RenderSubmitModelSceneLights`, flags `0x04000000`. Falls back to mode 0 when clear |
+| 2 | 4 | mode-0 draw bracketed by `SetDrawLayerNibble(7)` / `SetDrawLayerNibble(8)` |
+
+**Mode 1 is a lighting selector.** The two submit routines are byte-for-byte
+identical except for the command's flag word. `RenderEnqueueCommand` tests
+bit `0x04000000` and installs one of two D3D7 light setups:
+
+```c
+if ((flags ^ prev) & 0x0C000000) {
+    if (!(flags & 0x04000000)) SetLightingDefaultSingle();  /* 1 dir light  */
+    else                       SetLightingSceneArray();     /* up to 16     */
+}
+```
+
+- `SetLightingDefaultSingle` — `SetRenderState(D3DRENDERSTATE_AMBIENT, …)`,
+  `SetLight(0, …)`, `LightEnable(0, TRUE)`, then `LightEnable(1..15, FALSE)`.
+  One directional light, colour scaled ×1.4 with a ×0.3 secondary term.
+- `SetLightingSceneArray` — walks an array of up to **16** light structures at
+  `0x007E7AA8`, enabling each per a parallel flag array. **[proved]** the stride
+  is `0x1A` dwords = **104 bytes**, exactly `sizeof(D3DLIGHT7)`.
+
+Device vtable offsets used, identified from that stride and the 0–15 loop:
+`+0x48` `SetLight`, `+0x50` `SetRenderState`, `+0xB0` `LightEnable`.
+Render-state *numbers* other than `0x8B` (`D3DRENDERSTATE_AMBIENT`) are not yet
+mapped — that needs the DX7 GDT, still deferred from Phase 1.
+
+**Mode 2 is a draw-order override.** `SetDrawLayerNibble(n)` stores `n & 0xF`,
+which `RenderEnqueueCommand` ORs into the command header alongside
+`0x40000000`. `RenderInitStates` sets the default to **8**, so bracketing with
+7 puts the model in an *earlier* layer. Only four entries in the whole game use
+it, all in stage 1 (`st1_01b[0]`, `st1_05[0]`).
+
+Exported as `extras.hod2_draw_mode` on every model node. Stage 2 has 9 mode-1
+models (`st2_13[0..3]`, `st2_12[0..1]`, `st2_06[3..4]`, `st2_02b[1]`) and no
+mode-2.
+
 ### The real stage geometry set
 
 **Globbing `st<N>_*` is wrong in both directions.** The authoritative set is

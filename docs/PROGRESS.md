@@ -89,6 +89,9 @@ translation has not been decompiled yet.
 - [x] Document blend factors — two modes in use, standard and additive
 - [x] Document list assignment — no punch-through anywhere in the game
 - [x] Alpha handling incl. `IgnoreTexAlpha` opaque variants
+- [x] Two lighting setups identified: `SetLightingDefaultSingle` (one
+      directional) vs `SetLightingSceneArray` (up to 16 `D3DLIGHT7`), selected
+      by draw-command bit `0x04000000` — see `formats/pipeline.md`
 - [ ] Document texture shading, UV clamp/flip, filtering, fog
 - [ ] Document shading modes and environment mapping
 

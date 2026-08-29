@@ -141,6 +141,8 @@ def stage_geometry(game: Path, stage: int, scene: int):
                         if rec:
                             wanted.setdefault(rec[0], set()).add(rec[1])
 
+    draw_modes = tables.scene_draw_modes(scene)
+    slot_of: dict[tuple[str, int], int] = {v: k for k, v in slots.items()}
     parts, model_regions = [], {}
     for fname in sorted(wanted):
         stem = fname[:-4] if fname.endswith(".bin") else fname
@@ -158,8 +160,11 @@ def stage_geometry(game: Path, stage: int, scene: int):
             except Exception:
                 continue
             for m in (got if isinstance(got, list) else [got]):
-                model_regions[(stem, len(models))] = sorted(
-                    slot_regions.get((fname, entry), ()))
+                slot_id = slot_of.get((fname, entry))
+                model_regions[(stem, len(models))] = {
+                    "regions": sorted(slot_regions.get((fname, entry), ())),
+                    "draw_mode": draw_modes.get(slot_id, 0) if slot_id is not None else 0,
+                }
                 models.append(m)
         if models:
             parts.append((stem, models, bank))

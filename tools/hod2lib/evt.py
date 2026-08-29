@@ -109,7 +109,9 @@ OPCODES: dict[int, Op] = {
     0x11: ("mark_list_b", "list", 0),       # FUN_0045F160
     0x12: ("set_pending_ids_bias", "list", 0),  # FUN_00408CC0
     0x13: ("set_stage_params", "list", 0),  # FUN_0045F190
-    0x14: ("set_g_2bb4", "fix", 2),
+    # DAT_009A2BB4: enables the scene light array for draw_mode 1 region
+    # entries. Operand is 0/1. See docs/formats/pipeline.md.
+    0x14: ("set_scene_lighting", "fix", 2),
     0x15: ("set_g_8d4c", "fix", 2),
     0x16: ("set_fog_or_clear3", "fix", 4),  # FUN_00480D20, 3 deref'd args
     0x17: ("cam_pair_c", "fix", 4),         # FUN_0045F2A0 -> FUN_0040E370

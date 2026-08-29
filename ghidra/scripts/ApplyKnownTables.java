@@ -56,7 +56,7 @@ public class ApplyKnownTables extends GhidraScript {
         "spawn_if_mode2_d", "spawn_placed", "spawn_simple", "spawn_obj",
         "spawn_obj_c", "spawn_obj_unless_skip", "set_slot_xyz", "set_lod_ids",
         "mark_hittest_a", "mark_hittest_b", "set_lod_ids_bias", "set_stage_params",
-        "set_g_2bb4", "set_g_8d4c", "set_fog_or_clear3", "cam_pair_c",
+        "set_scene_lighting", "set_g_8d4c", "set_fog_or_clear3", "cam_pair_c",
         "cam_angles_a", "cam_angles_b", "set_g_8e58", "set_g_2c34",
         "set_g_a090", "set_g_8e50", "set_g_8a78", "set_g_a0f4",
         "view1_set", "view1_tween_rate", "view1_stop", "view1_tween_time",
@@ -111,6 +111,15 @@ public class ApplyKnownTables extends GhidraScript {
         {"0041D5A0", "AssetRunJob"},
         {"0045ECC0", "EvtInterpreterLoop"},
         {"0045F000", "EvtAdvanceBlockOrRoute"},
+        {"004185E0", "SubmitSlotWithSceneLightArray"},
+        {"00480CE0", "EvtOpSetSceneLighting14"},
+        {"004A7630", "RenderInitStates"},
+        {"004A79F0", "SetDrawLayerNibble"},
+        {"004A7E50", "RenderEnqueueCommand"},
+        {"004AA120", "SetLightingDefaultSingle"},
+        {"004AA2B0", "RenderSubmitModelDefaultLight"},
+        {"004AA500", "RenderSubmitModelSceneLights"},
+        {"004AA8B0", "SetLightingSceneArray"},
     };
 
     /* queue_event selector -> name, for the 9 selectors the scripts use */

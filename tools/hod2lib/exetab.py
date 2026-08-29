@@ -395,6 +395,23 @@ class ExeTables:
     #   0x00576A2C  ptr  scene -> region table, 0x18 bytes per region,
     #                    s16 ids terminated by -1 (max 12 entries)
     #   0x00576A5C  ptr  scene -> id table, 4 bytes: {s16 asset_slot, s16 draw_mode}
+    #
+    # draw_mode selects how RegionDrawResidentSet submits the model:
+    #
+    #   0  default        AssetDrawSlot -> RenderSubmitModelDefaultLight
+    #                     draw command flags = 0
+    #   1  scene-lit      when the opcode-0x14 toggle DAT_009A2BB4 is set,
+    #                     AssetDrawSlotLitByScene -> RenderSubmitModelSceneLights
+    #                     draw command flags = 0x04000000. That bit makes
+    #                     RenderEnqueueCommand install SetLightingSceneArray
+    #                     (up to 16 D3DLIGHT7s) instead of the default single
+    #                     directional light. Falls back to mode 0 when the
+    #                     toggle is clear.
+    #   2  early layer    the draw is bracketed by SetDrawLayerNibble(7) /
+    #                     SetDrawLayerNibble(8). That nibble is OR'd into the
+    #                     command header, and 8 is the default from
+    #                     RenderInitStates -- so mode 2 pushes the model into
+    #                     an earlier draw layer.
     #   0x00576A8C / 0x00576ABC   the same pair for game mode 1
     #
     # The indirection means several regions can share an id entry.
@@ -464,6 +481,17 @@ class ExeTables:
             out.append(entries)
         while out and not out[-1]:
             out.pop()
+        return out
+
+    #: draw_mode values, see the note above.
+    DRAW_DEFAULT, DRAW_SCENE_LIT, DRAW_EARLY_LAYER = 0, 1, 2
+
+    def scene_draw_modes(self, scene: int, mode1: bool = False) -> dict[int, int]:
+        """asset slot -> draw_mode, for every slot any region of a scene draws."""
+        out: dict[int, int] = {}
+        for region in self.scene_regions(scene, mode1):
+            for slot, mode in region:
+                out[slot] = max(out.get(slot, 0), mode)
         return out
 
     def scene_geometry_slots(self, scene: int, mode1: bool = False) -> list[int]:

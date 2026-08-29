@@ -179,6 +179,13 @@ function defaultChannels(): number[] {
   return c;
 }
 
+/**
+ * The waits that test the skip flag: `wait_queued_events_done` (0x40),
+ * `wait_camera_path_frame` (0x41) and `wait_frames` (0x42). The enemy-count
+ * and flag waits above 0x42 do not test it.
+ */
+const SKIPPABLE_WAITS = new Set([0x40, 0x41, 0x42]);
+
 /** How far a wait opcode can be honoured from the bundle alone. */
 const WAIT_NOTES: Record<number, string> = {
   0x40: "approximated: resolves when the current camera move ends",
@@ -213,6 +220,44 @@ export class Walker {
   backdropMode = 0;
   /** evt 0x1F: the HUD shutter state, 0..8. */
   shutterState = 2;
+  /**
+   * `DAT_009C8E00` -- the firing gate, set by the shutter machine
+   * (`FUN_00413970`): 1 in states 0, 1 and 6, and 0 in state 5 and when a
+   * state-3 close completes. It is not simply "the shutter is open": states 0
+   * and 5 both draw a closed shutter and set it to 1 and 0 respectively, so a
+   * boss intro can be letterboxed and still let you shoot.
+   */
+  firingGate = true;
+  /** Frames left of a state-3 close, after which the gate drops. */
+  private gateCloseLeft = 0;
+  /**
+   * `DAT_009A2D7C` -- set by `set_skippable_region` (0x2C). Non-zero means the
+   * script has opened a region the player is allowed to skip out of.
+   */
+  skippable = false;
+  /**
+   * `DAT_009A2D74` -- the skip flag every wait opcode tests.
+   *
+   * In the retail build this is never raised. The machinery is all there:
+   * both player-update routines (`FUN_00414940`, `FUN_00414B90`) end with
+   *
+   * ```c
+   * if (DAT_009c8e00 == 0 && DAT_009a2d7c != 0) {   // cutscene, skippable
+   *     mask[0] = 0x2; mask[1] = 0x20000;           // Start, player 1 / 2
+   *     if (mask[player] & _DAT_009c9028) DAT_009a1a18 = 1;
+   * }
+   * ```
+   *
+   * -- but `DAT_009a1a18` has **two writers and no readers anywhere in the
+   * binary**, and the only two writers of `DAT_009A2D74` itself
+   * (`EvtOpSetSkippableRegion2C` and the scene reset `FUN_0045EBC0`) both
+   * store 0. One assignment is missing and the whole feature is inert.
+   *
+   * Everything downstream of the flag is intact and is transcribed exactly,
+   * so the player supplies that one assignment from the UI: {@link requestSkip}
+   * is the line the retail build does not have. Nothing else here is invented.
+   */
+  skipRequested = false;
   /** evt 0x1D: rain. Only stage 1 ever turns it on. */
   rain = false;
   /** evt 0x15: the two players' gun spotlights. Gated by 0x14. */
@@ -356,6 +401,10 @@ export class Walker {
     this.backdropPreset = -1;
     this.backdropMode = 0;
     this.shutterState = 2;
+    this.firingGate = true;
+    this.gateCloseLeft = 0;
+    this.skippable = false;
+    this.skipRequested = false;
     this.rain = false;
     this.gunLights = false;
     this.sceneLighting = false;
@@ -463,6 +512,16 @@ export class Walker {
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.stepTweens(dt * fps);
 
+    // The shutter's 40-frame close, after which the firing gate drops and the
+    // game starts offering a skip.
+    if (this.gateCloseLeft > 0) {
+      this.gateCloseLeft -= dt * fps;
+      if (this.gateCloseLeft <= 0) {
+        this.gateCloseLeft = 0;
+        this.firingGate = false;
+      }
+    }
+
     if (this.options.simulateCombat) {
       for (const s of this.spawns) {
         if (s.secondsLeft !== null && s.secondsLeft > 0) {
@@ -493,6 +552,47 @@ export class Walker {
            guard++ < 4096) {
       if (!this.executeOne(false)) break;
     }
+  }
+
+  /**
+   * The firing gate, exactly as `FUN_00413970` drives it.
+   *
+   * States 0, 1 and 6 raise it; state 5 drops it at once; state 3 drops it
+   * only when the 40-frame close completes, which is why the countdown is
+   * kept rather than the gate simply following the state.
+   */
+  private applyFiringGate(state: number): void {
+    this.gateCloseLeft = 0;
+    if (state === 0 || state === 1 || state === 6) this.firingGate = true;
+    else if (state === 5) this.firingGate = false;
+    else if (state === 3) this.gateCloseLeft = 40;
+  }
+
+  /**
+   * True when the game would be offering a skip: inside a skippable region
+   * (`DAT_009A2D7C`) with the firing gate down (`DAT_009C8E00 == 0`).
+   */
+  get canSkip(): boolean {
+    return this.skippable && !this.firingGate && !this.finished;
+  }
+
+  /**
+   * Raise the skip flag -- the one assignment the retail build is missing.
+   *
+   * Pressing Start is what reaches this point in the game; see the note on
+   * {@link skipRequested}. Everything the flag then does is the game's own
+   * code. Returns false when the game would not have offered a skip.
+   */
+  requestSkip(): boolean {
+    if (!this.canSkip) return false;
+    this.skipRequested = true;
+    // The waits are re-run every frame, so one already pending is released
+    // the same way a new one is passed straight through.
+    if (this.wait && SKIPPABLE_WAITS.has(this.wait.op.op)) {
+      this.wait = null;
+      this.opIndex++;
+    }
+    return true;
   }
 
   private waitSatisfied(): boolean {
@@ -597,7 +697,26 @@ export class Walker {
         return undefined;
       case 0x1f: // set_hud_shutter_state
         this.shutterState = op.value ?? 0;
+        this.applyFiringGate(this.shutterState);
         return quiet ? undefined : this.host.setShutter(this.shutterState);
+      case 0x2c: // set_skippable_region
+        // EvtOpSetSkippableRegion2C:
+        //   arg != 0 -> DAT_009a2230 = 0; DAT_009a2d7c = 1
+        //   arg == 0 -> DAT_009a2d7c = 0; skip flag = 0
+        // Closing the region always clears the flag, so a skip never carries
+        // past the region it was asked for.
+        this.skippable = (op.raw?.length
+          ? Number.parseInt(op.raw[0], 16) : (op.value ?? 0)) !== 0;
+        if (!this.skippable) this.skipRequested = false;
+        return this.skippable ? "skippable region open" : "skippable region closed";
+      case 0x2e: // resume_bgm_if_skipped
+        // `if (skip) PlaySoundId(0x80000002)` -- restart the BGM a skipped
+        // cutscene interrupted. Inert unless a skip actually happened.
+        if (this.skipRequested && !quiet) {
+          this.host.playSound(0x80000002);
+          return "BGM resumed after a skip";
+        }
+        return undefined;
       case 0x2d: // show_screen_message
         return quiet || op.message_group === undefined
           ? undefined
@@ -846,6 +965,16 @@ export class Walker {
     const blocksOn = op.blocks_on ?? "";
     const arg = op.arg ?? 0;
     let policy: WaitPolicy;
+
+    // Every one of these opcodes opens with the same test -- 0x40 and 0x41
+    // with `if (skip == 0) { ...block... }`, 0x42 with `if (skip != 0)
+    // { clear and advance }` -- so a raised flag walks straight past them.
+    // The flag is not cleared here: it stays up until `set_skippable_region`
+    // closes the region, which is what makes one press skip a whole cutscene
+    // rather than a single wait.
+    if (this.skipRequested && SKIPPABLE_WAITS.has(op.op)) {
+      return `${blocksOn} -- skipped`;
+    }
 
     if (op.op === 0x42) {
       policy = { kind: "frames", framesLeft: arg };

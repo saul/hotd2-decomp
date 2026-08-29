@@ -198,13 +198,13 @@ inference; **[open]** = undetermined.
 | `1C` | `set_backdrop_mode` | **[proved]** 0 = off, 2 = drawn but frozen, else drawn and animating. The mode selector for `1B` |
 | `1D` | `enable_rain` | **[proved]** `FUN_004136A0`: 50 particles falling 2.0/frame in a camera-attached volume, drawn as asset `0x53` at alpha 0.5 in draw layer `0xE`. See below. Also swaps the impact effect to a wet variant. "rain" is still inference from the fall speed and the 3.5× vertical stretch |
 | `1E` | *(dead)* | **[proved]** `DAT_009C8A78` has **no readers anywhere in the binary**. Vestigial; its intent is unrecoverable |
-| `1F` | `set_hud_shutter_state` | **[proved]** 9 states. Draws asset `0x93E` at view-space `y = ±0.35, z = −1.0` and drives `DAT_009C8E00`, the gate on firing and ammo decrement. States 4/5 hide the HUD and lock out shooting; 1/2/6 show it |
+| `1F` | `set_hud_shutter_state` | **[proved]** 9 states. Draws asset `0x93E` at view-space `y = ±0.35, z = −1.0` — and that positions the quad's **origin**: `0x93E` is `common.bin` model 129, a four-vertex quad 1.03 × 0.10, so a closed bar spans 0.30–0.40 and its inner edge is at 80 % of the 0.3748 frustum half-height, a 10 % letterbox. Also drives `DAT_009C8E00`, the gate on firing and ammo decrement: 1 in states 0/1/6, 0 in state 5 and when a state-3 close completes. State 8 scales the bar `(1, 8, 1)` for a full blackout |
 | `20`–`27` | **fog / light tweens** | see the correction below |
 | `28` / `29` | `region_load` / `region_enter` | stage geometry streaming; see [`pipeline.md`](pipeline.md) |
 | `2B` | `award_accuracy_bonus` | **[proved]** `pct = hits*100/shots` (needs shots > 0x13), bonus = `g_accuracy_bonus_table[pct/10]` = `{0,0,0,0,500,1000,1500,2000,2500,3000,4000}` |
-| `2C` | `set_skippable_region` | **[proved] and dead** — it never sets `DAT_009A2D74`, and nothing else does either |
+| `2C` | `set_skippable_region` | **[proved]** `arg != 0` → `DAT_009A2230 = 0; DAT_009A2D7C = 1`; `arg == 0` → `DAT_009A2D7C = 0` and the skip flag is cleared. `DAT_009A2D7C` is live and read; the flag it would eventually raise is not — see below |
 | `2D` | `show_screen_message` | **[proved]** u16 group → variant by player configuration (0 = 1P/P1, 1 = 1P/P2, 2 = 2P), then a voice id and a timed sprite task from the 0x10-byte records at `0x00589DA8` `{u16 sprite, u16 frames, f32 x, f32 y, u32 voice}` |
-| `2E` | `resume_bgm_if_skipped` | **[proved]** guarded by the dead skip flag; a no-op in this build |
+| `2E` | `resume_bgm_if_skipped` | **[proved]** `if (skip) PlaySoundId(0x80000002)` — restart the BGM a skipped cutscene interrupted. Unreachable in this build; see below |
 | `2F` | `suppress_accuracy_stats` | **[proved]** non-zero stops the shots/hits counters that `2B` grades |
 | `30` | `queue_event` | the scripted-action ring — see below |
 | `31` | `goto_scene_state` | **[proved]** immediate transition to `(major 1, minor op0)` |
@@ -235,12 +235,41 @@ inference; **[open]** = undetermined.
 | `5D` / `5E` | `snd_load/free_pack` **(stub)** | **[proved]** `OutputDebugStringA("SS_SndLoadPack")` and nothing else — NAOMI sound-driver calls stubbed out for the PC port, which streams individual `.wav` files |
 | `5F` | `bgm_entry_play` | **[proved]** consumes 4 operands but uses **only the third**: stop the current BGM, then play that track id |
 
-> ⚠️ **The skip feature is entirely dead code.** `DAT_009A2D74` is never
-> written with a non-zero value anywhere in the binary (14 references: 12 reads
-> and 2 writes, both storing 0). Same for `DAT_009A2230` and `DAT_009A1A18`.
-> So every `if (skip_flag)` branch in this opcode family — including all of
-> `2E` — is unreachable, and `2C` only registers the request into a variable
-> nothing reads.
+### The skip feature — complete except for one assignment
+
+**[proved]** Every part of "press Start to skip a cutscene" is present in the
+shipped executable, and exactly one link is missing.
+
+1. `set_skippable_region` (`2C`) opens the window: `DAT_009A2D7C = 1`.
+2. Both player-update routines, `FUN_00414940` and `FUN_00414B90`, end with the
+   same block:
+
+   ```c
+   if (DAT_009c8e00 == 0 && DAT_009a2d7c != 0) {   // gate down, region open
+       mask[0] = 0x2; mask[1] = 0x20000;           // Start, player 1 / player 2
+       if (mask[player] & _DAT_009c9028) DAT_009a1a18 = 1;
+   }
+   ```
+
+   The gate `DAT_009C8E00` is the one `1F`'s shutter machine drives, so a skip
+   is only offered while the letterbox is closed — which is the definition of
+   "not currently playable".
+3. `40`, `41` and `42` each open by testing the skip flag `DAT_009A2D74` and
+   walking straight past the wait when it is set. The flag is *not* cleared by
+   the waits: it stays up until `2C` closes the region, so one press skips a
+   whole cutscene rather than a single wait.
+4. `2E` then restarts the BGM the skipped cutscene interrupted.
+
+> ⚠️ **The chain breaks at step 2 → 3.** The Start poll writes `DAT_009A1A18`,
+> which has **two writers and no readers anywhere in the binary**. The only two
+> writers of `DAT_009A2D74` itself — `EvtOpSetSkippableRegion2C` and the scene
+> reset `FUN_0045EBC0` — both store 0. So the flag never rises and every
+> `if (skip)` branch, including all of `2E`, is unreachable in the retail
+> build. One assignment is missing; everything on either side of it works.
+
+The browser player implements the machinery as written and supplies that one
+assignment from the UI, so the feature can be exercised. See
+[`../PLAYER_PROGRESS.md`](../PLAYER_PROGRESS.md).
 
 ### `1D` — the rain, read out
 

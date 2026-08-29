@@ -25,15 +25,19 @@
  * ```
  *
  * So closed is `y = 0.35` and fully open `y = 0.45`, and the slide is 40
- * frames either way. With the game's 41.100 degree vertical FOV the half
- * height at `z = 1` is `tan(20.55 deg) = 0.3748`, so a closed shutter's inner
- * edge sits at 93.4 % of half height — a thin band top and bottom — and an
- * open one is past the edge of the screen.
+ * frames either way — but `y` positions the bar's **origin**. Asset `0x93E` is
+ * `common.bin` model 129, a four-vertex quad 1.03 wide and 0.10 tall centred
+ * on that origin, so the closed bar spans 0.30..0.40 and its inner edge is
+ * 0.30. With the game's 41.100 degree vertical FOV the half height at `z = 1`
+ * is `tan(20.55 deg) = 0.3748`, so a closed shutter covers the outer 20 % of
+ * each half — a 10 % band top and bottom — and clears the frame entirely once
+ * the counter passes 30 of its 40 frames.
  *
- * The bar's own extent comes from asset `0x93E`, which the player has no 2D
- * pipeline for, so each bar is drawn from its inner edge outward to beyond
- * the frame. That is right for a letterbox and cannot be wrong in the visible
- * region.
+ * `DAT_009c8e00`, which this machine sets to 1 in states 0/1/6 and 0 in
+ * states 3 and 5, is the firing gate: it is 1 while the shutter is open. It is
+ * also the flag the player-update routines test before offering a skip, which
+ * is why Start only skips a cutscene while the letterbox is closed. See
+ * `walker.ts` on `set_skippable_region`.
  *
  * ## The message — evt `0x2D`
  *
@@ -46,12 +50,36 @@
 
 import type { MessageVariant } from "./bundle";
 
-/** Closed inner edge, and the 40-frame slide to fully open. */
+/** Closed centre offset, and the 40-frame slide to fully open. */
 const SHUTTER_CLOSED_Y = 0.35;
 const SHUTTER_STEP = 0.0025;
 const SHUTTER_FRAMES = 40;
 
-/** Half-height of the view frustum at z = 1, for the game's 41.1 deg FOV. */
+/**
+ * Half-height of the bar itself.
+ *
+ * `MatrixTranslate` positions the bar's **origin**, not its edge, and asset
+ * `0x93E` is `common.bin` model 129: a single four-vertex quad spanning
+ * x -0.515..0.515 and y -0.05..0.05. So a closed bar occupies 0.30..0.40 and
+ * its inner edge is 0.30, not 0.35.
+ *
+ * That one term is the difference between a letterbox and a hairline. Against
+ * the frustum half-height below, an inner edge of 0.30 covers 20% of the half
+ * height -- a 10% band top and bottom, which is what the game looks like --
+ * where 0.35 covers 6.6%, or 3.3% of the frame, which is nearly invisible.
+ */
+const SHUTTER_HALF = 0.05;
+
+/**
+ * Half-height of the view frustum at z = 1, for the game's 41.1 deg FOV.
+ *
+ * The quad's half-width of 0.515 is just over the 0.4997 half-width of a 4:3
+ * frustum at this FOV, so the bar is authored to span a 4:3 screen exactly and
+ * would leave a gap at either side of a wider one. The bars are drawn full
+ * width here: at the aspect the artwork was cut for that is what they are, and
+ * a letterbox that stops short of the frame edge would be a worse likeness
+ * than one that does not.
+ */
 const HALF_HEIGHT = Math.tan((41.1 * Math.PI) / 180 / 2);
 
 /** The game's screen space, which message x/y are expressed in. */
@@ -149,7 +177,8 @@ export class Hud {
   }
 
   private apply(): void {
-    // State 8 is a full blackout: one bar at y = 0 scaled 8x vertically.
+    // State 8 is a full blackout: one bar at y = 0 scaled 8x vertically, so
+    // its half-height is 0.4 against a frustum half-height of 0.375.
     if (this.state === 8) {
       this.top.style.height = "100%";
       this.bottom.style.height = "0";
@@ -157,11 +186,11 @@ export class Hud {
     }
     // 2 and 6 draw nothing at all.
     const open = this.state === 2 || this.state === 6;
-    const y = open
+    const inner = open
       ? Number.POSITIVE_INFINITY
-      : SHUTTER_CLOSED_Y + this.counter * SHUTTER_STEP;
+      : SHUTTER_CLOSED_Y + this.counter * SHUTTER_STEP - SHUTTER_HALF;
     // The inner edge as a fraction of half-height, then of the whole frame.
-    const frac = Math.min(1, y / HALF_HEIGHT);
+    const frac = Math.min(1, inner / HALF_HEIGHT);
     const pct = Math.max(0, (1 - frac) * 50);
     this.top.style.height = `${pct}%`;
     this.bottom.style.height = `${pct}%`;

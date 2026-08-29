@@ -136,10 +136,18 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       BAMS Euler). Times are 60 Hz frame numbers. **100.0000 % byte coverage on
       all 23 files** — 418 paths, 3,018 curves, 44,800 keyframes.
       Spec: [`formats/cam.md`](formats/cam.md)
-- [x] **119 damaged keyframe words in three shipped `cam/` files** (`cp_demo`
-      20, `cp_st1` 91, `cp_title` 8) repaired on read, and the repair counted
-      and printed rather than silent. Distinct from the 12 trailing padding
-      slots, which are part of the format. See
+- [x] **Individual keyframe bytes smashed to `0xFF` in four shipped `cam/`
+      files** — 120 that destroy the exponent and decode to NaN or ~1e38, plus
+      finite ones that a NaN test can never catch (`cp_st1` path 1's `target_y`
+      holds `da 2c 40 41` = 12.011 seventeen times, `da 2c 40 ff` four times and
+      `da 2c ff 41` three times — a plausible 31.897 that is not in the data).
+      The format reading is confirmed instruction by instruction from the
+      loader, `CamBindPathSlots`, `CamEvalPath7` and `CamEvalHermiteCurve`, so
+      the shipped executable evaluates these words too. **90 fields restored,
+      81 of them determined by the file itself** — sibling channels share a time
+      base, duplicate keys must be byte-identical, and `st1evtbl`'s `cam_play`
+      extents corroborate the restored durations. Distinct from the trailing
+      padding slots, which are part of the format. See
       [`re/anomalies.md`](re/anomalies.md)
 - [x] `evt/` — **solved structurally.** Fixup is a one-line mask
       (`FUN_00413120`); the payload is a 96-opcode bytecode VM
@@ -194,9 +202,17 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       blocks; `0x16` is ambient colour, not fog; `0x10`/`0x11` carry relocated
       **collision-mesh pointers**, not ids; `0x0E`/`0x0F`/`0x12` are the enemy
       approach-distance pacing table
-- [x] **The skip/fast-forward feature is dead code** — `DAT_009A2D74` is never
-      written non-zero anywhere, so every `if (skip)` branch, and opcode `0x2E`
-      entirely, is unreachable
+- [x] **The skip/fast-forward feature is complete except for one assignment.**
+      `set_skippable_region` (`0x2C`) is live and does drive `DAT_009A2D7C`;
+      both player-update routines (`FUN_00414940`, `FUN_00414B90`) poll Start
+      (`0x2` / `0x20000` against `_DAT_009C9028`) while that is set and the
+      firing gate `DAT_009C8E00` is down; and `0x40`, `0x41`, `0x42` and `0x2E`
+      all test the skip flag. But the poll writes `DAT_009A1A18`, which has
+      **two writers and no readers anywhere in the binary**, and both writers of
+      `DAT_009A2D74` itself store 0 — so the flag never rises and every
+      `if (skip)` branch is unreachable in the retail build. The gate is the
+      same `DAT_009C8E00` the shutter machine sets, which is why a skip is only
+      offered while the letterbox is closed
 - [ ] `evt/` remaining unknowns: the actor class counted by `0x46`, `0x16`'s
       numeric scale, `0x2D`'s sprite-vs-text mode flag, `0x33`'s second
       operand, and `0x1E` (unrecoverable — nothing reads it)

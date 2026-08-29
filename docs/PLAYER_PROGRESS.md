@@ -62,11 +62,26 @@ Things established while building it, now folded back into the format docs.
   two contiguous BGM filename tables whose lengths are fixed by their
   adjacency. Recorded in [`formats/sound.md`](formats/sound.md), and as a
   plate comment on `PlaySoundId` in the Ghidra database.
-- **`cp_st1.bin`, `cp_demo.bin` and `cp_title.bin` ship damaged.** 119
-  keyframe words decode to NaN or ~1e38, and `st1evtbl` plays the affected
-  paths. Both retail copies checked are byte-identical, so it is how the game
-  ships. `hod2lib.cam` repairs and counts them; before that, stage 1 could not
-  be exported at all.
+- **Four `cam/` files have individual bytes smashed to `0xFF`.** 120 destroy a
+  float's exponent and decode to NaN or ~1e38; others hit a mantissa byte and
+  decode to an ordinary-looking number no finiteness test can catch — `cp_st1`
+  path 1's `target_y` holds `da 2c 40 41` = 12.011 seventeen times and
+  `da 2c ff 41` = 31.897 three times. `st1evtbl` plays the affected paths, and
+  the format reading is confirmed instruction by instruction through the
+  loader, `CamBindPathSlots`, `CamEvalPath7` and `CamEvalHermiteCurve`, so the
+  shipped executable evaluates them too. The files over-determine themselves —
+  channels of a path share a time base, keys sharing a time are duplicates, and
+  `st1evtbl`'s own `cam_play` extents state each path's duration — and
+  `hod2lib.cam` restores **90 fields, 81 of them exactly**, recording the
+  evidence for each. Stage 1's opening cameras now chain end to end (path 2
+  ends at eye = (−37.88, 15.20, 133.74) and path 3 starts there) where before
+  they jerked. See [`re/anomalies.md`](re/anomalies.md).
+- **The skip feature is one assignment short of working.** `2C` is live,
+  both player-update routines poll Start while the shutter's firing gate is
+  down, and `40`/`41`/`42`/`2E` all test the skip flag — but the poll writes
+  `DAT_009A1A18`, which nothing reads, and `DAT_009A2D74` is only ever written
+  0. The player implements the machinery as written and supplies that one
+  assignment from the Skip button.
 - **Fog is per-mesh, and its values were in the data all along.** TSP bit 23
   is `FOGENABLE` **inverted**, so fog is on when the bit is clear — which is
   what `ModelForceFogControlNone` exploits. 2197/2219 stage-2 materials are
@@ -142,7 +157,7 @@ struck through:
 | `31` | `goto_scene_state` | 274 | Only with a scene state machine |
 | `28` | `region_load` | 262 | No — preloads what is already resident |
 | `59`/`58`/`5A` | asset job drains | 188 | No — nothing is ever pending |
-| `2C` | `set_skippable_region` | 126 | No — proved dead in this build |
+| `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip button; dead in the retail build only for a missing assignment |
 | `33` | `set_action_drain_mode` | 125 | Only with the action ring |
 | `10`/`11` | collision sets | 113 | Only with collision |
 | `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
@@ -228,9 +243,9 @@ missed. Meanings and confidence marks live in
 | `29` | `region_enter` | region | **done** | **switches the drawn region** — the core of the streaming model |
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
-| `2C` | `set_skippable_region` | flow | n/a | proved dead: it never sets the flag, and nothing else does either |
+| `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); lights the Skip button once the shutter's firing gate is also down, which is exactly when the game polls Start |
 | `2D` | `show_screen_message` | hud | **done** | **plays the voice** and holds a caption for the record's frame count at its screen position; the sprite artwork is not drawn |
-| `2E` | `resume_bgm_if_skipped` | audio | n/a | guarded by the dead skip flag — a no-op in this build |
+| `2E` | `resume_bgm_if_skipped` | audio | **done** | restarts BGM `0x80000002` when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
 | `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |
 | `31` | `goto_scene_state` | flow | shown | scene state transition; the player has no state machine |

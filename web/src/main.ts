@@ -372,6 +372,7 @@ class Player {
     $("#btn-play").addEventListener("click", () => this.togglePlay());
     $("#btn-step").addEventListener("click", () => this.stepOnce());
     $("#btn-stepback").addEventListener("click", () => this.stepBack());
+    $("#btn-skip").addEventListener("click", () => this.requestSkip());
     $("#btn-reset").addEventListener("click", () => {
       this.feed.clear();
       this.walker?.reset();
@@ -416,6 +417,7 @@ class Player {
       else if (e.code === "Digit1") this.setMode("step");
       else if (e.code === "Digit2") this.setMode("play");
       else if (e.code === "Digit3") this.setMode("free");
+      else if (e.code === "Enter") { e.preventDefault(); this.requestSkip(); }
     });
 
     window.addEventListener("popstate", () => {
@@ -523,6 +525,34 @@ class Player {
     this.playing = !this.playing;
     if (this.playing && this.state.mode === "step") this.setMode("play");
     this.setPlayButton();
+  }
+
+  /**
+   * Supply the assignment the retail build is missing.
+   *
+   * `set_skippable_region` (0x2C), the Start poll in both player-update
+   * routines and the skip test in every wait opcode are all present in the
+   * shipped executable; the only broken link is that the poll writes
+   * `DAT_009A1A18`, which nothing reads, instead of the flag `DAT_009A2D74`
+   * that the waits test. Pressing this is that write. Everything it sets in
+   * motion is the game's own code -- see `Walker.skipRequested`.
+   */
+  private requestSkip(): void {
+    const w = this.walker;
+    if (!w || !w.requestSkip()) return;
+    this.syncCameraToWalker();
+    this.refreshUi();
+    this.pushUrl();
+  }
+
+  private setSkipButton(): void {
+    const b = $("#btn-skip") as HTMLButtonElement;
+    const can = this.walker?.canSkip ?? false;
+    b.disabled = !can;
+    b.title = can
+      ? "Skip the rest of this skippable region (Enter)"
+      : "Skip is offered only inside a set_skippable_region with the firing "
+        + "gate down -- exactly when the game polls Start for a skip.";
   }
 
   private setPlayButton(): void {
@@ -788,6 +818,7 @@ class Player {
     if (!w || !this.stage) return;
     this.tree.mark(w.block, w.step, w.opIndex);
     this.minimap.draw(w.block);
+    this.setSkipButton();
 
     const cam = w.cam;
     const slider = $<HTMLInputElement>("#frame-slider");
@@ -841,6 +872,11 @@ class Player {
       ["sky", this.backdrop.describe],
       ["rigs", this.rigs.describe],
       ["shutter", this.hudLayer.describe],
+      // The two globals the skip feature hangs off, so it is visible that the
+      // region opened and the gate dropped even when nothing is pressed.
+      ["skip", w.skipRequested ? "requested"
+        : w.canSkip ? "offered"
+        : w.skippable ? "region open, firing gate up" : "—"],
       ["rain", this.rain.describe],
       ["last se", w.lastSound === null ? "—"
         : `0x${w.lastSound.toString(16).toUpperCase()}`],

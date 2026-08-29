@@ -173,14 +173,20 @@ OPCODES: dict[int, Op] = {
     # bonus = table[pct/10] at 0x00567990 = {0,0,0,0,500,1000,1500,2000,2500,
     # 3000,4000}.
     0x2B: ("award_accuracy_bonus", "fix", 1),
-    # Opens/closes a "skippable" region -- but the skip flag DAT_009A2D74 is
-    # never written non-zero anywhere in the binary, so the whole feature, and
-    # every `if (skip)` branch in this opcode family, is dead code.
+    # Opens/closes a "skippable" region. arg != 0 -> DAT_009A2230 = 0 and
+    # DAT_009A2D7C = 1; arg == 0 -> DAT_009A2D7C = 0 and the skip flag clears.
+    # DAT_009A2D7C is live: both player-update routines poll Start against it
+    # while the firing gate DAT_009C8E00 is down. But that poll writes
+    # DAT_009A1A18, which has no readers, and the skip flag DAT_009A2D74 the
+    # waits test is only ever written 0 -- so the feature is one assignment
+    # short of working. See docs/formats/evt.md.
     0x2C: ("set_skippable_region", "fix", 2),
     # u16 message group -> variant by player configuration, then a voice id and
     # a timed sprite from the 0x10-byte records at 0x00589DA8.
     0x2D: ("show_screen_message", "fix", 2),
-    0x2E: ("resume_bgm_if_skipped", "fix", 1),   # dead: see 0x2C
+    # `if (skip) PlaySoundId(0x80000002)` -- restart the BGM a skipped cutscene
+    # interrupted. Unreachable for the reason under 0x2C.
+    0x2E: ("resume_bgm_if_skipped", "fix", 1),
     0x2F: ("suppress_accuracy_stats", "fix", 2),  # gates the counters 0x2B grades
     0x30: ("queue_event", "queue", 0),      # FUN_0045F7F0
     0x31: ("goto_scene_state", "fix", 2),          # major fixed at 1

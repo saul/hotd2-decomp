@@ -2844,3 +2844,111 @@ Checked the alpha before blaming it, incidentally: texture 2's alpha nibbles
 spread across 7..15, a real gradient, so ARGB4444 is decoding correctly. It
 simply never reaches 0, which is why mis-ordered blending washes out rather
 than cutting holes.
+
+## The `cam/` files are damaged, and this is how you can be sure
+
+The user pushed back twice on the claim that `cp_st1.bin` ships damaged —
+"it's far more likely your interpretation of the data is wrong", then "are you
+not able to decomp the camera and object path code to see exactly how this is
+being interpreted?". Both were the right question, and answering it properly
+changed the answer.
+
+The format reading is now pinned instruction by instruction:
+
+* the loader at `0x00403F89` takes the path count from the EXE table at
+  `0x004C476C` and computes the curve base with `LEA ECX, [EAX + EDX*4 + 4]`.
+  Deriving *n* by scanning to the `0xFFFFFFFF` terminator instead gives the
+  identical number for all 23 shipped files.
+* the file arrives by `CreateFileA` / `GetFileSize` / `ReadFile` /
+  `CloseHandle` into a 32-byte-aligned buffer. Nothing decodes or relocates it.
+* `CamBindPathSlots` walks the offset table and the slot list in lockstep and
+  touches no payload byte.
+* `CamEvalHermiteCurve` indexes `*(float *)(param_1 + i * 8 + 2)` on a
+  `ushort *` — byte `i * 16 + 4` — and reads `pfVar1[-3]`, `pfVar1[-2]`,
+  `pfVar1[1]`, `pfVar1[3]`. That fixes the stride at 16 and the fields at
+  `{time, value, tangent_out, tangent_in}`, with no masking and no sentinel.
+* the two EXE tables that `CamEvalPath7` consults are independent and agree for
+  all 418 slots; the structural pool walk lands exactly on the end of all 23
+  files with zero slack.
+
+So the bytes on disk are the bytes the shipped game evaluates. The
+interpretation was not the problem — but the *diagnosis* was, in two ways.
+
+**It is per byte, not per word.** `cp_st1` path 1's `target_y` holds
+`da 2c 40 41` (12.011) seventeen times, `da 2c 40 ff` four times — NaN, caught
+— and `da 2c ff 41` three times, which is 31.897: finite, plausible, and not in
+the data. The old repair was filtering on non-finiteness, so it had been
+feeding those spikes to the camera all along. That, not the NaNs, is what the
+user was seeing at the start of stage 1.
+
+**The files over-determine themselves.** Three independent sources say what the
+values were:
+
+* the other channels of the same path. Path 1's `target_y` and `target_z` carry
+  the complete time base `0 10 20 … 160 190 260 330 380 ×12`; `target_x`, same
+  32 keys, has that sequence with sixteen holes. Path 2's six healthy channels
+  say `… 190 …` where `target_z` says `510` — `00 00 ff 43` against
+  `00 00 3e 43`, a smashed byte 2 that no finiteness test would ever flag.
+* `st1evtbl` itself. It plays these paths with `cam_play 0..230`, `0..380`,
+  `0..170 / 171..359 / 360..470` and `0..125 / 126..140` — exactly the
+  durations the restored time columns give, from a different file.
+* duplicate keys. Keys sharing a time are copies of one key and must be
+  byte-identical, so a member differing by one `0xFF` byte is convicted by its
+  twins.
+
+The restoration now works down that evidence in order and records which rule
+answered each field: **90 fields, 81 determined by the file itself**, 9
+reconstructed and labelled as such. Stage 1's opening cameras chain end to end
+again — path 2 finishes at eye `(−37.88, 15.20, 133.74)` and path 3 starts
+there — where before they jerked.
+
+Eight channels have no evidence left at all. `cp_st1` path 0's `eye_x` is the
+one that stings: all eight keys read `ff 64 bc ff`, no other curve in any
+`cam/` file carries those low three bytes, and the channel is constant so no
+neighbour constrains it. Its camera sits at one of ±23.5, ±94.2, ±376.8 or
+±1507.2 and the file no longer says which. That is flagged, not guessed.
+
+The earlier note's "119 damaged words" was also two different numbers added
+together, and is corrected in `anomalies.md`.
+
+## The skip feature is one assignment short of working
+
+Recorded previously as "entirely dead code". That was right about the flag and
+wrong about the feature, and the difference matters.
+
+`set_skippable_region` (`0x2C`) is live: it drives `g_nEvtSkippableRegion`
+(`0x009A2D7C`), which both player-update routines read. Each ends with
+
+```c
+if (g_nFiringGate == 0 && g_nEvtSkippableRegion != 0) {
+    mask[0] = 0x2; mask[1] = 0x20000;        // Start, player 1 / player 2
+    if (mask[player] & _DAT_009C9028) g_nSkipRequestedDeadEnd = 1;
+}
+```
+
+and `0x40`, `0x41`, `0x42` and `0x2E` all test the skip flag and walk past
+their wait when it is up. The gate is the same `g_nFiringGate` the shutter
+machine drives, so a skip is only offered while the letterbox is closed —
+which is a genuinely nice piece of design, and is why the two features had to
+be understood together.
+
+The break is one line: the Start poll writes `g_nSkipRequestedDeadEnd`
+(`0x009A1A18`), which has **two writers and no readers anywhere in the
+binary**, and the only two writers of the flag itself both store 0. The player
+transcribes the machinery as written and supplies that assignment from a Skip
+button, so the feature can actually be exercised.
+
+## The shutter was drawing at a fortieth of its size
+
+`MatrixTranslate(0, ±0.35, -1)` positions the bar's **origin**, and the
+implementation had been treating 0.35 as its inner edge. Asset `0x93E` is
+`common.bin` model 129: one four-vertex quad, x −0.515..0.515, y −0.05..0.05.
+So a closed bar spans 0.30..0.40 and its inner edge is 0.30 — 80 % of the
+0.3748 frustum half-height, giving a 10 % band top and bottom. Reading 0.35 as
+the edge gave 3.3 % of the frame, a hairline, which is why it looked like it
+was not rendering at all.
+
+The quad's 0.515 half-width just exceeds the 0.4997 half-width of a 4:3
+frustum at this FOV, so the artwork was cut for a 4:3 screen exactly. The
+player draws the bars full width and says so; stopping them short of a wide
+frame edge would be the worse likeness.

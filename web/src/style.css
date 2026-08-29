@@ -260,6 +260,14 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 #transport button.sound[aria-pressed="false"] { color: var(--dim); }
 
+/* The skip button is dark until the script opens a skippable region, so the
+   bar shows at a glance where the game would have accepted Start -- which is
+   information the retail build never surfaces, its skip being dead code. */
+#transport button.skip:disabled { color: var(--dim); border-color: var(--line); }
+#transport button.skip:not(:disabled) {
+  color: var(--accent-2); border-color: var(--accent-2);
+}
+
 /* ---- HUD layer (evt 0x1F shutter, 0x2D message) ---- */
 
 /* The game draws both as view-space geometry at z = -1, i.e. a screen

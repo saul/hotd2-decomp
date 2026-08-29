@@ -78,7 +78,16 @@ lands at 379 KB as JSON, which gzips hard.
 | **Play** | `2` | 60 Hz with a speed control, pausing at every branch point |
 | **Free roam** | `3` | orbit and fly, detached from the rail |
 
-Space plays/pauses, `→` and `←` step one instruction, `1`/`2`/`3` switch mode.
+Space plays/pauses, `→` and `←` step one instruction, `1`/`2`/`3` switch mode,
+`Enter` skips a cutscene.
+
+**Skip** lights up inside a `set_skippable_region` once the shutter's firing
+gate is down — exactly the condition under which the game polls Start for a
+skip. Pressing it releases `wait_queued_events_done`, `wait_camera_path_frame`
+and `wait_frames` until the region closes, and `resume_bgm_if_skipped` then
+restarts the interrupted track. All of that is the game's own code; the retail
+build simply never raises the flag, because the Start poll writes a global that
+nothing reads. The button supplies that one assignment.
 
 The script panel is deliberately narrow — the viewport is the point of the
 tool and the tree is a navigator, not the content. Drag the splitter to widen

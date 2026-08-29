@@ -2795,3 +2795,52 @@ several are untextured with a black base colour, and they render as large flat
 black wedges projecting from the model. They are inside the models' own mesh
 lists, not a rig error, but whether the engine draws them at all — and in what
 mode — is unresolved.
+
+### Session 19, continued — draw order
+
+The user looked at the stage-2 car render and said the black wedges were a
+draw-order problem with transparent faces. That was right, and my first reading
+was not.
+
+I had reported the black shapes as "opaque untextured black meshes". True of
+five of them, but I stopped there and missed that prims 6/7/8 are *textured*
+meshes whose black base colour annihilates their texture. Forcing those factors
+to white made the render look right — it revealed a licence plate that had been
+buried — and it is **wrong**. `InitD3DDeviceAndTextureStages` sets
+`COLOROP = MODULATE`, `COLORARG1 = D3DTA_TEXTURE`, `COLORARG2 = D3DTA_DIFFUSE`,
+and these meshes carry no per-vertex colour, so the mesh base colour *is* the
+diffuse. The black modulation is faithful; whitening it neutered a real pass.
+The experiment was worth running, but shipping it would have baked a lie into
+every export.
+
+The real cause is what the user said. Both symptoms — the wedges and the
+see-through roof — come from the exporter throwing away render order:
+
+* `RenderEnqueueCommand` draws the opaque pass immediately, in submission
+  order. `RenderFlushCommandList` sorts the whole list and draws the
+  translucent pass. The comparator at `0x004A8A20` is (draw layer ascending,
+  sort depth descending) — painter's order with the layer as outer key.
+* The pass selector is `(tsp & 0x180000) == 0x80000`, the **TSP bits, not the
+  list type**. `nl1.Mesh.opaque_pass` now spells that out separately from
+  `translucent`, because the two can disagree and it is the pass that decides
+  order.
+* The car's body is genuinely **two coincident translucent shells** — prim 0
+  (texture 2, white) and prim 6 (texture 33, black), centroids 0.03 apart,
+  radii 20.32 and 20.16. Nothing in glTF orders those.
+
+So the export now carries the order rather than pretending it does not matter:
+primitives opaque-first then translucent in chain order, `hod2_pass` and
+`hod2_chain_index` on every triangle primitive, and the full rule in
+`asset.extras.hod2_draw_order`. The web player eats the same glTF the exporter
+writes, so it inherits this without touching `bundle.py` — which mattered,
+because that file had uncommitted work from the parallel workstream.
+
+For the Blender viewers, which cannot honour order at all, blended materials
+are switched to hashed transparency. That resolves per fragment instead of per
+object: the wedges go, the roof is opaque, and the windows stay correctly
+see-through into the interior. It is not the engine's order and the docs say so.
+
+Checked the alpha before blaming it, incidentally: texture 2's alpha nibbles
+spread across 7..15, a real gradient, so ARGB4444 is decoding correctly. It
+simply never reaches 0, which is why mis-ordered blending washes out rather
+than cutting holes.

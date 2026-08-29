@@ -50,8 +50,12 @@ against a known-good input set; it contains no asset content.
 
 ## Status
 
-Phase 0 complete. See [`docs/PROGRESS.md`](docs/PROGRESS.md) for the phase
-checklist and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
+Phase 0 complete; Phase 1 (Ghidra environment) in progress.
+
+- [`docs/re/session-log.md`](docs/re/session-log.md) — **start here when
+  resuming.** Where the last session stopped and what to do next.
+- [`docs/PROGRESS.md`](docs/PROGRESS.md) — phase checklist
+- [`docs/PLAN.md`](docs/PLAN.md) — the full plan
 
 ## Usage
 
@@ -65,7 +69,8 @@ python3 tools/baseline.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2"
 
 ```
 docs/formats/   byte-exact format specs
-docs/re/        annotated addresses, .data tables, anomalies, build provenance
+docs/re/        session log, annotated addresses, anomalies, build provenance
+ghidra/         headless driver + GhidraScripts (project DB is not committed)
 tools/hod2lib/  the format library
 tools/emu/      Unicorn-based function harness (Phase 2)
 src/            readable C reference implementations

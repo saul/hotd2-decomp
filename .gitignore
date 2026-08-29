@@ -23,9 +23,12 @@ game/
 !extract/README.md
 
 # Ghidra
+# Project databases and analysis output are local; the scripts that produce
+# them are committed, because reproducibility is the point.
 *.gpr
 *.rep/
-ghidra/
+ghidra/project/
+ghidra/out/
 
 # Python
 __pycache__/

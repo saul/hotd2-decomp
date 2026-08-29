@@ -2,6 +2,10 @@
 
 Phase detail lives in [`PLAN.md`](PLAN.md).
 
+> **Resuming work?** Read [`re/session-log.md`](re/session-log.md) first — the
+> last entry records exactly where the previous session stopped, what was tried
+> and failed, and the ordered next actions.
+
 ## Phase 0 — Baseline ✅
 
 - [x] Repo initialised, `.gitignore` blocks all asset types
@@ -14,13 +18,23 @@ Phase detail lives in [`PLAN.md`](PLAN.md).
 - [x] Format specs stubbed with everything confirmed so far
 - [x] Build provenance recorded in `re/provenance.md` (stray `pol/files.txt` build listing)
 
-## Phase 1 — Ghidra environment
+## Phase 1 — Ghidra environment 🔶 in progress
 
-- [ ] Import `Hod2.exe`, base `0x400000`
-- [ ] Apply MSVC 6.0 FLIRT / Function ID signatures
+Environment is up and reproducible; analysis proper has not started.
+See [`re/session-log.md`](re/session-log.md) for state and next actions.
+
+- [x] Import `Hod2.exe`, base `0x400000` — auto-analysis succeeded
+- [x] Reproducible headless driver (`ghidra/run.sh`) + Java script template
+- [x] Baseline inventory exported: **1891 functions**, 73 non-default names,
+      417259 of 798720 `.text` bytes covered (**~52%**)
+- [x] Ghidra MCP registered in opencode config (needs restart to take effect)
+- [ ] Apply MSVC 6.0 FLIRT / Function ID signatures ← **highest leverage next**
 - [ ] Identify and excise the `d3du` / D3DX utility library
+- [ ] Force disassembly over the ~380 KB of uncovered `.text`
 - [ ] Import DX7 SDK headers as a GDT
-- [ ] Seed anchors from `re/addresses.md`
+- [ ] Seed anchors from `re/addresses.md` (as a committed `SeedAnchors.java`)
+- [ ] Find the `pol/` loader via the dir-template table at `0x57A008`
+- [ ] Identify the import at `0x4C40A4` called before every `CreateFileA`
 - [ ] Map the `.data` tables adjacent to the filename tables
 
 ## Phase 2 — Compression codec ⚠️ critical path

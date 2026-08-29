@@ -142,6 +142,25 @@ class Mesh:
         return self.list_type in (2, 3)
 
     @property
+    def opaque_pass(self) -> bool:
+        """Whether this mesh is drawn in the renderer's *opaque* pass.
+
+        `RenderEnqueueCommand` calls ``WalkMeshChainAndDraw(cmd, 0)`` and
+        `RenderFlushCommandList` calls it again with ``1``; each walk draws
+        only the meshes belonging to its pass and skips the rest by
+        ``mesh_data_size``. The selector is **the TSP bits, not the list
+        type**::
+
+            is_translucent = (tsp & 0x180000) != 0x80000
+
+        so a mesh is opaque only when ``IgnoreTexAlpha`` (bit 19) is set *and*
+        ``UseAlpha`` (bit 20) is clear. The two usually agree with
+        :attr:`translucent`, but the pass is what actually decides draw order,
+        which is why it is spelled out separately.
+        """
+        return (self.tsp & 0x180000) == 0x80000
+
+    @property
     def gouraud(self) -> bool:
         return bool(self.parameter_control & 0x02)
 

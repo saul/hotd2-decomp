@@ -367,6 +367,67 @@ buffer and appends a pointer to a sort list. `RenderFlushCommandList`
 > `FUN_004AA0E0` from the light block that evt opcodes `0x17`–`0x19` and
 > `0x20`–`0x27` drive. See [`evt.md`](evt.md).
 
+### Draw order — SOLVED
+
+`RenderFlushCommandList` sorts the pointer list with `qsort` and the
+comparator at `0x004A8A20`, which is short enough to give exactly:
+
+```c
+int cmp(cmd **a, cmd **b) {
+    int d = (a->flags & 0xF) - (b->flags & 0xF);   /* draw layer, ascending  */
+    if (d == 0) {
+        float f = b->sort_depth - a->sort_depth;   /* depth, descending      */
+        if (f == 0.0f) return 0;
+        return f < 0.0f ? -1 : 1;
+    }
+    return d;
+}
+```
+
+So a frame is ordered:
+
+1. **Opaque pass** — drawn at submission time by `RenderEnqueueCommand`, in
+   submission order. **Not sorted.**
+2. **Translucent pass** — drawn by `RenderFlushCommandList` after sorting the
+   whole command list by **(draw layer ascending, sort depth descending)**,
+   i.e. farthest first, painter's order, with the draw layer as the outer key.
+
+Within one command the walker goes in **chain (file) order**, drawing only the
+meshes of the current pass and skipping the rest by `mesh_data_size`. The pass
+selector is the TSP bits, **not** the list type — see
+[`materials.md`](materials.md).
+
+#### What the exporter does with this
+
+glTF has no render-order concept at all, so the order cannot be expressed
+directly. `hod2lib.gltf` therefore:
+
+* emits each mesh's primitives **opaque first, then translucent**, each group
+  in chain order — a stable sort, so the engine's within-pass order survives;
+* gives every triangle primitive `extras.hod2_pass` and
+  `extras.hod2_chain_index`;
+* records the whole rule above in the document's `asset.extras.hod2_draw_order`
+  (`gltf.DRAW_ORDER`), so a renderer that *can* honour order — the web player —
+  does not have to rediscover it.
+
+This makes the exported order deterministic and equal to the engine's. It does
+**not** make a general glTF viewer correct: Blender sorts blended surfaces per
+object, and this game's models genuinely contain two coincident translucent
+copies of the same shell (the stage-2 car's body is prim 0, texture 2, base
+colour white, and prim 6, texture 33, base colour black, centroids 0.03 apart
+and radii 20.32 vs 20.16). Those resolve arbitrarily and one paints over the
+other as a large flat wrong-coloured face. The `blender_*.py` viewers switch
+blended materials to **hashed/dithered** transparency, which resolves per
+fragment and avoids the artefact — not the engine's order, but not a lie about
+the geometry either.
+
+> ⚠️ The tempting "fix" is to force those black base colours to white. It is
+> wrong. `InitD3DDeviceAndTextureStages` sets `COLOROP = MODULATE`,
+> `COLORARG1 = D3DTA_TEXTURE`, `COLORARG2 = D3DTA_DIFFUSE`, and these meshes
+> carry no per-vertex colour — so the mesh base colour *is* the diffuse and the
+> black modulation is faithful. It looks like a fix because it neuters a real
+> pass.
+
 The world matrix is copied from the top of a matrix stack at `g_MatrixStackTop`
 (`0x007E7990`), 16 dwords per level, pushed by `MatrixStackPush` (`0x004A9880`)
 and popped by `MatrixStackPop` (`0x004A9840`).

@@ -66,6 +66,21 @@ else:
     w.node_tree.nodes["Background"].inputs[0].default_value = (1,1,1,1)
     w.node_tree.nodes["Background"].inputs[1].default_value = 1.0
     sc.world = w
+    # The engine draws its translucent pass sorted back-to-front (see
+    # gltf.DRAW_ORDER). glTF cannot carry that, and Blender sorts blended
+    # surfaces per object, so two coincident translucent copies of the same
+    # shell -- which this game's models genuinely contain -- resolve
+    # arbitrarily and one paints over the other. Dithered/hashed transparency
+    # resolves per fragment instead, which is not the engine's order either
+    # but does not produce the large flat wrong-surface artefacts.
+    for mat in bpy.data.materials:
+        for attr, val in (("surface_render_method", "DITHERED"),
+                          ("blend_method", "HASHED")):
+            if hasattr(mat, attr):
+                try:
+                    setattr(mat, attr, val)
+                except (TypeError, AttributeError):
+                    pass
 sc.render.resolution_x, sc.render.resolution_y = 800, 600
 sc.render.film_transparent = False
 sc.render.image_settings.file_format = "PNG"; sc.render.filepath = out

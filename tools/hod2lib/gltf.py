@@ -325,6 +325,51 @@ def _bams_euler_to_quat(rx: float, ry: float, rz: float
     )
 
 
+#: How a frame is ordered, recorded so a target renderer can reproduce it
+#: rather than guess. Proved from `RenderFlushCommandList` (0x004A88E0) and
+#: its qsort comparator (0x004A8A20).
+DRAW_ORDER = {
+    "passes": ["opaque", "translucent"],
+    "opaque": "drawn at submission time by RenderEnqueueCommand, in "
+              "submission order -- not sorted",
+    "translucent": "drawn by RenderFlushCommandList after sorting the whole "
+                   "command list",
+    "sort_key": "(draw_layer ASC, sort_depth DESC)",
+    "sort_comparator": "0x004A8A20: layer = flags & 0xF compared ascending; "
+                       "on a tie, sort_depth compared descending, i.e. "
+                       "farthest first (back-to-front painter's order)",
+    "sort_depth": "command +0x04: seeded from the world matrix _43 and "
+                  "refined to the nearest mesh Z by the walker",
+    "within_a_command": "meshes are walked in chain (file) order; meshes "
+                        "belonging to the other pass are skipped",
+    "pass_selector": "(tsp & 0x180000) == 0x80000 -> opaque; anything else "
+                     "is translucent. NOT the list type.",
+    "default_draw_layer": 8,
+    "note": "glTF cannot express render order, so primitives are emitted "
+            "opaque-first then translucent, each in chain order, and every "
+            "primitive carries hod2_pass and hod2_chain_index in its extras.",
+}
+
+
+def _draw_order_extras(mesh, chain_index: int) -> dict:
+    """Per-primitive draw-order data, for a renderer that can honour it."""
+    return {
+        "hod2_pass": "opaque" if mesh.opaque_pass else "translucent",
+        "hod2_chain_index": chain_index,
+    }
+
+
+def _ordered_prims(prims: list) -> list:
+    """Opaque primitives first, then translucent, each in chain order.
+
+    A stable sort on the pass alone, so the engine's within-pass chain order
+    survives. This does not make a viewer correct -- glTF has no render-order
+    concept and two coincident translucent surfaces still sort arbitrarily --
+    but it makes the order deterministic and equal to the engine's.
+    """
+    return sorted(prims, key=lambda p: p["extras"]["hod2_pass"] != "opaque")
+
+
 def _bias_tag(bias) -> str:
     """A short, filename-safe tag naming a pose bias."""
     return "_".join(f"{v:g}".replace("-", "n").replace(".", "p")
@@ -820,8 +865,10 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                     "indices": buf.indices(idx),
                     "material": get_material(part_name, bank, mesh),
                     "mode": TRIANGLES,
+                    "extras": _draw_order_extras(mesh, len(prims)),
                 })
 
+            prims = _ordered_prims(prims)
             if prims:
                 mesh_name = f"{part_name}_model_{mi:03d}"
                 meshes.append({"name": mesh_name, "primitives": prims})
@@ -945,7 +992,9 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                                 [i for tri in mesh.triangles for i in tri]),
                             "material": get_material(label, bank, mesh),
                             "mode": TRIANGLES,
+                            "extras": _draw_order_extras(mesh, len(prims)),
                         })
+                prims = _ordered_prims(prims)
                 if not prims:
                     continue
                 mesh_name = f"{rig.name}_{tag}_{part.name}"
@@ -1045,6 +1094,9 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
         "asset": {
             "version": "2.0",
             "generator": "hod2lib (hotd2-decomp)",
+            # The engine's frame ordering, so a renderer that can honour it
+            # does not have to rediscover it from the primitive extras.
+            "extras": {"hod2_draw_order": DRAW_ORDER},
         },
         "scene": 0,
         "scenes": [{"nodes": scene_nodes, "name": name}],

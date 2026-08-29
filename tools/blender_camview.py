@@ -115,6 +115,20 @@ if engine.startswith("eevee") and not _unlit:
 if engine.startswith("eevee"):
     sc.render.engine = [e for e in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE")
                         if e in sc.render.bl_rna.properties["engine"].enum_items][0]
+    # See hod2lib.gltf.DRAW_ORDER: the engine sorts its translucent pass
+    # back-to-front, glTF cannot carry render order, and Blender sorts blended
+    # surfaces per object -- so two coincident translucent copies of the same
+    # shell, which this game's models genuinely contain, resolve arbitrarily
+    # and one paints over the other as a large flat wrong-coloured face.
+    # Hashed transparency resolves per fragment instead.
+    for _mat in bpy.data.materials:
+        for _attr, _val in (("surface_render_method", "DITHERED"),
+                            ("blend_method", "HASHED")):
+            if hasattr(_mat, _attr):
+                try:
+                    setattr(_mat, _attr, _val)
+                except (TypeError, AttributeError):
+                    pass
 else:
     sc.render.engine = "BLENDER_WORKBENCH"
     sc.display.shading.light = "FLAT"

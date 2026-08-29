@@ -176,14 +176,20 @@ if obj is None or obj.type != "MESH":
 else:
     me = obj.data
     if obj.mode == "EDIT":
-        # Stay in Object Mode while reading: mesh.uv_layers/polygons are stale
-        # in Edit Mode, which silently produced reports with no UV data.
-        bpy.ops.object.mode_set(mode="OBJECT")
-        sel = [p for p in me.polygons if p.select]
-        if sel:
-            out(f"{len(sel)} face(s) selected")
-            report(obj, sel)
-        bpy.ops.object.mode_set(mode="EDIT")
+        # Read in Object Mode: mesh.uv_layers/polygons are stale in Edit Mode,
+        # which silently produced reports with no UV data.
+        #
+        # try/finally matters -- an exception here used to strand the user in
+        # Object Mode, which looks exactly like "I can no longer select faces".
+        sel = []
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+            sel = [p for p in me.polygons if p.select]
+            if sel:
+                out(f"{len(sel)} face(s) selected")
+                report(obj, sel)
+        finally:
+            bpy.ops.object.mode_set(mode="EDIT")
         if not sel:
             out("no faces selected -- in Edit Mode press 3 for face mode, "
                 "Alt+A to deselect, then click a face")

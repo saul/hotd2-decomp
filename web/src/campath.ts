@@ -156,6 +156,19 @@ export class CamPath {
   readonly start: number;
   readonly duration: number;
   readonly isObjectPath: boolean;
+  /** Keyframe fields the exporter reconstructed from a finite neighbour. */
+  readonly repairs: number;
+  /**
+   * Channels the exporter could not reconstruct at all and zero-filled.
+   *
+   * `cp_st1.bin` ships damaged — 91 keyframe words decode to NaN or ~1e38 —
+   * and on path 0 *every* `eye_x` value is gone, so the 0.0 in its place is
+   * invented. Both retail copies are byte-identical, so this is how the game
+   * ships. A path with entries here is flown, because refusing to would leave
+   * stage 1's opening with no camera at all, but it is badged rather than
+   * presented as the game's own data.
+   */
+  readonly damaged: Record<string, string[]>;
   private readonly curves: (Curve | null)[];
 
   constructor(slot: number, json: CamPathJson, isObjectPath: boolean) {
@@ -165,6 +178,8 @@ export class CamPath {
     this.start = json.start;
     this.duration = json.duration;
     this.isObjectPath = isObjectPath;
+    this.repairs = json.repairs ?? 0;
+    this.damaged = json.damaged ?? {};
     const names = isObjectPath ? OP_CHANNELS : CP_CHANNELS;
     this.curves = names.map((n) => {
       const keys = json.channels[n];
@@ -174,6 +189,11 @@ export class CamPath {
 
   get end(): number {
     return this.start + this.duration;
+  }
+
+  /** True when any channel of this path is invented rather than reconstructed. */
+  get isDamaged(): boolean {
+    return Object.keys(this.damaged).length > 0;
   }
 
   private ch(i: number, t: number): number {

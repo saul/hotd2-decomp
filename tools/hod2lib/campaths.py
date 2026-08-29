@@ -124,6 +124,16 @@ class CamPaths:
             "duration": ref.duration,
             "channels": keys,
         }
+        # Damage travels with the curve. `repairs` counts keyframe fields
+        # reconstructed from a finite neighbour; `damaged` names channels that
+        # had no finite value at all and were zero-filled, which is an
+        # invention rather than a repair. A consumer must not present the
+        # second as data -- see Curve.unrecoverable.
+        repairs = sum(c.repairs for c in ref.path.channels.values())
+        if repairs:
+            out["repairs"] = repairs
+        if ref.path.damaged:
+            out["damaged"] = ref.path.damaged
         # The eighth cp_ descriptor index no consumer reads. Recorded rather
         # than dropped: it is a real curve, and its purpose is still open.
         if ref.path.trailing:

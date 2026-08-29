@@ -110,6 +110,8 @@ class Curve:
     keys: list[Key] = field(default_factory=list)
     _clean: list[Key] | None = field(default=None, repr=False, compare=False)
     _repairs: int = field(default=0, repr=False, compare=False)
+    _unrecoverable: list[str] = field(default_factory=list, repr=False,
+                                      compare=False)
 
     @property
     def size(self) -> int:
@@ -166,6 +168,25 @@ class Curve:
             self._clean, self._repairs = self._clean_keys()
         return self._repairs
 
+    @property
+    def unrecoverable(self) -> list[str]:
+        """Fields that were zero-filled because the curve held no finite value.
+
+        This is the difference between a repair and a fabrication, and it
+        matters. Holding a damaged key from a finite neighbour reconstructs
+        something the surrounding keys evidence. A channel where *every* value
+        is damaged evidences nothing, and the 0.0 that goes in its place is an
+        invention -- ``cp_st1`` path 0's ``eye_x`` is exactly that case, all
+        eight values gone.
+
+        A consumer must not present such a curve as data. The exporters carry
+        it through to ``Path.damaged`` so the browser player can badge the
+        path rather than quietly flying a camera down a made-up line.
+        """
+        if self._clean is None:
+            self._clean, self._repairs = self._clean_keys()
+        return self._unrecoverable
+
     def _clean_keys(self) -> tuple[list[Key], int]:
         ks = list(self.keys)
         # Trailing padding: the format's own convention.
@@ -201,9 +222,13 @@ class Curve:
             if len(good) == len(ks):
                 continue
             if not good:
+                # Nothing to reconstruct from. Zero-fill so the curve is at
+                # least evaluable, and record that the result is invented --
+                # see the note on `unrecoverable`.
                 for i, k in enumerate(ks):
                     ks[i] = _with(k, field, 0.0)
                 repairs += len(ks)
+                self._unrecoverable.append(field)
                 continue
             for i, k in enumerate(ks):
                 if _is_sane(getattr(k, field)):
@@ -256,6 +281,17 @@ class Path:
     @property
     def duration(self) -> float:
         return max((c.duration for c in self.channels.values()), default=0.0)
+
+    @property
+    def damaged(self) -> dict[str, list[str]]:
+        """Channels holding invented values, as ``{channel: [field, ...]}``.
+
+        Empty for every path in the game except the first four of ``cp_st1``
+        and a handful in ``cp_demo`` and ``cp_title``. A non-empty result means
+        the curve cannot be trusted as data.
+        """
+        return {n: c.unrecoverable
+                for n, c in self.channels.items() if c.unrecoverable}
 
     def sample(self, t: float) -> dict[str, float]:
         return {n: c.evaluate(t) for n, c in self.channels.items()}

@@ -2337,3 +2337,114 @@ workstream. `formats/evt.md` is the authoritative list until that lands.
    its sets.
 2. The spawn behaviour tails — still 90% of the uncovered `evt/` bytes.
 3. Fold the opcode names into `hod2lib/evt.py` once the library split lands.
+
+---
+
+## Session 16 — `coli/` solved, and the opcode names folded into the library
+
+### 1. `hod2lib/evt.py`
+
+The `OPCODES` table now carries the recovered names instead of the placeholders
+that described a handler by the global it wrote. **Renames only** — every
+operand size was already correct, independently validated by the 17,150
+instructions that decode with zero errors, and the agents' measured sizes
+agreed with the table on every row I checked. Added `QUEUE_ACTIONS`, the ten
+`queue_event` selectors, which a timeline dump needs.
+
+`dump_stage_script.py` now reads semantically, and the output contains its own
+confirmation:
+
+```
+0001DC  30 queue_event   00000040 00000000 00000000 00000037 00000000
+```
+
+`0x37` = 55, and 55 is exactly `cp_st2`'s first global camera-path index.
+
+### 2. `coli/` — solved
+
+Rule 1 paid out immediately. `ColiSegmentVsMesh` (`0x004AAA40`) is the segment
+test and states the entire format:
+
+```
+u32 group_count                       (always 1 in shipped data)
+  u32 quad_count
+  f32 aabb_max[3]                     <- MAX first
+  f32 aabb_min[3]
+    quad, 18 dwords:
+      f32 nx, ny, nz, d               plane
+      u32 axis                        dominant axis 0/1/2
+      f32 v0[3] v1[3] v2[3] v3[3]
+      u32 surface                     material id, the hit test's return value
+```
+
+Two details that would have been very hard to guess and are obvious from the
+code:
+
+- **The AABB is stored max-then-min.** The reject test reads
+  `seg_min.x <= box[1] && … && box[4] <= seg_max.x`. Reading it the natural way
+  gives an inverted box that rejects everything. This is also visible in the
+  old stub of `coli.md`, which had recorded the first six floats of `coli2.bin`
+  and noted they looked like a normal — they were the AABB, upside down.
+- **`axis` is an integer in a float slot.** The decompiler compares it against
+  `1.4013e-45` and `2.8026e-45`, which are the bit patterns of 1 and 2.
+
+The format parsed **100.00 % of every loaded file on the first attempt** — 8
+files, 126 groups, 2,516 quads, no slack anywhere.
+
+#### Four checks, each of which collapses if the reading is wrong
+
+| Check | Result |
+|---|---|
+| blob walk tiles each file exactly | 8/8 at 100.00 % |
+| quad vertices inside their group's AABB | 0 of 10,064 outside |
+| stored plane fits its own four vertices | p99 5.1e-03 |
+| ‖normal‖ = 1 | worst 6.8e-07 |
+| **evt `0x10`/`0x11` pointers land on a blob header** | **86/86** |
+
+The last one is the strongest. A scene's collision file has only 3–48 valid
+blob starts among tens of thousands of byte offsets, and every collision-set
+pointer in every stage script hits one.
+
+It also confirmed the loader arithmetic from the other direction. Operand
+`0x0CECF000`, relocated by `-0x0C53E600`, is `0x00990A00` — exactly the address
+`ColiLoadFileByIndex` computes for a non-zero index. The first attempt used
+`ins.raw` unrelocated and scored 0/86, which is what a wrong answer looks like
+here; applying the documented fixup took it straight to 86/86.
+
+#### Which files a scene uses
+
+`ColiLoadForScene` loads **two**: `coli0.bin` into a dedicated buffer for every
+scene, and `coli<scene+1>.bin` into another. So `coli0` is a common set and
+`coli1`–`coli6` are per-stage.
+
+`coli.bin` is **not loaded at all** — absent from the filename table, 0x800
+bytes of leading zeros, and it contains the other files at 0x800-aligned
+offsets. A build artifact. Old open question 3 ("is `coli.bin` a concatenation
+or a separate dataset?") is answered: neither, it is a memory image nobody
+reads.
+
+#### Surface ids
+
+The hit test returns the quad's `surface` field, and the shipped data uses 13
+distinct values. **5 and 55 are wet**, confirmed by two independent consumers:
+the ground-impact effect swaps asset `0x46` for `0x61` plus two ripple calls
+(the same effect the rain opcode selects), and a bouncing dropped object plays
+a different impact sound. The rest are a material palette nothing read so far
+distinguishes.
+
+### Note on the parser's home
+
+The parser lives in `tools/verify_coli.py` rather than `hod2lib/`, deliberately:
+the library is being restructured in a parallel workstream and a new module
+would collide. It is self-contained and should move into `hod2lib/coli.py` once
+that lands.
+
+### Next
+
+1. `mot/` — the last unsolved format, and the only remaining Phase 6 item.
+2. `coli/` export: the quads are directly renderable as a debug mesh, which
+   would let collision be checked visually against the exported stage geometry
+   — and would settle whether the surface palette lines up with visible
+   materials.
+3. `coli0.bin` is loaded for every scene but **no** script pointer references
+   it. Find what installs it.

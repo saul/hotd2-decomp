@@ -123,7 +123,7 @@ translation has not been decompiled yet.
 - [x] Opaque/translucent two-pass selector decoded
       (`(tsp & 0x180000) != 0x80000`)
 
-## Phase 6 — Remaining formats 🔶 `evt/` and `cam/` solved; `mot/`+`coli/` open
+## Phase 6 — Remaining formats 🔶 `evt/`, `cam/` and `coli/` solved; `mot/` open
 
 - [x] `cam/` — **solved.** Not a keyframe struct: a pool of independent scalar
       **cubic Hermite** curves plus a per-path descriptor naming one curve per
@@ -184,7 +184,13 @@ translation has not been decompiled yet.
 - [ ] `tools/hod2lib/evt.py`'s `OPCODES` table still carries the old
       placeholder names; `formats/evt.md` is now the authoritative list
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
-- [ ] `coli/` — record layout + hit-test semantics
+- [x] **`coli/` — SOLVED.** Quad-soup collision meshes: per-group AABB
+      (stored max-then-min) plus 72-byte quads of `{plane, dominant axis, 4
+      verts, surface id}`, recovered from `ColiSegmentVsMesh` (`0x004AAA40`).
+      **100.00 % byte coverage on all 8 loaded files**; all 10,064 quad
+      vertices lie inside their group's AABB; and **86/86** evt `0x10`/`0x11`
+      pointers land exactly on a blob header. Surface ids 5 and 55 are wet.
+      Spec: [`formats/coli.md`](formats/coli.md)
 - [ ] `mot/` — rigid transforms vs vertex morphs
 
 ## Phase 7 — Documentation & C reference

@@ -366,6 +366,25 @@ Supporting routines identified along the way:
 | `0x009C7200` | 256-byte script flag array |
 | `0x009A2BE0` | 4 × 3 f32 enemy approach rings; defaults at `0x004C4CD0` |
 
+### `coli/` collision
+
+| Address | Name | Notes |
+|---|---|---|
+| `0x004AAA40` | `ColiSegmentVsMesh` | segment vs one blob; **the format specification** |
+| `0x004053B0` | `ColiTraceSegmentAllSets` | dynamic objects, then both script sets |
+| `0x004057F0` | `ColiTestSphereAgainstFullSet` | sphere test; full set only |
+| `0x00409D40` | `QueryGroundHeightAt` | downward segment; falls back to the ground plane |
+| `0x0048A310` | `ColiLoadFileByIndex` | `coli\%s` into a fixed buffer |
+| `0x0048A3B0` | `ColiLoadForScene` | loads `coli0` **and** `coli<scene+1>` |
+
+| Address | Name |
+|---|---|
+| `0x0098F200` | `g_coli_buffer_common` — `coli0.bin` |
+| `0x00990A00` | `g_coli_buffer_scene` — `coli<scene+1>.bin` |
+| `0x004D1CC4` | `g_coli_filename_table` — index N → `coliN.bin`, 7 → `coliT.bin` |
+| `0x009CAC40`… | `g_coli_hit_surface` / `_quad` / `_dist_sq` / `_x,_y,_z` / `_normal_x` |
+| `0x009CAC5C` | `g_coli_allow_backface` |
+
 ### The scene state machine
 
 | Address | Name | Notes |

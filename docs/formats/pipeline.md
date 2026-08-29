@@ -356,10 +356,16 @@ buffer and appends a pointer to a sort list. `RenderFlushCommandList`
 | `+0x04` | 1 | sort depth; seeded from the world matrix's `_43` and refined to the nearest mesh Z by the walker |
 | `+0x0C` | 1 | **model pointer** |
 | `+0x10` | 1 | alpha multiplier, used only by `DrawModelWithForcedAlphaBlend` |
-| `+0x14` | 4 | fog / ambient parameters |
-| `+0x24` | 1 | light-set generation id |
-| `+0x28` | 3 | fog colour |
+| `+0x14` | 4 | **light colour R/G/B + ambient** — snapshot of `g_render_light_colour_*` and `g_render_ambient` |
+| `+0x24` | 1 | light-set generation id (`g_render_light_generation`) |
+| `+0x28` | 3 | **light direction**, negated — `g_render_light_dir_*` |
 | `+0x34` | 16 | **4×4 world matrix**, installed with `SetTransform(D3DTRANSFORMSTATE_WORLD, …)` |
+
+> ⚠️ An earlier revision of this table called `+0x14` "fog/ambient parameters"
+> and `+0x28` "fog colour". Both are wrong: they are the scene light colour,
+> ambient and direction, written by `FUN_004AA0A0` / `FUN_004AA070` /
+> `FUN_004AA0E0` from the light block that evt opcodes `0x17`–`0x19` and
+> `0x20`–`0x27` drive. See [`evt.md`](evt.md).
 
 The world matrix is copied from the top of a matrix stack at `g_MatrixStackTop`
 (`0x007E7990`), 16 dwords per level, pushed by `MatrixStackPush` (`0x004A9880`)

@@ -335,6 +335,37 @@ Constants: `0x004C4C98` = 0.5 (the FOV halving), `0x004C4370` = 2π/65536.
 | `0x004038A0` | `EvtActionStoreSixOperands60` | `0x60` |
 | `0x00403BD0` | `EvtEnterSceneState` | jumps through the 2-D state table at `0x00576C14` (9 columns) |
 
+### `evt/` opcode handlers
+
+The 96-entry dispatch table is at `0x005931D8`; handler `N` is entry `N`.
+Slots `00`, `2A`, `34`, `3C`, `4C` point at `FUN_0041EBB0`, a bare `RET`.
+All the handlers named this session carry their opcode as a name suffix, e.g.
+`EvtOpWaitScriptFlag45`. The full semantic table is in
+[`../formats/evt.md`](../formats/evt.md); a condensed copy is the plate comment
+on `EvtInterpreterLoop` (`0x0045ECC0`).
+
+Supporting routines identified along the way:
+
+| Address | Name |
+|---|---|
+| `0x0041D970` / `0x0041D9D0` / `0x0041DA70` | `AssetDrainAllJobs` / `AssetDrainTexAndPolJobs` / `AssetDrainMotionJobs` |
+| `0x0041D3A0` / `0x0041D3B0` | `SndLoadPackStubbedOut` / `SndFreePackStubbedOut` |
+| `0x0041D450` | `BgmStopThenPlay` |
+| `0x004156C0` | `ScoreAddForPlayer` |
+| `0x004ABE70` | `CrtSrand` |
+| `0x00480AC0` | `BuildEntitySpotlightArray` (one `D3DLIGHT7` spot per entity) |
+| `0x00409D40` | `QueryGroundHeightAt` |
+| `0x004159A0` | `PlacePlayerEntityFromViewPose` |
+| `0x004AA070` / `0x004AA0A0` / `0x004AA0E0` | set render ambient / light colour / light direction |
+
+| Table | Contents |
+|---|---|
+| `0x00567990` | accuracy bonus, 11 × s16 `{0,0,0,0,500,1000,1500,2000,2500,3000,4000}` |
+| `0x00579968` | 12 × 16-byte backdrop presets |
+| `0x00589DA8` | 0x10-byte screen-message records |
+| `0x009C7200` | 256-byte script flag array |
+| `0x009A2BE0` | 4 × 3 f32 enemy approach rings; defaults at `0x004C4CD0` |
+
 ### The scene state machine
 
 | Address | Name | Notes |

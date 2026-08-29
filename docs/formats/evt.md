@@ -156,27 +156,129 @@ stub. **No shipped file ever encodes one** — a useful integrity check, since a
 mis-sized instruction would land on a stub or an out-of-range opcode almost
 immediately. 76 distinct opcodes are actually used.
 
-### Notable opcodes
+### The VM's own machinery
 
-| Op | Name | Notes |
+**[proved]**
+
+| Global | Role |
+|---|---|
+| `DAT_009C7108` | program counter; every token is a dword |
+| `DAT_009C8EA0` | yield flag. **Not cleared at loop entry**, so a handler that leaves it set *and does not advance `pc`* means "still waiting" |
+| `DAT_009A1A04` | current opcode, stored before dispatch. Handlers take **no arguments** |
+| `DAT_007DCCA4` | "script may advance" gate, recomputed every call: gameplay is live (a player in state 5 with credits, or `FUN_00413280()`). Nearly every wait opcode requires it |
+
+There is a hardcoded special case at `0x0045ED45`: in scene 5 with
+`DAT_009A3400 == 2`, a `wait_script_flag 0x13` immediately ahead of `pc` is
+skipped outright.
+
+### Opcode reference
+
+Confidence is marked per row. **[proved]** = the code was read end to end;
+**[likely]** = the mechanism is proved but the human-readable name is an
+inference; **[open]** = undetermined.
+
+| Op | Name | Meaning |
 |---|---|---|
-| `0x09` | `spawn_placed` | list of pointers to spawn descriptors — the main enemy placement opcode |
-| `0x0B`/`0x0C` | `spawn_obj` | same descriptor, different object base class |
-| `0x20`/`0x24` | `view_set` | set a view channel immediately (sub-opcode picks the channel) |
-| `0x21`/`0x25` | `view_tween_rate` | tween a channel at a given rate |
-| `0x23`/`0x27` | `view_tween_time` | tween a channel over a given duration; the handler pre-divides to a per-frame step |
-| `0x22`/`0x26` | `view_stop` | clear a channel's tween |
-| `0x30` | `queue_event` | push a scripted action onto a 16-slot ring; `EvtRunQueuedActions` (`0x00402320`) dispatches it through a two-level table at `0x005776EC`. The selector's **high nibble is both the operand count and the group index** — see below |
-| `0x40`–`0x47` | `wait_*` | the blocking opcodes; they set the yield flag and do not advance `pc` until their condition holds |
-| `0x49`/`0x4A`/`0x4B` | `variant_*` | pick one of several operand lists by a global — difficulty or player count |
-| `0x4D` | `checkpoint` | resets view state and records progress |
-| `0x50`–`0x57` | `asset_*` | **asset load/unload.** Each pushes a job onto the 64-entry ring at `0x007DA220`; `0x50`/`0x51` take an asset *slot* id, `0x52`–`0x57` a pol/tex *file* index. See [`pipeline.md`](pipeline.md) |
-| `0x4F` | `end_block` | hands control to the route table |
+| `01`–`08` | `spawn_if_mode*` | spawn lists gated on game mode |
+| `09` | `spawn_placed` | the main enemy placement opcode |
+| `0A`–`0D` | `spawn_*` | same descriptor, different object base class |
+| `0E` | `set_approach_rings` | **[proved]** `g_enemy_approach_rings[op0][0..2] = op1..op3` as **floats** — three XZ distances from the camera. 6 dwords; a 4th ring operand is read and discarded. ROM defaults `{25,38,51}` ×3 and `{37,48,51}` |
+| `0F` | `set_approach_steps` | **[proved]** `-1`-terminated list of small ints into `g_enemy_approach_steps`; defaults `{2,3,4}` |
+| `10` | `set_collision_set_full` | **[proved]** `-1`-terminated list of **relocated absolute pointers** to collision-mesh blobs. Consulted by both the ray and the sphere queries |
+| `11` | `set_collision_set_ray_only` | **[proved]** same, but consulted by the ray queries only — **[likely]** shoot-through scenery that does not block movement |
+| `12` | `set_approach_steps_2p_bias` | **[proved]** as `0F`, plus `+1` when two players are in play |
+| `13` | `set_scene_lighting_override` | **[proved]** 5-entry list → `(enable, light r, g, b, ambient)`, feeding one lighting-override call |
+| `14` | `set_scene_lighting` | `DAT_009A2BB4`; also gates `15` and `16` |
+| `15` | `enable_entity_spotlights` | **[proved]** one `D3DLIGHT7` **spotlight per entity** (theta = phi = π/8, falloff 1, attenuation0 0.5) into the 16-entry array at `0x009A1A20`. Only effective when `14` is on |
+| `16` | `set_ambient_light_rgb` | **[proved]** 4 dwords: three float refs → the D3D ambient colour. ⚠️ the old name `set_fog_or_clear3` was wrong — nothing on this path touches fog |
+| `17` | `slerp_light0_direction` | **[proved]** `(target_pitch, target_yaw, frames)`; spawns a task that **slerps** light 0's direction. Fire-and-forget — the VM does not wait |
+| `18` / `19` | `set_light0/1_direction` | **[proved]** `(pitch, yaw)` in BAMS on scene light block 0 / 1 |
+| `1A` | `set_ground_plane_y` | **[proved]** `g_ground_plane_y`. `QueryGroundHeightAt` returns it when a downward ray misses, and it is the plane blob shadows project onto. Also the value opcode `36` pins the view pose to |
+| `1B` | `set_backdrop_preset` | **[likely]** index 0–11 into a 12 × 16-byte table at `0x00579968` `{s16 assetA, s16 assetB, f32 dy, s32 spin, s32 angle0}` — a camera-following dome at dy 0…−3000. Presets 8, 10, 11 also scroll V by −0.005/frame. "sky" is inference |
+| `1C` | `set_backdrop_mode` | **[proved]** 0 = off, 2 = drawn but frozen, else drawn and animating. The mode selector for `1B` |
+| `1D` | `enable_rain` | **[likely]** particles falling 2.0/frame in a camera-attached volume, drawn as asset `0x53` scaled `(1.5, 3.5, 1.0)`; also swaps the impact effect to a wet variant. "rain" is inference from the fall speed and the 3.5× vertical stretch |
+| `1E` | *(dead)* | **[proved]** `DAT_009C8A78` has **no readers anywhere in the binary**. Vestigial; its intent is unrecoverable |
+| `1F` | `set_hud_shutter_state` | **[proved]** 9 states. Draws asset `0x93E` at view-space `y = ±0.35, z = −1.0` and drives `DAT_009C8E00`, the gate on firing and ammo decrement. States 4/5 hide the HUD and lock out shooting; 1/2/6 show it |
+| `20`–`27` | **fog / light tweens** | see the correction below |
+| `28` / `29` | `region_load` / `region_enter` | stage geometry streaming; see [`pipeline.md`](pipeline.md) |
+| `2B` | `award_accuracy_bonus` | **[proved]** `pct = hits*100/shots` (needs shots > 0x13), bonus = `g_accuracy_bonus_table[pct/10]` = `{0,0,0,0,500,1000,1500,2000,2500,3000,4000}` |
+| `2C` | `set_skippable_region` | **[proved] and dead** — it never sets `DAT_009A2D74`, and nothing else does either |
+| `2D` | `show_screen_message` | **[proved]** u16 group → variant by player configuration (0 = 1P/P1, 1 = 1P/P2, 2 = 2P), then a voice id and a timed sprite task from the 0x10-byte records at `0x00589DA8` `{u16 sprite, u16 frames, f32 x, f32 y, u32 voice}` |
+| `2E` | `resume_bgm_if_skipped` | **[proved]** guarded by the dead skip flag; a no-op in this build |
+| `2F` | `suppress_accuracy_stats` | **[proved]** non-zero stops the shots/hits counters that `2B` grades |
+| `30` | `queue_event` | the scripted-action ring — see below |
+| `31` | `goto_scene_state` | **[proved]** immediate transition to `(major 1, minor op0)` |
+| `32` | `goto_scene_state_when_alive` | **[proved]** as `31`, but parks on the instruction until neither player is dead-but-still-in-play |
+| `33` | `set_action_drain_mode` | **[proved]** `(drain_mode, pending_count_delta)`. Mode 1 = drain the ring, 2 = pop one |
+| `35` | `enable_camera_path_roll` | **[proved]** `CamEvalPath7` evaluates curve channel 6 (roll/bank) **only when this is set**; otherwise roll is forced to 0 |
+| `36` | `pin_view_to_ground_plane` | **[proved]** makes all four camera hooks take `eye.y` from `g_ground_plane_y` (opcode `1A`) instead of `path.y − 15` |
+| `37` | `force_camera_path_advance` | **[proved]** advances the camera path every frame, bypassing the "room cleared" gate |
+| `38`–`3B` | `se_play*` | sound effects |
+| `3D` / `3E` | `nop` | **[proved]** pure no-ops, `pc += 0x10` / `0x08` |
+| `3F` / `5B` / `5C` | `nop` | **[proved]** all three share **one** handler that is opcode-blind (`ADD [pc],4; RET`) — identical retired 0-operand opcodes |
+| `40` | `wait_queued_events_done` | **[proved]** `g_queued_events_pending == 0` |
+| `41` | `wait_camera_path_frame` | **[proved]** operand 0 = wait for the end of the path; otherwise wait until the path frame passes the operand |
+| `42` | `wait_frames` | **[proved]** countdown; only decrements while the gate is open, and `FUN_00499530` can clamp it downward to shorten a wait in progress |
+| `43` | `wait_enemies_present` | **[proved]** `g_enemies_present <= op`, and the camera has settled |
+| `44` | `wait_enemies_alive` | **[likely]** `g_enemies_alive <= op`, plus one frame of hysteresis. The two counters differ because `alive` drops at kill time and `present` at death-animation end, so `present >= alive` |
+| `45` | `wait_script_flag` | **[proved]** `g_script_flags[op]` — a 256-byte array at `0x009C7200` |
+| `46` | `wait_scripted_actors` | **[proved]** a counter with exactly one spawn site; **[open]** which actor class |
+| `47` | `wait_targets_clear` | **[likely]** camera settled and no live targetable entity registered. Depends on intra-frame task ordering that was not resolved |
+| `48` | `set_script_flag` | **[proved]** the writer half of `45` |
+| `49`–`4B` | `variant_*` | pick an operand list by a global |
+| `4D` | `checkpoint` | **[proved]** appends the current room id to the per-stage route history consumed by the stage-clear route map; reseeds the CRT RNG with **0** during gameplay (so runs are deterministic); restores the default per-class enemy approach rings |
+| `4E` / `4F` | `halt` / `end_block` | |
+| `50`–`57` | `asset_*` | streaming vocabulary; see [`pipeline.md`](pipeline.md) |
+| `58` | `asset_wait_all_jobs` | **[proved]** run every queued asset job to completion |
+| `59` | `asset_wait_tex_pol_jobs` | **[proved]** drain only job types < 8 (`tex\` and `pol\`); motion jobs are compacted and left pending |
+| `5A` | `asset_wait_motion_jobs` | **[proved]** drain only job types 8–10 (`mot\`) |
+| `5D` / `5E` | `snd_load/free_pack` **(stub)** | **[proved]** `OutputDebugStringA("SS_SndLoadPack")` and nothing else — NAOMI sound-driver calls stubbed out for the PC port, which streams individual `.wav` files |
+| `5F` | `bgm_entry_play` | **[proved]** consumes 4 operands but uses **only the third**: stop the current BGM, then play that track id |
 
-The `0x20`–`0x27` family targets one of two **view structs** (`DAT_009A3540`,
-`DAT_009A59E0` — one per player) via a 0x24-dword tween block laid out as
-`{enabled, from, to, rate}` per channel. Channels 5 and 9 are "all three axes at
-once" forms of 2/3/4 and 6/7/8.
+> ⚠️ **The skip feature is entirely dead code.** `DAT_009A2D74` is never
+> written with a non-zero value anywhere in the binary (14 references: 12 reads
+> and 2 writes, both storing 0). Same for `DAT_009A2230` and `DAT_009A1A18`.
+> So every `if (skip_flag)` branch in this opcode family — including all of
+> `2E` — is unreachable, and `2C` only registers the request into a variable
+> nothing reads.
+
+### Correction: `0x20`–`0x27` are fog and light tweens, not view tweens
+
+An earlier revision of this document said the `0x20`–`0x27` family targets
+"two **view structs**, one per player". That is wrong. `DAT_009A3540` and
+`DAT_009A59E0` are the two **scene light / fog environment blocks**.
+
+The decisive link is the renderer end, confirmed directly:
+`FUN_0040E160(&g_scene_light_block0)` runs once per frame from the view setup,
+builds a direction vector from the block's pitch/yaw, and hands it to
+`FUN_004AA0E0`, which writes `g_render_light_dir_*` — and *those* globals are
+read by `SetLightingDefaultSingle`, `RenderSubmitModelDefaultLight` and
+`RenderSubmitModelSceneLights`. Alongside it, `FUN_004AA0A0` writes the light
+colour and `FUN_004AA070` the ambient.
+
+| Offset in the block | Field |
+|---|---|
+| `+0x00` | world-space light direction (3 × f32) |
+| `+0x0C` | view-space light direction (3 × f32) |
+| `+0x18` / `+0x1C` | light pitch / yaw (BAMS) |
+| `+0x24`…`+0x2C` | fog colour R/G/B (ints) |
+| `+0x30` / `+0x34` | fog near / far |
+| `+0x240`…`+0x248` | light colour R/G/B (f32) |
+| `+0x24C` | ambient |
+
+So the `0x24`-dword `{enabled, from, to, rate}` tween block animates *these*:
+
+| Channel | Target |
+|---|---|
+| 0 / 1 | fog near / far |
+| 2, 3, 4 | fog colour R / G / B |
+| 5 | fog colour, all three at once |
+| 6, 7, 8 | light colour R / G / B |
+| 9 | light colour, all three at once |
+| 10 | ambient |
+
+`0x20`/`0x21`/`0x22`/`0x23` target light block 0 and `0x24`–`0x27` block 1;
+block 0 is pushed to the renderer every frame, block 1 only at scene init.
 
 ## `queue_event` — the scripted-action table, SOLVED
 
@@ -494,7 +596,12 @@ block in the corpus does this, which is exactly why it is easy to miss.
    handlers, not 100+, and they are tabulated above.
 3. ~~Which opcode selects a `cam/` path slot?~~ **SOLVED** — `queue_event`
    selector `0x40`, operand 2, a global path index. 751/751 verified.
-4. Semantics of the ~30 opcodes still named only by the global they write.
+4. ~~Semantics of the ~30 opcodes still named only by the global they write.~~
+   **Largely SOLVED** — see the opcode reference above. What remains open:
+   the identity of the actor class counted by `0x46`; the numeric scale of
+   `0x16`'s ambient floats; the mode flag that selects `0x2D`'s sprite vs text
+   draw path; `0x33`'s second operand; and `0x1E`, which is unrecoverable
+   because nothing reads it.
 5. `+0x14` / `+0x1C` of the spawn descriptor.
 6. What are the two "no file" scenes (7 and 8)? Scene 7 runs an inline stub
    inside `comevtbl` and is used as the fallback when a scene's route table

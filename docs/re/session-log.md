@@ -2190,3 +2190,150 @@ except the action table, which had not been fed to Ghidra.
    function inventory and should name a lot of them at once.
 4. Spawn behaviour tails — 90% of the uncovered `evt/` bytes; the class table
    is the way in.
+
+---
+
+## Session 15 — the scene state machine, and semantics for the whole opcode set
+
+Two tasks: decode the state machine at `0x00576C14`, and give the ~30 opcodes
+that were named only by the global they write an actual meaning. The second was
+fanned out to four parallel agents, read-only in Ghidra, with the parent doing
+all the writes.
+
+### 1. The state machine is a table of behaviour installers — and a trap
+
+`EvtEnterSceneState(major, minor)` jumps into `table[major*9 + minor]`. The `*9`
+came from the disassembly (`LEA ECX,[ECX+EAX*8]; ADD EAX,ECX`), not the
+decompiler.
+
+A cell installs hooks rather than doing work: the camera update
+(`g_camera_update_hook`, run each frame by `CameraUpdateTick`) and two
+per-player routine pointers, one of which `queue_event` selector `0x12` can
+also overwrite from script.
+
+**The unused cells are `while(1);`.** An invalid transition deliberately locks
+the game up, which turns the live-cell set into a hard statement rather than an
+inference. Six state handlers had no function body at all — nothing references
+them but this table.
+
+Rows 0–2 are the camera modes: follow the player midpoint, build the pose from
+the view struct, snap to the `cam/` path eye, path plus a 30-frame decaying
+impulse shake, and two variants that play a *deferred* path.
+
+That last pair closes a loop with Session 14. States (2,6) and (2,7) call
+`CamEvalPath7` themselves, stepping `g_stashed_path_frame` toward
+`g_stashed_path_end_frame` — exactly the globals `EvtActionCamPlay40`'s
+`flags & 2` branch stashes. A deferred camera play is a two-instruction idiom:
+
+```
+queue_event 0x40, start, end, path, 2     ; stash
+queue_event 0x21, 6 (or 7)                ; enter the state that plays it
+```
+
+Three measurements, all in `verify_evt_cam.py`: selector `0x21`'s 418 operands
+are only 4, 6 and 7 (row 2's live set is `{4,5,6,7}`); `0x11`'s are 1 and 3
+(row 1's is `{1,2,3}`); and **196/196** deferred plays are followed within three
+queued actions by a transition to state 6 or 7. A wrong row width would drop
+these onto the hang loop.
+
+### 2. Opcode semantics, four agents in parallel
+
+Each agent got a cluster, the handler addresses, this project's method rules,
+and an explicit instruction to mark every claim `[proved]` / `[likely]` /
+`[open]` and to say plainly when it could not tell. All four did. The full
+table now lives in `formats/evt.md`; the highlights:
+
+**Environment.** `0x15` puts one `D3DLIGHT7` **spotlight per entity** into a
+16-slot array; `0x16` is the **ambient colour** (its old name `set_fog_or_clear3`
+was wrong — nothing on that path touches fog); `0x1A` is the **ground plane**,
+both the fallback for a missed downward raycast and the plane blob shadows
+project onto; `0x1B`/`0x1C` drive a camera-following backdrop dome from a
+12-entry table; `0x1D` is rain; `0x1F` is a 9-state HUD shutter that also gates
+firing and ammo.
+
+**Camera.** `0x35` gates `CamEvalPath7`'s **7th curve channel** — roll exists in
+every `cp_` path but is only honoured when the script asks. `0x36` pins the view
+Y to the ground plane. `0x37` bypasses the "room cleared" gate on path advance.
+
+**Waits.** All eight decoded. `0x41` waits on a camera path frame (operand 0 =
+end of path). `0x43` and `0x44` watch **two different enemy counters** —
+`0x009C904A` drops at kill time, `0x009C7006` at death-animation end, so
+`present >= alive`. `0x45`/`0x48` are the reader and writer halves of a
+256-byte script flag array. `0x42`'s countdown can be **clamped downward** by an
+external wave-pacing routine, shortening a wait already in progress.
+
+**Assets and sound.** `0x58`/`0x59`/`0x5A` drain the asset job ring: all jobs,
+only `tex\`+`pol\`, or only `mot\`. `0x5D`/`0x5E` are `OutputDebugStringA`
+stubs — NAOMI sound-driver calls the PC port replaced with individual `.wav`
+streaming. `0x5F` consumes four operands and uses **only the third**.
+
+**Scoring.** `0x2B` is the end-of-stage accuracy bonus: `hits*100/shots`,
+indexed into `{0,0,0,0,500,1000,1500,2000,2500,3000,4000}`. `0x2F` suppresses
+the counters it grades.
+
+#### Four corrections to previously documented claims
+
+1. **`0x20`–`0x27` are fog and light tweens, not view tweens.** `DAT_009A3540`
+   and `DAT_009A59E0` are the two **scene light/fog blocks**, not per-player
+   view structs. I verified the renderer end myself before overturning it:
+   `FUN_004AA0E0` writes `g_render_light_dir_*`, `FUN_004AA0A0` the light
+   colour, `FUN_004AA070` the ambient — and those are read by the already-named
+   `SetLightingDefaultSingle` and `RenderSubmitModel*Light`. The tween's ten
+   channels are fog near/far, fog RGB, light RGB and ambient.
+2. **The draw command's `+0x14` and `+0x28` fields** were labelled
+   "fog/ambient parameters" and "fog colour" last session. They are the light
+   colour + ambient and the (negated) light direction. Corrected in
+   `pipeline.md`.
+3. **`0x10`/`0x11` carry relocated absolute pointers to collision-mesh blobs**,
+   not id lists — legal because `EvtRelocatePointers` has already rewritten
+   them. List A is consulted by both ray and sphere queries, list B by rays
+   only.
+4. **`0x0E`/`0x0F`/`0x12` are the enemy approach-distance pacing table**, not
+   spawn ids. `0x0E`'s operands are floats — the ROM defaults decode as
+   `{25,38,51}`, which as integers would be `0x41C80000`.
+
+#### The skip feature is dead code
+
+`DAT_009A2D74` is never written with a non-zero value anywhere in the binary
+(14 references: 12 reads, 2 writes, both storing 0). Same for `DAT_009A2230`
+and `DAT_009A1A18`. So every `if (skip_flag)` branch in this opcode family is
+unreachable, opcode `0x2E` is a no-op, and `0x2C` registers its request into a
+variable nothing reads. Worth knowing before anyone tries to implement it.
+
+Also: `0x3F`, `0x5B` and `0x5C` share **one** handler that is opcode-blind
+(`ADD [pc],4; RET`), so they are three identical retired no-ops, and `0x1E`
+writes a global with **no readers anywhere** — vestigial and unrecoverable.
+
+### A methodological note worth keeping
+
+One agent hit a **false `READ` xref**: `get_xrefs_to` reported `FUN_00429680`
+reading `DAT_009C8D4C`, but disassembling it showed a `REP MOVSD` whose operands
+Ghidra had mis-attributed. Cross-check any single-xref conclusion with
+`search_instructions` or the disassembly before naming from it.
+
+### Process notes
+
+Two mistakes of my own, both caught and fixed:
+
+- `git add -A` swept the peer session's in-progress library split
+  (`hod2lib/campaths.py`, `script.py`, `stage.py`, `PLAYER_PLAN.md`) into my
+  commits — twice. Both were split back out with a soft reset. **Stage explicit
+  paths in this repo; another workstream is live in the same tree.**
+- Ghidra's inline-script tool is disabled here (`GHIDRA_MCP_ALLOW_SCRIPTS`), so
+  ~50 renames had to go one call at a time. The high-value alternative is a
+  single plate comment carrying the whole table, which is what
+  `EvtInterpreterLoop` now has.
+
+`tools/hod2lib/evt.py`'s `OPCODES` dict still carries the old placeholder names.
+It was deliberately left alone — the Python is being restructured in a parallel
+workstream. `formats/evt.md` is the authoritative list until that lands.
+
+### Next
+
+1. `mot/` and `coli/` — the last two unsolved formats. `coli/` just got a large
+   push: the blob layout is now known from `FUN_004AAA40`
+   (`[group_count][per group: quad_count, AABB, quads of {plane, axis tag,
+   4 verts, surface flag}]`), and opcodes `0x10`/`0x11` say how a scene selects
+   its sets.
+2. The spawn behaviour tails — still 90% of the uncovered `evt/` bytes.
+3. Fold the opcode names into `hod2lib/evt.py` once the library split lands.

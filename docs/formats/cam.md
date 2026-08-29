@@ -265,3 +265,11 @@ path from their own stage. `tools/verify_evt_cam.py`.
 41.100° vertical (`0x1D3B` BAMS), 53.115° horizontal, 4:3, near 0.8, far 8000,
 constant for the whole game. Recovered from `SetupSceneProjection`; see
 [`pipeline.md`](pipeline.md). The exporter writes it into every glTF camera.
+
+## The roll channel is gated
+
+**[proved]** `CamEvalPath7` always evaluates curve channels 0–5 into eye and
+look-at. It evaluates channel **6** — roll/bank — only when `DAT_009A21B0` is
+non-zero, and forces roll to 0 otherwise. That global is written by `evt`
+opcode `0x35`. So a `cp_` path's roll curve exists in every file but is only
+honoured when the script asks for it.

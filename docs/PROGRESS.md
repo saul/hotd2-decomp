@@ -162,7 +162,27 @@ translation has not been decompiled yet.
       the camera modes, including the two that play a path stashed by
       `0x40 flags&2` — **196/196** deferred plays are followed by a transition
       to one of them
-- [ ] `evt/` semantics — ~26 opcodes still named only by the global they write
+- [x] **`evt/` opcode semantics — largely solved.** The ~30 opcodes known only
+      by the global they wrote are now decoded from their consumers: scene
+      lighting and spotlights, ambient colour, ground plane, backdrop dome,
+      rain, HUD shutter, accuracy scoring, camera-path roll/advance gates, the
+      wait family (queued events, camera frame, frames, two distinct enemy
+      counters, a 256-byte script-flag array, targetable entities), the asset
+      job drains, and two stubbed NAOMI sound calls. Full table with
+      per-row confidence in [`formats/evt.md`](formats/evt.md)
+- [x] **Corrections:** `0x20`–`0x27` are **fog/light tweens**, not per-player
+      view tweens — `DAT_009A3540`/`DAT_009A59E0` are the scene light/fog
+      blocks; `0x16` is ambient colour, not fog; `0x10`/`0x11` carry relocated
+      **collision-mesh pointers**, not ids; `0x0E`/`0x0F`/`0x12` are the enemy
+      approach-distance pacing table
+- [x] **The skip/fast-forward feature is dead code** — `DAT_009A2D74` is never
+      written non-zero anywhere, so every `if (skip)` branch, and opcode `0x2E`
+      entirely, is unreachable
+- [ ] `evt/` remaining unknowns: the actor class counted by `0x46`, `0x16`'s
+      numeric scale, `0x2D`'s sprite-vs-text mode flag, `0x33`'s second
+      operand, and `0x1E` (unrecoverable — nothing reads it)
+- [ ] `tools/hod2lib/evt.py`'s `OPCODES` table still carries the old
+      placeholder names; `formats/evt.md` is now the authoritative list
 - [ ] `evt/` remaining 21 % of bytes (behaviour tails, tween constant pool)
 - [ ] `coli/` — record layout + hit-test semantics
 - [ ] `mot/` — rigid transforms vs vertex morphs

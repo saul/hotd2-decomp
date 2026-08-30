@@ -36,6 +36,22 @@ from `render/characters.ts`, and only for spawns that resolve to a skeleton, so
 a class-0x41 placer never gets to the registry. The port is driven by
 `npm run test:port` and nothing else draws the props yet.
 
+**A reload resumes where you were.** The player writes its script address into
+the URL as it plays (`?stage=2&block=11&step=8&op=2&frame=1011`, throttled to
+one `replaceState` every 500 ms), and on load `Walker.seek` replays from the
+entry block to that address with every wait stepped over. That is what makes a
+refresh — or a Vite HMR reload — land in the same place instead of restarting
+the stage.
+
+`seek` had never worked past the first wait: `executeOne` refuses to run while
+one is raised, so the loop stopped dead and *every* seek in stage 2 landed on
+block 0 step 1 op 29. It now steps over waits, resolves a branch by taking the
+route the goal is actually behind, and returns whether it arrived — so a stale
+link says so rather than silently showing somewhere else.
+`npm run test:seek` samples addresses across all six stages, seeks back to each
+from cold, and compares the region, the streamed slots, the camera, the flags
+and the rest: 137 addresses, all exact.
+
 Three debug views hang off that same property — if all the state is in one
 enumerable place, it can be shown:
 
@@ -49,6 +65,16 @@ enumerable place, it can be shown:
   class has no module in `g_class_handlers`. 1046 of the 1383 placements
   `spawns.md` counts are in that state, and the box is the honest picture of
   it: something is there, and this player is not simulating it.
+* **Props** — with the Props checkbox on, a bounding box and an origin cross
+  on every prop the bundle names, coloured by why it is or is not on screen:
+  green drawn, amber hidden, magenta bound to a node with no geometry, red
+  named in `props.json` with no glTF node at all. Unbound props used to be
+  dropped from the layer's list entirely, which made "never exported" and
+  "hidden by something" look identical. The status line reports the same four
+  counts, and it now measures them when asked rather than caching them — the
+  cached version read `0/44 no node` for a set of props that were all bound and
+  fine, because `refreshUi` only runs during playback and so only ever saw the
+  state from before the first frame.
 * **Boxes** — the actor holding an attack permit, which is both the one about
   to swing and the one `SelectCameraLookAtTarget` is aiming at, plus every
   enemy keeping `wait_enemies_alive` blocked while it is blocking.
@@ -59,6 +85,7 @@ enumerable place, it can be shown:
 | the port | `tools/verify_port.py` | `FUN_` citations, coverage, `[diverges]`, snapshot rules |
 | the state machines | `npm run test:port` | permits, turn-taking, spacing, damage, save/restore |
 | the markup | `tools/verify_player_dom.py` | every `#id` the player looks up exists |
+| reload-and-resume | `npm run test:seek` | `Walker.seek` replays to an address and reproduces its state, over the shipped bundle |
 
 ---
 

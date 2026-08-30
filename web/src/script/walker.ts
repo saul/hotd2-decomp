@@ -547,21 +547,75 @@ export class Walker {
    * slots and the camera are right when you land: `region_enter` is an
    * instruction, so the region at op 14 of block 3 is a function of every
    * instruction that ran first. Feed output is suppressed during the replay.
+   *
+   * **The replay observes no waits.** A wait is a thing the *player* watches;
+   * a seek is asked for an address, so every one is stepped over the way
+   * `primeToFirstWait` steps over the early ones. Without that the loop stops
+   * at the first blocking instruction and every seek in the stage lands in the
+   * same place -- stage 2 put all of them on block 0 step 1 op 29.
+   *
+   * Returns whether it actually arrived, so a caller that asked for an
+   * unreachable address can say so instead of silently showing another one.
    */
-  seek(block: number, step = 0, opIndex = 0, maxOps = 500000): void {
+  seek(block: number, step = 0, opIndex = 0, maxOps = 500000): boolean {
     this.reset();
-    const quiet = { ...this.host };
     let executed = 0;
-    const stop = () =>
+    const arrived = () =>
       this.block === block && this.step === step && this.opIndex >= opIndex;
-    while (!this.finished && executed++ < maxOps) {
-      if (stop()) break;
+    while (executed++ < maxOps) {
+      if (arrived() || this.finished) break;
+      if (this.wait) {
+        // Exactly what `executeOne` left undone when the wait was raised: the
+        // waiting instruction has run, so move past it.
+        this.wait = null;
+        this.opIndex++;
+        continue;
+      }
+      // `halt` (0x4E) parks the interpreter and nothing in the script un-parks
+      // it, so anything past one is unreachable in play too. Stop rather than
+      // run script the game never would.
+      if (this.parked) break;
+      if (this.branch) { this.takeBranchToward(block); continue; }
       if (!this.executeOne(true)) break;
     }
-    void quiet;
     this.wait = null;
     this.branch = null;
     this.host.onBranch(null);
+    return arrived();
+  }
+
+  /**
+   * Resolve a branch met during a seek by taking the route the goal is
+   * actually behind.
+   *
+   * Falling back to `next[0]` -- which is what `branch_choice` defaults to --
+   * would make a seek past a branch point land wherever the first route goes,
+   * so an address recorded on the other fork could never be returned to.
+   */
+  private takeBranchToward(goal: number): void {
+    const b = this.branch;
+    if (!b) return;
+    this.takeBranch(b.targets.find((t) => this.reaches(t, goal)) ?? b.targets[0]);
+  }
+
+  /** Whether `goal` is reachable from `from` by following block routes. */
+  private reaches(from: number, goal: number, limit = 1024): boolean {
+    const seen = new Set<number>();
+    const queue = [from];
+    while (queue.length > 0 && seen.size < limit) {
+      const n = queue.shift() as number;
+      if (n === goal) return true;
+      if (n < 0 || seen.has(n)) continue;
+      seen.add(n);
+      const blk = this.blockAt(n);
+      if (!blk || blk.hole) continue;
+      const r = blk.route ?? this.script.routes[n];
+      if (!r) continue;
+      if (r.kind === "goto") queue.push(r.next[0]);
+      else if (r.kind === "branch") queue.push(...r.next);
+      else queue.push(n + 1);          // kind 2, as advanceStepOrRoute reads it
+    }
+    return false;
   }
 
   /** Take one instruction, ignoring any wait. Returns false when stuck. */

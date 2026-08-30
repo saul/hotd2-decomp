@@ -64,6 +64,14 @@ import { Rain } from "../render/rain";
 const $ = <T extends HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
 
+/**
+ * How often the playing address may be written back to the URL.
+ *
+ * Safari throttles `history.replaceState` to about one call every 300 ms and
+ * throws once a page exceeds it, so this stays comfortably the safe side.
+ */
+const URL_SYNC_MS = 500;
+
 class Player {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -115,6 +123,9 @@ class Player {
 
   private state: PlayerState = readState();
   private playing = false;
+  /** The address last written to the URL, and when — see `syncUrlToWalker`. */
+  private urlSyncKey = "";
+  private urlSyncAt = 0;
   private speed = 1;
   private pose: CameraPose = {
     eye: new Vector3(0, 0, 0),
@@ -391,7 +402,20 @@ class Player {
     if (this.state.slot !== undefined) {
       this.poseFromSlot(this.state.slot, this.state.frame ?? 0);
     } else if (this.state.block !== undefined) {
-      w.seek(this.state.block, this.state.step ?? 1, this.state.op ?? 0);
+      const arrived = w.seek(this.state.block, this.state.step ?? 1,
+                             this.state.op ?? 0);
+      if (!arrived) {
+        // The address is not on any route the script can take from the entry
+        // block -- a stale link, or a branch this run did not take. Say so
+        // rather than silently presenting whatever the replay ran into.
+        console.warn(`no route to ${this.state.block}/${this.state.step ?? 1}` +
+                     `/${this.state.op ?? 0}; showing ${w.block}/${w.step}` +
+                     `/${w.opIndex}`);
+      }
+      // Land in the same shot, not at the start of it.
+      if (this.state.frame !== undefined && w.cam) {
+        w.cam.frame = this.state.frame;
+      }
       this.syncCameraToWalker();
       this.syncBgmToWalker();
     } else {
@@ -979,6 +1003,7 @@ class Player {
         });
         this.hudLayer.tick(script.frames);
         if (!this.scrubbing) this.syncCameraToWalker();
+        this.syncUrlToWalker(now);
       }
       this.refreshUi();
     }
@@ -1196,6 +1221,36 @@ class Player {
 
   private pushUrl(): void {
     writeState(this.state);
+  }
+
+  /**
+   * Keep the address in the URL current while the script plays.
+   *
+   * The URL is the only thing that survives a page reload or a Vite HMR
+   * update, and `applyIncomingState` can only seek to an address it is given —
+   * so without this a refresh part-way through a stage restarts at the entry
+   * block, which is a long way back from wherever you were looking.
+   *
+   * `replaceState` rather than `pushState`, so playing does not fill the back
+   * button with one entry per instruction, and throttled because Safari
+   * rate-limits the history API to roughly one call every 300 ms.
+   */
+  private syncUrlToWalker(nowMs: number): void {
+    const w = this.walker;
+    if (!w || this.state.mode === "free" || this.state.slot !== undefined) {
+      return;
+    }
+    const key = `${w.block}/${w.step}/${w.opIndex}`;
+    if (key === this.urlSyncKey || nowMs - this.urlSyncAt < URL_SYNC_MS) return;
+    this.urlSyncKey = key;
+    this.urlSyncAt = nowMs;
+    this.state.block = w.block;
+    this.state.step = w.step;
+    this.state.op = w.opIndex;
+    // The frame within the running camera move, so a reload comes back to the
+    // same shot rather than to the beginning of it.
+    this.state.frame = w.cam ? Math.round(w.cam.frame) : undefined;
+    this.pushUrl();
   }
 }
 

@@ -279,3 +279,6 @@
 00454270	ActorUpdateBodyCondition	Derives obj+0x130C, the body condition, from which parts are gone. Both arm zones destroyed (obj+0x1318 bits 1 and 2) gives condition 5, which ChooseDeathMotion reads.
 004543f0	ActorReactToHit	Records the last-hit zone in obj+0x1319 (1 torso, 2 head) and decides whether the hit interrupts what the actor is doing. Results 1 and 3 always react; 2 and 5 only for character types 3 and 0x12.
 004544c0	ActorPlayHitReaction	The stumble. g_pHitReactionMotions[char][obj+0x130C][g_bone_reaction_group[bone]] cross-faded onto track 1 -- or hard-set with no fade when the bone is 9 or above, the pelvis and legs.
+004579a0	ZombieStateApproach	The advance. Sub-state 0 measures the actor's distance to the CAMERA (not to a player) and picks a step count from which of g_enemy_approach_rings' three radii it falls inside; sub-state 1 walks that many steps and then hands to the state named by the descriptor tail's byte 3.
+00403980	CameraInstallFollowMidpoint	Installs CameraFollowPlayerMidpoint as the camera update hook, plus the per-player draw helper. One of eight installers that write g_camera_update_hook.
+00403a60	CameraInstallDeferredRail	Installs CameraStepDeferredRailWithFrameExport as the camera update hook.

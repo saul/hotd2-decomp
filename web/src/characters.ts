@@ -57,6 +57,9 @@ import type { ActiveSpawn } from "./walker";
 
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
+/** The engine's frame clock. Motion clips are authored at half of it. */
+const GAME_HZ = 60;
+
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Y = new Vector3(0, 1, 0);
 const AXIS_Z = new Vector3(0, 0, 1);
@@ -322,7 +325,10 @@ export class CharacterLayer {
       if (!rm || rf >= rm.frames) {
         inst.react = null;
       } else {
-        const b = inst.react.hard ? 0 : inst.react.blend;
+        // `blend` is in **60 Hz game frames**; `rf` counts the clip's own
+        // frames, which mot/ authors at 30. Comparing them directly stretched
+        // the fade over twice the clip and the weight never reached 1.
+        const b = inst.react.hard ? 0 : inst.react.blend * rm.fps / GAME_HZ;
         const w = b <= 0 ? 1
           : Math.min(1, Math.min(rf, rm.frames - rf) / b);
         this.applyBlend(inst, m, f, rm, Math.floor(rf), w);
@@ -480,6 +486,7 @@ export class CharacterLayer {
   hit(inst: Instance, bone: number, cameraYawBams = 0): {
     damage: number; killed: boolean; head: boolean; hp: number;
     gore: boolean; severed: boolean; result: number; death?: number;
+    react?: number;
   } {
     const b = inst.type.bones.find((x) => x.bone === bone);
     const n = inst.hits.get(bone) ?? 0;
@@ -545,7 +552,8 @@ export class CharacterLayer {
     // `ZombieOnShot` only reacts while the actor is alive; the death takes
     // over otherwise.
     const survived = !wasDead && inst.hp >= 1;
-    if (survived) this.startReaction(inst, bone, result);
+    const react = survived
+      ? this.startReaction(inst, bone, result) : undefined;
 
     let death: number | undefined;
     const killed = !wasDead && inst.hp < 1 && result !== 5;
@@ -563,7 +571,7 @@ export class CharacterLayer {
       }
     }
     return { damage, killed, head, hp: Math.max(0, inst.hp), gore, severed,
-             result, death };
+             result, death, react };
   }
 
   /**
@@ -587,16 +595,31 @@ export class CharacterLayer {
    * `[open]`. It only changes the answer at condition 3, and for every
    * character in the player's stages conditions 0, 1, 2 and 4 share one row.
    */
-  private startReaction(inst: Instance, bone: number, result: number): void {
-    if (bone <= 0) return;
+  private startReaction(inst: Instance, bone: number,
+                        result: number): number | undefined {
+    if (bone <= 0) return undefined;
     const ct = inst.type.type;
+    // Results 1 and 3 always interrupt; 2 and 5 only for these two types. So
+    // a plain body hit on a zombie deliberately does *not* break its stride.
     const reacts = result === 1 || result === 3
       || ((result === 2 || result === 5) && (ct === 3 || ct === 0x12));
-    if (!reacts) return;
+    if (!reacts) return undefined;
+
     const group = this.json?.reaction_groups?.[bone];
-    if (group === undefined) return;
-    const motion = inst.type.reactions?.["0"]?.[group];
-    if (!motion || !inst.type.motions[String(motion)]) return;
+    const motion = group === undefined
+      ? undefined : inst.type.reactions?.["0"]?.[group];
+    if (!motion || !inst.type.motions[String(motion)]) {
+      // Say so rather than doing nothing quietly. A bundle exported before
+      // the reaction tables were added has no `reaction_groups`, and a
+      // silent no-op here looks exactly like "the game has no staggers".
+      if (!this.warnedNoReactions) {
+        this.warnedNoReactions = true;
+        console.warn(
+          "[characters] no hit-reaction data in this bundle — re-export it "
+          + "(tools/export_player.py). Zombies will not stagger when shot.");
+      }
+      return undefined;
+    }
     const b = this.json?.reaction_blend;
     inst.react = {
       motion,
@@ -605,6 +628,15 @@ export class CharacterLayer {
       // `ActorSetMotion` hard-sets the leg reactions: no cross-fade.
       hard: bone >= (b?.hard_set_from_bone ?? 9),
     };
+    return motion;
+  }
+
+  /** One warning per session, not one per shot. */
+  private warnedNoReactions = false;
+
+  /** Whether this bundle carries the hit-reaction tables at all. */
+  get hasReactions(): boolean {
+    return !!this.json?.reaction_groups?.length;
   }
 
   /**

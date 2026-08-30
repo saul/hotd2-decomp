@@ -371,6 +371,7 @@ export class Shooting {
       ` −${out.damage} hp${out.killed ? ", killed" : ` → ${out.hp}`}` +
       (out.severed ? " · limb severed" : out.gore ? " · part swapped" : "") +
       (out.result === 5 ? " · no effect (ricochet)" : "") +
+      (out.react ? ` · stagger ${out.react}` : "") +
       (out.death !== undefined ? ` · death ${out.death}` : "") +
       `  +${points}`;
     this.onShot({ hit: true, bone: pick.bone, head: out.head,

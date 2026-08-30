@@ -585,7 +585,57 @@ scale *= severity;                              /* the 0.5 / 0.75 / 1.0 above */
 so it is near-constant on screen out to twenty units and fixed in the world
 beyond that.
 
-## 10. What the player implements
+## 10. Approaching — the advance rings
+
+`ZombieStateApproach` (`FUN_004579A0`) is how an enemy closes the distance, and
+the measurement in it settles something about this game's camera:
+
+```c
+d = hypot(obj.z - g_camera_eye_z, obj.x - g_camera_eye_x);   /* to the CAMERA */
+set = (s8) obj+0x131F;                       /* which ring set this actor uses */
+if (d >  outer[set])                 steps = base + mid_add + outer_add;
+if (d <= outer[set] && d > mid[set]) steps = base + mid_add;
+if (d <= mid[set])                   steps = base;
+obj+0x1358 = steps;
+```
+
+Three concentric radii per ring set, and the ring the enemy starts in decides
+**how many steps it walks before it may attack**. Sub-state 1 then plays the
+walk and counts down, and on the last step hands control to the state named by
+the spawn descriptor tail's byte 3 — which is where the attack lives.
+
+evt opcode `0x0E` writes a ring set:
+
+```c
+i = ip[1];
+g_enemy_approach_rings[i].inner = ip[2];
+g_enemy_approach_rings[i].mid   = ip[3];
+g_enemy_approach_rings[i].outer = ip[4];
+```
+
+so the script tunes the approach distances per encounter.
+
+### The camera does not follow the enemies
+
+`ZombieStateApproach` measuring to `g_camera_eye_*` is the first clue; the
+xrefs settle it. Everything that writes `g_camera_yaw_bams` is one of:
+
+| Writer | What it is |
+|---|---|
+| `CameraStepDeferredRailWithFrameExport` | a `cam/` path |
+| `CameraPathWithImpulseShake` | a `cam/` path, plus a damped shake |
+| `CameraPlayStashedPath` | a `cam/` path |
+| `CameraFollowPlayerMidpoint` | the **split-screen** midpoint of the two player view objects |
+| `CameraClearHookAndPose` | zeroes it |
+| `FUN_00460960` | the results / name-entry screen |
+
+**None of them reads an actor.** There is no mode that aims at an enemy, and
+the eight installers at `0x00403970`..`0x00403A90` do not offer one. During a
+combat wait the camera is wherever its path left it, and the *enemies* walk to
+**it** — which is exactly why the approach rings are measured to the camera and
+not to a player position. The camera is the player in this game.
+
+## 11. What the player implements
 
 Exact: the hit spheres, hit points through `ActorInitHitPoints`, the per-bone
 damage escalation with the `DamageRankModifier` applied, the control codes,

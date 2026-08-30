@@ -3841,3 +3841,52 @@ reading `obj+0x1318`, the mask `RemoveBoneSubtree` writes — and
 `ChooseDeathMotion` gives condition 5 its own death. So the destroyed-zone mask
 *does* reach the death animation, just not through `obj+0x1368`, which remains
 open question 21.
+
+---
+
+## Why the staggers were invisible, and where the gameplay camera is
+
+Two separate things, one of them my fault.
+
+### The staggers
+
+The implementation was correct; the *data* was not reaching it. Running
+`export_player.py --stage 2` had rewritten `manifest.json` to advertise only
+stage 2 and left the other eleven bundles at their previous export, which
+predates the reaction tables. A client reading one of those found no
+`reaction_groups`, and `startReaction` returned quietly — indistinguishable
+from "the game has no staggers".
+
+Fixed three ways rather than one: re-exported every stage, made the missing
+data **say so** (one console warning per session instead of a silent return),
+and put the reaction motion in the shot feed so a working stagger is visible in
+the transcript.
+
+While checking, found a genuine bug next to it. The cross-fade length is in
+**60 Hz game frames** and was being compared against the clip's own 30 Hz
+frame counter, so the fade ran twice as long as it should over a 16-frame clip
+and the blend weight peaked at 0.8 instead of reaching 1. Measured before and
+after by replaying the client's own arithmetic over the exported JSON: peak
+deviation from the walk pose goes 64° -> 99° on a torso hit and 86° -> 109° on
+a head hit. That measurement is also what ruled the animation *out* as the
+cause of "no staggers" — 64° is plainly visible, so the problem had to be
+upstream.
+
+### The camera does not follow the enemies
+
+Asked to decompile how the camera tracks the zombie about to attack. It does
+not, and the evidence is clean enough to state plainly.
+
+`ZombieStateApproach` measures its distance to `g_camera_eye_x/z` — to the
+**camera**, not to a player — and picks how many steps to walk from which of
+three concentric radii it falls inside. That was the first clue. The xrefs
+settle it: every writer of `g_camera_yaw_bams` is a `cam/` path mode, the
+split-screen midpoint of the two player view objects, the clear-pose helper, or
+the results screen. None reads an actor, and none of the eight installers at
+`0x00403970`..`0x00403A90` offers an enemy-tracking mode.
+
+So during a combat wait the camera sits wherever its path left it and the
+enemies walk to it. The camera *is* the player here, which is why the approach
+rings are measured against it. Worth writing down because the perception that
+it follows the attacker is a natural one — enemies converge on the camera, so
+they end up centred without anything aiming at them.

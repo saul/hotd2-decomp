@@ -260,14 +260,6 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 #transport button.sound[aria-pressed="false"] { color: var(--dim); }
 
-/* The skip button is dark until the script opens a skippable region, so the
-   bar shows at a glance where the game would have accepted Start -- which is
-   information the retail build never surfaces, its skip being dead code. */
-#transport button.skip:disabled { color: var(--dim); border-color: var(--line); }
-#transport button.skip:not(:disabled) {
-  color: var(--accent-2); border-color: var(--accent-2);
-}
-
 /* ---- HUD layer (evt 0x1F shutter, 0x2D message) ---- */
 
 /* The game draws both as view-space geometry at z = -1, i.e. a screen
@@ -302,6 +294,41 @@ body.resizing { cursor: col-resize; user-select: none; }
    backdrop: it covers only the strip it occupies, so the shot the branch is
    asking you to choose between stays visible, and everything outside the
    viewport stays live. */
+/* The skip bar shares the branch bar's geometry and animation so the two read
+   as one family, and differs in colour because they differ in kind: the branch
+   bar is a decision playback is blocked on (amber, counts down), the skip bar
+   is an offer that changes nothing if ignored (cyan, no timer). They stack
+   rather than overlap on the rare frame both apply. */
+#skipbar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(rgba(11, 14, 18, 0), rgba(11, 14, 18, 0.92) 38%);
+  border-top: 1px solid var(--accent-2);
+  animation: branch-in 160ms ease-out;
+}
+#skipbar[hidden] { display: none; }
+#skipbar.stacked { bottom: 47px; }
+@media (prefers-reduced-motion: reduce) { #skipbar { animation: none; } }
+#skipbar .tag {
+  background: var(--accent-2); color: #04171c; font-weight: 700;
+  border-radius: 4px; padding: 2px 8px; font-size: 11px;
+  letter-spacing: 0.3px; text-transform: uppercase; flex: none;
+}
+#skip-sub { font-size: 12px; flex: 1; min-width: 0; }
+#skip-go {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 5px; padding: 4px 12px; font: inherit; cursor: pointer;
+  flex: none;
+}
+#skip-go:hover { border-color: var(--accent-2); color: var(--accent-2); }
+.skip-key {
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px;
+  flex: none;
+}
+
 #branchbar {
   position: absolute;
   left: 0; right: 0; bottom: 0;

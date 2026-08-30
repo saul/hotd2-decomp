@@ -82,6 +82,17 @@
           <!-- Anchored to the bottom of the rendered view, not a modal over
                it: a branch point is a fact about where playback has got to,
                so the script, the scrubber and free roam all stay usable. -->
+          <!-- Same anchoring as the branch bar below, and shown under the
+               same rule the game uses: inside a set_skippable_region with the
+               shutter's firing gate down. Where the branch bar asks a question
+               that playback is waiting on, this one only offers something, so
+               it never blocks and never counts down. -->
+          <div id="skipbar" hidden>
+            <span class="tag">Skip</span>
+            <span id="skip-sub" class="dim"></span>
+            <button id="skip-go">Skip ⏭</button>
+            <kbd class="skip-key">Enter</kbd>
+          </div>
           <div id="branchbar" hidden>
             <span class="tag">Branch</span>
             <span id="branch-sub" class="dim"></span>
@@ -135,8 +146,6 @@
             <option value="-1">pass through</option>
           </select>
         </label>
-        <button id="btn-skip" class="skip" disabled
-                title="Skip the cutscene (Enter). Lit only inside a set_skippable_region with the firing gate down -- exactly when the game polls Start for a skip.">⏭ Skip</button>
         <span class="sep"></span>
         <button id="btn-sound" class="sound" aria-pressed="false"
                 title="Sound on / off. Browsers block audio until the page is clicked, so this is also the gesture that unblocks it."><span id="sound-icon">🔇</span> <span id="sound-text">Muted</span></button>

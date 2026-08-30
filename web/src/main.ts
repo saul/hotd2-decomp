@@ -372,7 +372,7 @@ class Player {
     $("#btn-play").addEventListener("click", () => this.togglePlay());
     $("#btn-step").addEventListener("click", () => this.stepOnce());
     $("#btn-stepback").addEventListener("click", () => this.stepBack());
-    $("#btn-skip").addEventListener("click", () => this.requestSkip());
+    $("#skip-go").addEventListener("click", () => this.requestSkip());
     $("#btn-reset").addEventListener("click", () => {
       this.feed.clear();
       this.walker?.reset();
@@ -545,14 +545,31 @@ class Player {
     this.pushUrl();
   }
 
-  private setSkipButton(): void {
-    const b = $("#btn-skip") as HTMLButtonElement;
-    const can = this.walker?.canSkip ?? false;
-    b.disabled = !can;
-    b.title = can
-      ? "Skip the rest of this skippable region (Enter)"
-      : "Skip is offered only inside a set_skippable_region with the firing "
-        + "gate down -- exactly when the game polls Start for a skip.";
+  /**
+   * The skip bar, shown under the game's own condition.
+   *
+   * `Walker.canSkip` is `DAT_009A2D7C != 0 && DAT_009C8E00 == 0` -- the exact
+   * test both player-update routines make before looking at Start. So the bar
+   * appears precisely where the game would have accepted a skip, which is
+   * something the retail build never shows you, its skip being one assignment
+   * short of working.
+   *
+   * Unlike the branch bar this is an offer, not a question: playback is not
+   * waiting on it and ignoring it changes nothing.
+   */
+  private showSkipBar(): void {
+    const bar = $("#skipbar");
+    const w = this.walker;
+    const can = w?.canSkip ?? false;
+    bar.hidden = !can;
+    if (!can || !w) return;
+    // On the rare frame a branch point is live too, sit above it rather than
+    // under it.
+    bar.classList.toggle("stacked", !$("#branchbar").hidden);
+    const held = w.wait?.blocksOn;
+    $("#skip-sub").textContent = held
+      ? `holding on ${held} — skips every wait until the region closes`
+      : "skips every wait until set_skippable_region closes";
   }
 
   private setPlayButton(): void {
@@ -818,7 +835,7 @@ class Player {
     if (!w || !this.stage) return;
     this.tree.mark(w.block, w.step, w.opIndex);
     this.minimap.draw(w.block);
-    this.setSkipButton();
+    this.showSkipBar();
 
     const cam = w.cam;
     const slider = $<HTMLInputElement>("#frame-slider");

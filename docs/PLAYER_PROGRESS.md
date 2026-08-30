@@ -81,7 +81,9 @@ Things established while building it, now folded back into the format docs.
   down, and `40`/`41`/`42`/`2E` all test the skip flag — but the poll writes
   `DAT_009A1A18`, which nothing reads, and `DAT_009A2D74` is only ever written
   0. The player implements the machinery as written and supplies that one
-  assignment from the Skip button.
+  assignment from a Skip bar, which rises from the bottom of the rendered view
+  under the game's own condition and so marks every moment a skip would have
+  been accepted.
 - **Fog is per-mesh, and its values were in the data all along.** TSP bit 23
   is `FOGENABLE` **inverted**, so fog is on when the bit is clear — which is
   what `ModelForceFogControlNone` exploits. 2197/2219 stage-2 materials are
@@ -157,7 +159,7 @@ struck through:
 | `31` | `goto_scene_state` | 274 | Only with a scene state machine |
 | `28` | `region_load` | 262 | No — preloads what is already resident |
 | `59`/`58`/`5A` | asset job drains | 188 | No — nothing is ever pending |
-| `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip button; dead in the retail build only for a missing assignment |
+| `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip bar; dead in the retail build only for a missing assignment |
 | `33` | `set_action_drain_mode` | 125 | Only with the action ring |
 | `10`/`11` | collision sets | 113 | Only with collision |
 | `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
@@ -243,7 +245,7 @@ missed. Meanings and confidence marks live in
 | `29` | `region_enter` | region | **done** | **switches the drawn region** — the core of the streaming model |
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
-| `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); lights the Skip button once the shutter's firing gate is also down, which is exactly when the game polls Start |
+| `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); raises the Skip bar once the shutter's firing gate is also down, which is exactly when the game polls Start |
 | `2D` | `show_screen_message` | hud | **done** | **plays the voice** and holds a caption for the record's frame count at its screen position; the sprite artwork is not drawn |
 | `2E` | `resume_bgm_if_skipped` | audio | **done** | restarts BGM `0x80000002` when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |

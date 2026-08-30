@@ -81,13 +81,19 @@ lands at 379 KB as JSON, which gzips hard.
 Space plays/pauses, `→` and `←` step one instruction, `1`/`2`/`3` switch mode,
 `Enter` skips a cutscene.
 
-**Skip** lights up inside a `set_skippable_region` once the shutter's firing
-gate is down — exactly the condition under which the game polls Start for a
-skip. Pressing it releases `wait_queued_events_done`, `wait_camera_path_frame`
-and `wait_frames` until the region closes, and `resume_bgm_if_skipped` then
-restarts the interrupted track. All of that is the game's own code; the retail
-build simply never raises the flag, because the Start poll writes a global that
-nothing reads. The button supplies that one assignment.
+A **Skip** bar rises from the bottom of the rendered view — the same anchoring
+as the branch bar — whenever the script is inside a `set_skippable_region` and
+the shutter's firing gate is down. That pair is exactly the condition both
+player-update routines test before looking at Start, so the bar marks the
+moments the game itself would have taken a skip. It differs from the branch bar
+in kind and says so in its colour: a branch is a decision playback is blocked
+on and counts down, a skip is an offer that changes nothing if you ignore it.
+
+Taking it releases `wait_queued_events_done`, `wait_camera_path_frame` and
+`wait_frames` until the region closes, and `resume_bgm_if_skipped` then restarts
+the interrupted track. All of that is the game's own code; the retail build
+simply never raises the flag, because the Start poll writes a global that
+nothing reads. The bar supplies that one assignment.
 
 The script panel is deliberately narrow — the viewport is the point of the
 tool and the tree is a navigator, not the content. Drag the splitter to widen

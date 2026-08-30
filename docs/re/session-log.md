@@ -3013,3 +3013,59 @@ small, closed and fully read out of the handler — `0x1C`, `0x1D`, `0x1F` and
 `DAT_009C8E00` is the non-obvious half. The client prefers `means` over the
 bare value in every summary. Deriving it in the exporter rather than the client
 keeps one source: the same table that documents the opcode produces the label.
+
+## Session 20 — the spawn system
+
+Code first, as asked. The entry point was the spawn opcode handler, not the
+data, and it paid immediately.
+
+**`obj+0x1390` is the descriptor + 0x24.** There are three allocators, not two:
+opcode 0x09 → `FUN_004088A0` (0x13F4, no tail pointer, reads two tail bytes
+inline); 0x0B/0x0D → `FUN_00408A20` (0x13F4, `obj+0x1390 = desc+0x24`); 0x0C →
+`FUN_00408BC0` (**0x1314**, `obj+0x130C = desc+0x24`). All three end with
+`= descriptor + 9` on an `int *`.
+
+Last session I concluded the opposite — that `obj+0x1390` "does NOT point at
+the evt spawn descriptor" — from two independent classes. Both readings were
+off by exactly `0x24`, which is why one gave `init_flags` and the other float
+data. Two independent wrong answers agreeing is not corroboration when they
+share a method. The fix unblocked both rigs that were transcribed but unplaced.
+
+**The sound record table at `0x005845F8` is the binary's only name table** —
+324 `{id, filename}` records. There is no asset name table anywhere, so a
+`PlaySoundId` id is very often the sole evidence for what an object is. Two of
+the four class agents dead-ended looking for exactly this and reported the ids
+unresolvable; a third found the table. Worth remembering that a negative result
+from one agent is not a fact.
+
+With it, class 0x30 is **proved** to be the zombie rather than assumed: state 2
+of its own 54-entry state table plays `COMMON2\ZOMBIE_041_16.wav`. Its variants
+play `CHAIN_SAW_22` and `KNIFE1_44`. Class 0x10 is the civilian, by five voice
+records naming young man / man / young woman / old woman / child.
+
+**Item placement is container placement.** Class 0x41 type 0 places a *group*
+of breakable props from two EXE tables — nine groups, 42 props, a 10-byte
+record each. Break the last prop of an item-set and that set's item is
+released. The record's trailing bytes turned out to be a **support list** for
+the topple physics, confirmed 42/42: every member at stack level *n* names
+supports that are all at level *n−1*, and every ground-level member names none.
+A wrong field offset could not produce a consistent height ordering, so that is
+a real check rather than a plausible story.
+
+**Two over-claims of my own, corrected.** I had written that all three
+orientation words are Euler angles because the allocators copy them to
+`obj+0x64/68/6C`. True of the spawn path, false as a universal: class 0x41
+type 4 reads `obj+0x6C` as an object kind and `obj+0x64` as a group size. And
+`desc+0x22` reaches both `obj+0x11C` and `obj+0x11E`, which is the classic
+current/max HP idiom for combat classes — but at least eight classes repurpose
+`obj+0x11C` as a sub-type selector, and for class 0x51 it is dead entirely.
+
+**On the cat.** There is none in the sound table. The animals the binary names
+are a frog, an owl, a bat and a worm. Class 0x52 is the best structural
+candidate for a small ambient animal — it wanders, it is small, its model is
+`0x1385 + rand() % 10` — but it plays no sound, so nothing in the code names
+it. Left `[open]` rather than guessed.
+
+Still open: classes 0x20, 0x45 and 0x46 were not reached; class 0x30's state
+slots 0x16–0x35; and the ten behaviour functions at `0x005926A8`, three of
+which play sounds and so are the next place identity evidence will come from.

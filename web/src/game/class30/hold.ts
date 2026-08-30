@@ -49,7 +49,7 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3): void {
   // never set on the ported path.
   obj.cooldown = 0;
 
-  if (obj.rank < obj.allowance && obj.rank < QUEUE_CAP && obj.cooldown < 1
+  if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP && obj.cooldown < 1
       && TryClaimAttackSlot(obj)) {
     // Body condition 4 goes to state 0x34 instead; that state is unread, and
     // no stage-2 spawn carries condition 4 into this state.

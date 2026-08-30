@@ -585,7 +585,7 @@ missed. Meanings and confidence marks live in
 | `0C` | `spawn_obj_c` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0E` | `set_approach_rings` | spawn | shown | enemy approach pacing; operands decoded as floats |
-| `0F` | `set_approach_steps` | spawn | shown | enemy approach pacing; operands decoded as floats |
+| `0F` | `set_approach_steps` | spawn | **done** | **writes `g_enemy_approach_steps`/`_mid`/`_outer`** — how deep in the distance queue an enemy may be and still come at you. Operands are a `-1`-terminated list of **ints**, not floats. Stage 2 sets 2/3/4, 2/2/2 and 1/1/1 in different blocks |
 | `10` | `set_collision_set_full` | collision | shown | collision-set pointers, resolved to coli/ blobs; collision is not simulated |
 | `11` | `set_collision_set_ray_only` | collision | shown | collision-set pointers, resolved to coli/ blobs; collision is not simulated |
 | `12` | `set_approach_steps_2p_bias` | spawn | shown | enemy approach pacing; operands decoded as floats |

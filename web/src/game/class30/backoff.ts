@@ -10,7 +10,7 @@
  * than to the approach is what makes the next zombie's turn come round
  * promptly instead of after a fresh walk-in.
  */
-import type { Actor } from "../actor";
+import { ActorFlag, type Actor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionRowOf } from "../tables";
@@ -26,6 +26,9 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
   if (obj.sub === 0) {
     obj.cooldown = 0x3c;              // +0x1338, the engine's own 60
     obj.backoffFrames = 0;            // +0x1334
+    // `obj+0x34 |= 0x20000000`: out of the compacted queue while retreating,
+    // so whoever is behind moves up and can take its turn.
+    obj.flags |= ActorFlag.BackingOff;
     obj.sub = 1;
   }
 
@@ -41,6 +44,7 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
   const d = dist2d(obj.pos, obj.hasStrikeAnchor ? obj.target : eye);
   if (d > ApproachInnerRadius(obj) || obj.backoffFrames > BACKOFF_MAX_FRAMES) {
     obj.cooldown = 0;
+    obj.flags &= ~ActorFlag.BackingOff;
     ReleaseAttackSlot(obj);          // only now is the next enemy free
     obj.hasStrikeAnchor = false;
     obj.state = ZombieState.HoldAtRange;

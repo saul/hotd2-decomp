@@ -15,6 +15,11 @@ import { vec3, type Vec3 } from "./vec";
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
   /**
+   * Set by `ZombieStateBackOff` while the actor retreats and cleared when it
+   * finishes. `RankEnemiesByDistance` drops these from the compacted queue.
+   */
+  BackingOff = 0x20000000,
+  /**
    * Excluded from `RegisterForCameraTracking`. `ZombieStateApproach` sets it
    * while walking and clears it the moment the actor wins a permit, which is
    * how the camera comes to consider only enemies that have committed.
@@ -74,6 +79,15 @@ export interface Actor {
    * -1 is "not ranked yet" and passes every `rank < allowance` test.
    */
   rank: number;             // +0x131D
+  /**
+   * The **compacted** rank, and a different number: `RankEnemiesByDistance`
+   * writes 0xE to every ranked actor, then drops the ones that are retreating
+   * — `obj+0x34 & 0x20000000`, which `ZombieStateBackOff` sets — and numbers
+   * the survivors 0, 1, 2… So a zombie queued behind one that has just swung
+   * and is backing away moves up immediately. This is what the `< 3` cap
+   * tests; `rank` is what the ring allowance tests.
+   */
+  queueRank: number;        // +0x131E
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
   /** Frames spent retreating; `ZombieStateBackOff` gives up past 0xF0. */
@@ -182,6 +196,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     zones: 0,
     attack: -1,
     rank: -1,
+    queueRank: 0xe,
     ringSet: 0,
     backoffFrames: 0,
     allowance: 0,

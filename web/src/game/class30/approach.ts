@@ -32,7 +32,7 @@ export function ZombieStateApproach(obj: Actor, eye: Vec3): void {
   ZombieSetMotionIfIdle(obj,
     FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt));
 
-  if (obj.rank < obj.allowance && obj.rank < QUEUE_CAP
+  if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP
       && TryClaimAttackSlot(obj)) {
     obj.flags &= ~ActorFlag.NoCameraTrack;
     obj.state = obj.attackState;

@@ -203,7 +203,7 @@ inference; **[open]** = undetermined.
 | `28` / `29` | `region_load` / `region_enter` | stage geometry streaming; see [`pipeline.md`](pipeline.md) |
 | `2B` | `award_accuracy_bonus` | **[proved]** `pct = hits*100/shots` (needs shots > 0x13), bonus = `g_accuracy_bonus_table[pct/10]` = `{0,0,0,0,500,1000,1500,2000,2500,3000,4000}` |
 | `2C` | `set_skippable_region` | **[proved]** `arg != 0` → `DAT_009A2230 = 0; DAT_009A2D7C = 1`; `arg == 0` → `DAT_009A2D7C = 0` and the skip flag is cleared. `DAT_009A2D7C` is live and read; the flag it would eventually raise is not — see below |
-| `2D` | `show_screen_message` | **[proved]** u16 group → variant by player configuration (0 = 1P/P1, 1 = 1P/P2, 2 = 2P), then a voice id and a timed sprite task from the 0x10-byte records at `0x00589DA8` `{u16 sprite, u16 frames, f32 x, f32 y, u32 voice}` |
+| `2D` | `play_dialogue` | **[proved]** u16 group → variant by player configuration (0 = 1P/P1, 1 = 1P/P2, 2 = 2P), then a voice line **and up to four timed subtitle lines**. See below |
 | `2E` | `resume_bgm_if_skipped` | **[proved]** `if (skip) PlaySoundId(0x80000002)` — restart the BGM a skipped cutscene interrupted. Unreachable in this build; see below |
 | `2F` | `suppress_accuracy_stats` | **[proved]** non-zero stops the shots/hits counters that `2B` grades |
 | `30` | `queue_event` | the scripted-action ring — see below |
@@ -270,6 +270,78 @@ shipped executable, and exactly one link is missing.
 The browser player implements the machinery as written and supplies that one
 assignment from the UI, so the feature can be exercised. See
 [`../PLAYER_PROGRESS.md`](../PLAYER_PROGRESS.md).
+
+### `2D` — dialogue, not a sprite
+
+**[proved]** `FUN_00435B80` picks the variant, plays the voice and starts a
+per-frame task. The task, `FUN_00435AA0`, is a subtitle renderer:
+
+```c
+frames -= 1;
+if (frames == 0 || g_nEvtSkipFlag || DAT_009A2230) { task_end(); return; }
+if (DAT_009C911E != 1) {
+    id = lines[variant * 4 + line];
+    if (frames < line_rec[id].end_frame) line++;
+    FUN_00436850(line_rec[id].x_offset, 384.0, line_rec[id].text);
+    return;
+}
+FUN_0041C6D0(rec.sprite, rec.x, rec.y, 1,1,1, 0, 7);   /* never reached */
+```
+
+> The sprite branch is **dead**. `DAT_009C911E` has exactly one writer in the
+> binary — `FUN_0040AC60`, which stores 2 — and the global is BSS, so `== 1`
+> is never true. The game always draws text.
+
+Four tables, none of which stores a count:
+
+| Address | Shape | What |
+|---|---|---|
+| `0x0058B6B8` | `u16[group][3]` | variant id per player configuration; 0 = this group says nothing for that configuration |
+| `0x00589DA8` | `0x10` bytes | `{u16 sprite, u16 frames, f32 x, f32 y, u32 voice}` — `frames` is the whole line's duration, `voice` a `PlaySoundId` id |
+| `0x005919A8` | `u16[variant][4]` | the line ids, `0xFFFF`-terminated — at most four lines |
+| `0x0058BC68` | `0x40` bytes | `{f32 x_offset, char text[0x3A], u16 end_frame}` |
+
+Lines advance on a **countdown**, not a timer: `frames` counts down from the
+record's duration and the line index steps whenever it falls below the current
+line's `end_frame`, so `end_frame` reads as "frames still remaining when this
+line gives way" and the last line of a variant holds at 0.
+
+`FUN_00436850` is a proportional bitmap text renderer: it centres the string at
+`x = 320 − len × 5.6 + x_offset` on a 384 baseline in the 640×480 screen,
+advances 11.2 px per glyph, nudges the baseline per lowercase letter for
+descenders (`g` +4, `p`/`q`/`y` +5, `b`/`i`/`l` +1, `f`/`j`/`t` +2, `d`/`h`/`k`
++0, the rest +3), maps characters to glyph ids through the `u16` table at
+`0x0055E054`, and draws in `(1.0, 0.8, 0.8)`.
+
+So the script's dialogue is recoverable text, and the player-configuration
+split is real: group 5 is "Get him!" for a single player and **"Get them!"** in
+two-player.
+
+Note the early return on `g_nEvtSkipFlag` in both the setup and the task — a
+skipped cutscene drops its dialogue and its voice line, which is a third live
+consumer of the skip flag alongside `40`/`41`/`42` and `2E`.
+
+### `1F` — the shutter's nine states
+
+| State | What it does | `DAT_009C8E00` |
+|---|---|---|
+| 0 | close, and enable firing | 1 |
+| 1 | open over 40 frames | 1 |
+| 2 | open — nothing drawn | — |
+| 3 | close over 40 frames, then disable firing | 0 on completion |
+| 4 | hold closed (unless `DAT_009A5900 & 0x30`) | — |
+| 5 | close, and disable firing | 0 |
+| 6 | open at once, and enable firing | 1 |
+| 7 | restore the previous state (`DAT_009C8E9C`) | — |
+| 8 | full blackout — the bar scaled `(1, 8, 1)` | — |
+
+States 0 and 5 both draw a closed shutter and set the gate to 1 and 0
+respectively, which is the whole reason the gate is a separate global: a
+letterboxed moment can still be playable.
+
+`hod2lib.script` attaches these readings to the instruction as `means` and
+`firing_gate`, so the player shows "5 — close, and disable firing" rather than
+"5".
 
 ### `1D` — the rain, read out
 

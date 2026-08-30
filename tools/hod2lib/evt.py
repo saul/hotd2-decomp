@@ -181,9 +181,12 @@ OPCODES: dict[int, Op] = {
     # waits test is only ever written 0 -- so the feature is one assignment
     # short of working. See docs/formats/evt.md.
     0x2C: ("set_skippable_region", "fix", 2),
-    # u16 message group -> variant by player configuration, then a voice id and
-    # a timed sprite from the 0x10-byte records at 0x00589DA8.
-    0x2D: ("show_screen_message", "fix", 2),
+    # Dialogue: a u16 group -> a variant by player configuration, then a voice
+    # line through PlaySoundId and up to four timed subtitle lines drawn
+    # centred at y = 384. The task FUN_00435AA0 has a sprite branch as well,
+    # but DAT_009C911E is only ever written 2, so it never runs -- the game
+    # always draws text. Suppressed entirely while the skip flag is up.
+    0x2D: ("play_dialogue", "fix", 2),
     # `if (skip) PlaySoundId(0x80000002)` -- restart the BGM a skipped cutscene
     # interrupted. Unreachable for the reason under 0x2C.
     0x2E: ("resume_bgm_if_skipped", "fix", 1),

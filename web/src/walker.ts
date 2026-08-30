@@ -165,7 +165,7 @@ export interface WalkerHost {
   playSound(id: number): string | undefined;
   /** evt `0x1F`: the HUD shutter state. */
   setShutter(state: number): string | undefined;
-  /** evt `0x2D`: show a message group. */
+  /** evt `0x2D`: play a dialogue group -- voice line plus subtitles. */
   showMessage(group: number): string | undefined;
 }
 
@@ -713,16 +713,20 @@ export class Walker {
         this.shutterState = op.value ?? 0;
         this.applyFiringGate(this.shutterState);
         return quiet ? undefined : this.host.setShutter(this.shutterState);
+      case 0x2d: // play_dialogue
+        return quiet || op.message_group === undefined
+          ? undefined
+          : this.host.showMessage(op.message_group);
       case 0x2c: // set_skippable_region
         // EvtOpSetSkippableRegion2C:
         //   arg != 0 -> DAT_009a2230 = 0; DAT_009a2d7c = 1
         //   arg == 0 -> DAT_009a2d7c = 0; skip flag = 0
         // Closing the region always clears the flag, so a skip never carries
         // past the region it was asked for.
-        this.skippable = (op.raw?.length
-          ? Number.parseInt(op.raw[0], 16) : (op.value ?? 0)) !== 0;
+        this.skippable = op.open ?? (op.raw?.length
+          ? Number.parseInt(op.raw[0], 16) !== 0 : false);
         if (!this.skippable) this.skipRequested = false;
-        return this.skippable ? "skippable region open" : "skippable region closed";
+        return op.means;
       case 0x2e: // resume_bgm_if_skipped
         // `if (skip) PlaySoundId(0x80000002)` -- restart the BGM a skipped
         // cutscene interrupted. Inert unless a skip actually happened.
@@ -731,10 +735,6 @@ export class Walker {
           return "BGM resumed after a skip";
         }
         return undefined;
-      case 0x2d: // show_screen_message
-        return quiet || op.message_group === undefined
-          ? undefined
-          : this.host.showMessage(op.message_group);
       case 0x15: // enable_entity_spotlights -- the two players' gun lights
         // Decoded as a raw operand: 0x15's handler only writes a global, so
         // `script.py` leaves it in `raw` rather than naming a field.

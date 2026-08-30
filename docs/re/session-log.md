@@ -2952,3 +2952,64 @@ The quad's 0.515 half-width just exceeds the 0.4997 half-width of a 4:3
 frustum at this FOV, so the artwork was cut for a 4:3 screen exactly. The
 player draws the bars full width and says so; stopping them short of a wide
 frame edge would be the worse likeness.
+
+## `show_screen_message` is `play_dialogue`, and the subtitles are right there
+
+The user's hunch — "I think `show_screen_message` is actually some kind of
+`play_dialogue` (that shows subtitles and plays audio)" — was exactly right,
+and the reason it had been missed is instructive.
+
+`FUN_00435B80` was read as far as "plays a voice, then starts a task holding a
+sprite id and a frame count", and the 0x10-byte record at `0x00589DA8` really
+does carry a `sprite`, an `x` and a `y`. What was never followed was the task
+itself. `FUN_00435AA0` has two branches:
+
+```c
+if (DAT_009C911E != 1) { ...draw text... }
+FUN_0041C6D0(rec.sprite, rec.x, rec.y, ...);   /* the sprite */
+```
+
+and `DAT_009C911E` has **one writer in the entire binary** — `FUN_0040AC60`,
+which stores 2 — over a BSS global. The `== 1` test is never true. The sprite
+path, the `sprite` field and the `x`/`y` in the record are all dead; the game
+only ever draws text. Reading the record and stopping there had produced a
+plausible-looking description of a feature that does not run.
+
+The text path needs two more tables neither of which stores a count:
+`u16[variant][4]` line ids at `0x005919A8`, `0xFFFF`-terminated, and 0x40-byte
+`{f32 x_offset, char text[0x3A], u16 end_frame}` records at `0x0058BC68`. So a
+dialogue line is up to four subtitles, and they advance on a **countdown** —
+`frames` counts down from the record's duration and the line index steps when
+it falls under the current line's `end_frame`, which makes `end_frame` "frames
+still left when this line gives way" and gives the last line 0.
+
+`FUN_00436850` turned out to be a proportional bitmap text renderer: centre at
+`320 − len × 5.6 + x_offset`, 11.2 px per glyph on a 384 baseline, a per-letter
+baseline nudge for descenders, a char → glyph table at `0x0055E054`, colour
+`(1.0, 0.8, 0.8)`.
+
+The payoff is that the script's actual dialogue is now in the bundle and on
+screen: *"We're meeting G over there."*, *"I've already taken care of G." /
+"This is only the beginning."* And the player-configuration split is real
+content rather than duplication — group 5 is **"Get him!"** for one player and
+**"Get them!"** for two.
+
+One more thing falls out. Both the setup and the task return early on
+`g_nEvtSkipFlag`, so a skipped cutscene drops its subtitles and its voice line.
+That is a third live consumer of the skip flag alongside `40`/`41`/`42` and
+`2E`, and more evidence that the feature was finished and then lost a single
+assignment.
+
+## Telling the reader what an operand means
+
+`set_hud_shutter_state 5` was displayed as "5". The nine states were already
+read out of `HudDrawShutterState` and written down in `evt.md`, but the player
+showed the number, so the knowledge sat in a document nobody has open while
+watching a stage run.
+
+`hod2lib.script` now attaches a `means` string to the operands whose space is
+small, closed and fully read out of the handler — `0x1C`, `0x1D`, `0x1F` and
+`0x2C` — plus `firing_gate` for `0x1F`, since which states drive
+`DAT_009C8E00` is the non-obvious half. The client prefers `means` over the
+bare value in every summary. Deriving it in the exporter rather than the client
+keeps one source: the same table that documents the opcode produces the label.

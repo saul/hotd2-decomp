@@ -232,7 +232,7 @@ missed. Meanings and confidence marks live in
 | `1C` | `set_backdrop_mode` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
 | `1D` | `enable_rain` | scenery | **done** | **50 particles**, transcribed from `DrawRainParticles` — only stage 1 ever turns it on |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
-| `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**, all 9 states with the 40-frame slide |
+| `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**, all 9 states with the 40-frame slide, sized from asset `0x93E`'s own quad; the UI names each state and says what it does to the firing gate |
 | `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour, light colour and ambient all applied** |
 | `21` | `light0_tween_rate` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `22` | `light0_stop` | light | shown | clears a channel tween |
@@ -246,7 +246,7 @@ missed. Meanings and confidence marks live in
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
 | `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); raises the Skip bar once the shutter's firing gate is also down, which is exactly when the game polls Start |
-| `2D` | `show_screen_message` | hud | **done** | **plays the voice** and holds a caption for the record's frame count at its screen position; the sprite artwork is not drawn |
+| `2D` | `play_dialogue` | hud | **done** | **plays the voice and shows the subtitles** — the real script text, centred on a 384 baseline, advancing line by line on the game's countdown |
 | `2E` | `resume_bgm_if_skipped` | audio | **done** | restarts BGM `0x80000002` when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
 | `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |

@@ -16,6 +16,14 @@ const $ = <T extends HTMLElement>(sel: string): T =>
 
 /** A one-line operand summary for the tree and the feed. */
 export function opSummary(op: OpJson): string {
+  // `means` is the exporter's plain-English reading of an operand whose space
+  // is small, closed and fully read out of the handler -- shutter states,
+  // backdrop modes, rain, skippable regions. It outranks the bare number,
+  // because "5" tells a reader nothing and "close, and disable firing" is the
+  // whole content of the instruction.
+  if (op.means) {
+    return op.value !== undefined ? `${op.value} — ${op.means}` : op.means;
+  }
   if (op.action === "cam_play") {
     const where = op.cam ? `${op.cam.file}[${op.cam.path}]` : `slot ${op.slot}`;
     if (op.static) return `${where} hold @${op.start}`;

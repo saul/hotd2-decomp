@@ -39,16 +39,43 @@
  * is why Start only skips a cutscene while the letterbox is closed. See
  * `walker.ts` on `set_skippable_region`.
  *
- * ## The message — evt `0x2D`
+ * ## The dialogue — evt `0x2D`
  *
  * `FUN_00435B80` picks a variant by player configuration, plays its voice
- * through the ordinary sound dispatcher, and starts a task that holds a
- * sprite on screen for a frame count. The voice and the timing are exact
- * here; the sprite is an asset id with no 2D pipeline behind it, so its id
- * and position are shown instead of the artwork.
+ * through the ordinary sound dispatcher, and starts a task holding a frame
+ * count. That task, `FUN_00435AA0`, is a **subtitle renderer**:
+ *
+ * ```c
+ * frames -= 1;
+ * if (frames == 0 || skip_flag || DAT_009A2230) { task_end(); return; }
+ * if (DAT_009C911E != 1) {
+ *     id = lines[variant * 4 + line];
+ *     if (frames < line_rec[id].end_frame) line++;
+ *     DrawTextCentred(line_rec[id].x_offset, 384.0, line_rec[id].text);
+ *     return;
+ * }
+ * DrawSprite(rec.sprite, rec.x, rec.y, ...);   // never reached
+ * ```
+ *
+ * The sprite branch is dead: `DAT_009C911E` has exactly one writer in the
+ * binary and it stores 2, and the global is BSS, so `== 1` is never true. The
+ * game always draws text — which means the actual dialogue is recoverable, and
+ * it is: "We're meeting G over there.", "Get him!" (or "Get them!" on the 2P
+ * variant), and so on.
+ *
+ * Lines advance on a **countdown**: `frames` counts down from the record's
+ * duration and the line index steps whenever it drops below the current line's
+ * `end_frame`. The last line of a variant has `end_frame` 0, so it holds to the
+ * end. That is reproduced exactly here.
+ *
+ * `FUN_00436850` draws the line centred at `x = 320 - len * 5.6 + x_offset` on
+ * a 384 baseline in the 640x480 screen, 11.2 px per glyph, in (1.0, 0.8, 0.8).
+ * The position and the colour are honoured; the bitmap font is not, since the
+ * player has no 2D glyph pipeline, so the browser's own text sits where the
+ * game's would.
  */
 
-import type { MessageVariant } from "./bundle";
+import type { DialogueLine, MessageVariant } from "./bundle";
 
 /** Closed centre offset, and the 40-frame slide to fully open. */
 const SHUTTER_CLOSED_Y = 0.35;
@@ -82,9 +109,13 @@ const SHUTTER_HALF = 0.05;
  */
 const HALF_HEIGHT = Math.tan((41.1 * Math.PI) / 180 / 2);
 
-/** The game's screen space, which message x/y are expressed in. */
+/** The game's screen space, which the subtitle geometry is expressed in. */
 const SCREEN_W = 640;
 const SCREEN_H = 480;
+
+/** `FUN_00436850`'s baseline, and its per-glyph advance. */
+const TEXT_BASELINE_Y = 384;
+const GLYPH_ADVANCE = 11.2;
 
 export class Hud {
   private readonly root: HTMLElement;
@@ -96,6 +127,8 @@ export class Hud {
   private prevState = 2;
   private counter = 0;
   private msgFramesLeft = 0;
+  private lines: DialogueLine[] = [];
+  private lineIndex = 0;
   private enabled = true;
 
   constructor(parent: HTMLElement) {
@@ -122,6 +155,8 @@ export class Hud {
     this.state = this.prevState = 2;
     this.counter = 0;
     this.msgFramesLeft = 0;
+    this.lines = [];
+    this.lineIndex = 0;
     this.message.hidden = true;
     this.apply();
   }
@@ -145,17 +180,35 @@ export class Hud {
 
   /** evt `0x2D`, once the variant has been chosen. */
   showMessage(group: number, v: MessageVariant | null): string | undefined {
-    if (!v) return `message group ${group} has no variant for this player`;
+    if (!v) return `dialogue group ${group} has no variant for this player`;
     this.msgFramesLeft = v.frames;
+    this.lines = v.lines ?? [];
+    this.lineIndex = 0;
+    this.drawLine();
+    const said = this.lines.map((l) => l.text).join(" / ");
+    return said
+      ? `“${said}”${v.voice_file ? `  ·  ${v.voice_file}` : ""}`
+      : `dialogue ${v.frames}f${v.voice_file ? ` · ${v.voice_file}` : ""}` +
+        " (no subtitle lines)";
+  }
+
+  /** Place and fill the caption for whichever line the countdown is on. */
+  private drawLine(): void {
+    const l = this.lines[this.lineIndex];
+    if (!l || this.msgFramesLeft <= 0) {
+      this.message.hidden = true;
+      return;
+    }
     this.message.hidden = false;
-    this.message.textContent =
-      `sprite 0x${v.sprite.toString(16).toUpperCase()}` +
-      (v.voice_file ? `  ·  ${v.voice_file}` : "");
-    // x/y are pixels in the game's 640x480 screen.
-    this.message.style.left = `${(v.x / SCREEN_W) * 100}%`;
-    this.message.style.top = `${(v.y / SCREEN_H) * 100}%`;
-    return `message ${v.frames}f at (${v.x.toFixed(0)}, ${v.y.toFixed(0)})` +
-      (v.voice_file ? ` + ${v.voice_file}` : "");
+    this.message.textContent = l.text;
+    // The game centres on 320 and nudges by x_offset, so the caption's own
+    // centre is what moves; the transform below anchors it there.
+    const cx = SCREEN_W / 2 + l.x_offset;
+    this.message.style.left = `${(cx / SCREEN_W) * 100}%`;
+    this.message.style.top = `${(TEXT_BASELINE_Y / SCREEN_H) * 100}%`;
+    // Match the game's advance so a long line occupies the width it would.
+    this.message.style.fontSize =
+      `${(GLYPH_ADVANCE / SCREEN_W) * 100 * 1.35}cqw`;
   }
 
   /** Advance both timers. `frames` is elapsed 60 Hz frames. */
@@ -163,7 +216,13 @@ export class Hud {
     if (frames <= 0) return;
     if (this.msgFramesLeft > 0) {
       this.msgFramesLeft -= frames;
-      if (this.msgFramesLeft <= 0) this.message.hidden = true;
+      // `if (frames < line.end_frame) line++` -- the countdown, not a timer.
+      const cur = this.lines[this.lineIndex];
+      if (cur && this.lineIndex < this.lines.length - 1
+          && this.msgFramesLeft < cur.end_frame) {
+        this.lineIndex++;
+      }
+      this.drawLine();
     }
     if (this.state === 1) {
       this.counter = Math.min(SHUTTER_FRAMES, this.counter + frames);
@@ -200,7 +259,7 @@ export class Hud {
     if (!this.enabled) return "off";
     const label = SHUTTER_LABEL[this.state] ?? `state ${this.state}`;
     const msg = this.msgFramesLeft > 0
-      ? `, message ${Math.ceil(this.msgFramesLeft)}f` : "";
+      ? `, dialogue ${Math.ceil(this.msgFramesLeft)}f` : "";
     return `${label}${msg}`;
   }
 }

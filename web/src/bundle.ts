@@ -131,9 +131,20 @@ export interface OpJson {
   roll_enabled?: boolean;
   enabled?: boolean;
   ground_y?: number;
-  /** evt `0x2D`: the message group to look up. */
+  /** evt `0x2D`: the dialogue group to look up. */
   message_group?: number;
   value?: number;
+  /**
+   * A plain-English reading of `value` for the opcodes whose operand space is
+   * small, closed and fully read out of the handler — `0x1C`, `0x1D`, `0x1F`
+   * and `0x2C`. The exporter supplies it so the meaning travels with the
+   * instruction instead of being reinvented in the client.
+   */
+  means?: string;
+  /** evt `0x1F`: what this shutter state does to the firing gate, if anything. */
+  firing_gate?: boolean;
+  /** evt `0x2C`: true opens the skippable region, false closes it. */
+  open?: boolean;
   light_block?: number;
   channel?: number;
   channel_name?: string;
@@ -197,6 +208,24 @@ export interface MessageVariant {
   y: number;
   voice: number;
   voice_file: string | null;
+  /** The subtitle lines, in order. See `DialogueLine`. */
+  lines?: DialogueLine[];
+}
+
+/**
+ * One subtitle line of a dialogue variant.
+ *
+ * The task counts `frames` *down*, and steps to the next line whenever the
+ * remaining count falls below this line's `end_frame` — so `end_frame` reads
+ * as "frames still left when this line gives way", and the last line of a
+ * variant has 0.
+ */
+export interface DialogueLine {
+  line: number;
+  text: string;
+  /** Added to the centred position, in the game's 640-wide screen. */
+  x_offset: number;
+  end_frame: number;
 }
 
 export interface SoundJson {

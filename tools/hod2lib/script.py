@@ -42,6 +42,30 @@ def _as_f32(word: int) -> float:
     return v if v == v and abs(v) != float("inf") else None
 
 
+#: evt 0x1F's nine shutter states, from HudDrawShutterState (0x00413970).
+#: The bar is a 1.03 x 0.10 quad (asset 0x93E) drawn at view-space y = +/-0.35
+#: closed and +/-0.45 open, so "closed" is a 10 % letterbox top and bottom.
+SHUTTER_STATES = {
+    0: "close, and enable firing",
+    1: "open over 40 frames",
+    2: "open (nothing drawn)",
+    3: "close over 40 frames, then disable firing",
+    4: "hold closed",
+    5: "close, and disable firing",
+    6: "open at once, and enable firing",
+    7: "restore the previous state",
+    8: "full blackout (the bar scaled 8x)",
+}
+
+#: Which states drive DAT_009C8E00, the gate on firing and ammo decrement --
+#: and, through it, on whether Start is polled for a cutscene skip.
+SHUTTER_GATE = {0: True, 1: True, 6: True, 3: False, 5: False}
+
+#: evt 0x1C. The dome draw at 0x004132D0 tests for 0 and 2 by name and
+#: animates for anything else.
+BACKDROP_MODES = {0: "dome off", 2: "dome frozen (no spin)"}
+
+
 def _bams_deg(word: int) -> float:
     """A BAMS angle as degrees. 0x4000 is 90 degrees, and the game reads every
     angle this way (through ``__ftol``)."""
@@ -409,7 +433,7 @@ class Program:
         elif ins.opcode == 0x33:                      # set_action_drain_mode
             d["drain_mode"] = arg0
             d["pending_delta"] = ins.raw[1] if len(ins.raw) > 1 else None
-        elif ins.opcode == 0x2D:                      # show_screen_message
+        elif ins.opcode == 0x2D:                      # play_dialogue
             d["message_group"] = arg0
         elif ins.opcode in (0x18, 0x19):              # set_lightN_direction
             d["pitch_deg"] = _bams_deg(ins.raw[0])
@@ -423,6 +447,20 @@ class Program:
             d["rings"] = [_as_f32(w) for w in ins.raw[1:4]]
         elif ins.opcode in (0x1B, 0x1C, 0x1D, 0x1F):
             d["value"] = arg0
+            # A bare number tells a reader nothing. These three operand spaces
+            # are small, closed and fully read out of the handlers, so the
+            # meaning travels with the instruction.
+            if ins.opcode == 0x1F:
+                d["means"] = SHUTTER_STATES.get(arg0)
+                d["firing_gate"] = SHUTTER_GATE.get(arg0)
+            elif ins.opcode == 0x1C:
+                d["means"] = BACKDROP_MODES.get(arg0, "animating")
+            elif ins.opcode == 0x1D:
+                d["means"] = "rain on" if arg0 else "rain off"
+        elif ins.opcode == 0x2C:                      # set_skippable_region
+            d["open"] = bool(arg0)
+            d["means"] = ("opens a region the player may skip out of"
+                          if arg0 else "closes it, and clears the skip flag")
         elif ins.opcode in range(0x20, 0x28):
             d.update(self._decode_light_tween(ins))
 

@@ -565,6 +565,14 @@ class ExeTables:
     MESSAGE_RECORDS = 0x00589DA8
     MESSAGE_RECORD_STRIDE = 0x10
 
+    #: u16[variant][4], 0xFFFF-terminated -- the subtitle lines of a variant.
+    DIALOGUE_LINES = 0x005919A8
+    DIALOGUE_LINES_PER_VARIANT = 4
+    #: 0x40-byte {f32 x_offset, char text[0x3A], u16 end_frame} line records.
+    DIALOGUE_TEXT = 0x0058BC68
+    DIALOGUE_TEXT_STRIDE = 0x40
+    DIALOGUE_TEXT_END = 0x3E
+
     BACKDROP_PRESETS = 0x00579968
     BACKDROP_STRIDE = 0x10
     BACKDROP_COUNT = 12
@@ -695,11 +703,75 @@ class ExeTables:
                 entry["variants"].append({
                     "variant": v, "player_cfg": cfg, "sprite": sprite,
                     "frames": frames, "x": x, "y": y, "voice": voice,
+                    "lines": self.dialogue_lines(v),
                     "voice_file": (self.voice_names().get(voice & 0xFFF)
                                    if voice >> 28 == self.SOUND_NS_VOICE
                                    else None),
                 })
             out.append(entry)
+        return out
+
+    def dialogue_lines(self, variant: int) -> list[dict]:
+        """The subtitle lines a message variant displays, in order.
+
+        `FUN_00435AA0` -- the per-frame task `0x2D` starts -- is a subtitle
+        renderer, not a sprite blitter::
+
+            frames -= 1;
+            if (frames == 0 || skip_flag || DAT_009A2230) { task_end(); return; }
+            if (DAT_009C911E != 1) {
+                line_id = lines[variant * 4 + line];
+                if (frames < line_rec[line_id].end_frame) line++;
+                DrawTextCentred(line_rec[line_id].x_offset, 384.0,
+                                line_rec[line_id].text);
+                return;
+            }
+            /* sprite path -- see below */
+
+        The sprite branch is **dead**: `DAT_009C911E` has one writer in the
+        whole binary (`FUN_0040AC60`) and it stores 2, and the global is BSS,
+        so the `== 1` test is never true. The game always draws text.
+
+        Lines advance on a countdown rather than a timer: the task's `frames`
+        counts *down* from the record's duration, and the line index steps on
+        whenever `frames` falls below the current line's ``end_frame``. So
+        ``end_frame`` is "frames still remaining when this line gives way".
+
+        Line record, 0x40 bytes at ``DIALOGUE_TEXT``::
+
+            +0x00  f32   x_offset    added to the centred position
+            +0x04  char  text[0x3A]  NUL-terminated ASCII
+            +0x3E  u16   end_frame
+
+        ``FUN_00436850`` draws it centred: ``x = 320 - len * 5.6 + x_offset``
+        on a 384 baseline in the game's 640x480 screen, 11.2 px per glyph,
+        with a per-letter baseline nudge for descenders and a char -> glyph
+        table at 0x0055E054. Colour is (1.0, 0.8, 0.8).
+        """
+        lr = self._v2r(self.DIALOGUE_LINES)
+        tr = self._v2r(self.DIALOGUE_TEXT)
+        if lr is None or tr is None or variant < 0:
+            return []
+        out: list[dict] = []
+        for i in range(self.DIALOGUE_LINES_PER_VARIANT):
+            o = lr + (variant * self.DIALOGUE_LINES_PER_VARIANT + i) * 2
+            if o + 2 > len(self.data):
+                break
+            line_id, = struct.unpack_from("<H", self.data, o)
+            if line_id == 0xFFFF:
+                break
+            ro = tr + line_id * self.DIALOGUE_TEXT_STRIDE
+            if ro + self.DIALOGUE_TEXT_STRIDE > len(self.data):
+                break
+            x_off, = struct.unpack_from("<f", self.data, ro)
+            raw = self.data[ro + 4:ro + self.DIALOGUE_TEXT_END]
+            text = raw.split(b"\0")[0].decode("ascii", "replace")
+            end_frame, = struct.unpack_from(
+                "<H", self.data, ro + self.DIALOGUE_TEXT_END)
+            if not text:
+                continue
+            out.append({"line": line_id, "text": text,
+                        "x_offset": x_off, "end_frame": end_frame})
         return out
 
     def backdrop_presets(self) -> list[dict]:

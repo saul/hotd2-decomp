@@ -265,7 +265,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* The game draws both as view-space geometry at z = -1, i.e. a screen
    overlay. DOM keeps them crisp at any canvas size and out of the depth
    buffer, which is what the game's draw layer achieves. */
-.hud-layer { position: absolute; inset: 0; pointer-events: none; }
+/* `container-type` so the caption can be sized in cqw and track the rendered
+   view the way the game's fixed 11.2 px advance tracks its 640-wide screen. */
+.hud-layer {
+  position: absolute; inset: 0; pointer-events: none;
+  container-type: inline-size;
+}
 .hud-layer[hidden] { display: none; }
 .shutter {
   position: absolute; left: 0; right: 0; height: 0;
@@ -274,17 +279,26 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .shutter-top { top: 0; }
 .shutter-bottom { bottom: 0; }
+/* The dialogue caption. `FUN_00436850` centres the line on x = 320 and draws
+   it on a 384 baseline in (1.0, 0.8, 0.8), so that is the position and the
+   colour here. The bitmap font itself is not reproduced -- there is no 2D
+   glyph pipeline in the player -- but the shadow stands in for the way the
+   game's glyphs sit over the scene without a panel behind them. */
 .screen-message {
   position: absolute;
-  transform: translate(-100%, -50%);
-  background: rgba(6, 10, 14, 0.8);
-  border: 1px solid var(--accent-2);
-  border-radius: 4px;
-  color: var(--accent-2);
-  font-family: var(--mono);
-  font-size: 11px;
-  padding: 3px 7px;
+  transform: translate(-50%, -50%);
+  color: rgb(255, 204, 204);
+  font-family: var(--sans, system-ui, sans-serif);
+  font-weight: 600;
+  font-size: 15px;
+  font-size: 2.36cqw;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 0 #000, 0 0 6px rgba(0, 0, 0, 0.9);
+  padding: 0;
   white-space: nowrap;
+  max-width: 96cqw;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .screen-message[hidden] { display: none; }
 

@@ -247,6 +247,8 @@ export interface CharacterBone {
   hit_radius?: number;
   /** Damage for each successive hit on this bone, from `PTR_DAT_004C8350`. */
   damage?: number[];
+  /** Slot the bone is redrawn with after each hit, from `PTR_DAT_004C7160`. */
+  effects?: number[];
   /** The exporter's part name, which the glTF node name ends with. */
   part: string;
   slot: number;
@@ -263,6 +265,8 @@ export interface CharacterType {
   bones: CharacterBone[];
   /** Bone the score model treats as the head — 2 on every humanoid. */
   head_bone: number;
+  /** Damaged variants, keyed by asset slot: their own hit spheres. */
+  gore: Record<string, { centre: [number, number, number]; radius: number }>;
   motions: Record<string, BakedMotion>;
 }
 
@@ -275,6 +279,8 @@ export interface CharacterPlacement {
   motion: number | null;
   /** `obj+0x11C` from the descriptor, before difficulty scaling. */
   hp: number;
+  /** The actor's BAMS yaw — the directional death compares the camera's to it. */
+  yaw: number;
   /**
    * A scripted entrance played once before `motion` starts looping — state 21
    * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump
@@ -283,7 +289,18 @@ export interface CharacterPlacement {
   intro?: { motion: number; delay: number };
 }
 
+/** The directional death set — see docs/formats/combat.md. */
+export interface DeathSet {
+  front: number[];
+  back: number[];
+  right: number;
+  left: number;
+  /** ±45° in BAMS. */
+  arc: number;
+}
+
 export interface CharactersJson {
+  deaths: DeathSet;
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
   note: string;

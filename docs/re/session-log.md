@@ -3621,3 +3621,53 @@ silently: the collision-mesh refinement, the difficulty modifier, ammo, reload,
 civilians, and the death animation — the last because which motion a dying actor
 plays comes from the 54-state machine and only two of those states have been
 read.
+
+## Deaths and gore: two loose ends, both closed by the same table
+
+The shooting work left two things explicitly open. Both turned out to be one
+short hop from what was already read.
+
+**The gore swap** needed "the shared fallback set `FUN_004099A0` resolves".
+`FUN_004099A0` is eleven lines, and it searches the **tail of
+`PTR_DAT_004D032C`** — the very table the bone hit spheres come from. Past
+`bone_count − 1` entries the same `{slot, centre, radius}` records continue,
+terminated by `slot == -1`, one per damaged variant. So a gore part carries the
+sphere of the part it replaces, which is how a half-destroyed limb keeps a
+sensible hit volume: `char_adv00`'s head stage 1 has the head's own 1.3 radius
+and stage 2 drops to 1.0 as more of it is gone.
+
+That also corrects something from two sessions ago. Dumping that table then, I
+saw entries 15 and 16 holding slots `0x1F3A`/`0x1F3B` and wrote them off as
+"belonging to the next character" because they resolved to `znsam2.bin`. They
+are `char_adv00`'s **torso gore stages** — the same two slots the zone table
+names for bone 1. Reading past the end of a table and reading the *next thing in
+the same table* look identical until you know what the next thing is.
+
+The cat needed a bound: it has no gore, so it has no terminator either, and the
+walk runs into floats read as slots. Bounding by "only slots the zone table
+actually names" fixes it, and the split falls out cleanly — the characters with
+gore entries are exactly the characters with damage escalation.
+
+**The death animation** needed the 54-state machine. Rather than read 54
+handlers, I scanned each for 32-bit immediates in 950–1030 and got a shortlist of
+sixteen. State 6 was 512 bytes and referenced four of the death motions; it is
+`FUN_00454D20`, and it calls `FUN_004560B0` to choose, then waits for the clip
+to end.
+
+The choice is **directional**: `camera_yaw − actor_yaw` against four ±45° arcs,
+giving motion 992, 991, or a random pick from a four- or six-entry table.
+
+Worth recording how the check went, because the order mattered. The death
+motions were identified *first*, from the data alone — scanning `zom.bin` for
+motions whose root translation ends lowest gave a clean cluster, 985–992 plus
+1015 and 1017, all ending at y ≈ 1.5 from a standing 12. Only afterwards were
+`DAT_0059309C` and `DAT_00593084` dumped, and **every entry in both is in that
+cluster**. Two independent routes to the same set.
+
+I deliberately did not label the arcs "front" and "back". Which is which depends
+on the camera yaw being target-to-eye *and* the model facing its local −Z —
+exactly the pair of conventions that produced the wrong yaw flip earlier in this
+session. What the data says without needing either: one table moves the root
+−8.7/−9.5/−9.3 in z and the other +7.4/+8.2, so one set falls the way the body
+faces and the other falls back over. A body falls away from whatever shot it,
+and that is the whole content of it.

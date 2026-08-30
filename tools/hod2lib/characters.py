@@ -149,6 +149,40 @@ HIT_EFFECT = 0x004C7160
 #: Steps per bone in both tables.
 HIT_STEPS = 6
 
+#: How a dying actor picks its animation, from `FUN_004560B0` -> `FUN_00456220`.
+#:
+#: The general case is **directional**. `FUN_00456220` takes
+#: ``camera_yaw - actor_yaw`` and tests it against four +/-45 degree arcs with
+#: `FUN_0040A040(angle, centre, 0x2000)`::
+#:
+#:     arc 0x0000  -> a random pick from DAT_0059309C[4]
+#:     arc 0x4000  -> motion 992
+#:     arc 0x8000  -> a random pick from DAT_00593084[6]
+#:     arc 0xC000  -> motion 991
+#:
+#: The arcs are named here by their **angle**, not "front" and "back", because
+#: which is which depends on two conventions at once: the camera yaw is the
+#: direction from target to eye (`FUN_00403AC0`), and a character model faces
+#: its local -Z. Working both through, an actor facing the camera lands in the
+#: 0x8000 arc.
+#:
+#: What the *data* says is unambiguous and is the useful half: the 0x0000
+#: table's motions carry the root -8.7, -9.5, -9.3 in z and the 0x8000 table's
+#: carry it +7.4, +8.2, +2.5. Since the model faces -Z, negative z is forward,
+#: so one set falls the way it is facing and the other falls back over. A body
+#: falls away from whatever shot it.
+#:
+#: `FUN_004560B0` overrides this when a specific part has been destroyed
+#: (`obj+0x1368` bits 8, 0x10, 0x40, 0x80 -> motions 428, 421, 633, 553) and for
+#: some spawn variants; those are **not** implemented, so a character whose arm
+#: has come off still plays a directional death rather than the special one.
+DEATH_FRONT = 0x0059309C
+DEATH_BACK = 0x00593084
+DEATH_RIGHT = 992
+DEATH_LEFT = 991
+#: `0x2000` BAMS = 45 degrees, the half-width of each arc.
+DEATH_ARC = 0x2000
+
 #: The spawn's authored yaw is used **as written**. There is no half turn.
 #:
 #: An earlier revision added 0x8000 here on the strength of a measurement:
@@ -194,6 +228,8 @@ class Character:
     motions: dict[int, dict] = field(default_factory=dict)
     #: Asset slots the skeleton does not name -- see :func:`extra_parts`.
     extras: list[int] = field(default_factory=list)
+    #: ``{slot: {"centre", "radius"}}`` for the damaged variants.
+    gore: dict = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {
@@ -203,6 +239,7 @@ class Character:
             "bone_count": self.bone_count,
             "bones": self.bones,
             "extras": [f"0x{s:04X}" for s in self.extras],
+            "gore": {str(k): v for k, v in self.gore.items()},
             # Bone 2 is the head on every 15-bone humanoid, and the head is
             # what the score model keys on; carried rather than assumed by
             # the client.
@@ -229,7 +266,10 @@ class Placement:
 
     def to_json(self) -> dict:
         d = {"at": self.at, "class": self.cls, "char_type": self.char_type,
-             "motion": self.motion, "hp": self.hp}
+             "motion": self.motion, "hp": self.hp,
+             # The actor's own yaw, which the directional death compares the
+             # camera's against.
+             "yaw": self.spawn["orient"][1] & 0xFFFF}
         if self.intro:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
         return d
@@ -373,6 +413,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     chars: dict[int, Character] = {}
     placements: list[Placement] = []
     per_type: dict[int, list[dict]] = {}
+    dset = death_motions(tables)
 
     for at, sp in sorted(by_at.items()):
         rec = recs.get(at)
@@ -393,7 +434,13 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 continue
             chars[res.char_type] = built
         c = chars[res.char_type]
-        for mid in (motion, intro[0] if intro else None):
+        # The death set is authored against zom.bin's 16-bone skeleton, and a
+        # motion is only meaningful with the bone count it was authored for --
+        # so it is baked for the 16-bone humanoids and nothing else.
+        deaths = (list(dset["front"]) + list(dset["back"])
+                  + [dset["right"], dset["left"]]
+                  if c.bone_count == 16 else [])
+        for mid in [motion, intro[0] if intro else None] + deaths:
             if mid is None or mid in c.motions:
                 continue
             baked = _bake(stage.game, tables, mid, c.bone_count)
@@ -406,6 +453,12 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     entries = [_rig_entry(stage, tables, chars[ct], sps, pose_frame,
                           pose_motion)
                for ct, sps in sorted(per_type.items()) if ct in chars]
+    # One hidden template per character type carrying its damaged parts. The
+    # client clones from it on a hit -- emitting them on all 108 instances
+    # instead would multiply the geometry for something only a few bones ever
+    # show.
+    entries += [_gore_entry(stage, tables, chars[ct])
+                for ct in sorted(per_type) if ct in chars and chars[ct].gore]
     return chars, placements, [e for e in entries if e]
 
 
@@ -483,6 +536,54 @@ def _u16_table(tables, base: int, char_type: int, bone: int) -> list[int]:
     return list(struct.unpack_from(f"<{HIT_STEPS}H", tables.data, o))
 
 
+def death_motions(tables) -> dict:
+    """The directional death set. See :data:`DEATH_FRONT`."""
+    def rd(base, n):
+        o = tables._v2r(base)
+        if o is None:
+            return []
+        return list(struct.unpack_from(f"<{n}I", tables.data, o))
+    return {"front": rd(DEATH_FRONT, 4), "back": rd(DEATH_BACK, 6),
+            "right": DEATH_RIGHT, "left": DEATH_LEFT, "arc": DEATH_ARC}
+
+
+def gore_parts(tables, char_type: int) -> dict:
+    """The damaged-part spheres, keyed by asset slot.
+
+    `FUN_004099A0` searches the **tail** of the same table the bone spheres come
+    from: past ``bone_count - 1`` entries, ``{slot, centre, radius}`` again, and
+    ``slot == -1`` ends it. So a gore part carries the sphere of the part it
+    replaces, which is how a half-destroyed limb keeps a sensible hit volume.
+
+    Bounded by the slots the zone table actually names, because a character with
+    no gore -- the cat -- has no terminator either, and reading on walks into
+    whatever follows.
+    """
+    named: set[int] = set()
+    for bone in range(1, 64):
+        for v in _u16_table(tables, HIT_EFFECT, char_type, bone):
+            if v > 2:
+                named.add(v)
+    if not named:
+        return {}
+    b = tables._v2r(HIT_SPHERES)
+    p = tables._v2r(struct.unpack_from("<I", tables.data, b + char_type * 4)[0])
+    n = tables.character_bone_count(char_type)
+    out: dict[int, dict] = {}
+    for i in range(n - 1, n + 64):
+        o = p + i * 0x14
+        if o + 0x14 > len(tables.data):
+            break
+        slot, = struct.unpack_from("<i", tables.data, o)
+        if slot == -1:
+            break
+        if slot not in named:
+            continue
+        cx, cy, cz, r = struct.unpack_from("<4f", tables.data, o + 4)
+        out[slot] = {"centre": [cx, cy, cz], "radius": r}
+    return out
+
+
 def hit_sphere(tables, char_type: int, bone: int):
     """``(centre, radius)`` for one bone, or None when it has no sphere."""
     b = tables._v2r(HIT_SPHERES)
@@ -517,13 +618,22 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                if v]
         if dmg:
             b["damage"] = dmg
+        # The slot the bone is redrawn with after each successive hit. Values
+        # 0..2 are control codes in `FUN_00409430`, not slots.
+        eff = _u16_table(tables, HIT_EFFECT, char_type, n["bone"])
+        eff = [v if v > 2 else 0 for v in eff]
+        while eff and eff[-1] == 0:
+            eff.pop()
+        if eff:
+            b["effects"] = eff
         bones.append(b)
     return Character(char_type=char_type,
                      name=asset_file.removesuffix(".bin"),
                      file=asset_file,
                      bone_count=tables.character_bone_count(char_type),
                      bones=bones,
-                     extras=extra_parts(tables, char_type))
+                     extras=extra_parts(tables, char_type),
+                     gore=gore_parts(tables, char_type))
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],
@@ -616,11 +726,49 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict],
             "blocked": "", "parts": [(p, m) for p, m in parts if m]}
 
 
+def _gore_entry(stage, tables, char: Character) -> dict | None:
+    """A hidden rig holding one part per damaged variant, for the client to clone."""
+    from . import rigs as rigslib, stage as stagelib
+
+    slots = tables.asset_slots()
+    cache: dict[str, tuple] = {}
+    parts: list[tuple] = []
+    for slot in sorted(char.gore):
+        rec = slots.get(slot)
+        if not rec:
+            continue
+        stem = rec[0].removesuffix(".bin")
+        if stem not in cache:
+            try:
+                cache[stem] = stagelib.load_asset(stage.game, stem)
+            except Exception:
+                cache[stem] = ([], None)
+        models, bank = cache[stem]
+        if rec[1] >= len(models):
+            continue
+        part = rigslib.RigPart(f"gore_{slot:04x}", (slot,),
+                               note=f"damaged variant, slot {slot:#06x}")
+        parts.append((part, [(models[rec[1]], bank, stem)]))
+    if not parts:
+        return None
+    rig = rigslib.Rig(name=f"gore_{char.name}",
+                      routine=f"character type {char.char_type:#04x}",
+                      world_space=False, parts=tuple(p for p, _ in parts),
+                      note="damaged parts; hidden, cloned onto a bone when hit")
+    return {"rig": rig, "routes": [], "anchors": {}, "biases": {},
+            "world": False, "placements": [], "blocked": "",
+            "fixed": [{"kind": "fixed", "translation": [0.0, 0.0, 0.0],
+                       "rotation_bams": [0, 0, 0], "cam_paths": [],
+                       "note": rig.note}],
+            "parts": parts}
+
+
 def characters_json(chars: dict[int, Character],
-                    placements: list[Placement]) -> dict:
+                    placements: list[Placement], tables=None) -> dict:
     """The `characters` block of ``<stage>.script.json``."""
     posed = sum(1 for p in placements if p.motion is not None)
     return {
+        "deaths": death_motions(tables) if tables is not None else {},
         "types": {str(ct): c.to_json() for ct, c in sorted(chars.items())},
         "placements": [p.to_json() for p in placements],
         "note": (

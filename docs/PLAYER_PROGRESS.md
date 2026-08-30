@@ -329,17 +329,36 @@ spawn that has a real character so the two never draw on top of each other.
   the combo grows by 10 per consecutive headshot and **any non-head hit resets
   it**, and **80** on the kill.
 
-Not implemented, and each for a stated reason: the per-bone **collision-mesh**
+**Dying is directional.** `FUN_00409430` only drops HP; the actor's own machine
+moves it to **state 6** (`FUN_00454D20`), which calls `FUN_004560B0` →
+`FUN_00456220`: `camera_yaw − actor_yaw` against four ±45° arcs, picking motion
+992, 991, or a random entry from a table of 4 or 6. The clip plays once and the
+body stays, because what follows it is `FUN_00456740` and that is unread.
+
+The arcs are named by **angle** rather than front/back — which is which depends
+on the camera yaw being target-to-eye *and* a model facing its local −Z, two
+conventions at once. The data settles what they do: every motion in both tables
+ends with the root on the ground (y ≈ 12 → 1.5), the `0x0000` table carries z by
+−8.7/−9.5/−9.3 and the `0x8000` table by +7.4/+8.2 — one falls the way it faces,
+the other falls back over. That cluster was found by scanning `zom.bin` for
+motions whose root ends lowest **before** the tables were read, so the two are
+independent.
+
+**The gore swap is drawn.** `FUN_004099A0` resolves the damaged part's own hit
+sphere from the **tail of the same `PTR_DAT_004D032C` table** the bone spheres
+come from — past `bone_count − 1` entries, terminated by slot −1 — so a
+half-destroyed limb keeps a sensible hit volume: `char_adv00`'s head stage 1
+carries the head's 1.3 radius and stage 2 drops to 1.0. 23 entries for
+`char_adv00`, **none for the cat**, which is the same split as the damage
+escalation. The parts ship as one hidden template per character type and are
+cloned onto the bone when hit, rather than duplicated across all 108 instances.
+
+Not implemented, each for a stated reason: the per-bone **collision-mesh**
 refinement (the sphere alone picks the same bone except at grazing angles), the
 **difficulty modifier** at `PTR_DAT_004D0D84` (needs a rank), **ammo and
-reload**, **civilians**, and the **death animation** — which motion a dying
-actor plays comes from its class's 54-state machine and only two of those states
-have been read, so a killed character is removed and the HUD says so.
-
-The **gore swap** is decoded but not drawn: `FUN_004098E0` writes the effect
-slot straight into the bone's draw record, so a hit replaces that body part with
-a damaged variant, escalating per hit through `PTR_DAT_004C7160`. Drawing it
-needs the shared fallback set `FUN_004099A0` resolves, which is not read yet.
+reload**, **civilians**, and `FUN_004560B0`'s **special deaths** for a
+particular destroyed part (`obj+0x1368` bits → motions 428, 421, 633, 553), so
+a character whose arm has come off still plays a directional death.
 
 ## Scripted scenery: doors, shutters and vans
 

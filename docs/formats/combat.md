@@ -197,17 +197,78 @@ that evt `0x2B` reads.
 Shooting a **civilian** (class 0x10) costs a life and −100 twice; rescuing one
 awards +400.
 
-## 6. What the player implements
+## 6. Dying — state 6
+
+`FUN_00409430` does not change state; it drops HP and sets `obj+0x34 | 0x4000000`.
+The actor's own machine moves it to **state 6** (`FUN_00454D20`), which is the
+death:
+
+```c
+if (sub == 0) { FUN_004560B0(obj); sub++; }      /* choose and start */
+...
+if (obj[0x19C] >= play_length[obj[0x1B4]] - 1)   /* clip finished */
+    FUN_00456740(obj);                            /* or -> state 0xC */
+```
+
+`FUN_004560B0` picks the motion. Ignoring the special cases, it falls through to
+`FUN_00456220`, which is **directional**: `camera_yaw − actor_yaw` against four
+±45° arcs (`FUN_0040A040(angle, centre, 0x2000)`).
+
+| Arc | Motion |
+|---|---|
+| `0x0000` | random from `DAT_0059309C` = **985, 986, 988, 990** |
+| `0x4000` | **992** |
+| `0x8000` | random from `DAT_00593084` = **985, 989, 987, 988, 989, 990** |
+| `0xC000` | **991** |
+
+The arcs are named by angle rather than "front" and "back" because which is
+which depends on two conventions at once — the camera yaw is the direction from
+target to eye, and a model faces its local −Z.
+
+The **data** settles what they do, though. Every motion in both tables is in the
+cluster whose root ends on the ground (y ≈ 12 → 1.5), and the `0x0000` table
+carries the root −8.7, −9.5, −9.3 in z while the `0x8000` table carries it
++7.4, +8.2, +2.5. A model faces −Z, so one set falls the way it is facing and the
+other falls back over: a body falls away from whatever shot it. That was found by
+scanning `zom.bin` for motions whose root ends lowest, *before* the tables were
+read, so the two are independent.
+
+`FUN_004560B0` also has specific deaths for a destroyed part (`obj+0x1368` bits
+8, 0x10, 0x40, 0x80 → motions 428, 421, 633, 553), which are not implemented.
+
+## 7. The gore swap — `FUN_004099A0`
+
+`FUN_004098E0` writes the effect slot into `record[0]`, the slot the bone draws.
+`FUN_004099A0` then gives that new part its **own hit sphere**, searching the
+*tail* of the same `PTR_DAT_004D032C` table the bone spheres come from:
+
+```
+PTR_DAT_004D032C[char_type] + (bone_count - 1) * 0x14
+  ... {u32 slot; f32 centre[3]; f32 radius} entries ...
+  ... terminated by slot == -1
+```
+
+So a half-destroyed arm keeps a sensible hit volume — `char_adv00`'s head stage
+1 (`0x1F28`) has the head's own 1.3 radius, and stage 2 (`0x1F29`) drops to 1.0
+as more of it is gone. There are 23 such entries for `char_adv00` and **none for
+the cat**, which is also the split between characters that escalate damage and
+characters that do not.
+
+`FUN_004098E0` calls it twice — once for the character's own type and, if that
+finds nothing, once for type 7 (or 0x0B) — so type 7's table is a shared set
+behind the per-character ones.
+
+## 8. What the player implements
 
 Everything above except:
 
 * the **collision-mesh** refinement — the sphere pass alone decides the bone,
   which is the same answer except at grazing angles;
 * the **difficulty modifier** from `PTR_DAT_004D0D84`, which needs a rank;
-* the **death animation** — which motion a dying actor plays is chosen by its
-  class's state machine, and only two of the 54 zombie states are read
-  (see [`mot.md`](mot.md) and `hod2lib/characters.py`);
+* the **special deaths** — `FUN_004560B0` overrides the directional pick when a
+  particular part has been destroyed (`obj+0x1368` bits 8/0x10/0x40/0x80 →
+  motions 428, 421, 633, 553) and for some spawn variants;
 * **civilians, bosses and the ammo/reload cycle**.
 
 The hit spheres, the bone-indexed damage escalation, the nearest-first
-resolution and the score are all exact.
+resolution, the score, the directional death and the gore swap are all exact.

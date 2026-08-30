@@ -344,7 +344,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["rigs"] = rigs_json(rig_instances, rig_blocked,
                                     stage.campaths(), stage.tables)
     script_json["rain"] = rain
-    script_json["characters"] = charlib.characters_json(char_defs, char_places)
+    script_json["characters"] = charlib.characters_json(char_defs, char_places, stage.tables)
     script_json["props"] = propslib.props_json(stage.tables, hinges, statics)
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 

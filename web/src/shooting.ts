@@ -32,19 +32,28 @@
  * 120, 130, 140 …, and **any non-head hit resets it to zero**. That reset is
  * the whole reason the counter exists, so it is reproduced exactly.
  *
+ * ## Dying
+ *
+ * A kill runs `FUN_004560B0`'s directional pick — `camera_yaw − actor_yaw`
+ * against four ±45° arcs — and the body plays that clip once and stays. The
+ * game's camera yaw is the direction from target to eye, which is the camera's
+ * own local **+Z**, so that is what is measured here.
+ *
  * ## What this does not do
  *
- * No ammo, no reload, no civilians, and no death animation — which motion a
- * dying actor plays is chosen by its class's state machine, and only two of the
- * zombie's 54 states have been read. A killed character is removed instead, and
- * the HUD says so.
+ * No ammo, no reload, no civilians. `FUN_004560B0`'s *special* deaths — the
+ * ones for a particular destroyed part — are not implemented, so a character
+ * whose arm has come off still plays a directional death. What happens after
+ * the clip is `FUN_00456740`, which is unread, so the corpse simply stays.
  */
 
-import { Raycaster, Vector2, type Camera, type Object3D } from "three";
+import { Raycaster, Vector2, Vector3, type Camera, type Object3D } from "three";
 import type { CharacterLayer } from "./characters";
 
 /** `FUN_00404AD0` builds its segment as origin + direction * 1000. */
 const SHOT_RANGE = 1000;
+
+const BAMS = 65536 / (Math.PI * 2);
 
 /** `ScoreAddForPlayer` constants, from `FUN_00409430`. */
 const SCORE_HIT = 10;
@@ -105,6 +114,7 @@ export class Shooting {
     this._scene = scene ?? this._scene;
   }
 
+  private readonly _back = new Vector3();
   private _camera: Camera | null = null;
   private _scene: Object3D | null = null;
 
@@ -133,7 +143,12 @@ export class Shooting {
       return;
     }
 
-    const out = this.chars.hit(pick.inst, pick.bone);
+    // `FUN_00456220` picks the death from `camera_yaw − actor_yaw`, and the
+    // game's camera yaw is the direction from target to eye (`FUN_00403AC0`) —
+    // which is the camera's own local +Z, its backward axis.
+    this._back.set(0, 0, 1).applyQuaternion(this._camera.quaternion);
+    const camYaw = Math.atan2(this._back.x, this._back.z) * BAMS;
+    const out = this.chars.hit(pick.inst, pick.bone, camYaw);
     this.hits++;
     let points = 0;
     if (out.head) {
@@ -149,6 +164,8 @@ export class Shooting {
     const who = pick.inst.type.name;
     const note = `${who} bone ${pick.bone}${out.head ? " (head)" : ""}` +
       ` −${out.damage} hp${out.killed ? ", killed" : ` → ${out.hp}`}` +
+      (out.gore ? " · part destroyed" : "") +
+      (out.death !== undefined ? ` · death ${out.death}` : "") +
       `  +${points}`;
     this.onShot({ hit: true, bone: pick.bone, head: out.head,
                   damage: out.damage, killed: out.killed, hp: out.hp, points },

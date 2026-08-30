@@ -49,7 +49,7 @@
  * trying to derive that.
  */
 
-import { Group, Object3D, Quaternion, Ray, Vector3 } from "three";
+import { Group, Mesh, Object3D, Quaternion, Ray, Vector3 } from "three";
 import type {
   BakedMotion, CharacterPlacement, CharactersJson, CharacterType,
 } from "./bundle";
@@ -88,6 +88,17 @@ interface Instance {
   /** `obj+0x298 + bone*0x90` — hits already taken on each bone. */
   hits: Map<number, number>;
   dead: boolean;
+  /** The actor's own BAMS yaw, for the directional death. */
+  yaw: number;
+  /**
+   * The death clip, once chosen. It plays **once and holds its last frame** —
+   * `FUN_00454D20` waits for the clip to finish and then hands the body to
+   * `FUN_00456740`, which is not read, so the corpse stays put rather than
+   * doing something invented.
+   */
+  death: { motion: number; t: number } | null;
+  /** Damaged parts currently swapped in, so a second hit can replace them. */
+  gore: Map<number, Object3D>;
   /**
    * A one-shot entrance played before the loop: state 21 of class 0x30's
    * state machine sets a motion, holds for a delay, plays it to the end and
@@ -104,6 +115,8 @@ export class CharacterLayer {
   private readonly qa = new Quaternion();
   private readonly _c = new Vector3();
   private readonly _p = new Vector3();
+  /** Asset slot → the template node for that damaged part. */
+  private readonly goreParts = new Map<number, Object3D>();
 
   /** Spawn offsets that have a real character, so the marker layer can skip them. */
   readonly posed = new Set<number>();
@@ -129,6 +142,20 @@ export class CharacterLayer {
       typeOf.set(p.at, p.char_type);
       placeOf.set(p.at, p);
     }
+
+    // The hidden per-type templates holding the damaged parts. One copy each;
+    // a swap clones from here, which shares geometry and material in three.js.
+    root.traverse((o) => {
+      const x = o.userData as { hod2_kind?: string; hod2_rig?: string };
+      if (x?.hod2_kind !== "rig_part") return;
+      const rig = x.hod2_rig ?? "";
+      if (!rig.startsWith("gore_")) return;
+      const m = /_gore_([0-9a-f]{4})$/.exec(o.name);
+      if (m) {
+        this.goreParts.set(Number.parseInt(m[1], 16), o);
+        o.visible = false;
+      }
+    });
 
     const roots: Object3D[] = [];
     root.traverse((o) => {
@@ -181,7 +208,8 @@ export class CharacterLayer {
         ? p.intro : null;
       this.instances.push({ at, type, motion, root: node, pivot, bones,
                             clock: 0, intro, hp: p?.hp ?? 0,
-                            hits: new Map(), dead: false });
+                            hits: new Map(), dead: false, yaw: p?.yaw ?? 0,
+                            death: null, gore: new Map() });
       this.posed.add(at);
       node.visible = false;
     }
@@ -213,15 +241,29 @@ export class CharacterLayer {
     for (const s of live) present.add(s.at);
 
     for (const inst of this.instances) {
-      const show = this.enabled && present.has(inst.at) && !inst.dead;
+      // A corpse stays: `FUN_00454D20` plays the clip out before handing the
+      // body on, so removing it the instant HP hits zero would be wrong.
+      const show = this.enabled && present.has(inst.at);
       inst.root.visible = show;
       if (!show) continue;
-      inst.clock += dt;
+      if (inst.death) inst.death.t += dt;
+      else inst.clock += dt;
       this.pose(inst);
     }
   }
 
   private pose(inst: Instance): void {
+    // Dying takes over everything: the clip plays once and holds its last
+    // frame, because what happens after it is `FUN_00456740`, unread.
+    if (inst.death) {
+      const dm = inst.type.motions[String(inst.death.motion)];
+      if (dm) {
+        const f = Math.min(dm.frames - 1,
+                           Math.floor(inst.death.t * dm.fps));
+        this.apply(inst, dm, f);
+        return;
+      }
+    }
     // The entrance, if there is one: hold its first frame for the delay, play
     // it once, then hand over to the looping motion. `FUN_004577F0` waits for
     // `obj+0x19C` to reach the motion's length before changing state, so the
@@ -317,8 +359,9 @@ export class CharacterLayer {
    * the game's `next == 0` simply stops advancing. The difficulty modifier from
    * `PTR_DAT_004D0D84` needs a rank and is not applied.
    */
-  hit(inst: Instance, bone: number): {
+  hit(inst: Instance, bone: number, cameraYawBams = 0): {
     damage: number; killed: boolean; head: boolean; hp: number;
+    gore: boolean; death?: number;
   } {
     const b = inst.type.bones.find((x) => x.bone === bone);
     const n = inst.hits.get(bone) ?? 0;
@@ -326,17 +369,120 @@ export class CharacterLayer {
     const damage = row.length ? row[Math.min(n, row.length - 1)] : 0;
     inst.hits.set(bone, n + 1);
     inst.hp -= damage;
+
+    // `FUN_004098E0` writes the effect slot into record[0], which IS the slot
+    // the bone draws -- so the swap is a replacement, not an addition.
+    const gore = this.swapGore(inst, bone, b?.effects?.[n] ?? 0);
+
     const killed = inst.hp <= 0;
-    if (killed) inst.dead = true;
+    let death: number | undefined;
+    if (killed && !inst.dead) {
+      inst.dead = true;
+      death = this.chooseDeath(inst, cameraYawBams);
+      if (death !== undefined
+          && inst.type.motions[String(death)]) {
+        inst.death = { motion: death, t: 0 };
+      }
+    }
     return { damage, killed, head: bone === inst.type.head_bone,
-             hp: Math.max(0, inst.hp) };
+             hp: Math.max(0, inst.hp), gore, death };
+  }
+
+  /**
+   * `FUN_00456220`: `camera_yaw - actor_yaw` against four ±45° arcs.
+   *
+   * Named by angle rather than front/back — see the note in
+   * `hod2lib/characters.py`, which explains why those labels depend on two
+   * conventions at once and why the *data* is the reliable half.
+   */
+  private chooseDeath(inst: Instance, cameraYawBams: number): number | undefined {
+    const d = this.json?.deaths;
+    if (!d || !d.front?.length) return undefined;
+    const rel = (Math.round(cameraYawBams - inst.yaw) & 0xffff);
+    const inArc = (centre: number) => {
+      let x = (rel - centre) & 0xffff;
+      if (x > 0x8000) x -= 0x10000;
+      return Math.abs(x) <= d.arc;
+    };
+    if (inArc(0x4000)) return d.right;
+    if (inArc(0xc000)) return d.left;
+    const pool = inArc(0x8000) ? d.back : d.front;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  /**
+   * Replace a bone's mesh with its damaged variant.
+   *
+   * A bone node carries two different kinds of child: the primitives its own
+   * mesh was split into, and the child *bones* of the skeleton. Only the first
+   * may be hidden — hiding the node itself would take the rest of the limb with
+   * it. Where the node is a single `Mesh` rather than a group, its geometry and
+   * material are swapped instead, which leaves its children untouched.
+   */
+  private swapGore(inst: Instance, bone: number, slot: number): boolean {
+    if (!slot) return false;
+    const tmpl = this.goreParts.get(slot);
+    const node = inst.bones.get(bone);
+    if (!tmpl || !node) return false;
+
+    const self = node as Mesh;
+    if (self.isMesh) {
+      // A single-primitive bone: swapping geometry and material replaces what
+      // it draws and leaves its child bones alone. The original is kept so a
+      // seek can put it back.
+      const src = (tmpl as Mesh).isMesh
+        ? (tmpl as Mesh)
+        : (tmpl.children.find((c) => (c as Mesh).isMesh) as Mesh | undefined);
+      if (!src) return false;
+      if (!inst.gore.has(bone)) {
+        const keep = new Mesh(self.geometry, self.material as never);
+        keep.visible = false;
+        inst.gore.set(bone, keep);
+      }
+      self.geometry = src.geometry;
+      self.material = src.material;
+      return true;
+    }
+
+    // A multi-primitive bone: hide the primitives, keep the child bones, and
+    // hang a clone of the damaged part off the same node.
+    const bones = new Set(inst.bones.values());
+    const prev = inst.gore.get(bone);
+    if (prev && prev.parent === node) prev.removeFromParent();
+    else for (const c of node.children) {
+      if (!bones.has(c)) c.visible = false;
+    }
+    const copy = tmpl.clone(true);
+    copy.visible = true;
+    copy.position.set(0, 0, 0);
+    copy.quaternion.identity();
+    copy.scale.set(1, 1, 1);
+    node.add(copy);
+    inst.gore.set(bone, copy);
+    return true;
   }
 
   /** Revive everything — for a seek, which replays the script from the top. */
   revive(): void {
     for (const i of this.instances) {
       i.dead = false;
+      i.death = null;
       i.hits.clear();
+      for (const [bone, g] of i.gore) {
+        const node = i.bones.get(bone);
+        const self = node as Mesh | undefined;
+        if (self?.isMesh) {
+          // The saved original, put back.
+          self.geometry = (g as Mesh).geometry;
+          self.material = (g as Mesh).material;
+        } else {
+          g.removeFromParent();
+        }
+      }
+      i.gore.clear();
+      for (const node of i.bones.values()) {
+        for (const c of node.children) c.visible = true;
+      }
       const p = this.json?.placements.find((x) => x.at === i.at);
       i.hp = p?.hp ?? 0;
     }

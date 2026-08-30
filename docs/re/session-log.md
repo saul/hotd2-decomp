@@ -4351,3 +4351,32 @@ The actor the report described as walking at the camera turned out to be a
 different one: block 5 **step 3** is `tutorial.bin` (character 19, class 0x30,
 attack state 0), not the throwers at step 6. It was walking for the third
 reason above.
+
+### A bundle that no browser could parse
+
+The back-off export shipped `NaN` into two stage bundles and the player died on
+`SyntaxError: Unexpected token 'N'` before drawing anything.
+
+Cause: I added the throw clips to the bake list **outside** the
+`bone_count == 16` guard that every other motion has. `zsass`'s throw table
+carries a body-condition-2 row whose motions belong to `kame.bin` — the throw
+table at `PTR_DAT_00592A00` is indexed by body condition and shared by every
+character, so rows for conditions an actor never reaches name another
+creature's clips. Read at a 16-bone stride, motion 441 decodes into whatever
+follows it in the bank: denormals, ±1e38, and a NaN.
+
+Two fixes, and the second matters more than the first:
+
+* `_bake` rejects a motion whose root translation is not finite. A motion read
+  with the wrong stride does not fail, it returns garbage, and "the root is not
+  finite" is the cheapest true statement about that garbage.
+* `json.dumps(..., allow_nan=False)` on both bundle writers. Python emits bare
+  `NaN` and `Infinity` by default, which are not JSON; every consumer rejects
+  them with a byte offset rather than a field name. **An export that fails is
+  strictly better than a bundle that cannot be parsed**, and there was no
+  reason for the writer to be permissive.
+
+The lesson is the guard, not the NaN: every other motion source in that
+function is wrapped in `if c.bone_count == 16` and I added a fifth one beside
+them without it. Guards that exist four times and are missing once are worth a
+second look during review.

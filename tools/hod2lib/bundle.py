@@ -327,7 +327,12 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
 
     say(f"  {name}: camera paths")
     cam_json = stage.campaths().to_json()
-    (out_dir / f"{name}.cam.json").write_text(json.dumps(cam_json))
+    # `allow_nan=False` on purpose: Python writes bare `NaN` and `Infinity`,
+    # which are not JSON and which every browser rejects with a parse error
+    # naming a byte offset rather than a field. A bundle that cannot be parsed
+    # is worse than an export that fails, so this raises here instead.
+    (out_dir / f"{name}.cam.json").write_text(
+        json.dumps(cam_json, allow_nan=False))
 
     say(f"  {name}: event script")
     prog = scriptlib.Program(stage)
@@ -346,7 +351,8 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["rain"] = rain
     script_json["characters"] = charlib.characters_json(char_defs, char_places, stage.tables)
     script_json["props"] = propslib.props_json(stage.tables, hinges, statics)
-    (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
+    (out_dir / f"{name}.script.json").write_text(
+        json.dumps(script_json, allow_nan=False))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))
                    for b in prog.live_blocks() for s in b.steps for o in s.ops)

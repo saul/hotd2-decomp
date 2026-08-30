@@ -655,6 +655,13 @@ def _bake(game_dir, tables, motion_id: int, bone_count: int) -> dict | None:
         root.extend(f.root)
         for b in f.bones:
             rot.extend(b)
+    # A motion read with the wrong bone count decodes into whatever follows it
+    # in the bank, which shows up as denormals and NaN rather than as an error.
+    # Motion 441 of `kame.bin` reached the stage-2 bundle that way and made the
+    # JSON unparseable. Refuse it here: a motion whose root is not finite was
+    # not read correctly, whatever the stride said.
+    if not all(math.isfinite(v) for v in root):
+        return None
     return {"bank": fname, "frames": len(frames), "fps": MOTION_FPS,
             "root": root, "rot": rot}
 
@@ -749,8 +756,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             for row in c.attacks.values():
                 for e in row.values():
                     reacts += [e["strike"], e["lunge"]]
-        for hands in (c.throw or {}).get("hands", {}).values():
-            reacts += [h["motion"] for h in hands]
+            for hands in (c.throw or {}).get("hands", {}).values():
+                reacts += [h["motion"] for h in hands]
         # The back-away walk, and the two ordinary walk variants beside it.
         if c.bone_count == 16:
             for row in c.motion_row.values():

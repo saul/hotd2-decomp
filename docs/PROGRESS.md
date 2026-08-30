@@ -128,7 +128,7 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] Opaque/translucent two-pass selector decoded
       (`(tsp & 0x180000) != 0x80000`)
 
-## Phase 6 — Remaining formats 🔶 `evt/`, `cam/` and `coli/` solved; `mot/` open
+## Phase 6 — Remaining formats ✅ `evt/`, `cam/`, `coli/` and `mot/` all solved
 
 - [x] `cam/` — **solved.** Not a keyframe struct: a pool of independent scalar
       **cubic Hermite** curves plus a per-path descriptor naming one curve per
@@ -235,7 +235,7 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       operands to `file + blob offset + quad count + surface ids`, so
       `dump_stage_script.py` prints
       `set_collision_set_full  full: coli2.bin+0xb148(6q surf 52,53)`
-- [ ] `mot/` — rigid transforms vs vertex morphs
+- [x] `mot/` — **rigid**: per-bone BAMS rotations plus a root translation, verified 1058/1058 blocks. See [`formats/mot.md`](formats/mot.md)
 
 ## Phase 7 — Documentation & C reference
 
@@ -298,8 +298,16 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] **Spawns in the exported scene** — `hod2lib.spawnres` plus one glTF node
       per spawn; 562 of 1225 identified to a named asset file on proved rules
       only. The browser player eats the same glTF.
-- [ ] **Assembling a character needs `mot/`** — part models are authored about
-      their own origin, so the rest pose is in the motion data.
+- [x] **`mot/` — SOLVED.** The last unsolved format. One int32 offset per
+      motion at the file head, a `u32` frame count per block, then frames of
+      `(bones*6+15) & ~3` bytes: three floats of root translation and a BAMS
+      triple per bone. Read from `MotionJobBindOffsets` and `MotionFrameAddress`,
+      then checked — **1058/1058 blocks** consistent across all 49 banks. See
+      [`formats/mot.md`](formats/mot.md).
+- [x] **Characters assemble.** The skeleton is in the EXE, not the motion data:
+      each node carries its own bone offset. `tools/export_character.py` puts a
+      character together and poses it from a motion frame —
+      `export_character.py 0x1A --motion 762` renders a cat, mid-stride.
 - [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
       the only place this binary names anything. `ExeTables.sound_records()`.
       This is now the primary identification tool for the decomp.
@@ -344,7 +352,8 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
    tables in `Hod2.exe` at `0x0055B9B8`, no sizing needed
 3. ~~Packed s8 normal byte order~~ **MOOT** — no vertex-colour meshes exist
 4. Are the 3 anomalous `pol_*` files corrupt, or differently encoded? (Phase 2)
-5. Do `mot/` blocks drive rigid transforms or vertex morphs? (Phase 6)
+5. ~~Do `mot/` blocks drive rigid transforms or vertex morphs?~~ **Rigid** —
+   per-bone BAMS rotations plus a root translation. Solved.
 6. ~~What is the `evt/` pointer-relocation scheme?~~ **SOLVED** — one mask at
    `0x00413120`: dwords in `0x0CE80000..0x0CEFFFFF` get `-0x0C53E600`
 7. ~~What distinguishes `cam/cp_*` from `cam/op_*`?~~ **SOLVED** — same

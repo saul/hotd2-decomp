@@ -214,3 +214,15 @@
 004abd40	BuildPerspectiveProjection
 004abdf0	SetFogRange
 004ac980	BindModelTextureHandles
+00410590	SkeletonBuildAndPose	reads the motion frame, sets the object root pose, then walks the node tree
+004107e0	SkeletonWalkNode	per node: Translate(bone offset); RotZ; RotY; RotX from frame+0x0C+bone*6
+00411930	ActorSetMotion
+00412c10	MotionJobOpenFile	motion job sub-step 0: builds "mot\%s", CreateFileA, allocates size+0x20
+00412d40	MotionJobReadFile	sub-step 1: one ReadFile of the whole bank -- mot/ is NOT compressed
+00412d90	MotionJobBindOffsets	sub-step 2: the entire parse -- one int32 offset per motion id in the bank
+00412e20	AssetJobMotionLoad	asset job kind 8; dispatches the sub-step at job+0x0C
+00412e40	AssetJobMotionFree	asset job kind 9
+00412ef0	AssetJobMotionSync	asset job kind 10
+00412f50	MotionFrameAddress	((bones*6+15)&~3)*frame + 4 + slot.base; bones from the CHARACTER type
+0041d810	MotionWaitJob
+0041d860	MotionRequestBankLoad	enqueues asset job kind 8 for a bank id

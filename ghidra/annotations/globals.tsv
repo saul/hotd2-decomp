@@ -148,3 +148,18 @@
 009a5920	g_route_history
 009c8e00	g_nFiringGate
 009c911e	g_wCaptionMode
+# --- skinned characters and mot/ ---------------------------------------------
+004e0430	g_character_skeletons	char type -> skeleton block; count at +0x16, node pointers at +0x18
+004e0724	g_character_bone_counts	char type -> bones in a motion frame; one more than the top bone index
+004e07d0	g_motion_play_length	motion id -> play length the scripts compare against, about 2x the frames
+004e2c40	g_motion_bank_of	motion id -> bank id, the argument MotionRequestBankLoad takes
+004d1b00	g_asset_bank_names	bank id -> filename; SHARED with the camera paths
+004e2b14	g_motion_bank_ids	bank id -> s16 array of the motion ids it holds
+004e2bdc	g_motion_bank_count	bank id -> how many motions
+009a37e0	g_motion_slots	motion id -> {u32 base; u32 state}, state 2 = resident
+00579914	g_motion_job_substeps	three entries; entry 3 onward is the "mot\%s" string
+00579920	s_mot_path_format
+009a5c4c	g_frame_bone_rotations	frame + 0x0C: the s16 triple array SkeletonWalkNode indexes
+009ca0a4	g_skeleton_node_out	where SkeletonWalkNode writes each bone's resolved matrix, stride 0x90
+0052ed08	g_character_variant_counts	char type -> variant count (1 or 2), NOT a bone count
+004d032c	g_character_part_tables	char type -> per-bone {slot, ...} overrides, stride 0x14

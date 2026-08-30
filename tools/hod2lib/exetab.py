@@ -359,6 +359,22 @@ class ExeTables:
     #: path for. Object draw routines clamp with it -- `FUN_0048E600` and
     #: `FUN_0048F050` both do `n = min(current_frame, CAM_PATH_LENGTH[slot])`
     #: before calling `CamEvalObjectPath6`.
+    #: Bone count per character type, read by `FUN_00412F50` to size a motion
+    #: frame. Note it is one MORE than the highest bone index in the skeleton,
+    #: because bone 0 is the object root rather than a drawn node.
+    CHARACTER_BONE_COUNTS = 0x004E0724
+    #: Per-motion play length the scripts compare against. Roughly twice the
+    #: frame count -- see `hod2lib.mot`.
+    MOTION_PLAY_LENGTH = 0x004E07D0
+    #: motion id -> bank id, the argument `FUN_00412F50` hands the loader.
+    MOTION_BANK_OF = 0x004E2C40
+    #: bank id -> filename / motion-id list / count. The filename table is
+    #: shared with the camera paths, so an entry is a motion bank only when it
+    #: also has an id list.
+    MOTION_BANK_NAME = 0x004D1B00
+    MOTION_BANK_IDS = 0x004E2B14
+    MOTION_BANK_COUNT = 0x004E2BDC
+
     #: Skinned-character skeletons, one per character type. `FUN_00410590`
     #: reads ``PTR_DAT_004E0430[type]``; the block holds a node count at
     #: ``+0x16`` and that many node pointers at ``+0x18``. Each node is
@@ -401,8 +417,24 @@ class ExeTables:
     def character_skeleton(self, char_type: int) -> list[dict]:
         """The node tree for a character type, flattened, parents first.
 
-        Each entry is ``{"slot", "index", "depth", "children"}``. Returns an
-        empty list for a type with no skeleton.
+        Each entry is ``{"slot", "offset", "bone", "depth", "parent",
+        "children"}``, parents always before children. ``parent`` is an index
+        into the returned list, or ``None`` for a root.
+
+        The node layout, from `FUN_004107E0`, which does
+        ``MatrixTranslate(node[1], node[2], node[3]); RotZ; RotY; RotX``
+        with the rotations coming from the motion frame at ``bone * 6``::
+
+            +0x00  u32 asset slot
+            +0x04  f32 bone offset x      <- the bind pose, and it is HERE,
+            +0x08  f32 bone offset y         in the EXE, not in the motion data
+            +0x0C  f32 bone offset z
+            +0x10  u32 (always zero in this build)
+            +0x14  u16 bone index, 1-based; bone 0 is the object root
+            +0x16  u16 child count
+            +0x18  u32 children[]
+
+        Returns an empty list for a type with no skeleton.
         """
         base = self._v2r(self.CHARACTER_SKELETONS)
         if base is None or not (0 <= char_type < 0x100):
@@ -417,7 +449,7 @@ class ExeTables:
         out: list[dict] = []
         seen: set[int] = set()
 
-        def walk(node_ptr: int, depth: int) -> None:
+        def walk(node_ptr: int, depth: int, parent: int | None) -> None:
             o = self._v2r(node_ptr)
             if o is None or node_ptr in seen or depth > 12:
                 return
@@ -425,20 +457,58 @@ class ExeTables:
                 return
             seen.add(node_ptr)
             slot = struct.unpack_from("<I", self.data, o)[0]
+            offset = struct.unpack_from("<3f", self.data, o + 4)
             idx = struct.unpack_from("<H", self.data, o + 0x14)[0]
             n = struct.unpack_from("<H", self.data, o + 0x16)[0]
-            out.append({"slot": slot, "index": idx, "depth": depth,
+            me = len(out)
+            out.append({"slot": slot, "offset": offset, "bone": idx,
+                        "index": idx, "depth": depth, "parent": parent,
                         "children": n})
             if n > 64 or o + 0x18 + n * 4 > len(self.data):
                 return
             for i in range(n):
                 cp = struct.unpack_from("<I", self.data, o + 0x18 + i * 4)[0]
                 if cp:
-                    walk(cp, depth + 1)
+                    walk(cp, depth + 1, me)
 
         for i in range(roots):
-            walk(struct.unpack_from("<I", self.data, off + 0x18 + i * 4)[0], 0)
+            walk(struct.unpack_from("<I", self.data, off + 0x18 + i * 4)[0],
+                 0, None)
         return out
+
+    def character_bone_count(self, char_type: int) -> int:
+        """Bones in a character's motion frame, from `DAT_004E0724`."""
+        r = self._v2r(self.CHARACTER_BONE_COUNTS)
+        if r is None or not (0 <= char_type < 0x200):
+            return 0
+        return struct.unpack_from("<H", self.data, r + char_type * 2)[0]
+
+    def motion_banks(self) -> dict[int, tuple[str, list[int]]]:
+        """``{bank id: (filename, [motion ids])}`` for the real motion banks."""
+        out: dict[int, tuple[str, list[int]]] = {}
+        fn = self._v2r(self.MOTION_BANK_NAME)
+        ip = self._v2r(self.MOTION_BANK_IDS)
+        cp = self._v2r(self.MOTION_BANK_COUNT)
+        if None in (fn, ip, cp):
+            return out
+        for b in range(64):
+            p = struct.unpack_from("<I", self.data, fn + b * 4)[0]
+            name = self._cstr(p) if p else None
+            n = struct.unpack_from("<H", self.data, cp + b * 2)[0]
+            if not name or not (0 < n <= 4096):
+                continue
+            io = self._v2r(struct.unpack_from("<I", self.data, ip + b * 4)[0])
+            if io is None:
+                continue          # a camera-path entry, not a motion bank
+            out[b] = (name, list(struct.unpack_from(f"<{n}h", self.data, io)))
+        return out
+
+    def motion_bank_of(self, motion_id: int) -> int | None:
+        """Which bank holds a motion, from `DAT_004E2C40`."""
+        r = self._v2r(self.MOTION_BANK_OF)
+        if r is None or r + motion_id >= len(self.data):
+            return None
+        return self.data[r + motion_id]
 
     def character_asset_file(self, char_type: int) -> str | None:
         """The pol file a character type's parts live in, if they agree.

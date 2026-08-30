@@ -3224,3 +3224,54 @@ shutter — a 10 % black band along the bottom. And a skippable region is
 *precisely* when the shutter is closed, because the firing gate being down is
 the condition for both. The bar was behind the letterbox every single time it
 appeared. Explicit z-index on the layer, the bars and the loading overlay.
+
+## Session 21 — `mot/`, the last format
+
+Driven from the EXE throughout, and the data only opened at the end to check.
+
+The chain, all of it read before a single file was touched:
+`MotionRequestBankLoad` enqueues asset job kind 8; sub-step 0 builds the path
+from the format string `"mot\%s"` sitting immediately after the sub-step
+pointers; sub-step 1 does one `ReadFile` of the whole bank (no decompression,
+unlike `pol/`); sub-step 2 is the entire parse and is four lines — one `int32`
+offset per motion id in the bank. `MotionFrameAddress` then gives the stride,
+`(bones*6+15) & ~3`, and the `+4` that steps over the block header.
+
+Then, and only then, the files: **1058 of 1058 blocks** across all 49 banks have
+a declared frame count that exactly equals their block size divided by a stride
+the formula can produce. The verifier deliberately does not assume a bank
+belongs to a known character — it tests the format's arithmetic — which is what
+let it cover the `komono_*` prop banks whose bone counts are not in the
+character table at all.
+
+**A correction to last session, and it was load-bearing.** I said the rest pose
+lives in the motion data because every part model is authored about its own
+origin. Half right: the *models* are, but each skeleton node carries a **bone
+offset in the EXE** (`+0x04..+0x0C`, floats). `mot/` supplies only rotations
+and a root translation. So a character assembles from the EXE alone — which
+means the player never needed `mot/` to show a skeleton, only to make it look
+right. I had told the user the opposite and it shaped the plan.
+
+The bind pose is still not a rest pose, which is the subtlety: bone offsets all
+run along their own local X, so zero rotations collapse a character into a
+heap. `export_character.py 0x1A` renders a pile; `--motion 762` renders a cat,
+mid-stride, tail up. That render is the end-to-end proof of skeleton, stride,
+frame layout, bone indexing and rotation order together — a wrong value in any
+one of them does not produce a cat.
+
+Two smaller traps worth keeping:
+
+* `g_asset_bank_names` is **shared with the camera-path filenames**. Scanning
+  it blind treats `cp_st1.bin` as a motion bank. An entry is a bank only if it
+  also has an id list in `g_motion_bank_ids`.
+* The `u32` at the head of each motion block is the frame count, and the engine
+  never reads it — it drives playback from `g_motion_play_length` instead,
+  which is about *twice* the frame count. Using that table as a frame count
+  would double every animation. Left `[open]`; the block header is the one to
+  trust.
+
+Annotations for all of it went into `ghidra/annotations/*.tsv` — twelve
+functions and fourteen globals — so the Ghidra database rebuilds with the
+`mot/` work in it. `docs/PLAYER_PLAN.md` gained a section on wiring characters
+and spawns into the player, including the warning not to bake every motion:
+`people.bin` alone is 200 motions over 7105 frames.

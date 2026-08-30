@@ -382,3 +382,70 @@ Resolved since this plan was first drafted, and no longer risks:
 **GLB at E2, or E1?** Loose files need no exporter changes and are much easier
 to debug during W1; GLB is one file and no fetch storm. Recommendation: loose
 files through W1, GLB at E2 once the bundle shape has settled.
+
+---
+
+## Characters and spawns in the player
+
+`mot/` is decoded (see [`formats/mot.md`](formats/mot.md)), so the last blocker
+on showing actual enemies, civilians and props is gone. What follows is what
+the player needs, in dependency order, and what already exists.
+
+### What the exporter already emits
+
+* **One glTF node per spawn**, under a `spawns` root, carrying
+  `hod2_class`, `hod2_char_type`, `hod2_asset_file`, `hod2_node_count` and the
+  evt offset in `extras`. 562 of 1225 are identified to a named asset file.
+  The player consumes the same glTF as Blender, so this needs no bundle change.
+* **Object rigs** — twelve transcribed, placed and posed.
+* **Breakable prop groups** in `<stage>_objects.json`, with per-member
+  position, stack level and the support list.
+
+### What a character costs to add
+
+Three tables and one file format, all now parsed by `hod2lib`:
+
+1. `ExeTables.character_skeleton(type)` — the bone tree: offset, parent, bone
+   index and asset slot per node. **This is in the EXE**, so the bind hierarchy
+   needs no `mot/` data at all.
+2. `ExeTables.character_bone_count(type)` — the motion frame stride.
+3. `hod2lib.mot.load_bank()` / `MotionBank.frames()` — the per-bone BAMS
+   rotations and the root translation.
+
+`tools/export_character.py` already does the assembly end to end, and it does
+it **through the existing rig writer** rather than a second glTF path — a
+skeleton is exactly a rig: a tree of named parts, each with a translation, a
+BAMS rotation triple and an asset slot. That is the integration point.
+
+### Recommended shape
+
+**Static first.** Emit each identified spawn as a real node hierarchy posed at
+frame 0 of its idle motion, exactly as `export_character.py` does now. That is
+a one-file change to `_spawn_nodes` — swap the empty marker node for the
+skeleton the character resolver already returns — and it gets zombies,
+civilians and the cat standing in the level with no runtime work in the browser
+at all.
+
+**Animated second, and only if wanted.** A glTF animation channel per bone is
+the obvious encoding, but be aware of the cost: `people.bin` alone is 200
+motions × 7105 frames × 16 bones. Do **not** bake every motion. Bake the one
+idle motion per spawn, and if free playback is wanted later, ship the bank as a
+binary sidecar and sample it in TypeScript — the format is nine lines of code
+and `hod2lib.mot` is the reference.
+
+**Do not resolve motions in the browser.** Which motion an actor plays is
+chosen by its class's state machine (54 states for the zombie alone). The
+player should be told a motion id by the exporter, not try to derive one.
+
+### Known gaps before this looks right
+
+* **The bind pose is not a rest pose.** Every bone offset runs along its own
+  local X, so a character with zero rotations collapses into a heap. It must be
+  posed from a motion frame to look like anything — the cat renders as a cat at
+  motion 762 frame 0, and as a pile at bind.
+* **663 spawns are still unidentified**, because only classes whose handler has
+  been read get a character-type rule. Each further class handler read adds its
+  spawns.
+* **`g_motion_play_length` is not the frame count** — it is about twice it, and
+  the exact relation is open. Use the frame count in the block header for
+  playback, not that table.

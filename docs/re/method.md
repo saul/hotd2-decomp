@@ -1,5 +1,10 @@
 # Method — how to work on this project
 
+> The **operating procedure** — the loop, the commands, the pre-commit
+> checklist — is the `/decomp` skill at `.claude/skills/decomp/SKILL.md`.
+> This document is the *reasoning* underneath it: why each rule exists, and
+> what going against it cost.
+
 One rule dominates everything else here.
 
 ---

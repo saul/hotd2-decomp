@@ -732,20 +732,54 @@ Header is 0x24 bytes, identical for opcodes `0x09`, `0x0B`, `0x0C`, `0x0D`
 +0x18  s32  orientation b -> object +0x68
 +0x1C  s32  orientation c -> object +0x6C
 +0x20  u16  (always 0)
-+0x22  u16  hit points    -> object +0x11C *and* +0x11E
++0x22  u16  see below      -> object +0x11C *and* +0x11E
 +0x24  ...  variable behaviour tail
 ```
 
-The tail is class-specific: `0x0B`/`0x0C` store its address in the object
-(+0x1390 / +0x130C) and leave interpretation to the class, while `0x09` reads
-two bytes from it inline. `0x09` records are laid out contiguously at a **0x28**
-stride in every shipped file, i.e. a two-byte tail.
+### The parameter tail — SOLVED
 
-Tails are **not** self-terminating and their length is **not** a function of the
-class: the gap between consecutive descriptors of the same class varies (class
-48, for instance, appears with 40, 44, 48, 52, 56 and 60 byte spacing). Tails
-also contain further relocated pointers, so there is a second layer below them.
-Sizing a tail requires the consuming class handler.
+**[proved]** `obj+0x1390` **is the descriptor + 0x24** — the tail itself, not a
+pointer to some other record. There are two allocators:
+
+| Opcode | Function | Sets `obj+0x1390`? |
+|---|---|---|
+| `0x09` | `FUN_004088A0` | **no** — it reads two tail bytes inline (+0x24 → object +0x1F4, +0x25 → object +0x130C) |
+| `0x0B`/`0x0C`/`0x0D` | `FUN_00408A20` | **yes** — the function ends `obj+0x1390 = descriptor + 9` on an `int *` |
+
+So a class handler that reads `obj+0x1390 + k` is reading this file at
+`descriptor + 0x24 + k`. `hod2lib.evt.Spawn.param(k, kind)` does exactly that,
+taking the same `k` the handler uses so the two can be compared without
+arithmetic.
+
+Two worked examples, both `[proved]` in the code and then confirmed against the
+data:
+
+* **Class 0x25** — `FUN_00484FF0` switches on `*(int16*)(obj+0x1390 + 6)`, i.e.
+  descriptor `+0x2A`, as a prop-variant selector with cases 1–4 (0 and >4 draw
+  nothing). Reading there gives variants 1 and 2 in stage 2 and 3 and 4 in
+  stage 3 — and the variant-4 descriptor sits at `(-635.1, 43.0, -955.9)`,
+  which is where the routine hardcodes that prop's world position.
+* **Class 0x33** — `FUN_00433860` reads its object path slot from
+  `obj+0x1390 + 0x0C`, i.e. descriptor `+0x30`. That resolves to op_st2 336 and
+  338 and op_st5 382, all inside the correct per-stage ranges. Its main asset
+  is `obj+0x1390 + 0x00` → `obj+0x13F0`: `komono_boat.bin` on the stage-2
+  routes and `car_2.bin` on the stage-5 one.
+
+> ⚠️ Both were previously read at `descriptor + 6` and `descriptor + 0x0C` —
+> off by exactly `0x24`. That gave the high half of `init_flags` (always 0) and
+> float data respectively, and the conclusion drawn was that `obj+0x1390` must
+> point somewhere else entirely. It does not. Note though that `obj+0x1390`
+> **is** polymorphic across the codebase: `FUN_00408770` stores a pointer to a
+> *parent actor* there for objects it spawns itself rather than from a
+> descriptor.
+
+Tails are still **not** self-terminating and their length is **not** a function
+of the class: the gap between consecutive descriptors of the same class varies
+(class 48 appears with 40, 44, 48, 52, 56 and 60 byte spacing). Tails also
+contain further relocated pointers, so there is a second layer below them.
+Sizing a tail still requires the consuming class handler. `0x09` records are
+laid out contiguously at a **0x28** stride in every shipped file, i.e. a
+two-byte tail.
 
 ## Class table
 
@@ -783,9 +817,19 @@ opcode dispatch table — and has 56 entries:
 | | | | | 109 | `0x00496BA0` |
 | | | | | 110 | `0x00488820` |
 
+### `+0x22` is not simply hit points
+
+The u16 at `+0x22` reaches **both** `obj+0x11C` and `obj+0x11E`, and several
+classes use `obj+0x11C` as a **sub-type selector** rather than a health count:
+class `0x28` indexes a four-entry route table with it, class `0x33` picks one
+of eleven handlers, class `0x26` one of eight states. The field is still spelled
+`hp` in `hod2lib.evt.Spawn`; treat that as a historical name, not a claim. A
+`+0x11C` current / `+0x11E` maximum pair would also fit the duplication, and
+which classes read it which way is being resolved handler by handler.
+
 **This is the route to the remaining 20 % of the bytes.** Each handler reads its
-descriptor tail through object +0x1390 (`0x0B`) or +0x130C (`0x0C`), so the tail
-layout is recoverable one class at a time. Ten classes account for most of the
+descriptor tail through object +0x1390 (`0x0B`/`0x0D`) or +0x130C (`0x0C`), so
+the tail layout is recoverable one class at a time. Ten classes account for most of the
 data: 65 (347 descriptors), 48 (283), 37 (169), 68 (132).
 
 **Confirmed:**

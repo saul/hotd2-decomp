@@ -4854,3 +4854,49 @@ motion the swing was covering — fading from `obj.motion` there fades out of a
 walk nobody could see, and the bite still cuts. And `ZombieStateStrike` ends
 its clip a frame early, so `ActorAdvanceMotion`'s own end-of-clip branch never
 fires for it: the fade has to start in `endStrike`, at the transition itself.
+
+## There is no collision avoidance, and that is the finding
+
+Zombies retreating into each other, so: where does the engine separate them?
+Everything in the class-0x30 call graph got read looking for it, and it is not
+there.
+
+* `FUN_00452A10`, the last thing `EnemyZombieUpdate` calls, is **footstep
+  sounds** — a motion id and a frame number switched into a sound id.
+* The two radii `EnemyZombieInit` sets, `obj+0x124` from
+  `g_actor_radius_by_char` and `obj+0x128`, feed
+  `ActorUpdateBoundingSphere` — centre `(x, y + 0x128 + 1, z)` at
+  `obj+0x12C/130/134` — and that sphere is read by the shot test and by the
+  frustum test at `FUN_0045CA60`. By nothing else.
+* `SortEnemiesByDistance` is a plain radix sort. It orders; it moves no one.
+* `FUN_0045E770` is the carrier-platform transform, `FUN_0045DD30` a skeleton
+  node lookup, `FUN_0045DA60` the leave-and-collapse path.
+
+So the crowd is not held apart by a separation pass. It is held apart by three
+things that were already read: only `g_enemy_approach_steps` of them may come
+inside the mid ring, only `g_max_attackers` may attack, and **each attacker
+retreats to the spot it came from** — `obj+0x13D8/E0`, captured when its swing
+began. The port had replaced that last one with "walk away from the player",
+which funnels every retreating actor onto the same radial. That was the bug.
+
+### And the reason restoring it did not work first time
+
+`FUN_00409E00` is a **rate limit, not an ease**: it steps an angle toward
+another by at most *rate* BAMS per frame, and `ZombieStateHoldAtRange` and
+`ZombieStateWaitTurn` pass 0x40 with `ZombieStateBackOff` passing -0x40 — a
+third of a degree a frame. The port had been treating the rate as a fraction of
+the remaining angle, so every turn snapped round in a few frames. That is
+harmless while an actor is turning toward something far away and fatal when it
+passes the point it is turning *relative to*: the direction reverses, the snap
+follows it instantly, and the retreat walks straight back into the camera. With
+a real rate limit it cannot reverse in one step.
+
+### The on-screen gate
+
+`ActorIsOnScreen` (`FUN_00409C10`) projects the actor's tracked point and asks
+whether it lands inside the frame — half-width `g_projection_distance_px * 0.5`,
+half-height a literal 240, which is the second independent confirmation that
+this is a 640x480 projection. `TryClaimAttackSlot` calls it **before** handing
+out a permit, so an enemy off the side of the screen cannot start an attack,
+and cannot sit on the one permit while it is out of shot. Ported, through a new
+`viewSpaceOf` on `GameHost`.

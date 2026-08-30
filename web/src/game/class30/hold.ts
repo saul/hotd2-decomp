@@ -24,6 +24,7 @@ import type { Actor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { TryClaimAttackSlot } from "../combat/permits";
 import { CharacterTypeOf, FirstBakedOf, MotionRowOf } from "../tables";
+import type { GameHost } from "../host";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius, TestApproachRing } from "./ring";
@@ -32,8 +33,8 @@ import { MotionFade, MotionRow, QUEUE_CAP, ZombieState } from "./states";
 /** `FUN_00409E80`'s turn rate here is a literal 0x40 BAMS. */
 const HOLD_TURN_RATE = 0x40;
 
-export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3,
-                                       rng: Rng): void {
+export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3, rng: Rng,
+                                       host: GameHost): void {
   // Called for its side effect: it refreshes `obj+0x1358`, the queue depth
   // this actor is allowed to sit at.
   TestApproachRing(obj, eye);
@@ -52,7 +53,7 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3,
   obj.cooldown = 0;
 
   if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP && obj.cooldown < 1
-      && TryClaimAttackSlot(obj)) {
+      && TryClaimAttackSlot(obj, host)) {
     // Body condition 4 goes to state 0x34 instead; that state is unread, and
     // no stage-2 spawn carries condition 4 into this state.
     obj.state = ZombieState.Strike;

@@ -558,6 +558,7 @@ export class CharacterLayer {
     boneWorld: () => false,
     aimPoint: () => {},
     viewPoint: () => {},
+    viewSpaceOf: () => false,
     setBoneSlot: (at, bone, slot) => this.setBoneSlot(at, bone, slot),
   };
 

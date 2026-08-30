@@ -20,9 +20,22 @@ import { VecToAngles, bamsDelta, bamsWrap, type Vec3 } from "./vec";
  */
 const TURN_RATE = 4;
 
-/** A BAMS-per-frame rate as this port's easing fraction. */
-function easeFor(rate: number, dt: number): number {
-  return Math.min(1, (Math.abs(rate) / 0x40) * TURN_RATE * dt);
+/**
+ * `TurnAngleToward` — `FUN_00409E00`. Step an angle toward another by at most
+ * *rate* BAMS per 60 Hz frame.
+ *
+ * A **rate limit, not an ease**. Treating 0x40 as a fraction of the remaining
+ * angle made the turn snap round in a few frames, and that is what let a
+ * retreating zombie whip about the moment it passed its own anchor and walk
+ * back into the camera. At 0x40 a frame it creeps — a third of a degree — and
+ * cannot reverse in one step.
+ */
+export function TurnAngleToward(cur: number, want: number, rate: number,
+                                dt: number): number {
+  const step = Math.abs(rate) * dt * 60;
+  const d = bamsDelta(want, cur);
+  if (Math.abs(d) <= step) return bamsWrap(want);
+  return bamsWrap(cur + Math.sign(d) * step);
 }
 
 /**
@@ -47,8 +60,7 @@ export function TurnActorTowardCamera(obj: Actor, eye: Vec3, dt: number): void {
 export function TurnActorTowardCameraEye(obj: Actor, eye: Vec3,
                                          rate: number, dt = 1 / 60): void {
   const want = VecToAngles(obj.pos.x - eye.x, 0, obj.pos.z - eye.z).yaw;
-  const d = bamsDelta(want, obj.yaw);
-  obj.yaw = bamsWrap(obj.yaw + d * easeFor(rate, dt));
+  obj.yaw = TurnAngleToward(obj.yaw, want, rate, dt);
 }
 
 /**
@@ -69,8 +81,7 @@ export function TurnActorAwayFromPoint(obj: Actor, p: Vec3, rate: number,
   // current facing is the honest reading of "there is nothing to turn to".
   if (dx * dx + dz * dz < 1e-4) return;
   const want = VecToAngles(dx, 0, dz).yaw + (rate < 0 ? 0x8000 : 0);
-  const d = bamsDelta(want, obj.yaw);
-  obj.yaw = bamsWrap(obj.yaw + d * easeFor(rate, dt));
+  obj.yaw = TurnAngleToward(obj.yaw, want, rate, dt);
 }
 
 /**

@@ -107,7 +107,7 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
     return;
   }
   if (obj.attackPermit < 0) {
-    if (!ThrowerTryClaimAttackSlot(obj)) return;
+    if (!ThrowerTryClaimAttackSlot(obj, host)) return;
     obj.sub = ThrowSub.Draw;
   }
 

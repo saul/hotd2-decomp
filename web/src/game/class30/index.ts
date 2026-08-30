@@ -9,6 +9,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
+import type { GameHost } from "../host";
 import type { Vec3 } from "../vec";
 import { ZombieStateApproach } from "./approach";
 import { ZombieStateAttackRun } from "./attack_run";
@@ -20,11 +21,11 @@ import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieState } from "./states";
 
 export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
-                                  events?: Events): void {
+                                  host: GameHost, events?: Events): void {
   switch (obj.state) {
-    case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng);
+    case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
     case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt, rng);
-    case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye, rng);
+    case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye, rng, host);
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);

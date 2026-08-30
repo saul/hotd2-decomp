@@ -75,8 +75,16 @@ const TYPE: CharacterType = {
   head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977] },
   attacks: {
     "0": {
+      // `distance` is deliberately just *outside* the inner ring, as the real
+      // tables have it -- `char_adv00`'s two attacks name 26.0 and 25.0
+      // against a ring of 25. That is what makes an actor arriving from the
+      // hold already inside it, so the swing starts on the ring and the
+      // retreat ends exactly back at the spot it started from. A fixture with
+      // the distance *inside* the ring instead makes the retreat overshoot its
+      // own anchor and turn round, which is a property of the fixture and not
+      // of the port.
       "1": {
-        strike: 100, lunge: 101, distance: 20, hit_frame: 10,
+        strike: 100, lunge: 101, distance: 26, hit_frame: 10,
         player_motion: 7, cancel_mask: 8,
       },
     },
@@ -173,6 +181,7 @@ console.log("class 0x30, three zombies, ten seconds:");
   let sawBackoff = false;
   let minWalking = Infinity;
   let minAnywhere = Infinity;
+  let closestState = "";
   for (let i = 0; i < 600; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     maxPermits = Math.max(maxPermits,
@@ -180,7 +189,7 @@ console.log("class 0x30, three zombies, ten seconds:");
     for (const o of G.g_object_list) {
       if (o.state === ZombieState.BackOff) sawBackoff = true;
       const d = dist2d(o.pos, EYE);
-      minAnywhere = Math.min(minAnywhere, d);
+      if (d < minAnywhere) { minAnywhere = d; closestState = ZombieState[o.state] ?? String(o.state); }
       // Only the lunge may come inside the ring, and only to the attack's own
       // distance; the retreat starts from wherever the swing left it. What
       // must never happen is an *approaching* actor crossing it, which is the
@@ -217,7 +226,7 @@ console.log("class 0x30, three zombies, ten seconds:");
                            - biteM.root[2]);
   check("and nothing came closer than the bite's own settle point",
         minAnywhere >= bite.distance - biteNet - 0.01,
-        `closest ${minAnywhere.toFixed(2)}, floor `
+        `closest ${minAnywhere.toFixed(2)} in ${closestState}, floor `
         + `${(bite.distance - biteNet).toFixed(2)}`);
   check("the permit came back", G.g_attack_permits.filter((p) => p !== -1).length
         <= 1);
@@ -469,6 +478,50 @@ console.log("ThrowerStatePathFollow:");
         `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
   check("and only then starts throwing",
         z.state === ThrowerState.StandAndThrow, `state ${z.state}`);
+}
+
+// -- 3d. the on-screen gate -------------------------------------------------
+
+console.log("ActorIsOnScreen:");
+{
+  const rng = new Rng(2);
+  const events = scene(0, rng);
+  const z = ActorSpawn(0x5000, SpawnClass.Zombie, 1, "offscreen");
+  z.visible = true;
+  z.attackState = 1;
+  z.hp = 1000;
+  z.pos = vec3(0, 0, 40);
+  z.motion = 10;
+  z.lookAt = vec3(0, 4, 40);
+
+  // `TryClaimAttackSlot` calls `ActorIsOnScreen` (`FUN_00409C10`) first, so an
+  // enemy off the side of the frame cannot start an attack -- nor sit on the
+  // one permit while it is out of shot.
+  const offscreen = {
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = 900; out.y = 0; out.z = 40;   // far off the right of a 640-wide frame
+      return true;
+    },
+  };
+  for (let i = 0; i < 600; i++) GameUpdate(EYE, 1 / 60, offscreen, rng, events);
+  check("an enemy off the side of the frame takes no permit",
+        z.attackPermit === -1 && G.g_attack_permits.every((p) => p === -1),
+        `permit ${z.attackPermit}`);
+
+  const onscreen = {
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = 0; out.y = 0; out.z = 40;
+      return true;
+    },
+  };
+  let claimed = false;
+  for (let i = 0; i < 600 && !claimed; i++) {
+    GameUpdate(EYE, 1 / 60, onscreen, rng, events);
+    if (z.attackPermit >= 0) claimed = true;
+  }
+  check("and the same enemy in shot does", claimed, `permit ${z.attackPermit}`);
 }
 
 // -- 4. damage ---------------------------------------------------------------

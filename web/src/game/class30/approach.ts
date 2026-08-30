@@ -13,12 +13,14 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionRowOf } from "../tables";
+import type { GameHost } from "../host";
 import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionFade, MotionRow, QUEUE_CAP } from "./states";
 
-export function ZombieStateApproach(obj: Actor, eye: Vec3, rng: Rng): void {
+export function ZombieStateApproach(obj: Actor, eye: Vec3, rng: Rng,
+                                    host: GameHost): void {
   if (obj.sub === 0) {
     // The same band test `TestApproachRing` does, inlined here in the exe.
     TestApproachRing(obj, eye);
@@ -35,7 +37,7 @@ export function ZombieStateApproach(obj: Actor, eye: Vec3, rng: Rng): void {
     rng, "clip", MotionFade.Quick);
 
   if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP
-      && TryClaimAttackSlot(obj)) {
+      && TryClaimAttackSlot(obj, host)) {
     obj.flags &= ~ActorFlag.NoCameraTrack;
     obj.state = obj.attackState;
     obj.sub = 0;

@@ -37,7 +37,7 @@ export interface ClassHandler {
 export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
   [SpawnClass.Zombie]: {
     init: EnemyZombieInit,
-    update: (o, f) => EnemyZombieUpdate(o, f.eye, f.dt, f.rng, f.events),
+    update: (o, f) => EnemyZombieUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
   },
   [SpawnClass.Thrower]: {
     init: EnemyThrowerInit,

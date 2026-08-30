@@ -8,7 +8,7 @@
 import { Matrix4, Vector3 } from "three";
 import type { Context, System, Tick } from "../core/system";
 import { GameUpdate } from "../game/director";
-import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
+import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../game/globals";
 import type { GameHost } from "../game/host";
 import type { Vec3 } from "../game/vec";
@@ -59,6 +59,7 @@ export class GameSystem implements System {
   private readonly _eye = new Vector3();
   private readonly _bone = new Vector3();
   private readonly _camMat = new Matrix4();
+  private readonly _camInv = new Matrix4();
   private readonly host: GameHost = {
     boneWorld: (at, bone, out) => {
       if (!this.backend?.boneWorld(at, bone, this._bone)) return false;
@@ -77,6 +78,18 @@ export class GameSystem implements System {
       const p = new Vector3(x, y, z).applyMatrix4(this._camMat);
       out.x = p.x; out.y = p.y; out.z = p.z;
     },
+    // `obj+0x70/74/78`: the actor's tracked point in the camera's own space.
+    // Camera-local -Z is forward, and `ActorIsOnScreen` divides by z, so the
+    // depth is handed over positive.
+    viewSpaceOf: (at, out) => {
+      const a = ActorByAt(at);
+      if (!a) return false;
+      const p = new Vector3(a.lookAt.x, a.lookAt.y, a.lookAt.z)
+        .applyMatrix4(this._camInv);
+      if (p.z >= 0) return false;                      // behind the camera
+      out.x = p.x; out.y = p.y; out.z = -p.z;
+      return true;
+    },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),
   };
 
@@ -88,6 +101,7 @@ export class GameSystem implements System {
   update(ctx: Context, t: Tick): void {
     if (t.frozen || t.dt <= 0) return;
     this._camMat.copy(ctx.camera.matrixWorld);
+    this._camInv.copy(ctx.camera.matrixWorldInverse);
     ctx.camera.getWorldPosition(this._eye);
     const eye: Vec3 = { x: this._eye.x, y: this._eye.y, z: this._eye.z };
     const r = GameUpdate(eye, t.dt, this.host, ctx.rng, ctx.events);

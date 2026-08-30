@@ -12,13 +12,16 @@
  */
 import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
-import { TurnActorTowardCamera } from "../actor_turn";
+import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
 import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionFade, MotionRow, ZombieState } from "./states";
+
+/** `FUN_00409F90`'s rate here, positive when `obj+0x136C & 0x400000` is set. */
+const BACKOFF_TURN_RATE = -0x40;
 
 export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
                                    rng: Rng): void {
@@ -33,18 +36,23 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
 
   ZombieSetMotionIfIdle(obj,
     FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway), rng, 5, MotionFade.Normal);
-  // [diverges] The engine turns relative to `obj+0x13D8/E0`, where the strike
-  // began, at a rate of -0x40 or +0x40 by a flag. What the sign *means* is
-  // unresolved, and it matters: the strike ends only a few units from that
-  // point, so the direction to it is near-degenerate and a wrong sign sends
-  // the retreat in circles or straight back into the camera — both of which
-  // this has now done.
+  // Back toward where *this* actor's strike began — `obj+0x13D8/E0`, captured
+  // when it started the swing — and not simply away from the player.
   //
-  // What the game shows is unambiguous, so the port states that instead: the
-  // actor keeps facing the player and the back-away clip — whose root is +Z,
-  // measured at +9.6 against the run's -30 — carries it backwards out of
-  // range.
-  TurnActorTowardCamera(obj, obj.hasStrikeAnchor ? obj.target : eye, dt);
+  // That distinction is the closest thing this engine has to keeping enemies
+  // apart. There is no separation pass anywhere: the class-0x30 update has
+  // none, the two radii at `obj+0x124`/`+0x128` feed the bounding sphere, the
+  // screen test and the shot test and nothing else, and the sort is a plain
+  // radix sort. What stops a crowd piling up is that only `g_enemy_approach_steps`
+  // of them may come inside the mid ring at all, only one may attack, and
+  // **each attacker goes back to the spot it came from**. Retreating along a
+  // shared radial away from the player instead, as this did, funnels every
+  // one of them onto the same line.
+  //
+  // The negative rate turns to the *opposite* of `VecToAngles(obj - p)`: the
+  // anchor is further out than the actor now is, so the unflipped angle points
+  // inward and the back-away clip's +Z root would carry it into the camera.
+  TurnActorAwayFromPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);
   obj.backoffFrames += dt * GAME_HZ;
 
   // Distance is measured against the remembered player point, the same one the

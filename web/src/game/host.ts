@@ -24,6 +24,12 @@ export interface GameHost {
    * `ThrowerPickLandingPoint`.
    */
   viewPoint(x: number, y: number, z: number, out: Vec3): void;
+  /**
+   * The actor's tracked point in the camera's own space — `obj+0x70/74/78`,
+   * which `ActorRegisterCameraPoint` fills each frame. `ActorIsOnScreen` needs
+   * it to decide whether the actor may take an attack permit at all.
+   */
+  viewSpaceOf(at: number, out: Vec3): boolean;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */
   setBoneSlot(at: number, bone: number, slot: number): void;
 }
@@ -33,5 +39,6 @@ export const NULL_HOST: GameHost = {
   boneWorld: () => false,
   aimPoint: () => {},
   viewPoint: () => {},
+  viewSpaceOf: () => false,
   setBoneSlot: () => {},
 };

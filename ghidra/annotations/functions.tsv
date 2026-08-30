@@ -322,3 +322,11 @@
 00409010	RegisterForDistanceRank	Adds a live, not-yet-dead actor to the distance-ranked enemy list, at most 14.
 00455920	ActorBodyConditionFromHands	Derives obj+0x130C from whether bones 5 and 8 -- the hands, at obj+0x4DC and obj+0x68C, which are 0x20C + bone*0x90 -- still hold their original draw slots, and sets the matching destroyed-zone bits.
 00409e80	TurnActorTowardCameraEye	TurnActorTowardCamera without the 1.5-unit forward offset: eases the actor's yaw toward the camera eye itself.
+00441750	FloatingPropRowSpawn	Class 0x15. Spawns N copies of a prop spaced by a delta vector; each samples the wave field for its height.
+00442110	WaveEvalTravelling	One travelling source's contribution. phase = (|cos yaw| > 0.5 ? cos(yaw)*p.z : sin(yaw)*p.x) + src.phase; height = cos(2*pi*phase/wavelength) * amplitude. The 65536 scale and the BAMS cosine make it a plain sinusoid truncated to BAMS resolution. FPU args are dropped by the decompiler -- read from the disassembly.
+00442210	WaveEvalCircular	One circular source's contribution. r = hypot(p.x-src.x, p.z-src.z); height = cos(2*pi*r/wavelength) * amplitude * max(0, 1 - r*0.01), so a ripple dies at 100 units.
+00442290	WaterFieldCreate	Class 0x16. Allocates the 0x2C-byte wave-field manager and records the water plane Y from the spawn descriptor's y -- the descriptor's x and z are ignored, so the field is a global plane height, not a placed object.
+004420c0	WaveSourceTravellingTick	Reads {amplitude, wavelength, speed} from the descriptor tail on its first tick, installs WaveEvalTravelling, then advances the source's phase by speed every frame.
+004421b0	WaveSourceCircularTick	Same setup with WaveEvalCircular, then walks the source itself along its BAMS yaw at speed -- x += sin(yaw)*speed, z += cos(yaw)*speed.
+004422d0	WaterWaveSourceAdd	Class 0x17. Claims one of eight source slots, copies the spawn position and its three orientation words into it, and picks travelling or circular from g_wave_source_kinds by obj+0x11C.
+00442390	WaterFieldSampleHeight	Sums every active source's contribution at a point. This is a height QUERY for floating objects -- the water surface itself is static level geometry and is never displaced by it.

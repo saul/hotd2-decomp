@@ -215,3 +215,6 @@
 009a3794	g_damage_rank_pending	Accumulates rank adjustments -- PlayerTakeDamage subtracts 2 -- and UpdateDamageRank adds it in and clears it on its next pass.
 009a5cd0	g_player_was_hit	+player*0x98. Set by PlayerTakeDamage so the player entity plays its damage motion, which is stored alongside at g_player_hit_motion.
 009a5cd2	g_player_hit_motion	+player*0x130. The motion the player entity plays when hit, taken from the attack entry's +0x0A.
+007dcc4c	g_water_wave_field	The wave-field manager: {u32 active count; u32 slot mask; f32 plane_y; u32; void *sources[8]}. Created by class 0x16, filled by class 0x17.
+005644e4	g_wave_source_kinds	{handler, object size} per wave-source kind, stride 8: 0 travelling (WaveSourceTravellingTick), 1 circular (WaveSourceCircularTick).
+004d5464	g_wave_circular_falloff	0.01f. A circular ripple's amplitude scales by max(0, 1 - r * this), so it dies at 100 units.

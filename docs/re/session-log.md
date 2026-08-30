@@ -4130,3 +4130,55 @@ Two smaller things fell out of the same pass:
   model.
 * `ActorPlayHitVoice` kind 3, whose two-entry pools had no caller, is the
   **attack shout**: `ZombieStateStrike` raises it as the swing starts.
+
+---
+
+## Water: two systems, one name
+
+Asked to look at water, on the observation that it is missing in some places
+and "in the mesh" in others. Both halves of that are right, and they are
+different systems.
+
+**The surface is geometry, and nothing displaces it.** There is no water
+renderer in the engine. `g_water_level`, the global that sounds like one, is
+written by the class-0x51 water enemy's init and read only by that enemy — it
+is the height it bobs at. The visible water is ordinary meshes, tagged in the
+collision data by `WET_SURFACES` (5 and 55).
+
+Two independent tables agree on where it is: stage 2's collision has 18 wet
+quads at **y = −25.0**, and its script spawns a wave field whose plane is
+**−25.5 / −25.0**. Stage 3 has 259 wet quads at the same height, and the two
+footprints abut at z ≈ −2406 — one canal through both stages.
+
+**Why it comes and goes.** In stage 2 the surface is twelve separate model
+entries across five `pol/` files, each named by only a handful of regions; one
+entry is named by exactly one region. `RegionDrawResidentSet` walks only the
+current region's slot list, so water is drawn in 27 of stage 2's 58 non-empty
+regions and not in the other 31. The browser player already reproduces that
+rule, so "missing water" is a question about which region the walker is in
+rather than about the water.
+
+**The wave field is a query.** Classes 0x16 and 0x17 build a global plane plus
+up to eight sources, travelling or circular. The travelling one accumulates
+phase in the source's own `x`; the circular one walks the source along its yaw
+and falls off linearly to nothing at 100 units. Both reduce to
+`cos(2*pi * d / wavelength) * amplitude`, written as a BAMS cosine of
+`(int)(d * 65536 / wavelength)`.
+
+Its eleven callers are floating props and the water enemy. **None draws
+anything.** So implementing it would move barrels, not water.
+
+### Method note
+
+The decompiler dropped the FPU arguments in both evaluators — the documented
+trap in this project — and the phase expression is entirely in those dropped
+operands. `WaveEvalTravelling` decompiles to something that looks like it
+ignores its second parameter altogether; the disassembly shows it multiplying
+the sampled point by a cosine. Anything with an `__ftol` call in it should be
+read as assembly by default.
+
+Also worth recording as a near-miss: I spent a while on `shading == -1` in the
+water meshes, since 17 of 23 carry it and almost nothing else does. It is
+`SHADE_CONSTANT`, a named mode the exporter already handles — the correlation is
+real (water is flat-shaded) but it is not a fault. The white quad in the render
+that prompted the detour is elsewhere in the scene.

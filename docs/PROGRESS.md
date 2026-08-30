@@ -329,6 +329,14 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       `tools/verify_combat.py` checks all of it across 86 character types and
       2810 spawn/difficulty pairs. See
       [`formats/combat.md`](formats/combat.md).
+- [x] **Water — SOLVED.** Two separate systems that share a name. The visible
+      surface is ordinary level geometry, streamed per region like everything
+      else, and tagged in `coli/` with surfaces 5 and 55; stage 2's collision
+      water plane (−25.0) and its script's wave-field plane (−25.5/−25.0) agree
+      independently. The **wave field** (classes 0x16/0x17) is a height *query*,
+      not a renderer: a global plane plus up to eight travelling or circular
+      sinusoid sources, sampled by floating props and the water enemy and by
+      nothing that draws. See [`formats/water.md`](formats/water.md).
 - [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
       the only place this binary names anything. `ExeTables.sound_records()`.
       This is now the primary identification tool for the decomp.

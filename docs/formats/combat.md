@@ -751,8 +751,50 @@ and bone 8's draw slots (`obj+0x4DC` / `obj+0x68C`, the hands) with asset slots
 `0x1FA2` and `0x1F9E` in place of the bare-hand parts `0x1F9F` and `0x1F9B`.
 The character is `zsass.bin`, and it spawns holding something in each hand.
 
-Its state machine is its own, at `LAB_00449910`, and is `[open]` — so the
-player gives class 0x31 no behaviour at all rather than making it walk.
+### The throw
+
+`ThrowerStateThrow` (`FUN_0044FAF0`) takes **the same attack permit the
+zombies compete for**, picks a hand, reads its entry from
+`g_class31_throws[body_condition]` — the identical 0x10-byte layout as the
+melee table — and calls `SpawnThrownWeapon` on the frame `+0x08` names: **48**
+for conditions 0, 1 and 3, 35 for condition 2. Right hand plays motion 9, left
+motion 8.
+
+`SpawnThrownWeapon` (`FUN_004504E0`) does five things worth stating:
+
+* spawns the projectile at the **throwing bone's world position**;
+* leaves that hand bare — `0x1FA2` → `0x1F9F` for the right, `0x1F9E` →
+  `0x1F9B` for the left — and clears its hit sphere;
+* marks that arm's **destroyed-zone bit**, which is what the cancel mask reads,
+  so an armed hand and a thrown one are the same state as a shot-off one;
+* gives the weapon the thrower's **attack permit**, so the projectile damages
+  the player the thrower had claimed;
+* picks the flying model: `0x1F91` right, `0x1F90` left.
+
+`ThrowerStateRearm` (state 29) later puts the weapon back and clears the bit.
+
+### The flight — `ThrownWeaponFlyToTarget`
+
+```c
+ttl      = |target - pos| * 0.8333333;      /* = distance / 1.2 */
+velocity = (target - pos) / ttl;            /* constant 1.2 units per frame */
+...each frame:
+yaw += spin;  pos += velocity;
+if (--ttl <= 0) PlayerTakeDamage(permit, 1, 6);
+```
+
+A **straight line at a constant speed, and a timed hit** — there is no
+collision test at all, exactly like the melee strike landing on a frame number.
+`AimThrownWeapon` puts the target 4 units in front of the camera (offset
+sideways by 0.6 per player in two-player), so the weapon is aimed at where you
+are, not where you will be.
+
+Afterwards it sticks facing the camera for 30 frames and blinks for 60 —
+`obj+0x1F8` bit 0 toggled on alternate frames — before despawning.
+
+It is **shootable in flight**: `ThrownWeaponUpdate` registers it for the shot
+test, and a hit sends it to `ThrownWeaponDeflected`, which sprays an impact,
+plays `BULLET_MET3` and throws it off in a random direction.
 
 ## 11. What the player implements
 

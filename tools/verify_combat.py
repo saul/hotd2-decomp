@@ -50,7 +50,15 @@ byte. The readings under test are the ones docs/formats/combat.md states:
    usable attack, which is what would fail if the filter were throwing
    everything away.
 
-9. **Every sound id names a file.** The voice, impact and ricochet tables are
+9. **Every thrown attack resolves.** For each type that throws, the release
+   frame lands inside its own throw clip, the cancel mask is one of the three
+   the melee table also uses — 2 right arm, 4 left arm, 8 uncancellable — and
+   every held, bare and projectile slot resolves through the asset slot table.
+   Body conditions 0, 1 and 3 name the throwing arm; condition 2 uses a
+   different clip and the uncancellable mask, so the arm-matching rule is
+   reported rather than asserted.
+
+10. **Every sound id names a file.** The voice, impact and ricochet tables are
    read as `g_se_name_list` ids; a table read at the wrong address would give
    ids that resolve to nothing, so this fails loudly if the address is wrong.
 
@@ -263,6 +271,32 @@ def main() -> int:
                      f"{no_attack[:6]}")
 
     # 9 ------------------------------------------------------------------
+    n_throw = n_armed = 0
+    for ct in types:
+        thr = ch.throw_tables(tables, ct)
+        if not thr:
+            continue
+        for cond, hands in thr["hands"].items():
+            for h in hands:
+                n_throw += 1
+                if not (0 <= h["release_frame"] < play(h["motion"])):
+                    fails.append(f"type {ct} cond {cond} bone {h['bone']} "
+                                 f"releases on frame {h['release_frame']} of a "
+                                 f"{play(h['motion'])}-frame clip")
+                if h["cancel_mask"] not in (2, 4, 8):
+                    fails.append(f"type {ct} bone {h['bone']} cancel mask is "
+                                 f"{h['cancel_mask']:#x}")
+                elif h["cancel_mask"] == (2 if h["bone"] == 5 else 4):
+                    n_armed += 1
+                for key in ("held", "bare", "projectile"):
+                    v = h[key]
+                    if v is not None and v not in slots:
+                        fails.append(f"type {ct} bone {h['bone']} {key} slot "
+                                     f"{v:#x} is not an asset slot")
+    print(f"  {n_throw} thrown-weapon hands, {n_armed} cancelled by the arm "
+          f"that throws them")
+
+    # 10 -----------------------------------------------------------------
     se = tables.se_names()
     combat = ch.combat_tables(tables)
     ids = [s["id"] for s in combat["impact"] + combat["head_impact"]]

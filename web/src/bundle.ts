@@ -283,6 +283,8 @@ export interface CharacterType {
   attacks: Record<string, Record<string, AttackJson>>;
   /** `picks[(rand % 10) + (destroyed_zones & 7) * 10]` names the attack. */
   attack_picks: Record<string, number[]>;
+  /** The thrown-weapon attack, for the two types that have one. */
+  throw: ThrowJson | null;
   /** Damaged variants, keyed by asset slot: their own hit spheres. */
   gore: Record<string, { centre: [number, number, number]; radius: number }>;
   /**
@@ -370,6 +372,40 @@ export interface AttackJson {
    * 2 right arm, 4 left arm. 8 is outside the 3-bit mask, so it never cancels.
    */
   cancel_mask: number;
+}
+
+/** One hand's thrown-weapon attack. See docs/formats/combat.md §10. */
+export interface ThrowHandJson {
+  /** 5 (right) or 8 (left). */
+  bone: number;
+  motion: number;
+  /** Frame of the throw clip on which the weapon leaves the hand. */
+  release_frame: number;
+  range: number;
+  player_motion: number;
+  /** Destroyed zones that cancel it — 2 right arm, 4 left arm. */
+  cancel_mask: number;
+  /** Asset slot the hand draws while armed; null when the skeleton names it. */
+  held: number | null;
+  /** ...and once thrown. */
+  bare: number;
+  /** The model that flies. */
+  projectile: number;
+}
+
+/** The thrown-weapon attack, for the character types that have one. */
+export interface ThrowJson {
+  /** Keyed by body condition. */
+  hands: Record<string, ThrowHandJson[]>;
+  /** BAMS added to the weapon's yaw every frame in flight. */
+  spin: number;
+  /** Units per frame; the flight is a straight line at constant speed. */
+  speed: number;
+  /** The target is this far in front of the camera. */
+  aim_ahead: number;
+  aim_side: number;
+  stick_frames: number;
+  blink_frames: number;
 }
 
 /** `PlayerTakeDamage` — a strike costs exactly one life. */

@@ -218,3 +218,5 @@
 007dcc4c	g_water_wave_field	The wave-field manager: {u32 active count; u32 slot mask; f32 plane_y; u32; void *sources[8]}. Created by class 0x16, filled by class 0x17.
 005644e4	g_wave_source_kinds	{handler, object size} per wave-source kind, stride 8: 0 travelling (WaveSourceTravellingTick), 1 circular (WaveSourceCircularTick).
 004d5464	g_wave_circular_falloff	0.01f. A circular ripple's amplitude scales by max(0, 1 - r * this), so it dies at 100 units.
+00592a00	g_class31_throws	Per body condition -> two 0x10-byte entries in the same layout as g_class30_attacks: entry 0 the right hand (bone 5), entry 1 the left (bone 8). +0x08 is the frame of the throw clip on which the weapon leaves the hand -- 48 for conditions 0/1/3, 35 for condition 2.
+00592ae0	g_thrown_weapon_states	The projectile's two states: flight (ThrownWeaponFlyToTarget) and deflected (ThrownWeaponDeflected). Sits immediately before g_class30_states.

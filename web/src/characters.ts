@@ -872,6 +872,37 @@ export class CharacterLayer {
     }
   }
 
+  /**
+   * A clone of the model at *slot*, from the hidden per-type template the
+   * exporter emits — the same one the gore swap draws from. Used for a thrown
+   * weapon, which the skeleton never names.
+   */
+  cloneSlot(slot: number): Object3D | null {
+    const t = this.goreParts.get(slot);
+    if (!t) return null;
+    const c = t.clone(true);
+    c.visible = true;
+    c.position.set(0, 0, 0);
+    c.quaternion.identity();
+    c.scale.set(1, 1, 1);
+    return c;
+  }
+
+  /** World position of one bone of one instance, for a spawn point. */
+  boneWorld(at: number, bone: number, out: Vector3): boolean {
+    const inst = this.instances.find((i) => i.at === at);
+    const node = inst?.bones.get(bone);
+    if (!node) return false;
+    node.getWorldPosition(out);
+    return true;
+  }
+
+  /** Swap one bone's drawn model — the thrower's hand going bare and back. */
+  setBoneSlot(at: number, bone: number, slot: number): void {
+    const inst = this.instances.find((i) => i.at === at);
+    if (inst) this.swapGore(inst, bone, slot);
+  }
+
   /** The director's view of every instance. */
   get actors(): EnemyActor[] {
     return this.instances.map((i) => i.actor);

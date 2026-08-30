@@ -279,6 +279,43 @@ PLAYER_HIT_RANK_DELTA = -2
 #: What the continue screen restores (`FUN_00497440`), and the player's default.
 PLAYER_START_LIVES = 2
 
+#: `PTR_DAT_00592A00[body_condition]` -> two 0x10-byte entries, the same layout
+#: as :data:`ATTACK_TABLE`, read by `ThrowerStateThrow` (`FUN_0044FAF0`).
+#: Entry 0 is the right hand (bone 5), entry 1 the left (bone 8), and `+0x08`
+#: is the frame of the throw clip on which the weapon leaves the hand.
+THROW_TABLE = 0x00592A00
+THROW_CONDITIONS = 4
+
+#: `EnemyThrowerInit` and `SpawnThrownWeapon` name these outright, per
+#: character type. *held* is what the hand draws while armed, *bare* what it
+#: drops to once thrown, and *projectile* the model that flies.
+THROWER_SLOTS = {
+    0x16: {                                    # zsass.bin
+        5: {"held": 0x1FA2, "bare": 0x1F9F, "projectile": 0x1F91},
+        8: {"held": 0x1F9E, "bare": 0x1F9B, "projectile": 0x1F90},
+        "spin": 0x600,
+    },
+    0x18: {                                    # held slots come from the skeleton
+        5: {"held": None, "bare": 0x1FF1, "projectile": 0x1FE2},
+        8: {"held": None, "bare": 0x1FED, "projectile": 0x1FE1},
+        "spin": 0,
+    },
+}
+
+#: `ThrownWeaponFlyToTarget`. The weapon flies **straight** at a constant
+#: 1.2 units per frame -- ``ttl = distance * 0.8333333`` and
+#: ``velocity = (target - position) / ttl`` -- and when the timer runs out it
+#: calls `PlayerTakeDamage` outright. There is no collision test: the hit is
+#: timed, exactly like the melee strike's hit frame.
+THROW_SPEED = 1.2
+#: `AimThrownWeapon`: the target is this far in front of the camera, and in
+#: two-player it is offset sideways by 0.6 per player.
+THROW_AIM_AHEAD = 4.0
+THROW_AIM_SIDE = 0.6
+#: Frames the weapon sticks in view, then blinks, before despawning.
+THROW_STICK_FRAMES = 30
+THROW_BLINK_FRAMES = 60
+
 #: `DAT_00577674`: the sound ids `ActorPlayHitVoice` (`FUN_0040A6F0`) picks
 #: from. Fifteen dwords -- five flesh impacts, then six voice ids in
 #: ``(set A, set B)`` pairs, then two two-entry pools. Read as ids and resolved
@@ -429,6 +466,8 @@ class Character:
     attacks: dict = field(default_factory=dict)
     #: ``{body_condition: [80 pick indices]}`` -- see :func:`attack_picks`.
     attack_picks: dict = field(default_factory=dict)
+    #: The thrown-weapon attack, or None -- see :func:`throw_tables`.
+    throw: dict | None = None
 
     def to_json(self) -> dict:
         return {
@@ -448,6 +487,10 @@ class Character:
             "attacks": {str(k): {str(i): a for i, a in v.items()}
                         for k, v in self.attacks.items()},
             "attack_picks": {str(k): v for k, v in self.attack_picks.items()},
+            "throw": (None if not self.throw else
+                      {**self.throw,
+                       "hands": {str(k): v
+                                 for k, v in self.throw["hands"].items()}}),
             "motions": {str(k): v for k, v in self.motions.items()},
         }
 
@@ -679,6 +722,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             for row in c.attacks.values():
                 for e in row.values():
                     reacts += [e["strike"], e["lunge"]]
+        for hands in (c.throw or {}).get("hands", {}).values():
+            reacts += [h["motion"] for h in hands]
         for mid in [motion, intro[0] if intro else None] + deaths + reacts:
             if mid is None or mid in c.motions:
                 continue
@@ -970,6 +1015,47 @@ def attack_tables(tables, char_type: int) -> dict:
     return out
 
 
+def throw_tables(tables, char_type: int) -> dict | None:
+    """The thrown-weapon attack for one character type, or None.
+
+    Only the types :data:`THROWER_SLOTS` names throw, because only those have
+    a projectile model: `SpawnThrownWeapon` switches on the character type and
+    does nothing for any other.
+    """
+    kit = THROWER_SLOTS.get(char_type)
+    if kit is None:
+        return None
+    o = tables._v2r(0x004E07D0)
+    play = lambda m: struct.unpack_from("<h", tables.data, o + m * 2)[0]
+    b = tables._v2r(THROW_TABLE)
+    out: dict[int, list] = {}
+    for cond in range(THROW_CONDITIONS):
+        ptr = struct.unpack_from("<I", tables.data, b + cond * 4)[0]
+        q = tables._v2r(ptr)
+        if q is None:
+            continue
+        hands = []
+        for i, bone in enumerate((5, 8)):
+            a = q + i * ATTACK_ENTRY
+            motion, alt = struct.unpack_from("<2h", tables.data, a)
+            rng, = struct.unpack_from("<f", tables.data, a + 4)
+            rel, dmot, mask = struct.unpack_from("<3h", tables.data, a + 8)
+            if motion <= 0 or not (0 <= rel < play(motion)):
+                continue
+            hands.append({"bone": bone, "motion": motion, "release_frame": rel,
+                          "range": rng, "player_motion": dmot,
+                          "cancel_mask": mask & 0xFFFF, **kit[bone]})
+        if hands:
+            out[cond] = hands
+    if not out:
+        return None
+    return {"hands": out, "spin": kit["spin"],
+            "speed": THROW_SPEED, "aim_ahead": THROW_AIM_AHEAD,
+            "aim_side": THROW_AIM_SIDE,
+            "stick_frames": THROW_STICK_FRAMES,
+            "blink_frames": THROW_BLINK_FRAMES}
+
+
 def attack_picks(tables, char_type: int) -> dict:
     """``{body_condition: [80 indices]}`` -- see :data:`ATTACK_PICK_TABLE`."""
     n = ATTACK_PICK_PER_ZONE * ATTACK_ZONE_COMBOS
@@ -1202,7 +1288,8 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      torso_stages=torso_stage_count(tables, char_type),
                      reactions=hit_reactions(tables, char_type),
                      attacks=attack_tables(tables, char_type),
-                     attack_picks=attack_picks(tables, char_type))
+                     attack_picks=attack_picks(tables, char_type),
+                     throw=throw_tables(tables, char_type))
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],
@@ -1302,7 +1389,15 @@ def _gore_entry(stage, tables, char: Character) -> dict | None:
     slots = tables.asset_slots()
     cache: dict[str, tuple] = {}
     parts: list[tuple] = []
-    for slot in sorted(char.gore):
+    # The thrower's projectile and its two hand states ride in the same hidden
+    # rig: the client clones by asset slot either way, and neither the held
+    # hand nor the weapon in flight is named by the skeleton.
+    want = set(char.gore)
+    for hands in (char.throw or {}).get("hands", {}).values():
+        for h in hands:
+            want.update(v for v in (h["held"], h["bare"], h["projectile"])
+                        if v)
+    for slot in sorted(want):
         rec = slots.get(slot)
         if not rec:
             continue

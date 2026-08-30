@@ -118,9 +118,10 @@
  * straight from the motion bank. See docs/formats/combat.md §10.
  */
 
-import { Vector3 } from "three";
+import { Group, Matrix4, Object3D, Vector3 } from "three";
 import type {
-  ApproachJson, AttackJson, CharacterType, PlayerDamageJson, TrackingJson,
+  ApproachJson, AttackJson, CharacterType, PlayerDamageJson, ThrowHandJson,
+  TrackingJson,
 } from "./bundle";
 
 const BAMS = 65536 / (Math.PI * 2);
@@ -135,6 +136,14 @@ const QUEUE_CAP = 3;
  * their looping motion and stay where the script put them.
  */
 const CLASS_ZOMBIE = 0x30;
+/**
+ * The thrower. `EnemyThrowerInit` gives subtype 0x16 (`zsass.bin`) an item in
+ * each hand and puts it somewhere you cannot walk to — stage 2 block 5 spawns
+ * two at y = 87, above the street. Its own 30-state machine is unread, but the
+ * throw is not: it competes for the **same attack permit** as the zombies, and
+ * when it holds one it plays the throw clip and lets go on an exact frame.
+ */
+const CLASS_THROWER = 0x31;
 /**
  * Units per second an enemy closes at. **`[open]` — invented, not derived.**
  * See the module note: the zombie's code writes no velocity, its walk clips
@@ -176,7 +185,7 @@ export interface EnemyActor {
   type: CharacterType;
   /** `obj+0x130C` — the body condition, which indexes the attack tables. */
   condition: number;
-  /** The spawn class. Only 0x30 runs the state machine decompiled here. */
+  /** The spawn class. Only 0x30 and 0x31 have behaviour here. */
   cls: number;
 }
 
@@ -200,6 +209,27 @@ interface Ai {
   fired: boolean;
 }
 
+/**
+ * One weapon in flight — `ThrownWeaponFlyToTarget`.
+ *
+ * A straight line at a constant `speed` units per frame with
+ * `ttl = distance / speed`, tumbling on its yaw, and on expiry it calls
+ * `PlayerTakeDamage` outright: **the hit is timed, not tested**, exactly like
+ * the melee strike's hit frame. Afterwards it sticks facing the camera for 30
+ * frames and blinks for 60 before going away.
+ */
+interface Projectile {
+  node: Object3D;
+  vel: Vector3;
+  ttl: number;
+  spin: number;
+  yaw: number;
+  /** Frames spent in the stick/blink tail once the flight is done. */
+  after: number;
+  hit: boolean;
+  cfg: { stick_frames: number; blink_frames: number };
+}
+
 export class EnemyDirector {
   private approach: ApproachJson | null = null;
   private track: TrackingJson | null = null;
@@ -211,6 +241,15 @@ export class EnemyDirector {
   onStrike: (a: EnemyActor, attack: AttackJson) => void = () => {};
   /** `DAT_009C8E08` — invulnerability frames left. */
   private invuln = 0;
+  /** Weapons in flight, and the group they live in. */
+  private readonly flying: Projectile[] = [];
+  readonly projectiles = new Group();
+  /** Set by the host so a thrown weapon can be built and placed. */
+  chars: {
+    cloneSlot(slot: number): Object3D | null;
+    boneWorld(at: number, bone: number, out: Vector3): boolean;
+    setBoneSlot(at: number, bone: number, slot: number): void;
+  } | null = null;
   private readonly ai = new Map<number, Ai>();
   /**
    * `g_attack_permits`. `TryClaimAttackSlot` offers `g_max_attackers` of them,
@@ -244,6 +283,8 @@ export class EnemyDirector {
     this.tracking = false;
     this.focus = null;
     this.invuln = 0;
+    for (const p of this.flying) p.node.removeFromParent();
+    this.flying.length = 0;
   }
 
   private state(a: EnemyActor): Ai {
@@ -305,7 +346,8 @@ export class EnemyDirector {
     const live: { a: EnemyActor; s: Ai; d: number }[] = [];
     for (const a of actors) {
       const s = this.state(a);
-      if (a.dead || !a.visible || a.cls !== CLASS_ZOMBIE) {
+      if (a.dead || !a.visible
+          || (a.cls !== CLASS_ZOMBIE && a.cls !== CLASS_THROWER)) {
         if (s.permit >= 0) this.release(s);
         if (a.action) a.action = null;
         continue;
@@ -317,11 +359,22 @@ export class EnemyDirector {
     // against the ring table's allowance.
     live.sort((p, q) => p.d - q.d);
     live.forEach((x, i) => { x.s.rank = i; });
-    for (const x of live) this.step(x.a, x.s, eye, dt);
+    for (const x of live) {
+      if (x.a.cls === CLASS_THROWER) this.stepThrower(x.a, x.s, eye, dt);
+      else this.step(x.a, x.s, eye, dt);
+    }
+    this.stepProjectiles(eye, dt);
     return this.aim(live, eye, out);
   }
 
   /** One actor's state machine — states 22, 1 and 2. */
+  /** `TurnActorTowardCamera`, shared by both classes. */
+  private face(a: EnemyActor, eye: Vector3, dt: number): void {
+    const f = Math.atan2(a.pos.x - eye.x, a.pos.z - eye.z) * BAMS;
+    const d = ((f - a.yaw) % 65536 + 98304) % 65536 - 32768;
+    a.yaw = (a.yaw + d * Math.min(1, dt * 4) + 65536) % 65536;
+  }
+
   private step(a: EnemyActor, s: Ai, eye: Vector3, dt: number): void {
     // `TurnActorTowardCamera` takes `VecToAngles(obj.x - p.x, 0, obj.z - p.z)`
     // — the angle of **actor minus camera**, not camera minus actor. Writing it
@@ -420,6 +473,123 @@ export class EnemyDirector {
     // holding a permit.
     this.giveUp(a, s);
   }
+
+  /**
+   * The thrower. It never walks — its spawn is out of reach on purpose — so it
+   * only ever turns to face you, waits for the attack permit, and throws.
+   */
+  private stepThrower(a: EnemyActor, s: Ai, eye: Vector3, dt: number): void {
+    this.face(a, eye, dt);
+    const hands = a.type.throw?.hands?.[String(a.condition)]
+      ?? a.type.throw?.hands?.["0"] ?? [];
+    // `ThrowerStateThrow` refuses a hand whose arm has been shot off.
+    const usable = hands.filter((h) => (a.zones & 7 & h.cancel_mask)
+                                       !== h.cancel_mask);
+    if (!usable.length) { if (s.permit >= 0) this.release(s); return; }
+
+    if (s.permit < 0) {
+      if (s.rank < QUEUE_CAP && this.claim(s)) { s.sub = 0; s.fired = false; }
+      else return;
+    }
+    const hand = usable[Math.min(s.attack < 0 ? 0 : s.attack, usable.length - 1)];
+    if (s.sub === 0) {
+      s.attack = usable.indexOf(hand);
+      s.fired = false;
+      a.action = { motion: hand.motion, t: 0, loop: false };
+      s.sub = 1;
+      return;
+    }
+    const m = a.type.motions[String(hand.motion)];
+    if (!a.action || !m) {
+      // The clip finished: re-arm the hand and give the permit up so the next
+      // enemy — or this one — can take a turn.
+      if (s.fired) this.rearm(a, hand);
+      this.release(s);
+      s.sub = 0;
+      s.attack = (s.attack + 1) % usable.length;
+      return;
+    }
+    if (!s.fired && a.action.t * GAME_HZ >= hand.release_frame) {
+      s.fired = true;
+      this.throwWeapon(a, hand, eye);
+    }
+  }
+
+  /** `SpawnThrownWeapon`: the hand goes bare and the weapon takes the permit. */
+  private throwWeapon(a: EnemyActor, hand: ThrowHandJson, eye: Vector3): void {
+    const cfg = a.type.throw;
+    if (!cfg || !this.chars) return;
+    const from = new Vector3();
+    if (!this.chars.boneWorld(a.at, hand.bone, from)) return;
+    const node = this.chars.cloneSlot(hand.projectile);
+    if (!node) return;
+
+    this.chars.setBoneSlot(a.at, hand.bone, hand.bare);
+    a.zones |= hand.cancel_mask & 7;
+
+    // `AimThrownWeapon`: a point `aim_ahead` in front of the camera. The
+    // camera looks down its own local −Z, which is where the player is.
+    const target = new Vector3(0, 0, -cfg.aim_ahead)
+      .applyMatrix4(this._camMat).setY(eye.y);
+    const d = target.distanceTo(from);
+    const ttl = Math.max(1, d / cfg.speed);
+    node.position.copy(from);
+    this.projectiles.add(node);
+    this.flying.push({
+      node,
+      vel: target.clone().sub(from).divideScalar(ttl),
+      ttl, spin: hand.bone === 5 ? cfg.spin : -cfg.spin,
+      yaw: 0, after: 0, hit: false,
+      cfg: { stick_frames: cfg.stick_frames, blink_frames: cfg.blink_frames },
+    });
+  }
+
+  /** `ZombieStateRearm`: the hand gets its weapon back. */
+  private rearm(a: EnemyActor, hand: ThrowHandJson): void {
+    if (hand.held && this.chars) {
+      this.chars.setBoneSlot(a.at, hand.bone, hand.held);
+    }
+    a.zones &= ~(hand.cancel_mask & 7);
+  }
+
+  /** The camera's world matrix, so the aim point can be built in view space. */
+  private readonly _camMat = new Matrix4();
+  setCameraMatrix(m: Matrix4): void { this._camMat.copy(m); }
+
+  private stepProjectiles(eye: Vector3, dt: number): void {
+    const frames = dt * GAME_HZ;
+    for (let i = this.flying.length - 1; i >= 0; i--) {
+      const p = this.flying[i];
+      if (p.ttl > 0) {
+        p.node.position.addScaledVector(p.vel, frames);
+        p.yaw += p.spin * frames;
+        p.node.rotation.set(0, 0, p.yaw * (Math.PI * 2) / 65536);
+        p.ttl -= frames;
+        if (p.ttl <= 0 && !p.hit) {
+          p.hit = true;
+          if (this.invuln <= 0) {
+            this.invuln = this.dmg?.invuln_frames ?? 90;
+            this.onThrowHit();
+          }
+        }
+        continue;
+      }
+      // Stuck in view, then blinking, then gone.
+      p.after += frames;
+      p.node.lookAt(eye);
+      const blinkFrom = p.cfg.stick_frames;
+      if (p.after > blinkFrom) {
+        p.node.visible = Math.floor(p.after - blinkFrom) % 2 === 0;
+      }
+      if (p.after >= blinkFrom + p.cfg.blink_frames) {
+        p.node.removeFromParent();
+        this.flying.splice(i, 1);
+      }
+    }
+  }
+
+  /** Reported like a melee strike: one life, −100, and the invulnerability. */
+  onThrowHit: () => void = () => {};
 
   /** Attacks this actor can actually perform, for its body condition. */
   private attackList(a: EnemyActor): Record<string, AttackJson> {

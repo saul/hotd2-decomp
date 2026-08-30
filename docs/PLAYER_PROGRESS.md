@@ -350,6 +350,14 @@ exactly **one life**, 100 points and 90 frames of invulnerability, and drops
 the adaptive rank by 2 — being hit makes the game easier. Lives show in the
 status bar.
 
+**Thrown weapons are in.** Class 0x31's throwers — `zsass.bin` and
+`zslman.bin`, spawned out of walking reach — compete for the same attack permit
+as the zombies, play the throw clip and release on the frame the table names.
+The weapon flies in a straight line at 1.2 units/frame to a point 4 units in
+front of the camera, tumbling, and costs a life on arrival: the hit is timed,
+not tested. Throwing leaves the hand bare and sets the arm's destroyed-zone
+bit, so the cancel mask treats a thrown arm and a shot-off one alike.
+
 Still `[open]`, and marked in `enemies.ts`: the walk speed — derived from the
 ring table rather than found, and now known *not* to be root motion.
 

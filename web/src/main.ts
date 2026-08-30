@@ -215,11 +215,27 @@ class Player {
     this.shooting.reset();
     this.shooting.setTables(bundle.script.characters?.combat);
     this.enemies.reset();
+    this.enemies.chars = this.chars;
+    this.scene.add(this.enemies.projectiles);
     this.enemies.setTables(bundle.script.characters?.approach,
                            bundle.script.characters?.tracking,
                            bundle.script.characters?.player);
     this.lives = bundle.script.characters?.player?.start_lives ?? 2;
     // `PlayerTakeDamage`: one life, −100 and 90 frames of invulnerability.
+    // A thrown weapon costs the same as a strike: PlayerTakeDamage does not
+    // care which delivered it.
+    this.enemies.onThrowHit = () => {
+      const d = bundle.script.characters?.player;
+      this.lives = Math.max(0, this.lives - (d?.life_cost ?? 1));
+      this.shooting.score += d?.score ?? -100;
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, name: "hit by thrown weapon",
+              cat: "combat" },
+        note: `−1 life → ${this.lives} · ${d?.score ?? -100} pts`,
+      });
+      this.refreshUi();
+    };
     this.enemies.onStrike = (a, atk) => {
       const d = bundle.script.characters?.player;
       this.lives = Math.max(0, this.lives - (d?.life_cost ?? 1));
@@ -976,6 +992,8 @@ class Player {
       // The director runs first: it owns where the enemies are and which one
       // has committed to attacking, and the camera reads its answer.
       if (!this.state.freeze) {
+        // The aim point is built in the camera's own space.
+        this.enemies.setCameraMatrix(this.camera.matrixWorld);
         this.trackValid = this.enemies.update(
           this.chars.actors, this.camera.position, dt * this.speed,
           this.trackWant);

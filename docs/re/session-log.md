@@ -4233,3 +4233,48 @@ A pleasing coincidence while chasing it: the two per-class hooks
 `g_coli_hit_surface == 5 || 0x37` — the identical pair as `coli.py`'s
 `WET_SURFACES`. The same two surface tags drive the ricochet sound, the wet
 footprint of the canal, and a wading zombie's splash.
+
+---
+
+## The axe throw
+
+Read class 0x31's state machine far enough to get the throw, which turned out
+to need only four of its thirty states.
+
+The route in was not the state table. Walking it from the entry state (20, an
+entrance that hands to 7) would have taken a long time; instead I searched for
+**writes of the held-item slot** `0x1FA2` that `EnemyThrowerInit` puts in the
+hand. Two in the whole program: the init, and `ThrowerStateRearm`. That named
+the re-arm, and searching for the *bare* slot `0x1F9F` gave exactly one write —
+`SpawnThrownWeapon`. One xref from there gave the state that throws. Three
+searches instead of thirty decompilations.
+
+What it does is neat. The thrower **competes for the same attack permit as the
+zombies**, and hands it to the projectile — so the weapon damages the player
+the thrower had claimed, and the permit is not free again until the throw
+resolves. Throwing leaves the hand bare and sets that arm's **destroyed-zone
+bit**, the same bit shooting the arm off would set, which is why the cancel
+mask works unchanged for both: an arm that has thrown and an arm that has been
+shot off are the same state.
+
+The flight is simpler than expected and worth recording precisely, because it
+would be easy to over-engineer: `ttl = distance / 1.2`, `velocity =
+(target − position) / ttl`, straight line, constant speed, and on expiry it
+calls `PlayerTakeDamage` **outright**. No collision test. The target is a point
+four units in front of the camera. Same design as the melee strike landing on a
+frame number rather than on contact — this engine times its hits, it does not
+test them.
+
+Two details that pay off elsewhere: the projectile registers for the shot test,
+so you can shoot an axe out of the air (it ricochets away with `BULLET_MET3`,
+the same sound as a shot that does nothing to a zombie), and it registers for
+camera tracking, so the camera follows a thrown weapon.
+
+### A check that had to be weakened
+
+I asserted the cancel mask always names the throwing arm — 2 for the right
+hand, 4 for the left. It does for body conditions 0, 1 and 3, and **condition 2
+uses a different clip with the uncancellable mask 8**. Twelve of sixteen hands
+match the rule. Weakened to "one of 2, 4 or 8" with the match count reported,
+which still catches a stride error and no longer claims more than the data
+says.

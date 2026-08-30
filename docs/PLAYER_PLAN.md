@@ -449,3 +449,11 @@ player should be told a motion id by the exporter, not try to derive one.
 * **`g_motion_play_length` is not the frame count** — it is about twice it, and
   the exact relation is open. Use the frame count in the block header for
   playback, not that table.
+
+## Architecture
+
+The player is now a partial reimplementation of the game's runtime, not a
+viewer, and the decomp has ~30 spawn classes still to add. The plan for keeping
+it modular — a `System`/`World` tick, a typed event bus, one file per game
+class behind a registry, and ports instead of reach-through — is in
+[`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md).

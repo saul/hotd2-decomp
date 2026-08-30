@@ -84,6 +84,31 @@ MOTION_FPS = 30.0
 #: game is well inside it.
 MAX_BAKED_FRAMES = 600
 
+#: Half a turn, added to a spawn's authored yaw when placing a character.
+#:
+#: **[measured]**, not proved, and the distinction matters. Everything in the
+#: transform chain checks out on its own: the allocator copies ``desc+0x14/18/1C``
+#: straight to ``obj+0x64/68/6C`` (`FUN_004088A0`); `FUN_00410590` feeds those
+#: to ``RotX; RotY; RotZ``; and the engine's `MatrixRotateY` builds
+#: ``x' = c*x + s*z, z' = -s*x + c*z``, which is three.js's Y rotation exactly.
+#: The exporter mirrors no axis. So the yaw reaches the model unaltered and the
+#: 180 degrees has to come from the character models facing **+Z** in their own
+#: local space.
+#:
+#: The evidence is that they do. Taking every class-0x30 spawn in the six
+#: stages and comparing its authored yaw against the direction to the nearest
+#: camera eye, a raw +Z reading puts **149 of 203 zombies facing away** from the
+#: camera and 54 towards it; the flip reverses that. Zombies face the player.
+#: The spawn markers agree independently -- their cone is modelled pointing
+#: down local -Z, so they have always carried this half turn in geometry rather
+#: than in an angle, which is why nothing noticed until characters were drawn.
+#:
+#: What has *not* been found is where the game applies it. The per-frame update
+#: runs a 54-state machine and the setup computes an angle toward the camera
+#: into ``obj+0x4C8``, so a runtime turn is the likely home, but that is a
+#: guess and is not claimed here.
+SPAWN_YAW_HALF_TURN = 0x8000
+
 
 @dataclass
 class Character:
@@ -259,6 +284,16 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      bones=bones)
 
 
+def _placed(spawns: list[dict]) -> list[dict]:
+    """Spawn dicts with the half turn applied. See `SPAWN_YAW_HALF_TURN`."""
+    out = []
+    for sp in spawns:
+        o = list(sp["orient"])
+        o[1] = (o[1] + SPAWN_YAW_HALF_TURN) & 0xFFFF
+        out.append(dict(sp, orient=o))
+    return out
+
+
 def _rig_entry(stage, tables, char: Character, spawns: list[dict]) -> dict | None:
     """A `gltf.export_level` rig entry: the skeleton, placed at every spawn."""
     from . import rigs as rigslib, stage as stagelib
@@ -293,7 +328,7 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict]) -> dict | Non
         parts=tuple(p for p, _ in parts),
         note="skeleton from the EXE; posed per frame from mot/")
     return {"rig": rig, "routes": [], "anchors": {}, "biases": {},
-            "fixed": [], "world": False, "placements": spawns,
+            "fixed": [], "world": False, "placements": _placed(spawns),
             "blocked": "", "parts": [(p, m) for p, m in parts if m]}
 
 

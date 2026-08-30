@@ -59,8 +59,15 @@ const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Y = new Vector3(0, 1, 0);
 const AXIS_Z = new Vector3(0, 0, 1);
 
-/** `chr_<name>_spawn###_bone<NN>_<slot>` — the exporter's part naming. */
-const BONE_RE = /_bone(\d+)_/;
+/**
+ * The exporter names a bone's node `chr_<name>_spawn###_<part>`, where *part*
+ * is `bone<NN>_<slot>`. Matching on that **suffix** matters: a glTF node whose
+ * mesh has several primitives is loaded as a group with child meshes named
+ * `<node name>_0`, `_1`, …, and those would match a looser pattern. Rotating a
+ * primitive instead of its bone leaves the bone at bind and spins the piece
+ * about the joint — which is exactly what "the parts are detached" looks like.
+ */
+const boneSuffix = (part: string) => `_${part}`;
 
 interface Instance {
   /** evt offset of the spawn descriptor — the identity the walker uses. */
@@ -132,12 +139,25 @@ export class CharacterLayer {
       for (const child of [...node.children]) pivot.add(child);
       node.add(pivot);
 
+      // Index by the skeleton's own bone numbers, from the exporter's list,
+      // rather than by anything parsed out of the scene graph.
       const bones = new Map<number, Object3D>();
       pivot.traverse((o) => {
-        const m = BONE_RE.exec(o.name);
-        if (m) bones.set(Number.parseInt(m[1], 10), o);
+        for (const b of type.bones) {
+          if (bones.has(b.bone)) continue;
+          if (o.name.endsWith(boneSuffix(b.part))) {
+            bones.set(b.bone, o);
+            break;
+          }
+        }
       });
-      if (!bones.size) continue;
+      if (bones.size !== type.bones.length) {
+        // A partial skeleton would pose some joints and leave others at bind,
+        // which reads as a broken model rather than a missing feature.
+        console.warn(`character ${type.name} at ${at}: matched ` +
+                     `${bones.size} of ${type.bones.length} bones`);
+        continue;
+      }
 
       this.instances.push({ at, type, motion, root: node, pivot, bones,
                             clock: 0 });

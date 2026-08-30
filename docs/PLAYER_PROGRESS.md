@@ -223,6 +223,29 @@ in a bank exactly, which uniquely picks `nya.bin` for the cat's 19 bones,
 so every humanoid would get an arbitrary one of thirty. A character posed from
 another character's animation looks like a decoding bug, not a missing feature.
 
+Two things went wrong on the first pass and are worth recording, because one of
+them was mine and one of them was a fair reading of the data:
+
+* **The bones came apart.** 863 of 1632 character bone nodes carry more than one
+  glTF primitive, and `GLTFLoader` loads such a node as a group whose children
+  are named `<node>_0`, `_1`, … A loose `/_bone(\d+)_/` match therefore landed on
+  a *primitive* rather than its bone, so the bone stayed at bind while one piece
+  of it span about the joint. Matching the exporter's part name as a suffix
+  fixes it; the glTF hierarchy itself was correct all along.
+* **The characters faced backwards.** Every step of the transform chain checks
+  out in isolation — `FUN_004088A0` copies the descriptor's three orientation
+  words straight to `obj+0x64/68/6C`, `FUN_00410590` feeds them to
+  `RotX; RotY; RotZ`, and `MatrixRotateY` builds `x' = c·x + s·z`,
+  `z' = −s·x + c·z`, which is three.js's Y rotation exactly — and the exporter
+  mirrors no axis. So the half turn is in the models: they face **+Z** locally.
+  Measuring every class-0x30 spawn against the nearest camera eye puts 149 of
+  203 zombies facing *away* on a raw reading and towards it on a flipped one,
+  and zombies face the player. The spawn markers had carried the same half turn
+  all along, in geometry rather than in an angle — their cone is modelled
+  pointing down local −Z — which is why nothing noticed until characters were
+  drawn. Where the game applies it has **not** been found, so this is
+  `[measured]`, not `[proved]`.
+
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any
 spawn that has a real character so the two never draw on top of each other.

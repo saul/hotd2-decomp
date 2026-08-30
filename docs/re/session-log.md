@@ -3328,3 +3328,49 @@ feature not finished yet.
 287 of 562 identified spawns are posed, 25 character types. The marker layer
 skips any spawn that has a real character, so a cone never ends up stuck through
 a zombie.
+
+## Two ways a character can look wrong
+
+The first render of the spawned characters had them backwards and coming apart,
+and the two faults had nothing to do with each other.
+
+**The bones.** The glTF was right — dumping the hierarchy showed every bone
+nested under its parent with the correct offset, two roots (upper body, pelvis)
+exactly as the EXE skeleton describes. The fault was one line of client code:
+`/_bone(\d+)_/` against a node name. 863 of 1632 character bone nodes carry more
+than one primitive, and `GLTFLoader` loads such a node as a group whose children
+are named `<node>_0`, `_1`, … — all of which match that pattern. Depth-first
+traversal meant the *last* match won, so the map pointed at a primitive, the
+bone itself never rotated, and one piece of each limb span about the joint on
+its own. Matching the exporter's part name as a suffix fixes it.
+
+Worth noting how much time the wrong instinct would have cost: "parts are
+detached" reads as a transform bug, and the first three things checked were the
+parent chain, meshless bones breaking it, and the bind offsets. All three were
+fine. Dumping the actual glTF node tree — rather than reasoning about what the
+writer would have produced — is what ended it.
+
+**The facing.** Here the data was checked before the code was changed, which
+was the right order, because every individual step of the chain is correct:
+`FUN_004088A0` copies the descriptor's `+0x14/18/1C` straight to
+`obj+0x64/68/6C`; `FUN_00410590` feeds those to `RotX; RotY; RotZ`; and
+`MatrixRotateY` builds `x' = c·x + s·z, z' = −s·x + c·z`, which is three.js's Y
+rotation exactly. The exporter mirrors no axis and the client's `lookAt` is the
+ordinary one. So nothing in the pipeline turns the yaw, and the half turn has to
+be in the models: they face **+Z** in their own local space.
+
+The measurement that settles it needs no rendering. Take every class-0x30 spawn
+in the six stages, find the nearest camera eye sample on any `cp_` path, and
+compare the authored yaw with the direction to it. A raw reading puts **149 of
+203 zombies facing away** from the camera and 54 towards it; flipping reverses
+that, and zombies face the player. The screenshot corroborated it independently.
+
+The nicest part is that the spawn markers had been carrying this half turn all
+along without anyone noticing — their cone is modelled pointing down local −Z,
+so marker and character now agree. That is also why it survived this long: a
+symmetric marker with the flip baked into its geometry looks correct either way.
+
+Recorded as `[measured]`, not `[proved]`: where the *game* applies the half turn
+has not been found. The zombie's setup computes an angle toward the camera into
+`obj+0x4C8` and its update runs a 54-state machine, so a runtime turn is the
+likely home, but that is a guess and the note says so.

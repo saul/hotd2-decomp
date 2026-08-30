@@ -58,7 +58,15 @@ byte. The readings under test are the ones docs/formats/combat.md states:
    different clip and the uncancellable mask, so the arm-matching rule is
    reported rather than asserted.
 
-10. **Every sound id names a file.** The voice, impact and ricochet tables are
+10. **Every class with a motion rule actually produces posed actors.**
+    `resolve_for_stage` skips any spawn whose class has no entry in
+    `MOTION_RULES`, so a class can be fully decoded — attack tables, throw
+    tables, everything — and still export nothing at all. That is exactly what
+    happened to class 0x31: its tables were right and no bundle carried a
+    single thrower, because the class had no motion rule and every one of its
+    spawns was dropped before `_build` ran.
+
+11. **Every sound id names a file.** The voice, impact and ricochet tables are
    read as `g_se_name_list` ids; a table read at the wrong address would give
    ids that resolve to nothing, so this fails loudly if the address is wrong.
 
@@ -297,6 +305,28 @@ def main() -> int:
           f"that throws them")
 
     # 10 -----------------------------------------------------------------
+    import collections
+    posed = collections.Counter()
+    seen_cls = collections.Counter()
+    for n in sorted(stagelib.STAGE_TO_SCENE):
+        try:
+            st = stagelib.Stage(args.game_dir, stage=n)
+            places = ch.resolve_for_stage(st)[1]
+        except Exception:                                   # noqa: BLE001
+            continue
+        for p in places:
+            seen_cls[p.cls] += 1
+            if p.motion is not None:
+                posed[p.cls] += 1
+    for cls in sorted(ch.MOTION_RULES):
+        if seen_cls[cls] and not posed[cls]:
+            fails.append(f"class {cls:#04x} has a motion rule and "
+                         f"{seen_cls[cls]} spawns but none is posed")
+    print(f"  classes with a motion rule: "
+          + ", ".join(f"{c:#04x}={posed[c]}/{seen_cls[c]}"
+                      for c in sorted(ch.MOTION_RULES)))
+
+    # 11 -----------------------------------------------------------------
     se = tables.se_names()
     combat = ch.combat_tables(tables)
     ids = [s["id"] for s in combat["impact"] + combat["head_impact"]]

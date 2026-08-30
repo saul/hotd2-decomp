@@ -4278,3 +4278,26 @@ uses a different clip with the uncancellable mask 8**. Twelve of sixteen hands
 match the rule. Weakened to "one of 2, 4 or 8" with the match count reported,
 which still catches a stride error and no longer claims more than the data
 says.
+
+
+### Postscript: the throw exported nothing, and why
+
+Committed the thrown weapon, re-exported, and **no bundle carried a thrower**.
+The tables were all correct; the actors never existed.
+
+`resolve_for_stage` drops any spawn whose class has no entry in
+`MOTION_RULES` — "marker only", since an unposed character is a heap of parts.
+Class 0x31 had no rule, so all 49 of its spawns across the game were skipped
+before `_build` ever ran, and the throw tables I had just decoded were attached
+to characters that were never constructed.
+
+The rule was one line away in the same function I had already read:
+`EnemyThrowerInit` does `obj+0x1B4 = (char == 0x17) ? 0x1BA : 0x3A8`, the same
+shape as `EnemyZombieInit`'s `0x3BC`. Added as a `by_char` rule kind.
+
+Worth generalising: **decoding a class's tables and exporting its actors are
+two different things**, and the second silently no-ops. `verify_combat.py` now
+asserts that every class with a motion rule yields at least one posed
+placement, and prints the ratio — `0x30=283/283, 0x31=49/49, 0x53=4/4` — so a
+class that is decoded but not exported shows up as a failure rather than as an
+empty scene.

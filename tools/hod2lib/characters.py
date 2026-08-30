@@ -91,8 +91,13 @@ __all__ = ["MOTION_RULES", "Character", "Placement", "resolve_for_stage"]
 #: playlist -- and the handler takes the first. Every id in it falls inside
 #: `nya.bin`'s 762..773, which is the corroboration that it is a motion table
 #: and not something else with a convenient stride.
+#: ``("by_char", {char_type: id}, default)`` is a constant chosen by the
+#: character type, which is how `EnemyThrowerInit` does it:
+#: ``obj+0x1B4 = (char == 0x17) ? 0x1BA : 0x3A8``. Same shape as
+#: `EnemyZombieInit`'s, which is why class 0x30's is a plain literal.
 MOTION_RULES: dict[int, tuple] = {
     0x30: ("literal", 0x3BC),
+    0x31: ("by_char", {0x17: 0x1BA}, 0x3A8),
     0x53: ("table", 0x00589A64, 10, 0x00, "i16"),
 }
 
@@ -581,6 +586,10 @@ def motion_for(tables, spawn_rec, cls: int) -> int | None:
         return None
     if rule[0] == "literal":
         return rule[1]
+    if rule[0] == "by_char":
+        _, per_char, default = rule
+        ct = spawn_rec.param(0x00, "i8")
+        return per_char.get(ct, default)
     if rule[0] != "table":
         return None
     _, base, stride, at, kind = rule

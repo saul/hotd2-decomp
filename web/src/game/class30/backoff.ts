@@ -13,7 +13,7 @@
 import type { Actor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
-import { MotionRowOf } from "../tables";
+import { FirstBakedOf, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
@@ -29,7 +29,8 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
     obj.sub = 1;
   }
 
-  ZombieSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.BackAway]);
+  ZombieSetMotionIfIdle(obj,
+    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway));
   // Turn relative to where the strike began, not to the camera: the actor
   // lunged forward to swing and walks back out along the same line.
   TurnActorAwayFromPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);

@@ -4586,3 +4586,36 @@ So the port had it on Z, the first fix moved it to X, and the answer is Y. The
 lesson is the one the method already states: the draw call says which term is
 which, but only the writer says which term is the spin. The misleading
 annotation has been corrected in place.
+
+## The zombies stopped advancing, and why the test did not catch it
+
+Porting the movement to root motion made every zombie stand still. Two causes,
+and the second is the interesting one.
+
+**The exporter never baked the run.** `resolve_for_stage` collected motion-row
+indices `(0, 1, backoff)` — written when the approach was believed to do the
+walking, before `ZombieStateAttackRun` was read. The states index `row[2]` and
+`row[3]` for the run, and the closing *is* that clip's root motion, so with no
+clip there is no movement. It now bakes 0, 1, 2, 3 and the back-away, and every
+class-0x30 type in stage 2 gains both variants with real forward translation:
+`char_adv00` −9.6 and −30.0, `znkage` −15.7 and −15.4, `znebi2` −11.8 and −14.6.
+
+**The port asked for an index, not a clip.** `row[MotionRow.Run] ?? row[Alt]`
+never fell through, because `row[2]` *is* a number — 272, 1022, 433 — it just
+had nothing baked behind it, and `ZombieSetMotionIfIdle` then refused it and
+left the actor on its idle. `FirstBakedOf` picks the first entry that actually
+resolves to a clip. That matters beyond this bug: a row entry can legitimately
+name a clip authored for **another skeleton**, which `_bake` rightly refuses.
+
+**The synthetic test passed throughout**, because its motion row was written by
+hand with a run clip in it. A headless test over invented data cannot catch a
+bundle that is missing something — so the guard belongs in the corpus verifier,
+and `verify_combat.py` now has it: every motion-row entry the ported states
+read must be baked *if it belongs to that character's skeleton*, an entry
+authored for another skeleton is reported rather than failed, and a type with
+nothing that closes is called out by name. Run against the old exporter it
+fails with **43 unbaked entries and 6 types that could never reach the player**.
+
+That is the shape of the lesson: the port test guards the state machine, the
+corpus verifier guards the data it runs on, and neither substitutes for the
+other.

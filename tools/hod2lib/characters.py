@@ -793,8 +793,15 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 reacts += [e["strike"], e["lunge"]]
         for hands in (c.throw or {}).get("hands", {}).values():
             reacts += [h["motion"] for h in hands]
+        # The whole row the five ported states reach: 0/1 the walk
+        # `ZombieStateApproach` and `ZombieStateHoldAtRange` play, **2/3 the
+        # run `ZombieStateAttackRun` plays**, and the back-away
+        # `ZombieStateBackOff` plays. Baking only 0, 1 and the back-away --
+        # which this did, from when the approach was believed to do the
+        # walking -- leaves the attack run with no clip, and since the closing
+        # is that clip's own root motion, the zombies never advanced.
         for row in c.motion_row.values():
-            reacts += [row[i] for i in (0, 1, MOTION_ROW_BACKOFF)
+            reacts += [row[i] for i in (0, 1, 2, 3, MOTION_ROW_BACKOFF)
                        if i < len(row) and 0 < row[i] < 4096]
         for mid in [motion, intro[0] if intro else None] + deaths + reacts:
             if mid is None or mid in c.motions:

@@ -22,6 +22,9 @@ import {
   Sprite, SpriteMaterial, Vector3,
 } from "three";
 import type { ActiveSpawn } from "../script/walker";
+import type { Actor } from "../game/actor";
+import { ZombieState } from "../game/class30/states";
+import { ThrowerState } from "../game/class31/states";
 import { G } from "../game/globals";
 import { g_class_handlers } from "../game/registry";
 import { SpawnClass } from "../game/spawn_class";
@@ -46,6 +49,20 @@ const AWAITED = 0x4dff8c;
  * flips a label twice a second, and a fresh `CanvasTexture` per flip is a leak.
  */
 const LABELS = new Map<string, CanvasTexture>();
+
+/** The descriptor offset, as it is written everywhere else in this project. */
+const hex = (at: number): string => `0x${at.toString(16).toUpperCase()}`;
+
+/** The state name, for the classes whose state table has been read. */
+function stateOf(a: Actor): string {
+  if (a.cls === SpawnClass.Zombie) {
+    return `${ZombieState[a.state] ?? a.state}/${a.sub}`;
+  }
+  if (a.cls === SpawnClass.Thrower) {
+    return `${ThrowerState[a.state] ?? a.state}/${a.sub}`;
+  }
+  return `state ${a.state}`;
+}
 
 /** A stand-in body for a spawn with nothing assembled: 1.6 wide, 3.6 tall. */
 const STAND_IN = new Vector3(1.6, 3.6, 1.6);
@@ -136,6 +153,29 @@ export class DebugBoxLayer {
     return false;
   }
 
+
+  /**
+   * A name you can say out loud: `block/step/n`, plus the descriptor offset.
+   *
+   * `at` is the evt file offset of the spawn descriptor, and it is the
+   * identity every layer of this project keys on — the walker, the exporter,
+   * the annotations and `G.g_object_list` all agree on it, so quoting it names
+   * an actor unambiguously all the way back to the binary. The block/step
+   * prefix is the readable half: it is where in the script the spawn happened,
+   * which is how the timeline is addressed everywhere else.
+   */
+  private labels(spawns: readonly ActiveSpawn[]): Map<number, string> {
+    const out = new Map<number, string>();
+    const seen = new Map<string, number>();
+    for (const s of spawns) {
+      const step = `${s.block}/${s.step}`;
+      const n = seen.get(step) ?? 0;
+      seen.set(step, n + 1);
+      out.set(s.at, `${step}/${n}`);
+    }
+    return out;
+  }
+
   /**
    * `spawns` is the walker's live list — the same one the markers use, so the
    * two can never disagree about who is present. `waiting` is true while the
@@ -149,13 +189,16 @@ export class DebugBoxLayer {
       return;
     }
 
+    const id = this.labels(spawns);
+
     if (this.showUnported) {
       for (const s of spawns) {
         if (g_class_handlers[s.class as SpawnClass] !== undefined) continue;
         const name = SpawnClass[s.class] ?? "unread class";
         this.fit(s.at, new Vector3(s.pos[0], s.pos[1], s.pos[2]));
         this.place(this.acquire(UNPORTED), this._mid, this._size,
-                   `0x${s.class.toString(16).toUpperCase()} ${name}`);
+                   `${id.get(s.at) ?? "?"} ${hex(s.at)} `
+                   + `0x${s.class.toString(16).toUpperCase()} ${name}`);
       }
     }
 
@@ -168,9 +211,11 @@ export class DebugBoxLayer {
         // called out whether or not anything is waiting on it.
         if (!holder && !waiting) continue;
         this.fit(a.at, new Vector3(a.pos.x, a.pos.y, a.pos.z));
+        const who = `${id.get(a.at) ?? "?"} ${hex(a.at)} ${a.name}`;
         this.place(this.acquire(holder ? PERMIT : AWAITED),
                    this._mid, this._size,
-                   holder ? `permit · ${a.name}` : a.name);
+                   holder ? `${who} · permit · ${stateOf(a)}`
+                          : `${who} · ${stateOf(a)}`);
       }
     }
 

@@ -64,6 +64,26 @@ export function AttackPicksOf(a: Actor): number[] {
   return t?.attack_picks?.[String(a.condition)] ?? t?.attack_picks?.["0"] ?? [];
 }
 
+/**
+ * The first entry of the row that is actually baked into this bundle.
+ *
+ * [diverges] The engine picks between the two variants with a flag bit —
+ * `row[2 + ((obj+0x34 >> 0x1B) & 1)]` for the run — and nothing ported sets
+ * it, so this takes whichever exists. It matters because a row entry can name
+ * a clip authored for **another skeleton**: `znchain`'s run is `zom.bin` 968,
+ * which bakes for the 16-bone humanoids and is refused for it. Asking for the
+ * first entry by index and getting a number that has no clip behind it is
+ * what left every zombie standing still.
+ */
+export function FirstBakedOf(a: Actor, row: number[],
+                             ...indices: number[]): number | undefined {
+  for (const i of indices) {
+    const m = row[i];
+    if (m !== undefined && MotionOf(a, m)) return m;
+  }
+  return undefined;
+}
+
 /** The general motion row: 0/1 walk, 2/3 attack run, `backoff_index` retreat. */
 export function MotionRowOf(a: Actor): number[] {
   const t = CharacterTypeOf(a);

@@ -97,6 +97,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from hod2lib.characters import MOTION_ROW_BACKOFF
 from hod2lib import characters as ch          # noqa: E402
 from hod2lib import stage as stagelib         # noqa: E402
 
@@ -390,6 +391,58 @@ def main() -> int:
     if nameless:
         fails.append(f"sound ids with no filename: {nameless}")
 
+    # 13 -----------------------------------------------------------------
+    # Every motion-row entry the ported states read must be baked *if it
+    # belongs to this character's skeleton*. The closing is the clip's own root
+    # motion, so a row entry naming a number with nothing behind it leaves the
+    # zombie standing still -- which is what shipped once, because the exporter
+    # baked rows 0, 1 and the back-away and not the run at 2/3.
+    #
+    # An entry authored for another skeleton is data, not a gap: `znchain`'s
+    # run is `zom.bin` 968, which `_bake` rightly refuses for it. Those are
+    # reported, with what it costs them, rather than failed.
+    ROW = {0: "walk", 1: "walk alt", 2: "run", 3: "run alt",
+           MOTION_ROW_BACKOFF: "back away"}
+    gaps: list[str] = []
+    foreign: list[str] = []
+    immobile: list[str] = []
+    checked = 0
+    for n in sorted(stagelib.STAGE_TO_SCENE):
+        try:
+            st = stagelib.Stage(args.game_dir, stage=n)
+            chars, places, _ = ch.resolve_for_stage(st)
+        except Exception:                                   # noqa: BLE001
+            continue
+        for ct in sorted({p.char_type for p in places
+                          if p.cls == 0x30 and p.motion is not None}):
+            c = chars.get(ct)
+            if c is None:
+                continue
+            checked += 1
+            row = c.motion_row.get(0) or []
+            for i, label in ROW.items():
+                if i >= len(row) or not 0 < row[i] < 4096:
+                    continue
+                if row[i] in c.motions:
+                    continue
+                if implied(row[i]) == c.bone_count:
+                    gaps.append(f"char {ct} ({c.name}) {label} {row[i]}")
+                else:
+                    foreign.append(f"{c.name}:{label}")
+            movers = [row[i] for i in (2, 3, 0, 1)
+                      if i < len(row) and row[i] in c.motions
+                      and abs(_net_z(c.motions[row[i]])) >= 1.0]
+            if not movers:
+                immobile.append(f"char {ct} ({c.name})")
+    print(f"  motion rows: {checked} class-0x30 types, {len(gaps)} unbaked "
+          f"entries of their own skeleton, {len(set(foreign))} authored for "
+          f"another, {len(set(immobile))} with nothing that closes")
+    for m in sorted(set(immobile)):
+        print(f"    never reaches the player: {m}")
+    if gaps:
+        fails.append(f"motion-row entries the states read but the exporter "
+                     f"did not bake: {sorted(set(gaps))[:6]}")
+
     if fails:
         print("\nFAIL")
         for f in fails:
@@ -397,6 +450,12 @@ def main() -> int:
         return 1
     print("\nclean")
     return 0
+
+
+def _net_z(m: dict) -> float:
+    """Root translation on z over the whole clip."""
+    r, n = m["root"], m["frames"]
+    return 0.0 if n < 2 else r[(n - 1) * 3 + 2] - r[2]
 
 
 if __name__ == "__main__":

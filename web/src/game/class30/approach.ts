@@ -11,7 +11,7 @@
  */
 import { ActorFlag, type Actor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
-import { MotionRowOf } from "../tables";
+import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
@@ -29,7 +29,8 @@ export function ZombieStateApproach(obj: Actor, eye: Vec3): void {
   // `row[(obj+0x136C >> 0x15) & 1]` -- the two walk variants. Bit 0x200000 is
   // set by `ZombieStateAttackRun` from a random table when an actor drops out
   // of the queue, and it is not otherwise read here, so the port takes row 0.
-  ZombieSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.Walk]);
+  ZombieSetMotionIfIdle(obj,
+    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt));
 
   if (obj.rank < obj.allowance && obj.rank < QUEUE_CAP
       && TryClaimAttackSlot(obj)) {

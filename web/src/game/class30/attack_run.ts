@@ -12,7 +12,7 @@
  */
 import type { Actor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
-import { MotionRowOf } from "../tables";
+import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ActorAbortAttackAndLeave } from "./leave";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
@@ -21,9 +21,12 @@ import { MotionRow, ZombieState } from "./states";
 
 export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number): void {
   const row = MotionRowOf(obj);
-  // `row[2 + ((obj+0x34 >> 0x1B) & 1)]`. Bit 0x8000000 is the variant select
-  // and nothing in the ported path sets it, so this takes the first.
-  ZombieSetMotionIfIdle(obj, row[MotionRow.Run] ?? row[MotionRow.RunAlt]);
+  // `row[2 + ((obj+0x34 >> 0x1B) & 1)]`, taking whichever variant this bundle
+  // actually carries -- and falling back to the walk for a skeleton that has
+  // no run clip of its own, which is `znchain` and the two `znebi`.
+  ZombieSetMotionIfIdle(obj, FirstBakedOf(obj, row, MotionRow.Run,
+                                          MotionRow.RunAlt, MotionRow.Walk,
+                                          MotionRow.WalkAlt));
 
   if (TestApproachRing(obj, eye) === 1) {
     obj.state = ZombieState.HoldAtRange;

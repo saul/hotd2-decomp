@@ -22,7 +22,7 @@
 import type { Actor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { TryClaimAttackSlot } from "../combat/permits";
-import { CharacterTypeOf, MotionRowOf } from "../tables";
+import { CharacterTypeOf, FirstBakedOf, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius, TestApproachRing } from "./ring";
@@ -60,6 +60,7 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3): void {
 
   // Waiting its turn: the idle from the motion row, and a slow turn to keep
   // facing you.
-  ZombieSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.Walk]);
+  ZombieSetMotionIfIdle(obj,
+    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt));
   TurnActorTowardCameraEye(obj, eye, HOLD_TURN_RATE);
 }

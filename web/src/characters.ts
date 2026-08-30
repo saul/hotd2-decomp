@@ -109,6 +109,12 @@ interface Instance {
    * doing something invented.
    */
   death: { motion: number; t: number } | null;
+  /**
+   * The stumble — `ActorPlayHitReaction`'s one-shot on the actor's **second**
+   * motion track, while the walk keeps running on the first. `hard` is the
+   * bone >= 9 case, which `ActorSetMotion` snaps in with no cross-fade.
+   */
+  react: { motion: number; t: number; blend: number; hard: boolean } | null;
   /** Damaged parts currently swapped in, so a second hit can replace them. */
   gore: Map<number, Object3D>;
   /**
@@ -223,7 +229,7 @@ export class CharacterLayer {
                             latched: new Set<number>(),
                             removed: new Set<number>(),
                             hits: new Map(), dead: false, yaw: p?.yaw ?? 0,
-                            death: null, gore: new Map() });
+                            death: null, react: null, gore: new Map() });
       this.posed.add(at);
       node.visible = false;
     }
@@ -261,7 +267,12 @@ export class CharacterLayer {
       inst.root.visible = show;
       if (!show) continue;
       if (inst.death) inst.death.t += dt;
-      else inst.clock += dt;
+      else {
+        inst.clock += dt;
+        // The reaction runs on its own track; the loop underneath keeps going,
+        // which is what makes the cross-fade back land in the right place.
+        if (inst.react) inst.react.t += dt;
+      }
       this.pose(inst);
     }
   }
@@ -299,7 +310,60 @@ export class CharacterLayer {
     }
     if (!m || m.frames <= 0) return;
     f = Math.floor(inst.clock * m.fps) % m.frames;
+
+    // The stumble, cross-faded over the loop. `ActorPlayHitReaction` starts it
+    // on track 1 with a fade length of 10 frames, or 20 when the hit severed
+    // something; a hit at bone 9 or above skips the fade entirely. Fading back
+    // out over the same length at the end is `[likely]` — the fade *in* is
+    // what `FUN_00411B70` states.
+    if (inst.react) {
+      const rm = inst.type.motions[String(inst.react.motion)];
+      const rf = rm ? inst.react.t * rm.fps : 0;
+      if (!rm || rf >= rm.frames) {
+        inst.react = null;
+      } else {
+        const b = inst.react.hard ? 0 : inst.react.blend;
+        const w = b <= 0 ? 1
+          : Math.min(1, Math.min(rf, rm.frames - rf) / b);
+        this.applyBlend(inst, m, f, rm, Math.floor(rf), w);
+        return;
+      }
+    }
     this.apply(inst, m, f);
+  }
+
+  /**
+   * Pose from two motions at once: *w* is how much of *mB* to take.
+   *
+   * The engine blends by holding two motion tracks in one block and fading
+   * between them (`FUN_004119F0`'s track argument is 1 for the reaction, 0 for
+   * the loop). Slerping the bone quaternions is the same operation stated in
+   * the units this client already works in.
+   */
+  private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
+                     mB: BakedMotion, fB: number, w: number): void {
+    const ra = fA * 3;
+    const rb = fB * 3;
+    inst.pivot.position.set(
+      mA.root[ra] + (mB.root[rb] - mA.root[ra]) * w,
+      mA.root[ra + 1] + (mB.root[rb + 1] - mA.root[ra + 1]) * w,
+      mA.root[ra + 2] + (mB.root[rb + 2] - mA.root[ra + 2]) * w);
+
+    const n = inst.type.bone_count;
+    const ba = fA * n * 3;
+    const bb = fB * n * 3;
+    inst.pivot.quaternion
+      .copy(this.bams(mA.rot[ba], mA.rot[ba + 1], mA.rot[ba + 2]))
+      .slerp(this.bams(mB.rot[bb], mB.rot[bb + 1], mB.rot[bb + 2]), w);
+
+    for (const [bone, node] of inst.bones) {
+      const oa = ba + bone * 3;
+      const ob = bb + bone * 3;
+      if (oa + 2 >= mA.rot.length || ob + 2 >= mB.rot.length) continue;
+      node.quaternion
+        .copy(this.bams(mA.rot[oa], mA.rot[oa + 1], mA.rot[oa + 2]))
+        .slerp(this.bams(mB.rot[ob], mB.rot[ob + 1], mB.rot[ob + 2]), w);
+    }
   }
 
   private apply(inst: Instance, m: BakedMotion, f: number): void {
@@ -478,6 +542,11 @@ export class CharacterLayer {
     // A hit on something already dead scores nothing and cannot kill twice.
     if (wasDead && result === 2) result = 0;
 
+    // `ZombieOnShot` only reacts while the actor is alive; the death takes
+    // over otherwise.
+    const survived = !wasDead && inst.hp >= 1;
+    if (survived) this.startReaction(inst, bone, result);
+
     let death: number | undefined;
     const killed = !wasDead && inst.hp < 1 && result !== 5;
     if (killed) {
@@ -495,6 +564,47 @@ export class CharacterLayer {
     }
     return { damage, killed, head, hp: Math.max(0, inst.hp), gore, severed,
              result, death };
+  }
+
+  /**
+   * `ActorReactToHit` -> `ActorPlayHitReaction`: the stumble.
+   *
+   * Which clip is a two-level lookup — the actor's **body condition**
+   * (`obj+0x130C`) picks a row, and the **reaction group** of the bone that was
+   * hit picks the motion within it. `DAT_004C84A8` maps the bone to one of
+   * eight groups and they partition the body exactly as you would draw it:
+   * head, torso, each arm, pelvis, each leg. For the common zombie that is
+   * motions 977, 982, 981, 979, 974, 961, 960 — all 29 frames except the legs
+   * at 39, so a leg shot staggers for longer.
+   *
+   * `ActorReactToHit` does **not** run it for every hit. Results 1 (damaged
+   * and swapped) and 3 (severed) always react; results 2 and 5 react only for
+   * character types 3 and 0x12. So a shot that merely takes hit points off a
+   * zombie's pelvis does not interrupt its walk.
+   *
+   * Body condition is held at 0 here. `FUN_00454270` derives it from which
+   * parts are gone, but through `obj+0x4DC` / `obj+0x68C`, whose meaning is
+   * `[open]`. It only changes the answer at condition 3, and for every
+   * character in the player's stages conditions 0, 1, 2 and 4 share one row.
+   */
+  private startReaction(inst: Instance, bone: number, result: number): void {
+    if (bone <= 0) return;
+    const ct = inst.type.type;
+    const reacts = result === 1 || result === 3
+      || ((result === 2 || result === 5) && (ct === 3 || ct === 0x12));
+    if (!reacts) return;
+    const group = this.json?.reaction_groups?.[bone];
+    if (group === undefined) return;
+    const motion = inst.type.reactions?.["0"]?.[group];
+    if (!motion || !inst.type.motions[String(motion)]) return;
+    const b = this.json?.reaction_blend;
+    inst.react = {
+      motion,
+      t: 0,
+      blend: result === 3 ? (b?.sever ?? 20) : (b?.frames ?? 10),
+      // `ActorSetMotion` hard-sets the leg reactions: no cross-fade.
+      hard: bone >= (b?.hard_set_from_bone ?? 9),
+    };
   }
 
   /**
@@ -624,6 +734,7 @@ export class CharacterLayer {
     for (const i of this.instances) {
       i.dead = false;
       i.death = null;
+      i.react = null;
       i.hits.clear();
       i.latched.clear();
       for (const bone of i.removed) {
@@ -666,6 +777,7 @@ export class CharacterLayer {
       if (!i.root.visible || i.dead) continue;
       i.hp = 0;
       i.dead = true;
+      i.react = null;
       const death = this.chooseDeath(i, cameraYawBams);
       if (death !== undefined && i.type.motions[String(death)]) {
         i.death = { motion: death, t: 0 };

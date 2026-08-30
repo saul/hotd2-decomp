@@ -186,3 +186,7 @@
 009a58f8	g_hit_result	int[2], per player, written by ResolveHit: 0 = nothing, 1 = damaged and part swapped, 2 = damaged only, 3 = severed, 5 = no effect (the effect table's `2` sentinel). Result 5 scores nothing.
 009a5c82	g_head_combo_bonus	+player*0x98. Added to the 120-point headshot award and then incremented by 10, so consecutive headshots pay 120, 130, 140 ...; any non-head hit zeroes it.
 009a5c86	g_player_hit_count	+player*0x98. Hits that scored, for the end-of-stage accuracy grade evt 0x2B reads.
+004c84a8	g_bone_reaction_group	u16[16], bone -> hit-reaction group. Eight groups partitioning the body: 1 head, 2 torso, 3 right arm (bones 3-5), 4 left arm (6-8), 5 pelvis (9), 6 right leg (10-12), 7 left leg (13-15).
+00577674	g_hit_voice_table	15 sound ids for ActorPlayHitVoice: five flesh impacts (BLOOD02/03/04/06, BONE01), then hurt/kill/head voices as (set A, set B) pairs, then two two-entry pools.
+00592cbc	g_pHitReactionMotionsAlt	Per character type -> per body condition -> a row whose entries at +0x10 are indexed by the last-hit zone (obj+0x1319). Taken only when obj+0x136C & 0x100, which is [open].
+00592fc8	g_pHitReactionMotions	Per character type -> per body condition (obj+0x130C) -> u32[8] motion ids indexed by g_bone_reaction_group. Only two distinct rows exist for the humanoids: the ordinary one is head 977, torso 982, r.arm 981, l.arm 979, pelvis 974, r.leg 961, l.leg 960.

@@ -322,8 +322,12 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       `g_difficulty` scales starting hit points, `g_damage_rank` (adaptive,
       0..15) scales per-hit damage. Sounds are two switch statements, and the
       filenames they resolve to are what name the collision materials: sand,
-      metal, other, water, wood. `tools/verify_combat.py` checks all of it
-      across 86 character types and 2810 spawn/difficulty pairs. See
+      metal, other, water, wood. The **stumble** is a two-level table indexed
+      by body condition and by the bone's *reaction group* -- eight groups
+      partitioning the body into head, torso, each arm, pelvis and each leg --
+      played on a second motion track cross-faded over the walk.
+      `tools/verify_combat.py` checks all of it across 86 character types and
+      2810 spawn/difficulty pairs. See
       [`formats/combat.md`](formats/combat.md).
 - [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
       the only place this binary names anything. `ExeTables.sound_records()`.

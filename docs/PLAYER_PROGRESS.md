@@ -337,6 +337,15 @@ spawn that has a real character so the two never draw on top of each other.
   draw slot of **every bone below** the severed one, recursively, and a zero
   draw slot is unshootable as well as invisible. Severing bone 3 takes 4 and 5;
   a fatal torso hit severs bone 1 and takes the head and both arms.
+* **Getting shot makes them stumble.** `ActorPlayHitReaction` picks the clip
+  from a two-level table: the actor's body condition, then the **reaction
+  group** of the bone hit — `DAT_004C84A8` maps the bones to head, torso, each
+  arm, pelvis, each leg. For the common zombie that is motions 977/982/981/
+  979/974 at 29 frames and 961/960 at 39, so a leg shot staggers for longer.
+  It plays on a **second motion track** cross-faded over the walk, 10 frames or
+  20 when the hit severed something, and bones 9 and up snap in with no fade at
+  all. Only results 1 and 3 interrupt: a plain body hit on a zombie does not
+  break its stride, which is why they keep coming.
 * **Sounds are the game's own tables.** A ricochet per surface material
   (`BULLET_SND/MET/OTH/WAT/WOD`), one of five flesh impacts plus a two-set
   zombie voice on a hit, `BULLET_MET3` when the shot has no effect. The impact

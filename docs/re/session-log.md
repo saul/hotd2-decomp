@@ -3769,3 +3769,75 @@ nothing.
   and the GUI holds the project lock — so the annotations files really are the
   only durable place for a name. They are, and `verify_annotations.py` is clean
   at 252 functions and 166 globals.
+
+---
+
+## The stumble
+
+Asked whether a shot zombie plays a hit reaction. It does, and the routing was
+already half-read — `ZombieOnShot` calls `FUN_004543F0` on the surviving path
+and I had labelled that "hit reaction motion" and moved on. Reading it took two
+functions.
+
+`ActorReactToHit` decides **whether** the hit interrupts, and the answer is
+often no. Results 1 (damaged and swapped) and 3 (severed) always react; results
+2 and 5 react only for character types 3 and 0x12. An ordinary zombie's pelvis
+has no gore slot at all, so a pelvis shot always resolves as result 2 and
+**never breaks its stride** — which is a satisfying explanation for something
+anyone who has played the game has noticed.
+
+`ActorPlayHitReaction` picks **which** clip, from two indices: the actor's body
+condition (`obj+0x130C`) and the bone's *reaction group*. `DAT_004C84A8` is
+`u16[16]` and partitions the body into eight groups — head, torso, right arm,
+left arm, pelvis, right leg, left leg — which is the same partition as the
+destroyed-zone mask but finer, and it is the first table in this binary that
+names left and right separately.
+
+Bones 1–8 cross-fade in over 10 frames (20 if the hit severed something) onto
+**track 1** of the actor's motion block while the walk keeps running on track
+0; bones 9 and up are hard-set with no fade. That asymmetry is in the code, not
+inferred: `if (bone < 9 && ...) MotionCrossFadeTo(...) else ActorSetMotion(...)`.
+
+### Reading pointer arrays that have no count
+
+The variant arrays sit end to end in `.rdata` with nothing marking their
+lengths, and the first pass read a fixed six entries per character. That
+reported `char_adv02` as having a distinct reaction set at variant 3 *and* a
+sixth variant — the sixth was the next character's array. Bounding by "the next
+array pointer in the same table" fixed most of it and then failed twice more:
+the **last** array butts straight up against the pointer table itself, and one
+character's entry pointed somewhere else entirely, producing a thousand-entry
+array of garbage. The rule that holds is that these arrays are packed
+immediately before the table that points at them, so an entry outside that
+block is not a variant array at all. With both bounds the table reads as 21
+character types, no junk rows, and exactly two distinct motion sets.
+
+Worth writing down as a shape: **a pointer table whose targets are adjacent
+variable-length arrays bounds itself**, and the last element's bound is the
+table.
+
+### Checking it is a stumble and not something else
+
+Three measurements, none of them "the numbers look plausible":
+
+* every reaction is 29–43 frames and every death is 74–161, two disjoint
+  ranges, now asserted;
+* summing the unwrapped per-bone rotation over each clip, the reactions travel
+  326–377° against the walk's 137° over twice the frames;
+* every clip's last frame equals its first on every bone, which is what a
+  one-shot laid over a loop must do to hand back cleanly.
+
+That last one also explains a confusing render: frames 0 and 26 of motion 961
+came out pixel-identical and looked like the exporter was ignoring `--frame`.
+It was not — the clip is 21 frames, 26 clamped to the end, and the end is the
+start. Rendering the *most displaced* frame instead (computed, not guessed)
+gives the recoil: `extract/compare/sever/react_torso_f2.png` against the walk
+baseline in `intact.png`.
+
+### A loose end tied off
+
+`ActorUpdateBodyCondition` sets `obj+0x130C = 5` when both arm zones are gone —
+reading `obj+0x1318`, the mask `RemoveBoneSubtree` writes — and
+`ChooseDeathMotion` gives condition 5 its own death. So the destroyed-zone mask
+*does* reach the death animation, just not through `obj+0x1368`, which remains
+open question 21.

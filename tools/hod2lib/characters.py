@@ -170,6 +170,35 @@ INITIAL_DAMAGE_RANK = 0x005679F4
 #: the player uses because it has no adaptive-difficulty state to track.
 DEFAULT_DIFFICULTY = 2
 
+#: `PTR_PTR_00592FC8[char_type]` -> ``motion*[variant][group]``: the **stumble**
+#: an actor plays when a shot hurts it but does not kill it. Read from
+#: `ActorPlayHitReaction` (`FUN_004544C0`), which indexes it by the actor's
+#: body condition (``obj+0x130C``) and then by the reaction *group* of the bone
+#: that was hit.
+HIT_REACT_TABLE = 0x00592FC8
+#: The alternate table the same routine uses when ``obj+0x136C & 0x100`` is
+#: set. Its rows are indexed ``+0x10 + zone*4`` by the last-hit zone at
+#: ``obj+0x1319`` (0 none, 1 torso, 2 head), not by the reaction group. What
+#: sets that flag is `[open]`, so the player does not take this path.
+HIT_REACT_ALT_TABLE = 0x00592CBC
+#: `DAT_004C84A8`: ``u16[16]``, bone -> reaction group. Eight groups, and they
+#: partition the body exactly the way you would draw it:
+#: 1 head, 2 torso, 3 right arm, 4 left arm, 5 pelvis, 6 right leg, 7 left leg.
+REACT_GROUP = 0x004C84A8
+#: Groups in a reaction row.
+REACT_GROUPS = 8
+#: How far before a pointer table its variant arrays are packed. They are
+#: contiguous with it, so this only has to be generous, not exact.
+ARRAY_BLOCK = 0x1000
+#: `ActorPlayHitReaction` cross-fades over this many frames, +1, into the
+#: actor's second motion track -- 20 when the hit severed something
+#: (``obj+0x1364 == 3``) and 10 otherwise. Bones **9 and above** skip the
+#: fade entirely: `ActorSetMotion` hard-sets the leg reaction.
+REACT_BLEND = 10
+REACT_BLEND_SEVER = 20
+#: The bone below which the reaction is cross-faded rather than hard-set.
+REACT_BLEND_MAX_BONE = 9
+
 #: `DAT_00577674`: the sound ids `ActorPlayHitVoice` (`FUN_0040A6F0`) picks
 #: from. Fifteen dwords -- five flesh impacts, then six voice ids in
 #: ``(set A, set B)`` pairs, then two two-entry pools. Read as ids and resolved
@@ -313,6 +342,9 @@ class Character:
     gore: dict = field(default_factory=dict)
     #: `ResolveHit`'s torso stage count -- see :func:`torso_stage_count`.
     torso_stages: int = 0
+    #: ``{body_condition: [motion per reaction group]}`` -- see
+    #: :func:`hit_reactions`.
+    reactions: dict = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {
@@ -328,6 +360,7 @@ class Character:
             # the client.
             "head_bone": 2,
             "torso_stages": self.torso_stages,
+            "reactions": {str(k): v for k, v in self.reactions.items()},
             "motions": {str(k): v for k, v in self.motions.items()},
         }
 
@@ -526,7 +559,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         deaths = (list(dset["front"]) + list(dset["back"])
                   + [dset["right"], dset["left"]]
                   if c.bone_count == 16 else [])
-        for mid in [motion, intro[0] if intro else None] + deaths:
+        # The stumble set, same reasoning as the deaths: authored for the
+        # 16-bone humanoid skeleton, so baked only for those.
+        reacts = sorted({m for row in c.reactions.values() for m in row}) \
+            if c.bone_count == 16 else []
+        for mid in [motion, intro[0] if intro else None] + deaths + reacts:
             if mid is None or mid in c.motions:
                 continue
             baked = _bake(stage.game, tables, mid, c.bone_count)
@@ -714,6 +751,66 @@ def bone_zones(tables) -> list[int]:
     return list(struct.unpack_from("<16B", tables.data, o))
 
 
+def _bounded_ptr_array(tables, base: int, char_type: int) -> list[int]:
+    """The variant array for *char_type*, bounded by the next array's start.
+
+    These arrays sit end to end with no count, so reading a fixed number of
+    entries walks into the neighbour's -- which is exactly how a first pass at
+    this reported a reaction set that belonged to another character.
+
+    Two things bound it. The arrays are packed **immediately before the
+    pointer table**, so an entry that does not point into that block is not a
+    variant array at all and is rejected; and an array that is a variant array
+    ends where the next one begins, or where the pointer table itself does,
+    because the last one butts straight up against it.
+    """
+    b = tables._v2r(base)
+    if b is None:
+        return []
+    lo = base - ARRAY_BLOCK
+    tops: set[int] = set()
+    for ct in range(160):
+        v = struct.unpack_from("<I", tables.data, b + ct * 4)[0]
+        if lo <= v < base and tables._v2r(v) is not None:
+            tops.add(v)
+    p = struct.unpack_from("<I", tables.data, b + char_type * 4)[0]
+    if p not in tops:
+        return []
+    after = sorted(v for v in tops if v > p)
+    end = after[0] if after else base
+    o = tables._v2r(p)
+    return list(struct.unpack_from(f"<{(end - p) // 4}I", tables.data, o))
+
+
+def reaction_groups(tables) -> list[int]:
+    """:data:`REACT_GROUP` -- bone to reaction group."""
+    o = tables._v2r(REACT_GROUP)
+    return list(struct.unpack_from("<16H", tables.data, o)) if o else []
+
+
+def hit_reactions(tables, char_type: int) -> dict[int, list[int]]:
+    """``{body_condition: [motion per reaction group]}`` for one character.
+
+    Only two distinct rows exist for the humanoids. The ordinary one is::
+
+        head 977   torso 982   r.arm 981   l.arm 979
+        pelvis 974   r.leg 961   l.leg 960
+
+    all 29 frames except the legs at 39 -- short one-shots, and plainly not
+    the deaths, which run 74 to 161. The second row (motions 257-263, 43
+    frames) is reached only at body condition 3.
+    """
+    out: dict[int, list[int]] = {}
+    for variant, row in enumerate(_bounded_ptr_array(tables, HIT_REACT_TABLE,
+                                                     char_type)):
+        o = tables._v2r(row)
+        if o is None or o + REACT_GROUPS * 4 > len(tables.data):
+            continue
+        out[variant] = list(struct.unpack_from(f"<{REACT_GROUPS}I",
+                                               tables.data, o))
+    return out
+
+
 def combat_tables(tables) -> dict:
     """Every sound and sprite a shot can produce, with the names resolved.
 
@@ -869,7 +966,8 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      bones=bones,
                      extras=extra_parts(tables, char_type),
                      gore=gore_parts(tables, char_type),
-                     torso_stages=torso_stage_count(tables, char_type))
+                     torso_stages=torso_stage_count(tables, char_type),
+                     reactions=hit_reactions(tables, char_type))
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],
@@ -1007,6 +1105,9 @@ def characters_json(chars: dict[int, Character],
         "deaths": death_motions(tables) if tables is not None else {},
         "difficulty": difficulty_tables(tables) if tables is not None else {},
         "combat": combat_tables(tables) if tables is not None else {},
+        "reaction_groups": reaction_groups(tables) if tables is not None else [],
+        "reaction_blend": {"frames": REACT_BLEND, "sever": REACT_BLEND_SEVER,
+                           "hard_set_from_bone": REACT_BLEND_MAX_BONE},
         "bone_zones": bone_zones(tables) if tables is not None else [],
         "types": {str(ct): c.to_json() for ct, c in sorted(chars.items())},
         "placements": [p.to_json() for p in placements],

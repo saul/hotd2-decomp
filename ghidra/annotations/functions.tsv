@@ -266,3 +266,16 @@
 0040a8a0	GetDamageRank	Returns g_damage_rank, the 0..15 adaptive rank DamageRankModifier indexes. NOT g_difficulty.
 00460770	ResetDamageRank	Seeds g_damage_rank from g_initial_damage_rank[difficulty] when a game starts; forces difficulty 2 when FUN_00413280 is nonzero.
 004607b0	UpdateDamageRank	Adaptive difficulty. Re-derives g_damage_rank from lives lost since the last update and elapsed time (0x708 ticks per step), clamped to [0,15].
+004119f0	MotionStartOnTrack	Start a motion on one of the actor's two motion tracks; the track index is the last argument (0 the looping motion, 1 the one-shot the hit reaction uses).
+00411b20	MotionCrossFadeAlt	MotionCrossFadeTo with a different flag pair (block+0x38 |= 9); used by the alternate hit reaction indexed by the last-hit zone.
+00411b70	MotionCrossFadeTo	Start a motion on track 1 cross-fading from what is playing. block+0x33 = fade + 1 -- ActorPlayHitReaction passes 20 when the hit severed something and 10 otherwise.
+00407230	DrawBloodSpray	The blood flipbook: AssetDrawSlot(frame + 0x3A) for 25 frames at the hit bone, in view space, scaled (-view_z*0.0375 + 0.25) * 0.3 * severity.
+00407310	SpawnBloodSpray	Spawn the blood flipbook at a bone. Arg 3 is the severity scale ActorShotFeedback picks: 0.5 damaged, 0.75 damaged and swapped, 1.0 severed.
+00407950	PlayImpactSoundForMaterial	Collision material -> ricochet sound. The filenames it resolves to are what name the materials: 1 sand, 2 metal, 3 other, 5 water, 6 wood.
+00405260	SpawnWorldImpact	A shot that hit the world: takes the surface material from the collision hit record (+0x30) and spawns the matching sprite and sound.
+0040a6f0	ActorPlayHitVoice	Two sounds per event: a flesh impact from DAT_00577674[0..4] and a voice from one of two sets, chosen by character type. Kind 0 hurt, 1 killed, 2 headshot kill.
+00453eb0	ZombieOnShot	The zombie's shot reaction: DispatchHit, then per player ActorShotFeedback and either ActorReactToHit (alive) or the death voice and state 6 (dead).
+00454050	ActorShotFeedback	Draws the hit: blood at the bone scaled by g_hit_result, or -- on result 5 -- an impact sprite and a metal ricochet, because the shot did nothing.
+00454270	ActorUpdateBodyCondition	Derives obj+0x130C, the body condition, from which parts are gone. Both arm zones destroyed (obj+0x1318 bits 1 and 2) gives condition 5, which ChooseDeathMotion reads.
+004543f0	ActorReactToHit	Records the last-hit zone in obj+0x1319 (1 torso, 2 head) and decides whether the hit interrupts what the actor is doing. Results 1 and 3 always react; 2 and 5 only for character types 3 and 0x12.
+004544c0	ActorPlayHitReaction	The stumble. g_pHitReactionMotions[char][obj+0x130C][g_bone_reaction_group[bone]] cross-faded onto track 1 -- or hard-set with no fade when the bone is 9 or above, the pelvis and legs.

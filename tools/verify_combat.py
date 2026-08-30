@@ -26,7 +26,14 @@ byte. The readings under test are the ones docs/formats/combat.md states:
 5. **Hit points stay in range.** `ActorInitHitPoints` clamps to ``[1, 300]``
    on every difficulty, for every spawn in every stage.
 
-6. **Every sound id names a file.** The voice, impact and ricochet tables are
+6. **The stumble set is a stumble set.** Every reaction motion resolves to a
+   `g_motion_play_length` entry, every reaction row has all eight groups
+   filled, and **every reaction is shorter than every death** -- 29 to 43
+   frames against 74 to 161. A misread table would not land on that side of
+   the line by accident. The bone-to-group map is also checked to partition
+   bones 1..15 into the seven named regions and nothing else.
+
+7. **Every sound id names a file.** The voice, impact and ricochet tables are
    read as `g_se_name_list` ids; a table read at the wrong address would give
    ids that resolve to nothing, so this fails loudly if the address is wrong.
 
@@ -155,6 +162,40 @@ def main() -> int:
           f"[{diff['hp_min']}, {diff['hp_max']}]")
 
     # 6 ------------------------------------------------------------------
+    groups = ch.reaction_groups(tables)
+    want = [0, 2, 1, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6, 7, 7, 7]
+    if groups != want:
+        fails.append(f"bone-to-reaction-group map is {groups}, not {want}")
+    o = tables._v2r(0x004E07D0)
+    play = lambda m: struct.unpack_from("<h", tables.data, o + m * 2)[0]
+    dset = ch.death_motions(tables)
+    deaths = list(dset["front"]) + list(dset["back"]) + [dset["right"],
+                                                         dset["left"]]
+    shortest_death = min(play(m) for m in deaths)
+    react_motions: set[int] = set()
+    n_types = 0
+    for ct in types:
+        rows = ch.hit_reactions(tables, ct)
+        if not rows:
+            continue
+        n_types += 1
+        for variant, row in rows.items():
+            if len(row) != ch.REACT_GROUPS or not all(row):
+                fails.append(f"type {ct} condition {variant} row is {row}")
+                continue
+            react_motions.update(row)
+    longest_react = max(play(m) for m in react_motions) if react_motions else 0
+    print(f"  {n_types} types have a stumble set, {len(react_motions)} distinct "
+          f"motions, longest {longest_react} frames vs the shortest death at "
+          f"{shortest_death}")
+    if longest_react >= shortest_death:
+        fails.append(f"a reaction ({longest_react}) is not shorter than the "
+                     f"shortest death ({shortest_death})")
+    for m in sorted(react_motions):
+        if not (1 <= play(m) <= 120):
+            fails.append(f"reaction motion {m} has play length {play(m)}")
+
+    # 7 ------------------------------------------------------------------
     se = tables.se_names()
     combat = ch.combat_tables(tables)
     ids = [s["id"] for s in combat["impact"] + combat["head_impact"]]

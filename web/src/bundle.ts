@@ -270,6 +270,12 @@ export interface CharacterType {
   bones: CharacterBone[];
   /** Bone the score model treats as the head — 2 on every humanoid. */
   head_bone: number;
+  /**
+   * `{body_condition: [motion per reaction group]}` — the stumble the actor
+   * plays when a shot hurts it but does not kill it. See
+   * docs/formats/combat.md §7.
+   */
+  reactions: Record<string, number[]>;
   /** Damaged variants, keyed by asset slot: their own hit spheres. */
   gore: Record<string, { centre: [number, number, number]; radius: number }>;
   /**
@@ -352,6 +358,10 @@ export interface CharactersJson {
   combat: CombatJson;
   /** `g_bone_damage_zone` — bone → destroyed-zone bit, 0xFF for none. */
   bone_zones: number[];
+  /** `DAT_004C84A8` — bone → reaction group: head, torso, each limb. */
+  reaction_groups: number[];
+  /** `ActorPlayHitReaction`'s cross-fade lengths, in frames. */
+  reaction_blend: { frames: number; sever: number; hard_set_from_bone: number };
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
   note: string;

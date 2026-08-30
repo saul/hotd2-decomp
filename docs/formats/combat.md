@@ -367,7 +367,122 @@ different field 0x50 bytes earlier. What sets `obj+0x1368`'s bits 3, 4, 6 and 7
 is `[open]`, so these four are not implemented and a character whose arm has
 come off still plays a directional death.
 
-## 7. The gore swap — `FUN_004099A0`
+## 7. Reacting — the stumble
+
+A shot that hurts a zombie without killing it makes it **flinch**, and which
+flinch is a two-level table. `ZombieOnShot` (`FUN_00453EB0`) is the routing:
+
+```c
+if (obj->flags & 8) {                       /* was shot this frame */
+    DispatchHit();                          /* -> ResolveHit, sets g_hit_result */
+    for each player that hit:
+        ActorShotFeedback(player);          /* the blood or the ricochet */
+        if (!(obj->flags & 0x4000000)) {    /* still alive */
+            ActorReactToHit(player);        /* <- the stumble */
+            if (g_hit_result[player] != 5) ActorPlayHitVoice(obj, 0);
+        } else {
+            ActorPlayHitVoice(obj, bone == 2 ? 2 : 1);
+            state = 6;                      /* the death */
+        }
+}
+```
+
+### Which hits interrupt — `ActorReactToHit`
+
+Not all of them. `FUN_004543F0` first records the **last-hit zone** in
+`obj+0x1319` — 2 for the head, 1 for the torso, otherwise left alone — and then
+decides:
+
+| `g_hit_result` | Reacts? |
+|---|---|
+| 1 damaged and swapped | **yes** |
+| 3 severed | **yes** |
+| 4 | `FUN_0045D9F0` instead, for bones 1 and 9 |
+| 2 damaged only | only character types 3 and 0x12 |
+| 5 no effect | only character types 3 and 0x12 |
+
+So a shot that merely takes hit points off an ordinary zombie's pelvis — which
+has no gore slot at all, so it always resolves as result 2 — does **not**
+interrupt its walk. That is why a zombie can be shot repeatedly in the body and
+keep coming.
+
+### Which clip — `ActorPlayHitReaction`
+
+```c
+motion = g_pHitReactionMotions[char_type][obj+0x130C][g_bone_reaction_group[bone]];
+
+if (bone < 9 && !(obj+0x136C & 0x800)) {
+    MotionCrossFadeTo(obj+0x194, 1, motion, 0, 1,
+                      (obj+0x1364 == 3) ? 20 : 10);     /* result 3 = severed */
+} else {
+    ActorSetMotion(obj+0x194, motion);                  /* legs: no fade */
+}
+```
+
+Two indices. `obj+0x130C` is the actor's **body condition**;
+`g_bone_reaction_group` (`DAT_004C84A8`, `u16[16]`) turns the bone into one of
+eight **reaction groups**, and they partition the body exactly as you would
+draw it:
+
+| Group | Bones | Region |
+|---|---|---|
+| 1 | 2 | head |
+| 2 | 1 | torso |
+| 3 | 3, 4, 5 | right arm |
+| 4 | 6, 7, 8 | left arm |
+| 5 | 9 | pelvis |
+| 6 | 10, 11, 12 | right leg |
+| 7 | 13, 14, 15 | left leg |
+
+Only **two distinct rows** exist for the humanoids. The ordinary one:
+
+| Region | Motion | Frames |
+|---|---|---|
+| head | 977 | 29 |
+| torso | 982 | 29 |
+| right arm | 981 | 29 |
+| left arm | 979 | 29 |
+| pelvis | 974 | 29 |
+| right leg | 961 | **39** |
+| left leg | 960 | **39** |
+
+The second (motions 257–263, 43 frames) is reached only at body condition 3.
+Twenty-one character types have a stumble set; the cat has none, which is
+consistent with everything else about it.
+
+Three independent things say these are stumbles rather than something else
+mistaken for them, and none of them is "the numbers look right":
+
+* **Length.** Every reaction is 29–43 frames; every death is 74–161. The two
+  sets do not overlap, and `verify_combat.py` asserts they never will.
+* **Violence.** Summing the unwrapped per-bone rotation across each clip, the
+  reactions travel 326–377° against the walk's 137° over twice as many frames.
+  A flinch is a lurch and a recovery; a walk is not.
+* **They return.** Every clip's last frame is bit-identical to its first on
+  every bone, so a reaction hands back to the walk without a pop — which is
+  what a one-shot laid over a loop has to do.
+
+The **legs are hard-set**: bone 9 and above skip the cross-fade entirely and
+snap into the stagger. Bones 1–8 fade in over 10 frames, or 20 when the hit
+severed something. Both go on to **track 1** of the actor's motion block —
+`MotionStartOnTrack`'s last argument — while the walk keeps running on track 0.
+That is what the cross-fade is between.
+
+### Body condition — `ActorUpdateBodyCondition`
+
+`obj+0x130C` is derived by `FUN_00454270` from which parts are gone, and it
+feeds the death pick as well as the stumble: with `obj+0x136C & 0x40` set and
+**both arm zones destroyed** (`obj+0x1318` bits 1 and 2, from
+`RemoveBoneSubtree`) it becomes 5 — and `ChooseDeathMotion` gives condition 5
+its own death, motion 0x3DB. So the destroyed-zone mask does reach the death
+after all, just not through `obj+0x1368`.
+
+The rest of `FUN_00454270` reads `obj+0x4DC` and `obj+0x68C` against literal
+asset slots, and what those two fields are is `[open]`. The player holds the
+body condition at 0, which for every character in its stages selects the same
+row as conditions 1, 2 and 4.
+
+## 8. The gore swap — `ResolveDamagedPartSphere`
 
 `FUN_004098E0` writes the effect slot into `record[0]`, the slot the bone draws.
 `FUN_004099A0` then gives that new part its **own hit sphere**, searching the
@@ -389,7 +504,7 @@ characters that do not.
 finds nothing, once for type 7 (or 0x0B) — so type 7's table is a shared set
 behind the per-character ones.
 
-## 8. Feedback — the sounds and the impact sprite
+## 9. Feedback — the sounds and the impact sprite
 
 Every shot makes a noise and leaves a mark, and both are plain switch
 statements, so this half is fully determined. The sound ids resolve through
@@ -419,8 +534,8 @@ metal, other, water and wood. `coli.py` already observed the surface palette
 files independently, and it lands inside this table.
 
 `SpawnImpactSprite` (`FUN_004073B0`) is a second switch on the same material
-giving `(first texture, last texture, scale)` — an animated sprite that runs
-the range and dies. Material 1 is `0x091A..0x092F` at 1.0; water is
+giving `(first asset slot, last asset slot, scale)` — an animated sprite that runs
+the range and dies. Material 1 is slots `0x091A..0x092F` at 1.0; water is
 `0x08F8..0x0903` at **4.0**, a big splash; and the default arm is a single
 frame at 0.1, so a shot into untagged geometry barely shows.
 
@@ -470,13 +585,16 @@ scale *= severity;                              /* the 0.5 / 0.75 / 1.0 above */
 so it is near-constant on screen out to twenty units and fixed in the world
 beyond that.
 
-## 9. What the player implements
+## 10. What the player implements
 
 Exact: the hit spheres, hit points through `ActorInitHitPoints`, the per-bone
 damage escalation with the `DamageRankModifier` applied, the control codes,
 **the sever and its cascade**, the final-stage latch, the withheld torso stage,
 the headshot burst, the nearest-first resolution, the score including the
-result-5 rule, the directional death, the gore swap, and every sound in §8.
+result-5 rule, **the stumble** — the right clip per body region, cross-faded
+over the walk on a second track, faded for the upper body and hard-set for the
+legs, and skipped entirely for the hits that do not interrupt — the directional
+death, the gore swap, and every sound in §9.
 
 The live-enemy waits (evt `0x43` / `0x44`) become **real** when shooting is on:
 the script holds until the enemies are dead, which is the game's own condition.
@@ -494,12 +612,18 @@ Not implemented, and why:
   `[open]`, and the fix is to carry `coli.py`'s per-triangle `surface` into the
   bundle;
 * the **impact artwork**. The sprite's position, timing, frame count and scale
-  law are transcribed, but the frames are asset slots `0x3A..0x52` and
-  `0x091A..` which the bundle does not carry, so a radial splat stands in.
+  law are transcribed, but the frames are asset slots `0x3A..0x52` and `0x091A..` which the bundle does not carry, so a radial splat stands in.
   `[open]`;
 * the **special deaths** — `ChooseDeathMotion`'s `obj+0x1368` arms. What sets
   those bits is `[open]`; see §6;
 * **civilians, bosses and the ammo/reload cycle**;
+* the **body condition** `obj+0x130C`, held at 0. `ActorUpdateBodyCondition`
+  derives it partly from `obj+0x4DC` / `obj+0x68C`, which are `[open]`. It only
+  changes the stumble at condition 3, and conditions 0, 1, 2 and 4 share a row;
+* the **alternate reaction table** `g_pHitReactionMotionsAlt`, reached only
+  when `obj+0x136C & 0x100`, which is `[open]`;
+* the **fade back out** of a reaction. `MotionCrossFadeTo` states the fade *in*;
+  the player fades out over the same length, which is `[likely]`, not proved;
 * the **adaptive rank** itself. `UpdateDamageRank` needs lives lost and elapsed
   play time; the player holds the rank at `g_initial_damage_rank[difficulty]`,
   which is what a fresh game starts on.
@@ -508,4 +632,6 @@ Not implemented, and why:
 bytes, asserts the control-code/slot gap across all 86 character types,
 asserts every slot resolves through the asset slot table, asserts every sever
 step has a subtree to remove, walks all 2810 spawn/difficulty hit-point pairs
-through the clamp, and asserts all 30 combat sound ids name a file.
+through the clamp, asserts the bone-to-reaction-group map and that every
+stumble is shorter than every death (43 against 74), and asserts all 30 combat
+sound ids name a file.

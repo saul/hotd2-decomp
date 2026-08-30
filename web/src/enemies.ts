@@ -156,6 +156,17 @@ const CLOSING_SPEED = 6;
 export const STATE_NOOP = 0;
 export const STATE_ATTACK_RUN = 1;
 export const STATE_STRIKE = 2;
+/**
+ * `ZombieStateBackOff` (`FUN_00455C30`). After a strike the actor **keeps the
+ * permit** and retreats, playing its back-away walk, until it is back outside
+ * the inner ring or 240 frames have passed — and only then releases it and
+ * returns to holding. That retreat *is* the pause between attacks: there is no
+ * cooldown timer for an ordinary zombie, `ZombieStateHoldAtRange` forces
+ * `obj+0x133C` to zero unless `obj+0x1368` bit 0 is set.
+ */
+export const STATE_BACKOFF = 4;
+/** `obj+0x1334 > 0xF0` — the retreat gives up after 240 frames. */
+const BACKOFF_MAX_FRAMES = 240;
 export const STATE_LEAVE = 10;
 export const STATE_APPROACH = 22;
 
@@ -469,6 +480,33 @@ export class EnemyDirector {
       return;
     }
 
+    if (s.state === STATE_BACKOFF) {
+      // `ZombieStateBackOff`. Play the back-away walk from the motion row and
+      // retreat until outside the inner ring, or give up after 240 frames.
+      if (s.sub === 0) {
+        const row = a.type.motion_row?.[String(a.condition)]
+          ?? a.type.motion_row?.["0"];
+        const m = row?.[a.type.backoff_index ?? 4];
+        if (m && a.type.motions[String(m)]) {
+          a.action = { motion: m, t: 0, loop: true };
+        }
+        s.walkClock = 0;
+        s.sub = 1;
+      }
+      this.advance(a, eye, dt, true);
+      s.walkClock += dt * GAME_HZ;
+      const d = Math.hypot(a.pos.x - eye.x, a.pos.z - eye.z);
+      const inner = (this.approach?.rings[a.ringSet]
+                     ?? this.approach?.rings[0])?.inner ?? 0;
+      if (d > inner || s.walkClock > BACKOFF_MAX_FRAMES) {
+        a.action = null;
+        this.release(s);              // only now is the next enemy free
+        s.state = STATE_APPROACH;
+        s.sub = 0;
+      }
+      return;
+    }
+
     // Anything else is a state this client does not model. Never sit in one
     // holding a permit.
     this.giveUp(a, s);
@@ -488,7 +526,12 @@ export class EnemyDirector {
     if (!usable.length) { if (s.permit >= 0) this.release(s); return; }
 
     if (s.permit < 0) {
-      if (s.rank < QUEUE_CAP && this.claim(s)) { s.sub = 0; s.fired = false; }
+      // `FUN_0044CA40` is byte-for-byte `TryClaimAttackSlot` and, like it,
+      // tests **no queue rank** — that test lives in `ZombieStateApproach`,
+      // before the call, and class 0x31's throw state does not have it. Gating
+      // the thrower on rank is why the elevated ones never threw: they are far
+      // away by design, so their distance rank is always high.
+      if (this.claim(s)) { s.sub = 0; s.fired = false; }
       else return;
     }
     const hand = usable[Math.min(s.attack < 0 ? 0 : s.attack, usable.length - 1)];
@@ -651,22 +694,39 @@ export class EnemyDirector {
     return keys.length ? Number(keys[0]) : -1;
   }
 
+  /**
+   * The strike clip is over. `ZombieStateStrike` hands to state 4, which keeps
+   * the permit through the retreat — so the next enemy cannot start until this
+   * one has actually backed away.
+   */
   private endStrike(a: EnemyActor, s: Ai): void {
     a.action = null;
-    this.release(s);
-    s.state = STATE_APPROACH;
+    s.state = STATE_BACKOFF;
     s.sub = 0;
     s.fired = false;
   }
 
-  /** Move an actor toward the camera on the ground plane. See CLOSING_SPEED. */
-  private advance(a: EnemyActor, eye: Vector3, dt: number): void {
+  /**
+   * Move on the ground plane, toward the camera or away from it.
+   *
+   * **Never closer than the inner ring.** Band 1 is strike range and no state
+   * in the game walks past it — `ZombieStateAttackRun` stops there and hands
+   * to the hold. Without this an actor with no attack state, of which the game
+   * has 161, walks straight through the camera.
+   */
+  private advance(a: EnemyActor, eye: Vector3, dt: number,
+                  away = false): void {
     const v = CLOSING_SPEED * dt;
     if (v <= 0) return;
+    const inner = (this.approach?.rings[a.ringSet]
+                   ?? this.approach?.rings[0])?.inner ?? 0;
     this._fwd.set(eye.x - a.pos.x, 0, eye.z - a.pos.z);
     const len = this._fwd.length();
     if (len < 1e-3) return;
-    a.pos.addScaledVector(this._fwd.divideScalar(len), Math.min(v, len));
+    this._fwd.divideScalar(len);
+    const room = away ? v : Math.max(0, len - inner);
+    if (room <= 0) return;
+    a.pos.addScaledVector(this._fwd, (away ? -1 : 1) * Math.min(v, room));
   }
 
   /**

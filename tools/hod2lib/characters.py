@@ -181,11 +181,24 @@ DEFAULT_DIFFICULTY = 2
 #: body condition (``obj+0x130C``) and then by the reaction *group* of the bone
 #: that was hit.
 HIT_REACT_TABLE = 0x00592FC8
-#: The alternate table the same routine uses when ``obj+0x136C & 0x100`` is
-#: set. Its rows are indexed ``+0x10 + zone*4`` by the last-hit zone at
-#: ``obj+0x1319`` (0 none, 1 torso, 2 head), not by the reaction group. What
-#: sets that flag is `[open]`, so the player does not take this path.
+#: Not really an alternate reaction table: this is the character's **general
+#: motion row**, per body condition, and several states index it directly.
+#:
+#: ===== =========================================================
+#: index what reads it
+#: ===== =========================================================
+#: 0, 1  `ZombieStateApproach` -- the two walk variants, picked by
+#:       ``obj+0x136C`` bit 21
+#: 2, 3  `ZombieStateAttackRun` -- the run, picked by bit 27
+#: 4     `ZombieStateBackOff` -- the **back-away** walk, and also the
+#:       zone-0 entry of the reaction set `FUN_004547C0` reads at
+#:       ``+0x10 + zone*4``
+#: ===== =========================================================
 HIT_REACT_ALT_TABLE = 0x00592CBC
+#: How many entries of that row to export.
+MOTION_ROW_LEN = 8
+#: Index 4: the clip `ZombieStateBackOff` plays while retreating.
+MOTION_ROW_BACKOFF = 4
 #: `DAT_004C84A8`: ``u16[16]``, bone -> reaction group. Eight groups, and they
 #: partition the body exactly the way you would draw it:
 #: 1 head, 2 torso, 3 right arm, 4 left arm, 5 pelvis, 6 right leg, 7 left leg.
@@ -473,6 +486,9 @@ class Character:
     attack_picks: dict = field(default_factory=dict)
     #: The thrown-weapon attack, or None -- see :func:`throw_tables`.
     throw: dict | None = None
+    #: ``{body_condition: [motion, ...]}`` -- see :func:`motion_row`. Index 4
+    #: is the back-away walk `ZombieStateBackOff` plays.
+    motion_row: dict = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {
@@ -492,6 +508,8 @@ class Character:
             "attacks": {str(k): {str(i): a for i, a in v.items()}
                         for k, v in self.attacks.items()},
             "attack_picks": {str(k): v for k, v in self.attack_picks.items()},
+            "motion_row": {str(k): v for k, v in self.motion_row.items()},
+            "backoff_index": MOTION_ROW_BACKOFF,
             "throw": (None if not self.throw else
                       {**self.throw,
                        "hands": {str(k): v
@@ -733,6 +751,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                     reacts += [e["strike"], e["lunge"]]
         for hands in (c.throw or {}).get("hands", {}).values():
             reacts += [h["motion"] for h in hands]
+        # The back-away walk, and the two ordinary walk variants beside it.
+        if c.bone_count == 16:
+            for row in c.motion_row.values():
+                reacts += [row[i] for i in (0, 1, MOTION_ROW_BACKOFF)
+                           if i < len(row) and 0 < row[i] < 4096]
         for mid in [motion, intro[0] if intro else None] + deaths + reacts:
             if mid is None or mid in c.motions:
                 continue
@@ -879,6 +902,19 @@ def hit_steps(tables, char_type: int, bone: int) -> list[list[int]]:
         if j + 1 >= len(eff):
             break
         out.append([eff[j], eff[j + 1], dmg[j] if j < len(dmg) else 0])
+    return out
+
+
+def motion_row(tables, char_type: int) -> dict[int, list[int]]:
+    """``{body_condition: [motion, ...]}`` from :data:`HIT_REACT_ALT_TABLE`."""
+    out: dict[int, list[int]] = {}
+    for cond, row in enumerate(_bounded_ptr_array(tables, HIT_REACT_ALT_TABLE,
+                                                  char_type)):
+        o = tables._v2r(row)
+        if o is None or o + MOTION_ROW_LEN * 4 > len(tables.data):
+            continue
+        out[cond] = list(struct.unpack_from(f"<{MOTION_ROW_LEN}I",
+                                            tables.data, o))
     return out
 
 
@@ -1298,7 +1334,8 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      reactions=hit_reactions(tables, char_type),
                      attacks=attack_tables(tables, char_type),
                      attack_picks=attack_picks(tables, char_type),
-                     throw=throw_tables(tables, char_type))
+                     throw=throw_tables(tables, char_type),
+                     motion_row=motion_row(tables, char_type))
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],

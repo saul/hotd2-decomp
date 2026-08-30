@@ -731,13 +731,49 @@ feel of the thing. With nothing registered the rate is a flat **12**.
 ### The whole loop
 
 ```
-state 22  ZombieStateApproach     walk in; the ring you start in sets the steps
+state 22  ZombieStateApproach     walk in; the ring you start in sets the
+                                  queue depth allowed to press an attack
           TryClaimAttackSlot      one permit per player; win it or keep walking
 state 1   ZombieStateAttackRun    close until TestApproachRing returns 1
 state 2   ZombieStateHoldAtRange  hold, then ask for the permit again
 state 3   ZombieStateStrike       lunge, swing, land the hit on its own frame
-state 4                           re-approach
+state 4   ZombieStateBackOff      retreat, still holding the permit
 ```
+
+### The pause between attacks is the retreat
+
+There is no cooldown timer for an ordinary zombie:
+`ZombieStateHoldAtRange` forces `obj+0x133C` to zero unless `obj+0x1368` bit 0
+is set. What separates one attack from the next is **state 4**:
+
+```c
+motion = g_class30_motion_rows[char][cond][4];      /* the back-away walk */
+TurnActorAwayFromPoint(obj, strike_anchor_x, strike_anchor_z, ±0x40);
+if (++obj[0x1334] > 0xF0 || d > rings[set].inner) {
+    obj[0x133C] = 0;
+    ReleaseAttackSlot(obj);                          /* only now */
+    state = 2;
+}
+```
+
+The actor **keeps the permit through the whole retreat** and only gives it up
+once it is back outside the inner ring, or after 240 frames. So the next enemy
+cannot begin until this one has actually backed away — the turn-taking and the
+spacing are the same mechanism.
+
+`g_class30_motion_rows` is `PTR_PTR_00592CBC`, which is not an alternate
+reaction table as an earlier revision of this file called it: it is the
+character's general motion row, indexed by body condition. 0 and 1 are the walk
+variants `ZombieStateApproach` picks between on `obj+0x136C` bit 21, 2 and 3
+the attack run, and **4 the back-away** — 256 for `char_adv02`, 1008 for
+`char_adv00`, both about 70 frames.
+
+### Nothing walks inside the inner ring
+
+`ZombieStateAttackRun` stops when `TestApproachRing` returns 1 and hands to the
+hold; no state closes further. That is what keeps an actor out of the camera,
+and it matters for the 161 class-0x30 spawns whose `attack_state` is 0 or −1:
+they approach, are refused a permit, and simply stand at the ring.
 
 with `SelectCameraLookAtTarget` reading the slot table every frame, so the
 camera swings onto whoever just took a permit and follows them in.

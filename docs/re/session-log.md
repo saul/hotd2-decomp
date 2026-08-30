@@ -4301,3 +4301,53 @@ asserts that every class with a motion rule yields at least one posed
 placement, and prints the ratio — `0x30=283/283, 0x31=49/49, 0x53=4/4` — so a
 class that is decoded but not exported shows up as a failure rather than as an
 empty scene.
+
+---
+
+## Three more gameplay bugs, and the state I never read
+
+Reported from play: enemies do not take turns, they never walk backwards, and
+they close until they overlap the camera. All three are the same omission —
+**state 4**, which I had been mapping to "re-approach" without ever
+decompiling it.
+
+`ZombieStateBackOff` (`FUN_00455C30`) plays the back-away walk from
+`g_class30_motion_rows[char][cond][4]`, turns away from the position recorded
+when the strike began, and **keeps the attack permit through the whole
+retreat** — releasing it only once the actor is back outside the inner ring or
+240 frames have passed. So:
+
+* the pause between attacks *is* the retreat. There is no cooldown timer for an
+  ordinary zombie: `ZombieStateHoldAtRange` forces `obj+0x133C` to zero unless
+  `obj+0x1368` bit 0 is set, and only state 4 clears it on exit;
+* the backwards walk is a real clip — 256 for `char_adv02`, 1008 for
+  `char_adv00`, both about 70 frames;
+* and nothing walks inside the inner ring, because `ZombieStateAttackRun` stops
+  at band 1 and hands to the hold. My `advance` had no floor, so the 161
+  class-0x30 spawns with no attack state walked through the camera for ever.
+
+Also corrected a naming mistake with consequences. I had called
+`PTR_PTR_00592CBC` the "alternate hit-reaction table" and marked the path
+`[open]`. It is nothing of the kind: it is the character's **general motion
+row** per body condition — 0 and 1 the walk variants `ZombieStateApproach`
+picks between on bit 21, 2 and 3 the attack run, 4 the back-away, and 4..6 the
+reaction set at `+0x10`. Reading it as a reaction table meant I never looked
+for the walk clips in it, which is why the actors have been sliding rather than
+walking.
+
+### And why the axe throwers never threw
+
+`FUN_0044CA40`, class 0x31's permit claim, is `TryClaimAttackSlot` instruction
+for instruction — and **neither tests the distance queue**. That gate
+(`obj+0x131D < obj+0x1358 && obj+0x131E < 3`) lives in `ZombieStateApproach`,
+*before* the call. Class 0x31's throw state calls the claim directly.
+
+I had applied the rank gate to the thrower, so the two Johnnys in stage 2 block
+5 — which spawn at y = 87, deliberately out of reach — always had a high
+distance rank and never got a permit. A class-0x30 rule applied to a class that
+does not have it.
+
+The actor the report described as walking at the camera turned out to be a
+different one: block 5 **step 3** is `tutorial.bin` (character 19, class 0x30,
+attack state 0), not the throwers at step 6. It was walking for the third
+reason above.

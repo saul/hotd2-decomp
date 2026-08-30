@@ -358,6 +358,14 @@ front of the camera, tumbling, and costs a life on arrival: the hit is timed,
 not tested. Throwing leaves the hand bare and sets the arm's destroyed-zone
 bit, so the cancel mask treats a thrown arm and a shot-off one alike.
 
+**Turn-taking, retreat and spacing are in.** After a strike an actor enters
+`ZombieStateBackOff`, plays its back-away clip and retreats while **still
+holding the attack permit**, releasing only once it is outside the inner ring
+or after 240 frames — so the next enemy cannot start until this one has moved
+away. There is no cooldown timer; the retreat is the pause. And nothing walks
+inside the inner ring, which is what keeps the 161 spawns with no attack state
+from closing on the camera for ever.
+
 Still `[open]`, and marked in `enemies.ts`: the walk speed — derived from the
 ring table rather than found, and now known *not* to be root motion.
 

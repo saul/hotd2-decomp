@@ -285,6 +285,12 @@ export interface CharacterType {
   attack_picks: Record<string, number[]>;
   /** The thrown-weapon attack, for the two types that have one. */
   throw: ThrowJson | null;
+  /**
+   * `{body_condition: [motion, ...]}` — the character's general motion row.
+   * 0/1 the walk variants, 2/3 the attack run, `backoff_index` the back-away.
+   */
+  motion_row: Record<string, number[]>;
+  backoff_index: number;
   /** Damaged variants, keyed by asset slot: their own hit spheres. */
   gore: Record<string, { centre: [number, number, number]; radius: number }>;
   /**

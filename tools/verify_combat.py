@@ -66,7 +66,12 @@ byte. The readings under test are the ones docs/formats/combat.md states:
     single thrower, because the class had no motion rule and every one of its
     spawns was dropped before `_build` ran.
 
-11. **Every sound id names a file.** The voice, impact and ricochet tables are
+11. **Every class-0x30 type has a back-away clip.** `ZombieStateBackOff` plays
+    `motion_row[condition][4]`, and without it the retreat that separates one
+    attack from the next has nothing to show. Checked to resolve to a real
+    motion for every 16-bone humanoid.
+
+12. **Every sound id names a file.** The voice, impact and ricochet tables are
    read as `g_se_name_list` ids; a table read at the wrong address would give
    ids that resolve to nothing, so this fails loudly if the address is wrong.
 
@@ -327,6 +332,25 @@ def main() -> int:
                       for c in sorted(ch.MOTION_RULES)))
 
     # 11 -----------------------------------------------------------------
+    n_row = 0
+    for ct in types:
+        if (tables.character_bone_count(ct) or 0) != 16:
+            continue
+        rows = ch.motion_row(tables, ct)
+        if not rows:
+            continue
+        for cond, row in rows.items():
+            m = row[ch.MOTION_ROW_BACKOFF] if len(row) > ch.MOTION_ROW_BACKOFF \
+                else 0
+            if not (0 < m < 4096) or not (1 <= play(m) <= 400):
+                fails.append(f"type {ct} cond {cond} back-away motion {m} "
+                             f"has play length "
+                             f"{play(m) if 0 < m < 4096 else 'n/a'}")
+            else:
+                n_row += 1
+    print(f"  {n_row} back-away clips resolve")
+
+    # 12 -----------------------------------------------------------------
     se = tables.se_names()
     combat = ch.combat_tables(tables)
     ids = [s["id"] for s in combat["impact"] + combat["head_impact"]]

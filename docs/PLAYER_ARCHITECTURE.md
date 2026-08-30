@@ -61,6 +61,8 @@ jumps blocks). Moving those into `ops/` would mean publishing `rng` and
 ## The gameplay code is a **port**, not an interpretation
 
 This is the load-bearing decision, and it changes the shape of everything else.
+The operating procedure that falls out of it is the `/gameplay-port` skill
+(`.claude/skills/gameplay-port/`); this section is the *why*.
 
 Gameplay logic — enemy behaviour, damage, scoring, permits, the camera
 director — is not "informed by" the decomp. It **is** the decomp, transcribed.

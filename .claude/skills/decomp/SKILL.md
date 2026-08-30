@@ -115,6 +115,11 @@ Every session updates, in the same commit or the next:
   repeating it.
 * `docs/PLAYER_PLAN.md` — if it affects what the browser player can render
 
+If the finding is going **into** the player's gameplay port —
+`web/src/game/` — follow `/gameplay-port` for that half. It is downstream of
+this skill, not a substitute for it: nothing may be ported that has not been
+read, named and annotated here first.
+
 ## Evidence convention
 
 Mark every claim:

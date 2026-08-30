@@ -338,7 +338,8 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       and `world.save()` returns plain JSON that fully determines the next
       frame. `tools/verify_port.py` checks every `FUN_` citation against the
       annotations and reports the coverage. See
-      [`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md).
+      [`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md) for the rules and
+      `/gameplay-port` for the procedure.
 - [x] **Water — SOLVED.** Two separate systems that share a name. The visible
       surface is ordinary level geometry, streamed per region like everything
       else, and tagged in `coli/` with surfaces 5 and 55; stage 2's collision

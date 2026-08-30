@@ -261,6 +261,7 @@ export class CharacterLayer {
                               stepSeconds: stepSecondsOf(type, motion),
                               zones: 0, action: null, type,
                               condition: p?.body_condition ?? 0,
+                              cls: p?.class ?? 0,
                             }, zones: 0 });
       this.posed.add(at);
       node.visible = false;

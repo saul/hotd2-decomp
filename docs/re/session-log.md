@@ -4182,3 +4182,54 @@ water meshes, since 17 of 23 carry it and almost nothing else does. It is
 `SHADE_CONSTANT`, a named mode the exporter already handles — the correlation is
 real (water is flat-shaded) but it is not a fault. The white quad in the render
 that prompted the detour is elsewhere in the scene.
+
+---
+
+## Three bugs in the gameplay implementation, and what each teaches
+
+All three were reported from play, none would have shown up in a verifier, and
+each is a different shape of mistake.
+
+**The zombies turned away.** `TurnActorTowardCamera` uses
+`VecToAngles(obj.x - p.x, ...)` — **actor minus camera**. I wrote camera minus
+actor. That is exactly 180 degrees, and because the turn is eased it presents
+as a slow rotation *away* rather than as an obvious backwards snap. I had even
+written the correct expression into the annotation for that function and then
+inverted it in the port.
+
+**They stopped attacking.** There is one attack permit in single player, and an
+actor that claims it and lands in a state with no handler holds it for ever.
+Two doors into that: `attack_state == 0` is `g_class30_states[0]`, the engine's
+*no-op* — **161 of the game's class-0x30 spawns carry 0 or −1** — and the
+states that are not 1/2/3 (10, 15, 26, 30, 38; 51 more spawns) are approach
+variants I do not model. So the first scenery zombie to reach the front of the
+queue silently ended combat for the whole stage. Counting the spawns
+afterwards was what made the severity obvious; the fix is to refuse the permit
+rather than to add a timeout.
+
+**The cat walked at the player.** `g_class30_states` is class 0x30's. The cat
+is 0x53, civilians 0x10, scripted humanoids 0x25 — 279 placements — and I ran
+the zombie approach on every character instance. The gate should have been
+there from the start: a state machine belongs to the class it was read from.
+
+The repeated-swing-with-no-damage was the second and third compounding: a type
+with no usable attack entry entered the strike state, found nothing, dropped
+straight out and immediately re-claimed, looping the lunge clip.
+
+### And one enemy that is not meant to reach you
+
+Stage 2 block 5 has two class-0x31 subtype-0x16 spawns at **y = 87** with 130
+hit points, above the street. `EnemyThrowerInit` identifies them the way this
+project identifies everything: it replaces bone 5 and bone 8's draw slots —
+`obj+0x4DC` and `obj+0x68C`, the hand fields found earlier today from
+`ActorBodyConditionFromHands` — with asset slots `0x1FA2`/`0x1F9E` instead of
+the bare-hand parts, and the character resolves to **`zsass.bin`**. It spawns
+with something in each hand and cannot walk to you. Its state machine is at
+`LAB_00449910` and is unread, so the player gives class 0x31 no behaviour at
+all rather than inventing one.
+
+A pleasing coincidence while chasing it: the two per-class hooks
+`ZombieStateStrike` calls turned out to be **water splashes**, gated on
+`g_coli_hit_surface == 5 || 0x37` — the identical pair as `coli.py`'s
+`WET_SURFACES`. The same two surface tags drive the ricochet sound, the wet
+footprint of the canal, and a wading zombie's splash.

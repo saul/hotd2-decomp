@@ -742,6 +742,18 @@ state 4                           re-approach
 with `SelectCameraLookAtTarget` reading the slot table every frame, so the
 camera swings onto whoever just took a permit and follows them in.
 
+### Enemies that never walk to you
+
+Not every enemy closes. Stage 2 block 5 spawns two class-`0x31` subtype-`0x16`
+actors at **y = 87** with 130 hit points — above the street, out of walking
+reach. `EnemyThrowerInit` gives that subtype its identity: it replaces bone 5
+and bone 8's draw slots (`obj+0x4DC` / `obj+0x68C`, the hands) with asset slots
+`0x1FA2` and `0x1F9E` in place of the bare-hand parts `0x1F9F` and `0x1F9B`.
+The character is `zsass.bin`, and it spawns holding something in each hand.
+
+Its state machine is its own, at `LAB_00449910`, and is `[open]` — so the
+player gives class 0x31 no behaviour at all rather than making it walk.
+
 ## 11. What the player implements
 
 Exact: the hit spheres, hit points through `ActorInitHitPoints`, the per-bone
@@ -851,6 +863,31 @@ And the **pick table** is indexed by the same mask, so a damaged zombie reaches
 for a different attack in the first place: `char_adv00` with an intact head
 always draws attack 2 (strike 1013, cancelled by a destroyed head) and with the
 head gone always draws attack 3 (strike 983, mask `0x8`, uncancellable).
+
+### Three ways the player's version of this went wrong
+
+Recorded because each is a different kind of mistake and the first two are
+invisible from the code alone.
+
+**Facing.** `TurnActorTowardCamera` eases the actor's yaw toward
+`VecToAngles(obj.x - p.x, 0, obj.z - p.z)` — the angle of **actor minus
+camera**. Written the other way round it is a clean 180 degrees, and because
+the turn is eased the result is a zombie rotating slowly *away* from you rather
+than snapping backwards. Easy to write, hard to spot.
+
+**Permits held by actors that cannot attack.** There are only
+`g_max_attackers` permits — one in single player — and an actor that takes one
+and then sits in a state with no handler blocks every other enemy permanently.
+Two ways in: an `attack_state` of 0 is `g_class30_states[0]`, the engine's
+no-op, and **161 of the game's class-0x30 spawns carry 0 or −1**; and the
+states that are not 1, 2 or 3 (10, 15, 26, 30, 38 — 51 more spawns) are
+approach variants that a client not modelling them will sit in for ever. Both
+must be refused a permit or mapped onto a state that terminates.
+
+**Actors that are not class 0x30 at all.** `g_class30_states` belongs to class
+0x30. The cat is class 0x53, civilians 0x10, scripted humanoids 0x25 — 279
+placements across the game — and running the zombie's approach on them walks
+scenery at the camera.
 
 ### Damage to the player — `PlayerTakeDamage`
 

@@ -129,6 +129,13 @@ const GAME_HZ = 60;
 /** `obj+0x131E < 3` — only the nearest three may press an attack at all. */
 const QUEUE_CAP = 3;
 /**
+ * The only class whose state machine this models. `g_class30_states` belongs
+ * to class 0x30; the cat is class 0x53, the civilians 0x10, the scripted
+ * humanoids 0x25 — all with their own handlers, none of them read. They keep
+ * their looping motion and stay where the script put them.
+ */
+const CLASS_ZOMBIE = 0x30;
+/**
  * Units per second an enemy closes at. **`[open]` — invented, not derived.**
  * See the module note: the zombie's code writes no velocity, its walk clips
  * are in place, and the ring table counts queue depth rather than steps. This
@@ -169,6 +176,8 @@ export interface EnemyActor {
   type: CharacterType;
   /** `obj+0x130C` — the body condition, which indexes the attack tables. */
   condition: number;
+  /** The spawn class. Only 0x30 runs the state machine decompiled here. */
+  cls: number;
 }
 
 interface Ai {
@@ -203,8 +212,12 @@ export class EnemyDirector {
   /** `DAT_009C8E08` — invulnerability frames left. */
   private invuln = 0;
   private readonly ai = new Map<number, Ai>();
-  /** `g_attack_permits` — one per player; the player is player 0. */
-  private permits: (number | null)[] = [null, null];
+  /**
+   * `g_attack_permits`. `TryClaimAttackSlot` offers `g_max_attackers` of them,
+   * one per player, and with a single player it only ever offers slot 0 — so
+   * exactly one enemy is committed at a time, which is the game's feel.
+   */
+  private permits: (number | null)[] = [null];
   private readonly _a = new Vector3();
   private readonly _b = new Vector3();
   private readonly _fwd = new Vector3();
@@ -227,7 +240,7 @@ export class EnemyDirector {
 
   reset(): void {
     this.ai.clear();
-    this.permits = [null, null];
+    this.permits = [null];
     this.tracking = false;
     this.focus = null;
     this.invuln = 0;
@@ -292,7 +305,7 @@ export class EnemyDirector {
     const live: { a: EnemyActor; s: Ai; d: number }[] = [];
     for (const a of actors) {
       const s = this.state(a);
-      if (a.dead || !a.visible) {
+      if (a.dead || !a.visible || a.cls !== CLASS_ZOMBIE) {
         if (s.permit >= 0) this.release(s);
         if (a.action) a.action = null;
         continue;
@@ -310,8 +323,11 @@ export class EnemyDirector {
 
   /** One actor's state machine — states 22, 1 and 2. */
   private step(a: EnemyActor, s: Ai, eye: Vector3, dt: number): void {
-    // `TurnActorTowardCamera`: face a point just in front of the camera.
-    const face = Math.atan2(eye.x - a.pos.x, eye.z - a.pos.z) * BAMS;
+    // `TurnActorTowardCamera` takes `VecToAngles(obj.x - p.x, 0, obj.z - p.z)`
+    // — the angle of **actor minus camera**, not camera minus actor. Writing it
+    // the other way round is a clean 180 degrees, and since the turn is eased
+    // it reads as the zombie slowly rotating *away* from you.
+    const face = Math.atan2(a.pos.x - eye.x, a.pos.z - eye.z) * BAMS;
     let d = ((face - a.yaw) % 65536 + 98304) % 65536 - 32768;
     a.yaw = (a.yaw + d * Math.min(1, dt * 4) + 65536) % 65536;
 
@@ -325,10 +341,19 @@ export class EnemyDirector {
         return;
       }
       // `if (rank < allowance && rank < 3) TryClaimAttackSlot()`. The rank is
-      // recomputed for every actor once a frame in `update`.
+      // recomputed for every actor once a frame in `update`; the band is
+      // recomputed here too, because the actor is walking and `TestApproachRing`
+      // is called every frame by the states that follow this one.
       this.advance(a, eye, dt);
+      const rr = this.ring(a, eye);
+      s.allowance = rr.allow;
+      s.band = rr.band;
+      // An actor whose descriptor names no attack state must never take a
+      // permit: there are only `g_max_attackers` of them, and one held by an
+      // actor that cannot attack blocks every other enemy for good.
+      if (!this.canAttack(a)) return;
       if (s.rank < s.allowance && s.rank < QUEUE_CAP && this.claim(s)) {
-        s.state = a.attackState > 0 ? a.attackState : STATE_NOOP;
+        s.state = this.attackStateFor(a);
         s.sub = 0;
       }
       return;
@@ -348,15 +373,14 @@ export class EnemyDirector {
       // sub 1 lunges until it is inside the attack's own distance and then
       // starts the strike, sub 2 plays it out and lands the hit on the exact
       // frame the table names.
-      const list = a.type.attacks?.[String(a.condition)]
-        ?? a.type.attacks?.["0"] ?? {};
+      const list = this.attackList(a);
       if (s.sub === 0) {
         s.attack = this.pickAttack(a, list);
         s.fired = false;
         s.sub = 1;
       }
       const atk = list[String(s.attack)] ?? null;
-      if (!atk) { this.endStrike(a, s); return; }
+      if (!atk) { this.giveUp(a, s); return; }
 
       if (s.sub === 1) {
         const d = Math.hypot(a.pos.x - eye.x, a.pos.z - eye.z);
@@ -389,7 +413,51 @@ export class EnemyDirector {
         }
       }
       if (a.action.t * m.fps >= m.frames - 1) this.endStrike(a, s);
+      return;
     }
+
+    // Anything else is a state this client does not model. Never sit in one
+    // holding a permit.
+    this.giveUp(a, s);
+  }
+
+  /** Attacks this actor can actually perform, for its body condition. */
+  private attackList(a: EnemyActor): Record<string, AttackJson> {
+    return a.type.attacks?.[String(a.condition)]
+      ?? a.type.attacks?.["0"] ?? {};
+  }
+
+  /**
+   * Whether taking a permit could lead anywhere.
+   *
+   * `attack_state` 0 is `g_class30_states[0]`, which is the engine's no-op —
+   * 123 of stage 2's class-0x30 spawns carry it, and −1 another 38. Those
+   * actors are scenery that happens to walk. They must not compete for a
+   * permit, and neither must a type with no usable attack entry.
+   */
+  private canAttack(a: EnemyActor): boolean {
+    return a.attackState > 0 && Object.keys(this.attackList(a)).length > 0;
+  }
+
+  /**
+   * Which state a permit-holder enters. Only 1, 2 and 3 are modelled here;
+   * the others in the descriptor (10, 15, 26, 30, 38) are approach variants —
+   * state 15 walks a set distance and then hands to state 1 — so they are
+   * mapped onto the attack run rather than left to hang. An unmodelled state
+   * with no handler would hold its permit for ever, which is what stopped
+   * every other zombie attacking.
+   */
+  private attackStateFor(a: EnemyActor): number {
+    return a.attackState === STATE_STRIKE ? STATE_STRIKE : STATE_ATTACK_RUN;
+  }
+
+  /** Release the permit and go back to approaching, without striking. */
+  private giveUp(a: EnemyActor, s: Ai): void {
+    a.action = null;
+    this.release(s);
+    s.state = STATE_APPROACH;
+    s.sub = 0;
+    s.fired = false;
   }
 
   /**

@@ -243,11 +243,27 @@ class Player {
     const st = bundle.script.bgm?.stage_track;
     if (st) this.bgm.play(st.id, "stage");
     this.setLoading(null);
-    $("#status").textContent =
+    const status = $("#status");
+    status.textContent =
       `${entry.name} · ${entry.counts.models} models · ` +
       `${entry.counts.triangles.toLocaleString()} tris · ` +
       `${entry.counts.regions} regions · ${entry.counts.blocks} blocks · ` +
       `${entry.counts.branch_points} branch points`;
+    // A re-export changes the data under a page that looks identical, and a
+    // stale bundle is indistinguishable from a bug. Say when this one was
+    // built so the two can be told apart.
+    if (this.manifest?.built) {
+      const built = new Date(this.manifest.built);
+      const age = (Date.now() - built.getTime()) / 1000;
+      const tag = document.createElement("span");
+      tag.className = "dim";
+      tag.title = `Bundle built ${this.manifest.built} by `
+        + `${this.manifest.tool} ${this.manifest.tool_version}`;
+      tag.textContent = ` · bundle ${
+        age < 3600 ? `${Math.max(0, Math.round(age / 60))} min old`
+          : built.toLocaleString()}`;
+      status.appendChild(tag);
+    }
   }
 
   /** Honour the deep link: either an op address, or a raw camera pose. */
@@ -318,7 +334,9 @@ class Player {
       const on = (e.target as HTMLInputElement).checked;
       this.backdrop.setEnabled(on);
       this.rain.setEnabled(on);
-      this.hudLayer.setEnabled(on);
+    });
+    $<HTMLInputElement>("#show-hud").addEventListener("change", (e) => {
+      this.hudLayer.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-spawns").addEventListener("change", (e) => {
       this.spawns.setVisible((e.target as HTMLInputElement).checked);
@@ -629,7 +647,11 @@ class Player {
     this.playing = false;
     this.setPlayButton();
     this.feed.clear();
+    // A seek replays quietly, so no dialogue or shutter op reaches the layer.
+    // Without this the caption from wherever you were still hangs there.
+    this.hudLayer.reset();
     w.seek(block, step, op);
+    this.hudLayer.setShutterState(w.shutterState);
     this.syncCameraToWalker();
     this.syncBgmToWalker();
     this.state.block = block;
@@ -808,11 +830,20 @@ class Player {
         } else {
           this.accum += dt * this.speed;
           let guard = 0;
+          // Count the 60 Hz frames the walker actually advanced. The shutter
+          // slide and the dialogue countdown are script state measured in
+          // those frames, so they have to be driven from here rather than from
+          // wall time -- otherwise a caption put up in Step mode quietly
+          // expires two seconds later while playback is paused, which is
+          // exactly long enough to look at the script tree and miss it.
+          let advanced = 0;
           while (this.accum >= TICK && guard++ < 600) {
             this.accum -= TICK;
             this.walker.tick(TICK);
+            advanced++;
             if (this.walker.branch || this.walker.finished) break;
           }
+          this.hudLayer.tick(this.state.freeze ? 0 : advanced);
           if (!this.scrubbing) this.syncCameraToWalker();
         }
         this.refreshUi();
@@ -832,7 +863,6 @@ class Player {
       // g_active_cam_path, so object and shot run in lockstep.
       const cam = this.walker.cam;
       this.rigs.update(cam ? cam.slot : null, cam ? cam.frame : 0);
-      this.hudLayer.tick(this.state.freeze ? 0 : dt * 60);
       // The volume follows the camera's yaw only, so it stays world-vertical.
       this.rain.update(this.walker.rain, this.camera.position,
                        Math.atan2(-this._fwd.x, -this._fwd.z),

@@ -30,6 +30,7 @@ const CONTROLS = [
   "#show-rails",
   "#show-aim",
   "#show-sky",
+  "#show-hud",
   "#show-rigs",
   "#show-spawns",
   "#pillarbox",

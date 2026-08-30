@@ -211,7 +211,14 @@ export class Hud {
       `${(GLYPH_ADVANCE / SCREEN_W) * 100 * 1.35}cqw`;
   }
 
-  /** Advance both timers. `frames` is elapsed 60 Hz frames. */
+  /**
+   * Advance both timers. `frames` is 60 Hz frames the **walker** advanced.
+   *
+   * Not wall time: the shutter slide and the dialogue duration are script
+   * state measured in game frames, so with playback paused they hold. That is
+   * deliberate — stepping onto a `play_dialogue` and having the caption expire
+   * two seconds later, while nothing is playing, makes the line unreadable.
+   */
   tick(frames: number): void {
     if (frames <= 0) return;
     if (this.msgFramesLeft > 0) {

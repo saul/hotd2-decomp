@@ -49,7 +49,7 @@
  * trying to derive that.
  */
 
-import { Group, Object3D, Quaternion, Vector3 } from "three";
+import { Group, Object3D, Quaternion, Ray, Vector3 } from "three";
 import type {
   BakedMotion, CharacterPlacement, CharactersJson, CharacterType,
 } from "./bundle";
@@ -83,6 +83,11 @@ interface Instance {
   bones: Map<number, Object3D>;
   /** Seconds since this instance started playing, so they do not lock step. */
   clock: number;
+  /** `obj+0x11C`. Reaching 0 kills; see docs/formats/combat.md. */
+  hp: number;
+  /** `obj+0x298 + bone*0x90` — hits already taken on each bone. */
+  hits: Map<number, number>;
+  dead: boolean;
   /**
    * A one-shot entrance played before the loop: state 21 of class 0x30's
    * state machine sets a motion, holds for a delay, plays it to the end and
@@ -97,6 +102,8 @@ export class CharacterLayer {
   private enabled = true;
   private readonly q = new Quaternion();
   private readonly qa = new Quaternion();
+  private readonly _c = new Vector3();
+  private readonly _p = new Vector3();
 
   /** Spawn offsets that have a real character, so the marker layer can skip them. */
   readonly posed = new Set<number>();
@@ -173,7 +180,8 @@ export class CharacterLayer {
       const intro = p?.intro && type.motions[String(p.intro.motion)]
         ? p.intro : null;
       this.instances.push({ at, type, motion, root: node, pivot, bones,
-                            clock: 0, intro });
+                            clock: 0, intro, hp: p?.hp ?? 0,
+                            hits: new Map(), dead: false });
       this.posed.add(at);
       node.visible = false;
     }
@@ -205,7 +213,7 @@ export class CharacterLayer {
     for (const s of live) present.add(s.at);
 
     for (const inst of this.instances) {
-      const show = this.enabled && present.has(inst.at);
+      const show = this.enabled && present.has(inst.at) && !inst.dead;
       inst.root.visible = show;
       if (!show) continue;
       inst.clock += dt;
@@ -263,6 +271,75 @@ export class CharacterLayer {
     this.q.multiply(this.qa);
     this.qa.setFromAxisAngle(AXIS_X, rx * BAMS_TO_RAD);
     return this.q.multiply(this.qa);
+  }
+
+  /**
+   * Test a ray against every live character's per-bone hit spheres.
+   *
+   * `FUN_00404630` broad-phases on the actor's own sphere before descending
+   * into the bones; here the bone spheres are cheap enough (fifteen per
+   * character, a few dozen characters) that the broad phase would cost more
+   * than it saves, so it is skipped — the answer is the same.
+   *
+   * The sphere is `PTR_DAT_004D032C`'s centre and radius, carried on the bone
+   * and therefore moving with the animation exactly as `FUN_004107E0` makes it.
+   * Nearest along the ray wins, matching `FUN_00404DB0`'s sort.
+   */
+  pick(ray: Ray): { inst: Instance; bone: number; point: Vector3 } | null {
+    let best: { inst: Instance; bone: number; point: Vector3 } | null = null;
+    let bestT = Infinity;
+    for (const inst of this.instances) {
+      if (!inst.root.visible || inst.dead) continue;
+      for (const b of inst.type.bones) {
+        if (!b.hit_radius) continue;
+        const node = inst.bones.get(b.bone);
+        if (!node) continue;
+        this._c.set(b.hit_centre![0], b.hit_centre![1], b.hit_centre![2]);
+        node.localToWorld(this._c);
+        ray.closestPointToPoint(this._c, this._p);
+        const t = this._p.sub(ray.origin).dot(ray.direction);
+        if (t <= 0) continue;                         // behind the muzzle
+        if (ray.distanceSqToPoint(this._c) > b.hit_radius * b.hit_radius) continue;
+        if (t < bestT) {
+          bestT = t;
+          best = { inst, bone: b.bone, point: this._c.clone() };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Charge a hit, exactly as `FUN_00409430` does.
+   *
+   * Damage escalates with the number of hits **that bone** has already taken —
+   * `damage[bone][n]` — and the last step repeats once the row runs out, since
+   * the game's `next == 0` simply stops advancing. The difficulty modifier from
+   * `PTR_DAT_004D0D84` needs a rank and is not applied.
+   */
+  hit(inst: Instance, bone: number): {
+    damage: number; killed: boolean; head: boolean; hp: number;
+  } {
+    const b = inst.type.bones.find((x) => x.bone === bone);
+    const n = inst.hits.get(bone) ?? 0;
+    const row = b?.damage ?? [];
+    const damage = row.length ? row[Math.min(n, row.length - 1)] : 0;
+    inst.hits.set(bone, n + 1);
+    inst.hp -= damage;
+    const killed = inst.hp <= 0;
+    if (killed) inst.dead = true;
+    return { damage, killed, head: bone === inst.type.head_bone,
+             hp: Math.max(0, inst.hp) };
+  }
+
+  /** Revive everything — for a seek, which replays the script from the top. */
+  revive(): void {
+    for (const i of this.instances) {
+      i.dead = false;
+      i.hits.clear();
+      const p = this.json?.placements.find((x) => x.at === i.at);
+      i.hp = p?.hp ?? 0;
+    }
   }
 
   get describe(): string {

@@ -242,6 +242,11 @@ export interface BakedMotion {
 
 export interface CharacterBone {
   bone: number;
+  /** Hit-sphere centre in the bone's own space, from `PTR_DAT_004D032C`. */
+  hit_centre?: [number, number, number];
+  hit_radius?: number;
+  /** Damage for each successive hit on this bone, from `PTR_DAT_004C8350`. */
+  damage?: number[];
   /** The exporter's part name, which the glTF node name ends with. */
   part: string;
   slot: number;
@@ -256,6 +261,8 @@ export interface CharacterType {
   /** Bones in a motion frame — the stride, from the EXE. */
   bone_count: number;
   bones: CharacterBone[];
+  /** Bone the score model treats as the head — 2 on every humanoid. */
+  head_bone: number;
   motions: Record<string, BakedMotion>;
 }
 
@@ -266,6 +273,8 @@ export interface CharacterPlacement {
   char_type: number;
   /** null when this class has no motion rule yet — marker only. */
   motion: number | null;
+  /** `obj+0x11C` from the descriptor, before difficulty scaling. */
+  hp: number;
   /**
    * A scripted entrance played once before `motion` starts looping — state 21
    * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump

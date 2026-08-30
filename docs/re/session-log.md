@@ -3575,3 +3575,49 @@ assumed: baking a hinge pose into a single fixed rotation means collapsing
 like. All 195 composites round-trip to within 1e-4, so the odd-looking triples
 the decomposition emits (0x8000 in x and z where a plain yaw was expected) are
 equivalent branches and not errors.
+
+## Shooting, read end to end
+
+The chain from trigger to corpse turned out to be eight short functions, and
+following it in the *reverse* direction — from where the damage lands back to
+where the trigger is read — was much faster than looking for an input handler.
+
+`FUN_004098C0` is three lines: `obj+0x11C -= damage`. Its only caller is
+`FUN_00409430`, which is the whole damage model; its only caller is
+`FUN_004092F0`, which each actor runs on itself; and above that the pick,
+`FUN_00404570` → `FUN_00404630` → `FUN_00404700` → `FUN_00404750` →
+`FUN_004047D0` → `FUN_004062A0`. Six functions, none longer than a screen.
+
+Three findings worth keeping.
+
+**The hit test reuses the render skeleton.** `FUN_00404700` walks
+`PTR_DAT_004E0430[char_type]` — the same node tree, with the same `+0x16` count
+and `+0x18` children — that `FUN_00410590` draws through. So the shot geometry
+and the visible geometry cannot drift, and the per-bone hit spheres in
+`PTR_DAT_004D032C` are copied into the bone's draw record by `FUN_004107E0`
+alongside its matrix, which means they follow the animation for free. That table
+is the one guessed at as "hit spheres" two sessions ago from the radii alone;
+this is the confirmation, and it also closes it properly.
+
+**Damage is per bone AND per hit on that bone.** `FUN_00409430` indexes
+`bone * 6 + obj[0x298 + bone*0x90]`, the second term being the count of hits
+that bone has already taken. So each bone has a six-step escalation, and a
+zombie's head runs 100, 120, 140, 160 while its feet stay at 20. The same index
+into `PTR_DAT_004C7160` gives the asset slot the bone is **redrawn** with —
+`FUN_004098E0` writes it into `record[0]`, which is the slot `FUN_00411050`
+draws — so a zombie visibly comes apart where you shoot it.
+
+**The head combo resets on a body shot.** `ScoreAddForPlayer(player, 0x78)`
+then `combo += 10`, and every non-head hit writes `combo = 0`. That reset is the
+entire point of the counter and is easy to miss reading the branch quickly.
+
+One thing the reverse walk gave away for free: `FUN_004093C0` randomises which
+player resolves first in two-player, so simultaneous hits do not systematically
+favour player 1.
+
+Implemented with the sphere pass, the bone-indexed escalation, nearest-first
+resolution and the exact score. Left out with reasons stated rather than
+silently: the collision-mesh refinement, the difficulty modifier, ammo, reload,
+civilians, and the death animation — the last because which motion a dying actor
+plays comes from the 54-state machine and only two of those states have been
+read.

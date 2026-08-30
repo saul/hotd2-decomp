@@ -136,6 +136,19 @@ MOTION_STATE_CUE = 21
 #: game is well inside it.
 MAX_BAKED_FRAMES = 600
 
+#: `PTR_DAT_004D032C[char_type]`, stride 0x14 indexed ``bone - 1``:
+#: ``{u32 slot; f32 centre[3]; f32 radius}``. The per-bone hit sphere the shot
+#: test uses -- see docs/formats/combat.md.
+HIT_SPHERES = 0x004D032C
+#: `PTR_DAT_004C8350[char_type]`: ``u16[bone][6]``, damage for each successive
+#: hit on that bone.
+HIT_DAMAGE = 0x004C8350
+#: `PTR_DAT_004C7160[char_type]`: ``u16[bone][6]``, the asset slot the bone is
+#: redrawn with after each hit -- the gore swap.
+HIT_EFFECT = 0x004C7160
+#: Steps per bone in both tables.
+HIT_STEPS = 6
+
 #: The spawn's authored yaw is used **as written**. There is no half turn.
 #:
 #: An earlier revision added 0x8000 here on the strength of a measurement:
@@ -190,6 +203,10 @@ class Character:
             "bone_count": self.bone_count,
             "bones": self.bones,
             "extras": [f"0x{s:04X}" for s in self.extras],
+            # Bone 2 is the head on every 15-bone humanoid, and the head is
+            # what the score model keys on; carried rather than assumed by
+            # the client.
+            "head_bone": 2,
             "motions": {str(k): v for k, v in self.motions.items()},
         }
 
@@ -206,10 +223,13 @@ class Placement:
     #: A scripted entrance played once before the loop -- see
     #: :data:`MOTION_STATE_CUE`.
     intro: tuple[int, int] | None = None   #: ``(motion, delay_frames)``
+    #: `obj+0x11C`, from the descriptor's ``+0x22``. Difficulty scaling is not
+    #: applied -- see docs/formats/combat.md.
+    hp: int = 0
 
     def to_json(self) -> dict:
         d = {"at": self.at, "class": self.cls, "char_type": self.char_type,
-             "motion": self.motion}
+             "motion": self.motion, "hp": self.hp}
         if self.intro:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
         return d
@@ -364,7 +384,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         motion = motion_for(tables, rec, sp["class"])
         intro = intro_for(tables, rec, sp["class"])
         placements.append(Placement(at, sp["class"], res.char_type, motion, sp,
-                                    intro))
+                                    intro, sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note
         if res.char_type not in chars:
@@ -449,16 +469,55 @@ def _second_root(bones: list[dict]) -> dict | None:
     return roots[1] if len(roots) > 1 else (roots[0] if roots else None)
 
 
+def _u16_table(tables, base: int, char_type: int, bone: int) -> list[int]:
+    """One bone's six-step row from a per-character ``u16[bone][6]`` table."""
+    b = tables._v2r(base)
+    if b is None:
+        return []
+    p = tables._v2r(struct.unpack_from("<I", tables.data, b + char_type * 4)[0])
+    if p is None:
+        return []
+    o = p + bone * HIT_STEPS * 2
+    if o + HIT_STEPS * 2 > len(tables.data):
+        return []
+    return list(struct.unpack_from(f"<{HIT_STEPS}H", tables.data, o))
+
+
+def hit_sphere(tables, char_type: int, bone: int):
+    """``(centre, radius)`` for one bone, or None when it has no sphere."""
+    b = tables._v2r(HIT_SPHERES)
+    if b is None or bone < 1:
+        return None
+    p = tables._v2r(struct.unpack_from("<I", tables.data, b + char_type * 4)[0])
+    if p is None:
+        return None
+    o = p + (bone - 1) * 0x14
+    if o + 0x14 > len(tables.data):
+        return None
+    cx, cy, cz, r = struct.unpack_from("<4f", tables.data, o + 4)
+    return ((cx, cy, cz), r) if r > 0 else None
+
+
 def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
     skel = tables.character_skeleton(char_type)
     if not skel:
         return None
-    bones = [{"bone": n["bone"],
-              "part": f"bone{n['bone']:02d}_{n['slot']:04x}",
-              "slot": n["slot"],
-              "offset": list(n["offset"]),
-              "parent": n["parent"]}
-             for n in skel]
+    bones = []
+    for n in skel:
+        b = {"bone": n["bone"],
+             "part": f"bone{n['bone']:02d}_{n['slot']:04x}",
+             "slot": n["slot"],
+             "offset": list(n["offset"]),
+             "parent": n["parent"]}
+        sph = hit_sphere(tables, char_type, n["bone"])
+        if sph:
+            b["hit_centre"] = list(sph[0])
+            b["hit_radius"] = sph[1]
+        dmg = [v for v in _u16_table(tables, HIT_DAMAGE, char_type, n["bone"])
+               if v]
+        if dmg:
+            b["damage"] = dmg
+        bones.append(b)
     return Character(char_type=char_type,
                      name=asset_file.removesuffix(".bin"),
                      file=asset_file,

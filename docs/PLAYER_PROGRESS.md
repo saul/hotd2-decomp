@@ -307,6 +307,40 @@ spawn that has a real character so the two never draw on top of each other.
 | 5 | 4 | 25 |
 | 6 | 2 | 20 |
 
+## Shooting
+
+**Done, for the parts that are exact.** Full account in
+[`formats/combat.md`](formats/combat.md); the short version:
+
+* A shot is a **ray from the camera through the crosshair**. `FUN_00406110`
+  unprojects with the game's own projection distance — `640.21 = 240 / tan(41.1°
+  / 2)` — so the client uses the camera it already renders through and gets the
+  identical ray. Range 1000 units, as `FUN_00404AD0` builds it.
+* The test walks **the same skeleton tree the renderer uses** and intersects a
+  **per-bone sphere** from `PTR_DAT_004D032C` — `{slot, centre, radius}` indexed
+  `bone − 1`, copied into the bone's draw record each frame so it follows the
+  animation. A zombie's radii read as anatomy: torso 2.55, head 1.3, upper arm
+  1.4, hand 0.8, pelvis 1.75, thigh 2.15. Nearest along the ray wins, as
+  `FUN_00404DB0` sorts.
+* Damage escalates **per bone, per hit on that bone**: `PTR_DAT_004C8350`
+  indexed `bone*6 + hits_already_taken`. The head runs **100, 120, 140, 160**,
+  the torso 50/60/70, limbs 20–35. HP is the descriptor's `+0x22`.
+* Score is `FUN_00409430`'s: **10** a hit, **120 + a combo** on the head where
+  the combo grows by 10 per consecutive headshot and **any non-head hit resets
+  it**, and **80** on the kill.
+
+Not implemented, and each for a stated reason: the per-bone **collision-mesh**
+refinement (the sphere alone picks the same bone except at grazing angles), the
+**difficulty modifier** at `PTR_DAT_004D0D84` (needs a rank), **ammo and
+reload**, **civilians**, and the **death animation** — which motion a dying
+actor plays comes from its class's 54-state machine and only two of those states
+have been read, so a killed character is removed and the HUD says so.
+
+The **gore swap** is decoded but not drawn: `FUN_004098E0` writes the effect
+slot straight into the bone's draw record, so a hit replaces that body part with
+a damaged variant, escalating per hit through `PTR_DAT_004C7160`. Drawing it
+needs the shared fallback set `FUN_004099A0` resolves, which is not read yet.
+
 ## Scripted scenery: doors, shutters and vans
 
 **Done for the hinge family.** The zombies that lunge out of a van in stage 2

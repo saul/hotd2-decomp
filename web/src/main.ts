@@ -43,6 +43,7 @@ import { Backdrop } from "./backdrop";
 import { RigLayer } from "./rigs";
 import { CharacterLayer } from "./characters";
 import { PropLayer } from "./props";
+import { Shooting } from "./shooting";
 import { Hud as HudLayer } from "./hud";
 import { Rain } from "./rain";
 
@@ -84,6 +85,7 @@ class Player {
   private readonly rigs = new RigLayer();
   private readonly chars = new CharacterLayer();
   private readonly props = new PropLayer();
+  private readonly shooting = new Shooting($("#viewport"), this.chars);
   private readonly rain = new Rain();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
@@ -199,6 +201,9 @@ class Player {
     // Doors, shutters and the vans they hang off; driven by the script's
     // own flags, so nothing here needs a clock of its own.
     this.props.attach(this.stage.root, bundle.script.props);
+    this.shooting.reset();
+    this.shooting.setEnabled(
+      $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
     this.rain.attach(this.stage.root, bundle.script.rain);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
@@ -367,6 +372,21 @@ class Player {
     $<HTMLInputElement>("#show-props").addEventListener("change", (e) => {
       this.props.setEnabled((e.target as HTMLInputElement).checked);
     });
+    $<HTMLInputElement>("#shoot").addEventListener("change", (e) => {
+      this.shooting.setEnabled((e.target as HTMLInputElement).checked,
+                               this.camera, this.scene);
+      this.refreshUi();
+    });
+    // Every shot goes to the feed, so a session reads back as a transcript.
+    this.shooting.onShot = (r, note) => {
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1,
+              name: r.hit ? "shot · hit" : "shot · miss", cat: "combat" },
+        note,
+      });
+      this.refreshUi();
+    };
     $<HTMLInputElement>("#pillarbox").addEventListener("change", (e) => {
       this.pillarbox = (e.target as HTMLInputElement).checked;
       this.resize();
@@ -673,6 +693,7 @@ class Player {
     // Without this the caption from wherever you were still hangs there.
     this.hudLayer.reset();
     this.props.reset();
+    this.shooting.reset();
     w.seek(block, step, op);
     this.hudLayer.setShutterState(w.shutterState);
     this.syncCameraToWalker();
@@ -967,6 +988,7 @@ class Player {
       ["rigs", this.rigs.describe],
       ["characters", this.chars.describe],
       ["props", this.props.describe],
+      ["shooting", this.shooting.describe],
       ["shutter", this.hudLayer.describe],
       // The two globals the skip feature hangs off, so it is visible that the
       // region opened and the gate dropped even when nothing is pressed.

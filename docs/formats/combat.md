@@ -685,6 +685,52 @@ named function is the *first frame* and the steady state is a separate entry
 Ghidra had not split out. Decompiling the name alone shows setup code and hides
 the loop.
 
+### Registering, and the slot table
+
+`RegisterForCameraTracking` (`FUN_00408EC0`) is where an enemy joins the
+candidate list, and its first line is the important one:
+
+```c
+if (obj->flags & 0x10000) return;                 /* not a candidate at all */
+key = (int)(|actor.pos - camera_eye| * 10.0f);    /* 0x004C43A4 */
+candidates[n++] = {key, obj};                     /* at most 14 */
+```
+
+`ZombieStateApproach` **sets** `0x10000` while it walks and **clears** it the
+instant the actor wins a permit, so the camera never considers an enemy that
+has not committed. `SortCameraCandidates` is an LSD radix sort, two 8-bit
+passes over that 16-bit key — nearest first — and `UpdateCameraEnemySlots`
+then deals them out: permit holders into slots **0 and 1**, everyone else from
+slot 2 (`ClaimCameraEnemySlot` fills 2..13).
+
+### The turn rate
+
+`ComputeLookAtAngleError` clamps the angle between where the camera looks and
+where it wants to look to `0x1FFF` (45°), shifts right 7, and indexes one of
+four 64-byte curves. The scene reset picks **curve 1**:
+
+| Angle error | Rate | Step per frame |
+|---|---|---|
+| 0° – ~18° | **64** | 1/65 |
+| ~18° – ~23° | 63 → 22 | ramp |
+| ~23° – 45° | **16** | 1/17 |
+
+A larger rate is a *slower* turn, so the camera nearly holds still while the
+target is close to centre and swings briskly once it is wide. That curve is the
+feel of the thing. With nothing registered the rate is a flat **12**.
+
+### The whole loop
+
+```
+state 22  ZombieStateApproach   walk in; the ring you start in sets the steps
+          TryClaimAttackSlot    one permit per player; win it or keep walking
+state 1   ZombieStateAttackRun  close until TestApproachRing returns 1
+state 2                         the strike
+```
+
+with `SelectCameraLookAtTarget` reading the slot table every frame, so the
+camera swings onto whoever just took a permit and follows them in.
+
 ## 11. What the player implements
 
 Exact: the hit spheres, hit points through `ActorInitHitPoints`, the per-bone
@@ -727,6 +773,36 @@ Not implemented, and why:
 * the **adaptive rank** itself. `UpdateDamageRank` needs lives lost and elapsed
   play time; the player holds the rank at `g_initial_damage_rank[difficulty]`,
   which is what a fresh game starts on.
+
+The gameplay loop **is** implemented: the advance rings, the per-band step
+counts, the attack permit, the attack run and the strike, actors turning to
+face the camera, and the tracking camera with its slot table, nearest-first
+ordering and turn-rate curve. Two things in it are not transcribed and are
+marked as such in `enemies.ts`:
+
+* **how fast an enemy walks** is `[open]` — the velocity source in the
+  class-0x30 update was not found, so the speed is derived from the game's own
+  ring table instead: an actor crosses a band in the number of steps that band
+  allots, one step being one cycle of its walk motion. That falls out at about
+  6 units/second on the default rings;
+* **the strike itself** is `[open]`; the player holds the pose for one step and
+  then releases the permit so the next enemy can commit.
+
+And one question was asked and **not** answered, which is worth stating rather
+than guessing at. Do zombies aim their torso and head at the player
+independently of their body yaw? The pose path that has been read —
+`SkeletonBuildAndPose` -> `SkeletonWalkNode` — is **pure motion**: every bone's
+rotation comes from `g_frame_bone_rotations`, which points straight into the
+loaded motion bank, and nothing adds an actor-derived angle to any bone.
+`EnemyZombieInit` does compute a pitch and yaw toward the camera into
+`obj+0x1320`/`+0x1324`, and no reader for them was found in the class-0x30
+range. But the per-frame pose is reached through function pointers stored in
+the object (`+0x1158`, `+0x1174`), so an xref sweep cannot settle it — the
+same trap that produced the wrong camera conclusion earlier in this file.
+So: `[open]`. What would settle it is reading the stored callbacks rather than
+sweeping xrefs. What the game demonstrably *does* do is turn the whole actor
+(`TurnActorTowardCamera`) and select directional motion variants, which is
+enough to read as aiming.
 
 `tools/verify_combat.py` is the check: it re-derives the step tables from raw
 bytes, asserts the control-code/slot gap across all 86 character types,

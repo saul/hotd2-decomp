@@ -297,6 +297,13 @@ export interface CharacterPlacement {
   hp: number;
   /** The actor's BAMS yaw — the directional death compares the camera's to it. */
   yaw: number;
+  /** Class-0x30 descriptor tail: see `Placement` in hod2lib/characters.py. */
+  body_condition: number;
+  initial_state: number;
+  /** State to enter once the approach finishes. 0 means it never attacks. */
+  attack_state: number;
+  /** Which of `approach.rings` this actor measures against. */
+  ring_set: number;
   /**
    * A scripted entrance played once before `motion` starts looping — state 21
    * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump
@@ -340,6 +347,35 @@ export interface CombatJson {
   };
 }
 
+/** The advance rings — see docs/formats/combat.md §10. */
+export interface ApproachJson {
+  /** `{inner, mid, outer}` per ring set, from `DAT_004C4CD0`. */
+  rings: { inner: number; mid: number; outer: number }[];
+  /** Steps to walk: `base` inside the middle ring, plus the adds further out. */
+  steps: { base: number; mid_add: number; outer_add: number };
+  ring_set_for_char0: number;
+}
+
+/** What the gameplay camera aims at and how fast it turns. */
+export interface TrackingJson {
+  /** Four 64-entry turn-rate curves; a larger value is a *slower* turn. */
+  curves: number[][];
+  /** The one the scene reset selects. */
+  curve: number;
+  /** Angle error is clamped here (0x1FFF BAMS = 45°) before `>> 7`. */
+  error_clamp: number;
+  /** Flat rate used when nothing is being tracked. */
+  rate_untracked: number;
+  /** `TurnLookAtToward` re-emits the look-at this far from the eye. */
+  lookat_radius: number;
+  /** Sort key is `|actor − eye| × this`, ascending. */
+  distance_scale: number;
+  attack_slots: number;
+  slots: number;
+  max_candidates: number;
+  face_offset: number;
+}
+
 /** `ActorInitHitPoints` and `ResetDamageRank`. */
 export interface DifficultyJson {
   /** Added to a spawn's hit points, by menu difficulty 0..4. */
@@ -362,6 +398,8 @@ export interface CharactersJson {
   reaction_groups: number[];
   /** `ActorPlayHitReaction`'s cross-fade lengths, in frames. */
   reaction_blend: { frames: number; sever: number; hard_set_from_bone: number };
+  approach: ApproachJson;
+  tracking: TrackingJson;
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
   note: string;

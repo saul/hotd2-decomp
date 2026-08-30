@@ -307,6 +307,39 @@ spawn that has a real character so the two never draw on top of each other.
 | 5 | 4 | 25 |
 | 6 | 2 | 20 |
 
+## The gameplay loop
+
+**Done.** Enemies advance by the game's own **advance rings**, compete for an
+**attack permit**, and the camera follows whoever holds one. Full account in
+[`formats/combat.md`](formats/combat.md) §10; the short version:
+
+* Every enemy measures its distance **to the camera** — the camera is the
+  player here — and the ring it starts in sets how many steps it walks before
+  it may attack: `{25, 38, 51}` radii, 2 / +3 / +4 steps, from `DAT_004C4CD0`
+  and `FUN_00408D60`. No stage uses evt `0x0E`, so those constants are what
+  every encounter runs on.
+* `TryClaimAttackSlot` grants **one permit per player**. Only the holder enters
+  its attack state; everyone else keeps walking. That one byte (`obj+0x121`)
+  also decides the camera's focus.
+* `RegisterForCameraTracking` skips any actor with flag `0x10000`, which the
+  approach state sets while walking and clears when the actor wins a permit —
+  so the camera only ever considers enemies that have committed. Candidates are
+  keyed `|actor − eye| × 10` and radix-sorted nearest-first; permit holders take
+  slots 0 and 1, the rest from 2.
+* `SelectCameraLookAtTarget` aims at the lone attacker, the midpoint of two, or
+  — with none registered — the `cam/` path's own target, so with no enemies the
+  authored camera is reproduced exactly.
+* `TurnLookAtToward` eases onto it by `1/(1+rate)` per frame, rate from a
+  64-entry curve: **64 below ~18° of error, 16 past ~23°**. That curve is the
+  camera's feel — it holds for small offsets and swings for wide ones.
+
+The **Track** checkbox turns it off, restoring the authored path exactly.
+
+`[open]`, and marked in `enemies.ts`: the walk speed (derived from the ring
+table rather than found), the strike itself, and whether zombies aim torso and
+head independently of body yaw — the pose path read so far is pure motion, but
+it is reached through stored function pointers, so that is not settled.
+
 ## Shooting
 
 **Done, for the parts that are exact.** Full account in

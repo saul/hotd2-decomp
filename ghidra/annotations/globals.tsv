@@ -200,3 +200,11 @@
 009c6fa8	g_camera_lookat_target	The point the camera *wants* to look at, chosen by SelectCameraLookAtTarget: a single attacking enemy, the midpoint of two, or the cam/ path's own target when no enemies are registered.
 009c70d8	g_cam_path_target	The look-at CamEvalPath7 evaluates from the path's target channels, independent of its eye channels -- which is how a path holds the eye still and sweeps the aim.
 009c8e84	g_max_attackers	How many enemies may hold an attack permit at once: 1 or 2.
+004c4cd0	g_approach_ring_defaults	Four {inner, mid, outer} f32 ring sets copied into g_enemy_approach_rings by the scene reset. 25/38/51 for most characters, 37/48/51 for set 2. No stage script uses evt 0x0E, so these are what every encounter runs on.
+004c43a4	g_camera_track_key_scale	10.0f. RegisterForCameraTracking's sort key is the distance from the camera eye times this, as an int.
+00576c04	g_camera_turn_rate_curves	Four 64-byte curves indexed by the look-at angle error clamped to 0x1FFF and shifted right 7. The scene reset selects curve 1: rate 64 below about 18 degrees, ramping to 16 past 23. A larger value is a SLOWER turn.
+0059c988	g_camera_is_tracking	Zeroed by SelectCameraLookAtTarget when no enemy is registered; CameraTrackEnemiesTick uses it to choose between the angle-error curve and a flat rate.
+009c6f38	g_camera_turn_curve	Index into g_camera_turn_rate_curves; the scene reset sets 1.
+009c6f36	g_camera_turn_rate	The rate TurnLookAtToward divides by, refreshed every frame.
+005a4dc8	g_camera_candidates	{u32 distance key; void *actor} pairs, at most 14, radix-sorted nearest-first before the slots are assigned.
+009ca93c	g_camera_candidate_count	How many entries g_camera_candidates holds this frame.

@@ -33,7 +33,16 @@ byte. The readings under test are the ones docs/formats/combat.md states:
    the line by accident. The bone-to-group map is also checked to partition
    bones 1..15 into the seven named regions and nothing else.
 
-7. **Every sound id names a file.** The voice, impact and ricochet tables are
+7. **The approach and tracking tables are shaped like what they claim to be.**
+   Every ring set is ordered ``inner < mid <= outer``; the step counts grow
+   outward; every turn-rate curve has 64 positive entries; and the curve the
+   scene reset selects is **non-increasing** — the camera can only turn faster
+   as the target gets further off-axis, never slower. A misread stride or base
+   would break the ordering. Curve **0** is skipped: it lives in `.data` at
+   `0x0059C9A8`, not `.rdata`, and is a runtime working copy that is zero in
+   the file on disk.
+
+8. **Every sound id names a file.** The voice, impact and ricochet tables are
    read as `g_se_name_list` ids; a table read at the wrong address would give
    ids that resolve to nothing, so this fails loudly if the address is wrong.
 
@@ -196,6 +205,28 @@ def main() -> int:
             fails.append(f"reaction motion {m} has play length {play(m)}")
 
     # 7 ------------------------------------------------------------------
+    ap = ch.approach_tables(tables)
+    for i, r in enumerate(ap["rings"]):
+        if not (0 < r["inner"] < r["mid"] <= r["outer"]):
+            fails.append(f"ring set {i} is not ordered: {r}")
+    st = ap["steps"]
+    if not (st["base"] > 0 and st["mid_add"] > 0 and st["outer_add"] > 0):
+        fails.append(f"approach step counts are not all positive: {st}")
+    tr = ch.camera_tracking(tables)
+    for i, c in enumerate(tr["curves"]):
+        if len(c) != ch.TURN_RATE_CURVE_LEN:
+            fails.append(f"turn-rate curve {i} is {len(c)} entries")
+        elif i and any(v <= 0 for v in c):     # curve 0 is a runtime buffer
+            fails.append(f"turn-rate curve {i} has a non-positive rate: "
+                         f"min {min(c)}")
+    sel = tr["curves"][tr["curve"]]
+    if any(sel[i + 1] > sel[i] for i in range(len(sel) - 1)):
+        fails.append(f"turn-rate curve {tr['curve']} is not non-increasing")
+    print(f"  {len(ap['rings'])} ring sets, steps "
+          f"{st['base']}/+{st['mid_add']}/+{st['outer_add']}; "
+          f"curve {tr['curve']} runs {sel[0]} -> {sel[-1]}")
+
+    # 8 ------------------------------------------------------------------
     se = tables.se_names()
     combat = ch.combat_tables(tables)
     ids = [s["id"] for s in combat["impact"] + combat["head_impact"]]

@@ -44,6 +44,7 @@ import { RigLayer } from "./rigs";
 import { CharacterLayer } from "./characters";
 import { PropLayer } from "./props";
 import { Shooting } from "./shooting";
+import { EnemyDirector } from "./enemies";
 import { Hud as HudLayer } from "./hud";
 import { Rain } from "./rain";
 
@@ -86,6 +87,14 @@ class Player {
   private readonly chars = new CharacterLayer();
   private readonly props = new PropLayer();
   private readonly shooting = new Shooting($("#viewport"), this.chars);
+  /** Approach, attack permits, and the look-at the camera tracks. */
+  private readonly enemies = new EnemyDirector();
+  private readonly trackWant = new Vector3();
+  private readonly trackNow = new Vector3();
+  private trackValid = false;
+  private readonly _eye = new Vector3();
+  /** UI toggle — off restores the exact authored camera. */
+  private trackEnabled = true;
   private readonly rain = new Rain();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
@@ -203,6 +212,10 @@ class Player {
     this.props.attach(this.stage.root, bundle.script.props);
     this.shooting.reset();
     this.shooting.setTables(bundle.script.characters?.combat);
+    this.enemies.reset();
+    this.enemies.setTables(bundle.script.characters?.approach,
+                           bundle.script.characters?.tracking);
+    this.trackValid = false;
     this.shooting.playSound = (id) => { this.bgm.play(id); };
     this.shooting.setEnabled(
       $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
@@ -376,6 +389,11 @@ class Player {
     });
     $<HTMLInputElement>("#show-props").addEventListener("change", (e) => {
       this.props.setEnabled((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#track-enemies").addEventListener("change", (e) => {
+      this.trackEnabled = (e.target as HTMLInputElement).checked;
+      this.trackNow.set(0, 0, 0);
+      this.syncCameraToWalker();
     });
     $<HTMLInputElement>("#shoot").addEventListener("change", (e) => {
       const on = (e.target as HTMLInputElement).checked;
@@ -867,10 +885,22 @@ class Player {
     const p = this.paths?.paths.get(cam.slot);
     if (!p) return;
     p.pose(cam.frame, w.rollEnabled, this.pose);
+    const eyeY = cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY);
+    // `SelectCameraLookAtTarget`: when enemies are registered the camera aims
+    // at them instead of at the path's target, eased on by `TurnLookAtToward`.
+    // With none registered this is skipped entirely and the path is exact.
+    if (this.trackValid && this.trackEnabled) {
+      this._eye.set(this.pose.eye.x, eyeY, this.pose.eye.z);
+      this.enemies.turn(this._eye, this.trackNow.lengthSq() ? this.trackNow
+                                                            : this.pose.target,
+                        this.trackWant, this.trackNow);
+      this.pose.target.copy(this.trackNow);
+    } else {
+      this.trackNow.set(0, 0, 0);
+    }
     // The orientation comes from the raw curve pair; only the eye's height is
     // adjusted, and only after. Doing it the other way round tilts the shot.
-    applyPose(this.camera, this.pose,
-              cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY));
+    applyPose(this.camera, this.pose, eyeY);
     this.rails?.setCameraPose(this.camera.position, this.pose.target);
   }
 
@@ -926,6 +956,13 @@ class Player {
       this.rigs.update(cam ? cam.slot : null, cam ? cam.frame : 0);
       // Characters run on their own 30 Hz motion clock, not the camera's:
       // an idle loops whatever the shot is doing.
+      // The director runs first: it owns where the enemies are and which one
+      // has committed to attacking, and the camera reads its answer.
+      if (!this.state.freeze) {
+        this.trackValid = this.enemies.update(
+          this.chars.actors, this.camera.position, dt * this.speed,
+          this.trackWant);
+      }
       this.chars.update(this.walker.spawns,
                         this.state.freeze ? 0 : dt * this.speed);
       // The swing counter is game frames, so a paused player holds a
@@ -1009,6 +1046,7 @@ class Player {
       ["characters", this.chars.describe],
       ["props", this.props.describe],
       ["shooting", this.shooting.describe],
+      ["enemies", this.enemies.describe],
       ["shutter", this.hudLayer.describe],
       // The two globals the skip feature hangs off, so it is visible that the
       // region opened and the gate dropped even when nothing is pressed.

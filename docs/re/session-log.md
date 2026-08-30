@@ -3944,3 +3944,67 @@ paths 108 and 109 hold it at **0.00** over 160 frames while the target travels
 150 and the yaw sweeps **110 degrees**. So both mechanisms exist and both
 produce the same visible effect, which is worth remembering before attributing
 a pan to either one.
+
+---
+
+## The gameplay loop: rings, permits, and the camera that follows them
+
+Implemented the whole chain in the player. The decomp went in four steps and
+each one hinged on something that an xref sweep alone would have missed.
+
+**The camera modes hide their loops.** `CameraSnapToPathEye` and its three
+siblings each re-point `g_camera_update_hook` at an address *inside*
+themselves, so the named function is the first frame only. Splitting
+`0x40C470` out as `CameraHoldEyeTick` showed it writes **only the eye** — which
+is why the camera can sit still while the aim moves.
+
+**The tracking camera is a separate function entirely**, `CameraTrackEnemiesTick`
+(`FUN_00402890`), reachable only through a table at `0x00576CC8`. It calls
+`SelectCameraLookAtTarget`, eases with `TurnLookAtToward`, and takes its rate
+from `ComputeLookAtAngleError`.
+
+**Registration is gated on a flag that the approach state owns.**
+`RegisterForCameraTracking` skips any actor with `obj+0x34 & 0x10000`, and
+`ZombieStateApproach` sets that while walking and clears it the moment the
+actor wins an attack permit. So "the camera follows the zombie about to
+attack" is not a heuristic anywhere — it is one flag, set in one place.
+
+**The sort key had to be read as assembly.** The decompiler dropped the FPU
+argument to `__ftol` in `RegisterForCameraTracking`, exactly as this project's
+notes warn. The disassembly gives
+`key = (int)(|actor − camera_eye| × 10.0f)`, radix-sorted ascending: nearest
+first.
+
+The turn-rate curve is the part that gives the camera its character: rate 64
+(a 1/65 step) below about 18 degrees of error, ramping to 16 past 23. It
+barely moves for small offsets and swings for wide ones.
+
+### What was left open, deliberately
+
+* **Walk speed.** The velocity source in the class-0x30 update was not found —
+  no `fstp [reg+0x4c]` anywhere in `0x455000..0x459000`. Rather than invent a
+  number, the player derives it from the ring table: an actor crosses a band in
+  the number of steps that band allots, a step being one cycle of its walk
+  motion. About 6 units/second on the default rings. Marked `[likely]`.
+* **The strike.** Held for one step, then the permit is released.
+* **Torso and head aim.** Asked whether zombies aim their upper body at the
+  player independently of their body yaw. The pose path that has been read is
+  pure motion: `SkeletonWalkNode` takes every bone's rotation from
+  `g_frame_bone_rotations`, which points **into the loaded motion bank**, and
+  nothing adds an actor-derived angle. `EnemyZombieInit` does compute a pitch
+  and yaw toward the camera into `obj+0x1320/+0x1324` and no reader was found
+  in the class-0x30 range.
+
+  That is suggestive but **not** conclusive, and this is the second time in one
+  session the distinction has mattered: the per-frame pose is reached through
+  function pointers stored in the object (`+0x1158`, `+0x1174`), so xrefs
+  cannot see the call. Recording it as `[open]` rather than either implementing
+  a guess or repeating the mistake of calling an absent xref a proof. The way
+  to settle it is to read those stored callbacks.
+
+Data recovered along the way: the advance rings default to `{25, 38, 51}`
+(`{37, 48, 51}` for character type 0) from `DAT_004C4CD0`, step counts 2 / +3 /
++4 from `FUN_00408D60`, and **no stage script uses evt `0x0E`** — the opcode
+that would override the rings — so those constants are what every encounter in
+the game actually runs on. Evt `0x0F` (54 uses) and `0x12` (6) do set the step
+counts.

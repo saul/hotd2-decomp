@@ -54,6 +54,7 @@ import type {
   BakedMotion, CharacterPlacement, CharactersJson, CharacterType,
 } from "./bundle";
 import type { ActiveSpawn } from "./walker";
+import type { EnemyActor } from "./enemies";
 
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
@@ -73,6 +74,16 @@ const AXIS_Z = new Vector3(0, 0, 1);
  * about the joint — which is exactly what "the parts are detached" looks like.
  */
 const boneSuffix = (part: string) => `_${part}`;
+
+/**
+ * How long one cycle of an actor's walk takes — a "step" in the ring model.
+ * `ZombieStateApproach` counts steps, and a step is one pass of the looping
+ * motion, so the clip's own length is the answer.
+ */
+function stepSecondsOf(type: CharacterType, motion: number): number {
+  const m = type.motions[String(motion)];
+  return m && m.fps > 0 ? m.frames / m.fps : 1;
+}
 
 interface Instance {
   /** evt offset of the spawn descriptor — the identity the walker uses. */
@@ -105,6 +116,11 @@ interface Instance {
   dead: boolean;
   /** The actor's own BAMS yaw, for the directional death. */
   yaw: number;
+  /**
+   * The view the enemy director owns: position and facing live here so the AI
+   * can move the actor without reaching into three.js nodes.
+   */
+  actor: EnemyActor;
   /**
    * The death clip, once chosen. It plays **once and holds its last frame** —
    * `FUN_00454D20` waits for the clip to finish and then hands the body to
@@ -232,7 +248,16 @@ export class CharacterLayer {
                             latched: new Set<number>(),
                             removed: new Set<number>(),
                             hits: new Map(), dead: false, yaw: p?.yaw ?? 0,
-                            death: null, react: null, gore: new Map() });
+                            death: null, react: null, gore: new Map(),
+                            actor: {
+                              at, charType: type.type,
+                              ringSet: p?.ring_set ?? 0,
+                              attackState: p?.attack_state ?? 0,
+                              pos: node.position.clone(),
+                              yaw: p?.yaw ?? 0,
+                              dead: false, visible: false,
+                              stepSeconds: stepSecondsOf(type, motion),
+                            } });
       this.posed.add(at);
       node.visible = false;
     }
@@ -268,7 +293,15 @@ export class CharacterLayer {
       // body on, so removing it the instant HP hits zero would be wrong.
       const show = this.enabled && present.has(inst.at);
       inst.root.visible = show;
+      inst.actor.visible = show;
+      inst.actor.dead = inst.dead;
       if (!show) continue;
+      // The director owns position and facing; apply what it decided. The
+      // exporter baked the spawn pose into the root, and this replaces it
+      // with the live one rather than composing onto it.
+      inst.root.position.copy(inst.actor.pos);
+      inst.root.rotation.set(0, inst.actor.yaw * BAMS_TO_RAD, 0);
+      inst.yaw = inst.actor.yaw;
       if (inst.death) inst.death.t += dt;
       else {
         inst.clock += dt;
@@ -791,6 +824,11 @@ export class CharacterLayer {
       }
       i.hp = this.startHp(this.json?.placements.find((x) => x.at === i.at));
     }
+  }
+
+  /** The director's view of every instance. */
+  get actors(): EnemyActor[] {
+    return this.instances.map((i) => i.actor);
   }
 
   /** Live, visible, shootable actors — what the enemy-wait opcodes count. */

@@ -62,7 +62,7 @@
 00408c80	EvtOpSetApproachSteps0F
 00408cc0	EvtOpSetApproachStepsTwoPlayerBias12
 00408d10	EvtOpSetApproachRings0E
-00408e80	RegisterEnemySlot
+00408e80	RegisterEnemySlot	Takes the first free general slot, 2..13; slots 0 and 1 are reserved for enemies holding an attack permit. The slot index is kept in obj+0x120.
 00409270	ActorClaimHitSlot	14-slot table at g_hit_slots; sets obj+0x38 |= 0x40
 004092d0	ActorFreeHitSlot
 004092f0	DispatchHit
@@ -293,3 +293,16 @@
 00456520	ReleaseAttackSlot	Frees the attack permit at obj+0x121 and clears the global commit latch.
 00456560	ReleaseEnemyAliveCount	Decrements g_enemies_alive exactly once, guarded by obj+0x38 bit 1. This is what opens wait_enemies_alive.
 00456580	ReleaseEnemyPresentCount	Decrements g_enemies_present exactly once, guarded by obj+0x38 bit 2. This is what opens wait_enemies_present, and it is separate from the alive count.
+00402740	CameraTurnOntoPathTarget	Camera tick that eases the look-at onto the path's own target, then locks: once the dot product of desired and current exceeds 0.99999 it flips to evaluating the path straight into the camera block.
+00402860	CameraStartTurnOntoPathTarget	Forces CameraTurnOntoPathTarget back into its turning state and takes one damped step.
+00402890	CameraTrackEnemiesTick	The gameplay camera. Calls SelectCameraLookAtTarget, eases the block's look-at onto the result with TurnLookAtToward, and takes the turn rate from ComputeLookAtAngleError while enemies are registered or a flat constant when none are.
+00402e60	CameraEaseEyeToPath	Eases the camera block's eye toward the path's eye channel at 1/16 per frame, leaving the look-at to the tracking code.
+00403c00	TurnLookAtToward	Rotates a look-at point toward a desired one by num/(num+rate) of the angle between them and re-emits it at a fixed 100-unit radius from the eye. Rate 0 snaps; larger is slower.
+00403db0	CameraArmStashedPath	Loads the stashed path id and frame for the current branch variable and evaluates it into the camera block.
+00408dd0	UpdateCameraEnemySlots	Rebuilds g_enemy_slots each frame from the radix-sorted candidate list: enemies holding an attack permit take slots 0 and 1, everyone else fills from slot 2.
+00408ec0	RegisterForCameraTracking	Adds an actor to the camera candidate list unless obj+0x34 bit 0x10000 is set -- which ZombieStateApproach sets while walking and clears when the actor wins an attack permit, so only committed enemies are ever tracked. Key is (int)(|actor - camera eye| * 10.0).
+00408f30	SortCameraCandidates	LSD radix sort, two 8-bit passes, over the {distance key, actor} candidate list -- nearest first.
+00409ed0	TurnActorTowardCamera	Eases the actor's yaw (obj+0x68) toward a point 1.5 units in front of the camera.
+00456650	TestApproachRing	Returns which advance ring the actor is in -- 1 inside the inner radius (strike range), 2, 3, 4 outward -- and sets obj+0x1358 to the step count that band allows.
+004554d0	ZombieStateAttackRun	Class-0x30 state 1. Plays the run motion, closes on the camera, and switches to state 2 when TestApproachRing returns 1.
+00457220	ZombieStateWalkDistance	Class-0x30 state 15. Records a start point and walks until it has covered the distance at descriptor tail +4, then hands to state 1.

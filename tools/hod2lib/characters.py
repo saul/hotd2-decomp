@@ -199,6 +199,45 @@ REACT_BLEND_SEVER = 20
 #: The bone below which the reaction is cross-faded rather than hard-set.
 REACT_BLEND_MAX_BONE = 9
 
+#: `DAT_004C4CD0`: four ``{inner, mid, outer}`` f32 ring sets, copied into
+#: `g_enemy_approach_rings` by the scene reset (`FUN_0045EEC0`). No stage script
+#: uses evt `0x0E`, the opcode that would override them, so these constants are
+#: what every encounter in the game actually runs on.
+APPROACH_RING_DEFAULTS = 0x004C4CD0
+APPROACH_RING_SETS = 4
+#: `FUN_00408D60`: ``base``, and what is added in the middle and outer bands.
+#: Overridden by evt `0x0F` (54 uses) and `0x12` (6 uses, +1 in two-player).
+APPROACH_STEP_DEFAULTS = (2, 3, 4)
+#: `EnemyZombieInit`: character type 0 uses ring set 2, everything else set 0.
+RING_SET_FOR_CHAR0 = 2
+
+#: `PTR_DAT_00576C04`: four 64-byte turn-rate curves, indexed by the angle
+#: between where the camera looks and where it wants to look, clamped to
+#: :data:`TURN_ERROR_CLAMP` and shifted right 7. The scene reset picks curve
+#: **1**. A larger value is a *slower* turn: `TurnLookAtToward` steps
+#: ``1 / (1 + rate)`` of the remaining angle.
+TURN_RATE_CURVES = 0x00576C04
+TURN_RATE_CURVE_COUNT = 4
+TURN_RATE_CURVE_LEN = 64
+TURN_CURVE_DEFAULT = 1
+#: 0x1FFF BAMS = 45 degrees; the curve covers exactly that.
+TURN_ERROR_CLAMP = 0x1FFF
+#: Rate used when nothing is being tracked -- the first byte of curve 2.
+TURN_RATE_UNTRACKED = 12
+#: `TurnLookAtToward` re-emits the look-at this far from the eye.
+LOOKAT_RADIUS = 100.0
+
+#: `RegisterForCameraTracking`: the sort key is ``|actor - eye| * 10`` as an
+#: int, radix-sorted ascending -- nearest first.
+CAMERA_TRACK_DISTANCE_SCALE = 10.0
+#: Slots 0 and 1 are reserved for enemies holding an attack permit;
+#: `ClaimCameraEnemySlot` fills 2..13 with everyone else.
+CAMERA_ATTACK_SLOTS = 2
+CAMERA_SLOTS = 16
+CAMERA_MAX_CANDIDATES = 14
+#: `TurnActorTowardCamera` faces this far in front of the camera, not the eye.
+ACTOR_FACE_OFFSET = 1.5
+
 #: `DAT_00577674`: the sound ids `ActorPlayHitVoice` (`FUN_0040A6F0`) picks
 #: from. Fifteen dwords -- five flesh impacts, then six voice ids in
 #: ``(set A, set B)`` pairs, then two two-entry pools. Read as ids and resolved
@@ -377,6 +416,16 @@ class Placement:
     #: A scripted entrance played once before the loop -- see
     #: :data:`MOTION_STATE_CUE`.
     intro: tuple[int, int] | None = None   #: ``(motion, delay_frames)``
+    #: The class-0x30 descriptor tail, from `EnemyZombieInit` and
+    #: `ZombieStateApproach`: ``{i8 char_type; i8 body_condition;
+    #: i8 initial_state; i8 attack_state}``. State 22 is the approach and
+    #: state 0 is the no-op, so an attack state of 0 means this actor never
+    #: attacks.
+    body_condition: int = 0
+    initial_state: int = 0
+    attack_state: int = 0
+    #: ``obj+0x131F`` -- which ring set this actor measures against.
+    ring_set: int = 0
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -386,6 +435,10 @@ class Placement:
     def to_json(self) -> dict:
         d = {"at": self.at, "class": self.cls, "char_type": self.char_type,
              "motion": self.motion, "hp": self.hp,
+             "body_condition": self.body_condition,
+             "initial_state": self.initial_state,
+             "attack_state": self.attack_state,
+             "ring_set": self.ring_set,
              # The actor's own yaw, which the directional death compares the
              # camera's against.
              "yaw": self.spawn["orient"][1] & 0xFFFF}
@@ -543,8 +596,18 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             continue
         motion = motion_for(tables, rec, sp["class"])
         intro = intro_for(tables, rec, sp["class"])
-        placements.append(Placement(at, sp["class"], res.char_type, motion, sp,
-                                    intro, sp.get("hp", 0)))
+        # The class-0x30 tail. Only that class is known to lay it out this
+        # way -- `EnemyZombieInit` is what reads it -- so other classes get
+        # zeroes rather than a guess.
+        tail = ((rec.param(1, "i8") or 0, rec.param(2, "i8") or 0,
+                 rec.param(3, "i8") or 0)
+                if sp["class"] == 0x30 else (0, 0, 0))
+        placements.append(Placement(
+            at, sp["class"], res.char_type, motion, sp, intro,
+            body_condition=tail[0], initial_state=tail[1],
+            attack_state=tail[2],
+            ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
+            hp=sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note
         if res.char_type not in chars:
@@ -809,6 +872,56 @@ def hit_reactions(tables, char_type: int) -> dict[int, list[int]]:
         out[variant] = list(struct.unpack_from(f"<{REACT_GROUPS}I",
                                                tables.data, o))
     return out
+
+
+def approach_tables(tables) -> dict:
+    """The advance rings and the step counts, with their defaults.
+
+    `TestApproachRing` and `ZombieStateApproach` both measure the actor's
+    distance **to the camera** and read the same three radii, so one table
+    serves the walk-in and the attack run.
+    """
+    o = tables._v2r(APPROACH_RING_DEFAULTS)
+    sets = []
+    for i in range(APPROACH_RING_SETS):
+        inner, mid, outer = struct.unpack_from("<3f", tables.data, o + i * 12)
+        sets.append({"inner": inner, "mid": mid, "outer": outer})
+    return {
+        "rings": sets,
+        "steps": {"base": APPROACH_STEP_DEFAULTS[0],
+                  "mid_add": APPROACH_STEP_DEFAULTS[1],
+                  "outer_add": APPROACH_STEP_DEFAULTS[2]},
+        "ring_set_for_char0": RING_SET_FOR_CHAR0,
+    }
+
+
+def camera_tracking(tables) -> dict:
+    """What the gameplay camera aims at, and how fast it turns.
+
+    Three routines, all in docs/formats/combat.md §10: enemies register
+    themselves nearest-first, `SelectCameraLookAtTarget` picks a point from the
+    slot table, and `TurnLookAtToward` eases the camera onto it.
+    """
+    b = tables._v2r(TURN_RATE_CURVES)
+    curves = []
+    for i in range(TURN_RATE_CURVE_COUNT):
+        ptr = struct.unpack_from("<I", tables.data, b + i * 4)[0]
+        o = tables._v2r(ptr)
+        curves.append(list(struct.unpack_from(f"<{TURN_RATE_CURVE_LEN}b",
+                                              tables.data, o))
+                      if o is not None else [])
+    return {
+        "curves": curves,
+        "curve": TURN_CURVE_DEFAULT,
+        "error_clamp": TURN_ERROR_CLAMP,
+        "rate_untracked": TURN_RATE_UNTRACKED,
+        "lookat_radius": LOOKAT_RADIUS,
+        "distance_scale": CAMERA_TRACK_DISTANCE_SCALE,
+        "attack_slots": CAMERA_ATTACK_SLOTS,
+        "slots": CAMERA_SLOTS,
+        "max_candidates": CAMERA_MAX_CANDIDATES,
+        "face_offset": ACTOR_FACE_OFFSET,
+    }
 
 
 def combat_tables(tables) -> dict:
@@ -1106,6 +1219,8 @@ def characters_json(chars: dict[int, Character],
         "difficulty": difficulty_tables(tables) if tables is not None else {},
         "combat": combat_tables(tables) if tables is not None else {},
         "reaction_groups": reaction_groups(tables) if tables is not None else [],
+        "approach": approach_tables(tables) if tables is not None else {},
+        "tracking": camera_tracking(tables) if tables is not None else {},
         "reaction_blend": {"frames": REACT_BLEND, "sever": REACT_BLEND_SEVER,
                            "hard_set_from_bone": REACT_BLEND_MAX_BONE},
         "bone_zones": bone_zones(tables) if tables is not None else [],

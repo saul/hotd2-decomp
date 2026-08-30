@@ -599,11 +599,20 @@ if (d <= mid[set])                   steps = base;
 obj+0x1358 = steps;
 ```
 
-Three concentric radii per ring set, and the ring the enemy starts in decides
-**how many steps it walks before it may attack**. Sub-state 1 then plays the
-walk and counts down, and on the last step calls `TryClaimAttackSlot`; only if
-that succeeds does it hand control to the state named by the spawn descriptor
-tail's byte 3, which is where the attack lives. Fail and it keeps walking.
+Three concentric radii per ring set — but the number they yield is **not a step
+count**, which is what an earlier revision of this section said. `FUN_004090B0`
+sorts every live enemy by distance to the camera once a frame and writes each
+actor's **rank** in that queue to `obj+0x131D`. Sub-state 1's test is:
+
+```c
+if ((s8) obj[0x131D] < obj[0x1358] && obj[0x131E] < 3)
+    if (TryClaimAttackSlot(obj)) -> the state named by descriptor tail byte 3
+```
+
+"If I am among the nearest N, and among the nearest 3 overall, I may press an
+attack." So the ring table is a **crowd throttle**: far from the camera, a
+deeper slice of the queue is let through (9); close in, only the nearest 2.
+Nothing counts walking steps anywhere in the class-0x30 code.
 
 evt opcode `0x0E` writes a ring set:
 
@@ -784,11 +793,17 @@ actors turning to face the camera, and the tracking camera with its slot table,
 nearest-first ordering and turn-rate curve. One thing in it is not transcribed
 and is marked as such in `enemies.ts`:
 
-* **how fast an enemy walks** is `[open]` — the velocity source in the
-  class-0x30 update was not found, so the speed is derived from the game's own
-  ring table instead: an actor crosses a band in the number of steps that band
-  allots, one step being one cycle of its walk motion. That falls out at about
-  6 units/second on the default rings.
+* **how an enemy closes the distance** is `[open]`, and genuinely so. Three
+  candidates are ruled out: the zombie's own code never writes a velocity
+  (no `fstp [reg+0x4c]` anywhere in `0x455000..0x459000`); it is not root
+  motion (the clips the approach actually uses — 270, 975, 1000 — each net
+  between +0.00 and +0.04 over a full cycle, while the death clips net −8.7
+  and −15.7, so root motion is real but carries falling bodies); and it is not
+  a step count, per the queue-rank reading above. The player uses an
+  **invented** closing speed, flagged as such in `enemies.ts`, because the
+  game's own states plainly do close — `ZombieStateAttackRun` runs until
+  `TestApproachRing` returns 1, and the strike lunges until inside the attack's
+  distance.
 
 ### The strike — `ZombieStateHoldAtRange` and `ZombieStateStrike`
 

@@ -36,8 +36,7 @@
  * ## Approaching — `FUN_004579A0` and `TestApproachRing`
  *
  * Every enemy measures its distance **to the camera** — not to a player, the
- * camera *is* the player here — and the ring it falls in decides how many
- * steps it walks before it may attack:
+ * camera *is* the player here — and the ring it falls in yields a number:
  *
  * ```
  * d >  outer        base + mid_add + outer_add     (2 + 3 + 4 = 9)
@@ -46,14 +45,28 @@
  * d <= inner        in strike range
  * ```
  *
+ * That number is **not a step count**, which is what an earlier revision of
+ * this file assumed. `FUN_004090B0` sorts every live enemy by distance to the
+ * camera once a frame and writes each actor's *rank* in that queue to
+ * `obj+0x131D`; the approach state's test is
+ *
+ * ```c
+ * if ((s8)obj[0x131D] < obj[0x1358] && obj[0x131E] < 3) TryClaimAttackSlot();
+ * ```
+ *
+ * — "if I am among the nearest N, and among the nearest 3 overall, I may press
+ * an attack". So the ring table is a **crowd throttle**: far from the camera a
+ * deeper slice of the queue is allowed to come at you (9), close in only the
+ * nearest 2. Nothing counts walking steps anywhere.
+ *
  * The radii are `{25, 38, 51}` for most characters and `{37, 48, 51}` for
  * character type 0, copied from `DAT_004C4CD0` by the scene reset. No stage
  * script uses evt `0x0E`, the opcode that would override them.
  *
  * ## The permit — `FUN_00455DE0`
  *
- * When the steps run out an enemy asks for one of `g_attack_permits` — **one
- * per player**. Only the holder enters its attack state; everyone else keeps
+ * Once it is near enough the front of the queue an enemy asks for one of
+ * `g_attack_permits` — **one per player**. Only the holder enters its attack state; everyone else keeps
  * walking. The permit index lives in `obj+0x121`, and that one byte also
  * decides the camera's focus, which is the whole trick.
  *
@@ -82,16 +95,22 @@
  *
  * ## What is assumed, and marked
  *
- * Everything above is transcribed. The one thing that is not is **how fast an
- * enemy walks**: the velocity source in the class-0x30 update is `[open]`, so
- * the speed here is derived from the game's own tables instead — an actor
- * crosses a band in the number of steps the ring table allots it, one step
- * being one cycle of its walk motion. Stated rather than tuned, and it falls
- * out at roughly 6 units/second for the default rings.
+ * Everything above is transcribed. The one thing that is not is **how an
+ * enemy closes the distance**, and it is a real `[open]`, not a shortcut:
  *
- * It is *not* root motion, which was the obvious candidate: measured over the
- * baked clips the walk loop's root nets +0.00 in x and z and only bobs, while
- * the death clips net −8.7 and −15.7. Root motion carries a falling body.
+ *   * there is no `fstp [reg+0x4c]` anywhere in `0x455000..0x459000`, so the
+ *     zombie's own code never writes a velocity;
+ *   * it is not root motion — measured over the clips the approach actually
+ *     uses (270, 975, 1000), each nets between +0.00 and +0.04 over a full
+ *     cycle. They are in-place walks. The death clips, by contrast, net −8.7
+ *     and −15.7, so root motion is real and carries a falling body;
+ *   * and it is not a step count, per the note above.
+ *
+ * So `CLOSING_SPEED` below is an **invented constant**, not a derived one. It
+ * exists because the game's own states plainly do close the distance —
+ * `ZombieStateAttackRun` runs until `TestApproachRing` returns 1, and the
+ * strike lunges until it is inside the attack's distance — and without it
+ * nothing ever reaches striking range. Flagged rather than dressed up.
  *
  * Actors turn their **whole body** toward the camera and nothing aims a bone:
  * the per-frame pose hook has exactly two implementations in the program, a
@@ -107,6 +126,15 @@ import type {
 const BAMS = 65536 / (Math.PI * 2);
 /** The engine's frame clock; attack hit frames are counted in it. */
 const GAME_HZ = 60;
+/** `obj+0x131E < 3` — only the nearest three may press an attack at all. */
+const QUEUE_CAP = 3;
+/**
+ * Units per second an enemy closes at. **`[open]` — invented, not derived.**
+ * See the module note: the zombie's code writes no velocity, its walk clips
+ * are in place, and the ring table counts queue depth rather than steps. This
+ * exists so the states that plainly do close the distance can.
+ */
+const CLOSING_SPEED = 6;
 
 /** Class-0x30 state indices, from `g_class30_states`. */
 export const STATE_NOOP = 0;
@@ -146,10 +174,11 @@ export interface EnemyActor {
 interface Ai {
   state: number;
   sub: number;
-  /** `obj+0x1358` — how many steps this actor must walk. */
-  steps: number;
-  /** `obj+0x131D` — how many it has walked. */
-  walked: number;
+  /** `obj+0x1358` — how deep in the distance queue this actor may be. */
+  allowance: number;
+  /** `obj+0x131D` — its rank in that queue, nearest first. */
+  rank: number;
+  /** Used only to pace the hold-at-range cooldown. */
   walkClock: number;
   /** `obj+0x121` — the attack permit, or −1. */
   permit: number;
@@ -207,7 +236,8 @@ export class EnemyDirector {
   private state(a: EnemyActor): Ai {
     let s = this.ai.get(a.at);
     if (!s) {
-      s = { state: STATE_APPROACH, sub: 0, steps: 0, walked: 0, walkClock: 0,
+      s = { state: STATE_APPROACH, sub: 0, allowance: 0, rank: 99,
+            walkClock: 0,
             permit: -1, untracked: true, band: 4, attack: -1,
             fired: false };
       this.ai.set(a.at, s);
@@ -216,16 +246,16 @@ export class EnemyDirector {
   }
 
   /** `TestApproachRing` (`FUN_00456650`): the band, and the step count. */
-  private ring(a: EnemyActor, eye: Vector3): { band: number; steps: number } {
+  private ring(a: EnemyActor, eye: Vector3): { band: number; allow: number } {
     const r = this.approach?.rings[a.ringSet] ?? this.approach?.rings[0];
     const st = this.approach?.steps;
-    if (!r || !st) return { band: 1, steps: 0 };
+    if (!r || !st) return { band: 1, allow: 0 };
     // The game measures on the ground plane only — x and z.
     const d = Math.hypot(a.pos.x - eye.x, a.pos.z - eye.z);
-    if (d <= r.inner) return { band: 1, steps: st.base };
-    if (d <= r.mid) return { band: 2, steps: st.base };
-    if (d <= r.outer) return { band: 3, steps: st.base + st.mid_add };
-    return { band: 4, steps: st.base + st.mid_add + st.outer_add };
+    if (d <= r.inner) return { band: 1, allow: st.base };
+    if (d <= r.mid) return { band: 2, allow: st.base };
+    if (d <= r.outer) return { band: 3, allow: st.base + st.mid_add };
+    return { band: 4, allow: st.base + st.mid_add + st.outer_add };
   }
 
   /**
@@ -251,18 +281,6 @@ export class EnemyDirector {
   }
 
   /**
-   * How far an actor moves in a second. `[likely]` — see the module note: the
-   * ring table says an actor crosses a band in *n* steps, and a step is one
-   * walk cycle, so the speed follows from the game's own numbers.
-   */
-  private speed(a: EnemyActor): number {
-    const r = this.approach?.rings[a.ringSet];
-    const st = this.approach?.steps;
-    if (!r || !st || st.base <= 0 || a.stepSeconds <= 0) return 0;
-    return (r.mid - r.inner) / (st.base * a.stepSeconds);
-  }
-
-  /**
    * Advance every enemy and decide where the camera should look.
    *
    * Returns the desired look-at point, or null when nothing is registered —
@@ -279,9 +297,14 @@ export class EnemyDirector {
         if (a.action) a.action = null;
         continue;
       }
-      this.step(a, s, eye, dt);
       live.push({ a, s, d: a.pos.distanceTo(eye) });
     }
+    // `FUN_004090B0`: sort every live enemy by distance to the camera and give
+    // each its rank, nearest first. That rank is what the approach state tests
+    // against the ring table's allowance.
+    live.sort((p, q) => p.d - q.d);
+    live.forEach((x, i) => { x.s.rank = i; });
+    for (const x of live) this.step(x.a, x.s, eye, dt);
     return this.aim(live, eye, out);
   }
 
@@ -295,22 +318,16 @@ export class EnemyDirector {
     if (s.state === STATE_APPROACH) {
       if (s.sub === 0) {
         const r = this.ring(a, eye);
-        s.steps = r.steps;
+        s.allowance = r.allow;
         s.band = r.band;
-        s.walked = 0;
-        s.walkClock = 0;
         s.untracked = true;                 // `flags |= 0x10000`
         s.sub = 1;
         return;
       }
-      // Walk. A step is one cycle of the walk motion.
+      // `if (rank < allowance && rank < 3) TryClaimAttackSlot()`. The rank is
+      // recomputed for every actor once a frame in `update`.
       this.advance(a, eye, dt);
-      s.walkClock += dt;
-      if (s.walkClock >= a.stepSeconds) {
-        s.walkClock -= a.stepSeconds;
-        s.walked++;
-      }
-      if (s.walked >= s.steps && this.claim(s)) {
+      if (s.rank < s.allowance && s.rank < QUEUE_CAP && this.claim(s)) {
         s.state = a.attackState > 0 ? a.attackState : STATE_NOOP;
         s.sub = 0;
       }
@@ -404,9 +421,9 @@ export class EnemyDirector {
     s.fired = false;
   }
 
-  /** Move an actor along its facing, on the ground plane. */
+  /** Move an actor toward the camera on the ground plane. See CLOSING_SPEED. */
   private advance(a: EnemyActor, eye: Vector3, dt: number): void {
-    const v = this.speed(a) * dt;
+    const v = CLOSING_SPEED * dt;
     if (v <= 0) return;
     this._fwd.set(eye.x - a.pos.x, 0, eye.z - a.pos.z);
     const len = this._fwd.length();

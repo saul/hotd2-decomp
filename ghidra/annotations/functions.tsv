@@ -317,3 +317,8 @@
 00415430	PlayerTakeDamageTimed	PlayerTakeDamage with an explicit invulnerability duration and an override that ignores the current one.
 004153e0	CheckPlayerCanBeHit	Rejects a player index that is not 0 or 1, and rejects a hit while the player entity is in a state other than 1 or 4..5 during app state 6.
 0045d9f0	ActorAbortAttackAndLeave	Called when an attack is interrupted: releases the slots, sets body condition 4 and hands the actor to its leave state.
+004090b0	RankEnemiesByDistance	Once a frame: radix-sorts the live enemy list by distance to the camera and writes each actor's rank into obj+0x131D (nearest = 0) and a compacted rank into obj+0x131E. ZombieStateApproach tests those against the ring table's allowance -- so g_enemy_approach_steps is a crowd throttle on how deep in the queue an actor may be and still attack, NOT a count of walking steps.
+00409190	SortEnemiesByDistance	The radix sort behind RankEnemiesByDistance; two 8-bit passes over the {distance key, actor} list.
+00409010	RegisterForDistanceRank	Adds a live, not-yet-dead actor to the distance-ranked enemy list, at most 14.
+00455920	ActorBodyConditionFromHands	Derives obj+0x130C from whether bones 5 and 8 -- the hands, at obj+0x4DC and obj+0x68C, which are 0x20C + bone*0x90 -- still hold their original draw slots, and sets the matching destroyed-zone bits.
+00409e80	TurnActorTowardCameraEye	TurnActorTowardCamera without the 1.5-unit forward offset: eases the actor's yaw toward the camera eye itself.

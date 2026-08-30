@@ -4085,3 +4085,48 @@ it needs no guess about row length at all.
 Worth generalising: when a table has no count and its neighbours are ambiguous,
 look for the *index source* and export what that names, rather than trying to
 find the end.
+
+
+---
+
+## Correction: the ring table counts a queue, not steps
+
+Committed the gameplay loop describing `obj+0x1358` as "how many steps an
+enemy walks before it may attack", and derived the player's walk speed from
+that reading. Both wrong.
+
+`FUN_004090B0` runs once a frame over the distance-sorted enemy list and writes
+each actor's **rank** into `obj+0x131D` — nearest is 0. The approach state's
+test reads:
+
+```c
+if ((s8) obj[0x131D] < obj[0x1358] && obj[0x131E] < 3) TryClaimAttackSlot();
+```
+
+which is "if I am among the nearest N, and among the nearest 3 overall, I may
+press an attack". The ring table is a **crowd throttle**, not a pedometer: far
+out, a deeper slice of the queue is let through (9); close in, only the nearest
+two. Nothing in the class-0x30 code counts a walking step.
+
+How the reading went wrong is worth keeping. `obj+0x131D` is compared against a
+count derived from distance, incremented nowhere I had looked, and sits next to
+a genuine timer — so "steps walked" fitted every local fact. What broke it was
+asking the boring question I had skipped: *what writes this field?* Three
+writes in the whole program, one of them a rank assignment in a sort loop.
+
+That also collapses the derived walk speed, which was justified entirely by the
+step reading. Three candidates for locomotion are now ruled out — no velocity
+write in the zombie's range, in-place walk clips (270/975/1000 net +0.00 to
++0.04 per cycle, against −8.7 and −15.7 for the deaths), and no step model — so
+the player's closing speed is now labelled what it is: **invented**, present
+only because the attack states plainly do close the distance and nothing
+reaches striking range without it.
+
+Two smaller things fell out of the same pass:
+
+* `obj+0x4DC` and `obj+0x68C`, flagged `[open]` when `ActorUpdateBodyCondition`
+  was read, are bones 5 and 8's draw-slot fields — `0x20C + bone*0x90` — so the
+  body condition is derived from whether each **hand** still holds its original
+  model.
+* `ActorPlayHitVoice` kind 3, whose two-entry pools had no caller, is the
+  **attack shout**: `ZombieStateStrike` raises it as the swing starts.

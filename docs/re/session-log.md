@@ -4404,3 +4404,50 @@ appearing downstream.
 All five `bone_count == 16` guards are gone. `verify_combat.py` now asserts
 each character's back-away clip implies that character's own skeleton, rather
 than asserting the character is a humanoid.
+
+## The player is a port now, and it can be saved
+
+Two things landed together, and each is what makes the other worth having.
+
+**The port.** Gameplay code moved out of `web/src/enemies.ts` — deleted — and
+into `web/src/game/`, one TS function per exe function under the name
+`ghidra/annotations/functions.tsv` gives it, with the `FUN_` address in the doc
+comment. `game/globals.ts` is the data segment: `g_attack_permits`,
+`g_player_lives`, `g_enemy_approach_rings`, all named as the annotations name
+them. `game/actor.ts` is the object struct with the offsets in the comments.
+`game/registry.ts` is `g_class_handlers`, so a class with no module gets no
+behaviour rather than accidentally getting the zombie's.
+
+`game/` may not import three.js and may not call `Math.random`.
+`tools/verify_port.py` checks both, checks every `FUN_` citation against the
+annotations, and reports the coverage: **33 of 101 annotated gameplay
+functions**, 2 of 22 read classes, 5 declared `[diverges]`.
+
+**The save state.** `world.save()` returns plain JSON that fully determines the
+next frame; `world.load()` puts it back. It works because the port keeps its
+state where the engine keeps its state — one enumerable `G` and a list of
+plain-data actors — and because the renderers hold nothing a snapshot would
+need. Restoring calls `resync` and they rebuild from the actors. If a renderer
+could not, that would be a bug in the split, and the snapshot is the test that
+finds it.
+
+### What the headless test found in the first five minutes
+
+`npm run test:port` imports `game/` and nothing else. Two failures on the first
+run, both live in the shipped player:
+
+* **The lunge could never reach its attack.** `ZombieStateStrike` closes to the
+  attack entry's own distance, and `znchain`'s distances are *inside* the
+  25-unit inner ring — but `ActorAdvanceTowardCamera` clamped every state at
+  that ring, because that clamp was added to stop actors walking through the
+  camera. So a zombie lunged for ever, swinging at a range it could not reach.
+  That is the "they swing but don't hit, and then repeatedly do the swing anim"
+  report, and it had been read as an animation bug.
+* **The clip clock belonged to the renderer.** `action.t` was advanced inside
+  `CharacterLayer.update`, so a strike's hit frame could only arrive if
+  something was drawing it. The port could not be run headlessly at all, and a
+  save state restored while paused would have sat on a half-played swing for
+  ever. It is `ActorAdvanceMotion` now, in `game/`, where `ActorSetMotion` and
+  the motion job keep it in the engine.
+
+Neither was findable by reading, and both were one assertion each.

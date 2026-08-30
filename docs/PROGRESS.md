@@ -329,6 +329,16 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       `tools/verify_combat.py` checks all of it across 86 character types and
       2810 spawn/difficulty pairs. See
       [`formats/combat.md`](formats/combat.md).
+- [x] **The browser player is a port of the gameplay code, and it can be saved.**
+      `web/src/game/` is one TS function per exe function under the name
+      `ghidra/annotations/functions.tsv` gives it, with the address in the doc
+      comment; `game/globals.ts` is the data segment and `game/actor.ts` the
+      object struct with its offsets. It imports neither three.js nor
+      `Math.random`, so `npm run test:port` runs the state machines headlessly,
+      and `world.save()` returns plain JSON that fully determines the next
+      frame. `tools/verify_port.py` checks every `FUN_` citation against the
+      annotations and reports the coverage. See
+      [`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md).
 - [x] **Water — SOLVED.** Two separate systems that share a name. The visible
       surface is ordinary level geometry, streamed per region like everything
       else, and tagged in `coli/` with surfaces 5 and 55; stage 2's collision

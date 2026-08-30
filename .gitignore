@@ -4,6 +4,10 @@
 # ---------------------------------------------------------------------------
 extract/
 game/
+# ...but `web/src/game/` is the browser player's port of the gameplay code, not
+# a copy of the game. Named for what it is a port of; excluded from the rule
+# above by path, so the rule itself stays as broad as it was.
+!web/src/game/
 *.bin
 *.exe
 *.dll

@@ -656,5 +656,5 @@ missed. Meanings and confidence marks live in
 camera hook applies `eye.y = use_fixed_y ? fixed_eye_y : path.y - 15`, but
 applying that to the `cp_` curve puts 173 of 201 paths looking upward at their
 own aim point, so the client records both values and applies neither. The
-measurement and a switch to re-enable it are in `web/src/campath.ts`.
+measurement and a switch to re-enable it are in `web/src/render/campath.ts`.
 

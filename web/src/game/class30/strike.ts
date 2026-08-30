@@ -1,0 +1,111 @@
+/**
+ * `ZombieStateStrike` — `FUN_00455A40`, and the hit it lands.
+ *
+ * Sub 0 draws which attack to use, sub 1 lunges until it is inside that
+ * attack's own distance and starts the clip, sub 2 plays it out and lands the
+ * hit on the exact frame the table names.
+ *
+ * ## Why shooting an arm off matters twice
+ *
+ * An attack entry names a **cancel mask** of destroyed zones — 1 head, 2 right
+ * arm, 4 left arm — and the hit whiffs if every zone in it is gone. `znchain`
+ * has a right-arm swing cancelled by `0x2`, a longer left-arm one by `0x4`, a
+ * two-armed one by `0x6`, and a fallback with `0x8`, which is outside the
+ * three-bit mask and so never cancels.
+ *
+ * The same mask indexes the **pick** table, so a damaged zombie reaches for a
+ * different attack in the first place: `char_adv00` with a head draws attack 2,
+ * and with the head shot off draws attack 3.
+ */
+import type { Events } from "../../core/events";
+import type { Rng } from "../../core/rng";
+import type { AttackJson } from "../../bundle";
+import type { Actor } from "../actor";
+import { PlayerTakeDamage } from "../combat/player";
+import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
+import { dist2d, type Vec3 } from "../vec";
+import { ActorAdvanceTowardCamera } from "./move";
+import { ActorAbortAttackAndLeave } from "./leave";
+import { GAME_HZ, STATE_BACKOFF } from "./states";
+
+/**
+ * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
+ *
+ * The zone term is the point — a zombie that has lost its head or an arm draws
+ * from a different ten, so shooting a limb off changes which attack it reaches
+ * for as well as whether that attack can connect.
+ */
+export function ZombiePickAttack(obj: Actor, rng: Rng): number {
+  const list = AttackListOf(obj);
+  const picks = AttackPicksOf(obj);
+  const v = picks[rng.int(10) + (obj.zones & 7) * 10];
+  if (v !== undefined && list[String(v)]) return v;
+  // The pick named an entry the exporter filtered out -- those are the
+  // destroyed-zone rows the game itself would read as a zero motion. Fall back
+  // to any usable attack rather than freezing mid-swing.
+  const keys = Object.keys(list);
+  return keys.length ? Number(keys[0]) : -1;
+}
+
+/**
+ * `ActorStrikeConnect` — `FUN_00456490`. The hit whiffs if **every** zone the
+ * attack needs has been shot off. Mask 8 is outside the three-bit zone mask,
+ * so those attacks can never be cancelled.
+ */
+export function ActorStrikeConnect(obj: Actor, atk: AttackJson,
+                                   events?: Events): boolean {
+  if ((obj.zones & 7 & atk.cancel_mask) === atk.cancel_mask) return false;
+  return PlayerTakeDamage(0, obj, atk.player_motion, events, "strike",
+                          obj.attack);
+}
+
+/**
+ * The clip is over. `ZombieStateStrike` hands to state 4, which keeps the
+ * permit through the retreat — so the next enemy cannot start until this one
+ * has actually backed away.
+ */
+function endStrike(obj: Actor): void {
+  obj.action = null;
+  obj.state = STATE_BACKOFF;
+  obj.sub = 0;
+}
+
+export function ZombieStateStrike(obj: Actor, eye: Vec3, dt: number, rng: Rng,
+                                  events?: Events): void {
+  const list = AttackListOf(obj);
+  if (obj.sub === 0) {
+    obj.attack = ZombiePickAttack(obj, rng);
+    obj.sub = 1;
+  }
+  const atk = list[String(obj.attack)] ?? null;
+  if (!atk) { ActorAbortAttackAndLeave(obj); return; }
+
+  if (obj.sub === 1) {
+    if (dist2d(obj.pos, eye) > atk.distance) {
+      // Still short: play the lunge and keep closing.
+      if (obj.action?.motion !== atk.lunge) {
+        obj.action = { motion: atk.lunge, t: 0, loop: true };
+      }
+      // The lunge closes to the attack's own distance, which is inside the
+      // inner ring the approach stops at.
+      ActorAdvanceTowardCamera(obj, eye, dt, false, atk.distance);
+      return;
+    }
+    obj.action = { motion: atk.strike, t: 0, loop: false };
+    obj.sub = 2;
+    return;
+  }
+
+  // Sub 2: the clip is running. `hit_frame` is in 60 Hz game frames.
+  const m = MotionOf(obj, atk.strike);
+  if (!obj.action || !m) { endStrike(obj); return; }
+  // [diverges] sub 3 is this port's "already swung" latch. The engine has a
+  // sub-state at +0x1312 and a flag word at +0x1368; which bit it latches the
+  // hit with has not been read, so the latch is kept on the struct rather than
+  // in a field of the port's own invention.
+  if (obj.sub === 2 && obj.action.t * GAME_HZ >= atk.hit_frame) {
+    obj.sub = 3;
+    ActorStrikeConnect(obj, atk, events);
+  }
+  if (obj.action.t * m.fps >= m.frames - 1) endStrike(obj);
+}

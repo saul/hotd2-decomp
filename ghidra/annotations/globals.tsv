@@ -208,3 +208,10 @@
 009c6f36	g_camera_turn_rate	The rate TurnLookAtToward divides by, refreshed every frame.
 005a4dc8	g_camera_candidates	{u32 distance key; void *actor} pairs, at most 14, radix-sorted nearest-first before the slots are assigned.
 009ca93c	g_camera_candidate_count	How many entries g_camera_candidates holds this frame.
+00592f18	g_class30_attacks	Per character type -> per body condition -> 0x10-byte attack entries: {s16 strike motion; s16 lunge motion; f32 distance; s16 hit frame; s16 player damage motion; u16 cancel mask}. The cancel mask names zones (1 head, 2 right arm, 4 left arm) whose destruction makes the strike whiff; 8 is outside the 3-bit mask and so never cancels.
+00592dc0	g_class30_attack_picks	Per character type -> per body condition -> s32[80]: which attack to use, indexed (rand%10 + (destroyed_zones & 7) * 10). Ten choices per destroyed-zone combination, so a zombie that has lost its head or an arm reaches for a different attack.
+009a5c66	g_player_lives	+player*0x98. PlayerTakeDamage decrements it by one per strike; the continue screen restores 1 or 2.
+009c8e08	g_player_invuln_frames	+player. Set to 0x5A by PlayerTakeDamage and counted down; a strike is ignored while it is non-zero.
+009a3794	g_damage_rank_pending	Accumulates rank adjustments -- PlayerTakeDamage subtracts 2 -- and UpdateDamageRank adds it in and clears it on its next pass.
+009a5cd0	g_player_was_hit	+player*0x98. Set by PlayerTakeDamage so the player entity plays its damage motion, which is stored alongside at g_player_hit_motion.
+009a5cd2	g_player_hit_motion	+player*0x130. The motion the player entity plays when hit, taken from the attack entry's +0x0A.

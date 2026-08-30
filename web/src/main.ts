@@ -95,6 +95,8 @@ class Player {
   private readonly _eye = new Vector3();
   /** UI toggle — off restores the exact authored camera. */
   private trackEnabled = true;
+  /** `DAT_009A5C66 + player*0x98` — the player's remaining lives. */
+  private lives = 2;
   private readonly rain = new Rain();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
@@ -214,7 +216,22 @@ class Player {
     this.shooting.setTables(bundle.script.characters?.combat);
     this.enemies.reset();
     this.enemies.setTables(bundle.script.characters?.approach,
-                           bundle.script.characters?.tracking);
+                           bundle.script.characters?.tracking,
+                           bundle.script.characters?.player);
+    this.lives = bundle.script.characters?.player?.start_lives ?? 2;
+    // `PlayerTakeDamage`: one life, −100 and 90 frames of invulnerability.
+    this.enemies.onStrike = (a, atk) => {
+      const d = bundle.script.characters?.player;
+      this.lives = Math.max(0, this.lives - (d?.life_cost ?? 1));
+      this.shooting.score += d?.score ?? -100;
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, name: "hit by enemy", cat: "combat" },
+        note: `${a.type.name} strike ${atk.strike} · −1 life → ${this.lives}`
+            + ` · ${d?.score ?? -100} pts`,
+      });
+      this.refreshUi();
+    };
     this.trackValid = false;
     this.shooting.playSound = (id) => { this.bgm.play(id); };
     this.shooting.setEnabled(
@@ -1047,6 +1064,9 @@ class Player {
       ["props", this.props.describe],
       ["shooting", this.shooting.describe],
       ["enemies", this.enemies.describe],
+      ["lives", `${this.lives}`
+        + (this.enemies.invulnFrames > 0
+          ? ` · invulnerable ${Math.ceil(this.enemies.invulnFrames)}f` : "")],
       ["shutter", this.hudLayer.describe],
       // The two globals the skip feature hangs off, so it is visible that the
       // region opened and the gate dropped even when nothing is pressed.

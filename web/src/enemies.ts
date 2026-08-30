@@ -7,10 +7,31 @@
  * what made this hard to find in the first place:
  *
  * ```
- * ZombieStateApproach   walk in, band by band, then ask permission to attack
- * TryClaimAttackSlot    one permit per player -- the "about to attack" flag
+ * ZombieStateApproach     walk in band by band, then ask permission to attack
+ * TryClaimAttackSlot      one permit per player -- the "about to attack" flag
+ * ZombieStateHoldAtRange  hold inside the inner ring until the cooldown clears
+ * ZombieStateStrike       lunge, swing, land the hit on the frame it names
+ * PlayerTakeDamage        one life, -100, and 90 frames of invulnerability
  * SelectCameraLookAtTarget + TurnLookAtToward   where the camera aims, eased
  * ```
+ *
+ * ## The strike, and why shooting an arm off matters twice
+ *
+ * An attack entry names its own lunge distance, its strike clip, and the exact
+ * frame of that clip on which the hit lands. It also names a **cancel mask**
+ * of destroyed zones — 1 head, 2 right arm, 4 left arm — and the hit whiffs if
+ * every zone in it is gone. `znchain` has a right-arm swing cancelled by `0x2`,
+ * a longer left-arm one by `0x4`, a two-armed one by `0x6`, and a fallback
+ * with `0x8`, which is outside the three-bit mask and so never cancels.
+ *
+ * The same mask indexes the **pick** table, so a damaged zombie reaches for a
+ * different attack in the first place: `char_adv00` with a head draws attack 2,
+ * and with the head shot off draws attack 3.
+ *
+ * A strike costs exactly **one life** — the entry's `+0x0A` is the motion the
+ * player plays, not a damage amount — plus 100 points and 90 frames of
+ * invulnerability. It also drops the adaptive rank by 2, which is how being
+ * hit makes the game easier.
  *
  * ## Approaching — `FUN_004579A0` and `TestApproachRing`
  *
@@ -79,9 +100,13 @@
  */
 
 import { Vector3 } from "three";
-import type { ApproachJson, TrackingJson } from "./bundle";
+import type {
+  ApproachJson, AttackJson, CharacterType, PlayerDamageJson, TrackingJson,
+} from "./bundle";
 
 const BAMS = 65536 / (Math.PI * 2);
+/** The engine's frame clock; attack hit frames are counted in it. */
+const GAME_HZ = 60;
 
 /** Class-0x30 state indices, from `g_class30_states`. */
 export const STATE_NOOP = 0;
@@ -104,6 +129,18 @@ export interface EnemyActor {
   visible: boolean;
   /** Seconds one walk cycle takes — a "step". */
   stepSeconds: number;
+  /** `obj+0x1318 & 7` — 1 head gone, 2 right arm, 4 left arm. */
+  zones: number;
+  /**
+   * A one-shot the director asked the character layer to play at full weight:
+   * the lunge (looping) or the strike (once). `t` is seconds played, which is
+   * what `ActorStrikeConnect` compares against the attack's hit frame.
+   */
+  action: { motion: number; t: number; loop: boolean } | null;
+  /** The character type, so the director can read its attack tables. */
+  type: CharacterType;
+  /** `obj+0x130C` — the body condition, which indexes the attack tables. */
+  condition: number;
 }
 
 interface Ai {
@@ -120,11 +157,22 @@ interface Ai {
   untracked: boolean;
   /** The band `TestApproachRing` last returned: 1 strike, 2–4 outward. */
   band: number;
+  /** The attack index this strike drew, and whether its hit has fired. */
+  attack: number;
+  fired: boolean;
 }
 
 export class EnemyDirector {
   private approach: ApproachJson | null = null;
   private track: TrackingJson | null = null;
+  private dmg: PlayerDamageJson | null = null;
+  /**
+   * `PlayerTakeDamage`: a strike costs one life, −100, and 90 frames of
+   * invulnerability. Reported rather than applied here — the host owns the HUD.
+   */
+  onStrike: (a: EnemyActor, attack: AttackJson) => void = () => {};
+  /** `DAT_009C8E08` — invulnerability frames left. */
+  private invuln = 0;
   private readonly ai = new Map<number, Ai>();
   /** `g_attack_permits` — one per player; the player is player 0. */
   private permits: (number | null)[] = [null, null];
@@ -138,23 +186,30 @@ export class EnemyDirector {
   focus: EnemyActor | null = null;
 
   setTables(approach: ApproachJson | undefined,
-            track: TrackingJson | undefined): void {
+            track: TrackingJson | undefined,
+            player: PlayerDamageJson | undefined): void {
     this.approach = approach ?? null;
     this.track = track ?? null;
+    this.dmg = player ?? null;
   }
+
+  /** Frames of player invulnerability still running. */
+  get invulnFrames(): number { return this.invuln; }
 
   reset(): void {
     this.ai.clear();
     this.permits = [null, null];
     this.tracking = false;
     this.focus = null;
+    this.invuln = 0;
   }
 
   private state(a: EnemyActor): Ai {
     let s = this.ai.get(a.at);
     if (!s) {
       s = { state: STATE_APPROACH, sub: 0, steps: 0, walked: 0, walkClock: 0,
-            permit: -1, untracked: true, band: 4 };
+            permit: -1, untracked: true, band: 4, attack: -1,
+            fired: false };
       this.ai.set(a.at, s);
     }
     return s;
@@ -215,11 +270,13 @@ export class EnemyDirector {
    */
   update(actors: readonly EnemyActor[], eye: Vector3, dt: number,
          out: Vector3): boolean {
+    this.invuln = Math.max(0, this.invuln - dt * 60);
     const live: { a: EnemyActor; s: Ai; d: number }[] = [];
     for (const a of actors) {
       const s = this.state(a);
       if (a.dead || !a.visible) {
         if (s.permit >= 0) this.release(s);
+        if (a.action) a.action = null;
         continue;
       }
       this.step(a, s, eye, dt);
@@ -270,15 +327,81 @@ export class EnemyDirector {
     }
 
     if (s.state === STATE_STRIKE) {
-      // The swing itself is `[open]`; it is held for one step and then the
-      // permit is given up so the next enemy can commit.
-      s.walkClock += dt;
-      if (s.walkClock >= a.stepSeconds) {
-        this.release(s);
-        s.state = STATE_APPROACH;
-        s.sub = 0;
+      // `ZombieStateStrike` (`FUN_00455A40`). Sub 0 draws which attack to use,
+      // sub 1 lunges until it is inside the attack's own distance and then
+      // starts the strike, sub 2 plays it out and lands the hit on the exact
+      // frame the table names.
+      const list = a.type.attacks?.[String(a.condition)]
+        ?? a.type.attacks?.["0"] ?? {};
+      if (s.sub === 0) {
+        s.attack = this.pickAttack(a, list);
+        s.fired = false;
+        s.sub = 1;
       }
+      const atk = list[String(s.attack)] ?? null;
+      if (!atk) { this.endStrike(a, s); return; }
+
+      if (s.sub === 1) {
+        const d = Math.hypot(a.pos.x - eye.x, a.pos.z - eye.z);
+        if (d > atk.distance) {
+          // Still short: play the lunge and keep closing.
+          if (a.action?.motion !== atk.lunge) {
+            a.action = { motion: atk.lunge, t: 0, loop: true };
+          }
+          this.advance(a, eye, dt);
+          return;
+        }
+        a.action = { motion: atk.strike, t: 0, loop: false };
+        s.sub = 2;
+        return;
+      }
+
+      // Sub 2: the clip is running. `hit_frame` is in 60 Hz game frames.
+      const m = a.type.motions[String(atk.strike)];
+      if (!a.action || !m) { this.endStrike(a, s); return; }
+      const gameFrame = a.action.t * GAME_HZ;
+      if (!s.fired && gameFrame >= atk.hit_frame) {
+        s.fired = true;
+        // `ActorStrikeConnect`: the hit whiffs if every zone the attack needs
+        // has been shot off. Mask 8 is outside the 3-bit zone mask, so those
+        // attacks can never be cancelled.
+        const cancelled = (a.zones & 7 & atk.cancel_mask) === atk.cancel_mask;
+        if (!cancelled && this.invuln <= 0) {
+          this.invuln = this.dmg?.invuln_frames ?? 90;
+          this.onStrike(a, atk);
+        }
+      }
+      if (a.action.t * m.fps >= m.frames - 1) this.endStrike(a, s);
     }
+  }
+
+  /**
+   * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
+   *
+   * The zone term is the point — a zombie that has lost its head or an arm
+   * draws from a different ten, so shooting a limb off changes which attack it
+   * reaches for as well as whether that attack can connect.
+   */
+  private pickAttack(a: EnemyActor,
+                     list: Record<string, AttackJson>): number {
+    const picks = a.type.attack_picks?.[String(a.condition)]
+      ?? a.type.attack_picks?.["0"] ?? [];
+    const zone = a.zones & 7;
+    const v = picks[Math.floor(Math.random() * 10) + zone * 10];
+    if (v !== undefined && list[String(v)]) return v;
+    // The pick named an entry the exporter filtered out — those are the
+    // destroyed-zone rows the game itself would read as a zero motion. Fall
+    // back to any usable attack rather than freezing mid-swing.
+    const keys = Object.keys(list);
+    return keys.length ? Number(keys[0]) : -1;
+  }
+
+  private endStrike(a: EnemyActor, s: Ai): void {
+    a.action = null;
+    this.release(s);
+    s.state = STATE_APPROACH;
+    s.sub = 0;
+    s.fired = false;
   }
 
   /** Move an actor along its facing, on the ground plane. */

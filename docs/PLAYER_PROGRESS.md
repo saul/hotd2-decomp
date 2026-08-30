@@ -342,9 +342,16 @@ implementations in the whole program, a no-op and a collision push-out, and
 The aiming you see is the whole body turning plus directionally selected
 motion variants. See [`formats/combat.md`](formats/combat.md) §10.
 
+**The strike and player damage are in.** An attack entry names its lunge
+distance, its strike clip and the exact frame the hit lands on; a **cancel
+mask** of destroyed zones makes it whiff if the limb it swings with is gone,
+and the same mask picks *which* attack the zombie reaches for. A strike costs
+exactly **one life**, 100 points and 90 frames of invulnerability, and drops
+the adaptive rank by 2 — being hit makes the game easier. Lives show in the
+status bar.
+
 Still `[open]`, and marked in `enemies.ts`: the walk speed — derived from the
-ring table rather than found, and now known *not* to be root motion — and the
-strike itself.
+ring table rather than found, and now known *not* to be root motion.
 
 ## Shooting
 

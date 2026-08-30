@@ -42,7 +42,15 @@ byte. The readings under test are the ones docs/formats/combat.md states:
    `0x0059C9A8`, not `.rdata`, and is a runtime working copy that is zero in
    the file on disk.
 
-8. **Every sound id names a file.** The voice, impact and ricochet tables are
+8. **Every attack resolves.** `attack_tables` exports only the entries the
+   pick table names, and each is kept only if its **hit frame lands inside its
+   own strike clip** — the frame and the clip length come from different
+   tables, so a wrong stride cannot satisfy both. This re-checks the survivors
+   and asserts that every character with a pick table yields at least one
+   usable attack, which is what would fail if the filter were throwing
+   everything away.
+
+9. **Every sound id names a file.** The voice, impact and ricochet tables are
    read as `g_se_name_list` ids; a table read at the wrong address would give
    ids that resolve to nothing, so this fails loudly if the address is wrong.
 
@@ -227,6 +235,34 @@ def main() -> int:
           f"curve {tr['curve']} runs {sel[0]} -> {sel[-1]}")
 
     # 8 ------------------------------------------------------------------
+    n_atk = n_pick = 0
+    no_attack = []
+    for ct in types:
+        atk = ch.attack_tables(tables, ct)
+        picks = ch.attack_picks(tables, ct)
+        for cond, row in atk.items():
+            for i, e in row.items():
+                n_atk += 1
+                if not (0 <= e["hit_frame"] < play(e["strike"])):
+                    fails.append(f"type {ct} cond {cond} attack {i} hits on "
+                                 f"frame {e['hit_frame']} of a "
+                                 f"{play(e['strike'])}-frame clip")
+                if not (0 < play(e["lunge"]) <= 400):
+                    fails.append(f"type {ct} cond {cond} attack {i} lunge "
+                                 f"{e['lunge']} has length {play(e['lunge'])}")
+                if e["cancel_mask"] & ~0x0F:
+                    fails.append(f"type {ct} cond {cond} attack {i} cancel "
+                                 f"mask {e['cancel_mask']:#x} is out of range")
+        n_pick += sum(len(v) for v in picks.values())
+        if picks and not atk:
+            no_attack.append(ct)
+    print(f"  {n_atk} usable attacks, {n_pick} pick entries, "
+          f"{len(no_attack)} types with picks but no attack")
+    if no_attack:
+        fails.append(f"types with a pick table but no usable attack: "
+                     f"{no_attack[:6]}")
+
+    # 9 ------------------------------------------------------------------
     se = tables.se_names()
     combat = ch.combat_tables(tables)
     ids = [s["id"] for s in combat["impact"] + combat["head_impact"]]

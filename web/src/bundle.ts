@@ -276,6 +276,13 @@ export interface CharacterType {
    * docs/formats/combat.md §7.
    */
   reactions: Record<string, number[]>;
+  /**
+   * `{body_condition: {index: attack}}` — only the entries the pick table
+   * names, which are the only ones the game reads.
+   */
+  attacks: Record<string, Record<string, AttackJson>>;
+  /** `picks[(rand % 10) + (destroyed_zones & 7) * 10]` names the attack. */
+  attack_picks: Record<string, number[]>;
   /** Damaged variants, keyed by asset slot: their own hit spheres. */
   gore: Record<string, { centre: [number, number, number]; radius: number }>;
   /**
@@ -347,6 +354,33 @@ export interface CombatJson {
   };
 }
 
+/** One attack, from `PTR_PTR_00592F18`. See docs/formats/combat.md §10. */
+export interface AttackJson {
+  /** The strike clip. */
+  strike: number;
+  /** Played while still further away than `distance`. */
+  lunge: number;
+  distance: number;
+  /** Frame of the strike clip on which the hit lands. */
+  hit_frame: number;
+  /** The motion the *player* plays when hit. */
+  player_motion: number;
+  /**
+   * If every zone named here is destroyed the strike whiffs — 1 head,
+   * 2 right arm, 4 left arm. 8 is outside the 3-bit mask, so it never cancels.
+   */
+  cancel_mask: number;
+}
+
+/** `PlayerTakeDamage` — a strike costs exactly one life. */
+export interface PlayerDamageJson {
+  life_cost: number;
+  score: number;
+  invuln_frames: number;
+  rank_delta: number;
+  start_lives: number;
+}
+
 /** The advance rings — see docs/formats/combat.md §10. */
 export interface ApproachJson {
   /** `{inner, mid, outer}` per ring set, from `DAT_004C4CD0`. */
@@ -400,6 +434,7 @@ export interface CharactersJson {
   reaction_blend: { frames: number; sever: number; hard_set_from_bone: number };
   approach: ApproachJson;
   tracking: TrackingJson;
+  player: PlayerDamageJson;
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
   note: string;

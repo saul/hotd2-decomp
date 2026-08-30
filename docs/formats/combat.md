@@ -722,10 +722,12 @@ feel of the thing. With nothing registered the rate is a flat **12**.
 ### The whole loop
 
 ```
-state 22  ZombieStateApproach   walk in; the ring you start in sets the steps
-          TryClaimAttackSlot    one permit per player; win it or keep walking
-state 1   ZombieStateAttackRun  close until TestApproachRing returns 1
-state 2                         the strike
+state 22  ZombieStateApproach     walk in; the ring you start in sets the steps
+          TryClaimAttackSlot      one permit per player; win it or keep walking
+state 1   ZombieStateAttackRun    close until TestApproachRing returns 1
+state 2   ZombieStateHoldAtRange  hold, then ask for the permit again
+state 3   ZombieStateStrike       lunge, swing, land the hit on its own frame
+state 4                           re-approach
 ```
 
 with `SelectCameraLookAtTarget` reading the slot table every frame, so the
@@ -774,19 +776,85 @@ Not implemented, and why:
   play time; the player holds the rank at `g_initial_damage_rank[difficulty]`,
   which is what a fresh game starts on.
 
-The gameplay loop **is** implemented: the advance rings, the per-band step
-counts, the attack permit, the attack run and the strike, actors turning to
-face the camera, and the tracking camera with its slot table, nearest-first
-ordering and turn-rate curve. Two things in it are not transcribed and are
-marked as such in `enemies.ts`:
+The gameplay loop **is** implemented end to end: the advance rings, the
+per-band step counts, the attack permit, the attack run, the hold at range, the
+**strike** with its per-attack lunge distance and exact hit frame, the cancel
+mask and the destroyed-zone attack pick, **player lives and invulnerability**,
+actors turning to face the camera, and the tracking camera with its slot table,
+nearest-first ordering and turn-rate curve. One thing in it is not transcribed
+and is marked as such in `enemies.ts`:
 
 * **how fast an enemy walks** is `[open]` — the velocity source in the
   class-0x30 update was not found, so the speed is derived from the game's own
   ring table instead: an actor crosses a band in the number of steps that band
   allots, one step being one cycle of its walk motion. That falls out at about
-  6 units/second on the default rings;
-* **the strike itself** is `[open]`; the player holds the pose for one step and
-  then releases the permit so the next enemy can commit.
+  6 units/second on the default rings.
+
+### The strike — `ZombieStateHoldAtRange` and `ZombieStateStrike`
+
+Once an enemy is inside the inner ring, state 2 holds it there playing an idle
+until the attack cooldown clears, then asks `TryClaimAttackSlot` again. Success
+moves it to **state 3**, which is the swing:
+
+```c
+sub 0:  idx = picks[(rand % 10) + (destroyed_zones & 7) * 10];
+        atk = attacks[body_condition][idx];
+sub 1:  if (distance > atk.distance)  { play atk.lunge, keep closing; }
+        else { play atk.strike; ActorPlayHitVoice(obj, 3); sub = 2; }
+sub 2:  if (play_position == atk.hit_frame) ActorStrikeConnect(obj);
+        if (play_position >= length - 1) -> state 4, re-approach
+```
+
+The entry is 0x10 bytes:
+
+| Offset | Field |
+|---|---|
+| `+0x00` | s16 strike motion |
+| `+0x02` | s16 lunge motion, played while still beyond *distance* |
+| `+0x04` | f32 distance inside which the strike starts |
+| `+0x08` | s16 the frame of the clip on which the hit lands |
+| `+0x0A` | s16 the motion the **player** plays when hit |
+| `+0x0C` | u16 cancel mask |
+
+### Shooting a limb off changes the attack, twice over
+
+The **cancel mask** names destroyed zones — 1 head, 2 right arm, 4 left arm —
+and `ActorStrikeConnect` whiffs when every zone it names is gone:
+
+```c
+if ((destroyed_zones & 7 & atk.cancel_mask) != atk.cancel_mask)
+    PlayerTakeDamage(permit_holder, kind, atk.player_motion);
+```
+
+`znchain` shows the design cleanly: a right-arm swing cancelled by `0x2`, a
+longer-reach left-arm swing cancelled by `0x4`, a two-armed attack cancelled by
+`0x6`, and a fallback with mask `0x8` — which is outside the three-bit mask, so
+it can never be cancelled at all. Shoot the arm it swings with and that attack
+stops connecting.
+
+And the **pick table** is indexed by the same mask, so a damaged zombie reaches
+for a different attack in the first place: `char_adv00` with an intact head
+always draws attack 2 (strike 1013, cancelled by a destroyed head) and with the
+head gone always draws attack 3 (strike 983, mask `0x8`, uncancellable).
+
+### Damage to the player — `PlayerTakeDamage`
+
+```c
+if (invuln_frames[player] || app_state == 5) return;
+if (!shielded) {
+    g_player_lives[player] -= 1;
+    g_damage_rank_pending -= 2;          /* UpdateDamageRank consumes this */
+    ScoreAddForPlayer(player, -100);
+}
+if (kind) { g_player_was_hit[player] = 1; g_player_hit_motion[player] = motion; }
+invuln_frames[player] = 0x5A;            /* 90 frames, 1.5 s */
+```
+
+**One strike costs exactly one life.** There is no variable damage against the
+player — the attack entry's `+0x0A` is a *motion*, not an amount. And the
+`g_damage_rank_pending -= 2` closes a loop from §4: being hit lowers the
+adaptive rank, which raises the per-bone damage modifier, so the game gets
+easier the worse you do. The continue screen restores 1 or 2 lives.
 
 ### Do zombies aim their torso and head at the player? No.
 

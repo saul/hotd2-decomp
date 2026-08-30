@@ -238,6 +238,47 @@ CAMERA_MAX_CANDIDATES = 14
 #: `TurnActorTowardCamera` faces this far in front of the camera, not the eye.
 ACTOR_FACE_OFFSET = 1.5
 
+#: `PTR_PTR_00592F18[char][body_condition]` -> 0x10-byte attack entries, read
+#: by `ZombieStateStrike` (`FUN_00455A40`) and `ActorStrikeConnect`:
+#:
+#: ===== ==== ==========================================================
+#: +0x00 s16  the strike motion
+#: +0x02 s16  the lunge motion, played while still beyond *distance*
+#: +0x04 f32  distance inside which the strike starts
+#: +0x08 s16  the frame of the strike clip on which the hit lands
+#: +0x0A s16  the motion the *player* plays when hit
+#: +0x0C u16  cancel mask -- if every zone named here is destroyed, the
+#:            strike whiffs. 1 head, 2 right arm, 4 left arm; 8 is
+#:            outside the 3-bit zone mask, so it means "never cancelled"
+#: ===== ==== ==========================================================
+ATTACK_TABLE = 0x00592F18
+ATTACK_ENTRY = 0x10
+#: A hard cap on the entry scan. The real end comes from the next row's
+#: address -- the rows are adjacent with no count, exactly like the reaction
+#: variant arrays, and scanning a fixed number reads the next row's attacks as
+#: this one's. That produced "hits on frame 40 of a 20-frame clip".
+ATTACK_MAX = 16
+
+#: `PTR_PTR_00592DC0[char][cond]`: which attack to use, as
+#: ``picks[(rand/16 % 10) + (destroyed_zones & 7) * 10]`` -- ten choices for
+#: each combination of destroyed zones, so a zombie that has lost an arm draws
+#: from a different set.
+ATTACK_PICK_TABLE = 0x00592DC0
+ATTACK_PICK_PER_ZONE = 10
+ATTACK_ZONE_COMBOS = 8
+
+#: `PlayerTakeDamage` (`FUN_00415300`). A strike costs exactly one life --
+#: there is no variable damage against the player.
+PLAYER_LIFE_COST = 1
+PLAYER_HIT_SCORE = -100
+#: Frames of invulnerability after a hit (0x5A).
+PLAYER_INVULN_FRAMES = 90
+#: ...and the adaptive rank drops by this, which is how being hit makes the
+#: game easier. `UpdateDamageRank` consumes it.
+PLAYER_HIT_RANK_DELTA = -2
+#: What the continue screen restores (`FUN_00497440`), and the player's default.
+PLAYER_START_LIVES = 2
+
 #: `DAT_00577674`: the sound ids `ActorPlayHitVoice` (`FUN_0040A6F0`) picks
 #: from. Fifteen dwords -- five flesh impacts, then six voice ids in
 #: ``(set A, set B)`` pairs, then two two-entry pools. Read as ids and resolved
@@ -384,6 +425,10 @@ class Character:
     #: ``{body_condition: [motion per reaction group]}`` -- see
     #: :func:`hit_reactions`.
     reactions: dict = field(default_factory=dict)
+    #: ``{body_condition: [attack, ...]}`` -- see :func:`attack_tables`.
+    attacks: dict = field(default_factory=dict)
+    #: ``{body_condition: [80 pick indices]}`` -- see :func:`attack_picks`.
+    attack_picks: dict = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {
@@ -400,6 +445,9 @@ class Character:
             "head_bone": 2,
             "torso_stages": self.torso_stages,
             "reactions": {str(k): v for k, v in self.reactions.items()},
+            "attacks": {str(k): {str(i): a for i, a in v.items()}
+                        for k, v in self.attacks.items()},
+            "attack_picks": {str(k): v for k, v in self.attack_picks.items()},
             "motions": {str(k): v for k, v in self.motions.items()},
         }
 
@@ -626,6 +674,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # 16-bone humanoid skeleton, so baked only for those.
         reacts = sorted({m for row in c.reactions.values() for m in row}) \
             if c.bone_count == 16 else []
+        # The strike and lunge clips, so state 3 has something to play.
+        if c.bone_count == 16:
+            for row in c.attacks.values():
+                for e in row.values():
+                    reacts += [e["strike"], e["lunge"]]
         for mid in [motion, intro[0] if intro else None] + deaths + reacts:
             if mid is None or mid in c.motions:
                 continue
@@ -874,6 +927,73 @@ def hit_reactions(tables, char_type: int) -> dict[int, list[int]]:
     return out
 
 
+def attack_tables(tables, char_type: int) -> dict:
+    """``{body_condition: {index: attack}}`` -- see :data:`ATTACK_TABLE`.
+
+    Only the entries the **pick table names** are exported, because those are
+    the only ones the game ever reads: `ZombieStateStrike` indexes with
+    ``obj+0x131A``, which `attack_picks` supplies, and never scans. That also
+    sidesteps the row-length problem -- the rows are adjacent with no count, so
+    a fixed scan reads the next row's attacks as this one's, which is what
+    produced entries "hitting on frame 40 of a 20-frame clip".
+
+    Each entry is checked against its own strike clip before being kept: a hit
+    frame at or past the clip's length means the entry was not really there.
+    """
+    o = tables._v2r(0x004E07D0)
+    play = lambda m: struct.unpack_from("<h", tables.data, o + m * 2)[0]
+    picks = attack_picks(tables, char_type)
+    rows = _bounded_ptr_array(tables, ATTACK_TABLE, char_type)
+    out: dict[int, dict[int, dict]] = {}
+    for cond, row in enumerate(rows):
+        base = tables._v2r(row)
+        if base is None or cond not in picks:
+            continue
+        want = sorted({v for v in picks[cond] if 0 <= v < ATTACK_MAX})
+        got: dict[int, dict] = {}
+        for i in want:
+            a = base + i * ATTACK_ENTRY
+            if a + ATTACK_ENTRY > len(tables.data):
+                continue
+            strike, lunge = struct.unpack_from("<2h", tables.data, a)
+            dist, = struct.unpack_from("<f", tables.data, a + 4)
+            hit, dmot, mask = struct.unpack_from("<3h", tables.data, a + 8)
+            if strike <= 0 or lunge <= 0:
+                continue
+            if not (0 <= hit < play(strike)) or not (0 < play(lunge) <= 400):
+                continue
+            got[i] = {"strike": strike, "lunge": lunge, "distance": dist,
+                      "hit_frame": hit, "player_motion": dmot,
+                      "cancel_mask": mask & 0xFFFF}
+        if got:
+            out[cond] = got
+    return out
+
+
+def attack_picks(tables, char_type: int) -> dict:
+    """``{body_condition: [80 indices]}`` -- see :data:`ATTACK_PICK_TABLE`."""
+    n = ATTACK_PICK_PER_ZONE * ATTACK_ZONE_COMBOS
+    out: dict[int, list[int]] = {}
+    for cond, row in enumerate(_bounded_ptr_array(tables, ATTACK_PICK_TABLE,
+                                                  char_type)):
+        o = tables._v2r(row)
+        if o is None or o + n * 4 > len(tables.data):
+            continue
+        out[cond] = list(struct.unpack_from(f"<{n}i", tables.data, o))
+    return out
+
+
+def player_damage() -> dict:
+    """`PlayerTakeDamage` -- one life, -100, 90 frames of invulnerability."""
+    return {
+        "life_cost": PLAYER_LIFE_COST,
+        "score": PLAYER_HIT_SCORE,
+        "invuln_frames": PLAYER_INVULN_FRAMES,
+        "rank_delta": PLAYER_HIT_RANK_DELTA,
+        "start_lives": PLAYER_START_LIVES,
+    }
+
+
 def approach_tables(tables) -> dict:
     """The advance rings and the step counts, with their defaults.
 
@@ -1080,7 +1200,9 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      extras=extra_parts(tables, char_type),
                      gore=gore_parts(tables, char_type),
                      torso_stages=torso_stage_count(tables, char_type),
-                     reactions=hit_reactions(tables, char_type))
+                     reactions=hit_reactions(tables, char_type),
+                     attacks=attack_tables(tables, char_type),
+                     attack_picks=attack_picks(tables, char_type))
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],
@@ -1221,6 +1343,7 @@ def characters_json(chars: dict[int, Character],
         "reaction_groups": reaction_groups(tables) if tables is not None else [],
         "approach": approach_tables(tables) if tables is not None else {},
         "tracking": camera_tracking(tables) if tables is not None else {},
+        "player": player_damage(),
         "reaction_blend": {"frames": REACT_BLEND, "sever": REACT_BLEND_SEVER,
                            "hard_set_from_bone": REACT_BLEND_MAX_BONE},
         "bone_zones": bone_zones(tables) if tables is not None else [],

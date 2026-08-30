@@ -121,6 +121,8 @@ interface Instance {
    * can move the actor without reaching into three.js nodes.
    */
   actor: EnemyActor;
+  /** `obj+0x1318 & 7` — 1 head gone, 2 right arm, 4 left arm. */
+  zones: number;
   /**
    * The death clip, once chosen. It plays **once and holds its last frame** —
    * `FUN_00454D20` waits for the clip to finish and then hands the body to
@@ -257,7 +259,9 @@ export class CharacterLayer {
                               yaw: p?.yaw ?? 0,
                               dead: false, visible: false,
                               stepSeconds: stepSecondsOf(type, motion),
-                            } });
+                              zones: 0, action: null, type,
+                              condition: p?.body_condition ?? 0,
+                            }, zones: 0 });
       this.posed.add(at);
       node.visible = false;
     }
@@ -308,6 +312,7 @@ export class CharacterLayer {
         // The reaction runs on its own track; the loop underneath keeps going,
         // which is what makes the cross-fade back land in the right place.
         if (inst.react) inst.react.t += dt;
+        if (inst.actor.action) inst.actor.action.t += dt;
       }
       this.pose(inst);
     }
@@ -346,6 +351,24 @@ export class CharacterLayer {
     }
     if (!m || m.frames <= 0) return;
     f = Math.floor(inst.clock * m.fps) % m.frames;
+
+    // A strike or lunge the director started: full weight, no blend, and it
+    // reports its own play position back so the hit can land on its frame.
+    const act = inst.actor.action;
+    if (act) {
+      const am = inst.type.motions[String(act.motion)];
+      if (am) {
+        const af = act.t * am.fps;
+        if (af < am.frames) {
+          this.apply(inst, am, Math.floor(af));
+          return;
+        }
+        if (!act.loop) { inst.actor.action = null; }
+        else { act.t = 0; this.apply(inst, am, 0); return; }
+      } else {
+        inst.actor.action = null;
+      }
+    }
 
     // The stumble, cross-faded over the loop. `ActorPlayHitReaction` starts it
     // on track 1 with a fade length of 10 frames, or 20 when the hit severed
@@ -536,7 +559,12 @@ export class CharacterLayer {
     let result = 0;
     let gore = false;
     let severed = false;
-    const swap = () => { gore = this.swapGore(inst, bone, slot) || gore; };
+    const swap = () => {
+      gore = this.swapGore(inst, bone, slot) || gore;
+      // `ActorSwapDamagedPart` sets the zone bit when the *next* code is 0 or
+      // 1 -- that is, when this bone has reached its last stage.
+      if (code === 0 || code === 1) this.markZone(inst, bone);
+    };
     const sever = () => { severed = true; this.severChildren(inst, bone); };
 
     if (code === 0) {
@@ -687,9 +715,23 @@ export class CharacterLayer {
   /** `RemoveBoneSubtree` for one bone and everything under it. */
   private removeBone(inst: Instance, bone: number): void {
     inst.removed.add(bone);
+    this.markZone(inst, bone);
     const node = inst.bones.get(bone);
     if (node) node.visible = false;
     for (const b of this.childBones(inst.type, bone)) this.removeBone(inst, b);
+  }
+
+  /**
+   * `RemoveBoneSubtree` and `ActorSwapDamagedPart` both set
+   * `obj+0x1318 |= 1 << g_bone_damage_zone[bone]`. Only three zones are named
+   * — head, right arm, left arm — and the rest map to 0xFF, which the game's
+   * `& 0x1F` shift parks on bit 31 where nothing reads it.
+   */
+  private markZone(inst: Instance, bone: number): void {
+    const z = this.json?.bone_zones?.[bone];
+    if (z === undefined || z > 7) return;
+    inst.zones |= 1 << z;
+    inst.actor.zones = inst.zones & 7;
   }
 
   /**
@@ -807,6 +849,9 @@ export class CharacterLayer {
         if (node) node.visible = true;
       }
       i.removed.clear();
+      i.zones = 0;
+      i.actor.zones = 0;
+      i.actor.action = null;
       for (const [bone, g] of i.gore) {
         const node = i.bones.get(bone);
         const self = node as Mesh | undefined;

@@ -4035,3 +4035,53 @@ So the approach velocity stays `[open]` — and slightly better characterised
 than before, since it is now known not to be root motion and known not to be
 written in the zombie's own code (no `fstp [reg+0x4c]` anywhere in
 `0x455000..0x459000`).
+
+---
+
+## The strike, and damage to the player
+
+The last of the gameplay loop. Four things worth recording.
+
+**The strike is a table, not a state.** `ZombieStateStrike` (state 3) draws an
+entry from `g_class30_attacks[char][body_condition]` and does what it says: play
+the lunge until inside the entry's own distance, start the strike clip, shout
+(`ActorPlayHitVoice` kind 3, which is what those two two-entry voice pools at
+`0x005776A0`/`A8` were for), and call `ActorStrikeConnect` on the **exact frame
+the entry names**. Not a collision test, not a distance check at the moment of
+impact — a frame number.
+
+**Shooting a limb off matters twice, and that is the nicest thing in here.**
+Each entry carries a *cancel mask* of destroyed zones, and the hit whiffs if
+every zone in it is gone. `znchain` has a right-arm swing cancelled by `0x2`, a
+longer-reach left-arm one by `0x4`, a two-armed one by `0x6`, and a fallback
+with `0x8` — outside the three-bit zone mask, so uncancellable. The *same* mask
+indexes the pick table, so the zombie also reaches for a different attack:
+`char_adv00` with a head always draws attack 2, and with the head shot off
+always draws attack 3.
+
+**One strike costs one life.** The entry's `+0x0A` looked like a damage amount
+and is not — it is the motion the *player* plays when hit. `PlayerTakeDamage`
+decrements lives by exactly one, subtracts 100 points, and sets 90 frames of
+invulnerability. It also does `g_damage_rank_pending -= 2`, which
+`UpdateDamageRank` consumes: being hit lowers the adaptive rank, which raises
+the per-bone damage modifier. That closes a loop opened much earlier in this
+session, when the rank table was read without knowing what moved it.
+
+### The adjacent-array trap, third time
+
+`g_class30_attacks`' rows are adjacent with no count, and a fixed-length scan
+read the next row's attacks as this one's. The verifier caught it in the only
+way it could: entries "hitting on frame 40 of a 20-frame clip", because the
+frame and the clip length come from different tables and a misread cannot
+satisfy both.
+
+Bounding by the next row's address — the fix that worked for the reaction
+tables — was not enough here, because different character types point into the
+same rows at different offsets. The move that did work was to stop scanning
+altogether: **the game only ever reads the entries its pick table names**, so
+export exactly those and validate each against its own clip. Self-bounding, and
+it needs no guess about row length at all.
+
+Worth generalising: when a table has no count and its neighbours are ambiguous,
+look for the *index source* and export what that names, rather than trying to
+find the end.

@@ -56,7 +56,7 @@ remain. Phase 8 exports whole textured stages with camera animation.
 - [`docs/re/session-log.md`](docs/re/session-log.md) — **start here when
   resuming.** Where the last session stopped and what to do next.
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) — phase checklist
-- [`docs/PLAN.md`](docs/PLAN.md) — the full plan
+- [`docs/PLAN.md`](docs/PLAN.md) — **what is left to do**, and what "complete" should mean
 - [`docs/PLAYER_PLAN.md`](docs/PLAYER_PLAN.md) — the browser stage player's plan
   and rationale; [`web/README.md`](web/README.md) is how to run it
 

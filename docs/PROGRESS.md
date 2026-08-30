@@ -1,10 +1,14 @@
 # Progress
 
-Phase detail lives in [`PLAN.md`](PLAN.md).
+Phase detail lives in [`re/PLAN-phases-0-8.md`](re/PLAN-phases-0-8.md); what is left to do is in [`PLAN.md`](PLAN.md).
 
 > **Resuming work?** Read [`re/session-log.md`](re/session-log.md) first — the
 > last entry records exactly where the previous session stopped, what was tried
 > and failed, and the ordered next actions.
+
+> The eight phases below are finished. The forward-looking plan is
+> [`PLAN.md`](PLAN.md); the original plan document that defined these phases is
+> archived at [`re/PLAN-phases-0-8.md`](re/PLAN-phases-0-8.md).
 
 ## Phase 0 — Baseline ✅
 

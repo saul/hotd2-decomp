@@ -559,17 +559,28 @@ class Player {
    */
   private showSkipBar(): void {
     const bar = $("#skipbar");
+    const go = $<HTMLButtonElement>("#skip-go");
     const w = this.walker;
-    const can = w?.canSkip ?? false;
-    bar.hidden = !can;
-    if (!can || !w) return;
+    // The bar follows the region, not the offer. `canSkip` adds the firing
+    // gate, and gating *visibility* on that made the whole feature invisible
+    // whenever the gate happened to be up -- which is not worth the fidelity,
+    // since the region is the thing the script actually declares. So the bar
+    // shows for the region and the button carries the gate.
+    const open = w?.skippable ?? false;
+    bar.hidden = !open;
+    if (!open || !w) return;
+    const can = w.canSkip;
+    go.disabled = !can;
     // On the rare frame a branch point is live too, sit above it rather than
     // under it.
     bar.classList.toggle("stacked", !$("#branchbar").hidden);
     const held = w.wait?.blocksOn;
-    $("#skip-sub").textContent = held
-      ? `holding on ${held} — skips every wait until the region closes`
-      : "skips every wait until set_skippable_region closes";
+    $("#skip-sub").textContent = !can
+      ? "region open, but the shutter's firing gate is up — the game would not "
+        + "poll Start here"
+      : held
+        ? `holding on ${held} — skips every wait until the region closes`
+        : "skips every wait until set_skippable_region closes";
   }
 
   private setPlayButton(): void {

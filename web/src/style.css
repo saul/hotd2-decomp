@@ -322,7 +322,8 @@ body.resizing { cursor: col-resize; user-select: none; }
   border-radius: 5px; padding: 4px 12px; font: inherit; cursor: pointer;
   flex: none;
 }
-#skip-go:hover { border-color: var(--accent-2); color: var(--accent-2); }
+#skip-go:hover:not(:disabled) { border-color: var(--accent-2); color: var(--accent-2); }
+#skip-go:disabled { color: var(--dim); cursor: default; }
 .skip-key {
   font-family: var(--mono); font-size: 11px; color: var(--dim);
   border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px;

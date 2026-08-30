@@ -227,9 +227,14 @@ export class Walker {
    * and 5 both draw a closed shutter and set it to 1 and 0 respectively, so a
    * boss intro can be letterboxed and still let you shoot.
    */
-  firingGate = true;
-  /** Frames left of a state-3 close, after which the gate drops. */
-  private gateCloseLeft = 0;
+  firingGate = false;
+  /**
+   * Frames left of a state-3 close, after which the gate drops.
+   *
+   * Real time only. Stepping has no clock, so `stepOnce` finishes a pending
+   * close outright rather than leaving the gate stuck up forever.
+   */
+  gateCloseLeft = 0;
   /**
    * `DAT_009A2D7C` -- set by `set_skippable_region` (0x2C). Non-zero means the
    * script has opened a region the player is allowed to skip out of.
@@ -401,7 +406,9 @@ export class Walker {
     this.backdropPreset = -1;
     this.backdropMode = 0;
     this.shutterState = 2;
-    this.firingGate = true;
+    // BSS, so the gate starts down: FUN_0045EBC0 does not touch DAT_009C8E00,
+    // and nothing raises it until the shutter machine's first state 0, 1 or 6.
+    this.firingGate = false;
     this.gateCloseLeft = 0;
     this.skippable = false;
     this.skipRequested = false;
@@ -459,6 +466,13 @@ export class Walker {
   /** Take one instruction, ignoring any wait. Returns false when stuck. */
   stepOnce(): boolean {
     this.wait = null;
+    // Stepping advances instructions, not frames, so a shutter close that is
+    // still counting down would never finish and would hold the firing gate up
+    // for the rest of the session.
+    if (this.gateCloseLeft > 0) {
+      this.gateCloseLeft = 0;
+      this.firingGate = false;
+    }
     return this.executeOne(false);
   }
 

@@ -27,8 +27,15 @@ import { g_class_handlers } from "../game/registry";
 import { SpawnClass } from "../game/spawn_class";
 import { labelTexture } from "./overlays";
 
-/** Grey: the port is not simulating this one. */
-const UNPORTED = 0x8fa3ad;
+/**
+ * Magenta: the port is not simulating this one.
+ *
+ * Deliberately a colour nothing else in the scene uses. The level's own
+ * palette is browns, greys and sodium orange, the rails are cyan, amber and
+ * green, and a grey box read as scenery — which is exactly the wrong
+ * impression for a marker whose whole job is "this is missing".
+ */
+const UNPORTED = 0xff3df0;
 /** Amber: holds an attack permit — about to swing, and on camera. */
 const PERMIT = 0xffb02e;
 /** Green: alive, and the script is blocked until it is not. */

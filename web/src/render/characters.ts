@@ -217,6 +217,7 @@ export class CharacterLayer {
         condition: p?.body_condition ?? 0,
         ringSet: p?.ring_set ?? 0,
         leap: p?.leap ?? null,
+        path: p?.path ?? null,
       });
       a.motion = motion;
       a.intro = intro;

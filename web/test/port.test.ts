@@ -186,6 +186,13 @@ console.log("class 0x30, three zombies, ten seconds:");
   check("someone reached the player and swung", damaged > 0,
         `${damaged} hits`);
   check("the retreat happened", sawBackoff);
+  // Every caller of `ZombieSetMotionIfIdle` passes a random start frame, so
+  // two zombies given the same order at the same moment do not take the same
+  // steps at the same time. Starting them all at frame zero made a crowd move
+  // in lockstep, which a crowd of shambling corpses never does.
+  const phases = new Set(G.g_object_list.map((o) => o.clock.toFixed(4)));
+  check("and they are not in lockstep", phases.size > 1,
+        `${phases.size} distinct motion phases among ${G.g_object_list.length}`);
   check("nothing walked inside the inner ring",
         minWalking >= APPROACH.rings[0].inner - 0.01,
         `closest ${minWalking.toFixed(2)}`);
@@ -299,12 +306,12 @@ console.log("the queue throttle:");
   z.rank = 9;
   z.allowance = 2;
   const before = { ...z.pos };
-  for (let i = 0; i < 30; i++) ZombieStateWaitTurn(z, EYE);
+  for (let i = 0; i < 30; i++) ZombieStateWaitTurn(z, EYE, rng);
   check("an actor out of the queue waits, and does not advance",
         z.state === ZombieState.WaitTurn
         && Math.abs(z.pos.z - before.z) < 0.01, ZombieState[z.state]);
   z.rank = 0;
-  ZombieStateWaitTurn(z, EYE);
+  ZombieStateWaitTurn(z, EYE, rng);
   check("and rejoins the attack run when the queue moves on",
         z.state === ZombieState.AttackRun, ZombieState[z.state]);
 }
@@ -344,6 +351,46 @@ console.log("ThrowerStateLeapToPoint:");
   check("in about the frames it names", ys.findIndex((y) => y <= 37.001) <= 31,
         `${ys.findIndex((y) => y <= 37.001)}`);
   check("and then stands up to throw",
+        z.state === ThrowerState.StandAndThrow, `state ${z.state}`);
+}
+
+// -- 3c. the route ----------------------------------------------------------
+
+console.log("ThrowerStatePathFollow:");
+{
+  const rng = new Rng(6);
+  const events = scene(0, rng);
+  // Stage 2 block 3's zsass, 3/3/4, descriptor 0x1EF0, verbatim: wait 30
+  // frames, then climb three legs before it fights.
+  const z = ActorSpawn(0x1ef0, SpawnClass.Thrower, 1, "zsass", {
+    initialState: ThrowerState.PathFollow,
+    path: {
+      delay: 30,
+      points: [
+        { step: 1, motion_set: 1, dest: [-741.9, 100.0, -890.7] },
+        { step: 1, motion_set: 1, dest: [-741.9, 110.0, -845.7] },
+        { step: 1, motion_set: 2, dest: [-737.5, 115.0, -810.0] },
+      ],
+    },
+  });
+  z.visible = true;
+  z.hp = 10;
+  z.pos = vec3(-741.9, 90.0, -930.0);
+  z.motion = 10;
+  const start = { ...z.pos };
+
+  check("it starts on the route, not standing and throwing",
+        z.state === ThrowerState.PathFollow, `state ${z.state}`);
+  for (let i = 0; i < 20; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("it holds still for the descriptor's delay",
+        Math.abs(z.pos.z - start.z) < 0.01, `moved ${(z.pos.z - start.z).toFixed(2)}`);
+
+  for (let i = 0; i < 900; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("it walks the route to the last waypoint",
+        Math.abs(z.pos.x + 737.5) < 0.1 && Math.abs(z.pos.z + 810.0) < 0.1
+        && Math.abs(z.pos.y - 115.0) < 0.1,
+        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
+  check("and only then starts throwing",
         z.state === ThrowerState.StandAndThrow, `state ${z.state}`);
 }
 

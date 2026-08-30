@@ -103,6 +103,15 @@ export interface CharacterPlacement {
    */
   leap?: { dest: [number, number, number]; frames: number } | null;
   /**
+   * The route a `ThrowerStatePathFollow` spawn walks before it fights, from
+   * the descriptor's +0x04 delay and the 16-byte waypoints at +0x08.
+   */
+  path?: {
+    delay: number;
+    points: { step: number; motion_set: number;
+              dest: [number, number, number] }[];
+  } | null;
+  /**
    * A scripted entrance played once before `motion` starts looping — state 21
    * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump
    * out of it this way, staggered by their delays.

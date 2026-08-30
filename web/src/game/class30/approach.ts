@@ -9,6 +9,7 @@
  * It plays the in-place walk and **does not move**: the clip it selects,
  * `row[0]` or `row[1]`, carries no root translation. See `game/root_motion.ts`.
  */
+import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionRowOf } from "../tables";
@@ -17,7 +18,7 @@ import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionRow, QUEUE_CAP } from "./states";
 
-export function ZombieStateApproach(obj: Actor, eye: Vec3): void {
+export function ZombieStateApproach(obj: Actor, eye: Vec3, rng: Rng): void {
   if (obj.sub === 0) {
     // The same band test `TestApproachRing` does, inlined here in the exe.
     TestApproachRing(obj, eye);
@@ -30,7 +31,8 @@ export function ZombieStateApproach(obj: Actor, eye: Vec3): void {
   // set by `ZombieStateAttackRun` from a random table when an actor drops out
   // of the queue, and it is not otherwise read here, so the port takes row 0.
   ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt));
+    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
+    rng, "clip");
 
   if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP
       && TryClaimAttackSlot(obj)) {

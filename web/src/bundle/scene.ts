@@ -125,3 +125,41 @@ export interface RainJson {
   /** How many times this scene's script turns rain on. */
   enabled_by_script: number;
 }
+
+/**
+ * One member of a breakable group — a 10-byte record read out of the exe by
+ * `PlaceBreakableGroup` (`FUN_00462A80`), not out of the evt.
+ */
+export interface BreakableMember {
+  index: number;
+  /** Record `+0x00`/`+0x02`, already scaled by the record's own 0.1. */
+  x: number;
+  z: number;
+  /** Record `+0x04`. 0 means this prop hides nothing. */
+  item_set: number;
+  /** Record `+0x05`, signed. The Boss Mode drop, `-1` for none. */
+  boss_item: number;
+  /** Record `+0x06`. Height above the floor is `level * level_height`. */
+  level: number;
+  y_offset: number;
+  /** Record `+0x08`/`+0x09`, truncated to the `+0x07` count. */
+  supports: number[];
+}
+
+export interface BreakablePlacement {
+  /** The script address of the class-0x41 spawn that places this group. */
+  at: number;
+  group: number;
+  /** Descriptor `+0x24` — how many evt blocks the props live for. */
+  lifetime_evt_blocks: number;
+}
+
+export interface BreakablesJson {
+  /** All nine groups, indexed by group id. */
+  groups: BreakableMember[][];
+  /** `g_breakable_hull_points` — 96 `[x, y, z]`, already scaled by 0.001. */
+  hull: [number, number, number][];
+  placements: BreakablePlacement[];
+  /** 7.540296 — one stack level, in world units. */
+  level_height: number;
+}

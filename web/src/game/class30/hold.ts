@@ -19,6 +19,7 @@
  *   is set, so an ordinary zombie has no wait between swings beyond the
  *   retreat itself.
  */
+import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { TryClaimAttackSlot } from "../combat/permits";
@@ -31,7 +32,8 @@ import { MotionRow, QUEUE_CAP, ZombieState } from "./states";
 /** `FUN_00409E80`'s turn rate here is a literal 0x40 BAMS. */
 const HOLD_TURN_RATE = 0x40;
 
-export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3): void {
+export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3,
+                                       rng: Rng): void {
   // Called for its side effect: it refreshes `obj+0x1358`, the queue depth
   // this actor is allowed to sit at.
   TestApproachRing(obj, eye);
@@ -61,6 +63,7 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3): void {
   // Waiting its turn: the idle from the motion row, and a slow turn to keep
   // facing you.
   ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt));
+    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
+    rng, 5);
   TurnActorTowardCameraEye(obj, eye, HOLD_TURN_RATE);
 }

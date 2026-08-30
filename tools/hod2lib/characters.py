@@ -522,6 +522,15 @@ class Character:
 #: `ThrowerStateLeapToPoint` and `ZombieStateLeapToPoint` are the two read.
 LEAP_STATES = {0x30: (24,), 0x31: (20,)}
 
+#: Which state index means "follow a list of waypoints" -- `ThrowerStatePathFollow`.
+PATH_STATES = {0x31: (26,)}
+
+#: A waypoint: ``{s16 step, s16 motion_set, f32 x, f32 y, f32 z}``, sixteen
+#: bytes, and the list is terminated by a step of -1. *step* is frames per
+#: unit -- `ActorArcBeginTo` sets the duration from ``dist2d * step`` -- and it
+#: doubles as the arc kind `ActorArcStep` switches on.
+WAYPOINT_BYTES = 0x10
+
 
 @dataclass
 class Placement:
@@ -552,6 +561,10 @@ class Placement:
     #: (`ZombieStateLeapToPoint`) -- so it is emitted only for them; for any
     #: other state the same bytes mean something else.
     leap: dict | None = None
+    #: The waypoint path a `ThrowerStatePathFollow` spawn walks:
+    #: ``{delay, points: [{step, motion_set, dest}]}`` from the descriptor's
+    #: ``+0x04`` and the 16-byte entries at ``+0x08``.
+    path: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -570,6 +583,8 @@ class Placement:
              "yaw": self.spawn["orient"][1] & 0xFFFF}
         if self.leap:
             d["leap"] = self.leap
+        if self.path:
+            d["path"] = self.path
         if self.intro:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
         return d
@@ -762,10 +777,27 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             dest = [rec.param(o, "f32") for o in (4, 8, 0xC)]
             if 0 < frames < 3600 and all(math.isfinite(v) for v in dest):
                 leap = {"dest": dest, "frames": frames}
+        path = None
+        if rec is not None and tail[1] in PATH_STATES.get(sp["class"], ()):
+            pts = []
+            off = 8
+            for _ in range(32):                 # the longest seen is 3
+                step = rec.param(off, "i16")
+                if step is None or step == -1:
+                    break
+                dest = [rec.param(off + 4 + 4 * k, "f32") for k in range(3)]
+                if not all(v is not None and math.isfinite(v) for v in dest):
+                    break
+                pts.append({"step": step,
+                            "motion_set": rec.param(off + 2, "i16") or 0,
+                            "dest": dest})
+                off += WAYPOINT_BYTES
+            if pts:
+                path = {"delay": rec.param(4, "i32") or 0, "points": pts}
         placements.append(Placement(
             at, sp["class"], res.char_type, motion, sp, intro,
             body_condition=tail[0], initial_state=tail[1],
-            attack_state=tail[2], leap=leap,
+            attack_state=tail[2], leap=leap, path=path,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
             hp=sp.get("hp", 0)))
         if motion is None:

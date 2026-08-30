@@ -22,12 +22,12 @@ import { ZombieState } from "./states";
 export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
                                   events?: Events): void {
   switch (obj.state) {
-    case ZombieState.Approach:    return ZombieStateApproach(obj, eye);
-    case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt);
-    case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye);
+    case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng);
+    case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt, rng);
+    case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye, rng);
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
-    case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt);
-    case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye);
+    case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
+    case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
     default:                      return ZombieGiveUpAttack(obj);
   }
 }

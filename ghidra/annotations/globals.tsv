@@ -223,3 +223,12 @@
 009c7000	g_active_player	Which player TryClaimAttackSlot offers a permit to when g_max_attackers is 1. In a one-player game it is 0, so only g_attack_permits[0] is ever handed out.
 009c8e80	g_two_player_game	Set when two players are actually in play. TryClaimAttackSlot's g_max_attackers == 2 branch picks a permit at random when this is set and falls back to the nearer player otherwise.
 004c4d28	g_actor_radius_by_char	One float per character type, copied to obj+0x124 by EnemyZombieInit and EnemyThrowerInit. Paired with obj+0x128, which the zombie sets to 3.5 and the thrower to 5.0 (type 0x16) or 4.0 (types 0x17-0x19).
+007dcdd4	g_breakable_members	group*9 + member -> the live BreakablePropUpdate object, or 0 once it is destroyed. Stride 9 because the largest breakable group has nine members. The topple test reads it to find the props a member supports.
+009c7010	g_item_set_countdown	Per item-set: how many more props of that set must be destroyed before its hidden item drops. PlaceBreakableGroup seeds it with rand()%n + 1, so which break releases the item is random. Groups 6 and 7 both use set 2, so the later placement overwrites the earlier one's countdown.
+005937f8	g_breakable_hull_points	96 x {s16 x, s16 y, s16 z}, scaled by 0.001, the prop's collision hull. BreakablePropGroundContact transforms all 96 to find which corner a toppling prop lands on.
+00593a78	g_shatter_fragment_offsets	15 x {s16 x, s16 y, s16 z} in thousandths -- where each shatter fragment starts, relative to the prop.
+00593ad4	g_shatter_fragment_angles	15 x {s16 rx, s16 ry, s16 rz} in BAMS -- each shatter fragment's initial orientation.
+00593db8	g_prop_kind_params	Per class-0x41-type-4 object kind, stride 0xC: {s16 effect_id @+0, s16 effect_arg @+2, ..., s16 radius @+8}. PlaceKindedProp copies them into the prop's +0x324/+0x328/+0x124.
+00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
+00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
+009c9118	g_training_lesson	Which Training Mode lesson is running (g_GameMode == 2). PlaceBreakableGroup uses it to pick which members of a group become one-shot targets with asset 0x1A0F: lesson 0 takes members 2, 3, 4 and 6; lesson 1 takes 0, 1 and 5; lesson 2 takes 0 and 6; lesson 3 takes the same four as lesson 0.

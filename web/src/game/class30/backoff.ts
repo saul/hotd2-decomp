@@ -10,6 +10,7 @@
  * than to the approach is what makes the next zombie's turn come round
  * promptly instead of after a fresh walk-in.
  */
+import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
@@ -22,7 +23,8 @@ import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionRow, ZombieState } from "./states";
 /** `FUN_00409F90`'s rate here, negated when `obj+0x136C & 0x400000` is set. */
 const BACKOFF_TURN_RATE = -0x40;
 
-export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
+export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
+                                   rng: Rng): void {
   if (obj.sub === 0) {
     obj.cooldown = 0x3c;              // +0x1338, the engine's own 60
     obj.backoffFrames = 0;            // +0x1334
@@ -33,7 +35,7 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
   }
 
   ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway));
+    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway), rng, 5);
   // Turn relative to where the strike began, not to the camera: the actor
   // lunged forward to swing and walks back out along the same line.
   TurnActorAwayFromPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);

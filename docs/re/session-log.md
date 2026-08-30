@@ -4655,3 +4655,43 @@ because the director re-ranks every frame. Restoring the unsigned rank makes it
 fail. The synthetic scene cannot reproduce the *stranding* half, because the
 rank reset that now runs for unranked actors is itself part of the fix — so
 that half is asserted as the recovery it is, rather than contrived.
+
+## The route, the lockstep, and a tool to stop guessing
+
+Three reports, and the first thing that changed is how they got answered:
+`npm run replay -- 2 3 1` drives the port over a real stage bundle headless and
+prints what every actor is doing under the same `block/step/n` labels the debug
+boxes show. Two rounds of guessing at "stuck in WaitTurn" preceded it; the
+third round took a minute.
+
+**`ThrowerStatePathFollow` (class 0x31 state 26)** is a spawn that walks a
+route before it fights. The descriptor carries a delay at `+0x04` and then
+16-byte waypoints at `+0x08` — `{s16 step, s16 motion_set, f32 x, f32 y,
+f32 z}` — terminated by a step of -1. Stage 2's `3/3/4`, descriptor `0x1EF0`,
+waits 30 frames and then climbs: y = 100, y = 110, y = 115, and only then
+throws. A second, `0x7EA4`, walks five legs.
+
+Each leg is `ActorArcBeginTo`, and Ghidra hides the interesting half of it:
+`__ftol` is shown taking no argument at all, and the disassembly says
+
+```
+FLD [sx]; FSUB [dx]; FLD [sz]; FSUB [dz]     ; 2D only -- y is not in it
+... FSQRT ; FIMUL [step] ; CALL __ftol
+IDIV [step] ; SUB ECX,EDX                    ; T = n - n % step
+```
+
+so `step` is **frames per unit** — 1 gives a unit a frame — and it doubles as
+the arc kind `ActorArcStep` switches on.
+
+**The crowd was moving in lockstep**, and the reason is one argument.
+`ZombieSetMotionIfIdle` takes a start frame, and every caller passes a random
+one: the approach and the attack run pass `rand() % clip_length`, the hold, the
+retreat and the wait pass `rand() % 5`. The port started every clip at frame
+zero, so two zombies given the same order at the same moment took exactly the
+same steps at exactly the same time.
+
+**Annotating by appending put a duplicate address in `functions.tsv` twice in
+one session** — `ThrownWeaponFlyToTarget` and `RankEnemiesByDistance` — because
+the address was already named and I did not look. `tools/annotate.py` upserts
+by address now: it refuses to rename without `--rename`, replaces the comment,
+and appends only what is genuinely new.

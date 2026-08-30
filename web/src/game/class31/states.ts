@@ -20,6 +20,8 @@ export enum ThrowerState {
   StandAndThrow = 7,
   /** `ThrowerStateLeapToPoint` (`FUN_0044E4C0`). The scripted drop. */
   LeapToPoint = 20,
+  /** `ThrowerStatePathFollow` (`FUN_0044EE00`). A route walked before fighting. */
+  PathFollow = 26,
 }
 
 /** `ThrowerStateThrow`'s sub-state, at `obj+0x1312`. */

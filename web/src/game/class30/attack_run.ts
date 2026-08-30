@@ -10,6 +10,7 @@
  * walks a set distance and sets state 1; the burst-out entrance (27) plays its
  * clip and sets state 1. Between them that is 37 of stage 2's 90 zombies.
  */
+import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { FirstBakedOf, MotionRowOf } from "../tables";
@@ -18,14 +19,15 @@ import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionRow, ZombieState } from "./states";
 
-export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number): void {
+export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number,
+                                    rng: Rng): void {
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]`, taking whichever variant this bundle
   // actually carries -- and falling back to the walk for a skeleton that has
   // no run clip of its own, which is `znchain` and the two `znebi`.
   ZombieSetMotionIfIdle(obj, FirstBakedOf(obj, row, MotionRow.Run,
                                           MotionRow.RunAlt, MotionRow.Walk,
-                                          MotionRow.WalkAlt));
+                                          MotionRow.WalkAlt), rng, "clip");
 
   if (TestApproachRing(obj, eye) === 1) {
     obj.state = ZombieState.HoldAtRange;

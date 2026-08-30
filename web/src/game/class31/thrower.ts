@@ -26,6 +26,7 @@ import { CharacterTypeOf, MotionOf, ThrowHandsOf } from "../tables";
 import { vec3, type Vec3 } from "../vec";
 import { GAME_HZ } from "../class30/states";
 import { ThrowerStateLeapToPoint } from "./leap";
+import { ThrowerStatePathFollow } from "./path";
 import { ThrowerState, ThrowSub } from "./states";
 
 /** Hands whose arm has not been shot off. `ThrowerStateThrow` refuses the rest. */
@@ -145,6 +146,11 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number,
     ActorIntegrate(obj, dt);
     return;
   }
+  if (obj.state === ThrowerState.PathFollow) {
+    // It moves itself: each leg is an arc with its own duration.
+    ThrowerStatePathFollow(obj, dt);
+    return;
+  }
   TurnActorTowardCamera(obj, eye, dt);
   ThrowerStateThrow(obj, host, eye, events);
 }
@@ -172,9 +178,13 @@ export function EnemyThrowerInit(obj: Actor): void {
   obj.sub = ThrowSub.Draw;
   obj.attack = 0;
   obj.attackPermit = -1;
-  obj.state = obj.initialState === ThrowerState.LeapToPoint && obj.leap
-    ? ThrowerState.LeapToPoint
-    // [diverges] The other 27 states are unread. They all end up standing and
+  if (obj.initialState === ThrowerState.LeapToPoint && obj.leap) {
+    obj.state = ThrowerState.LeapToPoint;
+  } else if (obj.initialState === ThrowerState.PathFollow && obj.path) {
+    obj.state = ThrowerState.PathFollow;
+  } else {
+    // [diverges] The other 26 states are unread. They all end up standing and
     // throwing, which is the one behaviour this port has for the class.
-    : ThrowerState.StandAndThrow;
+    obj.state = ThrowerState.StandAndThrow;
+  }
 }

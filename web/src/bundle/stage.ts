@@ -8,7 +8,8 @@ import type { CamJson } from "./cameras";
 import type { CharactersJson } from "./characters";
 import { SUPPORTED_FORMAT } from "./manifest";
 import type { Manifest, StageEntry } from "./manifest";
-import type { BackdropJson, PropsJson, RainJson, RigsJson, SoundJson } from "./scene";
+import type { BackdropJson, BreakablesJson, PropsJson, RainJson, RigsJson,
+              SoundJson } from "./scene";
 import type { BlockJson, RegionEntryJson } from "./script";
 import type { BgmJson } from "./sound";
 
@@ -30,6 +31,7 @@ export interface ScriptJson {
   rigs?: RigsJson;
   characters?: CharactersJson;
   props?: PropsJson;
+  breakables?: BreakablesJson;
   rain?: RainJson;
   warnings: string[];
 }

@@ -40,6 +40,17 @@ export enum DamageZone {
   All = 7,
 }
 
+/**
+ * One waypoint: `{s16 step, s16 motion_set, f32 x, f32 y, f32 z}`, sixteen
+ * bytes in the descriptor. `step` is frames per unit and doubles as the arc
+ * kind — see `ActorArcBeginTo`.
+ */
+export interface PathPoint {
+  step: number;
+  motion_set: number;
+  dest: [number, number, number];
+}
+
 /** A motion the actor is playing at full weight. `t` is seconds. */
 export interface ActorClip { motion: number; t: number; loop: boolean }
 
@@ -116,6 +127,15 @@ export interface Actor {
   arcFrom: Vec3;
   /** `obj+0x1330` — frames of the arc elapsed. */
   arcFrames: number;
+  /**
+   * The route a `ThrowerStatePathFollow` spawn walks before it fights, from
+   * its descriptor: a delay and a list of waypoints.
+   */
+  path: { delay: number; points: PathPoint[] } | null;
+  /** Which leg of it — the engine keeps a cursor at `obj+0x1394`. */
+  pathLeg: number;
+  /** `obj+0x1330` in sub 1: the delay before the first leg. */
+  pathDelay: number;
   /** `obj+0x1334` — how many it lasts. */
   arcTotal: number;
 
@@ -206,6 +226,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     leap: null,
     arcFrom: vec3(),
     arcFrames: 0,
+    path: null,
+    pathLeg: 0,
+    pathDelay: 0,
     arcTotal: 0,
     hasStrikeAnchor: false,
     struck: false,

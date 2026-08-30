@@ -1,69 +1,40 @@
 /**
  * `ZombieStateApproach` — `FUN_004579A0`.
  *
- * Walk in, band by band, then ask permission to attack. The test is
+ * The *second* way into the attack loop, and the rarer one: it claims a permit
+ * up front and routes to the descriptor's own attack state. No spawn in stage
+ * 2 starts here — the ordinary path is an entrance state into `AttackRun` and
+ * then `HoldAtRange`, which claims for itself.
  *
- * ```c
- * if ((s8)obj[0x131D] < obj[0x1358] && obj[0x131E] < 3) TryClaimAttackSlot();
- * ```
- *
- * — "if I am among the nearest N, and among the nearest 3 overall, I may press
- * an attack". `obj+0x131D` is written once a frame by `RankEnemiesByDistance`
- * and `obj+0x1358` comes from `TestApproachRing`.
- *
- * This state also **sets `flags & 0x10000` while walking and clears it the
- * moment the actor wins a permit**, which is how the camera comes to consider
- * only enemies that have committed.
+ * It plays the in-place walk and **does not move**: the clip it selects,
+ * `row[0]` or `row[1]`, carries no root translation. See `game/root_motion.ts`.
  */
 import { ActorFlag, type Actor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
-import { QUEUE_CAP } from "../combat/rank";
-import { AttackListOf } from "../tables";
+import { MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
-import { ActorAdvanceTowardCamera } from "./move";
+import { ActorSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
-import { ZombieState } from "./states";
+import { MotionRow, QUEUE_CAP } from "./states";
 
-/**
- * Whether taking a permit could lead anywhere.
- *
- * `attack_state` 0 is `g_class30_states[0]`, the engine's no-op — 123 of stage
- * 2's class-0x30 spawns carry it, and -1 another 38. Those actors are scenery
- * that happens to walk. They must not compete for a permit: there are only
- * `g_max_attackers` of them, and one held by an actor that cannot attack
- * blocks every other enemy for good.
- */
-export function ActorCanAttack(obj: Actor): boolean {
-  return obj.attackState > 0 && Object.keys(AttackListOf(obj)).length > 0;
-}
-
-/**
- * Which state a permit-holder enters. Only 1 and 2 are ported; the descriptor
- * also names 10, 15, 26, 30 and 38, which are approach variants, so they are
- * mapped onto the attack run rather than left to hang.
- */
-export function ZombieAttackStateFor(obj: Actor): number {
-  return obj.attackState === ZombieState.Strike ? ZombieState.Strike : ZombieState.AttackRun;
-}
-
-export function ZombieStateApproach(obj: Actor, eye: Vec3, dt: number): void {
+export function ZombieStateApproach(obj: Actor, eye: Vec3): void {
   if (obj.sub === 0) {
-    const r = TestApproachRing(obj, eye);
-    obj.allowance = r.allowance;
+    // The same band test `TestApproachRing` does, inlined here in the exe.
+    TestApproachRing(obj, eye);
     obj.flags |= ActorFlag.NoCameraTrack;
     obj.sub = 1;
     return;
   }
 
-  // The band is recomputed every frame, because the actor is walking and the
-  // states that follow this one call `TestApproachRing` every frame too.
-  ActorAdvanceTowardCamera(obj, eye, dt);
-  obj.allowance = TestApproachRing(obj, eye).allowance;
+  // `row[(obj+0x136C >> 0x15) & 1]` -- the two walk variants. Bit 0x200000 is
+  // set by `ZombieStateAttackRun` from a random table when an actor drops out
+  // of the queue, and it is not otherwise read here, so the port takes row 0.
+  ActorSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.Walk]);
 
-  if (!ActorCanAttack(obj)) return;
   if (obj.rank < obj.allowance && obj.rank < QUEUE_CAP
       && TryClaimAttackSlot(obj)) {
-    obj.state = ZombieAttackStateFor(obj);
+    obj.flags &= ~ActorFlag.NoCameraTrack;
+    obj.state = obj.attackState;
     obj.sub = 0;
   }
 }

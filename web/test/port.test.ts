@@ -36,8 +36,17 @@ function check(name: string, ok: boolean, detail = ""): void {
 
 // -- a stage's worth of tables, small enough to reason about ----------------
 
-const motion = (frames: number) =>
-  ({ bank: "t", frames, fps: 30, root: [], rot: [] });
+/**
+ * A clip. `perFrame` is root translation along the clip's own -Z, which is
+ * what actually walks a zombie: the run carries 1.289 units a frame on the
+ * real data, the walk carries nothing.
+ */
+const motion = (frames: number, perFrame = 0) => ({
+  bank: "t", frames, fps: 30,
+  root: Array.from({ length: frames * 3 },
+                   (_, i) => (i % 3 === 2 ? -perFrame * Math.floor(i / 3) : 0)),
+  rot: [],
+});
 
 const TYPE: CharacterType = {
   type: 1, name: "test zombie", file: "t.bin", bone_count: 16,
@@ -66,12 +75,14 @@ const TYPE: CharacterType = {
   },
   attack_picks: { "0": new Array(80).fill(1) },
   throw: null,
-  motion_row: { "0": [10, 11, 12, 13, 14] },
+  motion_row: { "0": [10, 10, 12, 12, 14] },
   backoff_index: 4,
   gore: {}, torso_stages: 3,
   motions: {
-    "10": motion(20), "14": motion(20),
-    "100": motion(20), "101": motion(20),
+    // 10 the in-place walk and idle, 12 the run that closes, 14 the retreat.
+    "10": motion(20), "12": motion(16, 1.289), "14": motion(36, -0.429),
+    // 101 the lunge, which carries the actor the last few units into range.
+    "100": motion(20, 0.15), "101": motion(20, 0.6),
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
@@ -176,8 +187,12 @@ console.log("class 0x30, three zombies, ten seconds:");
   check("nothing walked inside the inner ring",
         minWalking >= APPROACH.rings[0].inner - 0.01,
         `closest ${minWalking.toFixed(2)}`);
-  check("and the lunge stopped at the attack's own distance",
-        minAnywhere >= TYPE.attacks["0"]["1"].distance - 0.01,
+  // Not the attack's distance exactly: the lunge stops when it is inside it,
+  // and then the strike clip carries the actor further in on its own root
+  // motion, which is what a lunge-and-swing looks like. What must never
+  // happen is a zombie ending up on top of the camera.
+  check("and nothing ended up on top of the camera",
+        minAnywhere > APPROACH.rings[0].inner * 0.5,
         `closest ${minAnywhere.toFixed(2)}`);
   check("the permit came back", G.g_attack_permits.filter((p) => p !== -1).length
         <= 1);
@@ -205,23 +220,29 @@ console.log("an unread class:");
   check("class 0x53 took no permit", cat.attackPermit === -1);
 }
 
-// -- 3. the actor with no attack state must not block the queue -------------
+// -- 3. `attack_state` does not gate the swing ------------------------------
 
-console.log("a spawn whose descriptor names no attack:");
+console.log("a spawn whose descriptor names no attack state:");
 {
   const rng = new Rng(7);
-  const events = scene(1, rng);
-  const scenery = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "scenery");
-  scenery.visible = true;
-  scenery.attackState = 0;          // g_class30_states[0], the engine's no-op
-  scenery.hp = 10;
-  scenery.pos = vec3(0, 0, 26);     // nearest, so it ranks first
-  scenery.motion = 10;
+  const events = scene(0, rng);
+  // 25 of stage 2's 90 class-0x30 spawns carry `attack_state = -1` and another
+  // 7 carry 0. `ZombieStateHoldAtRange` -- which is where an ordinary zombie
+  // decides to swing -- never reads that byte; only `ZombieStateApproach`
+  // does, and nothing starts there. An earlier port gated the permit on it and
+  // those spawns walked up and stood still, which is exactly the bug this
+  // asserts against.
+  const z = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "no-attack-state");
+  z.visible = true;
+  z.attackState = -1;
+  z.hp = 10;
+  z.pos = vec3(0, 0, 45);
+  z.motion = 10;
   let damaged = 0;
   events.on("player.damaged", () => damaged++);
   run(900, rng, events);
-  check("it never took a permit", scenery.attackPermit === -1);
-  check("the real zombie still got through", damaged > 0);
+  check("it attacks anyway, because the hub does not read attack_state",
+        damaged > 0, `${damaged} hits`);
 }
 
 // -- 4. damage ---------------------------------------------------------------
@@ -312,9 +333,10 @@ console.log("determinism:");
     return JSON.stringify(G.g_object_list.map((o) => [o.state, o.pos.x, o.pos.z]));
   };
   check("two runs from the same seed agree", one() === one());
-  check("every actor is back to approaching or attacking, none stuck",
-        G.g_object_list.every((o) => o.state === ZombieState.Approach
-          || o.attackPermit >= 0 || o.dead));
+  check("every actor is in the loop, none stuck outside it",
+        G.g_object_list.every((o) => o.state === ZombieState.HoldAtRange
+          || o.state === ZombieState.AttackRun || o.state === ZombieState.Strike
+          || o.state === ZombieState.BackOff || o.dead));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

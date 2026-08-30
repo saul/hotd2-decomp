@@ -209,16 +209,20 @@ export class CharacterLayer {
 
       const intro = p?.intro && type.motions[String(p.intro.motion)]
         ? p.intro : null;
-      const a = ActorSpawn(at, p?.class ?? 0, type.type, type.name);
+      // The descriptor tail is read by the class's own Init -- the start state
+      // is one of its bytes -- so it is handed over at spawn time.
+      const a = ActorSpawn(at, p?.class ?? 0, type.type, type.name, {
+        initialState: p?.initial_state ?? 0,
+        attackState: p?.attack_state ?? 0,
+        condition: p?.body_condition ?? 0,
+        ringSet: p?.ring_set ?? 0,
+      });
       a.motion = motion;
       a.intro = intro;
       a.hp = this.startHp(p);
       a.maxHp = a.hp;
       a.yaw = p?.yaw ?? 0;
       a.pos = { x: node.position.x, y: node.position.y, z: node.position.z };
-      a.ringSet = p?.ring_set ?? 0;
-      a.attackState = p?.attack_state ?? 0;
-      a.condition = p?.body_condition ?? 0;
       this.instances.push({ at, a, type, root: node, pivot, bones,
                             gore: new Map() });
       this.posed.add(at);

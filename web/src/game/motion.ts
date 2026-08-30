@@ -11,6 +11,7 @@
  * counter is a field of the object, at `obj+0x19C`.
  */
 import type { Actor } from "./actor";
+import { ApplyRootMotion, rootDelta } from "./root_motion";
 import { MotionOf } from "./tables";
 
 /** One actor's clocks, `dt` seconds of game time. */
@@ -22,7 +23,23 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     obj.death.t += dt;
     return;
   }
+  const base = MotionOf(obj, obj.motion);
+  const wasBase = obj.rootFrame;
   obj.clock += dt;
+  // Root motion: the clip's own translation is what walks the actor. Applied
+  // only while no one-shot is running, because the one-shot owns the body.
+  if (base && !obj.action && !obj.intro) {
+    const f = Math.floor(obj.clock * base.fps) % Math.max(1, base.frames);
+    const d = rootDelta(base, wasBase, f);
+    ApplyRootMotion(obj, d.x, d.z);
+    obj.rootFrame = f;
+  } else {
+    // A one-shot owns the body, and the base clock keeps running underneath
+    // it. Forgetting the base frame here is what stops the *next* base delta
+    // spanning the whole strike -- which teleported a zombie eleven units into
+    // the camera the frame its swing ended.
+    obj.rootFrame = -1;
+  }
 
   // The entrance: hold its first frame for the delay, play it once, then hand
   // over to the looping motion. `ZombieStateMotionCue21` waits for `obj+0x19C`
@@ -44,12 +61,22 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // and the state machine reads the null as "the swing is over".
   const act = obj.action;
   if (act) {
+    const wasAct = obj.rootActionFrame;
     act.t += dt;
     const am = MotionOf(obj, act.motion);
-    if (!am) obj.action = null;
-    else if (act.t * am.fps >= am.frames) {
-      if (act.loop) act.t = 0;
-      else obj.action = null;
+    if (!am) {
+      obj.action = null;
+    } else {
+      // The lunge and the strike carry their own translation, and the lunge is
+      // how the actor closes the last few units before a swing.
+      const f = Math.min(am.frames - 1, Math.floor(act.t * am.fps));
+      const d = rootDelta(am, wasAct, f);
+      ApplyRootMotion(obj, d.x, d.z);
+      obj.rootActionFrame = f;
+      if (act.t * am.fps >= am.frames) {
+        if (act.loop) { act.t = 0; obj.rootActionFrame = -1; }
+        else obj.action = null;
+      }
     }
   }
 

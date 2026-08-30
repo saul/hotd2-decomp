@@ -4451,3 +4451,87 @@ run, both live in the shipped player:
   the motion job keep it in the engine.
 
 Neither was findable by reading, and both were one assertion each.
+
+## The class-0x30 attack loop, read properly
+
+The player's zombies walked up to the camera and stood there. The port had
+three compounding errors, and all three came from guessing at things the
+tables state outright.
+
+**The state indices were guessed.** `g_class30_states` (0x00592AE8) reads
+1 `ZombieStateAttackRun`, **2 `ZombieStateHoldAtRange`**, 3 `ZombieStateStrike`,
+4 `ZombieStateBackOff`, 22 `ZombieStateApproach`. The port had the strike at 2,
+which is the hold, so the hub of the whole loop was never entered and the
+strike was reached by an index that means something else.
+
+**`ZombieStateHoldAtRange` is where a zombie decides to swing**, and it was
+missing entirely. It owns three things nothing else does: the spacing (inside
+`inner - 1` it sends the actor to `ZombieStateBackOff`, every frame, not just
+after a swing), the permit claim, and the cooldown. The real loop is
+
+```
+<entrance> -> AttackRun -> HoldAtRange -> Strike -> BackOff -> HoldAtRange
+```
+
+with the permit claimed in the hold and released in the retreat.
+`ZombieStateApproach` is a *second* entry path that claims early and routes to
+the descriptor's own attack state, and **no spawn in stage 2 starts there.**
+
+**The start state is descriptor byte +2**, which `EnemyZombieInit` reads and
+the exporter has always emitted as `initial_state`. The port ignored it and
+started everything in `Approach`. In stage 2 the commonest starts are 1
+(`AttackRun`, 32 spawns), 15 (`WalkDistance`, 19), 27 (18), 18, 31, 29 — never
+22. States 15 and 27 both end by setting state 1, which is what justifies an
+unported entrance resolving to `AttackRun` rather than aborting.
+
+**`attack_state` does not gate the swing.** Byte +3 is read only by
+`ZombieStateApproach`, to pick which state a permit-winner enters. The port
+used it as "may this actor attack at all" and refused a permit when it was 0 or
+-1 — which is 32 of stage 2's 90 zombies, including the single commonest
+descriptor in the stage. In the game they attack perfectly well.
+
+### And the movement `[open]` closes
+
+`CLOSING_SPEED = 6` was invented on the grounds that no state writes a
+velocity. That was true and the conclusion was wrong. `EnemyZombieUpdate`
+integrates `obj+0x40 += obj+0x4C`; `ZombieStateWalkDistance` *measures* how far
+the actor has travelled from a remembered point; neither makes sense unless the
+clips move it. Measured on `char_adv02`'s own motion row:
+
+```
+walk       motion 270   31 frames   net  +0.023   in place
+run        motion 264   16 frames   net -19.333   1.289/frame, 77 u/s
+back away  motion 256   36 frames   net +15.000   0.429/frame
+```
+
+So the approach genuinely does not move — it plays an in-place walk while it
+waits its turn — and the attack run closes at thirteen times the invented
+speed. The port applies the clips' own root motion now. What is still `[open]`
+is only the *mechanism* by which the root delta reaches `obj+0x4C`.
+
+### The bug the headless test caught this time
+
+A one-shot owns the body while it plays, so the base clip's root frame goes
+stale underneath it. The first base delta after a strike ended therefore
+spanned the entire swing and teleported the zombie eleven units — straight into
+the camera. Forgetting the base frame while an action runs is the fix; the
+trace that found it took one run.
+
+### Also read, for the drop
+
+Two more states, both scripted travel rather than physics:
+
+* `ZombieStateLeapToPoint` (class 0x30 state 24, `FUN_00457CE0`) reads a
+  destination and a frame count out of the descriptor and sets
+  `vel = (dest - pos) / frames`.
+* `ThrowerStateFallAndLand` (class 0x31 state 2, `FUN_0044A450`) sets
+  `obj+0x5C` to **-0.05444444** — gravity, -196 units/s² at 60 Hz — and falls
+  until `y + vel.y <= QueryGroundHeightAt(x, y + 4.5, z)`, then snaps to the
+  ground and bounces with `vel.y *= -0.5`, `vel.xz *= 0.5`. Character type 0x16
+  (zsass) never re-bounces and lands into state 7. `EnemyThrowerUpdate`
+  integrates acceleration as well as velocity, which is what makes it a fall.
+
+Stage 2 block 5 step 6 spawns two zsass at y = 87 with the ground at ~36, which
+is the drop the player is missing. It needs the class-0x31 descriptor tail
+exported — the exporter reads it only for class 0x30 — and a ground height the
+bundle does not carry.

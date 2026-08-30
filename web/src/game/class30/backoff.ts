@@ -1,45 +1,48 @@
 /**
  * `ZombieStateBackOff` — `FUN_00455C30`.
  *
- * After a strike the actor **keeps the permit** and retreats, playing the
- * back-away clip from its motion row, until it is back outside the inner ring
- * or 240 frames have passed — and only then releases it.
+ * After a strike the actor **keeps the permit** and retreats, playing `row[4]`
+ * — which carries 0.429 units per frame of root motion the other way — until
+ * it is back outside the inner ring or 240 frames have passed. Only then does
+ * it release, and it returns to `ZombieStateHoldAtRange`, not to the approach.
  *
- * That retreat *is* the pause between attacks. There is no cooldown timer for
- * an ordinary zombie: `ZombieStateHoldAtRange` forces `obj+0x133C` to zero
- * unless `obj+0x1368` bit 0 is set. It is also the reason nothing walks into
- * the camera, and why the enemies take turns at all.
+ * That retreat is the pause between attacks, and returning to the hub rather
+ * than to the approach is what makes the next zombie's turn come round
+ * promptly instead of after a fresh walk-in.
  */
 import type { Actor } from "../actor";
+import { TurnActorTowardPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
-import { CharacterTypeOf, MotionOf, MotionRowOf } from "../tables";
+import { MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
-import { ActorAdvanceTowardCamera } from "./move";
+import { ActorSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
-import { GAME_HZ, ZombieState } from "./states";
+import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionRow, ZombieState } from "./states";
 
-/** `obj+0x1334 > 0xF0` — the retreat gives up after 240 frames. */
-const BACKOFF_MAX_FRAMES = 240;
+/** `FUN_00409F90`'s rate here, negated when `obj+0x136C & 0x400000` is set. */
+const BACKOFF_TURN_RATE = -0x40;
 
 export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
   if (obj.sub === 0) {
-    const row = MotionRowOf(obj);
-    const m = row[CharacterTypeOf(obj)?.backoff_index ?? 4];
-    if (m !== undefined && MotionOf(obj, m)) {
-      obj.action = { motion: m, t: 0, loop: true };
-    }
-    obj.backoffFrames = 0;
+    obj.cooldown = 0x3c;              // +0x1338, the engine's own 60
+    obj.backoffFrames = 0;            // +0x1334
     obj.sub = 1;
   }
 
-  ActorAdvanceTowardCamera(obj, eye, dt, true);
+  ActorSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.BackAway]);
+  // Turn relative to where the strike began, not to the camera: the actor
+  // lunged forward to swing and walks back out along the same line.
+  TurnActorTowardPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);
   obj.backoffFrames += dt * GAME_HZ;
 
-  if (dist2d(obj.pos, eye) > ApproachInnerRadius(obj)
-      || obj.backoffFrames > BACKOFF_MAX_FRAMES) {
-    obj.action = null;
-    ReleaseAttackSlot(obj);            // only now is the next enemy free
-    obj.state = ZombieState.Approach;
+  // Distance is measured against the remembered player point, the same one the
+  // lunge used.
+  const d = dist2d(obj.pos, obj.hasStrikeAnchor ? obj.target : eye);
+  if (d > ApproachInnerRadius(obj) || obj.backoffFrames > BACKOFF_MAX_FRAMES) {
+    obj.cooldown = 0;
+    ReleaseAttackSlot(obj);          // only now is the next enemy free
+    obj.hasStrikeAnchor = false;
+    obj.state = ZombieState.HoldAtRange;
     obj.sub = 0;
   }
 }

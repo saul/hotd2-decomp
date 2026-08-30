@@ -26,8 +26,12 @@ const GAME_HZ = 60;
 
 /** Put one actor in the pool and run its class's `Init`. */
 export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
-                           name: string): Actor {
+                           name: string,
+                           descriptor?: Partial<Actor>): Actor {
   const obj = makeActor(at, cls, charType, name);
+  // The descriptor tail is what the class's own Init reads, so it goes on
+  // before Init runs -- `EnemyZombieInit` starts the actor in `initialState`.
+  if (descriptor) Object.assign(obj, descriptor);
   g_class_handlers[cls]?.init(obj);
   G.g_object_list.push(obj);
   return obj;

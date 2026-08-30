@@ -74,9 +74,41 @@ export interface Actor {
   backoffFrames: number;    // +0x1334
   /** How deep in the distance queue this actor may be and still attack. */
   allowance: number;        // +0x1358
+  /** Frames before this actor may claim again. `ZombieStateHoldAtRange`
+   *  forces it to zero unless `obj+0x1368` bit 0 is set. */
+  cooldown: number;         // +0x133C
+  /**
+   * The player point the strike measures its lunge against, written by
+   * `ActorFacePlayerTarget`. With one attacker it is the camera eye; with two
+   * it is a shoulder offset from it, which is why it is stored rather than
+   * recomputed.
+   */
+  target: Vec3;             // +0x13E4
+  /** Where the actor stood when its strike began; `ZombieStateBackOff`
+   *  retreats toward it. */
+  strikeStart: Vec3;        // +0x13D8
+  /** `obj+0x136C & 0x40000` — `strikeStart` has been captured. */
+  hasStrikeAnchor: boolean;
+  /**
+   * This swing has already landed its hit.
+   *
+   * [diverges] The engine tests `obj+0x19C == hit_frame` for exact equality
+   * against a counter that advances one per update, so it can only fire once.
+   * The port advances clips in seconds, so it latches instead.
+   */
+  struck: boolean;
 
   // -- descriptor --------------------------------------------------------
-  /** The state a permit-holder enters; 0 and -1 mean "never attacks". */
+  /**
+   * The state `EnemyZombieInit` starts this actor in — descriptor byte +2.
+   * Every entrance state in stage 2 funnels into `AttackRun`.
+   */
+  initialState: number;
+  /**
+   * The state a permit-holder enters out of `ZombieStateApproach` —
+   * descriptor byte +3. Nothing else reads it: `ZombieStateHoldAtRange`, which
+   * is where an ordinary zombie actually decides to swing, does not.
+   */
   attackState: number;
 
   // -- runtime the renderer reads ----------------------------------------
@@ -87,6 +119,13 @@ export interface Actor {
   motion: number;
   /** Seconds into that loop. */
   clock: number;
+  /**
+   * The frame index the root-motion delta was last taken at, for the base
+   * motion and for `action`. Root translation is a difference between frames,
+   * so the previous one is state.
+   */
+  rootFrame: number;
+  rootActionFrame: number;
   /** A one-shot or lunge at full weight: the lunge loops, the strike does not. */
   action: ActorClip | null;
   /** The death clip, once. */
@@ -127,11 +166,19 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     ringSet: 0,
     backoffFrames: 0,
     allowance: 0,
+    cooldown: 0,
+    target: vec3(),
+    strikeStart: vec3(),
+    hasStrikeAnchor: false,
+    struck: false,
+    initialState: 0,
     attackState: 0,
     dead: false,
     visible: false,
     motion: 0,
     clock: 0,
+    rootFrame: -1,
+    rootActionFrame: -1,
     action: null,
     death: null,
     react: null,

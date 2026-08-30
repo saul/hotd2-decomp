@@ -12,7 +12,9 @@ import { ZombieState } from "./states";
 
 export function ActorAbortAttackAndLeave(obj: Actor): void {
   obj.action = null;
+  obj.hasStrikeAnchor = false;
   ReleaseAttackSlot(obj);
-  obj.state = ZombieState.Approach;
+  // Back to the hub, which is where the engine's own release path lands.
+  obj.state = ZombieState.HoldAtRange;
   obj.sub = 0;
 }

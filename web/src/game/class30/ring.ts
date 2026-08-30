@@ -25,7 +25,8 @@ import type { Actor } from "../actor";
 import { G } from "../globals";
 import { dist2d, type Vec3 } from "../vec";
 
-export interface RingResult { band: number; allowance: number }
+/** The band: 1 strike range, 2 inside mid, 3 inside outer, 4 beyond. */
+export type RingBand = 1 | 2 | 3 | 4;
 
 /** The inner radius of this actor's ring set. */
 export function ApproachInnerRadius(obj: Actor): number {
@@ -33,7 +34,12 @@ export function ApproachInnerRadius(obj: Actor): number {
       ?? G.g_enemy_approach_rings[0] ?? 0;
 }
 
-export function TestApproachRing(obj: Actor, eye: Vec3): RingResult {
+/**
+ * Returns the band **and writes `obj+0x1358`** on the way through, which is
+ * how `ZombieStateHoldAtRange` refreshes the allowance by calling it and
+ * ignoring the result.
+ */
+export function TestApproachRing(obj: Actor, eye: Vec3): RingBand {
   const inner = ApproachInnerRadius(obj);
   const mid = G.g_enemy_approach_ring_mid[obj.ringSet]
            ?? G.g_enemy_approach_ring_mid[0] ?? inner;
@@ -42,14 +48,13 @@ export function TestApproachRing(obj: Actor, eye: Vec3): RingResult {
   const base = G.g_enemy_approach_steps;
   // The game measures on the ground plane only -- x and z.
   const d = dist2d(obj.pos, eye);
-  if (d <= inner) return { band: 1, allowance: base };
-  if (d <= mid) return { band: 2, allowance: base };
+  if (d <= inner) { obj.allowance = base; return 1; }
+  if (d <= mid) { obj.allowance = base; return 2; }
   if (d <= outer) {
-    return { band: 3, allowance: base + G.g_enemy_approach_steps_mid };
+    obj.allowance = base + G.g_enemy_approach_steps_mid;
+    return 3;
   }
-  return {
-    band: 4,
-    allowance: base + G.g_enemy_approach_steps_mid
-             + G.g_enemy_approach_steps_outer,
-  };
+  obj.allowance = base + G.g_enemy_approach_steps_mid
+                + G.g_enemy_approach_steps_outer;
+  return 4;
 }

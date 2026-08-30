@@ -24,8 +24,8 @@ import { DamageZone, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
-import { ActorAdvanceTowardCamera } from "./move";
 import { ActorAbortAttackAndLeave } from "./leave";
+import { ActorFacePlayerTarget } from "../actor_turn";
 import { GAME_HZ, StrikeSub, ZombieState } from "./states";
 
 /**
@@ -70,38 +70,53 @@ function endStrike(obj: Actor): void {
   obj.sub = 0;
 }
 
-export function ZombieStateStrike(obj: Actor, eye: Vec3, dt: number, rng: Rng,
+export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
                                   events?: Events): void {
+  // Every frame of the strike, before anything else: face the player and
+  // record where they are.
+  ActorFacePlayerTarget(obj, eye);
   const list = AttackListOf(obj);
   if (obj.sub === StrikeSub.Pick) {
     obj.attack = ZombiePickAttack(obj, rng);
+    obj.struck = false;
     obj.sub = StrikeSub.Lunge;
   }
   const atk = list[String(obj.attack)] ?? null;
   if (!atk) { ActorAbortAttackAndLeave(obj); return; }
 
   if (obj.sub === StrikeSub.Lunge) {
-    if (dist2d(obj.pos, eye) > atk.distance) {
-      // Still short: play the lunge and keep closing.
+    // Distance is to the point `ActorFacePlayerTarget` remembered, not to the
+    // camera: with two players those are different places.
+    if (dist2d(obj.pos, obj.target) > atk.distance) {
+      // Still short: play the lunge. Its own root motion is what closes the
+      // gap -- the state writes no velocity.
       if (obj.action?.motion !== atk.lunge) {
         obj.action = { motion: atk.lunge, t: 0, loop: true };
+        obj.rootActionFrame = -1;
       }
-      // The lunge closes to the attack's own distance, which is inside the
-      // inner ring the approach stops at.
-      ActorAdvanceTowardCamera(obj, eye, dt, false, atk.distance);
       return;
     }
     obj.action = { motion: atk.strike, t: 0, loop: false };
+    obj.rootActionFrame = -1;
+    // `ZombieStateStrike` remembers where the swing began; the retreat walks
+    // back out along that line.
+    if (!obj.hasStrikeAnchor) {
+      obj.strikeStart.x = obj.pos.x;
+      obj.strikeStart.y = obj.pos.y;
+      obj.strikeStart.z = obj.pos.z;
+      obj.hasStrikeAnchor = true;
+    }
     obj.sub = StrikeSub.Swinging;
     return;
   }
 
-  // Swinging: the clip is running. `hit_frame` is in 60 Hz game frames.
+  // Swinging: the clip is running. `hit_frame` counts the engine's own frame
+  // counter at `obj+0x19C`, which advances once per 60 Hz update.
   const m = MotionOf(obj, atk.strike);
   if (!obj.action || !m) { endStrike(obj); return; }
-  if (obj.sub === StrikeSub.Swinging
-      && obj.action.t * GAME_HZ >= atk.hit_frame) {
-    obj.sub = StrikeSub.Swung;
+  const frame = obj.action.t * GAME_HZ;
+  if (!obj.struck && frame >= atk.hit_frame) {
+    obj.struck = true;
     ActorStrikeConnect(obj, atk, events);
   }
   if (obj.action.t * m.fps >= m.frames - 1) endStrike(obj);

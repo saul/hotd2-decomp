@@ -70,6 +70,16 @@ export interface Actor {
   pos: Vec3;                // +0x40
   /** Yaw in BAMS. The engine keeps a triple at +0x64/68/6C; only Y turns. */
   yaw: number;              // +0x68
+  /**
+   * What the camera aims at, and **not** the actor's origin.
+   *
+   * `SkeletonEmitNode` (`FUN_004114C0`) records one bone's world position here
+   * as it walks the skeleton — bone 1, the torso, for an ordinary humanoid —
+   * and `FUN_00409B70` then raises it by 4.0 before registering the actor for
+   * camera tracking. `SelectCameraLookAtTarget` reads this and never reads
+   * `pos`. Aiming at the origin instead put the camera on the feet.
+   */
+  lookAt: Vec3;             // +0x100
   /** `EnemyThrowerUpdate` integrates `vel += acc` and then `pos += vel`. */
   vel: Vec3;                // +0x4C
   hp: number;               // +0x11C
@@ -139,6 +149,21 @@ export interface Actor {
   /** `obj+0x1334` — how many it lasts. */
   arcTotal: number;
 
+  /**
+   * How close the bite may bring this actor to its target.
+   *
+   * [diverges] The engine has no such clamp that I can find, and the bite
+   * plainly does travel — the recover is what the retreat then walks back, and
+   * that walk is the only pause between bites; `obj+0x1338`, the 60 that
+   * `ZombieStateBackOff` writes, is read nowhere in the program. But the clip
+   * *overshoots its own settle point*: `char_adv00`'s bite runs
+   * 0 -> -18.1 -> -15.55, so its peak carries the actor two and a half units
+   * past where it ends up, and at that peak it is inside the camera. This
+   * floors the travel at where the clip finishes, which keeps the recover and
+   * so the pause, and drops only the transient.
+   */
+  strikeFloor: number;
+
   /** `obj+0x136C & 0x40000` — `strikeStart` has been captured. */
   hasStrikeAnchor: boolean;
   /**
@@ -206,6 +231,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     flags: 0,
     pos: vec3(),
     yaw: 0,
+    lookAt: vec3(),
     vel: vec3(),
     hp: 0,
     maxHp: 0,
@@ -230,6 +256,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pathLeg: 0,
     pathDelay: 0,
     arcTotal: 0,
+    strikeFloor: 0,
     hasStrikeAnchor: false,
     struck: false,
     initialState: 0,

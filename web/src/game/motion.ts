@@ -67,26 +67,16 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     if (!am) {
       obj.action = null;
     } else {
-      // [diverges] Root motion is applied to a **looping** clip only.
-      //
-      // The mechanism that moves a clip's root delta onto the actor is still
-      // unread, so which clips it applies to is a choice, and this is the one
-      // the data supports. `char_adv00`'s attacks name distances of 26.0 and
-      // 25.0 against an inner ring of 25 -- so an actor arriving from
-      // `ZombieStateHoldAtRange` is *always* already inside the attack's own
-      // distance, the lunge never plays, and the strike is performed on the
-      // spot. Its clip nevertheless carries -15.55 of translation, and
-      // applying that walked the zombie through the camera and out the far
-      // side, where the retreat then parked it on the ring behind the player.
-      //
-      // A looping clip is locomotion and a one-shot is a performance. The
-      // lunge loops, so it still closes; the strike does not, so it swings
-      // where it stands.
+      // The strike travels, and it has to: `char_adv00`'s bite runs
+      // 0 -> -18.1 -> -15.55, a lunge and a recover. The 15.5 units it ends up
+      // forward are exactly the distance `ZombieStateBackOff` then has to walk
+      // back before it may attack again -- which *is* the pause between bites.
+      // Suppressing it left the actor already at the ring when the swing
+      // ended, so the retreat finished on its first frame and it bit again
+      // immediately.
       const f = Math.min(am.frames - 1, Math.floor(act.t * am.fps));
-      if (act.loop) {
-        const d = rootDelta(am, wasAct, f);
-        ApplyRootMotion(obj, d.x, d.z);
-      }
+      const d = rootDelta(am, wasAct, f);
+      ApplyRootMotion(obj, d.x, d.z);
       obj.rootActionFrame = f;
       if (act.t * am.fps >= am.frames) {
         if (act.loop) { act.t = 0; obj.rootActionFrame = -1; }

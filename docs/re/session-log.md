@@ -4789,3 +4789,36 @@ Sets 2 and 5–8 are the generic score pickup.
   behind ~40 of the types and is 3042 bytes; it is the next big one.
 * `FUN_004653B0` (the shatter fragments) and `FUN_004675A0` (the mode-1 item)
   are unread.
+
+## The root track is a bone, not a odometer
+
+Three reports at once — the camera on the zombies' feet, the walk sliding
+backwards, and no pause between bites — and they turned out to be one
+misreading with three faces.
+
+**`m.root` is the root bone's position inside the model.** Its y sits around
+11, which is standing height, and its x/z carry the character's travel:
+`char_adv00`'s walk wobbles +/-0.7 and nets +0.03, its run runs to -30 over a
+cycle, its back-away to +9.6, and its bite runs **0 -> -18.1 -> -15.55**, a
+lunge and a recover. The port was consuming the horizontal delta as world
+movement *and* the renderer was setting the pivot to the absolute root, so the
+model slid out of its own footprint and snapped back on the loop. The pivot
+keeps the height now and nothing else; the port keeps the travel.
+
+**The camera aims at `obj+0x100`, never at `obj+0x40`.** `SkeletonEmitNode`
+records a bone's world position there as it walks the skeleton — bone **1**,
+the torso, for an ordinary humanoid — and `ActorRegisterCameraPoint` raises it
+by 4.0 before the actor registers for tracking. `SelectCameraLookAtTarget`
+reads only that. The port was aiming at the actor's origin plus a flat 12,
+which is the feet.
+
+**The pause between bites is the recover.** The bite ends 15.5 units forward of
+where it started, and that is exactly the distance `ZombieStateBackOff` then
+has to walk before `ZombieStateHoldAtRange` will let it claim again. Nothing
+times it; the geometry is the timer. The previous commit had suppressed the
+strike's travel to stop zombies ending up behind the player, which removed the
+recover and with it the pause — so the zombie ended its swing already on the
+ring, the retreat finished on its first frame, and it bit again on the spot.
+
+The real fix for "behind the player" was never to suppress the travel: it was
+that the renderer was double-applying it.

@@ -12,16 +12,13 @@
  */
 import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
-import { TurnActorAwayFromPoint } from "../actor_turn";
+import { TurnActorTowardCamera } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
 import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionRow, ZombieState } from "./states";
-
-/** `FUN_00409F90`'s rate here, negated when `obj+0x136C & 0x400000` is set. */
-const BACKOFF_TURN_RATE = -0x40;
 
 export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
                                    rng: Rng): void {
@@ -36,9 +33,18 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
 
   ZombieSetMotionIfIdle(obj,
     FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway), rng, 5);
-  // Turn relative to where the strike began, not to the camera: the actor
-  // lunged forward to swing and walks back out along the same line.
-  TurnActorAwayFromPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);
+  // [diverges] The engine turns relative to `obj+0x13D8/E0`, where the strike
+  // began, at a rate of -0x40 or +0x40 by a flag. What the sign *means* is
+  // unresolved, and it matters: the strike ends only a few units from that
+  // point, so the direction to it is near-degenerate and a wrong sign sends
+  // the retreat in circles or straight back into the camera — both of which
+  // this has now done.
+  //
+  // What the game shows is unambiguous, so the port states that instead: the
+  // actor keeps facing the player and the back-away clip — whose root is +Z,
+  // measured at +9.6 against the run's -30 — carries it backwards out of
+  // range.
+  TurnActorTowardCamera(obj, obj.hasStrikeAnchor ? obj.target : eye, dt);
   obj.backoffFrames += dt * GAME_HZ;
 
   // Distance is measured against the remembered player point, the same one the

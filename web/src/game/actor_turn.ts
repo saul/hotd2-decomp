@@ -57,16 +57,19 @@ export function TurnActorTowardCameraEye(obj: Actor, eye: Vec3,
  */
 export function TurnActorAwayFromPoint(obj: Actor, p: Vec3, rate: number,
                                      dt: number): void {
-  // `VecToAngles(obj - p)` faces away from the point. The sign of the rate is
-  // a turn direction, not a flip: flipping it here points the actor at the
-  // camera and the back-away clip then carries it straight in.
+  // A **negative rate turns to the opposite** of `VecToAngles(obj - p)`, and
+  // this is settled by watching the retreat: `p` is where the strike began,
+  // which is further from the camera than the actor now is, so `obj - p`
+  // points *inward*. The back-away clip's root is +Z, away from the facing, so
+  // an unflipped angle walks the zombie into the camera instead of out of it.
   const dx = obj.pos.x - p.x;
   const dz = obj.pos.z - p.z;
   // Standing on the point gives no direction at all. `VecToAngles(0,0,0)`
   // returns zero, which would snap the actor to face north; holding the
   // current facing is the honest reading of "there is nothing to turn to".
   if (dx * dx + dz * dz < 1e-4) return;
-  const d = bamsDelta(VecToAngles(dx, 0, dz).yaw, obj.yaw);
+  const want = VecToAngles(dx, 0, dz).yaw + (rate < 0 ? 0x8000 : 0);
+  const d = bamsDelta(want, obj.yaw);
   obj.yaw = bamsWrap(obj.yaw + d * easeFor(rate, dt));
 }
 

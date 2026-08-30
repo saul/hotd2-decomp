@@ -90,7 +90,10 @@ const TYPE: CharacterType = {
     // 10 the in-place walk and idle, 12 the run that closes, 14 the retreat.
     "10": motion(20), "12": motion(16, 1.289), "14": motion(36, -0.429),
     // 101 the lunge, which carries the actor the last few units into range.
-    "100": motion(20, 0.15), "101": motion(20, 0.6),
+    // The bite, scaled like the real one: `char_adv00`'s runs to -15.55 net
+    // against a 25-unit inner ring, so the recover is most of the ring and the
+    // retreat that walks it back is the pause between bites.
+    "100": motion(20, 0.8), "101": motion(20, 0.6),
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
@@ -203,13 +206,19 @@ console.log("class 0x30, three zombies, ten seconds:");
   check("nothing walked inside the inner ring",
         minWalking >= APPROACH.rings[0].inner - 0.01,
         `closest ${minWalking.toFixed(2)}`);
-  // Not the attack's distance exactly: the lunge stops when it is inside it,
-  // and then the strike clip carries the actor further in on its own root
-  // motion, which is what a lunge-and-swing looks like. What must never
-  // happen is a zombie ending up on top of the camera.
-  check("and nothing ended up on top of the camera",
-        minAnywhere > APPROACH.rings[0].inner * 0.5,
-        `closest ${minAnywhere.toFixed(2)}`);
+  // Not the attack's distance: the bite travels, and it has to -- the ground
+  // it covers is what the retreat then walks back, which is the pause. What it
+  // must not do is overshoot the point its own clip settles at, because that
+  // transient is what reaches the camera. `strikeFloor` is that point, and it
+  // comes out of the tables rather than a number picked to fit.
+  const bite = TYPE.attacks["0"]["1"];
+  const biteM = TYPE.motions[String(bite.strike)];
+  const biteNet = Math.abs(biteM.root[(biteM.frames - 1) * 3 + 2]
+                           - biteM.root[2]);
+  check("and nothing came closer than the bite's own settle point",
+        minAnywhere >= bite.distance - biteNet - 0.01,
+        `closest ${minAnywhere.toFixed(2)}, floor `
+        + `${(bite.distance - biteNet).toFixed(2)}`);
   check("the permit came back", G.g_attack_permits.filter((p) => p !== -1).length
         <= 1);
   check("lives were spent, not overspent",
@@ -298,6 +307,30 @@ console.log("the queue throttle:");
     if (z.state === ZombieState.HoldAtRange
         && d > APPROACH.rings[0].inner + 1) strandedFar++;
   }
+  // The bite is a lunge and a recover -- `char_adv00`'s runs 0 -> -18.1 ->
+  // -15.55 -- and the distance it ends up forward is exactly what
+  // `ZombieStateBackOff` has to walk back before it may attack again. That
+  // walk *is* the pause between bites. With nothing else competing for the
+  // permit, the gap between one zombie's strikes is that walk plus the clip;
+  // suppress the strike's travel and it ends its swing already on the ring,
+  // the retreat finishes on its first frame, and it bites on the spot.
+  const gaps: number[] = [];
+  let last = -1;
+  let inStrike = false;
+  for (let i = 0; i < 1800; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    const now = z.state === ZombieState.Strike;
+    if (now && !inStrike) {
+      if (last >= 0) gaps.push(i - last);
+      last = i;
+    }
+    inStrike = now;
+  }
+  check("it bites more than once", gaps.length > 0, `${gaps.length + 1} bites`);
+  check("and waits between bites rather than repeating on the spot",
+        gaps.length > 0 && Math.min(...gaps) > 60,
+        gaps.length ? `shortest gap ${Math.min(...gaps)} frames` : "n/a");
+
   check("it closes the distance", closest < APPROACH.rings[0].inner,
         `closest ${closest.toFixed(1)} of 120`);
   check("and never idles in the hub while far from it", strandedFar < 60,

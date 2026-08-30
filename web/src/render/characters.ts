@@ -65,6 +65,13 @@ import { ActorKillAll, ResolveHit, type HitResult }
 import { ReleaseAttackSlot } from "../game/combat/permits";
 import { g_class_handlers } from "../game/registry";
 
+/**
+ * The bone `SkeletonEmitNode` records into `obj+0x100`, and the 4.0
+ * `FUN_00409B70` adds to its height before the camera reads it.
+ */
+const CAMERA_TRACK_BONE = 1;
+const CAMERA_TRACK_RISE = 4;
+
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
 /** The engine's frame clock. Motion clips are authored at half of it. */
@@ -274,8 +281,30 @@ export class CharacterLayer {
       // can be run with no renderer at all, and so a swing keeps its play
       // position across a save state. This only reads them.
       this.pose(inst);
+      this.trackLookAt(inst);
     }
   }
+
+  /**
+   * `obj+0x100`: what the camera aims at.
+   *
+   * `SkeletonEmitNode` records one bone's world position as it walks the
+   * skeleton, and `FUN_00409B70` raises it by 4.0 before the actor registers
+   * for camera tracking. The bone is **1** for an ordinary humanoid — the
+   * torso — with 2 and 9 selected by flags this port does not model.
+   * `SelectCameraLookAtTarget` reads this and never reads the position, which
+   * is why aiming at the origin put the camera on the feet.
+   */
+  private trackLookAt(inst: Instance): void {
+    const node = inst.bones.get(CAMERA_TRACK_BONE);
+    if (!node) return;
+    node.getWorldPosition(this._track);
+    inst.a.lookAt.x = this._track.x;
+    inst.a.lookAt.y = this._track.y + CAMERA_TRACK_RISE;
+    inst.a.lookAt.z = this._track.z;
+  }
+
+  private readonly _track = new Vector3();
 
   private pose(inst: Instance): void {
     // Dying takes over everything: the clip plays once and holds its last
@@ -285,7 +314,9 @@ export class CharacterLayer {
       if (dm) {
         const f = Math.min(dm.frames - 1,
                            Math.floor(inst.a.death.t * dm.fps));
-        this.apply(inst, dm, f);
+        // The death clip is not consumed by `ActorAdvanceMotion` -- a falling
+        // body's travel is the clip's, and nothing else moves it.
+        this.apply(inst, dm, f, false);
         return;
       }
     }
@@ -300,7 +331,7 @@ export class CharacterLayer {
       const t = inst.a.clock * im.fps - inst.a.intro.delay;
       // `ActorAdvanceMotion` clears the intro when it is over; until then this
       // draws it.
-      this.apply(inst, im, Math.max(0, Math.floor(t)));
+      this.apply(inst, im, Math.max(0, Math.floor(t)), false);
       return;
     }
     if (!m || m.frames <= 0) return;
@@ -352,10 +383,10 @@ export class CharacterLayer {
                      mB: BakedMotion, fB: number, w: number): void {
     const ra = fA * 3;
     const rb = fB * 3;
+    // Height only: the horizontal root is world movement the port has already
+    // applied. See `apply`.
     inst.pivot.position.set(
-      mA.root[ra] + (mB.root[rb] - mA.root[ra]) * w,
-      mA.root[ra + 1] + (mB.root[rb + 1] - mA.root[ra + 1]) * w,
-      mA.root[ra + 2] + (mB.root[rb + 2] - mA.root[ra + 2]) * w);
+      0, mA.root[ra + 1] + (mB.root[rb + 1] - mA.root[ra + 1]) * w, 0);
 
     const n = inst.type.bone_count;
     const ba = fA * n * 3;
@@ -374,11 +405,26 @@ export class CharacterLayer {
     }
   }
 
-  private apply(inst: Instance, m: BakedMotion, f: number): void {
+  /**
+   * Pose from one motion.
+   *
+   * `consumed` says the port has already taken this clip's **horizontal** root
+   * translation as world movement, so the pivot must not apply it again. The
+   * root track is the root *bone's* position within the model — its y sits
+   * around 11, standing height — and its x/z carry the character's travel:
+   * `char_adv00`'s run runs to -30 over a cycle and its bite to -18 and back.
+   * Applying that to the pivot as well as to the actor slid the model
+   * backwards out of its own footprint and snapped it on the loop.
+   *
+   * The vertical stays: that is the walk's bob, and nothing else provides it.
+   */
+  private apply(inst: Instance, m: BakedMotion, f: number,
+                consumed = true): void {
 
     // Root translation: three floats per frame.
     const r = f * 3;
-    inst.pivot.position.set(m.root[r], m.root[r + 1], m.root[r + 2]);
+    inst.pivot.position.set(consumed ? 0 : m.root[r], m.root[r + 1],
+                            consumed ? 0 : m.root[r + 2]);
 
     // Per-bone BAMS triples: bone_count * 3 shorts per frame, bone 0 first.
     const base = f * inst.type.bone_count * 3;

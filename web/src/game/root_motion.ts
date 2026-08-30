@@ -59,6 +59,22 @@ export function ApplyRootMotion(obj: Actor, dx: number, dz: number): void {
   const a = obj.yaw * ((Math.PI * 2) / 65536);
   const s = Math.sin(a);
   const c = Math.cos(a);
-  obj.pos.x += dx * c + dz * s;
-  obj.pos.z += dz * c - dx * s;
+  const nx = obj.pos.x + dx * c + dz * s;
+  const nz = obj.pos.z + dz * c - dx * s;
+
+  // The bite's floor -- see `Actor.strikeFloor`. Zero means no floor.
+  if (obj.strikeFloor > 0) {
+    const tx = nx - obj.target.x;
+    const tz = nz - obj.target.z;
+    const d = Math.hypot(tx, tz);
+    if (d < obj.strikeFloor) {
+      if (d < 1e-4) return;
+      const k = obj.strikeFloor / d;
+      obj.pos.x = obj.target.x + tx * k;
+      obj.pos.z = obj.target.z + tz * k;
+      return;
+    }
+  }
+  obj.pos.x = nx;
+  obj.pos.z = nz;
 }

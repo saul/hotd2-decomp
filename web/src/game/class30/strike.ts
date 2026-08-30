@@ -66,6 +66,7 @@ export function ActorStrikeConnect(obj: Actor, atk: AttackJson,
  */
 function endStrike(obj: Actor): void {
   obj.action = null;
+  obj.strikeFloor = 0;
   obj.state = ZombieState.BackOff;
   obj.sub = 0;
 }
@@ -98,6 +99,12 @@ export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
     }
     obj.action = { motion: atk.strike, t: 0, loop: false };
     obj.rootActionFrame = -1;
+    // Where the clip finishes, not where it peaks: the attack's own distance
+    // less the clip's net travel.
+    const m0 = MotionOf(obj, atk.strike);
+    const net = m0 && m0.frames > 1
+      ? Math.abs(m0.root[(m0.frames - 1) * 3 + 2] - m0.root[2]) : 0;
+    obj.strikeFloor = Math.max(0, atk.distance - net);
     // `ZombieStateStrike` remembers where the swing began; the retreat walks
     // back out along that line.
     if (!obj.hasStrikeAnchor) {

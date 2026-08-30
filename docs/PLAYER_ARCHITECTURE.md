@@ -15,8 +15,8 @@ work are done. Line counts as of the commit that landed them:
 
 | Directory | Lines | Files | What it owns |
 |---|---|---|---|
-| `game/` | 1631 | 26 | **the port.** No three.js, no DOM, no `Math.random` |
-| `render/` | 3643 | 13 | three.js. Observes game state, owns nothing |
+| `game/` | 1948 | 27 | **the port.** No three.js, no DOM, no `Math.random` |
+| `render/` | 3404 | 13 | three.js. Observes game state, owns nothing |
 | `script/` | 1668 | 12 | `walker.ts` — the machine; `ops/` — the 65 opcodes |
 | `app/` | 1530 | 5 | `main.ts` (1164), the loop, the system adapters |
 | `hud/` | 1031 | 4 | hud, ui, bgm, splitter |
@@ -309,10 +309,14 @@ Each step compiles and passes `verify_player_ops.py` on its own.
    `verify_player_ops.py` reads them instead of the class, still finds all 65,
    and now also refuses an opcode registered in two modules, which is the one
    failure mode the split introduces.
-7. ☐ **`render/actors/`.** Split `characters.ts` (928 lines) five ways. The
-   seams are already there — posing, damage, death, reaction — and the damage
-   half belongs in `game/` once it is separated. `ResolveHit` is the last
-   gameplay function still living in `render/`.
+7. ◐ **`characters.ts`.** The damage half is out: `ResolveHit`
+   (`FUN_00409430`), `ActorSwapDamagedPart`, `SeverBoneChildren`,
+   `RemoveBoneSubtree`, `ActorReactToHit`, `ActorPlayHitReaction`,
+   `DamageRankModifier` and `ChooseDeathMotionDirectional` are in
+   `game/combat/resolve_hit.ts`, and `characters.ts` is down to 689 — the two
+   model swaps go out through `GameHost` and it applies them. What is left to
+   split is assembly, posing and blending, and they share an `Instance` rather
+   than a concern, so the seam is less obvious than it looked.
 
 ### What the port found on its first headless run
 
@@ -370,6 +374,9 @@ tables. It asserts the things that actually went wrong:
 * a class with no module (0x53, the cat) does not move and takes no permit;
 * a spawn whose descriptor names no attack never takes a permit, and does not
   block the one that can;
+* a hit takes hit points off, swaps the bone's model, stumbles, severs on the
+  step the effect table says, takes the **whole subtree** with it, sets the
+  destroyed-zone bit, and does none of it twice;
 * a snapshot replays identically — through `structuredClone` *and* through
   `JSON.stringify`, which is the form the button hands out;
 * and two runs from the same seed agree, which is what guards the whole of the

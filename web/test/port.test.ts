@@ -10,8 +10,9 @@
  *
  * Run with `npm run test:port`.
  */
-import type { ApproachJson, CharacterType, PlayerDamageJson, TrackingJson }
-  from "../src/bundle";
+import type {
+  ApproachJson, CharactersJson, CharacterType, PlayerDamageJson, TrackingJson,
+} from "../src/bundle";
 import { Rng } from "../src/core/rng";
 import { Events } from "../src/core/events";
 import { ActorSpawn, GameUpdate } from "../src/game/director";
@@ -21,6 +22,7 @@ import { SetGameTables } from "../src/game/tables";
 import { STATE_APPROACH, STATE_ATTACK_RUN, STATE_BACKOFF }
   from "../src/game/class30/states";
 import { dist2d, vec3 } from "../src/game/vec";
+import { ResolveHit } from "../src/game/combat/resolve_hit";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -38,8 +40,18 @@ const motion = (frames: number) =>
   ({ bank: "t", frames, fps: 30, root: [], rot: [] });
 
 const TYPE: CharacterType = {
-  type: 1, name: "test zombie", file: "t.bin", bone_count: 16, bones: [],
-  head_bone: 2, reactions: {},
+  type: 1, name: "test zombie", file: "t.bin", bone_count: 16,
+  // Two bones, upper arm and forearm, with the forearm parented to it: enough
+  // for the sever cascade, which is the part that used to leave a limb
+  // animating below a destroyed one.
+  bones: [
+    { bone: 4, part: 4, parent: null, damage_rank: [], hit_radius: 2,
+      steps: [[0x11, 3, 3], [0x12, 4, 3], [0x13, 5, 3], [0x14, 1, 3]] },
+    { bone: 5, part: 5, parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+    { bone: 1, part: 1, parent: null, damage_rank: [], hit_radius: 3,
+      steps: [[0x21, 0, 3]] },
+  ] as CharacterType["bones"],
+  head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977] },
   attacks: {
     "0": {
       "1": {
@@ -56,6 +68,9 @@ const TYPE: CharacterType = {
   motions: {
     "10": motion(20), "14": motion(20),
     "100": motion(20), "101": motion(20),
+    "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
+    "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
+    "979": motion(29), "981": motion(29), "982": motion(29),
   },
 };
 
@@ -75,11 +90,32 @@ const PLAYER: PlayerDamageJson = {
   life_cost: 1, score: -100, invuln_frames: 90, rank_delta: 2, start_lives: 2,
 };
 
+/** One stage's `characters` block, with only what the port reads filled in. */
+const CHARS = {
+  types: { "1": TYPE },
+  approach: APPROACH,
+  tracking: TRACKING,
+  player: PLAYER,
+  placements: [],
+  // Bone -> damage zone: 4 and 5 are the right arm, bit 1.
+  bone_zones: [0xff, 0xff, 0, 0xff, 1, 1],
+  // Bone -> reaction group, which picks the stumble within the row.
+  reaction_groups: [0, 1, 0, 1, 2, 2],
+  reaction_blend: { frames: 10, sever: 20, hard_set_from_bone: 9 },
+  deaths: { front: [900], back: [901], left: 902, right: 903, arc: 0x2000 },
+  difficulty: {
+    hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+    initial_rank: [0, 0, 2, 0, 0], default: 2,
+  },
+  combat: undefined,
+  note: "",
+} as unknown as CharactersJson;
+
 const EYE = vec3(0, 0, 0);
 
 function scene(n: number, rng: Rng): Events {
   ResetGameGlobals();
-  SetGameTables({ "1": TYPE }, APPROACH, TRACKING, PLAYER);
+  SetGameTables(CHARS);
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
   for (let i = 0; i < n; i++) {
     const a = ActorSpawn(0x1000 + i, 0x30, 1, `zombie ${i}`);
@@ -184,7 +220,42 @@ console.log("a spawn whose descriptor names no attack:");
   check("the real zombie still got through", damaged > 0);
 }
 
-// -- 4. the snapshot round-trips, exactly -----------------------------------
+// -- 4. damage ---------------------------------------------------------------
+
+console.log("ResolveHit:");
+{
+  const rng = new Rng(5);
+  scene(1, rng);
+  const z = G.g_object_list[0];
+  z.hp = 100;
+  // Bone 4's effect table: four escalating stages, the fourth severing.
+  const out1 = ResolveHit(z, 4, 0, NULL_HOST, rng);
+  check("a hit takes hit points off", z.hp === 100 - 3, `hp ${z.hp}`);
+  check("and swaps the bone's model", z.boneSlot["4"] === 0x11,
+        JSON.stringify(z.boneSlot));
+  check("and stumbles", out1.react !== undefined);
+  ResolveHit(z, 4, 0, NULL_HOST, rng);
+  ResolveHit(z, 4, 0, NULL_HOST, rng);
+  const out4 = ResolveHit(z, 4, 0, NULL_HOST, rng);
+  check("the fourth hit severs", out4.severed && out4.result === 3);
+  check("and takes the forearm with it -- the whole subtree, not just the arm",
+        z.removed.includes(5), `removed ${JSON.stringify(z.removed)}`);
+  check("the destroyed-zone mask is set", (z.zones & 2) === 2, `${z.zones}`);
+  const before = z.zones;
+  ResolveHit(z, 4, 0, NULL_HOST, rng);
+  check("a fifth hit on a severed limb does not sever again",
+        z.zones === before && z.removed.filter((b) => b === 5).length === 1);
+
+  z.hp = 1;
+  const kill = ResolveHit(z, 1, 0, NULL_HOST, rng);
+  check("zero hit points kills, once", kill.killed && z.dead);
+  check("and picks a directional death", z.death !== null);
+  const again = ResolveHit(z, 1, 0, NULL_HOST, rng);
+  check("a hit on a corpse scores nothing", !again.killed
+        && again.result === 0);
+}
+
+// -- 5. the snapshot round-trips, exactly -----------------------------------
 
 console.log("save state:");
 {
@@ -226,7 +297,7 @@ console.log("save state:");
         digest() === after);
 }
 
-// -- 5. determinism, which is what guards the rules above -------------------
+// -- 6. determinism, which is what guards the rules above -------------------
 
 console.log("determinism:");
 {

@@ -156,6 +156,9 @@ class Player {
     this.world.add("game", this.game);
     this.world.add("render", this.bullets);
     this.game.backend = this.chars;
+    // One generator for the whole player, so a snapshot replays the gore
+    // rolls and the death directions as well as the attacks.
+    this.chars.rng = this.rng;
 
     // `PlayerTakeDamage` raises this wherever it is called from -- a strike, a
     // thrown weapon, and whatever comes next -- instead of the two duplicated
@@ -252,10 +255,7 @@ class Player {
     this.ctx.stage = this.state.stage;
     this.ctx.frame = 0;
     this.rng.reseed(this.state.seed ?? 1);
-    SetGameTables(bundle.script.characters?.types,
-                  bundle.script.characters?.approach,
-                  bundle.script.characters?.tracking,
-                  bundle.script.characters?.player);
+    SetGameTables(bundle.script.characters);
     this.world.attach(this.ctx);
     G.g_player_lives = [
       bundle.script.characters?.player?.start_lives ?? 2,

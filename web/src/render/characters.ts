@@ -56,7 +56,11 @@ import type {
 import type { ActiveSpawn } from "../script/walker";
 import type { Actor } from "../game/actor";
 import { ActorSpawn } from "../game/director";
-import { ActorByAt } from "../game/globals";
+import { ActorByAt, G } from "../game/globals";
+import { Rng } from "../core/rng";
+import type { GameHost } from "../game/host";
+import { ActorKillAll, ResolveHit, type HitResult }
+  from "../game/combat/resolve_hit";
 import { ReleaseAttackSlot } from "../game/combat/permits";
 import { g_class_handlers } from "../game/registry";
 
@@ -437,195 +441,47 @@ export class CharacterLayer {
     const d = this.json?.difficulty;
     if (!p) return 0;
     if (!d?.hp_delta?.length) return p.hp;
-    const hp = p.hp + (d.hp_delta[this.difficulty] ?? 0);
+    const hp = p.hp + (d.hp_delta[G.g_difficulty] ?? 0);
     return Math.min(d.hp_max, Math.max(d.hp_min, hp));
   }
 
-  /** Menu difficulty 0..4. Only scales starting hit points. */
-  difficulty = 2;
   /**
-   * `g_damage_rank` — the adaptive 0..15 rank the per-bone damage modifier is
-   * indexed by, **not** the menu difficulty. `ResetDamageRank` seeds it from
-   * `initial_rank[difficulty]`; there is no adaptive state to track here, so
-   * it stays at the seed.
+   * Charge a hit. `ResolveHit` (`FUN_00409430`) is in `game/combat/`, where it
+   * belongs: it decides hit points, which model each bone draws, what comes
+   * off and which way the actor falls, and all of that is state that has to be
+   * in a snapshot. This is the renderer's half — turn a picked `Instance` into
+   * an actor, and apply the model swaps the port asked for.
    */
-  get rank(): number {
-    const r = this.json?.difficulty?.initial_rank?.[this.difficulty] ?? 0;
-    return Math.min(15, Math.max(0, r));
+  hit(inst: Instance, bone: number, cameraYawBams = 0): HitResult {
+    const before = inst.a.removed.length;
+    const out = ResolveHit(inst.a, bone, cameraYawBams, this.host, this.rng);
+    // `RemoveBoneSubtree` zeroed some draw slots; hide what it named. A zero
+    // slot is invisible *and* unshootable, which is why the pick tests it too.
+    for (const b of inst.a.removed.slice(before)) {
+      const node = inst.bones.get(b);
+      if (node) node.visible = false;
+    }
+    // Say so rather than doing nothing quietly: a bundle exported before the
+    // reaction tables were added has no `reaction_groups`, and a silent no-op
+    // looks exactly like "the game has no staggers".
+    if (!this.hasReactions && !this.warnedNoReactions) {
+      this.warnedNoReactions = true;
+      console.warn(
+        "[characters] no hit-reaction data in this bundle — re-export it "
+        + "(tools/export_player.py). Zombies will not stagger when shot.");
+    }
+    return out;
   }
 
-  /**
-   * Charge a hit, exactly as `ResolveHit` (`FUN_00409430`) does.
-   *
-   * The shape that matters is the **control code**: each step reads its own
-   * effect-table entry as the slot to draw and the *next* entry as a code.
-   *
-   * ```
-   * code 0   last step: damage, swap once, latch
-   * code 1   SEVER: damage, swap this bone, and remove every bone below it
-   * code 2   nothing at all — no damage and no score
-   * code >2  escalate: damage, swap, advance
-   * ```
-   *
-   * An earlier revision folded 0/1/2 to "no slot" and never read them as
-   * codes, so every hit reskinned the bone and nothing was ever severed —
-   * which is what left a forearm animating below a destroyed upper arm.
-   * For `char_adv00` the sever code sits at step 5 of the upper arms,
-   * forearms, thighs and shins, so a limb comes off on the fifth hit and
-   * takes everything below it with it.
-   */
-  hit(inst: Instance, bone: number, cameraYawBams = 0): {
-    damage: number; killed: boolean; head: boolean; hp: number;
-    gore: boolean; severed: boolean; result: number; death?: number;
-    react?: number;
-  } {
-    const b = inst.type.bones.find((x) => x.bone === bone);
-    const n = inst.a.hits[bone] ?? 0;
-    const step = b?.steps?.[n];
-    const slot = step?.[0] ?? 0;
-    const code = step?.[1] ?? 0;
-    const head = bone === inst.type.head_bone;
-    const wasDead = inst.a.dead;
+  /** What the port swaps models through. */
+  private readonly host: GameHost = {
+    boneWorld: () => false,
+    aimPoint: () => {},
+    setBoneSlot: (at, bone, slot) => this.setBoneSlot(at, bone, slot),
+  };
 
-    // `damage = table + DamageRankModifier(bone)`, floored at zero.
-    let damage = step?.[2] ?? 0;
-    damage = Math.max(0, damage + (b?.damage_rank?.[this.rank] ?? 0));
-
-    let result = 0;
-    let gore = false;
-    let severed = false;
-    const swap = () => {
-      gore = this.swapGore(inst, bone, slot) || gore;
-      // `ActorSwapDamagedPart` sets the zone bit when the *next* code is 0 or
-      // 1 -- that is, when this bone has reached its last stage.
-      if (code === 0 || code === 1) this.markZone(inst, bone);
-    };
-    const sever = () => { severed = true; this.severChildren(inst, bone); };
-
-    if (code === 0) {
-      if (slot === 2) {
-        result = 5;                                  // the sentinel: no effect
-      } else {
-        result = 2;
-        inst.a.hp -= damage;
-        if (bone === 1) {
-          // The torso's last stage is the death wound: only on the hit that
-          // takes it below one hit point.
-          if (inst.a.hp < 1 && !inst.a.latched.includes(bone)) {
-            result = 3; swap(); sever(); inst.a.latched.push(bone);
-          }
-        } else if (!inst.a.latched.includes(bone) && slot !== 0) {
-          result = 1; swap();
-          inst.a.hits[bone] = n + 1;
-          inst.a.latched.push(bone);
-        }
-      }
-    } else if (code === 1) {
-      result = 2;
-      inst.a.hp -= damage;
-      if (!inst.a.latched.includes(bone)) {
-        result = 3; swap(); sever(); inst.a.latched.push(bone);
-      }
-    } else if (code === 2) {
-      result = 5;
-    } else {
-      result = 1;
-      inst.a.hp -= damage;
-      // `ResolveHit` counts the torso's real stages inline and withholds the
-      // last one while the actor is alive.
-      const withhold = inst.a.hp > 0 && bone === 1
-        && inst.type.torso_stages <= n + 1;
-      if (!withhold) {
-        swap();
-        inst.a.hits[bone] = n + 1;
-      }
-    }
-    if (result === 5) damage = 0;
-
-    // A hit on something already dead scores nothing and cannot kill twice.
-    if (wasDead && result === 2) result = 0;
-
-    // `ZombieOnShot` only reacts while the actor is alive; the death takes
-    // over otherwise.
-    const survived = !wasDead && inst.a.hp >= 1;
-    const react = survived
-      ? this.startReaction(inst, bone, result) : undefined;
-
-    let death: number | undefined;
-    const killed = !wasDead && inst.a.hp < 1 && result !== 5;
-    if (killed) {
-      inst.a.dead = true;
-      // The 1-in-4 headshot burst: `ResolveHit` swaps the head to slot 0,
-      // which is `RemoveBoneSubtree`'s "gone" — the head simply leaves.
-      if (head && Math.random() < 0.25) {
-        this.removeBone(inst, bone);
-        severed = true;
-      }
-      death = this.chooseDeath(inst, cameraYawBams);
-      if (death !== undefined && inst.type.motions[String(death)]) {
-        inst.a.death = { motion: death, t: 0 };
-      }
-    }
-    return { damage, killed, head, hp: Math.max(0, inst.a.hp), gore, severed,
-             result, death, react };
-  }
-
-  /**
-   * `ActorReactToHit` -> `ActorPlayHitReaction`: the stumble.
-   *
-   * Which clip is a two-level lookup — the actor's **body condition**
-   * (`obj+0x130C`) picks a row, and the **reaction group** of the bone that was
-   * hit picks the motion within it. `DAT_004C84A8` maps the bone to one of
-   * eight groups and they partition the body exactly as you would draw it:
-   * head, torso, each arm, pelvis, each leg. For the common zombie that is
-   * motions 977, 982, 981, 979, 974, 961, 960 — all 29 frames except the legs
-   * at 39, so a leg shot staggers for longer.
-   *
-   * `ActorReactToHit` does **not** run it for every hit. Results 1 (damaged
-   * and swapped) and 3 (severed) always react; results 2 and 5 react only for
-   * character types 3 and 0x12. So a shot that merely takes hit points off a
-   * zombie's pelvis does not interrupt its walk.
-   *
-   * Body condition is held at 0 here. `FUN_00454270` derives it from which
-   * parts are gone, but through `obj+0x4DC` / `obj+0x68C`, whose meaning is
-   * `[open]`. It only changes the answer at condition 3, and for every
-   * character in the player's stages conditions 0, 1, 2 and 4 share one row.
-   */
-  private startReaction(inst: Instance, bone: number,
-                        result: number): number | undefined {
-    if (bone <= 0) return undefined;
-    const ct = inst.type.type;
-    // Results 1 and 3 always interrupt; 2 and 5 only for these two types. So
-    // a plain body hit on a zombie deliberately does *not* break its stride.
-    const reacts = result === 1 || result === 3
-      || ((result === 2 || result === 5) && (ct === 3 || ct === 0x12));
-    if (!reacts) return undefined;
-
-    const group = this.json?.reaction_groups?.[bone];
-    const motion = group === undefined
-      ? undefined : inst.type.reactions?.["0"]?.[group];
-    if (!motion || !inst.type.motions[String(motion)]) {
-      // Say so rather than doing nothing quietly. A bundle exported before
-      // the reaction tables were added has no `reaction_groups`, and a
-      // silent no-op here looks exactly like "the game has no staggers".
-      if (!this.warnedNoReactions) {
-        this.warnedNoReactions = true;
-        console.warn(
-          "[characters] no hit-reaction data in this bundle — re-export it "
-          + "(tools/export_player.py). Zombies will not stagger when shot.");
-      }
-      return undefined;
-    }
-    const b = this.json?.reaction_blend;
-    inst.a.react = {
-      motion,
-      t: 0,
-      blend: result === 3 ? (b?.sever ?? 20) : (b?.frames ?? 10),
-      // `ActorSetMotion` hard-sets the leg reactions: no cross-fade.
-      hard: bone >= (b?.hard_set_from_bone ?? 9),
-    };
-    return motion;
-  }
+  /** The world's generator, handed over by the host. */
+  rng = new Rng(1);
 
   /** One warning per session, not one per shot. */
   private warnedNoReactions = false;
@@ -633,90 +489,6 @@ export class CharacterLayer {
   /** Whether this bundle carries the hit-reaction tables at all. */
   get hasReactions(): boolean {
     return !!this.json?.reaction_groups?.length;
-  }
-
-  /**
-   * `SeverBoneChildren` (`FUN_00409AB0`): remove every bone **below** this one.
-   *
-   * The severed bone itself keeps the stump model `ActorSwapDamagedPart` just
-   * gave it; `RemoveBoneSubtree` then walks each *child* and zeroes its draw
-   * slot, recursively. Hiding the topmost removed child is equivalent, because
-   * everything under it is removed too.
-   */
-  private severChildren(inst: Instance, bone: number): void {
-    for (const b of this.childBones(inst.type, bone)) this.removeBone(inst, b);
-  }
-
-  /** `RemoveBoneSubtree` for one bone and everything under it. */
-  private removeBone(inst: Instance, bone: number): void {
-    if (!inst.a.removed.includes(bone)) inst.a.removed.push(bone);
-    this.markZone(inst, bone);
-    const node = inst.bones.get(bone);
-    if (node) node.visible = false;
-    for (const b of this.childBones(inst.type, bone)) this.removeBone(inst, b);
-  }
-
-  /**
-   * `RemoveBoneSubtree` and `ActorSwapDamagedPart` both set
-   * `obj+0x1318 |= 1 << g_bone_damage_zone[bone]`. Only three zones are named
-   * — head, right arm, left arm — and the rest map to 0xFF, which the game's
-   * `& 0x1F` shift parks on bit 31 where nothing reads it.
-   */
-  private markZone(inst: Instance, bone: number): void {
-    const z = this.json?.bone_zones?.[bone];
-    if (z === undefined || z > 7) return;
-    inst.a.zones |= 1 << z;
-    inst.a.zones = inst.a.zones & 7;
-  }
-
-  /**
-   * Bone indices whose parent is *bone*.
-   *
-   * `CharacterBone.parent` is an **index into `bones`**, not a bone number —
-   * the exporter flattens the EXE's node tree parents-first and records where
-   * the parent sits in that list. The two happen to differ by one on a
-   * humanoid, so comparing them directly is an off-by-one that mostly looks
-   * right, which is exactly why it is resolved through the array here.
-   */
-  private childBones(type: CharacterType, bone: number): number[] {
-    let kids = this.kidCache.get(type);
-    if (!kids) {
-      kids = new Map();
-      type.bones.forEach((b) => {
-        if (b.parent === null || b.parent === undefined) return;
-        const p = type.bones[b.parent];
-        if (!p) return;
-        const list = kids!.get(p.bone) ?? [];
-        list.push(b.bone);
-        kids!.set(p.bone, list);
-      });
-      this.kidCache.set(type, kids);
-    }
-    return kids.get(bone) ?? [];
-  }
-
-  private readonly kidCache = new Map<CharacterType, Map<number, number[]>>();
-
-  /**
-   * `FUN_00456220`: `camera_yaw - actor_yaw` against four ±45° arcs.
-   *
-   * Named by angle rather than front/back — see the note in
-   * `hod2lib/characters.py`, which explains why those labels depend on two
-   * conventions at once and why the *data* is the reliable half.
-   */
-  private chooseDeath(inst: Instance, cameraYawBams: number): number | undefined {
-    const d = this.json?.deaths;
-    if (!d || !d.front?.length) return undefined;
-    const rel = (Math.round(cameraYawBams - inst.a.yaw) & 0xffff);
-    const inArc = (centre: number) => {
-      let x = (rel - centre) & 0xffff;
-      if (x > 0x8000) x -= 0x10000;
-      return Math.abs(x) <= d.arc;
-    };
-    if (inArc(0x4000)) return d.right;
-    if (inArc(0xc000)) return d.left;
-    const pool = inArc(0x8000) ? d.back : d.front;
-    return pool[Math.floor(Math.random() * pool.length)];
   }
 
   /**
@@ -880,7 +652,12 @@ export class CharacterLayer {
         node.visible = true;
         for (const c of node.children) c.visible = true;
       }
-      for (const bone of inst.a.removed) this.removeBone(inst, bone);
+      // `a.removed` already names every bone in each severed subtree, so
+      // hiding exactly those is the whole of it.
+      for (const bone of inst.a.removed) {
+        const node = inst.bones.get(bone);
+        if (node) node.visible = false;
+      }
       for (const [bone, slot] of Object.entries(inst.a.boneSlot)) {
         this.swapGore(inst, Number(bone), slot);
       }
@@ -896,25 +673,9 @@ export class CharacterLayer {
     return this.instances.filter((i) => i.root.visible && !i.a.dead).length;
   }
 
-  /**
-   * Kill every live actor outright, the way the debug path does: drop hit
-   * points to zero and start the directional death. Nothing is severed,
-   * because no bone was hit.
-   */
+  /** The debug clear. `ActorKillAll` is the port's; this only counts. */
   killAll(cameraYawBams = 0): number {
-    let n = 0;
-    for (const i of this.instances) {
-      if (!i.root.visible || i.a.dead) continue;
-      i.a.hp = 0;
-      i.a.dead = true;
-      i.a.react = null;
-      const death = this.chooseDeath(i, cameraYawBams);
-      if (death !== undefined && i.type.motions[String(death)]) {
-        i.a.death = { motion: death, t: 0 };
-      }
-      n++;
-    }
-    return n;
+    return ActorKillAll(cameraYawBams, this.rng);
   }
 
   get describe(): string {

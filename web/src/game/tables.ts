@@ -6,17 +6,18 @@
  * a save state carries the state, and the tables come back with the bundle.
  */
 import type {
-  ApproachJson, AttackJson, BakedMotion, CharacterType, PlayerDamageJson,
-  ThrowHandJson, TrackingJson,
+  AttackJson, BakedMotion, CharactersJson, CharacterType, ThrowHandJson,
 } from "../bundle";
 import type { Actor } from "./actor";
 import { G } from "./globals";
 
 export const T = {
+  /** The whole `characters` block: tables, types and placements. */
+  chars: null as CharactersJson | null,
   types: {} as Record<string, CharacterType>,
-  approach: null as ApproachJson | null,
-  tracking: null as TrackingJson | null,
-  player: null as PlayerDamageJson | null,
+  get approach() { return T.chars?.approach ?? null; },
+  get tracking() { return T.chars?.tracking ?? null; },
+  get player() { return T.chars?.player ?? null; },
 };
 
 /**
@@ -24,22 +25,21 @@ export const T = {
  * approach rings into the globals, which is what `DAT_004C4CD0` ->
  * `g_enemy_approach_rings` does at 0x004C4CD0.
  */
-export function SetGameTables(types: Record<string, CharacterType> | undefined,
-                              approach: ApproachJson | undefined,
-                              tracking: TrackingJson | undefined,
-                              player: PlayerDamageJson | undefined): void {
-  T.types = types ?? {};
-  T.approach = approach ?? null;
-  T.tracking = tracking ?? null;
-  T.player = player ?? null;
+export function SetGameTables(chars: CharactersJson | undefined): void {
+  T.chars = chars ?? null;
+  T.types = chars?.types ?? {};
 
-  const rings = approach?.rings ?? [];
+  const rings = chars?.approach?.rings ?? [];
   G.g_enemy_approach_rings = rings.map((r) => r.inner);
   G.g_enemy_approach_ring_mid = rings.map((r) => r.mid);
   G.g_enemy_approach_ring_outer = rings.map((r) => r.outer);
-  G.g_enemy_approach_steps = approach?.steps?.base ?? 0;
-  G.g_enemy_approach_steps_mid = approach?.steps?.mid_add ?? 0;
-  G.g_enemy_approach_steps_outer = approach?.steps?.outer_add ?? 0;
+  G.g_enemy_approach_steps = chars?.approach?.steps?.base ?? 0;
+  G.g_enemy_approach_steps_mid = chars?.approach?.steps?.mid_add ?? 0;
+  G.g_enemy_approach_steps_outer = chars?.approach?.steps?.outer_add ?? 0;
+  // `ResetDamageRank` (`FUN_00460770`) seeds the adaptive rank from the menu
+  // difficulty; there is no adaptive update ported yet, so it stays at seed.
+  G.g_damage_rank = Math.min(15, Math.max(0,
+    chars?.difficulty?.initial_rank?.[G.g_difficulty] ?? 0));
 }
 
 export function CharacterTypeOf(a: Actor): CharacterType | null {

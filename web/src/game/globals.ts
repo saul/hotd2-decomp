@@ -105,6 +105,8 @@ export const G = {
   g_difficulty: 2,
   /** `g_damage_rank` — 0x009C8E96. The adaptive per-shot damage bonus. */
   g_damage_rank: 2,
+  /** `g_hit_result` — 0x009A58F8. What the last shot did; the score reads it. */
+  g_hit_result: 0,
 
   // -- the camera --------------------------------------------------------
   /** `g_camera_is_tracking` — 0x0059C988. */

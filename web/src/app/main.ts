@@ -937,7 +937,6 @@ class Player {
     this.loop.running = this.playing && this.state.mode !== "free"
                         && !!this.walker && !this.walker.branch;
 
-    let tick = this.loop.idle(wall);
     if (!this.state.freeze && this.state.mode === "free") {
       this.freeRoam.update(wall, this.camera);
     } else if (!this.state.freeze && this.playing && this.walker) {
@@ -951,22 +950,35 @@ class Player {
         // caption put up in Step mode quietly expires two seconds later while
         // playback is paused, which is exactly long enough to look at the
         // script tree and miss it.
-        tick = this.loop.advance(wall, () => {
+        const script = this.loop.advance(wall, () => {
           this.walker!.tick(TICK);
           return !this.walker!.branch && !this.walker!.finished;
         });
-        this.hudLayer.tick(tick.frames);
-        // The port runs before the camera reads its answer: it owns where the
-        // enemies are and which one has committed to attacking.
-        this.world.update(this.ctx, tick);
+        this.hudLayer.tick(script.frames);
         if (!this.scrubbing) this.syncCameraToWalker();
       }
       this.refreshUi();
     }
 
-    if (this.walker) this.drawLayers(tick);
+    if (this.walker) {
+      // The port and the render layers run on wall time, not on the walker's
+      // accumulator, and they run in every mode: a zombie loops its walk while
+      // you step through the script one instruction at a time, and the rain
+      // keeps falling in free roam. Only the shutter and the dialogue
+      // countdown ride the script's own clock, and they took `tick` above.
+      const game = this.gameTick(wall);
+      this.world.update(this.ctx, game);
+      this.drawLayers(game);
+    }
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Game time for this frame: wall clock scaled by `speed`, zero while frozen. */
+  private gameTick(wall: number): Tick {
+    if (this.state.freeze) return this.loop.idle(wall);
+    const dt = wall * this.speed;
+    return { dt, frames: dt * 60, wall, frozen: false };
+  }
 
   /**
    * Everything that only reads state. Step 4 of PLAYER_ARCHITECTURE.md turns

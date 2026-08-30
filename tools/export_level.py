@@ -65,6 +65,34 @@ def _resolve_rigs(game: Path, st, bbox=None) -> list[dict]:
     return out
 
 
+def _spawn_nodes(st) -> list[dict]:
+    """Every spawn the script places, with whatever identity is proved.
+
+    `hod2lib.spawnres` maps a class to a character type and thence to a named
+    pol file. Only classes whose handler has actually been read get a rule --
+    there is deliberately no guess-from-the-descriptor fallback, because the
+    field a spawner copies into obj+0x1F4 means different things per class.
+    """
+    from hod2lib import spawnres
+    out: list[dict] = []
+    for r in spawnres.resolve_stage_spawns(st):
+        sp = r.spawn
+        out.append({
+            "at": sp.offset,
+            "opcode": sp.opcode,
+            "class": sp.cls,
+            "pos": [sp.pos[0], sp.pos[1], sp.pos[2]],
+            "rot": [sp.orient[0], sp.orient[1], sp.orient[2]],
+            "label": (r.asset_file or "").replace(".bin", "")
+                     or f"class{sp.cls:02x}",
+            "char_type": r.char_type,
+            "asset_file": r.asset_file,
+            "node_count": r.node_count,
+            "note": r.note,
+        })
+    return out
+
+
 def _breakable_json(st, prog) -> list[dict]:
     """The breakable-prop groups this stage places, with their members.
 
@@ -339,7 +367,9 @@ def main() -> int:
             bbox = (tuple(min(q[i] for q in pts) for i in range(3)),
                     tuple(max(q[i] for q in pts) for i in range(3)))
         rig_data = _resolve_rigs(game, st, bbox) if st is not None else []
+        spawn_data = _spawn_nodes(st) if st is not None else []
         info = gltf.export_level(name, parts, out_dir, rigs=rig_data,
+                                 spawns=spawn_data,
                                  write_textures=not args.no_textures,
                                  uv_check=args.uv_check,
                                  keep_collapsed_uv=args.keep_collapsed_uv,
@@ -386,6 +416,10 @@ def main() -> int:
         if info['folded_mirror_uv']:
             print(f"  folded {info['folded_mirror_uv']:,} out-of-range UVs on "
                   f"mirrored axes")
+        if info.get('spawns'):
+            named = sum(1 for s in spawn_data if s.get("asset_file"))
+            print(f"  {info['spawns']} spawn nodes ({named} identified to a "
+                  f"named asset file)")
         if info.get('rigs'):
             names = ", ".join(f"{k} x{v}" for k, v in
                               sorted(info.get('rig_counts', {}).items()))

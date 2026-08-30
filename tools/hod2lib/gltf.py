@@ -603,7 +603,8 @@ def _pack_glb(doc: dict, blob: bytes) -> bytes:
     return bytes(out)
 
 
-def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures=True,
+def export_level(name, parts, out_dir, collision=None, rigs=None,
+                 spawns=None, write_textures=True,
                  uv_check=False, keep_collapsed_uv=False, cam_files=None,
                  cam_step=2.0, unlit=False, model_regions=None,
                  fold_mirror_uv=False, glb=False):
@@ -937,6 +938,44 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
                                        obj_biases=biases))
         n_paths = sum(len(c.paths) for c in cam_files)
 
+    # ---- identified spawns ----------------------------------------------
+    #
+    # A node per spawn the event script places, carrying what the thing IS.
+    # A spawn class names a character type, the type names a skeleton in the
+    # EXE, and the skeleton's nodes name asset slots that resolve to a pol
+    # file -- so `cat.bin`, `zabat.bin`, `hito_oyaji.bin`. See
+    # `hod2lib.spawnres`.
+    #
+    # These carry no geometry. Every part model of a skinned character is
+    # authored about its own origin, so the rest pose is in the motion data,
+    # and `mot/` is not decoded -- a character can be placed and named but not
+    # assembled. A consumer should draw a marker until that changes.
+    n_spawns = 0
+    if spawns:
+        spawn_nodes: list[int] = []
+        for sp in spawns:
+            node = {
+                "name": f"spawn_{sp['at']:06x}_{sp['label']}",
+                "translation": list(sp["pos"]),
+                "rotation": list(_bams_euler_to_quat(*sp["rot"])),
+                "extras": {
+                    "hod2_kind": "spawn",
+                    "hod2_class": sp["class"],
+                    "hod2_evt_offset": sp["at"],
+                    "hod2_opcode": sp["opcode"],
+                },
+            }
+            for k in ("char_type", "asset_file", "node_count", "note"):
+                if sp.get(k) not in (None, "", 0):
+                    node["extras"]["hod2_" + k] = sp[k]
+            nodes.append(node)
+            spawn_nodes.append(len(nodes) - 1)
+            n_spawns += 1
+        if spawn_nodes:
+            nodes.append({"name": "spawns", "children": spawn_nodes,
+                          "extras": {"hod2_kind": "spawn_root"}})
+            scene_nodes.append(len(nodes) - 1)
+
     # ---- hand-coded object rigs -----------------------------------------
     #
     # An object that follows an op_ path is not one model: its draw routine
@@ -1142,5 +1181,6 @@ def export_level(name, parts, out_dir, collision=None, rigs=None, write_textures
         "animations": len(animations),
         "paths": n_paths,
         "rigs": n_rigs,
+        "spawns": n_spawns,
         "rig_counts": rig_counts,
     }

@@ -86,17 +86,51 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x2A` | `FUN_00432D40` | 4 | **Dead class** — the whole handler is `JMP ActorKill`. | `[proved]` |
 | `0x20`, `0x45`, `0x46` | — | 36/37/27 | Not reached. `0x20` has a call to the HP scaler at `0x0044964A`, so it is `[likely]` a combat actor. | `[open]` |
 
-## The sound record table — the binary's only name table
+## Two name tables, not none
 
-There is **no asset name table** in this executable. Slots are bare integers.
-The one place anything is named is the sound records at **`0x005845F8`**:
+> ⚠️ An earlier revision of this document said flatly that the binary has no
+> asset name table and that sound records were the only naming evidence. That
+> was wrong, and it cost real time: three of the four class-survey agents
+> reported identities as `[open]` on that basis. There are **two** name tables.
+
+### 1. Character skeletons → pol filenames
+
+`FUN_00410590` reads `PTR_DAT_004E0430[type]` for a character type. The block
+holds a node count at `+0x16` and that many node pointers at `+0x18`; each node
+is `{u32 asset_slot; …; u16 index @+0x14; u16 child_count @+0x16; u32 children[]}`
+and recurses. Every slot resolves through the asset slot table to a **pol
+filename**, and for 85 of the types all of a skeleton's slots agree on one file.
+
+That is a complete character bestiary, and it names things the sound records
+never could:
+
+| Types | Files |
+|---|---|
+| `0x01`–`0x14` | the zombie variants — `znassb`, `znchain`, `zndina`, `zngold`, `znnick`, `znjoe`, `znkage`, `znken`, `znebi2/3/4`, `znele`, `znonoopa`, `znjikken1` |
+| `0x1A`–`0x1F` | the small creatures — **`cat.bin`**, `frog.bin`, `frog_gold.bin`, `mol.bin`, `zabat.bin`, `zabat_wing.bin` |
+| `0x20`–`0x38` | the civilians — `hito_baba`, `hito_gal`, `hito_man`, `hito_oyaji`, `hito_manbest`, `deka_musume`, … (*hito* = person) |
+| `0x3E`–`0x43` | named characters — `hou`, `logan`, `curien`, and their HOD1 variants |
+| `0x47`–`0x55` | the bosses — `boss2`–`boss6`, `b6boss1z`–`b6boss5` |
+
+`ExeTables.character_skeleton()` and `character_asset_file()` decode it.
+
+**The cat is `[proved]`.** Class `0x53` stores character type `0x1A`, whose
+eighteen skeleton nodes all land in `cat.bin`. It spawns four times, in stage 2
+only, at evt `0x21F4`, `0x221C`, `0x44A4` and `0x6E98` — and `0x21F4`/`0x221C`
+sit immediately after the flying-creature block, which is `zabat.bin`, the
+bats. Rendering the eighteen parts corroborates it: each is about two units
+across, and they read as head, torso, hips, limb segments and tail.
+
+### 2. Sound records
+
+The sound records at **`0x005845F8`**:
 `{u32 id; char name[48]}`, stride `0x34`, terminated by `id == 0xFFFF` —
 **324 records**. `PlaySoundId` (`0x0041CFD0`) switches on `id >> 28` through
 the 9-entry table at `0x0041D324`; category 0 resolves here, category 1 through
 a string-pointer table at `0x00580354`.
 
-`ExeTables.sound_records()` decodes it. This is the primary identification tool
-for the whole decomp: a `PlaySoundId` id is very often the only evidence for
+`ExeTables.sound_records()` decodes it. It identifies *behaviour* where the
+skeleton table identifies *models*: a `PlaySoundId` id is very often the only evidence for
 what an object is. It is how the stage-2 vehicle was proved to be a car, how
 class 0x51 was proved to live in water, and how class 0x30 was proved to be a
 zombie rather than assumed to be one.
@@ -107,11 +141,11 @@ plus `COMM3`, `ETC`, `DAMEGE_GA`, `DAMEGE_JMS`, `START_COIN`.
 
 ### On animals
 
-The creatures the binary actually names are a **frog** (`KAERU2_22K.wav`,
-`KAERU4_22.WAV`), an **owl** (`FUKUROU1/2_22.wav`), a **bat**
-(`KOUMORI1/2_22.wav`), a **worm** (`WORM_TUBU1/2_44.wav`) and wing-flap
-(`HABATAKI*`). **There is no cat sound** — a search of all 324 records for
-cat/neko/mew finds nothing.
+The creatures the sound records name are a **frog** (`KAERU`), an **owl**
+(`FUKUROU`), a **bat** (`KOUMORI`), a **worm** (`WORM_TUBU`) and wing-flap
+(`HABATAKI`). There is no cat sound in any of the 324 records — which is
+consistent with the report that the cat is silent, and is exactly why the
+sound table alone could not identify it. The skeleton table could.
 
 ### Hunting the cat
 
@@ -216,6 +250,28 @@ a per-kind score table of stride `0xC`, swaps its model to a floating score
 sprite (`0x116A` / `0x119C`), fades over `0x31` frames and despawns. It draws
 itself with `AssetDrawSlot(obj+0x28C)` plus a ground shadow `AssetDrawSlot(0x10D0)`.
 `[proved]`
+
+## Getting spawns into a renderer
+
+`hod2lib.spawnres` resolves a spawn to its character type and asset file, and
+`export_level.py` emits one glTF node per spawn under a `spawns` root, carrying
+class, character type, node count and asset filename in `extras`. The browser
+player consumes the same glTF, so it gets them without a bundle change.
+
+**562 of 1225 spawns are identified**, across 52 distinct characters. Only
+classes whose handler has actually been read get a rule; there is deliberately
+**no** guess-from-the-descriptor fallback. Adding one looked attractive —
+opcode `0x09` really does copy `desc+0x24` into `obj+0x1F4` — and it "resolved"
+962 of 1225, but most of the extra hits were `char_adv02` purely because class
+`0x41` uses that field as a prop lifetime and a lifetime of 0 is character type
+0. Fewer, correct identifications beat more, wrong ones.
+
+**The nodes carry no geometry, and cannot yet.** Every part model in `cat.bin`
+and `hito_manbest.bin` is authored about its own origin — the per-part
+centroids are all within a unit of zero — so the rest pose is not in the
+models. It lives in the motion data, and `mot/` is the last undecoded format.
+Until then a consumer can place and label a character but not assemble it. The
+single-model prop classes are unaffected and draw exactly.
 
 ## Open questions
 

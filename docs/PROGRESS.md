@@ -289,6 +289,17 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       and a **support list** for topple physics. Verified 42/42 by
       self-consistency of the stacking. `ExeTables.breakable_groups()` decodes
       it and the exporter emits it per stage.
+- [x] **The character skeleton table at `0x004E0430`** — a spawn class names a
+      character type, the type names a skeleton, its nodes name asset slots,
+      and those resolve to **pol filenames**. 85 types identified: the zombie
+      variants, the civilians, the bosses, and the small creatures including
+      `cat.bin`. This is the binary's real name table; an earlier note claiming
+      it had none was wrong.
+- [x] **Spawns in the exported scene** — `hod2lib.spawnres` plus one glTF node
+      per spawn; 562 of 1225 identified to a named asset file on proved rules
+      only. The browser player eats the same glTF.
+- [ ] **Assembling a character needs `mot/`** — part models are authored about
+      their own origin, so the rest pose is in the motion data.
 - [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
       the only place this binary names anything. `ExeTables.sound_records()`.
       This is now the primary identification tool for the decomp.

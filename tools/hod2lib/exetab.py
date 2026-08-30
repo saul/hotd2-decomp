@@ -359,6 +359,23 @@ class ExeTables:
     #: path for. Object draw routines clamp with it -- `FUN_0048E600` and
     #: `FUN_0048F050` both do `n = min(current_frame, CAM_PATH_LENGTH[slot])`
     #: before calling `CamEvalObjectPath6`.
+    #: Skinned-character skeletons, one per character type. `FUN_00410590`
+    #: reads ``PTR_DAT_004E0430[type]``; the block holds a node count at
+    #: ``+0x16`` and that many node pointers at ``+0x18``. Each node is
+    #: ``{u32 asset_slot; ... u16 index @+0x14; u16 child_count @+0x16;
+    #: u32 children[] @+0x18}`` and recurses.
+    #:
+    #: This is the bridge from a spawn class to actual geometry: a class names
+    #: a character type, the type names a skeleton, and the skeleton's nodes
+    #: name asset slots -- which resolve through `asset_slots()` to a pol file.
+    #: Type 0x1A's eighteen nodes all land in ``cat.bin``; a civilian's fifteen
+    #: land in ``hito_manbest.bin``.
+    #:
+    #: The bind pose is **not** here -- every node's ``+0x04..+0x13`` is zero,
+    #: so the rest pose lives in the motion data and an assembled character
+    #: cannot be posed until `mot/` is decoded.
+    CHARACTER_SKELETONS = 0x004E0430
+
     #: Sound records: ``{u32 id; char name[48]}``, stride 0x34, terminated
     #: by ``id == 0xFFFF``. `PlaySoundId` (0x0041CFD0) switches on ``id >> 28``
     #: through the 9-entry table at 0x0041D324; category 0 resolves here.
@@ -380,6 +397,61 @@ class ExeTables:
     BREAKABLE_LEVEL_HEIGHT = 7.540296
 
     CAM_PATH_LENGTH = 0x00576D38
+
+    def character_skeleton(self, char_type: int) -> list[dict]:
+        """The node tree for a character type, flattened, parents first.
+
+        Each entry is ``{"slot", "index", "depth", "children"}``. Returns an
+        empty list for a type with no skeleton.
+        """
+        base = self._v2r(self.CHARACTER_SKELETONS)
+        if base is None or not (0 <= char_type < 0x100):
+            return []
+        ptr = struct.unpack_from("<I", self.data, base + char_type * 4)[0]
+        off = self._v2r(ptr)
+        if off is None or off + 0x18 > len(self.data):
+            return []
+        roots = struct.unpack_from("<h", self.data, off + 0x16)[0]
+        if not (0 < roots < 64):
+            return []
+        out: list[dict] = []
+        seen: set[int] = set()
+
+        def walk(node_ptr: int, depth: int) -> None:
+            o = self._v2r(node_ptr)
+            if o is None or node_ptr in seen or depth > 12:
+                return
+            if o + 0x18 > len(self.data):
+                return
+            seen.add(node_ptr)
+            slot = struct.unpack_from("<I", self.data, o)[0]
+            idx = struct.unpack_from("<H", self.data, o + 0x14)[0]
+            n = struct.unpack_from("<H", self.data, o + 0x16)[0]
+            out.append({"slot": slot, "index": idx, "depth": depth,
+                        "children": n})
+            if n > 64 or o + 0x18 + n * 4 > len(self.data):
+                return
+            for i in range(n):
+                cp = struct.unpack_from("<I", self.data, o + 0x18 + i * 4)[0]
+                if cp:
+                    walk(cp, depth + 1)
+
+        for i in range(roots):
+            walk(struct.unpack_from("<I", self.data, off + 0x18 + i * 4)[0], 0)
+        return out
+
+    def character_asset_file(self, char_type: int) -> str | None:
+        """The pol file a character type's parts live in, if they agree.
+
+        The filenames are the closest thing this binary has to an asset name
+        table, and they are how a spawn class gets identified: `cat.bin`,
+        `hito_manbest.bin`, `car_pl.bin`. An earlier revision of the notes
+        claimed no name table existed and leaned on sound records alone.
+        """
+        slots = self.asset_slots()
+        files = {slots[n["slot"]][0] for n in self.character_skeleton(char_type)
+                 if n["slot"] in slots}
+        return files.pop() if len(files) == 1 else None
 
     def sound_records(self) -> dict[int, str]:
         """``{sound id: filename}`` for every category-0 sound in the game."""

@@ -26,6 +26,7 @@ import { CharacterTypeOf, MotionOf, ThrowHandsOf } from "../tables";
 import { vec3, type Vec3 } from "../vec";
 import { GAME_HZ } from "../class30/states";
 import { ThrowerStateLeapToPoint } from "./leap";
+import { ThrowerStateLeapDown } from "./leap_down";
 import { ThrowerStatePathFollow } from "./path";
 import { ThrowerState, ThrowSub } from "./states";
 
@@ -144,6 +145,10 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number,
   if (obj.state === ThrowerState.LeapToPoint) {
     ThrowerStateLeapToPoint(obj);
     ActorIntegrate(obj, dt);
+    return;
+  }
+  if (obj.state === ThrowerState.LeapDown) {
+    ThrowerStateLeapDown(obj, host, dt);
     return;
   }
   if (obj.state === ThrowerState.PathFollow) {

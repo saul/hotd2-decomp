@@ -18,6 +18,12 @@ export interface GameHost {
   boneWorld(at: number, bone: number, out: Vec3): boolean;
   /** A point `ahead` units in front of the camera, at the eye's height. */
   aimPoint(ahead: number, out: Vec3): void;
+  /**
+   * A point in the camera's own space, in world coordinates. The engine builds
+   * these by unprojecting a screen offset at a depth — see
+   * `ThrowerPickLandingPoint`.
+   */
+  viewPoint(x: number, y: number, z: number, out: Vec3): void;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */
   setBoneSlot(at: number, bone: number, slot: number): void;
 }
@@ -26,5 +32,6 @@ export interface GameHost {
 export const NULL_HOST: GameHost = {
   boneWorld: () => false,
   aimPoint: () => {},
+  viewPoint: () => {},
   setBoneSlot: () => {},
 };

@@ -70,6 +70,13 @@ export class GameSystem implements System {
       const p = new Vector3(0, 0, -ahead).applyMatrix4(this._camMat);
       out.x = p.x; out.y = p.y; out.z = p.z;
     },
+    // A point in the camera's own space, in world coordinates. The engine
+    // unprojects a screen offset at a depth to get one -- see
+    // `ThrowerPickLandingPoint`.
+    viewPoint: (x, y, z, out) => {
+      const p = new Vector3(x, y, z).applyMatrix4(this._camMat);
+      out.x = p.x; out.y = p.y; out.z = p.z;
+    },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),
   };
 

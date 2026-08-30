@@ -484,6 +484,7 @@ export class CharacterLayer {
   private readonly host: GameHost = {
     boneWorld: () => false,
     aimPoint: () => {},
+    viewPoint: () => {},
     setBoneSlot: (at, bone, slot) => this.setBoneSlot(at, bone, slot),
   };
 

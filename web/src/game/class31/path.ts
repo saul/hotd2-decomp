@@ -17,6 +17,8 @@
 import type { Actor } from "../actor";
 import { GAME_HZ } from "../class30/states";
 import { ActorArcVelocity } from "./leap";
+import { ThrowerTryClaimAttackSlot } from "../combat/permits";
+import { CharacterTypeOf } from "../tables";
 import { ThrowerState } from "./states";
 
 /** Sub-states, which the engine simply increments. */
@@ -86,14 +88,17 @@ export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
 }
 
 /**
- * The terminator. Character type 0x17 goes to state 7; everything else claims
- * an attack permit and goes to state 9.
- *
- * [diverges] State 9 is unread, so both land in the port's one class-0x31
- * behaviour — stand and throw — which is what the route was walked to reach.
+ * The terminator. Character type 0x17 goes straight to state 7; everything
+ * else claims an attack permit and goes to state 9 —
+ * `ThrowerStateLeapDown`, which brings it off the roof and into shot.
  */
 function endPath(obj: Actor): void {
   obj.leap = null;
-  obj.state = ThrowerState.StandAndThrow;
   obj.sub = 0;
+  if (CharacterTypeOf(obj)?.type === 0x17) {
+    obj.state = ThrowerState.StandAndThrow;
+    return;
+  }
+  ThrowerTryClaimAttackSlot(obj);
+  obj.state = ThrowerState.LeapDown;
 }

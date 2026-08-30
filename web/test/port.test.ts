@@ -23,7 +23,7 @@ import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { SpawnClass } from "../src/game/spawn_class";
 import { ThrowerState } from "../src/game/class31/states";
-import { dist2d, vec3 } from "../src/game/vec";
+import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
 
 let failures = 0;
@@ -385,10 +385,35 @@ console.log("ThrowerStatePathFollow:");
   check("it holds still for the descriptor's delay",
         Math.abs(z.pos.z - start.z) < 0.01, `moved ${(z.pos.z - start.z).toFixed(2)}`);
 
-  for (let i = 0; i < 900; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-  check("it walks the route to the last waypoint",
-        Math.abs(z.pos.x + 737.5) < 0.1 && Math.abs(z.pos.z + 810.0) < 0.1
-        && Math.abs(z.pos.y - 115.0) < 0.1,
+  // The leap at the end lands in front of the camera, so the camera has to be
+  // somewhere plausible: in the real scene it is on the street below the roof,
+  // not a thousand units away at the origin.
+  const roofEye = vec3(-737.5, 100.0, -780.0);
+  const roofHost = {
+    ...NULL_HOST,
+    viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
+      out.x = roofEye.x + x;
+      out.y = roofEye.y + y;
+      out.z = roofEye.z + zz;
+    },
+  };
+  let reachedLast = false;
+  for (let i = 0; i < 900; i++) {
+    GameUpdate(roofEye, 1 / 60, roofHost, rng, events);
+    if (!reachedLast && Math.abs(z.pos.x + 737.5) < 0.2
+        && Math.abs(z.pos.z + 810.0) < 0.2
+        && Math.abs(z.pos.y - 115.0) < 0.2) reachedLast = true;
+  }
+  check("it walks the route to the last waypoint", reachedLast,
+        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
+  // The depth is exact -- 15.5 is a literal in `ThrowerPickLandingPoint`. The
+  // drop is not asserted to the unit because it divides by
+  // `g_projection_distance_px`, which is derived from the projection rather
+  // than read out of the binary; what matters is that it comes *down* and
+  // lands in front.
+  check("then it comes down off the roof, in front of the camera",
+        Math.abs(z.pos.z - (roofEye.z - 15.5)) < 0.5
+        && z.pos.y < 115 - 5 && z.pos.y < roofEye.y,
         `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
   check("and only then starts throwing",
         z.state === ThrowerState.StandAndThrow, `state ${z.state}`);

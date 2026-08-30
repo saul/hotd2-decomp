@@ -27,7 +27,8 @@ import { dist2d } from "../src/game/vec.ts";
 // so take the arguments that are not paths.
 const args = process.argv.slice(2)
   .filter((a) => !a.endsWith(".mjs") && !a.endsWith(".ts"));
-const [stage = "2", block = "3", step = "1", seconds = "10"] = args;
+const [stage = "2", block = "3", step = "1", seconds = "10",
+       every = "120"] = args;
 const root = join(process.env.HOME, "hotd2-decomp/extract/player", `stage${stage}`);
 const script = JSON.parse(readFileSync(join(root, `stage${stage}.script.json`), "utf8"));
 
@@ -93,7 +94,7 @@ console.log(`stage ${stage} block ${block} step ${step}: ${actors.length} actors
           + `camera ${Math.round(eye.z - cz)} units out\n`);
 const total = Number(seconds) * 60;
 for (let f = 0; f <= total; f++) {
-  if (f % 120 === 0) {
+  if (f % Number(every) === 0) {
     console.log(`t=${(f / 60).toFixed(1)}s`);
     for (const { a, id } of actors) {
       console.log(`  ${id} 0x${a.at.toString(16).toUpperCase()} `

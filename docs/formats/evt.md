@@ -235,91 +235,72 @@ inference; **[open]** = undetermined.
 | `5D` / `5E` | `snd_load/free_pack` **(stub)** | **[proved]** `OutputDebugStringA("SS_SndLoadPack")` and nothing else — NAOMI sound-driver calls stubbed out for the PC port, which streams individual `.wav` files |
 | `5F` | `bgm_entry_play` | **[proved]** consumes 4 operands but uses **only the third**: stop the current BGM, then play that track id |
 
-### The skip feature — complete except for one assignment
+### The skip feature
 
-**[proved]** Every part of "press Start to skip a cutscene" is present in the
-shipped executable, and exactly one link is missing.
+**[proved]** "Press Start to skip a cutscene" is complete and working in the
+retail build.
 
-1. `set_skippable_region` (`2C`) opens the window: `DAT_009A2D7C = 1`.
+1. `set_skippable_region` (`2C`) opens the window: `DAT_009A2D7C = 1`, and
+   `DAT_009A2230 = 0`.
 2. Both player-update routines, `FUN_00414940` and `FUN_00414B90`, end with the
    same block:
 
    ```c
-   if (DAT_009c8e00 == 0 && DAT_009a2d7c != 0) {   // gate down, region open
+   if (DAT_009C8E00 == 0 && DAT_009A2D7C != 0) {   // gate down, region open
        mask[0] = 0x2; mask[1] = 0x20000;           // Start, player 1 / player 2
-       if (mask[player] & _DAT_009c9028) DAT_009a1a18 = 1;
+       if (mask[player] & _DAT_009C9028) DAT_009A1A18 = 1;
    }
    ```
 
    The gate `DAT_009C8E00` is the one `1F`'s shutter machine drives, so a skip
    is only offered while the letterbox is closed — which is the definition of
    "not currently playable".
-3. `40`, `41` and `42` each open by testing the skip flag `DAT_009A2D74` and
-   walking straight past the wait when it is set. The flag is *not* cleared by
-   the waits: it stays up until `2C` closes the region, so one press skips a
-   whole cutscene rather than a single wait.
-4. `2E` then restarts the BGM the skipped cutscene interrupted.
+3. `CheckCutsceneSkipRequest` (`0x00435F40`), a standing task installed from the
+   table at `0x005934E4`, turns the request into the flag:
 
-> ⚠️ **The chain breaks at step 2 → 3.** The Start poll writes `DAT_009A1A18`,
-> which has **two writers and no readers anywhere in the binary**. The only two
-> writers of `DAT_009A2D74` itself — `EvtOpSetSkippableRegion2C` and the scene
-> reset `FUN_0045EBC0` — both store 0. So the flag never rises and every
-> `if (skip)` branch, including all of `2E`, is unreachable in the retail
-> build. One assignment is missing; everything on either side of it works.
+   ```c
+   if (g_skippable_region == 0) { task_end(); return; }
+   if (g_skip_requested) {
+       if (cam_end != cam_frame) cam_end = cam_frame;   // end the move here
+       g_skip_requested = 0;
+       g_skip_flag      = 1;
+       DAT_009A2230     = 1;
+       AssetDrainAllJobs();
+       *task = FinishCutsceneSkip;                      // clears 2230, ends
+   }
+   ```
 
-The browser player implements the machinery as written and supplies that one
-assignment from the UI, so the feature can be exercised. See
-[`../PLAYER_PROGRESS.md`](../PLAYER_PROGRESS.md).
+   The camera line is worth reading carefully: `DAT_009A6148` is the end frame
+   and `DAT_009A6144` the current one (`CamAdvancePathFrame`), so the skip
+   **ends the current camera move where it stands** rather than fast-forwarding
+   it to the end of the path. That retires the queued event, which is what lets
+   `40` fall through. `AssetDrainAllJobs` is there because the waits that would
+   have covered the streaming are about to be skipped past.
+4. With the flag up, every consumer opens by testing it:
 
-### `2D` — dialogue, not a sprite
+   | Opcode | With the flag raised |
+   |---|---|
+   | `30` `queue_event` | drops the action and advances past its operands |
+   | `40` / `41` / `42` | fall straight through |
+   | `0D` `spawn_obj_unless_skip` | consumes its `-1`-terminated list, spawns nothing |
+   | `3A` / `3B` `se_play*_unless_skip` | do not play |
+   | `2D` `play_dialogue` | no voice, no subtitle task — and `DrawDialogueSubtitleTask` ends a line already on screen |
+   | `2E` `resume_bgm_if_skipped` | `PlaySoundId(0x80000002)` |
 
-**[proved]** `FUN_00435B80` picks the variant, plays the voice and starts a
-per-frame task. The task, `FUN_00435AA0`, is a subtitle renderer:
+   With nothing queued and every wait passing through, the interpreter races to
+   the end of the region.
+5. `set_skippable_region(0)` clears the flag. It is *not* cleared by the waits,
+   so one press skips the whole region rather than a single wait.
 
-```c
-frames -= 1;
-if (frames == 0 || g_nEvtSkipFlag || DAT_009A2230) { task_end(); return; }
-if (DAT_009C911E != 1) {
-    id = lines[variant * 4 + line];
-    if (frames < line_rec[id].end_frame) line++;
-    FUN_00436850(line_rec[id].x_offset, 384.0, line_rec[id].text);
-    return;
-}
-FUN_0041C6D0(rec.sprite, rec.x, rec.y, 1,1,1, 0, 7);   /* never reached */
-```
-
-> The sprite branch is **dead**. `DAT_009C911E` has exactly one writer in the
-> binary — `FUN_0040AC60`, which stores 2 — and the global is BSS, so `== 1`
-> is never true. The game always draws text.
-
-Four tables, none of which stores a count:
-
-| Address | Shape | What |
-|---|---|---|
-| `0x0058B6B8` | `u16[group][3]` | variant id per player configuration; 0 = this group says nothing for that configuration |
-| `0x00589DA8` | `0x10` bytes | `{u16 sprite, u16 frames, f32 x, f32 y, u32 voice}` — `frames` is the whole line's duration, `voice` a `PlaySoundId` id |
-| `0x005919A8` | `u16[variant][4]` | the line ids, `0xFFFF`-terminated — at most four lines |
-| `0x0058BC68` | `0x40` bytes | `{f32 x_offset, char text[0x3A], u16 end_frame}` |
-
-Lines advance on a **countdown**, not a timer: `frames` counts down from the
-record's duration and the line index steps whenever it falls below the current
-line's `end_frame`, so `end_frame` reads as "frames still remaining when this
-line gives way" and the last line of a variant holds at 0.
-
-`FUN_00436850` is a proportional bitmap text renderer: it centres the string at
-`x = 320 − len × 5.6 + x_offset` on a 384 baseline in the 640×480 screen,
-advances 11.2 px per glyph, nudges the baseline per lowercase letter for
-descenders (`g` +4, `p`/`q`/`y` +5, `b`/`i`/`l` +1, `f`/`j`/`t` +2, `d`/`h`/`k`
-+0, the rest +3), maps characters to glyph ids through the `u16` table at
-`0x0055E054`, and draws in `(1.0, 0.8, 0.8)`.
-
-So the script's dialogue is recoverable text, and the player-configuration
-split is real: group 5 is "Get him!" for a single player and **"Get them!"** in
-two-player.
-
-Note the early return on `g_nEvtSkipFlag` in both the setup and the task — a
-skipped cutscene drops its dialogue and its voice line, which is a third live
-consumer of the skip flag alongside `40`/`41`/`42` and `2E`.
+> ⚠️ **Correction.** Earlier revisions of this document recorded the feature as
+> "entirely dead code", then as "complete except for one assignment", on the
+> grounds that `DAT_009A2D74`'s only two xrefs both store 0 and `DAT_009A1A18`
+> had no readers. Both conclusions came from the same mistake:
+> `CheckCutsceneSkipRequest` is reached only through a function pointer, so
+> Ghidra had never disassembled it and it appeared in no xref list. Scanning
+> the raw image for the little-endian address of `DAT_009A1A18` finds **five**
+> occurrences where the xref search found two. An absent xref is evidence about
+> the disassembly, not about the program.
 
 ### `1F` — the shutter's nine states
 

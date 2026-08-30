@@ -270,6 +270,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .hud-layer {
   position: absolute; inset: 0; pointer-events: none;
   container-type: inline-size;
+  /* Above the canvas, below the tool's own bars. The layer is appended last,
+     so without this the closed letterbox -- a 10 % band along the bottom --
+     paints straight over the skip bar. And because the layer takes no pointer
+     events the button underneath stays clickable, which is how you get a
+     control you can press but cannot see. */
+  z-index: 1;
 }
 .hud-layer[hidden] { display: none; }
 .shutter {
@@ -315,6 +321,7 @@ body.resizing { cursor: col-resize; user-select: none; }
    rather than overlap on the rare frame both apply. */
 #skipbar {
   position: absolute;
+  z-index: 2;
   left: 0; right: 0; bottom: 0;
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px;
@@ -346,6 +353,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 #branchbar {
   position: absolute;
+  z-index: 2;
   left: 0; right: 0; bottom: 0;
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px;
@@ -375,7 +383,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 #branch-buttons button.has-preview::after { content: " ◉"; color: var(--accent); }
 
 #loading {
-  position: absolute; inset: 0; display: grid; place-items: center;
+  position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
   background: #05070a; gap: 12px; text-align: center;
 }
 #loading[hidden] { display: none; }

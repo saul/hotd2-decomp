@@ -171,6 +171,22 @@ export class Bgm {
     void el.play().catch(() => {});
   }
 
+  /**
+   * Cut any voice line still playing.
+   *
+   * Used by the cutscene skip. SE and voice share one element pool, so the
+   * URL is what distinguishes them -- and stopping SE here would be wrong,
+   * since a gunshot is not part of the dialogue being skipped.
+   */
+  stopVoice(): void {
+    for (const el of this.pool) {
+      if (el && !el.paused && el.src.includes("/voice/")) {
+        el.pause();
+        el.currentTime = 0;
+      }
+    }
+  }
+
   stop(): void {
     this.el?.pause();
     this.state = {

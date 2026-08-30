@@ -215,6 +215,15 @@ class Player {
         if (v?.voice) this.bgm.play(v.voice);
         return this.hudLayer.showMessage(g, v);
       },
+      // The subtitle task tests the skip flag every frame and ends itself, so
+      // the caption goes at once. The voice is a fire-and-forget PlaySoundId
+      // that the game leaves playing; it is stopped here because the player
+      // owns the audio element and a line talking over a scene you have just
+      // skipped past reads as a bug rather than as fidelity.
+      endDialogue: () => {
+        this.hudLayer.endMessage();
+        this.bgm.stopVoice();
+      },
     }, { seed: this.state.seed ?? 1 });
 
     this.hudLayer.reset();
@@ -551,14 +560,10 @@ class Player {
   }
 
   /**
-   * Supply the assignment the retail build is missing.
+   * Press Start during a skippable cutscene.
    *
-   * `set_skippable_region` (0x2C), the Start poll in both player-update
-   * routines and the skip test in every wait opcode are all present in the
-   * shipped executable; the only broken link is that the poll writes
-   * `DAT_009A1A18`, which nothing reads, instead of the flag `DAT_009A2D74`
-   * that the waits test. Pressing this is that write. Everything it sets in
-   * motion is the game's own code -- see `Walker.skipRequested`.
+   * The whole feature is live in the retail game -- region, Start poll, watcher
+   * task, and every consumer of the flag. See `Walker.skipRequested`.
    */
   private requestSkip(): void {
     const w = this.walker;

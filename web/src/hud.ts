@@ -192,6 +192,20 @@ export class Hud {
         " (no subtitle lines)";
   }
 
+  /**
+   * End a dialogue outright, as raising the skip flag does.
+   *
+   * `DrawDialogueSubtitleTask` tests the flag every frame and calls
+   * `task_end()`, so the caption goes on the skip frame rather than playing
+   * its remaining duration out.
+   */
+  endMessage(): void {
+    this.msgFramesLeft = 0;
+    this.lines = [];
+    this.lineIndex = 0;
+    this.message.hidden = true;
+  }
+
   /** Place and fill the caption for whichever line the countdown is on. */
   private drawLine(): void {
     const l = this.lines[this.lineIndex];

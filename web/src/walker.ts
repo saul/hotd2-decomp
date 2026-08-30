@@ -168,6 +168,8 @@ export interface WalkerHost {
   setShutter(state: number): string | undefined;
   /** evt `0x2D`: play a dialogue group -- voice line plus subtitles. */
   showMessage(group: number): string | undefined;
+  /** Cut a dialogue short, as raising the skip flag does. */
+  endDialogue(): void;
 }
 
 /** Fog off (a range past the 8000 far plane) and a neutral white light. */
@@ -254,24 +256,39 @@ export class Walker {
   /**
    * `DAT_009A2D74` -- the skip flag every wait opcode tests.
    *
-   * In the retail build this is never raised. The machinery is all there:
-   * both player-update routines (`FUN_00414940`, `FUN_00414B90`) end with
+   * The whole chain is live in the retail game:
+   *
+   * 1. `set_skippable_region(1)` opens the window (`DAT_009A2D7C`).
+   * 2. Both player-update routines (`FUN_00414940`, `FUN_00414B90`) poll Start
+   *    while that is set and the firing gate `DAT_009C8E00` is down:
+   *    `if (mask[player] & _DAT_009C9028) DAT_009A1A18 = 1;`
+   * 3. A standing task, `SkipWatchTask` at `0x00435F40`, sees the request and
+   *    raises this flag:
    *
    * ```c
-   * if (DAT_009c8e00 == 0 && DAT_009a2d7c != 0) {   // cutscene, skippable
-   *     mask[0] = 0x2; mask[1] = 0x20000;           // Start, player 1 / 2
-   *     if (mask[player] & _DAT_009c9028) DAT_009a1a18 = 1;
+   * if (g_skippable_region == 0) { task_end(); return; }
+   * if (g_skip_requested) {
+   *     if (cam_end != cam_frame) cam_end = cam_frame;   // finish the move
+   *     g_skip_requested = 0;
+   *     g_skip_flag = 1;
+   *     DAT_009A2230 = 1;
+   *     AssetDrainAllJobs();                             // force the streaming
+   *     *task = SkipEndTask;                             // clears 2230, ends
    * }
    * ```
    *
-   * -- but `DAT_009a1a18` has **two writers and no readers anywhere in the
-   * binary**, and the only two writers of `DAT_009A2D74` itself
-   * (`EvtOpSetSkippableRegion2C` and the scene reset `FUN_0045EBC0`) both
-   * store 0. One assignment is missing and the whole feature is inert.
+   * 4. With the flag up, `queue_event` drops its action, `0x0D`, `0x3A` and
+   *    `0x3B` suppress, `0x2D` says nothing and any subtitle already on screen
+   *    ends, and `0x40`, `0x41` and `0x42` pass straight through -- so the
+   *    interpreter races to the end of the region.
+   * 5. `set_skippable_region(0)` clears the flag again.
    *
-   * Everything downstream of the flag is intact and is transcribed exactly,
-   * so the player supplies that one assignment from the UI: {@link requestSkip}
-   * is the line the retail build does not have. Nothing else here is invented.
+   * That task is reached only through a function pointer in the table at
+   * `0x005934E4`, so nothing calls it directly and a plain xref search on the
+   * flag finds only writers that store 0. An earlier revision of this comment
+   * concluded from exactly that search that the feature was "one assignment
+   * short of working". It is not: it ships working, and this is a
+   * transcription of it rather than a repair.
    */
   skipRequested = false;
   /** evt 0x1D: rain. Only stage 1 ever turns it on. */
@@ -602,15 +619,29 @@ export class Walker {
   }
 
   /**
-   * Raise the skip flag -- the one assignment the retail build is missing.
+   * Press Start, and let `SkipWatchTask` do what it does.
    *
-   * Pressing Start is what reaches this point in the game; see the note on
-   * {@link skipRequested}. Everything the flag then does is the game's own
-   * code. Returns false when the game would not have offered a skip.
+   * Everything here is transcribed from `0x00435F40`; see {@link skipRequested}
+   * for the chain. Returns false when the game would not have offered a skip.
    */
   requestSkip(): boolean {
     if (!this.canSkip) return false;
     this.skipRequested = true;
+
+    // `if (cam_end != cam_frame) cam_end = cam_frame`. Note what this is *not*:
+    // the camera does not fast-forward to the end of its path. The move is
+    // ended where it stands, which retires the queued event and lets
+    // `wait_queued_events_done` fall through on the next frame.
+    if (this.cam && !this.cam.done) {
+      this.cam.endFrame = this.cam.frame;
+      this.cam.done = true;
+      this.host.startCamera(this.cam);
+    }
+
+    // DrawDialogueSubtitleTask tests the flag every frame and ends the task,
+    // so a line already on screen goes at once rather than playing out.
+    this.host.endDialogue();
+
     // The waits are re-run every frame, so one already pending is released
     // the same way a new one is passed straight through.
     if (this.wait && SKIPPABLE_WAITS.has(this.wait.op.op)) {
@@ -725,7 +756,16 @@ export class Walker {
     },
 
     // -- camera ----------------------------------------------------------
-    0x30: { status: "done", run: (w, op) => w.applyQueueEvent(op) },
+    0x30: {
+      status: "done",
+      // EvtOpQueueEvent30 opens with `if (skip) { pc += operands; return; }`,
+      // so a raised flag drops the action entirely rather than queueing it.
+      // This is what makes a skip actually skip: with nothing queued and the
+      // waits passing through, the interpreter races to the end of the region.
+      run: (w, op) => (w.skipRequested
+        ? "dropped — skipping"
+        : w.applyQueueEvent(op)),
+    },
     0x35: {                                     // enable_camera_path_roll
       status: "done",
       run: (w, op) => {
@@ -829,9 +869,14 @@ export class Walker {
     },
     0x2d: {                                     // play_dialogue
       status: "done",
-      run: (w, op, quiet) => (quiet || op.message_group === undefined
-        ? undefined
-        : w.host.showMessage(op.message_group)),
+      // EvtOpPlayDialogue2D returns before both the voice and the subtitle
+      // task when the skip flag is up.
+      run: (w, op, quiet) => {
+        if (w.skipRequested) return "not said — skipping";
+        return quiet || op.message_group === undefined
+          ? undefined
+          : w.host.showMessage(op.message_group);
+      },
     },
 
     // -- the cutscene skip -------------------------------------------------
@@ -863,12 +908,22 @@ export class Walker {
     },
 
     // -- audio -------------------------------------------------------------
-    // 0x38/0x3A se_play, 0x39/0x3B se_play_3d. The "unless skip" variants are
-    // gated on a flag nothing in the binary ever raises, so all four run.
+    // 0x38/0x3A se_play, 0x39/0x3B se_play_3d. The "unless skip" pair really
+    // is gated: FUN_0045F750 and FUN_0045F780 both open with
+    // `if (g_nEvtSkipFlag == 0)`. That only ever mattered once the player
+    // could raise the flag.
     0x38: { status: "done", run: (w, op, quiet) => Walker.playSe(w, op, quiet) },
     0x39: { status: "done", run: (w, op, quiet) => Walker.playSe(w, op, quiet) },
-    0x3a: { status: "done", run: (w, op, quiet) => Walker.playSe(w, op, quiet) },
-    0x3b: { status: "done", run: (w, op, quiet) => Walker.playSe(w, op, quiet) },
+    0x3a: {
+      status: "done",
+      run: (w, op, quiet) => (w.skipRequested
+        ? "silent — skipping" : Walker.playSe(w, op, quiet)),
+    },
+    0x3b: {
+      status: "done",
+      run: (w, op, quiet) => (w.skipRequested
+        ? "silent — skipping" : Walker.playSe(w, op, quiet)),
+    },
     0x5f: {                                     // bgm_entry_play
       status: "done",
       run: (w, op, quiet) => {
@@ -888,7 +943,13 @@ export class Walker {
     0x09: { status: "done", run: (w, op) => Walker.pushSpawns(w, op) },
     0x0b: { status: "done", run: (w, op) => Walker.pushSpawns(w, op) },
     0x0c: { status: "done", run: (w, op) => Walker.pushSpawns(w, op) },
-    0x0d: { status: "done", run: (w, op) => Walker.pushSpawns(w, op) },
+    0x0d: {
+      status: "done",
+      // spawn_obj_unless_skip. FUN_00408B70 walks its -1-terminated operand
+      // list either way and only calls the spawn inside `if (skip == 0)`.
+      run: (w, op) => (w.skipRequested
+        ? "not spawned — skipping" : Walker.pushSpawns(w, op)),
+    },
 
     // -- flow --------------------------------------------------------------
     0x48: {                                     // set_script_flag

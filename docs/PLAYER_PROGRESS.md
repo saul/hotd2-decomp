@@ -76,14 +76,16 @@ Things established while building it, now folded back into the format docs.
   evidence for each. Stage 1's opening cameras now chain end to end (path 2
   ends at eye = (−37.88, 15.20, 133.74) and path 3 starts there) where before
   they jerked. See [`re/anomalies.md`](re/anomalies.md).
-- **The skip feature is one assignment short of working.** `2C` is live,
-  both player-update routines poll Start while the shutter's firing gate is
-  down, and `40`/`41`/`42`/`2E` all test the skip flag — but the poll writes
-  `DAT_009A1A18`, which nothing reads, and `DAT_009A2D74` is only ever written
-  0. The player implements the machinery as written and supplies that one
-  assignment from a Skip bar, which rises from the bottom of the rendered view
-  under the game's own condition and so marks every moment a skip would have
-  been accepted.
+- **The cutscene skip works in the retail game, and the player transcribes it.**
+  `2C` opens the window, both player-update routines poll Start while the
+  shutter's firing gate is down, and the standing task
+  `CheckCutsceneSkipRequest` raises the flag — ending the current camera move
+  where it stands and draining the asset queue. Every consumer is honoured
+  here: `30` drops its action, `40`/`41`/`42` fall through, `0D`/`3A`/`3B`
+  suppress, `2D` says nothing and cuts a subtitle already on screen, `2E`
+  restarts the BGM. Two earlier notes called this dead code; the task is only
+  ever reached through a function pointer, so it appeared in no xref list.
+  See [`re/session-log.md`](re/session-log.md).
 - **Fog is per-mesh, and its values were in the data all along.** TSP bit 23
   is `FOGENABLE` **inverted**, so fog is on when the bit is clear — which is
   what `ModelForceFogControlNone` exploits. 2197/2219 stage-2 materials are
@@ -159,7 +161,7 @@ struck through:
 | `31` | `goto_scene_state` | 274 | Only with a scene state machine |
 | `28` | `region_load` | 262 | No — preloads what is already resident |
 | `59`/`58`/`5A` | asset job drains | 188 | No — nothing is ever pending |
-| `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip bar; dead in the retail build only for a missing assignment |
+| `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip bar; the feature is live in the retail game |
 | `33` | `set_action_drain_mode` | 125 | Only with the action ring |
 | `10`/`11` | collision sets | 113 | Only with collision |
 | `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
@@ -255,6 +257,7 @@ missed. Meanings and confidence marks live in
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
 | `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); raises the Skip bar once the shutter's firing gate is also down, which is exactly when the game polls Start |
+| `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawns, unless a skip is in progress — `FUN_00408B70` walks the list either way |
 | `2D` | `play_dialogue` | hud | **done** | **plays the voice and shows the subtitles** — the real script text, centred on a 384 baseline, advancing line by line on the game's countdown |
 | `2E` | `resume_bgm_if_skipped` | audio | **done** | restarts BGM `0x80000002` when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |

@@ -89,11 +89,12 @@ moments the game itself would have taken a skip. It differs from the branch bar
 in kind and says so in its colour: a branch is a decision playback is blocked
 on and counts down, a skip is an offer that changes nothing if you ignore it.
 
-Taking it releases `wait_queued_events_done`, `wait_camera_path_frame` and
-`wait_frames` until the region closes, and `resume_bgm_if_skipped` then restarts
-the interrupted track. All of that is the game's own code; the retail build
-simply never raises the flag, because the Start poll writes a global that
-nothing reads. The bar supplies that one assignment.
+Taking it does what the game does: ends the current camera move where it
+stands, drops every `queue_event`, releases `wait_queued_events_done`,
+`wait_camera_path_frame` and `wait_frames`, suppresses `spawn_obj_unless_skip`
+and the two `se_play*_unless_skip` variants, cuts any dialogue mid-line, and
+restarts the interrupted track through `resume_bgm_if_skipped` — until
+`set_skippable_region` closes.
 
 The script panel is deliberately narrow — the viewport is the point of the
 tool and the tree is a navigator, not the content. Drag the splitter to widen

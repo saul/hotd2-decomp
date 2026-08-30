@@ -3149,3 +3149,78 @@ they are no-ops in the game as much as here.
 The one copy that can still drift is the human table in `PLAYER_PROGRESS.md`,
 so `tools/verify_player_ops.py` compares the two. It caught `set_backdrop_mode`
 on its first run.
+
+## An absent xref is evidence about the disassembly, not about the program
+
+Twice now the skip feature has been written up wrongly, and both times from the
+same mistake.
+
+First it was "entirely dead code": `DAT_009A2D74` has fourteen xrefs, twelve
+reads and two writes, and both writes store 0. Then, after finding that
+`set_skippable_region` really does drive `DAT_009A2D7C` and that both
+player-update routines poll Start against it, "complete except for one
+assignment" — because the poll writes `DAT_009A1A18`, and *that* had two
+writers and no readers at all.
+
+The user said flatly that the flag is definitely set, because you can skip
+cutscenes in the game. That is a stronger piece of evidence than an xref list,
+and it should have outweighed it immediately.
+
+Scanning the raw image for the little-endian address settles it in one line:
+
+```
+g_nSkipRequested  VA 009A1A18 -> 5 byte occurrences
+```
+
+Ghidra had found two. The other three are at `0x00435F26`, `0x00435F4D` and
+`0x00435F70`, in a block it had never disassembled — because
+`CheckCutsceneSkipRequest` is only ever reached through a function pointer
+written into a task struct, installed from the table at `0x005934E4`. Nothing
+calls it, so nothing referenced it, so it did not exist as far as any xref
+query was concerned.
+
+The task is the missing link and it is unremarkable once seen:
+
+```c
+if (g_skippable_region == 0) { task_end(); return; }
+if (g_skip_requested) {
+    if (cam_end != cam_frame) cam_end = cam_frame;
+    g_skip_requested = 0;
+    g_skip_flag      = 1;
+    DAT_009A2230     = 1;
+    AssetDrainAllJobs();
+    *task = FinishCutsceneSkip;
+}
+```
+
+Two details are worth keeping. `DAT_009A6148` is the end frame and
+`DAT_009A6144` the current one, so the skip **ends the current camera move
+where it stands** — it does not fast-forward to the end of the path. And
+`AssetDrainAllJobs` is there because the waits that would have covered the
+streaming are about to be walked past.
+
+Following the flag properly then turned up three consumers the earlier writeups
+had dismissed. `EvtOpQueueEvent30` drops its action entirely when the flag is
+up, which is the mechanism that makes a skip *skip*: with nothing queued and
+every wait falling through, the interpreter races to `set_skippable_region(0)`.
+`FUN_00408B70` (`0x0D`) walks its operand list either way but spawns nothing.
+`FUN_0045F750` and `FUN_0045F780` (`0x3A`, `0x3B`) are genuinely gated — the
+walker's comment had said the "unless skip" variants were gated on a flag
+nothing ever raises, which was a fair reading right up until the player could
+raise it.
+
+**Method note.** `get_xrefs_to` answers "what did the analyser link", not "what
+does the program do". When a global's reference count looks too small for the
+role it plays — and "a flag twelve places test and nobody sets" is exactly that
+shape — grep the image for the address before concluding anything.
+
+## The button you could click but not see
+
+The skip bar was invisible and clickable at the same time, which is a specific
+enough symptom to name the cause: something opaque was painting over it that
+took no pointer events. `.hud-layer` is `pointer-events: none`, is appended to
+`#viewport` at construction so it is the last child, and carries the letterbox
+shutter — a 10 % black band along the bottom. And a skippable region is
+*precisely* when the shutter is closed, because the firing gate being down is
+the condition for both. The bar was behind the letterbox every single time it
+appeared. Explicit z-index on the layer, the bars and the loading overlay.

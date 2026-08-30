@@ -202,17 +202,21 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       blocks; `0x16` is ambient colour, not fog; `0x10`/`0x11` carry relocated
       **collision-mesh pointers**, not ids; `0x0E`/`0x0F`/`0x12` are the enemy
       approach-distance pacing table
-- [x] **The skip/fast-forward feature is complete except for one assignment.**
-      `set_skippable_region` (`0x2C`) is live and does drive `DAT_009A2D7C`;
-      both player-update routines (`FUN_00414940`, `FUN_00414B90`) poll Start
-      (`0x2` / `0x20000` against `_DAT_009C9028`) while that is set and the
-      firing gate `DAT_009C8E00` is down; and `0x40`, `0x41`, `0x42` and `0x2E`
-      all test the skip flag. But the poll writes `DAT_009A1A18`, which has
-      **two writers and no readers anywhere in the binary**, and both writers of
-      `DAT_009A2D74` itself store 0 — so the flag never rises and every
-      `if (skip)` branch is unreachable in the retail build. The gate is the
-      same `DAT_009C8E00` the shutter machine sets, which is why a skip is only
-      offered while the letterbox is closed
+- [x] **The cutscene skip works, and every consumer of its flag is read out.**
+      `set_skippable_region` (`0x2C`) opens the window; both player-update
+      routines poll Start against `_DAT_009C9028` while the shutter's firing
+      gate `DAT_009C8E00` is down; and the standing task
+      `CheckCutsceneSkipRequest` (`0x00435F40`, installed from the table at
+      `0x005934E4`) raises `DAT_009A2D74`, ends the current camera move where
+      it stands, and drains the asset queue. With the flag up, `0x30` drops its
+      action, `0x40`/`0x41`/`0x42` fall through, `0x0D`/`0x3A`/`0x3B` suppress,
+      `0x2D` says nothing and cuts any subtitle already on screen, and `0x2E`
+      restarts the BGM — so the interpreter races to `set_skippable_region(0)`.
+      **Two earlier entries here were wrong** (“entirely dead code”, then “one
+      assignment short”): the task is reached only through a function pointer,
+      so Ghidra had not disassembled it and it appeared in no xref list. A raw
+      scan of the image finds five references to `DAT_009A1A18` where the xref
+      search found two
 - [ ] `evt/` remaining unknowns: the actor class counted by `0x46`, `0x16`'s
       numeric scale, `0x2D`'s sprite-vs-text mode flag, `0x33`'s second
       operand, and `0x1E` (unrecoverable — nothing reads it)

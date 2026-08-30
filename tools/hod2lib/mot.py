@@ -101,6 +101,40 @@ class MotionBank:
             return 0
         return struct.unpack_from("<I", self.raw, base)[0]
 
+    def implied_bone_count(self, motion_id: int) -> int | None:
+        """The bone count this block was authored for, from its own size.
+
+        A block declares its frame count in its first four bytes and occupies
+        everything up to the next block, and `verify_mot.py` shows that
+        ``frames * stride`` accounts for that span exactly on all 1058 blocks.
+        So the stride is `span / frames`, and the bone count follows by
+        inverting :func:`frame_stride`.
+
+        This is what makes "may this character play this motion" answerable
+        without a magic number: a motion belongs to the skeleton whose bone
+        count its own block size implies, and reading it at any other stride
+        walks into the next motion's data.
+        """
+        base = self.offsets.get(motion_id)
+        if base is None:
+            return None
+        declared = self.frame_count(motion_id)
+        if declared <= 0:
+            return None
+        start = base + 4
+        later = [o for o in self.offsets.values() if o > base]
+        end = min(later) if later else len(self.raw)
+        span = end - start
+        if span <= 0 or span % declared:
+            return None
+        stride = span // declared
+        # `(b * 6 + 15) & ~3 == stride` -- at most one b can satisfy it,
+        # because the step of 6 is wider than the 4 the mask rounds to.
+        for b in range((stride - 15) // 6, (stride + 3) // 6 + 1):
+            if b > 0 and frame_stride(b) == stride:
+                return b
+        return None
+
     def frames(self, motion_id: int, bone_count: int,
                count: int | None = None) -> list[Frame]:
         """Decode a motion's frames for a given character's bone count.

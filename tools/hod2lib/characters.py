@@ -645,6 +645,15 @@ def _bake(game_dir, tables, motion_id: int, bone_count: int) -> dict | None:
     bank = motlib.load_bank(game_dir, fname, ids)
     if bank is None:
         return None
+    # A motion belongs to the skeleton its own block size implies. Reading it
+    # at any other stride walks into the next motion's data and returns
+    # plausible-looking garbage rather than failing -- which is how `kame.bin`
+    # motion 441, a 24-bone clip, reached a 16-bone character's bundle as
+    # denormals and a NaN. This is the check the old `bone_count == 16` guards
+    # were standing in for, stated directly.
+    implied = bank.implied_bone_count(motion_id)
+    if implied is not None and implied != bone_count:
+        return None
     frames = bank.frames(motion_id, bone_count)
     if not frames:
         return None
@@ -741,28 +750,26 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 continue
             chars[res.char_type] = built
         c = chars[res.char_type]
-        # The death set is authored against zom.bin's 16-bone skeleton, and a
-        # motion is only meaningful with the bone count it was authored for --
-        # so it is baked for the 16-bone humanoids and nothing else.
+        # The death set is authored against zom.bin's skeleton. `_bake` drops
+        # it for any character whose bone count differs, so the list is offered
+        # unconditionally and filtered by the data rather than by a constant.
         deaths = (list(dset["front"]) + list(dset["back"])
-                  + [dset["right"], dset["left"]]
-                  if c.bone_count == 16 else [])
+                  + [dset["right"], dset["left"]])
         # The stumble set, same reasoning as the deaths: authored for the
         # 16-bone humanoid skeleton, so baked only for those.
-        reacts = sorted({m for row in c.reactions.values() for m in row}) \
-            if c.bone_count == 16 else []
-        # The strike and lunge clips, so state 3 has something to play.
-        if c.bone_count == 16:
-            for row in c.attacks.values():
-                for e in row.values():
-                    reacts += [e["strike"], e["lunge"]]
-            for hands in (c.throw or {}).get("hands", {}).values():
-                reacts += [h["motion"] for h in hands]
-        # The back-away walk, and the two ordinary walk variants beside it.
-        if c.bone_count == 16:
-            for row in c.motion_row.values():
-                reacts += [row[i] for i in (0, 1, MOTION_ROW_BACKOFF)
-                           if i < len(row) and 0 < row[i] < 4096]
+        # Every clip the states can reach. No bone-count guard is needed here:
+        # `_bake` refuses a motion whose own block implies a different
+        # skeleton, so a table row naming another creature's clip -- which the
+        # shared, condition-indexed throw table does -- simply does not bake.
+        reacts = sorted({m for row in c.reactions.values() for m in row})
+        for row in c.attacks.values():
+            for e in row.values():
+                reacts += [e["strike"], e["lunge"]]
+        for hands in (c.throw or {}).get("hands", {}).values():
+            reacts += [h["motion"] for h in hands]
+        for row in c.motion_row.values():
+            reacts += [row[i] for i in (0, 1, MOTION_ROW_BACKOFF)
+                       if i < len(row) and 0 < row[i] < 4096]
         for mid in [motion, intro[0] if intro else None] + deaths + reacts:
             if mid is None or mid in c.motions:
                 continue

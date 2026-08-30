@@ -66,10 +66,15 @@ byte. The readings under test are the ones docs/formats/combat.md states:
     single thrower, because the class had no motion rule and every one of its
     spawns was dropped before `_build` ran.
 
-11. **Every class-0x30 type has a back-away clip.** `ZombieStateBackOff` plays
-    `motion_row[condition][4]`, and without it the retreat that separates one
-    attack from the next has nothing to show. Checked to resolve to a real
-    motion for every 16-bone humanoid.
+11. **A motion belongs to one skeleton, and the tables respect that.** Every
+    motion block declares its own frame count and occupies a known span, so
+    `span / frames` gives its stride and hence the bone count it was authored
+    for. This checks that each character's back-away clip
+    (`motion_row[condition][4]`) implies **that character's own** bone count —
+    the invariant the exporter's old `bone_count == 16` guards were a proxy
+    for. It is what separates a real table row from one belonging to another
+    creature: the shared, condition-indexed throw table has rows naming
+    `kame.bin` clips, which imply 24 bones and are refused.
 
 12. **Every sound id names a file.** The voice, impact and ricochet tables are
    read as `g_se_name_list` ids; a table read at the wrong address would give
@@ -332,23 +337,44 @@ def main() -> int:
                       for c in sorted(ch.MOTION_RULES)))
 
     # 11 -----------------------------------------------------------------
-    n_row = 0
+    from hod2lib import mot as motlib
+    bank_cache: dict[str, object] = {}
+
+    def implied(mid: int):
+        """The bone count *mid*'s own block size implies, or None."""
+        bid = tables.motion_bank_of(mid)
+        banks = tables.motion_banks()
+        if bid not in banks:
+            return None
+        fname, ids = banks[bid]
+        if fname not in bank_cache:
+            bank_cache[fname] = motlib.load_bank(args.game_dir, fname, ids)
+        bank = bank_cache[fname]
+        return bank.implied_bone_count(mid) if bank else None
+
+    n_row = n_foreign = 0
     for ct in types:
-        if (tables.character_bone_count(ct) or 0) != 16:
-            continue
+        want = tables.character_bone_count(ct) or 0
         rows = ch.motion_row(tables, ct)
-        if not rows:
+        if not rows or not want:
             continue
         for cond, row in rows.items():
             m = row[ch.MOTION_ROW_BACKOFF] if len(row) > ch.MOTION_ROW_BACKOFF \
                 else 0
-            if not (0 < m < 4096) or not (1 <= play(m) <= 400):
+            if not (0 < m < 4096):
+                fails.append(f"type {ct} cond {cond} names back-away motion "
+                             f"{m}, which is not a motion id")
+                continue
+            got = implied(m)
+            if got is not None and got != want:
+                n_foreign += 1
+            elif not (1 <= play(m) <= 400):
                 fails.append(f"type {ct} cond {cond} back-away motion {m} "
-                             f"has play length "
-                             f"{play(m) if 0 < m < 4096 else 'n/a'}")
+                             f"has play length {play(m)}")
             else:
                 n_row += 1
-    print(f"  {n_row} back-away clips resolve")
+    print(f"  {n_row} back-away clips match their own character's skeleton, "
+          f"{n_foreign} name another's and are refused")
 
     # 12 -----------------------------------------------------------------
     se = tables.se_names()

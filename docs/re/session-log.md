@@ -4380,3 +4380,27 @@ The lesson is the guard, not the NaN: every other motion source in that
 function is wrapped in `if c.bone_count == 16` and I added a fifth one beside
 them without it. Guards that exist four times and are missing once are worth a
 second look during review.
+
+### `bone_count == 16` was a proxy; the real rule is in the data
+
+Challenged on the guard, and rightly. Sixteen is not a property of anything —
+it is "the humanoid skeleton `zom.bin` was authored for", written as a
+constant and copied to five call sites.
+
+The real rule was already provable from the format. A motion block declares its
+frame count in its first four bytes and occupies everything up to the next
+block, and `verify_mot.py` shows `frames * stride` accounts for that span
+exactly on all 1058 blocks. So the stride is `span / frames`, and inverting
+`(bones * 6 + 15) & ~3` gives the bone count the block was **authored for**.
+`MotionBank.implied_bone_count` does that, and `_bake` now refuses any motion
+whose implied count differs from the character asking for it.
+
+Measured: `kame.bin`'s motions 441 and 443 imply **24** bones; everything the
+humanoid tables name implies 16. So the guard and the rule agree on today's
+data — but the rule states *why*, works for the 19-bone cat and anything else
+added later, and catches a foreign clip by construction rather than by a NaN
+appearing downstream.
+
+All five `bone_count == 16` guards are gone. `verify_combat.py` now asserts
+each character's back-away clip implies that character's own skeleton, rather
+than asserting the character is a humanoid.

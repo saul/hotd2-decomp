@@ -1,7 +1,8 @@
 # Browser stage player — progress
 
 Running state of the web player. The plan and its rationale are in
-[`PLAYER_PLAN.md`](PLAYER_PLAN.md); how to run it is in
+[`PLAYER_PLAN.md`](PLAYER_PLAN.md); how the source is laid out and why is in
+[`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md); how to run it is in
 [`../web/README.md`](../web/README.md). This file is the checklist and, more
 usefully, the record of **what was got wrong and how it was caught** — the
 player is a consumer of the RE, so it is where reading errors surface as
@@ -9,6 +10,20 @@ visible misbehaviour.
 
 **Status:** R0–W5 shipped and working. W6 (visual regression) deferred, as
 planned.
+
+The gameplay code is now a **port** rather than an interpretation: `web/src/game/`
+is one TS function per exe function, under the name `functions.tsv` gives it,
+with the address in the doc comment. It imports neither three.js nor
+`Math.random`, so the whole of it runs headlessly — `npm run test:port` — and
+`world.save()` returns plain JSON that fully determines the next frame.
+`tools/verify_port.py` checks the citations, the coverage and the three ways
+state can escape a snapshot.
+
+| Check | Command | What it holds |
+|---|---|---|
+| opcode statuses | `tools/verify_player_ops.py` | `script/ops/` against the table below |
+| the port | `tools/verify_port.py` | `FUN_` citations, coverage, `[diverges]`, snapshot rules |
+| the state machines | `npm run test:port` | permits, turn-taking, spacing, damage, save/restore |
 
 ---
 

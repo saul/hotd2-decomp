@@ -8,7 +8,7 @@ description: Workflow for reverse-engineering The House of the Dead 2 in this re
 The reasoning behind these rules is in `docs/re/method.md`. This is the
 operating procedure. Read `docs/PLAN.md` for what is currently worth doing.
 
-## The four non-negotiables
+## The five non-negotiables
 
 1. **The EXE decides, always.** Decompile the code that consumes a structure
    before looking at a single byte of the structure. Data is for *verifying* a
@@ -23,6 +23,8 @@ operating procedure. Read `docs/PLAN.md` for what is currently worth doing.
 4. **Persist it.** Annotations to `ghidra/annotations/`, findings to
    `docs/`, the story to the session log. MCP renames leave no trail; an
    un-exported session is a lost session.
+5. **Commit only your own hunks.** Other workstreams run in this repo
+   concurrently. `git add -A` is banned — see *Committing* below.
 
 ## The loop
 
@@ -153,8 +155,46 @@ Both of these are the difference between naming a thing and guessing at it:
   for most classes and a parent actor pointer for one. Check the class.
 * **A negative result from one agent is not a fact.** Two agents reported the
   sound ids unresolvable; a third found the table.
-* **Stage explicit paths when committing.** A peer session often edits the same
-  tree; `git add -A` has swept its work into these commits more than once.
+
+## Committing: only ever your own hunks
+
+**Other workstreams run in this repo at the same time.** A peer session is
+often editing the same tree, sometimes the same file, and its work is
+uncommitted while it works. Sweeping it into your commit misattributes it and
+can commit something half-finished.
+
+`git add -A` and `git add .` are banned here. This has gone wrong repeatedly.
+
+Before you commit:
+
+```sh
+ListAgents                 # is a peer session live?
+git status --porcelain     # what is dirty that is NOT yours?
+```
+
+Then stage **explicit paths**, never a wildcard:
+
+```sh
+git add tools/hod2lib/mot.py docs/formats/mot.md
+git diff --cached --stat   # confirm before committing
+```
+
+**If a peer has edited a file you also changed**, paths are not enough — filter
+to your own hunks:
+
+```sh
+git diff -- path/to/shared.py > /tmp/mine.patch
+# keep only the hunks that are yours, then:
+git apply --cached /tmp/mine.patch
+git diff --cached --stat
+```
+
+If you have already committed someone else's work, undo it rather than leaving
+it: `git reset --soft HEAD~1` then `git restore --staged <their paths>`.
+
+Leave their uncommitted changes exactly as you found them. Do not "tidy",
+reformat, or re-sort a shared file — `ghidra/annotations/*.tsv` in particular is
+appended to by both workstreams.
 
 ## Done means
 
@@ -164,3 +204,4 @@ Both of these are the difference between naming a thing and guessing at it:
 - [ ] Renders logged with paths, if anything geometric changed
 - [ ] `PROGRESS.md`, the session log, and `PLAN.md` if the plan moved
 - [ ] Wrong turns written down, not quietly dropped
+- [ ] **Only your own hunks staged** — `git status` checked first, explicit paths, no `git add -A`

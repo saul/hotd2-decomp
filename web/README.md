@@ -101,6 +101,13 @@ tool and the tree is a navigator, not the content. Drag the splitter to widen
 it, double-click the splitter to reset, or focus it and use the arrow keys.
 The width is remembered per browser.
 
+**Characters** are spawned enemies, civilians and props assembled from the EXE
+skeleton and posed from `mot/` — the zombies and, in stage 2, the four cats.
+A spawn whose class has no motion rule yet keeps its marker instead: an unposed
+character is a heap of parts, because every bone offset runs along its own
+local X, so drawing one would look like a decoding bug rather than a missing
+feature. The marker layer skips any spawn that has a real character.
+
 Free roam drags to look, `WASD` to move, `Q`/`E` for world up and down, shift
 to sprint, alt to crawl, and the scroll wheel sets the base speed.
 

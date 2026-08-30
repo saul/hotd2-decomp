@@ -188,6 +188,54 @@ collision). The one genuine unknown left is `variant_*`.
 
 ---
 
+## Spawned characters
+
+**Done, for the classes whose handler names a motion.** A spawn descriptor names
+a class, the class names a character type, the type names a skeleton in the EXE,
+and the skeleton's nodes name asset slots that resolve to a `pol/` file. The
+exporter puts that skeleton through the **ordinary rig writer** — a tree of
+named parts, each with a translation and an asset slot, is exactly a rig — once
+per spawn descriptor, so the stage glTF arrives with a full hierarchy standing
+at every one.
+
+The client adopts those hierarchies and takes over the pose, transcribing
+`FUN_00410590`: the motion root translation and bone 0's rotation go on a group
+*between* the object transform and the bones (putting them on the instance root
+would apply the translation in world space and slide every character sideways),
+then each bone gets `qZ * qY * qX` from its BAMS triple. Motions loop at the
+30 Hz the data is authored at.
+
+**Which motion is the hard part, and it is deliberately conservative.**
+`obj+0x1B4` is the motion id — `FUN_00410590` calls the sampler as
+`FUN_00412F50(obj+0x1F4, obj+0x1B4, frame)` — and only a class handler writes
+it. So a class earns a motion rule the way it earns a character-type rule: by
+having its handler read.
+
+| Class | Rule | From |
+|---|---|---|
+| `0x30` the zombie | motion **956** (`zom.bin`) | `FUN_00452DA0` stores `0x3BC`, or `0x41E` on a branch not taken here |
+| `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail | `FUN_00431250`; the table is a five-entry playlist, all inside `nya.bin`'s 762–773 |
+
+A tempting general rule was tried and rejected: deriving the bank from the
+character's bone count. The stride `(bones*6+15) & ~3` must divide every block
+in a bank exactly, which uniquely picks `nya.bin` for the cat's 19 bones,
+`frog.bin` for 15 and `kame.bin` for 24 — but **30 of the 49 banks are 16-bone**,
+so every humanoid would get an arbitrary one of thirty. A character posed from
+another character's animation looks like a decoding bug, not a missing feature.
+
+**287 of 562 identified spawns are posed**, 25 distinct character types across
+the six stages. The rest keep their spawn marker, and the marker layer skips any
+spawn that has a real character so the two never draw on top of each other.
+
+| Stage | Character types | Posed spawns |
+|---|---|---|
+| 1 | 5 | 29 |
+| 2 | 11 | 108 (including the four cats) |
+| 3 | 9 | 55 |
+| 4 | 4 | 50 |
+| 5 | 4 | 25 |
+| 6 | 2 | 20 |
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

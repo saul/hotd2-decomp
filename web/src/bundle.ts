@@ -228,6 +228,52 @@ export interface DialogueLine {
   end_frame: number;
 }
 
+/** One motion, baked flat so the client can index it without parsing. */
+export interface BakedMotion {
+  bank: string;
+  frames: number;
+  /** `mot/` is authored at 30 Hz against the engine's 60 Hz clock. */
+  fps: number;
+  /** `frames * 3` floats: the root translation. */
+  root: number[];
+  /** `frames * bone_count * 3` BAMS shorts, bone 0 first. */
+  rot: number[];
+}
+
+export interface CharacterBone {
+  bone: number;
+  /** The exporter's part name, which the glTF node name ends with. */
+  part: string;
+  slot: number;
+  offset: [number, number, number];
+  parent: number | null;
+}
+
+export interface CharacterType {
+  type: number;
+  name: string;
+  file: string;
+  /** Bones in a motion frame — the stride, from the EXE. */
+  bone_count: number;
+  bones: CharacterBone[];
+  motions: Record<string, BakedMotion>;
+}
+
+export interface CharacterPlacement {
+  /** evt offset of the spawn descriptor. */
+  at: number;
+  class: number;
+  char_type: number;
+  /** null when this class has no motion rule yet — marker only. */
+  motion: number | null;
+}
+
+export interface CharactersJson {
+  types: Record<string, CharacterType>;
+  placements: CharacterPlacement[];
+  note: string;
+}
+
 export interface SoundJson {
   se: Record<string, string>;
   voice: Record<string, string>;
@@ -328,6 +374,7 @@ export interface ScriptJson {
   sound?: SoundJson;
   backdrop?: BackdropJson;
   rigs?: RigsJson;
+  characters?: CharactersJson;
   rain?: RainJson;
   warnings: string[];
 }

@@ -41,6 +41,7 @@ import { SceneFog, type FogMode } from "./fog";
 import { SceneLighting, type LightingMode } from "./lighting";
 import { Backdrop } from "./backdrop";
 import { RigLayer } from "./rigs";
+import { CharacterLayer } from "./characters";
 import { Hud as HudLayer } from "./hud";
 import { Rain } from "./rain";
 
@@ -80,6 +81,7 @@ class Player {
   private readonly lighting: SceneLighting;
   private readonly backdrop = new Backdrop();
   private readonly rigs = new RigLayer();
+  private readonly chars = new CharacterLayer();
   private readonly rain = new Rain();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
@@ -188,6 +190,10 @@ class Player {
     // clones the backdrop made rather than the shared originals.
     this.backdrop.attach(this.stage.root, bundle.script.backdrop);
     this.rigs.attach(this.stage.root, bundle.script.rigs, this.paths);
+    // Characters are already in the stage glTF, one hierarchy per spawn;
+    // this adopts them and takes over the pose.
+    this.chars.attach(this.stage.root, bundle.script.characters);
+    this.spawns.setPosed(this.chars.posed);
     this.rain.attach(this.stage.root, bundle.script.rain);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
@@ -349,6 +355,9 @@ class Player {
     });
     $<HTMLInputElement>("#show-spawns").addEventListener("change", (e) => {
       this.spawns.setVisible((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#show-chars").addEventListener("change", (e) => {
+      this.chars.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#pillarbox").addEventListener("change", (e) => {
       this.pillarbox = (e.target as HTMLInputElement).checked;
@@ -868,6 +877,10 @@ class Player {
       // g_active_cam_path, so object and shot run in lockstep.
       const cam = this.walker.cam;
       this.rigs.update(cam ? cam.slot : null, cam ? cam.frame : 0);
+      // Characters run on their own 30 Hz motion clock, not the camera's:
+      // an idle loops whatever the shot is doing.
+      this.chars.update(this.walker.spawns,
+                        this.state.freeze ? 0 : dt * this.speed);
       // The volume follows the camera's yaw only, so it stays world-vertical.
       this.rain.update(this.walker.rain, this.camera.position,
                        Math.atan2(-this._fwd.x, -this._fwd.z),
@@ -939,6 +952,7 @@ class Player {
       ["light", this.lighting.describe],
       ["sky", this.backdrop.describe],
       ["rigs", this.rigs.describe],
+      ["characters", this.chars.describe],
       ["shutter", this.hudLayer.describe],
       // The two globals the skip feature hangs off, so it is visible that the
       // region opened and the gate dropped even when nothing is pressed.

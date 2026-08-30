@@ -231,6 +231,14 @@ export class SpawnLayer {
   private readonly pool: Object3D[] = [];
   private labels = new Map<string, CanvasTexture>();
   private showLabels = true;
+  /**
+   * Spawn offsets that have a real assembled character in the scene.
+   *
+   * A marker stands in for something the player cannot draw. Once a spawn is
+   * drawn, the marker is not extra information, it is a cone stuck through the
+   * middle of a zombie -- so those are skipped here rather than dimmed.
+   */
+  private posed = new Set<number>();
 
   constructor() {
     this.group.name = "spawns";
@@ -275,7 +283,14 @@ export class SpawnLayer {
     return g;
   }
 
-  update(spawns: ActiveSpawn[]): void {
+  setPosed(posed: ReadonlySet<number>): void {
+    this.posed = new Set(posed);
+  }
+
+  update(all: ActiveSpawn[]): void {
+    const spawns = this.posed.size
+      ? all.filter((s) => !this.posed.has(s.at))
+      : all;
     for (let i = 0; i < spawns.length; i++) {
       const s = spawns[i];
       const o = this.acquire(i);

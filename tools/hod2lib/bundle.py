@@ -33,7 +33,7 @@ import json
 import time
 from pathlib import Path
 
-from . import (__version__, gltf, rigs as rigslib,
+from . import (__version__, characters as charlib, gltf, rigs as rigslib,
                script as scriptlib, stage as stagelib)
 
 __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
@@ -304,8 +304,15 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
                      biases={})
                 for inst in rig_instances]
 
+    # Spawned characters ride the same writer: a skeleton is a tree of named
+    # parts with a translation and an asset slot, which is exactly a rig. They
+    # are appended to the glTF list only -- `rigs_json` below is built from
+    # `rig_instances`, so a character never turns up as an object rig.
+    say(f"  {name}: characters")
+    char_defs, char_places, char_entries = charlib.resolve_for_stage(stage)
+
     info = gltf.export_level(
-        name, parts, out_dir, rigs=rig_data,
+        name, parts, out_dir, rigs=rig_data + char_entries,
         write_textures=write_textures,
         cam_files=[],                  # rails are drawn client-side
         unlit=unlit, model_regions=model_regions, glb=glb)
@@ -329,6 +336,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["rigs"] = rigs_json(rig_instances, rig_blocked,
                                     stage.campaths(), stage.tables)
     script_json["rain"] = rain
+    script_json["characters"] = charlib.characters_json(char_defs, char_places)
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))
@@ -354,6 +362,8 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
             "cam_paths": len(stage.campaths()),
             "spawns": n_spawns,
             "rigs": info.get("rigs", 0),
+            "characters": len(char_defs),
+            "posed_spawns": sum(1 for p in char_places if p.motion is not None),
         },
         "sources": {},
     }

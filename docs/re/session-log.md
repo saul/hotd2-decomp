@@ -3275,3 +3275,56 @@ functions and fourteen globals — so the Ghidra database rebuilds with the
 `mot/` work in it. `docs/PLAYER_PLAN.md` gained a section on wiring characters
 and spawns into the player, including the warning not to bake every motion:
 `people.bin` alone is 200 motions over 7105 frames.
+
+## Characters in the player, and the motion rule that is worth not guessing
+
+`mot/` being decoded made this a wiring job rather than a research one, and the
+plan in `PLAYER_PLAN.md` was right about the shape: a skeleton is exactly a rig
+— a tree of named parts, each with a translation, a BAMS triple and an asset
+slot — so it goes through the existing rig writer rather than a second glTF
+path. The writer already supported `placements`, one instance per spawn
+descriptor, so the stage glTF now arrives with a full character hierarchy
+standing at every spawn, positioned and yawed, and the client only has to pose
+it.
+
+The one thing that could not be baked is the transform between the object and
+the bones. `FUN_00410590` reads:
+
+```c
+MatrixTranslate(obj.pos); Scale; RotX; RotY; RotZ   /* baked into the root */
+MatrixTranslate(frame.root);                        /* <- not baked */
+RotZ(bone0.rz); RotY(bone0.ry); RotX(bone0.rx);     /* <- not baked */
+for (node in skeleton) DrawBone(node);
+```
+
+The motion root translation is expressed in the object's *rotated* frame, so
+writing it onto the instance root would apply it in world space and slide every
+character sideways. The client inserts a group for those two lines instead.
+
+**Which motion an actor plays is where this could have gone wrong.**
+`obj+0x1B4` is the motion id — the sampler is called as
+`FUN_00412F50(obj+0x1F4, obj+0x1B4, frame)`, character type and motion — and
+only a class handler writes it. Two are readable now:
+
+* class `0x30`, the zombie, is a literal: `obj[0x1B4] = 0x3BC` (956, `zom.bin`),
+  or `0x41E` (1054, `hzom.bin`) on a branch that tests a field the allocator
+  fills differently per spawn opcode. 956 is the common path and the only one
+  taken here.
+* class `0x53`, the cat, reads `u16[0x00589A64 + variant*10]` where the variant
+  is the spawn's parameter tail. The table is five `u16` per variant,
+  `0xFFFF`-terminated — a playlist — and every id in it lands inside `nya.bin`'s
+  762..773, which is the corroboration that it is a motion table at all.
+
+A general rule was tried and rejected, and recording why matters more than the
+result. The stride `(bones*6+15) & ~3` has to divide every block in a bank
+exactly, which is a genuine constraint and does uniquely pick `nya.bin` for the
+cat's 19 bones, `frog.bin` for 15 and `kame.bin` for 24. But **30 of the 49
+banks are 16-bone**, so every humanoid would have been posed from an arbitrary
+one of thirty. That is the same trap the spawn survey hit with `desc+0x24`: a
+rule that raises the count and lowers the truth. A character posed from another
+character's animation reads as a decoding bug, where a marker reads as a
+feature not finished yet.
+
+287 of 562 identified spawns are posed, 25 character types. The marker layer
+skips any spawn that has a real character, so a cone never ends up stuck through
+a zombie.

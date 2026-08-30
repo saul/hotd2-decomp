@@ -33,6 +33,7 @@ const CONTROLS = [
   "#show-hud",
   "#show-rigs",
   "#show-spawns",
+  "#show-chars",
   "#pillarbox",
   "#light-mode",
   "#fog-mode",

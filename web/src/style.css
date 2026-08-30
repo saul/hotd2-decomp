@@ -425,3 +425,31 @@ button.kill {
   cursor: pointer;
 }
 button.kill:hover { background: #8c2626; }
+
+/* -- globals panel ------------------------------------------------------- */
+
+#globals-panel { max-height: 40%; display: flex; flex-direction: column; }
+#globals-panel details { display: flex; flex-direction: column; min-height: 0; }
+#globals-panel summary { cursor: pointer; list-style: none; }
+#globals-panel summary::-webkit-details-marker { display: none; }
+#globals-panel summary::before { content: "\25B8 "; color: var(--dim); }
+#globals-panel details[open] summary::before { content: "\25BE "; }
+#globals {
+  padding: 4px 8px 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.45;
+}
+table.gt { width: 100%; border-collapse: collapse; }
+table.gt td { padding: 0 4px 0 0; vertical-align: top; white-space: nowrap; }
+table.gt td.gv { white-space: normal; word-break: break-all; }
+.gk { color: var(--dim); }
+.gaddr { color: var(--dim); opacity: 0.55; text-align: right; }
+.gdim { color: var(--dim); white-space: normal; }
+tr.gdead td { opacity: 0.45; }
+.ghead {
+  margin: 6px 0 2px;
+  color: var(--dim);
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}

@@ -138,6 +138,7 @@ cd web && npx tsc --noEmit          # test/ and tools/ are typechecked too
 npm run test:port                   # the port, headless: no three.js, no DOM
 cd .. && python3 tools/verify_port.py
 python3 tools/verify_player_ops.py  # if you touched script/ops/
+python3 tools/verify_player_dom.py  # if you touched index.html or a `$("#id")`
 ```
 
 `verify_port.py` holds:
@@ -259,6 +260,12 @@ the next frame. Two consequences worth knowing before you write code:
   names; hunting for the end of a table finds the start of the next one.
 * **Object fields are polymorphic.** `obj+0x11C` is hit points for combat
   classes and a sub-type selector for others. Check the class.
+* **A green build is not a working page.** `document.querySelector("#x") as T`
+  is a lie the type system cannot catch: a missing element is `null`, the cast
+  hides it, and the first `addEventListener` throws at startup behind a clean
+  `tsc` *and* a clean `vite build`. That has already happened here — a shell
+  `cd` failed, the markup edit never ran, and nothing noticed.
+  `verify_player_dom.py` is the guard; run it whenever you add a control.
 
 ## Committing: only ever your own hunks
 

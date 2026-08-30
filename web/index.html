@@ -32,6 +32,8 @@
         <label><input type="checkbox" id="show-spawns" checked /> Spawns</label>
         <label title="Spawned characters assembled from the EXE skeleton and posed from mot/. A spawn whose class has no motion rule yet keeps its marker instead — an unposed character is a heap of parts, not a character."><input type="checkbox" id="show-chars" checked /> Characters</label>
         <label title="Scripted scenery: doors, shutters and the vans they hang off. They swing when the script sets their flag (evt 0x48) and vanish on a second one."><input type="checkbox" id="show-props" checked /> Props</label>
+        <label title="Empty boxes wherever the script has spawned an actor whose class has no module in the port's g_class_handlers. The game would be running a state machine for it; this player is not. docs/formats/spawns.md says what each class is."><input type="checkbox" id="show-unported" /> Unported</label>
+        <label title="Bounding boxes on the actor holding an attack permit — the one about to swing, and the one SelectCameraLookAtTarget is aiming at — and, while wait_enemies_alive is blocking, on every enemy keeping it blocked."><input type="checkbox" id="show-boxes" /> Boxes</label>
         <label title="The gameplay camera. With enemies registered, SelectCameraLookAtTarget aims at the one holding an attack permit -- the one about to swing -- or the midpoint of two, and TurnLookAtToward eases the camera onto it. Off restores the authored cam/ path exactly."><input type="checkbox" id="track-enemies" checked /> Track</label>
         <label title="Click to shoot. Ray from the camera through the crosshair, tested against each character's per-bone hit spheres; hit points, the per-bone damage escalation, the sever step, the sounds and the score are the game's own. With this on, the live-enemy waits become real: the script holds until you have killed them. See docs/formats/combat.md."><input type="checkbox" id="shoot" /> Shoot</label>
         <button id="btn-kill" class="kill" hidden
@@ -128,6 +130,15 @@
           <div class="panel" id="inspector-panel">
             <div class="panel-head"><strong>Inspector</strong></div>
             <div id="inspector" class="scroll"></div>
+          </div>
+          <div class="panel" id="globals-panel">
+            <details id="globals-details">
+              <summary class="panel-head">
+                <strong>Globals</strong>
+                <span class="dim" title="The port's data segment — every g_* it touches, and the object pool. Read-only: a writable panel would be a fourth way for state to enter the game, and nothing done here would survive a save. Addresses are the ones cited in web/src/game/globals.ts, checked against ghidra/annotations/globals.tsv.">read-only · g_*</span>
+              </summary>
+              <div id="globals" class="scroll"></div>
+            </details>
           </div>
         </aside>
       </main>

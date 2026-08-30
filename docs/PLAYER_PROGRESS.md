@@ -41,6 +41,7 @@ enumerable place, it can be shown:
 | opcode statuses | `tools/verify_player_ops.py` | `script/ops/` against the table below |
 | the port | `tools/verify_port.py` | `FUN_` citations, coverage, `[diverges]`, snapshot rules |
 | the state machines | `npm run test:port` | permits, turn-taking, spacing, damage, save/restore |
+| the markup | `tools/verify_player_dom.py` | every `#id` the player looks up exists |
 
 ---
 

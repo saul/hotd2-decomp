@@ -26,6 +26,14 @@ export const T = {
  * `g_enemy_approach_rings` does at 0x004C4CD0.
  */
 export function SetGameTables(chars: CharactersJson | undefined): void {
+  // Ordering hazard, and it cost an afternoon: `ResetGameGlobals` clears the
+  // approach rings, so calling it *after* this leaves every ring at zero and
+  // every enemy permanently in the outermost band. Say so rather than let it
+  // be silent.
+  if (chars && !(chars.approach?.rings?.length)) {
+    console.warn("[game] no approach rings in this bundle -- enemies will "
+                 + "never reach striking range");
+  }
   T.chars = chars ?? null;
   T.types = chars?.types ?? {};
 

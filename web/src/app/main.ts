@@ -263,8 +263,14 @@ class Player {
     this.ctx.stage = this.state.stage;
     this.ctx.frame = 0;
     this.rng.reseed(this.state.seed ?? 1);
-    SetGameTables(bundle.script.characters);
+    // `attach` runs the scene reset, which zeroes the data segment -- so the
+    // tables go in **after** it. The other way round the reset wiped
+    // `g_enemy_approach_rings` seconds after `SetGameTables` filled it, every
+    // actor read every ring as zero, and so nothing ever reached striking
+    // range: they walked into the camera and spun on a facing angle that has
+    // no direction at zero distance.
     this.world.attach(this.ctx);
+    SetGameTables(bundle.script.characters);
     G.g_player_lives = [
       bundle.script.characters?.player?.start_lives ?? 2,
       bundle.script.characters?.player?.start_lives ?? 2,
@@ -1031,7 +1037,8 @@ class Player {
                      t.frozen ? 0 : t.wall * 60);
     // Debug overlays read the same live spawn list the markers do, so the two
     // can never disagree about who is present.
-    this.debug.update(w.spawns, w.wait?.policy.kind === "enemies");
+    this.debug.update(w.spawns, w.wait?.policy.kind === "enemies",
+                      this.camera.position);
     // Driven from here rather than from `refreshUi`, which only runs during
     // playback: the panel is at its most useful when the clock is stopped.
     this.globalsView.update();

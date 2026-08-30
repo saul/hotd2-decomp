@@ -144,9 +144,12 @@ export const G = {
 export type Globals = typeof G;
 
 /**
- * `ResetSceneEnemyState` in spirit: put every global back to what the scene
- * reset leaves it at. Called on stage load, and by the snapshot loader before
- * it writes the saved values in.
+ * Put every global back to what the scene reset leaves it at.
+ *
+ * **Call `SetGameTables` after this, never before.** This clears the approach
+ * rings, which are table-derived; doing it the other way round leaves them at
+ * zero, every enemy reads the outermost band for ever, and nothing reaches
+ * striking range.
  */
 export function ResetGameGlobals(): void {
   G.g_object_list = [];

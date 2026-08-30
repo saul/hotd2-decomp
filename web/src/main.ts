@@ -34,6 +34,7 @@ import { RailLayer, SpawnLayer } from "./overlays";
 import { FreeRoam, isTyping } from "./freeroam";
 import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "./walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
+import { restoreViewPrefs } from "./viewprefs";
 import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary } from "./ui";
 import { Bgm } from "./bgm";
 import { SceneFog, type FogMode } from "./fog";
@@ -424,6 +425,10 @@ class Player {
       this.state = readState();
       void this.loadStage();
     });
+
+    // Last, so the restore's dispatched `change` events land on the handlers
+    // registered above rather than on nothing.
+    restoreViewPrefs();
   }
 
   /**

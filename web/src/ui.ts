@@ -9,7 +9,8 @@
 
 import type { BlockJson, OpJson, ScriptJson } from "./bundle";
 import type { FeedEntry } from "./walker";
-import { STATUS_TITLE, opStatus } from "./opstatus";
+import { STATUS_TITLE } from "./opstatus";
+import { opStatus } from "./walker";
 
 const $ = <T extends HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;

@@ -188,6 +188,15 @@ collision). The one genuine unknown left is `variant_*`.
 
 ## Every opcode, and what the player does with it
 
+> The status column is a copy. The original lives on `Walker.OPS` in
+> `web/src/walker.ts`, where each opcode's `status` sits on the same object as
+> the `run` that justifies it — so the interpreter cannot disagree with the
+> script tree about what it honours. `tools/verify_player_ops.py` checks this
+> table against that one; it is what caught `enable_rain` being struck through
+> while it was implemented, and `set_backdrop_mode` being listed as missing
+> after the dome was built.
+
+
 All 96 dispatch slots, generated against `hod2lib.evt.OPCODES` so none can be
 missed. Meanings and confidence marks live in
 [`formats/evt.md`](formats/evt.md); this table is only about the **client**.
@@ -226,10 +235,10 @@ missed. Meanings and confidence marks live in
 | `16` | `set_ambient_light_rgb` | light | *tracked* | lighting override; values decoded, not applied to the render |
 | `17` | `slerp_light0_direction` | light | ~approx~ | the slerp target is taken immediately rather than stepped |
 | `18` | `set_light0_direction` | light | **done** | **drives the directional light** in `+ scene light` mode |
-| `19` | `set_light1_direction` | light | *tracked* | scene light direction, in degrees; not applied |
+| `19` | `set_light1_direction` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
 | `1A` | `set_ground_plane_y` | camera | *tracked* | ground plane / g_camera_fixed_eye_y; see the eye-height note |
 | `1B` | `set_backdrop_preset` | scenery | **done** | **the backdrop dome is drawn**, following the camera |
-| `1C` | `set_backdrop_mode` | scenery | shown | the camera-following backdrop dome — **the sky is missing** |
+| `1C` | `set_backdrop_mode` | scenery | **done** | dome mode: 0 off, 2 frozen, anything else spins at the preset's rate |
 | `1D` | `enable_rain` | scenery | **done** | **50 particles**, transcribed from `DrawRainParticles` — only stage 1 ever turns it on |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
 | `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**, all 9 states with the 40-frame slide, sized from asset `0x93E`'s own quad; the UI names each state and says what it does to the firing gate |
@@ -237,10 +246,10 @@ missed. Meanings and confidence marks live in
 | `21` | `light0_tween_rate` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `22` | `light0_stop` | light | shown | clears a channel tween |
 | `23` | `light0_tween_time` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
-| `24` | `light1_set` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
-| `25` | `light1_tween_rate` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `24` | `light1_set` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `25` | `light1_tween_rate` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
 | `26` | `light1_stop` | light | shown | clears a channel tween |
-| `27` | `light1_tween_time` | light | *tracked* | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `27` | `light1_tween_time` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
 | `28` | `region_load` | region | shown | preloads a region's assets; everything is already resident here |
 | `29` | `region_enter` | region | **done** | **switches the drawn region** — the core of the streaming model |
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |

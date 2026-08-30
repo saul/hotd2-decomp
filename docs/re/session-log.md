@@ -3106,3 +3106,46 @@ lock and `run_ghidra_script` is gated off over MCP — so the existing database
 state was read back through MCP queries (`search_functions_enhanced` with
 `has_custom_name`, and `list_globals`) and written to the TSVs by hand. The
 scripts are what make the next round automatic.
+
+## A parallel table only ever drifts
+
+`opstatus.ts` held "how far does the player honour each opcode", in a table
+next to — but separate from — the interpreter's dispatch switch. The user
+asked why `enable_rain` was struck through as unimplemented, and the answer was
+that it had been implemented for weeks: the switch had a `case 0x1d`, the
+progress doc said **done**, and only the status table still said `shown`. Three
+copies of one fact, two right.
+
+Checking the rest turned up more of the same. `set_skippable_region` was marked
+dead after being wired up. `set_backdrop_mode` was listed as "the sky is
+missing" after the dome was built. Going the other way, `region_load` and
+`pin_view_to_ground_plane` would have been *promoted* to done by a naive sweep,
+and both would have been lies: `loadRegion` is an empty host hook because the
+bundle holds every region from the start, and `cameraEyeY` ignores
+`useFixedEyeY` because `APPLY_EYE_Y_RULE` is off pending the eye-height
+question. Those two stay `shown` and `tracked`, with the reason on the entry.
+
+So the table is gone and the status now sits on the same object as the handler:
+
+```ts
+0x1d: {                                     // enable_rain
+  status: "done",
+  run: (w, op) => { w.rain = !!op.value; return op.means; },
+},
+```
+
+`Walker.OPS` is the whole registry — 65 opcodes, 48 with a `run` — and
+`apply()` is one line through it. An entry with no `run` is a declaration that
+the client deliberately does nothing, and an opcode absent from the table
+defaults to `shown`. Adding a handler without saying what it achieves is no
+longer expressible, and `opstatus.ts` is reduced to the vocabulary and the
+hover labels, which are presentation and belong with neither.
+
+Four light-block-1 opcodes moved `tracked` -> `none` on the way past.
+"Tracked" claims state is kept and shown; the walker stores nothing for them,
+and block 1 is pushed only at scene init and never reaches the renderer, so
+they are no-ops in the game as much as here.
+
+The one copy that can still drift is the human table in `PLAYER_PROGRESS.md`,
+so `tools/verify_player_ops.py` compares the two. It caught `set_backdrop_mode`
+on its first run.

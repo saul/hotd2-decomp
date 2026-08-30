@@ -232,19 +232,39 @@ them was mine and one of them was a fair reading of the data:
   a *primitive* rather than its bone, so the bone stayed at bind while one piece
   of it span about the joint. Matching the exporter's part name as a suffix
   fixes it; the glTF hierarchy itself was correct all along.
-* **The characters faced backwards.** Every step of the transform chain checks
-  out in isolation — `FUN_004088A0` copies the descriptor's three orientation
-  words straight to `obj+0x64/68/6C`, `FUN_00410590` feeds them to
-  `RotX; RotY; RotZ`, and `MatrixRotateY` builds `x' = c·x + s·z`,
-  `z' = −s·x + c·z`, which is three.js's Y rotation exactly — and the exporter
-  mirrors no axis. So the half turn is in the models: they face **+Z** locally.
-  Measuring every class-0x30 spawn against the nearest camera eye puts 149 of
-  203 zombies facing *away* on a raw reading and towards it on a flipped one,
-  and zombies face the player. The spawn markers had carried the same half turn
-  all along, in geometry rather than in an angle — their cone is modelled
-  pointing down local −Z — which is why nothing noticed until characters were
-  drawn. Where the game applies it has **not** been found, so this is
-  `[measured]`, not `[proved]`.
+* **The characters looked backwards, and the first fix was wrong.** A half turn
+  was added to the spawn yaw on the strength of a measurement — comparing every
+  class-0x30 spawn's yaw against the direction to the nearest camera eye seemed
+  to leave 149 of 203 zombies facing away. That measurement was unsound: the
+  nearest sample on a rail the camera travels *past* is frequently behind the
+  spawn. The chain is correct at every step, and each step was checked:
+  `FUN_004088A0` copies `desc+0x14/18/1C` straight to `obj+0x64/68/6C`;
+  `FUN_00410590` feeds them to `RotX; RotY; RotZ`; `MatrixRotateY` builds
+  `x' = c·x + s·z`, `z' = −s·x + c·z`, which is three.js's Y rotation exactly;
+  `FUN_004016B0` — the source of every angle in the game — is
+  `yaw = atan2(dx, dz)`; and the camera's own matrix is
+  `T(eye); RotZ(roll); RotY(yaw); RotX(pitch)` built from `eye − target`, so the
+  game's camera looks down its local **−Z** on a right-handed basis, exactly as
+  three.js does. **The scene is not mirrored.**
+
+  What settles the facing is geometry, not an angle. Posed at motion 956 frame
+  0, `char_adv00`'s toe reaches world `z = −2.47` against a heel at `+0.88`, and
+  the head's face juts to `z = −1.48`: a posed character faces **−Z**, and
+  `RotY(θ)` maps −Z to `θ + 180`. So the authored yaw already aims a character
+  where the designer pointed it. The half turn is gone.
+
+* **[open] The humanoids have no waist.** Assembled and posed, `char_adv00`'s
+  torso occupies `y 0.25…4.25` and its pelvis `−3.55…−0.96`, leaving a
+  1.2-unit hole. It is not a client bug — `export_character.py` produces it too
+  — and not a broken parent chain: the two are separate roots in the EXE
+  skeleton, which is what `FUN_00410590` iterates. `FUN_004107E0` writes one
+  slot per bone and `FUN_00411050` draws that one slot, so the game really does
+  draw 15 parts. The unused slots in `char_adv00.bin` interleave with the bone
+  slots (`0x1F00, 0x1F01, **0x1F02**, 0x1F03, 0x1F06 …`), which reads as the
+  shot-off damage variants rather than a missing limb. The untested lead is the
+  second per-bone table `FUN_004107E0` consults, `PTR_DAT_004D032C[char_type]`,
+  stride `0x14` indexed `bone − 1`, which compares its first word against the
+  node's slot. The cat is unaffected — 18 models, 18 bones, a clean 1:1.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any

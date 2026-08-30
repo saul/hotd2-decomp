@@ -29,6 +29,27 @@ bug rather than a missing feature.
 
 Characters with no motion rule keep their spawn marker. See
 docs/formats/mot.md and docs/formats/spawns.md.
+
+**[open] The waist is missing on the humanoids.** Assembled and posed,
+`char_adv00`'s torso (bone 1) occupies ``y 0.25..4.25`` and its pelvis (bone 9)
+``-3.55..-0.96``, leaving a 1.2-unit hole where an abdomen should be. This is
+not a client bug -- it is in `export_character.py`'s output too -- and it is not
+a broken parent chain: the two are separate roots in the EXE skeleton, which is
+what `FUN_00410590` iterates.
+
+What is known: `char_adv00.bin` holds 113 models and the skeleton names only
+15, and the unused ones include slot ``0x1F02``, which sits *between* the bone
+slots ``0x1F00, 0x1F01, 0x1F03, 0x1F06 ...``. Those interleaved gaps are most
+likely the shot-off damage variants class 0x30 switches between, not a missing
+limb. `FUN_004107E0` writes exactly one slot per bone into the draw record and
+`FUN_00411050` draws that one slot, so the game really does draw 15 parts.
+
+The untested lead is the second per-bone table `FUN_004107E0` consults:
+``PTR_DAT_004D032C[char_type]``, stride ``0x14``, indexed ``bone - 1``. It
+compares its first word against the node's asset slot and, on a match, copies
+three more words plus a scale into the draw record. What those are has not been
+established. The cat is unaffected -- 18 models, 18 bones, a clean 1:1 -- so
+whatever this is, it is a humanoid thing.
 """
 
 from __future__ import annotations
@@ -84,30 +105,34 @@ MOTION_FPS = 30.0
 #: game is well inside it.
 MAX_BAKED_FRAMES = 600
 
-#: Half a turn, added to a spawn's authored yaw when placing a character.
+#: The spawn's authored yaw is used **as written**. There is no half turn.
 #:
-#: **[measured]**, not proved, and the distinction matters. Everything in the
-#: transform chain checks out on its own: the allocator copies ``desc+0x14/18/1C``
-#: straight to ``obj+0x64/68/6C`` (`FUN_004088A0`); `FUN_00410590` feeds those
-#: to ``RotX; RotY; RotZ``; and the engine's `MatrixRotateY` builds
-#: ``x' = c*x + s*z, z' = -s*x + c*z``, which is three.js's Y rotation exactly.
-#: The exporter mirrors no axis. So the yaw reaches the model unaltered and the
-#: 180 degrees has to come from the character models facing **+Z** in their own
-#: local space.
+#: An earlier revision added 0x8000 here on the strength of a measurement:
+#: comparing every class-0x30 spawn's yaw against the direction to the nearest
+#: camera eye, a raw reading appeared to leave 149 of 203 zombies facing away.
+#: That measurement was unsound -- the nearest sample on a rail the camera
+#: travels *past* is often behind the spawn -- and the conclusion drawn from it
+#: was wrong. The chain is right as it stands, at every step:
 #:
-#: The evidence is that they do. Taking every class-0x30 spawn in the six
-#: stages and comparing its authored yaw against the direction to the nearest
-#: camera eye, a raw +Z reading puts **149 of 203 zombies facing away** from the
-#: camera and 54 towards it; the flip reverses that. Zombies face the player.
-#: The spawn markers agree independently -- their cone is modelled pointing
-#: down local -Z, so they have always carried this half turn in geometry rather
-#: than in an angle, which is why nothing noticed until characters were drawn.
+#: * `FUN_004088A0` copies ``desc+0x14/18/1C`` straight to ``obj+0x64/68/6C``;
+#: * `FUN_00410590` feeds those to ``RotX; RotY; RotZ``;
+#: * `MatrixRotateY` builds ``x' = c*x + s*z, z' = -s*x + c*z``, which is
+#:   three.js's Y rotation exactly;
+#: * `FUN_004016B0`, which is what produces every angle in the game, is
+#:   ``yaw = atan2(dx, dz)``, so a yaw of theta names the direction
+#:   ``(sin theta, 0, cos theta)``;
+#: * the camera's own matrix is ``T(eye); RotZ(roll); RotY(yaw); RotX(pitch)``
+#:   with ``yaw`` taken from ``eye - target`` -- so the game's camera looks down
+#:   its local **-Z** on a right-handed basis, which is three.js's convention
+#:   too. The scene is not mirrored.
 #:
-#: What has *not* been found is where the game applies it. The per-frame update
-#: runs a 54-state machine and the setup computes an angle toward the camera
-#: into ``obj+0x4C8``, so a runtime turn is the likely home, but that is a
-#: guess and is not claimed here.
-SPAWN_YAW_HALF_TURN = 0x8000
+#: What settles the facing is the geometry, not an angle. Posed at motion 956
+#: frame 0, `char_adv00`'s toe reaches world ``z = -2.47`` against a heel at
+#: ``+0.88``, and the head's face juts to ``z = -1.48``: a posed character
+#: faces **-Z**. ``RotY(theta)`` maps ``-Z`` to ``theta + 180``, so the
+#: authored yaw already aims a character where the designer pointed it, and
+#: adding a half turn aims it backwards.
+
 
 
 @dataclass
@@ -284,16 +309,6 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      bones=bones)
 
 
-def _placed(spawns: list[dict]) -> list[dict]:
-    """Spawn dicts with the half turn applied. See `SPAWN_YAW_HALF_TURN`."""
-    out = []
-    for sp in spawns:
-        o = list(sp["orient"])
-        o[1] = (o[1] + SPAWN_YAW_HALF_TURN) & 0xFFFF
-        out.append(dict(sp, orient=o))
-    return out
-
-
 def _rig_entry(stage, tables, char: Character, spawns: list[dict]) -> dict | None:
     """A `gltf.export_level` rig entry: the skeleton, placed at every spawn."""
     from . import rigs as rigslib, stage as stagelib
@@ -328,7 +343,7 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict]) -> dict | Non
         parts=tuple(p for p, _ in parts),
         note="skeleton from the EXE; posed per frame from mot/")
     return {"rig": rig, "routes": [], "anchors": {}, "biases": {},
-            "fixed": [], "world": False, "placements": _placed(spawns),
+            "fixed": [], "world": False, "placements": spawns,
             "blocked": "", "parts": [(p, m) for p, m in parts if m]}
 
 

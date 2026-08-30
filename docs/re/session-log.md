@@ -3374,3 +3374,65 @@ Recorded as `[measured]`, not `[proved]`: where the *game* applies the half turn
 has not been found. The zombie's setup computes an angle toward the camera into
 `obj+0x4C8` and its update runs a 54-state machine, so a runtime turn is the
 likely home, but that is a guess and the note says so.
+
+## The half turn was mine, not the game's
+
+Adding `+0x8000` to the spawn yaw was wrong, and the way it was wrong is worth
+keeping: the measurement that justified it was badly designed and I did not
+interrogate it before acting.
+
+The measurement compared each class-0x30 spawn's authored yaw with the
+direction to the **nearest camera eye sample on any `cp_` path**. 149 of 203
+came out facing away, which looked decisive. It is not: a camera rail runs
+*past* a spawn, so the nearest sample on it is very often behind the zombie.
+The statistic measures rail geometry as much as it measures facing. The user's
+"don't just do a yaw flip, dig into the code" was the right instruction.
+
+Doing that, every step of the chain checks out:
+
+* `FUN_004088A0` copies `desc+0x14/18/1C` straight to `obj+0x64/68/6C`;
+* `FUN_00410590` feeds those to `RotX; RotY; RotZ`;
+* `MatrixRotateY` builds `x' = c·x + s·z, z' = −s·x + c·z`, which is three.js's
+  Y rotation exactly;
+* `FUN_004016B0` — which produces every angle in this game, camera pose and
+  enemy facing alike — is `yaw = atan2(dx, dz)` with the pitch negated, so a
+  yaw of θ names the direction `(sin θ, 0, cos θ)`;
+* `FUN_00415A80` builds the camera's own matrix as
+  `T(eye); RotZ(roll); RotY(yaw); RotX(pitch)`, and `FUN_00403AC0` derives that
+  yaw from `eye − target`. So the camera's local +Z points *backward* and it
+  looks down its local **−Z**, on a basis whose X × Y = Z. That is three.js's
+  camera convention exactly.
+
+So the scene is not mirrored, which also answers the bigger worry: a
+left-handed projection does not by itself mirror anything if the view basis is
+built right-handed, and this one is.
+
+**What actually settles the facing is geometry, not an angle.** A foot is long
+toward the toe and a head is long toward the face. Posed at motion 956 frame 0,
+`char_adv00`'s toe reaches world `z = −2.47` against a heel at `+0.88`, and the
+head juts to `z = −1.48`. A posed character faces **−Z**; `RotY(θ)` maps −Z to
+`θ + 180`; so the authored yaw already aims it correctly and the half turn aimed
+it backwards. That test needs no rendering, no screenshot and no statistics, and
+it is the one I should have reached for first.
+
+## An honest gap: the humanoids have no waist
+
+`char_adv00` assembles with its torso at `y 0.25..4.25` and its pelvis at
+`−3.55..−0.96` — a 1.2-unit hole. Recording what has been ruled out, because
+the remaining space is small:
+
+* not a client bug: `export_character.py` produces the same gap;
+* not a broken parent chain: the torso and pelvis are separate roots in the EXE
+  skeleton, which is exactly what `FUN_00410590` iterates over;
+* not a missing draw: `FUN_004107E0` writes one slot per bone into the record
+  array and `FUN_00411050` draws that one slot, so 15 parts is what the game
+  draws too;
+* probably not the unused models: the spare slots interleave with the bone
+  slots (`0x1F00, 0x1F01, 0x1F02, 0x1F03, 0x1F06 …`), which reads as the
+  shot-off damage variants class 0x30 switches between.
+
+The untested lead is the second per-bone table `FUN_004107E0` consults:
+`PTR_DAT_004D032C[char_type]`, stride `0x14`, indexed `bone − 1`. It compares
+its first word against the node's asset slot and on a match copies three words
+and a scale into the draw record. The cat is unaffected — 18 models, 18 bones,
+a clean 1:1 — so whatever this is, it is specific to the humanoid rigs.

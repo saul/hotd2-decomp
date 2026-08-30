@@ -197,7 +197,14 @@ export class RailLayer {
 
 // -- spawn markers ---------------------------------------------------------
 
-export function labelTexture(text: string): CanvasTexture {
+/**
+ * A text sprite on a dark plate.
+ *
+ * `colour` is the ink. Spawn markers keep the default yellow; the debug boxes
+ * pass their own, so a label reads as the thing it is attached to rather than
+ * having to be traced back to its box.
+ */
+export function labelTexture(text: string, colour = "#ffe14d"): CanvasTexture {
   const pad = 8;
   const c = document.createElement("canvas");
   const ctx = c.getContext("2d")!;
@@ -209,7 +216,7 @@ export function labelTexture(text: string): CanvasTexture {
   g.font = "600 28px ui-monospace, SFMono-Regular, Menlo, monospace";
   g.fillStyle = "rgba(6,10,14,0.82)";
   g.fillRect(0, 0, w, 44);
-  g.fillStyle = "#ffe14d";
+  g.fillStyle = colour;
   g.textBaseline = "middle";
   g.fillText(text, pad, 23);
   const tex = new CanvasTexture(c);

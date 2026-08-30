@@ -42,8 +42,8 @@ const PERMIT = 0xffb02e;
 const AWAITED = 0x4dff8c;
 
 /**
- * Label textures, cached by their text. A permit moving between actors flips a
- * label twice a second, and a fresh `CanvasTexture` per flip is a leak.
+ * Label textures, cached by colour and text. A permit moving between actors
+ * flips a label twice a second, and a fresh `CanvasTexture` per flip is a leak.
  */
 const LABELS = new Map<string, CanvasTexture>();
 
@@ -104,17 +104,23 @@ export class DebugBoxLayer {
   }
 
   private place(b: Boxed, centre: Vector3, size: Vector3, text: string): void {
+    // The label takes the box's colour, so magenta text is the signal that
+    // this actor has no module -- readable without finding its box first.
+    const key = `${b.colour.toString(16)}|${text}`;
     b.node.position.copy(centre);
     b.lines.scale.copy(size);
     b.label.position.set(0, size.y / 2 + 0.6, 0);
-    if (b.label.userData.text !== text) {
-      let tex = LABELS.get(text);
-      if (!tex) LABELS.set(text, (tex = labelTexture(text)));
+    if (b.label.userData.text !== key) {
+      let tex = LABELS.get(key);
+      if (!tex) {
+        LABELS.set(key, (tex = labelTexture(
+          text, `#${b.colour.toString(16).padStart(6, "0")}`)));
+      }
       (b.label.material as SpriteMaterial).map = tex;
       (b.label.material as SpriteMaterial).needsUpdate = true;
       const img = tex.image as HTMLCanvasElement;
       b.label.scale.set(img.width / 22, 44 / 22, 1);
-      b.label.userData.text = text;
+      b.label.userData.text = key;
     }
   }
 

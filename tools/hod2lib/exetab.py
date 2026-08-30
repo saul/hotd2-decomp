@@ -409,6 +409,11 @@ class ExeTables:
     #: group; ``BREAKABLE_GROUPS`` is nine pointers to the member records.
     BREAKABLE_COUNTS = 0x00593D14
     BREAKABLE_GROUPS = 0x00593CF0
+    #: `g_breakable_hull_points` -- 96 {s16 x, s16 y, s16 z} in thousandths,
+    #: the hull `BreakablePropGroundContact` (`FUN_00465590`) transforms to
+    #: find which corner a toppling prop comes to rest on.
+    BREAKABLE_HULL = 0x005937F8
+    BREAKABLE_HULL_POINTS = 96
     #: Height of one stack level, from the constructor's own multiply.
     BREAKABLE_LEVEL_HEIGHT = 7.540296
 
@@ -562,7 +567,7 @@ class ExeTables:
             +0x00 s16  x * 0.1
             +0x02 s16  z * 0.1
             +0x04 u8   item-set id
-            +0x05 u8   asset variant (0xFF = the default, 0x19E8)
+            +0x05 s8   g_GameMode == 1 item kind, -1 for none
             +0x06 s8   stack level; y = level * 7.540296 above the floor
             +0x07 u8   number of supporting members
             +0x08 u8   supporting member index a
@@ -575,6 +580,16 @@ class ExeTables:
 
         The y here is *relative* -- the constructor adds
         ``g_camera_fixed_eye_y - 0.1`` as the floor.
+
+        .. note::
+           An earlier revision called ``+0x05`` an *asset variant*. It is not:
+           `PlaceBreakableGroup` writes the prop's asset slot unconditionally
+           (0x19E8, or 0x1A0F for a Training Mode target) and puts this byte in
+           ``obj+0x2A0``, which only `SpawnStoryModeItem` reads, and only
+           when ``g_GameMode == 1``. 39 of the 42 shipped records hold -1; the
+           three that do not all hide an ordinary item set as well, so mode 1
+           substitutes its own drop for theirs. **[proved]** from the one
+           consumer.
         """
         out: list[list[dict]] = []
         cbase, base = (self._v2r(self.BREAKABLE_COUNTS),
@@ -596,13 +611,35 @@ class ExeTables:
                     "x": struct.unpack_from("<h", r, 0)[0] * 0.1,
                     "z": struct.unpack_from("<h", r, 2)[0] * 0.1,
                     "item_set": r[4],
-                    "asset_variant": None if r[5] == 0xFF else r[5],
+                    "story_item": struct.unpack_from("<b", r, 5)[0],
                     "level": struct.unpack_from("<b", r, 6)[0],
                     "y_offset": struct.unpack_from("<b", r, 6)[0]
                                 * self.BREAKABLE_LEVEL_HEIGHT,
                     "supports": [r[8], r[9]][:nsup],
                 })
             out.append(members)
+        return out
+
+    def breakable_hull_points(self) -> list[tuple[float, float, float]]:
+        """`g_breakable_hull_points` -- the breakable prop's collision hull.
+
+        96 points of {s16 x, s16 y, s16 z} scaled by 0.001.
+        `BreakablePropGroundContact` (`FUN_00465590`) transforms every one of
+        them by the prop's ``Ry * Rz * Rx`` and asks whether it has gone below
+        the floor; the lowest one that has is the corner the prop settles on.
+        The loop bound is the raw address compare ``psVar4 <= 0x593A39``, which
+        is 96 strides of six bytes from 0x005937F8.
+        """
+        base = self._v2r(self.BREAKABLE_HULL)
+        if base is None:
+            return []
+        out: list[tuple[float, float, float]] = []
+        for i in range(self.BREAKABLE_HULL_POINTS):
+            o = base + i * 6
+            if o + 6 > len(self.data):
+                break
+            x, y, z = struct.unpack_from("<3h", self.data, o)
+            out.append((x * 0.001, y * 0.001, z * 0.001))
         return out
 
     def cam_path_length(self, slot: int) -> int:

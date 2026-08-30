@@ -30,11 +30,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 import time
 from pathlib import Path
 
-from . import (__version__, characters as charlib, gltf, props as propslib,
-               rigs as rigslib,
+from . import (__version__, characters as charlib, evt as evtlib, gltf,
+               props as propslib, rigs as rigslib,
                script as scriptlib, stage as stagelib)
 
 __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
@@ -158,6 +159,52 @@ def rain_json(tables, prog) -> dict:
         "alpha": 0.5,
         "draw_layer": 0xE,
         "enabled_by_script": used,
+    }
+
+
+def breakables_json(tables, prog) -> dict:
+    """The class-0x41 breakable-prop tables the port needs to place a group.
+
+    Spawn class 0x41 is a placer: `PropContainerPlacerUpdate` (`FUN_00461CD0`)
+    dispatches ``obj+0x130C`` through 79 constructors and then kills itself.
+    Type 0 is `PlaceBreakableGroup` (`FUN_00462A80`), which reads its members
+    out of the **exe**, not the evt -- so the port cannot place them from the
+    spawn descriptor alone and this block has to travel with the stage.
+
+    All nine groups are emitted, indexed by group id, because the placer picks
+    one by ``obj+0x11C`` at run time and a stage-filtered list would have to be
+    re-indexed. Forty-two records is nothing next to the geometry.
+
+    ``hull`` is `g_breakable_hull_points`, which
+    `BreakablePropGroundContact` (`FUN_00465590`) needs to settle a toppled
+    prop, and ``placements`` names the type-0 spawns so the player can show
+    which script address placed which group.
+    """
+    placements: list[dict] = []
+    if prog is not None:
+        raw = prog.evt.raw
+        for rec in evtlib.spawns(prog.evt):
+            if rec.cls != 0x41:
+                continue
+            # `desc+0x25` -> obj+0x130C is the constructor index and
+            # `desc+0x24` -> obj+0x1F4 is the lifetime in evt blocks. Opcode
+            # 0x09 copies both inline; see docs/formats/spawns.md.
+            if rec.offset + 0x26 > len(raw):
+                continue
+            kind = struct.unpack_from("<b", raw, rec.offset + 0x25)[0]
+            if kind != 0:
+                continue
+            placements.append({
+                "at": rec.offset,
+                "group": rec.hp,
+                "lifetime_evt_blocks":
+                    struct.unpack_from("<b", raw, rec.offset + 0x24)[0],
+            })
+    return {
+        "groups": tables.breakable_groups(),
+        "hull": [list(p) for p in tables.breakable_hull_points()],
+        "placements": placements,
+        "level_height": tables.BREAKABLE_LEVEL_HEIGHT,
     }
 
 
@@ -351,6 +398,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["rain"] = rain
     script_json["characters"] = charlib.characters_json(char_defs, char_places, stage.tables)
     script_json["props"] = propslib.props_json(stage.tables, hinges, statics)
+    script_json["breakables"] = breakables_json(stage.tables, prog)
     (out_dir / f"{name}.script.json").write_text(
         json.dumps(script_json, allow_nan=False))
 

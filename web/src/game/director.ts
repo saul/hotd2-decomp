@@ -13,6 +13,7 @@ import { SelectCameraLookAtTarget } from "./camera/select_target";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { TurnLookAtToward } from "./camera/turn";
 import { ThrownWeaponUpdate } from "./class31/projectile";
+import { BreakablePropPoolUpdate } from "./class41/prop";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { G } from "./globals";
@@ -82,6 +83,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   }
 
   ThrownWeaponUpdate(frames, events);
+  // The breakable props are their own 0x378 objects in the engine's pool, not
+  // actors, so they get their own sweep — the same shape as the weapons.
+  BreakablePropPoolUpdate(rng, events);
 
   UpdateCameraEnemySlots(eye);
   const tracking = SelectCameraLookAtTarget(_desired);

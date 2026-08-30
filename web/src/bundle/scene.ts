@@ -137,8 +137,8 @@ export interface BreakableMember {
   z: number;
   /** Record `+0x04`. 0 means this prop hides nothing. */
   item_set: number;
-  /** Record `+0x05`, signed. The Boss Mode drop, `-1` for none. */
-  boss_item: number;
+  /** Record `+0x05`, signed. The `g_GameMode == 1` drop, `-1` for none. */
+  story_item: number;
   /** Record `+0x06`. Height above the floor is `level * level_height`. */
   level: number;
   y_offset: number;

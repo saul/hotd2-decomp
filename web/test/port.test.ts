@@ -25,6 +25,12 @@ import { SpawnClass } from "../src/game/spawn_class";
 import { ThrowerState } from "../src/game/class31/states";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
+import type { BreakablesJson } from "../src/bundle";
+import {
+  BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
+  BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
+  PlaceBreakableGroup, PropContainerPlacerUpdate,
+} from "../src/game/class41";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -129,6 +135,7 @@ const CHARS = {
 } as unknown as CharactersJson;
 
 const EYE = vec3(0, 0, 0);
+
 
 function scene(n: number, rng: Rng): Events {
   ResetGameGlobals();
@@ -406,6 +413,8 @@ console.log("ThrowerStatePathFollow:");
   }
   check("it walks the route to the last waypoint", reachedLast,
         `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
+  // `ThrowerStateLeapDown`: off the roof and into shot, at a place picked on
+  // the *screen* rather than on the map -- 15.5 in front, 9.4 below.
   // The depth is exact -- 15.5 is a literal in `ThrowerPickLandingPoint`. The
   // drop is not asserted to the unit because it divides by
   // `g_projection_distance_px`, which is derived from the projection rather
@@ -517,5 +526,222 @@ console.log("determinism:");
         G.g_object_list.map((o) => ZombieState[o.state] ?? o.state).join(","));
 }
 
+
+// -- 8. class 0x41, the breakable-prop / item-container placer --------------
+//
+// Two groups' worth of members, shaped like the real ones: a two-high stack
+// whose top member is held up by the bottom one, and a three-member item set.
+// The hull is a single point under the origin, which is enough to make
+// `BreakablePropGroundContact` fire the moment a faller drops below the floor.
+
+const BREAKABLES: BreakablesJson = {
+  groups: [
+    // group 0: a stack. Member 1 stands on member 0.
+    [
+      { index: 0, x: 0, z: 0, item_set: 0, story_item: -1, level: 0,
+        y_offset: 0, supports: [] },
+      { index: 1, x: 0, z: 0, item_set: 0, story_item: -1, level: 1,
+        y_offset: 7.540296, supports: [0] },
+    ],
+    // group 1: three props sharing item set 2, all on the ground.
+    [
+      { index: 0, x: 10, z: 0, item_set: 2, story_item: -1, level: 0,
+        y_offset: 0, supports: [] },
+      { index: 1, x: 20, z: 0, item_set: 2, story_item: -1, level: 0,
+        y_offset: 0, supports: [] },
+      { index: 2, x: 30, z: 0, item_set: 2, story_item: -1, level: 0,
+        y_offset: 0, supports: [] },
+    ],
+    // group 2: one prop hiding the extra life.
+    [
+      { index: 0, x: 40, z: 0, item_set: 1, story_item: -1, level: 0,
+        y_offset: 0, supports: [] },
+    ],
+  ],
+  hull: [[0, 0, 0]],
+  placements: [],
+  level_height: 7.540296,
+};
+
+function propScene(rng: Rng): Events {
+  ResetGameGlobals();
+  SetGameTables(CHARS, BREAKABLES);
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_camera_fixed_eye_y = 0;
+  G.g_GameMode = 0;
+  void rng;
+  return new Events();
+}
+
+/** Shoot a prop `n` times, running its update after each. */
+function shoot(p: { id: number }, n: number, rng: Rng, events: Events): void {
+  for (let i = 0; i < n; i++) {
+    const live = G.g_breakable_props.find((q) => q.id === p.id);
+    if (!live) return;
+    BreakablePropTakeShot(live, 0);
+    BreakablePropUpdate(live, rng, events);
+  }
+}
+
+console.log("\nclass 0x41, the placer:");
+{
+  const rng = new Rng(11);
+  propScene(rng);
+  const placer = ActorSpawn(0x9000, SpawnClass.PropContainerPlacer, 4, "placer");
+  placer.visible = true;
+  placer.hp = 1;          // +0x11C: the group id
+  placer.charType = 4;    // +0x1F4: the lifetime in evt blocks
+  placer.condition = 0;   // +0x130C: constructor 0, PlaceBreakableGroup
+
+  PropContainerPlacerUpdate(placer, {
+    eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
+  });
+
+  check("the placer builds its group", G.g_breakable_props.length === 3,
+        `${G.g_breakable_props.length} props`);
+  check("the placer kills itself on its first frame", placer.dead);
+  check("every prop is registered in g_breakable_members",
+        G.g_breakable_props.every(
+          (p) => G.g_breakable_members[p.group * MEMBERS_PER_GROUP + p.member]
+                 === p.id));
+  check("the item countdown is seeded inside [1, n]",
+        G.g_item_set_countdown[ItemSet.Score2] >= 1
+        && G.g_item_set_countdown[ItemSet.Score2] <= 3,
+        String(G.g_item_set_countdown[ItemSet.Score2]));
+  check("a prop takes two shots and carries the group's lifetime",
+        G.g_breakable_props.every((p) => p.hp === 2 && p.lifetime === 4));
+}
+
+console.log("\nclass 0x41, breaking a prop:");
+{
+  const rng = new Rng(11);
+  const events = propScene(rng);
+  const props = PlaceBreakableGroup(1, 4, rng);
+  let cracked = 0, broken = 0;
+  events.on("prop.cracked", () => cracked++);
+  events.on("prop.broken", () => broken++);
+
+  const before = G.g_player_score[0];
+  shoot(props[0], 1, rng, events);
+  check("the first shot cracks rather than breaks",
+        cracked === 1 && broken === 0);
+  check("the cracked prop swaps to the broken model",
+        G.g_breakable_props[0].slot === BreakableSlot.Broken);
+  check("cracking a prop is worth no score at all",
+        G.g_player_score[0] === before, `${G.g_player_score[0]} vs ${before}`);
+  check("but it still counts as a hit", G.g_player_hit_count[0] === 1);
+
+  shoot(props[0], 1, rng, events);
+  check("the second shot breaks it", broken === 1);
+  check("breaking it is worth ten", G.g_player_score[0] === before + 10,
+        String(G.g_player_score[0]));
+  check("a broken prop leaves its member slot",
+        G.g_breakable_members[1 * MEMBERS_PER_GROUP + 0] === 0);
+}
+
+console.log("\nclass 0x41, the item comes out on a random break:");
+{
+  // The countdown decides *which* break pays out, and it is drawn from the
+  // rng -- so over many seeds the release must land on every one of the three
+  // props, and never on a fourth break that does not exist.
+  const landed = new Set<number>();
+  for (let seed = 1; seed <= 40; seed++) {
+    const rng = new Rng(seed);
+    const events = propScene(rng);
+    let releases = 0;
+    let onBreak = -1;
+    events.on("item.released", () => { releases++; onBreak = breaks; });
+    const props = PlaceBreakableGroup(1, 4, rng);
+    let breaks = 0;
+    for (const p of props) {
+      shoot(p, 2, rng, events);
+      breaks++;
+    }
+    check(`seed ${seed}: exactly one item comes out of the set`,
+          releases === 1, `${releases} releases`);
+    landed.add(onBreak);
+  }
+  check("over 40 seeds the release lands on more than one break",
+        landed.size > 1, `landed on breaks {${[...landed].sort().join(",")}}`);
+}
+
+console.log("\nclass 0x41, the stack collapses:");
+{
+  const rng = new Rng(5);
+  const events = propScene(rng);
+  const props = PlaceBreakableGroup(0, 4, rng);
+  const bottom = props[0], top = props[1];
+  check("the top of the stack starts a level up",
+        Math.abs(top.y - (bottom.y + 7.540296)) < 1e-6,
+        `${top.y} vs ${bottom.y}`);
+  check("the top starts standing", top.state === BreakableState.Standing);
+
+  shoot(bottom, 2, rng, events);
+  // The bottom is gone; the top should notice on its next update and fall.
+  BreakablePropUpdate(top, rng, events);
+  check("the top falls once its support is destroyed",
+        top.state === BreakableState.Falling, BreakableState[top.state]);
+
+  for (let i = 0; i < 600 && top.state === BreakableState.Falling; i++) {
+    BreakablePropUpdate(top, rng, events);
+  }
+  check("and it comes to rest rather than falling for ever",
+        top.state === BreakableState.Settled, BreakableState[top.state]);
+  check("it rests at or above the floor",
+        top.y >= G.g_camera_fixed_eye_y - 0.1 - 1e-3, String(top.y));
+}
+
+console.log("\nclass 0x41, a prop's lifetime is in evt blocks:");
+{
+  const rng = new Rng(9);
+  const events = propScene(rng);
+  const props = PlaceBreakableGroup(1, 2, rng);
+  const p = props[0];
+  // Frames alone must never expire it: the engine counts block advances.
+  for (let i = 0; i < 1000; i++) BreakablePropUpdate(p, rng, events);
+  check("a thousand frames do not expire a prop", !p.dead);
+  for (let b = 1; b <= 3; b++) {
+    G.g_evt_block_counter = b;
+    BreakablePropUpdate(p, rng, events);
+  }
+  check("but three block advances past a lifetime of two do", p.dead);
+}
+
+console.log("\nclass 0x41, the extra life:");
+{
+  const rng = new Rng(13);
+  const events = propScene(rng);
+  let released = -1;
+  events.on("item.released", (e) => { released = e.set; });
+  const props = PlaceBreakableGroup(2, 4, rng);
+  shoot(props[0], 2, rng, events);
+  check("the lone item-set-1 prop releases the extra life",
+        released === ItemSet.ExtraLife, String(released));
+
+  G.g_player_lives[0] = 2;
+  check("GrantExtraLife adds a life", GrantExtraLife(0) && G.g_player_lives[0] === 3);
+  G.g_player_lives[0] = 5;
+  const score = G.g_player_score[0];
+  check("and pays 300 instead when the player is at the cap",
+        !GrantExtraLife(0) && G.g_player_lives[0] === 5
+        && G.g_player_score[0] === score + 300);
+}
+
+console.log("\nclass 0x41, the props are in the save state:");
+{
+  const rng = new Rng(21);
+  const events = propScene(rng);
+  PlaceBreakableGroup(1, 4, rng);
+  const snap = JSON.stringify(G.g_breakable_props);
+  check("the prop pool survives JSON.stringify",
+        JSON.parse(snap).length === 3);
+  check("a prop holds no functions or class instances",
+        G.g_breakable_props.every(
+          (p) => Object.values(p).every(
+            (v) => typeof v !== "function"
+                   && (typeof v !== "object" || v === null
+                       || Object.getPrototypeOf(v) === Object.prototype))));
+  void events;
+}
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

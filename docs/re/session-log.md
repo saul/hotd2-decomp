@@ -4695,3 +4695,97 @@ one session** — `ThrownWeaponFlyToTarget` and `RankEnemiesByDistance` — beca
 the address was already named and I did not look. `tools/annotate.py` upserts
 by address now: it refuses to rename without `--rename`, replaces the comment,
 and appends only what is genuinely new.
+
+---
+
+## Session 22 — class 0x41, the item containers
+
+**Outcome:** spawn class `0x41` is read and ported. `web/src/game/class41/`
+holds the placer, the type-0 group constructor, the breakable prop's own state
+machine and the item releases; `verify_port.py` is green and
+`web/test/port.test.ts` gained 25 assertions for it.
+
+### What the class turned out to be
+
+`PropContainerPlacerUpdate` (`FUN_00461CD0`) is three instructions — dispatch
+`obj+0x130C` through the 79 constructors at `g_class41_constructors`, then
+`ActorKill`. It is the most-placed class in the game (441 spawns) and it is a
+*stub*: nothing it places is itself.
+
+Type 0, `PlaceBreakableGroup`, is the container mechanism, and reading its one
+consumer — `BreakablePropUpdate` (`FUN_00464620`) — settled what the items
+actually are. Set 1 is **the extra life**: `SpawnExtraLifePickup` builds a
+pickup whose shot handler calls `FUN_00415630`, which adds one to
+`g_player_lives` or pays 300 points at the cap, so that routine is now
+`GrantExtraLife`. Set 3 is **the golden frog** — a full `0x13F4` actor of
+character type `0x1C`, which the skeleton table resolves to `frog_gold.bin`.
+Sets 2 and 5–8 are the generic score pickup.
+
+### Three things the docs had wrong, all found by reading the consumer
+
+1. **The item does not drop on the last break.** `spawns.md` said it did. The
+   constructor seeds `g_item_set_countdown` with `rand() % n + 1` and each
+   break of a set member decrements it, so it is a **random** one of the set's
+   breaks. Two runs of stage 2 pay out at different times.
+2. **Member record `+0x05` is not an asset variant.** The constructor writes
+   the asset slot unconditionally and puts `+0x05` in `obj+0x2A0`, whose only
+   reader is `SpawnStoryModeItem` and only while `g_GameMode == 1`.
+3. **Only the destroying shot pays.** `BreakablePropAwardHit` takes an award
+   flag; the crack passes 0 and the destroy passes 1. Cracking a prop is worth
+   nothing.
+
+### What I got wrong
+
+* **I checked the `+0x05` field with the wrong dict key** — `m.get("variant")`
+  against a record that spells it `asset_variant` — got `None` for all 42, and
+  wrote "unreachable in the retail data" into an annotation on that basis.
+  Three members do carry one. A `.get()` that cannot fail is not a check; the
+  fix was to print the record and read it.
+* **I named the modes from memory.** I called `g_GameMode == 1` "Boss Mode"
+  and `== 2` "Training Mode" and got as far as committing
+  `SpawnBossModeItem` and `g_training_lesson` before checking `globals.tsv`,
+  which already reads the global as *1 = original/story, 2 = arcade, 3 = boss
+  rush*. Renamed to `SpawnStoryModeItem` and `g_prop_target_set`, and the
+  four member sets are now described by number with the naming marked
+  `[open]`. The repo's committed annotation outranks what I think I know
+  about the game.
+* **I ran `git checkout` on a shared file.** `./ghidra/run.sh
+  export-annotations` cannot run while the GUI holds the project — it aborts
+  on a lock error, as the skill says — so the `functions.tsv` diff I saw
+  afterwards was a **peer session's live edit**, not my export, and I reverted
+  it. Their tooling rewrote it seconds later so nothing was lost, but the rule
+  is: never `git checkout` a file in this tree, and read `script.log` before
+  believing an export happened.
+* **I conflated destroyed with falling.** The first draft had a destroyed
+  ground-level prop turn into a falling husk. It does not: its object entry
+  point is overwritten with `BreakableEffectUpdate` and it becomes a puff.
+  Only a prop whose *supports* have gone ever falls.
+
+### Two dead branches, transcribed as dead
+
+* The fall's land-on-another-prop test reads `obj+0x40..0x48`, and nothing in
+  class 0x41 ever writes them — `ActorAlloc` zeroes the object from `+0x34`
+  and a prop keeps its position at `+0x19C`. So it compares zero with zero for
+  every pair and cannot fire. Ported as written, with the field carried as
+  `hitPos` so the reason is visible.
+* The yaw draw's `& 0x8000FFFF` and sign-extension are the compiler's
+  `% 0x10000` idiom and are dead too: MSVC's `rand()` is 15 bits. The port
+  routes every `rand()` in this class through `MsvcRand`, because a 32-bit
+  draw would make both branches live and put half the props at a negative yaw
+  the engine cannot produce.
+
+### Next actions
+
+* **Wire class-0x41 spawns into the live player.** The port is driven by
+  `port.test.ts` but not yet by the running page: `ActorSpawn` is only called
+  from `render/characters.ts`, and only for spawns that resolve to a skeleton,
+  so a placer never reaches the registry. Extracting spawning from the
+  renderer is step 5/7 of `PLAYER_ARCHITECTURE.md` and this is another reason
+  to do it.
+* **Draw the props.** The port sets `x/y/z`, `pitch/yaw/roll`, `slot` and
+  `state`; nothing reads them yet. Slots `0x19E8` / `0x19E6` / `0x1A0F`.
+* **Read type 4** (`PlaceKindedProp`, 70 spawns, the most-placed of the 79)
+  and `FUN_00465FB0`, its prop. `FUN_00461CF0` is a single shared handler
+  behind ~40 of the types and is 3042 bytes; it is the next big one.
+* `FUN_004653B0` (the shatter fragments) and `FUN_004675A0` (the mode-1 item)
+  are unread.

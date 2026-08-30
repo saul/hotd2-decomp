@@ -30,6 +30,30 @@ export interface EventMap {
   "feed.note": { name: string; cat: string; note: string };
   /** A sound id the port asked for; the host owns the audio element. */
   "sound.play": { id: number };
+
+  // -- class 0x41, the breakable props -----------------------------------
+  /** First shot: the prop swapped to its broken model and shook. */
+  "prop.cracked": { id: number; sound: number };
+  /** Second shot: the prop is gone, and its item set has been charged. */
+  "prop.broken": { id: number; sound: number };
+  /** A stacked prop burst into fragments instead of toppling. */
+  "prop.shattered": { id: number; x: number; y: number; z: number };
+  /** A toppled prop reached the floor. */
+  "prop.settled": { id: number; sound: number };
+  /**
+   * The item a set of props was hiding came out. `set` is the item-set id, or
+   * -1 for the `g_GameMode == 1` substitute, whose kind is in `kind`.
+   */
+  "item.released": {
+    set: number;
+    from: number;
+    x: number;
+    y: number;
+    z: number;
+    kind?: number;
+    charType?: number;
+    sound?: number;
+  };
 }
 
 type Handler<K extends keyof EventMap> = (payload: EventMap[K]) => void;

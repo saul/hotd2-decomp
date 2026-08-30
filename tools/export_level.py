@@ -96,12 +96,14 @@ def _spawn_nodes(st) -> list[dict]:
 def _breakable_json(st, prog) -> list[dict]:
     """The breakable-prop groups this stage places, with their members.
 
-    Spawn class 0x41 type 0 (`FUN_00462A80`) places a *group* of shootable
-    props rather than one object. The spawn's `+0x11C` names the group; the
-    member records come from the EXE, not the evt. One member of each item-set
-    hides that set's item, released when the last prop of the set is broken --
-    which is what "item placement" means in this game: the items are not
-    placed, the containers are.
+    Spawn class 0x41 type 0 (`PlaceBreakableGroup`) places a *group* of
+    shootable props rather than one object. The spawn's `+0x11C` names the
+    group; the member records come from the EXE, not the evt. The props of one
+    item-set hide that set's item between them, and it is released on a
+    *random* one of their breaks -- the constructor seeds
+    `g_item_set_countdown` with ``rand() % n + 1`` -- which is what "item
+    placement" means in this game: the items are not placed, the containers
+    are.
 
     Only the groups this stage actually spawns are emitted. Stage 1 uses
     group 0 and stage 2 uses groups 1-7, each exactly once; group 8 is defined

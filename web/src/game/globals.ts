@@ -16,6 +16,7 @@
  * wrong and so is the port.
  */
 import type { Actor } from "./actor";
+import type { BreakableProp } from "./class41/prop_state";
 import { vec3, type Vec3 } from "./vec";
 
 /** One weapon in flight — the pool `ThrownWeaponUpdate` walks. */
@@ -131,6 +132,64 @@ export const G = {
   /** True once the look-at has a value worth easing from. */
   g_camera_lookat_valid: false,
 
+  // -- breakable props, class 0x41 ---------------------------------------
+  /**
+   * Every live breakable prop. The engine allocates each as its own 0x378
+   * object in the same pool the actors live in; a separate list is the same
+   * thing with the layout kept honest, since a prop shares no field offsets
+   * with an `Actor`.
+   */
+  g_breakable_props: [] as BreakableProp[],
+  /**
+   * `g_breakable_members` — 0x007DCDD4. `group * 9 + member` -> the live
+   * prop's `id`, or 0 once it is destroyed. Stride 9 because the largest
+   * group has nine members, and `BreakablePropUpdate` reads it to find the
+   * props a member supports so a stack collapses from the bottom.
+   */
+  g_breakable_members: [] as number[],
+  /**
+   * `g_item_set_countdown` — 0x009C7010. How many more props of an item set
+   * must break before its item drops. `PlaceBreakableGroup` seeds it with
+   * `rand() % n + 1`, so *which* break releases the item is random — it is
+   * not the last one.
+   */
+  g_item_set_countdown: [] as number[],
+  /** Hands out `BreakableProp.id`. State, so ids never collide across a load. */
+  g_breakable_next_id: 1,
+
+  // -- the ground plane --------------------------------------------------
+  /**
+   * `g_camera_fixed_eye_y` — 0x009C8E58, also labelled `g_ground_plane_y`.
+   * `PlaceBreakableGroup` puts a group's floor at `this - 0.1`, and
+   * `BreakablePropGroundContact` tests against the same value. The camera
+   * opcode 0x1A writes it.
+   */
+  g_camera_fixed_eye_y: 0,
+
+  // -- game mode ---------------------------------------------------------
+  /**
+   * `g_GameMode` — 0x009CA08C: 1 original/story, 2 arcade, 3 boss rush, as
+   * `globals.tsv` reads it. Class 0x41 branches on 1 and 2 — mode 1 releases
+   * the member's own `storyItem` and can drop an extra life from every prop,
+   * mode 2 turns selected members into one-shot targets and pays no score.
+   *
+   * Note this is the **exe's** numbering. The bundle's own `game_mode` is a
+   * different flag: `stage.game_mode = 1 if original else 0`, so a bundle 0
+   * is exe 2 and a bundle 1 is exe 1.
+   */
+  g_GameMode: 2,
+  /**
+   * `g_prop_target_set` — 0x009C9118. Which of four member sets
+   * `PlaceBreakableGroup` turns into one-shot targets while `g_GameMode` is 2.
+   */
+  g_prop_target_set: 0,
+  /**
+   * `g_evt_block_counter` — 0x009A2BB0. Advanced by the event script as it
+   * moves between blocks. A prop's lifetime is measured in these, not frames,
+   * which is why a prop outlives a slow player and not a fast one.
+   */
+  g_evt_block_counter: 0,
+
   // -- thrown weapons ----------------------------------------------------
   g_thrown_weapons: [] as ThrownWeapon[],
   /** Hands out `ThrownWeapon.id`. Part of the state, so ids never collide. */
@@ -174,6 +233,11 @@ export function ResetGameGlobals(): void {
   G.g_enemy_slots = [];
   G.g_thrown_weapons = [];
   G.g_thrown_next_id = 1;
+  G.g_breakable_props = [];
+  G.g_breakable_members = [];
+  G.g_item_set_countdown = [];
+  G.g_breakable_next_id = 1;
+  G.g_evt_block_counter = 0;
   G.g_frame = 0;
 }
 

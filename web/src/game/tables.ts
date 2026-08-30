@@ -6,7 +6,8 @@
  * a save state carries the state, and the tables come back with the bundle.
  */
 import type {
-  AttackJson, BakedMotion, CharactersJson, CharacterType, ThrowHandJson,
+  AttackJson, BakedMotion, BreakablesJson, CharactersJson, CharacterType,
+  ThrowHandJson,
 } from "../bundle";
 import type { Actor } from "./actor";
 import { G } from "./globals";
@@ -14,6 +15,12 @@ import { G } from "./globals";
 export const T = {
   /** The whole `characters` block: tables, types and placements. */
   chars: null as CharactersJson | null,
+  /**
+   * The `breakables` block: the nine class-0x41 groups, the 96-point hull and
+   * the type-0 placements. Read-only for the life of the stage, so it is not
+   * in the snapshot — it comes back with the bundle.
+   */
+  breakables: null as BreakablesJson | null,
   types: {} as Record<string, CharacterType>,
   get approach() { return T.chars?.approach ?? null; },
   get tracking() { return T.chars?.tracking ?? null; },
@@ -25,7 +32,8 @@ export const T = {
  * approach rings into the globals, which is what `DAT_004C4CD0` ->
  * `g_enemy_approach_rings` does at 0x004C4CD0.
  */
-export function SetGameTables(chars: CharactersJson | undefined): void {
+export function SetGameTables(chars: CharactersJson | undefined,
+                              breakables?: BreakablesJson): void {
   // Ordering hazard, and it cost an afternoon: `ResetGameGlobals` clears the
   // approach rings, so calling it *after* this leaves every ring at zero and
   // every enemy permanently in the outermost band. Say so rather than let it
@@ -36,6 +44,7 @@ export function SetGameTables(chars: CharactersJson | undefined): void {
   }
   T.chars = chars ?? null;
   T.types = chars?.types ?? {};
+  T.breakables = breakables ?? null;
 
   const rings = chars?.approach?.rings ?? [];
   G.g_enemy_approach_rings = rings.map((r) => r.inner);

@@ -180,6 +180,7 @@ game/           the port. no three.js, no DOM.
   actor.ts        the object struct, offsets in comments
   class30/        approach.ts attack_run.ts strike.ts backoff.ts
   class31/        thrower.ts projectile.ts
+  class41/        group.ts prop.ts items.ts — the breakable containers
   combat/         permits.ts rank.ts player.ts
   camera/         select_target.ts turn.ts
   tables.ts       the exported data, typed
@@ -316,7 +317,7 @@ Each step compiles and passes `verify_player_ops.py` on its own.
 2. ✅ **`game/globals.ts` + `game/actor.ts`.** `G` and the actor struct, with
    lives, score, invulnerability and the damage rank on them as
    `PlayerTakeDamage` (`FUN_00415300`).
-3. ✅ **`game/class30/` and `game/class31/`.** `enemies.ts` re-derived against
+3. ✅ **`game/class30/`, `game/class31/` and `game/class41/`.** `enemies.ts` re-derived against
    the decomp — one file per state, named for the exe function, calling the
    real call graph. The class registry mirrors `g_class_handlers`, so a class
    with no module gets no behaviour.

@@ -19,6 +19,23 @@ with the address in the doc comment. It imports neither three.js nor
 `tools/verify_port.py` checks the citations, the coverage and the three ways
 state can escape a snapshot.
 
+**Class 0x41, the item containers, is ported** (`game/class41/`). The placer
+dispatches through `g_class41_constructors` and kills itself; type 0 builds a
+group of breakable props from the exe's own member records, which travel in the
+bundle's new `breakables` block along with the 96-point collision hull. Each
+prop takes two shots — the first cracks it and pays nothing, the second breaks
+it for ten and charges its item set — and a prop whose supports are destroyed
+falls, spins and settles on a hull corner. When a set's countdown empties the
+item comes out: an **extra life** for set 1, the **golden frog** for set 3, a
+score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
+break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
+not always the same one.
+
+It is **not yet wired into the running page**: `ActorSpawn` is only reached
+from `render/characters.ts`, and only for spawns that resolve to a skeleton, so
+a class-0x41 placer never gets to the registry. The port is driven by
+`npm run test:port` and nothing else draws the props yet.
+
 Three debug views hang off that same property — if all the state is in one
 enumerable place, it can be shown:
 

@@ -58,7 +58,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `FUN_00461CD0` | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through a 79-entry table at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) reads `obj+0x6C` as an object kind. The retail stages reach 74 of the 79. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. | `[proved]`, by the game's own sound record |
 | `0x44` | `FUN_00472B10` | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Some children are shootable score pickups. | `[proved]` |
 | `0x25` | `FUN_004840D0` | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
@@ -189,9 +189,17 @@ match either sighting.
 ## Item placement — SOLVED
 
 **The items are not placed; the containers are.** Spawn class `0x41` type 0
-(`FUN_00462A80`) places a *group* of shootable props. The spawn's `+0x11C` is
-the group id. When the last prop of an item-set is broken, the item that was
-hidden in the set is released.
+(`PlaceBreakableGroup`, `FUN_00462A80`) places a *group* of shootable props.
+The spawn's `+0x11C` is the group id.
+
+> ⚠️ An earlier revision of this section said the item is released **when the
+> last prop of an item-set is broken**. It is not. The constructor seeds
+> `g_item_set_countdown` (`0x009C7010`) with `rand() % n + 1` over the `n`
+> props of the set, and each break of a set member decrements it; the item
+> comes out when it reaches zero. So it is a **random** one of the set's
+> breaks — first, last or middle — and two runs of the same stage pay out at
+> different times. `[proved]` from the constructor's tail and the destroy
+> branch of `BreakablePropUpdate`.
 
 Two tables in the EXE, not in the evt:
 
@@ -204,7 +212,7 @@ Each member record is **10 bytes**:
 +0x00  s16  x * 0.1
 +0x02  s16  z * 0.1
 +0x04  u8   item-set id
-+0x05  u8   asset variant (0xFF = the default, slot 0x19E8)
++0x05  s8   g_GameMode == 1 item kind, -1 for none
 +0x06  s8   stack level; y = level * 7.540296 above the floor
 +0x07  u8   number of supporting members
 +0x08  u8   supporting member index a
@@ -217,12 +225,45 @@ every member at level *n* names supports that are all at level *n−1*, and ever
 ground-level member names none — 42/42, no exceptions. That is a real check,
 because a wrong field offset would not produce a consistent height ordering.
 
-The floor is `g_camera_fixed_eye_y - 0.1`, added by the constructor, so the
-`y` in the record is relative.
+> ⚠️ `+0x05` was previously called an *asset variant*. It is not: the
+> constructor writes the asset slot **unconditionally** (`0x19E8`, or `0x1A0F`
+> for a mode-2 target) and puts this byte in `obj+0x2A0`, whose only reader is
+> `SpawnStoryModeItem` (`FUN_00467B90`) and only while `g_GameMode == 1`.
+> 39 of the 42 records hold `-1`; the three that do not — group 0 member 0
+> (kind 2) and group 7 members 3 and 4 (kind 5) — all hide an ordinary item
+> set as well, so mode 1 substitutes its own drop for theirs. `[proved]` from
+> the one consumer.
 
-Per prop: `+0x11C` = 2, i.e. **two shots** — the first plays `PlaySoundId(0x1D16A9)`
-and cracks the linked members, the second destroys it. In `g_GameMode == 2`
-selected members instead get `+0x11C = 1` and asset `0x1A0F`.
+The floor is `g_camera_fixed_eye_y - 0.1`, added by the constructor, so the
+`y` in the record is relative — except **group 7**, which the constructor
+gives a flat floor of `level * 7.540296 - 14.9` off its own pointer at
+`0x00593D0C`.
+
+Per prop: `+0x11C` = 2, i.e. **two shots** — the first plays
+`PlaySoundId(0x1D16A9)`, swaps the model to `0x19E6` and shakes every member
+that names this one as a support; the second plays `0x1A16A9` and destroys it.
+In `g_GameMode == 2` the members `g_prop_target_set` (`0x009C9118`) selects
+instead get `+0x11C = 1` and asset `0x1A0F`.
+
+**Only the destroying shot pays.** `BreakablePropAwardHit` (`FUN_004650F0`)
+takes an `award` flag: the crack passes 0 and the destroy passes 1, so
+cracking a prop is worth nothing and breaking it is worth 10. Both count
+toward `g_player_hit_count`, and neither pays in `g_GameMode == 2`.
+
+**Destroying and toppling are different things**, and it is easy to conflate
+them:
+
+* A prop at stack level 0 that is destroyed has its object entry point
+  overwritten with `BreakableEffectUpdate` (`FUN_00465500`) — it becomes a
+  puff for `0x48` frames and is gone. It does not fall.
+* A prop **above** level 0 that is destroyed bursts through
+  `BreakablePropSpawnShatter` (`FUN_00465170`) into 15 fragments and dies.
+* A prop only *falls* when the members it names as supports have all gone. It
+  then drops under `0.01361` a frame, spinning by at least `0x80`, until
+  `BreakablePropGroundContact` (`FUN_00465590`) finds one of the 96 points of
+  `g_breakable_hull_points` below the floor — at which point it settles onto
+  that corner. That is the whole stack collapse: nothing pushes anything, and
+  each prop only ever checks what it is standing on.
 
 **Lifetime is measured in event-script blocks, not frames.** Each prop keeps
 `obj+0x199` from `desc+0x24`, and despawns once the evt block counter
@@ -239,10 +280,28 @@ Which stage uses which group, `[proved]` from the descriptors:
 Group **8 is defined but never spawned** by any shipped stage. `[open]` whether
 it is cut content or reached by a path not walked here.
 
-`ExeTables.breakable_groups()` decodes all of this, and `export_level.py` emits
-the groups a stage actually places into `<stage>_objects.json`.
+`ExeTables.breakable_groups()` and `ExeTables.breakable_hull_points()` decode
+all of this. `export_level.py` emits the groups a stage actually places into
+`<stage>_objects.json`, and `hod2lib.bundle.breakables_json` emits all nine
+groups plus the hull into the player bundle's `breakables` block — the port
+places them from the exe tables, so a stage-filtered list would not do.
 
-### The items themselves
+### The items themselves — what each set releases
+
+`BreakablePropUpdate` switches on the item-set id once the countdown empties.
+Three arms, `[proved]` from the switch:
+
+| Set | Releases | Via |
+|---|---|---|
+| 1 | **An extra life.** `GrantExtraLife` (`FUN_00415630`) adds one to `g_player_lives`, or pays 300 points if the player is already at the cap. | `SpawnExtraLifePickup` (`FUN_00471BD0`) → `ExtraLifePickupUpdate` (`FUN_00471CC0`), drawn as slot `0x10C3` |
+| 3 | **The golden frog** — a full `0x13F4` actor of character type `0x1C`, whose skeleton slots all resolve to `frog_gold.bin`. | `SpawnGoldenFrog` (`FUN_004722A0`) |
+| 2, 5–8 | A **score pickup** of that kind. | `SpawnScorePickup` (`FUN_004723F0`) → `ScorePickupUpdate` (`FUN_004724A0`) |
+
+Set 4 has no arm and no shipped member uses it. Which sets the data actually
+places: group 0 → set 6, group 5 → set 1 (the extra life), groups 6 and 7 →
+set 2. Groups 6 and 7 **share** set 2, and `g_item_set_countdown` is one
+global per set, so whichever is placed second overwrites the other's
+countdown.
 
 The pickup actor is `FUN_004724A0`. On being shot it plays `PlaySoundId(0x416A9)`
 or `0x3B17A9`, awards `ScoreAddForPlayer(p, *(s16*)(0x0059505A + kind*0xC))` from

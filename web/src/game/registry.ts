@@ -17,6 +17,7 @@ import { SpawnClass } from "./spawn_class";
 import type { Vec3 } from "./vec";
 import { EnemyZombieInit, EnemyZombieUpdate } from "./class30";
 import { EnemyThrowerInit, EnemyThrowerUpdate } from "./class31/thrower";
+import { PropContainerPlacerHandler } from "./class41";
 
 export interface ClassFrame {
   eye: Vec3;
@@ -42,6 +43,9 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
     init: EnemyThrowerInit,
     update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.host, f.events),
   },
+  // A placer, not an actor: it builds its children and kills itself on its
+  // first frame. It draws nothing, so it needs no renderer.
+  [SpawnClass.PropContainerPlacer]: PropContainerPlacerHandler,
 };
 
 /** The classes with a ported behaviour, for the UI and `verify_port.py`. */

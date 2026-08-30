@@ -1,0 +1,150 @@
+# HOTD2 global data labels — the committed source of truth for the Ghidra database.
+#
+# Format: <address>\t<name>\t<optional comment>
+#
+# Regenerate:  ./ghidra/run.sh export-annotations
+# Replay:      ./ghidra/run.sh apply-annotations
+#
+# Windows TEB fields and resource labels are excluded: Ghidra creates those itself.
+#
+# --- game mode, scene and script state -------------------------------------
+009ca08c	g_GameMode	1 = original/story, 2 = arcade, 3 = boss rush
+009c6f0c	g_scene_state_major
+009c6f14	g_scene_state_minor
+00576c14	g_scene_state_table	the 6x9 scene state machine
+009c7200	g_script_flags	byte array the evt script sets and waits on
+009c88a4	g_script_branch_var	route branch selector, read by EvtAdvanceBlockOrRoute
+009a2bb0	g_evt_block_counter	advanced by EvtAdvanceBlockOrRoute; props measure lifetime in these
+009c7108	g_evt_ip	the evt interpreter's instruction pointer
+009a2d74	g_nEvtSkipFlag
+009a2d7c	g_nEvtSkippableRegion
+009a1a18	g_nSkipRequestedDeadEnd
+009a6184	g_evt_action_operands
+005776ec	g_evt_action_table	queue_event action groups, 16 selectors each
+# --- cameras and paths ------------------------------------------------------
+009a2d78	g_active_cam_path	the cp_ slot currently playing; gates most object rigs
+009a6040	g_camera_blocks	per-camera blocks, stride 0x1A4
+009a6110	g_cam_path_frame	camera block 0's current path frame (+0xD0 of the block)
+009c6f00	g_camera_index
+004c479c	g_cam_path_file_id
+00576d38	g_cam_path_length	per-slot play length, stride 4
+00576cf0	g_camera_preset_table
+009c71e0	g_camera_eye_x
+009c71e4	g_camera_eye_y
+009c71e8	g_camera_eye_z
+009c71ec	g_camera_pitch_bams
+009c71f0	g_camera_yaw_bams
+009c71f4	g_camera_roll_bams
+009c7080	g_camera_update_hook
+009c8e58	g_camera_fixed_eye_y	also labelled g_ground_plane_y; the two are the same word
+009c70f4	g_camera_use_fixed_y
+009c70ac	g_stashed_path_frame
+009c70b0	g_stashed_path_end_frame
+# --- actors, enemies, spawning ---------------------------------------------
+009a2280	g_class_handlers	112 slots, built by BuildClassHandlerTable
+00593358	g_class_handler_pairs	{class_id, handler}, 56 entries, negative id terminates
+009c7006	g_enemies_present
+009c904a	g_enemies_alive
+009a26a0	g_cur_actor
+009c8e4c	g_cur_enemy
+009c88c0	g_hit_slots	14 slots claimed by ActorClaimHitSlot
+0059d8e8	g_shot_test_list	stride 5 dwords
+005a4c80	g_shot_test_count
+009a5ec0	g_enemy_slots
+009c72e0	g_actor_kill_all	1 makes every class handler self-destruct
+009a5c34	g_carrier_object	the current rideable object
+005776b0	g_difficulty_hp_delta	{-30, -15, 0, 0, 0} added to obj+0x11E
+009c8e94	g_difficulty
+009c8e98	g_app_state
+009a2be0	g_enemy_approach_rings
+009c8e40	g_enemy_approach_steps
+009a32a0	g_frame_counter	free-running, incremented once per frame; NOT the cam path frame
+# --- spawn class tables discovered per class --------------------------------
+00592ae8	g_class30_states	54 entries; the zombie's state machine
+00592bc0	g_class30_draw	the zombie's draw pointer, immediately after its state table
+00592960	g_class31_states	36 entries
+004330c4	g_class33_selector_targets	jump targets for spawn class 0x33
+004330f8	g_class33_selector_index	byte index into the targets; valid selectors 1-11 and 99
+00595ab8	g_class44_subtypes	18 entries, indexed by obj+0x11C
+00593580	g_class41_constructors	79 entries, indexed by obj+0x130C
+005936bc	g_class41_entries	79 child entry functions
+0048e32c	g_class26_states	8 entries; entries 6 and 7 share a target
+005703b4	g_class26_path_by_selector	selector 6 -> path 0x183, 7 -> 0x184
+005926a8	g_prop_behaviours	10 behaviour functions shared by classes 0x12/0x13/0x15
+00589ae0	g_class28_route_table	{path slot, freeze frame} pairs
+00565ef4	g_st2car_path_table	object path per instance index
+00565f2c	g_st2car_asset_variants	int[2][4]; row 1 is the post-crash set
+00565f0c	g_class21_hp_by_rank	1 or 2 hit points by difficulty rank
+# --- items and breakables ---------------------------------------------------
+00593d14	g_breakable_group_counts	nine member counts: {4,2,3,9,5,3,3,6,7}
+00593cf0	g_breakable_group_ptrs	nine pointers to 10-byte member records
+0059505a	g_item_score_table	per-kind pickup score, stride 0xC
+# --- rendering --------------------------------------------------------------
+007e7990	g_MatrixStackTop
+007e7994	g_matrix_mode
+00571210	g_identity_matrix
+007e7948	g_projection_matrix_cache
+009a2d70	g_projection_distance_px
+009c7300	g_screen_offset_x
+009c7304	g_screen_offset_y
+00598ab0	g_SrcBlendTable
+00598ad0	g_DstBlendTable
+00598af0	g_TexAddressModeTable
+00598b00	g_ZFuncTable
+00598b20	g_CullModeTable
+0057a280	g_ModelFixupSlotList
+00576a8c	g_SceneRegionTableMode1
+00576abc	g_SceneRegionIdTableMode1
+00598778	g_d3du_unused_fov_degrees
+007de5c8	g_d3du_unused_projection
+# --- lighting and atmosphere ------------------------------------------------
+009a3540	g_scene_light_block0
+009a59e0	g_scene_light_block1
+009a3570	g_scene_fog_near
+009a3574	g_scene_fog_far
+009a3558	g_scene_light_pitch_bams
+009a355c	g_scene_light_yaw_bams
+009a354c	g_scene_light_dir_view
+009a3780	g_scene_light_colour_r
+009a378c	g_scene_light_ambient
+007e7998	g_render_light_colour_r
+007e79a4	g_render_ambient
+007e79a8	g_render_light_dir_x
+007e79b4	g_render_light_generation
+009c89e0	g_light_tween_block0
+009c8920	g_light_tween_block1
+009a1a88	g_entity_light_array	stride 0x1D dwords
+009ca090	g_backdrop_mode
+00579968	g_backdrop_preset_table
+007c2118	g_backdrop_preset_last
+007c1eb8	g_rain_particles
+009c8e50	g_rain_enabled
+# --- collision --------------------------------------------------------------
+009c7040	g_collision_meshes_full
+009ca0c0	g_collision_meshes_ray_only
+009cac40	g_coli_hit_surface
+009cac44	g_coli_hit_quad
+009cac48	g_coli_hit_dist_sq
+009cac50	g_coli_hit_z
+009cac54	g_coli_hit_x
+009cac58	g_coli_hit_y
+009cac64	g_coli_hit_normal_x
+009cac5c	g_coli_allow_backface
+0098f200	g_coli_buffer_common
+00990a00	g_coli_buffer_scene
+004d1cc4	g_coli_filename_table
+007dcbb0	g_water_level	seeded to -24.90; class 0x16/0x17 own the wave field
+# --- audio ------------------------------------------------------------------
+005845f8	g_se_name_list	{u32 id; char name[48]}, stride 0x34, 324 records, id 0xFFFF ends
+00580354	g_bgm_names_ar
+005803f8	g_bgm_names_plain
+0058044a	g_voice_records
+009c8fb8	g_current_bgm_id
+00588b58	s_sound_bgm_prefix
+# --- misc -------------------------------------------------------------------
+009a2c8c	g_queued_events_pending
+00567990	g_accuracy_bonus_table
+00589da8	g_screen_message_records
+009a5920	g_route_history
+009c8e00	g_nFiringGate
+009c911e	g_wCaptionMode

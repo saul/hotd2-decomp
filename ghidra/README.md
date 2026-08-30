@@ -15,9 +15,57 @@ Override with `GHIDRA_HOME` and `GAME_DIR`.
 ## Rebuild from scratch
 
 ```sh
+./ghidra/run.sh rebuild
+```
+
+That is the whole thing. It imports the EXE, runs auto-analysis, applies every
+dispatch table the project has recovered, and then replays every function name,
+label and comment from `annotations/`. The result is the annotated database.
+
+The steps individually, if you want them:
+
+```sh
 ./ghidra/run.sh import                        # import + auto-analysis, ~2 min
+HOTD2_APPLY=1 ./ghidra/run.sh script ApplyKnownTables.java
+HOTD2_APPLY=1 ./ghidra/run.sh apply-annotations
 ./ghidra/run.sh script ExportInventory.java   # regenerate ghidra/out/
 ```
+
+## Annotations are the source of truth
+
+The database is derived data and is not committed. **`annotations/*.tsv` is
+what is committed**, and it is the project's record of every symbol recovered:
+
+| File | Rows | Contents |
+|---|---|---|
+| `annotations/functions.tsv` | ~200 | `address`, `name`, optional comment |
+| `annotations/globals.tsv` | ~130 | `address`, `name`, optional comment |
+
+`ApplyAnnotations` only renames a symbol whose current name is still a Ghidra
+default, so it is idempotent, it never clobbers a name chosen in the GUI, and
+it can run before or after `ApplyKnownTables` without ordering trouble. It
+*creates* functions that do not exist yet, because most of the interesting ones
+are only reachable through a dispatch table auto-analysis did not recognise.
+
+`tools/verify_annotations.py` checks every row against the EXE's own PE section
+table — that each address resolves, that functions land in `.text`, that
+nothing is listed twice. Run it before committing an annotation change.
+
+### After exploring over MCP, export
+
+Renaming things over the Ghidra MCP bridge changes the live database and
+**leaves no reproducible trail**. That is the one way this project loses work.
+So when a session has renamed anything:
+
+```sh
+./ghidra/run.sh export-annotations   # DB -> annotations/*.tsv
+git diff ghidra/annotations          # review, then commit
+```
+
+`ExportAnnotations` deliberately skips anything a fresh import would recreate —
+default names, `Catch@`/`Unwind@`, PE resources, Windows TEB fields, and the
+CRT/D3DX names the function ID analyser finds — so the committed file stays a
+record of *this project's* findings rather than a snapshot of Ghidra's.
 
 ## Layout
 

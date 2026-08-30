@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Reproducible Ghidra headless driver for the HOTD2 project.
 #
-#   ./ghidra/run.sh import          create the project and run auto-analysis
-#   ./ghidra/run.sh script <Name>   run ghidra/scripts/<Name> against the program
-#   ./ghidra/run.sh list            list available scripts
+#   ./ghidra/run.sh rebuild             import + apply every committed annotation
+#   ./ghidra/run.sh import              create the project and run auto-analysis
+#   ./ghidra/run.sh apply-annotations   replay ghidra/annotations/*.tsv onto the DB
+#   ./ghidra/run.sh export-annotations  dump the DB's project symbols back to TSV
+#   ./ghidra/run.sh script <Name>       run ghidra/scripts/<Name> against the program
+#   ./ghidra/run.sh list                list available scripts
+#
+# `rebuild` is the one to run after a fresh checkout: it produces a database
+# with every name, label and dispatch table this project has recovered.
 #
 # Environment overrides:
 #   GHIDRA_HOME   default ~/ghidra_12.1.3_PUBLIC
@@ -22,6 +28,7 @@ SCRIPTS="$REPO/ghidra/scripts"
 OUT="$REPO/ghidra/out"
 
 export HOTD2_OUT="$OUT"
+export HOTD2_REPO="$REPO"
 mkdir -p "$PROJECT_DIR" "$OUT"
 
 [[ -x "$HEADLESS" ]] || { echo "error: analyzeHeadless not found at $HEADLESS" >&2; exit 1; }
@@ -36,6 +43,23 @@ case "${1:-}" in
       -cspec windows \
       > "$OUT/import.log" 2>&1
     grep -iE "Analysis succeeded|Import succeeded|ERROR" "$OUT/import.log" | tail -5
+    ;;
+
+  rebuild)
+    "$0" import
+    echo "Applying recovered dispatch tables..."
+    HOTD2_APPLY=1 "$0" script ApplyKnownTables.java
+    echo "Applying committed annotations..."
+    HOTD2_APPLY=1 "$0" script ApplyAnnotations.java
+    echo "Done. The database now carries every symbol in ghidra/annotations/."
+    ;;
+
+  apply-annotations)
+    HOTD2_APPLY="${HOTD2_APPLY:-}" "$0" script ApplyAnnotations.java
+    ;;
+
+  export-annotations)
+    "$0" script ExportAnnotations.java
     ;;
 
   script)

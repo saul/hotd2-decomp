@@ -1,0 +1,216 @@
+# HOTD2 function names — the committed source of truth for the Ghidra database.
+#
+# Format: <address>\t<name>\t<optional comment>
+# Addresses are virtual, lower-case hex, no 0x prefix.
+#
+# Regenerate from a live database with:   ./ghidra/run.sh export-annotations
+# Replay onto a fresh import with:        ./ghidra/run.sh apply-annotations
+#
+# ApplyAnnotations only renames a symbol whose current name is still a Ghidra
+# default (FUN_/SUB_/LAB_/DAT_/UNK_), so re-applying is idempotent and never
+# clobbers a name a human chose in the GUI.
+#
+# Names recovered by Ghidra's own analysers (CRT, D3DX, Catch@/Unwind@) are
+# deliberately NOT listed: auto-analysis recreates them on import.
+00401260	RegionDrawResidentSet	walks the region tables; the engine's only table-driven draw path
+00401470	RegionInit
+004014c0	RegionBindSceneTables
+00401510	RegionLoadDelta
+004015a0	RegionUnloadDelta
+00401630	EvtOpRegionEnter29
+00401670	EvtOpRegionLoad28
+00401ae0	MatrixToEulerBams	matrix -> (rx, ry, rz) BAMS decomposition
+00402320	EvtRunQueuedActions
+00403250	EvtActionSetContinuation13
+004032e0	EvtActionHoldCameraPreset20
+00403360	EvtActionCamPlay40
+004033b0	CamEvalStaticPose
+00403510	CamStartPathPlayback
+004035e0	CamAdvancePathFrame
+004036b0	EvtActionSceneState11
+00403710	EvtActionFinishSequence21
+00403780	EvtActionSetUpdateRoutine12
+004037e0	EvtActionSetGlobal14
+00403830	EvtActionSetPlayerFlag10
+004038a0	EvtActionStoreSixOperands60
+00403930	EvtActionSetFlag15
+00403bd0	EvtEnterSceneState
+00404000	CamBindPathSlots
+004040f0	CamEvalHermiteCurve
+004041e0	CamEvalPath7
+004042d0	CamEvalObjectPath6	writes {float x,y,z; int rx,ry,rz}; Ghidra types all six as float and is wrong
+00404570	ProcessPlayerShots	consumes the shot-test list, per player
+00404630	ShotTestSphere
+00404a00	ShotTestMesh
+00404db0	MarkActorShot	sets obj+0x34 |= 8 and the shooter bit
+004016b0	VecToAngles	writes BAMS pitch/yaw; yaw = atan2(dx, dz)
+004053b0	ColiTraceSegmentAllSets
+004057f0	ColiTestSphereAgainstFullSet
+00405160	RegisterForShotTest	appends the actor to the per-frame gunshot hit-test list
+00406310	CheckSphereInFrustum
+00407340	SpawnSpriteEffect	billboarded sprite-animation effect by kind
+004073b0	SpriteEffectSlotRange	maps an effect kind to its asset slot range
+004083d0	AttachedEffectThink	obj+0x1390 is a PARENT ACTOR here, not a descriptor tail
+00408770	SpawnAttachedEffect
+004088a0	EvtOpSpawnPlaced09	alloc 0x13F4; reads desc+0x24/+0x25 inline; does NOT set obj+0x1390
+00408970	ActorInitFlags	obj+0x34 |= 1
+00408a20	SpawnFromDescriptor	opcodes 0x0B/0x0D; alloc 0x13F4; obj+0x1390 = descriptor + 0x24
+00408aa0	EvtOpSpawnObj0B
+00408b70	EvtOpSpawnObjUnlessSkip0D
+00408bc0	SpawnFromDescriptorSmall	opcode 0x0C; alloc 0x1314; obj+0x130C = descriptor + 0x24
+00408c40	EvtOpSpawnObjC0C
+00408c80	EvtOpSetApproachSteps0F
+00408cc0	EvtOpSetApproachStepsTwoPlayerBias12
+00408d10	EvtOpSetApproachRings0E
+00408e80	RegisterEnemySlot
+00409270	ActorClaimHitSlot	14-slot table at g_hit_slots; sets obj+0x38 |= 0x40
+004092d0	ActorFreeHitSlot
+004092f0	DispatchHit
+00409430	ResolveHit	body-part and damage tables indexed by actor type
+004098c0	ActorApplyDamage	decrements obj+0x11C only
+00409cc0	ActorDespawn
+00409d40	QueryGroundHeightAt
+0040a8b0	ActorInitHitPoints	adds the difficulty delta to obj+0x11E, clamps [1,300], copies to obj+0x11C
+0040ac90	BuildClassHandlerTable	fills the 112-slot array from the {class,handler} pairs
+0040acd0	LzDecompress
+0040c320	PushSceneFogFromLightBlock
+0040c340	CameraClearHookAndPose
+0040c380	CameraFromViewAngles
+0040c430	CameraSnapToPathEye
+0040c4c0	CameraPathWithImpulseShake
+0040c770	CameraStepDeferredRailWithFrameExport
+0040c8a0	CameraPlayStashedPath
+0040c9c0	CameraFollowPlayerMidpoint
+0040e0b0	BuildSceneLightDirection
+00410440	ActorBuildSkinnedModel
+00411090	DrawSkinnedModelAndShadow	internally push/pop balanced
+004119a0	ActorSetMotionBlended
+00412440	ActorBindPartList
+004124b0	ActorReleasePartList
+00413120	EvtRelocatePointers
+004132d0	DrawBackdropDome
+004136a0	DrawRainParticles
+00413970	HudDrawShutterState
+004156c0	ScoreAddForPlayer
+004159a0	PlacePlayerEntityFromViewPose
+00416b00	PlayerShotEffectsThink	6-record ring of per-shot effects, per player
+00416f70	PlayerShotEffectSpawn
+00418200	LoadCommonPolTexBanks
+004184c0	SetupSceneProjection
+00418560	AssetDrawSlot
+004185a0	AssetDrawSlotWithAlpha
+004185e0	SubmitSlotWithSceneLightArray	lit variant of AssetDrawSlot, same slot
+00418820	AssetLoadOneSlot
+00418a00	AssetLoadTexBankStep
+00418ba0	AssetUnloadSlot
+00419200	AssetGetBoundingSphere
+00419270	ModelFlipStripCullingParity
+00419300	ModelForceFogControlNone
+004194c0	SetProjectionNearPlane
+0041cfd0	PlaySoundId	id >> 28 selects the category table at 0x0041D324
+0041d3a0	SndLoadPackStubbedOut
+0041d3b0	SndFreePackStubbedOut
+0041d450	BgmStopThenPlay
+0041d5a0	AssetRunJob
+0041d970	AssetDrainAllJobs
+0041d9d0	AssetDrainTexAndPolJobs
+0041da70	AssetDrainMotionJobs
+0041ebb0	NoOpStub	a bare RET; the filler entry in every dispatch table
+00435aa0	DrawDialogueSubtitleTask
+00435b80	EvtOpPlayDialogue2D
+00436200	ScoreRankForPlayer	score -> rank 0..7; picks the ending track
+00436850	DrawTextCentred
+0045ebb0	EvtResolvePointer	identity function; descriptors are already relocated pointers
+0045ecc0	EvtInterpreterLoop
+0045f000	EvtAdvanceBlockOrRoute
+0045f130	EvtOpSetCollisionSetFull10
+0045f160	EvtOpSetCollisionSetRayOnly11
+0045f190	EvtOpSetSceneLightingOverride13
+0045f240	EvtOpSetLight0Direction18
+0045f270	EvtOpSetLight1Direction19
+0045f2a0	EvtOpSlerpLight0Direction17
+0045f2d0	EvtOpSetGroundPlaneY1A
+0045f300	EvtOpSetBackdropPreset1B
+0045f320	EvtOpSetBackdropMode1C
+0045f340	EvtOpEnableRain1D
+0045f360	EvtOpWriteUnreadGlobal1E
+0045f380	EvtOpSetHudShutterState1F
+0045f680	EvtOpAssetWaitAllJobs58
+0045f690	EvtOpAssetWaitTexPolJobs59
+0045f6a0	EvtOpAssetWaitMotionJobs5A
+0045f6b0	EvtOpSndLoadPackStub5D
+0045f6e0	EvtOpSndFreePackStub5E
+0045f7c0	EvtOpBgmEntryPlay5F
+0045f7f0	EvtOpQueueEvent30
+0045f870	EvtOpGotoSceneState31
+0045f900	EvtOpGotoSceneStateWhenPlayersAlive32
+0045f9f0	EvtOpSetActionDrainMode33
+0045fa20	EvtOpEnableCameraPathRoll35
+0045fa40	EvtOpPinViewToGroundPlane36
+0045fa60	EvtOpForceCameraPathAdvance37
+0045fa80	EvtOpWaitQueuedEventsDone40
+0045fac0	EvtOpWaitCameraPathFrame41
+0045fb30	EvtOpWaitFrames42
+0045fbc0	EvtOpWaitEnemiesPresent43
+0045fc10	EvtOpWaitEnemiesAlive44
+0045fc80	EvtOpWaitScriptFlag45
+0045fcd0	EvtOpWaitScriptedActors46
+0045fd20	EvtOpWaitTargetsClear47
+0045fd70	EvtOpSetScriptFlag48
+0045fd90	EvtOpSetSkippableRegion2C
+0045fdd0	EvtOpShowScreenMessage2D
+0045fe00	EvtOpResumeBgmIfSkipped2E
+0045fe20	EvtOpSuppressAccuracyStats2F
+0045fe40	EvtOpAwardAccuracyBonus2B
+0045feb0	EvtOpNopOneOperand3E
+0045fec0	EvtOpNopThreeOperands3D
+00480a60	EntityLightAcquireSlot
+00480aa0	EntityLightReleaseSlot
+00480ac0	BuildEntitySpotlightArray
+00480ce0	EvtOpSetSceneLighting14
+00480d00	EvtOpEnableEntitySpotlights15
+00480d20	EvtOpSetAmbientLightRgb16
+0048a310	ColiLoadFileByIndex
+0048a3b0	ColiLoadForScene
+004a4da0	InitD3DDeviceAndTextureStages	sets COLORARG1=TEXTURE, COLORARG2=DIFFUSE, ALPHAARG1=TEXTURE
+004a59c0	DrawStripPrimitive
+004a5a40	DrawTriangleListPrimitive
+004a61b0	BindTextureStage
+004a7040	ActorKill	unlinks the actor and longjmps; does not return
+004a7400	ActorAllocRaw
+004a74e0	ActorAllocSub
+004a6fa0	ActorAlloc	ActorAlloc(entry_fn, size) stores entry_fn at obj[0]
+004a7630	RenderInitStates
+004a7780	TranslatePvr2StateToD3D	ALPHABLENDENABLE = (tsp & 0x180000) != 0x80000
+004a79f0	SetDrawLayerNibble
+004a7ab0	DrawSpriteQuadCommand
+004a7e50	RenderEnqueueCommand	draws the opaque pass immediately, in submission order
+004a7ef0	WalkMeshChainAndDraw
+004a8440	DrawModelWithForcedAlphaBlend
+004a88e0	RenderFlushCommandList	sorts by (draw layer asc, sort depth desc) then draws the translucent pass
+004a8a20	RenderCommandCompare	the qsort comparator behind the draw order
+004a8a80	MatrixTransformPoint
+004a8ca0	MatrixStore
+004a9230	MatrixLoad
+004a9250	SetMatrixMode
+004a92a0	MatrixMultiply
+004a9840	MatrixStackPop
+004a9880	MatrixStackPush	push(0) duplicates the top
+004a99f0	MatrixRotateX
+004a9ae0	MatrixRotateY
+004a9bd0	MatrixRotateZ
+004a9cc0	MatrixScale
+004a9d80	MatrixTranslate
+004a9e10	MatrixLoadIdentity
+004a9f70	MatrixClearRotation	wipes the top 3x3; a screen-axis billboard
+004aa070	SetRenderAmbient
+004aa0a0	SetRenderLightColour
+004aa0e0	SetRenderLightDirection
+004aa120	SetLightingDefaultSingle
+004aa2b0	RenderSubmitModelDefaultLight
+004aa500	RenderSubmitModelSceneLights
+004aa8b0	SetLightingSceneArray
+004aaa40	ColiSegmentVsMesh
+004abd40	BuildPerspectiveProjection
+004abdf0	SetFogRange
+004ac980	BindModelTextureHandles

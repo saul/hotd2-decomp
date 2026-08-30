@@ -27,7 +27,7 @@ import { CharacterTypeOf, FirstBakedOf, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius, TestApproachRing } from "./ring";
-import { MotionRow, QUEUE_CAP, ZombieState } from "./states";
+import { MotionFade, MotionRow, QUEUE_CAP, ZombieState } from "./states";
 
 /** `FUN_00409E80`'s turn rate here is a literal 0x40 BAMS. */
 const HOLD_TURN_RATE = 0x40;
@@ -64,6 +64,6 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3,
   // facing you.
   ZombieSetMotionIfIdle(obj,
     FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
-    rng, 5);
+    rng, 5, MotionFade.Normal);
   TurnActorTowardCameraEye(obj, eye, HOLD_TURN_RATE);
 }

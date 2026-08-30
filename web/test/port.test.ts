@@ -317,8 +317,15 @@ console.log("the queue throttle:");
   const gaps: number[] = [];
   let last = -1;
   let inStrike = false;
+  // `ActorSetMotionBlended`'s fourth argument is a fade length and every state
+  // passes one; without it each transition is a cut.
+  const strikeMotion = TYPE.attacks["0"]["1"].strike;
+  let fadedOutOfBite = false;
   for (let i = 0; i < 1800; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    if (z.fadeFrom?.motion === strikeMotion && z.fade > 0) {
+      fadedOutOfBite = true;
+    }
     const now = z.state === ZombieState.Strike;
     if (now && !inStrike) {
       if (last >= 0) gaps.push(i - last);
@@ -327,6 +334,9 @@ console.log("the queue throttle:");
     inStrike = now;
   }
   check("it bites more than once", gaps.length > 0, `${gaps.length + 1} bites`);
+  check("and the bite cross-fades into the retreat rather than cutting",
+        fadedOutOfBite,
+        fadedOutOfBite ? "" : "no fade with the strike as the outgoing clip");
   check("and waits between bites rather than repeating on the spot",
         gaps.length > 0 && Math.min(...gaps) > 60,
         gaps.length ? `shortest gap ${Math.min(...gaps)} frames` : "n/a");

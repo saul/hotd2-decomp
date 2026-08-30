@@ -17,7 +17,7 @@ import { TurnActorTowardCameraEye } from "../actor_turn";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
-import { MotionRow, ZombieState } from "./states";
+import { MotionFade, MotionRow, ZombieState } from "./states";
 
 /** `FUN_00409E80`'s rate here is the same literal 0x40 the hold uses. */
 const WAIT_TURN_RATE = 0x40;
@@ -27,7 +27,7 @@ export function ZombieStateWaitTurn(obj: Actor, eye: Vec3, rng: Rng): void {
 
   ZombieSetMotionIfIdle(obj,
     FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
-    rng, 5);
+    rng, 5, MotionFade.Normal);
   TurnActorTowardCameraEye(obj, eye, WAIT_TURN_RATE);
 
   // `(s8)obj+0x131D < obj+0x1358` -- back in the allowed slice, so go again.

@@ -197,6 +197,23 @@ export interface Actor {
   /** Seconds into that loop. */
   clock: number;
   /**
+   * The clip being faded *out* of, and how far into it.
+   *
+   * `ActorSetMotionBlended` (`FUN_004119A0`) takes a fade length as its fourth
+   * argument and stores it at `track+0x30`; every state passes one — 5 for the
+   * approach walk and the strike, 10 for the run, the idle, the retreat, the
+   * lunge and the wait. `ActorSetMotion` (`FUN_00411930`) is the one that does
+   * not, and it is used for the scripted cues that are meant to snap.
+   *
+   * Without it every transition is a cut, which is what made the bite jump
+   * straight into the walk-back.
+   */
+  fadeFrom: { motion: number; t: number } | null;
+  /** Frames of the cross-fade left. */
+  fade: number;
+  /** How many it started with, so the weight is a ratio. */
+  fadeLen: number;
+  /**
    * The frame index the root-motion delta was last taken at, for the base
    * motion and for `action`. Root translation is a difference between frames,
    * so the previous one is state.
@@ -265,6 +282,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     visible: false,
     motion: 0,
     clock: 0,
+    fadeFrom: null,
+    fade: 0,
+    fadeLen: 0,
     rootFrame: -1,
     rootActionFrame: -1,
     action: null,

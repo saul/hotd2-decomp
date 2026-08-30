@@ -17,9 +17,11 @@
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { MotionOf } from "../tables";
+import { MotionFade } from "./states";
 
 export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
-                                     rng: Rng, spread: number | "clip"): void {
+                                     rng: Rng, spread: number | "clip",
+                                     fade: MotionFade = MotionFade.Normal): void {
   if (motion === undefined) return;
   const m = MotionOf(obj, motion);
   if (!m) return;
@@ -27,8 +29,37 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
   // actor until it ends, and the reaction runs on its own track.
   if (obj.action) return;
   if (obj.motion === motion) return;
+  // Fade out of what is actually on screen. Right after a swing that is the
+  // strike clip, which `ActorAdvanceMotion` parked here as the outgoing one --
+  // taking `obj.motion` instead would fade out of the walk the swing had
+  // covered up, and the bite would still cut.
+  if (obj.fadeFrom && obj.fade > 0) {
+    obj.fade = fade;
+    obj.fadeLen = fade;
+  } else {
+    ActorStartFade(obj, obj.motion, obj.clock, fade);
+  }
   obj.motion = motion;
   const frames = Math.max(1, spread === "clip" ? m.frames : spread);
   obj.clock = rng.int(frames) / Math.max(1, m.fps);
   obj.rootFrame = -1;
+}
+
+/**
+ * Begin a cross-fade out of whatever is showing.
+ *
+ * The engine holds two motions on one track and fades between them;
+ * `MotionCrossFadeTo` (`FUN_00411B70`) is the same operation for the stumble,
+ * which this port already does. This is it for an ordinary motion change.
+ */
+export function ActorStartFade(obj: Actor, fromMotion: number, fromT: number,
+                               frames: number): void {
+  if (frames <= 0 || !MotionOf(obj, fromMotion)) {
+    obj.fadeFrom = null;
+    obj.fade = 0;
+    return;
+  }
+  obj.fadeFrom = { motion: fromMotion, t: fromT };
+  obj.fade = frames;
+  obj.fadeLen = frames;
 }

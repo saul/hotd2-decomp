@@ -17,7 +17,7 @@ import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
-import { MotionRow, ZombieState } from "./states";
+import { MotionFade, MotionRow, ZombieState } from "./states";
 
 export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number,
                                     rng: Rng): void {
@@ -27,7 +27,8 @@ export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number,
   // no run clip of its own, which is `znchain` and the two `znebi`.
   ZombieSetMotionIfIdle(obj, FirstBakedOf(obj, row, MotionRow.Run,
                                           MotionRow.RunAlt, MotionRow.Walk,
-                                          MotionRow.WalkAlt), rng, "clip");
+                                          MotionRow.WalkAlt), rng, "clip",
+                             MotionFade.Normal);
 
   if (TestApproachRing(obj, eye) === 1) {
     obj.state = ZombieState.HoldAtRange;

@@ -26,7 +26,8 @@ import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieGiveUpAttack } from "./leave";
 import { ActorFacePlayerTarget } from "../actor_turn";
-import { GAME_HZ, StrikeSub, ZombieState } from "./states";
+import { ActorStartFade } from "./motion_cue";
+import { GAME_HZ, MotionFade, StrikeSub, ZombieState } from "./states";
 
 /**
  * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
@@ -65,6 +66,12 @@ export function ActorStrikeConnect(obj: Actor, atk: AttackJson,
  * has actually backed away.
  */
 function endStrike(obj: Actor): void {
+  // The swing is what is on screen, so it is what the retreat fades out of.
+  // `ActorAdvanceMotion` cannot do it here: this ends the clip a frame early,
+  // before its own end-of-clip branch would fire.
+  if (obj.action) {
+    ActorStartFade(obj, obj.action.motion, obj.action.t, MotionFade.Normal);
+  }
   obj.action = null;
   obj.strikeFloor = 0;
   obj.state = ZombieState.BackOff;

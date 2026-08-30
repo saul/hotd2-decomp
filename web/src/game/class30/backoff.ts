@@ -18,7 +18,7 @@ import { FirstBakedOf, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
-import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionRow, ZombieState } from "./states";
+import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionFade, MotionRow, ZombieState } from "./states";
 
 export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
                                    rng: Rng): void {
@@ -32,7 +32,7 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
   }
 
   ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway), rng, 5);
+    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway), rng, 5, MotionFade.Normal);
   // [diverges] The engine turns relative to `obj+0x13D8/E0`, where the strike
   // began, at a rate of -0x40 or +0x40 by a flag. What the sign *means* is
   // unresolved, and it matters: the strike ends only a few units from that

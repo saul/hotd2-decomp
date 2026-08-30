@@ -84,7 +84,7 @@
 0040e0b0	BuildSceneLightDirection
 00410440	ActorBuildSkinnedModel
 00411090	DrawSkinnedModelAndShadow	internally push/pop balanced
-004119a0	ActorSetMotionBlended
+004119a0	ActorSetMotionBlended	Start a motion on the track with a **cross-fade**: the fourth argument is the fade length in frames, stored at track+0x30 as length+1, alongside the start frame at +0x08 and its half at +0x18. Every class-0x30 state passes one -- 5 for ZombieStateApproach's walk and ZombieStateStrike's swing, 10 for the attack run, the hold's idle, ZombieStateBackOff's retreat, the lunge and ZombieStateWaitTurn. ActorSetMotion (FUN_00411930) is the one that does not fade, and it is used for the scripted cues that are meant to cut.
 00412440	ActorBindPartList
 004124b0	ActorReleasePartList
 00413120	EvtRelocatePointers

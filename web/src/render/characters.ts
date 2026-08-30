@@ -337,14 +337,16 @@ export class CharacterLayer {
     if (!m || m.frames <= 0) return;
     f = Math.floor(inst.a.clock * m.fps) % m.frames;
 
-    // A strike or lunge the director started: full weight, no blend, and it
-    // reports its own play position back so the hit can land on its frame.
+    // A strike or lunge the director started: it owns the body, and it reports
+    // its own play position back so the hit can land on its frame.
     const act = inst.a.action;
     if (act) {
       const am = inst.type.motions[String(act.motion)];
       if (am) {
-        this.apply(inst, am, Math.min(am.frames - 1,
-                                      Math.floor(act.t * am.fps)));
+        const af = Math.min(am.frames - 1, Math.floor(act.t * am.fps));
+        // Fading *into* the swing: the lunge is set with a fade of 10 and the
+        // strike with 5, so the arm comes up rather than appearing raised.
+        if (!this.blendFromFade(inst, am, af)) this.apply(inst, am, af);
         return;
       }
     }
@@ -368,7 +370,32 @@ export class CharacterLayer {
         return;
       }
     }
-    this.apply(inst, m, f);
+    if (!this.blendFromFade(inst, m, f)) this.apply(inst, m, f);
+  }
+
+  /**
+   * Cross-fade out of the previous clip, if one is running.
+   *
+   * `ActorSetMotionBlended` takes a fade length as its fourth argument and
+   * every state passes one — 5 for the approach walk and the strike, 10 for
+   * the run, the idle, the retreat, the lunge and the wait. The port ignored
+   * it, so every transition was a cut and the bite jumped straight into the
+   * walk-back.
+   *
+   * Returns false when there is nothing to fade from, so the caller poses
+   * normally.
+   */
+  private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
+    const fade = inst.a.fadeFrom;
+    if (!fade || inst.a.fade <= 0 || inst.a.fadeLen <= 0) return false;
+    const pm = inst.type.motions[String(fade.motion)];
+    if (!pm || pm.frames <= 0) return false;
+    // The outgoing clip keeps playing underneath; `ActorAdvanceMotion` runs
+    // its clock. Weight goes 0 -> 1 onto the incoming one.
+    const pf = Math.floor(fade.t * pm.fps) % pm.frames;
+    const w = 1 - inst.a.fade / inst.a.fadeLen;
+    this.applyBlend(inst, pm, pf, m, f, Math.min(1, Math.max(0, w)));
+    return true;
   }
 
   /**

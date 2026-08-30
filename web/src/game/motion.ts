@@ -11,6 +11,8 @@
  * counter is a field of the object, at `obj+0x19C`.
  */
 import type { Actor } from "./actor";
+import { ActorStartFade } from "./class30/motion_cue";
+import { MotionFade } from "./class30/states";
 import { ApplyRootMotion, rootDelta } from "./root_motion";
 import { MotionOf } from "./tables";
 
@@ -26,6 +28,13 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   const base = MotionOf(obj, obj.motion);
   const wasBase = obj.rootFrame;
   obj.clock += dt;
+  // The outgoing clip keeps running underneath, which is what makes the blend
+  // land in the right place rather than freezing a pose and dissolving it.
+  if (obj.fadeFrom) {
+    obj.fadeFrom.t += dt;
+    obj.fade -= dt * 60;
+    if (obj.fade <= 0) obj.fadeFrom = null;
+  }
   // Root motion: the clip's own translation is what walks the actor. Applied
   // only while no one-shot is running, because the one-shot owns the body.
   if (base && !obj.action && !obj.intro) {
@@ -79,8 +88,16 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       ApplyRootMotion(obj, d.x, d.z);
       obj.rootActionFrame = f;
       if (act.t * am.fps >= am.frames) {
-        if (act.loop) { act.t = 0; obj.rootActionFrame = -1; }
-        else obj.action = null;
+        if (act.loop) {
+          act.t = 0;
+          obj.rootActionFrame = -1;
+        } else {
+          // A one-shot ending is a transition like any other: the next state
+          // will set its own clip, and it must fade out of the swing rather
+          // than out of whatever the base motion happened to be.
+          ActorStartFade(obj, act.motion, act.t, MotionFade.Normal);
+          obj.action = null;
+        }
       }
     }
   }

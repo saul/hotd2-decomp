@@ -73,6 +73,20 @@ export enum MotionRow {
   BackAway = 4,
 }
 
+/**
+ * `ActorSetMotionBlended`'s fourth argument: the cross-fade length in frames.
+ *
+ * Which value a state passes is not decoration — the quick one is for clips
+ * that are already in the right pose (the approach walk, the strike out of the
+ * lunge) and the long one for a real change of intent.
+ */
+export enum MotionFade {
+  /** `ZombieStateApproach`'s walk, and `ZombieStateStrike`'s swing. */
+  Quick = 5,
+  /** The attack run, the hold's idle, the retreat, the lunge, the wait. */
+  Normal = 10,
+}
+
 /** The engine's frame clock; attack hit frames are counted in it. */
 export const GAME_HZ = 60;
 

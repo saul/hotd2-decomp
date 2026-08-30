@@ -16,7 +16,7 @@ import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
-import { MotionRow, QUEUE_CAP } from "./states";
+import { MotionFade, MotionRow, QUEUE_CAP } from "./states";
 
 export function ZombieStateApproach(obj: Actor, eye: Vec3, rng: Rng): void {
   if (obj.sub === 0) {
@@ -32,7 +32,7 @@ export function ZombieStateApproach(obj: Actor, eye: Vec3, rng: Rng): void {
   // of the queue, and it is not otherwise read here, so the port takes row 0.
   ZombieSetMotionIfIdle(obj,
     FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
-    rng, "clip");
+    rng, "clip", MotionFade.Quick);
 
   if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP
       && TryClaimAttackSlot(obj)) {

@@ -4822,3 +4822,35 @@ ring, the retreat finished on its first frame, and it bit again on the spot.
 
 The real fix for "behind the player" was never to suppress the travel: it was
 that the renderer was double-applying it.
+
+## Every transition was a cut
+
+The motions snapped — most visibly from the bite into the walk-back — and the
+answer was in calls already read and not looked at closely enough.
+`ActorSetMotionBlended` (`FUN_004119A0`) takes **four** arguments, and the
+fourth is a cross-fade length: it lands at `track+0x30` as length+1, next to
+the start frame at `+0x08` and its half at `+0x18`. Every state passes one.
+
+```
+ZombieStateApproach   walk    5      ZombieStateAttackRun   run       10
+ZombieStateStrike     swing   5      ZombieStateHoldAtRange idle      10
+                                     ZombieStateBackOff     retreat   10
+                                     ZombieStateWaitTurn    walk      10
+                                     ZombieStateStrike      lunge     10
+```
+
+`ActorSetMotion` (`FUN_00411930`) is the one with no fade, and it is used for
+the scripted cues that are meant to cut — the leap, the entrance. So the engine
+distinguishes the two and the port did not: it swapped `obj.motion` outright
+and every change was a hard cut.
+
+The port keeps the outgoing clip and its clock on the actor now, so the fade is
+game state and survives a save, and the renderer blends the two with the
+`applyBlend` it already had for the stumble.
+
+Two things that were not obvious. The fade has to come out of **what is on
+screen**, which right after a swing is the strike clip rather than the base
+motion the swing was covering — fading from `obj.motion` there fades out of a
+walk nobody could see, and the bite still cuts. And `ZombieStateStrike` ends
+its clip a frame early, so `ActorAdvanceMotion`'s own end-of-clip branch never
+fires for it: the fade has to start in `endStrike`, at the transition itself.

@@ -788,21 +788,45 @@ marked as such in `enemies.ts`:
 * **the strike itself** is `[open]`; the player holds the pose for one step and
   then releases the permit so the next enemy can commit.
 
-And one question was asked and **not** answered, which is worth stating rather
-than guessing at. Do zombies aim their torso and head at the player
-independently of their body yaw? The pose path that has been read —
-`SkeletonBuildAndPose` -> `SkeletonWalkNode` — is **pure motion**: every bone's
-rotation comes from `g_frame_bone_rotations`, which points straight into the
-loaded motion bank, and nothing adds an actor-derived angle to any bone.
-`EnemyZombieInit` does compute a pitch and yaw toward the camera into
-`obj+0x1320`/`+0x1324`, and no reader for them was found in the class-0x30
-range. But the per-frame pose is reached through function pointers stored in
-the object (`+0x1158`, `+0x1174`), so an xref sweep cannot settle it — the
-same trap that produced the wrong camera conclusion earlier in this file.
-So: `[open]`. What would settle it is reading the stored callbacks rather than
-sweeping xrefs. What the game demonstrably *does* do is turn the whole actor
-(`TurnActorTowardCamera`) and select directional motion variants, which is
-enough to read as aiming.
+### Do zombies aim their torso and head at the player? No.
+
+Worth stating as a result rather than a shrug, because it is a reasonable thing
+to expect and the answer is a clean negative:
+
+* **The bone pose is pure motion.** `SkeletonWalkNode` takes every bone's
+  rotation from `g_frame_bone_rotations`, which points straight into the loaded
+  motion bank, and adds nothing derived from the actor.
+* **The per-frame pose hook is empty.** `SkeletonApplyRootMotion` ends by
+  calling a hook stored in the motion block at `+0x115C`. Across the whole
+  197,671-instruction program **exactly two** writes to that field exist:
+  `FUN_00410440` installs `PoseHookNone` — a bare `return`, and the one every
+  skeletal actor including the zombie gets — and one special class installs
+  `PoseHookGrowAndPushOutOfWorld`, which ramps a radius and pushes the actor
+  out of world collision. Neither rotates a bone.
+* **The angles that exist are never read.** `EnemyZombieInit` computes a pitch
+  and yaw toward the camera into `obj+0x1320`/`+0x1324`, and nothing in the
+  class-0x30 range reads them back.
+
+So the aiming you see is the **whole actor turning** — `TurnActorTowardCamera`
+eases `obj+0x68` toward a point 1.5 units in front of the camera — plus the
+motion variants the game selects directionally: two walks chosen by
+`obj+0x136C` bit 21, the attack by bit 27, the per-region stumbles, and the
+four-arc deaths. Body yaw and authored clips, not a bone-level aim.
+
+That took a hook search rather than an xref sweep to establish, because the
+pose is reached through a stored function pointer — the same shape that made
+the camera tracking invisible earlier in this file. The difference is that here
+the hook was found and read, and it is empty.
+
+### Locomotion is still open, but narrower
+
+`SkeletonApplyRootMotion` **does** turn motion root translation into world
+movement when `obj+0x64` bit 1 is set. That is not what walks a zombie in,
+though: measured over the baked clips, the walk loop's root nets **+0.00** in
+both x and z — it only bobs, ±0.22 — while the deaths net **−8.7** and
+**−15.7**. So root motion carries a falling body and nothing else, and the
+approach velocity is still `[open]`. No `fstp [reg+0x4c]` exists anywhere in
+`0x455000..0x459000`, so it is not written in the zombie's own code.
 
 `tools/verify_combat.py` is the check: it re-derives the step tables from raw
 bytes, asserts the control-code/slot gap across all 86 character types,

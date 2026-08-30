@@ -335,10 +335,16 @@ spawn that has a real character so the two never draw on top of each other.
 
 The **Track** checkbox turns it off, restoring the authored path exactly.
 
-`[open]`, and marked in `enemies.ts`: the walk speed (derived from the ring
-table rather than found), the strike itself, and whether zombies aim torso and
-head independently of body yaw — the pose path read so far is pure motion, but
-it is reached through stored function pointers, so that is not settled.
+**Zombies do not aim their torso or head** — that was asked and is now a
+settled negative, not an omission. The per-frame pose hook has exactly two
+implementations in the whole program, a no-op and a collision push-out, and
+`SkeletonWalkNode` reads every bone rotation straight from the motion bank.
+The aiming you see is the whole body turning plus directionally selected
+motion variants. See [`formats/combat.md`](formats/combat.md) §10.
+
+Still `[open]`, and marked in `enemies.ts`: the walk speed — derived from the
+ring table rather than found, and now known *not* to be root motion — and the
+strike itself.
 
 ## Shooting
 

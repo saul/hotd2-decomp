@@ -67,6 +67,15 @@
  * crosses a band in the number of steps the ring table allots it, one step
  * being one cycle of its walk motion. Stated rather than tuned, and it falls
  * out at roughly 6 units/second for the default rings.
+ *
+ * It is *not* root motion, which was the obvious candidate: measured over the
+ * baked clips the walk loop's root nets +0.00 in x and z and only bobs, while
+ * the death clips net −8.7 and −15.7. Root motion carries a falling body.
+ *
+ * Actors turn their **whole body** toward the camera and nothing aims a bone:
+ * the per-frame pose hook has exactly two implementations in the program, a
+ * no-op and a collision push-out, and `SkeletonWalkNode` reads every rotation
+ * straight from the motion bank. See docs/formats/combat.md §10.
  */
 
 import { Vector3 } from "three";

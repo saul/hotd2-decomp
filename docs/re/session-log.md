@@ -3995,12 +3995,24 @@ barely moves for small offsets and swings for wide ones.
   and yaw toward the camera into `obj+0x1320/+0x1324` and no reader was found
   in the class-0x30 range.
 
-  That is suggestive but **not** conclusive, and this is the second time in one
-  session the distinction has mattered: the per-frame pose is reached through
-  function pointers stored in the object (`+0x1158`, `+0x1174`), so xrefs
-  cannot see the call. Recording it as `[open]` rather than either implementing
-  a guess or repeating the mistake of calling an absent xref a proof. The way
-  to settle it is to read those stored callbacks.
+  **Settled afterwards, and the answer is no.** Rather than leave it, I chased
+  the stored callbacks as the note said to. `SkeletonApplyRootMotion` ends by
+  calling a hook at motion block `+0x115C`, and a search of the whole program —
+  197,671 instructions, not truncated — finds **exactly two** writes to that
+  field: `PoseHookNone`, a bare `return` installed by `FUN_00410440` for every
+  skeletal actor including the zombie, and `PoseHookGrowAndPushOutOfWorld` for
+  one special class, which ramps a radius and pushes the actor out of world
+  collision. Neither rotates a bone. With `SkeletonWalkNode` reading every
+  rotation straight from the motion bank, there is no bone-level aim.
+
+  What reads as aiming is the whole actor turning plus directionally selected
+  motion variants — two walks on `obj+0x136C` bit 21, the attack on bit 27, the
+  per-region stumbles, the four-arc deaths.
+
+  The method note worth keeping: an xref sweep could not answer this either
+  way, but a *hook* search could, because a stored function pointer is still
+  written somewhere. "Find the writes to the field" is the move when "find the
+  calls to the function" fails.
 
 Data recovered along the way: the advance rings default to `{25, 38, 51}`
 (`{37, 48, 51}` for character type 0) from `DAT_004C4CD0`, step counts 2 / +3 /
@@ -4008,3 +4020,18 @@ Data recovered along the way: the advance rings default to `{25, 38, 51}`
 that would override the rings — so those constants are what every encounter in
 the game actually runs on. Evt `0x0F` (54 uses) and `0x12` (6) do set the step
 counts.
+
+
+### Postscript: root motion is real, but it is not the walk
+
+`SkeletonApplyRootMotion` (`FUN_00410C50`) converts the frame-to-frame delta of
+the motion root into world movement, rotated by the actor's own orientation,
+when `obj+0x64` bit 1 is set. That looked like the missing locomotion. It is
+not: measured over the baked clips, the walk loop's root nets **+0.00** in both
+x and z and only bobs by ±0.22, while the death clips net **−8.7** and
+**−15.7**. Root motion carries a falling body away and nothing else.
+
+So the approach velocity stays `[open]` — and slightly better characterised
+than before, since it is now known not to be root motion and known not to be
+written in the zombie's own code (no `fstp [reg+0x4c]` anywhere in
+`0x455000..0x459000`).

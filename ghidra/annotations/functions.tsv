@@ -306,3 +306,7 @@
 00456650	TestApproachRing	Returns which advance ring the actor is in -- 1 inside the inner radius (strike range), 2, 3, 4 outward -- and sets obj+0x1358 to the step count that band allows.
 004554d0	ZombieStateAttackRun	Class-0x30 state 1. Plays the run motion, closes on the camera, and switches to state 2 when TestApproachRing returns 1.
 00457220	ZombieStateWalkDistance	Class-0x30 state 15. Records a start point and walks until it has covered the distance at descriptor tail +4, then hands to state 1.
+00410920	SkeletonPoseRootFrame	Per-frame root pose: reads the current motion frame, or blends two of them by DAT_007C1C24 when the cross-fade flag is set (obj+0x37 & 0x21), and applies the root translation and rotation.
+00410c50	SkeletonApplyRootMotion	Converts the frame-to-frame delta of the motion root into world movement when obj+0x64 bit 1 is set, rotating it by the actor's own orientation, then calls the per-frame pose hook at motion block +0x115C.
+00420810	PoseHookNone	The default per-frame pose hook: does nothing. Every skeletal actor installed by FUN_00410440 gets this one.
+0048d070	PoseHookGrowAndPushOutOfWorld	The only other per-frame pose hook in the program. Ramps the actor's radius (obj+0x128) toward a target and pushes it out of world collision along the hit normal. It does NOT rotate any bone -- see the note on upper-body aim in docs/formats/combat.md.

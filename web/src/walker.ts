@@ -104,6 +104,8 @@ export type WaitPolicy =
   | { kind: "frames"; framesLeft: number }
   | { kind: "camera" }
   | { kind: "combat"; secondsLeft: number }
+  /** The real gate: blocks until the player has killed them. */
+  | { kind: "enemies" }
   | { kind: "passed"; why: string };
 
 export interface PendingWait {
@@ -164,6 +166,16 @@ export interface WalkerHost {
   onBranch(choice: BranchChoice | null): void;
   /** Any sound id, dispatched by namespace as `PlaySoundId` does. */
   playSound(id: number): string | undefined;
+  /**
+   * Live enemies the player can still shoot, or `null` when shooting is off.
+   *
+   * `wait_enemies_present` / `wait_enemies_alive` are the game's combat gate:
+   * they block until `g_enemies_present` / `g_enemies_alive` fall to the
+   * operand, and those counters only move because the player kills things.
+   * With shooting enabled that is a real condition again, so the walker waits
+   * on it instead of on a stopwatch.
+   */
+  aliveEnemies(): number | null;
   /** evt `0x1F`: the HUD shutter state. */
   setShutter(state: number): string | undefined;
   /** evt `0x2D`: play a dialogue group -- voice line plus subtitles. */
@@ -192,8 +204,9 @@ const SKIPPABLE_WAITS = new Set([0x40, 0x41, 0x42]);
 /** How far a wait opcode can be honoured from the bundle alone. */
 const WAIT_NOTES: Record<number, string> = {
   0x40: "approximated: resolves when the current camera move ends",
-  0x43: "simulated: the live-enemy gate, paced by the combat setting",
-  0x44: "simulated: the second enemy counter, paced with 0x43",
+  0x43: "the live-enemy gate: real while Shoot is on, otherwise paced by the "
+      + "combat setting",
+  0x44: "the second enemy counter, gated with 0x43",
   0x45: "passed: the script flag array is written by gameplay",
   0x46: "passed: the scripted-actor counter is a runtime value",
   0x47: "passed: 'camera settled and no live target' needs the runtime",
@@ -661,6 +674,8 @@ export class Walker {
         return !this.cam || this.cam.done || this.cam.isStatic;
       case "combat":
         return this.liveEnemies <= (w.op.arg ?? 0) || w.policy.secondsLeft <= 0;
+      case "enemies":
+        return (this.host.aliveEnemies() ?? 0) <= (w.op.arg ?? 0);
       default:
         return true;
     }
@@ -991,6 +1006,9 @@ export class Walker {
     0x41: { status: "done", run: (w, op) => w.applyWait(op) },
     0x42: { status: "done", run: (w, op) => w.applyWait(op) },
     0x40: { status: "approx", run: (w, op) => w.applyWait(op) },
+    // Exact while Shoot is on -- the wait ends when the enemies are dead,
+    // which is the game's own condition. Otherwise there is nothing to kill
+    // them, so the combat setting paces it and the feed says so.
     0x43: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x44: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x45: { status: "approx", run: (w, op) => w.applyWait(op) },
@@ -1247,11 +1265,21 @@ export class Walker {
       policy = { kind: "frames", framesLeft: left };
     } else if (op.op === 0x40) {
       policy = { kind: "camera" };
-    } else if ((op.op === 0x43 || op.op === 0x44) &&
-               this.options.simulateCombat) {
-      const over = Math.max(0, this.liveEnemies - arg);
-      policy = { kind: "combat",
-                 secondsLeft: over * this.options.secondsPerEnemy };
+    } else if (op.op === 0x43 || op.op === 0x44) {
+      // With shooting on, the gate is the gate: it opens when they are dead.
+      const alive = this.host.aliveEnemies();
+      if (alive !== null) {
+        policy = alive <= arg
+          ? { kind: "passed", why: "no live enemies" }
+          : { kind: "enemies" };
+      } else if (this.options.simulateCombat) {
+        const over = Math.max(0, this.liveEnemies - arg);
+        policy = { kind: "combat",
+                   secondsLeft: over * this.options.secondsPerEnemy };
+      } else {
+        policy = { kind: "passed",
+                   why: WAIT_NOTES[op.op] ?? "needs the runtime" };
+      }
     } else if (op.op === 0x45 && this.flags.has(arg)) {
       policy = { kind: "passed", why: "flag already set by the script" };
     } else {

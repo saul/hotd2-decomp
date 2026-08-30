@@ -87,6 +87,18 @@ interface Instance {
   hp: number;
   /** `obj+0x298 + bone*0x90` — hits already taken on each bone. */
   hits: Map<number, number>;
+  /**
+   * `rec+0x74 & 0x80000000` — the "this bone has reached its last stage"
+   * latch. Once set, further hits on that bone still cost hit points but
+   * never swap a model or advance the step.
+   */
+  latched: Set<number>;
+  /**
+   * Bones `RemoveBoneSubtree` has zeroed. A zero draw slot is invisible *and*
+   * unshootable — `ShotTestBoneTree` tests `rec[0] != 0` before descending —
+   * so this gates the pick as well as the display.
+   */
+  removed: Set<number>;
   dead: boolean;
   /** The actor's own BAMS yaw, for the directional death. */
   yaw: number;
@@ -207,7 +219,9 @@ export class CharacterLayer {
       const intro = p?.intro && type.motions[String(p.intro.motion)]
         ? p.intro : null;
       this.instances.push({ at, type, motion, root: node, pivot, bones,
-                            clock: 0, intro, hp: p?.hp ?? 0,
+                            clock: 0, intro, hp: this.startHp(p),
+                            latched: new Set<number>(),
+                            removed: new Set<number>(),
                             hits: new Map(), dead: false, yaw: p?.yaw ?? 0,
                             death: null, gore: new Map() });
       this.posed.add(at);
@@ -334,6 +348,9 @@ export class CharacterLayer {
       if (!inst.root.visible || inst.dead) continue;
       for (const b of inst.type.bones) {
         if (!b.hit_radius) continue;
+        // A removed bone has a zero draw slot, and `ShotTestBoneTree` never
+        // descends into one -- so a blown-off arm cannot be shot again.
+        if (inst.removed.has(b.bone)) continue;
         const node = inst.bones.get(b.bone);
         if (!node) continue;
         this._c.set(b.hit_centre![0], b.hit_centre![1], b.hit_centre![2]);
@@ -352,41 +369,181 @@ export class CharacterLayer {
   }
 
   /**
-   * Charge a hit, exactly as `FUN_00409430` does.
+   * `ActorInitHitPoints` (`FUN_0040A8B0`): the descriptor's hit points plus the
+   * difficulty delta, clamped to `[1, 300]`.
+   */
+  private startHp(p: CharacterPlacement | undefined): number {
+    const d = this.json?.difficulty;
+    if (!p) return 0;
+    if (!d?.hp_delta?.length) return p.hp;
+    const hp = p.hp + (d.hp_delta[this.difficulty] ?? 0);
+    return Math.min(d.hp_max, Math.max(d.hp_min, hp));
+  }
+
+  /** Menu difficulty 0..4. Only scales starting hit points. */
+  difficulty = 2;
+  /**
+   * `g_damage_rank` — the adaptive 0..15 rank the per-bone damage modifier is
+   * indexed by, **not** the menu difficulty. `ResetDamageRank` seeds it from
+   * `initial_rank[difficulty]`; there is no adaptive state to track here, so
+   * it stays at the seed.
+   */
+  get rank(): number {
+    const r = this.json?.difficulty?.initial_rank?.[this.difficulty] ?? 0;
+    return Math.min(15, Math.max(0, r));
+  }
+
+  /**
+   * Charge a hit, exactly as `ResolveHit` (`FUN_00409430`) does.
    *
-   * Damage escalates with the number of hits **that bone** has already taken —
-   * `damage[bone][n]` — and the last step repeats once the row runs out, since
-   * the game's `next == 0` simply stops advancing. The difficulty modifier from
-   * `PTR_DAT_004D0D84` needs a rank and is not applied.
+   * The shape that matters is the **control code**: each step reads its own
+   * effect-table entry as the slot to draw and the *next* entry as a code.
+   *
+   * ```
+   * code 0   last step: damage, swap once, latch
+   * code 1   SEVER: damage, swap this bone, and remove every bone below it
+   * code 2   nothing at all — no damage and no score
+   * code >2  escalate: damage, swap, advance
+   * ```
+   *
+   * An earlier revision folded 0/1/2 to "no slot" and never read them as
+   * codes, so every hit reskinned the bone and nothing was ever severed —
+   * which is what left a forearm animating below a destroyed upper arm.
+   * For `char_adv00` the sever code sits at step 5 of the upper arms,
+   * forearms, thighs and shins, so a limb comes off on the fifth hit and
+   * takes everything below it with it.
    */
   hit(inst: Instance, bone: number, cameraYawBams = 0): {
     damage: number; killed: boolean; head: boolean; hp: number;
-    gore: boolean; death?: number;
+    gore: boolean; severed: boolean; result: number; death?: number;
   } {
     const b = inst.type.bones.find((x) => x.bone === bone);
     const n = inst.hits.get(bone) ?? 0;
-    const row = b?.damage ?? [];
-    const damage = row.length ? row[Math.min(n, row.length - 1)] : 0;
-    inst.hits.set(bone, n + 1);
-    inst.hp -= damage;
+    const step = b?.steps?.[n];
+    const slot = step?.[0] ?? 0;
+    const code = step?.[1] ?? 0;
+    const head = bone === inst.type.head_bone;
+    const wasDead = inst.dead;
 
-    // `FUN_004098E0` writes the effect slot into record[0], which IS the slot
-    // the bone draws -- so the swap is a replacement, not an addition.
-    const gore = this.swapGore(inst, bone, b?.effects?.[n] ?? 0);
+    // `damage = table + DamageRankModifier(bone)`, floored at zero.
+    let damage = step?.[2] ?? 0;
+    damage = Math.max(0, damage + (b?.damage_rank?.[this.rank] ?? 0));
 
-    const killed = inst.hp <= 0;
+    let result = 0;
+    let gore = false;
+    let severed = false;
+    const swap = () => { gore = this.swapGore(inst, bone, slot) || gore; };
+    const sever = () => { severed = true; this.severChildren(inst, bone); };
+
+    if (code === 0) {
+      if (slot === 2) {
+        result = 5;                                  // the sentinel: no effect
+      } else {
+        result = 2;
+        inst.hp -= damage;
+        if (bone === 1) {
+          // The torso's last stage is the death wound: only on the hit that
+          // takes it below one hit point.
+          if (inst.hp < 1 && !inst.latched.has(bone)) {
+            result = 3; swap(); sever(); inst.latched.add(bone);
+          }
+        } else if (!inst.latched.has(bone) && slot !== 0) {
+          result = 1; swap();
+          inst.hits.set(bone, n + 1);
+          inst.latched.add(bone);
+        }
+      }
+    } else if (code === 1) {
+      result = 2;
+      inst.hp -= damage;
+      if (!inst.latched.has(bone)) {
+        result = 3; swap(); sever(); inst.latched.add(bone);
+      }
+    } else if (code === 2) {
+      result = 5;
+    } else {
+      result = 1;
+      inst.hp -= damage;
+      // `ResolveHit` counts the torso's real stages inline and withholds the
+      // last one while the actor is alive.
+      const withhold = inst.hp > 0 && bone === 1
+        && inst.type.torso_stages <= n + 1;
+      if (!withhold) {
+        swap();
+        inst.hits.set(bone, n + 1);
+      }
+    }
+    if (result === 5) damage = 0;
+
+    // A hit on something already dead scores nothing and cannot kill twice.
+    if (wasDead && result === 2) result = 0;
+
     let death: number | undefined;
-    if (killed && !inst.dead) {
+    const killed = !wasDead && inst.hp < 1 && result !== 5;
+    if (killed) {
       inst.dead = true;
+      // The 1-in-4 headshot burst: `ResolveHit` swaps the head to slot 0,
+      // which is `RemoveBoneSubtree`'s "gone" — the head simply leaves.
+      if (head && Math.random() < 0.25) {
+        this.removeBone(inst, bone);
+        severed = true;
+      }
       death = this.chooseDeath(inst, cameraYawBams);
-      if (death !== undefined
-          && inst.type.motions[String(death)]) {
+      if (death !== undefined && inst.type.motions[String(death)]) {
         inst.death = { motion: death, t: 0 };
       }
     }
-    return { damage, killed, head: bone === inst.type.head_bone,
-             hp: Math.max(0, inst.hp), gore, death };
+    return { damage, killed, head, hp: Math.max(0, inst.hp), gore, severed,
+             result, death };
   }
+
+  /**
+   * `SeverBoneChildren` (`FUN_00409AB0`): remove every bone **below** this one.
+   *
+   * The severed bone itself keeps the stump model `ActorSwapDamagedPart` just
+   * gave it; `RemoveBoneSubtree` then walks each *child* and zeroes its draw
+   * slot, recursively. Hiding the topmost removed child is equivalent, because
+   * everything under it is removed too.
+   */
+  private severChildren(inst: Instance, bone: number): void {
+    for (const b of this.childBones(inst.type, bone)) this.removeBone(inst, b);
+  }
+
+  /** `RemoveBoneSubtree` for one bone and everything under it. */
+  private removeBone(inst: Instance, bone: number): void {
+    inst.removed.add(bone);
+    const node = inst.bones.get(bone);
+    if (node) node.visible = false;
+    for (const b of this.childBones(inst.type, bone)) this.removeBone(inst, b);
+  }
+
+  /**
+   * Bone indices whose parent is *bone*.
+   *
+   * `CharacterBone.parent` is an **index into `bones`**, not a bone number —
+   * the exporter flattens the EXE's node tree parents-first and records where
+   * the parent sits in that list. The two happen to differ by one on a
+   * humanoid, so comparing them directly is an off-by-one that mostly looks
+   * right, which is exactly why it is resolved through the array here.
+   */
+  private childBones(type: CharacterType, bone: number): number[] {
+    let kids = this.kidCache.get(type);
+    if (!kids) {
+      kids = new Map();
+      type.bones.forEach((b) => {
+        if (b.parent === null || b.parent === undefined) return;
+        const p = type.bones[b.parent];
+        if (!p) return;
+        const list = kids!.get(p.bone) ?? [];
+        list.push(b.bone);
+        kids!.set(p.bone, list);
+      });
+      this.kidCache.set(type, kids);
+    }
+    return kids.get(bone) ?? [];
+  }
+
+  private readonly kidCache = new Map<CharacterType, Map<number, number[]>>();
 
   /**
    * `FUN_00456220`: `camera_yaw - actor_yaw` against four ±45° arcs.
@@ -468,6 +625,12 @@ export class CharacterLayer {
       i.dead = false;
       i.death = null;
       i.hits.clear();
+      i.latched.clear();
+      for (const bone of i.removed) {
+        const node = i.bones.get(bone);
+        if (node) node.visible = true;
+      }
+      i.removed.clear();
       for (const [bone, g] of i.gore) {
         const node = i.bones.get(bone);
         const self = node as Mesh | undefined;
@@ -483,9 +646,33 @@ export class CharacterLayer {
       for (const node of i.bones.values()) {
         for (const c of node.children) c.visible = true;
       }
-      const p = this.json?.placements.find((x) => x.at === i.at);
-      i.hp = p?.hp ?? 0;
+      i.hp = this.startHp(this.json?.placements.find((x) => x.at === i.at));
     }
+  }
+
+  /** Live, visible, shootable actors — what the enemy-wait opcodes count. */
+  get aliveCount(): number {
+    return this.instances.filter((i) => i.root.visible && !i.dead).length;
+  }
+
+  /**
+   * Kill every live actor outright, the way the debug path does: drop hit
+   * points to zero and start the directional death. Nothing is severed,
+   * because no bone was hit.
+   */
+  killAll(cameraYawBams = 0): number {
+    let n = 0;
+    for (const i of this.instances) {
+      if (!i.root.visible || i.dead) continue;
+      i.hp = 0;
+      i.dead = true;
+      const death = this.chooseDeath(i, cameraYawBams);
+      if (death !== undefined && i.type.motions[String(death)]) {
+        i.death = { motion: death, t: 0 };
+      }
+      n++;
+    }
+    return n;
   }
 
   get describe(): string {

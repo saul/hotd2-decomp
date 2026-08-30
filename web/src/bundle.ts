@@ -245,10 +245,15 @@ export interface CharacterBone {
   /** Hit-sphere centre in the bone's own space, from `PTR_DAT_004D032C`. */
   hit_centre?: [number, number, number];
   hit_radius?: number;
-  /** Damage for each successive hit on this bone, from `PTR_DAT_004C8350`. */
-  damage?: number[];
-  /** Slot the bone is redrawn with after each hit, from `PTR_DAT_004C7160`. */
-  effects?: number[];
+  /**
+   * `[slot, code, damage]` per successive hit, exactly as `ResolveHit` reads
+   * them. *code* is the **next** effect-table entry, which the game branches
+   * on rather than treating as a slot: 0 last step, **1 sever**, 2 no effect,
+   * anything larger escalate. See docs/formats/combat.md.
+   */
+  steps?: [number, number, number][];
+  /** `PTR_DAT_004D0D84[bone]` — s8 added to the damage, per adaptive rank. */
+  damage_rank?: number[];
   /** The exporter's part name, which the glTF node name ends with. */
   part: string;
   slot: number;
@@ -267,6 +272,11 @@ export interface CharacterType {
   head_bone: number;
   /** Damaged variants, keyed by asset slot: their own hit spheres. */
   gore: Record<string, { centre: [number, number, number]; radius: number }>;
+  /**
+   * `ResolveHit`'s count of real torso gore stages. The last one is withheld
+   * while the actor is alive, so a zombie only shows it once dead.
+   */
+  torso_stages: number;
   motions: Record<string, BakedMotion>;
 }
 
@@ -299,8 +309,49 @@ export interface DeathSet {
   arc: number;
 }
 
+/** A sound id paired with the filename `g_se_name_list` gives it. */
+export interface NamedSound { id: number; file: string }
+
+/** Everything a shot can make happen — see docs/formats/combat.md §9. */
+export interface CombatJson {
+  /** `ActorPlayHitVoice`: one of five flesh impacts, on every hurt and kill. */
+  impact: NamedSound[];
+  /** ...replaced by one of these two on a headshot kill. */
+  head_impact: NamedSound[];
+  /** `[set A, set B]` per event; `voice_set_a_types` says which a type takes. */
+  voice: { hurt: NamedSound[]; kill: NamedSound[]; head: NamedSound[] };
+  voice_set_a_types: number[];
+  /** `FUN_00407950`: collision material → the ricochet it plays. */
+  ricochet: Record<string, NamedSound>;
+  /** `FUN_004073B0`: material → `[first texture, last texture, scale]`. */
+  impact_sprite: Record<string, [number, number, number]>;
+  impact_sprite_default: [number, number, number];
+  /** `ActorShotFeedback`: blood spray scale by hit result. */
+  blood_scale: Record<string, number>;
+  no_effect: {
+    sound: NamedSound; sound_type2: NamedSound;
+    material: number; material_type3: number;
+  };
+}
+
+/** `ActorInitHitPoints` and `ResetDamageRank`. */
+export interface DifficultyJson {
+  /** Added to a spawn's hit points, by menu difficulty 0..4. */
+  hp_delta: number[];
+  /** Starting adaptive rank by menu difficulty — what damage is indexed by. */
+  initial_rank: number[];
+  /** Menu difficulty the player defaults to (Normal). */
+  default: number;
+  hp_min: number;
+  hp_max: number;
+}
+
 export interface CharactersJson {
   deaths: DeathSet;
+  difficulty: DifficultyJson;
+  combat: CombatJson;
+  /** `g_bone_damage_zone` — bone → destroyed-zone bit, 0xFF for none. */
+  bone_zones: number[];
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
   note: string;

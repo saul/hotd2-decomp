@@ -22,7 +22,7 @@ planned.
 | **W1** | Vite + TS + Three scaffold, bundle loader, static render, URL state | ✅ typechecks and builds clean; all state URL-addressable including `freeze=1` |
 | **W2** | Hermite eval, rails, free-roam camera | ✅ curves evaluated client-side; rails per path with the active sub-range highlighted |
 | **W3** | Script walker, region visibility, step mode | ✅ every op reachable and seekable; only the current region drawn |
-| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; branch points pause with a seeded countdown; combat on a tunable per-enemy timer |
+| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; branch points pause with a seeded countdown; with Shoot on the live-enemy waits are the real gate, otherwise a tunable per-enemy timer |
 | **W5** | Audio, fog, route minimap, Arcade/Original toggle, event feed, inspector | ✅ BGM, SE and voice all play, dispatched by namespace; scene fog rendered radially |
 | **W6** | Visual regression harness | deferred — `freeze=1` and the URL state it needs are already in place |
 
@@ -322,9 +322,26 @@ spawn that has a real character so the two never draw on top of each other.
   animation. A zombie's radii read as anatomy: torso 2.55, head 1.3, upper arm
   1.4, hand 0.8, pelvis 1.75, thigh 2.15. Nearest along the ray wins, as
   `FUN_00404DB0` sorts.
-* Damage escalates **per bone, per hit on that bone**: `PTR_DAT_004C8350`
-  indexed `bone*6 + hits_already_taken`. The head runs **100, 120, 140, 160**,
-  the torso 50/60/70, limbs 20–35. HP is the descriptor's `+0x22`.
+* Damage escalates **per bone, per hit on that bone**: `g_pBoneDamage` indexed
+  `bone*6 + hits_already_taken`. `char_adv02`'s head runs **100, 120, 140, 160**
+  and its torso 30/40/50/60/70, plus `DamageRankModifier` — `g_pBoneDamageByRank`
+  indexed by the **adaptive rank**, not the menu difficulty. Hit points are the
+  descriptor's `+0x22` through `ActorInitHitPoints`: plus
+  `g_difficulty_hp_delta[difficulty]` = `{−30, −15, 0, 0, 0}`, clamped to
+  `[1, 300]`. A stage-2 zombie is **220**, and on Normal (rank 1) two headshots
+  — 100 + 120 — kill exactly.
+* **The `[i + 1]` entry of the effect table is a control code, not a slot**:
+  0 last step, **1 sever**, 2 no effect at all, anything larger escalate. That
+  was read wrong once, which is what left a forearm animating below a destroyed
+  upper arm. On a sever, `SeverBoneChildren` → `RemoveBoneSubtree` zeroes the
+  draw slot of **every bone below** the severed one, recursively, and a zero
+  draw slot is unshootable as well as invisible. Severing bone 3 takes 4 and 5;
+  a fatal torso hit severs bone 1 and takes the head and both arms.
+* **Sounds are the game's own tables.** A ricochet per surface material
+  (`BULLET_SND/MET/OTH/WAT/WOD`), one of five flesh impacts plus a two-set
+  zombie voice on a hit, `BULLET_MET3` when the shot has no effect. The impact
+  sprite's position, timing and scale law are transcribed; the artwork is asset
+  slots the bundle does not carry, so a splat stands in.
 * Score is `FUN_00409430`'s: **10** a hit, **120 + a combo** on the head where
   the combo grows by 10 per consecutive headshot and **any non-head hit resets
   it**, and **80** on the kill.
@@ -517,8 +534,8 @@ missed. Meanings and confidence marks live in
 | `40` | `wait_queued_events_done` | wait | ~approx~ | resolves when the current camera move ends |
 | `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path |
 | `42` | `wait_frames` | wait | **done** | **exact** frame countdown |
-| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate — simulated on the per-enemy timer, and the feed says so |
-| `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate — simulated on the per-enemy timer, and the feed says so |
+| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead; otherwise paced by the per-enemy timer, and the feed says so |
+| `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate, gated with `0x43` |
 | `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
 | `46` | `wait_scripted_actors` | wait | shown | runtime counter; passed, with the condition reported |
 | `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |

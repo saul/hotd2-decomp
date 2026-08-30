@@ -226,3 +226,43 @@
 00412f50	MotionFrameAddress	((bones*6+15)&~3)*frame + 4 + slot.base; bones from the CHARACTER type
 0041d810	MotionWaitJob
 0041d860	MotionRequestBankLoad	enqueues asset job kind 8 for a bank id
+
+# --- combat: shots, damage, dismemberment, death; characters, motion, props ---
+00404700	ShotTestSkeleton	walks g_pCharacterSkeletons[char_type] -- the SAME tree the renderer draws through
+00404750	ShotTestBoneTree	per bone: sphere, or mesh when record+0x88 != -1; recurses into children
+004047d0	ShotTestBoneSphere	ray vs the bone's hit sphere from g_pBoneHitSpheres, appended to g_ShotHitList
+004048a0	ShotTestBoneMesh	precise test against the bone's own collision mesh in its local space
+00404ad0	ShotBuildSegment	origin -> origin + direction * 1000
+00404b80	ShotTestWorld	the miss: ColiSegmentVsMesh against the full and ray-only collision sets
+00406110	BuildShotRay	unprojects the crosshair with g_projection_distance_px (640.21) and writes the per-player shot record at g_ShotRecords
+004062a0	RayTestSphere	rotates the centre into the shot frame with the precomputed sin/cos and compares the perpendicular distance to the radius
+004093c0	ChooseHitPlayerOrder	picks which players resolve, randomising the order in two-player
+00409870	DamageRankModifier	per-bone, per-difficulty addend from g_pBoneDamageByRank
+004098e0	ActorSwapDamagedPart	writes the effect slot into record[0] -- the slot the bone DRAWS -- so a hit replaces that body part
+004099a0	ResolveDamagedPartSphere	gives the swapped part its own hit sphere from the TAIL of g_pBoneHitSpheres, past bone_count-1 entries, terminated by slot == -1
+00411050	SkeletonDrawNodeSlot	draws record[bone].slot; record base obj+0x20C, stride 0x90
+00432ff0	ScriptedSceneryDispatch33	class 0x33, switch on obj+0x11C
+00433a10	ScriptedPropDrawUntilFlag	class 0x33 selector 2: draws params[0] until params[3] == cam frame or g_script_flags[params.u8(0x11)]. The stage-2 van bodies are these
+00435f20	StartCutsceneSkipWatcher	installs CheckCutsceneSkipRequest from the task table at 0x005934E4
+00435f40	CheckCutsceneSkipRequest	THE link that makes the skip work: raises g_nEvtSkipFlag when Start was pressed inside a skippable region; also ends the current camera move (cam_end = cam_frame) and drains the asset queue
+00435fa0	FinishCutsceneSkip	clears DAT_009A2230 one frame later and ends the task
+00452da0	EnemyZombieInit	class 0x30. params[0] = character type, params[2] = initial state (obj+0x1310), obj+0x1B4 = motion 0x3BC (956, zom.bin) or 0x41E on a branch
+004533f0	EnemyZombieUpdate	per frame: dispatches g_pZombieStates[obj+0x1310], then integrates velocity
+00454d20	ZombieStateDeath6	state 6: ChooseDeathMotion, then wait for the clip to finish
+004560b0	ChooseDeathMotion	special deaths for a destroyed part (obj+0x1368 bits -> 428/421/633/553), else falls through to the directional pick
+00456220	ChooseDeathMotionDirectional	camera_yaw - actor_yaw against four +/-45 degree arcs: 0x4000 -> 992, 0xC000 -> 991, 0x0000 -> g_pDeathMotionsArc0[4], 0x8000 -> g_pDeathMotionsArc8000[6]
+004577f0	ZombieStateMotionCue21	state 21: play params[+0x04], hold params[+0x08] frames, wait for the clip, then state params[3]. The stage-2 van zombies jump out with motion 923
+0045f750	EvtOpSePlayUnlessSkip3A	opens with if (g_nEvtSkipFlag == 0) -- the gate is real, not dead
+0045f780	EvtOpSePlay3dUnlessSkip3B	as 0x3A, 0x10-byte operand
+00472b10	PropPlacerDispatch44	class 0x44, indexes the 18 builders at g_pPropBuilders
+00472bd0	PropBuildHinge	selector 1, 37 spawns: one hinge from the parameter tail
+00472c90	PropBuildVanDoors	selector 2: two doors at literal offsets (+/-9.29, 11.5, 22.68), slots 0x1794/0x1795, half a turn apart
+00472eb0	PropBuildHingeScaled	selector 4, 13 spawns: as selector 1 with a per-instance scale and the flags at different offsets
+00473cf0	HingeUpdate	shared by class 0x44 selectors 1/2/4. Swings on g_script_flags[open_flag] through g_pHingeCurvesXYZ / g_pHingeCurvesYaw; transform is RotY(base); RotZ(rz); RotY(swing); RotX(rx)
+00409a00	FindSkeletonNodeForBone	Search g_character_skeletons[char_type] for the node whose bone index (+0x14) is the argument. Starts at the root's children, so the root itself is never returned.
+00409a50	FindSkeletonNodeForBoneRec	Recursive half of FindSkeletonNodeForBone. Node layout: +0x14 u16 bone, +0x16 u16 child count, +0x18 child pointers.
+00409ab0	SeverBoneChildren	Run when a bone reaches its sever step (effect-table next == 1, or a torso hit that kills). Calls RemoveBoneSubtree on every CHILD of that bone -- the bone itself keeps the stump model ActorSwapDamagedPart just gave it, and everything below it disappears.
+00409af0	RemoveBoneSubtree	Sets the destroyed-zone bit in obj+0x1318, zeroes the bone's draw slot (rec+0x00) and rec+0x78, then recurses into its children. A zero draw slot is both invisible and unshootable: ShotTestBoneTree tests `if (rec[0] != 0)`.
+0040a8a0	GetDamageRank	Returns g_damage_rank, the 0..15 adaptive rank DamageRankModifier indexes. NOT g_difficulty.
+00460770	ResetDamageRank	Seeds g_damage_rank from g_initial_damage_rank[difficulty] when a game starts; forces difficulty 2 when FUN_00413280 is nonzero.
+004607b0	UpdateDamageRank	Adaptive difficulty. Re-derives g_damage_rank from lives lost since the last update and elapsed time (0x708 ticks per step), clamped to [0,15].

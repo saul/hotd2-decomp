@@ -3671,3 +3671,101 @@ session. What the data says without needing either: one table moves the root
 −8.7/−9.5/−9.3 in z and the other +7.4/+8.2, so one set falls the way the body
 faces and the other falls back over. A body falls away from whatever shot it,
 and that is the whole content of it.
+
+---
+
+## Dismemberment, the damage rank, and the sounds
+
+Three things came out of one question: *"shooting an upper arm shouldn't leave
+the lower arm still moving."* That is right, and the reason was a misreading
+recorded here rather than quietly fixed.
+
+### `[i + 1]` was never the next slot
+
+`ResolveHit` reads `slot = effect[bone*6 + n]` and `code = effect[bone*6 + n + 1]`.
+The earlier note called `code` "the following step, which is how the code knows
+whether this hit is the last one that bone can take" — true as far as it goes,
+and it caused the exporter to fold the values 0, 1 and 2 to "no slot" and trim
+them off the end. `ResolveHit` does not use `code` as a slot at all. It
+**branches** on it: 0 last step, **1 sever**, 2 no effect whatsoever, anything
+larger escalate. Folding 0/1/2 away deleted the sever code entirely, so every
+hit reskinned the bone and nothing ever came off.
+
+The data makes the distinction unambiguous and the check now asserts it: across
+all 86 character types with a skeleton there are 442 slot references, the lowest
+being `0xB91`, and the only values below that are 0, 1 and 2. A gap of 2958 with
+nothing in it. If `code` were an ordinary slot the table would be dense near
+zero.
+
+`FUN_00409AB0` had been listed as "called on the sever path and not yet read".
+Reading it took two minutes and was the whole answer:
+
+```c
+SeverBoneChildren(bone):  for each CHILD of bone: RemoveBoneSubtree(child)
+RemoveBoneSubtree(node):  zone_mask |= 1 << g_bone_damage_zone[node->bone];
+                          rec[node->bone].slot = 0;  rec[node->bone].f78 = 0;
+                          recurse into children
+```
+
+The severed bone keeps the stump `ActorSwapDamagedPart` gave it; everything
+below it has its draw slot zeroed, which `ShotTestBoneTree` also treats as "not
+there" — so a blown-off arm is unshootable as well as invisible.
+
+**A second bug found while fixing the first.** `CharacterBone.parent` is an
+**index into the flattened bone list**, not a bone number. The first cascade
+compared `child.parent === bone` directly. On a humanoid the two differ by
+exactly one, so it removed *almost* the right set and looked plausible — the
+kind of error that survives a spot check. Resolved through the array now, and
+`verify_combat.py` asserts every sever step has a subtree to remove.
+
+Renders: `extract/compare/sever/intact.png` and `arm_severed.png` —
+`char_adv00` at motion 956 frame 8, with and without bones 4 and 5. The
+forearm and hand are gone, the upper arm remains, the rest is byte-identical.
+
+Worth noting what *isn't* a bug: `char_adv00` carries code 1 at **step 0** on
+both upper arms and both forearms, so one shot really does take an arm off.
+`char_adv02` carries it at step 4. Both are the game.
+
+### Difficulty is two numbers, not one
+
+`DamageRankModifier` indexes `g_pBoneDamageByRank[char][bone*0x10 + rank]` where
+`rank = GetDamageRank()` = `g_damage_rank` at `0x009C8E96` — which is **not**
+`g_difficulty` at `0x009C8E94`, one short earlier. `g_difficulty` only feeds
+`ActorInitHitPoints`: `hp += g_difficulty_hp_delta[difficulty]` = `{−30, −15,
+0, 0, 0}`, clamped `[1, 300]`. `g_damage_rank` is the adaptive rank, seeded by
+`ResetDamageRank` from `{−3, −1, 1, 4, 8}` and moved by `UpdateDamageRank` with
+lives lost and elapsed time, clamped `[0, 15]`. Two adjacent shorts doing
+completely different jobs; reading either as "the difficulty" gives wrong
+numbers.
+
+With that applied the client's arithmetic lands where it should: a stage-2
+zombie has 220 hit points and on Normal — rank 1, head modifier 0 — two
+headshots at 100 and 120 kill exactly.
+
+### The sounds were a switch statement all along
+
+`FUN_00407950` is a bare `switch (material) PlaySoundId(...)`, and the
+filenames it resolves to are what make the material codes readable:
+`BULLET_SND1` under 1, `BULLET_MET1` under 2, `BULLET_OTH1` under 3,
+`BULLET_WAT1` under 5, `BULLET_WOD1` under 6 — sand, metal, other, water, wood.
+`coli.py` had already observed the surface palette `(0, 2, 3, 0x32, 0x34, 0x35,
+0x38, 0x3C, 0x3D, 0x5A, 0x63)` in the collision files without knowing what any
+of it meant, and it lands inside this table.
+
+The actor side is `ActorPlayHitVoice`: one of `BLOOD02/03/04/06/BONE01` plus a
+voice from one of **two sets**, chosen by character type. A result-5 hit — the
+`2` sentinel — plays `BULLET_MET3` instead: the shot bounced off, and scores
+nothing.
+
+### Method notes
+
+* **An annotation file that other people append to must not be re-sorted.**
+  The first pass at persisting this session's names rewrote `globals.tsv` into
+  address order with section headers — a 262-line diff over 14 new rows, and a
+  merge hazard for the concurrent workstream. Restored to the original order
+  with the new rows appended, per the skill's rule. The tell was `git diff
+  --stat` showing far more churn than the work justified.
+* `run_script_inline` and headless are both unavailable — scripts are gated off
+  and the GUI holds the project lock — so the annotations files really are the
+  only durable place for a name. They are, and `verify_annotations.py` is clean
+  at 252 functions and 166 globals.

@@ -202,6 +202,8 @@ class Player {
     // own flags, so nothing here needs a clock of its own.
     this.props.attach(this.stage.root, bundle.script.props);
     this.shooting.reset();
+    this.shooting.setTables(bundle.script.characters?.combat);
+    this.shooting.playSound = (id) => { this.bgm.play(id); };
     this.shooting.setEnabled(
       $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
     this.rain.attach(this.stage.root, bundle.script.rain);
@@ -223,6 +225,9 @@ class Player {
       onFeed: (e) => this.onFeed(e),
       onBranch: (b) => this.showBranch(b),
       playSound: (id) => this.bgm.play(id),
+      // Null unless Shoot is on: only then is there anything that can make
+      // the count fall, so only then is the gate a real condition.
+      aliveEnemies: () => this.shooting.isEnabled ? this.chars.aliveCount : null,
       setShutter: (st) => this.hudLayer.setShutterState(st),
       showMessage: (g) => {
         // Variant 0 is the 1P / player-1 configuration, which is what a
@@ -373,8 +378,20 @@ class Player {
       this.props.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#shoot").addEventListener("change", (e) => {
-      this.shooting.setEnabled((e.target as HTMLInputElement).checked,
-                               this.camera, this.scene);
+      const on = (e.target as HTMLInputElement).checked;
+      this.shooting.setEnabled(on, this.camera, this.scene);
+      $<HTMLButtonElement>("#btn-kill").hidden = !on;
+      this.refreshUi();
+    });
+    // The debug clear: `killAll` drops every live actor to zero hit points and
+    // starts its directional death, which is what opens the enemy gate.
+    $<HTMLButtonElement>("#btn-kill").addEventListener("click", () => {
+      const n = this.chars.killAll(this.shooting.cameraYawBams);
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, name: "kill all", cat: "combat" },
+        note: `${n} enem${n === 1 ? "y" : "ies"} killed`,
+      });
       this.refreshUi();
     });
     // Every shot goes to the feed, so a session reads back as a transcript.
@@ -915,6 +932,9 @@ class Player {
       // half-open door where it is.
       this.props.update(this.walker.flags,
                         this.state.freeze ? 0 : dt * this.speed * 60);
+      // Impact sprites run on wall time: they are feedback for a click, not
+      // part of the script's clock, so a paused player still shows them out.
+      this.shooting.update(dt);
       // The volume follows the camera's yaw only, so it stays world-vertical.
       this.rain.update(this.walker.rain, this.camera.position,
                        Math.atan2(-this._fwd.x, -this._fwd.z),

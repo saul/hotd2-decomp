@@ -32,7 +32,9 @@
         <label><input type="checkbox" id="show-spawns" checked /> Spawns</label>
         <label title="Spawned characters assembled from the EXE skeleton and posed from mot/. A spawn whose class has no motion rule yet keeps its marker instead — an unposed character is a heap of parts, not a character."><input type="checkbox" id="show-chars" checked /> Characters</label>
         <label title="Scripted scenery: doors, shutters and the vans they hang off. They swing when the script sets their flag (evt 0x48) and vanish on a second one."><input type="checkbox" id="show-props" checked /> Props</label>
-        <label title="Click to shoot. Ray from the camera through the crosshair, tested against each character's per-bone hit spheres; damage, the head bonus and the kill bonus are the game's own. See docs/formats/combat.md."><input type="checkbox" id="shoot" /> Shoot</label>
+        <label title="Click to shoot. Ray from the camera through the crosshair, tested against each character's per-bone hit spheres; hit points, the per-bone damage escalation, the sever step, the sounds and the score are the game's own. With this on, the live-enemy waits become real: the script holds until you have killed them. See docs/formats/combat.md."><input type="checkbox" id="shoot" /> Shoot</label>
+        <button id="btn-kill" class="kill" hidden
+                title="Kill every live enemy outright -- hit points to zero and the directional death, the same thing that opens the live-enemy gate. Nothing is severed, because no bone was hit.">Kill</button>
         <label title="The game is 4:3 and its projection is a compile-time constant: 41.1 degrees vertical.">
           <input type="checkbox" id="pillarbox" checked /> 4:3
         </label>
@@ -140,7 +142,7 @@
             <option value="8">8×</option>
           </select>
         </label>
-        <label class="speed" title="The live-enemy waits are the combat gate. There is no combat here, so they are paced by this instead -- and the feed says so.">
+        <label class="speed" title="The live-enemy waits (evt 0x43/0x44) are the game's combat gate. With Shoot on they are honoured exactly -- the script waits until the enemies are dead. With Shoot off there is nothing that can kill them, so this paces them instead, and the feed says so.">
           Combat
           <select id="combat">
             <option value="0">instant</option>

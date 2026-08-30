@@ -149,6 +149,87 @@ HIT_EFFECT = 0x004C7160
 #: Steps per bone in both tables.
 HIT_STEPS = 6
 
+#: `PTR_DAT_004D0D84[char_type]`: ``s8[bone][16]``, added to the table damage.
+#: Indexed by :data:`DAMAGE_RANK`, **not** by the menu difficulty.
+HIT_DAMAGE_RANK = 0x004D0D84
+#: Ranks in that table.
+HIT_RANKS = 16
+
+#: `DAT_004C4D18`: ``u8[16]``, bone -> the bit `RemoveBoneSubtree` sets in the
+#: actor's destroyed-zone mask at ``obj+0x1318``. 0xFF means "no zone" -- the
+#: shift is masked with 0x1F, so those land on bit 31 and mean nothing.
+BONE_ZONE = 0x004C4D18
+
+#: `DAT_005776B0`: ``s32[5]``, added to a spawn's hit points by
+#: `ActorInitHitPoints` (`FUN_0040A8B0`) and then clamped to ``[1, 300]``.
+DIFFICULTY_HP_DELTA = 0x005776B0
+#: `DAT_005679F4`: ``s8[5]``, difficulty -> the rank `ResetDamageRank` starts
+#: the game at. `UpdateDamageRank` then moves it within ``[0, 15]``.
+INITIAL_DAMAGE_RANK = 0x005679F4
+#: What `GetDamageRank` returns for a normal-difficulty start, which is what
+#: the player uses because it has no adaptive-difficulty state to track.
+DEFAULT_DIFFICULTY = 2
+
+#: `DAT_00577674`: the sound ids `ActorPlayHitVoice` (`FUN_0040A6F0`) picks
+#: from. Fifteen dwords -- five flesh impacts, then six voice ids in
+#: ``(set A, set B)`` pairs, then two two-entry pools. Read as ids and resolved
+#: through `g_se_name_list`, so the names below are the game's own filenames.
+HIT_VOICE_TABLE = 0x00577674
+
+#: Character types that take **voice set A**. `ActorPlayHitVoice` switches on
+#: ``obj+0x1F4`` and everything not listed here takes set B.
+VOICE_SET_A_TYPES = (0, 2, 5, 6, 9, 0x0E, 0x0F, 0x10, 0x11)
+
+#: `FUN_00407950`, material -> the ricochet sound the impact plays. The names
+#: are what makes the material codes readable: SND sand, MET metal, OTH other,
+#: WAT water, WOD wood. Materials 4 and 0x36 are silent, and the default arm
+#: is silent too -- a shot into untagged geometry makes no noise.
+RICOCHET_BY_MATERIAL = {
+    0x01: 0x1316A9, 0x33: 0x1316A9,     # COMMON\BULLET_SND1_16.WAV
+    0x02: 0x0E16A9, 0x34: 0x0E16A9,     # COMMON\BULLET_MET1_16.WAV
+    0x03: 0x1216A9, 0x35: 0x1216A9,     # COMMON\BULLET_OTH1_16.WAV
+    0x05: 0x1416A9, 0x37: 0x1416A9,     # COMMON\BULLET_WAT1_16.WAV
+    0x06: 0x1516A9, 0x38: 0x1516A9,     # COMMON\BULLET_WOD1_16.WAV
+    0x44: 0x0B16A9, 0x53: 0x0B16A9,     # COMMON\BOMB1_11.WAV
+    0x45: 0x0B16A9,
+    0x61: 0x0C16A9, 0x62: 0x0C16A9,     # COMMON\BOMB2_16.WAV
+}
+
+#: `FUN_004073B0`, material -> ``(first_texture, last_texture, scale)``. The
+#: impact is an **animated sprite**: it runs the texture ids from first to last
+#: and dies. The default arm -- an untagged surface -- is a single frame at
+#: 0.1 scale, which is why a shot into scenery the level did not tag barely
+#: shows.
+IMPACT_SPRITE_BY_MATERIAL = {
+    0x01: (0x091A, 0x092F, 1.0), 0x33: (0x091A, 0x092F, 1.0),
+    0x02: (0x0DC3, 0x0DD1, 1.0), 0x34: (0x0DC3, 0x0DD1, 1.0),
+    0x03: (0x0E25, 0x0E33, 1.0), 0x35: (0x0E25, 0x0E33, 1.0),
+    0x52: (0x0E25, 0x0E33, 1.0),
+    0x05: (0x08F8, 0x0903, 4.0), 0x37: (0x08F8, 0x0903, 4.0),
+    0x06: (0x0904, 0x0919, 1.0), 0x38: (0x0904, 0x0919, 1.0),
+    0x41: (0x0DD7, 0x0E22, 1.0),
+    0x44: (0x0FD4, 0x1031, 1.0),
+    0x45: (0x174A, 0x1785, 1.0),
+    0x46: (0x0094, 0x00A2, 0.7), 0x4B: (0x0094, 0x00A2, 0.7),
+    0x50: (0x023A, 0x0248, 1.0),
+    0x51: (0x0054, 0x0062, 1.0),
+    0x53: (0x0125, 0x013D, 1.0),
+    0x61: (0x1339, 0x1356, 1.0), 0x62: (0x1339, 0x1356, 1.5),
+    0x63: (0x091A, 0x092F, 5.0),
+}
+#: The default arm of that switch.
+IMPACT_SPRITE_DEFAULT = (0x0904, 0x0904, 0.1)
+
+#: `ActorShotFeedback` (`FUN_00454050`) -- the blood spray's scale by hit
+#: result, and the ricochet a result-5 hit plays instead of blood.
+BLOOD_SCALE_BY_RESULT = {1: 0.75, 2: 0.5, 3: 1.0, 4: 1.0}
+#: Result 5 -- the shot did nothing. Character type 2 gets its own ricochet.
+NO_EFFECT_RICOCHET = 0x1116A9          # COMMON\BULLET_MET3_22.WAV
+NO_EFFECT_RICOCHET_TYPE2 = 0x0F16A9    # COMMON\BULLET_MET2_16.WAV
+#: ...and the impact sprite material it spawns, 0x51 for character type 3.
+NO_EFFECT_MATERIAL = 3
+NO_EFFECT_MATERIAL_TYPE3 = 0x51
+
 #: How a dying actor picks its animation, from `FUN_004560B0` -> `FUN_00456220`.
 #:
 #: The general case is **directional**. `FUN_00456220` takes
@@ -230,6 +311,8 @@ class Character:
     extras: list[int] = field(default_factory=list)
     #: ``{slot: {"centre", "radius"}}`` for the damaged variants.
     gore: dict = field(default_factory=dict)
+    #: `ResolveHit`'s torso stage count -- see :func:`torso_stage_count`.
+    torso_stages: int = 0
 
     def to_json(self) -> dict:
         return {
@@ -244,6 +327,7 @@ class Character:
             # what the score model keys on; carried rather than assumed by
             # the client.
             "head_bone": 2,
+            "torso_stages": self.torso_stages,
             "motions": {str(k): v for k, v in self.motions.items()},
         }
 
@@ -260,8 +344,10 @@ class Placement:
     #: A scripted entrance played once before the loop -- see
     #: :data:`MOTION_STATE_CUE`.
     intro: tuple[int, int] | None = None   #: ``(motion, delay_frames)``
-    #: `obj+0x11C`, from the descriptor's ``+0x22``. Difficulty scaling is not
-    #: applied -- see docs/formats/combat.md.
+    #: The descriptor's ``+0x22``, **before** difficulty scaling.
+    #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
+    #: ``[1, 300]``; the client does that, because it is the client that owns
+    #: the difficulty setting.
     hp: int = 0
 
     def to_json(self) -> dict:
@@ -536,6 +622,154 @@ def _u16_table(tables, base: int, char_type: int, bone: int) -> list[int]:
     return list(struct.unpack_from(f"<{HIT_STEPS}H", tables.data, o))
 
 
+def _u16_flat(tables, base: int, char_type: int, count: int) -> list[int]:
+    """*count* u16s from the head of a per-character table, as one flat array.
+
+    The six-step rows are read flat on purpose. `ResolveHit` computes
+    ``i = bone*6 + n`` and then reads **both** ``[i]`` and ``[i + 1]``, so the
+    last step of every bone takes its control code from the *next* bone's row.
+    Splitting the table into rows first would quietly lose that.
+    """
+    b = tables._v2r(base)
+    if b is None:
+        return []
+    p = tables._v2r(struct.unpack_from("<I", tables.data, b + char_type * 4)[0])
+    if p is None or p + count * 2 > len(tables.data):
+        return []
+    return list(struct.unpack_from(f"<{count}H", tables.data, p))
+
+
+def hit_steps(tables, char_type: int, bone: int) -> list[list[int]]:
+    """The six ``[slot, code, damage]`` steps `ResolveHit` walks for one bone.
+
+    *slot* is what the bone is redrawn with, *damage* what the hit costs, and
+    *code* is the **next** entry in the effect table -- which `FUN_00409430`
+    branches on rather than treating as a slot:
+
+    ===== =========================================================
+    code  what the hit does
+    ===== =========================================================
+    0     last step. Damage; swap once and latch; no dismemberment.
+    1     **sever**. Damage, swap this bone, and remove every bone
+          below it (`SeverBoneChildren` -> `RemoveBoneSubtree`).
+    2     nothing at all -- no damage and no score.
+    >2    escalate: damage, swap, and advance to the next step.
+    ===== =========================================================
+
+    For ``char_adv00`` code 1 sits at step 5 of bones 3, 4, 6, 7, 10, 11, 13
+    and 14 -- the upper arms, forearms, thighs and shins, and nothing else.
+    A limb comes off on the fifth hit, not the first.
+    """
+    n = tables.character_bone_count(char_type) or 0
+    span = (n + 2) * HIT_STEPS
+    eff = _u16_flat(tables, HIT_EFFECT, char_type, span)
+    dmg = _u16_flat(tables, HIT_DAMAGE, char_type, span)
+    if not eff:
+        return []
+    out = []
+    for i in range(HIT_STEPS):
+        j = bone * HIT_STEPS + i
+        if j + 1 >= len(eff):
+            break
+        out.append([eff[j], eff[j + 1], dmg[j] if j < len(dmg) else 0])
+    return out
+
+
+def torso_stage_count(tables, char_type: int) -> int:
+    """`ResolveHit`'s inline count of the torso's real gore stages.
+
+    The default branch walks the effect table forward from bone 1 step 0 while
+    the entries are greater than 2, and **withholds the last torso stage while
+    the actor is still alive** (``if (count <= hits + 1) skip the swap``). So a
+    zombie only ever shows its final torso wound once it is dead.
+    """
+    n = tables.character_bone_count(char_type) or 0
+    eff = _u16_flat(tables, HIT_EFFECT, char_type, (n + 2) * HIT_STEPS)
+    c = 0
+    while HIT_STEPS + c < len(eff) and eff[HIT_STEPS + c] > 2:
+        c += 1
+    return c
+
+
+def damage_rank_row(tables, char_type: int, bone: int) -> list[int]:
+    """``s8[16]`` added to the table damage, one entry per adaptive rank."""
+    b = tables._v2r(HIT_DAMAGE_RANK)
+    if b is None:
+        return []
+    v = struct.unpack_from("<I", tables.data, b + char_type * 4)[0]
+    p = tables._v2r(v) if v else None
+    if p is None:
+        return []
+    o = p + bone * HIT_RANKS
+    if o + HIT_RANKS > len(tables.data):
+        return []
+    return list(struct.unpack_from(f"<{HIT_RANKS}b", tables.data, o))
+
+
+def bone_zones(tables) -> list[int]:
+    """:data:`BONE_ZONE` -- bone to destroyed-zone bit, 0xFF for none."""
+    o = tables._v2r(BONE_ZONE)
+    if o is None:
+        return []
+    return list(struct.unpack_from("<16B", tables.data, o))
+
+
+def combat_tables(tables) -> dict:
+    """Every sound and sprite a shot can produce, with the names resolved.
+
+    All of it is proved: `FUN_00407950` is a bare switch of `PlaySoundId`
+    calls, `FUN_004073B0` a bare switch of texture ranges, and
+    :data:`HIT_VOICE_TABLE` is read as sound ids and resolved through
+    `g_se_name_list` -- so ``COMMON\\BULLET_WOD1_16.WAV`` sitting under
+    material 6 is what proves material 6 is wood, rather than anyone guessing.
+    """
+    o = tables._v2r(HIT_VOICE_TABLE)
+    v = list(struct.unpack_from("<15I", tables.data, o)) if o else [0] * 15
+    se = tables.se_names()
+    name = lambda i: se.get(i, "")
+    named = lambda ids: [{"id": i, "file": name(i)} for i in ids]
+    return {
+        # `ActorPlayHitVoice`. `impact` plays on every hurt and every body
+        # kill; `head` replaces it on a headshot kill.
+        "impact": named(v[0:5]),
+        "head_impact": named([0x0116A9, 0x0516A9]),
+        "voice": {
+            "hurt": named([v[5], v[6]]),
+            "kill": named([v[7], v[8]]),
+            "head": named([v[9], v[10]]),
+        },
+        "voice_set_a_types": list(VOICE_SET_A_TYPES),
+        # `FUN_00407950` and `FUN_004073B0`, keyed by collision material.
+        "ricochet": {str(k): {"id": i, "file": name(i)}
+                     for k, i in sorted(RICOCHET_BY_MATERIAL.items())},
+        "impact_sprite": {str(k): list(t)
+                          for k, t in sorted(IMPACT_SPRITE_BY_MATERIAL.items())},
+        "impact_sprite_default": list(IMPACT_SPRITE_DEFAULT),
+        # `ActorShotFeedback`.
+        "blood_scale": {str(k): s for k, s in BLOOD_SCALE_BY_RESULT.items()},
+        "no_effect": {
+            "sound": {"id": NO_EFFECT_RICOCHET,
+                      "file": name(NO_EFFECT_RICOCHET)},
+            "sound_type2": {"id": NO_EFFECT_RICOCHET_TYPE2,
+                            "file": name(NO_EFFECT_RICOCHET_TYPE2)},
+            "material": NO_EFFECT_MATERIAL,
+            "material_type3": NO_EFFECT_MATERIAL_TYPE3,
+        },
+    }
+
+
+def difficulty_tables(tables) -> dict:
+    """The two difficulty tables `ActorInitHitPoints` and `ResetDamageRank` use."""
+    a = tables._v2r(DIFFICULTY_HP_DELTA)
+    b = tables._v2r(INITIAL_DAMAGE_RANK)
+    return {
+        "hp_delta": list(struct.unpack_from("<5i", tables.data, a)) if a else [],
+        "initial_rank": list(struct.unpack_from("<5b", tables.data, b)) if b else [],
+        "default": DEFAULT_DIFFICULTY,
+        "hp_min": 1, "hp_max": 300,
+    }
+
+
 def death_motions(tables) -> dict:
     """The directional death set. See :data:`DEATH_FRONT`."""
     def rd(base, n):
@@ -614,18 +848,19 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
         if sph:
             b["hit_centre"] = list(sph[0])
             b["hit_radius"] = sph[1]
-        dmg = [v for v in _u16_table(tables, HIT_DAMAGE, char_type, n["bone"])
-               if v]
-        if dmg:
-            b["damage"] = dmg
-        # The slot the bone is redrawn with after each successive hit. Values
-        # 0..2 are control codes in `FUN_00409430`, not slots.
-        eff = _u16_table(tables, HIT_EFFECT, char_type, n["bone"])
-        eff = [v if v > 2 else 0 for v in eff]
-        while eff and eff[-1] == 0:
-            eff.pop()
-        if eff:
-            b["effects"] = eff
+        # `[slot, code, damage]` per step, with the control codes intact. An
+        # earlier revision folded 0/1/2 to 0 and trimmed the tail, which threw
+        # away the sever code entirely -- so a limb was reskinned on the first
+        # hit and never came off. See :func:`hit_steps`.
+        steps = hit_steps(tables, char_type, n["bone"])
+        while steps and steps[-1][0] == 0 and steps[-1][1] == 0 \
+                and steps[-1][2] == 0:
+            steps.pop()
+        if steps:
+            b["steps"] = steps
+        rank = damage_rank_row(tables, char_type, n["bone"])
+        if any(rank):
+            b["damage_rank"] = rank
         bones.append(b)
     return Character(char_type=char_type,
                      name=asset_file.removesuffix(".bin"),
@@ -633,7 +868,8 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      bone_count=tables.character_bone_count(char_type),
                      bones=bones,
                      extras=extra_parts(tables, char_type),
-                     gore=gore_parts(tables, char_type))
+                     gore=gore_parts(tables, char_type),
+                     torso_stages=torso_stage_count(tables, char_type))
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],
@@ -769,6 +1005,9 @@ def characters_json(chars: dict[int, Character],
     posed = sum(1 for p in placements if p.motion is not None)
     return {
         "deaths": death_motions(tables) if tables is not None else {},
+        "difficulty": difficulty_tables(tables) if tables is not None else {},
+        "combat": combat_tables(tables) if tables is not None else {},
+        "bone_zones": bone_zones(tables) if tables is not None else [],
         "types": {str(ct): c.to_json() for ct, c in sorted(chars.items())},
         "placements": [p.to_json() for p in placements],
         "note": (

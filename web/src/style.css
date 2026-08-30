@@ -413,3 +413,15 @@ body.resizing { cursor: col-resize; user-select: none; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
 .err { color: var(--spawn); }
+
+/* The debug clear, next to the Shoot checkbox. Only shown while shooting. */
+button.kill {
+  background: #6b1d1d;
+  border: 1px solid #a33;
+  color: #ffd9d9;
+  border-radius: 3px;
+  padding: 1px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+button.kill:hover { background: #8c2626; }

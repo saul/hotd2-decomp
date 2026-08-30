@@ -312,6 +312,19 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       each node carries its own bone offset. `tools/export_character.py` puts a
       character together and poses it from a motion frame —
       `export_character.py 0x1A --motion 762` renders a cat, mid-stride.
+- [x] **Combat — SOLVED.** The shot, the hit test, the per-bone damage
+      escalation, **dismemberment**, the death pick and every sound a shot can
+      make. The pivot was that the effect table's `[i + 1]` entry is a *control
+      code* (0 last, **1 sever**, 2 no effect, larger escalate) rather than the
+      next slot: on a sever `SeverBoneChildren` -> `RemoveBoneSubtree` zeroes
+      the draw slot of every bone below the one hit, so an arm takes its
+      forearm and hand with it. Difficulty is two separate numbers --
+      `g_difficulty` scales starting hit points, `g_damage_rank` (adaptive,
+      0..15) scales per-hit damage. Sounds are two switch statements, and the
+      filenames they resolve to are what name the collision materials: sand,
+      metal, other, water, wood. `tools/verify_combat.py` checks all of it
+      across 86 character types and 2810 spawn/difficulty pairs. See
+      [`formats/combat.md`](formats/combat.md).
 - [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
       the only place this binary names anything. `ExeTables.sound_records()`.
       This is now the primary identification tool for the decomp.
@@ -404,3 +417,12 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     (`== 6`), gates `EvtInterpreterLoop`'s hardcoded scene-5 skip (`== 5`), and
     picks the entry step in `FUN_0045EBC0` (`== 5 || == 9`). Read as "scene id"
     in one place and "scene state" in another; the two readings disagree.
+21. What sets `obj+0x1368` bits 3, 4, 6 and 7? `ChooseDeathMotion` overrides
+    the directional death with motions 428, 421, 633 and 553 for them. It is
+    **not** the destroyed-zone mask -- that is `obj+0x1318`, 0x50 bytes
+    earlier, and it names only three zones: head, right arm, left arm.
+    (Phase 8)
+22. Why is character type 21 (`samson`) different in `g_character_part_tables`?
+    Its entry's first word is a float rather than an asset slot, so the
+    damaged-part sphere scan finds nothing for it. Its effect *slots* resolve
+    normally. (low priority)

@@ -18,7 +18,7 @@
 009c7108	g_evt_ip	the evt interpreter's instruction pointer
 009a2d74	g_nEvtSkipFlag
 009a2d7c	g_nEvtSkippableRegion
-009a1a18	g_nSkipRequestedDeadEnd
+009a1a18	g_nSkipRequested	CORRECTION: previously named ...DeadEnd on the basis that nothing read it. CheckCutsceneSkipRequest does -- it is only ever reached through a function pointer, so no xref showed it
 009a6184	g_evt_action_operands
 005776ec	g_evt_action_table	queue_event action groups, 16 selectors each
 # --- cameras and paths ------------------------------------------------------
@@ -54,7 +54,7 @@
 009c72e0	g_actor_kill_all	1 makes every class handler self-destruct
 009a5c34	g_carrier_object	the current rideable object
 005776b0	g_difficulty_hp_delta	{-30, -15, 0, 0, 0} added to obj+0x11E
-009c8e94	g_difficulty
+009c8e94	g_difficulty	Menu difficulty 0..4. Only scales starting hit points, through g_difficulty_hp_delta; per-hit damage uses g_damage_rank instead.
 009c8e98	g_app_state
 009a2be0	g_enemy_approach_rings
 009c8e40	g_enemy_approach_steps
@@ -161,5 +161,28 @@
 00579920	s_mot_path_format
 009a5c4c	g_frame_bone_rotations	frame + 0x0C: the s16 triple array SkeletonWalkNode indexes
 009ca0a4	g_skeleton_node_out	where SkeletonWalkNode writes each bone's resolved matrix, stride 0x90
-0052ed08	g_character_variant_counts	char type -> variant count (1 or 2), NOT a bone count
+0052ed08	g_pCharacterExtraParts	{u32 count; u32 *descriptors[]}; each descriptor's first word is an asset slot the SKELETON DOES NOT NAME. 68 of 76 character types have one or two; the cat has none. Without them a humanoid has a hole where its waist should be
 004d032c	g_character_part_tables	char type -> per-bone {slot, ...} overrides, stride 0x14
+
+# --- combat: shots, damage, dismemberment, death; characters, motion, props ---
+004c7160	g_pBoneEffectSlots	per character: u16[bone][6], the asset slot the bone is redrawn with after each successive hit
+004c8350	g_pBoneDamage	per character: u16[bone][6], damage for each successive hit on that bone. char_adv00's head runs 100/120/140/160
+004d0d84	g_pBoneDamageByRank	per character: s8[bone][0x10], a difficulty addend on top of g_pBoneDamage
+0058b6b8	g_pDialogueVariants	evt 0x2D: u16[group][3], the variant per player configuration
+0058bc68	g_pDialogueText	evt 0x2D: 0x40-byte {f32 x_offset, char text[0x3A], u16 end_frame} subtitle lines
+005919a8	g_pDialogueLines	evt 0x2D: u16[variant][4] subtitle line ids, 0xFFFF-terminated
+00593084	g_pDeathMotionsArc8000	6 death motions for the 0x8000 arc: 985, 989, 987, 988, 989, 990. Their root carries z by +7.4/+8.2
+0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
+005960b4	g_pHingeCurvesXYZ	hinge swing curves, 6-byte {s16 rx, ry, rz} frames. Curve 2 is the van doors: 179 deg by frame 12, settling to 137
+005960c8	g_pHingeCurvesYaw	hinge swing curves, u16 yaw-only frames, for the selectors the xyz table has no entry for
+0059f4d0	g_ShotHitList	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
+005a4c84	g_nShotHitCount	entries in g_ShotHitList this frame
+009a2cb8	g_ShotRecords	per player, 0x68 bytes: world ray origin, direction, -pitch/-yaw and their sin/cos
+009a5c78	g_nPlayerFired	set to 1 by the player update when the trigger is down and ammo remains; cleared by ProcessPlayerShots
+004c4d18	g_bone_damage_zone	u8[16], bone -> destroyed-zone bit index for obj+0x1318. char_adv00: bone 2 (head) -> 0, bones 3-5 (right arm) -> 1, bones 6-8 (left arm) -> 2, all others 0xFF -- the shift is masked with 0x1F so those land harmlessly on bit 31.
+005679f4	g_initial_damage_rank	s8[5], difficulty -> starting g_damage_rank: -3, -1, 1, 4, 8. Not clamped on the way in; UpdateDamageRank clamps to [0,15] on its first pass.
+009c8e96	g_damage_rank	Adaptive 0..15 rank. DamageRankModifier indexes g_pBoneDamageByRank[char][bone*0x10 + rank] with it and adds the signed byte to the table damage.
+009a2d88	g_shot_bone	int[2], per player: the bone index this player's shot hit. DispatchHit copies it from (s8)obj+0x190+player before calling ResolveHit.
+009a58f8	g_hit_result	int[2], per player, written by ResolveHit: 0 = nothing, 1 = damaged and part swapped, 2 = damaged only, 3 = severed, 5 = no effect (the effect table's `2` sentinel). Result 5 scores nothing.
+009a5c82	g_head_combo_bonus	+player*0x98. Added to the 120-point headshot award and then incremented by 10, so consecutive headshots pay 120, 130, 140 ...; any non-head hit zeroes it.
+009a5c86	g_player_hit_count	+player*0x98. Hits that scored, for the end-of-stage accuracy grade evt 0x2B reads.

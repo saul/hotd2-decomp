@@ -3476,3 +3476,43 @@ right, and the half turn was mine.
 
 The same render confirms the waist gap independently — visible between chest
 and belt on both zombies — which rules the browser out of that one for good.
+
+## The waist: the skeleton is not the whole character
+
+With a reproducer in hand -- `verify_spawn_facing.py` plus `blender_shot.py` --
+the gap took three checks and one lucky split.
+
+Ruled out first, and each mattered:
+
+* **The skeleton header.** It has a node's shape -- slot at +0, offset at +4,
+  bone at +0x14 -- so an undrawn root part was the obvious candidate. Its slot
+  is 0 for every character.
+* **`PTR_DAT_004D032C`.** The lead recorded last session. Dumped, it is the
+  per-bone **hit-sphere** table: `{slot, centre, radius}` in bone order, radii
+  2.55 torso, 1.3 head, 0.8 hand, 1.75 pelvis, with the entries past the end
+  belonging to the next character. Damage volumes, not geometry. Recorded as
+  closed so it is not chased again.
+* **`PTR_DAT_0052ED08`.** Reached by scanning the image for the only `u32`
+  `0x00001F02` in it -- slot `0x1F02` being the one model in `char_adv00.bin`
+  that fits the hole. The single hit at `0x0052BEF8` sits `0x38` bytes before
+  the pointer that table already gave for `char_adv00`, which is what turned a
+  guess into a structure: `{u32 count; u32 *descriptors[]}`, each descriptor's
+  first word an asset slot.
+
+The split settled it. **68 of the 76 character types with a skeleton have one
+or two extra parts, and the cat has none** -- exactly the set with the gap and
+exactly the one without. That is a much better argument than "the extents fit",
+which was all I had before.
+
+Attachment was decided by rendering both candidates rather than by reasoning:
+on the **second root** the waist closes and the zombie matches the reference the
+user supplied; on the first root the gap survives. Every character has exactly
+two roots, at bones 1 and 9 for the 15-bone humanoids but 4, 10, 12 or 20 for
+the wings, `curien` and the HOD1 bosses -- so the rule is "the second root", not
+the number 9.
+
+Left open honestly: the descriptor has four more fields, including a byte array
+`ff ff ff ff ff ff ff ff 0a 0b 0c 0d 0e 0f 16 17` and two pointers to blocks
+`0x2D8` bytes apart, which read like per-vertex skinning against several bones.
+The part is attached rigidly, which matches the game at rest; a deforming waist
+would only show in extreme poses.

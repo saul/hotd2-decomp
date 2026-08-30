@@ -149,6 +149,8 @@ class Character:
     bones: list[dict] = field(default_factory=list)
     #: ``{motion_id: {"bank", "frames", "root", "rot"}}``
     motions: dict[int, dict] = field(default_factory=dict)
+    #: Asset slots the skeleton does not name -- see :func:`extra_parts`.
+    extras: list[int] = field(default_factory=list)
 
     def to_json(self) -> dict:
         return {
@@ -157,6 +159,7 @@ class Character:
             "file": self.file,
             "bone_count": self.bone_count,
             "bones": self.bones,
+            "extras": [f"0x{s:04X}" for s in self.extras],
             "motions": {str(k): v for k, v in self.motions.items()},
         }
 
@@ -329,6 +332,66 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None):
     return chars, placements, [e for e in entries if e]
 
 
+#: `PTR_DAT_0052ED08[char_type]` -> ``{u32 count; u32 *descriptors[]}``, each
+#: descriptor's first word an asset slot.
+#:
+#: These are the parts a character draws that its **skeleton does not name**,
+#: and without them a humanoid has a hole where its waist should be: the torso
+#: mesh stops at ``y = 0.29`` and the pelvis starts at ``-0.98``, which is the
+#: 1.2-unit gap between chest and belt. `char_adv00`'s single extra is slot
+#: ``0x1F02`` -- model 99, ``y -0.09..1.69`` -- and dropped in at the second
+#: root it closes that gap exactly.
+#:
+#: The split identified it: **every humanoid has one or two, and the cat has
+#: none**, which is the same split as the gap. 68 of the 76 character types
+#: with a skeleton carry at least one.
+#:
+#: The descriptor has four more fields -- two pointers to blocks 0x2D8 bytes
+#: apart, a count, and a byte array reading
+#: ``ff ff ff ff ff ff ff ff 0a 0b 0c 0d 0e 0f 16 17`` -- which look like
+#: per-vertex skinning against several bones. That is **not** decoded, so the
+#: part is attached rigidly here. See :func:`_second_root`.
+EXTRA_PARTS = 0x0052ED08
+
+
+def extra_parts(tables, char_type: int) -> list[int]:
+    """Asset slots a character draws that its skeleton does not name."""
+    base = tables._v2r(EXTRA_PARTS)
+    if base is None or not (0 <= char_type < 0x100):
+        return []
+    blk = tables._v2r(struct.unpack_from("<I", tables.data,
+                                         base + char_type * 4)[0])
+    if blk is None or blk + 8 > len(tables.data):
+        return []
+    count, arr = struct.unpack_from("<2I", tables.data, blk)
+    ao = tables._v2r(arr)
+    if ao is None or not (0 < count < 16):
+        return []
+    out = []
+    for i in range(count):
+        d = tables._v2r(struct.unpack_from("<I", tables.data, ao + i * 4)[0])
+        if d is None or d + 4 > len(tables.data):
+            continue
+        out.append(struct.unpack_from("<I", tables.data, d)[0])
+    return out
+
+
+def _second_root(bones: list[dict]) -> dict | None:
+    """The pelvis root, which is what an extra part hangs off.
+
+    Every character in the game has exactly two root nodes -- an upper body at
+    bone 1 and a lower body whose bone index is 9 for the 15-bone humanoids but
+    4, 10, 12 or 20 for the wings, `curien` and the HOD1 bosses. So the rule is
+    structural, not the number 9.
+
+    Verified by rendering: `char_adv00` with its extra part on the second root
+    matches the game exactly, and on the *first* root the waist gap is still
+    there.
+    """
+    roots = [b for b in bones if b["parent"] is None]
+    return roots[1] if len(roots) > 1 else (roots[0] if roots else None)
+
+
 def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
     skel = tables.character_skeleton(char_type)
     if not skel:
@@ -343,7 +406,8 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      name=asset_file.removesuffix(".bin"),
                      file=asset_file,
                      bone_count=tables.character_bone_count(char_type),
-                     bones=bones)
+                     bones=bones,
+                     extras=extra_parts(tables, char_type))
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],
@@ -403,6 +467,24 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict],
         idx = rec[1] if rec else None
         model = models[idx] if idx is not None and idx < len(models) else None
         parts.append((part, [(model, bank, char.name)] if model else []))
+
+    # The parts the skeleton does not name, hung off the second root with no
+    # transform of their own. They are deliberately NOT added to
+    # ``Character.bones``: the client poses by bone index, and an extra part
+    # has none -- it rides its parent, which is what rigid attachment means.
+    host = _second_root(char.bones)
+    for i, slot in enumerate(char.extras):
+        rec = slots.get(slot)
+        idx = rec[1] if rec else None
+        model = models[idx] if idx is not None and idx < len(models) else None
+        if model is None:
+            continue
+        parts.append((rigslib.RigPart(
+            f"extra{i}_{slot:04x}", (slot,),
+            parent=host["part"] if host else "",
+            note=f"part {i} of character type {char.char_type:#04x}'s extra "
+                 f"list; the skeleton does not name it"),
+            [(model, bank, char.name)]))
 
     rig = rigslib.Rig(
         name=f"chr_{char.name}",

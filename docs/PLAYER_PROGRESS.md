@@ -262,20 +262,37 @@ them was mine and one of them was a fair reading of the data:
   measurement makes: a correct one is unimodal about zero. That shape should
   have been the warning.
 
-* **[open] The humanoids have no waist.** Assembled and posed, `char_adv00`'s
-  torso occupies `y 0.25…4.25` and its pelvis `−3.55…−0.96`, leaving a
-  1.2-unit hole. It is not a client bug — `export_character.py` produces it too
-  — and not a broken parent chain: the two are separate roots in the EXE
-  skeleton, which is what `FUN_00410590` iterates. `FUN_004107E0` writes one
-  slot per bone and `FUN_00411050` draws that one slot, so the game really does
-  draw 15 parts. The unused slots in `char_adv00.bin` interleave with the bone
-  slots (`0x1F00, 0x1F01, **0x1F02**, 0x1F03, 0x1F06 …`), which reads as the
-  shot-off damage variants rather than a missing limb. The untested lead is the
-  second per-bone table `FUN_004107E0` consults, `PTR_DAT_004D032C[char_type]`,
-  stride `0x14` indexed `bone − 1`, which compares its first word against the
-  node's slot. The cat is unaffected — 18 models, 18 bones, a clean 1:1. The
-  Blender render confirms it independently: the gap is visible between chest and
-  belt on both zombies, so it is in the assembly and not in the browser.
+* **The humanoids had no waist, and now they do.** Assembled from the skeleton
+  alone, `char_adv00`'s torso occupied `y 0.25…4.25` and its pelvis
+  `−3.55…−0.96`, leaving a 1.2-unit hole between chest and belt. The skeleton
+  was not at fault — `FUN_004107E0` writes one slot per bone and `FUN_00411050`
+  draws that one slot, so 15 parts is genuinely what the game draws *from the
+  skeleton*.
+
+  It draws more than that. `PTR_DAT_0052ED08[char_type]` is
+  `{u32 count; u32 *descriptors[]}`, each descriptor's first word an asset slot,
+  and those are parts the skeleton never names. **68 of the 76 character types
+  with a skeleton carry one or two; the cat carries none** — which is the same
+  split as the gap, and is what identified it. `char_adv00`'s single extra is
+  slot `0x1F02`, model 99, `y −0.09…1.69`.
+
+  It hangs off the **second root**. Every character has exactly two root nodes,
+  an upper body at bone 1 and a lower body at bone 9 for the 15-bone humanoids
+  but 4, 10, 12 or 20 for the wings, `curien` and the HOD1 bosses — so the rule
+  is structural, not the number. Rendered both ways: on the second root the
+  waist closes and the result matches the game; on the first the gap is still
+  there.
+
+  A dead end worth recording so it is not re-walked: `PTR_DAT_004D032C` is the
+  per-bone **hit-sphere** table, `{slot, centre x/y/z, radius}` in bone order
+  (2.55 torso, 1.3 head, 0.8 hand, 1.75 pelvis) — damage volumes, not geometry.
+
+  **`[open]`** how the game attaches it. The descriptor carries four more
+  fields: two pointers to blocks `0x2D8` bytes apart, a count, and a byte array
+  reading `ff ff ff ff ff ff ff ff 0a 0b 0c 0d 0e 0f 16 17`, which look like
+  per-vertex skinning against several bones. The part is attached **rigidly**
+  here, which matches the game at rest; a deforming waist would show up in
+  extreme poses.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any

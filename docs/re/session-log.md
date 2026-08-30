@@ -3069,3 +3069,40 @@ it. Left `[open]` rather than guessed.
 Still open: classes 0x20, 0x45 and 0x46 were not reached; class 0x30's state
 slots 0x16–0x35; and the ten behaviour functions at `0x005926A8`, three of
 which play sounds and so are the next place identity evidence will come from.
+
+### Session 20, continued — annotations became committed source
+
+The user asked where the names actually live, and the honest answer was: not in
+the repo. `ApplyKnownTables.java` covered the evt opcode and spawn-class
+dispatch tables and nothing else. Every other symbol — ~90 project globals and
+~130 function names, built up across many sessions — existed only in the live
+database, applied interactively over the MCP bridge, which leaves no trail. The
+markdown cheerfully referenced `g_camera_fixed_eye_y` and `FUN_00462A80` as
+though they were durable. A fresh checkout would have rebuilt to neither.
+
+So the model is now: **the database is derived, `ghidra/annotations/*.tsv` is
+source.** `ExportAnnotations.java` dumps the project's symbols out of a
+database; `ApplyAnnotations.java` replays them onto a fresh import, creating
+functions that do not exist yet because most of the interesting ones are only
+reachable through a table auto-analysis never recognised. `./ghidra/run.sh
+rebuild` is the one command: import, apply tables, apply annotations.
+
+Two design choices worth keeping. `ApplyAnnotations` renames only symbols still
+carrying a Ghidra default name, so it is idempotent, never clobbers a name
+chosen in the GUI, and does not care whether it runs before or after
+`ApplyKnownTables`. And `ExportAnnotations` filters out everything a fresh
+import recreates — `Catch@`/`Unwind@`, PE resources, TEB fields, and the
+CRT/D3DX names the function ID analyser finds — so the committed file stays a
+record of *this project's* findings rather than a snapshot of Ghidra's.
+
+`tools/verify_annotations.py` checks every row against the EXE's own PE section
+table, and immediately rejected three rows. The rule was mine that was wrong:
+MSVC emits a switch's jump table inside the function body, so
+`g_class33_selector_targets` and friends legitimately live in `.text`. They are
+reported now rather than rejected.
+
+Headless could not be used for any of this — the GUI instance holds the project
+lock and `run_ghidra_script` is gated off over MCP — so the existing database
+state was read back through MCP queries (`search_functions_enhanced` with
+`has_custom_name`, and `list_globals`) and written to the TSVs by hand. The
+scripts are what make the next round automatic.

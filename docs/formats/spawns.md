@@ -113,10 +113,44 @@ The creatures the binary actually names are a **frog** (`KAERU2_22K.wav`,
 (`HABATAKI*`). **There is no cat sound** — a search of all 324 records for
 cat/neko/mew finds nothing.
 
-Class `0x52` is the best structural candidate for a small ambient animal — it
-wanders, it is small, and its model slot is `0x1385 + rand() % 10` — but it
-plays no sound at all, so nothing in the code names it. Recorded as `[open]`
-rather than guessed.
+### Hunting the cat
+
+A user report gave two sightings in stage 2: near the start after the car on
+the non-crash branch, and around the flying creatures. It moves and makes no
+sound. That is a locality question, so it can be chased in the data without
+guessing at names.
+
+Ruled out by position: class `0x52` (the wandering critter) spawns twice in
+stage 2, but at evt `0xDBCC`/`0xDBF4` — deep in the script, near neither place.
+Classes `0x12`/`0x13` (the animated props) resolve to `komono_boat`,
+`komono_st1`, `etc_1` and `sanbasi`, also elsewhere.
+
+**The lead is class `0x53`** (`FUN_00431250`), and it fits on every axis the
+report gives:
+
+* **Stage 2 only**, four instances — evt `0x21F4`, `0x221C`, `0x44A4`, `0x6E98`
+  — each with a different animation set (2, 4, 0, 5) and mode (0, 0, 2, 1).
+* **`0x21F4` and `0x221C` sit immediately after the flying-creature block**
+  (`0x1FF8`–`0x20C0`), which is one of the two reported sightings.
+* **It moves**: `FUN_00431430` runs motion `0x2FD`, then swaps to `0x305` once
+  `x < -478` — it runs away along X.
+* **It makes no sound** — no `PlaySoundId` in its range.
+* **It is branch machinery**, which is what "non-crash branch" points at:
+  `if ((obj+0x34 & 8) && g_script_branch_var == 0 && DAT_009A2BC0 == 8)
+  g_script_branch_var = 2;` — shooting it sets the route branch variable.
+* It is a **skinned character of type `0x1A`**, so a small animated creature
+  rather than a prop.
+
+`[open]`, and deliberately so — nothing in the binary names it. What would
+settle it is resolving character type `0x1A` through the skinned-model part
+pipeline (`FUN_00410590` / `FUN_00412440`) to its actual models and rendering
+them. The obvious shortcut does not work: the first int of
+`PTR_DAT_0052ED08[type]` is 1 or 2 for **every** character type, so it is a
+variant count, not a bone count, and cannot separate a quadruped from a human.
+
+Class `0x52` remains a second candidate on shape alone — it wanders, it is
+small, its model is `0x1385 + rand() % 10` — but its stage-2 positions do not
+match either sighting.
 
 ## Item placement — SOLVED
 

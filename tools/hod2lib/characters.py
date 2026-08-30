@@ -102,6 +102,36 @@ MOTION_RULES: dict[int, tuple] = {
 #: playback rate rather than baked into the frame data.
 MOTION_FPS = 30.0
 
+#: Class 0x30's parameter tail also carries a **scripted entrance**.
+#:
+#: ``FUN_00452DA0`` copies ``params[2]`` to ``obj+0x1310``, which is the index
+#: `FUN_004533F0` dispatches through the 54-state table at ``0x00592AE8``. State
+#: **21** (`FUN_004577F0`) is a one-shot motion cue::
+#:
+#:     if (sub == 0) {
+#:         PlayMotion(obj+0x194, params[+0x04]);   /* the entrance motion */
+#:         obj[0x1330] = params[+0x08];            /* a start delay */
+#:         sub++;
+#:     }
+#:     if (sub <= 1 && --obj[0x1330] > 0) return;  /* hold */
+#:     if (obj[0x19C] >= play_length[obj[0x1B4]] - 1) {
+#:         obj[0x1310] = params[3];                /* then this state */
+#:         if (params[3] == 21) obj[0x1310] = 1;   /* 21 means "walk" */
+#:     }
+#:
+#: The two zombies inside the stage-2 van are exactly this: state 21, motion
+#: **923** from `zom.bin`, delays of **0 and 10 frames** so they come out one
+#: after the other, then state 1. Motion 923 is a jump: its root translation
+#: runs z 0 to -15.7 while y arcs 8.2 to 17.4 and back, which is a body
+#: leaving a van and landing. The idle 956 has z = 0 and a flat y throughout.
+#:
+#: `[open]` whether the delay also freezes the animation. It gates the state
+#: *transition* and clears bit 0x4000 of ``obj+0x34`` when it expires, which
+#: reads like an animation-paused bit, but that is not established. Holding the
+#: first frame for the delay is what reproduces the stagger, and that is what is
+#: done here.
+MOTION_STATE_CUE = 21
+
 #: More than this and a bake is not worth its bytes; the longest motion in the
 #: game is well inside it.
 MAX_BAKED_FRAMES = 600
@@ -173,16 +203,22 @@ class Placement:
     char_type: int
     motion: int | None
     spawn: dict                     #: the script's own spawn dict
+    #: A scripted entrance played once before the loop -- see
+    #: :data:`MOTION_STATE_CUE`.
+    intro: tuple[int, int] | None = None   #: ``(motion, delay_frames)``
 
     def to_json(self) -> dict:
-        return {"at": self.at, "class": self.cls, "char_type": self.char_type,
-                "motion": self.motion}
+        d = {"at": self.at, "class": self.cls, "char_type": self.char_type,
+             "motion": self.motion}
+        if self.intro:
+            d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
+        return d
 
 
 _BAMS = math.tau / 65536.0
 
 
-def _rot(bams) -> list[list[float]]:
+def rot_matrix(bams) -> list[list[float]]:
     """``Rz(rz) @ Ry(ry) @ Rx(rx)`` -- the engine's order, as a 3x3."""
     ax, ay, az = (v * _BAMS for v in bams)
     ca, sa = math.cos(ax), math.sin(ax)
@@ -195,7 +231,7 @@ def _rot(bams) -> list[list[float]]:
     ]
 
 
-def _to_bams(M) -> tuple[int, int, int]:
+def bams_from_matrix(M) -> tuple[int, int, int]:
     """Inverse of :func:`_rot`: a 3x3 back to a BAMS ``(rx, ry, rz)`` triple."""
     sb = max(-1.0, min(1.0, -M[2][0]))
     ay = math.asin(sb)
@@ -208,10 +244,10 @@ def _to_bams(M) -> tuple[int, int, int]:
     return tuple(int(round(v / _BAMS)) & 0xFFFF for v in (ax, ay, az))
 
 
-def _compose(outer, inner) -> tuple[int, int, int]:
+def compose_bams(outer, inner) -> tuple[int, int, int]:
     """The BAMS triple equivalent to applying *outer* then *inner*."""
-    A, B = _rot(outer), _rot(inner)
-    return _to_bams([[sum(A[i][k] * B[k][j] for k in range(3))
+    A, B = rot_matrix(outer), rot_matrix(inner)
+    return bams_from_matrix([[sum(A[i][k] * B[k][j] for k in range(3))
                       for j in range(3)] for i in range(3)])
 
 
@@ -233,6 +269,20 @@ def motion_for(tables, spawn_rec, cls: int) -> int | None:
         return None
     mid = struct.unpack_from("<H", tables.data, r)[0]
     return None if mid == 0xFFFF else mid
+
+
+def intro_for(tables, spawn_rec, cls: int) -> tuple[int, int] | None:
+    """A scripted entrance motion and its delay, or None."""
+    if cls != 0x30:
+        return None
+    if spawn_rec.param(2, "i8") != MOTION_STATE_CUE:
+        return None
+    motion = spawn_rec.param(0x04, "i32")
+    delay = spawn_rec.param(0x08, "i32") or 0
+    bank = tables.motion_bank_of(motion) if motion and motion > 0 else None
+    if bank is None or bank not in tables.motion_banks():
+        return None
+    return (motion, max(0, delay))
 
 
 def _bake(game_dir, tables, motion_id: int, bone_count: int) -> dict | None:
@@ -259,7 +309,8 @@ def _bake(game_dir, tables, motion_id: int, bone_count: int) -> dict | None:
             "root": root, "rot": rot}
 
 
-def resolve_for_stage(stage, prog=None, pose_frame: int | None = None):
+def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
+                      pose_motion: int | None = None):
     """Characters, their placements, and glTF rig entries for the geometry.
 
     Returns ``(characters, placements, rig_entries)``:
@@ -311,7 +362,9 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None):
         if not res.identified or res.char_type is None:
             continue
         motion = motion_for(tables, rec, sp["class"])
-        placements.append(Placement(at, sp["class"], res.char_type, motion, sp))
+        intro = intro_for(tables, rec, sp["class"])
+        placements.append(Placement(at, sp["class"], res.char_type, motion, sp,
+                                    intro))
         if motion is None:
             continue                      # marker only -- see the module note
         if res.char_type not in chars:
@@ -320,14 +373,18 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None):
                 continue
             chars[res.char_type] = built
         c = chars[res.char_type]
-        if motion not in c.motions:
-            baked = _bake(stage.game, tables, motion, c.bone_count)
-            if baked is None:
+        for mid in (motion, intro[0] if intro else None):
+            if mid is None or mid in c.motions:
                 continue
-            c.motions[motion] = baked
+            baked = _bake(stage.game, tables, mid, c.bone_count)
+            if baked is not None:
+                c.motions[mid] = baked
+        if motion not in c.motions:
+            continue
         per_type.setdefault(res.char_type, []).append(sp)
 
-    entries = [_rig_entry(stage, tables, chars[ct], sps, pose_frame)
+    entries = [_rig_entry(stage, tables, chars[ct], sps, pose_frame,
+                          pose_motion)
                for ct, sps in sorted(per_type.items()) if ct in chars]
     return chars, placements, [e for e in entries if e]
 
@@ -411,7 +468,8 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
 
 
 def _rig_entry(stage, tables, char: Character, spawns: list[dict],
-               pose_frame: int | None = None) -> dict | None:
+               pose_frame: int | None = None,
+               pose_motion: int | None = None) -> dict | None:
     """A `gltf.export_level` rig entry: the skeleton, placed at every spawn.
 
     *pose_frame* bakes a motion frame into the parts instead of leaving them at
@@ -432,7 +490,8 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict],
 
     pose = None
     if pose_frame is not None and char.motions:
-        mid = next(iter(char.motions))
+        mid = (pose_motion if pose_motion in char.motions
+               else next(iter(char.motions)))
         m = char.motions[mid]
         f = max(0, min(pose_frame, m["frames"] - 1))
         n = char.bone_count
@@ -443,7 +502,7 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict],
         # not approximated: the rotation multiplies and the root translation is
         # carried through it.
         root = m["root"][f * 3: f * 3 + 3]
-        R0 = _rot(pose[0])
+        R0 = rot_matrix(pose[0])
 
     parts: list[tuple] = []
     for i, b in enumerate(char.bones):
@@ -452,7 +511,7 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict],
         if pose is not None and b["parent"] is None:
             offset = [sum(R0[i][k] * offset[k] for k in range(3)) + root[i]
                       for i in range(3)]
-            rot = _compose(pose[0], rot)
+            rot = compose_bams(pose[0], rot)
         part = rigslib.RigPart(
             b["part"], (b["slot"],),
             translation=tuple(offset),

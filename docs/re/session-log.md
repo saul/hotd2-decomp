@@ -3516,3 +3516,62 @@ Left open honestly: the descriptor has four more fields, including a byte array
 `0x2D8` bytes apart, which read like per-vertex skinning against several bones.
 The part is attached rigidly, which matches the game at rest; a deforming waist
 would only show in extreme poses.
+
+## The van, the doors and the zombies inside it
+
+The user pointed at two zombies in stage 2 and said they spawn in the back of a
+van whose doors swing open. Every part of that turned out to be in the data, and
+finding it was a chain of five short hops rather than one hard problem.
+
+**Which spawns are the van.** Listing everything within 60 units of the two
+zombies gave a class 0x33 and a class 0x44 at the *same* position, 13 units away
+— two halves of one set piece. Class 0x33 selector 2 (`FUN_00433A10`) draws one
+model until a script flag; its `params[0]` resolves to `char_adv04.bin` model 94,
+20 x 20 x 45 units and 350 verts. A van.
+
+**The doors.** Class 0x44 selector 2 (`FUN_00472C90`) builds *two* child actors
+at literal offsets `(±9.29, 11.5, 22.68)` with slots `0x1794`/`0x1795` and a half
+turn between them. Those slots are models 95 and 96: door leaves hinged at x = 0,
+**9.29 wide** — the same number as the offset — and the van's rear face is at
+z = 22.68. Three numbers agreeing is what turns a guess into a reading.
+
+**The swing.** `FUN_00473CF0` is shared by selectors 1, 2 and 4, so one
+transcription covers 53 of the 123 class-0x44 spawns. It is a baked curve, not a
+spring: `PTR_DAT_005960B4[curve]` holds 6-byte `{s16 rx, ry, rz}` frames, with a
+second yaw-only table at `0x005960C8` for the curves that do not need the wobble.
+Curve 2 goes to 179 degrees by frame 12 and settles back to 137 — a door thrown
+hard enough to rebound.
+
+The transform is worth keeping: `RotY(base_yaw); RotZ(rz); RotY(swing); RotX(rx)`
+— two Y rotations with a Z between them, so the mounting angle and the swing stay
+independent and four curves serve every door in the game.
+
+**Room doors are the same thing.** The user asked separately about doors between
+rooms. They were already in the list — `etc_door`, `komono_souko` (warehouse),
+`komono_shop` — and their open flags do land immediately before a `region_load` /
+`region_enter`, while the others are followed by `se_play`. One mechanism, two
+uses.
+
+**The jump.** `FUN_00452DA0` copies `params[2]` to `obj+0x1310`, which is the
+index into the 54-state table at `0x00592AE8`. The van zombies carry state 21;
+the three on the roof carry 27. State 21 (`FUN_004577F0`) plays `params[+0x04]`,
+holds `params[+0x08]` frames, waits for the clip to finish and moves to
+`params[3]`. For the two in the van that is motion **923**, delays **0 and 10** —
+staggered — then the ordinary walk.
+
+Motion 923 identifies itself without any further reading: its root translation
+runs z 0 to -15.7 while y arcs 8.2 to 17.4 and back, against the idle 956's
+z = 0 and flat y. That is a body leaving a van and landing.
+
+**Verified by rendering**, three times: doors shut (the van rear is a solid panel
+and the zombies are hidden), doors at frame 59 (open, both standing in the cargo
+bay on its ribbed floor), and the entrance at motion 923 frame 14 (both mid-leap,
+clear of the van). `verify_spawn_facing.py` grew `--open-frame`,
+`--pose-motion` and `--pose-frame` for exactly this.
+
+One piece of arithmetic worth recording because it was checked rather than
+assumed: baking a hinge pose into a single fixed rotation means collapsing
+`Ry·Rz·Ry·Rx` into one `Rz·Ry·Rx` triple, which is not the identity it looks
+like. All 195 composites round-trip to within 1e-4, so the odd-looking triples
+the decomposition emits (0x8000 in x and z where a plain yaw was expected) are
+equivalent branches and not errors.

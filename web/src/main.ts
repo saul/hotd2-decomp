@@ -42,6 +42,7 @@ import { SceneLighting, type LightingMode } from "./lighting";
 import { Backdrop } from "./backdrop";
 import { RigLayer } from "./rigs";
 import { CharacterLayer } from "./characters";
+import { PropLayer } from "./props";
 import { Hud as HudLayer } from "./hud";
 import { Rain } from "./rain";
 
@@ -82,6 +83,7 @@ class Player {
   private readonly backdrop = new Backdrop();
   private readonly rigs = new RigLayer();
   private readonly chars = new CharacterLayer();
+  private readonly props = new PropLayer();
   private readonly rain = new Rain();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
@@ -194,6 +196,9 @@ class Player {
     // this adopts them and takes over the pose.
     this.chars.attach(this.stage.root, bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
+    // Doors, shutters and the vans they hang off; driven by the script's
+    // own flags, so nothing here needs a clock of its own.
+    this.props.attach(this.stage.root, bundle.script.props);
     this.rain.attach(this.stage.root, bundle.script.rain);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
@@ -358,6 +363,9 @@ class Player {
     });
     $<HTMLInputElement>("#show-chars").addEventListener("change", (e) => {
       this.chars.setEnabled((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#show-props").addEventListener("change", (e) => {
+      this.props.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#pillarbox").addEventListener("change", (e) => {
       this.pillarbox = (e.target as HTMLInputElement).checked;
@@ -664,6 +672,7 @@ class Player {
     // A seek replays quietly, so no dialogue or shutter op reaches the layer.
     // Without this the caption from wherever you were still hangs there.
     this.hudLayer.reset();
+    this.props.reset();
     w.seek(block, step, op);
     this.hudLayer.setShutterState(w.shutterState);
     this.syncCameraToWalker();
@@ -881,6 +890,10 @@ class Player {
       // an idle loops whatever the shot is doing.
       this.chars.update(this.walker.spawns,
                         this.state.freeze ? 0 : dt * this.speed);
+      // The swing counter is game frames, so a paused player holds a
+      // half-open door where it is.
+      this.props.update(this.walker.flags,
+                        this.state.freeze ? 0 : dt * this.speed * 60);
       // The volume follows the camera's yaw only, so it stays world-vertical.
       this.rain.update(this.walker.rain, this.camera.position,
                        Math.atan2(-this._fwd.x, -this._fwd.z),
@@ -953,6 +966,7 @@ class Player {
       ["sky", this.backdrop.describe],
       ["rigs", this.rigs.describe],
       ["characters", this.chars.describe],
+      ["props", this.props.describe],
       ["shutter", this.hudLayer.describe],
       // The two globals the skip feature hangs off, so it is visible that the
       // region opened and the gate dropped even when nothing is pressed.

@@ -34,6 +34,7 @@ const CONTROLS = [
   "#show-rigs",
   "#show-spawns",
   "#show-chars",
+  "#show-props",
   "#pillarbox",
   "#light-mode",
   "#fog-mode",

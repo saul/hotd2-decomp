@@ -50,7 +50,9 @@
  */
 
 import { Group, Object3D, Quaternion, Vector3 } from "three";
-import type { CharactersJson, CharacterType } from "./bundle";
+import type {
+  BakedMotion, CharacterPlacement, CharactersJson, CharacterType,
+} from "./bundle";
 import type { ActiveSpawn } from "./walker";
 
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
@@ -81,6 +83,12 @@ interface Instance {
   bones: Map<number, Object3D>;
   /** Seconds since this instance started playing, so they do not lock step. */
   clock: number;
+  /**
+   * A one-shot entrance played before the loop: state 21 of class 0x30's
+   * state machine sets a motion, holds for a delay, plays it to the end and
+   * only then falls through to the ordinary walk.
+   */
+  intro: { motion: number; delay: number } | null;
 }
 
 export class CharacterLayer {
@@ -107,10 +115,12 @@ export class CharacterLayer {
 
     const motionOf = new Map<number, number>();
     const typeOf = new Map<number, number>();
+    const placeOf = new Map<number, CharacterPlacement>();
     for (const p of json.placements) {
       if (p.motion === null || p.motion === undefined) continue;
       motionOf.set(p.at, p.motion);
       typeOf.set(p.at, p.char_type);
+      placeOf.set(p.at, p);
     }
 
     const roots: Object3D[] = [];
@@ -131,6 +141,7 @@ export class CharacterLayer {
       if (motion === undefined || ct === undefined) continue;
       const type = json.types[String(ct)];
       if (!type || !type.motions[String(motion)]) continue;
+      const p = placeOf.get(at);
 
       // The motion root translation and bone 0's rotation sit between the
       // object transform and the bones -- see the note above.
@@ -159,8 +170,10 @@ export class CharacterLayer {
         continue;
       }
 
+      const intro = p?.intro && type.motions[String(p.intro.motion)]
+        ? p.intro : null;
       this.instances.push({ at, type, motion, root: node, pivot, bones,
-                            clock: 0 });
+                            clock: 0, intro });
       this.posed.add(at);
       node.visible = false;
     }
@@ -201,9 +214,31 @@ export class CharacterLayer {
   }
 
   private pose(inst: Instance): void {
-    const m = inst.type.motions[String(inst.motion)];
+    // The entrance, if there is one: hold its first frame for the delay, play
+    // it once, then hand over to the looping motion. `FUN_004577F0` waits for
+    // `obj+0x19C` to reach the motion's length before changing state, so the
+    // hand-over is at the end of the clip and not on a timer.
+    let m = inst.type.motions[String(inst.motion)];
+    let f = 0;
+    if (inst.intro) {
+      const im = inst.type.motions[String(inst.intro.motion)];
+      const t = inst.clock * im.fps - inst.intro.delay;
+      if (t < im.frames) {
+        this.apply(inst, im, Math.max(0, Math.floor(t)));
+        return;
+      }
+      // Restart the loop's clock from the moment the entrance ended, so the
+      // walk does not begin part-way through.
+      inst.clock -= (inst.intro.delay + im.frames) / im.fps;
+      inst.intro = null;
+      m = inst.type.motions[String(inst.motion)];
+    }
     if (!m || m.frames <= 0) return;
-    const f = Math.floor(inst.clock * m.fps) % m.frames;
+    f = Math.floor(inst.clock * m.fps) % m.frames;
+    this.apply(inst, m, f);
+  }
+
+  private apply(inst: Instance, m: BakedMotion, f: number): void {
 
     // Root translation: three floats per frame.
     const r = f * 3;

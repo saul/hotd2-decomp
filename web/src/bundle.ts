@@ -266,11 +266,54 @@ export interface CharacterPlacement {
   char_type: number;
   /** null when this class has no motion rule yet — marker only. */
   motion: number | null;
+  /**
+   * A scripted entrance played once before `motion` starts looping — state 21
+   * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump
+   * out of it this way, staggered by their delays.
+   */
+  intro?: { motion: number; delay: number };
 }
 
 export interface CharactersJson {
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
+  note: string;
+}
+
+/** One swinging prop — a door leaf, a shutter, a van door. */
+export interface PropHinge {
+  name: string;
+  kind: "hinge";
+  at: number;
+  /** The class-0x44 builder that made it: 1, 2 or 4. */
+  selector: number;
+  slot: number;
+  /** +1 or −1; mirrors the swing so a pair opens outward. */
+  side: number;
+  curve: number;
+  /** BAMS mounting angle, separate from the swing. */
+  base_yaw: number;
+  /** Script flag that starts the swing. */
+  open_flag: number;
+  /** Script flag that deletes it, or −1. */
+  remove_flag: number;
+}
+
+/** A class-0x33 selector-2 prop: drawn until a flag or a camera frame. */
+export interface PropStatic {
+  name: string;
+  kind: "static";
+  at: number;
+  slot: number;
+  remove_flag: number;
+  remove_frame: number | null;
+}
+
+export interface PropsJson {
+  hinges: PropHinge[];
+  statics: PropStatic[];
+  /** Curve id → `[rx, ry, rz]` in BAMS, one per frame. */
+  curves: Record<string, number[][]>;
   note: string;
 }
 
@@ -375,6 +418,7 @@ export interface ScriptJson {
   backdrop?: BackdropJson;
   rigs?: RigsJson;
   characters?: CharactersJson;
+  props?: PropsJson;
   rain?: RainJson;
   warnings: string[];
 }

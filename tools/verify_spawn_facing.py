@@ -31,7 +31,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from hod2lib import characters as charlib, gltf, stage as stagelib  # noqa: E402
+from hod2lib import (characters as charlib, gltf, props as propslib,  # noqa: E402
+                     stage as stagelib)
 
 BLENDER = "/Applications/Blender.app/Contents/MacOS/Blender"
 
@@ -48,6 +49,11 @@ def main() -> int:
                     help="motion frame to pose the characters at")
     ap.add_argument("--out", type=Path,
                     default=Path("extract/verify/spawn_facing"))
+    ap.add_argument("--pose-motion", type=lambda s: int(s, 0), default=None,
+                    help="pose the characters with this motion id")
+    ap.add_argument("--open-frame", type=int, default=None,
+                    help="bake the hinged props at this frame of their swing "
+                         "(0 = shut, 59 = fully open on most curves)")
     ap.add_argument("--render", action="store_true",
                     help="run Blender rather than just printing the command")
     args = ap.parse_args()
@@ -57,10 +63,16 @@ def main() -> int:
     parts, model_regions, _regions = st.geometry()
 
     _chars, places, entries = charlib.resolve_for_stage(
-        st, pose_frame=args.pose_frame)
+        st, pose_frame=args.pose_frame, pose_motion=args.pose_motion)
     posed = sum(1 for p in places if p.motion is not None)
     print(f"stage {args.stage}: {len(parts)} geometry parts, "
           f"{len(entries)} character types, {posed} posed spawns")
+
+    hinges, statics = propslib.resolve_for_stage(st)
+    prop_entries = propslib.rig_entries(st, hinges, statics, args.open_frame)
+    print(f"  {len(hinges)} hinged props, {len(statics)} static props"
+          + ("" if args.open_frame is None
+             else f", baked at swing frame {args.open_frame}"))
 
     cam_files = st.cam_files()
     ref = st.campaths().get(args.slot)
@@ -73,7 +85,8 @@ def main() -> int:
 
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
-    info = gltf.export_level("spawn_facing", parts, out, rigs=entries,
+    info = gltf.export_level("spawn_facing", parts, out,
+                             rigs=entries + prop_entries,
                              cam_files=cam_files, unlit=True,
                              model_regions=model_regions)
     print(f"  -> {info['gltf']}  ({info['meshes']} meshes, "

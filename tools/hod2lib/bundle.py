@@ -33,7 +33,8 @@ import json
 import time
 from pathlib import Path
 
-from . import (__version__, characters as charlib, gltf, rigs as rigslib,
+from . import (__version__, characters as charlib, gltf, props as propslib,
+               rigs as rigslib,
                script as scriptlib, stage as stagelib)
 
 __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
@@ -311,8 +312,15 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     say(f"  {name}: characters")
     char_defs, char_places, char_entries = charlib.resolve_for_stage(stage)
 
+    # Scripted scenery -- the doors, shutters and vans the script opens. Same
+    # writer again: a prop is one model at a pose, which is a rig with a fixed
+    # placement.
+    say(f"  {name}: scripted props")
+    hinges, statics = propslib.resolve_for_stage(stage)
+    prop_entries = propslib.rig_entries(stage, hinges, statics)
+
     info = gltf.export_level(
-        name, parts, out_dir, rigs=rig_data + char_entries,
+        name, parts, out_dir, rigs=rig_data + char_entries + prop_entries,
         write_textures=write_textures,
         cam_files=[],                  # rails are drawn client-side
         unlit=unlit, model_regions=model_regions, glb=glb)
@@ -337,6 +345,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
                                     stage.campaths(), stage.tables)
     script_json["rain"] = rain
     script_json["characters"] = charlib.characters_json(char_defs, char_places)
+    script_json["props"] = propslib.props_json(stage.tables, hinges, statics)
     (out_dir / f"{name}.script.json").write_text(json.dumps(script_json))
 
     n_spawns = sum(len(o.detail.get("spawns", ()))
@@ -363,6 +372,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
             "spawns": n_spawns,
             "rigs": info.get("rigs", 0),
             "characters": len(char_defs),
+            "props": len(hinges) + len(statics),
             "posed_spawns": sum(1 for p in char_places if p.motion is not None),
         },
         "sources": {},

@@ -307,6 +307,71 @@ spawn that has a real character so the two never draw on top of each other.
 | 5 | 4 | 25 |
 | 6 | 2 | 20 |
 
+## Scripted scenery: doors, shutters and vans
+
+**Done for the hinge family.** The zombies that lunge out of a van in stage 2
+are not standing in the open — they are inside it, and the doors swing apart on
+a script cue. Two spawn classes make that set piece, and they sit at the same
+position because they are two halves of one thing:
+
+* **class 0x33 selector 2** (`FUN_00433A10`) is a **static scripted prop**: one
+  model at the spawn's pose, drawn until a script flag is set or the camera path
+  reaches a given frame. The van body is one of these.
+* **class 0x44** (`FUN_00472B10`) is a **prop placer** dispatching on
+  `obj+0x11C` through 18 builders at `0x00595AB8`. Selectors **1, 2 and 4 share
+  one child behaviour**, `FUN_00473CF0` — 53 of the 123 class-0x44 spawns — and
+  that behaviour is a hinge.
+
+The hinge, per frame:
+
+```c
+if (remove_flag >= 0 && g_script_flags[remove_flag]) despawn();
+if (g_script_flags[open_flag]) {
+    f = frame++;                       /* clamped at 59, or 129 on curve 4 */
+    obj.rz = base_rz + curve[f].rz;
+    obj.rx = base_rx + side * curve[f].rx;
+    obj.yaw = curve[f].ry * swing_scale * (side < 1 ? -1 : +1);
+}
+Translate(pos); RotY(base_yaw); RotZ(rz); RotY(swing); RotX(rx);
+```
+
+Two Y rotations with a Z between them: the **mounting** angle and the **swing**
+are separate, which is what lets four baked curves serve doors hung at any angle,
+and `side` mirrors the swing so one curve opens a pair outward.
+
+| Curve | Frames | Shape |
+|---|---|---|
+| 0 | 60 | flung to 111.9°, rebounding to 85.9 |
+| 1 | 60 | smooth ease to 122.6°, held |
+| 2 | 60 | **the van doors** — 179.1° by frame 12, settling to 137.0 |
+| 3 | 60 | flung to 91.3°, rebounding to 64.4 |
+| 4 | 130 | curve 1 stretched |
+
+**56 hinges and 10 statics** across the six stages: `etc_door`, `komono_shop`,
+`komono_barmae` (bar front), `komono_souko` (warehouse), `komono_suimon` (sluice
+gate), `komono_tokeidai` (clock tower) — the room-to-room doors among them. The
+trigger is an ordinary `set_script_flag` (0x48), and for the room doors it does
+land right before a `region_load` / `region_enter`, exactly as you would expect
+of a door you walk through; the others are followed by `se_play`, the door sound.
+
+**The entrance motion.** `FUN_00452DA0` copies the spawn's `params[2]` to
+`obj+0x1310`, the index `FUN_004533F0` dispatches through the 54-state table at
+`0x00592AE8`. State **21** (`FUN_004577F0`) is a one-shot motion cue: it plays
+`params[+0x04]`, holds for `params[+0x08]` frames, waits for the clip to end and
+then falls to `params[3]`. The two van zombies are exactly that — motion **923**
+from `zom.bin`, delays **0 and 10** so they come out one after the other, then
+state 1. Motion 923's root translation runs z 0 → −15.7 while y arcs 8.2 → 17.4
+and back: a body leaving a van and landing. Six spawns in the game use it.
+
+`[open]` whether the delay also freezes the animation — it gates the state
+transition and clears bit 0x4000 of `obj+0x34`, which reads like an
+animation-paused bit but is not established. Holding the first frame reproduces
+the stagger, and that is what the player does.
+
+Not decoded: the other fifteen class-0x44 builders have their own child
+behaviours, and `FUN_00473CF0`'s impact wobble (one damped sine over 16 frames
+when a prop is shot) has nothing to drive it here.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

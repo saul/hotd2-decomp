@@ -33,4 +33,9 @@ export function RankEnemiesByDistance(eye: Vec3): void {
   const live = G.g_object_list.filter((o) => !o.dead && o.visible);
   const sorted = SortEnemiesByDistance(live, eye);
   for (let i = 0; i < sorted.length; i++) sorted[i].rank = i;
+  // An actor the ranking pass did not see keeps -1, which is what
+  // `EnemyZombieInit` writes and what every `(s8)` test reads as "nearest".
+  for (const o of G.g_object_list) {
+    if (o.dead || !o.visible) o.rank = -1;
+  }
 }

@@ -4619,3 +4619,39 @@ fails with **43 unbaked entries and 6 types that could never reach the player**.
 That is the shape of the lesson: the port test guards the state machine, the
 corpus verifier guards the data it runs on, and neither substitutes for the
 other.
+
+## Still not advancing: a signed byte and a state I did not read
+
+The debug labels earned their keep immediately — "3/1/2 0x1E00 is just
+HoldAtRange/0" named the actor, and its descriptor said `initial_state = 21`,
+so it should have been in the attack run. Two causes.
+
+**`obj+0x131D` is signed.** Every test reads it as `(s8)`, and
+`EnemyZombieInit` writes `0xFF` — which is **-1**, so an actor that has not
+been ranked yet passes `rank < allowance` rather than failing it. The port
+stored 255. Since the renderer sets `visible` *after* the game phase, an
+actor's first frame always runs before `RankEnemiesByDistance` has seen it, so
+every zombie failed the test on frame one and dropped out of the attack run
+immediately.
+
+**`ZombieStateWaitTurn` (state 5) is the way back, and I had not read it.**
+`ZombieStateAttackRun` sends a dropped-out actor there; it plays the *in-place*
+walk, turns to the camera at 0x40 a frame, and returns to state 1 the moment
+the rank is inside the allowance again. So the queue throttle is a **round
+trip**. The port routed the drop-out through a made-up abort into
+`HoldAtRange`, which has no exit except "too close" or "claim a permit" — so a
+zombie that dropped out at 120 units parked in the hub for ever. That is
+exactly `HoldAtRange/0`, standing still.
+
+`ActorAbortAttackAndLeave` (`FUN_0045D9F0`) was also being cited for behaviour
+it does not have: it is three calls that take no actor and assign no state. It
+was an assumption from the very first pass at this file and it survived four
+commits because nothing checked it. The port's own fallback is now named for
+what it is — `ZombieGiveUpAttack`, tagged `[diverges]`, with no `FUN_`
+citation — and it routes to `WaitTurn`, which has a way back.
+
+`npm run test:port` gains the round trip, asserted on the state directly
+because the director re-ranks every frame. Restoring the unsigned rank makes it
+fail. The synthetic scene cannot reproduce the *stranding* half, because the
+rank reset that now runs for unranked actors is itself part of the fix — so
+that half is asserted as the recovery it is, rather than contrived.

@@ -10,6 +10,8 @@
  *
  * ```
  * <entrance> -> AttackRun -> HoldAtRange -> Strike -> BackOff -> HoldAtRange
+ *                  ^                 |
+ *                  +--- WaitTurn <---+   when the queue rank drops out
  * ```
  *
  * with the permit claimed in `HoldAtRange` and released in `ZombieStateBackOff`.
@@ -27,6 +29,8 @@ export enum ZombieState {
   Strike = 3,
   /** `ZombieStateBackOff` (`FUN_00455C30`). */
   BackOff = 4,
+  /** `ZombieStateWaitTurn` (`FUN_00455670`). The way back into the loop. */
+  WaitTurn = 5,
   /** `ZombieStateDeath6` (`FUN_00454D20`). */
   Death = 6,
   /** `ActorAbortAttackAndLeave` (`FUN_0045D9F0`). */

@@ -24,7 +24,7 @@ import { DamageZone, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
-import { ActorAbortAttackAndLeave } from "./leave";
+import { ZombieGiveUpAttack } from "./leave";
 import { ActorFacePlayerTarget } from "../actor_turn";
 import { GAME_HZ, StrikeSub, ZombieState } from "./states";
 
@@ -82,7 +82,7 @@ export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
     obj.sub = StrikeSub.Lunge;
   }
   const atk = list[String(obj.attack)] ?? null;
-  if (!atk) { ActorAbortAttackAndLeave(obj); return; }
+  if (!atk) { ZombieGiveUpAttack(obj); return; }
 
   if (obj.sub === StrikeSub.Lunge) {
     // Distance is to the point `ActorFacePlayerTarget` remembered, not to the

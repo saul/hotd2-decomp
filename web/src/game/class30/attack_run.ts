@@ -14,7 +14,6 @@ import type { Actor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
-import { ActorAbortAttackAndLeave } from "./leave";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionRow, ZombieState } from "./states";
@@ -36,9 +35,12 @@ export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number): void {
 
   TurnActorTowardCamera(obj, eye, dt);
 
-  // "I have fallen out of the slice of the queue that may come at you." The
-  // engine goes to state 5 with a random flag from `DAT_00566124`; that state
-  // is unread, and holding a permit in it would block everyone, so the port
-  // takes the release that state 5 would eventually reach.
-  if (obj.allowance <= obj.rank) ActorAbortAttackAndLeave(obj);
+  // "I have fallen out of the slice of the queue that may come at you."
+  // `ZombieStateWaitTurn` marks time on the spot and sends the actor back here
+  // when the queue moves on. Routing this anywhere without a way back is what
+  // left every zombie standing in `HoldAtRange` for ever.
+  if (obj.allowance <= obj.rank) {
+    obj.state = ZombieState.WaitTurn;
+    obj.sub = 0;
+  }
 }

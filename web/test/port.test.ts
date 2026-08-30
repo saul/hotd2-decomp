@@ -20,6 +20,7 @@ import { G, ResetGameGlobals } from "../src/game/globals";
 import { NULL_HOST } from "../src/game/host";
 import { SetGameTables } from "../src/game/tables";
 import { ZombieState } from "../src/game/class30/states";
+import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { SpawnClass } from "../src/game/spawn_class";
 import { ThrowerState } from "../src/game/class31/states";
 import { dist2d, vec3 } from "../src/game/vec";
@@ -246,6 +247,68 @@ console.log("a spawn whose descriptor names no attack state:");
         damaged > 0, `${damaged} hits`);
 }
 
+// -- 3a. the queue throttle is a round trip -------------------------------
+
+console.log("the queue throttle:");
+{
+  const rng = new Rng(9);
+  const events = scene(0, rng);
+  // One zombie, a long way out. Nothing else competes, so it must simply
+  // arrive: the whole point of `ZombieStateWaitTurn` is that dropping out of
+  // the distance queue is temporary. Without it the actor parked in
+  // `HoldAtRange` for ever and stood still -- which is what shipped.
+  const z = ActorSpawn(0x4000, SpawnClass.Zombie, 1, "lone");
+  z.attackState = 1;
+  z.hp = 1000;
+  z.pos = vec3(0, 0, 120);
+  z.motion = 10;
+  check("it starts unranked, which reads as -1 and passes the rank test",
+        z.rank === -1, `rank ${z.rank}`);
+
+  // The renderer sets `visible` *after* the game phase, so an actor's first
+  // frame always runs before `RankEnemiesByDistance` has ever seen it. That
+  // ordering is the whole bug: with the rank read unsigned it looked like
+  // "last in the queue" and the actor dropped out of the attack run on frame
+  // one, into a state with no way back.
+  z.visible = false;
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  z.visible = true;
+
+  let strandedFar = 0;
+  let closest = Infinity;
+  for (let i = 0; i < 900; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    const d = dist2d(z.pos, EYE);
+    closest = Math.min(closest, d);
+    // Sitting in the hub while nowhere near it is the deadlock's signature.
+    if (z.state === ZombieState.HoldAtRange
+        && d > APPROACH.rings[0].inner + 1) strandedFar++;
+  }
+  check("it closes the distance", closest < APPROACH.rings[0].inner,
+        `closest ${closest.toFixed(1)} of 120`);
+  check("and never idles in the hub while far from it", strandedFar < 60,
+        `${strandedFar} frames`);
+
+  // The round trip itself. `ZombieStateAttackRun` parks an actor here when its
+  // rank falls outside the allowance, and this is the only thing that puts it
+  // back; routing the drop-out anywhere else strands it for ever.
+  // Called directly: the director re-ranks every frame, so the only way to
+  // hold an actor outside the allowance is to run the state itself.
+  z.state = ZombieState.WaitTurn;
+  z.sub = 0;
+  z.rank = 9;
+  z.allowance = 2;
+  const before = { ...z.pos };
+  for (let i = 0; i < 30; i++) ZombieStateWaitTurn(z, EYE);
+  check("an actor out of the queue waits, and does not advance",
+        z.state === ZombieState.WaitTurn
+        && Math.abs(z.pos.z - before.z) < 0.01, ZombieState[z.state]);
+  z.rank = 0;
+  ZombieStateWaitTurn(z, EYE);
+  check("and rejoins the attack run when the queue moves on",
+        z.state === ZombieState.AttackRun, ZombieState[z.state]);
+}
+
 // -- 3b. the drop -----------------------------------------------------------
 
 console.log("ThrowerStateLeapToPoint:");
@@ -372,10 +435,14 @@ console.log("determinism:");
     return JSON.stringify(G.g_object_list.map((o) => [o.state, o.pos.x, o.pos.z]));
   };
   check("two runs from the same seed agree", one() === one());
+  // `WaitTurn` belongs to the loop too: it is where an actor outside the
+  // allowance marks time, and it has a way back into the attack run.
+  const IN_LOOP = new Set([ZombieState.AttackRun, ZombieState.HoldAtRange,
+                           ZombieState.Strike, ZombieState.BackOff,
+                           ZombieState.WaitTurn]);
   check("every actor is in the loop, none stuck outside it",
-        G.g_object_list.every((o) => o.state === ZombieState.HoldAtRange
-          || o.state === ZombieState.AttackRun || o.state === ZombieState.Strike
-          || o.state === ZombieState.BackOff || o.dead));
+        G.g_object_list.every((o) => IN_LOOP.has(o.state) || o.dead),
+        G.g_object_list.map((o) => ZombieState[o.state] ?? o.state).join(","));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

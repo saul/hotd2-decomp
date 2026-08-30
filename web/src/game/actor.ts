@@ -68,7 +68,11 @@ export interface Actor {
   zones: number;            // +0x1318
   /** The attack index the strike drew. */
   attack: number;           // +0x131A
-  /** Rank in the distance queue, nearest first. */
+  /**
+   * Rank in the distance queue, nearest first, and **signed**: the engine
+   * reads `(s8)obj+0x131D` everywhere, and `EnemyZombieInit` writes 0xFF, so
+   * -1 is "not ranked yet" and passes every `rank < allowance` test.
+   */
   rank: number;             // +0x131D
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
@@ -177,7 +181,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     sub: 0,
     zones: 0,
     attack: -1,
-    rank: 99,
+    rank: -1,
     ringSet: 0,
     backoffFrames: 0,
     allowance: 0,

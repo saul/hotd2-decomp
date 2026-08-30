@@ -14,8 +14,9 @@ import { ZombieStateApproach } from "./approach";
 import { ZombieStateAttackRun } from "./attack_run";
 import { ZombieStateBackOff } from "./backoff";
 import { ZombieStateHoldAtRange } from "./hold";
-import { ActorAbortAttackAndLeave } from "./leave";
+import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
+import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieState } from "./states";
 
 export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
@@ -26,7 +27,8 @@ export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye);
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt);
-    default:                      return ActorAbortAttackAndLeave(obj);
+    case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye);
+    default:                      return ZombieGiveUpAttack(obj);
   }
 }
 
@@ -40,7 +42,11 @@ export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
  */
 export function EnemyZombieInit(obj: Actor): void {
   obj.attackPermit = -1;
-  obj.rank = 0xff;                    // `obj+0x131D = 0xFF`
+  // `obj+0x131D = 0xFF`, and every test reads it as `(s8)` -- so this is -1,
+  // and an actor that has not been ranked yet passes rather than failing. As
+  // 255 it failed every one, and the zombie dropped out of the attack run on
+  // its first frame before `RankEnemiesByDistance` had ever seen it.
+  obj.rank = -1;
   obj.sub = 0;
   obj.backoffFrames = 0;
   obj.cooldown = 0;

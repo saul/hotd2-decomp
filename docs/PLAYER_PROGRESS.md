@@ -253,6 +253,15 @@ them was mine and one of them was a fair reading of the data:
   `RotY(θ)` maps −Z to `θ + 180`. So the authored yaw already aims a character
   where the designer pointed it. The half turn is gone.
 
+  **Verified afterwards.** Re-running the comparison properly — against the
+  camera that is actually playing when each spawn instruction executes, rather
+  than the nearest sample on any rail — puts **131 of 191 zombies facing the
+  camera** within 60°, and only **4** facing away, on a histogram that peaks at
+  0° and falls off symmetrically. The biased version of the same test gave 54
+  against 149 and was *bimodal at ±180*, which is the shape a broken
+  measurement makes: a correct one is unimodal about zero. That shape should
+  have been the warning.
+
 * **[open] The humanoids have no waist.** Assembled and posed, `char_adv00`'s
   torso occupies `y 0.25…4.25` and its pelvis `−3.55…−0.96`, leaving a
   1.2-unit hole. It is not a client bug — `export_character.py` produces it too

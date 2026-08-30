@@ -3415,6 +3415,15 @@ head juts to `z = −1.48`. A posed character faces **−Z**; `RotY(θ)` maps �
 it backwards. That test needs no rendering, no screenshot and no statistics, and
 it is the one I should have reached for first.
 
+The sound version of the measurement was then run as a check, not as the basis
+for the decision: comparing each spawn against the camera *actually playing when
+that spawn instruction executes* gives **131 of 191 zombies facing the camera**
+within 60 degrees and **4** facing away, on a histogram that peaks at 0 and
+falls away symmetrically. The biased version gave 54 against 149 and was
+**bimodal at plus/minus 180**. That shape was the tell and I read past it:
+a real facing distribution is unimodal about zero, and anything peaked at both
+ends is measuring something other than what it claims to.
+
 ## An honest gap: the humanoids have no waist
 
 `char_adv00` assembles with its torso at `y 0.25..4.25` and its pelvis at

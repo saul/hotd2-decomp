@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import (coli as colilib, gltf, rigs as rigslib,
+from hod2lib import (coli as colilib, evt as evtlib, gltf, rigs as rigslib,
                      script as scriptlib, stage as stagelib)  # noqa: E402
 
 STAGE_TO_SCENE = stagelib.STAGE_TO_SCENE

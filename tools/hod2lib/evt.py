@@ -559,6 +559,21 @@ SPAWN_STRIDE_09 = 0x28
 #: Opcodes whose operands are pointers to spawn descriptors.
 SPAWN_OPCODES = (0x09, 0x0B, 0x0C, 0x0D)
 
+#: Opcodes that attach the descriptor's tail to the object as a per-class
+#: parameter block. **[proved]** ``FUN_00408A20`` -- the allocator shared by
+#: opcodes 0x0B/0x0C/0x0D -- ends with ``obj+0x1390 = descriptor + 9`` on an
+#: ``int *``, i.e. **descriptor + 0x24**. Opcode 0x09's ``FUN_004088A0`` never
+#: writes ``obj+0x1390``; it only reads two bytes of the tail inline.
+#:
+#: So a class handler that dereferences ``obj+0x1390`` is reading this file,
+#: at ``spawn.offset + 0x24 + k``. Every field a handler names as
+#: ``obj+0x1390 + k`` is therefore ``params_offset + k`` here.
+#:
+#: Beware: ``obj+0x1390`` is polymorphic across the codebase. ``FUN_00408770``
+#: stores a pointer to a *parent actor* there instead, for objects it spawns
+#: itself rather than from a descriptor.
+PARAM_OPCODES = (0x0B, 0x0C, 0x0D)
+
 
 @dataclass
 class Spawn:
@@ -569,11 +584,47 @@ class Spawn:
     pos: tuple[float, float, float]
     orient: tuple[int, int, int]
     hp: int
+    #: The file this descriptor was read from, so the tail can be read lazily.
+    evt: "EvtFile | None" = None
 
     @property
     def yaw_deg(self) -> float:
-        """Orientation b as degrees, on the assumption it is a BAMS angle."""
+        """Orientation b as degrees.
+
+        **[proved] an angle.** ``FUN_004088A0`` and ``FUN_00408A20`` both copy
+        the three orientation words straight to ``obj+0x64/+0x68/+0x6C``, which
+        is exactly the triple every object root feeds to
+        ``MatrixRotateX/Y/Z``. An earlier revision here hedged that only the
+        middle word was confirmed to be an angle; all three are.
+        """
         return self.orient[1] * 360.0 / 65536.0
+
+    @property
+    def has_params(self) -> bool:
+        """Whether this descriptor's tail reaches the object as a parameter
+        block -- true only for the opcodes that write ``obj+0x1390``."""
+        return self.opcode in PARAM_OPCODES
+
+    @property
+    def params_offset(self) -> int:
+        """File offset of ``obj+0x1390``: the start of the parameter tail."""
+        return self.offset + SPAWN_HEADER
+
+    def param(self, at: int, kind: str = "i32"):
+        """One field of the parameter tail, at byte offset *at* within it.
+
+        *at* is the offset a class handler writes as ``obj+0x1390 + at``, so
+        the two can be compared without arithmetic. Returns ``None`` when this
+        descriptor carries no parameter block or the field runs off the end.
+        """
+        if self.evt is None or not self.has_params:
+            return None
+        fmt = {"i32": "<i", "u32": "<I", "i16": "<h", "u16": "<H",
+               "i8": "<b", "u8": "<B", "f32": "<f"}[kind]
+        off = self.params_offset + at
+        if off < 0 or off + struct.calcsize(fmt) > len(self.evt.raw):
+            return None
+        return struct.unpack_from(fmt, self.evt.raw, off)[0]
 
 
 def read_spawn(evt: EvtFile, off: int, opcode: int = 0x09) -> Spawn:
@@ -581,8 +632,13 @@ def read_spawn(evt: EvtFile, off: int, opcode: int = 0x09) -> Spawn:
     cls, flags = struct.unpack_from("<2I", evt.raw, off)
     pos = struct.unpack_from("<3f", evt.raw, off + 0x08)
     orient = struct.unpack_from("<3i", evt.raw, off + 0x14)
+    # +0x22 reaches BOTH obj+0x11C and obj+0x11E. Several classes use
+    # obj+0x11C as a sub-type selector rather than a hit-point count --
+    # class 0x28 indexes a 4-entry route table with it, class 0x33 picks one
+    # of eleven handlers, class 0x26 one of eight states -- so the name `hp`
+    # is the historical one, not a claim. See docs/formats/evt.md.
     hp = struct.unpack_from("<H", evt.raw, off + 0x22)[0]
-    return Spawn(off, opcode, cls, flags, pos, orient, hp)
+    return Spawn(off, opcode, cls, flags, pos, orient, hp, evt)
 
 
 def spawns(evt: EvtFile, opcodes: tuple[int, ...] = SPAWN_OPCODES) -> list[Spawn]:

@@ -91,6 +91,9 @@ class RigPart:
     draw_layer: int | None = None          #: SetDrawLayerNibble, if overridden
     animated: str = ""                     #: runtime rule, not baked
     condition: str = ""                    #: when the routine draws it at all
+    #: When the rig's class selects between prop sets with a parameter, the
+    #: value of that selector this part is drawn for. None means always.
+    variant: int | None = None
     #: Name of the part this one hangs off, when the routine nests a push
     #: inside another without popping. Empty means a child of the object root,
     #: which is the usual case -- MatrixStackPush(0) duplicates the top, so
@@ -117,6 +120,16 @@ class Rig:
     #: offsets from an object root -- the routine draws them straight off the
     #: view matrix with no root push of its own.
     world_space: bool = False
+    #: Where the class's variant selector lives in the spawn parameter tail,
+    #: as ``(offset, kind)`` -- the offset a handler writes as
+    #: ``obj+0x1390 + n``. See `hod2lib.evt.PARAM_OPCODES`.
+    variant_param: tuple[int, str] | None = None
+    #: Where the object path slot lives in the parameter tail, same spelling.
+    route_param: tuple[int, str] | None = None
+    #: Where the object's *main* asset slot lives in the tail, when the class
+    #: takes it from the descriptor rather than a literal. Recorded so the
+    #: per-instance body can be resolved; see the note on `obj_4331d0`.
+    main_asset_param: tuple[int, str] | None = None
     #: Set when the rig is understood but cannot be *placed*, explaining why.
     #: The transcription is still worth keeping; the exporter reports the
     #: reason rather than guessing at a position.
@@ -419,19 +432,14 @@ OBJ_484FF0_PROPS = Rig(
     routine="FUN_00484FF0",
     world_space=True,
     spawn_class=0x25,
-    placement_blocked=(
-        "the variant that selects which prop is drawn is "
-        "*(int16*)(*(int*)(obj+0x1390) + 6), and obj+0x1390 does NOT point at "
-        "the evt spawn descriptor: reading +6 there (the high half of "
-        "init_flags) gives 0 for all 142 class-0x25 descriptors in all six "
-        "stages, and variant 0 draws nothing. Until that record is identified "
-        "there is no way to say which stage holds these props, so they are "
-        "transcribed but not placed -- putting them in every stage would be "
-        "worse than leaving them out."),
-    note="variant = *(int16*)(*(int*)(obj+0x1390) + 6), a field of the stage "
-         "spawn descriptor. The routine takes its path slot from obj+0x135C "
-         "at runtime, not from a literal, so the variant-3 parts cannot be "
-         "placed by this exporter. The whole routine is gated on "
+    variant_param=(6, "i16"),
+    note="variant = *(int16*)(obj+0x1390 + 6), which is descriptor +0x2A -- "
+         "the parameter tail opcodes 0x0B/0x0C/0x0D attach. Variants 1 and 2 "
+         "occur in stage 2, 3 and 4 in stage 3. The variant-4 descriptor sits "
+         "at (-635.1, 43.0, -955.9), which is where the routine hardcodes "
+         "part_10df_v4 -- independent corroboration of both readings. The "
+         "variant-3 parts take their path slot from obj+0x135C at runtime and "
+         "are still not placeable. The whole routine is gated on "
          "DAT_009A5900 & 0x20, and [likely] that bit is dead: of 54 "
          "references, the setters are OR 1/2/8/0x10/0x18 and nothing sets "
          "0x20, so the early-out never fires in the retail build.",
@@ -439,18 +447,21 @@ OBJ_484FF0_PROPS = Rig(
         RigPart("part_1a37_v1", (0x1A37,),
                 translation=(-1367.0, -17.0, -1845.3),
                 rotation_bams=(0, 0x8000, 0),
+                variant=1,
                 condition="variant == 1",
                 note="raw x=0xC4AAE000 y=0xC1880000 z=0xC4E6A99A, "
                      "rotY 0x8000 = 180 deg. World space."),
         RigPart("part_1a37_v2", (0x1A37,),
                 translation=(214.0, -17.0, -2172.0),
                 rotation_bams=(0, 0xAAAA, 0),
+                variant=2,
                 condition="variant == 2",
                 note="raw x=0x43560000 y=0xC1880000 z=0xC507C000, "
                      "rotY 0xAAAA. World space."),
         RigPart("part_10df_v4", (0x10DF,),
                 translation=(-636.0, 43.35, -952.0),
                 rotation_bams=(0xC000, 0, 0),
+                variant=4,
                 condition="variant == 4 and g_active_cam_path == 0x93",
                 note="raw x=0xC41F0000 y=0x422D6666 z=0xC46E0000, "
                      "rotX 0xC000 = 270 deg. World space."),
@@ -636,14 +647,12 @@ OBJ_4331D0 = Rig(
     name="obj_4331d0",
     routine="SUB_004331D0",
     spawn_class=0x33,
-    placement_blocked=(
-        "the route is *(int*)(obj+0x1390 + 0x0C), and obj+0x1390 does not "
-        "point at the evt spawn descriptor: reading +0x0C at all 44 class-0x33 "
-        "descriptors gives float bit patterns (0xC0DA0000 and the like), not "
-        "slot ids in the 253..417 object-path range. Same record as the one "
-        "obj_484ff0_props needs, and the second independent confirmation that "
-        "obj+0x1390 is a per-class parameter block distinct from the evt "
-        "descriptor. Without it there is no route, so nothing is placed."),
+    route_param=(0x0C, "i32"),
+    # The five sub-parts below are drawn only when the main asset is 0x1B0E,
+    # and the main asset is itself a tail field -- obj+0x13F0 = p+0x00. So the
+    # selector for this rig is the asset id.
+    variant_param=(0x00, "i32"),
+    main_asset_param=(0x00, "i32"),
     note="Max matrix depth 1, 8 balanced push/pop pairs, no nesting -- every "
          "part is a sibling. Two of the pushed blocks draw nothing; one caches "
          "the object's camera-space position. No SetDrawLayerNibble anywhere. "
@@ -682,6 +691,7 @@ OBJ_4331D0 = Rig(
         RigPart("part_0899", (0x899,),
                 translation=(-5.2664, 8.3328, 6.717),
                 rotation_bams=(-11578, 0, 0),
+                variant=0x1B0E,
                 condition="main asset == 0x1B0E",
                 note="raw x=0xC0A88659 y=0x41055326 z=0x40D6F1AA; "
                      "rotX 0xFFFFD2C6 = -11578 = -63.5999 deg"),
@@ -689,18 +699,22 @@ OBJ_4331D0 = Rig(
                 translation=(0.0, 3.5437, 17.0281),
                 animated="RotX by obj+0x135C, which gains 0x2000 BAMS (45 deg) "
                          "once per draw immediately before this part",
+                variant=0x1B0E,
                 condition="main asset == 0x1B0E"),
         RigPart("part_08cb_b", (0x8CB,),
                 translation=(0.0, 3.5437, -12.384),
                 animated="RotX by obj+0x135C -- the same value part_08cb_a "
                          "just advanced, read and not incremented again, so "
                          "the two are always in phase",
+                variant=0x1B0E,
                 condition="main asset == 0x1B0E"),
         RigPart("part_1b0a", (0x1B0A,),
                 translation=(10.0, 6.216, 6.878),
+                variant=0x1B0E,
                 condition="main asset == 0x1B0E"),
         RigPart("part_1b0d", (0x1B0D,),
                 translation=(-10.0, 6.216, 6.878),
+                variant=0x1B0E,
                 condition="main asset == 0x1B0E",
                 note="[likely] a mirrored pair with part_1b0a -- same y and z, "
                      "x negated -- but they are different asset ids, so they "
@@ -903,6 +917,11 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
     # Spawn descriptors, grouped by class, so a rig that is a class handler can
     # be placed at every instance the event script puts in the stage.
     placements: dict[int, list[dict]] = {}
+    #: The same descriptors as `evt.Spawn` records, which can read the
+    #: parameter tail. **[proved]** the allocator behind spawn opcodes
+    #: 0x0B/0x0C/0x0D ends with ``obj+0x1390 = descriptor + 0x24``, so a class
+    #: handler reading ``obj+0x1390 + k`` is reading ``spawn.param(k)``.
+    raw: dict[int, list] = {}
     wanted = {r.spawn_class for r in RIGS if r.spawn_class is not None}
     if wanted:
         try:
@@ -916,6 +935,13 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
                         for sp in op.detail.get("spawns", []) or []:
                             if sp["class"] in wanted:
                                 placements.setdefault(sp["class"], []).append(sp)
+            try:
+                from . import evt as evtlib
+                for rec in evtlib.spawns(prog.evt):
+                    if rec.cls in wanted:
+                        raw.setdefault(rec.cls, []).append(rec)
+            except Exception:
+                pass
 
     out: list[dict] = []
     blocked: list[Rig] = []
@@ -923,7 +949,7 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
         routes: list[dict] = []
 
         def take(slot, cam_paths, bias=(0.0, 0.0, 0.0)):
-            if slot not in have:
+            if slot is None or slot not in have:
                 return
             if cam_paths and not (set(cam_paths) & have_cam):
                 return
@@ -941,11 +967,28 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
                  for fp in rig.fixed_poses
                  if not fp.cam_paths or (set(fp.cam_paths) & have_cam)]
 
+        # Some classes select between prop sets, or pick a route, with a field
+        # of the spawn parameter tail rather than a literal in the code. That
+        # field is the real per-stage gate: a stage bounding box could never be
+        # one, because levels span thousands of units and would accept absolute
+        # props everywhere.
+        variants: set[int] = set()
+        if rig.variant_param and rig.spawn_class is not None:
+            at, kind = rig.variant_param
+            for rec in raw.get(rig.spawn_class, ()):
+                v = rec.param(at, kind)
+                if v:
+                    variants.add(v)
+        if rig.route_param and rig.spawn_class is not None:
+            at, kind = rig.route_param
+            for rec in raw.get(rig.spawn_class, ()):
+                take(rec.param(at, kind), ())
+
         # A world-space rig has no root to place: its part translations are
-        # already absolute, so it needs a gate saying which stage holds it.
-        # Without a confirmed gate it is transcribed but not placed.
-        world = bool(rig.world_space and bbox is not None
-                     and not rig.placement_blocked)
+        # already absolute, so it is emitted only when this stage actually
+        # spawns a variant it draws.
+        world = bool(rig.world_space and not rig.placement_blocked
+                     and (variants if rig.variant_param else bbox is not None))
 
         if rig.placement_blocked:
             blocked.append(rig)
@@ -956,6 +999,8 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
 
         parts = []
         for part in ordered_parts(rig):
+            if part.variant is not None and part.variant not in variants:
+                continue
             models = []
             for sid in part.slots:
                 rec = slots.get(sid)
@@ -972,5 +1017,6 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
                         "blocked": rig.placement_blocked,
                         "fixed": fixed, "world": world,
                         "placements": (placements.get(rig.spawn_class, [])
-                                       if not rig.world_space else [])})
+                                       if not (rig.world_space or rig.route_param
+                                               or rig.variant_param) else [])})
     return out, blocked

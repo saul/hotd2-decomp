@@ -194,3 +194,9 @@
 009a2be8	g_enemy_approach_ring_outer	f32, stride 0xC, one per ring set. The outer radius; see g_enemy_approach_rings.
 009c8e44	g_enemy_approach_steps_mid	Added to g_enemy_approach_steps when the actor starts between the middle and outer rings.
 009c8e48	g_enemy_approach_steps_outer	Added on top of g_enemy_approach_steps_mid when the actor starts outside the outer ring, so a distant enemy walks further before it can attack.
+009a2ba0	g_attack_permits	u8 per player. An approaching enemy must claim one through TryClaimAttackSlot before it may attack, so only g_max_attackers enemies commit at a time. The holder's index is kept in obj+0x121, and SelectCameraLookAtTarget focuses the camera on whoever holds one.
+009a34f0	g_attack_committed	Set when a claimed attack has actually started; TryClaimAttackSlot short-circuits while it is set.
+009a60d8	g_camera_block_target	The camera block's current look-at point (block+0xD8). StepCameraLookAtDamped eases it toward g_camera_lookat_target rather than snapping.
+009c6fa8	g_camera_lookat_target	The point the camera *wants* to look at, chosen by SelectCameraLookAtTarget: a single attacking enemy, the midpoint of two, or the cam/ path's own target when no enemies are registered.
+009c70d8	g_cam_path_target	The look-at CamEvalPath7 evaluates from the path's target channels, independent of its eye channels -- which is how a path holds the eye still and sweeps the aim.
+009c8e84	g_max_attackers	How many enemies may hold an attack permit at once: 1 or 2.

@@ -601,8 +601,9 @@ obj+0x1358 = steps;
 
 Three concentric radii per ring set, and the ring the enemy starts in decides
 **how many steps it walks before it may attack**. Sub-state 1 then plays the
-walk and counts down, and on the last step hands control to the state named by
-the spawn descriptor tail's byte 3 — which is where the attack lives.
+walk and counts down, and on the last step calls `TryClaimAttackSlot`; only if
+that succeeds does it hand control to the state named by the spawn descriptor
+tail's byte 3, which is where the attack lives. Fail and it keeps walking.
 
 evt opcode `0x0E` writes a ring set:
 
@@ -615,25 +616,74 @@ g_enemy_approach_rings[i].outer = ip[4];
 
 so the script tunes the approach distances per encounter.
 
-### The camera does not follow the enemies
+### The camera does follow the enemies
 
-`ZombieStateApproach` measuring to `g_camera_eye_*` is the first clue; the
-xrefs settle it. Everything that writes `g_camera_yaw_bams` is one of:
+**Correction.** An earlier revision of this section said it did not, on the
+strength of an xref sweep: nothing that writes `g_camera_yaw_bams` reads an
+actor. That is true and it is not the question, because **the tracking never
+writes a yaw**. It writes a *point*, and a separate damped step turns the
+camera toward it. The same trap as the skip flag earlier in this project —
+absence in one narrow query taken for absence in the program.
 
-| Writer | What it is |
-|---|---|
-| `CameraStepDeferredRailWithFrameExport` | a `cam/` path |
-| `CameraPathWithImpulseShake` | a `cam/` path, plus a damped shake |
-| `CameraPlayStashedPath` | a `cam/` path |
-| `CameraFollowPlayerMidpoint` | the **split-screen** midpoint of the two player view objects |
-| `CameraClearHookAndPose` | zeroes it |
-| `FUN_00460960` | the results / name-entry screen |
+There are three pieces.
 
-**None of them reads an actor.** There is no mode that aims at an enemy, and
-the eight installers at `0x00403970`..`0x00403A90` do not offer one. During a
-combat wait the camera is wherever its path left it, and the *enemies* walk to
-**it** — which is exactly why the approach rings are measured to the camera and
-not to a player position. The camera is the player in this game.
+**1. What to look at — `SelectCameraLookAtTarget` (`FUN_00403050`).**
+`g_enemy_slots` is a 16-entry `{u8 occupied; void *actor}` table of enemies
+registered with the camera. Each actor remembers its slot in `obj+0x120`
+(`0xFF` = none) and its *attack permit* in `obj+0x121`.
+
+```c
+if      (slot0 && slot1 && slot0->obj[0x121] != -1 && slot1->obj[0x121] == -1)
+                                   look = slot0->pos;          /* the attacker, alone */
+else if (slot0 && slot1)           look = midpoint(slot0, slot1);
+else if (slot0)                    look = slot0->pos;
+...
+else                               look = g_cam_path_target;   /* no enemies: the path */
+```
+
+So the camera aims at a live enemy, or splits the difference between two, and
+falls back to the authored path target only when there are none registered.
+
+**2. Which enemy is "about to attack" — `TryClaimAttackSlot` (`FUN_00455DE0`).**
+`ZombieStateApproach` finishes its walk and calls this. There is one
+**attack permit per player** in `g_attack_permits`, `g_max_attackers` of them;
+claiming one stores its index in `obj+0x121` and returns 1, which is what lets
+the approach state hand over to the attack state named by the descriptor tail.
+Fail, and the enemy keeps walking.
+
+That single byte does double duty: it gates the attack *and* it is what
+`SelectCameraLookAtTarget` tests. **The camera focuses on the enemy that holds
+the attack permit** — the one about to attack — and otherwise frames the pair.
+
+**3. Turning — `StepCameraLookAtDamped` (`FUN_00402F80`).** The desired point
+is not applied directly. Each frame the camera block's own look-at
+(`g_camera_block_target`, block `+0xD8`) is eased toward it, at a rate that
+`ComputeLookAtAngleError` takes from the angle between current and desired,
+clamped to `0x1FFF` (45°) and used to index `PTR_DAT_00576C04`. That easing is
+the smooth pan.
+
+### Why the eye can sit still through all of this
+
+The camera *modes* only ever write the eye and, on a rail, a yaw. Two of them
+in particular:
+
+* `CameraHoldEyeTick` (`0x0040C470`) writes **only** `g_camera_eye_*` and never
+  touches an angle;
+* on a rail, `CamEvalPath7` gives **eye and look-at as independent channels**,
+  so a path can pin the eye and sweep the aim on its own. Stage 2's paths 108
+  and 109 do exactly that: measured over their 160 frames the eye travels
+  **0.00 units** while the target travels 150 and the yaw sweeps **110°**.
+
+Both are worth knowing because they are the shape the player has to reproduce:
+position and aim are separate, and the aim has a mind of its own.
+
+A note on finding these at all: `CameraSnapToPathEye`,
+`CameraStepDeferredRailWithFrameExport`, `CameraPathWithImpulseShake` and
+`CameraPlayStashedPath` each **re-point `g_camera_update_hook` at an address
+inside themselves** (`0x40C470`, `0x40C790`, `0x40C5C0`, `0x40C8B0`), so the
+named function is the *first frame* and the steady state is a separate entry
+Ghidra had not split out. Decompiling the name alone shows setup code and hides
+the loop.
 
 ## 11. What the player implements
 

@@ -282,3 +282,14 @@
 004579a0	ZombieStateApproach	The advance. Sub-state 0 measures the actor's distance to the CAMERA (not to a player) and picks a step count from which of g_enemy_approach_rings' three radii it falls inside; sub-state 1 walks that many steps and then hands to the state named by the descriptor tail's byte 3.
 00403980	CameraInstallFollowMidpoint	Installs CameraFollowPlayerMidpoint as the camera update hook, plus the per-player draw helper. One of eight installers that write g_camera_update_hook.
 00403a60	CameraInstallDeferredRail	Installs CameraStepDeferredRailWithFrameExport as the camera update hook.
+00402f80	StepCameraLookAtDamped	Per frame: evaluates the active cam/ path's look-at into g_camera_lookat_target, then eases the camera block's current target (block+0xD8) toward it. The easing is why the pan is smooth rather than a snap.
+00403050	SelectCameraLookAtTarget	Picks what the camera looks at. Walks g_enemy_slots; an enemy holding an attack permit (obj+0x121 != -1) is focused ALONE, otherwise the midpoint of two registered enemies is used, and with no enemies registered it falls back to the cam/ path's own target channel. This is the gameplay tracking camera.
+00403b00	ComputeLookAtAngleError	Angle between the camera's current look direction and the desired one, clamped to 0x1FFF (45 deg) and used to index PTR_DAT_00576C04 -- the turn-rate curve, so a bigger swing turns at a different rate.
+0040c470	CameraHoldEyeTick	Steady-state body of CameraSnapToPathEye, reached by that function re-pointing g_camera_update_hook at itself+N. Writes only the eye, never the angles -- which is how the camera holds position while SelectCameraLookAtTarget swings the look-at.
+0040c790	CameraStepRailTick	Steady-state body of CameraStepDeferredRailWithFrameExport. Advances the stashed path frame, evaluates eye and target as independent channels, takes yaw from (eye - target) and forces pitch and roll to zero.
+00408d90	ResetCameraEnemySlots	Clears g_enemy_slots, the 16-entry {u8 occupied; void *actor} table the tracking camera reads.
+004092b0	ReleaseCameraEnemySlot	Frees this actor's camera slot: g_enemy_slots[obj+0x120] = 0, obj+0x120 = 0xFF.
+00455de0	TryClaimAttackSlot	An approaching enemy asks permission to attack. One permit per player in g_attack_permits, count from g_max_attackers; on success it stores the permit index in obj+0x121 and returns 1, which is what lets ZombieStateApproach hand over to the attack state -- and what makes the camera focus on that enemy.
+00456520	ReleaseAttackSlot	Frees the attack permit at obj+0x121 and clears the global commit latch.
+00456560	ReleaseEnemyAliveCount	Decrements g_enemies_alive exactly once, guarded by obj+0x38 bit 1. This is what opens wait_enemies_alive.
+00456580	ReleaseEnemyPresentCount	Decrements g_enemies_present exactly once, guarded by obj+0x38 bit 2. This is what opens wait_enemies_present, and it is separate from the alive count.

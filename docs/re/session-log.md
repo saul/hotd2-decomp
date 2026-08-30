@@ -3890,3 +3890,57 @@ enemies walk to it. The camera *is* the player here, which is why the approach
 rings are measured against it. Worth writing down because the perception that
 it follows the attacker is a natural one — enemies converge on the camera, so
 they end up centred without anything aiming at them.
+
+
+---
+
+## Correction: the camera does follow the enemies
+
+I said it did not. That was wrong, and the way it was wrong is the same trap
+this project has now hit twice.
+
+The reasoning was: sweep the xrefs on `g_camera_yaw_bams`, find that every
+writer is a path mode, the split-screen midpoint, the clear-pose helper or the
+results screen, and conclude nothing aims at an actor. Every step of that is
+true. It is also the wrong question, because **the tracking never writes a
+yaw** — it writes a *point*, and a separate damped step turns the camera toward
+it. Absence in one narrow query is not absence in the program. The skip flag
+earlier in this project failed the same way.
+
+The user's correction was precise and it is what pointed at the answer: "the
+camera doesn't move but the angles / look-at definitely does". That is two
+separate mechanisms, and looking for one that did both is why I missed them.
+
+What is actually there, in three pieces:
+
+* `SelectCameraLookAtTarget` (`FUN_00403050`) reads `g_enemy_slots`, a 16-entry
+  `{u8 occupied; void *actor}` table, and picks a point: **the enemy holding an
+  attack permit, alone**, else the midpoint of two registered enemies, else —
+  only when none are registered — the `cam/` path's own target channel.
+* `TryClaimAttackSlot` (`FUN_00455DE0`) is what makes an enemy "the one about
+  to attack": one permit per player in `g_attack_permits`, and
+  `ZombieStateApproach` may only enter its attack state if it gets one. The
+  permit index lives in `obj+0x121`, and that single byte both gates the attack
+  and selects the camera's focus.
+* `StepCameraLookAtDamped` (`FUN_00402F80`) eases the block's look-at toward
+  the desired point rather than snapping, at a rate `ComputeLookAtAngleError`
+  reads from a curve indexed by the angle error. That is the smooth pan.
+
+Two further things had to be understood before any of it was visible.
+
+**The camera modes hide their own loops.** `CameraSnapToPathEye`,
+`CameraStepDeferredRailWithFrameExport`, `CameraPathWithImpulseShake` and
+`CameraPlayStashedPath` each re-point `g_camera_update_hook` at an address
+*inside themselves* — `0x40C470`, `0x40C790`, `0x40C5C0`, `0x40C8B0` — so the
+named function runs once and the steady state is a separate entry Ghidra had
+not split out. Decompiling by name shows setup and hides the per-frame body.
+`CameraHoldEyeTick` at `0x40C470` turned out to write **only** the eye, which is
+half the answer to "the camera doesn't move but the angles do".
+
+**The other half is authored.** `CamEvalPath7` returns eye and look-at as
+independent channels, so a path can pin the eye and sweep the aim by itself.
+Measured over stage 2's 66 paths: 3 hold the eye under 5 units of travel, and
+paths 108 and 109 hold it at **0.00** over 160 frames while the target travels
+150 and the yaw sweeps **110 degrees**. So both mechanisms exist and both
+produce the same visible effect, which is worth remembering before attributing
+a pan to either one.

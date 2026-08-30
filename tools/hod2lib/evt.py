@@ -560,10 +560,21 @@ SPAWN_STRIDE_09 = 0x28
 SPAWN_OPCODES = (0x09, 0x0B, 0x0C, 0x0D)
 
 #: Opcodes that attach the descriptor's tail to the object as a per-class
-#: parameter block. **[proved]** ``FUN_00408A20`` -- the allocator shared by
-#: opcodes 0x0B/0x0C/0x0D -- ends with ``obj+0x1390 = descriptor + 9`` on an
-#: ``int *``, i.e. **descriptor + 0x24**. Opcode 0x09's ``FUN_004088A0`` never
-#: writes ``obj+0x1390``; it only reads two bytes of the tail inline.
+#: parameter block. There are **three** allocators, not two:
+#:
+#: =======  ===================  ======  =====================================
+#: opcode   allocator            size    tail pointer
+#: =======  ===================  ======  =====================================
+#: 0x09     ``FUN_004088A0``     0x13F4  none -- reads ``+0x24``/``+0x25``
+#:                                       inline into ``obj+0x1F4``/``+0x130C``
+#: 0x0B/0D  ``FUN_00408A20``     0x13F4  ``obj+0x1390 = descriptor + 0x24``
+#: 0x0C     ``FUN_00408BC0``     0x1314  ``obj+0x130C = descriptor + 0x24``
+#: =======  ===================  ======  =====================================
+#:
+#: **[proved]** all three end with ``= descriptor + 9`` on an ``int *``, so the
+#: tail is at ``descriptor + 0x24`` regardless; only the object field and the
+#: allocation size differ. ``FUN_00408A20`` additionally sets
+#: ``obj+0x1316`` from the u16 at ``desc+0x20``.
 #:
 #: So a class handler that dereferences ``obj+0x1390`` is reading this file,
 #: at ``spawn.offset + 0x24 + k``. Every field a handler names as
@@ -591,11 +602,18 @@ class Spawn:
     def yaw_deg(self) -> float:
         """Orientation b as degrees.
 
-        **[proved] an angle.** ``FUN_004088A0`` and ``FUN_00408A20`` both copy
-        the three orientation words straight to ``obj+0x64/+0x68/+0x6C``, which
-        is exactly the triple every object root feeds to
-        ``MatrixRotateX/Y/Z``. An earlier revision here hedged that only the
-        middle word was confirmed to be an angle; all three are.
+        **[proved] of the spawn path, NOT of every class.** All three spawn
+        allocators copy the orientation words straight to
+        ``obj+0x64/+0x68/+0x6C``, the triple every object root feeds to
+        ``MatrixRotateX/Y/Z`` -- so by default all three are angles, and an
+        earlier revision that hedged about the outer two was too cautious.
+
+        But a class may then read those object fields as something else
+        entirely. **[proved]** class 0x41 type 4 (``FUN_00462E10``) takes
+        ``obj+0x6C`` (from ``desc+0x1C``) as an object *kind* and ``obj+0x64``
+        (from ``desc+0x14``) as a *group size*. So "these are Euler angles" is
+        the right default and the wrong universal: check the class before
+        trusting the outer two.
         """
         return self.orient[1] * 360.0 / 65536.0
 

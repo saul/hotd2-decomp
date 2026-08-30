@@ -743,8 +743,9 @@ pointer to some other record. There are two allocators:
 
 | Opcode | Function | Sets `obj+0x1390`? |
 |---|---|---|
-| `0x09` | `FUN_004088A0` | **no** — it reads two tail bytes inline (+0x24 → object +0x1F4, +0x25 → object +0x130C) |
-| `0x0B`/`0x0C`/`0x0D` | `FUN_00408A20` | **yes** — the function ends `obj+0x1390 = descriptor + 9` on an `int *` |
+| `0x09` | `FUN_004088A0` | alloc **0x13F4**; **no** tail pointer — it reads two tail bytes inline (+0x24 → object +0x1F4, +0x25 → object +0x130C) |
+| `0x0B`/`0x0D` | `FUN_00408A20` | alloc **0x13F4**; `obj+0x1390 = descriptor + 0x24`. Also sets `obj+0x1316` from the u16 at `desc+0x20` |
+| `0x0C` | `FUN_00408BC0` | alloc **0x1314**; `obj+0x130C = descriptor + 0x24` — a *different object field*, so a class-0x0C object has no `obj+0x1390` at all |
 
 So a class handler that reads `obj+0x1390 + k` is reading this file at
 `descriptor + 0x24 + k`. `hod2lib.evt.Spawn.param(k, kind)` does exactly that,

@@ -21,7 +21,9 @@
  * bug that had the cat running the zombie's state machine.
  */
 import type { Actor } from "../actor";
+import { G } from "../globals";
 import type { ClassFrame, ClassHandler } from "../registry";
+import { SpawnClass } from "../spawn_class";
 import { PlaceBreakableGroup } from "./group";
 
 /**
@@ -96,6 +98,24 @@ export const PropContainerPlacerHandler: ClassHandler = {
   init: PropContainerPlacerInit,
   update: PropContainerPlacerUpdate,
 };
+
+/**
+ * Put the breakable state back to "nothing placed", for a seek.
+ *
+ * A seek replays the script from the entry block, so the spawn list is rebuilt
+ * and the bridge will place every group again. Without this the old placers
+ * are still in the pool — dead, so `ActorByAt` finds them and refuses to
+ * re-spawn — and the props from before the seek are left standing at whatever
+ * state they were in, which is neither where you came from nor where you went.
+ */
+export function ResetPropContainers(): void {
+  G.g_breakable_props = [];
+  G.g_breakable_members = [];
+  G.g_item_set_countdown = [];
+  G.g_breakable_next_id = 1;
+  G.g_object_list = G.g_object_list.filter(
+    (o) => o.cls !== SpawnClass.PropContainerPlacer);
+}
 
 export { PlaceBreakableGroup };
 export * from "./prop_state";

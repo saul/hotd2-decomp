@@ -185,6 +185,7 @@ game/           the port. no three.js, no DOM.
   camera/         select_target.ts turn.ts
   tables.ts       the exported data, typed
 render/         three.js. observes game state, owns nothing.
+  breakables.ts   one node per live class-0x41 prop, cloned from a slot
 ```
 
 ## Saving and restoring the whole game state

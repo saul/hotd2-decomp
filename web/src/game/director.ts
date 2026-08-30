@@ -14,13 +14,15 @@ import { UpdateCameraEnemySlots } from "./camera/slots";
 import { TurnLookAtToward } from "./camera/turn";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/prop";
+import { PropContainerType } from "./class41";
+import { T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
-import { G } from "./globals";
+import { ActorByAt, G } from "./globals";
 import type { GameHost } from "./host";
 import { ActorAdvanceMotion } from "./motion";
 import { g_class_handlers } from "./registry";
-import type { SpawnClass } from "./spawn_class";
+import { SpawnClass as SpawnClassValue, type SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 
 const GAME_HZ = 60;
@@ -36,6 +38,53 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
   g_class_handlers[cls]?.init(obj);
   G.g_object_list.push(obj);
   return obj;
+}
+
+/**
+ * The fields of a script spawn this needs. `script/walker`'s `ActiveSpawn`
+ * satisfies it structurally, which keeps `game/` from importing the walker.
+ */
+export interface ScriptSpawn {
+  at: number;
+  class: number;
+}
+
+/**
+ * Put the script's class-0x41 spawns into the object pool.
+ *
+ * Nothing else does: `ActorSpawn` is otherwise reached only from the character
+ * layer, and only for spawns that resolve to a skeleton — so a placer, which
+ * has no character at all, never reached the registry and no prop was ever
+ * built. Extracting spawning from the renderer is step 5 of
+ * PLAYER_ARCHITECTURE.md; until then this is the one class that needs the
+ * bridge, and saying so explicitly beats a general fallback that would also
+ * re-spawn every enemy the character layer already owns.
+ *
+ * It lives here rather than in `class41/` because putting it there made
+ * `class41 -> director -> registry -> class41` a cycle, and ESM resolved it by
+ * leaving `g_class_handlers[0x41]` undefined at evaluation time: the placers
+ * spawned and were never updated, so no prop was ever placed and nothing said
+ * why.
+ *
+ * A spawn with no row in `breakables.placements` is a constructor this port
+ * does not implement — 73 of the 79 — and is left alone rather than guessed at.
+ */
+export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
+  const placements = T.breakables?.placements;
+  if (!placements?.length) return;
+  for (const s of spawns) {
+    if (s.class !== SpawnClassValue.PropContainerPlacer) continue;
+    if (ActorByAt(s.at)) continue;
+    const pl = placements.find((p) => p.at === s.at);
+    if (!pl) continue;
+    // `+0x11C` is the group and `+0x1F4` the lifetime in evt blocks; both are
+    // polymorphic fields and neither means what its name means elsewhere.
+    const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
+                         pl.lifetime_evt_blocks, `breakable group ${pl.group}`,
+                         { hp: pl.group,
+                           condition: PropContainerType.BreakableGroup });
+    a.visible = true;
+  }
 }
 
 export interface FrameResult {

@@ -5,6 +5,7 @@
  * Registered into `Walker.OPS` by `./index.ts`; the `status` field is what
  * `verify_player_ops.py` checks against docs/PLAYER_PROGRESS.md.
  */
+import { G } from "../../game/globals";
 import type { OpImpl } from "../walker";
 
 export const OPS: Record<number, OpImpl> = {
@@ -32,6 +33,10 @@ export const OPS: Record<number, OpImpl> = {
       run: (w, op) => {
         w.groundY = op.ground_y ?? null;
         w.fixedEyeY = op.camera_fixed_eye_y ?? op.ground_y ?? 0;
+        // The engine's own write. Class 0x41 reads it when it places a group,
+        // which happens inside the spawn opcode -- so it has to be current by
+        // the time that instruction runs, not by the time the frame draws.
+        G.g_camera_fixed_eye_y = w.fixedEyeY;
         return undefined;
       },
     },

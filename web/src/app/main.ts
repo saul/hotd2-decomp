@@ -60,6 +60,9 @@ import { SetGameTables } from "../game/tables";
 import { TurnLookAtToward } from "../game/camera/turn";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
+import { BreakableLayer } from "../render/breakables";
+import { ResetPropContainers } from "../game/class41";
+import { SpawnPropContainers } from "../game/director";
 
 const $ = <T extends HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
@@ -99,6 +102,7 @@ class Player {
   private readonly rigs = new RigLayer();
   private readonly chars = new CharacterLayer();
   private readonly props = new PropLayer();
+  private readonly breakables = new BreakableLayer();
   private readonly shooting = new Shooting($("#viewport"), this.chars);
   /** The registry and the tick order: script -> game -> render -> hud. */
   private readonly world = new World();
@@ -158,6 +162,7 @@ class Player {
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
     this.scene.add(this.debug.group);
+    this.scene.add(this.breakables.group);
 
     this.ctx = {
       scene: this.scene,
@@ -190,6 +195,33 @@ class Player {
                                           : "hit by enemy" },
         note: `${d.who}${d.attack >= 0 ? ` attack ${d.attack}` : ""}`
             + ` · −1 life → ${d.lives} · ${d.score} pts`,
+      });
+      this.refreshUi();
+    });
+
+    // Class 0x41 raises these where the engine calls `PlaySoundId`, so the
+    // sound belongs to the port's decision rather than to the click that
+    // caused it -- a prop cracked by a collapsing stack sounds the same as one
+    // cracked by a bullet, which is what the engine does.
+    const propFeed = (name: string) => (d: { id: number; sound: number }) => {
+      this.bgm.play(d.sound);
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, cat: "combat", name },
+        note: `prop ${d.id}`,
+      });
+    };
+    this.events.on("prop.cracked", propFeed("breakable cracked"));
+    this.events.on("prop.broken", propFeed("breakable broken"));
+    this.events.on("prop.settled", propFeed("breakable settled"));
+    // The payoff: the item a set of props was hiding.
+    this.events.on("item.released", (d) => {
+      if (d.sound) this.bgm.play(d.sound);
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, cat: "combat", name: "item released" },
+        note: `set ${d.set} from prop ${d.from}`
+            + ` at ${d.x.toFixed(1)}, ${d.y.toFixed(1)}, ${d.z.toFixed(1)}`,
       });
       this.refreshUi();
     });
@@ -281,7 +313,7 @@ class Player {
     // range: they walked into the camera and spun on a facing angle that has
     // no direction at zero distance.
     this.world.attach(this.ctx);
-    SetGameTables(bundle.script.characters);
+    SetGameTables(bundle.script.characters, bundle.script.breakables);
     G.g_player_lives = [
       bundle.script.characters?.player?.start_lives ?? 2,
       bundle.script.characters?.player?.start_lives ?? 2,
@@ -293,6 +325,10 @@ class Player {
     // Doors, shutters and the vans they hang off; driven by the script's
     // own flags, so nothing here needs a clock of its own.
     this.props.attach(this.stage.root, bundle.script.props);
+    // Class 0x41's props are built at run time, so only the templates are
+    // adopted here; the nodes follow `G.g_breakable_props`.
+    this.breakables.adopt(this.stage.root);
+    this.shooting.breakables = this.breakables;
     this.shooting.reset();
     this.shooting.setTables(bundle.script.characters?.combat);
     this.bullets.source = this.chars;
@@ -494,6 +530,9 @@ class Player {
     });
     $<HTMLInputElement>("#show-props").addEventListener("change", (e) => {
       this.props.setEnabled((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#show-breakables").addEventListener("change", (e) => {
+      this.breakables.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#track-enemies").addEventListener("change", (e) => {
       this.trackEnabled = (e.target as HTMLInputElement).checked;
@@ -796,6 +835,9 @@ class Player {
     this.hudLayer.reset();
     this.props.reset();
     this.shooting.reset();
+    // The replay rebuilds the spawn list, so the placers must be able to run
+    // again -- otherwise the pre-seek props stand there for ever.
+    ResetPropContainers();
     w.seek(block, step, op);
     this.hudLayer.setShutterState(w.shutterState);
     this.syncCameraToWalker();
@@ -1015,11 +1057,30 @@ class Player {
       // keeps falling in free roam. Only the shutter and the dialogue
       // countdown ride the script's own clock, and they took `tick` above.
       const game = this.gameTick(wall);
+      this.syncPortGlobals();
       this.world.update(this.ctx, game);
       this.drawLayers(game);
     }
     this.renderer.render(this.scene, this.camera);
   };
+
+  /**
+   * The two script-owned globals the port reads, and the spawns it needs.
+   *
+   * `g_camera_fixed_eye_y` is where class 0x41 puts a group's floor and what
+   * `BreakablePropGroundContact` settles against. The camera opcode writes it
+   * too, so a group placed during a seek replay gets the right floor; this
+   * keeps it true for every other frame.
+   */
+  private syncPortGlobals(): void {
+    const w = this.walker;
+    if (!w) return;
+    G.g_camera_fixed_eye_y = w.fixedEyeY;
+    // The spawn opcode places a group the moment it runs, so this is only the
+    // safety net for a spawn list restored by a snapshot load rather than by
+    // an instruction. It is idempotent — `ActorByAt` refuses a second one.
+    SpawnPropContainers(w.spawns);
+  }
 
   /** Game time for this frame: wall clock scaled by `speed`, zero while frozen. */
   private gameTick(wall: number): Tick {
@@ -1053,6 +1114,9 @@ class Player {
     // The swing counter is game frames, so a paused player holds a half-open
     // door where it is.
     this.props.update(w.flags, t.dt * 60);
+    // The breakable props follow the port's pool, not the script: they are
+    // created by `PlaceBreakableGroup` and die on their own clock.
+    this.breakables.update();
     // Impact sprites run on wall time: they are feedback for a click, not part
     // of the script's clock, so a paused player still shows them out.
     this.shooting.update(t.wall);
@@ -1159,6 +1223,7 @@ class Player {
       ["rigs", this.rigs.describe],
       ["characters", this.chars.describe],
       ["props", this.props.describe],
+      ["breakables", this.breakables.describe],
       ["shooting", this.shooting.describe],
       ["enemies", this.game.describe],
       ["lives", `${G.g_player_lives[0]}`

@@ -1,4 +1,3 @@
-import { Rng } from "../core/rng";
 /**
  * Walks a stage's event script: blocks, steps, instructions, and the route
  * table that orders them.
@@ -26,6 +25,8 @@ import { Rng } from "../core/rng";
  * block on, and `WaitPolicy` says what the walker did instead.
  */
 
+import { Rng } from "../core/rng";
+import { G } from "../game/globals";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
 import { OPS as OPS_TABLE } from "./ops";
@@ -458,6 +459,10 @@ export class Walker {
     this.lightDir = { pitchDeg: 0, yawDeg: 0 };
     this.lightSet = false;
     this.checkpointBlock = this.script.entry_block;
+    // `g_evt_block_counter` is the engine's, not the walker's -- it lives in
+    // `G` because the port reads it, and the walker advances it because the
+    // script is what advances it.
+    G.g_evt_block_counter = 0;
     this.flags.clear();
     this.loadedSlots.clear();
     this.spawns = [];
@@ -1191,6 +1196,10 @@ export class Walker {
       this.host.onBranch(null);
       return false;
     }
+    // `EvtAdvanceBlockOrRoute` advances `g_evt_block_counter` on every block
+    // transition. Class 0x41's props measure their lifetime in these rather
+    // than in frames, so it has to be a real counter and not a frame clock.
+    G.g_evt_block_counter++;
     if (this.options.clearSpawnsOnBlock) this.spawns = [];
     // The preview shots belong to the branch in the block that stored them --
     // every `store_six` in the game sits in a branch block. Carrying one

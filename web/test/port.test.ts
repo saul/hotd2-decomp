@@ -31,6 +31,7 @@ import {
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
   PlaceBreakableGroup, PropContainerPlacerUpdate,
 } from "../src/game/class41";
+import { SpawnPropContainers } from "../src/game/director";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -655,7 +656,10 @@ const BREAKABLES: BreakablesJson = {
     ],
   ],
   hull: [[0, 0, 0]],
-  placements: [],
+  placements: [
+    { at: 0xa100, group: 1, lifetime_evt_blocks: 4 },
+    { at: 0xa200, group: 2, lifetime_evt_blocks: 6 },
+  ],
   level_height: 7.540296,
 };
 
@@ -821,6 +825,40 @@ console.log("\nclass 0x41, the extra life:");
   check("and pays 300 instead when the player is at the cap",
         !GrantExtraLife(0) && G.g_player_lives[0] === 5
         && G.g_player_score[0] === score + 300);
+}
+
+console.log("\nclass 0x41, the script spawns reach the pool:");
+{
+  const rng = new Rng(31);
+  const events = propScene(rng);
+  // What the walker's live spawn list looks like: a placer the bundle has a
+  // placement for, one it does not, and an unrelated class.
+  const spawns = [
+    { at: 0xa100, class: SpawnClass.PropContainerPlacer },
+    { at: 0xbeef, class: SpawnClass.PropContainerPlacer },   // no placement
+    { at: 0xc000, class: SpawnClass.Zombie },
+  ];
+  SpawnPropContainers(spawns);
+  const placers = G.g_object_list.filter(
+    (o) => o.cls === SpawnClass.PropContainerPlacer);
+  check("only the placer with a placement is spawned",
+        placers.length === 1 && placers[0].at === 0xa100,
+        `${placers.length} placers`);
+  check("it carries the group in +0x11C and the lifetime in +0x1F4",
+        placers[0].hp === 1 && placers[0].charType === 4);
+
+  // The placer builds its group on its first update and then kills itself.
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("one frame places the group", G.g_breakable_props.length === 3,
+        `${G.g_breakable_props.length} props`);
+  check("and the placer is gone", placers[0].dead);
+
+  // Running again must not place it twice -- the bridge is called every frame.
+  SpawnPropContainers(spawns);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a second pass does not place the group again",
+        G.g_breakable_props.length === 3,
+        `${G.g_breakable_props.length} props`);
 }
 
 console.log("\nclass 0x41, the props are in the save state:");

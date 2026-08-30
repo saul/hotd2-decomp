@@ -31,10 +31,29 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
-It is **not yet wired into the running page**: `ActorSpawn` is only reached
-from `render/characters.ts`, and only for spawns that resolve to a skeleton, so
-a class-0x41 placer never gets to the registry. The port is driven by
-`npm run test:port` and nothing else draws the props yet.
+**They are drawn, and they can be shot.** `render/breakables.ts` follows
+`G.g_breakable_props` the way the projectile layer follows the thrown weapons:
+one cloned node per live prop, re-cloned when the first shot swaps the model to
+`0x19E6`, plus the ground shadow at `0x10D0`. The models come from a hidden
+`slots_breakable` rig the exporter now emits — the props are built at run time,
+so there is no node per placement to emit, only a template per asset slot. They
+live in `komono_2.bin`; *komono* is Japanese for "small items".
+
+The gun picks the nearer of the character and the prop, so a barrel in front of
+a zombie stops the bullet, and a hit only sets the hit bits: the port's own
+`BreakablePropUpdate` is what cracks the prop, pays the ten points and releases
+the item on its next frame. Scoring it from the renderer would be a second copy
+of the rule.
+
+Two things had to move for any of it to happen. `ActorSpawn` is otherwise
+reached only from the character layer, and only for spawns with a skeleton, so
+a placer never got to the registry — `SpawnPropContainers` is the bridge, and it
+runs **inside the spawn opcode** rather than once a frame, because the placer
+lives and dies on the frame it is spawned and because a seek replays
+instructions with no frames in between. `g_evt_block_counter` and
+`g_camera_fixed_eye_y` moved into `G`, written by the block transition and the
+camera opcode that write them in the engine, so a group placed during a replay
+gets the right floor and the right lifetime clock.
 
 **A reload resumes where you were.** The player writes its script address into
 the URL as it plays (`?stage=2&block=11&step=8&op=2&frame=1011`, throttled to

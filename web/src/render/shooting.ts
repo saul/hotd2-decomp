@@ -83,6 +83,9 @@ import type { CharacterLayer } from "./characters";
 import type { CombatJson } from "../bundle";
 import { G } from "../game/globals";
 import { HitResultCode } from "../game/combat/resolve_hit";
+import { BreakablePropTakeShot } from "../game/class41/prop";
+import type { BreakableLayer } from "./breakables";
+import type { BreakableProp } from "../game/class41/prop_state";
 
 /** `FUN_00404AD0` builds its segment as origin + direction * 1000. */
 const SHOT_RANGE = 1000;
@@ -213,6 +216,8 @@ export class Shooting {
 
   private combat: CombatJson | null = null;
   private impacts: ImpactSprites | null = null;
+  /** The breakable props, so a barrel in front of a zombie takes the shot. */
+  breakables: BreakableLayer | null = null;
   private readonly _v = new Vector3();
 
   constructor(private readonly viewport: HTMLElement,
@@ -318,6 +323,15 @@ export class Shooting {
     this.shots++;
 
     const pick = this.chars.pick(this.ray.ray);
+    // The engine's shot test walks one depth-sorted list, so whichever is
+    // nearer takes the shot: a barrel in front of a zombie stops the bullet.
+    const prop = this.breakables?.pick(this.ray) ?? null;
+    if (prop && (!pick
+                 || this.ray.ray.origin.distanceToSquared(prop.point)
+                    < this.ray.ray.origin.distanceToSquared(pick.point))) {
+      this.hitProp(prop.prop, prop.point);
+      return;
+    }
     if (!pick) {
       // A miss still resets nothing -- the game only clears the head combo on
       // a hit that is not a head. `FUN_00405260` takes the material from the
@@ -387,6 +401,37 @@ export class Shooting {
                   damage: out.damage, killed: out.killed, hp: out.hp,
                   result: out.result, points },
                 note);
+  }
+
+  /**
+   * Land a shot on a breakable prop.
+   *
+   * All this does is set the hit bits, because that is all the engine's shot
+   * test does: `BreakablePropUpdate` reads `obj+0x34` on its next frame and is
+   * what cracks the prop, pays the ten points through `BreakablePropAwardHit`
+   * and releases whatever it was hiding. Scoring or breaking it from here
+   * would be a second implementation of the rule, and the two would drift.
+   *
+   * The sounds are the port's too — it emits `prop.cracked` / `prop.broken`
+   * with the id the engine plays, and the feed plays them.
+   */
+  private hitProp(p: BreakableProp, point: Vector3): void {
+    BreakablePropTakeShot(p, 0);
+    this.hits++;
+    // A prop is not flesh: the impact is the hard-surface spark, which is what
+    // `SpawnPropHitSpark` (`FUN_00465860`) puts at the shot point.
+    const c = this.combat;
+    const sp = c?.impact_sprite[String(MISS_MATERIAL)]
+      ?? c?.impact_sprite_default;
+    if (sp && this.impacts) {
+      this.impacts.spawn(point, this.viewZ(point), sp[2],
+                         Math.max(1, sp[1] - sp[0] + 1));
+    }
+    // `hp` is still what it was: the port has not consumed the hit yet, so
+    // this says what the shot is about to do rather than what it did.
+    this.onShot({ hit: true, points: 0 },
+                `breakable group ${p.group} member ${p.member}`
+                + (p.hp > 1 ? " · cracked" : " · broken"));
   }
 
   get describe(): string {

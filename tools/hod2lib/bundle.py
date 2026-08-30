@@ -45,6 +45,10 @@ __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
 #: something subtly wrong.
 BUNDLE_FORMAT = 1
 
+#: Every asset slot `BreakablePropUpdate` can draw: whole, cracked, the
+#: `g_GameMode == 2` one-shot target, and the ground shadow.
+BREAKABLE_SLOTS = (0x19E8, 0x19E6, 0x1A0F, 0x10D0)
+
 
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -208,6 +212,55 @@ def breakables_json(tables, prog) -> dict:
     }
 
 
+def breakable_slot_entry(stage) -> dict | None:
+    """A hidden rig holding the breakable props' models, for the client to clone.
+
+    Class 0x41's props are built at run time by `PlaceBreakableGroup`, not
+    placed by the exporter, so there is no node per prop to emit -- the client
+    makes one per live prop and needs a template to copy. Same shape as the
+    gore rig: one part per asset slot, hidden, cloned by slot.
+
+    The four slots are every one `BreakablePropUpdate` can draw: the whole
+    prop, the cracked one it swaps to on the first shot, the `g_GameMode == 2`
+    one-shot target, and the ground shadow. They all live in `komono_2.bin` --
+    *komono*, small items -- which is not part of any stage's geometry set, so
+    it is loaded on demand here exactly as the scripted props are.
+    """
+    from . import rigs as rigslib
+
+    slots = stage.tables.asset_slots()
+    cache: dict[str, tuple] = {}
+    parts: list[tuple] = []
+    for slot in BREAKABLE_SLOTS:
+        rec = slots.get(slot)
+        if not rec:
+            continue
+        stem = rec[0].removesuffix(".bin")
+        if stem not in cache:
+            try:
+                cache[stem] = stagelib.load_asset(stage.game, stem)
+            except Exception:
+                cache[stem] = ([], None)
+        models, bank = cache[stem]
+        if rec[1] >= len(models):
+            continue
+        part = rigslib.RigPart(f"slot_{slot:04x}", (slot,),
+                               note=f"breakable prop, slot {slot:#06x}")
+        parts.append((part, [(models[rec[1]], bank, stem)]))
+    if not parts:
+        return None
+    rig = rigslib.Rig(name="slots_breakable",
+                      routine="class 0x41 (BreakablePropUpdate)",
+                      world_space=False, parts=tuple(p for p, _ in parts),
+                      note="breakable prop models; hidden, cloned per live prop")
+    return {"rig": rig, "routes": [], "anchors": {}, "biases": {},
+            "world": False, "placements": [], "blocked": "",
+            "fixed": [{"kind": "fixed", "translation": [0.0, 0.0, 0.0],
+                       "rotation_bams": [0, 0, 0], "cam_paths": [],
+                       "note": rig.note}],
+            "parts": parts}
+
+
 def backdrop_json(tables, prog) -> dict:
     """The backdrop dome presets, plus the ones this scene's script selects.
 
@@ -366,8 +419,10 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     hinges, statics = propslib.resolve_for_stage(stage)
     prop_entries = propslib.rig_entries(stage, hinges, statics)
 
+    brk = breakable_slot_entry(stage)
     info = gltf.export_level(
-        name, parts, out_dir, rigs=rig_data + char_entries + prop_entries,
+        name, parts, out_dir,
+        rigs=rig_data + char_entries + prop_entries + ([brk] if brk else []),
         write_textures=write_textures,
         cam_files=[],                  # rails are drawn client-side
         unlit=unlit, model_regions=model_regions, glb=glb)

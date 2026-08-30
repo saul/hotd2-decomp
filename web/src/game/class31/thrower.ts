@@ -25,7 +25,8 @@ import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, ThrowHandsOf } from "../tables";
 import { vec3, type Vec3 } from "../vec";
 import { GAME_HZ } from "../class30/states";
-import { ThrowSub } from "./states";
+import { ThrowerStateLeapToPoint } from "./leap";
+import { ThrowerState, ThrowSub } from "./states";
 
 /** Hands whose arm has not been shot off. `ThrowerStateThrow` refuses the rest. */
 function usableHands(obj: Actor): ThrowHandJson[] {
@@ -74,7 +75,7 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
     ttl,
     // Which hand it left decides which way it tumbles.
     spin: hand.bone === 5 ? cfg.spin : -cfg.spin,
-    yaw: 0,
+    spinAngle: 0,
     after: 0,
     hit: false,
     stickFrames: cfg.stick_frames,
@@ -130,16 +131,50 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   }
 }
 
-/** `EnemyThrowerUpdate` — `FUN_00449910`. Class 0x31's per-frame dispatch. */
+/**
+ * `EnemyThrowerUpdate` — `FUN_00449910`.
+ *
+ * The engine integrates **acceleration as well as velocity** here — `vel +=
+ * acc; pos += vel` — which is what makes this class's fall and leap states
+ * physical where class 0x30's are not.
+ */
 export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number,
                                    host: GameHost, events?: Events): void {
+  if (obj.state === ThrowerState.LeapToPoint) {
+    ThrowerStateLeapToPoint(obj);
+    ActorIntegrate(obj, dt);
+    return;
+  }
   TurnActorTowardCamera(obj, eye, dt);
   ThrowerStateThrow(obj, host, eye, events);
 }
 
-/** `EnemyThrowerInit` — `FUN_00449620`. */
+/**
+ * `pos += vel`, at the engine's own 60 Hz. The arc's velocity is per frame, so
+ * the port scales it by however much of a frame this tick covered.
+ */
+function ActorIntegrate(obj: Actor, dt: number): void {
+  const frames = dt * GAME_HZ;
+  obj.pos.x += obj.vel.x * frames;
+  obj.pos.y += obj.vel.y * frames;
+  obj.pos.z += obj.vel.z * frames;
+}
+
+/**
+ * `EnemyThrowerInit` — `FUN_00449620`.
+ *
+ * Like `EnemyZombieInit` it starts the actor in the descriptor's own byte +2.
+ * Stage 2's class-0x31 spawns start in 18, 19, 20, 23 and 26 — never in the
+ * throw state the old port assumed, which is why the two zsass above the
+ * street stood in mid-air instead of dropping into it.
+ */
 export function EnemyThrowerInit(obj: Actor): void {
   obj.sub = ThrowSub.Draw;
   obj.attack = 0;
   obj.attackPermit = -1;
+  obj.state = obj.initialState === ThrowerState.LeapToPoint && obj.leap
+    ? ThrowerState.LeapToPoint
+    // [diverges] The other 27 states are unread. They all end up standing and
+    // throwing, which is the one behaviour this port has for the class.
+    : ThrowerState.StandAndThrow;
 }

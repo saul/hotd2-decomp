@@ -96,6 +96,13 @@ export interface CharacterPlacement {
   /** Which of `approach.rings` this actor measures against. */
   ring_set: number;
   /**
+   * The ballistic arc a spawn placed in the air rides to the ground, from the
+   * descriptor's +0x04..+0x10. Only the two leap states read those bytes —
+   * class 0x31's state 20 and class 0x30's state 24 — so it is present only
+   * for them.
+   */
+  leap?: { dest: [number, number, number]; frames: number } | null;
+  /**
    * A scripted entrance played once before `motion` starts looping — state 21
    * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump
    * out of it this way, staggered by their delays.

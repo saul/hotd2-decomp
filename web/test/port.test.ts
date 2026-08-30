@@ -21,6 +21,7 @@ import { NULL_HOST } from "../src/game/host";
 import { SetGameTables } from "../src/game/tables";
 import { ZombieState } from "../src/game/class30/states";
 import { SpawnClass } from "../src/game/spawn_class";
+import { ThrowerState } from "../src/game/class31/states";
 import { dist2d, vec3 } from "../src/game/vec";
 import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
 
@@ -243,6 +244,44 @@ console.log("a spawn whose descriptor names no attack state:");
   run(900, rng, events);
   check("it attacks anyway, because the hub does not read attack_state",
         damaged > 0, `${damaged} hits`);
+}
+
+// -- 3b. the drop -----------------------------------------------------------
+
+console.log("ThrowerStateLeapToPoint:");
+{
+  const rng = new Rng(4);
+  const events = scene(0, rng);
+  // Stage 2 block 5 step 6's first zsass, verbatim: spawned at y = 87 with a
+  // descriptor naming the street at y = 37, thirty frames away.
+  const z = ActorSpawn(0x20e8, SpawnClass.Thrower, 1, "zsass", {
+    initialState: ThrowerState.LeapToPoint,
+    leap: { dest: [-732.8, 37.0, -1206.5], frames: 30 },
+  });
+  z.visible = true;
+  z.hp = 10;
+  z.pos = vec3(-732.8, 87.0, -1206.5);
+  z.motion = 10;
+
+  check("it starts in the descriptor's own state, not the throw",
+        z.state === ThrowerState.LeapToPoint, `state ${z.state}`);
+
+  const ys: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    ys.push(z.pos.y);
+  }
+  check("it falls", ys[5] < 87 && ys[5] > 37, `y ${ys[5].toFixed(1)}`);
+  check("it accelerates rather than sliding down at a constant rate",
+        ys[4] - ys[5] < ys[19] - ys[20],
+        `${(ys[4] - ys[5]).toFixed(3)} then ${(ys[19] - ys[20]).toFixed(3)}`);
+  check("it lands on the point the descriptor names",
+        Math.abs(z.pos.y - 37) < 0.01 && Math.abs(z.pos.x + 732.8) < 0.01,
+        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)})`);
+  check("in about the frames it names", ys.findIndex((y) => y <= 37.001) <= 31,
+        `${ys.findIndex((y) => y <= 37.001)}`);
+  check("and then stands up to throw",
+        z.state === ThrowerState.StandAndThrow, `state ${z.state}`);
 }
 
 // -- 4. damage ---------------------------------------------------------------

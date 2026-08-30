@@ -15,7 +15,7 @@ import { TurnActorTowardCamera } from "../actor_turn";
 import { MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ActorAbortAttackAndLeave } from "./leave";
-import { ActorSetMotionIfIdle } from "./motion_cue";
+import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionRow, ZombieState } from "./states";
 
@@ -23,7 +23,7 @@ export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number): void {
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]`. Bit 0x8000000 is the variant select
   // and nothing in the ported path sets it, so this takes the first.
-  ActorSetMotionIfIdle(obj, row[MotionRow.Run] ?? row[MotionRow.RunAlt]);
+  ZombieSetMotionIfIdle(obj, row[MotionRow.Run] ?? row[MotionRow.RunAlt]);
 
   if (TestApproachRing(obj, eye) === 1) {
     obj.state = ZombieState.HoldAtRange;

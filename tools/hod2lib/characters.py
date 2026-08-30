@@ -518,6 +518,11 @@ class Character:
         }
 
 
+#: Which state index means "ride a ballistic arc to a named point", per class.
+#: `ThrowerStateLeapToPoint` and `ZombieStateLeapToPoint` are the two read.
+LEAP_STATES = {0x30: (24,), 0x31: (20,)}
+
+
 @dataclass
 class Placement:
     """One spawn descriptor resolved to a character and a motion."""
@@ -540,6 +545,13 @@ class Placement:
     attack_state: int = 0
     #: ``obj+0x131F`` -- which ring set this actor measures against.
     ring_set: int = 0
+    #: The ballistic arc a spawn placed in the air rides to the ground:
+    #: ``{dest: [x, y, z], frames: n}`` from the descriptor's ``+0x04``..
+    #: ``+0x10``. Only the two leap states read those bytes -- class 0x31's
+    #: state 20 (`ThrowerStateLeapToPoint`) and class 0x30's state 24
+    #: (`ZombieStateLeapToPoint`) -- so it is emitted only for them; for any
+    #: other state the same bytes mean something else.
+    leap: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -556,6 +568,8 @@ class Placement:
              # The actor's own yaw, which the directional death compares the
              # camera's against.
              "yaw": self.spawn["orient"][1] & 0xFFFF}
+        if self.leap:
+            d["leap"] = self.leap
         if self.intro:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
         return d
@@ -730,16 +744,28 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             continue
         motion = motion_for(tables, rec, sp["class"])
         intro = intro_for(tables, rec, sp["class"])
-        # The class-0x30 tail. Only that class is known to lay it out this
-        # way -- `EnemyZombieInit` is what reads it -- so other classes get
-        # zeroes rather than a guess.
+        # The descriptor tail, as `EnemyZombieInit` (class 0x30) and
+        # `EnemyThrowerInit` (class 0x31) read it: byte +1 is the body
+        # condition, +2 the state the actor starts in, +3 the state a
+        # permit-winner enters. Both inits do
+        # `obj[0x130C] = d[1]; obj[0x1310] = d[2]`, so both classes get it;
+        # every other class gets zeroes rather than a guess.
         tail = ((rec.param(1, "i8") or 0, rec.param(2, "i8") or 0,
                  rec.param(3, "i8") or 0)
-                if sp["class"] == 0x30 else (0, 0, 0))
+                if sp["class"] in (0x30, 0x31) else (0, 0, 0))
+        # The leap states read a destination and a duration out of the same
+        # descriptor; every other state uses those bytes for something else,
+        # so this is gated on the state rather than emitted blind.
+        leap = None
+        if rec is not None and tail[1] in LEAP_STATES.get(sp["class"], ()):
+            frames = rec.param(0x10, "i32") or 0
+            dest = [rec.param(o, "f32") for o in (4, 8, 0xC)]
+            if 0 < frames < 3600 and all(math.isfinite(v) for v in dest):
+                leap = {"dest": dest, "frames": frames}
         placements.append(Placement(
             at, sp["class"], res.char_type, motion, sp, intro,
             body_condition=tail[0], initial_state=tail[1],
-            attack_state=tail[2],
+            attack_state=tail[2], leap=leap,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
             hp=sp.get("hp", 0)))
         if motion is None:

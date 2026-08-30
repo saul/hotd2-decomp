@@ -11,11 +11,11 @@
  * promptly instead of after a fresh walk-in.
  */
 import type { Actor } from "../actor";
-import { TurnActorTowardPoint } from "../actor_turn";
+import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
-import { ActorSetMotionIfIdle } from "./motion_cue";
+import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
 import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionRow, ZombieState } from "./states";
 
@@ -29,10 +29,10 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
     obj.sub = 1;
   }
 
-  ActorSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.BackAway]);
+  ZombieSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.BackAway]);
   // Turn relative to where the strike began, not to the camera: the actor
   // lunged forward to swing and walks back out along the same line.
-  TurnActorTowardPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);
+  TurnActorAwayFromPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);
   obj.backoffFrames += dt * GAME_HZ;
 
   // Distance is measured against the remembered player point, the same one the

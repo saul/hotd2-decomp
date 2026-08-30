@@ -33,7 +33,17 @@ export interface ThrownWeapon {
   ttl: number;
   /** BAMS per frame, signed by which hand threw it. */
   spin: number;
-  yaw: number;
+  /**
+   * The accumulated tumble, `obj+0x68`.
+   *
+   * `ThrownWeaponFlyToTarget` does `obj+0x68 += obj+0x135C` every frame in
+   * flight — negated for the other hand — and `ThrownWeaponUpdate` draws the
+   * weapon as `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)`. So
+   * the tumble is the **Y** term: the weapon turns about its own vertical.
+   * The X and Z terms are zero in flight; they are only set on landing, when
+   * `AimThrownWeapon` points the stuck weapon back at the camera.
+   */
+  spinAngle: number;
   /** Frames spent in the stick-and-blink tail once the flight is done. */
   after: number;
   hit: boolean;

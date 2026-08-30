@@ -216,6 +216,7 @@ export class CharacterLayer {
         attackState: p?.attack_state ?? 0,
         condition: p?.body_condition ?? 0,
         ringSet: p?.ring_set ?? 0,
+        leap: p?.leap ?? null,
       });
       a.motion = motion;
       a.intro = intro;

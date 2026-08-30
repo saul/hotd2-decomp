@@ -4535,3 +4535,54 @@ Stage 2 block 5 step 6 spawns two zsass at y = 87 with the ground at ~36, which
 is the drop the player is missing. It needs the class-0x31 descriptor tail
 exported — the exporter reads it only for class 0x30 — and a ground height the
 bundle does not carry.
+
+## The drop, and a spin axis I got wrong twice
+
+**Spawns placed in the air ride a ballistic arc named in their own
+descriptor.** Class 0x31 state 20 (`ThrowerStateLeapToPoint`) hands the actor's
+position, a destination at descriptor `+0x04/08/0C` and a duration at `+0x10`
+to `ActorArcBegin`, and `ActorArcVelocity` rebuilds the velocity every frame:
+
+```
+vel.xz = (dst - src) / T
+vel.y  = -0.027222222*n + (T*T*0.027222222 + 2*dy) / (2*T)
+```
+
+Exact projectile motion, and the 0.027222222 is half the 0.05444444 that
+`ThrowerStateFallAndLand` puts in `obj+0x5C` — which is what a discrete
+`pos += vel; vel -= g` integrator needs for the arc to land on time.
+
+The data agrees exactly. Stage 2's seven leap spawns are all class 0x31 state
+20, and the two the report named — block 5 step 6, `0x20E8` and `0x2120` — sit
+at y = 87 with destinations at y = 37, the street: **50 units down over 30 and
+35 frames.** No gravity simulation and no ground query is involved; the landing
+point is data.
+
+`EnemyThrowerInit` reads its start state from descriptor byte +2 exactly as
+`EnemyZombieInit` does, and the exporter was only reading that tail for class
+0x30, so every thrower started in the throw state and stood in mid-air.
+
+### The knife's spin: Z, then X, then Y
+
+Reported as spinning about the wrong axis, and it took two reads to get right.
+
+`ThrownWeaponUpdate` draws the weapon as
+`Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)`, and this repo's own
+annotation for it said "obj+0x1364 added to the X rotation as spin" — so the
+first reading was **X**. That is where 0x1364 goes, but it is zero in flight.
+
+`ThrownWeaponFlyToTarget` is what actually tumbles it:
+
+```c
+if (obj[0x1358] == 5) obj[0x68] += obj[0x135C];
+else                  obj[0x68] -= obj[0x135C];
+```
+
+`obj+0x68` is the **Y** term, and 0x1358 is which hand threw it, which is where
+the two hands' opposite spins come from. X and Z are set only on landing, when
+`AimThrownWeapon` turns the stuck weapon back to face the camera.
+
+So the port had it on Z, the first fix moved it to X, and the answer is Y. The
+lesson is the one the method already states: the draw call says which term is
+which, but only the writer says which term is the spin. The misleading
+annotation has been corrected in place.

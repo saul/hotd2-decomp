@@ -54,6 +54,8 @@ export interface Actor {
   pos: Vec3;                // +0x40
   /** Yaw in BAMS. The engine keeps a triple at +0x64/68/6C; only Y turns. */
   yaw: number;              // +0x68
+  /** `EnemyThrowerUpdate` integrates `vel += acc` and then `pos += vel`. */
+  vel: Vec3;                // +0x4C
   hp: number;               // +0x11C
   maxHp: number;            // +0x11E
   /** `-1` when it holds no permit, else the index into `g_attack_permits`. */
@@ -87,6 +89,18 @@ export interface Actor {
   /** Where the actor stood when its strike began; `ZombieStateBackOff`
    *  retreats toward it. */
   strikeStart: Vec3;        // +0x13D8
+  /**
+   * The ballistic arc a spawn placed in the air rides down, from its
+   * descriptor. Null for a spawn that is already on the ground.
+   */
+  leap: { dest: [number, number, number]; frames: number } | null;
+  /** `obj+0x13C0` — where the arc began. */
+  arcFrom: Vec3;
+  /** `obj+0x1330` — frames of the arc elapsed. */
+  arcFrames: number;
+  /** `obj+0x1334` — how many it lasts. */
+  arcTotal: number;
+
   /** `obj+0x136C & 0x40000` — `strikeStart` has been captured. */
   hasStrikeAnchor: boolean;
   /**
@@ -154,6 +168,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     flags: 0,
     pos: vec3(),
     yaw: 0,
+    vel: vec3(),
     hp: 0,
     maxHp: 0,
     attackPermit: -1,
@@ -169,6 +184,10 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     cooldown: 0,
     target: vec3(),
     strikeStart: vec3(),
+    leap: null,
+    arcFrom: vec3(),
+    arcFrames: 0,
+    arcTotal: 0,
     hasStrikeAnchor: false,
     struck: false,
     initialState: 0,

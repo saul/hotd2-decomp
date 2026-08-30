@@ -55,7 +55,7 @@ export function TurnActorTowardCameraEye(obj: Actor, eye: Vec3,
  * `TurnActorAwayFromPoint` — `FUN_00409F90`. Turn relative to an arbitrary
  * point; a negative rate is what `ZombieStateBackOff` passes to face away.
  */
-export function TurnActorTowardPoint(obj: Actor, p: Vec3, rate: number,
+export function TurnActorAwayFromPoint(obj: Actor, p: Vec3, rate: number,
                                      dt: number): void {
   // `VecToAngles(obj - p)` faces away from the point. The sign of the rate is
   // a turn direction, not a flip: flipping it here points the actor at the

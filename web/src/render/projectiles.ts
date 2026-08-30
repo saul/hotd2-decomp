@@ -44,9 +44,17 @@ export class ProjectileLayer implements System {
       }
       node.position.set(w.pos.x, w.pos.y, w.pos.z);
       node.visible = w.visible;
-      // In flight it tumbles on its own yaw; stuck, it faces the camera.
-      if (w.ttl > 0) node.rotation.set(0, 0, w.yaw * BAMS_TO_RAD);
-      else node.lookAt(this._eye);
+      if (w.ttl > 0) {
+        // `ThrownWeaponFlyToTarget` accumulates the spin into `obj+0x68`, and
+        // `ThrownWeaponUpdate` draws `Rz(obj+0x6C) * Ry(obj+0x68) *
+        // Rx(obj+0x1364 + obj+0x64)` — so the tumble is the **Y** term, and
+        // the other two are zero until it lands. This span was on Z, which
+        // cartwheels the weapon sideways.
+        node.rotation.set(0, w.spinAngle * BAMS_TO_RAD, 0);
+      } else {
+        // Landed: `AimThrownWeapon` points it back at the camera.
+        node.lookAt(this._eye);
+      }
     }
     for (const [id, node] of this.nodes) {
       if (seen.has(id)) continue;

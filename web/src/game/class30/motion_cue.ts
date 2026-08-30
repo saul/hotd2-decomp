@@ -9,7 +9,7 @@
 import type { Actor } from "../actor";
 import { MotionOf } from "../tables";
 
-export function ActorSetMotionIfIdle(obj: Actor, motion: number | undefined,
+export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
                                      loop = true): void {
   if (motion === undefined || !MotionOf(obj, motion)) return;
   // A one-shot the state machine started -- a strike, a lunge -- owns the

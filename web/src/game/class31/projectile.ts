@@ -2,7 +2,9 @@
  * The weapon in flight.
  *
  * A straight line at a constant `speed` units per frame with
- * `ttl = distance / speed`, tumbling on its yaw, and on expiry it calls
+ * `ttl = distance / speed`, tumbling **about its own Y axis** — the flight
+ * adds the rate into `obj+0x68`, which is the draw's Y term — and on expiry it
+ * calls
  * `PlayerTakeDamage` outright: **the hit is timed, not tested**, exactly like
  * the melee strike's hit frame. Afterwards it sticks facing the camera for
  * `stick_frames` and blinks for `blink_frames` before going away.
@@ -22,7 +24,7 @@ export function ThrownWeaponFlyToTarget(i: number, frames: number,
     p.pos.x += p.vel.x * frames;
     p.pos.y += p.vel.y * frames;
     p.pos.z += p.vel.z * frames;
-    p.yaw += p.spin * frames;
+    p.spinAngle += p.spin * frames;
     p.ttl -= frames;
     if (p.ttl <= 0 && !p.hit) {
       p.hit = true;

@@ -197,7 +197,7 @@ export class RailLayer {
 
 // -- spawn markers ---------------------------------------------------------
 
-function labelTexture(text: string): CanvasTexture {
+export function labelTexture(text: string): CanvasTexture {
   const pad = 8;
   const c = document.createElement("canvas");
   const ctx = c.getContext("2d")!;

@@ -35,6 +35,8 @@ const CONTROLS = [
   "#show-spawns",
   "#show-chars",
   "#show-props",
+  "#show-unported",
+  "#show-boxes",
   "#shoot",
   "#pillarbox",
   "#light-mode",

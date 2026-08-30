@@ -53,6 +53,8 @@ import { Loop, TICK } from "./loop";
 import { wireSplitter } from "../hud/splitter";
 import { GameSystem, ScriptSystem } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
+import { DebugBoxLayer } from "../render/debug";
+import { GlobalsView } from "../hud/globals_view";
 import { G } from "../game/globals";
 import { SetGameTables } from "../game/tables";
 import { TurnLookAtToward } from "../game/camera/turn";
@@ -100,6 +102,10 @@ class Player {
   /** Approach, attack permits, and the look-at the camera tracks. */
   private readonly game = new GameSystem();
   private readonly bullets = new ProjectileLayer();
+  /** Debug overlays: unported classes, the permit holder, the awaited enemies. */
+  private readonly debug = new DebugBoxLayer();
+  /** The port's data segment, on screen. */
+  private readonly globalsView = new GlobalsView();
   private readonly trackNow = new Vector3();
   private readonly _eye = new Vector3();
   /** UI toggle — off restores the exact authored camera. */
@@ -140,6 +146,7 @@ class Player {
     this.scene.add(this.backdrop.group);
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
+    this.scene.add(this.debug.group);
 
     this.ctx = {
       scene: this.scene,
@@ -156,6 +163,7 @@ class Player {
     this.world.add("game", this.game);
     this.world.add("render", this.bullets);
     this.game.backend = this.chars;
+    this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore
     // rolls and the death directions as well as the attacks.
     this.chars.rng = this.rng;
@@ -271,6 +279,7 @@ class Player {
     this.shooting.reset();
     this.shooting.setTables(bundle.script.characters?.combat);
     this.bullets.source = this.chars;
+    this.debug.detach();
     this.scene.add(this.bullets.group);
     this.trackNow.set(0, 0, 0);
     this.shooting.playSound = (id) => { this.bgm.play(id); };
@@ -284,6 +293,8 @@ class Player {
     this.scene.add(this.rails.group);
     this.rails.setVisible($<HTMLInputElement>("#show-rails").checked);
     this.rails.setAimRailsVisible($<HTMLInputElement>("#show-aim").checked);
+    this.debug.showUnported = $<HTMLInputElement>("#show-unported").checked;
+    this.debug.showBoxes = $<HTMLInputElement>("#show-boxes").checked;
 
     this.walker = new Walker(bundle.script, {
       enterRegion: (r) => this.stage?.enterRegion(r),
@@ -427,6 +438,12 @@ class Player {
     });
     $<HTMLInputElement>("#show-aim").addEventListener("change", (e) => {
       this.rails?.setAimRailsVisible((e.target as HTMLInputElement).checked);
+    });
+    $<HTMLInputElement>("#show-unported").addEventListener("change", (e) => {
+      this.debug.showUnported = (e.target as HTMLInputElement).checked;
+    });
+    $<HTMLInputElement>("#show-boxes").addEventListener("change", (e) => {
+      this.debug.showBoxes = (e.target as HTMLInputElement).checked;
     });
     $<HTMLInputElement>("#show-rigs").addEventListener("change", (e) => {
       this.rigs.setEnabled((e.target as HTMLInputElement).checked);
@@ -1012,6 +1029,12 @@ class Player {
     this.rain.update(w.rain, this.camera.position,
                      Math.atan2(-this._fwd.x, -this._fwd.z),
                      t.frozen ? 0 : t.wall * 60);
+    // Debug overlays read the same live spawn list the markers do, so the two
+    // can never disagree about who is present.
+    this.debug.update(w.spawns, w.wait?.policy.kind === "enemies");
+    // Driven from here rather than from `refreshUi`, which only runs during
+    // playback: the panel is at its most useful when the clock is stopped.
+    this.globalsView.update();
     this.lighting.setGunLights(w.gunLights);
     this.lighting.setSceneLighting(w.sceneLighting);
     this.lighting.updateGunLights(

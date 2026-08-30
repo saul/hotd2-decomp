@@ -19,6 +19,23 @@ with the address in the doc comment. It imports neither three.js nor
 `tools/verify_port.py` checks the citations, the coverage and the three ways
 state can escape a snapshot.
 
+Three debug views hang off that same property — if all the state is in one
+enumerable place, it can be shown:
+
+* **Globals** (right rail, collapsed) — every `g_*` the port touches with its
+  exe address, and the object pool a row per actor: class, state, permit, hit
+  points. Read-only on purpose; a writable panel would be a fourth way for
+  state to enter the game and nothing done in it would survive a save. The
+  addresses are parsed out of `game/globals.ts` at build time by the same
+  regex `verify_port.py` uses, so there is no second copy of them.
+* **Unported** — an empty box wherever the script has spawned an actor whose
+  class has no module in `g_class_handlers`. 1046 of the 1383 placements
+  `spawns.md` counts are in that state, and the box is the honest picture of
+  it: something is there, and this player is not simulating it.
+* **Boxes** — the actor holding an attack permit, which is both the one about
+  to swing and the one `SelectCameraLookAtTarget` is aiming at, plus every
+  enemy keeping `wait_enemies_alive` blocked while it is blocking.
+
 | Check | Command | What it holds |
 |---|---|---|
 | opcode statuses | `tools/verify_player_ops.py` | `script/ops/` against the table below |

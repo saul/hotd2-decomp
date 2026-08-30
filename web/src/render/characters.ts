@@ -49,7 +49,8 @@
  * trying to derive that.
  */
 
-import { Group, Mesh, Object3D, Quaternion, Ray, Vector3 } from "three";
+import { Box3, Group, Mesh, Object3D, Quaternion, Ray, Vector3 }
+  from "three";
 import type {
   BakedMotion, CharacterPlacement, CharactersJson, CharacterType,
 } from "../bundle";
@@ -600,6 +601,18 @@ export class CharacterLayer {
     c.quaternion.identity();
     c.scale.set(1, 1, 1);
     return c;
+  }
+
+  /**
+   * The assembled actor's world bounds, for a debug box. False when the spawn
+   * has no character in the scene — a class with no motion rule keeps its
+   * marker, and there is nothing to measure.
+   */
+  boundsOf(at: number, out: Box3): boolean {
+    const inst = this.instances.find((i) => i.at === at);
+    if (!inst || !inst.root.visible) return false;
+    out.setFromObject(inst.root);
+    return !out.isEmpty();
   }
 
   /** World position of one bone of one instance, for a spawn point. */

@@ -359,7 +359,109 @@ class ExeTables:
     #: path for. Object draw routines clamp with it -- `FUN_0048E600` and
     #: `FUN_0048F050` both do `n = min(current_frame, CAM_PATH_LENGTH[slot])`
     #: before calling `CamEvalObjectPath6`.
+    #: Sound records: ``{u32 id; char name[48]}``, stride 0x34, terminated
+    #: by ``id == 0xFFFF``. `PlaySoundId` (0x0041CFD0) switches on ``id >> 28``
+    #: through the 9-entry table at 0x0041D324; category 0 resolves here.
+    #:
+    #: This is the **only place the binary names anything**. There is no asset
+    #: name table, so a `PlaySoundId` id is often the sole evidence for what an
+    #: object is -- `STAGE2_SE\\CAR_SRIP_22.wav` is how the stage-2 vehicle was
+    #: proved to be a car, and `COMMON\\SIBUKI2_16.WAV` (shibuki, "splash") is
+    #: how class 0x51 was proved to live in water.
+    SOUND_RECORDS = 0x005845F8
+    SOUND_RECORD_STRIDE = 0x34
+
+    #: The breakable-prop groups placed by spawn class 0x41 type 0
+    #: (`FUN_00462A80`). ``BREAKABLE_COUNTS`` is nine member counts, one per
+    #: group; ``BREAKABLE_GROUPS`` is nine pointers to the member records.
+    BREAKABLE_COUNTS = 0x00593D14
+    BREAKABLE_GROUPS = 0x00593CF0
+    #: Height of one stack level, from the constructor's own multiply.
+    BREAKABLE_LEVEL_HEIGHT = 7.540296
+
     CAM_PATH_LENGTH = 0x00576D38
+
+    def sound_records(self) -> dict[int, str]:
+        """``{sound id: filename}`` for every category-0 sound in the game."""
+        out: dict[int, str] = {}
+        base = self._v2r(self.SOUND_RECORDS)
+        if base is None:
+            return out
+        for i in range(4096):
+            off = base + i * self.SOUND_RECORD_STRIDE
+            if off + self.SOUND_RECORD_STRIDE > len(self.data):
+                break
+            sid = struct.unpack_from("<I", self.data, off)[0]
+            if sid == 0xFFFF:
+                break
+            raw = self.data[off + 4: off + self.SOUND_RECORD_STRIDE]
+            name = raw.split(b"\0")[0]
+            try:
+                out[sid] = name.decode("ascii")
+            except UnicodeDecodeError:
+                continue
+        return out
+
+    def sound_name(self, sound_id: int) -> str | None:
+        """The filename a `PlaySoundId` id names, if it is a category-0 id."""
+        return self.sound_records().get(sound_id)
+
+    def breakable_groups(self) -> list[list[dict]]:
+        """The breakable-prop groups, decoded from `FUN_00462A80`'s tables.
+
+        Spawn class 0x41 type 0 places a *group* of shootable props rather
+        than one object: the spawn's ``obj+0x11C`` is the group id, and the
+        constructor loops over that group's member records building a child
+        actor each. One member of the group hides the group's item, which is
+        released when the last prop of its item-set is broken.
+
+        Each record is 10 bytes::
+
+            +0x00 s16  x * 0.1
+            +0x02 s16  z * 0.1
+            +0x04 u8   item-set id
+            +0x05 u8   asset variant (0xFF = the default, 0x19E8)
+            +0x06 s8   stack level; y = level * 7.540296 above the floor
+            +0x07 u8   number of supporting members
+            +0x08 u8   supporting member index a
+            +0x09 u8   supporting member index b
+
+        The support list is what makes a stack topple when a prop under it is
+        destroyed. **[proved]** by self-consistency: across all 42 members of
+        all nine groups, every member at level *n* names supports that are all
+        at level *n-1*, and every ground-level member names none.
+
+        The y here is *relative* -- the constructor adds
+        ``g_camera_fixed_eye_y - 0.1`` as the floor.
+        """
+        out: list[list[dict]] = []
+        cbase, base = (self._v2r(self.BREAKABLE_COUNTS),
+                       self._v2r(self.BREAKABLE_GROUPS))
+        if cbase is None or base is None:
+            return out
+        counts = self.data[cbase:cbase + 9]
+        ptrs = struct.unpack_from("<9I", self.data, base)
+        for ptr, n in zip(ptrs, counts):
+            off = self._v2r(ptr)
+            members = []
+            for i in range(n):
+                r = self.data[off + i * 10: off + i * 10 + 10]
+                if len(r) < 10:
+                    break
+                nsup = r[7]
+                members.append({
+                    "index": i,
+                    "x": struct.unpack_from("<h", r, 0)[0] * 0.1,
+                    "z": struct.unpack_from("<h", r, 2)[0] * 0.1,
+                    "item_set": r[4],
+                    "asset_variant": None if r[5] == 0xFF else r[5],
+                    "level": struct.unpack_from("<b", r, 6)[0],
+                    "y_offset": struct.unpack_from("<b", r, 6)[0]
+                                * self.BREAKABLE_LEVEL_HEIGHT,
+                    "supports": [r[8], r[9]][:nsup],
+                })
+            out.append(members)
+        return out
 
     def cam_path_length(self, slot: int) -> int:
         """Authored play length of a global cam path slot, in 60 Hz frames.

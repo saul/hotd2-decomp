@@ -271,6 +271,23 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] **Object export** — every `op_` path is now an animated node
       (translation + rotation), not just a rail; `<stage>_objects.json` carries
       the spawns the event script places and the routes together
+- [x] **The spawn system — enemies, items and props.** `obj+0x1390` is the
+      **descriptor + 0x24**, read out of the three allocators; see
+      [`formats/spawns.md`](formats/spawns.md). 35 used classes surveyed, most
+      identified from code. The zombie (`0x30`), the civilians (`0x10`, proved
+      by voice filenames — shooting one costs a life, rescuing awards +400), a
+      water enemy (`0x51`), a flying enemy (`0x43`), the water-wave field
+      (`0x16`/`0x17`), dynamic lights (`0x2B`), and the ending-branch selector
+      (`0x33` selector 11, which picks the ending track from score rank).
+- [x] **Item placement.** The items are not placed — the *containers* are.
+      Class `0x41` type 0 places groups of breakable props from two EXE tables:
+      9 groups, 42 props, each a 10-byte record with x/z, item-set, stack level
+      and a **support list** for topple physics. Verified 42/42 by
+      self-consistency of the stacking. `ExeTables.breakable_groups()` decodes
+      it and the exporter emits it per stage.
+- [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
+      the only place this binary names anything. `ExeTables.sound_records()`.
+      This is now the primary identification tool for the decomp.
 - [x] **Twelve rigs transcribed**, of the 31 `CamEvalObjectPath6` callers.
       `hod2lib/rigs.py` holds them; [`re/rig-survey.md`](re/rig-survey.md)
       surveys all 31 and maps the other 22 to the routines that draw them.

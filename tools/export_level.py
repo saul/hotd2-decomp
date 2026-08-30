@@ -65,6 +65,50 @@ def _resolve_rigs(game: Path, st, bbox=None) -> list[dict]:
     return out
 
 
+def _breakable_json(st, prog) -> list[dict]:
+    """The breakable-prop groups this stage places, with their members.
+
+    Spawn class 0x41 type 0 (`FUN_00462A80`) places a *group* of shootable
+    props rather than one object. The spawn's `+0x11C` names the group; the
+    member records come from the EXE, not the evt. One member of each item-set
+    hides that set's item, released when the last prop of the set is broken --
+    which is what "item placement" means in this game: the items are not
+    placed, the containers are.
+
+    Only the groups this stage actually spawns are emitted. Stage 1 uses
+    group 0 and stage 2 uses groups 1-7, each exactly once; group 8 is defined
+    but no stage spawns it.
+    """
+    if prog is None:
+        return []
+    import struct as _struct
+    from hod2lib import evt as _evt
+    try:
+        groups = st.tables.breakable_groups()
+    except Exception:
+        return []
+    out: list[dict] = []
+    for rec in _evt.spawns(prog.evt):
+        if rec.cls != 0x41:
+            continue
+        off = rec.offset + 0x25
+        if off >= len(prog.evt.raw):
+            continue
+        if _struct.unpack_from("<b", prog.evt.raw, off)[0] != 0:
+            continue          # not the group placer
+        gid = rec.hp
+        if not (0 <= gid < len(groups)):
+            continue
+        out.append({
+            "group": gid,
+            "spawn_at": rec.offset,
+            "lifetime_evt_blocks": _struct.unpack_from(
+                "<b", prog.evt.raw, rec.offset + 0x24)[0],
+            "members": groups[gid],
+        })
+    return out
+
+
 def _objects_json(st) -> dict:
     """The stage's objects: what the event script spawns, and the routes.
 
@@ -129,6 +173,7 @@ def _objects_json(st) -> dict:
                 "is Rz*Ry*Rx from the op_ BAMS Euler triple -- see "
                 "docs/formats/cam.md.",
         "spawn_count": len(spawns),
+        "breakable_groups": _breakable_json(st, prog),
         "spawns_by_class": dict(sorted(by_class.items(), key=lambda kv: -kv[1])),
         "spawns": spawns,
         "object_paths": paths,

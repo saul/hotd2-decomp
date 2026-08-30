@@ -149,7 +149,7 @@ the reason and the player shows it rather than guessing.
 The script tree and the event feed **strike through any instruction the player
 does not act on**, and dot-underline the ones it approximates, so it is
 obvious at a glance how much of a stage is really being honoured. The map
-lives in `web/src/opstatus.ts` — in TypeScript rather than the bundle, because
+lives in `web/src/script/opstatus.ts` — in TypeScript rather than the bundle, because
 it describes the *client*, and only the client knows what it has implemented.
 
 Ranked by how often they occur across the six arcade stages, what is still
@@ -516,7 +516,7 @@ when a prop is shot) has nothing to drive it here.
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in
-> `web/src/walker.ts`, where each opcode's `status` sits on the same object as
+> `web/src/script/walker.ts`, where each opcode's `status` sits on the same object as
 > the `run` that justifies it — so the interpreter cannot disagree with the
 > script tree about what it honours. `tools/verify_player_ops.py` checks this
 > table against that one; it is what caught `enable_rain` being struck through

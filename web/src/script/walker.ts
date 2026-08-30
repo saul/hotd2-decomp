@@ -28,6 +28,7 @@ import { Rng } from "../core/rng";
 
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
+import { OPS as OPS_TABLE } from "./ops";
 
 
 export interface ActiveSpawn extends SpawnJson {
@@ -208,7 +209,7 @@ const WAIT_NOTES: Record<number, string> = {
  *
  * `run` and `status` travel together on purpose -- see {@link Walker.OPS}.
  */
-interface OpImpl {
+export interface OpImpl {
   status: OpStatus;
   run?: (w: Walker, op: OpJson, quiet: boolean) => string | undefined;
 }
@@ -675,7 +676,7 @@ export class Walker {
    * only when the 40-frame close completes, which is why the countdown is
    * kept rather than the gate simply following the state.
    */
-  private applyFiringGate(state: number): void {
+  applyFiringGate(state: number): void {
     this.gateCloseLeft = 0;
     if (state === 0 || state === 1 || state === 6) this.firingGate = true;
     else if (state === 5) this.firingGate = false;
@@ -787,313 +788,10 @@ export class Walker {
    * not acted on (`shown`). An opcode absent from the table entirely is
    * treated as `shown`.
    */
-  private static readonly OPS: Record<number, OpImpl> = {
-    // -- regions and streaming ------------------------------------------
-    0x29: {                                     // region_enter
-      status: "done",
-      run: (w, op) => {
-        w.region = op.region ?? -1;
-        w.host.enterRegion(w.region);
-        return undefined;
-      },
-    },
-    0x28: {                                     // region_load
-      // Decoded and reported, but the host hook is deliberately empty: the
-      // bundle holds every region's geometry from the start, so there is
-      // nothing to preload. A `run` that only writes a feed note is still
-      // `shown`.
-      status: "shown",
-      run: (w, op) => {
-        if (op.region !== undefined) w.host.loadRegion(op.region);
-        return "preload";
-      },
-    },
-    0x50: {                                     // asset_load_slot
-      status: "done",
-      run: (w, op) => {
-        if (op.slot !== undefined) {
-          w.loadedSlots.add(op.slot);
-          w.host.loadSlot(op.slot);
-        }
-        return undefined;
-      },
-    },
-    0x51: {                                     // asset_unload_slot
-      status: "done",
-      run: (w, op) => {
-        if (op.slot !== undefined) {
-          w.loadedSlots.delete(op.slot);
-          w.host.unloadSlot(op.slot);
-        }
-        return undefined;
-      },
-    },
-
-    // -- camera ----------------------------------------------------------
-    0x30: {
-      status: "done",
-      // EvtOpQueueEvent30 opens with `if (skip) { pc += operands; return; }`,
-      // so a raised flag drops the action entirely rather than queueing it.
-      // This is what makes a skip actually skip: with nothing queued and the
-      // waits passing through, the interpreter races to the end of the region.
-      run: (w, op) => (w.skipRequested
-        ? "dropped — skipping"
-        : w.applyQueueEvent(op)),
-    },
-    0x35: {                                     // enable_camera_path_roll
-      status: "done",
-      run: (w, op) => {
-        w.rollEnabled = !!op.roll_enabled;
-        return w.rollEnabled ? "roll channel on" : "roll channel off";
-      },
-    },
-    0x1a: {                                     // ground plane / fixed eye Y
-      status: "tracked",
-      run: (w, op) => {
-        w.groundY = op.ground_y ?? null;
-        w.fixedEyeY = op.camera_fixed_eye_y ?? op.ground_y ?? 0;
-        return undefined;
-      },
-    },
-    0x36: {                                     // pin_view_to_ground_plane
-      // Kept and shown, not applied: `campath.cameraEyeY` has
-      // APPLY_EYE_Y_RULE off, because measuring the rule against the data
-      // found 173 of 201 paths would end up looking *up* at their own target.
-      // Until that is resolved the honest status is `tracked`.
-      status: "tracked",
-      run: (w, op) => {
-        w.useFixedEyeY = !!op.use_fixed_eye_y;
-        return w.useFixedEyeY
-          ? `camera eye Y pinned to ${w.fixedEyeY}`
-          : "camera eye Y back to path.y - 15";
-      },
-    },
-    0x37: {                                     // force_camera_path_advance
-      status: "tracked",
-      run: (w, op) => {
-        w.forcePathAdvance = !!op.force_path_advance;
-        return undefined;
-      },
-    },
-
-    // -- lighting and fog -------------------------------------------------
-    // 0x18 sets, 0x17 slerps; the client takes the slerp target immediately,
-    // which is the one approximation in this group.
-    0x18: { status: "done", run: (w, op) => Walker.setLightDir(w, op) },
-    0x17: { status: "approx", run: (w, op) => Walker.setLightDir(w, op) },
-    // Light block 1 is pushed only at scene init and never reaches the
-    // renderer, so these are no-ops in the game as well as here. Honouring
-    // them would be wrong, not merely unimplemented.
-    0x19: { status: "none", run: () => undefined },
-    0x14: {                                     // set_scene_lighting
-      status: "done",
-      run: (w, op) => {
-        w.sceneLighting = !!op.enabled;
-        return undefined;
-      },
-    },
-    0x15: {                                     // enable_entity_spotlights
-      // Decoded as a raw operand: 0x15's handler only writes a global, so
-      // `script.py` leaves it in `raw` rather than naming a field.
-      status: "done",
-      run: (w, op) => {
-        w.gunLights = (op.raw?.length
-          ? Number.parseInt(op.raw[0], 16) : (op.value ?? 0)) !== 0;
-        return w.gunLights ? "gun lights on" : "gun lights off";
-      },
-    },
-    // Block 0 is pushed every frame, so it is the one that shows.
-    0x20: { status: "done", run: (w, op) => w.applyLightChannel(op) },
-    0x21: { status: "done", run: (w, op) => w.applyLightChannel(op) },
-    0x23: { status: "done", run: (w, op) => w.applyLightChannel(op) },
-    // Block 1 again -- same reasoning as 0x19 above.
-    0x24: { status: "none", run: () => undefined },
-    0x25: { status: "none", run: () => undefined },
-    0x27: { status: "none", run: () => undefined },
-
-    // -- scenery and HUD ---------------------------------------------------
-    0x1b: {                                     // set_backdrop_preset
-      status: "done",
-      run: (w, op) => {
-        w.backdropPreset = op.value ?? -1;
-        return `dome preset ${w.backdropPreset}`;
-      },
-    },
-    0x1c: {                                     // set_backdrop_mode
-      status: "done",
-      run: (w, op) => {
-        w.backdropMode = op.value ?? 0;
-        return op.means;
-      },
-    },
-    0x1d: {                                     // enable_rain
-      status: "done",
-      run: (w, op) => {
-        w.rain = !!op.value;
-        return op.means;
-      },
-    },
-    0x1f: {                                     // set_hud_shutter_state
-      status: "done",
-      run: (w, op, quiet) => {
-        w.shutterState = op.value ?? 0;
-        w.applyFiringGate(w.shutterState);
-        return quiet ? undefined : w.host.setShutter(w.shutterState);
-      },
-    },
-    0x2d: {                                     // play_dialogue
-      status: "done",
-      // EvtOpPlayDialogue2D returns before both the voice and the subtitle
-      // task when the skip flag is up.
-      run: (w, op, quiet) => {
-        if (w.skipRequested) return "not said — skipping";
-        return quiet || op.message_group === undefined
-          ? undefined
-          : w.host.showMessage(op.message_group);
-      },
-    },
-
-    // -- the cutscene skip -------------------------------------------------
-    0x2c: {                                     // set_skippable_region
-      // EvtOpSetSkippableRegion2C:
-      //   arg != 0 -> DAT_009A2230 = 0; DAT_009A2D7C = 1
-      //   arg == 0 -> DAT_009A2D7C = 0; skip flag = 0
-      // Closing always clears the flag, so a skip never carries past the
-      // region it was asked for.
-      status: "done",
-      run: (w, op) => {
-        w.skippable = op.open ?? (op.raw?.length
-          ? Number.parseInt(op.raw[0], 16) !== 0 : false);
-        if (!w.skippable) w.skipRequested = false;
-        return op.means;
-      },
-    },
-    0x2e: {                                     // resume_bgm_if_skipped
-      // `if (skip) PlaySoundId(0x80000002)` -- restart the BGM a skipped
-      // cutscene interrupted. Inert unless a skip actually happened.
-      status: "done",
-      run: (w, _op, quiet) => {
-        if (w.skipRequested && !quiet) {
-          w.host.playSound(0x80000002);
-          return "BGM resumed after a skip";
-        }
-        return undefined;
-      },
-    },
-
-    // -- audio -------------------------------------------------------------
-    // 0x38/0x3A se_play, 0x39/0x3B se_play_3d. The "unless skip" pair really
-    // is gated: FUN_0045F750 and FUN_0045F780 both open with
-    // `if (g_nEvtSkipFlag == 0)`. That only ever mattered once the player
-    // could raise the flag.
-    0x38: { status: "done", run: (w, op, quiet) => Walker.playSe(w, op, quiet) },
-    0x39: { status: "done", run: (w, op, quiet) => Walker.playSe(w, op, quiet) },
-    0x3a: {
-      status: "done",
-      run: (w, op, quiet) => (w.skipRequested
-        ? "silent — skipping" : Walker.playSe(w, op, quiet)),
-    },
-    0x3b: {
-      status: "done",
-      run: (w, op, quiet) => (w.skipRequested
-        ? "silent — skipping" : Walker.playSe(w, op, quiet)),
-    },
-    0x5f: {                                     // bgm_entry_play
-      status: "done",
-      run: (w, op, quiet) => {
-        w.bgmTrack = op.track ?? null;
-        // The handler is a stop then a play, and only the third operand is
-        // used. `quiet` is a replay, where re-triggering audio for every
-        // instruction skipped over would be wrong.
-        return quiet || op.track === undefined || op.track === null
-          ? undefined
-          : w.host.playSound(op.track);
-      },
-    },
-
-    // -- spawns ------------------------------------------------------------
-    // Only these four resolve to placed markers; measured over all six stage
-    // scripts, no other opcode carries a resolved spawn descriptor.
-    0x09: { status: "done", run: (w, op) => Walker.pushSpawns(w, op) },
-    0x0b: { status: "done", run: (w, op) => Walker.pushSpawns(w, op) },
-    0x0c: { status: "done", run: (w, op) => Walker.pushSpawns(w, op) },
-    0x0d: {
-      status: "done",
-      // spawn_obj_unless_skip. FUN_00408B70 walks its -1-terminated operand
-      // list either way and only calls the spawn inside `if (skip == 0)`.
-      run: (w, op) => (w.skipRequested
-        ? "not spawned — skipping" : Walker.pushSpawns(w, op)),
-    },
-
-    // -- flow --------------------------------------------------------------
-    0x48: {                                     // set_script_flag
-      status: "tracked",
-      run: (w, op) => {
-        if (op.flag !== undefined) w.flags.add(op.flag);
-        return undefined;
-      },
-    },
-    0x4d: {                                     // checkpoint
-      status: "tracked",
-      run: (w) => {
-        w.checkpointBlock = w.block;
-        return "checkpoint";
-      },
-    },
-    0x4e: {                                     // halt
-      // The handler does not advance pc, so the VM sits here re-running it
-      // forever. That is a park, not the end of the scene.
-      status: "done",
-      run: (w) => {
-        w.parked = true;
-        return "halt — the script parks here";
-      },
-    },
-    0x4f: {                                     // end_block
-      status: "done",
-      run: (w, _op, quiet) => {
-        w.advanceStepOrRoute(quiet);
-        return undefined;
-      },
-    },
-
-    // -- waits -------------------------------------------------------------
-    // 0x41 and 0x42 are exact frame counts. 0x40 resolves when the current
-    // camera move ends, which is an approximation of "the action ring is
-    // empty"; 0x43/0x44 are paced by the combat setting; 0x45 reads a flag
-    // array gameplay would write. WAIT_NOTES says which, per instruction.
-    0x41: { status: "done", run: (w, op) => w.applyWait(op) },
-    0x42: { status: "done", run: (w, op) => w.applyWait(op) },
-    0x40: { status: "approx", run: (w, op) => w.applyWait(op) },
-    // Exact while Shoot is on -- the wait ends when the enemies are dead,
-    // which is the game's own condition. Otherwise there is nothing to kill
-    // them, so the combat setting paces it and the feed says so.
-    0x43: { status: "approx", run: (w, op) => w.applyWait(op) },
-    0x44: { status: "approx", run: (w, op) => w.applyWait(op) },
-    0x45: { status: "approx", run: (w, op) => w.applyWait(op) },
-    0x46: { status: "shown", run: (w, op) => w.applyWait(op) },
-    0x47: { status: "shown", run: (w, op) => w.applyWait(op) },
-
-    // -- declared, deliberately not acted on --------------------------------
-    // Proved no-ops in the game, dead opcodes, and dispatch slots nothing
-    // encodes. Striking these through would suggest the player is missing
-    // something; it is not.
-    0x00: { status: "none" }, 0x1e: { status: "none" },
-    0x2a: { status: "none" }, 0x34: { status: "none" },
-    0x3c: { status: "none" }, 0x3d: { status: "none" },
-    0x3e: { status: "none" }, 0x3f: { status: "none" },
-    0x4c: { status: "none" }, 0x5b: { status: "none" },
-    0x5c: { status: "none" }, 0x5d: { status: "none" },
-    0x5e: { status: "none" },
-
-    // Decoded into the feed with their operands, and nothing more. Everything
-    // here is a real instruction the player does not yet honour.
-    0x13: { status: "tracked" }, 0x16: { status: "tracked" },
-    0x22: { status: "shown" }, 0x26: { status: "shown" },
-  };
+  private static readonly OPS: Record<number, OpImpl> = OPS_TABLE;
 
   /** 0x17 and 0x18 differ only in that one of them is a slerp. */
-  private static setLightDir(w: Walker, op: OpJson): string | undefined {
+  static setLightDir(w: Walker, op: OpJson): string | undefined {
     if (op.pitch_deg !== undefined) {
       w.lightDir = {
         pitchDeg: op.pitch_deg,
@@ -1104,12 +802,12 @@ export class Walker {
     return op.op === 0x17 ? "slerp target taken immediately" : undefined;
   }
 
-  private static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
+  static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
     w.lastSound = op.sound ?? null;
     return quiet || !op.sound ? undefined : w.host.playSound(op.sound);
   }
 
-  private static pushSpawns(w: Walker, op: OpJson): string | undefined {
+  static pushSpawns(w: Walker, op: OpJson): string | undefined {
     if (!op.spawns?.length) return undefined;
     for (const s of op.spawns) {
       w.spawns.push({
@@ -1150,7 +848,7 @@ export class Walker {
    * Channel 5 is "all three fog components at once" and 9 the same for the
    * light colour, which is why they fan out to three channels here.
    */
-  private applyLightChannel(op: OpJson): string | undefined {
+  applyLightChannel(op: OpJson): string | undefined {
     const ch = op.channel;
     if (ch === undefined || ch < 0 || ch > 10) return undefined;
 
@@ -1220,7 +918,7 @@ export class Walker {
     }
   }
 
-  private applyQueueEvent(op: OpJson): string | undefined {
+  applyQueueEvent(op: OpJson): string | undefined {
     if (op.action === "cam_play") {
       const slot = op.slot ?? -1;
       const start = op.start ?? 0;
@@ -1299,7 +997,7 @@ export class Walker {
     return undefined;
   }
 
-  private applyWait(op: OpJson): string | undefined {
+  applyWait(op: OpJson): string | undefined {
     const blocksOn = op.blocks_on ?? "";
     const arg = op.arg ?? 0;
     let policy: WaitPolicy;
@@ -1385,7 +1083,7 @@ export class Walker {
    *    so with no gameplay a branch always takes `next[0]`. That is what the
    *    branch UI is for -- it sets the choice the player would have made.
    */
-  private advanceStepOrRoute(quiet: boolean): boolean {
+  advanceStepOrRoute(quiet: boolean): boolean {
     this.step += 1;
     this.opIndex = 0;
     const blk = this.currentBlock;

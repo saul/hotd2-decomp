@@ -17,15 +17,19 @@ work are done. Line counts as of the commit that landed them:
 |---|---|---|---|
 | `game/` | 1631 | 26 | **the port.** No three.js, no DOM, no `Math.random` |
 | `render/` | 3643 | 13 | three.js. Observes game state, owns nothing |
-| `script/` | 1543 | 2 | `walker.ts` — the machine **and** all 65 opcodes |
+| `script/` | 1668 | 12 | `walker.ts` — the machine; `ops/` — the 65 opcodes |
 | `app/` | 1530 | 5 | `main.ts` (1164), the loop, the system adapters |
 | `hud/` | 1031 | 4 | hud, ui, bgm, splitter |
 | `bundle/` | 715 | 8 | one module per exporter block |
 | `core/` | 297 | 5 | `System`, `World`, `Context`, `Events`, `Rng`, `Snapshot` |
 
-Two files are still too big and both have a step of their own below:
-`script/walker.ts` at 1506 (step 6) and `app/main.ts` at 1164 (step 5 is only
-half done — the layer wiring came out, the UI wiring did not).
+`app/main.ts` at 1164 is still too big, and step 5 below says what is left in
+it. `script/walker.ts` is 1204 and that is close to done: the opcode table is
+out, and what remains is the machine — addressing, stepping, the waits, the
+branch points and the save slice — plus the three op helpers that are really
+machine (`applyWait` draws from the RNG and takes branches, `applyQueueEvent`
+jumps blocks). Moving those into `ops/` would mean publishing `rng` and
+`liveBlocks`, which is a wider seam than the line count is worth.
 
 ### What it was, and the four problems this was written against
 
@@ -300,9 +304,11 @@ Each step compiles and passes `verify_player_ops.py` on its own.
    splitter are out; it is 1164 lines and the target is under 400. What is left
    is the UI wiring (~500 lines) and the stage load (~150), and both want the
    remaining layers to be `System`s first — `drawLayers` is the seam.
-6. ☐ **`script/ops/`.** `walker.ts` keeps the machine; each op category
-   registers its own entries. `verify_player_ops.py` already checks the opcode
-   table against the docs, so this step is guarded.
+6. ✅ **`script/ops/`.** Nine modules — camera, region, lighting, scene, sound,
+   hud, spawn, flow, wait — each registering its own entries into `Walker.OPS`.
+   `verify_player_ops.py` reads them instead of the class, still finds all 65,
+   and now also refuses an opcode registered in two modules, which is the one
+   failure mode the split introduces.
 7. ☐ **`render/actors/`.** Split `characters.ts` (928 lines) five ways. The
    seams are already there — posing, damage, death, reaction — and the damage
    half belongs in `game/` once it is separated. `ResolveHit` is the last

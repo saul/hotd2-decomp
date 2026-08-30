@@ -7,7 +7,7 @@ table parallel to the interpreter's dispatch switch, and they drifted:
 ``set_skippable_region`` was marked dead after it had been wired up.
 
 That table is gone. The status now lives on the same object as the handler, in
-``Walker.OPS`` in ``web/src/walker.ts``, so the code cannot disagree with
+``Walker.OPS``, assembled from ``web/src/script/ops/``, so the code cannot disagree with
 itself. What *can* still drift is the human-readable copy in
 ``docs/PLAYER_PROGRESS.md``, and this checks that one.
 
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-WALKER = ROOT / "web" / "src" / "walker.ts"
+OPS_DIR = ROOT / "web" / "src" / "script" / "ops"
 DOC = ROOT / "docs" / "PLAYER_PROGRESS.md"
 
 #: The doc writes `**done**` for done and plain or italic text otherwise.
@@ -32,21 +32,22 @@ DOC_STATUS = re.compile(r"\*{0,2}_{0,2}(done|approx|tracked|shown|none|n/a)_{0,2
 
 
 def walker_statuses() -> dict[int, str]:
-    """`{opcode: status}` from the `Walker.OPS` table."""
-    src = WALKER.read_text()
-    try:
-        start = src.index("private static readonly OPS")
-        body = src[start:src.index("\n  /** 0x17 and 0x18 differ", start)]
-    except ValueError:
-        raise SystemExit("verify_player_ops: could not find Walker.OPS; "
-                         "the table moved and this script needs updating")
+    """`{opcode: status}` from the modules that make up `Walker.OPS`."""
     out: dict[int, str] = {}
-    for m in re.finditer(
-            r"0x([0-9a-f]{2}):\s*\{\s*(?://[^\n]*\n\s*)*"
-            r"(?:[^\n]*\n\s*)??status:\s*\"(\w+)\"", body):
-        out[int(m.group(1), 16)] = m.group(2)
-    if not out:
-        raise SystemExit("verify_player_ops: Walker.OPS parsed as empty")
+    files = sorted(p for p in OPS_DIR.glob("*.ts") if p.name != "index.ts")
+    if not files:
+        raise SystemExit(f"verify_player_ops: no op modules under {OPS_DIR}; "
+                         "the table moved and this script needs updating")
+    for path in files:
+        body = path.read_text()
+        for m in re.finditer(
+                r"0x([0-9a-f]{2}):\s*\{\s*(?://[^\n]*\n\s*)*"
+                r"(?:[^\n]*\n\s*)??status:\s*\"(\w+)\"", body):
+            op = int(m.group(1), 16)
+            if op in out:
+                raise SystemExit(f"verify_player_ops: opcode 0x{op:02X} is "
+                                 f"registered twice; the last one silently wins")
+            out[op] = m.group(2)
     return out
 
 

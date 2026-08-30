@@ -54,6 +54,7 @@ whatever this is, it is a humanoid thing.
 
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass, field
 
@@ -175,6 +176,42 @@ class Placement:
                 "motion": self.motion}
 
 
+_BAMS = math.tau / 65536.0
+
+
+def _rot(bams) -> list[list[float]]:
+    """``Rz(rz) @ Ry(ry) @ Rx(rx)`` -- the engine's order, as a 3x3."""
+    ax, ay, az = (v * _BAMS for v in bams)
+    ca, sa = math.cos(ax), math.sin(ax)
+    cb, sb = math.cos(ay), math.sin(ay)
+    cc, sc = math.cos(az), math.sin(az)
+    return [
+        [cc * cb, cc * sb * sa - sc * ca, cc * sb * ca + sc * sa],
+        [sc * cb, sc * sb * sa + cc * ca, sc * sb * ca - cc * sa],
+        [-sb,     cb * sa,                cb * ca],
+    ]
+
+
+def _to_bams(M) -> tuple[int, int, int]:
+    """Inverse of :func:`_rot`: a 3x3 back to a BAMS ``(rx, ry, rz)`` triple."""
+    sb = max(-1.0, min(1.0, -M[2][0]))
+    ay = math.asin(sb)
+    if abs(M[2][0]) < 0.999999:
+        ax = math.atan2(M[2][1], M[2][2])
+        az = math.atan2(M[1][0], M[0][0])
+    else:                                   # gimbal lock: fold into rx
+        ax = math.atan2(-M[1][2], M[1][1])
+        az = 0.0
+    return tuple(int(round(v / _BAMS)) & 0xFFFF for v in (ax, ay, az))
+
+
+def _compose(outer, inner) -> tuple[int, int, int]:
+    """The BAMS triple equivalent to applying *outer* then *inner*."""
+    A, B = _rot(outer), _rot(inner)
+    return _to_bams([[sum(A[i][k] * B[k][j] for k in range(3))
+                      for j in range(3)] for i in range(3)])
+
+
 def motion_for(tables, spawn_rec, cls: int) -> int | None:
     """The motion id a class handler starts this spawn in, or None."""
     rule = MOTION_RULES.get(cls)
@@ -219,7 +256,7 @@ def _bake(game_dir, tables, motion_id: int, bone_count: int) -> dict | None:
             "root": root, "rot": rot}
 
 
-def resolve_for_stage(stage, prog=None):
+def resolve_for_stage(stage, prog=None, pose_frame: int | None = None):
     """Characters, their placements, and glTF rig entries for the geometry.
 
     Returns ``(characters, placements, rig_entries)``:
@@ -287,7 +324,7 @@ def resolve_for_stage(stage, prog=None):
             c.motions[motion] = baked
         per_type.setdefault(res.char_type, []).append(sp)
 
-    entries = [_rig_entry(stage, tables, chars[ct], sps)
+    entries = [_rig_entry(stage, tables, chars[ct], sps, pose_frame)
                for ct, sps in sorted(per_type.items()) if ct in chars]
     return chars, placements, [e for e in entries if e]
 
@@ -309,8 +346,18 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      bones=bones)
 
 
-def _rig_entry(stage, tables, char: Character, spawns: list[dict]) -> dict | None:
-    """A `gltf.export_level` rig entry: the skeleton, placed at every spawn."""
+def _rig_entry(stage, tables, char: Character, spawns: list[dict],
+               pose_frame: int | None = None) -> dict | None:
+    """A `gltf.export_level` rig entry: the skeleton, placed at every spawn.
+
+    *pose_frame* bakes a motion frame into the parts instead of leaving them at
+    bind. The browser poses at runtime and does not want this; a still render
+    for verification does, because bind is a heap of parts and proves nothing.
+
+    The bake folds the frame's root translation into the root bones. That is
+    exact only while bone 0 carries no rotation -- it does not for every motion,
+    so a non-zero bone 0 is refused rather than approximated.
+    """
     from . import rigs as rigslib, stage as stagelib
 
     try:
@@ -319,14 +366,36 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict]) -> dict | Non
         return None
     slots = tables.asset_slots()
 
+    pose = None
+    if pose_frame is not None and char.motions:
+        mid = next(iter(char.motions))
+        m = char.motions[mid]
+        f = max(0, min(pose_frame, m["frames"] - 1))
+        n = char.bone_count
+        pose = {b: tuple(m["rot"][f * n * 3 + b * 3: f * n * 3 + b * 3 + 3])
+                for b in range(n)}
+        # Bone 0 sits between the object and the skeleton, and the rig writer
+        # has no node there, so it is composed into each root bone -- exactly,
+        # not approximated: the rotation multiplies and the root translation is
+        # carried through it.
+        root = m["root"][f * 3: f * 3 + 3]
+        R0 = _rot(pose[0])
+
     parts: list[tuple] = []
     for i, b in enumerate(char.bones):
+        offset = list(b["offset"])
+        rot = pose[b["bone"]] if pose else (0, 0, 0)
+        if pose is not None and b["parent"] is None:
+            offset = [sum(R0[i][k] * offset[k] for k in range(3)) + root[i]
+                      for i in range(3)]
+            rot = _compose(pose[0], rot)
         part = rigslib.RigPart(
             b["part"], (b["slot"],),
-            translation=tuple(b["offset"]),
-            # Bind pose. The client overwrites every bone from the motion each
-            # frame; this is only what the file loads as.
-            rotation_bams=(0, 0, 0),
+            translation=tuple(offset),
+            # Bind pose unless a frame was asked for. The client overwrites
+            # every bone from the motion each frame; this is what the file
+            # loads as.
+            rotation_bams=rot,
             parent=(char.bones[b["parent"]]["part"]
                     if b["parent"] is not None else ""),
             note=f"bone {b['bone']} of character type {char.char_type:#04x}")

@@ -3445,3 +3445,34 @@ The untested lead is the second per-bone table `FUN_004107E0` consults:
 its first word against the node's asset slot and on a match copies three words
 and a scale into the draw record. The cat is unaffected — 18 models, 18 bones,
 a clean 1:1 — so whatever this is, it is specific to the humanoid rigs.
+
+## Settling it by looking
+
+Two indirect arguments said the spawn yaw was right — the mesh extents (a posed
+`char_adv00`'s toe reaches `z = -2.47` against a heel at `+0.88`) and the
+re-run measurement (131 of 191 facing the camera). The user asked for the
+direct one: put the camera where the game puts it, pose the zombies, render.
+
+Two small tools, because neither existed:
+
+* `verify_spawn_facing.py` exports a stage with the characters **posed** rather
+  than at bind. The bundle deliberately exports bind, since the browser poses
+  at runtime, and bind is a heap of parts that proves nothing. Posing needed one
+  new thing: bone 0 sits between the object and the skeleton and the rig writer
+  has no node there, so it is composed into each root bone — the rotation
+  multiplies and the root translation is carried through it. That composition
+  goes through a BAMS `Rz·Ry·Rx` build and its exact inverse, round-tripped as
+  a check rather than assumed.
+* `blender_shot.py` renders from an eye/target given as arguments, so the caller
+  evaluates the path with `hod2lib` — the same evaluation the player uses — and
+  Blender only draws. `blender_camview.py` drives the *baked* camera animation
+  instead, which is the right check for the spline export but makes the render
+  depend on how Blender's importer binds animations; it was not binding them,
+  and the camera stayed put at every frame.
+
+At camera slot 59 frame 210, where stage 2 block 3 step 1 places two zombies:
+both face the camera, arms out. The authored yaw is right, the revert was
+right, and the half turn was mine.
+
+The same render confirms the waist gap independently — visible between chest
+and belt on both zombies — which rules the browser out of that one for good.

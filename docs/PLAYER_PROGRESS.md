@@ -273,7 +273,9 @@ them was mine and one of them was a fair reading of the data:
   shot-off damage variants rather than a missing limb. The untested lead is the
   second per-bone table `FUN_004107E0` consults, `PTR_DAT_004D032C[char_type]`,
   stride `0x14` indexed `bone − 1`, which compares its first word against the
-  node's slot. The cat is unaffected — 18 models, 18 bones, a clean 1:1.
+  node's slot. The cat is unaffected — 18 models, 18 bones, a clean 1:1. The
+  Blender render confirms it independently: the gap is visible between chest and
+  belt on both zombies, so it is in the assembly and not in the browser.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any

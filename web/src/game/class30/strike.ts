@@ -20,13 +20,13 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { AttackJson } from "../../bundle";
-import type { Actor } from "../actor";
+import { DamageZone, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ActorAdvanceTowardCamera } from "./move";
 import { ActorAbortAttackAndLeave } from "./leave";
-import { GAME_HZ, STATE_BACKOFF } from "./states";
+import { GAME_HZ, StrikeSub, ZombieState } from "./states";
 
 /**
  * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
@@ -38,7 +38,7 @@ import { GAME_HZ, STATE_BACKOFF } from "./states";
 export function ZombiePickAttack(obj: Actor, rng: Rng): number {
   const list = AttackListOf(obj);
   const picks = AttackPicksOf(obj);
-  const v = picks[rng.int(10) + (obj.zones & 7) * 10];
+  const v = picks[rng.int(10) + (obj.zones & DamageZone.All) * 10];
   if (v !== undefined && list[String(v)]) return v;
   // The pick named an entry the exporter filtered out -- those are the
   // destroyed-zone rows the game itself would read as a zero motion. Fall back
@@ -54,7 +54,7 @@ export function ZombiePickAttack(obj: Actor, rng: Rng): number {
  */
 export function ActorStrikeConnect(obj: Actor, atk: AttackJson,
                                    events?: Events): boolean {
-  if ((obj.zones & 7 & atk.cancel_mask) === atk.cancel_mask) return false;
+  if ((obj.zones & DamageZone.All & atk.cancel_mask) === atk.cancel_mask) return false;
   return PlayerTakeDamage(0, obj, atk.player_motion, events, "strike",
                           obj.attack);
 }
@@ -66,21 +66,21 @@ export function ActorStrikeConnect(obj: Actor, atk: AttackJson,
  */
 function endStrike(obj: Actor): void {
   obj.action = null;
-  obj.state = STATE_BACKOFF;
+  obj.state = ZombieState.BackOff;
   obj.sub = 0;
 }
 
 export function ZombieStateStrike(obj: Actor, eye: Vec3, dt: number, rng: Rng,
                                   events?: Events): void {
   const list = AttackListOf(obj);
-  if (obj.sub === 0) {
+  if (obj.sub === StrikeSub.Pick) {
     obj.attack = ZombiePickAttack(obj, rng);
-    obj.sub = 1;
+    obj.sub = StrikeSub.Lunge;
   }
   const atk = list[String(obj.attack)] ?? null;
   if (!atk) { ActorAbortAttackAndLeave(obj); return; }
 
-  if (obj.sub === 1) {
+  if (obj.sub === StrikeSub.Lunge) {
     if (dist2d(obj.pos, eye) > atk.distance) {
       // Still short: play the lunge and keep closing.
       if (obj.action?.motion !== atk.lunge) {
@@ -92,19 +92,16 @@ export function ZombieStateStrike(obj: Actor, eye: Vec3, dt: number, rng: Rng,
       return;
     }
     obj.action = { motion: atk.strike, t: 0, loop: false };
-    obj.sub = 2;
+    obj.sub = StrikeSub.Swinging;
     return;
   }
 
-  // Sub 2: the clip is running. `hit_frame` is in 60 Hz game frames.
+  // Swinging: the clip is running. `hit_frame` is in 60 Hz game frames.
   const m = MotionOf(obj, atk.strike);
   if (!obj.action || !m) { endStrike(obj); return; }
-  // [diverges] sub 3 is this port's "already swung" latch. The engine has a
-  // sub-state at +0x1312 and a flag word at +0x1368; which bit it latches the
-  // hit with has not been read, so the latch is kept on the struct rather than
-  // in a field of the port's own invention.
-  if (obj.sub === 2 && obj.action.t * GAME_HZ >= atk.hit_frame) {
-    obj.sub = 3;
+  if (obj.sub === StrikeSub.Swinging
+      && obj.action.t * GAME_HZ >= atk.hit_frame) {
+    obj.sub = StrikeSub.Swung;
     ActorStrikeConnect(obj, atk, events);
   }
   if (obj.action.t * m.fps >= m.frames - 1) endStrike(obj);

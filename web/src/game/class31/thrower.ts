@@ -17,7 +17,7 @@
  */
 import type { Events } from "../../core/events";
 import type { ThrowHandJson } from "../../bundle";
-import type { Actor } from "../actor";
+import { DamageZone, type Actor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { ReleaseAttackSlot, ThrowerTryClaimAttackSlot } from "../combat/permits";
 import { G } from "../globals";
@@ -25,11 +25,12 @@ import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, ThrowHandsOf } from "../tables";
 import { vec3, type Vec3 } from "../vec";
 import { GAME_HZ } from "../class30/states";
+import { ThrowSub } from "./states";
 
 /** Hands whose arm has not been shot off. `ThrowerStateThrow` refuses the rest. */
 function usableHands(obj: Actor): ThrowHandJson[] {
   return ThrowHandsOf(obj)
-    .filter((h) => (obj.zones & 7 & h.cancel_mask) !== h.cancel_mask);
+    .filter((h) => (obj.zones & DamageZone.All & h.cancel_mask) !== h.cancel_mask);
 }
 
 /**
@@ -56,7 +57,7 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
   if (!host.boneWorld(obj.at, hand.bone, from)) return;
 
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
-  obj.zones |= hand.cancel_mask & 7;
+  obj.zones |= hand.cancel_mask & DamageZone.All;
 
   const target = vec3();
   AimThrownWeapon(obj, host, eye, target);
@@ -87,7 +88,7 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
 export function ThrowerStateRearm(obj: Actor, hand: ThrowHandJson,
                                   host: GameHost): void {
   if (hand.held) host.setBoneSlot(obj.at, hand.bone, hand.held);
-  obj.zones &= ~(hand.cancel_mask & 7);
+  obj.zones &= ~(hand.cancel_mask & DamageZone.All);
 }
 
 /**
@@ -104,27 +105,27 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   }
   if (obj.attackPermit < 0) {
     if (!ThrowerTryClaimAttackSlot(obj)) return;
-    obj.sub = 0;
+    obj.sub = ThrowSub.Draw;
   }
 
   const hand = hands[Math.min(Math.max(0, obj.attack), hands.length - 1)];
-  if (obj.sub === 0) {
+  if (obj.sub === ThrowSub.Draw) {
     obj.attack = hands.indexOf(hand);
     obj.action = { motion: hand.motion, t: 0, loop: false };
-    obj.sub = 1;
+    obj.sub = ThrowSub.Winding;
     return;
   }
 
   const m = MotionOf(obj, hand.motion);
   if (!obj.action || !m) {
-    if (obj.sub === 2) ThrowerStateRearm(obj, hand, host);
+    if (obj.sub === ThrowSub.Thrown) ThrowerStateRearm(obj, hand, host);
     ReleaseAttackSlot(obj);
-    obj.sub = 0;
+    obj.sub = ThrowSub.Draw;
     obj.attack = (obj.attack + 1) % hands.length;
     return;
   }
-  if (obj.sub === 1 && obj.action.t * GAME_HZ >= hand.release_frame) {
-    obj.sub = 2;
+  if (obj.sub === ThrowSub.Winding && obj.action.t * GAME_HZ >= hand.release_frame) {
+    obj.sub = ThrowSub.Thrown;
     SpawnThrownWeapon(obj, hand, host, eye, events);
   }
 }
@@ -138,7 +139,7 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number,
 
 /** `EnemyThrowerInit` — `FUN_00449620`. */
 export function EnemyThrowerInit(obj: Actor): void {
-  obj.sub = 0;
+  obj.sub = ThrowSub.Draw;
   obj.attack = 0;
   obj.attackPermit = -1;
 }

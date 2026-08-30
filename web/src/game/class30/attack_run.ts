@@ -7,11 +7,11 @@ import type { Actor } from "../actor";
 import type { Vec3 } from "../vec";
 import { ActorAdvanceTowardCamera } from "./move";
 import { TestApproachRing } from "./ring";
-import { STATE_STRIKE } from "./states";
+import { ZombieState } from "./states";
 
 export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number): void {
   if (TestApproachRing(obj, eye).band === 1) {
-    obj.state = STATE_STRIKE;
+    obj.state = ZombieState.Strike;
     obj.sub = 0;
     obj.backoffFrames = 0;
     return;

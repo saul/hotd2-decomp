@@ -19,10 +19,10 @@ import { ActorSpawn, GameUpdate } from "../src/game/director";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { NULL_HOST } from "../src/game/host";
 import { SetGameTables } from "../src/game/tables";
-import { STATE_APPROACH, STATE_ATTACK_RUN, STATE_BACKOFF }
-  from "../src/game/class30/states";
+import { ZombieState } from "../src/game/class30/states";
+import { SpawnClass } from "../src/game/spawn_class";
 import { dist2d, vec3 } from "../src/game/vec";
-import { ResolveHit } from "../src/game/combat/resolve_hit";
+import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -45,12 +45,16 @@ const TYPE: CharacterType = {
   // for the sever cascade, which is the part that used to leave a limb
   // animating below a destroyed one.
   bones: [
-    { bone: 4, part: 4, parent: null, damage_rank: [], hit_radius: 2,
-      steps: [[0x11, 3, 3], [0x12, 4, 3], [0x13, 5, 3], [0x14, 1, 3]] },
-    { bone: 5, part: 5, parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
-    { bone: 1, part: 1, parent: null, damage_rank: [], hit_radius: 3,
-      steps: [[0x21, 0, 3]] },
-  ] as CharacterType["bones"],
+    { bone: 4, part: "r_upperarm", slot: 4, offset: [0, 0, 0], parent: null,
+      damage_rank: [], hit_radius: 2,
+      steps: [[0x11, EffectCode.Escalate, 3], [0x12, EffectCode.Escalate + 1, 3],
+              [0x13, EffectCode.Escalate + 2, 3], [0x14, EffectCode.Sever, 3]] },
+    { bone: 5, part: "r_forearm", slot: 5, offset: [0, 0, 0], parent: 0,
+      damage_rank: [], hit_radius: 2, steps: [] },
+    { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
+      damage_rank: [], hit_radius: 3,
+      steps: [[0x21, EffectCode.Last, 3]] },
+  ],
   head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977] },
   attacks: {
     "0": {
@@ -118,7 +122,7 @@ function scene(n: number, rng: Rng): Events {
   SetGameTables(CHARS);
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
   for (let i = 0; i < n; i++) {
-    const a = ActorSpawn(0x1000 + i, 0x30, 1, `zombie ${i}`);
+    const a = ActorSpawn(0x1000 + i, SpawnClass.Zombie, 1, `zombie ${i}`);
     a.visible = true;
     a.attackState = 1;
     a.hp = 10;
@@ -151,14 +155,14 @@ console.log("class 0x30, three zombies, ten seconds:");
     maxPermits = Math.max(maxPermits,
       G.g_attack_permits.filter((p) => p !== -1).length);
     for (const o of G.g_object_list) {
-      if (o.state === STATE_BACKOFF) sawBackoff = true;
+      if (o.state === ZombieState.BackOff) sawBackoff = true;
       const d = dist2d(o.pos, EYE);
       minAnywhere = Math.min(minAnywhere, d);
       // Only the lunge may come inside the ring, and only to the attack's own
       // distance; the retreat starts from wherever the swing left it. What
       // must never happen is an *approaching* actor crossing it, which is the
       // rule that keeps a zombie with no attack state out of the camera.
-      if (o.state === STATE_APPROACH || o.state === STATE_ATTACK_RUN) {
+      if (o.state === ZombieState.Approach || o.state === ZombieState.AttackRun) {
         minWalking = Math.min(minWalking, d);
       }
     }
@@ -188,8 +192,8 @@ console.log("an unread class:");
 {
   const rng = new Rng(7);
   const events = scene(0, rng);
-  // 0x53 is the cat. It has no module, so it must not move.
-  const cat = ActorSpawn(0x2000, 0x53, 1, "cat");
+  // The cat. It has no module in `g_class_handlers`, so it must not move.
+  const cat = ActorSpawn(0x2000, SpawnClass.SkinnedNpc, 1, "cat");
   cat.visible = true;
   cat.attackState = 1;
   cat.hp = 10;
@@ -207,7 +211,7 @@ console.log("a spawn whose descriptor names no attack:");
 {
   const rng = new Rng(7);
   const events = scene(1, rng);
-  const scenery = ActorSpawn(0x3000, 0x30, 1, "scenery");
+  const scenery = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "scenery");
   scenery.visible = true;
   scenery.attackState = 0;          // g_class30_states[0], the engine's no-op
   scenery.hp = 10;
@@ -309,7 +313,7 @@ console.log("determinism:");
   };
   check("two runs from the same seed agree", one() === one());
   check("every actor is back to approaching or attacking, none stuck",
-        G.g_object_list.every((o) => o.state === STATE_APPROACH
+        G.g_object_list.every((o) => o.state === ZombieState.Approach
           || o.attackPermit >= 0 || o.dead));
 }
 

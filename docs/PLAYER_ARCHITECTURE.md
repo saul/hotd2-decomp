@@ -122,6 +122,26 @@ export interface Actor {
 }
 ```
 
+**3b. Closed sets are enums, not loose numbers.** The port is a
+transcription, not a transliteration: where the exe enumerates something — a
+state table, a class id, a control code, a flag bit — TypeScript gets an
+`enum` whose *values* are the exe's own numbers and whose *members* are named
+for what the exe calls them.
+
+```ts
+export enum ZombieState {
+  /** `ZombieStateAttackRun` (`FUN_004554D0`). */
+  AttackRun = 1,
+  /** `ZombieStateStrike` (`FUN_00455A40`). */
+  Strike = 2,
+}
+```
+
+`obj.state = 4` and `case 0x53:` are how the cat ended up running the zombie's
+state machine. The rule is not "no numbers" — a radius, a rate, a frame count
+and a threshold stay named constants, because they are scalars rather than
+members of a set. It is: **if the exe would switch on it, it is an enum.**
+
 **4. Divergence is declared.** Where the port cannot follow — no collision
 meshes in the bundle, three.js quaternions instead of the matrix stack, a
 constant we never found — it is tagged and explained on the spot:
@@ -355,6 +375,11 @@ cheaply checkable because both sides are text.
   `docs/formats/spawns.md`, and report which have behaviour, which are
   deliberately inert, and which are simply unread — the drift that let 279
   non-zombie placements run the zombie's AI.
+* **Globals too.** Every `` `g_name` — `0x00…` `` citation must exist in
+  `globals.tsv` under that name, so a global renamed in Ghidra and not renamed
+  here fails rather than quietly documenting a symbol that no longer exists.
+* **Every `game/class<NN>/` has a `SpawnClass` member**, so no registry key is
+  ever a bare number, and every member has a row in `spawns.md`.
 * **The snapshot rules, which are grep-checkable too:** no `from "three"` under
   `game/`, no `Math.random(` under `game/`, and no `export let` in
   `game/globals.ts`. Each of the three is a way for state to escape the

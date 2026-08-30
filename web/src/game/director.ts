@@ -19,12 +19,13 @@ import { G } from "./globals";
 import type { GameHost } from "./host";
 import { ActorAdvanceMotion } from "./motion";
 import { g_class_handlers } from "./registry";
+import type { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 
 const GAME_HZ = 60;
 
 /** Put one actor in the pool and run its class's `Init`. */
-export function ActorSpawn(at: number, cls: number, charType: number,
+export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
                            name: string): Actor {
   const obj = makeActor(at, cls, charType, name);
   g_class_handlers[cls]?.init(obj);

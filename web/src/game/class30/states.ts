@@ -1,23 +1,54 @@
 /**
- * `g_class30_states` — the state indices class 0x30 dispatches on.
+ * `g_class30_states` (0x00592AE8) — the states class 0x30 dispatches on.
  *
- * Only the five below are ported. The others in the descriptor (10, 15, 26,
- * 30, 38) are approach variants; state 15 walks a set distance and hands to
- * state 1. An unmodelled state with no handler holds its permit for ever,
- * which is what stopped every other zombie attacking, so
- * `ActorAbortAttackAndLeave` catches them rather than a fallthrough.
+ * The 54-entry table is the class's whole behaviour; five of its states are
+ * ported. The others in the descriptor (10, 15, 26, 30, 38) are approach
+ * variants — state 15 walks a set distance and hands to state 1 — and an
+ * unmodelled state with no handler holds its permit for ever, which is what
+ * stopped every other zombie attacking. `ActorAbortAttackAndLeave` catches
+ * them rather than a fallthrough.
+ *
+ * Values are the table's own indices; the names are what the routines at those
+ * indices were named in `ghidra/annotations/functions.tsv`.
  */
-export const STATE_NOOP = 0;
-export const STATE_ATTACK_RUN = 1;
-export const STATE_STRIKE = 2;
+export enum ZombieState {
+  /** `g_class30_states[0]` — the engine's no-op. 123 of stage 2's spawns. */
+  NoOp = 0,
+  /** `ZombieStateAttackRun` (`FUN_004554D0`). */
+  AttackRun = 1,
+  /** `ZombieStateStrike` (`FUN_00455A40`). */
+  Strike = 2,
+  /**
+   * `ZombieStateBackOff` (`FUN_00455C30`). The pause between attacks. There is
+   * no cooldown timer for an ordinary zombie: `ZombieStateHoldAtRange` forces
+   * `obj+0x133C` to zero unless `obj+0x1368` bit 0 is set, so the retreat *is*
+   * the pause.
+   */
+  BackOff = 4,
+  /** `ActorAbortAttackAndLeave` (`FUN_0045D9F0`). */
+  Leave = 10,
+  /** `ZombieStateApproach` (`FUN_004579A0`). */
+  Approach = 22,
+}
+
 /**
- * `ZombieStateBackOff` — the pause between attacks. There is no cooldown
- * timer for an ordinary zombie: `ZombieStateHoldAtRange` forces `obj+0x133C`
- * to zero unless `obj+0x1368` bit 0 is set, so the retreat *is* the pause.
+ * `ZombieStateStrike`'s sub-state, at `obj+0x1312`.
+ *
+ * [diverges] `Swung` is this port's "already landed the hit" latch. The engine
+ * has both a sub-state here and a flag word at `obj+0x1368`; which bit it
+ * latches with has not been read, so the latch is kept on the struct rather
+ * than in a field of the port's own invention.
  */
-export const STATE_BACKOFF = 4;
-export const STATE_LEAVE = 10;
-export const STATE_APPROACH = 22;
+export enum StrikeSub {
+  /** Draw which attack to use. */
+  Pick = 0,
+  /** Lunge until inside the attack's own distance. */
+  Lunge = 1,
+  /** The clip is running and the hit has not landed. */
+  Swinging = 2,
+  /** The hit has landed; play the clip out. */
+  Swung = 3,
+}
 
 /** The engine's frame clock; attack hit frames are counted in it. */
 export const GAME_HZ = 60;

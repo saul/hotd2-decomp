@@ -8,7 +8,7 @@
  * ascending, so nearest first; permit holders take slots 0 and 1 and everyone
  * else 2 upward.
  */
-import { FLAG_NO_CAMERA_TRACK, type Actor } from "../actor";
+import { ActorFlag, type Actor } from "../actor";
 import { G } from "../globals";
 import { T } from "../tables";
 import { dist3d, type Vec3 } from "../vec";
@@ -22,7 +22,7 @@ export function ResetCameraEnemySlots(): void {
 /** `RegisterForCameraTracking` — `FUN_00408EC0`. */
 export function RegisterForCameraTracking(obj: Actor): boolean {
   if (obj.dead || !obj.visible) return false;
-  return (obj.flags & FLAG_NO_CAMERA_TRACK) === 0;
+  return (obj.flags & ActorFlag.NoCameraTrack) === 0;
 }
 
 /** `UpdateCameraEnemySlots` — `FUN_00408DD0`. Fill `g_enemy_slots` for the frame. */

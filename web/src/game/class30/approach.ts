@@ -15,14 +15,14 @@
  * moment the actor wins a permit**, which is how the camera comes to consider
  * only enemies that have committed.
  */
-import { FLAG_NO_CAMERA_TRACK, type Actor } from "../actor";
+import { ActorFlag, type Actor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
 import { QUEUE_CAP } from "../combat/rank";
 import { AttackListOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ActorAdvanceTowardCamera } from "./move";
 import { TestApproachRing } from "./ring";
-import { STATE_ATTACK_RUN, STATE_STRIKE } from "./states";
+import { ZombieState } from "./states";
 
 /**
  * Whether taking a permit could lead anywhere.
@@ -43,14 +43,14 @@ export function ActorCanAttack(obj: Actor): boolean {
  * mapped onto the attack run rather than left to hang.
  */
 export function ZombieAttackStateFor(obj: Actor): number {
-  return obj.attackState === STATE_STRIKE ? STATE_STRIKE : STATE_ATTACK_RUN;
+  return obj.attackState === ZombieState.Strike ? ZombieState.Strike : ZombieState.AttackRun;
 }
 
 export function ZombieStateApproach(obj: Actor, eye: Vec3, dt: number): void {
   if (obj.sub === 0) {
     const r = TestApproachRing(obj, eye);
     obj.allowance = r.allowance;
-    obj.flags |= FLAG_NO_CAMERA_TRACK;
+    obj.flags |= ActorFlag.NoCameraTrack;
     obj.sub = 1;
     return;
   }

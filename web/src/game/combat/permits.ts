@@ -5,7 +5,7 @@
  * permit index lives in `obj+0x121`, and `RegisterForCameraTracking` keys off
  * the same commitment. One byte doing two jobs is the whole trick.
  */
-import { FLAG_NO_CAMERA_TRACK, type Actor } from "../actor";
+import { ActorFlag, type Actor } from "../actor";
 import { G } from "../globals";
 
 /**
@@ -19,7 +19,7 @@ export function TryClaimAttackSlot(obj: Actor): boolean {
     if (G.g_attack_permits[i] === -1) {
       G.g_attack_permits[i] = obj.at;
       obj.attackPermit = i;                    // +0x121
-      obj.flags &= ~FLAG_NO_CAMERA_TRACK;      // the camera may now see it
+      obj.flags &= ~ActorFlag.NoCameraTrack;      // the camera may now see it
       return true;
     }
   }
@@ -43,5 +43,5 @@ export function ThrowerTryClaimAttackSlot(obj: Actor): boolean {
 export function ReleaseAttackSlot(obj: Actor): void {
   if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
   obj.attackPermit = -1;
-  obj.flags |= FLAG_NO_CAMERA_TRACK;
+  obj.flags |= ActorFlag.NoCameraTrack;
 }

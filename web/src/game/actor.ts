@@ -9,15 +9,31 @@
  * The renderer binds to an actor by `at` and owns the nodes; it holds no state
  * of its own that a snapshot would need.
  */
+import type { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 
-/** `obj+0x34` bit: excluded from `RegisterForCameraTracking`. */
-export const FLAG_NO_CAMERA_TRACK = 0x10000;
+/** `obj+0x34` — the object's flag word. Only the bits the port reads. */
+export enum ActorFlag {
+  /**
+   * Excluded from `RegisterForCameraTracking`. `ZombieStateApproach` sets it
+   * while walking and clears it the moment the actor wins a permit, which is
+   * how the camera comes to consider only enemies that have committed.
+   */
+  NoCameraTrack = 0x10000,
+}
 
-/** `obj+0x1318` — the destroyed-zone mask. */
-export const ZONE_HEAD = 1;
-export const ZONE_RIGHT_ARM = 2;
-export const ZONE_LEFT_ARM = 4;
+/**
+ * `obj+0x1318` — the destroyed-zone mask, and the same three bits an attack's
+ * `cancel_mask` names. Only three zones exist; `g_bone_damage_zone` maps every
+ * other bone to 0xFF, which the game's `& 0x1F` parks on bit 31.
+ */
+export enum DamageZone {
+  Head = 1,
+  RightArm = 2,
+  LeftArm = 4,
+  /** The whole mask. `zones & DamageZone.All` is the engine's own `& 7`. */
+  All = 7,
+}
 
 /** A motion the actor is playing at full weight. `t` is seconds. */
 export interface ActorClip { motion: number; t: number; loop: boolean }
@@ -27,7 +43,7 @@ export interface Actor {
   /** The spawn's script address. Stable, and the key the renderer binds on. */
   at: number;
   /** The spawn class — `g_class_handlers` is indexed by it. */
-  cls: number;
+  cls: SpawnClass;
   /** The character type index; `game/tables.ts` resolves the data. */
   charType: number;
   /** Display name, for the feed. Copied from the type at spawn. */
@@ -46,7 +62,7 @@ export interface Actor {
   condition: number;        // +0x130C
   state: number;            // +0x1310
   sub: number;              // +0x1312
-  /** Destroyed zones: 1 head, 2 right arm, 4 left arm. */
+  /** Destroyed zones — a mask of {@link DamageZone}. */
   zones: number;            // +0x1318
   /** The attack index the strike drew. */
   attack: number;           // +0x131A
@@ -92,7 +108,7 @@ export interface Actor {
 }
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
-export function makeActor(at: number, cls: number, charType: number,
+export function makeActor(at: number, cls: SpawnClass, charType: number,
                           name: string): Actor {
   return {
     at, cls, charType, name,

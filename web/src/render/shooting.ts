@@ -82,6 +82,7 @@ import {
 import type { CharacterLayer } from "./characters";
 import type { CombatJson } from "../bundle";
 import { G } from "../game/globals";
+import { HitResultCode } from "../game/combat/resolve_hit";
 
 /** `FUN_00404AD0` builds its segment as origin + direction * 1000. */
 const SHOT_RANGE = 1000;
@@ -110,8 +111,8 @@ export interface ShotResult {
   damage?: number;
   killed?: boolean;
   hp?: number;
-  /** `g_hit_result` — 1 swapped, 2 damaged, 3 severed, 5 no effect. */
-  result?: number;
+  /** `g_hit_result`. */
+  result?: HitResultCode;
   points: number;
 }
 
@@ -352,13 +353,13 @@ export class Shooting {
     }
     if (out.killed) points += SCORE_KILL;
     // `ResolveHit` scores nothing at all for a result-5 hit.
-    if (out.result === 5) points = 0;
+    if (out.result === HitResultCode.NoEffect) points = 0;
     this.score += points;
 
     // `ActorShotFeedback`: a result-5 hit is a ricochet, everything else is
     // blood at the bone, scaled by how bad the hit was.
     const c = this.combat;
-    if (out.result === 5) {
+    if (out.result === HitResultCode.NoEffect) {
       const ric = c?.no_effect.sound;
       if (ric) this.playSound(ric.id);
       const sp = c?.impact_sprite[String(c.no_effect.material)];
@@ -378,7 +379,7 @@ export class Shooting {
     const note = `${who} bone ${pick.bone}${out.head ? " (head)" : ""}` +
       ` −${out.damage} hp${out.killed ? ", killed" : ` → ${out.hp}`}` +
       (out.severed ? " · limb severed" : out.gore ? " · part swapped" : "") +
-      (out.result === 5 ? " · no effect (ricochet)" : "") +
+      (out.result === HitResultCode.NoEffect ? " · no effect (ricochet)" : "") +
       (out.react ? ` · stagger ${out.react}` : "") +
       (out.death !== undefined ? ` · death ${out.death}` : "") +
       `  +${points}`;

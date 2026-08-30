@@ -13,6 +13,7 @@ import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import type { Actor } from "./actor";
 import type { GameHost } from "./host";
+import { SpawnClass } from "./spawn_class";
 import type { Vec3 } from "./vec";
 import { EnemyZombieInit, EnemyZombieUpdate } from "./class30";
 import { EnemyThrowerInit, EnemyThrowerUpdate } from "./class31/thrower";
@@ -32,18 +33,17 @@ export interface ClassHandler {
   update(obj: Actor, f: ClassFrame): void;
 }
 
-export const g_class_handlers: Record<number, ClassHandler> = {
-  /** The zombie. */
-  0x30: {
+export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
+  [SpawnClass.Zombie]: {
     init: EnemyZombieInit,
     update: (o, f) => EnemyZombieUpdate(o, f.eye, f.dt, f.rng, f.events),
   },
-  /** The thrower. */
-  0x31: {
+  [SpawnClass.Thrower]: {
     init: EnemyThrowerInit,
     update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.host, f.events),
   },
 };
 
 /** The classes with a ported behaviour, for the UI and `verify_port.py`. */
-export const PORTED_CLASSES = Object.keys(g_class_handlers).map(Number);
+export const PORTED_CLASSES: SpawnClass[] =
+  Object.keys(g_class_handlers).map(Number);

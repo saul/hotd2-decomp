@@ -11,10 +11,46 @@
  */
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
-import { type Actor } from "../actor";
+import { DamageZone, type Actor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, T } from "../tables";
+
+/**
+ * `g_hit_result` (0x009A58F8) — what a shot did. The score, the impact sprite
+ * and the ricochet sound all switch on it.
+ */
+export enum HitResultCode {
+  /** Nothing: a hit on something already dead. */
+  None = 0,
+  /** Damaged, and the bone's model was swapped. */
+  Damaged = 1,
+  /** Damage only — no swap, no stumble for most character types. */
+  Plain = 2,
+  /** Severed: the bone kept its stump and everything below it came off. */
+  Severed = 3,
+  /** The sentinel. No damage, no score, and a ricochet rather than blood. */
+  NoEffect = 5,
+}
+
+/**
+ * The **control code** in a bone's effect-table step: each step reads its own
+ * entry as the slot to draw and the *next* entry as one of these.
+ *
+ * An earlier revision folded 0/1/2 to "no slot" and never read them as codes,
+ * so every hit reskinned the bone and nothing was ever severed — which is what
+ * left a forearm animating below a destroyed upper arm.
+ */
+export enum EffectCode {
+  /** Last step: damage, swap once, latch. */
+  Last = 0,
+  /** Damage, swap this bone, and remove every bone below it. */
+  Sever = 1,
+  /** Nothing at all — no damage and no score. */
+  NoEffect = 2,
+  /** Anything above `NoEffect` escalates: damage, swap, advance a step. */
+  Escalate = 3,
+}
 
 export interface HitResult {
   damage: number;
@@ -23,8 +59,7 @@ export interface HitResult {
   hp: number;
   gore: boolean;
   severed: boolean;
-  /** `g_hit_result` — 0 nothing, 1 damaged, 2 plain, 3 severed, 5 ricochet. */
-  result: number;
+  result: HitResultCode;
   death?: number;
   react?: number;
 }
@@ -75,7 +110,7 @@ function childBones(type: CharacterType, bone: number): number[] {
 function markZone(obj: Actor, bone: number): void {
   const z = T.chars?.bone_zones?.[bone];
   if (z === undefined || z > 7) return;
-  obj.zones = (obj.zones | (1 << z)) & 7;
+  obj.zones = (obj.zones | (1 << z)) & DamageZone.All;
 }
 
 /**
@@ -127,7 +162,7 @@ export function SeverBoneChildren(obj: Actor, bone: number): void {
  * a leg shot staggers for longer.
  */
 export function ActorPlayHitReaction(obj: Actor, bone: number,
-                                     result: number): number | undefined {
+                                     result: HitResultCode): number | undefined {
   const group = T.chars?.reaction_groups?.[bone];
   const type = CharacterTypeOf(obj);
   const motion = group === undefined
@@ -137,7 +172,8 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
   obj.react = {
     motion,
     t: 0,
-    blend: result === 3 ? (b?.sever ?? 20) : (b?.frames ?? 10),
+    blend: result === HitResultCode.Severed ? (b?.sever ?? 20)
+                                            : (b?.frames ?? 10),
     // `ActorSetMotion` hard-sets the leg reactions: no cross-fade.
     hard: bone >= (b?.hard_set_from_bone ?? 9),
   };
@@ -152,11 +188,13 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
  * points off a zombie's pelvis does not interrupt its walk.
  */
 export function ActorReactToHit(obj: Actor, bone: number,
-                                result: number): number | undefined {
+                                result: HitResultCode): number | undefined {
   if (bone <= 0) return undefined;
   const ct = CharacterTypeOf(obj)?.type ?? -1;
-  const reacts = result === 1 || result === 3
-    || ((result === 2 || result === 5) && (ct === 3 || ct === 0x12));
+  const reacts = result === HitResultCode.Damaged
+    || result === HitResultCode.Severed
+    || ((result === HitResultCode.Plain || result === HitResultCode.NoEffect)
+        && (ct === 3 || ct === 0x12));
   return reacts ? ActorPlayHitReaction(obj, bone, result) : undefined;
 }
 
@@ -210,52 +248,55 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   const n = obj.hits[bone] ?? 0;
   const step = b?.steps?.[n];
   const slot = step?.[0] ?? 0;
-  const code = step?.[1] ?? 0;
+  const code: EffectCode = step?.[1] ?? EffectCode.Last;
   const head = bone === type?.head_bone;
   const wasDead = obj.dead;
 
   // `damage = table + DamageRankModifier(bone)`, floored at zero.
   let damage = Math.max(0, (step?.[2] ?? 0) + DamageRankModifier(b));
 
-  let result = 0;
+  let result = HitResultCode.None;
   let gore = false;
   let severed = false;
   // The zone bit is set when the *next* code is 0 or 1 -- that is, when this
   // bone has reached its last stage.
   const swap = (): void => {
-    gore = ActorSwapDamagedPart(obj, bone, slot, code === 0 || code === 1,
-                                host) || gore;
+    const last = code === EffectCode.Last || code === EffectCode.Sever;
+    gore = ActorSwapDamagedPart(obj, bone, slot, last, host) || gore;
   };
   const sever = (): void => { severed = true; SeverBoneChildren(obj, bone); };
 
-  if (code === 0) {
+  if (code === EffectCode.Last) {
     if (slot === 2) {
-      result = 5;                                  // the sentinel: no effect
+      result = HitResultCode.NoEffect;                                  // the sentinel: no effect
     } else {
-      result = 2;
+      result = HitResultCode.Plain;
       obj.hp -= damage;
       if (bone === 1) {
         // The torso's last stage is the death wound: only on the hit that
         // takes it below one hit point.
         if (obj.hp < 1 && !obj.latched.includes(bone)) {
-          result = 3; swap(); sever(); obj.latched.push(bone);
+          result = HitResultCode.Severed;
+          swap(); sever(); obj.latched.push(bone);
         }
       } else if (!obj.latched.includes(bone) && slot !== 0) {
-        result = 1; swap();
+        result = HitResultCode.Damaged;
+        swap();
         obj.hits[bone] = n + 1;
         obj.latched.push(bone);
       }
     }
-  } else if (code === 1) {
-    result = 2;
+  } else if (code === EffectCode.Sever) {
+    result = HitResultCode.Plain;
     obj.hp -= damage;
     if (!obj.latched.includes(bone)) {
-      result = 3; swap(); sever(); obj.latched.push(bone);
+      result = HitResultCode.Severed;
+      swap(); sever(); obj.latched.push(bone);
     }
-  } else if (code === 2) {
-    result = 5;
+  } else if (code === EffectCode.NoEffect) {
+    result = HitResultCode.NoEffect;
   } else {
-    result = 1;
+    result = HitResultCode.Damaged;
     obj.hp -= damage;
     // `ResolveHit` counts the torso's real stages inline and withholds the
     // last one while the actor is alive.
@@ -266,10 +307,10 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
       obj.hits[bone] = n + 1;
     }
   }
-  if (result === 5) damage = 0;
+  if (result === HitResultCode.NoEffect) damage = 0;
 
   // A hit on something already dead scores nothing and cannot kill twice.
-  if (wasDead && result === 2) result = 0;
+  if (wasDead && result === HitResultCode.Plain) result = HitResultCode.None;
   G.g_hit_result = result;
 
   // `ZombieOnShot` only reacts while the actor is alive; the death takes over
@@ -278,7 +319,8 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   const react = survived ? ActorReactToHit(obj, bone, result) : undefined;
 
   let death: number | undefined;
-  const killed = !wasDead && obj.hp < 1 && result !== 5;
+  const killed = !wasDead && obj.hp < 1
+    && result !== HitResultCode.NoEffect;
   if (killed) {
     obj.dead = true;
     // The 1-in-4 headshot burst: `ResolveHit` swaps the head to slot 0, which

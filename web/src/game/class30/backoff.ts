@@ -16,7 +16,7 @@ import { CharacterTypeOf, MotionOf, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ActorAdvanceTowardCamera } from "./move";
 import { ApproachInnerRadius } from "./ring";
-import { GAME_HZ, STATE_APPROACH } from "./states";
+import { GAME_HZ, ZombieState } from "./states";
 
 /** `obj+0x1334 > 0xF0` — the retreat gives up after 240 frames. */
 const BACKOFF_MAX_FRAMES = 240;
@@ -39,7 +39,7 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number): void {
       || obj.backoffFrames > BACKOFF_MAX_FRAMES) {
     obj.action = null;
     ReleaseAttackSlot(obj);            // only now is the next enemy free
-    obj.state = STATE_APPROACH;
+    obj.state = ZombieState.Approach;
     obj.sub = 0;
   }
 }

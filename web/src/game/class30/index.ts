@@ -15,26 +15,24 @@ import { ZombieStateAttackRun } from "./attack_run";
 import { ZombieStateBackOff } from "./backoff";
 import { ActorAbortAttackAndLeave } from "./leave";
 import { ZombieStateStrike } from "./strike";
-import {
-  STATE_APPROACH, STATE_ATTACK_RUN, STATE_BACKOFF, STATE_STRIKE,
-} from "./states";
+import { ZombieState } from "./states";
 
 export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
                                   events?: Events): void {
   TurnActorTowardCamera(obj, eye, dt);
 
   switch (obj.state) {
-    case STATE_APPROACH:   return ZombieStateApproach(obj, eye, dt);
-    case STATE_ATTACK_RUN: return ZombieStateAttackRun(obj, eye, dt);
-    case STATE_STRIKE:     return ZombieStateStrike(obj, eye, dt, rng, events);
-    case STATE_BACKOFF:    return ZombieStateBackOff(obj, eye, dt);
+    case ZombieState.Approach:   return ZombieStateApproach(obj, eye, dt);
+    case ZombieState.AttackRun: return ZombieStateAttackRun(obj, eye, dt);
+    case ZombieState.Strike:     return ZombieStateStrike(obj, eye, dt, rng, events);
+    case ZombieState.BackOff:    return ZombieStateBackOff(obj, eye, dt);
     default:               return ActorAbortAttackAndLeave(obj);
   }
 }
 
 /** `EnemyZombieInit` — `FUN_00452DA0`. Where a fresh class-0x30 actor starts. */
 export function EnemyZombieInit(obj: Actor): void {
-  obj.state = STATE_APPROACH;
+  obj.state = ZombieState.Approach;
   obj.sub = 0;
   obj.attackPermit = -1;
   obj.rank = 99;

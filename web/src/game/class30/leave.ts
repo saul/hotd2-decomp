@@ -8,11 +8,11 @@
  */
 import type { Actor } from "../actor";
 import { ReleaseAttackSlot } from "../combat/permits";
-import { STATE_APPROACH } from "./states";
+import { ZombieState } from "./states";
 
 export function ActorAbortAttackAndLeave(obj: Actor): void {
   obj.action = null;
   ReleaseAttackSlot(obj);
-  obj.state = STATE_APPROACH;
+  obj.state = ZombieState.Approach;
   obj.sub = 0;
 }

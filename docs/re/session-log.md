@@ -6484,3 +6484,86 @@ ticked yet, and the two test actors separated along **y** instead of x.
 
 **Next actions:** class 0x51, the water enemy — stage 2 block 16 step 8 spawns
 three and they still have no module.
+
+## The wall, again: it was never the collision
+
+The report came back — `stage=2 block=16 step=3 op=13 frame=350` still walks
+through the wall after both radii were fixed, and so do some at
+`stage=4 block=2 step=8 op=20 frame=860`. It did, and the previous session's
+verification is why it was not caught: that harness invented a camera position
+and put **every** blob into `g_coli_full_set`. Neither is what happens in play.
+
+`web/tools/wall.mjs` is the harness that does not invent either. It `seek`s the
+real `Walker` to the address, so the script's own `set_collision_set_full` has
+run, and it reads the eye off the camera path the step is playing. Run at that
+address it says: the full set is **one blob**, `coli2.bin:4656` — fourteen
+quads of flat water at `y = -25` — and the ray set is empty. The building the
+zombie crosses has no collision anywhere in `coli`, and
+`EvtOpSetCollisionSetFull10` (`FUN_0045F130`) *replaces* the pending list
+rather than appending to it, so nothing from an earlier step is still active.
+**No sphere push could ever have stopped it.** Most of the walls this game
+draws are not walls the engine can feel; what keeps an enemy out of them is the
+entrance the script gave it.
+
+And that entrance was missing. `ZombieStateWalkDistance` (`FUN_00457220`),
+class 0x30 state 15, latches the `f32` at descriptor tail `+0x04`, records
+where it started at `obj+0x13C0`, and plays its run clip on the yaw the spawn
+record gave it until the 2D distance from that point reaches the latched
+value — three to thirty units. Only then does it set state 1 and turn to the
+camera. `ZombieEntryState` folded it into `AttackRun`, so all **fifty** of the
+game's state-15 spawns turned on frame one and took the straight line. All four
+spawns in the report are state 15; the user named `16/3/0 0x9DDC`, which is
+40412, walk distance 8.
+
+Two halves had to be fixed, and only one of them is in the port:
+`WALK_DISTANCE_STATES` in `tools/hod2lib/characters.py` listed class 0x31
+only, so the bundle never carried the distance at all. `verify_walk_distance.py`
+is the check that could have failed: every one of the 58 records that names
+either state reads as an **exact integer** at tail `+0x04`, and tail `+0x08`
+reads as a plausible distance in **0** of the 58 — it is the next descriptor,
+which is the adjacent-array trap stated as an assertion.
+
+Measured on the reported spawn over the same four seconds, crossings of drawn
+geometry fall from 11 to 4. The four that remain are two frames at the corner
+of the building, and they are what the engine itself does: the actor faces the
+camera, the camera is round the corner, and there is nothing in `coli` there.
+
+### What was checked before believing any of it
+
+The walk direction is the whole of the fix, so the chain was read rather than
+assumed — this is the inverted-facing trap and it has cost this project before.
+`MatrixRotateY` (`0x004A9AE0`) composes `x' = x·c + z·s`, `z' = −x·s + z·c`,
+which is exactly `ApplyRootMotion`; `VecToAngles` (`FUN_004016B0`) is
+`atan2(dx, dz)`; `TurnActorTowardCamera` (`FUN_00409ED0`) passes **actor minus
+camera**; and `verify_spawn_facing.py` already had the art half — a character
+faces `−Z` at yaw 0. Together those say an actor at yaw 0 walks along `−Z`,
+which is forward. Stage 4's three spawns are the independent case: yaw `0x8000`,
+28 units, and they walk `+Z` — straight at the camera, which is `+Z` of them.
+Both cases walk *toward* the player, which is what a scripted walk-in is for.
+
+`EnemyZombieInit` (`FUN_00452DA0`) was re-read to be sure nothing overwrites the
+spawn yaw. It does not: the `VecToAngles` call in it writes `obj+0x1320/0x1324`,
+not `obj+0x64/0x68`. Two things in it are worth recording for later, neither
+ported:
+
+* `obj+0x34 = spawn record's flags word | 1` (`ActorInitFlags`, `FUN_00408970`).
+  Bit 27 picks between `row[2]` and `row[3]` — the run variant — and 141
+  class-0x30 spawns set it. The port carries none of that word, which is the
+  `[diverges]` both `ZombieStateAttackRun` and the new state 15 now name. It is
+  not a free fix: bits 3, 8, 14 and 17 also appear in shipped records and the
+  port reads those offsets as `Hit`, `ShotImmune`, `PoseFrozen` and `Airborne`.
+* `obj+0x136C = (s16)obj+0x1316 | 0x60000000` — the class-0x30 flag word is
+  **seeded from the spawn record** too, not just from the constant the port
+  writes.
+
+### Wrong turns
+
+* The whole of the previous session's wall fix was aimed at collision. The
+  radii were genuinely missing and the fix stands, but it was not this bug, and
+  the harness that "confirmed" it had replaced both of the things that decide
+  the answer. A harness that invents its inputs cannot fail.
+* The first reading of this one was that the walk-in would route the zombie
+  around the corner. It does not — it walks it *at* the camera, which is
+  through the corner. The measurement said 4 crossings, not 0, and the
+  difference between those two numbers is the part of the report that has no
+  fix in the engine.

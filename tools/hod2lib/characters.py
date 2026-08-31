@@ -554,9 +554,17 @@ LEAP_STATES = {0x30: (24,), 0x31: (20,)}
 #: Which state index means "follow a list of waypoints" -- `ThrowerStatePathFollow`.
 PATH_STATES = {0x31: (26,)}
 
-#: `ThrowerStateWalkDistance` (class 0x31 state 18) walks until the 2D distance
-#: from where it started reaches the **float** at descriptor tail ``+0x04``.
-WALK_DISTANCE_STATES = {0x31: (18,)}
+#: `ThrowerStateWalkDistance` (class 0x31 state 18) and
+#: `ZombieStateWalkDistance` (class 0x30 state 15) both walk until the 2D
+#: distance from where they started reaches the **float** at descriptor tail
+#: ``+0x04``.
+#:
+#: Class 0x30 was missing here, and it is the commonest scripted entrance in
+#: the game after the attack run: fifty spawns, every one of them an exact
+#: integer between 3 and 30 -- which is what ``verify_walk_distance.py``
+#: checks. Without the field the port had nothing to walk and sent all fifty
+#: straight at the camera from their first frame.
+WALK_DISTANCE_STATES = {0x30: (15,), 0x31: (18,)}
 
 #: `ThrowerStateEntranceClip` (class 0x31 state 19) plays the motion named by
 #: the int at descriptor tail ``+0x04`` once and then stands.

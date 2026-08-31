@@ -372,8 +372,16 @@ export interface Actor {
   moveBand: number;
   /** `obj+0x1338` — frames since a leap landed. */
   sinceLanding: number;
-  /** `ThrowerStateWalkDistance`'s target, from the descriptor. */
+  /**
+   * `ThrowerStateWalkDistance`'s target, from the descriptor — and
+   * `ZombieStateWalkDistance`'s, which reads the same float at tail `+0x04`.
+   */
   walkDistance: number;
+  /**
+   * `obj+0x1374` — how far `ZombieStateWalkDistance` has come from
+   * `arcFrom`. The engine writes it every frame and never reads it back.
+   */
+  walkTravelled: number;    // +0x1374
   /** `ThrowerStateEntranceClip`'s one-shot clip, from the descriptor. */
   entranceMotion: number;
   /** `ThrowerStateDelayedPounce`'s clip and duration, from the descriptor. */
@@ -713,6 +721,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     moveBand: 0,
     sinceLanding: 0,
     walkDistance: 0,
+    walkTravelled: 0,
     entranceMotion: 0,
     pounce: null,
     grab: null,

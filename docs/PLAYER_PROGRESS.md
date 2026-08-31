@@ -47,6 +47,31 @@ destination, no route. The wall interaction is extraction, not avoidance: a
 sphere test each frame that shoves the actor back out. A zombie will hug a wall
 and slide along it; it will never route around one.
 
+**And the push was never what shaped that path.** The report was that the
+stage 2 block 16 step 3 zombie still walked through a wall after both radii
+were fixed, and it did. Walking the *real* script to that address — which is
+what `web/tools/wall.mjs` is for — the collision the engine has selected there
+is one blob: `coli2.bin:4656`, fourteen quads of flat water at `y = -25`. The
+building whose corner the zombie crosses has **no collision anywhere in
+`coli`**, and `EvtOpSetCollisionSetFull10` *replaces* the set rather than
+adding to it, so nothing else is active either. No sphere push could ever have
+helped.
+
+What shapes an enemy's path in this game is the **entrance the script gave
+it**, and class 0x30 state 15 — `ZombieStateWalkDistance`, the walk-in — was
+not ported at all: `ZombieEntryState` folded it into `AttackRun`. Fifty spawns
+across the game start in it, including all four the report names, and every one
+of them turned to face the camera on its first frame and took the straight line
+instead of walking three to thirty units of its own entrance first. The
+exporter never emitted the distance either — `WALK_DISTANCE_STATES` listed
+class 0x31 only. Both are fixed, and for that spawn the number of drawn-mesh
+crossings over the same four seconds falls from 11 to 4.
+
+The four that remain are two frames at the building's corner, and they are the
+engine's own: the actor faces the camera, the camera is behind the corner, and
+there is nothing in `coli` to feel. Routing around drawn geometry would be an
+addition to the game, not a fidelity fix.
+
 **`ColiTestSphereAgainstActors` is in** — the actor-versus-actor half of the
 same hook, and the last unported piece of it. It is **mutual and deferred**: an
 actor pushes itself out by a tenth of the penetration and *records* the

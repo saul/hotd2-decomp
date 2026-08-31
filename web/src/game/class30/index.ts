@@ -18,6 +18,7 @@ import { ZombieStateHoldAtRange } from "./hold";
 import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
+import { ZombieStateWalkDistance } from "./walk_distance";
 import { ZombieState } from "./states";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
@@ -58,6 +59,12 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
+
+    // The scripted walk-in. Fifty spawns across the game start here, and
+    // folding it into `AttackRun` is what had them turn to the camera on
+    // frame one and cross geometry the level never meant them to.
+    case ZombieState.WalkDistance:
+      return ZombieStateWalkDistance(obj, rng);
 
     // The two entrances that place the actor. Without them a spawn stands at
     // the y its record names — under the water at stage 2 block 16, and in
@@ -139,7 +146,7 @@ export function EnemyZombieInit(obj: Actor): void {
 /**
  * Which state to actually start in.
  *
- * [diverges] Sixteen of the 54 are ported. Every entrance state that *is*
+ * [diverges] Seventeen of the 54 are ported. Every entrance state that *is*
  * read ends by setting state 1 — `ZombieStateWalkDistance` walks its distance
  * and sets 1, the burst-out entrance plays its clip and sets 1 — so an
  * unported entrance resolves to `AttackRun` rather than being left to abort.
@@ -160,6 +167,10 @@ export function ZombieEntryState(initial: number): ZombieState {
   if (initial === ZombieState.Emerge || initial === ZombieState.DelayedLeap) {
     return initial;
   }
+  // `ZombieStateWalkDistance` *does* end by setting 1, so the fallback below
+  // reached the right final state — but only after skipping the walk-in that
+  // is the whole point of it. See `class30/walk_distance.ts`.
+  if (initial === ZombieState.WalkDistance) return initial;
   switch (initial) {
     case ZombieState.Approach:
     case ZombieState.AttackRun:

@@ -28,6 +28,7 @@ import {
 } from "../src/game/coli";
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
+import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ActorFlag, ZombieFlag2 } from "../src/game/actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot }
   from "../src/game/combat/permits";
@@ -2779,6 +2780,83 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
           b.pos.x > 2 && b.pushedBy === -1, `bx ${b.pos.x.toFixed(3)}`);
     check("so the two separate", Math.abs(a.pos.x - b.pos.x) > gap0,
           `gap ${Math.abs(a.pos.x - b.pos.x).toFixed(3)} from ${gap0}`);
+  }
+}
+
+console.log("\nclass 0x30 state 15, the scripted walk-in:");
+{
+  // `ZombieStateWalkDistance` does not move the actor -- the clip's root
+  // motion does -- so the test moves it and checks what the state makes of
+  // that. See `game/class30/walk_distance.ts`.
+  const walker = (dist: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(0x7100, SpawnClass.Zombie, 1, "walk-in", {
+      initialState: ZombieState.WalkDistance, walkDistance: dist,
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 0);
+    return z;
+  };
+
+  // **The bug this fixes.** State 15 was folded into `AttackRun`, so all
+  // fifty of the game's walk-in spawns turned to face the camera on their
+  // first frame instead of walking the entrance the level was built for.
+  check("a state-15 spawn starts in WalkDistance, not AttackRun",
+        ZombieEntryState(ZombieState.WalkDistance) === ZombieState.WalkDistance,
+        String(ZombieEntryState(ZombieState.WalkDistance)));
+
+  {
+    const z = walker(8);
+    ZombieStateWalkDistance(z, new Rng(1));
+    check("the first frame latches the distance and the start point",
+          z.targetArrive === 8 && z.arcFrom.x === 0 && z.arcFrom.z === 0
+          && z.sub === 2, `arrive ${z.targetArrive} sub ${z.sub}`);
+    check("...and it is still walking", z.state === ZombieState.WalkDistance,
+          String(z.state));
+
+    z.pos.z = -7.9;                       // just short
+    ZombieStateWalkDistance(z, new Rng(1));
+    check("short of the distance it keeps walking",
+          z.state === ZombieState.WalkDistance
+          && Math.abs(z.walkTravelled - 7.9) < 1e-4,
+          `${ZombieState[z.state]} travelled ${z.walkTravelled.toFixed(2)}`);
+
+    z.pos.z = -8.1;                       // past it
+    ZombieStateWalkDistance(z, new Rng(1));
+    check("reaching it hands to AttackRun with a fresh sub",
+          z.state === ZombieState.AttackRun && z.sub === 0,
+          `${ZombieState[z.state]}/${z.sub}`);
+    check("...and records where the walk ended",
+          z.strikeStart.z === -8.1, String(z.strikeStart.z));
+  }
+
+  // The measure is `sqrt(dx^2 + dz^2)`: an actor dropped a long way has not
+  // walked anywhere. Taking the 3D distance would end the entrance early for
+  // every spawn that falls to the floor on its first frame.
+  {
+    const z = walker(8);
+    ZombieStateWalkDistance(z, new Rng(1));
+    z.pos.y = -100;
+    ZombieStateWalkDistance(z, new Rng(1));
+    check("the distance is 2D -- falling is not walking",
+          z.state === ZombieState.WalkDistance && z.walkTravelled === 0,
+          `${ZombieState[z.state]} travelled ${z.walkTravelled}`);
+  }
+
+  // The other arm: with `obj+0x34` bit 0x20000000 the state retires the actor
+  // instead of sending it at the camera. No shipped class-0x30 spawn sets it.
+  {
+    const z = walker(4);
+    z.flags |= ActorFlag.BackingOff;
+    ZombieStateWalkDistance(z, new Rng(1));
+    z.pos.x = 5;
+    ZombieStateWalkDistance(z, new Rng(1));
+    check("the 0x20000000 arm despawns rather than attacking",
+          z.despawned && z.state === ZombieState.WalkDistance,
+          `despawned ${z.despawned} ${ZombieState[z.state]}`);
   }
 }
 

@@ -6772,3 +6772,97 @@ player is dead. The port has no such gate; it has no death.
 always spends one. That is a real divergence, left alone here rather than
 folded into an unrelated change: it is one frame per wait, and changing it
 touches every wait in the client at once.
+
+## The first zombies in stage 1 were behind a gate nobody had opened
+
+Nothing came round the first corner of stage 1. The block that ought to place
+them — block 0, step 2 — is not short of spawn opcodes, and three of them run:
+two `spawn_placed` (`09`) at the top of the step and a `spawn_obj` (`0B`) with
+four descriptors right where the zombies should be. That last one is what made
+this hard to see, because it *does* spawn four objects and they *are* placed —
+they are just class `0x20`, which has no module in the port and does nothing.
+The zombies are two instructions earlier:
+
+    000554  07 spawn_if_mode2_c   00977BC4 00977BF4 00977C24 FFFFFFFF
+    000568  03 spawn_if_mode1_c   00977BF4 00977C24 FFFFFFFF
+
+Both were unimplemented, and they are the *only* thing that places those
+zombies. Two failures had to line up: `hod2lib.evt.SPAWN_OPCODES` stopped at
+the four ungated spawn opcodes, so the bundle carried `raw` operands and no
+resolved descriptors for these; and `Walker.OPS` had no handler, so even a
+resolved descriptor would have gone nowhere.
+
+### `mode` was never a mode
+
+`FUN_00408820` (opcodes `0x01`–`0x04`) and `FUN_00408860` (`0x05`–`0x08`) are
+one routine written twice:
+
+    if (g_max_attackers == N) jmp g_evt_spawn_gated_handlers[g_evt_opcode];
+    else                      walk the operand list to its -1 and skip it;
+
+`g_evt_spawn_gated_handlers` at `0x00577650` is indexed by the **opcode
+itself** and holds `EvtOpSpawnPlaced09`, `EvtOpSpawnSimple0A`,
+`EvtOpSpawnObj0B`, `EvtOpSpawnObjC0C` — twice, at 1–4 and again at 5–8. So
+these eight opcodes are the ordinary four with a gate in front and *nothing
+else changed*: same descriptors, same allocators, same tails.
+
+`DAT_009C8E84` was already named `g_max_attackers` from the permit work. It is
+raised in `FUN_00414770` when a player enters a state whose flags carry `0x20`
+and lowered in `FUN_00414280` when one leaves, so it is the count of players
+**currently in play** — which is exactly why the permit code reads it as "how
+many enemies may attack at once". The old `spawn_if_mode1_*` name guessed at a
+difficulty or game mode; there is none. Renamed to `spawn_placed_if_1p`,
+`spawn_obj_if_1p`, `spawn_obj_if_2p` and so on, after the handler each
+forwards to and the count it needs.
+
+The two lists **overlap rather than replace**, which is the detail that decides
+what a one-player game gets. `07` lists three descriptors and `03` lists the
+last two of that same three, at `0x7F4` and `0x824`. So one player gets two
+zombies and two players get three; a reading that treated the gates as
+alternatives would have put three on screen in single player.
+
+### What it cost elsewhere
+
+Widening `SPAWN_OPCODES` is not a local change — `evt.spawns()` is what the
+asset bundler, the rig writer and four verifiers walk. Eleven more class-0x30
+captors and thirteen more captor scripts came into view, so
+`verify_captor_scripts.py`'s baselines moved from 58/86 to 69/99. Those are
+enemies the shipped scripts really do place; they had been invisible to every
+tool in the repo, not only to the player. Stage 1's bundle went from 203 to 209
+spawns.
+
+### The citation check did not reach the file this landed in
+
+`verify_port.py` only globbed `web/src/game/`, so the exe citations in
+`web/src/script/` — the whole opcode-handler half of the port — went unchecked.
+Widened to a `cited_files()` that covers both for the name and global checks,
+while the boundary and coverage checks stay on `game/`: `script/` legitimately
+touches the DOM, and the opcode handlers are not the gameplay call graph that
+coverage measures. That immediately counted two more ports and no failures,
+which says the existing citations there were already honest — but they were
+honest by luck.
+
+### Wrong turns
+
+- Wrote the two gated opcodes as one TypeScript function taking the required
+  player count as an argument. That is one TS function for two exe functions,
+  and the em-dash citation form would have failed the check the moment it
+  reached it. Split into `EvtOpSpawnIfOnePlayer` and `EvtOpSpawnIfTwoPlayers`,
+  which is what the exe has.
+- Listed `0x03/0x04/0x07/0x08` in `PARAM_OPCODES` *and* mapped through
+  `effective_spawn_opcode` in `has_params`. Two sources of truth for one
+  answer; `PARAM_OPCODES` is the set of allocators and the mapping does the
+  rest.
+- `./ghidra/run.sh export-annotations` cannot run while a Ghidra GUI holds the
+  project lock — it aborts with `LockException` and the TSVs are left alone, so
+  a `git diff` after it looks like a clean export when nothing ran. The rows
+  here were appended by a script that reproduces the exporter's format exactly
+  and is idempotent, and `verify_annotations.py` confirms them against the EXE.
+
+### Still open in stage 1
+
+`0x0A` `spawn_simple`, 10 sites. Its operands are **not** the 0x24-byte
+placement descriptor: `EvtOpSpawnSimple0A` (`0x00408990`) reads a two-word
+`{class, hp}` record and never writes a position, so whatever it makes places
+itself. Class `0x20`, 4 of them in this step alone, still has no module.
+`0x31` `goto_scene_state` runs 32 times and is inert here.

@@ -19,6 +19,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Walker, type WalkerHost } from "../src/script/walker";
+import { EvtOpSpawnIfOnePlayer, EvtOpSpawnIfTwoPlayers }
+  from "../src/script/ops/spawn";
+import { G } from "../src/game/globals";
 import type { OpJson, ScriptJson } from "../src/bundle";
 
 const ROOT = join(process.env.HOME ?? "", "hotd2-decomp", "extract", "player");
@@ -377,6 +380,56 @@ for (const stage of STAGES) {
     noSim.applyWait(gate);
     check("with no simulation the civilian gate passes instead of hanging",
           noSim.wait === null);
+  }
+}
+
+// The player-count gate on the spawn opcodes: `EvtOpSpawnIfOnePlayer`
+// (`FUN_00408820`) and `EvtOpSpawnIfTwoPlayers` (`FUN_00408860`). Stage 1's
+// opening encounter is placed by `0x07` over three class-0x30 descriptors and
+// then `0x03` over the last two of that same three, so exactly two zombies
+// arrive in a one-player game and three in a two-player one. Both opcodes were
+// unimplemented, and the two of them are the *only* thing that places those
+// zombies -- which is why nothing at all came round that corner.
+{
+  const file = join(ROOT, "stage1", "stage1.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const block = script.blocks.find((b) => b.index === 0);
+    const step = block?.steps?.find((st) => st.index === 2);
+    const gated = (step?.ops ?? []).filter((o) => o.op === 0x03 || o.op === 0x07);
+
+    check("stage 1's opening encounter is behind the player-count gate",
+          gated.length === 2 && gated[0].op === 0x07 && gated[1].op === 0x03,
+          gated.map((o) => o.name).join(", ") || "none found");
+
+    // The bundle has to carry the descriptors, or the gate has nothing to
+    // let through: `evt.SPAWN_OPCODES` stopped at the ungated four until the
+    // forward table said these were the same descriptors.
+    check("...and the bundle resolves their descriptors",
+          gated.length === 2
+          && gated[0].spawns?.length === 3 && gated[1].spawns?.length === 2,
+          `${gated[0]?.spawns?.length} then ${gated[1]?.spawns?.length}`);
+    check("...as class-0x30 zombies",
+          (gated[0]?.spawns ?? []).every((s) => s.class === 0x30));
+
+    const run = (players: number): number => {
+      const w = new Walker(script, mkHost());
+      const was = G.g_max_attackers;
+      G.g_max_attackers = players;
+      try {
+        for (const op of gated) {
+          if (op.op === 0x07) EvtOpSpawnIfTwoPlayers(w, op);
+          else EvtOpSpawnIfOnePlayer(w, op);
+        }
+      } finally { G.g_max_attackers = was; }
+      return w.spawns.filter((s) => s.class === 0x30).length;
+    };
+
+    check("one player gets the two zombies 0x03 lists", run(1) === 2,
+          `${run(1)} spawned`);
+    // Not 3 + 2: the second player adds one, it does not double the set.
+    check("two players get the three 0x07 lists, and no more", run(2) === 3,
+          `${run(2)} spawned`);
   }
 }
 

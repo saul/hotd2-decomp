@@ -457,6 +457,21 @@ each one.
 
 Things established while building it, now folded back into the format docs.
 
+- **Opcodes `01`–`08` are the spawn opcodes behind a player-count gate.**
+  `[proved]` — `EvtOpSpawnIfOnePlayer` (`0x00408820`) and
+  `EvtOpSpawnIfTwoPlayers` (`0x00408860`) test `g_max_attackers` against 1 or 2
+  and either tail-jump into `g_evt_spawn_gated_handlers` (`0x00577650`) —
+  indexed by the opcode, holding `09`/`0A`/`0B`/`0C` twice — or walk the
+  operand list to its `-1` and skip it. Same descriptors, same allocators, so
+  the old `spawn_if_mode*` naming was a guess at a difficulty setting that does
+  not exist. The lists **overlap** rather than replace: stage 1 block 0 step 2
+  gives `07` three class-0x30 descriptors and `03` the last two of that same
+  three, so a second player adds one zombie rather than swapping the set. Only
+  `03`/`04` and `07`/`08` are ever encoded, 63 sites across the six stages.
+  **This was why stage 1's first zombies never arrived** — the two opcodes that
+  place them were the only thing that places them, `hod2lib.evt` did not resolve
+  their descriptors, and the walker had no handler.
+
 - **`store_six` (`0x60`) is the arcade branch preview.** `[proved]` — three
   `(frame, slot)` camera poses indexed by `branch_choice`, from reading the
   scatter in `EvtActionStoreSixOperands60` against the gather in
@@ -1025,14 +1040,14 @@ missed. Meanings and confidence marks live in
 | Op | Name | Category | Status | Notes |
 |---|---|---|---|---|
 | `00` | `nop_stub` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
-| `01` | `spawn_if_mode1_a` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
-| `02` | `spawn_if_mode1_b` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
-| `03` | `spawn_if_mode1_c` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
-| `04` | `spawn_if_mode1_d` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
-| `05` | `spawn_if_mode2_a` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
-| `06` | `spawn_if_mode2_b` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
-| `07` | `spawn_if_mode2_c` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
-| `08` | `spawn_if_mode2_d` | spawn | shown | spawn lists gated on game mode; descriptors not resolved for these variants |
+| `01` | `spawn_placed_if_1p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it |
+| `02` | `spawn_simple_if_1p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0A`. No shipped script encodes it |
+| `03` | `spawn_obj_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0B` — 12 sites. Stage 1's first zombies are here |
+| `04` | `spawn_obj_c_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0C` — 3 sites |
+| `05` | `spawn_placed_if_2p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it |
+| `06` | `spawn_simple_if_2p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0A`. No shipped script encodes it |
+| `07` | `spawn_obj_if_2p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0B` — 45 sites; the extra enemies a second player brings |
+| `08` | `spawn_obj_c_if_2p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0C` — 3 sites |
 | `09` | `spawn_placed` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0A` | `spawn_simple` | spawn | shown | same descriptor family; not resolved to markers |
 | `0B` | `spawn_obj` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |

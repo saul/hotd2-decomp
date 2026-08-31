@@ -51,9 +51,9 @@ public class ApplyKnownTables extends GhidraScript {
 
     /* ---- evt opcode names, transcribed from all 96 handlers ---- */
     private static final String[] OPCODES = {
-        "nop_stub", "spawn_if_mode1_a", "spawn_if_mode1_b", "spawn_if_mode1_c",
-        "spawn_if_mode1_d", "spawn_if_mode2_a", "spawn_if_mode2_b", "spawn_if_mode2_c",
-        "spawn_if_mode2_d", "spawn_placed", "spawn_simple", "spawn_obj",
+        "nop_stub", "spawn_placed_if_1p", "spawn_simple_if_1p", "spawn_obj_if_1p",
+        "spawn_obj_c_if_1p", "spawn_placed_if_2p", "spawn_simple_if_2p", "spawn_obj_if_2p",
+        "spawn_obj_c_if_2p", "spawn_placed", "spawn_simple", "spawn_obj",
         "spawn_obj_c", "spawn_obj_unless_skip", "set_slot_xyz", "set_lod_ids",
         "mark_hittest_a", "mark_hittest_b", "set_lod_ids_bias", "set_stage_params",
         "set_scene_lighting", "set_g_8d4c", "set_fog_or_clear3", "cam_pair_c",

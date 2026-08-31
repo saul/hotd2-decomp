@@ -39,9 +39,9 @@ public class RecoverEventHandlers extends GhidraScript {
      * Kept in sync with OPCODES in tools/hod2lib/evt.py -- that table is the
      * authority for operand lengths; this one only supplies symbol names. */
     private static final String[] NAMES = {
-        "nop_stub", "spawn_if_mode1_a", "spawn_if_mode1_b", "spawn_if_mode1_c",
-        "spawn_if_mode1_d", "spawn_if_mode2_a", "spawn_if_mode2_b", "spawn_if_mode2_c",
-        "spawn_if_mode2_d", "spawn_placed", "spawn_simple", "spawn_obj",
+        "nop_stub", "spawn_placed_if_1p", "spawn_simple_if_1p", "spawn_obj_if_1p",
+        "spawn_obj_c_if_1p", "spawn_placed_if_2p", "spawn_simple_if_2p", "spawn_obj_if_2p",
+        "spawn_obj_c_if_2p", "spawn_placed", "spawn_simple", "spawn_obj",
         "spawn_obj_c", "spawn_obj_unless_skip", "set_slot_xyz", "set_pending_ids",
         "mark_list_a", "mark_list_b", "set_pending_ids_bias", "set_stage_params",
         "set_g_2bb4", "set_g_8d4c", "set_fog_or_clear3", "cam_pair_c",

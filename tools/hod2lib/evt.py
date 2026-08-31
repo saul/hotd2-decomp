@@ -99,14 +99,21 @@ OPCODES: dict[int, Op] = {
     # instructions across every shipped file decode with zero errors and no
     # stub opcode is ever reached.
     0x00: ("nop_stub", "bad", 0),
-    0x01: ("spawn_if_mode1_a", "list", 0),
-    0x02: ("spawn_if_mode1_b", "list", 0),
-    0x03: ("spawn_if_mode1_c", "list", 0),
-    0x04: ("spawn_if_mode1_d", "list", 0),
-    0x05: ("spawn_if_mode2_a", "list", 0),
-    0x06: ("spawn_if_mode2_b", "list", 0),
-    0x07: ("spawn_if_mode2_c", "list", 0),
-    0x08: ("spawn_if_mode2_d", "list", 0),
+    # 0x01-0x08 are 0x09/0x0A/0x0B/0x0C behind a player-count gate, and
+    # nothing else: EvtOpSpawnIfOnePlayer (0x00408820) and
+    # EvtOpSpawnIfTwoPlayers (0x00408860) test g_max_attackers against 1 or 2
+    # and either tail-jump into g_evt_spawn_gated_handlers[opcode] or walk the
+    # operand list to its -1 and skip it. Same descriptors, same allocators --
+    # so the old `spawn_if_mode*` naming was a guess at a difficulty or game
+    # mode, and the gate is really "how many players are in play".
+    0x01: ("spawn_placed_if_1p", "list", 0),
+    0x02: ("spawn_simple_if_1p", "list", 0),
+    0x03: ("spawn_obj_if_1p", "list", 0),
+    0x04: ("spawn_obj_c_if_1p", "list", 0),
+    0x05: ("spawn_placed_if_2p", "list", 0),
+    0x06: ("spawn_simple_if_2p", "list", 0),
+    0x07: ("spawn_obj_if_2p", "list", 0),
+    0x08: ("spawn_obj_c_if_2p", "list", 0),
     0x09: ("spawn_placed", "list", 0),      # FUN_004088A0 -- the spawn opcode
     0x0A: ("spawn_simple", "list", 0),      # FUN_00408990
     0x0B: ("spawn_obj", "list", 0),         # FUN_00408AA0
@@ -556,8 +563,33 @@ class EvtFile:
 SPAWN_HEADER = 0x24
 SPAWN_STRIDE_09 = 0x28
 
+#: What each player-count-gated opcode forwards to, from the table at
+#: ``g_evt_spawn_gated_handlers`` (0x00577650), which is indexed by the opcode
+#: itself. Entries 1-4 and 5-8 are the same four handlers, so 0x01-0x08 are
+#: exactly 0x09/0x0A/0x0B/0x0C with a gate in front and nothing else changed.
+GATED_SPAWN_FORWARD = {
+    0x01: 0x09, 0x02: 0x0A, 0x03: 0x0B, 0x04: 0x0C,
+    0x05: 0x09, 0x06: 0x0A, 0x07: 0x0B, 0x08: 0x0C,
+}
+
+#: How many players must be in play for a gated opcode to run at all --
+#: ``g_max_attackers``, which is the count of players currently in a live
+#: state, not a difficulty setting.
+GATED_SPAWN_PLAYERS = {op: (1 if op <= 0x04 else 2) for op in GATED_SPAWN_FORWARD}
+
+
+def effective_spawn_opcode(opcode: int) -> int:
+    """The handler *opcode* actually runs -- itself, unless it is gated."""
+    return GATED_SPAWN_FORWARD.get(opcode, opcode)
+
+
 #: Opcodes whose operands are pointers to spawn descriptors.
-SPAWN_OPCODES = (0x09, 0x0B, 0x0C, 0x0D)
+#:
+#: 0x0A and its two gated forms are absent on purpose: ``EvtOpSpawnSimple0A``
+#: takes a two-word ``{class, hp}`` record, not a 0x24-byte placement
+#: descriptor, so reading one as a descriptor yields a garbage position.
+SPAWN_OPCODES = (0x01, 0x03, 0x04, 0x05, 0x07, 0x08,
+                 0x09, 0x0B, 0x0C, 0x0D)
 
 #: Opcodes that attach the descriptor's tail to the object as a per-class
 #: parameter block. There are **three** allocators, not two:
@@ -583,6 +615,10 @@ SPAWN_OPCODES = (0x09, 0x0B, 0x0C, 0x0D)
 #: Beware: ``obj+0x1390`` is polymorphic across the codebase. ``FUN_00408770``
 #: stores a pointer to a *parent actor* there instead, for objects it spawns
 #: itself rather than from a descriptor.
+#:
+#: This is the set of *allocators*. The player-count-gated opcodes 0x03/0x04
+#: and 0x07/0x08 reach them through ``effective_spawn_opcode``, so they are
+#: not listed here and must not be tested against this tuple directly.
 PARAM_OPCODES = (0x0B, 0x0C, 0x0D)
 
 
@@ -621,7 +657,7 @@ class Spawn:
     def has_params(self) -> bool:
         """Whether this descriptor's tail reaches the object as a parameter
         block -- true only for the opcodes that write ``obj+0x1390``."""
-        return self.opcode in PARAM_OPCODES
+        return effective_spawn_opcode(self.opcode) in PARAM_OPCODES
 
     @property
     def params_offset(self) -> int:

@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 GAME = ROOT / "web" / "src" / "game"
 FUNCS = ROOT / "ghidra" / "annotations" / "functions.tsv"
 GLOBALS = ROOT / "ghidra" / "annotations" / "globals.tsv"
+SCRIPT = ROOT / "web" / "src" / "script"
 SPAWNS = ROOT / "docs" / "formats" / "spawns.md"
 
 # Two citation forms, and the difference matters.
@@ -64,11 +65,23 @@ def game_files() -> list[Path]:
     return sorted(p for p in GAME.rglob("*.ts"))
 
 
+def cited_files() -> list[Path]:
+    """Everything whose exe citations are checked.
+
+    Wider than `game_files()`: `web/src/script/` ports the event VM's opcode
+    handlers, which are exe functions like any other, and their citations went
+    unchecked while this only looked under `game/`. The boundary and coverage
+    checks stay on `game/` -- `script/` legitimately touches the DOM, and the
+    opcode handlers are not the gameplay call graph coverage is measuring.
+    """
+    return game_files() + sorted(p for p in SCRIPT.rglob("*.ts"))
+
+
 def check_names(named: dict[str, str]) -> set[str]:
     """Rule 1: one exe function, one TS function, same name."""
     ported: set[str] = set()
     unnamed: set[str] = set()
-    for path in game_files():
+    for path in cited_files():
         text = path.read_text()
         rel = path.relative_to(ROOT)
         cited: set[str] = set()
@@ -126,7 +139,7 @@ def check_globals(named: dict[str, str]) -> int:
     and the port quietly documents a symbol that no longer exists.
     """
     seen: set[str] = set()
-    for path in game_files():
+    for path in cited_files():
         rel = path.relative_to(ROOT)
         for name, addr in GLOBAL_DOC.findall(path.read_text()):
             key = addr.lower().rjust(8, "0")

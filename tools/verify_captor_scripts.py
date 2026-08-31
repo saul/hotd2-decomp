@@ -29,11 +29,16 @@ from hod2lib import script as scriptlib, stage as stagelib  # noqa: E402
 
 #: What the shipped stages hold. A change here is a change in the reading.
 #:
-#: 59 spawns reach *some* captor state; 58 reach one that takes a script. The
+#: 70 spawns reach *some* captor state; 69 reach one that takes a script. The
 #: odd one starts in `ZombieStateAwaitCivilianOrder`, which reads the
 #: civilian's own block rather than a script of its own, and attacks in state 1.
-EXPECT_SPAWNS = 58
-EXPECT_SCRIPTS = 86
+#:
+#: These were 58 and 86 while `evt.SPAWN_OPCODES` stopped at the four ungated
+#: spawn opcodes. Adding the player-count-gated 0x03/0x04/0x07/0x08 brought 11
+#: more captors and 13 more scripts into view -- enemies the shipped scripts
+#: place, and that a one- or two-player game really does get.
+EXPECT_SPAWNS = 69
+EXPECT_SCRIPTS = 99
 
 
 def main() -> int:

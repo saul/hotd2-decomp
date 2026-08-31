@@ -179,7 +179,7 @@ inference; **[open]** = undetermined.
 
 | Op | Name | Meaning |
 |---|---|---|
-| `01`–`08` | `spawn_if_mode*` | spawn lists gated on game mode |
+| `01`–`08` | `spawn_*_if_1p` / `_if_2p` | **[proved]** the four spawn opcodes behind a player-count gate and nothing else. `EvtOpSpawnIfOnePlayer` (`0x00408820`) and `EvtOpSpawnIfTwoPlayers` (`0x00408860`) test `g_max_attackers` against 1 or 2 and either tail-jump into `g_evt_spawn_gated_handlers` (`0x00577650`) — indexed by the opcode, holding `09`/`0A`/`0B`/`0C` twice — or walk the operand list to its `-1` and skip it. Same descriptors, same allocators. The two lists **overlap** rather than replace: stage 1 block 0 step 2 gives `07` three class-0x30 zombies and `03` the last two of that same three, so the second player adds one. Only `03`/`04` and `07`/`08` are ever encoded. ⚠️ the old name `spawn_if_mode*` guessed at a difficulty or game mode; the gate is the live player count |
 | `09` | `spawn_placed` | the main enemy placement opcode |
 | `0A`–`0D` | `spawn_*` | same descriptor, different object base class |
 | `0E` | `set_approach_rings` | **[proved]** `g_enemy_approach_rings[op0][0..2] = op1..op3` as **floats** — three XZ distances from the camera. 6 dwords; a 4th ring operand is read and discarded. ROM defaults `{25,38,51}` ×3 and `{37,48,51}` |

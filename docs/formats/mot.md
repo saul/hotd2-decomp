@@ -113,6 +113,29 @@ ticking once per 60 Hz frame over data authored at 30 Hz. Measured across the
 a given motion gets. Because there is no rule, the bundle **carries the exe's
 value** rather than deriving one: `BakedMotion.play`.
 
+`FUN_004111A0`, the sampler, says exactly how the clock is used and settles the
+"odd values interpolated" guess:
+
+```c
+model[2] = model[0] % (g_motion_play_length[model[8]] + 1);   /* the cursor */
+model[6] = model[2] / 2;                                      /* the frame  */
+```
+
+* `model[0]` (`obj+0x194`) is the **tick**, incremented by the owning class;
+* `model[2]` (`obj+0x19C`) is the **play cursor**, and it *wraps* at
+  `play_length + 1`, so it takes every value from 0 to the play length
+  inclusive and then returns to zero;
+* `model[6]` is the authored frame, the cursor halved — and an odd cursor
+  blends the two neighbouring frames on tracks 1 and 2, which is the
+  interpolation.
+
+Two consequences the port depends on. A class holds a clip on its last frame by
+simply **not incrementing `model[0]`** — there is no "stop" flag. And a cue
+compared for equality against the cursor comes round once per play-through
+rather than being true for ever, which is what makes a loop count cost one
+play: `CivilianUpdate` spends one only on the single frame where
+`model[2] == play_length`.
+
 Reading a cue against the authored frame count instead loses every cue past
 halfway, silently. That is what left the civilians alive under their captors:
 stage 1's four maul cues are 24, 30, 62 and 64 against clips of 41, 26, 43 and

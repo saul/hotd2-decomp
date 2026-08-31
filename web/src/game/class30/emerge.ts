@@ -46,7 +46,8 @@ function frameOf(obj: Actor): number {
 
 function atLastFrame(obj: Actor): boolean {
   const len = MotionPlayLength(obj);
-  return len > 0 && frameOf(obj) >= len - 1;
+  // Equality: the cursor wraps at `len + 1`, so `>=` covers two frames.
+  return len > 0 && frameOf(obj) === len - 1;
 }
 
 /**

@@ -320,7 +320,8 @@ export function SetPieceFrame(obj: Actor): number {
  */
 export function SetPieceAtLastFrame(obj: Actor): boolean {
   const len = MotionPlayLength(obj);
-  return len > 0 && SetPieceFrame(obj) >= len - 1;
+  // Equality: the cursor wraps at `len + 1`, so `>=` covers two frames.
+  return len > 0 && SetPieceFrame(obj) === len - 1;
 }
 
 export const SetPiecePropHandler: ClassHandler = {

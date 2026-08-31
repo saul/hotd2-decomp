@@ -126,7 +126,16 @@ export function MotionOf(a: Actor, id: number): BakedMotion | null {
  */
 export function MotionPlayFrame(a: Actor): number {
   const m = MotionOf(a, a.motion);
-  return m ? Math.floor(a.clock * m.fps * 2) : 0;
+  if (!m) return 0;
+  // `FUN_004111A0`, the sampler: `model[2] = model[0] % (play_length + 1)`.
+  // It **wraps**, and the `+ 1` is why the cursor reaches the play length
+  // itself rather than stopping one short — which is the single frame per
+  // cycle that `CivilianUpdate`'s loop arm spends a loop on. The same routine
+  // then takes `model[2] / 2` as the authored frame and blends the odd values
+  // between two, which is what the 60 Hz clock over 30 Hz data actually means.
+  const len = MotionPlayLength(a, a.motion);
+  const cursor = Math.floor(a.clock * m.fps * 2);
+  return len > 0 ? cursor % (len + 1) : cursor;
 }
 
 /**

@@ -204,7 +204,9 @@ function frameOf(obj: Actor): number {
  */
 function atLastFrame(obj: Actor): boolean {
   const len = MotionPlayLength(obj);
-  return len > 0 && frameOf(obj) >= len - 1;
+  // **Equality, because the cursor wraps.** `>=` is true for both `len - 1`
+  // and `len`, so every entry would spend two of its loops per play-through.
+  return len > 0 && frameOf(obj) === len - 1;
 }
 
 /**

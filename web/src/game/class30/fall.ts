@@ -64,7 +64,7 @@ export function ZombieStateFallToGround(obj: Actor, dt: number,
 
   // `obj+0x19C >= g_motion_play_length[motion] - 1`, both in the play clock.
   const len = MotionPlayLength(obj);
-  if (len > 0 && MotionPlayFrame(obj) >= len - 1) {
+  if (len > 0 && MotionPlayFrame(obj) === len - 1) {
     obj.state = ZombieState.AttackRun;
     obj.sub = 0;
   }

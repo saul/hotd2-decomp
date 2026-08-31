@@ -102,7 +102,8 @@ import { PlayerTakeDamageTimed } from "../combat/player";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import type { ClassFrame, ClassHandler } from "../registry";
-import { CharacterTypeOf, MotionOf, T } from "../tables";
+import { CharacterTypeOf, MotionOf, MotionPlayFrame, MotionPlayLength, T }
+  from "../tables";
 import { makeCivilianState, type CivilianState } from "./state";
 
 /**
@@ -648,12 +649,6 @@ function CivilianSetMotion(obj: Actor, motion: number, frame: number): void {
   obj.rootFrame = -1;
 }
 
-/** The clip frame this actor is on, unwrapped — the engine's `model+0x08`. */
-function MotionFrameOf(obj: Actor): number {
-  const m = MotionOf(obj, obj.motion);
-  return m ? Math.floor(obj.clock * m.fps) : 0;
-}
-
 /**
  * `CivilianStepScript` — `FUN_0048B1E0`.
  *
@@ -744,7 +739,9 @@ function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
       && !(sub.childrenGoal < sub.childCount)) return false;
   if ((word & CivilianWait.MotionLoops) && sub.loops === 0) return false;
   if ((word & CivilianWait.MotionFrame)
-      && MotionFrameOf(obj) === sub.motionCompare) return false;
+      // `*(int *)(model + 8)` is `obj+0x19C`, the **play** cursor, not the
+      // authored frame index — the same clock every other cue is counted in.
+      && MotionPlayFrame(obj) === sub.motionCompare) return false;
   if ((word & CivilianWait.Hook) && sub.hookBusy !== 0) return false;
   if (word & CivilianWait.Free) return false;
   if ((word & CivilianWait.CameraSettled)
@@ -1149,16 +1146,69 @@ function CivilianCheckRemoval(obj: Actor): void {
 }
 
 /** Op 0x00's loop counter, which wait bit 0x100 blocks on. */
-function CivilianCountMotionLoops(obj: Actor): void {
+export function CivilianCountMotionLoops(obj: Actor): void {
   const sub = obj.civ;
   if (!sub) return;
-  if (sub.loops <= 0) return;
   const m = MotionOf(obj, obj.motion);
   if (!m) return;
-  const end = sub.frameLimit !== 0 ? sub.frameLimit : m.frames;
-  if (MotionFrameOf(obj) < end) return;
-  sub.loops -= 1;
-  if (sub.loops !== 0) obj.clock = 0;
+
+  // `(short)sub+0x0C`, **signed**: negative means play for ever, and the
+  // engine's `if (0 < loops)` skips the whole arm at zero — a clip with no
+  // loops left does not advance at all.
+  const loops = sub.loops;
+  if (loops < 0) return;
+  if (loops === 0) { CivilianHoldLastFrame(obj); return; }
+
+  const cur = MotionPlayFrame(obj);
+  if (sub.frameLimit === 0) {
+    // `model[2] < g_anim_frame_counts[model[8]]` — the **play** length. The
+    // cursor wraps at `play + 1`, so this is false on exactly one frame of
+    // each play-through, which is what makes a loop cost one play rather than
+    // one frame. Reading `m.frames` here spent a loop halfway through instead.
+    if (cur < MotionPlayLength(obj)) return;
+    sub.loops -= 1;
+    if (sub.loops !== 0) return;      // more to play: keep advancing
+    CivilianHoldLastFrame(obj);
+    return;
+  }
+  // The frame-limit form: stop at `sub+0x08` rather than at the clip's end,
+  // and rewind only when the wait word asks for another loop.
+  if (cur < sub.frameLimit) return;
+  if (sub.wait & CivilianWait.MotionLoops) {
+    sub.loops -= 1;
+    if (sub.loops !== 0) {
+      obj.clock = 0;
+      obj.rootFrame = -1;
+      return;
+    }
+  }
+  CivilianHoldLastFrame(obj);
+}
+
+/**
+ * Stop the play cursor where it is.
+ *
+ * **This is what the engine does by simply not incrementing it.**
+ * `CivilianUpdate`'s loop arm advances `model+0x00` only while the loop count
+ * allows; when it runs out nothing touches the cursor again and the clip sits
+ * on its last frame for as long as the actor lives. The port's clock is
+ * advanced unconditionally by `ActorAdvanceMotion` and wrapped by the
+ * renderer, so "stop incrementing" has to be said out loud — otherwise a
+ * civilian killed in a set piece plays its dying clip over and over, which is
+ * exactly what it did.
+ *
+ * The cursor is pinned at the play length rather than at the clip's last
+ * authored frame because that is where the engine's leaves it: the increment
+ * is refused on the first frame that reaches it.
+ */
+function CivilianHoldLastFrame(obj: Actor): void {
+  const m = MotionOf(obj, obj.motion);
+  if (!m?.fps) return;
+  // The cursor is at the play length when the last loop is spent -- the one
+  // value that wraps to zero on the next tick -- so pinning the clock there
+  // is exactly the engine's "stop incrementing `model[0]`".
+  const hold = MotionPlayLength(obj) / (m.fps * 2);
+  if (obj.clock > hold) obj.clock = hold;
 }
 
 /** `sub+0x5C`, called once a frame before anything else moves the actor. */

@@ -30,7 +30,7 @@ import {
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
-import { ActorFlag, ZombieFlag2 } from "../src/game/actor";
+import { ActorFlag, ZombieFlag2, type Actor } from "../src/game/actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot }
   from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
@@ -40,8 +40,8 @@ import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ZombieScriptEnded } from "../src/game/class30/target";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
-import { CivilianAttachSet, CivilianOp, CivilianUpdate, CivilianWait,
-         PoseHookGrowAndPushOutOfWorld }
+import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
+         CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
@@ -2888,10 +2888,21 @@ console.log("\nthe clip clock the scripts count in:");
         MotionPlayLength(z) === 37 && m.frames * 2 - 2 === 38,
         `${MotionPlayLength(z)} for ${m.frames} frames`);
   // The failure this guards: a cue past the authored frame count must still
-  // be reachable, because the engine's clock reaches it.
-  z.clock = (m.frames - 0.5) / m.fps;
+  // be reachable, because the engine's cursor counts to the play length. It
+  // **wraps** there rather than running away -- `model[2] = model[0] %
+  // (play + 1)` -- so the test is that one full cycle visits every value up
+  // to the play length and then returns to zero.
+  const seen = new Set<number>();
+  for (let i = 0; i < 80; i++) {
+    z.clock = i / (m.fps * 2);
+    seen.add(MotionPlayFrame(z));
+  }
   check("a cue past the authored frame count is still reachable",
-        MotionPlayFrame(z) > m.frames, `frame ${MotionPlayFrame(z)}`);
+        seen.has(30) && seen.has(37) && m.frames === 20,
+        `${seen.size} distinct cursors for ${m.frames} frames`);
+  check("...and the cursor wraps at the play length rather than running away",
+        Math.max(...seen) === 37 && seen.size === 38,
+        `max ${Math.max(...seen)} of ${seen.size}`);
 }
 
 console.log("\nclass 0x10's body radius, and the hook that ramps it:");
@@ -2933,6 +2944,67 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   c.civ!.wait |= CivilianWait.PushOutOfWorld;
   PoseHookGrowAndPushOutOfWorld(c);
   check("with it, it is pushed out", c.pos.x < 29, c.pos.x.toFixed(2));
+}
+
+console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
+{
+  // `CivilianUpdate` advances the cursor only while the loop count allows;
+  // when it runs out nothing touches it again. The port's clock is advanced
+  // unconditionally and the renderer wraps it, so a civilian killed in a set
+  // piece played its dying clip over and over.
+  const dying = (loops: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
+    const c = ActorSpawn(0x7400, SpawnClass.Civilian, 1, "dying", undefined,
+                         new Rng(1));
+    c.visible = true;
+    c.motion = 10;                   // 20 frames, play length 37
+    c.clock = 0;
+    c.civ!.loops = loops;
+    return c;
+  };
+  const runClip = (c: Actor, frames: number) => {
+    for (let i = 0; i < frames; i++) {
+      ActorAdvanceMotion(c, 1 / 60);
+      CivilianCountMotionLoops(c);
+    }
+  };
+
+  {
+    const c = dying(1);
+    runClip(c, 200);                 // far past the clip's 37-frame play length
+    check("a one-shot clip stops at the end of its play length",
+          MotionPlayFrame(c) === 37, String(MotionPlayFrame(c)));
+    check("...and the loop count is spent", c.civ!.loops === 0,
+          String(c.civ!.loops));
+    const at = MotionPlayFrame(c);
+    runClip(c, 200);
+    check("...and it stays there rather than wrapping round again",
+          MotionPlayFrame(c) === at, String(MotionPlayFrame(c)));
+  }
+
+  // A negative count is the engine's "play for ever": the cursor keeps
+  // moving, where a spent one is pinned.
+  {
+    const c = dying(-1);
+    runClip(c, 200);
+    const a = MotionPlayFrame(c);
+    runClip(c, 1);
+    check("a negative loop count still plays for ever",
+          MotionPlayFrame(c) !== a, `${a} then ${MotionPlayFrame(c)}`);
+  }
+
+  // Two loops take twice as long to settle, and settle in the same place.
+  {
+    const c = dying(2);
+    runClip(c, 40);
+    check("a two-loop clip is still going after one play",
+          c.civ!.loops === 1, String(c.civ!.loops));
+    runClip(c, 200);
+    check("...and rests after the second", c.civ!.loops === 0
+          && MotionPlayFrame(c) === 37, String(MotionPlayFrame(c)));
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

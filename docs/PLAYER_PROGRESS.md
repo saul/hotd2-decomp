@@ -97,8 +97,25 @@ away. The bundle now carries the exe's own table as `BakedMotion.play` — it is
 and `MotionPlayFrame` / `MotionPlayLength` are the one pair of readers, so
 class 0x24's drift cue and the emerge and fall states are exact too.
 
+**And a corpse now rests.** `CivilianUpdate` advances the play cursor only
+while the loop count allows; when it runs out nothing touches it again and the
+clip sits on its last frame. The port advanced the clock unconditionally and
+the renderer wrapped it, so a civilian killed in a set piece played its dying
+animation over and over — 23 of 23 mauled civilians did. `web/tools/corpses.mjs`
+is the check, and it is 25 of 25 resting now.
+
+That needed the sampler read properly. `SkeletonAdvancePlayCursor`
+(`FUN_004111A0`) is `model[2] = model[0] % (play_length + 1)` — the cursor
+**wraps**, taking every value from 0 to the play length inclusive — and
+`model[6] = model[2] / 2` is the authored frame, with odd cursors blending two.
+Two things follow: a class holds a clip by simply not incrementing its tick,
+and a cue compared for equality comes round once per play-through, which is
+what makes a loop count cost one play rather than one frame. The last-frame
+tests are equalities again for the same reason; `>=` against a wrapping cursor
+is true on two frames of every cycle.
+
 Across the shipped corpus that takes the civilians the captors actually kill
-from **4 to 9** in fifteen seconds, and rescues from 21 to 18.
+from **4 to 10** in fifteen seconds, and rescues from 21 to 17.
 
 **A new overlay, `Wedged`**, answers the question the collision one leaves open.
 `#show-coli` says what the engine can feel; this marks in red every zombie the

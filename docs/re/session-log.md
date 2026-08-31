@@ -6650,3 +6650,60 @@ is what pointed at the radius rather than at a wall. So the port keeps
   3 — the same wrong unit the code used. Two halves of one mistake agreeing.
   The corpus check is what found it; the unit test could not have.
 
+## The corpses that would not lie still
+
+Reported straight after: a civilian killed by a zombie in a set piece replays
+its dying animation instead of resting on it. Measured over the whole corpus —
+drive every civilian *with its captors*, let the mauls finish, then watch the
+last five seconds — **23 of 23** mauled civilians were still animating.
+
+`CivilianUpdate`'s loop arm is the answer and it is four lines:
+
+    if      (loops <  0)  model[0]++;                     // for ever
+    else if (loops >  0) {
+      if (model[2] < g_anim_frame_counts[model[8]]) model[0]++;
+      else if (--loops != 0)                        model[0]++;
+    }                                                     // ...and otherwise
+                                                          // nothing at all
+
+There is no "stop" flag. When the count runs out **nothing increments the
+cursor again**, and the clip sits where it is for as long as the actor lives.
+The port advanced `obj.clock` unconditionally in `ActorAdvanceMotion` and the
+renderer wrapped it with `% frames`, so "stop incrementing" had to be said out
+loud: `CivilianHoldLastFrame` pins the clock at the play length.
+
+### The wrong turn, and what it taught
+
+The first version compared the cursor against the play length and decremented
+when it reached it — and the new unit test caught it immediately: a two-loop
+clip spent **both** loops on the first play-through. The cursor was running
+away, so every frame after the first was `>= play`.
+
+`SkeletonAdvancePlayCursor` (`FUN_004111A0`) is what settles it, and it closes
+the last `[open]` in the `g_motion_play_length` note at the same time:
+
+    model[2] = model[0] % (g_motion_play_length[model[8]] + 1);   /* cursor */
+    model[6] = model[2] / 2;                                      /* frame  */
+
+* `model[0]` (`obj+0x194`) is the tick the owning class increments;
+* `model[2]` (`obj+0x19C`) is the play cursor and it **wraps** at
+  `play_length + 1`, so it visits 0..play_length and returns to zero;
+* `model[6]` is the authored frame — the cursor halved — and an odd cursor
+  blends the two neighbouring frames on tracks 1 and 2. That is the "odd values
+  interpolated" that `mot.md` guessed at, stated by the code.
+
+So `model[2] < play_length` is false on exactly one frame of each cycle, which
+is what makes a loop cost one play. `MotionPlayFrame` wraps to match, and every
+last-frame test went back to **equality**: `>=` against a wrapping cursor is
+true on two frames of every cycle, which would spend two loops per play.
+
+Making that exact moved the corpus again on its own — mauled 9 -> 10, rescued
+18 -> 17 — because the loop counting in the maul was off by the same factor.
+
+### One corpse that is *supposed* to keep moving
+
+Stage 4's civilian `4484` still animates, and correctly: its death script is
+`{op 0, motion 606, loops -1}`, and a negative count is the engine's own "play
+for ever". `corpses.mjs` excludes negative counts by name rather than
+tolerating a failure, so the check stays able to fail.
+

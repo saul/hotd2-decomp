@@ -207,6 +207,19 @@ export class StageScene {
     return true;
   }
 
+  /**
+   * `QueryGroundSurfaceAt` — `FUN_00409D80` — the material id under a point.
+   *
+   * `[open]` The ids are per-quad fields of the `coli/` sets and the bundle
+   * carries none of them, so this reports 0 for everything: "ordinary ground".
+   * The one caller, `ThrowerStateWaitForPermit`, then sends a `zskamere` to
+   * its standing strike rather than to its perch, which is the branch it takes
+   * on every surface but `0x35`.
+   */
+  groundSurfaceAt(_x: number, _y: number, _z: number): number {
+    return 0;
+  }
+
   private readonly _ray = new Raycaster();
   private readonly _a = new Vector3();
   private readonly _b = new Vector3();

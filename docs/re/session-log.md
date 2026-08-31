@@ -5558,3 +5558,102 @@ reached early: `st1_vehicle` `0xFD` (pos -5, rot -25) and `obj_48f190` `0x17A`
    stop being swept from 0.
 2. `hidden_unless` currently has one value. `RigPart.condition` carries several
    other rules in English across the 12 rigs; each is a candidate.
+
+---
+
+## The other eighteen class-0x31 states, and a death that was never its own
+
+Followed the wall-crawler with the half of the class that was read but not
+ported: the damage chain, the death chain, the scripted entrances, and
+`zskamere`'s two standing attacks. Four agents, one per group.
+
+### The bug that was already shipping
+
+Class 0x31 was dying through **class 0x30's directional death** — clips 985 to
+992, `zom.bin`'s, which do bake for these skeletons and so played without
+complaint. The engine gives the class its own four-state chain: an arc at the
+camera, a bounce, the character's own death clip, and a corpse that sinks for
+two seconds. Nothing reported it, because a zombie falling over the wrong way
+looks like a zombie falling over.
+
+Two structural things had to change for it. `ResolveHit` now hands class 0x31 a
+**pending hit** rather than a stumble and a death clip — it keeps the shared
+damage, gore and score and gives up only the animation, which is exactly the
+split the engine has. And the director had to stop skipping dead actors: it
+`continue`d on `obj.dead`, which is right for a class whose death is a clip and
+fatal for one whose death is a state machine. A `ClassHandler.updatesWhenDead`
+opt-in was the smallest honest fix; without it the body froze in mid-air on the
+frame its hit points ran out.
+
+### Reachability turned out to be the useful question
+
+Asking "which of these can the shipped data actually reach" was worth more than
+reading any single state:
+
+* **21 and 22 are unreachable from anywhere** — not in a pick band, not written
+  by any state, not named by any descriptor. Cut content.
+* **6 is not a state.** Nothing in the program writes 6 to `obj+0x1310`;
+  `ThrowerLeave` is a subroutine that happens to occupy the slot.
+* **24 and 32 are `zskamere`'s alone**, entered only from state 8 — and state 8
+  raises `obj+0x136C` bit `0x400` on the way in, which is what makes both of
+  them resolve against `g_class31_throws` instead of the melee table. Neither
+  sets that bit itself, so reading either in isolation would have got the wrong
+  table.
+* **29 and 30 can only come from a descriptor byte, and no descriptor names
+  them.** The `ThrowerTryEnterState` cases for them are dead because no pick
+  band contains `0x1D` or `0x1E`.
+* **1, 2 and 33 are reachable only through `ThrowerOnShot`.** There is no other
+  door into the reaction chain.
+
+That left seven initial states in the shipped data — 18, 19, 20, 23, 26, **27**
+and **34** — and the last two had been doing nothing. Stage 5's four `zslman`
+grab a *named player* out of a camera-relative offset; stage 6's eight
+materialise in three blinking hops.
+
+### Four things I had wrong
+
+**`ThrowerStateBackAwayThreeUnits` is a materialisation, not a retreat.** It
+counts `obj+0x1348` **down** 3, 2, 1 and measures each hop from the origin it
+captured on entry, so it appears ninety units out and jumps in to thirty. The
+name was invented from a half-read and has been changed to
+`ThrowerStateBlinkInThreeHops`, everywhere.
+
+**`ThrowerOnShot` does not walk `g_hit_slots`.** It walks
+`g_hit_player_order` at `0x009C8908`, which is a different two-entry array —
+the player resolve order. The row said `g_hit_slots` and was wrong.
+
+**State 11's fall clips were inverted.** `(-(char != 0x17) & 0x1E9) + 0x1BC` is
+`0x3A5` for everything *but* 0x17; the annotation had it the other way round.
+
+**The per-stance idles were never baked.** They are named as literals inside
+the state routines, not through any table, so the exporter's motion collector
+never saw them — a `zstin` that reached a wall had no idle for the stance it
+arrived in and held whatever it was playing. Forty-five literal ids now go into
+the bake list, and three of them are correctly refused: they are `kame.bin`
+clips and the other three types are `szom.bin`.
+
+### The thing that made the whole class make sense
+
+Every per-set table in class 0x31 resolves to exactly **two** distinct rows,
+and the line they split on is the motion bank: 0x16, 0x18 and 0x19 are sixteen
+-bone `szom.bin` skeletons and 0x17 alone is twenty-four-bone `kame.bin`. The
+"four behaviour sets" are two skeletons and two variations of one of them. Once
+that was visible, the shared rows, the character-type branches and the one
+genuine engine bug — `ThrowerStateGetUp` plays a `szom.bin` clip with no type
+branch, and `zskamere` can reach it — all stopped looking arbitrary.
+
+Also settled: **character type 0x18 appears under two different behaviour
+sets**, set 0 in stage 5 and set 3 in stage 6. That is the clearest possible
+evidence that the set is descriptor data rather than a property of the model,
+and the docs had said "set 0 is `zstin`".
+
+### Still open
+
+The engine's `TraceActorSurfaceContactPoint` gives state 33 a wall to bounce
+off on all six axes; the port has collision only through a raycast against the
+drawn geometry, so a wall bounce settles on the frame cap instead of finding
+its surface. `ThrowerStateCloseAndStrike` has no mover at all and freezes its
+target point on entry, which means its range test can never change its answer —
+whether something else carries a `zskamere` on surface `0x35` is unread. And
+`PlaySoundId(0x2023A9)` fires on every frame of state 27's solid phase rather
+than once, which is either an audio-layer dedupe or an original bug.

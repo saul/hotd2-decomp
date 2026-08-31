@@ -5,9 +5,10 @@
  * `EnemyThrowerInit` (`FUN_00449620`) takes straight from the spawn
  * descriptor's byte +1. It is *not* the body condition: the routine that
  * derives one from the hands, `ActorBodyConditionFromHands` (`FUN_00455920`),
- * has exactly one caller and it is class 0x30's state 2. Stage 2 gives the
- * `zstin` spawns set 0 and the `zsass` spawns set 1, and set 0 is the only one
- * whose picks contain the wall and ceiling leaps — so the wall-crawler is a
+ * has exactly one caller and it is class 0x30's state 2. Set 0 is the only one
+ * whose picks contain the wall and ceiling leaps, and across the six stages it
+ * is taken by fourteen `zstin` spawns **and four `zslman` ones** — the same
+ * character type that stands and throws under set 3. So the wall-crawler is a
  * property of the descriptor, not of the model.
  *
  * The port stores that byte in `Actor.condition`, which is the same offset.
@@ -15,6 +16,7 @@
 import type { ArcStage, Class31Attack, Class31Set } from "../../bundle/characters";
 import { ThrowerFlag, ThrowerStance, type Actor } from "../actor";
 import { T } from "../tables";
+import { InstallArcMotionScript } from "./arc";
 import { ThrowerMotion } from "./states";
 
 /** The set this actor fights with. */
@@ -74,6 +76,16 @@ export function ThrowerPickState(a: Actor, band: number,
   const row = Class31SetOf(a)?.state_picks?.[String(band)] ?? [];
   if (!row.length) return undefined;
   return row[(roll % 10) + (a.zones & 7) * 10];
+}
+
+/**
+ * `ThrowerLoadAttackArcScript` — `FUN_0044B610`. Install the arc motion script
+ * of the attack the actor has drawn, against the stance it is in.
+ */
+export function ThrowerLoadAttackArcScript(obj: Actor): void {
+  obj.stance = ThrowerStanceOf(obj);
+  InstallArcMotionScript(obj,
+    ThrowerAttackOf(obj, obj.stance, obj.attack)?.script ?? null);
 }
 
 /** One of the arc scripts a *state* names rather than an attack entry. */

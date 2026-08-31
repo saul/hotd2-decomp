@@ -147,16 +147,22 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) ActorAdvanceMotion(obj, dt);
+    const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {
       // A dead or unloaded actor must not sit on a permit.
       if (obj.attackPermit >= 0) {
         G.g_attack_permits[obj.attackPermit] = -1;
         obj.attackPermit = -1;
       }
-      obj.action = null;
-      continue;
+      // ...but a class whose *death* is a state machine still has to run it.
+      // Class 0x31 falls, lands, plays its death clip and rots; stopping here
+      // left the body frozen wherever its hit points ran out.
+      if (!(obj.dead && obj.visible && handler?.updatesWhenDead)) {
+        obj.action = null;
+        continue;
+      }
     }
-    g_class_handlers[obj.cls]?.update(obj, f);
+    handler?.update(obj, f);
   }
 
   ThrownWeaponUpdate(frames, events);

@@ -107,7 +107,7 @@ function TurnTowardCameraAndTest(obj: Actor, eye: Vec3, dt: number): boolean {
  * This is the throttle: there is one permit in single player, so however many
  * throwers are on you, only one is ever coming.
  */
-export function ThrowerStateWaitForPermit(obj: Actor, rng: Rng,
+export function ThrowerStateWaitForPermit(obj: Actor, eye: Vec3, rng: Rng,
                                           host: GameHost): void {
   if (obj.sub === 0) {
     if (!ThrowerTryClaimAttackSlot(obj, host)) {
@@ -129,12 +129,30 @@ export function ThrowerStateWaitForPermit(obj: Actor, rng: Rng,
     obj.sub = 1;
   }
 
-  obj.flags2 &= ~ThrowerFlag.UseThrowTable;
   obj.sub = 0;
-  // [diverges] Character type 0x17 goes to state 0x20 or 0x18 here, neither of
-  // which is ported and neither of which any stage-2 spawn can reach.
+  // Character type 0x17 does not pounce. It splits two ways, and **it raises
+  // the throw-table bit on the way out** — which is what makes both of its
+  // attacks resolve against `g_class31_throws` rather than the melee row.
+  // Neither state sets that bit itself, so this is the only place it is set.
+  if (obj.charType === CHAR_ZSKAMERE) {
+    obj.flags2 |= ThrowerFlag.UseThrowTable;
+    // On surface 0x35, more than fifteen units above the eye, it perches and
+    // swings on the spot; otherwise it closes and strikes.
+    const surface = host.groundSurfaceAt?.(obj.pos.x, obj.pos.y + 4.5,
+                                           obj.pos.z) ?? 0;
+    obj.state = surface === PERCH_SURFACE && eye.y + PERCH_HEIGHT < obj.pos.y
+      ? ThrowerState.StrikeOnTheSpot : ThrowerState.CloseAndStrike;
+    return;
+  }
+  obj.flags2 &= ~ThrowerFlag.UseThrowTable;
   obj.state = ThrowerState.Pounce;
 }
+
+/** Character type 0x17, the only one that does not pounce. */
+const CHAR_ZSKAMERE = 0x17;
+/** The surface it perches on, and how far above the eye it must be. */
+const PERCH_SURFACE = 0x35;
+const PERCH_HEIGHT = 15;
 
 /** Is this actor far enough from the camera to be out of its face? */
 export function ThrowerIsClear(obj: Actor, eye: Vec3, clear: number): boolean {

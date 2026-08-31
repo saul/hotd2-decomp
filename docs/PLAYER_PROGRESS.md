@@ -549,6 +549,25 @@ difference between the four character types that share this machine is
 *data* — the behaviour set is a byte in the spawn descriptor, and `zsass`'s
 picks contain only the throw where `zstin`'s contain the climb.
 
+**And it now dies its own death.** Class 0x31 does not use the shared stagger
+or the shared *directional* death clip — it has a four-state chain of its own,
+and until this it was borrowing `zom.bin`'s, a different creature's animation.
+A shot is read by `ThrowerOnShot` on the actor's next tick and turns into a
+state: `zslman` is bounced along whichever axis its stance names, anything else
+standing in the hub stumbles, and anything else falls over. **A knockdown is
+survivable** — it lies there for a random half-second, gets up and carries on
+with its hit points intact — and the get-up clip plays only after a
+decapitation, because the head-model swap is the one thing that raises the bit
+that routes it there. A kill instead rides a ballistic arc *at the camera*,
+harder the nearer it already was, bounces, plays the character's own death clip
+and rots for two seconds before despawning.
+
+All thirty-five states are ported. Seven of them are entrances the shipped data
+uses, and stage 5's four `zslman` (a camera-relative grab that names which
+player it takes) and stage 6's eight (a three-hop blinking materialisation)
+were among the ones that previously did nothing at all. Two — 21 and 22 — are
+unreachable from anywhere and are ported because the state table names them.
+
 Where the wall search finds nothing, the actor simply does not climb — which is
 what the engine does when there is no wall. The player answers that search off
 the drawn geometry rather than the `coli/` sets the bundle does not carry, so

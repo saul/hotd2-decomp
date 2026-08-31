@@ -546,6 +546,32 @@ WALK_DISTANCE_STATES = {0x31: (18,)}
 #: the int at descriptor tail ``+0x04`` once and then stands.
 ENTRANCE_CLIP_STATES = {0x31: (19,)}
 
+#: `ThrowerStateWaitForCue` (class 0x31 state 28) plays the motion at tail
+#: ``+0x04`` from a random frame and waits on the condition the s16 at ``+0x08``
+#: selects -- 0 a frame count, 1 the camera path frame, 2 a script flag --
+#: against the operand at ``+0x0A``, then jumps to the state at ``+0x03``. Six
+#: shipped spawns, all in ``trnevtbl.bin``.
+CUE_STATES = {0x31: (28,)}
+
+#: `ThrowerStateLeapStrike` (class 0x31 state 22) arcs to the landing point over
+#: the s32 frame count at tail ``+0x04``. **No shipped spawn starts in it and no
+#: state can reach it**; it is exported for completeness, not for use.
+LEAP_STRIKE_STATES = {0x31: (22,)}
+
+#: `ThrowerStateGrabPlayer` (class 0x31 state 27) rides a **camera-relative**
+#: offset. Its tail is 0x18 bytes: `f32 dx, dy, dz` at ``+0x04``, the camera
+#: path frame it waits for at ``+0x10``, the frames it takes to drop at
+#: ``+0x12``, the frames it holds the grab for at ``+0x14``, and the player it
+#: grabs at ``+0x16`` -- `-1` meaning either. Stage 5 spawns four, all
+#: character type 0x18, all naming the offset (0, 0, -10).
+GRAB_STATES = {0x31: (27,)}
+
+#: `ThrowerStateBlinkInThreeHops` (class 0x31 state 34) holds its stance's
+#: idle for the frame count at tail ``+0x04`` and then jumps to the state named
+#: by the signed byte at tail ``+0x03``, which `Placement.attack_state` already
+#: carries. Stage 6 spawns eight, all character 0x18, all naming state 7.
+BACK_AWAY_STATES = {0x31: (34,)}
+
 #: `ThrowerStateDelayedPounce` (class 0x31 state 23) plays the motion at tail
 #: ``+0x04`` for the frame count at ``+0x08``, then leaps at the camera over
 #: that same count. The int at ``+0x0C`` is in the record and is `[open]` --
@@ -610,6 +636,17 @@ class Placement:
     #: `ThrowerStateDelayedPounce`'s ``{motion, frames}`` -- see
     #: :data:`POUNCE_STATES`.
     pounce: dict | None = None
+    #: `ThrowerStateGrabPlayer`'s ``{offset, cue_frame, drop_frames,
+    #: hold_frames, player}`` -- see :data:`GRAB_STATES`.
+    grab: dict | None = None
+    #: `ThrowerStateBlinkInThreeHops`' hold, in frames -- see
+    #: :data:`BACK_AWAY_STATES`.
+    back_away_delay: int | None = None
+    #: `ThrowerStateWaitForCue`'s ``{motion, cond, operand}`` -- see
+    #: :data:`CUE_STATES`.
+    cue: dict | None = None
+    #: `ThrowerStateLeapStrike`'s arc duration -- see :data:`LEAP_STRIKE_STATES`.
+    leap_strike_frames: int | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -636,6 +673,14 @@ class Placement:
             d["entrance_motion"] = self.entrance_motion
         if self.pounce:
             d["pounce"] = self.pounce
+        if self.grab:
+            d["grab"] = self.grab
+        if self.back_away_delay is not None:
+            d["back_away_delay"] = self.back_away_delay
+        if self.cue:
+            d["cue"] = self.cue
+        if self.leap_strike_frames is not None:
+            d["leap_strike_frames"] = self.leap_strike_frames
         if self.intro:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
         return d
@@ -880,12 +925,39 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             m, n = rec.param(4, "i32"), rec.param(8, "i32")
             if m is not None and 0 < m < 4096 and n is not None and 0 < n < 3600:
                 pounce = {"motion": m, "frames": n}
+        grab = None
+        if tail[1] in GRAB_STATES.get(sp["class"], ()):
+            off = [rec.param(o, "f32") for o in (4, 8, 0xC)]
+            cue, drop, hold = (rec.param(0x10, "i16"), rec.param(0x12, "i16"),
+                               rec.param(0x14, "i16"))
+            if (all(v is not None and math.isfinite(v) for v in off)
+                    and cue is not None and drop and hold):
+                grab = {"offset": off, "cue_frame": cue, "drop_frames": drop,
+                        "hold_frames": hold,
+                        "player": rec.param(0x16, "i8") or 0}
+        back_away_delay = None
+        if tail[1] in BACK_AWAY_STATES.get(sp["class"], ()):
+            n = rec.param(4, "i32")
+            if n is not None and 0 <= n < 3600:
+                back_away_delay = n
+        cue = None
+        if tail[1] in CUE_STATES.get(sp["class"], ()):
+            m, cond, arg = (rec.param(4, "i32"), rec.param(8, "i16"),
+                            rec.param(0xA, "i16"))
+            if m is not None and 0 < m < 4096 and cond is not None:
+                cue = {"motion": m, "cond": cond, "operand": arg or 0}
+        leap_strike_frames = None
+        if tail[1] in LEAP_STRIKE_STATES.get(sp["class"], ()):
+            n = rec.param(4, "i32")
+            if n is not None and 0 < n < 3600:
+                leap_strike_frames = n
         placements.append(Placement(
             at, sp["class"], res.char_type, motion, sp, intro,
             body_condition=tail[0], initial_state=tail[1],
             attack_state=tail[2], leap=leap, path=path,
             walk_distance=walk_distance, entrance_motion=entrance_motion,
-            pounce=pounce,
+            pounce=pounce, grab=grab, back_away_delay=back_away_delay,
+            cue=cue, leap_strike_frames=leap_strike_frames,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
             hp=sp.get("hp", 0)))
         if motion is None:
@@ -931,7 +1003,9 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         entry_clips = [p.entrance_motion for p in placements
                        if p.at == at and p.entrance_motion] \
                     + [p.pounce["motion"] for p in placements
-                       if p.at == at and p.pounce]
+                       if p.at == at and p.pounce] \
+                    + [p.cue["motion"] for p in placements
+                       if p.at == at and p.cue]
         if sp["class"] == 0x31:
             entry_clips += class31_motion_ids(class31)
         for mid in ([motion, intro[0] if intro else None]
@@ -1719,6 +1793,13 @@ CLASS31_ATTACKS_PER_STANCE = 4
 #: :data:`ATTACK_PICK_TABLE`, read a byte at a time out of an int array.
 CLASS31_ATTACK_PICKS = 0x00592A20
 
+#: The same address as :data:`THROW_TABLE`, under the name the *melee* reader
+#: uses. `ThrowerStateCloseAndStrike` (class 0x31 state 24) indexes it by
+#: ``obj+0x131A`` and reads all four fields; `ThrowerStateThrow` reads entries 0
+#: and 1 as the right and left hand. Eight entries a row.
+CLASS31_THROW_TABLE = THROW_TABLE
+CLASS31_THROW_ENTRIES = 8
+
 #: ``PTR_PTR_00592A60[set]`` -> three band pointers, each to 80 ints laid out
 #: ``[destroyed zones 0..7][10]``. `ThrowerPickNextState` draws a **state id**
 #: out of it and offers it to `ThrowerTryEnterState`. Band 0 is never reached:
@@ -1729,6 +1810,21 @@ CLASS31_PICKS = ATTACK_PICK_PER_ZONE * ATTACK_ZONE_COMBOS
 
 #: ``PTR_DAT_00592A70[set][g_react_group[bone]]`` -- the stumble, eight groups.
 CLASS31_REACTIONS = 0x00592A70
+
+#: The pose frame a class-0x31 corpse freezes on, keyed by the clip it died in.
+#: `ThrowerStateCorpseSink` and `ThrowerStateCorpseBlink` pick between the two
+#: entries with ``rand() % 17 >> 4``, so the second comes up once in seventeen.
+#:
+#: The general table at `g_class31_corpse_frames` (0x00592A80) covers motions
+#: 0x3D9..0x3E0, and **class 0x31 never plays one of those** -- every use of it
+#: reads outside the array. Only these four special cases are real, so only
+#: these are exported and the port keeps the current frame otherwise.
+CLASS31_CORPSE_FRAMES = {
+    0x11E: 0x00592AD8,      # character 0x16's death clip
+    0x11D: 0x00592AD0,      # ...0x18's and 0x19's
+    0x1BC: 0x00592AC8,      # ...0x17's
+    0x3A6: 0x00592AC0,      # the airborne clip of sets 0 and 3
+}
 
 #: A three-stage arc motion script, the 12 dwords `InstallArcMotionScript`
 #: (`FUN_0044DA60`) copies into the actor's slot: ``{s32 motion, s32 start
@@ -1753,6 +1849,41 @@ CLASS31_ARC_SCRIPTS = {
 }
 #: `ThrowerStateLeapAside`'s character-0x18 block is one script per stance.
 CLASS31_ARC_SCRIPT_BYTES = ARC_SCRIPT_STAGES * 4 * 4
+
+
+#: The motion ids class 0x31's states name as **literals** rather than through
+#: a table, so nothing collects them from the data. Every one is read out of the
+#: routine beside it; `_bake` refuses a clip that belongs to another skeleton,
+#: so the whole list is offered to every class-0x31 character rather than
+#: filtered here.
+#:
+#: Leaving these out is not a subtle failure: a `zstin` that leaps onto a wall
+#: has no idle for the stance it arrives in, so `ThrowerSetMotionIfIdle`
+#: refuses the clip and it holds whatever it was playing.
+CLASS31_LITERAL_MOTIONS = {
+    # `ThrowerStateStandAndDecide` (state 7): the idle per stance, and
+    # character type 0x18's own three.
+    0x138, 0x137, 0x131, 0x20F, 0x20C, 0x212,
+    # `ThrowerStateWaitForPermit` (state 8), the same shape plus its default.
+    0x129, 0x124, 0x134, 0x127, 0x208, 0x1FD, 0x1F3, 0x205,
+    # `ThrowerStateLeapAside` (state 10), character 0x18's four.
+    0x211, 0x20E, 0x214, 0x20B,
+    # `ThrowerStateFallToSurface` (state 11): the fall and the two landings.
+    # Each is a pair `(-(char != 0x17) & delta) + base`, so 0x3A5/0x3A9 for
+    # every type but 0x17 and 0x1BC/0x1BA for that one -- and 0x1BC and 0x1BA
+    # are bank 20, `zskamere`'s own, so `_bake` rightly refuses them elsewhere.
+    0x1BC, 0x3A5, 0x1BA, 0x3A9,
+    # State 3, the death clip, per character type.
+    0x11E, 0x11D,
+    # `ThrowerStateStrikeOnTheSpot` (state 32).
+    0x1B8,
+    # `ThrowerStateGrabPlayer` (state 27): the ride, the two grabs, the finish.
+    0x1E9, 0x1E5, 0x1E7, 0x1E8,
+    # `ThrowerStateKnockedTumbling` (state 33): the tumble and the get-up.
+    0x215, 0x1FE, 0x1F4, 0x206, 0x216, 0x1FF, 0x1F5, 0x207,
+    # `ThrowerStateThrow`'s character-0x18 branch.
+    0x1F7, 0x1F6, 0x1FC, 0x1FB, 0x1F2, 0x1F1, 0x204, 0x203,
+}
 
 
 def _next_block(tables, base: int, count: int, after: int,
@@ -1834,6 +1965,32 @@ def class31_tables(tables) -> dict:
                         "script": script, "hit_frame": hit,
                         "player_motion": hurt, "cancel_mask": mask & 0xFFFF}
         row["attacks"] = attacks
+        # `g_class31_throws` in the raw, per set. `throw_tables` reads the same
+        # two rows for the projectile, keyed by the hand; `ThrowerStateCloseAndStrike`
+        # reads them as a **melee** attack -- strike clip, approach clip, the
+        # distance it closes to, and the frame the hit lands on.
+        ptr_throw = _ptr_row(tables, CLASS31_THROW_TABLE, i) or 0
+        o = tables._v2r(ptr_throw)
+        strikes: dict[str, dict] = {}
+        if o is not None:
+            n = min(CLASS31_THROW_ENTRIES,
+                    (_next_block(tables, CLASS31_THROW_TABLE, CLASS31_SETS,
+                                 CLASS31_ATTACK_TABLE, ptr_throw) - ptr_throw)
+                    // ATTACK_ENTRY)
+            for k in range(max(0, n)):
+                a = o + k * ATTACK_ENTRY
+                if a + ATTACK_ENTRY > len(tables.data):
+                    break
+                strike, lunge = struct.unpack_from("<2h", tables.data, a)
+                dist, = struct.unpack_from("<f", tables.data, a + 4)
+                hit, hurt, mask = struct.unpack_from("<3h", tables.data, a + 8)
+                if strike <= 0:
+                    continue
+                strikes[str(k)] = {"strike": strike, "lunge": lunge,
+                                   "distance": dist, "hit_frame": hit,
+                                   "player_motion": hurt,
+                                   "cancel_mask": mask & 0xFFFF}
+        row["strikes"] = strikes
         o = tables._v2r(_ptr_row(tables, CLASS31_ATTACK_PICKS, i) or 0)
         row["attack_picks"] = (
             list(struct.unpack_from(f"<{CLASS31_PICKS}i", tables.data, o))
@@ -1858,6 +2015,12 @@ def class31_tables(tables) -> dict:
             else [])
         sets.append(row)
 
+    corpse = {}
+    for motion, addr in CLASS31_CORPSE_FRAMES.items():
+        o = tables._v2r(addr)
+        if o is not None and o + 8 <= len(tables.data):
+            corpse[str(motion)] = list(struct.unpack_from("<2i", tables.data, o))
+
     scripts = {k: _arc_script(tables, a)
                for k, a in CLASS31_ARC_SCRIPTS.items() if k != "aside_zslman"}
     # Character 0x18's is four scripts, one per surface stance, so it goes in
@@ -1866,7 +2029,8 @@ def class31_tables(tables) -> dict:
         scripts[f"aside_zslman_{st}"] = _arc_script(
             tables, CLASS31_ARC_SCRIPTS["aside_zslman"]
             + st * CLASS31_ARC_SCRIPT_BYTES)
-    return {"sets": sets, "scripts": {k: v for k, v in scripts.items() if v},
+    return {"sets": sets, "corpse_frames": corpse,
+            "scripts": {k: v for k, v in scripts.items() if v},
             "note": (
                 "Class 0x31's behaviour, four sets deep, indexed by the "
                 "descriptor tail's byte +1 (obj+0x130C). Set 0 is zstin, "
@@ -1879,12 +2043,15 @@ def class31_motion_ids(block: dict) -> list[int]:
     for row in block.get("sets", []):
         out += [m for m in row.get("motions", []) if 0 < m < 4096]
         out += [m for m in row.get("reactions", []) if 0 < m < 4096]
+        for e in row.get("strikes", {}).values():
+            out += [e["strike"], e["lunge"]]
         for stance in row.get("attacks", {}).values():
             for e in stance.values():
                 out += [st["motion"] for st in e["script"]]
     for script in block.get("scripts", {}).values():
         if script:
             out += [st["motion"] for st in script]
+    out += sorted(CLASS31_LITERAL_MOTIONS)
     return sorted({m for m in out if 0 < m < 4096})
 
 

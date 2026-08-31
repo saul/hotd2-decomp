@@ -1660,6 +1660,10 @@ const TYPE31: CharacterType = {
     "303": motion(34), "302": motion(36), "284": motion(25),
     "298": motion(30), "299": motion(30),
     "290": motion(23), "291": motion(23), "309": motion(46), "282": motion(41),
+    // The reaction row, the airborne clip, the get-up and the death clip.
+    "929": motion(20), "930": motion(20), "931": motion(20), "934": motion(50),
+    "935": motion(20), "938": motion(20), "939": motion(20),
+    "283b": motion(1), "285": motion(50), "287": motion(29),
   },
 };
 
@@ -1689,8 +1693,11 @@ const CLASS31 = {
       "1": [14, 14, 14, 15, 15, 15, 16, 16, 16, 12, ...new Array(70).fill(14)],
       "2": [7, 7, 7, 7, 7, 7, 7, 7, 7, 13, ...new Array(70).fill(7)],
     },
-    reactions: [],
+    // `g_class31_hit_reactions` row A, the `szom.bin` one sets 0, 1 and 3 share.
+    reactions: [0x3a7, 0x3a3, 0x3a7, 0x3aa, 0x3ab, 0x3a7, 0x3a2, 0x3a1],
   }],
+  // The pose a corpse freezes on, by the clip it died in.
+  corpse_frames: { "286": [74, 70], "285": [48, 40], "934": [44, 35] },
   scripts: {
     wall_left: ARC(290), wall_right: ARC(291), ceiling: ARC(309),
     aside: ARC(282), aside_attack3: ARC(282), aside_zsass: ARC(282),
@@ -1877,6 +1884,120 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   ThrowerStrikeConnect(z, events);
   check("but an attack whose zone has been shot off whiffs", hits === before,
         `${hits} vs ${before}`);
+}
+
+
+// -- 13. class 0x31's own damage and death ----------------------------------
+
+console.log("class 0x31, the stumble and the death chain:");
+{
+  const rng = new Rng(21);
+  const events = new Events();
+  const z = thrower(ThrowerState.StandAndDecide);
+  z.pos = vec3(0, 0, 45);
+  z.hp = 100;
+
+  // `ResolveHit` hands class 0x31 a *pending hit* instead of the shared
+  // stagger and the shared directional death: the class picks its own.
+  ResolveHit(z, 4, 0, CAM_HOST, rng);
+  check("a shot leaves a pending hit rather than a stumble clip",
+        !!z.pendingHit && z.react === null, `${JSON.stringify(z.pendingHit)}`);
+  GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("...which the next tick turns into its own state",
+        z.state === ThrowerState.HitReaction
+        || z.state === ThrowerState.FallAndLand, `state ${z.state}`);
+  check("and the pending hit is drained", z.pendingHit === null);
+
+  // Now kill it, and watch the whole chain rather than a death clip.
+  z.state = ThrowerState.StandAndDecide;
+  z.sub = 0;
+  z.flags = 0;
+  z.flags2 = 0;
+  z.hp = 1;
+  ResolveHit(z, 1, 0, CAM_HOST, rng);
+  check("the kill sets no directional death clip", z.death === null,
+        `${JSON.stringify(z.death)}`);
+  GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("it falls instead", z.state === ThrowerState.FallAndLand,
+        `state ${z.state}`);
+
+  const seen = new Set<number>();
+  for (let i = 0; i < 1200 && z.visible; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    seen.add(z.state);
+  }
+  check("the fall becomes a corpse", seen.has(ThrowerState.Corpse),
+        [...seen].join());
+  check("and the corpse despawns rather than lying there for ever",
+        !z.visible && z.dead, `visible ${z.visible}`);
+}
+
+console.log("class 0x31, being knocked down is survivable:");
+{
+  const rng = new Rng(31);
+  const events = new Events();
+  const z = thrower(ThrowerState.StandAndDecide);
+  z.pos = vec3(0, 0, 45);
+  z.hp = 100;
+  // A body shot on an actor that is *not* in the hub falls rather than
+  // stumbles, and a fall it survives ends back at the hub.
+  z.state = ThrowerState.LeapAside;
+  z.sub = 0;
+  ResolveHit(z, 1, 0, CAM_HOST, rng);
+  GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("a shot outside the hub knocks it over",
+        z.state === ThrowerState.FallAndLand, `state ${z.state}`);
+  let recovered = false;
+  for (let i = 0; i < 900; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    if (z.state === ThrowerState.StandAndDecide) { recovered = true; break; }
+  }
+  check("and it gets back up", recovered && !z.dead, `state ${z.state}`);
+  check("with its hit points intact", z.hp > 0, `hp ${z.hp}`);
+}
+
+console.log("class 0x31, the scripted entrances:");
+{
+  const rng = new Rng(41);
+  const events = new Events();
+  // Stage 6's `zslman` blink in: three hops from 90 units out, 30 apart.
+  const z = thrower(ThrowerState.BlinkIn, { backAwayDelay: 0, attackState: 7 });
+  z.pos = vec3(0, 0, 45);
+  z.yaw = 0;
+  const origin = { ...z.pos };
+  check("it starts in the entrance", z.state === ThrowerState.BlinkIn,
+        `state ${z.state}`);
+  const hops: number[] = [];
+  for (let i = 0; i < 300 && z.state === ThrowerState.BlinkIn; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    const d = Math.round(Math.hypot(z.pos.x - origin.x, z.pos.z - origin.z));
+    if (hops[hops.length - 1] !== d) hops.push(d);
+  }
+  // With a delay of 0 the first hop lands on the entry frame itself, so the
+  // origin never shows up in the trace.
+  check("three hops, at 90, 60 and 30 units from where it appeared",
+        hops.join() === "90,60,30", hops.join());
+  check("then it hands to the state its descriptor names",
+        z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
+}
+
+console.log("class 0x31, ThrowerStateWaitForCue:");
+{
+  const rng = new Rng(51);
+  const events = new Events();
+  // The training stage's six: hold a clip until the camera path reaches a
+  // frame, then become state 7.
+  const z = thrower(ThrowerState.WaitForCue, {
+    cue: { motion: 295, cond: 1, operand: 140 }, attackState: 7,
+  });
+  G.g_cam_path_frame = 0;
+  for (let i = 0; i < 120; i++) GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("it waits while the camera is short of the cue frame",
+        z.state === ThrowerState.WaitForCue, `state ${z.state}`);
+  G.g_cam_path_frame = 140;
+  GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("and goes the moment the camera reaches it",
+        z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

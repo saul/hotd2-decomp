@@ -179,9 +179,10 @@ game/           the port. no three.js, no DOM.
   globals.ts      every g_* the port touches, in one enumerable object
   actor.ts        the object struct, offsets in comments
   class30/        approach.ts attack_run.ts strike.ts backoff.ts
-  class31/        the wall-crawler: router.ts arc.ts pounce.ts surface.ts
-                  stand.ts strike.ts entrance.ts — plus thrower.ts and
-                  projectile.ts for the throw
+  class31/        the wall-crawler, all 35 states: router.ts arc.ts pounce.ts
+                  surface.ts stand.ts strike.ts entrance.ts on_shot.ts
+                  death.ts react.ts standing.ts scripted.ts — plus thrower.ts
+                  and projectile.ts for the throw
   class24/        the set-pieces, choreographed against the camera
   class25/        the scripted-humanoid bytecode VM — the cutscene system
   class41/        group.ts prop.ts kinded.ts items.ts — the containers

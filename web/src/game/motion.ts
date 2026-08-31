@@ -10,7 +10,7 @@
  * `ActorSetMotion` and the motion job own these in the engine, and the frame
  * counter is a field of the object, at `obj+0x19C`.
  */
-import type { Actor } from "./actor";
+import { ActorFlag, type Actor } from "./actor";
 import { ActorStartFade } from "./class30/motion_cue";
 import { MotionFade } from "./class30/states";
 import { ApplyRootMotion, rootDelta } from "./root_motion";
@@ -23,6 +23,10 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // `if (obj+0x1324 == 0) obj+0x194++` — so a frozen object simply never
   // advances, and the freeze is not a thing that has to be undone afterwards.
   if (obj.frozen !== 0) return;
+  // `ThrowerAdvanceMotion` (`FUN_00449EF0`) skips the play cursor entirely
+  // while `obj+0x34` bit 0x4000 is set, which is how class 0x31 holds a pose
+  // in mid-air and how a corpse stays on the frame it was pinned to.
+  if (obj.flags & ActorFlag.PoseFrozen) return;
   if (obj.death) {
     // The death clip plays once and **holds its last frame**: `ZombieStateDeath6`
     // waits for it to finish and hands the body to a routine that is not read,

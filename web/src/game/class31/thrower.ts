@@ -17,7 +17,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
-import { DamageZone, type Actor } from "../actor";
+import { ActorFlag, DamageZone, type Actor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { ReleaseAttackSlot, ThrowerTryClaimAttackSlot } from "../combat/permits";
 import { G } from "../globals";
@@ -37,6 +37,23 @@ import {
   ThrowerStateStandAndDecide, ThrowerStateWaitForPermit,
 } from "./stand";
 import { ThrowerStateLeapToSurface } from "./surface";
+import { ThrowerOnShot } from "./on_shot";
+import {
+  ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
+  ThrowerStateFallToSurface, ThrowerLeave,
+} from "./death";
+import {
+  ThrowerStateGetUp, ThrowerStateHitReaction, ThrowerStateKnockedTumbling,
+} from "./react";
+import {
+  ThrowerStateCloseAndStrike, ThrowerStateRearm, ThrowerStateRestoreBothHands,
+  ThrowerStateStrikeOnTheSpot,
+} from "./standing";
+import {
+  ThrowerStateBlinkInThreeHops, ThrowerStateGrabPlayer, ThrowerStateLeapStrike,
+  ThrowerStateRideObjectPath, ThrowerStateWaitForCue,
+} from "./scripted";
+import { ThrowerStanceOf } from "./tables";
 import { ThrowerState, ThrowSub } from "./states";
 
 /** Hands whose arm has not been shot off. `ThrowerStateThrow` refuses the rest. */
@@ -96,9 +113,17 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
   events?.emit("enemy.threw", { at: obj.at, who: obj.name });
 }
 
-/** `ThrowerStateRearm` — `FUN_0044F7A0`. The hand gets its weapon back. */
-export function ThrowerStateRearm(obj: Actor, hand: ThrowHandJson,
-                                  host: GameHost): void {
+/**
+ * Put one hand's weapon back.
+ *
+ * [diverges] Not `ThrowerStateRearm` (`FUN_0044F7A0`), which is class 0x31's
+ * state 29 and lives in `standing.ts`: that one is character type 0x16's, has
+ * its own clip and restores *both* hands on the clip's midpoint. This is the
+ * one-hand swap the port's throw loop does on its way out, and it exists
+ * because the port's throw is a loop where the engine's is a state.
+ */
+function ThrowerRearmHand(obj: Actor, hand: ThrowHandJson,
+                          host: GameHost): void {
   if (hand.held) host.setBoneSlot(obj.at, hand.bone, hand.held);
   obj.zones &= ~(hand.cancel_mask & DamageZone.All);
 }
@@ -113,10 +138,21 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   const hands = usableHands(obj);
   if (!hands.length) {
     if (obj.attackPermit >= 0) ReleaseAttackSlot(obj);
+    obj.state = ThrowerState.StandAndDecide;
+    obj.sub = 0;
     return;
   }
   if (obj.attackPermit < 0) {
-    if (!ThrowerTryClaimAttackSlot(obj, host)) return;
+    // The engine only ever *enters* this state with a permit —
+    // `ThrowerTryEnterState`'s case `0x1F` claims one first and refuses
+    // otherwise — so an actor here without one has nothing to do. Looping
+    // instead left a `zslman` walking into the camera on its idle's root
+    // motion while it waited for a permit that the hub would have asked for.
+    if (!ThrowerTryClaimAttackSlot(obj, host)) {
+      obj.state = ThrowerState.StandAndDecide;
+      obj.sub = 0;
+      return;
+    }
     obj.sub = ThrowSub.Draw;
   }
 
@@ -130,7 +166,7 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
 
   const m = MotionOf(obj, hand.motion);
   if (!obj.action || !m) {
-    if (obj.sub === ThrowSub.Thrown) ThrowerStateRearm(obj, hand, host);
+    if (obj.sub === ThrowSub.Thrown) ThrowerRearmHand(obj, hand, host);
     ReleaseAttackSlot(obj);
     obj.sub = ThrowSub.Draw;
     obj.attack = (obj.attack + 1) % hands.length;
@@ -153,13 +189,59 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
  */
 export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
                                    host: GameHost, events?: Events): void {
-  if (obj.cooldown > 0) obj.cooldown = Math.max(0, obj.cooldown - dt * GAME_HZ);
+  // The cooldown is also the post-knockdown window in which shots ricochet:
+  // `EnemyThrowerUpdate` clears `obj+0x34` bit 0x100 when it reaches zero.
+  if (obj.cooldown > 0) {
+    obj.cooldown = Math.max(0, obj.cooldown - dt * GAME_HZ);
+    if (obj.cooldown === 0) obj.flags &= ~ActorFlag.ShotImmune;
+  }
+  // The shot drain, in the engine's own place: before the state runs.
+  ThrowerOnShot(obj);
 
+  const stance = ThrowerStanceOf(obj) & 3;
   switch (obj.state) {
+    case ThrowerState.HitReaction:
+      return ThrowerStateHitReaction(obj, eye, rng, host);
+    case ThrowerState.FallAndLand:
+      return ThrowerStateFallAndLand(obj, eye, dt, rng, host);
+    case ThrowerState.Death:
+      return ThrowerStateDeathClip(obj);
+    case ThrowerState.Corpse:
+      return ThrowerStateCorpse(obj, dt, rng, false);
+    case ThrowerState.CorpseBlink:
+      return ThrowerStateCorpse(obj, dt, rng, true);
+    // Slot 6 holds `ThrowerLeave`, which nothing ever enters as a state. It is
+    // here so that an actor forced into it by a descriptor still leaves.
+    case ThrowerState.Leave:
+      return ThrowerLeave(obj);
+    case ThrowerState.FallToSurface:
+      return ThrowerStateFallToSurface(obj, dt, host);
+    case ThrowerState.GetUp:
+      return ThrowerStateGetUp(obj, eye, rng, host);
+    case ThrowerState.RideObjectPath:
+      return ThrowerStateRideObjectPath(obj, dt, host);
+    case ThrowerState.LeapStrike:
+      return ThrowerStateLeapStrike(obj, dt, rng, host, events);
+    case ThrowerState.CloseAndStrike:
+      return ThrowerStateCloseAndStrike(obj, eye, rng, host, events);
+    case ThrowerState.GrabPlayer:
+      return ThrowerStateGrabPlayer(obj, eye, dt, rng, events);
+    case ThrowerState.WaitForCue:
+      return ThrowerStateWaitForCue(obj, dt, rng);
+    case ThrowerState.Rearm:
+      return ThrowerStateRearm(obj, host);
+    case ThrowerState.RestoreBothHands:
+      return ThrowerStateRestoreBothHands(obj, dt, stance, host);
+    case ThrowerState.StrikeOnTheSpot:
+      return ThrowerStateStrikeOnTheSpot(obj, dt, rng, host, events);
+    case ThrowerState.KnockedTumbling:
+      return ThrowerStateKnockedTumbling(obj, eye, dt, rng, host);
+    case ThrowerState.BlinkIn:
+      return ThrowerStateBlinkInThreeHops(obj, dt, stance);
     case ThrowerState.StandAndDecide:
       return ThrowerStateStandAndDecide(obj, eye, dt, rng, host);
     case ThrowerState.WaitForPermit:
-      return ThrowerStateWaitForPermit(obj, rng, host);
+      return ThrowerStateWaitForPermit(obj, eye, rng, host);
     // Three ids, one handler: the router names 12 and 13, the wait names 9.
     case ThrowerState.Pounce:
     case ThrowerState.PounceNear:
@@ -188,11 +270,13 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.Throw:
       TurnActorTowardCamera(obj, eye, dt);
       return ThrowerStateThrow(obj, host, eye, events);
+    // State 0 is the engine's shared no-op: an actor placed in it does nothing
+    // for ever, which is what the engine does too.
+    case ThrowerState.Idle:
+      return;
     default:
-      // [diverges] The eighteen unread states — the hit reactions, the death
-      // chain, the two scripted attacks, the grab — are not modelled. An actor
-      // in one of them would sit on a permit for ever, so it is sent back to
-      // the hub, which is where every ported state also ends.
+      // Every one of the 35 states now has an arm, so this is only reachable
+      // through a descriptor byte outside 0..34.
       obj.state = ThrowerState.StandAndDecide;
       obj.sub = 0;
       return;
@@ -222,7 +306,13 @@ export function EnemyThrowerInit(obj: Actor): void {
   obj.sub = ThrowSub.Draw;
   obj.attack = 0;
   obj.attackPermit = -1;
+  // `obj+0x1316`, from the descriptor's `+0x20`: the surface the actor starts
+  // attached to. Every shipped stage-2 spawn starts on the ground; stage 6's
+  // eight `BlinkIn` spawns cover all four stances.
   obj.flags2 = 0;
+  obj.alpha = 1;
+  obj.pendingHit = null;
+  obj.knockCount = 0;
   obj.stance = 0;
   obj.moveBand = 0;
   obj.arcPhase = 0;
@@ -233,12 +323,23 @@ export function EnemyThrowerInit(obj: Actor): void {
 /**
  * Which state to actually start in.
  *
- * [diverges] Of the five entrances the shipped stages use, four are ported;
- * state 21 rides an object path this port does not evaluate. Anything else
- * resolves to the hub, which is where every entrance ends anyway.
+ * All seven entrances the shipped data uses are ported — 18, 19, 20, 23, 26,
+ * 27 and 34 — and so are the two, 21 and 22, that no descriptor names.
+ * Anything else resolves to the hub, which is where every entrance ends.
  */
 export function ThrowerEntryState(obj: Actor): ThrowerState {
   switch (obj.initialState) {
+    case ThrowerState.GrabPlayer:
+      return obj.grab ? ThrowerState.GrabPlayer : ThrowerState.StandAndDecide;
+    case ThrowerState.WaitForCue:
+      return obj.cue ? ThrowerState.WaitForCue : ThrowerState.StandAndDecide;
+    case ThrowerState.BlinkIn:
+      return ThrowerState.BlinkIn;
+    case ThrowerState.LeapStrike:
+      return obj.leapStrikeFrames > 0
+        ? ThrowerState.LeapStrike : ThrowerState.StandAndDecide;
+    case ThrowerState.RideObjectPath:
+      return ThrowerState.RideObjectPath;
     case ThrowerState.WalkDistance:
       return obj.walkDistance > 0
         ? ThrowerState.WalkDistance : ThrowerState.StandAndDecide;

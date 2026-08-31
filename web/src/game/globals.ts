@@ -258,6 +258,21 @@ export const G = {
    * within 0x2000 of it. The host writes it once a frame.
    */
   g_camera_yaw_bams: 0,
+  /**
+   * `g_coli_hit_surface` — 0x009CAC40. The material id of whatever the last
+   * collision trace hit, and a **side output**: every caller reads it straight
+   * after its own trace rather than being handed it.
+   *
+   * Class 0x31 latches it into `obj+0x1350` where it lands, because `0x5A`
+   * kills whatever touches it.
+   */
+  g_coli_hit_surface: 0,
+  /**
+   * `g_active_player` — 0x009C7000, from `FUN_00414F40`: -1 nobody, 0 or 1
+   * that player alone, 2 both. `TryClaimAttackSlot` offers a permit
+   * accordingly when `g_max_attackers` is 1.
+   */
+  g_active_player: 0,
 
   // -- game mode ---------------------------------------------------------
   /**

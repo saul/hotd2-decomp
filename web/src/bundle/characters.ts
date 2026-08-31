@@ -121,6 +121,21 @@ export interface CharacterPlacement {
   /** `ThrowerStateDelayedPounce` (state 23): a clip, then a leap over `frames`. */
   pounce?: { motion: number; frames: number } | null;
   /**
+   * `ThrowerStateGrabPlayer` (state 27). The offset is **camera-relative**:
+   * the actor rides it until the camera path reaches `cue_frame`, drops to it
+   * over `drop_frames`, and holds the grab for `hold_frames`. `player` is who
+   * it grabs, `-1` for either.
+   */
+  grab?: {
+    offset: [number, number, number];
+    cue_frame: number;
+    drop_frames: number;
+    hold_frames: number;
+    player: number;
+  } | null;
+  /** `ThrowerStateBlinkInThreeHops` (state 34) holds this long first. */
+  back_away_delay?: number;
+  /**
    * A scripted entrance played once before `motion` starts looping — state 21
    * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump
    * out of it this way, staggered by their delays.
@@ -301,6 +316,15 @@ export interface Class31Set {
   motions: number[];
   /** `{stance: {index: attack}}` — stance 4 is "mid-leap". */
   attacks: Record<string, Record<string, Class31Attack>>;
+  /**
+   * `g_class31_throws` in the raw, by index. `ThrowerStateThrow` reads entries
+   * 0 and 1 as the right and left hand; `ThrowerStateCloseAndStrike` reads the
+   * same rows as a **melee** attack — a strike clip, an approach clip, the
+   * distance it closes to and the frame the hit lands on. Entries the row
+   * leaves zero are omitted, which is why a set-0 actor with both arms gone
+   * draws index 3 and finds nothing.
+   */
+  strikes: Record<string, AttackJson>;
   /** `picks[(rand % 10) + (destroyed_zones & 7) * 10]` names the attack. */
   attack_picks: number[];
   /** `{band: [80 candidate state ids]}` — the behaviour repertoire. */
@@ -312,6 +336,13 @@ export interface Class31Set {
 /** `g_class31_*` — class 0x31's four behaviour sets and its named scripts. */
 export interface Class31Json {
   sets: Class31Set[];
+  /**
+   * The pose frame a corpse freezes on, by the clip it died in — the two
+   * entries are picked between with `rand() % 17 >> 4`, so the second comes up
+   * once in seventeen. Only the four special-cased clips are here: the
+   * engine's general table covers motions class 0x31 never plays.
+   */
+  corpse_frames?: Record<string, number[]>;
   /** The arc scripts a state names rather than an attack entry. */
   scripts: Record<string, ArcStage[]>;
   note?: string;

@@ -35,6 +35,15 @@ export interface ClassHandler {
   init(obj: Actor): void;
   /** The class's `Update` — one call per 60 Hz frame. */
   update(obj: Actor, f: ClassFrame): void;
+  /**
+   * Keep ticking this class after it dies.
+   *
+   * Most classes die into a clip the renderer plays out, so the director stops
+   * updating them and nothing is lost. **Class 0x31's death is four states** —
+   * the fall, the death clip, the corpse and the despawn — so stopping would
+   * freeze a body in mid-air the moment its hit points ran out.
+   */
+  updatesWhenDead?: boolean;
 }
 
 export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
@@ -45,6 +54,7 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
   [SpawnClass.Thrower]: {
     init: EnemyThrowerInit,
     update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
+    updatesWhenDead: true,
   },
   // A placer, not an actor: it builds its children and kills itself on its
   // first frame. It draws nothing, so it needs no renderer.

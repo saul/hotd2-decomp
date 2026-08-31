@@ -1056,12 +1056,20 @@ sets identify the other two, because set 2's first entry is `0x1BA` — the
 motion `EnemyThrowerInit` starts character type 0x17 in — and set 3's clips are
 the `0x208` family the code hard-codes for 0x18.
 
-| Set | Character | How it fights |
-|---|---|---|
-| 0 | `zstin` | climbs walls and ceilings, then pounces |
-| 1 | `zsass` | stands out of reach and throws |
-| 2 | `zskamere` | stands. Its picks are `7` in every slot of every band |
-| 3 | `zslman` | stands and throws |
+**Measured across all six stages**, the `{character, set}` pairs the shipped
+descriptors actually use are:
+
+| Set | Characters that take it | Spawns | How it fights |
+|---|---|---|---|
+| 0 | `zstin` (14), **`zslman` (4)** | 18 | climbs walls and ceilings, then pounces |
+| 1 | `zsass` | 8 | stands out of reach and throws |
+| 2 | `zskamere` | 15 | stands. Its picks are `7` in every slot of every band |
+| 3 | `zslman` | 8 | stands and throws |
+
+Note the second row: **character type 0x18 appears under two different sets**,
+which is the clearest evidence that the set is descriptor data and not a
+property of the model. The same `zslman` climbs in stage 5 and stands in
+stage 6.
 
 ### The 35-state table — `g_class31_states`, 0x00592960
 
@@ -1074,32 +1082,61 @@ makes its fall and its knock-back physical.
 |---|---|---|
 | 0 | `0x0041EBB0` | the engine's shared no-op |
 | 1 | `ThrowerStateHitReaction` | the stumble, from `g_class31_hit_reactions` |
-| 2 | `ThrowerStateFallAndLand` | gravity, then a bounce |
-| 3–5 | `FUN_0044A930` / `FUN_0044A9D0` / `FUN_0044AB70` | death, corpse, corpse blinking out |
-| 6 | `FUN_0044AD60` | release everything and despawn |
+| 2 | `ThrowerStateFallAndLand` | knocked off its feet: an arc **at the camera**, then a bounce |
+| 3 | `ThrowerStateDeathClip` | character 0x16's own death clip |
+| 4, 5 | `ThrowerStateCorpseSink` / `ThrowerStateCorpseBlink` | two seconds of corpse, sinking or flickering |
+| 6 | `ThrowerLeave` | release everything and despawn — **never entered as a state** |
 | **7** | `ThrowerStateStandAndDecide` | **the hub** |
-| **8** | `ThrowerStateWaitForPermit` | idle until a permit frees |
+| **8** | `ThrowerStateWaitForPermit` | idle until a permit frees, then split by character |
 | **9, 12, 13** | `ThrowerStateLeapDown` | **the pounce**, one handler for three ids |
 | **10** | `ThrowerStateLeapAside` | the leap back out of your face |
-| 11 | `ThrowerStateFallToSurface` | fall until the ground catches |
+| 11 | `ThrowerStateFallToSurface` | fall until the ground catches — how a wall-crawler comes down |
 | **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
-| 17 | `ThrowerStateGetUp` | motion `0x127`, then decide again |
+| 17 | `ThrowerStateGetUp` | motion `0x127`, and **only after a decapitation** |
 | **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance |
 | **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
 | 20 | `ThrowerStateLeapToPoint` | the scripted drop |
-| 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames |
-| 22 | `ThrowerStateLeapStrike` | a pounce off the descriptor |
+| 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames — **cut content** |
+| 22 | `ThrowerStateLeapStrike` | a pounce off the descriptor — **dead code** |
 | **23** | `ThrowerStateDelayedPounce` | wait, then leap at the camera's own height |
-| 24 | `ThrowerStateCloseAndStrike` | close to the attack's range, then swing |
+| 24 | `ThrowerStateCloseAndStrike` | `zskamere`'s standing swing |
 | **25** | `ThrowerStateWithdraw` | back off, then stand |
 | 26 | `ThrowerStatePathFollow` | a route walked before fighting |
-| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab |
+| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab — stage 5's four `zslman` |
 | 28 | `ThrowerStateWaitForCue` | wait on a timer, a path frame or a flag |
 | 29, 30 | `ThrowerStateRearm` / `ThrowerStateRestoreBothHands` | the weapon goes back |
 | 31 | `ThrowerStateThrow` | see §10 |
-| 32 | `ThrowerStateStrikeOnTheSpot` | swing, pause, swing, for ever |
-| 33 | `ThrowerStateKnockedTumbling` | shot off a surface, bouncing |
-| 34 | `ThrowerStateBackAwayThreeUnits` | shoved straight back |
+| 32 | `ThrowerStateStrikeOnTheSpot` | `zskamere` perched on surface `0x35`, swinging for ever |
+| 33 | `ThrowerStateKnockedTumbling` | `zslman`'s shot reaction: bounced along its stance's axis |
+| 34 | `ThrowerStateBlinkInThreeHops` | stage 6's blinking materialisation |
+
+### What a spawn can actually be placed in
+
+Measured over every shipped `evt/` file, the initial-state byte takes seven
+values and no more:
+
+| state | spawns | where |
+|---|---|---|
+| 18 | 9 | |
+| 19 | 10 | |
+| 20 | 17 | |
+| 23 | 2 | stage 2 block 21 |
+| 26 | 2 | |
+| 27 | 4 | stage 5, all `zslman` |
+| 28 | 6 | the training stage |
+| 34 | 8 | stage 6, all `zslman` |
+
+...and the rest are reached, or not, like this:
+
+* **From the router**: 7, 9, 12, 13, 14, 15, 16 and 31 — those are the only
+  values in any reachable pick band.
+* **From `ThrowerOnShot`**: 1, 2 and 33 — a shot is the *only* way into the
+  reaction and death chain.
+* **From another state**: 3, 4, 5, 10, 11, 17, 25.
+* **Never**: 6 is a subroutine occupying a state slot, and nothing anywhere
+  writes 6 to `obj+0x1310`. 21 and 22 are unreachable from anywhere — cut
+  content. 24 and 32 are `zskamere`'s and come only from state 8. 29 and 30
+  can be reached only by a descriptor byte, and no descriptor names them.
 
 ### The repertoire is data — `g_class31_action_picks`, 0x00592A60
 
@@ -1281,3 +1318,51 @@ set 0 and set 3 five stances and sets 1 and 2 a single one, packed end to end
 with no count, so reading a fixed eight walks into the neighbour's entries.
 That is the adjacent-array trap, and the exporter bounds each row by the start
 of the next.
+
+### Being shot — `ThrowerOnShot`, `FUN_004499A0`
+
+Class 0x31 does not use the shared stagger or the shared *directional* death.
+The damage is shared — `DispatchHit` → `ResolveHit` charges the hit points,
+swaps the gore and awards the points, exactly as for a zombie — and then this
+routine reads the result and picks a **state**:
+
+```
+if (obj+0x34 & 0x100)               nothing: the shot ricochets
+if (result == 5)                    nothing
+if (obj+0x136C & 0x200000)          nothing: the death is already latched
+release the permit, clear the pounce and band bits
+if (dead)                           state 2,  latch 0x200000, voice 2 on a head shot
+else if (obj+0x34 & 0x2000)         nothing: two knockback arcs are spent
+else if (char == 0x18)              state 33, the tumble
+else if (state == 7 && on ground)   state 1,  the stumble
+else                                state 2,  the knockdown
+```
+
+Two consequences worth naming. **A knockdown is survivable** — state 2 lies
+still for `(rand()%10+1)*3` frames, plays a get-up and returns to the hub with
+its hit points intact — so being knocked over is not the same as dying. And
+`obj+0x1368` is the **bone index** here, where class 0x30 keeps a bitfield of
+special-death arms in the same word: one offset, two meanings, and conflating
+them is a stumble that plays the wrong clip.
+
+`ThrowerShotFeedback` (`FUN_00449B20`) is the other half, and one thing in it
+is load-bearing: a result-1 hit on **bone 2** that swaps the head model to
+`0x2015` raises `obj+0x136C` bits `0x6000000`, and `0x4000000` of that pair is
+the only thing in the class that routes states 1 and 2 into **state 17**. So a
+thrower plays its get-up exactly when you have taken its head off and it has
+survived it.
+
+### The two motion banks, and why every table has two rows
+
+Character types 0x16, 0x18 and 0x19 are sixteen-bone **`szom.bin`** skeletons
+(motion bank 47); 0x17 alone is a twenty-four-bone **`kame.bin`** one (bank
+20). Every per-set table in this class resolves to exactly two distinct rows
+along that line — `g_class31_hit_reactions` rows A and B, `g_class31_throws`
+rows A and B, `g_class31_melee_attacks`' five-stance rows against its
+one-stance one. The "four behaviour sets" are really two skeletons and two
+variations. `[proved]` by the banks: row A's reactions are `0x3A1`–`0x3AB`,
+all bank 47, and row B's are `0x1BD`–`0x1BF`, all bank 20.
+
+One consequence is an engine bug, left as it is: `ThrowerStateGetUp` plays
+motion `0x127` with no character-type branch, and `0x127` is a `szom.bin` clip.
+`zskamere` can reach that state and has no such clip on its rig.

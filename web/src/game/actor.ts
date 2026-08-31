@@ -21,6 +21,20 @@ export enum ActorFlag {
    */
   BackingOff = 0x20000000,
   /**
+   * `obj+0x34` bit 8. While it is set `ThrowerShotFeedback` forces the hit
+   * result to 5, so a downed thrower only ricochets — a real invulnerability
+   * window, counted down by `obj+0x133C`.
+   */
+  ShotImmune = 0x100,
+  /** No more knockback arcs: two re-entries into one fall have been spent. */
+  ArcSpent = 0x2000,
+  /** Freezes the motion advance, which is how a pose holds mid-air. */
+  PoseFrozen = 0x4000,
+  /** A reaction is in progress. */
+  Reacting = 0x40000000,
+  /** `ResolveHit` sets it when the hit points reach zero. */
+  Dead = 0x4000000,
+  /**
    * Excluded from `RegisterForCameraTracking`. `ZombieStateApproach` sets it
    * while walking and clears it the moment the actor wins a permit, which is
    * how the camera comes to consider only enemies that have committed.
@@ -82,6 +96,14 @@ export enum ThrowerFlag {
   Ceiling = 0x100,
   /** The three surface bits together. */
   Surface = 0x1C0,
+  /** The blinking states hide the actor with this and `Actor.alpha`. */
+  Blinking = 0x4,
+  /** A reaction is already running; a second shot latches a re-entry. */
+  ReactReentry = 0x400000,
+  /** The reaction has been chosen for this death; only once. */
+  DeathLatched = 0x200000,
+  /** Knocked down — what routes states 1 and 2 into the get-up. */
+  KnockedDown = 0x4000000,
   /** `ThrowerStrikeConnect` uses `g_class31_throws` instead of the melee row. */
   UseThrowTable = 0x400,
   /** `ThrowerPickNextState` has committed to a band; `moveBand` holds which. */
@@ -280,6 +302,49 @@ export interface Actor {
   entranceMotion: number;
   /** `ThrowerStateDelayedPounce`'s clip and duration, from the descriptor. */
   pounce: { motion: number; frames: number } | null;
+  /** `ThrowerStateGrabPlayer`'s descriptor tail. */
+  grab: {
+    offset: [number, number, number];
+    cue_frame: number;
+    drop_frames: number;
+    hold_frames: number;
+    player: number;
+  } | null;
+  /** `ThrowerStateBlinkInThreeHops`' delay, from the descriptor. */
+  backAwayDelay: number;
+  /** `ThrowerStateWaitForCue`'s descriptor tail. */
+  cue: { motion: number; cond: number; operand: number } | null;
+  /** `ThrowerStateLeapStrike`'s arc duration, from the descriptor. */
+  leapStrikeFrames: number;
+
+  // -- class 0x31's damage and death chain -------------------------------
+  /**
+   * The shot `ResolveHit` charged that this actor has not reacted to yet.
+   *
+   * The engine has no such field: `MarkActorShot` sets `obj+0x34` bit 3 and
+   * writes the bone to `obj+0x190 + player`, and the actor's own update drains
+   * it. This is that pair, in one place, because the port resolves the damage
+   * at shot time and the class picks its reaction on its next tick — the same
+   * frame boundary the engine has.
+   */
+  pendingHit: { bone: number; result: number } | null;   // +0x190, +0x34 bit 3
+  /** `obj+0x1368` — the bone that was hit. Class 0x31 alone reads it that way. */
+  reactBone: number;        // +0x1368
+  /** `obj+0x1328` — re-entries into the knockdown; two caps the arc. */
+  knockCount: number;       // +0x1328
+  /** `obj+0x1350` — the surface under the landing point. `0x5A` kills. */
+  landSurface: number;      // +0x1350
+  /** `obj+0x1388` — the height a fall began at, and a flag while it is set. */
+  fallFromY: number;        // +0x1388
+  /** `obj+0x1354` — the axis gravity pulls along. See `ThrowerArcKind`. */
+  arcKind: number;          // +0x1354
+  /** `obj+0x138C` — the draw alpha the blinking states write. */
+  alpha: number;            // +0x138C
+  /** `obj+0x133C` is the cooldown; this is the frame the corpse is pinned to. */
+  corpseFrame: number;      // +0x194, pinned
+  /** `ThrowerStateBlinkInThreeHops`' two counters. */
+  hopsLeft: number;         // +0x1348
+  hopFrames: number;        // +0x1344
 
   /**
    * How close the bite may bring this actor to its target.
@@ -429,6 +494,20 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     walkDistance: 0,
     entranceMotion: 0,
     pounce: null,
+    grab: null,
+    backAwayDelay: 0,
+    cue: null,
+    leapStrikeFrames: 0,
+    pendingHit: null,
+    reactBone: 0,
+    knockCount: 0,
+    landSurface: 0,
+    fallFromY: 0,
+    arcKind: 0,
+    alpha: 1,
+    corpseFrame: -1,
+    hopsLeft: 0,
+    hopFrames: 0,
     strikeFloor: 0,
     hasStrikeAnchor: false,
     struck: false,

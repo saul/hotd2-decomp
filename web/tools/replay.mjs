@@ -67,6 +67,10 @@ spawns.forEach((s, n) => {
     walkDistance: p.walk_distance ?? 0,
     entranceMotion: p.entrance_motion ?? 0,
     pounce: p.pounce ?? null,
+    grab: p.grab ?? null,
+    backAwayDelay: p.back_away_delay ?? 0,
+    cue: p.cue ?? null,
+    leapStrikeFrames: p.leap_strike_frames ?? 0,
   });
   a.pos = { x: s.pos[0], y: s.pos[1], z: s.pos[2] };
   a.hp = p.hp || 100;

@@ -74,8 +74,78 @@ export function ActorArcBeginToAtSpeed(obj: Actor, dest: Vec3,
  */
 export function InstallArcMotionScript(obj: Actor,
                                        script: ArcStage[] | null): void {
-  obj.arcScript = script && script.length ? script : null;
+  // The engine copies the twelve dwords, and the copy matters: the timing fit
+  // below **rewrites** them. Pointing at the bundle's own array instead would
+  // have the first leap of the stage permanently re-time every later one.
+  obj.arcScript = script && script.length
+    ? script.map((st) => ({ ...st })) : null;
 }
+
+/**
+ * The arc-script timing fit — `FitArcScriptByFadeLength` (`FUN_0044D5F0`) and
+ * `FitArcScriptByStartFrame` (`FUN_0044E140`), the variant character type 0x19
+ * takes.
+ *
+ * [diverges] One function here where the engine has two. They share their
+ * whole positive branch and their slack formula and differ only in the tight
+ * branch, so splitting them would duplicate twenty lines to vary three; the
+ * character-type test that chooses between them is kept, in the same place
+ * `ActorArcStep` makes it.
+ *
+ * The script is authored against one clip; the arc it is laid over is however
+ * long the distance made it. This is what reconciles them, and the two
+ * routines differ in *which end they give*:
+ *
+ * ```
+ * slack = T - stage2.fade - stage1.fade - stage1.until + stage1.start
+ * k     = trunc(|slack| * 0.5)
+ * slack > 0  ->  both fades grow by k, the remainder onto stage 1's
+ * slack <= 0 ->  0x19: both start frames advance by k, each clamped at its own
+ *                      threshold — a short leap skips into the middle of the
+ *                      clip rather than playing it slowly
+ *                else: stage 1's start walks up and its threshold walks down
+ *                      until the three stages fit
+ * ```
+ *
+ * The 0.5 is `float ptr [0x004C43AC]` = `0x3F000000`; Ghidra drops it, because
+ * it is the argument to `__ftol`.
+ */
+export function FitArcScriptToDuration(obj: Actor): void {
+  const s = obj.arcScript;
+  if (!s || s.length < 3) return;
+  const T = obj.arcTotal;
+  const slack = T - s[2].fade - s[1].fade - s[1].until + s[1].start;
+  const k = Math.trunc(Math.abs(slack) * 0.5);
+
+  if (slack > 0) {
+    s[1].fade = Math.min(FADE_MAX, s[1].fade + k);
+    s[2].fade = Math.min(FADE_MAX, s[2].fade + k);
+    const rest = slack - s[2].fade - s[1].fade;
+    if (rest > 0) s[1].fade = Math.min(FADE_MAX, s[1].fade + rest);
+    return;
+  }
+  if (obj.charType === CHAR_ZSTIN) {
+    s[1].start = Math.min(s[1].until, s[1].start + k);
+    s[2].start = Math.min(s[2].until, s[2].start + k);
+    const rest = -slack - s[2].start - s[1].start;
+    if (rest > 0) s[1].start = Math.min(s[1].until, s[1].start + rest);
+    return;
+  }
+  // [diverges] `FitArcScriptByFadeLength`'s tight branch walks stage 1's start
+  // up and its threshold down one frame at a time under two joint conditions;
+  // this is the fixed point of that loop and not the loop itself, which is the
+  // same answer whenever the window is wide enough to close — `[open]` when it
+  // is not.
+  const room = Math.max(0, s[1].until - s[1].start - 1);
+  const take = Math.min(room, -slack);
+  s[1].start += Math.ceil(take / 2);
+  s[1].until -= Math.floor(take / 2);
+}
+
+/** `ActorSetMotionBlended` stores the fade as a byte, so the fit clamps here. */
+const FADE_MAX = 0x7f;
+/** The character type that takes `FitArcScriptByStartFrame`. */
+const CHAR_ZSTIN = 0x19;
 
 /**
  * `ActorArcBeginToWaypoint` — `FUN_0044D780`.
@@ -189,12 +259,9 @@ function playStage(obj: Actor, stage: ArcStage | undefined): void {
  * `ActorArcStep` — `FUN_0044D860`. One frame of an arc, script and all.
  * Returns false once the whole thing — flight *and* clip — is over.
  *
- * [diverges] The engine runs the script's stage timings through a fitter
- * first (`FUN_0044D5F0`, or `FUN_0044E140` for character type 0x19), which
- * rewrites the middle and last stages' start frames, fades and thresholds so
- * the three stages span `obj+0x1334` exactly. The exact arithmetic of those
- * two is `[open]`; here the clip runs at its own rate and the phase advances
- * when the arc does, which puts the landing stage on the landing either way.
+ * Phase 0 runs `FitArcScriptToDuration` first, which is what reconciles a clip
+ * authored at one length with an arc that is however long the distance made
+ * it.
  */
 export function ActorArcStep(obj: Actor, _step: number,
                              dt: number): boolean {
@@ -203,6 +270,9 @@ export function ActorArcStep(obj: Actor, _step: number,
   const frames = dt * GAME_HZ;
 
   if (obj.arcPhase === ArcPhase.Windup) {
+    // Phase 0 fits the script to the arc *before* the first stage plays, so
+    // the windup, the flight and the landing span the leap however long it is.
+    FitArcScriptToDuration(obj);
     playStage(obj, script[0]);
     obj.arcPhase = ArcPhase.Crouched;
     return true;

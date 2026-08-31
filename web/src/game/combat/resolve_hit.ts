@@ -11,8 +11,9 @@
  */
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
-import { DamageZone, type Actor } from "../actor";
+import { ActorFlag, DamageZone, type Actor } from "../actor";
 import { G } from "../globals";
+import { SpawnClass } from "../spawn_class";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, T } from "../tables";
 
@@ -316,7 +317,17 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   // `ZombieOnShot` only reacts while the actor is alive; the death takes over
   // otherwise.
   const survived = !wasDead && obj.hp >= 1;
-  const react = survived ? ActorReactToHit(obj, bone, result) : undefined;
+  // **Class 0x31 reacts and dies through its own states**, so it takes the
+  // shared damage, gore and score and none of the shared *animation*:
+  // `ThrowerOnShot` reads this result on the actor's next tick and picks the
+  // stumble, the knockdown or the tumble, and its death is a four-state chain
+  // with its own clips. Handing it the shared stagger and the shared
+  // *directional* death gave a `zstin` `zom.bin`'s animations, which belong to
+  // a different creature.
+  const ownReaction = obj.cls === SpawnClass.Thrower;
+  if (ownReaction) obj.pendingHit = { bone, result };
+  const react = survived && !ownReaction
+    ? ActorReactToHit(obj, bone, result) : undefined;
 
   let death: number | undefined;
   const killed = !wasDead && obj.hp < 1
@@ -329,9 +340,14 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
       RemoveBoneSubtree(obj, bone);
       severed = true;
     }
-    death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
-    if (death !== undefined && MotionOf(obj, death)) {
-      obj.death = { motion: death, t: 0 };
+    // `ResolveHit` also raises `obj+0x34` bit 0x4000000, which is what
+    // `ThrowerOnShot` reads to tell a killing blow from a survivable one.
+    obj.flags |= ActorFlag.Dead;
+    if (!ownReaction) {
+      death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
+      if (death !== undefined && MotionOf(obj, death)) {
+        obj.death = { motion: death, t: 0 };
+      }
     }
   }
   return { damage, killed, head, hp: Math.max(0, obj.hp), gore, severed,

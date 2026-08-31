@@ -56,6 +56,17 @@ export interface GameHost {
    * no wall — the actor simply does not take that action.
    */
   traceSegment?(from: Vec3, to: Vec3, out: Vec3): boolean;
+  /**
+   * `QueryGroundSurfaceAt` (`FUN_00409D80`). The **material id** under a
+   * point, not its height: a vertical trace from 1000 units below, returning
+   * `g_coli_hit_surface`.
+   *
+   * Only one thing in the port asks — `ThrowerStateWaitForPermit`, deciding
+   * whether a `zskamere` is perched on surface `0x35` — and a host that cannot
+   * answer reports 0, which sends it to the standing strike instead. That is
+   * the same branch it takes on any other surface.
+   */
+  groundSurfaceAt?(x: number, y: number, z: number): number;
 }
 
 /**

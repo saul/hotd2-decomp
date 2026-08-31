@@ -86,8 +86,11 @@ export enum ThrowerState {
   StrikeOnTheSpot = 32,
   /** `ThrowerStateKnockedTumbling` (`FUN_00450E40`). */
   KnockedTumbling = 33,
-  /** `ThrowerStateBackAwayThreeUnits` (`FUN_00451480`). */
-  BackAway = 34,
+  /**
+   * `ThrowerStateBlinkInThreeHops` (`FUN_00451480`). Three blinking hops in
+   * from 90 units out, not the retreat an earlier reading called it.
+   */
+  BlinkIn = 34,
 }
 
 /** `ThrowerStateThrow`'s sub-state, at `obj+0x1312`. */

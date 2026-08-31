@@ -19,7 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Walker, type WalkerHost } from "../src/script/walker";
-import type { ScriptJson } from "../src/bundle";
+import type { OpJson, ScriptJson } from "../src/bundle";
 
 const ROOT = join(process.env.HOME ?? "", "hotd2-decomp", "extract", "player");
 const STAGES = [1, 2, 3, 4, 5, 6];
@@ -93,6 +93,11 @@ for (const stage of STAGES) {
   // Drive the stage the way playing does, sampling as it goes.
   const live = new Walker(script, mkHost());
   live.reset();
+  // This loop is a replay standing in for playback -- it steps over waits
+  // instead of satisfying them -- so it has to leave the same state behind as
+  // `seek`, and that includes retiring the enemies an enemy gate was waiting
+  // on. Playback proper never sets this; see `Walker.replaying`.
+  live.replaying = true;
   const samples: { b: number; s: number; o: number; state: string }[] = [];
   for (let i = 0; i < 200_000 && !live.finished && !live.parked; i++) {
     // The same release `seek` uses, so the two paths cannot drift: a wait
@@ -176,6 +181,39 @@ for (const stage of STAGES) {
     const props = w.spawns.filter((s) => s.class === 0x41 || s.class === 0x44);
     check("the gate retires enemies only, not the props placed with them",
           props.length > 0, `${props.length} container placers survived`);
+  }
+}
+
+// ...and the other half of that rule: **playback must not do it.** The gate
+// opens in play because the player killed them, and the death clips are still
+// running -- `FUN_00454D20` plays one out before handing the body on. Sweeping
+// the list there made every corpse vanish the instant the last enemy died.
+{
+  const file = join(ROOT, "stage2", "stage2.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const gate = { i: 0, at: 0, op: 0x43, name: "wait_enemies_present",
+                   cat: "wait", arg: 0 } as unknown as OpJson;
+    const spawn = { at: 1, class: 0x30, flags: 0, pos: [0, 0, 0] as
+                    [number, number, number], orient: [0, 0, 0] as
+                    [number, number, number], hp: 1, yaw_deg: 0,
+                    block: 0, step: 0, opIndex: 0, opcode: 9 };
+
+    // Playback, with the last enemy just killed: the gate opens and the
+    // corpses stay.
+    const play = new Walker(script, { ...mkHost(), aliveEnemies: () => 0 });
+    play.spawns = [{ ...spawn }];
+    play.applyWait(gate);
+    check("playback keeps the bodies when the gate opens",
+          play.spawns.length === 1, `${play.spawns.length} left`);
+
+    // The same call during a replay, where nothing killed anything.
+    const replay = new Walker(script, { ...mkHost(), aliveEnemies: () => 0 });
+    replay.replaying = true;
+    replay.spawns = [{ ...spawn }];
+    replay.applyWait(gate);
+    check("a replay retires them, because nothing else will",
+          replay.spawns.length === 0, `${replay.spawns.length} left`);
   }
 }
 

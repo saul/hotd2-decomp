@@ -400,6 +400,24 @@ export class Walker {
   readonly loadedSlots = new Set<number>();
   spawns: ActiveSpawn[] = [];
   cam: CamCommand | null = null;
+  /**
+   * True while a **replay** is walking the script rather than playback.
+   *
+   * A replay has to apply a wait's *postcondition* itself, because nothing
+   * else will: `seek` steps over the enemy gates without shooting anything,
+   * so the enemies the gate was waiting on have to be retired by hand — see
+   * {@link retireGatedEnemies}.
+   *
+   * In **playback** none of that may happen. The gate opens there because the
+   * player actually killed them, and `FUN_00454D20` plays the death clip out
+   * before handing the body on — so sweeping the list the moment the last one
+   * dies takes the corpses with it and the bodies vanish mid-fall.
+   *
+   * `seek` owns this. The drive loop in `test/seek.test.ts` sets it too,
+   * because that loop is a replay standing in for playback and has to leave
+   * the same state behind.
+   */
+  replaying = false;
   wait: PendingWait | null = null;
   branch: BranchChoice | null = null;
   finished = false;
@@ -593,6 +611,17 @@ export class Walker {
    */
   seek(block: number, step = 0, opIndex = 0, maxOps = 500000): boolean {
     this.reset();
+    const wasReplaying = this.replaying;
+    this.replaying = true;
+    try {
+      return this.seekInner(block, step, opIndex, maxOps);
+    } finally {
+      this.replaying = wasReplaying;
+    }
+  }
+
+  private seekInner(block: number, step: number, opIndex: number,
+                    maxOps: number): boolean {
     let executed = 0;
     const arrived = () =>
       this.block === block && this.step === step && this.opIndex >= opIndex;
@@ -647,6 +676,10 @@ export class Walker {
    * to late in a stage arrived with every zombie the script had ever placed
    * still standing, most of them behind the camera.
    *
+   * **Only ever during a replay.** In playback the gate opens because the
+   * player killed them, and the bodies are still falling — doing this there
+   * made every corpse disappear the instant the last enemy died.
+   *
    * Only the classes `ActorIsEnemy` counts are retired. A prop, a civilian, a
    * set-piece and a scripted humanoid are all outlived by the gate — none of
    * them moves either counter, so the gate says nothing about them, and they
@@ -664,6 +697,7 @@ export class Walker {
    * way to choose between; no such gate exists.
    */
   private retireGatedEnemies(): void {
+    if (!this.replaying) return;
     this.spawns = this.spawns.filter((s) => !ENEMY_GATE_CLASSES.has(s.class));
   }
 
@@ -801,7 +835,9 @@ export class Walker {
       } else if (!this.waitSatisfied()) {
         return;
       }
-      if (ENEMY_GATE_WAITS.has(this.wait.op.op)) this.retireGatedEnemies();
+      // Deliberately no retirement here: this is the *playback* path, where
+      // the gate opened because the enemies really are dead and their death
+      // clips are still running.
       this.wait = null;
       this.opIndex++;
     }

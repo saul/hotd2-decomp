@@ -5035,3 +5035,20 @@ count fall and it passes — no invented wait lengths in between. That removed
 `simulateCombat`, `secondsPerEnemy`, the `combat` wait policy and
 `ActiveSpawn.secondsLeft`; `liveEnemies` now means what its name says, the
 spawns an enemy gate is actually waiting on.
+
+### The enemy-gate retirement was applied to playback as well as to replays
+
+Retiring the enemies past a `wait_enemies_alive` is right for a **replay** and
+wrong for **playback**, and the first version did both. In play the gate opens
+because the player killed them and `FUN_00454D20` is still playing the death
+clip out before handing the body on — so sweeping the spawn list the moment the
+last one dies takes the corpses with it and the bodies vanish mid-fall.
+
+`Walker.replaying` now says which is which. `seek` owns it, the drive loop in
+`test/seek.test.ts` sets it because that loop is a replay standing in for
+playback, and `retireGatedEnemies` is a no-op without it. The playback
+completion path in `advance` does not retire at all any more.
+
+Both halves are asserted: playback keeps the bodies when the gate opens, and a
+replay drops them because nothing else will. Removing the guard fails the first
+and leaves the second passing.

@@ -176,6 +176,16 @@ export interface WalkerHost {
    * when a civilian is rescued, and rescuing one means killing its captors.
    */
   aliveCivilians(): number | null;
+  /**
+   * `g_camera_free` (0x009C6F2D), or `null` when this client cannot evaluate
+   * it.
+   *
+   * The room-clear waits `0x43`, `0x44` and `0x46` all require it on top of
+   * their counter, so the script does not move on the frame the last enemy
+   * dies -- it moves once no enemy is claiming the camera *and* the aim has
+   * swung back onto the path. Without it every room hands over abruptly.
+   */
+  cameraFree(): boolean | null;
   /** evt `0x1F`: the HUD shutter state. */
   setShutter(state: number): string | undefined;
   /** evt `0x2D`: play a dialogue group -- voice line plus subtitles. */
@@ -978,6 +988,17 @@ export class Walker {
     return true;
   }
 
+  /**
+   * `g_camera_free`, the second half of every room-clear gate.
+   *
+   * A host that cannot evaluate it -- no simulation running -- reports `null`,
+   * and the term drops out rather than parking the script on a condition
+   * nothing can ever satisfy. That is the same rule the counters use.
+   */
+  private cameraHasHandedBack(): boolean {
+    return this.host.cameraFree() !== false;
+  }
+
   private waitSatisfied(): boolean {
     const w = this.wait;
     if (!w) return true;
@@ -987,9 +1008,11 @@ export class Walker {
       case "camera":
         return !this.cam || this.cam.done || this.cam.isStatic;
       case "enemies":
-        return (this.host.aliveEnemies() ?? 0) <= (w.op.arg ?? 0);
+        return (this.host.aliveEnemies() ?? 0) <= (w.op.arg ?? 0)
+               && this.cameraHasHandedBack();
       case "civilians":
-        return (this.host.aliveCivilians() ?? 0) <= (w.op.arg ?? 0);
+        return (this.host.aliveCivilians() ?? 0) <= (w.op.arg ?? 0)
+               && this.cameraHasHandedBack();
       case "queued":
         this.settleCameraAction();
         return this.queuedEventsPending === 0;
@@ -1251,6 +1274,27 @@ export class Walker {
   }
 
   /**
+   * Retire an outstanding `cam_play` because something has taken the camera
+   * off it.
+   *
+   * The engine runs the ring **one action at a time**: a second `cam_play`
+   * queued behind a first does not start until the first retires. This client
+   * runs an action the moment it is queued, so the moment `this.cam` is
+   * replaced the previous action is over as far as the count is concerned.
+   *
+   * Without this the count leaks, and it leaks precisely where nothing is
+   * ticking -- `seek` and `stepOnce` run instructions without a clock, so a
+   * block's worth of `cam_play`s all set `camPending` and only the last can
+   * ever be retired. A reload into such an address then parked for ever on the
+   * next `wait_queued_events_done`.
+   */
+  private supersedeCameraAction(): void {
+    if (!this.camPending) return;
+    this.camPending = false;
+    this.retireQueuedEvent();
+  }
+
+  /**
    * Retire the `cam_play` whose path has just finished.
    *
    * `CamAdvancePathFrame` does this itself on the frame the path ends, so it
@@ -1319,6 +1363,7 @@ export class Walker {
       // takes this path (0 of the 1110 non-deferred plays name -1), but it is
       // the other half of the opcode.
       const from = op.resume && this.cam ? this.cam.frame : start;
+      this.supersedeCameraAction();
       this.cam = {
         slot,
         startFrame: from,
@@ -1372,6 +1417,8 @@ export class Walker {
       if (minor === 6 || minor === 7) {
         const st = this.stashedCam;
         if (!st) return "state 6/7 with nothing stashed";
+        // The stashed play takes the camera over; whatever was on it is done.
+        this.supersedeCameraAction();
         this.cam = {
           slot: st.slot,
           startFrame: st.start,
@@ -1443,8 +1490,8 @@ export class Walker {
       // With shooting on, the gate is the gate: it opens when they are dead.
       const alive = this.host.aliveEnemies();
       if (alive !== null) {
-        policy = alive <= arg
-          ? { kind: "passed", why: "no live enemies" }
+        policy = alive <= arg && this.cameraHasHandedBack()
+          ? { kind: "passed", why: "no live enemies, and the camera is back" }
           : { kind: "enemies" };
       } else {
         // Shooting off: nothing can make the count fall, so the gate is not a
@@ -1465,8 +1512,8 @@ export class Walker {
       // play" -- but the comparison is transcribed, not folded to `=== 0`.
       const civilians = this.host.aliveCivilians();
       if (civilians !== null) {
-        policy = civilians <= arg
-          ? { kind: "passed", why: "no civilians in play" }
+        policy = civilians <= arg && this.cameraHasHandedBack()
+          ? { kind: "passed", why: "no civilians in play, and the camera is back" }
           : { kind: "civilians" };
       } else {
         policy = { kind: "passed",

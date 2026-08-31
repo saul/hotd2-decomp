@@ -428,6 +428,10 @@ class Player {
       // path drop it -- so this is the engine's own counter, not a restatement
       // of it. Null while Shoot is off, for the reason on `aliveEnemies`.
       aliveCivilians: () => this.shooting.isEnabled ? G.g_civilians_alive : null,
+      // `g_camera_free` -- the room-clear waits need the camera back on its
+      // rail, not just the count at zero. Null while Shoot is off, where the
+      // counts never fall anyway and the gates pass on their own.
+      cameraFree: () => this.shooting.isEnabled ? G.g_camera_free !== 0 : null,
       setShutter: (st) => this.hudLayer.setShutterState(st),
       showMessage: (g) => {
         // Variant 0 is the 1P / player-1 configuration, which is what a

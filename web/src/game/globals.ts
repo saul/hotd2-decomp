@@ -225,6 +225,26 @@ export const G = {
    */
   g_camera_settled: 0,
   /**
+   * `g_camera_free` — 0x009C6F2D. **The gate on every room-clear wait.**
+   *
+   * `wait_enemies_present` (0x43), `wait_enemies_alive` (0x44) and
+   * `wait_scripted_actors` (0x46) all require this on top of their counter, so
+   * a room does not hand over the moment the last enemy dies — it hands over
+   * once the camera has swung back onto its rail.
+   *
+   * The engine computes it across two per-frame camera drivers:
+   * `FUN_00402E00` raises it when no `g_enemy_slots` entry is claimed, and
+   * `FUN_00402650` clears it on every frame the camera mode is not
+   * "return to path" — a mode it only picks when `g_enemies_alive == 0` *and*
+   * no slot is claimed. Inside that mode `CameraTurnOntoPathTarget` latches it
+   * when the eased look-at catches the path target.
+   *
+   * This port has one camera routine rather than that pair, so what it keeps
+   * is the conjunction the two of them compute between them: no slot claimed,
+   * no enemy alive, and the aim converged. [diverges]
+   */
+  g_camera_free: 0,
+  /**
    * `g_enemy_slots` — 0x009A5EC0. The actors the camera considers, nearest
    * first; slots 0 and 1 are the permit holders. Holds `at`, not pointers.
    */
@@ -439,6 +459,7 @@ export function ResetGameGlobals(): void {
   G.g_camera_turn_rate = 0;
   G.g_camera_turn_curve = 1;
   G.g_camera_settled = 0;
+  G.g_camera_free = 0;
   G.g_enemy_slots = [];
   G.g_thrown_weapons = [];
   G.g_thrown_next_id = 1;

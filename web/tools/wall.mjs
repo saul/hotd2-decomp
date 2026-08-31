@@ -43,7 +43,7 @@ const w = new Walker(script, {
   enterRegion: NOOP, loadRegion: NOOP, loadSlot: NOOP, unloadSlot: NOOP,
   startCamera: NOOP, releaseCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
   playSound: NOOP, aliveEnemies: () => null,
-  aliveCivilians: () => null, setShutter: NOOP,
+  aliveCivilians: () => null, cameraFree: () => null, setShutter: NOOP,
   showMessage: NOOP, endDialogue: NOOP,
 });
 if (!w.seek(Number(block), Number(step), Number(op))) {

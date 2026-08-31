@@ -1182,8 +1182,8 @@ missed. Meanings and confidence marks live in
 | `40` | `wait_queued_events_done` | wait | ~approx~ | **`g_queued_events_pending == 0`, counted for real** — `queue_event` adds one, each handler takes one back, `finish_sequence` never does and `0x31`/`0x33` do it for it. Still `approx` because the ring's *ordering* is not modelled: the port runs an action when it is queued, not one at a time |
 | `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path |
 | `42` | `wait_frames` | wait | **done** | **exact** frame countdown |
-| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead; with Shoot off nothing can make the count fall, so it passes and the feed says so |
-| `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate, gated with `0x43` |
+| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead **and the camera has swung back** (`g_camera_free`); with Shoot off nothing can make the count fall, so it passes and the feed says so |
+| `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate, gated with `0x43`. The engine's extra frame of hysteresis is **not** ported [diverges] |
 | `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
 | `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real while Shoot is on**; with Shoot off nothing can rescue a civilian, so it passes rather than deadlocking. All 68 sites pass operand 0 |
 | `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |

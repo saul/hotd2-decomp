@@ -7108,3 +7108,69 @@ plus a second global rename — `g_evt_block_counter` → `g_evt_step_index`,
 `PropExpireByBlockLifetime` → `PropExpireByStepLifetime`, and the
 `spawnBlock` / `blocksElapsed` fields with them — and folding that into a
 rename commit would hide it.
+
+## The action ring leaked wherever nothing was ticking
+
+Reported as "consistently getting stuck on `wait_queued_events_done` even when
+nothing is happening", and it was mine — a regression from counting
+`g_queued_events_pending` for real.
+
+The engine runs the ring **one action at a time**: a `cam_play` queued behind
+another does not start until the first retires. This port runs an action the
+moment it is queued, and tracked the outstanding `cam_play` in a single
+boolean. That is fine while a clock is running, because each camera reaches the
+end of its path and retires as it goes — which is exactly why driving all six
+stages from cold found nothing.
+
+`seek` and `stepOnce` have no clock. They replay instructions to reproduce an
+address, so a whole block's worth of `cam_play`s queue with none of them ever
+finishing, and every retirement but the last is lost. The count never falls
+back to zero and the next `wait_queued_events_done` parks for good. **138 of
+the 308 block/step addresses a reload can land on were stuck.**
+
+The fix follows the port's own model: an action ends when the next one starts,
+so replacing `walker.cam` retires whatever was on it. The regression test is
+the shape that actually breaks — seek to every reload address, *then* play —
+because driving from cold cannot see it.
+
+Worth naming the pattern, because this is the second time this session: a
+check that exercises the healthy path and calls itself a regression test. The
+first was asserting the ring balances at block boundaries, which the engine's
+per-block reset makes almost unfalsifiable. Both times the missing question was
+*what sequence of calls actually produces the bug* — and both times it was a
+path the obvious test never takes.
+
+## `g_camera_free`: a room hands over when the camera does
+
+Now ported. `wait_enemies_present`, `wait_enemies_alive` and
+`wait_scripted_actors` all require `0x009C6F2D` on top of their counter, so the
+script does **not** advance on the frame the last enemy dies — it advances once
+no enemy holds a camera slot and the eased look-at has caught the path target.
+That beat is the difference between a room ending and a room cutting.
+
+The engine spreads it over two per-frame camera drivers — `FUN_00402E00`
+raises it from the slot array, `FUN_00402650` clears it on any frame the camera
+is not in return-to-path mode, and `CameraTurnOntoPathTarget` latches it on
+convergence. The port has one camera routine, so it writes out the conjunction
+those compute between them: no slot claimed, nothing alive, aim converged.
+
+Two things had to be fixed underneath it:
+
+* **`g_camera_settled` was never cleared.** `FUN_004022B0` zeroes it at the top
+  of the camera actor every frame and the convergence test raises it again — it
+  is a *this frame* answer. The port only ever raised it, so after the first
+  convergence it stayed 1 for the rest of the stage and anything gated on it
+  was permanently open. That had been invisible because only class 0x10's
+  `CameraSettled` wait read it.
+* **The convergence test cannot answer for an unposed camera.** `FUN_00401DF0`
+  divides by both lengths, and the port returns 0 rather than NaN when either
+  is degenerate — a look-at sitting exactly on the eye, before any path has
+  seated the block. Zero is never `> 0.99999`, so nothing would settle and, now
+  that room-clear gates hang off it, the script would park for ever. Convergence
+  is answered directly in that case: two coincident points are converged
+  whatever the eye is doing. A numerical guard, not a change to the rule —
+  and `port.test.ts` fails without it rather than trusting the reasoning.
+
+Still not ported, and now the only known gap in this family: the extra frame of
+hysteresis `wait_enemies_alive` alone carries (`g_evt_wait_alive_hysteresis`,
+`0x007DCCA8`), which makes its condition hold two frames running.

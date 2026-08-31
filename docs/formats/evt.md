@@ -219,10 +219,10 @@ inference; **[open]** = undetermined.
 | `40` | `wait_queued_events_done` | **[proved]** `g_queued_events_pending == 0`. `queue_event` adds one per action and every handler takes one back on completion **except `EvtActionFinishSequence21`**, which never retires itself — `31`/`32`/`33` do it for it |
 | `41` | `wait_camera_path_frame` | **[proved]** operand 0 = wait for the end of the path; otherwise wait until the path frame passes the operand |
 | `42` | `wait_frames` | **[proved]** countdown; only decrements while the gate is open, and `FUN_00499530` can clamp it downward to shorten a wait in progress |
-| `43` | `wait_enemies_present` | **[proved]** `g_enemies_present <= op`, and the camera has settled |
-| `44` | `wait_enemies_alive` | **[likely]** `g_enemies_alive <= op`, plus one frame of hysteresis. The two counters differ because `alive` drops at kill time and `present` at death-animation end, so `present >= alive` |
+| `43` | `wait_enemies_present` | **[proved]** `g_enemies_present <= op` **and `g_camera_free`** (`0x009C6F2D`) — so the room does not hand over on the frame the last enemy dies, but once no enemy holds a camera slot and the aim has swung back onto the rail |
+| `44` | `wait_enemies_alive` | **[likely]** `g_enemies_alive <= op`, `g_camera_free`, plus **one frame of hysteresis** (`g_evt_wait_alive_hysteresis`, `0x007DCCA8` — the condition must hold two frames running; no other wait has it). The two counters differ because `alive` drops at kill time and `present` at death-animation end, so `present >= alive` |
 | `45` | `wait_script_flag` | **[proved]** `g_script_flags[op]` — a 256-byte array at `0x009C7200` |
-| `46` | `wait_scripted_actors` | **[proved]** `g_civilians_alive <= op` — the **class-0x10 civilians**. Byte for byte the `43` handler on a different counter, and all 68 sites in the game pass operand 0, so it is always "wait for the last civilian to leave play" |
+| `46` | `wait_scripted_actors` | **[proved]** `g_civilians_alive <= op` — the **class-0x10 civilians**. Byte for byte the `43` handler on a different counter — `g_camera_free` included — and all 68 sites in the game pass operand 0, so it is always "wait for the last civilian to leave play" |
 | `47` | `wait_targets_clear` | **[likely]** camera settled and no live targetable entity registered. Depends on intra-frame task ordering that was not resolved |
 | `48` | `set_script_flag` | **[proved]** the writer half of `45` |
 | `49`–`4B` | `variant_*` | pick an operand list by a global |

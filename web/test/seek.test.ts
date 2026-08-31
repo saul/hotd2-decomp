@@ -48,6 +48,7 @@ const mkHost = (): WalkerHost => ({
   playSound: () => undefined,
   aliveEnemies: () => null,
   aliveCivilians: () => null,
+  cameraFree: () => null,
   setShutter: () => undefined,
   showMessage: () => undefined,
   endDialogue: () => undefined,
@@ -329,6 +330,51 @@ for (const stage of STAGES) {
   }
 }
 
+// The room-clear gates need the camera back, not just the count at zero.
+// `EvtOpWaitEnemiesPresent43` / `44` / `46` all test `g_camera_free`
+// (0x009C6F2D) as well as their counter, so the script holds through the swing
+// back onto the rail after the last enemy dies. Without it every room hands
+// over on the death frame.
+{
+  const file = join(ROOT, "stage2", "stage2.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    for (const [op, name] of [[0x43, "wait_enemies_present"],
+                              [0x44, "wait_enemies_alive"],
+                              [0x46, "wait_scripted_actors"]] as [number, string][]) {
+      const gate = { i: 0, at: 0, op, name, cat: "wait", arg: 0 } as unknown as OpJson;
+      const host = { ...mkHost(), aliveEnemies: () => 0, aliveCivilians: () => 0 };
+
+      const swinging = new Walker(script, { ...host, cameraFree: () => false });
+      swinging.applyWait(gate);
+      check(`0x${op.toString(16)} holds while the camera is still claimed`,
+            swinging.wait !== null,
+            "passed on the death frame");
+
+      const back = new Walker(script, { ...host, cameraFree: () => true });
+      back.applyWait(gate);
+      check(`0x${op.toString(16)} passes once the camera is back on its rail`,
+            back.wait === null);
+    }
+
+    // And it releases a gate already held, the frame the camera comes back.
+    const gate = { i: 0, at: 0, op: 0x43, name: "wait_enemies_present",
+                   cat: "wait", arg: 0 } as unknown as OpJson;
+    let free = false;
+    const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
+                                   aliveCivilians: () => 0,
+                                   cameraFree: () => free });
+    w.applyWait(gate);
+    w.tick(1 / 60);
+    const held = w.wait?.policy.kind === "enemies";
+    free = true;
+    w.tick(1 / 60);
+    check("a gate held by the camera releases when the swing finishes",
+          held && w.wait?.policy.kind !== "enemies" && w.opIndex > 0,
+          `now ${w.wait?.policy.kind ?? "idle"} at op ${w.opIndex}`);
+  }
+}
+
 // `wait_scripted_actors` (0x46) is `EvtOpWaitScriptedActors46`
 // (`FUN_0045FCD0`): the `wait_enemies_present` handler with
 // `g_civilians_alive` in place of `g_enemies_present`. It has to behave like
@@ -479,6 +525,58 @@ for (const stage of STAGES) {
           !negative && w.ringResidue === 0 && w.queuedEventsPending === 0,
           `${w.ringResidue} block(s) ended owing an action, ended on `
           + `${w.queuedEventsPending}${negative ? ", went negative" : ""}`);
+  }
+}
+
+// Reload, then play on. This is the shape the action-ring count actually
+// broke in: `seek` and `stepOnce` run instructions with **no clock**, so a
+// block's worth of `cam_play`s all queued without any of them ever reaching
+// the end of a path. The retirement was tracked in a single boolean, so all
+// but the last were lost and the count never fell back to zero -- a reload
+// into most of the game then parked for ever on the next
+// `wait_queued_events_done`. 138 of these 308 addresses were stuck.
+//
+// Driving the whole script from cold cannot see it, because ticking retires
+// each camera as it goes. Only replaying without a clock and *then* playing
+// does, which is exactly what the player does on load.
+{
+  for (const stage of STAGES) {
+    const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+    if (!existsSync(file)) continue;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+
+    // Every block/step a reload can land on -- the address the player puts in
+    // the URL is a block and a step.
+    const addrs: [number, number][] = [];
+    for (const blk of script.blocks ?? []) {
+      if (blk.hole || !blk.steps) continue;
+      for (let s = 1; s < blk.steps.length; s++) addrs.push([blk.index, s]);
+    }
+
+    let stuck = 0, seeks = 0, worst = "";
+    for (const [b, s] of addrs) {
+      const v = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
+                                     aliveCivilians: () => 0 });
+      if (!v.seek(b, s, 0)) continue;
+      seeks++;
+      let at = "", stalls = 0;
+      for (let i = 0; i < 60 * 60 * 8 && !v.finished; i++) {
+        if (v.branch) v.takeBranch(0);
+        v.tick(1 / 60);
+        const p = `${v.block}/${v.step}/${v.opIndex}`;
+        if (p === at) { if (++stalls > 60 * 90) break; } else { stalls = 0; at = p; }
+      }
+      if (!v.finished) {
+        stuck++;
+        if (!worst) {
+          worst = `${b}/${s} parked at ${v.block}/${v.step}/${v.opIndex} on `
+            + `${v.wait ? `0x${v.wait.op.op.toString(16)} (${v.wait.policy.kind})`
+                        : "no wait"}, pending ${v.queuedEventsPending}`;
+        }
+      }
+    }
+    check(`stage ${stage}: every reload point still plays to the end`,
+          stuck === 0, `${stuck} of ${seeks} stuck -- ${worst}`);
   }
 }
 

@@ -19,6 +19,8 @@ import { ActorSpawn, GameUpdate } from "../src/game/director";
 import { CamAdvancePathFrame, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
+import { CameraTrackEnemiesTick, UpdateCameraFreeFlag }
+  from "../src/game/camera/track";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { NULL_HOST } from "../src/game/host";
 import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
@@ -3114,6 +3116,50 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     check("...nor does an ordinary body condition",
           !ZombieShouldStandAndThrow(ordinary));
   }
+}
+
+// `g_camera_free` -- the gate every room-clear wait needs on top of its
+// counter. It is the flag that decides whether a room hands over on the frame
+// the last enemy dies or once the camera has swung back onto its rail, and the
+// way it fails is by never rising, which parks the script for good.
+{
+  ResetGameGlobals();
+
+  // Claimed: somebody is in the camera's slots.
+  G.g_enemy_slots = [0];
+  G.g_enemies_alive = 1;
+  G.g_camera_settled = 1;
+  UpdateCameraFreeFlag();
+  check("the camera is not free while an enemy holds a slot",
+        G.g_camera_free === 0);
+
+  // The slots have emptied but something is still alive.
+  G.g_enemy_slots = [];
+  UpdateCameraFreeFlag();
+  check("...nor while anything is still alive", G.g_camera_free === 0);
+
+  // Everything dead, but the aim is still swinging back.
+  G.g_enemies_alive = 0;
+  G.g_camera_settled = 0;
+  UpdateCameraFreeFlag();
+  check("...nor during the swing back onto the rail", G.g_camera_free === 0);
+
+  // And the moment the swing completes.
+  G.g_camera_settled = 1;
+  UpdateCameraFreeFlag();
+  check("the camera is free once the swing finishes", G.g_camera_free === 1);
+
+  // The failure that would park the script: a camera with no pose at all --
+  // look-at sitting on the eye -- makes the engine's cosine test divide by
+  // zero, and it answers 0, which is never > 0.99999. Nothing would settle and
+  // no room-clear gate would ever open.
+  ResetGameGlobals();
+  G.g_enemies_alive = 0;
+  G.g_enemy_slots = [];
+  CameraTrackEnemiesTick();
+  check("an unposed camera settles rather than parking the script for ever",
+        G.g_camera_settled === 1 && G.g_camera_free === 1,
+        `settled ${G.g_camera_settled}, free ${G.g_camera_free}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

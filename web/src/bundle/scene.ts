@@ -92,6 +92,12 @@ export interface RigRoute {
    * `cp_st1` 2: `CamEvalObjectPath6(0xFE, 350.0)`.
    */
   hold_frame?: number | null;
+  /**
+   * The frame past which the routine stops re-evaluating and holds the pose it
+   * last wrote. Not always the path length — `St1VehicleUpdate` stops at
+   * `0x15D` (349) where `op_st1` 1's length is 350.
+   */
+  stop_frame?: number | null;
   /** What the routine does at the end of this route, from the transcription. */
   note?: string;
 }

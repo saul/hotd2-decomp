@@ -26,6 +26,12 @@ Checks, each chosen to collapse if the reading is wrong:
     `op_` file
   * the object-path slot constants found in the code land in `op_` files and
     never in `cp_` ones
+  * **no rig route is evaluated before its own keys begin.** A route the
+    player rides from frame 0 whose channels start later is extrapolated
+    backwards along the opening segment, and `CamEvalHermiteCurve` does not
+    clamp -- it ran the stage-1 car's yaw to eleven turns when `op_st1` 2 was
+    wrongly listed as a route. A route with `hold_frame` is exempt: it is
+    evaluated at that literal and never swept.
 
 Usage:
     python3 tools/verify_objects.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2"
@@ -86,6 +92,8 @@ def main() -> int:
           f"defined, ids {min(known_classes)}..{max(known_classes)}")
 
     # global path slot -> file stem, via the EXE's own per-file slot lists
+    #: Every resolved path slot, across all stages, for the route checks.
+    all_paths: dict = {}
     slot_file: dict[int, str] = {}
     for p in sorted((game / "cam").glob("*.bin")):
         for s in tables.cam_slots_for(p.stem) or []:
@@ -132,6 +140,9 @@ def main() -> int:
 
         cp = st.campaths()
         op_paths = [r for r in cp.by_slot.values() if r.is_object_path] if cp else []
+        if cp:
+            for _r in cp.by_slot.values():
+                all_paths.setdefault(_r.slot, _r)
         want = f"op_st{stage_no}"
         for r in op_paths:
             if r.file != want:
@@ -215,6 +226,40 @@ def main() -> int:
                     problems.append(
                         f"{rig.name}: route {r.slot:#05x} is in {rf} but its "
                         f"gate {cam:#05x} is in {cf} -- it could never fire")
+
+    print()
+    print("rig routes evaluated before their own keys begin:")
+    swept = late = 0
+    for rig in rigslib.RIGS:
+        for r in rig.routes:
+            ref = all_paths.get(r.slot)
+            if ref is None:
+                continue
+            if r.hold_frame is not None:
+                # Parked at a literal: the frame never sweeps, so a channel
+                # starting late is not reached.
+                continue
+            swept += 1
+            firsts = {n: c.keys[0].time
+                      for n, c in ref.path.channels.items() if c.keys}
+            if not firsts:
+                continue
+            start = min(firsts.values())
+            worst = max(firsts.values())
+            # The routines start at g_cam_path_frame 0 and clamp only at the
+            # top, so any channel whose first key is above max(0, start) is
+            # evaluated outside its own range.
+            floor = max(0.0, start)
+            bad = {n: t for n, t in firsts.items() if t > floor + 1.0}
+            if bad:
+                late += 1
+                names = ", ".join(f"{n}@{t:g}" for n, t in sorted(bad.items()))
+                print(f"  {rig.name}: route {r.slot:#05x} swept from "
+                      f"{floor:g} but {names}")
+                problems.append(
+                    f"{rig.name}: route {r.slot:#05x} is swept from frame "
+                    f"{floor:g} but its {names} -- extrapolated backwards")
+    print(f"  {swept} swept routes checked, {late} evaluated before their keys")
 
     print()
     print("object-path slot constants found in the draw routines:")

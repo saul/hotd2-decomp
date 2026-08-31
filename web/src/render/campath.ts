@@ -21,7 +21,7 @@ const CP_CHANNELS = [
   "roll",
 ] as const;
 
-const OP_CHANNELS = [
+export const OP_CHANNELS = [
   "pos_x", "pos_y", "pos_z",
   "rot_x", "rot_y", "rot_z",
 ] as const;

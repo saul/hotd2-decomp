@@ -5466,3 +5466,95 @@ one rig has two routes on the same slot.
    passing a literal to `CamEvalObjectPath6` is a `hold_frame`, and grepping
    the decompilation for a float constant in that argument would find them all.
 2. Implement `condition` on parts so `_MOVING` actually gates the trails.
+
+---
+
+## Session 2026-08-31c — the rest of the stage-1 vehicle, and a route sweep
+
+Follow-up to the previous entry. Four things, all in `St1VehicleUpdate`'s orbit.
+
+### 0. A regression I introduced, and the assumption it exposed
+
+Giving `cp_st1` 2 its own `Route(0xFE, hold_frame=350.0)` left the rig with
+**two routes on slot 0xFE**, and `rigs.ts` built its route lookup as
+`Map<slot, route>`. The second overwrote the first, so during `cp_st1` 1 no
+instance gate matched `0x21` and the car stopped following the path at all --
+the fix for the spin broke the drive before it.
+
+The exporter emits one glTF root per *path slot*, so an instance is a slot and
+may carry several routes. `Instance` now holds `routes: RigRoute[]` and
+`update` picks the one whose `cam_paths` includes the active shot, falling back
+to an ungated route and then to the first. A slot with one route behaves
+exactly as before.
+
+Worth remembering: **one route per slot was an assumption nothing stated.** It
+held only because no transcribed rig had yet used a slot twice.
+
+### 1. `stop_frame`
+
+The routine's own "stop re-evaluating" test is not the path length.
+`St1VehicleUpdate` stops at `0x15D` (349); `op_st1` 1's length is 350. So the
+held pose is the path at 349 and never at 350. `Route.stop_frame` records it
+and the player clamps with `min(stop_frame, length)`.
+
+### 2. `hidden_unless="moving"`
+
+The four dust trails are drawn inside `if (obj+0x1320 != 0)`. That flag is
+clear whenever the object is parked or has run out, so a stopped car must not
+trail dust. `RigPart.condition` already said so in English; the machine-readable
+half is new, and the player now hides those parts when the instance is frozen
+or riding a `hold_frame` route.
+
+### 3. `path_rotation` — the occupants' yaw
+
+`obj+0x1334 = CamEvalObjectPath6(0xFF, t).rot_y - 0x4000`, with
+`t = clamp(g_cam_path_frame, 0, 0x31) + 100.0`, or `150.0` outside that range.
+It rotates one occupant in Y and the other by its negation, the latter only
+while `obj+0x1324` (two players) is set.
+
+Three things about it that a "bake the pose" model cannot express, and which is
+why `PathRotation` exists at all: the angle comes from a **different path**
+than the body's, on a **different clock** than the camera frame, and it applies
+only on **one shot**. Before `cp_st1` 2 the field is still zero, which is why
+the occupants face forward for the whole drive and only turn once the car has
+stopped.
+
+The renderer composes it onto the part's baked quaternion, so the exported pose
+stays the identity case.
+
+### 4. The sweep, and what it did and did not find
+
+**[measured]** All 51 `CamEvalObjectPath6` call sites, scanned for a `PUSH
+imm32` decoding to a plausible frame float in the 24 bytes before the call:
+nine hits, at `0048E64D`, `0048E6BD`, `0048F964`, `0048F9C4`, `0048FACF`,
+`00426BA3`, `00426C83`, `0047F715`, `00432AB6`. Only the first two are in a
+transcribed rig, and both are `St1VehicleUpdate`'s, already handled. So **no
+other transcribed rig parks on a literal.**
+
+The scan's blind spot, and it matters: `obj_432840` has the same *rule* --
+"the pose is the route sampled ONCE at the table's freeze frame and held" until
+`obj+0x1320` flips -- but the freeze frame comes from the table at
+`0x00589AE0`, not a literal, so no byte pattern finds it. Its four routes
+(`0x145`, `0x146`, `0x149`, `0x14A`) are still swept from frame 0 by the
+player. **[open]**
+
+### The check that would have caught it
+
+`verify_objects.py` gains: no swept route may be evaluated before its own keys
+begin. A `hold_frame` route is exempt, since its frame never sweeps. Confirmed
+it fails on the original bug -- restoring `Route(0xFF, cam_paths=(0x22,))`
+makes it report `route 0x0ff swept from 0 but rot_x@100, rot_y@100, rot_z@100`
+and exit 1. Currently 27 swept routes, 0 bad.
+
+The whole-corpus form of the same question across the exported bundles found
+only four routes whose channels start at different frames at all, none of them
+reached early: `st1_vehicle` `0xFD` (pos -5, rot -25) and `obj_48f190` `0x17A`
+(rot 0, pos -10).
+
+### Next actions
+
+1. `obj_432840`'s freeze frames come from `0x00589AE0`. Read that table, give
+   `Route` a `hold_frame_from` or resolve it at export, and the four routes
+   stop being swept from 0.
+2. `hidden_unless` currently has one value. `RigPart.condition` carries several
+   other rules in English across the 12 rigs; each is a candidate.

@@ -47,18 +47,55 @@
  * it is not applied here; a rig that freezes stays until the stage is reset.
  */
 
-import { Euler, Object3D, Vector3 } from "three";
+import { Euler, Object3D, Quaternion, Vector3 } from "three";
 import type { RigsJson, RigRoute } from "../bundle";
 import type { CamPaths } from "./campath";
+import { OP_CHANNELS } from "./campath";
 
 /** BAMS -> radians. */
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
+/** `hod2_path_rotation`: a part rotation the routine drives from a path. */
+interface PathRotationRule {
+  slot: number;
+  channel: string;
+  axis: "x" | "y" | "z";
+  scale: number;
+  offset_bams: number;
+  frame_offset: number;
+  frame_lo: number | null;
+  frame_hi: number | null;
+  frame_default: number | null;
+  cam_paths: number[];
+}
+
+/** One `rig_part` node, with the rules the routine applies to it. */
+interface Part {
+  node: Object3D;
+  /** The pose the exporter baked, which a path rotation composes onto. */
+  baked: Quaternion;
+  /** `"moving"`: drawn only while the object's moving flag is set. */
+  hiddenUnless: string;
+  pathRotation: PathRotationRule | null;
+}
+
 interface Instance {
   root: Object3D;
   rig: string;
+  /** `rig_part` descendants carrying a rule the player can act on. */
+  parts: Part[];
+  /**
+   * Every route that names this instance's path slot.
+   *
+   * The exporter emits one root per **slot**, but a routine may name the same
+   * slot from two different shots under different rules -- the stage-1 vehicle
+   * rides `op_st1` 1 on `cp_st1` 1 and parks on it on `cp_st1` 2. Keying a
+   * route by slot alone silently drops one of them.
+   */
+  routes: RigRoute[];
+  /** The route the camera currently selects, out of {@link routes}. */
   route: RigRoute | null;
-  /** cp_ slots that select this route; empty means always present. */
+  /** cp_ slots that select any of this instance's routes; empty means always. */
   gate: number[];
   /** True once the path has run out and the pose is held. */
   frozen: boolean;
@@ -93,6 +130,7 @@ export class RigLayer {
   private enabled = true;
   private readonly _e = new Euler();
   private readonly _v = new Vector3();
+  private readonly _q = new Quaternion();
 
   /** Find the rig roots the exporter emitted and bind each to its route. */
   attach(root: Object3D, json: RigsJson | undefined, paths: CamPaths): void {
@@ -100,10 +138,12 @@ export class RigLayer {
     this.paths = paths;
     if (!json) return;
 
-    const routeBySlot = new Map<number, { rig: string; route: RigRoute }>();
+    const routesBySlot = new Map<number, { rig: string; routes: RigRoute[] }>();
     for (const rig of json.rigs) {
       for (const route of rig.routes) {
-        routeBySlot.set(route.slot, { rig: rig.name, route });
+        let e = routesBySlot.get(route.slot);
+        if (!e) routesBySlot.set(route.slot, (e = { rig: rig.name, routes: [] }));
+        e.routes.push(route);
       }
     }
 
@@ -112,12 +152,34 @@ export class RigLayer {
                                hod2_rig?: string };
       if (x?.hod2_kind !== "rig") return;
       const slot = x.hod2_path_slot;
-      const bound = slot === undefined ? undefined : routeBySlot.get(slot);
+      const bound = slot === undefined ? undefined : routesBySlot.get(slot);
+      const routes = bound?.routes ?? [];
+      // The part rules live on the `rig_part` descendants of this root.
+      const parts: Part[] = [];
+      o.traverse((c) => {
+        const px = c.userData as {
+          hod2_kind?: string; hod2_hidden_unless?: string;
+          hod2_path_rotation?: PathRotationRule;
+        };
+        if (px?.hod2_kind !== "rig_part") return;
+        if (!px.hod2_hidden_unless && !px.hod2_path_rotation) return;
+        parts.push({
+          node: c,
+          baked: c.quaternion.clone(),
+          hiddenUnless: px.hod2_hidden_unless ?? "",
+          pathRotation: px.hod2_path_rotation ?? null,
+        });
+      });
       this.instances.push({
         root: o,
         rig: x.hod2_rig ?? "?",
-        route: bound?.route ?? null,
-        gate: bound?.route.cam_paths ?? [],
+        parts,
+        routes,
+        route: routes[0] ?? null,
+        // An ungated route makes the whole instance ungated; otherwise the
+        // gate is the union, and `update` picks which route applies.
+        gate: routes.some((r) => r.cam_paths.length === 0)
+          ? [] : routes.flatMap((r) => r.cam_paths),
         frozen: false,
         frame: 0,
       });
@@ -180,6 +242,14 @@ export class RigLayer {
 
       // A selected route re-samples; a held one keeps the frame it stopped at.
       if (show === selected) {
+        // Pick which of this slot's routes the current shot selects. An
+        // ungated route is the fallback, then the first route at all, so a
+        // slot with a single route behaves exactly as before.
+        show.route = show.routes.find(
+          (r) => camSlot !== null && r.cam_paths.includes(camSlot))
+          ?? show.routes.find((r) => r.cam_paths.length === 0)
+          ?? show.routes[0] ?? null;
+        if (!show.route) continue;
         const hold = show.route.hold_frame;
         if (hold != null) {
           // The routine passes a literal time, so the object is parked on the
@@ -190,12 +260,64 @@ export class RigLayer {
           show.frozen = true;
           show.frame = hold;
         } else {
-          const end = show.route.length ?? Number.POSITIVE_INFINITY;
+          // The routine stops on its own test where it has one, and on the
+          // path length otherwise. They are not the same frame: the stage-1
+          // vehicle stops at 349 while op_st1 1 runs to 350, so the held pose
+          // is the path at 349 and never at 350.
+          const end = Math.min(show.route.stop_frame ?? Number.POSITIVE_INFINITY,
+                               show.route.length ?? Number.POSITIVE_INFINITY);
           show.frozen = camFrame > end;
           show.frame = Math.min(end, camFrame);
         }
       }
       this.place(show, show.frame);
+      this.applyPartRules(show, camSlot, camFrame);
+    }
+  }
+
+  /**
+   * The per-part rules the routine applies at draw time.
+   *
+   * Two of them, both from `St1VehicleUpdate`. The dust trails sit inside
+   * `if (obj+0x1320 != 0)`, so a parked or finished object does not draw them.
+   * The occupants' yaw is `obj+0x1334`, which the routine fills from a *second*
+   * path evaluation on its own clock -- not the camera frame, and not the
+   * frame the body is posed at.
+   */
+  private applyPartRules(inst: Instance, camSlot: number | null,
+                         camFrame: number): void {
+    if (!inst.parts.length) return;
+    const moving = !inst.frozen && inst.route?.hold_frame == null;
+    for (const part of inst.parts) {
+      if (part.hiddenUnless === "moving") part.node.visible = moving;
+
+      const r = part.pathRotation;
+      if (!r) continue;
+      // The rule applies only on the shots the routine writes the field in;
+      // elsewhere the field still holds whatever it was, which is zero.
+      const on = r.cam_paths.length === 0
+        || (camSlot !== null && r.cam_paths.includes(camSlot));
+      if (!on) {
+        part.node.quaternion.copy(part.baked);
+        continue;
+      }
+      let t: number;
+      if (r.frame_lo != null && r.frame_hi != null
+          && (camFrame < r.frame_lo || camFrame > r.frame_hi)
+          && r.frame_default != null) {
+        t = r.frame_default;
+      } else {
+        t = camFrame + r.frame_offset;
+      }
+      const path = this.paths?.objectPaths.get(r.slot);
+      if (!path) continue;
+      const ch = OP_CHANNELS.indexOf(r.channel as typeof OP_CHANNELS[number]);
+      if (ch < 0) continue;
+      const bams = r.scale * (path.channel(ch, t) + r.offset_bams);
+      this._e.set(0, 0, 0, "ZYX");
+      this._e[r.axis] = bams * BAMS_TO_RAD;
+      part.node.quaternion.copy(part.baked)
+        .multiply(this._q.setFromEuler(this._e));
     }
   }
 

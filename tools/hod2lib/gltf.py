@@ -1045,6 +1045,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
                     "extras": {
                         "hod2_kind": "rig_part",
                         "hod2_rig": rig.name, "hod2_routine": rig.routine,
+                        "hod2_part": part.name,
                         "hod2_slots": [f"0x{x:04X}" for x in part.slots],
                     },
                 }
@@ -1054,6 +1055,21 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
                     node["extras"]["hod2_draw_layer"] = part.draw_layer
                 if part.condition:
                     node["extras"]["hod2_condition"] = part.condition
+                if part.hidden_unless:
+                    # The machine-readable half of `condition`: the client can
+                    # act on this one rather than only showing it.
+                    node["extras"]["hod2_hidden_unless"] = part.hidden_unless
+                if part.path_rotation is not None:
+                    pr = part.path_rotation
+                    node["extras"]["hod2_path_rotation"] = {
+                        "slot": pr.slot, "channel": pr.channel, "axis": pr.axis,
+                        "scale": pr.scale, "offset_bams": pr.offset_bams,
+                        "frame_offset": pr.frame_offset,
+                        "frame_lo": pr.frame_lo, "frame_hi": pr.frame_hi,
+                        "frame_default": pr.frame_default,
+                        "cam_paths": list(pr.cam_paths),
+                        "condition": pr.condition, "note": pr.note,
+                    }
                 if part.animated:
                     # Recorded, never baked: these are runtime-driven and the
                     # export has no frame to bake from.

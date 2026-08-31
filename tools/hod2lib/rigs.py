@@ -71,6 +71,12 @@ class Route:
     #: path. ``None`` means the usual ``min(g_cam_path_frame,
     #: cam_path_length[slot])``.
     hold_frame: float | None = None
+    #: The frame past which the routine stops re-evaluating entirely and holds
+    #: the pose it last wrote -- a test in the routine, *not* the path length.
+    #: `St1VehicleUpdate` uses ``0x15D`` (349) where op 0xFE's length is 350,
+    #: so the held pose is the path at 349 and never at 350. ``None`` means the
+    #: routine has no such test and the length is the only limit.
+    stop_frame: int | None = None
     #: Added to the path *position* before the pose rotations are applied, so
     #: it cannot be expressed as a child offset of the rotated anchor.
     bias: Vec3 = (0.0, 0.0, 0.0)
@@ -87,6 +93,33 @@ class FixedPose:
 
 
 @dataclass(frozen=True)
+class PathRotation:
+    """A part rotation the routine drives from an ``op_`` path channel.
+
+    `St1VehicleUpdate` is the case this exists for: on `cp_st1` 2 it evaluates
+    op_st1 2 for ``rot_y`` alone and writes ``rot_y - 0x4000`` to obj+0x1334,
+    which then rotates the two occupants in Y -- one by it, the other by its
+    negation. The angle is therefore ``scale * (channel + offset_bams)``.
+
+    The evaluation time is the routine's own, not the camera frame:
+    ``clamp(g_cam_path_frame, frame_lo, frame_hi) + frame_offset``, or
+    ``frame_default`` when the frame falls outside ``[frame_lo, frame_hi]``.
+    """
+    slot: int                              #: op_ slot to evaluate
+    channel: str                           #: which channel supplies the angle
+    axis: str                              #: "x", "y" or "z" -- the MatrixRotate
+    scale: float = 1.0                     #: applied after ``offset_bams``
+    offset_bams: int = 0                   #: added to the channel value
+    frame_offset: float = 0.0
+    frame_lo: float | None = None
+    frame_hi: float | None = None
+    frame_default: float | None = None
+    cam_paths: tuple[int, ...] = ()        #: shots where the rule applies
+    condition: str = ""                    #: when the routine applies it at all
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class RigPart:
     name: str
     slots: tuple[int, ...]                 #: AssetDrawSlot ids, drawn in order
@@ -96,6 +129,13 @@ class RigPart:
     draw_layer: int | None = None          #: SetDrawLayerNibble, if overridden
     animated: str = ""                     #: runtime rule, not baked
     condition: str = ""                    #: when the routine draws it at all
+    #: Machine-readable form of `condition` for the cases the player can act
+    #: on. ``"moving"`` means the routine draws the part only while the
+    #: object's moving flag is set -- obj+0x1320 for the stage-1 vehicle --
+    #: which is false whenever the route is parked or has run out.
+    hidden_unless: str = ""
+    #: A rotation driven from a path channel rather than baked.
+    path_rotation: "PathRotation | None" = None
     #: When the rig's class selects between prop sets with a parameter, the
     #: value of that selector this part is drawn for. None means always.
     variant: int | None = None
@@ -170,15 +210,29 @@ _MOVING = "only while obj+0x1320 (moving) is set"
 #: The stage-1 opening vehicle. `FUN_0048E600` picks its route from the camera
 #: path -- cp_st1 0/1/2 (0x20/0x21/0x22) select op_st1 0/1/2 (0xFD/0xFE/0xFF) --
 #: so the object runs in lockstep with the shot.
+#: obj+0x1334, the stage-1 occupants' yaw: op_st1 2's `rot_y` less 0x4000,
+#: evaluated at the routine's own clamped time, and only on cp_st1 2. Before
+#: that shot the field is still zero, which is why the occupants face forward
+#: for the whole drive and only turn once the car has stopped.
+_ST1_OCCUPANT_YAW = dict(
+    slot=0xFF, channel="rot_y", axis="y", offset_bams=-0x4000,
+    frame_offset=100.0, frame_lo=0.0, frame_hi=0x31, frame_default=150.0,
+    cam_paths=(0x22,),
+    note="obj+0x1334 = CamEvalObjectPath6(0xFF, t).rot_y - 0x4000, where "
+         "t = g_cam_path_frame + 100.0 for frames 0..0x31 and 150.0 outside "
+         "that range",
+)
+
 ST1_VEHICLE = Rig(
     name="st1_vehicle",
     routine="FUN_0048E600",
     routes=(
         Route(0xFD, cam_paths=(0x20,)),
-        Route(0xFE, cam_paths=(0x21,),
+        Route(0xFE, cam_paths=(0x21,), stop_frame=0x15D,
               note="obj+0x1320 is cleared once the frame passes 0x15D (349) "
                    "and the routine then stops re-evaluating, so the pose is "
-                   "held at the end of the path"),
+                   "held at frame 349 -- never at 350, which is the path's "
+                   "own length"),
         # cp_st1 2 does NOT ride a path. `FUN_0048E600` evaluates op 0xFE at
         # the literal 0x43AF0000 = 350.0 -- the end of the path the car has
         # just finished -- and clears obj+0x1320, so the car is parked and its
@@ -215,13 +269,15 @@ ST1_VEHICLE = Rig(
         RigPart("side_left", (0x157C, 0x157D),
                 translation=(-10.0702, 6.1773, 6.8503),
                 draw_layer=0xC,
-                animated="RotY by obj+0x1334 = rot_y of op_st1 2 (slot 0xFF) "
-                         "at frame clamp(g_cam_path_frame, 0, 0x31) + 100, or "
-                         "150.0 when out of that range, minus 0x4000",
+                path_rotation=PathRotation(**_ST1_OCCUPANT_YAW),
+                animated="RotY by obj+0x1334",
                 note="[likely] an occupant; drawn in layer 0xC, then the "
                      "routine restores layer 8"),
         RigPart("side_right", (0x157A, 0x157B),
                 translation=(10.077, 6.211, 6.8302),
+                path_rotation=PathRotation(**dict(_ST1_OCCUPANT_YAW, scale=-1.0,
+                    condition="only while obj+0x1324 is set, which happens "
+                              "when two players are in play")),
                 animated="RotY by -obj+0x1334",
                 condition="the RotY is applied only while obj+0x1324 is set, "
                           "which happens when two players are in play",
@@ -244,19 +300,19 @@ ST1_VEHICLE = Rig(
         # ground effect, not a wheel: the wheels are modelled into the body.
         RigPart("trail_fl", (0x08CE,), translation=(-9.63, 0.0, 15.989),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
-                condition=_MOVING,
+                condition=_MOVING, hidden_unless="moving",
                 note="[likely] a dust/spray trail behind a wheel"),
         RigPart("trail_fr", (0x08CE,), translation=(9.63, 0.0, 15.989),
                 scale=(-1.0, 1.0, 1.0),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
-                condition=_MOVING),
+                condition=_MOVING, hidden_unless="moving"),
         RigPart("trail_rl", (0x08CE,), translation=(-9.63, 0.0, -12.9132),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
-                condition=_MOVING),
+                condition=_MOVING, hidden_unless="moving"),
         RigPart("trail_rr", (0x08CE,), translation=(9.63, 0.0, -12.9132),
                 scale=(-1.0, 1.0, 1.0),
                 animated="model cycles DAT_009A32A0 % 12 + 0x8CE",
-                condition=_MOVING),
+                condition=_MOVING, hidden_unless="moving"),
     ),
 )
 
@@ -968,7 +1024,7 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
         routes: list[dict] = []
 
         def take(slot, cam_paths, bias=(0.0, 0.0, 0.0), hold_frame=None,
-                 note=""):
+                 note="", stop_frame=None):
             if slot is None or slot not in have:
                 return
             if cam_paths and not (set(cam_paths) & have_cam):
@@ -979,13 +1035,14 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
             # vehicle does (cp_st1 1 rides op 0xFE, cp_st1 2 parks on it).
             routes.append({"slot": slot, "bias": tuple(bias),
                            "cam_paths": [c for c in cam_paths],
-                           "hold_frame": hold_frame, "note": note})
+                           "hold_frame": hold_frame, "note": note,
+                           "stop_frame": stop_frame})
 
         for slot in rig.path_slots:          # flat spelling, no cam gate
             take(slot, ())
         for route in rig.routes:
             take(route.slot, route.cam_paths, route.bias, route.hold_frame,
-                 route.note)
+                 route.note, route.stop_frame)
 
         fixed = [{"kind": "fixed", "translation": list(fp.translation),
                   "rotation_bams": list(fp.rotation_bams),

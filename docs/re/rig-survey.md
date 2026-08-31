@@ -40,7 +40,29 @@ Treating `0xFF` as a route the car rides is what made the browser player fly
 the car through the camera while spinning it eleven and a half times -- the
 evaluator extrapolates backwards along the opening segment, and at frame 0
 `rot_y` reaches 762,158 BAMS. A `Route` now carries `hold_frame` for the
-literal case. See the session log.
+literal case, and `verify_objects.py` fails if any swept route is evaluated
+before its own keys begin.
+
+**[measured]** Sweeping all 51 `CamEvalObjectPath6` call sites for a float
+literal in the time argument finds nine, and only `St1VehicleUpdate`'s two are
+in a transcribed rig. `obj_432840` has the same *shape* of rule -- its pose is
+"sampled ONCE at the table's freeze frame and held" until `obj+0x1320` flips --
+but the freeze frame comes from the table at `0x00589AE0` rather than a
+literal, so the scan cannot see it. It is recorded in that rig's note and is
+**[open]**: the player still sweeps those four routes from frame 0.
+
+Two other stop rules a route may carry:
+
+* `stop_frame` -- the frame past which the routine stops re-evaluating and
+  holds what it last wrote. **Not** the path length: `St1VehicleUpdate` stops
+  at `0x15D` (349) where `op_st1` 1 runs to 350.
+* `RigPart.hidden_unless="moving"` -- the part sits inside
+  `if (obj+0x1320 != 0)`, so a parked or finished object does not draw it. The
+  stage-1 vehicle's four dust trails are the case.
+* `RigPart.path_rotation` -- a part rotation driven from a path channel on the
+  routine's *own* clock rather than the camera frame. The stage-1 occupants'
+  yaw is `op_st1` 2's `rot_y` less `0x4000`, sampled at
+  `clamp(frame, 0, 0x31) + 100`.
 
 ## How a rig is bound to a stage
 

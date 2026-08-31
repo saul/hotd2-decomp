@@ -604,6 +604,10 @@ def rigs_json(instances, blocked, campaths, campaths_tables) -> dict:
                 # than the clamped camera frame -- the object is parked at a
                 # fixed point on the path, not riding it.
                 "hold_frame": r.get("hold_frame"),
+                # The routine's own "stop re-evaluating" test, which is not
+                # always the path length: St1VehicleUpdate stops at 0x15D
+                # (349) where op 0xFE's length is 350.
+                "stop_frame": r.get("stop_frame"),
                 # What the routine does when the path runs out. The
                 # transcription records it per route; it is the difference
                 # between "the object vanishes" and "the object freezes and

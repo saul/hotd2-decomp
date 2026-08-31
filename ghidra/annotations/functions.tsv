@@ -500,6 +500,6 @@
 0048d9f0	CivilianHookStartFall	Op 0x10 hook: zero the y velocity, set obj+0x5C to -0.02722 and install CivilianHookFallStep. Consumes two dwords.
 0048da20	CivilianHookFallStep	Per-frame: obj+0x50 += obj+0x5C, obj+0x44 += obj+0x50, and when QueryGroundHeightAt(x, y+100, z) is at or above the new height, snap to it, raise sub+0x18 (which wait bit 0x400 waits for) and uninstall.
 0048da90	CivilianHookRideChildren	Op 0x10 hook: install CivilianHookRideChildrenStep. Consumes two dwords.
-0048dab0	CivilianHookRideChildrenStep	Per-frame: averages the surviving children's positions so a civilian is carried between its captors. Uninstalls itself once the object is flagged dead.
+0048dab0	CivilianHookRideChildrenStep	Per-frame: averages the surviving children's positions and turns the civilian toward it with ActorTurnTowardPoint capped at 0x80 BAMS -- a facing, not a carry. Uninstalls itself once the object is flagged dead, and does NOT raise sub+0x18, so wait bit 0x400 never ends on this one.
 0048db90	CivilianHookLaunchUp	Op 0x10 hook: take one dword as the launch y speed, raise obj+0x34 bit 0x80000 and install the fall step. Consumes three dwords.
 0048dbd0	CivilianHookLaunch	Op 0x10 hook: take three dwords as a whole launch velocity and install the fall step. Consumes five dwords.

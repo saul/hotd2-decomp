@@ -30,12 +30,13 @@ const GAME_HZ = 60;
 /** Put one actor in the pool and run its class's `Init`. */
 export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
                            name: string,
-                           descriptor?: Partial<Actor>): Actor {
+                           descriptor?: Partial<Actor>,
+                           rng?: Rng): Actor {
   const obj = makeActor(at, cls, charType, name);
   // The descriptor tail is what the class's own Init reads, so it goes on
   // before Init runs -- `EnemyZombieInit` starts the actor in `initialState`.
   if (descriptor) Object.assign(obj, descriptor);
-  g_class_handlers[cls]?.init(obj);
+  g_class_handlers[cls]?.init(obj, rng);
   G.g_object_list.push(obj);
   return obj;
 }
@@ -148,6 +149,11 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // waits on frame one.
   G.g_enemies_present = G.g_object_list
     .filter((o) => o.visible && ActorIsEnemy(o.cls)).length;
+
+  // `ActorDespawn` unlinked these; the pool is a list, so they leave here.
+  if (G.g_object_list.some((o) => o.despawned)) {
+    G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
+  }
 
   const f = { eye, dt, rng, host, events };
   for (const obj of G.g_object_list) {

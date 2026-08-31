@@ -26,7 +26,7 @@ import { vec3 } from "../src/game/vec.ts";
 
 const root = join(process.env.HOME, "hotd2-decomp/extract/player");
 const SECONDS = 30;
-let total = 0, moved = 0, rescued = 0, bad = 0;
+let total = 0, moved = 0, rescued = 0, holding = 0, bad = 0;
 
 for (let stage = 1; stage <= 6; stage++) {
   let script;
@@ -42,6 +42,7 @@ for (let stage = 1; stage <= 6; stage++) {
                 script.coli, civ);
   G.g_coli_full_set = Object.keys(script.coli?.blobs ?? {});
 
+  const rng = new Rng(7);
   const places = new Map(
     (script.characters?.placements ?? []).map((p) => [p.at, p]));
   const actors = [];
@@ -58,8 +59,10 @@ for (let stage = 1; stage <= 6; stage++) {
       k.hp = k.maxHp = kid.hp || 1;
       k.pos = vec3(kid.pos[0], kid.pos[1], kid.pos[2]);
     }
+    // The Init draws: op 0x15 picks what the civilian is holding with a
+    // weighted `rand()`, and without a generator that whole opcode is skipped.
     const a = ActorSpawn(Number(at), SpawnClass.Civilian, rec.charType,
-                         `civ@${at}`);
+                         `civ@${at}`, undefined, rng);
     a.visible = true;
     actors.push(a);
   }
@@ -67,7 +70,6 @@ for (let stage = 1; stage <= 6; stage++) {
 
   const events = new Events();
   events.on("civilian.rescued", () => { rescued += 1; });
-  const rng = new Rng(7);
   const start = actors.map((a) => a.civ?.cursor ?? -1);
   let steps = 0;
   const seen = actors.map(() => new Set());
@@ -91,6 +93,10 @@ for (let stage = 1; stage <= 6; stage++) {
   for (let i = 0; i < actors.length; i++) {
     total += 1;
     if ((actors[i].civ?.cursor ?? -1) !== start[i]) { moved += 1; stageMoved += 1; }
+    // Either arm counts: op 0x15 chooses and op 0x13/0x14 append, and the
+    // append is usually many blocks further into the stream than 30s reaches.
+    if ((actors[i].civ?.items.length ?? 0) > 0
+        || (actors[i].civ?.pickedItem ?? -1) >= 0) holding += 1;
     // A stream that visits more distinct cursors than it has commands has
     // wrapped, which the flat index cannot do -- so this is a runaway.
     const len = (civ.scripts[actors[i].civ?.script ?? 0] ?? []).length;
@@ -105,15 +111,16 @@ for (let stage = 1; stage <= 6; stage++) {
 }
 
 console.log(`\n${total} civilians driven, ${moved} advanced, `
-            + `${rescued} rescued, ${bad} runaway`);
+            + `${rescued} rescued, ${holding} holding something, `
+            + `${bad} runaway`);
 
 /**
  * What a full six-stage bundle gives. The fourteen that do not advance are
  * waiting on camera cues and script flags this harness never raises -- both
  * of stage 6's are -- which is a property of the harness, not of the port.
  */
-const EXPECT = { total: 47, moved: 33, rescued: 21 };
-const got = { total, moved, rescued };
+const EXPECT = { total: 47, moved: 35, rescued: 25, holding: 4 };
+const got = { total, moved, rescued, holding };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
 if (bad || total === 0 || missing.length) {
   console.log("\nFAIL");
@@ -126,5 +133,6 @@ if (bad || total === 0 || missing.length) {
   }
   process.exit(1);
 }
-console.log("\nclean -- every shipped stream steps, none runs away, and "
-            + "killing the captors rescues 21 of the 47");
+console.log("\nclean -- every shipped stream steps, none runs away, killing "
+            + "the captors rescues 25 of the 47, and 4 end up holding "
+            + "something");

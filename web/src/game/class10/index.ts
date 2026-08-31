@@ -69,24 +69,40 @@
  *
  * ## What this does not do
  *
- * [diverges] The pose half stays in the renderer. `CivilianApplyMotionPose`
- * (`FUN_0048C310`) blends the clip, takes the root translation off the pol
- * file and turns the body by the difference between two bone directions;
- * `CivilianDrawHeldItems` (`FUN_0048CD10`) draws whatever ops 0x13-0x15 put in
- * the actor's hands; `CivilianUpdateOnCarrier` (`FUN_0048B140`) pushes a
- * carrier object's matrix around the whole update. None of that is reachable
- * from `game/`, so the opcodes that only feed it are decoded, named, and left
- * as no-ops rather than approximated.
+ * [diverges] The **drawing** stays in the renderer, which is where it belongs:
+ * `CivilianDrawHeldItems` (`FUN_0048CD10`) is `syncHeldItems` in
+ * `render/characters.ts`, and `ActorRegisterCameraPoint`'s shot sphere is that
+ * layer's `pick` — this side owns the radius at `obj+0x124` and the item list,
+ * and nothing else. `CivilianApplyMotionPose` (`FUN_0048C310`) is not ported:
+ * it blends the clip, takes the root translation off the pol file and turns
+ * the body by the difference between two bone directions, and the generic
+ * `ActorAdvanceMotion` root walk already carries a civilian where its clips
+ * say.
+ *
+ * [open] `CivilianUpdateOnCarrier` (`FUN_0048B140`) pushes a carrier object's
+ * translate and rotate around the whole update, for the **7 of 47** spawns
+ * whose descriptor `+0x22` is non-zero. The carrier is `g_civilian_carrier`
+ * (0x009A2C88), which a class-0x13 sub-constructor writes — and class 0x13 is
+ * not read, let alone ported, so there is no object to ride. Those seven stand
+ * where the script put them until it is. Naming the dependency is the point:
+ * approximating the ride would put them somewhere plausible and wrong.
+ *
+ * [open] `SpawnCivilianBloodPool` (`FUN_0048E080`) builds a ground decal at the
+ * shot point, scaled by how far below the camera plane it is. It is a whole
+ * object of its own class with an unread update, and the renderer's impact
+ * sprite already marks the hit.
  */
 import type { CivilianCmdJson } from "../../bundle/scene";
 import type { Events } from "../../core/events";
+import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { QueryGroundHeightAt } from "../coli";
 import { ScoreAddForPlayer } from "../combat/score";
 import { PlayerTakeDamageTimed } from "../combat/player";
+import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import type { ClassFrame, ClassHandler } from "../registry";
-import { MotionOf, T } from "../tables";
+import { CharacterTypeOf, MotionOf, T } from "../tables";
 import { makeCivilianState, type CivilianState } from "./state";
 
 /**
@@ -277,6 +293,8 @@ export enum CivilianHook {
 /** `sub+0x5C`'s own constants — the fall step at 0x0048DA20. */
 const FALL_ACCEL = -0.02722;
 const FALL_PROBE = 100;
+/** `CivilianHookRideChildrenStep`'s turn cap, 0x0048DB6C. */
+const RIDE_TURN_CAP = 0x80;
 
 /** `CivilianInit`'s literals. */
 const DEFAULT_TURN_RATE = 10;
@@ -298,13 +316,19 @@ function CmdAt(script: number, pc: number): CivilianCmdJson | null {
  * (`UNK_0048D1F0` and `PoseHookGrowAndPushOutOfWorld`) and binds the part list;
  * both are the renderer's, and are `[diverges]` here.
  */
-export function CivilianInit(obj: Actor): void {
+export function CivilianInit(obj: Actor, rng?: Rng): void {
   const sub = makeCivilianState();
   obj.civ = sub;
   // `obj+0x120` and `obj+0x121` are both 0xFF: a civilian holds neither a
   // general slot nor an attack permit, whatever `RegisterEnemySlot` hands it.
   obj.attackPermit = -1;
   sub.turnRate = DEFAULT_TURN_RATE;
+  // `obj+0x124 = g_actor_radius_by_char[type]`, `obj+0x128 = 1.0`. The first
+  // is the shot sphere and is ten units for every civilian; the second is the
+  // radius `PoseHookGrowAndPushOutOfWorld` ramps, which op 0x16 retargets.
+  obj.radius = CharacterTypeOf(obj)?.actor_radius ?? 0;
+  sub.scaleTarget = 1;
+  sub.attachSet = CivilianAttachSet(obj.charType);
 
   const p = T.civilians?.spawns?.[String(obj.at)];
   if (!p) return;
@@ -320,7 +344,32 @@ export function CivilianInit(obj: Actor): void {
   const entry = T.civilians?.entries?.[p.script];
   if (entry === undefined) return;
   sub.script = entry;
-  CivilianRunScript(obj, entry, 0);
+  CivilianRunScript(obj, entry, 0, undefined, rng);
+}
+
+/**
+ * `sub+0x82` — which of a held-item record's six attach sets this character
+ * uses, from `CivilianInit`'s own switch on the character type.
+ *
+ * One record therefore serves every skin that can hold it, with a different
+ * offset and scale in a child's hand than in an old man's.
+ */
+export function CivilianAttachSet(charType: number): number {
+  switch (charType) {
+    case 0x20: case 0x23:
+      return 0;
+    case 0x24: case 0x25: case 0x31: case 0x32: case 0x33:
+      return 4;
+    case 0x26: case 0x29: case 0x2a: case 0x2b: case 0x2c: case 0x2d:
+    case 0x38:
+      return 1;
+    case 0x27: case 0x28:
+      return 2;
+    case 0x2e: case 0x2f: case 0x30:
+      return 3;
+    default:
+      return 5;
+  }
 }
 
 /**
@@ -332,7 +381,7 @@ export function CivilianInit(obj: Actor): void {
  * walk, which is the `*sub |= saved & 0x08000000` at the end.
  */
 export function CivilianRunScript(obj: Actor, script: number, pc: number,
-                                  f?: ClassFrame): void {
+                                  f?: ClassFrame, rng?: Rng): void {
   const sub = obj.civ;
   if (!sub) return;
   const uncounted = sub.wait & CivilianWait.Uncounted;
@@ -422,10 +471,15 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.SetScriptFlag:
         G.g_script_flags[a[0]] = 1; break;
       case CivilianOp.PlayDialogue:
-        // `EvtOpPlayDialogue2D` (`FUN_00435B80`). The engine gates it on the
-        // removal countdown so a civilian already walking off stays quiet.
+        // `EvtOpPlayDialogue2D` (`FUN_00435B80`) — the *same* call evt op 0x2D
+        // makes, and all 36 operands the shipped streams use are real message
+        // groups, so a civilian's line goes through the player's own subtitle
+        // and voice path rather than out as a bare sound id.
+        //
+        // The engine gates it on the removal countdown, so a civilian already
+        // walking off stays quiet.
         if (sub.removeDelay === 0) {
-          f?.events?.emit("sound.play", { id: 0x20000000 | a[0] });
+          f?.events?.emit("civilian.dialogue", { at: obj.at, group: a[0] });
         }
         break;
       case CivilianOp.SetResume:
@@ -464,11 +518,35 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.Wait:
         CivilianApplyWaitWord(obj, a[0], f);
         break;
-      // Drawing, or unread. Named so the stream stays legible and so a later
-      // reading has somewhere to land; deliberately no behaviour.
       case CivilianOp.AddHeldItem:
+        // `CivilianAddHeldItem` (`FUN_0048CAE0`) grows the array by one and
+        // appends. The engine's second operand is the pair's other half, which
+        // only the per-item callback reads and nothing here does.
+        if ((c.item ?? -1) >= 0) sub.items.push(c.item!);
+        break;
       case CivilianOp.AddPickedItem:
-      case CivilianOp.PickHeldItem:
+        // `CivilianAddPickedItem` (`FUN_0048CB60`) — the same, with whatever
+        // op 0x15 last chose.
+        if (sub.pickedItem >= 0) sub.items.push(sub.pickedItem);
+        break;
+      case CivilianOp.PickHeldItem: {
+        // `CivilianPickHeldItem` (`FUN_0048CBF0`): sum the weights, take
+        // `rand() % total`, and walk the list subtracting until it goes
+        // negative. Drawn from `ctx.rng` — `Math.random` would break the
+        // snapshot, and which bottle a civilian is holding is state.
+        const tbl = c.itemTable ?? [];
+        const total = tbl.reduce((n, e) => n + e[0], 0);
+        const draw = f?.rng ?? rng;
+        if (total > 0 && draw) {
+          let r = draw.int(total) - (tbl[0]?.[0] ?? 0);
+          let i = 0;
+          while (r >= 0 && i + 1 < tbl.length) { i += 1; r -= tbl[i][0]; }
+          sub.pickedItem = tbl[i]?.[1] ?? -1;
+        }
+        break;
+      }
+      // Unread. Named so the stream stays legible and so a later reading has
+      // somewhere to land; deliberately no behaviour.
       case CivilianOp.SetGlobalA:
       case CivilianOp.SetGlobalB:
       case CivilianOp.SetAttachMode:
@@ -887,7 +965,35 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
     }
   }
 
+  // `ActorRegisterCameraPoint(4.0)` (`FUN_00409B70`) goes here in the engine:
+  // it transforms `obj+0x100` into view space, appends the actor to the
+  // per-frame gunshot list and raises `obj+0x104` by its argument.
+  //
+  // [diverges] Every part of that is the draw's. `obj+0x100` is written by
+  // `SkeletonEmitNode` as the skeleton is walked, and the port has no
+  // skeleton — `render/characters.ts`'s `trackLookAt` is that writer here, and
+  // it already applies the same 4.0 rise. The shot test is the renderer's too,
+  // for the same reason: the ray is the mouse's. What the port owns is the
+  // sphere's *radius*, `obj+0x124`, which `CivilianInit` sets.
+  CivilianWriteCameraPoint(obj);
   CivilianCheckRemoval(obj);
+}
+
+/**
+ * The camera-point switch at the tail of `CivilianUpdate`: `sub+0x80` (op
+ * 0x17) picks which point goes to `obj+0x12C`.
+ *
+ * [open] Only mode 0 is ported. Modes 1, 2 and 3 multiply the camera matrix by
+ * a matrix inside the model block (`model+0x70`, `model+0x4C`, and the
+ * midpoint of `model+0x244` and `model+0x1D8`) and those are not bone records
+ * — they are matrices the pose leaves behind, which `game/` cannot reach.
+ * Eight of the shipped streams ask for mode 1, four for mode 2, two for mode 3.
+ */
+function CivilianWriteCameraPoint(obj: Actor): void {
+  if (obj.civ?.cameraPointMode !== 0) return;
+  obj.camPoint.x = obj.pos.x;
+  obj.camPoint.y = obj.pos.y;
+  obj.camPoint.z = obj.pos.z;
 }
 
 /**
@@ -969,8 +1075,7 @@ function CivilianCheckRemoval(obj: Actor): void {
   // countdown instead, which is what keeps a hostage on stage until rescued.
   if (sub.childCount !== 0) { sub.removeDelay = 1; return; }
   if (!(sub.flags2 & 1)) G.g_civilians_alive -= 1;
-  obj.dead = true;
-  obj.visible = false;
+  ActorDespawn(obj);
 }
 
 /** Op 0x00's loop counter, which wait bit 0x100 blocks on. */
@@ -1010,10 +1115,24 @@ function CivilianRunFrameHook(obj: Actor, frames: number): void {
       }
       break;
     }
-    // [diverges] `RideChildren` (0x0048DA90 -> 0x0048DAB0) averages the
-    // surviving children's bone positions to carry the civilian between them.
-    // It needs posed skeletons, which `game/` cannot reach.
-    case CivilianHook.RideChildren:
+    case CivilianHook.RideChildren: {
+      // `0x0048DAB0`: face the **average** of the surviving captors, at up to
+      // 0x80 BAMS a frame, and uninstall once this actor is flagged dead. It
+      // is a facing, not a carry — the civilian turns to whoever is still
+      // holding it, and stops when the last one is gone.
+      if (obj.flags & ActorFlag.Dead) { sub.hook = CivilianHook.None; break; }
+      const n = sub.children.length;
+      if (n === 0) break;
+      const mid = { x: 0, y: 0, z: 0 };
+      for (const at of sub.children) {
+        const kid = ActorByAt(at);
+        if (!kid) continue;
+        mid.x += kid.pos.x; mid.y += kid.pos.y; mid.z += kid.pos.z;
+      }
+      mid.x /= n; mid.y /= n; mid.z /= n;
+      ActorTurnTowardPoint(obj, mid, RIDE_TURN_CAP);
+      break;
+    }
     case CivilianHook.None:
     default:
       break;
@@ -1047,6 +1166,9 @@ export function ActorTurnTowardPoint(obj: Actor,
 export const CivilianHandler: ClassHandler = {
   init: CivilianInit,
   update: CivilianUpdate,
+  // A civilian has no hit table and no hit points: the shot test marks it and
+  // `CivilianCheckShot` is what a hit *means*. See `combat/shot.ts`.
+  ownsShotResult: true,
   // A shot civilian keeps running: its on-shot script is what plays the fall,
   // the voice and the removal, and stopping at `dead` froze it upright.
   updatesWhenDead: true,

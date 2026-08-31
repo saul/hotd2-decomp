@@ -38,6 +38,12 @@ export interface EventMap {
   "civilian.rescued": { at: number; player: number; score: number };
   /** A civilian was shot: a life, and -100 twice. */
   "civilian.shot": { at: number; player: number };
+  /**
+   * Op 0x1D — `EvtOpPlayDialogue2D`. The same message groups evt op 0x2D
+   * plays, so the host routes it to the subtitle and voice path rather than
+   * treating it as a bare sound.
+   */
+  "civilian.dialogue": { at: number; group: number };
 
   // -- class 0x41, the breakable props -----------------------------------
   /** First shot: the prop swapped to its broken model and shook. */

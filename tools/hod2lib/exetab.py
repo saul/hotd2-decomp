@@ -294,6 +294,29 @@ class ExeTables:
     #: The opcodes whose operands are pointers to another command stream.
     CIVILIAN_SCRIPT_OPS = {0x0E: (1,), 0x0F: (1,), 0x1E: (1,), 0x1F: (1, 2)}
 
+    #: A held-item record, 0x7C bytes, from `CivilianDrawHeldItems`
+    #: (`FUN_0048CD10`) -- which copies all 31 dwords onto its stack and then
+    #: reads them back, so the layout is the copy's::
+    #:
+    #:     +0x00  u32       bone the item hangs off
+    #:     +0x04  u32       asset slot drawn there
+    #:     +0x08  s32       kind; 3-10 and 0x0E-0x12 draw a second, fixed slot
+    #:     +0x0C  s32       rotate X, BAMS
+    #:     +0x10  s32       rotate Y
+    #:     +0x14  s32       rotate Z
+    #:     +0x18  fn        per-frame callback, run after the draw
+    #:     +0x1C  f32[6][4] per attach set: translate x/y/z, then scale
+    #:
+    #: The attach set is ``sub+0x82``, which `CivilianInit` picks from the
+    #: character type -- so one record serves every skin that can hold it.
+    CIVILIAN_ITEM_BYTES = 0x7C
+
+    #: `CivilianDrawHeldItems`' second-asset switch, by the record's kind.
+    CIVILIAN_ITEM_EXTRA = {3: 0x10A5, 4: 0x10A7, 5: 0x10A9, 6: 0x10A3,
+                           7: 0x107F, 8: 0x1081, 9: 0x1083, 10: 0x107D,
+                           0x0E: 0x1098, 0x0F: 0x1099, 0x10: 0x108C,
+                           0x12: 0x108B}
+
     #: Op 0x10 installs a native per-frame hook and **the hook decides the
     #: command's length**: `CivilianRunScript` calls it as
     #: ``next = hook(obj, cmd + 2)`` and takes the pointer it returns. The
@@ -386,6 +409,8 @@ class ExeTables:
 
         order = sorted(raw)
         index = {va: i for i, va in enumerate(order)}
+        items: dict[int, int] = {}          # record address -> index in `out`
+        self._civ_items: list[dict] = []
         scripts: list[list[dict]] = []
         for va in order:
             out: list[dict] = []
@@ -407,6 +432,10 @@ class ExeTables:
                                                 struct.pack("<i", args[0]))[0]
                 if op == 0x18 and args[0]:
                     d["pose"] = [self._f32(args[0] + i * 4) for i in range(6)]
+                if op in (0x13, 0x14) and args[0] > 0:
+                    d["item"] = self._civ_item(args[0], items)
+                if op == 0x15 and args[0]:
+                    d["itemTable"] = self._civ_item_table(args[0], items)
                 if op == 0x22 and args[0]:
                     snd: list[list[int]] = []
                     q = args[0]
@@ -419,7 +448,41 @@ class ExeTables:
                     d["sounds"] = snd
                 out.append(d)
             scripts.append(out)
-        return {"entries": [index[v] for v in entry_va], "scripts": scripts}
+        return {"entries": [index[v] for v in entry_va], "scripts": scripts,
+                "items": self._civ_items}
+
+    def _civ_item(self, va: int, seen: dict[int, int]) -> int:
+        """Decode one held-item record, memoised; returns its index."""
+        if va in seen:
+            return seen[va]
+        w = [self._i32(va + 4 * i) for i in range(31)]
+        if any(v is None for v in w):
+            return -1
+        sets = []
+        for k in range(6):
+            sets.append([struct.unpack("<f", struct.pack("<i", w[7 + k * 4 + j]
+                                                        ))[0]
+                         for j in range(4)])
+        seen[va] = len(self._civ_items)
+        self._civ_items.append({
+            "bone": w[0], "slot": w[1] & 0xFFFF, "kind": w[2],
+            "extra": self.CIVILIAN_ITEM_EXTRA.get(w[2]),
+            "rot": [w[3], w[4], w[5]], "sets": sets,
+        })
+        return seen[va]
+
+    def _civ_item_table(self, va: int,
+                        seen: dict[int, int]) -> list[list[int]]:
+        """Op 0x15's ``{weight, record}`` list, terminated by weight -1."""
+        out: list[list[int]] = []
+        while len(out) < 32:
+            w = self._i32(va)
+            if w is None or w == -1:
+                break
+            rec = self._i32(va + 4)
+            out.append([w, self._civ_item(rec, seen) if rec else -1])
+            va += 8
+        return out
 
     def asset_slots(self) -> dict[int, tuple[str, int]]:
         """asset slot id -> (pol filename, entry index within that file).

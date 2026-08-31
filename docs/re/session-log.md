@@ -5979,3 +5979,103 @@ because the doc line reads either way and only one of them is the code.
 and the 47 new captor placements are new and no committed bundle has them. Then
 either class 0x11 (the plain script-spawned enemy) or the `0x20`/`0x45`/`0x46`
 classes, which are unread and need a `/decomp` pass before anything else.
+
+---
+
+## Session 2026-08-31e — class 0x10 in the player, and a class that was ported and invisible
+
+**Outcome:** the civilians are on screen, shootable, holding things and
+talking. Follow-up to session 2026-08-31d, which ported the class but not its
+half of the renderer.
+
+### The class was ported and drew nothing
+
+`MOTION_RULES` had no entry for class 0x10, so `resolve_for_stage` gave all 47
+spawns `motion = None`, and the client skips anything it cannot pose. The
+answer was in `CivilianInit` all along: `model+0x20 = 0x294` — motion **660**,
+`people.bin` — written before a line of script runs. One literal.
+
+Baking it is not enough on its own: op 0x00 changes the clip constantly, and a
+shot civilian spends the rest of its life in another stream. `civilian_motion_ids`
+takes the transitive closure of the entry stream's ops 0x00/0x01 across
+0x0E/0x0F/0x1E/0x1F — 13 to 23 clips per character type.
+
+Rendered and read back: `extract/compare/civ/hito_gal.png` is a woman in a dark
+top and skirt, arms at her sides, correctly assembled and posed at motion 660
+frame 0. Not a zombie.
+
+### Shooting one does not go through `ResolveHit`
+
+`ShotTestSphere` (`FUN_00404630`) is the fork, and it took two wrong guesses to
+find it:
+
+* **Not the descriptor's `init_flags`.** Bit 0x80 is clear on all 1,100 spawn
+  descriptors in the game, so that is not where it comes from.
+* **Not the skeleton record's `+0x16`.** It is 2 for every character type, so
+  that clause never discriminates either.
+
+It is `obj+0x34` bit 0x80, and nothing a civilian runs ever sets it — so a
+civilian is a **sphere of radius `obj+0x124`**, ten units, and the shot ends at
+`MarkActorShot` setting bit 3 and the shooter's bit. That is the same shape as
+a breakable prop, and it is wired the same way: `ClassHandler.ownsShotResult`,
+and `Shooting` marks and steps back.
+
+Running `ResolveHit` over a civilian would have charged hit points it does not
+have and swapped gore models it has none of.
+
+### Held items
+
+The 0x7C-byte record is fully readable off `CivilianDrawHeldItems`, which
+copies all 31 dwords onto its stack: bone, asset slot, kind, three BAMS
+rotations, a per-frame callback, and **six** `{x, y, z, scale}` attach sets.
+`sub+0x82` picks the set from the character type, which is why one bottle fits
+an old man and a schoolgirl.
+
+Fourteen records; the models are `etc_1.bin` and `common.bin`, and the kinds'
+second slots are effect billboards — `0x10A3` renders as a soft flame quad
+(`extract/compare/civ/item_10a3.png`), and the schoolgirl's `0x10C3` is a small
+white box (`item_10c3.png`).
+
+They ride the hidden `gore_*` template the client already clones from. The gate
+on emitting that template was `chars[ct].gore`, and a civilian has no damaged
+parts at all — so the first export had the item slots computed and no template
+to put them in. The gate is `gore or held_slots` now.
+
+### Op 0x15 draws, and `Init` had no generator
+
+The weighted pick is `rand() % total`, and it runs **in the Init** for at least
+one shipped stream. `ClassHandler.init` took no `Rng`, so the opcode was
+silently skipped and every civilian held nothing. `init(obj, rng?)` now, passed
+from `ActorSpawn`; class 0x24's `FALLBACK_RNG` was the precedent for *not*
+doing this, and it is the wrong precedent here — that class's random arm is
+never taken, and this one is.
+
+### Two things found on the way
+
+* **Nothing was listening to `sound.play`.** Class 0x31's laser sword, its
+  footsteps and its landing thump have been raising that event into an empty
+  bus since they were ported. One line in `main.ts`.
+* `ActorRegisterCameraPoint`'s first port **overwrote** `obj+0x100` with the
+  actor's position, clobbering `render/characters.ts`'s `trackLookAt`, which
+  already writes it from bone 1 and applies the same 4.0 rise. The port's copy
+  is gone; the note that the draw owns that field is in its place.
+
+### Not done, and why
+
+* **The carrier.** 7 of 47 civilians have a non-zero `+0x22` and run
+  `CivilianUpdateOnCarrier`, which pushes `g_civilian_carrier`'s transform
+  around the whole update. That global is written by a class-0x13
+  sub-constructor and class 0x13 is not read, so there is no object to ride.
+  Approximating it would put seven civilians somewhere plausible and wrong.
+* **`SpawnCivilianBloodPool`** (`FUN_0048E080`) — a ground decal that is a whole
+  object of its own class with an unread update. The renderer's impact sprite
+  already marks the hit.
+* **`CivilianApplyMotionPose`** (`FUN_0048C310`) — the generic root-motion walk
+  carries a civilian where its clips say; the bone-difference body turn is not
+  ported.
+* Ops 0x17 modes 1-3 write `obj+0x12C` from matrices inside the model block.
+  Nothing read reads `obj+0x12C` back, so both halves are `[open]`.
+
+**Next actions:** class 0x13, which would unblock the seven carried civilians
+and is 15 spawns of its own; or the `0x20`/`0x45`/`0x46` classes, which are
+unread.

@@ -53,6 +53,40 @@ it, and a block whose own wait is already satisfied is **skipped** — with
 block would have set. `port.test.ts` pins both, along with the timer's `n + 1`
 frames and the two score paths.
 
+**And they are on screen.** `CivilianInit` writes motion **660** before it runs
+a line of script, and without a `MOTION_RULES` entry for the class the exporter
+resolved all 47 to a character with no motion and the client drew none of
+them — the whole class was ported and invisible. It now bakes the transitive
+closure of every clip the spawn's script can reach, and a civilian stands,
+walks and cowers.
+
+The rest of the class's own render half came with it:
+
+* **They can be shot.** A civilian has no hit table, and `ShotTestSphere` is
+  the fork the engine uses: an actor with `obj+0x34` bit 0x80 clear — which
+  every civilian is — is a ten-unit sphere and the shot ends at
+  `MarkActorShot`, not at `ResolveHit`. `ClassHandler.ownsShotResult` is that
+  fork in the port, and `Shooting` takes it the same way it takes a breakable
+  prop: mark it, and let the class score it.
+* **They hold things.** Ops 0x13-0x15 hang an `etc_1.bin` model off bone 5 with
+  a rotation and an offset picked by a six-way attach set the character type
+  chooses, and op 0x15 draws its record from a weighted table — through
+  `ctx.rng`, so which bottle a civilian is carrying survives a save. The models
+  ride the same hidden template the gore swap clones from.
+* **They speak.** Op 0x1D is `EvtOpPlayDialogue2D` and all 36 of its operands
+  are real message groups, so a civilian's line goes through the player's own
+  subtitles and voice.
+* **They leave.** `ActorDespawn` is now the port's own removal, and it outranks
+  the walker's spawn list.
+
+One gap is named rather than approximated: 7 of the 47 ride a carrier object
+(`g_civilian_carrier`), and the carrier is written by class 0x13, which is not
+read. Those seven stand where the script put them.
+
+While wiring the dialogue it turned out **nothing was listening to
+`sound.play`** at all — class 0x31's laser sword and its footsteps had been
+raising it into the void since they were ported. The bus is connected now.
+
 **Class 0x25, the scripted humanoid, is ported** (`game/class25/`) — the
 second-largest class in the game and a **bytecode VM**. The spawn's tail points
 at a command block; the Init installs the interpreter and it walks 8-byte

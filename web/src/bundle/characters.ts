@@ -74,6 +74,13 @@ export interface CharacterType {
    * while the actor is alive, so a zombie only shows it once dead.
    */
   torso_stages: number;
+  /**
+   * `obj+0x124`, from `g_actor_radius_by_char` (0x004C4D28). The radius
+   * `ShotTestSphere` (`FUN_00404630`) uses for an actor shot as a **sphere**
+   * rather than per bone — which is every class-0x10 civilian, since none of
+   * them ever raises `obj+0x34` bit 0x80. Ten units for all of them.
+   */
+  actor_radius: number;
   motions: Record<string, BakedMotion>;
 }
 

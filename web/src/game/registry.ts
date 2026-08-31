@@ -32,8 +32,15 @@ export interface ClassFrame {
 }
 
 export interface ClassHandler {
-  /** The class's `Init` — what the spawn opcode's constructor leaves behind. */
-  init(obj: Actor): void;
+  /**
+   * The class's `Init` — what the spawn opcode's constructor leaves behind.
+   *
+   * `rng` is optional because most Inits do not draw: the ones that do — class
+   * 0x24's phase seed, class 0x10's weighted pick of what a civilian is
+   * holding — call `rand()` in the engine too, and a draw that is not from
+   * `ctx.rng` is a save state that does not restore.
+   */
+  init(obj: Actor, rng?: Rng): void;
   /** The class's `Update` — one call per 60 Hz frame. */
   update(obj: Actor, f: ClassFrame): void;
   /**
@@ -45,6 +52,19 @@ export interface ClassHandler {
    * freeze a body in mid-air the moment its hit points ran out.
    */
   updatesWhenDead?: boolean;
+  /**
+   * This class reads `obj+0x34` bit 3 itself, so a shot must **not** go
+   * through `ResolveHit`.
+   *
+   * `MarkActorShot` (`FUN_00404DB0`) is all the engine's shot test ever does:
+   * it raises bit 3 and the bit naming the shooter, and the actor's own update
+   * decides what that means. For class 0x30 and 0x31 that leads to
+   * `ResolveHit` and a damage table; for a class-0x10 civilian it leads to a
+   * life, two hundred points and the on-shot script, and running the zombie's
+   * damage table over one would charge it hit points it does not have and swap
+   * gore models it has none of.
+   */
+  ownsShotResult?: boolean;
 }
 
 export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {

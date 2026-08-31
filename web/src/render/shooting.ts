@@ -84,6 +84,10 @@ import type { CombatJson } from "../bundle";
 import { G } from "../game/globals";
 import { HitResultCode } from "../game/combat/resolve_hit";
 import { BreakablePropTakeShot } from "../game/class41/prop";
+import { MarkActorShot } from "../game/combat/shot";
+import { g_class_handlers } from "../game/registry";
+import type { SpawnClass } from "../game/spawn_class";
+import type { Actor } from "../game/actor";
 import type { BreakableLayer } from "./breakables";
 import type { BreakableProp } from "../game/class41/prop_state";
 
@@ -355,6 +359,16 @@ export class Shooting {
       return;
     }
 
+    // A class that reads `obj+0x34` bit 3 itself takes the shot as the engine
+    // delivers it -- marked, and nothing else. `CivilianUpdate` is what a hit
+    // on a civilian *means*: a life, two hundred points and the on-shot
+    // script. Same shape as `hitProp` below, and for the same reason.
+    const handler = g_class_handlers[pick.inst.a.cls as SpawnClass];
+    if (handler?.ownsShotResult) {
+      this.hitMarkedOnly(pick.inst, pick.bone, pick.point);
+      return;
+    }
+
     const out = this.chars.hit(pick.inst, pick.bone, this.cameraYawBams);
     this.hits++;
     let points = 0;
@@ -401,6 +415,28 @@ export class Shooting {
                   damage: out.damage, killed: out.killed, hp: out.hp,
                   result: out.result, points },
                 note);
+  }
+
+  /**
+   * Land a shot on an actor whose own class decides what it means.
+   *
+   * `MarkActorShot` (`FUN_00404DB0`) raises `obj+0x34` bit 3 and the bit that
+   * names the shooter, and that is the whole of the engine's shot test for an
+   * actor with no hit table. Scoring it here would be a second implementation
+   * of the rule -- the civilian charges its own hundred twice, and the life
+   * comes off in `PlayerTakeDamageTimed`.
+   */
+  private hitMarkedOnly(inst: { a: Actor; type: { name: string } },
+                        bone: number, point: Vector3): void {
+    MarkActorShot(inst.a, 0, bone);
+    this.hits++;
+    this.headCombo = 0;
+    // `ActorShotFeedback` still runs: it is flesh, so it is blood at the shot
+    // point, at the "damaged" severity -- there is no hit result to scale by.
+    const scale = this.combat?.blood_scale["1"] ?? 0.5;
+    this.impacts?.spawn(point, this.viewZ(point), scale, BLOOD_FRAMES);
+    this.onShot({ hit: true, bone, points: 0 },
+                `${inst.type.name} · marked, its own class scores it`);
   }
 
   /**

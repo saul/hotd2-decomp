@@ -28,6 +28,7 @@ import {
   type StageEntry,
   type OpJson,
 } from "../bundle";
+import type { SoundJson } from "../bundle/scene";
 import { CamPaths, applyPose, cameraEyeY, type CameraPose } from "../render/campath";
 import { StageScene } from "../render/stagescene";
 import { RailLayer, SpawnLayer } from "../render/overlays";
@@ -106,6 +107,12 @@ class Player {
   private readonly props = new PropLayer();
   private readonly breakables = new BreakableLayer();
   private readonly shooting = new Shooting($("#viewport"), this.chars);
+  /**
+   * The stage's `sound` block, kept for the one caller that is not the walker:
+   * class 0x10's op 0x1D plays a dialogue group from inside the port, and the
+   * port cannot reach the bundle.
+   */
+  private dialogue: SoundJson | null = null;
   /** The registry and the tick order: script -> game -> render -> hud. */
   private readonly world = new World();
   private readonly events = new Events();
@@ -226,6 +233,39 @@ class Player {
       this.refreshUi();
     });
 
+    // Nothing was listening to this. The port raises `sound.play` wherever the
+    // engine calls `PlaySoundId` from gameplay -- class 0x31's laser sword and
+    // its footsteps, class 0x10's queued cries -- and every one of them was
+    // going nowhere.
+    this.events.on("sound.play", (d) => { this.bgm.play(d.id); });
+
+    // -- class 0x10, the civilians ---------------------------------------
+    // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a
+    // civilian's line goes through the player's own subtitles and voice rather
+    // than out as a bare sound id.
+    this.events.on("civilian.dialogue", (d) => {
+      const v = this.dialogue?.messages?.[String(d.group)]?.[0] ?? null;
+      if (v?.voice) this.bgm.play(v.voice);
+      this.hudLayer.showMessage(d.group, v);
+    });
+    this.events.on("civilian.rescued", (d) => {
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, cat: "combat", name: "civilian rescued" },
+        note: `+400 to ${d.player < 0 ? "both players" : `player ${d.player}`}`
+            + ` → ${d.score}`,
+      });
+      this.refreshUi();
+    });
+    this.events.on("civilian.shot", (d) => {
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, cat: "combat", name: "civilian shot" },
+        note: `player ${d.player < 0 ? "?" : d.player} · −1 life · −100 twice`,
+      });
+      this.refreshUi();
+    });
+
     this.wireUi();
     wireSplitter();
     // Watching the viewport rather than the window catches the splitter drag
@@ -331,6 +371,7 @@ class Player {
     // character layer is the seam the port already reaches the renderer
     // through, so they are handed to it rather than duplicated in `game/`.
     this.chars.paths = this.paths;
+    this.chars.civilians = bundle.script.civilians ?? null;
     this.chars.attach(this.stage.root, bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
     // Doors, shutters and the vans they hang off; driven by the script's
@@ -342,6 +383,7 @@ class Player {
     this.shooting.breakables = this.breakables;
     this.shooting.reset();
     this.shooting.setTables(bundle.script.characters?.combat);
+    this.dialogue = bundle.script.sound ?? null;
     this.bullets.source = this.chars;
     this.debug.detach();
     this.scene.add(this.bullets.group);

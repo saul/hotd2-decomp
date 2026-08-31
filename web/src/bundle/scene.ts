@@ -276,6 +276,28 @@ export interface CivilianCmdJson {
   pose?: number[];
   /** Op 0x22's `(sound id, delay)` list, terminated by id `0xFFFFFFFF`. */
   sounds?: [number, number][];
+  /** Ops 0x13 and 0x14: an index into {@link CiviliansJson.items}. */
+  item?: number;
+  /** Op 0x15: `[weight, item index]`, the list the weighted pick walks. */
+  itemTable?: [number, number][];
+}
+
+/**
+ * One held-item record — the 0x7C bytes `CivilianDrawHeldItems`
+ * (`FUN_0048CD10`) reads. An item is one asset slot hung off one bone, rotated
+ * and then offset and scaled by whichever of the six attach sets the character
+ * type takes.
+ */
+export interface CivilianItemJson {
+  bone: number;
+  slot: number;
+  /** 3-10 and 0x0E-0x12 draw a second, fixed slot as well. */
+  kind: number;
+  extra?: number | null;
+  /** BAMS, applied X then Z then Y as the draw does. */
+  rot: [number, number, number];
+  /** Per attach set: translate x, y, z, then a uniform scale. */
+  sets: [number, number, number, number][];
 }
 
 /** One class-0x10 spawn's descriptor tail — see `game/class10`. */
@@ -301,6 +323,8 @@ export interface CiviliansJson {
   entries: number[];
   /** Every reachable stream, including the ones only an operand points at. */
   scripts: CivilianCmdJson[][];
+  /** Every held-item record any stream names, in first-seen order. */
+  items: CivilianItemJson[];
   /** Keyed by the spawn's script address. */
   spawns: Record<string, CivilianSpawnJson>;
 }

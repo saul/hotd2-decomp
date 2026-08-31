@@ -30,9 +30,9 @@ import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ActorFlag } from "../src/game/actor";
 import { SpawnClass } from "../src/game/spawn_class";
-import { CivilianOp, CivilianUpdate, CivilianWait }
+import { CivilianAttachSet, CivilianOp, CivilianUpdate, CivilianWait }
   from "../src/game/class10";
-import type { CivilianCmdJson } from "../src/bundle/scene";
+import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
 import { ThrowerState } from "../src/game/class31/states";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
@@ -93,6 +93,7 @@ const motion = (frames: number, perFrame = 0) => ({
 
 const TYPE: CharacterType = {
   type: 1, name: "test zombie", file: "t.bin", bone_count: 16,
+  actor_radius: 10,
   // Two bones, upper arm and forearm, with the forearm parented to it: enough
   // for the sever cascade, which is the part that used to leave a limb
   // animating below a destroyed one.
@@ -2195,11 +2196,13 @@ console.log("\nclass 0x10, the civilian and the rescue:");
    * *before* the next opcode above 0x2B — so a stream that does not open with
    * one never loads a wait word at all and parks on the zero it started with.
    */
-  const civScene = (cmds: CivilianCmdJson[][], children: number[] = []) => {
+  const civScene = (cmds: CivilianCmdJson[][], children: number[] = [],
+                    items: CivilianItemJson[] = [], seed?: number) => {
     ResetGameGlobals();
     SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
       entries: [0],
       scripts: cmds,
+      items,
       spawns: {
         "16384": {
           charType: 1, script: 0, removePath: -1, removeFrame: 0,
@@ -2216,7 +2219,8 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       k.visible = true;
       return k;
     });
-    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian");
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, seed === undefined ? rng : new Rng(seed));
     a.visible = true;
     a.pos = vec3(0, 0, 0);
     return { a, kids, events: new Events() };
@@ -2383,6 +2387,60 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           G.g_player_score[0] === -100 && G.g_player_score[1] === -100
           && G.g_player_lives[0] === 2,
           `${G.g_player_score.join("/")} lives ${G.g_player_lives[0]}`);
+  }
+
+  // The held items, ops 0x13-0x15. The weighted pick is `rand() %% total`
+  // walked down the list, and it comes from `ctx.rng` -- which is what makes
+  // "which bottle is this civilian holding" survive a save state.
+  {
+    const items: CivilianItemJson[] = [
+      { bone: 5, slot: 0x1000, kind: -1, rot: [0, 0, 0],
+        sets: Array.from({ length: 6 },
+                         (_, i) => [i, 0, 0, 1] as [number, number, number,
+                                                    number]) },
+      { bone: 5, slot: 0x1001, kind: -1, rot: [0, 0, 0],
+        sets: Array.from({ length: 6 },
+                         (_, i) => [i, 0, 0, 1] as [number, number, number,
+                                                    number]) },
+    ];
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      { op: CivilianOp.PickHeldItem, args: [1], itemTable: [[1, 0], [3, 1]] },
+      { op: CivilianOp.AddPickedItem, args: [0] },
+      { op: CivilianOp.AddHeldItem, args: [0, 0], item: 0 },
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]], [], items);
+    check("the pick and both appends land in one block",
+          a.civ?.items.length === 2 && a.civ?.pickedItem !== -1,
+          `items ${JSON.stringify(a.civ?.items)}`);
+    check("...and the second append is the record op 0x13 names",
+          a.civ?.items[1] === 0, `${a.civ?.items[1]}`);
+    // The weights are 1 and 3, so the second record is three times as likely.
+    // Asserting a *distribution* rather than a value is what catches a walk
+    // that always takes the head -- which is the easy way to get this wrong.
+    let second = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const one = civScene([[
+        cmd(CivilianOp.Wait, CivilianWait.Free),
+        { op: CivilianOp.PickHeldItem, args: [1],
+          itemTable: [[1, 0], [3, 1]] },
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]], [], items, seed);
+      if (one.a.civ?.pickedItem === 1) second += 1;
+    }
+    check("the weighted pick is weighted, not always the head",
+          second > 20 && second < 40, `${second}/40 took the 3:1 entry`);
+    void events;
+  }
+
+  // `sub+0x82`: one record, six attach sets, chosen by the character type.
+  {
+    check("the attach set comes from the character type",
+          CivilianAttachSet(0x20) === 0 && CivilianAttachSet(0x24) === 4
+          && CivilianAttachSet(0x26) === 1 && CivilianAttachSet(0x27) === 2
+          && CivilianAttachSet(0x2e) === 3 && CivilianAttachSet(0x99) === 5);
   }
 
   // Op 0x11's skip count, which is what `CivilianReapplyWaitCommand` is for:

@@ -54,6 +54,7 @@ import { Box3, Group, Mesh, Object3D, Quaternion, Ray, Vector3 }
 import type {
   BakedMotion, CharacterPlacement, CharactersJson, CharacterType,
 } from "../bundle";
+import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
 import type { ActiveSpawn } from "../script/walker";
 import type { Actor } from "../game/actor";
 import { ActorSpawn } from "../game/director";
@@ -121,6 +122,15 @@ interface Instance {
    * descriptors the walker never sees. They come and go with their parent.
    */
   parentAt?: number;
+  /**
+   * Class 0x10's held items, by their index in `civilians.items`.
+   *
+   * `CivilianDrawHeldItems` (`FUN_0048CD10`) walks the actor's own list every
+   * frame; here the models are attached once and left on the bone, which is
+   * the same picture with far less work. The map is keyed by item index so a
+   * civilian holding two of the same thing keeps both.
+   */
+  held?: Map<number, Object3D>;
 }
 
 export class CharacterLayer {
@@ -144,6 +154,13 @@ export class CharacterLayer {
    * traversal rather than a clone: the geometry is already in the scene at the
    * right place, and all that is missing is the pose.
    */
+  /**
+   * The held-item records, handed over with the stage. They live in the
+   * `civilians` block rather than in `characters` because they are the exe's,
+   * not a character's — one record serves every skin that can hold it.
+   */
+  civilians: CiviliansJson | null = null;
+
   attach(root: Object3D, json: CharactersJson | undefined): void {
     this.detach();
     this.json = json ?? null;
@@ -234,7 +251,7 @@ export class CharacterLayer {
         walkDistance: p?.walk_distance ?? 0,
         entranceMotion: p?.entrance_motion ?? 0,
         pounce: p?.pounce ?? null,
-      });
+      }, this.rng);
       a.motion = motion;
       a.intro = intro;
       a.hp = this.startHp(p);
@@ -286,7 +303,10 @@ export class CharacterLayer {
     for (const inst of this.instances) {
       // A corpse stays: `FUN_00454D20` plays the clip out before handing the
       // body on, so removing it the instant HP hits zero would be wrong.
-      const show = this.enabled && present.has(inst.at);
+      // `ActorDespawn` is the port's own removal — a class-0x10 civilian
+      // walks off when its removal cue fires — and it outranks the walker's
+      // list, which knows only that the spawn instruction has run.
+      const show = this.enabled && present.has(inst.at) && !inst.a.despawned;
       inst.root.visible = show;
       inst.a.visible = show;
       if (!show) continue;
@@ -300,6 +320,7 @@ export class CharacterLayer {
       // position across a save state. This only reads them.
       this.pose(inst);
       this.trackLookAt(inst);
+      if (inst.a.civ) this.syncHeldItems(inst);
     }
   }
 
@@ -323,6 +344,57 @@ export class CharacterLayer {
   }
 
   private readonly _track = new Vector3();
+
+  /**
+   * `CivilianDrawHeldItems` — `FUN_0048CD10`. What is in a civilian's hands.
+   *
+   * The record says which bone, which asset slot and how to sit on it; the
+   * character type says which of the record's six attach sets to use, which is
+   * why one bottle fits an old man and a schoolgirl. The draw's rotation order
+   * is X, then Z, then Y, and the translate follows it — copied from the
+   * routine rather than guessed, because a hand prop is exactly the thing that
+   * looks nearly right in three wrong orders.
+   *
+   * [diverges] The engine re-draws the item from scratch every frame and runs
+   * the record's own per-frame callback (`rec+0x18`) after it. Here the model
+   * is parented to the bone once and the callback is `[open]` — the four that
+   * appear are unread.
+   */
+  private syncHeldItems(inst: Instance): void {
+    const want = inst.a.civ?.items ?? [];
+    const have = inst.held ?? (inst.held = new Map());
+    if (want.length === have.size && want.every((k) => have.has(k))) return;
+    const items = this.civItems;
+    for (const [k, node] of have) {
+      if (want.includes(k)) continue;
+      node.removeFromParent();
+      have.delete(k);
+    }
+    for (const k of want) {
+      if (have.has(k)) continue;
+      const rec = items[k];
+      const bone = rec && inst.bones.get(rec.bone);
+      if (!rec || !bone) { have.set(k, new Object3D()); continue; }
+      const group = new Object3D();
+      for (const slot of [rec.slot, rec.extra ?? 0]) {
+        const m = slot ? this.cloneSlot(slot) : null;
+        if (m) group.add(m);
+      }
+      const set = rec.sets[inst.a.civ?.attachSet ?? 5] ?? rec.sets[5]
+        ?? [0, 0, 0, 1];
+      group.rotation.set(rec.rot[0] * BAMS_TO_RAD, rec.rot[1] * BAMS_TO_RAD,
+                         rec.rot[2] * BAMS_TO_RAD, "XZY");
+      group.position.set(set[0], set[1], set[2]);
+      group.scale.setScalar(set[3] || 1);
+      bone.add(group);
+      have.set(k, group);
+    }
+  }
+
+  /** `civilians.items` — the records the held-item ops name. */
+  private get civItems(): CivilianItemJson[] {
+    return this.civilians?.items ?? [];
+  }
 
   private pose(inst: Instance): void {
     // Dying takes over everything: the clip plays once and holds its last
@@ -695,6 +767,10 @@ export class CharacterLayer {
         }
       }
       i.gore.clear();
+      // Class 0x10's hands come back empty: `CivilianInit` runs again below
+      // and the script puts back whatever it puts back.
+      for (const g of i.held?.values() ?? []) g.removeFromParent();
+      i.held?.clear();
       for (const node of i.bones.values()) {
         for (const c of node.children) c.visible = true;
       }
@@ -704,7 +780,7 @@ export class CharacterLayer {
       // Back to whatever the class's `Init` leaves behind -- and through the
       // permit release, so nothing is left holding one from before the seek.
       ReleaseAttackSlot(i.a);
-      g_class_handlers[i.a.cls]?.init(i.a);
+      g_class_handlers[i.a.cls]?.init(i.a, this.rng);
     }
   }
 

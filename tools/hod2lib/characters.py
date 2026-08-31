@@ -109,6 +109,12 @@ MOTION_RULES: dict[int, tuple] = {
     # actor opens in. 137 of these, and without a rule they resolve to a
     # character the client cannot pose and so does not draw.
     0x25: ("block", 0x0C, 0x04),
+    # `CivilianInit` (`FUN_0048A3E0`) writes `model+0x20 = 0x294` -- motion
+    # **660**, from `people.bin` -- before it runs a line of script, and the
+    # script's op 0x00 takes over from there. Without a rule the 47 civilians
+    # resolved to a character with no motion and the client drew none of them,
+    # so the whole class was invisible even once it was ported.
+    0x10: ("literal", 0x294),
     0x30: ("literal", 0x3BC),
     0x31: ("by_char", {0x17: 0x1BA}, 0x3A8),
     0x53: ("table", 0x00589A64, 10, 0x00, "i16"),
@@ -490,6 +496,15 @@ class Character:
     gore: dict = field(default_factory=dict)
     #: `ResolveHit`'s torso stage count -- see :func:`torso_stage_count`.
     torso_stages: int = 0
+    #: Asset slots this character's class-0x10 scripts can put in its hand --
+    #: ops 0x13, 0x14 and 0x15. They ride the hidden gore template, which is
+    #: what the client clones a held model from.
+    held_slots: set = field(default_factory=set)
+    #: ``obj+0x124``, from `g_actor_radius_by_char` (0x004C4D28). This is the
+    #: radius `ShotTestSphere` (`FUN_00404630`) uses for an actor that is *not*
+    #: shot per bone -- which is every class-0x10 civilian, since none of them
+    #: ever raises `obj+0x34` bit 0x80. Ten units for all of them.
+    actor_radius: float = 0.0
     #: ``{body_condition: [motion per reaction group]}`` -- see
     #: :func:`hit_reactions`.
     reactions: dict = field(default_factory=dict)
@@ -517,6 +532,7 @@ class Character:
             # the client.
             "head_bone": 2,
             "torso_stages": self.torso_stages,
+            "actor_radius": self.actor_radius,
             "reactions": {str(k): v for k, v in self.reactions.items()},
             "attacks": {str(k): {str(i): a for i, a in v.items()}
                         for k, v in self.attacks.items()},
@@ -891,6 +907,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     chars: dict[int, Character] = {}
     placements: list[Placement] = []
     class31 = class31_tables(tables)
+    try:
+        civscripts = tables.civilian_scripts()
+    except Exception:
+        civscripts = {"entries": [], "scripts": []}
     per_type: dict[int, list[dict]] = {}
     dset = death_motions(tables)
 
@@ -1038,6 +1058,16 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                        if p.at == at and p.cue]
         if sp["class"] == 0x31:
             entry_clips += class31_motion_ids(class31)
+        # Class 0x10 chooses its clips from the **exe's** command streams, and
+        # from every stream those can branch to: ops 0x0E/0x0F/0x1E/0x1F carry
+        # pointers to further streams, and a civilian that is shot spends the
+        # rest of its life in one of them. Baking only the opening motion left
+        # every civilian frozen in its idle the moment its script moved on.
+        if sp["class"] == 0x10:
+            entry_clips += civilian_motion_ids(
+                civscripts, rec.param(0x01, "i8") or 0)
+            chars[res.char_type].held_slots.update(
+                civilian_item_slots(civscripts, rec.param(0x01, "i8") or 0))
         for mid in ([motion, intro[0] if intro else None]
                     + deaths + reacts + entry_clips):
             if mid is None or mid in c.motions:
@@ -1056,8 +1086,13 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     # client clones from it on a hit -- emitting them on all 108 instances
     # instead would multiply the geometry for something only a few bones ever
     # show.
+    # The gate is not `gore` alone: a class-0x10 civilian has no damaged parts
+    # at all and still needs a template, because the models it holds ride the
+    # same hidden rig. Gating on gore left every held item with nothing to
+    # clone from.
     entries += [_gore_entry(stage, tables, chars[ct])
-                for ct in sorted(per_type) if ct in chars and chars[ct].gore]
+                for ct in sorted(per_type)
+                if ct in chars and (chars[ct].gore or chars[ct].held_slots)]
     return chars, placements, [e for e in entries if e]
 
 
@@ -1577,6 +1612,20 @@ def hit_sphere(tables, char_type: int, bone: int):
     return ((cx, cy, cz), r) if r > 0 else None
 
 
+#: `g_actor_radius_by_char` -- one float per character type, copied to
+#: ``obj+0x124`` by every Init that has one.
+ACTOR_RADIUS_TABLE = 0x004C4D28
+
+
+def actor_radius(tables, char_type: int) -> float:
+    """``obj+0x124`` for a character type, or 0 when the table has no row."""
+    v = tables._u32(ACTOR_RADIUS_TABLE + char_type * 4)
+    if v is None:
+        return 0.0
+    r = struct.unpack("<f", struct.pack("<I", v))[0]
+    return r if math.isfinite(r) and 0 < r < 1000 else 0.0
+
+
 def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
     skel = tables.character_skeleton(char_type)
     if not skel:
@@ -1614,6 +1663,7 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      extras=extra_parts(tables, char_type),
                      gore=gore_parts(tables, char_type),
                      torso_stages=torso_stage_count(tables, char_type),
+                     actor_radius=actor_radius(tables, char_type),
                      reactions=hit_reactions(tables, char_type),
                      attacks=attack_tables(tables, char_type),
                      attack_picks=attack_picks(tables, char_type),
@@ -1722,6 +1772,10 @@ def _gore_entry(stage, tables, char: Character) -> dict | None:
     # rig: the client clones by asset slot either way, and neither the held
     # hand nor the weapon in flight is named by the skeleton.
     want = set(char.gore)
+    # Class 0x10's held items ride here too, for the same reason the thrower's
+    # hands do: the client clones by asset slot, and the skeleton names none of
+    # them.
+    want.update(char.held_slots)
     for hands in (char.throw or {}).get("hands", {}).values():
         for h in hands:
             want.update(v for v in (h["held"], h["bare"], h["projectile"])
@@ -2065,6 +2119,71 @@ def class31_tables(tables) -> dict:
                 "Class 0x31's behaviour, four sets deep, indexed by the "
                 "descriptor tail's byte +1 (obj+0x130C). Set 0 is zstin, "
                 "which is the wall-crawler.")}
+
+
+def civilian_motion_ids(block: dict, entry: int) -> list[int]:
+    """Every clip class 0x10's script *entry* can reach.
+
+    Ops 0x00 and 0x01 name the clip; ops 0x0E, 0x0F, 0x1E and 0x1F name another
+    stream, so the answer is the transitive closure from the entry rather than
+    one stream's worth. `_bake` refuses a clip authored for another skeleton,
+    so the whole set is offered rather than filtered here.
+    """
+    scripts = block.get("scripts") or []
+    entries = block.get("entries") or []
+    if not (0 <= entry < len(entries)):
+        return []
+    out: list[int] = []
+    seen: set[int] = set()
+    pending = [entries[entry]]
+    while pending:
+        i = pending.pop()
+        if i in seen or not (0 <= i < len(scripts)):
+            continue
+        seen.add(i)
+        for c in scripts[i]:
+            if c["op"] in (0, 1):
+                m = c["args"][0]
+                if 0 < m < 4096:
+                    out.append(m)
+            pending += [j for j in (c.get("scripts") or []) if j >= 0]
+    return sorted(set(out))
+
+
+def civilian_item_slots(block: dict, entry: int) -> set[int]:
+    """Every asset slot class 0x10's script *entry* can put in a hand.
+
+    Ops 0x13 and 0x14 name a record directly, op 0x15 a weighted table of
+    them, and a record draws its own slot plus, for some kinds, a fixed second
+    one. All of it goes in the hidden template the client clones from.
+    """
+    scripts = block.get("scripts") or []
+    entries = block.get("entries") or []
+    items = block.get("items") or []
+    if not (0 <= entry < len(entries)):
+        return set()
+    picked: set[int] = set()
+    seen: set[int] = set()
+    pending = [entries[entry]]
+    while pending:
+        i = pending.pop()
+        if i in seen or not (0 <= i < len(scripts)):
+            continue
+        seen.add(i)
+        for c in scripts[i]:
+            if c.get("item") is not None and c["item"] >= 0:
+                picked.add(c["item"])
+            for _w, k in c.get("itemTable") or ():
+                if k >= 0:
+                    picked.add(k)
+            pending += [j for j in (c.get("scripts") or []) if j >= 0]
+    out: set[int] = set()
+    for k in picked:
+        if 0 <= k < len(items):
+            out.add(items[k]["slot"])
+            if items[k].get("extra"):
+                out.add(items[k]["extra"])
+    return out
 
 
 def class31_motion_ids(block: dict) -> list[int]:

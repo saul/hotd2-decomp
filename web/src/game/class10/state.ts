@@ -76,6 +76,18 @@ export interface CivilianState {
   carrier: number;
   /** +0x6C who gets the +400, or `-1` for both. From the child that died. */
   rescuePlayer: number;
+  /**
+   * +0x70 the held-item array, and +0x6E its length. Indices into
+   * `T.civilians.items`; ops 0x13 and 0x14 append and the draw walks them.
+   */
+  items: number[];
+  /** +0x74 what op 0x15 last picked, for op 0x14 to append. */
+  pickedItem: number;
+  /**
+   * +0x82 which of a record's six attach sets this character uses.
+   * `CivilianInit` picks it from the character type.
+   */
+  attachSet: number;
   /** +0x78 / +0x7C op 0x16 — the radius ramp `PoseHookGrowAndPushOutOfWorld` runs. */
   scaleTarget: number;
   scaleStep: number;
@@ -116,6 +128,7 @@ export function makeCivilianState(): CivilianState {
     target: { x: 0, y: 0, z: 0 }, radius: 0, targetMode: 0,
     cursor: 0, onShot: 0, onShotAlt: 0, resume: 0, sounds: [],
     hook: 0, children: [], carrier: 0, rescuePlayer: -1,
+    items: [], pickedItem: -1, attachSet: 5,
     scaleTarget: 1, scaleStep: 0, cameraPointMode: 2, deathVoice: 0xff,
     soundId: 0, soundDelay: 0, cameraBone: 2,
     moveFrames: 0, moveTo: { x: 0, y: 0, z: 0 },

@@ -41,6 +41,22 @@ export enum ActorFlag {
    * how the camera comes to consider only enemies that have committed.
    */
   NoCameraTrack = 0x10000,
+  /**
+   * `obj+0x34` bit 3 — a shot landed and the actor's own update has not drained
+   * it yet. `MarkActorShot` (`FUN_00404DB0`) raises it together with bit 1 or
+   * bit 2, which name the player who fired.
+   */
+  Hit = 0x8,
+  /** Bit 1: player 0 fired the shot that raised {@link Hit}. */
+  HitByPlayer0 = 0x2,
+  /** Bit 2: player 1 did. Neither bit set means the shooter is unknown. */
+  HitByPlayer1 = 0x4,
+  /**
+   * `obj+0x34` bit 7 — shoot this actor **per bone**. `ShotTestSphere`
+   * descends into `ShotTestSkeleton` only when it is set; without it the actor
+   * is one sphere of radius `obj+0x124`. No class-0x10 script ever sets it.
+   */
+  ShootPerBone = 0x80,
 }
 
 /**
@@ -339,6 +355,33 @@ export interface Actor {
    */
   killedBy: number;         // +0x131C
   /**
+   * `obj+0x124` — the actor's own radius, from `g_actor_radius_by_char`.
+   *
+   * `ShotTestSphere` (`FUN_00404630`) tests this sphere for any actor that is
+   * not shot per bone. A class-0x10 civilian always is one: nothing in the 136
+   * command streams ever raises `obj+0x34` bit 0x80, so the whole class is a
+   * ten-unit ball and not a skeleton.
+   */
+  /**
+   * `ActorDespawn` (`FUN_00409CC0`) has taken this object out of the pool.
+   *
+   * The engine unlinks it; a list with a flag is the same thing with an index,
+   * and it keeps the actor addressable for the frame the renderer needs to
+   * drop its instance. Class 0x10 is the first class whose *script* can retire
+   * it — a civilian walks off when its removal cue fires.
+   */
+  despawned: boolean;
+  radius: number;           // +0x124
+  /**
+   * `obj+0x12C` — the point `CivilianUpdate`'s camera-point switch writes,
+   * selected by `sub+0x80` (op 0x17). Mode 0 is the actor's own position;
+   * modes 1-3 read matrices out of the model block and are `[open]`.
+   *
+   * It is **not** the shot sphere: that is `obj+0x100`, which the draw writes
+   * and `ActorRegisterCameraPoint` lifts.
+   */
+  camPoint: Vec3;           // +0x12C
+  /**
    * Class 0x10's `ActorAllocSub(0xC4)` block at `obj+0x1310`.
    *
    * `obj+0x1310` is `state` for a combat class; for a civilian it is a
@@ -518,6 +561,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     leapStrikeFrames: 0,
     pendingHit: null,
     killedBy: -1,
+    despawned: false,
+    radius: 0,
+    camPoint: vec3(),
     civ: null,
     reactBone: 0,
     knockCount: 0,

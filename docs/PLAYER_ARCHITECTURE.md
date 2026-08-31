@@ -188,7 +188,8 @@ game/           the port. no three.js, no DOM.
   class25/        the scripted-humanoid bytecode VM — the cutscene system
   class41/        group.ts prop.ts kinded.ts items.ts — the containers
   class44/        container.ts — the one that is knocked loose and falls
-  combat/         permits.ts rank.ts player.ts
+  combat/         permits.ts rank.ts player.ts score.ts shot.ts
+  despawn.ts      ActorDespawn — the port's own removal from the pool
   camera/         path.ts track.ts select_target.ts turn.ts slots.ts
                   — the camera block: `cam_play` seats it, the hook eases it
   coli.ts         the game's own collision -- the segment and sphere queries,

@@ -170,6 +170,72 @@ The fall step (`0x0048DA20`) accelerates, moves, and stops the frame
 to it, raising `sub+0x18` (which wait bit `0x400` waits for) and uninstalling
 itself.
 
+## What the civilian looks like
+
+`CivilianInit` writes `model+0x20 = 0x294` — motion **660**, from
+`people.bin` — before it runs a line of script, and op 0x00 takes over from
+there. That literal is the class's `MOTION_RULES` entry: without it the 47
+civilians resolved to a character with no motion and the client drew none of
+them. The bake list is the transitive closure of the entry stream's ops 0x00
+and 0x01, following ops 0x0E/0x0F/0x1E/0x1F, because a civilian that is shot
+spends the rest of its life in another stream.
+
+The skins are what the class is: `hito_gal`, `hito_galjk` (a schoolgirl),
+`hito_man`, `hito_baba` and `hito_babann` (an old woman), `hito_oyaji`,
+`hito_oyajiaa` and `hito_oyajisagyo` (old men, one in work clothes),
+`deka_musume`, `hitoc`, `char_adv0*` and `player_gold`.
+
+### Held items
+
+Ops 0x13, 0x14 and 0x15 put a model in a civilian's hand, and
+`CivilianDrawHeldItems` (`FUN_0048CD10`) draws it. The record is 0x7C bytes —
+the routine copies all 31 dwords onto its stack and reads them back, so the
+layout is the copy's:
+
+```
+rec+0x00  u32       bone the item hangs off (5, a hand, on every record read)
+rec+0x04  u32       asset slot drawn there
+rec+0x08  s32       kind; 3-10 and 0x0E-0x12 draw a second, fixed slot
+rec+0x0C  s32       rotate X, BAMS
+rec+0x10  s32       rotate Y
+rec+0x14  s32       rotate Z
+rec+0x18  fn        per-frame callback, run after the draw. [open]
+rec+0x1C  f32[6][4] per attach set: translate x/y/z, then a uniform scale
+```
+
+The rotations are applied **X, then Z, then Y**, and the translate follows
+them. The attach set is `sub+0x82`, which `CivilianInit` picks from the
+character type:
+
+| Attach set | Character types |
+|---|---|
+| 0 | `0x20`, `0x23` |
+| 1 | `0x26`, `0x29`-`0x2D`, `0x38` |
+| 2 | `0x27`, `0x28` |
+| 3 | `0x2E`-`0x30` |
+| 4 | `0x24`, `0x25`, `0x31`-`0x33` |
+| 5 | everything else |
+
+So one record serves every skin that can hold it, with a different offset and
+scale in a child's hand than in an old man's. Fourteen records exist; their
+models are in `etc_1.bin` and `common.bin`, and the kinds' second slots are
+effect billboards (`0x10A3` is a soft flame quad).
+
+Op 0x15 picks between records with a weighted `rand()`: a `{weight, record}`
+list terminated by weight `-1`, `rand() % total`, walked down subtracting.
+`CivilianAddPickedItem` (op 0x14) then appends whatever it chose. The draw is
+the same for both.
+
+### Being shot
+
+A civilian has no hit table and no hit points, and the shot never reaches
+`ResolveHit`. `ShotTestSphere` (`FUN_00404630`) tests a sphere at the actor's
+registered point with radius `obj+0x124` — `g_actor_radius_by_char`, **ten
+units** for every civilian type — and descends into `ShotTestSkeleton` only
+when `obj+0x34` bit `0x80` is set. No class-0x10 script ever sets it. What
+lands is `MarkActorShot` (`FUN_00404DB0`): `obj+0x34 |= (1 << (player + 1)) |
+8`, and `CivilianUpdate` reads those bits back on its next frame.
+
 ## The rescue, and what the class is
 
 `CivilianInit` reads a **child count** at tail `+0x0C` and an array of

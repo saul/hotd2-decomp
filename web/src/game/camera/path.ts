@@ -56,3 +56,22 @@ export function CamSetPathTarget(target: Vec3): void {
   G.g_cam_path_target.y = target.y;
   G.g_cam_path_target.z = target.z;
 }
+
+/**
+ * Has the camera path just reached a cue frame?
+ *
+ * The engine writes `g_cam_path_frame` once a frame through `__ftol`, stepping
+ * by exactly one, so its own cue tests are plain equality: the counter cannot
+ * pass a cue without landing on it. Here the clock is real elapsed time and a
+ * slow frame advances it by two or more, which steps straight over an exact
+ * cue and strands whatever was waiting on it. So the equality becomes a
+ * crossing -- identical whenever the engine's assumption holds, and correct
+ * when it does not.
+ *
+ * Only for the one-shot cues. Class 0x24 and 0x25 already ask `>=`, which is
+ * what their code does. [diverges]
+ */
+export function CamPathCueReached(path: number, frame: number): boolean {
+  if (G.g_active_cam_path !== path) return false;
+  return G.g_cam_path_frame_prev < frame && frame <= G.g_cam_path_frame;
+}

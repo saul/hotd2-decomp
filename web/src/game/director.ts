@@ -10,7 +10,8 @@ import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import { makeActor, type Actor } from "./actor";
 import { UpdateCameraEnemySlots } from "./camera/slots";
-import { CameraTrackEnemiesTick } from "./camera/track";
+import { CameraTrackEnemiesTick, UpdateCameraFreeFlag }
+  from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
@@ -209,6 +210,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   BreakablePropPoolUpdate(rng, events);
 
   UpdateCameraEnemySlots(eye);
+  // `FUN_00402E00` recomputes `g_camera_free` from the slot array it has just
+  // filled -- the gate the room-clear waits need on top of their counter.
+  UpdateCameraFreeFlag();
   // The camera hook, in the engine's own order: the queued `cam_play` action
   // has already seated the block on the rail for this frame (the host calls
   // `CamAdvancePathFrame`), and this eases the aim off it and back.

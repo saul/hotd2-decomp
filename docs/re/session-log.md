@@ -7244,3 +7244,55 @@ stage 2 wall. It seeks the walker to each thrower's own spawn address now.
   `AttackRun`, so they leap down sixty-five units off their ledge and then join
   the fight, which is what the state says and what the descriptor asks for.
 
+
+## `wait_scripted_actors` hung because the camera frame was a float
+
+Reported as sticking on `wait_scripted_actors 0` "even after they die", at
+`stage=1&block=1&step=8`. The counter was innocent — a killed civilian leaves
+`g_civilians_alive` correctly, and the death scripts carry `LeaveCountNow` in
+59 of the 60 streams the game uses as one. What never happened was the
+*removal*.
+
+Stage 1's civilian `0x1828` leaves by a camera cue: `removePath 39`,
+`removeFrame 280`. Class 0x10 tests that cue with `==`, and so does the engine
+— safely, because `g_cam_path_frame` (`0x009A6110`) is written by both camera
+drivers through **`__ftol`**. It is an integer that steps by exactly one, so it
+cannot pass a cue without landing on it.
+
+The port handed that global the walker's clock directly, and the walker's clock
+is `dt * 60` — a float. At a fixed 1/60 it stays integral and every `==`
+matches, which is why **every headless test passed and only the browser broke**:
+under a real frame time the value goes fractional and a cue frame is simply
+never equal to it. The civilian never started its removal countdown, never left
+the count, and the wait sat there for ever.
+
+Two changes: the global is truncated as `__ftol` does, and the one-shot cue
+tests became crossing tests (`prev < cue <= now`) rather than equality, because
+even an integer clock driven by elapsed time can advance by two on a slow frame
+and step straight over. Classes 0x24 and 0x25 already ask `>=` and are fine;
+class 0x31's `!==` at `scripted.ts:215` is a different shape — it gates a
+per-frame action rather than latching once — and was left alone. `[open]`
+
+The wider lesson is the one the fixed-timestep harness kept hiding: a test that
+ticks at exactly 1/60 cannot see a bug whose cause is that the timestep is not
+exactly 1/60. Both of this session's stuck-script bugs were invisible to the
+headless drive for that family of reason — the first because `seek` has no
+clock at all, this one because the test clock was too perfect.
+
+## `g_camera_free`, corrected
+
+The first cut of this ANDed three terms — no slot claimed, nothing alive, aim
+converged — and that is stronger than anything the engine computes. They belong
+to *two alternative drivers*, selected by the `finish_sequence` minor
+(`DAT_00576B20`: 4 and 6 install `FUN_00402650`, 7 installs `FUN_00402E00`),
+not to one. `FUN_00402E00` is four slot bytes and nothing else.
+
+Worse, I had not implemented the engine's escape hatch: every enemy death site
+frees the actor's slot and then forces the flag straight to 1 — `0x00480416`
+then `0x0048042C`, and `0x00428B44` right after `g_enemies_present--`. The
+engine deliberately refuses to make a room wait out the swing back. With the
+conjunction and no force, a room-clear gate stayed shut for good.
+
+Now it is `FUN_00402E00` transcribed, and the port's slot list is rebuilt from
+the live actors each frame so a dead enemy leaves it on its own — one frame
+later than the engine's explicit store.

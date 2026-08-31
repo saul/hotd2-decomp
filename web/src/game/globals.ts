@@ -288,6 +288,18 @@ export const G = {
   g_active_cam_path: -1,
   g_cam_path_frame: 0,
   /**
+   * The previous frame's `g_cam_path_frame`.
+   *
+   * Not an engine global. The engine's counter steps by exactly one, so it
+   * cannot pass a cue without landing on it and testing `==` is safe there.
+   * This port's camera clock runs on real elapsed time and can advance by more
+   * than one frame in a tick, so an exact cue can be stepped straight over.
+   * Keeping the previous value turns those tests into a crossing test, which
+   * is the same answer whenever the engine's assumption holds and the right
+   * one when it does not. [diverges]
+   */
+  g_cam_path_frame_prev: 0,
+  /**
    * `g_script_flags` — 0x009C7200. The byte array `set_script_flag` (evt 0x48)
    * writes and the set-pieces read for their other removal trigger.
    */

@@ -89,32 +89,46 @@ export function CameraTrackEnemiesTick(): void {
         || Math.abs(LookAtCosineSquared(eye, want, have)) > 0.99999) {
       G.g_camera_settled = 1;
     }
-    // `CameraTurnOntoPathTarget` raises `g_camera_free` on the same test, in
-    // the same breath as `g_camera_settled` — that is the moment the swing
-    // back onto the rail is over and a room-clear wait may pass.
-    UpdateCameraFreeFlag();
     G.g_camera_turn_rate = T.tracking?.rate_untracked ?? 12;
     return;
   }
   ComputeLookAtAngleError();
-  // Still tracking an enemy: the camera is claimed, so the flag is down.
-  UpdateCameraFreeFlag();
 }
 
 /**
- * `g_camera_free`, as the engine's two camera drivers compute it between them.
+ * `g_camera_free` — `FUN_00402E00`, transcribed.
  *
- * `FUN_00402E00` walks the four `g_enemy_slots` entries and raises the flag
- * only when none is claimed; `FUN_00402650` clears it on every frame the
- * camera is not in its return-to-path mode, which it enters only when
- * `g_enemies_alive` is zero and no slot is claimed. `CameraTurnOntoPathTarget`
- * then latches it when the eased look-at catches the path target.
+ *     g_camera_free = 1;
+ *     for (p = &g_enemy_slots; p < 0x009A5EE0; p += 8)
+ *         if (*p != 0) { g_camera_free = 0; break; }
  *
- * One routine here rather than that pair, so the three terms are written out:
- * nobody in the slots, nothing alive, and the aim converged. [diverges]
+ * Four slots, stride 8, and the flag is the *occupied* byte of each — nothing
+ * else. `g_enemy_slots` here holds only the claimed slots, so the walk is a
+ * length test.
+ *
+ * The room-clear waits `0x43`, `0x44` and `0x46` all require this on top of
+ * their counter, so a room does not hand over while an enemy still holds the
+ * camera.
+ *
+ * **Two things this deliberately does not do**, both of which an earlier cut
+ * of this function got wrong and which parked the script:
+ *
+ * - It does not require `g_enemies_alive == 0`, and it does not require the
+ *   aim to have converged. Those belong to `FUN_00402650`, the *other*
+ *   per-frame camera driver — the two are alternatives selected by the
+ *   `finish_sequence` minor (`DAT_00576B20[minor]`: 4 and 6 install
+ *   `FUN_00402650`, 7 installs this one), not a pair that both run. ANDing all
+ *   three terms is stronger than either driver and holds a room-clear gate for
+ *   ever whenever anything is still alive. This port models the driver it can
+ *   represent. [diverges]
+ * - It does not wait out the swing back onto the rail. The engine explicitly
+ *   refuses to: every enemy death site frees the actor's slot and then forces
+ *   this flag straight to 1 (`0x00480416` then `0x0048042C`; `0x00428B44`
+ *   right after `g_enemies_present--`), so the gate opens on the death frame.
+ *   Here the slot list is rebuilt from the live actors every frame, so a dead
+ *   enemy leaves it on its own and the flag rises the same way — one frame
+ *   later than the engine's explicit store. [diverges]
  */
 export function UpdateCameraFreeFlag(): void {
-  G.g_camera_free =
-    G.g_enemy_slots.length === 0 && G.g_enemies_alive === 0
-      && G.g_camera_settled !== 0 ? 1 : 0;
+  G.g_camera_free = G.g_enemy_slots.length === 0 ? 1 : 0;
 }

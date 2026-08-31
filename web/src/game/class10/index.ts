@@ -97,6 +97,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ActorUpdateBoundingSphere, type Actor } from "../actor";
 import { ColiTestSphereAgainstFullSet, QueryGroundHeightAt } from "../coli";
+import { CamPathCueReached } from "../camera/path";
 import { ScoreAddForPlayer } from "../combat/score";
 import { PlayerTakeDamageTimed } from "../combat/player";
 import { ActorDespawn } from "../despawn";
@@ -758,8 +759,7 @@ function CivilianCueMet(obj: Actor, word: number): boolean {
   const sub = obj.civ;
   if (!sub) return false;
   if ((word & CivilianWait.CameraCue)
-      && G.g_active_cam_path === sub.cuePath
-      && G.g_cam_path_frame === sub.cueFrame) return true;
+      && CamPathCueReached(sub.cuePath, sub.cueFrame)) return true;
   if ((word & CivilianWait.TwoPlayers) && G.g_two_player_game >= 1) return true;
   return false;
 }
@@ -1129,8 +1129,7 @@ function CivilianCheckRemoval(obj: Actor): void {
   const sub = obj.civ;
   if (!sub) return;
   if (sub.removeDelay === 0) {
-    if (G.g_active_cam_path === sub.removePath
-        && G.g_cam_path_frame === sub.removeFrame) {
+    if (CamPathCueReached(sub.removePath, sub.removeFrame)) {
       sub.removeDelay = Math.max(1, T.civilians?.spawns?.[String(obj.at)]
         ?.removeDelay ?? 0);
     }

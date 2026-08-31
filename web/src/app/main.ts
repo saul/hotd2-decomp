@@ -1222,7 +1222,16 @@ class Player {
     // Class 0x24's set-pieces are choreographed against the camera: every one
     // of their removal and freeze triggers is a `cp_` slot plus a frame.
     G.g_active_cam_path = w.cam ? w.cam.slot : -1;
-    G.g_cam_path_frame = w.cam ? w.cam.frame : 0;
+    // `__ftol` -- both camera drivers end on `g_cam_path_frame = __ftol(...)`,
+    // so this global is an **integer** that steps by exactly one a frame. The
+    // walker's clock is a float (`dt * 60`), and handing that straight over
+    // made every `===` test against it a coin toss: at a fixed 1/60 the value
+    // stays integral and matches, but under a browser's variable frame time it
+    // goes fractional and a cue frame is simply never equal to it. Class 0x10's
+    // removal cue never fired, so a civilian never left `g_civilians_alive` and
+    // `wait_scripted_actors` waited for ever.
+    G.g_cam_path_frame_prev = G.g_cam_path_frame;
+    G.g_cam_path_frame = w.cam ? Math.trunc(w.cam.frame) : 0;
     G.g_script_flags = [];
     for (const flag of w.flags) G.g_script_flags[flag] = 1;
     // The spawn opcode places a group the moment it runs, so this is only the

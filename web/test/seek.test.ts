@@ -367,11 +367,13 @@ for (const stage of STAGES) {
     w.applyWait(gate);
     w.tick(1 / 60);
     const held = w.wait?.policy.kind === "enemies";
+    const heldAt = `${w.block}/${w.step}/${w.opIndex}`;
     free = true;
     w.tick(1 / 60);
+    const movedTo = `${w.block}/${w.step}/${w.opIndex}`;
     check("a gate held by the camera releases when the swing finishes",
-          held && w.wait?.policy.kind !== "enemies" && w.opIndex > 0,
-          `now ${w.wait?.policy.kind ?? "idle"} at op ${w.opIndex}`);
+          held && w.wait?.policy.kind !== "enemies" && movedTo !== heldAt,
+          `held at ${heldAt}, now ${w.wait?.policy.kind ?? "idle"} at ${movedTo}`);
   }
 }
 
@@ -407,18 +409,24 @@ for (const stage of STAGES) {
     falling.applyWait(gate);
     falling.tick(1 / 60);
     const stillHeld = falling.wait?.policy.kind === "civilians";
+    const heldAt = `${falling.block}/${falling.step}/${falling.opIndex}`;
     alive = 0;
     falling.tick(1 / 60);
+    const movedTo = `${falling.block}/${falling.step}/${falling.opIndex}`;
     // Releasing does not leave the walker idle: it runs straight on into the
     // instructions after the gate and stops at the *next* wait, which is what
     // the interpreter does too -- a satisfied wait clears the yield flag and
     // the `do { } while (yield == 0)` loop keeps dispatching in the same
     // frame. So the check is that the civilian gate is gone, not that no wait
     // is pending.
+    // Progress is the address changing, not the op index rising: the walker
+    // runs on to whatever comes next, and that can be a new step or a branch
+    // prompt, both of which sit at op 0.
     check("a held civilian gate releases when the count reaches zero",
           stillHeld && falling.wait?.policy.kind !== "civilians"
-          && falling.opIndex > 0,
-          `now ${falling.wait?.policy.kind ?? "idle"} at op ${falling.opIndex}`);
+          && movedTo !== heldAt,
+          `held at ${heldAt}, now ${falling.wait?.policy.kind ?? "idle"} `
+          + `at ${movedTo}`);
 
     // Shoot off: nothing can rescue a civilian, so the gate is not a condition
     // this client can evaluate and it passes rather than deadlocking.

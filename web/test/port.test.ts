@@ -16,11 +16,10 @@ import type {
 import { Rng } from "../src/core/rng";
 import { Events } from "../src/core/events";
 import { ActorSpawn, GameUpdate } from "../src/game/director";
-import { CamAdvancePathFrame, CamSetPathTarget }
+import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { CameraTrackEnemiesTick, UpdateCameraFreeFlag }
-  from "../src/game/camera/track";
+import { UpdateCameraFreeFlag } from "../src/game/camera/track";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { NULL_HOST } from "../src/game/host";
 import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
@@ -2532,6 +2531,44 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("...and does not run its actions",
           a.civ?.turnRate !== 66, `rate ${a.civ?.turnRate}`);
   }
+
+  // **Does a dead civilian leave `g_civilians_alive`?** This is the counter
+  // `wait_scripted_actors` blocks on, and a civilian that dies without leaving
+  // it parks the script for ever. `CivilianInit` raises the count
+  // unconditionally; the way back out on a death is the on-shot script's own
+  // `Wait` word carrying `LeaveCountNow` -- and 59 of the 60 streams the shipped
+  // scripts use as a death script do carry it, so this is the path that matters.
+  {
+    const cmdS = (op: CivilianOp, scripts: number[],
+                  ...args: number[]): CivilianCmdJson => ({ op, args, scripts });
+
+    // Stream 0 is the life, stream 1 the death. The death stream leaves the
+    // count the way the game's own death scripts do.
+    const { a, events } = civScene([
+      [cmd(CivilianOp.Wait, 0),
+       cmdS(CivilianOp.SetOnShot, [1], 1),
+       cmd(CivilianOp.Wait, 0)],
+      [cmd(CivilianOp.Wait, CivilianWait.LeaveCountNow),
+       cmd(CivilianOp.End)],
+    ]);
+    cFrame(a, events);
+    check("a civilian in play is counted", G.g_civilians_alive === 1,
+          `${G.g_civilians_alive}`);
+
+    // What the maul does to it: `ZombieStateTargetMotionScript` raises the same
+    // bit a killing shot raises on the civilian's `obj+0x34`.
+    a.flags |= ActorFlag.Dead;
+    cFrame(a, events);
+    check("...and leaves the count when it is killed",
+          G.g_civilians_alive === 0, `${G.g_civilians_alive} still counted`);
+
+    // And it does not leave twice: the removal that follows a death must not
+    // decrement again, or the count goes negative and a later `wait_scripted_
+    // actors` passes while civilians are still standing.
+    for (let i = 0; i < 8; i++) cFrame(a, events);
+    check("...exactly once, however long it lies there",
+          G.g_civilians_alive === 0, `${G.g_civilians_alive}`);
+  }
 }
 
 console.log("\nclass 0x30's captor family — the zombies work on the civilian:");
@@ -3053,6 +3090,9 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
           === ZombieState.StandAndThrow,
         String(ZombieEntryState(ZombieState.StandAndThrow)));
 
+  /** `obj+0x34` bit 0x20000 — see `ActorInitFlags` and `class30/ground.ts`. */
+  const GROUND_SNAP_EXEMPT = 0x20000;
+
   const thrower = (cond = 7) => {
     ResetGameGlobals();
     SetGameTables(CHARS);
@@ -3100,6 +3140,68 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
           && ZombiePickThrowingHand(z, new Rng(1)) === 0);
   }
 
+  // **`ActorInitFlags`, and the bit that showed.** The spawn record's flags
+  // word becomes `obj+0x34` before the class Init runs, and `0x20000` exempts
+  // the actor from the per-frame ground snap. Without the word, stage 1's axe
+  // man was dropped from the ledge he is placed on to the script's ground
+  // plane and threw from behind the wall he had been standing on.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_camera_fixed_eye_y = 0;          // the ground plane, far below
+    const pinned = ActorSpawn(0x7600, SpawnClass.Zombie, 1, "on a ledge", {
+      initialState: ZombieState.StandAndThrow, condition: 7,
+      flags: GROUND_SNAP_EXEMPT,
+    });
+    pinned.visible = true;
+    pinned.hp = pinned.maxHp = 100;
+    pinned.pos = vec3(0, 47, 60);
+    check("the spawn record's flags word reaches the actor",
+          (pinned.flags & GROUND_SNAP_EXEMPT) !== 0,
+          `0x${(pinned.flags >>> 0).toString(16)}`);
+    check("...and `ActorInitFlags` ORs in bit 0", (pinned.flags & 1) !== 0);
+    ZombiePushOutOfWorldAndActors(pinned, 1);
+    check("a pinned spawn keeps the height the script placed it at",
+          pinned.pos.y === 47, String(pinned.pos.y));
+
+    // ...and one without the bit settles onto the ground plane, as every
+    // other stationary thrower in the game does.
+    const loose = ActorSpawn(0x7601, SpawnClass.Zombie, 1, "not pinned", {
+      initialState: ZombieState.StandAndThrow, condition: 7,
+    });
+    loose.visible = true;
+    loose.hp = loose.maxHp = 100;
+    loose.pos = vec3(0, 47, 60);
+    ZombiePushOutOfWorldAndActors(loose, 1);
+    check("...and one without it still snaps to the ground",
+          loose.pos.y === 0, String(loose.pos.y));
+  }
+
+  // The way out: it backs away by the descriptor's distance and then goes.
+  {
+    const z = thrower();
+    z.boneSlot["5"] = 0;
+    z.boneSlot["8"] = 0;                 // both thrown
+    z.sub = 4;                           // the recover, with nothing left
+    z.motion = 102;                      // 24 frames, so a play length of 46
+    // The recover arm waits for `obj+0x19C == play_length - 1` exactly, and
+    // the cursor wraps -- so this is frame 45 of 46, not "some time later".
+    z.clock = 45 / (30 * 2);
+    ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
+    check("with both hands empty it starts the leave delay",
+          z.throwDelay === 2, String(z.throwDelay));
+    for (let i = 0; i < 4; i++) {
+      ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
+    }
+    check("...and then walks away rather than despawning on the spot",
+          z.state === ZombieState.WalkDistance && z.targetArrive === 5
+          && !z.despawned,
+          `${ZombieState[z.state]} arrive ${z.targetArrive} `
+          + `despawned ${z.despawned}`);
+    check("...backwards, on `row[4]`",
+          (z.flags & ActorFlag.BackingOff) !== 0);
+  }
+
   // The other way in: a condition-8 walker already facing the camera.
   {
     const z = thrower(8);
@@ -3133,33 +3235,57 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   check("the camera is not free while an enemy holds a slot",
         G.g_camera_free === 0);
 
-  // The slots have emptied but something is still alive.
+  // The slot empties and the flag rises again -- that is the whole rule.
   G.g_enemy_slots = [];
   UpdateCameraFreeFlag();
-  check("...nor while anything is still alive", G.g_camera_free === 0);
+  check("the camera is free once nothing holds a slot", G.g_camera_free === 1);
 
-  // Everything dead, but the aim is still swinging back.
-  G.g_enemies_alive = 0;
+  // The rule is the slot array and NOTHING else. An earlier cut of this also
+  // required `g_enemies_alive == 0` and a converged aim -- terms that belong
+  // to the other camera driver, not this one -- and the conjunction held every
+  // room-clear gate for ever while anything was still alive. These two are the
+  // regression: enemies alive, and an aim that has not converged, must both
+  // leave the flag up.
+  G.g_enemies_alive = 5;
+  UpdateCameraFreeFlag();
+  check("...even with enemies alive, if none of them holds a slot",
+        G.g_camera_free === 1);
   G.g_camera_settled = 0;
   UpdateCameraFreeFlag();
-  check("...nor during the swing back onto the rail", G.g_camera_free === 0);
+  check("...and without waiting for the aim to converge",
+        G.g_camera_free === 1);
+}
 
-  // And the moment the swing completes.
-  G.g_camera_settled = 1;
-  UpdateCameraFreeFlag();
-  check("the camera is free once the swing finishes", G.g_camera_free === 1);
-
-  // The failure that would park the script: a camera with no pose at all --
-  // look-at sitting on the eye -- makes the engine's cosine test divide by
-  // zero, and it answers 0, which is never > 0.99999. Nothing would settle and
-  // no room-clear gate would ever open.
+// The camera-path cue, and the frame that gets stepped over.
+//
+// `g_cam_path_frame` is an integer in the engine -- both camera drivers end on
+// `__ftol` -- and it steps by exactly one, so the engine's cue tests are plain
+// `==`. This port's clock is real elapsed time. Handing the walker's float
+// straight to the global made `==` a coin toss (fine at a fixed 1/60, never
+// equal under a browser's variable frame time), and a slow frame can still
+// step over an exact cue even once it is truncated. Class 0x10's removal cue
+// is one of those, and a civilian that misses it never leaves
+// `g_civilians_alive` -- so `wait_scripted_actors` waits for ever.
+{
   ResetGameGlobals();
-  G.g_enemies_alive = 0;
-  G.g_enemy_slots = [];
-  CameraTrackEnemiesTick();
-  check("an unposed camera settles rather than parking the script for ever",
-        G.g_camera_settled === 1 && G.g_camera_free === 1,
-        `settled ${G.g_camera_settled}, free ${G.g_camera_free}`);
+  G.g_active_cam_path = 39;
+
+  G.g_cam_path_frame_prev = 279; G.g_cam_path_frame = 280;
+  check("a cue the camera lands on fires", CamPathCueReached(39, 280));
+
+  G.g_cam_path_frame_prev = 279; G.g_cam_path_frame = 281;
+  check("...and so does one a slow frame steps over",
+        CamPathCueReached(39, 280));
+
+  G.g_cam_path_frame_prev = 280; G.g_cam_path_frame = 281;
+  check("...but it does not fire again once it is behind",
+        !CamPathCueReached(39, 280));
+
+  G.g_cam_path_frame_prev = 279; G.g_cam_path_frame = 281;
+  check("...nor on a different path", !CamPathCueReached(40, 280));
+
+  G.g_cam_path_frame_prev = 0; G.g_cam_path_frame = 0;
+  check("...nor before the path has reached it", !CamPathCueReached(39, 280));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -38,6 +38,7 @@ import {
   BreakableState, PropFamily, type BreakableProp,
 } from "../game/class41/prop_state";
 import { KIND_SHADOW } from "../game/class41/kinded";
+import { GENERIC_DRAW_SLOT } from "../game/class41/generic";
 
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
@@ -58,6 +59,73 @@ const SHAKE_SCALE = 0.01;
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
 
 /**
+ * `LiftUpdate` (`FUN_0046A360`)'s draw, transcribed. The state half is
+ * `game/class41/lift.ts`; this is the five `AssetDrawSlot` calls.
+ *
+ * ```c
+ * MatrixStackPush(0);
+ *   MatrixTranslate(obj+0x19C, obj+0x1A0, obj+0x1A4);
+ *   AssetDrawSlot(0x197A);                          // the body
+ *   MatrixStackPush(0);
+ *     MatrixTranslate(9.619, 0.0451, -8.4127);
+ *     MatrixRotateY(obj+0x1D0);      AssetDrawSlot(0x197B);
+ *     MatrixTranslate(-6.5, 0, 0);
+ *     MatrixRotateY((-0x4000 - obj+0x1D0) * 2);
+ *                                    AssetDrawSlot(0x197B);
+ *   MatrixStackPop(1);
+ *   MatrixStackPush(0);
+ *     MatrixTranslate(-3.988, 0.0451, -9.6331);
+ *     MatrixRotateY(obj+0x1E8);      AssetDrawSlot(0x197B);
+ *     MatrixTranslate(-6.5, 0, 0);
+ *     MatrixRotateY(obj+0x1E8 * -2); AssetDrawSlot(0x197B);
+ *   MatrixStackPop(1);
+ *   MatrixTranslate(-3.2134, 13.0, -2.0);
+ *   MatrixRotateX(obj+0x1CC);
+ *   MatrixTranslate(0, 1.0, 0);
+ *   AssetDrawSlot(0x1981);                          // the panel
+ * MatrixStackPop(1);
+ * ```
+ *
+ * Every constant is read back out of the disassembly rather than off the
+ * decompiler, because the decompiler drops FPU arguments to these calls. The
+ * root takes **no** rotation: `obj+0x1CC` and `+0x1D0` are hinge angles for
+ * this type, not the prop's orientation.
+ */
+const LIFT_CAR_SLOT = 0x197a;
+const LIFT_LEAF_SLOT = 0x197b;
+const LIFT_PANEL_SLOT = 0x1981;
+const LIFT_HINGE_NEAR: readonly [number, number, number] =
+  [9.619, 0.0451, -8.4127];
+const LIFT_HINGE_FAR: readonly [number, number, number] =
+  [-3.988, 0.0451, -9.6331];
+/** `MatrixTranslate(-6.5, 0, 0)` — leaf two hangs off the end of leaf one. */
+const LIFT_LEAF_SPAN = -6.5;
+const LIFT_PANEL_AT: readonly [number, number, number] = [-3.2134, 13.0, -2.0];
+/** `MatrixTranslate(0, 1.0, 0)` after the panel's hinge. */
+const LIFT_PANEL_RISE = 1.0;
+/** The near pair's second leaf folds back from `-0x4000`, the far pair's from 0. */
+const LIFT_NEAR_FOLD_BIAS = -0x4000;
+
+/**
+ * Which model a prop draws.
+ *
+ * For everything but the generic family this is `obj+0x28C` and nothing else.
+ * The generic family is where it gets interesting: `PlaceGenericProp` copies
+ * the spawn descriptor's `+0x11C` into `+0x28C`, but only three of its types
+ * ever draw that field — the rest hardcode a literal, which is
+ * `GENERIC_DRAW_SLOT`. `null` means the routine draws no static model at all.
+ */
+function DrawSlotFor(p: BreakableProp): number | null {
+  if (p.family === PropFamily.Lift) return LIFT_CAR_SLOT;
+  // `-1` as a `u16`: the engine's "draw nothing", which `KindedPropUpdate`
+  // writes over a prop it has hidden.
+  if (p.slot === SLOT_NONE && p.family !== PropFamily.Generic) return null;
+  if (p.family !== PropFamily.Generic) return p.slot;
+  const drawn = GENERIC_DRAW_SLOT[p.kind];
+  return drawn === undefined ? p.slot : drawn;
+}
+
+/**
  * Which ground shadow a prop casts, if any.
  *
  * A group prop always casts the large one. A kinded prop casts one only for
@@ -75,12 +143,23 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   return KIND_SHADOW[p.kind] ?? null;
 }
 
+/** The five hinged sub-nodes the lift's draw composes. */
+interface LiftParts {
+  near: Object3D;
+  nearFold: Object3D;
+  far: Object3D;
+  farFold: Object3D;
+  panel: Object3D;
+}
+
 interface Live {
   /** The prop's model, re-cloned when the asset slot changes. */
   node: Object3D;
   shadow: Object3D | null;
   /** Which slot `node` was cloned from, so a swap is noticed. */
   slot: number;
+  /** Only the lift has one; the pivots its update drives. */
+  lift?: LiftParts;
 }
 
 export class BreakableLayer implements System {
@@ -151,23 +230,28 @@ export class BreakableLayer implements System {
 
     for (const p of G.g_breakable_props) {
       if (p.dead) continue;
+      const slot = DrawSlotFor(p);
+      // A generic type whose routine draws only an effect has no model here,
+      // and drawing `obj+0x28C` for it put a character where scenery was.
+      if (slot === null) continue;
       seen.add(p.id);
       let l = this.nodes.get(p.id);
       // The first shot swaps the model to 0x19E6, so the slot is re-checked
       // every frame and a changed one re-clones rather than re-poses.
-      if (l && l.slot !== p.slot) {
+      if (l && l.slot !== slot) {
         l.node.removeFromParent();
         this.nodes.delete(p.id);
         l = undefined;
       }
       if (!l) {
-        const node = this.clone(p.slot);
+        const node = this.clone(slot);
         if (!node) continue;
         this.group.add(node);
         const shadowSlot = ShadowSlotFor(p);
         const shadow = shadowSlot === null ? null : this.clone(shadowSlot);
         if (shadow) this.group.add(shadow);
-        this.nodes.set(p.id, (l = { node, shadow, slot: p.slot }));
+        this.nodes.set(p.id, (l = { node, shadow, slot }));
+        if (p.family === PropFamily.Lift) this.buildLift(l);
       }
 
       // A destroyed prop is a puff the port is counting down; nothing of the
@@ -184,7 +268,9 @@ export class BreakableLayer implements System {
       // Ry * Rz * Rx, the engine's order — the same composition the hull test
       // in `BreakablePropGroundContact` uses, so the box and the model agree.
       l.node.rotation.set(0, 0, 0);
-      if (p.family === PropFamily.Falling) {
+      if (l.lift) {
+        this.poseLift(l.lift, p);
+      } else if (p.family === PropFamily.Falling) {
         // `FallingContainerUpdate` draws Rz * Ry * Rx; the others Ry * Rz * Rx.
         // The same order its hull test uses, so box and model agree.
         l.node.rotateZ(p.roll * BAMS_TO_RAD);
@@ -213,6 +299,62 @@ export class BreakableLayer implements System {
       l.shadow?.removeFromParent();
       this.nodes.delete(id);
     }
+  }
+
+  /**
+   * Hang the lift's four cage leaves and its overhead panel off the car.
+   *
+   * `MatrixStackPush(0)` duplicates the top of the stack, so the two hinges
+   * are **siblings** under the body's translate rather than a chain — the
+   * `MatrixStackPop(1)` between them is what says so. The panel comes after
+   * both pops, so it composes on the body too.
+   */
+  private buildLift(l: Live): void {
+    const pivot = (at: readonly [number, number, number]) => {
+      const g = new Group();
+      g.position.set(at[0], at[1], at[2]);
+      return g;
+    };
+    const leaf = () => this.clone(LIFT_LEAF_SLOT);
+
+    const near = pivot(LIFT_HINGE_NEAR);
+    const nearFold = pivot([LIFT_LEAF_SPAN, 0, 0]);
+    const far = pivot(LIFT_HINGE_FAR);
+    const farFold = pivot([LIFT_LEAF_SPAN, 0, 0]);
+    const panel = pivot(LIFT_PANEL_AT);
+
+    for (const [pv, fold] of [[near, nearFold], [far, farFold]] as const) {
+      const a = leaf();
+      if (a) pv.add(a);
+      const b = leaf();
+      if (b) fold.add(b);
+      pv.add(fold);
+      l.node.add(pv);
+    }
+    const deck = this.clone(LIFT_PANEL_SLOT);
+    if (deck) {
+      // `MatrixTranslate(0, 1.0, 0)` sits between the hinge and the model.
+      deck.position.set(0, LIFT_PANEL_RISE, 0);
+      panel.add(deck);
+    }
+    l.node.add(panel);
+    l.lift = { near, nearFold, far, farFold, panel };
+  }
+
+  /**
+   * The three angles `LiftUpdate` drives, applied to the pivots.
+   *
+   * The second leaf of each pair counter-rotates at twice the rate, which is
+   * what folds it back against the first instead of swinging it wide: the
+   * near pair from `-0x4000`, the far pair from zero.
+   */
+  private poseLift(g: LiftParts, p: BreakableProp): void {
+    g.near.rotation.y = p.yaw * BAMS_TO_RAD;
+    g.nearFold.rotation.y =
+      (LIFT_NEAR_FOLD_BIAS - p.yaw) * 2 * BAMS_TO_RAD;
+    g.far.rotation.y = p.hingeB * BAMS_TO_RAD;
+    g.farFold.rotation.y = p.hingeB * -2 * BAMS_TO_RAD;
+    g.panel.rotation.x = p.pitch * BAMS_TO_RAD;
   }
 
   /**
@@ -266,14 +408,54 @@ export class BreakableLayer implements System {
     this.update();
   }
 
+  /**
+   * What the pool is doing, and — when a prop is not drawn — *why*.
+   *
+   * "up (n drawn)" on its own was the least useful line in the panel: it said
+   * ten props had no node and nothing about which ten, so the same question
+   * had to be answered from the exporter every time. The three reasons are
+   * separated here because they want different fixes: a type whose routine
+   * draws no model is finished, a slot with no template is an exporter gap,
+   * and anything left is a renderer bug.
+   */
   get describe(): string {
     const live = G.g_breakable_props.filter((p) => !p.dead);
     if (!this.templates.size) return "no models";
     if (!live.length) return "none placed";
-    const by = (f: PropFamily) =>
-      live.filter((p) => p.family === f).length;
-    const generic = by(PropFamily.Generic);
-    return `${live.length} up (${this.nodes.size} drawn)`
-      + (generic ? `, ${generic} placed but not simulated` : "");
+    const generic = live.filter((p) => p.family === PropFamily.Generic).length;
+    // `+0x290` is the object kind for a kinded prop and the class-0x41 type
+    // for a generic one, so the two have to be counted apart or the line
+    // reports a kind as a type. Same offset, different meaning, again.
+    const kinds = new Set<number>();
+    const types = new Set<number>();
+    let effects = 0;
+    const noTemplate = new Set<number>();
+    for (const p of live) {
+      const slot = DrawSlotFor(p);
+      if (slot !== null) {
+        if (!this.templates.has(slot)) noTemplate.add(slot);
+        continue;
+      }
+      effects++;
+      (p.family === PropFamily.Generic ? types : kinds).add(p.kind);
+    }
+    const bits = [`${live.length} up (${this.nodes.size} drawn)`];
+    if (generic) bits.push(`${generic} placed but not simulated`);
+    if (effects) {
+      // Not a gap in the export: `PlaceKindedProp` writes `obj+0x28C = -1`
+      // for every kind but 2, 3, 8 and 9, and `KindedPropUpdate` then draws
+      // `FUN_0040DD90(obj+0x324)` instead — the animated-effect system, which
+      // this player has no renderer for at all.
+      const who = [
+        kinds.size ? `kind ${[...kinds].sort((a, b) => a - b).join(",")}` : "",
+        types.size ? `type ${[...types].sort((a, b) => a - b).join(",")}` : "",
+      ].filter(Boolean).join(" / ");
+      bits.push(`${effects} are effects, not models (${who})`);
+    }
+    if (noTemplate.size) {
+      bits.push(`no template for slot `
+                + [...noTemplate].map((x) => `0x${x.toString(16)}`).join(","));
+    }
+    return bits.join(", ");
   }
 }

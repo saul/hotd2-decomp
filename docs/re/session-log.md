@@ -4900,3 +4900,103 @@ this is a 640x480 projection. `TryClaimAttackSlot` calls it **before** handing
 out a permit, so an enemy off the side of the screen cannot start an attack,
 and cannot sit on the one permit while it is out of shot. Ported, through a new
 `viewSpaceOf` on `GameHost`.
+
+## Session: class 0x40, the class-0x41 lift, and what `+0x11C` really means
+
+Three questions from one report: what is class 64 ("furniture?"), where is the
+c65 lift, and why do zombies stay alive while seeking.
+
+### Class 0x40 is not furniture — it is a flock of eight enemies
+
+`PlaceHorde` (`FUN_0043BD30`) was not even a function in the Ghidra database;
+`docs/formats/spawns.md` had it as "horde spawner" from a disassembly read that
+was never written back. Created and read: it allocates N members into
+`g_horde_members`, hands each its index at `+0x131B`, and dies. Every member is
+character type **0x1D — `mol.bin`**, a six-segment chain, and dies to one shot
+for 80 points playing `PDMG_MORR1/2_44.wav`. `HordeMemberUpdate`
+(`FUN_0043C440`) is a seven-state machine with an entry spline, a wander box, a
+dive at the camera and neighbour avoidance inside 6.0 units.
+
+So the answer to "is it some furniture?" is no, and the answer to "should we
+port it?" is "that is an enemy AI of zombie scale, separately". Named and
+documented; not ported.
+
+Two globals fell out of it and are worth having on their own:
+`g_evt_block_index` (0x009A2BC0) — the block **currently executing**, which is
+*not* `g_evt_block_counter` (0x009A2BB0), the monotonic count of transitions
+prop lifetimes measure — and `g_scene_index` (0x009A1A08), proved by
+`ColiLoadForScene` indexing its file list with it.
+
+### The lift, and a name taken from the wrong noun
+
+Class 0x41 type 32 is `FUN_0046A360`. Its three models all live in
+**`komono_suimon.bin`** — *suimon* (水門), a sluice gate — and its leaves play
+`DOORKICK3`. Two name tables agreeing, so it was called `WaterGateUpdate` and
+committed to nothing.
+
+Then it was rendered, and it is a **folding lattice cage gate seen from
+inside**, with a passenger's legs visible through it. The corroboration that
+settles it is in the code, not the picture: while script flag 0x37 is up the
+routine holds `obj+0x1A0` at `g_camera_block_eye.y - 15.0`, and stage 2 raises
+that flag over `cp_st2` path 28 (slot 83), whose eye **climbs from 55.0 to
+144.2** — so the object rides from 39.6 to 129.2, and 40.0 is exactly where the
+spawn puts it. An 89-unit vertical ride with the camera standing on it.
+
+**The asset file is named for the area, not for the object in it.** That is the
+trap; `komono_suimon.bin` entries 5, 6 and 9 are a lift. Renamed to `LiftUpdate`
+everywhere before anything shipped.
+
+The three hinges are `+0x1D0` (near cage pair), `+0x1E8` (far pair) and
+`+0x1CC` (an overhead panel, `[open]` what it is), each stepping 0x200 BAMS a
+frame under a script flag, and each test is `< limit + 1` — so every hinge
+comes to rest **one step past** the round number. `PlaceGenericProp` case 0x20
+seeds all three, which is what makes the sound cues, written as equalities
+against the rest angle, fire once and only on the first frame.
+
+### `+0x11C` is a lifetime that is only *sometimes* also a slot
+
+Reading the lift's constructor turned up the real prop bug.
+`PlaceGenericProp` writes the descriptor's `+0x11C` into `obj+0x28C` (the asset
+slot) **and** `obj+0x11C` (the lifetime `PropExpireByBlockLifetime` counts
+down). The exporter had been carrying it as a slot only, and
+`lifetime_evt_blocks: 0`.
+
+All 25 routines that open with the prologue were then read for one question:
+does this one draw `obj+0x28C`? Three do — types 5, 12 and 33. The rest
+hardcode their models. Stage 2's 67 generic props carry the values
+`0,1,2,3,4,5` and then `0x1D8` and up with **nothing in between**, and the
+types carrying the high values are exactly those three. So 46 of 67 were being
+drawn as `char_adv03.bin`, `eff_boss4.bin` and `bg_adv10.bin` — characters
+standing in for scenery, which is what "a lot of the props aren't rendering"
+looked like. `GENERIC_DRAW_SLOT` now carries the literal each read routine
+draws, and the exporter emits those templates instead of the lifetime.
+
+Types 70, 71, 72 and 77 open with `if (g_GameMode != 1) ActorDespawn(obj)` —
+Original Mode's collectibles, which in an Arcade run should be gone on their
+first frame and were instead standing in the level for ever.
+
+### The kinded props that have no model are *supposed* to have no model
+
+With the generic props fixed the panel still said 9 of 16 props undrawn.
+`PlaceKindedProp` sets `obj+0x28C = 0xFFFF` and overrides it for four kinds
+only; the other seven draw `FUN_0040DD90(obj+0x324)` — the animated-effect
+system. So those markers are not an export gap, they are a renderer the player
+does not have. The status line now says which of the three reasons applies,
+because "16 up (7 drawn)" was the least useful line in the panel.
+
+### Seeking left every zombie the script had ever placed
+
+`wait_enemies_alive` / `wait_enemies_present` block until the counters fall,
+and the counters only fall when the actors die — so *past* one of those gates
+every enemy placed before it is dead, by construction. The replay shoots
+nothing, so nothing retired them: a seek to block 17 step 8 arrived with six
+zombies from steps 3, 5, 6 and 7 standing behind the camera. Every path that
+releases a wait without testing it now goes through one `stepOverWait`, which
+applies the postcondition.
+
+All 488 enemy gates in the six shipped scripts wait for **zero** — 54 of `0x43`
+and 434 of `0x44` — so there is no "leave two alive" case to get wrong.
+
+The set of classes retired is deliberately **not** `registry.ts`'s
+`ENEMY_CLASSES`: that one is narrower on purpose, because an unported class in
+it is an actor that never dies and therefore a gate that never unblocks.

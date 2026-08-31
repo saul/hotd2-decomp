@@ -58,7 +58,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) reads `obj+0x6C` as an object kind. The retail stages reach 74 of the 79. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) reads `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. | `[proved]`, by the game's own sound record |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selector 16 (`PlaceFallingContainer`) is an **item container** and is ported; the other seventeen are unread. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
@@ -78,13 +78,72 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x15` | `FUN_00441750` | 4 | **Row spawner for floating props** — N copies spaced by a delta vector, each sampling the wave field. | `[proved]` |
 | `0x52` | `FUN_0043F4C0` | 10 | **Small wandering critter.** Subtypes 0–1 wander and self-despawn; 2–4 are **shootable route-branch triggers** that set the script branch variable and flee. Plays no sound, so the species is `[open]`. | `[proved]` function |
 | `0x53` | `FUN_00431250` | 4 | **Skinned NPC**; subtype ≥2 is a shootable branch trigger that reacts and runs away. | `[proved]` |
-| `0x40` | `FUN_0043BD30` | 9 | **Horde spawner** — 1, 4, 6, 8 or 10 copies of an enemy actor depending on player count and scene. | `[proved]` mechanism |
+| `0x40` | `PlaceHorde` (`FUN_0043BD30`) | 9 | **Horde spawner — a flock of enemies, not scenery.** Allocates N members running `HordeMemberInit` (`FUN_0043BEF0`) into `g_horde_members` (0x007DCC20, 10 slots), each carrying its index at `+0x131B`, then `ActorKill`s itself. `obj+0x130C`: 0 → one; 1 → 8, or 10 with two players, 6 in evt blocks 0x0E/0x12 (8 with two players) and 4 in block 0x19; 2 → not a spawner at all. Every member is character type **0x1D = `mol.bin`**, a six-segment chain; each increments *both* enemy counters (except variant 2), dies to one shot for **80 points** playing `STAGE1_SE`/`STAGE2_SE` `PDMG_MORR1/2_44.wav`, and casts a ground shadow at slot `0x10D0`. `HordeMemberUpdate` (`FUN_0043C440`) is a seven-state machine: fly in along a six-segment spline from `g_horde_formation` (0x0055E200), wander a per-variant box (0x0055E568/0x0055E574) avoiding neighbours inside 6.0 units, wind up, dive at the camera, pull out. **Not ported** — an enemy AI of zombie scale. | `[proved]` mechanism; species `[open]` |
 | `0x11`, `0x14`, `0x19`, `0x32` | — | 4/5/4/2 | **Enemies**, all incrementing both enemy counters. `0x19` takes ~15 per-bone model slots straight from its tail. | `[proved]` |
 | `0x12`, `0x13` | `0043F9D0`/`0043FE10` | 3/23 | **Script-driven animated props**, sharing a 10-entry behaviour table at `0x005926A8`. | `[proved]` |
 | `0x22` | `FUN_0049B0D0` | 4 | Enemy with four behaviour variants plus a companion actor. | `[proved]` |
 | `0x27`, `0x28` | `004329D0`/`00432610` | 2/6 | **Path-riding vehicles/props**; `0x27` swaps model and lights a flame at path frame `0xBE`. | `[proved]` |
 | `0x2A` | `FUN_00432D40` | 4 | **Dead class** — the whole handler is `JMP ActorKill`. | `[proved]` |
 | `0x20`, `0x45`, `0x46` | — | 36/37/27 | Not reached. `0x20` has a call to the HP scaler at `0x0044964A`, so it is `[likely]` a combat actor. | `[open]` |
+
+### The generic props' `+0x11C`: a lifetime that is *sometimes also* a slot
+
+**[proved]** `PlaceGenericProp` (`FUN_00461CF0`) — the constructor 44 of class
+0x41's 79 types share — writes the spawn descriptor's `+0x11C` into **two**
+fields of the object it builds:
+
+```c
+obj->+0x28C = placer->+0x11C;     /* the asset slot */
+obj->+0x11C = placer->+0x11C;     /* the lifetime, in event blocks */
+```
+
+`PropExpireByBlockLifetime` (`FUN_00466640`), which **25** of the update
+routines open with, reads `obj+0x11C` as a lifetime and despawns the prop once
+`g_evt_block_counter` has advanced past it. Only **three** of the routines ever
+draw `obj+0x28C`:
+
+| Type | Routine | What it draws |
+|---|---|---|
+| 5 | `FUN_00466820` | `obj+0x28C`; killed by script flag 0x13 |
+| 12 | `FUN_00467E50` | `obj+0x28C`, scaled; removed at cam path 0x2F frame 0x96 |
+| 33 | `FUN_00472950` | `obj+0x28C + n`, a strip played as an animation |
+
+Every other type hardcodes its model, or takes it from the constructor's own
+switch arm, or draws no static model at all (18, 25 and 28 draw only an effect
+at `obj+0x324`).
+
+**[measured]** The two meanings never overlap in the shipped data. The distinct
+`+0x11C` values stage 2's 67 generic props carry are
+
+```
+0, 1, 2, 3, 4, 5,   then   0x1D8, 0x1FA, 0xFD2, 0xFD3, 0x13B5, 0x16A6, 0x173D, …
+```
+
+— nothing between 6 and 0x1D7 — and the types carrying the high values are
+exactly 5, 12 and 33. Reading all 67 as slots resolved 46 of them to
+`char_adv03.bin`, `eff_boss4.bin` and `bg_adv10.bin`: characters and effects
+standing in for scenery.
+
+**[proved]** Types **70, 71, 72 and 77** open with
+`if (g_GameMode != 1) { ActorDespawn(obj); return; }` — they are Original
+Mode's collectibles and are gone on their first frame of an Arcade run.
+
+### Class 0x41 type 4: seven of the eleven kinds are effects, not models
+
+**[proved]** `PlaceKindedProp` (`FUN_00462E10`) sets `obj+0x28C = 0xFFFF` and
+then overrides it for **four** kinds only — 2 → `0x17A9`, 3 → `0x19E8`,
+8 → `0x17AA`, 9 → `0x17AB`. `KindedPropUpdate`'s draw is
+
+```c
+if (obj->+0x32C == 0 && obj->+0x28C != -1) AssetDrawSlot(obj->+0x28C);
+else if (obj->+0x194 == 4 || g_scene_index == 3) FUN_0040DFA0(obj + 0x324);
+else                                            FUN_0040DD90(obj + 0x324);
+```
+
+so kinds 0, 1, 4, 5, 6, 7 and 10 have **no static model in the engine either**:
+they are animated effects, `obj+0x324`/`+0x328` coming from
+`g_prop_kind_params`. A spawn marker with nothing under it for one of those
+kinds is not a missing export — it is a renderer the player does not have.
 
 ### Class 0x24's parameter tail
 

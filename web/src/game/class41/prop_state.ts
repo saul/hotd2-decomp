@@ -28,10 +28,13 @@ export enum PropFamily {
   /** `BreakableEffectUpdate` — the puff a destroyed group prop becomes. */
   Effect = 3,
   /**
-   * Built by `PlaceGenericProp` and **drawn only** — one of thirty update
-   * routines this port has not read. See `class41/generic.ts`.
+   * Built by `PlaceGenericProp` and **drawn only** — one of the update
+   * routines this port has read for what it draws but not for what it does.
+   * See `class41/generic.ts`.
    */
   Generic = 4,
+  /** `LiftUpdate` (`FUN_0046A360`) — class 0x41 type 32, the lift. */
+  Lift = 5,
 }
 
 /** `obj+0x192` — where a prop is in its life. */
@@ -107,7 +110,15 @@ export interface BreakableProp {
   member: number;         // +0x290
   /** `obj+0x195` — the item set it belongs to, 0 for none. */
   itemSet: ItemSet;       // +0x195
-  /** `obj+0x2A0` — the `g_GameMode == 1` drop, `-1` for none. */
+  /**
+   * `obj+0x2A0` — the `g_GameMode == 1` drop, `-1` for none.
+   *
+   * A third meaning for one offset, and not the last: `LiftUpdate` uses
+   * this word as the **frame counter** that releases the lift's overhead
+   * panel, and
+   * several other generic routines use it as a state timer. Check the family
+   * before reading it, exactly as for `kind`/`member` at `+0x290`.
+   */
   storyItem: number;      // +0x2A0
   /** `obj+0x196` — the value of `g_evt_block_counter` it last saw. */
   spawnBlock: number;     // +0x196
@@ -144,6 +155,15 @@ export interface BreakableProp {
   rollSpin: number;       // +0x1E0
   /** `obj+0x1E4` — the pitch the settle eases toward, +/-0x4000. */
   restPitch: number;      // +0x1E4
+  /**
+   * `obj+0x1E8` — a second hinge angle, in BAMS.
+   *
+   * Only the routines that draw more than one moving part have one:
+   * `LiftUpdate` swings its far pair of leaves on this while the near
+   * pair swings on `yaw` (`+0x1D0`), and `FUN_00468F00` and `FUN_0046B320`
+   * use it as the phase of a `sin` sweep.
+   */
+  hingeB: number;         // +0x1E8
   /** `obj+0x1FE` — the bearing the topple is thrown along. */
   topple: number;         // +0x1FE
   /** `obj+0x198` — which hull point it came to rest on. */
@@ -242,6 +262,7 @@ export function makeBreakableProp(id: number, group: number,
     spin: 0,
     rollSpin: 0,
     restPitch: 0,
+    hingeB: 0,
     topple: 0,
     contact: 0,
     restX: 0, restY: 0, restZ: 0,

@@ -27,6 +27,7 @@
 
 import { Rng } from "../core/rng";
 import { G } from "../game/globals";
+import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
 import { OPS as OPS_TABLE } from "./ops";
@@ -193,6 +194,37 @@ function defaultChannels(): number[] {
  * and flag waits above 0x42 do not test it.
  */
 const SKIPPABLE_WAITS = new Set([0x40, 0x41, 0x42]);
+
+/**
+ * The two enemy counters' gates: `wait_enemies_alive` (0x43) and
+ * `wait_enemies_present` (0x44).
+ *
+ * They are the only waits whose *postcondition* says something about the
+ * actors rather than about the clock, which is why they get their own set —
+ * see {@link Walker.retireGatedEnemies}.
+ */
+const ENEMY_GATE_WAITS = new Set([0x43, 0x44]);
+
+/**
+ * The spawn classes whose handler moves `g_enemies_alive` or
+ * `g_enemies_present` — which is to say, the ones an enemy gate is waiting
+ * for. From `docs/formats/spawns.md`, which reads it off the handlers.
+ *
+ * Deliberately **not** `registry.ts`'s `ENEMY_CLASSES`. That set is the
+ * classes the *port* counts, and it is narrower on purpose: an unported class
+ * in it is an actor that never dies and so a `wait_enemies_alive` that never
+ * unblocks. This set is about the script, where a class counts whether or not
+ * the port can run it.
+ */
+const ENEMY_GATE_CLASSES: ReadonlySet<number> = new Set<number>([
+  0x11, 0x14, 0x19, 0x32,           // enemies, both counters
+  SpawnClass.Zombie,                // 0x30
+  SpawnClass.Thrower,               // 0x31
+  SpawnClass.HordeSpawner,          // 0x40 — its children count, and it is
+                                    //        gone before the gate is reached
+  SpawnClass.FlyingEnemy,           // 0x43
+  SpawnClass.WaterEnemy,            // 0x51
+]);
 
 /** How far a wait opcode can be honoured from the bundle alone. */
 const WAIT_NOTES: Record<number, string> = {
@@ -587,10 +619,7 @@ export class Walker {
         }
       }
       if (this.wait) {
-        // Exactly what `executeOne` left undone when the wait was raised: the
-        // waiting instruction has run, so move past it.
-        this.wait = null;
-        this.opIndex++;
+        this.stepOverWait();
         continue;
       }
       // `halt` (0x4E) parks the interpreter and nothing in the script un-parks
@@ -604,6 +633,41 @@ export class Walker {
     this.branch = null;
     this.host.onBranch(null);
     return arrived();
+  }
+
+  /**
+   * Retire the enemies an enemy gate was waiting on.
+   *
+   * `wait_enemies_alive` (0x43) and `wait_enemies_present` (0x44) block until
+   * `g_enemies_alive` / `g_enemies_present` fall to the operand, and those
+   * counters only fall when the actors *die* — each class's handler
+   * decrements its own on the kill path. So on the far side of one of these
+   * gates every enemy placed before it is dead, by construction and not by
+   * policy. The engine never has to sweep them up because the script cannot
+   * get past the gate until the player has.
+   *
+   * The replay shoots nothing, so without this nothing retires them: a seek
+   * to late in a stage arrived with every zombie the script had ever placed
+   * still standing, most of them behind the camera.
+   *
+   * Only the classes `ActorIsEnemy` counts are retired. A prop, a civilian, a
+   * set-piece and a scripted humanoid are all outlived by the gate — none of
+   * them moves either counter, so the gate says nothing about them, and they
+   * have their own lifetimes (`g_evt_block_counter` for the props, a camera
+   * cue for the set-pieces).
+   *
+   * [diverges] The engine's counters are the truth and the actor list follows
+   * them; here the actor list *is* the truth and the counters are derived, so
+   * this drops the actors rather than zeroing a counter.
+   *
+   * The operand is not consulted, and it does not need to be: **all 488
+   * enemy gates in the six shipped scripts wait for zero** — 54 of `0x43`
+   * and 434 of `0x44`, every one with `arg == 0`. A gate that waited for
+   * "two left" would leave two specific enemies alive that the replay has no
+   * way to choose between; no such gate exists.
+   */
+  private retireGatedEnemies(): void {
+    this.spawns = this.spawns.filter((s) => !ENEMY_GATE_CLASSES.has(s.class));
   }
 
   /**
@@ -638,6 +702,24 @@ export class Walker {
       else queue.push(n + 1);          // kind 2, as advanceStepOrRoute reads it
     }
     return false;
+  }
+
+  /**
+   * Step past the wait the interpreter is sitting on, as if its condition had
+   * just been met.
+   *
+   * This is exactly what `executeOne` left undone when it raised the wait —
+   * the waiting instruction has already run, so only the cursor has to move.
+   * Every path that releases a wait without the condition actually being
+   * tested goes through here (`seek`, `primeToFirstWait`, the drive loop in
+   * `test/seek.test.ts`), so that the wait's **postcondition** is applied in
+   * one place: see {@link retireGatedEnemies}.
+   */
+  stepOverWait(): void {
+    if (!this.wait) return;
+    if (ENEMY_GATE_WAITS.has(this.wait.op.op)) this.retireGatedEnemies();
+    this.wait = null;
+    this.opIndex++;
   }
 
   /** Take one instruction, ignoring any wait. Returns false when stuck. */
@@ -676,8 +758,7 @@ export class Walker {
         // is waiting on finishes; opening there would just show a black
         // screen with no sky.
         if (this.cam && this.region >= 0) break;
-        this.wait = null;
-        this.opIndex++;
+        this.stepOverWait();
       }
       if (!this.executeOne(false)) break;
     }
@@ -734,6 +815,7 @@ export class Walker {
       } else if (!this.waitSatisfied()) {
         return;
       }
+      if (ENEMY_GATE_WAITS.has(this.wait.op.op)) this.retireGatedEnemies();
       this.wait = null;
       this.opIndex++;
     }
@@ -1113,6 +1195,7 @@ export class Walker {
         policy = { kind: "passed",
                    why: WAIT_NOTES[op.op] ?? "needs the runtime" };
       }
+      if (policy.kind === "passed") this.retireGatedEnemies();
     } else if (op.op === 0x45 && this.flags.has(arg)) {
       policy = { kind: "passed", why: "flag already set by the script" };
     } else {

@@ -183,6 +183,20 @@ export const G = {
    * opcode 0x1A writes it.
    */
   g_camera_fixed_eye_y: 0,
+  /**
+   * `g_camera_block_eye` — 0x009A60C0: the eased eye position of the camera
+   * block `g_camera_index` selects, at `g_camera_blocks + 0x80`.
+   *
+   * Not the same thing as `g_camera_fixed_eye_y`, which is a *ground plane*
+   * the script sets. This is where the camera actually is, after
+   * `FUN_00402EF0` has eased it toward the pose the path evaluated —
+   * `FUN_00403B00` reads it as the eye when it measures the angle to the
+   * look-at target, which is what proves the three words are a position.
+   *
+   * Only one camera block is ever active in this port, so the array collapses
+   * to one entry.
+   */
+  g_camera_block_eye: vec3(),
 
   // -- game mode ---------------------------------------------------------
   /**
@@ -201,6 +215,13 @@ export const G = {
    * `PlaceBreakableGroup` turns into one-shot targets while `g_GameMode` is 2.
    */
   g_prop_target_set: 0,
+  /**
+   * `g_scene_index` — 0x009A1A08. Which scene is loaded, zero-based:
+   * `ColiLoadForScene` indexes its file list with it, so scene 1 is stage 2.
+   * Class 0x41's routines branch on it for the per-stage sound sets and for
+   * `PropExpireByBlockLifetime`'s scene-1 sweep.
+   */
+  g_scene_index: 0,
   /**
    * `g_evt_block_counter` — 0x009A2BB0. Advanced by the event script as it
    * moves between blocks. A prop's lifetime is measured in these, not frames,
@@ -256,6 +277,8 @@ export function ResetGameGlobals(): void {
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
   G.g_evt_block_counter = 0;
+  G.g_scene_index = 0;
+  G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
   G.g_cam_path_frame = 0;
   G.g_script_flags = [];

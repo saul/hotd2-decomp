@@ -70,11 +70,16 @@ function shot(w: Walker): string {
     sceneLighting: w.sceneLighting,
     gunLights: w.gunLights,
     checkpoint: w.checkpointBlock,
+    // The live actors a reload has to bring back with it. Enemies are here
+    // because `wait_enemies_alive` retires them: a seek that carried every
+    // enemy the script had ever placed used to arrive with a hundred of them
+    // standing behind the camera, and nothing in this snapshot noticed.
+    spawns: w.spawns.map((s) => [s.at, s.class]),
   });
 }
 
 /** Private members the drive loop needs; the player reaches them through UI. */
-type Inner = { opIndex: number; executeOne(quiet: boolean): boolean };
+type Inner = { executeOne(quiet: boolean): boolean };
 
 console.log("Walker.seek round-trips, against the shipped bundle:\n");
 
@@ -90,11 +95,9 @@ for (const stage of STAGES) {
   live.reset();
   const samples: { b: number; s: number; o: number; state: string }[] = [];
   for (let i = 0; i < 200_000 && !live.finished && !live.parked; i++) {
-    if (live.wait) {
-      live.wait = null;
-      (live as unknown as Inner).opIndex++;
-      continue;
-    }
+    // The same release `seek` uses, so the two paths cannot drift: a wait
+    // stepped over has to leave the same state either way.
+    if (live.wait) { live.stepOverWait(); continue; }
     if (live.branch) { live.takeBranch(); continue; }
     if (i % SAMPLE_EVERY === 0) {
       samples.push({ b: live.block, s: live.step, o: live.opIndex,
@@ -143,6 +146,36 @@ for (const stage of STAGES) {
     const w3 = new Walker(script, mkHost());
     check("an address behind the branch the script does not take by default",
           w3.seek(18, 4, 7) === true);
+  }
+}
+
+// The enemy gate's postcondition, as a check that can fail: past a
+// `wait_enemies_alive` every enemy placed before it is dead, so a seek into
+// the back half of a stage must not arrive with the front half's enemies
+// still standing. Stage 2 places 104 zombies and 20 throwers across 42
+// blocks. Spawn markers are already dropped on a block change, so what this
+// catches is the accumulation *within* one block: stage 2's block 17 spawns
+// zombies in step 3 and again in steps 5 and 7, with a gate between each, and
+// a seek to step 8 used to arrive with all three waves standing.
+{
+  const file = join(ROOT, "stage2", "stage2.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    /** The classes that move an enemy counter, from `docs/formats/spawns.md`. */
+    const ENEMY = new Set([0x11, 0x14, 0x19, 0x30, 0x31, 0x32, 0x40, 0x43,
+                           0x51]);
+    const w = new Walker(script, mkHost());
+    const arrived = w.seek(17, 8, 29);
+    const live = w.spawns.filter((s) => ENEMY.has(s.class));
+    const stale = live.filter((s) => s.step < 8);
+    check("a seek past an enemy gate leaves no enemy from before it",
+          arrived && stale.length === 0,
+          `${live.length} enemy spawns live, ${stale.length} from earlier ` +
+          `steps: ${[...new Set(stale.map((s) => s.step))].join(", ")}`);
+    // ...and it must not throw away what the gate says nothing about.
+    const props = w.spawns.filter((s) => s.class === 0x41 || s.class === 0x44);
+    check("the gate retires enemies only, not the props placed with them",
+          props.length > 0, `${props.length} container placers survived`);
   }
 }
 

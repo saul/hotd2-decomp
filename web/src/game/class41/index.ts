@@ -169,6 +169,8 @@ export * from "./generic";
 export * from "./prop_state";
 export * from "./prop";
 export * from "./items";
+export * from "./lift";
+export * from "./lifetime";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

@@ -32,7 +32,13 @@ import {
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
   PlaceBreakableGroup, PropContainerPlacerUpdate, PlaceKindedProp,
   KindedPropUpdate, PropFamily, KIND_SLOT, SLOT_NONE, PlaceGenericProp,
+  LiftUpdate, LiftFlag, LIFT_NEAR_CLOSED, LIFT_NEAR_OPEN,
+  LIFT_FAR_CLOSED, LIFT_PANEL_CLOSED, LIFT_PANEL_OPEN, LIFT_PANEL_DELAY,
+  LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
+  PropExpireByBlockLifetime, GENERIC_DRAW_SLOT,
+  GENERIC_ORIGINAL_MODE_ONLY,
 } from "../src/game/class41";
+import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import {
   FallingContainerUpdate, PlaceFallingContainer, FALLING_SLOT_LOOSE,
   FALLING_SLOT_WHOLE,
@@ -1343,5 +1349,168 @@ console.log("\nclass 0x41, the props are in the save state:");
                        || Object.getPrototypeOf(v) === Object.prototype))));
   void events;
 }
+console.log("\nclass 0x41 type 32, the lift:");
+{
+  const rng = new Rng(41);
+  const events = propScene(rng);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const gate = PlaceGenericProp(
+    { at: 0xbdc0, container: "generic", type: 32, slot: 2,
+      lifetime_evt_blocks: 2, pos: [-825.1, 40, -1871.7],
+      pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(gate);
+
+  check("it is its own family, not a drawn-only generic prop",
+        gate.family === PropFamily.Lift);
+  check("and the constructor seeds the three hinges at rest",
+        gate.yaw === LIFT_NEAR_CLOSED && gate.hingeB === LIFT_FAR_CLOSED
+        && gate.pitch === LIFT_PANEL_CLOSED);
+  check("the car it draws is komono_suimon slot 0x197A, not the `slot` 2 "
+        + "the descriptor carries", GENERIC_DRAW_SLOT[32] === 0x197a);
+
+  // No flag up: nothing moves. This is the whole point of the routine --
+  // every motion waits on the script.
+  for (let i = 0; i < 120; i++) LiftUpdate(gate, events);
+  check("with no script flag raised nothing moves at all",
+        gate.yaw === LIFT_NEAR_CLOSED && gate.hingeB === LIFT_FAR_CLOSED
+        && gate.pitch === LIFT_PANEL_CLOSED && gate.y === 40
+        && sounds.length === 0);
+
+  // Flag 0x37: the gate rides fifteen under the camera's eye.
+  G.g_camera_block_eye.y = 100;
+  G.g_script_flags[LiftFlag.RideCamera] = 1;
+  LiftUpdate(gate, events);
+  check("flag 0x37 hangs the car floor fifteen under the camera eye",
+        gate.y === 100 - LIFT_RIDE_DROP, String(gate.y));
+
+  // Flag 0x6B: the near pair swings 0x4000 -> 0x8000 at 0x200 a frame, so 32
+  // frames exactly, and the door sound fires on the first of them only.
+  G.g_script_flags[LiftFlag.OpenNear] = 1;
+  sounds.length = 0;
+  LiftUpdate(gate, events);
+  check("the leaves' door sound fires on the first frame of the swing",
+        sounds.length === 1 && sounds[0] === SFX_LIFT_GATE);
+  for (let i = 1; i < 32; i++) LiftUpdate(gate, events);
+  check("32 frames take the near pair exactly to its open angle",
+        gate.yaw === LIFT_NEAR_OPEN, gate.yaw.toString(16));
+  for (let i = 0; i < 60; i++) LiftUpdate(gate, events);
+  // The engine's test is `< limit + 1`, so the frame that finds the hinge
+  // exactly *at* its limit still adds a step: every one of these angles comes
+  // to rest one 0x200 past the round number, and then stops.
+  check("and it comes to rest one step past that and stays there",
+        gate.yaw === LIFT_NEAR_OPEN + LIFT_HINGE_STEP,
+        gate.yaw.toString(16));
+  check("the door sound does not repeat",
+        sounds.filter((x) => x === SFX_LIFT_GATE).length === 1);
+
+  // The panel is not on a flag of its own: it waits on the frames flag 0x6B
+  // has been up, which is `obj+0x2A0`.
+  check("the overhead panel swung once the near pair had been folding for "
+        + "0x27 frames", gate.pitch === LIFT_PANEL_OPEN + LIFT_HINGE_STEP,
+        gate.pitch.toString(16));
+  check("its own sound fired once", sounds.filter(
+    (x) => x === SFX_LIFT_PANEL).length === 1);
+  check("and 0x2A0 counted every frame the flag was up, not just the moving "
+        + "ones", gate.storyItem === 1 + 31 + 60);
+
+  // Flag 0x6C is independent: the far pair has not moved yet.
+  check("the far pair has not moved -- its flag is still down",
+        gate.hingeB === LIFT_FAR_CLOSED);
+  G.g_script_flags[LiftFlag.OpenFar] = 1;
+  LiftUpdate(gate, events);
+  check("and it starts from 0x8000 the moment flag 0x6C goes up",
+        gate.hingeB === LIFT_FAR_CLOSED + LIFT_HINGE_STEP);
+
+  // The lifetime prologue still runs: two blocks, and it is gone.
+  for (let b = 1; b <= 3; b++) {
+    G.g_evt_block_counter = b;
+    LiftUpdate(gate, events);
+  }
+  check("and it expires on its two-block lifetime like any other prop",
+        gate.dead);
+  void LIFT_PANEL_DELAY;
+}
+
+console.log("\nclass 0x41, a generic prop's +0x11C is a lifetime:");
+{
+  const rng = new Rng(43);
+  const events = propScene(rng);
+  // The stage-2 shape: `hp` 1, which is a lifetime of one block and NOT
+  // asset slot 1 (`bg_adv10.bin`).
+  const p = PlaceGenericProp(
+    { at: 0xbe00, container: "generic", type: 20, slot: 1,
+      lifetime_evt_blocks: 1, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+    rng);
+  G.g_breakable_props.push(p);
+  check("the lifetime is the descriptor's +0x11C", p.lifetime === 1);
+  check("and the model is the literal its routine draws, not that number",
+        GENERIC_DRAW_SLOT[20] === 0x1e2);
+  for (let i = 0; i < 600; i++) PropExpireByBlockLifetime(p);
+  check("frames alone do not expire it", !p.dead);
+  for (let b = 1; b <= 2; b++) {
+    G.g_evt_block_counter = b;
+    PropExpireByBlockLifetime(p);
+  }
+  check("two block advances past a lifetime of one do", p.dead);
+
+  // The scene-1 sweep.
+  const q = PlaceGenericProp(
+    { at: 0xbe40, container: "generic", type: 20, slot: 9,
+      lifetime_evt_blocks: 9, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+    rng);
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  PropExpireByBlockLifetime(q);
+  check("g_script_flags[0x77] clears every prop on scene 1", q.dead);
+  G.g_scene_index = 0;
+  G.g_script_flags[0x77] = 0;
+  void events;
+}
+
+console.log("\nclass 0x41, Original Mode's collectibles in Arcade:");
+{
+  const rng = new Rng(47);
+  const events = propScene(rng);
+  // `FUN_004675A0`'s first line is `if (g_GameMode != 1) ActorDespawn(obj)`.
+  const p = PlaceGenericProp(
+    { at: 0xbf00, container: "generic", type: 70, slot: 3,
+      lifetime_evt_blocks: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+    rng);
+  G.g_breakable_props.push(p);
+  G.g_GameMode = 2;
+  BreakablePropPoolUpdate(rng, events);
+  check("an Original-Mode-only type is gone on its first Arcade frame",
+        G.g_breakable_props.length === 0);
+
+  const q = PlaceGenericProp(
+    { at: 0xbf40, container: "generic", type: 70, slot: 3,
+      lifetime_evt_blocks: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+    rng);
+  G.g_breakable_props.push(q);
+  G.g_GameMode = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("and survives in Original Mode", !q.dead);
+  check("the set is the four routines that were actually read",
+        [...GENERIC_ORIGINAL_MODE_ONLY].sort((a, b) => a - b)
+          .join(",") === "70,71,72,77");
+  G.g_GameMode = 0;
+}
+
+console.log("\nclass 0x41 type 4, seven of the eleven kinds are effects:");
+{
+  // `PlaceKindedProp` (`FUN_00462E10`) writes `obj+0x28C = 0xFFFF` and then
+  // overrides it for exactly four kinds. The other seven draw
+  // `FUN_0040DD90(obj+0x324)` instead — an animated effect, not a model —
+  // which is why their spawn markers have nothing under them and why that is
+  // the engine's behaviour rather than a missing export.
+  check("only kinds 2, 3, 8 and 9 name an asset slot",
+        Object.keys(KIND_SLOT).map(Number).sort((a, b) => a - b)
+          .join(",") === "2,3,8,9");
+  check("and every other kind is left at the engine's 0xFFFF",
+        [0, 1, 4, 5, 6, 7, 10].every((k) => (KIND_SLOT[k] ?? SLOT_NONE)
+                                            === SLOT_NONE));
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

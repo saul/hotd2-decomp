@@ -162,7 +162,15 @@ export interface BreakablePlacement {
   group?: number;
   /** `kinded` and `falling` — the object kind in the orientation word. */
   kind?: number;
-  /** `generic` — the class-0x41 constructor type, and the asset slot to draw. */
+  /**
+   * `generic` — the class-0x41 constructor type, and the spawn descriptor's
+   * `+0x11C`.
+   *
+   * `slot` and `lifetime_evt_blocks` carry the **same word**: the constructor
+   * writes it to `obj+0x28C` and to `obj+0x11C` both. Only the types in
+   * `GENERIC_DESCRIPTOR_SLOT` draw the slot; for everything else it is a
+   * lifetime and `slot` is meaningless. See `game/class41/generic.ts`.
+   */
   type?: number;
   slot?: number;
   /** `generic` — the other two orientation words, which really are angles. */

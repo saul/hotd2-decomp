@@ -52,6 +52,33 @@ so 21 set-pieces in stage 2 inflated the count `wait_enemies_alive` blocks on,
 and made the camera swing to look at the world origin, which rendered a black
 screen. Both now ask `ActorIsEnemy`.
 
+**Class 0x41 type 32 — the lift — is ported** (`game/class41/lift.ts`). It is
+the one class-0x41 prop that moves: while the script holds flag 0x37 up the car
+floor rides at `g_camera_block_eye.y - 15`, and stage 2's block 18 sends it up
+89 units on `cp_st2` path 28. Flags 0x6B and 0x6C fold two pairs of lattice
+cage leaves 0x200 BAMS a frame; `obj+0x2A0` counts frames flag 0x6B has been up
+and releases an overhead panel after 40 of them. The renderer composes five
+draws down the matrix stack — the car, four leaves and the panel — which is the
+first prop in the player with hinged sub-parts.
+
+**The generic props draw the right models now.** `PlaceGenericProp` writes the
+spawn descriptor's `+0x11C` into `obj+0x28C` *and* `obj+0x11C`, so the same
+number is an asset slot and a lifetime in event blocks, and only three of the
+44 types ever draw the slot. The player had been treating all of them as slots,
+which put `char_adv03.bin` and `eff_boss4.bin` where 46 of stage 2's 67 generic
+props should be. All 25 routines that share the lifetime prologue were read for
+what they draw; `GENERIC_DRAW_SLOT` carries the answer and the exporter emits
+those templates. `PropExpireByBlockLifetime` now runs for the whole family, so
+a prop the script placed for one block no longer stands there all stage, and
+Original Mode's collectibles (types 70–72, 77) leave on their first Arcade
+frame the way the engine sends them.
+
+Seven of the eleven **kinded** object kinds still show nothing, and that is the
+engine's own behaviour: `PlaceKindedProp` leaves `obj+0x28C` at `0xFFFF` for
+every kind but 2, 3, 8 and 9, and the update draws an animated effect
+(`FUN_0040DD90`) instead. The player has no renderer for that system at all,
+which is the next real gap in the props.
+
 **All three container families are ported**: the group placer (class 0x41
 type 0), `KindedPropUpdate` (type 4 — 70 spawns, the most-placed constructor in
 the game, 37 of them hiding an item) and `FallingContainerUpdate` (class 0x44
@@ -99,8 +126,17 @@ block 0 step 1 op 29. It now steps over waits, resolves a branch by taking the
 route the goal is actually behind, and returns whether it arrived — so a stale
 link says so rather than silently showing somewhere else.
 `npm run test:seek` samples addresses across all six stages, seeks back to each
-from cold, and compares the region, the streamed slots, the camera, the flags
-and the rest: 137 addresses, all exact.
+from cold, and compares the region, the streamed slots, the camera, the flags,
+**the live spawns** and the rest: 137 addresses, all exact.
+
+A replay also has to honour what a wait *leaves behind*, not only what it
+blocks on. `wait_enemies_alive` and `wait_enemies_present` open only when the
+counters fall, and the counters fall only when the actors die — so past one of
+those gates every enemy placed before it is dead by construction. The replay
+shoots nothing, so nothing retired them, and a seek to block 17 step 8 of
+stage 2 arrived with six zombies from earlier steps still standing behind the
+camera. Every path that releases a wait without testing it now goes through one
+`stepOverWait`, which applies the postcondition.
 
 Three debug views hang off that same property — if all the state is in one
 enumerable place, it can be shown:

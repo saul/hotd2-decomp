@@ -54,6 +54,56 @@ BREAKABLE_SLOTS = (
     0x0A50, 0x0A51, 0x0A55,                  # FallingContainerUpdate
 )
 
+#: What each `PlaceGenericProp` type actually draws, by class-0x41 type.
+#:
+#: **[proved]**, one routine at a time, out of `g_class41_entries`. This exists
+#: because `PlaceGenericProp` writes the descriptor's ``+0x11C`` into *both*
+#: ``obj+0x11C`` (the lifetime `PropExpireByBlockLifetime` counts down) and
+#: ``obj+0x28C`` (the asset slot), and only three types ever draw the latter.
+#: For every other type the value is a **lifetime of 0-5 event blocks** and the
+#: model is a literal in the routine, so exporting ``+0x11C`` as a slot
+#: resolved 46 of stage 2's 67 generic props to `char_adv03.bin`,
+#: `eff_boss4.bin` and other characters -- which is what "the props are not
+#: rendering" looked like.
+#:
+#: The measurement that says the two meanings never overlap: the distinct
+#: ``+0x11C`` values stage 2 places are 0,1,2,3,4,5 and then 0x1D8 upwards,
+#: with nothing in between, and the three types carrying the high values are
+#: exactly the three whose routine draws ``obj+0x28C``.
+#:
+#: ``None`` means the routine draws no static model at all -- an effect at
+#: ``obj+0x324``, and nothing for this exporter to place. An empty tuple with
+#: `descriptor=True` means "the spawn descriptor names it", handled below.
+GENERIC_DESCRIPTOR_SLOT = (5, 12, 33)
+
+#: The literal slots each read routine passes to `AssetDrawSlot`, in the order
+#: it draws them. Cited by the routine that draws each one.
+GENERIC_STATIC_SLOTS: dict[int, tuple[int, ...]] = {
+    6:  (0x1032,),                  # ctor arm; FUN_004668A0 animates from it
+    8:  (0x1A36,),                  # FUN_00467080, `0x1A36 - obj+0x290`
+    10: (0x10C4,),                  # ctor arm; FUN_004668A0
+    11: (0x01CF, 0x01D0),           # FUN_00467C80, `0x1CF + (frame & 1)`
+    13: (0x1A4A, 0x1A49, 0x1A43),   # FUN_00467F50
+    14: (0x10D2,),                  # FUN_00468180
+    19: (0x01CE, 0x10D3),           # FUN_00468F00, body plus the ctor arm
+    20: (0x01E2,),                  # FUN_00469380
+    21: tuple(range(0x132F, 0x1339)),   # FUN_004694A0, `0x132F + frame % 10`
+    27: (0x17A9,),                  # FUN_00469E60
+    30: (0x01DF,),                  # FUN_0046A0F0
+    32: (0x197A, 0x197B, 0x1981),   # LiftUpdate -- car, cage leaf, panel
+    35: (0x1812, 0x1813),           # FUN_0046B320
+    49: (0x01D2, 0x10D0),           # FUN_0046E6E0, body plus its shadow
+    56: (0x10D3,),                  # ctor arm 0x38
+    58: (0x01D1,),                  # FUN_0046F580
+    60: (0x01D8,),                  # FUN_0046F840
+    64: (0x1A39, 0x0C27),           # FUN_0046FBE0
+    77: (0x10AB,),                  # FUN_004717A0, Original Mode only
+}
+
+#: Types whose routine draws only an effect, never a static model.
+#: `FUN_00468E50` (18), `FUN_00469AE0` (25) and `FUN_00469F50` (28).
+GENERIC_NO_MODEL = (18, 25, 28)
+
 
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -232,13 +282,16 @@ def _container_placements(prog) -> list[dict]:
                     "pos": list(rec.pos), "yaw": rec.orient[1],
                 })
             elif ctor in generic:
-                # Everything else `PlaceGenericProp` builds. `+0x11C` is the
-                # **asset slot** here, not hit points -- which is why the spawn
-                # markers on these read `hp5949` for what is really 0x173D.
+                # Everything else `PlaceGenericProp` builds. `+0x11C` goes to
+                # **both** `obj+0x11C` and `obj+0x28C`, so it is the lifetime
+                # in event blocks *and* the asset slot -- and only the three
+                # types in `GENERIC_DESCRIPTOR_SLOT` ever draw the slot. Both
+                # are carried under their own names; the client decides which
+                # one this type's routine reads. See `GENERIC_STATIC_SLOTS`.
                 out.append({
                     "at": rec.offset, "container": "generic",
                     "type": ctor, "slot": rec.hp,
-                    "lifetime_evt_blocks": 0,
+                    "lifetime_evt_blocks": rec.hp,
                     "pos": list(rec.pos),
                     "pitch": rec.orient[0], "yaw": rec.orient[1],
                     "roll": rec.orient[2],
@@ -448,7 +501,16 @@ def breakable_slot_entry(stage, prog=None) -> dict | None:
     # stage's own placements and differ per stage.
     want = list(BREAKABLE_SLOTS)
     for pl in _container_placements(prog):
-        if pl["container"] == "generic" and pl["slot"] not in want:
+        if pl["container"] != "generic":
+            continue
+        # The literals this type's routine draws, always; plus the descriptor
+        # slot for the three types that read `obj+0x28C`. A type that is only
+        # ever handed a lifetime contributes nothing, which is what stops
+        # `+0x11C == 2` being exported as `char_adv03.bin`.
+        for slot in GENERIC_STATIC_SLOTS.get(pl["type"], ()):
+            if slot not in want:
+                want.append(slot)
+        if pl["type"] in GENERIC_DESCRIPTOR_SLOT and pl["slot"] not in want:
             want.append(pl["slot"])
     for slot in want:
         rec = slots.get(slot)

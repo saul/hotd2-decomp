@@ -1088,6 +1088,15 @@ class Player {
     const w = this.walker;
     if (!w) return;
     G.g_camera_fixed_eye_y = w.fixedEyeY;
+    // `g_camera_block_eye` is where the camera actually is, as `FUN_00402EF0`
+    // leaves it. The lift rides fifteen units under it; nothing else in
+    // the port reads it yet.
+    G.g_camera_block_eye.x = this.camera.position.x;
+    G.g_camera_block_eye.y = this.camera.position.y;
+    G.g_camera_block_eye.z = this.camera.position.z;
+    // `ColiLoadForScene` indexes its file list with this, so it is zero-based
+    // and scene 1 is stage 2.
+    G.g_scene_index = w.script.scene ?? 0;
     // Class 0x24's set-pieces are choreographed against the camera: every one
     // of their removal and freeze triggers is a `cp_` slot plus a frame.
     G.g_active_cam_path = w.cam ? w.cam.slot : -1;

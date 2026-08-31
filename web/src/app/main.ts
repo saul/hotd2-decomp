@@ -314,13 +314,17 @@ class Player {
     // no direction at zero distance.
     this.world.attach(this.ctx);
     SetGameTables(bundle.script.characters, bundle.script.breakables,
-                  bundle.script.set_pieces);
+                  bundle.script.set_pieces, bundle.script.humanoids);
     G.g_player_lives = [
       bundle.script.characters?.player?.start_lives ?? 2,
       bundle.script.characters?.player?.start_lives ?? 2,
     ];
     // Characters are already in the stage glTF, one hierarchy per spawn;
     // this adopts them and takes over the pose.
+    // The object paths class 0x25 rides live in the camera bundle; the
+    // character layer is the seam the port already reaches the renderer
+    // through, so they are handed to it rather than duplicated in `game/`.
+    this.chars.paths = this.paths;
     this.chars.attach(this.stage.root, bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
     // Doors, shutters and the vans they hang off; driven by the script's

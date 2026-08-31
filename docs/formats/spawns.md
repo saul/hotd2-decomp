@@ -61,7 +61,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) reads `obj+0x6C` as an object kind. The retail stages reach 74 of the 79. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. | `[proved]`, by the game's own sound record |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selector 16 (`PlaceFallingContainer`) is an **item container** and is ported; the other seventeen are unread. | `[proved]` |
-| `0x25` | `FUN_004840D0` | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
+| `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
 | `0x10` | `FUN_0048A3E0` | 51 | **Civilian / rescuable victim.** Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. Shooting one costs a **life** and −100 twice; rescuing awards **+400**. | `[proved]` |
 | `0x31` | `0x00449620` | 49 | **Humanoid enemy, four subtypes** (`0x16`–`0x19`). Damageable, increments `g_enemies_alive`. Ricochet SFX by subtype: `BULLET_WOD1_16.WAV` (wood) for `0x17`, `BULLET_MET2_16.WAV` (metal) for `0x19`. | `[proved]` enemy; species `[open]` |
 | `0x24` | `SetPiecePropInit` (`FUN_00482CE0`) | 48 | **Scripted non-combat set-piece prop.** Not damageable, awards nothing, plays no sound at all (all 496 `PlaySoundId` xrefs checked). A skinned actor choreographed against the **camera**: six state selectors covering idle, a delayed motion change, freeze/unfreeze cues, two gravity drops and a slide, and every one of them is removed when the camera reaches a named path at a named frame. `obj+0x11C` is an animation phase seed. **Ported.** | `[proved]` |
@@ -126,6 +126,63 @@ last frame, `g_motion_play_length[motion] - 1`.
 start frame, anything else is a literal one — which is how a row of identical
 set-pieces avoids animating in lockstep. No shipped spawn uses `-1`; all 28 the
 six stages reach carry a literal frame.
+
+### Class 0x25's bytecode
+
+`ScriptedHumanoidInit` is an Init like class 0x24's: it installs
+`ScriptedHumanoidUpdate` and never runs again. The tail points at a **command
+block**:
+
+```
+tail+0x00  s8   character type   (Boss Mode remaps 0x39/0x3A to the player's)
+tail+0x02  s16  removal: cam path, or a script-flag index
+tail+0x04  s16  removal: cam frame threshold
+tail+0x08  u32  a model handle
+tail+0x0C  u32  -> the command block
+
+blk+0x02   s16  == 2: start with the draw flag set
+blk+0x04   s16  the motion it opens in
+blk+0x06   s16  phase seed, -1 for rand() % 10
+blk+0x08   ...  the commands
+```
+
+A command is `{s16 op, s16 mode, s16 a, s16 b}` — eight bytes, or sixteen when
+it carries a point (`op 7`, `op 8`, and `op 4 mode 4`). **The length rule is
+the check on the whole reading**: one wrong length desynchronises the stream
+and the opcodes go out of range at once, and all 137 blocks the six stages
+reach decode with every opcode in `0..18` or `-1`.
+
+| Op | What it does | Count |
+|---|---|---|
+| 4 | wait for a condition | 357 |
+| 3 | set the motion, with a blend | 195 |
+| 14 | set the draw mode | 155 |
+| 0 | wait, and record which condition released it | 145 |
+| 9 | swap the model in a hand, from `0x004EC9E0` | 114 |
+| 10 | skip an arm unless the player count matches | 100 |
+| 1 | as 0, with the mark set to 1 | 88 |
+| -1 | leave the VM for the idle routine | 69 |
+| 18 | `ActorKill` | 68 |
+| 11 | ride an `op_` object path | 24 |
+| 13 | `PlaySoundId` | 14 |
+| 8 | set the position | 13 |
+| 17 | hand the object to another routine | 12 |
+| 2 | set the motion | 10 |
+| 16 | swap one bone's draw slot | 8 |
+| 6 | stop turning, or face the camera | 8 |
+| 7 | face a point once | 4 |
+| 5 | turn by a fixed amount over N frames | 1 |
+
+The condition modes opcodes 0, 1 and 4 share: `0` a frame count, `1` the camera
+reaching a path at a frame, `2` a motion frame (`-1` for the clip's last), `3` a
+script flag, `4` "am I closer to this point than I was last frame", `-1`
+unconditional.
+
+**A command that cannot proceed does not advance the cursor.** It falls through
+to the per-frame tail and is retried next frame, so a run of setup commands all
+take effect at once and only a wait costs a frame. `op 11` evaluates its path
+at the **camera's** frame, which is what keeps a scripted actor in step with
+the shot it belongs to.
 
 ## Two name tables, not none
 

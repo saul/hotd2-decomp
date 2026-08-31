@@ -67,8 +67,10 @@ __all__ = ["MOTION_RULES", "Character", "Placement", "resolve_for_stage"]
 #:
 #: ``("table", base, stride, at, kind)`` reads the spawn's parameter tail at
 #: *at* as *kind* to get a variant, then takes the ``u16`` at
-#: ``base + variant * stride``. ``("literal", id)`` is a constant, and
-#: ``("param", at, kind)`` is the motion id read straight from the tail.
+#: ``base + variant * stride``. ``("literal", id)`` is a constant,
+#: ``("param", at, kind)`` is read straight from the tail, and
+#: ``("block", ptr_at, field)`` follows a pointer in the tail to a command
+#: block and reads a ``s16`` from it.
 #:
 #: Class ``0x30`` -- the zombie, and the single largest population in the game
 #: -- is `FUN_00452DA0`, which opens with the assignment::
@@ -102,6 +104,11 @@ MOTION_RULES: dict[int, tuple] = {
     # between. Without this rule the 48 set-piece props resolve to a character
     # with no motion, and the client skips anything it cannot pose.
     0x24: ("param", 0x0A, "i16"),
+    # `ScriptedHumanoidInit` (`FUN_004840D0`) follows a pointer: the tail at
+    # `+0x0C` names a command block, and the block's `+0x04` is the motion the
+    # actor opens in. 137 of these, and without a rule they resolve to a
+    # character the client cannot pose and so does not draw.
+    0x25: ("block", 0x0C, 0x04),
     0x30: ("literal", 0x3BC),
     0x31: ("by_char", {0x17: 0x1BA}, 0x3A8),
     0x53: ("table", 0x00589A64, 10, 0x00, "i16"),
@@ -639,6 +646,20 @@ def motion_for(tables, spawn_rec, cls: int) -> int | None:
         return None
     if rule[0] == "literal":
         return rule[1]
+    if rule[0] == "block":
+        _, ptr_at, field = rule
+        evt = getattr(spawn_rec, "evt", None)
+        if evt is None:
+            return None
+        raw = evt.raw
+        base = spawn_rec.offset + 0x24 + ptr_at
+        if base + 4 > len(raw):
+            return None
+        off = evt.to_offset(struct.unpack_from("<I", raw, base)[0])
+        if off is None or off + field + 2 > len(raw):
+            return None
+        mid = struct.unpack_from("<h", raw, off + field)[0]
+        return None if mid <= 0 else mid
     if rule[0] == "param":
         mid = spawn_rec.param(rule[1], rule[2])
         return None if mid is None or mid <= 0 else mid

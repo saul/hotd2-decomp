@@ -271,6 +271,18 @@ export class CamPaths {
   get(slot: number): CamPath | undefined {
     return this.paths.get(slot) ?? this.objectPaths.get(slot);
   }
+
+  /**
+   * An `op_` object path **only**.
+   *
+   * `get` falls back from one map to the other, which is right for the rails
+   * but wrong for `CamEvalObjectPath6`: the two slot spaces overlap, so a
+   * class-0x25 actor asking for object path 331 was handed *camera* path 331
+   * and placed on the lens, which fills the screen and reads as a black frame.
+   */
+  objectPath(slot: number): CamPath | undefined {
+    return this.objectPaths.get(slot);
+  }
 }
 
 // -- pose -> three.js ------------------------------------------------------

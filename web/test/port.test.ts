@@ -43,6 +43,10 @@ import {
   DROP_GRAVITY, SLIDE_FRAMES, SLIDE_VX, SLIDE_VZ,
   type SetPieceParams,
 } from "../src/game/class24";
+import {
+  HumanoidCond, HumanoidOp, HumanoidTurn, ScriptedHumanoidUpdate,
+  type HumanoidProgram,
+} from "../src/game/class25";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -1081,7 +1085,119 @@ console.log("\nclass 0x41 type 34 is a falling container:");
   void events;
 }
 
-// -- 9. class 0x24, the set-pieces -----------------------------------------
+// -- 9. class 0x25, the scripted humanoid VM -------------------------------
+
+function humanoidScene(cmds: HumanoidProgram["cmds"],
+                       over: Partial<HumanoidProgram> = {}):
+    { a: ReturnType<typeof ActorSpawn>; events: Events } {
+  ResetGameGlobals();
+  const prog: HumanoidProgram = {
+    charType: 1, removePath: 90, removeFrame: 900, flags2: 0,
+    motion: 10, phase: 0, cmds, ...over,
+  };
+  SetGameTables(CHARS, undefined, undefined, { "12288": prog });
+  G.g_active_cam_path = -1;
+  G.g_cam_path_frame = 0;
+  const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "humanoid");
+  a.visible = true;
+  a.pos = vec3(0, 0, 0);
+  return { a, events: new Events() };
+}
+
+const hFrame = (a: ReturnType<typeof ActorSpawn>, events: Events, rng: Rng) =>
+  ScriptedHumanoidUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
+                              events });
+
+console.log("\nclass 0x25, the VM runs until a command blocks:");
+{
+  const rng = new Rng(4);
+  // Three setup commands and then a wait: all three should take effect on the
+  // first frame, because only a wait costs one.
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.SetPos, mode: 0, a: 0, b: 0, f0: 5, f1: 7 },
+    { op: HumanoidOp.DrawMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.TurnMode, mode: 1, a: 0, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 30, b: 0 },
+    { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+  ]);
+  hFrame(a, events, rng);
+  check("a run of setup commands all take effect in one frame",
+        a.pos.x === 5 && a.pos.z === 7 && a.drawMode === 2
+        && a.turnMode === HumanoidTurn.FaceCamera && a.pc === 3,
+        `pc ${a.pc}`);
+
+  // The wait costs frames, and exactly the number it asks for.
+  for (let i = 0; i < 29; i++) hFrame(a, events, rng);
+  check("the wait holds the cursor while it counts", a.pc === 3 && !a.dead,
+        `pc ${a.pc} hold ${a.holdFrames}`);
+  hFrame(a, events, rng);
+  check("and releases on the frame it names, running on to the kill",
+        a.dead, `pc ${a.pc} hold ${a.holdFrames}`);
+}
+
+console.log("\nclass 0x25, the camera conditions:");
+{
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 57, b: 40 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 12, f1: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ]);
+  hFrame(a, events, rng);
+  check("it waits while the camera is elsewhere", a.pc === 0);
+  G.g_active_cam_path = 57;
+  G.g_cam_path_frame = 39;
+  hFrame(a, events, rng);
+  check("and while the path matches but the frame has not come", a.pc === 0);
+  G.g_cam_path_frame = 40;
+  hFrame(a, events, rng);
+  check("then runs on when the camera arrives",
+        a.pos.y === 12 && a.pc === -1, `pc ${a.pc} y ${a.pos.y}`);
+}
+
+console.log("\nclass 0x25, jumps and the stall guard:");
+{
+  const rng = new Rng(4);
+  // A jump backwards over a wait: the classic idle loop, and the shape that
+  // would hang the frame if the VM did not stop at a blocked command.
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 5, b: 0 },
+    { op: HumanoidOp.Jump, mode: 0, a: 0, b: 0, next: 0 },
+  ]);
+  for (let i = 0; i < 200; i++) hFrame(a, events, rng);
+  check("a loop of wait-and-jump runs for ever without hanging a frame",
+        !a.dead && a.pc === 0, `pc ${a.pc}`);
+}
+
+console.log("\nclass 0x25, the removal trigger:");
+{
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  G.g_active_cam_path = 90;
+  G.g_cam_path_frame = 899;
+  hFrame(a, events, rng);
+  check("it stays until the camera reaches the removal frame", !a.dead);
+  G.g_cam_path_frame = 900;
+  hFrame(a, events, rng);
+  check("and leaves when it does", a.dead);
+}
+
+console.log("\nclass 0x25, it is not an enemy:");
+{
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  hFrame(a, events, rng);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a scripted humanoid is not counted as a live enemy",
+        G.g_enemies_alive === 0, String(G.g_enemies_alive));
+  check("and is not a camera target", G.g_enemy_slots.length === 0);
+}
+
+// -- 10. class 0x24, the set-pieces ----------------------------------------
 
 const SETPIECE_BASE: SetPieceParams = {
   selector: 0, removePath: 7, removeFrame: 100, motion: 10, hold: 0,

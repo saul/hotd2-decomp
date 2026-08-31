@@ -11,6 +11,7 @@ import type {
 } from "../bundle";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
+import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 
 export const T = {
@@ -24,6 +25,8 @@ export const T = {
   breakables: null as BreakablesJson | null,
   /** Class 0x24's parameter tail, per spawn address. */
   setPieces: null as Record<string, SetPieceParams> | null,
+  /** Class 0x25's decoded bytecode, per spawn address. */
+  humanoids: null as Record<string, HumanoidProgram> | null,
   types: {} as Record<string, CharacterType>,
   get approach() { return T.chars?.approach ?? null; },
   get tracking() { return T.chars?.tracking ?? null; },
@@ -37,7 +40,8 @@ export const T = {
  */
 export function SetGameTables(chars: CharactersJson | undefined,
                               breakables?: BreakablesJson,
-                              setPieces?: Record<string, SetPieceParams>): void {
+                              setPieces?: Record<string, SetPieceParams>,
+                              humanoids?: Record<string, HumanoidProgram>): void {
   // Ordering hazard, and it cost an afternoon: `ResetGameGlobals` clears the
   // approach rings, so calling it *after* this leaves every ring at zero and
   // every enemy permanently in the outermost band. Say so rather than let it
@@ -50,6 +54,7 @@ export function SetGameTables(chars: CharactersJson | undefined,
   T.types = chars?.types ?? {};
   T.breakables = breakables ?? null;
   T.setPieces = setPieces ?? null;
+  T.humanoids = humanoids ?? null;
 
   const rings = chars?.approach?.rings ?? [];
   G.g_enemy_approach_rings = rings.map((r) => r.inner);

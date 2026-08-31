@@ -307,6 +307,94 @@ def set_pieces_json(prog) -> dict:
     return out
 
 
+#: A class-0x25 command is eight bytes, or sixteen when it carries a point.
+def _humanoid_cmd_len(op: int, mode: int) -> int:
+    if op == 8 or op == 7:
+        return 16
+    if op == 4 and mode == 4:
+        return 16
+    return 8
+
+
+def scripted_humanoids_json(prog) -> dict:
+    """Class 0x25's bytecode, decoded — see `game/class25`.
+
+    `ScriptedHumanoidInit` (`FUN_004840D0`) reads a pointer out of the tail at
+    `+0x0C` to a **command block**, installs `ScriptedHumanoidUpdate`
+    (`FUN_004842A0`) and never runs again. The block opens with a four-word
+    header and is followed by a list of 8-byte commands the VM walks.
+
+    The commands are emitted as a flat list with jumps resolved to an **index**
+    into it, because the engine's `op 15` carries an absolute pointer into the
+    loaded evt and an index is the same edge without the address.
+
+    All 137 blocks the six stages reach decode with every opcode in `0..18` or
+    `-1`, which is the check that the command length rules are right: one wrong
+    length desynchronises the stream and the opcodes go out of range
+    immediately.
+    """
+    if prog is None:
+        return {}
+    raw = prog.evt.raw
+    out: dict[str, dict] = {}
+    for rec in evtlib.spawns(prog.evt):
+        if rec.cls != 0x25:
+            continue
+        tail = rec.offset + 0x24
+        if tail + 0x10 > len(raw):
+            continue
+        blk = prog.evt.to_offset(
+            struct.unpack_from("<I", raw, tail + 0x0C)[0])
+        if blk is None or blk + 8 > len(raw):
+            continue
+
+        # Walk the stream once to fix an order, then again to resolve jumps.
+        order: list[int] = []
+        seen: set[int] = set()
+        pending = [blk + 8]
+        while pending:
+            p = pending.pop(0)
+            while p not in seen and p + 8 <= len(raw):
+                seen.add(p)
+                order.append(p)
+                op, mode, a, _b = struct.unpack_from("<4h", raw, p)
+                if op in (18, -1):
+                    break
+                if op == 15:
+                    t = prog.evt.to_offset(
+                        struct.unpack_from("<I", raw, p + 4)[0])
+                    if t is not None:
+                        pending.append(t)
+                    break
+                p += _humanoid_cmd_len(op, mode)
+        order.sort()
+        index = {off: i for i, off in enumerate(order)}
+
+        cmds: list[dict] = []
+        for off in order:
+            op, mode, a, b = struct.unpack_from("<4h", raw, off)
+            c: dict = {"op": op, "mode": mode, "a": a, "b": b}
+            if _humanoid_cmd_len(op, mode) == 16:
+                c["f0"], c["f1"] = struct.unpack_from("<2f", raw, off + 8)
+            if op == 15:
+                t = prog.evt.to_offset(
+                    struct.unpack_from("<I", raw, off + 4)[0])
+                c["next"] = index.get(t, -1) if t is not None else -1
+            cmds.append(c)
+
+        hdr = struct.unpack_from("<4h", raw, blk)
+        out[str(rec.offset)] = {
+            "charType": struct.unpack_from("<b", raw, tail)[0],
+            "removePath": struct.unpack_from("<h", raw, tail + 2)[0],
+            "removeFrame": struct.unpack_from("<h", raw, tail + 4)[0],
+            "flags2": hdr[1],
+            "motion": hdr[2],
+            "phase": hdr[3],
+            "cmds": cmds,
+        }
+    return out
+
+
 def breakables_json(tables, prog) -> dict:
     """The class-0x41 breakable-prop tables the port needs to place a group.
 
@@ -588,6 +676,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["props"] = propslib.props_json(stage.tables, hinges, statics)
     script_json["breakables"] = breakables_json(stage.tables, prog)
     script_json["set_pieces"] = set_pieces_json(prog)
+    script_json["humanoids"] = scripted_humanoids_json(prog)
     (out_dir / f"{name}.script.json").write_text(
         json.dumps(script_json, allow_nan=False))
 

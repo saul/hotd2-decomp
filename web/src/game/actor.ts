@@ -123,8 +123,30 @@ export interface Actor {
   frozen: number;           // +0x1324
   /** `obj+0x1330` — the set-piece slide's countdown, in frames. */
   slideTimer: number;       // +0x1330
-  /** `obj+0x1320` — `SetPieceStateHoldThenPlay`'s frame counter. */
+  /**
+   * `obj+0x1320` — frames a wait has been stalled for. `SetPieceStateHoldThenPlay`
+   * counts its hold in it, and class 0x25's VM its frame conditions.
+   */
   holdFrames: number;       // +0x1320
+  /** `obj+0x1394` — class 0x25's command cursor, as an index. -1 has left. */
+  pc: number;               // +0x1394
+  /** `obj+0x132C` / `+0x1328` / `+0x1354` / `+0x1350` — the turn. */
+  turnMode: number;         // +0x132C
+  turnFrames: number;       // +0x1328
+  turnStep: number;         // +0x1354
+  turnTarget: number;       // +0x1350
+  /** `obj+0x1358` / `+0x135C` / `+0x1360` — riding an object path. */
+  pathMode: number;         // +0x1358
+  pathSlot: number;         // +0x135C
+  pathOffset: number;       // +0x1360
+  /** `obj+0x1330` — class 0x25's draw mode. */
+  drawMode: number;         // +0x1330
+  /**
+   * `obj+0x13C0` — where the actor was last frame. The VM's "am I closing on
+   * this point" condition compares against it, which is the only reason it is
+   * kept.
+   */
+  prevPos: Vec3;            // +0x13C0
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
   /** Frames spent retreating; `ZombieStateBackOff` gives up past 0xF0. */
@@ -280,6 +302,16 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     frozen: 0,
     slideTimer: 0,
     holdFrames: 0,
+    pc: 0,
+    turnMode: 0,
+    turnFrames: 0,
+    turnStep: 0,
+    turnTarget: 0,
+    pathMode: 0,
+    pathSlot: -1,
+    pathOffset: 0,
+    drawMode: 0,
+    prevPos: vec3(),
     ringSet: 0,
     backoffFrames: 0,
     allowance: 0,

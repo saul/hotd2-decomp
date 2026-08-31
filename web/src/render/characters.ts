@@ -563,6 +563,28 @@ export class CharacterLayer {
     setBoneSlot: (at, bone, slot) => this.setBoneSlot(at, bone, slot),
   };
 
+  /**
+   * `CamEvalObjectPath6` — the `op_` object paths class 0x25's actors ride.
+   *
+   * Handed in by `main.ts` because the curves belong to the camera bundle, not
+   * to the characters; this layer is only the `HostBackend` the port already
+   * talks to.
+   */
+  paths: {
+    objectPath(slot: number):
+      { position(t: number, out?: Vector3): Vector3 } | undefined;
+  } | null = null;
+
+  objectPath(slot: number, frame: number):
+      { x: number; y: number; z: number } | null {
+    const p = this.paths?.objectPath(slot);
+    if (!p) return null;
+    const v = p.position(frame, this._pathPos);
+    return { x: v.x, y: v.y, z: v.z };
+  }
+
+  private readonly _pathPos = new Vector3();
+
   /** The world's generator, handed over by the host. */
   rng = new Rng(1);
 

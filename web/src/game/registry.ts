@@ -20,6 +20,7 @@ import { EnemyThrowerInit, EnemyThrowerUpdate } from "./class31/thrower";
 import { PropContainerPlacerHandler } from "./class41";
 import { Class44PlacerHandler } from "./class44";
 import { SetPiecePropHandler } from "./class24";
+import { ScriptedHumanoidHandler } from "./class25";
 
 export interface ClassFrame {
   eye: Vec3;
@@ -52,6 +53,8 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
   [SpawnClass.PropPlacer]: Class44PlacerHandler,
   // A skinned actor choreographed against the camera, not an enemy.
   [SpawnClass.SetPieceProp]: SetPiecePropHandler,
+  // A bytecode VM driving a skinned character. Not an enemy.
+  [SpawnClass.ScriptedHumanoid]: ScriptedHumanoidHandler,
 };
 
 /**

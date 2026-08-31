@@ -14,6 +14,18 @@
 import type { Vec3 } from "./vec";
 
 export interface GameHost {
+  /**
+   * `CamEvalObjectPath6` — a point on an `op_` object path at a frame.
+   *
+   * Class 0x25's actors ride these, and the curves live in the bundle's camera
+   * block, which `game/` cannot reach: evaluating a Hermite spline is the
+   * renderer's job and its result is three.js's. Optional, because a host with
+   * no camera paths is a valid host — the port then leaves the actor where it
+   * was, which is what a missing path should look like.
+   */
+  objectPath?(slot: number, frame: number):
+    { x: number; y: number; z: number; yaw?: number } | null;
+
   /** World position of one bone on one actor. False if it is not posed. */
   boneWorld(at: number, bone: number, out: Vec3): boolean;
   /** A point `ahead` units in front of the camera, at the eye's height. */

@@ -220,3 +220,26 @@ export interface SetPieceParamsJson {
   /** `obj+0x11C`: a start frame, or -1 for a random one. Not hit points. */
   phase: number;
 }
+
+/** One class-0x25 command — see `game/class25`. */
+export interface HumanoidCmdJson {
+  op: number;
+  mode: number;
+  a: number;
+  b: number;
+  f0?: number;
+  f1?: number;
+  /** `op 15` only: the index it jumps to. */
+  next?: number;
+}
+
+/** One class-0x25 spawn's program. */
+export interface HumanoidProgramJson {
+  charType: number;
+  removePath: number;
+  removeFrame: number;
+  flags2: number;
+  motion: number;
+  phase: number;
+  cmds: HumanoidCmdJson[];
+}

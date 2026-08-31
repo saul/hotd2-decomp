@@ -8,6 +8,7 @@
 import { Matrix4, Vector3 } from "three";
 import type { Context, System, Tick } from "../core/system";
 import { GameUpdate } from "../game/director";
+import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../game/globals";
 import type { GameHost } from "../game/host";
@@ -18,6 +19,9 @@ import type { Walker } from "../script/walker";
 export interface HostBackend {
   boneWorld(at: number, bone: number, out: Vector3): boolean;
   setBoneSlot(at: number, bone: number, slot: number): void;
+  /** `CamEvalObjectPath6` — a point on an `op_` path, for class 0x25. */
+  objectPath?(slot: number, frame: number):
+    { x: number; y: number; z: number } | null;
 }
 
 /**
@@ -66,6 +70,10 @@ export class GameSystem implements System {
       out.x = this._bone.x; out.y = this._bone.y; out.z = this._bone.z;
       return true;
     },
+    // `CamEvalObjectPath6`. The curves are in the camera bundle and their
+    // evaluation is the renderer's, so the port asks across the seam rather
+    // than carrying a Hermite evaluator of its own.
+    objectPath: (slot, frame) => this.backend?.objectPath?.(slot, frame) ?? null,
     // The camera looks down its own local -Z, which is where the player is.
     aimPoint: (ahead, out) => {
       const p = new Vector3(0, 0, -ahead).applyMatrix4(this._camMat);
@@ -123,10 +131,16 @@ export class GameSystem implements System {
 
   /** What the inspector shows. Derived, so it is not in the snapshot. */
   get describe(): string {
-    const live = G.g_object_list.filter((o) => !o.dead && o.visible).length;
-    if (!live) return "idle";
+    // "live" means enemies, the way `g_enemies_alive` does. Counting every
+    // actor was fine while the pool held only enemies; it now holds
+    // set-pieces and scripted humanoids too, and a row that says 22 live when
+    // the gate sees 8 is a row that sends you looking in the wrong place.
+    const actors = G.g_object_list.filter((o) => !o.dead && o.visible);
+    const live = actors.filter((o) => ActorIsEnemy(o.cls)).length;
+    if (!actors.length) return "idle";
     const held = G.g_attack_permits.filter((p) => p !== -1).length;
     return `${held} attacking${G.g_camera_is_tracking ? " · camera locked" : ""}`
-         + ` · ${live} live`;
+         + ` · ${live} live`
+         + (actors.length > live ? ` · ${actors.length - live} scripted` : "");
   }
 }

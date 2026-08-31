@@ -31,6 +31,13 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**Class 0x25, the scripted humanoid, is ported** (`game/class25/`) — the
+second-largest class in the game and a **bytecode VM**. The spawn's tail points
+at a command block; the Init installs the interpreter and it walks 8-byte
+commands until one blocks, so a run of setup commands all take effect in one
+frame and only a wait costs one. 137 blocks and 1,385 commands are decoded into
+the bundle. This is the game's cutscene system, not an enemy.
+
 **Class 0x24, the set-pieces, is ported** (`game/class24/`) — a skinned actor
 choreographed against the camera rather than the clock: all six state routines,
 the freeze/unfreeze cues, both gravity drops and the slide. They render because

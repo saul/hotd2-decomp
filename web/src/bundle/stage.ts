@@ -9,7 +9,8 @@ import type { CharactersJson } from "./characters";
 import { SUPPORTED_FORMAT } from "./manifest";
 import type { Manifest, StageEntry } from "./manifest";
 import type { BackdropJson, BreakablesJson, PropsJson, RainJson, RigsJson,
-              SetPieceParamsJson, SoundJson } from "./scene";
+              HumanoidProgramJson, SetPieceParamsJson,
+              SoundJson } from "./scene";
 import type { BlockJson, RegionEntryJson } from "./script";
 import type { BgmJson } from "./sound";
 
@@ -34,6 +35,8 @@ export interface ScriptJson {
   breakables?: BreakablesJson;
   /** Class 0x24's parameter tail, keyed by spawn address. */
   set_pieces?: Record<string, SetPieceParamsJson>;
+  /** Class 0x25's decoded bytecode, keyed by spawn address. */
+  humanoids?: Record<string, HumanoidProgramJson>;
   rain?: RainJson;
   warnings: string[];
 }

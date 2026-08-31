@@ -83,6 +83,13 @@ export interface OpJson {
   spawns?: SpawnJson[];
   scene_state?: { major: number | string; minor: number };
   camera_state?: string | null;
+  /** `goto_scene_state` / `goto_scene_state_when_alive` (0x31/0x32). */
+  scene_state_minor?: number;
+  /** `set_action_drain_mode` (0x33): the ring's dequeue mode. */
+  drain_mode?: number;
+  /** `set_action_drain_mode` (0x33): added to the pending count, **unsigned**
+   *  in the bundle -- every one of the 128 in the game is -1. */
+  pending_delta?: number;
   branch_preview?: {
     choice: number;
     frame: number;

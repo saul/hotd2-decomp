@@ -207,16 +207,16 @@ inference; **[open]** = undetermined.
 | `2E` | `resume_bgm_if_skipped` | **[proved]** `if (skip) PlaySoundId(0x80000002)` — restart the BGM a skipped cutscene interrupted. Unreachable in this build; see below |
 | `2F` | `suppress_accuracy_stats` | **[proved]** non-zero stops the shots/hits counters that `2B` grades |
 | `30` | `queue_event` | the scripted-action ring — see below |
-| `31` | `goto_scene_state` | **[proved]** immediate transition to `(major 1, minor op0)` |
-| `32` | `goto_scene_state_when_alive` | **[proved]** as `31`, but parks on the instruction until neither player is dead-but-still-in-play |
-| `33` | `set_action_drain_mode` | **[proved]** `(drain_mode, pending_count_delta)`. Mode 1 = drain the ring, 2 = pop one |
+| `31` | `goto_scene_state` | **[proved]** the end-of-room instruction. Enters `(1, op0)` — and **all 548 sites pass 3**, `CameraFromViewAngles` — parks `g_evt_action_handler` on a bare `RET`, tearing down the driver the `finish_sequence` installed, and **decrements `g_queued_events_pending`**, which is how selector `0x21` gets retired. Also clears `g_evt_cam_override_valid`, `g_camera_ease_eye` and bit 0 of both players' flags |
+| `32` | `goto_scene_state_when_alive` | **[proved]** as `31` but **minus the `g_evt_cam_override_valid` and `g_camera_ease_eye` clears**, and it parks on the instruction — setting `g_evt_yield` and re-running each frame — until a player is outside the death → continue → revive chain (`g_player_state_table[state] + 0x10`) or still has lives |
+| `33` | `set_action_drain_mode` | **[proved]** `g_evt_action_advance = op0; g_queued_events_pending += op1`, a signed add. Mode 1 = dequeue and run in the same frame, 2 = dequeue but defer a frame. **All 128 in the game carry delta −1**, cutting a running `cam_play` short so the `finish_sequence` queued behind it can start |
 | `35` | `enable_camera_path_roll` | **[proved]** `CamEvalPath7` evaluates curve channel 6 (roll/bank) **only when this is set**; otherwise roll is forced to 0 |
 | `36` | `pin_view_to_ground_plane` | **[proved]** makes all four camera hooks take `eye.y` from `g_ground_plane_y` (opcode `1A`) instead of `path.y − 15` |
 | `37` | `force_camera_path_advance` | **[proved]** advances the camera path every frame, bypassing the "room cleared" gate |
 | `38`–`3B` | `se_play*` | sound effects |
 | `3D` / `3E` | `nop` | **[proved]** pure no-ops, `pc += 0x10` / `0x08` |
 | `3F` / `5B` / `5C` | `nop` | **[proved]** all three share **one** handler that is opcode-blind (`ADD [pc],4; RET`) — identical retired 0-operand opcodes |
-| `40` | `wait_queued_events_done` | **[proved]** `g_queued_events_pending == 0` |
+| `40` | `wait_queued_events_done` | **[proved]** `g_queued_events_pending == 0`. `queue_event` adds one per action and every handler takes one back on completion **except `EvtActionFinishSequence21`**, which never retires itself — `31`/`32`/`33` do it for it |
 | `41` | `wait_camera_path_frame` | **[proved]** operand 0 = wait for the end of the path; otherwise wait until the path frame passes the operand |
 | `42` | `wait_frames` | **[proved]** countdown; only decrements while the gate is open, and `FUN_00499530` can clamp it downward to shorten a wait in progress |
 | `43` | `wait_enemies_present` | **[proved]** `g_enemies_present <= op`, and the camera has settled |

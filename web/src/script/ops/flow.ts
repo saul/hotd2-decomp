@@ -25,6 +25,68 @@ export const OPS: Record<number, OpImpl> = {
       },
     },
 
+    // -- the scene state machine -------------------------------------------
+    // `goto_scene_state` is the end-of-room instruction. It trails almost
+    // every step -- 548 sites, and **every one passes minor 3** -- sitting
+    // between the wait that holds for the room and `end_block`:
+    //
+    //     queue_event finish_sequence 4|6|7   ; a `cam/` path camera, state 2
+    //     wait_enemies_alive 0                ; the room
+    //     goto_scene_state 3                  ; hand the camera back, retire
+    //     end_block
+    //
+    // `EvtOpGotoSceneState31` (`FUN_0045F870`) enters scene state (1, minor),
+    // parks the action ring's handler on a bare RET -- which is what tears
+    // down the camera driver the `finish_sequence` installed -- and takes one
+    // off `g_queued_events_pending`, retiring that `0x21`. Cell (1,3) is
+    // `CameraFromViewAngles`: the pose stops coming from the `cam/` path and
+    // starts coming from the player's own view angles at 0x009A60CC/D0/D4.
+    //
+    // The port draws the camera from the path, not from a view struct, so what
+    // it takes from this is the state and the retirement. Three further
+    // effects are read but not modelled, and are listed rather than buried:
+    // clearing `g_evt_cam_override_valid` (only the row-5 hooks read it),
+    // clearing `g_camera_ease_eye`, and clearing bit 0 of both players' flags,
+    // which hides the on-screen player rigs -- this client draws none.
+    // [diverges]
+    0x31: {
+      status: "tracked",
+      run: (w, op) => {
+        const minor = op.scene_state_minor ?? 3;
+        w.enterSceneState(1, minor);
+        w.retireSceneSequence();
+        return `scene state 1/${minor}`;
+      },
+    },
+    0x32: {
+      // `EvtOpGotoSceneStateWhenPlayersAlive32` is 0x31 plus a park: it sets
+      // the yield latch and re-runs every frame until a player is out of the
+      // death -> continue -> revive chain (or still has lives). It also omits
+      // two of 0x31's clears. This client has no player death, so the gate is
+      // always open and the two omitted clears are ones it does not model
+      // either -- it behaves as 0x31. [diverges]
+      status: "tracked",
+      run: (w, op) => {
+        const minor = op.scene_state_minor ?? 3;
+        w.enterSceneState(1, minor);
+        w.retireSceneSequence();
+        return `scene state 1/${minor} -- the alive gate is always open here`;
+      },
+    },
+    0x33: {
+      // `EvtOpSetActionDrainMode33`: `mode = op0; pending += op1`, a signed
+      // add. All 128 in the game carry -1, so this is the *other* script-side
+      // retirement -- it cuts a running `cam_play` short and lets the queued
+      // `finish_sequence` behind it start. The dequeue mode itself is not
+      // modelled; the ring here runs an action the moment it is queued.
+      status: "tracked",
+      run: (w, op) => {
+        const delta = (op.pending_delta ?? 0) | 0;
+        w.addQueuedEvents(delta);
+        return `drain mode ${op.drain_mode ?? 0}, pending ${delta >= 0 ? "+" : ""}${delta}`;
+      },
+    },
+
     // -- flow --------------------------------------------------------------
     0x48: {                                     // set_script_flag
       status: "tracked",

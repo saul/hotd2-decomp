@@ -6947,3 +6947,83 @@ committed as `HEAD` plus this session's own rows rather than as the mixed
 working tree. Two peer commits landed while it was in progress; the new commit
 sits on top of them and nothing was lost.
 
+
+## `goto_scene_state` is the end-of-room instruction
+
+548 sites, and **every one passes minor 3**. It is not a general transition —
+it has exactly one shape, and it sits between the wait that holds for the room
+and `end_block`:
+
+```
+queue_event finish_sequence 4|6|7   ; a cam/ path camera -- scene state 2
+wait_enemies_alive 0                ; the room
+goto_scene_state 3                  ; hand the camera back, retire the action
+end_block
+```
+
+`EvtOpGotoSceneState31` enters state (1, 3) — `CameraFromViewAngles`, which
+builds the pose from the player's view angles at `0x009A60CC/D0/D4` instead of
+from the `cam/` path — parks the action ring's handler slot on a bare `RET`,
+which is what tears down the camera driver the `finish_sequence` installed, and
+takes one off `g_queued_events_pending`.
+
+That last one is the useful half. `EvtActionFinishSequence21` is **the one
+action handler that never retires itself**: it installs a persistent camera
+driver and pins the ring's dequeue mode at "still running". `goto_scene_state`
+and `set_action_drain_mode` are its script-side retirement — which is why they
+trail almost every room. Measured over the shipped scripts: all 316
+`goto_scene_state` sites have exactly one outstanding unretired `0x21`, and all
+128 `set_action_drain_mode` instructions carry delta −1.
+
+So `wait_queued_events_done` (`0x40`) is now counted for real rather than
+resolved on "the camera move ended". The two agree closely — the approximation
+was chosen for the common shape and the common shape is most of the game — but
+the counter is a few frames quicker in every stage, because a stashed or held
+pose retires at once where `cam.done` does not. Stage 3 differs by 91 frames.
+
+The check that matters is that the accounting cannot deadlock. `seek.test.ts`
+now drives all six stages on the clock; dropping `goto_scene_state`'s
+retirement parks every one of them on a `wait_queued_events_done` within the
+first few blocks. A second, structural check: `FUN_0045EBC0` zeroes the count
+when it loads a block, so the engine absorbs an imbalance silently — and if
+every action is retired by the right instruction, that reset is a no-op. It is,
+in all six stages.
+
+### A wrong turn worth recording
+
+The first version of that test asserted only "the ring is empty at each block
+boundary", and I convinced myself it was the sharp check. It is not: the
+per-block reset means a mis-retired action is absorbed rather than
+accumulating. I then "proved it could fail" with a `sed` that silently did not
+match, and read the resulting all-green as confirmation. It was confirmation of
+nothing. The lesson is the one this log keeps relearning — **when you break
+something to prove a check fails, verify the break landed** — and the honest
+version of the check is the deadlock, with the block-boundary residue as a
+complement rather than the headline.
+
+### Two annotations corrected
+
+`0x00402860` was named `CameraStartTurnOntoPathTarget`, "forces
+`CameraTurnOntoPathTarget` back into its turning state". The bytes at
+`0x00402867` are `C6 05 2D 6F 9C 00 01` — it writes **1**, the *path* branch,
+and clears `0x009C6F2C`: it abandons the turn and hands the camera back after
+one damped step. Renamed `CameraHandBackToPath`. It is unreachable anyway.
+
+The port's `camera/track.ts` said `DAT_009C6F2E` was "read in two places and
+written in none". It *is* written — once, to 0, at `0x0040322D`. The dead-code
+conclusion stands; the reason was wrong.
+
+### `DAT_009C6F2D` is `g_camera_free`, and the port does not have it
+
+Every enemy wait — `0x43`, `0x44` and the new `0x46` — requires this byte, and
+it means *no enemy is claiming the camera and the return-to-path swing has
+finished*. `FUN_00402E00` recomputes it from `g_enemy_slots` every frame;
+`FUN_00402650` clears it every frame the camera mode is not "return to path";
+and inside that mode `CameraTurnOntoPathTarget` latches it when the eased
+look-at catches the path target.
+
+So in the real game a room-clear gate does **not** open the moment the last
+enemy dies — it opens once the camera has swung back onto its rail. The port
+has `g_enemy_slots`, `g_camera_settled` and `CameraTrackEnemiesTick` already,
+so this is portable, and it is the most substantial piece of scripted-sequence
+behaviour still missing. **[open]** — not attempted here.

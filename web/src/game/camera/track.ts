@@ -29,8 +29,11 @@
  *   off the playing path every frame, exactly as `CamAdvancePathFrame` writes
  *   it; the second pose block that ease reads has no port yet. [open]
  * - `if (g_enemies_alive == 0 && DAT_009C6F2E == 2) rate = 0`, a snap. That
- *   byte is **read in two places and written in none**, so it is zero for the
- *   life of the process and the branch is dead code.
+ *   byte *is* written -- once, to **0**, at `0x0040322D` in `FUN_004031E0` --
+ *   so it is zero for the life of the process and the branch is dead code all
+ *   the same. (This note used to say "written in none", which was wrong: the
+ *   store is there, it just never stores anything but zero. Same conclusion,
+ *   sounder reason.)
  */
 import { G } from "../globals";
 import { T } from "../tables";

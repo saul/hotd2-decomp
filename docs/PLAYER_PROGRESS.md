@@ -626,11 +626,11 @@ struck through:
 | Op | Name | Uses | Worth doing? |
 |---|---|---|---|
 | `52`/`53`/`54`/`55`/`56`/`57` | `asset_*` file traffic | 2717 | No — the bundle already holds every model and texture |
-| `31` | `goto_scene_state` | 274 | Only with a scene state machine |
+| `31` | `goto_scene_state` | 274 | **Done** — the scene state is real, and this retires the `finish_sequence` behind it |
 | `28` | `region_load` | 262 | No — preloads what is already resident |
 | `59`/`58`/`5A` | asset job drains | 188 | No — nothing is ever pending |
 | `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip bar; the feature is live in the retail game |
-| `33` | `set_action_drain_mode` | 125 | Only with the action ring |
+| `33` | `set_action_drain_mode` | 125 | **Done** — the `pending` half; the ring's dequeue *mode* is still not modelled |
 | `10`/`11` | collision sets | 113 | Only with collision |
 | `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
 | `49`/`4A`/`4B` | `variant_*` | — | **Worth checking** — a global picks which operand list runs, so some spawns may never appear |
@@ -1126,9 +1126,9 @@ missed. Meanings and confidence marks live in
 | `2E` | `resume_bgm_if_skipped` | audio | **done** | restarts BGM `0x80000002` when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
 | `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |
-| `31` | `goto_scene_state` | flow | shown | scene state transition; the player has no state machine |
-| `32` | `goto_scene_state_when_alive` | flow | shown | scene state transition; the player has no state machine |
-| `33` | `set_action_drain_mode` | flow | shown | action-ring drain mode |
+| `31` | `goto_scene_state` | flow | *tracked* | the end-of-room instruction: enters scene state (1, 3) and retires the outstanding `queue_event 0x21`. The camera hook it installs reads the player view angles, which this client does not have — it draws the `cam/` path. [diverges] |
+| `32` | `goto_scene_state_when_alive` | flow | *tracked* | as `0x31`, minus two clears, plus a park until a player is out of the death → continue → revive chain. No player death here, so the gate is always open [diverges] |
+| `33` | `set_action_drain_mode` | flow | *tracked* | `pending += delta`, the second script-side retirement — all 128 in the game carry −1. The dequeue mode itself is not modelled |
 | `34` | `unused_34` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `35` | `enable_camera_path_roll` | camera | **done** | **gates the camera roll channel**, exactly as CamEvalPath7 does |
 | `36` | `pin_view_to_ground_plane` | camera | *tracked* | selects the fixed camera eye height; see the eye-height note |
@@ -1141,7 +1141,7 @@ missed. Meanings and confidence marks live in
 | `3D` | `nop3` | nop | n/a | proved no-ops |
 | `3E` | `nop1` | nop | n/a | proved no-ops |
 | `3F` | `nop0` | nop | n/a | proved no-ops |
-| `40` | `wait_queued_events_done` | wait | ~approx~ | resolves when the current camera move ends |
+| `40` | `wait_queued_events_done` | wait | ~approx~ | **`g_queued_events_pending == 0`, counted for real** — `queue_event` adds one, each handler takes one back, `finish_sequence` never does and `0x31`/`0x33` do it for it. Still `approx` because the ring's *ordering* is not modelled: the port runs an action when it is queued, not one at a time |
 | `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path |
 | `42` | `wait_frames` | wait | **done** | **exact** frame countdown |
 | `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead; with Shoot off nothing can make the count fall, so it passes and the feed says so |

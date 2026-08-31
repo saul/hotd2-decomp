@@ -433,6 +433,55 @@ for (const stage of STAGES) {
   }
 }
 
+// The action ring, driven for real. `wait_queued_events_done` (0x40) is
+// `g_queued_events_pending == 0`, and the walker now keeps that count rather
+// than resolving on "the camera move ended" -- so a miscounted action handler
+// is a script that parks for ever instead of one that runs a little early.
+// This drives every stage on the clock, the way playing does, and the thing it
+// is really checking is that none of them deadlock.
+{
+  for (const stage of STAGES) {
+    const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+    if (!existsSync(file)) continue;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    // Everything already dead, so the combat gates never hold: what is left
+    // holding the script is the camera and the ring.
+    const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
+                                   aliveCivilians: () => 0 });
+    const CAP = 60 * 60 * 20;            // twenty simulated minutes
+    const STALL = 60 * 60 * 5;           // five on one instruction is a park
+    let frames = 0, stalls = 0, at = "";
+    let negative = false;
+    while (!w.finished && frames < CAP) {
+      if (w.branch) w.takeBranch(0);
+      w.tick(1 / 60);
+      frames++;
+      if (w.queuedEventsPending < 0) negative = true;
+      const now = `${w.block}/${w.step}/${w.opIndex}`;
+      if (now === at) { if (++stalls > STALL) break; } else { stalls = 0; at = now; }
+    }
+    check(`stage ${stage}: the script runs to the end on the clock`,
+          w.finished, stalls > STALL
+            ? `parked at ${at} on ${w.wait ? `wait 0x${w.wait.op.op.toString(16)}`
+               + ` (${w.wait.policy.kind}), pending ${w.queuedEventsPending}` : "no wait"}`
+            : `only reached ${at} in ${frames} frames`);
+    // The check above is the sharp one: dropping `goto_scene_state`'s
+    // retirement parks all six stages on a `wait_queued_events_done` within
+    // the first few blocks, because the count never falls back to zero.
+    //
+    // This one is the structural complement. `FUN_0045EBC0` zeroes the count
+    // when it loads a block, so the engine absorbs a residue silently; if the
+    // port retires every action from the right instruction, that reset is a
+    // no-op and the ring is *already* empty at each transition. It is, in all
+    // six stages -- which is a statement about the script's shape, not about
+    // the port agreeing with itself.
+    check(`stage ${stage}: the action ring balances`,
+          !negative && w.ringResidue === 0 && w.queuedEventsPending === 0,
+          `${w.ringResidue} block(s) ended owing an action, ended on `
+          + `${w.queuedEventsPending}${negative ? ", went negative" : ""}`);
+  }
+}
+
 if (ran === 0) {
   console.log("  no bundle under extract/player -- run tools/export_player.py");
   process.exit(0);

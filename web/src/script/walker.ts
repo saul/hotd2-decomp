@@ -99,6 +99,8 @@ export type WaitPolicy =
   | { kind: "enemies" }
   /** `wait_scripted_actors`: blocks until the civilians have left play. */
   | { kind: "civilians" }
+  /** `wait_queued_events_done`: blocks while the action ring owes work. */
+  | { kind: "queued" }
   | { kind: "passed"; why: string };
 
 export interface PendingWait {
@@ -403,6 +405,54 @@ export class Walker {
   }
   /** A `cam_play` with `flags & 2` stashes its range for a later 0x21. */
   stashedCam: { slot: number; start: number; end: number } | null = null;
+
+  /**
+   * `g_scene_state_major` / `g_scene_state_minor` (0x009C6F0C / 0x009C6F14).
+   *
+   * `EvtEnterSceneState` (`FUN_00403BD0`) records the pair and jumps to
+   * `g_scene_state_table[major * 9 + minor]`, which *installs* that phase's
+   * camera hook rather than doing any work itself. Three instructions reach
+   * it: `queue_event` selector `0x21` with major 2 (the `cam/` path cameras),
+   * selector `0x11` with the current major, and `goto_scene_state` with major
+   * fixed at 1. The port tracked only the first, so the state was never a
+   * state -- it is one now.
+   */
+  sceneState = { major: 0, minor: 0 };
+
+  /**
+   * `g_queued_events_pending` -- 0x009A2C8C. What `wait_queued_events_done`
+   * (`0x40`) blocks on.
+   *
+   * `queue_event` adds one per action and each action handler takes one back
+   * when it completes -- *except* `EvtActionFinishSequence21`, which installs
+   * a persistent camera driver and never retires itself. `goto_scene_state`
+   * and `set_action_drain_mode` are its script-side retirement, which is why
+   * they trail almost every room: measured over the shipped scripts, all 316
+   * `goto_scene_state` sites have exactly one outstanding `queue_event 0x21`
+   * at that point.
+   */
+  queuedEventsPending = 0;
+
+  /**
+   * How many block transitions found the action ring still owing work.
+   *
+   * `FUN_0045EBC0` zeroes `g_queued_events_pending` when it loads a block, so
+   * a residue is silently absorbed by the engine too -- which makes it the one
+   * place the port's accounting can be checked against the script's own
+   * structure rather than against itself. It should be zero.
+   */
+  ringResidue = 0;
+
+  /**
+   * Whether the `cam_play` now running still owes its retirement.
+   *
+   * `CamAdvancePathFrame` retires the action when the path reaches its end; a
+   * held pose (`CamEvalStaticPose`) and a deferred stash (`FUN_00403490`)
+   * retire at once, so only a real playback is outstanding. The camera a
+   * scene state 6/7 starts is *not* one: its `cam_play` was retired when it
+   * was stashed.
+   */
+  private camPending = false;
   /**
    * The arcade branch-preview shots, from the most recent `store_six`
    * (`queue_event` sel 0x60): one camera pose per route the next branch can
@@ -513,6 +563,9 @@ export class Walker {
     this.branchChoice = 0;
     this.parked = false;
     this.stashedCam = null;
+    this.sceneState = { major: 0, minor: 0 };
+    this.queuedEventsPending = 0;
+    this.camPending = false;
     this.branchPreview = null;
     this.channels = defaultChannels();
     this.tweens = new Array(CHANNEL_COUNT).fill(null);
@@ -557,6 +610,9 @@ export class Walker {
       skipRequested: this.skipRequested, rain: this.rain,
       gunLights: this.gunLights, sceneLighting: this.sceneLighting,
       branchChoice: this.branchChoice, parked: this.parked,
+      sceneState: { ...this.sceneState },
+      queuedEventsPending: this.queuedEventsPending,
+      camPending: this.camPending,
       channels: [...this.channels], tweens: this.tweens.map((t) => t && {...t}),
       fogSet: this.fogSet, lightDir: { ...this.lightDir },
       lightSet: this.lightSet, checkpointBlock: this.checkpointBlock,
@@ -585,6 +641,7 @@ export class Walker {
       "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
       "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
       "lightSet", "checkpointBlock", "branchPreview", "stashedCam", "spawns",
+      "sceneState", "queuedEventsPending", "camPending",
       "cam", "finished", "bgmTrack", "lastSound", "seq",
     ] as const;
     const self = this as unknown as Record<string, unknown>;
@@ -825,6 +882,8 @@ export class Walker {
       this.cam.frame += used;
       if (this.cam.frame >= this.cam.endFrame) this.cam.done = true;
     }
+    // `CamAdvancePathFrame` retires its action on the frame the path ends.
+    this.settleCameraAction();
 
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.stepTweens(dt * fps);
@@ -902,6 +961,7 @@ export class Walker {
     if (this.cam && !this.cam.done) {
       this.cam.endFrame = this.cam.frame;
       this.cam.done = true;
+      this.settleCameraAction();
       this.host.startCamera(this.cam);
     }
 
@@ -930,6 +990,9 @@ export class Walker {
         return (this.host.aliveEnemies() ?? 0) <= (w.op.arg ?? 0);
       case "civilians":
         return (this.host.aliveCivilians() ?? 0) <= (w.op.arg ?? 0);
+      case "queued":
+        this.settleCameraAction();
+        return this.queuedEventsPending === 0;
       default:
         return true;
     }
@@ -1140,7 +1203,74 @@ export class Walker {
     }
   }
 
+  /**
+   * `EvtEnterSceneState` -- `FUN_00403BD0`.
+   *
+   * The table cell is a hook *installer*, and the only hook this client draws
+   * from is the `cam/` path, so what the port keeps is the state itself. It
+   * matters because the row decides who owns the camera: row 2 is the path
+   * cameras, row 1 hands the camera to the player's own view angles, and
+   * leaving row 2 is what ends a scripted shot.
+   */
+  enterSceneState(major: number, minor: number): void {
+    this.sceneState = { major, minor };
+  }
+
+  /**
+   * `goto_scene_state`'s retirement of the outstanding `queue_event 0x21`.
+   *
+   * Also drops the camera the `finish_sequence` was driving: opcode 0x31
+   * parks the ring's handler slot on a bare `RET`, which is what stops the
+   * per-minor camera driver running. In this client that means the deferred
+   * play stops advancing -- it is already at its end in every shipped case,
+   * because a `wait_camera_path_frame 0` precedes the `goto_scene_state`.
+   */
+  retireSceneSequence(): void {
+    this.settleCameraAction();
+    this.retireQueuedEvent();
+  }
+
+  /** `set_action_drain_mode`'s signed `pending += delta`. */
+  addQueuedEvents(delta: number): void {
+    if (delta < 0) {
+      // A negative delta is the script retiring an action by hand, and the
+      // one it means is the `cam_play` still playing -- 0x33 is what cuts a
+      // shot short so the `finish_sequence` queued behind it can start.
+      this.camPending = false;
+    }
+    this.queuedEventsPending = Math.max(0, this.queuedEventsPending + delta);
+  }
+
+  /** One action handler completing: the `pending--` every one of them ends on. */
+  private retireQueuedEvent(): void {
+    // The engine lets this go negative and `wait_queued_events_done` tests
+    // `!= 0`, so a negative count there would park for ever. It cannot happen
+    // in the shipped scripts, but a skipped `queue_event` does not queue while
+    // its `goto_scene_state` still retires -- so the floor is kept.
+    if (this.queuedEventsPending > 0) this.queuedEventsPending -= 1;
+  }
+
+  /**
+   * Retire the `cam_play` whose path has just finished.
+   *
+   * `CamAdvancePathFrame` does this itself on the frame the path ends, so it
+   * has to happen wherever the camera can reach its end -- the clock in
+   * `tick`, and the skip, which ends the move where it stands.
+   */
+  private settleCameraAction(): void {
+    if (!this.camPending) return;
+    if (!this.cam || this.cam.done || this.cam.isStatic) {
+      this.camPending = false;
+      this.retireQueuedEvent();
+    }
+  }
+
   applyQueueEvent(op: OpJson): string | undefined {
+    // `EvtOpQueueEvent30` adds one for every action it queues. The handler
+    // takes it back when it completes; the branches below say which of them
+    // complete immediately and which stay outstanding.
+    this.queuedEventsPending += 1;
+
     if (op.action === "cam_play") {
       const slot = op.slot ?? -1;
       const start = op.start ?? 0;
@@ -1178,6 +1308,8 @@ export class Walker {
         // frame, on a tail that is usually three. [diverges]
         const at = op.resume ? (this.cam ? this.cam.frame + 1 : 0) : start;
         this.stashedCam = { slot, start: at, end };
+        // `FUN_00403490` stashes and returns; the action is done.
+        this.retireQueuedEvent();
         return `stashed ${at}..${end} for a later scene state 6/7`;
       }
 
@@ -1200,17 +1332,39 @@ export class Walker {
         done: !!op.static,
       };
       this.host.startCamera(this.cam);
-      return this.cam.isStatic ? "static pose" : undefined;
+      if (this.cam.isStatic) {
+        // `CamEvalStaticPose` writes the pose and retires; nothing is playing.
+        this.retireQueuedEvent();
+        return "static pose";
+      }
+      // `CamAdvancePathFrame` stays installed and retires on the frame the
+      // path reaches its end -- `settleCameraAction` is where that lands.
+      this.camPending = true;
+      return undefined;
+    }
+
+    if (op.action === "scene_state") {
+      // Selector 0x11, `EvtActionSceneState11` -- the current major with the
+      // operand as minor. Eight sites in the game, operands 1 and 3, both
+      // inside row 1's live set. It retires like any other handler.
+      this.enterSceneState(this.sceneState.major, op.args?.[0] ?? 0);
+      this.retireQueuedEvent();
+      return `scene state ${this.sceneState.major}/${this.sceneState.minor}`;
     }
 
     if (op.action === "store_six" && op.branch_preview) {
       // FUN_00403DB0 reads these back indexed by branch_choice, so they are
       // the shot the arcade shows for each route the branch can take.
       this.branchPreview = op.branch_preview;
+      this.retireQueuedEvent();
       return `${op.branch_preview.length} branch preview shots`;
     }
 
     if (op.action === "finish_sequence") {
+      // `EvtActionFinishSequence21` is the one handler that does NOT retire
+      // itself -- it installs a camera driver and pins the ring's dequeue mode
+      // at "still running". `goto_scene_state` is what takes it back.
+      this.enterSceneState(2, op.args?.[0] ?? 0);
       // Selector 0x21 is EvtEnterSceneState(2, minor) -- it picks a *camera
       // routine*, it does not hand control back from a path. Row 2's live
       // cells are 4, 6 and 7, and those are the only operands that occur.
@@ -1244,6 +1398,11 @@ export class Walker {
       }
       return op.camera_state ? `camera state ${op.camera_state}` : undefined;
     }
+    // `set_player_flag` (0x10), `set_update_routine` (0x12), `set_global`
+    // (0x14), `set_flag` (0x15), `hold_camera_preset` (0x20) and a `store_six`
+    // with no preview: none is modelled here, and every one of them ends on
+    // the same `pending--`, so the ring must not be left owing work for them.
+    this.retireQueuedEvent();
     return undefined;
   }
 
@@ -1271,7 +1430,15 @@ export class Walker {
       const left = this.cam ? Math.max(0, target - this.cam.frame) : 0;
       policy = { kind: "frames", framesLeft: left };
     } else if (op.op === 0x40) {
-      policy = { kind: "camera" };
+      // `EvtOpWaitQueuedEventsDone40` is `g_queued_events_pending == 0`, and
+      // the port now keeps that count for real. It used to resolve on "the
+      // camera move ended", which is the same answer in the common shape --
+      // a lone `cam_play` followed by this wait -- but not when a
+      // `finish_sequence` is outstanding behind the shot.
+      this.settleCameraAction();
+      policy = this.queuedEventsPending === 0
+        ? { kind: "passed", why: "the action ring is empty" }
+        : { kind: "queued" };
     } else if (op.op === 0x43 || op.op === 0x44) {
       // With shooting on, the gate is the gate: it opens when they are dead.
       const alive = this.host.aliveEnemies();
@@ -1409,6 +1576,13 @@ export class Walker {
     // transition. Class 0x41's props measure their lifetime in these rather
     // than in frames, so it has to be a real counter and not a frame clock.
     G.g_evt_block_counter++;
+    // `FUN_0045EBC0` loads a block's program and zeroes `g_queued_events_pending`
+    // with it, so the ring's accounting cannot drift across a block boundary.
+    // That is a real bound, not a tidy-up: it is why a miscounted action costs
+    // at most one block rather than deadlocking the stage.
+    if (this.queuedEventsPending !== 0) this.ringResidue += 1;
+    this.queuedEventsPending = 0;
+    this.camPending = false;
     if (this.options.clearSpawnsOnBlock) this.spawns = [];
     // The preview shots belong to the branch in the block that stored them --
     // every `store_six` in the game sits in a branch block. Carrying one

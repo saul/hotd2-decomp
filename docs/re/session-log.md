@@ -5151,3 +5151,33 @@ starting late.
   is still `[open]`, and it does not affect the port, which runs the tracking
   camera because the tracking data (slots, candidate sort, permits) is
   demonstrably maintained.
+
+### And a third: `start == -1` in a **deferred** play
+
+Reported separately, same session: stage 1 block 8 step 4 op 25 threw the
+camera back before the start of its path and replayed the lot, once.
+
+Op 23 is `cam_play -1, 685, slot 44, flags 2` — resume *and* deferred. The port
+handled `start == -1` only in the non-deferred branch and stashed the literal
+`-1`, so the `finish_sequence 7` at op 24 set the clock to frame -1 and ran 686
+frames instead of the 8 the script asked for.
+
+`FUN_00403490`, the stash branch of `EvtActionCamPlay40`, says what it means:
+
+```c
+g_stashed_path_frame = operands[0];
+if (g_stashed_path_frame == -1)
+    g_stashed_path_frame = g_cam_path_frame + 1;
+```
+
+The `+ 1` is not in `CamStartPathPlayback`'s own resume, and the difference is
+real: `CamAdvancePathFrame` evaluates then increments, the rail hooks increment
+then evaluate. Both are now transcribed, along with the branch **order** —
+`EvtActionCamPlay40` tests `start == end` before it tests `flags & 2`, and the
+port had those the other way round. No shipped play is both static and
+deferred, so that half changes nothing today; it is fixed because a
+transcription that only happens to agree with the data is not one.
+
+**[measured]** four plays in the game name `-1`, all four deferred (stage 1
+blocks 3 and 8, both bundles); none of the 1110 non-deferred plays does, so
+`CamStartPathPlayback`'s resume is unreachable from the scripts.

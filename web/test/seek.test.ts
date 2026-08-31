@@ -178,6 +178,67 @@ for (const stage of STAGES) {
         + skipped.slice(0, 4).map(([k, o]) => `${k} at op ${o}`).join(", "));
 }
 
+// -- a deferred resume resumes ----------------------------------------------
+
+/**
+ * No `cam_play` ever leaves the camera clock before frame 0.
+ *
+ * `EvtActionCamPlay40`'s `flags & 2` branch is `FUN_00403490`, and it is not a
+ * plain copy of the operands:
+ *
+ * ```c
+ * g_stashed_path_frame = operands[0];
+ * if (g_stashed_path_frame == -1)
+ *     g_stashed_path_frame = g_cam_path_frame + 1;
+ * ```
+ *
+ * So `start == -1` means "resume" in the deferred branch as well as in
+ * `CamStartPathPlayback`. The port stashed the literal -1 and the
+ * `finish_sequence 6|7` that followed set the camera to frame -1, off the
+ * front of the curve — stage 1 block 8 step 4 op 23 asks to resume at frame
+ * 678 of a 685-frame shot and instead replayed all 686 from before the start,
+ * once, before carrying on.
+ *
+ * Four plays in the game name -1 and all four are deferred: stage 1 blocks 3
+ * and 8, in the Arcade and Original bundles alike.
+ */
+console.log("\nno camera play starts before frame 0:");
+for (const stage of STAGES) {
+  const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+  if (!existsSync(file)) continue;
+  const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+  const w = new Walker(script, mkHost());
+  w.reset();
+  w.replaying = true;
+  const bad: string[] = [];
+  for (let i = 0; i < 200_000 && !w.finished && !w.parked; i++) {
+    if (w.wait) { w.stepOverWait(); continue; }
+    if (w.branch) { w.takeBranch(); continue; }
+    const at = `${w.block}/${w.step}/${w.opIndex}`;
+    if (!(w as unknown as Inner).executeOne(true)) break;
+    if (w.cam && (w.cam.startFrame < 0 || w.cam.frame < 0)) {
+      bad.push(`${at} -> ${w.cam.startFrame}..${w.cam.endFrame}`);
+    }
+  }
+  check(`stage ${stage}: every play starts inside its path`, bad.length === 0,
+        `${bad.length} start before frame 0, e.g. ${bad.slice(0, 3).join(", ")}`);
+}
+
+// The site the report came from, named: stage 1's block 8 step 4 op 23 is a
+// deferred play that says -1, and op 24 hands it to the rail hook.
+{
+  const file = join(ROOT, "stage1", "stage1.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const w = new Walker(script, mkHost());
+    const arrived = w.seek(8, 4, 25);
+    check("a deferred `start == -1` resumes forward, it does not rewind",
+          arrived && !!w.cam && w.cam.slot === 44 && w.cam.startFrame > 500
+            && w.cam.endFrame === 685,
+          `cam ${w.cam?.slot} ${w.cam?.startFrame}..${w.cam?.endFrame}`);
+  }
+}
+
 // An address the script cannot reach must be reported, not silently swapped
 // for wherever the replay happened to stop.
 {

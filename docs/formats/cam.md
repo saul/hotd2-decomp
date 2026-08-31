@@ -131,6 +131,38 @@ The five exceptions are all in `trnevtbl.bin` block 7 and all name slot
 **418** — exactly one past the end of the allocated range 0–417. A data defect,
 recorded in [`../re/anomalies.md`](../re/anomalies.md).
 
+### `start == -1` means resume — in **both** branches
+
+**[proved]** `EvtActionCamPlay40` (`FUN_00403360`) branches in this order:
+
+```c
+if (operands[0] == operands[1])  CamEvalStaticPose();   /* a held pose */
+else if (flags & 2)              FUN_00403490();        /* stash, do not play */
+else                             CamStartPathPlayback();
+```
+
+Both playing branches special-case `-1`, and they do **not** agree on the
+arithmetic:
+
+| branch | on `start == -1` |
+|---|---|
+| `CamStartPathPlayback` (`0x00403510`) | `frame = g_cam_path_frame` |
+| `FUN_00403490`, the stash (`0x00403490`) | `g_stashed_path_frame = g_cam_path_frame + 1` |
+
+The `+ 1` is because of where each one increments. `CamAdvancePathFrame`
+evaluates and *then* increments, so resuming at the current frame re-draws it
+once; the rail hooks (`CameraPlayStashedPath`, `CameraStepRailTick`) increment
+and *then* evaluate, so the stash has to name the frame before the one it
+wants.
+
+**[measured]** Four `cam_play`s in the whole game name `-1`, and all four are
+deferred: stage 1 blocks 3 and 8, in the Arcade and Original bundles alike.
+None of the 1110 non-deferred plays does, so `CamStartPathPlayback`'s own
+resume branch is unreachable from the shipped scripts. No deferred play has
+`start == end` either, so the order of the first two tests is never observable
+in the data — which is exactly why it has to be transcribed rather than
+inferred.
+
 `sel=0x21` (`FUN_00403710`, 444 uses) hands control back from a path;
 `sel=0x60` (`FUN_004038A0`, 13 uses) sets a six-component pose directly.
 Only **nine** selectors exist in total, not the 100+ estimated earlier.

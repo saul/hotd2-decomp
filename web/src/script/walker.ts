@@ -1130,18 +1130,46 @@ export class Walker {
       const start = op.start ?? 0;
       const end = op.end ?? 0;
 
-      // `flags & 2` does NOT play. EvtActionCamPlay40 stashes the range in
-      // g_stashed_path_frame / _end_frame and returns; a later
-      // `queue_event 0x21, 6|7` enters the scene state whose camera hook
-      // steps it. All 208 deferred plays in the game are followed within
-      // three queued actions by exactly that, so the idiom is reliable.
-      if (((op.flags ?? 0) & 2) !== 0) {
-        this.stashedCam = { slot, start, end };
-        return "stashed for a later scene state 6/7";
+      // `EvtActionCamPlay40` (`FUN_00403360`) branches in this order, and the
+      // order is transcribed rather than rearranged:
+      //
+      //     if (start == end)  CamEvalStaticPose();      // a held pose
+      //     else if (flags & 2) FUN_00403490();          // stash, do not play
+      //     else                CamStartPathPlayback();
+      //
+      // The static test comes first, so a `flags & 2` play whose start equals
+      // its end would hold rather than stash. No shipped script has one — 0 of
+      // the 392 deferred plays — but the port used to test the flag first, and
+      // a transcription that only happens to agree with the data is not one.
+      if (start !== end && ((op.flags ?? 0) & 2) !== 0) {
+        // `FUN_00403490`, the stash. It is not a plain copy of the operands:
+        //
+        //     g_stashed_path_frame = operands[0];
+        //     if (g_stashed_path_frame == -1)
+        //         g_stashed_path_frame = g_cam_path_frame + 1;
+        //
+        // so **`start == -1` means resume here too**, from the frame the
+        // camera is on plus one. The port stashed the literal -1, and the
+        // `finish_sequence 6|7` that follows then set the camera to frame -1
+        // — off the front of the curve — and replayed the whole path from
+        // there. Four plays in the game say -1 and all four are deferred:
+        // stage 1 blocks 3 and 8, in both the Arcade and Original bundles.
+        // Block 8 step 4 op 23 asks to resume at frame 682 of a 685-frame
+        // shot and was replaying 686 frames instead.
+        //
+        // The engine's rail hook increments before it evaluates, so its first
+        // drawn frame is this one plus another; the port draws this one. One
+        // frame, on a tail that is usually three. [diverges]
+        const at = op.resume ? (this.cam ? this.cam.frame + 1 : 0) : start;
+        this.stashedCam = { slot, start: at, end };
+        return `stashed ${at}..${end} for a later scene state 6/7`;
       }
 
-      // start == -1 resumes from the frame the previous command left at,
-      // rather than seeking; start == end holds a static pose.
+      // `CamStartPathPlayback`'s own `start == -1`: resume from the current
+      // frame, with no `+ 1` — `CamAdvancePathFrame` increments after it
+      // evaluates, where the rail hook increments before. No shipped script
+      // takes this path (0 of the 1110 non-deferred plays name -1), but it is
+      // the other half of the opcode.
       const from = op.resume && this.cam ? this.cam.frame : start;
       this.cam = {
         slot,

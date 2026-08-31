@@ -58,7 +58,7 @@ public class RecoverEventHandlers extends GhidraScript {
         "wait_pending", "wait_cond_a", "wait_frames", "wait_cond_b",
         "wait_cond_c", "wait_flag", "wait_cond_d", "wait_ready",
         "set_flag", "variant_call_a", "variant_call_b", "variant_spawn",
-        "unused_4c", "checkpoint", "halt", "end_block",
+        "unused_4c", "checkpoint", "halt", "advance_step",
         "call_1d5d0", "call_1d610", "voice_a", "voice_b",
         "call_1d6d0", "call_1d710", "call_1d750", "call_1d790",
         "call_1d970", "call_1d9d0", "call_1da70", "skip1_b",

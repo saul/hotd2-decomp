@@ -120,7 +120,7 @@ export class ScriptTree {
       s.className = "stp";
       const lbl = document.createElement("span");
       lbl.className = "lbl";
-      // EvtAdvanceBlockOrRoute sets the step index to 1 on every block change,
+      // EvtAdvanceStepOrRoute sets the step index to 1 on every block change,
       // so step 0 is only reached through the checkpoint path.
       lbl.textContent = step.index === 0
         ? "step 0  (checkpoint state — a block change enters at step 1)"

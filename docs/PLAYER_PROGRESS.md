@@ -478,7 +478,7 @@ each one.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Most of a stage never ran; regions and camera barely changed | **A block's steps are sequential.** `end_block` advances to the next *step*; only an exhausted step table reaches the route table. Treating every `end_block` as a block exit ran one step per block | read `EvtAdvanceBlockOrRoute` |
+| Most of a stage never ran; regions and camera barely changed | **A block's steps are sequential.** `advance_step` advances to the next *step*; only an exhausted step table reaches the route table. Treating every `advance_step` as a block exit ran one step per block | read `EvtAdvanceStepOrRoute` |
 | Scene ended early | Route **kind 2 is not "end"** — it falls through to `block + 1`. The scene ends when that block is a hole | same |
 | Branch buttons picked the wrong route | A branch takes `next[branch_choice]`, not "a target"; `branch_choice` resets to 0 on every block change and every writer of it is gameplay code | same |
 | Clicking a branch button did nothing | The countdown re-announced the branch every frame, so the UI rebuilt the buttons 60×/s and the click never landed between `pointerdown` and `pointerup` | notify on *change*, not on tick |
@@ -486,7 +486,7 @@ each one.
 | Whole view tilted down | `eye.y = path.y - 15` was applied **before** the look-at, but the game derives pitch and yaw from the *unshifted* `eye - target` and only then overwrites `eye.y` | translate after orienting |
 | Camera still too low | The `-15` should not be applied at all — see below | reverted, with the measurement |
 | Fog far too thick | `SetFogRange` **doubles** near and far before the device sees them, and three.js's fog factor is `smoothstep` where D3D's is a straight ramp | double the range, patch the fragment chunk |
-| Op 0 of every step never ran — a region entered a step late, a `cam_play` skipped, the camera's position jumping 41 units in stage 2's block 17 doorway | `end_block` (0x4F) moves the program counter itself, and `executeOne` then incremented it again. `EvtAdvanceBlockOrRoute` assigns `DAT_009C7108` the address of the new step's *first* instruction; this VM has no shared post-increment | increment only when the handler left the pc alone; `test/seek.test.ts` asserts every step entered runs its op 0 |
+| Op 0 of every step never ran — a region entered a step late, a `cam_play` skipped, the camera's position jumping 41 units in stage 2's block 17 doorway | `advance_step` (0x4F) moves the program counter itself, and `executeOne` then incremented it again. `EvtAdvanceStepOrRoute` assigns `DAT_009C7108` the address of the new step's *first* instruction; this VM has no shared post-increment | increment only when the handler left the pc alone; `test/seek.test.ts` asserts every step entered runs its op 0 |
 | The camera rewound to before the start of its path once, then carried on (stage 1 block 8 step 4) | `start == -1` means **resume** in the deferred branch too: `FUN_00403490` stashes `g_cam_path_frame + 1`, not the literal -1. The port stashed -1, so `finish_sequence 7` set the clock to frame -1 and replayed all 686 frames | transcribe `FUN_00403490`; `test/seek.test.ts` asserts no play starts before frame 0 |
 | The camera's aim jerked 20 degrees the frame the last enemy died | `SelectCameraLookAtTarget`'s "nothing registered" case is a **fallback to the path's own target**, not an exit, and `CameraTrackEnemiesTick` eases onto it unconditionally — `g_camera_is_tracking` picks only the *rate* | `game/camera/track.ts`, with `g_camera_block_target` as real state in `G` |
 
@@ -1156,7 +1156,7 @@ missed. Meanings and confidence marks live in
 | `4C` | `unused_4c` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `4D` | `checkpoint` | flow | *tracked* | records the checkpoint block |
 | `4E` | `halt` | flow | **done** | **parks playback** — it does not end the scene |
-| `4F` | `end_block` | flow | **done** | **next step, or the route table** when the step list is exhausted |
+| `4F` | `advance_step` | flow | **done** | **next step, or the route table** when the step list is exhausted. Retires nothing: actors cross both step and block boundaries by design |
 | `50` | `asset_load_slot` | assets | **done** | **streams a model in / out** of the drawn set |
 | `51` | `asset_unload_slot` | assets | **done** | **streams a model in / out** of the drawn set |
 | `52` | `asset_load_polfile` | assets | shown | whole-file asset traffic; the bundle already holds every model |

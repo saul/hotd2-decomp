@@ -145,9 +145,9 @@ so is the event feed.
 - **Roll is gated.** `CamEvalPath7` evaluates a `cp_` path's 7th channel only
   while `DAT_009A21B0` is set, which evt opcode `0x35` writes. The curve exists
   in every path; the client honours the gate rather than always applying it.
-- **Block, step and route flow**, transcribed from `EvtAdvanceBlockOrRoute`.
+- **Block, step and route flow**, transcribed from `EvtAdvanceStepOrRoute`.
   Three things there are easy to get wrong and were all wrong here first:
-  a block's steps run **in sequence** (`end_block` advances to the next step,
+  a block's steps run **in sequence** (`advance_step` advances to the next step,
   and only an exhausted step table reaches the route table); route kind 2 is
   **not** "the scene ends" but a fall-through to `block + 1`; and a branch
   takes `next[branch_choice]`, where `branch_choice` resets to 0 on every
@@ -247,7 +247,7 @@ so is the event feed.
   reasoning and a switch to re-enable it live in `src/campath.ts`.
   (`0x36`, which selects the fixed-height branch, occurs **zero** times in any
   shipped script, so that half is unreachable from the data regardless.)
-- **Step 0 is inference.** `EvtAdvanceBlockOrRoute` sets the step index to 1
+- **Step 0 is inference.** `EvtAdvanceStepOrRoute` sets the step index to 1
   on every block change and `FUN_0045EBC0` picks the scene's first step by game
   mode — 1 for Arcade, 5 for Original Mode on scene 0, 0 only on the continue
   and checkpoint paths. Those are read from the binary. That step 0 is

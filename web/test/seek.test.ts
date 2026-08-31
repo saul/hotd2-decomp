@@ -140,8 +140,8 @@ for (const stage of STAGES) {
 /**
  * Every step the walker enters runs its op 0.
  *
- * `end_block` (0x4F) moves the program counter itself, exactly as
- * `EvtAdvanceBlockOrRoute` (`FUN_0045F000`) does — it assigns
+ * `advance_step` (0x4F) moves the program counter itself, exactly as
+ * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) does — it assigns
  * `DAT_009C7108 = FUN_0045EB90(scene, block, step)`, the address of the new
  * step's *first* instruction. The port used to add an unconditional
  * `opIndex++` after every handler, so that first instruction was stepped over.

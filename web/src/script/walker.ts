@@ -1009,16 +1009,16 @@ export class Walker {
     if (this.step >= blk.steps.length) return this.advanceStepOrRoute(quiet);
     const step = blk.steps[this.step];
     // Falling off the end of a step's instructions is the same thing
-    // `end_block` does explicitly: move to the next step.
+    // `advance_step` does explicitly: move to the next step.
     if (this.opIndex >= step.ops.length) return this.advanceStepOrRoute(quiet);
 
     const op = step.ops[this.opIndex];
-    // Where the program counter was before the handler ran. `end_block`
+    // Where the program counter was before the handler ran. `advance_step`
     // (0x4F) moves it itself -- and so does anything else that calls
     // `advanceStepOrRoute` or `goToBlock` -- so the increment below has to be
     // conditional or the new step's **first instruction is skipped**.
     //
-    // `EvtAdvanceBlockOrRoute` (`FUN_0045F000`) is unambiguous about this:
+    // `EvtAdvanceStepOrRoute` (`FUN_0045F000`) is unambiguous about this:
     // it ends by assigning the instruction pointer outright,
     //
     //     DAT_009C7108 = FUN_0045EB90(scene, block, step);
@@ -1029,7 +1029,7 @@ export class Walker {
     // landing on an instruction means executing it.
     //
     // The port had an unconditional `opIndex++` here, so op 0 of every step
-    // entered through an `end_block` never ran. 460 of the 479 steps in
+    // entered through an `advance_step` never ran. 460 of the 479 steps in
     // stages 1-6 open with a real instruction, and what was being dropped was
     // 118 checkpoints, 63 asset loads, 21 `queue_event`s, 12 `region_load`s
     // and 8 `region_enter`s. Two visible consequences, both reported:
@@ -1486,7 +1486,7 @@ export class Walker {
   // -- routing -----------------------------------------------------------
 
   /**
-   * `end_block` (0x4F), transcribed from `EvtAdvanceBlockOrRoute` (0x0045F000):
+   * `advance_step` (0x4F), transcribed from `EvtAdvanceStepOrRoute` (0x0045F000):
    *
    * ```c
    * step += 1;
@@ -1505,9 +1505,9 @@ export class Walker {
    * Three things in there are easy to get wrong, and this walker had all
    * three wrong before it was read properly:
    *
-   * 1. **A block's steps run in sequence.** `end_block` advances to the next
+   * 1. **A block's steps run in sequence.** `advance_step` advances to the next
    *    *step*, not out of the block. Only when the step table is exhausted
-   *    does the route table get consulted. Treating every `end_block` as a
+   *    does the route table get consulted. Treating every `advance_step` as a
    *    block exit skips most of a stage -- including the `region_enter` and
    *    `cam_play` instructions that live in the later steps.
    * 2. **`kind == 2` is not "the scene ends".** It falls through to
@@ -1572,7 +1572,7 @@ export class Walker {
       this.host.onBranch(null);
       return false;
     }
-    // `EvtAdvanceBlockOrRoute` advances `g_evt_block_counter` on every block
+    // `EvtAdvanceStepOrRoute` advances `g_evt_block_counter` on every block
     // transition. Class 0x41's props measure their lifetime in these rather
     // than in frames, so it has to be a real counter and not a frame clock.
     G.g_evt_block_counter++;
@@ -1593,7 +1593,7 @@ export class Walker {
     this.step = (blk.steps?.length ?? 0) > step ? step : 0;
     this.opIndex = 0;
     this.branch = null;
-    // Reset last, matching the tail of EvtAdvanceBlockOrRoute: a choice
+    // Reset last, matching the tail of EvtAdvanceStepOrRoute: a choice
     // applies to exactly one transition and never carries forward.
     this.branchChoice = 0;
     this.host.onBranch(null);

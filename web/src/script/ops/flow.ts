@@ -28,12 +28,12 @@ export const OPS: Record<number, OpImpl> = {
     // -- the scene state machine -------------------------------------------
     // `goto_scene_state` is the end-of-room instruction. It trails almost
     // every step -- 548 sites, and **every one passes minor 3** -- sitting
-    // between the wait that holds for the room and `end_block`:
+    // between the wait that holds for the room and `advance_step`:
     //
     //     queue_event finish_sequence 4|6|7   ; a `cam/` path camera, state 2
     //     wait_enemies_alive 0                ; the room
     //     goto_scene_state 3                  ; hand the camera back, retire
-    //     end_block
+    //     advance_step
     //
     // `EvtOpGotoSceneState31` (`FUN_0045F870`) enters scene state (1, minor),
     // parks the action ring's handler on a bare RET -- which is what tears
@@ -111,7 +111,7 @@ export const OPS: Record<number, OpImpl> = {
         return "halt — the script parks here";
       },
     },
-    0x4f: {                                     // end_block
+    0x4f: {                                     // advance_step
       status: "done",
       run: (w, _op, quiet) => {
         w.advanceStepOrRoute(quiet);

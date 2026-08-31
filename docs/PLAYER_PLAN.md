@@ -209,9 +209,9 @@ swaps bundles.
 ## The event VM
 
 Faithful to `EvtInterpreterLoop`, `EvtRunQueuedActions` and
-`EvtAdvanceBlockOrRoute`.
+`EvtAdvanceStepOrRoute`.
 
-Blocks are entered at **step 1** — `EvtAdvanceBlockOrRoute` sets the step index
+Blocks are entered at **step 1** — `EvtAdvanceStepOrRoute` sets the step index
 to 1 on every block change, so step 0 is reached only through the checkpoint
 path. It is presented as "checkpoint state" rather than run inline. *(The
 block-change behaviour is confirmed from the binary; the checkpoint reading is

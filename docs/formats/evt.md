@@ -227,7 +227,7 @@ inference; **[open]** = undetermined.
 | `48` | `set_script_flag` | **[proved]** the writer half of `45` |
 | `49`–`4B` | `variant_*` | pick an operand list by a global |
 | `4D` | `checkpoint` | **[proved]** appends the current room id to the per-stage route history consumed by the stage-clear route map; reseeds the CRT RNG with **0** during gameplay (so runs are deterministic); restores the default per-class enemy approach rings |
-| `4E` / `4F` | `halt` / `end_block` | |
+| `4E` / `4F` | `halt` / `advance_step` | **[proved]** `4F` is `EvtAdvanceStepOrRoute` (`0x0045F000`): `step += 1`, and only when that step does not exist does it read the route record and reset `step` to 1. It touches **no actors** — a block's steps are one continuous room and this fires between them; 71 step boundaries and 19 block boundaries in the shipped scripts are crossed by live enemy-class spawns with no intervening enemy gate. The only wholesale sweep is the scene change, which rebases the object arena (`FUN_004A7310`). ⚠️ formerly `end_block`, which reads as a block terminator — it is not one |
 | `50`–`57` | `asset_*` | streaming vocabulary; see [`pipeline.md`](pipeline.md) |
 | `58` | `asset_wait_all_jobs` | **[proved]** run every queued asset job to completion |
 | `59` | `asset_wait_tex_pol_jobs` | **[proved]** drain only job types < 8 (`tex\` and `pol\`); motion jobs are compacted and left pending |
@@ -550,7 +550,7 @@ take. Note the order: **frame first, then the global camera path slot**. The
 scatter is what makes it look otherwise; reading only the store, the pairs
 appear to be `(slot, frame)`.
 
-`branch_choice` is `DAT_009C88A4`, the same global `EvtAdvanceBlockOrRoute`
+`branch_choice` is `DAT_009C88A4`, the same global `EvtAdvanceStepOrRoute`
 indexes `next[]` with — so the preview and the route it previews are keyed
 identically, which is the check that this reading is right.
 

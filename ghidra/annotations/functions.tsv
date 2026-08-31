@@ -122,7 +122,7 @@
 00436850	DrawTextCentred
 0045ebb0	EvtResolvePointer	identity function; descriptors are already relocated pointers
 0045ecc0	EvtInterpreterLoop
-0045f000	EvtAdvanceBlockOrRoute
+0045f000	EvtAdvanceStepOrRoute
 0045f130	EvtOpSetCollisionSetFull10
 0045f160	EvtOpSetCollisionSetRayOnly11
 0045f190	EvtOpSetSceneLightingOverride13

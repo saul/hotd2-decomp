@@ -7027,3 +7027,84 @@ enemy dies — it opens once the camera has swung back onto its rail. The port
 has `g_enemy_slots`, `g_camera_settled` and `CameraTrackEnemiesTick` already,
 so this is portable, and it is the most substantial piece of scripted-sequence
 behaviour still missing. **[open]** — not attempted here.
+
+## `end_block` was never a block terminator — renamed `advance_step`
+
+Opcode `0x4F` was called `end_block`, and its handler `EvtAdvanceBlockOrRoute`.
+Both read as "this is where a block ends", and the question that came out of
+that reading was whether the port should retire live actors there — they
+"shouldn't be coming with us to the next block". Reading `FUN_0045F000` says
+neither half of that is right:
+
+    step += 1;
+    if (EvtGetStep(scene, block, step) == -1) {   /* steps ran out */
+        ... follow the 8-byte route record ...
+        step = 1;
+    }
+    pc = EvtGetStep(scene, block, step);
+    branch_choice = 0;
+
+It advances the **step**. Only an exhausted step list reaches the route table,
+and blocks average 3.99 steps (479 steps over 120 blocks, one block of 18), so
+the large majority of `0x4F` executions do not change block at all. Renamed the
+opcode to `advance_step` and the handler to `EvtAdvanceStepOrRoute`, which is
+what the port's own `advanceStepOrRoute` had been called all along — the exe
+symbol and the opcode were the two places still carrying the old reading.
+
+### Nothing retires actors at a block change, and nothing should
+
+`EvtAdvanceStepOrRoute` touches no object state whatsoever. Nor does anything
+else on the path: `EvtOpRegionEnter29` calls `RegionUnloadDelta`, which frees
+*assets* for regions leaving the set; `FUN_0045EBC0` (block load) resets script
+state — step cursor, pc, `g_queued_events_pending`, the skip flags — and
+`FUN_00408D60`, which only restores the default approach steps `{2,3,4}`.
+
+The scripts confirm this is deliberate. Counting enemy-class descriptors placed
+with no intervening `wait_enemies_alive` / `wait_enemies_present` /
+`wait_scripted_actors`, live enemies cross **71 step boundaries and 19 block
+boundaries** across the six stages — a lower bound, since any gate is treated
+here as clearing and `wait_enemies_alive 3` does not. Stage 2 is the clearest
+case: block 0 step 3 ends `0B spawn_obj 00977DCC 00977E90` then `4F`, and block
+1 step 0 opens with a region load and lighting and no gate at all. A sweep at
+`0x4F` would delete stage 2's opening encounter.
+
+The only wholesale sweep in the game is the **scene** change: `FUN_0040E860`
+calls `FUN_004A7310`, which rebases the 16 MB bump arena every object is
+allocated from by `FUN_004A6FA0`. Objects are not despawned one at a time; the
+pool is thrown away. The port already matches that — `ResetGameGlobals` clears
+`G.g_object_list` — so nothing needed changing.
+
+`walker.ts` had already written down the principle in `retireGatedEnemies`:
+enemies are dead on the far side of a gate *by construction*, because the
+script cannot pass the gate until the player has killed them. The 71 ungated
+crossings are the cases where the script deliberately does not gate.
+
+### Left open: `g_evt_block_counter` counts steps, not blocks
+
+**[proved]** and **not fixed here.** `DAT_009A2BB0` is named
+`g_evt_block_counter`, and `globals.tsv` calls it "a monotonic count of block
+transitions". It is neither monotonic nor a block count: it is the **step
+index** — `EvtAdvanceStepOrRoute` increments it at the top and assigns it `1`
+in the route branch, and `FUN_0045EBC0` seeds it with 0, 1 or 5 depending on
+game mode. Every use of it as a step index in the same function confirms it.
+
+That matters because `PropExpireByBlockLifetime` (`FUN_00466640`) ages a prop
+by one tick every time this value *changes*:
+
+    if (g_evt_block_counter != obj->+0x196) {
+        if (obj->+0x11C < ++obj->+0x197) { ActorDespawn(obj); return; }
+        obj->+0x196 = g_evt_block_counter;
+    }
+
+so `obj+0x11C` is a lifetime in **steps**, not blocks. The port increments
+`G.g_evt_block_counter` only in `Walker.goToBlock`, once per block transition —
+so with blocks averaging 3.99 steps, a prop carrying one of the common
+lifetimes (0–5) lives roughly four times too long. The transcription of
+`PropExpireByBlockLifetime` itself is faithful; the bug is entirely in what the
+counter counts.
+
+Left for its own change because it is a behavioural fix across all six stages
+plus a second global rename — `g_evt_block_counter` → `g_evt_step_index`,
+`PropExpireByBlockLifetime` → `PropExpireByStepLifetime`, and the
+`spawnBlock` / `blocksElapsed` fields with them — and folding that into a
+rename commit would hide it.

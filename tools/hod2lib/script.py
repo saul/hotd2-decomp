@@ -703,7 +703,7 @@ class Program:
         everything else -- normal Arcade play          1
         ===========================================  ====
 
-        This is the same rule ``EvtAdvanceBlockOrRoute`` follows on every
+        This is the same rule ``EvtAdvanceStepOrRoute`` follows on every
         later block change, where it sets the step index to 1 outright. Step 0
         is reached only through the checkpoint path, which is why it is
         presented as checkpoint state rather than run inline.

@@ -240,7 +240,12 @@ OPCODES: dict[int, Op] = {
     # restores the default approach rings.
     0x4D: ("checkpoint", "fix", 1),         # FUN_0045EEC0
     0x4E: ("halt", "halt", 0),              # FUN_0045EFF0
-    0x4F: ("end_block", "next", 0),         # FUN_0045F000
+    # 0x4F advances the *step*, and only reaches the route table when the
+    # step list is exhausted -- see EvtAdvanceStepOrRoute. It was called
+    # `end_block` for a long time, which reads as a block terminator and is
+    # wrong: a block's steps are one continuous room and 0x4F fires between
+    # them. Renamed to say what it does.
+    0x4F: ("advance_step", "next", 0),      # EvtAdvanceStepOrRoute
     # 0x50-0x57 are the asset streaming vocabulary. Each pushes a job onto
     # the 64-entry ring at DAT_007DA220 with a fixed job kind; see
     # ASSET_JOB_KIND and docs/formats/pipeline.md.
@@ -482,7 +487,7 @@ class EvtFile:
     # -- bytecode ----------------------------------------------------------
 
     def disasm(self, off: int, limit: int = 20000) -> Iterator[Instr]:
-        """Decode one bytecode stream, stopping at halt/end_block."""
+        """Decode one bytecode stream, stopping at halt/advance_step."""
         start = off
         for _ in range(limit):
             op = self.w(off)

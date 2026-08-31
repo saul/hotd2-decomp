@@ -121,17 +121,67 @@ export const G = {
   g_hit_result: 0,
 
   // -- the camera --------------------------------------------------------
-  /** `g_camera_is_tracking` — 0x0059C988. */
+  /**
+   * `g_camera_is_tracking` — 0x0059C988. Zeroed by `SelectCameraLookAtTarget`
+   * when no enemy is registered. It picks the *turn rate*, not whether the
+   * camera turns: the ease runs either way.
+   */
   g_camera_is_tracking: 0,
-  /** `g_camera_lookat_target` — 0x009C6FA8. Where the camera is aimed now. */
+  /**
+   * `g_camera_lookat_target` — 0x009C6FA8. The point the camera **wants** to
+   * look at this frame: a single attacking enemy, the midpoint of two, or —
+   * with nothing registered — the path's own target.
+   *
+   * This is the *desired* point, not where the camera is aimed. Where it is
+   * aimed is {@link Globals.g_camera_block_target}, which eases onto this one.
+   */
   g_camera_lookat_target: vec3(),
+  /**
+   * `g_camera_block_target` — 0x009A60D8, the camera block's `+0xD8`: where
+   * the camera is actually looking, right now.
+   *
+   * This is the state that makes the camera smooth. `CameraTrackEnemiesTick`
+   * eases it onto `g_camera_lookat_target` every frame and never assigns it —
+   * so when the last enemy dies and the desired point falls back to the
+   * path's own target, the aim *swings* back onto the rail over about thirty
+   * frames instead of cutting to it.
+   */
+  g_camera_block_target: vec3(),
+  /**
+   * `g_cam_path_target` — 0x009C70D8. The look-at `CamEvalPath7` evaluates
+   * from the active path's target channels, and the fallback
+   * `SelectCameraLookAtTarget` uses when nothing is registered.
+   *
+   * [diverges] The engine writes this only from the deferred-rail hooks
+   * (`CameraStepRailTick`, `CameraPlayStashedPath`, `CameraArmStashedPath`),
+   * so after an ordinary `cam_play` action retires it can hold the target of
+   * whichever shot last ran through one of those. The port keeps it current
+   * with the playing path every frame. In the case that motivated this —
+   * stage 2 block 17 step 5, where `finish_sequence 6` had just run the
+   * 121..150 range through `CameraPlayStashedPath` — the two agree exactly.
+   */
+  g_cam_path_target: vec3(),
+  /**
+   * `g_camera_turn_rate` — 0x009C6F36, and `g_camera_turn_curve` — 0x009C6F38.
+   *
+   * The rate `TurnLookAtToward` divides by, refreshed at the *end* of every
+   * `CameraTrackEnemiesTick` and therefore one frame old when the ease reads
+   * it. That lag is the engine's, not an accident of the port.
+   */
+  g_camera_turn_rate: 0,
+  g_camera_turn_curve: 1,
+  /**
+   * `g_camera_settled` — 0x009C6F2F. Raised once the eased look-at has caught
+   * up with the desired one (|dot| > 0.99999). `EvtOpWaitTargetsClear47`
+   * gates on it, which is why the ease has to exist for op 0x47 to mean
+   * anything.
+   */
+  g_camera_settled: 0,
   /**
    * `g_enemy_slots` — 0x009A5EC0. The actors the camera considers, nearest
    * first; slots 0 and 1 are the permit holders. Holds `at`, not pointers.
    */
   g_enemy_slots: [] as number[],
-  /** True once the look-at has a value worth easing from. */
-  g_camera_lookat_valid: false,
 
   // -- breakable props, class 0x41 ---------------------------------------
   /**
@@ -269,7 +319,11 @@ export function ResetGameGlobals(): void {
   G.g_nPlayerFired = [0, 0];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
-  G.g_camera_lookat_valid = false;
+  G.g_camera_block_target = vec3();
+  G.g_cam_path_target = vec3();
+  G.g_camera_turn_rate = 0;
+  G.g_camera_turn_curve = 1;
+  G.g_camera_settled = 0;
   G.g_enemy_slots = [];
   G.g_thrown_weapons = [];
   G.g_thrown_next_id = 1;

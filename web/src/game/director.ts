@@ -9,9 +9,8 @@
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import { makeActor, type Actor } from "./actor";
-import { SelectCameraLookAtTarget } from "./camera/select_target";
 import { UpdateCameraEnemySlots } from "./camera/slots";
-import { TurnLookAtToward } from "./camera/turn";
+import { CameraTrackEnemiesTick } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
@@ -114,13 +113,13 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
 }
 
 export interface FrameResult {
-  /** Whether anything is registered — false means "use the path's target". */
-  tracking: boolean;
-  /** Where the camera should look now, eased. Only valid when tracking. */
+  /**
+   * Where the camera should look now — `g_camera_block_target`, after this
+   * frame's ease. Always valid: with nothing registered it eases onto the
+   * path's own target rather than handing control back.
+   */
   lookAt: Vec3;
 }
-
-const _desired = vec3();
 
 /**
  * Advance the whole game by `dt` seconds of game time.
@@ -166,13 +165,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   BreakablePropPoolUpdate(rng, events);
 
   UpdateCameraEnemySlots(eye);
-  const tracking = SelectCameraLookAtTarget(_desired);
-  if (!tracking) {
-    G.g_camera_lookat_valid = false;
-    return { tracking: false, lookAt: G.g_camera_lookat_target };
-  }
-  const current = G.g_camera_lookat_valid ? G.g_camera_lookat_target : _desired;
-  TurnLookAtToward(eye, current, _desired, G.g_camera_lookat_target);
-  G.g_camera_lookat_valid = true;
-  return { tracking: true, lookAt: G.g_camera_lookat_target };
+  // The camera hook, in the engine's own order: the queued `cam_play` action
+  // has already seated the block on the rail for this frame (the host calls
+  // `CamAdvancePathFrame`), and this eases the aim off it and back.
+  CameraTrackEnemiesTick();
+  return { lookAt: G.g_camera_block_target };
 }

@@ -185,7 +185,8 @@ game/           the port. no three.js, no DOM.
   class41/        group.ts prop.ts kinded.ts items.ts — the containers
   class44/        container.ts — the one that is knocked loose and falls
   combat/         permits.ts rank.ts player.ts
-  camera/         select_target.ts turn.ts
+  camera/         path.ts track.ts select_target.ts turn.ts slots.ts
+                  — the camera block: `cam_play` seats it, the hook eases it
   tables.ts       the exported data, typed
 render/         three.js. observes game state, owns nothing.
   breakables.ts   one node per live class-0x41 prop, cloned from a slot

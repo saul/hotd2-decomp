@@ -135,6 +135,70 @@ recorded in [`../re/anomalies.md`](../re/anomalies.md).
 `sel=0x60` (`FUN_004038A0`, 13 uses) sets a six-component pose directly.
 Only **nine** selectors exist in total, not the 100+ estimated earlier.
 
+## The camera block, and why the aim is smooth
+
+**[proved]** A `cp_` path is not fed to the renderer directly. It is written
+into a **camera block** — `g_camera_blocks` (`0x009A6040`, stride `0x1A4`),
+whose eye is at `+0x80` (`g_camera_block_eye`), pitch/yaw/roll at `+0x8C` and
+look-at at `+0x98` (`g_camera_block_target`) — and two things then act on it
+each frame, in this order:
+
+1. **The queued action.** `CamAdvancePathFrame` (`0x004035E0`) is installed by
+   `CamStartPathPlayback` and runs until the frame counter passes the command's
+   end frame. Every frame it writes the block's eye **and** look-at straight
+   from `CamEvalPath7`, with no easing. That is what keeps the script's cuts
+   sharp — and cuts are the norm: **148 of the 631 consecutive `cam_play` pairs
+   in stages 1-6 turn the view by more than 3 degrees at the seam, some by
+   173.** When the action retires the block is simply left where it is.
+
+2. **The camera hook** at `g_camera_update_hook` (`0x009C7080`), run by
+   `CameraUpdateTick`. During a fight that is `CameraTrackEnemiesTick`
+   (`0x00402890`), which does:
+
+   ```c
+   CameraEaseBlockEyeToPathPose();          /* the eye  */
+   SelectCameraLookAtTarget();              /* what it WANTS to look at */
+   TurnLookAtToward(&block_eye, &g_camera_lookat_target,
+                    &g_camera_block_target, &out, 1, g_camera_turn_rate);
+   g_camera_block_target = out;
+   /* then refresh g_camera_turn_rate for the NEXT frame */
+   ```
+
+`SelectCameraLookAtTarget` (`0x00403050`) with **nothing registered** does not
+hand control back — it writes `g_camera_lookat_target = g_cam_path_target`
+(`0x009C70D8`, the path's own aim) and clears `g_camera_is_tracking`. The ease
+in step 3 is unconditional. So `g_camera_is_tracking` selects only the *rate*:
+
+| tracking | rate | source |
+|---|---|---|
+| yes | `curve[angle >> 7]`, 64 near zero ramping to 16 past ~23 degrees | `ComputeLookAtAngleError`, `PTR_DAT_00576C04[g_camera_turn_curve]` |
+| no  | flat **12** | `*PTR_DAT_00576C0C` |
+
+`TurnLookAtToward` (`0x00403C00`) rotates the current aim toward the desired
+one by `num / (num + rate)` of the angle between them and re-emits it 100 units
+from the eye; every call site passes `num = 1`. Rate 0 would be a snap, and the
+one branch that sets it — `if (g_enemies_alive == 0 && DAT_009C6F2E == 2)` — is
+**dead code**: `DAT_009C6F2E` is read twice in the image and written nowhere.
+
+The rate is written at the *end* of the tick and read at the top of the next,
+so it is always one frame old. That lag is the engine's.
+
+`g_camera_settled` (`0x009C6F2F`) is raised once the eased aim has caught up
+with the desired one. The test is `|VecCosSquaredSigned| > 0.99999` and that
+function returns the **square** of the cosine, never rooted — so the threshold
+is about 0.18 degrees. `EvtOpWaitTargetsClear47` gates on this flag, which is
+why evt op `0x47` cannot mean anything without the ease.
+
+### The eye has a second pose block — [open]
+
+`CameraEaseBlockEyeToPathPose` (`0x00402EF0`) moves the block's eye a
+**sixteenth of the way per frame** toward `0x009C70C0` while `g_camera_ease_eye`
+(`0x009C6F33`) is set, and snaps to it otherwise. `0x009C70C0`/`0x009C70D8` is
+a *second* eye/look-at pair, and only the deferred-rail hooks
+(`CameraStepRailTick`, `CameraPlayStashedPath`, `CameraArmStashedPath`) ever
+write it. What keeps it current during an ordinary `cam_play` is not settled,
+and until it is the player takes the block eye straight from the curve.
+
 ## Timebase
 
 Times are **frame numbers at 60 Hz**. 99.68 % of the 44,750 real keyframe times

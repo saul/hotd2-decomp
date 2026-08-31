@@ -16,6 +16,8 @@ import type {
 import { Rng } from "../src/core/rng";
 import { Events } from "../src/core/events";
 import { ActorSpawn, GameUpdate } from "../src/game/director";
+import { CamAdvancePathFrame, CamSetPathTarget }
+  from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { NULL_HOST } from "../src/game/host";
@@ -582,6 +584,83 @@ console.log("ResolveHit:");
         && again.result === 0);
 }
 
+// -- 4b. the camera never cuts on its own -----------------------------------
+
+/**
+ * The aim eases onto whatever `SelectCameraLookAtTarget` picks, and picking
+ * "the path's own target" is not a special case.
+ *
+ * This is the assertion the stage-2 block-17 report needed. The camera sits at
+ * the end of a shot with two enemies alive, aimed off the rail at them; you
+ * kill the last one; the port used to hand the raw path target straight to the
+ * renderer on that frame, which turned a sixteen-degree correction into one
+ * frame of camera. `CameraTrackEnemiesTick` has no such branch — with nothing
+ * registered it eases at the flat rate 12, about a thirteenth of the remaining
+ * angle a frame.
+ */
+console.log("the camera eases back onto the rail, it does not cut:");
+{
+  const rng = new Rng(5);
+  const events = scene(1, rng);
+  const z = G.g_object_list[0];
+  // Off to one side and low, the way the pair in stage 2 block 17 sit.
+  z.pos = vec3(-20, 0, 60);
+  z.lookAt = vec3(-20, 12, 60);
+
+  // The rail: eye at the origin looking straight down +Z, which is the shot's
+  // own aim once the `cam_play` action has retired.
+  const rail = vec3(0, 0, 100);
+  CamAdvancePathFrame(EYE, rail);
+  CamSetPathTarget(rail);
+
+  const aimAngle = (): number => {
+    const t = G.g_camera_block_target;
+    const a = Math.hypot(t.x - EYE.x, t.y - EYE.y, t.z - EYE.z) || 1;
+    const b = Math.hypot(rail.x - EYE.x, rail.y - EYE.y, rail.z - EYE.z) || 1;
+    const dot = ((t.x - EYE.x) * (rail.x - EYE.x)
+               + (t.y - EYE.y) * (rail.y - EYE.y)
+               + (t.z - EYE.z) * (rail.z - EYE.z)) / (a * b);
+    return Math.acos(Math.min(1, Math.max(-1, dot))) * 180 / Math.PI;
+  };
+
+  // Let the enemy pull the aim off the rail. The block is not re-seated,
+  // because the shot's action has retired -- that is the whole point.
+  let pulled = 0;
+  for (let i = 0; i < 240; i++) {
+    CamSetPathTarget(rail);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    pulled = aimAngle();
+  }
+  check("an enemy pulls the aim off the rail", pulled > 3,
+        `${pulled.toFixed(1)} deg off`);
+  check("and the camera is marked as tracking", G.g_camera_is_tracking === 1);
+
+  // Now kill it. Nothing is registered from the next frame on.
+  z.dead = true;
+  let worst = 0;
+  let settled = -1;
+  for (let i = 0; i < 300; i++) {
+    const before = aimAngle();
+    CamSetPathTarget(rail);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    const after = aimAngle();
+    worst = Math.max(worst, Math.abs(before - after));
+    if (settled < 0 && after < 0.5) settled = i;
+  }
+  check("with nothing registered the camera stops tracking",
+        G.g_camera_is_tracking === 0);
+  check("the aim comes back to the rail", settled >= 0,
+        `still ${aimAngle().toFixed(2)} deg off after 300 frames`);
+  // 1/13 of a gap that starts near 16 degrees is about 1.3 degrees; a snap
+  // would show the whole gap in one step.
+  check("and never moves more than two degrees in a frame", worst < 2,
+        `worst frame moved ${worst.toFixed(2)} deg`);
+  check("it takes tens of frames, not one", settled > 20,
+        `settled after ${settled} frames`);
+  check("`g_camera_settled` is raised once it has caught up",
+        G.g_camera_settled === 1);
+}
+
 // -- 5. the snapshot round-trips, exactly -----------------------------------
 
 console.log("save state:");
@@ -593,7 +672,7 @@ console.log("save state:");
     ]),
     lives: G.g_player_lives, invuln: G.g_player_invuln_frames,
     permits: G.g_attack_permits, score: G.g_player_score,
-    look: G.g_camera_lookat_target,
+    look: G.g_camera_lookat_target, aim: G.g_camera_block_target,
   });
 
   const rng = new Rng(11);

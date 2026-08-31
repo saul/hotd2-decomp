@@ -5052,3 +5052,102 @@ completion path in `advance` does not retire at all any more.
 Both halves are asserted: playback keeps the bodies when the gate opens, and a
 replay drops them because nothing else will. Removing the guard fails the first
 and leaves the second passing.
+
+## Session 31 — the camera does not cut, and every step was losing its first instruction
+
+Started from a report: at `?stage=2&mode=play&block=17&step=5&op=36&frame=150`
+the camera "snaps from indoor to outdoors" instead of moving across smoothly.
+Two separate bugs, one in the camera and one much larger in the interpreter.
+
+### What the report was *not*
+
+The first hypothesis — that the camera cuts to another rail — is wrong here,
+and measuring said so before any code was written. Block 17's shots are all
+`cp_st2[26]`/`[27]`, and evaluated at the seam they are continuous to within a
+hundredth of a unit: slot 81 at frame 700 and slot 82 at frame 0 are the same
+point. Across stages 1-6, **148 of 631 consecutive `cam_play` pairs** *are*
+discontinuous — some by 173 degrees — so the game does cut, deliberately and
+often, and blending across those seams would be wrong. Block 17 is simply not
+one of them.
+
+### The camera: `SelectCameraLookAtTarget` has no "off"
+
+`FUN_00403050`'s "nothing registered" case is a **fallback, not an exit**. It
+writes `g_camera_lookat_target = g_cam_path_target` and clears
+`g_camera_is_tracking`; `CameraTrackEnemiesTick` (`FUN_00402890`) then eases
+`g_camera_block_target` onto it with `TurnLookAtToward` **unconditionally**,
+taking the rate from the angle-error curve while an enemy is registered and the
+flat `*PTR_DAT_00576C0C` (12) when none is. There is no path through that
+routine that assigns the desired point straight through.
+
+The port had it as `if (tracking) ease; else use the raw path target`, so the
+frame the last enemy died the aim teleported back onto the rail — **20.8
+degrees in one frame**, measured, at exactly the `wait_enemies_alive 0` the
+report linked. `game/camera/track.ts` now holds the routine as written and
+`g_camera_block_target` is real state in `G`.
+
+Three things fell out of reading it properly:
+
+- `FUN_00401DF0` returns the **square** of the cosine, so the `> 0.99999`
+  convergence tests are ~0.18 degrees, not 0.26. Named `VecCosSquaredSigned`.
+- `g_camera_settled` (0x009C6F2F) is what those tests raise, and
+  `EvtOpWaitTargetsClear47` gates on it — so op 0x47 cannot mean anything
+  without the ease.
+- `if (g_enemies_alive == 0 && DAT_009C6F2E == 2) rate = 0` is **dead code**:
+  `DAT_009C6F2E` is read in two places and written in none.
+
+Deliberately not ported: `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`), the
+1/16-a-frame ease of the block *eye* toward the pose block at 0x009C70C0.
+`CamAdvancePathFrame` writes the block eye straight from the curve every frame
+a `cam_play` is live, which is what the port does; the second pose block that
+ease reads is only written by the deferred-rail hooks and has no port yet.
+`[open]`
+
+### The interpreter: `end_block` moved the pc, and then the pc moved again
+
+The remaining symptom — the camera's *position* jumping in the doorway — was
+not a camera bug at all.
+
+`Walker.executeOne` ended with an unconditional `this.opIndex++`. `end_block`
+(0x4F) calls `advanceStepOrRoute`, which sets `step += 1; opIndex = 0` — and
+then the increment ran anyway, so **op 0 of every step entered through an
+`end_block` never executed**.
+
+`EvtAdvanceBlockOrRoute` (`FUN_0045F000`) is unambiguous that this is wrong:
+it ends by assigning the instruction pointer outright,
+`DAT_009C7108 = FUN_0045EB90(scene, block, step)`, the address of the new
+step's *first* instruction. This VM has no shared post-increment at all —
+every handler advances the pointer for itself, e.g. `EvtOpGotoSceneState31`
+does `DAT_009C7108 += 8`. Landing on an instruction means executing it.
+
+**460 of the 479 steps in stages 1-6 open with a real instruction.** What was
+being dropped, by opcode: 118 `checkpoint`, 118 `set_hud_shutter_state`, 63
+`asset_load_polfile`, 21 `queue_event`, 15 `set_collision_set_full`, 12
+`region_load`, 12 `spawn_placed`, 11 `spawn_obj`, 10 `set_ground_plane_y`, 10
+`set_script_flag`, 8 `region_enter`, 8 `asset_load_slot`.
+
+In block 17 that is both halves of the report:
+
+- step 6 op 0 `region_enter 32` never ran, so the outdoor geometry arrived a
+  step late — the "indoor to outdoors" pop;
+- step 7 op 0 `cam_play 231..365` never ran, so the camera clock sat at frame
+  230 through two waits until step 7 op 13's deferred play threw it to frame
+  366 — **the eye moving 41 units in one frame**, in the doorway.
+
+The fix is to increment only when the handler left the program counter where it
+found it. `test/seek.test.ts` now walks all six stages and asserts every step
+it enters runs its op 0; on the old code that fails on all six, with 149 steps
+starting late.
+
+### Wrong turns
+
+- Chased the `cp_`/`op_` seam analysis and the scene-state camera-hook table a
+  long way on the assumption the snap was a rail change. It was not, and the
+  seam measurement is what should have redirected the search sooner — it was
+  taken early and then not believed.
+- Read row 5 of `g_scene_state_table` as live and briefly concluded
+  `CameraTrackEnemiesTick` might never be installed. Every shipped
+  `EvtEnterSceneState` call passes major 1 or 2; whether major 5 is reachable
+  is still `[open]`, and it does not affect the port, which runs the tracking
+  camera because the tracking data (slots, candidate sort, permits) is
+  demonstrably maintained.

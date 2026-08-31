@@ -934,19 +934,50 @@ export class Walker {
     if (this.opIndex >= step.ops.length) return this.advanceStepOrRoute(quiet);
 
     const op = step.ops[this.opIndex];
+    // Where the program counter was before the handler ran. `end_block`
+    // (0x4F) moves it itself -- and so does anything else that calls
+    // `advanceStepOrRoute` or `goToBlock` -- so the increment below has to be
+    // conditional or the new step's **first instruction is skipped**.
+    //
+    // `EvtAdvanceBlockOrRoute` (`FUN_0045F000`) is unambiguous about this:
+    // it ends by assigning the instruction pointer outright,
+    //
+    //     DAT_009C7108 = FUN_0045EB90(scene, block, step);
+    //
+    // which is the address of the new step's first instruction. This VM has
+    // no shared post-increment at all -- every handler advances the pointer
+    // for itself (`EvtOpGotoSceneState31` does `DAT_009C7108 += 8`), so
+    // landing on an instruction means executing it.
+    //
+    // The port had an unconditional `opIndex++` here, so op 0 of every step
+    // entered through an `end_block` never ran. 460 of the 479 steps in
+    // stages 1-6 open with a real instruction, and what was being dropped was
+    // 118 checkpoints, 63 asset loads, 21 `queue_event`s, 12 `region_load`s
+    // and 8 `region_enter`s. Two visible consequences, both reported:
+    // stage 2 block 17 step 6's `region_enter 32` never ran, so the outdoor
+    // geometry appeared a step late; and step 7's `cam_play 231..365` never
+    // ran, so the camera clock sat at frame 230 until the deferred play at
+    // op 13 threw it to 366 -- a 41-unit jump in the camera's position, in
+    // the doorway, which is the "snaps from inside to outside" this fixes.
+    const pcBlock = this.block;
+    const pcStep = this.step;
+    const pcOp = this.opIndex;
     const note = this.apply(op, quiet);
     if (!quiet) {
       this.host.onFeed({
         seq: this.seq++,
-        block: this.block,
-        step: this.step,
-        opIndex: this.opIndex,
+        block: pcBlock,
+        step: pcStep,
+        opIndex: pcOp,
         op,
         note,
       });
     }
     if (this.wait || this.branch || this.finished || this.parked) return true;
-    this.opIndex++;
+    if (this.block === pcBlock && this.step === pcStep
+        && this.opIndex === pcOp) {
+      this.opIndex++;
+    }
     return true;
   }
 

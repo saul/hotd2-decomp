@@ -63,6 +63,12 @@ export function SetGameTables(chars: CharactersJson | undefined,
   G.g_enemy_approach_steps = chars?.approach?.steps?.base ?? 0;
   G.g_enemy_approach_steps_mid = chars?.approach?.steps?.mid_add ?? 0;
   G.g_enemy_approach_steps_outer = chars?.approach?.steps?.outer_add ?? 0;
+  // The same reset picks the camera's turn-rate curve: `FUN_0045EEC0` writes
+  // `g_camera_turn_curve = 1`, and `tracking.curve` is that constant read out
+  // of the exe. It is a runtime global because the engine can point it at any
+  // of the four curves, not because anything shipped ever does.
+  G.g_camera_turn_curve = chars?.tracking?.curve ?? 1;
+  G.g_camera_turn_rate = chars?.tracking?.rate_untracked ?? 12;
   // `ResetDamageRank` (`FUN_00460770`) seeds the adaptive rank from the menu
   // difficulty; there is no adaptive update ported yet, so it stays at seed.
   G.g_damage_rank = Math.min(15, Math.max(0,

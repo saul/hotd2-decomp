@@ -1,30 +1,83 @@
 /**
- * `TurnLookAtToward` — `FUN_00403C00`.
+ * The look-at ease, and the rate curve that drives it.
  *
- * Ease *current* onto *desired* by `1 / (1 + rate)` of the angle between them,
- * re-emitted at a fixed radius from the eye. The rate comes from a 64-entry
- * curve indexed by the angle error clamped to 45 degrees: **64 below about 18
- * degrees, ramping to 16 past 23** — and a larger rate is a *slower* turn, so
- * the camera holds almost still for small offsets and swings briskly for wide
- * ones. That curve is the feel of it.
+ * `TurnLookAtToward` — `FUN_00403C00`. Rotate *current* toward *desired* by
+ * `num / (num + rate)` of the angle between them, seen from the eye, and
+ * re-emit the result at a fixed 100-unit radius. Every caller passes `num = 1`,
+ * so the step is `1 / (1 + rate)` and a **larger rate is a slower turn**:
+ * rate 0 is a snap, rate 12 (the untracked constant) crosses a 16-degree gap
+ * in about thirty frames, rate 64 barely moves.
+ *
+ * `ComputeLookAtAngleError` — `FUN_00403B00` — is what refreshes that rate.
+ * Despite the name it does not return an angle: it measures the one between
+ * where the camera is looking and where it wants to look, clamps it to 0x1FFF
+ * (45 degrees), and uses it to index a 64-entry curve — **64 below about 18
+ * degrees, ramping down to 16 past 23** — writing the result into
+ * `g_camera_turn_rate` for the *next* frame to read. That curve is the feel of
+ * it: the camera holds almost still for small offsets and swings briskly for
+ * wide ones.
  */
 import { G } from "../globals";
 import { T } from "../tables";
 import { BAMS, type Vec3 } from "../vec";
 
-/** `ComputeLookAtAngleError` — `FUN_00403B00`. The angle between two look-ats. */
-export function ComputeLookAtAngleError(a: Vec3, b: Vec3): number {
-  const la = Math.hypot(a.x, a.y, a.z);
-  const lb = Math.hypot(b.x, b.y, b.z);
+/** The angle between two directions, in BAMS. `FUN_00401D70`. */
+function angleBetweenBams(ax: number, ay: number, az: number,
+                          bx: number, by: number, bz: number): number {
+  const la = Math.hypot(ax, ay, az);
+  const lb = Math.hypot(bx, by, bz);
   if (la < 1e-4 || lb < 1e-4) return 0;
-  const dot = (a.x * b.x + a.y * b.y + a.z * b.z) / (la * lb);
-  return Math.acos(Math.min(1, Math.max(-1, dot)));
+  const dot = (ax * bx + ay * by + az * bz) / (la * lb);
+  return Math.round(Math.acos(Math.min(1, Math.max(-1, dot))) * BAMS);
 }
 
-export function TurnLookAtToward(eye: Vec3, current: Vec3, desired: Vec3,
-                                 out: Vec3): void {
+/**
+ * `sign(cos) * cos^2` between two directions. `FUN_00401DF0`.
+ *
+ * The engine never takes the square root, so its `> 0.99999` convergence test
+ * is against the **square** of the cosine — about 0.18 degrees, not 0.26.
+ */
+export function LookAtCosineSquared(eye: Vec3, a: Vec3, b: Vec3): number {
+  const ax = a.x - eye.x, ay = a.y - eye.y, az = a.z - eye.z;
+  const bx = b.x - eye.x, by = b.y - eye.y, bz = b.z - eye.z;
+  const dot = ax * bx + ay * by + az * bz;
+  const den = (ax * ax + ay * ay + az * az) * (bx * bx + by * by + bz * bz);
+  if (den < 1e-12) return 0;
+  const v = (dot * dot) / den;
+  return dot < 0 ? -v : v;
+}
+
+/**
+ * `ComputeLookAtAngleError` — `FUN_00403B00`.
+ *
+ * Writes `g_camera_turn_rate` from the angle between the camera block's
+ * current look-at and the desired one, through `g_camera_turn_curve`.
+ */
+export function ComputeLookAtAngleError(): void {
+  const eye = G.g_camera_block_eye;
+  const cur = G.g_camera_block_target;
+  const want = G.g_camera_lookat_target;
   const t = T.tracking;
-  const radius = t?.lookat_radius ?? 100;
+  let bams = angleBetweenBams(
+    cur.x - eye.x, cur.y - eye.y, cur.z - eye.z,
+    want.x - eye.x, want.y - eye.y, want.z - eye.z);
+  const clamp = t?.error_clamp ?? 0x1fff;
+  if (bams > clamp) bams = clamp;
+  const curve = t?.curves?.[G.g_camera_turn_curve];
+  if (!curve?.length) return;
+  G.g_camera_turn_rate =
+    curve[Math.min(curve.length - 1, Math.max(0, bams >> 7))] ?? 0;
+}
+
+/**
+ * `TurnLookAtToward` — `FUN_00403C00`.
+ *
+ * The argument order is the exe's: eye, **desired**, **current**, out. `num`
+ * and `rate` form the step fraction `num / (num + rate)`.
+ */
+export function TurnLookAtToward(eye: Vec3, desired: Vec3, current: Vec3,
+                                 out: Vec3, num: number, rate: number): void {
+  const radius = T.tracking?.lookat_radius ?? 100;
   const a = { x: current.x - eye.x, y: current.y - eye.y, z: current.z - eye.z };
   const b = { x: desired.x - eye.x, y: desired.y - eye.y, z: desired.z - eye.z };
   const la = Math.hypot(a.x, a.y, a.z);
@@ -35,15 +88,8 @@ export function TurnLookAtToward(eye: Vec3, current: Vec3, desired: Vec3,
   }
   a.x /= la; a.y /= la; a.z /= la;
   b.x /= lb; b.y /= lb; b.z /= lb;
-  const angle = ComputeLookAtAngleError(a, b);
-
-  let rate = t?.rate_untracked ?? 12;
-  if (G.g_camera_is_tracking && t?.curves?.length) {
-    const bams = Math.min(t.error_clamp ?? 0x1fff, Math.round(angle * BAMS));
-    const curve = t.curves[t.curve ?? 1] ?? [];
-    rate = curve[Math.min(curve.length - 1, bams >> 7)] ?? rate;
-  }
-  const f = 1 / (1 + rate);
+  const angle = angleBetweenBams(a.x, a.y, a.z, b.x, b.y, b.z) / BAMS;
+  const f = num / (num + rate);
 
   if (angle < 1e-5) {
     out.x = eye.x + b.x * radius;

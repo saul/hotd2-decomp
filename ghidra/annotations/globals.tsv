@@ -241,3 +241,5 @@
 00595aa0	g_original_item_tables	Pointer per scene index to that scene's Original Mode item table, read by PickOriginalModeItem: stride 8, entries at +0..+3 (item ids) and cumulative rand() weights at +4..+7.
 005957d8	g_original_item_records	One 0xC record per Original Mode item id: u16 model slot, u16 second model slot, f32 draw scale, u16 pickup id passed to FUN_00475E40.
 009c90c0	g_original_items_taken	One byte per Original Mode item id, incremented on pickup and capped at 99.
+009c6f2f	g_camera_settled	Raised by CameraTrackEnemiesTick and CameraTurnOntoPathTarget once the eased look-at has caught up with the desired one (|VecCosSquaredSigned| > 0.99999). EvtOpWaitTargetsClear47 gates on it, so op 0x47 means nothing without the ease.
+009c6f33	g_camera_ease_eye	Selects how CameraEaseBlockEyeToPathPose moves the camera block's eye onto the path pose: set = a sixteenth a frame, clear = snap. Raised only by EvtActionSetFlag15; cleared by the scene reset and by EvtOpGotoSceneState31.

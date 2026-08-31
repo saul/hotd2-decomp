@@ -131,6 +131,53 @@ for (const stage of STAGES) {
           : "no samples");
 }
 
+// -- no instruction is skipped ----------------------------------------------
+
+/**
+ * Every step the walker enters runs its op 0.
+ *
+ * `end_block` (0x4F) moves the program counter itself, exactly as
+ * `EvtAdvanceBlockOrRoute` (`FUN_0045F000`) does — it assigns
+ * `DAT_009C7108 = FUN_0045EB90(scene, block, step)`, the address of the new
+ * step's *first* instruction. The port used to add an unconditional
+ * `opIndex++` after every handler, so that first instruction was stepped over.
+ *
+ * 460 of the 479 steps in stages 1-6 open with a real instruction, and what
+ * went missing was 118 checkpoints, 63 asset loads, 21 `queue_event`s, 12
+ * `region_load`s and 8 `region_enter`s. Stage 2 block 17 is where it showed:
+ * step 6's `region_enter 32` never ran, so the outdoor geometry arrived a step
+ * late, and step 7's `cam_play 231..365` never ran, so the camera clock stuck
+ * at frame 230 until the deferred play threw it to 366 — the camera's position
+ * jumping 41 units in the doorway.
+ *
+ * This walks every stage and records, per step entered, the lowest `opIndex`
+ * actually executed. Anything but 0 is an instruction the game runs and the
+ * player does not.
+ */
+console.log("\nno step loses its first instruction:");
+for (const stage of STAGES) {
+  const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+  if (!existsSync(file)) continue;
+  const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+  const w = new Walker(script, mkHost());
+  w.reset();
+  w.replaying = true;
+  const lowest = new Map<string, number>();
+  for (let i = 0; i < 200_000 && !w.finished && !w.parked; i++) {
+    if (w.wait) { w.stepOverWait(); continue; }
+    if (w.branch) { w.takeBranch(); continue; }
+    const key = `${w.block}/${w.step}`;
+    const prev = lowest.get(key);
+    if (prev === undefined || w.opIndex < prev) lowest.set(key, w.opIndex);
+    if (!(w as unknown as Inner).executeOne(true)) break;
+  }
+  const skipped = [...lowest].filter(([, o]) => o !== 0);
+  check(`stage ${stage}: all ${lowest.size} steps entered run their op 0`,
+        skipped.length === 0,
+        `${skipped.length} start at a later op, e.g. `
+        + skipped.slice(0, 4).map(([k, o]) => `${k} at op ${o}`).join(", "));
+}
+
 // An address the script cannot reach must be reported, not silently swapped
 // for wherever the replay happened to stop.
 {

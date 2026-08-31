@@ -58,7 +58,8 @@ import { GlobalsView } from "../hud/globals_view";
 import { GameMode } from "../game/game_mode";
 import { G } from "../game/globals";
 import { SetGameTables } from "../game/tables";
-import { TurnLookAtToward } from "../game/camera/turn";
+import { CamAdvancePathFrame, CamSetPathTarget }
+  from "../game/camera/path";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { BreakableLayer } from "../render/breakables";
@@ -119,8 +120,6 @@ class Player {
   private readonly debug = new DebugBoxLayer();
   /** The port's data segment, on screen. */
   private readonly globalsView = new GlobalsView();
-  private readonly trackNow = new Vector3();
-  private readonly _eye = new Vector3();
   /** UI toggle — off restores the exact authored camera. */
   private trackEnabled = true;
   private readonly rain = new Rain();
@@ -345,7 +344,6 @@ class Player {
     this.bullets.source = this.chars;
     this.debug.detach();
     this.scene.add(this.bullets.group);
-    this.trackNow.set(0, 0, 0);
     this.shooting.playSound = (id) => { this.bgm.play(id); };
     this.shooting.setEnabled(
       $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
@@ -463,7 +461,7 @@ class Player {
       if (this.state.frame !== undefined && w.cam) {
         w.cam.frame = this.state.frame;
       }
-      this.syncCameraToWalker();
+      this.syncCameraToWalker(true);
       this.syncBgmToWalker();
     } else {
       w.reset();
@@ -471,7 +469,7 @@ class Player {
       // command, so opening there is a truthful black screen. Prime to where
       // the stage actually starts instead.
       w.primeToFirstWait();
-      this.syncCameraToWalker();
+      this.syncCameraToWalker(true);
     }
     if (this.state.all) {
       $<HTMLInputElement>("#all-regions").checked = true;
@@ -547,7 +545,6 @@ class Player {
     });
     $<HTMLInputElement>("#track-enemies").addEventListener("change", (e) => {
       this.trackEnabled = (e.target as HTMLInputElement).checked;
-      this.trackNow.set(0, 0, 0);
       this.syncCameraToWalker();
     });
     $<HTMLInputElement>("#shoot").addEventListener("change", (e) => {
@@ -881,7 +878,15 @@ class Player {
         op: { i: -1, at: 0, op: 0x30, name: "cam_play", cat: "camera" },
         note: `slot ${cmd.slot} is not in this stage's cam file`,
       });
+      return;
     }
+    // `CamStartPathPlayback` (`FUN_00403510`) ends by calling
+    // `CamAdvancePathFrame` itself, and `CamEvalStaticPose` writes the block
+    // outright: a new shot always seats the camera on its own pose rather
+    // than swinging onto it. That is what keeps the script's cuts sharp — and
+    // 148 of the 631 consecutive `cam_play` pairs in stages 1-6 are cuts, some
+    // of them a full 173 degrees.
+    this.seatCameraFromWalker(true);
   }
 
   private onFeed(e: FeedEntry): void {
@@ -990,7 +995,16 @@ class Player {
     if (t !== null && t !== undefined && t !== 0) this.bgm.play(t);
   }
 
-  private syncCameraToWalker(): void {
+  /**
+   * The camera, in the engine's own two halves.
+   *
+   * `seatCameraFromWalker` is the queued `cam_play` action -- it evaluates the
+   * path and writes the camera block. `applyCameraFromBlock` is the draw. In
+   * between, `GameUpdate` runs `CameraTrackEnemiesTick`, which eases the
+   * block's look-at. Doing all three in one place is what the port used to do,
+   * and it is why the aim could only ever be a frame stale or a frame early.
+   */
+  private seatCameraFromWalker(force = false): void {
     const w = this.walker;
     if (!w || this.state.mode === "free") return;
     const cam = w.cam;
@@ -998,25 +1012,51 @@ class Player {
     const p = this.paths?.paths.get(cam.slot);
     if (!p) return;
     p.pose(cam.frame, w.rollEnabled, this.pose);
-    const eyeY = cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY);
-    // `SelectCameraLookAtTarget`: when enemies are registered the camera aims
-    // at them instead of at the path's target, eased on by `TurnLookAtToward`.
-    // With none registered this is skipped entirely and the path is exact.
-    if (this.game.tracking && this.trackEnabled) {
-      // `TurnLookAtToward` again, from the eye the pose actually uses: the
-      // port eased against the camera's own position, which is a frame behind
-      // and half a unit off once the fixed eye height is applied.
-      this._eye.set(this.pose.eye.x, eyeY, this.pose.eye.z);
-      const cur = this.trackNow.lengthSq() ? this.trackNow : this.pose.target;
-      TurnLookAtToward(this._eye, cur, this.game.lookAt, this.trackNow);
-      this.pose.target.copy(this.trackNow);
-    } else {
-      this.trackNow.set(0, 0, 0);
+    // The block holds the **raw** curve eye, as `CamEvalPath7` leaves it. The
+    // `path.y - 15` rule is a property of the draw (`g_camera_eye_y`), not of
+    // the block, so it is applied in `applyCameraFromBlock` -- see the note on
+    // `APPLY_EYE_Y_RULE` in render/campath.ts for why it is off anyway.
+    // The path's own aim, which `SelectCameraLookAtTarget` falls back to.
+    CamSetPathTarget(this.pose.target);
+    // `CamAdvancePathFrame` runs only while the action is live. Once the shot
+    // reaches its end frame the action retires and the block is left where it
+    // is, for the camera hook to ease from -- which is the state the player
+    // spends every fight in. `trackEnabled` off pins the block to the rail
+    // every frame, which is the "exact authored camera" the toggle promises.
+    if (force || !cam.done || !this.trackEnabled) {
+      CamAdvancePathFrame(this.pose.eye, this.pose.target);
     }
-    // The orientation comes from the raw curve pair; only the eye's height is
-    // adjusted, and only after. Doing it the other way round tilts the shot.
-    applyPose(this.camera, this.pose, eyeY);
+  }
+
+  /** Draw from the camera block, after the hook has eased it. */
+  private applyCameraFromBlock(): void {
+    const w = this.walker;
+    if (!w || this.state.mode === "free") return;
+    if (!w.cam || !this.paths?.paths.get(w.cam.slot)) return;
+    this.pose.eye.set(G.g_camera_block_eye.x, G.g_camera_block_eye.y,
+                      G.g_camera_block_eye.z);
+    this.pose.target.set(G.g_camera_block_target.x, G.g_camera_block_target.y,
+                         G.g_camera_block_target.z);
+    // The orientation comes from the block's eye/target pair; only the eye's
+    // height is adjusted, and only after. Doing it the other way round tilts
+    // the shot.
+    applyPose(this.camera, this.pose,
+              cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY));
     this.rails?.setCameraPose(this.camera.position, this.pose.target);
+  }
+
+  /**
+   * Seat and draw in one go, for the paths that have no game tick between.
+   *
+   * `force` puts the aim on the rail even though the shot's action has
+   * retired. That is not something the engine ever needs — it has no seek —
+   * but arriving at a deep link with an eased look-at of (0,0,0) points the
+   * camera at the world origin, so anything that teleports the player into a
+   * state seats the block rather than easing out of nothing.
+   */
+  private syncCameraToWalker(force = false): void {
+    this.seatCameraFromWalker(force);
+    this.applyCameraFromBlock();
   }
 
   private frame = (now: number) => {
@@ -1048,7 +1088,6 @@ class Player {
           return !this.walker!.branch && !this.walker!.finished;
         });
         this.hudLayer.tick(script.frames);
-        if (!this.scrubbing) this.syncCameraToWalker();
         this.syncUrlToWalker(now);
       }
       this.refreshUi();
@@ -1062,7 +1101,14 @@ class Player {
       // countdown ride the script's own clock, and they took `tick` above.
       const game = this.gameTick(wall);
       this.syncPortGlobals();
+      // `CamStartPathPlayback` -> `CamAdvancePathFrame`, before the hook. This
+      // runs in Step mode too: the walker is not advancing, but the port is,
+      // and the camera hook still has to have a rail to fall back onto.
+      if (!this.scrubbing) this.seatCameraFromWalker();
       this.world.update(this.ctx, game);
+      // `CameraTrackEnemiesTick` has just moved the block's look-at; the draw
+      // reads it. Everything below poses against this camera.
+      if (!this.scrubbing) this.applyCameraFromBlock();
       this.drawLayers(game);
       // The stats panel is driven from here, not from the playback branch.
       // Read from there it only ever showed the state from *before* the first
@@ -1087,12 +1133,15 @@ class Player {
     const w = this.walker;
     if (!w) return;
     G.g_camera_fixed_eye_y = w.fixedEyeY;
-    // `g_camera_block_eye` is where the camera actually is, as `FUN_00402EF0`
-    // leaves it. The lift rides fifteen units under it; nothing else in
-    // the port reads it yet.
-    G.g_camera_block_eye.x = this.camera.position.x;
-    G.g_camera_block_eye.y = this.camera.position.y;
-    G.g_camera_block_eye.z = this.camera.position.z;
+    // `g_camera_block_eye` is the camera block's own eye, and `cam_play`
+    // owns it — `CamAdvancePathFrame` writes it from the curve. Free roam has
+    // no path and therefore no block, so there it is taken from the viewer's
+    // camera instead, which is the only thing standing in for one.
+    if (this.state.mode === "free") {
+      G.g_camera_block_eye.x = this.camera.position.x;
+      G.g_camera_block_eye.y = this.camera.position.y;
+      G.g_camera_block_eye.z = this.camera.position.z;
+    }
     // `ColiLoadForScene` indexes its file list with this, so it is zero-based
     // and scene 1 is stage 2.
     G.g_scene_index = w.script.scene ?? 0;
@@ -1181,8 +1230,9 @@ class Player {
     const err = this.world.load(snap, this.ctx);
     if (err) return err;
     // The renderers have resynced; the camera has not, because it is driven
-    // from the walker's restored cam command rather than from a system.
-    this.trackNow.set(0, 0, 0);
+    // from the walker's restored cam command rather than from a system. The
+    // eased look-at came back with the rest of `G`, so this only re-seats the
+    // block on the rail and draws.
     this.syncCameraToWalker();
     this.chars.resync();
     this.refreshUi();

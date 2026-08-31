@@ -7,6 +7,20 @@
  * slot0 only                  -> look at slot0
  * nothing registered          -> look where the cam/ path says
  * ```
+ *
+ * **The last row is a fallback, not an exit.** The routine returns nothing: it
+ * always writes `g_camera_lookat_target`, and with no enemy registered it
+ * writes the path's own target and clears `g_camera_is_tracking`. Whoever
+ * called it — `CameraTrackEnemiesTick` — then eases the camera onto that point
+ * exactly as it would ease onto an enemy, and `g_camera_is_tracking` only
+ * chooses the rate.
+ *
+ * The port used to return `false` here and have the caller snap the camera
+ * straight to the path's target instead. That is the difference between a
+ * camera that swings back onto the rail over about thirty frames when the last
+ * enemy dies and one that jumps 16 degrees in a single frame — which is what
+ * stage 2 block 17 step 5 did at `wait_enemies_alive 0`, right before the
+ * camera moves outside.
  */
 import type { Actor } from "../actor";
 import { ActorByAt, G } from "../globals";
@@ -32,10 +46,20 @@ function lookAtOf(a: Actor): Vec3 {
            z: a.pos.z };
 }
 
-/** False when nothing is registered, which is the fallback to the path's target. */
-export function SelectCameraLookAtTarget(out: Vec3): boolean {
+/** Writes `g_camera_lookat_target` and sets `g_camera_is_tracking`. */
+export function SelectCameraLookAtTarget(): void {
+  const out = G.g_camera_lookat_target;
   const s0 = ActorByAt(G.g_enemy_slots[0]);
-  if (!s0) return false;
+  if (!s0) {
+    // `DAT_0059c988 = 0` and the three words come straight from the path pose
+    // block at 0x009C70D8.
+    G.g_camera_is_tracking = 0;
+    out.x = G.g_cam_path_target.x;
+    out.y = G.g_cam_path_target.y;
+    out.z = G.g_cam_path_target.z;
+    return;
+  }
+  G.g_camera_is_tracking = 1;
   const s1 = ActorByAt(G.g_enemy_slots[1]);
 
   // `obj+0x100`, which the skeleton walk fills from a bone and the update
@@ -52,5 +76,4 @@ export function SelectCameraLookAtTarget(out: Vec3): boolean {
     out.y = a0.y;
     out.z = a0.z;
   }
-  return true;
 }

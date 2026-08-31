@@ -56,8 +56,13 @@ export class GameSystem implements System {
   /** Filled in by the host once the character layer exists. */
   backend: HostBackend | null = null;
 
-  /** Whether the camera should use the tracked look-at this frame. */
-  tracking = false;
+  /**
+   * `g_camera_block_target` for the renderer: where the camera is looking
+   * after this frame's ease. There is no "is it tracking" question any more —
+   * `SelectCameraLookAtTarget` falls back to the path's own target and the
+   * ease runs either way, which is what stops the aim snapping when the last
+   * enemy dies.
+   */
   readonly lookAt = new Vector3();
 
   private readonly _eye = new Vector3();
@@ -103,7 +108,6 @@ export class GameSystem implements System {
 
   attach(): void {
     ResetGameGlobals();
-    this.tracking = false;
   }
 
   update(ctx: Context, t: Tick): void {
@@ -113,7 +117,6 @@ export class GameSystem implements System {
     ctx.camera.getWorldPosition(this._eye);
     const eye: Vec3 = { x: this._eye.x, y: this._eye.y, z: this._eye.z };
     const r = GameUpdate(eye, t.dt, this.host, ctx.rng, ctx.events);
-    this.tracking = r.tracking;
     this.lookAt.set(r.lookAt.x, r.lookAt.y, r.lookAt.z);
     ctx.frame = Math.round(G.g_frame);
   }
@@ -124,9 +127,8 @@ export class GameSystem implements System {
 
   load(slice: unknown): void {
     RestoreGameGlobals(slice as Globals);
-    this.tracking = G.g_camera_lookat_valid;
-    this.lookAt.set(G.g_camera_lookat_target.x, G.g_camera_lookat_target.y,
-                    G.g_camera_lookat_target.z);
+    this.lookAt.set(G.g_camera_block_target.x, G.g_camera_block_target.y,
+                    G.g_camera_block_target.z);
   }
 
   /** What the inspector shows. Derived, so it is not in the snapshot. */

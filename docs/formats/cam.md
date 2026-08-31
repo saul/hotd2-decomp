@@ -52,11 +52,11 @@ Key:
 ```
 
 `key_count` is a power of two because the evaluator does a fixed
-`log2(count)`-step binary search rather than a bounded loop. Curves with fewer
-real keys are padded, and a padding slot is marked by storing `0xFFFF0000` — a
-NaN — in its `time`. Only **5 curves in `cp_st1.bin`** are padded, but the
-evaluator returns NaN if a padding slot is ever selected, so a parser must trim
-at the first non-finite time.
+`log2(count)`-step binary search rather than a bounded loop. Every slot holds a
+real key: across all 23 files, 44,800 keyframes, there is no padding and no
+non-finite time. (An earlier reading of this format claimed a `0xFFFF0000` NaN
+padding convention. That was damage in a local extract, not the format — see
+[`../re/anomalies.md`](../re/anomalies.md).)
 
 ### Path descriptor
 
@@ -276,24 +276,20 @@ up to 32 and stores the base at `0x0059C9EC`; `0x00403FB0` performs the
 `ReadFile`; `0x00404000` then resolves each table entry to `base + offset` and
 files it under its slot id.
 
-## Anomaly
+## Integrity
 
-`op_st1.bin` ships with **six corrupt offset-table entries** (indices 51, 53,
-56, 67, 69, 71). They are not dword aligned — every one is ≡ 2 mod 4 — and point
-into the middle of keyframe data. The descriptors they should name do exist:
-the structural pool walk finds exactly six descriptors the table never
-mentions, and both lists are ascending, so the pairing is unambiguous.
-`hod2lib` repairs them and reports each substitution in `CamFile.repairs`.
+There is no anomaly in this format. Every one of the 23 shipped files parses to
+**100.0000% byte coverage**, 418 paths and 3,018 curves, with every offset-table
+entry dword aligned and pointing at a real descriptor, and every one of the
+44,800 keyframes holding four finite words.
 
-Separately, four files carry **individual bytes smashed to `0xFF`** inside
-keyframe data. Where the top byte is hit the float decodes to NaN or ~1e38;
-where a mantissa byte is hit it decodes to an ordinary-looking number, so a
-finiteness test alone is not enough. The files over-determine themselves —
-channels of a path share a time base, keys sharing a time are duplicates, and
-`st1evtbl`'s `cam_play` extents state each path's duration independently — and
-`hod2lib.cam` uses that to restore 90 fields, 81 of them exactly, recording the
-evidence for each in `Curve.damage`. Channels with no evidence left are
-zero-filled and flagged in `Path.damaged`.
+`hod2lib.cam` used to carry a substantial repair apparatus for this file set —
+six "corrupt" offset-table entries in `op_st1.bin` and ~90 keyframe words
+"smashed to `0xFF`" across four files. **None of that was in the shipped data.**
+It was bit-rot in one local extract of the game, and it is gone once the files
+are re-copied from the disc. `CamFile.parse` now *rejects* a file holding a word
+outside the sane range rather than reconstructing it, so a damaged copy fails
+loudly instead of being silently invented over.
 See [`../re/anomalies.md`](../re/anomalies.md).
 
 ## Export

@@ -36,7 +36,6 @@ const RAIL_OBJ = 0x4dff59;
 const RAIL_ACTIVE = 0xffe14d;
 const RAIL_DIM = 0x2a3a44;
 /** A path with invented channels. Drawn, but never as if it were data. */
-const RAIL_DAMAGED = 0xff4d6a;
 
 /** BAMS yaw -> radians. 0x4000 is 90 degrees. */
 const BAMS = (Math.PI * 2) / 65536;
@@ -134,11 +133,8 @@ export class RailLayer {
   highlight(slot: number | null, start?: number, end?: number): void {
     const dimColor = new Color(RAIL_DIM);
     for (const [s, line] of this.eyeLines) {
-      // A damaged path is drawn so the shot is not simply missing, but in the
-      // warning colour so it is never mistaken for the game's own data.
-      const damaged = this.paths.paths.get(s)?.isDamaged ?? false;
       (line.material as LineBasicMaterial).color.set(
-        s === slot ? (damaged ? RAIL_DAMAGED : RAIL_EYE) : dimColor,
+        s === slot ? RAIL_EYE : dimColor,
       );
       (line.material as LineBasicMaterial).opacity = s === slot ? 0.9 : 0.35;
     }

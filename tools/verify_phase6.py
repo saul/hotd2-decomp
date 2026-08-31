@@ -45,15 +45,7 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
         return 1, ["no cam/ files found"]
 
     total_bytes = covered_bytes = 0
-    n_paths = n_curves = n_keys = n_repairs = 0
-    padded = 0
-    # Smashed keyframe words, restored by Curve.real_keys. Distinct from
-    # CamFile.repairs, which counts repaired *offset-table* entries. Both are
-    # reported so neither repair is silent -- see docs/re/anomalies.md.
-    key_repairs = 0
-    key_repair_files: list[str] = []
-    how = Counter()
-    lost: list[str] = []
+    n_paths = n_curves = n_keys = 0
 
     print("cam/ -- Hermite spline paths")
     print(f"  {'file':<16}{'paths':>6}{'curves':>8}{'keys':>8}{'coverage':>11}")
@@ -69,17 +61,6 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
         n_paths += len(f.paths)
         n_curves += len(f.curves)
         n_keys += sum(len(c.keys) for c in f.curves.values())
-        n_repairs += len(f.repairs)
-        padded += sum(1 for c in f.curves.values() if len(c.real_keys) != len(c.keys))
-        for path in f.paths:
-            for ch, ds in path.damage.items():
-                how.update(d.how for d in ds)
-            for ch, fields in path.damaged.items():
-                lost.append(f"{p.name} path {path.index} {ch}.{'/'.join(fields)}")
-        here = sum(c.repairs for c in f.curves.values())
-        if here:
-            key_repairs += here
-            key_repair_files.append(f"{p.name} ({here})")
 
         pct = 100.0 * cov / len(f.raw)
         print(f"  {p.name:<16}{len(f.paths):>6}{len(f.curves):>8}"
@@ -98,26 +79,18 @@ def verify_cam(game: Path) -> tuple[int, list[str]]:
     for p in files:
         f = cam.load(str(p))
         for c in f.curves.values():
-            for k in c.real_keys:
+            for k in c.keys:
                 if not math.isfinite(k.time) or abs(k.time - round(k.time)) > 0.01:
                     off_grid += 1
 
     print(f"\n  {n_paths} paths, {n_curves} curves, {n_keys:,} keyframes")
     print(f"  byte coverage {100.0 * covered_bytes / total_bytes:.4f}% "
           f"({covered_bytes:,} / {total_bytes:,})")
-    print(f"  curves with padded key slots: {padded}")
-    print(f"  repaired offset-table entries: {n_repairs}")
-    print(f"  restored keyframe words: {key_repairs}"
-          + (f"  [{', '.join(key_repair_files)}]" if key_repair_files else ""))
-    if how:
-        exact = sum(v for k, v in how.items() if k != "nearest")
-        print(f"    by evidence: " + ", ".join(f"{k} {v}" for k, v in how.most_common()))
-        print(f"    {exact} determined by the file itself, "
-              f"{how.get('nearest', 0)} reconstructed from neighbours")
-    if lost:
-        print(f"  channels with no evidence left, zero-filled and flagged: {len(lost)}")
-        for x in lost:
-            print(f"    {x}")
+    # `cam.CamFile.parse` raises on any keyframe word that is not a value a
+    # keyframe could hold, so reaching here means every word in every file is
+    # intact. Stated rather than assumed: a damaged extract is what made this
+    # parser invent data in the first place.
+    print(f"  keyframe words outside the sane range: 0 (parse would have failed)")
     print(f"  keyframe times off the 60 Hz frame grid: {off_grid}")
     return (1 if problems else 0), problems
 

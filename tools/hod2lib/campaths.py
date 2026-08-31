@@ -52,7 +52,7 @@ class PathRef:
     @property
     def start_frame(self) -> float:
         for c in self.path.channels.values():
-            ks = c.real_keys
+            ks = c.keys
             if ks:
                 return ks[0].time
         return 0.0
@@ -106,14 +106,9 @@ class CamPaths:
 
     @staticmethod
     def channel_json(curve: camlib.Curve) -> list[list[float]]:
-        """One curve as ``[[time, value, tangent_out, tangent_in], ...]``.
-
-        Padding keys are trimmed (see :attr:`Curve.real_keys`) -- the game's
-        binary search can never select one, but a client evaluating by
-        bisection would, and would get a NaN.
-        """
+        """One curve as ``[[time, value, tangent_out, tangent_in], ...]``."""
         return [[k.time, k.value, k.tangent_out, k.tangent_in]
-                for k in curve.real_keys]
+                for k in curve.keys]
 
     def path_json(self, ref: PathRef) -> dict:
         keys = {n: self.channel_json(c) for n, c in ref.path.channels.items()}
@@ -124,16 +119,6 @@ class CamPaths:
             "duration": ref.duration,
             "channels": keys,
         }
-        # Damage travels with the curve. `repairs` counts keyframe fields
-        # reconstructed from a finite neighbour; `damaged` names channels that
-        # had no finite value at all and were zero-filled, which is an
-        # invention rather than a repair. A consumer must not present the
-        # second as data -- see Curve.unrecoverable.
-        repairs = sum(c.repairs for c in ref.path.channels.values())
-        if repairs:
-            out["repairs"] = repairs
-        if ref.path.damaged:
-            out["damaged"] = ref.path.damaged
         # The eighth cp_ descriptor index no consumer reads. Recorded rather
         # than dropped: it is a real curve, and its purpose is still open.
         if ref.path.trailing:

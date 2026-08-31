@@ -17,13 +17,6 @@ export interface CamPathJson {
   /** `eye_x`…`roll` for a `cp_` path, `pos_x`…`rot_z` for an `op_` one. */
   channels: Record<string, Key[]>;
   trailing_curve?: number;
-  /** Keyframe fields reconstructed from a finite neighbour. */
-  repairs?: number;
-  /**
-   * Channels that held no finite value at all and were zero-filled. That is
-   * an invention, not a repair — the path must not be presented as data.
-   */
-  damaged?: Record<string, string[]>;
 }
 
 export interface CamJson {

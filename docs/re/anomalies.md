@@ -135,33 +135,29 @@ Most raw `pol/` offset tables start `800, 800, ...`. `etc_1.bin` starts
 small models, or the table has a different meaning here. Low priority; noted so
 the `container.py` parser is tested against it.
 
-## 7. `cam/op_st1.bin` corrupt offset-table entries
+## 7. `cam/op_st1.bin` corrupt offset-table entries — RESOLVED, not shipped
 
-Six of the 75 entries in `op_st1.bin`'s path offset table are corrupt:
+**Withdrawn.** This was bit-rot in one local extract of the game, not a defect
+in the shipped data. Verified against the retail disc image (`hotd2.iso`,
+`DATA.CAB` → MSI `File`/`Component`/`Directory` tables): the pristine
+`op_st1.bin` has all 75 offset-table entries dword aligned and pointing at real
+descriptors, and the file parses to 100% byte coverage with no fixups.
 
-| Entry | Table offset | Alignment | Real descriptor |
+The six "corrupt" entries were single bytes overwritten with `0xEE`:
+
+| Entry | On disk (damaged) | Pristine | Smashed byte |
 |---|---|---|---|
-| 51 | `0xA7EE` | 2 mod 4 | `0xA758` |
-| 53 | `0xAFEE` | 2 mod 4 | `0xAF38` |
-| 56 | `0xB9EE` | 2 mod 4 | `0xB988` |
-| 67 | `0xDBEE` | 2 mod 4 | `0xDB98` |
-| 69 | `0xDFEE` | 2 mod 4 | `0xDFB8` |
-| 71 | `0xE5EE` | 2 mod 4 | `0xE558` |
+| 51 | `0xA7EE` | `0xA758` | `0x58` → `0xEE` |
+| 53 | `0xAFEE` | `0xAF38` | `0x38` → `0xEE` |
+| 56 | `0xB9EE` | `0xB988` | `0x88` → `0xEE` |
+| 67 | `0xDBEE` | `0xDB98` | `0x98` → `0xEE` |
+| 69 | `0xDFEE` | `0xDFB8` | `0xB8` → `0xEE` |
+| 71 | `0xE5EE` | `0xE558` | `0x58` → `0xEE` |
 
-Every one is misaligned and points into the middle of keyframe data. The
-descriptors they should name do exist: a structural walk of the curve pool finds
-exactly six descriptors the table never mentions, and both lists are ascending,
-so the pairing is unambiguous. `hod2lib.cam` repairs them and reports each
-substitution in `CamFile.repairs`.
-
-Nothing in `Hod2.exe` marks these six as special — their slot ids (304, 306,
-309, 320, 322, 324) are ordinary members of the file's contiguous run 253-327.
-So the game would bind them and read garbage if anything ever selected them.
-Whether anything does is unknown; no other cam file has the defect.
-
-The deltas between corrupt and real offsets (150, 182, 102, 86, 54, 150 bytes)
-are not constant, so this is not a uniform off-by-N — it looks like an exporter
-bug or a partially rewritten table.
+That the low byte alone changed, always to the same value, is the signature of
+media damage — and it is why the "deltas are not constant, so this is not a
+uniform off-by-N" reasoning went nowhere: there was no exporter bug to find.
+`hod2lib.cam`'s offset-repair pass has been removed.
 
 ## 8. `trnevtbl.bin` references cam path slot 418
 
@@ -176,113 +172,48 @@ isolated off-by-one in the data, not a misreading of the format. What the game
 does when it binds slot 418 is unknown; `0x0059C9F8 + 418 * 8` is whatever
 follows the slot array.
 
-## `cam/` — individual bytes smashed to `0xFF` in four shipped files
+## `cam/` — bytes smashed to `0xFF` in four files — RESOLVED, not shipped
 
-**[measured]** Scattered keyframe bytes in four `cam/` files read `0xFF` where
-the authored value had something else. Both retail copies checked are
-byte-identical here, so this is how the game ships.
+**Withdrawn, and this one cost real work.** Four `cam/` files
+(`cp_st1`, `cp_demo`, `cp_title`, `op_st1`) held scattered keyframe bytes reading
+`0xFF` where the authored value had something else. A large restoration
+apparatus was built on top of it — sibling time bases, duplicate-key and
+constant-column convictions, partner/twin/order/nearest evidence grades,
+`Curve.damage`, `Path.damaged`, a bundle `repairs` count and a client warning
+badge — and the format documentation absorbed the damage as if it were part of
+the format.
 
-The damage is per **byte**, not per word, and that matters:
+**None of it was in the shipped data.** Comparing the install against the retail
+disc showed the four files differ from the disc by exactly those bytes:
 
-* when the smashed byte is the top one, the exponent is destroyed and the float
-  decodes to NaN or about 1e38 — obvious;
-* when it is a mantissa byte, the result is an ordinary-looking number that no
-  finiteness test will ever flag.
-
-`cp_st1` path 1's `target_y` shows both in one curve. Seventeen consecutive
-keys hold `da 2c 40 41` = 12.011. Four read `da 2c 40 ff` (NaN) and three read
-`da 2c ff 41` — a perfectly plausible **31.897** that is not in the data. The
-same curve's twelve-key trailing run at t = 380 holds `cc 0b b0 41` = 22.006 ten
-times, `cc 0b b0 ff` once and `cc 0b ff 41` once. Twelve copies of one key,
-differing in single `0xFF` bytes.
-
-| File | non-finite | finite but smashed |
+| File | bytes differing from disc | value written |
 |---|---|---|
-| `cp_demo.bin` | 20 | 0 |
-| `cp_st1.bin` | 92 | 3 |
-| `cp_title.bin` | 8 | 1 |
-| `cp_st3.bin` | 0 | 3 |
-| **total** | **120** | **7** |
+| `cam/cp_st1.bin` | 203 | `0xFF` |
+| `cam/cp_demo.bin` | 20 | `0xFF` |
+| `cam/cp_title.bin` | 9 | `0xFF` |
+| `cam/op_st1.bin` | 6 | `0xEE` |
 
-(The finite column counts only what the conservative detector below proves.
-It is a floor, not a census: a smashed mantissa byte in a curve with no
-repeated value leaves no evidence at all.)
+Re-copied from the disc, all 23 files parse to 100.0000% coverage with zero
+repairs, zero unrecoverable channels and — the part that should have been the
+tell — **zero padding keys**. The `0xFFFF0000` "NaN padding convention" in the
+key `time` field was itself two smashed `0xFF` bytes. A format feature was
+invented to explain corruption.
 
-### Why this is the data and not a misreading
+### What went wrong, so it does not recur
 
-The obvious suspicion is that the parse is wrong and these bytes mean something
-else. It is not, and the whole chain is checkable in the disassembly:
+* The claim **"both retail copies checked are byte-identical, so this is how the
+  game ships"** appeared in three places and was load-bearing for the whole
+  apparatus. Two copies of the same *installed* tree are not two retail copies;
+  neither was ever compared against the disc. **Compare against the distribution
+  medium, not against another copy of the same extract.**
+* Damage that reconstructs plausibly is more dangerous than damage that
+  crashes. The restorer's own `nearest` grade was explicitly "a reconstruction,
+  not a recovery", and those values still flowed into the exported bundle.
+* A parser that repairs its input silently launders a data defect into a
+  documented format property. `CamFile.parse` now **raises** on any keyframe
+  word outside the sane range instead of restoring it.
 
-* the loader at `0x00403f89` reads the path count from the EXE table at
-  `0x004C476C` and computes the curve base with `LEA ECX, [EAX + EDX*4 + 4]` —
-  file pointer plus `4 + n*4`. Deriving *n* by scanning to the `0xFFFFFFFF`
-  terminator instead gives the identical number for all 23 shipped files.
-* the file is placed by a plain `CreateFileA` / `GetFileSize` / `ReadFile` /
-  `CloseHandle` sequence into a 32-byte-aligned buffer. Nothing decodes,
-  decompresses or relocates it.
-* `CamBindPathSlots` (`0x00404000`) walks the offset table and the EXE slot list
-  in lockstep — `*(int *)(&DAT_0059c9f8 + slot * 8) = *piVar4 + DAT_0059c9ec` —
-  so path *k* is global slot `slot_list[k]`, and it touches no payload byte.
-* `CamEvalPath7` resolves a channel as `curve_base + descriptor[ch] * 4`.
-* `CamEvalHermiteCurve` indexes `*(float *)(param_1 + i * 8 + 2)` on a
-  `ushort *` — byte `i * 16 + 4` — and reads `pfVar1[-3]`, `pfVar1[-2]`,
-  `pfVar1[1]`, `pfVar1[3]`, fixing the 16-byte stride and the field order at
-  `{time, value, tangent_out, tangent_in}`. There is no masking, no sentinel
-  and no integer path.
-* the two EXE tables are independent — the descriptor pointer comes from
-  `CAM_SLOT_LIST`, the curve base from `SLOT_TO_CAM` — and they agree for all
-  418 slots.
-* the structural pool walk lands exactly on the end of every one of the 23
-  files, with zero slack.
-
-So the bytes the evaluator sees are the bytes on disk, and the shipped
-executable evaluates these words too.
-
-Three independent sources then say what the values should have been:
-
-1. **The other channels of the same path.** `cp_st1` path 1's `target_y` and
-   `target_z` carry the complete healthy time base
-   `0 10 20 … 160 190 260 330 380 ×12`; `target_x`, the same 32-key curve, has
-   that sequence with sixteen holes. Path 2's six healthy channels say
-   `0 80 190 240 370 425 445 470` where `target_z` says `0 80 **510** _ 370 _
-   445 _` — and 510 is `00 00 ff 43` against 190's `00 00 3e 43`.
-2. **`st1evtbl` itself.** The script plays these paths with
-   `cam_play 0..230` (slot 32), `0..380` (33), `0..170 / 171..359 / 360..470`
-   (34) and `0..125 / 126..140` (35) — the exact durations the restored time
-   columns give, from a different file authored by the same tools.
-3. **Duplicate keys.** Keys sharing a time are copies of one key and must be
-   byte-identical, so any member differing by a single `0xFF` byte is convicted
-   by its twins.
-
-### What the restoration does
-
-`hod2lib.cam` trims the trailing padding, then works through the evidence in
-order of strength, recording which rule answered each field in
-`Curve.damage` (`Damage.how`):
-
-| rule | evidence |
-|---|---|
-| `duplicate` / `constant` | a repeated key or column, differing by one `0xFF` byte |
-| `sibling` | the time column, from a channel of the same path that agrees with the surviving times |
-| `partner` | `tangent_out` from this key's own `tangent_in`, which carries the same low three bytes |
-| `twin` | another key in the curve holds the same low three bytes with a sane top byte, and no other top byte occurs |
-| `order` | the only top byte keeping the time column strictly increasing between healthy neighbours |
-| `nearest` | no exact evidence — the top byte landing closest to the neighbours. A reconstruction |
-
-Across the corpus that is **90 fields restored, 81 of them determined by the
-file itself** and 9 reconstructed. `verify_phase6.py` prints the breakdown, so
-no substitution is silent.
-
-> ⚠️ **Padding is not damage.** `key_count` is always a power of two because the
-> binary search runs a fixed `log2(count)` steps, so short curves are padded and
-> a padding slot stores `0xFFFF0000` in its time field. Padding is always a
-> *trailing* run. An earlier note recorded "103 damaged words in cp_st1", which
-> was its damaged words and its 11 padding slots added together, and a second
-> recorded 91 by counting only the non-finite ones.
-
-Eight channels have no evidence left and are zero-filled and flagged in
-`Path.damaged` so a consumer can badge them rather than present them as data.
-`cp_st1` path 0's `eye_x` is the one that matters: all eight keys read
-`ff 64 bc ff`, no other curve in any `cam/` file carries those low three bytes,
-and the channel is constant so no neighbour constrains it. That camera's x is
-one of ±23.5, ±94.2, ±376.8 or ±1507.2 and the file no longer says which.
+Fixed by restoring the four files from `hotd2.iso` and deleting the repair code
+from `hod2lib.cam`, `hod2lib.campaths`, `tools/verify_phase6.py`,
+`web/src/bundle/cameras.ts`, `web/src/render/campath.ts`,
+`web/src/render/overlays.ts` and `web/src/app/main.ts`.

@@ -1282,15 +1282,7 @@ class Player {
         this.stage.visibility === "all"],
       ["drawn", `${this.stage.visibleCount} models, ` +
         `${this.stage.visibleTriangles.toLocaleString()} tris`],
-      ["cam slot", (() => {
-        if (!cam) return "—";
-        const p = this.paths?.paths.get(cam.slot);
-        if (!p) return String(cam.slot);
-        if (p.isDamaged) {
-          return `${cam.slot} ⚠ ${Object.keys(p.damaged).join(",")} invented`;
-        }
-        return p.repairs ? `${cam.slot} (${p.repairs} repaired)` : String(cam.slot);
-      })(), !!(cam && this.paths?.paths.get(cam.slot)?.isDamaged)],
+      ["cam slot", cam ? String(cam.slot) : "—"],
       ["cam frame", cam ? cam.frame.toFixed(1) : "—"],
       ["roll channel", w.rollEnabled ? "on (opcode 0x35)" : "off"],
       ["spawns", `${w.spawns.length} placed`

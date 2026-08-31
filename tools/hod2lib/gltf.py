@@ -225,7 +225,7 @@ def _sample_path(path, channels, step):
     curves = [path.channels.get(c) for c in channels]
     if any(c is None for c in curves):
         return []
-    keys = curves[0].real_keys
+    keys = curves[0].keys
     if len(keys) < 2:
         t0 = keys[0].time if keys else 0.0
         return [(t0, [c.evaluate(t0) for c in curves])]

@@ -23,6 +23,7 @@ import { SetGameTables } from "../src/game/tables";
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { SpawnClass } from "../src/game/spawn_class";
+import { GameMode } from "../src/game/game_mode";
 import { ThrowerState } from "../src/game/class31/states";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
@@ -692,12 +693,22 @@ const BREAKABLES: BreakablesJson = {
   level_height: 7.540296,
 };
 
-function propScene(rng: Rng): Events {
+/**
+ * A scene for the container tests.
+ *
+ * The mode defaults to **Original** because that is the one in which an
+ * ordinary breakable is an ordinary breakable. In Arcade,
+ * `PlaceBreakableGroup` turns the members named by `g_prop_target_set` into
+ * one-shot targets that pay no score, and every group has at least one of
+ * them — so "a prop takes two shots" is a statement about Original Mode and
+ * always was. Arcade's rule gets its own case below.
+ */
+function propScene(rng: Rng, mode: GameMode = GameMode.Original): Events {
   ResetGameGlobals();
   SetGameTables(CHARS, BREAKABLES);
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
   G.g_camera_fixed_eye_y = 0;
-  G.g_GameMode = 0;
+  G.g_GameMode = mode;
   void rng;
   return new Events();
 }
@@ -1478,7 +1489,7 @@ console.log("\nclass 0x41, Original Mode's collectibles in Arcade:");
       lifetime_evt_blocks: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
     rng);
   G.g_breakable_props.push(p);
-  G.g_GameMode = 2;
+  G.g_GameMode = GameMode.Arcade;
   BreakablePropPoolUpdate(rng, events);
   check("an Original-Mode-only type is gone on its first Arcade frame",
         G.g_breakable_props.length === 0);
@@ -1488,13 +1499,13 @@ console.log("\nclass 0x41, Original Mode's collectibles in Arcade:");
       lifetime_evt_blocks: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
     rng);
   G.g_breakable_props.push(q);
-  G.g_GameMode = 1;
+  G.g_GameMode = GameMode.Original;
   BreakablePropPoolUpdate(rng, events);
   check("and survives in Original Mode", !q.dead);
   check("the set is the four routines that were actually read",
         [...GENERIC_ORIGINAL_MODE_ONLY].sort((a, b) => a - b)
           .join(",") === "70,71,72,77");
-  G.g_GameMode = 0;
+  G.g_GameMode = GameMode.Arcade;
 }
 
 console.log("\nclass 0x41 type 4, seven of the eleven kinds are effects:");
@@ -1510,6 +1521,33 @@ console.log("\nclass 0x41 type 4, seven of the eleven kinds are effects:");
   check("and every other kind is left at the engine's 0xFFFF",
         [0, 1, 4, 5, 6, 7, 10].every((k) => (KIND_SLOT[k] ?? SLOT_NONE)
                                             === SLOT_NONE));
+}
+
+console.log("\nclass 0x41, Arcade's one-shot targets:");
+{
+  const rng = new Rng(53);
+  const events = propScene(rng, GameMode.Arcade);
+  G.g_prop_target_set = 0;      // members 2, 3, 4 and 6
+  const props = PlaceBreakableGroup(1, 4, rng);
+  const target = props.find((p) => p.member === 2);
+  const plain = props.find((p) => p.member === 0);
+  check("the member the target set names takes one shot, not two",
+        !!target && target.hp === 1, `hp ${target?.hp}`);
+  check("and wears the one-shot model",
+        target?.slot === BreakableSlot.OneShotTarget,
+        `0x${target?.slot.toString(16)}`);
+  check("the members it does not name are ordinary",
+        !!plain && plain.hp === 2 && plain.slot === BreakableSlot.Default);
+
+  const before = G.g_player_score[0];
+  shoot(target!, 1, rng, events);
+  // Note what it does *not* do: `hp` is still 1. A one-shot target is removed
+  // outright rather than damaged, so nothing decrements the shot count.
+  check("one shot removes it, without spending its hit point",
+        target!.state === BreakableState.Removed && target!.hp === 1,
+        `hp ${target!.hp} state ${target!.state}`);
+  check("and it pays no score", G.g_player_score[0] === before,
+        `${G.g_player_score[0]} vs ${before}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

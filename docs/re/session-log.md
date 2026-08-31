@@ -5000,3 +5000,38 @@ and 434 of `0x44` — so there is no "leave two alive" case to get wrong.
 The set of classes retired is deliberately **not** `registry.ts`'s
 `ENEMY_CLASSES`: that one is narrower on purpose, because an unported class in
 it is an actor that never dies and therefore a gate that never unblocks.
+
+### One game-mode enumeration, and the end of simulated combat
+
+Two clean-ups that were each hiding a small bug.
+
+**`game_mode` meant two different things.** The exporter emitted
+`1 if original else 0` under the same name the EXE uses for
+`g_GameMode` — 1 original, 2 arcade, 3 boss rush — so a bundle's `0` was the
+EXE's `2` and every reader had to know which side of the seam it stood on.
+Worse, **nothing in the player ever wrote `G.g_GameMode` at all**, so every run
+was Arcade whichever bundle was loaded. That was harmless until class 0x41 grew
+a branch on it: `PlaceGenericProp`'s types 70–72 and 77 despawn on their first
+frame unless the mode is Original, and Original Mode's whole item hunt is
+behind it. There is one enumeration now — `hod2lib.stage.GameMode` and
+`web/src/game/game_mode.ts` — and `main.ts` copies the bundle's value straight
+into `G.g_GameMode`.
+
+Typing the global as the enum turned up something the tests had been asserting
+against a mode that does not exist. `propScene` set `g_GameMode = 0`, a neutral
+that is neither Original nor Arcade, and under it "a prop takes two shots" held.
+In **Arcade** it does not: `PlaceBreakableGroup` turns the members
+`g_prop_target_set` names into one-shot targets, and every group has at least
+one of them. So that fixture is Original now — the mode in which an ordinary
+breakable is an ordinary breakable — and Arcade's rule has its own case, which
+turned up a detail nobody had written down: a one-shot target is **removed
+outright without its hit point being spent**, so `hp` is still 1 afterwards.
+
+**The Combat dropdown is gone.** `wait_enemies_present`/`wait_enemies_alive`
+were paced on a per-enemy stopwatch (instant / 0.5 s / 1 s / 2 s / pass
+through) from before the player could shoot anything. It can shoot now, so with
+Shoot on the gate is the real gate and with Shoot off nothing can make the
+count fall and it passes — no invented wait lengths in between. That removed
+`simulateCombat`, `secondsPerEnemy`, the `combat` wait policy and
+`ActiveSpawn.secondsLeft`; `liveEnemies` now means what its name says, the
+spawns an enemy gate is actually waiting on.

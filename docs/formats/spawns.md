@@ -145,6 +145,69 @@ they are animated effects, `obj+0x324`/`+0x328` coming from
 `g_prop_kind_params`. A spawn marker with nothing under it for one of those
 kinds is not a missing export — it is a renderer the player does not have.
 
+### The effect system: what the model-less props actually draw
+
+**[proved]** An "effect" is a small **rigged object animated by an ordinary
+motion**. Three contiguous tables in the EXE describe all 29 of them:
+
+```
+0x004D5390   void *[29]   g_effect_trees          root node per effect id
+0x004D5404   s16  [29]    g_effect_bone_counts    bones its motion carries
+0x004D5440   u8   [29]    g_effect_interp_mode    0 = one key a frame
+```
+
+A node — and the root the table points at is one — is
+
+```
++0x00  u32  asset slot            0 on the root, so the root never draws
++0x04  s16  bone index, 1-based
++0x06  u16  child count
++0x08  u32  children[]
+```
+
+which is `g_character_skeletons`' struct **minus the bind offsets**, because an
+effect's translations are per-frame rather than a rest pose.
+
+`EffectDrawUnlit` (`FUN_0040DD90`) takes a 4-int state block that lives inside
+the owning object — `obj+0x324` for a class-0x41 prop — holding
+`{effect id, motion id, frame, previous frame}`. `EffectDrawTree` wraps the
+frame and walks the children; `EffectDrawNode` pushes, poses, draws its slot
+and recurses.
+
+**The animation is a plain motion.** `EffectFrameTranslations`
+(`FUN_0040E040`) resolves to
+
+```
+g_motion_slots[motion].base + 4 + frame * align4(bones * 0x12 - 0xF)
+                            + bone * 0xC          /* 3 floats  */
+```
+
+with the rotations following at `bone * 6` (three BAMS shorts, X then Y then
+Z), so `mot.md`'s decoder already reads the data — only the node tree is new.
+`g_effect_interp_mode` picks the rate: 0 is one key per frame, 1 and 2 halve it
+and blend the neighbouring keys, and 2 additionally slerps through matrices
+when any axis differs by more than `0x3000`.
+
+**[proved] by the slot names.** Every node of an effect resolves to one
+`komono_*.bin` — *komono*, "small items", the same family as the breakable
+props:
+
+| Effect | Prop kind | Nodes | File |
+|---|---|---|---|
+| 5 | 0 | 13 | `komono_3.bin` |
+| 17 | 1 | 18 | `komono_6.bin` |
+| 20 | 6 | 11 | `komono_3.bin` |
+| 22 | 5 | 11 | `komono_7.bin` |
+
+and each tree's node count is exactly its `g_effect_bone_counts` entry — a
+check that would fail if the struct or the table bound were wrong.
+
+So a class-0x41 kinded prop of a kind with no asset slot is **not missing**: it
+is a multi-part `komono` prop whose parts and pose come through this system.
+`g_prop_kind_params` already carries the `(effect, motion)` pair per kind, and
+the player already decodes motions and already exports per-slot templates —
+what it does not yet have is the node tree and a renderer that walks it.
+
 ### Class 0x24's parameter tail
 
 `SetPiecePropInit` reads everything a set-piece does out of the tail at

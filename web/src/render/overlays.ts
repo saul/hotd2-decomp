@@ -308,12 +308,6 @@ export class SpawnLayer {
       // they are deliberately not applied here.
       o.rotation.set(0, s.orient[1] * BAMS, 0);
 
-      const dead = s.secondsLeft !== null && s.secondsLeft <= 0;
-      for (const c of o.children) {
-        const m = (c as Mesh).material as MeshBasicMaterial | undefined;
-        if (m && "opacity" in m) m.opacity = dead ? 0.18 : 0.85;
-      }
-
       const text = `c${s.class}${s.hp ? ` hp${s.hp}` : ""}`;
       let sprite = o.children.find((c) => (c as Sprite).isSprite) as
         | Sprite

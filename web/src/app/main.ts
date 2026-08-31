@@ -55,6 +55,7 @@ import { GameSystem, ScriptSystem } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
 import { GlobalsView } from "../hud/globals_view";
+import { GameMode } from "../game/game_mode";
 import { G } from "../game/globals";
 import { SetGameTables } from "../game/tables";
 import { TurnLookAtToward } from "../game/camera/turn";
@@ -271,7 +272,7 @@ class Player {
   private entryFor(stage: number, original: boolean): StageEntry | undefined {
     return this.manifest.stages.find(
       (s) => (s.stage ?? s.scene) === stage &&
-        (s.game_mode === 1) === original,
+        (s.game_mode === GameMode.Original) === original,
     );
   }
 
@@ -319,6 +320,11 @@ class Player {
       bundle.script.characters?.player?.start_lives ?? 2,
       bundle.script.characters?.player?.start_lives ?? 2,
     ];
+    // Nothing wrote this before, so every run was Arcade whichever bundle was
+    // loaded. That stopped being harmless the moment class 0x41 grew a branch
+    // on it: `PlaceGenericProp`'s types 70-72 and 77 despawn on their first
+    // frame unless the mode is Original, and the whole item hunt is behind it.
+    G.g_GameMode = bundle.script.game_mode;
     // Characters are already in the stage glTF, one hierarchy per spawn;
     // this adopts them and takes over the pose.
     // The object paths class 0x25 rides live in the camera bundle; the
@@ -657,13 +663,6 @@ class Player {
 
     $<HTMLSelectElement>("#speed").addEventListener("change", (e) => {
       this.speed = Number((e.target as HTMLSelectElement).value);
-    });
-
-    $<HTMLSelectElement>("#combat").addEventListener("change", (e) => {
-      const v = Number((e.target as HTMLSelectElement).value);
-      if (!this.walker) return;
-      this.walker.options.simulateCombat = v >= 0;
-      this.walker.options.secondsPerEnemy = Math.max(0, v);
     });
 
     const slider = $<HTMLInputElement>("#frame-slider");
@@ -1241,7 +1240,8 @@ class Player {
       })(), !!(cam && this.paths?.paths.get(cam.slot)?.isDamaged)],
       ["cam frame", cam ? cam.frame.toFixed(1) : "—"],
       ["roll channel", w.rollEnabled ? "on (opcode 0x35)" : "off"],
-      ["spawns", `${w.liveEnemies} live / ${w.spawns.length} placed`],
+      ["spawns", `${w.spawns.length} placed`
+        + (w.liveEnemies ? `, ${w.liveEnemies} the enemy gate waits on` : "")],
       ["waiting on", w.wait ? w.wait.blocksOn : "—", !!w.wait],
       ["bgm", w.bgmTrack === null ? "—" : `track ${w.bgmTrack}`],
       ["fog", this.sceneFog.describe],

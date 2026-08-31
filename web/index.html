@@ -159,16 +159,6 @@
             <option value="8">8×</option>
           </select>
         </label>
-        <label class="speed" title="The live-enemy waits (evt 0x43/0x44) are the game's combat gate. With Shoot on they are honoured exactly -- the script waits until the enemies are dead. With Shoot off there is nothing that can kill them, so this paces them instead, and the feed says so.">
-          Combat
-          <select id="combat">
-            <option value="0">instant</option>
-            <option value="0.5">0.5 s/enemy</option>
-            <option value="1" selected>1 s/enemy</option>
-            <option value="2">2 s/enemy</option>
-            <option value="-1">pass through</option>
-          </select>
-        </label>
         <span class="sep"></span>
         <button id="btn-sound" class="sound" aria-pressed="false"
                 title="Sound on / off. Browsers block audio until the page is clicked, so this is also the gesture that unblocks it."><span id="sound-icon">🔇</span> <span id="sound-text">Muted</span></button>

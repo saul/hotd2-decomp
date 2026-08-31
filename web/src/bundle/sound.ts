@@ -16,6 +16,7 @@ export interface BgmJson {
     plain: string | null;
     note: string;
   } | null;
+  /** `g_GameMode` as the exe numbers it — see `game/game_mode.ts`. */
   game_mode: number;
 }
 

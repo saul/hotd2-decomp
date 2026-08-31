@@ -183,10 +183,13 @@ so is the event feed.
   256-byte flag array written by gameplay — and that gameplay is still being
   decompiled. Re-implementing it here would mean guessing, and a guess dressed
   as an interpreter is worse than an honest walker. So `wait_enemies_present`
-  and friends are *simulated* on a per-enemy timer (the **Combat** control:
-  instant / 0.5 s / 1 s / 2 s / pass through), and every wait the walker could
-  not honour appears in the feed with the condition it *would* have blocked on
-  and what happened instead.
+  and friends now block on the real thing whenever **Shoot** is on: the gate
+  opens when the enemies are dead, because the player can kill them. With
+  Shoot off nothing can make the count fall, so the gate passes and the feed
+  says so. (It used to be paced on a per-enemy stopwatch — a stand-in from
+  before there was any shooting, which only ever produced a wait of an
+  invented length.) Every wait the walker cannot honour appears in the feed
+  with the condition it *would* have blocked on and what happened instead.
 - **Runtime-driven rig parts are not animated.** `rigs.py` records the rule —
   "RotY by obj+0x1334", "model cycles `DAT_009A32A0 % 12 + 0x8CE`" — rather
   than baking a frame of it, because the globals driving them are gameplay

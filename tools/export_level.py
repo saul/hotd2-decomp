@@ -383,7 +383,8 @@ def main() -> int:
             side = out_dir / f"{name}_regions.json"
             side.write_text(json.dumps({
                 "scene": scene,
-                "game_mode": 1 if args.original else 0,
+                "game_mode": int(stagelib.GameMode.ORIGINAL if args.original
+                                 else stagelib.GameMode.ARCADE),
                 "note": "region id -> asset slots resident and drawn. Set by evt "
                         "opcode 0x29; consecutive regions overlap, which is why "
                         "a whole-stage export shows interpenetrating geometry "

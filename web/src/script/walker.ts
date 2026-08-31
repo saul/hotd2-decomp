@@ -39,8 +39,6 @@ export interface ActiveSpawn extends SpawnJson {
   step: number;
   opIndex: number;
   opcode: number;
-  /** Counts down while combat is simulated; null when it is not. */
-  secondsLeft: number | null;
 }
 
 /**
@@ -97,7 +95,6 @@ export interface CamCommand {
 export type WaitPolicy =
   | { kind: "frames"; framesLeft: number }
   | { kind: "camera" }
-  | { kind: "combat"; secondsLeft: number }
   /** The real gate: blocks until the player has killed them. */
   | { kind: "enemies" }
   | { kind: "passed"; why: string };
@@ -127,10 +124,6 @@ export interface FeedEntry {
 }
 
 export interface WalkerOptions {
-  /** Seconds of simulated combat per live spawn. 0 resolves instantly. */
-  secondsPerEnemy: number;
-  /** Simulate the enemy-count waits at all, or pass straight through them. */
-  simulateCombat: boolean;
   /**
    * Seconds a branch point waits before the seeded RNG picks. Hovering the
    * branch bar freezes it, so this is the unattended pace, not a deadline.
@@ -142,8 +135,6 @@ export interface WalkerOptions {
 }
 
 export const DEFAULT_OPTIONS: WalkerOptions = {
-  secondsPerEnemy: 1,
-  simulateCombat: true,
   branchCountdown: 1.5,
   clearSpawnsOnBlock: true,
   seed: 1,
@@ -229,8 +220,8 @@ const ENEMY_GATE_CLASSES: ReadonlySet<number> = new Set<number>([
 /** How far a wait opcode can be honoured from the bundle alone. */
 const WAIT_NOTES: Record<number, string> = {
   0x40: "approximated: resolves when the current camera move ends",
-  0x43: "the live-enemy gate: real while Shoot is on, otherwise paced by the "
-      + "combat setting",
+  0x43: "the live-enemy gate: real while Shoot is on, and passed when it is "
+      + "off because nothing can then make the count fall",
   0x44: "the second enemy counter, gated with 0x43",
   0x45: "passed: the script flag array is written by gameplay",
   0x46: "passed: the scripted-actor counter is a runtime value",
@@ -445,9 +436,15 @@ export class Walker {
     return steps?.[this.step]?.ops?.[this.opIndex];
   }
 
+  /**
+   * How many of the live spawns are the classes an enemy gate waits on.
+   *
+   * The player's own count is `chars.aliveCount`, which knows what has been
+   * shot; this is the script's view, and it is what the status panel reports
+   * alongside the placement count.
+   */
   get liveEnemies(): number {
-    return this.spawns.filter((s) => s.secondsLeft === null || s.secondsLeft > 0)
-      .length;
+    return this.spawns.filter((s) => ENEMY_GATE_CLASSES.has(s.class)).length;
   }
 
   // -- control -----------------------------------------------------------
@@ -794,14 +791,6 @@ export class Walker {
       }
     }
 
-    if (this.options.simulateCombat) {
-      for (const s of this.spawns) {
-        if (s.secondsLeft !== null && s.secondsLeft > 0) {
-          s.secondsLeft = Math.max(0, s.secondsLeft - dt);
-        }
-      }
-    }
-
     if (this.wait) {
       const w = this.wait.policy;
       if (w.kind === "frames") {
@@ -809,9 +798,6 @@ export class Walker {
         w.framesLeft -= used;
         frames -= used;
         if (w.framesLeft > 0) return;
-      } else if (w.kind === "combat") {
-        w.secondsLeft = Math.max(0, w.secondsLeft - dt);
-        if (!this.waitSatisfied()) return;
       } else if (!this.waitSatisfied()) {
         return;
       }
@@ -890,8 +876,6 @@ export class Walker {
         return w.policy.framesLeft <= 0;
       case "camera":
         return !this.cam || this.cam.done || this.cam.isStatic;
-      case "combat":
-        return this.liveEnemies <= (w.op.arg ?? 0) || w.policy.secondsLeft <= 0;
       case "enemies":
         return (this.host.aliveEnemies() ?? 0) <= (w.op.arg ?? 0);
       default:
@@ -974,9 +958,6 @@ export class Walker {
         step: w.step,
         opIndex: w.opIndex,
         opcode: op.op,
-        secondsLeft: w.options.simulateCombat
-          ? w.options.secondsPerEnemy
-          : null,
       });
     }
     return `${op.spawns.length} spawn${op.spawns.length === 1 ? "" : "s"}`;
@@ -1187,11 +1168,11 @@ export class Walker {
         policy = alive <= arg
           ? { kind: "passed", why: "no live enemies" }
           : { kind: "enemies" };
-      } else if (this.options.simulateCombat) {
-        const over = Math.max(0, this.liveEnemies - arg);
-        policy = { kind: "combat",
-                   secondsLeft: over * this.options.secondsPerEnemy };
       } else {
+        // Shooting off: nothing can make the count fall, so the gate is not a
+        // condition this client can evaluate and it passes. It used to be
+        // paced on a stopwatch instead — a stand-in from before the player
+        // could shoot, which only ever produced a wait of an invented length.
         policy = { kind: "passed",
                    why: WAIT_NOTES[op.op] ?? "needs the runtime" };
       }

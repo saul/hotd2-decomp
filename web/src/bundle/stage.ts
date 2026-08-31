@@ -17,6 +17,7 @@ import type { BgmJson } from "./sound";
 export interface ScriptJson {
   scene: number;
   stage: number | null;
+  /** `g_GameMode` as the exe numbers it — see `game/game_mode.ts`. */
   game_mode: number;
   evt_file: string;
   entry_block: number;

@@ -23,14 +23,36 @@ Reference: docs/formats/pipeline.md.
 from __future__ import annotations
 
 import re
+from enum import IntEnum
 from dataclasses import dataclass, field
 from pathlib import Path as _Path
 
 from . import cam as camlib, coli as colilib, container as C, evt, exetab, nl1, texbank
 from .campaths import CamPaths
 
+
 __all__ = ["STAGE_TO_SCENE", "SCENE_TO_STAGE", "Stage", "Part",
-           "get_tables", "load_asset", "load_cam_paths"]
+           "get_tables", "load_asset", "load_cam_paths", "GameMode"]
+
+
+class GameMode(IntEnum):
+    """`g_GameMode` (0x009CA08C), as the EXE numbers it.
+
+    The bundle used to emit a *different* number under the same name -- a flag,
+    ``1 if original else 0`` -- so a bundle's 0 meant the EXE's 2 and every
+    reader had to know which side of the seam it was on. There is one
+    enumeration now; `web/src/game/game_mode.ts` is its other half.
+    """
+
+    #: The story campaign. Class 0x41 releases the member's own story item
+    #: here, and `PlaceGenericProp`'s types 70-72 and 77 exist only in it.
+    ORIGINAL = 1
+    #: Arcade. `PlaceBreakableGroup` turns the members `g_prop_target_set`
+    #: names into one-shot targets that pay no score.
+    ARCADE = 2
+    #: Boss Rush. No shipped stage script is entered in this mode.
+    BOSS_RUSH = 3
+
 
 #: stage number -> scene id, the event system's own index.
 STAGE_TO_SCENE = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5}
@@ -152,7 +174,8 @@ class Stage:
         self.scene = scene
         self.stage = stage if stage is not None else SCENE_TO_STAGE.get(scene)
         self.original = original
-        self.game_mode = 1 if original else 0
+        self.game_mode = int(GameMode.ORIGINAL if original
+                            else GameMode.ARCADE)
 
         tables = get_tables(self.game)
         if tables is None:

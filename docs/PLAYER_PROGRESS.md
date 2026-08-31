@@ -768,7 +768,7 @@ missed. Meanings and confidence marks live in
 | `40` | `wait_queued_events_done` | wait | ~approx~ | resolves when the current camera move ends |
 | `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path |
 | `42` | `wait_frames` | wait | **done** | **exact** frame countdown |
-| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead; otherwise paced by the per-enemy timer, and the feed says so |
+| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead; with Shoot off nothing can make the count fall, so it passes and the feed says so |
 | `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate, gated with `0x43` |
 | `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
 | `46` | `wait_scripted_actors` | wait | shown | runtime counter; passed, with the condition reported |

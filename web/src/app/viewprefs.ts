@@ -42,7 +42,6 @@ const CONTROLS = [
   "#light-mode",
   "#fog-mode",
   "#speed",
-  "#combat",
 ] as const;
 
 type Saved = Record<string, boolean | string>;

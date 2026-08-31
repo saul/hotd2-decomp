@@ -28,6 +28,7 @@ export interface StageEntry {
   name: string;
   stage: number | null;
   scene: number;
+  /** `g_GameMode` as the exe numbers it — see `game/game_mode.ts`. */
   game_mode: number;
   geometry: string;
   cam: string;

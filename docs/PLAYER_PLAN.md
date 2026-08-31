@@ -370,7 +370,6 @@ Resolved since this plan was first drafted, and no longer risks:
 | Refactor silently changes exporter behaviour | byte-identical output capture before/after; R0 gated on it |
 | `cam.json` size (~600 KB per stage) | gzip; binary sidecar fallback |
 | ~1300 texture requests before E2 | HTTP/2, or bring GLB forward |
-| Play-mode pacing (1 s/enemy) is a guess | tunable; validate against footage |
 | Step-0 semantics are inferred | explicit W3 verification before it shapes the timeline UI |
 | Visual baselines drift with Chromium versions | pin the Playwright browser build; signatures are tolerance-banded, not exact |
 | Two docs disagree as RE lands underneath | the bundle records source hashes and tool version; `dump_stage_script.py` stays the oracle |

@@ -17,6 +17,7 @@
  */
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
+import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 
 /** One weapon in flight — the pool `ThrownWeaponUpdate` walks. */
@@ -200,16 +201,16 @@ export const G = {
 
   // -- game mode ---------------------------------------------------------
   /**
-   * `g_GameMode` — 0x009CA08C: 1 original/story, 2 arcade, 3 boss rush, as
-   * `globals.tsv` reads it. Class 0x41 branches on 1 and 2 — mode 1 releases
-   * the member's own `storyItem` and can drop an extra life from every prop,
-   * mode 2 turns selected members into one-shot targets and pays no score.
+   * `g_GameMode` — 0x009CA08C. See {@link GameMode}.
    *
-   * Note this is the **exe's** numbering. The bundle's own `game_mode` is a
-   * different flag: `stage.game_mode = 1 if original else 0`, so a bundle 0
-   * is exe 2 and a bundle 1 is exe 1.
+   * Class 0x41 branches on it both ways: Original releases the member's own
+   * `storyItem` and can drop an extra life from every prop, Arcade turns
+   * selected members into one-shot targets and pays no score for them.
+   *
+   * The bundle carries the same numbers — `script.game_mode` *is* this field,
+   * and `main.ts` copies it straight across.
    */
-  g_GameMode: 2,
+  g_GameMode: GameMode.Arcade as GameMode,
   /**
    * `g_prop_target_set` — 0x009C9118. Which of four member sets
    * `PlaceBreakableGroup` turns into one-shot targets while `g_GameMode` is 2.

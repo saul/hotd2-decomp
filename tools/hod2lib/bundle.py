@@ -127,9 +127,10 @@ def bgm_json(tables, stage_number: int | None, game_mode: int) -> dict:
 
     Both tables travel, because which one the game picks depends on runtime
     state (`DAT_009C8E98 == 6 && g_GameMode == 0` selects the plain names, and
-    everything else the `_AR` mix). The client defaults to the same rule it
-    can actually evaluate -- Arcade gets `_AR`, which is what every stage
-    scene resolves to -- and can be pointed at the other.
+    everything else the `_AR` mix). Note the `0` there: it is a mode no stage
+    is entered in, so neither `GameMode.ORIGINAL` nor `GameMode.ARCADE` can
+    reach the plain table. The client defaults to `_AR` for that reason and
+    can be pointed at the other.
     """
     names = tables.bgm_names()
     idx = STAGE_BGM_INDEX.get(stage_number or -1)

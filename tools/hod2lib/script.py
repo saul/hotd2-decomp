@@ -28,6 +28,7 @@ import struct
 from dataclasses import dataclass, field
 
 from . import coli as colilib, evt, exetab
+from .stage import GameMode
 
 
 def _as_f32(word: int) -> float:
@@ -707,12 +708,13 @@ class Program:
         is reached only through the checkpoint path, which is why it is
         presented as checkpoint state rather than run inline.
         """
-        if self.stage_game_mode == 1 and self.scene == 0:
+        if self.stage_game_mode == GameMode.ORIGINAL and self.scene == 0:
             return 5
         return 1
 
     @property
     def stage_game_mode(self) -> int:
+        """`g_GameMode` as the EXE numbers it -- see `stage.GameMode`."""
         return self.stage.game_mode
 
     def cam_slots_used(self) -> list[int]:

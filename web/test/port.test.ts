@@ -30,6 +30,9 @@ import {
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
+import { ZombieArmedHands, ZombiePickThrowingHand,
+         ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
+  from "../src/game/class30/stand_throw";
 import { ActorFlag, ZombieFlag2, type Actor } from "../src/game/actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot }
   from "../src/game/combat/permits";
@@ -140,10 +143,37 @@ const TYPE: CharacterType = {
         player_motion: 7, cancel_mask: 8,
       },
     },
+    // The throw entries: index 0 is bone 5's and index 1 is bone 8's, and the
+    // range is a throw's rather than a reach's.
+    "7": {
+      "0": { strike: 102, lunge: 101, distance: 99, hit_frame: 8,
+             player_motion: 4, cancel_mask: 2 },
+      "1": { strike: 103, lunge: 101, distance: 99, hit_frame: 8,
+             player_motion: 4, cancel_mask: 4 },
+    },
+    "8": {
+      "0": { strike: 102, lunge: 101, distance: 99, hit_frame: 8,
+             player_motion: 4, cancel_mask: 2 },
+      "1": { strike: 103, lunge: 101, distance: 99, hit_frame: 8,
+             player_motion: 4, cancel_mask: 4 },
+    },
   },
   attack_picks: { "0": new Array(80).fill(1) },
   throw: null,
-  motion_row: { "0": [10, 10, 12, 12, 14] },
+  // The stationary thrower's kit. Body conditions 7 and 8 index the same two
+  // attack entries, one per hand, exactly as `tutorial.bin`'s do; the hand
+  // slots are what `ZombieArmedHands` compares the live draw slots against.
+  zombie_throw: {
+    hands: [
+      { bone: 5, held: 7886, bare: 7883, weapon_bone: 6, projectile: 585 },
+      { bone: 8, held: 7882, bare: 7879, weapon_bone: 9, projectile: 585 },
+    ],
+    straight: true, speed: 1, speed_standing: 1.5, aim_ahead: 4,
+    aim_side: 0.6, aim_drop: 1.5, arc_gravity: 0.009, hit_kind: 4,
+    stick_frames: 30, blink_frames: 60,
+  },
+  motion_row: { "0": [10, 10, 12, 12, 14], "7": [10, 10, 12, 12, 14],
+                "8": [10, 10, 12, 12, 14] },
   backoff_index: 4,
   gore: {}, torso_stages: 3,
   motions: {
@@ -154,6 +184,9 @@ const TYPE: CharacterType = {
     // against a 25-unit inner ring, so the recover is most of the ring and the
     // retreat that walks it back is the pause between bites.
     "100": motion(20, 0.8), "101": motion(20, 0.6),
+    // The two throw clips, which carry no root motion at all --
+    // `tutorial.bin`'s net exactly zero.
+    "102": motion(24), "103": motion(20),
     // 185 (0xB9) is the pose `ZombieStateEmerge` holds while it waits.
     "185": motion(4),
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
@@ -3004,6 +3037,82 @@ console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
     runClip(c, 200);
     check("...and rests after the second", c.civ!.loops === 0
           && MotionPlayFrame(c) === 37, String(MotionPlayFrame(c)));
+  }
+}
+
+console.log("\nclass 0x30 state 33: the stationary thrower:");
+{
+  // `ZombieStateStandAndThrow` is the only class-0x30 state that never moves
+  // the actor. The port had no state 33, so `ZombieEntryState` folded it into
+  // `AttackRun` and stage 1's axe man -- character type 0x13, whose asset file
+  // is `tutorial.bin` -- charged the camera.
+  check("a state-33 spawn starts in StandAndThrow, not AttackRun",
+        ZombieEntryState(ZombieState.StandAndThrow)
+          === ZombieState.StandAndThrow,
+        String(ZombieEntryState(ZombieState.StandAndThrow)));
+
+  const thrower = (cond = 7) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(0x7500, SpawnClass.Zombie, 1, "axe man", {
+      initialState: ZombieState.StandAndThrow, condition: cond,
+      standThrow: { delay_two_hands: 2, delay_one_hand: 2,
+                    delay_after_throw: 2, exit_state: 0, walk_distance: 5 },
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 60);
+    return z;
+  };
+
+  {
+    const z = thrower();
+    check("both hands start armed", ZombieArmedHands(z) === 2,
+          String(ZombieArmedHands(z)));
+    // Two frames of delay, then it claims and starts the throw clip.
+    for (let i = 0; i < 4; i++) {
+      ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
+    }
+    check("it claims a permit and starts a throw clip",
+          z.attackPermit >= 0 && (z.motion === 102 || z.motion === 103),
+          `permit ${z.attackPermit} motion ${z.motion}`);
+    check("...and it has not moved", z.pos.x === 0 && z.pos.z === 60,
+          `${z.pos.x}, ${z.pos.z}`);
+  }
+
+  // **The hand bookkeeping.** A hand whose draw slot is no longer the one the
+  // skeleton gave it has thrown its weapon -- or had it shot off -- and
+  // `ZombiePickThrowingHand` must fall back to the other one.
+  {
+    const z = thrower();
+    z.boneSlot["5"] = 0;                       // right hand emptied
+    check("an emptied hand disarms", ZombieArmedHands(z) === 1,
+          String(ZombieArmedHands(z)));
+    check("...and the pick falls back to the other",
+          ZombiePickThrowingHand(z, new Rng(1)) === 8,
+          String(ZombiePickThrowingHand(z, new Rng(1))));
+    z.boneSlot["8"] = 0;
+    check("with both empty the pick reports none",
+          ZombieArmedHands(z) === 0
+          && ZombiePickThrowingHand(z, new Rng(1)) === 0);
+  }
+
+  // The other way in: a condition-8 walker already facing the camera.
+  {
+    const z = thrower(8);
+    z.state = ZombieState.AttackRun;
+    G.g_camera_yaw_bams = 0x8000;
+    z.yaw = 0;                                 // facing the camera's reverse
+    check("a condition-8 walker facing the camera stops and throws",
+          ZombieShouldStandAndThrow(z));
+    const away = thrower(8);
+    away.yaw = 0x4000;                         // ninety degrees off
+    check("...and one facing away does not", !ZombieShouldStandAndThrow(away));
+    const ordinary = thrower(0);
+    ordinary.yaw = 0;
+    check("...nor does an ordinary body condition",
+          !ZombieShouldStandAndThrow(ordinary));
   }
 }
 

@@ -53,6 +53,20 @@ export interface ThrownWeapon {
   blinkFrames: number;
   /** The renderer hides it on alternate frames once it is blinking. */
   visible: boolean;
+  /**
+   * Constant acceleration, for the one throw that arcs.
+   *
+   * Class 0x31's weapon always flies straight, so this is zero for every one
+   * of its throws. `ZombieThrownWeaponStateArc` (`FUN_004598F0`) is the other
+   * family: char type 1 lobs its weapon with `±0.009` on whichever of X and Z
+   * `ZombieThrownWeaponBeginArc` picks, and the axe throwers do not.
+   */
+  acc?: Vec3;
+  /**
+   * The damage kind `PlayerTakeDamage` is given on arrival — 4 for a flat
+   * throw and 6 for an arced one. Absent means class 0x31's, which passes 0.
+   */
+  hitKind?: number;
 }
 
 export const G = {

@@ -21,6 +21,14 @@ export function ThrownWeaponFlyToTarget(i: number, frames: number,
                                         events?: Events): boolean {
   const p = G.g_thrown_weapons[i];
   if (p.ttl > 0) {
+    // Class 0x30's arced throw is the only one with an acceleration:
+    // `ZombieThrownWeaponStateArc` adds it into the velocity first, then
+    // steps, which is what makes the curve land where the solve put it.
+    if (p.acc) {
+      p.vel.x += p.acc.x * frames;
+      p.vel.y += p.acc.y * frames;
+      p.vel.z += p.acc.z * frames;
+    }
     p.pos.x += p.vel.x * frames;
     p.pos.y += p.vel.y * frames;
     p.pos.z += p.vel.z * frames;
@@ -28,7 +36,8 @@ export function ThrownWeaponFlyToTarget(i: number, frames: number,
     p.ttl -= frames;
     if (p.ttl <= 0 && !p.hit) {
       p.hit = true;
-      PlayerTakeDamageTimed(0, ActorByAt(p.from) ?? null, 0, events);
+      PlayerTakeDamageTimed(0, ActorByAt(p.from) ?? null, p.hitKind ?? 0,
+                            events);
     }
     return true;
   }

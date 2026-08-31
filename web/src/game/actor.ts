@@ -9,7 +9,8 @@
  * The renderer binds to an actor by `at` and owns the nodes; it holds no state
  * of its own that a snapshot would need.
  */
-import type { ArcStage, TargetScriptJson } from "../bundle/characters";
+import type { ArcStage, CharacterPlacement, TargetScriptJson }
+  from "../bundle/characters";
 import type { CivilianState } from "./class10/state";
 import type { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
@@ -41,6 +42,19 @@ export enum ActorFlag {
    * how the camera comes to consider only enemies that have committed.
    */
   NoCameraTrack = 0x10000,
+  /**
+   * `obj+0x34` bit `0x10000000` — this actor is mid-attack and will not be
+   * re-ranked out of it. `ZombieStateStandAndThrow` raises it for the length
+   * of the throw clip and `ZombieStateTargetMotionScript` for an entry whose
+   * mode is not negative.
+   */
+  Committed = 0x10000000,
+  /**
+   * `obj+0x34` bit `0x1000000` — set while a stationary thrower still has a
+   * weapon, and cleared as it leaves. `ZombieStateStandAndThrow` is the only
+   * reader and writer.
+   */
+  HoldingWeapon = 0x1000000,
   /**
    * `obj+0x34` bit `0x20000` — airborne. `ZombiePushOutOfWorldAndActors`
    * skips the ground snap while it is set, which is what lets a leap arc
@@ -382,6 +396,18 @@ export interface Actor {
    * `arcFrom`. The engine writes it every frame and never reads it back.
    */
   walkTravelled: number;    // +0x1374
+  /**
+   * `obj+0x131A` — which entry of `g_class30_attacks[type][condition]` the
+   * next attack uses. `ZombiePickThrowingHand` writes 0 for bone 5 and 1 for
+   * bone 8; the melee states index the same table with the pick list.
+   */
+  attackIndex: number;      // +0x131A
+  /** `obj+0x1330` — `ZombieStateStandAndThrow`'s idle countdown. */
+  throwDelay: number;       // +0x1330
+  /** The bone the current throw leaves from, 5 or 8. */
+  throwHand: number;
+  /** `ZombieStateStandAndThrow`'s descriptor tail, from the bundle. */
+  standThrow: CharacterPlacement["stand_throw"];
   /**
    * How deep in the **world** this actor's body sphere was on its last push,
    * and zero when it was clear.
@@ -740,6 +766,10 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     walkDistance: 0,
     walkTravelled: 0,
     worldPushDepth: 0,
+    attackIndex: 0,
+    throwDelay: 0,
+    throwHand: 0,
+    standThrow: undefined,
     entranceMotion: 0,
     pounce: null,
     grab: null,

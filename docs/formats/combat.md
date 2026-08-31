@@ -1093,6 +1093,48 @@ makes its fall and its knock-back physical.
 | 11 | `ThrowerStateFallToSurface` | fall until the ground catches — how a wall-crawler comes down |
 | **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
 | 17 | `ThrowerStateGetUp` | motion `0x127`, and **only after a decapitation** |
+### Class 0x30 state 33 — the stationary thrower
+
+`ZombieStateStandAndThrow` (`FUN_00459080`) is the **only class-0x30 state
+that never moves the actor**. Seven spawns start in it, every one of them body
+condition 7, and three character types have the hands for it:
+
+| type | asset file | bone 5 held / bare | bone 8 held / bare | projectile |
+|---|---|---|---|---|
+| 1 | `znassb.bin` | `0x1BA9` / `0x1BAC` | `0x1BA5` / `0x1BA8` | `znassb.bin` 3 and 2, **arced** |
+| 0x13 | **`tutorial.bin`** | `0x1ECE` / `0x1ECB` | `0x1ECA` / `0x1EC7` | `0x249` — `znonoo.bin` 0, the **axe**, flat |
+| 0x14 | `znonoopa.bin` | `0x1EF9` / `0x1EF6` | `0x1EF5` / `0x1EF3` | the same axe |
+
+There is no table for any of that: a switch on the character type inside
+`ZombiePickThrowingHand` (`FUN_00458F00`) and `ZombieThrowHandWeapon`
+(`FUN_0045A240`) is the whole list. `ZombieArmedHands` is a comparison of each
+hand's live **draw slot** — `0x20C + bone * 0x90` — against the one the
+skeleton gave it, so shooting a weapon out of a hand, or severing the arm,
+disarms it.
+
+The sub-states are `Arm → Wait → Claim → Release → Recover → Leave`, and the
+first three are a fallthrough: with zero delays a spawn arms, waits and claims
+on one frame, and three of the seven have exactly that. The permit is
+`TryClaimAttackSlot`, the same one every other enemy queues for, so a thrower
+behind a crowd waits its turn.
+
+Body condition 7 is **sticky**: `ActorBodyConditionFromHands` (`FUN_00455920`)
+recomputes the condition from the hands for every type in 0x13..0x14 *except*
+when it is already 7 or 5, and the state itself sets 5 as it leaves.
+
+The way out is the descriptor's `tail+0x03` — the same byte the port carries as
+`attack_state`. **0** walks away through state 15 with the distance at
+`tail+0x10`; **26** leaps through state 26 to the point at `tail+0x10`..`+0x18`
+with the gravity at `tail+0x20`. Both are entered at **sub 1**, which is why
+those two states have a sub-1 arm that skips their own descriptor read. The
+walk arm raises `obj+0x34` bit `0x20000000`, and this is the one place in the
+game that reaches `ZombieStateWalkDistance`'s retire-instead-of-attack branch.
+
+A second path reaches the same state: `ZombieShouldStandAndThrow`
+(`FUN_00458E10`) lets a **condition 8** walker stop and throw when the camera
+is already within `0x400` BAMS of the way it is facing. Fourteen spawns are
+condition 8, and they never turn to line the shot up.
+
 | **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance — class 0x30's state 15 is the same routine on the same `f32` at tail `+0x04` |
 | **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
 | 20 | `ThrowerStateLeapToPoint` | the scripted drop |

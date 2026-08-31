@@ -19,6 +19,7 @@ import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieStateWalkDistance } from "./walk_distance";
+import { ZombieStateStandAndThrow } from "./stand_throw";
 import { ZombieState } from "./states";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
@@ -59,6 +60,12 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
+
+    // The stationary thrower. It is the only class-0x30 state that never
+    // moves the actor at all, which is exactly why folding it into
+    // `AttackRun` was so visible: the tutorial's axe man charged the camera.
+    case ZombieState.StandAndThrow:
+      return ZombieStateStandAndThrow(obj, eye, rng, host, events);
 
     // The scripted walk-in. Fifty spawns across the game start here, and
     // folding it into `AttackRun` is what had them turn to the camera on
@@ -171,6 +178,9 @@ export function ZombieEntryState(initial: number): ZombieState {
   // reached the right final state — but only after skipping the walk-in that
   // is the whole point of it. See `class30/walk_distance.ts`.
   if (initial === ZombieState.WalkDistance) return initial;
+  // ...and neither does the stationary thrower: it ends by *leaving*, through
+  // state 15 or state 26, and `AttackRun` would have it walk at you instead.
+  if (initial === ZombieState.StandAndThrow) return initial;
   switch (initial) {
     case ZombieState.Approach:
     case ZombieState.AttackRun:

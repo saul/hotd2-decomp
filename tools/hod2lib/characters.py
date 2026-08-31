@@ -339,6 +339,63 @@ THROWER_SLOTS = {
     },
 }
 
+#: The **class 0x30** hand kits, which are a different family from
+#: :data:`THROWER_SLOTS` above: `ZombiePickThrowingHand` (`FUN_00458F00`) tests
+#: *held* to see whether a hand is still armed, and `ZombieThrowHandWeapon`
+#: (`FUN_0045A240`) swaps it to *bare*, clears the weapon bone beside it and
+#: gives the projectile *projectile*.
+#:
+#: Only three character types throw, and the switch in each of those two
+#: functions is the whole list -- there is no table. Resolved through
+#: `asset_slots()` the names say what they are: 0x13 is **tutorial.bin**, 0x14
+#: is znonoopa.bin, and what 0x13 and 0x14 throw is `znonoo.bin` part 0, the
+#: axe. Char type 1 (znassb.bin) throws parts of its own model instead.
+#:
+#: *weapon_bone* is the bone the routine zeroes alongside the hand: the weapon
+#: mesh hangs off the hand, and leaving it drawn leaves an axe floating in an
+#: empty fist.
+ZOMBIE_THROW_SLOTS = {
+    0x01: {                                    # znassb.bin
+        5: {"held": 0x1BA9, "bare": 0x1BAC, "weapon_bone": 6,
+            "projectile": 0x1B8D},
+        8: {"held": 0x1BA5, "bare": 0x1BA8, "weapon_bone": 9,
+            "projectile": 0x1B8C},
+    },
+    0x13: {                                    # tutorial.bin
+        5: {"held": 0x1ECE, "bare": 0x1ECB, "weapon_bone": 6,
+            "projectile": 0x249},
+        8: {"held": 0x1ECA, "bare": 0x1EC7, "weapon_bone": 9,
+            "projectile": 0x249},
+    },
+    0x14: {                                    # znonoopa.bin
+        5: {"held": 0x1EF9, "bare": 0x1EF6, "weapon_bone": 6,
+            "projectile": 0x249},
+        8: {"held": 0x1EF5, "bare": 0x1EF3, "weapon_bone": 9,
+            "projectile": 0x249},
+    },
+}
+
+#: `znonoo.bin` part 0 -- the axe, and the only projectile that flies straight.
+#: `ZombieThrowHandWeapon` sends it to state 1 and everything else to state 2,
+#: the arc.
+ZOMBIE_AXE_SLOT = 0x249
+#: `ZombieThrowHandWeapon`'s two speeds for `obj+0x1370`: the stationary
+#: thrower's axe is faster than an ordinary one's.
+ZOMBIE_THROW_SPEED_STANDING = 1.5
+ZOMBIE_THROW_SPEED = 1.0
+#: `ZombieThrownWeaponAimAtCamera`: the axe aims this far below the eye, and
+#: everything aims 4.0 in front with the same 0.6 per-player side offset the
+#: class-0x31 throw uses.
+ZOMBIE_THROW_AIM_DROP = 1.5
+#: `ZombieThrownWeaponStateArc`'s gravity, `0x3C1374BC`, negated for bone 8.
+ZOMBIE_THROW_ARC_GRAVITY = 0.008999999612569809
+#: `PlayerTakeDamage`'s third argument: 4 for the straight throw, 6 for the arc.
+ZOMBIE_THROW_HIT_KIND = 4
+ZOMBIE_THROW_ARC_HIT_KIND = 6
+
+#: `ZombieStateStandAndThrow` (class 0x30 state 33) reads its own tail.
+STAND_AND_THROW_STATES = {0x30: (33,)}
+
 #: `ThrownWeaponFlyToTarget`. The weapon flies **straight** at a constant
 #: 1.2 units per frame -- ``ttl = distance * 0.8333333`` and
 #: ``velocity = (target - position) / ttl`` -- and when the timer runs out it
@@ -514,6 +571,9 @@ class Character:
     attack_picks: dict = field(default_factory=dict)
     #: The thrown-weapon attack, or None -- see :func:`throw_tables`.
     throw: dict | None = None
+    #: Class 0x30's own hand kit -- see :data:`ZOMBIE_THROW_SLOTS`. A different
+    #: family from :attr:`throw`, which is class 0x31's.
+    zombie_throw: dict | None = None
     #: ``{body_condition: [motion, ...]}`` -- see :func:`motion_row`. Index 4
     #: is the back-away walk `ZombieStateBackOff` plays.
     motion_row: dict = field(default_factory=dict)
@@ -543,6 +603,7 @@ class Character:
                       {**self.throw,
                        "hands": {str(k): v
                                  for k, v in self.throw["hands"].items()}}),
+            "zombie_throw": self.zombie_throw,
             "motions": {str(k): v for k, v in self.motions.items()},
         }
 
@@ -671,6 +732,8 @@ class Placement:
     cue: dict | None = None
     #: `ThrowerStateLeapStrike`'s arc duration -- see :data:`LEAP_STRIKE_STATES`.
     leap_strike_frames: int | None = None
+    #: `ZombieStateStandAndThrow`'s tail -- see :data:`STAND_AND_THROW_STATES`.
+    stand_throw: dict | None = None
     #: `ZombieStateEmerge`'s (state 27) ``{delay, motion}`` from the tail's
     #: ``+0x04`` and ``+0x08``. The clip's own root translation is what lifts
     #: the actor out of the water or the ground -- a spawn's ``y`` is where its
@@ -721,6 +784,8 @@ class Placement:
             d["path"] = self.path
         if self.walk_distance is not None:
             d["walk_distance"] = self.walk_distance
+        if self.stand_throw is not None:
+            d["stand_throw"] = self.stand_throw
         if self.entrance_motion is not None:
             d["entrance_motion"] = self.entrance_motion
         if self.pounce:
@@ -1005,6 +1070,38 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             d = rec.param(4, "f32")
             if d is not None and math.isfinite(d) and 0 < d < 4096:
                 walk_distance = d
+        # `ZombieStateStandAndThrow` reads four delays and then, by the same
+        # `tail+0x03` byte the port already carries as `attack_state`, either a
+        # walk distance at `+0x10` or a leap point at `+0x10`..`+0x18` with its
+        # gravity at `+0x20`. The two readings are cleanly separated: all five
+        # spawns whose byte is 0 have a small distance at `+0x10` and zeroes
+        # after it, and both whose byte is 26 have a real world point.
+        stand_throw = None
+        if tail[1] in STAND_AND_THROW_STATES.get(sp["class"], ()):
+            exit_state = tail[2]
+            st = {
+                "delay_two_hands": rec.param(0x04, "i32") or 0,
+                "delay_one_hand": rec.param(0x08, "i32") or 0,
+                "delay_after_throw": rec.param(0x0C, "i32") or 0,
+                "exit_state": exit_state,
+            }
+            if exit_state == 0:
+                d = rec.param(0x10, "f32")
+                if d is not None and math.isfinite(d) and 0 < d < 4096:
+                    st["walk_distance"] = d
+            else:
+                dest = [rec.param(0x10 + 4 * k, "f32") for k in range(3)]
+                g = rec.param(0x20, "f32")
+                if (all(v is not None and math.isfinite(v) for v in dest)
+                        and g is not None and math.isfinite(g)):
+                    st["leap"] = {"dest": dest, "gravity": g}
+            # `+0x1C` is only read on the arm `obj+0x38` bit 0x10 opens, and
+            # nothing seen sets that bit -- so it is the next descriptor's
+            # bytes for most spawns. Emitted only when it reads as a delay.
+            leave = rec.param(0x1C, "i32")
+            if leave is not None and 0 <= leave < 3600:
+                st["leave_delay"] = leave
+            stand_throw = st
         entrance_motion = None
         if tail[1] in ENTRANCE_CLIP_STATES.get(sp["class"], ()):
             m = rec.param(4, "i32")
@@ -1069,6 +1166,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             body_condition=tail[0], initial_state=tail[1],
             attack_state=tail[2], leap=leap, path=path,
             walk_distance=walk_distance, entrance_motion=entrance_motion,
+            stand_throw=stand_throw,
             pounce=pounce, grab=grab, back_away_delay=back_away_delay,
             cue=cue, leap_strike_frames=leap_strike_frames,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
@@ -1498,6 +1596,37 @@ def throw_tables(tables, char_type: int) -> dict | None:
             "blink_frames": THROW_BLINK_FRAMES}
 
 
+def zombie_throw_tables(char_type: int) -> dict | None:
+    """Class 0x30's hand kit, or None for a type that does not throw.
+
+    Every value here is a literal out of `ZombiePickThrowingHand` and
+    `ZombieThrowHandWeapon` -- there is no table in the exe, only a switch on
+    the character type in each of those two functions, and three types in it.
+    See :data:`ZOMBIE_THROW_SLOTS`.
+    """
+    kit = ZOMBIE_THROW_SLOTS.get(char_type)
+    if kit is None:
+        return None
+    hands = [{"bone": bone, **kit[bone]} for bone in (5, 8)]
+    # The axe flies straight; anything else arcs. `ZombieThrowHandWeapon`
+    # decides by the projectile slot, not by the character.
+    straight = all(h["projectile"] == ZOMBIE_AXE_SLOT for h in hands)
+    return {
+        "hands": hands,
+        "straight": straight,
+        "speed": ZOMBIE_THROW_SPEED,
+        "speed_standing": ZOMBIE_THROW_SPEED_STANDING,
+        "aim_ahead": THROW_AIM_AHEAD,
+        "aim_side": THROW_AIM_SIDE,
+        "aim_drop": ZOMBIE_THROW_AIM_DROP if straight else 0.0,
+        "arc_gravity": ZOMBIE_THROW_ARC_GRAVITY,
+        "hit_kind": ZOMBIE_THROW_HIT_KIND if straight
+                    else ZOMBIE_THROW_ARC_HIT_KIND,
+        "stick_frames": THROW_STICK_FRAMES,
+        "blink_frames": THROW_BLINK_FRAMES,
+    }
+
+
 def attack_picks(tables, char_type: int) -> dict:
     """``{body_condition: [80 indices]}`` -- see :data:`ATTACK_PICK_TABLE`."""
     n = ATTACK_PICK_PER_ZONE * ATTACK_ZONE_COMBOS
@@ -1747,6 +1876,7 @@ def _build(stage, tables, char_type: int, asset_file: str) -> Character | None:
                      attacks=attack_tables(tables, char_type),
                      attack_picks=attack_picks(tables, char_type),
                      throw=throw_tables(tables, char_type),
+                     zombie_throw=zombie_throw_tables(char_type),
                      motion_row=motion_row(tables, char_type))
 
 

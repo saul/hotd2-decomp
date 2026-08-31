@@ -61,6 +61,12 @@ export enum ZombieState {
    */
   Emerge = 27,
 
+  /**
+   * `ZombieStateStandAndThrow` (`FUN_00459080`). The stationary thrower: it
+   * never moves, and the axe man of stage 1's tutorial is one. Seven spawns.
+   */
+  StandAndThrow = 33,
+
   // -- the captor family: states that work on `obj+0x1394` ----------------
   //
   // Every one of these walks at, mauls or waits on the object the actor was

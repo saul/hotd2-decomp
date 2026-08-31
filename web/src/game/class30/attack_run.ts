@@ -18,6 +18,7 @@ import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionFade, MotionRow, ZombieState } from "./states";
+import { ZombieShouldStandAndThrow } from "./stand_throw";
 
 export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number,
                                     rng: Rng): void {
@@ -44,6 +45,15 @@ export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number,
   // left every zombie standing in `HoldAtRange` for ever.
   if (obj.allowance <= obj.rank) {
     obj.state = ZombieState.WaitTurn;
+    obj.sub = 0;
+    return;
+  }
+
+  // **The other way into state 33.** A body-condition-8 walker that is already
+  // facing the camera stops where it is and throws, rather than closing first.
+  // `ZombieShouldStandAndThrow` takes the permit as part of asking.
+  if (ZombieShouldStandAndThrow(obj)) {
+    obj.state = ZombieState.StandAndThrow;
     obj.sub = 0;
   }
 }

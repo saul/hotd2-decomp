@@ -69,6 +69,8 @@ export interface CharacterType {
   attack_picks: Record<string, number[]>;
   /** The thrown-weapon attack, for the two types that have one. */
   throw: ThrowJson | null;
+  /** Class 0x30's own hand kit, if this type throws. */
+  zombie_throw?: ZombieThrowJson | null;
   /**
    * `{body_condition: [motion, ...]}` — the character's general motion row.
    * 0/1 the walk variants, 2/3 the attack run, `backoff_index` the back-away.
@@ -195,6 +197,20 @@ export interface CharacterPlacement {
   walk_distance?: number;
   /** `ThrowerStateEntranceClip` (state 19) plays this once, then stands. */
   entrance_motion?: number;
+  /**
+   * `ZombieStateStandAndThrow`'s tail. `exit_state` is the same `tail+0x03`
+   * byte as {@link CharacterPlacement.attack_state}, and it is what says whether
+   * `walk_distance` or `leap` is the reading of `tail+0x10`.
+   */
+  stand_throw?: {
+    delay_two_hands: number;
+    delay_one_hand: number;
+    delay_after_throw: number;
+    exit_state: number;
+    walk_distance?: number;
+    leap?: { dest: [number, number, number]; gravity: number };
+    leave_delay?: number;
+  };
   /** `ThrowerStateDelayedPounce` (state 23): a clip, then a leap over `frames`. */
   pounce?: { motion: number; frames: number } | null;
   /**
@@ -290,6 +306,48 @@ export interface ThrowHandJson {
   bare: number;
   /** The model that flies. */
   projectile: number;
+}
+
+/**
+ * Class 0x30's hand kit — a **different family** from {@link ThrowJson}, which
+ * is class 0x31's. Every value is a literal out of `ZombiePickThrowingHand`
+ * (`FUN_00458F00`) and `ZombieThrowHandWeapon` (`FUN_0045A240`); there is no
+ * table in the exe, only a switch on the character type in each, with three
+ * types in it: 1 (`znassb.bin`), 0x13 (`tutorial.bin`) and 0x14
+ * (`znonoopa.bin`).
+ */
+export interface ZombieThrowHandJson {
+  /** 5 (right) or 8 (left). */
+  bone: number;
+  /** The slot this hand draws while it still holds its weapon. */
+  held: number;
+  /** ...and once it has thrown it. */
+  bare: number;
+  /** The bone the weapon mesh hangs off, zeroed with the swap. */
+  weapon_bone: number;
+  /** The model that flies. `0x249` is `znonoo.bin` part 0 — the axe. */
+  projectile: number;
+}
+
+export interface ZombieThrowJson {
+  hands: ZombieThrowHandJson[];
+  /** The axe flies flat; anything else arcs. Decided by the projectile slot. */
+  straight: boolean;
+  /** Units per frame, and the faster one body condition 7 throws at. */
+  speed: number;
+  speed_standing: number;
+  /** The aim point: this far in front of the eye, offset sideways per player,
+   *  and this far below it for the axe. */
+  aim_ahead: number;
+  aim_side: number;
+  aim_drop: number;
+  /** `ZombieThrownWeaponStateArc`'s gravity, negated for bone 8. */
+  arc_gravity: number;
+  /** `PlayerTakeDamage`'s third argument: 4 straight, 6 arced. */
+  hit_kind: number;
+  /** Frames it sticks in view, then blinks, before it goes. */
+  stick_frames: number;
+  blink_frames: number;
 }
 
 /** The thrown-weapon attack, for the character types that have one. */

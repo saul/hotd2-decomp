@@ -32,7 +32,8 @@ import { ActorFlag, ZombieFlag2 } from "../src/game/actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot }
   from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
-import { ActorSnapToGroundHeight } from "../src/game/class30/ground";
+import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
+  from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ZombieScriptEnded } from "../src/game/class30/target";
 import type { TargetScriptJson } from "../src/bundle/characters";
@@ -2718,6 +2719,66 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
           Math.abs(z.vel.x - 30 / z.holdFrames) < 1e-4, `vx ${z.vel.x}`);
     check("...with gravity on the y axis", Math.abs(z.accY + 0.04) < 1e-6,
           `accY ${z.accY}`);
+  }
+}
+
+console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
+{
+  const scenePush = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    T.coli = { files: ["t"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["wall", "floor"];
+    G.g_camera_fixed_eye_y = 0;
+  };
+
+  // **The bug this fixes.** `EnemyZombieInit` writes both radii and the port
+  // wrote neither, so every zombie collided as a point of radius zero and the
+  // world push could never find anything to be pushed out of.
+  {
+    scenePush();
+    const z = ActorSpawn(0x7000, SpawnClass.Zombie, 1, "radii");
+    check("the Init sets the shot radius and the body radius",
+          z.radius === 10 && z.bodyRadius === 3.5,
+          `shot ${z.radius} body ${z.bodyRadius}`);
+  }
+
+  // `WALL_BLOB` is the plane x = 30. Put an actor inside it and it must come
+  // back out rather than through.
+  {
+    scenePush();
+    const z = ActorSpawn(0x7001, SpawnClass.Zombie, 1, "walled");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(29, 0, 45);
+    const before = z.pos.x;
+    ZombiePushOutOfWorldAndActors(z, 1);
+    check("an actor inside a wall is pushed back out of it", z.pos.x < before,
+          `x ${z.pos.x.toFixed(2)} from ${before}`);
+  }
+
+  // The crowd push is **mutual and deferred**: the mover records the opposite
+  // push on whoever it found, who applies it on its own next frame. That is
+  // what makes it one test per actor rather than one per pair.
+  {
+    scenePush();
+    const a = ActorSpawn(0x7002, SpawnClass.Zombie, 1, "a");
+    const b = ActorSpawn(0x7003, SpawnClass.Zombie, 1, "b");
+    for (const z of [a, b]) { z.visible = true; z.hp = z.maxHp = 100; }
+    a.pos = vec3(0, 0, 0);
+    b.pos = vec3(2, 0, 0);             // well inside 3.5 + 3.5
+    const gap0 = Math.abs(a.pos.x - b.pos.x);
+    ZombiePushOutOfWorldAndActors(a, 1);
+    check("an actor inside another is pushed away from it", a.pos.x < 0,
+          `ax ${a.pos.x.toFixed(3)}`);
+    check("...and the other is told which way, not moved",
+          b.pos.x === 2 && b.pushedBy === a.at && b.pushNormal.x > 0,
+          `bx ${b.pos.x} by ${b.pushedBy}`);
+    ZombiePushOutOfWorldAndActors(b, 1);
+    check("which it does on its own next frame",
+          b.pos.x > 2 && b.pushedBy === -1, `bx ${b.pos.x.toFixed(3)}`);
+    check("so the two separate", Math.abs(a.pos.x - b.pos.x) > gap0,
+          `gap ${Math.abs(a.pos.x - b.pos.x).toFixed(3)} from ${gap0}`);
   }
 }
 

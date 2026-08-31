@@ -6428,3 +6428,59 @@ crowd from occupying one point.
 
 **Next actions:** that. Then class 0x51, the water enemy — stage 2 block 16
 step 8 spawns three of them and they have no module at all.
+
+---
+
+## Session 2026-08-31j — the zombie had no size
+
+**Outcome:** the wall-walking traced to two unwritten fields.
+`ColiTestSphereAgainstActors` ported, which finishes
+`ZombiePushOutOfWorldAndActors`.
+
+### Why it came through the wall
+
+`EnemyZombieInit` writes **two** radii and the port wrote neither:
+
+* `obj+0x124` = `g_actor_radius_by_char[charType]` — the **shot** sphere, 10.0.
+* `obj+0x128` = 3.5 — the **body** sphere, and the one every collision uses.
+
+`ZombiePushOutOfWorldAndActors` tests `ColiTestSphereAgainstFullSet(obj+0x12C,
+obj+0x128)`. With `obj+0x128` at zero the sphere had no radius, never
+penetrated anything, and the push ported last session did nothing at all.
+Driving the block-16 step-3 spawn at a camera on the far side of the wall it
+was reported to cross: **0 frames step through a solid quad** now, where before
+the radii it walked straight through.
+
+Note this port had `radius` for `+0x124` and used *that* in the push — the
+wrong one of the two. Both are named on `Actor` now, with the difference
+written down.
+
+### "Does it have a predefined path?" No.
+
+`PATH_STATES` is `{0x31: (26,)}`: only class 0x31 follows a path.
+`ZombieStateWalkDistance` (state 15, which that spawn starts in) records where
+it started and walks until the 2D distance from it exceeds the float at
+`tail+0x04` — 8.0 here. There is no destination and no route. The floats
+further into that descriptor look like a point and are the **next spawn
+record**: the adjacent-array trap, and the annotation now says so.
+
+Nor is the push avoidance. It is extraction: a sphere test each frame that
+shoves the actor back out along the surface normal. A zombie hugs a wall and
+slides along it; nothing in class 0x30 routes around anything.
+
+### `ColiTestSphereAgainstActors` (`FUN_00405B10`)
+
+Centre-to-centre against the **sum** of the radii, nearest candidate wins, and
+the actor it finds is **not moved**: the opposite push is written onto it at
+`obj+0x138`/`+0x13C`/`+0x140`, and that actor applies it on its own next frame.
+One test per actor, not one per pair.
+
+The engine reads a per-frame list every actor registers into. The port walks
+`g_object_list` and derives each candidate's sphere from its position, which
+removes an ordering hazard the first version walked straight into: testing
+against `camPoint` as stored gave a stale centre for any actor that had not
+ticked yet, and the two test actors separated along **y** instead of x.
+`ActorUpdateBoundingSphere` moved to `actor.ts` so the test can call it.
+
+**Next actions:** class 0x51, the water enemy — stage 2 block 16 step 8 spawns
+three and they still have no module.

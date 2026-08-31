@@ -20,6 +20,7 @@
  * none is warranted.
  */
 import type { ColiBlob, ColiJson } from "../bundle";
+import { ActorUpdateBoundingSphere, type Actor } from "./actor";
 import { G } from "./globals";
 import { T } from "./tables";
 
@@ -222,6 +223,75 @@ export function QueryGroundHeightAt(x: number, y: number, z: number): number {
 export function QueryGroundSurfaceAt(x: number, y: number, z: number): number {
   ColiTraceSegmentAllSets(x, y - GROUND_PROBE, z, x, y, z);
   return G.g_coli_hit_surface;
+}
+
+/**
+ * `ColiTestSphereAgainstActors` — `FUN_00405B10`. The actor-versus-actor test.
+ *
+ * The engine walks a per-frame list of registered body spheres; the port walks
+ * `g_object_list`, which is the same set — an actor is in that list exactly
+ * while it is alive and placed. Everything else is transcribed:
+ *
+ * * the caller itself is skipped, as are actors carrying `obj+0x34` bits
+ *   `0x80008000` or `0x10`;
+ * * a body radius of zero is lazily filled in from the shot radius at
+ *   `obj+0x124`, which is the engine's own fallback for an actor whose class
+ *   never set one;
+ * * the overlap test is centre-to-centre against the **sum** of the radii, and
+ *   the nearest of the candidates wins;
+ * * and the hit is reported as a normal along the line between the centres,
+ *   with the depth as the overlap.
+ *
+ * It also writes the **opposite** push onto the actor it found — `obj+0x138`
+ * and the vector at `+0x140` — rather than moving it. That actor applies it on
+ * its own next frame, so one test per actor separates a whole crowd.
+ */
+export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
+                                            cz: number, r: number): boolean {
+  G.g_coli_hit_surface = 0;
+  let best: Actor | null = null;
+  let bestDist = Infinity;
+  for (const o of G.g_object_list) {
+    if (o === self || o.despawned || !o.visible) continue;
+    if (o.flags & (0x80008000 | 0x10)) continue;
+    // `if (obj+0x128 == 0) obj+0x128 = obj+0x124` -- the engine's own lazy
+    // default, kept because it is what gives a class that never set a body
+    // radius one at all.
+    if (o.bodyRadius === 0) o.bodyRadius = o.radius;
+    // The engine tests a list every actor registers into once a frame; the
+    // port derives the sphere from the position instead, so an actor that has
+    // not ticked yet is still measured where it actually is.
+    ActorUpdateBoundingSphere(o);
+    const dx = cx - o.camPoint.x;
+    const dy = cy - o.camPoint.y;
+    const dz = cz - o.camPoint.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d > r + o.bodyRadius) continue;
+    if (d >= bestDist) continue;
+    bestDist = d;
+    best = o;
+  }
+  if (!best) return false;
+
+  const dx = cx - best.camPoint.x;
+  const dy = cy - best.camPoint.y;
+  const dz = cz - best.camPoint.z;
+  const len = Math.hypot(dx, dy, dz);
+  if (len === 0) return false;                    // exactly co-located: no way out
+  const nx = dx / len, ny = dy / len, nz = dz / len;
+  G.g_coli_hit_normal = [nx, ny, nz];
+  G.g_coli_hit_depth = r + best.bodyRadius - len;
+  G.g_coli_hit_x = best.camPoint.x;
+  G.g_coli_hit_y = best.camPoint.y;
+  G.g_coli_hit_z = best.camPoint.z;
+  // The deferred half: the other actor is told which way it was pushed and by
+  // how much, and moves itself next frame.
+  best.pushedBy = self.at;
+  best.pushDepth = G.g_coli_hit_depth;
+  best.pushNormal.x = -nx;
+  best.pushNormal.y = -ny;
+  best.pushNormal.z = -nz;
+  return true;
 }
 
 /**

@@ -14,9 +14,14 @@
  * zombies there stand at the height the script wrote and the floor leaves
  * without them — buried at one end of the slope and floating at the other.
  */
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
-import { ColiTestSphereAgainstFullSet, QueryGroundHeightAt } from "../coli";
-import { G } from "../globals";
+import {
+  ActorFlag, ActorUpdateBoundingSphere, ZombieFlag2, type Actor,
+} from "../actor";
+import {
+  ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet,
+  QueryGroundHeightAt,
+} from "../coli";
+import { ActorByAt, G } from "../globals";
 import { ZombieState } from "./states";
 
 /** `ActorSnapToGroundHeight` probes from this far above the actor's own y. */
@@ -25,23 +30,11 @@ const GROUND_PROBE_RISE = 6;
 const GROUND_SNAP_LIMIT = 10;
 /** `ZombiePushOutOfWorldAndActors`' shove timer, and the bit it flips. */
 const SHOVE_PERIOD = 0x3c;
-/** `ActorUpdateBoundingSphere`'s two lifts. */
-const SPHERE_RISE = 1;
-const SPHERE_RISE_LOW = 0.5;
-
-/**
- * `ActorUpdateBoundingSphere` — `FUN_00454AC0`.
- *
- * `obj+0x12C/0x130/0x134` is the sphere everything else tests: the actor's own
- * x and z, with y lifted by its radius `obj+0x128` and then by one unit — or a
- * half when `obj+0x136C` bit `0x2000000` is set.
- */
-export function ActorUpdateBoundingSphere(obj: Actor): void {
-  obj.camPoint.x = obj.pos.x;
-  obj.camPoint.z = obj.pos.z;
-  obj.camPoint.y = obj.pos.y + obj.radius
-    + ((obj.flags2 & ZombieFlag2.LowSphere) ? SPHERE_RISE_LOW : SPHERE_RISE);
-}
+/** The push applies a tenth of the penetration a frame — 1.8x while airborne. */
+const PUSH_FRACTION = 0.1;
+const PUSH_AIRBORNE = 1.8;
+/** `obj+0x34 & 0x18000000` — either of the two airborne bits. */
+const AIRBORNE_EITHER = 0x18000000;
 
 /**
  * `ActorSnapToGroundHeight` — `FUN_00454B10`.
@@ -71,19 +64,44 @@ export function ActorSnapToGroundHeight(obj: Actor): void {
 /**
  * `ZombiePushOutOfWorldAndActors` — `FUN_00454900`. The hook at `obj+0x12F0`.
  *
- * [open] The **actor-versus-actor** half is not ported.
- * `ColiTestSphereAgainstActors` pushes an actor out of another by a tenth of
- * the penetration each frame — 1.8x while `obj+0x34` carries either airborne
- * bit — and `game/coli.ts` has no entry point for it. It is what stops a crowd
- * occupying one point, and it is the next thing worth reading here.
+ * Both halves are here: the world push, which is what stops an actor walking
+ * through a wall, and the actor-versus-actor push, which is what stops a crowd
+ * occupying one point.
  */
 export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void {
   obj.flags2 &= ~ZombieFlag2.Shoved;
   ActorUpdateBoundingSphere(obj);
 
+  // The actor-versus-actor half. It is **mutual and deferred**: an actor
+  // pushes itself out by a tenth of the penetration and *records* the opposite
+  // push on whoever it found, who applies it on its own next frame. So the
+  // separation costs one test per actor, not one per pair.
+  if (obj.flags2 & ZombieFlag2.CollideActors) {
+    if (obj.pushedBy >= 0) {
+      const by = ActorByAt(obj.pushedBy);
+      let f = obj.pushDepth * PUSH_FRACTION;
+      if (by && (by.flags & AIRBORNE_EITHER)) f *= PUSH_AIRBORNE;
+      obj.pos.x += obj.pushNormal.x * f;
+      obj.pos.y += obj.pushNormal.y * f;
+      obj.pos.z += obj.pushNormal.z * f;
+      ActorUpdateBoundingSphere(obj);
+      obj.pushedBy = -1;
+    }
+    if (ColiTestSphereAgainstActors(obj, obj.camPoint.x, obj.camPoint.y,
+                                    obj.camPoint.z, obj.bodyRadius)) {
+      let f = G.g_coli_hit_depth * PUSH_FRACTION;
+      if (obj.flags & AIRBORNE_EITHER) f *= PUSH_AIRBORNE;
+      // x and z only: an actor is never pushed up out of another.
+      obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * f;
+      obj.pos.z += (G.g_coli_hit_normal[2] ?? 0) * f;
+      obj.flags2 |= ZombieFlag2.Shoved;
+      ActorUpdateBoundingSphere(obj);
+    }
+  }
+
   if (obj.flags2 & ZombieFlag2.CollideWorld) {
     if (ColiTestSphereAgainstFullSet(obj.camPoint.x, obj.camPoint.y,
-                                     obj.camPoint.z, obj.radius)) {
+                                     obj.camPoint.z, obj.bodyRadius)) {
       const d = G.g_coli_hit_depth;
       obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * d;
       obj.pos.y += (G.g_coli_hit_normal[1] ?? 0) * d;

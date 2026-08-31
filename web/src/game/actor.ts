@@ -432,6 +432,27 @@ export interface Actor {
   despawned: boolean;
   radius: number;           // +0x124
   /**
+   * `obj+0x128` — the **body** radius, which is a different number from the
+   * shot radius above and is the one every collision uses.
+   *
+   * `EnemyZombieInit` writes 3.5 and `EnemyThrowerInit` 5.0 for character type
+   * 0x16 or 4.0 for 0x17-0x19; `g_actor_radius_by_char` fills `+0x124` beside
+   * it. The port had neither, so the body sphere had **radius zero** and the
+   * world push could never find a wall — which is why a zombie walked through
+   * one instead of sliding along it.
+   */
+  bodyRadius: number;       // +0x128
+  /**
+   * `obj+0x138`..`+0x148` — the push another actor recorded on this one.
+   *
+   * `ColiTestSphereAgainstActors` does not move the actor it finds: it writes
+   * the opposite push onto it and lets it apply that on its own next frame.
+   * `pushedBy` is the actor that did it, by spawn address, or `-1`.
+   */
+  pushedBy: number;         // +0x138
+  pushDepth: number;        // +0x13C
+  pushNormal: Vec3;         // +0x140
+  /**
    * `obj+0x12C` — the point `CivilianUpdate`'s camera-point switch writes,
    * selected by `sub+0x80` (op 0x17). Mode 0 is the actor's own position;
    * modes 1-3 read matrices out of the model block and are `[open]`.
@@ -608,6 +629,32 @@ export interface Actor {
 }
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
+/** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
+const SPHERE_RISE = 1;
+const SPHERE_RISE_LOW = 0.5;
+/** `obj+0x136C` bit 0x2000000: the sphere sits a half unit up, not one. */
+const LOW_SPHERE = 0x2000000;
+
+/**
+ * `ActorUpdateBoundingSphere` — `FUN_00454AC0`.
+ *
+ * `obj+0x12C/0x130/0x134` is the sphere everything else tests: the actor's own
+ * x and z, with y lifted by the **body** radius `obj+0x128` and then by one
+ * unit — or a half when `obj+0x136C` bit `0x2000000` is set.
+ *
+ * It lives here rather than beside its caller because both the class-0x30 push
+ * and `ColiTestSphereAgainstActors` need it, and the second must be able to
+ * ask it about an actor that has not ticked yet. The engine solves that with a
+ * per-frame registration list; deriving the sphere from the position is the
+ * same answer without the ordering hazard.
+ */
+export function ActorUpdateBoundingSphere(obj: Actor): void {
+  obj.camPoint.x = obj.pos.x;
+  obj.camPoint.z = obj.pos.z;
+  obj.camPoint.y = obj.pos.y + obj.bodyRadius
+    + ((obj.flags2 & LOW_SPHERE) ? SPHERE_RISE_LOW : SPHERE_RISE);
+}
+
 export function makeActor(at: number, cls: SpawnClass, charType: number,
                           name: string): Actor {
   return {
@@ -676,6 +723,10 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     killedBy: -1,
     despawned: false,
     radius: 0,
+    bodyRadius: 0,
+    pushedBy: -1,
+    pushDepth: 0,
+    pushNormal: vec3(),
     camPoint: vec3(),
     civ: null,
     reactBone: 0,

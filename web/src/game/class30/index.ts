@@ -23,7 +23,7 @@ import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
-import { MotionRowOf } from "../tables";
+import { CharacterTypeOf, MotionRowOf } from "../tables";
 import {
   TARGET_STATES,
   ZombieStateAwaitCivilianOrder, ZombieStateDragTarget,
@@ -32,6 +32,9 @@ import {
   ZombieStateTargetScriptWithFlag, ZombieStateWalkPastPoint,
   ZombieStateWalkToPoint, ZombieStateWalkToTarget,
 } from "./target";
+
+/** `EnemyZombieInit`'s literal for `obj+0x128` — `0x40600000`. */
+const ZOMBIE_BODY_RADIUS = 3.5;
 
 export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
                                   host: GameHost, events?: Events): void {
@@ -112,6 +115,11 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
  */
 export function EnemyZombieInit(obj: Actor): void {
   obj.attackPermit = -1;
+  // `EnemyZombieInit`: `obj+0x124 = g_actor_radius_by_char[type]`, the shot
+  // sphere, and `obj+0x128 = 3.5`, the body one. The port had neither, so
+  // every zombie collided as a point and walked through walls.
+  obj.radius = CharacterTypeOf(obj)?.actor_radius ?? 0;
+  obj.bodyRadius = ZOMBIE_BODY_RADIUS;
   // `obj+0x131D = 0xFF`, and every test reads it as `(s8)` -- so this is -1,
   // and an actor that has not been ranked yet passes rather than failing. As
   // 255 it failed every one, and the zombie dropped out of the attack run on

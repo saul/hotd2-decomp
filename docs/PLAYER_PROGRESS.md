@@ -31,6 +31,30 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
+from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,
+which is the **body** sphere every collision uses — and the port wrote neither.
+So every zombie collided as a point of radius zero, and the world push in
+`ZombiePushOutOfWorldAndActors` could never find a wall to be pushed out of.
+That is why one walked through a wall in stage 2's block 16 rather than sliding
+along it.
+
+Worth being clear about what that push is and is not: **class 0x30 has no path
+following and no steering.** `PATH_STATES` is class 0x31 only, and
+`ZombieStateWalkDistance` records where it started and walks until the 2D
+distance from that point exceeds the float at the descriptor's `+0x04` — no
+destination, no route. The wall interaction is extraction, not avoidance: a
+sphere test each frame that shoves the actor back out. A zombie will hug a wall
+and slide along it; it will never route around one.
+
+**`ColiTestSphereAgainstActors` is in** — the actor-versus-actor half of the
+same hook, and the last unported piece of it. It is **mutual and deferred**: an
+actor pushes itself out by a tenth of the penetration and *records* the
+opposite push on whoever it found, who applies it on its own next frame. One
+test per actor separates a whole crowd. `ActorUpdateBoundingSphere` moved to
+`actor.ts` for it, because the test has to be able to ask about an actor that
+has not ticked yet.
+
 **Zombies are on the floor now.** `EnemyZombieUpdate` runs a hook at
 `obj+0x12F0` — `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) — and half of
 what it does is `ActorSnapToGroundHeight` (`FUN_00454B10`): **every class-0x30

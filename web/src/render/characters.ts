@@ -251,6 +251,8 @@ export class CharacterLayer {
         walkDistance: p?.walk_distance ?? 0,
         entranceMotion: p?.entrance_motion ?? 0,
         pounce: p?.pounce ?? null,
+        emerge: p?.emerge ?? null,
+        delayedLeap: p?.delayed_leap ?? null,
         // The captor family's two script blobs, and the object they work on.
         // `CivilianInit` writes `child+0x1394 = this`, and `civilian_child` is
         // that pointer as a spawn address.

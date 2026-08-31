@@ -31,7 +31,9 @@ import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ActorFlag, ZombieFlag2 } from "../src/game/actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot }
   from "../src/game/combat/permits";
-import { EnemyZombieUpdate } from "../src/game/class30";
+import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
+import { ActorSnapToGroundHeight } from "../src/game/class30/ground";
+import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ZombieScriptEnded } from "../src/game/class30/target";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
@@ -143,6 +145,8 @@ const TYPE: CharacterType = {
     // against a 25-unit inner ring, so the recover is most of the ring and the
     // retreat that walks it back is the pause between bites.
     "100": motion(20, 0.8), "101": motion(20, 0.6),
+    // 185 (0xB9) is the pose `ZombieStateEmerge` holds while it waits.
+    "185": motion(4),
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
@@ -2617,6 +2621,103 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     ZombieScriptEnded(z);
     check("...and only a finished attack script sends it at the player",
           z.state === ZombieState.AttackRun, `state ${z.state}`);
+  }
+}
+
+console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
+{
+  const rng = new Rng(21);
+  // A floor at y = 0 and nothing else, so the snap has exactly one answer.
+  const scene30 = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    T.coli = { files: ["t"], blobs: { floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["floor"];
+    G.g_camera_fixed_eye_y = -1e9;     // a miss must not pass as a hit
+    const z = ActorSpawn(0x6000, SpawnClass.Zombie, 1, "placed");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.radius = 10;
+    return z;
+  };
+
+  // **The bug this fixes.** Nothing in the port ever put a class-0x30 actor on
+  // the collision floor: its `y` was whatever the spawn record said, for ever.
+  {
+    const z = scene30();
+    // Three under the floor: the probe starts six units above the actor's own
+    // y, so that is what "below" can mean. A water spawn ten units down is out
+    // of its reach until the emerge clip has brought it most of the way up —
+    // which is the engine's limit too, and why the clip is not decoration.
+    z.pos = vec3(0, -3, 0);
+    ActorSnapToGroundHeight(z);
+    check("an actor below the floor is brought up to it", z.pos.y === 0,
+          `y ${z.pos.y}`);
+    z.pos = vec3(0, -40, 0);
+    ActorSnapToGroundHeight(z);
+    check("...but only from within the six-unit probe", z.pos.y === -1e9,
+          `y ${z.pos.y}`);
+    z.pos = vec3(0, 6, 0);             // a little above it
+    ActorSnapToGroundHeight(z);
+    check("...and one just above it is stuck to it", z.pos.y === 0,
+          `y ${z.pos.y}`);
+  }
+
+  // More than ten units of air, and only when the actor may leave the floor,
+  // is a fall rather than a snap.
+  {
+    const z = scene30();
+    z.pos = vec3(0, 40, 0);
+    z.flags2 &= ~ZombieFlag2.MayFall;
+    ActorSnapToGroundHeight(z);
+    check("without the fall bit even forty units snaps", z.pos.y === 0,
+          `y ${z.pos.y}`);
+    z.pos = vec3(0, 40, 0);
+    z.flags2 |= ZombieFlag2.MayFall;
+    ActorSnapToGroundHeight(z);
+    check("with it, the actor falls instead",
+          z.state === ZombieState.FallToGround && z.pos.y === 40,
+          `state ${z.state} y ${z.pos.y}`);
+  }
+
+  // `ZombieStateEmerge`: hold the submerged pose for the descriptor's delay,
+  // then play the clip it names. The clip is what the player sees coming out
+  // of the water; the snap is what keeps its feet on the bottom.
+  {
+    const z = scene30();
+    z.pos = vec3(0, -5, 0);
+    z.emerge = { delay: 30, motion: 12 };
+    z.state = ZombieEntryState(ZombieState.Emerge);
+    check("state 27 is an entrance, not a synonym for AttackRun",
+          z.state === ZombieState.Emerge, `state ${z.state}`);
+    EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+    check("...which holds the submerged pose and freezes the clock",
+          z.motion === 0xb9 && z.frozen === 1, `motion ${z.motion}`);
+    for (let i = 0; i < 29; i++) {
+      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+    }
+    check("it waits the descriptor's delay out", z.motion === 0xb9,
+          `motion ${z.motion}`);
+    EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+    check("and then plays the clip the descriptor names",
+          z.motion === 12 && z.frozen === 0, `motion ${z.motion}`);
+    // And the snap has it standing on the floor rather than under it.
+    check("...on the floor, not five units under it", z.pos.y === 0,
+          `y ${z.pos.y}`);
+  }
+
+  // `ActorArcBeginFalling` counts its own frames from the gravity, which is
+  // the thing that makes state 26 different from every other arc in the port.
+  {
+    const z = scene30();
+    z.pos = vec3(0, 40, 0);
+    ActorArcBeginFalling(z, [30, 0, 0], 0.04);
+    check("the delayed leap's frame count comes from the drop and the gravity",
+          z.holdFrames > 40 && z.holdFrames < 50, `${z.holdFrames} frames`);
+    check("...and the flat speed divides the distance by it",
+          Math.abs(z.vel.x - 30 / z.holdFrames) < 1e-4, `vx ${z.vel.x}`);
+    check("...with gravity on the y axis", Math.abs(z.accY + 0.04) < 1e-6,
+          `accY ${z.accY}`);
   }
 }
 

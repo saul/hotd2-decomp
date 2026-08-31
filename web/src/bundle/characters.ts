@@ -139,6 +139,16 @@ export interface CharacterPlacement {
   /** Which of `approach.rings` this actor measures against. */
   ring_set: number;
   /**
+   * `ZombieStateEmerge`'s (state 27) delay and clip. A spawn's `y` is where
+   * its entrance *starts*; this clip's own root translation is what lifts the
+   * actor out of the water or the ground.
+   */
+  emerge?: { delay: number; motion: number } | null;
+  /** `ZombieStateDelayedLeap`'s (state 26). `gravity` is per-frame, not a duration. */
+  delayed_leap?: {
+    delay: number; dest: [number, number, number]; gravity: number;
+  } | null;
+  /**
    * The two captor scripts, decoded — see `target_script` in
    * hod2lib/characters.py. `target_script` is the descriptor tail's `+0x04`
    * blob read for the initial state, `attack_script` the `+0x08` blob read for

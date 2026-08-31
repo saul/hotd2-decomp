@@ -6343,3 +6343,88 @@ after two hits. Left out again, with the reason at the call site.
 **Next actions:** `ZombiePushOutOfWorldAndActors` (`FUN_00454900`), still the
 only unported thing keeping a crowd from occupying one point — and now that
 off-screen actors can hold permits again, how tightly they pack matters more.
+
+---
+
+## Session 2026-08-31i — nothing ever put a zombie on the floor
+
+**Outcome:** the per-frame ground snap and the two placing entrances ported.
+Four functions named, `class30/ground.ts`, `class30/emerge.ts` and
+`class30/fall.ts` added.
+
+### The question: "what logic are we missing for placing the zombies?"
+
+`ActorSnapToGroundHeight` (`FUN_00454B10`). `EnemyZombieUpdate` runs a hook at
+`obj+0x12F0` after the state and the velocity integration; that hook is
+`ZombiePushOutOfWorldAndActors`, and it calls the snap every frame unless the
+actor is airborne:
+
+```c
+ground = QueryGroundHeightAt(x, y + 6.0, z);
+if (!(obj+0x136C & 0x4000000) || y <= ground || |y - ground| <= 10.0)
+    y = ground;                       // snap
+else if (state != 0xB) state = 0xB;   // or fall
+```
+
+The port had **none of it**. A class-0x30 actor's `y` was whatever its spawn
+record said and stayed there. Stage 2's block 16 runs over ground that drops
+from -25 to -34.5 over a few units, which is exactly where it was reported.
+
+Measured on the eight block-16 spawns: every one now ends the run with `y`
+equal to the collision height under it, where before they held their spawn `y`
+of -15, -19 and -27.
+
+Note the probe's reach: six units above the actor's own `y`, so an actor ten
+units under the floor **cannot see it**. That is the engine's limit too, and it
+is why the emerge clip is not decoration — the clip brings the actor up to
+within range of its own snap.
+
+### The water: state 27
+
+`ZombieStateEmerge` (`FUN_004584E0`) is the missing animation. Sub 0 holds
+motion 0xB9 with the clock frozen and **root motion off** (`obj+0x1F8 &= ~1`)
+and arms `tail+0x04` as a delay; sub 1 counts it down, turns root motion back
+on and plays `tail+0x08` — **178** for stage 2's water spawns and **183** for
+the ground ones — whose own translation lifts the actor; sub 2 plays it out,
+throwing effect 0x62 at frame 22 and 0x61 at frame 35 when the clip is 178, and
+hands to `AttackRun`.
+
+Those two clip ids are the same pair `ZombieStateTargetMotionScript` special-
+cases with a dust effect, which is the corroboration that they are the two
+"come up out of something" clips.
+
+### The other one: state 26
+
+`ZombieStateDelayedLeap` (`FUN_004581A0`) is a delayed ballistic entrance, and
+it could not be folded into the existing `leap` export because **the offsets
+differ**: state 24 keeps its destination at `tail+0x04` and a duration at
+`+0x10`; state 26 keeps a delay at `+0x04`, the destination at `+0x08`..`+0x10`
+and, at `+0x14`, a per-frame **acceleration** — 0.04 for both stage-2 spawns.
+`ActorArcBeginFalling` (`FUN_0040A090`) counts the frame count out by
+simulating `v -= a; y += v` until the height passes the destination's, which is
+unlike every other arc in the port.
+
+### Two things that fell out
+
+* **`EnemyZombieUpdate` never integrated the velocity.** The engine does
+  `obj+0x40 += obj+0x4C` straight after the state. Adding it also fixed
+  `ZombieStatePounceOnTarget` from the captor family, which had been setting a
+  velocity nothing applied.
+* `ZombieEntryState` had to pass 26 and 27 through for the same reason as the
+  captor states: they do not end by setting 1, they end by *moving the actor*.
+
+### Wrong turn
+
+The first test asserted that an actor eight units under the floor is snapped up
+to it. It is not — the probe starts six above the actor, so eight is out of
+reach. The test was wrong, not the port, and the corrected pair of assertions
+now pins the reach as well as the snap.
+
+### Not done
+
+`ColiTestSphereAgainstActors`, the actor-versus-actor half of the same hook.
+`game/coli.ts` has no entry point for it. It is still the only thing keeping a
+crowd from occupying one point.
+
+**Next actions:** that. Then class 0x51, the water enemy — stage 2 block 16
+step 8 spawns three of them and they have no module at all.

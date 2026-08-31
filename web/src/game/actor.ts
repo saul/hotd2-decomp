@@ -42,6 +42,12 @@ export enum ActorFlag {
    */
   NoCameraTrack = 0x10000,
   /**
+   * `obj+0x34` bit `0x20000` — airborne. `ZombiePushOutOfWorldAndActors`
+   * skips the ground snap while it is set, which is what lets a leap arc
+   * through the air instead of being pulled onto the floor every frame.
+   */
+  Airborne = 0x20000,
+  /**
    * `obj+0x34` bit 3 — a shot landed and the actor's own update has not drained
    * it yet. `MarkActorShot` (`FUN_00404DB0`) raises it together with bit 1 or
    * bit 2, which name the player who fired.
@@ -142,6 +148,23 @@ export enum ThrowerFlag {
 /** `obj+0x136C` for class 0x30, where the bits differ from the thrower's. */
 export enum ZombieFlag2 {
   /**
+   * `obj+0x136C` bit `0x4000000` — this actor may leave the floor. Without it
+   * `ActorSnapToGroundHeight` sticks it to the collision height whatever the
+   * drop; with it, more than ten units of air sends it to
+   * `ZombieStateFallToGround`.
+   */
+  MayFall = 0x4000000,
+  /** Bit `0x20000000` — take part in the world push. Off while emerging. */
+  CollideWorld = 0x20000000,
+  /** Bit `0x40000000` — take part in the actor-versus-actor push. */
+  CollideActors = 0x40000000,
+  /** Bit `0x800000` — set for the frame a push actually moved this actor. */
+  Shoved = 0x800000,
+  /** Bit `0x400000` — which way `ZombieStateBackOff` turns; the shove flips it. */
+  BackOffTurnFlip = 0x400000,
+  /** Bit `0x2000000` — the bounding sphere sits a half unit up, not one. */
+  LowSphere = 0x2000000,
+  /**
    * The class-0x30 half of {@link ThrowerFlag.OffScreenPermit}:
    * `TryClaimAttackSlot` sets it, `ReleaseAttackSlot` and
    * `ZombieStateHoldAtRange` clear it, and each clears
@@ -202,6 +225,23 @@ export interface Actor {
    * distinct from it — `vel.y` is the speed, this is what feeds it.
    */
   accY: number;             // +0x5C
+  /** `obj+0x58` and `obj+0x60` — the other two, which only the arcs use. */
+  accX: number;             // +0x58
+  accZ: number;             // +0x60
+  /**
+   * `ZombieStateEmerge`'s descriptor: `{delay, motion}` from the tail's
+   * `+0x04` and `+0x08`. The clip's own root translation is what lifts the
+   * actor out of the water or the ground.
+   */
+  emerge: { delay: number; motion: number } | null;
+  /**
+   * `ZombieStateDelayedLeap`'s: `{delay, dest, gravity}` from `+0x04`,
+   * `+0x08..+0x10` and `+0x14`. The last is a per-frame **acceleration**, not
+   * a duration — see `ActorArcBeginFalling`.
+   */
+  delayedLeap: {
+    delay: number; dest: [number, number, number]; gravity: number;
+  } | null;
   hp: number;               // +0x11C
   maxHp: number;            // +0x11E
   /** `-1` when it holds no permit, else the index into `g_attack_permits`. */
@@ -578,6 +618,10 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     lookAt: vec3(),
     vel: vec3(),
     accY: 0,
+    accX: 0,
+    accZ: 0,
+    emerge: null,
+    delayedLeap: null,
     hp: 0,
     maxHp: 0,
     attackPermit: -1,

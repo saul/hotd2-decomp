@@ -19,6 +19,10 @@ import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieState } from "./states";
+import { ZombieFlag2 } from "../actor";
+import { ZombiePushOutOfWorldAndActors } from "./ground";
+import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
+import { ZombieStateFallToGround } from "./fall";
 import { MotionRowOf } from "../tables";
 import {
   TARGET_STATES,
@@ -31,6 +35,19 @@ import {
 
 export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
                                   host: GameHost, events?: Events): void {
+  ZombieRunState(obj, eye, dt, rng, host, events);
+  // The engine's own order, and the two halves the port did not have.
+  // `EnemyZombieUpdate` integrates the velocity straight after the state —
+  // which is what carries a leap through its arc — and then runs the hook at
+  // `obj+0x12F0`, which is what puts the actor on the floor.
+  obj.pos.x += obj.vel.x;
+  obj.pos.y += obj.vel.y;
+  obj.pos.z += obj.vel.z;
+  ZombiePushOutOfWorldAndActors(obj, dt * 60);
+}
+
+function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
+                        host: GameHost, events?: Events): void {
   switch (obj.state) {
     case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
     case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt, rng);
@@ -38,6 +55,16 @@ export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
+
+    // The two entrances that place the actor. Without them a spawn stands at
+    // the y its record names — under the water at stage 2 block 16, and in
+    // the ground where the floor drops away.
+    case ZombieState.Emerge:
+      return ZombieStateEmerge(obj, dt, events);
+    case ZombieState.DelayedLeap:
+      return ZombieStateDelayedLeap(obj, dt, rng);
+    case ZombieState.FallToGround:
+      return ZombieStateFallToGround(obj, dt, rng);
 
     // The captor family. None of these looks at the camera: they work on the
     // object at `obj+0x1394`, which for 47 of the 59 spawns that reach one is
@@ -95,6 +122,9 @@ export function EnemyZombieInit(obj: Actor): void {
   obj.cooldown = 0;
   obj.hasStrikeAnchor = false;
   obj.struck = false;
+  // `EnemyZombieInit`: `obj+0x136C |= 0x60000000` — take part in both pushes.
+  obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
+  obj.shoveTimer = 0;
   obj.state = ZombieEntryState(obj.initialState);
 }
 
@@ -116,6 +146,12 @@ export function ZombieEntryState(initial: number): ZombieState {
   // hostage on frame one and charged the camera — the opposite of what a set
   // piece is for.
   if (TARGET_STATES.has(initial)) return initial;
+  // The two placing entrances pass through for the same reason as the captor
+  // states: they do not end by setting 1, they end by *moving the actor*, and
+  // sending them to `AttackRun` leaves the spawn wherever its record put it.
+  if (initial === ZombieState.Emerge || initial === ZombieState.DelayedLeap) {
+    return initial;
+  }
   switch (initial) {
     case ZombieState.Approach:
     case ZombieState.AttackRun:

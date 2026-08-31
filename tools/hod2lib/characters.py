@@ -663,6 +663,16 @@ class Placement:
     cue: dict | None = None
     #: `ThrowerStateLeapStrike`'s arc duration -- see :data:`LEAP_STRIKE_STATES`.
     leap_strike_frames: int | None = None
+    #: `ZombieStateEmerge`'s (state 27) ``{delay, motion}`` from the tail's
+    #: ``+0x04`` and ``+0x08``. The clip's own root translation is what lifts
+    #: the actor out of the water or the ground -- a spawn's ``y`` is where its
+    #: entrance *starts*, not where it stands.
+    emerge: dict | None = None
+    #: `ZombieStateDelayedLeap`'s (state 26) ``{delay, dest, gravity}`` from
+    #: ``+0x04``, ``+0x08``..``+0x10`` and ``+0x14``. The last is a per-frame
+    #: downward **acceleration**, not a duration -- `FUN_0040A090` counts the
+    #: frames out by simulating the drop.
+    delayed_leap: dict | None = None
     #: The two captor scripts, decoded -- see :func:`target_script`. ``target``
     #: is the tail's ``+0x04`` blob read for the initial state, ``attack`` the
     #: ``+0x08`` blob read for the attack state. Only class-0x30 spawns whose
@@ -689,6 +699,10 @@ class Placement:
         # is, because nothing in the script ever places it.
         if self.spawn.get("civilian_child") is not None:
             d["civilian_child"] = self.spawn["civilian_child"]
+        if self.emerge:
+            d["emerge"] = self.emerge
+        if self.delayed_leap:
+            d["delayed_leap"] = self.delayed_leap
         if self.target_script:
             d["target_script"] = self.target_script
         if self.attack_script:
@@ -1011,6 +1025,21 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             n = rec.param(4, "i32")
             if n is not None and 0 < n < 3600:
                 leap_strike_frames = n
+        # The two placing entrances. Both are class 0x30 only, and both are
+        # read off the tail at offsets no other state uses -- which is why
+        # neither could be folded into `leap` above.
+        emerge = delayed_leap = None
+        if sp["class"] == 0x30 and tail[1] == 27:
+            m = rec.param(8, "i32")
+            if m is not None and 0 < m < 4096:
+                emerge = {"delay": rec.param(4, "i32") or 0, "motion": m}
+        if sp["class"] == 0x30 and tail[1] == 26:
+            dest = [rec.param(8 + 4 * k, "f32") for k in range(3)]
+            g = rec.param(0x14, "f32")
+            if (all(v is not None and math.isfinite(v) for v in dest)
+                    and g is not None and 0 < g < 10):
+                delayed_leap = {"delay": rec.param(4, "i32") or 0,
+                                "dest": dest, "gravity": g}
         tscript = ascript = None
         if sp["class"] == 0x30:
             tscript = target_script(prog, prog.evt.to_offset(
@@ -1019,6 +1048,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 rec.param(8, "u32") or 0), tail[2])
         placements.append(Placement(
             at, sp["class"], res.char_type, motion, sp, intro,
+            emerge=emerge, delayed_leap=delayed_leap,
             target_script=tscript, attack_script=ascript,
             body_condition=tail[0], initial_state=tail[1],
             attack_state=tail[2], leap=leap, path=path,
@@ -1083,6 +1113,17 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # The captor family's own clips: a zombie that walks at a civilian and
         # then mauls it plays motions its general row never names, and an
         # unbaked clip is an actor frozen mid-script.
+        # The emerge clip, the submerged pose it holds first, and the two
+        # clips the delayed leap plays. An unbaked entrance is an actor
+        # standing in the water.
+        if emerge:
+            entry_clips += [emerge["motion"], 0xB9]
+        if delayed_leap:
+            entry_clips += [0x3BB, 0x399, 0x3F7]
+        # `ActorSnapToGroundHeight` routes an actor over a drop into state 11,
+        # whose landing clip is 0x3BA -- and every class-0x30 actor can now
+        # reach it, so it is baked for all of them.
+        entry_clips += [0x3BA]
         entry_clips += target_script_motions(tscript)
         entry_clips += target_script_motions(ascript)
         if sp["class"] == 0x10:

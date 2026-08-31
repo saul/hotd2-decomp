@@ -35,6 +35,12 @@ export enum ZombieState {
   Death = 6,
   /** `ActorAbortAttackAndLeave` (`FUN_0045D9F0`). */
   Leave = 10,
+  /**
+   * `ZombieStateFallToGround` (`FUN_00454B90`). Where
+   * `ActorSnapToGroundHeight` sends an actor that is more than ten units above
+   * the floor and allowed to leave it.
+   */
+  FallToGround = 11,
   /** `ZombieStateWalkDistance` (`FUN_00457220`). */
   WalkDistance = 15,
   /** `ZombieStateMotionCue21` (`FUN_004577F0`). */
@@ -43,6 +49,17 @@ export enum ZombieState {
   Approach = 22,
   /** `ZombieStateLeapToPoint` (`FUN_00457CE0`). */
   LeapToPoint = 24,
+  /**
+   * `ZombieStateDelayedLeap` (`FUN_004581A0`). Wait, then ride a ballistic arc
+   * to a point the descriptor names — the burst-out entrances. Eleven spawns.
+   */
+  DelayedLeap = 26,
+  /**
+   * `ZombieStateEmerge` (`FUN_004584E0`). Hold a pose, wait, then play the
+   * clip the descriptor names — coming up out of the water or the ground.
+   * Eighteen spawns.
+   */
+  Emerge = 27,
 
   // -- the captor family: states that work on `obj+0x1394` ----------------
   //

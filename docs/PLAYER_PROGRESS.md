@@ -31,6 +31,33 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**Zombies are on the floor now.** `EnemyZombieUpdate` runs a hook at
+`obj+0x12F0` — `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) — and half of
+what it does is `ActorSnapToGroundHeight` (`FUN_00454B10`): **every class-0x30
+actor is snapped to the collision height every frame**, from a probe six units
+above its own `y`. The port had none of it, so an actor's height was whatever
+its spawn record said, for ever. Stage 2's block 16 runs over ground that drops
+from -25 to -34.5 in a few units, which is why the zombies there were in it.
+More than ten units of air, on an actor allowed to leave the floor, is
+`ZombieStateFallToGround` (state 11) instead — also ported.
+
+**And two entrances that place the actor.** A spawn's `y` is where its entrance
+*starts*, not where it stands:
+
+* `ZombieStateEmerge` (27, eighteen spawns) holds a submerged pose with the
+  clock frozen and root motion off, waits the descriptor's delay, then plays
+  the clip the descriptor names — 178 for the water ones, 183 for the ground —
+  whose own translation lifts the actor out, throwing a splash at frames 22 and
+  35. That is the missing "get out of the water" animation.
+* `ZombieStateDelayedLeap` (26, eleven spawns) waits, then rides an arc to a
+  point the descriptor gives. Its `ActorArcBeginFalling` is unlike every other
+  arc in the port: the descriptor gives a per-frame **acceleration**, and the
+  frame count is counted out by simulating the drop.
+
+`EnemyZombieUpdate` also integrates `obj+0x4C` into the position now, which it
+never did — so the class-0x30 pounce, which was setting a velocity nothing
+applied, moves at last.
+
 **An off-screen enemy still takes its permit** — and the port used to say
 otherwise, which is why an enemy the camera's rail had walked into stood in
 your face for good. `TryClaimAttackSlot` calls `ActorIsOnScreen`, but **not to

@@ -22,11 +22,33 @@ import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
+import { ZombieState } from "../src/game/class30/states.ts";
+import { TARGET_STATES } from "../src/game/class30/target.ts";
 import { vec3 } from "../src/game/vec.ts";
 
 const root = join(process.env.HOME, "hotd2-decomp/extract/player");
+/**
+ * The camera, parked five thousand units from anything. That is the whole
+ * point: with the eye far away, "closed on the civilian" and "closed on the
+ * camera" are opposite answers, and a captor that has fallen through to
+ * `AttackRun` gives the second one.
+ */
+const EYE = vec3(5000, 40, 5000);
+
+/** How far off `obj`'s facing is from a point, in radians. The clips face -Z. */
+function facingError(obj, p) {
+  const want = Math.atan2(obj.pos.x - p.x, obj.pos.z - p.z);
+  const have = obj.yaw * ((Math.PI * 2) / 65536);
+  let d = want - have;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return Math.abs(d);
+}
 const SECONDS = 30;
 let total = 0, moved = 0, rescued = 0, holding = 0, bad = 0;
+let captors = 0, towardCiv = 0, towardEye = 0, mauled = 0;
+let inCaptorState = 0;
+const closing = new Map();
 
 for (let stage = 1; stage <= 6; stage++) {
   let script;
@@ -54,7 +76,12 @@ for (let stage = 1; stage <= 6; stage++) {
         initialState: p.initial_state ?? 0,
         attackState: p.attack_state ?? 0,
         condition: p.body_condition ?? 0,
-      });
+        script: (p.target_script || p.attack_script)
+          ? { target: p.target_script ?? null,
+              attack: p.attack_script ?? null }
+          : null,
+        targetAt: p.civilian_child ?? -1,
+      }, rng);
       k.visible = true;
       k.hp = k.maxHp = kid.hp || 1;
       k.pos = vec3(kid.pos[0], kid.pos[1], kid.pos[2]);
@@ -77,6 +104,30 @@ for (let stage = 1; stage <= 6; stage++) {
     for (let k = 0; k < actors.length; k++) {
       seen[k].add(`${actors[k].civ?.script}:${actors[k].civ?.cursor}`);
     }
+    // **Who are the captors facing?** This is the assertion the whole captor
+    // family exists for. `ZombieStateWalkToTarget` turns toward the civilian
+    // every frame; `AttackRun`, which is where all 47 of them used to fall
+    // through to, turns toward the camera. Measuring the *facing* rather than
+    // the distance keeps the answer clean whether or not the clip's root
+    // motion actually carries the actor anywhere this frame.
+    for (const o of G.g_object_list) {
+      if (o.cls !== SpawnClass.Zombie || o.targetAt < 0) continue;
+      const rec = closing.get(o.at) ?? { captor: false, run: false };
+      // The direct statement of the fix: did this captor ever run a state
+      // that works on its civilian, or did it go straight to `AttackRun` and
+      // the camera? Before the family was ported, every one of the 47 gave
+      // the second answer.
+      if (TARGET_STATES.has(o.state)) rec.captor = true;
+      if (o.state === ZombieState.AttackRun) rec.run = true;
+      if (i === (SECONDS * 60) / 2 - 1) {
+        const civ = G.g_object_list.find((c) => c.at === o.targetAt);
+        if (civ) {
+          rec.civ = facingError(o, civ.pos);
+          rec.eye = facingError(o, EYE);
+        }
+      }
+      closing.set(o.at, rec);
+    }
     // Half way through, kill every captor. That is the one thing this harness
     // *can* do that the shipped waits are actually waiting for -- most of the
     // rest are camera cues and script flags a lone director never raises --
@@ -86,8 +137,11 @@ for (let stage = 1; stage <= 6; stage++) {
         if (o.cls === SpawnClass.Zombie) { o.dead = true; }
       }
     }
-    GameUpdate(vec3(0, 40, 0), 1 / 60, NULL_HOST, rng, events);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     steps += 1;
+  }
+  for (const a of actors) {
+    if (a.flags & 0x4000000) mauled += 1;
   }
   let stageMoved = 0;
   for (let i = 0; i < actors.length; i++) {
@@ -110,17 +164,40 @@ for (let stage = 1; stage <= 6; stage++) {
               + `${stageMoved} advanced their script in ${SECONDS}s`);
 }
 
-console.log(`\n${total} civilians driven, ${moved} advanced, `
+for (const r of closing.values()) {
+  captors += 1;
+  if (r.captor) inCaptorState += 1;
+  if (r.civ !== undefined && r.civ <= r.eye) towardCiv += 1;
+  else if (r.civ !== undefined) towardEye += 1;
+}
+console.log(`\n${captors} captors tracked: ${inCaptorState} ran a state that `
+            + `works on their civilian; at 15s ${towardCiv} face the civilian `
+            + `more squarely than the camera and ${towardEye} the other way`);
+console.log(`${mauled} civilians were killed by their captors`);
+console.log(`${total} civilians driven, ${moved} advanced, `
             + `${rescued} rescued, ${holding} holding something, `
             + `${bad} runaway`);
 
 /**
- * What a full six-stage bundle gives. The fourteen that do not advance are
- * waiting on camera cues and script flags this harness never raises -- both
- * of stage 6's are -- which is a property of the harness, not of the port.
+ * What a full six-stage bundle gives.
+ *
+ * The thirteen civilians that do not advance are waiting on camera cues and
+ * script flags this harness never raises -- both of stage 6's are -- which is
+ * a property of the harness, not of the port.
+ *
+ * **`inCaptorState` is the one that matters.** 45 of the 47 captors run a
+ * state that works on their civilian; the other two start in state 18, which
+ * is a genuine non-captor entrance. Before `class30/target.ts` existed the
+ * number was **zero** -- every one of them fell through `ZombieEntryState` to
+ * `AttackRun` and went for the camera.
+ *
+ * `mauled` is the other side of it: four civilians are killed by their captors
+ * inside fifteen seconds, which is four that can no longer be rescued. That is
+ * why `rescued` is lower here than it was before the family was ported.
  */
-const EXPECT = { total: 47, moved: 35, rescued: 25, holding: 4 };
-const got = { total, moved, rescued, holding };
+const EXPECT = { total: 47, moved: 34, rescued: 21, holding: 4,
+                 captors: 47, inCaptorState: 45, mauled: 4 };
+const got = { total, moved, rescued, holding, captors, inCaptorState, mauled };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
 if (bad || total === 0 || missing.length) {
   console.log("\nFAIL");
@@ -133,6 +210,7 @@ if (bad || total === 0 || missing.length) {
   }
   process.exit(1);
 }
-console.log("\nclean -- every shipped stream steps, none runs away, killing "
-            + "the captors rescues 25 of the 47, and 4 end up holding "
-            + "something");
+console.log("\nclean -- every shipped stream steps, none runs away, 45 of the "
+            + "47 captors work on their own civilian rather than on the "
+            + "camera, and 4 civilians are mauled before anyone can save "
+            + "them");

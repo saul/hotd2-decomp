@@ -9,7 +9,7 @@
  * The renderer binds to an actor by `at` and owns the nodes; it holds no state
  * of its own that a snapshot would need.
  */
-import type { ArcStage } from "../bundle/characters";
+import type { ArcStage, TargetScriptJson } from "../bundle/characters";
 import type { CivilianState } from "./class10/state";
 import type { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
@@ -395,6 +395,47 @@ export interface Actor {
   knockCount: number;       // +0x1328
   /** `obj+0x1350` — the surface under the landing point. `0x5A` kills. */
   landSurface: number;      // +0x1350
+  /**
+   * `obj+0x1394` — **the object this actor was built for**, by spawn address.
+   *
+   * Polymorphic, like everything at this end of the struct:
+   * `ThrowerStatePathFollow` keeps a waypoint cursor here, and
+   * `ScriptedHumanoidInit` a command pointer. For a class-0x30 zombie it is a
+   * *parent actor*, written by `CivilianInit` for the 47 captors it builds —
+   * and the whole `ZombieStateWalkToTarget` family walks at it instead of at
+   * the camera. `-1` for an actor that has none.
+   */
+  targetAt: number;         // +0x1394
+  /**
+   * The two captor scripts off the descriptor tail, decoded — `+0x04` for the
+   * initial state and `+0x08` for the attack state. `ZombieScriptForState`
+   * (`FUN_0045CA10`) picks between them by which state the actor is in.
+   */
+  script: { target: TargetScriptJson | null;
+            attack: TargetScriptJson | null } | null;
+  /**
+   * `obj+0x1398` — the cursor into the captor script's entry list.
+   *
+   * The engine keeps a pointer; an index is the same edge without the address,
+   * and it survives a snapshot. Shared by every state in the family, which is
+   * how `ZombieStateWalkToTarget` can hand `ZombieStateTargetMotionScript` a
+   * half-walked list.
+   */
+  scriptPc: number;         // +0x1398
+  /** `obj+0x1320` — the clip the captor script wants; the tail re-blends to it. */
+  scriptMotion: number;     // +0x1320, aliases `holdFrames`
+  /** `obj+0x1350` — the captor script's remaining loop count. Aliases `landSurface`. */
+  targetLoops: number;      // +0x1350
+  /**
+   * `obj+0x1354` — the script entry's cue frame or mode, and, once
+   * `ZombieStateTargetLostPause` is entered, the state to come back to.
+   * Aliases `arcKind`; the two never overlap in time.
+   */
+  targetCue: number;        // +0x1354
+  /** `obj+0x1358` — the sub to come back to. Aliases `allowance`/`pathMode`. */
+  resumeSub: number;        // +0x1358
+  /** `obj+0x1370` — how close `ZombieStateWalkToTarget` has to get. */
+  targetArrive: number;     // +0x1370
   /** `obj+0x1388` — the height a fall began at, and a flag while it is set. */
   fallFromY: number;        // +0x1388
   /** `obj+0x1354` — the axis gravity pulls along. See `ThrowerArcKind`. */
@@ -568,6 +609,14 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     reactBone: 0,
     knockCount: 0,
     landSurface: 0,
+    targetAt: -1,
+    script: null,
+    scriptPc: 0,
+    scriptMotion: 0,
+    targetLoops: 0,
+    targetCue: 0,
+    resumeSub: 0,
+    targetArrive: 0,
     fallFromY: 0,
     arcKind: 0,
     alpha: 1,

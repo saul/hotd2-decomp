@@ -466,7 +466,15 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         }
         break;
       case CivilianOp.SetChildCue:
-        if (sub.childCount !== 0) sub.childCue2 = a[1];
+        // **The order.** `sub+0x2C` is a class-0x30 state id and `sub+0x2E` a
+        // countdown, and the captors sitting in
+        // `ZombieStateAwaitCivilianOrder` are what read them. An earlier
+        // revision kept only the second operand and called it `childCue2`
+        // `[open]`, which threw the order itself away.
+        if (sub.childCount !== 0) {
+          sub.childOrder = a[0];
+          sub.childOrderFrames = a[1];
+        }
         break;
       case CivilianOp.SetScriptFlag:
         G.g_script_flags[a[0]] = 1; break;
@@ -881,6 +889,9 @@ export function CivilianPruneDeadChildren(obj: Actor): void {
       continue;
     }
     if (kid) sub.rescuePlayer = kid.killedBy ?? -1;
+    // `sub+0x64` is the pounce slot; the engine clears it when the child
+    // holding it goes, or the next one never gets a turn.
+    if (sub.pouncer === at) sub.pouncer = 0;
   }
   sub.children = keep;
   sub.childCount = keep.length;

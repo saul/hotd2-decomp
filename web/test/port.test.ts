@@ -29,6 +29,9 @@ import {
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ActorFlag } from "../src/game/actor";
+import { EnemyZombieUpdate } from "../src/game/class30";
+import { ZombieScriptEnded } from "../src/game/class30/target";
+import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
 import { CivilianAttachSet, CivilianOp, CivilianUpdate, CivilianWait }
   from "../src/game/class10";
@@ -2460,6 +2463,140 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           a.civ?.enemiesGoal === 5, `goal ${a.civ?.enemiesGoal}`);
     check("...and does not run its actions",
           a.civ?.turnRate !== 66, `rate ${a.civ?.turnRate}`);
+  }
+}
+
+console.log("\nclass 0x30's captor family — the zombies work on the civilian:");
+{
+  const rng = new Rng(11);
+
+  /** One civilian and one captor, wired the way the exporter wires them. */
+  const captorScene = (initial: number, attack: number,
+                       target: TargetScriptJson | null,
+                       civCmds: CivilianCmdJson[][] = [[
+                         { op: CivilianOp.Wait, args: [0] },
+                         { op: CivilianOp.End, args: [] },
+                       ]]) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], scripts: civCmds, items: [],
+      spawns: {
+        "16384": {
+          charType: 1, script: 0, removePath: -1, removeFrame: 0,
+          removeDelay: 0,
+          children: [{ at: 0x4100, class: 0x30, charType: 1,
+                       pos: [0, 0, 0] as [number, number, number],
+                       yaw: 0, hp: 1 }],
+        },
+      },
+    });
+    const civ = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian");
+    civ.visible = true;
+    civ.pos = vec3(0, 0, 0);
+    const z = ActorSpawn(0x4100, SpawnClass.Zombie, 1, "captor", {
+      initialState: initial, attackState: attack,
+      script: { target, attack: null }, targetAt: 0x4000,
+    }, rng);
+    z.visible = true;
+    z.pos = vec3(0, 0, 40);
+    return { civ, z, events: new Events() };
+  };
+  const zFrame = (z: ReturnType<typeof ActorSpawn>, events: Events) =>
+    EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST, events);
+
+  // The bug this family fixes: an unmodelled captor state fell through
+  // `ZombieEntryState` to `AttackRun` and the zombie went for the camera.
+  {
+    const { z } = captorScene(ZombieState.WalkToTarget, 1, null);
+    check("a captor starts in its own state, not in AttackRun",
+          z.state === ZombieState.WalkToTarget, `state ${z.state}`);
+  }
+
+  // **The grab.** `ZombieStateWalkToTarget` raises the civilian's own `Free`
+  // wait bit the frame it gets close enough — which is the civilian's cue.
+  {
+    const script: TargetScriptJson = {
+      state: ZombieState.WalkToTarget,
+      head: { arrive: 10, loops: 1, motion: 10, frame: 0 },
+      entries: [{ motion: 10, frame: 0, loops: 1, mode: 5 }],
+    };
+    const { civ, z, events } = captorScene(ZombieState.WalkToTarget, 1,
+                                           script);
+    zFrame(z, events);
+    check("...and walks at the civilian rather than the camera",
+          z.sub === 2 && z.targetArrive === 10, `sub ${z.sub}`);
+    zFrame(z, events);
+    check("out of reach it stays in the walk",
+          z.state === ZombieState.WalkToTarget
+          && !(civ.civ!.wait & CivilianWait.Free), `state ${z.state}`);
+    z.pos = vec3(0, 0, 4);                     // inside the arrive radius
+    zFrame(z, events);
+    check("inside the radius it hands over to the maul...",
+          z.state === ZombieState.TargetMotionScript && z.sub === 1,
+          `state ${z.state} sub ${z.sub}`);
+    check("...and raises the civilian's own `Free` wait bit, which is the grab",
+          (civ.civ!.wait & CivilianWait.Free) !== 0,
+          `wait ${civ.civ!.wait.toString(16)}`);
+  }
+
+  // **The maul.** The cue frame raises `0x4000000` on the civilian — the same
+  // bit a killing shot raises, so it costs both players a hundred points.
+  {
+    const script: TargetScriptJson = {
+      state: ZombieState.TargetMotionScript,
+      head: {},
+      entries: [{ motion: 10, frame: 0, loops: 1, mode: 3 }],
+    };
+    const { civ, z, events } = captorScene(ZombieState.TargetMotionScript, 1,
+                                           script);
+    let killed = false;
+    events.on("sound.play", () => { killed = true; });
+    zFrame(z, events);
+    check("the maul opens on the script's first entry",
+          z.motion === 10 && z.targetCue === 3 && z.sub === 2,
+          `motion ${z.motion} cue ${z.targetCue}`);
+    check("and has not touched the civilian yet",
+          !(civ.flags & ActorFlag.Dead));
+    // Frame 3 of a 30 fps clip.
+    z.clock = 3 / 30;
+    zFrame(z, events);
+    check("on the cue frame it kills the civilian outright",
+          (civ.flags & ActorFlag.Dead) !== 0 && killed,
+          `flags ${civ.flags.toString(16)}`);
+  }
+
+  // **The order.** Class 0x10's op 0x1A writes a state and a countdown into
+  // its own block, and `ZombieStateAwaitCivilianOrder` is the captor sitting
+  // on it. `0x31` means die.
+  {
+    const { civ, z, events } = captorScene(
+      ZombieState.AwaitCivilianOrder, 1, null,
+      [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
+        { op: CivilianOp.SetChildCue, args: [ZombieState.OrderDie, 2] },
+        { op: CivilianOp.Wait, args: [0] },
+        { op: CivilianOp.End, args: [] }]]);
+    check("the civilian's op 0x1A is an order to its captors, not a spare word",
+          civ.civ!.childOrder === ZombieState.OrderDie
+          && civ.civ!.childOrderFrames === 2,
+          `order ${civ.civ!.childOrder}/${civ.civ!.childOrderFrames}`);
+    zFrame(z, events);            // sub 0 -> 1, saves the flags
+    zFrame(z, events);            // takes the order
+    check("...and the captor obeys it: 0x31 is die",
+          z.dead && (z.flags & ActorFlag.Dead) !== 0,
+          `dead ${z.dead} state ${z.state}`);
+  }
+
+  // The script ends by flipping roles, and only the *attack* script running
+  // out sends the actor at the player.
+  {
+    const { z } = captorScene(ZombieState.WalkToTarget,
+                              ZombieState.RetireOffScreen, null);
+    ZombieScriptEnded(z);
+    check("a finished target script hands over to the attack state",
+          z.state === ZombieState.RetireOffScreen, `state ${z.state}`);
+    ZombieScriptEnded(z);
+    check("...and only a finished attack script sends it at the player",
+          z.state === ZombieState.AttackRun, `state ${z.state}`);
   }
 }
 

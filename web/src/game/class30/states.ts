@@ -43,6 +43,39 @@ export enum ZombieState {
   Approach = 22,
   /** `ZombieStateLeapToPoint` (`FUN_00457CE0`). */
   LeapToPoint = 24,
+
+  // -- the captor family: states that work on `obj+0x1394` ----------------
+  //
+  // Every one of these walks at, mauls or waits on the object the actor was
+  // *built for* rather than at the camera. 59 spawns across the game use one,
+  // and 47 of those are the class-0x10 civilians' own captors.
+  /** `ZombieStateWalkToTarget` (`FUN_0045A890`). Walk at the target, then grab. */
+  WalkToTarget = 34,
+  /** `ZombieStateTargetMotionScript` (`FUN_0045AAA0`). The maul. */
+  TargetMotionScript = 35,
+  /** `ZombieStateTargetScriptWithFlag` (`FUN_0045B190`). ...raising a script flag. */
+  TargetScriptWithFlag = 36,
+  /** `ZombieStateCarryProp` (`FUN_0045B380`). Carries a companion object. */
+  CarryProp = 37,
+  /** `ZombieStateRetireOffScreen` (`FUN_0045B7B0`). The commonest attack state. */
+  RetireOffScreen = 38,
+  /** `ZombieStateAwaitCivilianOrder` (`FUN_0045BAD0`). Waits on the civilian. */
+  AwaitCivilianOrder = 39,
+  /** `ZombieStateWalkPastPoint` (`FUN_0045BCB0`). */
+  WalkPastPoint = 40,
+  /** `ZombieStateWalkToPoint` (`FUN_0045BE30`). */
+  WalkToPoint = 41,
+  /** `ZombieStateDragTarget` (`FUN_0045C080`). Glued to the civilian. */
+  DragTarget = 43,
+  /** `ZombieStatePounceOnTarget` (`FUN_0045C2E0`). */
+  PounceOnTarget = 44,
+  /** `ZombieStateTargetLostPause` (`FUN_0045C7D0`). The target died under it. */
+  TargetLostPause = 45,
+  /**
+   * The order `ZombieStateAwaitCivilianOrder` reads as "die" rather than as a
+   * state to enter — class 0x10's op 0x1A writes it to `sub+0x2C`.
+   */
+  OrderDie = 0x31,
 }
 
 /**

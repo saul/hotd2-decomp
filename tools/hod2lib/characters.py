@@ -663,6 +663,12 @@ class Placement:
     cue: dict | None = None
     #: `ThrowerStateLeapStrike`'s arc duration -- see :data:`LEAP_STRIKE_STATES`.
     leap_strike_frames: int | None = None
+    #: The two captor scripts, decoded -- see :func:`target_script`. ``target``
+    #: is the tail's ``+0x04`` blob read for the initial state, ``attack`` the
+    #: ``+0x08`` blob read for the attack state. Only class-0x30 spawns whose
+    #: state is in :data:`TARGET_SCRIPT_SHAPE` carry them.
+    target_script: dict | None = None
+    attack_script: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -683,6 +689,10 @@ class Placement:
         # is, because nothing in the script ever places it.
         if self.spawn.get("civilian_child") is not None:
             d["civilian_child"] = self.spawn["civilian_child"]
+        if self.target_script:
+            d["target_script"] = self.target_script
+        if self.attack_script:
+            d["attack_script"] = self.attack_script
         if self.leap:
             d["leap"] = self.leap
         if self.path:
@@ -1001,8 +1011,15 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             n = rec.param(4, "i32")
             if n is not None and 0 < n < 3600:
                 leap_strike_frames = n
+        tscript = ascript = None
+        if sp["class"] == 0x30:
+            tscript = target_script(prog, prog.evt.to_offset(
+                rec.param(4, "u32") or 0), tail[1])
+            ascript = target_script(prog, prog.evt.to_offset(
+                rec.param(8, "u32") or 0), tail[2])
         placements.append(Placement(
             at, sp["class"], res.char_type, motion, sp, intro,
+            target_script=tscript, attack_script=ascript,
             body_condition=tail[0], initial_state=tail[1],
             attack_state=tail[2], leap=leap, path=path,
             walk_distance=walk_distance, entrance_motion=entrance_motion,
@@ -1063,6 +1080,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # pointers to further streams, and a civilian that is shot spends the
         # rest of its life in one of them. Baking only the opening motion left
         # every civilian frozen in its idle the moment its script moved on.
+        # The captor family's own clips: a zombie that walks at a civilian and
+        # then mauls it plays motions its general row never names, and an
+        # unbaked clip is an actor frozen mid-script.
+        entry_clips += target_script_motions(tscript)
+        entry_clips += target_script_motions(ascript)
         if sp["class"] == 0x10:
             entry_clips += civilian_motion_ids(
                 civscripts, rec.param(0x01, "i8") or 0)
@@ -2119,6 +2141,84 @@ def class31_tables(tables) -> dict:
                 "Class 0x31's behaviour, four sets deep, indexed by the "
                 "descriptor tail's byte +1 (obj+0x130C). Set 0 is zstin, "
                 "which is the wall-crawler.")}
+
+
+#: The class-0x30 states that work on ``obj+0x1394`` -- the object the actor
+#: was built for, which for the 47 class-0x10 captors is the civilian.
+#:
+#: Each takes a script through `ZombieScriptForState` (`FUN_0045CA10`): the
+#: descriptor tail's `+0x08` when the actor is in the tail's attack state,
+#: `+0x04` otherwise. The blob opens with a header whose shape belongs to the
+#: state that *entered* it and continues as a list of motion entries, which
+#: `ZombieStateTargetMotionScript` (state 35) steps whoever put the cursor
+#: there. A list ends on the first entry whose motion is below 1.
+#:
+#: ``(header bytes, shorts per entry)``.
+TARGET_SCRIPT_SHAPE: dict[int, tuple[int, int]] = {
+    34: (10, 4),   # {f32 arrive_dist; u16 loops; u16 motion; u16 frame}
+    35: (0, 4),    # straight into the entries
+    36: (0, 5),    # ...with a g_script_flags index per entry
+    37: (0x38, 4),  # the carried-prop record; [open] beyond its motion fields
+    38: (20, 4),   # {f32 x, y, z; s16 motion, frame; s16 loops, mode}
+    40: (16, 4),   # {f32 x, y, z; s16 motion, frame}
+    41: (16, 4),   # the same, arrived at rather than walked past
+    43: (4, 0),    # {s16 loops; s16 cue_frame} -- no list
+}
+
+
+def target_script(prog, off: int, state: int) -> dict | None:
+    """One captor script blob, decoded for the state that enters it.
+
+    The check that the shapes are right is that **every** blob terminates: all
+    86 the six stages reach end on an entry whose motion is below 1, within 64
+    entries. A wrong header length walks into the middle of a float and the
+    list runs away immediately.
+    """
+    shape = TARGET_SCRIPT_SHAPE.get(state)
+    if shape is None or off is None:
+        return None
+    head_len, per = shape
+    raw = prog.evt.raw
+    if off + head_len > len(raw):
+        return None
+    head: dict = {}
+    if state == 34:
+        head = {"arrive": struct.unpack_from("<f", raw, off)[0],
+                "loops": struct.unpack_from("<H", raw, off + 4)[0],
+                "motion": struct.unpack_from("<H", raw, off + 6)[0],
+                "frame": struct.unpack_from("<H", raw, off + 8)[0]}
+    elif state in (38, 40, 41):
+        pt = list(struct.unpack_from("<3f", raw, off))
+        head = {"point": pt,
+                "motion": struct.unpack_from("<h", raw, off + 12)[0],
+                "frame": struct.unpack_from("<h", raw, off + 14)[0]}
+        if state == 38:
+            head["loops"] = struct.unpack_from("<h", raw, off + 16)[0]
+            head["mode"] = struct.unpack_from("<h", raw, off + 18)[0]
+    elif state == 43:
+        head = {"loops": struct.unpack_from("<h", raw, off)[0],
+                "cue": struct.unpack_from("<h", raw, off + 2)[0]}
+    entries: list[dict] = []
+    p = off + head_len
+    while per and len(entries) < 64 and p + per * 2 <= len(raw):
+        v = struct.unpack_from("<%dh" % per, raw, p)
+        if v[0] < 1:
+            break
+        e = {"motion": v[0], "frame": v[1], "loops": v[2], "mode": v[3]}
+        if per > 4:
+            e["flag"] = v[4]
+        entries.append(e)
+        p += per * 2
+    return {"state": state, "head": head, "entries": entries}
+
+
+def target_script_motions(script: dict | None) -> list[int]:
+    """Every clip a decoded captor script names, for the bake list."""
+    if not script:
+        return []
+    out = [script["head"].get("motion", 0)]
+    out += [e["motion"] for e in script["entries"]]
+    return [m for m in out if 0 < m < 4096]
 
 
 def civilian_motion_ids(block: dict, entry: int) -> list[int]:

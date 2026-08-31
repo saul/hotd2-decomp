@@ -84,6 +84,42 @@ export interface CharacterType {
   motions: Record<string, BakedMotion>;
 }
 
+/**
+ * One entry of a captor script's motion list — `s16[4]`, or `s16[5]` for state
+ * 36, which carries a `g_script_flags` index as well.
+ */
+export interface TargetScriptEntry {
+  motion: number;
+  frame: number;
+  loops: number;
+  /**
+   * The cue frame the maul lands on, or, in `ZombieStateRetireOffScreen`, the
+   * mode its per-frame arm switches on. `ZombieApplyScriptMode` also reads it.
+   */
+  mode: number;
+  /** State 36 only: the `g_script_flags` byte raised on the cue frame. */
+  flag?: number;
+}
+
+/** One decoded captor script: a header shaped by the entering state, then a list. */
+export interface TargetScriptJson {
+  /** The class-0x30 state the header belongs to. */
+  state: number;
+  head: {
+    /** State 34: how close the walk has to get. */
+    arrive?: number;
+    /** States 38, 40 and 41: the point walked at or past. */
+    point?: [number, number, number];
+    motion?: number;
+    frame?: number;
+    loops?: number;
+    mode?: number;
+    /** State 43: the frame the drag kills on. */
+    cue?: number;
+  };
+  entries: TargetScriptEntry[];
+}
+
 export interface CharacterPlacement {
   /** evt offset of the spawn descriptor. */
   at: number;
@@ -102,6 +138,15 @@ export interface CharacterPlacement {
   attack_state: number;
   /** Which of `approach.rings` this actor measures against. */
   ring_set: number;
+  /**
+   * The two captor scripts, decoded — see `target_script` in
+   * hod2lib/characters.py. `target_script` is the descriptor tail's `+0x04`
+   * blob read for the initial state, `attack_script` the `+0x08` blob read for
+   * the attack state, which is the selection `ZombieScriptForState`
+   * (`FUN_0045CA10`) makes.
+   */
+  target_script?: TargetScriptJson;
+  attack_script?: TargetScriptJson;
   /**
    * The class-0x10 civilian whose `CivilianInit` builds this actor, as its
    * spawn address. Present only on the fifty zombies holding a civilian:

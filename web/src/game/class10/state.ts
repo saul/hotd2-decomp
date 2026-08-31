@@ -48,8 +48,22 @@ export interface CivilianState {
   removeFrame: number;
   /** +0x2A frames left before the actor leaves, once the cue has been met. */
   removeDelay: number;
-  /** +0x2E op 0x1A's second operand. `[open]` — nothing read reads it back. */
-  childCue2: number;
+  /**
+   * +0x2C / +0x2E — **the order this civilian gives its captors**, from op
+   * 0x1A. `ZombieStateAwaitCivilianOrder` (`FUN_0045BAD0`) counts the frames
+   * down and takes the state id; `0x31` means die. This is the civilian's
+   * script driving the zombies that are holding it, and it is the reverse
+   * direction of the `Free` bit they raise on arrival.
+   */
+  childOrder: number;
+  childOrderFrames: number;
+  /**
+   * +0x64 — the one captor currently pouncing, by spawn address, or 0.
+   * `ZombieStatePounceOnTarget` claims it so a civilian held by three is
+   * mauled by one at a time, and `CivilianPruneDeadChildren` clears it when
+   * that one dies.
+   */
+  pouncer: number;
   /** +0x30..+0x38 the point the actor turns toward and walks at. */
   target: { x: number; y: number; z: number };
   /** +0x3C op 5's arrival radius; wait bit 0x10 unblocks inside it. */
@@ -124,7 +138,7 @@ export function makeCivilianState(): CivilianState {
     turnRate: 10, cuePath: 0, cueFrame: 0, timer: -1, motionCompare: 0,
     hookBusy: 0, flagIndex: 0, skipCount: 0, childCount: 0, childrenGoal: 0,
     enemiesGoal: 0, civiliansGoal: 0, removePath: 0, removeFrame: 0,
-    removeDelay: 0, childCue2: 0,
+    removeDelay: 0, childOrder: 0, childOrderFrames: 0, pouncer: 0,
     target: { x: 0, y: 0, z: 0 }, radius: 0, targetMode: 0,
     cursor: 0, onShot: 0, onShotAlt: 0, resume: 0, sounds: [],
     hook: 0, children: [], carrier: 0, rescuePlayer: -1,

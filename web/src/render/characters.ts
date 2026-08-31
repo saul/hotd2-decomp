@@ -251,6 +251,14 @@ export class CharacterLayer {
         walkDistance: p?.walk_distance ?? 0,
         entranceMotion: p?.entrance_motion ?? 0,
         pounce: p?.pounce ?? null,
+        // The captor family's two script blobs, and the object they work on.
+        // `CivilianInit` writes `child+0x1394 = this`, and `civilian_child` is
+        // that pointer as a spawn address.
+        script: (p?.target_script || p?.attack_script)
+          ? { target: p.target_script ?? null,
+              attack: p.attack_script ?? null }
+          : null,
+        targetAt: p?.civilian_child ?? -1,
       }, this.rng);
       a.motion = motion;
       a.intro = intro;

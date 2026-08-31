@@ -46,6 +46,33 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
 }
 
 /**
+ * `ActorSetMotionBlended` — `FUN_004119A0`. Start a clip at a frame, over a
+ * cross-fade.
+ *
+ * The engine's own primitive, and the one the whole captor-script family calls
+ * — a script entry is `{motion, frame, loops, mode}`, and its frame is a
+ * literal, not a random spread. `ZombieSetMotionIfIdle` above is the *other*
+ * caller shape: the one that draws the start frame, because a crowd must not
+ * move in lockstep.
+ */
+export function ActorSetMotionBlended(obj: Actor, motion: number,
+                                      frame: number, fade: number): void {
+  const m = MotionOf(obj, motion);
+  if (!m) return;
+  if (obj.motion !== motion) {
+    if (obj.fadeFrom && obj.fade > 0) {
+      obj.fade = fade;
+      obj.fadeLen = fade;
+    } else {
+      ActorStartFade(obj, obj.motion, obj.clock, fade);
+    }
+  }
+  obj.motion = motion;
+  obj.clock = Math.max(0, frame) / Math.max(1, m.fps);
+  obj.rootFrame = -1;
+}
+
+/**
  * Begin a cross-fade out of whatever is showing.
  *
  * The engine holds two motions on one track and fades between them;

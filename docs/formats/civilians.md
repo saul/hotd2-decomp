@@ -259,6 +259,75 @@ costs a **life** and 100 points of its own — and then charges another 100, so
 the shooter is down 200; a *killing* shot charges 100 to **both** players and
 no life. Either way the civilian switches to its on-shot script and cries out.
 
+## The captors, and what they are actually doing
+
+They are not attacking the player. Eleven of the 54 states in
+`g_class30_states` never look at the camera at all — they work on
+**`obj+0x1394`**, the object the actor was built for, and `CivilianInit` is
+what writes the civilian there. 59 class-0x30 spawns across the game reach one,
+and 47 of them are a civilian's captors.
+
+| State | Name | What it does |
+|---|---|---|
+| 34 | `ZombieStateWalkToTarget` | Walk at the civilian until inside the script's radius, then grab |
+| 35 | `ZombieStateTargetMotionScript` | The maul: steps a motion list and kills on a cue frame |
+| 36 | `ZombieStateTargetScriptWithFlag` | The same, raising a `g_script_flags` byte on the cue |
+| 37 | `ZombieStateCarryProp` | Carries a companion object and turns toward the camera |
+| 38 | `ZombieStateRetireOffScreen` | Leaves once it is off camera, or once its loops run out |
+| 39 | `ZombieStateAwaitCivilianOrder` | Waits on the civilian's own script — see below |
+| 40 | `ZombieStateWalkPastPoint` | Walk until a point is behind it, then maul |
+| 41 | `ZombieStateWalkToPoint` | Walk to within 5.0 of a point, then maul |
+| 43 | `ZombieStateDragTarget` | Glued to the civilian: copies its position *and* rotation |
+| 44 | `ZombieStatePounceOnTarget` | Leaps at it, one zombie at a time |
+| 45 | `ZombieStateTargetLostPause` | Where it goes when the civilian dies under it |
+
+### The two scripts
+
+`ZombieScriptForState` (`FUN_0045CA10`) picks the descriptor tail's `+0x08`
+blob while the actor is in the tail's attack state (`tail+0x03`), and the
+`+0x04` blob otherwise. Each opens with a header shaped by the state that
+*entered* it and continues as a list of `s16[4]` `{motion, frame, loops, mode}`
+entries; the cursor at `obj+0x1398` is shared, which is how the walk hands the
+maul a half-walked list. All 86 blobs the six stages reach decode and
+terminate — `tools/verify_captor_scripts.py`.
+
+| Entering state | Header |
+|---|---|
+| 34 | `{f32 arrive_dist; u16 loops; u16 motion; u16 frame}` |
+| 35, 36 | none — straight into the entries (36's are `s16[5]`) |
+| 38 | `{f32 x, y, z; s16 motion, frame; s16 loops, mode}` |
+| 40, 41 | `{f32 x, y, z; s16 motion, frame}` |
+| 43 | `{s16 loops; s16 cue_frame}` |
+
+A list ends on the first entry whose motion is below 1, and then
+`ZombieScriptEnded` (`FUN_0045C8D0`) **flips the roles**: initial state →
+attack state, attack state → `AttackRun`. That last transition is the first
+moment one of these zombies turns on the player, and it is the shape of the
+whole set piece — deal with the civilian, then come for the camera.
+
+### Two signals, both polled
+
+Neither is a callback. Each is one actor writing a field the other reads, which
+is why both survive a snapshot with no wiring at all.
+
+* **Arrival unblocks the civilian.** `ZombieStateWalkToTarget` raises `0x800`
+  in the civilian's own wait word the frame it gets close enough — the `Free`
+  bit — and the civilian's script has been parked on it waiting to be grabbed.
+* **The civilian orders its captors.** Op 0x1A writes a class-0x30 state id to
+  `sub+0x2C` and a countdown to `sub+0x2E`, and
+  `ZombieStateAwaitCivilianOrder` is the captor sitting on it. `0x31` means
+  die, and the zombie takes its killer from the civilian's `sub+0x6C` — so the
+  player who earned the rescue is credited with the captors that gave up.
+
+And the kill goes the other way: the maul raises `0x4000000` on the
+**civilian's** `obj+0x34`, the same bit a killing shot raises. `CivilianUpdate`
+runs its killed branch, charges both players 100 and plays the death voice.
+Failing to rescue costs exactly what a bad shot does.
+
+`ZombieStatePounceOnTarget` also claims the civilian's `sub+0x64`, so a
+civilian held by three is mauled by one at a time;
+`CivilianPruneDeadChildren` clears that slot when the holder dies.
+
 That cry is what proves the class. `CivilianPlayDeathVoice` (`FUN_0048D140`)
 picks by character type: `0x24`/`0x25`/`0x2E`/`0x31`–`0x33` → `0x2000001A`,
 `0x21`/`0x22` → `0x20000011`, `0x26`–`0x2C` → `0x2000000B`,

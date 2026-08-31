@@ -179,6 +179,8 @@ game/           the port. no three.js, no DOM.
   globals.ts      every g_* the port touches, in one enumerable object
   actor.ts        the object struct, offsets in comments
   class30/        approach.ts attack_run.ts strike.ts backoff.ts
+                  target.ts — the eleven states that work on a civilian
+                  rather than on the camera
   class31/        the wall-crawler, all 35 states: router.ts arc.ts pounce.ts
                   surface.ts stand.ts strike.ts entrance.ts on_shot.ts
                   death.ts react.ts standing.ts scripted.ts — plus thrower.ts

@@ -87,6 +87,27 @@ While wiring the dialogue it turned out **nothing was listening to
 `sound.play`** at all — class 0x31's laser sword and its footsteps had been
 raising it into the void since they were ported. The bus is connected now.
 
+**And the zombies holding them now behave.** Eleven of class 0x30's 54 states
+never look at the camera: they work on `obj+0x1394`, the object the actor was
+built for, which for 47 of the 59 spawns that reach one is the civilian.
+`class30/target.ts` ports them — the walk, the maul, the drag, the pounce, the
+off-screen retire and the wait — and `ZombieEntryState` no longer folds them
+into `AttackRun`, which is what had every captor in the game abandoning its
+hostage on frame one and charging the player.
+
+Two signals run between the classes, both polled rather than called: the captor
+raises `CivilianWait.Free` in the civilian's own wait word the frame it gets
+close enough to grab, and the civilian's op 0x1A writes a state id and a
+countdown that `ZombieStateAwaitCivilianOrder` obeys — `0x31` means die. The
+maul kills by raising the same `obj+0x34` bit a killing shot raises, so a
+civilian mauled by its captors costs both players a hundred points exactly as
+a stray bullet would.
+
+`web/tools/civilians.mjs` measures it over the shipped data: **45 of the 47
+captors run a state that works on their own civilian**, and four civilians are
+mauled inside fifteen seconds — four that can no longer be rescued, which is
+why the rescue count in that harness went down.
+
 **Class 0x25, the scripted humanoid, is ported** (`game/class25/`) — the
 second-largest class in the game and a **bytecode VM**. The spawn's tail points
 at a command block; the Init installs the interpreter and it walks 8-byte

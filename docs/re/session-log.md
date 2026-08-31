@@ -6079,3 +6079,94 @@ never taken, and this one is.
 **Next actions:** class 0x13, which would unblock the seven carried civilians
 and is 15 spawns of its own; or the `0x20`/`0x45`/`0x46` classes, which are
 unread.
+
+---
+
+## Session 2026-08-31f — the zombies were never supposed to be chasing you
+
+**Outcome:** eleven class-0x30 states read, named and ported. 19 new function
+annotations, a new `web/src/game/class30/target.ts`, a new
+`tools/verify_captor_scripts.py`.
+
+### The question, and the answer
+
+"When civilians are involved in set pieces, shouldn't the zombies attack the
+civilians first?" They should, and the engine does. Searching for readers of
+`obj+0x1394` — the field `CivilianInit` fills with the parent civilian — turns
+up **eleven entries of `g_class30_states`**: 34, 35, 36, 37, 38, 39, 40, 41,
+43, 44 and 45. None of them looks at the camera. They walk at, maul, drag,
+pounce on and wait beside the object the actor was *built for*.
+
+The census settles it: of the 23 spawns in the whole game that start in state
+34, **every one is a civilian's captor**. Same for 39 (6 of 6), 40, 43.
+
+And the port had `ZombieEntryState` mapping every unported entrance to
+`AttackRun`, so all 47 captors abandoned their hostage on frame one and charged
+the camera. Exactly the reported behaviour.
+
+### The script, and the flip
+
+`ZombieScriptForState` (`FUN_0045CA10`) is two blobs off the descriptor tail:
+`+0x08` while the actor is in the tail's attack state, `+0x04` otherwise. A
+blob is a header shaped by the entering state plus a list of `s16[4]` motion
+entries, walked through a cursor at `obj+0x1398` that the states **share** —
+which is how state 34's walk hands state 35's maul a half-walked list.
+
+`ZombieScriptEnded` (`FUN_0045C8D0`) flips the roles when a list runs out:
+initial → attack, attack → `AttackRun`. That last transition is the first
+moment one of these zombies turns on the player, and it is the whole shape of
+a set piece. All 86 blobs decode and terminate.
+
+### Two signals between the classes, both polled
+
+Neither is a callback, and that is why both survive a snapshot untouched:
+
+* `ZombieStateWalkToTarget` raises `0x800` — `CivilianWait.Free` — in the
+  **civilian's own wait word** the frame it gets close enough. The civilian's
+  script has been parked on that bit waiting to be grabbed.
+* Class 0x10's op 0x1A writes a class-0x30 state id to `sub+0x2C` and a
+  countdown to `sub+0x2E`, and `ZombieStateAwaitCivilianOrder` is the captor
+  sitting on it. `0x31` means die.
+
+**The port had op 0x1A wrong.** Last session it kept only the second operand,
+called it `childCue2` and marked it `[open]` — throwing away the order itself.
+Reading the state that consumes a field is what tells you what the field is;
+reading only the writer gave a plausible-looking name for half of it.
+
+The kill goes the other way: the maul raises `0x4000000` on the *civilian's*
+`obj+0x34`, the same bit a killing shot raises, so `CivilianUpdate`'s killed
+branch runs and charges both players 100. Failing to rescue costs exactly what
+a bad shot does — and `civilians.mjs` now shows four civilians mauled inside
+fifteen seconds, which is four that can no longer be rescued. The `rescued`
+count in that harness went **down** from 25 to 21 because of it, which is the
+change working rather than a regression.
+
+### Wrong turns
+
+* The first `civilians.mjs` measure was "did the captor get closer to its
+  civilian than to the camera". It reported 41 and 38 out of 47 — both — which
+  is nonsense until you notice the civilians are moving too, and that a
+  distance to a point 5,000 units away barely changes. Replaced with the
+  unambiguous question: **did this captor ever run a state that works on its
+  civilian?** 45 of 47. Before the family was ported it was zero.
+* `FUN_0045B7B0` and `FUN_0045C2E0` were not functions in the database at all —
+  nothing referenced them except the state table, which Ghidra had not typed.
+  `create_function` first, then decompile.
+
+### Not done
+
+* `ZombieStateCarryProp` (state 37, nine spawns) allocates a companion object
+  running `FUN_00442740` and waits for the player to destroy it. That class is
+  unread, so the exit cannot be modelled; the port runs the state's script
+  half, which is what the engine does for as long as the prop lives.
+* `ActorBoundsOnScreen` (`FUN_0045CA60`) pads the actor's view-space interval
+  at `obj+0x10C`/`0x110` by its radius. Those two fields have not been read, so
+  `ZombieStateRetireOffScreen` asks `ActorIsOnScreen` about the tracked point
+  instead — the same question about a point rather than a box.
+* `ZombieStatePounceOnTarget` aims at a point off the civilian's **bone
+  matrix**; `game/` has no skeleton, so it aims at the same offsets from the
+  actor's position and facing.
+
+**Next actions:** the companion class behind state 37 (`FUN_00442740`), which
+is the last unread piece of the captor family; or class 0x13, which is what the
+seven carried civilians are riding.

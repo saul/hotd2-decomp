@@ -19,6 +19,15 @@ import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieState } from "./states";
+import { MotionRowOf } from "../tables";
+import {
+  TARGET_STATES,
+  ZombieStateAwaitCivilianOrder, ZombieStateDragTarget,
+  ZombieStatePounceOnTarget, ZombieStateRetireOffScreen,
+  ZombieStateTargetLostPause, ZombieStateTargetMotionScript,
+  ZombieStateTargetScriptWithFlag, ZombieStateWalkPastPoint,
+  ZombieStateWalkToPoint, ZombieStateWalkToTarget,
+} from "./target";
 
 export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
                                   host: GameHost, events?: Events): void {
@@ -29,6 +38,39 @@ export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
+
+    // The captor family. None of these looks at the camera: they work on the
+    // object at `obj+0x1394`, which for 47 of the 59 spawns that reach one is
+    // the class-0x10 civilian that built them. See `class30/target.ts`.
+    case ZombieState.WalkToTarget:
+      return ZombieStateWalkToTarget(obj);
+    case ZombieState.TargetMotionScript:
+      return ZombieStateTargetMotionScript(obj, rng, events);
+    case ZombieState.TargetScriptWithFlag:
+      return ZombieStateTargetScriptWithFlag(obj);
+    case ZombieState.RetireOffScreen:
+      return ZombieStateRetireOffScreen(obj, host, rng);
+    case ZombieState.AwaitCivilianOrder:
+      return ZombieStateAwaitCivilianOrder(obj, rng);
+    case ZombieState.WalkPastPoint:
+      return ZombieStateWalkPastPoint(obj);
+    case ZombieState.WalkToPoint:
+      return ZombieStateWalkToPoint(obj);
+    case ZombieState.DragTarget:
+      return ZombieStateDragTarget(obj);
+    case ZombieState.PounceOnTarget:
+      return ZombieStatePounceOnTarget(obj, dt);
+    case ZombieState.TargetLostPause:
+      return ZombieStateTargetLostPause(obj, rng, MotionRowOf(obj)[0] ?? 0);
+    // [open] `ZombieStateCarryProp` (`FUN_0045B380`) allocates a companion
+    // object running `FUN_00442740` and waits for the player to destroy it.
+    // That class is unread, so its exit cannot be modelled — but the state's
+    // own body plays its script, which is what the engine does for as long as
+    // the prop lives. Nine spawns, and running them as the maul is very much
+    // closer than sending them at the player.
+    case ZombieState.CarryProp:
+      return ZombieStateTargetMotionScript(obj, rng, events);
+
     default:                      return ZombieGiveUpAttack(obj);
   }
 }
@@ -59,13 +101,21 @@ export function EnemyZombieInit(obj: Actor): void {
 /**
  * Which state to actually start in.
  *
- * [diverges] Only five of the 54 are ported. Every entrance state that *is*
+ * [diverges] Sixteen of the 54 are ported. Every entrance state that *is*
  * read ends by setting state 1 — `ZombieStateWalkDistance` walks its distance
  * and sets 1, the burst-out entrance plays its clip and sets 1 — so an
  * unported entrance resolves to `AttackRun` rather than being left to abort.
  * Between them states 15 and 27 alone are 37 of stage 2's 90 zombies.
  */
 export function ZombieEntryState(initial: number): ZombieState {
+  // **The captor states are the exception, and folding them into the default
+  // was a real bug.** They do not end by setting state 1; they end by handing
+  // over to the *attack* script, and only when that is spent does
+  // `ZombieScriptEnded` send the actor at the player. Sending them to
+  // `AttackRun` here meant all 47 of the civilians' captors abandoned their
+  // hostage on frame one and charged the camera — the opposite of what a set
+  // piece is for.
+  if (TARGET_STATES.has(initial)) return initial;
   switch (initial) {
     case ZombieState.Approach:
     case ZombieState.AttackRun:

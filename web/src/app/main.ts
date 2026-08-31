@@ -46,6 +46,7 @@ import { CharacterLayer } from "../render/characters";
 import { PropLayer } from "../render/props";
 import { Shooting } from "../render/shooting";
 import { ColiDebugLayer } from "../render/coli_debug";
+import { StuckDebugLayer } from "../render/stuck_debug";
 import { World } from "../core/world";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
@@ -110,6 +111,7 @@ class Player {
   private readonly shooting = new Shooting($("#viewport"), this.chars);
   /** The `coli/` overlay — see `render/coli_debug.ts`. */
   private readonly coliDebug = new ColiDebugLayer();
+  private readonly stuckDebug = new StuckDebugLayer();
   /**
    * The stage's `sound` block, kept for the one caller that is not the walker:
    * class 0x10's op 0x1D plays a dialogue group from inside the port, and the
@@ -375,6 +377,7 @@ class Player {
     // through, so they are handed to it rather than duplicated in `game/`.
     this.chars.paths = this.paths;
     this.coliDebug.attach(this.stage.root, bundle.script.coli);
+    this.stuckDebug.attach(this.stage.root);
     this.chars.civilians = bundle.script.civilians ?? null;
     this.chars.attach(this.stage.root, bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
@@ -405,6 +408,7 @@ class Player {
     this.debug.showUnported = $<HTMLInputElement>("#show-unported").checked;
     this.debug.showBoxes = $<HTMLInputElement>("#show-boxes").checked;
     this.coliDebug.setEnabled($<HTMLInputElement>("#show-coli").checked);
+    this.stuckDebug.setEnabled($<HTMLInputElement>("#show-stuck").checked);
 
     this.walker = new Walker(bundle.script, {
       enterRegion: (r) => this.stage?.enterRegion(r),
@@ -564,6 +568,9 @@ class Player {
     });
     $<HTMLInputElement>("#show-unported").addEventListener("change", (e) => {
       this.debug.showUnported = (e.target as HTMLInputElement).checked;
+    });
+    $<HTMLInputElement>("#show-stuck").addEventListener("change", (e) => {
+      this.stuckDebug.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-coli").addEventListener("change", (e) => {
       this.coliDebug.setEnabled((e.target as HTMLInputElement).checked);
@@ -1249,6 +1256,9 @@ class Player {
     // Cheap: it rebuilds only when the script has selected a different
     // set of blobs, which is a handful of times a stage.
     this.coliDebug.refresh();
+    // Counts every frame whether or not it is drawing, so switching the
+    // overlay on shows what is *already* wedged rather than restarting the run.
+    this.stuckDebug.update();
     // The volume follows the camera's yaw only, so it stays world-vertical.
     this.rain.update(w.rain, this.camera.position,
                      Math.atan2(-this._fwd.x, -this._fwd.z),
@@ -1349,6 +1359,7 @@ class Player {
       ["breakables", this.breakables.describe],
       ["shooting", this.shooting.describe],
       ["coli", this.coliDebug.describe],
+      ["wedged", this.stuckDebug.describe],
       ["enemies", this.game.describe],
       ["lives", `${G.g_player_lives[0]}`
         + (G.g_player_invuln_frames > 0

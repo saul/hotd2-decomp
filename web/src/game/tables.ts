@@ -112,6 +112,37 @@ export function MotionOf(a: Actor, id: number): BakedMotion | null {
 }
 
 /**
+ * `obj+0x19C` — the clip frame **the scripts count in**.
+ *
+ * The animation clock ticks once per 60 Hz frame over data authored at 30 Hz,
+ * so it runs to about twice `frames`. Every cue a script names is in these
+ * units: `ZombieStateTargetMotionScript`'s kill frame, the class-0x25 VM's
+ * "last frame", `ZombieStateMotionCue21`'s exit.
+ *
+ * Counting in authored frames instead silently loses every cue past halfway.
+ * That is what left the civilians alive under their captors: stage 1's four
+ * maul cues are 24, 30, 62 and 64 against clips of 41, 26, 43 and 46 frames,
+ * so only the 24 ever fired.
+ */
+export function MotionPlayFrame(a: Actor): number {
+  const m = MotionOf(a, a.motion);
+  return m ? Math.floor(a.clock * m.fps * 2) : 0;
+}
+
+/**
+ * `g_motion_play_length[motion]` — how far {@link MotionPlayFrame} counts.
+ *
+ * The bundle carries the exe's own value because it is `2n - 2` for some
+ * motions and `2n - 3` for others with no rule saying which; the derivation is
+ * the fallback for a bundle built before the table was exported.
+ */
+export function MotionPlayLength(a: Actor, id = a.motion): number {
+  const m = MotionOf(a, id);
+  if (!m) return 0;
+  return m.play ?? Math.max(1, m.frames * 2 - 2);
+}
+
+/**
  * Attacks this actor can perform for its body condition — the row
  * `ZombieStateStrike` indexes with the pick table.
  */

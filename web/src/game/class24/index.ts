@@ -44,7 +44,7 @@ import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { ClassFrame, ClassHandler } from "../registry";
-import { T } from "../tables";
+import { MotionPlayFrame, MotionPlayLength, T } from "../tables";
 
 /** `obj+0x130C` for this class — which state routine the Init installs. */
 export enum SetPieceState {
@@ -299,25 +299,28 @@ function SetPieceStateDelayedDrift(obj: Actor): void {
   }
 }
 
-/** The motion frame the renderer is showing, from the seconds-based clock. */
+/**
+ * `obj+0x19C` — the clip frame the script's cues are counted in.
+ *
+ * The **play** clock, at 60 Hz over 30 Hz data, not the authored frame index:
+ * `DRIFT_START_FRAME` and every other literal this class compares against come
+ * out of the exe in those units.
+ */
 export function SetPieceFrame(obj: Actor): number {
-  const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
-  return Math.floor(obj.clock * (m?.fps ?? 30));
+  return MotionPlayFrame(obj);
 }
 
 /**
  * Whether the clip has reached its last frame.
  *
- * The engine compares against `g_motion_play_length[motion] - 1`. That table
- * is not in the bundle, but the baked clip carries its own frame count, and
- * `mot.md` records that the play length runs at about twice the frames — so
- * the *clip's* last frame is the honest reading of "the animation has
- * finished" and does not need a second table to say it.
+ * `obj+0x19C >= g_motion_play_length[motion] - 1`. That table **is** in the
+ * bundle now — an earlier revision of this comment said it was not and stood
+ * the authored frame count in for it, which halves every cue this class reads:
+ * `DRIFT_START_FRAME` is 0x32 against clips of about thirty frames.
  */
 export function SetPieceAtLastFrame(obj: Actor): boolean {
-  const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
-  if (!m?.frames) return false;
-  return SetPieceFrame(obj) >= m.frames - 1;
+  const len = MotionPlayLength(obj);
+  return len > 0 && SetPieceFrame(obj) >= len - 1;
 }
 
 export const SetPiecePropHandler: ClassHandler = {

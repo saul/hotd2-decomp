@@ -95,8 +95,8 @@
 import type { CivilianCmdJson } from "../../bundle/scene";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, type Actor } from "../actor";
-import { QueryGroundHeightAt } from "../coli";
+import { ActorFlag, ActorUpdateBoundingSphere, type Actor } from "../actor";
+import { ColiTestSphereAgainstFullSet, QueryGroundHeightAt } from "../coli";
 import { ScoreAddForPlayer } from "../combat/score";
 import { PlayerTakeDamageTimed } from "../combat/player";
 import { ActorDespawn } from "../despawn";
@@ -252,6 +252,13 @@ export enum CivilianWait {
   RemoveOffCamera = 0x02000000,
   /** **The rescue.** Pay 400 and clear the bit. */
   Rescued = 0x10000000,
+  /**
+   * Bit `0x1000000` — take part in the world push.
+   * `PoseHookGrowAndPushOutOfWorld` tests it before tracing at all, so a
+   * civilian standing in scenery stays where the script put it unless the
+   * script says otherwise.
+   */
+  PushOutOfWorld = 0x01000000,
   /** Wait while only one player is in play. */
   TwoPlayers = 0x40000000,
   /** The bits that make the loop worth entering at all. */
@@ -316,6 +323,9 @@ function CmdAt(script: number, pc: number): CivilianCmdJson | null {
  * (`UNK_0048D1F0` and `PoseHookGrowAndPushOutOfWorld`) and binds the part list;
  * both are the renderer's, and are `[diverges]` here.
  */
+/** `CivilianInit`'s literal for `obj+0x128` — `0x3F800000`. */
+const CIVILIAN_BODY_RADIUS = 1;
+
 export function CivilianInit(obj: Actor, rng?: Rng): void {
   const sub = makeCivilianState();
   obj.civ = sub;
@@ -327,7 +337,14 @@ export function CivilianInit(obj: Actor, rng?: Rng): void {
   // is the shot sphere and is ten units for every civilian; the second is the
   // radius `PoseHookGrowAndPushOutOfWorld` ramps, which op 0x16 retargets.
   obj.radius = CharacterTypeOf(obj)?.actor_radius ?? 0;
-  sub.scaleTarget = 1;
+  // **This is the one the captors run into.** `obj+0x128` is the body sphere
+  // every actor-versus-actor push measures against, and the port set only the
+  // shot sphere above — so `ColiTestSphereAgainstActors`' lazy default filled
+  // it from `obj+0x124`, ten units, and a captor walking at its civilian was
+  // shoved off it from thirteen and a half units away. Its script wants to be
+  // within six. It never arrived, and the civilian was never mauled.
+  obj.bodyRadius = CIVILIAN_BODY_RADIUS;
+  sub.scaleTarget = CIVILIAN_BODY_RADIUS;
   sub.attachSet = CivilianAttachSet(obj.charType);
 
   const p = T.civilians?.spawns?.[String(obj.at)];
@@ -987,7 +1004,49 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // for the same reason: the ray is the mouse's. What the port owns is the
   // sphere's *radius*, `obj+0x124`, which `CivilianInit` sets.
   CivilianWriteCameraPoint(obj);
+  PoseHookGrowAndPushOutOfWorld(obj);
   CivilianCheckRemoval(obj);
+}
+
+/**
+ * `PoseHookGrowAndPushOutOfWorld` — `FUN_0048D070`.
+ *
+ * The class's per-frame pose hook, and one of only two in the program. It does
+ * two things and neither is a bone: it steps `obj+0x128` — the **body radius**
+ * — toward the target op 0x16 set, by that op's per-frame step, clamping at
+ * the target from whichever side it approaches; then, if the civilian's wait
+ * word carries {@link CivilianWait.PushOutOfWorld}, it traces that sphere
+ * against the full collision set and moves the actor out along the hit normal
+ * by the **whole** penetration.
+ *
+ * The engine runs it from the pose walk; the port runs it from the update,
+ * for the same reason `ActorAdvanceMotion` lives in `game/` — a hook that only
+ * fires while something is drawing is a hook that a headless run and a
+ * restored save both lose.
+ */
+export function PoseHookGrowAndPushOutOfWorld(obj: Actor): void {
+  const sub = obj.civ;
+  if (!sub) return;
+  if (sub.scaleTarget !== obj.bodyRadius) {
+    obj.bodyRadius += sub.scaleStep;
+    // Clamp from whichever side it is closing: growing overshoots upward,
+    // shrinking overshoots downward, and a zero step never arrives at all.
+    if (sub.scaleStep > 0 && obj.bodyRadius > sub.scaleTarget) {
+      obj.bodyRadius = sub.scaleTarget;
+    } else if (sub.scaleStep < 0 && obj.bodyRadius < sub.scaleTarget) {
+      obj.bodyRadius = sub.scaleTarget;
+    }
+  }
+  if (!(sub.wait & CivilianWait.PushOutOfWorld)) return;
+  ActorUpdateBoundingSphere(obj);
+  if (!ColiTestSphereAgainstFullSet(obj.camPoint.x, obj.camPoint.y,
+                                    obj.camPoint.z, obj.bodyRadius)) {
+    return;
+  }
+  const d = G.g_coli_hit_depth;
+  obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * d;
+  obj.pos.y += (G.g_coli_hit_normal[1] ?? 0) * d;
+  obj.pos.z += (G.g_coli_hit_normal[2] ?? 0) * d;
 }
 
 /**

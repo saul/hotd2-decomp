@@ -72,6 +72,42 @@ engine's own: the actor faces the camera, the camera is behind the corner, and
 there is nothing in `coli` to feel. Routing around drawn geometry would be an
 addition to the game, not a fidelity fix.
 
+**Two faults kept the set pieces from working, and neither was where it
+looked.** The report was that the stage 1 well captors were stuck in a wall and
+that a mauled civilian just carried on.
+
+*The captors were not in a wall — they were being held off their own hostage.*
+`CivilianInit` writes `obj+0x128 = 1.0`, the body sphere; the port wrote only
+`obj+0x124`, the shot sphere, so `ColiTestSphereAgainstActors`' lazy default
+filled the body radius from it — ten units. A captor walking at its civilian
+was shoved back from 13.5 units away by the crowd push while its script wanted
+to be within six, and it chased for ever, a few units short. Setting the radius
+fixes it, and `PoseHookGrowAndPushOutOfWorld` (`FUN_0048D070`) is now ported
+with it: the per-frame hook that ramps that radius toward whatever op 0x16 set
+and pushes the civilian out of the world when its wait word asks.
+
+*The maul was an animation with no consequence.* `obj+0x19C` — the frame every
+script cue is counted in — is the **play** clock: it ticks once per 60 Hz frame
+over 30 Hz data, so it runs to `g_motion_play_length[motion]`, about twice the
+authored frames. The port was counting authored frames, so every cue past
+halfway was never reached. **30 of the game's 51 kill cues are in that range**
+(`tools/verify_maul_cues.py`), which is why the civilians got up and walked
+away. The bundle now carries the exe's own table as `BakedMotion.play` — it is
+`2n - 2` for some motions and `2n - 3` for others with no rule saying which —
+and `MotionPlayFrame` / `MotionPlayLength` are the one pair of readers, so
+class 0x24's drift cue and the emerge and fall states are exact too.
+
+Across the shipped corpus that takes the civilians the captors actually kill
+from **4 to 9** in fifteen seconds, and rescues from 21 to 18.
+
+**A new overlay, `Wedged`**, answers the question the collision one leaves open.
+`#show-coli` says what the engine can feel; this marks in red every zombie the
+world push has been shoving for half a second or more — an actor that cannot
+get where its state is taking it. It counts only the world half of
+`ZombiePushOutOfWorldAndActors`, because the engine's single `Shoved` bit
+cannot tell a wall from another zombie's shoulder and the second happens
+constantly.
+
 **`ColiTestSphereAgainstActors` is in** — the actor-versus-actor half of the
 same hook, and the last unported piece of it. It is **mutual and deferred**: an
 actor pushes itself out by a tenth of the penetration and *records* the

@@ -382,6 +382,23 @@ export interface Actor {
    * `arcFrom`. The engine writes it every frame and never reads it back.
    */
   walkTravelled: number;    // +0x1374
+  /**
+   * How deep in the **world** this actor's body sphere was on its last push,
+   * and zero when it was clear.
+   *
+   * [diverges] The engine has no such field: it keeps one flag bit,
+   * `ZombieFlag2.Shoved`, raised by *either* push and cleared next frame, so
+   * nothing in the game can tell "wedged in a wall" from "shouldering past
+   * another zombie". That distinction is the whole point of the overlay in
+   * `render/stuck_debug.ts`, and a bit that cannot make it is no use — so the
+   * depth is recorded here rather than being recomputed by the renderer, which
+   * would mean tracing the level a second time and clobbering
+   * `g_coli_hit_normal` behind the game's back.
+   *
+   * It is plain data on the actor, so a snapshot carries it and a reload shows
+   * the same actors wedged in the same walls.
+   */
+  worldPushDepth: number;
   /** `ThrowerStateEntranceClip`'s one-shot clip, from the descriptor. */
   entranceMotion: number;
   /** `ThrowerStateDelayedPounce`'s clip and duration, from the descriptor. */
@@ -722,6 +739,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     sinceLanding: 0,
     walkDistance: 0,
     walkTravelled: 0,
+    worldPushDepth: 0,
     entranceMotion: 0,
     pounce: null,
     grab: null,

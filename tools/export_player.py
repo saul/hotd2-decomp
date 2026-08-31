@@ -17,6 +17,7 @@ event script. See docs/PLAYER_PLAN.md for why that split was chosen.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -83,6 +84,38 @@ def main() -> int:
 
     if not entries:
         raise SystemExit("nothing was built")
+
+    # **The manifest is the whole bundle's index, and a partial export used to
+    # replace it.** `--stage 2` after a `--all` left a manifest naming stage 2
+    # alone, and the player simply had no other stages -- silently, because
+    # every other stage's files were still sitting on disk beside it. So carry
+    # forward any entry this run did not rebuild whose files are still there,
+    # and say which, rather than dropping it.
+    #
+    # A carried entry names its own files, so `--gltf` and `--glb` bundles can
+    # sit side by side; the top-level `notes` cannot say that, and describes
+    # this run. Rebuild everything if that matters.
+    built = {e["name"] for e in entries}
+    kept = []
+    old_path = out / "manifest.json"
+    if old_path.exists():
+        try:
+            previous = json.loads(old_path.read_text()).get("stages", [])
+        except (OSError, ValueError) as exc:                   # noqa: PERF203
+            print(f"manifest.json unreadable, starting fresh ({exc})",
+                  file=sys.stderr)
+            previous = []
+        for e in previous:
+            if e.get("name") in built:
+                continue
+            files = [e.get(k) for k in ("geometry", "cam", "script")]
+            if not all(f and (out / e["name"] / f).exists() for f in files):
+                continue
+            entries.append(e)
+            kept.append(e["name"])
+    if kept:
+        print(f"carried forward from the previous manifest: {', '.join(kept)}")
+    entries.sort(key=lambda e: (e.get("stage", 0), e.get("name", "")))
 
     path = bundle.write_manifest(
         out, entries, game_dir=game,

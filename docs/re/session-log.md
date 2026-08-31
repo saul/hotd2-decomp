@@ -6567,3 +6567,86 @@ ported:
   through the corner. The measurement said 4 crossings, not 0, and the
   difference between those two numbers is the part of the report that has no
   fix in the engine.
+
+## The captors, the maul, and one clock counted in the wrong units
+
+Reported: the stage 1 well captors "don't seem to work — are they stuck in the
+wall?", and a zombie hitting a civilian does not kill it. Two separate faults,
+and the wall was not either of them.
+
+### The captor was being held off its own hostage
+
+Driving stage 1's eight captors headless, 6376 sat in `ZombieStateWalkToTarget`
+for forty seconds and never handed over. Its script wants to be within **6**
+units; it oscillated around 8.7 and never closed. It was not stuck: it was
+being pushed.
+
+`CivilianInit` (`FUN_0048A3E0`) writes **two** radii, `obj+0x124` from
+`g_actor_radius_by_char` and `obj+0x128 = 1.0`. The port wrote only the first,
+so `ColiTestSphereAgainstActors`' own lazy default — `if (obj+0x128 == 0)
+obj+0x128 = obj+0x124` — filled the body sphere from the *shot* sphere, ten
+units. 3.5 + 10 = 13.5, and the crowd push shoved the captor back out of that
+every frame at a tenth of the penetration. The walk and the push found an
+equilibrium a couple of units outside the arrive radius, for ever.
+
+Ported with it: `PoseHookGrowAndPushOutOfWorld` (`FUN_0048D070`), the class's
+per-frame pose hook and one of only two in the program. It ramps `obj+0x128`
+toward the target op 0x16 set, by that op's step, clamping from whichever side
+it approaches; then pushes the civilian out of the full collision set by the
+**whole** penetration, but only when the wait word carries `0x1000000`. The
+port had op 0x16 decoded into `scaleTarget`/`scaleStep` and nothing that ever
+read them.
+
+### The maul was an animation with no consequence
+
+`ZombieStateTargetMotionScript` kills on `obj+0x19C == obj+0x1354`, and
+`obj+0x1354` is the script entry's fourth short. Stage 1's four cues are 24,
+30, 62 and 64. Only the 24 ever fired.
+
+`obj+0x19C` is the **play** clock. It ticks once per 60 Hz frame over data
+authored at 30 Hz, so it counts to `g_motion_play_length[motion]` — and those
+four clips are 41, 26, 43 and 46 frames, so three of the four cues are past the
+authored frame count and unreachable if you count in authored frames, which the
+port was doing. Across the whole game **30 of the 51 kill cues** are in that
+range: `tools/verify_maul_cues.py` measures both readings and fails only if a
+cue is past its clip's *play* length, which none is.
+
+`mot.md` had `g_motion_play_length` as `[open]` — "about twice the frames, not
+exactly `2n - 2`, has not been pinned down". It still is not exactly `2n - 2`:
+across the 220 motions the bundles bake it is `2n - 2` for 91 and `2n - 3` for
+129 and never anything else. Which of the two a motion gets is still `[open]`,
+so the bundle now **carries the table** (`BakedMotion.play`) rather than
+deriving it, and `MotionPlayFrame`/`MotionPlayLength` in `game/tables.ts` are
+the only readers. That made class 0x24's `0x32` drift cue, `ZombieStateEmerge`'s
+landing hold and `ZombieStateFallToGround`'s exit exact at the same time — all
+three were counting authored frames too, and class 0x24's comment said outright
+that the table "is not in the bundle" as the reason.
+
+Corpus effect: civilians actually killed by their captors goes from 4 to 9 in
+fifteen seconds, rescues from 21 to 18.
+
+### `Wedged`, the overlay
+
+`#show-stuck` marks in red every zombie the **world** push has moved for thirty
+consecutive frames — an actor that cannot get where its state is taking it. It
+pairs with `#show-coli`: that one says what the engine can feel, this one says
+who is caught in it.
+
+It could not be built on `ZombieFlag2.Shoved`, which is what it looks like it
+should use. The engine raises that single bit from *either* half of
+`ZombiePushOutOfWorldAndActors`, and the actor-versus-actor half fires
+constantly in any crowd — the very first trace of captor 6376 showed
+`shoved=true` on every frame with the collision set both full and empty, which
+is what pointed at the radius rather than at a wall. So the port keeps
+`Actor.worldPushDepth`, declared `[diverges]`, written only by the world half.
+
+### Wrong turns
+
+* The first reading of "stuck in the wall" was taken at face value and the
+  collision sets were the first thing measured. They were irrelevant twice
+  over: the trace was identical with every blob selected and with none.
+* `web/test/port.test.ts` already had an assertion for the maul's kill cue and
+  it passed throughout, because the fixture set `z.clock = 3 / 30` to reach cue
+  3 — the same wrong unit the code used. Two halves of one mistake agreeing.
+  The corpus check is what found it; the unit test could not have.
+

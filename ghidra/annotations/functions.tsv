@@ -46,7 +46,7 @@
 004016b0	VecToAngles	writes BAMS pitch/yaw; yaw = atan2(dx, dz)
 004053b0	ColiTraceSegmentAllSets
 004057f0	ColiTestSphereAgainstFullSet
-00405160	RegisterForShotTest	appends the actor to the per-frame gunshot hit-test list
+00405160	RegisterForShotTest	Appends the actor to the per-frame list at 0x0059D8E8: {obj, obj+0x34, obj+0x12C, +0x130, +0x134}, stride 5 dwords. Skipped when obj+0x34 bit 0x8000 is set, and taken only when bit 0x10 is set or obj+0x78 <= 0. It feeds two consumers, not one: the gunshot hit test, and -- after FUN_00405360 copies it to 0x005A30A0 -- ColiTestSphereAgainstActors, which is the actor-versus-actor push. So a class that never calls this takes no part in separating a crowd.
 00406310	CheckSphereInFrustum
 00407340	SpawnSpriteEffect	billboarded sprite-animation effect by kind
 004073b0	SpriteEffectSlotRange	maps an effect kind to its asset slot range
@@ -533,3 +533,4 @@
 0040a090	ActorArcBeginFalling	Sets up a ballistic arc from a per-frame downward ACCELERATION rather than a duration: counts the frames out by stepping v -= a, y += v until the height has passed the destination's, then writes obj+0x5C = -a, zeroes obj+0x58 and obj+0x60, and sets the flat x and z speeds to the distance over that count and the initial y speed to (n*n*a + 2*dy) / 2n. ZombieStateDelayedLeap is the caller; the frame count lands in obj+0x1330.
 00405b10	ColiTestSphereAgainstActors	The actor-versus-actor sphere test. Walks the per-frame dynamic list at 0x005A30A0 (stride 5 dwords, {ptr, ?, x, y, z}), skipping the caller and anything carrying obj+0x34 bits 0x80008000 or 0x10, and lazily filling obj+0x128 from obj+0x124 for an actor whose class never set a body radius. Overlap is centre-to-centre against the SUM of the radii and the nearest candidate wins. It does not move the actor it finds: it writes the OPPOSITE push onto it -- obj+0x138 = me, obj+0x13C = depth, obj+0x140..0x148 = -normal -- and that actor applies it on its own next frame, so one test per actor separates a whole crowd.
 00455490	ZombieReleaseAndDespawn	ReleaseEnemyAliveCount, ReleaseEnemyPresentCount and ReleaseAttackSlot, then clears g_attack_permits[obj+0x120] and ActorDespawns. The terminal arm of ZombieStateWalkDistance, taken when obj+0x34 bit 0x20000000 is set -- which no class-0x30 spawn record does.
+00405360	ColiPublishDynamicList	Copies the registration list at 0x0059D8E8 to the dynamic list at 0x005A30A0 that ColiTestSphereAgainstActors walks, five dwords per entry. The two-buffer split is what lets the push test a snapshot of the frame's spheres rather than a list being appended to while it reads.

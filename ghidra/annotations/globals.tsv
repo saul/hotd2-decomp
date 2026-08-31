@@ -153,7 +153,7 @@
 # --- skinned characters and mot/ ---------------------------------------------
 004e0430	g_character_skeletons	char type -> skeleton block; count at +0x16, node pointers at +0x18
 004e0724	g_character_bone_counts	char type -> bones in a motion frame; one more than the top bone index
-004e07d0	g_motion_play_length	motion id -> play length the scripts compare against, about 2x the frames
+004e07d0	g_motion_play_length	motion id -> the clip clock the scripts compare against, s16 per id. NOT the frame count: the animation clock ticks once per 60 Hz frame over data authored at 30 Hz, so across the 220 motions the bundles bake it is 2n-2 for 91 and 2n-3 for the other 129 and never anything else. Every cue expressed in clip frames is in these units -- ZombieStateTargetMotionScript's kill frame, ZombieStateMotionCue21's exit, the class-0x25 VM's -1 for the last frame, class 0x24's 0x32 drift cue. Comparing them against the authored frame count loses every cue past halfway.
 004e2c40	g_motion_bank_of	motion id -> bank id, the argument MotionRequestBankLoad takes
 004d1b00	g_asset_bank_names	bank id -> filename; SHARED with the camera paths
 004e2b14	g_motion_bank_ids	bank id -> s16 array of the motion ids it holds

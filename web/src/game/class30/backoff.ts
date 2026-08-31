@@ -14,7 +14,7 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
-import { FirstBakedOf, MotionOf, MotionRowOf } from "../tables";
+import { FirstBakedOf, MotionPlayFrame, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
@@ -29,12 +29,6 @@ const BACKOFF_TURN_RATE = -0x40;
  */
 const BACKOFF_HELD_MOTION = 0x100;
 const BACKOFF_HELD_MIN_FRAME = 0x43;
-
-/** The engine's `obj+0x19C`, the clip's own frame at 60 Hz. */
-function MotionFrameOf(obj: Actor): number {
-  const m = MotionOf(obj, obj.motion);
-  return m ? Math.floor(obj.clock * m.fps * 2) : 0;
-}
 
 export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
                                    rng: Rng): void {
@@ -87,7 +81,7 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
   // the instant they crossed the ring, which is a swing they should not have
   // had yet.
   const clipHeld = obj.motion === BACKOFF_HELD_MOTION
-    && MotionFrameOf(obj) <= BACKOFF_HELD_MIN_FRAME;
+    && MotionPlayFrame(obj) <= BACKOFF_HELD_MIN_FRAME;
   if ((d > ApproachInnerRadius(obj) || obj.backoffFrames > BACKOFF_MAX_FRAMES)
       && !clipHeld) {
     obj.cooldown = 0;

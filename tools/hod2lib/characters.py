@@ -865,8 +865,16 @@ def _bake(game_dir, tables, motion_id: int, bone_count: int) -> dict | None:
     # not read correctly, whatever the stride said.
     if not all(math.isfinite(v) for v in root):
         return None
-    return {"bank": fname, "frames": len(frames), "fps": MOTION_FPS,
-            "root": root, "rot": rot}
+    # `g_motion_play_length[motion]`, and the reason it is carried rather than
+    # derived: every cue the scripts express in clip frames is in these units,
+    # they run at about twice the authored frames, and the exact value is
+    # `2n - 2` or `2n - 3` with no rule that says which.
+    play = tables.motion_play_length(motion_id)
+    out = {"bank": fname, "frames": len(frames), "fps": MOTION_FPS,
+           "root": root, "rot": rot}
+    if play is not None and play > 0:
+        out["play"] = play
+    return out
 
 
 def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,

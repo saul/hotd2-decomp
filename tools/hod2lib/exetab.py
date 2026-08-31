@@ -746,6 +746,26 @@ class ExeTables:
             return None
         return self.data[r + motion_id]
 
+    def motion_play_length(self, motion_id: int) -> int | None:
+        """`g_motion_play_length[motion_id]` — the clock the scripts compare to.
+
+        **Not the frame count.** The animation clock ticks once per 60 Hz frame
+        over data authored at 30 Hz, so this runs at about twice the frames:
+        across the 220 motions the shipped bundles bake it is `2n - 2` for 91
+        of them and `2n - 3` for the other 129, and never anything else.
+
+        Everything the scripts express in clip frames is in *these* units --
+        `ZombieStateTargetMotionScript`'s kill cue, the class-0x25 VM's `-1`
+        for "the last frame", `ZombieStateMotionCue21`'s exit. Comparing them
+        against the authored frame count silently loses every cue past halfway,
+        which is what left the civilians alive: three of stage 1's four maul
+        cues are 30, 62 and 64 against clips of 26, 43 and 46 frames.
+        """
+        r = self._v2r(self.MOTION_PLAY_LENGTH)
+        if r is None or motion_id < 0 or r + motion_id * 2 + 2 > len(self.data):
+            return None
+        return struct.unpack_from("<h", self.data, r + motion_id * 2)[0]
+
     def character_asset_file(self, char_type: int) -> str | None:
         """The pol file a character type's parts live in, if they agree.
 

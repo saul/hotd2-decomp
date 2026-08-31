@@ -21,7 +21,8 @@ import { CamAdvancePathFrame, CamSetPathTarget }
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { NULL_HOST } from "../src/game/host";
-import { SetGameTables, T } from "../src/game/tables";
+import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
+  from "../src/game/tables";
 import {
   ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
   QueryGroundHeightAt, QueryGroundSurfaceAt,
@@ -39,7 +40,8 @@ import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ZombieScriptEnded } from "../src/game/class30/target";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
-import { CivilianAttachSet, CivilianOp, CivilianUpdate, CivilianWait }
+import { CivilianAttachSet, CivilianOp, CivilianUpdate, CivilianWait,
+         PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
@@ -93,11 +95,16 @@ function check(name: string, ok: boolean, detail = ""): void {
  * what actually walks a zombie: the run carries 1.289 units a frame on the
  * real data, the walk carries nothing.
  */
-const motion = (frames: number, perFrame = 0) => ({
+const motion = (frames: number, perFrame = 0, play?: number) => ({
   bank: "t", frames, fps: 30,
   root: Array.from({ length: frames * 3 },
                    (_, i) => (i % 3 === 2 ? -perFrame * Math.floor(i / 3) : 0)),
   rot: [],
+  // `g_motion_play_length`, when the fixture wants to pin it. The real table
+  // is `2n - 2` for some motions and `2n - 3` for others, so a clip that
+  // carries the odd one is the only thing that can tell "read the bundle"
+  // apart from "derive it from the frame count".
+  ...(play === undefined ? {} : { play }),
 });
 
 const TYPE: CharacterType = {
@@ -141,7 +148,7 @@ const TYPE: CharacterType = {
   gore: {}, torso_stages: 3,
   motions: {
     // 10 the in-place walk and idle, 12 the run that closes, 14 the retreat.
-    "10": motion(20), "12": motion(16, 1.289), "14": motion(36, -0.429),
+    "10": motion(20, 0, 37), "12": motion(16, 1.289), "14": motion(36, -0.429),
     // 101 the lunge, which carries the actor the last few units into range.
     // The bite, scaled like the real one: `char_adv00`'s runs to -15.55 net
     // against a 25-unit inner ring, so the recover is most of the ring and the
@@ -2583,8 +2590,12 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
           `motion ${z.motion} cue ${z.targetCue}`);
     check("and has not touched the civilian yet",
           !(civ.flags & ActorFlag.Dead));
-    // Frame 3 of a 30 fps clip.
-    z.clock = 3 / 30;
+    // Cue 3 in the **play** clock, which ticks at 60 Hz over 30 Hz data — so
+    // three sixtieths, not three thirtieths. This fixture encoded the wrong
+    // one, and it agreed with a `frameOf` that was also counting in authored
+    // frames: two halves of the same mistake, which is why the corpus (three
+    // of stage 1's four maul cues never firing) caught it and this did not.
+    z.clock = 3 / 60;
     zFrame(z, events);
     check("on the cue frame it kills the civilian outright",
           (civ.flags & ActorFlag.Dead) !== 0 && killed,
@@ -2858,6 +2869,70 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
           z.despawned && z.state === ZombieState.WalkDistance,
           `despawned ${z.despawned} ${ZombieState[z.state]}`);
   }
+}
+
+console.log("\nthe clip clock the scripts count in:");
+{
+  // `g_motion_play_length` is about twice `frames`, and every cue a script
+  // names is in *those* units. Counting in authored frames loses every cue
+  // past halfway, which is what left the mauled civilians alive.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  const z = ActorSpawn(0x7200, SpawnClass.Zombie, 1, "clock");
+  z.motion = 10;                     // 20 frames, and a play length of 37
+  const m = CHARS.types["1"].motions["10"];
+  check("the play clock runs at twice the authored frames",
+        (() => { z.clock = 1 / m.fps; return MotionPlayFrame(z) === 2; })(),
+        `frame ${MotionPlayFrame(z)}`);
+  check("...and the play length comes from the bundle, not from frames * 2",
+        MotionPlayLength(z) === 37 && m.frames * 2 - 2 === 38,
+        `${MotionPlayLength(z)} for ${m.frames} frames`);
+  // The failure this guards: a cue past the authored frame count must still
+  // be reachable, because the engine's clock reaches it.
+  z.clock = (m.frames - 0.5) / m.fps;
+  check("a cue past the authored frame count is still reachable",
+        MotionPlayFrame(z) > m.frames, `frame ${MotionPlayFrame(z)}`);
+}
+
+console.log("\nclass 0x10's body radius, and the hook that ramps it:");
+{
+  // **The bug this fixes.** `CivilianInit` writes `obj+0x128 = 1.0`; the port
+  // wrote only `obj+0x124`, so `ColiTestSphereAgainstActors`' lazy default
+  // filled the body radius from the *shot* radius -- ten units -- and a
+  // captor walking at its civilian was shoved off it from 13.5 away when its
+  // script wanted to be within 6. It never arrived and nobody was ever mauled.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
+  const c = ActorSpawn(0x7300, SpawnClass.Civilian, 1, "civ", undefined,
+                       new Rng(1));
+  check("the civilian's body sphere is one unit, not its shot sphere",
+        c.bodyRadius === 1 && c.radius !== 1,
+        `body ${c.bodyRadius} shot ${c.radius}`);
+
+  // Op 0x16 ramps it, and the hook is what applies the ramp.
+  c.civ!.scaleTarget = 4;
+  c.civ!.scaleStep = 1;
+  for (let i = 0; i < 10; i++) PoseHookGrowAndPushOutOfWorld(c);
+  check("the pose hook ramps it to the target and stops there",
+        c.bodyRadius === 4, String(c.bodyRadius));
+  c.civ!.scaleTarget = 2;
+  c.civ!.scaleStep = -0.5;
+  for (let i = 0; i < 10; i++) PoseHookGrowAndPushOutOfWorld(c);
+  check("...from either side", c.bodyRadius === 2, String(c.bodyRadius));
+
+  // And the push it does only when the wait word asks for it.
+  T.coli = { files: ["t"], blobs: { wall: WALL_BLOB } };
+  G.g_coli_full_set = ["wall"];
+  c.pos = vec3(29, 0, 45);
+  c.civ!.scaleTarget = c.bodyRadius;
+  c.civ!.scaleStep = 0;
+  PoseHookGrowAndPushOutOfWorld(c);
+  check("without the wait bit it stays in the wall", c.pos.x === 29,
+        String(c.pos.x));
+  c.civ!.wait |= CivilianWait.PushOutOfWorld;
+  PoseHookGrowAndPushOutOfWorld(c);
+  check("with it, it is pushed out", c.pos.x < 29, c.pos.x.toFixed(2));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

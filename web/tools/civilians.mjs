@@ -191,12 +191,18 @@ console.log(`${total} civilians driven, ${moved} advanced, `
  * number was **zero** -- every one of them fell through `ZombieEntryState` to
  * `AttackRun` and went for the camera.
  *
- * `mauled` is the other side of it: four civilians are killed by their captors
- * inside fifteen seconds, which is four that can no longer be rescued. That is
+ * `mauled` is the other side of it: nine civilians are killed by their captors
+ * inside fifteen seconds, which is nine that can no longer be rescued. That is
  * why `rescued` is lower here than it was before the family was ported.
+ *
+ * It was **four** until the clip clock was fixed. `obj+0x19C` counts in
+ * `g_motion_play_length`, roughly twice the authored frames, and the port was
+ * counting authored frames -- so every kill cue past halfway was simply never
+ * reached and the maul was an animation with no consequence. 30 of the game's
+ * 51 cues are in that range; `tools/verify_maul_cues.py` is the corpus check.
  */
-const EXPECT = { total: 47, moved: 34, rescued: 21, holding: 4,
-                 captors: 47, inCaptorState: 45, mauled: 4 };
+const EXPECT = { total: 47, moved: 34, rescued: 18, holding: 4,
+                 captors: 47, inCaptorState: 45, mauled: 9 };
 const got = { total, moved, rescued, holding, captors, inCaptorState, mauled };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
 if (bad || total === 0 || missing.length) {
@@ -212,5 +218,5 @@ if (bad || total === 0 || missing.length) {
 }
 console.log("\nclean -- every shipped stream steps, none runs away, 45 of the "
             + "47 captors work on their own civilian rather than on the "
-            + "camera, and 4 civilians are mauled before anyone can save "
+            + "camera, and 9 civilians are mauled before anyone can save "
             + "them");

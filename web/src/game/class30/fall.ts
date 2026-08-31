@@ -12,7 +12,7 @@
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
 import { QueryGroundHeightAt } from "../coli";
-import { MotionOf } from "../tables";
+import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieState } from "./states";
 
@@ -62,8 +62,9 @@ export function ZombieStateFallToGround(obj: Actor, dt: number,
     obj.sub = 2;
   }
 
-  const m = MotionOf(obj, obj.motion);
-  if (m && obj.clock * m.fps * 2 >= m.frames * 2 - 1) {
+  // `obj+0x19C >= g_motion_play_length[motion] - 1`, both in the play clock.
+  const len = MotionPlayLength(obj);
+  if (len > 0 && MotionPlayFrame(obj) >= len - 1) {
     obj.state = ZombieState.AttackRun;
     obj.sub = 0;
   }

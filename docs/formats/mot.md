@@ -100,12 +100,23 @@ The `+ 4` in the sampler steps over a `u32` the loader never reads. It is the
 length; the engine simply does not need it, because the scripts drive playback
 from `g_motion_play_length` instead.
 
-`[open]`: `g_motion_play_length[motion_id]` (`0x004E07D0`) is what the scripts
-compare against — the class-0x25 VM uses `-1` to mean "last frame of the
-motion" — and it runs at roughly **twice** the frame count: 25 frames against
-48, 41 against 79, 51 against 99. That fits an animation clock ticking once per
-60 Hz frame over data authored at 30 Hz with the odd values interpolated, but
-it is not exactly `2n - 2` for every motion and has not been pinned down.
+`g_motion_play_length[motion_id]` (`0x004E07D0`, `s16` per id) is what the
+scripts compare against, and **every cue expressed in clip frames is in its
+units, not in `frames`**: `ZombieStateTargetMotionScript`'s kill frame,
+`ZombieStateMotionCue21`'s exit, class 0x24's `0x32` drift cue, the class-0x25
+VM's `-1` for "the last frame".
+
+It runs at about **twice** the frame count, which fits an animation clock
+ticking once per 60 Hz frame over data authored at 30 Hz. Measured across the
+220 motions the shipped bundles bake it is `2n - 2` for 91 of them and
+`2n - 3` for the other 129, and never anything else — `[open]` which of the two
+a given motion gets. Because there is no rule, the bundle **carries the exe's
+value** rather than deriving one: `BakedMotion.play`.
+
+Reading a cue against the authored frame count instead loses every cue past
+halfway, silently. That is what left the civilians alive under their captors:
+stage 1's four maul cues are 24, 30, 62 and 64 against clips of 41, 26, 43 and
+46 frames, so only the 24 ever fired.
 
 ## Banks
 

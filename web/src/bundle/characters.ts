@@ -14,6 +14,14 @@ export interface BakedMotion {
   root: number[];
   /** `frames * bone_count * 3` BAMS shorts, bone 0 first. */
   rot: number[];
+  /**
+   * `g_motion_play_length[motion]` (`0x004E07D0`) — the clip clock the
+   * *scripts* count in, which is **not** `frames`. It ticks once per 60 Hz
+   * frame over 30 Hz data, so it is `2 * frames - 2` or `- 3`; which of the
+   * two has no rule, so it is carried rather than derived. Absent only for a
+   * motion the table has no row for.
+   */
+  play?: number;
 }
 
 export interface CharacterBone {

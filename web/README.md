@@ -26,6 +26,12 @@ npm run dev          # http://localhost:5173
 Add `--original` to step 1 to build the Original Mode (game mode 1) variants
 too, which the **Original** checkbox then switches between.
 
+`--stage N` rebuilds one stage. That is the fast path when only one stage's
+data has changed, and it keeps the rest: the exporter carries every stage it
+did not rebuild forward into `manifest.json`, and prints which. It used to
+replace the manifest outright, which left the player with only the stage that
+had just been built while every other stage's files sat on disk unlisted.
+
 `extract/player/` is served at `/bundle/` by a dev-server middleware
 (`vite.config.ts`). It is deliberately *not* in `public/`: it is game-derived
 data and must never end up in a build artifact. For a production build, run

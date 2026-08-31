@@ -59,7 +59,7 @@ import { ActorIsOnScreen } from "../combat/permits";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import { ActorSetMotionBlended } from "./motion_cue";
-import { MotionOf } from "../tables";
+import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
 import { ZombieState } from "./states";
 import { vec3, type Vec3 } from "../vec";
 
@@ -193,14 +193,18 @@ function loseTarget(obj: Actor): void {
 
 /** The clip frame this actor is on — the engine's `obj+0x19C`. */
 function frameOf(obj: Actor): number {
-  const m = MotionOf(obj, obj.motion);
-  return m ? Math.floor(obj.clock * m.fps) : 0;
+  return MotionPlayFrame(obj);
 }
 
-/** Whether the clip is on its last frame. */
+/**
+ * `obj+0x19C == g_motion_play_length[obj+0x1B4] - 1`.
+ *
+ * Both halves count in the **play** clock, not in authored frames. Measuring
+ * this in frames ends every entry at halfway and takes the kill cue with it.
+ */
 function atLastFrame(obj: Actor): boolean {
-  const m = MotionOf(obj, obj.motion);
-  return !!m && frameOf(obj) >= m.frames - 1;
+  const len = MotionPlayLength(obj);
+  return len > 0 && frameOf(obj) >= len - 1;
 }
 
 /**

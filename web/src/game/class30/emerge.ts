@@ -19,7 +19,7 @@
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
-import { MotionOf } from "../tables";
+import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieState } from "./states";
 
@@ -41,13 +41,12 @@ const LEAP_LAND_MOTION = 0x3f7;
 
 /** The clip frame this actor is on — the engine's `obj+0x19C`, at 60 Hz. */
 function frameOf(obj: Actor): number {
-  const m = MotionOf(obj, obj.motion);
-  return m ? Math.floor(obj.clock * m.fps * 2) : 0;
+  return MotionPlayFrame(obj);
 }
 
 function atLastFrame(obj: Actor): boolean {
-  const m = MotionOf(obj, obj.motion);
-  return !!m && frameOf(obj) >= m.frames * 2 - 1;
+  const len = MotionPlayLength(obj);
+  return len > 0 && frameOf(obj) >= len - 1;
 }
 
 /**
@@ -153,8 +152,7 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
       if (obj.hp >= 1) ActorSetMotionBlended(obj, LEAP_LAND_MOTION, 0, 5);
       // `obj+0x1350 = play_length - rand() % 30 - 1`: how long the landing
       // holds before the actor starts walking.
-      obj.targetLoops = Math.max(0, (MotionOf(obj, obj.motion)?.frames ?? 1) * 2
-                                    - rng.int(0x1e) - 1);
+      obj.targetLoops = Math.max(0, MotionPlayLength(obj) - rng.int(0x1e) - 1);
       obj.sub = 4;
     }
     return;

@@ -99,10 +99,16 @@ export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void 
     }
   }
 
+  // [diverges] `worldPushDepth` is the port's own, and this is the only place
+  // that writes it: it must be cleared whether or not the actor takes part in
+  // the world push, or an actor that stops colliding stays flagged as wedged
+  // for ever. See `Actor.worldPushDepth`.
+  obj.worldPushDepth = 0;
   if (obj.flags2 & ZombieFlag2.CollideWorld) {
     if (ColiTestSphereAgainstFullSet(obj.camPoint.x, obj.camPoint.y,
                                      obj.camPoint.z, obj.bodyRadius)) {
       const d = G.g_coli_hit_depth;
+      obj.worldPushDepth = d;
       obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * d;
       obj.pos.y += (G.g_coli_hit_normal[1] ?? 0) * d;
       obj.pos.z += (G.g_coli_hit_normal[2] ?? 0) * d;

@@ -27,6 +27,11 @@ export enum PropFamily {
   Falling = 2,
   /** `BreakableEffectUpdate` — the puff a destroyed group prop becomes. */
   Effect = 3,
+  /**
+   * Built by `PlaceGenericProp` and **drawn only** — one of thirty update
+   * routines this port has not read. See `class41/generic.ts`.
+   */
+  Generic = 4,
 }
 
 /** `obj+0x192` — where a prop is in its life. */

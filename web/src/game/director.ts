@@ -13,7 +13,7 @@ import { SelectCameraLookAtTarget } from "./camera/select_target";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { TurnLookAtToward } from "./camera/turn";
 import { ThrownWeaponUpdate } from "./class31/projectile";
-import { BreakablePropPoolUpdate } from "./class41/prop";
+import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
 import { Class44Selector } from "./class44";
 import { T } from "./tables";
@@ -82,7 +82,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
 
-    if (pl.container === "falling") {
+    if (pl.container === "falling" && s.class === SpawnClassValue.PropPlacer) {
       // Class 0x44 dispatches on `+0x11C`, so the selector goes in `hp` — the
       // same field that is the *group id* for a class-0x41 placer.
       const a = ActorSpawn(s.at, SpawnClassValue.PropPlacer, 0,
@@ -95,10 +95,12 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     }
 
     // `+0x130C` selects the class-0x41 constructor; `+0x11C` is the group id
-    // for type 0 and `+0x1F4` the lifetime. All three are polymorphic fields
-    // and none means what its name means elsewhere.
-    const type = pl.container === "kinded"
-      ? PropContainerType.KindedProp : PropContainerType.BreakableGroup;
+    // for type 0, the lifetime for a kinded prop and the **asset slot** for a
+    // generic one. Four meanings, one offset.
+    const type = pl.container === "kinded" ? PropContainerType.KindedProp
+      : pl.container === "generic" ? (pl.type ?? 0)
+      : pl.container === "falling" ? PropContainerType.FallingContainer
+      : PropContainerType.BreakableGroup;
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
                          pl.lifetime_evt_blocks,
                          pl.container === "kinded"

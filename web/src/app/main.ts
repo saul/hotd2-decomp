@@ -1060,6 +1060,13 @@ class Player {
       this.syncPortGlobals();
       this.world.update(this.ctx, game);
       this.drawLayers(game);
+      // The stats panel is driven from here, not from the playback branch.
+      // Read from there it only ever showed the state from *before* the first
+      // frame -- which read `0/44 no node` for props that were all fine and
+      // `none placed` for a pool with 39 things in it. A panel that lies when
+      // the clock is stopped is worse than no panel, and the clock is stopped
+      // for most of the time anyone spends looking at it.
+      this.refreshUi();
     }
     this.renderer.render(this.scene, this.camera);
   };

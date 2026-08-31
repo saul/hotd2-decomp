@@ -155,13 +155,19 @@ export interface BreakablePlacement {
   /** The script address of the spawn that places it. */
   at: number;
   /** Which constructor: the group table, one kinded prop, one container. */
-  container: "group" | "kinded" | "falling";
+  container: "group" | "kinded" | "falling" | "generic";
   /** How many evt blocks it lives for. */
   lifetime_evt_blocks: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
   group?: number;
   /** `kinded` and `falling` — the object kind in the orientation word. */
   kind?: number;
+  /** `generic` — the class-0x41 constructor type, and the asset slot to draw. */
+  type?: number;
+  slot?: number;
+  /** `generic` — the other two orientation words, which really are angles. */
+  pitch?: number;
+  roll?: number;
   /** The item set it belongs to, 0 for none. */
   item_set?: number;
   /** How many props share that set; the countdown is seeded from it. */

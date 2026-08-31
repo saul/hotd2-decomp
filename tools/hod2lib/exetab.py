@@ -422,6 +422,13 @@ class ExeTables:
     #: `FUN_0046B040` as `(&DAT_00594788, 0x30)`.
     FALLING_HULL = 0x00594788
     FALLING_HULL_POINTS = 48
+    #: `g_class41_constructors` (79 entries) and, immediately after it, the
+    #: table of *update* routines `PlaceGenericProp` allocates against.
+    CLASS41_CTORS = 0x00593580
+    CLASS41_UPDATES = 0x005936BC
+    CLASS41_TYPES = 79
+    #: `PlaceGenericProp` itself -- the constructor 44 of the 79 types share.
+    GENERIC_PROP_CTOR = 0x00461CF0
     #: Height of one stack level, from the constructor's own multiply.
     BREAKABLE_LEVEL_HEIGHT = 7.540296
 
@@ -627,6 +634,23 @@ class ExeTables:
                 })
             out.append(members)
         return out
+
+    def class41_dispatch(self) -> list[dict]:
+        """Per class-0x41 type: which constructor builds it, and which routine
+        the object it builds then runs.
+
+        Two parallel 79-entry tables, back to back in `.data`. The second one
+        is what `PlaceGenericProp` (`FUN_00461CF0`) indexes when it allocates,
+        which is how one constructor serves 44 different objects.
+        """
+        cb, ub = self._v2r(self.CLASS41_CTORS), self._v2r(self.CLASS41_UPDATES)
+        if cb is None or ub is None:
+            return []
+        n = self.CLASS41_TYPES
+        ctors = struct.unpack_from(f"<{n}I", self.data, cb)
+        upds = struct.unpack_from(f"<{n}I", self.data, ub)
+        return [{"type": i, "ctor": ctors[i], "update": upds[i]}
+                for i in range(n)]
 
     def prop_kind_params(self) -> list[dict]:
         """`g_prop_kind_params` -- per class-0x41 type-4 object kind.

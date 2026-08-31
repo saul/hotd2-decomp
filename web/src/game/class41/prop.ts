@@ -30,8 +30,6 @@ import {
   BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, PropFamily,
   type BreakableProp,
 } from "./prop_state";
-import { KindedPropUpdate } from "./kinded";
-import { FallingContainerUpdate } from "../class44/container";
 
 // -- the constants the routine spells out ----------------------------------
 
@@ -424,28 +422,6 @@ function SettleStep(p: BreakableProp): void {
   if (Math.abs(p.spin) > 0x20) {
     p.pitch += p.spin >> 3;
     BreakablePropGroundContact(p);
-  }
-}
-
-/**
- * The whole pool, once a frame — and the dispatch that stands in for the
- * engine calling each object through its own entry point.
- *
- * All three families are 0x378 objects in one pool; what differs is the
- * routine `ActorAlloc` was handed. `PropFamily` is that routine, so switching
- * on it here is the same call the engine makes indirectly.
- */
-export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
-  for (const p of G.g_breakable_props) {
-    if (p.dead) continue;
-    switch (p.family) {
-      case PropFamily.Kinded: KindedPropUpdate(p, rng, events); break;
-      case PropFamily.Falling: FallingContainerUpdate(p, rng, events); break;
-      default: BreakablePropUpdate(p, rng, events); break;
-    }
-  }
-  if (G.g_breakable_props.some((p) => p.dead)) {
-    G.g_breakable_props = G.g_breakable_props.filter((p) => !p.dead);
   }
 }
 

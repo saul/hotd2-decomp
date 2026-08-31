@@ -30,7 +30,7 @@ import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
   PlaceBreakableGroup, PropContainerPlacerUpdate, PlaceKindedProp,
-  KindedPropUpdate, PropFamily, KIND_SLOT, SLOT_NONE,
+  KindedPropUpdate, PropFamily, KIND_SLOT, SLOT_NONE, PlaceGenericProp,
 } from "../src/game/class41";
 import {
   FallingContainerUpdate, PlaceFallingContainer, FALLING_SLOT_LOOSE,
@@ -1024,6 +1024,55 @@ console.log("\nall three families share one item-set countdown:");
   }
   check("breaking the set across two classes pays out once",
         releases === 1, `${releases} releases`);
+}
+
+console.log("\nclass 0x41, the generic props:");
+{
+  const rng = new Rng(3);
+  propScene(rng);
+  // What the exporter emits for one: the type, the asset slot from `+0x11C`,
+  // and three real angles.
+  const p = PlaceGenericProp({
+    at: 0xa900, container: "generic", type: 12, slot: 0x173d,
+    lifetime_evt_blocks: 0, pos: [5, 6, 7], pitch: 0x100, yaw: 0x2000,
+    roll: 0x300,
+  }, rng);
+  check("a generic prop draws the slot from +0x11C, not hit points",
+        p.slot === 0x173d, p.slot.toString(16));
+  check("it is placed where the script put it",
+        p.x === 5 && p.y === 6 && p.z === 7);
+  check("all three orientation words are angles for this family",
+        p.pitch === 0x100 && p.yaw === 0x2000 && p.roll === 0x300);
+  check("and it is the drawn-only family",
+        p.family === PropFamily.Generic);
+
+  // The arms of the switch that override what the prologue took.
+  const door = PlaceGenericProp({
+    at: 0xa901, container: "generic", type: 6, slot: 0x1234,
+    lifetime_evt_blocks: 0, pos: [0, 0, 0],
+  }, rng);
+  check("a type whose arm overrides the slot uses the arm's",
+        door.slot === 0x1032 && door.hp === 1, door.slot.toString(16));
+}
+
+console.log("\nclass 0x41 type 34 is a falling container:");
+{
+  const rng = new Rng(9);
+  const events = propScene(rng);
+  // The generic constructor's case 0x22 builds the same object class 0x44
+  // selector 16 does -- so the type-34 spawns in stages 1, 3, 4 and 5 are
+  // item containers, and they were absent entirely.
+  const before = G.g_item_set_countdown[ItemSet.Score2] ?? 0;
+  const c = PlaceFallingContainer(0xf200, 0, ItemSet.Score2, -1, 1, 4,
+                                  0, 20, 0, 0, rng);
+  G.g_breakable_props.push(c);
+  check("it seeds an item countdown, which is why it could not be skipped",
+        G.g_item_set_countdown[ItemSet.Score2] === 1
+        && before !== G.g_item_set_countdown[ItemSet.Score2]);
+  check("and it is the same two-shot falling object",
+        c.family === PropFamily.Falling && c.hp === 2
+        && c.slot === FALLING_SLOT_WHOLE);
+  void events;
 }
 
 console.log("\nclass 0x41, the props are in the save state:");

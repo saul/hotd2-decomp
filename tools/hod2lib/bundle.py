@@ -171,6 +171,16 @@ def rain_json(tables, prog) -> dict:
     }
 
 
+def _generic_types(prog) -> set[int]:
+    """The class-0x41 types `PlaceGenericProp` builds, from the dispatch table."""
+    try:
+        rows = prog.stage.tables.class41_dispatch()
+    except Exception:
+        return set()
+    ctor = 0x00461CF0
+    return {r["type"] for r in rows if r["ctor"] == ctor}
+
+
 def _container_placements(prog) -> list[dict]:
     """Every container spawn a stage places, decoded to what the port needs.
 
@@ -193,6 +203,7 @@ def _container_placements(prog) -> list[dict]:
         return []
     raw = prog.evt.raw
     out: list[dict] = []
+    generic = _generic_types(prog)
     for rec in evtlib.spawns(prog.evt):
         if rec.cls not in (0x41, 0x44):
             continue
@@ -206,6 +217,31 @@ def _container_placements(prog) -> list[dict]:
                     "group": rec.hp,
                     "lifetime_evt_blocks":
                         struct.unpack_from("<b", raw, rec.offset + 0x24)[0],
+                })
+            elif ctor == 34:
+                # `PlaceGenericProp` case 0x22 builds a falling container:
+                # `+0x11C` is the lifetime and the slot is forced to 0xA50, so
+                # this is the same object class 0x44 selector 16 places.
+                out.append({
+                    "at": rec.offset, "container": "falling", "kind": 0,
+                    "item_set": struct.unpack_from("<b", raw,
+                                                   rec.offset + 0x24)[0],
+                    "story_item": -1,
+                    "set_size": rec.orient[0],
+                    "lifetime_evt_blocks": rec.hp & 0xFF,
+                    "pos": list(rec.pos), "yaw": rec.orient[1],
+                })
+            elif ctor in generic:
+                # Everything else `PlaceGenericProp` builds. `+0x11C` is the
+                # **asset slot** here, not hit points -- which is why the spawn
+                # markers on these read `hp5949` for what is really 0x173D.
+                out.append({
+                    "at": rec.offset, "container": "generic",
+                    "type": ctor, "slot": rec.hp,
+                    "lifetime_evt_blocks": 0,
+                    "pos": list(rec.pos),
+                    "pitch": rec.orient[0], "yaw": rec.orient[1],
+                    "roll": rec.orient[2],
                 })
             elif ctor == 4:
                 out.append({
@@ -262,7 +298,7 @@ def breakables_json(tables, prog) -> dict:
     }
 
 
-def breakable_slot_entry(stage) -> dict | None:
+def breakable_slot_entry(stage, prog=None) -> dict | None:
     """A hidden rig holding the breakable props' models, for the client to clone.
 
     Class 0x41's props are built at run time by `PlaceBreakableGroup`, not
@@ -281,7 +317,14 @@ def breakable_slot_entry(stage) -> dict | None:
     slots = stage.tables.asset_slots()
     cache: dict[str, tuple] = {}
     parts: list[tuple] = []
-    for slot in BREAKABLE_SLOTS:
+    # The three container families draw from a fixed set; the generic props
+    # each name their own slot in the spawn descriptor, so those come from the
+    # stage's own placements and differ per stage.
+    want = list(BREAKABLE_SLOTS)
+    for pl in _container_placements(prog):
+        if pl["container"] == "generic" and pl["slot"] not in want:
+            want.append(pl["slot"])
+    for slot in want:
         rec = slots.get(slot)
         if not rec:
             continue
@@ -469,7 +512,10 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     hinges, statics = propslib.resolve_for_stage(stage)
     prop_entries = propslib.rig_entries(stage, hinges, statics)
 
-    brk = breakable_slot_entry(stage)
+    # Before the glTF: the template rig has to include every asset slot the
+    # stage's generic props name, and only the script knows which those are.
+    prog = scriptlib.Program(stage)
+    brk = breakable_slot_entry(stage, prog)
     info = gltf.export_level(
         name, parts, out_dir,
         rigs=rig_data + char_entries + prop_entries + ([brk] if brk else []),
@@ -487,7 +533,6 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
         json.dumps(cam_json, allow_nan=False))
 
     say(f"  {name}: event script")
-    prog = scriptlib.Program(stage)
     script_json = prog.to_json()
     # The region table travels with the script because the client's region
     # visibility is driven by opcodes 0x28/0x29, and it needs to resolve a

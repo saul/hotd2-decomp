@@ -27,6 +27,8 @@ import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { PlaceBreakableGroup } from "./group";
 import { PlaceKindedProp } from "./kinded";
+import { PlaceGenericProp } from "./generic";
+import { PlaceFallingContainer } from "../class44/container";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -42,6 +44,13 @@ export enum PropContainerType {
   BreakableGroup = 0,
   /** `PlaceKindedProp` (`FUN_00462E10`) — one prop, kind from `obj+0x6C`. */
   KindedProp = 4,
+  /**
+   * `PlaceGenericProp` case 0x22 — a falling container, the same object class
+   * 0x44 selector 16 places. Twelve spawns across stages 1, 3, 4 and 5, and
+   * they seed item countdowns, so leaving them out left those stages' item
+   * sets paying out on the wrong break.
+   */
+  FallingContainer = 34,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -62,6 +71,15 @@ export const g_class41_constructors:
     // polymorphic and both have already misled this project once.
     PlaceBreakableGroup(obj.hp, obj.charType, f.rng);
   },
+  [PropContainerType.FallingContainer]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "falling");
+    if (!pl) return;
+    G.g_breakable_props.push(PlaceFallingContainer(
+      obj.at, 0, pl.item_set ?? 0, -1, pl.set_size ?? 0,
+      pl.lifetime_evt_blocks, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
+      f.rng));
+  },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
       (q) => q.at === obj.at && q.container === "kinded");
@@ -81,8 +99,25 @@ export const g_class41_constructors:
  * still disappears on its first frame rather than sitting in the level.
  */
 export function PropContainerPlacerUpdate(obj: Actor, f: ClassFrame): void {
-  g_class41_constructors[obj.condition]?.(obj, f);
+  const ctor = g_class41_constructors[obj.condition];
+  if (ctor) ctor(obj, f);
+  else PlaceGenericPropFor(obj, f);
   ActorKillPlacer(obj);
+}
+
+/**
+ * The fallback for the 44 types `PlaceGenericProp` builds.
+ *
+ * A table entry each would be 44 identical closures; the exporter has already
+ * decided which types this constructor serves, so a placement tagged
+ * `generic` *is* the table lookup, and a type with no placement is a type this
+ * stage does not use.
+ */
+function PlaceGenericPropFor(obj: Actor, f: ClassFrame): void {
+  const pl = T.breakables?.placements?.find(
+    (q) => q.at === obj.at && q.container === "generic");
+  if (!pl) return;
+  G.g_breakable_props.push(PlaceGenericProp(pl, f.rng));
 }
 
 /**
@@ -130,6 +165,7 @@ export function ResetPropContainers(): void {
 
 export { PlaceBreakableGroup };
 export * from "./kinded";
+export * from "./generic";
 export * from "./prop_state";
 export * from "./prop";
 export * from "./items";

@@ -66,7 +66,11 @@ const SLOT_PART = /_slot_([0-9a-f]{4})$/;
  * casts none — it spends most of its life off the ground.
  */
 function ShadowSlotFor(p: BreakableProp): number | null {
+  // A generic prop is whatever its slot says it is -- scenery, an effect, in a
+  // few cases an enemy. Nothing in `PlaceGenericProp` draws a shadow, so
+  // neither does this.
   if (p.family === PropFamily.Falling) return null;
+  if (p.family === PropFamily.Generic) return null;
   if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
   return KIND_SHADOW[p.kind] ?? null;
 }
@@ -263,10 +267,13 @@ export class BreakableLayer implements System {
   }
 
   get describe(): string {
-    const n = G.g_breakable_props.filter((p) => !p.dead).length;
+    const live = G.g_breakable_props.filter((p) => !p.dead);
     if (!this.templates.size) return "no models";
-    if (!n) return "none placed";
-    const whole = G.g_breakable_props.filter((p) => !p.dead && p.hp > 1).length;
-    return `${n} up, ${n - whole} cracked`;
+    if (!live.length) return "none placed";
+    const by = (f: PropFamily) =>
+      live.filter((p) => p.family === f).length;
+    const generic = by(PropFamily.Generic);
+    return `${live.length} up (${this.nodes.size} drawn)`
+      + (generic ? `, ${generic} placed but not simulated` : "");
   }
 }

@@ -128,7 +128,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "falling" ? PropContainerType.FallingContainer
       : PropContainerType.BreakableGroup;
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
-                         pl.lifetime_evt_blocks,
+                         pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
                            : `breakable group ${pl.group}`,

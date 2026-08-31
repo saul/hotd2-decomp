@@ -32,7 +32,7 @@
  * the instruction that raises it.
  *
  * ```c
- * PropExpireByBlockLifetime(obj);
+ * PropExpireByStepLifetime(obj);
  * if (g_script_flags[0x37] == 1) obj->y = g_camera_block_eye.y - 15.0f;
  * if (g_script_flags[0x6B] == 1) {
  *     if (obj->+0x1D0 <= 0x8000) {
@@ -75,7 +75,7 @@
  */
 import type { Events } from "../../core/events";
 import { G } from "../globals";
-import { PropExpireByBlockLifetime } from "./lifetime";
+import { PropExpireByStepLifetime } from "./lifetime";
 import type { BreakableProp } from "./prop_state";
 
 /**
@@ -124,7 +124,7 @@ function ScriptFlagUp(f: LiftFlag): boolean {
  * One call per 60 Hz frame, from the container pool.
  */
 export function LiftUpdate(p: BreakableProp, events?: Events): void {
-  if (PropExpireByBlockLifetime(p)) return;
+  if (PropExpireByStepLifetime(p)) return;
 
   if (ScriptFlagUp(LiftFlag.RideCamera)) {
     p.y = G.g_camera_block_eye.y - LIFT_RIDE_DROP;

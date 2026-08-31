@@ -97,9 +97,11 @@ obj->+0x28C = placer->+0x11C;     /* the asset slot */
 obj->+0x11C = placer->+0x11C;     /* the lifetime, in event blocks */
 ```
 
-`PropExpireByBlockLifetime` (`FUN_00466640`), which **25** of the update
+`PropExpireByStepLifetime` (`FUN_00466640`), which **25** of the update
 routines open with, reads `obj+0x11C` as a lifetime and despawns the prop once
-`g_evt_block_counter` has advanced past it. Only **three** of the routines ever
+`g_evt_step_index` has **changed** more times than it. That counter is the event
+VM's *step* index, not a block count, so `obj+0x11C` is a lifetime in event
+steps — blocks average 3.99 of them. Only **three** of the routines ever
 draw `obj+0x28C`:
 
 | Type | Routine | What it draws |

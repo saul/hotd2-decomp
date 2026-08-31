@@ -406,15 +406,25 @@ export const G = {
    * `g_scene_index` — 0x009A1A08. Which scene is loaded, zero-based:
    * `ColiLoadForScene` indexes its file list with it, so scene 1 is stage 2.
    * Class 0x41's routines branch on it for the per-stage sound sets and for
-   * `PropExpireByBlockLifetime`'s scene-1 sweep.
+   * `PropExpireByStepLifetime`'s scene-1 sweep.
    */
   g_scene_index: 0,
   /**
-   * `g_evt_block_counter` — 0x009A2BB0. Advanced by the event script as it
-   * moves between blocks. A prop's lifetime is measured in these, not frames,
-   * which is why a prop outlives a slow player and not a fast one.
+   * `g_evt_step_index` — 0x009A2BB0. The event VM's **step index**, and the
+   * walker's cursor: `Walker.step` is an accessor over this field, because the
+   * engine has one global here and both halves of the game read it.
+   *
+   * `EvtAdvanceStepOrRoute` increments it at the top and assigns it `1` in the
+   * route branch, so it runs 1..k within a block and drops back to 1 on a
+   * block change — it is **not** monotonic and **not** a block count.
+   * `FUN_0045EBC0` seeds it with 0, 1 or 5 by game mode.
+   *
+   * A prop's lifetime is measured in changes to this, not in frames, which is
+   * why a prop outlives a slow player and not a fast one. It used to be a
+   * monotonic per-block counter here and props lived about four times too
+   * long — blocks average 3.99 steps.
    */
-  g_evt_block_counter: 0,
+  g_evt_step_index: 0,
 
   // -- thrown weapons ----------------------------------------------------
   g_thrown_weapons: [] as ThrownWeapon[],
@@ -479,11 +489,12 @@ export function ResetGameGlobals(): void {
   G.g_breakable_members = [];
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
-  G.g_evt_block_counter = 0;
+  G.g_evt_step_index = 0;
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
   G.g_cam_path_frame = 0;
+  G.g_cam_path_frame_prev = 0;
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;

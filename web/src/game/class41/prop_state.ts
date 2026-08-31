@@ -120,10 +120,11 @@ export interface BreakableProp {
    * before reading it, exactly as for `kind`/`member` at `+0x290`.
    */
   storyItem: number;      // +0x2A0
-  /** `obj+0x196` — the value of `g_evt_block_counter` it last saw. */
-  spawnBlock: number;     // +0x196
-  /** `obj+0x197` — how many block advances it has counted. */
-  blocksElapsed: number;  // +0x197
+  /** `obj+0x196` — the value of `g_evt_step_index` it last saw. */
+  lastStepIndex: number;  // +0x196
+  /** `obj+0x197` — how many *changes* to it this prop has counted. A block
+   *  advance is one; so is every step advance inside a block. */
+  stepsElapsed: number;   // +0x197
   /** `obj+0x199` — how many it may count before it despawns. */
   lifetime: number;       // +0x199
   /** `obj+0x11C` — shots left: 2 whole, 1 cracked, 0 destroyed. */
@@ -250,8 +251,8 @@ export function makeBreakableProp(id: number, group: number,
     id, at: 0, group, member,
     itemSet: ItemSet.None,
     storyItem: -1,
-    spawnBlock: 0,
-    blocksElapsed: 0,
+    lastStepIndex: 0,
+    stepsElapsed: 0,
     lifetime: 0,
     hp: 0,
     state: BreakableState.Standing,

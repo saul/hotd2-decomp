@@ -77,8 +77,8 @@ export function PlaceKindedProp(at: number, kind: number, itemSet: number,
   p.itemSet = itemSet;
   // `+0x11C` is the lifetime in evt blocks here, not a shot count.
   p.lifetime = lifetime;
-  p.spawnBlock = G.g_evt_block_counter;
-  p.blocksElapsed = 0;
+  p.lastStepIndex = G.g_evt_step_index;
+  p.stepsElapsed = 0;
   p.x = x;
   p.y = y;
   p.z = z;
@@ -109,10 +109,10 @@ export function KindedPropUpdate(p: BreakableProp, rng: Rng,
                                  events?: Events): void {
   // `FUN_00466640`: the same evt-block lifetime the other families have, but
   // measured against `+0x11C`.
-  if (G.g_evt_block_counter !== p.spawnBlock) {
-    p.blocksElapsed += 1;
-    if (p.blocksElapsed > p.lifetime) { ActorDespawnProp(p); return; }
-    p.spawnBlock = G.g_evt_block_counter;
+  if (G.g_evt_step_index !== p.lastStepIndex) {
+    p.stepsElapsed += 1;
+    if (p.stepsElapsed > p.lifetime) { ActorDespawnProp(p); return; }
+    p.lastStepIndex = G.g_evt_step_index;
   }
 
   // `+0x32C` is the break effect's frame counter; once it is running the prop

@@ -347,7 +347,7 @@ number is an asset slot and a lifetime in event blocks, and only three of the
 which put `char_adv03.bin` and `eff_boss4.bin` where 46 of stage 2's 67 generic
 props should be. All 25 routines that share the lifetime prologue were read for
 what they draw; `GENERIC_DRAW_SLOT` carries the answer and the exporter emits
-those templates. `PropExpireByBlockLifetime` now runs for the whole family, so
+those templates. `PropExpireByStepLifetime` now runs for the whole family, so
 a prop the script placed for one block no longer stands there all stage, and
 Original Mode's collectibles (types 70–72, 77) leave on their first Arcade
 frame the way the engine sends them.
@@ -387,8 +387,8 @@ reached only from the character layer, and only for spawns with a skeleton, so
 a placer never got to the registry — `SpawnPropContainers` is the bridge, and it
 runs **inside the spawn opcode** rather than once a frame, because the placer
 lives and dies on the frame it is spawned and because a seek replays
-instructions with no frames in between. `g_evt_block_counter` and
-`g_camera_fixed_eye_y` moved into `G`, written by the block transition and the
+instructions with no frames in between. `g_evt_step_index` and
+`g_camera_fixed_eye_y` moved into `G`, written by the step advance and the
 camera opcode that write them in the engine, so a group placed during a replay
 gets the right floor and the right lifetime clock.
 
@@ -493,6 +493,17 @@ each one.
 ## Findings the player produced
 
 Things established while building it, now folded back into the format docs.
+
+- **`g_evt_step_index` (`0x009A2BB0`) is the step index, not a block count.**
+  `[proved]` — `EvtAdvanceStepOrRoute` increments it at the top and assigns it
+  `1` in the route branch, and `FUN_0045EBC0` seeds it with 0, 1 or 5 by game
+  mode. It is neither monotonic nor per-block. `PropExpireByStepLifetime` ages
+  a prop one tick every time it **changes**, so `obj+0x11C` is a lifetime in
+  event *steps*. The port kept a separate monotonic counter bumped once per
+  block, and with blocks averaging 3.99 steps every class 0x41 and 0x44 prop
+  lived about four times too long. It is now the same field as the walker's
+  step cursor, because the engine has one global and two that must agree is
+  the shape the bug had.
 
 - **Opcodes `01`–`08` are the spawn opcodes behind a player-count gate.**
   `[proved]` — `EvtOpSpawnIfOnePlayer` (`0x00408820`) and

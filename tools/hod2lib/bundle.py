@@ -59,7 +59,7 @@ BREAKABLE_SLOTS = (
 #:
 #: **[proved]**, one routine at a time, out of `g_class41_entries`. This exists
 #: because `PlaceGenericProp` writes the descriptor's ``+0x11C`` into *both*
-#: ``obj+0x11C`` (the lifetime `PropExpireByBlockLifetime` counts down) and
+#: ``obj+0x11C`` (the lifetime `PropExpireByStepLifetime` counts down) and
 #: ``obj+0x28C`` (the asset slot), and only three types ever draw the latter.
 #: For every other type the value is a **lifetime of 0-5 event blocks** and the
 #: model is a literal in the routine, so exporting ``+0x11C`` as a slot
@@ -267,7 +267,7 @@ def _container_placements(prog) -> list[dict]:
                 out.append({
                     "at": rec.offset, "container": "group",
                     "group": rec.hp,
-                    "lifetime_evt_blocks":
+                    "lifetime_evt_steps":
                         struct.unpack_from("<b", raw, rec.offset + 0x24)[0],
                 })
             elif ctor == 34:
@@ -280,7 +280,7 @@ def _container_placements(prog) -> list[dict]:
                                                    rec.offset + 0x24)[0],
                     "story_item": -1,
                     "set_size": rec.orient[0],
-                    "lifetime_evt_blocks": rec.hp & 0xFF,
+                    "lifetime_evt_steps": rec.hp & 0xFF,
                     "pos": list(rec.pos), "yaw": rec.orient[1],
                 })
             elif ctor in generic:
@@ -293,7 +293,7 @@ def _container_placements(prog) -> list[dict]:
                 out.append({
                     "at": rec.offset, "container": "generic",
                     "type": ctor, "slot": rec.hp,
-                    "lifetime_evt_blocks": rec.hp,
+                    "lifetime_evt_steps": rec.hp,
                     "pos": list(rec.pos),
                     "pitch": rec.orient[0], "yaw": rec.orient[1],
                     "roll": rec.orient[2],
@@ -306,7 +306,7 @@ def _container_placements(prog) -> list[dict]:
                                                    rec.offset + 0x24)[0],
                     "set_size": rec.orient[0],
                     # `+0x11C` is the lifetime for this class, not hit points.
-                    "lifetime_evt_blocks": rec.hp,
+                    "lifetime_evt_steps": rec.hp,
                     "pos": list(rec.pos), "yaw": rec.orient[1],
                 })
         elif rec.hp == 16:                      # class 0x44 selector 16
@@ -317,7 +317,7 @@ def _container_placements(prog) -> list[dict]:
                 "item_set": struct.unpack_from("<b", raw, tail + 4)[0],
                 "story_item": struct.unpack_from("<i", raw, tail + 8)[0],
                 "set_size": rec.orient[0],
-                "lifetime_evt_blocks":
+                "lifetime_evt_steps":
                     struct.unpack_from("<b", raw, tail)[0],
                 "pos": list(rec.pos), "yaw": rec.orient[1],
             })

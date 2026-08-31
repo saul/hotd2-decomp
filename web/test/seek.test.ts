@@ -588,6 +588,58 @@ for (const stage of STAGES) {
   }
 }
 
+// `g_evt_step_index` (0x009A2BB0) is the event VM's step cursor, and a prop's
+// lifetime is counted in *changes* to it -- see `PropExpireByStepLifetime`.
+// The port used to keep a separate monotonic counter here, bumped once per
+// block, so props aged about four times too slowly. These drive the shipped
+// scripts and check the counter has the shape the engine gives it.
+{
+  for (const stage of STAGES) {
+    const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+    if (!existsSync(file)) continue;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
+                                   aliveCivilians: () => 0 });
+    w.reset();
+    w.replaying = true;
+
+    let prevIdx = G.g_evt_step_index, prevBlock = w.block;
+    let idxChanges = 0, blockChanges = 0, resetsToOne = 0, monotonic = true;
+    let cursorAgrees = true;
+    for (let i = 0; i < 200_000 && !w.finished && !w.parked; i++) {
+      if (w.wait) { w.stepOverWait(); continue; }
+      if (w.branch) { w.takeBranch(); continue; }
+      if (!(w as unknown as Inner).executeOne(true)) break;
+      // The cursor and the global are one field; if that ever stops being
+      // true, the bug this replaced is back.
+      if (w.step !== G.g_evt_step_index) cursorAgrees = false;
+      if (G.g_evt_step_index !== prevIdx) {
+        idxChanges++;
+        if (G.g_evt_step_index < prevIdx) monotonic = false;
+        if (w.block !== prevBlock && G.g_evt_step_index === 1) resetsToOne++;
+        prevIdx = G.g_evt_step_index;
+      }
+      if (w.block !== prevBlock) { blockChanges++; prevBlock = w.block; }
+    }
+
+    check(`stage ${stage}: the step cursor and g_evt_step_index are one field`,
+          cursorAgrees);
+    // The whole point: it moves far more often than the block does. If these
+    // were equal the port would be back to counting blocks.
+    check(`stage ${stage}: the step index moves oftener than the block does`,
+          idxChanges > blockChanges,
+          `${idxChanges} index changes vs ${blockChanges} block changes`);
+    // `EvtAdvanceStepOrRoute` assigns 1 in the route branch, so it is a
+    // cursor and not a tally -- a monotonic run means the reset was lost.
+    check(`stage ${stage}: it drops back to 1 on a block change, not upward`,
+          !monotonic && resetsToOne > 0,
+          `${resetsToOne} resets to 1 over ${blockChanges} block changes`);
+    console.log(`        stage ${stage}: ${idxChanges} step-index changes over `
+                + `${blockChanges} block changes `
+                + `(${(idxChanges / Math.max(1, blockChanges)).toFixed(2)}x)`);
+  }
+}
+
 if (ran === 0) {
   console.log("  no bundle under extract/player -- run tools/export_player.py");
   process.exit(0);

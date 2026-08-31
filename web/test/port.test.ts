@@ -63,7 +63,7 @@ import {
   LiftUpdate, LiftFlag, LIFT_NEAR_CLOSED, LIFT_NEAR_OPEN,
   LIFT_FAR_CLOSED, LIFT_PANEL_CLOSED, LIFT_PANEL_OPEN, LIFT_PANEL_DELAY,
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
-  PropExpireByBlockLifetime, GENERIC_DRAW_SLOT,
+  PropExpireByStepLifetime, GENERIC_DRAW_SLOT,
   GENERIC_ORIGINAL_MODE_ONLY,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
@@ -850,8 +850,8 @@ const BREAKABLES: BreakablesJson = {
     radius: 6, y_offset: 6,
   })),
   placements: [
-    { at: 0xa100, container: "group", group: 1, lifetime_evt_blocks: 4 },
-    { at: 0xa200, container: "group", group: 2, lifetime_evt_blocks: 6 },
+    { at: 0xa100, container: "group", group: 1, lifetime_evt_steps: 4 },
+    { at: 0xa200, container: "group", group: 2, lifetime_evt_steps: 6 },
   ],
   level_height: 7.540296,
 };
@@ -1004,7 +1004,7 @@ console.log("\nclass 0x41, a prop's lifetime is in evt blocks:");
   for (let i = 0; i < 1000; i++) BreakablePropUpdate(p, rng, events);
   check("a thousand frames do not expire a prop", !p.dead);
   for (let b = 1; b <= 3; b++) {
-    G.g_evt_block_counter = b;
+    G.g_evt_step_index = b;
     BreakablePropUpdate(p, rng, events);
   }
   check("but three block advances past a lifetime of two do", p.dead);
@@ -1224,7 +1224,7 @@ console.log("\nclass 0x41, the generic props:");
   // and three real angles.
   const p = PlaceGenericProp({
     at: 0xa900, container: "generic", type: 12, slot: 0x173d,
-    lifetime_evt_blocks: 0, pos: [5, 6, 7], pitch: 0x100, yaw: 0x2000,
+    lifetime_evt_steps: 0, pos: [5, 6, 7], pitch: 0x100, yaw: 0x2000,
     roll: 0x300,
   }, rng);
   check("a generic prop draws the slot from +0x11C, not hit points",
@@ -1239,7 +1239,7 @@ console.log("\nclass 0x41, the generic props:");
   // The arms of the switch that override what the prologue took.
   const door = PlaceGenericProp({
     at: 0xa901, container: "generic", type: 6, slot: 0x1234,
-    lifetime_evt_blocks: 0, pos: [0, 0, 0],
+    lifetime_evt_steps: 0, pos: [0, 0, 0],
   }, rng);
   check("a type whose arm overrides the slot uses the arm's",
         door.slot === 0x1032 && door.hp === 1, door.slot.toString(16));
@@ -1531,7 +1531,7 @@ console.log("\nclass 0x41 type 32, the lift:");
   events.on("sound.play", (e) => sounds.push(e.id));
   const gate = PlaceGenericProp(
     { at: 0xbdc0, container: "generic", type: 32, slot: 2,
-      lifetime_evt_blocks: 2, pos: [-825.1, 40, -1871.7],
+      lifetime_evt_steps: 2, pos: [-825.1, 40, -1871.7],
       pitch: 0, yaw: 0, roll: 0 }, rng);
   G.g_breakable_props.push(gate);
 
@@ -1596,12 +1596,12 @@ console.log("\nclass 0x41 type 32, the lift:");
   check("and it starts from 0x8000 the moment flag 0x6C goes up",
         gate.hingeB === LIFT_FAR_CLOSED + LIFT_HINGE_STEP);
 
-  // The lifetime prologue still runs: two blocks, and it is gone.
+  // The lifetime prologue still runs: three step changes, and it is gone.
   for (let b = 1; b <= 3; b++) {
-    G.g_evt_block_counter = b;
+    G.g_evt_step_index = b;
     LiftUpdate(gate, events);
   }
-  check("and it expires on its two-block lifetime like any other prop",
+  check("and it expires on its two-step lifetime like any other prop",
         gate.dead);
   void LIFT_PANEL_DELAY;
 }
@@ -1610,32 +1610,51 @@ console.log("\nclass 0x41, a generic prop's +0x11C is a lifetime:");
 {
   const rng = new Rng(43);
   const events = propScene(rng);
-  // The stage-2 shape: `hp` 1, which is a lifetime of one block and NOT
-  // asset slot 1 (`bg_adv10.bin`).
+  // The stage-2 shape: `hp` 1, which is a lifetime of one event *step* and
+  // NOT asset slot 1 (`bg_adv10.bin`).
   const p = PlaceGenericProp(
     { at: 0xbe00, container: "generic", type: 20, slot: 1,
-      lifetime_evt_blocks: 1, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+      lifetime_evt_steps: 1, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
     rng);
   G.g_breakable_props.push(p);
   check("the lifetime is the descriptor's +0x11C", p.lifetime === 1);
   check("and the model is the literal its routine draws, not that number",
         GENERIC_DRAW_SLOT[20] === 0x1e2);
-  for (let i = 0; i < 600; i++) PropExpireByBlockLifetime(p);
+  for (let i = 0; i < 600; i++) PropExpireByStepLifetime(p);
   check("frames alone do not expire it", !p.dead);
   for (let b = 1; b <= 2; b++) {
-    G.g_evt_block_counter = b;
-    PropExpireByBlockLifetime(p);
+    G.g_evt_step_index = b;
+    PropExpireByStepLifetime(p);
   }
-  check("two block advances past a lifetime of one do", p.dead);
+  check("two step advances past a lifetime of one do", p.dead);
+
+  // The bug this replaced, stated so it cannot come back: the counter is the
+  // step index, so a prop ages *inside* a block as well as across one. When
+  // it was a monotonic per-block counter every prop lived about four times
+  // too long -- blocks average 3.99 steps.
+  G.g_evt_step_index = 1;                  // placed in block N's first step
+  const r = PlaceGenericProp(
+    { at: 0xbe80, container: "generic", type: 20, slot: 1,
+      lifetime_evt_steps: 1, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+    rng);
+  PropExpireByStepLifetime(r);
+  check("a prop placed in step 1 survives its own step", !r.dead);
+  G.g_evt_step_index = 2;                  // still block N, second step
+  PropExpireByStepLifetime(r);
+  check("...and its lifetime of one carries it one step further", !r.dead);
+  G.g_evt_step_index = 3;                  // still block N, third step
+  PropExpireByStepLifetime(r);
+  check("...but it is gone by step 3, without the block ever changing",
+        r.dead);
 
   // The scene-1 sweep.
   const q = PlaceGenericProp(
     { at: 0xbe40, container: "generic", type: 20, slot: 9,
-      lifetime_evt_blocks: 9, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+      lifetime_evt_steps: 9, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
     rng);
   G.g_scene_index = 1;
   G.g_script_flags[0x77] = 1;
-  PropExpireByBlockLifetime(q);
+  PropExpireByStepLifetime(q);
   check("g_script_flags[0x77] clears every prop on scene 1", q.dead);
   G.g_scene_index = 0;
   G.g_script_flags[0x77] = 0;
@@ -1649,7 +1668,7 @@ console.log("\nclass 0x41, Original Mode's collectibles in Arcade:");
   // `FUN_004675A0`'s first line is `if (g_GameMode != 1) ActorDespawn(obj)`.
   const p = PlaceGenericProp(
     { at: 0xbf00, container: "generic", type: 70, slot: 3,
-      lifetime_evt_blocks: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+      lifetime_evt_steps: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
     rng);
   G.g_breakable_props.push(p);
   G.g_GameMode = GameMode.Arcade;
@@ -1659,7 +1678,7 @@ console.log("\nclass 0x41, Original Mode's collectibles in Arcade:");
 
   const q = PlaceGenericProp(
     { at: 0xbf40, container: "generic", type: 70, slot: 3,
-      lifetime_evt_blocks: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+      lifetime_evt_steps: 3, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
     rng);
   G.g_breakable_props.push(q);
   G.g_GameMode = GameMode.Original;

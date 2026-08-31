@@ -132,7 +132,7 @@ def _breakable_json(st, prog) -> list[dict]:
         out.append({
             "group": gid,
             "spawn_at": rec.offset,
-            "lifetime_evt_blocks": _struct.unpack_from(
+            "lifetime_evt_steps": _struct.unpack_from(
                 "<b", prog.evt.raw, rec.offset + 0x24)[0],
             "members": groups[gid],
         })

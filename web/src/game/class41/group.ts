@@ -115,8 +115,8 @@ export function PlaceBreakableGroup(group: number, lifetime: number,
     p.itemSet = m.item_set;
     p.storyItem = m.story_item;
     p.lifetime = lifetime;
-    p.spawnBlock = G.g_evt_block_counter;
-    p.blocksElapsed = 0;
+    p.lastStepIndex = G.g_evt_step_index;
+    p.stepsElapsed = 0;
     p.hp = 2;
     p.slot = BreakableSlot.Default;
     p.state = BreakableState.Standing;

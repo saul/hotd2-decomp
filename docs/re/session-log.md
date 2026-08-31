@@ -7296,3 +7296,74 @@ conjunction and no force, a room-clear gate stayed shut for good.
 Now it is `FUN_00402E00` transcribed, and the port's slot list is rebuilt from
 the live actors each frame so a dead enemy leaves it on its own — one frame
 later than the engine's explicit store.
+
+## `g_evt_block_counter` was the step index all along, and props lived four times too long
+
+Follow-up to the `advance_step` rename, and the substance behind it. The
+counter at `0x009A2BB0` was named `g_evt_block_counter` and `globals.tsv`
+called it "a monotonic count of block transitions". It is neither monotonic nor
+a block count. `EvtAdvanceStepOrRoute` increments it at the top and assigns it
+**1** in the route branch, `FUN_0045EBC0` seeds it with 0, 1 or 5 by game mode,
+and every other use in that function indexes the step table with it. It is the
+**step index**, running 1..k inside a block and dropping back to 1 on a block
+change.
+
+`PropExpireByStepLifetime` (`FUN_00466640`) ages a prop one tick every time the
+value *changes*:
+
+    if (g_evt_step_index != obj->+0x196) {
+        if (obj->+0x11C < ++obj->+0x197) { ActorDespawn(obj); return; }
+        obj->+0x196 = g_evt_step_index;
+    }
+
+so `obj+0x11C` is a lifetime in **event steps**. The port's transcription of
+that function was faithful; the bug was entirely in what the counter counted.
+`Walker.goToBlock` incremented `G.g_evt_block_counter` once per block
+transition, and nothing incremented it per step — so with blocks averaging 3.99
+steps, every class 0x41 and 0x44 prop lived about four times too long. Driving
+the shipped scripts now shows 3.3× to 6.7× more index changes than block
+changes, per stage.
+
+### One field, because the engine has one global
+
+The fix is not "also bump it on a step advance" — that is two counters that
+have to agree, which is the shape the bug had. `Walker.step` is now an accessor
+over `G.g_evt_step_index`: the walker's cursor and the prop clock are the same
+field, as they are the same global in the engine.
+
+That has a consequence worth writing down: the cursor is global, so two
+`Walker`s alive at once share it. Nothing does — the app has one and the tests
+build them one at a time — but a freshly constructed walker used to start at
+`step = 0` and now inherits whatever the last one left. Two of `seek.test.ts`'s
+gate tests build a walker and call `applyWait` without `reset`, and both failed
+on the first run for exactly that reason. The constructor claims the cursor now.
+That failure is the argument for the accessor rather than against it: with two
+fields the same staleness would have sat in `G` unnoticed, because nothing was
+reading it.
+
+### The rename, and the bundle key with it
+
+`g_evt_block_counter` → `g_evt_step_index`, `PropExpireByBlockLifetime` →
+`PropExpireByStepLifetime`, and the two prop fields — `spawnBlock` →
+`lastStepIndex`, `blocksElapsed` → `stepsElapsed`. The exported bundle key
+`lifetime_evt_blocks` → `lifetime_evt_steps` went with them, which meant
+re-exporting all twelve stage bundles: a stale bundle would leave
+`pl.lifetime_evt_steps` undefined, `?? 0` would make it a zero lifetime, and
+every prop would vanish on its first step change. That is a silent failure the
+type system cannot catch, so the audit is per file and by hand:
+
+    for f in extract/player/stage*/stage*.script.json; do
+      grep -o 'lifetime_evt_[a-z]*' "$f" | sort -u; done
+
+Worth knowing: the first `--all` came back with stages 3 and 4 still carrying
+the old key. A peer session was exporting at the same time, from a process that
+had imported `hod2lib.bundle` before the edit. Renaming a *serialised* key with
+other sessions live needs the audit afterwards, not just the export.
+
+### Not mine, but failing
+
+`verify_port.py` fails at HEAD on `web/src/game/camera/track.ts`: it cites
+`g_camera_free` — `FUN_00402E00`, and no such row is in `functions.tsv`. That
+arrived with 2e6edda and the address is absent from HEAD's TSV too, so it is
+not fallout from this rename. Left for whoever named it; it wants a real name
+in Ghidra, and a `g_`-prefixed one for a function is suspect on its own.

@@ -26,7 +26,7 @@
  *
  * ```c
  * obj->+0x28C = placer->+0x11C;     // the asset slot
- * obj->+0x11C = placer->+0x11C;     // the lifetime, in event blocks
+ * obj->+0x11C = placer->+0x11C;     // the lifetime, in event steps
  * ```
  *
  * One number in the script, read as two different things — and which one it
@@ -49,7 +49,7 @@
  * ## What is ported here, and what is not
  *
  * The constructor is transcribed, and so is the lifetime prologue every one
- * of these objects opens with (`PropExpireByBlockLifetime`, `class41/
+ * of these objects opens with (`PropExpireByStepLifetime`, `class41/
  * lifetime.ts`) — without it a prop the script placed for one block stands
  * there for the rest of the stage.
  *
@@ -197,12 +197,12 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   p.kind = type;
   p.state = BreakableState.Standing;
   p.flags = 0x80000000 | BreakableFlag.Live;
-  p.spawnBlock = G.g_evt_block_counter;
-  p.blocksElapsed = 0;
-  // `obj+0x11C` — the lifetime `PropExpireByBlockLifetime` counts down. The
+  p.lastStepIndex = G.g_evt_step_index;
+  p.stepsElapsed = 0;
+  // `obj+0x11C` — the lifetime `PropExpireByStepLifetime` counts down. The
   // same word the slot came from, and for most types the *only* meaning it
   // has. `+0x199` is not involved: this family measures against `+0x11C`.
-  p.lifetime = pl.lifetime_evt_blocks ?? 0;
+  p.lifetime = pl.lifetime_evt_steps ?? 0;
   // `ActorAlloc` zeroes the object, and no arm the port covers writes
   // `+0x2A0` — which for the lift is its panel's frame counter and so
   // has to start at zero rather than at the group props' -1.

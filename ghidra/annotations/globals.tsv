@@ -14,7 +14,7 @@
 00576c14	g_scene_state_table	the 6x9 scene state machine
 009c7200	g_script_flags	byte array the evt script sets and waits on
 009c88a4	g_script_branch_var	route branch selector, read by EvtAdvanceStepOrRoute
-009a2bb0	g_evt_block_counter	advanced by EvtAdvanceStepOrRoute; props measure lifetime in these
+009a2bb0	g_evt_step_index	The event VM's STEP index -- not a block counter and NOT monotonic. EvtAdvanceStepOrRoute increments it at the top and assigns it 1 in the route branch, so it runs 1..k within a block and drops back to 1 on a block change; FUN_0045EBC0 seeds it with 0, 1 or 5 by game mode. Class 0x41 and 0x44 props age one tick every time it CHANGES (PropExpireByStepLifetime), which makes obj+0x11C a lifetime in STEPS. Blocks average 3.99 steps, so reading it as a block count makes props live about four times too long. A block with one live step goes 1 -> 1 across its transition and does not age a prop at all.
 009c7108	g_evt_ip	the evt interpreter's instruction pointer
 009a2d74	g_nEvtSkipFlag
 009a2d7c	g_nEvtSkippableRegion
@@ -234,9 +234,9 @@
 00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
 00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
 009c9118	g_prop_target_set	Selects which members of a breakable group PlaceBreakableGroup turns into one-shot targets (+0x11C = 1, asset 0x1A0F) while g_GameMode == 2: set 0 takes members 2, 3, 4 and 6; set 1 takes 0, 1 and 5; set 2 takes 0 and 6; set 3 takes the same four as set 0. What the four sets *are* is [open] -- the mode names come from the g_GameMode row, not from anything read here.
-009a2bc0	g_evt_block_index	The event block currently executing, written by EvtAdvanceStepOrRoute and recorded byte-wise into g_route_history. NOT g_evt_block_counter (0x009A2BB0), which is a monotonic count of block transitions and is what prop lifetimes measure.
+009a2bc0	g_evt_block_index	The event block currently executing, written by EvtAdvanceStepOrRoute and recorded byte-wise into g_route_history. NOT g_evt_step_index (0x009A2BB0), which is the step index within the current block and is what prop lifetimes measure.
 009a60c0	g_camera_block_eye	g_camera_blocks + 0x80: the eased eye position of camera block g_camera_index, a vec3 FUN_00402EF0 eases toward the pose the path evaluated. FUN_00403B00 reads it as the eye when it measures the angle to the look-at target at block+0x98 (g_camera_block_target), which is what proves the three words are a position.
-009a1a08	g_scene_index	Which scene is loaded, zero-based -- ColiLoadForScene indexes its file list with it, so scene 1 is stage 2. Class 0x41 and class 0x40 branch on it for the per-stage sound sets and for PropExpireByBlockLifetime's scene-1 sweep.
+009a1a08	g_scene_index	Which scene is loaded, zero-based -- ColiLoadForScene indexes its file list with it, so scene 1 is stage 2. Class 0x41 and class 0x40 branch on it for the per-stage sound sets and for PropExpireByStepLifetime's scene-1 sweep.
 004d5390	g_effect_trees	29 pointers, one per effect id, to the root node of that effect's part tree: {u32 asset slot; s16 bone index; u16 child count; u32 children[]}. Same shape as g_character_skeletons but with no bind offsets -- an effect's translations come per-frame from its motion. Bounded by g_effect_bone_counts at 0x004D5404: 0x74 / 4 = 29 entries, and every tree's node count matches its bone count.
 004d5404	g_effect_bone_counts	s16 per effect id: how many bones its motion frames carry, which is what fixes the frame stride align4(n * 0x12 - 0xF) = n translations of 0xC plus n rotations of 6.
 004d5440	g_effect_interp_mode	u8 per effect id: 0 plays one motion key per frame; 1 and 2 halve the rate and interpolate, 2 additionally slerping through matrices when an axis differs by more than 0x3000.

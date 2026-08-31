@@ -270,7 +270,28 @@ export class Walker {
   options: WalkerOptions;
 
   block = 0;
-  step = 0;
+  /**
+   * The step cursor, and it is `g_evt_step_index` — 0x009A2BB0 — itself.
+   *
+   * The engine has exactly one global here, and both halves of the game read
+   * it: `EvtAdvanceStepOrRoute` uses it to index the step table, and class
+   * 0x41's `PropExpireByStepLifetime` ages a prop every time it *changes*.
+   * The port used to keep two things — this cursor, and a separate monotonic
+   * `g_evt_step_index` bumped once per block — and the props aged against
+   * the wrong one. Blocks average 3.99 steps, so they lived about four times
+   * too long.
+   *
+   * So it is an accessor over `G`, not a field beside it. Two counters that
+   * have to agree is the shape the bug had.
+   *
+   * The consequence is that the cursor is **global**, as it is in the engine:
+   * there is one VM and one of these. Two `Walker`s alive at once share it.
+   * Nothing does that — the app has one, and the tests build them one at a
+   * time — and `seek` opens with `reset`, so a walker takes the cursor back
+   * whenever it is driven from cold.
+   */
+  get step(): number { return G.g_evt_step_index; }
+  set step(v: number) { G.g_evt_step_index = v; }
   opIndex = 0;
 
   region = -1;
@@ -511,6 +532,10 @@ export class Walker {
     this.rng = new Rng(this.options.seed);
     this.liveBlocks = script.blocks.filter((b) => !b.hole);
     this.block = script.entry_block;
+    // The step cursor is `G.g_evt_step_index`, so it outlives the object that
+    // was driving it. Claim it here, or a freshly built walker starts at
+    // whatever step the previous one stopped on.
+    this.step = 0;
   }
 
   // -- addressing --------------------------------------------------------
@@ -583,10 +608,6 @@ export class Walker {
     this.lightDir = { pitchDeg: 0, yawDeg: 0 };
     this.lightSet = false;
     this.checkpointBlock = this.script.entry_block;
-    // `g_evt_block_counter` is the engine's, not the walker's -- it lives in
-    // `G` because the port reads it, and the walker advances it because the
-    // script is what advances it.
-    G.g_evt_block_counter = 0;
     this.flags.clear();
     this.loadedSlots.clear();
     this.spawns = [];
@@ -764,7 +785,7 @@ export class Walker {
    * Only the classes `ActorIsEnemy` counts are retired. A prop, a civilian, a
    * set-piece and a scripted humanoid are all outlived by the gate — none of
    * them moves either counter, so the gate says nothing about them, and they
-   * have their own lifetimes (`g_evt_block_counter` for the props, a camera
+   * have their own lifetimes (`g_evt_step_index` for the props, a camera
    * cue for the set-pieces).
    *
    * [diverges] The engine's counters are the truth and the actor list follows
@@ -1619,10 +1640,6 @@ export class Walker {
       this.host.onBranch(null);
       return false;
     }
-    // `EvtAdvanceStepOrRoute` advances `g_evt_block_counter` on every block
-    // transition. Class 0x41's props measure their lifetime in these rather
-    // than in frames, so it has to be a real counter and not a frame clock.
-    G.g_evt_block_counter++;
     // `FUN_0045EBC0` loads a block's program and zeroes `g_queued_events_pending`
     // with it, so the ring's accounting cannot drift across a block boundary.
     // That is a real bound, not a tidy-up: it is why a miscounted action costs

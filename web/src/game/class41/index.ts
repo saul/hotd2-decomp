@@ -77,7 +77,7 @@ export const g_class41_constructors:
     if (!pl) return;
     G.g_breakable_props.push(PlaceFallingContainer(
       obj.at, 0, pl.item_set ?? 0, -1, pl.set_size ?? 0,
-      pl.lifetime_evt_blocks, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
+      pl.lifetime_evt_steps, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
       f.rng));
   },
   [PropContainerType.KindedProp]: (obj, f) => {
@@ -86,7 +86,7 @@ export const g_class41_constructors:
     if (!pl) return;
     G.g_breakable_props.push(PlaceKindedProp(
       obj.at, pl.kind ?? 0, pl.item_set ?? 0, pl.set_size ?? 0,
-      pl.lifetime_evt_blocks, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
+      pl.lifetime_evt_steps, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
       f.rng));
   },
 };

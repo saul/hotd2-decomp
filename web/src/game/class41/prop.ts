@@ -229,10 +229,10 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
 
   // Lifetime is counted in **evt blocks**, not frames: one tick each time the
   // script moves on. A prop outlives a slow player and not a fast one.
-  if (G.g_evt_block_counter !== p.spawnBlock) {
-    p.blocksElapsed += 1;
-    if (p.blocksElapsed > p.lifetime) { ActorDespawnProp(p); return; }
-    p.spawnBlock = G.g_evt_block_counter;
+  if (G.g_evt_step_index !== p.lastStepIndex) {
+    p.stepsElapsed += 1;
+    if (p.stepsElapsed > p.lifetime) { ActorDespawnProp(p); return; }
+    p.lastStepIndex = G.g_evt_step_index;
   }
 
   const rec = BreakableGroupMembers(p.group)[p.member];

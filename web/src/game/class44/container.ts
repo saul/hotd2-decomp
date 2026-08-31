@@ -62,8 +62,8 @@ export function PlaceFallingContainer(at: number, kind: number,
   p.itemSet = itemSet;
   p.storyItem = storyItem;
   p.lifetime = lifetime;
-  p.spawnBlock = G.g_evt_block_counter;
-  p.blocksElapsed = 0;
+  p.lastStepIndex = G.g_evt_step_index;
+  p.stepsElapsed = 0;
   // Two shots, and unlike the kinded props this really is a shot count.
   p.hp = 2;
   p.slot = FALLING_SLOT_WHOLE;
@@ -163,10 +163,10 @@ export function FallingContainerGroundContact(p: BreakableProp): boolean {
  */
 export function FallingContainerUpdate(p: BreakableProp, rng: Rng,
                                        events?: Events): void {
-  if (G.g_evt_block_counter !== p.spawnBlock) {
-    p.blocksElapsed += 1;
-    if (p.blocksElapsed > p.lifetime) { ActorDespawnProp(p); return; }
-    p.spawnBlock = G.g_evt_block_counter;
+  if (G.g_evt_step_index !== p.lastStepIndex) {
+    p.stepsElapsed += 1;
+    if (p.stepsElapsed > p.lifetime) { ActorDespawnProp(p); return; }
+    p.lastStepIndex = G.g_evt_step_index;
   }
 
   if ((p.flags & BreakableFlag.Hit) !== 0 && p.hp > 0) {

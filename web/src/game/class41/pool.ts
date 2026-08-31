@@ -15,7 +15,7 @@ import { G } from "../globals";
 import { FallingContainerUpdate } from "../class44/container";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
 import { KindedPropUpdate } from "./kinded";
-import { PropExpireByBlockLifetime } from "./lifetime";
+import { PropExpireByStepLifetime } from "./lifetime";
 import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
 import { PropFamily, type BreakableProp } from "./prop_state";
 import { LiftUpdate } from "./lift";
@@ -28,7 +28,7 @@ import { LiftUpdate } from "./lift";
  * behaviour behind it — those objects are placed and drawn and otherwise do
  * nothing, which is declared in `class41/generic.ts` — but it is **not** an
  * empty arm: twenty-five of the routines it stands for open with
- * `PropExpireByBlockLifetime`, and a prop that never expires is a prop that
+ * `PropExpireByStepLifetime`, and a prop that never expires is a prop that
  * stands in the level for the rest of the stage.
  */
 export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
@@ -61,5 +61,5 @@ function GenericPropUpdate(p: BreakableProp): void {
     ActorDespawnProp(p);
     return;
   }
-  PropExpireByBlockLifetime(p);
+  PropExpireByStepLifetime(p);
 }

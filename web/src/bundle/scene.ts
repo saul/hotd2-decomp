@@ -170,7 +170,7 @@ export interface BreakablePlacement {
   /** Which constructor: the group table, one kinded prop, one container. */
   container: "group" | "kinded" | "falling" | "generic";
   /** How many evt blocks it lives for. */
-  lifetime_evt_blocks: number;
+  lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
   group?: number;
   /** `kinded` and `falling` — the object kind in the orientation word. */
@@ -179,7 +179,7 @@ export interface BreakablePlacement {
    * `generic` — the class-0x41 constructor type, and the spawn descriptor's
    * `+0x11C`.
    *
-   * `slot` and `lifetime_evt_blocks` carry the **same word**: the constructor
+   * `slot` and `lifetime_evt_steps` carry the **same word**: the constructor
    * writes it to `obj+0x28C` and to `obj+0x11C` both. Only the types in
    * `GENERIC_DESCRIPTOR_SLOT` draw the slot; for everything else it is a
    * lifetime and `slot` is meaningless. See `game/class41/generic.ts`.

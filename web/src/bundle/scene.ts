@@ -205,3 +205,18 @@ export interface BreakablesJson {
   /** 7.540296 — one stack level, in world units. */
   level_height: number;
 }
+
+/** One class-0x24 set-piece's parameter tail — see `game/class24`. */
+export interface SetPieceParamsJson {
+  selector: number;
+  removePath: number;
+  removeFrame: number;
+  motion: number;
+  hold: number;
+  cuePath: number;
+  cueFrame: number;
+  cue2Path: number;
+  cue2Frame: number;
+  /** `obj+0x11C`: a start frame, or -1 for a random one. Not hit points. */
+  phase: number;
+}

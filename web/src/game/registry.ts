@@ -19,6 +19,7 @@ import { EnemyZombieInit, EnemyZombieUpdate } from "./class30";
 import { EnemyThrowerInit, EnemyThrowerUpdate } from "./class31/thrower";
 import { PropContainerPlacerHandler } from "./class41";
 import { Class44PlacerHandler } from "./class44";
+import { SetPiecePropHandler } from "./class24";
 
 export interface ClassFrame {
   eye: Vec3;
@@ -49,7 +50,33 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
   [SpawnClass.PropContainerPlacer]: PropContainerPlacerHandler,
   // Same shape: a placer that builds and dies. Only selector 16 is ported.
   [SpawnClass.PropPlacer]: Class44PlacerHandler,
+  // A skinned actor choreographed against the camera, not an enemy.
+  [SpawnClass.SetPieceProp]: SetPiecePropHandler,
 };
+
+/**
+ * The classes whose handler increments `g_enemies_alive`.
+ *
+ * The counter is not "how many actors are on screen": each class's own handler
+ * decides whether it is an enemy, and most do not. `spawns.md` proves the set
+ * from the handlers — 0x30 and 0x31 increment it, 0x43 and the 0x11/0x14/0x19/
+ * 0x32 group increment both counters, and 0x51 is a damageable water enemy.
+ * A civilian, a scripted humanoid, the cat and a set-piece do not.
+ *
+ * This matters because `wait_enemies_alive` blocks the script until the count
+ * falls: anything wrongly counted here is a stage that never continues. It
+ * started mattering the moment class 0x24 was ported, because that put 21
+ * animated non-enemies into stage 2's object list.
+ */
+export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
+  SpawnClass.Zombie, SpawnClass.Thrower, SpawnClass.FlyingEnemy,
+  SpawnClass.WaterEnemy,
+]);
+
+/** Whether this actor is one the enemy counters count. */
+export function ActorIsEnemy(cls: number): boolean {
+  return ENEMY_CLASSES.has(cls);
+}
 
 /** The classes with a ported behaviour, for the UI and `verify_port.py`. */
 export const PORTED_CLASSES: SpawnClass[] =

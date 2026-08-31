@@ -64,7 +64,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x25` | `FUN_004840D0` | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
 | `0x10` | `FUN_0048A3E0` | 51 | **Civilian / rescuable victim.** Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. Shooting one costs a **life** and −100 twice; rescuing awards **+400**. | `[proved]` |
 | `0x31` | `0x00449620` | 49 | **Humanoid enemy, four subtypes** (`0x16`–`0x19`). Damageable, increments `g_enemies_alive`. Ricochet SFX by subtype: `BULLET_WOD1_16.WAV` (wood) for `0x17`, `BULLET_MET2_16.WAV` (metal) for `0x19`. | `[proved]` enemy; species `[open]` |
-| `0x24` | `FUN_00482CE0` | 48 | **Scripted non-combat set-piece prop.** Not damageable, awards nothing, plays no sound at all (all 496 `PlaySoundId` xrefs checked). Six state selectors covering idle, freeze/unfreeze cues, gravity drops and a slide. | `[proved]` negatively |
+| `0x24` | `SetPiecePropInit` (`FUN_00482CE0`) | 48 | **Scripted non-combat set-piece prop.** Not damageable, awards nothing, plays no sound at all (all 496 `PlaySoundId` xrefs checked). A skinned actor choreographed against the **camera**: six state selectors covering idle, a delayed motion change, freeze/unfreeze cues, two gravity drops and a slide, and every one of them is removed when the camera reaches a named path at a named frame. `obj+0x11C` is an animation phase seed. **Ported.** | `[proved]` |
 | `0x33` | `FUN_00432FF0` | 44 | **Generic scripted scenery**, eleven sub-handlers on `obj+0x11C`. Selector 1 is a path-driven vehicle (`STAGE5_SE\DRIVE_DEAD2_22.wav`), 8 the bridge collapse (`BRIDGE_CRASH1_22.wav`), 9 a car fire (`CAR_FIRE_22.wav`), 11 the **ending-branch selector** — it picks `ENDL.WAV` or `ENDS.WAV` from the player's score rank. Selector 4 is a *kickable* prop: shootable, but a hit only imparts an impulse. | `[proved]` |
 | `0x51` | `FUN_00438540` | 28 | **Water enemy.** Rises from the water plane, bobs on the surface, claims one of four attack slots and lunges to bite for 1 damage inside 8.0 units. Dies to a single hit, worth 80 points. Splashes play `COMMON\SIBUKI2_16.WAV` / `SIBUKI3` (*shibuki*, "splash"); death plays `BLOOD07_16.WAV`, so it is organic. | `[proved]` |
 | `0x26` | `FUN_0048E290` | 25 | **Vehicle-and-scenery family**, 8 states, no combat role at all. Only state 2 is shootable, and it is indestructible — it sparks and nothing decrements. States 0/1/4 draw a four-wheeled vehicle with hinged doors, a steering wheel, axles that spin only while moving, and a shattering windscreen. | `[proved]` mechanically; *which* vehicle `[open]` |
@@ -85,6 +85,47 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x27`, `0x28` | `004329D0`/`00432610` | 2/6 | **Path-riding vehicles/props**; `0x27` swaps model and lights a flame at path frame `0xBE`. | `[proved]` |
 | `0x2A` | `FUN_00432D40` | 4 | **Dead class** — the whole handler is `JMP ActorKill`. | `[proved]` |
 | `0x20`, `0x45`, `0x46` | — | 36/37/27 | Not reached. `0x20` has a call to the HP scaler at `0x0044964A`, so it is `[likely]` a combat actor. | `[open]` |
+
+### Class 0x24's parameter tail
+
+`SetPiecePropInit` reads everything a set-piece does out of the tail at
+`desc+0x24`, and the six state routines read nothing else:
+
+```
++0x00  u32  the model handle FUN_0045EBB0 resolves
++0x04  s8   character type      -> obj+0x1F4
++0x05  s8   state selector      -> obj+0x130C
++0x06  s16  removal: cam path, or a script-flag index
++0x08  s16  removal: cam frame threshold
++0x0A  s16  motion id           -> obj+0x1B4
++0x0C  s16  hold frames (selector 0 only)
++0x0E  s16  cue path — or a motion id, in the hold state
++0x10  s16  cue frame
++0x12  s16  second cue path (selector 2)
++0x14  s16  second cue frame
+```
+
+The handler is an **Init**: it installs one of six routines as the object's own
+entry point and never runs again.
+
+| Sel | Routine | What it does |
+|---|---|---|
+| 0 | `SetPieceStateIdle` | plays its motion and waits to be removed |
+| 0 | `SetPieceStateHoldThenPlay` | taken when `+0x0C` is non-zero: hold that many frames, then install motion `+0x0E` |
+| 1 | `SetPieceStateFreezeOnCue` | plays, then holds on a camera cue |
+| 2 | `SetPieceStateStartAndStopOnCues` | starts frozen; one cue starts it, another stops it |
+| 3 | `SetPieceStateDropToGround` | starts frozen and falls at 0.027222222 to the ground plane, then plays |
+| 4 | `SetPieceStateSlide` | slides at a fixed (0.646266, 0, 0.613497) for 0x27 frames, then holds 0x19 |
+| 5 | `SetPieceStateDelayedDrift` | waits for motion frame 0x32, then drifts down at 0.0034027777 |
+
+`obj+0x1324` is a **freeze flag**: `SetPiecePropDrawAndTick` advances the motion
+frame only while it is zero. Selectors 3, 4 and 5 freeze again on the clip's
+last frame, `g_motion_play_length[motion] - 1`.
+
+`obj+0x11C` is an **animation phase seed**, not hit points: `-1` draws a random
+start frame, anything else is a literal one — which is how a row of identical
+set-pieces avoids animating in lockstep. No shipped spawn uses `-1`; all 28 the
+six stages reach carry a literal frame.
 
 ## Two name tables, not none
 

@@ -82,6 +82,12 @@ export interface Actor {
   lookAt: Vec3;             // +0x100
   /** `EnemyThrowerUpdate` integrates `vel += acc` and then `pos += vel`. */
   vel: Vec3;                // +0x4C
+  /**
+   * The vertical acceleration accumulator the falling set-pieces integrate:
+   * `accY -= g; vel.y += accY; pos.y += vel.y`. Two dwords past `vel`, and
+   * distinct from it — `vel.y` is the speed, this is what feeds it.
+   */
+  accY: number;             // +0x5C
   hp: number;               // +0x11C
   maxHp: number;            // +0x11E
   /** `-1` when it holds no permit, else the index into `g_attack_permits`. */
@@ -109,6 +115,16 @@ export interface Actor {
    * tests; `rank` is what the ring allowance tests.
    */
   queueRank: number;        // +0x131E
+  /**
+   * `obj+0x1324` — the set-piece **freeze** flag. `SetPiecePropDrawAndTick`
+   * advances the motion frame only while it is zero, so a non-zero value holds
+   * the pose. Selectors 2 and 3 start frozen and a camera cue releases them.
+   */
+  frozen: number;           // +0x1324
+  /** `obj+0x1330` — the set-piece slide's countdown, in frames. */
+  slideTimer: number;       // +0x1330
+  /** `obj+0x1320` — `SetPieceStateHoldThenPlay`'s frame counter. */
+  holdFrames: number;       // +0x1320
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
   /** Frames spent retreating; `ZombieStateBackOff` gives up past 0xF0. */
@@ -250,6 +266,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     yaw: 0,
     lookAt: vec3(),
     vel: vec3(),
+    accY: 0,
     hp: 0,
     maxHp: 0,
     attackPermit: -1,
@@ -260,6 +277,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     attack: -1,
     rank: -1,
     queueRank: 0xe,
+    frozen: 0,
+    slideTimer: 0,
+    holdFrames: 0,
     ringSet: 0,
     backoffFrames: 0,
     allowance: 0,

@@ -10,6 +10,7 @@ import type {
   ThrowHandJson,
 } from "../bundle";
 import type { Actor } from "./actor";
+import type { SetPieceParams } from "./class24";
 import { G } from "./globals";
 
 export const T = {
@@ -21,6 +22,8 @@ export const T = {
    * in the snapshot — it comes back with the bundle.
    */
   breakables: null as BreakablesJson | null,
+  /** Class 0x24's parameter tail, per spawn address. */
+  setPieces: null as Record<string, SetPieceParams> | null,
   types: {} as Record<string, CharacterType>,
   get approach() { return T.chars?.approach ?? null; },
   get tracking() { return T.chars?.tracking ?? null; },
@@ -33,7 +36,8 @@ export const T = {
  * `g_enemy_approach_rings` does at 0x004C4CD0.
  */
 export function SetGameTables(chars: CharactersJson | undefined,
-                              breakables?: BreakablesJson): void {
+                              breakables?: BreakablesJson,
+                              setPieces?: Record<string, SetPieceParams>): void {
   // Ordering hazard, and it cost an afternoon: `ResetGameGlobals` clears the
   // approach rings, so calling it *after* this leaves every ring at zero and
   // every enemy permanently in the outermost band. Say so rather than let it
@@ -45,6 +49,7 @@ export function SetGameTables(chars: CharactersJson | undefined,
   T.chars = chars ?? null;
   T.types = chars?.types ?? {};
   T.breakables = breakables ?? null;
+  T.setPieces = setPieces ?? null;
 
   const rings = chars?.approach?.rings ?? [];
   G.g_enemy_approach_rings = rings.map((r) => r.inner);

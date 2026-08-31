@@ -57,6 +57,7 @@ import type {
 import type { ActiveSpawn } from "../script/walker";
 import type { Actor } from "../game/actor";
 import { ActorSpawn } from "../game/director";
+import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G } from "../game/globals";
 import { Rng } from "../core/rng";
 import type { GameHost } from "../game/host";
@@ -764,7 +765,11 @@ export class CharacterLayer {
 
   /** Live, visible, shootable actors — what the enemy-wait opcodes count. */
   get aliveCount(): number {
-    return this.instances.filter((i) => i.root.visible && !i.a.dead).length;
+    // The combat gate counts enemies, not everything with a skeleton: the cat
+    // and the class-0x24 set-pieces are posed actors too, and counting them
+    // holds `wait_enemies_alive` open for ever.
+    return this.instances.filter(
+      (i) => i.root.visible && !i.a.dead && ActorIsEnemy(i.a.cls)).length;
   }
 
   /** The debug clear. `ActorKillAll` is the port's; this only counts. */

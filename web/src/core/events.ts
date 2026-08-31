@@ -38,6 +38,8 @@ export interface EventMap {
   "prop.broken": { id: number; sound: number };
   /** A stacked prop burst into fragments instead of toppling. */
   "prop.shattered": { id: number; x: number; y: number; z: number };
+  /** A class-0x24 set-piece hit its removal trigger and left. */
+  "setpiece.removed": { at: number };
   /** A toppled prop reached the floor. */
   "prop.settled": { id: number; sound: number };
   /**

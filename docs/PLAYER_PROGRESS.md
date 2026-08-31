@@ -31,6 +31,20 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**Class 0x24, the set-pieces, is ported** (`game/class24/`) — a skinned actor
+choreographed against the camera rather than the clock: all six state routines,
+the freeze/unfreeze cues, both gravity drops and the slide. They render because
+`MOTION_RULES` gained a rule for the class; without one the exporter resolved
+them to a character with no motion and the client skipped anything it cannot
+pose.
+
+That port turned up two counting bugs that had been latent since the pool held
+only enemies. `g_enemies_alive` and `RegisterForCameraTracking` both took
+**every visible actor**, where the engine has each class's own handler decide —
+so 21 set-pieces in stage 2 inflated the count `wait_enemies_alive` blocks on,
+and made the camera swing to look at the world origin, which rendered a black
+screen. Both now ask `ActorIsEnemy`.
+
 **All three container families are ported**: the group placer (class 0x41
 type 0), `KindedPropUpdate` (type 4 — 70 spawns, the most-placed constructor in
 the game, 37 of them hiding an item) and `FallingContainerUpdate` (class 0x44

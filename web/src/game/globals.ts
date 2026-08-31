@@ -157,6 +157,24 @@ export const G = {
   /** Hands out `BreakableProp.id`. State, so ids never collide across a load. */
   g_breakable_next_id: 1,
 
+  // -- the camera the script is playing ----------------------------------
+  /**
+   * `g_active_cam_path` — 0x009A2D78, the `cp_` slot currently playing, and
+   * `g_cam_path_frame` — 0x009A6110, how far into it the camera is.
+   *
+   * Class 0x24's set-pieces are driven entirely by these: every one of its six
+   * states is removed when the camera reaches a named path at a named frame,
+   * and the freeze/unfreeze cues are the same pair again. A set-piece is a
+   * thing that happens *at a point in a camera move*, not at a point in time.
+   */
+  g_active_cam_path: -1,
+  g_cam_path_frame: 0,
+  /**
+   * `g_script_flags` — 0x009C7200. The byte array `set_script_flag` (evt 0x48)
+   * writes and the set-pieces read for their other removal trigger.
+   */
+  g_script_flags: [] as number[],
+
   // -- the ground plane --------------------------------------------------
   /**
    * `g_camera_fixed_eye_y` — 0x009C8E58, also labelled `g_ground_plane_y`.
@@ -238,6 +256,9 @@ export function ResetGameGlobals(): void {
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
   G.g_evt_block_counter = 0;
+  G.g_active_cam_path = -1;
+  G.g_cam_path_frame = 0;
+  G.g_script_flags = [];
   G.g_frame = 0;
 }
 

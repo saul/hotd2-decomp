@@ -313,7 +313,8 @@ class Player {
     // range: they walked into the camera and spun on a facing angle that has
     // no direction at zero distance.
     this.world.attach(this.ctx);
-    SetGameTables(bundle.script.characters, bundle.script.breakables);
+    SetGameTables(bundle.script.characters, bundle.script.breakables,
+                  bundle.script.set_pieces);
     G.g_player_lives = [
       bundle.script.characters?.player?.start_lives ?? 2,
       bundle.script.characters?.player?.start_lives ?? 2,
@@ -1083,6 +1084,12 @@ class Player {
     const w = this.walker;
     if (!w) return;
     G.g_camera_fixed_eye_y = w.fixedEyeY;
+    // Class 0x24's set-pieces are choreographed against the camera: every one
+    // of their removal and freeze triggers is a `cp_` slot plus a frame.
+    G.g_active_cam_path = w.cam ? w.cam.slot : -1;
+    G.g_cam_path_frame = w.cam ? w.cam.frame : 0;
+    G.g_script_flags = [];
+    for (const flag of w.flags) G.g_script_flags[flag] = 1;
     // The spawn opcode places a group the moment it runs, so this is only the
     // safety net for a spawn list restored by a snapshot load rather than by
     // an instruction. It is idempotent — `ActorByAt` refuses a second one.

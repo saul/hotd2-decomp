@@ -67,7 +67,8 @@ __all__ = ["MOTION_RULES", "Character", "Placement", "resolve_for_stage"]
 #:
 #: ``("table", base, stride, at, kind)`` reads the spawn's parameter tail at
 #: *at* as *kind* to get a variant, then takes the ``u16`` at
-#: ``base + variant * stride``. ``("literal", id)`` is a constant.
+#: ``base + variant * stride``. ``("literal", id)`` is a constant, and
+#: ``("param", at, kind)`` is the motion id read straight from the tail.
 #:
 #: Class ``0x30`` -- the zombie, and the single largest population in the game
 #: -- is `FUN_00452DA0`, which opens with the assignment::
@@ -96,6 +97,11 @@ __all__ = ["MOTION_RULES", "Character", "Placement", "resolve_for_stage"]
 #: ``obj+0x1B4 = (char == 0x17) ? 0x1BA : 0x3A8``. Same shape as
 #: `EnemyZombieInit`'s, which is why class 0x30's is a plain literal.
 MOTION_RULES: dict[int, tuple] = {
+    # `SetPiecePropInit` (`FUN_00482CE0`) reads the motion straight out of the
+    # parameter tail -- `obj+0x1B4 = (s16)tail+0x0A` -- with no variant table in
+    # between. Without this rule the 48 set-piece props resolve to a character
+    # with no motion, and the client skips anything it cannot pose.
+    0x24: ("param", 0x0A, "i16"),
     0x30: ("literal", 0x3BC),
     0x31: ("by_char", {0x17: 0x1BA}, 0x3A8),
     0x53: ("table", 0x00589A64, 10, 0x00, "i16"),
@@ -633,6 +639,9 @@ def motion_for(tables, spawn_rec, cls: int) -> int | None:
         return None
     if rule[0] == "literal":
         return rule[1]
+    if rule[0] == "param":
+        mid = spawn_rec.param(rule[1], rule[2])
+        return None if mid is None or mid <= 0 else mid
     if rule[0] == "by_char":
         _, per_char, default = rule
         ct = spawn_rec.param(0x00, "i8")

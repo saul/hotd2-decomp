@@ -269,6 +269,44 @@ def _container_placements(prog) -> list[dict]:
     return out
 
 
+def set_pieces_json(prog) -> dict:
+    """Class 0x24's parameter tail, per spawn.
+
+    `SetPiecePropInit` (`FUN_00482CE0`) reads everything a set-piece does out
+    of the tail at ``desc+0x24``, and the six state routines read nothing else.
+    Keyed by the spawn's script address, which is the identity every layer of
+    this project agrees on.
+
+    ``obj+0x11C`` is carried as ``phase`` and is **not** hit points: `-1` means
+    the Init draws a random start frame for the clip, which is how a row of
+    identical set-pieces avoids animating in lockstep.
+    """
+    if prog is None:
+        return {}
+    raw = prog.evt.raw
+    out: dict[str, dict] = {}
+    for rec in evtlib.spawns(prog.evt):
+        if rec.cls != 0x24:
+            continue
+        t = rec.offset + 0x24
+        if t + 0x16 > len(raw):
+            continue
+        s16 = lambda o: struct.unpack_from("<h", raw, t + o)[0]   # noqa: E731
+        out[str(rec.offset)] = {
+            "selector": struct.unpack_from("<b", raw, t + 0x05)[0],
+            "removePath": s16(0x06),
+            "removeFrame": s16(0x08),
+            "motion": s16(0x0A),
+            "hold": s16(0x0C),
+            "cuePath": s16(0x0E),
+            "cueFrame": s16(0x10),
+            "cue2Path": s16(0x12),
+            "cue2Frame": s16(0x14),
+            "phase": rec.hp,
+        }
+    return out
+
+
 def breakables_json(tables, prog) -> dict:
     """The class-0x41 breakable-prop tables the port needs to place a group.
 
@@ -549,6 +587,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["characters"] = charlib.characters_json(char_defs, char_places, stage.tables)
     script_json["props"] = propslib.props_json(stage.tables, hinges, statics)
     script_json["breakables"] = breakables_json(stage.tables, prog)
+    script_json["set_pieces"] = set_pieces_json(prog)
     (out_dir / f"{name}.script.json").write_text(
         json.dumps(script_json, allow_nan=False))
 

@@ -22,7 +22,7 @@ import { RankEnemiesByDistance } from "./combat/rank";
 import { ActorByAt, G } from "./globals";
 import type { GameHost } from "./host";
 import { ActorAdvanceMotion } from "./motion";
-import { g_class_handlers } from "./registry";
+import { ActorIsEnemy, g_class_handlers } from "./registry";
 import { SpawnClass as SpawnClassValue, type SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 
@@ -137,8 +137,11 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // Once a frame, for everyone: the rank the approach state tests against the
   // ring table's allowance.
   RankEnemiesByDistance(eye);
+  // Only the classes whose handler increments it — not every visible actor.
+  // A set-piece or a civilian in this count is a `wait_enemies_alive` that
+  // never unblocks.
   G.g_enemies_alive = G.g_object_list
-    .filter((o) => !o.dead && o.visible).length;
+    .filter((o) => !o.dead && o.visible && ActorIsEnemy(o.cls)).length;
 
   const f = { eye, dt, rng, host, events };
   for (const obj of G.g_object_list) {

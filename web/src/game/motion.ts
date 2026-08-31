@@ -18,6 +18,11 @@ import { MotionOf } from "./tables";
 
 /** One actor's clocks, `dt` seconds of game time. */
 export function ActorAdvanceMotion(obj: Actor, dt: number): void {
+  // A frozen set-piece holds its pose exactly. In the engine the clock lives
+  // *inside* the class's own draw routine — `SetPiecePropDrawAndTick` writes
+  // `if (obj+0x1324 == 0) obj+0x194++` — so a frozen object simply never
+  // advances, and the freeze is not a thing that has to be undone afterwards.
+  if (obj.frozen !== 0) return;
   if (obj.death) {
     // The death clip plays once and **holds its last frame**: `ZombieStateDeath6`
     // waits for it to finish and hands the body to a routine that is not read,

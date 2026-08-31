@@ -9,7 +9,7 @@ import type { CharactersJson } from "./characters";
 import { SUPPORTED_FORMAT } from "./manifest";
 import type { Manifest, StageEntry } from "./manifest";
 import type { BackdropJson, BreakablesJson, PropsJson, RainJson, RigsJson,
-              SoundJson } from "./scene";
+              SetPieceParamsJson, SoundJson } from "./scene";
 import type { BlockJson, RegionEntryJson } from "./script";
 import type { BgmJson } from "./sound";
 
@@ -32,6 +32,8 @@ export interface ScriptJson {
   characters?: CharactersJson;
   props?: PropsJson;
   breakables?: BreakablesJson;
+  /** Class 0x24's parameter tail, keyed by spawn address. */
+  set_pieces?: Record<string, SetPieceParamsJson>;
   rain?: RainJson;
   warnings: string[];
 }

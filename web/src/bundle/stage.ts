@@ -11,7 +11,7 @@ import type { Manifest, StageEntry } from "./manifest";
 import type { BackdropJson, BreakablesJson, PropsJson, RainJson, RigsJson,
               HumanoidProgramJson, SetPieceParamsJson,
               SoundJson } from "./scene";
-import type { BlockJson, RegionEntryJson } from "./script";
+import type { BlockJson, ColiJson, RegionEntryJson } from "./script";
 import type { BgmJson } from "./sound";
 
 export interface ScriptJson {
@@ -39,6 +39,8 @@ export interface ScriptJson {
   /** Class 0x25's decoded bytecode, keyed by spawn address. */
   humanoids?: Record<string, HumanoidProgramJson>;
   rain?: RainJson;
+  /** The `coli/` blobs this scene loads — see {@link ColiJson}. */
+  coli?: ColiJson;
   warnings: string[];
 }
 

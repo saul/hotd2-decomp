@@ -314,7 +314,8 @@ class Player {
     // no direction at zero distance.
     this.world.attach(this.ctx);
     SetGameTables(bundle.script.characters, bundle.script.breakables,
-                  bundle.script.set_pieces, bundle.script.humanoids);
+                  bundle.script.set_pieces, bundle.script.humanoids,
+                  bundle.script.coli);
     G.g_player_lives = [
       bundle.script.characters?.player?.start_lives ?? 2,
       bundle.script.characters?.player?.start_lives ?? 2,
@@ -350,9 +351,6 @@ class Player {
     this.rain.attach(this.stage.root, bundle.script.rain);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
-    // The port asks the level one question -- is there a wall there -- through
-    // this. See `TerrainProbe` in app/systems.ts.
-    this.game.terrain = this.stage;
 
     this.rails = new RailLayer(this.paths);
     this.scene.add(this.rails.group);

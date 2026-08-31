@@ -16,11 +16,14 @@
  */
 import type { Rng } from "../../core/rng";
 import { ThrowerFlag, type Actor } from "../actor";
-import { QueryGroundHeightAt, type GameHost } from "../host";
-import { G } from "../globals";
-import { bamsDelta, vec3 } from "../vec";
 import {
-  ActorArcBeginToAtSpeed, ActorArcStep, ActorLocalPoint, InstallArcMotionScript,
+  ColiLoaded, ColiTraceSegmentAllSets, QueryGroundHeightAt,
+} from "../coli";
+import { G } from "../globals";
+import { bamsDelta, bamsWrap, vec3, type Vec3 } from "../vec";
+import {
+  ActorArcBeginToAtSpeed, ActorArcStep, ActorLocalPoint,
+  ActorLocalPointPitched, InstallArcMotionScript,
 } from "./arc";
 import {
   CEILING_PROBE_REACH, ThrowerState, WALL_FACING_TOLERANCE, WALL_PROBE_REACH,
@@ -31,6 +34,7 @@ import { ThrowerArcScript } from "./tables";
 const _a = vec3();
 const _b = vec3();
 const _hit = vec3();
+const _c = vec3();
 
 /**
  * `ThrowerFindWallBeside` — `FUN_0044BEF0`. Is there something to climb?
@@ -41,24 +45,23 @@ const _hit = vec3();
  * leap's destination. It refuses outright unless the actor is already facing
  * within 0x2000 — 45° — of the camera, which is what stops it climbing away.
  */
-export function ThrowerFindWallBeside(obj: Actor, side: -1 | 1, rng: Rng,
-                                      host: GameHost): boolean {
+export function ThrowerFindWallBeside(obj: Actor, side: -1 | 1,
+                                      rng: Rng): boolean {
   if (Math.abs(bamsDelta(G.g_camera_yaw_bams, obj.yaw)) > WALL_FACING_TOLERANCE) {
     return false;
   }
   if (obj.flags2 & ThrowerFlag.NoWallLeap) return false;
-  if (!host.traceSegment) return false;
 
-  const ground = QueryGroundHeightAt(host, obj.pos.x, obj.pos.y + WALL_STANDOFF,
-                                     obj.pos.z, _hit);
-  if (ground === null) return false;
+  const ground = QueryGroundHeightAt(obj.pos.x, obj.pos.y + WALL_STANDOFF,
+                                     obj.pos.z);
   const y = ground + rng.int(WALL_PROBE_SPREAD) + WALL_PROBE_RISE;
 
   ActorLocalPoint(obj.pos, obj.yaw, side * WALL_PROBE_REACH, 0, 0, _a);
   _a.y = y;
-  _b.x = obj.pos.x; _b.y = y; _b.z = obj.pos.z;
-  if (!host.traceSegment(_a, _b, _hit)) return false;
-
+  if (!ColiTraceSegmentAllSets(_a.x, y, _a.z, obj.pos.x, y, obj.pos.z)) {
+    return false;
+  }
+  _hit.x = G.g_coli_hit_x; _hit.y = G.g_coli_hit_y; _hit.z = G.g_coli_hit_z;
   // ...and stand off the face of it, in the actor's own frame.
   ActorLocalPoint(_hit, obj.yaw, -side * WALL_STANDOFF, 0, 0, obj.strikeStart);
   return true;
@@ -68,13 +71,13 @@ export function ThrowerFindWallBeside(obj: Actor, side: -1 | 1, rng: Rng,
  * `ThrowerFindCeilingAbove` — `FUN_0044C0B0`. The same question, upward: a
  * trace from 1000 units above the actor **in its own frame** back down to it.
  */
-export function ThrowerFindCeilingAbove(obj: Actor, host: GameHost): boolean {
-  if (!host.traceSegment) return false;
+export function ThrowerFindCeilingAbove(obj: Actor): boolean {
   ActorLocalPoint(obj.pos, obj.yaw, 0, CEILING_PROBE_REACH, 0, _a);
-  if (!host.traceSegment(_a, obj.pos, _hit)) return false;
-  obj.strikeStart.x = _hit.x;
-  obj.strikeStart.y = _hit.y;
-  obj.strikeStart.z = _hit.z;
+  if (!ColiTraceSegmentAllSets(_a.x, _a.y, _a.z,
+                               obj.pos.x, obj.pos.y, obj.pos.z)) return false;
+  obj.strikeStart.x = G.g_coli_hit_x;
+  obj.strikeStart.y = G.g_coli_hit_y;
+  obj.strikeStart.z = G.g_coli_hit_z;
   return true;
 }
 
@@ -113,4 +116,129 @@ export function ThrowerStateLeapToSurface(obj: Actor, dt: number): void {
   obj.flags2 |= s.flag | ThrowerFlag.OffGround;
   obj.state = ThrowerState.StandAndDecide;
   obj.sub = 0;
+}
+
+/**
+ * The cardinal the actor's yaw snaps to, and the two perpendiculars.
+ *
+ * `TraceActorSurfaceContactPoint` and `SelectActorGravityAxis` both begin by
+ * quantising the yaw with four `FUN_0040A040(yaw, C, 0x2000)` tests against
+ * `0x8000`, `0`, `0x4000` and `0xC000` — 45° either side of each cardinal, so
+ * one always matches.
+ */
+function CardinalYaw(yaw: number): number {
+  return (Math.round(bamsWrap(yaw) / 0x4000) & 3) * 0x4000;
+}
+
+/** How far the surface probe reaches, and how far past the actor it ends. */
+const SURFACE_PROBE_REACH = 1000;
+const SURFACE_PROBE_REACH_CEILING = 1500;
+const SURFACE_PROBE_OVERSHOOT = 20;
+/** Within this of the actor, the contact counts; 15 on the ceiling. */
+const SURFACE_CONTACT_RANGE = 10;
+const SURFACE_CONTACT_RANGE_CEILING = 15;
+
+/**
+ * `TraceActorSurfaceContactPoint` — `FUN_0044C370`.
+ *
+ * Where the surface an actor is stuck to actually *is*. The probe is built in
+ * the actor's own frame with a pitch as well as a yaw, so the same routine
+ * answers for the floor, either wall and the ceiling: it traces a thousand
+ * units in along the attach axis (fifteen hundred for the ceiling) to a point
+ * twenty units past the actor on the other side.
+ *
+ * Its miss behaviour is not uniform, and the asymmetry is the engine's:
+ * clinging to a wall and missing returns **false with the output untouched**,
+ * where standing on the ground and missing still answers — with the actor's
+ * own x and z at `g_camera_fixed_eye_y`, the script's ground plane.
+ */
+export function TraceActorSurfaceContactPoint(obj: Actor,
+                                              out: Vec3): boolean {
+  const onCeiling = (obj.flags2 & ThrowerFlag.Ceiling) !== 0;
+  const offGround = (obj.flags2 & ThrowerFlag.OffGround) !== 0;
+  const cardinal = CardinalYaw(obj.yaw);
+
+  let rx = 0x4000;                       // the floor: probe straight down
+  let ry = 0;
+  if (obj.flags2 & ThrowerFlag.WallB) { rx = 0; ry = cardinal - 0x4000; }
+  else if (obj.flags2 & ThrowerFlag.WallA) { rx = 0; ry = cardinal + 0x4000; }
+  if (onCeiling) { rx = 0xc000; ry = 0; }
+
+  const reach = onCeiling ? SURFACE_PROBE_REACH_CEILING : SURFACE_PROBE_REACH;
+  ActorLocalPointPitched(obj.pos, rx, ry, 0, 0, reach, _a);
+  ActorLocalPointPitched(obj.pos, rx, ry + 0x8000, 0, 0,
+                         SURFACE_PROBE_OVERSHOOT, _b);
+
+  const hit = ColiTraceSegmentAllSets(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z);
+  _hit.x = G.g_coli_hit_x; _hit.y = G.g_coli_hit_y; _hit.z = G.g_coli_hit_z;
+  if (!onCeiling && offGround) {
+    if (!hit) return false;
+    out.x = _hit.x; out.y = obj.pos.y; out.z = _hit.z;
+    return true;
+  }
+  if (hit) {
+    out.x = _hit.x; out.y = _hit.y; out.z = _hit.z;
+    return true;
+  }
+  if (onCeiling) return false;
+  out.x = obj.pos.x;
+  out.y = G.g_camera_fixed_eye_y;
+  out.z = obj.pos.z;
+  return true;
+}
+
+/**
+ * `ThrowerSnapToSurface` — `FUN_0044C600`, and the routine it wraps,
+ * `ThrowerFindSurfaceUnderfoot` (`FUN_0044C640`), which decides where the
+ * surface is and what to do when there is not one.
+ *
+ * **This is what holds a wall-crawler on its wall.** `ThrowerPushOutOfWorld`
+ * runs it every frame, but only in states 7 and 8 — so an actor that has
+ * arrived somewhere is kept there while it stands and waits, and the moment
+ * the surface goes out from under it the same call is what sends it falling.
+ *
+ * [diverges] One function here for the engine's two, because the caller is
+ * three lines and adds nothing; and the engine's own contact test measures
+ * against a point it builds from the same probe, where this measures against
+ * the actor. The threshold and both exits are the engine's.
+ */
+export function ThrowerSnapToSurface(obj: Actor): void {
+  // A bundle with no collision at all is a headless fixture, not a level with
+  // no floor: answering "you have fallen off the world" to every actor is not
+  // the engine's behaviour, it is the absence of the data the engine has.
+  if (!ColiLoaded()) return;
+  if (!TraceActorSurfaceContactPoint(obj, _c)) {
+    ThrowerLoseSurface(obj);
+    return;
+  }
+  const range = (obj.flags2 & ThrowerFlag.Ceiling)
+    ? SURFACE_CONTACT_RANGE_CEILING : SURFACE_CONTACT_RANGE;
+  if (Math.hypot(_c.x - obj.pos.x, _c.y - obj.pos.y, _c.z - obj.pos.z) > range) {
+    ThrowerLoseSurface(obj);
+    return;
+  }
+  obj.pos.x = _c.x;
+  obj.pos.y = _c.y;
+  obj.pos.z = _c.z;
+}
+
+/**
+ * Nothing under it any more: an actor on the ground goes to state 11 and falls,
+ * and one still attached re-perches through state 8.
+ */
+function ThrowerLoseSurface(obj: Actor): void {
+  if (!(obj.flags2 & ThrowerFlag.OffGround)) {
+    // The engine exempts states 0x13..0x16 and 0x1A, which ride free of the
+    // ground; none of them can be current here, because the snap runs only in
+    // states 7 and 8.
+    if (obj.state !== ThrowerState.FallToSurface) {
+      obj.sub = 0;
+      obj.state = ThrowerState.FallToSurface;
+    }
+    return;
+  }
+  if (obj.state !== ThrowerState.WaitForPermit) {
+    obj.state = ThrowerState.WaitForPermit;
+    obj.sub = 0;
+  }
 }

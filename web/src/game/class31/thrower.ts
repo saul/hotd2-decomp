@@ -36,7 +36,7 @@ import {
 import {
   ThrowerStateStandAndDecide, ThrowerStateWaitForPermit,
 } from "./stand";
-import { ThrowerStateLeapToSurface } from "./surface";
+import { ThrowerSnapToSurface, ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerOnShot } from "./on_shot";
 import {
   ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
@@ -198,12 +198,26 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
   // The shot drain, in the engine's own place: before the state runs.
   ThrowerOnShot(obj);
 
+  // `ThrowerPushOutOfWorld` (`FUN_00449D40`), the collision hook at
+  // `obj+0x12F0`, runs `ThrowerSnapToSurface` every frame — **but only in
+  // states 7 and 8**. That is what holds a wall-crawler on its wall while it
+  // stands and waits, and what drops it into the fall the moment the wall has
+  // gone out from under it.
+  //
+  // [diverges] The hook's other two jobs, the two sphere push-outs, are not
+  // here: `ColiTestSphereAgainstFullSet` is ported but nothing has read the
+  // engine's own penetration depth, so pushing by it would be invention.
+  if (obj.state === ThrowerState.StandAndDecide
+      || obj.state === ThrowerState.WaitForPermit) {
+    ThrowerSnapToSurface(obj);
+  }
+
   const stance = ThrowerStanceOf(obj) & 3;
   switch (obj.state) {
     case ThrowerState.HitReaction:
       return ThrowerStateHitReaction(obj, eye, rng, host);
     case ThrowerState.FallAndLand:
-      return ThrowerStateFallAndLand(obj, eye, dt, rng, host);
+      return ThrowerStateFallAndLand(obj, eye, dt, rng);
     case ThrowerState.Death:
       return ThrowerStateDeathClip(obj);
     case ThrowerState.Corpse:
@@ -215,7 +229,7 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.Leave:
       return ThrowerLeave(obj);
     case ThrowerState.FallToSurface:
-      return ThrowerStateFallToSurface(obj, dt, host);
+      return ThrowerStateFallToSurface(obj, dt);
     case ThrowerState.GetUp:
       return ThrowerStateGetUp(obj, eye, rng, host);
     case ThrowerState.RideObjectPath:
@@ -235,7 +249,7 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.StrikeOnTheSpot:
       return ThrowerStateStrikeOnTheSpot(obj, dt, rng, host, events);
     case ThrowerState.KnockedTumbling:
-      return ThrowerStateKnockedTumbling(obj, eye, dt, rng, host);
+      return ThrowerStateKnockedTumbling(obj, eye, dt, rng);
     case ThrowerState.BlinkIn:
       return ThrowerStateBlinkInThreeHops(obj, dt, stance);
     case ThrowerState.StandAndDecide:
@@ -248,7 +262,7 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.PounceFar:
       return ThrowerStateLeapDown(obj, dt, rng, host, events);
     case ThrowerState.LeapAside:
-      return ThrowerStateLeapAside(obj, eye, dt, rng, host);
+      return ThrowerStateLeapAside(obj, eye, dt, rng);
     case ThrowerState.LeapToWallA:
     case ThrowerState.LeapToWallB:
     case ThrowerState.LeapToCeiling:

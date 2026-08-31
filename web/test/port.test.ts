@@ -21,7 +21,11 @@ import { CamAdvancePathFrame, CamSetPathTarget }
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { NULL_HOST } from "../src/game/host";
-import { SetGameTables } from "../src/game/tables";
+import { SetGameTables, T } from "../src/game/tables";
+import {
+  ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
+  QueryGroundHeightAt, QueryGroundSurfaceAt,
+} from "../src/game/coli";
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { SpawnClass } from "../src/game/spawn_class";
@@ -1722,15 +1726,34 @@ const CAM_HOST = {
   },
 };
 
-/** ...and the same, with a wall the trace can find. */
-const wallHost = (hit: Vec3 | null) => ({
-  ...CAM_HOST,
-  traceSegment: (_f: Vec3, _t: Vec3, out: Vec3) => {
-    if (!hit) return false;
-    out.x = hit.x; out.y = hit.y; out.z = hit.z;
-    return true;
-  },
-});
+/**
+ * One `coli/` quad, as a blob the port's own collision can be pointed at.
+ *
+ * The wall search used to be answered by a stub host that said "yes, there,"
+ * which tested the state machine and nothing else. This is a real quad in the
+ * real format, so the assertions below go through `ColiSegmentVsMesh`'s plane
+ * test, its dominant-axis projection and its winding test — the same code the
+ * shipped collision runs.
+ */
+function coliQuad(plane: [number, number, number, number], axis: number,
+                  verts: number[], surface = 52) {
+  const xs = [verts[0], verts[3], verts[6], verts[9]];
+  const ys = [verts[1], verts[4], verts[7], verts[10]];
+  const zs = [verts[2], verts[5], verts[8], verts[11]];
+  return {
+    min: [Math.min(...xs), Math.min(...ys), Math.min(...zs)],
+    max: [Math.max(...xs), Math.max(...ys), Math.max(...zs)],
+    n: 1, plane, verts, axis: [axis], surface: [surface],
+  };
+}
+
+/** A wall in the plane `x = 30`, forty units tall and eighty deep. */
+const WALL_BLOB = coliQuad([-1, 0, 0, 30], 0,
+                           [30, -10, 5, 30, -10, 85, 30, 40, 85, 30, 40, 5]);
+/** ...and a floor at `y = 0`, which is where this file's actors stand. */
+const FLOOR_BLOB = coliQuad([0, 1, 0, 0], 1,
+                            [-200, 0, -200, 200, 0, -200, 200, 0, 200,
+                             -200, 0, 200]);
 
 function thrower(state: number, extra: Record<string, unknown> = {}) {
   ResetGameGlobals();
@@ -1785,6 +1808,8 @@ console.log("class 0x31, the climb:");
   // With no collision the search fails, and the engine's answer to that is to
   // refuse the state -- not to leap at nothing. It still pounces, because one
   // slot in ten of band 1's picks is the pounce and that needs no wall.
+  T.coli = null;
+  G.g_coli_full_set = [];
   let climbed = false;
   for (let i = 0; i < 300; i++) {
     GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
@@ -1801,11 +1826,13 @@ console.log("class 0x31, the climb:");
   z.flags2 = 0;
   z.pos = vec3(0, 0, 45);
 
-  // Put a wall 30 units to one side, twelve up.
-  const host = wallHost(vec3(30, 12, 45));
+  // Now give the level a wall in the plane x = 30 — a real quad, tested by the
+  // real intersector — and the same search finds it.
+  T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+  G.g_coli_full_set = ["wall", "floor"];
   let sawLeap = false;
   for (let i = 0; i < 900; i++) {
-    GameUpdate(EYE, 1 / 60, host, rng, events);
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
     if (z.state === ThrowerState.LeapToWallA
         || z.state === ThrowerState.LeapToWallB
         || z.state === ThrowerState.LeapToCeiling) sawLeap = true;
@@ -1998,6 +2025,53 @@ console.log("class 0x31, ThrowerStateWaitForCue:");
   GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
   check("and goes the moment the camera reaches it",
         z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
+}
+
+
+// -- 14. the collision, against real quads -----------------------------------
+
+console.log("coli/, the game's own collision:");
+{
+  ResetGameGlobals();
+  T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+  G.g_coli_full_set = ["wall", "floor"];
+  G.g_camera_fixed_eye_y = -999;          // so a fallback is unmistakable
+
+  // A segment straight at the wall in the plane x = 30.
+  check("a segment across a quad hits it, at the quad's own plane",
+        ColiTraceSegmentAllSets(0, 10, 45, 60, 10, 45)
+        && Math.abs(G.g_coli_hit_x - 30) < 1e-4, `x ${G.g_coli_hit_x}`);
+  check("...and reports the quad's material, which only coli/ carries",
+        G.g_coli_hit_surface === 52, `${G.g_coli_hit_surface}`);
+  // Past the quad's own extent: the winding test refuses it.
+  check("a segment past the quad's edge misses",
+        !ColiTraceSegmentAllSets(0, 100, 45, 60, 100, 45));
+  // Same side of the plane at both ends: no crossing, no hit.
+  check("a segment that never crosses the plane misses",
+        !ColiTraceSegmentAllSets(0, 10, 45, 20, 10, 45));
+
+  check("the ground height comes off the floor quad",
+        Math.abs(QueryGroundHeightAt(10, 20, 10)) < 1e-4,
+        `${QueryGroundHeightAt(10, 20, 10)}`);
+  check("...and falls back to the script's ground plane where there is none",
+        QueryGroundHeightAt(10, 20, 9999) === -999,
+        `${QueryGroundHeightAt(10, 20, 9999)}`);
+  check("the surface query reports the material, 0 for a miss",
+        QueryGroundSurfaceAt(10, 20, 10) === 52
+        && QueryGroundSurfaceAt(10, 20, 9999) === 0);
+
+  // The two sets differ in exactly one way: the sphere test ignores ray-only.
+  G.g_coli_full_set = [];
+  G.g_coli_ray_set = ["wall"];
+  check("a ray-only blob still stops a segment",
+        ColiTraceSegmentAllSets(0, 10, 45, 60, 10, 45));
+  check("...but the sphere test does not see it",
+        !ColiTestSphereAgainstFullSet(28, 10, 45, 5));
+  G.g_coli_full_set = ["wall"];
+  check("and it does once the blob is in the full set",
+        ColiTestSphereAgainstFullSet(28, 10, 45, 5)
+        && Math.abs(G.g_coli_hit_depth - 3) < 1e-4,
+        `depth ${G.g_coli_hit_depth}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

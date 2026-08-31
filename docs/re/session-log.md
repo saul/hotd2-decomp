@@ -5657,3 +5657,69 @@ target point on entry, which means its range test can never change its answer �
 whether something else carries a `zskamere` on surface `0x35` is unread. And
 `PlaySoundId(0x2023A9)` fires on every frame of state 27's solid phase rather
 than once, which is either an audio-layer dedupe or an original bug.
+
+---
+
+## The collision the player runs is now the game's own
+
+Reported plainly: *"it's important we use the `coli/` rather than tracing
+against the rendered mesh."* Right, and for a sharper reason than fidelity —
+the drawn mesh is the wrong object twice over. Only the **resident region** is
+in it, so a wall one region ahead is invisible; and it carries **no surface
+ids**, so every material test came back 0 and `zskamere`'s perch condition
+could never be true.
+
+The fix turned out to make the port smaller, not bigger. `coli/` is a few
+dozen blobs of quads — the whole of stage 2 is **785 quads across 57 blobs**,
+250 KB — and the queries are plain arithmetic over plain arrays. So the
+collision went into the bundle and the trace went into **`game/`**, and the
+`GameHost.traceSegment` / `groundSurfaceAt` seam was deleted rather than
+widened. The port now answers its own collision headlessly: the wall search,
+the ground height and the material all work in `npm run test:port`.
+
+Three things fell out of doing it properly.
+
+**`ThrowerPushOutOfWorld` (`FUN_00449D40`) was a whole missing mechanism.** It
+is class 0x31's collision hook at `obj+0x12F0` — the "collision push-out" this
+project's docs already knew was one of the two implementations of that hook,
+never read. It places the body sphere (`ThrowerPlaceCollisionSphere`, which
+hangs the sphere *below* the origin on a ceiling and above it on the ground),
+pushes out of two sphere tests, and — **only in states 7 and 8** — runs
+`ThrowerSnapToSurface`. That last call is what holds a wall-crawler on its wall
+while it stands and waits, and what drops it into the fall the moment the wall
+goes. Without it a `zstin` that climbed would have stayed wherever it landed
+for ever. Its middle branch is also the answer to an `[open]` from the previous
+pass: the forced entry into state 2 is **the player shoving a wall-crawler off
+its wall**.
+
+**Surface `0x35` is the commonest surface in the game.** The corpus histogram
+gives `53` = `0x35` 874 quads of about 2 500 — more than a third — so
+`zskamere`'s perch test reads as "standing on ordinary ground more than fifteen
+units above the camera" rather than on any special material. `90` = `0x5A`, the
+one that kills whatever lands on it, is seven quads.
+
+**The wall search now succeeds in the shipped level.** `npm run replay -- 2 17 5`
+shows `LeapToWallB` firing at 46 units and the actor's idle changing to the
+wall stance clip — the reported behaviour, against the game's own data, for the
+first time.
+
+### The check that would have caught a silent mistake
+
+`verify_coli.py` re-derives every exported blob through the exporter and
+compares it field by field with the parsed file: **166 blobs, 0 differing**. It
+exists because a transposed vertex triple or an off-by-one stride in the flat
+packing reads as perfectly plausible geometry and silently moves walls — the
+kind of error that shows up as "the zombies climb the wrong thing" three
+sessions later.
+
+`port.test.ts` gained ten assertions against real quads in the real format
+rather than a stub host that said "yes, there": the plane test, the winding
+test, the ground fallback, the material, and the one difference between the two
+sets.
+
+### One thing deliberately not done
+
+`ColiTestSphereAgainstFullSet` is ported, but `ThrowerPushOutOfWorld`'s two
+push-outs are not wired: nothing has read the engine's own penetration depth,
+and pushing an actor by a number I invented would be worse than not pushing it.
+Marked `[open]` in the port.

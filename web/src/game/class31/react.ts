@@ -21,7 +21,8 @@ import { ThrowerPickNextState } from "./router";
 import { ThrowerState } from "./states";
 import { Class31SetOf, ThrowerStanceOf } from "./tables";
 import { ThrowerEnterCorpseState, FALL_GRAVITY, SURFACE_KILL } from "./death";
-import type { Vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
+import { TraceActorSurfaceContactPoint } from "./surface";
 
 /** `g_bone_reaction_group` has sixteen entries, so the bone clamps here. */
 const REACT_BONE_MAX = 15;
@@ -168,13 +169,12 @@ const AXIS_OF: Record<number, "x" | "y" | "z"> = {
  * shooting anything else: a second hit while it is still tumbling hard-cuts
  * the clip and spends one of its two knockback arcs.
  *
- * [diverges] The engine finds the surface to bounce off with
- * `TraceActorSurfaceContactPoint`, which needs the collision sets. Without a
- * host trace the port bounces off the script's ground plane on the floor axis
- * and lets the other five settle on the frame cap, which is the same exit.
+ * The surface it bounces off comes from `TraceActorSurfaceContactPoint`, the
+ * engine's own probe, against the game's own `coli/` quads — so a wall bounce
+ * finds the wall rather than settling on the frame cap.
  */
 export function ThrowerStateKnockedTumbling(obj: Actor, eye: Vec3, dt: number,
-                                            rng: Rng, host: GameHost): void {
+                                            rng: Rng): void {
   const frames = dt * GAME_HZ;
   const stance = ThrowerStanceOf(obj) & 3;
 
@@ -228,7 +228,7 @@ export function ThrowerStateKnockedTumbling(obj: Actor, eye: Vec3, dt: number,
     obj.pos.y += obj.vel.y * frames;
     obj.pos.z += obj.vel.z * frames;
 
-    const contact = ThrowerTumbleContact(obj, axis, host);
+    const contact = ThrowerTumbleContact(obj, axis);
     const past = pull < 0 ? obj.pos[axis] <= contact : obj.pos[axis] >= contact;
     if (!past && obj.sinceLanding < TUMBLE_FRAME_CAP) return;
 
@@ -289,24 +289,24 @@ function ThrowerBeginTumbleArc(obj: Actor, eye: Vec3): void {
   obj.vel.y = 0;
 }
 
-/** Where the surface the tumble bounces off is, on the axis it bounces on. */
-function ThrowerTumbleContact(obj: Actor, axis: "x" | "y" | "z",
-                              host: GameHost): number {
-  if (axis === "y") {
-    const g = host.traceSegment
-      ? QueryGround(obj, host) : null;
-    return g ?? G.g_camera_fixed_eye_y;
+/**
+ * Where the surface the tumble bounces off is, on the axis it bounces on.
+ *
+ * `TraceActorSurfaceContactPoint` answers for all four attachments — the
+ * floor, either wall and the ceiling — so this is the engine's own query and
+ * not a floor special case any more. The `4.5` standoff is the engine's, and
+ * its sign follows the axis the arc kind names.
+ */
+function ThrowerTumbleContact(obj: Actor, axis: "x" | "y" | "z"): number {
+  if (!TraceActorSurfaceContactPoint(obj, _contact)) {
+    return obj.pos[axis] + (obj.vel[axis] >= 0 ? TUMBLE_STANDOFF
+                                               : -TUMBLE_STANDOFF);
   }
-  // A wall bounce needs the collision sets; without them the actor settles on
-  // the frame cap instead, which is the engine's own fallback exit.
-  return obj.pos[axis] + (obj.vel[axis] >= 0 ? TUMBLE_STANDOFF
-                                             : -TUMBLE_STANDOFF);
+  if (axis === "y") return _contact.y;
+  // A wall's contact point stands off by 4.5 the way the actor came at it.
+  const away = obj.arcKind === ThrowerArcKind.WallPlusX
+            || obj.arcKind === ThrowerArcKind.WallPlusZ;
+  return _contact[axis] + (away ? -TUMBLE_STANDOFF : TUMBLE_STANDOFF);
 }
 
-function QueryGround(obj: Actor, host: GameHost): number | null {
-  const out = { x: 0, y: 0, z: 0 };
-  if (!host.traceSegment) return null;
-  return host.traceSegment({ x: obj.pos.x, y: obj.pos.y - 1000, z: obj.pos.z },
-                           { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z }, out)
-    ? out.y : null;
-}
+const _contact = vec3();

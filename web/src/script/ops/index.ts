@@ -7,6 +7,7 @@
  */
 import type { OpImpl } from "../walker";
 import { OPS as camera } from "./camera";
+import { OPS as collision } from "./collision";
 import { OPS as region } from "./region";
 import { OPS as lighting } from "./lighting";
 import { OPS as scene } from "./scene";
@@ -18,6 +19,7 @@ import { OPS as wait } from "./wait";
 
 export const OPS: Record<number, OpImpl> = {
   ...camera,
+  ...collision,
   ...region,
   ...lighting,
   ...scene,

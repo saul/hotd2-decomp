@@ -1,4 +1,37 @@
 /**
+ * One `coli/` blob — the collision the engine itself queries.
+ *
+ * Flat arrays per blob, the way the baked motions are: `plane` is `4n`,
+ * `verts` `12n` (four corners, three floats each), `axis` and `surface` `n`.
+ * `axis` is the **dominant** axis, 0 = X, 1 = Y, 2 = Z, and it names the
+ * component the point-in-quad test drops.
+ *
+ * The AABB is stored max-then-min in the file; the exporter writes it back out
+ * as an honest pair, because reading it the file's way round gives an inverted
+ * box that rejects everything.
+ */
+export interface ColiBlob {
+  min: number[];
+  max: number[];
+  n: number;
+  plane: number[];
+  verts: number[];
+  axis: number[];
+  surface: number[];
+}
+
+/**
+ * A scene's collision. `ColiLoadForScene` loads two files — `coli0.bin` for
+ * every scene plus `coli<scene+1>.bin` — and the event script selects blobs
+ * out of them by pointer, which resolves to the `"<file>:<offset>"` key here.
+ */
+export interface ColiJson {
+  files: string[];
+  blobs: Record<string, ColiBlob>;
+  note?: string;
+}
+
+/**
  * The evt bytecode as the exporter decodes it: blocks, steps,
  * instructions, spawns and regions.
  *
@@ -67,6 +100,14 @@ export interface OpJson {
   roll_enabled?: boolean;
   enabled?: boolean;
   ground_y?: number;
+  /**
+   * evt `0x10` / `0x11`: the `coli/` blobs this instruction selects into the
+   * full or the ray-only set, each resolved to the `{file, offset}` pair that
+   * keys `ColiJson.blobs`.
+   */
+  meshes?: { file?: string; offset?: number; operand: number; address: number;
+             quads?: number; surfaces?: number[] }[];
+  set?: "full" | "ray";
   /** evt `0x2D`: the dialogue group to look up. */
   message_group?: number;
   value?: number;

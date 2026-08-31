@@ -1,5 +1,10 @@
 # `coli/` collision meshes
 
+**Status: SOLVED, and shipped.** The browser player runs *this* collision —
+`game/coli.ts` is a transcription of `ColiSegmentVsMesh` and its callers, and
+the bundle carries every blob of both files a scene loads. See
+[the port section](#what-the-player-does-with-it) at the end.
+
 **Status: SOLVED.** Format recovered from the hit test, validated to 100.00 %
 byte coverage on every loaded file and cross-checked against the event scripts.
 
@@ -208,3 +213,77 @@ spaces really are the same — `--no-coli` skips it.
    mesh from it. Overlaying it on the exported stage in Blender would be the
    visual confirmation, and would show whether the surface palette lines up
    with visible materials.
+
+## What the player does with it
+
+The browser port answers its own collision queries, in `web/src/game/coli.ts`,
+against the quads exported here. It does **not** raycast the drawn geometry —
+an earlier pass did, through a `GameHost` seam, and that was wrong twice over:
+the drawn mesh only ever has the resident region in it, and it carries no
+surface ids at all, so every material test came back 0.
+
+The exporter emits every blob of both files a scene loads, keyed
+`"<file>:<offset>"` — which is what an opcode `0x10` / `0x11` pointer resolves
+to, so a script selection is a lookup rather than an index. Flat arrays per
+blob, the way the baked motions are:
+
+```
+min[3] max[3]      the group AABB, written back as an honest min/max pair
+n                  quads
+plane[4n]          nx, ny, nz, d
+verts[12n]         four corners, three floats each
+axis[n]            0 = X, 1 = Y, 2 = Z — the component the winding test drops
+surface[n]
+```
+
+The whole of stage 2's collision is **785 quads across 57 blobs**, about 250 KB
+of JSON, so there is no spatial index and none is warranted.
+
+`verify_coli.py` re-derives every blob through the exporter and compares it
+field by field with the parsed file — 166 blobs, 0 differing. That check exists
+because a transposed vertex triple or an off-by-one stride reads as plausible
+geometry and silently moves walls.
+
+### The two sets are the whole of the selection
+
+`G.g_coli_full_set` and `G.g_coli_ray_set` hold blob keys, and evt `0x10` and
+`0x11` **replace** them — so a step with an empty operand list clears one.
+Both are snapshot state; the blobs themselves are table data and are not.
+
+The segment test consults both sets; the sphere test consults the full set
+only. That difference is the only thing distinguishing them, and it is what
+makes `0x11` read as scenery that stops a bullet but not a body.
+
+### What asks
+
+| Query | Exe | Who asks |
+|---|---|---|
+| `ColiTraceSegmentAllSets` | `FUN_004053B0` | everything below |
+| `QueryGroundHeightAt` | `FUN_00409D40` | class 0x31's falls; the ground under a wall probe |
+| `QueryGroundSurfaceAt` | `FUN_00409D80` | `zskamere`'s perch test, against surface `0x35` |
+| `ColiTestSphereAgainstFullSet` | `FUN_004057F0` | `ThrowerPushOutOfWorld`'s two push-outs |
+
+`ThrowerFindWallBeside`, `ThrowerFindCeilingAbove` and
+`TraceActorSurfaceContactPoint` are the class-0x31 probes built on top of them
+— the wall search that decides whether a `zstin` may climb, and the per-frame
+snap that holds it on the wall it climbed. Against the real data, **24 of the
+game's 49 class-0x31 spawns have a wall within reach and 14 have a ceiling**;
+`tools/verify_thrower_walls.py` measures it.
+
+### Surface `0x35` is the commonest one in the game
+
+The whole-corpus histogram is worth having in one place, because two gameplay
+tests key on a specific id:
+
+```
+ 0:   5    2: 110    3:   6    5:   4   50:  29   52: 465
+53: 874   55: 276   56: 266   60: 137   61: 321   90:   7   99:  16
+```
+
+`5` and `55` are the wet surfaces — the splash, the ricochet and the canal's
+wet footprint all key on them. **`53` = `0x35` is 874 quads, more than a third
+of the whole game's collision**, which makes `zskamere`'s perch condition read
+as "standing on ordinary ground, more than fifteen units above the camera"
+rather than on any special material. `90` = `0x5A` is the seven quads that
+**kill whatever lands on them** — class 0x31 tests for it by name in its fall
+and its tumble.

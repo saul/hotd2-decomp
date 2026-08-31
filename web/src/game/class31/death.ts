@@ -15,15 +15,13 @@
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { G } from "../globals";
-import { QueryGroundHeightAt, type GameHost } from "../host";
+import { QueryGroundHeightAt } from "../coli";
 import { MotionOf, T } from "../tables";
-import { vec3 } from "../vec";
 import { GAME_HZ } from "../class30/states";
 import { ActorArcVelocity, ActorClipFrame, ActorClipLength } from "./arc";
 import { ThrowerState, ThrowerMotion } from "./states";
 import { ThrowerMotionOf, ThrowerStanceOf } from "./tables";
 
-const _hit = vec3();
 
 /** `obj+0x5C` — gravity, -196 units per second squared at 60 Hz. */
 export const FALL_GRAVITY = -0.05444444;
@@ -112,8 +110,7 @@ export function ThrowerBeginKnockbackArc(obj: Actor, eye: { x: number;
 export function ThrowerStateFallAndLand(obj: Actor, eye: { x: number;
                                                            y: number;
                                                            z: number },
-                                        dt: number, rng: Rng,
-                                        host: GameHost): void {
+                                        dt: number, rng: Rng): void {
   const frames = dt * GAME_HZ;
 
   if (obj.sub === 0) {
@@ -166,11 +163,10 @@ export function ThrowerStateFallAndLand(obj: Actor, eye: { x: number;
     }
     obj.sinceLanding += frames;
     obj.vel.y += obj.accY * frames;
-    const g = QueryGroundHeightAt(host, obj.pos.x,
-                                  obj.pos.y + FALL_PROBE_RISE, obj.pos.z, _hit);
-    // [diverges] With no collision the ground is the script's own plane,
-    // which is what `g_camera_fixed_eye_y` is for.
-    const ground = g ?? G.g_camera_fixed_eye_y;
+    // `QueryGroundHeightAt` falls back to the script's own ground plane when
+    // the trace misses, which is the engine's own answer.
+    const ground = QueryGroundHeightAt(obj.pos.x, obj.pos.y + FALL_PROBE_RISE,
+                                       obj.pos.z);
     if (obj.pos.y + obj.vel.y > ground && obj.sinceLanding < FALL_FRAME_CAP) {
       obj.pos.x += obj.vel.x * frames;
       obj.pos.y += obj.vel.y * frames;
@@ -358,8 +354,7 @@ export function ThrowerLeave(obj: Actor): void {
  * under ten none at all, which is what makes a short drop read as a step and a
  * long one as a landing.
  */
-export function ThrowerStateFallToSurface(obj: Actor, dt: number,
-                                          host: GameHost): void {
+export function ThrowerStateFallToSurface(obj: Actor, dt: number): void {
   const frames = dt * GAME_HZ;
   const is17 = obj.charType === CHAR_ZSKAMERE;
 
@@ -374,9 +369,8 @@ export function ThrowerStateFallToSurface(obj: Actor, dt: number,
   if (obj.sub === 1) {
     obj.accY = FALL_GRAVITY;
     obj.vel.y += obj.accY * frames;
-    const g = QueryGroundHeightAt(host, obj.pos.x,
-                                  obj.pos.y + DROP_PROBE_RISE, obj.pos.z, _hit);
-    const ground = g ?? G.g_camera_fixed_eye_y;
+    const ground = QueryGroundHeightAt(obj.pos.x, obj.pos.y + DROP_PROBE_RISE,
+                                       obj.pos.z);
     if (ground < obj.pos.y + obj.vel.y) {
       obj.pos.y += obj.vel.y * frames;
       return;

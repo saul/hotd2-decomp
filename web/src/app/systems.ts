@@ -25,27 +25,6 @@ export interface HostBackend {
 }
 
 /**
- * `ColiTraceSegmentAllSets`, answered by the level.
- *
- * The engine traces against the `coli/` sets — simplified meshes loaded beside
- * the geometry — and the bundle does not carry them, so this is answered off
- * the drawn geometry instead. That is a real difference and it is declared:
- * the drawn mesh is finer than the collision mesh and only the current region
- * is in it. What it is good enough for is the question class 0x31 asks — *is
- * there a wall sixty units to my left, and how high is it?*
- */
-export interface TerrainProbe {
-  traceSegment(from: Vec3, to: Vec3, out: Vec3): boolean;
-  /**
-   * The surface material under a point. `[open]` for this player: the material
-   * ids live in the `coli/` sets and the bundle carries none of them, so this
-   * always reports 0 — "no special surface", which is the branch every
-   * caller takes on ordinary ground.
-   */
-  groundSurfaceAt(x: number, y: number, z: number): number;
-}
-
-/**
  * The script's slice: the walker's program counter, flags and channels.
  *
  * The walker is stepped by `app/loop.ts` rather than here, because it is the
@@ -76,8 +55,6 @@ export class GameSystem implements System {
   readonly id = "game";
   /** Filled in by the host once the character layer exists. */
   backend: HostBackend | null = null;
-  /** ...and the level, for the one thing the port asks the geometry. */
-  terrain: TerrainProbe | null = null;
 
   /**
    * `g_camera_block_target` for the renderer: where the camera is looking
@@ -128,11 +105,6 @@ export class GameSystem implements System {
       return true;
     },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),
-    // Left undefined when there is no level to ask, which is exactly how the
-    // engine behaves where there is no wall: the surface leaps are refused.
-    traceSegment: (from, to, out) =>
-      this.terrain?.traceSegment(from, to, out) ?? false,
-    groundSurfaceAt: (x, y, z) => this.terrain?.groundSurfaceAt(x, y, z) ?? 0,
   };
 
   attach(): void {

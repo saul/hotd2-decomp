@@ -17,6 +17,7 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
+import { ColiTraceSegmentAllSets } from "../coli";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { vec3, type Vec3 } from "../vec";
@@ -38,7 +39,8 @@ import {
 } from "./tables";
 
 const _dest = vec3();
-const _hit = vec3();
+/** How far above and below the landing point the probe reaches. */
+const ASIDE_PROBE = 1000;
 
 const CHAR_ZSASS = 0x16;
 const CHAR_ZSLMAN = 0x18;
@@ -124,7 +126,7 @@ function asideScript(obj: Actor): string {
  * `g_camera_fixed_eye_y`, which is what a host with no collision always gets.
  */
 export function ThrowerStateLeapAside(obj: Actor, eye: Vec3, dt: number,
-                                      rng: Rng, host: GameHost): void {
+                                      rng: Rng): void {
   if (obj.sub === 0) {
     const side = (obj.flags2 & 0x10) ? 1 : (rng.int(2) === 0 ? 1 : -1);
     // The camera's **yaw only**, not its whole matrix: the point stays level
@@ -133,13 +135,13 @@ export function ThrowerStateLeapAside(obj: Actor, eye: Vec3, dt: number,
     ActorLocalPoint(eye, G.g_camera_yaw_bams, side * ASIDE_SIDEWAYS, 0,
                     ASIDE_AHEAD, _dest);
 
-    const from = { x: _dest.x, y: obj.lookAt.y - 1000, z: _dest.z };
-    const to = { x: _dest.x, y: obj.lookAt.y + 1000, z: _dest.z };
-    if (host.traceSegment?.(from, to, _hit)) {
-      obj.strikeStart.x = _hit.x;
-      obj.strikeStart.y = _hit.y;
-      obj.strikeStart.z = _hit.z;
+    if (ColiTraceSegmentAllSets(_dest.x, obj.lookAt.y - ASIDE_PROBE, _dest.z,
+                                _dest.x, obj.lookAt.y + ASIDE_PROBE, _dest.z)) {
+      obj.strikeStart.x = G.g_coli_hit_x;
+      obj.strikeStart.y = G.g_coli_hit_y;
+      obj.strikeStart.z = G.g_coli_hit_z;
     } else {
+      // The engine's own fallback when the vertical probe finds nothing.
       obj.strikeStart.x = _dest.x;
       obj.strikeStart.y = G.g_camera_fixed_eye_y;
       obj.strikeStart.z = _dest.z;

@@ -321,5 +321,28 @@ export function ActorLocalPoint(p: Vec3, yaw: number, x: number, y: number,
   return out;
 }
 
+/**
+ * `MatrixTranslate(p); MatrixRotateX(rx); MatrixRotateY(ry); TransformPoint(v)`.
+ *
+ * The stack post-multiplies, so the composed transform is `T · Rx · Ry` and
+ * **Y applies first**. Only the surface probes need the pitch; everything else
+ * in the class uses `ActorLocalPoint`.
+ */
+export function ActorLocalPointPitched(p: Vec3, rx: number, ry: number,
+                                       x: number, y: number, z: number,
+                                       out: Vec3): Vec3 {
+  const b = (ry * Math.PI * 2) / 65536;
+  const cb = Math.cos(b), sb = Math.sin(b);
+  const px = x * cb + z * sb;
+  const py = y;
+  const pz = -x * sb + z * cb;
+  const a = (rx * Math.PI * 2) / 65536;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  out.x = p.x + px;
+  out.y = p.y + py * ca - pz * sa;
+  out.z = p.z + py * sa + pz * ca;
+  return out;
+}
+
 /** A scratch destination, so the arc helpers allocate nothing per frame. */
 export const arcScratch: Vec3 = vec3();

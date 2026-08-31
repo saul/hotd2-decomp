@@ -568,12 +568,21 @@ player it takes) and stage 6's eight (a three-hop blinking materialisation)
 were among the ones that previously did nothing at all. Two — 21 and 22 — are
 unreachable from anywhere and are ported because the state table names them.
 
-Where the wall search finds nothing, the actor simply does not climb — which is
-what the engine does when there is no wall. The player answers that search off
-the drawn geometry rather than the `coli/` sets the bundle does not carry, so
-it can only see the resident region; `tools/verify_thrower_walls.py` runs the
-real query against the real collision data and reports **24 of the game's 49
-class-0x31 spawns with a wall in reach, 9 of them in stage 2**.
+**The player runs the game's own collision.** The bundle carries every `coli/`
+blob a scene loads and `game/coli.ts` is a transcription of
+`ColiSegmentVsMesh` and its callers, so the wall search, the ground height and
+the surface material are answered against the quads the engine tests — with the
+material ids that only `coli/` has, and headlessly, with no renderer involved.
+An earlier pass raycast the *drawn* mesh through a host seam, which could only
+ever see the resident region and had to report 0 for every surface; that seam
+is gone. Where the search genuinely finds nothing the actor does not climb,
+which is what the engine does when there is no wall — and against the real data
+**24 of the game's 49 class-0x31 spawns have a wall in reach and 14 a ceiling**,
+9 and 4 of them in stage 2.
+
+Two evt opcodes came with it: `0x10` and `0x11` fill the full and the ray-only
+collision sets, and the difference between them is that the sphere test
+consults only the first.
 
 **Turn-taking, retreat and spacing are in.** After a strike an actor enters
 `ZombieStateBackOff`, plays its back-away clip and retreats while **still
@@ -770,8 +779,8 @@ missed. Meanings and confidence marks live in
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0E` | `set_approach_rings` | spawn | shown | enemy approach pacing; operands decoded as floats |
 | `0F` | `set_approach_steps` | spawn | **done** | **writes `g_enemy_approach_steps`/`_mid`/`_outer`** — how deep in the distance queue an enemy may be and still come at you. Operands are a `-1`-terminated list of **ints**, not floats. Stage 2 sets 2/3/4, 2/2/2 and 1/1/1 in different blocks |
-| `10` | `set_collision_set_full` | collision | shown | collision-set pointers, resolved to coli/ blobs; collision is not simulated |
-| `11` | `set_collision_set_ray_only` | collision | shown | collision-set pointers, resolved to coli/ blobs; collision is not simulated |
+| `10` | `set_collision_set_full` | collision | done | fills `g_coli_full_set`, which the segment **and** the sphere test consult |
+| `11` | `set_collision_set_ray_only` | collision | done | fills `g_coli_ray_set`, which only the segment test consults |
 | `12` | `set_approach_steps_2p_bias` | spawn | shown | enemy approach pacing; operands decoded as floats |
 | `13` | `set_scene_lighting_override` | light | *tracked* | lighting override; values decoded, not applied to the render |
 | `14` | `set_scene_lighting` | light | **done** | gates `15` and `16`, as the game does |

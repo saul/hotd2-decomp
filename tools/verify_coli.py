@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import coli, evt, exetab  # noqa: E402
+from hod2lib import coli, evt, exetab, stage as stagelib  # noqa: E402
 
 OPS_COLLISION_SET = (0x10, 0x11)
 
@@ -130,6 +130,57 @@ def main() -> int:
     print()
     print(f"evt collision-set pointers (opcodes 0x10 / 0x11)   : {total}")
     print(f"  landing exactly on a blob header of their scene  : {hit}/{total}")
+
+    # -- the exported bundle carries the same quads -----------------------
+    #
+    # The player now runs the *game's* collision rather than raycasting the
+    # drawn mesh, so the bundle's copy has to be the file's copy. This
+    # re-derives every blob through the exporter and compares it field by
+    # field with the parsed file, which is what would collapse if the flat
+    # array packing were ever wrong -- a transposed vertex triple or an
+    # off-by-one stride reads as plausible geometry and silently moves walls.
+    from hod2lib import script as scriptlib  # noqa: PLC0415
+    checked = mismatched = 0
+    for stage_no in range(1, 7):
+        st = stagelib.Stage(game, stage=stage_no)
+        try:
+            block = scriptlib.Program(st).coli_json()
+        except Exception as exc:                    # noqa: BLE001
+            problems.append(f"stage {stage_no}: coli_json failed: {exc}")
+            continue
+        sets = st.colisets() or ()
+        for f in sets:
+            for b in f.blobs:
+                quads = b.quads
+                if not quads:
+                    continue
+                key = f"{f.name}:{b.offset}"
+                out = block["blobs"].get(key)
+                if out is None:
+                    problems.append(f"{key}: in the file, missing from the bundle")
+                    continue
+                checked += 1
+                bad = out["n"] != len(quads)
+                for i, q in enumerate(quads):
+                    if bad:
+                        break
+                    pl = out["plane"][i * 4:i * 4 + 4]
+                    if (tuple(pl[:3]) != tuple(q.normal) or pl[3] != q.plane_d
+                            or out["axis"][i] != q.axis
+                            or out["surface"][i] != q.surface):
+                        bad = True
+                        break
+                    vs = out["verts"][i * 12:i * 12 + 12]
+                    flat = [c for v in q.verts for c in v]
+                    if vs != flat:
+                        bad = True
+                if bad:
+                    mismatched += 1
+                    problems.append(f"{key}: the bundle's quads are not the "
+                                    f"file's")
+    print()
+    print(f"exported collision blobs re-derived and compared    : {checked}")
+    print(f"  differing from the parsed file                    : {mismatched}")
 
     if problems:
         print(f"\n{len(problems)} problem(s):")

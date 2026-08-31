@@ -726,8 +726,62 @@ class Program:
                         out.add(o.detail["slot"])
         return sorted(out)
 
+    def coli_json(self) -> dict:
+        """Every `coli/` blob this scene loads, keyed the way the script names it.
+
+        `ColiLoadForScene` (0x0048A3B0) loads two files -- `coli0.bin` for every
+        scene plus `coli<scene+1>.bin` -- and opcodes `0x10` and `0x11` select
+        blobs out of them by **relocated absolute pointer**. Those resolve to a
+        ``{file, offset}`` pair, so that pair is the key here and a selection in
+        the script is a lookup rather than an index.
+
+        Every blob in both files is emitted, not only the ones the shipped
+        script selects: the whole of stage 2's collision is 785 quads, so
+        deciding which are reachable would cost more than it saves and would be
+        a judgement the data does not need.
+
+        Flat arrays per blob, the way the baked motions are, because the client
+        walks them per quad and an array of objects would be four times the
+        size for the same numbers.
+        """
+        sets = self.stage.colisets()
+        if not sets:
+            return {}
+        blobs: dict[str, dict] = {}
+        for f in sets:
+            for b in f.blobs:
+                quads = b.quads
+                if not quads:
+                    continue
+                # One AABB for the blob: the groups' boxes, merged. The engine
+                # rejects per group, and the shipped data has one group each.
+                lo = [min(g.aabb_min[k] for g in b.groups) for k in range(3)]
+                hi = [max(g.aabb_max[k] for g in b.groups) for k in range(3)]
+                plane: list[float] = []
+                verts: list[float] = []
+                for q in quads:
+                    plane += [q.normal[0], q.normal[1], q.normal[2], q.plane_d]
+                    for v in q.verts:
+                        verts += [v[0], v[1], v[2]]
+                blobs[f"{f.name}:{b.offset}"] = {
+                    "min": lo, "max": hi, "n": len(quads),
+                    "plane": plane, "verts": verts,
+                    "axis": [q.axis for q in quads],
+                    "surface": [q.surface for q in quads],
+                }
+        return {
+            "files": [f.name for f in sets],
+            "blobs": blobs,
+            "note": ("Segment and sphere queries run against these. Opcode 0x10 "
+                     "names the full set, which both the ray and the sphere "
+                     "test consult; 0x11 names a ray-only set, [likely] "
+                     "scenery that stops a bullet but not movement. See "
+                     "docs/formats/coli.md."),
+        }
+
     def to_json(self) -> dict:
         return {
+            "coli": self.coli_json(),
             "scene": self.scene,
             "stage": self.stage.stage,
             "game_mode": self.stage.game_mode,

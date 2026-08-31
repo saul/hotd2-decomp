@@ -91,13 +91,13 @@ export function ThrowerTryEnterState(obj: Actor, state: number, rng: Rng,
       return ThrowerTryClaimAttackSlot(obj, host) ? enter() : false;
     case ThrowerState.LeapToWallB:
       if (obj.flags2 & ThrowerFlag.OffGround) return false;
-      return ThrowerFindWallBeside(obj, -1, rng, host) ? enter() : false;
+      return ThrowerFindWallBeside(obj, -1, rng) ? enter() : false;
     case ThrowerState.LeapToWallA:
       if (obj.flags2 & ThrowerFlag.OffGround) return false;
-      return ThrowerFindWallBeside(obj, 1, rng, host) ? enter() : false;
+      return ThrowerFindWallBeside(obj, 1, rng) ? enter() : false;
     case ThrowerState.LeapToCeiling:
       if (obj.flags2 & ThrowerFlag.OffGround) return false;
-      return ThrowerFindCeilingAbove(obj, host) ? enter() : false;
+      return ThrowerFindCeilingAbove(obj) ? enter() : false;
     case ThrowerState.Rearm:
     case ThrowerState.RestoreBothHands:
       if (obj.state !== ThrowerState.StandAndDecide) return false;

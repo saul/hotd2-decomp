@@ -34,7 +34,24 @@ const script = JSON.parse(readFileSync(join(root, `stage${stage}.script.json`), 
 
 const chars = script.characters;
 ResetGameGlobals();
-SetGameTables(chars);
+SetGameTables(chars, undefined, undefined, undefined, script.coli);
+// The script's own opcode 0x10 / 0x11 selections are what make a set active.
+// Replaying one step in isolation never runs them, so every blob the whole
+// stage ever selects goes into the full set: the level as the collision sees
+// it, which is what the wall search wants to ask about.
+{
+  const keys = new Set();
+  for (const b of script.blocks ?? []) {
+    for (const s of b.steps ?? []) {
+      for (const op of s.ops ?? []) {
+        for (const m of op.meshes ?? []) {
+          if (m.file !== undefined) keys.add(`${m.file}:${m.offset}`);
+        }
+      }
+    }
+  }
+  G.g_coli_full_set = [...keys];
+}
 const placements = new Map(chars.placements.map((p) => [p.at, p]));
 
 // The spawns of one step, in the order the debug labels number them.

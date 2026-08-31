@@ -122,7 +122,7 @@
 # --- collision --------------------------------------------------------------
 009c7040	g_collision_meshes_full
 009ca0c0	g_collision_meshes_ray_only
-009cac40	g_coli_hit_surface
+009cac40	g_coli_hit_surface	The material id of whatever the last collision trace hit, 0 for a miss. A side output: every caller reads it straight after its own query rather than being handed it. Class 0x31 latches it into obj+0x1350 where it lands, because 0x5A kills whatever touches it. Across the whole corpus 53 (0x35) is the commonest id at 874 quads, 5 and 55 are the wet surfaces, and 90 (0x5A) is seven quads.
 009cac44	g_coli_hit_quad
 009cac48	g_coli_hit_dist_sq
 009cac50	g_coli_hit_z

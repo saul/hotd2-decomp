@@ -268,6 +268,30 @@ export const G = {
    */
   g_coli_hit_surface: 0,
   /**
+   * `g_coli_hit_x/y/z` — 0x009CAC54 / 0x009CAC58 / 0x009CAC50 — and the
+   * normal. Every collision query reports through these rather than returning
+   * a point: the return value only says whether there *was* a hit.
+   */
+  g_coli_hit_x: 0,
+  g_coli_hit_y: 0,
+  g_coli_hit_z: 0,
+  g_coli_hit_normal: [0, 1, 0] as number[],
+  /** How far inside the surface a sphere test found the centre. */
+  g_coli_hit_depth: 0,
+  /**
+   * The two script-selected collision sets, as `"<file>:<offset>"` blob keys.
+   *
+   * evt `0x10` fills the **full** set, which both the segment and the sphere
+   * test consult; `0x11` fills the **ray-only** set, which only the segment
+   * test does — `[likely]` scenery that stops a bullet but not movement. Each
+   * instruction *replaces* the set it names.
+   *
+   * This is state, not table data: the script changes it as the stage runs, so
+   * it goes in the snapshot and the blobs themselves do not.
+   */
+  g_coli_full_set: [] as string[],
+  g_coli_ray_set: [] as string[],
+  /**
    * `g_active_player` — 0x009C7000, from `FUN_00414F40`: -1 nobody, 0 or 1
    * that player alone, 2 both. `TryClaimAttackSlot` offers a permit
    * accordingly when `g_max_attackers` is 1.
@@ -361,6 +385,9 @@ export function ResetGameGlobals(): void {
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
   G.g_cam_path_frame = 0;
+  G.g_coli_full_set = [];
+  G.g_coli_ray_set = [];
+  G.g_coli_hit_surface = 0;
   G.g_script_flags = [];
   G.g_frame = 0;
 }

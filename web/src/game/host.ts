@@ -44,49 +44,19 @@ export interface GameHost {
   viewSpaceOf(at: number, out: Vec3): boolean;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */
   setBoneSlot(at: number, bone: number, slot: number): void;
-  /**
-   * `ColiTraceSegmentAllSets` — does the level get in the way between these
-   * two points, and where?
-   *
-   * The engine traces against the `coli/` sets, which are simplified meshes
-   * loaded beside the geometry; the bundle does not carry them, so the host
-   * answers from whatever it has. Optional, and a host that cannot answer is a
-   * valid host: `ThrowerFindWallBeside` and `ThrowerFindCeilingAbove` return
-   * false on a miss, and the engine does exactly the same thing when there is
-   * no wall — the actor simply does not take that action.
-   */
-  traceSegment?(from: Vec3, to: Vec3, out: Vec3): boolean;
-  /**
-   * `QueryGroundSurfaceAt` (`FUN_00409D80`). The **material id** under a
-   * point, not its height: a vertical trace from 1000 units below, returning
-   * `g_coli_hit_surface`.
-   *
-   * Only one thing in the port asks — `ThrowerStateWaitForPermit`, deciding
-   * whether a `zskamere` is perched on surface `0x35` — and a host that cannot
-   * answer reports 0, which sends it to the standing strike instead. That is
-   * the same branch it takes on any other surface.
-   */
-  groundSurfaceAt?(x: number, y: number, z: number): number;
 }
 
-/**
- * `QueryGroundHeightAt` — `FUN_00409D40`. A vertical trace from 1000 units
- * below the point up to it, returning the height of what it hit.
+/*
+ * `QueryGroundHeightAt`, `QueryGroundSurfaceAt` and `ColiTraceSegmentAllSets`
+ * used to be host methods, answered off the *drawn* geometry.
  *
- * [diverges] The engine's is a real query against the collision sets and
- * returns 0 for a miss; here a host with no collision has no answer at all, so
- * this reports `null` and every caller falls back to something the engine
- * itself falls back to.
+ * They are not any more. The bundle carries the game's own `coli/` sets, so
+ * `game/coli.ts` answers them itself — which means the wall search, the ground
+ * height and the surface material all work headlessly, against the same quads
+ * the engine tests, with the material ids that only `coli/` has. A seam that
+ * could only see the resident region and had to report 0 for every surface was
+ * the wrong shape for the question.
  */
-export function QueryGroundHeightAt(host: GameHost, x: number, y: number,
-                                    z: number, out: Vec3): number | null {
-  if (!host.traceSegment) return null;
-  return host.traceSegment({ x, y: y - GROUND_PROBE, z }, { x, y, z }, out)
-    ? out.y : null;
-}
-
-/** `FUN_00409D40`'s own reach. */
-const GROUND_PROBE = 1000;
 
 /** A host that knows nothing, for headless runs. */
 export const NULL_HOST: GameHost = {

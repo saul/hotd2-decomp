@@ -7,7 +7,7 @@
  */
 import type {
   AttackJson, BakedMotion, BreakablesJson, CharactersJson, CharacterType,
-  ThrowHandJson,
+  ColiJson, ThrowHandJson,
 } from "../bundle";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
@@ -27,6 +27,12 @@ export const T = {
   setPieces: null as Record<string, SetPieceParams> | null,
   /** Class 0x25's decoded bytecode, per spawn address. */
   humanoids: null as Record<string, HumanoidProgram> | null,
+  /**
+   * The scene's `coli/` blobs. Read-only for the life of the stage, so — like
+   * every other table here — it is not in a snapshot; **which** of them are
+   * active is, and that lives in `G.g_coli_full_set` / `g_coli_ray_set`.
+   */
+  coli: null as ColiJson | null,
   types: {} as Record<string, CharacterType>,
   get approach() { return T.chars?.approach ?? null; },
   get tracking() { return T.chars?.tracking ?? null; },
@@ -38,10 +44,14 @@ export const T = {
  * approach rings into the globals, which is what `DAT_004C4CD0` ->
  * `g_enemy_approach_rings` does at 0x004C4CD0.
  */
+/** Said once: a headless fixture legitimately has no collision. */
+let warnedNoColi = false;
+
 export function SetGameTables(chars: CharactersJson | undefined,
                               breakables?: BreakablesJson,
                               setPieces?: Record<string, SetPieceParams>,
-                              humanoids?: Record<string, HumanoidProgram>): void {
+                              humanoids?: Record<string, HumanoidProgram>,
+                              coli?: ColiJson): void {
   // Ordering hazard, and it cost an afternoon: `ResetGameGlobals` clears the
   // approach rings, so calling it *after* this leaves every ring at zero and
   // every enemy permanently in the outermost band. Say so rather than let it
@@ -55,6 +65,14 @@ export function SetGameTables(chars: CharactersJson | undefined,
   T.breakables = breakables ?? null;
   T.setPieces = setPieces ?? null;
   T.humanoids = humanoids ?? null;
+  T.coli = coli ?? null;
+  // A bundle exported before the collision block existed is a bundle where
+  // every trace misses, and a silent miss looks exactly like an open level.
+  if (chars && !coli?.blobs && !warnedNoColi) {
+    warnedNoColi = true;
+    console.warn("[game] no coli/ collision in this bundle -- re-export it "
+                 + "(tools/export_player.py). Nothing will find a wall.");
+  }
 
   const rings = chars?.approach?.rings ?? [];
   G.g_enemy_approach_rings = rings.map((r) => r.inner);

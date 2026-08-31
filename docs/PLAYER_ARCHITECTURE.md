@@ -190,6 +190,8 @@ game/           the port. no three.js, no DOM.
   combat/         permits.ts rank.ts player.ts
   camera/         path.ts track.ts select_target.ts turn.ts slots.ts
                   — the camera block: `cam_play` seats it, the hook eases it
+  coli.ts         the game's own collision -- the segment and sphere queries,
+                  against the `coli/` quads the bundle carries
   tables.ts       the exported data, typed
 render/         three.js. observes game state, owns nothing.
   breakables.ts   one node per live class-0x41 prop, cloned from a slot

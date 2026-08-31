@@ -13,6 +13,7 @@ import { ThrowerFlag, type Actor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
+import { QueryGroundSurfaceAt } from "../coli";
 import { MotionOf } from "../tables";
 import { bamsDelta, dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "../class30/motion_cue";
@@ -138,8 +139,8 @@ export function ThrowerStateWaitForPermit(obj: Actor, eye: Vec3, rng: Rng,
     obj.flags2 |= ThrowerFlag.UseThrowTable;
     // On surface 0x35, more than fifteen units above the eye, it perches and
     // swings on the spot; otherwise it closes and strikes.
-    const surface = host.groundSurfaceAt?.(obj.pos.x, obj.pos.y + 4.5,
-                                           obj.pos.z) ?? 0;
+    const surface = QueryGroundSurfaceAt(obj.pos.x, obj.pos.y + 4.5,
+                                         obj.pos.z);
     obj.state = surface === PERCH_SURFACE && eye.y + PERCH_HEIGHT < obj.pos.y
       ? ThrowerState.StrikeOnTheSpot : ThrowerState.CloseAndStrike;
     return;

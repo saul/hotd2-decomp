@@ -16,7 +16,6 @@ import {
   Group,
   Mesh,
   Object3D,
-  Raycaster,
   Sphere,
   Vector3,
   type Material,
@@ -171,60 +170,6 @@ export class StageScene {
   }
 
   /** Count of models currently drawn -- the cheap regression metric. */
-  /**
-   * `ColiTraceSegmentAllSets` — `FUN_004097B0` — answered off the drawn mesh.
-   *
-   * The only thing in the port that asks: class 0x31's `ThrowerFindWallBeside`
-   * and `ThrowerFindCeilingAbove`, which want to know whether there is
-   * something to leap onto and where its face is, and
-   * `ThrowerStateLeapAside`, which wants the floor under a point beside the
-   * camera.
-   *
-   * [diverges] The engine traces against the `coli/` sets — separate,
-   * simplified meshes with per-face surface ids — and the bundle carries none
-   * of them, so this uses the geometry that is currently *drawn*. Two
-   * consequences worth naming: the drawn mesh is finer than the collision one,
-   * and only the resident region is in it, so a wall in the next region is
-   * invisible to this. Both make the search fail rather than lie, and a failed
-   * search is what the engine itself does where there is no wall.
-   */
-  traceSegment(from: { x: number; y: number; z: number },
-               to: { x: number; y: number; z: number },
-               out: { x: number; y: number; z: number }): boolean {
-    this._a.set(from.x, from.y, from.z);
-    this._b.set(to.x, to.y, to.z);
-    const len = this._a.distanceTo(this._b);
-    if (len < 1e-4) return false;
-    this._ray.set(this._a, this._b.sub(this._a).divideScalar(len));
-    this._ray.far = len;
-    this._probe.length = 0;
-    for (const m of this.models) if (m.node.visible) this._probe.push(m.node);
-    const hits = this._ray.intersectObjects(this._probe, true);
-    if (!hits.length) return false;
-    out.x = hits[0].point.x;
-    out.y = hits[0].point.y;
-    out.z = hits[0].point.z;
-    return true;
-  }
-
-  /**
-   * `QueryGroundSurfaceAt` — `FUN_00409D80` — the material id under a point.
-   *
-   * `[open]` The ids are per-quad fields of the `coli/` sets and the bundle
-   * carries none of them, so this reports 0 for everything: "ordinary ground".
-   * The one caller, `ThrowerStateWaitForPermit`, then sends a `zskamere` to
-   * its standing strike rather than to its perch, which is the branch it takes
-   * on every surface but `0x35`.
-   */
-  groundSurfaceAt(_x: number, _y: number, _z: number): number {
-    return 0;
-  }
-
-  private readonly _ray = new Raycaster();
-  private readonly _a = new Vector3();
-  private readonly _b = new Vector3();
-  private readonly _probe: Object3D[] = [];
-
   get visibleCount(): number {
     let n = 0;
     for (const m of this.models) if (m.node.visible) n++;

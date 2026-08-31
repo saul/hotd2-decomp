@@ -414,6 +414,14 @@ class ExeTables:
     #: find which corner a toppling prop comes to rest on.
     BREAKABLE_HULL = 0x005937F8
     BREAKABLE_HULL_POINTS = 96
+    #: `g_prop_kind_params` -- 11 records of 0xC, indexed by the class-0x41
+    #: type-4 object kind in `obj+0x6C`.
+    PROP_KIND_PARAMS = 0x00593DB8
+    PROP_KIND_COUNT = 11
+    #: The 48-point hull `FallingContainerUpdate` settles against, passed to
+    #: `FUN_0046B040` as `(&DAT_00594788, 0x30)`.
+    FALLING_HULL = 0x00594788
+    FALLING_HULL_POINTS = 48
     #: Height of one stack level, from the constructor's own multiply.
     BREAKABLE_LEVEL_HEIGHT = 7.540296
 
@@ -618,6 +626,57 @@ class ExeTables:
                     "supports": [r[8], r[9]][:nsup],
                 })
             out.append(members)
+        return out
+
+    def prop_kind_params(self) -> list[dict]:
+        """`g_prop_kind_params` -- per class-0x41 type-4 object kind.
+
+        `PlaceKindedProp` copies three of these into the prop and
+        `KindedPropUpdate` plays the fourth when the prop is destroyed::
+
+            +0x00  s16  effect id          -> obj+0x324
+            +0x02  s16  effect variant     -> obj+0x328
+            +0x04  u32  break sound        -> PlaySoundId
+            +0x08  s16  hit radius         -> obj+0x124
+            +0x0A  s16  shot-test y offset
+
+        The sounds are the same three the group props use -- 0x1A16A9 break,
+        0x1D16A9 crack, 0x2B16A9 -- so the kinds are three materials, not
+        eleven.
+        """
+        base = self._v2r(self.PROP_KIND_PARAMS)
+        if base is None:
+            return []
+        out: list[dict] = []
+        for i in range(self.PROP_KIND_COUNT):
+            o = base + i * 0xC
+            if o + 0xC > len(self.data):
+                break
+            effect, variant = struct.unpack_from("<2h", self.data, o)
+            sound, = struct.unpack_from("<I", self.data, o + 4)
+            radius, y_off = struct.unpack_from("<2h", self.data, o + 8)
+            out.append({"kind": i, "effect": effect, "effect_variant": variant,
+                        "sound": sound, "radius": radius, "y_offset": y_off})
+        return out
+
+    def falling_hull_points(self) -> list[tuple[float, float, float]]:
+        """The 48-point hull `FallingContainerUpdate` comes to rest on.
+
+        Same shape as `breakable_hull_points` -- {s16 x, s16 y, s16 z} scaled
+        by 0.001 -- but a different table, a different count, and **no** height
+        offset: `FUN_0046B040` transforms the raw point where
+        `BreakablePropGroundContact` first subtracts the prop's own 3.770148.
+        """
+        base = self._v2r(self.FALLING_HULL)
+        if base is None:
+            return []
+        out: list[tuple[float, float, float]] = []
+        for i in range(self.FALLING_HULL_POINTS):
+            o = base + i * 6
+            if o + 6 > len(self.data):
+                break
+            x, y, z = struct.unpack_from("<3h", self.data, o)
+            out.append((x * 0.001, y * 0.001, z * 0.001))
         return out
 
     def breakable_hull_points(self) -> list[tuple[float, float, float]]:

@@ -15,6 +15,7 @@ import { TurnLookAtToward } from "./camera/turn";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/prop";
 import { PropContainerType } from "./class41";
+import { Class44Selector } from "./class44";
 import { T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
@@ -47,6 +48,7 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
 export interface ScriptSpawn {
   at: number;
   class: number;
+  pos?: [number, number, number];
 }
 
 /**
@@ -73,16 +75,38 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
   const placements = T.breakables?.placements;
   if (!placements?.length) return;
   for (const s of spawns) {
-    if (s.class !== SpawnClassValue.PropContainerPlacer) continue;
+    const isPlacer = s.class === SpawnClassValue.PropContainerPlacer
+                  || s.class === SpawnClassValue.PropPlacer;
+    if (!isPlacer) continue;
     if (ActorByAt(s.at)) continue;
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
-    // `+0x11C` is the group and `+0x1F4` the lifetime in evt blocks; both are
-    // polymorphic fields and neither means what its name means elsewhere.
+
+    if (pl.container === "falling") {
+      // Class 0x44 dispatches on `+0x11C`, so the selector goes in `hp` — the
+      // same field that is the *group id* for a class-0x41 placer.
+      const a = ActorSpawn(s.at, SpawnClassValue.PropPlacer, 0,
+                           `container kind ${pl.kind}`,
+                           { hp: Class44Selector.FallingContainer });
+      a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
+      a.yaw = pl.yaw ?? 0;
+      a.visible = true;
+      continue;
+    }
+
+    // `+0x130C` selects the class-0x41 constructor; `+0x11C` is the group id
+    // for type 0 and `+0x1F4` the lifetime. All three are polymorphic fields
+    // and none means what its name means elsewhere.
+    const type = pl.container === "kinded"
+      ? PropContainerType.KindedProp : PropContainerType.BreakableGroup;
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
-                         pl.lifetime_evt_blocks, `breakable group ${pl.group}`,
-                         { hp: pl.group,
-                           condition: PropContainerType.BreakableGroup });
+                         pl.lifetime_evt_blocks,
+                         pl.container === "kinded"
+                           ? `prop kind ${pl.kind}`
+                           : `breakable group ${pl.group}`,
+                         { hp: pl.group ?? 0, condition: type });
+    a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
+    a.yaw = pl.yaw ?? 0;
     a.visible = true;
   }
 }

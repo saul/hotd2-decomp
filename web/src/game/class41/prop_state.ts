@@ -9,6 +9,26 @@
  * struct and its own pool, the way `ThrownWeapon` does.
  */
 
+/**
+ * Which update function the object is running.
+ *
+ * All three container families are 0x378 objects in the same pool; what makes
+ * them different is the routine `ActorAlloc` was given, and the engine swaps
+ * that routine at run time — a destroyed ground-level group prop has its first
+ * word overwritten with `BreakableEffectUpdate`. So this field *is* the entry
+ * point, and switching on it is what the engine does by calling through it.
+ */
+export enum PropFamily {
+  /** `BreakablePropUpdate` — class 0x41 type 0, from the group table. */
+  Group = 0,
+  /** `KindedPropUpdate` — class 0x41 type 4. 70 spawns, the most-placed. */
+  Kinded = 1,
+  /** `FallingContainerUpdate` — class 0x44 selector 16. */
+  Falling = 2,
+  /** `BreakableEffectUpdate` — the puff a destroyed group prop becomes. */
+  Effect = 3,
+}
+
 /** `obj+0x192` — where a prop is in its life. */
 export enum BreakableState {
   /** Whole or cracked, standing where it was placed. */
@@ -40,6 +60,13 @@ export enum ItemSet {
   Score2 = 2,
   /** `SpawnGoldenFrog` (`FUN_004722A0`) — character type 0x1C, `frog_gold`. */
   GoldenFrog = 3,
+  /**
+   * A set with **no arm in the switch**: its countdown runs down and nothing
+   * comes out. `KindedPropUpdate` also refuses to despawn a prop carrying it,
+   * so the six stage-2 props in this set stay on screen after they break.
+   * Whether that is deliberate or a data slip is `[open]`.
+   */
+  NoRelease = 4,
   Score5 = 5,
   Score6 = 6,
   Score7 = 7,
@@ -63,6 +90,12 @@ export enum BreakableSlot {
 export interface BreakableProp {
   /** Unique and stable; `g_breakable_members` holds these, not pointers. */
   id: number;
+  /**
+   * The script address of the spawn that placed it, or 0 for a group member.
+   * Only the one-prop-per-spawn families have one, and it is what stops the
+   * bridge placing the same prop twice.
+   */
+  at: number;
   /** `obj+0x194` — which breakable group placed it. */
   group: number;          // +0x194
   /** `obj+0x290` — its index within that group, and its `supports` key. */
@@ -99,6 +132,11 @@ export interface BreakableProp {
   roll: number;           // +0x1D4
   /** `obj+0x1D8` — BAMS added to `pitch` each frame while it falls. */
   spin: number;           // +0x1D8
+  /**
+   * `obj+0x1E0` — BAMS added to `roll` each frame. Only the falling container
+   * tumbles on two axes; the group props keep `roll` at zero.
+   */
+  rollSpin: number;       // +0x1E0
   /** `obj+0x1E4` — the pitch the settle eases toward, +/-0x4000. */
   restPitch: number;      // +0x1E4
   /** `obj+0x1FE` — the bearing the topple is thrown along. */
@@ -119,16 +157,26 @@ export interface BreakableProp {
    * `obj+0x32C` — frames the puff has run, up to `BREAKABLE_EFFECT_FRAMES`.
    */
   effectFrames: number;   // +0x32C
+  /** Which update function this object runs. See {@link PropFamily}. */
+  family: PropFamily;     // *obj
   /**
-   * The object's entry point has been replaced with `BreakableEffectUpdate`.
+   * `obj+0x290` — the object kind, for the two families that have one. It
+   * indexes `g_prop_kind_params` and picks the asset slot.
    *
-   * The engine spells this as `*obj = BreakableEffectUpdate` — an object *is*
-   * its update function, so a destroyed ground-level prop stops being a prop
-   * by having its first word overwritten. A boolean is the same switch with
-   * the function pointer kept out of the snapshot, which may hold no
-   * functions.
+   * Note this is the **same field** the group props use for the member index:
+   * `PlaceBreakableGroup` writes the member there and `PlaceKindedProp` writes
+   * the kind. Check the family before reading it.
    */
-  isEffect: boolean;      // *obj
+  kind: number;           // +0x290
+  /**
+   * `obj+0x2E0` — `FallingContainerUpdate`'s own floor, set to `y - 7.35` at
+   * placement. It settles against this rather than against
+   * `g_camera_fixed_eye_y`, which is why a container hung above the ground
+   * comes to rest in the air.
+   */
+  floorY: number;         // +0x2E0
+  /** `obj+0x328` — the effect variant from `g_prop_kind_params`. */
+  effectVariant: number;  // +0x328
   /**
    * `obj+0x29C` — set to 500.0 the frame a topple comes to rest. Nothing in
    * the routines read so far reads it back; carried because the engine writes
@@ -174,7 +222,7 @@ export const HIT_FLAG_MASK = 0xe;
 export function makeBreakableProp(id: number, group: number,
                                   member: number): BreakableProp {
   return {
-    id, group, member,
+    id, at: 0, group, member,
     itemSet: ItemSet.None,
     storyItem: -1,
     spawnBlock: 0,
@@ -187,6 +235,7 @@ export function makeBreakableProp(id: number, group: number,
     vx: 0, vy: 0, vz: 0,
     pitch: 0, yaw: 0, roll: 0,
     spin: 0,
+    rollSpin: 0,
     restPitch: 0,
     topple: 0,
     contact: 0,
@@ -195,7 +244,10 @@ export function makeBreakableProp(id: number, group: number,
     flags: 0,
     effect: 0,
     effectFrames: 0,
-    isEffect: false,
+    family: PropFamily.Group,
+    kind: 0,
+    floorY: 0,
+    effectVariant: 0,
     settleTimer: 0,
     hitPos: { x: 0, y: 0, z: 0 },
     dead: false,

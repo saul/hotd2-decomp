@@ -29,8 +29,13 @@ import type { BreakablesJson } from "../src/bundle";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
-  PlaceBreakableGroup, PropContainerPlacerUpdate,
+  PlaceBreakableGroup, PropContainerPlacerUpdate, PlaceKindedProp,
+  KindedPropUpdate, PropFamily, KIND_SLOT, SLOT_NONE,
 } from "../src/game/class41";
+import {
+  FallingContainerUpdate, PlaceFallingContainer, FALLING_SLOT_LOOSE,
+  FALLING_SLOT_WHOLE,
+} from "../src/game/class44";
 import { SpawnPropContainers } from "../src/game/director";
 
 let failures = 0;
@@ -655,10 +660,18 @@ const BREAKABLES: BreakablesJson = {
         y_offset: 0, supports: [] },
     ],
   ],
-  hull: [[0, 0, 0]],
+  // Four corners of a box. A single point is not enough: the settle picks the
+  // *lowest corner that is not the current one*, so a one-point hull can never
+  // re-seat and the object sinks to wherever the fall left it.
+  hull: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]],
+  falling_hull: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]],
+  kinds: Array.from({ length: 11 }, (_, k) => ({
+    kind: k, effect: k, effect_variant: 400 + k, sound: 0x1a16a9,
+    radius: 6, y_offset: 6,
+  })),
   placements: [
-    { at: 0xa100, group: 1, lifetime_evt_blocks: 4 },
-    { at: 0xa200, group: 2, lifetime_evt_blocks: 6 },
+    { at: 0xa100, container: "group", group: 1, lifetime_evt_blocks: 4 },
+    { at: 0xa200, container: "group", group: 2, lifetime_evt_blocks: 6 },
   ],
   level_height: 7.540296,
 };
@@ -859,6 +872,158 @@ console.log("\nclass 0x41, the script spawns reach the pool:");
   check("a second pass does not place the group again",
         G.g_breakable_props.length === 3,
         `${G.g_breakable_props.length} props`);
+}
+
+console.log("\nclass 0x41 type 4, the kinded props:");
+{
+  const rng = new Rng(41);
+  const events = propScene(rng);
+  let broken = 0, cracked = 0, released = -1;
+  events.on("prop.broken", () => broken++);
+  events.on("prop.cracked", () => cracked++);
+  events.on("item.released", (e) => { released = e.set; });
+
+  // Kind 2 wears 0x17A9 and dies to one shot; kind 3 wears the group props'
+  // crate and takes two. Both are in item set 2, size 2.
+  const a = PlaceKindedProp(0xd000, 2, ItemSet.Score2, 2, 5,
+                            10, 0, 0, 0x4000, rng);
+  const b = PlaceKindedProp(0xd001, 3, ItemSet.Score2, 2, 5,
+                            20, 0, 0, 0, rng);
+  G.g_breakable_props.push(a, b);
+  check("a kinded prop takes the slot its kind names",
+        a.slot === KIND_SLOT[2] && b.slot === KIND_SLOT[3],
+        `${a.slot.toString(16)} / ${b.slot.toString(16)}`);
+  check("and is its own family", a.family === PropFamily.Kinded);
+  check("the countdown is seeded inside [1, set size]",
+        G.g_item_set_countdown[ItemSet.Score2] >= 1
+        && G.g_item_set_countdown[ItemSet.Score2] <= 2);
+
+  // The crate kind survives its first shot; every other kind does not.
+  BreakablePropTakeShot(b, 0);
+  KindedPropUpdate(b, rng, events);
+  check("the crate kind survives one shot and hides its model",
+        cracked === 1 && broken === 0 && b.slot === SLOT_NONE,
+        `slot ${b.slot.toString(16)}`);
+
+  const before = G.g_player_score[0];
+  BreakablePropTakeShot(a, 0);
+  KindedPropUpdate(a, rng, events);
+  check("a non-crate kind dies to one shot", broken === 1);
+  check("and that shot is worth ten", G.g_player_score[0] === before + 10,
+        `${G.g_player_score[0]} vs ${before}`);
+
+  // The break effect holds the prop for its animation, then it goes.
+  for (let i = 0; i < 200 && !a.dead; i++) KindedPropUpdate(a, rng, events);
+  check("the destroyed prop leaves once its effect has run", a.dead);
+  void released;
+}
+
+console.log("\nclass 0x41 type 4, the whole set pays out exactly once:");
+{
+  for (let seed = 1; seed <= 20; seed++) {
+    const rng = new Rng(seed);
+    const events = propScene(rng);
+    let releases = 0;
+    events.on("item.released", () => releases++);
+    // Four props sharing set 5, declared size 4 -- the shape stage 2 uses.
+    const props = [0, 1, 2, 3].map((i) =>
+      PlaceKindedProp(0xe000 + i, 2, ItemSet.Score5, 4, 5,
+                      i * 10, 0, 0, 0, rng));
+    G.g_breakable_props.push(...props);
+    for (const p of props) {
+      BreakablePropTakeShot(p, 0);
+      KindedPropUpdate(p, rng, events);
+    }
+    check(`seed ${seed}: exactly one item from the set of four`,
+          releases === 1, `${releases} releases`);
+  }
+}
+
+console.log("\nclass 0x44 selector 16, the falling container:");
+{
+  const rng = new Rng(77);
+  const events = propScene(rng);
+  let cracked = 0, broken = 0, settled = 0, released = -1;
+  events.on("prop.cracked", () => cracked++);
+  events.on("prop.broken", () => broken++);
+  events.on("prop.settled", () => settled++);
+  events.on("item.released", (e) => { released = e.set; });
+
+  const c = PlaceFallingContainer(0xf000, 1, ItemSet.ExtraLife, -1, 1, 6,
+                                  0, 20, 0, 0, rng);
+  G.g_breakable_props.push(c);
+  check("it starts whole, two shots, on its own floor",
+        c.slot === FALLING_SLOT_WHOLE && c.hp === 2
+        && Math.abs(c.floorY - (20 - 7.35)) < 1e-6,
+        `floor ${c.floorY}`);
+
+  const before = G.g_player_score[0];
+  BreakablePropTakeShot(c, 0);
+  FallingContainerUpdate(c, rng, events);
+  check("the first shot knocks it loose rather than breaking it",
+        cracked === 1 && broken === 0 && c.hp === 1
+        && c.slot === FALLING_SLOT_LOOSE);
+  check("it pays nothing for that", G.g_player_score[0] === before);
+  check("and it is thrown upward", c.vy > 0, String(c.vy));
+  check("it is falling", c.state === BreakableState.Falling);
+
+  for (let i = 0; i < 600 && c.state === BreakableState.Falling; i++) {
+    FallingContainerUpdate(c, rng, events);
+  }
+  check("it comes to rest rather than falling for ever",
+        c.state === BreakableState.Settled, BreakableState[c.state]);
+  // Settling is what re-seats the origin: the contact frame only records the
+  // corner, and the frames after it put the container back on that corner.
+  for (let i = 0; i < 120; i++) FallingContainerUpdate(c, rng, events);
+  // It comes to rest *on a corner*, so the origin sits above the floor by
+  // however far that corner is from it -- what must not happen is the origin
+  // sinking through, or the container settling onto the camera's ground plane
+  // instead of its own.
+  check("it settles on its own floor rather than through it or the camera's",
+        c.y >= c.floorY - 1e-3 && c.y - c.floorY < 3
+        && c.floorY > G.g_camera_fixed_eye_y,
+        `y ${c.y.toFixed(3)} floor ${c.floorY.toFixed(3)} ` +
+        `camera ${G.g_camera_fixed_eye_y}`);
+  check("landing was announced", settled === 1);
+
+  BreakablePropTakeShot(c, 0);
+  FallingContainerUpdate(c, rng, events);
+  check("the second shot destroys it", broken === 1 && c.dead);
+  check("it pays ten", G.g_player_score[0] === before + 10);
+  check("and the extra life comes out", released === ItemSet.ExtraLife,
+        String(released));
+}
+
+console.log("\nall three families share one item-set countdown:");
+{
+  const rng = new Rng(5);
+  const events = propScene(rng);
+  let releases = 0;
+  events.on("item.released", () => releases++);
+  // One group prop and two kinded props, all in set 2. The group placer
+  // seeds the countdown, then each kinded placement re-seeds it -- which is
+  // the engine's own behaviour and why the classes cannot be ported apart.
+  PlaceBreakableGroup(1, 4, rng);
+  const k = [0, 1].map((i) =>
+    PlaceKindedProp(0xf100 + i, 2, ItemSet.Score2, 2, 5, 50 + i * 10, 0, 0,
+                    0, rng));
+  G.g_breakable_props.push(...k);
+  check("the countdown is one global, not one per class",
+        G.g_item_set_countdown[ItemSet.Score2] >= 1
+        && G.g_item_set_countdown[ItemSet.Score2] <= 2,
+        String(G.g_item_set_countdown[ItemSet.Score2]));
+
+  // Break everything in set 2 across both classes; exactly one item drops.
+  for (const p of [...G.g_breakable_props]) {
+    if (p.itemSet !== ItemSet.Score2) continue;
+    for (let n = 0; n < 3 && !p.dead; n++) {
+      BreakablePropTakeShot(p, 0);
+      if (p.family === PropFamily.Kinded) KindedPropUpdate(p, rng, events);
+      else BreakablePropUpdate(p, rng, events);
+    }
+  }
+  check("breaking the set across two classes pays out once",
+        releases === 1, `${releases} releases`);
 }
 
 console.log("\nclass 0x41, the props are in the save state:");

@@ -24,7 +24,9 @@ import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { ClassFrame, ClassHandler } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { T } from "../tables";
 import { PlaceBreakableGroup } from "./group";
+import { PlaceKindedProp } from "./kinded";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -59,6 +61,15 @@ export const g_class41_constructors:
     // lifetime in evt blocks, not a character type. Both fields are
     // polymorphic and both have already misled this project once.
     PlaceBreakableGroup(obj.hp, obj.charType, f.rng);
+  },
+  [PropContainerType.KindedProp]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "kinded");
+    if (!pl) return;
+    G.g_breakable_props.push(PlaceKindedProp(
+      obj.at, pl.kind ?? 0, pl.item_set ?? 0, pl.set_size ?? 0,
+      pl.lifetime_evt_blocks, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
+      f.rng));
   },
 };
 
@@ -118,6 +129,7 @@ export function ResetPropContainers(): void {
 }
 
 export { PlaceBreakableGroup };
+export * from "./kinded";
 export * from "./prop_state";
 export * from "./prop";
 export * from "./items";

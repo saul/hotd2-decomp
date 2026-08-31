@@ -27,9 +27,11 @@ import {
 } from "./group";
 import { ReleaseHiddenItem } from "./items";
 import {
-  BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK,
+  BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, PropFamily,
   type BreakableProp,
 } from "./prop_state";
+import { KindedPropUpdate } from "./kinded";
+import { FallingContainerUpdate } from "../class44/container";
 
 // -- the constants the routine spells out ----------------------------------
 
@@ -153,7 +155,11 @@ export function BreakablePropGroundContact(p: BreakableProp): boolean {
   // Settling re-derives the origin from the contact point: put the rested
   // corner where it landed, re-apply the rotation, and step back along the
   // hull offset to find where the prop's own origin now is.
-  if (p.state === BreakableState.Settled && touched) {
+  // The engine re-seats on **every** settled frame, not only on the ones that
+  // find a corner below the floor: the `if (state == 2)` around the re-seat is
+  // outside the hull loop. Gating it on a contact leaves the origin wherever
+  // the fall stopped, which is a fraction of a unit into the ground.
+  if (p.state === BreakableState.Settled) {
     const [cx, cy, cz] = hull[p.contact] ?? [0, 0, 0];
     const back = RotateYZX(-cx, -(cy - BREAKABLE_HEIGHT), -cz,
                            p.yaw, p.roll, p.pitch);
@@ -217,7 +223,7 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
                                     events?: Events): void {
   // A destroyed ground-level prop has had its entry point replaced; it runs
   // the puff and nothing else.
-  if (p.isEffect) { BreakableEffectUpdate(p); return; }
+  if (p.family === PropFamily.Effect) { BreakableEffectUpdate(p); return; }
 
   // The prop re-registers itself every frame, so a slot freed by a break is
   // only ever reclaimed by something still alive.
@@ -244,7 +250,11 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
   if ((p.flags & BreakableFlag.Hit) !== 0 && p.group !== 4) {
     if (p.hp === 1) {
       BreakDestroy(p, level, rng, events);
-      if (p.dead || p.isEffect) { p.flags &= ~HIT_FLAG_MASK; return; }
+      // `BreakDestroy` may have swapped the entry point out from under us.
+      if (p.dead || (p.family as PropFamily) === PropFamily.Effect) {
+        p.flags &= ~HIT_FLAG_MASK;
+        return;
+      }
     } else if (p.hp === 2) {
       BreakCrack(p, level, rng, events);
     }
@@ -281,7 +291,7 @@ function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
   }
   // Ground level: the object's entry point is replaced with the puff, and
   // this is where whatever it was hiding comes out.
-  p.isEffect = true;
+  p.family = PropFamily.Effect;
   p.effect = 0;
   p.effectFrames = 0;
   ReleaseHiddenItem(p, events);
@@ -417,10 +427,22 @@ function SettleStep(p: BreakableProp): void {
   }
 }
 
-/** The whole pool, once a frame. `ThrownWeaponUpdate`'s shape. */
+/**
+ * The whole pool, once a frame — and the dispatch that stands in for the
+ * engine calling each object through its own entry point.
+ *
+ * All three families are 0x378 objects in one pool; what differs is the
+ * routine `ActorAlloc` was handed. `PropFamily` is that routine, so switching
+ * on it here is the same call the engine makes indirectly.
+ */
 export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
   for (const p of G.g_breakable_props) {
-    if (!p.dead) BreakablePropUpdate(p, rng, events);
+    if (p.dead) continue;
+    switch (p.family) {
+      case PropFamily.Kinded: KindedPropUpdate(p, rng, events); break;
+      case PropFamily.Falling: FallingContainerUpdate(p, rng, events); break;
+      default: BreakablePropUpdate(p, rng, events); break;
+    }
   }
   if (G.g_breakable_props.some((p) => p.dead)) {
     G.g_breakable_props = G.g_breakable_props.filter((p) => !p.dead);

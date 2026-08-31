@@ -130,12 +130,19 @@ for (const stage of STAGES) {
   if (existsSync(file)) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
     const w = new Walker(script, mkHost());
-    // Stage 2's route runs 0 -> 11 -> ... ; block 3 is never entered, and a
-    // block is always entered at step 1, so step 0 is unreachable too.
+    // A block that does not exist. Note this has to be a *made-up* block now:
+    // the seek steers branches toward its goal, so almost every real block is
+    // reachable — including the ones behind the fork the script does not take
+    // by default, which is where stage 2 keeps the falling containers.
     check("an unreachable address returns false rather than pretending",
-          w.seek(3, 1, 0) === false);
+          w.seek(9999, 1, 0) === false);
     const w2 = new Walker(script, mkHost());
     check("a reachable address returns true", w2.seek(11, 8, 2) === true);
+    // The point of the steering, stated as a check: block 18 is behind block
+    // 14's second fork and `branchChoice` defaults to the first.
+    const w3 = new Walker(script, mkHost());
+    check("an address behind the branch the script does not take by default",
+          w3.seek(18, 4, 7) === true);
   }
 }
 

@@ -34,12 +34,17 @@
 import { Box3, Group, Object3D, Raycaster, Vector3 } from "three";
 import type { Context, System } from "../core/system";
 import { G } from "../game/globals";
-import { BreakableState, type BreakableProp } from "../game/class41/prop_state";
+import {
+  BreakableState, PropFamily, type BreakableProp,
+} from "../game/class41/prop_state";
+import { KIND_SHADOW } from "../game/class41/kinded";
 
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
-/** `AssetDrawSlot(0x10D0)` — the ground shadow every standing prop gets. */
+/** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;
+/** A model slot of `0xFFFF` is the engine's `-1`: draw nothing. */
+const SLOT_NONE = 0xffff;
 /** The shadow sits this far above the floor, and is scaled to this width. */
 const SHADOW_RISE = 0.2;
 const SHADOW_SCALE = 10;
@@ -51,6 +56,20 @@ const SHAKE_SCALE = 0.01;
 
 /** Templates come from the hidden `slots_breakable` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
+
+/**
+ * Which ground shadow a prop casts, if any.
+ *
+ * A group prop always casts the large one. A kinded prop casts one only for
+ * the kinds the engine's `switch` on `obj+0x290` lists, and kinds 4 and 5 get
+ * the smaller `0x10D1`; every other kind casts none. The falling container
+ * casts none — it spends most of its life off the ground.
+ */
+function ShadowSlotFor(p: BreakableProp): number | null {
+  if (p.family === PropFamily.Falling) return null;
+  if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
+  return KIND_SHADOW[p.kind] ?? null;
+}
 
 interface Live {
   /** The prop's model, re-cloned when the asset slot changes. */
@@ -141,14 +160,19 @@ export class BreakableLayer implements System {
         const node = this.clone(p.slot);
         if (!node) continue;
         this.group.add(node);
-        const shadow = this.clone(SHADOW_SLOT);
+        const shadowSlot = ShadowSlotFor(p);
+        const shadow = shadowSlot === null ? null : this.clone(shadowSlot);
         if (shadow) this.group.add(shadow);
         this.nodes.set(p.id, (l = { node, shadow, slot: p.slot }));
       }
 
       // A destroyed prop is a puff the port is counting down; nothing of the
-      // prop itself is drawn once it is `Removed`.
-      const gone = p.state === BreakableState.Removed || p.isEffect;
+      // prop itself is drawn once it is `Removed`, and a kinded prop whose
+      // model has been hidden behind 0xFFFF draws nothing either.
+      const gone = p.state === BreakableState.Removed
+        || p.family === PropFamily.Effect
+        || p.slot === SLOT_NONE
+        || (p.family === PropFamily.Kinded && p.effectFrames > 0);
       l.node.visible = !gone;
 
       const [sx, sz] = this.shake(p);
@@ -156,15 +180,25 @@ export class BreakableLayer implements System {
       // Ry * Rz * Rx, the engine's order — the same composition the hull test
       // in `BreakablePropGroundContact` uses, so the box and the model agree.
       l.node.rotation.set(0, 0, 0);
-      l.node.rotateY(p.yaw * BAMS_TO_RAD);
-      l.node.rotateZ(p.roll * BAMS_TO_RAD);
-      l.node.rotateX(p.pitch * BAMS_TO_RAD);
+      if (p.family === PropFamily.Falling) {
+        // `FallingContainerUpdate` draws Rz * Ry * Rx; the others Ry * Rz * Rx.
+        // The same order its hull test uses, so box and model agree.
+        l.node.rotateZ(p.roll * BAMS_TO_RAD);
+        l.node.rotateY(p.yaw * BAMS_TO_RAD);
+        l.node.rotateX(p.pitch * BAMS_TO_RAD);
+      } else {
+        l.node.rotateY(p.yaw * BAMS_TO_RAD);
+        l.node.rotateZ(p.roll * BAMS_TO_RAD);
+        l.node.rotateX(p.pitch * BAMS_TO_RAD);
+      }
 
       if (l.shadow) {
         // `AssetDrawSlot(0x10D0)` at `g_camera_fixed_eye_y + 0.2`, flat, and
         // only while the prop is whole enough to cast one.
         l.shadow.visible = !gone;
-        l.shadow.position.set(p.x, G.g_camera_fixed_eye_y + SHADOW_RISE, p.z);
+        const floor = p.family === PropFamily.Falling
+          ? p.floorY : G.g_camera_fixed_eye_y;
+        l.shadow.position.set(p.x, floor + SHADOW_RISE, p.z);
         l.shadow.scale.set(SHADOW_SCALE, 1, SHADOW_SCALE);
       }
     }
@@ -203,7 +237,8 @@ export class BreakableLayer implements System {
     if (!this.enabled) return null;
     let best: { prop: BreakableProp; point: Vector3; d: number } | null = null;
     for (const p of G.g_breakable_props) {
-      if (p.dead || p.state === BreakableState.Removed || p.isEffect) continue;
+      if (p.dead || p.state === BreakableState.Removed
+          || p.family === PropFamily.Effect) continue;
       const l = this.nodes.get(p.id);
       if (!l || !l.node.visible) continue;
       this._box.setFromObject(l.node);

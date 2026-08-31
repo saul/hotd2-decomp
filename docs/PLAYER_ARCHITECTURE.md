@@ -180,7 +180,8 @@ game/           the port. no three.js, no DOM.
   actor.ts        the object struct, offsets in comments
   class30/        approach.ts attack_run.ts strike.ts backoff.ts
   class31/        thrower.ts projectile.ts
-  class41/        group.ts prop.ts items.ts — the breakable containers
+  class41/        group.ts prop.ts kinded.ts items.ts — the containers
+  class44/        container.ts — the one that is knocked loose and falls
   combat/         permits.ts rank.ts player.ts
   camera/         select_target.ts turn.ts
   tables.ts       the exported data, typed

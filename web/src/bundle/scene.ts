@@ -146,12 +146,44 @@ export interface BreakableMember {
   supports: number[];
 }
 
+/**
+ * One container spawn, decoded. Three families share this shape because they
+ * share `g_item_set_countdown` — see `_container_placements` in the exporter
+ * for which descriptor field each one reads.
+ */
 export interface BreakablePlacement {
-  /** The script address of the class-0x41 spawn that places this group. */
+  /** The script address of the spawn that places it. */
   at: number;
-  group: number;
-  /** Descriptor `+0x24` — how many evt blocks the props live for. */
+  /** Which constructor: the group table, one kinded prop, one container. */
+  container: "group" | "kinded" | "falling";
+  /** How many evt blocks it lives for. */
   lifetime_evt_blocks: number;
+  /** `group` only — the row of `g_breakable_group_ptrs` to build. */
+  group?: number;
+  /** `kinded` and `falling` — the object kind in the orientation word. */
+  kind?: number;
+  /** The item set it belongs to, 0 for none. */
+  item_set?: number;
+  /** How many props share that set; the countdown is seeded from it. */
+  set_size?: number;
+  /** `falling` only — the `g_GameMode == 1` drop, `-1` for none. */
+  story_item?: number;
+  pos?: [number, number, number];
+  /** BAMS. */
+  yaw?: number;
+}
+
+/** One row of `g_prop_kind_params`, per class-0x41 type-4 object kind. */
+export interface PropKindParams {
+  kind: number;
+  effect: number;
+  effect_variant: number;
+  /** `PlaySoundId` id played when the prop is destroyed. */
+  sound: number;
+  /** `obj+0x124` — the hit radius. */
+  radius: number;
+  /** How far above the prop's origin the shot-test point sits. */
+  y_offset: number;
 }
 
 export interface BreakablesJson {
@@ -159,6 +191,10 @@ export interface BreakablesJson {
   groups: BreakableMember[][];
   /** `g_breakable_hull_points` — 96 `[x, y, z]`, already scaled by 0.001. */
   hull: [number, number, number][];
+  /** The 48-point hull `FallingContainerUpdate` settles against. */
+  falling_hull: [number, number, number][];
+  /** `g_prop_kind_params`, indexed by kind. */
+  kinds: PropKindParams[];
   placements: BreakablePlacement[];
   /** 7.540296 — one stack level, in world units. */
   level_height: number;

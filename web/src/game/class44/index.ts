@@ -1,0 +1,97 @@
+/**
+ * Class 0x44 — the prop placer, and the falling container behind selector 16.
+ *
+ * Same shape as class 0x41: `PropPlacerDispatch44` (`FUN_00472B10`) is two
+ * instructions —
+ *
+ * ```c
+ * (*g_class44_subtypes[obj->+0x11C])(obj);
+ * ActorKill();
+ * ```
+ *
+ * — so the placer is a transient stub that never survives its first frame. The
+ * one difference from 0x41 is the field it dispatches on: `+0x11C`, the word
+ * that is hit points for a combat actor and the *group id* for a class-0x41
+ * placer. Three classes, three meanings, one offset.
+ *
+ * Eighteen builders, of which the shipped stages reach all eighteen. Only
+ * selector 16 is read and ported: it is the one that hands out items, and it
+ * is the only one that shares `g_item_set_countdown` with class 0x41. The rest
+ * keep their slot and do nothing, for the same reason class 0x41's other 78
+ * do — an unimplemented selector running the wrong builder is the bug that had
+ * the cat walking at the player.
+ */
+import type { Actor } from "../actor";
+import { G } from "../globals";
+import type { ClassFrame, ClassHandler } from "../registry";
+import { T } from "../tables";
+import { PlaceFallingContainer } from "./container";
+
+/**
+ * `obj+0x11C` for this class — the builder index.
+ *
+ * Only the members with a port are named. A selector the stages place but that
+ * has not been read is a bare number on purpose: naming it would claim a
+ * reading that has not happened.
+ */
+export enum Class44Selector {
+  /** `PlaceFallingContainer` (`FUN_00473940`) — the item container. */
+  FallingContainer = 16,
+}
+
+/** What one class-0x44 builder does. `undefined` where none is ported. */
+export type Class44Builder = (obj: Actor, f: ClassFrame) => void;
+
+/**
+ * `g_class44_subtypes` — 0x00595AB8, 18 entries indexed by `obj+0x11C`.
+ *
+ * Sparse for the same reason `g_class_handlers` is: a selector with no entry
+ * does nothing, and that is structural rather than an `if`.
+ *
+ * Filled in **here**, not from `container.ts`. Registering from the other side
+ * makes `index -> container -> index` a cycle, and `export *` evaluates the
+ * dependency first — so the builder would run its registration against a
+ * `const` that has not been initialised yet. That is the same cycle that left
+ * `g_class_handlers[0x41]` empty and cost an hour; once is enough.
+ */
+export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
+  [Class44Selector.FallingContainer]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "falling");
+    if (!pl) return;
+    G.g_breakable_props.push(PlaceFallingContainer(
+      obj.at, pl.kind ?? 0, pl.item_set ?? 0, pl.story_item ?? -1,
+      pl.set_size ?? 0, pl.lifetime_evt_blocks,
+      obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw, f.rng));
+  },
+};
+
+/**
+ * `PropPlacerDispatch44` — `FUN_00472B10`. Dispatch, then die.
+ *
+ * The `ActorKill` is the line after the call and is not conditional, so a
+ * selector with no builder still disappears on its first frame rather than
+ * sitting in the level.
+ */
+export function PropPlacerDispatch44(obj: Actor, f: ClassFrame): void {
+  g_class44_subtypes[obj.hp]?.(obj, f);
+  ActorKillClass44Placer(obj);
+}
+
+/** The placer's end, as `ActorKill` (`FUN_004A7040`) delivers it. */
+export function ActorKillClass44Placer(obj: Actor): void {
+  obj.dead = true;
+  obj.visible = false;
+}
+
+/** There is no `Init` in the engine; this only marks the actor live. */
+export function Class44PlacerInit(obj: Actor): void {
+  obj.visible = true;
+}
+
+export const Class44PlacerHandler: ClassHandler = {
+  init: Class44PlacerInit,
+  update: PropPlacerDispatch44,
+};
+
+export * from "./container";

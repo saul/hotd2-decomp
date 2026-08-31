@@ -567,8 +567,25 @@ export class Walker {
     let executed = 0;
     const arrived = () =>
       this.block === block && this.step === step && this.opIndex >= opIndex;
+    let steered = -1;
     while (executed++ < maxOps) {
       if (arrived() || this.finished) break;
+      // Point the *next* block transition at the goal.
+      //
+      // A branch route only pauses when it has more than one live target;
+      // otherwise `advanceStepOrRoute` takes `next[branchChoice]` silently,
+      // and `branchChoice` is 0 — so without this every seek follows the first
+      // fork and everything on the other one is unreachable. Stage 2 puts
+      // blocks 18, 21 and 22 behind block 14's second fork, and the falling
+      // containers with them.
+      if (this.block !== steered) {
+        steered = this.block;
+        const r = this.currentBlock?.route ?? this.script.routes[this.block];
+        if (r?.kind === "branch" && r.next.length > 1) {
+          const i = r.next.findIndex((n) => this.reaches(n, block));
+          if (i >= 0) this.branchChoice = i;
+        }
+      }
       if (this.wait) {
         // Exactly what `executeOne` left undone when the wait was raised: the
         // waiting instruction has run, so move past it.

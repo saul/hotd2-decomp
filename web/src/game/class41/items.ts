@@ -117,8 +117,16 @@ export function SpawnStoryModeItem(p: BreakableProp, events?: Events): void {
  * `g_GameMode == 1` has two overrides, and the order is the engine's: an
  * always-on flag makes *every* prop drop the extra life, and a prop carrying
  * its own `storyItem` releases that in place of its set's item.
+ *
+ * The engine spells this switch out **three times** — once each in
+ * `BreakablePropUpdate`, `KindedPropUpdate` and `FallingContainerUpdate` — and
+ * the three copies are identical but for the height the item is released at.
+ * That difference is `rise`; everything else is one routine here rather than
+ * three, because three transcriptions of one switch is three places for it to
+ * drift.
  */
-export function ReleaseHiddenItem(p: BreakableProp, events?: Events): void {
+export function ReleaseHiddenItem(p: BreakableProp, events?: Events,
+                                  rise = 0): void {
   // [open] `g_GameMode == 1 && DAT_009C88AA != 0` forces `itemSet = 1` on
   // every prop, so each one drops an extra life. What sets that flag has not
   // been read, so the port does not reproduce it.
@@ -128,26 +136,30 @@ export function ReleaseHiddenItem(p: BreakableProp, events?: Events): void {
   G.g_item_set_countdown[p.itemSet] = left;
   if (left !== 0) return;
 
+  // The per-family height tweak, applied for the release and taken straight
+  // back off — the engine does exactly this, `+0x1A0 += r` then `-= r`.
+  p.y += rise;
   if (G.g_GameMode === 1 && p.storyItem !== -1) {
     SpawnStoryModeItem(p, events);
-    return;
+  } else {
+    switch (p.itemSet) {
+      case ItemSet.ExtraLife:
+        SpawnExtraLifePickup(p, events);
+        break;
+      case ItemSet.GoldenFrog:
+        SpawnGoldenFrog(p, events);
+        break;
+      case ItemSet.Score2:
+      case ItemSet.Score5:
+      case ItemSet.Score6:
+      case ItemSet.Score7:
+      case ItemSet.Score8:
+        SpawnScorePickup(p, p.itemSet, events);
+        break;
+      default:
+        // Set 4 has no arm in the engine's switch, and no shipped prop uses it.
+        break;
+    }
   }
-  switch (p.itemSet) {
-    case ItemSet.ExtraLife:
-      SpawnExtraLifePickup(p, events);
-      break;
-    case ItemSet.GoldenFrog:
-      SpawnGoldenFrog(p, events);
-      break;
-    case ItemSet.Score2:
-    case ItemSet.Score5:
-    case ItemSet.Score6:
-    case ItemSet.Score7:
-    case ItemSet.Score8:
-      SpawnScorePickup(p, p.itemSet, events);
-      break;
-    default:
-      // Set 4 has no arm in the engine's switch and no shipped member uses it.
-      break;
-  }
+  p.y -= rise;
 }

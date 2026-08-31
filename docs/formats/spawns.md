@@ -60,7 +60,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 |---|---|---|---|---|
 | `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) reads `obj+0x6C` as an object kind. The retail stages reach 74 of the 79. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. | `[proved]`, by the game's own sound record |
-| `0x44` | `FUN_00472B10` | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Some children are shootable score pickups. | `[proved]` |
+| `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selector 16 (`PlaceFallingContainer`) is an **item container** and is ported; the other seventeen are unread. | `[proved]` |
 | `0x25` | `FUN_004840D0` | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
 | `0x10` | `FUN_0048A3E0` | 51 | **Civilian / rescuable victim.** Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. Shooting one costs a **life** and −100 twice; rescuing awards **+400**. | `[proved]` |
 | `0x31` | `0x00449620` | 49 | **Humanoid enemy, four subtypes** (`0x16`–`0x19`). Damageable, increments `g_enemies_alive`. Ricochet SFX by subtype: `BULLET_WOD1_16.WAV` (wood) for `0x17`, `BULLET_MET2_16.WAV` (metal) for `0x19`. | `[proved]` enemy; species `[open]` |
@@ -285,6 +285,39 @@ all of this. `export_level.py` emits the groups a stage actually places into
 `<stage>_objects.json`, and `hod2lib.bundle.breakables_json` emits all nine
 groups plus the hull into the player bundle's `breakables` block — the port
 places them from the exe tables, so a stage-filtered list would not do.
+
+### Three container families, one countdown
+
+The group placer is not the only thing that hands out items. Traced by xref
+from the three release routines, **five** routines call them, and every one
+releases on the shot that destroys the container — there is no container that
+is opened rather than broken.
+
+| Routine | Class | Spawns | Shots | Hide an item |
+|---|---|---|---|---|
+| `BreakablePropUpdate` (`FUN_00464620`) | 0x41 type 0 | 8 groups, 42 props | 2 | 7 props |
+| `KindedPropUpdate` (`FUN_00465FB0`) | 0x41 type 4 | **70** | 1, or 2 for a `0x19E8` crate | **37** |
+| `FallingContainerUpdate` (`FUN_0046A580`) | 0x44 sel 16 | 2 | 2 | 2 |
+| `FUN_0046B5F0` | 0x41 type 37 | 3 | — | `[open]`, unread |
+| `FUN_0046FB50` | `[open]` | — | — | `[open]`, unread |
+
+**They all decrement the same `g_item_set_countdown`,** so an item set is not
+owned by a class. Stage 2's set 2 is spread across the group placer, seven
+type-4 props and the class-0x44 container, and whichever of them the player
+breaks last is what pays out. That is why the three cannot sensibly be ported
+apart.
+
+The two one-prop-per-spawn families carry their payload in the descriptor's
+*orientation* words rather than in a table: `desc+0x1C` is the object kind and
+`desc+0x14` the item-set **size**, which is what seeds the countdown. So an
+item set there is N separate spawns sharing an id, and each placement re-seeds
+the countdown — the last one placed decides which break pays.
+
+`KindedPropUpdate` also has two release-height tweaks the others do not: set 6
+lifts the drop by 0.5 for kinds 2, 8 and 9, and set 7 by 0.9 for a prop wearing
+`0x17AB`. And item set **4** has no arm in the switch at all: its countdown
+runs down, nothing comes out, and the prop is left standing rather than
+despawned. Six stage-2 props are in it; whether that is deliberate is `[open]`.
 
 ### The items themselves — what each set releases
 

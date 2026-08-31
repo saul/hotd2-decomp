@@ -31,6 +31,16 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**All three container families are ported**: the group placer (class 0x41
+type 0), `KindedPropUpdate` (type 4 — 70 spawns, the most-placed constructor in
+the game, 37 of them hiding an item) and `FallingContainerUpdate` (class 0x44
+selector 16, which is knocked loose by the first shot and tumbles onto its own
+floor). They had to go in together: all three decrement the same
+`g_item_set_countdown`, so porting one of them leaves the others' sets paying
+out at the wrong break. `game/class44/` is new, and `PropFamily` stands in for
+the update routine the engine installs — all three are 0x378 objects in one
+pool and differ only by the function pointer in their first word.
+
 **They are drawn, and they can be shot.** `render/breakables.ts` follows
 `G.g_breakable_props` the way the projectile layer follows the thrown weapons:
 one cloned node per live prop, re-cloned when the first shot swaps the model to

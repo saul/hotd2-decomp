@@ -45,9 +45,14 @@ __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
 #: something subtly wrong.
 BUNDLE_FORMAT = 1
 
-#: Every asset slot `BreakablePropUpdate` can draw: whole, cracked, the
-#: `g_GameMode == 2` one-shot target, and the ground shadow.
-BREAKABLE_SLOTS = (0x19E8, 0x19E6, 0x1A0F, 0x10D0)
+#: Every asset slot the three container families can draw. The group props
+#: use the first four; `KindedPropUpdate` adds the three kinded models and the
+#: smaller shadow, and `FallingContainerUpdate` the whole/loose/fragment trio.
+BREAKABLE_SLOTS = (
+    0x19E8, 0x19E6, 0x1A0F, 0x10D0,          # BreakablePropUpdate
+    0x17A9, 0x17AA, 0x17AB, 0x10D1,          # KindedPropUpdate
+    0x0A50, 0x0A51, 0x0A55,                  # FallingContainerUpdate
+)
 
 
 def _sha256(path: Path) -> str:
@@ -166,6 +171,68 @@ def rain_json(tables, prog) -> dict:
     }
 
 
+def _container_placements(prog) -> list[dict]:
+    """Every container spawn a stage places, decoded to what the port needs.
+
+    Three families, three different descriptors, one list -- because they all
+    decrement the same `g_item_set_countdown` and the port has to place them
+    all before any of the countdowns mean anything:
+
+    * ``group``   class 0x41 type 0, `PlaceBreakableGroup`. `+0x11C` is the
+      group id and `desc+0x24` the lifetime in evt blocks.
+    * ``kinded``  class 0x41 type 4, `PlaceKindedProp`. The *orientation* words
+      carry the payload -- `desc+0x1C` is the object kind and `desc+0x14` the
+      item-set size -- while `desc+0x22` is the lifetime and `desc+0x24` the
+      item set. None of those three fields means what its name means elsewhere.
+    * ``falling`` class 0x44 selector 16, `PlaceFallingContainer`. Same
+      orientation trick, but the lifetime, item set and mode-1 item come from
+      the **parameter tail** at `desc+0x24`, because class 0x44 spawns through
+      the allocator that writes `obj+0x1390`.
+    """
+    if prog is None:
+        return []
+    raw = prog.evt.raw
+    out: list[dict] = []
+    for rec in evtlib.spawns(prog.evt):
+        if rec.cls not in (0x41, 0x44):
+            continue
+        if rec.offset + 0x30 > len(raw):
+            continue
+        if rec.cls == 0x41:
+            ctor = struct.unpack_from("<b", raw, rec.offset + 0x25)[0]
+            if ctor == 0:
+                out.append({
+                    "at": rec.offset, "container": "group",
+                    "group": rec.hp,
+                    "lifetime_evt_blocks":
+                        struct.unpack_from("<b", raw, rec.offset + 0x24)[0],
+                })
+            elif ctor == 4:
+                out.append({
+                    "at": rec.offset, "container": "kinded",
+                    "kind": rec.orient[2],
+                    "item_set": struct.unpack_from("<b", raw,
+                                                   rec.offset + 0x24)[0],
+                    "set_size": rec.orient[0],
+                    # `+0x11C` is the lifetime for this class, not hit points.
+                    "lifetime_evt_blocks": rec.hp,
+                    "pos": list(rec.pos), "yaw": rec.orient[1],
+                })
+        elif rec.hp == 16:                      # class 0x44 selector 16
+            tail = rec.offset + 0x24
+            out.append({
+                "at": rec.offset, "container": "falling",
+                "kind": rec.orient[2],
+                "item_set": struct.unpack_from("<b", raw, tail + 4)[0],
+                "story_item": struct.unpack_from("<i", raw, tail + 8)[0],
+                "set_size": rec.orient[0],
+                "lifetime_evt_blocks":
+                    struct.unpack_from("<b", raw, tail)[0],
+                "pos": list(rec.pos), "yaw": rec.orient[1],
+            })
+    return out
+
+
 def breakables_json(tables, prog) -> dict:
     """The class-0x41 breakable-prop tables the port needs to place a group.
 
@@ -184,29 +251,12 @@ def breakables_json(tables, prog) -> dict:
     prop, and ``placements`` names the type-0 spawns so the player can show
     which script address placed which group.
     """
-    placements: list[dict] = []
-    if prog is not None:
-        raw = prog.evt.raw
-        for rec in evtlib.spawns(prog.evt):
-            if rec.cls != 0x41:
-                continue
-            # `desc+0x25` -> obj+0x130C is the constructor index and
-            # `desc+0x24` -> obj+0x1F4 is the lifetime in evt blocks. Opcode
-            # 0x09 copies both inline; see docs/formats/spawns.md.
-            if rec.offset + 0x26 > len(raw):
-                continue
-            kind = struct.unpack_from("<b", raw, rec.offset + 0x25)[0]
-            if kind != 0:
-                continue
-            placements.append({
-                "at": rec.offset,
-                "group": rec.hp,
-                "lifetime_evt_blocks":
-                    struct.unpack_from("<b", raw, rec.offset + 0x24)[0],
-            })
+    placements = _container_placements(prog)
     return {
         "groups": tables.breakable_groups(),
         "hull": [list(p) for p in tables.breakable_hull_points()],
+        "falling_hull": [list(p) for p in tables.falling_hull_points()],
+        "kinds": tables.prop_kind_params(),
         "placements": placements,
         "level_height": tables.BREAKABLE_LEVEL_HEIGHT,
     }

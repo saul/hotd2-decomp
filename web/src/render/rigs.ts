@@ -180,9 +180,20 @@ export class RigLayer {
 
       // A selected route re-samples; a held one keeps the frame it stopped at.
       if (show === selected) {
-        const end = show.route.length ?? Number.POSITIVE_INFINITY;
-        show.frozen = camFrame > end;
-        show.frame = Math.min(end, camFrame);
+        const hold = show.route.hold_frame;
+        if (hold != null) {
+          // The routine passes a literal time, so the object is parked on the
+          // path and the camera frame does not reach it at all. Driving it
+          // with camFrame instead walks the object along -- and off the front
+          // of -- a curve it was never meant to ride: for the stage-1 vehicle
+          // that extrapolated op_st1 2's rot_y to eleven full turns.
+          show.frozen = true;
+          show.frame = hold;
+        } else {
+          const end = show.route.length ?? Number.POSITIVE_INFINITY;
+          show.frozen = camFrame > end;
+          show.frame = Math.min(end, camFrame);
+        }
       }
       this.place(show, show.frame);
     }

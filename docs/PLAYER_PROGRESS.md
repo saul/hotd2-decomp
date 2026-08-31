@@ -306,6 +306,13 @@ the rule, the bundle carries it, and the inspector shows it. Stage 1's vehicle
 has nine such parts — wheels, occupants, a swing arm, and four trail effects
 that cycle their model every frame.
 
+- **a route is not always ridden.** A route may carry `hold_frame`, the literal
+  evaluation time the routine passes instead of the camera frame; the object is
+  parked at a point on the path rather than following it. Stage 1's vehicle does
+  this on `cp_st1` 2. Driving it with the camera frame instead extrapolated
+  `op_st1` 2's `rot_y` to eleven and a half turns and walked the car through the
+  camera.
+
 `obj_484ff0_props` is transcribed but deliberately **not placed**: the variant
 that selects which prop is drawn comes from a pointer that is not the spawn
 descriptor, so there is nothing to place it against yet. The bundle carries

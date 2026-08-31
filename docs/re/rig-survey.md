@@ -22,6 +22,26 @@ path and never draws, while its rig lives in `FUN_00452320`. Reading only the
 9 direct drawers misses it entirely. When looking for a rig, follow the poser
 to its `obj[0]`.
 
+## A route is not always ridden
+
+**[proved]** A routine that names an `op_` slot is not necessarily *following*
+it. `St1VehicleUpdate` (`0x0048E600`) passes a **literal** time for `cp_st1` 2 --
+`CamEvalObjectPath6(0xFE, 0x43AF0000)`, i.e. 350.0, the end of the path the car
+has just finished -- so the car is parked, not moving, and `obj+0x1320` is
+cleared so its wheels and dust trails stop being drawn.
+
+The same shot also calls `CamEvalObjectPath6(0xFF, ...)`, but keeps only
+`local_8` (`rot_y`) and writes it to `obj+0x1334`, the occupants' yaw. Slot
+`0xFF`'s **position channels are never read.** That is why its `pos_*` keys
+span frames 0..110 while its `rot_*` keys span 100..150: the two are not
+sampled together, and nothing in the file says they should be.
+
+Treating `0xFF` as a route the car rides is what made the browser player fly
+the car through the camera while spinning it eleven and a half times -- the
+evaluator extrapolates backwards along the opening segment, and at frame 0
+`rot_y` reaches 762,158 BAMS. A `Route` now carries `hold_frame` for the
+literal case. See the session log.
+
 ## How a rig is bound to a stage
 
 Routines dispatch on `g_active_cam_path` (`0x009A2D78`) through a jump table
@@ -53,7 +73,7 @@ never fire.
 
 | routine | rig | routes | notes |
 |---|---|---|---|
-| `0x0048E600` | `st1_vehicle` | `0xFD`–`0xFF` | stage-1 opening vehicle, 11 parts |
+| `St1VehicleUpdate` `0x0048E600` | `st1_vehicle` | `0xFD`, `0xFE` (×2) | stage-1 opening vehicle, 11 parts. **Rides `0xFD`/`0xFE` only.** On `cp_st1` 2 it parks: `CamEvalObjectPath6(0xFE, 350.0)` with a *literal* time. `0xFF` is read only for `rot_y`, the occupants' yaw — it is not a route. |
 | `0x0048EAD0` | `obj_48ead0` | `0x156`–`0x15D`, `0x199` | [likely] a speedboat — renders as one, with an outboard motor. `+2.0` Y pose bias. |
 | `0x0048F050` | `obj_48f050` | `0x173`, `0x174` | one part |
 | `0x0048F190` | `obj_48f190` | `0x17A`–`0x17D` | [likely] a convertible car — renders as one. 8 parts, nesting depth 2. |

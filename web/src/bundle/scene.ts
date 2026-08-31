@@ -85,6 +85,13 @@ export interface RigRoute {
   duration: number | null;
   /** `CAM_PATH_LENGTH[slot]` — the frame the routines clamp at. */
   length: number | null;
+  /**
+   * Set when the routine evaluates this path at a **literal** time instead of
+   * the camera frame — the object is parked at a fixed point on the path
+   * rather than riding it. `FUN_0048E600` does this for the stage-1 vehicle on
+   * `cp_st1` 2: `CamEvalObjectPath6(0xFE, 350.0)`.
+   */
+  hold_frame?: number | null;
   /** What the routine does at the end of this route, from the transcription. */
   note?: string;
 }

@@ -600,12 +600,15 @@ def rigs_json(instances, blocked, campaths, campaths_tables) -> dict:
                 # evaluator extrapolate back along the opening segment, which
                 # is what the game does.
                 "length": campaths_tables.cam_path_length(r["slot"]),
+                # Set when the routine passes a literal evaluation time rather
+                # than the clamped camera frame -- the object is parked at a
+                # fixed point on the path, not riding it.
+                "hold_frame": r.get("hold_frame"),
                 # What the routine does when the path runs out. The
                 # transcription records it per route; it is the difference
                 # between "the object vanishes" and "the object freezes and
                 # swaps model", which look very different on screen.
-                "note": next((rt.note for rt in inst["rig"].routes
-                              if rt.slot == r["slot"]), ""),
+                "note": r.get("note", ""),
                 # Empty means ungated: the rig is present whatever the camera
                 # is doing. Otherwise it rides only while one of these cp_
                 # slots is the active camera path.

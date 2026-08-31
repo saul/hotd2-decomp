@@ -5383,3 +5383,86 @@ grab, the knock-back tumble, and the object-path entrance. All of them are read
 and named; none of them is reachable from the states that are ported, and the
 dispatcher sends anything unmodelled back to the hub rather than letting it sit
 on a permit.
+
+---
+
+## Session 2026-08-31b — the stage-1 car was riding a path it never rides
+
+**Symptom**: at the end of the stage-1 opening, the car spins several times on
+the spot and ends up intersecting the camera.
+
+### What it was
+
+`FUN_0048E600`, now **`St1VehicleUpdate`**, dispatches on `g_active_cam_path`:
+
+```c
+if (g_active_cam_path == 0x20)      slot = 0xFD;      /* ride */
+else if (g_active_cam_path == 0x21) {
+    if (0x15D < g_cam_path_frame) { obj+0x1320 = 0; goto draw; }   /* stop */
+    slot = 0xFE;                                       /* ride */
+} else if (g_active_cam_path == 0x22) {
+    CamEvalObjectPath6(0xFE, 0x43AF0000, &pose);       /* 350.0, a LITERAL */
+    obj+0x1320 = 0;                                    /* parked */
+    t = (g_cam_path_frame < 0 || 0x31 < g_cam_path_frame)
+          ? 150.0 : g_cam_path_frame + 100.0;
+    CamEvalObjectPath6(0xFF, t, &tmp);
+    obj+0x1334 = tmp.rot_y - 0x4000;                   /* occupants' yaw only */
+    goto draw;
+}
+n = min(g_cam_path_frame, g_cam_path_length[slot]);
+CamEvalObjectPath6(slot, (float)n, &pose);
+```
+
+So on `cp_st1` 2 the car is **parked** at op `0xFE` frame 350 -- the end of the
+path it has just finished -- and op `0xFF` is read for **`rot_y` only**, which
+becomes the occupants' yaw. `0xFF`'s position is never read.
+
+`hod2lib.rigs` had it as `Route(0xFF, cam_paths=(0x22,))`, i.e. "the car rides
+op 0xFF over the camera frame". Both halves wrong.
+
+### Why it span
+
+`0xFF`'s `rot_*` keys start at frame **100**; its `pos_*` keys start at 0. They
+are not sampled together and nothing in the file says they should be. Driving
+the rotation from the camera frame therefore evaluates it up to 100 frames
+*before its first key*, and `CamEvalHermiteCurve` extrapolates along the opening
+segment rather than clamping -- **[proved]**, the fixed-depth binary search
+lands on index 1 at the low end and `s` goes negative, so the cubic runs away:
+
+| camFrame | `rot_y` BAMS | turns |
+|---|---|---|
+| 0 | 762,158 | 11.63 |
+| 25 | 370,335 | 5.65 |
+| 50 | 144,564 | 2.21 |
+| 100 | 16,384 | 0.25 (correct) |
+
+and the position swept 78 units off, back through the correct spot and 69 units
+past it -- through the camera. Correct pose is stationary at
+`(-64.05, 0, 137.48)`, yaw 113.4 deg.
+
+### Fix
+
+`Route` gains `hold_frame`: the literal evaluation time a routine passes instead
+of the camera frame. `cp_st1` 2 becomes `Route(0xFE, hold_frame=350.0)` and the
+bogus `0xFF` route is gone. `bundle.py` carries it; `rigs.ts` honours it.
+
+`take()` in `resolve_for_stage` now carries `note`/`hold_frame` **with the
+route** instead of `bundle.py` looking the note up by slot -- necessary now that
+one rig has two routes on the same slot.
+
+### Not done
+
+* The occupants' yaw (`obj+0x1334`) is recorded as a part rule, not implemented:
+  it needs per-part path-driven rotation in the renderer, which does not exist.
+* `obj+0x1320` gates the wheel and dust-trail draws; the player does not honour
+  that condition yet, so the parked car may still show its trails.
+* The `cp_st1` 1 stop test is `> 0x15D` (349) but the player freezes at
+  `camFrame > length` (350). One frame out; invisible here because op `0xFE`
+  holds its value across 349..350, but it is not the same rule.
+
+### Next actions
+
+1. Look at the other 11 transcribed rigs for the same mistake -- any routine
+   passing a literal to `CamEvalObjectPath6` is a `hold_frame`, and grepping
+   the decompilation for a float constant in that argument would find them all.
+2. Implement `condition` on parts so `_MOVING` actually gates the trails.

@@ -53,7 +53,7 @@
 004083d0	AttachedEffectThink	obj+0x1390 is a PARENT ACTOR here, not a descriptor tail
 00408770	SpawnAttachedEffect
 004088a0	EvtOpSpawnPlaced09	alloc 0x13F4; reads desc+0x24/+0x25 inline; does NOT set obj+0x1390
-00408970	ActorInitFlags	obj+0x34 = the spawn record's flags word | 1, and obj+0x38 = 0. This is where the descriptor's flags become the actor's: bit 27 picks the run variant every motion row exposes as row[2]/row[3], and 141 class-0x30 spawns set it.
+00408970	ActorInitFlags	obj+0x34 = the spawn record's flags word | 1, and obj+0x38 = 0. Run by SpawnFromDescriptor BEFORE the class's own Init, which then ORs its bits on top. This is where the descriptor's flags become the actor's: bit 15 takes it out of the shot test and the crowd push, bit 17 skips the per-frame ground snap in ZombiePushOutOfWorldAndActors so a spawn placed on a ledge stays on it (95 spawns), bit 18 tells EnemyZombieInit not to compute the aim angles, bit 27 picks between row[2] and row[3] (155 spawns), and bit 14 freezes the pose.
 00408a20	SpawnFromDescriptor	opcodes 0x0B/0x0D; alloc 0x13F4; obj+0x1390 = descriptor + 0x24
 00408aa0	EvtOpSpawnObj0B
 00408b70	EvtOpSpawnObjUnlessSkip0D

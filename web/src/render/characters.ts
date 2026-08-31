@@ -57,6 +57,7 @@ import type {
 import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
 import type { ActiveSpawn } from "../script/walker";
 import type { Actor } from "../game/actor";
+import { DescriptorFromPlacement } from "../game/descriptor";
 import { ActorSpawn } from "../game/director";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G } from "../game/globals";
@@ -241,27 +242,8 @@ export class CharacterLayer {
         ? p.intro : null;
       // The descriptor tail is read by the class's own Init -- the start state
       // is one of its bytes -- so it is handed over at spawn time.
-      const a = ActorSpawn(at, p?.class ?? 0, type.type, type.name, {
-        initialState: p?.initial_state ?? 0,
-        attackState: p?.attack_state ?? 0,
-        condition: p?.body_condition ?? 0,
-        ringSet: p?.ring_set ?? 0,
-        leap: p?.leap ?? null,
-        path: p?.path ?? null,
-        walkDistance: p?.walk_distance ?? 0,
-        entranceMotion: p?.entrance_motion ?? 0,
-        pounce: p?.pounce ?? null,
-        emerge: p?.emerge ?? null,
-        delayedLeap: p?.delayed_leap ?? null,
-        // The captor family's two script blobs, and the object they work on.
-        // `CivilianInit` writes `child+0x1394 = this`, and `civilian_child` is
-        // that pointer as a spawn address.
-        script: (p?.target_script || p?.attack_script)
-          ? { target: p.target_script ?? null,
-              attack: p.attack_script ?? null }
-          : null,
-        targetAt: p?.civilian_child ?? -1,
-      }, this.rng);
+      const a = ActorSpawn(at, p?.class ?? 0, type.type, type.name,
+                           DescriptorFromPlacement(p), this.rng);
       a.motion = motion;
       a.intro = intro;
       a.hp = this.startHp(p);

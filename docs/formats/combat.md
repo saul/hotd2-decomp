@@ -1093,6 +1093,39 @@ makes its fall and its knock-back physical.
 | 11 | `ThrowerStateFallToSurface` | fall until the ground catches — how a wall-crawler comes down |
 | **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
 | 17 | `ThrowerStateGetUp` | motion `0x127`, and **only after a decapitation** |
+### The spawn record's flags word
+
+`ActorInitFlags` (`FUN_00408970`) is two lines and it matters more than its
+size suggests:
+
+```c
+obj[0x34] = spawn_flags | 1;
+obj[0x38] = 0;
+```
+
+`SpawnFromDescriptor` runs it **before** the class's own `Init`, which then ORs
+its own bits on top. Everything the shipped records set:
+
+| bit | spawns | what reads it |
+|---|---|---|
+| `0x8` | 4 | `Hit` — a shot the update has not drained |
+| `0x10` | 5 | skipped by `ColiTestSphereAgainstActors` |
+| `0x100` | 6 | `ShotImmune` |
+| `0x2000` | 9 | `ArcSpent` |
+| `0x4000` | 6 | `PoseFrozen` — the motion clock does not advance |
+| `0x8000` | 167 | `RegisterForShotTest` refuses it, and so does the crowd push |
+| `0x10000` | 4 | `NoCameraTrack` |
+| **`0x20000`** | **95** | **`ZombiePushOutOfWorldAndActors` skips the ground snap** |
+| `0x40000` | 22 | `EnemyZombieInit` skips the aim-angle setup |
+| `0x8000000` | 155 | picks between `row[2]` and `row[3]` |
+
+`0x20000` is the one that shows. Stage 1's axe man stands on a ledge whose
+collision is **two vertical quads** — `coli1.bin:4968`, both `axis 2` with a
+zero-Y normal — so `QueryGroundHeightAt` finds nothing under him and falls back
+to the script's ground plane sixty-two units below. The flag is what keeps him
+on the ledge, and without it he dropped through it and threw from behind the
+wall he had been standing on.
+
 ### Class 0x30 state 33 — the stationary thrower
 
 `ZombieStateStandAndThrow` (`FUN_00459080`) is the **only class-0x30 state

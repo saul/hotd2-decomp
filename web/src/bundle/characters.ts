@@ -197,6 +197,16 @@ export interface CharacterPlacement {
   walk_distance?: number;
   /** `ThrowerStateEntranceClip` (state 19) plays this once, then stands. */
   entrance_motion?: number;
+  /** `ThrowerStateWaitForCue` (state 28): the clip, the condition and its
+   *  operand. */
+  cue?: { motion: number; cond: number; operand: number } | null;
+  /** `ThrowerStateLeapStrike` (state 22): the frames the arc takes. */
+  leap_strike_frames?: number;
+  /**
+   * The spawn record's flags word — `ActorInitFlags` (`FUN_00408970`) makes it
+   * the actor's `obj+0x34`, before the class's own `Init` ORs its bits in.
+   */
+  init_flags?: number;
   /**
    * `ZombieStateStandAndThrow`'s tail. `exit_state` is the same `tail+0x03`
    * byte as {@link CharacterPlacement.attack_state}, and it is what says whether

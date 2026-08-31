@@ -19,19 +19,23 @@ import { join } from "node:path";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
+import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { vec3 } from "../src/game/vec.ts";
+import { Walker } from "../src/script/walker.ts";
 
 const root = join(process.env.HOME, "hotd2-decomp/extract/player");
 /** Far enough that "stood still" and "charged the camera" cannot be confused. */
 const EYE = vec3(0, 10, 0);
 const SECONDS = 40;
 
-let total = 0, stood = 0, threw = 0, left = 0;
+let total = 0, stood = 0, threw = 0, left = 0, held = 0, pinned = 0;
+/** `obj+0x34` bit 0x20000 -- see `ActorInitFlags` and `ground.ts`. */
+const GROUND_SNAP_EXEMPT = 0x20000;
 const rows = [];
 for (let stage = 1; stage <= 6; stage++) {
   let script;
@@ -40,16 +44,32 @@ for (let stage = 1; stage <= 6; stage++) {
       join(root, `stage${stage}`, `stage${stage}.script.json`), "utf8"));
   } catch { continue; }
   const chars = script.characters;
+  // Where each spawn is placed, **and** the script address that places it --
+  // the collision the ground snap consults is whatever the script had selected
+  // by then, and that is one blob, not the whole file. Selecting every blob
+  // measures a level the game never has; that mistake has already cost this
+  // project one wrong answer about a wall.
   const spawnPos = new Map();
+  const spawnAddr = new Map();
   for (const b of script.blocks ?? []) {
-    for (const st of b.steps ?? []) {
+    for (const [si, st] of (b.steps ?? []).entries()) {
       for (const op of st.ops ?? []) {
         for (const sp of op.spawns ?? []) {
-          if (!spawnPos.has(sp.at)) spawnPos.set(sp.at, sp);
+          if (spawnPos.has(sp.at)) continue;
+          spawnPos.set(sp.at, sp);
+          spawnAddr.set(sp.at, [b.index, si, op.i]);
         }
       }
     }
   }
+  const NOOP = () => undefined;
+  const mkWalker = () => new Walker(script, {
+    enterRegion: NOOP, loadRegion: NOOP, loadSlot: NOOP, unloadSlot: NOOP,
+    startCamera: NOOP, releaseCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
+    playSound: NOOP, aliveEnemies: () => null, aliveCivilians: () => null,
+    cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
+    endDialogue: NOOP,
+  });
   const throwers = (chars.placements ?? [])
     .filter((p) => p.class === 0x30 && p.initial_state === 33);
   if (!throwers.length) continue;
@@ -62,12 +82,8 @@ for (let stage = 1; stage <= 6; stage++) {
     // it would measure the queue rather than the state.
     const rng = new Rng(5);
     const a = ActorSpawn(p.at, p.class, p.char_type,
-                         chars.types[String(p.char_type)]?.name ?? "?", {
-      initialState: p.initial_state, attackState: p.attack_state ?? 0,
-      condition: p.body_condition ?? 0, ringSet: p.ring_set ?? 0,
-      standThrow: p.stand_throw, walkDistance: p.walk_distance ?? 0,
-      delayedLeap: p.delayed_leap ?? null,
-    }, rng);
+                         chars.types[String(p.char_type)]?.name ?? "?",
+                         DescriptorFromPlacement(p), rng);
     a.visible = true;
     a.hp = a.maxHp = p.hp || 100;
     a.motion = p.motion ?? 0;
@@ -75,6 +91,17 @@ for (let stage = 1; stage <= 6; stage++) {
     const sp = spawnPos.get(p.at);
     a.pos = vec3(sp?.pos[0] ?? 0, sp?.pos[1] ?? 0, sp?.pos[2] ?? 0);
     const start = { ...a.pos };
+    // The script's own collision at the address that spawns it. Stage 1's axe
+    // man stands on a ledge the selected set does not floor at all -- it is
+    // two vertical quads -- and it is the spawn flags word that keeps him on
+    // it rather than any geometry.
+    const addr = spawnAddr.get(p.at);
+    if (addr) {
+      const w = mkWalker();
+      if (w.seek(addr[0], addr[1], addr[2])) {
+        G.g_camera_fixed_eye_y = w.groundY ?? 0;
+      }
+    }
 
     const events = new Events();
     let thrown = 0;
@@ -87,6 +114,9 @@ for (let stage = 1; stage <= 6; stage++) {
     let drift = 0;
     let leftBy = null;
     let lastIn = { ...a.pos };
+    // How far it covered *after* leaving the state -- the backing away.
+    let walked = 0;
+    let leftAt = null;
     for (let i = 0; i < SECONDS * 60; i++) {
       GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
       if (process.env.TRACE && String(p.at) === process.env.TRACE && i % 30 === 0) {
@@ -97,8 +127,15 @@ for (let stage = 1; stage <= 6; stage++) {
       if (a.state === ZombieState.StandAndThrow) {
         peak = Math.max(peak, Math.hypot(a.pos.x - start.x, a.pos.z - start.z));
         lastIn = { ...a.pos };
-      } else if (leftBy === null) {
-        drift = Math.hypot(lastIn.x - start.x, lastIn.z - start.z);
+      } else {
+        if (leftBy === null) {
+          drift = Math.hypot(lastIn.x - start.x, lastIn.z - start.z);
+          leftAt = { ...a.pos };
+        }
+        if (leftAt) {
+          walked = Math.max(walked, Math.hypot(a.pos.x - leftAt.x,
+                                               a.pos.z - leftAt.z));
+        }
         leftBy = ZombieState[a.state] ?? a.state;
       }
     }
@@ -107,24 +144,45 @@ for (let stage = 1; stage <= 6; stage++) {
     // have moved. Anything above a unit is the clip's root motion carrying it.
     if (leftBy === null) drift = Math.hypot(lastIn.x - start.x, lastIn.z - start.z);
     if (drift < 1) stood += 1;
+    // **And a pinned one must not have fallen.** `ActorInitFlags` makes the
+    // spawn record's flags word the actor's, and `0x20000` is what exempts it
+    // from the per-frame ground snap. Stage 1's is the only thrower that
+    // carries it -- it stands on a ledge whose collision is two *vertical*
+    // quads, so the ground query finds nothing under it and the snap dropped
+    // it sixty-two units to the script's ground plane, from where it threw
+    // from behind the wall it had been standing on.
+    //
+    // The other eight have no such flag and are meant to settle onto whatever
+    // is under them, so they are counted separately rather than excused.
+    if (p.init_flags & GROUND_SNAP_EXEMPT) {
+      pinned += 1;
+      if (Math.abs(lastIn.y - start.y) < 1) held += 1;
+    }
     if (thrown >= 1) threw += 1;
     if (leftBy !== null) left += 1;
     rows.push(`  stage ${stage} ${p.at} (ct ${p.char_type}, `
       + `${chars.types[String(p.char_type)]?.file}): net `
-      + `${drift.toFixed(2)}u (clip swing ${peak.toFixed(2)}u), threw `
-      + `${thrown}, left by ${leftBy ?? "—"}`);
+      + `${drift.toFixed(2)}u (clip swing ${peak.toFixed(2)}u), fell `
+      + `${(lastIn.y - start.y).toFixed(1)}u, threw ${thrown}, left by `
+      + `${leftBy ?? "—"} after ${walked.toFixed(1)}u`);
   }
 }
 
 for (const r of rows) console.log(r);
-console.log(`\n${total} stationary throwers: ${stood} never moved, `
-          + `${threw} threw at least once, ${left} left when they were done`);
+console.log(`\n${total} stationary throwers: ${stood} never moved in the `
+          + `plane, ${threw} threw both hands, ${left} left when they were `
+          + `done, and ${held} of the ${pinned} the spawn flags exempt from `
+          + `the ground snap held their height`);
 if (!total) {
   console.log("\nFAIL  no state-33 spawn in the bundle -- re-export it");
   process.exit(1);
 }
-if (stood !== total || threw !== total) {
-  console.log("\nFAIL  a stationary thrower must stand still and throw");
+if (stood !== total || threw !== total || left !== total
+    || held !== pinned || !pinned) {
+  console.log("\nFAIL  a stationary thrower must hold its height, stand still, "
+              + "throw, and back away when it is done");
   process.exit(1);
 }
-console.log("\nclean -- every one stands where the script put it and throws");
+console.log("\nclean -- every one stands where the script put it, throws both "
+            + "hands and leaves, and the one the spawn flags pin stays on its "
+            + "ledge");

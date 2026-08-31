@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
+import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
@@ -75,21 +76,8 @@ spawns.forEach((s, n) => {
   const p = placements.get(s.at);
   if (!p || p.motion === null) return;
   const a = ActorSpawn(s.at, s.class, p.char_type,
-                       chars.types[String(p.char_type)]?.name ?? "?", {
-    initialState: p.initial_state ?? 0,
-    attackState: p.attack_state ?? 0,
-    condition: p.body_condition ?? 0,
-    ringSet: p.ring_set ?? 0,
-    leap: p.leap ?? null,
-    path: p.path ?? null,
-    walkDistance: p.walk_distance ?? 0,
-    entranceMotion: p.entrance_motion ?? 0,
-    pounce: p.pounce ?? null,
-    grab: p.grab ?? null,
-    backAwayDelay: p.back_away_delay ?? 0,
-    cue: p.cue ?? null,
-    leapStrikeFrames: p.leap_strike_frames ?? 0,
-  });
+                       chars.types[String(p.char_type)]?.name ?? "?",
+                       DescriptorFromPlacement(p));
   a.pos = { x: s.pos[0], y: s.pos[1], z: s.pos[2] };
   a.hp = p.hp || 100;
   a.motion = p.motion;

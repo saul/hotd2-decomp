@@ -734,6 +734,12 @@ class Placement:
     leap_strike_frames: int | None = None
     #: `ZombieStateStandAndThrow`'s tail -- see :data:`STAND_AND_THROW_STATES`.
     stand_throw: dict | None = None
+    #: The spawn record's own flags word, which `ActorInitFlags`
+    #: (`FUN_00408970`) makes the actor's ``obj+0x34``: ``obj[0x34] = flags | 1``.
+    #: Bit 17 skips the per-frame ground snap, bit 27 picks the run variant,
+    #: bit 15 takes the actor out of the shot test. Carried whole rather than
+    #: bit by bit, because that is what the engine does with it.
+    init_flags: int = 0
     #: `ZombieStateEmerge`'s (state 27) ``{delay, motion}`` from the tail's
     #: ``+0x04`` and ``+0x08``. The clip's own root translation is what lifts
     #: the actor out of the water or the ground -- a spawn's ``y`` is where its
@@ -786,6 +792,8 @@ class Placement:
             d["walk_distance"] = self.walk_distance
         if self.stand_throw is not None:
             d["stand_throw"] = self.stand_throw
+        if self.init_flags:
+            d["init_flags"] = self.init_flags
         if self.entrance_motion is not None:
             d["entrance_motion"] = self.entrance_motion
         if self.pounce:
@@ -1167,6 +1175,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             attack_state=tail[2], leap=leap, path=path,
             walk_distance=walk_distance, entrance_motion=entrance_motion,
             stand_throw=stand_throw,
+            init_flags=int(sp.get("flags") or 0),
             pounce=pounce, grab=grab, back_away_delay=back_away_delay,
             cue=cue, leap_strike_frames=leap_strike_frames,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),

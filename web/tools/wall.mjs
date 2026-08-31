@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
+import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
@@ -99,23 +100,8 @@ for (const s of w.spawns) {
   const p = placements.get(s.at);
   if (!p || p.motion === null || p.motion === undefined) continue;
   const a = ActorSpawn(s.at, s.class, p.char_type,
-                       chars.types[String(p.char_type)]?.name ?? "?", {
-    initialState: p.initial_state ?? 0,
-    attackState: p.attack_state ?? 0,
-    condition: p.body_condition ?? 0,
-    ringSet: p.ring_set ?? 0,
-    leap: p.leap ?? null,
-    path: p.path ?? null,
-    walkDistance: p.walk_distance ?? 0,
-    entranceMotion: p.entrance_motion ?? 0,
-    pounce: p.pounce ?? null,
-    emerge: p.emerge ?? null,
-    delayedLeap: p.delayed_leap ?? null,
-    script: (p.target_script || p.attack_script)
-      ? { target: p.target_script ?? null, attack: p.attack_script ?? null }
-      : null,
-    targetAt: p.civilian_child ?? -1,
-  }, rng);
+                       chars.types[String(p.char_type)]?.name ?? "?",
+                       DescriptorFromPlacement(p), rng);
   a.motion = p.motion;
   a.hp = p.hp || 100;
   a.yaw = p.yaw ?? 0;

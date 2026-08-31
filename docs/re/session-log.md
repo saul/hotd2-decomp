@@ -7174,3 +7174,73 @@ Two things had to be fixed underneath it:
 Still not ported, and now the only known gap in this family: the extra frame of
 hysteresis `wait_enemies_alive` alone carries (`g_evt_wait_alive_hysteresis`,
 `0x007DCCA8`), which makes its condition hold two frames running.
+
+## The axe man fell off his ledge, and the harness could not see it
+
+Reported after the state-33 port landed: he "immediately falls to the ground
+and then starts throwing axes behind the wall", and after both axes "he should
+walk backwards and then die so the game can continue". Three separate faults,
+and the third is the one worth keeping.
+
+### He fell because the port threw the spawn record's flags away
+
+Walking the real script to `8/4/26` and reading the trace: he is at `y = -15.5`
+and his spawn record places him at `y = 47.0`. The collision the script has
+selected there is one blob, `coli1.bin:4968` — **two quads, both `axis 2` with
+a zero-Y normal**, a vertical panel. `QueryGroundHeightAt` finds nothing under
+him and returns `g_camera_fixed_eye_y`, the ground plane op 21 had just set, so
+the per-frame snap drops him sixty-two units off the ledge. From down there the
+throws come out behind the wall he had been standing on.
+
+The engine does not snap him, because `ZombiePushOutOfWorldAndActors` reads
+
+    if ((obj[0x34] & 0x20000) == 0) ActorSnapToGroundHeight(obj);
+
+and his spawn record's flags word is exactly `0x20000`. `ActorInitFlags`
+(`FUN_00408970`) makes that word `obj+0x34` before the class `Init` runs, and
+the port carried none of it — a `[diverges]` written down two commits earlier
+when the run-variant bit turned up. This is what it cost. Ninety-five shipped
+spawns set that bit.
+
+The word is carried whole now, as the engine does, rather than bit by bit.
+
+### He never walked backwards because the tail never reached him
+
+`arrive=0` in the trace. `ZombieStandAndThrowLeave` reads the walk distance out
+of `obj.standThrow`, and `render/characters.ts` never passed `stand_throw` —
+so every stationary thrower in the player read zero, reached it on its first
+frame and despawned on the spot instead of backing away five units.
+
+### The part worth keeping: the harness could not have caught either
+
+`web/tools/throwers.mjs` reported **nine of nine working** while every one of
+them was broken in the player, because the harness built its own descriptor and
+passed `stand_throw` — the field the player was missing. A harness that builds
+its actor differently from the thing it is checking is testing the port and not
+the player.
+
+So the mapping from placement JSON to `Actor` fields is now one function,
+`DescriptorFromPlacement` in `game/descriptor.ts`, and the player and all three
+harnesses call it. Doing that immediately turned up a second drift in the other
+direction: `replay.mjs` had been passing `grab`, `back_away_delay`, `cue` and
+`leap_strike_frames` and the *player* had not, so class 0x31's grab, its cue
+wait, its blink-in hold and its leap strike had been reading descriptors the
+player never handed them. Two of those fields were not even declared on
+`CharacterPlacement`.
+
+The harness also selected **every** collision blob rather than the one the
+script had chosen — the same mistake that produced the wrong answer about the
+stage 2 wall. It seeks the walker to each thrower's own spawn address now.
+
+### Wrong turns
+
+* The first version of the height check demanded that all nine throwers hold
+  their y. Only one of the nine has the `0x20000` flag; the other eight are
+  meant to settle onto whatever is under them, so the check is conditional on
+  the flag now and counts the two groups separately. A check that would fail on
+  correct behaviour is worse than no check.
+* Stage 3's two leaping throwers looked wrong — "left by AttackRun after 563
+  units" — and they are not. `ZombieStateDelayedLeap` ends by handing to
+  `AttackRun`, so they leap down sixty-five units off their ledge and then join
+  the fight, which is what the state says and what the descriptor asks for.
+

@@ -6866,3 +6866,84 @@ placement descriptor: `EvtOpSpawnSimple0A` (`0x00408990`) reads a two-word
 `{class, hp}` record and never writes a position, so whatever it makes places
 itself. Class `0x20`, 4 of them in this step alone, still has no module.
 `0x31` `goto_scene_state` runs 32 times and is inert here.
+
+## The tutorial's axe man, who was never supposed to move
+
+Reported: "the 'tutorial' zombie (the one with the axe — e.g. 8/4/4 0x2BF4)
+has never behaved properly; he tries to move when he should be in place."
+
+`0x2BF4` is 11252, and its placement is class 0x30, character type **19**,
+body condition **7**, initial state **33**. State 33 was not in the port's
+`ZombieState` at all, so `ZombieEntryState` sent it to `AttackRun`.
+
+`g_class30_states[33]` is `0x00459080`. Read: it is the one class-0x30 state
+that never writes a position. Sub 0 latches an idle delay by how many hands
+still hold a weapon — `tail+0x04` for two, `tail+0x08` for one, and
+`ZombieReleaseAndDespawn` for none; sub 1 plays `row[0]` and counts it down;
+sub 2 waits on `TryClaimAttackSlot` and starts the throw clip; sub 3 waits for
+`obj+0x19C` to reach the attack entry's hit frame and lets the weapon go; sub 4
+plays the clip out and goes back to sub 0 while a hand is still armed; sub 5
+idles `tail+0x0C` and leaves. Subs 0 to 2 are a **fallthrough** — `case 0` has
+no `break` — so with zero delays a spawn arms, waits and claims on one frame,
+and three of the nine have exactly that.
+
+### The names came out of the asset slots, not out of the look of it
+
+The identification is the satisfying part. `ZombiePickThrowingHand`
+(`FUN_00458F00`) and `ZombieThrowHandWeapon` (`FUN_0045A240`) each switch on
+the character type over three cases, comparing bone 5's and bone 8's **draw
+slots** — `0x20C + bone * 0x90` — against literals. Resolved through
+`asset_slots()`:
+
+| type | file | bone 5 | bone 8 | projectile |
+|---|---|---|---|---|
+| 1 | `znassb.bin` | 0x1BA9 | 0x1BA5 | its own parts 3 and 2 |
+| 0x13 | **`tutorial.bin`** | 0x1ECE | 0x1ECA | `0x249` = `znonoo.bin` 0 |
+| 0x14 | `znonoopa.bin` | 0x1EF9 | 0x1EF5 | the same |
+
+So the user's "tutorial zombie with the axe" is the game's own name for it
+twice over: the character is `tutorial.bin` and what it throws is `znonoo.bin`
+— *ono* is an axe. Neither was guessed from the model.
+
+### What the descriptor tail says, and the check that could have failed
+
+`tail+0x03` — the same byte the port already carries as `attack_state` — is
+the exit: **0** walks away through state 15 with the distance at `tail+0x10`,
+**26** leaps through state 26 to the point at `tail+0x10`..`+0x18` with the
+gravity at `+0x20`. All seven spawns read at the time split cleanly: the five
+with 0 have a small distance at `+0x10` and zeroes after it, and the two with
+26 have a real world point and a plausible gravity. Reading the leap fields off
+a walk spawn gives `(5.0, 0, 0)` and a gravity of 8.31 — the next descriptor.
+
+Both exits are entered at **sub 1**, which is finally why states 15 and 26 have
+a sub-1 arm that skips their own descriptor read: the fields are already on the
+actor. And the walk arm raises `obj+0x34` bit `0x20000000` — the arm of
+`ZombieStateWalkDistance` that retires the actor instead of attacking, which
+the walk-in commit had annotated as reachable by no shipped spawn. **It is
+reachable, and this is the only thing that reaches it.** Corrected.
+
+### Wrong turns
+
+* The first measurement said the tutorial zombie drifted 4.2 units while
+  throwing, and the first guess was that `ActorSetMotionBlended` fails to reset
+  the root-motion baseline the way `ZombieSetMotionIfIdle` does. It does reset
+  it — checked before changing anything. The 4.2 units are the throw clip's own
+  wind-up: `tutorial.bin`'s two throw clips have a net root translation of
+  **exactly zero** and swing the actor forward and back in between. The
+  harness now measures net displacement, which is the question actually being
+  asked, and reports the swing beside it.
+* `web/tools/civilians.mjs`' pinned corpus counts went from 47/47 to 53/57
+  mid-session, and that was **not** this work: a peer session's reading of evt
+  opcodes 0x01-0x0A decodes player-count-gated spawns the exporter had been
+  dropping. Re-pinned, with a note saying the numbers are the corpus rather
+  than a target.
+
+### A note on committing
+
+Three peer sessions were live and one had work staged in the index. This
+commit was built with a temporary `GIT_INDEX_FILE` and `git commit-tree` so the
+real index was never touched, and the two shared annotation files were
+committed as `HEAD` plus this session's own rows rather than as the mixed
+working tree. Two peer commits landed while it was in progress; the new commit
+sits on top of them and nothing was lost.
+

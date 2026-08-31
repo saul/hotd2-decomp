@@ -117,6 +117,43 @@ is true on two frames of every cycle.
 Across the shipped corpus that takes the civilians the captors actually kill
 from **4 to 10** in fifteen seconds, and rescues from 21 to 17.
 
+**The stationary thrower is in** — class 0x30 state 33,
+`ZombieStateStandAndThrow` (`FUN_00459080`), the **only** state in the class
+that never moves the actor. It stands where the script put it, plays `row[0]`,
+takes an attack permit, throws the weapon out of one hand and then the other,
+and only when both are empty does it walk away or leap out. Nine spawns start
+in it, and the port had none of it: `ZombieEntryState` folded them all into
+`AttackRun`, so stage 1's `0x2BF4` — character type 0x13, whose asset file is
+the game's own **`tutorial.bin`** — charged the camera instead of standing
+across the room throwing axes at you.
+
+There is no table behind any of it. A switch on the character type inside
+`ZombiePickThrowingHand` and `ZombieThrowHandWeapon` is the whole list, and
+resolving the asset slots names the parts: `0x13` is `tutorial.bin`, `0x14` is
+`znonoopa.bin`, and what both throw is `znonoo.bin` part 0 — the axe. Char
+type 1 (`znassb.bin`) lobs parts of its own model on an arc. A hand counts as
+armed exactly while its bone's **draw slot** is still the one the skeleton gave
+it, so shooting the axe out of a hand disarms it and the pick falls to the
+other.
+
+The flight reuses the pool class 0x31's projectile already lives in, extended
+with the acceleration the arc needs and the damage kind (4 flat, 6 arced).
+`ZombieShouldStandAndThrow` is wired in too: a body-condition-8 walker already
+facing the camera stops and throws rather than closing, and fourteen spawns are
+condition 8.
+
+`web/tools/throwers.mjs` measures it: nine throwers, all nine net under 0.2
+units of movement against the 4.2-unit swing their throw clips carry and
+return, all nine throw both hands, all nine leave — seven by state 15 and two
+by state 26. That walk exit is the one place in the game that reaches
+`ZombieStateWalkDistance`'s retire branch, which the walk-in commit had marked
+unreachable.
+
+[open] You are meant to be able to shoot the axe out of the air — the weapon
+registers for the shot test every frame, and in the tutorial that is the whole
+lesson. The port's projectile pool is plain records and its shot test walks
+actors, so `ZombieThrownWeaponStateShotDown` is named rather than half-done.
+
 **A new overlay, `Wedged`**, answers the question the collision one leaves open.
 `#show-coli` says what the engine can feel; this marks in red every zombie the
 world push has been shoving for half a second or more — an actor that cannot

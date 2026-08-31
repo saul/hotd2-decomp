@@ -185,11 +185,17 @@ console.log(`${total} civilians driven, ${moved} advanced, `
  * script flags this harness never raises -- both of stage 6's are -- which is
  * a property of the harness, not of the port.
  *
- * **`inCaptorState` is the one that matters.** 45 of the 47 captors run a
+ * **`inCaptorState` is the one that matters.** 55 of the 57 captors run a
  * state that works on their civilian; the other two start in state 18, which
  * is a genuine non-captor entrance. Before `class30/target.ts` existed the
  * number was **zero** -- every one of them fell through `ZombieEntryState` to
  * `AttackRun` and went for the camera.
+ *
+ * The totals were 47 and 47 until the evt spawn opcodes 0x01-0x0A were read:
+ * those decode player-count-gated spawns the exporter had been dropping, so
+ * six more civilians and ten more captors are in the bundle now. The counts
+ * here are the corpus, not a target -- when the exporter learns to read
+ * something new they move, and that is the check working.
  *
  * `mauled` is the other side of it: ten civilians are killed by their captors
  * inside fifteen seconds, which is ten that can no longer be rescued. That is
@@ -201,8 +207,8 @@ console.log(`${total} civilians driven, ${moved} advanced, `
  * reached and the maul was an animation with no consequence. 30 of the game's
  * 51 cues are in that range; `tools/verify_maul_cues.py` is the corpus check.
  */
-const EXPECT = { total: 47, moved: 34, rescued: 17, holding: 4,
-                 captors: 47, inCaptorState: 45, mauled: 10 };
+const EXPECT = { total: 53, moved: 40, rescued: 23, holding: 4,
+                 captors: 57, inCaptorState: 55, mauled: 10 };
 const got = { total, moved, rescued, holding, captors, inCaptorState, mauled };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
 if (bad || total === 0 || missing.length) {
@@ -216,7 +222,7 @@ if (bad || total === 0 || missing.length) {
   }
   process.exit(1);
 }
-console.log("\nclean -- every shipped stream steps, none runs away, 45 of the "
-            + "47 captors work on their own civilian rather than on the "
+console.log("\nclean -- every shipped stream steps, none runs away, 55 of the "
+            + "57 captors work on their own civilian rather than on the "
             + "camera, and 10 civilians are mauled before anyone can save "
             + "them");

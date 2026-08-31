@@ -435,7 +435,7 @@ Supporting routines identified along the way:
 | `0x009C71E0`…`0x009C71F4` | `g_camera_eye_x/y/z`, `g_camera_pitch/yaw/roll_bams` | the resolved camera pose |
 | `0x009C7080` | `g_camera_update_hook` | installed by a scene state cell |
 | `0x009C6F0C` / `0x009C6F14` | `g_scene_state_major` / `_minor` | |
-| `0x009C8E58` / `0x009C70F4` | `g_camera_fixed_eye_y` / `g_camera_use_fixed_y` | written by evt opcodes `0x1A` and `0x36` |
+| `0x009C8E58` / `0x009C70F4` | `g_camera_fixed_eye_y` / `g_camera_use_fixed_y` | written by evt opcodes `0x1A` and `0x36`. The first is **misnamed** — it is the ground plane (`g_ground_plane_y`), read by the shadow, the breakables' floor and `QueryGroundHeightAt`'s miss; the camera is its minority reader |
 | `0x009C70AC` / `0x009C70B0` | `g_stashed_path_frame` / `_end_frame` | stashed by `queue_event 0x40` with `flags & 2` |
 | `0x009A2224` | current region id | written by evt opcode `0x29` |
 | `0x009A1A08` | current scene id | |

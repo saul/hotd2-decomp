@@ -229,9 +229,17 @@ export const G = {
   // -- the ground plane --------------------------------------------------
   /**
    * `g_camera_fixed_eye_y` — 0x009C8E58, also labelled `g_ground_plane_y`.
-   * `PlaceBreakableGroup` puts a group's floor at `this - 0.1`, and
-   * `BreakablePropGroundContact` tests against the same value. The camera
-   * opcode 0x1A writes it.
+   *
+   * **The name is wrong and is kept only because it is the one in the Ghidra
+   * database.** It is a *ground plane*, not an eye height: `EvtOpSetGroundPlaneY1A`
+   * (evt opcode 0x1A) writes it, `PlaceBreakableGroup` puts a group's floor at
+   * `this - 0.1`, `BreakablePropGroundContact` tests against the same value,
+   * `ActorDrawGroundShadow` draws on it, and `QueryGroundHeightAt` returns it
+   * when the `coli/` trace misses. Its one camera use is conditional on
+   * `g_camera_use_fixed_y`, which is where the name came from and which is the
+   * minority of its readers. Renaming it is a fifty-site sweep across the
+   * port, the docs, the tools and the database, so it is written down here
+   * rather than done half-way.
    */
   g_camera_fixed_eye_y: 0,
   /**

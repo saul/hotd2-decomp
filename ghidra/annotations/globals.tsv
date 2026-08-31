@@ -136,6 +136,8 @@
 007dcbb0	g_water_level	seeded to -24.90; class 0x16/0x17 own the wave field
 # --- audio ------------------------------------------------------------------
 005845f8	g_se_name_list	{u32 id; char name[48]}, stride 0x34, 324 records, id 0xFFFF ends
+005887fc	g_looping_se_ids	SE ids PlaySoundId (0x0041CFD0) plays LOOPED, walked as dwords until 0xFFFFFFFF. 44 entries, paired index for index with g_looping_se_stop_ids; seven ids appear twice, which is harmless because the walk stops at the first match.
+005888b0	g_looping_se_stop_ids	The stopper for each entry of g_looping_se_ids, same index, same length. An id found here makes PlaySoundId call SoundStopAllLoopingSe before playing it. All 44 pairs are X.wav against X_OFF.wav -- UFO_44, CHAIN_SAW_22, RAIN3ST_44, QUAKE_22, LASER_SWORD_22 -- which is what proves the pairing rather than the tables merely being adjacent.
 00580354	g_bgm_names_ar
 005803f8	g_bgm_names_plain
 0058044a	g_voice_records

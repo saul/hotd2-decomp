@@ -146,6 +146,21 @@ enum GrabSub {
   ThrowAway = 5,
 }
 
+/**
+ * State 27's four sound cues, resolved through `g_se_name_list` -- `0x005845F8`.
+ *
+ * `GRAB_SWORD_ON` and `GRAB_SWORD_OFF` are a **looping pair**:
+ * `PlaySoundId` -- `0x0041CFD0` -- carries two parallel 44-entry tables, the
+ * looping ids at `0x005887FC` and their stoppers at `0x005888B0`, and an id
+ * found in the second calls `SoundStopAllLoopingSe` before playing itself. All
+ * 44 pairs are `X.wav` against `X_OFF.wav`, and these two are one of them, so
+ * the hold ignites a sustained hum and the last fifteen frames kill it.
+ */
+const GRAB_STEP = 0x2516a9;        // COMMON\ENE_WALK2_11.WAV
+const GRAB_LAND = 0x2916a9;        // COMMON\ENE_WALK6_22.WAV
+const GRAB_SWORD_ON = 0x1f23a9;    // STAGE5_SE\LASER_SWORD_22.wav, loops
+const GRAB_SWORD_OFF = 0x2023a9;   // STAGE5_SE\LASER_SWORD_22_OFF.wav
+
 /** The two grab clips, picked at random, and the ride and finish clips. */
 const GRAB_RIDE = 0x1e9;
 const GRAB_A = 0x1e5;
@@ -153,8 +168,14 @@ const GRAB_B = 0x1e7;
 const GRAB_FINISH = 0x1e8;
 /** The frame of the grab clip the damage lands on. */
 const GRAB_HIT_FRAME = 30;
-/** It blinks for the last fifteen frames of the hold. */
-const GRAB_BLINK_TAIL = 15;
+/**
+ * It blinks for the **first** fifteen frames of the hold, not the last: the
+ * engine's test is `hold_frames - 15 < timer` against a timer that starts at
+ * `hold_frames` and counts down, so the flicker is how it arrives and the rest
+ * of the hold is solid. A hold shorter than fifteen frames never stops
+ * blinking, which is why the descriptor's holds are all longer.
+ */
+const GRAB_BLINK_FRAMES = 15;
 
 /**
  * `ThrowerStateGrabPlayer` — `FUN_0044EF90`, class 0x31 state 27.
@@ -196,6 +217,7 @@ export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
     // other two and never looks at them again.
     obj.vel.y = (obj.arcTo.y - obj.arcFrom.y) / g.drop_frames;
     obj.slideTimer = g.drop_frames;
+    events?.emit("sound.play", { id: GRAB_STEP });
     obj.sub = GrabSub.Descend;
   }
 
@@ -205,16 +227,25 @@ export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
     if (obj.slideTimer > 0) return ThrowerGrabRide(obj, eye);
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.pos.y = eye.y + obj.arcTo.y;
+    events?.emit("sound.play", { id: GRAB_LAND });
     obj.action = { motion: GRAB_RIDE, t: 0, loop: false };
     obj.rootActionFrame = -1;
     obj.slideTimer = g.hold_frames;
+    events?.emit("sound.play", { id: GRAB_SWORD_ON });
     obj.sub = GrabSub.Hold;
   }
 
   if (obj.sub === GrabSub.Hold) {
-    if (obj.slideTimer > g.hold_frames - GRAB_BLINK_TAIL) {
+    if (obj.slideTimer > g.hold_frames - GRAB_BLINK_FRAMES) {
       ThrowerBlink(obj);
     } else {
+      // **Every frame, not once.** The engine has no edge test here: the sound
+      // sits in the `else` arm of a per-frame branch, so it fires on each of
+      // the `hold_frames - 15` frames after the blink, and `PlaySoundId` does
+      // not de-duplicate -- it takes a free channel every call. Faithful is
+      // faithful; a renderer that wants one shot can collapse consecutive
+      // `sound.play` of the same id, but the port must not decide that for it.
+      events?.emit("sound.play", { id: GRAB_SWORD_OFF });
       obj.flags2 &= ~ThrowerFlag.Blinking;
       obj.alpha = 1;
     }
@@ -239,6 +270,12 @@ export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
     obj.action = { motion: GRAB_FINISH, t: 0, loop: false };
     obj.rootActionFrame = -1;
     obj.sub = GrabSub.ThrowAway;
+  }
+
+  if (obj.sub === GrabSub.ThrowAway && obj.action
+      && ActorClipFrame(obj) === Math.floor(
+           ActorClipLength(obj, obj.action.motion) / 2)) {
+    events?.emit("sound.play", { id: GRAB_STEP });
   }
 
   // Sub 5 rides the camera by **delta** rather than by offset, so the throw

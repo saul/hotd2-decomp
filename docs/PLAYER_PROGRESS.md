@@ -568,6 +568,14 @@ player it takes) and stage 6's eight (a three-hop blinking materialisation)
 were among the ones that previously did nothing at all. Two — 21 and 22 — are
 unreachable from anywhere and are ported because the state table names them.
 
+State 27, the grab, now plays its sounds. Two of the four are a **looping
+pair**: `PlaySoundId` walks two parallel tables — the looping ids at
+`0x005887FC` and their stoppers at `0x005888B0` — and all 44 pairs in them are
+`X.wav` against `X_OFF.wav`, so `LASER_SWORD_22` ignites on the landing and
+`LASER_SWORD_22_OFF` kills it before the strike. The off cue fires on *every*
+non-blinking frame of the hold, not once; the engine has no edge test there and
+`PlaySoundId` does not de-duplicate.
+
 **The player runs the game's own collision.** The bundle carries every `coli/`
 blob a scene loads and `game/coli.ts` is a transcription of
 `ColiSegmentVsMesh` and its callers, so the wall search, the ground height and
@@ -577,8 +585,19 @@ An earlier pass raycast the *drawn* mesh through a host seam, which could only
 ever see the resident region and had to report 0 for every surface; that seam
 is gone. Where the search genuinely finds nothing the actor does not climb,
 which is what the engine does when there is no wall — and against the real data
-**24 of the game's 49 class-0x31 spawns have a wall in reach and 14 a ceiling**,
-9 and 4 of them in stage 2.
+**38 of the game's 49 class-0x31 spawns stand on the collision mesh, 22 have a
+wall in reach and 11 a ceiling**, 9 and 2 of them in stage 2.
+
+`web/tools/coli_walls.mjs` runs that query through the port and asserts those
+four numbers against `tools/verify_thrower_walls.py`, which answers the same
+question in independent Python off the `coli/` files. The grounded count agrees
+exactly, and the two remaining gaps are the reference being deliberately
+looser — it is two-sided, so it counts the floor a spawn stands 0.05 units
+inside as a ceiling, and it measures nearest from the wrong end of the segment.
+Both are written up at the top of that file. The cross-check is what found the
+winding test's per-axis sign parity: the sign factor is the dominant normal
+component **negated on Y**, and one global polarity passes every floor in the
+game while rejecting every wall, or the reverse.
 
 Two evt opcodes came with it: `0x10` and `0x11` fill the full and the ray-only
 collision sets, and the difference between them is that the sphere test

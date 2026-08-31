@@ -1750,10 +1750,20 @@ function coliQuad(plane: [number, number, number, number], axis: number,
 /** A wall in the plane `x = 30`, forty units tall and eighty deep. */
 const WALL_BLOB = coliQuad([-1, 0, 0, 30], 0,
                            [30, -10, 5, 30, -10, 85, 30, 40, 85, 30, 40, 5]);
-/** ...and a floor at `y = 0`, which is where this file's actors stand. */
+/**
+ * ...and a floor at `y = 0`, which is where this file's actors stand.
+ *
+ * **Wound the way the game's own floors are**, which is clockwise seen from
+ * above: `coli2.bin:13864` quad 0, under stage 2's spawn at
+ * (-742, 40.1, -1725), runs `+x, -z, -x, +z`. It matters because the winding
+ * test's sign factor is the dominant normal component *negated on Y*, so a
+ * floor authored the other way round is rejected. These fixtures were wound
+ * counter-clockwise while `coli.ts` had one global polarity and both were
+ * wrong together -- the game's data is the arbiter, not the fixture.
+ */
 const FLOOR_BLOB = coliQuad([0, 1, 0, 0], 1,
-                            [-200, 0, -200, 200, 0, -200, 200, 0, 200,
-                             -200, 0, 200]);
+                            [-200, 0, 200, 200, 0, 200, 200, 0, -200,
+                             -200, 0, -200]);
 
 function thrower(state: number, extra: Record<string, unknown> = {}) {
   ResetGameGlobals();
@@ -2028,6 +2038,42 @@ console.log("class 0x31, ThrowerStateWaitForCue:");
 }
 
 
+console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
+{
+  const rng = new Rng(61);
+  const events = new Events();
+  const heard: number[] = [];
+  events.on("sound.play", (e: { id: number }) => heard.push(e.id));
+  // Stage 5's four `zslman`: ride the camera, drop on a cue, hold, grab.
+  const z = thrower(ThrowerState.GrabPlayer, {
+    attackState: 7,
+    grab: {
+      offset: [0, -40, 0], cue_frame: 20, drop_frames: 10, hold_frames: 25,
+      player: 0,
+    },
+  });
+  z.pos = vec3(0, 60, 0);
+  G.g_cam_path_frame = 0;
+  for (let i = 0; i < 5; i++) GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("no sound while it hangs off the camera waiting for the cue",
+        heard.length === 0, heard.map((h) => h.toString(16)).join());
+  G.g_cam_path_frame = 20;
+  GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("the cue frame plays one step -- COMMON\\ENE_WALK2_11",
+        heard.join() === String(0x2516a9), heard.map((h) => h.toString(16)).join());
+  for (let i = 0; i < 10; i++) GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("landing plays the thump, then ignites the looping laser sword",
+        heard.join() === [0x2516a9, 0x2916a9, 0x1f23a9].join(),
+        heard.map((h) => h.toString(16)).join());
+  // It blinks for the *first* fifteen frames of the hold and is solid for the
+  // rest, and the `_OFF` stopper sits in the `else` arm of that per-frame
+  // branch with no edge test -- so with a 25-frame hold it fires ten times.
+  for (let i = 0; i < 25; i++) GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  const offs = heard.filter((h) => h === 0x2023a9).length;
+  check("...and the `_OFF` stopper fires on each of the 10 non-blinking frames",
+        offs === 10, `${offs}`);
+}
+
 // -- 14. the collision, against real quads -----------------------------------
 
 console.log("coli/, the game's own collision:");
@@ -2037,18 +2083,38 @@ console.log("coli/, the game's own collision:");
   G.g_coli_full_set = ["wall", "floor"];
   G.g_camera_fixed_eye_y = -999;          // so a fallback is unmistakable
 
-  // A segment straight at the wall in the plane x = 30.
+  // The wall's normal is -X, so its front is x < 30 — where the actor stands.
+  // Every probe in the game traces **inward**, from a far point to the actor,
+  // which is the direction the engine's `d0 <= 0 && d1 > 0` accepts.
   check("a segment across a quad hits it, at the quad's own plane",
-        ColiTraceSegmentAllSets(0, 10, 45, 60, 10, 45)
+        ColiTraceSegmentAllSets(60, 10, 45, 0, 10, 45)
         && Math.abs(G.g_coli_hit_x - 30) < 1e-4, `x ${G.g_coli_hit_x}`);
   check("...and reports the quad's material, which only coli/ carries",
         G.g_coli_hit_surface === 52, `${G.g_coli_hit_surface}`);
+  // **A quad is one-sided.** The engine accepts only "behind, then in front",
+  // and `g_coli_allow_backface` is written by nothing in the program — so the
+  // same segment reversed does not hit at all. Reading the test as "opposite
+  // signs" would make every wall in the game two-sided.
+  check("the same segment reversed does not hit: quads are one-sided",
+        !ColiTraceSegmentAllSets(0, 10, 45, 60, 10, 45));
   // Past the quad's own extent: the winding test refuses it.
   check("a segment past the quad's edge misses",
-        !ColiTraceSegmentAllSets(0, 100, 45, 60, 100, 45));
+        !ColiTraceSegmentAllSets(60, 100, 45, 0, 100, 45));
   // Same side of the plane at both ends: no crossing, no hit.
   check("a segment that never crosses the plane misses",
-        !ColiTraceSegmentAllSets(0, 10, 45, 20, 10, 45));
+        !ColiTraceSegmentAllSets(20, 10, 45, 0, 10, 45));
+  // Nearest is measured from the **second** endpoint, which is what makes a
+  // ground query find the floor under your feet and not the lowest in the map.
+  T.coli = { files: ["test"], blobs: { hi: coliQuad([0, 1, 0, -20], 1,
+      [-50, 20, 50, 50, 20, 50, 50, 20, -50, -50, 20, -50], 61),
+    floor: FLOOR_BLOB } };
+  G.g_coli_full_set = ["hi", "floor"];
+  check("the nearer surface to the query's own end wins",
+        QueryGroundHeightAt(0, 30, 0) === 20, `${QueryGroundHeightAt(0, 30, 0)}`);
+  check("...and from below it is the low one",
+        QueryGroundHeightAt(0, 10, 0) === 0, `${QueryGroundHeightAt(0, 10, 0)}`);
+  T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+  G.g_coli_full_set = ["wall", "floor"];
 
   check("the ground height comes off the floor quad",
         Math.abs(QueryGroundHeightAt(10, 20, 10)) < 1e-4,
@@ -2060,11 +2126,47 @@ console.log("coli/, the game's own collision:");
         QueryGroundSurfaceAt(10, 20, 10) === 52
         && QueryGroundSurfaceAt(10, 20, 9999) === 0);
 
+  // The regression that cost a session: the winding test's sign factor is the
+  // dominant normal component, but **negated on Y**, because dropping to the
+  // (x, z) plane picks up the handedness of `x_hat x z_hat = -y_hat` while
+  // (y, z) and (x, y) do not. One global polarity passes floors and rejects
+  // every wall in the game -- or the reverse. All three axes, both signs.
+  T.coli = { files: ["test"], blobs: {
+    xneg: WALL_BLOB,
+    xpos: coliQuad([1, 0, 0, 30], 0,
+                   [-30, -10, 85, -30, -10, 5, -30, 40, 5, -30, 40, 85]),
+    zneg: coliQuad([0, 0, -1, 30], 2,
+                   [5, -10, 30, -75, -10, 30, -75, 40, 30, 5, 40, 30]),
+    zpos: coliQuad([0, 0, 1, 30], 2,
+                   [-75, -10, -30, 5, -10, -30, 5, 40, -30, -75, 40, -30]),
+    yup: FLOOR_BLOB,
+    ydown: coliQuad([0, -1, 0, 50], 1,
+                    [-200, 50, -200, 200, 50, -200, 200, 50, 200,
+                     -200, 50, 200]),
+  } };
+  G.g_coli_full_set = ["xneg", "xpos", "zneg", "zpos", "yup", "ydown"];
+  const faces: [string, number[], number[]][] = [
+    ["+x wall", [60, 10, 45], [0, 10, 45]],
+    ["-x wall", [-60, 10, 45], [0, 10, 45]],
+    ["+z wall", [-35, 10, 60], [-35, 10, 0]],
+    ["-z wall", [-35, 10, -60], [-35, 10, 0]],
+    ["floor", [0, -60, 0], [0, 10, 0]],
+    ["ceiling", [0, 110, 0], [0, 10, 0]],
+  ];
+  const missed = faces.filter(([, a, b]) =>
+    !ColiTraceSegmentAllSets(a[0], a[1], a[2], b[0], b[1], b[2]))
+    .map(([n]) => n);
+  check("every face orientation is hit from behind, on all three axes",
+        missed.length === 0, `missed ${missed.join()}`);
+  T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+  G.g_coli_full_set = ["wall", "floor"];
+
+
   // The two sets differ in exactly one way: the sphere test ignores ray-only.
   G.g_coli_full_set = [];
   G.g_coli_ray_set = ["wall"];
   check("a ray-only blob still stops a segment",
-        ColiTraceSegmentAllSets(0, 10, 45, 60, 10, 45));
+        ColiTraceSegmentAllSets(60, 10, 45, 0, 10, 45));
   check("...but the sphere test does not see it",
         !ColiTestSphereAgainstFullSet(28, 10, 45, 5));
   G.g_coli_full_set = ["wall"];

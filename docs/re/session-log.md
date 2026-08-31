@@ -5723,3 +5723,132 @@ sets.
 push-outs are not wired: nothing has read the engine's own penetration depth,
 and pushing an actor by a number I invented would be worse than not pushing it.
 Marked `[open]` in the port.
+
+## The winding test had a sign parity, and one polarity cannot serve three axes
+
+`web/tools/coli_walls.mjs` runs the port's own `game/coli.ts` over every
+class-0x31 spawn in the game and prints the same summary as
+`tools/verify_thrower_walls.py`, which answers the same question in independent
+Python straight off the `coli/` files. They disagreed, and badly:
+
+```
+port:   49 spawns: 1 stand on the collision mesh, 0 reach a wall, 0 have a ceiling
+python: 49 spawns: 38 stand on the collision mesh, 24 reach a wall, 14 have a ceiling
+```
+
+The cross-check earned its keep twice over. Two separate faults, and the
+disagreement named the spawn to look at in both cases.
+
+**One:** the point-in-quad test's acceptance sign was inverted. `coli2.bin:13864`
+quad 0 is a floor at `y = 40.1` spanning `x -776..-742`, `z -1796..-1707`, and
+stage 2's `17/5/1` stands at `(-742, 40.1, -1725)` — plainly inside it. All four
+edge terms came out negative under the transcribed `>= 0`, so every floor in the
+game was being rejected.
+
+**Two, and this is the one worth remembering:** flipping the sign fixed the
+floors and left *every wall in the game* unreachable — 37 grounded, 1 wall. The
+sign factor is the dominant normal component, but the reduction from a 3D
+`edge × (P − vertex) · n` to two components picks up the handedness of
+`û × v̂`, and that is `+x̂` for axis 0 and `+ẑ` for axis 2 but **`−ŷ`** for
+axis 1, because `x̂ × ẑ` points *down*. One global polarity is not a
+transcription detail that can be got slightly wrong; it is arithmetically
+incapable of serving all three axes, and it will always look right on whichever
+of the two families you tested. With `w = axis === 1 ? -ny : (axis === 0 ? nx : nz)`
+the port reports **38 grounded, exactly matching the reference**.
+
+### What the wrong turn cost, and what stopped it being worse
+
+Two rounds were spent testing hypotheses that the data had already excluded —
+disabling the AABB reject, disabling the surface-0 skip, comparing blob and
+quad counts — and one round was wasted on a two-sided-plane experiment whose
+patch silently did not apply, because the search string was indented four
+spaces and the source two. `str.replace` on a non-matching string is a no-op
+that returns the original, and the run that followed printed numbers identical
+to the unpatched run, which read as "not the cause". **Any programmatic edit
+used as an experiment needs an assertion that it applied.** The re-run with an
+`assert` immediately gave 14 ceilings where the same "experiment" had given 11.
+
+### The two places the port and the reference still differ, both settled
+
+They do not agree exactly, and each gap was chased to the individual spawn
+rather than waved through as "the Python is looser":
+
+* **Ceilings, 11 against 14.** Three spawns stand on a floor whose plane they
+  are 0.05 units *below* — `coli2.bin:23720` quad 11 under stage 2's
+  `(-1033.1, 129.2, -1914.2)`, and two like it. A trace from a thousand units up
+  meets that floor from the **front**, and the engine takes a quad only from
+  behind, so it is not a ceiling. The reference is two-sided and counts the
+  floor underfoot as a roof.
+* **Walls, 22 against 24.** `ColiSegmentVsMesh` judges nearest from the
+  segment's **second** endpoint — `ThrowerFindWallBeside` passes the actor
+  there — and the reference measures from the first. On two stage-4 spawns that
+  picks a different floor out of a stack and moves the nine-to-twenty-nine probe
+  band off a wall quad only 10.8 units tall.
+
+Flipping either rule in `coli.ts` reproduces the reference's number *exactly*,
+which is what closes the accounting: the gap is those two decisions and nothing
+else. `coli_walls.mjs` now asserts 49 / 38 / 22 / 11 and fails on any other
+move, and `port.test.ts` gained a six-quad fixture covering both signs of all
+three axes — the case that would have caught the parity in the first hour.
+
+### The fixtures were wound to fit the bug
+
+`port.test.ts`'s hand-authored floor quads were wound counter-clockwise seen
+from above, and passed only because `coli.ts` had the matching wrong polarity:
+two wrongs agreeing is exactly what a fixture written alongside the code under
+test will do. The game's own floors run `+x, −z, −x, +z`; the fixtures now do
+too, and say why.
+
+## Class 0x31 state 27's sounds, and the looping-SE pair tables
+
+`ThrowerStateGrabPlayer` (`FUN_0044EF90`) makes four `PlaySoundId` calls, and
+what they are is settled by `g_se_name_list`:
+
+| id | file | where |
+| --- | --- | --- |
+| `0x2516A9` | `COMMON\ENE_WALK2_11.WAV` | the cue frame, and again halfway through the finish clip |
+| `0x2916A9` | `COMMON\ENE_WALK6_22.WAV` | the landing |
+| `0x1F23A9` | `STAGE5_SE\LASER_SWORD_22.wav` | the hold begins |
+| `0x2023A9` | `STAGE5_SE\LASER_SWORD_22_OFF.wav` | every non-blinking frame of the hold |
+
+The last two are a **looping pair**, which is a general mechanism worth
+recording. `PlaySoundId` (`0x0041CFD0`) carries two parallel tables walked in
+lockstep — looping ids at `0x005887FC`, their stoppers at `0x005888B0`, both
+terminated by `0xFFFFFFFF`. An id found in the first plays looped; an id found
+in the second calls `SoundStopAllLoopingSe` and then plays itself. There are
+**44 pairs, and all 44 are `X.wav` against `X_OFF.wav`** — `UFO_44`,
+`CHAIN_SAW_22`, `RAIN3ST_44`, `BOAT_SLOW`, `QUAKE_22`, `LASER_SWORD_22`. Seven
+ids appear twice in the tables, which is harmless: the walk stops at the first
+match.
+
+So the grab ignites a sustained hum on landing and kills it before the strike.
+
+Two corrections to the earlier reading, both from the decompilation rather than
+from the shape of the code:
+
+* The blink is the **first** fifteen frames of the hold, not the last. The test
+  is `hold_frames - 15 < timer` against a timer that starts at `hold_frames` and
+  counts down, so the flicker is how the actor arrives and the rest of the hold
+  is solid. The port's constant was named `GRAB_BLINK_TAIL`; it is now
+  `GRAB_BLINK_FRAMES`.
+* The `_OFF` cue is **not** a one-shot. It sits in the `else` arm of a per-frame
+  branch with no edge test, so it fires on each of the `hold_frames - 15`
+  non-blinking frames, and `PlaySoundId` takes a free channel every call. An
+  earlier note here had it as "once on the crossing frame — do not re-fire",
+  which was reading intent into the code instead of reading the code. The port
+  emits all of them; a renderer may collapse them, the port may not decide that.
+
+## `g_camera_fixed_eye_y` is misnamed, and is not being renamed today
+
+`0x009C8E58` is a **ground plane**, not an eye height. `EvtOpSetGroundPlaneY1A`
+writes it; `PlaceBreakableGroup` puts a group's floor at `this - 0.1`;
+`BreakablePropGroundContact`, `ActorDrawGroundShadow`,
+`TraceActorSurfaceContactPoint` and `QueryGroundHeightAt`'s miss path all read
+it as the floor. Its one camera use is conditional on `g_camera_use_fixed_y`,
+and that minority reader is where the name came from.
+
+The rename is right and is roughly fifty sites across the port, the docs, the
+tools and the live database — several of them in files a peer workstream is
+editing right now. Doing it half-way is worse than not doing it, so it is
+recorded at the definition in `globals.ts` and in `addresses.md` and left for a
+session that can sweep it in one commit.

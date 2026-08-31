@@ -19,11 +19,22 @@
  * applied it to every state, which was both the wrong shape and thirteen times
  * too slow.
  *
- * [diverges] What is still unread is the *mechanism*: `EnemyZombieUpdate`
- * integrates `obj+0x40 += obj+0x4C` and something must put the clip's root
- * delta there, but neither the states nor `ZombieAdvanceMotion` visibly do it.
- * The magnitudes below are measured from the clips rather than invented, so
- * only the transfer is in question.
+ * **The mechanism is `SkeletonApplyRootMotion` (`FUN_00410C50`)**, and it was
+ * `[open]` here for a long time. It does not go through `obj+0x4C` at all: the
+ * draw walk reaches it as `ActorAdvanceMotion` -> `DrawSkinnedModelAndShadow`
+ * -> `SkeletonDrawWalk` -> `SkeletonPoseRootFrame`, and it writes the rotated
+ * delta straight onto `g_cur_actor`'s position. Its gate is motion-block
+ * `+0x64` bit 1 — which is `obj+0x1F8`, and `ActorBuildSkinnedModel` sets it
+ * to 3 unconditionally for **every skeletal actor in the game**. So root
+ * motion is on from frame one for class 0x30 and class 0x31 alike; there is
+ * no per-state or per-class switch, and nothing carries an actor but its
+ * clips.
+ *
+ * [diverges] The engine rotates the delta by the full `Rz · Ry · Rx` and a
+ * per-character scale; this rotates by yaw alone. That is exact for anything
+ * standing upright and wrong for a class-0x31 actor on a wall or a ceiling,
+ * whose pitch and roll are not zero — which is `[open]` until something needs
+ * it, because the clips those stances play carry no root translation.
  */
 import type { BakedMotion } from "../bundle";
 import type { Actor } from "./actor";
@@ -44,10 +55,15 @@ export function rootDelta(m: BakedMotion, prev: number, next: number):
   const [px, pz] = at(Math.min(prev, n - 1));
   const [nx, nz] = at(Math.min(next, n - 1));
   if (next > prev) return { x: nx - px, z: nz - pz };
-  // The clip looped: finish the cycle, then start the next one.
-  const [ex, ez] = at(n - 1);
+  // **The loop wrap is damped, not stitched.** `SkeletonApplyRootMotion` tests
+  // `|frame - previous| > play_length / 4` and, when it trips, resets the
+  // baseline to `root + (root - baseline) / play_length` instead of taking the
+  // delta — so the wrap frame contributes very nearly nothing and a looping
+  // walk does not lurch once a cycle. Summing "finish the cycle, then start
+  // the next" as this used to gives the wrap frame a whole clip's worth of
+  // translation in one tick.
   const [sx, sz] = at(0);
-  return { x: (ex - px) + (nx - sx), z: (ez - pz) + (nz - sz) };
+  return { x: (nx - sx) / n, z: (nz - sz) / n };
 }
 
 /**

@@ -55,11 +55,20 @@ function blobsOf(keys: readonly string[]): ColiBlob[] {
  * One quad against one segment — the inner half of `ColiSegmentVsMesh`
  * (`FUN_004AAA40`).
  *
- * Signed plane distances at both ends; a hit needs **opposite signs**, so a
- * segment that starts and ends on the same side of the plane cannot hit it.
- * The intersection is the distance-weighted blend of the endpoints, and the
- * point-in-quad test is four 2D cross products in the plane the dominant axis
- * drops.
+ * Three details that are easy to get almost right:
+ *
+ * * **The accepted sign combination is `d0 <= 0 && d1 > 0`** — the first point
+ *   behind or on the plane and the second strictly in front. The mirror case
+ *   is the *back-face* crossing, gated on `g_coli_allow_backface`
+ *   (0x009CAC5C), which nothing in the program writes — so it never happens.
+ *   Accepting "opposite signs" would make every quad two-sided.
+ * * **The winding test wants all four cross products, times the dominant
+ *   normal component, `>= 0`** — not merely to agree with each other. Folding
+ *   `n[axis]` in is what makes it independent of the quad's winding.
+ * * **Nearest is measured from the segment's *second* endpoint.** Every caller
+ *   puts the actor there — `QueryGroundHeightAt` traces from `y - 1000` **up
+ *   to** the actor — so that is what picks the ground nearest under your feet
+ *   rather than the lowest floor in the level.
  */
 function quadVsSegment(b: ColiBlob, i: number,
                        ax: number, ay: number, az: number,
@@ -68,35 +77,51 @@ function quadVsSegment(b: ColiBlob, i: number,
   const p = i * 4;
   const nx = b.plane[p], ny = b.plane[p + 1], nz = b.plane[p + 2];
   const d = b.plane[p + 3];
-  const da = nx * ax + ny * ay + nz * az + d;
-  const db = nx * bx + ny * by + nz * bz + d;
-  if ((da > 0) === (db > 0)) return false;
-  const t = da / (da - db);
+  const d0 = nx * ax + ny * ay + nz * az + d;
+  if (d0 > 0) return false;                    // back-facing: never accepted
+  const d1 = nx * bx + ny * by + nz * bz + d;
+  if (d1 <= 0) return false;
+  // `P = (|d1|*P0 + |d0|*P1) / (|d0| + |d1|)`, which this is.
+  const t = d0 / (d0 - d1);
   const hx = ax + (bx - ax) * t;
   const hy = ay + (by - ay) * t;
   const hz = az + (bz - az) * t;
 
-  const [u, v] = PLANE_AXES[b.axis[i]] ?? PLANE_AXES[1];
+  const axis = b.axis[i];
+  const [u, v] = PLANE_AXES[axis] ?? PLANE_AXES[1];
+  // The sign factor is the normal's dominant component -- **negated on Y**.
+  //
+  // Each edge term is the 3D `edge x (P - vertex)` dotted with the normal,
+  // written in the two components the dominant axis leaves. Dropping to two
+  // dimensions picks up the handedness of `u_hat x v_hat`, which is `+x` for
+  // axis 0 and `+z` for axis 2 but **`-y`** for axis 1, because `x_hat x z_hat`
+  // points down. One global polarity therefore cannot serve all three, and that
+  // is exactly the shape of the bug this replaced: floors (axis 1) passed and
+  // every wall in the game was rejected.
+  const w = axis === 0 ? nx : axis === 1 ? -ny : nz;
   const q = i * 12;
   const hu = u === 0 ? hx : u === 1 ? hy : hz;
   const hv = v === 0 ? hx : v === 1 ? hy : hz;
-  let sign = 0;
   for (let k = 0; k < 4; k++) {
     const a0 = q + k * 3;
     const a1 = q + ((k + 1) & 3) * 3;
     const u0 = b.verts[a0 + u], v0 = b.verts[a0 + v];
     const u1 = b.verts[a1 + u], v1 = b.verts[a1 + v];
-    const cross = (u1 - u0) * (hv - v0) - (v1 - v0) * (hu - u0);
-    if (cross === 0) continue;
-    const s = cross > 0 ? 1 : -1;
-    if (sign === 0) sign = s;
-    else if (s !== sign) return false;
+    // Every edge term must be non-negative, and the two cases that settle the
+    // expression and the sign factor together are both in the data:
+    // `coli2.bin:13864` quad 0 is a floor at y = 40.1 spanning x -776..-742,
+    // z -1796..-1707 with stage 2's `17/5/1` standing on it at
+    // (-742, 40.1, -1725), and `coli2.bin:15760` is the wall at x = -717.8 that
+    // the same stage's spawn at (-741.3, 47.0, -823.6) leaps onto. Both come
+    // out positive on all four edges; either sign factor on its own rejects
+    // one of the two.
+    if (((v1 - v0) * (u0 - hu) - (v0 - hv) * (u1 - u0)) * w < 0) return false;
   }
 
   out.x = hx; out.y = hy; out.z = hz;
   out.nx = nx; out.ny = ny; out.nz = nz;
   out.surface = b.surface[i];
-  const dx = hx - ax, dy = hy - ay, dz = hz - az;
+  const dx = hx - bx, dy = hy - by, dz = hz - bz;
   out.distSq = dx * dx + dy * dy + dz * dz;
   return true;
 }
@@ -118,6 +143,11 @@ export function ColiSegmentVsMesh(b: ColiBlob,
 
   for (let i = 0; i < b.n; i++) {
     if (!quadVsSegment(b, i, ax, ay, az, bx, by, bz, _hit)) continue;
+    // The engine's "have I a hit yet" guard is the **surface id**, not a
+    // boolean, so a quad whose surface is 0 reads as a miss *and* does not
+    // occlude anything tested after it. Five quads in the corpus are like
+    // that; they are effectively transparent.
+    if (_hit.surface === 0) continue;
     if (found && _hit.distSq >= best.distSq) continue;
     best.x = _hit.x; best.y = _hit.y; best.z = _hit.z;
     best.nx = _hit.nx; best.ny = _hit.ny; best.nz = _hit.nz;
@@ -134,9 +164,23 @@ const _best: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
 /**
  * `ColiTraceSegmentAllSets` — `FUN_004053B0`.
  *
- * Both script-selected sets, nearest hit wins. Writes `g_coli_hit_surface`,
- * `g_coli_hit_x/y/z` and the normal, which is how every caller reads the
- * answer: the return value only says whether there *was* one.
+ * Both script-selected sets, **nearest to the second endpoint** wins, and a
+ * hit in the first does not short-circuit the second. It writes
+ * `g_coli_hit_surface`, `g_coli_hit_x/y/z` and the normal, which is how every
+ * caller reads the answer: the return value only says whether there *was* one.
+ *
+ * [diverges] The engine runs a **third** pass, first, over dynamic actors'
+ * own collision blobs, each traced in that actor's object space. The port has
+ * no per-actor blobs, so it has nothing to put in that pass.
+ *
+ * [open] The engine keys its nearest-of-all pass on `trunc(distance * 10)`
+ * and radix-sorts **only the low sixteen bits**, so a hit beyond 6553.5 units
+ * wraps and can win spuriously. This compares the distances directly; nothing
+ * in the shipped data traces that far.
+ *
+ * Opcode `0x11` never appears in any shipped script, so the ray-only pass is
+ * dead in practice — it is here because the opcode is real, not because
+ * anything uses it.
  */
 export function ColiTraceSegmentAllSets(ax: number, ay: number, az: number,
                                         bx: number, by: number, bz: number):
@@ -185,11 +229,16 @@ export function QueryGroundSurfaceAt(x: number, y: number, z: number): number {
  * is the difference between the two sets: a bullet is stopped by scenery a body
  * walks through.
  *
- * [diverges] The engine's own test and its penetration depth are `[open]` —
- * this is a plane-distance test against each quad of each full-set blob, which
- * gives the same answer for a sphere resting on a face and an approximate one
- * near an edge. `g_coli_hit_depth` is how far inside the sphere's centre is,
- * which is what `ThrowerPushOutOfWorld` multiplies by 0.1.
+ * The depth is `radius - sqrt(distance²)` — how far the sphere must move along
+ * `g_coli_hit_normal` to be exactly tangent — and its callers apply **all** of
+ * it. The `depth * 0.1` an earlier note here mentioned belongs to a different
+ * hook: `ColiTestSphereAgainstActors`, the actor-versus-actor test, which also
+ * pushes on X and Z only.
+ *
+ * [diverges] The engine clamps to the nearest point on an *edge* when the
+ * centre projects outside the quad and reports `centre - that point` as the
+ * normal; this takes the face case alone, which is exact for a sphere resting
+ * on a face and an approximation near an edge.
  */
 export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
                                              cz: number, r: number): boolean {

@@ -92,6 +92,22 @@ export const G = {
   g_attack_permits: [-1] as number[],
   /** `g_max_attackers` — 0x009C8E84. */
   g_max_attackers: 1,
+  /**
+   * `g_attack_committed` — 0x009A34F0. One enemy off camera may hold a
+   * permit; while it does, **nobody else may claim one at all**.
+   *
+   * Both claim functions read it first and give up, and both set it when the
+   * actor they are about to grant is off screen. It is cleared by the two
+   * release functions and by `ZombieStateHoldAtRange`, each gated on the
+   * actor's own bit — `obj+0x136C` bit 0x20000 for class 0x30, bit 0x8000 for
+   * class 0x31.
+   *
+   * The port used to have neither half: it **refused** an off-screen claim
+   * outright, so an enemy that ended up level with the camera could never take
+   * a permit, never attack, never run the state that retreats, and stood there
+   * for good.
+   */
+  g_attack_committed: 0,
 
   // -- the approach rings, copied from the defaults by the scene reset ----
   /** `g_enemy_approach_rings` — 0x009A2BE0, the inner radius per ring set. */
@@ -380,6 +396,7 @@ export function ResetGameGlobals(): void {
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
   G.g_attack_permits = new Array(G.g_max_attackers).fill(-1);
+  G.g_attack_committed = 0;
   G.g_enemy_approach_rings = [];
   G.g_enemy_approach_ring_mid = [];
   G.g_enemy_approach_ring_outer = [];

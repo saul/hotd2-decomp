@@ -6269,3 +6269,77 @@ caught. The call goes in when there is a player state to test. Recorded as
 keeping a crowd from occupying one point, and it feeds directly back into how
 often the actor holding the permit is actually in range. Then the adaptive
 `UpdateDamageRank`.
+
+---
+
+## Session 2026-08-31h — the off-screen permit, and a collision overlay
+
+**Outcome:** the reported "zsass walks into the camera and never leaves" traced
+to one inverted test. Fixed, with the global latch it belongs to. New
+`web/src/render/coli_debug.ts` and a `Collision` checkbox.
+
+### The bug: being off screen does not refuse a permit
+
+`TryClaimAttackSlot` (`FUN_00455DE0`) and `ThrowerTryClaimAttackSlot`
+(`FUN_0044CA40`) both call `ActorIsOnScreen`, and the port read that as a
+refusal:
+
+```ts
+if (host && !ActorIsOnScreen(obj, host)) return false;
+```
+
+The engine does the opposite. It grants the permit either way, and when the
+claimer is **off screen** it additionally sets the actor's own bit —
+`obj+0x136C` 0x20000 for class 0x30, 0x8000 for class 0x31 — and the global
+`g_attack_committed` (0x009A34F0). Both claim functions *read* that global
+first and give up before a player is even picked, so **one enemy may be
+attacking unseen and while one is, nobody else may claim at all**. It is
+cleared by `ReleaseAttackSlot` (`FUN_00456520`), `ThrowerReleaseAttackPermit`
+(`FUN_0044CFB0`) and `ZombieStateHoldAtRange`, each gated on that same bit.
+
+The consequence of the port's reading is exactly what was reported: an actor
+the camera's rail has walked into is off screen, is refused a permit for ever,
+sits in `ThrowerStateWaitForPermit` idling, and therefore never reaches
+`ThrowerStatePounce` → `ThrowerStateLeapAside`, which is the *only* thing that
+puts a thrower back to fifty units. `zsass` shows it worst because its whole
+cycle is close in, pounce, leap back.
+
+Measured before and after with a harness that walks the camera into eight
+stage-2 `zsass`: before, none of the ones the camera reached ever left
+`WaitForPermit`; after, they run `WaitForPermit → Pounce → LeapAside` and
+recover from a minimum of 1.1 units back out to 35 and beyond.
+
+`port.test.ts`'s `ActorIsOnScreen` block asserted the old behaviour and now
+asserts the new one, including that the latch blocks a second claimant and that
+releasing lifts it.
+
+### The other half of the report: "misaligned to the walls"
+
+That one is the engine. `ThrowerStateLeapAside` (`FUN_0044B880`) builds its
+landing point in the **camera's own frame** — `MatrixTranslate(eye);
+MatrixRotateY(g_camera_yaw_bams)` and a local `(±5, 0, 50)` — so the left/right
+choice is five units either side of where the camera is looking and knows
+nothing about the geometry. The only collision it consults is a **vertical**
+segment through that point, from a thousand units below the actor's tracked
+height to a thousand above, to find the floor to land on. So: aligned to the
+camera, corrected in `y` by the mesh, and never in `x`/`z`.
+
+### The overlay
+
+`Collision` draws exactly what the port traces: the quads in
+`G.g_coli_full_set` in amber, the ray-only ones in blue, a spike on each
+normal, and nothing for a blob in neither list — because nothing tests those.
+It rebuilds only when the script's own opcodes change the selection, which is a
+handful of times a stage.
+
+### Wrong turn
+
+The first attempt at this session's fix also wired `IsPlayerAttackable` into
+the claim, where the engine has it. That is the same trap as last session and
+it was caught the same way: the port's stand-in tests `g_player_lives` while
+the engine tests the player *state word*, so every enemy stopped attacking
+after two hits. Left out again, with the reason at the call site.
+
+**Next actions:** `ZombiePushOutOfWorldAndActors` (`FUN_00454900`), still the
+only unported thing keeping a crowd from occupying one point — and now that
+off-screen actors can hold permits again, how tightly they pack matters more.

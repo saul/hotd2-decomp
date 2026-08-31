@@ -45,6 +45,7 @@ import { RigLayer } from "../render/rigs";
 import { CharacterLayer } from "../render/characters";
 import { PropLayer } from "../render/props";
 import { Shooting } from "../render/shooting";
+import { ColiDebugLayer } from "../render/coli_debug";
 import { World } from "../core/world";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
@@ -107,6 +108,8 @@ class Player {
   private readonly props = new PropLayer();
   private readonly breakables = new BreakableLayer();
   private readonly shooting = new Shooting($("#viewport"), this.chars);
+  /** The `coli/` overlay — see `render/coli_debug.ts`. */
+  private readonly coliDebug = new ColiDebugLayer();
   /**
    * The stage's `sound` block, kept for the one caller that is not the walker:
    * class 0x10's op 0x1D plays a dialogue group from inside the port, and the
@@ -371,6 +374,7 @@ class Player {
     // character layer is the seam the port already reaches the renderer
     // through, so they are handed to it rather than duplicated in `game/`.
     this.chars.paths = this.paths;
+    this.coliDebug.attach(this.stage.root, bundle.script.coli);
     this.chars.civilians = bundle.script.civilians ?? null;
     this.chars.attach(this.stage.root, bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
@@ -400,6 +404,7 @@ class Player {
     this.rails.setAimRailsVisible($<HTMLInputElement>("#show-aim").checked);
     this.debug.showUnported = $<HTMLInputElement>("#show-unported").checked;
     this.debug.showBoxes = $<HTMLInputElement>("#show-boxes").checked;
+    this.coliDebug.setEnabled($<HTMLInputElement>("#show-coli").checked);
 
     this.walker = new Walker(bundle.script, {
       enterRegion: (r) => this.stage?.enterRegion(r),
@@ -559,6 +564,9 @@ class Player {
     });
     $<HTMLInputElement>("#show-unported").addEventListener("change", (e) => {
       this.debug.showUnported = (e.target as HTMLInputElement).checked;
+    });
+    $<HTMLInputElement>("#show-coli").addEventListener("change", (e) => {
+      this.coliDebug.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-boxes").addEventListener("change", (e) => {
       this.debug.showBoxes = (e.target as HTMLInputElement).checked;
@@ -1238,6 +1246,9 @@ class Player {
     // Impact sprites run on wall time: they are feedback for a click, not part
     // of the script's clock, so a paused player still shows them out.
     this.shooting.update(t.wall);
+    // Cheap: it rebuilds only when the script has selected a different
+    // set of blobs, which is a handful of times a stage.
+    this.coliDebug.refresh();
     // The volume follows the camera's yaw only, so it stays world-vertical.
     this.rain.update(w.rain, this.camera.position,
                      Math.atan2(-this._fwd.x, -this._fwd.z),
@@ -1337,6 +1348,7 @@ class Player {
       ["props", this.props.describe],
       ["breakables", this.breakables.describe],
       ["shooting", this.shooting.describe],
+      ["coli", this.coliDebug.describe],
       ["enemies", this.game.describe],
       ["lives", `${G.g_player_lives[0]}`
         + (G.g_player_invuln_frames > 0

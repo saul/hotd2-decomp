@@ -129,6 +129,25 @@ export enum ThrowerFlag {
   Struck = 0x800,
   /** Mid-pounce: the stance row moves by four. */
   Pouncing = 0x20000,
+  /**
+   * This actor took its permit while **off screen**, and `g_offscreen_attacker`
+   * is latched because of it. `ThrowerReleaseAttackPermit` clears both.
+   *
+   * Class 0x30 keeps the same fact in bit `0x20000` of the same word — which
+   * is `Pouncing` here, and harmless only because no actor is both classes.
+   */
+  OffScreenPermit = 0x8000,
+}
+
+/** `obj+0x136C` for class 0x30, where the bits differ from the thrower's. */
+export enum ZombieFlag2 {
+  /**
+   * The class-0x30 half of {@link ThrowerFlag.OffScreenPermit}:
+   * `TryClaimAttackSlot` sets it, `ReleaseAttackSlot` and
+   * `ZombieStateHoldAtRange` clear it, and each clears
+   * `g_offscreen_attacker` with it.
+   */
+  OffScreenPermit = 0x20000,
 }
 
 /**

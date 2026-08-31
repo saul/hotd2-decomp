@@ -28,7 +28,9 @@ import {
 } from "../src/game/coli";
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
-import { ActorFlag } from "../src/game/actor";
+import { ActorFlag, ZombieFlag2 } from "../src/game/actor";
+import { ReleaseAttackSlot, TryClaimAttackSlot }
+  from "../src/game/combat/permits";
 import { EnemyZombieUpdate } from "../src/game/class30";
 import { ZombieScriptEnded } from "../src/game/class30/target";
 import type { TargetScriptJson } from "../src/bundle/characters";
@@ -536,9 +538,11 @@ console.log("ActorIsOnScreen:");
   z.motion = 10;
   z.lookAt = vec3(0, 4, 40);
 
-  // `TryClaimAttackSlot` calls `ActorIsOnScreen` (`FUN_00409C10`) first, so an
-  // enemy off the side of the frame cannot start an attack -- nor sit on the
-  // one permit while it is out of shot.
+  // `TryClaimAttackSlot` calls `ActorIsOnScreen` (`FUN_00409C10`) -- but **not
+  // to refuse the claim**. An off-screen enemy gets the permit and raises
+  // `g_attack_committed`, and that latch is what stops a second one. Reading
+  // it as a refusal is what left an enemy the camera had walked into standing
+  // there for ever: no permit, so no attack, so never the state that retreats.
   const offscreen = {
     ...NULL_HOST,
     viewSpaceOf: (_at: number, out: Vec3) => {
@@ -546,11 +550,23 @@ console.log("ActorIsOnScreen:");
       return true;
     },
   };
-  for (let i = 0; i < 600; i++) GameUpdate(EYE, 1 / 60, offscreen, rng, events);
-  check("an enemy off the side of the frame takes no permit",
-        z.attackPermit === -1 && G.g_attack_permits.every((p) => p === -1),
-        `permit ${z.attackPermit}`);
+  for (let i = 0; i < 600 && z.attackPermit < 0; i++) {
+    GameUpdate(EYE, 1 / 60, offscreen, rng, events);
+  }
+  check("an enemy off the side of the frame still takes a permit",
+        z.attackPermit >= 0, `permit ${z.attackPermit}`);
+  check("...and latches g_attack_committed while it holds it",
+        G.g_attack_committed === 1
+        && (z.flags2 & ZombieFlag2.OffScreenPermit) !== 0,
+        `latch ${G.g_attack_committed} flags2 ${z.flags2.toString(16)}`);
 
+  // The latch is the throttle: while one enemy is attacking unseen, nobody
+  // else may claim at all — not even one in plain sight.
+  const other = ActorSpawn(0x5004, SpawnClass.Zombie, 1, "second");
+  other.visible = true;
+  other.hp = 1000;
+  other.pos = vec3(5, 0, 40);
+  other.lookAt = vec3(5, 4, 40);
   const onscreen = {
     ...NULL_HOST,
     viewSpaceOf: (_at: number, out: Vec3) => {
@@ -558,12 +574,16 @@ console.log("ActorIsOnScreen:");
       return true;
     },
   };
-  let claimed = false;
-  for (let i = 0; i < 600 && !claimed; i++) {
-    GameUpdate(EYE, 1 / 60, onscreen, rng, events);
-    if (z.attackPermit >= 0) claimed = true;
-  }
-  check("and the same enemy in shot does", claimed, `permit ${z.attackPermit}`);
+  check("a second enemy cannot claim while the latch is up",
+        !TryClaimAttackSlot(other, onscreen), `permit ${other.attackPermit}`);
+
+  // Releasing the off-screen permit lifts it, and only then.
+  ReleaseAttackSlot(z);
+  check("releasing it lifts the latch", G.g_attack_committed === 0
+        && (z.flags2 & ZombieFlag2.OffScreenPermit) === 0);
+  check("and the next enemy may claim", TryClaimAttackSlot(other, onscreen),
+        `permit ${other.attackPermit}`);
+  ReleaseAttackSlot(other);
 }
 
 // -- 4. damage ---------------------------------------------------------------

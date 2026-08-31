@@ -31,6 +31,25 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**An off-screen enemy still takes its permit** — and the port used to say
+otherwise, which is why an enemy the camera's rail had walked into stood in
+your face for good. `TryClaimAttackSlot` calls `ActorIsOnScreen`, but **not to
+refuse the claim**: the engine grants it and raises a global latch,
+`g_attack_committed`, so exactly one enemy may attack from off screen and while
+one does nobody else may claim at all. Reading it as a refusal meant such an
+actor never got a permit, so never pounced, so never ran the state that
+retreats. `zsass` showed it most because its whole cycle is *close in, pounce,
+leap back to fifty*.
+
+**There is a collision overlay now** — the `Collision` checkbox. It draws the
+`coli/` quads the port actually traces: amber for the blobs the script has
+selected into the sphere-and-segment set, blue for the ray-only ones, with a
+spike on each quad's normal so the one-sided winding is visible, and nothing at
+all for a blob in neither set, because nothing tests those. It answers the
+question it was built for: a thrower's leap-aside lands on collision in **y**
+only — the sideways choice is five units either side of the camera's forward at
+fifty, in the camera's frame, and knows nothing about walls.
+
 **The attack pacing is measured, not guessed.** `web/tools/cadence.mjs` drives
 real spawns and prints the cycle: a lone zombie strikes every **3.22 s** — a
 1.63 s clip and a 1.58 s retreat, with 0.1 s of standing — and six zombies give

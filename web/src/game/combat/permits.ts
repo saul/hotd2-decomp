@@ -5,7 +5,7 @@
  * permit index lives in `obj+0x121`, and `RegisterForCameraTracking` keys off
  * the same commitment. One byte doing two jobs is the whole trick.
  */
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
@@ -27,10 +27,8 @@ const _view = vec3();
  * `ActorIsOnScreen` — `FUN_00409C10`.
  *
  * Projects the actor's tracked point and asks whether it lands inside the
- * frame. `TryClaimAttackSlot` calls it before handing out a permit, so **an
- * enemy off the side of the screen cannot start an attack** — which is what
- * stops something you cannot see swinging at you, and stops it holding the one
- * permit while it is out of shot.
+ * frame. Both claim functions call it — but **not to refuse the claim**. See
+ * {@link TryClaimAttackSlot}.
  */
 export function ActorIsOnScreen(obj: Actor, host: GameHost): boolean {
   if (!host.viewSpaceOf(obj.at, _view)) return true;   // not posed: no opinion
@@ -46,11 +44,25 @@ export function ActorIsOnScreen(obj: Actor, host: GameHost): boolean {
  *
  * Note what it does **not** do: there is no queue-rank test here. That lives
  * in `ZombieStateApproach`, before the call.
+ *
+ * **Being off screen does not refuse the claim.** This port used to read it
+ * that way and it was wrong in a way you could watch: an enemy that ended up
+ * level with the camera — which happens whenever the rail carries the camera
+ * into one — was refused a permit for ever, so it never attacked, never ran
+ * the state that retreats, and simply stood in your face. `zsass` shows it
+ * most because its whole cycle is *close in, pounce, leap back to fifty*, and
+ * without the permit it never gets past the first step.
+ *
+ * What the engine actually does is grant the permit and raise a **global
+ * latch**, `g_attack_committed`: one enemy may be attacking from off screen,
+ * and while one is, nobody else may claim at all. That is the rule this
+ * enforces now, on both halves.
  */
-export function TryClaimAttackSlot(obj: Actor, host?: GameHost): boolean {
-  // `FUN_00409DC0` and `ActorIsOnScreen` both gate the claim; this is the one
-  // that matters for what the player sees.
-  if (host && !ActorIsOnScreen(obj, host)) return false;
+export function TryClaimAttackSlot(obj: Actor, host?: GameHost,
+                                   offScreenBit: number =
+                                     ZombieFlag2.OffScreenPermit): boolean {
+  // The latch is read first and gives up before a player is even picked.
+  if (G.g_attack_committed !== 0) return false;
   for (let i = 0; i < G.g_max_attackers; i++) {
     // [open] `obj+0x121` is a **player index**, not a slot: the engine picks
     // which player to come for and then voids the choice when
@@ -65,6 +77,12 @@ export function TryClaimAttackSlot(obj: Actor, host?: GameHost): boolean {
     // would stop every enemy attacking after two hits, which is a divergence
     // rather than a fix. It goes in when there is a player state to test.
     if (G.g_attack_permits[i] === -1) {
+      // Granted either way; off screen it also latches, so this actor is the
+      // only one that may be attacking unseen.
+      if (host && !ActorIsOnScreen(obj, host)) {
+        obj.flags2 |= offScreenBit;
+        G.g_attack_committed = 1;
+      }
       G.g_attack_permits[i] = obj.at;
       obj.attackPermit = i;                    // +0x121
       obj.flags &= ~ActorFlag.NoCameraTrack;      // the camera may now see it
@@ -83,13 +101,35 @@ export function TryClaimAttackSlot(obj: Actor, host?: GameHost): boolean {
  * elevated ones never threw — they are far away by design, so their distance
  * rank is always high.
  */
-export function ThrowerTryClaimAttackSlot(obj: Actor, host?: GameHost): boolean {
-  return TryClaimAttackSlot(obj, host);
+export function ThrowerTryClaimAttackSlot(obj: Actor,
+                                          host?: GameHost): boolean {
+  // The one thing that is not byte-for-byte: the off-screen latch is recorded
+  // in a different bit of the same word, because class 0x30 already uses
+  // `0x20000` for something else on its own actors.
+  return TryClaimAttackSlot(obj, host, ThrowerFlag.OffScreenPermit);
 }
 
-/** `ReleaseAttackSlot` — `FUN_00456520`. */
-export function ReleaseAttackSlot(obj: Actor): void {
+/**
+ * `ReleaseAttackSlot` — `FUN_00456520`, and `ThrowerReleaseAttackPermit`
+ * (`FUN_0044CFB0`) is the same function with the other bit.
+ *
+ * Releasing an off-screen permit is the **only** thing that lifts
+ * `g_attack_committed`, so forgetting it here would stall every enemy in the
+ * scene rather than just this one.
+ */
+export function ReleaseAttackSlot(obj: Actor,
+                                  offScreenBit: number =
+                                    ZombieFlag2.OffScreenPermit): void {
   if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
   obj.attackPermit = -1;
   obj.flags |= ActorFlag.NoCameraTrack;
+  if (obj.flags2 & offScreenBit) {
+    obj.flags2 &= ~offScreenBit;
+    G.g_attack_committed = 0;
+  }
+}
+
+/** `ThrowerReleaseAttackPermit` — `FUN_0044CFB0`. */
+export function ThrowerReleaseAttackPermit(obj: Actor): void {
+  ReleaseAttackSlot(obj, ThrowerFlag.OffScreenPermit);
 }

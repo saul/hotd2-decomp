@@ -857,6 +857,9 @@ class Player {
     const b = $("#btn-play");
     b.textContent = this.playing ? "❚❚" : "▶";
     b.classList.toggle("playing", this.playing);
+    // Every path that changes `playing` or the mode goes through here, which
+    // is why the overlay is refreshed from it rather than from the frame loop.
+    this.refreshPausedOverlay();
   }
 
   private stepOnce(): void {
@@ -1132,6 +1135,10 @@ class Player {
     this.loop.speed = this.speed;
     this.loop.running = this.playing && this.state.mode !== "free"
                         && !!this.walker && !this.walker.branch;
+    // Driven from here as well as from `setPlayButton`, because a stage that
+    // has just finished loading arrives paused without anything having touched
+    // the transport. Both calls are idempotent DOM toggles.
+    this.refreshPausedOverlay();
 
     if (!this.state.freeze && this.state.mode === "free") {
       this.freeRoam.update(wall, this.camera);
@@ -1220,11 +1227,49 @@ class Player {
     SpawnPropContainers(w.spawns);
   }
 
+  /**
+   * Is the **game** clock stopped?
+   *
+   * Two cases, and neither is `?freeze=1`, which stops everything including
+   * wall time:
+   *
+   * * **paused** — play mode with the transport stopped. Nothing should move:
+   *   an enemy holds the frame it was on, its motion clock does not advance,
+   *   and neither does the port.
+   * * **free roam** — you are flying the camera around a scene, not watching
+   *   it. `Loop.idle` has said "for the frozen and free-roam paths" since it
+   *   was written; free roam simply never took it.
+   *
+   * **Step mode is deliberately not here.** Stepping is for advancing the
+   * script an instruction at a time while the port keeps running underneath —
+   * that is what makes a zombie loop its walk while you read the tree — and it
+   * has its own mode button rather than a paused transport.
+   */
+  private get gameStopped(): boolean {
+    if (this.state.mode === "free") return true;
+    return this.state.mode === "play" && !this.playing;
+  }
+
   /** Game time for this frame: wall clock scaled by `speed`, zero while frozen. */
   private gameTick(wall: number): Tick {
-    if (this.state.freeze) return this.loop.idle(wall);
+    if (this.state.freeze || this.gameStopped) return this.loop.idle(wall);
     const dt = wall * this.speed;
     return { dt, frames: dt * 60, wall, frozen: false };
+  }
+
+  /**
+   * The paused state, on screen: the rendered frame drains to grey and the
+   * word sits in the middle of it.
+   *
+   * Free roam stops the same clock but does **not** raise this — it is a mode
+   * you chose, with its own lit button, and covering the view you are flying
+   * through with `PAUSED` would be worse than saying nothing.
+   */
+  private refreshPausedOverlay(): void {
+    const paused = this.state.mode === "play" && !this.playing
+                   && !!this.walker;
+    $("#viewport").classList.toggle("paused", paused);
+    $("#paused-overlay").hidden = !paused;
   }
 
   /**

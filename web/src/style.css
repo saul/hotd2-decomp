@@ -130,6 +130,19 @@ body.resizing { cursor: col-resize; user-select: none; }
   background: #05070a;
 }
 #view { position: absolute; top: 0; left: 0; display: block; }
+/* Paused drains the colour out of the rendered frame -- and only out of the
+   frame: the canvas carries the filter rather than `#viewport`, so the debug
+   overlays, the crosshair and the message below keep theirs. */
+#viewport.paused #view { filter: grayscale(1) brightness(0.75); }
+#paused-overlay {
+  position: absolute; inset: 0; z-index: 2; display: grid; place-items: center;
+  pointer-events: none;
+}
+#paused-overlay[hidden] { display: none; }
+#paused-overlay span {
+  font: 600 34px/1 var(--mono); letter-spacing: 0.42em; text-indent: 0.42em;
+  color: #eef2f6; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85);
+}
 
 .panel { background: var(--panel); border-bottom: 1px solid var(--line); min-height: 0; }
 .grow-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }

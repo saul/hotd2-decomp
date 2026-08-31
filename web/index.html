@@ -90,6 +90,10 @@
 
         <div id="viewport">
           <canvas id="view"></canvas>
+          <!-- Shown while the game clock is stopped and the viewer is meant to
+               notice. Free roam stops the clock too but says so with its own
+               mode button, so it does not raise this. -->
+          <div id="paused-overlay" hidden><span>PAUSED</span></div>
           <div id="loading">
             <div class="spinner"></div>
             <p id="loading-text">loading bundle…</p>

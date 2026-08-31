@@ -538,10 +538,33 @@ LEAP_STATES = {0x30: (24,), 0x31: (20,)}
 #: Which state index means "follow a list of waypoints" -- `ThrowerStatePathFollow`.
 PATH_STATES = {0x31: (26,)}
 
-#: A waypoint: ``{s16 step, s16 motion_set, f32 x, f32 y, f32 z}``, sixteen
-#: bytes, and the list is terminated by a step of -1. *step* is frames per
-#: unit -- `ActorArcBeginTo` sets the duration from ``dist2d * step`` -- and it
-#: doubles as the arc kind `ActorArcStep` switches on.
+#: `ThrowerStateWalkDistance` (class 0x31 state 18) walks until the 2D distance
+#: from where it started reaches the **float** at descriptor tail ``+0x04``.
+WALK_DISTANCE_STATES = {0x31: (18,)}
+
+#: `ThrowerStateEntranceClip` (class 0x31 state 19) plays the motion named by
+#: the int at descriptor tail ``+0x04`` once and then stands.
+ENTRANCE_CLIP_STATES = {0x31: (19,)}
+
+#: `ThrowerStateDelayedPounce` (class 0x31 state 23) plays the motion at tail
+#: ``+0x04`` for the frame count at ``+0x08``, then leaps at the camera over
+#: that same count. The int at ``+0x0C`` is in the record and is `[open]` --
+#: the state does not read it.
+POUNCE_STATES = {0x31: (23,)}
+
+#: A waypoint: ``{s16 step, s16 script, f32 x, f32 y, f32 z}``, sixteen bytes,
+#: and the list is terminated by a step of -1.
+#:
+#: *step* is the arc's parameter-advance rate: `ActorArcBeginTo` sets the
+#: duration to ``dist2d * step`` rounded down to a multiple of *step*, and
+#: `ActorArcStepInterp` advances the counter by *step* a frame -- so the leg
+#: still takes about ``dist2d`` frames, at *step* times the resolution. It is
+#: **not** the arc kind: that is ``obj+0x1354``, which `SelectActorGravityAxis`
+#: writes from the surface the actor is attached to.
+#:
+#: *script* selects the leg's three-stage arc motion script for every character
+#: type but 0x17 -- 1 -> ``0x00565E58``, 2 -> ``0x00565E88``, anything else
+#: ``0x00565EB8``; type 0x17 always takes ``0x00565E28``.
 WAYPOINT_BYTES = 0x10
 
 
@@ -578,6 +601,15 @@ class Placement:
     #: ``{delay, points: [{step, motion_set, dest}]}`` from the descriptor's
     #: ``+0x04`` and the 16-byte entries at ``+0x08``.
     path: dict | None = None
+    #: `ThrowerStateWalkDistance`'s target distance -- see
+    #: :data:`WALK_DISTANCE_STATES`.
+    walk_distance: float | None = None
+    #: `ThrowerStateEntranceClip`'s one-shot motion -- see
+    #: :data:`ENTRANCE_CLIP_STATES`.
+    entrance_motion: int | None = None
+    #: `ThrowerStateDelayedPounce`'s ``{motion, frames}`` -- see
+    #: :data:`POUNCE_STATES`.
+    pounce: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -598,6 +630,12 @@ class Placement:
             d["leap"] = self.leap
         if self.path:
             d["path"] = self.path
+        if self.walk_distance is not None:
+            d["walk_distance"] = self.walk_distance
+        if self.entrance_motion is not None:
+            d["entrance_motion"] = self.entrance_motion
+        if self.pounce:
+            d["pounce"] = self.pounce
         if self.intro:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
         return d
@@ -777,6 +815,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
 
     chars: dict[int, Character] = {}
     placements: list[Placement] = []
+    class31 = class31_tables(tables)
     per_type: dict[int, list[dict]] = {}
     dset = death_motions(tables)
 
@@ -824,10 +863,29 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 off += WAYPOINT_BYTES
             if pts:
                 path = {"delay": rec.param(4, "i32") or 0, "points": pts}
+        # The other three class-0x31 entrances read the same four bytes as
+        # something else again, so each is gated on its own state.
+        walk_distance = None
+        if tail[1] in WALK_DISTANCE_STATES.get(sp["class"], ()):
+            d = rec.param(4, "f32")
+            if d is not None and math.isfinite(d) and 0 < d < 4096:
+                walk_distance = d
+        entrance_motion = None
+        if tail[1] in ENTRANCE_CLIP_STATES.get(sp["class"], ()):
+            m = rec.param(4, "i32")
+            if m is not None and 0 < m < 4096:
+                entrance_motion = m
+        pounce = None
+        if tail[1] in POUNCE_STATES.get(sp["class"], ()):
+            m, n = rec.param(4, "i32"), rec.param(8, "i32")
+            if m is not None and 0 < m < 4096 and n is not None and 0 < n < 3600:
+                pounce = {"motion": m, "frames": n}
         placements.append(Placement(
             at, sp["class"], res.char_type, motion, sp, intro,
             body_condition=tail[0], initial_state=tail[1],
             attack_state=tail[2], leap=leap, path=path,
+            walk_distance=walk_distance, entrance_motion=entrance_motion,
+            pounce=pounce,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
             hp=sp.get("hp", 0)))
         if motion is None:
@@ -865,7 +923,19 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         for row in c.motion_row.values():
             reacts += [row[i] for i in (0, 1, 2, 3, MOTION_ROW_BACKOFF)
                        if i < len(row) and 0 < row[i] < 4096]
-        for mid in [motion, intro[0] if intro else None] + deaths + reacts:
+        # The entrance clips a class-0x31 descriptor names for itself, plus
+        # every clip its behaviour set can reach: the idle and walk pair, the
+        # eight stumbles, and the arc motion scripts behind each attack and
+        # each surface leap. `_bake` refuses a clip authored for another
+        # skeleton, so the list is offered whole rather than filtered here.
+        entry_clips = [p.entrance_motion for p in placements
+                       if p.at == at and p.entrance_motion] \
+                    + [p.pounce["motion"] for p in placements
+                       if p.at == at and p.pounce]
+        if sp["class"] == 0x31:
+            entry_clips += class31_motion_ids(class31)
+        for mid in ([motion, intro[0] if intro else None]
+                    + deaths + reacts + entry_clips):
             if mid is None or mid in c.motions:
                 continue
             baked = _bake(stage.game, tables, mid, c.bone_count)
@@ -1582,6 +1652,242 @@ def _gore_entry(stage, tables, char: Character) -> dict | None:
             "parts": parts}
 
 
+#: Class 0x31's own tables, four **behaviour sets** deep.
+#:
+#: Every one of these is indexed by ``obj+0x130C``, which `EnemyThrowerInit`
+#: takes straight from the descriptor tail's byte +1 -- **not** by the body
+#: condition (`ActorBodyConditionFromHands` has exactly one caller, and it is
+#: class 0x30's state 2). Stage 2 gives the `zstin` spawns set 0 and the
+#: `zsass` spawns set 1, and the motion sets identify the other two: set 2's
+#: first entry is 0x1BA, the motion `EnemyThrowerInit` starts character type
+#: 0x17 in, and set 3's clips are the 0x208 family that `ThrowerStateThrow`
+#: and `ThrowerStateWaitForPermit` reach for when the character is 0x18.
+#:
+#: ==== ============== =============================================
+#: set  character      how it fights
+#: ==== ============== =============================================
+#: 0    `zstin`        leaps at walls and the ceiling, then pounces
+#: 1    `zsass`        throws
+#: 2    `zskamere`     [open]
+#: 3    `zslman`       [open]
+#: ==== ============== =============================================
+CLASS31_SETS = 4
+
+#: ``PTR_DAT_005929F0[set]`` -> six motion ids:
+#:
+#: ===== ======================================================
+#: index what reads it
+#: ===== ======================================================
+#: 0, 1  the stand `ThrowerStateWaitForPermit` picks between at
+#:       random, and index 1 is also the pause
+#:       `ThrowerStateStrikeOnTheSpot` plays between strikes
+#: 2, 3  the walk/idle `ThrowerStateStandAndDecide` and
+#:       `ThrowerStateWalkDistance` play, picked by
+#:       ``obj+0x34`` bit 27
+#: 4     the landing clip `ThrowerStateLeapAside` and
+#:       `ThrowerStateWithdraw` play
+#: 5     `[open]` -- no reader found
+#: ===== ======================================================
+CLASS31_MOTION_SETS = 0x005929F0
+CLASS31_MOTION_SET_LEN = 6
+
+#: ``PTR_PTR_00592A10[set]`` -> 0x10-byte attack entries, indexed
+#: ``obj+0x131A + stance * 4``. `ThrowerStrikeConnect` reads the last three
+#: fields and `ThrowerLoadAttackArcScript` the first:
+#:
+#: ===== ==== ====================================================
+#: +0x00 u32  pointer to the three-stage arc motion script
+#: +0x04 s32  frame of that clip on which the hit lands, or -1 for
+#:            "when the arc reaches its landing phase"
+#: +0x08 s32  the reaction the *player* plays when hit
+#: +0x0C u32  cancel mask -- if every zone named here is destroyed
+#:            the strike whiffs
+#: ===== ==== ====================================================
+CLASS31_ATTACK_TABLE = 0x00592A10
+#: The stance rows: ``bit6 + 2*(bit7 + 2*bit17) + 3*bit8`` of ``obj+0x136C``,
+#: so 0 the ground, 1 one wall, 2 the other, 3 the ceiling, and 4 the same
+#: four again while a leap is in progress (bit 17). The rows are **not all the
+#: same length** -- set 0 and set 3 carry five stances, sets 1 and 2 share a
+#: single one -- and they sit end to end with no count, so the reader bounds
+#: each row by the start of the next thing in the block. Reading a fixed eight
+#: walks into the neighbour, which is the adjacent-array trap.
+CLASS31_STANCES = 8
+CLASS31_ATTACKS_PER_STANCE = 4
+
+#: ``PTR_DAT_00592A20[set][(rand()>>4) % 10 + (obj+0x1318 & 7) * 10]`` -- which
+#: attack index to use, by destroyed zones. The same shape as class 0x30's
+#: :data:`ATTACK_PICK_TABLE`, read a byte at a time out of an int array.
+CLASS31_ATTACK_PICKS = 0x00592A20
+
+#: ``PTR_PTR_00592A60[set]`` -> three band pointers, each to 80 ints laid out
+#: ``[destroyed zones 0..7][10]``. `ThrowerPickNextState` draws a **state id**
+#: out of it and offers it to `ThrowerTryEnterState`. Band 0 is never reached:
+#: the router only ever produces band 1 (40 < d <= 50) or band 2.
+CLASS31_STATE_PICKS = 0x00592A60
+CLASS31_BANDS = 3
+CLASS31_PICKS = ATTACK_PICK_PER_ZONE * ATTACK_ZONE_COMBOS
+
+#: ``PTR_DAT_00592A70[set][g_react_group[bone]]`` -- the stumble, eight groups.
+CLASS31_REACTIONS = 0x00592A70
+
+#: A three-stage arc motion script, the 12 dwords `InstallArcMotionScript`
+#: (`FUN_0044DA60`) copies into the actor's slot: ``{s32 motion, s32 start
+#: frame, s32 fade, s32 threshold} x 3``. `ActorArcStep` plays stage 0 at the
+#: start of the arc, stage 1 once the clip frame passes stage 0's threshold,
+#: stage 2 once it passes stage 1's, and reports the arc over once it passes
+#: stage 2's. Every script in the program names the **same motion** in all
+#: three stages, so it is one clip cut into windup / flight / landing.
+ARC_SCRIPT_STAGES = 3
+
+#: The arc scripts that are named by a state rather than by an attack entry.
+#: `ThrowerStateLeapAside` picks between the first four and
+#: `ThrowerStateLeapToSurface` uses one per state id.
+CLASS31_ARC_SCRIPTS = {
+    "aside": 0x00564AC8,             # every character but 0x16 and 0x18
+    "aside_attack3": 0x00564AF8,     # ...unless obj+0x131A is 3
+    "aside_zsass": 0x005649A8,       # character type 0x16
+    "aside_zslman": 0x00564D08,      # character type 0x18, then +0x60 a stance
+    "wall_left": 0x00564A68,         # state 14
+    "wall_right": 0x00564A38,        # state 15
+    "ceiling": 0x00564A98,           # state 16
+}
+#: `ThrowerStateLeapAside`'s character-0x18 block is one script per stance.
+CLASS31_ARC_SCRIPT_BYTES = ARC_SCRIPT_STAGES * 4 * 4
+
+
+def _next_block(tables, base: int, count: int, after: int,
+                this: int) -> int:
+    """Where the row at *this* ends: the next row's start, or *after*'s first.
+
+    The rows of these tables are packed end to end with no count, so a fixed
+    length reads the neighbour's entries as if they were this row's -- which
+    is exactly the adjacent-array trap. Bounding by the next start recovers
+    set 0's five stances and sets 1 and 2's single one.
+    """
+    ends = set()
+    for k in range(count):
+        v = _ptr_row(tables, base, k)
+        if v and v > this:
+            ends.add(v)
+        v = _ptr_row(tables, after, k)
+        if v and v > this:
+            ends.add(v)
+    return min(ends) if ends else this
+
+
+def _arc_script(tables, addr: int) -> list[dict] | None:
+    """The 12 dwords at *addr* as three ``{motion, start, fade, until}`` stages."""
+    o = tables._v2r(addr) if addr else None
+    if o is None or o + CLASS31_ARC_SCRIPT_BYTES > len(tables.data):
+        return None
+    v = struct.unpack_from("<12i", tables.data, o)
+    out = [{"motion": v[i * 4], "start": v[i * 4 + 1],
+            "fade": v[i * 4 + 2], "until": v[i * 4 + 3]}
+           for i in range(ARC_SCRIPT_STAGES)]
+    return out if out[0]["motion"] > 0 else None
+
+
+def _ptr_row(tables, base: int, i: int) -> int | None:
+    o = tables._v2r(base)
+    if o is None or o + (i + 1) * 4 > len(tables.data):
+        return None
+    return struct.unpack_from("<I", tables.data, o + i * 4)[0]
+
+
+def class31_tables(tables) -> dict:
+    """Class 0x31's four behaviour sets -- see :data:`CLASS31_SETS`.
+
+    Everything here is read from the routine that consumes it, and the routine
+    is named in each constant's own comment. The arc scripts are resolved and
+    inlined rather than left as addresses, because the client has no way to
+    dereference one.
+    """
+    if tables is None:
+        return {}
+    sets = []
+    for i in range(CLASS31_SETS):
+        row: dict = {"set": i}
+        o = tables._v2r(_ptr_row(tables, CLASS31_MOTION_SETS, i) or 0)
+        row["motions"] = (
+            list(struct.unpack_from(f"<{CLASS31_MOTION_SET_LEN}i",
+                                    tables.data, o)) if o is not None else [])
+        # The attack entries, flattened to [stance][index] with the arc script
+        # resolved in place. An entry whose script pointer is null is a hole --
+        # the pick table never names it.
+        ptr_row = _ptr_row(tables, CLASS31_ATTACK_TABLE, i) or 0
+        o = tables._v2r(ptr_row)
+        attacks: dict[str, dict[str, dict]] = {}
+        if o is not None:
+            n = min(CLASS31_STANCES * CLASS31_ATTACKS_PER_STANCE,
+                    (_next_block(tables, CLASS31_ATTACK_TABLE, CLASS31_SETS,
+                                 CLASS31_ATTACK_PICKS, ptr_row) - ptr_row)
+                    // ATTACK_ENTRY)
+            if n > 0 and o + n * ATTACK_ENTRY <= len(tables.data):
+                for k in range(n):
+                    ptr, hit, hurt, mask = struct.unpack_from(
+                        "<IiiI", tables.data, o + k * ATTACK_ENTRY)
+                    script = _arc_script(tables, ptr)
+                    if script is None:
+                        continue
+                    stance, idx = divmod(k, CLASS31_ATTACKS_PER_STANCE)
+                    attacks.setdefault(str(stance), {})[str(idx)] = {
+                        "script": script, "hit_frame": hit,
+                        "player_motion": hurt, "cancel_mask": mask & 0xFFFF}
+        row["attacks"] = attacks
+        o = tables._v2r(_ptr_row(tables, CLASS31_ATTACK_PICKS, i) or 0)
+        row["attack_picks"] = (
+            list(struct.unpack_from(f"<{CLASS31_PICKS}i", tables.data, o))
+            if o is not None and o + CLASS31_PICKS * 4 <= len(tables.data)
+            else [])
+        # The state picks are a pointer to a pointer: one band pointer each.
+        bands: dict[str, list[int]] = {}
+        b = tables._v2r(_ptr_row(tables, CLASS31_STATE_PICKS, i) or 0)
+        if b is not None:
+            for band in range(CLASS31_BANDS):
+                ptr, = struct.unpack_from("<I", tables.data, b + band * 4)
+                o = tables._v2r(ptr)
+                if o is None or o + CLASS31_PICKS * 4 > len(tables.data):
+                    continue
+                bands[str(band)] = list(struct.unpack_from(
+                    f"<{CLASS31_PICKS}i", tables.data, o))
+        row["state_picks"] = bands
+        o = tables._v2r(_ptr_row(tables, CLASS31_REACTIONS, i) or 0)
+        row["reactions"] = (
+            list(struct.unpack_from(f"<{REACT_GROUPS}i", tables.data, o))
+            if o is not None and o + REACT_GROUPS * 4 <= len(tables.data)
+            else [])
+        sets.append(row)
+
+    scripts = {k: _arc_script(tables, a)
+               for k, a in CLASS31_ARC_SCRIPTS.items() if k != "aside_zslman"}
+    # Character 0x18's is four scripts, one per surface stance, so it goes in
+    # flat rather than nested -- the client indexes it by name.
+    for st in range(4):
+        scripts[f"aside_zslman_{st}"] = _arc_script(
+            tables, CLASS31_ARC_SCRIPTS["aside_zslman"]
+            + st * CLASS31_ARC_SCRIPT_BYTES)
+    return {"sets": sets, "scripts": {k: v for k, v in scripts.items() if v},
+            "note": (
+                "Class 0x31's behaviour, four sets deep, indexed by the "
+                "descriptor tail's byte +1 (obj+0x130C). Set 0 is zstin, "
+                "which is the wall-crawler.")}
+
+
+def class31_motion_ids(block: dict) -> list[int]:
+    """Every clip the class-0x31 tables can reach, for the bake list."""
+    out: list[int] = []
+    for row in block.get("sets", []):
+        out += [m for m in row.get("motions", []) if 0 < m < 4096]
+        out += [m for m in row.get("reactions", []) if 0 < m < 4096]
+        for stance in row.get("attacks", {}).values():
+            for e in stance.values():
+                out += [st["motion"] for st in e["script"]]
+    for script in block.get("scripts", {}).values():
+        if script:
+            out += [st["motion"] for st in script]
+    return sorted({m for m in out if 0 < m < 4096})
+
+
 def characters_json(chars: dict[int, Character],
                     placements: list[Placement], tables=None) -> dict:
     """The `characters` block of ``<stage>.script.json``."""
@@ -1597,6 +1903,7 @@ def characters_json(chars: dict[int, Character],
         "reaction_blend": {"frames": REACT_BLEND, "sever": REACT_BLEND_SEVER,
                            "hard_set_from_bone": REACT_BLEND_MAX_BONE},
         "bone_zones": bone_zones(tables) if tables is not None else [],
+        "class31": class31_tables(tables) if tables is not None else {},
         "types": {str(ct): c.to_json() for ct, c in sorted(chars.items())},
         "placements": [p.to_json() for p in placements],
         "note": (

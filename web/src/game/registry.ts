@@ -44,7 +44,7 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
   },
   [SpawnClass.Thrower]: {
     init: EnemyThrowerInit,
-    update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.host, f.events),
+    update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
   },
   // A placer, not an actor: it builds its children and kills itself on its
   // first frame. It draws nothing, so it needs no renderer.

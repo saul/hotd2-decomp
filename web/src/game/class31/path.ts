@@ -11,12 +11,13 @@
  *
  * Each leg is `ActorArcBeginTo`, whose duration comes out as
  * `n - n % step` for `n = (int)(dist2d * step)` — the **2D** distance, x and z
- * only. So `step` is frames per unit: 1 is a unit a frame. The same number is
- * the arc kind `ActorArcStep` switches on.
+ * only. `step` is the arc's parameter-advance rate, not its kind; the kind is
+ * `obj+0x1354`, which `SelectActorGravityAxis` writes from the surface the
+ * actor is attached to.
  */
 import type { Actor } from "../actor";
 import { GAME_HZ } from "../class30/states";
-import { ActorArcVelocity } from "./leap";
+import { ActorArcVelocity } from "./arc";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import { CharacterTypeOf } from "../tables";
 import { ThrowerState } from "./states";
@@ -32,7 +33,7 @@ enum PathSub {
 export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
   const path = obj.path;
   if (!path || !path.points.length) {
-    obj.state = ThrowerState.StandAndThrow;
+    obj.state = ThrowerState.StandAndDecide;
     obj.sub = 0;
     return;
   }
@@ -59,6 +60,7 @@ export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
     const dz = wp.dest[2] - obj.pos.z;
     const n = Math.trunc(Math.hypot(dx, dz) * wp.step);
     obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
+    obj.arcTo = { x: wp.dest[0], y: wp.dest[1], z: wp.dest[2] };
     obj.arcFrames = 0;
     obj.arcTotal = Math.max(1, n - (n % wp.step));
     obj.leap = { dest: wp.dest, frames: obj.arcTotal };
@@ -96,9 +98,9 @@ function endPath(obj: Actor): void {
   obj.leap = null;
   obj.sub = 0;
   if (CharacterTypeOf(obj)?.type === 0x17) {
-    obj.state = ThrowerState.StandAndThrow;
+    obj.state = ThrowerState.StandAndDecide;
     return;
   }
   ThrowerTryClaimAttackSlot(obj);
-  obj.state = ThrowerState.LeapDown;
+  obj.state = ThrowerState.Pounce;
 }

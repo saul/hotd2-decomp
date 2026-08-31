@@ -443,6 +443,51 @@ def main() -> int:
         fails.append(f"motion-row entries the states read but the exporter "
                      f"did not bake: {sorted(set(gaps))[:6]}")
 
+    # 14 -----------------------------------------------------------------
+    # Class 0x31's four behaviour sets, and the one structural claim about them
+    # that could be wrong: every state id the pick tables name must be one
+    # `ThrowerTryEnterState` accepts, and every clip the tables reach must
+    # exist. A pick naming a state the gate refuses outright is an actor that
+    # can only ever stand still, which is what the port shipped before the
+    # tables were read.
+    c31 = ch.class31_tables(tables)
+    accepted = {7, 8, 9, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x1D, 0x1E, 0x1F, 0x20}
+    bad_states, bad_clips, no_attack31 = [], [], []
+    n_sets = n_picks = 0
+    for row in c31.get("sets", []):
+        n_sets += 1
+        # Band 0 is unreachable -- `ThrowerPickNextState` starts the band at 2
+        # and only ever lowers it to 1 -- so it is reported, not failed.
+        for band in ("1", "2"):
+            for v in row["state_picks"].get(band, []):
+                n_picks += 1
+                if v not in accepted:
+                    bad_states.append(f"set {row['set']} band {band}: {v}")
+        if not row["attacks"]:
+            no_attack31.append(row["set"])
+        for stance, entries in row["attacks"].items():
+            for idx, e in entries.items():
+                for st in e["script"]:
+                    if not 0 < st["motion"] < 4096:
+                        bad_clips.append(f"set {row['set']} {stance}/{idx}")
+                if not (-1 <= e["hit_frame"] <= 400):
+                    bad_states.append(f"set {row['set']} {stance}/{idx} hit "
+                                      f"frame {e['hit_frame']}")
+        # Every index the pick table names must have an entry in *some* stance.
+        for v in set(row["attack_picks"]):
+            if not any(str(v) in st for st in row["attacks"].values()):
+                no_attack31.append(f"set {row['set']} pick {v}")
+    print(f"  class 0x31: {n_sets} behaviour sets, {n_picks} action picks, "
+          f"{len(c31.get('scripts', {}))} named arc scripts, "
+          f"{len(ch.class31_motion_ids(c31))} distinct clips")
+    if bad_states:
+        fails.append(f"class-0x31 picks name states the gate refuses: "
+                     f"{sorted(set(bad_states))[:6]}")
+    if bad_clips:
+        fails.append(f"class-0x31 arc scripts with no motion: {bad_clips[:6]}")
+    if no_attack31:
+        print(f"    attack indices with no entry: {sorted(set(map(str, no_attack31)))}")
+
     if fails:
         print("\nFAIL")
         for f in fails:

@@ -517,13 +517,37 @@ exactly **one life**, 100 points and 90 frames of invulnerability, and drops
 the adaptive rank by 2 — being hit makes the game easier. Lives show in the
 status bar.
 
-**Thrown weapons are in.** Class 0x31's throwers — `zsass.bin` and
-`zslman.bin`, spawned out of walking reach — compete for the same attack permit
+**Thrown weapons are in.** Two of class 0x31's four character types —
+`zsass.bin` and `zslman.bin`, spawned out of walking reach — compete for the same attack permit
 as the zombies, play the throw clip and release on the frame the table names.
 The weapon flies in a straight line at 1.2 units/frame to a point 4 units in
 front of the camera, tumbling, and costs a life on arrival: the hit is timed,
 not tested. Throwing leaves the hand bare and sets the arm's destroyed-zone
 bit, so the cancel mask treats a thrown arm and a shot-off one alike.
+
+**Class 0x31's wall-crawler is in.** `zstin.bin` — stage 2's knife zombie, the
+one at `17/5` — does not walk at you and swing. It walks in the distance its
+descriptor names, and from then on it is driven by a **pick table**: at 40–50
+units it leaps onto the wall beside it or the ceiling above it nine times in
+ten, and its whole motion set and attack row change with the surface it is on;
+inside thirty units it waits for the attack permit and then **arcs onto the
+camera**, stabbing on a numbered frame of the leap clip, and leaps back out to
+one side. The leap back is the pause between attacks — there is no cooldown.
+
+Two things about it are worth knowing because they are the opposite of what you
+would write. `ThrowerStrikeConnect` **tests no range at all**: the aiming is the
+arc, which lands the actor on a point unprojected from a fixed screen offset,
+so the stab connects because the flight put it there on that frame. And the
+difference between the four character types that share this machine is
+*data* — the behaviour set is a byte in the spawn descriptor, and `zsass`'s
+picks contain only the throw where `zstin`'s contain the climb.
+
+Where the wall search finds nothing, the actor simply does not climb — which is
+what the engine does when there is no wall. The player answers that search off
+the drawn geometry rather than the `coli/` sets the bundle does not carry, so
+it can only see the resident region; `tools/verify_thrower_walls.py` runs the
+real query against the real collision data and reports **24 of the game's 49
+class-0x31 spawns with a wall in reach, 9 of them in stage 2**.
 
 **Turn-taking, retreat and spacing are in.** After a strike an actor enters
 `ZombieStateBackOff`, plays its back-away clip and retreats while **still

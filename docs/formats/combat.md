@@ -1033,3 +1033,251 @@ step has a subtree to remove, walks all 2810 spawn/difficulty hit-point pairs
 through the clamp, asserts the bone-to-reaction-group map and that every
 stumble is shorter than every death (43 against 74), and asserts all 30 combat
 sound ids name a file.
+
+---
+
+## 12. Class 0x31 — the wall-crawler
+
+Class 0x30 is a crowd. Class 0x31 is an **animal**: it circles the walls at
+middle range, leaps at you when you let it close, stabs on a numbered frame of
+the leap, and jumps back out to one side. Four character types share the
+machinery — 0x16 `zsass.bin`, 0x17 `zskamere.bin`, 0x18 `zslman.bin`, 0x19
+`zstin.bin` — and the one that moves is `zstin`.
+
+### The behaviour set is a byte in the descriptor, not the model
+
+Every table in this class is indexed by `obj+0x130C`, which `EnemyThrowerInit`
+takes straight from the spawn descriptor's byte **+1**. It is **not** the body
+condition: `ActorBodyConditionFromHands` (`FUN_00455920`) has exactly one
+caller in the program and it is class 0x30's state 2. `[proved]`
+
+Stage 2 gives the `zstin` spawns set 0 and the `zsass` spawns set 1; the motion
+sets identify the other two, because set 2's first entry is `0x1BA` — the
+motion `EnemyThrowerInit` starts character type 0x17 in — and set 3's clips are
+the `0x208` family the code hard-codes for 0x18.
+
+| Set | Character | How it fights |
+|---|---|---|
+| 0 | `zstin` | climbs walls and ceilings, then pounces |
+| 1 | `zsass` | stands out of reach and throws |
+| 2 | `zskamere` | stands. Its picks are `7` in every slot of every band |
+| 3 | `zslman` | stands and throws |
+
+### The 35-state table — `g_class31_states`, 0x00592960
+
+`EnemyThrowerUpdate` (`FUN_00449910`) ticks a cooldown, runs the shot drain,
+dispatches on `obj+0x1310`, and *then* integrates `vel += acc; pos += vel` —
+class 0x31 integrates acceleration where class 0x30 does not, which is what
+makes its fall and its knock-back physical.
+
+| # | Routine | What it is |
+|---|---|---|
+| 0 | `0x0041EBB0` | the engine's shared no-op |
+| 1 | `ThrowerStateHitReaction` | the stumble, from `g_class31_hit_reactions` |
+| 2 | `ThrowerStateFallAndLand` | gravity, then a bounce |
+| 3–5 | `FUN_0044A930` / `FUN_0044A9D0` / `FUN_0044AB70` | death, corpse, corpse blinking out |
+| 6 | `FUN_0044AD60` | release everything and despawn |
+| **7** | `ThrowerStateStandAndDecide` | **the hub** |
+| **8** | `ThrowerStateWaitForPermit` | idle until a permit frees |
+| **9, 12, 13** | `ThrowerStateLeapDown` | **the pounce**, one handler for three ids |
+| **10** | `ThrowerStateLeapAside` | the leap back out of your face |
+| 11 | `ThrowerStateFallToSurface` | fall until the ground catches |
+| **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
+| 17 | `ThrowerStateGetUp` | motion `0x127`, then decide again |
+| **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance |
+| **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
+| 20 | `ThrowerStateLeapToPoint` | the scripted drop |
+| 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames |
+| 22 | `ThrowerStateLeapStrike` | a pounce off the descriptor |
+| **23** | `ThrowerStateDelayedPounce` | wait, then leap at the camera's own height |
+| 24 | `ThrowerStateCloseAndStrike` | close to the attack's range, then swing |
+| **25** | `ThrowerStateWithdraw` | back off, then stand |
+| 26 | `ThrowerStatePathFollow` | a route walked before fighting |
+| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab |
+| 28 | `ThrowerStateWaitForCue` | wait on a timer, a path frame or a flag |
+| 29, 30 | `ThrowerStateRearm` / `ThrowerStateRestoreBothHands` | the weapon goes back |
+| 31 | `ThrowerStateThrow` | see §10 |
+| 32 | `ThrowerStateStrikeOnTheSpot` | swing, pause, swing, for ever |
+| 33 | `ThrowerStateKnockedTumbling` | shot off a surface, bouncing |
+| 34 | `ThrowerStateBackAwayThreeUnits` | shoved straight back |
+
+### The repertoire is data — `g_class31_action_picks`, 0x00592A60
+
+`ThrowerStateStandAndDecide` does not choose an action. It hands the job to
+`ThrowerPickNextState` (`FUN_0044ADB0`), which measures **one number** — the
+ground distance to the camera — and turns it into a band:
+
+```
+d <= 30                 -> state 8 outright: wait for a permit, then pounce
+40 < d <= 50            -> band 1
+everything else         -> band 2
+```
+
+then draws a **state id** out of
+`g_class31_action_picks[set][band][(rand()>>4) % 10 + (destroyed_zones & 7) * 10]`
+and offers it to `ThrowerTryEnterState` (`FUN_0044AFB0`), which refuses it if
+the actor cannot do that right now. On a refusal the actor goes back to state 7
+and tries again. **Band 0 exists in the table and is unreachable** — the router
+starts the band at 2 and only ever lowers it to 1. `[proved]`
+
+`zstin`'s two reachable bands, per ten slots:
+
+```
+band 1 (40..50):  14 14 14 15 15 15 16 16 16 12
+band 2 (else):     7  7  7  7  7  7  7  7  7 13
+```
+
+So at middle range it climbs nine times in ten, and everywhere else it stands
+and pounces one time in ten. Sets 1 and 3 offer only `7` and the throw; set 2
+offers only `7`. That table **is** the behaviour, and it is why the difference
+between the four types is data rather than code.
+
+`ThrowerTryEnterState`'s gates, all `[proved]`:
+
+| State | Accepted when |
+|---|---|
+| 7 | always |
+| 8 | the permit claim **fails** — state 8 is what an actor with no permit does |
+| 9 | ...and the claim **succeeds** |
+| 0x0C, 0x0D | a permit, and the character is not 0x18 |
+| 0x0E, 0x0F | on the ground, and `ThrowerFindWallBeside(∓1.0)` finds a wall |
+| 0x10 | on the ground, and `ThrowerFindCeilingAbove` finds a ceiling |
+| 0x1D, 0x1E | only from state 7, and only when a hand is bare |
+| 0x1F | a hand is still armed, and a permit |
+| 0x20 | a permit, and the ground surface under the actor is `0x35` |
+| anything else | never |
+
+`ThrowerBothHandsArmed` and `ThrowerHasBareHand` both test character types 0x16
+and 0x18 only, so **`zstin` can never throw and never re-arm** — the two states
+its picks would allow are refused by identity.
+
+### The stance is which surface it is standing on
+
+`obj+0x136C` bits 6, 7 and 8, as `bit6 + 2*bit7 + 3*bit8`:
+
+| Stance | Bit | Set by |
+|---|---|---|
+| 0 ground | — | the spawn, from the descriptor's `+0x20` |
+| 1 | `0x40` | state 15 arriving |
+| 2 | `0x80` | state 14 arriving |
+| 3 ceiling | `0x100` | state 16 arriving |
+
+...plus `0x20`, "off the ground", which is what stops a clinging actor turning
+to track you and what refuses a second climb. Bit 17 (`0x20000`), set while a
+pounce is in flight, adds **4**, which is how `g_class31_melee_attacks` gets
+eight rows out of four surfaces. `SelectActorGravityAxis` (`FUN_00450CF0`)
+reads the same three bits to pick which axis gravity pulls along, and
+`TraceActorSurfaceContactPoint` (`FUN_0044C370`) to pick which way to probe —
+three independent consumers of one reading. `[proved]`
+
+The stance re-points **everything**: the idle clip in state 7, the wait clip in
+state 8, the attack row, and the arc script the leap back plays.
+
+### Finding a wall — `ThrowerFindWallBeside`, `FUN_0044BEF0`
+
+The gate on states 14 and 15, and it is a question about the *level*:
+
+```
+refuse unless |camera_yaw - obj_yaw| <= 0x2000 and !(obj+0x136C & 2)
+y    = QueryGroundHeightAt(x, y + 4.5, z) + rand() % 20 + 9.0
+hit  = ColiTraceSegmentAllSets(local(±60, 0, 0) at y  ->  the actor at y)
+dest = local(∓4.5, 0, 0) from the hit point
+```
+
+— sixty units to its own left or right, at head height, and it lands **4.5
+units short of the face**. `ThrowerFindCeilingAbove` (`FUN_0044C0B0`) is the
+same question straight up, over a thousand units.
+
+`tools/verify_thrower_walls.py` runs those two queries against the game's own
+`coli/` sets at every class-0x31 spawn in the game: **24 of the 49 can reach a
+wall and 14 have something overhead**, 9 and 4 of them in stage 2. The climb is
+level design, not unreachable data.
+
+### The pounce — `ThrowerStateLeapDown`, `FUN_0044B670`
+
+States 9, 12 and 13 share it, and it is the attack. What it is *not* is a swing
+at a range:
+
+```
+dest  = ThrowerPickLandingPoint()       /* a place on the SCREEN */
+yaw   = g_camera_yaw_bams
+ActorArcBeginToWaypoint(dest, <null script>, 1)
+obj+0x1364 = the stance, latched before the surface bits are cleared
+...every frame: ThrowerStrikeConnect()
+```
+
+Three things worth naming.
+
+* **The attack is chosen by the null script.** `ActorArcBeginToWaypoint`
+  (`FUN_0044D780`) takes a pointer to an arc motion script, and passing the
+  `&DAT_007DCC70` sentinel — sixty-four zero bytes — means "roll one instead":
+  it draws an index out of `g_class31_attack_picks` and installs *that
+  attack's* script. So the swing and the flight are one clip.
+* **The stance is latched, then cleared.** `obj+0x1364` is written from the
+  surface bits and the bits are cleared immediately after, so a thrower that
+  pounces off a wall swings the wall's attack and arrives on the ground.
+* **`ThrowerStrikeConnect` (`FUN_0044CE60`) tests no range at all.** It fires
+  when the clip reaches the attack entry's `hit_frame`, and the only other
+  condition is the cancel mask. The aiming *is* the arc: the landing point is a
+  pixel offset unprojected at a fixed depth, so the actor is where the swing
+  will reach on the frame it lands. Same design as the melee strike and the
+  thrown weapon — this engine times its hits, it does not test them.
+
+Then state 10, `ThrowerStateLeapAside`: a point five units to one side of the
+camera and fifty in front **in the camera's yaw-only frame**, vertical-traced
+between ±1000 to find whatever floor is there — falling back to
+`g_camera_fixed_eye_y` when the trace misses — and arced to. It stands there
+for ninety frames or until it is fifty units clear. That wait **is** the
+cooldown; there is no timer.
+
+### The arc, and the three-stage script
+
+Nothing in this class walks except state 18 and the hub. Every other move is a
+ballistic arc to a named point:
+
+```
+ActorArcInterpolate(n):      /* FUN_0044DD00, an absolute position */
+  x = src.x + (dst.x - src.x)/T * n
+  z = src.z + (dst.z - src.z)/T * n
+  y = src.y + (T*T*g2 + 2*dy)*n / (2T)  -  g2*n*n*0.5      g2 = 0.027222222
+```
+
+with the duration from `ActorArcBeginToAtSpeed` (`FUN_0044DB50`) for character
+type 0x19 — the horizontal distance at a fixed **30 units per `minFrames`**,
+so 2.0 units a frame — and from `ActorArcBeginTo` for the rest.
+
+Over it runs a **three-stage arc motion script**, twelve dwords that
+`InstallArcMotionScript` (`FUN_0044DA60`) copies into `g_arc_scripts`:
+
+```
+{ s32 motion, s32 start frame, s32 fade, s32 threshold } x 3
+```
+
+Every script in the program names the **same motion** in all three stages, so a
+script is one clip cut into windup, flight and landing. `ActorArcStep`
+(`FUN_0044D860`) plays stage 0 on the spot, stage 1 once the clip frame passes
+stage 0's threshold, stage 2 once it passes stage 1's, and reports the arc over
+past stage 2's. `zstin`'s attack 0 is `{303,0,5,22}{303,23,5,46}{303,47,0,47}`
+and connects on frame **62** of the same clip.
+
+> ⚠️ **Every one of those thresholds is in engine frames, at 60 Hz.** `mot/` is
+> authored at 30 Hz, so the baked clip's own index is half of it: clip 303
+> bakes to 34 keys and the hit frame is 62. Reading the baked index is why the
+> port's pounce landed and never connected.
+
+### The tables
+
+| Address | Name | Shape |
+|---|---|---|
+| `0x005929F0` | `g_class31_motion_sets` | `[set]` → `s32[6]`: idle, idle, walk, walk, landing, airborne |
+| `0x00592A00` | `g_class31_throws` | `[set]` → eight `0x10`-byte entries, the class-0x30 attack layout |
+| `0x00592A10` | `g_class31_melee_attacks` | `[set]` → `[stance][4]` of `{script*, s32 hit frame, s32 player motion, u32 cancel mask}` |
+| `0x00592A20` | `g_class31_attack_picks` | `[set]` → `s32[8][10]`, which attack by destroyed zones |
+| `0x00592A60` | `g_class31_action_picks` | `[set]` → three bands → `s32[8][10]` of state ids |
+| `0x00592A70` | `g_class31_hit_reactions` | `[set]` → `s32[8]` by reaction group |
+
+Two of those rows are shared and it matters: `g_class31_melee_attacks` gives
+set 0 and set 3 five stances and sets 1 and 2 a single one, packed end to end
+with no count, so reading a fixed eight walks into the neighbour's entries.
+That is the adjacent-array trap, and the exporter bounds each row by the start
+of the next.

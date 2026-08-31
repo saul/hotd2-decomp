@@ -248,6 +248,16 @@ export const G = {
    * to one entry.
    */
   g_camera_block_eye: vec3(),
+  /**
+   * `g_camera_yaw_bams` — 0x009C71F0. Which way the camera is pointing, in
+   * BAMS, beside the eye at `g_camera_eye_x/y/z` (0x009C71E0).
+   *
+   * Class 0x31 needs the *yaw alone* rather than the whole camera matrix:
+   * `ThrowerStateLeapAside` builds its landing point with a Y rotation only,
+   * and `ThrowerFindWallBeside` refuses to leap unless the actor is facing
+   * within 0x2000 of it. The host writes it once a frame.
+   */
+  g_camera_yaw_bams: 0,
 
   // -- game mode ---------------------------------------------------------
   /**

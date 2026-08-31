@@ -27,6 +27,8 @@ import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { SpawnClass } from "../src/game/spawn_class";
 import { GameMode } from "../src/game/game_mode";
 import { ThrowerState } from "../src/game/class31/states";
+import { ThrowerStrikeConnect } from "../src/game/class31/strike";
+import { ThrowerStanceOf } from "../src/game/class31/tables";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
 import type { BreakablesJson } from "../src/bundle";
@@ -435,7 +437,7 @@ console.log("ThrowerStateLeapToPoint:");
   check("in about the frames it names", ys.findIndex((y) => y <= 37.001) <= 31,
         `${ys.findIndex((y) => y <= 37.001)}`);
   check("and then stands up to throw",
-        z.state === ThrowerState.StandAndThrow, `state ${z.state}`);
+        z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
 }
 
 // -- 3c. the route ----------------------------------------------------------
@@ -501,8 +503,11 @@ console.log("ThrowerStatePathFollow:");
         Math.abs(z.pos.z - (roofEye.z - 15.5)) < 0.5
         && z.pos.y < 115 - 5 && z.pos.y < roofEye.y,
         `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
-  check("and only then starts throwing",
-        z.state === ThrowerState.StandAndThrow, `state ${z.state}`);
+  // ...and the pounce hands to the leap aside, not to the hub: state 9 always
+  // ends in state 10. Standing again is two states further on.
+  check("and only then goes for the player",
+        z.state === ThrowerState.LeapAside
+        || z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
 }
 
 // -- 3d. the on-screen gate -------------------------------------------------
@@ -1627,6 +1632,251 @@ console.log("\nclass 0x41, Arcade's one-shot targets:");
         `hp ${target!.hp} state ${target!.state}`);
   check("and it pays no score", G.g_player_score[0] === before,
         `${G.g_player_score[0]} vs ${before}`);
+}
+
+
+// -- 12. class 0x31, the wall-crawler ---------------------------------------
+
+/**
+ * `zstin`'s own tables, cut down to the rows the states read. The numbers are
+ * the game's: the arc scripts and hit frames are `g_class31_melee_attacks`
+ * row A verbatim, the picks are `g_class31_action_picks` set 0, and 313 is the
+ * walk clip whose root motion is the only thing that closes the distance.
+ */
+const ARC = (motionId: number) => [
+  { motion: motionId, start: 0, fade: 5, until: 22 },
+  { motion: motionId, start: 23, fade: 5, until: 46 },
+  { motion: motionId, start: 47, fade: 0, until: 47 },
+];
+
+const TYPE31: CharacterType = {
+  ...TYPE,
+  type: 0x19, name: "zstin", file: "zstin.bin",
+  motions: {
+    ...TYPE.motions,
+    // The walk that closes, the idle that does not, the landing clip, and one
+    // clip per attack and per surface leap.
+    "313": motion(13, 2.08), "295": motion(31), "283": motion(16),
+    "303": motion(34), "302": motion(36), "284": motion(25),
+    "298": motion(30), "299": motion(30),
+    "290": motion(23), "291": motion(23), "309": motion(46), "282": motion(41),
+  },
+};
+
+const CLASS31 = {
+  sets: [{
+    set: 0,
+    motions: [295, 295, 313, 313, 283, 934],
+    attacks: {
+      // Stance 0, the ground: two hands and a head-butt.
+      "0": {
+        "0": { script: ARC(303), hit_frame: 62, player_motion: 2, cancel_mask: 2 },
+        "1": { script: ARC(302), hit_frame: 64, player_motion: 3, cancel_mask: 4 },
+        "3": { script: ARC(284), hit_frame: 41, player_motion: 7, cancel_mask: 8 },
+      },
+      // Stance 1 and 2, the two walls -- a different swing on each.
+      "1": {
+        "0": { script: ARC(299), hit_frame: 52, player_motion: 2, cancel_mask: 2 },
+      },
+      "2": {
+        "0": { script: ARC(298), hit_frame: 52, player_motion: 2, cancel_mask: 2 },
+      },
+    },
+    // Intact: a coin flip between the two hands.
+    attack_picks: [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, ...new Array(70).fill(0)],
+    state_picks: {
+      // Band 1 is the climb, band 2 stands and occasionally pounces.
+      "1": [14, 14, 14, 15, 15, 15, 16, 16, 16, 12, ...new Array(70).fill(14)],
+      "2": [7, 7, 7, 7, 7, 7, 7, 7, 7, 13, ...new Array(70).fill(7)],
+    },
+    reactions: [],
+  }],
+  scripts: {
+    wall_left: ARC(290), wall_right: ARC(291), ceiling: ARC(309),
+    aside: ARC(282), aside_attack3: ARC(282), aside_zsass: ARC(282),
+  },
+};
+
+const CHARS31 = {
+  ...CHARS,
+  types: { "1": TYPE, "25": TYPE31 },
+  class31: CLASS31,
+} as unknown as CharactersJson;
+
+/**
+ * A camera at `EYE` looking toward **+Z**, which is where this file's actors
+ * stand. `viewPoint` takes a point in camera space, where -Z is forward, so
+ * the z term is negated on the way out.
+ */
+const CAM_HOST = {
+  ...NULL_HOST,
+  viewPoint: (x: number, y: number, z: number, out: Vec3) => {
+    out.x = EYE.x + x; out.y = EYE.y + y; out.z = EYE.z - z;
+  },
+};
+
+/** ...and the same, with a wall the trace can find. */
+const wallHost = (hit: Vec3 | null) => ({
+  ...CAM_HOST,
+  traceSegment: (_f: Vec3, _t: Vec3, out: Vec3) => {
+    if (!hit) return false;
+    out.x = hit.x; out.y = hit.y; out.z = hit.z;
+    return true;
+  },
+});
+
+function thrower(state: number, extra: Record<string, unknown> = {}) {
+  ResetGameGlobals();
+  SetGameTables(CHARS31);
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  // `g_camera_yaw_bams` is the heading *from* the camera *toward* what it
+  // looks at -- `ThrowerStateLeapDown` sets the pouncing actor's own yaw from
+  // it, and an actor facing the camera carries `VecToAngles(obj - eye)`. This
+  // file's actors stand at +Z of an eye at the origin, so that heading is 0.
+  G.g_camera_yaw_bams = 0;
+  const a = ActorSpawn(0x9000, SpawnClass.Thrower, 0x19, "zstin", {
+    initialState: state, condition: 0, ...extra,
+  });
+  a.visible = true;
+  a.hp = 100;
+  a.motion = 936;
+  a.pos = vec3(0, 0, 80);
+  a.yaw = 0;
+  return a;
+}
+
+console.log("class 0x31, ThrowerStateWalkDistance:");
+{
+  const rng = new Rng(11);
+  const events = new Events();
+  const z = thrower(ThrowerState.WalkDistance, { walkDistance: 15 });
+  const start = { ...z.pos };
+  check("it starts in the entrance the descriptor names",
+        z.state === ThrowerState.WalkDistance, `state ${z.state}`);
+  let walked = 0;
+  for (let i = 0; i < 600 && z.state === ThrowerState.WalkDistance; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    walked = Math.hypot(z.pos.x - start.x, z.pos.z - start.z);
+  }
+  // It stops on the frame it passes the distance, so it may overshoot by one
+  // frame of the walk -- 2.08 units -- and no more.
+  check("and stops within a frame of the fifteen units it names",
+        walked >= 15 && walked < 15 + 2.2, `${walked.toFixed(2)}`);
+  check("then it stands and decides",
+        z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
+}
+
+console.log("class 0x31, the climb:");
+{
+  const rng = new Rng(3);
+  const events = new Events();
+  const z = thrower(ThrowerState.StandAndDecide);
+  // Band 1 is 40 < d <= 50, and the pick table there is nine parts climb.
+  z.pos = vec3(0, 0, 45);
+  z.yaw = 0;                             // facing the camera, which the gate needs
+
+  // With no collision the search fails, and the engine's answer to that is to
+  // refuse the state -- not to leap at nothing. It still pounces, because one
+  // slot in ten of band 1's picks is the pounce and that needs no wall.
+  let climbed = false;
+  for (let i = 0; i < 300; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    if (z.state === ThrowerState.LeapToWallA
+        || z.state === ThrowerState.LeapToWallB
+        || z.state === ThrowerState.LeapToCeiling) climbed = true;
+  }
+  check("with nothing to climb it never enters a surface leap", !climbed,
+        `state ${z.state}`);
+  check("...and its stance is still the ground", z.stance === 0
+        && (z.flags2 & 0x1c0) === 0, `flags2 ${z.flags2.toString(16)}`);
+  z.state = ThrowerState.StandAndDecide;
+  z.sub = 0;
+  z.flags2 = 0;
+  z.pos = vec3(0, 0, 45);
+
+  // Put a wall 30 units to one side, twelve up.
+  const host = wallHost(vec3(30, 12, 45));
+  let sawLeap = false;
+  for (let i = 0; i < 900; i++) {
+    GameUpdate(EYE, 1 / 60, host, rng, events);
+    if (z.state === ThrowerState.LeapToWallA
+        || z.state === ThrowerState.LeapToWallB
+        || z.state === ThrowerState.LeapToCeiling) sawLeap = true;
+    if ((z.flags2 & 0x1c0) !== 0) break;
+  }
+  check("given a wall it leaps at it", sawLeap, `state ${z.state}`);
+  check("and arriving changes its stance off the ground",
+        (z.flags2 & 0x1c0) !== 0 && (z.flags2 & 0x20) !== 0
+        && ThrowerStanceOf(z) > 0,
+        `flags2 0x${z.flags2.toString(16)} stance ${ThrowerStanceOf(z)}`);
+  check("...and left it up on the wall", z.pos.y > 5,
+        `y ${z.pos.y.toFixed(1)}`);
+}
+
+console.log("class 0x31, the pounce and the leap back:");
+{
+  const rng = new Rng(5);
+  const events = new Events();
+  let hits = 0;
+  let hitMotion = -1;
+  events.on("player.damaged", () => { hits++; hitMotion = G.g_player_hit_motion[0]; });
+  const z = thrower(ThrowerState.StandAndDecide);
+  z.pos = vec3(0, 0, 25);                // inside 30: the router goes straight to 8
+
+  GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  check("inside thirty units it stops deciding and waits for a permit",
+        z.state === ThrowerState.WaitForPermit, `state ${z.state}`);
+
+  let sawPounce = false;
+  let closest = Infinity;
+  let sawAside = false;
+  for (let i = 0; i < 900; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    if (z.state === ThrowerState.Pounce) sawPounce = true;
+    if (z.state === ThrowerState.LeapAside) sawAside = true;
+    closest = Math.min(closest, dist2d(z.pos, EYE));
+  }
+  check("it takes the permit and pounces", sawPounce, `state ${z.state}`);
+  // `ThrowerPickLandingPoint` puts it 15.5 in front of the camera, which is
+  // the whole reason the stab connects without any range test.
+  check("the leap puts it on the landing point, not at a range it chose",
+        Math.abs(closest - 15.5) < 0.6, `closest ${closest.toFixed(2)}`);
+  check("and the stab lands", hits > 0, `${hits} hits`);
+  // Attack 0's `player_motion` is 2, attack 1's is 3: whichever it drew, the
+  // reaction is the attack entry's, not a constant.
+  check("with the reaction the attack entry names",
+        hitMotion === 2 || hitMotion === 3, `motion ${hitMotion}`);
+  check("then it leaps back out", sawAside, `state ${z.state}`);
+  check("and the permit is free again for the next one",
+        G.g_attack_permits.filter((p) => p !== -1).length <= 1,
+        `${G.g_attack_permits.join()}`);
+}
+
+console.log("class 0x31, ThrowerStrikeConnect tests no range:");
+{
+  const rng = new Rng(9);
+  const events = new Events();
+  void rng;
+  let hits = 0;
+  events.on("player.damaged", () => hits++);
+  const z = thrower(ThrowerState.StandAndDecide);
+  z.pos = vec3(0, 0, 400);              // nowhere near the camera
+  z.attackPermit = 0;
+  G.g_attack_permits[0] = z.at;
+  z.attack = 0;
+  z.stance = 0;
+  z.action = { motion: 303, t: 62 / 60, loop: false };
+  check("a swing on its hit frame connects from four hundred units away",
+        ThrowerStrikeConnect(z, events) && hits === 1, `${hits} hits`);
+  // ...and the cancel mask is the only thing that stops it.
+  z.flags2 = 0;
+  z.zones = 2;                          // attack 0 names zone 2, the right arm
+  z.action = { motion: 303, t: 62 / 60, loop: false };
+  G.g_player_invuln_frames = 0;
+  const before = hits;
+  ThrowerStrikeConnect(z, events);
+  check("but an attack whose zone has been shot off whiffs", hits === before,
+        `${hits} vs ${before}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

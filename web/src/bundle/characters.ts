@@ -112,6 +112,15 @@ export interface CharacterPlacement {
               dest: [number, number, number] }[];
   } | null;
   /**
+   * `ThrowerStateWalkDistance` (class 0x31 state 18) walks until it is this
+   * far from where it started, then stands.
+   */
+  walk_distance?: number;
+  /** `ThrowerStateEntranceClip` (state 19) plays this once, then stands. */
+  entrance_motion?: number;
+  /** `ThrowerStateDelayedPounce` (state 23): a clip, then a leap over `frames`. */
+  pounce?: { motion: number; frames: number } | null;
+  /**
    * A scripted entrance played once before `motion` starts looping — state 21
    * of class 0x30's 54-state machine. The two zombies in the stage-2 van jump
    * out of it this way, staggered by their delays.
@@ -256,6 +265,58 @@ export interface DifficultyJson {
   hp_max: number;
 }
 
+/**
+ * One stage of a three-stage arc motion script — `InstallArcMotionScript`
+ * (`FUN_0044DA60`) copies twelve dwords into the actor's slot and
+ * `ActorArcStep` (`FUN_0044D860`) walks them.
+ *
+ * Every script in the program names the **same motion** in all three stages,
+ * so a script is one clip cut into windup, flight and landing.
+ */
+export interface ArcStage {
+  motion: number;
+  /** Frame of that clip the stage starts at. */
+  start: number;
+  /** Cross-fade in, in frames. */
+  fade: number;
+  /** The clip frame past which the next stage begins. */
+  until: number;
+}
+
+/** One class-0x31 attack — `g_class31_melee_attacks` — 0x00592A10. */
+export interface Class31Attack {
+  script: ArcStage[];
+  /** Frame of the script's clip on which the hit lands; -1 means "on landing". */
+  hit_frame: number;
+  /** The reaction the *player* plays when it connects. */
+  player_motion: number;
+  /** If every zone named here is destroyed the strike whiffs. */
+  cancel_mask: number;
+}
+
+/** One class-0x31 behaviour set. See docs/formats/combat.md §12. */
+export interface Class31Set {
+  set: number;
+  /** `g_class31_motion_sets` — `[idle, idle, walk, walk, land, airborne]`. */
+  motions: number[];
+  /** `{stance: {index: attack}}` — stance 4 is "mid-leap". */
+  attacks: Record<string, Record<string, Class31Attack>>;
+  /** `picks[(rand % 10) + (destroyed_zones & 7) * 10]` names the attack. */
+  attack_picks: number[];
+  /** `{band: [80 candidate state ids]}` — the behaviour repertoire. */
+  state_picks: Record<string, number[]>;
+  /** The stumble, by reaction group. */
+  reactions: number[];
+}
+
+/** `g_class31_*` — class 0x31's four behaviour sets and its named scripts. */
+export interface Class31Json {
+  sets: Class31Set[];
+  /** The arc scripts a state names rather than an attack entry. */
+  scripts: Record<string, ArcStage[]>;
+  note?: string;
+}
+
 export interface CharactersJson {
   deaths: DeathSet;
   difficulty: DifficultyJson;
@@ -269,6 +330,8 @@ export interface CharactersJson {
   approach: ApproachJson;
   tracking: TrackingJson;
   player: PlayerDamageJson;
+  /** Class 0x31's own tables — see {@link Class31Json}. */
+  class31?: Class31Json;
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
   note: string;

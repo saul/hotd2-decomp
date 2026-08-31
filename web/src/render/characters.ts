@@ -226,6 +226,9 @@ export class CharacterLayer {
         ringSet: p?.ring_set ?? 0,
         leap: p?.leap ?? null,
         path: p?.path ?? null,
+        walkDistance: p?.walk_distance ?? 0,
+        entranceMotion: p?.entrance_motion ?? 0,
+        pounce: p?.pounce ?? null,
       });
       a.motion = motion;
       a.intro = intro;

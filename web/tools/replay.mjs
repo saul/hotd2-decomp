@@ -63,6 +63,10 @@ spawns.forEach((s, n) => {
     condition: p.body_condition ?? 0,
     ringSet: p.ring_set ?? 0,
     leap: p.leap ?? null,
+    path: p.path ?? null,
+    walkDistance: p.walk_distance ?? 0,
+    entranceMotion: p.entrance_motion ?? 0,
+    pounce: p.pounce ?? null,
   });
   a.pos = { x: s.pos[0], y: s.pos[1], z: s.pos[2] };
   a.hp = p.hp || 100;
@@ -85,6 +89,24 @@ const name = (a) => a.cls === SpawnClass.Zombie
     ? `${ThrowerState[a.state] ?? a.state}/${a.sub}`
     : `state ${a.state}`;
 
+// A camera that looks straight down -Z from `eye`, which is where this
+// harness puts it. The leap states unproject through the host, so with
+// `NULL_HOST` they have nowhere to aim; this is the smallest host that makes
+// them answerable. It reports no collision, which is the engine's own
+// "there is no wall there" and leaves the surface leaps refused.
+const host = {
+  ...NULL_HOST,
+  viewPoint: (x, y, z, out) => {
+    out.x = eye.x + x; out.y = eye.y + y; out.z = eye.z + z;
+  },
+  aimPoint: (ahead, out) => {
+    out.x = eye.x; out.y = eye.y; out.z = eye.z - ahead;
+  },
+};
+// ...and the yaw that matches it: looking down -Z is 0x8000 in BAMS.
+G.g_camera_yaw_bams = 0x8000;
+G.g_camera_fixed_eye_y = eye.y;
+
 const rng = new Rng(1);
 const events = new Events();
 let hits = 0;
@@ -104,7 +126,7 @@ for (let f = 0; f <= total; f++) {
         + `permit=${a.attackPermit} motion=${a.motion}`);
     }
   }
-  GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+  GameUpdate(eye, 1 / 60, host, rng, events);
   for (const { a } of actors) a.visible = !a.dead;   // what the renderer does
 }
 console.log(`\n${hits} hits on the player over ${seconds}s`);

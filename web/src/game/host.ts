@@ -44,7 +44,38 @@ export interface GameHost {
   viewSpaceOf(at: number, out: Vec3): boolean;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */
   setBoneSlot(at: number, bone: number, slot: number): void;
+  /**
+   * `ColiTraceSegmentAllSets` — does the level get in the way between these
+   * two points, and where?
+   *
+   * The engine traces against the `coli/` sets, which are simplified meshes
+   * loaded beside the geometry; the bundle does not carry them, so the host
+   * answers from whatever it has. Optional, and a host that cannot answer is a
+   * valid host: `ThrowerFindWallBeside` and `ThrowerFindCeilingAbove` return
+   * false on a miss, and the engine does exactly the same thing when there is
+   * no wall — the actor simply does not take that action.
+   */
+  traceSegment?(from: Vec3, to: Vec3, out: Vec3): boolean;
 }
+
+/**
+ * `QueryGroundHeightAt` — `FUN_00409D40`. A vertical trace from 1000 units
+ * below the point up to it, returning the height of what it hit.
+ *
+ * [diverges] The engine's is a real query against the collision sets and
+ * returns 0 for a miss; here a host with no collision has no answer at all, so
+ * this reports `null` and every caller falls back to something the engine
+ * itself falls back to.
+ */
+export function QueryGroundHeightAt(host: GameHost, x: number, y: number,
+                                    z: number, out: Vec3): number | null {
+  if (!host.traceSegment) return null;
+  return host.traceSegment({ x, y: y - GROUND_PROBE, z }, { x, y, z }, out)
+    ? out.y : null;
+}
+
+/** `FUN_00409D40`'s own reach. */
+const GROUND_PROBE = 1000;
 
 /** A host that knows nothing, for headless runs. */
 export const NULL_HOST: GameHost = {

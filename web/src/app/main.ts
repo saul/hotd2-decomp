@@ -350,6 +350,9 @@ class Player {
     this.rain.attach(this.stage.root, bundle.script.rain);
     this.lighting.attach(this.stage.root);
     this.scene.add(this.stage.root);
+    // The port asks the level one question -- is there a wall there -- through
+    // this. See `TerrainProbe` in app/systems.ts.
+    this.game.terrain = this.stage;
 
     this.rails = new RailLayer(this.paths);
     this.scene.add(this.rails.group);

@@ -9,6 +9,7 @@
  * The renderer binds to an actor by `at` and owns the nodes; it holds no state
  * of its own that a snapshot would need.
  */
+import type { ArcStage } from "../bundle/characters";
 import type { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 
@@ -41,14 +42,69 @@ export enum DamageZone {
 }
 
 /**
- * One waypoint: `{s16 step, s16 motion_set, f32 x, f32 y, f32 z}`, sixteen
- * bytes in the descriptor. `step` is frames per unit and doubles as the arc
- * kind — see `ActorArcBeginTo`.
+ * One waypoint: `{s16 step, s16 script, f32 x, f32 y, f32 z}`, sixteen bytes
+ * in the descriptor.
+ *
+ * `step` is the arc's **parameter-advance rate**, not the arc kind:
+ * `ActorArcBeginTo` (`FUN_0044DC70`) sets the duration to `dist2d * step`
+ * rounded down to a multiple of `step`, and the stepper adds `step` a frame —
+ * so the leg still takes about `dist2d` frames, at `step` times the
+ * resolution. The arc *kind* is `obj+0x1354`, which `SelectActorGravityAxis`
+ * (`FUN_00450CF0`) writes from the surface the actor is attached to.
+ *
+ * `script` selects the leg's three-stage arc motion script — see
+ * `InstallArcMotionScript` (`FUN_0044DA60`).
  */
 export interface PathPoint {
   step: number;
   motion_set: number;
   dest: [number, number, number];
+}
+
+/**
+ * `obj+0x136C` — class 0x31's second flag word.
+ *
+ * Bits 6, 7 and 8 are the **surface the actor is attached to**, and they are
+ * the axis everything else about a thrower turns on: they pick its motion
+ * row, its attack row, and the gravity axis `SelectActorGravityAxis`
+ * (`FUN_00450CF0`) writes. `ThrowerStateLeapToSurface` sets one on arrival.
+ */
+export enum ThrowerFlag {
+  /** `ThrowerFindWallBeside`'s own refusal bit. */
+  NoWallLeap = 0x2,
+  /** Off the ground — set with any of the three surface bits. */
+  OffGround = 0x20,
+  /** State 15's wall. Stance `+1`. */
+  WallA = 0x40,
+  /** State 14's wall. Stance `+2`. */
+  WallB = 0x80,
+  /** State 16's ceiling. Stance `+3`. */
+  Ceiling = 0x100,
+  /** The three surface bits together. */
+  Surface = 0x1C0,
+  /** `ThrowerStrikeConnect` uses `g_class31_throws` instead of the melee row. */
+  UseThrowTable = 0x400,
+  /** `ThrowerPickNextState` has committed to a band; `moveBand` holds which. */
+  BandLatched = 0x2000,
+  /** This swing has already connected. */
+  Struck = 0x800,
+  /** Mid-pounce: the stance row moves by four. */
+  Pouncing = 0x20000,
+}
+
+/**
+ * The stance rows of `g_class31_melee_attacks`: which surface the actor is on,
+ * and whether it is in the air. `ThrowerLoadAttackArcScript` (`FUN_0044B610`)
+ * computes it as `bit6 + 2*(bit7 + 2*bit17) + 3*bit8`, which for the four
+ * surface bits alone is 0..3 and with the pounce bit is 4..7.
+ */
+export enum ThrowerStance {
+  Ground = 0,
+  WallA = 1,
+  WallB = 2,
+  Ceiling = 3,
+  /** Add this while `ThrowerFlag.Pouncing` is set. */
+  Pounce = 4,
 }
 
 /** A motion the actor is playing at full weight. `t` is seconds. */
@@ -190,6 +246,40 @@ export interface Actor {
   pathDelay: number;
   /** `obj+0x1334` — how many it lasts. */
   arcTotal: number;
+  /** `obj+0x13CC` — where the arc ends. */
+  arcTo: Vec3;
+  /**
+   * `obj+0x1360` — which of `ActorArcStep`'s five phases the arc is in. The
+   * same word the path rider keeps its offset in; only one class uses it at a
+   * time, which is why they are two names for one offset here.
+   */
+  arcPhase: number;
+  /**
+   * The three-stage arc motion script the current leap is playing.
+   *
+   * [diverges] The engine keeps these in `g_arc_scripts` (0x009C8AA0), one
+   * 0x30-byte slot per enemy slot, because `InstallArcMotionScript` copies
+   * rather than points. It is per-actor state either way, and holding it on
+   * the actor is what puts it in the snapshot.
+   */
+  arcScript: ArcStage[] | null;
+  /** `obj+0x136C` — see {@link ThrowerFlag}. */
+  flags2: number;
+  /** `obj+0x1364` — the stance row the current attack was drawn against. */
+  stance: number;
+  /**
+   * `obj+0x135C` — the distance band `ThrowerPickNextState` last committed to.
+   * The same word as `pathSlot`; see `arcPhase`.
+   */
+  moveBand: number;
+  /** `obj+0x1338` — frames since a leap landed. */
+  sinceLanding: number;
+  /** `ThrowerStateWalkDistance`'s target, from the descriptor. */
+  walkDistance: number;
+  /** `ThrowerStateEntranceClip`'s one-shot clip, from the descriptor. */
+  entranceMotion: number;
+  /** `ThrowerStateDelayedPounce`'s clip and duration, from the descriptor. */
+  pounce: { motion: number; frames: number } | null;
 
   /**
    * How close the bite may bring this actor to its target.
@@ -329,6 +419,16 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pathLeg: 0,
     pathDelay: 0,
     arcTotal: 0,
+    arcTo: vec3(),
+    arcPhase: 0,
+    arcScript: null,
+    flags2: 0,
+    stance: 0,
+    moveBand: 0,
+    sinceLanding: 0,
+    walkDistance: 0,
+    entranceMotion: 0,
+    pounce: null,
     strikeFloor: 0,
     hasStrikeAnchor: false,
     struck: false,

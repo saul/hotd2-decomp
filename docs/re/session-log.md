@@ -5181,3 +5181,205 @@ transcription that only happens to agree with the data is not one.
 **[measured]** four plays in the game name `-1`, all four deferred (stage 1
 blocks 3 and 8, both bundles); none of the 1110 non-deferred plays does, so
 `CamStartPathPlayback`'s resume is unreachable from the scripts.
+
+---
+
+## Session 2026-08-31 — the install was rotten, not the format
+
+**Prompted by a plain question**: compare the installed game tree against the
+retail disc (`/Users/Shared/hotd2.iso`) and report the differences. The answer
+invalidated a documented "anomaly" and ~400 lines of parser.
+
+### Method
+
+The disc ships an MSI plus one 421 MB `DATA.CAB` whose members are flattened to
+`F<seq>_<name>`, and 376 basenames collide across `pol/`, `tex/` and `mot/`, so
+basename matching cannot work. Parsed the MSI's `File`, `Component` and
+`Directory` tables directly (OLE compound file → `_StringPool`/`_StringData`,
+`_Columns`, then column-wise table streams) to rebuild true install paths, then
+compared by SHA-256. Script kept at `tools/`-adjacent scratch; the MSI reader is
+~110 lines and worth re-deriving if ever needed again.
+
+### Result
+
+2047 files: **2040 byte-identical, 0 missing, 7 modified in place.**
+
+| File | Δ | What it was |
+|---|---|---|
+| `Hod2.exe` | 1 byte | `JZ`→`JNZ` at `0x004A6857` — deliberate no-CD patch, kept |
+| `evt/st1evtbl.bin` | 1 byte | rot; a pristine `st1evtbl - Copy.bin` sat beside it |
+| `cam/cp_st1.bin` | 203 bytes → `0xFF` | rot |
+| `cam/cp_demo.bin` | 20 bytes → `0xFF` | rot |
+| `cam/cp_title.bin` | 9 bytes → `0xFF` | rot |
+| `cam/op_st1.bin` | 6 bytes → `0xEE` | rot |
+| `pol/tv2.bin` | 14 bytes | **[open]** — see below |
+
+### What this cost
+
+`docs/re/anomalies.md` §7 and its `cam/` smashed-bytes section were **both
+descriptions of local bit-rot**, and `hod2lib.cam` had grown a full restoration
+engine to work around them: offset-table repair, sibling time bases,
+duplicate/constant convictions, a partner/twin/order/nearest evidence ladder,
+`Curve.damage`, `Path.damaged`, a bundle `repairs` field and a client warning
+badge. `docs/formats/cam.md` had absorbed a `0xFFFF0000` "NaN padding
+convention" that does not exist — those were two more smashed `0xFF` bytes.
+
+The load-bearing error was the sentence **"both retail copies checked are
+byte-identical, so this is how the game ships"**. Two copies of the same
+*installed* tree are not two retail copies. Nothing was ever compared against
+the disc.
+
+After restoring the four `cam/` files from the disc: all 23 files parse to
+**100.0000% byte coverage**, 418 paths, 3,018 curves, 44,800 keyframes, zero
+repairs, zero unrecoverable channels, zero padding keys. The repair code is
+deleted; `CamFile.parse` now raises `CamError` on any keyframe word outside the
+sane range so a damaged copy fails loudly instead of being invented over.
+
+### Also checked
+
+* The Ghidra pipeline works unchanged against the **disc's** `Hod2.exe`: two
+  isolated scratch rebuilds (disc EXE vs installed patched EXE) export
+  byte-identical symbol sets — 486 functions, 731 globals, `failed=0`. The
+  no-CD patch is a same-length opcode swap, so no address moves.
+* The live Ghidra DB holds work the restore scripts do **not** reproduce: 62
+  function names present only in the DB (a whole `Thrower*` class, ~53 of them,
+  `0x449620`–`0x451480`), 65 more where the DB improves on an
+  `ApplyKnownTables` placeholder, and 10 globals. Not yet written back.
+* `verify_annotations.py` would reject a straight export today:
+  `CameraUpdateTick` is used at both `0x40c370` and `0x414f10`.
+
+### Wrong turns this session
+
+* Set up a scratch Ghidra project with `ghidra/annotations` **symlinked into the
+  repo**, then ran `export-annotations` against it — which overwrote the
+  committed TSVs. Restoring from HEAD lost ~35 uncommitted rows a peer session
+  had staged in the working tree. Scratch projects must copy the annotations,
+  never link them.
+* First reading of the `0xFF`/`0xEE` byte scatter called it "deliberate RE probe
+  edits". It was media rot. The tell was there: single low bytes, always the
+  same value, never a whole field.
+
+### Next actions
+
+1. Write the 127 live-only function names and 10 globals into
+   `ghidra/annotations/`, resolving the `CameraUpdateTick` duplicate first.
+2. `pol/tv2.bin` — 14 bytes differ from the disc in 6 clusters across
+   `0x26F`–`0x3B7`, but unlike every other `pol/` file it is high-entropy on
+   **both** sides, so the usual header check says nothing. Restore it from the
+   disc and find out what reads it. **[open]**
+3. Re-check whether any other extract-derived "anomaly" in `docs/re/anomalies.md`
+   has the same cause — §6 `pol/etc_1.bin` offset table is the obvious
+   candidate, and it is the same shape of claim.
+
+---
+
+## Class 0x31 is a wall-crawler, and its behaviour is a table
+
+Reported as: *"the game has only implemented the walking zombies, but these
+zombies move and jump around the walls etc, before jumping on and stabbing the
+player (then jump back)"*, pointing at `17/5/1`, descriptor `0xB9E8` in stage 2.
+
+That descriptor is class **0x31**, character type **0x19 = `zstin.bin`**, and
+the port gave the whole class one behaviour — stand still and throw. Reading
+the other thirty-one states turned out to be less work than it sounds, because
+**the behaviour is not in the code**.
+
+### The route in: a distance, a band, and a pick table
+
+`ThrowerStateStandAndDecide` (state 7) does not decide anything. It calls
+`ThrowerPickNextState` (`FUN_0044ADB0`), which measures the ground distance to
+the camera, turns it into a band — 1 for `40 < d <= 50`, 2 for everything else,
+and `d <= 30` short-circuits to state 8 — and draws a **state id** out of
+`g_class31_action_picks[set][band][rand%10 + zones*10]`. `ThrowerTryEnterState`
+(`FUN_0044AFB0`) then refuses it if the actor cannot do it right now.
+
+`zstin`'s band 1 is `14 14 14 15 15 15 16 16 16 12` and its band 2 is
+`7 7 7 7 7 7 7 7 7 13`. States 14, 15 and 16 leap onto the wall on either side
+and the ceiling; 12 and 13 are the pounce. **That table is the reported
+behaviour, verbatim.** Sets 1 and 3 have only `7` and the throw in the same
+slots and set 2 has nothing but `7`, which is why the four character types that
+share this machine behave nothing alike.
+
+### The thing I nearly got wrong twice
+
+`obj+0x130C` is **not** the body condition here. The port's `Actor.condition`
+is that offset and is documented as "derived from whether the hands still hold
+their slots", which is true of class 0x30 — `ActorBodyConditionFromHands` has
+exactly one caller in the program and it is class 0x30's state 2. For class
+0x31 `EnemyThrowerInit` writes the spawn descriptor's byte +1 there and nothing
+touches it again, so it is a **behaviour set**. An agent reading the tables
+labelled the four rows `0x16, 0x17, 0x18, 0x19` by position and concluded that
+`zstin` never climbs; the data says row 0 is `zstin` and row 2 is `zskamere`,
+identified by set 2's first motion being `0x1BA`, the clip `EnemyThrowerInit`
+starts character 0x17 in. Reading the row as a character index would have made
+the whole climb unreachable.
+
+The related bit, and the one that makes the class coherent: `obj+0x136C` bits
+6, 7 and 8 are **which surface the actor is stuck to** — ground, either wall,
+the ceiling. Three independent consumers agree: `SelectActorGravityAxis`
+(`FUN_00450CF0`) maps them to a gravity axis, `TraceActorSurfaceContactPoint`
+(`FUN_0044C370`) to a probe direction, and `ThrowerLoadAttackArcScript` to an
+attack row. So the wall-crawling is not a special case bolted on — it is the
+same state machine reading a different row, and states 14/15/16 exist only to
+set the bit.
+
+### The stab is timed, not tested
+
+`ThrowerStrikeConnect` (`FUN_0044CE60`) has **no range test at all**. It fires
+when the clip reaches the attack entry's `hit_frame` and the cancel mask has
+not wiped out the limb. The aiming is `ThrowerPickLandingPoint`, which
+unprojects a fixed pixel offset at a fixed depth — a place on the *screen* —
+and the arc puts the actor there on that frame. The same design as the zombie's
+strike and the thrown weapon's expiry.
+
+### Four wrong turns worth recording
+
+**The clip clock.** `hit_frame` is 62 and clip 303 bakes to 34 keys, so the hit
+could never fire. `g_anim_frame_counts` and every threshold in this class are
+in **engine frames at 60 Hz**; `mot/` is authored at 30 Hz. Reading the baked
+index made the pounce land silently and connect never — the actor arrived, the
+animation played, and nothing happened, which is exactly the failure that is
+hardest to spot from a state trace.
+
+**The 12-dword blocks are not waypoints.** I briefed an agent that
+`DAT_00564A68` and friends were 16-byte waypoint lists, because a genuine
+16-byte waypoint format exists a few states away in `ThrowerStatePathFollow`.
+They are three-stage **arc motion scripts**, `{motion, start, fade, threshold}`
+×3 — one clip cut into windup, flight and landing. Two agents found that
+independently and the brief was corrected mid-flight.
+
+**The adjacent-array trap, again.** `g_class31_melee_attacks` gives set 0 five
+stance rows, sets 1 and 2 one, and set 3 five, packed end to end with no count.
+Reading a fixed eight rows returns the neighbour's entries as if they were this
+set's. Bounded by the next row's start, which is how `_bounded_ptr_array`
+already does it elsewhere in the exporter.
+
+**A peer session's commit dropped my annotations.** Twenty-six rows added to
+`ghidra/annotations/functions.tsv` were gone from the working tree after a
+concurrent commit landed, and `verify_port.py` caught it — forty-two citations
+with no row. Re-applied from a scratch script, which is the lesson: with two
+sessions in one tree, an annotation batch wants to be re-runnable.
+
+### Two checks that can fail
+
+`tools/verify_thrower_walls.py` runs `ThrowerFindWallBeside`'s and
+`ThrowerFindCeilingAbove`'s own queries against the game's own `coli/` sets at
+every class-0x31 spawn in the game. If the reading of the pick table were
+wrong — if the climb were unreachable data — no spawn would have a wall. **24
+of 49 do, and 14 have a ceiling**; 9 and 4 of those are in stage 2. It fails
+only on zero, and its trace is deliberately looser than the engine's so it can
+only over-report.
+
+`verify_combat.py` gained a section asserting that every state id the pick
+tables name is one `ThrowerTryEnterState` accepts. A pick naming a state the
+gate refuses outright would be an actor that can only stand still.
+
+### What is not ported, and why
+
+Eighteen of the thirty-five states: the hit reactions and the death chain
+(class 0x31 has its own, and the port kills actors through the shared combat
+code), the fall to a surface, the two scripted attacks, the camera-relative
+grab, the knock-back tumble, and the object-path entrance. All of them are read
+and named; none of them is reachable from the states that are ported, and the
+dispatcher sends anything unmodelled back to the hub rather than letting it sit
+on a permit.

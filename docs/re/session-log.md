@@ -7367,3 +7367,56 @@ other sessions live needs the audit afterwards, not just the export.
 arrived with 2e6edda and the address is absent from HEAD's TSV too, so it is
 not fallout from this rename. Left for whoever named it; it wants a real name
 in Ghidra, and a `g_`-prefixed one for a function is suspect on its own.
+
+## The captor's exit, and the two pieces that were left open
+
+`ZombieScriptEnded` (`FUN_0045C8D0`) is where a captor turns on the player, and
+the port had the role flip but not the three details around it.
+
+**The `WalkPastPoint` shortcut.** The engine does not always walk the leg:
+
+```c
+case 0x28:
+    if (ActorPointIsAhead(obj+0x64, obj+0x40, ZombieScriptForState(...)))
+        { obj+0x1310 = 1; obj+0x1312 = 0; }      /* straight to AttackRun */
+    else  obj+0x1312 = 1;
+```
+
+Stage 1's `0x18E8` is exactly that shape — `initial_state 34`,
+`attack_state 40`, an attack script whose point is already in front of it and
+no entries at all. The port only ever set sub 1, so it walked the whole leg
+before turning. It reached `AttackRun` either way, one frame later, so this is
+fidelity rather than the reported symptom — which I still have not reproduced,
+because `replay.mjs` builds actors from *script* spawns and a captor is not
+one: `CivilianInit` builds it from the civilian's own child array. Closing that
+harness gap is what would let the maul be driven headlessly at all. `[open]`
+
+**The camera cue, `tail+0x0C`/`+0x0E`.** The exporter was not carrying it, so
+both the `WalkToPoint` flag and state 42 were unportable. It is now — gated on
+the spawn actually having a captor script, which matters: read blind off class
+0x30 those bytes yield **333** "cues", of which 330 are mantissa
+(`path: 13107, frame: -16093`) because every other state uses them for a
+destination, a waypoint, a pounce or a grab. Gated properly it is **three**,
+all in stage 2 — `(66, 430)` twice and `(75, 660)` once — which is exactly the
+count read independently out of the disassembly.
+
+**State 42, `ZombieStateHoldForCameraCue` (`FUN_0045BFD0`).** Unnamed in Ghidra
+until now. A captor whose script has ended and which would go to `AttackRun` is
+being *staged for a shot*: it holds here until the camera reaches its cue. It
+is not an idle — it runs the state it is holding (`obj+0x132C`, the delegate)
+every frame and takes the state back afterwards, so the zombie really does run
+at the player and hold at range. What it is forbidden is **landing the blow**:
+an attempt to reach `Strike` is bounced to `HoldAtRange` and the permit handed
+back, which makes this the only code in the captor family that touches
+`g_attack_permits`.
+
+One shape difference: the engine calls `g_class30_states[obj+0x132C]` straight
+out of the table, where the port dispatches on `obj.state`. So the delegate is
+handed in as a callback and the state field is set around the call — importing
+the dispatcher back into `target.ts` would close a cycle. [diverges]
+
+Also named the two finish-sequence camera drivers this turn's earlier
+`g_camera_free` work leaned on: `CameraDriverFromDeferredPose` (`FUN_00402E00`,
+minor 7) and `CameraDriverSelectMode` (`FUN_00402650`, minors 4 and 6). Having
+them named is what makes "these are alternatives, not a conjunction" a citable
+statement rather than a note in a comment.

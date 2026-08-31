@@ -41,7 +41,8 @@ import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
 import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
-import { ZombieScriptEnded } from "../src/game/class30/target";
+import { ZombieScriptEnded, ZombieStateHoldForCameraCue }
+  from "../src/game/class30/target";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
@@ -3305,6 +3306,110 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
 
   G.g_cam_path_frame_prev = 0; G.g_cam_path_frame = 0;
   check("...nor before the path has reached it", !CamPathCueReached(39, 280));
+}
+
+// The captor's exit: `ZombieScriptEnded` (`FUN_0045C8D0`) and the shortcut in
+// its `WalkPastPoint` arm. Stage 1's `0x18E8` is the shape that matters --
+// initial state 34 (`WalkToTarget`), attack state 40 (`WalkPastPoint`), an
+// attack script whose point sits in front of it and no entries at all. When
+// the maul ends, the engine tests the point and turns on the player *at once*
+// rather than walking the leg first.
+{
+  const captor = (state: number, attackState: number,
+                  point: [number, number, number], yaw = 0) => {
+    ResetGameGlobals();
+    const z = ActorSpawn(0x18e8, SpawnClass.Zombie, 1, "captor");
+    z.state = state;
+    z.attackState = attackState;
+    z.yaw = yaw;
+    z.pos = vec3(-80, 2, -309);
+    z.script = { target: null,
+                 attack: { state: attackState, head: { point }, entries: [] } };
+    return z;
+  };
+
+  // Facing +X (yaw 0xC000) with the point at x = -25: already ahead.
+  const ahead = captor(ZombieState.TargetMotionScript, ZombieState.WalkPastPoint,
+                       [-25, 2, -309], 0xc000);
+  ZombieScriptEnded(ahead);
+  check("a captor whose point is already ahead turns on the player at once",
+        ahead.state === ZombieState.AttackRun && ahead.sub === 0,
+        `state ${ahead.state} sub ${ahead.sub}`);
+
+  // Facing -X, so the same point is behind: it walks the leg first.
+  const behind = captor(ZombieState.TargetMotionScript, ZombieState.WalkPastPoint,
+                        [-25, 2, -309], 0x4000);
+  ZombieScriptEnded(behind);
+  check("...and one whose point is behind walks it first",
+        behind.state === ZombieState.WalkPastPoint && behind.sub === 1,
+        `state ${behind.state} sub ${behind.sub}`);
+
+  // The role flip itself: a captor already *in* its attack state goes to
+  // `AttackRun`, which is what ends the family for good.
+  const done = captor(ZombieState.WalkPastPoint, ZombieState.WalkPastPoint,
+                      [-25, 2, -309], 0x4000);
+  ZombieScriptEnded(done);
+  check("a captor that has finished its attack script goes to AttackRun",
+        done.state === ZombieState.AttackRun, `state ${done.state}`);
+}
+
+// State 42, the camera-cue hold (`ZombieStateHoldForCameraCue`,
+// `FUN_0045BFD0`). A captor that has finished its script and would turn on the
+// player is instead **staged for a shot**: it runs at the player and holds at
+// range, but may not land the blow until the camera reaches the path and frame
+// in its descriptor tail. Three spawns in the game do this, all in stage 2.
+{
+  const staged = (cue: { path: number; frame: number } | null) => {
+    ResetGameGlobals();
+    const z = ActorSpawn(0xa030, SpawnClass.Zombie, 1, "staged captor");
+    z.state = ZombieState.TargetMotionScript;
+    z.attackState = ZombieState.AttackRun;
+    z.cameraCue = cue;
+    return z;
+  };
+
+  // The exit is diverted rather than going to AttackRun.
+  const held = staged({ path: 75, frame: 660 });
+  ZombieScriptEnded(held);
+  check("a captor with a camera cue holds instead of turning on the player",
+        held.state === ZombieState.HoldForCameraCue
+        && held.delegate === ZombieState.AttackRun
+        && (held.flags & ActorFlag.NoCameraTrack) !== 0,
+        `state ${held.state} delegate ${held.delegate}`);
+
+  // Without a cue it goes straight through, which is the other 66 spawns.
+  const free = staged(null);
+  ZombieScriptEnded(free);
+  check("...and one without a cue does not",
+        free.state === ZombieState.AttackRun, `state ${free.state}`);
+
+  // Holding: the delegate runs, and the state comes straight back.
+  G.g_active_cam_path = 12;
+  G.g_cam_path_frame = 3;
+  let ran = 0;
+  ZombieStateHoldForCameraCue(held, (o, st) => { ran = st; void o; });
+  check("the hold runs its delegate every frame",
+        ran === ZombieState.AttackRun && held.state === ZombieState.HoldForCameraCue,
+        `ran ${ran}, state ${held.state}`);
+
+  // The delegate wants to strike: bounced to HoldAtRange, permit given up.
+  held.attackPermit = 0;
+  G.g_attack_permits[0] = 1;
+  ZombieStateHoldForCameraCue(held, (o) => { o.state = ZombieState.Strike; });
+  check("a delegate that reaches Strike is bounced, and gives the permit back",
+        held.state === ZombieState.HoldForCameraCue
+        && held.delegate === ZombieState.HoldAtRange
+        && held.attackPermit === -1,
+        `state ${held.state} delegate ${held.delegate} permit ${held.attackPermit}`);
+
+  // The camera arrives: it graduates to the delegate and is visible again.
+  G.g_active_cam_path = 75;
+  G.g_cam_path_frame = 660;
+  ZombieStateHoldForCameraCue(held, () => {});
+  check("and it graduates when the camera reaches the cue",
+        held.state === ZombieState.HoldAtRange
+        && (held.flags & ActorFlag.NoCameraTrack) === 0,
+        `state ${held.state} flags 0x${(held.flags >>> 0).toString(16)}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

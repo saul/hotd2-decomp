@@ -626,6 +626,16 @@ export interface Actor {
    * is where an ordinary zombie actually decides to swing, does not.
    */
   attackState: number;
+  /**
+   * `obj+0x132C` — the state `ZombieStateHoldForCameraCue` runs on this
+   * actor's behalf while it waits for its camera cue.
+   */
+  delegate: number;
+  /**
+   * The descriptor tail's `+0x0C`/`+0x0E`, or null when `+0x0C` is -1.
+   * The camera path and frame a captor's exit waits for.
+   */
+  cameraCue: { path: number; frame: number } | null;
 
   // -- runtime the renderer reads ----------------------------------------
   dead: boolean;
@@ -809,6 +819,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     struck: false,
     initialState: 0,
     attackState: 0,
+    delegate: 0,
+    cameraCue: null,
     dead: false,
     visible: false,
     motion: 0,

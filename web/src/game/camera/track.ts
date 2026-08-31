@@ -96,7 +96,7 @@ export function CameraTrackEnemiesTick(): void {
 }
 
 /**
- * `g_camera_free` — `FUN_00402E00`, transcribed.
+ * `g_camera_free` — `CameraDriverFromDeferredPose` (`FUN_00402E00`).
  *
  *     g_camera_free = 1;
  *     for (p = &g_enemy_slots; p < 0x009A5EE0; p += 8)

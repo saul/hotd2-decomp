@@ -89,6 +89,11 @@ export enum ZombieState {
   /** `ZombieStateWalkToPoint` (`FUN_0045BE30`). */
   WalkToPoint = 41,
   /** `ZombieStateDragTarget` (`FUN_0045C080`). Glued to the civilian. */
+  /**
+   * `ZombieStateHoldForCameraCue` (`FUN_0045BFD0`). Holds a captor off the
+   * player until the camera reaches its cue. See `class30/target.ts`.
+   */
+  HoldForCameraCue = 42,
   DragTarget = 43,
   /** `ZombieStatePounceOnTarget` (`FUN_0045C2E0`). */
   PounceOnTarget = 44,

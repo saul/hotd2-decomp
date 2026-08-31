@@ -756,6 +756,12 @@ class Placement:
     #: state is in :data:`TARGET_SCRIPT_SHAPE` carry them.
     target_script: dict | None = None
     attack_script: dict | None = None
+    #: The captor family's camera cue, ``{path, frame}`` from the tail's
+    #: ``+0x0C``/``+0x0E``, or ``None`` when ``+0x0C`` is -1. `ZombieScriptEnded`
+    #: reads it to decide whether a captor that has finished its script may turn
+    #: on the player at once or must first hold in state 42 until the camera
+    #: reaches that path and frame. Three spawns in the game set one.
+    camera_cue: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -784,6 +790,8 @@ class Placement:
             d["target_script"] = self.target_script
         if self.attack_script:
             d["attack_script"] = self.attack_script
+        if self.camera_cue:
+            d["camera_cue"] = self.camera_cue
         if self.leap:
             d["leap"] = self.leap
         if self.path:
@@ -1162,15 +1170,36 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 delayed_leap = {"delay": rec.param(4, "i32") or 0,
                                 "dest": dest, "gravity": g}
         tscript = ascript = None
+        camera_cue = None
         if sp["class"] == 0x30:
             tscript = target_script(prog, prog.evt.to_offset(
                 rec.param(4, "u32") or 0), tail[1])
             ascript = target_script(prog, prog.evt.to_offset(
                 rec.param(8, "u32") or 0), tail[2])
+            # The captor family's camera cue, at tail +0x0C/+0x0E.
+            # `ZombieScriptEnded` (`FUN_0045C8D0`) tests `tail+0x0C != -1`
+            # twice: once to raise `obj+0x34 & 0x10000` on the walk-to-point
+            # arm, and once to divert an exit that would have gone to
+            # `AttackRun` into state 42 instead, which holds the actor off the
+            # player until the camera reaches `(tail+0x0C, tail+0x0E)`.
+            # -1 means no cue, and only three spawns in the game set one.
+            #
+            # Gated on the actor actually being a captor, not on its class.
+            # Those bytes are a destination float, a waypoint, a pounce or a
+            # grab for other states, and read blind they yield 333 "cues" of
+            # which 330 are mantissa -- `path: 13107, frame: -16093` and the
+            # like. Only a spawn with one of the two scripts reads them as a
+            # camera cue at all.
+            if tscript or ascript:
+                cue_path = rec.param(0xC, "i16")
+                if cue_path is not None and cue_path != -1:
+                    camera_cue = {"path": cue_path,
+                                  "frame": rec.param(0xE, "i16") or 0}
         placements.append(Placement(
             at, sp["class"], res.char_type, motion, sp, intro,
             emerge=emerge, delayed_leap=delayed_leap,
             target_script=tscript, attack_script=ascript,
+            camera_cue=camera_cue,
             body_condition=tail[0], initial_state=tail[1],
             attack_state=tail[2], leap=leap, path=path,
             walk_distance=walk_distance, entrance_motion=entrance_motion,

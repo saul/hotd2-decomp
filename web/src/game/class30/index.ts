@@ -30,6 +30,7 @@ import {
   TARGET_STATES,
   ZombieStateAwaitCivilianOrder, ZombieStateDragTarget,
   ZombieStatePounceOnTarget, ZombieStateRetireOffScreen,
+  ZombieStateHoldForCameraCue,
   ZombieStateTargetLostPause, ZombieStateTargetMotionScript,
   ZombieStateTargetScriptWithFlag, ZombieStateWalkPastPoint,
   ZombieStateWalkToPoint, ZombieStateWalkToTarget,
@@ -106,6 +107,16 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
       return ZombieStatePounceOnTarget(obj, dt);
     case ZombieState.TargetLostPause:
       return ZombieStateTargetLostPause(obj, rng, MotionRowOf(obj)[0] ?? 0);
+    // The camera-cue hold runs the state it is holding, so it is handed the
+    // dispatcher rather than importing it back.
+    case ZombieState.HoldForCameraCue:
+      return ZombieStateHoldForCameraCue(obj, (o, st) => {
+        const was = o.state;
+        o.state = st;
+        ZombieRunState(o, eye, dt, rng, host, events);
+        // The delegate may have changed the state; state 42 reads that back.
+        if (o.state === st) o.state = was;
+      });
     // [open] `ZombieStateCarryProp` (`FUN_0045B380`) allocates a companion
     // object running `FUN_00442740` and waits for the player to destroy it.
     // That class is unread, so its exit cannot be modelled — but the state's

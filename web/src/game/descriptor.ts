@@ -26,6 +26,7 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
   return {
     initialState: p?.initial_state ?? 0,
     attackState: p?.attack_state ?? 0,
+    cameraCue: p?.camera_cue ?? null,
     condition: p?.body_condition ?? 0,
     ringSet: p?.ring_set ?? 0,
     leap: p?.leap ?? null,

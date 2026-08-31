@@ -165,6 +165,14 @@ export interface CharacterPlacement {
    * the attack state, which is the selection `ZombieScriptForState`
    * (`FUN_0045CA10`) makes.
    */
+  /**
+   * The captor family's camera cue, from the descriptor tail's `+0x0C`/`+0x0E`,
+   * absent when `+0x0C` is -1. `ZombieScriptEnded` reads it to decide whether a
+   * captor that has finished its script may turn on the player at once, or must
+   * hold in state 42 until the camera reaches that path and frame. Three spawns
+   * in the game set one, all in stage 2.
+   */
+  camera_cue?: { path: number; frame: number };
   target_script?: TargetScriptJson;
   attack_script?: TargetScriptJson;
   /**

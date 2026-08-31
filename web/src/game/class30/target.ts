@@ -55,7 +55,7 @@ import { ActorFlag, type Actor } from "../actor";
 import type { GameHost } from "../host";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { CivilianWait } from "../class10";
-import { ActorIsOnScreen } from "../combat/permits";
+import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import { ActorSetMotionBlended } from "./motion_cue";
@@ -167,8 +167,33 @@ export function ZombieScriptEnded(obj: Actor): void {
       obj.scriptPc = 0;
       obj.sub = 1;
       break;
-    case ZombieState.WalkPastPoint:
+    case ZombieState.WalkPastPoint: {
+      // The engine does not always take the walk. If the script's point is
+      // already in front of the actor it goes **straight to `AttackRun`**:
+      //
+      //     if (ActorPointIsAhead(obj+0x64, obj+0x40, ZombieScriptForState(...)))
+      //         { obj+0x1310 = 1; obj+0x1312 = 0; }
+      //     else  obj+0x1312 = 1;
+      //
+      // The port only ever set sub 1, so a captor whose point was already
+      // ahead walked the whole leg before turning on the player instead of
+      // turning at once.
+      const s = ZombieScriptForState(obj);
+      const pt = s?.head.point;
+      if (pt && ActorPointIsAhead(obj, vec3(pt[0], pt[1], pt[2]))) {
+        obj.state = ZombieState.AttackRun;
+        obj.sub = 0;
+      } else {
+        obj.sub = 1;
+      }
+      break;
+    }
+    case ZombieState.WalkToPoint:
       obj.sub = 1;
+      // `if (tail+0x0C != -1) obj+0x34 |= 0x10000` — an actor with a camera
+      // cue drops out of the camera's candidate list for the leg it is about
+      // to walk, so the shot it is being staged for is not pulled onto it.
+      if (obj.cameraCue) obj.flags |= ActorFlag.NoCameraTrack;
       break;
     case ZombieState.AwaitCivilianOrder:
       obj.sub = 1;
@@ -176,6 +201,20 @@ export function ZombieScriptEnded(obj: Actor): void {
     default:
       obj.sub = 0;
       break;
+  }
+  // A captor with a camera cue does not turn on the player when its script
+  // ends -- it is being staged for a shot, and state 42 holds it until the
+  // camera arrives:
+  //
+  //     if (obj+0x1310 == 1 && tail+0x0C != -1) {
+  //         obj+0x132C = 1; obj+0x1310 = 0x2A; obj+0x34 |= 0x10000;
+  //     }
+  //
+  // Three spawns in the game reach it, all in stage 2.
+  if (obj.state === ZombieState.AttackRun && obj.cameraCue) {
+    obj.delegate = ZombieState.AttackRun;
+    obj.state = ZombieState.HoldForCameraCue;
+    obj.flags |= ActorFlag.NoCameraTrack;
   }
   // `obj+0x34 &= 0xFFFFDAFF` for every state but the walk: the maul's
   // interrupt immunity and its two unread bits come off with the script.
@@ -701,6 +740,60 @@ export function ZombieStatePounceOnTarget(obj: Actor, dt: number): void {
  * the character's own walk clip for `rand() % 11 + 10` frames, then return to
  * the state and sub it remembered.
  */
+/**
+ * `ZombieStateHoldForCameraCue` — `FUN_0045BFD0`. Class 0x30 state 42.
+ *
+ * A captor that has finished its script and would otherwise turn on the player
+ * is being **staged for a shot**: it holds here until the camera reaches the
+ * path and frame in its descriptor tail (`+0x0C`/`+0x0E`). Three spawns in the
+ * game do this, all in stage 2.
+ *
+ * It is not an idle. It runs whatever state it is holding — `obj+0x132C`, the
+ * delegate — every frame, then takes the state back:
+ *
+ *     g_class30_states[obj+0x132C](obj);
+ *     if (g_active_cam_path == tail+0x0C && g_cam_path_frame == tail+0x0E) {
+ *         obj+0x34 &= ~0x10000;  obj+0x1310 = obj+0x132C;  return;
+ *     }
+ *     if (obj+0x1310 != 0x2A) {
+ *         if (obj+0x1310 == 3) {                    // it wants to strike
+ *             obj+0x132C = 2;                       // back to HoldAtRange
+ *             g_attack_permits[obj+0x121] = 0;      // and give the permit up
+ *             obj+0x1310 = 0x2A;  return;
+ *         }
+ *         obj+0x132C = obj+0x1310;  obj+0x1310 = 0x2A;
+ *     }
+ *
+ * So the zombie really does run at the player and hold at range — it is only
+ * forbidden to **land the blow** until the camera is looking. Reaching `Strike`
+ * is bounced back to `HoldAtRange` and the permit is handed back, which is why
+ * this is the only code in the captor family that touches `g_attack_permits`.
+ */
+export function ZombieStateHoldForCameraCue(
+    obj: Actor, runState: (obj: Actor, state: ZombieState) => void): void {
+  // The engine calls `g_class30_states[obj+0x132C]` directly. The dispatcher
+  // lives in `class30/index.ts` and importing it here would close a cycle, so
+  // it is handed in — the one shape difference from the engine's table lookup.
+  runState(obj, obj.delegate);
+
+  const cue = obj.cameraCue;
+  if (cue && G.g_active_cam_path === cue.path
+      && G.g_cam_path_frame === cue.frame) {
+    obj.flags &= ~ActorFlag.NoCameraTrack;
+    obj.state = obj.delegate;
+    return;
+  }
+  if (obj.state === ZombieState.HoldForCameraCue) return;
+  if (obj.state === ZombieState.Strike) {
+    obj.delegate = ZombieState.HoldAtRange;
+    ReleaseAttackSlot(obj);
+    obj.state = ZombieState.HoldForCameraCue;
+    return;
+  }
+  obj.delegate = obj.state;
+  obj.state = ZombieState.HoldForCameraCue;
+}
+
 export function ZombieStateTargetLostPause(obj: Actor, rng: Rng,
                                            walkMotion: number): void {
   if (obj.sub === 0) {

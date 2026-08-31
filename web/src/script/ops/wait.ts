@@ -23,6 +23,9 @@ export const OPS: Record<number, OpImpl> = {
     0x43: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x44: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x45: { status: "approx", run: (w, op) => w.applyWait(op) },
-    0x46: { status: "shown", run: (w, op) => w.applyWait(op) },
+    // 0x46 is the same instruction as 0x43 on `g_civilians_alive`; it is
+    // real while Shoot is on and passes when it is off, so it is paced
+    // exactly as the two enemy gates above are.
+    0x46: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x47: { status: "shown", run: (w, op) => w.applyWait(op) },
 };

@@ -6707,3 +6707,68 @@ Stage 4's civilian `4484` still animates, and correctly: its death script is
 for ever". `corpses.mjs` excludes negative counts by name rather than
 tolerating a failure, so the check stays able to fail.
 
+
+## `wait_scripted_actors` waits for the civilians — and the VM's yield flag
+
+`EvtOpWaitScriptedActors46` (`FUN_0045FCD0`) is `EvtOpWaitEnemiesPresent43`
+with **`g_civilians_alive`** (`0x009CA0E8`) where the enemy counter goes —
+same latch, same two side conditions, same `pc += 8`. That closes the
+`[open] which actor class` that has sat on this opcode: the scripted actors
+are the **class-0x10 civilians**. All **68** sites in the shipped scripts pass
+operand 0, so in practice it is always "wait until the last civilian has left
+play".
+
+### The counter's exits, and the one the port does not have
+
+`g_civilians_alive` was annotated here as "`CivilianInit` raises it unless the
+wait word carries `0x08000000`". **That was wrong.** The `INC word ptr` at
+`0x0048A6FE` sits on the straight-line fall-through with no branch around it —
+`get_xrefs_to` returns nothing for it or for the instruction after. The
+`0x08000000` test three instructions later guards *two other* counters,
+`0x009A21BA` and `word[0x009C9100 + stage*2]`. The two got conflated because
+`FUN_0045EDD0` zeroes `g_civilians_alive` and `0x9C9100[stage]` back to back.
+The port was already unconditional here, so the code was right and the note
+was wrong — the reverse of the usual failure, and worth saying out loud.
+
+There are three ways out, each decrementing once:
+
+* op `0x2C` carrying `0x00080000` (`CivilianRunScript` `0x0048BA3C`), which
+  also stamps sub+0x04 bit 0 so a later teardown will not double-count;
+* `CivilianUpdate` `0x0048B003`, the remove-delay teardown;
+* `CivilianUpdate` `0x0048B0AC`, the **off-camera** teardown — *not ported*.
+
+Rather than guess whether the missing one matters, it is bounded:
+`tools/verify_civilian_count.py` asserts that **every** stream carrying
+`0x02000000` also carries `0x00080000`. It does — 90 of 90 — so a civilian
+removed off camera has always left the count already, and the unported path
+cannot strand `wait_scripted_actors` above zero. If that ever stops being
+true the check fails instead of the player deadlocking.
+
+### `DAT_009C8EA0` is the yield flag, not a wait latch
+
+Reading the waits meant reading `EvtInterpreterLoop`, and the thing every one
+of them touches is worth stating properly. `g_evt_yield` is **not cleared at
+loop entry**:
+
+    do { g_evt_opcode = *pc; dispatch[g_evt_opcode](); } while (g_evt_yield == 0);
+
+so a wait handler reached with it clear sets it and returns **without testing
+its condition** — every wait costs at least one frame, even one already
+satisfied. On a later frame it tests; a satisfied wait clears the flag and
+advances `pc`, and the loop then **keeps dispatching in the same frame** until
+the next wait. That is the whole of the VM's frame pacing, and it explains two
+things that looked odd: opcode `0x4E` `halt` is nothing but `g_evt_yield = 1`
+with `pc` unchanged (`FUN_0045EFF0`, confirmed as dispatch slot `0x4E`), and
+the unused slots `0x00/0x2A/0x34/0x3C/0x4C` point at a bare `RET`, which
+leaves the flag clear and spins the loop forever — reaching one hangs.
+
+`DAT_007DCCA4`, which nearly every wait also requires, is recomputed once per
+frame at the top of the loop and read nowhere else: *may the script advance* —
+a player in state 5 with lives left. So the script, `wait_frames`' countdown
+included, **freezes on the continue screen** rather than running on while the
+player is dead. The port has no such gate; it has no death.
+
+**The port's waits pass a satisfied gate in zero frames**, where the engine
+always spends one. That is a real divergence, left alone here rather than
+folded into an unrelated change: it is one frame per wait, and changing it
+touches every wait in the client at once.

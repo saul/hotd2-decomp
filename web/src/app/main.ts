@@ -423,6 +423,11 @@ class Player {
       // Null unless Shoot is on: only then is there anything that can make
       // the count fall, so only then is the gate a real condition.
       aliveEnemies: () => this.shooting.isEnabled ? this.chars.aliveCount : null,
+      // `g_civilians_alive` is maintained by the class-0x10 port itself --
+      // `CivilianInit` raises it, op 0x2C's `LeaveCountNow` and the removal
+      // path drop it -- so this is the engine's own counter, not a restatement
+      // of it. Null while Shoot is off, for the reason on `aliveEnemies`.
+      aliveCivilians: () => this.shooting.isEnabled ? G.g_civilians_alive : null,
       setShutter: (st) => this.hudLayer.setShutterState(st),
       showMessage: (g) => {
         // Variant 0 is the 1P / player-1 configuration, which is what a

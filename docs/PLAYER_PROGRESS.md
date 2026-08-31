@@ -1095,7 +1095,7 @@ missed. Meanings and confidence marks live in
 | `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead; with Shoot off nothing can make the count fall, so it passes and the feed says so |
 | `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate, gated with `0x43` |
 | `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
-| `46` | `wait_scripted_actors` | wait | shown | runtime counter; passed, with the condition reported |
+| `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real while Shoot is on**; with Shoot off nothing can rescue a civilian, so it passes rather than deadlocking. All 68 sites pass operand 0 |
 | `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |
 | `48` | `set_script_flag` | flow | *tracked* | writes the script flag array 0x45 reads |
 | `49` | `variant_call_a` | flow | shown | a global picks which operand list runs; the client does not evaluate it |

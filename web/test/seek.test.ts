@@ -44,6 +44,7 @@ const mkHost = (): WalkerHost => ({
   onBranch: () => undefined,
   playSound: () => undefined,
   aliveEnemies: () => null,
+  aliveCivilians: () => null,
   setShutter: () => undefined,
   showMessage: () => undefined,
   endDialogue: () => undefined,
@@ -322,6 +323,60 @@ for (const stage of STAGES) {
     replay.applyWait(gate);
     check("a replay retires them, because nothing else will",
           replay.spawns.length === 0, `${replay.spawns.length} left`);
+  }
+}
+
+// `wait_scripted_actors` (0x46) is `EvtOpWaitScriptedActors46`
+// (`FUN_0045FCD0`): the `wait_enemies_present` handler with
+// `g_civilians_alive` in place of `g_enemies_present`. It has to behave like
+// the enemy gate -- block on a live count, pass on a dead one -- and not like
+// the pass-through it used to be, or a stage that waits for its hostages to be
+// rescued runs straight past them.
+{
+  const file = join(ROOT, "stage2", "stage2.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    // Every one of the 68 sites in the shipped scripts passes operand 0.
+    const gate = { i: 0, at: 0, op: 0x46, name: "wait_scripted_actors",
+                   cat: "wait", arg: 0 } as unknown as OpJson;
+
+    const held = new Walker(script, { ...mkHost(), aliveCivilians: () => 2 });
+    held.applyWait(gate);
+    check("the civilian gate holds while civilians are in play",
+          held.wait !== null && held.wait.policy.kind === "civilians",
+          `policy ${held.wait?.policy.kind ?? "none"}`);
+
+    const open = new Walker(script, { ...mkHost(), aliveCivilians: () => 0 });
+    open.applyWait(gate);
+    check("the civilian gate opens when the last one has left",
+          open.wait === null);
+
+    // The count falling is what releases a gate already held -- the walker
+    // re-tests every frame, exactly as the interpreter re-runs the handler.
+    let alive = 2;
+    const falling = new Walker(script, { ...mkHost(), aliveCivilians: () => alive });
+    falling.applyWait(gate);
+    falling.tick(1 / 60);
+    const stillHeld = falling.wait?.policy.kind === "civilians";
+    alive = 0;
+    falling.tick(1 / 60);
+    // Releasing does not leave the walker idle: it runs straight on into the
+    // instructions after the gate and stops at the *next* wait, which is what
+    // the interpreter does too -- a satisfied wait clears the yield flag and
+    // the `do { } while (yield == 0)` loop keeps dispatching in the same
+    // frame. So the check is that the civilian gate is gone, not that no wait
+    // is pending.
+    check("a held civilian gate releases when the count reaches zero",
+          stillHeld && falling.wait?.policy.kind !== "civilians"
+          && falling.opIndex > 0,
+          `now ${falling.wait?.policy.kind ?? "idle"} at op ${falling.opIndex}`);
+
+    // Shoot off: nothing can rescue a civilian, so the gate is not a condition
+    // this client can evaluate and it passes rather than deadlocking.
+    const noSim = new Walker(script, { ...mkHost(), aliveCivilians: () => null });
+    noSim.applyWait(gate);
+    check("with no simulation the civilian gate passes instead of hanging",
+          noSim.wait === null);
   }
 }
 

@@ -154,7 +154,7 @@
 0045fbc0	EvtOpWaitEnemiesPresent43
 0045fc10	EvtOpWaitEnemiesAlive44
 0045fc80	EvtOpWaitScriptFlag45
-0045fcd0	EvtOpWaitScriptedActors46
+0045fcd0	EvtOpWaitScriptedActors46	evt 0x46. The EvtOpWaitEnemiesPresent43 handler with g_civilians_alive (0x009CA0E8) in place of g_enemies_present: same DAT_009C8EA0 yield latch, same DAT_007DCCA4 gameplay-live gate, same DAT_009C6F2D side condition. All 68 sites in the shipped scripts pass operand 0, so in practice it waits for the last civilian to leave play.
 0045fd20	EvtOpWaitTargetsClear47
 0045fd70	EvtOpSetScriptFlag48
 0045fd90	EvtOpSetSkippableRegion2C
@@ -535,3 +535,4 @@
 00455490	ZombieReleaseAndDespawn	ReleaseEnemyAliveCount, ReleaseEnemyPresentCount and ReleaseAttackSlot, then clears g_attack_permits[obj+0x120] and ActorDespawns. The terminal arm of ZombieStateWalkDistance, taken when obj+0x34 bit 0x20000000 is set -- which no class-0x30 spawn record does.
 00405360	ColiPublishDynamicList	Copies the registration list at 0x0059D8E8 to the dynamic list at 0x005A30A0 that ColiTestSphereAgainstActors walks, five dwords per entry. The two-buffer split is what lets the push test a snapshot of the frame's spheres rather than a list being appended to while it reads.
 004111a0	SkeletonAdvancePlayCursor	The motion sampler's clock arm. model[2] = model[0] % (g_motion_play_length[model[8]] + 1) -- the play cursor, which WRAPS at play_length + 1 and so takes every value from 0 to the play length inclusive; model[6] = model[2] / 2 is the authored frame, and an odd cursor blends the two neighbours on tracks 1 and 2, which is the 60 Hz over 30 Hz interpolation. Sets model+0x5D when the cursor has reached the play length and model+0x5E when it has reached play_length - 1. Nothing here advances model[0]: the owning class does, and a class holds a clip on its last frame by simply not incrementing it.
+0045eff0	EvtOpHalt4E	evt 0x4E. Sets g_evt_yield and does not advance pc, so the VM re-runs it every frame forever -- a park, not the end of a scene. Confirmed as slot 0x4E of the dispatch table at 0x005931D8.

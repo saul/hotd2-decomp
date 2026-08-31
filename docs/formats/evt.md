@@ -222,7 +222,7 @@ inference; **[open]** = undetermined.
 | `43` | `wait_enemies_present` | **[proved]** `g_enemies_present <= op`, and the camera has settled |
 | `44` | `wait_enemies_alive` | **[likely]** `g_enemies_alive <= op`, plus one frame of hysteresis. The two counters differ because `alive` drops at kill time and `present` at death-animation end, so `present >= alive` |
 | `45` | `wait_script_flag` | **[proved]** `g_script_flags[op]` — a 256-byte array at `0x009C7200` |
-| `46` | `wait_scripted_actors` | **[proved]** a counter with exactly one spawn site; **[open]** which actor class |
+| `46` | `wait_scripted_actors` | **[proved]** `g_civilians_alive <= op` — the **class-0x10 civilians**. Byte for byte the `43` handler on a different counter, and all 68 sites in the game pass operand 0, so it is always "wait for the last civilian to leave play" |
 | `47` | `wait_targets_clear` | **[likely]** camera settled and no live targetable entity registered. Depends on intra-frame task ordering that was not resolved |
 | `48` | `set_script_flag` | **[proved]** the writer half of `45` |
 | `49`–`4B` | `variant_*` | pick an operand list by a global |

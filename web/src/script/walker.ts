@@ -97,6 +97,8 @@ export type WaitPolicy =
   | { kind: "camera" }
   /** The real gate: blocks until the player has killed them. */
   | { kind: "enemies" }
+  /** `wait_scripted_actors`: blocks until the civilians have left play. */
+  | { kind: "civilians" }
   | { kind: "passed"; why: string };
 
 export interface PendingWait {
@@ -161,6 +163,17 @@ export interface WalkerHost {
    * on it instead of on a stopwatch.
    */
   aliveEnemies(): number | null;
+  /**
+   * Class-0x10 civilians still in play (`g_civilians_alive`, `0x009CA0E8`),
+   * or `null` when the gate is not a condition this client can evaluate.
+   *
+   * `wait_scripted_actors` (`EvtOpWaitScriptedActors46`, `FUN_0045FCD0`) is
+   * structurally the same instruction as `wait_enemies_present` -- the same
+   * latch, the same two side conditions -- reading this counter instead. It is
+   * gated the same way as `aliveEnemies` for the same reason: the count falls
+   * when a civilian is rescued, and rescuing one means killing its captors.
+   */
+  aliveCivilians(): number | null;
   /** evt `0x1F`: the HUD shutter state. */
   setShutter(state: number): string | undefined;
   /** evt `0x2D`: play a dialogue group -- voice line plus subtitles. */
@@ -224,7 +237,8 @@ const WAIT_NOTES: Record<number, string> = {
       + "off because nothing can then make the count fall",
   0x44: "the second enemy counter, gated with 0x43",
   0x45: "passed: the script flag array is written by gameplay",
-  0x46: "passed: the scripted-actor counter is a runtime value",
+  0x46: "the civilian gate: real while Shoot is on, and passed when it is "
+      + "off because rescuing a civilian means killing its captors",
   0x47: "passed: 'camera settled and no live target' needs the runtime",
 };
 
@@ -914,6 +928,8 @@ export class Walker {
         return !this.cam || this.cam.done || this.cam.isStatic;
       case "enemies":
         return (this.host.aliveEnemies() ?? 0) <= (w.op.arg ?? 0);
+      case "civilians":
+        return (this.host.aliveCivilians() ?? 0) <= (w.op.arg ?? 0);
       default:
         return true;
     }
@@ -1272,6 +1288,23 @@ export class Walker {
                    why: WAIT_NOTES[op.op] ?? "needs the runtime" };
       }
       if (policy.kind === "passed") this.retireGatedEnemies();
+    } else if (op.op === 0x46) {
+      // `EvtOpWaitScriptedActors46` (`FUN_0045FCD0`) -- byte for byte the
+      // `wait_enemies_present` handler with `g_civilians_alive` (0x009CA0E8)
+      // in place of `g_enemies_present`, so it is paced the same way.
+      //
+      // Every one of the 68 sites in the shipped scripts passes operand 0, so
+      // in practice this is always "wait until the last civilian has left
+      // play" -- but the comparison is transcribed, not folded to `=== 0`.
+      const civilians = this.host.aliveCivilians();
+      if (civilians !== null) {
+        policy = civilians <= arg
+          ? { kind: "passed", why: "no civilians in play" }
+          : { kind: "civilians" };
+      } else {
+        policy = { kind: "passed",
+                   why: WAIT_NOTES[op.op] ?? "needs the runtime" };
+      }
     } else if (op.op === 0x45 && this.flags.has(arg)) {
       policy = { kind: "passed", why: "flag already set by the script" };
     } else {

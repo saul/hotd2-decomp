@@ -640,6 +640,44 @@ bundle that already holds every asset, dead in this build, or gated on
 machinery the player does not have (a scene state machine, the action ring,
 collision). The one genuine unknown left is `variant_*`.
 
+## The three clocks
+
+Wall time, game time and the script's own 60 Hz accumulator are separate, and
+which of them a thing rides decides what happens when you stop.
+
+| mode | script | port and render | wall-time effects |
+|---|---|---|---|
+| **Play** | runs | runs | run |
+| **Paused** | stopped | **stopped** | run |
+| **Step** | one instruction at a time | **runs** | run |
+| **Free roam** | stopped | **stopped** | run |
+| `?freeze=1` | stopped | stopped | stopped |
+
+Paused and free roam used to advance the port and the render layers: an enemy
+went on looping its walk clip and sliding along its root motion with the
+transport stopped, so opening any of the debugging URLs put the scene in motion
+before the script had run an instruction. `Loop.idle` had carried the comment
+"for the frozen and free-roam paths" since it was written; free roam simply
+never took it.
+
+**Step is deliberately not in that group.** Stepping is for advancing the
+script an instruction at a time while the port keeps running underneath — that
+is what makes a zombie loop its walk while you read the tree — and it has its
+own mode button rather than a paused transport.
+
+Paused says so on screen: the rendered frame drains to grey and the word sits
+in the middle of it. The filter is on the canvas rather than on `#viewport`, so
+the debug overlays, the crosshair and the message keep their colour. Free roam
+stops the same clock and shows nothing, because it is a mode you chose with its
+own lit button.
+
+`Tick.frozen` and `Tick.dt` are what every layer already keyed off, so they all
+hold correctly: a half-open door stays half open, the rain stops, and the
+impact sprites — feedback for a click rather than script state — still play out
+on wall time.
+
+---
+
 ## Deliberate non-goals
 
 - **It is a script walker, not the event VM.** The blocking opcodes gate on

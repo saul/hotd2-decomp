@@ -9,7 +9,7 @@ import type { CharactersJson } from "./characters";
 import { SUPPORTED_FORMAT } from "./manifest";
 import type { Manifest, StageEntry } from "./manifest";
 import type { BackdropJson, BreakablesJson, PropsJson, RainJson, RigsJson,
-              HumanoidProgramJson, SetPieceParamsJson,
+              CiviliansJson, HumanoidProgramJson, SetPieceParamsJson,
               SoundJson } from "./scene";
 import type { BlockJson, ColiJson, RegionEntryJson } from "./script";
 import type { BgmJson } from "./sound";
@@ -38,6 +38,8 @@ export interface ScriptJson {
   set_pieces?: Record<string, SetPieceParamsJson>;
   /** Class 0x25's decoded bytecode, keyed by spawn address. */
   humanoids?: Record<string, HumanoidProgramJson>;
+  /** Class 0x10's civilians: the exe's scripts, and who runs which. */
+  civilians?: CiviliansJson;
   rain?: RainJson;
   /** The `coli/` blobs this scene loads — see {@link ColiJson}. */
   coli?: ColiJson;

@@ -116,6 +116,11 @@ interface Instance {
   bones: Map<number, Object3D>;
   /** Damaged parts currently swapped in, so a second hit can replace them. */
   gore: Map<number, Object3D>;
+  /**
+   * The class-0x10 civilian that built this actor, for the fifty captors whose
+   * descriptors the walker never sees. They come and go with their parent.
+   */
+  parentAt?: number;
 }
 
 export class CharacterLayer {
@@ -237,7 +242,7 @@ export class CharacterLayer {
       a.yaw = p?.yaw ?? 0;
       a.pos = { x: node.position.x, y: node.position.y, z: node.position.z };
       this.instances.push({ at, a, type, root: node, pivot, bones,
-                            gore: new Map() });
+                            gore: new Map(), parentAt: p?.civilian_child });
       this.posed.add(at);
       node.visible = false;
     }
@@ -268,6 +273,15 @@ export class CharacterLayer {
     if (!this.instances.length) return;
     const present = new Set<number>();
     for (const s of live) present.add(s.at);
+    // **Class 0x10's children are not in the walker's list.** `CivilianInit`
+    // builds them from descriptors nothing in the evt points at, so they have
+    // no spawn instruction to be placed by; they are present exactly when the
+    // civilian that holds them is. Without this the fifty captors were placed,
+    // posed and permanently invisible.
+    for (const inst of this.instances) {
+      const parent = inst.parentAt;
+      if (parent !== undefined && present.has(parent)) present.add(inst.at);
+    }
 
     for (const inst of this.instances) {
       // A corpse stays: `FUN_00454D20` plays the clip out before handing the

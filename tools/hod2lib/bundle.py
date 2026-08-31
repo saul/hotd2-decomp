@@ -36,6 +36,7 @@ from pathlib import Path
 
 from . import (__version__, characters as charlib, evt as evtlib, gltf,
                props as propslib, rigs as rigslib,
+               spawnres as spawnreslib,
                script as scriptlib, stage as stagelib)
 
 __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
@@ -645,6 +646,72 @@ def rigs_json(instances, blocked, campaths, campaths_tables) -> dict:
     }
 
 
+def civilians_json(prog, tables) -> dict:
+    """Class 0x10's spawns and the exe's civilian scripts — see `game/class10`.
+
+    Unlike class 0x24 and class 0x25, whose parameters live in the evt, a
+    civilian's behaviour is a **command stream compiled into Hod2.exe**:
+    `CivilianInit` (`FUN_0048A3E0`) indexes the 67-entry table at
+    `g_civilian_scripts` (0x005702A8) with the spawn tail's byte at `+0x01`.
+
+    So this emits two things — the streams once, decoded by
+    `ExeTables.civilian_scripts`, and the per-spawn tail that selects one.
+    Keyed by the spawn's script address, like every other class here.
+
+    The tail, from `CivilianInit`'s own reads:
+
+    ```
+    tail+0x00  s8   character type      -> obj+0x1F4
+    tail+0x01  s8   script index        -> g_civilian_scripts[n]
+    tail+0x02  s16  removal cam path    -> sub+0x26
+    tail+0x04  s16  removal cam frame   -> sub+0x28
+    tail+0x06  s16  removal delay       -> sub+0x2A, once the cue is met
+    tail+0x08  u32  part list           -> model+0x1170
+    tail+0x0C  s32  child count         -> sub+0x1E
+    tail+0x10  u32[] child descriptors  -> SpawnFromDescriptor, each
+                                          parented at child+0x1394
+    ```
+    """
+    if prog is None or tables is None:
+        return {}
+    raw = prog.evt.raw
+    spawns: dict[str, dict] = {}
+    for rec in evtlib.spawns(prog.evt):
+        if rec.cls != 0x10:
+            continue
+        t = rec.offset + 0x24
+        if t + 0x10 > len(raw):
+            continue
+        n = struct.unpack_from("<i", raw, t + 0x0C)[0]
+        kids: list[dict] = []
+        for k in range(max(0, min(n, 32))):
+            off = prog.evt.to_offset(
+                struct.unpack_from("<I", raw, t + 0x10 + k * 4)[0])
+            if off is None or off > len(raw) - 0x24:
+                continue
+            # The children are **not** script spawns: nothing in the evt's
+            # instruction stream points at these descriptors, so the walker
+            # never sees them and the civilian's own Init is the only thing
+            # that builds them. They come out whole for that reason.
+            kid = evtlib.read_spawn(prog.evt, off, 0x0B)
+            res = spawnreslib.resolve_spawn(tables, kid)
+            kids.append({
+                "at": off, "class": kid.cls, "charType": res.char_type,
+                "pos": list(kid.pos), "yaw": kid.orient[1], "hp": kid.hp,
+            })
+        spawns[str(rec.offset)] = {
+            "charType": struct.unpack_from("<b", raw, t)[0],
+            "script": struct.unpack_from("<b", raw, t + 1)[0],
+            "removePath": struct.unpack_from("<h", raw, t + 2)[0],
+            "removeFrame": struct.unpack_from("<h", raw, t + 4)[0],
+            "removeDelay": struct.unpack_from("<h", raw, t + 6)[0],
+            "children": kids,
+        }
+    if not spawns:
+        return {}
+    return dict(tables.civilian_scripts(), spawns=spawns)
+
+
 def build_stage(stage, out_root: Path, *, glb: bool = True,
                 write_textures: bool = True, unlit: bool = True,
                 cam_step: float = 2.0, progress=None) -> dict:
@@ -747,6 +814,7 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     script_json["breakables"] = breakables_json(stage.tables, prog)
     script_json["set_pieces"] = set_pieces_json(prog)
     script_json["humanoids"] = scripted_humanoids_json(prog)
+    script_json["civilians"] = civilians_json(prog, stage.tables)
     (out_dir / f"{name}.script.json").write_text(
         json.dumps(script_json, allow_nan=False))
 

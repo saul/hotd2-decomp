@@ -34,7 +34,8 @@ const script = JSON.parse(readFileSync(join(root, `stage${stage}.script.json`), 
 
 const chars = script.characters;
 ResetGameGlobals();
-SetGameTables(chars, undefined, undefined, undefined, script.coli);
+SetGameTables(chars, undefined, undefined, undefined, script.coli,
+              script.civilians);
 // The script's own opcode 0x10 / 0x11 selections are what make a set active.
 // Replaying one step in isolation never runs them, so every blob the whole
 // stage ever selects goes into the full set: the level as the collision sees

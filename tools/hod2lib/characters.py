@@ -663,6 +663,10 @@ class Placement:
              # The actor's own yaw, which the directional death compares the
              # camera's against.
              "yaw": self.spawn["orient"][1] & 0xFFFF}
+        # A class-0x10 child: present exactly when the civilian that built it
+        # is, because nothing in the script ever places it.
+        if self.spawn.get("civilian_child") is not None:
+            d["civilian_child"] = self.spawn["civilian_child"]
         if self.leap:
             d["leap"] = self.leap
         if self.path:
@@ -857,6 +861,32 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         recs = {r.offset: r for r in evtlib.spawns(prog.evt)}
     except Exception:
         recs = {}
+
+    # **Class 0x10's children are not script spawns.** `CivilianInit`
+    # (`FUN_0048A3E0`) reads a count at tail+0x0C and an array of descriptor
+    # pointers at tail+0x10 and calls `SpawnFromDescriptor` on each, parenting
+    # every one at `child+0x1394`. Nothing in the evt's instruction stream
+    # points at those descriptors, so `evt.spawns()` never returns them and
+    # the fifty zombies holding the game's civilians hostage had no geometry,
+    # no placement and no actor. They are the reason a civilian can be
+    # rescued at all -- the rescue is `wait until my children are dead`.
+    for rec in list(recs.values()):
+        if rec.cls != 0x10:
+            continue
+        n = rec.param(0x0C, "i32") or 0
+        for k in range(max(0, min(n, 32))):
+            w = rec.param(0x10 + k * 4, "u32")
+            off = prog.evt.to_offset(w) if w else None
+            if off is None or off in recs or off > len(prog.evt.raw) - 0x24:
+                continue
+            kid = evtlib.read_spawn(prog.evt, off, 0x0B)
+            recs[off] = kid
+            by_at.setdefault(off, {
+                "at": off, "class": kid.cls, "flags": kid.init_flags,
+                "pos": list(kid.pos), "yaw_deg": kid.yaw_deg,
+                "orient": list(kid.orient), "hp": kid.hp,
+                "civilian_child": rec.offset,
+            })
 
     chars: dict[int, Character] = {}
     placements: list[Placement] = []

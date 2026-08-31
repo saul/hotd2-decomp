@@ -11,6 +11,7 @@ import type {
 } from "../bundle";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
+import type { CiviliansJson } from "../bundle/scene";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 
@@ -27,6 +28,13 @@ export const T = {
   setPieces: null as Record<string, SetPieceParams> | null,
   /** Class 0x25's decoded bytecode, per spawn address. */
   humanoids: null as Record<string, HumanoidProgram> | null,
+  /**
+   * Class 0x10's civilians: the exe's 136 command streams, the 67-entry table
+   * that names them, and the per-spawn tail that picks one. The streams are
+   * `.rodata` compiled into Hod2.exe rather than evt data, which is why they
+   * arrive as one block for the whole game and not per spawn.
+   */
+  civilians: null as CiviliansJson | null,
   /**
    * The scene's `coli/` blobs. Read-only for the life of the stage, so — like
    * every other table here — it is not in a snapshot; **which** of them are
@@ -51,7 +59,8 @@ export function SetGameTables(chars: CharactersJson | undefined,
                               breakables?: BreakablesJson,
                               setPieces?: Record<string, SetPieceParams>,
                               humanoids?: Record<string, HumanoidProgram>,
-                              coli?: ColiJson): void {
+                              coli?: ColiJson,
+                              civilians?: CiviliansJson): void {
   // Ordering hazard, and it cost an afternoon: `ResetGameGlobals` clears the
   // approach rings, so calling it *after* this leaves every ring at zero and
   // every enemy permanently in the outermost band. Say so rather than let it
@@ -66,6 +75,7 @@ export function SetGameTables(chars: CharactersJson | undefined,
   T.setPieces = setPieces ?? null;
   T.humanoids = humanoids ?? null;
   T.coli = coli ?? null;
+  T.civilians = civilians ?? null;
   // A bundle exported before the collision block existed is a bundle where
   // every trace misses, and a silent miss looks exactly like an open level.
   if (chars && !coli?.blobs && !warnedNoColi) {

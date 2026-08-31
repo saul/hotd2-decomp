@@ -28,7 +28,11 @@ import {
 } from "../src/game/coli";
 import { ZombieState } from "../src/game/class30/states";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
+import { ActorFlag } from "../src/game/actor";
 import { SpawnClass } from "../src/game/spawn_class";
+import { CivilianOp, CivilianUpdate, CivilianWait }
+  from "../src/game/class10";
+import type { CivilianCmdJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
 import { ThrowerState } from "../src/game/class31/states";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
@@ -2174,6 +2178,231 @@ console.log("coli/, the game's own collision:");
         ColiTestSphereAgainstFullSet(28, 10, 45, 5)
         && Math.abs(G.g_coli_hit_depth - 3) < 1e-4,
         `depth ${G.g_coli_hit_depth}`);
+}
+
+console.log("\nclass 0x10, the civilian and the rescue:");
+{
+  const rng = new Rng(9);
+
+  /**
+   * One civilian, one script, and however many captors the test wants.
+   *
+   * The streams are the exe's; here they are hand-written in the same shape
+   * the exporter emits, so the VM is driven with no bundle and no renderer.
+   *
+   * **Every fixture opens with a `Wait`**, because every shipped stream does.
+   * `CivilianRunScript` runs its first command whatever it is and stops
+   * *before* the next opcode above 0x2B — so a stream that does not open with
+   * one never loads a wait word at all and parks on the zero it started with.
+   */
+  const civScene = (cmds: CivilianCmdJson[][], children: number[] = []) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0],
+      scripts: cmds,
+      spawns: {
+        "16384": {
+          charType: 1, script: 0, removePath: -1, removeFrame: 0,
+          removeDelay: 0,
+          children: children.map((at) => ({
+            at, class: 0x30, charType: 1,
+            pos: [0, 0, 0] as [number, number, number], yaw: 0, hp: 1,
+          })),
+        },
+      },
+    });
+    const kids = children.map((at) => {
+      const k = ActorSpawn(at, SpawnClass.Zombie, 1, "captor");
+      k.visible = true;
+      return k;
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian");
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    return { a, kids, events: new Events() };
+  };
+  const cFrame = (a: ReturnType<typeof ActorSpawn>, events: Events) =>
+    CivilianUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST, events });
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+
+  // The VM runs a whole block in one go and parks on the next wait. A wait
+  // word leads its block and governs the wait that *follows* it, which is why
+  // a stream opens with one.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.SetCiviliansGoal, 3),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 88),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    check("the Init runs a whole block and parks on the next wait",
+          a.civ?.cursor === 3 && a.civ?.turnRate === 77
+          && a.civ?.civiliansGoal === 3,
+          `cursor ${a.civ?.cursor} rate ${a.civ?.turnRate}`);
+    for (let i = 0; i < 20; i++) cFrame(a, events);
+    check("...and a wait word with no bits and no timer never resumes",
+          a.civ?.turnRate === 77 && a.civ?.cursor === 3,
+          `rate ${a.civ?.turnRate} cursor ${a.civ?.cursor}`);
+  }
+
+  // Wait bit 0x2000 reads `g_script_flags`, and a flag the script has never
+  // set is *absent* from the array — which is a hole an undefined slips
+  // straight through if the read is not defaulted.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.ScriptFlag),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    for (let i = 0; i < 5; i++) cFrame(a, events);
+    check("an unset script flag holds the wait rather than passing it",
+          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+    G.g_script_flags[0] = 1;
+    cFrame(a, events);
+    check("...and raising it lets the block run",
+          a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
+  }
+
+  // The timer, op 0x09. It does **not** delay its own block: `CivilianStep-
+  // Script` clears the timer on every resume, and the value that survives is
+  // the one `CivilianReapplyWaitCommand` reads out of the block ahead. So a
+  // timer set in one block delays the wait at the end of it, and a timer of
+  // `n` costs `n + 1` frames because the test reads before the decrement.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTimer, 3),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    cFrame(a, events);
+    check("the timer's own block runs at once and parks with it armed",
+          a.civ?.timer === 3 && a.civ?.cursor === 3 && a.civ?.turnRate === 10,
+          `timer ${a.civ?.timer} cursor ${a.civ?.cursor}`);
+    for (let i = 0; i < 3; i++) cFrame(a, events);
+    check("a timer holds the next block for the frames it names",
+          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+    cFrame(a, events);
+    check("...and releases it on the frame it reads zero",
+          a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
+  }
+
+  // **The rescue.** Wait bit 0x04 blocks while more than `childrenGoal` of
+  // the civilian's captors are alive; the block it unblocks carries the
+  // 0x10000000 bit, which is where the 400 is paid.
+  {
+    const { a, kids, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetChildrenGoal, 0),
+      cmd(CivilianOp.Wait, CivilianWait.ChildrenAlive),
+      cmd(CivilianOp.Wait, CivilianWait.Rescued),
+      cmd(CivilianOp.End),
+    ]], [0x4100, 0x4200]);
+    let paid = 0;
+    events.on("civilian.rescued", () => { paid += 1; });
+    check("the civilian starts holding both its captors",
+          a.civ?.childCount === 2, `${a.civ?.childCount}`);
+    for (let i = 0; i < 5; i++) cFrame(a, events);
+    check("...and the rescue does not pay while either is alive",
+          G.g_player_score[0] === 0 && paid === 0,
+          `score ${G.g_player_score[0]}`);
+    kids[0].dead = true;
+    cFrame(a, events);
+    check("one captor down is not enough",
+          a.civ?.childCount === 1 && G.g_player_score[0] === 0,
+          `left ${a.civ?.childCount} score ${G.g_player_score[0]}`);
+    kids[1].dead = true;
+    cFrame(a, events);
+    check("the last captor down pays 400 -- to both players, since the port "
+          + "cannot name a shooter",
+          paid === 1 && G.g_player_score[0] === 400
+          && G.g_player_score[1] === 400,
+          `paid ${paid} ${G.g_player_score.join("/")}`);
+  }
+
+  // Shooting one. `SetOnShot` is the gate: without it the hit bits are simply
+  // cleared and the civilian cannot be hurt at all.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End),
+    ]]);
+    G.g_player_lives = [2, 2];
+    a.flags |= 8;
+    cFrame(a, events);
+    check("a civilian with no on-shot script cannot be shot",
+          G.g_player_lives[0] === 2 && G.g_player_score[0] === 0 && !a.dead,
+          `lives ${G.g_player_lives[0]} score ${G.g_player_score[0]}`);
+  }
+  {
+    // The exporter resolves op 0x0E's pointer to a stream index, so the
+    // fixture carries `scripts` the same way.
+    const { a, events } = civScene([
+      [cmd(CivilianOp.Wait, CivilianWait.Free),
+       { op: CivilianOp.SetOnShot, args: [1], scripts: [1] },
+       cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+      [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.SetTurnRate, 55),
+       cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+    ]);
+    G.g_player_lives = [2, 2];
+    G.g_player_score = [0, 0];
+    let shot = 0;
+    events.on("civilian.shot", () => { shot += 1; });
+    a.flags |= 8 | 2;                       // hit, and bit 1 names player 0
+    cFrame(a, events);
+    // -200, not -100: `PlayerTakeDamage` charges its own 100 for the life and
+    // `CivilianUpdate` charges another for the civilian. That is what
+    // "-100 twice" in docs/formats/spawns.md is.
+    check("shooting a civilian costs a life and 100 points twice",
+          shot === 1 && G.g_player_lives[0] === 1
+          && G.g_player_score[0] === -200,
+          `lives ${G.g_player_lives[0]} score ${G.g_player_score[0]}`);
+    check("...and switches it to the on-shot script",
+          a.civ?.turnRate === 55 && a.dead, `rate ${a.civ?.turnRate}`);
+  }
+  {
+    const { a, events } = civScene([
+      [cmd(CivilianOp.Wait, CivilianWait.Free),
+       { op: CivilianOp.SetOnShot, args: [1], scripts: [1] },
+       cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+      [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+    ]);
+    G.g_player_lives = [2, 2];
+    G.g_player_score = [0, 0];
+    a.flags |= ActorFlag.Dead;              // a killing shot
+    cFrame(a, events);
+    check("a killing shot charges 100 to BOTH players and no life",
+          G.g_player_score[0] === -100 && G.g_player_score[1] === -100
+          && G.g_player_lives[0] === 2,
+          `${G.g_player_score.join("/")} lives ${G.g_player_lives[0]}`);
+  }
+
+  // Op 0x11's skip count, which is what `CivilianReapplyWaitCommand` is for:
+  // the skipped block's *conditions* are re-applied and its actions are not.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetSkipCount, 1),
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetTurnRate, 66),      // skipped: not a wait condition
+      cmd(CivilianOp.SetEnemiesGoal, 5),    // re-applied: it is one
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    cFrame(a, events);
+    check("a skipped block re-applies its wait conditions...",
+          a.civ?.enemiesGoal === 5, `goal ${a.civ?.enemiesGoal}`);
+    check("...and does not run its actions",
+          a.civ?.turnRate !== 66, `rate ${a.civ?.turnRate}`);
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

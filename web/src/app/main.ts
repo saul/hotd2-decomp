@@ -315,7 +315,7 @@ class Player {
     this.world.attach(this.ctx);
     SetGameTables(bundle.script.characters, bundle.script.breakables,
                   bundle.script.set_pieces, bundle.script.humanoids,
-                  bundle.script.coli);
+                  bundle.script.coli, bundle.script.civilians);
     G.g_player_lives = [
       bundle.script.characters?.player?.start_lives ?? 2,
       bundle.script.characters?.player?.start_lives ?? 2,

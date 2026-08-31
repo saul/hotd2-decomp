@@ -183,6 +183,7 @@ game/           the port. no three.js, no DOM.
                   surface.ts stand.ts strike.ts entrance.ts on_shot.ts
                   death.ts react.ts standing.ts scripted.ts — plus thrower.ts
                   and projectile.ts for the throw
+  class10/        the civilians — the exe's own bytecode VM, and the rescue
   class24/        the set-pieces, choreographed against the camera
   class25/        the scripted-humanoid bytecode VM — the cutscene system
   class41/        group.ts prop.ts kinded.ts items.ts — the containers

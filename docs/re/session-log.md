@@ -5852,3 +5852,130 @@ tools and the live database — several of them in files a peer workstream is
 editing right now. Doing it half-way is worse than not doing it, so it is
 recorded at the definition in `globals.ts` and in `addresses.md` and left for a
 session that can sweep it in one commit.
+
+---
+
+## Session 2026-08-31d — class 0x10, and fifty zombies that were never in the game
+
+**Outcome:** class 0x10, the civilian, is read, annotated and ported. 22 new
+functions and 6 new globals. New `tools/verify_civilian_scripts.py`, new
+`docs/formats/civilians.md`, new `game/class10/`.
+
+### The class is a VM, and its scripts are in the exe
+
+`CivilianInit` (`FUN_0048A3E0`) reads a byte at the spawn tail's `+0x01` and
+indexes a 67-entry pointer table at `0x005702A8`. That table is **`.rodata`
+compiled into Hod2.exe** — the first gameplay data in this project that is not
+in the evt, which is why the exporter had to grow a reader
+(`ExeTables.civilian_scripts`) rather than another `bundle.py` walk.
+
+Commands are dwords with a per-opcode length, opcodes `0x00..0x2D`. Following
+the four opcodes that carry pointers to other streams (`0x0E`, `0x0F`, `0x1E`,
+`0x1F`) finds 136 streams and 1,967 commands, of which the 67 table entries are
+only the roots — the rest live in the gaps *between* the table's own entries,
+and one of them starts before the first entry, which is what made the first
+version of the verifier fail on a bounds check it had computed from the table.
+
+The falsifiable check is the decode itself: 17,684 of the region's 18,728 bytes
+are command, every stream ends in exactly one `0x2D`, and no byte is claimed by
+two commands. One wrong length desynchronises a dword stream immediately.
+
+**Op `0x10` has no fixed length.** It installs a native per-frame hook, and the
+engine calls it as `next = hook(obj, cmd + 2)` and takes the pointer back — so
+the hook decides. Four appear in the shipped data, consuming 2, 2, 3 and 5
+dwords. The decoder refuses an unlisted hook rather than guessing, which is how
+the 3-dword one (`0x0048DB90`, a launch speed) was found: the first run threw
+on the byte after it.
+
+### Two things that read backwards
+
+Both cost a round of failing assertions, and both are in the port's doc
+comment and in `docs/formats/civilians.md` now:
+
+* **A wait word leads its block and governs the wait that *follows* it.** The
+  VM runs its first command whatever it is and stops before the *next* opcode
+  above `0x2B`, so a stream that does not open with a `0x2C` never loads a wait
+  word and parks on the zero it started with. Every shipped stream opens with
+  one. The first test fixture did not, and asserted a park that was really a
+  never-started script.
+* **`SetTimer` does not delay its own block.** `CivilianStepScript` clears the
+  timer on every resume; the value that survives is the one
+  `CivilianReapplyWaitCommand` reads out of the block *ahead*. A timer of `n`
+  costs `n + 1` frames, because the test reads before the decrement.
+
+And a third, which is stranger and is transcribed rather than smoothed over:
+once the parked wait clears, the step loop loads the **cursor's own** word and
+tests that too, and if it also passes it advances again — so a block whose wait
+is already satisfied has its actions skipped entirely.
+`CivilianReapplyWaitCommand` (`FUN_0048B760`) exists to make that survivable: a
+second, smaller VM that re-applies only the opcodes a wait condition reads.
+That is the whole reason there are two interpreters.
+
+### The finding: the captors were not in the game
+
+`CivilianInit` reads a child count at tail `+0x0C` and an array of descriptor
+pointers at `+0x10`, and `SpawnFromDescriptor`s each one, parenting it at
+`child+0x1394`. **Nothing in the evt's instruction stream points at those
+descriptors.** `evt.spawns()` walks the instruction stream, so it never
+returned them; the character exporter is built on that walk, so it never placed
+them; and the client spawns from the placements, so 47 class-0x30 zombies
+across stages 1–4 did not exist in the player at all.
+
+They are the rescue. Wait bit `0x04` blocks while more than `sub+0x20` of them
+are alive, and the block it unblocks ends with a wait word carrying
+`0x10000000`, which is where `ScoreAddForPlayer` pays 400. Without the captors
+there was nothing to kill, so no civilian could ever be rescued — and the class
+having no module at all had hidden that completely.
+
+`characters.py` now folds those descriptors into `by_at` before the placement
+loop, tagged `civilian_child`, and the render layer makes a child present
+exactly when its parent is (they have no spawn instruction to be placed by).
+
+### Scoring, and what "−100 twice" means
+
+`docs/formats/spawns.md` has said "shooting one costs a life and −100 twice"
+since the class was first identified. The code says which: the survivable
+branch calls `PlayerTakeDamageTimed`, which charges 100 of its own for the
+life, and then charges another 100 — so the shooter is down 200. The *killing*
+branch charges 100 to **both** players and no life. The test asserts both,
+because the doc line reads either way and only one of them is the code.
+
+### Wrong turns
+
+* The first test fixtures were written as if a `Wait` at the head of a stream
+  parked the actor, and as if a `SetTimer` delayed its own block. Five
+  assertions failed; all five were the fixtures, not the port. Worth recording
+  because the failures looked exactly like transcription bugs.
+* `g_script_flags[i] !== 0` on an array the script has never written reads
+  `undefined`, and `undefined !== 0` is true — so wait bit `0x2000` ended on
+  frame one. Caught by an assertion written specifically because the array is
+  sparse. It is `?? 0` now.
+* `verify_civilian_scripts.py`'s first version derived the region's lower bound
+  from the script table and reported eleven commands "outside the region". The
+  bound was wrong, not the commands: one sub-stream sits below the first table
+  entry. The bound now comes from the walk.
+
+### Not done
+
+* `CivilianApplyMotionPose` (`FUN_0048C310`), `CivilianDrawHeldItems`
+  (`FUN_0048CD10`) and `CivilianUpdateOnCarrier` (`FUN_0048B140`) are read and
+  named but not ported — they are the renderer's half, and the opcodes that
+  only feed them (`0x13`–`0x15`, `0x27`) are decoded, named and left inert.
+* The `RideChildren` hook (`0x0048DA90` → `0x0048DAB0`) averages the surviving
+  captors' positions to carry the civilian between them. It needs posed
+  skeletons, so it is `[open]` in the port.
+* `obj+0x131C`, which names the player who killed a captor, is on `Actor` and
+  nothing writes it: the port's shot path carries no player at all. The rescue
+  therefore always takes the engine's own `-1` branch and pays both players.
+* Ops `0x19`, `0x1B`, `0x23`, `0x24`, `0x25` and `0x2B` are named from their
+  writes and `[open]` on meaning — nothing read reads those fields back.
+* `./ghidra/run.sh export-annotations` still exits 1 while the GUI holds the
+  project, so the database was synced over MCP (`rename_function`, and
+  `create_label` for the seven the naming gate rejects and for the six
+  globals). The TSVs remain the source of truth.
+
+**Next actions:** re-export the bundle
+(`python3 tools/export_player.py --game-dir "..." --all`) — the civilians block
+and the 47 new captor placements are new and no committed bundle has them. Then
+either class 0x11 (the plain script-spawned enemy) or the `0x20`/`0x45`/`0x46`
+classes, which are unread and need a `/decomp` pass before anything else.

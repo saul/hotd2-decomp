@@ -141,6 +141,13 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // never unblocks.
   G.g_enemies_alive = G.g_object_list
     .filter((o) => !o.dead && o.visible && ActorIsEnemy(o.cls)).length;
+  // The looser of the two. `EnemyThrowerInit` raises it and
+  // `ThrowerRetireFromPresentCount` drops it — on *leaving*, not on dying — so
+  // a corpse still on stage is present and not alive. Class 0x10's wait bit
+  // 0x01 reads it, and reading zero would have unblocked every one of those
+  // waits on frame one.
+  G.g_enemies_present = G.g_object_list
+    .filter((o) => o.visible && ActorIsEnemy(o.cls)).length;
 
   const f = { eye, dt, rng, host, events };
   for (const obj of G.g_object_list) {

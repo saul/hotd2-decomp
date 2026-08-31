@@ -30,6 +30,14 @@ export interface EventMap {
   "feed.note": { name: string; cat: string; note: string };
   /** A sound id the port asked for; the host owns the audio element. */
   "sound.play": { id: number };
+  /** `ScoreAddForPlayer` ran. Negative `points` is a penalty. */
+  "player.score": { player: number; points: number; score: number };
+
+  // -- class 0x10, the civilians -----------------------------------------
+  /** A civilian's captors are all dead: +400, and it walks off. */
+  "civilian.rescued": { at: number; player: number; score: number };
+  /** A civilian was shot: a life, and -100 twice. */
+  "civilian.shot": { at: number; player: number };
 
   // -- class 0x41, the breakable props -----------------------------------
   /** First shot: the prop swapped to its broken model and shook. */

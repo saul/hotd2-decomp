@@ -10,6 +10,7 @@
  * of its own that a snapshot would need.
  */
 import type { ArcStage } from "../bundle/characters";
+import type { CivilianState } from "./class10/state";
 import type { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 
@@ -328,6 +329,23 @@ export interface Actor {
    * frame boundary the engine has.
    */
   pendingHit: { bone: number; result: number } | null;   // +0x190, +0x34 bit 3
+  /**
+   * `obj+0x131C` — which player's shot killed this actor.
+   *
+   * `CivilianPruneDeadChildren` reads it off a dead captor to decide who is
+   * paid for the rescue. `[open]` here: the port's shot path carries no player
+   * at all, so nothing writes it and it stays `-1` — which is the engine's own
+   * "could not name one", and pays both players.
+   */
+  killedBy: number;         // +0x131C
+  /**
+   * Class 0x10's `ActorAllocSub(0xC4)` block at `obj+0x1310`.
+   *
+   * `obj+0x1310` is `state` for a combat class; for a civilian it is a
+   * pointer to its own script state, which is the polymorphic-field trap in
+   * its clearest form. See `class10/state.ts`.
+   */
+  civ: CivilianState | null;                             // +0x1310
   /** `obj+0x1368` — the bone that was hit. Class 0x31 alone reads it that way. */
   reactBone: number;        // +0x1368
   /** `obj+0x1328` — re-entries into the knockdown; two caps the arc. */
@@ -499,6 +517,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     cue: null,
     leapStrikeFrames: 0,
     pendingHit: null,
+    killedBy: -1,
+    civ: null,
     reactBone: 0,
     knockCount: 0,
     landSurface: 0,

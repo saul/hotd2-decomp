@@ -21,6 +21,7 @@ import { PropContainerPlacerHandler } from "./class41";
 import { Class44PlacerHandler } from "./class44";
 import { SetPiecePropHandler } from "./class24";
 import { ScriptedHumanoidHandler } from "./class25";
+import { CivilianHandler } from "./class10";
 
 export interface ClassFrame {
   eye: Vec3;
@@ -47,6 +48,7 @@ export interface ClassHandler {
 }
 
 export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
+  [SpawnClass.Civilian]: CivilianHandler,
   [SpawnClass.Zombie]: {
     init: EnemyZombieInit,
     update: (o, f) => EnemyZombieUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),

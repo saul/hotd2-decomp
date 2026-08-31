@@ -268,6 +268,159 @@ class ExeTables:
                 out[i] = (name, cnt)
         return out
 
+    # -- class 0x10's civilian scripts -----------------------------------
+    #
+    # `CivilianInit` (`FUN_0048A3E0`) reads the spawn tail's byte at +0x01 and
+    # indexes CIVILIAN_SCRIPT_TABLE with it, then hands the pointer to
+    # `CivilianRunScript` (`FUN_0048B9E0`). The commands are **dwords**, not
+    # the 8-byte records class 0x25 uses, and the length is per-opcode.
+    #
+    # 0x2D ends a stream. 0x2C suspends it -- `CivilianRunScript` stops before
+    # any opcode above 0x2B and `CivilianStepScript` (`FUN_0048B1E0`) resumes
+    # there once the wait word's conditions are met.
+    #
+    # The table's 67 entries are only the *entry points*: ops 0x0E/0x0F/0x1E
+    # /0x1F carry pointers to further streams that live in the gaps between
+    # them, so the decode is a work list, not a walk of the table.
+
+    CIVILIAN_SCRIPT_TABLE = 0x005702A8
+
+    #: Command length in dwords, from `CivilianRunScript`'s own switch. Every
+    #: opcode not listed here consumes two dwords, which is that switch's
+    #: fall-through `piVar8 = param_2 + 2`.
+    CIVILIAN_CMD_LEN = {0: 3, 1: 4, 5: 3, 0x0D: 3, 0x13: 3, 0x16: 3, 0x1A: 3,
+                        0x1F: 3, 0x21: 3, 0x24: 3, 0x25: 3, 0x26: 3, 0x2B: 6}
+
+    #: The opcodes whose operands are pointers to another command stream.
+    CIVILIAN_SCRIPT_OPS = {0x0E: (1,), 0x0F: (1,), 0x1E: (1,), 0x1F: (1, 2)}
+
+    #: Op 0x10 installs a native per-frame hook and **the hook decides the
+    #: command's length**: `CivilianRunScript` calls it as
+    #: ``next = hook(obj, cmd + 2)`` and takes the pointer it returns. The
+    #: four the shipped scripts use, with the dwords each consumes:
+    #:
+    #: ``0`` uninstall (`NoOpStub`); ``0x0048D9F0`` start falling under
+    #: gravity; ``0x0048DA90`` install the land-and-stop hook at 0x0048DAB0;
+    #: ``0x0048DB90`` take a launch **y** speed, then fall; ``0x0048DBD0``
+    #: take a whole launch velocity.
+    #:
+    #: An unlisted hook is an error rather than a guess: its length is not
+    #: knowable without reading it, and guessing desynchronises the stream.
+    CIVILIAN_HOOK_LEN = {0: 2, 0x0048D9F0: 2, 0x0048DA90: 2,
+                         0x0048DB90: 3, 0x0048DBD0: 5}
+
+    def _f32(self, va: int) -> float | None:
+        r = self._v2r(va)
+        if r is None or r + 4 > len(self.data):
+            return None
+        return struct.unpack_from("<f", self.data, r)[0]
+
+    def _i32(self, va: int) -> int | None:
+        v = self._u32(va)
+        return None if v is None else v - (1 << 32) if v >= 1 << 31 else v
+
+    def _civ_point(self, va: int) -> list[float] | None:
+        if va is None or va < IMAGE_BASE:
+            return None
+        pt = [self._f32(va + i * 4) for i in range(3)]
+        return None if any(c is None for c in pt) else pt
+
+    def civilian_scripts(self) -> dict:
+        """Every class-0x10 command stream in the exe, decoded.
+
+        Returns ``{"entries": [script index per table slot],
+        "scripts": [[command, ...], ...]}``. A command is
+        ``{"op": int, "args": [int, ...]}`` plus the resolved operands the
+        port needs: ``point``/``pose`` for the pointers-to-floats, ``sounds``
+        for the ``(id, delay)`` list op 0x22 walks, and ``script`` (an index
+        into ``scripts``) wherever an operand is another stream.
+
+        The check that the length table is right is that **every** stream
+        reachable from the 67 table entries decodes with every opcode in
+        ``0..0x2D``: one wrong length desynchronises the dword stream and the
+        opcodes go out of range within a command or two.
+        """
+        tab = self.CIVILIAN_SCRIPT_TABLE
+        entry_va: list[int] = []
+        while True:
+            v = self._u32(tab + len(entry_va) * 4)
+            if v is None or not (IMAGE_BASE <= v < tab):
+                break
+            entry_va.append(v)
+
+        # Work list: decode a stream, queue every stream it points at.
+        raw: dict[int, list[dict]] = {}
+        pending = list(entry_va)
+        while pending:
+            va = pending.pop(0)
+            if va in raw:
+                continue
+            cmds: list[dict] = []
+            raw[va] = cmds
+            p = va
+            for _ in range(4096):
+                op = self._i32(p)
+                if op is None or not 0 <= op <= 0x2D:
+                    raise ValueError(
+                        f"civilian script {va:#010x}: opcode {op} at {p:#010x}"
+                        " -- the command length table is wrong")
+                n = self.CIVILIAN_CMD_LEN.get(op, 2)
+                if op == 0x10:
+                    hook = self._u32(p + 4) or 0
+                    if hook not in self.CIVILIAN_HOOK_LEN:
+                        raise ValueError(
+                            f"civilian script {va:#010x}: op 0x10 at "
+                            f"{p:#010x} installs an unread hook {hook:#010x}"
+                            " -- its command length is not knowable")
+                    n = self.CIVILIAN_HOOK_LEN[hook]
+                if op == 0x2D:
+                    cmds.append({"op": op, "args": []})
+                    break
+                args = [self._i32(p + 4 * k) for k in range(1, n)]
+                cmds.append({"op": op, "args": args, "at": p})
+                for i in self.CIVILIAN_SCRIPT_OPS.get(op, ()):  # noqa: B007
+                    t = args[i - 1]
+                    if t:
+                        pending.append(t)
+                p += 4 * n
+
+        order = sorted(raw)
+        index = {va: i for i, va in enumerate(order)}
+        scripts: list[list[dict]] = []
+        for va in order:
+            out: list[dict] = []
+            for c in raw[va]:
+                op, args = c["op"], c["args"]
+                d: dict = {"op": op, "args": args}
+                for i in self.CIVILIAN_SCRIPT_OPS.get(op, ()):
+                    d.setdefault("scripts", []).append(index.get(args[i - 1],
+                                                                -1))
+                if op in (5, 0x26) and args[0] > 0:
+                    d["point"] = self._civ_point(args[0])
+                elif op == 6:
+                    d["point"] = self._civ_point(args[0])
+                if op == 5:
+                    d["radius"] = struct.unpack("<f",
+                                                struct.pack("<i", args[1]))[0]
+                if op == 0x16:
+                    d["radius"] = struct.unpack("<f",
+                                                struct.pack("<i", args[0]))[0]
+                if op == 0x18 and args[0]:
+                    d["pose"] = [self._f32(args[0] + i * 4) for i in range(6)]
+                if op == 0x22 and args[0]:
+                    snd: list[list[int]] = []
+                    q = args[0]
+                    while len(snd) < 64:
+                        sid = self._u32(q)
+                        if sid is None or sid == 0xFFFFFFFF:
+                            break
+                        snd.append([sid, self._i32(q + 4) or 0])
+                        q += 8
+                    d["sounds"] = snd
+                out.append(d)
+            scripts.append(out)
+        return {"entries": [index[v] for v in entry_va], "scripts": scripts}
+
     def asset_slots(self) -> dict[int, tuple[str, int]]:
         """asset slot id -> (pol filename, entry index within that file).
 

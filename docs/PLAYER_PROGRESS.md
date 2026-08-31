@@ -31,6 +31,28 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**Class 0x10, the civilians, is ported** (`game/class10/`) — and with it the
+game's **rescue mechanic**, which the player had no part of. It is a second
+bytecode VM, but unlike class 0x25's the scripts are compiled into
+`Hod2.exe`: 67 entry points, 136 streams and 1,967 commands, now decoded into
+the bundle by `ExeTables.civilian_scripts`.
+
+The find that mattered is that a civilian's **captors were not in the game at
+all**. `CivilianInit` builds them from descriptors at the spawn tail's `+0x10`,
+and nothing in the evt's instruction stream points there — so the script walker
+never returned them, the exporter never placed them and 47 class-0x30 zombies
+across four stages simply did not exist. They do now, they follow their
+civilian on and off stage, and killing the last of them pays the **+400** the
+rescue is worth. Shooting the civilian instead costs a **life** and 100 points
+twice, and a killing shot charges 100 to both players.
+
+Two pieces of the wait machinery are worth stating because they read
+backwards: a wait word **leads** its block and governs the wait that follows
+it, and a block whose own wait is already satisfied is **skipped** — with
+`CivilianReapplyWaitCommand` re-applying the clip, target and cues the skipped
+block would have set. `port.test.ts` pins both, along with the timer's `n + 1`
+frames and the two score paths.
+
 **Class 0x25, the scripted humanoid, is ported** (`game/class25/`) — the
 second-largest class in the game and a **bytecode VM**. The spawn's tail points
 at a command block; the Init installs the interpreter and it walks 8-byte

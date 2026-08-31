@@ -64,6 +64,23 @@ export const G = {
   g_object_list: [] as Actor[],
   /** `g_enemies_alive` — 0x009C904A. */
   g_enemies_alive: 0,
+  /**
+   * `g_enemies_present` — 0x009C7006. The looser of the two counts: what the
+   * evt's enemy waits and class 0x10's wait bit 0 test against.
+   */
+  g_enemies_present: 0,
+  /**
+   * `g_civilians_alive` — 0x009CA0E8. Every class-0x10 civilian raises this in
+   * its Init and drops it when it leaves, unless its wait word carries
+   * `0x08000000` (uncounted) — and one wait bit blocks a script until the
+   * count has fallen far enough, which is how a stage paces its rescues.
+   */
+  g_civilians_alive: 0,
+  /**
+   * `g_two_player_game` — 0x009C8E80. Set when two players are actually in
+   * play; class 0x10's wait bit 0x40000000 blocks until it is clear.
+   */
+  g_two_player_game: 0,
 
   // -- attack permits ----------------------------------------------------
   /**
@@ -360,6 +377,8 @@ export type Globals = typeof G;
 export function ResetGameGlobals(): void {
   G.g_object_list = [];
   G.g_enemies_alive = 0;
+  G.g_enemies_present = 0;
+  G.g_civilians_alive = 0;
   G.g_attack_permits = new Array(G.g_max_attackers).fill(-1);
   G.g_enemy_approach_rings = [];
   G.g_enemy_approach_ring_mid = [];

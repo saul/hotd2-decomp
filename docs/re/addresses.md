@@ -207,6 +207,7 @@ classic ring-buffer initialisation.
 | `0x009A59E0` | view struct, player 2 |
 | `0x009A2280` | class index → per-class handler fn (112 slots, built by `FUN_0040AC90`) |
 | `0x00593358` | `{class_id, handler}` pair list, 56 entries, terminated by a negative id |
+| `0x005702A8` | `g_civilian_scripts` — class 0x10's 67 command streams, indexed by the spawn tail's `+0x01`. See docs/formats/civilians.md |
 | `0x004A6FA0` | object allocator: `alloc(size)`, zero, link, store *handler* at +0x00 |
 
 ## Asset streaming — Phase 6

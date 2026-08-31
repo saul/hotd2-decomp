@@ -255,6 +255,56 @@ export interface HumanoidCmdJson {
 }
 
 /** One class-0x25 spawn's program. */
+/**
+ * One class-0x10 command, as `ExeTables.civilian_scripts` decodes it.
+ *
+ * The stream is **dwords**, not the 8-byte records class 0x25 uses, and the
+ * length is per-opcode; `args` is everything after the opcode. The resolved
+ * fields are the operands that are pointers into the exe, followed for the
+ * port because it cannot follow them itself.
+ */
+export interface CivilianCmdJson {
+  op: number;
+  args: number[];
+  /** Indices into {@link CiviliansJson.scripts} for a pointer operand. */
+  scripts?: number[];
+  /** Ops 5, 6 and 0x26: the three floats the operand points at. */
+  point?: [number, number, number] | null;
+  /** Op 5's approach radius, op 0x16's target scale — the operand as a float. */
+  radius?: number;
+  /** Op 0x18's six floats: position then rotation. */
+  pose?: number[];
+  /** Op 0x22's `(sound id, delay)` list, terminated by id `0xFFFFFFFF`. */
+  sounds?: [number, number][];
+}
+
+/** One class-0x10 spawn's descriptor tail — see `game/class10`. */
+export interface CivilianSpawnJson {
+  charType: number;
+  /** Index into {@link CiviliansJson.entries}. */
+  script: number;
+  removePath: number;
+  removeFrame: number;
+  removeDelay: number;
+  children: {
+    at: number; class: number; charType: number | null;
+    pos: [number, number, number]; yaw: number; hp: number;
+  }[];
+}
+
+/**
+ * Class 0x10's scripts, which live in the **exe** rather than the evt, and the
+ * per-spawn tail that picks one.
+ */
+export interface CiviliansJson {
+  /** `g_civilian_scripts` (0x005702A8), 67 slots -> index into `scripts`. */
+  entries: number[];
+  /** Every reachable stream, including the ones only an operand points at. */
+  scripts: CivilianCmdJson[][];
+  /** Keyed by the spawn's script address. */
+  spawns: Record<string, CivilianSpawnJson>;
+}
+
 export interface HumanoidProgramJson {
   charType: number;
   removePath: number;

@@ -442,6 +442,15 @@ export interface Actor {
   arcKind: number;          // +0x1354
   /** `obj+0x138C` — the draw alpha the blinking states write. */
   alpha: number;            // +0x138C
+  /**
+   * `obj+0x1338` — frames since this actor was last shoved out of another.
+   *
+   * `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) counts it down and, 60
+   * frames after a push, flips `obj+0x136C` bit 0x400000 — the direction
+   * `ZombieStateBackOff` retreats in. **Not** the attack cooldown, which is
+   * the next field along.
+   */
+  shoveTimer: number;       // +0x1338
   /** `obj+0x133C` is the cooldown; this is the frame the corpse is pinned to. */
   corpseFrame: number;      // +0x194, pinned
   /** `ThrowerStateBlinkInThreeHops`' two counters. */
@@ -620,6 +629,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     fallFromY: 0,
     arcKind: 0,
     alpha: 1,
+    shoveTimer: 0,
     corpseFrame: -1,
     hopsLeft: 0,
     hopFrames: 0,

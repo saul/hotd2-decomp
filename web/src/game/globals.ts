@@ -386,6 +386,14 @@ export function ResetGameGlobals(): void {
   G.g_enemy_approach_steps = 0;
   G.g_enemy_approach_steps_mid = 0;
   G.g_enemy_approach_steps_outer = 0;
+  // The scene reset re-arms the player: `ResetSceneCombatState`
+  // (`FUN_0045EEC0`) calls into the player init, and without it a replay or a
+  // seek starts with however many lives the last run ended on. That went
+  // unnoticed until `TryClaimAttackSlot` grew its `IsPlayerAttackable` gate,
+  // at which point a zero-life player made every enemy stop attacking.
+  // `main.ts` overwrites this from the bundle's `start_lives` immediately
+  // after, which is the engine's order too.
+  G.g_player_lives = [2, 2];
   G.g_player_invuln_frames = 0;
   G.g_player_was_hit = [0, 0];
   G.g_player_hit_motion = [0, 0];

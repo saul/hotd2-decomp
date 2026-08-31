@@ -31,6 +31,23 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**The attack pacing is measured, not guessed.** `web/tools/cadence.mjs` drives
+real spawns and prints the cycle: a lone zombie strikes every **3.22 s** — a
+1.63 s clip and a 1.58 s retreat, with 0.1 s of standing — and six zombies give
+5.85 s each with one swinging at a time and 9.3 s of waiting. That is the
+engine's own pacing: there is no per-swing cooldown in class 0x30 (`obj+0x133C`
+is forced to zero unless state 19 arms it, and four spawns in the game start
+there), the 90-frame invulnerability window does not gate the attack queue, and
+the approach rings come from one table with **no difficulty index**. The port
+runs difficulty 2, which changes hit points and per-shot damage and nothing
+about timing.
+
+Two timing bugs came out of reading it: `ZombieStateBackOff` was writing the
+engine's `obj+0x1338` into the port's `obj+0x133C` — two different fields — and
+its exit was missing the clause that holds a retreat until the back-away clip
+has played. `ResetGameGlobals` also did not re-arm `g_player_lives`, so a seek
+started with whatever the last run ended on.
+
 **Class 0x10, the civilians, is ported** (`game/class10/`) — and with it the
 game's **rescue mechanic**, which the player had no part of. It is a second
 bytecode VM, but unlike class 0x25's the scripts are compiled into

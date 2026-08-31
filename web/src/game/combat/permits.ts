@@ -52,6 +52,18 @@ export function TryClaimAttackSlot(obj: Actor, host?: GameHost): boolean {
   // that matters for what the player sees.
   if (host && !ActorIsOnScreen(obj, host)) return false;
   for (let i = 0; i < G.g_max_attackers; i++) {
+    // [open] `obj+0x121` is a **player index**, not a slot: the engine picks
+    // which player to come for and then voids the choice when
+    // `IsPlayerAttackable` (`FUN_00409DC0`) says no. That gate is deliberately
+    // **not** wired up here, and the reason is worth keeping.
+    //
+    // The engine's `IsPlayerAttackable` tests the player *state word*
+    // (`g_player_state`, 0x009A5C62), which must be 5. `PlayerTakeDamage`
+    // never writes it — losing your last life does not make you unattackable;
+    // the continue sequence does, and this port has no continue. The port's
+    // stand-in for that function tests `g_player_lives`, so calling it here
+    // would stop every enemy attacking after two hits, which is a divergence
+    // rather than a fix. It goes in when there is a player state to test.
     if (G.g_attack_permits[i] === -1) {
       G.g_attack_permits[i] = obj.at;
       obj.attackPermit = i;                    // +0x121

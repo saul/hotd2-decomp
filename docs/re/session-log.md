@@ -6170,3 +6170,102 @@ change working rather than a regression.
 **Next actions:** the companion class behind state 37 (`FUN_00442740`), which
 is the last unread piece of the captor family; or class 0x13, which is what the
 seven carried civilians are riding.
+
+---
+
+## Session 2026-08-31g — the attack pacing, and what difficulty actually does
+
+**Outcome:** the class-0x30 attack loop read end to end. Five functions and
+three globals named. Two real divergences fixed, one wrong belief in the port
+corrected, one deliberate non-fix recorded. New `web/tools/cadence.mjs`.
+
+### The question: "what difficulty are we simulating?"
+
+**2, and it does not pace anything.** `ResetDamageRank` (`FUN_00460770`) seeds
+`g_damage_rank` from `g_initial_damage_rank[difficulty]`, and it **forces
+index 2** whenever `FUN_00413280()` is non-zero, ignoring the menu. Index 2
+gives `hp_delta = 0` and `initial_rank = 1`. `g_damage_rank` scales **per-shot
+damage** through `DamageRankModifier`, and nothing else.
+
+`ResetSceneCombatState` (`FUN_0045EEC0`) copies the three approach-ring radii
+from `DAT_004C4CD0/D4/D8` — **one table, no difficulty index**. So the rings,
+the queue depths and therefore the attack cadence are identical on every
+setting. There is no difficulty-dependent timing anywhere in class 0x30.
+
+The port hardcodes `g_difficulty = 2` and never offers it. The adaptive rank
+(`UpdateDamageRank`, `g_damage_rank_pending`) is still unported, so the rank
+stays at its seed — that changes damage, not timing.
+
+### Where the pauses are, and where they are not
+
+Read: `ZombieStateHoldAtRange`, `ZombieStateStrike`, `ZombieStateBackOff`,
+`ZombieStateWaitTurn`, `ZombieStateAttackRun`, `TryClaimAttackSlot`,
+`IsPlayerAttackable`, `CheckPlayerCanBeHit`, `ZombiePushOutOfWorldAndActors`,
+`ZombieStateWaitForCameraFrame`, `EnemyZombieInitByCharType`.
+
+* **There is no per-swing cooldown.** `obj+0x133C` is *forced to zero* by
+  `ZombieStateHoldAtRange` unless `obj+0x1368` bit 0 is set, and the only
+  thing in all 54 states that sets that bit is
+  `ZombieStateWaitForCameraFrame` (state 19), which arms it from the
+  descriptor tail's `+0x10`. Four spawns in the game start there.
+* **The pause is the queue.** `rank < allowance && queueRank < 3` and one
+  permit per player. A lone zombie has rank 0 and re-claims on the frame its
+  retreat ends — so it really does swing, retreat, swing, with no idle. That
+  is the engine, not a port bug.
+* **The 90-frame invulnerability window is not a pause.**
+  `IsPlayerAttackable` (`FUN_00409DC0`) tests the player *state word*
+  (`g_player_state`, 0x009A5C62 — must be 5); the invulnerability lives in a
+  separate byte array that only `PlayerTakeDamage` reads. An invulnerable
+  player is still a legal target and the queue keeps turning.
+* `obj+0x136C` bit `0x400` **is** a "stand through one whole idle before you
+  may attack" latch — but `EnemyZombieInitByCharType` sets it once, for
+  character type 2 only, and `ZombieStateHoldAtRange` clears it the first time
+  the idle reaches `play_length - 2`. A one-shot, not a rhythm.
+* `DAT_00566124` looked like a wait table. It is ten entries of 0 and 1 that
+  `ZombieStateAttackRun` ORs into `obj+0x136C` at **bit 21** — which idle
+  variant a waiting zombie plays. Not a duration.
+
+Measured, over the real stage-2 spawns: **a lone zombie strikes every 3.22 s**
+(1.63 s clip + 1.58 s retreat, 0.1 s in the hub); **six zombies give 5.85 s
+each, one swinging at a time, 9.3 s of standing.** `web/tools/cadence.mjs` is
+that measurement, with expectations, so a change to the loop moves a number.
+
+### Fixed
+
+* **`obj+0x1338` and `obj+0x133C` were conflated.** `ZombieStateBackOff` wrote
+  the engine's `+0x1338` value (60) into the port's `cooldown`, which is
+  `+0x133C`. They are different fields: `+0x1338` is the shove timer
+  `ZombiePushOutOfWorldAndActors` counts down to flip the retreat's turn
+  direction; `+0x133C` is the attack cooldown. Now `Actor.shoveTimer`.
+* **`ZombieStateBackOff` was missing half its exit test.** The engine's is
+  `(far enough || 240 frames) && (motion != 0x100 || frame > 0x43)` — a
+  character whose back-away is motion 256 may not return to the hub until that
+  clip has played. Three of the game's motion rows use it.
+* **`ResetGameGlobals` did not reset `g_player_lives`.** A replay or a seek
+  started with however many the last run ended on. The engine's scene reset
+  re-arms the player.
+
+### Corrected
+
+`backoff.ts` asserted there is **no** actor-versus-actor separation pass
+anywhere in the engine. That is wrong. `ZombiePushOutOfWorldAndActors`
+(`FUN_00454900`) — the hook `EnemyZombieInit` installs at `obj+0x12F0` — runs
+`ColiTestSphereAgainstActors` against `obj+0x12C` with radius `obj+0x128` and
+pushes the actor out by a tenth of the penetration each frame, 1.8x while
+airborne. It is not ported, and porting it would change how a crowd packs.
+
+### Deliberately not fixed
+
+The engine's `TryClaimAttackSlot` voids a permit it has just picked when
+`IsPlayerAttackable` returns false. Wiring that up looked like a free fidelity
+win and is not: the engine's version tests the player *state word*, which
+losing your last life does **not** change, while the port's stand-in tests
+`g_player_lives`. Adding the call made every enemy stop attacking after two
+hits — the cadence harness went from 9 strikes to 2, which is how it was
+caught. The call goes in when there is a player state to test. Recorded as
+`[open]` at the call site.
+
+**Next actions:** port `ZombiePushOutOfWorldAndActors` — it is the only thing
+keeping a crowd from occupying one point, and it feeds directly back into how
+often the actor holding the permit is actually in range. Then the adaptive
+`UpdateDamageRank`.

@@ -20,6 +20,25 @@ export function CheckPlayerCanBeHit(player: number): boolean {
 }
 
 /**
+ * `IsPlayerAttackable` — `FUN_00409DC0`. May an enemy commit an attack here?
+ *
+ * It lives beside the damage because it is a question about the *player*, and
+ * because `TryClaimAttackSlot` needs it: the engine voids a permit it has just
+ * picked when this returns false. Note what it does **not** test —
+ * `g_player_invuln_frames`. The 90-frame window after a hit stops the *damage*
+ * and nothing else, so the enemies keep taking their turns through it. That is
+ * the engine's answer to "why is there no pause after I am hit", and it is
+ * why there is not one here either.
+ *
+ * [diverges] The engine tests the scene state, the app state and the per-player
+ * state word at `g_player_state`; the port has none of those and tests the one
+ * thing that stands in for all three — the player is alive.
+ */
+export function IsPlayerAttackable(player: number): boolean {
+  return player >= 0 && (G.g_player_lives[player] ?? 0) > 0;
+}
+
+/**
  * `PlayerTakeDamage` — `FUN_00415300`.
  *
  * One function for every damage source. The melee strike and the thrown weapon

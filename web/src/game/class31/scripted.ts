@@ -26,7 +26,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
-import { PlayerTakeDamage } from "../combat/player";
+import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionOf } from "../tables";
@@ -318,17 +318,6 @@ function ThrowerGrabTakePermit(obj: Actor, named: number, rng: Rng): void {
     obj.struck = false;
   }
   obj.attackPermit = p;
-}
-
-/**
- * `IsPlayerAttackable` — `FUN_00409DC0`.
- *
- * [diverges] The engine tests the scene state, the app state and the per-player
- * state word; the port has none of those and tests the one thing that stands in
- * for all three — the player is alive.
- */
-export function IsPlayerAttackable(player: number): boolean {
-  return player >= 0 && (G.g_player_lives[player] ?? 0) > 0;
 }
 
 /** `ThrowerLeave` — `FUN_0044AD60`. Release everything and go. */

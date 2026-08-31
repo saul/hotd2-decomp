@@ -1115,14 +1115,14 @@ console.log("\nclass 0x25, the VM runs until a command blocks:");
   // first frame, because only a wait costs one.
   const { a, events } = humanoidScene([
     { op: HumanoidOp.SetPos, mode: 0, a: 0, b: 0, f0: 5, f1: 7 },
-    { op: HumanoidOp.DrawMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.SetHitMode, mode: 2, a: 0, b: 0 },
     { op: HumanoidOp.TurnMode, mode: 1, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 30, b: 0 },
     { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
   ]);
   hFrame(a, events, rng);
   check("a run of setup commands all take effect in one frame",
-        a.pos.x === 5 && a.pos.z === 7 && a.drawMode === 2
+        a.pos.x === 5 && a.pos.z === 7 && a.hitMode === 2
         && a.turnMode === HumanoidTurn.FaceCamera && a.pc === 3,
         `pc ${a.pc}`);
 

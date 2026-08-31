@@ -139,8 +139,12 @@ export interface Actor {
   pathMode: number;         // +0x1358
   pathSlot: number;         // +0x135C
   pathOffset: number;       // +0x1360
-  /** `obj+0x1330` — class 0x25's draw mode. */
-  drawMode: number;         // +0x1330
+  /**
+   * `obj+0x1330` — class 0x25's `op 14`. **Not** a draw mode: the class's own
+   * draw routine never reads it and poses unconditionally. `[open]` — its only
+   * reader is the hit handler at `obj+0x12EC`, which is unread.
+   */
+  hitMode: number;          // +0x1330
   /**
    * `obj+0x13C0` — where the actor was last frame. The VM's "am I closing on
    * this point" condition compares against it, which is the only reason it is
@@ -310,7 +314,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pathMode: 0,
     pathSlot: -1,
     pathOffset: 0,
-    drawMode: 0,
+    hitMode: 0,
     prevPos: vec3(),
     ringSet: 0,
     backoffFrames: 0,

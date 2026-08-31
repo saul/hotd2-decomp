@@ -46,10 +46,10 @@ import { VecToAngles } from "../vec";
 
 /** The opcodes `ScriptedHumanoidUpdate` switches on. */
 export enum HumanoidOp {
-  /** Wait for a condition, then record which one released it. */
-  WaitAndMark = 0,
-  /** The same, with the mark set to 1. */
-  WaitAndMark1 = 1,
+  /** Wait for a condition, then let the animation **run**. */
+  WaitThenPlay = 0,
+  /** Wait for a condition, then **hold** the pose. */
+  WaitThenHold = 1,
   /** Set the motion by id, with a phase. */
   SetMotion = 2,
   /** Set the motion with a blend and a mode. */
@@ -74,8 +74,12 @@ export enum HumanoidOp {
   Effect = 12,
   /** `PlaySoundId`. */
   PlaySound = 13,
-  /** Set the draw/visibility mode. */
-  DrawMode = 14,
+  /**
+   * `obj+0x1330`. **Not** a draw mode: `ScriptedHumanoidUpdate`'s draw routine
+   * never reads it and poses the actor unconditionally. `[open]` — the only
+   * reader is the hit handler installed at `obj+0x12EC`, which is unread.
+   */
+  SetHitMode = 14,
   /** Jump. */
   Jump = 15,
   /** Swap one bone's draw slot. */
@@ -158,6 +162,9 @@ export function ScriptedHumanoidInit(obj: Actor): void {
   const p = HumanoidProgramOf(obj);
   obj.pc = 0;
   obj.holdFrames = 0;
+  // The Init pre-applies the first command: `obj+0x1324 = 1` when the block
+  // opens with an op-1 wait, so an actor whose first instruction is "hold"
+  // does not play a frame before it takes effect.
   obj.frozen = 0;
   obj.turnMode = HumanoidTurn.None;
   obj.turnFrames = 0;
@@ -166,6 +173,7 @@ export function ScriptedHumanoidInit(obj: Actor): void {
   obj.pathSlot = -1;
   obj.pathMode = 0;
   if (!p) return;
+  if (p.cmds[0]?.op === HumanoidOp.WaitThenHold) obj.frozen = 1;
   obj.motion = p.motion;
   const m = T.types[String(obj.charType)]?.motions[String(p.motion)];
   const fps = m?.fps ?? 30;
@@ -251,12 +259,15 @@ export function ScriptedHumanoidUpdate(obj: Actor, f: ClassFrame): void {
 /** One command. Returns whether the cursor moved — false parks the VM. */
 function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
   switch (c.op) {
-    case HumanoidOp.WaitAndMark:
-    case HumanoidOp.WaitAndMark1:
+    case HumanoidOp.WaitThenPlay:
+    case HumanoidOp.WaitThenHold:
       if (!CondMet(obj, c)) return false;
-      // `+0x1324` records *which* opcode released the wait. Nothing ported
-      // reads it back, but it is state and it is one word.
-      obj.frozen = c.op === HumanoidOp.WaitAndMark1 ? 1 : c.op;
+      // `obj+0x1324 = <the opcode>`, and that word is the **freeze flag** the
+      // draw routine tests before advancing the motion frame — the same one
+      // class 0x24 has. So the opcode number is not a marker: op 0 lets the
+      // animation run and op 1 holds the pose, and the engine writes it by
+      // reusing the opcode as the value.
+      obj.frozen = c.op === HumanoidOp.WaitThenHold ? 1 : 0;
       obj.holdFrames = 0;
       obj.pc += 1;
       return true;
@@ -331,8 +342,8 @@ function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
       obj.pc += 1;
       return true;
 
-    case HumanoidOp.DrawMode:
-      obj.drawMode = c.mode;
+    case HumanoidOp.SetHitMode:
+      obj.hitMode = c.mode;
       obj.holdFrames = 0;
       obj.pc += 1;
       return true;

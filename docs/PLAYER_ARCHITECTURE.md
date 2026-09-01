@@ -1090,6 +1090,82 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 17 | **`refreshUi` dies.** `hudRows` into `buildProjection`, the minimap paint into its component, all 19 call sites and `setPlayButton`/`refreshPausedOverlay` gone. One update path | ☐ |
 | 18 | **Structural sharing replaces the change key.** `stable()` per slice, panels `memo()`, `publish` shallow-compares the root; `projectionKey`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ☐ |
 | 19 | **The shutter and the caption become engine state.** `/decomp` `FUN_00413970` and `FUN_00435AA0` first, name `DAT_009CA0F4` and its counter, then onto `Walker` beside `gateCloseLeft`; `Hud` becomes a `System` with `resync`. Clears step 14's assertion C | ☐ |
+| 20 | **This document describes what is.** `## The UI layer` is rewritten from a plan in the present tense into the UI's stated rules; the tree matches the tree; the findings below collapse into those rules and stop being a list of complaints | ☐ |
+
+### Step 20, and why it is a step rather than a tidy-up
+
+`## The UI layer` above still opens *"The UI is ~1900 lines of imperative DOM
+... wired with 67 `addEventListener` calls"*, in the present tense, and closes
+with a tree whose last line is `hud/ bgm.ts — audio, not UI` — a file that has
+since moved to `audio/`. It was written as a proposal, step 11 built most of
+it, and nobody went back. A document that describes a layout the tree no longer
+has is worse than no document, which is the same rule this file already states
+about restructuring.
+
+So the last step is to rewrite that section as **the rules of the UI layer**,
+stated once, in the present tense, with the findings above collapsed into them
+rather than left as a list of things that were wrong. The rules the review
+arrived at, which is what step 20 has to say:
+
+1. **`ui/` reads one projection and emits commands.** No import from `game/`,
+   `script/`, `bundle/` or `core/`, type-only included.
+2. **The projection is plain data.** Numbers, strings, booleans and arrays of
+   them. If `structuredClone` would not round-trip it, it does not belong —
+   the same test a snapshot slice has to pass, for the same reason.
+3. **A command is the UI asking the world to change.** Anything that changes
+   nothing outside `ui/` — a fold, a filter, a scroll position — is component
+   state and must not be a command. The union stays small on purpose.
+4. **Slices are referentially stable when their content has not changed.**
+   That is what makes `memo` the diff. A builder that allocates a fresh array
+   for an unchanged slice defeats the whole scheme silently.
+5. **Cost is demand, and demand is expressed by mounting.** `app/` never asks
+   the DOM anything; a panel that wants an expensive slice says so by being on
+   screen.
+6. **One writer per pixel.** No imperative DOM write to anything React renders.
+7. **State the script drives belongs to the script**, not to the layer that
+   draws it — the shutter and the caption being the case that proved it.
+
+### Enforcing those rules, and whether a linter helps
+
+Partly, and not by adopting ESLint.
+
+Rules 1 and 6 are file-level and `verify_layers.py` already measures them, or
+will once step 13 lets it see `.tsx`. Rule 2 is a runtime property and
+`test/state.test.ts` and `test/projection.test.ts` prove it better than any
+static check could. Rule 3 is enforced by TypeScript: the union is closed and
+the switch is exhaustive, so a command with no case fails to compile. **The
+strongest rule in this layer is a type, not a linter**, and that is worth
+saying before adding tooling.
+
+Two rules genuinely need an AST and are caught by nothing today:
+
+* **Every exported component in `ui/panels/` is wrapped in `memo`.** Rule 4
+  makes the slices stable; this is what spends that. It fails *quietly* — the
+  panel still renders correctly, just needlessly — which is exactly the kind of
+  regression no test will report.
+* **`store.demand(...)` is called from inside a `useEffect` and nowhere else.**
+  Called during render, strict mode double-invokes it, the count never returns
+  to zero, and `app/` builds an expensive slice for a panel that closed. A
+  quiet, permanent cost with no symptom.
+
+Both are expression-level, both are fragile to match with a regex, and neither
+is worth eight new dependencies and a config file. **ESLint is the wrong size
+for this repo** — and it would cost something real: `verify_layers.py`'s two
+severities and its ratchet baselines have no ESLint equivalent, and the ratchet
+is the mechanism that let steps 8-12 land at all.
+
+The idiomatic answer here is a small purpose-built checker that uses a parser,
+in the same shape as every other `tools/verify_*`: **`web/tools/verify_ui.mjs`,
+walking `ts.createSourceFile` from the `typescript` already in `devDependencies`
+— no new package — and reporting in `verify_layers.py`'s two-severity format so
+a rule can be introduced against a baseline and driven down.**
+
+Worth resisting: a rule for anything the type system, the layer checker or a
+runtime test already holds. Three overlapping enforcement mechanisms for one
+property is how a rule ends up being satisfied in the checker rather than in
+the code — which this document has already caught happening once, with
+`layers-are-systems` going green because it had nothing left to look at.
+
 
 ### Proving a step did not change behaviour
 

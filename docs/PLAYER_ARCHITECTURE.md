@@ -430,7 +430,8 @@ What is on disk. Where a line is still a plan it says so.
 ```
 web/src/
   app/          the composition root: the only layer that sees all the others
-    main.ts       `Player` — 1060 lines. Step 10 is what shortens it
+    main.ts       `Player` — 1060 lines, and step 5 closed at that size
+                  deliberately: see "400 was the wrong number" below
     loop.ts       the 60 Hz accumulator, freeze and speed — in one place
     systems.ts    the adapters: GameSystem, ScriptSystem, drawSystem
     commands.ts   the one exhaustive switch over `UiCommand`
@@ -956,10 +957,10 @@ exhaustive switch. The strongest rule in this layer is a type.
 
 ## Order of work
 
-Everything except **step 10** is done. `script/walker.ts` is still 1525 lines
+Steps 1 to 20 are done. **Step 10** — `script/walker.ts` is still 1525 lines
 holding the machine, the opcodes' state, the waits and the seek planner in one
-class, and `WalkerHost` is 14 methods; splitting it is what shortens
-`app/main.ts` too, and it is the last row with a `☐`.
+class, and `WalkerHost` is 14 methods — is untouched, and **steps 21 to 28**
+are the second UI review's, described below the table.
 
 Each step compiles, keeps `verify_layers.py` green, and passes
 `verify_player_ops.py` and `npm run test:port` on its own.
@@ -987,6 +988,90 @@ Each step compiles, keeps `verify_layers.py` green, and passes
 | 18 | **Structural sharing replaces the change key.** One generic `stabilise` pass, panels `memo()`, `publish` decides on identity; `projectionKey`, `revision`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ✅ |
 | 19 | **The shutter and the caption become engine state.** `g_bHudShutterState` and `g_bHudShutterPrev` named; the slide counter turned out to be a task field and to *be* `gateCloseLeft`, so the two became one; `Hud` holds no state and `app/` adapts it with `drawSystem` | ✅ |
 | 20 | **This document describes what is.** `## The UI layer` is the UI's seven stated rules; the tree matches the tree; the findings collapse into the rules and into what was *rejected*; `web/tools/verify_ui.mjs` holds the two that need an AST | ✅ |
+| 21 | **The stylesheet has one owner.** `verify_player_dom.py` re-aimed at the two questions that are still load-bearing; the seven rules step 16 orphaned restored, as ids where the control is a singleton and as structural selectors where it is a role | ☐ |
+| 22 | **The error boundary.** Three: the sidebar, the top chrome, and a root backstop, so one bad value in one panel cannot blank the page. Recovery is explicit — a boundary that resets on the next projection loops at 60 Hz. `onCaughtError` routes the throw into the event feed | ☐ |
+| 23 | **`stabilise` goes recursive.** One `share()` pass instead of compare-then-copy, and sharing at every depth rather than only at the projection's top-level keys — which is what lets a per-group `memo` bail when a sibling moved | ☐ |
+| 24 | **One subscription per slice.** `useSlice` over `useSyncExternalStore`; store and dispatch from context; `panels-are-memoised` **deleted** and replaced by `selectors-return-fields` | ☐ |
+| 25 | **The publish path has one owner.** Published at the end of every frame rather than from a system inside `if (this.walker)`; the hand-publishes in `setLoading`/`fail` and `panelSystem` go with it | ☐ |
+| 26 | **React owns every pixel inside `#viewport`.** The hud layer and the crosshair rendered by React and handed across through `UiHost`; `hud/` and `render/` write geometry onto nodes they were given. New **error** rule: no DOM insertion outside `ui/` | ☐ |
+| 27 | **The write seam.** `PlayerCommands`, so the half of the seam that mutates is as declared as `PlayerView` made the half that reads | ☐ |
+| 28 | **The small ones.** `app/dom.ts` deleted; one owner each for `SHUTTER_LABEL` and `SubtitleLine`; `FeedRow.seq` and the feed keyed on it | ☐ |
+
+### The second UI review, and the eight steps it produced
+
+Steps 13 to 20 were driven by one review; steps 21 to 28 are driven by a
+second, taken once the whole layer was in place and could be read as a layer
+rather than as a migration. It found one live bug, four places where the
+design is weaker than this document claimed, and three pieces of residue.
+
+**The live bug: seven orphaned rules.** Step 16 moved every element of the
+chrome out of `index.html` and into React, and seven `#id` selectors in
+`style.css` were left styling ids that nothing renders any more — the branch
+routes' buttons and subtitle, the skip button and its subtitle, the volume
+slider, the camera-frame label, and `#bgm-label.blocked`, which is the *only*
+indication that the browser is holding audio until the page is clicked. Every
+check in the repo was green over it. That is the same failure the whole
+project keeps meeting from a new direction: **an id is a fact with two
+owners**, the stylesheet and the markup, and step 16 deleted one of them
+without telling the other.
+
+`verify_player_dom.py` could not have caught it. Its question — "is every id
+the player looks up present in `index.html`?" — went vacuous the moment
+`index.html` shrank to a mount point; it reports **one id**. Step 21 re-aims
+it at the two questions that are still load-bearing, in both directions.
+
+**Where the document over-claimed.** Rule 4 says slices are referentially
+stable so that `memo` is the diff. That is true, but only at *slice*
+granularity: `stabilise` shares at the projection's top-level keys and nowhere
+deeper, so one actor moving out of forty makes the whole `actorPanel` new and
+every group re-renders. And the root subscribes to the whole projection, so
+any change re-renders `App`, `Sidebar` and seven `Panel`s before the leaf
+`memo`s can bail. Two components — `StagePicker` and `ViewSettings` — take the
+entire projection as a prop, so their `memo` can never bail at all, while
+`verify_ui.mjs` reports `panels-are-memoised: 0 ok`. That is precisely the
+outcome that file's own header warns about: a rule satisfied in the checker
+rather than in the code.
+
+Steps 23 and 24 fix the cause rather than the symptom, and step 24 **deletes**
+`panels-are-memoised` rather than making it cleverer. Per-slice subscription
+makes the memo unnecessary, which is the best end a lint rule can have.
+
+**On cadence, and why nothing is throttled.** The obvious reading of the above
+is that the UI should be published less often than 60 Hz. It should not, and
+the measurement says why. `publish` already bails on identity, so on a frame
+where nothing changed React does *nothing* — no render, no reconciliation, not
+even a listener call. What is paid every frame is ours: building the slices
+and diffing them, on the order of six hundred leaf comparisons and a hundred
+and fifty string allocations for an open-everything frame, against a 16.6 ms
+budget. Capping the rate would trade a real property — the panels are live
+while the clock is stopped, which is when they are most useful — for a saving
+of under one percent. After steps 23 and 24 the property that matters is
+structural: **the number of React renders per frame is proportional to the
+number of slices that actually changed, not to the size of the page.**
+
+**The residue.** `app/dom.ts` has fifty-five lines and zero importers, and is
+still listed in the tree above. `SHUTTER_LABEL` is duplicated verbatim in
+`script/ops/hud.ts` and `hud/hud.ts` — a nine-row table with two owners, in
+the two files step 19 wrote to give the shutter one. `SubtitleLine` is
+declared in `ui/projection.ts`, whose stated contract is "what the UI is
+allowed to know", and is not a field of `UiProjection`: only `hud/` uses it.
+And the event feed keys on the array index over a `slice(-400)` window, so
+past the cap every push shifts every index and React rewrites four hundred
+rows to add one. Step 28.
+
+**What was deferred, and why it is worth naming.** A screenshot harness —
+headless Chromium against `?freeze=1`, driving the page through a declared
+`?harness=1` seam that can only do what a `UiCommand` can do — would have
+shown the seven orphaned rules instantly, and is the only kind of check that
+sees them. It is deferred rather than rejected. Two things decided its shape
+before its schedule: `tests/README.md`'s policy that no game asset is ever
+committed, together with the ruling in `.gitignore` that **a screenshot of a
+stage is derived game art**, rules out golden images and pixel regression
+outright and leaves screenshots as local, uncommitted evidence; and the
+harness needs a bundle, so it needs the install, so it is a developer tool and
+not a CI gate. `.gitignore` has reserved `web/playwright-report/`,
+`web/test-results/` and `web/test/visual/screenshots/` since long before this
+review, which is a fair measure of how long the idea has been waiting.
 
 ### What the snapshot oracle found on its first run
 

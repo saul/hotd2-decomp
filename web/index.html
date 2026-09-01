@@ -123,30 +123,52 @@
 
         <aside id="right">
           <div id="hud" class="panel"></div>
-          <div class="panel">
-            <div class="panel-head"><strong>Route graph</strong></div>
+          <details class="panel fold" id="panel-wait" open>
+            <summary class="panel-head">
+              <strong>Wait</strong>
+              <span class="dim" id="wait-sub"></span>
+              <label class="hl" title="Box every actor keeping this wait blocked."><input type="checkbox" id="hl-wait" /> box</label>
+            </summary>
+            <div id="wait-body" class="scroll dbg"></div>
+          </details>
+          <details class="panel fold" id="panel-enemy">
+            <summary class="panel-head">
+              <strong>Enemies</strong>
+              <span class="dim" id="enemy-sub"></span>
+              <label class="hl" title="Box every live enemy."><input type="checkbox" id="hl-enemy" /> box</label>
+            </summary>
+            <div id="enemy-body" class="scroll dbg"></div>
+          </details>
+          <details class="panel fold" id="panel-civ">
+            <summary class="panel-head">
+              <strong>Civilians</strong>
+              <span class="dim" id="civ-sub"></span>
+              <label class="hl" title="Box every class-0x10 civilian."><input type="checkbox" id="hl-civ" /> box</label>
+            </summary>
+            <div id="civ-body" class="scroll dbg"></div>
+          </details>
+          <details class="panel fold" id="panel-route">
+            <summary class="panel-head"><strong>Route graph</strong></summary>
             <canvas id="minimap" height="150"></canvas>
-          </div>
-          <div class="panel grow-panel">
-            <div class="panel-head">
+          </details>
+          <details class="panel fold grow-panel" id="panel-feed" open>
+            <summary class="panel-head">
               <strong>Event feed</strong>
               <button id="feed-clear" class="mini">clear</button>
-            </div>
+            </summary>
             <div id="feed" class="scroll"></div>
-          </div>
-          <div class="panel" id="inspector-panel">
-            <div class="panel-head"><strong>Inspector</strong></div>
+          </details>
+          <details class="panel fold" id="inspector-panel">
+            <summary class="panel-head"><strong>Inspector</strong></summary>
             <div id="inspector" class="scroll"></div>
-          </div>
-          <div class="panel" id="globals-panel">
-            <details id="globals-details">
-              <summary class="panel-head">
-                <strong>Globals</strong>
-                <span class="dim" title="The port's data segment — every g_* it touches, and the object pool. Read-only: a writable panel would be a fourth way for state to enter the game, and nothing done here would survive a save. Addresses are the ones cited in web/src/game/globals.ts, checked against ghidra/annotations/globals.tsv.">read-only · g_*</span>
-              </summary>
-              <div id="globals" class="scroll"></div>
-            </details>
-          </div>
+          </details>
+          <details class="panel fold" id="globals-panel">
+            <summary class="panel-head">
+              <strong>Globals</strong>
+              <span class="dim" title="The port's data segment — every g_* it touches, and the object pool. Read-only: a writable panel would be a fourth way for state to enter the game, and nothing done here would survive a save. Addresses are the ones cited in web/src/game/globals.ts, checked against ghidra/annotations/globals.tsv.">read-only · g_*</span>
+            </summary>
+            <div id="globals" class="scroll"></div>
+          </details>
         </aside>
       </main>
 

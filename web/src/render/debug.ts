@@ -50,6 +50,8 @@ const UNPORTED = 0xff3df0;
 const PERMIT = 0xffb02e;
 /** Green: alive, and the script is blocked until it is not. */
 const AWAITED = 0x4dff8c;
+/** Cyan: picked out by a sidebar panel, whatever it is doing. */
+const SELECTED = 0x26d9ff;
 /** The three rings: inner is strike range, then mid, then outer. */
 const RING_COLOURS = [0xff6b6b, 0xffd166, 0x6bcBff];
 
@@ -98,6 +100,13 @@ export class DebugBoxLayer {
   showUnported = false;
   /** The permit holder, and whoever the script is waiting on. */
   showBoxes = false;
+  /**
+   * Actors the sidebar's debug panels have asked for by `at`.
+   *
+   * Independent of `showBoxes`: the panels box exactly what they list, so
+   * ticking "box" next to a row is the same question as reading the row.
+   */
+  highlight: ReadonlySet<number> = new Set();
   source: BoundsSource | null = null;
 
   private readonly pool: Boxed[] = [];
@@ -240,7 +249,8 @@ export class DebugBoxLayer {
          eye?: Vector3): void {
     if (eye) this._eye.copy(eye);
     this.used = 0;
-    this.group.visible = this.showUnported || this.showBoxes;
+    this.group.visible = this.showUnported || this.showBoxes
+                      || this.highlight.size > 0;
     if (!this.group.visible) {
       for (const b of this.pool) b.node.visible = false;
       for (const r of this.rings) r.visible = false;
@@ -281,6 +291,25 @@ export class DebugBoxLayer {
                    this._mid, this._size,
                    holder ? `${who} · permit · ${stateOf(a)}`
                           : `${who} · ${stateOf(a)}`);
+      }
+    }
+
+    // The panels' own selection, drawn whether or not `Boxes` is on and
+    // whether or not anything is waiting -- it is the panel's list, made
+    // visible.
+    if (this.highlight.size) {
+      const permits = new Set(G.g_attack_permits.filter((p) => p !== -1));
+      for (const a of G.g_object_list) {
+        if (!this.highlight.has(a.at) || a.despawned) continue;
+        // Already drawn by the block above; a second box would z-fight it.
+        if (this.showBoxes && (waiting || permits.has(a.at))) continue;
+        this.fit(a.at, new Vector3(a.pos.x, a.pos.y, a.pos.z));
+        const d = dist2d(a.pos, { x: this._eye.x, y: this._eye.y,
+                                  z: this._eye.z });
+        this.place(this.acquire(permits.has(a.at) ? PERMIT : SELECTED),
+                   this._mid, this._size,
+                   `${id.get(a.at) ?? "?"} ${hex(a.at)} ${a.name}`
+                   + ` d=${d.toFixed(0)} · ${stateOf(a)}`);
       }
     }
 

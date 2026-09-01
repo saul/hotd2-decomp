@@ -77,7 +77,9 @@ function actorRow(a: Actor): string {
 }
 
 export class GlobalsView {
-  private readonly panel = $<HTMLDetailsElement>("#globals-details");
+  // The panel *is* the `<details>` now that every right-hand panel folds,
+  // so there is no inner one to look up.
+  private readonly panel = $<HTMLDetailsElement>("#globals-panel");
   private readonly el = $("#globals");
   private last = "";
 

@@ -36,7 +36,7 @@ import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { restoreViewPrefs } from "./viewprefs";
-import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary } from "../hud/ui";
+import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary, rememberFolds } from "../hud/ui";
 import { Bgm } from "../hud/bgm";
 import { SceneFog, type FogMode } from "../render/fog";
 import { SceneLighting, type LightingMode } from "../render/lighting";
@@ -58,6 +58,7 @@ import { GameSystem, ScriptSystem } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
 import { GlobalsView } from "../hud/globals_view";
+import { DebugPanels } from "../hud/debug_panels";
 import { GameMode } from "../game/game_mode";
 import { G } from "../game/globals";
 import { SetGameTables } from "../game/tables";
@@ -132,6 +133,7 @@ class Player {
   private readonly debug = new DebugBoxLayer();
   /** The port's data segment, on screen. */
   private readonly globalsView = new GlobalsView();
+  private readonly debugPanels = new DebugPanels();
   /** UI toggle — off restores the exact authored camera. */
   private trackEnabled = true;
   private readonly rain = new Rain();
@@ -584,6 +586,7 @@ class Player {
     $<HTMLInputElement>("#show-coli").addEventListener("change", (e) => {
       this.coliDebug.setEnabled((e.target as HTMLInputElement).checked);
     });
+    rememberFolds();
     $<HTMLInputElement>("#show-boxes").addEventListener("change", (e) => {
       this.debug.showBoxes = (e.target as HTMLInputElement).checked;
     });
@@ -1328,6 +1331,10 @@ class Player {
                      t.frozen ? 0 : t.wall * 60);
     // Debug overlays read the same live spawn list the markers do, so the two
     // can never disagree about who is present.
+    // The sidebar decides what it wants boxed, then the layer draws it: one
+    // list, read once, so a row and its box cannot disagree.
+    this.debugPanels.update(w, this.camera.position);
+    this.debug.highlight = this.debugPanels.highlight;
     this.debug.update(w.spawns, w.wait?.policy.kind === "enemies",
                       this.camera.position);
     // Driven from here rather than from `refreshUi`, which only runs during

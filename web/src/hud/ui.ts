@@ -401,3 +401,41 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
+
+// -- panel folds ------------------------------------------------------------
+
+/**
+ * Remember which sidebar panels are open.
+ *
+ * There is more worth showing than fits, so the panels fold — and a layout you
+ * have to rebuild after every reload is one you stop using. Per-viewer and
+ * disposable by nature, so `localStorage`, wrapped: a browser set to block
+ * site data throws on the accessor rather than returning null.
+ */
+export function rememberFolds(root = "#right"): void {
+  const KEY = "hod2.folds";
+  let open: Record<string, boolean> = {};
+  try {
+    open = JSON.parse(localStorage.getItem(KEY) ?? "{}") as typeof open;
+  } catch { /* first run, private window, or site data blocked */ }
+
+  const panels = [...document.querySelectorAll<HTMLDetailsElement>(
+    `${root} details.fold[id]`)];
+
+  // A control in the header is a control, not a fold handle. `summary`
+  // toggles its `details` on any click inside it, so the `box` checkboxes and
+  // the feed's `clear` button would collapse the panel they belong to.
+  for (const c of document.querySelectorAll<HTMLElement>(
+      `${root} summary input, ${root} summary button, ${root} summary label`)) {
+    c.addEventListener("click", (e) => e.stopPropagation());
+  }
+
+  for (const d of panels) {
+    if (d.id in open) d.open = open[d.id];
+    d.addEventListener("toggle", () => {
+      const state: Record<string, boolean> = {};
+      for (const q of panels) state[q.id] = q.open;
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* ignore */ }
+    });
+  }
+}

@@ -441,12 +441,24 @@ button.kill:hover { background: #8c2626; }
 
 /* -- globals panel ------------------------------------------------------- */
 
-#globals-panel { max-height: 40%; display: flex; flex-direction: column; }
-#globals-panel details { display: flex; flex-direction: column; min-height: 0; }
-#globals-panel summary { cursor: pointer; list-style: none; }
-#globals-panel summary::-webkit-details-marker { display: none; }
-#globals-panel summary::before { content: "\25B8 "; color: var(--dim); }
-#globals-panel details[open] summary::before { content: "\25BE "; }
+/* Every right-hand panel folds. There is far more worth showing than fits
+   vertically, so the sidebar scrolls and each group is closed until wanted;
+   a closed panel also costs nothing to render -- `GlobalsView` and the debug
+   panels both skip the work when `open` is false. */
+.fold > summary { cursor: pointer; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "\25B8 "; color: var(--dim); }
+.fold[open] > summary::before { content: "\25BE "; }
+.fold[open] { display: flex; flex-direction: column; min-height: 0; }
+/* Open panels share the sidebar rather than one of them taking it all. */
+.fold[open] > .scroll { max-height: 32vh; }
+#panel-feed[open] > .scroll { max-height: none; }
+.panel-head .hl {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 3px;
+  font-weight: normal; color: var(--dim);
+}
+.panel-head .hl input { margin: 0; }
+#globals-panel { max-height: 40%; }
 #globals {
   padding: 4px 8px 8px;
   font-family: var(--mono);
@@ -466,3 +478,11 @@ tr.gdead td { opacity: 0.45; }
   border-top: 1px solid var(--line);
   padding-top: 4px;
 }
+
+/* -- the debug panels ---------------------------------------------------- */
+.dbg { font: 11px/1.45 var(--mono); padding: 4px 6px; }
+.dbg-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dbg-row.hot { color: var(--accent-2); }
+.dbg-row.dead { color: var(--dim); text-decoration: line-through; }
+.dbg-note { color: var(--dim); white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; }

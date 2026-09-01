@@ -63,7 +63,7 @@ export function runCommand(p: Player, c: UiCommand): void {
       p.walker?.takeBranch(c.target);
       p.clearFeed();
       p.syncCameraToWalker();
-      p.refreshUi();
+      p.markAddress();
       return;
     case "previewBranch":
       p.poseFromSlot(c.slot, c.frame);
@@ -82,7 +82,7 @@ export function runCommand(p: Player, c: UiCommand): void {
       p.walker?.reset();
       p.walker?.primeToFirstWait();
       p.syncCameraToWalker();
-      p.refreshUi();
+      p.markAddress();
       p.pushUrl();
       return;
     case "scrubFrame": {
@@ -102,13 +102,15 @@ export function runCommand(p: Player, c: UiCommand): void {
       p.pillarbox = c.on;
       p.resize();
       return;
+    // No redraw here, and none needed: the projection is rebuilt every frame
+    // from the one tick, so a setting that changes what a layer reports shows
+    // up on the next one. Twenty controls each poking the UI was the second
+    // update path, and it is gone.
     case "setLightMode":
       p.lighting.setMode(c.mode as LightingMode);
-      p.refreshUi();
       return;
     case "setFogMode":
       p.sceneFog.setMode(c.mode as FogMode);
-      p.refreshUi();
       return;
     case "setVolume":  p.bgm.setVolume(c.volume / 100); return;
     case "toggleMute": p.bgm.setMuted(!p.bgm.muted); return;
@@ -145,7 +147,6 @@ export function runCommand(p: Player, c: UiCommand): void {
         op: { i: -1, at: 0, op: -1, name: "kill all", cat: "combat" },
         note: `${n} enem${n === 1 ? "y" : "ies"} killed`,
       });
-      p.refreshUi();
       return;
     }
   }

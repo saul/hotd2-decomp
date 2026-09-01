@@ -243,5 +243,5 @@ function applyIncomingState(p: Player): void {
     p.toggles = { ...p.toggles, allRegions: true };
     p.scene3d?.setVisibility("all");
   }
-  p.refreshUi();
+  p.markAddress();
 }

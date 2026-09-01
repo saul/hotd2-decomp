@@ -259,11 +259,10 @@ export class PropLayer implements System {
   /**
    * Which of the four states a prop is in, measured now.
    *
-   * Computed rather than cached: the status line is read by `refreshUi`, which
-   * only runs during playback, so a stored answer is whatever was true when
-   * the stage loaded — which is *before* the first frame, when nothing has
-   * been measured and every prop still looks missing. That read exactly once
-   * as "44 no node" for a set of props that were all bound and fine.
+   * Computed rather than cached: a stored answer is whatever was true when the
+   * stage loaded — which is *before* the first frame, when nothing has been
+   * measured and every prop still looks missing. That read exactly once as
+   * "44 no node" for a set of props that were all bound and fine.
    */
   private stateOf(l: Live): PropDebugState {
     if (!l.bound) return PropDebugState.Missing;

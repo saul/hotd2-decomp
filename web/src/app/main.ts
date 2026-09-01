@@ -138,8 +138,6 @@ export class Player implements PlayerView {
   /** The event feed, capped. Append-only, so a version beats a compare. */
   private feedRows: FeedRow[] = [];
   feedVersion = 0;
-  /** The HUD strip, rebuilt by `refreshUi` and read by the projection. */
-  hud: [string, string, boolean?][] = [];
   private readonly freeRoam: FreeRoam;
   readonly bgm = new Bgm();
   readonly sceneFog: SceneFog;
@@ -296,10 +294,10 @@ export class Player implements PlayerView {
     this.world.add("render", this.stuckDebug);
     this.world.add("render", this.rain);
     this.world.add("render", this.debug);
-    // The port's data segment on screen, and the sidebar. Driven from the
-    // tick rather than from `refreshUi`, which only runs during playback:
-    // both are at their most useful when the clock is stopped.
-    // The React half. One projection a frame, published only when it differs.
+    // The one update path. A projection a frame, built from the tick and
+    // published only when it differs -- so the sidebar and the globals panel
+    // are live while the clock is stopped, which is when they are at their
+    // most useful and is exactly when the old second path did not run.
     this.world.add("hud", panelSystem("ui", () => this.publishUi()));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
@@ -319,7 +317,6 @@ export class Player implements PlayerView {
         note: `${d.who}${d.attack >= 0 ? ` attack ${d.attack}` : ""}`
             + ` · −1 life → ${d.lives} · ${d.score} pts`,
       });
-      this.refreshUi();
     });
 
     // Class 0x41 raises these where the engine calls `PlaySoundId`, so the
@@ -346,7 +343,6 @@ export class Player implements PlayerView {
         note: `set ${d.set} from prop ${d.from}`
             + ` at ${d.x.toFixed(1)}, ${d.y.toFixed(1)}, ${d.z.toFixed(1)}`,
       });
-      this.refreshUi();
     });
 
     // Nothing was listening to this. The port raises `sound.play` wherever the
@@ -371,7 +367,6 @@ export class Player implements PlayerView {
         note: `+400 to ${d.player < 0 ? "both players" : `player ${d.player}`}`
             + ` → ${d.score}`,
       });
-      this.refreshUi();
     });
     this.events.on("civilian.shot", (d) => {
       this.onFeed({
@@ -379,7 +374,6 @@ export class Player implements PlayerView {
         op: { i: -1, at: 0, op: -1, cat: "combat", name: "civilian shot" },
         note: `player ${d.player < 0 ? "?" : d.player} · −1 life · −100 twice`,
       });
-      this.refreshUi();
     });
 
     this.wireUi();
@@ -415,7 +409,41 @@ export class Player implements PlayerView {
   get tree(): TreeProjection | null { return this.treeProj; }
   get minimap(): MinimapGraph | null { return this.minimapGraphData; }
   get feed(): readonly FeedRow[] { return this.feedRows; }
-  get hudRows(): readonly [string, string, boolean?][] { return this.hud; }
+  /**
+   * The HUD strip, built where it is read.
+   *
+   * It was a field rebuilt by `refreshUi` from nineteen call sites, which is
+   * how a panel came to show the state from *before* the first frame. Every
+   * row is a layer's own one-line `describe`, so building it costs a string
+   * concatenation per layer and the projection's change key decides whether
+   * anyone sees it.
+   */
+  get hudRows(): readonly [string, string, boolean?][] {
+    const w = this.walker;
+    if (!w || !this.scene3d) return [];
+    return hudRows(w, {
+      mode: this.state.mode,
+      region: this.scene3d.visibility === "all",
+      drawn: `${this.scene3d.visibleCount} models, `
+           + `${this.scene3d.visibleTriangles.toLocaleString()} tris`,
+      eye: this.camera.position,
+      describe: {
+        fog: this.sceneFog.describe,
+        light: this.lighting.describe,
+        sky: this.backdrop.describe,
+        rigs: this.rigs.describe,
+        characters: this.chars.describe,
+        props: this.props.describe,
+        breakables: this.breakables.describe,
+        shooting: this.shooting.describe,
+        coli: this.coliDebug.describe,
+        wedged: this.stuckDebug.describe,
+        enemies: this.game.describe,
+        shutter: this.hudLayer.describe,
+        rain: this.rain.describe,
+      },
+    });
+  }
   get hasSaved(): boolean { return !!this.saved; }
   get sound(): SoundProjection { return soundProjection(this); }
   get skip(): SkipProjection | null { return skipProjection(this); }
@@ -472,7 +500,6 @@ export class Player implements PlayerView {
               name: r.hit ? "shot · hit" : "shot · miss", cat: "combat" },
         note,
       });
-      this.refreshUi();
     };
 
     window.addEventListener("keydown", (e) => {
@@ -546,7 +573,6 @@ export class Player implements PlayerView {
     }
     this.playing = mode === "play" ? this.playing : false;
     this.pushUrl();
-    this.refreshUi();
   }
 
   togglePlay(): void {
@@ -565,7 +591,7 @@ export class Player implements PlayerView {
     const w = this.walker;
     if (!w || !w.requestSkip()) return;
     this.syncCameraToWalker();
-    this.refreshUi();
+    this.markAddress();
     this.pushUrl();
   }
 
@@ -576,7 +602,7 @@ export class Player implements PlayerView {
     this.playing = false;
     w.stepOnce();
     this.syncCameraToWalker();
-    this.refreshUi();
+    this.markAddress();
     this.pushUrl();
   }
 
@@ -638,7 +664,6 @@ export class Player implements PlayerView {
     this.state.op = op;
     this.state.slot = this.state.frame = undefined;
     this.pushUrl();
-    this.refreshUi();
   }
 
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
@@ -754,7 +779,6 @@ export class Player implements PlayerView {
         this.hudLayer.tick(script.frames);
         this.syncUrlToWalker(now);
       }
-      this.refreshUi();
     }
 
     if (this.walker) {
@@ -774,13 +798,6 @@ export class Player implements PlayerView {
       this.cam.driving = !this.scrubbing;
       this.cam.scripted = this.state.mode !== "free";
       this.world.update(this.ctx, game);
-      // The stats panel is driven from here, not from the playback branch.
-      // Read from there it only ever showed the state from *before* the first
-      // frame -- which read `0/44 no node` for props that were all fine and
-      // `none placed` for a pool with 39 things in it. A panel that lies when
-      // the clock is stopped is worse than no panel, and the clock is stopped
-      // for most of the time anyone spends looking at it.
-      this.refreshUi();
     }
     this.renderer.render(this.scene, this.camera);
   };
@@ -928,36 +945,21 @@ export class Player implements PlayerView {
     if (err) return err;
     // Every layer has resynced, the camera included -- it is the first system
     // in the render phase, so the rest posed against the shot it restored.
-    this.refreshUi();
+    this.markAddress();
     return null;
   }
 
-  refreshUi(): void {
+  /**
+   * Remember where the script is, for the next `pushUrl`.
+   *
+   * The other half of what `refreshUi` did, and the only half that was ever
+   * about state rather than about drawing. It is called from the paths that
+   * *move* the script and nowhere else -- `setStage` and `reset` deliberately
+   * clear the address, and a sync folded into `pushUrl` would put it back.
+   */
+  markAddress(): void {
     const w = this.walker;
-    if (!w || !this.scene3d) return;
-    this.hud = hudRows(w, {
-      mode: this.state.mode,
-      region: this.scene3d.visibility === "all",
-      drawn: `${this.scene3d.visibleCount} models, `
-           + `${this.scene3d.visibleTriangles.toLocaleString()} tris`,
-      eye: this.camera.position,
-      describe: {
-        fog: this.sceneFog.describe,
-        light: this.lighting.describe,
-        sky: this.backdrop.describe,
-        rigs: this.rigs.describe,
-        characters: this.chars.describe,
-        props: this.props.describe,
-        breakables: this.breakables.describe,
-        shooting: this.shooting.describe,
-        coli: this.coliDebug.describe,
-        wedged: this.stuckDebug.describe,
-        enemies: this.game.describe,
-        shutter: this.hudLayer.describe,
-        rain: this.rain.describe,
-      },
-    });
-
+    if (!w) return;
     this.state.block = w.block;
     this.state.step = w.step;
     this.state.op = w.opIndex;

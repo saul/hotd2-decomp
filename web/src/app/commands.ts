@@ -307,6 +307,7 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     case "chars":        p.chars.setEnabled(on); return;
     case "props":        p.props.setEnabled(on); return;
     case "breakables":   p.breakables.setEnabled(on); return;
+    case "propBoxes":    p.props.setDebugVisible(on); return;
     case "trackEnemies":
       p.cam.trackEnabled = on;
       p.syncCameraToWalker();

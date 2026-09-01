@@ -138,6 +138,8 @@ export class PropLayer implements System {
   readonly id = "render.props";
   /** Bounding boxes and origin crosses, one per prop the bundle names. */
   readonly debug = new Group();
+  /** The `Prop boxes` switch. Off by default — see `setDebugVisible`. */
+  private debugEnabled = false;
   private live: Live[] = [];
   private json: PropsJson | null = null;
   private enabled = true;
@@ -208,8 +210,21 @@ export class PropLayer implements System {
    */
   setEnabled(v: boolean): void {
     this.enabled = v;
-    this.debug.visible = v;
+    this.debug.visible = v && this.debugEnabled;
     for (const l of this.live) if (l.bound) l.node.visible = v;
+  }
+
+  /**
+   * The overlay, on its own switch.
+   *
+   * It used to ride on `Props`, which meant the only way to see the props
+   * without a box, a cross and a label on each of them was to stop drawing
+   * them. A debug overlay is never what somebody wants to look at the scene
+   * through, so it defaults off and `Props` keeps only the props.
+   */
+  setDebugVisible(v: boolean): void {
+    this.debugEnabled = v;
+    this.debug.visible = v && this.enabled;
   }
 
   /**
@@ -276,8 +291,8 @@ export class PropLayer implements System {
    * and a label saying which of the four states it is in.
    */
   private updateDebug(): void {
-    this.debug.visible = this.enabled;
-    if (!this.enabled) {
+    this.debug.visible = this.enabled && this.debugEnabled;
+    if (!this.enabled || !this.debugEnabled) {
       for (const m of this.markers) m.node.visible = false;
       return;
     }

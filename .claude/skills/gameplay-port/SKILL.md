@@ -32,7 +32,11 @@ globals match.
    and the snapshot is what proves nothing is hiding in a closure.
 4. **Enums for the sets the exe enumerates, constants for scalars.** Idiomatic
    TypeScript is not in tension with a faithful port — see below.
-5. **Divergence is declared** with a greppable `[diverges]` and a reason.
+5. **Divergence is declared** with a greppable `[diverges]` and a reason —
+   and **it is the user's decision, not yours.** Correctness comes before a
+   working commit, every time. If the faithful thing is a refactor and the
+   quick thing is a `[diverges]`, you MUST NOT pick the quick thing.
+   Say what the engine does, say what the faithful fix would cost, and **ask**.
 6. **Stay inside your layer.** `game/` is the engine: no `three`, no DOM, no
    `Math.random`, and no import from `render/`, `hud/` or `app/`.
    `tools/verify_layers.py` enforces it, and the rule is *never* satisfied by

@@ -7667,3 +7667,55 @@ it steps by exactly one per frame, and this port's cursor comes off a clock the
 player may advance by several frames at once. A missed equality there would
 leave the actor shot-immune for life, so the port takes `>=`. At the engine's
 own rate they are the same frame.
+
+## Every civilian in the level was alive before its scene, and `Init` ran twice
+
+`wait_scripted_actors` (0x46) never passed in stage 1 block 1: the sidebar said
+`g_civilians_alive 13` against seven class-0x10 actors in the pool.
+
+Two faults, one of them mine to own.
+
+**The count was double.** `CharacterLayer.revive` — reached from
+`Shooting.reset`, which `loadStageInto` calls two lines after `chars.build` —
+walked every instance and called `g_class_handlers[cls].init(a, rng)` again.
+`CivilianInit` (`FUN_0048A3E0`) raises `g_civilians_alive` unconditionally at
+`0x0048A6FE`, so every stage load counted all seven twice, and every seek added
+seven more. A stack trace on the increment is what found it; nothing about it
+was visible in the source. `[proved]`
+
+**And seven was already wrong.** The engine creates an object in
+`SpawnFromDescriptor` (`FUN_00408A20`) when the script's spawn opcode runs, and
+`CivilianInit` runs there. Stage 1 spawns its seven civilians from blocks 1, 4,
+6, 8, 9 and 13 — at block 1 exactly **one** exists. This port built an `Actor`
+for every placement in the stage's glTF at load time and gated it with
+`visible`, so all seven were counted from frame one and a gate whose 68 sites
+all want zero could never open. `[proved]`
+
+**The wrong fix, and being told so.** My first move was to derive
+`g_civilians_alive` from the pool each frame the way `g_enemies_alive` already
+is. It works, the numbers agree, and it is a divergence I chose on my own
+because the faithful fix looked like a refactor. The user's instruction was
+blunt and correct: only spawn when the game would, and consult before diverging
+at all. That rule is now non-negotiable 5 in the gameplay-port skill. The
+derivation is reverted; `g_civilians_alive` is stepped where the engine steps
+it.
+
+`CharacterLayer` now adopts the hierarchies at build and holds them in
+`pending`; `syncSpawns`, driven from the script phase beside
+`SpawnPropContainers`, makes the game object when the instruction that spawns
+it runs and unmakes it when it leaves. `revive` releases instead of re-initing,
+so `Init` runs once per object as it does in the exe. `render-drives-the-port`
+fell from 13 to 12.
+
+The pool at that address went from 73 actors to 14.
+
+**A third thing the same investigation turned up.** `CharacterLayer.update`
+folded the `Characters` debug checkbox into `a.visible` — the port's stand-in
+for object lifetime — so turning a *view* switch off emptied `g_enemies_alive`
+and `g_civilians_alive` and unblocked every gate that reads them. And the
+sidebar's list of actors holding a count gate open did not test `sub+0x04`
+bit 0, so it named civilians that op 0x2C had already released: a gate held by
+the **camera** (`g_camera_free`, and `EvtOpWaitScriptedActors46` at
+`FUN_0045FCD0` does test it, along with `g_evt_gameplay_live`) read as one held
+by an actor. Both fixed; the second is why the panel now says which half is
+blocking.

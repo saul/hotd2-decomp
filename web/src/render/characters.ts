@@ -51,7 +51,7 @@
 
 import { Box3, Group, Mesh, Object3D, Ray, Vector3 } from "three";
 import type {
-  CharacterPlacement, CharactersJson,
+  CharacterPlacement, CharacterType, CharactersJson,
 } from "../bundle";
 import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
 import type { Actor } from "../game/actor";
@@ -66,8 +66,6 @@ import type { Context, System } from "../core/system";
 import type { GameHost } from "../game/host";
 import { ActorKillAll, ResolveHit, type HitResult }
   from "../game/combat/resolve_hit";
-import { ReleaseAttackSlot } from "../game/combat/permits";
-import { g_class_handlers } from "../game/registry";
 import { BAMS_TO_RAD } from "../core/bams";
 
 /**
@@ -105,9 +103,34 @@ import { swapGore } from "./characters/gore";
 export type { Instance };
 
 
+/** An adopted hierarchy waiting for its spawn opcode. */
+interface Pending {
+  at: number;
+  type: CharacterType;
+  root: Object3D;
+  pivot: Group;
+  bones: Map<number, Object3D>;
+  /** The placement's own motion, which `ActorSpawn` does not set. */
+  motion: number;
+  place: CharacterPlacement | undefined;
+  parentAt?: number;
+  home: { x: number; y: number; z: number };
+}
+
 export class CharacterLayer implements System {
   readonly id = "render.characters";
+  /** Characters the script has spawned. Everything here has a game object. */
   private instances: Instance[] = [];
+  /**
+   * Adopted hierarchies with no game object yet — every spawn in the stage's
+   * glTF that the script has not run the opcode for. `syncSpawns` moves a
+   * record between here and `instances`; nothing else may.
+   */
+  private pending = new Map<number, Pending>();
+  private readonly live = new Set<number>();
+  /** Each spawn's authored position, so a second placement starts where the
+   * first did rather than where the last one walked to. */
+  private readonly home = new Map<number, { x: number; y: number; z: number }>();
   private json: CharactersJson | null = null;
   private enabled = true;
   /** Posing and blending. See `render/characters/pose.ts`. */
@@ -142,6 +165,9 @@ export class CharacterLayer implements System {
   build(root: Object3D, stage: Scope, json: CharactersJson | undefined): void {
     stage.child("characters").defer(() => {
       this.instances = [];
+      this.pending.clear();
+      this.live.clear();
+      this.home.clear();
       this.posed.clear();
       this.json = null;
     });
@@ -219,20 +245,104 @@ export class CharacterLayer implements System {
         continue;
       }
 
-      // The descriptor tail is read by the class's own Init -- the start state
-      // is one of its bytes -- so it is handed over at spawn time.
-      const a = ActorSpawn(at, p?.class ?? 0, type.type, type.name,
-                           DescriptorFromPlacement(p), this.rng);
-      a.motion = motion;
-      a.hp = this.startHp(p);
-      a.maxHp = a.hp;
-      a.yaw = p?.yaw ?? 0;
-      a.pos = { x: node.position.x, y: node.position.y, z: node.position.z };
-      this.instances.push({ at, a, type, root: node, pivot, bones,
-                            gore: new Map(), parentAt: p?.civilian_child });
+      // **No `ActorSpawn` here.** The hierarchy is adopted; the game object is
+      // not made until the script's spawn opcode asks for it, which is when
+      // `SpawnFromDescriptor` (`FUN_00408A20`) makes the engine's. See
+      // `syncSpawns`.
+      this.pending.set(at, {
+        at, type, root: node, pivot, bones, motion,
+        place: p, parentAt: p?.civilian_child,
+        home: { x: node.position.x, y: node.position.y, z: node.position.z },
+      });
+      this.home.set(at, { x: node.position.x, y: node.position.y,
+                          z: node.position.z });
       this.posed.add(at);
       node.visible = false;
     }
+  }
+
+  /**
+   * Make the game objects the script has spawned, and unmake the rest.
+   *
+   * **This is the engine's object lifetime, and the reason it is a seam at
+   * all.** In the exe an actor comes into existence in `SpawnFromDescriptor`
+   * (`FUN_00408A20`) when opcode 0x0B/0x0C/0x0D runs, and its class `Init`
+   * runs there and once. This layer used to build all of them at scene load
+   * and gate them with `visible` instead, which meant every `Init` in the
+   * stage had already run before the first frame: stage 1 counted all seven of
+   * its civilians in `g_civilians_alive` from the entry block, six of them
+   * belonging to blocks 4, 6, 8, 9 and 13, and `wait_scripted_actors` — whose
+   * 68 sites all want zero — could never pass.
+   *
+   * Driven from `syncPortGlobals`, beside `SpawnPropContainers`, so it runs in
+   * the script phase and a spawn ticks on the frame its opcode ran. Idempotent
+   * in both directions: an `at` already made is left alone.
+   */
+  syncSpawns(spawns: readonly { at: number }[]): void {
+    const want = new Set<number>();
+    for (const s of spawns) if (this.pending.has(s.at) || this.live.has(s.at)) {
+      want.add(s.at);
+    }
+    // **Class 0x10's children are not in the walker's list.** `CivilianInit`
+    // (`FUN_0048A3E0`) `SpawnFromDescriptor`s each of them itself, and nothing
+    // in the evt points at their descriptors — so they are present exactly
+    // when the civilian that holds them is.
+    for (const rec of [...this.pending.values()]) {
+      if (rec.parentAt !== undefined && want.has(rec.parentAt)) want.add(rec.at);
+    }
+    for (const inst of this.instances) {
+      if (inst.parentAt !== undefined && want.has(inst.parentAt)) {
+        want.add(inst.at);
+      }
+    }
+
+    for (const at of want) {
+      const rec = this.pending.get(at);
+      if (!rec) continue;
+      const p = rec.place;
+      // The descriptor tail is read by the class's own Init -- the start state
+      // is one of its bytes -- so it is handed over at spawn time.
+      const a = ActorSpawn(at, p?.class ?? 0, rec.type.type, rec.type.name,
+                           DescriptorFromPlacement(p), this.rng);
+      a.motion = rec.motion;
+      a.hp = this.startHp(p);
+      a.maxHp = a.hp;
+      a.yaw = p?.yaw ?? 0;
+      a.pos = { ...rec.home };
+      a.visible = true;
+      this.pending.delete(at);
+      this.live.add(at);
+      this.instances.push({ at, a, type: rec.type, root: rec.root,
+                            pivot: rec.pivot, bones: rec.bones,
+                            gore: new Map(), parentAt: rec.parentAt });
+    }
+
+    // ...and out again. `ActorDespawn` is the engine's own removal and the
+    // pool sweep in `GameUpdate` takes it off `g_object_list`; the hierarchy
+    // goes back to `pending` so the same spawn can be placed a second time,
+    // which a route that re-enters a region does.
+    for (let i = this.instances.length - 1; i >= 0; i--) {
+      const inst = this.instances[i];
+      if (want.has(inst.at) && !inst.a.despawned) continue;
+      this.release(inst);
+      this.instances.splice(i, 1);
+    }
+  }
+
+  /** Put one instance's nodes back and return its record to `pending`. */
+  private release(inst: Instance): void {
+    inst.root.visible = false;
+    inst.a.visible = false;
+    this.restoreNodes(inst);
+    this.live.delete(inst.at);
+    const p = this.json?.placements.find((x) => x.at === inst.at);
+    this.pending.set(inst.at, {
+      at: inst.at, type: inst.type, root: inst.root, pivot: inst.pivot,
+      bones: inst.bones, motion: p?.motion ?? inst.a.motion, place: p,
+      parentAt: inst.parentAt, home: this.home.get(inst.at)
+        ?? { x: inst.root.position.x, y: inst.root.position.y,
+             z: inst.root.position.z },
+    });
   }
 
 
@@ -249,30 +359,20 @@ export class CharacterLayer implements System {
    * the two can never disagree about who is present. The clocks are already
    * advanced: `ActorAdvanceMotion` did that in the game phase.
    */
-  update(ctx: Context): void {
-    const live = ctx.walker?.spawns ?? [];
-    if (!this.instances.length) return;
-    const present = new Set<number>();
-    for (const s of live) present.add(s.at);
-    // **Class 0x10's children are not in the walker's list.** `CivilianInit`
-    // builds them from descriptors nothing in the evt points at, so they have
-    // no spawn instruction to be placed by; they are present exactly when the
-    // civilian that holds them is. Without this the fifty captors were placed,
-    // posed and permanently invisible.
+  update(_ctx: Context): void {
     for (const inst of this.instances) {
-      const parent = inst.parentAt;
-      if (parent !== undefined && present.has(parent)) present.add(inst.at);
-    }
-
-    for (const inst of this.instances) {
-      // A corpse stays: `FUN_00454D20` plays the clip out before handing the
-      // body on, so removing it the instant HP hits zero would be wrong.
-      // `ActorDespawn` is the port's own removal — a class-0x10 civilian
-      // walks off when its removal cue fires — and it outranks the walker's
-      // list, which knows only that the spawn instruction has run.
-      const show = this.enabled && present.has(inst.at) && !inst.a.despawned;
+      // Everything here has a game object because the script spawned it, so
+      // presence is not this layer's question any more — `syncSpawns` owns it.
+      // What is left is the one frame between `ActorDespawn` and the pool
+      // sweep: a corpse stays, because `FUN_00454D20` plays the clip out
+      // before handing the body on, so removing it the instant HP hits zero
+      // would be wrong.
+      inst.a.visible = !inst.a.despawned;
+      // **`Characters` is a view switch and must not touch `a.visible`.**
+      // Folded into it, turning the checkbox off emptied `g_enemies_alive` and
+      // `g_civilians_alive` and unblocked every gate that reads them.
+      const show = this.enabled && inst.a.visible;
       inst.root.visible = show;
-      inst.a.visible = show;
       if (!show) continue;
       // The director owns position and facing; apply what it decided. The
       // exporter baked the spawn pose into the root, and this replaces it
@@ -485,47 +585,68 @@ export class CharacterLayer implements System {
 
   /** Revive everything — for a seek, which replays the script from the top. */
   revive(): void {
-    for (const i of this.instances) {
-      i.a.dead = false;
-      i.a.death = null;
-      i.a.react = null;
-      i.a.hits = {};
-      i.a.latched.length = 0;
-      for (const bone of i.a.removed) {
-        const node = i.bones.get(bone);
-        if (node) node.visible = true;
+    // **Everything goes back to `pending`, and nothing is re-inited here.**
+    // This used to walk the live instances and call each class's `Init` again
+    // — on a stage load that meant every `Init` in the stage ran twice, once
+    // from the build that had just run it, which is how stage 1 reported
+    // thirteen live civilians against seven actors. The engine has one `Init`
+    // per object because it has one `SpawnFromDescriptor` per object; the
+    // port gets the same by unmaking the objects and letting the replayed
+    // script make them again.
+    for (const inst of this.instances) this.release(inst);
+    this.instances = [];
+  }
+
+  /** Put one instance's nodes back to bind: bones, gore swaps, held items. */
+  private restoreNodes(inst: Instance): void {
+    for (const [bone, g] of inst.gore) {
+      const node = inst.bones.get(bone);
+      const self = node as Mesh | undefined;
+      if (self?.isMesh) {
+        // The saved original, put back.
+        self.geometry = (g as Mesh).geometry;
+        self.material = (g as Mesh).material;
+      } else {
+        g.removeFromParent();
       }
-      i.a.removed.length = 0;
-      i.a.zones = 0;
-      i.a.action = null;
-      for (const [bone, g] of i.gore) {
-        const node = i.bones.get(bone);
-        const self = node as Mesh | undefined;
-        if (self?.isMesh) {
-          // The saved original, put back.
-          self.geometry = (g as Mesh).geometry;
-          self.material = (g as Mesh).material;
-        } else {
-          g.removeFromParent();
-        }
-      }
-      i.gore.clear();
-      // Class 0x10's hands come back empty: `CivilianInit` runs again below
-      // and the script puts back whatever it puts back.
-      for (const g of i.held?.values() ?? []) g.removeFromParent();
-      i.held?.clear();
-      for (const node of i.bones.values()) {
-        for (const c of node.children) c.visible = true;
-      }
-      i.a.hp = this.startHp(this.json?.placements.find((x) => x.at === i.at));
-      i.a.maxHp = i.a.hp;
-      i.a.boneSlot = {};
-      // Back to whatever the class's `Init` leaves behind -- and through the
-      // permit release, so nothing is left holding one from before the seek.
-      ReleaseAttackSlot(i.a);
-      g_class_handlers[i.a.cls]?.init(i.a, this.rng);
+    }
+    inst.gore.clear();
+    for (const g of inst.held?.values() ?? []) g.removeFromParent();
+    inst.held?.clear();
+    for (const node of inst.bones.values()) {
+      node.visible = true;
+      for (const c of node.children) c.visible = true;
     }
   }
+
+  /**
+   * Make `instances` agree with the object pool.
+   *
+   * A snapshot load replaces every actor with a restored copy and a seek wipes
+   * the pool outright, so after either the live references here are stale.
+   * Binding rather than re-spawning is the whole point: a restored actor
+   * carries its hit points, its severed bones and its state, and calling
+   * `ActorSpawn` would throw all of it away.
+   */
+  private bindToPool(): void {
+    for (const [at, rec] of [...this.pending]) {
+      const a = ActorByAt(at);
+      if (!a || a.despawned) continue;
+      this.pending.delete(at);
+      this.live.add(at);
+      this.instances.push({ at, a, type: rec.type, root: rec.root,
+                            pivot: rec.pivot, bones: rec.bones,
+                            gore: new Map(), parentAt: rec.parentAt });
+    }
+    for (let i = this.instances.length - 1; i >= 0; i--) {
+      const inst = this.instances[i];
+      const a = ActorByAt(inst.at);
+      if (a && !a.despawned) { inst.a = a; continue; }
+      this.release(inst);
+      this.instances.splice(i, 1);
+    }
+  }
+
 
   /**
    * A clone of the model at *slot*, from the hidden per-type template the
@@ -591,26 +712,13 @@ export class CharacterLayer implements System {
    * between game state and render state is in the right place.
    */
   resync(_ctx: Context): void {
+    // Which spawns exist at all is the pool's answer, not this layer's: a load
+    // restores it and a seek replays the script into it.
+    this.bindToPool();
     for (const inst of this.instances) {
-      const a = ActorByAt(inst.at);
-      if (a) inst.a = a;
       // Put every bone and every swapped part back, then re-apply what the
       // restored actor says was destroyed.
-      for (const [bone, g] of inst.gore) {
-        const node = inst.bones.get(bone);
-        const self = node as Mesh | undefined;
-        if (self?.isMesh) {
-          self.geometry = (g as Mesh).geometry;
-          self.material = (g as Mesh).material;
-        } else {
-          g.removeFromParent();
-        }
-      }
-      inst.gore.clear();
-      for (const node of inst.bones.values()) {
-        node.visible = true;
-        for (const c of node.children) c.visible = true;
-      }
+      this.restoreNodes(inst);
       // `a.removed` already names every bone in each severed subtree, so
       // hiding exactly those is the whole of it.
       for (const bone of inst.a.removed) {

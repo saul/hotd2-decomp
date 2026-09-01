@@ -154,15 +154,15 @@ export interface FrameResult {
  * `eye` is the camera, which in this game *is* the player: every range test in
  * the enemy code measures to it.
  */
-export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
-                           events?: Events): FrameResult {
-  const frames = dt * GAME_HZ;
-  G.g_frame += frames;
-  TickPlayerInvulnerability(frames);
-
-  // Once a frame, for everyone: the rank the approach state tests against the
-  // ring table's allowance.
-  RankEnemiesByDistance(eye);
+/**
+ * The two enemy counts, derived from the pool rather than stepped.
+ *
+ * [diverges] The engine keeps both as counters that each class's `Init` raises
+ * and its teardown lowers. This predates the spawn-on-opcode work and is the
+ * last of the counters still derived; `g_civilians_alive` is stepped where the
+ * engine steps it.
+ */
+export function SyncDerivedActorCounts(): void {
   // Only the classes whose handler increments it — not every visible actor.
   // A set-piece or a civilian in this count is a `wait_enemies_alive` that
   // never unblocks.
@@ -175,6 +175,18 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // waits on frame one.
   G.g_enemies_present = G.g_object_list
     .filter((o) => o.visible && ActorIsEnemy(o.cls)).length;
+}
+
+export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
+                           events?: Events): FrameResult {
+  const frames = dt * GAME_HZ;
+  G.g_frame += frames;
+  TickPlayerInvulnerability(frames);
+
+  // Once a frame, for everyone: the rank the approach state tests against the
+  // ring table's allowance.
+  RankEnemiesByDistance(eye);
+  SyncDerivedActorCounts();
 
   // `ActorDespawn` unlinked these; the pool is a list, so they leave here.
   if (G.g_object_list.some((o) => o.despawned)) {

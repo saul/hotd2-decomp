@@ -180,6 +180,30 @@ from -25 to -34.5 in a few units, which is why the zombies there were in it.
 More than ten units of air, on an actor allowed to leave the floor, is
 `ZombieStateFallToGround` (state 11) instead — also ported.
 
+**Characters spawn when the script spawns them.** `CharacterLayer.build`
+adopted the stage glTF's hierarchies *and* made an `Actor` for every one of
+them, gating presence with `visible` afterwards. The engine makes an object in
+`SpawnFromDescriptor` (`FUN_00408A20`) when opcode 0x0B/0x0C/0x0D runs, and
+runs its class `Init` there — so every `Init` in the level had already run
+before the first frame, and `CharacterLayer.revive` ran all of them a second
+time on top. `CivilianInit` raises `g_civilians_alive` unconditionally, so
+stage 1 reported thirteen live civilians against seven actors and
+`wait_scripted_actors` — 68 sites, all wanting zero — could never pass at block
+1, where exactly one of the seven has been spawned.
+
+`syncSpawns` is that lifetime now, driven from the script phase beside
+`SpawnPropContainers` so an actor ticks on the frame its instruction ran. At
+stage 1 block 1 the pool holds 14 actors rather than 73.
+`render-drives-the-port` fell from 13 to 12.
+
+**A debug toggle no longer changes what the game does.** `Characters` was
+folded into `a.visible`, which is the port's stand-in for object lifetime — so
+unticking it emptied `g_enemies_alive` and `g_civilians_alive` and released
+every gate that reads them. The switch is the renderer's now and the lifetime
+is the port's. The prop overlay also has its own switch, `Prop boxes`, instead
+of riding on `Props`: a box, a cross and a label on every prop is not what
+anyone wants to look at the scene through.
+
 **A third entrance: the one that arrives on a clip.** `ZombieStateMotionCue21`
 (state 21, `FUN_004577F0`) is ported — the two zombies that come out through
 the van's windscreen in stage 2 and four more in stage 5. It plays the

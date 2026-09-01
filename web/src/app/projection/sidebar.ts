@@ -67,8 +67,13 @@ export function waitBlockers(w: Walker): Actor[] {
       (a) => ActorIsEnemy(a.cls) && a.visible && !a.dead && inPlay(a));
   }
   if (kind === "civilians") {
+    // `CivilianApplyWaitWord`'s `LeaveCountNow` takes a civilian out of
+    // `g_civilians_alive` while it is still standing there, so a list that did
+    // not test `sub+0x04` bit 0 named actors the count had already released —
+    // and a gate held open by the **camera** looked as though an actor held it.
     return G.g_object_list.filter(
-      (a) => a.cls === SpawnClass.Civilian && a.visible && inPlay(a));
+      (a) => a.cls === SpawnClass.Civilian && a.visible && inPlay(a)
+          && !((a.civ?.flags2 ?? 0) & 1));
   }
   return [];
 }

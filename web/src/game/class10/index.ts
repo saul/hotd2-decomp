@@ -355,9 +355,9 @@ export function CivilianInit(obj: Actor, rng?: Rng): void {
   sub.removeFrame = p.removeFrame;
   sub.childCount = p.children.length;
   sub.children = p.children.map((c) => c.at);
-  // `g_civilians_alive` counts everyone the wait word does not exempt, and the
-  // exemption is not known until op 0x2C runs — so the engine counts first and
-  // op 0x2C's `LeaveCountNow` takes it back.
+  // `CivilianInit` raises it **unconditionally** — the INC at `0x0048A6FE` is
+  // on the straight-line fall-through — and this runs exactly when the engine
+  // runs it, on the script's spawn opcode. Three paths take it back, one each.
   G.g_civilians_alive += 1;
 
   const entry = T.civilians?.entries?.[p.script];

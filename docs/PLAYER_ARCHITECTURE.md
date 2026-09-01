@@ -70,15 +70,27 @@ Every layer rule in `tools/verify_layers.py` is an **error** at zero except
 two, which are ratchets: a count that may fall and may never rise, tied to the
 step that clears it. Both are real rather than accounting.
 
-**`render-drives-the-port`, at 13.** The camera shot calls
+**`render-drives-the-port`, at 12.** The camera shot calls
 `CamAdvancePathFrame` and `CamSetPathTarget`; the character layer spawns
-actors and resolves hits; the shooting layer takes a shot at a breakable and
-scores it. Every one is the *renderer* deciding something the port should
-decide, because the input that triggers it — a pointer, a curve evaluation —
-lives on this side of the seam. Closing it means the port owning a shot queue
-rather than the layer that noticed the click: gameplay work, not a refactor.
-**It has no step.** Assigning one is a decision for this document, never a
-line edit in the checker.
+actors; the shooting layer takes a shot at a breakable and scores it. Every one
+is the *renderer* deciding something the port should decide, because the input
+that triggers it — a pointer, a curve evaluation — lives on this side of the
+seam. Closing it means the port owning a shot queue rather than the layer that
+noticed the click: gameplay work, not a refactor. **It has no step.** Assigning
+one is a decision for this document, never a line edit in the checker.
+
+It came down from 13 when the character layer stopped calling each class's
+`Init`. That call was the one that mattered most, because it was not only in
+the wrong layer — it ran at the **wrong time**. `CharacterLayer.build` made an
+actor for every placement in the stage's glTF the moment the stage loaded, so
+every `Init` in the level had run before the first frame, and
+`CharacterLayer.revive` then ran all of them a second time. The engine makes an
+object in `SpawnFromDescriptor` (`FUN_00408A20`) when opcode 0x0B/0x0C/0x0D
+runs, and once. `CharacterLayer.syncSpawns`, driven from the script phase
+beside `SpawnPropContainers`, is that lifetime: the hierarchies are still
+adopted at build, but nothing is a game object until the instruction that makes
+one has run. What is left of the rule here is `ActorSpawn` and `ActorDespawn`
+themselves — the layer still *performs* the spawn, it no longer *decides* it.
 
 **`layers-are-systems`, at 1.** `FreeRoam` is never `world.add`ed, and it is
 mode-gated: it only runs in free roam, where the script is not playing and

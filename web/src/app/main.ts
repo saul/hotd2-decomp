@@ -917,10 +917,14 @@ export class Player implements PlayerView, PlayerCommands {
 
   /** The script-owned globals the port reads. See `app/systems.ts`. */
   private pushPortGlobals(): void {
-    if (this.walker) {
-      syncPortGlobals(this.walker, this.state.mode === "free",
-                      this.camera.position);
-    }
+    if (!this.walker) return;
+    syncPortGlobals(this.walker, this.state.mode === "free",
+                    this.camera.position);
+    // The spawn opcodes, made real. `SpawnPropContainers` above does class
+    // 0x41's; this does the characters, and both sit here for the same reason
+    // — the script phase, so an actor spawned by an instruction ticks on the
+    // frame that instruction ran, exactly as `SpawnFromDescriptor`'s does.
+    this.chars.syncSpawns(this.walker.spawns);
   }
 
   /**

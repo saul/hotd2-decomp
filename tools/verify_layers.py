@@ -152,7 +152,7 @@ def main() -> int:
             "render-drives-the-port",
             "an engine function *called* from render/ is a decision the port "
             "should be making; types, enums and pure maths are fine",
-            "ratchet", baseline=13, step=11),
+            "ratchet", baseline=12, step=11),
         # The same correction as its render twin, for the same reason: all
         # seven hits were citations in doc comments -- the sound name table's
         # address in bgm.ts, the routine hud.ts draws from. `hud/` never wrote

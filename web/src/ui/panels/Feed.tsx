@@ -14,27 +14,23 @@ export function Feed(
   { rows, dispatch }: { rows: readonly FeedRow[]; dispatch: Dispatch },
 ) {
   const stick = useRef(true);
+  const box = useRef<HTMLDivElement>(null);
 
-  // `#feed` is the scroller and it is the chrome's, not this component's --
-  // the rows are portalled into it. Until `index.html` becomes a mount point
-  // that is the honest way to reach it.
+  // The scroller is this component's own element now. It used to be
+  // `index.html`'s, reached by `document.querySelector` from in here, because
+  // the rows were portalled into it -- a component asking the document for its
+  // own container.
   useEffect(() => {
-    const n = document.querySelector<HTMLElement>("#feed");
-    if (!n) return;
-    const on = () => {
-      stick.current = n.scrollTop + n.clientHeight >= n.scrollHeight - 24;
-    };
-    n.addEventListener("scroll", on);
-    return () => n.removeEventListener("scroll", on);
-  }, []);
-
-  useEffect(() => {
-    const n = document.querySelector<HTMLElement>("#feed");
+    const n = box.current;
     if (n && stick.current) n.scrollTop = n.scrollHeight;
   }, [rows]);
 
   return (
-    <>
+    <div id="feed" className="scroll" ref={box}
+         onScroll={(e) => {
+           const n = e.currentTarget;
+           stick.current = n.scrollTop + n.clientHeight >= n.scrollHeight - 24;
+         }}>
       {rows.map((e, i) => (
         <div key={i} className={`fe cat-${e.cat} st-${e.status}`}
              title={e.title}
@@ -46,6 +42,6 @@ export function Feed(
           {e.note && <span className="note">{e.note}</span>}
         </div>
       ))}
-    </>
+    </div>
   );
 }

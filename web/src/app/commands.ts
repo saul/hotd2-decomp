@@ -27,6 +27,9 @@ export function runCommand(p: Player, c: UiCommand): void {
       if (c.shut) p.shutClasses.add(c.cls);
       else p.shutClasses.delete(c.cls);
       return;
+    case "boxWait":
+      p.boxWait = c.on;
+      return;
     case "seek":
       p.seekTo(c.block, c.step, c.op);
       return;

@@ -36,7 +36,6 @@ import { readState, writeState, type PlayerState } from "./urlstate";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { on } from "./dom";
-import { Minimap, rememberFolds } from "../hud/ui";
 import { Bgm } from "../audio/bgm";
 import { Backdrop } from "../render/backdrop";
 import { RigLayer } from "../render/rigs";
@@ -128,7 +127,6 @@ export class Player implements PlayerView {
   set walker(w: Walker | null) { this.ctx.walker = w; }
 
   /** The route graph, painted to a canvas. Named apart from the projection. */
-  readonly routeMap = new Minimap();
   /**
    * The script tree, built once per stage.
    *
@@ -191,6 +189,10 @@ export class Player implements PlayerView {
   /** The sidebar's own state: which classes are boxed, and which are folded. */
   readonly boxedClasses = new Set<number>();
   readonly shutClasses = new Set<number>();
+  /** The wait panel's `box` checkbox — see the `boxWait` command. */
+  boxWait = false;
+  /** What the mounted panels are showing. See `UiStore.demand`. */
+  readonly wants = this.ui.wants;
   /** The view toggles. Defaults come from the table the panel renders. */
   toggles: Readonly<Record<ToggleName, boolean>> = TOGGLE_DEFAULTS;
   private readonly events = new Events();
@@ -457,7 +459,6 @@ export class Player implements PlayerView {
    * button, and the one callback a layer raises *into* the shell.
    */
   private wireUi(): void {
-    rememberFolds();
     // Deciding is not a race. Hovering the branch bar -- to read the routes,
     // or to preview a shot -- stops the arcade countdown until the pointer
     // leaves. The bar itself is still hand-built DOM (see `showBranch`), so
@@ -939,8 +940,7 @@ export class Player implements PlayerView {
     // The boxes follow the sidebar's selection whether or not the sidebar is
     // drawn, so this is computed before anything is folded away.
     this.debug.highlight = highlightSet(
-      this.walker, this.boxedClasses,
-      $<HTMLInputElement>("#hl-wait").checked);
+      this.walker, this.boxedClasses, this.boxWait);
 
     const p = buildProjection(this, ctx);
     const key = projectionKey(p);
@@ -966,8 +966,6 @@ export class Player implements PlayerView {
   refreshUi(): void {
     const w = this.walker;
     if (!w || !this.scene3d) return;
-    this.routeMap.draw(w.block);
-
     this.hud = hudRows(w, {
       mode: this.state.mode,
       region: this.scene3d.visibility === "all",

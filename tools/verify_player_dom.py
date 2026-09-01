@@ -51,9 +51,16 @@ def main() -> int:
     for path in sorted([*SRC.rglob("*.ts"), *SRC.rglob("*.tsx")]):
         text = path.read_text()
         rel = str(path.relative_to(ROOT))
-        for name in SELECTOR.findall(text):
+        # Comments first, the way `verify_layers.py` does it and for the same
+        # reason: a doc comment *describing* a lookup -- "this used to read
+        # `$("#hl-wait").checked` once a frame" -- is not a lookup, and
+        # failing on one makes the history unwritable. Whole-line `//` only,
+        # so a `https://` inside a string survives.
+        code = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+        for name in SELECTOR.findall(code):
             wanted.setdefault(name, []).append(rel)
-        if DYNAMIC.search(text):
+        if DYNAMIC.search(code):
             dynamic.append(rel)
 
     missing = {k: v for k, v in wanted.items() if k not in markup}

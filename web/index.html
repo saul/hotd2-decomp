@@ -65,54 +65,9 @@
           </div>
         </div>
 
-        <aside id="right">
-          <div id="hud" class="panel"></div>
-          <details class="panel fold" id="panel-wait" open>
-            <summary class="panel-head">
-              <strong>Wait</strong>
-              <span class="dim" id="wait-sub"></span>
-              <label class="hl" title="Box every actor keeping this wait blocked."><input type="checkbox" id="hl-wait" /> box</label>
-            </summary>
-            <div id="wait-body" class="scroll dbg"></div>
-          </details>
-          <details class="panel fold" id="panel-actors">
-            <summary class="panel-head">
-              <strong>Actors</strong>
-              <span class="dim" id="actor-sub" title="Every object in g_object_list, grouped by spawn class. Each class describes its own actors — a class with a module in g_class_handlers explains itself, one without is listed by id and left alone. docs/formats/spawns.md is the class table."></span>
-            </summary>
-            <div id="actor-body" class="scroll dbg"></div>
-          </details>
-          <details class="panel fold" id="panel-route">
-            <summary class="panel-head"><strong>Route graph</strong></summary>
-            <canvas id="minimap" height="150"></canvas>
-          </details>
-          <details class="panel fold grow-panel" id="panel-feed" open>
-            <summary class="panel-head">
-              <strong>Event feed</strong>
-              <button id="feed-clear" class="mini">clear</button>
-            </summary>
-            <div id="feed" class="scroll"></div>
-          </details>
-          <details class="panel fold" id="inspector-panel">
-            <summary class="panel-head"><strong>Inspector</strong></summary>
-            <div id="inspector" class="scroll"></div>
-          </details>
-          <details class="panel fold" id="scope-panel">
-            <summary class="panel-head">
-              <strong>Scopes</strong>
-              <span class="dim" title="The disposal tree. Every scope shows the frame it was opened at: a child of `stage` whose frame predates the current stage load survived a teardown, and nothing else in the player can tell you that. Repeated names collapse into a tallied row, so a hundred leaked effect scopes is one line rather than a hundred.">lifetimes</span>
-            </summary>
-            <div id="scopes" class="scroll"></div>
-          </details>
-
-          <details class="panel fold" id="globals-panel">
-            <summary class="panel-head">
-              <strong>Globals</strong>
-              <span class="dim" title="The port's data segment — every g_* it touches, and the object pool. Read-only: a writable panel would be a fourth way for state to enter the game, and nothing done here would survive a save. Addresses are the ones cited in web/src/game/globals.ts, checked against ghidra/annotations/globals.tsv.">read-only · g_*</span>
-            </summary>
-            <div id="globals" class="scroll"></div>
-          </details>
-        </aside>
+        <!-- React's, entirely. Every panel in here owns its own fold and
+             declares its own cost; see `ui/panels/Panel.tsx`. -->
+        <aside id="right"></aside>
       </main>
 
       <footer id="transport"></footer>

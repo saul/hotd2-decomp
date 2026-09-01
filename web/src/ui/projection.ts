@@ -265,6 +265,8 @@ export interface UiProjection {
   fogMode: string;
   pillarbox: boolean;
   wait: WaitProjection | null;
+  /** The wait panel's `box` checkbox. See the `boxWait` command. */
+  waitBoxed: boolean;
   actorPanel: ActorsProjection | null;
   /** Null while the panel is folded — it is the expensive one to build. */
   globals: GlobalsProjection | null;

@@ -16,6 +16,7 @@ import type { Scope } from "../../core/scope";
 import type { Walker } from "../../script/walker";
 import type { CamPaths } from "../../render/campath";
 import type { ToggleName } from "../../ui/commands";
+import type { UiSlice } from "../../ui/store";
 import type {
   BranchProjection, FeedRow, MinimapGraph, SkipProjection, SoundProjection,
   TransportProjection, TreeProjection, UiProjection,
@@ -48,6 +49,16 @@ export interface PlayerView {
   readonly camEye: { x: number; y: number; z: number };
   readonly boxedClasses: ReadonlySet<number>;
   readonly shutClasses: ReadonlySet<number>;
+  readonly boxWait: boolean;
+  /**
+   * Is anything showing this slice?
+   *
+   * The panels answer, by being mounted. This used to be
+   * `document.querySelector("#globals-panel").open` — the composition root
+   * asking the DOM a question once a frame, with the answer owned by a layer
+   * three above it. See `ui/store.ts`.
+   */
+  readonly wants: (slice: UiSlice) => boolean;
   readonly tree: TreeProjection | null;
   readonly treeVersion: number;
   readonly minimap: MinimapGraph | null;
@@ -62,12 +73,6 @@ export interface PlayerView {
   readonly branch: BranchProjection | null;
   readonly transport: TransportProjection;
 }
-
-const $ = <T extends HTMLElement>(sel: string): T =>
-  document.querySelector(sel) as T;
-
-/** Is a `<details>` panel open? A folded panel is not worth building. */
-const open = (sel: string): boolean => !!$<HTMLDetailsElement>(sel)?.open;
 
 export function buildProjection(v: PlayerView, ctx: RenderContext): UiProjection {
   const w = v.walker;
@@ -85,14 +90,15 @@ export function buildProjection(v: PlayerView, ctx: RenderContext): UiProjection
     lightMode: v.lightMode,
     fogMode: v.fogMode,
     pillarbox: v.pillarbox,
-    // A folded panel is not built. Its *selection* still counts, though —
-    // the highlight set is computed whatever the panels are showing.
-    wait: w && open("#panel-wait") ? waitProjection(w, eye) : null,
-    actorPanel: open("#panel-actors")
+    // A slice nothing is showing is not built. Its *selection* still counts,
+    // though — the highlight set is computed whatever the panels are showing.
+    wait: w && v.wants("wait") ? waitProjection(w, eye) : null,
+    waitBoxed: v.boxWait,
+    actorPanel: v.wants("actors")
       ? actorsProjection(eye, v.boxedClasses, v.shutClasses) : null,
-    // Built only while the panel is open: it walks every global and every
-    // actor and formats them all.
-    globals: open("#globals-panel") ? globalsProjection() : null,
+    // Built only while something is showing it: it walks every global and
+    // every actor and formats them all.
+    globals: v.wants("globals") ? globalsProjection() : null,
     tree: v.tree,
     minimap: v.minimap,
     treeVersion: v.treeVersion,

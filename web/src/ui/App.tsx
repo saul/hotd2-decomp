@@ -21,11 +21,14 @@ import { ActorBody, WaitBody } from "./panels/Sidebar";
 import { Tree } from "./panels/Tree";
 import { Feed } from "./panels/Feed";
 import { HudStrip } from "./panels/HudStrip";
+import { Minimap } from "./panels/Minimap";
+import { Panel } from "./panels/Panel";
 import { Toggles } from "./panels/Toggles";
 import { Modes, StagePicker, ViewSettings } from "./panels/Topbar";
 import { Transport } from "./panels/Transport";
 import { SkipBar } from "./panels/SkipBar";
 import { BranchBar } from "./panels/BranchBar";
+import type { UiProjection } from "./projection";
 
 /**
  * A panel's mount point, or a loud failure.
@@ -62,17 +65,87 @@ export function App({ store }: { store: UiStore }) {
                                  dispatch={store.dispatch} />)}
       {into("#tree", <Tree p={p.tree} current={p.current}
                            dispatch={store.dispatch} />)}
-      {into("#feed", <Feed rows={p.feed} dispatch={store.dispatch} />)}
-      {into("#inspector", <>{p.inspector}</>)}
-      {into("#hud", <HudStrip rows={p.hudRows} />)}
-      {into("#scopes", <Scopes root={p.scopes}
-                               stageLoadedAt={p.scopeContext.stageLoadedAt} />)}
-      {into("#globals", <Globals p={p.globals} />)}
-      {into("#wait-sub", <>{p.wait?.sub ?? "running"}</>)}
-      {into("#wait-body", <WaitBody p={p.wait} />)}
-      {into("#actor-sub", <>{p.actorPanel?.sub ?? ""}</>)}
-      {into("#actor-body", <ActorBody p={p.actorPanel}
-                                      dispatch={store.dispatch} />)}
+      {into("#right", <Sidebar p={p} store={store} />)}
+    </>
+  );
+}
+
+/**
+ * The right-hand sidebar, which is now entirely React's.
+ *
+ * Every panel here owns its own fold and declares its own cost. Nothing in
+ * `app/` asks the document what is showing, and a panel that is folded is not
+ * rendered — so `wants(slice)` and "is this component mounted" are the same
+ * fact rather than two that have to be kept in step.
+ */
+function Sidebar({ p, store }: { p: UiProjection; store: UiStore }) {
+  const dispatch = store.dispatch;
+  return (
+    <>
+      <div id="hud" className="panel"><HudStrip rows={p.hudRows} /></div>
+
+      <Panel id="panel-wait" store={store} title="Wait" slice="wait" defaultOpen
+             sub={p.wait?.sub ?? "running"}
+             head={
+               <label className="hl"
+                      title="Box every actor keeping this wait blocked.">
+                 <input type="checkbox" checked={p.waitBoxed}
+                        onChange={(e) => dispatch({ kind: "boxWait",
+                                                    on: e.target.checked })} />
+                 {" box"}
+               </label>
+             }>
+        <div className="scroll dbg"><WaitBody p={p.wait} /></div>
+      </Panel>
+
+      <Panel id="panel-actors" store={store} title="Actors" slice="actors"
+             sub={p.actorPanel?.sub ?? ""}
+             subTitle={"Every object in g_object_list, grouped by spawn class. "
+               + "Each class describes its own actors — a class with a module "
+               + "in g_class_handlers explains itself, one without is listed "
+               + "by id and left alone. docs/formats/spawns.md is the class "
+               + "table."}>
+        <div className="scroll dbg">
+          <ActorBody p={p.actorPanel} dispatch={dispatch} />
+        </div>
+      </Panel>
+
+      <Panel id="panel-route" store={store} title="Route graph">
+        <Minimap graph={p.minimap} current={p.current?.block ?? -1}
+                 dispatch={dispatch} />
+      </Panel>
+
+      <Panel id="panel-feed" store={store} title="Event feed" defaultOpen grow>
+        <Feed rows={p.feed} dispatch={dispatch} />
+      </Panel>
+
+      <Panel id="inspector-panel" store={store} title="Inspector">
+        <div id="inspector" className="scroll">{p.inspector}</div>
+      </Panel>
+
+      <Panel id="scope-panel" store={store} title="Scopes" sub="lifetimes"
+             subTitle={"The disposal tree. Every scope shows the frame it was "
+               + "opened at: a child of `stage` whose frame predates the "
+               + "current stage load survived a teardown, and nothing else in "
+               + "the player can tell you that. Repeated names collapse into a "
+               + "tallied row, so a hundred leaked effect scopes is one line "
+               + "rather than a hundred."}>
+        <div id="scopes" className="scroll">
+          <Scopes root={p.scopes}
+                  stageLoadedAt={p.scopeContext.stageLoadedAt} />
+        </div>
+      </Panel>
+
+      <Panel id="globals-panel" store={store} title="Globals" slice="globals"
+             sub="read-only · g_*"
+             subTitle={"The port's data segment — every g_* it touches, and "
+               + "the object pool. Read-only: a writable panel would be a "
+               + "fourth way for state to enter the game, and nothing done "
+               + "here would survive a save. Addresses are the ones cited in "
+               + "web/src/game/globals.ts, checked against "
+               + "ghidra/annotations/globals.tsv."}>
+        <div id="globals" className="scroll"><Globals p={p.globals} /></div>
+      </Panel>
     </>
   );
 }

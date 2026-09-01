@@ -162,7 +162,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.treeProj = treeProjection(bundle.script);
   p.treeVersion += 1;
   p.minimapGraphData = minimapGraph(bundle.script);
-  p.routeMap.build(p.minimapGraphData);
   p.clearFeed();
 
   if (bundle.script.warnings.length) {

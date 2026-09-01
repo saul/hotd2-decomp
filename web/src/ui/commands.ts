@@ -37,6 +37,16 @@ export type UiCommand =
   | { kind: "boxClass"; cls: number; on: boolean }
   /** The sidebar's per-class fold. */
   | { kind: "foldClass"; cls: number; shut: boolean }
+  /**
+   * The wait panel's `box` checkbox.
+   *
+   * A command and not component state, because it changes something outside
+   * `ui/`: the boxes drawn round the actors holding the wait. It used to be a
+   * bare `<input>` in `index.html` that `publishUi` read back with
+   * `$("#hl-wait").checked` once a frame -- the shell asking the DOM what the
+   * user had clicked, rather than being told.
+   */
+  | { kind: "boxWait"; on: boolean }
   | { kind: "setLightMode"; mode: string }
   | { kind: "setFogMode"; mode: string }
   | { kind: "setPillarbox"; on: boolean }

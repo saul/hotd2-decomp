@@ -92,8 +92,8 @@ export interface TreeBlock {
  * The whole script.
  *
  * Rebuilt only on a stage load — it is thousands of rows and none of them
- * change. `app/` keeps the same object across frames, so React skips it and
- * the change key is computed without it. `treeVersion` is what says it moved.
+ * change. `app/` keeps the same object across frames, so `stabilise` settles
+ * it with one `Object.is` and React never walks it.
  */
 export interface TreeProjection {
   blocks: TreeBlock[];
@@ -278,10 +278,8 @@ export interface StatusProjection {
 }
 
 export interface UiProjection {
-  /** Bumped whenever anything below changed. React re-renders on this alone. */
-  revision: number;
   stage: number;
-  stages: number[];
+  stages: readonly number[];
   original: boolean;
   /** Null once the stage is up. */
   loading: LoadingProjection | null;
@@ -307,21 +305,23 @@ export interface UiProjection {
   actorPanel: ActorsProjection | null;
   /** Null while the panel is folded — it is the expensive one to build. */
   globals: GlobalsProjection | null;
-  /** Rebuilt on a stage load only. See `treeVersion`. */
+  /** Rebuilt on a stage load only, and held by reference until then. */
   tree: TreeProjection | null;
   /** Also per stage; the minimap paints it to a canvas itself. */
   minimap: MinimapGraph | null;
-  /** Bumped when `tree` is replaced, so the change key need not walk it. */
-  treeVersion: number;
   /** Where the script is now, for the tree's highlight. */
   current: { block: number; step: number; op: number } | null;
-  feed: FeedRow[];
-  /** Bumped on every push and on a clear, for the same reason as `treeVersion`. */
-  feedVersion: number;
+  /**
+   * The event feed, capped.
+   *
+   * Replaced rather than mutated on every push, so this is reference-stable
+   * between pushes and `stabilise` never walks its four hundred rows.
+   */
+  feed: readonly FeedRow[];
   /** The inspector's body, already serialised. */
   inspector: string;
   /** The HUD strip: label, value, and whether it is worth the eye. */
-  hudRows: [string, string, boolean?][];
+  hudRows: readonly [string, string, boolean?][];
   skip: SkipProjection | null;
   branch: BranchProjection | null;
   scopes: ScopeRow | null;

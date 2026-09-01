@@ -32,7 +32,6 @@ function check(name: string, ok: boolean, detail = ""): void {
 /** Enough of a projection to render every branch of the chrome. */
 function projection(): UiProjection {
   return {
-    revision: 1,
     stage: 2,
     stages: [1, 2],
     original: false,
@@ -57,12 +56,10 @@ function projection(): UiProjection {
     tree: { blocks: [{ index: 0, kind: "next", targets: [1], stepCount: 2,
                        title: "block 0", steps: [] }] },
     minimap: { entry: 0, nodes: [{ index: 0, kind: "next", next: [1] }] },
-    treeVersion: 1,
     current: { block: 0, step: 1, op: 0 },
     feed: [{ block: 0, step: 1, opIndex: 0, at: "0.1.0", name: "cam_play",
              summary: "", note: "", cat: "camera", status: "ported",
              title: "" }],
-    feedVersion: 1,
     inspector: "cam_play",
     hudRows: [["mode", "play"]],
     skip: { canSkip: true, sub: "region 3", stacked: false },

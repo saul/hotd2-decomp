@@ -6,6 +6,7 @@
  * settings are the player's own — the game has no such choices — and their
  * tooltips are the only place that says so.
  */
+import { memo } from "react";
 import type { Dispatch } from "../commands";
 import type { UiProjection } from "../projection";
 
@@ -26,7 +27,7 @@ const MODES: { mode: "step" | "play" | "free"; label: string }[] = [
   { mode: "free", label: "Free roam" },
 ];
 
-export function StagePicker({ p, dispatch }:
+export const StagePicker = memo(function StagePicker({ p, dispatch }:
   { p: UiProjection; dispatch: Dispatch }) {
   return (
     <>
@@ -46,9 +47,9 @@ export function StagePicker({ p, dispatch }:
       </label>
     </>
   );
-}
+});
 
-export function Modes({ mode, dispatch }:
+export const Modes = memo(function Modes({ mode, dispatch }:
   { mode: string; dispatch: Dispatch }) {
   return (
     <>
@@ -61,9 +62,9 @@ export function Modes({ mode, dispatch }:
       ))}
     </>
   );
-}
+});
 
-export function ViewSettings({ p, dispatch }:
+export const ViewSettings = memo(function ViewSettings({ p, dispatch }:
   { p: UiProjection; dispatch: Dispatch }) {
   return (
     <>
@@ -103,4 +104,4 @@ export function ViewSettings({ p, dispatch }:
       </label>
     </>
   );
-}
+});

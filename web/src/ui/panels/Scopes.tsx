@@ -13,7 +13,7 @@
  * * **`owned` growing under a flat tree** — something is registering into a
  *   scope that never closes.
  */
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import type { ScopeRow } from "./scope_types";
 
 /** A sibling tally past this is a leak, not a busy frame. */
@@ -83,7 +83,7 @@ function Rows(
   );
 }
 
-export function Scopes(
+export const Scopes = memo(function Scopes(
   { root, stageLoadedAt }: { root: ScopeRow | null; stageLoadedAt: number },
 ) {
   const peak = useRef({ scopes: 0, owned: 0 });
@@ -119,4 +119,4 @@ export function Scopes(
       </div>
     </>
   );
-}
+});

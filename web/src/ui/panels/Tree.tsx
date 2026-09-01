@@ -55,7 +55,7 @@ const Block = memo(function Block(
   );
 });
 
-export function Tree(
+export const Tree = memo(function Tree(
   { p, current, dispatch }: {
     p: TreeProjection | null;
     current: { block: number; step: number; op: number } | null;
@@ -122,4 +122,4 @@ export function Tree(
       </div>
     </aside>
   );
-}
+});

@@ -7,6 +7,7 @@
  * reader of engine state with its own idea of when to look, and that is how a
  * sidebar comes to disagree with the boxes drawn round the actors it lists.
  */
+import { memo } from "react";
 import type { ActorsProjection, DebugLine, WaitProjection } from "../projection";
 import type { Dispatch } from "../commands";
 
@@ -24,12 +25,12 @@ function Lines({ lines }: { lines: readonly DebugLine[] }) {
   );
 }
 
-export function WaitBody({ p }: { p: WaitProjection | null }) {
+export const WaitBody = memo(function WaitBody({ p }: { p: WaitProjection | null }) {
   if (!p) return null;
   return <Lines lines={p.lines} />;
-}
+});
 
-export function ActorBody(
+export const ActorBody = memo(function ActorBody(
   { p, dispatch }: { p: ActorsProjection | null; dispatch: Dispatch },
 ) {
   if (!p) return null;
@@ -63,4 +64,4 @@ export function ActorBody(
       ))}
     </>
   );
-}
+});

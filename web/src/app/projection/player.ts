@@ -22,6 +22,7 @@ import type {
   SoundProjection, StatusProjection, TransportProjection, TreeProjection,
   UiProjection,
 } from "../../ui/projection";
+import { stabilise } from "./stable";
 import { actorsProjection, waitProjection } from "./sidebar";
 import { globalsProjection } from "./globals";
 import { inspectorText, opSummary } from "./script";
@@ -65,10 +66,8 @@ export interface PlayerView {
    */
   readonly wants: (slice: UiSlice) => boolean;
   readonly tree: TreeProjection | null;
-  readonly treeVersion: number;
   readonly minimap: MinimapGraph | null;
   readonly feed: readonly FeedRow[];
-  readonly feedVersion: number;
   readonly hudRows: readonly [string, string, boolean?][];
   readonly appScope: Scope;
   readonly stageLoadedAt: number;
@@ -79,13 +78,23 @@ export interface PlayerView {
   readonly transport: TransportProjection;
 }
 
-export function buildProjection(v: PlayerView, ctx: RenderContext): UiProjection {
+/**
+ * This frame's projection, sharing everything it can with the last.
+ *
+ * `prev` is what the store is already holding. Every slice that has not
+ * changed comes back as the same object, so `memo` in `ui/` is the diff —
+ * see `app/projection/stable.ts`. The builder below is therefore free to
+ * allocate: what it hands back is filtered through `stabilise`.
+ */
+export function buildProjection(v: PlayerView, ctx: RenderContext,
+                                prev: UiProjection | null): UiProjection {
   const w = v.walker;
   const eye = v.camEye;
-  return {
-    revision: 0,
+  return stabilise(prev, {
     stage: v.stage,
-    stages: [...v.stages],
+    // Held by reference and replaced rather than mutated, all three of them,
+    // so `Object.is` settles them without a walk.
+    stages: v.stages,
     original: v.original,
     loading: v.loading,
     status: v.status,
@@ -107,33 +116,15 @@ export function buildProjection(v: PlayerView, ctx: RenderContext): UiProjection
     globals: v.wants("globals") ? globalsProjection() : null,
     tree: v.tree,
     minimap: v.minimap,
-    treeVersion: v.treeVersion,
     current: w ? { block: w.block, step: w.step, op: w.opIndex } : null,
-    feed: [...v.feed],
-    feedVersion: v.feedVersion,
+    feed: v.feed,
     inspector: w?.currentOp
       ? inspectorText(w.currentOp, { summary: opSummary(w.currentOp) }) : "",
-    hudRows: [...v.hudRows],
+    hudRows: v.hudRows,
     skip: v.skip,
     branch: v.branch,
     scopes: v.appScope.snapshot(),
     scopeContext: { frame: ctx.frame, stageLoadedAt: v.stageLoadedAt },
     hasSaved: v.hasSaved,
-  };
-}
-
-/**
- * What decides whether the projection is published at all.
- *
- * The whole value, minus the three things that are too big to walk sixty
- * times a second: the tree is thousands of rows that change only on a stage
- * load, the feed is up to four hundred that only grow, and the minimap graph
- * is per stage. All three carry a version instead.
- *
- * Same cost as the string compare each panel used to do for itself, done
- * once — and unlike a hand-listed set of fields it cannot go stale the first
- * time one is added.
- */
-export function projectionKey(p: UiProjection): string {
-  return JSON.stringify({ ...p, tree: null, feed: null, minimap: null });
+  });
 }

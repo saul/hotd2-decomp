@@ -10,9 +10,10 @@
  * nothing done here would be reproducible from a save. `app/` never installs a
  * command that writes one, and `no-engine-writes-in-ui` is the check.
  */
+import { memo } from "react";
 import type { GlobalsProjection } from "../projection";
 
-export function Globals({ p }: { p: GlobalsProjection | null }) {
+export const Globals = memo(function Globals({ p }: { p: GlobalsProjection | null }) {
   // Null means the panel is folded and `app/` did not build it. Rendering
   // nothing is right: the `<details>` is closed, so nobody is looking.
   if (!p) return null;
@@ -70,4 +71,4 @@ export function Globals({ p }: { p: GlobalsProjection | null }) {
       )}
     </>
   );
-}
+});

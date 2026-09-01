@@ -12,7 +12,7 @@
  * `document.querySelector` in `hud/ui.ts` painted from `Player.refreshUi`,
  * which made the route graph a thing the shell had to remember to redraw.
  */
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { MinimapGraph } from "../projection";
 import type { Dispatch } from "../commands";
 
@@ -71,7 +71,7 @@ function layoutOf(graph: MinimapGraph): { width: number; nodes: Node[] } {
 
 const EMPTY = { width: 360, nodes: [] as Node[] };
 
-export function Minimap(
+export const Minimap = memo(function Minimap(
   { graph, current, dispatch }:
   { graph: MinimapGraph | null; current: number; dispatch: Dispatch },
 ) {
@@ -139,4 +139,4 @@ export function Minimap(
               if (best >= 0) dispatch({ kind: "seek", block: best, step: 0, op: 0 });
             }} />
   );
-}
+});

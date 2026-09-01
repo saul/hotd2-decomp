@@ -9,10 +9,11 @@
  * Not a modal. A branch is a fact about where playback has got to, not an
  * interruption of it.
  */
+import { memo } from "react";
 import type { Dispatch } from "../commands";
 import type { BranchProjection } from "../projection";
 
-export function BranchBar({ p, dispatch, onHover }:
+export const BranchBar = memo(function BranchBar({ p, dispatch, onHover }:
   { p: BranchProjection | null; dispatch: Dispatch;
     onHover: (over: boolean) => void }) {
   if (!p) return null;
@@ -47,4 +48,4 @@ export function BranchBar({ p, dispatch, onHover }:
       </span>
     </div>
   );
-}
+});

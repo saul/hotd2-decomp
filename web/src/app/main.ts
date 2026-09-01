@@ -58,8 +58,7 @@ import type {
   SoundProjection, StatusProjection, TransportProjection, TreeProjection,
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
-import { buildProjection, projectionKey, type PlayerView }
-  from "./projection/player";
+import { buildProjection, type PlayerView } from "./projection/player";
 import { hudRows } from "./projection/hud";
 import {
   branchProjection, skipProjection, soundProjection, transportProjection,
@@ -124,20 +123,24 @@ export class Player implements PlayerView {
   get walker(): Walker | null { return this.ctx.walker; }
   set walker(w: Walker | null) { this.ctx.walker = w; }
 
-  /** The route graph, painted to a canvas. Named apart from the projection. */
   /**
    * The script tree, built once per stage.
    *
-   * Thousands of rows and none of them change, so it is kept by reference and
-   * `treeVersion` is what tells the projection's change key it moved — walking
-   * it every frame to notice it had not would cost more than drawing it.
+   * Thousands of rows and none of them change, so it is kept **by reference**
+   * and replaced only on a stage load. That one fact is what stops the
+   * projection walking it: `stabilise` settles an unmoved reference with an
+   * `Object.is` and goes no further.
    */
   treeProj: TreeProjection | null = null;
-  treeVersion = 0;
   minimapGraphData: MinimapGraph | null = null;
-  /** The event feed, capped. Append-only, so a version beats a compare. */
-  private feedRows: FeedRow[] = [];
-  feedVersion = 0;
+  /**
+   * The event feed, capped.
+   *
+   * Replaced rather than pushed to, for the same reason as the tree: an array
+   * mutated in place is one the projection cannot tell has changed, and one it
+   * has to walk to find out that it has not.
+   */
+  private feedRows: readonly FeedRow[] = [];
   private readonly freeRoam: FreeRoam;
   readonly bgm = new Bgm();
   readonly sceneFog: SceneFog;
@@ -179,9 +182,6 @@ export class Player implements PlayerView {
   stageLoadedAt = 0;
   /** The one thing React subscribes to. See `ui/store.ts`. */
   private readonly ui: UiStore;
-  /** Bumped when the projection actually changed, so React can skip a frame. */
-  private uiRevision = 0;
-  private lastUiKey = "";
   /** The sidebar's own state: which classes are boxed, and which are folded. */
   readonly boxedClasses = new Set<number>();
   readonly shutClasses = new Set<number>();
@@ -704,12 +704,10 @@ export class Player implements PlayerView {
 
   onFeed(e: FeedEntry): void {
     this.feedRows = [...this.feedRows, feedRow(e)].slice(-Player.FEED_MAX);
-    this.feedVersion += 1;
   }
 
   clearFeed(): void {
     this.feedRows = [];
-    this.feedVersion += 1;
   }
 
   /**
@@ -928,12 +926,10 @@ export class Player implements PlayerView {
     this.debug.highlight = highlightSet(
       this.walker, this.boxedClasses, this.boxWait);
 
-    const p = buildProjection(this, this.ctx);
-    const key = projectionKey(p);
-    if (key === this.lastUiKey) return;
-    this.lastUiKey = key;
-    p.revision = ++this.uiRevision;
-    this.ui.publish(p);
+    // `stabilise` inside the builder hands back the value the store already
+    // holds when nothing moved, so `publish` decides with an identity test.
+    // There is no key, no counter and no list of fields to keep in step.
+    this.ui.publish(buildProjection(this, this.ctx, this.ui.getSnapshot()));
   }
 
   /** Put one back. Returns the reason it was refused, or null. */

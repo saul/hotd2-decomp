@@ -7,10 +7,15 @@
  * clock stays the render loop's — this does not schedule anything, it only
  * says "there is a new value".
  *
- * The `revision` on the projection is what decides whether to notify at all.
- * A 60 Hz redraw of a sidebar that has not changed is the cost this avoids,
- * and it is why `app/` builds the projection cheaply and compares rather than
- * letting React diff a few hundred rows sixty times a second.
+ * Whether to notify at all is decided by **identity**. `app/` runs each frame's
+ * projection through `stabilise` (`app/projection/stable.ts`), which returns
+ * the previous value unchanged when nothing moved and otherwise keeps every
+ * slice that did not — so this handles both cases with one `===`, and a panel
+ * whose slice is untouched gets the same object and its `memo` bails.
+ *
+ * What this replaces is a `revision` counter over a `JSON.stringify` of the
+ * whole projection. That was all-or-nothing: one field moving re-rendered
+ * every panel, because every slice was a fresh object.
  */
 import type { UiProjection } from "./projection";
 import type { Dispatch, UiCommand } from "./commands";
@@ -42,7 +47,7 @@ export class UiStore {
 
   /** New projection. Cheap when nothing changed: same object, no notify. */
   publish(next: UiProjection): void {
-    if (this.current && this.current.revision === next.revision) return;
+    if (this.current === next) return;
     this.current = next;
     for (const l of this.listeners) l();
   }

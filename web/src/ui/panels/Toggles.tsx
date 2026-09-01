@@ -11,6 +11,7 @@
  * turning it on means, and `runCommand` switches on the name exhaustively, so
  * adding a row here without handling it fails to compile.
  */
+import { memo } from "react";
 import type { Dispatch, ToggleName } from "../commands";
 
 export interface ToggleSpec {
@@ -61,7 +62,7 @@ export const TOGGLE_DEFAULTS: Readonly<Record<ToggleName, boolean>> =
   Object.fromEntries(TOGGLES.map((t) => [t.name, t.on])) as
     Record<ToggleName, boolean>;
 
-export function Toggles(
+export const Toggles = memo(function Toggles(
   { state, dispatch }: {
     state: Readonly<Record<ToggleName, boolean>>;
     dispatch: Dispatch;
@@ -79,4 +80,4 @@ export function Toggles(
       ))}
     </>
   );
-}
+});

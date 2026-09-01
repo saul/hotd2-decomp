@@ -7,12 +7,13 @@
  * is released — `app/` needs both, because *while* you are dragging, the
  * camera systems must not fight you for the pose.
  */
+import { memo } from "react";
 import type { Dispatch } from "../commands";
 import type { SoundProjection, TransportProjection } from "../projection";
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
 
-export function Transport(
+export const Transport = memo(function Transport(
   { t, sound, dispatch }: {
     t: TransportProjection;
     sound: SoundProjection;
@@ -74,4 +75,4 @@ export function Transport(
       </label>
     </>
   );
-}
+});

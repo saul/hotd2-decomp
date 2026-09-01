@@ -4,7 +4,8 @@
  * Every row is assembled in `app/`, because most of them are a layer's own
  * one-line `describe` and the UI has no business asking a layer anything.
  */
-export function HudStrip(
+import { memo } from "react";
+export const HudStrip = memo(function HudStrip(
   { rows }: { rows: readonly [string, string, boolean?][] },
 ) {
   return (
@@ -17,4 +18,4 @@ export function HudStrip(
       ))}
     </>
   );
-}
+});

@@ -25,6 +25,10 @@ import { useEffect, type ReactNode } from "react";
 import { usePersisted } from "../persist";
 import type { UiSlice, UiStore } from "../store";
 
+// Deliberately **not** `memo`. Its children are elements built fresh by the
+// caller on every render, so the shallow compare could never bail -- the
+// memoisation that matters is on the panel bodies below it, which take a
+// projection slice and nothing else.
 export function Panel({
   id, store, title, sub, subTitle, slice, defaultOpen = false, head, grow,
   children,

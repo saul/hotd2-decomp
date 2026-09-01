@@ -157,7 +157,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);
-  p.treeVersion += 1;
   p.minimapGraphData = minimapGraph(bundle.script);
   p.clearFeed();
 

@@ -22,7 +22,8 @@ python3 tools/verify_layers.py            # player layer boundaries
 python3 tools/verify_port.py              # the port matches the annotations
 python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 cd web && npx tsc --noEmit && npm run test:port && npm run test:seek \
-    && npm run test:scope && npm run test:state && npm run test:ui
+    && npm run test:scope && npm run test:state && npm run test:ui \
+    && npm run test:projection
 ```
 
 ### Layers, and the direction dependencies point

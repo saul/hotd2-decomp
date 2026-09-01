@@ -6,11 +6,11 @@
  * scrolled up — reading back through what happened should not be yanked away
  * by the next instruction.
  */
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { FeedRow } from "../projection";
 import type { Dispatch } from "../commands";
 
-export function Feed(
+export const Feed = memo(function Feed(
   { rows, dispatch }: { rows: readonly FeedRow[]; dispatch: Dispatch },
 ) {
   const stick = useRef(true);
@@ -44,4 +44,4 @@ export function Feed(
       ))}
     </div>
   );
-}
+});

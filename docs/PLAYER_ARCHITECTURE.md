@@ -1093,7 +1093,7 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 15 | **Panels own themselves.** Fold is `ui/` state, not a DOM read; cost becomes demand expressed by mounting; `rememberFolds` deleted and `app/projection/player.ts` loses its `$`. The whole right sidebar is React's, the minimap included | ✅ |
 | 16 | **`index.html` becomes a mount point.** The chrome is React's, canvas included; `createPortal` and the sixteen mount ids go; the loading overlay, the paused overlay and `#status` become projection state, the filter and the splitter become component state; the `.mode` and `.shooting` collisions go with their imperative writers. `web/test/ui.test.tsx` renders the page | ✅ |
 | 17 | **`refreshUi` dies.** `hudRows` computed where it is read, the minimap paint into its component, all 19 call sites and `setPlayButton`/`refreshPausedOverlay` gone. `markAddress` keeps the half that was state. One update path | ✅ |
-| 18 | **Structural sharing replaces the change key.** `stable()` per slice, panels `memo()`, `publish` shallow-compares the root; `projectionKey`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ☐ |
+| 18 | **Structural sharing replaces the change key.** One generic `stabilise` pass, panels `memo()`, `publish` decides on identity; `projectionKey`, `revision`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ✅ |
 | 19 | **The shutter and the caption become engine state.** `/decomp` `FUN_00413970` and `FUN_00435AA0` first, name `DAT_009CA0F4` and its counter, then onto `Walker` beside `gateCloseLeft`; `Hud` becomes a `System` with `resync`. Clears step 14's assertion C | ☐ |
 | 20 | **This document describes what is.** `## The UI layer` is rewritten from a plan in the present tense into the UI's stated rules; the tree matches the tree; the findings below collapse into those rules and stop being a list of complaints | ☐ |
 
@@ -1240,6 +1240,12 @@ After the step, every one of those must be **byte-identical**, and
 `verify_layers.py`, `verify_port.py`, `verify_player_ops.py`,
 `verify_player_dom.py` and `verify_objects.py` must still pass. A step is not
 done until that holds.
+
+`npm run test:projection` is on it from step 18. It guards a property nothing
+else can see: `tsc` cannot, because the types are the same either way, and
+`test:ui` cannot, because the markup is. The only symptom of losing it is that
+the player gets slower sixty times a second, and nobody attributes that to the
+field added six weeks earlier without a stable reference behind it.
 
 `npm run test:ui` is on that list from step 16 — the only check that the page
 has the shape the stylesheet expects, which neither `tsc` nor `vite build` can

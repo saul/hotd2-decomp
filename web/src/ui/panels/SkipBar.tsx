@@ -9,10 +9,11 @@
  * Unlike the branch bar this is an offer, not a question: playback is not
  * waiting on it and ignoring it changes nothing.
  */
+import { memo } from "react";
 import type { Dispatch } from "../commands";
 import type { SkipProjection } from "../projection";
 
-export function SkipBar({ p, dispatch }:
+export const SkipBar = memo(function SkipBar({ p, dispatch }:
   { p: SkipProjection | null; dispatch: Dispatch }) {
   if (!p) return null;
   return (
@@ -24,4 +25,4 @@ export function SkipBar({ p, dispatch }:
       <kbd className="skip-key">Enter</kbd>
     </div>
   );
-}
+});

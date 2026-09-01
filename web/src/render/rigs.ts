@@ -49,6 +49,7 @@
 
 import { Euler, Object3D, Quaternion, Vector3 } from "three";
 import type { RigsJson, RigRoute } from "../bundle";
+import type { Context, System } from "../core/system";
 import type { CamPaths } from "./campath";
 import { OP_CHANNELS } from "./campath";
 
@@ -123,7 +124,8 @@ function bamsEuler(rx: number, ry: number, rz: number, out: Euler): Euler {
   return out.set(rx * BAMS_TO_RAD, ry * BAMS_TO_RAD, rz * BAMS_TO_RAD, "ZYX");
 }
 
-export class RigLayer {
+export class RigLayer implements System {
+  readonly id = "render.rigs";
   private instances: Instance[] = [];
   private actors: Actor[] = [];
   private paths: CamPaths | null = null;
@@ -133,7 +135,7 @@ export class RigLayer {
   private readonly _q = new Quaternion();
 
   /** Find the rig roots the exporter emitted and bind each to its route. */
-  attach(root: Object3D, json: RigsJson | undefined, paths: CamPaths): void {
+  build(root: Object3D, json: RigsJson | undefined, paths: CamPaths): void {
     this.instances = [];
     this.paths = paths;
     if (!json) return;
@@ -217,8 +219,11 @@ export class RigLayer {
    * into it — the rig rides the *same* clock, which is the whole point of the
    * `g_active_cam_path` dispatch: object and shot run in lockstep.
    */
-  update(camSlot: number | null, camFrame: number): void {
+  update(ctx: Context): void {
     if (!this.paths) return;
+    const cam = ctx.walker?.cam;
+    const camSlot = cam ? cam.slot : null;
+    const camFrame = cam ? cam.frame : 0;
     for (const actor of this.actors) {
       // The route the camera currently selects, if any.
       const selected = actor.instances.find(
@@ -273,6 +278,26 @@ export class RigLayer {
       this.place(show, show.frame);
       this.applyPartRules(show, camSlot, camFrame);
     }
+  }
+
+  /**
+   * Rebuild after a load.
+   *
+   * `showing` and `frozen` are the two pieces of state here that are **not** a
+   * function of the camera command: they are how the object got to where it
+   * is. A held instance keeps being drawn precisely because its path ran out
+   * while the player was watching — and after a seek it did not, so carrying
+   * them across leaves a rig posed in a way play could never produce. That is
+   * the divergence this layer being outside `World` used to guarantee.
+   */
+  resync(ctx: Context): void {
+    for (const inst of this.instances) {
+      inst.frozen = false;
+      inst.frame = 0;
+      inst.route = inst.routes[0] ?? null;
+    }
+    for (const actor of this.actors) actor.showing = null;
+    this.update(ctx);
   }
 
   /**

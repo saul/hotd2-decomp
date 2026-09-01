@@ -47,6 +47,8 @@ import {
   Sprite, SpriteMaterial, Vector3,
 } from "three";
 import type { PropsJson, PropHinge, PropStatic } from "../bundle";
+import { IDLE_TICK, type Context, type System, type Tick }
+  from "../core/system";
 import { labelTexture } from "./overlays";
 
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
@@ -130,7 +132,8 @@ interface Marker {
   colour: number;
 }
 
-export class PropLayer {
+export class PropLayer implements System {
+  readonly id = "render.props";
   /** Bounding boxes and origin crosses, one per prop the bundle names. */
   readonly debug = new Group();
   private live: Live[] = [];
@@ -148,7 +151,7 @@ export class PropLayer {
     this.debug.name = "prop-debug";
   }
 
-  attach(root: Object3D, json: PropsJson | undefined): void {
+  build(root: Object3D, json: PropsJson | undefined): void {
     this.detach();
     this.json = json ?? null;
     if (!json) return;
@@ -209,7 +212,11 @@ export class PropLayer {
    * (0x48). `frames` is elapsed 60 Hz frames the walker advanced — the swing
    * counter is game frames, so a paused player holds a half-open door open.
    */
-  update(flags: ReadonlySet<number>, frames: number): void {
+  update(ctx: Context, t: Tick): void {
+    const w = ctx.walker;
+    if (!w) return;
+    const flags = w.flags;
+    const frames = t.dt * 60;
     if (!this.live.length) return;
     for (const l of this.live) {
       if (!l.bound) continue;              // nothing to pose
@@ -351,6 +358,19 @@ export class PropLayer {
   /** Reset the swing counters, for a seek or a stage change. */
   reset(): void {
     for (const l of this.live) l.frame = 0;
+  }
+
+  /**
+   * A load restored the flag set but not how long ago each flag was raised,
+   * and the swing counter is elapsed frames. So the doors go back to shut and
+   * swing again from there — which is exactly what a seek already does, and
+   * the two disagreeing would be worse than either.
+   *
+   * `[diverges]` — the engine has no seek, so it never has to answer this.
+   */
+  resync(ctx: Context): void {
+    this.reset();
+    this.update(ctx, IDLE_TICK);
   }
 
   get describe(): string {

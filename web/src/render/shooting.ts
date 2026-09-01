@@ -81,6 +81,7 @@ import {
 } from "three";
 import type { CharacterLayer } from "./characters";
 import type { CombatJson } from "../bundle";
+import type { Context, System, Tick } from "../core/system";
 import { G } from "../game/globals";
 import { HitResultCode } from "../game/combat/resolve_hit";
 import { BreakablePropTakeShot } from "../game/class41/prop";
@@ -194,7 +195,8 @@ class ImpactSprites {
   }
 }
 
-export class Shooting {
+export class Shooting implements System {
+  readonly id = "render.shooting";
   private readonly ray = new Raycaster();
   private readonly ndc = new Vector2();
   private readonly dot: HTMLElement;
@@ -274,9 +276,14 @@ export class Shooting {
     this.combat = combat ?? null;
   }
 
-  /** Advance the impact sprites. */
-  update(dt: number): void {
-    this.impacts?.update(dt);
+  /**
+   * Advance the impact sprites.
+   *
+   * Wall time, not game time: they are feedback for a click, not part of the
+   * script's clock, so a paused player still sees them out.
+   */
+  update(_ctx: Context, t: Tick): void {
+    this.impacts?.update(t.wall);
   }
 
   private pickOne<T>(xs: T[] | undefined): T | undefined {

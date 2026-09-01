@@ -55,13 +55,13 @@ import type {
   BakedMotion, CharacterPlacement, CharactersJson, CharacterType,
 } from "../bundle";
 import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
-import type { ActiveSpawn } from "../script/walker";
 import type { Actor } from "../game/actor";
 import { DescriptorFromPlacement } from "../game/descriptor";
 import { ActorSpawn } from "../game/director";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G } from "../game/globals";
 import { Rng } from "../core/rng";
+import type { Context, System } from "../core/system";
 import type { GameHost } from "../game/host";
 import { ActorKillAll, ResolveHit, type HitResult }
   from "../game/combat/resolve_hit";
@@ -134,7 +134,8 @@ interface Instance {
   held?: Map<number, Object3D>;
 }
 
-export class CharacterLayer {
+export class CharacterLayer implements System {
+  readonly id = "render.characters";
   private instances: Instance[] = [];
   private json: CharactersJson | null = null;
   private enabled = true;
@@ -162,7 +163,7 @@ export class CharacterLayer {
    */
   civilians: CiviliansJson | null = null;
 
-  attach(root: Object3D, json: CharactersJson | undefined): void {
+  build(root: Object3D, json: CharactersJson | undefined): void {
     this.detach();
     this.json = json ?? null;
     if (!json) return;
@@ -278,7 +279,8 @@ export class CharacterLayer {
    * the two can never disagree about who is present. The clocks are already
    * advanced: `ActorAdvanceMotion` did that in the game phase.
    */
-  update(live: readonly ActiveSpawn[]): void {
+  update(ctx: Context): void {
+    const live = ctx.walker?.spawns ?? [];
     if (!this.instances.length) return;
     const present = new Set<number>();
     for (const s of live) present.add(s.at);
@@ -833,7 +835,7 @@ export class CharacterLayer {
    * All of it is derived from the actor, which is the test that the split
    * between game state and render state is in the right place.
    */
-  resync(): void {
+  resync(_ctx: Context): void {
     for (const inst of this.instances) {
       const a = ActorByAt(inst.at);
       if (a) inst.a = a;

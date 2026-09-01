@@ -34,6 +34,7 @@ import {
 } from "three";
 import { G } from "../game/globals";
 import { SpawnClass } from "../game/spawn_class";
+import type { System } from "../core/system";
 
 /** How long the world push has to keep firing before an actor counts as stuck. */
 const STUCK_FRAMES = 30;
@@ -44,7 +45,8 @@ const PILLAR = 40;
 
 interface Marker { mesh: Mesh; pillar: LineSegments }
 
-export class StuckDebugLayer {
+export class StuckDebugLayer implements System {
+  readonly id = "render.stuck_debug";
   private root: Group | null = null;
   private enabled = false;
   /** Consecutive frames of world push, per spawn address. */
@@ -53,7 +55,7 @@ export class StuckDebugLayer {
   private stuck = 0;
   private deepest = 0;
 
-  attach(parent: Object3D): void {
+  build(parent: Object3D): void {
     this.detach();
     this.root = new Group();
     this.root.name = "stuck_debug";
@@ -104,7 +106,7 @@ export class StuckDebugLayer {
 
       let m = this.markers.get(o.at);
       if (!m) {
-        m = this.build(o.bodyRadius);
+        m = this.makeMarker(o.bodyRadius);
         this.root.add(m.mesh, m.pillar);
         this.markers.set(o.at, m);
       }
@@ -127,7 +129,7 @@ export class StuckDebugLayer {
     }
   }
 
-  private build(radius: number): Marker {
+  private makeMarker(radius: number): Marker {
     const mesh = new Mesh(
       new SphereGeometry(Math.max(0.5, radius), 12, 8),
       new MeshBasicMaterial({ color: STUCK_COLOUR, wireframe: true,

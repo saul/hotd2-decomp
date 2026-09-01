@@ -28,6 +28,7 @@ import {
   Sprite, SpriteMaterial, Vector3,
 } from "three";
 import type { ActiveSpawn } from "../script/walker";
+import type { Context, System } from "../core/system";
 import type { Actor } from "../game/actor";
 import { ZombieState } from "../game/class30/states";
 import { ThrowerState } from "../game/class31/states";
@@ -94,7 +95,21 @@ interface Boxed {
   colour: number;
 }
 
-export class DebugBoxLayer {
+/**
+ * Whatever is deciding which actors to box.
+ *
+ * Structural rather than an import: the thing that answers this lives in
+ * `hud/`, and `render` may not depend on `ui`. The sidebar hands its choice
+ * over by *being* one of these.
+ */
+export interface HighlightSource {
+  readonly highlight: ReadonlySet<number>;
+}
+
+const EMPTY: ReadonlySet<number> = new Set<number>();
+
+export class DebugBoxLayer implements System {
+  readonly id = "render.debug_boxes";
   readonly group = new Group();
   /** Empty boxes for spawned classes with no module. */
   showUnported = false;
@@ -106,8 +121,19 @@ export class DebugBoxLayer {
    * Independent of `showBoxes`: the panels box exactly what they list, so
    * ticking "box" next to a row is the same question as reading the row.
    */
-  highlight: ReadonlySet<number> = new Set();
+  panels: HighlightSource | null = null;
   source: BoundsSource | null = null;
+
+  /**
+   * What the sidebar asked to be boxed, as of its **last** tick.
+   *
+   * `render` runs before `hud`, so ticking a box next to a row shows up on the
+   * following frame. Sixteen milliseconds on a debug overlay, and the
+   * alternative is `render` reaching into `ui`.
+   */
+  private get highlight(): ReadonlySet<number> {
+    return this.panels?.highlight ?? EMPTY;
+  }
 
   private readonly pool: Boxed[] = [];
   private readonly rings: LineLoop[] = [];
@@ -245,9 +271,11 @@ export class DebugBoxLayer {
    * two can never disagree about who is present. `waiting` is true while the
    * interpreter is parked on an enemy-count wait.
    */
-  update(spawns: readonly ActiveSpawn[], waiting: boolean,
-         eye?: Vector3): void {
-    if (eye) this._eye.copy(eye);
+  update(ctx: Context): void {
+    const w = ctx.walker;
+    const spawns = w?.spawns ?? [];
+    const waiting = w?.wait?.policy.kind === "enemies";
+    this._eye.copy(ctx.camera.position);
     this.used = 0;
     this.group.visible = this.showUnported || this.showBoxes
                       || this.highlight.size > 0;
@@ -325,5 +353,10 @@ export class DebugBoxLayer {
     this.pool.length = 0;
     this.rings.length = 0;
     this.used = 0;
+  }
+
+  /** The boxes are a pure function of the restored actor list. */
+  resync(ctx: Context): void {
+    this.update(ctx);
   }
 }

@@ -28,7 +28,7 @@ import {
   Vector3,
 } from "three";
 import type { CamPath, CamPaths } from "./campath";
-import type { ActiveSpawn } from "../script/walker";
+import type { Context, System } from "../core/system";
 
 const RAIL_EYE = 0x26d9ff;
 const RAIL_AIM = 0xff8c1a;
@@ -229,7 +229,8 @@ export function labelTexture(text: string, colour = "#ffe14d"): CanvasTexture {
  * Position, BAMS yaw, class and hit points are all confirmed, and those are
  * what is drawn.
  */
-export class SpawnLayer {
+export class SpawnLayer implements System {
+  readonly id = "render.spawns";
   readonly group = new Group();
   private readonly pool: Object3D[] = [];
   private labels = new Map<string, CanvasTexture>();
@@ -290,7 +291,8 @@ export class SpawnLayer {
     this.posed = new Set(posed);
   }
 
-  update(all: ActiveSpawn[]): void {
+  update(ctx: Context): void {
+    const all = ctx.walker?.spawns ?? [];
     const spawns = this.posed.size
       ? all.filter((s) => !this.posed.has(s.at))
       : all;
@@ -327,5 +329,13 @@ export class SpawnLayer {
     for (let i = spawns.length; i < this.pool.length; i++) {
       this.pool[i].visible = false;
     }
+  }
+
+  /**
+   * A load replaced the spawn list wholesale; the markers are a pure function
+   * of it, so placing them again is the whole of the rebuild.
+   */
+  resync(ctx: Context): void {
+    this.update(ctx);
   }
 }

@@ -44,6 +44,7 @@
  */
 
 import { Color, Fog, Scene, ShaderChunk, type Material, type Mesh } from "three";
+import type { Context, System } from "../core/system";
 
 export type FogMode = "off" | "planar" | "radial";
 
@@ -99,7 +100,8 @@ export const FOG_RANGE_SCALE = 2;
  */
 const radialUniform = { value: 1 };
 
-export class SceneFog {
+export class SceneFog implements System {
+  readonly id = "render.fog";
   private readonly scene: Scene;
   private readonly fog = new Fog(0x000000, 65000, 65001);
   private mode: FogMode = "radial";
@@ -144,9 +146,19 @@ export class SceneFog {
     return this.mode;
   }
 
-  /** Push the walker's fog state into the scene. */
-  update(near: number, far: number, rgb: [number, number, number],
-         active: boolean): void {
+  /**
+   * Push the walker's fog state into the scene.
+   *
+   * The script ramps fog over frames rather than switching it, so this runs
+   * every tick and no-ops on the key when nothing actually moved. It is also
+   * the whole of the rebuild after a load: the ramp's current value came back
+   * with the walker.
+   */
+  update(ctx: Context): void {
+    const w = ctx.walker;
+    if (!w) return;
+    const { near, far, rgb } = w.fog;
+    const active = w.fogSet;
     const key = `${this.mode}|${active}|${near}|${far}|${rgb.join(",")}`;
     // near/far arrive as the script set them; the doubling happens below.
     if (key === this.last) return;
@@ -156,6 +168,10 @@ export class SceneFog {
     this.fog.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
     this.activeRange = active && far > near && near * FOG_RANGE_SCALE < 8000;
     this.apply();
+  }
+
+  resync(ctx: Context): void {
+    this.update(ctx);
   }
 
   private activeRange = false;

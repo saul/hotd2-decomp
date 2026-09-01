@@ -131,10 +131,10 @@ def main() -> int:
             "ratchet", baseline=17, step=11),
         "layers-are-systems": Rule(
             "layers-are-systems",
-            "a layer ticked by hand from main.ts is outside World, so it is "
-            "outside save/load/resync -- which is why a seek can leave a rig "
-            "held in a pose play would never produce",
-            "ratchet", baseline=14, step=8),
+            "a layer ticked by hand is outside World, so it is outside "
+            "save/load/resync -- which is why a seek could leave a rig held "
+            "in a pose play would never produce",
+            "ratchet", baseline=1, step=5),
         "one-bams-constant": Rule(
             "one-bams-constant",
             "BAMS_TO_RAD defined per-file drifts; one definition in core/",
@@ -187,15 +187,41 @@ def main() -> int:
         if re.search(r"\bBAMS_TO_RAD\s*=", code):
             rules["one-bams-constant"].hit(str(rel))
 
-    main_ts = SRC / "app" / "main.ts"
-    if main_ts.is_file():
-        body = main_ts.read_text(encoding="utf-8", errors="replace")
-        m = re.search(r"private drawLayers\(.*?\n  \}", body, flags=re.S)
-        if m:
-            for call in sorted(set(re.findall(r"this\.(\w+)\.(?:update|set)\b",
-                                              m.group(0)))):
-                rules["layers-are-systems"].hit(
-                    f"web/src/app/main.ts: drawLayers ticks this.{call}")
+    # Every drawable layer must be in the tick order.
+    #
+    # This used to look for `drawLayers`, the one method that hand-ticked them
+    # all -- which made the rule die the moment that method did. It now asks
+    # the question the rule was always about: an exported class in `render/`
+    # that has an `update` is a layer, and a layer that `app/` never hands to
+    # `world.add` is ticked by hand or not at all.
+    layers: dict[str, str] = {}                       # class name -> file
+    for f in files:
+        if f.parent.name != "render":
+            continue
+        cls = None
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"export class (\w+)", line)
+            if m:
+                cls = m.group(1)
+            elif re.match(r"  (?:readonly )?update\(", line) and cls:
+                layers[cls] = str(f.relative_to(ROOT))
+                cls = None
+
+    app = "\n".join(f.read_text(encoding="utf-8", errors="replace")
+                    for f in files if f.parent.name == "app")
+    # `world.add("render", new CameraDrawSystem(...))` names the class; the
+    # commoner `world.add("render", this.rigs)` names a field, so the field's
+    # own `= new RigLayer(` is what resolves it.
+    fields = dict(re.findall(r"(\w+)(?:\s*:\s*[\w<>\[\]| ]+)?\s*=\s*new (\w+)\(",
+                             app))
+    registered = set(re.findall(r"world\.add\(\s*\"\w+\"\s*,\s*new (\w+)\(", app))
+    for fld in re.findall(r"world\.add\(\s*\"\w+\"\s*,\s*this\.(\w+)\b", app):
+        if fld in fields:
+            registered.add(fields[fld])
+
+    for cls, where in sorted(layers.items()):
+        if cls not in registered:
+            rules["layers-are-systems"].hit(f"{where}: {cls} is never world.add()ed")
 
     print("browser player -- layer boundaries\n")
     print(f"  {'rule':<28}{'sev':<9}{'count':>6}{'baseline':>10}   status")

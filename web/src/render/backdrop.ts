@@ -40,6 +40,8 @@
 
 import { Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { BackdropJson, BackdropPreset } from "../bundle";
+import { IDLE_TICK, type Context, type System, type Tick }
+  from "../core/system";
 
 /** BAMS -> radians, the constant the matrix rotators use. */
 const BAMS_TO_RAD = 9.58738e-5;
@@ -47,7 +49,8 @@ const BAMS_TO_RAD = 9.58738e-5;
 /** The scale the draw applies. Negative Z is deliberate. */
 const DOME_SCALE = new Vector3(1.2, 1.2, -1.2);
 
-export class Backdrop {
+export class Backdrop implements System {
+  readonly id = "render.backdrop";
   readonly group = new Group();
   private presets: BackdropPreset[] = [];
   /** asset slot -> the node that draws it. */
@@ -73,7 +76,7 @@ export class Backdrop {
    * leaving it in the stage tree would let the region logic show it in place
    * — at its authored position rather than around the camera.
    */
-  attach(root: Object3D, backdrop: BackdropJson | undefined): void {
+  build(root: Object3D, backdrop: BackdropJson | undefined): void {
     this.detach();
     this.presets = backdrop?.presets ?? [];
     if (!this.presets.length) return;
@@ -138,7 +141,15 @@ export class Backdrop {
    * `frames` is the elapsed time in 60 Hz frames, matching the per-frame
    * `angle += spin` the draw does.
    */
-  update(preset: number, mode: number, camera: Vector3, frames: number): void {
+  update(ctx: Context, t: Tick): void {
+    const w = ctx.walker;
+    if (!w) return;
+    const preset = w.backdropPreset;
+    const mode = w.backdropMode;
+    const camera = ctx.camera.position;
+    // Wall time, not game time: the dome keeps turning while the script is
+    // stepped an instruction at a time, and stops dead when the clock does.
+    const frames = t.frozen ? 0 : t.wall * 60;
     const p = this.presets[preset];
     this.mode = mode;
 
@@ -166,6 +177,17 @@ export class Backdrop {
       this.group.rotation.set(0, a, 0, "ZYX");
     }
     this.group.scale.copy(DOME_SCALE);
+  }
+
+  /**
+   * The spin angle is the one thing here that is not a function of the
+   * restored script state, and the draw resets it whenever the preset
+   * changes — so a load re-seats it from the preset rather than carrying a
+   * rotation that belongs to wherever the player was before the seek.
+   */
+  resync(ctx: Context): void {
+    this.preset = -1;
+    this.update(ctx, IDLE_TICK);
   }
 
   get describe(): string {

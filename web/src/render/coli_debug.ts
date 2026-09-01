@@ -28,6 +28,7 @@ import {
 } from "three";
 import type { ColiJson } from "../bundle/script";
 import { G } from "../game/globals";
+import type { System } from "../core/system";
 
 /** Amber: the full set, which both the sphere and the segment tests use. */
 const FULL_COLOUR = 0xffa53d;
@@ -36,14 +37,15 @@ const RAY_COLOUR = 0x4da6ff;
 /** How far a normal spike sticks out, in world units. */
 const NORMAL_LEN = 6;
 
-export class ColiDebugLayer {
+export class ColiDebugLayer implements System {
+  readonly id = "render.coli_debug";
   private root: Group | null = null;
   private json: ColiJson | null = null;
   /** The set membership the mesh was built for, so it rebuilds when it moves. */
   private builtFor = "";
   private enabled = false;
 
-  attach(parent: Object3D, coli: ColiJson | undefined): void {
+  build(parent: Object3D, coli: ColiJson | undefined): void {
     this.detach();
     this.json = coli ?? null;
     this.root = new Group();
@@ -62,20 +64,23 @@ export class ColiDebugLayer {
   setEnabled(on: boolean): void {
     this.enabled = on;
     if (this.root) this.root.visible = on;
-    if (on) this.refresh();
+    if (on) this.update();
   }
 
-  /** Rebuild when the script has selected a different set of blobs. */
-  refresh(): void {
+  /**
+   * Rebuild when the script has selected a different set of blobs — cheap,
+   * because that is a handful of times a stage and the key says when.
+   */
+  update(): void {
     if (!this.enabled || !this.root || !this.json) return;
     const key = `${G.g_coli_full_set.join(",")}|${G.g_coli_ray_set.join(",")}`;
     if (key === this.builtFor) return;
     this.builtFor = key;
     this.clear();
-    this.build(G.g_coli_full_set, FULL_COLOUR);
+    this.addBlobs(G.g_coli_full_set, FULL_COLOUR);
     // A blob in both lists is drawn once, in the full set's colour: that is
     // the one whose behaviour is the superset.
-    this.build(G.g_coli_ray_set.filter((k) => !G.g_coli_full_set.includes(k)),
+    this.addBlobs(G.g_coli_ray_set.filter((k) => !G.g_coli_full_set.includes(k)),
                RAY_COLOUR);
   }
 
@@ -88,7 +93,7 @@ export class ColiDebugLayer {
     }
   }
 
-  private build(keys: readonly string[], colour: number): void {
+  private addBlobs(keys: readonly string[], colour: number): void {
     if (!this.root || !this.json) return;
     const pos: number[] = [];
     const edge: number[] = [];

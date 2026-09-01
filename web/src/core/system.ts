@@ -1,4 +1,5 @@
 import type { PerspectiveCamera, Scene } from "three";
+import type { Walker } from "../script/walker";
 import type { Events } from "./events";
 import type { Rng } from "./rng";
 
@@ -12,6 +13,15 @@ export interface Context {
   readonly events: Events;
   /** The world's seeded generator. The only random source in the player. */
   readonly rng: Rng;
+  /**
+   * The script, and through it everything the stage's own program decides:
+   * the spawn list, the flags, the fog and light ramps, the camera command.
+   *
+   * Null until the first stage load. Every render layer reads it and none
+   * writes it — the walker is stepped by `app/loop.ts`, which is the one
+   * thing that gets to decide when a tick stops.
+   */
+  walker: Walker | null;
   /** Which stage is loaded — the snapshot is keyed on it. */
   stage: number;
   /** 60 Hz frames since the stage loaded. */
@@ -28,6 +38,16 @@ export interface Tick {
   wall: number;
   frozen: boolean;
 }
+
+/**
+ * A tick that advances nothing.
+ *
+ * What `resync` hands a layer whose `update` is already the whole of its
+ * rebuild: the state has been restored underneath it and it should place
+ * itself against that state without moving any clock of its own.
+ */
+export const IDLE_TICK: Tick =
+  { dt: 0, frames: 0, wall: 0, frozen: true };
 
 /**
  * A layer of the player.

@@ -63,6 +63,7 @@ import {
   Vector3,
   type Material,
 } from "three";
+import type { Context, System } from "../core/system";
 
 /** 2*pi / 65536 — the constant both matrix rotators multiply by. */
 export const BAMS_TO_RAD = 9.58738e-5;
@@ -126,7 +127,8 @@ export function lightDirection(pitchDeg: number, yawDeg: number,
   return out.set(cp * Math.sin(y), -Math.sin(p), cp * Math.cos(y));
 }
 
-export class SceneLighting {
+export class SceneLighting implements System {
+  readonly id = "render.lighting";
   readonly group = new Group();
   private readonly dir = new DirectionalLight(0xffffff, DIFFUSE_SCALE);
   private readonly amb = new AmbientLight(0xffffff, 1);
@@ -141,6 +143,7 @@ export class SceneLighting {
   private readonly lit = new Map<Material, Material>();
   private root: Object3D | null = null;
   private readonly _v = new Vector3();
+  private readonly _fwd = new Vector3();
 
   constructor(scene: Scene) {
     this.group.name = "scene_lights";
@@ -158,7 +161,7 @@ export class SceneLighting {
   }
 
   /** Remember the stage root so materials can be swapped in place. */
-  attach(root: Object3D): void {
+  build(root: Object3D): void {
     this.root = root;
     this.lit.clear();
     if (this.mode === "scene") this.applyMaterials();
@@ -229,6 +232,26 @@ export class SceneLighting {
 
   get current(): SceneLightState {
     return this.state;
+  }
+
+  /**
+   * The script's light block, the two evt gates, and the gun lights' place in
+   * the world — all four every tick, because the script ramps the colour over
+   * frames rather than switching it. `set` and `refreshGuns` no-op when
+   * nothing actually moved.
+   */
+  update(ctx: Context): void {
+    const w = ctx.walker;
+    if (!w) return;
+    this.set(w.light);
+    this.setGunLights(w.gunLights);
+    this.setSceneLighting(w.sceneLighting);
+    this.updateGunLights(ctx.camera.position,
+                         ctx.camera.getWorldDirection(this._fwd));
+  }
+
+  resync(ctx: Context): void {
+    this.update(ctx);
   }
 
   private refresh(): void {

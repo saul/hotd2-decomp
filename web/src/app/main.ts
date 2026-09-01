@@ -29,7 +29,9 @@ import {
   type OpJson,
 } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
-import { CamPaths, applyPose, cameraEyeY, type CameraPose } from "../render/campath";
+import { CamPaths } from "../render/campath";
+import { CameraDrawSystem, CameraRig, CameraSeatSystem }
+  from "../render/camera";
 import { StageScene } from "../render/stagescene";
 import { RailLayer, SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
@@ -54,7 +56,7 @@ import type { Context, Tick } from "../core/system";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
 import { wireSplitter } from "../hud/splitter";
-import { GameSystem, ScriptSystem } from "./systems";
+import { GameSystem, ScriptSystem, panelSystem } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
 import { GlobalsView } from "../hud/globals_view";
@@ -62,8 +64,6 @@ import { DebugPanels } from "../hud/debug_panels";
 import { GameMode } from "../game/game_mode";
 import { G } from "../game/globals";
 import { SetGameTables } from "../game/tables";
-import { CamAdvancePathFrame, CamSetPathTarget }
-  from "../game/camera/path";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { BreakableLayer } from "../render/breakables";
@@ -90,10 +90,17 @@ class Player {
 
   private manifest!: Manifest;
   private stage: StageScene | null = null;
-  private rails: RailLayer | null = null;
   private spawns = new SpawnLayer();
   private paths: CamPaths | null = null;
-  private walker: Walker | null = null;
+  /**
+   * The script, and the one copy of it.
+   *
+   * It lives on the `Context` because every system reads it there; this is the
+   * same reference under the name the player's own code has always used, so
+   * the two can never drift apart.
+   */
+  private get walker(): Walker | null { return this.ctx.walker; }
+  private set walker(w: Walker | null) { this.ctx.walker = w; }
 
   private readonly tree = new ScriptTree();
   private readonly feed = new EventFeed();
@@ -134,8 +141,6 @@ class Player {
   /** The port's data segment, on screen. */
   private readonly globalsView = new GlobalsView();
   private readonly debugPanels = new DebugPanels();
-  /** UI toggle — off restores the exact authored camera. */
-  private trackEnabled = true;
   private readonly rain = new Rain();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
@@ -145,11 +150,8 @@ class Player {
   private urlSyncKey = "";
   private urlSyncAt = 0;
   private speed = 1;
-  private pose: CameraPose = {
-    eye: new Vector3(0, 0, 0),
-    target: new Vector3(0, 0, -1),
-    roll: 0,
-  };
+  /** The camera's own state: the pose scratch, the rails, and the two toggles. */
+  private readonly cam = new CameraRig();
   /** Everything a system is handed. Built once; the stage index moves. */
   private readonly ctx: Context;
   /** The last snapshot taken, for the Load button. */
@@ -157,7 +159,6 @@ class Player {
   /** Set while the frame slider is driving the camera by hand. */
   private scrubbing = false;
   private pillarbox = true;
-  private readonly _fwd = new Vector3();
 
   constructor() {
     this.renderer = new WebGLRenderer({
@@ -183,6 +184,7 @@ class Player {
       camera: this.camera,
       events: this.events,
       rng: this.rng,
+      walker: null,
       stage: this.state.stage,
       frame: 0,
     };
@@ -190,10 +192,40 @@ class Player {
     // the port decides where it is and what it is doing, and the renderer
     // reads that. Adding a layer is one `add` and never touches the loop.
     this.world.add("script", this.script);
+    // The camera's two halves straddle the game phase: the shot writes the
+    // block, `CameraTrackEnemiesTick` eases it, and only then does the draw
+    // read it back. See `render/camera.ts`.
+    this.world.add("script", new CameraSeatSystem(this.cam));
     this.world.add("game", this.game);
+    this.world.add("render", new CameraDrawSystem(this.cam));
+    // Everything below poses against the camera the draw just placed.
+    this.world.add("render", this.spawns);
+    this.world.add("render", this.sceneFog);
+    this.world.add("render", this.lighting);
+    this.world.add("render", this.backdrop);
+    this.world.add("render", this.rigs);
+    this.world.add("render", this.chars);
+    this.world.add("render", this.props);
+    this.world.add("render", this.breakables);
     this.world.add("render", this.bullets);
+    this.world.add("render", this.shooting);
+    this.world.add("render", this.coliDebug);
+    this.world.add("render", this.stuckDebug);
+    this.world.add("render", this.rain);
+    this.world.add("render", this.debug);
+    // The port's data segment on screen, and the sidebar. Driven from the
+    // tick rather than from `refreshUi`, which only runs during playback:
+    // both are at their most useful when the clock is stopped.
+    this.world.add("hud", panelSystem("hud.globals",
+      () => this.globalsView.update()));
+    this.world.add("hud", panelSystem("hud.debug_panels", (ctx) => {
+      if (ctx.walker) this.debugPanels.update(ctx.walker, this.camera.position);
+    }));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
+    // The sidebar decides what it wants boxed and the layer draws it: one
+    // list, read once, so a row and its box cannot disagree.
+    this.debug.panels = this.debugPanels;
     // One generator for the whole player, so a snapshot replays the gore
     // rolls and the death directions as well as the attacks.
     this.chars.rng = this.rng;
@@ -331,11 +363,16 @@ class Player {
     this.playing = false;
     this.setPlayButton();
 
+    // Cleared before anything is torn down: `world.detach` and the layers'
+    // builders both run before the new one exists, and a layer that read the
+    // *previous* stage's script there would place the old stage's spawns in
+    // the new stage's scene.
+    this.walker = null;
     if (this.stage) {
       this.scene.remove(this.stage.root);
       this.stage.dispose();
     }
-    if (this.rails) this.scene.remove(this.rails.group);
+    if (this.cam.rails) this.scene.remove(this.cam.rails.group);
 
     const bundle = await loadStage(entry);
     this.paths = new CamPaths(bundle.cam);
@@ -344,8 +381,8 @@ class Player {
     this.sceneFog.prepare(this.stage.root);
     // Adopt the dome models before lighting, so its material swap sees the
     // clones the backdrop made rather than the shared originals.
-    this.backdrop.attach(this.stage.root, bundle.script.backdrop);
-    this.rigs.attach(this.stage.root, bundle.script.rigs, this.paths);
+    this.backdrop.build(this.stage.root, bundle.script.backdrop);
+    this.rigs.build(this.stage.root, bundle.script.rigs, this.paths);
     // The scene reset comes first: it empties the object pool and copies the
     // approach rings into the globals, and `chars.attach` spawns into that
     // pool. Doing it the other way round drops every actor it just made.
@@ -378,14 +415,14 @@ class Player {
     // character layer is the seam the port already reaches the renderer
     // through, so they are handed to it rather than duplicated in `game/`.
     this.chars.paths = this.paths;
-    this.coliDebug.attach(this.stage.root, bundle.script.coli);
-    this.stuckDebug.attach(this.stage.root);
+    this.coliDebug.build(this.stage.root, bundle.script.coli);
+    this.stuckDebug.build(this.stage.root);
     this.chars.civilians = bundle.script.civilians ?? null;
-    this.chars.attach(this.stage.root, bundle.script.characters);
+    this.chars.build(this.stage.root, bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
     // Doors, shutters and the vans they hang off; driven by the script's
     // own flags, so nothing here needs a clock of its own.
-    this.props.attach(this.stage.root, bundle.script.props);
+    this.props.build(this.stage.root, bundle.script.props);
     // Class 0x41's props are built at run time, so only the templates are
     // adopted here; the nodes follow `G.g_breakable_props`.
     this.breakables.adopt(this.stage.root);
@@ -399,14 +436,14 @@ class Player {
     this.shooting.playSound = (id) => { this.bgm.play(id); };
     this.shooting.setEnabled(
       $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
-    this.rain.attach(this.stage.root, bundle.script.rain);
-    this.lighting.attach(this.stage.root);
+    this.rain.build(this.stage.root, bundle.script.rain);
+    this.lighting.build(this.stage.root);
     this.scene.add(this.stage.root);
 
-    this.rails = new RailLayer(this.paths);
-    this.scene.add(this.rails.group);
-    this.rails.setVisible($<HTMLInputElement>("#show-rails").checked);
-    this.rails.setAimRailsVisible($<HTMLInputElement>("#show-aim").checked);
+    this.cam.rails = new RailLayer(this.paths);
+    this.scene.add(this.cam.rails.group);
+    this.cam.rails.setVisible($<HTMLInputElement>("#show-rails").checked);
+    this.cam.rails.setAimRailsVisible($<HTMLInputElement>("#show-aim").checked);
     this.debug.showUnported = $<HTMLInputElement>("#show-unported").checked;
     this.debug.showBoxes = $<HTMLInputElement>("#show-boxes").checked;
     this.coliDebug.setEnabled($<HTMLInputElement>("#show-coli").checked);
@@ -572,10 +609,10 @@ class Player {
     });
 
     $<HTMLInputElement>("#show-rails").addEventListener("change", (e) => {
-      this.rails?.setVisible((e.target as HTMLInputElement).checked);
+      this.cam.rails?.setVisible((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-aim").addEventListener("change", (e) => {
-      this.rails?.setAimRailsVisible((e.target as HTMLInputElement).checked);
+      this.cam.rails?.setAimRailsVisible((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#show-unported").addEventListener("change", (e) => {
       this.debug.showUnported = (e.target as HTMLInputElement).checked;
@@ -614,7 +651,7 @@ class Player {
       this.breakables.setEnabled((e.target as HTMLInputElement).checked);
     });
     $<HTMLInputElement>("#track-enemies").addEventListener("change", (e) => {
-      this.trackEnabled = (e.target as HTMLInputElement).checked;
+      this.cam.trackEnabled = (e.target as HTMLInputElement).checked;
       this.syncCameraToWalker();
     });
     $<HTMLInputElement>("#shoot").addEventListener("change", (e) => {
@@ -788,11 +825,11 @@ class Player {
       // the rail. Free roam therefore shows the whole level -- otherwise most
       // of it simply is not there.
       this.stage?.setVisibility("all");
-      this.rails?.setCameraMarkerVisible(true);
+      this.cam.rails?.setCameraMarkerVisible(true);
     } else {
       const all = $<HTMLInputElement>("#all-regions").checked;
       this.stage?.setVisibility(all ? "all" : "region");
-      this.rails?.setCameraMarkerVisible(false);
+      this.cam.rails?.setCameraMarkerVisible(false);
       this.syncCameraToWalker();
     }
     this.playing = mode === "play" ? this.playing : false;
@@ -926,21 +963,16 @@ class Player {
 
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
   private poseFromSlot(slot: number, frame: number): void {
-    const p = this.paths?.paths.get(slot);
-    if (!p) return;
-    p.pose(frame, this.walker?.rollEnabled ?? false, this.pose);
-    applyPose(this.camera, this.pose,
-              cameraEyeY(this.pose, this.walker?.useFixedEyeY ?? false,
-                         this.walker?.fixedEyeY ?? 0));
-    this.rails?.highlight(slot, p.start, p.end);
-    this.rails?.setCameraPose(this.camera.position, this.pose.target);
+    this.cam.poseFromSlot(this.camera, this.walker?.rollEnabled ?? false,
+                          this.walker?.useFixedEyeY ?? false,
+                          this.walker?.fixedEyeY ?? 0, slot, frame);
   }
 
   // -- walker callbacks --------------------------------------------------
 
   private onCamera(cmd: CamCommand): void {
     const p = this.paths?.paths.get(cmd.slot);
-    this.rails?.highlight(
+    this.cam.rails?.highlight(
       cmd.slot,
       Math.min(cmd.startFrame, cmd.endFrame),
       Math.max(cmd.startFrame, cmd.endFrame),
@@ -959,7 +991,7 @@ class Player {
     // than swinging onto it. That is what keeps the script's cuts sharp — and
     // 148 of the 631 consecutive `cam_play` pairs in stages 1-6 are cuts, some
     // of them a full 173 degrees.
-    this.seatCameraFromWalker(true);
+    this.cam.seat(this.ctx, true);
   }
 
   private onFeed(e: FeedEntry): void {
@@ -1036,7 +1068,7 @@ class Player {
             // it back on whatever the script is actually playing.
             const c = this.walker?.cam;
             if (c) this.onCamera(c);
-            else this.rails?.highlight(null);
+            else this.cam.rails?.highlight(null);
           });
         }
         btn.addEventListener("click", () => {
@@ -1069,67 +1101,14 @@ class Player {
   }
 
   /**
-   * The camera, in the engine's own two halves.
-   *
-   * `seatCameraFromWalker` is the queued `cam_play` action -- it evaluates the
-   * path and writes the camera block. `applyCameraFromBlock` is the draw. In
-   * between, `GameUpdate` runs `CameraTrackEnemiesTick`, which eases the
-   * block's look-at. Doing all three in one place is what the port used to do,
-   * and it is why the aim could only ever be a frame stale or a frame early.
-   */
-  private seatCameraFromWalker(force = false): void {
-    const w = this.walker;
-    if (!w || this.state.mode === "free") return;
-    const cam = w.cam;
-    if (!cam) return;
-    const p = this.paths?.paths.get(cam.slot);
-    if (!p) return;
-    p.pose(cam.frame, w.rollEnabled, this.pose);
-    // The block holds the **raw** curve eye, as `CamEvalPath7` leaves it. The
-    // `path.y - 15` rule is a property of the draw (`g_camera_eye_y`), not of
-    // the block, so it is applied in `applyCameraFromBlock` -- see the note on
-    // `APPLY_EYE_Y_RULE` in render/campath.ts for why it is off anyway.
-    // The path's own aim, which `SelectCameraLookAtTarget` falls back to.
-    CamSetPathTarget(this.pose.target);
-    // `CamAdvancePathFrame` runs only while the action is live. Once the shot
-    // reaches its end frame the action retires and the block is left where it
-    // is, for the camera hook to ease from -- which is the state the player
-    // spends every fight in. `trackEnabled` off pins the block to the rail
-    // every frame, which is the "exact authored camera" the toggle promises.
-    if (force || !cam.done || !this.trackEnabled) {
-      CamAdvancePathFrame(this.pose.eye, this.pose.target);
-    }
-  }
-
-  /** Draw from the camera block, after the hook has eased it. */
-  private applyCameraFromBlock(): void {
-    const w = this.walker;
-    if (!w || this.state.mode === "free") return;
-    if (!w.cam || !this.paths?.paths.get(w.cam.slot)) return;
-    this.pose.eye.set(G.g_camera_block_eye.x, G.g_camera_block_eye.y,
-                      G.g_camera_block_eye.z);
-    this.pose.target.set(G.g_camera_block_target.x, G.g_camera_block_target.y,
-                         G.g_camera_block_target.z);
-    // The orientation comes from the block's eye/target pair; only the eye's
-    // height is adjusted, and only after. Doing it the other way round tilts
-    // the shot.
-    applyPose(this.camera, this.pose,
-              cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY));
-    this.rails?.setCameraPose(this.camera.position, this.pose.target);
-  }
-
-  /**
-   * Seat and draw in one go, for the paths that have no game tick between.
+   * Seat and draw in one go, for the paths that have no game tick between —
+   * a seek, a slider drag, a stage that has just finished loading.
    *
    * `force` puts the aim on the rail even though the shot's action has
-   * retired. That is not something the engine ever needs — it has no seek —
-   * but arriving at a deep link with an eased look-at of (0,0,0) points the
-   * camera at the world origin, so anything that teleports the player into a
-   * state seats the block rather than easing out of nothing.
+   * retired. See `CameraRig.seat`.
    */
   private syncCameraToWalker(force = false): void {
-    this.seatCameraFromWalker(force);
-    this.applyCameraFromBlock();
+    this.cam.sync(this.ctx, force);
   }
 
   private frame = (now: number) => {
@@ -1178,15 +1157,15 @@ class Player {
       // countdown ride the script's own clock, and they took `tick` above.
       const game = this.gameTick(wall);
       this.syncPortGlobals();
-      // `CamStartPathPlayback` -> `CamAdvancePathFrame`, before the hook. This
-      // runs in Step mode too: the walker is not advancing, but the port is,
-      // and the camera hook still has to have a rail to fall back onto.
-      if (!this.scrubbing) this.seatCameraFromWalker();
+      // One call, and the order inside it is `World`'s: the shot seats the
+      // camera block, the port's frame eases it, the draw reads it back, and
+      // every render layer poses against the camera that draw placed.
+      // `CamStartPathPlayback` -> `CamAdvancePathFrame` runs in Step mode too:
+      // the walker is not advancing, but the port is, and the camera hook
+      // still has to have a rail to fall back onto.
+      this.cam.driving = !this.scrubbing;
+      this.cam.scripted = this.state.mode !== "free";
       this.world.update(this.ctx, game);
-      // `CameraTrackEnemiesTick` has just moved the block's look-at; the draw
-      // reads it. Everything below poses against this camera.
-      if (!this.scrubbing) this.applyCameraFromBlock();
-      this.drawLayers(game);
       // The stats panel is driven from here, not from the playback branch.
       // Read from there it only ever showed the state from *before* the first
       // frame -- which read `0/44 no node` for props that were all fine and
@@ -1288,64 +1267,6 @@ class Player {
     $("#paused-overlay").hidden = !paused;
   }
 
-  /**
-   * Everything that only reads state. Step 4 of PLAYER_ARCHITECTURE.md turns
-   * each of these into a `System` in the `render` phase; until then they are
-   * at least all in one place and all driven by one `Tick`.
-   */
-  private drawLayers(t: Tick): void {
-    const w = this.walker!;
-    this.spawns.update(w.spawns);
-    // Both animate: the script ramps fog and light over frames rather than
-    // switching them. `update`/`set` no-op when nothing actually moved.
-    const f = w.fog;
-    this.sceneFog.update(f.near, f.far, f.rgb, w.fogSet);
-    this.lighting.set(w.light);
-    this.backdrop.update(w.backdropPreset, w.backdropMode,
-                         this.camera.position, t.frozen ? 0 : t.wall * 60);
-    // Rigs ride the camera's clock: the routines dispatch on
-    // g_active_cam_path, so object and shot run in lockstep.
-    const cam = w.cam;
-    this.rigs.update(cam ? cam.slot : null, cam ? cam.frame : 0);
-    // Characters run on their own 30 Hz motion clock, not the camera's: an
-    // idle loops whatever the shot is doing.
-    this.chars.update(w.spawns);
-    // The swing counter is game frames, so a paused player holds a half-open
-    // door where it is.
-    this.props.update(w.flags, t.dt * 60);
-    // The breakable props follow the port's pool, not the script: they are
-    // created by `PlaceBreakableGroup` and die on their own clock.
-    this.breakables.update();
-    // Impact sprites run on wall time: they are feedback for a click, not part
-    // of the script's clock, so a paused player still shows them out.
-    this.shooting.update(t.wall);
-    // Cheap: it rebuilds only when the script has selected a different
-    // set of blobs, which is a handful of times a stage.
-    this.coliDebug.refresh();
-    // Counts every frame whether or not it is drawing, so switching the
-    // overlay on shows what is *already* wedged rather than restarting the run.
-    this.stuckDebug.update();
-    // The volume follows the camera's yaw only, so it stays world-vertical.
-    this.rain.update(w.rain, this.camera.position,
-                     Math.atan2(-this._fwd.x, -this._fwd.z),
-                     t.frozen ? 0 : t.wall * 60);
-    // Debug overlays read the same live spawn list the markers do, so the two
-    // can never disagree about who is present.
-    // The sidebar decides what it wants boxed, then the layer draws it: one
-    // list, read once, so a row and its box cannot disagree.
-    this.debugPanels.update(w, this.camera.position);
-    this.debug.highlight = this.debugPanels.highlight;
-    this.debug.update(w.spawns, w.wait?.policy.kind === "enemies",
-                      this.camera.position);
-    // Driven from here rather than from `refreshUi`, which only runs during
-    // playback: the panel is at its most useful when the clock is stopped.
-    this.globalsView.update();
-    this.lighting.setGunLights(w.gunLights);
-    this.lighting.setSceneLighting(w.sceneLighting);
-    this.lighting.updateGunLights(
-      this.camera.position, this.camera.getWorldDirection(this._fwd));
-  }
-
   // -- save state --------------------------------------------------------
 
   /**
@@ -1363,12 +1284,8 @@ class Player {
   loadSnapshot(snap: Snapshot): string | null {
     const err = this.world.load(snap, this.ctx);
     if (err) return err;
-    // The renderers have resynced; the camera has not, because it is driven
-    // from the walker's restored cam command rather than from a system. The
-    // eased look-at came back with the rest of `G`, so this only re-seats the
-    // block on the rail and draws.
-    this.syncCameraToWalker();
-    this.chars.resync();
+    // Every layer has resynced, the camera included -- it is the first system
+    // in the render phase, so the rest posed against the shot it restored.
     this.refreshUi();
     return null;
   }

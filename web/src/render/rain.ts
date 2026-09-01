@@ -44,6 +44,7 @@
 import { Euler, Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { RainJson } from "../bundle";
 import { Rng } from "../core/rng";
+import type { Context, System, Tick } from "../core/system";
 
 const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
@@ -54,7 +55,8 @@ interface Drop {
   z: number;
 }
 
-export class Rain {
+export class Rain implements System {
+  readonly id = "render.rain";
   readonly group = new Group();
   private drops: Drop[] = [];
   private cfg: RainJson | null = null;
@@ -65,6 +67,7 @@ export class Rain {
   private rand = new Rng(1);
   private readonly _e = new Euler();
   private readonly _v = new Vector3();
+  private readonly _fwdW = new Vector3();
 
   constructor() {
     this.group.name = "rain";
@@ -81,7 +84,7 @@ export class Rain {
    * routine names the slot as a literal. Taking it out of the stage tree stops
    * the region logic from ever showing the single authored copy.
    */
-  attach(root: Object3D, cfg: RainJson | undefined): void {
+  build(root: Object3D, cfg: RainJson | undefined): void {
     this.detach();
     this.cfg = cfg ?? null;
     if (!cfg || !cfg.enabled_by_script) return;
@@ -151,10 +154,20 @@ export class Rain {
   }
 
   /**
-   * `on` is evt `0x1D`'s flag; `frames` is elapsed 60 Hz frames, matching the
-   * routine's per-frame `y -= 2.0`.
+   * evt `0x1D`'s flag drives it, and the fall is per 60 Hz frame to match the
+   * routine's `y -= 2.0`. Wall time rather than game time: the rain keeps
+   * falling in free roam and while the script is stepped.
+   *
+   * The yaw is read off the camera here rather than handed in. It used to
+   * come from a vector `main.ts` filled *after* this ran, so the volume's
+   * rotation was always one frame behind the shot it is meant to sit in.
    */
-  update(on: boolean, camEye: Vector3, camYawRad: number, frames: number): void {
+  update(ctx: Context, t: Tick): void {
+    const on = ctx.walker?.rain ?? false;
+    const camEye = ctx.camera.position;
+    ctx.camera.getWorldDirection(this._fwdW);
+    const camYawRad = Math.atan2(-this._fwdW.x, -this._fwdW.z);
+    const frames = t.frozen ? 0 : t.wall * 60;
     this.on = on;
     const show = on && this.enabled && this.drops.length > 0;
     this.group.visible = show;

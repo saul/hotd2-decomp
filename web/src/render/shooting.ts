@@ -249,7 +249,11 @@ export class Shooting implements System {
   setEnabled(v: boolean, camera?: Camera, scene?: Object3D): void {
     this.enabled = v;
     this.dot.hidden = !v;
-    this.viewport.classList.toggle("shooting", v);
+    // The `shooting` class on the viewport is **not** set here any more. The
+    // viewport is React's element and `p.toggles.shoot` is the same fact, so
+    // it is rendered rather than toggled -- two layers writing one attribute
+    // is the bug this whole arc is about, and `paused` was the other writer.
+
     this._camera = camera ?? this._camera;
     this._scene = scene ?? this._scene;
     if (this._scene && !this.impacts) {

@@ -16,7 +16,7 @@ export function SkipBar({ p, dispatch }:
   { p: SkipProjection | null; dispatch: Dispatch }) {
   if (!p) return null;
   return (
-    <div className={p.stacked ? "stacked" : undefined}>
+    <div id="skipbar" className={p.stacked ? "stacked" : undefined}>
       <span className="tag">Skip</span>
       <span className="dim">{p.sub}</span>
       <button disabled={!p.canSkip}

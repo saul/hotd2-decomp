@@ -1091,7 +1091,7 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 13 | **The checks read the UI layer.** `verify_layers.py` and `verify_player_dom.py` glob `.tsx` too; the DOM selector accepts a type parameter; `into()` throws on a missing host instead of rendering nothing | ✅ |
 | 14 | **The snapshot oracle.** `CameraFrame` extracted so `GameSystem` is three-free and `System<Context>`; `web/test/state.test.ts` drives the real `World` headless and asserts save/load and seek equivalence frame by frame. Found two real bugs on its first run — see below | ✅ |
 | 15 | **Panels own themselves.** Fold is `ui/` state, not a DOM read; cost becomes demand expressed by mounting; `rememberFolds` deleted and `app/projection/player.ts` loses its `$`. The whole right sidebar is React's, the minimap included | ✅ |
-| 16 | **`index.html` becomes a mount point.** The chrome is React's; `createPortal` and the sixteen mount ids go; the filter, the feed scroller, the loading overlay, the paused overlay and `#status` become projection state; the `.mode` collision goes with the imperative writer | ☐ |
+| 16 | **`index.html` becomes a mount point.** The chrome is React's, canvas included; `createPortal` and the sixteen mount ids go; the loading overlay, the paused overlay and `#status` become projection state, the filter and the splitter become component state; the `.mode` and `.shooting` collisions go with their imperative writers. `web/test/ui.test.tsx` renders the page | ✅ |
 | 17 | **`refreshUi` dies.** `hudRows` into `buildProjection`, the minimap paint into its component, all 19 call sites and `setPlayButton`/`refreshPausedOverlay` gone. One update path | ☐ |
 | 18 | **Structural sharing replaces the change key.** `stable()` per slice, panels `memo()`, `publish` shallow-compares the root; `projectionKey`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ☐ |
 | 19 | **The shutter and the caption become engine state.** `/decomp` `FUN_00413970` and `FUN_00435AA0` first, name `DAT_009CA0F4` and its counter, then onto `Walker` beside `gateCloseLeft`; `Hud` becomes a `System` with `resync`. Clears step 14's assertion C | ☐ |
@@ -1240,6 +1240,13 @@ After the step, every one of those must be **byte-identical**, and
 `verify_layers.py`, `verify_port.py`, `verify_player_ops.py`,
 `verify_player_dom.py` and `verify_objects.py` must still pass. A step is not
 done until that holds.
+
+`npm run test:ui` is on that list from step 16 — the only check that the page
+has the shape the stylesheet expects, which neither `tsc` nor `vite build` can
+see. It caught nothing on the way in because the bug it exists for was found by
+reading first: moving the sidebar out of its portal dropped the
+`<aside id="right">` that `#stagearea`'s four-column grid places by source
+order, and the symptom would have been a blank right-hand column.
 
 `npm run test:state` is on that list from step 14 — and it is the stricter
 oracle, because the harnesses above only prove that *playing forward* did not

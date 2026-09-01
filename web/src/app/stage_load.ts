@@ -31,9 +31,7 @@ import { seekTo as seekWalkerTo } from "../script/seek";
 import { minimapGraph, treeProjection } from "./projection/script";
 import { makeWalkerHost } from "./walker_host";
 import type { Player } from "./main";
-
-const $ = <T extends HTMLElement>(sel: string): T =>
-  document.querySelector(sel) as T;
+import type { StatusProjection } from "../ui/projection";
 
 /** The manifest row for a stage, falling back to Arcade when Original has none. */
 function entryFor(p: Player, stage: number,
@@ -51,7 +49,6 @@ export async function loadStageInto(p: Player): Promise<void> {
 
   p.setLoading(`loading ${entry.name}…`);
   p.playing = false;
-  p.setPlayButton();
 
   // Cleared before anything is torn down: `world.detach` and the layers'
   // builders both run before the new one exists, and a layer that read the
@@ -187,27 +184,28 @@ export async function loadStageInto(p: Player): Promise<void> {
   const st = bundle.script.bgm?.stage_track;
   if (st) p.bgm.play(st.id, "stage");
   p.setLoading(null);
-  const status = $("#status");
-  status.textContent =
-    `${entry.name} · ${entry.counts.models} models · ` +
-    `${entry.counts.triangles.toLocaleString()} tris · ` +
-    `${entry.counts.regions} regions · ${entry.counts.blocks} blocks · ` +
-    `${entry.counts.branch_points} branch points`;
+  const status: StatusProjection = {
+    text:
+      `${entry.name} · ${entry.counts.models} models · ` +
+      `${entry.counts.triangles.toLocaleString()} tris · ` +
+      `${entry.counts.regions} regions · ${entry.counts.blocks} blocks · ` +
+      `${entry.counts.branch_points} branch points`,
+    note: "",
+    noteTitle: "",
+  };
   // A re-export changes the data under a page that looks identical, and a
   // stale bundle is indistinguishable from a bug. Say when this one was
   // built so the two can be told apart.
   if (p.manifest?.built) {
     const built = new Date(p.manifest.built);
     const age = (Date.now() - built.getTime()) / 1000;
-    const tag = document.createElement("span");
-    tag.className = "dim";
-    tag.title = `Bundle built ${p.manifest.built} by `
+    status.noteTitle = `Bundle built ${p.manifest.built} by `
       + `${p.manifest.tool} ${p.manifest.tool_version}`;
-    tag.textContent = ` · bundle ${
+    status.note = ` · bundle ${
       age < 3600 ? `${Math.max(0, Math.round(age / 60))} min old`
         : built.toLocaleString()}`;
-    status.appendChild(tag);
   }
+  p.status = status;
 }
 
 /** Honour the deep link: either an op address, or a raw camera pose. */

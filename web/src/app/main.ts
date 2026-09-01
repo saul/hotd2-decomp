@@ -35,7 +35,6 @@ import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
-import { on } from "./dom";
 import { Bgm } from "../audio/bgm";
 import { Backdrop } from "../render/backdrop";
 import { RigLayer } from "../render/rigs";
@@ -48,13 +47,15 @@ import { World } from "../core/world";
 import { Scope } from "../core/scope";
 import { UiStore } from "../ui/store";
 import { mountUi } from "./ui_root";
+import type { UiHost } from "../ui/App";
+import type { UiSlice } from "../ui/store";
 import type { ToggleName, UiCommand } from "../ui/commands";
 import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { screenMessage } from "./projection/message";
 import { feedRow } from "./projection/script";
 import type {
-  BranchProjection, FeedRow, MinimapGraph, SkipProjection, SoundProjection,
-  TransportProjection, TreeProjection,
+  BranchProjection, FeedRow, LoadingProjection, MinimapGraph, SkipProjection,
+  SoundProjection, StatusProjection, TransportProjection, TreeProjection,
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
 import { buildProjection, projectionKey, type PlayerView }
@@ -74,7 +75,6 @@ import type { RenderContext } from "../render/context";
 import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
-import { wireSplitter } from "../hud/splitter";
 import { GameSystem, ScriptSystem, panelSystem, syncPortGlobals }
   from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
@@ -85,9 +85,6 @@ import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { ResetPropContainers } from "../game/class41";
 import { ResetGameGlobals } from "../game/globals";
-
-const $ = <T extends HTMLElement>(sel: string): T =>
-  document.querySelector(sel) as T;
 
 /**
  * How often the playing address may be written back to the URL.
@@ -106,8 +103,9 @@ export class Player implements PlayerView {
   private readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
-  private readonly viewport = $("#viewport");
-  private readonly canvas = $<HTMLCanvasElement>("#view");
+  /** React's, handed over once it has them. See `app/ui_root.ts`. */
+  private readonly viewport: HTMLElement;
+  private readonly canvas: HTMLCanvasElement;
 
   manifest!: Manifest;
   /** Which stages the bundle holds, for the picker. */
@@ -142,7 +140,7 @@ export class Player implements PlayerView {
   feedVersion = 0;
   /** The HUD strip, rebuilt by `refreshUi` and read by the projection. */
   hud: [string, string, boolean?][] = [];
-  private readonly freeRoam = new FreeRoam($("#viewport"));
+  private readonly freeRoam: FreeRoam;
   readonly bgm = new Bgm();
   readonly sceneFog: SceneFog;
   readonly lighting: SceneLighting;
@@ -151,7 +149,7 @@ export class Player implements PlayerView {
   readonly chars = new CharacterLayer();
   readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
-  readonly shooting = new Shooting($("#viewport"), this.chars);
+  readonly shooting: Shooting;
   /** The `coli/` overlay — see `render/coli_debug.ts`. */
   readonly coliDebug = new ColiDebugLayer();
   readonly stuckDebug = new StuckDebugLayer();
@@ -182,7 +180,7 @@ export class Player implements PlayerView {
   stageScope: Scope | null = null;
   stageLoadedAt = 0;
   /** The one thing React subscribes to. See `ui/store.ts`. */
-  private readonly ui = new UiStore();
+  private readonly ui: UiStore;
   /** Bumped when the projection actually changed, so React can skip a frame. */
   private uiRevision = 0;
   private lastUiKey = "";
@@ -192,7 +190,10 @@ export class Player implements PlayerView {
   /** The wait panel's `box` checkbox — see the `boxWait` command. */
   boxWait = false;
   /** What the mounted panels are showing. See `UiStore.demand`. */
-  readonly wants = this.ui.wants;
+  readonly wants = (slice: UiSlice): boolean => this.ui.wants(slice);
+  /** The overlay over the viewport, and the stage's line in the top bar. */
+  loading: LoadingProjection | null = { text: "loading bundle…", failed: false };
+  status: StatusProjection = { text: "", note: "", noteTitle: "" };
   /** The view toggles. Defaults come from the table the panel renders. */
   toggles: Readonly<Record<ToggleName, boolean>> = TOGGLE_DEFAULTS;
   private readonly events = new Events();
@@ -208,7 +209,7 @@ export class Player implements PlayerView {
   readonly rain = new Rain();
   /** The rain pool, advanced in the game phase. See `game/effects/rain.ts`. */
   readonly rainSim = new RainSystem();
-  readonly hudLayer = new HudLayer($("#viewport"));
+  readonly hudLayer: HudLayer;
 
   state: PlayerState = readState();
   playing = false;
@@ -226,7 +227,13 @@ export class Player implements PlayerView {
   scrubbing = false;
   pillarbox = true;
 
-  constructor() {
+  constructor(ui: UiStore, host: UiHost) {
+    this.ui = ui;
+    this.viewport = host.viewport;
+    this.canvas = host.canvas;
+    this.freeRoam = new FreeRoam(host.viewport);
+    this.shooting = new Shooting(host.viewport, this.chars);
+    this.hudLayer = new HudLayer(host.viewport);
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
       antialias: true,
@@ -293,7 +300,7 @@ export class Player implements PlayerView {
     // tick rather than from `refreshUi`, which only runs during playback:
     // both are at their most useful when the clock is stopped.
     // The React half. One projection a frame, published only when it differs.
-    this.world.add("hud", panelSystem("ui", (ctx) => this.publishUi(ctx)));
+    this.world.add("hud", panelSystem("ui", () => this.publishUi()));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore
@@ -379,8 +386,6 @@ export class Player implements PlayerView {
     // The one place a `UiCommand` means anything. Everything in `ui/` reaches
     // the world through here and nowhere else.
     this.ui.onCommand((c) => this.runCommand(c));
-    mountUi(this.ui);
-    wireSplitter();
     // Watching the viewport rather than the window catches the splitter drag
     // and the branch bar appearing, neither of which resizes the window.
     new ResizeObserver(() => this.resize()).observe(this.viewport);
@@ -459,15 +464,6 @@ export class Player implements PlayerView {
    * button, and the one callback a layer raises *into* the shell.
    */
   private wireUi(): void {
-    // Deciding is not a race. Hovering the branch bar -- to read the routes,
-    // or to preview a shot -- stops the arcade countdown until the pointer
-    // leaves. The bar itself is still hand-built DOM (see `showBranch`), so
-    // this is a listener rather than a command.
-    const bar = $("#branchbar");
-    on(this.appScope, bar, "pointerenter",
-       () => this.runCommand({ kind: "branchHover", over: true }));
-    on(this.appScope, bar, "pointerleave",
-       () => this.runCommand({ kind: "branchHover", over: false }));
     // Every shot goes to the feed, so a session reads back as a transcript.
     this.shooting.onShot = (r, note) => {
       this.onFeed({
@@ -534,9 +530,6 @@ export class Player implements PlayerView {
    */
   setMode(mode: PlayerState["mode"]): void {
     this.state.mode = mode;
-    for (const b of document.querySelectorAll<HTMLButtonElement>(".mode")) {
-      b.classList.toggle("active", b.dataset.mode === mode);
-    }
     this.freeRoam.enabled = mode === "free";
     if (mode === "free") {
       this.freeRoam.adoptFrom(this.camera);
@@ -552,7 +545,6 @@ export class Player implements PlayerView {
       this.syncCameraToWalker();
     }
     this.playing = mode === "play" ? this.playing : false;
-    this.setPlayButton();
     this.pushUrl();
     this.refreshUi();
   }
@@ -561,7 +553,6 @@ export class Player implements PlayerView {
     if (this.state.mode === "free") this.setMode("play");
     this.playing = !this.playing;
     if (this.playing && this.state.mode === "step") this.setMode("play");
-    this.setPlayButton();
   }
 
   /**
@@ -579,22 +570,10 @@ export class Player implements PlayerView {
   }
 
 
-  /**
-   * The transport button follows `playing` through the projection; this is
-   * only the greyed-out overlay, which is DOM the React tree does not own.
-   *
-   * Every path that changes `playing` or the mode goes through here, which is
-   * why the overlay is refreshed from it rather than from the frame loop.
-   */
-  setPlayButton(): void {
-    this.refreshPausedOverlay();
-  }
-
   stepOnce(): void {
     const w = this.walker;
     if (!w) return;
     this.playing = false;
-    this.setPlayButton();
     w.stepOnce();
     this.syncCameraToWalker();
     this.refreshUi();
@@ -611,7 +590,6 @@ export class Player implements PlayerView {
     const w = this.walker;
     if (!w) return;
     this.playing = false;
-    this.setPlayButton();
     if (w.opIndex > 0) this.seekTo(w.block, w.step, w.opIndex - 1);
     else if (w.step > 0) {
       const ops = w.currentBlock?.steps?.[w.step - 1]?.ops?.length ?? 1;
@@ -623,7 +601,6 @@ export class Player implements PlayerView {
     const w = this.walker;
     if (!w) return;
     this.playing = false;
-    this.setPlayButton();
     this.clearFeed();
     // A seek replays quietly, so no dialogue or shutter op reaches the layer.
     // Without this the caption from wherever you were still hangs there.
@@ -758,11 +735,6 @@ export class Player implements PlayerView {
     this.loop.speed = this.speed;
     this.loop.running = this.playing && this.state.mode !== "free"
                         && !!this.walker && !this.walker.branch;
-    // Driven from here as well as from `setPlayButton`, because a stage that
-    // has just finished loading arrives paused without anything having touched
-    // the transport. Both calls are idempotent DOM toggles.
-    this.refreshPausedOverlay();
-
     if (!this.state.freeze && this.state.mode === "free") {
       this.freeRoam.update(wall, this.camera);
     } else if (!this.state.freeze && this.playing && this.walker) {
@@ -859,11 +831,8 @@ export class Player implements PlayerView {
    * you chose, with its own lit button, and covering the view you are flying
    * through with `PAUSED` would be worse than saying nothing.
    */
-  private refreshPausedOverlay(): void {
-    const paused = this.state.mode === "play" && !this.playing
-                   && !!this.walker;
-    $("#viewport").classList.toggle("paused", paused);
-    $("#paused-overlay").hidden = !paused;
+  get paused(): boolean {
+    return this.state.mode === "play" && !this.playing && !!this.walker;
   }
 
   // -- save state --------------------------------------------------------
@@ -936,13 +905,13 @@ export class Player implements PlayerView {
    * interface in `app/projection/player.ts` is the whole list of what the UI
    * depends on — and nothing in the builder can write back.
    */
-  private publishUi(ctx: RenderContext): void {
+  private publishUi(): void {
     // The boxes follow the sidebar's selection whether or not the sidebar is
     // drawn, so this is computed before anything is folded away.
     this.debug.highlight = highlightSet(
       this.walker, this.boxedClasses, this.boxWait);
 
-    const p = buildProjection(this, ctx);
+    const p = buildProjection(this, this.ctx);
     const key = projectionKey(p);
     if (key === this.lastUiKey) return;
     this.lastUiKey = key;
@@ -1017,19 +986,21 @@ export class Player implements PlayerView {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * The overlay over the viewport.
+   *
+   * Published rather than written: the element is React's, and these are
+   * called from outside the frame loop -- `fail` in particular runs when no
+   * stage will ever load, so there is no tick to pick the change up.
+   */
   setLoading(text: string | null): void {
-    const el = $("#loading");
-    el.hidden = text === null;
-    if (text !== null) $("#loading-text").textContent = text;
+    this.loading = text === null ? null : { text, failed: false };
+    this.publishUi();
   }
 
   fail(msg: string): void {
-    const el = $("#loading");
-    el.hidden = false;
-    el.querySelector(".spinner")?.remove();
-    const p = $("#loading-text");
-    p.className = "err";
-    p.textContent = msg;
+    this.loading = { text: msg, failed: true };
+    this.publishUi();
   }
 
   pushUrl(): void {
@@ -1067,4 +1038,17 @@ export class Player implements PlayerView {
   }
 }
 
-void new Player().start();
+// React first: the canvas and the viewport are its elements, so the `Player`
+// is built once it has committed them and handed them over. Nothing here
+// reaches into the document for a mount point of its own.
+//
+// Once, and guarded: an effect that runs twice -- strict mode, or a dev-server
+// remount -- would build a second `Player` over the same canvas, and the two
+// would fight for the frame.
+let started = false;
+const ui = new UiStore();
+mountUi(ui, (host) => {
+  if (started) return;
+  started = true;
+  void new Player(ui, host).start();
+});

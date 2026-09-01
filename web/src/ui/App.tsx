@@ -1,19 +1,27 @@
 /**
- * The UI layer's root.
+ * The UI layer's root, and the page.
  *
  * One subscription to one projection, and every panel below is a pure
  * function of it. Nothing here reaches into the engine, holds a layer, or
  * keeps a copy of game state; a control that wants something to happen
  * dispatches a `UiCommand` and `app/` decides what that means.
  *
- * The chrome is still `index.html`'s, so the panels are portalled into its
- * existing mount points rather than owning the page. That is what let them
- * move one at a time and be compared against the DOM version each replaced —
- * step 11 finishes by inverting it, and `index.html` becomes a single mount
- * point.
+ * `index.html` is a mount point. The chrome used to live there and the panels
+ * were portalled into sixteen ids inside it, which let them move across one at
+ * a time — and left a page with two owners. A renamed id gave `createPortal` a
+ * null host and the panel silently vanished; `#viewport` carried a `paused`
+ * class from `app/` and a `shooting` class from `render/` while React rendered
+ * neither; the mode buttons were written by React *and* by a
+ * `classList.toggle` loop, and the loop won for about a frame. All three are
+ * the same bug, and having one writer is the fix.
+ *
+ * The one thing that flows the other way is the two elements the renderer
+ * needs: the canvas it draws into and the viewport it measures. React owns
+ * them, so React hands them over — `onHost` fires once, after mount, and
+ * `app/` builds the `Player` around them. That is why the chrome renders
+ * before there is a projection at all.
  */
-import { useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { UiStore } from "./store";
 import { Scopes } from "./panels/Scopes";
 import { Globals } from "./panels/Globals";
@@ -23,6 +31,7 @@ import { Feed } from "./panels/Feed";
 import { HudStrip } from "./panels/HudStrip";
 import { Minimap } from "./panels/Minimap";
 import { Panel } from "./panels/Panel";
+import { Resizer } from "./panels/Resizer";
 import { Toggles } from "./panels/Toggles";
 import { Modes, StagePicker, ViewSettings } from "./panels/Topbar";
 import { Transport } from "./panels/Transport";
@@ -30,42 +39,102 @@ import { SkipBar } from "./panels/SkipBar";
 import { BranchBar } from "./panels/BranchBar";
 import type { UiProjection } from "./projection";
 
-/**
- * A panel's mount point, or a loud failure.
- *
- * Returning `null` for a missing host is precisely the bug
- * `verify_player_dom.py` was written to catch, reproduced sixteen times over:
- * rename an id in `index.html` and the panel simply stops rendering, behind a
- * clean `tsc` and a clean `vite build`. These selectors are built at run time
- * and no static check can see them, so until step 16 deletes the portals
- * altogether, throwing is what stands in for one.
- */
-const into = (sel: string, node: React.ReactNode) => {
-  const host = document.querySelector(sel);
-  if (!host) throw new Error(`ui: no mount point ${sel} in index.html`);
-  return createPortal(node, host);
-};
+/** The two elements the renderer needs, handed over once React has them. */
+export interface UiHost {
+  canvas: HTMLCanvasElement;
+  viewport: HTMLElement;
+}
 
-export function App({ store }: { store: UiStore }) {
-  const p = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  if (!p) return null;
+export function App(
+  { store, onHost }: { store: UiStore; onHost: (h: UiHost) => void },
+) {
+  const p = useSyncExternalStore(store.subscribe, store.getSnapshot,
+                                store.getServerSnapshot);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+
+  // Once, after the first commit. There is no projection yet and there cannot
+  // be: `app/` needs these two elements to build the `Player` that produces
+  // one.
+  useEffect(() => {
+    if (canvas.current && viewport.current) {
+      onHost({ canvas: canvas.current, viewport: viewport.current });
+    }
+  }, [onHost]);
+
+  const loading = p ? p.loading : { text: "loading bundle…", failed: false };
 
   return (
     <>
-      {into("#stage-picker", <StagePicker p={p} dispatch={store.dispatch} />)}
-      {into("#modes", <Modes mode={p.transport.mode}
-                             dispatch={store.dispatch} />)}
-      {into("#view-settings", <ViewSettings p={p} dispatch={store.dispatch} />)}
-      {into("#transport", <Transport t={p.transport} sound={p.sound}
-                                     dispatch={store.dispatch} />)}
-      {into("#branchbar", <BranchBar p={p.branch}
-                                     dispatch={store.dispatch} />)}
-      {into("#skipbar", <SkipBar p={p.skip} dispatch={store.dispatch} />)}
-      {into("#toggles", <Toggles state={p.toggles}
-                                 dispatch={store.dispatch} />)}
-      {into("#tree", <Tree p={p.tree} current={p.current}
-                           dispatch={store.dispatch} />)}
-      {into("#right", <Sidebar p={p} store={store} />)}
+      <header id="topbar">
+        <span className="brand">HOTD2 <span className="dim">stage player</span></span>
+        {p && <>
+          <span id="stage-picker" className="toggles">
+            <StagePicker p={p} dispatch={store.dispatch} />
+          </span>
+          <span className="sep" />
+          <div className="modes" role="tablist" id="modes">
+            <Modes mode={p.transport.mode} dispatch={store.dispatch} />
+          </div>
+          <span className="sep" />
+          <span id="toggles" className="toggles">
+            <Toggles state={p.toggles} dispatch={store.dispatch} />
+          </span>
+          <span id="view-settings" className="toggles">
+            <ViewSettings p={p} dispatch={store.dispatch} />
+          </span>
+        </>}
+        <span className="grow" />
+        <span id="status" className="dim">
+          {p?.status.text ?? ""}
+          {p?.status.note
+            && <span className="dim" title={p.status.noteTitle}>
+                 {p.status.note}
+               </span>}
+        </span>
+      </header>
+
+      <main id="stagearea">
+        <Tree p={p?.tree ?? null} current={p?.current ?? null}
+              dispatch={store.dispatch} />
+        <Resizer />
+
+        {/* `shooting` and `paused` are both this element's class, so they are
+            both read from the projection. Two layers writing it imperatively
+            is what left the crosshair on after the mode changed. */}
+        <div id="viewport" ref={viewport}
+             className={[p?.paused && "paused",
+                         p?.toggles.shoot && "shooting"]
+                        .filter(Boolean).join(" ")}>
+          <canvas id="view" ref={canvas} />
+          {p?.paused && <div id="paused-overlay"><span>PAUSED</span></div>}
+          {loading && (
+            <div id="loading">
+              {!loading.failed && <div className="spinner" />}
+              <p id="loading-text" className={loading.failed ? "err" : undefined}>
+                {loading.text}
+              </p>
+            </div>
+          )}
+          {/* Anchored to the bottom of the rendered view, not a modal over it:
+              a branch point is a fact about where playback has got to, so the
+              script, the scrubber and free roam all stay usable. The skip bar
+              sits above it on the rare frame both are live. */}
+          <SkipBar p={p?.skip ?? null} dispatch={store.dispatch} />
+          <BranchBar p={p?.branch ?? null} dispatch={store.dispatch}
+                     onHover={(over) =>
+                       store.dispatch({ kind: "branchHover", over })} />
+        </div>
+
+        {/* Fourth in source order, because `#stagearea` is a grid and grid
+            auto-placement follows the DOM. */}
+        <aside id="right">{p && <Sidebar p={p} store={store} />}</aside>
+      </main>
+
+      <footer id="transport">
+        {p && <Transport t={p.transport} sound={p.sound}
+                         dispatch={store.dispatch} />}
+      </footer>
     </>
   );
 }

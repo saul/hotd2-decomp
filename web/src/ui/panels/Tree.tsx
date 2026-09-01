@@ -1,5 +1,5 @@
 /**
- * The script, as a tree.
+ * The script panel: a filter box, and the script as a tree.
  *
  * Thousands of rows, none of which change once a stage has loaded — so the
  * whole thing is memoised on the projection's identity and re-renders only
@@ -11,6 +11,11 @@
  * The filter is the same argument. It hides rows by style, over a list React
  * has already committed, because a `useState` filter would rebuild every
  * block on each keystroke.
+ *
+ * Both of those writes go to nodes **this component rendered**, which is the
+ * distinction that matters: "one writer per pixel" is about two layers
+ * fighting over one attribute, not about a component reaching for the DOM it
+ * owns when React's model is the wrong tool for the job.
  */
 import { memo, useEffect, useRef, useState } from "react";
 import type { TreeProjection } from "../projection";
@@ -58,20 +63,10 @@ export function Tree(
   },
 ) {
   const host = useRef<HTMLDivElement>(null);
+  // The filter changes nothing outside this panel, so it is component state.
+  // It used to be an `<input>` in `index.html` that this subscribed to with a
+  // `querySelector` -- a component reaching out of itself for its own control.
   const [q, setQ] = useState("");
-
-  // The filter box lives in the panel head, which is still the chrome's HTML.
-  // Subscribing to it is the bridge until step 11 finishes and `index.html`
-  // becomes a mount point; the alternative is portalling a control into a
-  // header, which is worse.
-  useEffect(() => {
-    const box = document.querySelector<HTMLInputElement>("#tree-filter");
-    if (!box) return;
-    const on = () => setQ(box.value);
-    box.addEventListener("input", on);
-    setQ(box.value);
-    return () => box.removeEventListener("input", on);
-  }, []);
 
   // The highlight, applied straight to the committed DOM. One row gains a
   // class and one loses it, sixty times a second at worst; as a prop it would
@@ -116,8 +111,15 @@ export function Tree(
   }, [q, p]);
 
   return (
-    <div ref={host}>
-      {p?.blocks.map((b) => <Block key={b.index} b={b} dispatch={dispatch} />)}
-    </div>
+    <aside id="left">
+      <div className="panel-head">
+        <strong>Script</strong>
+        <input type="search" id="tree-filter" placeholder="filter…"
+               value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div id="tree" className="scroll" ref={host}>
+        {p?.blocks.map((b) => <Block key={b.index} b={b} dispatch={dispatch} />)}
+      </div>
+    </aside>
   );
 }

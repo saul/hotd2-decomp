@@ -12,11 +12,18 @@
 import type { Dispatch } from "../commands";
 import type { BranchProjection } from "../projection";
 
-export function BranchBar({ p, dispatch }:
-  { p: BranchProjection | null; dispatch: Dispatch }) {
+export function BranchBar({ p, dispatch, onHover }:
+  { p: BranchProjection | null; dispatch: Dispatch;
+    onHover: (over: boolean) => void }) {
   if (!p) return null;
   return (
-    <>
+    // Deciding is not a race: hovering the bar -- to read the routes, or to
+    // preview a shot -- stops the arcade countdown until the pointer leaves.
+    // This used to be two `addEventListener` calls in `Player.wireUi`, on an
+    // element in `index.html` that this component rendered the contents of.
+    <div id="branchbar"
+         onPointerEnter={() => onHover(true)}
+         onPointerLeave={() => onHover(false)}>
       <span className="tag">Branch</span>
       <span className="dim">{p.sub}</span>
       <span>
@@ -38,6 +45,6 @@ export function BranchBar({ p, dispatch }:
       <span className={`countdown${p.paused ? " paused" : ""}`}>
         {p.countdown}
       </span>
-    </>
+    </div>
   );
 }

@@ -250,14 +250,51 @@ export interface SoundProjection {
   text: string;
 }
 
+/**
+ * The overlay over the viewport while a bundle or a stage is coming in.
+ *
+ * `failed` is the terminal kind: the spinner goes and the text is an error.
+ * There is no way back from one, which is why it is a flag on the same value
+ * rather than a second field that could disagree with it.
+ */
+export interface LoadingProjection {
+  text: string;
+  failed: boolean;
+}
+
+/**
+ * The stage's line in the top bar.
+ *
+ * The bundle note is separate because it carries its own tooltip -- the build
+ * stamp and the tool that made it. A re-export changes the data under a page
+ * that looks identical, and a stale bundle is indistinguishable from a bug.
+ */
+export interface StatusProjection {
+  /** Model, triangle, region, block and branch-point counts. */
+  text: string;
+  /** ` · bundle 3 min old`, or empty. */
+  note: string;
+  noteTitle: string;
+}
+
 export interface UiProjection {
   /** Bumped whenever anything below changed. React re-renders on this alone. */
   revision: number;
   stage: number;
   stages: number[];
   original: boolean;
-  loading: string | null;
-  status: string;
+  /** Null once the stage is up. */
+  loading: LoadingProjection | null;
+  /** The stage's line in the top bar. */
+  status: StatusProjection;
+  /**
+   * The clock is stopped and the viewer is meant to notice.
+   *
+   * Free roam stops the same clock but does **not** raise this — it is a mode
+   * you chose, with its own lit button, and covering the view you are flying
+   * through with `PAUSED` would be worse than saying nothing.
+   */
+  paused: boolean;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
   sound: SoundProjection;

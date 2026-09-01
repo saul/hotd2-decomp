@@ -18,8 +18,9 @@ import type { CamPaths } from "../../render/campath";
 import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type {
-  BranchProjection, FeedRow, MinimapGraph, SkipProjection, SoundProjection,
-  TransportProjection, TreeProjection, UiProjection,
+  BranchProjection, FeedRow, LoadingProjection, MinimapGraph, SkipProjection,
+  SoundProjection, StatusProjection, TransportProjection, TreeProjection,
+  UiProjection,
 } from "../../ui/projection";
 import { actorsProjection, waitProjection } from "./sidebar";
 import { globalsProjection } from "./globals";
@@ -37,6 +38,10 @@ export interface PlayerView {
   readonly stage: number;
   readonly stages: readonly number[];
   readonly original: boolean;
+  readonly loading: LoadingProjection | null;
+  readonly status: StatusProjection;
+  /** The clock is stopped and the viewer is meant to notice. */
+  readonly paused: boolean;
   readonly mode: "play" | "step" | "free";
   readonly playing: boolean;
   readonly speed: number;
@@ -82,8 +87,9 @@ export function buildProjection(v: PlayerView, ctx: RenderContext): UiProjection
     stage: v.stage,
     stages: [...v.stages],
     original: v.original,
-    loading: null,
-    status: "",
+    loading: v.loading,
+    status: v.status,
+    paused: v.paused,
     toggles: v.toggles,
     transport: v.transport,
     sound: v.sound,

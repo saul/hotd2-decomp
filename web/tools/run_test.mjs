@@ -24,6 +24,14 @@ const out = await build({
   target: "node20",
   write: false,
   logLevel: "warning",
+  // A CJS dependency bundled into ESM keeps its `require`, and esbuild's shim
+  // for it looks for a global one before giving up. `react-dom/server` reaches
+  // for `util` that way, so give it a real `require` rather than pretend no
+  // test will ever pull in a CommonJS package.
+  banner: {
+    js: "import { createRequire as __cr } from 'node:module';"
+      + " const require = __cr(import.meta.url);",
+  },
 });
 
 const dir = mkdtempSync(join(tmpdir(), "hod2-test-"));

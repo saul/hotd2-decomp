@@ -54,7 +54,7 @@ export function Modes({ mode, dispatch }:
     <>
       {MODES.map((m) => (
         <button key={m.mode}
-                className={`mode${mode === m.mode ? " on" : ""}`}
+                className={`mode${mode === m.mode ? " active" : ""}`}
                 onClick={() => dispatch({ kind: "setMode", mode: m.mode })}>
           {m.label}
         </button>

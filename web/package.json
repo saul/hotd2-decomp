@@ -13,7 +13,8 @@
     "replay": "node --experimental-strip-types --no-warnings tools/run_test.mjs tools/replay.mjs",
     "test:seek": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/seek.test.ts",
     "test:scope": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/scope.test.ts",
-    "test:state": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/state.test.ts"
+    "test:state": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/state.test.ts",
+    "test:ui": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/ui.test.tsx"
   },
   "dependencies": {
     "react": "^19.2.8",

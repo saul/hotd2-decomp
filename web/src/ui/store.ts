@@ -87,4 +87,14 @@ export class UiStore {
    * mutating it.
    */
   getSnapshot = (): UiProjection | null => this.current;
+
+  /**
+   * The same value, for a render with no browser behind it.
+   *
+   * `useSyncExternalStore` asks for this separately because a server has no
+   * subscription to fall back on. There is no server here — what uses it is
+   * `web/test/ui.test.tsx`, which renders the chrome to a string and is the
+   * only check that the page has the shape the stylesheet expects.
+   */
+  getServerSnapshot = (): UiProjection | null => this.current;
 }

@@ -7,71 +7,12 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app">
-      <header id="topbar">
-        <span class="brand">HOTD2 <span class="dim">stage player</span></span>
-        <span id="stage-picker" class="toggles"></span>
-        <span class="sep"></span>
-        <div class="modes" role="tablist" id="modes"></div>
-        <span class="sep"></span>
-        <span id="toggles" class="toggles"></span>
-        <span id="view-settings" class="toggles"></span>
-        <span class="grow"></span>
-        <span id="status" class="dim"></span>
-      </header>
-
-      <main id="stagearea">
-        <aside id="left">
-          <div class="panel-head">
-            <strong>Script</strong>
-            <input type="search" id="tree-filter" placeholder="filter…" />
-          </div>
-          <div id="tree" class="scroll"></div>
-        </aside>
-
-        <div
-          id="left-resize"
-          class="resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the script panel"
-          aria-valuemin="130"
-          aria-valuemax="620"
-          tabindex="0"
-          title="Drag to resize · double-click to reset"
-        ></div>
-
-        <div id="viewport">
-          <canvas id="view"></canvas>
-          <!-- Shown while the game clock is stopped and the viewer is meant to
-               notice. Free roam stops the clock too but says so with its own
-               mode button, so it does not raise this. -->
-          <div id="paused-overlay" hidden><span>PAUSED</span></div>
-          <div id="loading">
-            <div class="spinner"></div>
-            <p id="loading-text">loading bundle…</p>
-          </div>
-
-          <!-- Anchored to the bottom of the rendered view, not a modal over
-               it: a branch point is a fact about where playback has got to,
-               so the script, the scrubber and free roam all stay usable. -->
-          <!-- Same anchoring as the branch bar below, and shown under the
-               same rule the game uses: inside a set_skippable_region with the
-               shutter's firing gate down. Where the branch bar asks a question
-               that playback is waiting on, this one only offers something, so
-               it never blocks and never counts down. -->
-          <div id="skipbar"></div>
-          <div id="branchbar">
-          </div>
-        </div>
-
-        <!-- React's, entirely. Every panel in here owns its own fold and
-             declares its own cost; see `ui/panels/Panel.tsx`. -->
-        <aside id="right"></aside>
-      </main>
-
-      <footer id="transport"></footer>
-    </div>
+    <!-- A mount point, and nothing else. Every element of the chrome is
+         rendered by `ui/App.tsx`, including the canvas the renderer draws
+         into: a page with two owners is how a `paused` class and a `shooting`
+         class came to fight over one attribute, and how a renamed id could
+         make a panel silently disappear. -->
+    <div id="app"></div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

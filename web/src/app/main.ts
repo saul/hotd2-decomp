@@ -34,7 +34,7 @@ import { CameraDrawSystem, CameraRig, CameraSeatSystem }
 import { StageScene } from "../render/stagescene";
 import { RailLayer, SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
-import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "../script/walker";
+import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { on } from "./dom";
@@ -61,7 +61,7 @@ import { screenMessage } from "./projection/message";
 import { feedRow, inspectorText, minimapGraph, opSummary, treeProjection }
   from "./projection/script";
 import type {
-  FeedRow, MinimapGraph, SkipProjection, SoundProjection,
+  BranchProjection, FeedRow, MinimapGraph, SkipProjection, SoundProjection,
   TransportProjection, TreeProjection,
 } from "../ui/projection";
 import { actorsProjection, highlightSet, waitProjection }
@@ -525,7 +525,9 @@ class Player {
       startCamera: (c) => this.onCamera(c),
       releaseCamera: () => {},
       onFeed: (e) => this.onFeed(e),
-      onBranch: (b) => this.showBranch(b),
+      // Nothing to do: the branch bar is a projection now, so the next frame
+      // draws it. The callback stays because the walker's contract has one.
+      onBranch: () => {},
       playSound: (id) => this.bgm.play(id),
       // Null unless Shoot is on: only then is there anything that can make
       // the count fall, so only then is the gate a real condition.
@@ -807,7 +809,7 @@ class Player {
     return {
       canSkip: can,
       // On the rare frame a branch point is live too, sit above it.
-      stacked: !$("#branchbar").hidden,
+      stacked: !!w.branch,
       sub: !can
         ? "region open, but the shutter's firing gate is up — the game would "
           + "not poll Start here"
@@ -946,7 +948,6 @@ class Player {
    * the script, the scrubber and free roam all stay usable while it is up,
    * and it never covers the shot you are choosing between.
    */
-  private shownBranch: string | null = null;
   /** True while the pointer is over the branch bar; freezes the countdown. */
   private branchHover = false;
 
@@ -955,75 +956,34 @@ class Player {
    * frozen because the pointer is over the bar, or simply waiting because
    * only Play mode runs the arcade timer at all.
    */
-  private refreshBranchCountdown(): void {
+  private branchProjection(): BranchProjection | null {
     const b = this.walker?.branch;
-    const el = $("#branch-countdown");
-    if (!b) {
-      el.textContent = "";
-      return;
-    }
-    if (!this.playing) el.textContent = "waiting for a choice";
-    else if (this.branchHover) el.textContent = "countdown paused";
-    else el.textContent = `picking in ${Math.max(0, b.countdown).toFixed(1)} s`;
-    el.classList.toggle("paused", this.playing && this.branchHover);
-  }
-
-  private showBranch(b: BranchChoice | null): void {
-    const bar = $("#branchbar");
-    if (!b) {
-      bar.hidden = true;
-      this.shownBranch = null;
-      return;
-    }
-    // Rebuilding the buttons while one is being clicked destroys the click.
-    // Only a different branch point is worth redrawing for.
-    const key = `${b.block}:${b.targets.join(",")}`;
-    if (this.shownBranch === key && !bar.hidden) return;
-    this.shownBranch = key;
-    bar.hidden = false;
+    if (!b) return null;
     const route = this.walker?.currentBlock?.route;
-    $("#branch-sub").textContent =
-      `block ${b.block} → ${b.targets.join(" or ")}`;
-
-    const box = $("#branch-buttons");
-    box.replaceChildren(
-      ...b.targets.map((t) => {
-        const btn = document.createElement("button");
+    return {
+      sub: `block ${b.block} → ${b.targets.join(" or ")}`,
+      options: b.targets.map((t) => {
         const choice = route ? route.next.indexOf(t) : -1;
-        btn.textContent = `→ ${t}`;
-        btn.title = `Take route to block ${t}` +
-          (choice >= 0 ? ` (branch_choice ${choice})` : "");
         // The arcade shows a preview of each route before you commit. Those
-        // shots are the store_six operands, indexed by branch_choice.
+        // shots are the `store_six` operands, indexed by `branch_choice`.
         // Unused choices are stored as slot 0 / frame 0 and resolve to no
         // path; those get no preview rather than a shot of somewhere else.
-        const shot = b.preview?.find((p) => p.choice === choice && p.cam);
-        if (shot) {
-          btn.classList.add("has-preview");
-          btn.addEventListener("pointerenter", () =>
-            this.poseFromSlot(shot.slot, shot.frame));
-          btn.addEventListener("pointerleave", () => {
-            this.syncCameraToWalker();
-            // poseFromSlot moved the rail highlight to the preview path; put
-            // it back on whatever the script is actually playing.
-            const c = this.walker?.cam;
-            if (c) this.onCamera(c);
-            else this.cam.rails?.highlight(null);
-          });
-        }
-        btn.addEventListener("click", () => {
-          this.walker?.takeBranch(t);
-          this.clearFeed();
-          this.syncCameraToWalker();
-          this.refreshUi();
-        });
-        return btn;
+        const shot = b.preview?.find((q) => q.choice === choice && q.cam);
+        return {
+          target: t,
+          label: `→ ${t}`,
+          title: `Take route to block ${t}`
+            + (choice >= 0 ? ` (branch_choice ${choice})` : ""),
+          preview: shot ? { slot: shot.slot, frame: shot.frame } : null,
+        };
       }),
-    );
-    this.refreshBranchCountdown();
-
-    // The bar is a grid row, so showing it shortens the viewport. The
-    // ResizeObserver on #viewport picks that up; nothing to do here.
+      countdown: !this.playing
+        ? "waiting for a choice"
+        : this.branchHover
+          ? "countdown paused"
+          : `picking in ${Math.max(0, b.countdown).toFixed(1)} s`,
+      paused: this.playing && this.branchHover,
+    };
   }
 
   // -- per-frame ---------------------------------------------------------
@@ -1072,7 +1032,6 @@ class Player {
     } else if (!this.state.freeze && this.playing && this.walker) {
       if (this.walker.branch) {
         if (!this.branchHover) this.walker.tickBranchCountdown(wall);
-        this.refreshBranchCountdown();
       } else {
         // The 60 Hz frames the walker actually advanced. The shutter slide and
         // the dialogue countdown are script state measured in those frames, so
@@ -1296,8 +1255,25 @@ class Player {
       case "requestSkip": this.requestSkip(); return;
       case "branchHover":
         this.branchHover = c.over;
-        this.refreshBranchCountdown();
         return;
+      case "takeBranch":
+        this.walker?.takeBranch(c.target);
+        this.clearFeed();
+        this.syncCameraToWalker();
+        this.refreshUi();
+        return;
+      case "previewBranch":
+        this.poseFromSlot(c.slot, c.frame);
+        return;
+      case "endPreview": {
+        this.syncCameraToWalker();
+        // `poseFromSlot` moved the rail highlight to the preview path; put it
+        // back on whatever the script is actually playing.
+        const cam = this.walker?.cam;
+        if (cam) this.onCamera(cam);
+        else this.cam.rails?.highlight(null);
+        return;
+      }
       case "reset":
         this.clearFeed();
         this.walker?.reset();
@@ -1505,6 +1481,7 @@ class Player {
         ? inspectorText(w.currentOp, { summary: opSummary(w.currentOp) }) : "",
       hudRows: this.hudRows,
       skip: this.skipProjection(),
+      branch: this.branchProjection(),
       scopes: this.appScope.snapshot(),
       scopeContext: { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt },
       hasSaved: !!this.saved,

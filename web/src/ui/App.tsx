@@ -25,6 +25,7 @@ import { Toggles } from "./panels/Toggles";
 import { Modes, StagePicker, ViewSettings } from "./panels/Topbar";
 import { Transport } from "./panels/Transport";
 import { SkipBar } from "./panels/SkipBar";
+import { BranchBar } from "./panels/BranchBar";
 
 const at = (sel: string) => document.querySelector(sel);
 
@@ -44,6 +45,8 @@ export function App({ store }: { store: UiStore }) {
                              dispatch={store.dispatch} />)}
       {into("#view-settings", <ViewSettings p={p} dispatch={store.dispatch} />)}
       {into("#transport", <Transport t={p.transport} sound={p.sound}
+                                     dispatch={store.dispatch} />)}
+      {into("#branchbar", <BranchBar p={p.branch}
                                      dispatch={store.dispatch} />)}
       {into("#skipbar", <SkipBar p={p.skip} dispatch={store.dispatch} />)}
       {into("#toggles", <Toggles state={p.toggles}

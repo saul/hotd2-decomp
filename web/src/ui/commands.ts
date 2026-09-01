@@ -43,6 +43,10 @@ export type UiCommand =
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }
   | { kind: "requestSkip" }
+  | { kind: "takeBranch"; target: number }
+  /** Hovering a route's button previews its opening shot. */
+  | { kind: "previewBranch"; slot: number; frame: number }
+  | { kind: "endPreview" }
   /** Hovering the branch bar stops the arcade countdown. Deciding is not a race. */
   | { kind: "branchHover"; over: boolean };
 

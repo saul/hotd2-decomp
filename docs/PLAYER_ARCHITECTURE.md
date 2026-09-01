@@ -791,7 +791,7 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
-| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero and `ui` may no longer import `engine` at all | ◐ — every panel is React; `wireUi` and the `index.html` inversion remain |
+| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control | ✅ |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
 
 ### Proving a step did not change behaviour

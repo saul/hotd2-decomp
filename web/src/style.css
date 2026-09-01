@@ -462,6 +462,11 @@ button.kill:hover { background: #8c2626; }
    out the way the toolbar's flex row used to. */
 .toggles { display: contents; }
 
+/* Both bars are React's now and render nothing when there is no offer and no
+   question. They used to carry `hidden`; an empty grid row is the same thing
+   said in CSS, and it means the projection is the only thing deciding. */
+#skipbar:empty, #branchbar:empty { display: none; }
+
 /* -- the scope panel: the disposal tree, and where it is leaking ---------- */
 #scope-panel { max-height: 32%; }
 #scopes {

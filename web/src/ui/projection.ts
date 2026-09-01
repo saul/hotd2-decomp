@@ -18,6 +18,33 @@
 import type { ScopeRow } from "./panels/scope_types";
 import type { ToggleName } from "./commands";
 
+/** One route out of a branch point, as a button. */
+export interface BranchOption {
+  target: number;
+  label: string;
+  title: string;
+  /**
+   * The arcade shows a preview of each route before you commit — the
+   * `store_six` operands, indexed by `branch_choice`. Null when a choice is
+   * stored as slot 0 / frame 0, which resolves to no path: no preview beats a
+   * shot of somewhere else.
+   */
+  preview: { slot: number; frame: number } | null;
+}
+
+/**
+ * A branch point, which playback **is** waiting on — unlike the skip bar.
+ *
+ * Null when there is none.
+ */
+export interface BranchProjection {
+  sub: string;
+  options: BranchOption[];
+  countdown: string;
+  /** True while hovering has stopped the arcade countdown. */
+  paused: boolean;
+}
+
 /**
  * The skip offer, shown under the game's own condition.
  *
@@ -257,6 +284,7 @@ export interface UiProjection {
   /** The HUD strip: label, value, and whether it is worth the eye. */
   hudRows: [string, string, boolean?][];
   skip: SkipProjection | null;
+  branch: BranchProjection | null;
   scopes: ScopeRow | null;
   scopeContext: { frame: number; stageLoadedAt: number };
   /** Whether a snapshot is held, so Load can be enabled. */

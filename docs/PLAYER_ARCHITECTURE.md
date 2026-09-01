@@ -826,10 +826,247 @@ step 5.
 When a step clears a ratchet, check whether the rule still has teeth before
 dropping the baseline.
 
+## What the UI review found
+
+The projection and the command union are the right shape and will take a lot
+more porting without bending: one read-only value, one closed union, one store,
+and `PlayerView` as the written-down answer to "what does the UI depend on?".
+Adding a class costs three edits and the class describes itself through
+`ActorDebug` rather than the panel knowing what a zombie is.
+
+What the review found is that **the enforcement did not follow**, and that step
+11's own last move — inverting the portals so `index.html` becomes a mount
+point — was never made, while the row said done. Everything below follows from
+those two facts. Steps 13-19 clear them.
+
+### The checks did not read the UI layer
+
+`verify_layers.py:175` and `verify_player_dom.py:47` both glob
+`SRC.rglob("*.ts")`. The UI layer is `.tsx`. So `ui-reads-projection-only`,
+`no-engine-writes-in-ui` and `layer-direction` printed `error 0 ok` having
+never opened the 790 lines they exist to police. It is clean today by
+discipline, not by measurement — widening the glob leaves all eleven rules
+green and both ratchets held, so closing it costs nothing.
+
+The DOM guard has a second, independent hole. Its `SELECTOR` rejects a type
+parameter, and every lookup in `ui/` uses one:
+
+| form | matched today |
+|---|---|
+| `document.querySelector("#feed")` | yes |
+| `document.querySelector<HTMLElement>("#feed")` | **no** |
+| `at(sel)` in `App.tsx` | **no** — built at runtime |
+
+That is why the tool lists `feed`, `tree-filter`, `globals` and `wait-body`
+under *"no code reads"*: they are read constantly.
+
+The third hole is not a defect in the tool. `App.tsx` mounts sixteen portals
+through `at(sel)`, so rename `#globals` in the markup and `createPortal` gets
+`null`, `into` returns `null`, and the panel silently does not render — behind
+a clean `tsc`, a clean `vite build` and a clean `verify_player_dom`. That is
+precisely the failure the tool was written for, reproduced sixteen times by the
+portal design. It is an argument for step 16, not for a cleverer regex.
+
+### One attribute, two writers
+
+`main.ts:529` still does `classList.toggle("active", ...)` over `.mode`.
+`Topbar.tsx:57` renders `className={`mode${on ? " on" : ""}`}`. `style.css:78`
+styles `.mode.active`, and **there is no `.on` rule in the stylesheet.**
+
+So a mode switch sets `active` imperatively, then the next `publishUi`
+re-renders those buttons — `mode` changed, so React writes `className` — and
+wipes it. The active-mode highlight lasts about one frame. The fix is to remove
+a writer, never to add the missing CSS.
+
+### Data flowed backwards through the DOM, and the reason it did
+
+`app/projection/player.ts:70` asks the DOM what the UI is doing:
+
+```ts
+const open = (sel: string) => !!$<HTMLDetailsElement>(sel)?.open;
+wait: w && open("#panel-wait") ? waitProjection(w, eye) : null,
+```
+
+`app/` -> projection -> React -> DOM -> `app/`. The projection, which is meant
+to be the single source of truth for the UI, reads part of its input back out
+of the UI.
+
+The diagnosis matters more than the cycle. **Two unrelated concerns were fused
+into one `<details>` element:**
+
+1. *is this panel open* — pure view state, which nothing outside `ui/` needs;
+2. *should `app/` spend the money building `globalsProjection()`* — a cost
+   decision only `app/` can act on.
+
+`open("#globals-panel")` was concern 2 reaching for concern 1 through the only
+channel available at the time. The fix is to separate them again, not to move
+fold state somewhere else.
+
+**Fold stays in `ui/`, local and uncommanded** — a `useState` plus a
+`usePersisted` hook. `hud/ui.ts` and `hud/splitter.ts` already use
+`localStorage` from the ui layer and `verify_layers.py` has never objected; its
+DOM rule applies to `engine` only.
+
+**Cost becomes demand, and demand is expressed by mounting.** The component
+tree is the demand graph:
+
+```tsx
+{open && <Globals p={p.globals} />}      // mounted only while open
+```
+
+```ts
+// ui/store.ts -- the shape `subscribe` already has, with a name on it
+demand = (slice: SliceName): (() => void) => { ...; return () => ...; };
+wants  = (slice: SliceName): boolean => this.wanted.has(slice);
+```
+
+```ts
+// app/projection/player.ts -- the `$` helper and every DOM read leave
+globals: ui.wants("globals") ? globalsProjection() : null,
+```
+
+Register in an **effect**, never during render: strict mode double-invokes
+render, and the effect cleanup is also what makes unmount-on-fold decrement.
+
+The alternative — lifting fold into the projection behind a `foldPanel`
+command — was rejected. It is not wrong, but it buys nothing. Fold state is not
+addressable, is deliberately not in the URL, is not part of "where playback
+is", and never needs replaying; paying a projection field, a command case, a
+`PanelName` union and a `ViewPrefs` key for something the component already
+knows about itself is how a composition root turns into a god object. A command
+is *the UI asking the world to change*, and folding a panel changes nothing —
+`foldPanel` would have been the first command in the union that was not one.
+
+One caveat: `<details>` is an awkward controlled component, because the browser
+flips `open` before React hears about it. `open={open}` with `onToggle` reading
+`e.currentTarget.open` is the form that does not fight it.
+
+### The change key is a workaround, not a design
+
+```ts
+export function projectionKey(p: UiProjection): string {
+  return JSON.stringify({ ...p, tree: null, feed: null, minimap: null });
+}
+```
+
+The comment defends it well and the argument is sound as far as it goes — a
+hand-listed field set goes stale the first time someone adds a field. But it is
+O(everything), it allocates a large string sixty times a second, and it is why
+the fold gating above had to exist at all.
+
+**The comparison is not what is wrong; the allocation is.** `buildProjection`
+hands back fresh references every frame:
+
+```ts
+stages: [...v.stages],   feed: [...v.feed],   hudRows: [...v.hudRows],
+scopes: v.appScope.snapshot(),
+current: w ? { block: w.block, step: w.step, op: w.opIndex } : null,
+```
+
+Every one of those is a new object each frame, so `memo` and `useMemo` can
+never bail out. Swapping `JSON.stringify` for a deep-equal would remove the
+string and keep the full walk. The projection is structurally incapable of
+being compared by reference, and the key is standing in for that.
+
+**Structural sharing at build time, then reference equality is the diff.** A
+`stable(prev, next, eq)` helper returns `prev` when nothing in a slice changed,
+with a row-wise variant for `feed`, `globals.rows` and `actorPanel.groups` that
+reuses individual row objects — so a sidebar where one actor moved re-renders
+one row. The root is still rebuilt each frame but holds mostly the same
+references, and `publish` shallow-compares ~25 fields instead of serialising a
+tree. Panels become `memo()`, unchanged slices are identical references, and
+`memo` skips them. That is React's actual diffing mechanism, which the
+stringify was substituting for.
+
+`treeVersion` and `feedVersion` are then **deleted**: they exist only because
+reference equality was unavailable, and two hand-maintained counters that can
+drift from what they describe are worse than the property itself.
+
+Two things to keep hold of:
+
+* **`getSnapshot` must return a stable reference between notifies** or React
+  loops for ever. `publish` guards on `revision` today and must guard on the
+  shallow compare after — the invariant is already stated on `store.ts:46`,
+  and step 18 gives it a test.
+* **`useSyncExternalStoreWithSelector` is not the answer.** It needs the
+  `use-sync-external-store` shim as a new dependency and re-runs every selector
+  on every notify regardless. Root subscription plus structural sharing plus
+  `memo` gets the same result with the React already in `package.json`.
+
+### Two update paths, one of them imperative and hot
+
+`publishUi` is a `panelSystem` in the tick — once a frame, declarative.
+Alongside it `refreshUi()` has **19 call sites**, rebuilds `hudRows` from
+thirteen `describe` getters and repaints the minimap canvas, and runs at least
+twice per frame in `frame()` plus on every feed event. It is what `wireUi` used
+to be, alive under another name. Everything it does is either a projection
+field or a canvas paint, and the canvas is the one honest exception.
+
+### Script state living in `hud/`, outside the snapshot
+
+`Walker` correctly owns and snapshots `shutterState`, `firingGate` and
+`gateCloseLeft`. But `hud/hud.ts` privately holds `counter` — the shutter's
+40-frame slide phase — and `msgFramesLeft` and `lineIndex`. `seekTo` papers
+over that with an explicit `hudLayer.reset()`; **`loadSnapshot` does not.**
+Save mid-dialogue, load, and the caption is wherever it happened to be.
+
+This is the same class of bug as the rig held in a pose play would never
+produce, and per the port's own rule the state is in the wrong place:
+`FUN_00413970` is `HudDrawShutterState` in `functions.tsv`, but
+`DAT_009CA0F4` — the state the machine runs on — and its frame counter are
+**not in `globals.tsv`**, and `FUN_00435AA0`, the subtitle task, is unnamed.
+Step 19 therefore starts in Ghidra, under `/decomp`, and not in TypeScript.
+
+### Dead things
+
+* `#feed-clear` is in the markup with **no handler anywhere** — no listener, no
+  `UiCommand`. `clearFeed()` exists and only `app/` calls it.
+* `UiProjection.loading` and `.status` are hardcoded `null` / `""` in
+  `buildProjection` and read by nothing; `setLoading`, `fail` and
+  `stage_load.ts` write those elements directly.
+* `.mode.active`, per above.
+
+### The snapshot oracle steps 15-19 are measured against
+
+The seven harnesses prove a refactor did not change gameplay. Nothing proved
+that **a snapshot restores what it saved**, which is what step 19 needs and
+what the seek bugs kept costing. `web/test/state.test.ts` (`npm run test:state`)
+drives the real `World` over a real bundle on a fixed tick and a fixed seed:
+
+* **A. Snapshot fidelity, no seeking.** Run T1 frames, `world.save`, run T2 more
+  recording a digest **every frame**, `world.load`, run T2 again. The two digest
+  *sequences* must be identical. Frame-by-frame rather than final-state on
+  purpose: a final compare says it diverged, a sequence says on which frame.
+* **B. The form the button hands out.** `JSON.parse(JSON.stringify(snap))`
+  loaded instead of `snap`, same result.
+* **C. Seek equivalence.** Play to an address recording the digest, then from
+  cold `ResetPropContainers` + `seekTo` + `world.resync`, and compare `G` and
+  the pool — not only the walker's own fields, which `seek.test.ts` already
+  covers. Both "the rig held a pose across a seek" and "the pre-seek props
+  stand there for ever" lived here and were found by hand.
+
+Assertion C **fails at HEAD**, on the shutter and caption state above. Write it
+in step 14, watch it fail, fix it in step 19.
+
+It needs one enabling change. `app/systems.ts` imports `three` at module level,
+so `ScriptSystem` and `GameSystem` cannot be reached headlessly — `run_test.mjs`
+would pull three.js in and fail on `window`. But the three.js in `GameSystem` is
+entirely the camera adapter: `aimPoint`, `viewPoint`, `viewSpaceOf` and two
+matrix copies. `GameUpdate`, `save()` and `load()` are already pure. Extracting
+a `CameraFrame` port leaves `GameSystem` three-free and `System<Context>`,
+which is what lets the test drive the systems rather than a copy of them — and
+it nibbles at `render-drives-the-port` rather than feeding it.
+
 ## Order of work
 
-Steps 1–4 and 6 are done. Each step compiles, keeps `verify_layers.py` green,
-and passes `verify_player_ops.py` and `npm run test:port` on its own.
+Steps 1–9b and 12 are done; 10 is untouched and 11 is half made. Each step compiles,
+keeps `verify_layers.py` green, and passes `verify_player_ops.py` and `npm run test:port`
+on its own.
+
+Steps 13 and 14 are independent of everything and of each other. 15–18 are one arc and
+should not be interleaved with anything else touching `index.html` or `style.css`.
+19 edits `script/walker.ts`, which is step 10's territory — check `git status` and
+`ListAgents` before starting it.
 
 | # | Step | State |
 |---|---|---|
@@ -844,8 +1081,15 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
-| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control | ✅ |
+| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control. **The inversion is not done** — the panels are portalled into `index.html`'s chrome, and the checks never read `.tsx`. Steps 13-19 | ◐ |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
+| 13 | **The checks read the UI layer.** `verify_layers.py` and `verify_player_dom.py` glob `.tsx` too; the DOM selector accepts a type parameter; `into()` throws on a missing host instead of rendering nothing | ☐ |
+| 14 | **The snapshot oracle.** `CameraFrame` extracted so `GameSystem` is three-free and `System<Context>`; `web/test/state.test.ts` drives the real `World` headless and asserts save/load and seek equivalence frame by frame | ☐ |
+| 15 | **Panels own themselves.** Fold is `ui/` state, not a DOM read; cost becomes demand expressed by mounting; `rememberFolds` deleted and `app/projection/player.ts` loses its `$` | ☐ |
+| 16 | **`index.html` becomes a mount point.** The chrome is React's; `createPortal` and the sixteen mount ids go; the filter, the feed scroller, the loading overlay, the paused overlay and `#status` become projection state; the `.mode` collision goes with the imperative writer | ☐ |
+| 17 | **`refreshUi` dies.** `hudRows` into `buildProjection`, the minimap paint into its component, all 19 call sites and `setPlayButton`/`refreshPausedOverlay` gone. One update path | ☐ |
+| 18 | **Structural sharing replaces the change key.** `stable()` per slice, panels `memo()`, `publish` shallow-compares the root; `projectionKey`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ☐ |
+| 19 | **The shutter and the caption become engine state.** `/decomp` `FUN_00413970` and `FUN_00435AA0` first, name `DAT_009CA0F4` and its counter, then onto `Walker` beside `gateCloseLeft`; `Hud` becomes a `System` with `resync`. Clears step 14's assertion C | ☐ |
 
 ### Proving a step did not change behaviour
 
@@ -857,7 +1101,7 @@ for t in replay cadence civilians throwers wall corpses coli_walls; do
   node --experimental-strip-types --no-warnings tools/run_test.mjs \
       tools/$t.mjs > /tmp/base.$t.txt
 done
-npm run test:port && npm run test:seek
+npm run test:port && npm run test:seek && npm run test:scope
 ```
 
 Everything goes through `tools/run_test.mjs`, which bundles with esbuild first.
@@ -869,8 +1113,15 @@ class-0x31 spawns where the Python reference says 49. Capture it anyway — the
 test is that the output does not change, not that it passes.
 
 After the step, every one of those must be **byte-identical**, and
-`verify_layers.py`, `verify_port.py`, `verify_player_ops.py` and
-`verify_objects.py` must still pass. A step is not done until that holds.
+`verify_layers.py`, `verify_port.py`, `verify_player_ops.py`,
+`verify_player_dom.py` and `verify_objects.py` must still pass. A step is not
+done until that holds.
+
+From step 14 on, `npm run test:state` joins that list — and it is the stricter
+oracle, because the harnesses above only prove that *playing forward* did not
+change. Steps 15-18 are UI-only and must not move a byte of any of them; step
+19 is the one that legitimately changes an output, and assertion C is what says
+it changed in the right direction.
 
 
 ## The check that makes it real: `tools/verify_port.py`

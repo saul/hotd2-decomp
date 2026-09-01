@@ -75,7 +75,29 @@
  * game's would.
  */
 
-import type { SubtitleLine } from "../ui/projection";
+/**
+ * One subtitle line, as this layer draws it.
+ *
+ * Declared here rather than imported from `bundle/` on purpose. A type-only
+ * import carries no code, but it makes the UI track the exporter's schema —
+ * and the whole point of the boundary is that this side owns the shape of its
+ * own input. `app/projection/message.ts` maps the bundle's `DialogueLine` onto
+ * this and would not compile if the two drifted.
+ *
+ * It lived in `ui/projection.ts` until step 28, whose stated contract is "what
+ * the UI is allowed to know" and whose every other type is a field of
+ * `UiProjection`. This one never was: the only consumer is `ScreenMessage`
+ * below, and that is a contract between `app/` and `hud/` that the projection
+ * has no part in. The reasoning above is why it is still a declaration and not
+ * an import from `bundle/`; only the file it sits in changed.
+ */
+export interface SubtitleLine {
+  text: string;
+  /** Added to the centred position, in the game's 640-wide screen. */
+  xOffset: number;
+  /** The frame count this line gives way at. */
+  endFrame: number;
+}
 
 /**
  * What `app/` hands over for evt `0x2D`.
@@ -154,6 +176,15 @@ const GLYPH_ADVANCE = 11.2;
  *
  * `resync` is therefore the same call as `update`: there is nothing to rebuild
  * that is not already read fresh.
+ *
+ * Step 19 left two members behind that were not drawing: an `enabled` flag and
+ * a `describe` that turned the shutter state into a word for the HUD strip.
+ * `describe` needed a nine-row label table, `script/ops/hud.ts` already had
+ * the same nine rows for the feed, and neither copy could tell it was one of
+ * two. Step 28 moved the sentence to `app/projection/hud.ts`, which may read
+ * both `script/`'s table and the walker, and `enabled` went with it — React
+ * had already taken `.hud-layer`'s `hidden` in step 26, so the flag existed
+ * only to make that one string say `"off"`. What is left here draws.
  */
 /**
  * What this layer reads. Structural on purpose.
@@ -196,7 +227,8 @@ export interface HudElements {
    *
    * Named here because it is part of the handover and because naming it is
    * what says who owns it: React renders it and renders its `hidden` from
-   * `toggles.hud`. The constructor does not keep it — see `setEnabled`.
+   * `toggles.hud`. The constructor does not keep it, and since step 28 there
+   * is no member of this class that could want it.
    */
   root: HTMLElement;
   /** `.shutter-top`, whose `height` is the top bar of the letterbox. */
@@ -220,7 +252,6 @@ export class Hud {
    */
   messages: (group: number) => ScreenMessage | null = () => null;
 
-  private enabled = true;
   /** What was last drawn, so an unchanged frame costs no DOM writes. */
   private drawn = "";
 
@@ -236,20 +267,6 @@ export class Hud {
     // renders the node and never touches its `hidden`, precisely so there is
     // no moment where the two disagree about a caption that does not exist.
     this.message.hidden = true;
-  }
-
-  /**
-   * Whether the HUD toggle is on.
-   *
-   * It no longer hides anything: `.hud-layer`'s `hidden` is rendered by React
-   * from `toggles.hud`, which is the same fact this is set from and the only
-   * thing it was ever used for. Two writers for one boolean, one of them a
-   * frame behind the other, is exactly the bug the seventh rule is about. The
-   * flag stays because `describe` reports `"off"` from it, which is a
-   * *sentence in the sidebar* and not a pixel.
-   */
-  setEnabled(v: boolean): void {
-    this.enabled = v;
   }
 
   /**
@@ -329,24 +346,4 @@ export class Hud {
     this.top.style.height = `${pct}%`;
     this.bottom.style.height = `${pct}%`;
   }
-
-  describe(w: ShutterView | null): string {
-    if (!this.enabled) return "off";
-    const state = w?.shutterState ?? 2;
-    const label = SHUTTER_LABEL[state] ?? `state ${state}`;
-    const frames = w?.captionFrames ?? 0;
-    return `${label}${frames > 0 ? `, dialogue ${Math.ceil(frames)}f` : ""}`;
-  }
 }
-
-const SHUTTER_LABEL: Record<number, string> = {
-  0: "closed",
-  1: "opening",
-  2: "open",
-  3: "closing",
-  4: "closed",
-  5: "closed",
-  6: "open",
-  7: "restore",
-  8: "blackout",
-};

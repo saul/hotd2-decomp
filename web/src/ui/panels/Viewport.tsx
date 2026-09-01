@@ -39,13 +39,15 @@
  * **`hidden` on `.hud-layer` and on `.crosshair` is React's.** It was the
  * layers', and on both it was purely a function of a toggle that is already in
  * the projection:
- * `Hud.setEnabled` is reached only from `applyToggle`'s `hud` case and
+ * `Hud.setEnabled` was reached only from `applyToggle`'s `hud` case and
  * `Shooting.setEnabled` only from its `shoot` case, both of them driven from
  * the same `toggles` record this subscribes to. Two writers for one boolean,
- * one of them a frame behind the other. The layers keep their `enabled` field
- * — `Hud.describe` reports `"off"` from it and `Shooting` gates its pointer
- * handlers and `walker_host`'s live counts on it — and no longer touch the
- * DOM with it.
+ * one of them a frame behind the other. `Shooting` keeps its `enabled` field,
+ * because it gates its pointer handlers and `walker_host`'s live counts on it
+ * as well as the element; `Hud`'s had no job left once the DOM write went, and
+ * step 28 deleted it along with the one sentence that still read it — the HUD
+ * strip's shutter row, which reads `toggles.hud` in `app/projection/hud.ts`
+ * now and says `"off"` from the same field this does.
  *
  * Source order here is the paint order for everything sharing a `z-index`, so
  * it is a decision rather than an accident: the canvas and the overlays come

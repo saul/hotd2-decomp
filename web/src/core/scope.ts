@@ -11,9 +11,12 @@
  * dies they are undone, children first, in reverse order of registration.
  *
  * It knows only how to undo a closure. **What** needs undoing is the calling
- * layer's business: `render/scope3d.ts` for the scene graph, `app/dom.ts` for
- * listeners and timers. That split is why there is no `addEventListener` here
- * to type around — the engine does not have to know what a DOM event is.
+ * layer's business: `render/scope3d.ts` for the scene graph. That split is why
+ * there is no `addEventListener` here to type around — the engine does not
+ * have to know what a DOM event is. There was an `app/dom.ts` beside it for
+ * listeners and timers; React owns every listener the page has since step 26
+ * and undoes them on unmount, so it had no callers left and step 28 deleted
+ * it.
  *
  * ## The one rule
  *

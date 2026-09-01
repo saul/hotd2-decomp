@@ -6,9 +6,19 @@
  */
 import type { OpImpl } from "../walker";
 
-/** What the feed calls each state, as `HudDrawShutterState` (`FUN_00413970`)
- *  switches on it. */
-const SHUTTER_LABEL: Record<number, string> = {
+/**
+ * What each shutter state is called, as `HudDrawShutterState` (`FUN_00413970`)
+ * switches on it.
+ *
+ * Exported because there is a second reader: the HUD strip's `shutter` row
+ * says the same nine words about the same nine states. `hud/` had a verbatim
+ * copy of this table for that row until step 28 — a fact with two owners, in
+ * the two files step 19 wrote to give the shutter one, and nothing would have
+ * failed if they had drifted. `ui/` may not import from `script/`, so the row
+ * is built in `app/projection/hud.ts`, which is the layer allowed to see both
+ * sides and reads this table from here.
+ */
+export const SHUTTER_LABEL: Record<number, string> = {
   0: "closed", 1: "opening", 2: "open", 3: "closing", 4: "closed",
   5: "closed", 6: "open", 7: "restore", 8: "blackout",
 };

@@ -44,7 +44,6 @@ import type { RigLayer } from "../render/rigs";
 import type { Shooting } from "../render/shooting";
 import type { StageScene } from "../render/stagescene";
 import type { StuckDebugLayer } from "../render/stuck_debug";
-import type { Hud as HudLayer } from "../hud/hud";
 
 /**
  * Everything the commands below may move, and nothing else.
@@ -104,7 +103,6 @@ export interface PlayerCommands {
   readonly debug: DebugBoxLayer;
   readonly coliDebug: ColiDebugLayer;
   readonly stuckDebug: StuckDebugLayer;
-  readonly hudLayer: HudLayer;
 
   // -- asked to do something --------------------------------------------
 
@@ -290,7 +288,15 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
       p.backdrop.setEnabled(on);
       p.rain.setEnabled(on);
       return;
-    case "hud":          p.hudLayer.setEnabled(on); return;
+    case "hud":
+      // Deliberately nothing. `.hud-layer`'s `hidden` is rendered by React
+      // from `toggles.hud` since step 26 and the HUD strip's shutter row reads
+      // the same field since step 28, so by the time this runs the toggle has
+      // already reached both of its readers through `p.toggles`. The case
+      // stays because the switch is exhaustive over `ToggleName` and that is
+      // the property worth keeping: deleting it would make a toggle with no
+      // effect indistinguishable from one somebody forgot to wire up.
+      return;
     case "spawns":       p.spawns.setVisible(on); return;
     case "chars":        p.chars.setEnabled(on); return;
     case "props":        p.props.setEnabled(on); return;

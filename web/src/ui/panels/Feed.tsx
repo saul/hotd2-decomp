@@ -31,8 +31,12 @@ export function Feed() {
            const n = e.currentTarget;
            stick.current = n.scrollTop + n.clientHeight >= n.scrollHeight - 24;
          }}>
-      {rows?.map((e, i) => (
-        <div key={i} className={`fe cat-${e.cat} st-${e.status}`}
+      {/* Keyed on `seq` and not on the index: the window is capped at 400 and
+          `slice(-400)` shifts every index by one on every push past the cap,
+          so an index key made React rewrite four hundred rows' text to add
+          one at the bottom. `seq` follows the row. */}
+      {rows?.map((e) => (
+        <div key={e.seq} className={`fe cat-${e.cat} st-${e.status}`}
              title={e.title}
              onClick={() => dispatch({ kind: "seek", block: e.block,
                                        step: e.step, op: e.opIndex })}>

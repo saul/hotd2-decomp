@@ -50,6 +50,7 @@ import type { Context, Tick } from "../src/core/system";
 import type { Snapshot } from "../src/core/snapshot";
 import { World } from "../src/core/world";
 import { GameSystem, ScriptSystem, syncPortGlobals } from "../src/app/systems";
+import { describeShutter } from "../src/app/projection/hud";
 import { ResetPropContainers } from "../src/game/class41/index";
 import { ResetGameGlobals } from "../src/game/globals";
 import { Walker, type WalkerHost } from "../src/script/walker";
@@ -371,6 +372,19 @@ console.log("\nThe shutter and the caption are script state:\n");
 
     check("the caption countdown is in the slice too",
           "captionGroup" in slice && "captionFrames" in slice);
+
+    // Step 28 moved the HUD strip's shutter row out of `hud/`, where it had
+    // its own copy of the label table, and into `app/projection/hud.ts`, where
+    // it reads the one in `script/ops/hud.ts` that the feed prints from. The
+    // labels themselves are pinned in `test:projection` against a plain
+    // object; what this adds is that a **real `Walker`** satisfies what the
+    // row reads, and that the word it produces is the word for the state the
+    // walker is actually in.
+    r.walker.setShutter(3);
+    advance(r, 10);
+    check("and the strip's shutter row says what the walker is doing",
+          describeShutter(r.walker, true) === "closing",
+          `read back "${describeShutter(r.walker, true)}"`);
   }
 }
 

@@ -113,6 +113,23 @@ export interface MinimapGraph {
 
 /** One line of the event feed. */
 export interface FeedRow {
+  /**
+   * A number that only ever goes up, so React can key on the row.
+   *
+   * `Feed.tsx` keyed on the array index, over a window `Player.onFeed` caps
+   * with `slice(-400)`. Past the cap every push shifts every index by one, so
+   * React saw four hundred rows whose content had all changed and rewrote the
+   * text of every one of them to add a single line at the bottom. With this
+   * the key follows the row and a push is one insertion.
+   *
+   * It is minted in `onFeed` and it is deliberately **not** `FeedEntry.seq`:
+   * that one is the walker's own instruction counter, it is in the snapshot
+   * and a load or a seek resets it to zero, and roughly a dozen of the
+   * `Player` event handlers raise an entry with `seq: -1` because they are not
+   * an instruction at all. Neither property is what a React key needs, which
+   * is only that it never repeats.
+   */
+  seq: number;
   block: number;
   step: number;
   opIndex: number;
@@ -124,23 +141,6 @@ export interface FeedRow {
   cat: string;
   status: string;
   title: string;
-}
-
-/**
- * One subtitle line, as the HUD draws it.
- *
- * Declared here rather than imported from `bundle/` on purpose. A type-only
- * import carries no code, but it makes `ui/` track the exporter's schema —
- * and the whole point of a projection is that the UI owns the shape of its
- * own input. `app/` maps the bundle's `DialogueLine` onto this and would not
- * compile if the two drifted.
- */
-export interface SubtitleLine {
-  text: string;
-  /** Added to the centred position, in the game's 640-wide screen. */
-  xOffset: number;
-  /** The frame count this line gives way at. */
-  endFrame: number;
 }
 
 /** One weapon in flight, as the globals panel lists it. */

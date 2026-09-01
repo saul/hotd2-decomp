@@ -110,10 +110,17 @@ export function treeProjection(script: ScriptJson): TreeProjection {
   return { blocks };
 }
 
-/** One feed entry, flattened. The feed is append-only and capped by `ui/`. */
-export function feedRow(e: FeedEntry): FeedRow {
+/**
+ * One feed entry, flattened. The feed is append-only and capped by `app/`.
+ *
+ * `seq` is passed in rather than taken from the entry: see `FeedRow.seq` for
+ * why the entry's own is the wrong number, and `Player.onFeed` for the counter
+ * this comes from.
+ */
+export function feedRow(e: FeedEntry, seq: number): FeedRow {
   const status = opStatus(e.op.op);
   return {
+    seq,
     block: e.block, step: e.step, opIndex: e.opIndex,
     at: `${e.block}.${e.step}.${e.opIndex}`,
     name: e.op.name,

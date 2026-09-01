@@ -58,7 +58,7 @@ import type {
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
 import { buildProjection, type PlayerView } from "./projection/player";
-import { hudRows } from "./projection/hud";
+import { describeShutter, hudRows } from "./projection/hud";
 import {
   branchProjection, skipProjection, soundProjection, transportProjection,
 } from "./projection/chrome";
@@ -449,7 +449,7 @@ export class Player implements PlayerView, PlayerCommands {
         coli: this.coliDebug.describe,
         wedged: this.stuckDebug.describe,
         enemies: this.game.describe,
-        shutter: this.hudLayer.describe(this.walker),
+        shutter: describeShutter(this.walker, this.toggles.hud),
         rain: this.rain.describe,
       },
     });
@@ -724,8 +724,22 @@ export class Player implements PlayerView, PlayerCommands {
   /** The feed is capped so a long session cannot grow without bound. */
   private static readonly FEED_MAX = 400;
 
+  /**
+   * The next feed row's key, and it never goes back.
+   *
+   * `clearFeed` does not reset it and neither does a seek or a load, which is
+   * the whole requirement: React only asks that a key never repeat among the
+   * rows it is looking at, and the cheapest way to promise that is a counter
+   * with no way of going down. `FeedEntry.seq` cannot do the job — it is the
+   * walker's instruction counter, it is in the snapshot, a load or a seek
+   * restores it, and the dozen handlers below that raise an entry for
+   * something that is not an instruction all pass `seq: -1`.
+   */
+  private feedSeq = 0;
+
   onFeed(e: FeedEntry): void {
-    this.feedRows = [...this.feedRows, feedRow(e)].slice(-Player.FEED_MAX);
+    this.feedRows =
+      [...this.feedRows, feedRow(e, this.feedSeq++)].slice(-Player.FEED_MAX);
   }
 
   clearFeed(): void {
@@ -1075,10 +1089,35 @@ export class Player implements PlayerView, PlayerCommands {
 // Once, and guarded: an effect that runs twice -- strict mode, or a dev-server
 // remount -- would build a second `Player` over the same canvas, and the two
 // would fight for the frame.
-let started = false;
+let player: Player | null = null;
 const ui = new UiStore();
 mountUi(ui, (host) => {
-  if (started) return;
-  started = true;
-  void new Player(ui, host).start();
+  if (player) return;
+  player = new Player(ui, host);
+  void player.start();
+}, (label, error, info) => {
+  // A panel that threw belongs in the transcript, next to whatever the script
+  // was doing when it did. That is the whole point of the feed: it is the one
+  // place the session reads back in order, and a boundary's fallback says
+  // *which* region died but not *when*.
+  //
+  // `console.error` as well, always. The feed is capped at four hundred rows,
+  // a throw that repeats will push its own cause off the top, and the stack is
+  // in the console and nowhere else.
+  console.error(`ui: ${label} threw`, error, info);
+  // Before `Player` exists there is nothing to push into. That window is real
+  // -- `mountUi` calls `createRoot(...).render(...)` and the very first render
+  // happens before `onHost` has handed the canvas over -- and the console line
+  // above is the whole of the report for anything thrown inside it.
+  if (!player) return;
+  // `onFeed` assigns an array and nothing else. It must not publish: this runs
+  // inside React's error handling, and publishing from there would re-enter
+  // the render that is in the middle of failing. The next frame picks the row
+  // up like any other.
+  player.onFeed({
+    seq: -1, block: -1, step: -1, opIndex: -1,
+    op: { i: -1, at: 0, op: -1, name: "ui error", cat: "flow" },
+    note: `${label} threw: ${error instanceof Error ? error.message
+                                                    : String(error)}`,
+  });
 });

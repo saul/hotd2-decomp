@@ -449,7 +449,7 @@ web/src/
     ui_root.ts    createRoot on #app, and the canvas coming back
     projection/   what the UI is told, assembled — player, sidebar, script,
                   globals, hud, message, and `stable.ts`
-    stage_load.ts, walker_host.ts, urlstate.ts, viewprefs.ts, dom.ts
+    stage_load.ts, walker_host.ts, urlstate.ts, viewprefs.ts
   core/         the framework. No three.js, no DOM.
     system.ts     System { id; attach; update; detach; save?; load?; resync? }
                   and Context { walker, scope, session, view, stage, frame }
@@ -616,12 +616,22 @@ attachTo(scope, parent, node)     // add now, removeFromParent on dispose
 ownResources(scope, root)         // every unique geometry/material/texture
 cloneInto(scope, parent, tmpl)    // clone, attach, own
 
-// app/dom.ts                                                     built
+// app/dom.ts                                          built, then deleted
 on(scope, el, type, fn)           // typed via HTMLElementEventMap
 onWindow(scope, type, fn)
 every(scope, ms, fn)              // setInterval, cleared on dispose
 eachFrame(scope, fn)              // rAF loop that stops with the scope
 ```
+
+The DOM half of that pair is **gone**, and how it went is the interesting
+part. It was written for the 67 hand-wired listeners, and steps 15 to 26 gave
+every one of them to React, which undoes its own listeners on unmount and
+needs no scope to be told to. By step 28 the file had fifty-five lines and
+zero importers, and it was deleted rather than kept for a caller that might
+come back: a helper with no users is a claim about the design that nothing
+checks. It is in the history if the browser shell ever grows a listener React
+cannot own. `render/scope3d.ts` is untouched — three.js has no unmount, so the
+scene graph still needs every one of its three.
 
 `ownResources` de-duplicates through three `Set`s before disposing anything,
 because three.js shares geometry and materials freely and disposing one that
@@ -1011,7 +1021,7 @@ Each step compiles, keeps `verify_layers.py` green, and passes
 | 25 | **The publish path has one owner.** Published at the end of every frame rather than from a system inside `if (this.walker)`; the hand-publishes in `setLoading`/`fail` and `panelSystem` go with it | ✅ |
 | 26 | **React owns every pixel inside `#viewport`.** The hud layer and the crosshair rendered by React and handed across through `UiHost`; `hud/` and `render/` write geometry onto nodes they were given. New **error** rule: no DOM insertion outside `ui/` | ✅ |
 | 27 | **The write seam.** `PlayerCommands`, so the half of the seam that mutates is as declared as `PlayerView` made the half that reads | ✅ |
-| 28 | **The small ones.** `app/dom.ts` deleted; one owner each for `SHUTTER_LABEL` and `SubtitleLine`; `FeedRow.seq` and the feed keyed on it | ☐ |
+| 28 | **The small ones.** `app/dom.ts` deleted; one owner each for `SHUTTER_LABEL` and `SubtitleLine`; `FeedRow.seq` and the feed keyed on it; step 22’s `onError` routed into the feed. The shutter label cascaded further than the list did: `Hud.describe` moved to `app/projection/hud.ts`, which took `Hud.enabled` and `setEnabled` with it, which emptied `applyToggle`’s `case "hud"` and dropped `hudLayer` from `PlayerCommands` | ✅ |
 
 ### The second UI review, and the eight steps it produced
 
@@ -1074,6 +1084,30 @@ allowed to know", and is not a field of `UiProjection`: only `hud/` uses it.
 And the event feed keys on the array index over a `slice(-400)` window, so
 past the cap every push shifts every index and React rewrites four hundred
 rows to add one. Step 28.
+
+**What the fourth of those cost to fix, which is the interesting part.** The
+duplicate label table could not be resolved by sharing a module: `script/` is
+engine and `hud/` is ui, and rule 1 forbids the import in the direction that
+would have helped. So the *reader* moved instead — `Hud.describe` became
+`describeShutter` in `app/projection/hud.ts`, where the composition root may
+read `script/`'s one table and the walker together — and pulling that one
+sentence out emptied three more things behind it. `Hud.enabled` existed only
+to make `describe` say `"off"`, React having taken `.hud-layer`'s `hidden`
+from `toggles.hud` in step 26, so `enabled` and `setEnabled` went; with those
+gone `applyToggle`'s `case "hud"` had nothing to do, because the toggle
+already reaches both its readers through `p.toggles`; and with that case empty
+nothing in `commands.ts` named `hudLayer` any more, so it left `PlayerCommands`
+and the declared write surface got one member shorter. The case itself stays,
+as a documented no-op, because the switch is exhaustive over `ToggleName` and
+a missing case and a deliberately empty one must not look alike.
+
+Two of the five admitted an assertion and got one. `test:projection` asserts
+all nine of the strip's shutter labels against `SHUTTER_LABEL` itself, so the
+table that was copied is now the table that is checked, and `test:state`
+asserts the same row against a real mid-close `Walker`. `test:ui` cannot see a
+React key — keys are not rendered — so the feed's is read out of `Feed.tsx`'s
+source beside a markup check that every row in the projection reaches the
+page.
 
 **What was deferred, and why it is worth naming.** A screenshot harness —
 headless Chromium against `?freeze=1`, driving the page through a declared

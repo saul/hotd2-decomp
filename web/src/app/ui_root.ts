@@ -17,12 +17,14 @@
  * `onError` knows *which* region died, which the root option cannot tell you
  * from a component stack. Both go to `onError` below.
  *
- * `onError` defaults to `console.error` on purpose. Routing these into the
- * player's event feed is left to a later step, and is not an oversight: the
- * `Player` is built inside `onHost`, which runs *after* `mountUi` has been
- * called, so there is nothing to push a feed row into at the moment the root
- * is created. The optional parameter is the seam that makes that step a
- * one-line change here and one in `main.ts`.
+ * `onError` is a parameter and not a fixed call to `console.error` because the
+ * report has somewhere better to go: `main.ts` passes one that pushes a feed
+ * row, so a panel that threw reads back in the transcript beside whatever the
+ * script was doing when it did. It stays *optional*, with `console.error` as
+ * the default, for the window this file cannot close — `createRoot(...).render`
+ * below runs the first render before `onHost` has handed the canvas over, so
+ * the `Player` the feed belongs to does not exist yet. The caller decides what
+ * to do in that window; this file only guarantees that nothing is swallowed.
  */
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";

@@ -83,9 +83,15 @@ function projection(): UiProjection {
                        title: "block 0", steps: [] }] },
     minimap: { entry: 0, nodes: [{ index: 0, kind: "next", next: [1] }] },
     current: { block: 0, step: 1, op: 0 },
-    feed: [{ block: 0, step: 1, opIndex: 0, at: "0.1.0", name: "cam_play",
-             summary: "", note: "", cat: "camera", status: "ported",
-             title: "" }],
+    // Two rows, with `seq` deliberately not 0 and 1: `Player.onFeed` mints
+    // from a counter that never resets, so by the time the window is full the
+    // numbers bear no relation to the array indices.
+    feed: [{ seq: 412, block: 0, step: 1, opIndex: 0, at: "0.1.0",
+             name: "cam_play", summary: "", note: "", cat: "camera",
+             status: "ported", title: "" },
+           { seq: 413, block: 0, step: 1, opIndex: 1, at: "0.1.1",
+             name: "wait_frames", summary: "", note: "", cat: "wait",
+             status: "ported", title: "" }],
     inspector: "cam_play",
     hudRows: [["mode", "play"]],
     skip: { canSkip: true, sub: "region 3", stacked: false },
@@ -225,6 +231,31 @@ check("a folded panel renders no body, which is what makes demand honest",
       && !warm.includes('id="minimap"'),
       "a shut panel rendered its children");
 check("and an open one does", warm.includes('id="feed"'));
+
+// Step 28. The feed keyed on the array index over a `slice(-400)` window, so
+// past the cap every push shifted every index by one and React rewrote all
+// four hundred rows' text to add one at the bottom.
+//
+// **React does not render keys**, so the markup cannot show which one is used
+// and this cannot be asserted the way the ids above are. What the markup does
+// show is that both rows in the fixture reach the page -- the failure a wrong
+// key would eventually produce is rows with the wrong text in them, not rows
+// missing -- and the key itself is read from the source, the way the boundary
+// nesting below is, for the same reason: it is a fact about the source that
+// the output does not carry.
+const feedBody = warm.slice(warm.indexOf('id="feed"'),
+                            warm.indexOf('id="inspector-panel"'));
+check("every feed row reaches the page",
+      (feedBody.match(/class="fe /g) ?? []).length === 2
+      && feedBody.includes("cam_play") && feedBody.includes("wait_frames"),
+      "a row in the projection did not render");
+const FEED = join(process.cwd(), "src", "ui", "panels", "Feed.tsx");
+let feedSrc = "";
+try { feedSrc = readFileSync(FEED, "utf8"); }
+catch { check("Feed.tsx is readable", false, `not found at ${FEED}`); }
+check("and is keyed on its own seq, not on where it happens to sit",
+      feedSrc.includes("key={e.seq}") && !/key=\{i\}/.test(feedSrc),
+      "an index key over a capped window renames every row on every push");
 
 // The boundaries render no element of their own while the region under them
 // is healthy, which is the property that keeps them out of `#stagearea`'s
@@ -372,8 +403,8 @@ boundary.componentDidCatch(new Error("nope"), { componentStack: "" });
 check("and componentDidCatch reports the label with the error",
       reported[0] === "The transport"
       && (reported[1] as Error).message === "nope",
-      "app/ui_root.ts routes this to console.error until a later step gives "
-      + "it the event feed");
+      "app/main.ts routes this to console.error and to the event feed, so "
+      + "the region that died is named beside what the script was doing");
 
 console.log("\nAnd the two elements no boundary may unmount:\n");
 

@@ -14,9 +14,16 @@
  * replaced — `projectionKey`'s `JSON.stringify` was one string compare
  * standing in for a diff, and one field moving re-rendered everything.
  *
+ * Since step 28 it also covers one row of the HUD strip. That is not the same
+ * subject, and it is here rather than in `test:state` for a plain reason:
+ * `test:state` needs a built bundle and skips without one, and the shutter
+ * row's whole content is a lookup in a table that needs no bundle at all.
+ *
  * Run with `npm run test:projection`.
  */
+import { describeShutter } from "../src/app/projection/hud";
 import { equal, stabilise } from "../src/app/projection/stable";
+import { SHUTTER_LABEL } from "../src/script/ops/hud";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -206,6 +213,44 @@ check("a nested unmoved reference is settled without a walk", deepWalked === 0,
       `the tree was read ${deepWalked} times on a frame it did not change`);
 check("...and the slice holding it is the object it was",
       held !== heldPrev && held.panel === heldPrev.panel);
+
+// -- and the strip's shutter row reads the one label table -----------------
+
+console.log("\nThe HUD strip's shutter row, built in app/:\n");
+
+// Step 28. This sentence was `Hud.describe` in `hud/`, and it needed a private
+// copy of the nine-row label table because `ui/` may not import from
+// `script/`. The two copies were identical and nothing anywhere would have
+// noticed if they had stopped being -- a fact with two owners, in the two
+// files step 19 wrote to give the shutter one. It is built in `app/` now,
+// which is the layer allowed to read both the table and the walker, and this
+// is the check that it reads *that* table: every state the exe's switch has
+// is asserted against the entry the feed prints for the same state.
+for (const [k, label] of Object.entries(SHUTTER_LABEL)) {
+  const state = Number(k);
+  check(`state ${state} is "${label}", the same word the feed uses`,
+        describeShutter({ shutterState: state, captionFrames: 0 }, true)
+          === label);
+}
+check("a state the table has no row for still says which one it was",
+      describeShutter({ shutterState: 99, captionFrames: 0 }, true)
+        === "state 99",
+      "an unknown state must not read as one of the nine");
+check("a caption still counting is on the end of the row",
+      describeShutter({ shutterState: 3, captionFrames: 40.2 }, true)
+        === "closing, dialogue 41f",
+      "the countdown is fractional and the row rounds up, so a caption with "
+      + "any frames left never reads as 0f");
+// `Hud` held a copy of this boolean, written through `setEnabled`, purely so
+// this string could say "off" -- a second owner of the fact React had already
+// taken for `.hud-layer`'s `hidden`. The copy is gone; the row still says it,
+// from `Player.toggles` where the toggle lives.
+check("and the toggle being off outranks everything else",
+      describeShutter({ shutterState: 3, captionFrames: 40 }, false) === "off");
+check("...even with no walker at all",
+      describeShutter(null, false) === "off"
+      && describeShutter(null, true) === "open",
+      "before a stage is loaded the shutter is open, which is state 2");
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

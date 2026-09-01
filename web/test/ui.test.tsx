@@ -14,11 +14,22 @@
  * not about content: a test that pinned the markup would fail on every honest
  * edit and be deleted within the month.
  *
+ * Since step 22 it also covers the error boundaries, and covers them with a
+ * hole in the middle that is stated where it bites: `renderToStaticMarkup`
+ * does not run a boundary at all, so the one assertion worth having — the page
+ * survives while a panel is throwing — cannot be made from here. What is here
+ * instead is the fallback driven through the two methods React itself calls,
+ * and the nesting the boundaries must have, read from the source because a
+ * healthy boundary renders no markup to read.
+ *
  * Run with `npm run test:ui`.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { App } from "../src/ui/App";
+import { ErrorBoundary } from "../src/ui/ErrorBoundary";
 import { UiStore } from "../src/ui/store";
 import { TOGGLE_DEFAULTS } from "../src/ui/panels/Toggles";
 import type { UiProjection } from "../src/ui/projection";
@@ -127,6 +138,118 @@ check("the active mode button carries the class the stylesheet knows",
       "`.mode.active` is what style.css styles");
 check("the script filter is the panel's own control",
       warm.includes('id="tree-filter"'));
+
+// The boundaries render no element of their own while the region under them
+// is healthy, which is the property that keeps them out of `#stagearea`'s
+// grid: the four columns land by source order, so a `<div>` wrapped round
+// `#left` or `#right` would move the column it was added to protect. The GRID
+// check above is what proves it, and these two say it about the two places a
+// wrapper would be easiest to add by accident.
+check("nothing stands between #viewport and its canvas",
+      /id="viewport"[^>]*>\s*<canvas id="view"/.test(warm),
+      "a boundary that wraps the canvas in an element of its own would also "
+      + "be a boundary that can unmount it");
+check("nothing stands between #right and the first panel in it",
+      /id="right"[^>]*>\s*<div id="hud"/.test(warm));
+
+console.log("\nA region that throws:\n");
+
+// The scenario the boundaries exist for: one slice whose shape a panel cannot
+// read. `HudStrip` destructures every row, so a null row throws out of the
+// sidebar — and, without a boundary, out of `world.update` and the whole
+// frame with it.
+const badHud = { ...projection(),
+                 hudRows: [null as unknown as [string, string]] };
+let thrown: unknown = null;
+try { render(badHud); } catch (e) { thrown = e; }
+check("a slice a panel cannot read does throw out of that panel",
+      thrown !== null,
+      "the rest of this section is only meaningful if this still throws");
+
+// **This file cannot see the recovery, and must not pretend to.**
+// `renderToStaticMarkup` does not invoke error boundaries: React only runs
+// `getDerivedStateFromError` in a client render, and a throw during server
+// rendering propagates to the caller — which is what the check above just
+// measured. So the assertion that would have caught a blank page — "#viewport,
+// #view, #topbar and #transport are all still in the output while one panel is
+// throwing" — cannot be written here at all. Writing it against a hand-built
+// fallback would assert this test's own imitation of React and nothing else.
+//
+// What it needs is a client render, which needs a DOM: jsdom or happy-dom plus
+// `act`, and a new devDependency this repo has consistently refused for less —
+// or the headless-Chromium harness `docs/PLAYER_ARCHITECTURE.md` has deferred,
+// which would see it in the real browser and is the better answer. Until one of
+// those exists, what is testable is below: the pieces React drives, driven
+// directly, and the shape of the tree they sit in.
+
+console.log("\nThe fallback, through the two methods React calls:\n");
+
+/** React's own contract: derive the state, then render. Nothing is stubbed. */
+function fallback(label: string, error: unknown): string {
+  const b = new ErrorBoundary({ label, children: null });
+  b.state = ErrorBoundary.getDerivedStateFromError(error);
+  return renderToStaticMarkup(b.render());
+}
+
+const fb = fallback("The sidebar", new Error("rows is not iterable"));
+check("it names the region, so you know which part died",
+      fb.includes("The sidebar"));
+check("and carries the message, so you know what the bad value was",
+      fb.includes("rows is not iterable"));
+check("and offers Retry, which is the only way out of it",
+      fb.includes("Retry"),
+      "recovery is explicit: a boundary that cleared itself on the next "
+      + "projection would re-render the throwing panel at 60 Hz");
+check("and wears the class the stylesheet styles", fb.includes('class="errbox"'));
+
+// `throw null` is legal, and a boundary that stored the caught value bare and
+// compared it against null would read it back as healthy, render the children,
+// and catch it again -- for ever. The value is boxed for exactly this.
+check("a thrown null is still a failure, not a healthy region",
+      fallback("The sidebar", null).includes("errbox"),
+      "throw null read back as healthy");
+
+let reported: unknown[] = [];
+const boundary = new ErrorBoundary({
+  label: "The transport", children: null,
+  onError: (...args) => { reported = args; },
+});
+boundary.componentDidCatch(new Error("nope"), { componentStack: "" });
+check("and componentDidCatch reports the label with the error",
+      reported[0] === "The transport"
+      && (reported[1] as Error).message === "nope",
+      "app/ui_root.ts routes this to console.error until a later step gives "
+      + "it the event feed");
+
+console.log("\nAnd the two elements no boundary may unmount:\n");
+
+// `app/` is handed `#viewport` and `#view` through `onHost` and the
+// `WebGLRenderer` and the `ResizeObserver` are built on them for the session.
+// A boundary above either one can replace it with a fallback, and then WebGL
+// draws into a detached canvas: a dead page that looks like a graphics bug.
+// The markup cannot show this — a healthy boundary renders nothing — so the
+// nesting is read from the source. The root backstop is the one boundary that
+// is allowed to contain them, because a page whose root has thrown is already
+// gone.
+// `npm run test:ui` runs with `web/` as the working directory, and the bundle
+// this file becomes lives in a temp dir, so `import.meta.url` cannot find the
+// source.
+const APP = join(process.cwd(), "src", "ui", "App.tsx");
+let src: string[] = [];
+try { src = readFileSync(APP, "utf8").split("\n"); }
+catch { check("App.tsx is readable", false, `not found at ${APP}; run from web/`); }
+const canvasAt = src.findIndex((l) => l.includes('<canvas id="view"'));
+let depth = 0;
+for (const line of src.slice(0, canvasAt)) {
+  if (/^\s*<ErrorBoundary\b/.test(line)) depth++;
+  if (/^\s*<\/ErrorBoundary>/.test(line)) depth--;
+}
+check("only the root backstop encloses the canvas", canvasAt > 0 && depth === 1,
+      `#view sits inside ${depth} boundaries; only the root may hold it`);
+check("every region of the page is inside one",
+      src.filter((l) => /^\s*<ErrorBoundary\b/.test(l)).length === 6,
+      "the root, the top bar, the script tree, the viewport overlays, the "
+      + "sidebar and the transport");
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

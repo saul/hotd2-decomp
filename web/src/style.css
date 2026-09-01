@@ -435,6 +435,23 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 .err { color: var(--spawn); }
 
+/* An `ErrorBoundary`'s fallback, standing in for the region that threw. It is
+   `position: relative` because one of its homes is inside `#viewport`, where
+   `#view` is absolutely positioned and would otherwise paint over a static
+   box -- an error message hidden behind the canvas is the failure this whole
+   boundary exists to end. */
+.errbox {
+  position: relative; z-index: 4;
+  margin: 6px; padding: 8px 10px; align-self: start;
+  background: var(--panel-2); border: 1px solid var(--warn); border-radius: 4px;
+  font-size: 12px;
+}
+.errbox-label { color: var(--warn); font-weight: 600; }
+.errbox-msg {
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0 6px;
+}
+
 /* The debug clear, next to the Shoot checkbox. Only shown while shooting. */
 button.kill {
   background: #6b1d1d;

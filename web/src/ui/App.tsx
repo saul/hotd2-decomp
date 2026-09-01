@@ -20,6 +20,13 @@
  * them, so React hands them over — `onHost` fires once, after mount, and
  * `app/` builds the `Player` around them. That is why the chrome renders
  * before there is a projection at all.
+ *
+ * Every region is inside an `ErrorBoundary`, and one region is deliberately
+ * not: `#viewport` and `#view` are the two elements handed across by `onHost`,
+ * and the renderer holds them for the session. So the boundaries sit *inside*
+ * the viewport, around the overlays, and never around the viewport itself — a
+ * boundary that could unmount the canvas would leave WebGL drawing into a
+ * detached element, which is a dead page that looks like a graphics bug.
  */
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { UiStore } from "./store";
@@ -37,6 +44,7 @@ import { Modes, StagePicker, ViewSettings } from "./panels/Topbar";
 import { Transport } from "./panels/Transport";
 import { SkipBar } from "./panels/SkipBar";
 import { BranchBar } from "./panels/BranchBar";
+import { ErrorBoundary } from "./ErrorBoundary";
 import type { UiProjection } from "./projection";
 
 /** The two elements the renderer needs, handed over once React has them. */
@@ -46,7 +54,11 @@ export interface UiHost {
 }
 
 export function App(
-  { store, onHost }: { store: UiStore; onHost: (h: UiHost) => void },
+  { store, onHost, onError }: {
+    store: UiStore;
+    onHost: (h: UiHost) => void;
+    onError?: (label: string, error: unknown, info?: unknown) => void;
+  },
 ) {
   const p = useSyncExternalStore(store.subscribe, store.getSnapshot,
                                 store.getServerSnapshot);
@@ -65,38 +77,42 @@ export function App(
   const loading = p ? p.loading : { text: "loading bundle…", failed: false };
 
   return (
-    <>
+    <ErrorBoundary label="The player" onError={onError}>
       <header id="topbar">
-        <span className="brand">HOTD2 <span className="dim">stage player</span></span>
-        {p && <>
-          <span id="stage-picker" className="toggles">
-            <StagePicker p={p} dispatch={store.dispatch} />
+        <ErrorBoundary label="The top bar" onError={onError}>
+          <span className="brand">HOTD2 <span className="dim">stage player</span></span>
+          {p && <>
+            <span id="stage-picker" className="toggles">
+              <StagePicker p={p} dispatch={store.dispatch} />
+            </span>
+            <span className="sep" />
+            <div className="modes" role="tablist" id="modes">
+              <Modes mode={p.transport.mode} dispatch={store.dispatch} />
+            </div>
+            <span className="sep" />
+            <span id="toggles" className="toggles">
+              <Toggles state={p.toggles} dispatch={store.dispatch} />
+            </span>
+            <span id="view-settings" className="toggles">
+              <ViewSettings p={p} dispatch={store.dispatch} />
+            </span>
+          </>}
+          <span className="grow" />
+          <span id="status" className="dim">
+            {p?.status.text ?? ""}
+            {p?.status.note
+              && <span className="dim" title={p.status.noteTitle}>
+                   {p.status.note}
+                 </span>}
           </span>
-          <span className="sep" />
-          <div className="modes" role="tablist" id="modes">
-            <Modes mode={p.transport.mode} dispatch={store.dispatch} />
-          </div>
-          <span className="sep" />
-          <span id="toggles" className="toggles">
-            <Toggles state={p.toggles} dispatch={store.dispatch} />
-          </span>
-          <span id="view-settings" className="toggles">
-            <ViewSettings p={p} dispatch={store.dispatch} />
-          </span>
-        </>}
-        <span className="grow" />
-        <span id="status" className="dim">
-          {p?.status.text ?? ""}
-          {p?.status.note
-            && <span className="dim" title={p.status.noteTitle}>
-                 {p.status.note}
-               </span>}
-        </span>
+        </ErrorBoundary>
       </header>
 
       <main id="stagearea">
-        <Tree p={p?.tree ?? null} current={p?.current ?? null}
-              dispatch={store.dispatch} />
+        <ErrorBoundary label="The script tree" onError={onError}>
+          <Tree p={p?.tree ?? null} current={p?.current ?? null}
+                dispatch={store.dispatch} />
+        </ErrorBoundary>
         <Resizer />
 
         {/* `shooting` and `paused` are both this element's class, so they are
@@ -107,35 +123,49 @@ export function App(
                          p?.toggles.shoot && "shooting"]
                         .filter(Boolean).join(" ")}>
           <canvas id="view" ref={canvas} />
-          {p?.paused && <div id="paused-overlay"><span>PAUSED</span></div>}
-          {loading && (
-            <div id="loading">
-              {!loading.failed && <div className="spinner" />}
-              <p id="loading-text" className={loading.failed ? "err" : undefined}>
-                {loading.text}
-              </p>
-            </div>
-          )}
-          {/* Anchored to the bottom of the rendered view, not a modal over it:
-              a branch point is a fact about where playback has got to, so the
-              script, the scrubber and free roam all stay usable. The skip bar
-              sits above it on the rare frame both are live. */}
-          <SkipBar p={p?.skip ?? null} dispatch={store.dispatch} />
-          <BranchBar p={p?.branch ?? null} dispatch={store.dispatch}
-                     onHover={(over) =>
-                       store.dispatch({ kind: "branchHover", over })} />
+          {/* The boundary goes round the overlays and never round `#viewport`
+              or `#view`: `app/` was handed those two elements through `onHost`
+              and the `WebGLRenderer` and the `ResizeObserver` are built on
+              them for the session. Unmounting either leaves WebGL drawing into
+              a detached canvas, which looks like a graphics bug and is not
+              one. */}
+          <ErrorBoundary label="The viewport overlays" onError={onError}>
+            {p?.paused && <div id="paused-overlay"><span>PAUSED</span></div>}
+            {loading && (
+              <div id="loading">
+                {!loading.failed && <div className="spinner" />}
+                <p id="loading-text" className={loading.failed ? "err" : undefined}>
+                  {loading.text}
+                </p>
+              </div>
+            )}
+            {/* Anchored to the bottom of the rendered view, not a modal over it:
+                a branch point is a fact about where playback has got to, so the
+                script, the scrubber and free roam all stay usable. The skip bar
+                sits above it on the rare frame both are live. */}
+            <SkipBar p={p?.skip ?? null} dispatch={store.dispatch} />
+            <BranchBar p={p?.branch ?? null} dispatch={store.dispatch}
+                       onHover={(over) =>
+                         store.dispatch({ kind: "branchHover", over })} />
+          </ErrorBoundary>
         </div>
 
         {/* Fourth in source order, because `#stagearea` is a grid and grid
             auto-placement follows the DOM. */}
-        <aside id="right">{p && <Sidebar p={p} store={store} />}</aside>
+        <aside id="right">
+          <ErrorBoundary label="The sidebar" onError={onError}>
+            {p && <Sidebar p={p} store={store} />}
+          </ErrorBoundary>
+        </aside>
       </main>
 
       <footer id="transport">
-        {p && <Transport t={p.transport} sound={p.sound}
-                         dispatch={store.dispatch} />}
+        <ErrorBoundary label="The transport" onError={onError}>
+          {p && <Transport t={p.transport} sound={p.sound}
+                           dispatch={store.dispatch} />}
+        </ErrorBoundary>
       </footer>
-    </>
+    </ErrorBoundary>
   );
 }
 

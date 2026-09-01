@@ -15,6 +15,7 @@ import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
 import type { GameHost } from "../game/host";
 import type { Vec3 } from "../game/vec";
 import type { Walker } from "../script/walker";
+import { SpawnPropContainers } from "../game/director";
 
 /** What the renderer answers for the port. See `game/host.ts`. */
 export interface HostBackend {
@@ -180,4 +181,48 @@ export function panelSystem(id: string,
                             tick: (ctx: RenderContext) => void)
     : System<RenderContext> {
   return { id, update: (ctx) => tick(ctx) };
+}
+
+/**
+ * The two script-owned globals the port reads, and the spawns it needs.
+ *
+ * `g_camera_fixed_eye_y` is where class 0x41 puts a group's floor and what
+ * `BreakablePropGroundContact` settles against. The camera opcode writes it
+ * too, so a group placed during a seek replay gets the right floor; this
+ * keeps it true for every other frame.
+ */
+export function syncPortGlobals(w: Walker, freeRoam: boolean,
+                                eye: { x: number; y: number; z: number }): void {
+  G.g_camera_fixed_eye_y = w.fixedEyeY;
+  // `g_camera_block_eye` is the camera block's own eye, and `cam_play`
+  // owns it — `CamAdvancePathFrame` writes it from the curve. Free roam has
+  // no path and therefore no block, so there it is taken from the viewer's
+  // camera instead, which is the only thing standing in for one.
+  if (freeRoam) {
+    G.g_camera_block_eye.x = eye.x;
+    G.g_camera_block_eye.y = eye.y;
+    G.g_camera_block_eye.z = eye.z;
+  }
+  // `ColiLoadForScene` indexes its file list with this, so it is zero-based
+  // and scene 1 is stage 2.
+  G.g_scene_index = w.script.scene ?? 0;
+  // Class 0x24's set-pieces are choreographed against the camera: every one
+  // of their removal and freeze triggers is a `cp_` slot plus a frame.
+  G.g_active_cam_path = w.cam ? w.cam.slot : -1;
+  // `__ftol` -- both camera drivers end on `g_cam_path_frame = __ftol(...)`,
+  // so this global is an **integer** that steps by exactly one a frame. The
+  // walker's clock is a float (`dt * 60`), and handing that straight over
+  // made every `===` test against it a coin toss: at a fixed 1/60 the value
+  // stays integral and matches, but under a browser's variable frame time it
+  // goes fractional and a cue frame is simply never equal to it. Class 0x10's
+  // removal cue never fired, so a civilian never left `g_civilians_alive` and
+  // `wait_scripted_actors` waited for ever.
+  G.g_cam_path_frame_prev = G.g_cam_path_frame;
+  G.g_cam_path_frame = w.cam ? Math.trunc(w.cam.frame) : 0;
+  G.g_script_flags = [];
+  for (const flag of w.flags) G.g_script_flags[flag] = 1;
+  // The spawn opcode places a group the moment it runs, so this is only the
+  // safety net for a spawn list restored by a snapshot load rather than by
+  // an instruction. It is idempotent — `ActorByAt` refuses a second one.
+  SpawnPropContainers(w.spawns);
 }

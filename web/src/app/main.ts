@@ -61,6 +61,9 @@ import { highlightSet } from "./projection/sidebar";
 import { buildProjection, projectionKey, type PlayerView }
   from "./projection/player";
 import { hudRows } from "./projection/hud";
+import {
+  branchProjection, skipProjection, soundProjection, transportProjection,
+} from "./projection/chrome";
 import { SceneFog } from "../render/fog";
 import { SceneLighting } from "../render/lighting";
 import { applyToggle, runCommand } from "./commands";
@@ -72,16 +75,15 @@ import type { RenderContext } from "../render/context";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
 import { wireSplitter } from "../hud/splitter";
-import { GameSystem, ScriptSystem, panelSystem } from "./systems";
+import { GameSystem, ScriptSystem, panelSystem, syncPortGlobals }
+  from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
-import { G } from "../game/globals";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { ResetPropContainers } from "../game/class41";
-import { SpawnPropContainers } from "../game/director";
 
 const $ = <T extends HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
@@ -400,10 +402,10 @@ export class Player implements PlayerView {
   get feed(): readonly FeedRow[] { return this.feedRows; }
   get hudRows(): readonly [string, string, boolean?][] { return this.hud; }
   get hasSaved(): boolean { return !!this.saved; }
-  get sound(): SoundProjection { return this.soundProjection(); }
-  get skip(): SkipProjection | null { return this.skipProjection(); }
-  get branch(): BranchProjection | null { return this.branchProjection(); }
-  get transport(): TransportProjection { return this.transportProjection(); }
+  get sound(): SoundProjection { return soundProjection(this); }
+  get skip(): SkipProjection | null { return skipProjection(this); }
+  get branch(): BranchProjection | null { return branchProjection(this); }
+  get transport(): TransportProjection { return transportProjection(this); }
 
   // -- bootstrap ---------------------------------------------------------
 
@@ -567,40 +569,6 @@ export class Player implements PlayerView {
     this.pushUrl();
   }
 
-  /**
-   * The skip bar, shown under the game's own condition.
-   *
-   * `Walker.canSkip` is `DAT_009A2D7C != 0 && DAT_009C8E00 == 0` -- the exact
-   * test both player-update routines make before looking at Start. So the bar
-   * appears precisely where the game would have accepted a skip, which is
-   * something the retail build never shows you, its skip being one assignment
-   * short of working.
-   *
-   * Unlike the branch bar this is an offer, not a question: playback is not
-   * waiting on it and ignoring it changes nothing.
-   */
-  private skipProjection(): SkipProjection | null {
-    const w = this.walker;
-    // The bar follows the region, not the offer. `canSkip` adds the firing
-    // gate, and gating *visibility* on that made the whole feature invisible
-    // whenever the gate happened to be up -- which is not worth the fidelity,
-    // since the region is the thing the script actually declares. So the bar
-    // shows for the region and the button carries the gate.
-    if (!w?.skippable) return null;
-    const can = w.canSkip;
-    const held = w.wait?.blocksOn;
-    return {
-      canSkip: can,
-      // On the rare frame a branch point is live too, sit above it.
-      stacked: !!w.branch,
-      sub: !can
-        ? "region open, but the shutter's firing gate is up — the game would "
-          + "not poll Start here"
-        : held
-          ? `holding on ${held} — skips every wait until the region closes`
-          : "skips every wait until set_skippable_region closes",
-    };
-  }
 
   /**
    * The transport button follows `playing` through the projection; this is
@@ -734,40 +702,6 @@ export class Player implements PlayerView {
   /** True while the pointer is over the branch bar; freezes the countdown. */
   branchHover = false;
 
-  /**
-   * The countdown label. Three states, and each says what it means: running,
-   * frozen because the pointer is over the bar, or simply waiting because
-   * only Play mode runs the arcade timer at all.
-   */
-  private branchProjection(): BranchProjection | null {
-    const b = this.walker?.branch;
-    if (!b) return null;
-    const route = this.walker?.currentBlock?.route;
-    return {
-      sub: `block ${b.block} → ${b.targets.join(" or ")}`,
-      options: b.targets.map((t) => {
-        const choice = route ? route.next.indexOf(t) : -1;
-        // The arcade shows a preview of each route before you commit. Those
-        // shots are the `store_six` operands, indexed by `branch_choice`.
-        // Unused choices are stored as slot 0 / frame 0 and resolve to no
-        // path; those get no preview rather than a shot of somewhere else.
-        const shot = b.preview?.find((q) => q.choice === choice && q.cam);
-        return {
-          target: t,
-          label: `→ ${t}`,
-          title: `Take route to block ${t}`
-            + (choice >= 0 ? ` (branch_choice ${choice})` : ""),
-          preview: shot ? { slot: shot.slot, frame: shot.frame } : null,
-        };
-      }),
-      countdown: !this.playing
-        ? "waiting for a choice"
-        : this.branchHover
-          ? "countdown paused"
-          : `picking in ${Math.max(0, b.countdown).toFixed(1)} s`,
-      paused: this.playing && this.branchHover,
-    };
-  }
 
   // -- per-frame ---------------------------------------------------------
 
@@ -839,7 +773,7 @@ export class Player implements PlayerView {
       // keeps falling in free roam. Only the shutter and the dialogue
       // countdown ride the script's own clock, and they took `tick` above.
       const game = this.gameTick(wall);
-      this.syncPortGlobals();
+      this.pushPortGlobals();
       // One call, and the order inside it is `World`'s: the shot seats the
       // camera block, the port's frame eases it, the draw reads it back, and
       // every render layer poses against the camera that draw placed.
@@ -860,49 +794,12 @@ export class Player implements PlayerView {
     this.renderer.render(this.scene, this.camera);
   };
 
-  /**
-   * The two script-owned globals the port reads, and the spawns it needs.
-   *
-   * `g_camera_fixed_eye_y` is where class 0x41 puts a group's floor and what
-   * `BreakablePropGroundContact` settles against. The camera opcode writes it
-   * too, so a group placed during a seek replay gets the right floor; this
-   * keeps it true for every other frame.
-   */
-  private syncPortGlobals(): void {
-    const w = this.walker;
-    if (!w) return;
-    G.g_camera_fixed_eye_y = w.fixedEyeY;
-    // `g_camera_block_eye` is the camera block's own eye, and `cam_play`
-    // owns it — `CamAdvancePathFrame` writes it from the curve. Free roam has
-    // no path and therefore no block, so there it is taken from the viewer's
-    // camera instead, which is the only thing standing in for one.
-    if (this.state.mode === "free") {
-      G.g_camera_block_eye.x = this.camera.position.x;
-      G.g_camera_block_eye.y = this.camera.position.y;
-      G.g_camera_block_eye.z = this.camera.position.z;
+  /** The script-owned globals the port reads. See `app/systems.ts`. */
+  private pushPortGlobals(): void {
+    if (this.walker) {
+      syncPortGlobals(this.walker, this.state.mode === "free",
+                      this.camera.position);
     }
-    // `ColiLoadForScene` indexes its file list with this, so it is zero-based
-    // and scene 1 is stage 2.
-    G.g_scene_index = w.script.scene ?? 0;
-    // Class 0x24's set-pieces are choreographed against the camera: every one
-    // of their removal and freeze triggers is a `cp_` slot plus a frame.
-    G.g_active_cam_path = w.cam ? w.cam.slot : -1;
-    // `__ftol` -- both camera drivers end on `g_cam_path_frame = __ftol(...)`,
-    // so this global is an **integer** that steps by exactly one a frame. The
-    // walker's clock is a float (`dt * 60`), and handing that straight over
-    // made every `===` test against it a coin toss: at a fixed 1/60 the value
-    // stays integral and matches, but under a browser's variable frame time it
-    // goes fractional and a cue frame is simply never equal to it. Class 0x10's
-    // removal cue never fired, so a civilian never left `g_civilians_alive` and
-    // `wait_scripted_actors` waited for ever.
-    G.g_cam_path_frame_prev = G.g_cam_path_frame;
-    G.g_cam_path_frame = w.cam ? Math.trunc(w.cam.frame) : 0;
-    G.g_script_flags = [];
-    for (const flag of w.flags) G.g_script_flags[flag] = 1;
-    // The spawn opcode places a group the moment it runs, so this is only the
-    // safety net for a spawn list restored by a snapshot load rather than by
-    // an instruction. It is idempotent — `ActorByAt` refuses a second one.
-    SpawnPropContainers(w.spawns);
   }
 
   /**
@@ -1011,49 +908,7 @@ export class Player implements PlayerView {
     }
   }
 
-  /** The camera slider's range and label, which follow the current shot. */
-  private transportProjection(): TransportProjection {
-    const w = this.walker;
-    const cam = w?.cam;
-    const path = cam ? this.paths?.paths.get(cam.slot) : undefined;
-    const base = {
-      playing: this.playing, mode: this.state.mode, speed: this.speed,
-      frozen: !!this.state.freeze,
-    };
-    if (!cam || !path) {
-      return { ...base, hasPath: false, camFrame: 0, camFrameLo: 0,
-               camFrameHi: 1, camLabel: "no camera path" };
-    }
-    const lo = Math.min(cam.startFrame, cam.endFrame);
-    const hi = Math.max(cam.startFrame, cam.endFrame, lo + 1);
-    return {
-      ...base,
-      hasPath: true,
-      camFrame: cam.frame,
-      camFrameLo: Math.floor(lo),
-      camFrameHi: Math.ceil(hi),
-      camLabel: `${path.file}[${path.index}] slot ${cam.slot}  `
-        + `frame ${cam.frame.toFixed(0)} / ${hi.toFixed(0)}`
-        + (cam.isStatic ? "  (static pose)" : ""),
-    };
-  }
 
-  private soundProjection(): SoundProjection {
-    const bs = this.bgm.current;
-    const on = !this.bgm.muted;
-    return {
-      muted: this.bgm.muted,
-      volume: Math.round(this.bgm.volume * 100),
-      blocked: bs.blocked,
-      // The button states what it currently IS, not what pressing it does.
-      text: on ? (bs.playing ? "Sound on" : "Sound on…") : "Muted",
-      label: !bs.file
-        ? "no bgm"
-        : bs.blocked && on
-          ? "click 🔇 to allow audio"
-          : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`,
-    };
-  }
 
   /**
    * This frame's projection, if it differs from the last.

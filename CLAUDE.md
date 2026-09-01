@@ -34,7 +34,13 @@ app       app/                          the composition root. sees everything
 ```
 
 Down only. `engine` imports nothing above itself; `render` and `ui` never
-import each other. `tools/verify_layers.py` enforces this with two severities:
+import each other.
+
+Lifetimes above the engine line belong to a **scope** — the disposal tree in
+`core/scope.ts`. A scope holds only what is *not* in the snapshot, which is the
+same thing as saying it holds exactly what `resync` must be able to rebuild.
+**`game/` never gets one**: the port transcribes a fixed object pool, and a
+snapshot slice has to survive `clonePlain`. `tools/verify_layers.py` enforces this with two severities:
 **error** rules must be zero, **ratchet** rules record a count that may fall
 but never rise.
 

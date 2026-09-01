@@ -352,6 +352,7 @@ web/src/
     loop.ts       the 60 Hz accumulator, freeze and speed — in one place
   core/
     system.ts     System { id; attach; update; detach; save?; load?; resync? }
+    scope.ts      the disposal tree: child/defer/own/listen/dispose
     world.ts      the registry, the tick order, save() and load()
     context.ts    engine-only: { bundle, walker, events, rng, stage, frame }
     render_context.ts  extends Context with { scene, camera }
@@ -371,6 +372,7 @@ web/src/
     seek.ts       the planner
   render/       stagescene, rigs, props, backdrop, rain, fog, lighting,
                 campath, characters. Every one a System.
+    scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
   ui/           React. projection.ts, commands.ts, and one file per panel
   hud/          bgm.ts — audio, not UI
 ```
@@ -400,6 +402,165 @@ there, because a snapshot does not contain the queue.
 `g_class_handlers`. A class with no module gets no behaviour — the rule that
 fixed the cat, made structural instead of an `if`.
 
+## Scopes: every lifetime has an owner
+
+The player has a lifetime problem the exe does not. It owns GPU resources, DOM
+nodes, event listeners and audio, and it can switch stage, seek, and restore a
+snapshot — none of which the game can do. Today that is managed by hand:
+
+| | count |
+|---|---|
+| hand-written `detach()` methods in `render/` and `hud/` | 9 |
+| manual `.dispose()` / `removeFromParent()` calls | 37 |
+| `addEventListener` | 67 |
+| `removeEventListener` | **6** |
+
+That last row is the argument. Three leaks found while writing step 8, all the
+same shape: `SpawnLayer.labels` is a `Map<string, CanvasTexture>` that `detach`
+never touches; `SceneLighting.lit` holds cloned `Material`s and is `.clear()`ed
+without disposing them; `props.ts` has a module-level `LABELS` cache with no
+owner at all.
+
+A **scope** is a named node in a disposal tree. Things register with it; when it
+dies they are undone, children first, in reverse order of registration.
+
+### The one rule
+
+> **A scope holds only what is *not* in the snapshot.**
+
+Which is the same sentence as: **a scope is exactly the set of things `resync`
+must be able to throw away and rebuild.** Two consequences, and both are the
+point:
+
+* **`game/` never gets a scope.** The port is a transcription, and the exe's
+  object lifetime is a fixed pool plus `ActorDespawn` clearing fields in a
+  reused slot — no hierarchy, no arena. A scope there would be structure with no
+  counterpart in the binary, which is what `verify_port.py` exists to catch.
+* **Nothing a scope owns can be game state.** `World.save()` puts every slice
+  through `clonePlain`; a scope is a live graph of disposal closures and cannot
+  survive that. If something needs to be in a snapshot, it does not belong to a
+  scope.
+
+### The hierarchy
+
+```
+app                          process lifetime
+└── stage                    one loadStage; dies on stage switch
+    ├── assets               geometry, textures, templates -- survives a seek
+    └── session              everything a seek or a snapshot load rebuilds
+        ├── actor:<at>       per-actor render state
+        ├── effect:<id>      impacts, projectiles, gore parts
+        └── region:<n>       streamed slots (loadSlot / unloadSlot)
+```
+
+The `assets` / `session` split is the one that earns its keep. `RigLayer` holds
+`actor.showing` and `Instance.frozen` — *how the object got where it is*, not
+where it is. That is session state, and carrying it across a seek posed a rig in
+a way play could never produce. Step 8 fixed it with a hand-written `resync`
+that resets three fields; get the next layer wrong and nothing catches you.
+Owned by `session`, a seek drops it because a seek drops the scope.
+
+`region:<n>` is the one level with a counterpart in the game: the asset
+opcodes already load and unload a region's slots, which the walker surfaces as
+`loadSlot`/`unloadSlot`. `[likely]` — the port's side is read, the exe's side is
+not re-read at the time of writing.
+
+### The API
+
+```ts
+// core/scope.ts -- no three.js, no DOM
+export class Scope {
+  readonly name: string;
+  /** ctx.frame when this scope was opened. The debug view reads it. */
+  readonly openedAt: number;
+  child(name: string): Scope;
+  /** Undo something. Runs LIFO on dispose. */
+  defer(undo: () => void): void;
+  /** Anything with a `dispose()`: geometry, material, texture, render target. */
+  own<T extends { dispose(): void }>(t: T): T;
+  /** Add a listener and register its removal in one call. */
+  listen<E>(target: EventTargetLike, type: string,
+            fn: (e: E) => void, opts?: AddEventListenerOptions): void;
+  dispose(): void;
+  get alive(): boolean;
+}
+```
+
+`EventTargetLike` is a **structural** interface — `addEventListener` and
+`removeEventListener`, nothing else. `HTMLElement` satisfies it without `core/`
+naming a DOM type, so `no-dom-in-engine` stays honest rather than being dodged:
+the rule looks for `document`, `window`, `HTMLElement` and `localStorage`, and
+none of them appear.
+
+Two thin helper modules on top, because the ergonomics are the whole point of
+doing this at all:
+
+```ts
+// render/scope3d.ts
+attachTo(scope, parent, node)   // add now, removeFromParent on dispose
+ownGeometry(scope, g) / ownMaterial(scope, m) / ownTexture(scope, t)
+clone(scope, template)          // clone, attach, and own every unique resource
+
+// hud/scope_audio.ts
+play(scope, id)                 // stops when the scope dies
+```
+
+The test of whether the helpers are good enough: **`detach()` should disappear**
+from all nine layers. If a layer still needs a hand-written teardown after this,
+a helper is missing.
+
+### Seeing it: the scope panel
+
+A leak is invisible until it is counted, so the debug sidebar grows a **Scopes**
+panel showing the live tree:
+
+```
+app                                    opened f0      3 owned
+└ stage                                opened f0    412 owned
+  ├ assets                             opened f0    380 owned
+  └ session                            opened f0     32 owned
+    ├ actor:0x1a40        ×7           opened f214     6 owned
+    ├ effect:impact       ×3           opened f981     2 owned
+    └ effect:thrown       ×112  ⚠      opened f88      1 owned
+```
+
+Three things, and each of them makes a different leak legible:
+
+* **`openedAt`** — the frame the scope was opened. A child of `stage` whose
+  frame predates the current stage load is a scope that survived a teardown.
+  Nothing else in the player can tell you that.
+* **The sibling count** (`×112`) — repeated names collapse into one row with a
+  tally. A hundred and twelve thrown-weapon scopes is a leak you can see from
+  across the room; a hundred and twelve rows is a wall of text you scroll past.
+* **The owned count and its high-water mark** — growth with a flat scope tree
+  means something is registering into a scope that never closes.
+
+The panel reads a **plain projection**, not the tree:
+
+```ts
+interface ScopeNode {
+  name: string; openedAt: number; owned: number;
+  children: ScopeNode[];
+}
+```
+
+`app/` builds it from the root and hands it over, so `hud/` needs no import from
+`core/` — the same seam step 11 generalises, arriving early and for a reason.
+This is the first real `UiProjection`, and it is a good one to design against
+because it is read-only, plain, and cheap to diff.
+
+### The check that could fail
+
+Instrument `Scope` in the test build and assert that after ten load / seek
+cycles:
+
+* every scope opened during stage *N* is disposed by the time stage *N+1* has
+  loaded, and
+* the live registration count returns to its first-load value.
+
+That runs headless — it counts registrations, not GPU objects, so no WebGL is
+needed and it can join `npm run test:port`.
+
 ## Enforcement: `tools/verify_layers.py`
 
 A boundary nobody measures is a preference. Every rule above is checked, and
@@ -426,7 +587,23 @@ escape hatch is to fix the layering or to change the plan.
 in this document, not in the checker.** If a piece of work genuinely cannot be
 done without adding a violation, that means the refactor it depends on has to
 come first — say so and stop, rather than raising the number. Every ratchet
-here is a debt with a named creditor: step 8, 9, 11 or 12.
+here is a debt with a named creditor: step 5, 9, 11 or 12.
+
+### The rules must keep asking the real question
+
+`layers-are-systems` used to search `main.ts` for `drawLayers` and count what
+that method ticked. Step 8 deleted `drawLayers` — and the rule went to zero not
+because it was satisfied but because it had nothing left to look at. A rule
+that cannot fire is worse than no rule, because the row still reads `ok`.
+
+It now asks the question it was always about: **an exported class in `render/`
+with an `update` is a layer, and a layer `app/` never hands to `world.add` is
+outside the tick order.** That found `FreeRoam`, which is real — free roam is
+mode-gated and main still drives it by hand — so the baseline is 1, owned by
+step 5.
+
+When a step clears a ratchet, check whether the rule still has teeth before
+dropping the baseline.
 
 ## Order of work
 
@@ -439,11 +616,12 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 2 | `game/globals.ts` + `game/actor.ts` — `G` and the actor struct at its offsets | ✅ |
 | 3 | `game/class30/`, `class31/`, `class41/` behind the registry | ✅ |
 | 4 | `render/`, `hud/`, `script/`, `bundle/` split out; `bundle.ts` split by exporter block | ✅ |
-| 5 | **Thin `main.ts`.** 1531 lines against a target of 400 | ◐ — falls out of 8 and 11 |
+| 5 | **Thin `main.ts`.** 1379 lines against a target of 400. `FreeRoam` is the last layer outside `World`, because it is mode-gated | ◐ — falls out of 11 |
 | 6 | `script/ops/` — nine modules, each registering its own entries | ✅ |
 | 7 | **`characters.ts`.** The damage half is out; assembly, posing and blending remain | ◐ |
-| 8 | **Every layer is a `System`.** All 14 hand-ticked layers registered with `World`; `drawLayers` deleted; `resync` on each. Fixes the rig seek divergence | ☐ |
-| 9 | **The engine/render boundary.** `Context` loses three.js and `RenderContext` is added; the 32 transcribed routines move to `game/`, rig pose authority first | ☐ |
+| 8 | **Every layer is a `System`.** All 14 hand-ticked layers registered with `World`; `drawLayers` deleted; `resync` on each. Fixes the rig seek divergence | ✅ |
+| 9 | **The engine/render boundary, and who owns what.** `Context` loses three.js and `RenderContext` is added; `core/scope.ts` plus the `render`/`hud` helpers, and all nine `detach()` methods go; the 32 transcribed routines move to `game/`, rig pose authority first | ☐ |
+| 9b | **The scope panel.** The live tree in the sidebar, with `openedAt` and sibling tallies. Depends on 9; it is what makes a leak a thing you notice rather than a thing you profile for | ☐ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
 | 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ☐ |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, one `bamsEuler` | ☐ |
@@ -454,11 +632,20 @@ Before starting, capture the baseline — the headless harnesses are the oracle:
 
 ```sh
 cd web
-for t in replay cadence civilians throwers wall corpses; do
-  node --experimental-strip-types --no-warnings tools/$t.mjs > /tmp/base.$t.txt
+for t in replay cadence civilians throwers wall corpses coli_walls; do
+  node --experimental-strip-types --no-warnings tools/run_test.mjs \
+      tools/$t.mjs > /tmp/base.$t.txt
 done
 npm run test:port && npm run test:seek
 ```
+
+Everything goes through `tools/run_test.mjs`, which bundles with esbuild first.
+Running a harness with node's bare `--experimental-strip-types` fails on the
+first `enum` it meets and tells you so in a way that looks like a real failure.
+
+`coli_walls` **fails at HEAD**, and has since before this work: it reports 51
+class-0x31 spawns where the Python reference says 49. Capture it anyway — the
+test is that the output does not change, not that it passes.
 
 After the step, every one of those must be **byte-identical**, and
 `verify_layers.py`, `verify_port.py`, `verify_player_ops.py` and

@@ -37,6 +37,13 @@ globals match.
    `Math.random`, and no import from `render/`, `hud/` or `app/`.
    `tools/verify_layers.py` enforces it, and the rule is *never* satisfied by
    weakening the checker — see **When a rule blocks the work** below.
+
+   **And no `Scope` in `game/`.** Scopes are the player's answer to a lifetime
+   problem the exe does not have; the port's answer is the object pool and
+   `ActorDespawn`, because that is what the binary does. A scope also cannot go
+   in a snapshot — `World.save()` puts every slice through `clonePlain`. If you
+   reach for one in `game/`, either the thing is render state and belongs in
+   `render/`, or you are inventing a lifetime the exe never had.
 7. **Commit only your own hunks.** Same rule as `/decomp`; peers run in this
    repo concurrently. `git add -A` is banned.
 

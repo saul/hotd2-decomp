@@ -64,7 +64,7 @@ import {
 } from "./projection/chrome";
 import { SceneFog } from "../render/fog";
 import { SceneLighting } from "../render/lighting";
-import { applyToggle, runCommand } from "./commands";
+import { applyToggle, runCommand, type PlayerCommands } from "./commands";
 import { loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
@@ -97,7 +97,7 @@ const PREF_COMMANDS: ReadonlySet<string> = new Set([
   "toggle", "setLightMode", "setFogMode", "setPillarbox", "setSpeed",
 ]);
 
-export class Player implements PlayerView {
+export class Player implements PlayerView, PlayerCommands {
   private readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;

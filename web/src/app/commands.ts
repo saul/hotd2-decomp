@@ -11,13 +11,123 @@
  * root deciding what a click does, so the coupling is the job rather than a
  * smell — the thing worth keeping narrow is the other direction, and
  * `PlayerView` keeps it.
+ *
+ * `PlayerCommands` below is the other half of that argument, and it is worth
+ * being exact about what it does and does not buy. It does **not** narrow the
+ * coupling; nothing here wants it narrowed. What it does is make the size of
+ * the write surface visible and declared, the way `PlayerView` made the read
+ * surface visible. Before it, these two functions took the whole 1060-line
+ * `Player`, so a new case could reach for any member that happened to be in
+ * scope and no diff would show that the surface had grown. Now a command
+ * reaching for something new has to add a line here, in the open, and the
+ * length of the interface is a standing measurement of how much of the player
+ * the UI can move.
  */
-import type { Player } from "./main";
+import type { PerspectiveCamera, Scene } from "three";
 import type { ToggleName, UiCommand } from "../ui/commands";
-import type { FogMode } from "../render/fog";
-import type { LightingMode } from "../render/lighting";
+import type { PlayerState } from "./urlstate";
+import type { CamCommand, FeedEntry, Walker } from "../script/walker";
+import type { Snapshot } from "../core/snapshot";
+import type { Bgm } from "../audio/bgm";
+import type { Backdrop } from "../render/backdrop";
+import type { BreakableLayer } from "../render/breakables";
+import type { CameraRig } from "../render/camera";
+import type { CharacterLayer } from "../render/characters";
+import type { ColiDebugLayer } from "../render/coli_debug";
+import type { DebugBoxLayer } from "../render/debug";
+import type { FogMode, SceneFog } from "../render/fog";
+import type { LightingMode, SceneLighting } from "../render/lighting";
+import type { SpawnLayer } from "../render/overlays";
+import type { PropLayer } from "../render/props";
+import type { Rain } from "../render/rain";
+import type { RigLayer } from "../render/rigs";
+import type { Shooting } from "../render/shooting";
+import type { StageScene } from "../render/stagescene";
+import type { StuckDebugLayer } from "../render/stuck_debug";
+import type { Hud as HudLayer } from "../hud/hud";
 
-export function runCommand(p: Player, c: UiCommand): void {
+/**
+ * Everything the commands below may move, and nothing else.
+ *
+ * The `readonly` marks are the distinction that carries the information, so
+ * they are worth reading carefully: a member is mutable here only if a command
+ * *assigns to it* (`p.speed = c.speed`), and `readonly` if the commands merely
+ * reach *through* it (`p.lighting.setMode(...)`, `p.cam.rails?.setVisible()`).
+ * The reference is fixed; what it names is not. So the mutable block is the
+ * short honest list of player fields a click can overwrite, and the rest is
+ * the list of layers a click can talk to.
+ *
+ * `state` is the case that makes the distinction concrete. `PlayerState` is a
+ * plain mutable record and several commands write fields on it, so
+ * `readonly state: PlayerState` says exactly the right thing: a command may
+ * set `state.stage`, and may not swap the record the player is holding.
+ */
+export interface PlayerCommands {
+  // -- assigned to ------------------------------------------------------
+
+  /** The wait panel's `box` checkbox. */
+  boxWait: boolean;
+  /** Replaced rather than mutated, so the projection settles it by id. */
+  toggles: Readonly<Record<ToggleName, boolean>>;
+  speed: number;
+  /** True while the pointer is over the branch bar; freezes the countdown. */
+  branchHover: boolean;
+  /** Set while the frame slider is driving the camera by hand. */
+  scrubbing: boolean;
+  pillarbox: boolean;
+  /** The last snapshot taken, for the Load button. */
+  saved: Snapshot | null;
+
+  // -- reached through --------------------------------------------------
+
+  /** Written field by field; never replaced. See the note above. */
+  readonly state: PlayerState;
+  readonly walker: Walker | null;
+  /** Sets, so the contents move while the reference does not. */
+  readonly boxedClasses: Set<number>;
+  readonly shutClasses: Set<number>;
+  readonly camera: PerspectiveCamera;
+  readonly scene: Scene;
+  readonly scene3d: StageScene | null;
+  readonly cam: CameraRig;
+  readonly lighting: SceneLighting;
+  readonly sceneFog: SceneFog;
+  readonly bgm: Bgm;
+  readonly backdrop: Backdrop;
+  readonly rain: Rain;
+  readonly rigs: RigLayer;
+  readonly chars: CharacterLayer;
+  readonly props: PropLayer;
+  readonly breakables: BreakableLayer;
+  readonly spawns: SpawnLayer;
+  readonly shooting: Shooting;
+  readonly debug: DebugBoxLayer;
+  readonly coliDebug: ColiDebugLayer;
+  readonly stuckDebug: StuckDebugLayer;
+  readonly hudLayer: HudLayer;
+
+  // -- asked to do something --------------------------------------------
+
+  seekTo(block: number, step: number, op: number): void;
+  setMode(mode: PlayerState["mode"]): void;
+  togglePlay(): void;
+  stepOnce(): void;
+  stepBack(): void;
+  requestSkip(): void;
+  poseFromSlot(slot: number, frame: number): void;
+  syncCameraToWalker(force?: boolean): void;
+  onCamera(cmd: CamCommand): void;
+  onFeed(e: FeedEntry): void;
+  clearFeed(): void;
+  markAddress(): void;
+  pushUrl(): void;
+  loadStage(): Promise<void>;
+  resize(): void;
+  saveSnapshot(): Snapshot;
+  loadSnapshot(snap: Snapshot): string | null;
+}
+
+export function runCommand(p: PlayerCommands, c: UiCommand): void {
   switch (c.kind) {
     case "boxClass":
       if (c.on) p.boxedClasses.add(c.cls);
@@ -160,8 +270,8 @@ export function runCommand(p: Player, c: UiCommand): void {
  * property the sixteen anonymous `wireUi` listeners could not have: there
  * was no list of them, and no way to be told one had been missed.
  */
-export function applyToggle(p: Player, name: ToggleName,
-                            on: boolean): void {
+export function applyToggle(p: PlayerCommands, name: ToggleName,
+                                    on: boolean): void {
   switch (name) {
     case "allRegions":
       p.state.all = on || undefined;

@@ -56,8 +56,17 @@ export function PlayerTakeDamage(player: number, src: Actor | null,
   if (!CheckPlayerCanBeHit(player)) return false;
 
   const d = T.player;
+  // [diverges] Floored at **one**, not zero. Reaching zero is the continue
+  // sequence, and this port has none: the engine's `g_player_state`
+  // (0x009A5C62) leaves 5 and `IsPlayerAttackable` above then makes
+  // every enemy stand down, so a player who runs out simply stops being
+  // attacked and the script freezes on `g_evt_gameplay_live`. With neither of
+  // those modelled, a run that hit zero left the player alive, unattackable by
+  // nothing, and the scene running on — which reads as the enemies breaking.
+  // Until there is a player state to lose, there is no last life to lose
+  // either. Named on purpose: this is a stand-in, not the rule.
   G.g_player_lives[player] =
-    Math.max(0, G.g_player_lives[player] - (d?.life_cost ?? 1));
+    Math.max(1, G.g_player_lives[player] - (d?.life_cost ?? 1));
   G.g_player_score[player] += d?.score ?? -100;
   G.g_player_invuln_frames = d?.invuln_frames ?? 90;
   G.g_player_was_hit[player] = 1;

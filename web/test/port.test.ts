@@ -729,7 +729,7 @@ console.log("ActorIsOnScreen:");
   ReleaseAttackSlot(other);
 }
 
-// -- 4. damage ---------------------------------------------------------------
+  // -- 4. damage ---------------------------------------------------------------
 
 console.log("ResolveHit:");
 {
@@ -2670,6 +2670,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("a civilian in play is counted", G.g_civilians_alive === 1,
           `${G.g_civilians_alive}`);
 
+
     // What the maul does to it: `ZombieStateTargetMotionScript` raises the same
     // bit a killing shot raises on the civilian's `obj+0x34`.
     a.flags |= ActorFlag.Dead;
@@ -2683,6 +2684,23 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     for (let i = 0; i < 8; i++) cFrame(a, events);
     check("...exactly once, however long it lies there",
           G.g_civilians_alive === 0, `${G.g_civilians_alive}`);
+  }
+  // **The record fills the object, then `Init` runs — in that order.**
+  // `SpawnFromDescriptor` (`FUN_00408A20`) does it that way, and
+  // `CivilianInit` (`FUN_0048A3E0`) runs the civilian's script as its last
+  // act, so the script's opening `SetMotion` is what the actor plays. The
+  // player was assigning the placement's own motion *after* `ActorSpawn`
+  // returned, which put it straight back: every civilian in the game stood in
+  // its spawn pose -- a hostage on 660 rather than the 371 her script asks for
+  // -- while her script ran on underneath it.
+  {
+    civScene([[cmd(CivilianOp.Wait, 0),
+               cmd(CivilianOp.SetMotion, 10, -1),
+               cmd(CivilianOp.Wait, 0)]]);
+    const posed = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "posed",
+                             { motion: 900 }, new Rng(3));
+    check("the class Init's motion outlives the record's",
+          posed.motion === 10, `motion ${posed.motion}`);
   }
 }
 
@@ -2919,6 +2937,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     check("...with gravity on the y axis", Math.abs(z.accY + 0.04) < 1e-6,
           `accY ${z.accY}`);
   }
+
 }
 
 console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");

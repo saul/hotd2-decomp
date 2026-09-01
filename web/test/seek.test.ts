@@ -400,6 +400,32 @@ for (const stage of STAGES) {
     replay.applyWait(gate);
     check("a replay retires them, because nothing else will",
           replay.spawns.length === 0, `${replay.spawns.length} left`);
+
+    // **And the civilian gate does the same for what *it* counts.** It did
+    // not, because which waits retire was a second hard-coded set of opcode
+    // numbers next to the rule table rather than a field on the rule. So a
+    // seek that stepped over `wait_scripted_actors` carried the previous
+    // scene's hostages into the block it landed in, where they were spawned,
+    // counted in `g_civilians_alive`, and held the *next* one of these open.
+    const civGate = { i: 0, at: 0, op: 0x46, name: "wait_scripted_actors",
+                      cat: "wait", arg: 0 } as unknown as OpJson;
+    const civ = { at: 0x4AE4, class: 0x10, pos: [0, 0, 0] as [number, number, number] };
+    const civReplay = new Walker(script, { ...mkHost(), aliveCivilians: () => 0 });
+    civReplay.replaying = true;
+    civReplay.spawns = [{ ...civ } as never, { ...spawn }];
+    civReplay.applyWait(civGate);
+    check("a replay retires the civilians the civilian gate counts",
+          civReplay.spawns.length === 1
+          && civReplay.spawns[0]?.class === spawn.class,
+          `${civReplay.spawns.length} left`);
+
+    // ...and only those. An enemy standing next to a rescued hostage is not
+    // what this gate is about.
+    const civPlay = new Walker(script, { ...mkHost(), aliveCivilians: () => 0 });
+    civPlay.spawns = [{ ...civ } as never];
+    civPlay.applyWait(civGate);
+    check("playback keeps them, as the enemy gate does",
+          civPlay.spawns.length === 1, `${civPlay.spawns.length} left`);
   }
 }
 

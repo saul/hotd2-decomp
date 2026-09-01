@@ -54,7 +54,7 @@ export interface WaitRule {
    * *actors* rather than about the clock, which is what a replay has to
    * reproduce by hand — see `Walker.retireGatedEnemies`.
    */
-  readonly retiresEnemies?: boolean;
+  readonly retires?: "enemies" | "civilians";
   /** Decide what this wait is waiting for, on the frame the instruction runs. */
   enter(op: OpJson, ctx: WaitContext): WaitPolicy;
   /** Is it over? Only called for a policy that actually blocks. */

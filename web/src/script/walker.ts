@@ -190,7 +190,6 @@ export interface WalkerHost {
  * actors rather than about the clock, which is why they get their own set —
  * see {@link Walker.retireGatedEnemies}.
  */
-const ENEMY_GATE_WAITS = new Set([0x43, 0x44]);
 
 /**
  * The spawn classes whose handler moves `g_enemies_alive` or
@@ -212,6 +211,17 @@ const ENEMY_GATE_CLASSES: ReadonlySet<number> = new Set<number>([
   SpawnClass.FlyingEnemy,           // 0x43
   SpawnClass.WaterEnemy,            // 0x51
 ]);
+
+/**
+ * The classes `wait_scripted_actors` (0x46) waits on — `g_civilians_alive`.
+ *
+ * `CivilianInit` (`FUN_0048A3E0`) is the only thing that raises that counter,
+ * so this is class 0x10 and nothing else. Its children are not in the spawn
+ * list at all: `CivilianInit` `SpawnFromDescriptor`s them itself, and they go
+ * when their parent does.
+ */
+const CIVILIAN_GATE_CLASSES: ReadonlySet<number> =
+  new Set<number>([SpawnClass.Civilian]);
 
 /**
  * One opcode's implementation and how far this client honours it.
@@ -748,9 +758,9 @@ export class Walker {
    * "two left" would leave two specific enemies alive that the replay has no
    * way to choose between; no such gate exists.
    */
-  private retireGatedEnemies(): void {
+  private retireGated(classes: ReadonlySet<number>): void {
     if (!this.replaying) return;
-    this.spawns = this.spawns.filter((s) => !ENEMY_GATE_CLASSES.has(s.class));
+    this.spawns = this.spawns.filter((s) => !classes.has(s.class));
   }
 
   /**
@@ -762,11 +772,18 @@ export class Walker {
    * Every path that releases a wait without the condition actually being
    * tested goes through here (`seek`, `primeToFirstWait`, the drive loop in
    * `test/seek.test.ts`), so that the wait's **postcondition** is applied in
-   * one place: see {@link retireGatedEnemies}.
+   * one place: see {@link retireGated}.
+   *
+   * Which waits have one is the rule table's answer, not a second list of
+   * opcode numbers here. It used to be `{0x43, 0x44}` written out, which is
+   * why `wait_scripted_actors` was never retired: adding a gate meant
+   * remembering to add it in two places, and nobody did.
    */
   stepOverWait(): void {
     if (!this.wait) return;
-    if (ENEMY_GATE_WAITS.has(this.wait.op.op)) this.retireGatedEnemies();
+    const retires = WAIT_RULES.get(this.wait.op.op)?.retires;
+    if (retires) this.retireGated(retires === "civilians"
+      ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
     this.wait = null;
     this.opIndex++;
   }
@@ -1356,7 +1373,15 @@ export class Walker {
       ? rule.enter(op, this.waitContext)
       : passedBecause(op);
     if (policy.kind === "passed") {
-      if (rule?.retiresEnemies) this.retireGatedEnemies();
+      // **A replay that walks past a gate has to leave the gate's world
+      // behind it.** `wait_enemies_alive 0` is only reached in play once the
+      // enemies are dead, so a seek that steps over it and keeps their spawns
+      // arrives in a state the game cannot be in: the previous scene's actors
+      // standing in the next scene's block, counted alive, holding the very
+      // gate the script is about to reach open. The wait's own postcondition
+      // is the answer -- retire exactly what it counts.
+      if (rule?.retires) this.retireGated(rule.retires === "civilians"
+        ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
       return `${blocksOn} -- ${policy.why}`;
     }
     this.wait = { op, blocksOn, policy };

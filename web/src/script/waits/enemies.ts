@@ -15,7 +15,7 @@ import { passedBecause, type WaitContext, type WaitRule } from "./types";
 
 export const waitEnemiesAlive: WaitRule = {
   ops: [0x43, 0x44],
-  retiresEnemies: true,
+  retires: "enemies",
   enter(op: OpJson, ctx: WaitContext): WaitPolicy {
     const alive = ctx.host.aliveEnemies();
     if (alive === null) return passedBecause(op);
@@ -40,6 +40,11 @@ export const waitEnemiesAlive: WaitRule = {
  */
 export const waitScriptedActors: WaitRule = {
   ops: [0x46],
+  // Same reason as its enemy twin above, and it was missing: a seek that
+  // stepped over this one kept the previous scene's civilians, so they were
+  // spawned into the block it landed in, counted in `g_civilians_alive`, and
+  // held the *next* one of these open for ever.
+  retires: "civilians",
   enter(op: OpJson, ctx: WaitContext): WaitPolicy {
     const civilians = ctx.host.aliveCivilians();
     if (civilians === null) return passedBecause(op);

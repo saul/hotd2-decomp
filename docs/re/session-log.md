@@ -7756,3 +7756,44 @@ keeps it.
 
 The regression test drives it end to end and was checked against the old code
 first: it fails `latch 1 permits [-1]`, which is the whole bug in one line.
+
+## Three from one sitting: the pose, the gate's postcondition, and the last life
+
+**Every civilian in the game stood in its spawn pose.** `CharacterLayer` built
+the actor with `ActorSpawn` — which runs the class `Init` — and *then* assigned
+the placement's own `motion`, `hp`, `yaw` and `pos` on top. `CivilianInit`
+(`FUN_0048A3E0`) runs the civilian's script as its last act, and the hostage at
+`0x4AE4` opens hers with `SetMotion 371`; the placement's motion is 660, which
+is exactly what `CivilianInit` writes as its default, so the assignment put the
+default straight back. She played 660 for ever while her script ran on
+underneath. The engine has no such window: `SpawnFromDescriptor`
+(`FUN_00408A20`) fills the object from the record and *then* calls `Init`, so
+everything now goes in through the descriptor and the order is the engine's.
+The regression test was checked against the old ordering first. `[proved]`
+
+**A seek stepped over `wait_scripted_actors` and kept its civilians.** The
+enemy gates retire what they count during a replay — the wait is only reached
+in play once the count is zero, so a replay that walks past it has to establish
+that. `wait_scripted_actors` (0x46) never did, so a seek carried the previous
+scene's hostages into the block it landed in, where they were spawned, counted
+in `g_civilians_alive`, and held the *next* gate open. The reason it was
+missed: which waits retire lived in **two** places, a `retiresEnemies` flag on
+the rule and a hard-coded `{0x43, 0x44}` beside `stepOverWait`. It is one field
+on the rule now, `retires: "enemies" | "civilians"`, read by both paths.
+
+**Lives floor at one.** `[diverges]`, and named as a stand-in rather than a
+rule: reaching zero is the continue sequence, which this port does not have.
+In the engine `g_player_state` (0x009A5C62) leaves 5, `IsPlayerAttackable`
+(`FUN_00409DC0`) makes every enemy stand down and `g_evt_gameplay_live`
+(0x007DCCA4) freezes the script. With none of that modelled, a run that hit
+zero left the player alive, attacked by nobody, and the scene running on.
+
+**And a checker sharp edge worth knowing.** `verify_port.py` de-duplicates a
+citation that matches both its reference and its definition pattern by pairing
+`(name, address)` **across the whole file**. So writing an ordinary
+cross-reference — `` `IsPlayerAttackable` (`FUN_00409DC0`) `` — inside the very
+file that defines it cancels the definition, and coverage drops by one with no
+failure printed. It cost a while to find because nothing is wrong with either
+line on its own. The comment now names the function without re-citing its
+address, which is the right cross-reference for something ten lines up anyway,
+but the dedupe would be better done on position than on the pair.

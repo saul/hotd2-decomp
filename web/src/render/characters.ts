@@ -302,14 +302,21 @@ export class CharacterLayer implements System {
       const p = rec.place;
       // The descriptor tail is read by the class's own Init -- the start state
       // is one of its bytes -- so it is handed over at spawn time.
+      // **Everything the record carries goes in before `Init` runs**, which
+      // is the order `SpawnFromDescriptor` (`FUN_00408A20`) has: it fills the
+      // object from the record and only then calls the class's `Init`. Setting
+      // them afterwards let the record overwrite what `Init` decided —
+      // `CivilianInit` (`FUN_0048A3E0`) runs the civilian's script as its last
+      // act, so a hostage whose script opens `SetMotion 371` had it replaced
+      // by the placement's own 660 on the same frame, and every civilian in
+      // the game stood in its spawn pose while its script ran on underneath.
       const a = ActorSpawn(at, p?.class ?? 0, rec.type.type, rec.type.name,
-                           DescriptorFromPlacement(p), this.rng);
-      a.motion = rec.motion;
-      a.hp = this.startHp(p);
-      a.maxHp = a.hp;
-      a.yaw = p?.yaw ?? 0;
-      a.pos = { ...rec.home };
-      a.visible = true;
+                           { ...DescriptorFromPlacement(p),
+                             motion: rec.motion,
+                             hp: this.startHp(p), maxHp: this.startHp(p),
+                             yaw: p?.yaw ?? 0, pos: { ...rec.home },
+                             visible: true },
+                           this.rng);
       this.pending.delete(at);
       this.live.add(at);
       this.instances.push({ at, a, type: rec.type, root: rec.root,

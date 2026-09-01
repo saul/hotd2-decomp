@@ -839,7 +839,7 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 4 | `render/`, `hud/`, `script/`, `bundle/` split out; `bundle.ts` split by exporter block | ✅ |
 | 5 | **Thin `main.ts`.** 1054 lines. The 400 target was wrong — see below. `FreeRoam` is the last layer outside `World`, because it is mode-gated | ✅ |
 | 6 | `script/ops/` — nine modules, each registering its own entries | ✅ |
-| 7 | **`characters.ts`.** The damage half is out; assembly, posing and blending remain | ◐ |
+| 7 | **`characters.ts`.** 898 → 647, with `characters/{instance,pose,gore}.ts` beside it | ✅ |
 | 8 | **Every layer is a `System`.** All 14 hand-ticked layers registered with `World`; `drawLayers` deleted; `resync` on each. Fixes the rig seek divergence | ✅ |
 | 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |

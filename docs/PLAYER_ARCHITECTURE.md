@@ -1,62 +1,89 @@
-# Browser player: architecture, and the plan to keep it one
+# Browser player: architecture
 
 The player has grown from a camera-path viewer into a partial reimplementation
-of the game's runtime. Combat alone added ~700 lines in one session, and the
-decomp has **roughly thirty spawn classes still unread**, each of which is a
-self-contained state machine. The current shape will not absorb that.
+of the game's runtime, and the decomp still has roughly thirty spawn classes
+unread, each a self-contained state machine. This document is the shape that
+absorbs them, the rules that keep it one shape, and the checks that make the
+rules real.
 
-This is the plan to make it absorb it. It is written to be executed in order,
-each step leaving the tree green.
+It is written to be executed in order. Each step leaves the tree green.
+
+**If a rule here cannot be satisfied by the work in front of you, that is a
+finding, not an obstacle.** Say so, and change the plan. The one thing that is
+never acceptable is a violation smuggled in to get a commit out: the boundaries
+below are load-bearing, and every one of them was written after something
+expensive went wrong.
+
+## The three layers
+
+```
+engine    core/ bundle/ script/ game/   no three.js, no DOM, deterministic,
+                                        snapshotable, runs headless
+render    render/                       three.js. reads engine state, owns nothing
+ui        hud/ -> ui/                   reads one projection, emits commands
+app       app/                          the composition root. sees everything;
+                                        nothing sees it
+```
+
+Dependencies point **down and never up**. `app` may import anything; `render`
+and `ui` may import `engine`; `engine` imports nothing above itself. `render`
+and `ui` may not import each other.
+
+Each layer earns its boundary by what it makes possible, not by tidiness:
+
+* **engine runs headless.** That is what lets `npm run test:port` drive the
+  state machines in under a second, and it is the only reason the gameplay bugs
+  in this project get caught before a play-test.
+* **render owns nothing.** A snapshot contains nothing from `render/`; loading
+  one calls `resync` and the renderers rebuild. A renderer that cannot rebuild
+  itself from engine state is a bug in the split, and the snapshot is the test
+  that finds it.
+* **ui reads a projection.** Not the walker, not `G`. One plain, serialisable
+  value per frame, and typed commands back. That keeps the UI replaceable and,
+  more importantly, keeps gameplay rules from accumulating in click handlers --
+  which is exactly how `main.ts` became a god object the first time.
 
 ## Where it is now
 
-The tree below is the one this document asked for; steps 1 to 5 of the order of
-work are done. Line counts as of the commit that landed them:
+Measured at the commit that landed this document:
 
-| Directory | Lines | Files | What it owns |
-|---|---|---|---|
-| `game/` | 1948 | 27 | **the port.** No three.js, no DOM, no `Math.random` |
-| `render/` | 3404 | 13 | three.js. Observes game state, owns nothing |
-| `script/` | 1668 | 12 | `walker.ts` — the machine; `ops/` — the 65 opcodes |
-| `app/` | 1530 | 5 | `main.ts` (1164), the loop, the system adapters |
-| `hud/` | 1031 | 4 | hud, ui, bgm, splitter |
-| `bundle/` | 715 | 8 | one module per exporter block |
-| `core/` | 297 | 5 | `System`, `World`, `Context`, `Events`, `Rng`, `Snapshot` |
+| Directory | Lines | Files | Layer | What it owns |
+|---|---|---|---|---|
+| `game/` | 15267 | 79 | engine | **the port.** No three.js, no DOM, no `Math.random` |
+| `render/` | 5142 | 17 | render | three.js. Observes engine state |
+| `script/` | 2407 | 13 | engine | `walker.ts` — the machine; `ops/` — the 65 opcodes |
+| `app/` | 1951 | 5 | app | `main.ts` (1531), the loop, the system adapters |
+| `hud/` | 1422 | 6 | ui | hud, ui, bgm, splitter, debug panels, globals view |
+| `bundle/` | 1246 | 8 | engine | one module per exporter block |
+| `core/` | 337 | 5 | engine | `System`, `World`, `Context`, `Events`, `Rng`, `Snapshot` |
 
-`app/main.ts` at 1164 is still too big, and step 5 below says what is left in
-it. `script/walker.ts` is 1204 and that is close to done: the opcode table is
-out, and what remains is the machine — addressing, stepping, the waits, the
-branch points and the save slice — plus the three op helpers that are really
-machine (`applyWait` draws from the RNG and takes branches, `applyQueueEvent`
-jumps blocks). Moving those into `ops/` would mean publishing `rng` and
-`liveBlocks`, which is a wider seam than the line count is worth.
+27,772 lines. The four largest files are `script/walker.ts` (1714),
+`app/main.ts` (1531), `game/class10/index.ts` (1378) and
+`render/characters.ts` (895).
 
-### What it was, and the four problems this was written against
+### The honest gaps
 
-| File | Lines | What it owned |
+`game/` is clean: no three.js, no DOM, no `Math.random`. That boundary holds
+and it is the one that has paid for itself. The rest are open, and
+`tools/verify_layers.py` reports each of them against a baseline that may not
+grow:
+
+| Gap | Count | Cleared by |
 |---|---|---|
-| `walker.ts` | 1447 | the evt machine **and** all 65 opcode implementations |
-| `main.ts` | 1152 | three.js, the loop, every layer, all UI wiring, **and gameplay rules** |
-| `characters.ts` | 945 | assembly, posing, blending, damage, gore, death, reactions |
-| `enemies.ts` | 828 | slots, permits, ranking, approach, strike, throw, projectiles, camera aim |
-| `bundle.ts` | 663 | every JSON type in the bundle, in one flat file |
-| 14 others | ~3800 | one concern each — these were fine |
+| Layers ticked by hand from `main.ts` instead of registered with `World` | 14 | step 8 |
+| `three` imported by `core/` — `Context` holds a `Scene` and a camera | 1 | step 9 |
+| Transcribed exe routines living in `render/` | 32 | step 9 |
+| UI modules importing the engine directly | 17 | step 11 |
+| Transcribed exe routines living in `hud/` | 7 | step 11 |
+| `BAMS_TO_RAD` definitions | 9 | step 12 |
 
-1. **`main.ts` was a god object.** 21 imports, and it owned the render loop,
-   the layer wiring, the UI, *and* gameplay rules. Lives and score were
-   decremented in two hand-written callbacks (`onStrike`, `onThrowHit`) that
-   already duplicated each other. **Fixed:** both are one
-   `PlayerTakeDamage`, and the HUD hears about it on the event bus.
-2. **There was no notion of a system.** Every layer had a bespoke `update`
-   signature and `main.ts` called each by hand, applying its own `dt * speed`
-   and freeze rules at each call site. **Fixed:** `app/loop.ts` owns the
-   accumulator and hands out one `Tick`.
-3. **`enemies.ts` was becoming the whole actor runtime.** One file for class
-   0x30 and 0x31, with ~30 more classes to come. **Fixed:** it is gone,
-   re-derived as `game/class30/` and `game/class31/` behind a registry.
-4. **Callbacks instead of events.** Seven `onX = ...` assignments in `main.ts`.
-   **Fixed** for damage; the walker's host interface is still callbacks, and
-   deliberately so — it is a host, not a notification.
+Two of those are correctness, not tidiness. Only 2 of 17 render layers
+implement `System`, so most of the renderer is outside `save`/`load`/`resync`:
+`RigLayer` keeps `actor.showing` and `Instance.frozen` across a seek, and
+nothing rebuilds them, so rewinding can leave a rig held in a pose continuous
+play would never produce. And the 32 transcribed routines in `render/` are
+unreachable by `test:port` and `verify_port.py` — which is precisely where the
+stage-1 car spin lived for as long as it did.
 
 ## The gameplay code is a **port**, not an interpretation
 
@@ -169,39 +196,14 @@ and the globals match.**
 
 ### And a boundary that makes it enforceable
 
-`game/` must not import `three`. It reads and writes its own globals and actor
-structs, and the renderer observes them. That is not architectural purity for
-its own sake: it is what lets the port be exercised headlessly, which is the
-only way these bugs get caught before you see them.
+`game/` must not import `three`, touch the DOM, or call `Math.random`. It reads
+and writes its own globals and actor structs, and the renderer observes them.
+That is not architectural purity for its own sake: it is what lets the port be
+exercised headlessly, which is the only way these bugs get caught before you
+see them.
 
-```
-game/           the port. no three.js, no DOM.
-  globals.ts      every g_* the port touches, in one enumerable object
-  actor.ts        the object struct, offsets in comments
-  class30/        approach.ts attack_run.ts strike.ts backoff.ts
-                  ground.ts — the per-frame snap that puts them on the floor
-                  emerge.ts fall.ts — the entrances that place the actor
-                  target.ts — the eleven states that work on a civilian
-                  rather than on the camera
-  class31/        the wall-crawler, all 35 states: router.ts arc.ts pounce.ts
-                  surface.ts stand.ts strike.ts entrance.ts on_shot.ts
-                  death.ts react.ts standing.ts scripted.ts — plus thrower.ts
-                  and projectile.ts for the throw
-  class10/        the civilians — the exe's own bytecode VM, and the rescue
-  class24/        the set-pieces, choreographed against the camera
-  class25/        the scripted-humanoid bytecode VM — the cutscene system
-  class41/        group.ts prop.ts kinded.ts items.ts — the containers
-  class44/        container.ts — the one that is knocked loose and falls
-  combat/         permits.ts rank.ts player.ts score.ts shot.ts
-  despawn.ts      ActorDespawn — the port's own removal from the pool
-  camera/         path.ts track.ts select_target.ts turn.ts slots.ts
-                  — the camera block: `cam_play` seats it, the hook eases it
-  coli.ts         the game's own collision -- the segment and sphere queries,
-                  against the `coli/` quads the bundle carries
-  tables.ts       the exported data, typed
-render/         three.js. observes game state, owns nothing.
-  breakables.ts   one node per live class-0x41 prop, cloned from a slot
-```
+All three are checked — the first two by `tools/verify_layers.py`, all three by
+`tools/verify_port.py`.
 
 ## Saving and restoring the whole game state
 
@@ -274,106 +276,194 @@ What it is for, in rough order of value:
   reproducible.
 * **Resume.** The deep link already carries a stage, a block and a seed; a
   snapshot carries the rest.
+## `script/`: four machines wearing one class
+
+`walker.ts` is 1714 lines and the target in this document has been "the machine
+only, ~300" since it was written. Extracting `ops/` did not move it, because
+the opcodes were never the bulk. What is actually in there is four separable
+things:
+
+| Concern | Today | Target |
+|---|---|---|
+| **The VM** — program counter over block/step/op, the dispatch table, `executeOne`, `apply` | fused | `script/vm.ts`, ~250 lines |
+| **Resumption** — what makes the VM *stop*: wait policies, the enemy gates, the skip request, the firing gate | `SKIPPABLE_WAITS`, `ENEMY_GATE_WAITS`, `waitSatisfied`, `WAIT_NOTES` | `script/waits/*.ts`, one file per policy kind, registered the way `ops/` register |
+| **Script-driven state** — channel tweens, scene state, queued events, the camera action lifecycle | seven methods and the `CH_*` constants | `script/state/{channels,scene,queued,camera}.ts`, each owning its own save slice |
+| **Seek** — `seek`, `seekInner`, `reaches`, `takeBranchToward` | inside the VM | `script/seek.ts`, a planner that drives the VM's public surface |
+
+**Seek is the one worth arguing about.** It is not part of the machine: it is a
+tool that drives the machine to a target, the way a debugger does. Keeping it
+inside is why `fix(gameplay): a camera cue the seek landed past could never
+fire` was a walker bug rather than a planner bug. Outside, a seek defect cannot
+break playback.
+
+`WalkerHost` has **23 methods**, which is the same smell measured from the
+other side: the machine reaching into everything. It collapses to about six.
+Outward notifications (`onFeed`, `onBranch`) become events on the bus, because
+they are notifications and not host services. Script-driven state is mutated
+directly by the ops that own it. What is genuinely left is a small read-only
+port for the questions the script asks about the world — `aliveEnemies`,
+`aliveCivilians`, `cameraFree`.
+
+## The UI layer
+
+The UI is ~1900 lines of imperative DOM: `index.html` (196 lines, 51
+elements), `hud/` (1422), and `wireUi`/`refreshUi` in `main.ts` (~300), wired
+with 67 `addEventListener` calls. Four debug surfaces landed in a single day —
+the sidebar, the globals view, the collision and stuck overlays — and each one
+hand-rolled `createElement`, listeners and `textContent` updates.
+
+**React, on two seams and no more.**
+
+**1. One read model.** A `UiProjection` system in the `hud` phase emits a
+plain, serialisable `UiState` once per frame: numbers, strings and arrays. No
+three.js objects, no walker reference, no actor references. This *is* the UI
+boundary, and because it is plain data it is snapshot-testable like everything
+else.
+
+**2. One command model.** The UI never calls the engine. It dispatches typed
+`UiCommand`s — `play`, `pause`, `step`, `seek`, `setStage`, `toggleLayer` —
+onto a queue the app drains at a tick boundary. That deletes the 67 ad-hoc
+listeners and makes an interaction reproducible: a sequence of commands is a
+test.
+
+React subscribes with `useSyncExternalStore` and panels select slices, so a
+changed score re-renders the score and nothing else. The canvas stays out of
+React entirely: three.js owns it, a `<Viewport>` holds a ref and never
+re-renders. `hud/bgm.ts` is audio rather than UI and does not move.
+
+**The risk, named so it can be watched:** `UiState` must stay a *projection*.
+The moment a panel writes to it instead of dispatching a command, the layer is
+gone — which is exactly how `render/` accumulated 32 transcribed exe routines.
+
+### Why React rather than keeping the hand-rolled DOM
+
+Not for its own sake. The panel count is growing weekly and every panel is the
+same three chores; the projection and command seams are worth having whatever
+renders them, and React is the smallest thing that consumes them well.
+`useSyncExternalStore` maps onto the existing snapshot model exactly, so no
+state library is wanted or allowed.
 
 ## The shape to move to
 
 ```
 web/src/
-  app/          bootstrap and the loop, nothing else
-    main.ts       build the World, wire the UI, run
+  app/          bootstrap and the loop, nothing else. Target: under 400 lines.
+    main.ts       build the World, mount the UI, run
     loop.ts       the 60 Hz accumulator, freeze and speed — in one place
   core/
-    system.ts     interface System { id; attach; update; detach; save?; load?; resync? }
+    system.ts     System { id; attach; update; detach; save?; load?; resync? }
     world.ts      the registry, the tick order, save() and load()
-    context.ts    { scene, camera, bundle, walker, events, rng }
+    context.ts    engine-only: { bundle, walker, events, rng, stage, frame }
+    render_context.ts  extends Context with { scene, camera }
     events.ts     a typed bus
-    rng.ts        seeded, with its state exposed — snapshots need it
+    rng.ts        seeded, state exposed — snapshots need it
     snapshot.ts   the Snapshot type and the round-trip check
-  game/         the port — see above. The only rules that matter live here.
+    bams.ts       BAMS_TO_RAD and bamsEuler. One definition.
+  game/         the port. The only rules that matter live here.
+    ...           one module per class, behind a registry
+    stagecast/    rig route selection, frame rules, part rules — pose authority
   bundle/       one module per exporter block, re-exported by index.ts
   script/
-    walker.ts     the machine only (~300 lines)
-    ops/          camera.ts flow.ts region.ts sound.ts hud.ts combat.ts
+    vm.ts         the machine only
+    ops/          the 65 opcodes, one module per group
+    waits/        one module per wait policy
+    state/        channels, scene, queued events, camera action
+    seek.ts       the planner
   render/       stagescene, rigs, props, backdrop, rain, fog, lighting,
-                campath, actors (assembly, posing, blending)
-  hud/          hud, overlays, ui
+                campath, characters. Every one a System.
+  ui/           React. projection.ts, commands.ts, and one file per panel
+  hud/          bgm.ts — audio, not UI
 ```
 
 ### The three rules that hold the rest together
 
 **1. One `System` interface and one tick order.** Every layer implements
-`attach / update / detach`, and `World` ticks them in an explicit order that
-mirrors the engine's frame:
+`attach / update / detach`, and `World` ticks them in an order that mirrors the
+engine's frame:
 
 ```
-script → game → render → hud
+script -> game -> render -> hud
 ```
 
 `app/loop.ts` owns the accumulator, `speed` and `freeze`; systems receive an
-already-scaled `dt` and the count of 60 Hz frames advanced. Adding a system
-becomes one `world.add(...)` and never touches the loop.
+already-scaled `dt` and the count of 60 Hz frames advanced. Adding a system is
+one `world.add(...)` and never touches the loop. **A layer ticked by hand is a
+layer outside `save`/`load`/`resync`** — that is not a style point, it is the
+rig seek bug.
 
-**2. A typed event bus instead of callbacks.** `events.emit("player.damaged",
-{...})`. The port raises them where the exe would set a flag; the HUD and the
-feed subscribe. That deletes the duplicated damage handling already in
-`main.ts` and means the next damage source wires itself. Events are
-fire-and-forget notifications **out** of the port: no system may put state
+**2. A typed event bus instead of callbacks.** The port raises them where the
+exe would set a flag; the HUD and the feed subscribe. Events are
+fire-and-forget notifications **out** of the engine: no system may put state
 there, because a snapshot does not contain the queue.
 
 **3. One module per game class, behind a registry** that mirrors
 `g_class_handlers`. A class with no module gets no behaviour — the rule that
 fixed the cat, made structural instead of an `if`.
 
+## Enforcement: `tools/verify_layers.py`
+
+A boundary nobody measures is a preference. Every rule above is checked, and
+the check runs in the same suite as the rest:
+
+```sh
+python3 tools/verify_layers.py          # summary
+python3 tools/verify_layers.py --list   # every violation
+```
+
+Two severities, and the difference is the whole design:
+
+* **error** — must be zero. A new one fails immediately. Today: the layer
+  direction rule, and `three` / DOM / `Math.random` inside the engine. All four
+  are at zero and stay there.
+* **ratchet** — a violation the architecture has not reached yet. The current
+  count is recorded against the step that clears it, and the build fails if it
+  **grows**.
+
+There is deliberately **no suppression comment and no per-file opt-out.** The
+escape hatch is to fix the layering or to change the plan.
+
+**Lowering a baseline is the point. Raising one is a decision, and it belongs
+in this document, not in the checker.** If a piece of work genuinely cannot be
+done without adding a violation, that means the refactor it depends on has to
+come first — say so and stop, rather than raising the number. Every ratchet
+here is a debt with a named creditor: step 8, 9, 11 or 12.
+
 ## Order of work
 
-Each step compiles and passes `verify_player_ops.py` on its own.
+Steps 1–4 and 6 are done. Each step compiles, keeps `verify_layers.py` green,
+and passes `verify_player_ops.py` and `npm run test:port` on its own.
 
-1. ✅ **`core/` + `app/loop.ts`.** `System`/`World`/`Context`/`Events`/`Rng`/
-   `Snapshot`, and one `Tick` that is already scaled and gated.
-2. ✅ **`game/globals.ts` + `game/actor.ts`.** `G` and the actor struct, with
-   lives, score, invulnerability and the damage rank on them as
-   `PlayerTakeDamage` (`FUN_00415300`).
-3. ✅ **`game/class30/`, `game/class31/` and `game/class41/`.** `enemies.ts` re-derived against
-   the decomp — one file per state, named for the exe function, calling the
-   real call graph. The class registry mirrors `g_class_handlers`, so a class
-   with no module gets no behaviour.
-4. ✅ **`render/`, `hud/`, `script/`, `bundle/`.** Moved, and `bundle.ts` split
-   by exporter block.
-5. ◐ **Thin `main.ts`.** The gameplay rules, the loop, the layer clocks and the
-   splitter are out; it is 1164 lines and the target is under 400. What is left
-   is the UI wiring (~500 lines) and the stage load (~150), and both want the
-   remaining layers to be `System`s first — `drawLayers` is the seam.
-6. ✅ **`script/ops/`.** Nine modules — camera, region, lighting, scene, sound,
-   hud, spawn, flow, wait — each registering its own entries into `Walker.OPS`.
-   `verify_player_ops.py` reads them instead of the class, still finds all 65,
-   and now also refuses an opcode registered in two modules, which is the one
-   failure mode the split introduces.
-7. ◐ **`characters.ts`.** The damage half is out: `ResolveHit`
-   (`FUN_00409430`), `ActorSwapDamagedPart`, `SeverBoneChildren`,
-   `RemoveBoneSubtree`, `ActorReactToHit`, `ActorPlayHitReaction`,
-   `DamageRankModifier` and `ChooseDeathMotionDirectional` are in
-   `game/combat/resolve_hit.ts`, and `characters.ts` is down to 689 — the two
-   model swaps go out through `GameHost` and it applies them. What is left to
-   split is assembly, posing and blending, and they share an `Instance` rather
-   than a concern, so the seam is less obvious than it looked.
+| # | Step | State |
+|---|---|---|
+| 1 | `core/` + `app/loop.ts` — `System`/`World`/`Context`/`Events`/`Rng`/`Snapshot`, one scaled `Tick` | ✅ |
+| 2 | `game/globals.ts` + `game/actor.ts` — `G` and the actor struct at its offsets | ✅ |
+| 3 | `game/class30/`, `class31/`, `class41/` behind the registry | ✅ |
+| 4 | `render/`, `hud/`, `script/`, `bundle/` split out; `bundle.ts` split by exporter block | ✅ |
+| 5 | **Thin `main.ts`.** 1531 lines against a target of 400 | ◐ — falls out of 8 and 11 |
+| 6 | `script/ops/` — nine modules, each registering its own entries | ✅ |
+| 7 | **`characters.ts`.** The damage half is out; assembly, posing and blending remain | ◐ |
+| 8 | **Every layer is a `System`.** All 14 hand-ticked layers registered with `World`; `drawLayers` deleted; `resync` on each. Fixes the rig seek divergence | ☐ |
+| 9 | **The engine/render boundary.** `Context` loses three.js and `RenderContext` is added; the 32 transcribed routines move to `game/`, rig pose authority first | ☐ |
+| 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
+| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ☐ |
+| 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, one `bamsEuler` | ☐ |
 
-### What the port found on its first headless run
+### Proving a step did not change behaviour
 
-The rewrite in step 3 was not a code move, and two bugs fell out of it that
-were live in the player before:
+Before starting, capture the baseline — the headless harnesses are the oracle:
 
-* **The lunge could never reach its attack.** `ZombieStateStrike` closes to the
-  attack entry's own distance, and those are *inside* the 25-unit inner ring —
-  but the advance clamped every state at the ring. So an actor lunged forever,
-  swinging at a range it could not reach. It matches the report of zombies that
-  "swing but don't hit, and then repeatedly do the swing anim".
-* **The clip clock was owned by the renderer.** `action.t` was advanced in
-  `CharacterLayer.update`, so the port could not be run without a screen and a
-  save state restored while paused would sit on a half-played swing for ever.
-  It is `ActorAdvanceMotion` now, in `game/`, where the engine keeps it.
+```sh
+cd web
+for t in replay cadence civilians throwers wall corpses; do
+  node --experimental-strip-types --no-warnings tools/$t.mjs > /tmp/base.$t.txt
+done
+npm run test:port && npm run test:seek
+```
 
-Neither was findable by reading. Both were the first two failures of
-`npm run test:port`.
+After the step, every one of those must be **byte-identical**, and
+`verify_layers.py`, `verify_port.py`, `verify_player_ops.py` and
+`verify_objects.py` must still pass. A step is not done until that holds.
+
 
 ## The check that makes it real: `tools/verify_port.py`
 
@@ -403,7 +493,6 @@ cheaply checkable because both sides are text.
   `game/`, no `Math.random(` under `game/`, and no `export let` in
   `game/globals.ts`. Each of the three is a way for state to escape the
   snapshot, and each has exactly one honest spelling.
-
 ## The other check: `npm run test:port`
 
 `web/test/port.test.ts` imports `game/` and nothing else — no three.js, no

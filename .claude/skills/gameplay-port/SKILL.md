@@ -16,7 +16,7 @@ running the zombie's state machine, a rank test moved across a function
 boundary the engine keeps. All four are impossible if the call graph and the
 globals match.
 
-## The six non-negotiables
+## The seven non-negotiables
 
 1. **Decompile with `/decomp` first.** You may not port what you have not read.
    Any reading of the binary done for a port — a new state, a table, a field —
@@ -33,7 +33,11 @@ globals match.
 4. **Enums for the sets the exe enumerates, constants for scalars.** Idiomatic
    TypeScript is not in tension with a faithful port — see below.
 5. **Divergence is declared** with a greppable `[diverges]` and a reason.
-6. **Commit only your own hunks.** Same rule as `/decomp`; peers run in this
+6. **Stay inside your layer.** `game/` is the engine: no `three`, no DOM, no
+   `Math.random`, and no import from `render/`, `hud/` or `app/`.
+   `tools/verify_layers.py` enforces it, and the rule is *never* satisfied by
+   weakening the checker — see **When a rule blocks the work** below.
+7. **Commit only your own hunks.** Same rule as `/decomp`; peers run in this
    repo concurrently. `git add -A` is banned.
 
 ## The loop
@@ -55,6 +59,30 @@ restructure, update that table and the tree above it **in the same commit** —
 a plan that describes a layout the tree no longer has is worse than no plan.
 
 Run `ListAgents` if a peer session may be live.
+
+### 0b. When a rule blocks the work
+
+It will happen: the faithful transcription of a routine wants something the
+layer it belongs in is not allowed to have. A pose that needs the camera, a
+panel that needs an actor, a class whose state the renderer already holds.
+
+**Do not weaken the rule to get the commit out.** Not a `three` import "just
+for this one", not a raised ratchet baseline, not a helper in `app/` that
+launders the dependency. Every boundary in this project was written after
+something expensive went wrong, and the stage-1 car spin lived for as long as
+it did precisely because transcribed exe behaviour had drifted into `render/`
+where no check could reach it.
+
+Instead:
+
+1. **Finish everything that is not blocked.** Most of the task usually is.
+2. **Name the rule, and what satisfying it would take.** Which step of
+   `docs/PLAYER_ARCHITECTURE.md`'s order of work clears it — every ratchet has
+   one — and roughly what that step costs.
+3. **Put the call to the user**: do the enabling refactor first, or change the
+   plan. Both are legitimate; quietly violating the boundary is not.
+
+A wider refactor being necessary is a finding worth having, not a failure.
 
 ### 1. Orient
 
@@ -137,9 +165,16 @@ Three checks, all of which can fail:
 cd web && npx tsc --noEmit          # test/ and tools/ are typechecked too
 npm run test:port                   # the port, headless: no three.js, no DOM
 cd .. && python3 tools/verify_port.py
+python3 tools/verify_layers.py      # layer boundaries -- always, not just on a move
 python3 tools/verify_player_ops.py  # if you touched script/ops/
 python3 tools/verify_player_dom.py  # if you touched index.html or a `$("#id")`
 ```
+
+`verify_layers.py` holds the boundaries in `docs/PLAYER_ARCHITECTURE.md`. Its
+**error** rules must be zero — the layer direction, and `three` / DOM /
+`Math.random` inside the engine. Its **ratchet** rules carry a count that may
+fall but never rise, each one attributed to the step of the order of work that
+clears it.
 
 `verify_port.py` holds:
 

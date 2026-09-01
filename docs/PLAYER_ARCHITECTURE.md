@@ -45,45 +45,64 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 
 ## Where it is now
 
-Measured at the commit that landed this document:
-
 | Directory | Lines | Files | Layer | What it owns |
 |---|---|---|---|---|
-| `game/` | 15267 | 79 | engine | **the port.** No three.js, no DOM, no `Math.random` |
-| `render/` | 5142 | 17 | render | three.js. Observes engine state |
-| `script/` | 2407 | 13 | engine | `walker.ts` — the machine; `ops/` — the 65 opcodes |
-| `app/` | 1951 | 5 | app | `main.ts` (1531), the loop, the system adapters |
-| `hud/` | 1422 | 6 | ui | hud, ui, bgm, splitter, debug panels, globals view |
+| `game/` | 15423 | 80 | engine | **the port.** No three.js, no DOM, no `Math.random` |
+| `render/` | 5752 | 23 | render | three.js. Observes engine state, owns nothing |
+| `app/` | 2984 | 18 | app | `main.ts` (1060), the loop, the adapters, the projection |
+| `script/` | 2873 | 22 | engine | `walker.ts` — the machine; `ops/`, `waits/`, `state/` |
+| `ui/` | 1883 | 20 | ui | React: one projection in, one command union out |
 | `bundle/` | 1246 | 8 | engine | one module per exporter block |
-| `core/` | 337 | 5 | engine | `System`, `World`, `Context`, `Events`, `Rng`, `Snapshot` |
+| `core/` | 721 | 8 | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
+| `hud/` | 309 | 1 | ui | the shutter and the caption, drawn |
+| `audio/` | 248 | 1 | ui | `bgm.ts` |
 
-27,772 lines. The four largest files are `script/walker.ts` (1714),
-`app/main.ts` (1531), `game/class10/index.ts` (1378) and
-`render/characters.ts` (895).
+31,439 lines. The four largest files are `script/walker.ts` (1525),
+`game/class10/index.ts` (1378), `app/main.ts` (1060) and `game/actor.ts` (842).
 
-### The honest gaps
+### The gaps, and what closed them
 
-`game/` is clean: no three.js, no DOM, no `Math.random`. That boundary holds
-and it is the one that has paid for itself. The rest are open, and
-`tools/verify_layers.py` reports each of them against a baseline that may not
-grow:
+`game/` has been clean throughout: no three.js, no DOM, no `Math.random`. That
+boundary is the one that paid for itself first. The others were open when this
+document was written, each measured by `tools/verify_layers.py` against a
+baseline that could fall but never rise — and the order of work below is what
+drove each to zero.
 
-| Gap | Count | Cleared by |
+| Gap | Was | Cleared by |
 |---|---|---|
-| Layers ticked by hand from `main.ts` instead of registered with `World` | 14 | step 8 |
-| `three` imported by `core/` — `Context` holds a `Scene` and a camera | 1 | step 9 |
+| Layers ticked by hand instead of registered with `World` | 14 | step 8 |
+| `three` imported by `core/` — `Context` held a `Scene` and a camera | 1 | step 9 |
 | Transcribed exe routines living in `render/` | 32 | step 9 |
 | UI modules importing the engine directly | 17 | step 11 |
 | Transcribed exe routines living in `hud/` | 7 | step 11 |
 | `BAMS_TO_RAD` definitions | 9 | step 12 |
+| Checks that could not read `.tsx` at all | 3 rules | step 13 |
+| Attributes with two writers | 3 | steps 15-16 |
+| Script state kept outside the snapshot | 2 | steps 14, 19 |
 
-Two of those are correctness, not tidiness. Only 2 of 17 render layers
-implement `System`, so most of the renderer is outside `save`/`load`/`resync`:
-`RigLayer` keeps `actor.showing` and `Instance.frozen` across a seek, and
-nothing rebuilds them, so rewinding can leave a rig held in a pose continuous
-play would never produce. And the 32 transcribed routines in `render/` are
-unreachable by `test:port` and `verify_port.py` — which is precisely where the
-stage-1 car spin lived for as long as it did.
+Two of those were correctness rather than tidiness, and both bit. Only 2 of 17
+render layers implemented `System`, so most of the renderer was outside
+`save`/`load`/`resync`: `RigLayer` kept `actor.showing` and `Instance.frozen`
+across a seek and nothing rebuilt them, so rewinding could leave a rig held in
+a pose continuous play would never produce. And the 32 transcribed routines in
+`render/` were unreachable by `test:port` and `verify_port.py` — which is
+precisely where the stage-1 car spin lived for as long as it did.
+
+Two ratchets are still above zero, and both are real rather than accounting.
+
+**`render-drives-the-port`, at 13.** The camera shot calls
+`CamAdvancePathFrame` and `CamSetPathTarget`; the character layer spawns
+actors and resolves hits; the shooting layer takes a shot at a breakable and
+scores it. Every one is the *renderer* deciding something the port should
+decide, because the input that triggers it — a pointer, a curve evaluation —
+lives on this side of the seam. Closing it means the port owning a shot queue
+rather than the layer that noticed the click, which is a piece of gameplay
+work and not a refactor. It has no step yet; adding one is the next thing to
+decide, not a line edit in the checker.
+
+**`layers-are-systems`, at 1.** `FreeRoam` is never `world.add`ed, and it is
+mode-gated: it only runs in free roam, where the script is not playing and
+there is nothing for a snapshot to be wrong about. Step 5's row says so.
 
 ## The gameplay code is a **port**, not an interpretation
 
@@ -324,76 +343,139 @@ port for the questions the script asks about the world — `aliveEnemies`,
 
 ## The UI layer
 
-The UI is ~1900 lines of imperative DOM: `index.html` (196 lines, 51
-elements), `hud/` (1422), and `wireUi`/`refreshUi` in `main.ts` (~300), wired
-with 67 `addEventListener` calls. Four debug surfaces landed in a single day —
-the sidebar, the globals view, the collision and stuck overlays — and each one
-hand-rolled `createElement`, listeners and `textContent` updates.
+The UI is React over two seams and no more. `index.html` is nine lines and a
+`<div id="app">`; everything the page has is rendered by `ui/App.tsx`, the
+canvas included.
 
-**React, on two seams and no more.**
+**One read model.** A `UiProjection` is built once a frame by `app/` and
+published to a store React subscribes to with `useSyncExternalStore`. It is
+plain data: numbers, strings, booleans and arrays of them. No three.js
+objects, no walker reference, no actor references.
 
-**1. One read model.** A `UiProjection` system in the `hud` phase emits a
-plain, serialisable `UiState` once per frame: numbers, strings and arrays. No
-three.js objects, no walker reference, no actor references. This *is* the UI
-boundary, and because it is plain data it is snapshot-testable like everything
-else.
+**One command model.** The UI never calls the engine. It dispatches a
+`UiCommand` — a closed union — and `app/commands.ts` is the one exhaustive
+switch that decides what each one means. A command added without a case there
+fails to compile, which is the property the twenty-odd anonymous
+`addEventListener` callbacks it replaced could not have: there was no list of
+what the UI could do, and no way to be told one had been missed.
 
-**2. One command model.** The UI never calls the engine. It dispatches typed
-`UiCommand`s — `play`, `pause`, `step`, `seek`, `setStage`, `toggleLayer` —
-onto a queue the app drains at a tick boundary. That deletes the 67 ad-hoc
-listeners and makes an interaction reproducible: a sequence of commands is a
-test.
+### The seven rules
 
-React subscribes with `useSyncExternalStore` and panels select slices, so a
-changed score re-renders the score and nothing else. The canvas stays out of
-React entirely: three.js owns it, a `<Viewport>` holds a ref and never
-re-renders. `hud/bgm.ts` is audio rather than UI and does not move.
+Written once, because the review that produced steps 13 to 19 found the same
+mistake in seven different costumes: **a fact with two owners**. Each rule
+below is one of them, and the fix in every case was to delete an owner rather
+than to keep two in step.
 
-**The risk, named so it can be watched:** `UiState` must stay a *projection*.
-The moment a panel writes to it instead of dispatching a command, the layer is
-gone — which is exactly how `render/` accumulated 32 transcribed exe routines.
+**1. `ui/` reads one projection and emits commands.** No import from `game/`,
+`script/`, `bundle/` or `core/`, type-only included. A panel that reads engine
+state directly is a second reader with its own idea of *when* to look, which
+is how a sidebar comes to disagree with the boxes drawn round the actors it is
+listing. `ui-reads-projection-only` and `layer-direction` are the checks, and
+they have read `.tsx` since step 13 — for the eleven months before that they
+printed `error 0 ok` having never opened the files.
 
-### Why React rather than keeping the hand-rolled DOM
+**2. The projection is plain data.** If `structuredClone` would not round-trip
+it, it does not belong — the same test a snapshot slice has to pass, for the
+same reason.
 
-Not for its own sake. The panel count is growing weekly and every panel is the
-same three chores; the projection and command seams are worth having whatever
-renders them, and React is the smallest thing that consumes them well.
-`useSyncExternalStore` maps onto the existing snapshot model exactly, so no
-state library is wanted or allowed.
+**3. A command is the UI asking the *world* to change.** Anything that changes
+nothing outside `ui/` — a fold, a filter, a scroll position, a panel width —
+is component state. It is not a command, it is not in the projection, and it
+does not reach `app/`. Putting it there drags UI-local state up into the
+composition root and grows the union with things the game has no opinion
+about.
 
-## The shape to move to
+**4. Slices are referentially stable when their content has not changed.**
+That is what makes `memo` the diff: a panel whose slice did not move gets the
+object it had last frame and does not re-render, whatever else did. One
+generic `stabilise` pass at the root does it — see `app/projection/stable.ts`
+— and `publish` then decides whether to notify at all with a single `===`.
+
+**5. Cost is demand, and demand is expressed by mounting.** An open panel
+registers a claim on the slice it shows; `app/` asks `wants(slice)` and never
+asks the DOM anything. "Is this panel open" and "is this component mounted"
+are one fact, not two.
+
+**6. One writer per pixel.** No imperative DOM write to anything React
+renders. A component reaching for a node **it rendered itself** is a different
+matter and is allowed where React's model is the wrong tool — the script
+tree's highlight and the minimap's canvas both do it, inside the component
+that owns the node.
+
+**7. State the script drives belongs to the script**, not to the layer that
+draws it. The shutter and the caption are the case that proved it: their state
+lived in `hud/`, so a snapshot restored the shutter's *state* without the
+slide phase behind it.
+
+### What each rule cost when it was missing
+
+| rule | what it looked like |
+|---|---|
+| 1 | three `error` rules reporting zero over 790 lines they had never opened |
+| 2 | — held throughout; the one rule nothing has yet broken |
+| 3 | the projection builder reading `<details>.open` out of the document, once a frame, to decide what to build |
+| 4 | `JSON.stringify` of the whole projection every frame, because every slice was a fresh object and `memo` could never bail |
+| 5 | `rememberFolds` persisting a fold that `app/` then read back through a `querySelector` |
+| 6 | the active mode button lit for about a frame; `#viewport` carrying a class from `app/` and another from `render/` while React rendered neither; sixteen portals that silently rendered nothing if an id was renamed |
+| 7 | a save taken mid-shutter-close coming back frozen part-way shut |
+
+None of those was a typo. Each was a reasonable local decision that became
+wrong once something else moved, which is why they are rules and not a style
+guide.
+
+## The tree
+
+What is on disk. Where a line is still a plan it says so.
 
 ```
 web/src/
-  app/          bootstrap and the loop, nothing else. Target: under 400 lines.
-    main.ts       build the World, mount the UI, run
+  app/          the composition root: the only layer that sees all the others
+    main.ts       `Player` — 1060 lines. Step 10 is what shortens it
     loop.ts       the 60 Hz accumulator, freeze and speed — in one place
-  core/
+    systems.ts    the adapters: GameSystem, ScriptSystem, drawSystem
+    commands.ts   the one exhaustive switch over `UiCommand`
+    ui_root.ts    createRoot on #app, and the canvas coming back
+    projection/   what the UI is told, assembled — player, sidebar, script,
+                  globals, hud, message, and `stable.ts`
+    stage_load.ts, walker_host.ts, urlstate.ts, viewprefs.ts, dom.ts
+  core/         the framework. No three.js, no DOM.
     system.ts     System { id; attach; update; detach; save?; load?; resync? }
-    scope.ts      the disposal tree: child / defer / own / dispose
-    bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
+                  and Context { walker, scope, session, view, stage, frame }
     world.ts      the registry, the tick order, save() and load()
-    context.ts    engine-only: { walker, scope, events, rng, stage, frame }
+    scope.ts      the disposal tree: child / defer / own / dispose
+    camera.ts     CameraFrame — the camera as plain numbers, for the port
+    snapshot.ts   the Snapshot type and the round-trip check
     events.ts     a typed bus
     rng.ts        seeded, state exposed — snapshots need it
-    snapshot.ts   the Snapshot type and the round-trip check
-    bams.ts       BAMS_TO_RAD and bamsEuler. One definition.
+    bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
-    ...           one module per class, behind a registry
-    stagecast/    rig route selection, frame rules, part rules — pose authority
+    class10/ class24/ class25/ class30/ class31/ class41/ class44/
+                  one module per class, behind `registry.ts`
+    globals.ts    `G`, the data segment      actor.ts   the struct at its offsets
+    camera/ combat/ effects/                 coli.ts, motion.ts, tables.ts, ...
   bundle/       one module per exporter block, re-exported by index.ts
   script/
-    vm.ts         the machine only
-    ops/          the 65 opcodes, one module per group
+    walker.ts     the machine, and the script's own state
+    ops/          the opcodes, one module per group
     waits/        one module per wait policy
     state/        channels, scene, queued events, camera action
     seek.ts       the planner
-  render/       context.ts -- RenderContext, which adds { scene, camera }
-                stagescene, rigs, props, backdrop, rain, fog, lighting,
-                campath, characters. Every one a System.
+    (`vm.ts` is step 10: the machine still shares a file with the state)
+  render/       three.js. Reads engine state, owns nothing.
+    context.ts    RenderContext, which adds { scene, camera }
+    camera.ts     the shot, the take and the draw — three systems, in order
+    stagescene, rigs, props, backdrop, rain, fog, lighting, campath,
+    characters, shooting, breakables, projectiles, overlays, debug
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
-  ui/           React. projection.ts, commands.ts, store.ts, one file per panel
-  hud/          bgm.ts — audio, not UI
+  ui/           React. One projection in, one command union out.
+    App.tsx       the whole page, including the canvas
+    store.ts      UiStore: publish, subscribe, dispatch, demand
+    projection.ts what the UI is allowed to know
+    commands.ts   what the UI is allowed to ask for
+    persist.ts    usePersisted — folds and widths, and nothing else
+    panels/       one file per panel, every one `memo`-wrapped
+  hud/          hud.ts — the shutter and the caption, drawn. Holds no state.
+  audio/        bgm.ts — audio, not UI
 ```
 
 ### The three rules that hold the rest together
@@ -826,252 +908,61 @@ step 5.
 When a step clears a ratchet, check whether the rule still has teeth before
 dropping the baseline.
 
-## What the UI review found
+## What the review found, and what was rejected
 
-The projection and the command union are the right shape and will take a lot
-more porting without bending: one read-only value, one closed union, one store,
-and `PlayerView` as the written-down answer to "what does the UI depend on?".
-Adding a class costs three edits and the class describes itself through
-`ActorDebug` rather than the panel knowing what a zombie is.
+The findings themselves are the seven rules above and the table under them;
+listing them twice would make one copy the stale one. What is worth keeping
+here is the reasoning that does **not** survive as a rule — the alternatives
+that were considered and turned down, because those are what a future reader
+is most likely to re-propose.
 
-What the review found is that **the enforcement did not follow**, and that step
-11's own last move — inverting the portals so `index.html` becomes a mount
-point — was never made, while the row said done. Everything below follows from
-those two facts. Steps 13-19 clear them.
+**A `foldPanel` command, with a `PanelName` union and a `ViewPrefs` key.** The
+obvious fix for the projection builder reading `<details>.open` was to send the
+fold *up* instead: make it a command, keep it in the projection, persist it
+with the other view preferences. It is the wrong direction. A fold changes
+nothing outside `ui/`, so the command union would grow a member describing
+something the world has no opinion about, and the composition root would carry
+state that exists only to be handed straight back. The right fix was to notice
+that the `<details>` was doing two jobs — keeping the fold, and answering
+"is this worth building" — and to separate them: the fold stays local, and the
+cost becomes demand expressed by mounting.
 
-### The checks did not read the UI layer
+**A cleverer regex for the sixteen portal mounts.** `verify_player_dom.py`
+could not see `into("#globals", …)`, so it could not tell you that a renamed id
+had silently stopped a panel rendering. Teaching it to recognise that one
+helper would have made the tool understand one call site in one file. The
+selectors were built at run time and no static check could see them in
+general; that was an argument for deleting the portals, not for a smarter
+tool. Step 16 deleted them, and in the meantime `into` threw.
 
-`verify_layers.py:175` and `verify_player_dom.py:47` both globbed
-`SRC.rglob("*.ts")`. The UI layer is `.tsx`. So `ui-reads-projection-only`,
-`no-engine-writes-in-ui` and `layer-direction` printed `error 0 ok` having
-never opened the 790 lines they exist to police. It was clean by discipline,
-not by measurement — and widening the glob left all eleven rules green with
-both ratchets held, so closing it cost nothing. **Step 13 did.**
+**`useSyncExternalStoreWithSelector`.** The React-shaped answer to "panels
+should select slices". It is a separate shim to depend on, and it re-runs
+every selector on every publish anyway — so the work it avoids is the render,
+not the comparison, and the comparison is what was expensive. Structural
+sharing gets the same result with no dependency and makes the *store* cheaper
+too: `publish` compares once, by identity.
 
-The DOM guard has a second, independent hole. Its `SELECTOR` rejects a type
-parameter, and every lookup in `ui/` uses one:
+**A hand-listed set of fields to compare.** The obvious cheap version of
+`stabilise`. It goes stale the first time a field is added, silently, and in
+the direction of doing more work — which is the same failure the old change
+key had and the reason it was written as a `JSON.stringify` of everything in
+the first place. Generic, or not at all.
 
-| form | matched today |
-|---|---|
-| `document.querySelector("#feed")` | yes |
-| `document.querySelector<HTMLElement>("#feed")` | **no** |
-| `at(sel)` in `App.tsx` | **no** — built at runtime |
-
-That is why the tool listed `feed` and `tree-filter` under *"no code
-reads"* while `main.ts` read both every frame; widening the pattern moved them
-across, 12 referenced ids to 14. `globals` and `wait-body` stayed on that list
-for the third reason below, and stay there until step 16.
-
-The third hole is not a defect in the tool. `App.tsx` mounts sixteen portals
-through `at(sel)`, so rename `#globals` in the markup and `createPortal` gets
-`null`, `into` returns `null`, and the panel silently does not render — behind
-a clean `tsc`, a clean `vite build` and a clean `verify_player_dom`. That is
-precisely the failure the tool was written for, reproduced sixteen times by the
-portal design. It is an argument for step 16, not for a cleverer regex — so
-step 13 made `into` **throw** on a missing host rather than teach the checker
-to guess. A mount point that has gone is now a blank page and a named id in
-the console, which is the loudest a run-time selector can be made.
-
-### One attribute, two writers
-
-`main.ts:529` still does `classList.toggle("active", ...)` over `.mode`.
-`Topbar.tsx:57` renders `className={`mode${on ? " on" : ""}`}`. `style.css:78`
-styles `.mode.active`, and **there is no `.on` rule in the stylesheet.**
-
-So a mode switch sets `active` imperatively, then the next `publishUi`
-re-renders those buttons — `mode` changed, so React writes `className` — and
-wipes it. The active-mode highlight lasts about one frame. The fix is to remove
-a writer, never to add the missing CSS.
-
-### Data flowed backwards through the DOM, and the reason it did
-
-`app/projection/player.ts:70` asks the DOM what the UI is doing:
-
-```ts
-const open = (sel: string) => !!$<HTMLDetailsElement>(sel)?.open;
-wait: w && open("#panel-wait") ? waitProjection(w, eye) : null,
-```
-
-`app/` -> projection -> React -> DOM -> `app/`. The projection, which is meant
-to be the single source of truth for the UI, reads part of its input back out
-of the UI.
-
-The diagnosis matters more than the cycle. **Two unrelated concerns were fused
-into one `<details>` element:**
-
-1. *is this panel open* — pure view state, which nothing outside `ui/` needs;
-2. *should `app/` spend the money building `globalsProjection()`* — a cost
-   decision only `app/` can act on.
-
-`open("#globals-panel")` was concern 2 reaching for concern 1 through the only
-channel available at the time. The fix is to separate them again, not to move
-fold state somewhere else.
-
-**Fold stays in `ui/`, local and uncommanded** — a `useState` plus a
-`usePersisted` hook. `hud/ui.ts` and `hud/splitter.ts` already use
-`localStorage` from the ui layer and `verify_layers.py` has never objected; its
-DOM rule applies to `engine` only.
-
-**Cost becomes demand, and demand is expressed by mounting.** The component
-tree is the demand graph:
-
-```tsx
-{open && <Globals p={p.globals} />}      // mounted only while open
-```
-
-```ts
-// ui/store.ts -- the shape `subscribe` already has, with a name on it
-demand = (slice: SliceName): (() => void) => { ...; return () => ...; };
-wants  = (slice: SliceName): boolean => this.wanted.has(slice);
-```
-
-```ts
-// app/projection/player.ts -- the `$` helper and every DOM read leave
-globals: ui.wants("globals") ? globalsProjection() : null,
-```
-
-Register in an **effect**, never during render: strict mode double-invokes
-render, and the effect cleanup is also what makes unmount-on-fold decrement.
-
-The alternative — lifting fold into the projection behind a `foldPanel`
-command — was rejected. It is not wrong, but it buys nothing. Fold state is not
-addressable, is deliberately not in the URL, is not part of "where playback
-is", and never needs replaying; paying a projection field, a command case, a
-`PanelName` union and a `ViewPrefs` key for something the component already
-knows about itself is how a composition root turns into a god object. A command
-is *the UI asking the world to change*, and folding a panel changes nothing —
-`foldPanel` would have been the first command in the union that was not one.
-
-One caveat: `<details>` is an awkward controlled component, because the browser
-flips `open` before React hears about it. `open={open}` with `onToggle` reading
-`e.currentTarget.open` is the form that does not fight it.
-
-### The change key is a workaround, not a design
-
-```ts
-export function projectionKey(p: UiProjection): string {
-  return JSON.stringify({ ...p, tree: null, feed: null, minimap: null });
-}
-```
-
-The comment defends it well and the argument is sound as far as it goes — a
-hand-listed field set goes stale the first time someone adds a field. But it is
-O(everything), it allocates a large string sixty times a second, and it is why
-the fold gating above had to exist at all.
-
-**The comparison is not what is wrong; the allocation is.** `buildProjection`
-hands back fresh references every frame:
-
-```ts
-stages: [...v.stages],   feed: [...v.feed],   hudRows: [...v.hudRows],
-scopes: v.appScope.snapshot(),
-current: w ? { block: w.block, step: w.step, op: w.opIndex } : null,
-```
-
-Every one of those is a new object each frame, so `memo` and `useMemo` can
-never bail out. Swapping `JSON.stringify` for a deep-equal would remove the
-string and keep the full walk. The projection is structurally incapable of
-being compared by reference, and the key is standing in for that.
-
-**Structural sharing at build time, then reference equality is the diff.** A
-`stable(prev, next, eq)` helper returns `prev` when nothing in a slice changed,
-with a row-wise variant for `feed`, `globals.rows` and `actorPanel.groups` that
-reuses individual row objects — so a sidebar where one actor moved re-renders
-one row. The root is still rebuilt each frame but holds mostly the same
-references, and `publish` shallow-compares ~25 fields instead of serialising a
-tree. Panels become `memo()`, unchanged slices are identical references, and
-`memo` skips them. That is React's actual diffing mechanism, which the
-stringify was substituting for.
-
-`treeVersion` and `feedVersion` are then **deleted**: they exist only because
-reference equality was unavailable, and two hand-maintained counters that can
-drift from what they describe are worse than the property itself.
-
-Two things to keep hold of:
-
-* **`getSnapshot` must return a stable reference between notifies** or React
-  loops for ever. `publish` guards on `revision` today and must guard on the
-  shallow compare after — the invariant is already stated on `store.ts:46`,
-  and step 18 gives it a test.
-* **`useSyncExternalStoreWithSelector` is not the answer.** It needs the
-  `use-sync-external-store` shim as a new dependency and re-runs every selector
-  on every notify regardless. Root subscription plus structural sharing plus
-  `memo` gets the same result with the React already in `package.json`.
-
-### Two update paths, one of them imperative and hot
-
-`publishUi` is a `panelSystem` in the tick — once a frame, declarative.
-Alongside it `refreshUi()` has **19 call sites**, rebuilds `hudRows` from
-thirteen `describe` getters and repaints the minimap canvas, and runs at least
-twice per frame in `frame()` plus on every feed event. It is what `wireUi` used
-to be, alive under another name. Everything it does is either a projection
-field or a canvas paint, and the canvas is the one honest exception.
-
-### Script state living in `hud/`, outside the snapshot
-
-`Walker` correctly owns and snapshots `shutterState`, `firingGate` and
-`gateCloseLeft`. But `hud/hud.ts` privately holds `counter` — the shutter's
-40-frame slide phase — and `msgFramesLeft` and `lineIndex`. `seekTo` papers
-over that with an explicit `hudLayer.reset()`; **`loadSnapshot` does not.**
-Save mid-dialogue, load, and the caption is wherever it happened to be.
-
-This is the same class of bug as the rig held in a pose play would never
-produce, and per the port's own rule the state is in the wrong place:
-`FUN_00413970` is `HudDrawShutterState` in `functions.tsv`, but
-`DAT_009CA0F4` — the state the machine runs on — and its frame counter are
-**not in `globals.tsv`**, and `FUN_00435AA0`, the subtitle task, is unnamed.
-Step 19 therefore starts in Ghidra, under `/decomp`, and not in TypeScript.
-
-### Dead things
-
-* `#feed-clear` is in the markup with **no handler anywhere** — no listener, no
-  `UiCommand`. `clearFeed()` exists and only `app/` calls it.
-* `UiProjection.loading` and `.status` are hardcoded `null` / `""` in
-  `buildProjection` and read by nothing; `setLoading`, `fail` and
-  `stage_load.ts` write those elements directly.
-* `.mode.active`, per above.
-
-### The snapshot oracle steps 15-19 are measured against
-
-The seven harnesses prove a refactor did not change gameplay. Nothing proved
-that **a snapshot restores what it saved**, which is what step 19 needs and
-what the seek bugs kept costing. `web/test/state.test.ts` (`npm run test:state`)
-drives the real `World` over a real bundle on a fixed tick and a fixed seed:
-
-* **A. Snapshot fidelity, no seeking.** Run T1 frames, `world.save`, run T2 more
-  recording a digest **every frame**, `world.load`, run T2 again. The two digest
-  *sequences* must be identical. Frame-by-frame rather than final-state on
-  purpose: a final compare says it diverged, a sequence says on which frame.
-* **B. The form the button hands out.** `JSON.parse(JSON.stringify(snap))`
-  loaded instead of `snap`, same result.
-* **C. Seek equivalence.** Play to an address recording the digest, then from
-  cold `ResetPropContainers` + `seekTo` + `world.resync`, and compare `G` and
-  the pool — not only the walker's own fields, which `seek.test.ts` already
-  covers. Both "the rig held a pose across a seek" and "the pre-seek props
-  stand there for ever" lived here and were found by hand.
-
-Assertion C **fails at HEAD**, on the shutter and caption state above. Write it
-in step 14, watch it fail, fix it in step 19.
-
-It needs one enabling change. `app/systems.ts` imports `three` at module level,
-so `ScriptSystem` and `GameSystem` cannot be reached headlessly — `run_test.mjs`
-would pull three.js in and fail on `window`. But the three.js in `GameSystem` is
-entirely the camera adapter: `aimPoint`, `viewPoint`, `viewSpaceOf` and two
-matrix copies. `GameUpdate`, `save()` and `load()` are already pure. Extracting
-a `CameraFrame` port leaves `GameSystem` three-free and `System<Context>`,
-which is what lets the test drive the systems rather than a copy of them — and
-it nibbles at `render-drives-the-port` rather than feeding it.
+**Two more mechanisms for rules the types already hold.** See
+`web/tools/verify_ui.mjs`: the projection being plain data is a runtime
+property that `test:state` and `test:projection` prove better than any static
+check, and the command union is exhaustive because it is a closed union in an
+exhaustive switch. The strongest rule in this layer is a type.
 
 ## Order of work
 
-Steps 1–9b and 12–14 are done; 10 is untouched and 11 is half made. Each step compiles,
-keeps `verify_layers.py` green, and passes `verify_player_ops.py` and `npm run test:port`
-on its own.
+Everything except **step 10** is done. `script/walker.ts` is still 1525 lines
+holding the machine, the opcodes' state, the waits and the seek planner in one
+class, and `WalkerHost` is 14 methods; splitting it is what shortens
+`app/main.ts` too, and it is the last row with a `☐`.
 
-15–18 are one arc and
-should not be interleaved with anything else touching `index.html` or `style.css`.
-19 edits `script/walker.ts`, which is step 10's territory — check `git status` and
-`ListAgents` before starting it.
+Each step compiles, keeps `verify_layers.py` green, and passes
+`verify_player_ops.py` and `npm run test:port` on its own.
 
 | # | Step | State |
 |---|---|---|
@@ -1086,7 +977,7 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
-| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control. **The inversion is not done** — the panels are still portalled into `index.html`'s chrome. Steps 15-18 | ◐ |
+| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control. The inversion was finished by steps 15-18: `index.html` is a mount point and the portals are gone | ✅ |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
 | 13 | **The checks read the UI layer.** `verify_layers.py` and `verify_player_dom.py` glob `.tsx` too; the DOM selector accepts a type parameter; `into()` throws on a missing host instead of rendering nothing | ✅ |
 | 14 | **The snapshot oracle.** `CameraFrame` extracted so `GameSystem` is three-free and `System<Context>`; `web/test/state.test.ts` drives the real `World` headless and asserts save/load and seek equivalence frame by frame. Found two real bugs on its first run — see below | ✅ |
@@ -1095,7 +986,7 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 17 | **`refreshUi` dies.** `hudRows` computed where it is read, the minimap paint into its component, all 19 call sites and `setPlayButton`/`refreshPausedOverlay` gone. `markAddress` keeps the half that was state. One update path | ✅ |
 | 18 | **Structural sharing replaces the change key.** One generic `stabilise` pass, panels `memo()`, `publish` decides on identity; `projectionKey`, `revision`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ✅ |
 | 19 | **The shutter and the caption become engine state.** `g_bHudShutterState` and `g_bHudShutterPrev` named; the slide counter turned out to be a task field and to *be* `gateCloseLeft`, so the two became one; `Hud` holds no state and `app/` adapts it with `drawSystem` | ✅ |
-| 20 | **This document describes what is.** `## The UI layer` is rewritten from a plan in the present tense into the UI's stated rules; the tree matches the tree; the findings below collapse into those rules and stop being a list of complaints | ☐ |
+| 20 | **This document describes what is.** `## The UI layer` is the UI's seven stated rules; the tree matches the tree; the findings collapse into the rules and into what was *rejected*; `web/tools/verify_ui.mjs` holds the two that need an AST | ✅ |
 
 ### What the snapshot oracle found on its first run
 
@@ -1162,80 +1053,64 @@ now, and the firing gate reads it.
 That is the same shape as everything else this review found: a fact with two
 owners. The fix is not a synchronisation, it is deleting one of them.
 
-### Step 20, and why it is a step rather than a tidy-up
+### Why step 20 was a step and not a tidy-up
 
-`## The UI layer` above still opens *"The UI is ~1900 lines of imperative DOM
-... wired with 67 `addEventListener` calls"*, in the present tense, and closes
-with a tree whose last line is `hud/ bgm.ts — audio, not UI` — a file that has
-since moved to `audio/`. It was written as a proposal, step 11 built most of
-it, and nobody went back. A document that describes a layout the tree no longer
-has is worse than no document, which is the same rule this file already states
-about restructuring.
+`## The UI layer` used to open *"The UI is ~1900 lines of imperative DOM …
+wired with 67 `addEventListener` calls"*, in the present tense, and close with
+a tree whose last line was `hud/ bgm.ts — audio, not UI` for a file that had
+moved to `audio/`. It was written as a proposal, step 11 built most of it, and
+nobody went back. A document that describes a layout the tree no longer has is
+worse than no document, which is the same rule this file already states about
+restructuring — so making it true again is a step with a checklist, not a
+tidy-up to be done when convenient.
 
-So the last step is to rewrite that section as **the rules of the UI layer**,
-stated once, in the present tense, with the findings above collapsed into them
-rather than left as a list of things that were wrong. The rules the review
-arrived at, which is what step 20 has to say:
+It is also where the rules came from. Seven findings, seven costumes, one
+mistake: a fact with two owners. That is only visible once they are written
+down together.
 
-1. **`ui/` reads one projection and emits commands.** No import from `game/`,
-   `script/`, `bundle/` or `core/`, type-only included.
-2. **The projection is plain data.** Numbers, strings, booleans and arrays of
-   them. If `structuredClone` would not round-trip it, it does not belong —
-   the same test a snapshot slice has to pass, for the same reason.
-3. **A command is the UI asking the world to change.** Anything that changes
-   nothing outside `ui/` — a fold, a filter, a scroll position — is component
-   state and must not be a command. The union stays small on purpose.
-4. **Slices are referentially stable when their content has not changed.**
-   That is what makes `memo` the diff. A builder that allocates a fresh array
-   for an unchanged slice defeats the whole scheme silently.
-5. **Cost is demand, and demand is expressed by mounting.** `app/` never asks
-   the DOM anything; a panel that wants an expensive slice says so by being on
-   screen.
-6. **One writer per pixel.** No imperative DOM write to anything React renders.
-7. **State the script drives belongs to the script**, not to the layer that
-   draws it — the shutter and the caption being the case that proved it.
-
-### Enforcing those rules, and whether a linter helps
+### The linting question, and what was built
 
 Partly, and not by adopting ESLint.
 
-Rules 1 and 6 are file-level and `verify_layers.py` already measures them, or
-will once step 13 lets it see `.tsx`. Rule 2 is a runtime property and
+Rules 1 and 6 are file-level and `verify_layers.py` measures them — it has
+read `.tsx` since step 13. Rule 2 is a runtime property and
 `test/state.test.ts` and `test/projection.test.ts` prove it better than any
 static check could. Rule 3 is enforced by TypeScript: the union is closed and
 the switch is exhaustive, so a command with no case fails to compile. **The
 strongest rule in this layer is a type, not a linter**, and that is worth
 saying before adding tooling.
 
-Two rules genuinely need an AST and are caught by nothing today:
+Two rules genuinely need an AST, and both fail **quietly** — the page still
+renders, the app still works, it just costs more for ever:
 
-* **Every exported component in `ui/panels/` is wrapped in `memo`.** Rule 4
-  makes the slices stable; this is what spends that. It fails *quietly* — the
-  panel still renders correctly, just needlessly — which is exactly the kind of
-  regression no test will report.
-* **`store.demand(...)` is called from inside a `useEffect` and nowhere else.**
-  Called during render, strict mode double-invokes it, the count never returns
-  to zero, and `app/` builds an expensive slice for a panel that closed. A
-  quiet, permanent cost with no symptom.
+* **every exported component in `ui/panels/` is wrapped in `memo`**, which is
+  what spends the reference stability rule 4 buys;
+* **`store.demand(…)` is called from inside a `useEffect` and nowhere else**,
+  because during render strict mode takes the claim twice and releases it
+  once, and `app/` then builds an expensive slice for a panel nobody has open.
 
-Both are expression-level, both are fragile to match with a regex, and neither
-is worth eight new dependencies and a config file. **ESLint is the wrong size
-for this repo** — and it would cost something real: `verify_layers.py`'s two
-severities and its ratchet baselines have no ESLint equivalent, and the ratchet
-is the mechanism that let steps 8-12 land at all.
+Neither is worth eight new dependencies and a config file. **ESLint is the
+wrong size for this repo**, and it would cost something real: `verify_layers.py`'s
+two severities and its ratchet baselines have no ESLint equivalent, and the
+ratchet is the mechanism that let steps 8-12 land at all.
 
-The idiomatic answer here is a small purpose-built checker that uses a parser,
-in the same shape as every other `tools/verify_*`: **`web/tools/verify_ui.mjs`,
-walking `ts.createSourceFile` from the `typescript` already in `devDependencies`
-— no new package — and reporting in `verify_layers.py`'s two-severity format so
-a rule can be introduced against a baseline and driven down.**
+So: **`web/tools/verify_ui.mjs`** (`npm run verify:ui`), walking
+`ts.createSourceFile` from the `typescript` already in `devDependencies` — no
+new package — and reporting in `verify_layers.py`'s two-severity format.
+
+Its two exemptions are principled rather than a list of names, which is what
+keeps it from becoming a suppression file: a component with **no props** never
+re-renders from props, so `memo` would compare nothing, and a component taking
+**`children`** is handed fresh elements by its caller every render, so the
+shallow compare could never bail. `Panel` and `Resizer` are exempt today for
+those reasons and stop being exempt the moment either grows real props.
 
 Worth resisting: a rule for anything the type system, the layer checker or a
-runtime test already holds. Three overlapping enforcement mechanisms for one
-property is how a rule ends up being satisfied in the checker rather than in
-the code — which this document has already caught happening once, with
-`layers-are-systems` going green because it had nothing left to look at.
-
+runtime test already holds. Three overlapping mechanisms for one property is
+how a rule ends up satisfied in the checker rather than in the code — which
+this document has already caught happening once, with `layers-are-systems`
+going green because it had nothing left to look at. That warning is in the
+file's own header.
 
 ### Proving a step did not change behaviour
 
@@ -1260,8 +1135,8 @@ test is that the output does not change, not that it passes.
 
 After the step, every one of those must be **byte-identical**, and
 `verify_layers.py`, `verify_port.py`, `verify_player_ops.py`,
-`verify_player_dom.py` and `verify_objects.py` must still pass. A step is not
-done until that holds.
+`verify_player_dom.py`, `verify_objects.py` and `npm run verify:ui` must still
+pass. A step is not done until that holds.
 
 `npm run test:projection` is on it from step 18. It guards a property nothing
 else can see: `tsc` cannot, because the types are the same either way, and

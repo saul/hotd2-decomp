@@ -23,7 +23,7 @@ python3 tools/verify_port.py              # the port matches the annotations
 python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 cd web && npx tsc --noEmit && npm run test:port && npm run test:seek \
     && npm run test:scope && npm run test:state && npm run test:ui \
-    && npm run test:projection
+    && npm run test:projection && npm run verify:ui
 ```
 
 ### Layers, and the direction dependencies point

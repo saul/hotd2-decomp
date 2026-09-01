@@ -15,7 +15,8 @@
     "test:scope": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/scope.test.ts",
     "test:state": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/state.test.ts",
     "test:ui": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/ui.test.tsx",
-    "test:projection": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/projection.test.ts"
+    "test:projection": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/projection.test.ts",
+    "verify:ui": "node tools/verify_ui.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

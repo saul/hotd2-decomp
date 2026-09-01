@@ -119,7 +119,6 @@ export class Player implements PlayerView, PlayerCommands {
   /** The loaded stage geometry. Named apart from `stage`, the number. */
   scene3d: StageScene | null = null;
   spawns = new SpawnLayer();
-  paths: CamPaths | null = null;
   /**
    * The script, and the one copy of it.
    *
@@ -187,6 +186,18 @@ export class Player implements PlayerView, PlayerCommands {
   lifeFrame = 0;
   stageScope: Scope | null = null;
   stageLoadedAt = 0;
+  /**
+   * The stage's camera paths, and the one copy of them.
+   *
+   * The same arrangement as `walker` above and for the same reason: it lives
+   * on the context because every layer that evaluates a shot reads it there,
+   * and this is that reference under the name the player's own code uses, so
+   * the two cannot drift apart. `CameraRig` used to keep a second copy that
+   * nothing ever assigned, which parked the camera at the origin.
+   */
+  get paths(): CamPaths | null { return this.ctx.paths; }
+  set paths(v: CamPaths | null) { this.ctx.paths = v; }
+
   /** The one thing React subscribes to. See `ui/store.ts`. */
   private readonly ui: UiStore;
   /** The sidebar's own state: which classes are boxed, and which are folded. */
@@ -276,6 +287,7 @@ export class Player implements PlayerView, PlayerCommands {
       events: this.events,
       rng: this.rng,
       walker: null,
+      paths: null,
       scope: this.appScope,
       // Replaced by `newSession` before anything registers on it.
       session: this.appScope.child("session:boot"),
@@ -718,7 +730,7 @@ export class Player implements PlayerView, PlayerCommands {
 
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
   poseFromSlot(slot: number, frame: number): void {
-    this.cam.poseFromSlot(this.camera, this.walker?.rollEnabled ?? false,
+    this.cam.poseFromSlot(this.ctx, this.walker?.rollEnabled ?? false,
                           this.walker?.useFixedEyeY ?? false,
                           this.walker?.fixedEyeY ?? 0, slot, frame);
   }

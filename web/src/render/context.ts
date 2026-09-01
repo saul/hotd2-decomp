@@ -15,8 +15,23 @@
  */
 import type { PerspectiveCamera, Scene } from "three";
 import type { Context } from "../core/system";
+import type { CamPaths } from "./campath";
 
 export interface RenderContext extends Context {
   readonly scene: Scene;
   readonly camera: PerspectiveCamera;
+  /**
+   * The stage's `cam/` paths, and the **one** copy of them.
+   *
+   * Here for the same reason `walker` is on `Context`: every layer that
+   * evaluates a shot reads them, so they live in the one place every layer is
+   * already handed, under the name `app/` has always used for them. A layer
+   * with its own `paths` field is a second owner of one fact, and the second
+   * owner is the one nobody remembers to assign — `CameraRig` had exactly
+   * that, and both halves of the camera silently returned early for as long
+   * as it did, leaving the shot parked at the world origin.
+   *
+   * Null until the first stage load.
+   */
+  paths: CamPaths | null;
 }

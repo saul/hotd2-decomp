@@ -491,7 +491,7 @@ web/src/
     seek.ts       the planner
     (`vm.ts` is not split out yet: the machine shares a file with the state)
   render/       three.js. Reads engine state, owns nothing.
-    context.ts    RenderContext, which adds { scene, camera }
+    context.ts    RenderContext, which adds { scene, camera, paths }
     camera.ts     the shot, the take and the draw — three systems, in order
     stagescene, rigs, props, backdrop, rain, fog, lighting, campath,
     characters, shooting, breakables, projectiles, overlays, debug
@@ -528,6 +528,15 @@ already-scaled `dt` and the count of 60 Hz frames advanced. Adding a system is
 one `world.add(...)` and never touches the loop. **A layer ticked by hand is a
 layer outside `save`/`load`/`resync`** — that is not a style point, it is the
 rig seek bug.
+
+**1b. One owner per fact, and the context is where a shared one lives.**
+Anything more than one layer reads goes on the `Context` — the walker, the
+camera paths — under the name `app/` already uses for it, and `Player` reaches
+it through a getter onto `ctx` so the two cannot drift. A layer that keeps its
+own copy is a second owner, and the second owner is the one nobody remembers
+to assign: `CameraRig` held a `paths` field that nothing ever set, so both
+halves of the camera returned early on every frame and the shot sat at the
+world origin for as long as it did.
 
 **2. A typed event bus instead of callbacks.** The port raises them where the
 exe would set a flag; the HUD and the feed subscribe. Events are

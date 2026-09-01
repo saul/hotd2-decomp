@@ -23,21 +23,23 @@
  * Doing all three in one place is what the player used to do, and it is why
  * the aim could only ever be a frame stale or a frame early.
  */
-import type { PerspectiveCamera } from "three";
 import type { System, Tick } from "../core/system";
 import type { RenderContext } from "./context";
 import { CamAdvancePathFrame, CamSetPathTarget } from "../game/camera/path";
 import { G } from "../game/globals";
 import { Vector3 } from "three";
-import { CamPaths, applyPose, cameraEyeY, type CameraPose } from "./campath";
+import { applyPose, cameraEyeY, type CameraPose } from "./campath";
 import type { RailLayer } from "./overlays";
 
 /**
- * The state both halves share: the pose scratch, the path table, and the two
+ * The state both halves share: the pose scratch, the rails, and the two
  * switches the player's own chrome owns.
+ *
+ * The path table is **not** here. It is on the context, where every layer that
+ * evaluates a shot already reads it; a copy of it on this class was a second
+ * owner of one fact, and it was the copy nothing assigned.
  */
 export class CameraRig {
-  paths: CamPaths | null = null;
   rails: RailLayer | null = null;
   /**
    * False in free roam, where the viewer is flying the camera and the script's
@@ -67,7 +69,7 @@ export class CameraRig {
     if (!w || !this.scripted) return;
     const cam = w.cam;
     if (!cam) return;
-    const p = this.paths?.paths.get(cam.slot);
+    const p = ctx.paths?.paths.get(cam.slot);
     if (!p) return;
     p.pose(cam.frame, w.rollEnabled, this.pose);
     // The block holds the **raw** curve eye, as `CamEvalPath7` leaves it. The
@@ -89,7 +91,7 @@ export class CameraRig {
   draw(ctx: RenderContext): void {
     const w = ctx.walker;
     if (!w || !this.scripted) return;
-    if (!w.cam || !this.paths?.paths.get(w.cam.slot)) return;
+    if (!w.cam || !ctx.paths?.paths.get(w.cam.slot)) return;
     this.pose.eye.set(G.g_camera_block_eye.x, G.g_camera_block_eye.y,
                       G.g_camera_block_eye.z);
     this.pose.target.set(G.g_camera_block_target.x, G.g_camera_block_target.y,
@@ -109,10 +111,11 @@ export class CameraRig {
   }
 
   /** `?slot=59&frame=170`: pose straight off a path, no script. */
-  poseFromSlot(camera: PerspectiveCamera, walkerRoll: boolean,
+  poseFromSlot(ctx: RenderContext, walkerRoll: boolean,
                useFixedEyeY: boolean, fixedEyeY: number,
                slot: number, frame: number): boolean {
-    const p = this.paths?.paths.get(slot);
+    const camera = ctx.camera;
+    const p = ctx.paths?.paths.get(slot);
     if (!p) return false;
     p.pose(frame, walkerRoll, this.pose);
     applyPose(camera, this.pose,

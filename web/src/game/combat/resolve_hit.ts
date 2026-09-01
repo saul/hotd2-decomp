@@ -14,6 +14,7 @@ import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
 import { G } from "../globals";
 import { SpawnClass } from "../spawn_class";
+import { ActorIsEnemy, g_class_handlers } from "../registry";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, T } from "../tables";
 
@@ -325,6 +326,19 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   // *directional* death gave a `zstin` `zom.bin`'s animations, which belong to
   // a different creature.
   const ownReaction = obj.cls === SpawnClass.Thrower;
+  // **Whose death this is.** `ResolveHit` (`FUN_00409430`) drops hit points
+  // and nothing else; the clip comes from the class's own machine —
+  // `ZombieStateDeath6` (`FUN_00454D20`) sub 0 calls `ChooseDeathMotion` for
+  // class 0x30, `CivilianCheckShot` runs the killed script for class 0x10, and
+  // `ThrowerOnShot` picks its own chain. `updatesWhenDead` is exactly the set
+  // of classes that keep running one, so they do not get the shared clip.
+  //
+  // Handing it to a civilian was not cosmetic: `ActorAdvanceMotion` returns on
+  // `obj.death` before it touches the base clock, so her killed script — which
+  // waits on the clip looping once before the block whose wait word carries
+  // `LeaveCountNow` — could never count that loop. She never left
+  // `g_civilians_alive`, and `wait_scripted_actors` never opened.
+  const ownDeath = g_class_handlers[obj.cls]?.updatesWhenDead ?? false;
   if (ownReaction) obj.pendingHit = { bone, result };
   const react = survived && !ownReaction
     ? ActorReactToHit(obj, bone, result) : undefined;
@@ -343,7 +357,7 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     // `ResolveHit` also raises `obj+0x34` bit 0x4000000, which is what
     // `ThrowerOnShot` reads to tell a killing blow from a survivable one.
     obj.flags |= ActorFlag.Dead;
-    if (!ownReaction) {
+    if (!ownDeath) {
       death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
       if (death !== undefined && MotionOf(obj, death)) {
         obj.death = { motion: death, t: 0 };
@@ -354,22 +368,44 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
            result, death, react };
 }
 
+/** What {@link ActorKillAll} cleared, split by which gate it opens. */
+export interface KillAllResult {
+  enemies: number;
+  civilians: number;
+}
+
 /**
  * `ActorKillAll` — the debug clear. Drop every live actor to zero hit points
  * and start the directional death. Nothing is severed, because no bone was hit.
+ *
+ * It raises `ActorFlag.Dead` as well as `dead`, exactly as `ResolveHit` does on
+ * a killing blow, and that is the difference between clearing the room and
+ * clearing half of it. **A class that dies through its own states reads the
+ * flag, not `dead`**: `CivilianCheckShot` runs the civilian's killed script
+ * off it, and that script is what carries `LeaveCountNow` and takes her out of
+ * `g_civilians_alive` — 59 of the 60 streams the shipped scripts use as a
+ * death script do. Without the flag the button killed the enemies and left
+ * every civilian standing in the count, holding `wait_scripted_actors` open
+ * with nothing on screen to shoot.
  */
-export function ActorKillAll(cameraYawBams: number, rng: Rng): number {
-  let n = 0;
+export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
+  const out: KillAllResult = { enemies: 0, civilians: 0 };
   for (const obj of G.g_object_list) {
     if (!obj.visible || obj.dead) continue;
     obj.hp = 0;
     obj.dead = true;
     obj.react = null;
-    const death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
-    if (death !== undefined && MotionOf(obj, death)) {
-      obj.death = { motion: death, t: 0 };
+    obj.flags |= ActorFlag.Dead;
+    // Same rule as `ResolveHit` above: a class that runs its own death gets
+    // its own clip, and the shared one would stop the clock it counts on.
+    if (!g_class_handlers[obj.cls]?.updatesWhenDead) {
+      const death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
+      if (death !== undefined && MotionOf(obj, death)) {
+        obj.death = { motion: death, t: 0 };
+      }
     }
-    n++;
+    if (ActorIsEnemy(obj.cls)) out.enemies += 1;
+    else if (obj.cls === SpawnClass.Civilian) out.civilians += 1;
   }
-  return n;
+  return out;
 }

@@ -663,157 +663,6 @@ BACK_AWAY_STATES = {0x31: (34,)}
 #: the state does not read it.
 POUNCE_STATES = {0x31: (23,)}
 
-#: The twelve class-0x30 entrance states that read a tail of their own and had
-#: no decoding here at all -- 133 of the game's 356 class-0x30 spawns, against
-#: the 17 states the port already read. Each is gated on its own initial state
-#: because every one of them reads the same bytes as something else.
-#:
-#: `ZombieStateRideCarrier` (29) is deliberately absent: it reads **nothing**
-#: from the tail but byte 3, and the tail it sits on belongs to the state it
-#: hands over to. All six shipped spawns prove it -- the three whose byte 3 is
-#: 26 carry a `ZombieStateDelayedLeap` tail and the three whose byte 3 is 30
-#: carry a `ZombieStateArcScriptedEntrance` one, each already decoded by the
-#: rule for that state.
-ENTRY_TAIL_STATES = {
-    #: `ZombieStateSurfaceOnCameraCue`: the camera frame at ``+0x04``, and a
-    #: walk distance at ``+0x08`` read only when ``+0x03`` is 15.
-    13: "surface_cue",
-    #: `ZombieStateRunInPlaceTimed`: frames at ``+0x04``.
-    14: "run_in_place",
-    #: `ZombieStateHoldClipThenBranch`: motion at ``+0x04``, frames at
-    #: ``+0x08``, and a walk distance at ``+0x0C`` when ``+0x03`` is 15.
-    17: "hold_clip",
-    #: `ZombieStateWaitCameraFrameThenBranch`: motion ``+0x04``, frame ``+0x08``.
-    18: "wait_cam_frame",
-    #: `ZombieStateWaitForCameraFrame`: motion ``+0x04``, s16 frame ``+0x08``,
-    #: freeze ``+0x0C``, claim ``+0x0D``, s16 delay ``+0x0E``, s16 cooldown
-    #: ``+0x10``.
-    19: "wait_cam_strike",
-    #: `ZombieStateWaitScriptFlagThenBranch`: motion ``+0x04``, flag ``+0x08``.
-    20: "wait_flag",
-    #: `ZombieStateScriptedGrabAndDespawn`: cue ``+0x04`` (-1 for at once),
-    #: motion ``+0x08``, hit frame ``+0x0C``.
-    23: "grab_kill",
-    #: `ZombieStateLeapToPoint`: dest ``+0x04``, s16 frames ``+0x10``, s16
-    #: delay ``+0x12``, idle motion ``+0x14``, strike motion ``+0x18``, u16 hit
-    #: frame ``+0x1C``, s8 player ``+0x1E``.
-    24: "leap_strike",
-    #: `ZombieStateArcScriptedEntrance`: dest ``+0x04``, arc frames ``+0x10``,
-    #: arc step ``+0x14``, delay ``+0x18``.
-    30: "arc_entrance",
-    #: `ZombieStateWaitScriptFlagThenEnter`: u8 flag ``+0x04``, idle motion
-    #: ``+0x08``, delay ``+0x0C``, motion ``+0x10``.
-    31: "flag_enter",
-    #: `ZombieStateDelayedStrikeInPlace`: s16 delay ``+0x04``, s16 rearm
-    #: ``+0x06``, s8 player ``+0x08``.
-    32: "delayed_strike",
-}
-
-
-def entry_tail(rec, state: int, exit_state: int) -> dict | None:
-    """The tail one of :data:`ENTRY_TAIL_STATES` reads, or ``None``.
-
-    Every field is bounds-checked, because for any state but its own these
-    bytes are the *next* descriptor: a motion id has to be a plausible id, a
-    frame count has to be a plausible count. A field that fails is dropped
-    rather than guessed, and the port's state falls back to its own default.
-    """
-    def i32(off):
-        return rec.param(off, "i32")
-
-    def motion(off):
-        m = rec.param(off, "i32")
-        return m if m is not None and 0 < m < 4096 else None
-
-    def frames(off, lim=100000):
-        n = rec.param(off, "i32")
-        return n if n is not None and 0 <= n < lim else None
-
-    def dist(off):
-        # Read as an *integer* and converted, which is what the two arms that
-        # hand to state 15 do -- `(float)*(uint *)(tail + n)`, an FILD. The
-        # float reading of the same bytes would be a denormal.
-        d = rec.param(off, "u32")
-        return float(d) if d is not None and 0 < d < 4096 else None
-
-    kind = ENTRY_TAIL_STATES.get(state)
-    if kind is None:
-        return None
-    if kind == "surface_cue":
-        t = {"cue_frame": frames(0x04) or 0}
-        if exit_state == 15:
-            d = dist(0x08)
-            if d is not None:
-                t["walk_distance"] = d
-        return t
-    if kind == "run_in_place":
-        n = frames(0x04, 3600)
-        return {"frames": n} if n else None
-    if kind == "hold_clip":
-        m, n = motion(0x04), frames(0x08, 3600)
-        if m is None or n is None:
-            return None
-        t = {"motion": m, "frames": n}
-        if exit_state == 15:
-            d = dist(0x0C)
-            if d is not None:
-                t["walk_distance"] = d
-        return t
-    if kind in ("wait_cam_frame", "wait_flag"):
-        m, n = motion(0x04), i32(0x08)
-        if m is None or n is None or not 0 <= n < 100000:
-            return None
-        return {"motion": m, "cue": n}
-    if kind == "wait_cam_strike":
-        m = motion(0x04)
-        f = rec.param(0x08, "i16")
-        if m is None or f is None:
-            return None
-        return {"motion": m, "cue_frame": f,
-                "freeze": (rec.param(0x0C, "i8") or 0) == 0,
-                "claim": (rec.param(0x0D, "i8") or 0) != 0,
-                "delay": rec.param(0x0E, "i16") or 0,
-                "cooldown": rec.param(0x10, "i16") or 0}
-    if kind == "grab_kill":
-        cue, m, hit = i32(0x04), motion(0x08), frames(0x0C, 3600)
-        if m is None or hit is None or cue is None:
-            return None
-        return {"cue_frame": cue, "motion": m, "hit_frame": hit}
-    if kind == "leap_strike":
-        dest = [rec.param(0x04 + 4 * k, "f32") for k in range(3)]
-        n = rec.param(0x10, "i16")
-        idle, strike = motion(0x14), motion(0x18)
-        hit = rec.param(0x1C, "u16")
-        if (not all(v is not None and math.isfinite(v) for v in dest)
-                or not n or n <= 0 or idle is None or strike is None
-                or hit is None):
-            return None
-        return {"dest": dest, "frames": n,
-                "delay": rec.param(0x12, "i16") or 0,
-                "idle_motion": idle, "strike_motion": strike,
-                "hit_frame": hit, "player": rec.param(0x1E, "i8") or 0}
-    if kind == "arc_entrance":
-        dest = [rec.param(0x04 + 4 * k, "f32") for k in range(3)]
-        n, step = rec.param(0x10, "i32"), rec.param(0x14, "i32")
-        if (not all(v is not None and math.isfinite(v) for v in dest)
-                or not n or n <= 0 or not step or step <= 0):
-            return None
-        return {"dest": dest, "frames": n, "step": step,
-                "delay": frames(0x18, 3600) or 0}
-    if kind == "flag_enter":
-        idle, m = motion(0x08), motion(0x10)
-        flag = rec.param(0x04, "u8")
-        if idle is None or m is None or flag is None:
-            return None
-        return {"flag": flag, "idle_motion": idle, "motion": m,
-                "delay": frames(0x0C, 3600) or 0}
-    if kind == "delayed_strike":
-        return {"delay": rec.param(0x04, "i16") or 0,
-                "rearm": rec.param(0x06, "i16") or 0,
-                "player": rec.param(0x08, "i8") or 0}
-    return None
-
-
 #: A waypoint: ``{s16 step, s16 script, f32 x, f32 y, f32 z}``, sixteen bytes,
 #: and the list is terminated by a step of -1.
 #:
@@ -913,11 +762,6 @@ class Placement:
     #: on the player at once or must first hold in state 42 until the camera
     #: reaches that path and frame. Three spawns in the game set one.
     camera_cue: dict | None = None
-    #: The tail one of the twelve :data:`ENTRY_TAIL_STATES` reads, decoded by
-    #: :func:`entry_tail` and shaped by which state it is. Together these are
-    #: 133 of the game's 356 class-0x30 spawns; before it they all fell through
-    #: `ZombieEntryState` to `AttackRun` and charged the camera on frame one.
-    entry: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -942,8 +786,6 @@ class Placement:
             d["emerge"] = self.emerge
         if self.delayed_leap:
             d["delayed_leap"] = self.delayed_leap
-        if self.entry:
-            d["entry"] = self.entry
         if self.target_script:
             d["target_script"] = self.target_script
         if self.attack_script:
@@ -1276,12 +1118,6 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             if leave is not None and 0 <= leave < 3600:
                 st["leave_delay"] = leave
             stand_throw = st
-        # The twelve entrance states, each gated on its own initial state --
-        # see :data:`ENTRY_TAIL_STATES`. Class 0x30 only: class 0x31 numbers
-        # its states differently and reads different bytes for them.
-        entry = None
-        if sp["class"] == 0x30:
-            entry = entry_tail(rec, tail[1], tail[2])
         entrance_motion = None
         if tail[1] in ENTRANCE_CLIP_STATES.get(sp["class"], ()):
             m = rec.param(4, "i32")
@@ -1364,7 +1200,6 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             emerge=emerge, delayed_leap=delayed_leap,
             target_script=tscript, attack_script=ascript,
             camera_cue=camera_cue,
-            entry=entry,
             body_condition=tail[0], initial_state=tail[1],
             attack_state=tail[2], leap=leap, path=path,
             walk_distance=walk_distance, entrance_motion=entrance_motion,
@@ -1437,29 +1272,6 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             entry_clips += [emerge["motion"], 0xB9]
         if delayed_leap:
             entry_clips += [0x3BB, 0x399, 0x3F7]
-        # The twelve entrance states' own clips. Every one of these states
-        # measures its exit on the **play clock** of a clip it names, so an
-        # unbaked clip is not a cosmetic gap: `MotionPlayLength` is 0, the
-        # cursor never reaches the last frame, and the actor waits for ever.
-        # That is exactly what `tools/entrances.mjs` caught for states 13, 24
-        # and 30 -- 984, 1010 and 927 were named by the descriptor and baked
-        # for nobody.
-        if entry:
-            entry_clips += [entry.get(k) for k in
-                            ("motion", "idle_motion", "strike_motion")]
-            if tail[1] == 13:
-                # Chosen by character type, not named in the tail -- see
-                # `ZombieStateSurfaceOnCameraCue`.
-                entry_clips += [0xB8, 0x3D8]
-            if tail[1] == 23:
-                # The paired wait/grab clips: it plays 0xBB and blends 0xBA.
-                entry_clips += [0xBA, 0xBB]
-            if tail[1] == 30:
-                # The crouch and the three arc-script stages, both by type.
-                entry_clips += [0x10C, 0x39F]
-                for a30 in CLASS30_ARC_SCRIPTS.values():
-                    entry_clips += [st["motion"]
-                                    for st in (_arc_script(tables, a30) or [])]
         # `ActorSnapToGroundHeight` routes an actor over a drop into state 11,
         # whose landing clip is 0x3BA -- and every class-0x30 actor can now
         # reach it, so it is baked for all of them.
@@ -1958,12 +1770,6 @@ def combat_tables(tables) -> dict:
         "impact_sprite": {str(k): list(t)
                           for k, t in sorted(IMPACT_SPRITE_BY_MATERIAL.items())},
         "impact_sprite_default": list(IMPACT_SPRITE_DEFAULT),
-        # `ZombieStateArcScriptedEntrance` (class 0x30 state 30) names these by
-        # character type. The arc machinery is class 0x31's, but these two
-        # scripts are class 0x30's own -- see :data:`CLASS30_ARC_SCRIPTS`.
-        "arc_scripts": {k: v for k, v in
-                        ((k, _arc_script(tables, a))
-                         for k, a in CLASS30_ARC_SCRIPTS.items()) if v},
         # `ActorShotFeedback`.
         "blood_scale": {str(k): s for k, s in BLOOD_SCALE_BY_RESULT.items()},
         "no_effect": {
@@ -2371,14 +2177,6 @@ CLASS31_ARC_SCRIPTS = {
     "wall_left": 0x00564A68,         # state 14
     "wall_right": 0x00564A38,        # state 15
     "ceiling": 0x00564A98,           # state 16
-}
-#: `ZombieStateArcScriptedEntrance`'s two arc motion scripts, in the same
-#: twelve-dword shape as class 0x31's. The state picks by character type, not
-#: by anything in the descriptor: type 0 takes the first and every other type
-#: the second.
-CLASS30_ARC_SCRIPTS = {
-    "entrance_type0": 0x00567898,
-    "entrance_other": 0x00567958,
 }
 #: `ThrowerStateLeapAside`'s character-0x18 block is one script per stance.
 CLASS31_ARC_SCRIPT_BYTES = ARC_SCRIPT_STAGES * 4 * 4

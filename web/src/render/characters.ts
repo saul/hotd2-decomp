@@ -64,7 +64,7 @@ import { Rng } from "../core/rng";
 import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { GameHost } from "../game/host";
-import { ActorKillAll, ResolveHit, type HitResult }
+import { ActorKillAll, type KillAllResult, ResolveHit, type HitResult }
   from "../game/combat/resolve_hit";
 import { BAMS_TO_RAD } from "../core/bams";
 
@@ -752,7 +752,7 @@ export class CharacterLayer implements System {
   }
 
   /** The debug clear. `ActorKillAll` is the port's; this only counts. */
-  killAll(cameraYawBams = 0): number {
+  killAll(cameraYawBams = 0): KillAllResult {
     return ActorKillAll(cameraYawBams, this.rng);
   }
 

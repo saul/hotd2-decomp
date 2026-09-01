@@ -48,15 +48,9 @@ export function ZombieThrownWeaponAimAtCamera(obj: Actor, host: GameHost,
   host.aimPoint(k?.aim_ahead ?? 4, out);
   out.y = eye.y - (k?.aim_drop ?? 0);
   // `(obj+0x121 * -2 + 1) * -0.6`: permit 0 gives +0.6 and permit 1 gives
-  // -0.6.
-  //
-  // The gate is `obj+0x1360 != 1`, and `ZombieThrowHandWeapon` sets that field
-  // from **`g_max_attackers`** one line before it calls this — not from the
-  // player count, which is a different counter incremented off a different
-  // slot bit. So the offset appears exactly when the game is running two
-  // permits, and reading the source global here is the same value the engine
-  // latched: the latch and the aim happen in the same call.
-  if (G.g_max_attackers !== 1) {
+  // -0.6. With one player `g_two_player_game` is clear and the engine takes
+  // the centre instead.
+  if (G.g_two_player_game) {
     const side = (obj.attackPermit * -2 + 1) * -(k?.aim_side ?? 0.6);
     const a = G.g_camera_yaw_bams * ((Math.PI * 2) / 65536);
     out.x += Math.cos(a) * side;

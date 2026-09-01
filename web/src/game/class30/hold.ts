@@ -49,12 +49,9 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3, rng: Rng,
     return;
   }
 
-  // `if (!(obj+0x1368 & 1)) obj+0x133C = 0` — no cooldown for an ordinary
-  // zombie. `ZombieStateWaitForCameraFrame` (state 19) is the only thing that
-  // sets the bit, and its four spawns are the only ones that pause between
-  // swings; everyone else swings again as soon as the retreat is done.
-  if (!obj.hasCooldown) obj.cooldown = 0;
-  else if (obj.cooldown >= 1) { obj.cooldown -= 1; return; }
+  // No cooldown for an ordinary zombie: the bit that would run one down is
+  // never set on the ported path.
+  obj.cooldown = 0;
 
   if (ZombieAttackRefusal(obj) === null && TryClaimAttackSlot(obj, host)) {
     // Body condition 4 goes to state 0x34 instead; that state is unread, and

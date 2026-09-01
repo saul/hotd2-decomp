@@ -110,7 +110,7 @@ export function ViewSettings() {
   return (
     <>
       <button className="kill" hidden={!shooting}
-              title="Kill every live enemy outright -- hit points to zero and the directional death, the same thing that opens the live-enemy gate. Nothing is severed, because no bone was hit."
+              title="Kill every live actor outright -- hit points to zero and the directional death, the same thing that opens the live-enemy gate. Civilians go too, through their own killed script, because they are what wait_scripted_actors counts and a room cleared with the hostages still standing is a script that has not moved. Nothing is severed, because no bone was hit."
               onClick={() => dispatch({ kind: "killAll" })}>Kill</button>
       <button title="Snapshot the whole game state: the walker's program counter and flags, the data segment, every actor and the random seed. Nothing from three.js -- the renderers rebuild from those, which is the test that the split is in the right place. See docs/PLAYER_ARCHITECTURE.md."
               onClick={() => dispatch({ kind: "saveState" })}>Save</button>

@@ -7,7 +7,7 @@
  * ```
  * if      (loops <  0)  model[0]++;                     // for ever
  * else if (loops >  0) {
- *   if (model[2] < g_motion_play_length[model[8]]) model[0]++;
+ *   if (model[2] < g_anim_frame_counts[model[8]]) model[0]++;
  *   else if (--loops != 0)                        model[0]++;
  * }                                                     // ...and otherwise
  * ```                                                   // nothing at all

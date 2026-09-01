@@ -130,53 +130,6 @@ export interface TargetScriptJson {
   entries: TargetScriptEntry[];
 }
 
-/**
- * The descriptor tail of a class-0x30 entrance state, by state.
- *
- * Every field is optional because the decoder refuses a field whose bytes do
- * not read plausibly — for any state but its own these are the next
- * descriptor's — and the state falls back to its own default rather than
- * acting on a guess.
- */
-export interface ZombieEntryTail {
-  /** 13, 18, 19, 23: the camera path frame the state waits for. `-1` in state
-   *  23 means fire at once. */
-  cue_frame?: number;
-  /** 18, 20: the camera frame, or the `g_script_flags` index, to wait on. */
-  cue?: number;
-  /** 13, 17: the walk distance handed to state 15, present only when the
-   *  descriptor's `+0x03` names it. */
-  walk_distance?: number;
-  /** 14, 17: how many frames the hold lasts. */
-  frames?: number;
-  /** 17, 18, 19, 20, 23, 31: the clip the state plays while it waits. */
-  motion?: number;
-  /** 19: the pose is frozen while it waits (`tail+0x0C == 0`). */
-  freeze?: boolean;
-  /** 19: claim an attack permit on the cue (`tail+0x0D`). */
-  claim?: boolean;
-  /** 19, 24, 30, 31, 32: the frames counted down before the state acts. */
-  delay?: number;
-  /** 19: `obj+0x133C`, the only attack cooldown class 0x30 ever arms. */
-  cooldown?: number;
-  /** 23, 24: the play-clock frame the hit lands on. */
-  hit_frame?: number;
-  /** 24, 30: where the arc goes. */
-  dest?: [number, number, number];
-  /** 30: the arc's parameter-advance rate, `ActorArcStep`'s argument. */
-  step?: number;
-  /** 24, 31: the clip played between strikes. */
-  idle_motion?: number;
-  /** 24: the clip the strike itself plays. */
-  strike_motion?: number;
-  /** 24, 32: which player to attack, `-1` for either. */
-  player?: number;
-  /** 31: the `g_script_flags` index that lets the actor into the game. */
-  flag?: number;
-  /** 32: the frames re-armed between swings. */
-  rearm?: number;
-}
-
 export interface CharacterPlacement {
   /** evt offset of the spawn descriptor. */
   at: number;
@@ -276,18 +229,6 @@ export interface CharacterPlacement {
     leap?: { dest: [number, number, number]; gravity: number };
     leave_delay?: number;
   };
-  /**
-   * The tail one of the twelve class-0x30 entrance states reads — see
-   * `ENTRY_TAIL_STATES` in `hod2lib/characters.py`, which gates each shape on
-   * the spawn's own `initial_state`. Between them these are 133 of the game's
-   * 356 class-0x30 spawns.
-   *
-   * One union rather than twelve optional fields, because exactly one state
-   * reads any given spawn's bytes and every other reading of them is the *next*
-   * descriptor. `ZombieEntryTailFor` in `class30/entrance.ts` narrows it back
-   * by state.
-   */
-  entry?: ZombieEntryTail | null;
   /** `ThrowerStateDelayedPounce` (state 23): a clip, then a leap over `frames`. */
   pounce?: { motion: number; frames: number } | null;
   /**
@@ -340,12 +281,6 @@ export interface CombatJson {
   /** `FUN_004073B0`: material → `[first texture, last texture, scale]`. */
   impact_sprite: Record<string, [number, number, number]>;
   impact_sprite_default: [number, number, number];
-  /**
-   * `ZombieStateArcScriptedEntrance`'s two arc motion scripts, in class 0x31's
-   * twelve-dword shape. The state picks by character type: `entrance_type0`
-   * for type 0 and `entrance_other` for every other.
-   */
-  arc_scripts?: Record<string, ArcStage[]>;
   /** `ActorShotFeedback`: blood spray scale by hit result. */
   blood_scale: Record<string, number>;
   no_effect: {

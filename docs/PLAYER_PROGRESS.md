@@ -1007,66 +1007,6 @@ from closing on the camera for ever.
 Still `[open]`, and marked in `enemies.ts`: the walk speed — derived from the
 ring table rather than found, and now known *not* to be root motion.
 
-### The twelve entrance states
-
-**Every entrance state the game ships is now ported.** `ZombieEntryState` used
-to be a list of exceptions with an `AttackRun` fallback: seventeen of the 54
-states were read and the other 37 fell through, on the reasoning that every
-entrance ends by setting state 1 anyway. That is true of some of them and it
-was never the point — the entrance is what puts the actor *where the level
-wants it* before the attack run starts. Twelve of those 37 have shipped spawns,
-**127 of the game's 356 class-0x30 placements**, and states 17 and 18 alone are
-75 of them.
-
-| state | name | spawns | what it waits for |
-|---|---|---:|---|
-| 13 | `ZombieStateSurfaceOnCameraCue` | 16 | the camera path frame, `>=` |
-| 14 | `ZombieStateRunInPlaceTimed` | 2 | a frame count |
-| 17 | `ZombieStateHoldClipThenBranch` | 38 | a frame count |
-| 18 | `ZombieStateWaitCameraFrameThenBranch` | 37 | the camera path frame, `==` |
-| 19 | `ZombieStateWaitForCameraFrame` | 4 | ...then claims and strikes |
-| 20 | `ZombieStateWaitScriptFlagThenBranch` | 2 | a script flag |
-| 23 | `ZombieStateScriptedGrabAndDespawn` | 6 | a cue, then kills and despawns |
-| 24 | `ZombieStateLeapToPoint` | 6 | flies to a point and never leaves |
-| 29 | `ZombieStateRideCarrier` | 6 | rides `g_carrier_object` |
-| 30 | `ZombieStateArcScriptedEntrance` | 3 | a scripted ballistic arc |
-| 31 | `ZombieStateWaitScriptFlagThenEnter` | 4 | a script flag — and counts itself in |
-| 32 | `ZombieStateDelayedStrikeInPlace` | 3 | a timer, then swings for ever |
-
-Four things worth carrying forward from reading them:
-
-* **The exits are expressed in the play clock**, and three of the twelve name a
-  clip the bundle was not baking. `MotionPlayLength` is then 0, the cursor
-  never reaches the last frame, and the actor waits for the rest of the stage.
-  That is not a cosmetic gap and it is invisible to a unit test with a
-  hand-written fixture — `web/tools/entrances.mjs` is what caught it, by
-  driving all 127 shipped spawns against the real bundle.
-* **`g_two_player_game` was misnamed.** `FUN_004147E0` does
-  `INC word [009C8E80]` once per player as it enters — beside a *separate*
-  `INC` of `g_max_attackers` on a different slot bit — and `FUN_00413F42` does
-  the matching `DEC`. It is a **count of players in play**, renamed
-  `g_players_in_play`, and it is 1 in an ordinary single-player game. The port
-  had it at 0, which is the attract screen; states 24 and 32 both refuse to
-  strike there, so leaving it would have parked all nine of those spawns. The
-  thrown weapon, which the port had reading this global, actually reads
-  `g_max_attackers` — `ZombieThrowHandWeapon` latches that onto the projectile
-  at `+0x1360` one line before it aims.
-* **State 19 is the only thing in class 0x30 that arms an attack cooldown.**
-  It sets `obj+0x1368` bit 0 and `obj+0x133C`; every other zombie has that bit
-  clear, so `ZombieStateHoldAtRange` forces the cooldown to zero and there is
-  no wait between swings beyond the strike clip and the retreat.
-* **State 29 reads nothing from its descriptor tail** but byte 3 — the tail
-  belongs to the state it hands over to. The shipped data proves it cleanly:
-  the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
-  the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
-
-`[diverges]` **The port has no rideable object.** Every class that writes
-`g_carrier_object` is unported, so it stays -1, and two states take their
-no-carrier arms: state 29 hands over immediately rather than parking six spawns
-for ever, and state 32 never takes its give-up branch. Riding properly needs
-the vehicle classes (`St1VehicleUpdate`, `FUN_0048E600`, and its peers) — a
-separate port, not a line edit.
-
 ## Shooting
 
 **Done, for the parts that are exact.** Full account in

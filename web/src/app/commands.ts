@@ -255,11 +255,17 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "killAll": {
       // The debug clear: `killAll` drops every live actor to zero hit points
       // and starts its directional death, which is what opens the enemy gate.
+      // Civilians go with them — they are what `wait_scripted_actors` counts,
+      // and a room cleared of enemies with the hostages still standing is a
+      // script that has not moved.
       const n = p.chars.killAll(p.shooting.cameraYawBams);
+      const parts = [`${n.enemies} enem${n.enemies === 1 ? "y" : "ies"}`];
+      if (n.civilians) parts.push(`${n.civilians} civilian`
+                                  + (n.civilians === 1 ? "" : "s"));
       p.onFeed({
         seq: -1, block: p.walker?.block ?? -1, step: -1, opIndex: -1,
         op: { i: -1, at: 0, op: -1, name: "kill all", cat: "combat" },
-        note: `${n} enem${n === 1 ? "y" : "ies"} killed`,
+        note: `${parts.join(" · ")} killed`,
       });
       return;
     }

@@ -45,8 +45,7 @@ import { Euler, Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { RainJson } from "../bundle";
 import { Rng } from "../core/rng";
 import type { Context, System, Tick } from "../core/system";
-
-const BAMS_TO_RAD = (Math.PI * 2) / 65536;
+import { BAMS_TO_RAD } from "../core/bams";
 
 interface Drop {
   node: Object3D;

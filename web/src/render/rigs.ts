@@ -52,9 +52,9 @@ import type { RigsJson, RigRoute } from "../bundle";
 import type { Context, System } from "../core/system";
 import type { CamPaths } from "./campath";
 import { OP_CHANNELS } from "./campath";
+import { BAMS_TO_RAD } from "../core/bams";
 
 /** BAMS -> radians. */
-const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
 /** `hod2_path_rotation`: a part rotation the routine drives from a path. */
 interface PathRotationRule {

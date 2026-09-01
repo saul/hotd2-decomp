@@ -42,9 +42,7 @@ import { Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { BackdropJson, BackdropPreset } from "../bundle";
 import { IDLE_TICK, type Context, type System, type Tick }
   from "../core/system";
-
-/** BAMS -> radians, the constant the matrix rotators use. */
-const BAMS_TO_RAD = 9.58738e-5;
+import { BAMS_TO_RAD } from "../core/bams";
 
 /** The scale the draw applies. Negative Z is deliberate. */
 const DOME_SCALE = new Vector3(1.2, 1.2, -1.2);

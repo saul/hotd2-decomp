@@ -66,7 +66,6 @@ import {
 import type { Context, System } from "../core/system";
 
 /** 2*pi / 65536 — the constant both matrix rotators multiply by. */
-export const BAMS_TO_RAD = 9.58738e-5;
 
 /** `SetLightingDefaultSingle`'s two scalings of the scene light colour. */
 export const DIFFUSE_SCALE = 1.4;

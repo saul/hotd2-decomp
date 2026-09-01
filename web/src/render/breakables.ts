@@ -39,8 +39,7 @@ import {
 } from "../game/class41/prop_state";
 import { KIND_SHADOW } from "../game/class41/kinded";
 import { GENERIC_DRAW_SLOT } from "../game/class41/generic";
-
-const BAMS_TO_RAD = (Math.PI * 2) / 65536;
+import { BAMS_TO_RAD } from "../core/bams";
 
 /** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;

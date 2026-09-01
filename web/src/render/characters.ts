@@ -67,6 +67,7 @@ import { ActorKillAll, ResolveHit, type HitResult }
   from "../game/combat/resolve_hit";
 import { ReleaseAttackSlot } from "../game/combat/permits";
 import { g_class_handlers } from "../game/registry";
+import { BAMS_TO_RAD } from "../core/bams";
 
 /**
  * The bone `SkeletonEmitNode` records into `obj+0x100`, and the 4.0
@@ -74,8 +75,6 @@ import { g_class_handlers } from "../game/registry";
  */
 const CAMERA_TRACK_BONE = 1;
 const CAMERA_TRACK_RISE = 4;
-
-const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
 /** The engine's frame clock. Motion clips are authored at half of it. */
 const GAME_HZ = 60;
@@ -93,7 +92,6 @@ const AXIS_Z = new Vector3(0, 0, 1);
  * about the joint — which is exactly what "the parts are detached" looks like.
  */
 const boneSuffix = (part: string) => `_${part}`;
-
 
 /**
  * The renderer's half of a character: the nodes, and a reference to the game

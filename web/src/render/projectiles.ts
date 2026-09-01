@@ -9,12 +9,11 @@
 import { Group, Object3D, Vector3 } from "three";
 import type { Context, System } from "../core/system";
 import { G } from "../game/globals";
+import { BAMS_TO_RAD } from "../core/bams";
 
 export interface SlotSource {
   cloneSlot(slot: number): Object3D | null;
 }
-
-const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 
 export class ProjectileLayer implements System {
   readonly id = "render.projectiles";

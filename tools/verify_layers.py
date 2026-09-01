@@ -137,8 +137,9 @@ def main() -> int:
             "ratchet", baseline=1, step=5),
         "one-bams-constant": Rule(
             "one-bams-constant",
-            "BAMS_TO_RAD defined per-file drifts; one definition in core/",
-            "ratchet", baseline=9, step=12),
+            "BAMS_TO_RAD belongs to core/bams.ts and nowhere else -- the nine "
+            "per-file copies did not agree to six significant figures",
+            "error"),
     }
 
     files = sorted(SRC.rglob("*.ts"))
@@ -184,7 +185,10 @@ def main() -> int:
         if lay == "ui":
             for m in EXE_CITE_RE.finditer(text):
                 rules["no-engine-truth-in-ui"].hit(f"{rel}: {m.group(0)}")
-        if re.search(r"\bBAMS_TO_RAD\s*=", code):
+        # core/bams.ts is the one definition, so it is not a violation of
+        # itself. Everywhere else, importing it is the only option.
+        if (re.search(r"\bBAMS_TO_RAD\s*=", code)
+                and f.name != "bams.ts"):
             rules["one-bams-constant"].hit(str(rel))
 
     # Every drawable layer must be in the tick order.

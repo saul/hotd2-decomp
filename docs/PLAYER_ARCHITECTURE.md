@@ -353,6 +353,7 @@ web/src/
   core/
     system.ts     System { id; attach; update; detach; save?; load?; resync? }
     scope.ts      the disposal tree: child / defer / own / dispose
+    bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
     world.ts      the registry, the tick order, save() and load()
     context.ts    engine-only: { bundle, walker, events, rng, stage, frame }
     render_context.ts  extends Context with { scene, camera }
@@ -606,7 +607,32 @@ escape hatch is to fix the layering or to change the plan.
 in this document, not in the checker.** If a piece of work genuinely cannot be
 done without adding a violation, that means the refactor it depends on has to
 come first — say so and stop, rather than raising the number. Every ratchet
-here is a debt with a named creditor: step 5, 9, 11 or 12.
+here is a debt with a named creditor: step 5, 9 or 11.
+
+A ratchet that reaches zero and can never come back should become an **error**,
+which is what happened to `one-bams-constant`. There is no longer a reason to
+write that constant anywhere but `core/bams.ts`, so the rule no longer records
+a count — it refuses.
+
+### What step 12 actually found
+
+Nine files defined `BAMS_TO_RAD`. Seven spelled it `(Math.PI * 2) / 65536` and
+two spelled it `9.58738e-5` — **they disagree in the sixth significant figure**,
+which is small enough never to be noticed and large enough that two layers did
+not agree about where the same object was pointing.
+
+Neither was right. The exe holds the constant as a **float32**; `9.58738e-05`
+is Ghidra's six-digit rendering of it, recorded in `docs/re/session-log.md` as
+2π/65536. So `core/bams.ts` says `Math.fround((Math.PI * 2) / 65536)`, which is
+the float the binary actually contains. All three agree to about one part in
+10^8, so nothing on screen moves; the point is having one answer.
+
+The step also claimed there were duplicate `bamsEuler`s to merge. There were
+not — there is exactly one, in `render/rigs.ts`, and it stays there. The
+quaternion chains in `characters.ts` and `props.ts` look similar but compose
+different rotation orders, so folding them together would be a bug wearing a
+refactor's clothes. `bamsEuler` could not live in `core/` anyway: it returns a
+three.js `Euler`.
 
 ### The rules must keep asking the real question
 
@@ -643,7 +669,7 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
 | 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ☐ |
-| 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, one `bamsEuler` | ☐ |
+| 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
 
 ### Proving a step did not change behaviour
 

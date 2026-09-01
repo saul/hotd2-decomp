@@ -37,11 +37,11 @@ export function VecToAngles(dx: number, dy: number, dz: number):
   };
 }
 
-/** Shortest signed BAMS difference, in (-32768, 32768]. */
-export function bamsDelta(to: number, from: number): number {
-  return ((to - from) % 65536 + 98304) % 65536 - 32768;
-}
-
-export function bamsWrap(a: number): number {
-  return ((a % 65536) + 65536) % 65536;
-}
+/**
+ * The angle helpers live in `core/bams.ts` and are re-exported here.
+ *
+ * There is one definition of a BAMS turn in the player, and `core/` is where
+ * it is. These stay reachable from `../vec` because that is where forty call
+ * sites already look for them, and moving those would be churn for nothing.
+ */
+export { bamsDelta, bamsWrap } from "../core/bams";

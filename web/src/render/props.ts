@@ -50,8 +50,8 @@ import type { PropsJson, PropHinge, PropStatic } from "../bundle";
 import { IDLE_TICK, type Context, type System, type Tick }
   from "../core/system";
 import { labelTexture } from "./overlays";
+import { BAMS_TO_RAD } from "../core/bams";
 
-const BAMS_TO_RAD = (Math.PI * 2) / 65536;
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Y = new Vector3(0, 1, 0);
 const AXIS_Z = new Vector3(0, 0, 1);

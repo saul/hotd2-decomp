@@ -11,9 +11,7 @@
 
 import { Matrix4, Quaternion, Vector3 } from "three";
 import type { CamJson, CamPathJson, Key } from "../bundle";
-
-/** BAMS: the game stores every angle as 65536 = 360 degrees. */
-export const BAMS_TO_RAD = (Math.PI * 2) / 65536;
+import { BAMS_TO_RAD } from "../core/bams";
 
 const CP_CHANNELS = [
   "eye_x", "eye_y", "eye_z",

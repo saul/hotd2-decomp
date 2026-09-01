@@ -9,13 +9,12 @@
  * Not a modal. A branch is a fact about where playback has got to, not an
  * interruption of it.
  */
-import { memo } from "react";
-import type { Dispatch } from "../commands";
-import type { BranchProjection } from "../projection";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
 
-export const BranchBar = memo(function BranchBar({ p, dispatch, onHover }:
-  { p: BranchProjection | null; dispatch: Dispatch;
-    onHover: (over: boolean) => void }) {
+export function BranchBar() {
+  const dispatch = useDispatch();
+  const p = useSlice((s) => s?.branch);
   if (!p) return null;
   return (
     // Deciding is not a race: hovering the bar -- to read the routes, or to
@@ -23,8 +22,8 @@ export const BranchBar = memo(function BranchBar({ p, dispatch, onHover }:
     // This used to be two `addEventListener` calls in `Player.wireUi`, on an
     // element in `index.html` that this component rendered the contents of.
     <div id="branchbar"
-         onPointerEnter={() => onHover(true)}
-         onPointerLeave={() => onHover(false)}>
+         onPointerEnter={() => dispatch({ kind: "branchHover", over: true })}
+         onPointerLeave={() => dispatch({ kind: "branchHover", over: false })}>
       <span className="tag">Branch</span>
       <span className="dim">{p.sub}</span>
       {/* `routes` rather than an id: a route button is a role, and the bar is
@@ -51,4 +50,4 @@ export const BranchBar = memo(function BranchBar({ p, dispatch, onHover }:
       </span>
     </div>
   );
-});
+}

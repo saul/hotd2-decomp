@@ -1,10 +1,10 @@
 /**
  * The script panel: a filter box, and the script as a tree.
  *
- * Thousands of rows, none of which change once a stage has loaded — so the
- * whole thing is memoised on the projection's identity and re-renders only
- * when a different stage is loaded. What changes every frame is one row's
- * `current` class, and that is why the highlight is applied to the DOM
+ * Thousands of rows, none of which change once a stage has loaded — so each
+ * block is memoised on the object `stabilise` holds still for it, and a stage
+ * that is already up re-renders none of them. What changes every frame is one
+ * row's `current` class, and that is why the highlight is applied to the DOM
  * directly rather than as a prop: threading it through would make React
  * reconcile the whole tree to move one outline.
  *
@@ -20,6 +20,8 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { TreeProjection } from "../projection";
 import type { Dispatch } from "../commands";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
 
 const Block = memo(function Block(
   { b, dispatch }: { b: TreeProjection["blocks"][number]; dispatch: Dispatch },
@@ -55,13 +57,14 @@ const Block = memo(function Block(
   );
 });
 
-export const Tree = memo(function Tree(
-  { p, current, dispatch }: {
-    p: TreeProjection | null;
-    current: { block: number; step: number; op: number } | null;
-    dispatch: Dispatch;
-  },
-) {
+export function Tree() {
+  const dispatch = useDispatch();
+  const p = useSlice((s) => s?.tree);
+  // The whole triple, because the highlight is a row and a row is all three.
+  // It moves on every instruction, and what that costs is this component's
+  // render and one `querySelector` -- the blocks below are memoised on values
+  // `stabilise` holds still, so none of them re-render for it.
+  const current = useSlice((s) => s?.current);
   const host = useRef<HTMLDivElement>(null);
   // The filter changes nothing outside this panel, so it is component state.
   // It used to be an `<input>` in `index.html` that this subscribed to with a
@@ -122,4 +125,4 @@ export const Tree = memo(function Tree(
       </div>
     </aside>
   );
-});
+}

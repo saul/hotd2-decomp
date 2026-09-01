@@ -9,12 +9,12 @@
  * Unlike the branch bar this is an offer, not a question: playback is not
  * waiting on it and ignoring it changes nothing.
  */
-import { memo } from "react";
-import type { Dispatch } from "../commands";
-import type { SkipProjection } from "../projection";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
 
-export const SkipBar = memo(function SkipBar({ p, dispatch }:
-  { p: SkipProjection | null; dispatch: Dispatch }) {
+export function SkipBar() {
+  const dispatch = useDispatch();
+  const p = useSlice((s) => s?.skip);
   if (!p) return null;
   return (
     <div id="skipbar" className={p.stacked ? "stacked" : undefined}>
@@ -25,4 +25,4 @@ export const SkipBar = memo(function SkipBar({ p, dispatch }:
       <kbd className="skip-key">Enter</kbd>
     </div>
   );
-});
+}

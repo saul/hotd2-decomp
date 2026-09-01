@@ -23,19 +23,20 @@
  */
 import { useEffect, type ReactNode } from "react";
 import { usePersisted } from "../persist";
-import type { UiSlice, UiStore } from "../store";
+import { useStore } from "../store_context";
+import type { UiSlice } from "../store";
 
 // Deliberately **not** `memo`. Its children are elements built fresh by the
-// caller on every render, so the shallow compare could never bail -- the
-// memoisation that matters is on the panel bodies below it, which take a
-// projection slice and nothing else.
+// caller on every render, so the shallow compare could never bail. Since step
+// 24 there is nothing for it to save anyway: the body inside each panel
+// subscribes to its own slice, so it re-renders when that slice moves whether
+// this component rendered again or not.
 export function Panel({
-  id, store, title, sub, subTitle, slice, defaultOpen = false, head, grow,
+  id, title, sub, subTitle, slice, defaultOpen = false, head, grow,
   children,
 }: {
   /** Also the CSS hook and the persistence key. */
   id: string;
-  store: UiStore;
   title: string;
   sub?: string;
   subTitle?: string;
@@ -47,6 +48,7 @@ export function Panel({
   grow?: boolean;
   children?: ReactNode;
 }) {
+  const store = useStore();
   const [open, setOpen] = usePersisted(id, defaultOpen);
 
   // In an effect, never during render: strict mode double-invokes a render,

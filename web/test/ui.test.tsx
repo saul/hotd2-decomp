@@ -14,6 +14,13 @@
  * not about content: a test that pinned the markup would fail on every honest
  * edit and be deleted within the month.
  *
+ * Since step 24 it also lists the ids each render must carry. That is not a
+ * duplicate of `verify_player_dom.py`: that tool reads `id="..."` out of the
+ * source, so it goes on passing when a component that carries one stops being
+ * *rendered* — and step 24 moved eight ids into components that did not exist
+ * before, which is exactly the edit that loses one silently. Here they have to
+ * come out of a render.
+ *
  * Since step 22 it also covers the error boundaries, and covers them with a
  * hole in the middle that is stated where it bites: `renderToStaticMarkup`
  * does not run a boundary at all, so the one assertion worth having — the page
@@ -31,6 +38,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { App } from "../src/ui/App";
 import { ErrorBoundary } from "../src/ui/ErrorBoundary";
 import { UiStore } from "../src/ui/store";
+import { Transport } from "../src/ui/panels/Transport";
 import { TOGGLE_DEFAULTS } from "../src/ui/panels/Toggles";
 import type { UiProjection } from "../src/ui/projection";
 
@@ -103,6 +111,30 @@ function inOrder(html: string, ids: string[]): string {
 const GRID = ["topbar", "stagearea", "left", "left-resize", "viewport", "view",
               "right", "transport"];
 
+/** What the page carries before `Player` exists, ids the sheet styles included. */
+const COLD_IDS = ["topbar", "status", "stagearea", "left", "tree-filter",
+                  "tree", "left-resize", "viewport", "view", "loading",
+                  "loading-text", "right", "transport"];
+
+/**
+ * And with a projection, at the default folds.
+ *
+ * `#feed` is in the list because its panel opens by default; `#minimap`,
+ * `#inspector`, `#scopes` and `#globals` are not, because theirs do not, and a
+ * panel that is folded renders no body at all -- which is the same fact
+ * `store.demand` is counting.
+ */
+const WARM_IDS = ["topbar", "stage-picker", "modes", "toggles", "view-settings",
+                  "status", "stagearea", "left", "tree-filter", "tree",
+                  "left-resize", "viewport", "view", "paused-overlay",
+                  "skipbar", "branchbar", "right", "hud", "panel-wait",
+                  "panel-actors", "panel-route", "panel-feed", "feed",
+                  "inspector-panel", "scope-panel", "globals-panel",
+                  "transport", "volume", "bgm-label", "frame-label"];
+
+const missing = (html: string, ids: string[]): string[] =>
+  ids.filter((id) => !html.includes(`id="${id}"`));
+
 console.log("\nThe chrome renders before there is a projection:\n");
 
 const cold = render(null);
@@ -112,6 +144,9 @@ check("and the loading overlay is up",
       cold.includes('id="loading"') && cold.includes("loading bundle"));
 check("and the panels that need a projection are not",
       !cold.includes('id="panel-wait"') && !cold.includes('id="hud"'));
+check("and every id the stylesheet hangs off this state is emitted",
+      missing(cold, COLD_IDS).length === 0,
+      `missing: ${missing(cold, COLD_IDS).join(", ")}`);
 
 console.log("\nAnd again with one:\n");
 
@@ -138,6 +173,18 @@ check("the active mode button carries the class the stylesheet knows",
       "`.mode.active` is what style.css styles");
 check("the script filter is the panel's own control",
       warm.includes('id="tree-filter"'));
+check("every id the stylesheet hangs off is emitted",
+      missing(warm, WARM_IDS).length === 0,
+      `missing: ${missing(warm, WARM_IDS).join(", ")}`);
+// The fold is what decides whether a body exists, and the body existing is
+// what `store.demand` counts. A panel that rendered its children while shut
+// would claim its slice for ever, and `app/` would build the expensive one for
+// a panel nobody has open.
+check("a folded panel renders no body, which is what makes demand honest",
+      !warm.includes('id="globals"') && !warm.includes('id="scopes"')
+      && !warm.includes('id="minimap"'),
+      "a shut panel rendered its children");
+check("and an open one does", warm.includes('id="feed"'));
 
 // The boundaries render no element of their own while the region under them
 // is healthy, which is the property that keeps them out of `#stagearea`'s
@@ -151,6 +198,21 @@ check("nothing stands between #viewport and its canvas",
       + "be a boundary that can unmount it");
 check("nothing stands between #right and the first panel in it",
       /id="right"[^>]*>\s*<div id="hud"/.test(warm));
+
+console.log("\nThe store reaches the panels by context:\n");
+
+// Step 24 took the `store` prop off `Panel` and the `dispatch` prop off most
+// of the panels; both come from `StoreContext` now. The failure mode that
+// replaces a missing prop is a component that subscribes to a store nothing
+// publishes to and sits there permanently empty, with nothing anywhere saying
+// why -- so the context has no working default and this is what it does
+// instead.
+let outside: unknown = null;
+try { renderToStaticMarkup(createElement(Transport)); }
+catch (e) { outside = e; }
+check("a panel rendered outside <App> says so rather than rendering empty",
+      outside instanceof Error && outside.message.includes("StoreContext"),
+      `threw ${String(outside)}`);
 
 console.log("\nA region that throws:\n");
 

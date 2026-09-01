@@ -12,9 +12,10 @@
  * `document.querySelector` in `hud/ui.ts` painted from `Player.refreshUi`,
  * which made the route graph a thing the shell had to remember to redraw.
  */
-import { memo, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { MinimapGraph } from "../projection";
-import type { Dispatch } from "../commands";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
 
 const HEIGHT = 150;
 
@@ -71,10 +72,14 @@ function layoutOf(graph: MinimapGraph): { width: number; nodes: Node[] } {
 
 const EMPTY = { width: 360, nodes: [] as Node[] };
 
-export const Minimap = memo(function Minimap(
-  { graph, current, dispatch }:
-  { graph: MinimapGraph | null; current: number; dispatch: Dispatch },
-) {
+// The block, not the whole `current` triple: the step and the op move on every
+// instruction and this only draws the block, so subscribing to the field it
+// paints is the difference between a canvas repaint per op and one per block.
+export function Minimap() {
+  const dispatch = useDispatch();
+  const graph = useSlice((p) => p?.minimap);
+  const block = useSlice((p) => p?.current?.block);
+  const current = block ?? -1;
   const canvas = useRef<HTMLCanvasElement>(null);
   const { width, nodes: layout } = useMemo(
     () => graph ? layoutOf(graph) : EMPTY, [graph]);
@@ -139,4 +144,4 @@ export const Minimap = memo(function Minimap(
               if (best >= 0) dispatch({ kind: "seek", block: best, step: 0, op: 0 });
             }} />
   );
-});
+}

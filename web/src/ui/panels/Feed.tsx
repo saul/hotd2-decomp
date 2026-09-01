@@ -6,13 +6,13 @@
  * scrolled up — reading back through what happened should not be yanked away
  * by the next instruction.
  */
-import { memo, useEffect, useRef } from "react";
-import type { FeedRow } from "../projection";
-import type { Dispatch } from "../commands";
+import { useEffect, useRef } from "react";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
 
-export const Feed = memo(function Feed(
-  { rows, dispatch }: { rows: readonly FeedRow[]; dispatch: Dispatch },
-) {
+export function Feed() {
+  const dispatch = useDispatch();
+  const rows = useSlice((p) => p?.feed);
   const stick = useRef(true);
   const box = useRef<HTMLDivElement>(null);
 
@@ -31,7 +31,7 @@ export const Feed = memo(function Feed(
            const n = e.currentTarget;
            stick.current = n.scrollTop + n.clientHeight >= n.scrollHeight - 24;
          }}>
-      {rows.map((e, i) => (
+      {rows?.map((e, i) => (
         <div key={i} className={`fe cat-${e.cat} st-${e.status}`}
              title={e.title}
              onClick={() => dispatch({ kind: "seek", block: e.block,
@@ -44,4 +44,4 @@ export const Feed = memo(function Feed(
       ))}
     </div>
   );
-});
+}

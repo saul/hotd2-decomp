@@ -11,8 +11,9 @@
  * turning it on means, and `runCommand` switches on the name exhaustively, so
  * adding a row here without handling it fails to compile.
  */
-import { memo } from "react";
-import type { Dispatch, ToggleName } from "../commands";
+import type { ToggleName } from "../commands";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
 
 export interface ToggleSpec {
   name: ToggleName;
@@ -62,12 +63,13 @@ export const TOGGLE_DEFAULTS: Readonly<Record<ToggleName, boolean>> =
   Object.fromEntries(TOGGLES.map((t) => [t.name, t.on])) as
     Record<ToggleName, boolean>;
 
-export const Toggles = memo(function Toggles(
-  { state, dispatch }: {
-    state: Readonly<Record<ToggleName, boolean>>;
-    dispatch: Dispatch;
-  },
-) {
+// One subscription for the whole record, not sixteen: they are one field of
+// the projection, they are stabilised together, and a change to any of them is
+// a click that has just repainted this row anyway.
+export function Toggles() {
+  const dispatch = useDispatch();
+  const state = useSlice((p) => p?.toggles);
+  if (!state) return null;
   return (
     <>
       {TOGGLES.map((t) => (
@@ -80,4 +82,4 @@ export const Toggles = memo(function Toggles(
       ))}
     </>
   );
-});
+}

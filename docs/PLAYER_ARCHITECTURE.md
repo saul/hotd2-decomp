@@ -385,11 +385,22 @@ does not reach `app/`. Putting it there drags UI-local state up into the
 composition root and grows the union with things the game has no opinion
 about.
 
-**4. Slices are referentially stable when their content has not changed.**
-That is what makes `memo` the diff: a panel whose slice did not move gets the
-object it had last frame and does not re-render, whatever else did. One
-generic `stabilise` pass at the root does it — see `app/projection/stable.ts`
-— and `publish` then decides whether to notify at all with a single `===`.
+**4. Slices are referentially stable when their content has not changed, and
+a component subscribes to the slice it reads.** The stability comes from one
+generic recursive `share` pass — see `app/projection/stable.ts` — which
+returns the previous object for every part that did not move, at every depth;
+`publish` then decides whether to notify at all with a single `===`.
+
+The subscription is what turns that into a diff. Each component calls
+`useSlice` with a selector that **names a field and never builds a value**, so
+the selector's result is already `Object.is`-stable and React re-renders
+exactly those components whose field moved. A selector that constructs
+something is wrong loudly — React throws *"The result of getSnapshot should be
+cached"* on the first render — and `selectors-return-fields` catches it before
+it runs. `memo` survives only where a component is still handed props by a
+parent that maps over a list, which is `Block` in the script tree and `Lines`
+in the sidebar; everywhere else per-slice subscription made it moot, and the
+rule that used to police it was deleted rather than tightened.
 
 **5. Cost is demand, and demand is expressed by mounting.** An open panel
 registers a claim on the slice it shows; `app/` asks `wants(slice)` and never
@@ -414,7 +425,7 @@ slide phase behind it.
 | 1 | three `error` rules reporting zero over 790 lines they had never opened |
 | 2 | — held throughout; the one rule nothing has yet broken |
 | 3 | the projection builder reading `<details>.open` out of the document, once a frame, to decide what to build |
-| 4 | `JSON.stringify` of the whole projection every frame, because every slice was a fresh object and `memo` could never bail |
+| 4 | `JSON.stringify` of the whole projection every frame, because every slice was a fresh object and `memo` could never bail. Then, after `stabilise`: one root subscription, so any change re-rendered `App`, the sidebar and all seven panels before the leaf `memo`s could bail — and two panels took the whole projection as a prop, so theirs could not bail at all while the checker reported zero |
 | 5 | `rememberFolds` persisting a fold that `app/` then read back through a `querySelector` |
 | 6 | the active mode button lit for about a frame; `#viewport` carrying a class from `app/` and another from `render/` while React rendered neither; sixteen portals that silently rendered nothing if an id was renamed |
 | 7 | a save taken mid-shutter-close coming back frozen part-way shut |
@@ -469,12 +480,15 @@ web/src/
     characters, shooting, breakables, projectiles, overlays, debug
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
   ui/           React. One projection in, one command union out.
-    App.tsx       the whole page, including the canvas
+    App.tsx       the page, including the canvas; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand
+    store_context.ts  useStore / useDispatch — the store by position, not prop
+    useSlice.ts   one subscription per slice; a selector names a field
+    ErrorBoundary.tsx  one region dies instead of the page
     projection.ts what the UI is allowed to know
     commands.ts   what the UI is allowed to ask for
     persist.ts    usePersisted — folds and widths, and nothing else
-    panels/       one file per panel, every one `memo`-wrapped
+    panels/       one file per panel, each subscribing to what it reads
   hud/          hud.ts — the shutter and the caption, drawn. Holds no state.
   audio/        bgm.ts — audio, not UI
 ```
@@ -957,10 +971,10 @@ exhaustive switch. The strongest rule in this layer is a type.
 
 ## Order of work
 
-Steps 1 to 20 are done. **Step 10** — `script/walker.ts` is still 1525 lines
-holding the machine, the opcodes' state, the waits and the seek planner in one
-class, and `WalkerHost` is 14 methods — is untouched, and **steps 21 to 28**
-are the second UI review's, described below the table.
+Steps 1 to 25 and 27 are done. What is left is **step 10** — `script/walker.ts`
+is still 1525 lines holding the machine, the opcodes' state, the waits and the
+seek planner in one class, and `WalkerHost` is 14 methods — and **steps 26 and
+28**, the last two of the second UI review's, described below the table.
 
 Each step compiles, keeps `verify_layers.py` green, and passes
 `verify_player_ops.py` and `npm run test:port` on its own.
@@ -988,13 +1002,13 @@ Each step compiles, keeps `verify_layers.py` green, and passes
 | 18 | **Structural sharing replaces the change key.** One generic `stabilise` pass, panels `memo()`, `publish` decides on identity; `projectionKey`, `revision`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ✅ |
 | 19 | **The shutter and the caption become engine state.** `g_bHudShutterState` and `g_bHudShutterPrev` named; the slide counter turned out to be a task field and to *be* `gateCloseLeft`, so the two became one; `Hud` holds no state and `app/` adapts it with `drawSystem` | ✅ |
 | 20 | **This document describes what is.** `## The UI layer` is the UI's seven stated rules; the tree matches the tree; the findings collapse into the rules and into what was *rejected*; `web/tools/verify_ui.mjs` holds the two that need an AST | ✅ |
-| 21 | **The stylesheet has one owner.** `verify_player_dom.py` re-aimed at the two questions that are still load-bearing; the seven rules step 16 orphaned restored, as ids where the control is a singleton and as structural selectors where it is a role | ☐ |
-| 22 | **The error boundary.** Three: the sidebar, the top chrome, and a root backstop, so one bad value in one panel cannot blank the page. Recovery is explicit — a boundary that resets on the next projection loops at 60 Hz. `onCaughtError` routes the throw into the event feed | ☐ |
-| 23 | **`stabilise` goes recursive.** One `share()` pass instead of compare-then-copy, and sharing at every depth rather than only at the projection's top-level keys — which is what lets a per-group `memo` bail when a sibling moved | ☐ |
-| 24 | **One subscription per slice.** `useSlice` over `useSyncExternalStore`; store and dispatch from context; `panels-are-memoised` **deleted** and replaced by `selectors-return-fields` | ☐ |
-| 25 | **The publish path has one owner.** Published at the end of every frame rather than from a system inside `if (this.walker)`; the hand-publishes in `setLoading`/`fail` and `panelSystem` go with it | ☐ |
+| 21 | **The stylesheet has one owner.** `verify_player_dom.py` re-aimed at the two questions that are still load-bearing; the seven rules step 16 orphaned restored, as ids where the control is a singleton and as structural selectors where it is a role | ✅ |
+| 22 | **The error boundary.** Six: the top bar, the script tree, the viewport overlays, the sidebar, the transport and a root backstop, so one bad value in one panel cannot blank the page. A healthy one renders no element, because the grid places by source order; none may enclose the canvas. Recovery is explicit — a boundary that reset on the next projection would re-render the throwing panel at 60 Hz — and the caught value is boxed so `throw null` cannot reach the same loop from the other side. `onUncaughtError`, because a boundary that catches already reports under the name of the region that died; routing into the feed waits for step 28 | ✅ |
+| 23 | **`stabilise` goes recursive.** One `share()` pass instead of compare-then-copy, and sharing at every depth rather than only at the projection's top-level keys — which is what lets a per-group `memo` bail when a sibling moved | ✅ |
+| 24 | **One subscription per slice.** `useSlice` over `useSyncExternalStore`; store and dispatch from context; `panels-are-memoised` **deleted** and replaced by `selectors-return-fields` | ✅ |
+| 25 | **The publish path has one owner.** Published at the end of every frame rather than from a system inside `if (this.walker)`; the hand-publishes in `setLoading`/`fail` and `panelSystem` go with it | ✅ |
 | 26 | **React owns every pixel inside `#viewport`.** The hud layer and the crosshair rendered by React and handed across through `UiHost`; `hud/` and `render/` write geometry onto nodes they were given. New **error** rule: no DOM insertion outside `ui/` | ☐ |
-| 27 | **The write seam.** `PlayerCommands`, so the half of the seam that mutates is as declared as `PlayerView` made the half that reads | ☐ |
+| 27 | **The write seam.** `PlayerCommands`, so the half of the seam that mutates is as declared as `PlayerView` made the half that reads | ✅ |
 | 28 | **The small ones.** `app/dom.ts` deleted; one owner each for `SHUTTER_LABEL` and `SubtitleLine`; `FeedRow.seq` and the feed keyed on it | ☐ |
 
 ### The second UI review, and the eight steps it produced

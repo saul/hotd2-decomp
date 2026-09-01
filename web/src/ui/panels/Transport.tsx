@@ -7,19 +7,20 @@
  * is released — `app/` needs both, because *while* you are dragging, the
  * camera systems must not fight you for the pose.
  */
-import { memo } from "react";
-import type { Dispatch } from "../commands";
-import type { SoundProjection, TransportProjection } from "../projection";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
 
-export const Transport = memo(function Transport(
-  { t, sound, dispatch }: {
-    t: TransportProjection;
-    sound: SoundProjection;
-    dispatch: Dispatch;
-  },
-) {
+// Two subscriptions and no `memo`. `camFrame` moves every frame of playback,
+// so this is one of the few components that genuinely re-renders at 60 Hz --
+// which is the property the step is after: the ones that re-render are the ones
+// whose slice moved, and the rest of the page does not pay for them.
+export function Transport() {
+  const dispatch = useDispatch();
+  const t = useSlice((p) => p?.transport);
+  const sound = useSlice((p) => p?.sound);
+  if (!t || !sound) return null;
   return (
     <>
       <button title="Back to the entry block"
@@ -86,4 +87,4 @@ export const Transport = memo(function Transport(
       </label>
     </>
   );
-});
+}

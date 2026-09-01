@@ -10,8 +10,14 @@
  * Whether to notify at all is decided by **identity**. `app/` runs each frame's
  * projection through `stabilise` (`app/projection/stable.ts`), which returns
  * the previous value unchanged when nothing moved and otherwise keeps every
- * slice that did not — so this handles both cases with one `===`, and a panel
- * whose slice is untouched gets the same object and its `memo` bails.
+ * slice that did not — so this handles both cases with one `===`.
+ *
+ * What the listeners do with that is `ui/useSlice.ts`'s business: each one is a
+ * component reading the single field it draws, and a field whose content has
+ * not moved is the same object it was last frame, so React finds nothing to do
+ * for it. That is why there is one `publish` and no per-slice notification
+ * here — the fan-out is the projection's reference stability, not a second
+ * subscription table this would have to keep in step.
  *
  * What this replaces is a `revision` counter over a `JSON.stringify` of the
  * whole projection. That was all-or-nothing: one field moving re-rendered

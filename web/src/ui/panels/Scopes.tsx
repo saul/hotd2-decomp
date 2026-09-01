@@ -13,7 +13,8 @@
  * * **`owned` growing under a flat tree** — something is registering into a
  *   scope that never closes.
  */
-import { memo, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
+import { useSlice } from "../useSlice";
 import type { ScopeRow } from "./scope_types";
 
 /** A sibling tally past this is a leak, not a busy frame. */
@@ -83,9 +84,10 @@ function Rows(
   );
 }
 
-export const Scopes = memo(function Scopes(
-  { root, stageLoadedAt }: { root: ScopeRow | null; stageLoadedAt: number },
-) {
+export function Scopes() {
+  const root = useSlice((p) => p?.scopes);
+  const loadedAt = useSlice((p) => p?.scopeContext.stageLoadedAt);
+  const stageLoadedAt = loadedAt ?? 0;
   const peak = useRef({ scopes: 0, owned: 0 });
   const totals = useMemo(() => {
     let scopes = 0;
@@ -119,4 +121,4 @@ export const Scopes = memo(function Scopes(
       </div>
     </>
   );
-});
+}

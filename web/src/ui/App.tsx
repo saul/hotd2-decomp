@@ -1,10 +1,17 @@
 /**
  * The UI layer's root, and the page.
  *
- * One subscription to one projection, and every panel below is a pure
- * function of it. Nothing here reaches into the engine, holds a layer, or
- * keeps a copy of game state; a control that wants something to happen
- * dispatches a `UiCommand` and `app/` decides what that means.
+ * `App` is two things and nothing else: the one place the store enters the
+ * tree, and the frame every region hangs off. It subscribes to a single fact —
+ * whether there is a projection yet — and every panel below it subscribes to
+ * the fields it actually reads, with `useSlice`. Before step 24 the root read
+ * the whole projection, so one moved field re-rendered `App`, the sidebar and
+ * all seven panels before a leaf `memo` could bail: the cost of a publish was
+ * the size of the page. It is now the size of the change.
+ *
+ * Nothing here reaches into the engine, holds a layer, or keeps a copy of game
+ * state; a control that wants something to happen dispatches a `UiCommand` and
+ * `app/` decides what that means.
  *
  * `index.html` is a mount point. The chrome used to live there and the panels
  * were portalled into sixteen ids inside it, which let them move across one at
@@ -28,24 +35,20 @@
  * boundary that could unmount the canvas would leave WebGL drawing into a
  * detached element, which is a dead page that looks like a graphics bug.
  */
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef } from "react";
 import type { UiStore } from "./store";
-import { Scopes } from "./panels/Scopes";
-import { Globals } from "./panels/Globals";
-import { ActorBody, WaitBody } from "./panels/Sidebar";
+import { StoreContext } from "./store_context";
+import { useHasProjection } from "./useSlice";
+import { Sidebar } from "./panels/Sidebar";
 import { Tree } from "./panels/Tree";
-import { Feed } from "./panels/Feed";
-import { HudStrip } from "./panels/HudStrip";
-import { Minimap } from "./panels/Minimap";
-import { Panel } from "./panels/Panel";
 import { Resizer } from "./panels/Resizer";
 import { Toggles } from "./panels/Toggles";
-import { Modes, StagePicker, ViewSettings } from "./panels/Topbar";
+import { Modes, StagePicker, Status, ViewSettings } from "./panels/Topbar";
 import { Transport } from "./panels/Transport";
 import { SkipBar } from "./panels/SkipBar";
 import { BranchBar } from "./panels/BranchBar";
+import { LoadingOverlay, PausedOverlay, Viewport } from "./panels/Viewport";
 import { ErrorBoundary } from "./ErrorBoundary";
-import type { UiProjection } from "./projection";
 
 /** The two elements the renderer needs, handed over once React has them. */
 export interface UiHost {
@@ -53,6 +56,14 @@ export interface UiHost {
   viewport: HTMLElement;
 }
 
+/**
+ * The composition root's one call, and the shape `app/ui_root.ts` renders.
+ *
+ * It provides the store and renders the page. The split is not decoration: a
+ * component cannot read a context it provides itself, and `Page` is what needs
+ * to read one — `useHasProjection` and every `useSlice` below it go through
+ * `StoreContext`, so the provider has to sit above the first consumer.
+ */
 export function App(
   { store, onHost, onError }: {
     store: UiStore;
@@ -60,8 +71,23 @@ export function App(
     onError?: (label: string, error: unknown, info?: unknown) => void;
   },
 ) {
-  const p = useSyncExternalStore(store.subscribe, store.getSnapshot,
-                                store.getServerSnapshot);
+  return (
+    <StoreContext value={store}>
+      <Page onHost={onHost} onError={onError} />
+    </StoreContext>
+  );
+}
+
+function Page(
+  { onHost, onError }: {
+    onHost: (h: UiHost) => void;
+    onError?: (label: string, error: unknown, info?: unknown) => void;
+  },
+) {
+  // The only subscription above a panel. It flips once, when `app/` publishes
+  // its first projection, and never back — so this render happens twice in a
+  // session and the panels below carry every frame after that.
+  const ready = useHasProjection();
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
 
@@ -74,54 +100,45 @@ export function App(
     }
   }, [onHost]);
 
-  const loading = p ? p.loading : { text: "loading bundle…", failed: false };
-
   return (
     <ErrorBoundary label="The player" onError={onError}>
       <header id="topbar">
         <ErrorBoundary label="The top bar" onError={onError}>
           <span className="brand">HOTD2 <span className="dim">stage player</span></span>
-          {p && <>
+          {ready && <>
             <span id="stage-picker" className="toggles">
-              <StagePicker p={p} dispatch={store.dispatch} />
+              <StagePicker />
             </span>
             <span className="sep" />
             <div className="modes" role="tablist" id="modes">
-              <Modes mode={p.transport.mode} dispatch={store.dispatch} />
+              <Modes />
             </div>
             <span className="sep" />
             <span id="toggles" className="toggles">
-              <Toggles state={p.toggles} dispatch={store.dispatch} />
+              <Toggles />
             </span>
             <span id="view-settings" className="toggles">
-              <ViewSettings p={p} dispatch={store.dispatch} />
+              <ViewSettings />
             </span>
           </>}
           <span className="grow" />
-          <span id="status" className="dim">
-            {p?.status.text ?? ""}
-            {p?.status.note
-              && <span className="dim" title={p.status.noteTitle}>
-                   {p.status.note}
-                 </span>}
-          </span>
+          <Status />
         </ErrorBoundary>
       </header>
 
       <main id="stagearea">
         <ErrorBoundary label="The script tree" onError={onError}>
-          <Tree p={p?.tree ?? null} current={p?.current ?? null}
-                dispatch={store.dispatch} />
+          <Tree />
         </ErrorBoundary>
         <Resizer />
 
-        {/* `shooting` and `paused` are both this element's class, so they are
-            both read from the projection. Two layers writing it imperatively
-            is what left the crosshair on after the mode changed. */}
-        <div id="viewport" ref={viewport}
-             className={[p?.paused && "paused",
-                         p?.toggles.shoot && "shooting"]
-                        .filter(Boolean).join(" ")}>
+        {/* `#viewport` is a component because the two classes it carries are
+            projection fields, and the root reading them would re-render the
+            whole chrome to move one class. The canvas and the overlays are
+            built here and passed through as `children`, so they are the same
+            elements whatever the classes do — which is the property that keeps
+            the canvas mounted for the session. */}
+        <Viewport hostRef={viewport}>
           <canvas id="view" ref={canvas} />
           {/* The boundary goes round the overlays and never round `#viewport`
               or `#view`: `app/` was handed those two elements through `onHost`
@@ -130,121 +147,31 @@ export function App(
               a detached canvas, which looks like a graphics bug and is not
               one. */}
           <ErrorBoundary label="The viewport overlays" onError={onError}>
-            {p?.paused && <div id="paused-overlay"><span>PAUSED</span></div>}
-            {loading && (
-              <div id="loading">
-                {!loading.failed && <div className="spinner" />}
-                <p id="loading-text" className={loading.failed ? "err" : undefined}>
-                  {loading.text}
-                </p>
-              </div>
-            )}
-            {/* Anchored to the bottom of the rendered view, not a modal over it:
-                a branch point is a fact about where playback has got to, so the
-                script, the scrubber and free roam all stay usable. The skip bar
-                sits above it on the rare frame both are live. */}
-            <SkipBar p={p?.skip ?? null} dispatch={store.dispatch} />
-            <BranchBar p={p?.branch ?? null} dispatch={store.dispatch}
-                       onHover={(over) =>
-                         store.dispatch({ kind: "branchHover", over })} />
+            <PausedOverlay />
+            <LoadingOverlay />
+            {/* Anchored to the bottom of the rendered view, not a modal over
+                it: a branch point is a fact about where playback has got to,
+                so the script, the scrubber and free roam all stay usable. The
+                skip bar sits above it on the rare frame both are live. */}
+            <SkipBar />
+            <BranchBar />
           </ErrorBoundary>
-        </div>
+        </Viewport>
 
         {/* Fourth in source order, because `#stagearea` is a grid and grid
             auto-placement follows the DOM. */}
         <aside id="right">
           <ErrorBoundary label="The sidebar" onError={onError}>
-            {p && <Sidebar p={p} store={store} />}
+            {ready && <Sidebar />}
           </ErrorBoundary>
         </aside>
       </main>
 
       <footer id="transport">
         <ErrorBoundary label="The transport" onError={onError}>
-          {p && <Transport t={p.transport} sound={p.sound}
-                           dispatch={store.dispatch} />}
+          {ready && <Transport />}
         </ErrorBoundary>
       </footer>
     </ErrorBoundary>
-  );
-}
-
-/**
- * The right-hand sidebar, which is now entirely React's.
- *
- * Every panel here owns its own fold and declares its own cost. Nothing in
- * `app/` asks the document what is showing, and a panel that is folded is not
- * rendered — so `wants(slice)` and "is this component mounted" are the same
- * fact rather than two that have to be kept in step.
- */
-function Sidebar({ p, store }: { p: UiProjection; store: UiStore }) {
-  const dispatch = store.dispatch;
-  return (
-    <>
-      <div id="hud" className="panel"><HudStrip rows={p.hudRows} /></div>
-
-      <Panel id="panel-wait" store={store} title="Wait" slice="wait" defaultOpen
-             sub={p.wait?.sub ?? "running"}
-             head={
-               <label className="hl"
-                      title="Box every actor keeping this wait blocked.">
-                 <input type="checkbox" checked={p.waitBoxed}
-                        onChange={(e) => dispatch({ kind: "boxWait",
-                                                    on: e.target.checked })} />
-                 {" box"}
-               </label>
-             }>
-        <div className="scroll dbg"><WaitBody p={p.wait} /></div>
-      </Panel>
-
-      <Panel id="panel-actors" store={store} title="Actors" slice="actors"
-             sub={p.actorPanel?.sub ?? ""}
-             subTitle={"Every object in g_object_list, grouped by spawn class. "
-               + "Each class describes its own actors — a class with a module "
-               + "in g_class_handlers explains itself, one without is listed "
-               + "by id and left alone. docs/formats/spawns.md is the class "
-               + "table."}>
-        <div className="scroll dbg">
-          <ActorBody p={p.actorPanel} dispatch={dispatch} />
-        </div>
-      </Panel>
-
-      <Panel id="panel-route" store={store} title="Route graph">
-        <Minimap graph={p.minimap} current={p.current?.block ?? -1}
-                 dispatch={dispatch} />
-      </Panel>
-
-      <Panel id="panel-feed" store={store} title="Event feed" defaultOpen grow>
-        <Feed rows={p.feed} dispatch={dispatch} />
-      </Panel>
-
-      <Panel id="inspector-panel" store={store} title="Inspector">
-        <div id="inspector" className="scroll">{p.inspector}</div>
-      </Panel>
-
-      <Panel id="scope-panel" store={store} title="Scopes" sub="lifetimes"
-             subTitle={"The disposal tree. Every scope shows the frame it was "
-               + "opened at: a child of `stage` whose frame predates the "
-               + "current stage load survived a teardown, and nothing else in "
-               + "the player can tell you that. Repeated names collapse into a "
-               + "tallied row, so a hundred leaked effect scopes is one line "
-               + "rather than a hundred."}>
-        <div id="scopes" className="scroll">
-          <Scopes root={p.scopes}
-                  stageLoadedAt={p.scopeContext.stageLoadedAt} />
-        </div>
-      </Panel>
-
-      <Panel id="globals-panel" store={store} title="Globals" slice="globals"
-             sub="read-only · g_*"
-             subTitle={"The port's data segment — every g_* it touches, and "
-               + "the object pool. Read-only: a writable panel would be a "
-               + "fourth way for state to enter the game, and nothing done "
-               + "here would survive a save. Addresses are the ones cited in "
-               + "web/src/game/globals.ts, checked against "
-               + "ghidra/annotations/globals.tsv."}>
-        <div id="globals" className="scroll"><Globals p={p.globals} /></div>
-      </Panel>
-    </>
   );
 }

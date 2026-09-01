@@ -13,11 +13,26 @@
  * both fail **silently** — the page still renders, the app still works, it
  * just costs more for ever:
  *
- * * a panel that is not `memo`-wrapped re-renders on every publish, which
- *   throws away the reference stability step 18 bought;
+ * * a `useSlice` selector that builds a value instead of naming a field is a
+ *   new object on every read, so the subscription can never settle;
  * * `store.demand` called during render is taken twice by strict mode and
  *   released once, so the count never returns to zero and `app/` builds an
  *   expensive slice for a panel nobody has open, for the rest of the session.
+ *
+ * **What used to be here, and why it is gone.** The first rule was
+ * `panels-are-memoised`, and step 24 deleted it rather than making it
+ * cleverer. It counted exported components in `panels/` that were not wrapped
+ * in `memo`, and it reported `0 ok` for months while two of them —
+ * `StagePicker` and `ViewSettings` — took the *entire* projection as a prop
+ * and so could never bail on any frame. That is the outcome the standing rule
+ * at the foot of this header warns about: a rule satisfied in the checker rather than in the
+ * code. Per-slice subscription makes the mistake it was aimed at impossible
+ * rather than merely detectable — a component that reads the projection now
+ * subscribes to the field it draws, and re-renders when that field moves
+ * whatever its parent did — so there is nothing left for a memo rule to
+ * protect. **A rule that can be deleted because the design no longer permits
+ * the mistake is the best end a rule can have**, and it is a better end than a
+ * tighter version of the same rule would have been.
  *
  * **Why not ESLint.** There is no lint config in this repo, it would be about
  * eight dependencies and a config file, and it would cost something concrete:
@@ -27,11 +42,12 @@
  * shape as every other `verify_*`, over the `typescript` already in
  * devDependencies, and no new package.
  *
- * The standing rule for this file is that it must not grow. Do not add a
- * check for anything the types, the layer checker or a runtime test already
- * hold — three overlapping mechanisms for one property is how a rule ends up
- * satisfied in the checker rather than in the code, which this project has
- * already caught happening once.
+ * The standing rule for this file is that it must not grow — which is why
+ * step 24 replaced a rule rather than adding one, and the count is still two.
+ * Do not add a check for anything the types, the layer checker or a runtime
+ * test already hold — three overlapping mechanisms for one property is how a
+ * rule ends up satisfied in the checker rather than in the code, which this
+ * project has already caught happening once.
  *
  * Run with `npm run verify:ui`.
  */
@@ -45,9 +61,10 @@ const PANELS = join(WEB, "src", "ui", "panels");
 const UI = join(WEB, "src", "ui");
 
 const rules = {
-  "panels-are-memoised": {
-    why: "a panel that is not memoised re-renders on every publish, which "
-       + "spends the reference stability the projection is built to have",
+  "selectors-return-fields": {
+    why: "a `useSlice` selector names a field of the projection; one that "
+       + "builds a value returns a new object on every read, and the "
+       + "subscription never settles",
     severity: "error",
     hits: [],
   },
@@ -69,42 +86,80 @@ const at = (node, src) =>
   + `${src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1}`;
 
 /**
- * Is this a component the rule applies to?
+ * The grammar a selector is allowed to be.
  *
- * Two exemptions, both principled rather than a list of names. A component
- * with **no props** never re-renders from props, so `memo` would compare
- * nothing. A component that takes **`children`** is handed fresh elements by
- * its caller on every render, so the shallow compare could never bail — the
- * memoisation that matters is on the panel bodies below it. Neither is a
- * suppression: a component that grows real props stops being exempt.
+ * Identifiers, property accesses (optional chaining included), non-null
+ * assertions, parentheses, and `??` / `||` against a literal. That is exactly
+ * the set of expressions that can only ever *reach into* the projection, and
+ * `app/projection/stable.ts` guarantees every such value is referentially
+ * stable while its content has not moved. Anything else — an object or array
+ * literal, a call, a template string, arithmetic, a comparison — builds a new
+ * value on each read, and `useSyncExternalStore` compares reads with
+ * `Object.is`, so it never settles and React throws "The result of getSnapshot
+ * should be cached to avoid an infinite loop" on the first render.
+ *
+ * A unary minus is not in the set on purpose, so `?? -1` is a violation rather
+ * than a special case: the component that wants a sentinel can apply one to
+ * what it was handed, and keeping the grammar to "a path, or a path with a
+ * literal fallback" is what makes it explainable in one sentence.
  */
-function wantsMemo(fn) {
-  const [props] = fn.parameters;
-  if (!props) return false;
-  const t = props.name;
-  if (ts.isObjectBindingPattern(t)) {
-    return !t.elements.some((e) => e.name.getText() === "children");
-  }
-  // A named props parameter: fall back to its type literal, if it has one.
-  const lit = props.type;
-  if (lit && ts.isTypeLiteralNode(lit)) {
-    return !lit.members.some((m) => m.name?.getText() === "children");
-  }
-  return true;
+function isLiteral(n) {
+  return ts.isStringLiteral(n) || ts.isNumericLiteral(n)
+      || n.kind === ts.SyntaxKind.TrueKeyword
+      || n.kind === ts.SyntaxKind.FalseKeyword
+      || n.kind === ts.SyntaxKind.NullKeyword;
 }
 
-/** `export function Foo(...)` in a panel file that is not wrapped. */
-function checkMemo(src) {
-  for (const node of src.statements) {
-    if (!ts.isFunctionDeclaration(node) || !node.name) continue;
-    const exported = node.modifiers?.some(
-      (m) => m.kind === ts.SyntaxKind.ExportKeyword);
-    if (!exported) continue;
-    if (!/^[A-Z]/.test(node.name.text)) continue;
-    if (!wantsMemo(node)) continue;
-    rules["panels-are-memoised"].hits.push(
-      `${at(node, src)}: ${node.name.text} is exported unwrapped`);
+function isFieldPath(n) {
+  if (ts.isIdentifier(n)) return true;
+  if (ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n)) {
+    return isFieldPath(n.expression);
   }
+  if (ts.isPropertyAccessExpression(n)) return isFieldPath(n.expression);
+  if (ts.isBinaryExpression(n)) {
+    const op = n.operatorToken.kind;
+    if (op === ts.SyntaxKind.QuestionQuestionToken
+        || op === ts.SyntaxKind.BarBarToken) {
+      return isFieldPath(n.left) && isLiteral(n.right);
+    }
+  }
+  return false;
+}
+
+/** What is wrong with this argument to `useSlice`, if anything. */
+function badSelector(arg, src) {
+  if (!arg) return "no selector at all";
+  if (!ts.isArrowFunction(arg)) {
+    return `the selector is \`${arg.getText(src)}\`, not an arrow function, `
+         + "so what it returns cannot be read here";
+  }
+  if (ts.isBlock(arg.body)) {
+    return "the selector has a block body; a field is an expression";
+  }
+  if (!isFieldPath(arg.body)) {
+    return `\`${arg.body.getText(src)}\` builds a value rather than naming a `
+         + "field";
+  }
+  return "";
+}
+
+/** Every `useSlice(...)` argument must be a path into the projection. */
+function checkSelectors(src) {
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const name = ts.isIdentifier(callee) ? callee.text
+        : ts.isPropertyAccessExpression(callee) ? callee.name.text : "";
+      if (name === "useSlice") {
+        const why = badSelector(node.arguments[0], src);
+        if (why) {
+          rules["selectors-return-fields"].hits.push(`${at(node, src)}: ${why}`);
+        }
+      }
+    }
+    node.forEachChild(visit);
+  };
+  visit(src);
 }
 
 /** Every `x.demand(...)` must sit inside a `useEffect` callback. */
@@ -125,25 +180,34 @@ function checkDemand(src) {
   visit(src, false);
 }
 
-const tsxUnder = (dir) =>
+const under = (dir, ext) =>
   readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith(".tsx"))
+    .filter((e) => e.isFile() && ext.some((x) => e.name.endsWith(x)))
     .map((e) => join(dir, e.name));
 
-for (const file of tsxUnder(PANELS)) checkMemo(parse(file));
+const tsxUnder = (dir) => under(dir, [".tsx"]);
+
+// The selector rule reads `.ts` as well: `useSlice` is called from components,
+// which are `.tsx`, but a helper hook that wraps it need not be, and a rule
+// that could only see one extension is how three `error` rules here came to
+// report zero over files they had never opened.
+for (const file of [...under(UI, [".ts", ".tsx"]),
+                    ...under(PANELS, [".ts", ".tsx"])]) {
+  checkSelectors(parse(file));
+}
 for (const file of [...tsxUnder(UI), ...tsxUnder(PANELS)]) {
   checkDemand(parse(file));
 }
 
 console.log("browser player -- the two UI rules that need an AST\n");
-console.log("  rule                  sev       count  baseline   status");
+console.log("  rule                       sev       count  baseline   status");
 let failed = 0;
 for (const [name, r] of Object.entries(rules)) {
   const n = r.hits.length;
   const base = r.baseline ?? 0;
   const ok = r.severity === "error" ? n === 0 : n <= base;
   if (!ok) failed++;
-  console.log(`  ${name.padEnd(22)}${r.severity.padEnd(10)}${String(n).padStart(5)}`
+  console.log(`  ${name.padEnd(27)}${r.severity.padEnd(10)}${String(n).padStart(5)}`
               + `${String(base).padStart(10)}   ${ok ? "ok" : "FAIL"}`);
 }
 console.log();

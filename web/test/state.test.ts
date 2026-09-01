@@ -31,11 +31,12 @@
  * itself restored by a load. Two runs at the same frame therefore see the same
  * camera, and a divergence is the port's rather than the harness's.
  *
- * **What it cannot see yet.** `hud/` is not in the `World`, so the shutter's
- * slide phase and the caption countdown are outside every assertion below —
- * they are script state kept in the layer that draws it, which is exactly why
- * `loadSnapshot` restores neither. Step 19 moves them onto `Walker`, and
- * assertion C covers them the moment it does.
+ * The shutter and the caption used to be outside all three: they were script
+ * state kept in `hud/`, the layer that draws them, and `hud/` is not in the
+ * `World`. So a save taken three frames into a shutter close came back as a
+ * shutter frozen part-way shut. Step 19 moved them onto `Walker`, which is
+ * what the last group below checks by name — the general assertions cover them
+ * too, but a named check is what says *why* they are there.
  *
  * Run with `npm run test:state`. Skips cleanly when no bundle is built.
  */
@@ -92,8 +93,7 @@ const mkHost = (): WalkerHost => ({
   aliveEnemies: () => null,
   aliveCivilians: () => null,
   cameraFree: () => null,
-  setShutter: () => undefined,
-  showMessage: () => undefined,
+  showMessage: () => null,
   endDialogue: () => undefined,
 });
 
@@ -326,6 +326,51 @@ for (const stage of STAGES) {
     check(`stage ${stage}: a seek from cold and a seek from ${DETOUR} frames `
           + `in agree`, !firstDiff(coldRun, warmRun),
           firstDiff(coldRun, warmRun));
+  }
+}
+
+// -- what step 19 put in reach --------------------------------------------
+
+console.log("\nThe shutter and the caption are script state:\n");
+
+{
+  const s = script(1);
+  if (s) {
+    const r = build(1, s);
+    // Drive a close by hand: `set_hud_shutter_state 3` is what the script does
+    // before a cutscene, and the slide is forty frames.
+    r.walker.setShutter(3);
+    advance(r, 10);
+    const mid = r.world.save(r.ctx);
+    const slice = mid.parts.script as Record<string, unknown>;
+    check("a shutter mid-close is in the slice",
+          slice.shutterState === 3
+          && typeof slice.shutterCounter === "number"
+          && (slice.shutterCounter as number) > 0
+          && (slice.shutterCounter as number) < 40,
+          `state ${String(slice.shutterState)}, `
+          + `counter ${String(slice.shutterCounter)}`);
+
+    // Run the close out, then put the snapshot back. The old failure was that
+    // the state came back and the phase did not, so the bars stopped where
+    // they were with nothing driving them.
+    advance(r, 60);
+    const settled = r.walker.shutterCounter;
+    loadInto(r, mid);
+    check("and a load restores the phase, not just the state",
+          r.walker.shutterState === 3 && r.walker.shutterCounter !== settled
+          && r.walker.shutterCounter === (slice.shutterCounter as number),
+          `counter came back as ${r.walker.shutterCounter}`);
+
+    // The firing gate is the reason it matters: it drops when the close
+    // completes, and the skip offer follows it.
+    advance(r, 60);
+    check("and the close still completes from there",
+          r.walker.shutterState === 4 && !r.walker.firingGate,
+          `state ${r.walker.shutterState}, gate ${r.walker.firingGate}`);
+
+    check("the caption countdown is in the slice too",
+          "captionGroup" in slice && "captionFrames" in slice);
   }
 }
 

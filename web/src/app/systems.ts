@@ -162,6 +162,21 @@ export function panelSystem(id: string,
 }
 
 /**
+ * A layer whose `update` **is** its rebuild.
+ *
+ * `resync` is the same call, which is exactly the case `IDLE_TICK` in
+ * `core/system.ts` describes: the state has been restored underneath the layer
+ * and it should place itself against that state without a clock of its own.
+ * `hud/hud.ts` is the one that qualifies outright — it holds no state at all,
+ * so a load, a seek and an ordinary frame are one path.
+ */
+export function drawSystem<C extends Context>(id: string,
+                                              draw: (ctx: C) => void)
+    : System<C> {
+  return { id, update: (ctx) => draw(ctx), resync: (ctx) => draw(ctx) };
+}
+
+/**
  * The two script-owned globals the port reads, and the spawns it needs.
  *
  * `g_camera_fixed_eye_y` is where class 0x41 puts a group's floor and what

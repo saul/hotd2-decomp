@@ -29,6 +29,7 @@ import { GameMode } from "../game/game_mode";
 import { SetGameTables } from "../game/tables";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { minimapGraph, treeProjection } from "./projection/script";
+import { screenMessage } from "./projection/message";
 import { makeWalkerHost } from "./walker_host";
 import type { Player } from "./main";
 import type { StatusProjection } from "../ui/projection";
@@ -153,7 +154,10 @@ export async function loadStageInto(p: Player): Promise<void> {
     { seed: p.state.seed ?? 1 });
   p.script.walker = p.walker;
 
-  p.hudLayer.reset();
+  // The dialogue table for the stage. The walker carries the group; the words
+  // are bundle data and belong here.
+  p.hudLayer.messages =
+    (g) => screenMessage(bundle.script.sound?.messages?.[String(g)]?.[0] ?? null);
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);

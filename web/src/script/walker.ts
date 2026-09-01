@@ -73,6 +73,9 @@ export interface CamCommand {
   done: boolean;
 }
 
+/** The shutter's slide, in frames. `0x28` in `HudDrawShutterState`. */
+const SHUTTER_FRAMES = 40;
+
 export type WaitPolicy =
   | { kind: "frames"; framesLeft: number }
   /** The real gate: blocks until the player has killed them. */
@@ -167,9 +170,14 @@ export interface WalkerHost {
    */
   cameraFree(): boolean | null;
   /** evt `0x1F`: the HUD shutter state. */
-  setShutter(state: number): string | undefined;
-  /** evt `0x2D`: play a dialogue group -- voice line plus subtitles. */
-  showMessage(group: number): string | undefined;
+  /**
+   * evt `0x2D`: start a dialogue group's voice, and say how long it runs.
+   *
+   * The **countdown** is the walker's, because it is script state that has to
+   * survive a snapshot; what the host supplies is the duration, which is
+   * bundle data, and the feed note, which needs the words.
+   */
+  showMessage(group: number): { frames: number; note?: string } | null;
   /** Cut a dialogue short, as raising the skip flag does. */
   endDialogue(): void;
 }
@@ -258,8 +266,52 @@ export class Walker {
   /** The backdrop dome: 0x1B picks the preset, 0x1C the mode. */
   backdropPreset = -1;
   backdropMode = 0;
-  /** evt 0x1F: the HUD shutter state, 0..8. */
+  /**
+   * `g_bHudShutterState` — `0x009CA0F4`. evt 0x1F, states 0..8.
+   *
+   * The state is the script's; the *drawing* of it is `hud/hud.ts`, which is
+   * a `System` and reads these three fields rather than keeping its own copy.
+   * It kept its own copy until step 19, and a snapshot load put the state back
+   * without the slide phase behind it — so a save taken mid-close came back as
+   * a shutter frozen half shut.
+   */
   shutterState = 2;
+  /**
+   * `g_bHudShutterPrev` — `0x009C8E9C`. What state 7 restores.
+   *
+   * `HudDrawShutterState` (`FUN_00413970`) also compares it against the state
+   * to notice a change and seed the counter, and writes it on every path
+   * except state 8 — so a blackout does not become the state a later 7
+   * restores.
+   */
+  shutterPrev = 2;
+  /**
+   * The shutter's slide counter: 0 fully closed, 40 fully open.
+   *
+   * **Not a global.** It is a field on the draw task, at `+0x50`, which is why
+   * `globals.tsv` names the two states and not this. State 1 counts it up to
+   * 0x28 and hands over to 2; state 3 counts it down to 0, draws the closed
+   * bars and hands over to 4 — dropping the firing gate on the way.
+   *
+   * That last clause is why this replaced `gateCloseLeft`. The exe has **one**
+   * counter doing both jobs; the port had two, one of them in the snapshot and
+   * one of them not, and they could disagree — a seek reset the shutter's copy
+   * while restoring the gate's.
+   */
+  shutterCounter = 0;
+  /**
+   * evt 0x2D: the subtitle task's own fields.
+   *
+   * `DrawDialogueSubtitleTask` (`FUN_00435AA0`) holds the variant at `+0x34`,
+   * the frames remaining at `+0x36` and the line index at `+0x38`. The first
+   * two are here; the line index is **derived**, because it is a function of
+   * the countdown — the task steps it when `frames` drops below the current
+   * line's `end_frame`, and those are fixed data, so counting the lines whose
+   * `end_frame` still exceeds the countdown gives the same answer without
+   * putting the dialogue table in the save state.
+   */
+  captionGroup = -1;
+  captionFrames = 0;
   /**
    * `DAT_009C8E00` -- the firing gate, set by the shutter machine
    * (`FUN_00413970`): 1 in states 0, 1 and 6, and 0 in state 5 and when a
@@ -268,13 +320,6 @@ export class Walker {
    * boss intro can be letterboxed and still let you shoot.
    */
   firingGate = false;
-  /**
-   * Frames left of a state-3 close, after which the gate drops.
-   *
-   * Real time only. Stepping has no clock, so `stepOnce` finishes a pending
-   * close outright rather than leaving the gate stuck up forever.
-   */
-  gateCloseLeft = 0;
   /**
    * `DAT_009A2D7C` -- set by `set_skippable_region` (0x2C). Non-zero means the
    * script has opened a region the player is allowed to skip out of.
@@ -544,11 +589,13 @@ export class Walker {
     this.forcePathAdvance = false;
     this.backdropPreset = -1;
     this.backdropMode = 0;
-    this.shutterState = 2;
+    this.shutterState = this.shutterPrev = 2;
+    this.shutterCounter = 0;
+    this.captionGroup = -1;
+    this.captionFrames = 0;
     // BSS, so the gate starts down: FUN_0045EBC0 does not touch DAT_009C8E00,
     // and nothing raises it until the shutter machine's first state 0, 1 or 6.
     this.firingGate = false;
-    this.gateCloseLeft = 0;
     this.skippable = false;
     this.skipRequested = false;
     this.rain = false;
@@ -591,7 +638,9 @@ export class Walker {
       groundY: this.groundY, forcePathAdvance: this.forcePathAdvance,
       backdropPreset: this.backdropPreset, backdropMode: this.backdropMode,
       shutterState: this.shutterState, firingGate: this.firingGate,
-      gateCloseLeft: this.gateCloseLeft, skippable: this.skippable,
+      shutterPrev: this.shutterPrev, shutterCounter: this.shutterCounter,
+      captionGroup: this.captionGroup, captionFrames: this.captionFrames,
+      skippable: this.skippable,
       skipRequested: this.skipRequested, rain: this.rain,
       gunLights: this.gunLights, sceneLighting: this.sceneLighting,
       branchChoice: this.branchChoice, parked: this.parked,
@@ -634,7 +683,8 @@ export class Walker {
     const keys = [
       "block", "step", "opIndex", "region", "rollEnabled", "useFixedEyeY",
       "fixedEyeY", "groundY", "forcePathAdvance", "backdropPreset",
-      "backdropMode", "shutterState", "firingGate", "gateCloseLeft",
+      "backdropMode", "shutterState", "shutterPrev", "shutterCounter",
+      "captionGroup", "captionFrames", "firingGate",
       "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
       "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
       "lightSet", "checkpointBlock", "branchPreview", "stashedCam", "spawns",
@@ -727,10 +777,7 @@ export class Walker {
     // Stepping advances instructions, not frames, so a shutter close that is
     // still counting down would never finish and would hold the firing gate up
     // for the rest of the session.
-    if (this.gateCloseLeft > 0) {
-      this.gateCloseLeft = 0;
-      this.firingGate = false;
-    }
+    if (this.shutterState === 3) this.settleShutter();
     return this.executeOne(false);
   }
 
@@ -785,14 +832,13 @@ export class Walker {
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.lightBlock.step(dt * fps);
 
-    // The shutter's 40-frame close, after which the firing gate drops and the
-    // game starts offering a skip.
-    if (this.gateCloseLeft > 0) {
-      this.gateCloseLeft -= dt * fps;
-      if (this.gateCloseLeft <= 0) {
-        this.gateCloseLeft = 0;
-        this.firingGate = false;
-      }
+    this.tickShutter(dt * fps);
+    // The caption is a countdown in script frames, not in wall time: stepping
+    // onto a `play_dialogue` and having the line expire two seconds later
+    // while nothing is playing makes it unreadable.
+    if (this.captionFrames > 0) {
+      this.captionFrames = Math.max(0, this.captionFrames - dt * fps);
+      if (this.captionFrames === 0) this.captionGroup = -1;
     }
 
     if (this.wait) {
@@ -827,10 +873,58 @@ export class Walker {
    * kept rather than the gate simply following the state.
    */
   applyFiringGate(state: number): void {
-    this.gateCloseLeft = 0;
     if (state === 0 || state === 1 || state === 6) this.firingGate = true;
     else if (state === 5) this.firingGate = false;
-    else if (state === 3) this.gateCloseLeft = 40;
+  }
+
+  /**
+   * evt `0x1F`, the whole transition — `HudDrawShutterState`, `FUN_00413970`.
+   *
+   * The seeding is the exe's: the draw routine compares the state against
+   * `g_bHudShutterPrev` and, on a change, sets the counter to 0x28 entering
+   * state 3 and 0 entering state 1. State 7 assigns the previous state back
+   * rather than being a state of its own.
+   */
+  setShutter(state: number): void {
+    if (state !== this.shutterState) {
+      if (state === 3) this.shutterCounter = SHUTTER_FRAMES;
+      else if (state === 1) this.shutterCounter = 0;
+    }
+    if (state === 7) {
+      this.shutterState = this.shutterPrev;
+    } else {
+      this.shutterPrev = this.shutterState;
+      this.shutterState = state;
+    }
+    this.applyFiringGate(this.shutterState);
+  }
+
+  /**
+   * The slide, on the script's own clock.
+   *
+   * State 1 counts up and hands over to 2; state 3 counts down and hands over
+   * to 4, dropping the firing gate as it goes. Everything else holds. The
+   * counter is one field doing both jobs, exactly as it is in the exe.
+   */
+  private tickShutter(frames: number): void {
+    if (frames <= 0) return;
+    if (this.shutterState === 1) {
+      this.shutterCounter = Math.min(SHUTTER_FRAMES,
+                                     this.shutterCounter + frames);
+      if (this.shutterCounter >= SHUTTER_FRAMES) {
+        this.shutterPrev = this.shutterState = 2;
+      }
+    } else if (this.shutterState === 3) {
+      this.shutterCounter = Math.max(0, this.shutterCounter - frames);
+      if (this.shutterCounter <= 0) this.settleShutter();
+    }
+  }
+
+  /** The end of a state-3 close: bars shut, gate down, state 4. */
+  private settleShutter(): void {
+    this.shutterCounter = 0;
+    this.shutterPrev = this.shutterState = 4;
+    this.firingGate = false;
   }
 
   /**
@@ -864,6 +958,8 @@ export class Walker {
 
     // DrawDialogueSubtitleTask tests the flag every frame and ends the task,
     // so a line already on screen goes at once rather than playing out.
+    this.captionGroup = -1;
+    this.captionFrames = 0;
     this.host.endDialogue();
 
     // The waits are re-run every frame, so one already pending is released

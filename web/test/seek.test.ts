@@ -51,8 +51,7 @@ const mkHost = (): WalkerHost => ({
   aliveEnemies: () => null,
   aliveCivilians: () => null,
   cameraFree: () => null,
-  setShutter: () => undefined,
-  showMessage: () => undefined,
+  showMessage: () => null,
   endDialogue: () => undefined,
 });
 

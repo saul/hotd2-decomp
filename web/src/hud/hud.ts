@@ -93,10 +93,14 @@ export interface ScreenMessage {
   voiceFile: string | null;
 }
 
-/** Closed centre offset, and the 40-frame slide to fully open. */
+/**
+ * Closed centre offset, and the step per slide frame.
+ *
+ * The slide's *length* is `SHUTTER_FRAMES` in `script/walker.ts`, where the
+ * counter lives — this layer only turns a counter into a height.
+ */
 const SHUTTER_CLOSED_Y = 0.35;
 const SHUTTER_STEP = 0.0025;
-const SHUTTER_FRAMES = 40;
 
 /**
  * Half-height of the bar itself.
@@ -133,19 +137,58 @@ const SCREEN_H = 480;
 const TEXT_BASELINE_Y = 384;
 const GLYPH_ADVANCE = 11.2;
 
+/**
+ * The shutter and the caption, drawn.
+ *
+ * A `System`, and it holds **no state of its own**. The shutter's state, its
+ * slide counter and the caption's countdown are all on `Walker`, because they
+ * are what the script decided and a snapshot has to bring them back. This
+ * layer reads them every tick and places two bars and a line of text.
+ *
+ * That is the whole of step 19, and the bug it fixes is small and long-lived:
+ * `loadSnapshot` restored the shutter *state* and not the slide phase, because
+ * the phase lived here, so a save taken three frames into a close came back as
+ * a shutter frozen part-way shut with no clock behind it. `seekTo` did not
+ * have the bug only because it called `reset()` by hand — one path remembering
+ * what the other forgot, which is the shape this document keeps calling out.
+ *
+ * `resync` is therefore the same call as `update`: there is nothing to rebuild
+ * that is not already read fresh.
+ */
+/**
+ * What this layer reads. Structural on purpose.
+ *
+ * It is `Walker`'s shape and it is deliberately not `Walker`'s *type*: `hud/`
+ * is the UI layer, and an import from `script/` would make it a second reader
+ * of engine state — which is what `layer-direction` counts, and it counted
+ * this the first time round. `app/` is the composition root and the only
+ * layer allowed to see both sides, so the two lines that put this in the tick
+ * order live in `app/systems.ts`.
+ */
+export interface ShutterView {
+  shutterState: number;
+  shutterCounter: number;
+  captionGroup: number;
+  captionFrames: number;
+}
+
 export class Hud {
   private readonly root: HTMLElement;
   private readonly top: HTMLElement;
   private readonly bottom: HTMLElement;
   private readonly message: HTMLElement;
 
-  private state = 2;                 // 2 = open, which is the resting state
-  private prevState = 2;
-  private counter = 0;
-  private msgFramesLeft = 0;
-  private lines: SubtitleLine[] = [];
-  private lineIndex = 0;
+  /**
+   * The dialogue table, by group. Installed by `app/` at stage load.
+   *
+   * The lines are bundle data rather than state, which is why the walker
+   * carries the group and not the words.
+   */
+  messages: (group: number) => ScreenMessage | null = () => null;
+
   private enabled = true;
+  /** What was last drawn, so an unchanged frame costs no DOM writes. */
+  private drawn = "";
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement("div");
@@ -159,7 +202,6 @@ export class Hud {
     this.message.hidden = true;
     this.root.append(this.top, this.bottom, this.message);
     parent.appendChild(this.root);
-    this.apply();
   }
 
   setEnabled(v: boolean): void {
@@ -167,65 +209,40 @@ export class Hud {
     this.root.hidden = !v;
   }
 
-  reset(): void {
-    this.state = this.prevState = 2;
-    this.counter = 0;
-    this.msgFramesLeft = 0;
-    this.lines = [];
-    this.lineIndex = 0;
-    this.message.hidden = true;
-    this.apply();
-  }
-
-  /** evt `0x1F`. */
-  setShutterState(state: number): string | undefined {
-    if (state === this.state) return undefined;
-    // States 1 and 3 seed the counter from the state they came from: 3 starts
-    // fully open and closes, 1 starts closed and opens.
-    if (state === 3) this.counter = SHUTTER_FRAMES;
-    else if (state === 1) this.counter = 0;
-    if (state === 7) {
-      this.state = this.prevState;   // 7 restores whatever was showing
-    } else {
-      this.prevState = this.state;
-      this.state = state;
-    }
-    this.apply();
-    return SHUTTER_LABEL[state] ?? `shutter state ${state}`;
-  }
-
-  /** evt `0x2D`, once the variant has been chosen. */
-  showMessage(group: number, v: ScreenMessage | null): string | undefined {
-    if (!v) return `dialogue group ${group} has no variant for this player`;
-    this.msgFramesLeft = v.frames;
-    this.lines = v.lines;
-    this.lineIndex = 0;
-    this.drawLine();
-    const said = this.lines.map((l) => l.text).join(" / ");
-    return said
-      ? `“${said}”${v.voiceFile ? `  ·  ${v.voiceFile}` : ""}`
-      : `dialogue ${v.frames}f${v.voiceFile ? ` · ${v.voiceFile}` : ""}` +
-        " (no subtitle lines)";
+  /**
+   * Draw, from the script's state and nothing else.
+   *
+   * This is the layer's whole update **and** its whole rebuild, which is why
+   * `app/` can register it with `drawSystem` and a load, a seek and an
+   * ordinary frame all go through one path.
+   */
+  draw(w: ShutterView | null): void {
+    this.apply(w?.shutterState ?? 2, w?.shutterCounter ?? 0);
+    this.drawLine(w?.captionGroup ?? -1, w?.captionFrames ?? 0);
   }
 
   /**
-   * End a dialogue outright, as raising the skip flag does.
+   * Which line the countdown is on.
    *
-   * `DrawDialogueSubtitleTask` tests the flag every frame and calls
-   * `task_end()`, so the caption goes on the skip frame rather than playing
-   * its remaining duration out.
+   * `DrawDialogueSubtitleTask` steps an index when `frames` drops below the
+   * current line's `end_frame`. The end frames are fixed and descending and
+   * the countdown is monotone, so counting the lines still ahead of it gives
+   * the same answer — and keeps the index derived, which is what lets it stay
+   * out of the save state. The last line stores `end_frame` 0 and holds.
    */
-  endMessage(): void {
-    this.msgFramesLeft = 0;
-    this.lines = [];
-    this.lineIndex = 0;
-    this.message.hidden = true;
+  private lineFor(lines: readonly SubtitleLine[], framesLeft: number)
+      : SubtitleLine | undefined {
+    if (!lines.length) return undefined;
+    let i = 0;
+    while (i < lines.length - 1 && framesLeft < lines[i].endFrame) i++;
+    return lines[i];
   }
 
   /** Place and fill the caption for whichever line the countdown is on. */
-  private drawLine(): void {
-    const l = this.lines[this.lineIndex];
-    if (!l || this.msgFramesLeft <= 0) {
+  private drawLine(group: number, framesLeft: number): void {
+    const v = group >= 0 ? this.messages(group) : null;
+    const l = v ? this.lineFor(v.lines, framesLeft) : undefined;
+    if (!l || framesLeft <= 0) {
       this.message.hidden = true;
       return;
     }
@@ -242,49 +259,27 @@ export class Hud {
   }
 
   /**
-   * Advance both timers. `frames` is 60 Hz frames the **walker** advanced.
+   * Two bars, from the state and the counter.
    *
-   * Not wall time: the shutter slide and the dialogue duration are script
-   * state measured in game frames, so with playback paused they hold. That is
-   * deliberate — stepping onto a `play_dialogue` and having the caption expire
-   * two seconds later, while nothing is playing, makes the line unreadable.
+   * `drawn` is a one-string guard rather than a diff: this runs every tick and
+   * the shutter changes on perhaps one frame in a thousand.
    */
-  tick(frames: number): void {
-    if (frames <= 0) return;
-    if (this.msgFramesLeft > 0) {
-      this.msgFramesLeft -= frames;
-      // `if (frames < line.end_frame) line++` -- the countdown, not a timer.
-      const cur = this.lines[this.lineIndex];
-      if (cur && this.lineIndex < this.lines.length - 1
-          && this.msgFramesLeft < cur.endFrame) {
-        this.lineIndex++;
-      }
-      this.drawLine();
-    }
-    if (this.state === 1) {
-      this.counter = Math.min(SHUTTER_FRAMES, this.counter + frames);
-      if (this.counter >= SHUTTER_FRAMES) this.state = 2;
-      this.apply();
-    } else if (this.state === 3) {
-      this.counter = Math.max(0, this.counter - frames);
-      if (this.counter <= 0) this.state = 4;
-      this.apply();
-    }
-  }
-
-  private apply(): void {
+  private apply(state: number, counter: number): void {
+    const key = `${state}:${counter}`;
+    if (key === this.drawn) return;
+    this.drawn = key;
     // State 8 is a full blackout: one bar at y = 0 scaled 8x vertically, so
     // its half-height is 0.4 against a frustum half-height of 0.375.
-    if (this.state === 8) {
+    if (state === 8) {
       this.top.style.height = "100%";
       this.bottom.style.height = "0";
       return;
     }
     // 2 and 6 draw nothing at all.
-    const open = this.state === 2 || this.state === 6;
+    const open = state === 2 || state === 6;
     const inner = open
       ? Number.POSITIVE_INFINITY
-      : SHUTTER_CLOSED_Y + this.counter * SHUTTER_STEP - SHUTTER_HALF;
+      : SHUTTER_CLOSED_Y + counter * SHUTTER_STEP - SHUTTER_HALF;
     // The inner edge as a fraction of half-height, then of the whole frame.
     const frac = Math.min(1, inner / HALF_HEIGHT);
     const pct = Math.max(0, (1 - frac) * 50);
@@ -292,12 +287,12 @@ export class Hud {
     this.bottom.style.height = `${pct}%`;
   }
 
-  get describe(): string {
+  describe(w: ShutterView | null): string {
     if (!this.enabled) return "off";
-    const label = SHUTTER_LABEL[this.state] ?? `state ${this.state}`;
-    const msg = this.msgFramesLeft > 0
-      ? `, dialogue ${Math.ceil(this.msgFramesLeft)}f` : "";
-    return `${label}${msg}`;
+    const state = w?.shutterState ?? 2;
+    const label = SHUTTER_LABEL[state] ?? `state ${state}`;
+    const frames = w?.captionFrames ?? 0;
+    return `${label}${frames > 0 ? `, dialogue ${Math.ceil(frames)}f` : ""}`;
   }
 }
 

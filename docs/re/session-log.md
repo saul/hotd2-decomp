@@ -7572,3 +7572,37 @@ could ever open. Each one produced a confident wrong diagnosis before it was
 caught. The harness only earned its answer once it built actors the way
 `render/characters.ts` does — which is the argument `game/descriptor.ts` was
 written to make, arriving from the other direction.
+
+## The shutter's counter is a task field, and it is also the firing gate's
+
+Read for the player's step 19, which wanted the shutter and the caption moved
+out of the layer that draws them and into the script's own state.
+
+`HudDrawShutterState` (`FUN_00413970`) is the nine-state machine, and the two
+things it switches on are now named: `g_bHudShutterState` (`0x009CA0F4`), which
+evt `0x1F` writes through `EvtOpSetHudShutterState1F`, and
+`g_bHudShutterPrev` (`0x009C8E9C`). The second has two jobs, and both are worth
+writing down. The routine compares it against the state to notice a change and
+seed the slide counter — `0x28` entering state 3, `0` entering state 1 — and
+state 7 assigns it back, which is what makes 7 "restore" rather than a state of
+its own. It is written on every path **except** state 8, so a blackout never
+becomes the state a later 7 restores. `[proved]`
+
+**The counter is not a global.** It is `*(int *)(param_1 + 0x50)` — a field on
+the draw task. The plan for step 19 said to "name `DAT_009CA0F4` and its
+counter", and there was nothing to name: 26 xrefs on the state, none on any
+adjacent counter, and the increment is against the task pointer. `[proved]`
+
+The part that mattered for the port: **it is the same counter the firing gate
+runs on.** State 3 counts it down to zero, draws the closed bars, moves to
+state 4 and sets `g_nFiringGate` to 0 on that same path. The port had grown two
+copies — `Walker.gateCloseLeft`, which was in the save state, and `Hud.counter`,
+which was not — and nothing kept them equal. A seek reset one and restored the
+other. One field in the exe, one field in the port now.
+
+Also confirmed while here: `DrawDialogueSubtitleTask` (`FUN_00435AA0`) holds
+its own three fields on the task — variant `+0x34`, frames remaining `+0x36`,
+line index `+0x38`. The line index is a pure function of the countdown, because
+the end frames are fixed and descending and the task only ever steps forward,
+so the port derives it rather than storing it. That keeps the dialogue table
+out of the save state without changing which line is on screen on any frame.

@@ -54,13 +54,22 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // rail, not just the count at zero. Null while Shoot is off, where the
     // counts never fall anyway and the gates pass on their own.
     cameraFree: () => p.shooting.isEnabled ? G.g_camera_free !== 0 : null,
-    setShutter: (st) => p.hudLayer.setShutterState(st),
+    // The shutter is the walker's own state now: there is nothing to tell.
     showMessage: (g) => {
       // Variant 0 is the 1P / player-1 configuration, which is what a
       // single-viewer playback corresponds to.
-      const v = script.sound?.messages?.[String(g)]?.[0] ?? null;
-      if (v?.voice) p.bgm.play(v.voice);
-      return p.hudLayer.showMessage(g, screenMessage(v));
+      const raw = script.sound?.messages?.[String(g)]?.[0] ?? null;
+      const v = screenMessage(raw);
+      if (!raw || !v) return null;
+      if (raw.voice) p.bgm.play(raw.voice);
+      const said = v.lines.map((l) => l.text).join(" / ");
+      return {
+        frames: v.frames,
+        note: said
+          ? `“${said}”${v.voiceFile ? `  ·  ${v.voiceFile}` : ""}`
+          : `dialogue ${v.frames}f${v.voiceFile ? ` · ${v.voiceFile}` : ""}`
+            + " (no subtitle lines)",
+      };
     },
     // The subtitle task tests the skip flag every frame and ends itself, so
     // the caption goes at once. The voice is a fire-and-forget PlaySoundId
@@ -68,7 +77,6 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // owns the audio element and a line talking over a scene you have just
     // skipped past reads as a bug rather than as fidelity.
     endDialogue: () => {
-      p.hudLayer.endMessage();
       p.bgm.stopVoice();
     },
   };

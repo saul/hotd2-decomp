@@ -51,7 +51,6 @@ import type { UiHost } from "../ui/App";
 import type { UiSlice } from "../ui/store";
 import type { ToggleName, UiCommand } from "../ui/commands";
 import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
-import { screenMessage } from "./projection/message";
 import { feedRow } from "./projection/script";
 import type {
   BranchProjection, FeedRow, LoadingProjection, MinimapGraph, SkipProjection,
@@ -74,7 +73,7 @@ import type { RenderContext } from "../render/context";
 import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
-import { GameSystem, ScriptSystem, panelSystem, syncPortGlobals }
+import { GameSystem, ScriptSystem, drawSystem, panelSystem, syncPortGlobals }
   from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
@@ -298,6 +297,11 @@ export class Player implements PlayerView {
     // published only when it differs -- so the sidebar and the globals panel
     // are live while the clock is stopped, which is when they are at their
     // most useful and is exactly when the old second path did not run.
+    // The screen-space layer, before the projection is built: it draws the
+    // shutter and the caption straight off the walker, and holds no state of
+    // its own for a snapshot to miss.
+    this.world.add("hud", drawSystem("hud.layer",
+                                    (ctx) => this.hudLayer.draw(ctx.walker)));
     this.world.add("hud", panelSystem("ui", () => this.publishUi()));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
@@ -357,8 +361,13 @@ export class Player implements PlayerView {
     // than out as a bare sound id.
     this.events.on("civilian.dialogue", (d) => {
       const v = this.dialogue?.messages?.[String(d.group)]?.[0] ?? null;
-      if (v?.voice) this.bgm.play(v.voice);
-      this.hudLayer.showMessage(d.group, screenMessage(v));
+      if (!v || !this.walker) return;
+      if (v.voice) this.bgm.play(v.voice);
+      // Onto the walker, not into the layer: a caption is script state, and
+      // the one raised by a civilian is no less so than the one raised by
+      // evt 0x2D. It goes in the snapshot with the rest.
+      this.walker.captionGroup = d.group;
+      this.walker.captionFrames = v.frames;
     });
     this.events.on("civilian.rescued", (d) => {
       this.onFeed({
@@ -439,7 +448,7 @@ export class Player implements PlayerView {
         coli: this.coliDebug.describe,
         wedged: this.stuckDebug.describe,
         enemies: this.game.describe,
-        shutter: this.hudLayer.describe,
+        shutter: this.hudLayer.describe(this.walker),
         rain: this.rain.describe,
       },
     });
@@ -628,9 +637,10 @@ export class Player implements PlayerView {
     if (!w) return;
     this.playing = false;
     this.clearFeed();
-    // A seek replays quietly, so no dialogue or shutter op reaches the layer.
-    // Without this the caption from wherever you were still hangs there.
-    this.hudLayer.reset();
+    // No `hudLayer.reset()` here any more. The shutter and the caption are
+    // the walker's state, `seekWalkerTo` resets it with everything else, and
+    // `world.resync` redraws from what the replay left -- one rebuild path
+    // rather than one path plus a thing this had to remember.
     this.shooting.reset();
     // The replay rebuilds the spawn list, so the placers must be able to run
     // again -- otherwise the pre-seek props stand there for ever.
@@ -657,7 +667,6 @@ export class Player implements PlayerView {
     // pass does both, and the camera's is the stronger of the two -- it seats
     // the block on the rail even where the restored shot's action has already
     // retired. Two rebuild paths that nearly agree is the thing being removed.
-    this.hudLayer.setShutterState(w.shutterState);
     this.syncBgmToWalker();
     this.state.block = block;
     this.state.step = step;
@@ -770,11 +779,10 @@ export class Player implements PlayerView {
         // caption put up in Step mode quietly expires two seconds later while
         // playback is paused, which is exactly long enough to look at the
         // script tree and miss it.
-        const script = this.loop.advance(wall, () => {
+        this.loop.advance(wall, () => {
           this.walker!.tick(TICK);
           return !this.walker!.branch && !this.walker!.finished;
         });
-        this.hudLayer.tick(script.frames);
         this.syncUrlToWalker(now);
       }
     }

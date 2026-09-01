@@ -1094,7 +1094,7 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 16 | **`index.html` becomes a mount point.** The chrome is React's, canvas included; `createPortal` and the sixteen mount ids go; the loading overlay, the paused overlay and `#status` become projection state, the filter and the splitter become component state; the `.mode` and `.shooting` collisions go with their imperative writers. `web/test/ui.test.tsx` renders the page | ✅ |
 | 17 | **`refreshUi` dies.** `hudRows` computed where it is read, the minimap paint into its component, all 19 call sites and `setPlayButton`/`refreshPausedOverlay` gone. `markAddress` keeps the half that was state. One update path | ✅ |
 | 18 | **Structural sharing replaces the change key.** One generic `stabilise` pass, panels `memo()`, `publish` decides on identity; `projectionKey`, `revision`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ✅ |
-| 19 | **The shutter and the caption become engine state.** `/decomp` `FUN_00413970` and `FUN_00435AA0` first, name `DAT_009CA0F4` and its counter, then onto `Walker` beside `gateCloseLeft`; `Hud` becomes a `System` with `resync`. Clears step 14's assertion C | ☐ |
+| 19 | **The shutter and the caption become engine state.** `g_bHudShutterState` and `g_bHudShutterPrev` named; the slide counter turned out to be a task field and to *be* `gateCloseLeft`, so the two became one; `Hud` holds no state and `app/` adapts it with `drawSystem` | ✅ |
 | 20 | **This document describes what is.** `## The UI layer` is rewritten from a plan in the present tense into the UI's stated rules; the tree matches the tree; the findings below collapse into those rules and stop being a list of complaints | ☐ |
 
 ### What the snapshot oracle found on its first run
@@ -1139,6 +1139,28 @@ One thing it deliberately does not assert: `hud/` is not in the `World`, so
 the shutter's slide phase and the caption countdown are outside every
 assertion. Step 19 puts them on `Walker`, and assertion C covers them the
 moment it does.
+
+### What step 19 found in the binary
+
+Two of the plan's own assumptions were wrong, and the decompile is what said
+so.
+
+**The slide counter is not a global.** `HudDrawShutterState` (`FUN_00413970`)
+keeps it at `+0x50` on its own draw task, so there was nothing to name in
+`globals.tsv` beside the two states — `g_bHudShutterState` (`0x009CA0F4`) and
+`g_bHudShutterPrev` (`0x009C8E9C`), the second being both the change detector
+that seeds the counter and the thing state 7 restores.
+
+**And it is the same counter as `gateCloseLeft`.** The exe has one field doing
+both jobs: state 1 counts it up to `0x28` and hands over to state 2, state 3
+counts it down to 0, draws the closed bars, hands over to state 4 and drops
+`g_nFiringGate` on the way. The port had two copies — `Walker.gateCloseLeft`,
+which was in the snapshot, and `Hud.counter`, which was not — and they could
+disagree, because a seek reset one and restored the other. They are one field
+now, and the firing gate reads it.
+
+That is the same shape as everything else this review found: a fact with two
+owners. The fix is not a synchronisation, it is deleting one of them.
 
 ### Step 20, and why it is a step rather than a tidy-up
 

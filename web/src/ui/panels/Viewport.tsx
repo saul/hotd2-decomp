@@ -20,25 +20,103 @@
  * `shooting` by `render/` — while React rendered neither, and the crosshair
  * stayed on after the mode changed. One writer, and the writer is the one that
  * renders the element.
+ *
+ * ## The hud layer and the crosshair
+ *
+ * Step 26 finished that job for the *children* of `#viewport`. `hud/` used to
+ * build `.hud-layer` and its three divs with `document.createElement` and
+ * append them here, and `render/` did the same with `.crosshair`, so the
+ * element React renders held five nodes React had never heard of and their
+ * position in the paint order was whatever the mount sequence happened to
+ * produce. They are rendered here now, and the layers are handed the nodes
+ * through `onHost` and write only *geometry* onto them: heights on the two
+ * shutter bars, text and a position on the caption, a left and a top on the
+ * crosshair. That is the same arrangement rule 6 already permits for the
+ * script tree's highlight — a node written to by the component that rendered
+ * it — with the handover made explicit because the writer is a different
+ * layer.
+ *
+ * **`hidden` on `.hud-layer` and on `.crosshair` is React's.** It was the
+ * layers', and on both it was purely a function of a toggle that is already in
+ * the projection:
+ * `Hud.setEnabled` is reached only from `applyToggle`'s `hud` case and
+ * `Shooting.setEnabled` only from its `shoot` case, both of them driven from
+ * the same `toggles` record this subscribes to. Two writers for one boolean,
+ * one of them a frame behind the other. The layers keep their `enabled` field
+ * — `Hud.describe` reports `"off"` from it and `Shooting` gates its pointer
+ * handlers and `walker_host`'s live counts on it — and no longer touch the
+ * DOM with it.
+ *
+ * Source order here is the paint order for everything sharing a `z-index`, so
+ * it is a decision rather than an accident: the canvas and the overlays come
+ * first as `children`, then `.hud-layer` at `z-index: 1` — above the frame,
+ * below the tool's own bars, which is what keeps a closed letterbox off the
+ * skip bar — and `.crosshair` last, on top of the `z-index: 2` bars. The
+ * crosshair stands in for the pointer that `#viewport.shooting { cursor: none }`
+ * took away, and a pointer that disappears under the branch bar reads as the
+ * mode having broken. Nothing under it becomes unclickable: `.crosshair` is
+ * `pointer-events: none`.
  */
 import type { ReactNode, RefObject } from "react";
 import { useSlice } from "../useSlice";
 import type { LoadingProjection } from "../projection";
 
+/**
+ * The nodes `app/` is handed, as the refs that fill them in.
+ *
+ * One prop rather than six, and named for what each node is rather than for
+ * the layer that writes it: `Viewport` renders them all whatever is switched
+ * on, and which layer holds which is `UiHost`'s business.
+ */
+export interface ViewportRefs {
+  host: RefObject<HTMLDivElement | null>;
+  hud: RefObject<HTMLDivElement | null>;
+  shutterTop: RefObject<HTMLDivElement | null>;
+  shutterBottom: RefObject<HTMLDivElement | null>;
+  message: RefObject<HTMLDivElement | null>;
+  crosshair: RefObject<HTMLDivElement | null>;
+}
+
 export function Viewport(
-  { hostRef, children }: {
+  { refs, children }: {
     /** Handed to `app/` through `onHost`; see `App`. */
-    hostRef: RefObject<HTMLDivElement | null>;
+    refs: ViewportRefs;
     children: ReactNode;
   },
 ) {
   const paused = useSlice((p) => p?.paused);
+  // One read, two uses: the `shooting` class hides the system cursor and the
+  // crosshair replaces it. They are the same fact and it is read once, which
+  // is what stops them disagreeing on a frame.
   const shooting = useSlice((p) => p?.toggles.shoot);
+  const hud = useSlice((p) => p?.toggles.hud);
   return (
-    <div id="viewport" ref={hostRef}
+    <div id="viewport" ref={refs.host}
          className={[paused && "paused", shooting && "shooting"]
                     .filter(Boolean).join(" ")}>
       {children}
+      {/* Before the first projection there are no toggles and both are
+          hidden. That is the state the constructors used to start in for the
+          crosshair, and for the hud layer it is invisible either way: the
+          loading overlay is opaque and two stacking levels above, and the bars
+          have no height until `Hud.draw` runs, which cannot happen before
+          `app/` exists to tick it. */}
+      <div className="hud-layer" ref={refs.hud} hidden={!hud}>
+        <div className="shutter shutter-top" ref={refs.shutterTop} />
+        <div className="shutter shutter-bottom" ref={refs.shutterBottom} />
+        {/* The caption is the one node on this subtree whose `hidden` stays
+            with the layer, and it is deliberately not written here at all:
+            whether there is a caption is a countdown on the walker, not a
+            field of the projection, so React has nothing to render it from and
+            an initial value written here would make two writers in sequence.
+            `hud/` owns `hidden`, `textContent`, `left`, `top` and `fontSize`
+            on this node — it sets `hidden` in its own constructor — and React
+            owns its class. Nothing writes both. Between mount and the layer's
+            first `draw` the div is empty, which has no box and paints
+            nothing. */}
+        <div className="screen-message" ref={refs.message} />
+      </div>
+      <div className="crosshair" ref={refs.crosshair} hidden={!shooting} />
     </div>
   );
 }

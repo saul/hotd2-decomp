@@ -21,6 +21,13 @@
  * before, which is exactly the edit that loses one silently. Here they have to
  * come out of a render.
  *
+ * Since step 26 it also covers the five elements inside `#viewport` that used
+ * to be appended there by `hud/` and `render/`. None of them carries an id, so
+ * `verify_player_dom.py` is structurally unable to see them: this is the only
+ * check that they are rendered, that they are rendered *inside* the viewport,
+ * and that `hidden` on the two React now owns follows the toggle rather than
+ * the layer.
+ *
  * Since step 22 it also covers the error boundaries, and covers them with a
  * hole in the middle that is stated where it bites: `renderToStaticMarkup`
  * does not run a boundary at all, so the one assertion worth having — the page
@@ -94,6 +101,39 @@ function render(p: UiProjection | null): string {
   const store = new UiStore();
   if (p) store.publish(p);
   return renderToStaticMarkup(createElement(App, { store, onHost: () => {} }));
+}
+
+/**
+ * Everything between `#viewport` and the sidebar column, which is its subtree.
+ *
+ * `#stagearea` renders the tree, the resizer, the viewport and `<aside
+ * id="right">` in that order, so the span between the last two is exactly what
+ * `#viewport` contains. That is how the elements React took over from `hud/`
+ * and `render/` in step 26 can be checked for *containment* and not merely for
+ * presence: appending them to the wrong parent is the failure, and a
+ * whole-document `includes` would pass either way.
+ */
+function viewportOf(html: string): string {
+  const a = html.indexOf('id="viewport"');
+  const b = html.indexOf('id="right"');
+  return a >= 0 && b > a ? html.slice(a, b) : "";
+}
+
+/** The same source-order test as `inOrder`, over substrings rather than ids. */
+function inSourceOrder(html: string, parts: string[]): string {
+  let at = -1;
+  for (const s of parts) {
+    const next = html.indexOf(s);
+    if (next < 0) return `${s} is not rendered`;
+    if (next < at) return `${s} is out of source order`;
+    at = next;
+  }
+  return "";
+}
+
+/** The opening tag of the one div with this class, `hidden` included. */
+function tagOf(html: string, cls: string): string {
+  return html.match(new RegExp(`<div class="${cls}"[^>]*>`))?.[0] ?? "";
 }
 
 /** `#stagearea`'s four columns land by source order, so the order is the test. */
@@ -198,6 +238,58 @@ check("nothing stands between #viewport and its canvas",
       + "be a boundary that can unmount it");
 check("nothing stands between #right and the first panel in it",
       /id="right"[^>]*>\s*<div id="hud"/.test(warm));
+
+console.log("\nEverything inside #viewport is React's:\n");
+
+// Step 26. `hud/` built `.hud-layer` and its three divs with
+// `document.createElement` and appended them here, and `render/` did the same
+// with `.crosshair`, so the element React renders held five children React had
+// never heard of -- and where they landed in the paint order was decided by
+// which of React's conditional overlays had mounted first. They are rendered
+// here now and handed to the layers through `UiHost`. None of them carries an
+// id, so `verify_player_dom.py` cannot see them and this is the only check
+// there is that they exist at all.
+const HUD_NODES = ['class="hud-layer"', 'class="shutter shutter-top"',
+                   'class="shutter shutter-bottom"',
+                   'class="screen-message"'];
+
+for (const [when, html] of [["before a projection", cold],
+                            ["and with one", warm]] as const) {
+  const vp = viewportOf(html);
+  check(`the hud layer and the crosshair are inside #viewport, ${when}`,
+        HUD_NODES.every((n) => vp.includes(n)) && vp.includes('class="crosshair"'),
+        "a node the layers are handed is outside the element they draw over");
+  // The canvas stays first because `#view` is absolutely positioned and the
+  // rest of the viewport paints over it; the crosshair is last because it
+  // stands in for the pointer `#viewport.shooting { cursor: none }` removed,
+  // and a pointer under the branch bar reads as the mode having broken.
+  check(`the canvas is first and the crosshair last, ${when}`,
+        !inSourceOrder(vp, ['<canvas id="view"', 'class="hud-layer"',
+                            'class="crosshair"']),
+        inSourceOrder(vp, ['<canvas id="view"', 'class="hud-layer"',
+                           'class="crosshair"']));
+  const layer = vp.slice(vp.indexOf('class="hud-layer"'),
+                         vp.indexOf('class="crosshair"'));
+  check(`the two bars and the caption are inside the layer, ${when}`,
+        HUD_NODES.slice(1).every((n) => layer.includes(n)),
+        "the shutter writes `style.height` on a node outside the container "
+        + "the stylesheet gives it `container-type` on");
+}
+
+// `hidden` on these two was `Hud.setEnabled` and `Shooting.setEnabled`, and on
+// both it was purely a function of a toggle already in the projection. So it
+// is rendered, and the layers stopped writing it: one writer, and it is the
+// one that renders the element. The caption is the exception and is
+// deliberately not asserted here -- whether there is a caption is a countdown
+// on the walker, so `hud/` still owns that one.
+check("with no projection there are no toggles, so both are hidden",
+      tagOf(cold, "hud-layer").includes("hidden")
+      && tagOf(cold, "crosshair").includes("hidden"));
+check("and with one, each follows its toggle rather than its layer",
+      TOGGLE_DEFAULTS.hud && !TOGGLE_DEFAULTS.shoot
+      && !tagOf(warm, "hud-layer").includes("hidden")
+      && tagOf(warm, "crosshair").includes("hidden"),
+      `hud-layer=${tagOf(warm, "hud-layer")} crosshair=${tagOf(warm, "crosshair")}`);
 
 console.log("\nThe store reaches the panels by context:\n");
 

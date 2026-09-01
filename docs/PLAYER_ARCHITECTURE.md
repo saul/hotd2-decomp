@@ -489,7 +489,9 @@ web/src/
     commands.ts   what the UI is allowed to ask for
     persist.ts    usePersisted — folds and widths, and nothing else
     panels/       one file per panel, each subscribing to what it reads
-  hud/          hud.ts — the shutter and the caption, drawn. Holds no state.
+  hud/          hud.ts — the shutter and the caption, drawn. Holds no state,
+                and no longer builds its own nodes: React renders them and
+                hands them over through `UiHost`
   audio/        bgm.ts — audio, not UI
 ```
 
@@ -971,10 +973,10 @@ exhaustive switch. The strongest rule in this layer is a type.
 
 ## Order of work
 
-Steps 1 to 25 and 27 are done. What is left is **step 10** — `script/walker.ts`
-is still 1525 lines holding the machine, the opcodes' state, the waits and the
-seek planner in one class, and `WalkerHost` is 14 methods — and **steps 26 and
-28**, the last two of the second UI review's, described below the table.
+Steps 1 to 27 are done. What is left is **step 10** — `script/walker.ts` is
+still 1525 lines holding the machine, the opcodes' state, the waits and the
+seek planner in one class, and `WalkerHost` is 14 methods — and **step 28**,
+the last of the second UI review's, described below the table.
 
 Each step compiles, keeps `verify_layers.py` green, and passes
 `verify_player_ops.py` and `npm run test:port` on its own.
@@ -1007,7 +1009,7 @@ Each step compiles, keeps `verify_layers.py` green, and passes
 | 23 | **`stabilise` goes recursive.** One `share()` pass instead of compare-then-copy, and sharing at every depth rather than only at the projection's top-level keys — which is what lets a per-group `memo` bail when a sibling moved | ✅ |
 | 24 | **One subscription per slice.** `useSlice` over `useSyncExternalStore`; store and dispatch from context; `panels-are-memoised` **deleted** and replaced by `selectors-return-fields` | ✅ |
 | 25 | **The publish path has one owner.** Published at the end of every frame rather than from a system inside `if (this.walker)`; the hand-publishes in `setLoading`/`fail` and `panelSystem` go with it | ✅ |
-| 26 | **React owns every pixel inside `#viewport`.** The hud layer and the crosshair rendered by React and handed across through `UiHost`; `hud/` and `render/` write geometry onto nodes they were given. New **error** rule: no DOM insertion outside `ui/` | ☐ |
+| 26 | **React owns every pixel inside `#viewport`.** The hud layer and the crosshair rendered by React and handed across through `UiHost`; `hud/` and `render/` write geometry onto nodes they were given. New **error** rule: no DOM insertion outside `ui/` | ✅ |
 | 27 | **The write seam.** `PlayerCommands`, so the half of the seam that mutates is as declared as `PlayerView` made the half that reads | ✅ |
 | 28 | **The small ones.** `app/dom.ts` deleted; one owner each for `SHUTTER_LABEL` and `SubtitleLine`; `FeedRow.seq` and the feed keyed on it | ☐ |
 

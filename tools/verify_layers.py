@@ -61,6 +61,16 @@ G_WRITE_RE = re.compile(r"\bG\.\w+(?:\[[^\]]*\]|\.\w+)*\s*(?:[-+*/|&^]|\+\+|--)?
 #: A value (non-type) import from game/, and the names it brings in.
 GAME_VALUE_IMPORT_RE = re.compile(
     r'import\s+(?!type\s)\{([^}]*)\}\s*(?:\n\s*)?from\s+"(\.\./game/[^"]+)"')
+#: Every way there is of putting a node into the document.
+#:
+#: `document.createElement` is deliberately **not** here. Two calls build a
+#: canvas to use as a texture -- `render/overlays.ts`'s `labelTexture` and
+#: `render/shooting.ts`'s `splat` -- and neither element ever enters the
+#: document, so they are not a second writer of anything. It is the *insertion*
+#: that is the violation, not the construction.
+DOM_INSERT_RE = re.compile(
+    r"\.(?:appendChild|insertBefore|replaceChildren|insertAdjacentElement"
+    r"|insertAdjacentHTML|prepend|append)\s*\(")
 
 
 def layer_of(path: Path) -> str | None:
@@ -159,6 +169,14 @@ def main() -> int:
             "from game/, script/ or bundle/ -- type-only included -- makes it "
             "a second reader of engine state with its own idea of when to look",
             "error"),
+        "no-dom-insertion": Rule(
+            "no-dom-insertion",
+            "React renders every element on the page; a layer that inserts one "
+            "into the document is a second owner of what is inside an element "
+            "React renders, and the paint order it ends up with is an accident "
+            "of which mounted first -- the layers are handed the nodes they "
+            "write to, through UiHost",
+            "error"),
         "layers-are-systems": Rule(
             "layers-are-systems",
             "a layer ticked by hand is outside World, so it is outside "
@@ -186,8 +204,15 @@ def main() -> int:
         text = f.read_text(encoding="utf-8", errors="replace")
         # strip block and line comments for the token rules, so a rule name in
         # a doc comment is not a violation of itself
-        code = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-        code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+        # Both substitutions keep the newlines they swallow, so a hit can quote
+        # a line number that matches the file: the block one puts back as many
+        # as the comment spanned, and the line one is anchored with `[ \t]*`
+        # rather than `\s*` -- `\s` matches a newline, so a `//` comment with a
+        # blank line above it used to eat that line and shift everything below
+        # it up by one. Nothing else changes: the same comments come out.
+        code = re.sub(r"/\*.*?\*/",
+                      lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+        code = re.sub(r"^[ \t]*//.*$", "", code, flags=re.M)
 
         for spec in IMPORT_RE.findall(text):
             if spec == "three" or spec.startswith("three/"):
@@ -231,6 +256,14 @@ def main() -> int:
             for m in G_WRITE_RE.finditer(code):
                 rules["no-engine-writes-in-ui"].hit(
                     f"{rel}: {m.group(0).strip()}")
+        # Every layer, `ui/` included: React is the one writer, and a component
+        # that built its own children imperatively would be as wrong as a layer
+        # that did. It went in at zero, with no exemptions, because step 26
+        # left exactly zero -- the two sites it deleted were the whole list.
+        for m in DOM_INSERT_RE.finditer(code):
+            line = code.count("\n", 0, m.start()) + 1
+            rules["no-dom-insertion"].hit(
+                f"{rel}:{line}: {m.group(0).strip()}")
         # core/bams.ts is the one definition, so it is not a violation of
         # itself. Everywhere else, importing it is the only option.
         if (re.search(r"\bBAMS_TO_RAD\s*=", code)

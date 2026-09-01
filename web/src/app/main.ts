@@ -229,8 +229,12 @@ export class Player implements PlayerView, PlayerCommands {
     this.viewport = host.viewport;
     this.canvas = host.canvas;
     this.freeRoam = new FreeRoam(host.viewport);
-    this.shooting = new Shooting(host.viewport, this.chars);
-    this.hudLayer = new HudLayer(host.viewport);
+    // Both take the nodes React rendered for them rather than a parent to
+    // insert into: the crosshair and the four hud divs are `#viewport`'s
+    // children and `#viewport` is React's element, so React renders them and
+    // hands them across in `UiHost`. See `ui/panels/Viewport.tsx`.
+    this.shooting = new Shooting(host.viewport, host.crosshair, this.chars);
+    this.hudLayer = new HudLayer(host.hud);
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
       antialias: true,

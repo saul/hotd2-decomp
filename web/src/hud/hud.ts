@@ -172,8 +172,42 @@ export interface ShutterView {
   captionFrames: number;
 }
 
+/**
+ * The four nodes this layer draws onto, handed over by `app/`.
+ *
+ * The layer used to build them itself and append the root into `#viewport`,
+ * which made it a second owner of what is inside the element React renders —
+ * and left the shutter's place in the paint order to whichever of React's
+ * conditional overlays had mounted first. React renders them now, in
+ * `ui/panels/Viewport.tsx`, and hands them across through `UiHost`. The
+ * arrangement is deliberate and it is what rule 6 permits: React owns the
+ * structure and the classes the stylesheet hangs off, this layer owns the
+ * geometry it writes onto them sixty times a second, and neither writes what
+ * the other does.
+ *
+ * The shape is structurally identical to `UiHost["hud"]` rather than imported
+ * from it, so `hud/` does not depend on the page's root component to describe
+ * four divs. `new Hud(host.hud)` in `app/main.ts` is where the two meet, and
+ * `tsc` fails there the moment they drift.
+ */
+export interface HudElements {
+  /**
+   * `.hud-layer`, the container.
+   *
+   * Named here because it is part of the handover and because naming it is
+   * what says who owns it: React renders it and renders its `hidden` from
+   * `toggles.hud`. The constructor does not keep it — see `setEnabled`.
+   */
+  root: HTMLElement;
+  /** `.shutter-top`, whose `height` is the top bar of the letterbox. */
+  top: HTMLElement;
+  /** `.shutter-bottom`, likewise. */
+  bottom: HTMLElement;
+  /** `.screen-message`, the caption. This layer owns its `hidden`. */
+  message: HTMLElement;
+}
+
 export class Hud {
-  private readonly root: HTMLElement;
   private readonly top: HTMLElement;
   private readonly bottom: HTMLElement;
   private readonly message: HTMLElement;
@@ -190,23 +224,32 @@ export class Hud {
   /** What was last drawn, so an unchanged frame costs no DOM writes. */
   private drawn = "";
 
-  constructor(parent: HTMLElement) {
-    this.root = document.createElement("div");
-    this.root.className = "hud-layer";
-    this.top = document.createElement("div");
-    this.top.className = "shutter shutter-top";
-    this.bottom = document.createElement("div");
-    this.bottom.className = "shutter shutter-bottom";
-    this.message = document.createElement("div");
-    this.message.className = "screen-message";
+  // `.hud-layer` itself is not kept. Its `hidden` is the only thing this layer
+  // ever wrote on it and that is React's now, so holding a reference would be
+  // holding the one node the split says belongs to the other side.
+  constructor(nodes: HudElements) {
+    this.top = nodes.top;
+    this.bottom = nodes.bottom;
+    this.message = nodes.message;
+    // The caption starts hidden because there is no caption until the script
+    // starts one, and this layer is the only writer of that flag — React
+    // renders the node and never touches its `hidden`, precisely so there is
+    // no moment where the two disagree about a caption that does not exist.
     this.message.hidden = true;
-    this.root.append(this.top, this.bottom, this.message);
-    parent.appendChild(this.root);
   }
 
+  /**
+   * Whether the HUD toggle is on.
+   *
+   * It no longer hides anything: `.hud-layer`'s `hidden` is rendered by React
+   * from `toggles.hud`, which is the same fact this is set from and the only
+   * thing it was ever used for. Two writers for one boolean, one of them a
+   * frame behind the other, is exactly the bug the seventh rule is about. The
+   * flag stays because `describe` reports `"off"` from it, which is a
+   * *sentence in the sidebar* and not a pixel.
+   */
   setEnabled(v: boolean): void {
     this.enabled = v;
-    this.root.hidden = !v;
   }
 
   /**

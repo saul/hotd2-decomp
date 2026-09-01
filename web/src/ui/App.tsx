@@ -22,11 +22,23 @@
  * `classList.toggle` loop, and the loop won for about a frame. All three are
  * the same bug, and having one writer is the fix.
  *
- * The one thing that flows the other way is the two elements the renderer
- * needs: the canvas it draws into and the viewport it measures. React owns
- * them, so React hands them over — `onHost` fires once, after mount, and
- * `app/` builds the `Player` around them. That is why the chrome renders
- * before there is a projection at all.
+ * The one thing that flows the other way is the elements the layers below
+ * need: the canvas the renderer draws into, the viewport it measures, the four
+ * nodes `hud/` writes the shutter and the caption onto, and the crosshair
+ * `render/` moves with the pointer. React owns them, so React hands them over
+ * — `onHost` fires once, after mount, and `app/` builds the `Player` around
+ * them. That is why the chrome renders before there is a projection at all.
+ *
+ * The hud layer and the crosshair are on that list from step 26. Until then
+ * they were the last two elements on the page React did not render: `hud/`
+ * built four divs with `document.createElement` and appended them into
+ * `#viewport`, and `render/` did the same with one, so the element React
+ * renders had children React had never heard of. It worked, and it worked by
+ * accident — React appends its conditional overlays wherever its own last
+ * child happens to be, so whether the crosshair painted over the branch bar or
+ * under it depended on the order the two had first mounted in. Rule 6 is one
+ * writer per pixel, and a node whose *position* has two authors is the same
+ * bug as an attribute that has two.
  *
  * Every region is inside an `ErrorBoundary`, and one region is deliberately
  * not: `#viewport` and `#view` are the two elements handed across by `onHost`,
@@ -50,10 +62,27 @@ import { BranchBar } from "./panels/BranchBar";
 import { LoadingOverlay, PausedOverlay, Viewport } from "./panels/Viewport";
 import { ErrorBoundary } from "./ErrorBoundary";
 
-/** The two elements the renderer needs, handed over once React has them. */
+/**
+ * The elements the layers below need, handed over once React has them.
+ *
+ * Explicit and typed rather than a parent to go hunting in: a layer that found
+ * its own nodes with `querySelector` would be free to find a different one
+ * after a rename, and would fail by drawing nothing rather than by failing to
+ * compile. Every field here is rendered unconditionally by `Viewport`, so a
+ * node handed over is a node that lives as long as the session.
+ */
 export interface UiHost {
   canvas: HTMLCanvasElement;
   viewport: HTMLElement;
+  /** `.hud-layer` and its three children; see `hud/hud.ts`. */
+  hud: {
+    root: HTMLElement;
+    top: HTMLElement;
+    bottom: HTMLElement;
+    message: HTMLElement;
+  };
+  /** `.crosshair`; see `render/shooting.ts`. */
+  crosshair: HTMLElement;
 }
 
 /**
@@ -90,13 +119,35 @@ function Page(
   const ready = useHasProjection();
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
+  // The nodes `hud/` and `render/` write geometry onto. They are declared here
+  // rather than inside `Viewport` because `onHost` is the handover and it
+  // fires from here; `Viewport` renders them and takes the refs as a prop.
+  const hud = useRef<HTMLDivElement>(null);
+  const shutterTop = useRef<HTMLDivElement>(null);
+  const shutterBottom = useRef<HTMLDivElement>(null);
+  const message = useRef<HTMLDivElement>(null);
+  const crosshair = useRef<HTMLDivElement>(null);
 
   // Once, after the first commit. There is no projection yet and there cannot
-  // be: `app/` needs these two elements to build the `Player` that produces
-  // one.
+  // be: `app/` needs these elements to build the `Player` that produces one.
+  //
+  // The guard is not defensive padding. `onHost` builds the `WebGLRenderer`,
+  // the `Hud` and the `Shooting` layer in one go, and a `UiHost` with one null
+  // field would hand a layer a node it then writes to on every frame — an
+  // error thrown sixty times a second from inside the tick, a long way from
+  // the ref that was never attached. Every element below is rendered
+  // unconditionally, so after the first commit they are all present; if that
+  // ever stops being true this fires never rather than half.
   useEffect(() => {
-    if (canvas.current && viewport.current) {
-      onHost({ canvas: canvas.current, viewport: viewport.current });
+    const [c, v, h, t, b, m, x] = [
+      canvas.current, viewport.current, hud.current, shutterTop.current,
+      shutterBottom.current, message.current, crosshair.current,
+    ];
+    if (c && v && h && t && b && m && x) {
+      onHost({
+        canvas: c, viewport: v, crosshair: x,
+        hud: { root: h, top: t, bottom: b, message: m },
+      });
     }
   }, [onHost]);
 
@@ -137,8 +188,12 @@ function Page(
             whole chrome to move one class. The canvas and the overlays are
             built here and passed through as `children`, so they are the same
             elements whatever the classes do — which is the property that keeps
-            the canvas mounted for the session. */}
-        <Viewport hostRef={viewport}>
+            the canvas mounted for the session. The hud layer and the crosshair
+            are rendered by `Viewport` itself, after these children, because
+            their `hidden` is the same toggle field it already subscribes to
+            for the `shooting` class. */}
+        <Viewport refs={{ host: viewport, hud, shutterTop, shutterBottom,
+                          message, crosshair }}>
           <canvas id="view" ref={canvas} />
           {/* The boundary goes round the overlays and never round `#viewport`
               or `#view`: `app/` was handed those two elements through `onHost`

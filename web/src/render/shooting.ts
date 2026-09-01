@@ -200,7 +200,6 @@ export class Shooting implements System {
   readonly id = "render.shooting";
   private readonly ray = new Raycaster();
   private readonly ndc = new Vector2();
-  private readonly dot: HTMLElement;
 
   private enabled = false;
   /**
@@ -226,13 +225,20 @@ export class Shooting implements System {
   breakables: BreakableLayer | null = null;
   private readonly _v = new Vector3();
 
+  /**
+   * The viewport and the crosshair are React's, and arrive through `UiHost`.
+   *
+   * This layer used to build `.crosshair` and append it into `#viewport`,
+   * which put a node React had never heard of inside the element React
+   * renders — and left where it landed in the paint order to whichever of
+   * React's conditional overlays had mounted first. It is rendered by
+   * `ui/panels/Viewport.tsx` now and handed over here, and what this layer
+   * writes onto it is what it always really wanted: a `left` and a `top`
+   * following the pointer.
+   */
   constructor(private readonly viewport: HTMLElement,
+              private readonly dot: HTMLElement,
               private readonly chars: CharacterLayer) {
-    this.dot = document.createElement("div");
-    this.dot.className = "crosshair";
-    this.dot.hidden = true;
-    viewport.appendChild(this.dot);
-
     viewport.addEventListener("pointerdown", (e) => {
       if (!this.enabled || e.button !== 0) return;
       e.preventDefault();
@@ -248,11 +254,14 @@ export class Shooting implements System {
 
   setEnabled(v: boolean, camera?: Camera, scene?: Object3D): void {
     this.enabled = v;
-    this.dot.hidden = !v;
-    // The `shooting` class on the viewport is **not** set here any more. The
-    // viewport is React's element and `p.toggles.shoot` is the same fact, so
-    // it is rendered rather than toggled -- two layers writing one attribute
-    // is the bug this whole arc is about, and `paused` was the other writer.
+    // Neither the `shooting` class on the viewport nor the crosshair's
+    // `hidden` is set here any more. Both are React's elements and
+    // `p.toggles.shoot` is the same fact this is called with, so both are
+    // rendered rather than toggled -- two layers writing one attribute is the
+    // bug this whole arc is about, and `paused` was the other writer. The flag
+    // itself stays: it gates the pointer handlers above and `walker_host`
+    // reads it through `isEnabled` to decide whether the live-enemy counts
+    // mean anything, and neither of those is a pixel.
 
     this._camera = camera ?? this._camera;
     this._scene = scene ?? this._scene;

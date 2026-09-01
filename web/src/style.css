@@ -299,11 +299,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .hud-layer {
   position: absolute; inset: 0; pointer-events: none;
   container-type: inline-size;
-  /* Above the canvas, below the tool's own bars. The layer is appended last,
-     so without this the closed letterbox -- a 10 % band along the bottom --
-     paints straight over the skip bar. And because the layer takes no pointer
-     events the button underneath stays clickable, which is how you get a
-     control you can press but cannot see. */
+  /* Above the canvas, below the tool's own bars. The layer is rendered after
+     the skip and branch bars -- it used to be appended after them, and since
+     step 26 React renders it there -- so without this the closed letterbox,
+     a 10 % band along the bottom, paints straight over the skip bar. And
+     because the layer takes no pointer events the button underneath stays
+     clickable, which is how you get a control you can press but cannot see. */
   z-index: 1;
 }
 .hud-layer[hidden] { display: none; }

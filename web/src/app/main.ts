@@ -18,21 +18,18 @@ import {
   Color,
   PerspectiveCamera,
   Scene,
-  Vector3,
   WebGLRenderer,
 } from "three";
 import {
   loadManifest,
-  loadStage,
   type Manifest,
-  type StageEntry,
 } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
 import { CamPaths } from "../render/campath";
 import { CameraDrawSystem, CameraRig, CameraSeatSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
-import { RailLayer, SpawnLayer } from "../render/overlays";
+import { SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
@@ -41,8 +38,6 @@ import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { on } from "./dom";
 import { Minimap, rememberFolds } from "../hud/ui";
 import { Bgm } from "../audio/bgm";
-import { SceneFog, type FogMode } from "../render/fog";
-import { SceneLighting, type LightingMode } from "../render/lighting";
 import { Backdrop } from "../render/backdrop";
 import { RigLayer } from "../render/rigs";
 import { CharacterLayer } from "../render/characters";
@@ -54,19 +49,22 @@ import { World } from "../core/world";
 import { Scope } from "../core/scope";
 import { UiStore } from "../ui/store";
 import { mountUi } from "./ui_root";
-import type { UiProjection } from "../ui/projection";
 import type { ToggleName, UiCommand } from "../ui/commands";
 import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
-import { globalsProjection } from "./projection/globals";
 import { screenMessage } from "./projection/message";
-import { feedRow, inspectorText, minimapGraph, opSummary, treeProjection }
-  from "./projection/script";
+import { feedRow } from "./projection/script";
 import type {
   BranchProjection, FeedRow, MinimapGraph, SkipProjection, SoundProjection,
   TransportProjection, TreeProjection,
 } from "../ui/projection";
-import { actorsProjection, highlightSet, waitProjection }
-  from "./projection/sidebar";
+import { highlightSet } from "./projection/sidebar";
+import { buildProjection, projectionKey, type PlayerView }
+  from "./projection/player";
+import { hudRows } from "./projection/hud";
+import { SceneFog } from "../render/fog";
+import { SceneLighting } from "../render/lighting";
+import { applyToggle, runCommand } from "./commands";
+import { loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
 import type { Tick } from "../core/system";
@@ -77,9 +75,7 @@ import { wireSplitter } from "../hud/splitter";
 import { GameSystem, ScriptSystem, panelSystem } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
-import { GameMode } from "../game/game_mode";
 import { G } from "../game/globals";
-import { SetGameTables } from "../game/tables";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { RainSystem } from "../game/effects/rain";
@@ -103,19 +99,20 @@ const PREF_COMMANDS: ReadonlySet<string> = new Set([
   "toggle", "setLightMode", "setFogMode", "setPillarbox", "setSpeed",
 ]);
 
-class Player {
+export class Player implements PlayerView {
   private readonly renderer: WebGLRenderer;
-  private readonly scene = new Scene();
-  private readonly camera: PerspectiveCamera;
+  readonly scene = new Scene();
+  readonly camera: PerspectiveCamera;
   private readonly viewport = $("#viewport");
   private readonly canvas = $<HTMLCanvasElement>("#view");
 
-  private manifest!: Manifest;
+  manifest!: Manifest;
   /** Which stages the bundle holds, for the picker. */
-  private stages: number[] = [];
-  private stage: StageScene | null = null;
-  private spawns = new SpawnLayer();
-  private paths: CamPaths | null = null;
+  stages: number[] = [];
+  /** The loaded stage geometry. Named apart from `stage`, the number. */
+  scene3d: StageScene | null = null;
+  spawns = new SpawnLayer();
+  paths: CamPaths | null = null;
   /**
    * The script, and the one copy of it.
    *
@@ -123,10 +120,11 @@ class Player {
    * same reference under the name the player's own code has always used, so
    * the two can never drift apart.
    */
-  private get walker(): Walker | null { return this.ctx.walker; }
-  private set walker(w: Walker | null) { this.ctx.walker = w; }
+  get walker(): Walker | null { return this.ctx.walker; }
+  set walker(w: Walker | null) { this.ctx.walker = w; }
 
-  private readonly minimap = new Minimap();
+  /** The route graph, painted to a canvas. Named apart from the projection. */
+  readonly routeMap = new Minimap();
   /**
    * The script tree, built once per stage.
    *
@@ -134,35 +132,35 @@ class Player {
    * `treeVersion` is what tells the projection's change key it moved — walking
    * it every frame to notice it had not would cost more than drawing it.
    */
-  private treeProj: TreeProjection | null = null;
-  private treeVersion = 0;
-  private minimapGraph: MinimapGraph | null = null;
+  treeProj: TreeProjection | null = null;
+  treeVersion = 0;
+  minimapGraphData: MinimapGraph | null = null;
   /** The event feed, capped. Append-only, so a version beats a compare. */
   private feedRows: FeedRow[] = [];
-  private feedVersion = 0;
+  feedVersion = 0;
   /** The HUD strip, rebuilt by `refreshUi` and read by the projection. */
-  private hudRows: [string, string, boolean?][] = [];
+  hud: [string, string, boolean?][] = [];
   private readonly freeRoam = new FreeRoam($("#viewport"));
-  private readonly bgm = new Bgm();
-  private readonly sceneFog: SceneFog;
-  private readonly lighting: SceneLighting;
-  private readonly backdrop = new Backdrop();
-  private readonly rigs = new RigLayer();
-  private readonly chars = new CharacterLayer();
-  private readonly props = new PropLayer();
-  private readonly breakables = new BreakableLayer();
-  private readonly shooting = new Shooting($("#viewport"), this.chars);
+  readonly bgm = new Bgm();
+  readonly sceneFog: SceneFog;
+  readonly lighting: SceneLighting;
+  readonly backdrop = new Backdrop();
+  readonly rigs = new RigLayer();
+  readonly chars = new CharacterLayer();
+  readonly props = new PropLayer();
+  readonly breakables = new BreakableLayer();
+  readonly shooting = new Shooting($("#viewport"), this.chars);
   /** The `coli/` overlay — see `render/coli_debug.ts`. */
-  private readonly coliDebug = new ColiDebugLayer();
-  private readonly stuckDebug = new StuckDebugLayer();
+  readonly coliDebug = new ColiDebugLayer();
+  readonly stuckDebug = new StuckDebugLayer();
   /**
    * The stage's `sound` block, kept for the one caller that is not the walker:
    * class 0x10's op 0x1D plays a dialogue group from inside the port, and the
    * port cannot reach the bundle.
    */
-  private dialogue: SoundJson | null = null;
+  dialogue: SoundJson | null = null;
   /** The registry and the tick order: script -> game -> render -> hud. */
-  private readonly world = new World<RenderContext>();
+  readonly world = new World<RenderContext>();
   /**
    * The root of the disposal tree, and the two scopes under it that matter.
    *
@@ -170,7 +168,7 @@ class Player {
    * game state is replaced under the renderer — a seek or a snapshot load —
    * and is exactly what `resync` would otherwise have to rebuild by hand.
    */
-  private readonly appScope = new Scope("app", () => this.lifeFrame);
+  readonly appScope = new Scope("app", () => this.lifeFrame);
   /**
    * Frames since the page loaded, which never resets.
    *
@@ -178,49 +176,49 @@ class Player {
    * scopes across a stage switch — and "was this opened before the current
    * stage loaded" is the one question the panel exists to answer.
    */
-  private lifeFrame = 0;
-  private stageScope: Scope | null = null;
-  private stageLoadedAt = 0;
+  lifeFrame = 0;
+  stageScope: Scope | null = null;
+  stageLoadedAt = 0;
   /** The one thing React subscribes to. See `ui/store.ts`. */
   private readonly ui = new UiStore();
   /** Bumped when the projection actually changed, so React can skip a frame. */
   private uiRevision = 0;
   private lastUiKey = "";
   /** The sidebar's own state: which classes are boxed, and which are folded. */
-  private readonly boxedClasses = new Set<number>();
-  private readonly shutClasses = new Set<number>();
+  readonly boxedClasses = new Set<number>();
+  readonly shutClasses = new Set<number>();
   /** The view toggles. Defaults come from the table the panel renders. */
-  private toggles: Readonly<Record<ToggleName, boolean>> = TOGGLE_DEFAULTS;
+  toggles: Readonly<Record<ToggleName, boolean>> = TOGGLE_DEFAULTS;
   private readonly events = new Events();
   /** The one random source in the player, and part of every snapshot. */
-  private readonly rng = new Rng(1);
+  readonly rng = new Rng(1);
   private readonly loop = new Loop();
-  private readonly script = new ScriptSystem();
+  readonly script = new ScriptSystem();
   /** Approach, attack permits, and the look-at the camera tracks. */
   private readonly game = new GameSystem();
-  private readonly bullets = new ProjectileLayer();
+  readonly bullets = new ProjectileLayer();
   /** Debug overlays: unported classes, the permit holder, the awaited enemies. */
-  private readonly debug = new DebugBoxLayer();
-  private readonly rain = new Rain();
+  readonly debug = new DebugBoxLayer();
+  readonly rain = new Rain();
   /** The rain pool, advanced in the game phase. See `game/effects/rain.ts`. */
-  private readonly rainSim = new RainSystem();
-  private readonly hudLayer = new HudLayer($("#viewport"));
+  readonly rainSim = new RainSystem();
+  readonly hudLayer = new HudLayer($("#viewport"));
 
-  private state: PlayerState = readState();
-  private playing = false;
+  state: PlayerState = readState();
+  playing = false;
   /** The address last written to the URL, and when — see `syncUrlToWalker`. */
   private urlSyncKey = "";
   private urlSyncAt = 0;
-  private speed = 1;
+  speed = 1;
   /** The camera's own state: the pose scratch, the rails, and the two toggles. */
-  private readonly cam = new CameraRig();
+  readonly cam = new CameraRig();
   /** Everything a system is handed. Built once; the stage index moves. */
-  private readonly ctx: RenderContext;
+  readonly ctx: RenderContext;
   /** The last snapshot taken, for the Load button. */
-  private saved: Snapshot | null = null;
+  saved: Snapshot | null = null;
   /** Set while the frame slider is driving the camera by hand. */
-  private scrubbing = false;
-  private pillarbox = true;
+  scrubbing = false;
+  pillarbox = true;
 
   constructor() {
     this.renderer = new WebGLRenderer({
@@ -377,6 +375,36 @@ class Player {
     this.resize();
   }
 
+  // -- what the UI may know ----------------------------------------------
+
+  /**
+   * `PlayerView`, implemented.
+   *
+   * Read-only accessors and nothing else: the interface in
+   * `app/projection/player.ts` is the written-down answer to "what does the
+   * UI depend on?", and `implements` is what keeps the answer true. A panel
+   * that needs a new fact gets a line here, in the open, rather than a reach
+   * into whatever happens to be reachable.
+   */
+  get stage(): number { return this.state.stage; }
+  get original(): boolean { return !!this.state.original; }
+  get mode(): "play" | "step" | "free" { return this.state.mode; }
+  get frozen(): boolean { return !!this.state.freeze; }
+  get lightMode(): string { return this.lighting.lightingMode; }
+  get fogMode(): string { return this.sceneFog.fogMode; }
+  get camEye(): { x: number; y: number; z: number } {
+    return this.camera.position;
+  }
+  get tree(): TreeProjection | null { return this.treeProj; }
+  get minimap(): MinimapGraph | null { return this.minimapGraphData; }
+  get feed(): readonly FeedRow[] { return this.feedRows; }
+  get hudRows(): readonly [string, string, boolean?][] { return this.hud; }
+  get hasSaved(): boolean { return !!this.saved; }
+  get sound(): SoundProjection { return this.soundProjection(); }
+  get skip(): SkipProjection | null { return this.skipProjection(); }
+  get branch(): BranchProjection | null { return this.branchProjection(); }
+  get transport(): TransportProjection { return this.transportProjection(); }
+
   // -- bootstrap ---------------------------------------------------------
 
   async start(): Promise<void> {
@@ -404,255 +432,9 @@ class Player {
     requestAnimationFrame(this.frame);
   }
 
-  private entryFor(stage: number, original: boolean): StageEntry | undefined {
-    return this.manifest.stages.find(
-      (s) => (s.stage ?? s.scene) === stage &&
-        (s.game_mode === GameMode.Original) === original,
-    );
-  }
-
-  private async loadStage(): Promise<void> {
-    const entry = this.entryFor(this.state.stage, this.state.original) ??
-      this.entryFor(this.state.stage, false);
-    if (!entry) return this.fail(`stage ${this.state.stage} is not in this bundle`);
-
-    this.setLoading(`loading ${entry.name}…`);
-    this.playing = false;
-    this.setPlayButton();
-
-    // Cleared before anything is torn down: `world.detach` and the layers'
-    // builders both run before the new one exists, and a layer that read the
-    // *previous* stage's script there would place the old stage's spawns in
-    // the new stage's scene.
-    this.walker = null;
-    // Everything the previous stage built goes back before anything of the new
-    // one is made, so a leak shows as a scope that outlived this call rather
-    // than as a slow climb nobody attributes to a stage switch.
-    this.stageScope?.dispose();
-    this.stageScope = this.appScope.child(`stage:${this.state.stage}`);
-    this.ctx.scope = this.stageScope;
-    this.newSession();
-    if (this.stage) {
-      this.scene.remove(this.stage.root);
-      this.stage.dispose();
-    }
-    if (this.cam.rails) this.scene.remove(this.cam.rails.group);
-
-    const bundle = await loadStage(entry);
-    this.paths = new CamPaths(bundle.cam);
-    this.stage = await StageScene.load(bundle.geometryUrl, bundle.script);
-    // Honour the per-mesh fog bit and compile the radial-fog variant.
-    this.sceneFog.prepare(this.stage.root);
-    // Adopt the dome models before lighting, so its material swap sees the
-    // clones the backdrop made rather than the shared originals.
-    this.backdrop.build(this.stage.root, this.ctx.scope,
-                        bundle.script.backdrop);
-    this.rigs.build(this.stage.root, bundle.script.rigs, this.paths);
-    // The scene reset comes first: it empties the object pool and copies the
-    // approach rings into the globals, and `chars.attach` spawns into that
-    // pool. Doing it the other way round drops every actor it just made.
-    this.world.detach(this.ctx);
-    this.ctx.stage = this.state.stage;
-    this.ctx.frame = 0;
-    this.rng.reseed(this.state.seed ?? 1);
-    // `attach` runs the scene reset, which zeroes the data segment -- so the
-    // tables go in **after** it. The other way round the reset wiped
-    // `g_enemy_approach_rings` seconds after `SetGameTables` filled it, every
-    // actor read every ring as zero, and so nothing ever reached striking
-    // range: they walked into the camera and spun on a facing angle that has
-    // no direction at zero distance.
-    this.world.attach(this.ctx);
-    SetGameTables(bundle.script.characters, bundle.script.breakables,
-                  bundle.script.set_pieces, bundle.script.humanoids,
-                  bundle.script.coli, bundle.script.civilians);
-    G.g_player_lives = [
-      bundle.script.characters?.player?.start_lives ?? 2,
-      bundle.script.characters?.player?.start_lives ?? 2,
-    ];
-    // Nothing wrote this before, so every run was Arcade whichever bundle was
-    // loaded. That stopped being harmless the moment class 0x41 grew a branch
-    // on it: `PlaceGenericProp`'s types 70-72 and 77 despawn on their first
-    // frame unless the mode is Original, and the whole item hunt is behind it.
-    G.g_GameMode = bundle.script.game_mode;
-    // Characters are already in the stage glTF, one hierarchy per spawn;
-    // this adopts them and takes over the pose.
-    // The object paths class 0x25 rides live in the camera bundle; the
-    // character layer is the seam the port already reaches the renderer
-    // through, so they are handed to it rather than duplicated in `game/`.
-    this.chars.paths = this.paths;
-    this.coliDebug.build(this.stage.root, this.ctx.scope,
-                         bundle.script.coli);
-    this.stuckDebug.build(this.stage.root, this.ctx.scope);
-    this.chars.civilians = bundle.script.civilians ?? null;
-    this.chars.build(this.stage.root, this.ctx.scope,
-                     bundle.script.characters);
-    this.spawns.setPosed(this.chars.posed);
-    // Doors, shutters and the vans they hang off; driven by the script's
-    // own flags, so nothing here needs a clock of its own.
-    this.props.build(this.stage.root, this.ctx.scope, bundle.script.props);
-    // Class 0x41's props are built at run time, so only the templates are
-    // adopted here; the nodes follow `G.g_breakable_props`.
-    this.breakables.adopt(this.stage.root);
-    this.shooting.breakables = this.breakables;
-    this.shooting.reset();
-    this.shooting.setTables(bundle.script.characters?.combat);
-    this.dialogue = bundle.script.sound ?? null;
-    this.bullets.source = this.chars;
-    this.scene.add(this.bullets.group);
-    this.shooting.playSound = (id) => { this.bgm.play(id); };
-    const rainCfg = bundle.script.rain;
-    this.rain.build(this.ctx, this.stage.root, rainCfg);
-    this.rainSim.configure(
-      rainCfg?.enabled_by_script
-        ? { fallPerFrame: rainCfg.fall_per_frame,
-            respawnBelow: rainCfg.respawn_below, spawn: rainCfg.spawn }
-        : null,
-      this.rng);
-    this.lighting.build(this.stage.root);
-    this.scene.add(this.stage.root);
-
-    this.cam.rails = new RailLayer(this.paths);
-    this.scene.add(this.cam.rails.group);
-    // Everything the new stage's layers have to be told about the toggles,
-    // in one call. This used to be six checkbox reads that had to be kept in
-    // step with the sixteen listeners by hand, and three of them were missing.
-    this.applyAllToggles();
-
-    this.walker = new Walker(bundle.script, {
-      enterRegion: (r) => this.stage?.enterRegion(r),
-      loadRegion: () => {},
-      loadSlot: (s) => this.stage?.loadSlot(s),
-      unloadSlot: (s) => this.stage?.unloadSlot(s),
-      startCamera: (c) => this.onCamera(c),
-      releaseCamera: () => {},
-      onFeed: (e) => this.onFeed(e),
-      // Nothing to do: the branch bar is a projection now, so the next frame
-      // draws it. The callback stays because the walker's contract has one.
-      onBranch: () => {},
-      playSound: (id) => this.bgm.play(id),
-      // Null unless Shoot is on: only then is there anything that can make
-      // the count fall, so only then is the gate a real condition.
-      aliveEnemies: () => this.shooting.isEnabled ? this.chars.aliveCount : null,
-      // `g_civilians_alive` is maintained by the class-0x10 port itself --
-      // `CivilianInit` raises it, op 0x2C's `LeaveCountNow` and the removal
-      // path drop it -- so this is the engine's own counter, not a restatement
-      // of it. Null while Shoot is off, for the reason on `aliveEnemies`.
-      aliveCivilians: () => this.shooting.isEnabled ? G.g_civilians_alive : null,
-      // `g_camera_free` -- the room-clear waits need the camera back on its
-      // rail, not just the count at zero. Null while Shoot is off, where the
-      // counts never fall anyway and the gates pass on their own.
-      cameraFree: () => this.shooting.isEnabled ? G.g_camera_free !== 0 : null,
-      setShutter: (st) => this.hudLayer.setShutterState(st),
-      showMessage: (g) => {
-        // Variant 0 is the 1P / player-1 configuration, which is what a
-        // single-viewer playback corresponds to.
-        const v = bundle.script.sound?.messages?.[String(g)]?.[0] ?? null;
-        if (v?.voice) this.bgm.play(v.voice);
-        return this.hudLayer.showMessage(g, screenMessage(v));
-      },
-      // The subtitle task tests the skip flag every frame and ends itself, so
-      // the caption goes at once. The voice is a fire-and-forget PlaySoundId
-      // that the game leaves playing; it is stopped here because the player
-      // owns the audio element and a line talking over a scene you have just
-      // skipped past reads as a bug rather than as fidelity.
-      endDialogue: () => {
-        this.hudLayer.endMessage();
-        this.bgm.stopVoice();
-      },
-    }, { seed: this.state.seed ?? 1 });
-    this.script.walker = this.walker;
-
-    this.hudLayer.reset();
-    this.bgm.setTable(bundle.script.bgm, entry.game_mode);
-    this.bgm.setSoundTables(bundle.script.sound);
-    this.treeProj = treeProjection(bundle.script);
-    this.treeVersion += 1;
-    this.minimapGraph = minimapGraph(bundle.script);
-    this.minimap.build(this.minimapGraph);
-    this.clearFeed();
-
-    if (bundle.script.warnings.length) {
-      // Decoder warnings are surfaced, not swallowed: a step that failed to
-      // disassemble is a hole in the timeline and the user should know.
-      for (const w of bundle.script.warnings) {
-        this.onFeed({
-          seq: -1, block: -1, step: -1, opIndex: -1,
-          op: { i: -1, at: 0, op: -1, name: "decoder warning", cat: "flow" },
-          note: w,
-        });
-      }
-    }
-
-    // The stage is up. Anything opened under it from here belongs to this
-    // stage's run, and anything older that is still under `stage:` did not
-    // come from this load -- which is what the panel flags.
-    this.stageLoadedAt = this.lifeFrame;
-    this.applyIncomingState();
-    // No `bgm_entry_play` in any stage script starts the stage's own track --
-    // they only switch to boss and transition music -- so the opening track
-    // is started here and labelled as not script-driven.
-    const st = bundle.script.bgm?.stage_track;
-    if (st) this.bgm.play(st.id, "stage");
-    this.setLoading(null);
-    const status = $("#status");
-    status.textContent =
-      `${entry.name} · ${entry.counts.models} models · ` +
-      `${entry.counts.triangles.toLocaleString()} tris · ` +
-      `${entry.counts.regions} regions · ${entry.counts.blocks} blocks · ` +
-      `${entry.counts.branch_points} branch points`;
-    // A re-export changes the data under a page that looks identical, and a
-    // stale bundle is indistinguishable from a bug. Say when this one was
-    // built so the two can be told apart.
-    if (this.manifest?.built) {
-      const built = new Date(this.manifest.built);
-      const age = (Date.now() - built.getTime()) / 1000;
-      const tag = document.createElement("span");
-      tag.className = "dim";
-      tag.title = `Bundle built ${this.manifest.built} by `
-        + `${this.manifest.tool} ${this.manifest.tool_version}`;
-      tag.textContent = ` · bundle ${
-        age < 3600 ? `${Math.max(0, Math.round(age / 60))} min old`
-          : built.toLocaleString()}`;
-      status.appendChild(tag);
-    }
-  }
-
-  /** Honour the deep link: either an op address, or a raw camera pose. */
-  private applyIncomingState(): void {
-    const w = this.walker;
-    if (!w) return;
-    if (this.state.slot !== undefined) {
-      this.poseFromSlot(this.state.slot, this.state.frame ?? 0);
-    } else if (this.state.block !== undefined) {
-      const arrived = seekWalkerTo(w, this.state.block, this.state.step ?? 1,
-                             this.state.op ?? 0);
-      if (!arrived) {
-        // The address is not on any route the script can take from the entry
-        // block -- a stale link, or a branch this run did not take. Say so
-        // rather than silently presenting whatever the replay ran into.
-        console.warn(`no route to ${this.state.block}/${this.state.step ?? 1}` +
-                     `/${this.state.op ?? 0}; showing ${w.block}/${w.step}` +
-                     `/${w.opIndex}`);
-      }
-      // Land in the same shot, not at the start of it.
-      if (this.state.frame !== undefined && w.cam) {
-        w.cam.frame = this.state.frame;
-      }
-      this.syncCameraToWalker(true);
-      this.syncBgmToWalker();
-    } else {
-      w.reset();
-      // Instruction 0 of block 0 has entered no region and issued no camera
-      // command, so opening there is a truthful black screen. Prime to where
-      // the stage actually starts instead.
-      w.primeToFirstWait();
-      this.syncCameraToWalker(true);
-    }
-    if (this.state.all) {
-      this.toggles = { ...this.toggles, allRegions: true };
-      this.stage?.setVisibility("all");
-    }
-    this.refreshUi();
+  /** Load the stage the URL names. The sequence is `app/stage_load.ts`. */
+  async loadStage(): Promise<void> {
+    await loadStageInto(this);
   }
 
   // -- ui wiring ---------------------------------------------------------
@@ -739,7 +521,7 @@ class Player {
    * the tree is a navigator, not the content. Width is a per-viewer
    * convenience, so it lives in `localStorage` and nowhere else.
    */
-  private setMode(mode: PlayerState["mode"]): void {
+  setMode(mode: PlayerState["mode"]): void {
     this.state.mode = mode;
     for (const b of document.querySelectorAll<HTMLButtonElement>(".mode")) {
       b.classList.toggle("active", b.dataset.mode === mode);
@@ -750,11 +532,11 @@ class Player {
       // A region holds only the few models the game draws from one point on
       // the rail. Free roam therefore shows the whole level -- otherwise most
       // of it simply is not there.
-      this.stage?.setVisibility("all");
+      this.scene3d?.setVisibility("all");
       this.cam.rails?.setCameraMarkerVisible(true);
     } else {
       const all = this.toggles.allRegions;
-      this.stage?.setVisibility(all ? "all" : "region");
+      this.scene3d?.setVisibility(all ? "all" : "region");
       this.cam.rails?.setCameraMarkerVisible(false);
       this.syncCameraToWalker();
     }
@@ -764,7 +546,7 @@ class Player {
     this.refreshUi();
   }
 
-  private togglePlay(): void {
+  togglePlay(): void {
     if (this.state.mode === "free") this.setMode("play");
     this.playing = !this.playing;
     if (this.playing && this.state.mode === "step") this.setMode("play");
@@ -777,7 +559,7 @@ class Player {
    * The whole feature is live in the retail game -- region, Start poll, watcher
    * task, and every consumer of the flag. See `Walker.skipRequested`.
    */
-  private requestSkip(): void {
+  requestSkip(): void {
     const w = this.walker;
     if (!w || !w.requestSkip()) return;
     this.syncCameraToWalker();
@@ -827,11 +609,11 @@ class Player {
    * Every path that changes `playing` or the mode goes through here, which is
    * why the overlay is refreshed from it rather than from the frame loop.
    */
-  private setPlayButton(): void {
+  setPlayButton(): void {
     this.refreshPausedOverlay();
   }
 
-  private stepOnce(): void {
+  stepOnce(): void {
     const w = this.walker;
     if (!w) return;
     this.playing = false;
@@ -848,7 +630,7 @@ class Player {
    * streamed slots and the camera is not invertible, so the only correct way
    * back is to run forward again.
    */
-  private stepBack(): void {
+  stepBack(): void {
     const w = this.walker;
     if (!w) return;
     this.playing = false;
@@ -860,7 +642,7 @@ class Player {
     }
   }
 
-  private seekTo(block: number, step: number, op: number): void {
+  seekTo(block: number, step: number, op: number): void {
     const w = this.walker;
     if (!w) return;
     this.playing = false;
@@ -896,7 +678,7 @@ class Player {
   }
 
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
-  private poseFromSlot(slot: number, frame: number): void {
+  poseFromSlot(slot: number, frame: number): void {
     this.cam.poseFromSlot(this.camera, this.walker?.rollEnabled ?? false,
                           this.walker?.useFixedEyeY ?? false,
                           this.walker?.fixedEyeY ?? 0, slot, frame);
@@ -904,7 +686,7 @@ class Player {
 
   // -- walker callbacks --------------------------------------------------
 
-  private onCamera(cmd: CamCommand): void {
+  onCamera(cmd: CamCommand): void {
     const p = this.paths?.paths.get(cmd.slot);
     this.cam.rails?.highlight(
       cmd.slot,
@@ -931,12 +713,12 @@ class Player {
   /** The feed is capped so a long session cannot grow without bound. */
   private static readonly FEED_MAX = 400;
 
-  private onFeed(e: FeedEntry): void {
+  onFeed(e: FeedEntry): void {
     this.feedRows = [...this.feedRows, feedRow(e)].slice(-Player.FEED_MAX);
     this.feedVersion += 1;
   }
 
-  private clearFeed(): void {
+  clearFeed(): void {
     this.feedRows = [];
     this.feedVersion += 1;
   }
@@ -950,7 +732,7 @@ class Player {
    * and it never covers the shot you are choosing between.
    */
   /** True while the pointer is over the branch bar; freezes the countdown. */
-  private branchHover = false;
+  branchHover = false;
 
   /**
    * The countdown label. Three states, and each says what it means: running,
@@ -996,7 +778,7 @@ class Player {
    * skipped over would be a burst of stops and starts -- so the walker records
    * the track and the result is applied once, here.
    */
-  private syncBgmToWalker(): void {
+  syncBgmToWalker(): void {
     const t = this.walker?.bgmTrack;
     if (t !== null && t !== undefined && t !== 0) this.bgm.play(t);
   }
@@ -1008,7 +790,7 @@ class Player {
    * `force` puts the aim on the rail even though the shot's action has
    * retired. See `CameraRig.seat`.
    */
-  private syncCameraToWalker(force = false): void {
+  syncCameraToWalker(force = false): void {
     this.cam.sync(this.ctx, force);
   }
 
@@ -1190,7 +972,7 @@ class Player {
    * layer holding state play would never produce" structural rather than a
    * thing each `resync` has to remember.
    */
-  private newSession(): void {
+  newSession(): void {
     this.ctx.session.dispose();
     this.ctx.session = this.stageScope!.child("session");
   }
@@ -1219,182 +1001,13 @@ class Player {
   }
 
   private dispatchCommand(c: UiCommand): void {
-    switch (c.kind) {
-      case "boxClass":
-        if (c.on) this.boxedClasses.add(c.cls);
-        else this.boxedClasses.delete(c.cls);
-        return;
-      case "foldClass":
-        if (c.shut) this.shutClasses.add(c.cls);
-        else this.shutClasses.delete(c.cls);
-        return;
-      case "seek":
-        this.seekTo(c.block, c.step, c.op);
-        return;
-      case "toggle":
-        this.toggles = { ...this.toggles, [c.name]: c.on };
-        this.applyToggle(c.name, c.on);
-        return;
-      case "setStage":
-        this.state.stage = c.stage;
-        this.state.block = this.state.step = this.state.op = undefined;
-        this.state.slot = this.state.frame = undefined;
-        this.pushUrl();
-        void this.loadStage();
-        return;
-      case "setOriginal":
-        this.state.original = c.on;
-        this.pushUrl();
-        void this.loadStage();
-        return;
-      case "setMode":    this.setMode(c.mode); return;
-      case "setSpeed":   this.speed = c.speed; return;
-      case "play":
-      case "pause":      this.togglePlay(); return;
-      case "stepForward": this.stepOnce(); return;
-      case "stepBack":   this.stepBack(); return;
-      case "requestSkip": this.requestSkip(); return;
-      case "branchHover":
-        this.branchHover = c.over;
-        return;
-      case "takeBranch":
-        this.walker?.takeBranch(c.target);
-        this.clearFeed();
-        this.syncCameraToWalker();
-        this.refreshUi();
-        return;
-      case "previewBranch":
-        this.poseFromSlot(c.slot, c.frame);
-        return;
-      case "endPreview": {
-        this.syncCameraToWalker();
-        // `poseFromSlot` moved the rail highlight to the preview path; put it
-        // back on whatever the script is actually playing.
-        const cam = this.walker?.cam;
-        if (cam) this.onCamera(cam);
-        else this.cam.rails?.highlight(null);
-        return;
-      }
-      case "reset":
-        this.clearFeed();
-        this.walker?.reset();
-        this.walker?.primeToFirstWait();
-        this.syncCameraToWalker();
-        this.refreshUi();
-        this.pushUrl();
-        return;
-      case "scrubFrame": {
-        // `done` is the pointer coming off the slider. While it is down the
-        // camera systems must not fight the drag for the pose, which is what
-        // `cam.driving` is read for in the frame.
-        this.scrubbing = !c.done;
-        const w = this.walker;
-        if (!w?.cam) return;
-        w.cam.frame = c.frame;
-        this.syncCameraToWalker();
-        this.state.frame = w.cam.frame;
-        this.pushUrl();
-        return;
-      }
-      case "setPillarbox":
-        this.pillarbox = c.on;
-        this.resize();
-        return;
-      case "setLightMode":
-        this.lighting.setMode(c.mode as LightingMode);
-        this.refreshUi();
-        return;
-      case "setFogMode":
-        this.sceneFog.setMode(c.mode as FogMode);
-        this.refreshUi();
-        return;
-      case "setVolume":  this.bgm.setVolume(c.volume / 100); return;
-      case "toggleMute": this.bgm.setMuted(!this.bgm.muted); return;
-      case "saveState": {
-        // Held in memory rather than written out: the value is plain JSON, so
-        // a `copy(player.saveSnapshot())` in the console is a file whenever
-        // one is wanted, and the button is for the loop you actually run --
-        // snapshot, try something, put it back.
-        const snap = this.saved = this.saveSnapshot();
-        this.onFeed({
-          seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
-          op: { i: -1, at: 0, op: -1, name: "state saved", cat: "flow" },
-          note: `block ${snap.stage}/${snap.frame | 0} · `
-              + `${Object.keys(snap.parts).length} slices`,
-        });
-        return;
-      }
-      case "loadState": {
-        if (!this.saved) return;
-        const err = this.loadSnapshot(this.saved);
-        this.onFeed({
-          seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
-          op: { i: -1, at: 0, op: -1, name: "state loaded", cat: "flow" },
-          note: err ?? `back to frame ${this.saved.frame | 0}`,
-        });
-        return;
-      }
-      case "killAll": {
-        // The debug clear: `killAll` drops every live actor to zero hit points
-        // and starts its directional death, which is what opens the enemy gate.
-        const n = this.chars.killAll(this.shooting.cameraYawBams);
-        this.onFeed({
-          seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
-          op: { i: -1, at: 0, op: -1, name: "kill all", cat: "combat" },
-          note: `${n} enem${n === 1 ? "y" : "ies"} killed`,
-        });
-        this.refreshUi();
-        return;
-      }
-    }
-  }
-
-  /**
-   * What each view toggle does.
-   *
-   * Exhaustive over `ToggleName`, so a row added to the table in
-   * `ui/panels/Toggles.tsx` without a case here fails to compile. That is the
-   * property the sixteen anonymous `wireUi` listeners could not have: there
-   * was no list of them, and no way to be told one had been missed.
-   */
-  private applyToggle(name: ToggleName, on: boolean): void {
-    switch (name) {
-      case "allRegions":
-        this.state.all = on || undefined;
-        this.stage?.setVisibility(on ? "all" : "region");
-        this.pushUrl();
-        return;
-      case "rails":        this.cam.rails?.setVisible(on); return;
-      case "aimRails":     this.cam.rails?.setAimRailsVisible(on); return;
-      case "unported":     this.debug.showUnported = on; return;
-      case "stuck":        this.stuckDebug.setEnabled(on); return;
-      case "coli":         this.coliDebug.setEnabled(on); return;
-      case "boxes":        this.debug.showBoxes = on; return;
-      case "rigs":         this.rigs.setEnabled(on); return;
-      case "sky":
-        // One control for both: they are the same weather.
-        this.backdrop.setEnabled(on);
-        this.rain.setEnabled(on);
-        return;
-      case "hud":          this.hudLayer.setEnabled(on); return;
-      case "spawns":       this.spawns.setVisible(on); return;
-      case "chars":        this.chars.setEnabled(on); return;
-      case "props":        this.props.setEnabled(on); return;
-      case "breakables":   this.breakables.setEnabled(on); return;
-      case "trackEnemies":
-        this.cam.trackEnabled = on;
-        this.syncCameraToWalker();
-        return;
-      case "shoot":
-        this.shooting.setEnabled(on, this.camera, this.scene);
-        return;
-    }
+    runCommand(this, c);
   }
 
   /** Everything a fresh stage has to be told about the current toggles. */
-  private applyAllToggles(): void {
+  applyAllToggles(): void {
     for (const [name, on] of Object.entries(this.toggles)) {
-      this.applyToggle(name as ToggleName, on);
+      applyToggle(this, name as ToggleName, on);
     }
   }
 
@@ -1442,60 +1055,22 @@ class Player {
     };
   }
 
+  /**
+   * This frame's projection, if it differs from the last.
+   *
+   * The `Player` satisfies `PlayerView` structurally, so the read-only
+   * interface in `app/projection/player.ts` is the whole list of what the UI
+   * depends on — and nothing in the builder can write back.
+   */
   private publishUi(ctx: RenderContext): void {
-    const w = this.walker;
-    const eye = this.camera.position;
     // The boxes follow the sidebar's selection whether or not the sidebar is
     // drawn, so this is computed before anything is folded away.
     this.debug.highlight = highlightSet(
-      w, this.boxedClasses, $<HTMLInputElement>("#hl-wait").checked);
-    const p: UiProjection = {
-      revision: 0,
-      stage: this.state.stage,
-      stages: this.stages,
-      original: !!this.state.original,
-      loading: null,
-      status: "",
-      toggles: this.toggles,
-      transport: this.transportProjection(),
-      sound: this.soundProjection(),
-      lightMode: this.lighting.lightingMode,
-      fogMode: this.sceneFog.fogMode,
-      pillarbox: this.pillarbox,
-      // A folded panel is not built. Its *selection* still counts, though —
-      // `highlightSet` is computed below whatever the panels are showing.
-      wait: w && $<HTMLDetailsElement>("#panel-wait").open
-        ? waitProjection(w, eye) : null,
-      actorPanel: $<HTMLDetailsElement>("#panel-actors").open
-        ? actorsProjection(eye, this.boxedClasses, this.shutClasses) : null,
-      // Built only while the panel is open: it walks every global and every
-      // actor and formats them all.
-      globals: $<HTMLDetailsElement>("#globals-panel").open
-        ? globalsProjection() : null,
-      tree: this.treeProj,
-      minimap: this.minimapGraph,
-      treeVersion: this.treeVersion,
-      current: w ? { block: w.block, step: w.step, op: w.opIndex } : null,
-      feed: this.feedRows,
-      feedVersion: this.feedVersion,
-      inspector: w?.currentOp
-        ? inspectorText(w.currentOp, { summary: opSummary(w.currentOp) }) : "",
-      hudRows: this.hudRows,
-      skip: this.skipProjection(),
-      branch: this.branchProjection(),
-      scopes: this.appScope.snapshot(),
-      scopeContext: { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt },
-      hasSaved: !!this.saved,
-    };
-    // The whole projection is the key. Same cost as the string compare each
-    // panel used to do for itself, done once, and it cannot go stale the way
-    // a hand-listed set of fields would the first time one is added.
-    // Without `tree` and `feed`: the first is thousands of rows that change
-    // only on a stage load and the second is up to four hundred that only
-    // grow, so both carry a version instead. Stringifying them sixty times a
-    // second to discover they had not moved was the one shape of this that
-    // would have been too slow.
-    const key = JSON.stringify({ ...p, tree: null, feed: null, minimap: null });
+      this.walker, this.boxedClasses,
+      $<HTMLInputElement>("#hl-wait").checked);
+
+    const p = buildProjection(this, ctx);
+    const key = projectionKey(p);
     if (key === this.lastUiKey) return;
     this.lastUiKey = key;
     p.revision = ++this.uiRevision;
@@ -1515,55 +1090,33 @@ class Player {
     return null;
   }
 
-  private refreshUi(): void {
+  refreshUi(): void {
     const w = this.walker;
-    if (!w || !this.stage) return;
-    this.minimap.draw(w.block);
+    if (!w || !this.scene3d) return;
+    this.routeMap.draw(w.block);
 
-    const cam = w.cam;
-    const route = w.currentBlock?.route;
-    this.hudRows = [
-      ["mode", this.state.mode],
-      ["block", `${w.block}  (${route?.kind ?? "?"}` +
-        `${route && route.next.some((n) => n >= 0)
-          ? " → " + route.next.filter((n) => n >= 0).join(",") : ""})`],
-      ["step / op", `${w.step} / ${w.opIndex}`],
-      ["region", w.region < 0 ? "—" : String(w.region),
-        this.stage.visibility === "all"],
-      ["drawn", `${this.stage.visibleCount} models, ` +
-        `${this.stage.visibleTriangles.toLocaleString()} tris`],
-      ["cam slot", cam ? String(cam.slot) : "—"],
-      ["cam frame", cam ? cam.frame.toFixed(1) : "—"],
-      ["roll channel", w.rollEnabled ? "on (opcode 0x35)" : "off"],
-      ["spawns", `${w.spawns.length} placed`
-        + (w.liveEnemies ? `, ${w.liveEnemies} the enemy gate waits on` : "")],
-      ["waiting on", w.wait ? w.wait.blocksOn : "—", !!w.wait],
-      ["bgm", w.bgmTrack === null ? "—" : `track ${w.bgmTrack}`],
-      ["fog", this.sceneFog.describe],
-      ["light", this.lighting.describe],
-      ["sky", this.backdrop.describe],
-      ["rigs", this.rigs.describe],
-      ["characters", this.chars.describe],
-      ["props", this.props.describe],
-      ["breakables", this.breakables.describe],
-      ["shooting", this.shooting.describe],
-      ["coli", this.coliDebug.describe],
-      ["wedged", this.stuckDebug.describe],
-      ["enemies", this.game.describe],
-      ["lives", `${G.g_player_lives[0]}`
-        + (G.g_player_invuln_frames > 0
-          ? ` · invulnerable ${Math.ceil(G.g_player_invuln_frames)}f` : "")],
-      ["shutter", this.hudLayer.describe],
-      // The two globals the skip feature hangs off, so it is visible that the
-      // region opened and the gate dropped even when nothing is pressed.
-      ["skip", w.skipRequested ? "requested"
-        : w.canSkip ? "offered"
-        : w.skippable ? "region open, firing gate up" : "—"],
-      ["rain", this.rain.describe],
-      ["last se", w.lastSound === null ? "—"
-        : `0x${w.lastSound.toString(16).toUpperCase()}`],
-      ["eye", fmtVec(this.camera.position)],
-    ];
+    this.hud = hudRows(w, {
+      mode: this.state.mode,
+      region: this.scene3d.visibility === "all",
+      drawn: `${this.scene3d.visibleCount} models, `
+           + `${this.scene3d.visibleTriangles.toLocaleString()} tris`,
+      eye: this.camera.position,
+      describe: {
+        fog: this.sceneFog.describe,
+        light: this.lighting.describe,
+        sky: this.backdrop.describe,
+        rigs: this.rigs.describe,
+        characters: this.chars.describe,
+        props: this.props.describe,
+        breakables: this.breakables.describe,
+        shooting: this.shooting.describe,
+        coli: this.coliDebug.describe,
+        wedged: this.stuckDebug.describe,
+        enemies: this.game.describe,
+        shutter: this.hudLayer.describe,
+        rain: this.rain.describe,
+      },
+    });
 
     this.state.block = w.block;
     this.state.step = w.step;
@@ -1572,7 +1125,7 @@ class Player {
 
   // -- chrome ------------------------------------------------------------
 
-  private resize(): void {
+  resize(): void {
     const w = this.viewport.clientWidth;
     const h = this.viewport.clientHeight;
     if (w === 0 || h === 0) return;
@@ -1593,13 +1146,13 @@ class Player {
     this.camera.updateProjectionMatrix();
   }
 
-  private setLoading(text: string | null): void {
+  setLoading(text: string | null): void {
     const el = $("#loading");
     el.hidden = text === null;
     if (text !== null) $("#loading-text").textContent = text;
   }
 
-  private fail(msg: string): void {
+  fail(msg: string): void {
     const el = $("#loading");
     el.hidden = false;
     el.querySelector(".spinner")?.remove();
@@ -1608,7 +1161,7 @@ class Player {
     p.textContent = msg;
   }
 
-  private pushUrl(): void {
+  pushUrl(): void {
     writeState(this.state);
   }
 
@@ -1641,10 +1194,6 @@ class Player {
     this.state.frame = w.cam ? Math.round(w.cam.frame) : undefined;
     this.pushUrl();
   }
-}
-
-function fmtVec(v: Vector3): string {
-  return `${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)}`;
 }
 
 void new Player().start();

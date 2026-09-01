@@ -7468,3 +7468,59 @@ streams that depend entirely on the remove-delay teardown go from the 5 I
 claimed to **11**, and stream 1 — this hostage — is the first of them. A check
 built on a fact the same session disproved is worse than no check, because it
 reads as coverage.
+
+## `0x009A6110` answered, and what the hostage is actually for
+
+`g_cam_path_frame` is `(int)` of the **float at `0x009C70BC`**. The decompiler
+renders both camera drivers' last statement as `DAT_009A6110 = __ftol()` with
+the argument dropped — the oldest trap in this project — and the disassembly
+shows `FLD float ptr [0x009C70BC]` feeding it. It is also written directly by
+`CamAdvancePathFrame` as `(&DAT_009A6110)[block * 0x69]`: the four 0x1A4-byte
+camera/evt-action blocks, with the frame at `+0x04` and the running counter at
+`+0x38`. So it **does** track an ordinary `cam_play`, and it was not the
+culprit. `CameraStepRailTick` is clamped (`if (end <= cur) goto done`), so the
+rail cannot overrun a queued range either.
+
+The actual mechanism is in the civilian's own data. Stage 1's hostage `0x1828`
+runs stream 1 — `Wait 0x8300000`, `SetMotion 399,-1`, `SetOnShot`, `End` — and
+that wait word has **no bit inside `CivilianStepScript`'s `0x40003FFF` loop
+mask**, so with the timer at -1 the script parks there for good, looping motion
+399. That is the "I don't wanna die". It has no exit.
+
+Its **on-shot script does**. Stream 0 re-points the removal cue with op `0x0D`
+to `(39, 60)` — overriding the descriptor's `(39, 280)`, which is why the
+descriptor cue looked unreachable — plays 378 then 377, waits on the play
+cursor and the loop count, and ends on `Wait 0x80000`, `LeaveCountNow`.
+
+**So the hostage is meant to be killed by its captor.** The chain is: captor
+`0x1868` starts in state 35 (the maul) and kills on its cue frame → the
+civilian's killed branch runs the on-shot script → `LeaveCountNow` → the count
+reaches 0 → `wait_scripted_actors 0` passes.
+
+Driven correctly in a harness the whole chain works: the captor mauls, kills at
+frame 50, and goes to `AttackRun` — which also answers the "kills the civilian
+then keeps moving" report — and the hostage leaves the count at frame 470.
+
+Two wait bits read out of `CivilianStepScript` while doing it, both already
+matching the port: `0x200` holds until the play cursor equals `sub+0x16`, and
+`0x8000` is not a wait at all (outside the loop mask).
+
+### Three harness bugs, and why they are worth recording
+
+Every failed reading this turn was the probe, not the port: `charType` passed
+as 1 so `MotionOf` missed and the cursor could not advance; the descriptor
+assigned *after* `ActorSpawn` so `EnemyZombieInit` started the captor in
+`AttackRun` instead of its maul; and `GameUpdate` called with an options object
+when it takes positional arguments, which made `dt` undefined and turned the
+whole clip clock to `NaN`. The second is the exact ordering `director.ts` and
+`render/characters.ts` both carry a comment about. A harness that builds its
+actor differently from the player is testing neither — which is the same lesson
+`descriptor.ts` exists to enforce, learned again from the other side.
+
+The port's units are all correct, then, and the stall is in integration.
+`retireGatedEnemies` is a no-op outside a replay, every captor has a glTF node,
+and the player does hand the descriptor over at spawn — so those are ruled out.
+`[open]`: whether the captor is *visible*, and so clocked, at the moment it
+should maul. And one testable consequence of the data: **if the captor is shot
+before it kills the hostage, the hostage has no way out of the count until step
+9** — which would be a deadlock the game's own data allows.

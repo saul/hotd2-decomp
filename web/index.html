@@ -131,21 +131,12 @@
             </summary>
             <div id="wait-body" class="scroll dbg"></div>
           </details>
-          <details class="panel fold" id="panel-enemy">
+          <details class="panel fold" id="panel-actors">
             <summary class="panel-head">
-              <strong>Enemies</strong>
-              <span class="dim" id="enemy-sub"></span>
-              <label class="hl" title="Box every live enemy."><input type="checkbox" id="hl-enemy" /> box</label>
+              <strong>Actors</strong>
+              <span class="dim" id="actor-sub" title="Every object in g_object_list, grouped by spawn class. Each class describes its own actors — a class with a module in g_class_handlers explains itself, one without is listed by id and left alone. docs/formats/spawns.md is the class table."></span>
             </summary>
-            <div id="enemy-body" class="scroll dbg"></div>
-          </details>
-          <details class="panel fold" id="panel-civ">
-            <summary class="panel-head">
-              <strong>Civilians</strong>
-              <span class="dim" id="civ-sub"></span>
-              <label class="hl" title="Box every class-0x10 civilian."><input type="checkbox" id="hl-civ" /> box</label>
-            </summary>
-            <div id="civ-body" class="scroll dbg"></div>
+            <div id="actor-body" class="scroll dbg"></div>
           </details>
           <details class="panel fold" id="panel-route">
             <summary class="panel-head"><strong>Route graph</strong></summary>

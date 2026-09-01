@@ -15,6 +15,24 @@ export enum SpawnClass {
   Civilian = 0x10,
   /** `FUN_00441750` — row spawner for floating props. */
   FloatingPropRow = 0x15,
+  /** `FUN_00442290` — creates the water-wave field and records its plane Y. */
+  WaterWaveField = 0x16,
+  /**
+   * `FUN_004422D0` — one wave source on the 0x16 field. `obj+0x11C` selects
+   * travelling or circular; amplitude, wavelength and speed come off its tail.
+   */
+  WaterWaveSource = 0x17,
+  /**
+   * `FUN_00451720` — enemy with **rank-scaled hit points**: `obj+0x11C` is
+   * overwritten from the table at `0x00565F0C`, 1 or 2 by difficulty rank.
+   */
+  RankScaledEnemy = 0x21,
+  /** `FUN_0049B0D0` — enemy with four behaviour variants and a companion. */
+  VariantEnemy = 0x22,
+  /** `FUN_004329D0` — path-riding vehicle; swaps model and lights a flame. */
+  PathRidingVehicle = 0x27,
+  /** `FUN_00432610` — path-riding prop. */
+  PathRidingProp = 0x28,
   /** `FUN_00482CE0` — scripted non-combat set-piece prop. */
   SetPieceProp = 0x24,
   /** `FUN_004840D0` — script-driven humanoid actor. Not an enemy. */

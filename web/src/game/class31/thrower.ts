@@ -18,6 +18,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
+import type { ActorDebug } from "../registry";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { ReleaseAttackSlot, ThrowerTryClaimAttackSlot } from "../combat/permits";
 import { G } from "../globals";
@@ -369,4 +370,21 @@ export function ThrowerEntryState(obj: Actor): ThrowerState {
     default:
       return ThrowerState.StandAndDecide;
   }
+}
+
+/**
+ * The thrower. Its states are class 0x31's own table, not class 0x30's, so
+ * the number is shown raw rather than named with the wrong vocabulary.
+ */
+export function EnemyThrowerDebug(obj: Actor): ActorDebug {
+  return {
+    summary: `state ${obj.state}/${obj.sub}`
+      + (obj.dead ? " · dead" : obj.attackPermit >= 0 ? " · permit" : ""),
+    detail: [
+      `rank ${obj.rank}/${obj.allowance} · queue ${obj.queueRank}`,
+      `hp ${obj.hp}/${obj.maxHp} · motion ${obj.motion}`
+        + ` · flags 0x${(obj.flags >>> 0).toString(16)}`,
+    ],
+    hot: obj.attackPermit >= 0,
+  };
 }

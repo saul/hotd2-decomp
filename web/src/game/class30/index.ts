@@ -9,6 +9,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
+import type { ActorDebug } from "../registry";
 import type { GameHost } from "../host";
 import type { Vec3 } from "../vec";
 import { ZombieStateApproach } from "./approach";
@@ -200,4 +201,36 @@ export function ZombieEntryState(initial: number): ZombieState {
     default:
       return ZombieState.AttackRun;
   }
+}
+
+/**
+ * The zombie, for the debug sidebar.
+ *
+ * Everything a zombie's next decision turns on: the state, the two ranks and
+ * the allowance the approach gate compares them against, and whether it holds
+ * an attack permit or is queued for one. A crowd parked in `HoldAtRange` is
+ * either out of rank or waiting on the single permit, and those two look
+ * identical on screen.
+ */
+export function EnemyZombieDebug(obj: Actor): ActorDebug {
+  const wants = obj.state === ZombieState.HoldAtRange
+             || obj.state === ZombieState.AttackRun;
+  const permit = obj.attackPermit >= 0;
+  const detail = [
+    `rank ${obj.rank}/${obj.allowance} · queue ${obj.queueRank}`
+      + ` · cooldown ${obj.cooldown}`,
+    `hp ${obj.hp}/${obj.maxHp} · motion ${obj.motion}`
+      + ` · flags 0x${(obj.flags >>> 0).toString(16)}`,
+  ];
+  if (obj.targetAt >= 0) {
+    detail.push(`target 0x${obj.targetAt.toString(16).toUpperCase()}`
+      + ` · initial ${ZombieState[obj.initialState] ?? obj.initialState}`
+      + ` · attack ${ZombieState[obj.attackState] ?? obj.attackState}`);
+  }
+  return {
+    summary: `${ZombieState[obj.state] ?? obj.state}/${obj.sub}`
+      + (obj.dead ? " · dead" : permit ? " · permit" : wants ? " · wants a permit" : ""),
+    detail,
+    hot: permit,
+  };
 }

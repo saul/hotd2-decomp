@@ -15,8 +15,10 @@ import type { Actor } from "./actor";
 import type { GameHost } from "./host";
 import { SpawnClass } from "./spawn_class";
 import type { Vec3 } from "./vec";
-import { EnemyZombieInit, EnemyZombieUpdate } from "./class30";
-import { EnemyThrowerInit, EnemyThrowerUpdate } from "./class31/thrower";
+import { EnemyZombieDebug, EnemyZombieInit, EnemyZombieUpdate }
+  from "./class30";
+import { EnemyThrowerDebug, EnemyThrowerInit, EnemyThrowerUpdate }
+  from "./class31/thrower";
 import { PropContainerPlacerHandler } from "./class41";
 import { Class44PlacerHandler } from "./class44";
 import { SetPiecePropHandler } from "./class24";
@@ -29,6 +31,25 @@ export interface ClassFrame {
   rng: Rng;
   host: GameHost;
   events?: Events;
+}
+
+/**
+ * What a class says about one of its actors, for the debug sidebar.
+ *
+ * The sidebar used to know how a zombie and a civilian each store their state,
+ * which meant it only ever described the two classes someone had bothered to
+ * teach it, and it drifted the moment either changed. Asking the class instead
+ * puts the description next to the code it describes: a class that has been
+ * ported explains itself, and one that has not says nothing rather than being
+ * guessed at from the outside.
+ */
+export interface ActorDebug {
+  /** One line, in the class's own vocabulary — its state, not a category. */
+  summary: string;
+  /** Detail beneath it. One short line each; omit rather than pad. */
+  detail?: string[];
+  /** Worth calling out: holding a permit, blocked, parked. */
+  hot?: boolean;
 }
 
 export interface ClassHandler {
@@ -65,6 +86,13 @@ export interface ClassHandler {
    * gore models it has none of.
    */
   ownsShotResult?: boolean;
+  /**
+   * Describe one of this class's actors for the debug sidebar.
+   *
+   * Optional, and read-only by contract: it runs every frame the panel is
+   * open, so it must not draw from `rng`, advance a clock or touch `G`.
+   */
+  debug?(obj: Actor): ActorDebug;
 }
 
 export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
@@ -72,11 +100,13 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
   [SpawnClass.Zombie]: {
     init: EnemyZombieInit,
     update: (o, f) => EnemyZombieUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
+    debug: EnemyZombieDebug,
   },
   [SpawnClass.Thrower]: {
     init: EnemyThrowerInit,
     update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
     updatesWhenDead: true,
+    debug: EnemyThrowerDebug,
   },
   // A placer, not an actor: it builds its children and kills itself on its
   // first frame. It draws nothing, so it needs no renderer.

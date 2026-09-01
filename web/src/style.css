@@ -484,5 +484,15 @@ tr.gdead td { opacity: 0.45; }
 .dbg-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dbg-row.hot { color: var(--accent-2); }
 .dbg-row.dead { color: var(--dim); text-decoration: line-through; }
-.dbg-note { color: var(--dim); white-space: nowrap; overflow: hidden;
+.dbg-note { color: var(--dim); white-space: pre; overflow: hidden;
             text-overflow: ellipsis; }
+.dbg-group {
+  display: flex; align-items: center; gap: 5px; cursor: pointer;
+  margin-top: 4px; padding-top: 3px; border-top: 1px solid var(--line);
+  color: var(--text);
+}
+.dbg-group:first-child { margin-top: 0; border-top: 0; }
+.dbg-caret { color: var(--dim); width: 8px; }
+.dbg-gname { font-weight: 600; }
+.dbg-box { margin-left: auto; color: var(--dim); }
+.dbg-box:hover { color: var(--accent); }

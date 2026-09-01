@@ -102,7 +102,7 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { PlayerTakeDamageTimed } from "../combat/player";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
-import type { ClassFrame, ClassHandler } from "../registry";
+import type { ActorDebug, ClassFrame, ClassHandler } from "../registry";
 import { CharacterTypeOf, MotionOf, MotionPlayFrame, MotionPlayLength, T }
   from "../tables";
 import { makeCivilianState, type CivilianState } from "./state";
@@ -1282,9 +1282,91 @@ export function ActorTurnTowardPoint(obj: Actor,
   obj.yaw = (obj.yaw + step) & 0xffff;
 }
 
+/**
+ * The civilian VM, for the debug sidebar.
+ *
+ * The wait word is the whole story: `CivilianStepScript` only enters its loop
+ * when the word has a bit in `Any` or the timer is running, so a word made
+ * only of high bits is parked until something outside the VM moves it — which
+ * is what stage 1's hostage does while it waits to be killed. Spelling the
+ * bits out, next to the counter or cue each one is actually waiting on, is the
+ * difference between reading that and staring at a hex value.
+ */
+const WAIT_BIT_NAMES: [number, string][] = [
+  [CivilianWait.EnemiesPresent, "enemies-present"],
+  [CivilianWait.EnemiesAlive, "enemies-alive"],
+  [CivilianWait.ChildrenAlive, "children-alive"],
+  [CivilianWait.CiviliansAlive, "civilians-alive"],
+  [CivilianWait.Reach, "reach"], [0x20, "face"], [0x40, "in-front"],
+  [0x80, "camera-cue"],
+  [CivilianWait.MotionLoops, "motion-loops"],
+  [CivilianWait.MotionFrame, "motion-frame"],
+  [0x400, "hook"], [CivilianWait.Free, "free"],
+  [CivilianWait.CameraSettled, "camera-settled"],
+  [CivilianWait.ScriptFlag, "script-flag"],
+  [CivilianWait.LeaveCountNow, "leave-count"],
+  [CivilianWait.PushOutOfWorld, "push-out"],
+  [CivilianWait.RemoveOffCamera, "remove-off-camera"],
+  [CivilianWait.Uncounted, "uncounted"],
+  [CivilianWait.Rescued, "rescued"],
+  [CivilianWait.TwoPlayers, "two-players"],
+];
+
+export function CivilianDebug(obj: Actor): ActorDebug {
+  const sub = obj.civ;
+  if (!sub) return { summary: "no VM state", hot: true };
+  const word = sub.wait >>> 0;
+  const parked = (word & CivilianWait.Any) === 0 && sub.timer < 0;
+  const bits = WAIT_BIT_NAMES.filter(([b]) => word & b).map(([, n]) => n);
+
+  // What each set bit is actually waiting on, beside its current value: a
+  // script held by a counter reads differently from one waiting on a cue that
+  // has already gone by, and only the second is a bug.
+  const on: string[] = [];
+  if (word & CivilianWait.EnemiesAlive) {
+    on.push(`enemies>${sub.enemiesGoal} (${G.g_enemies_alive})`);
+  }
+  if (word & CivilianWait.CiviliansAlive) {
+    on.push(`civilians>${sub.civiliansGoal} (${G.g_civilians_alive})`);
+  }
+  if (word & CivilianWait.ChildrenAlive) {
+    on.push(`children>${sub.childrenGoal} (${sub.childCount})`);
+  }
+  if (word & CivilianWait.MotionLoops) on.push(`loops ${sub.loops}`);
+  if (word & CivilianWait.MotionFrame) {
+    on.push(`frame ${MotionPlayFrame(obj)}==${sub.motionCompare}`);
+  }
+  if (word & 0x80) {
+    on.push(`cue (${sub.cuePath},${sub.cueFrame}) now `
+      + `(${G.g_active_cam_path},${G.g_cam_path_frame})`);
+  }
+  if (sub.timer >= 0) on.push(`timer ${sub.timer}`);
+
+  const detail = [
+    `script ${sub.script} · pc ${sub.pc} · cursor ${sub.cursor}`
+      + ` · motion ${obj.motion}`,
+    `wait 0x${word.toString(16)}${bits.length ? " · " + bits.join(" ") : ""}`,
+  ];
+  if (on.length) detail.push(`on ${on.join(" · ")}`);
+  if (parked) {
+    detail.push("no loop bit and no timer — parked until something "
+      + "outside the VM moves it");
+  }
+  detail.push(`removal (${sub.removePath},${sub.removeFrame})`
+    + ` delay ${sub.removeDelay} · children ${sub.childCount}`
+    + ` · onShot ${sub.onShotScript}`);
+  return {
+    summary: (obj.dead ? "dead · " : "")
+      + (parked ? "parked" : bits.length ? bits.join(" ") : "running"),
+    detail,
+    hot: parked && !obj.dead,
+  };
+}
+
 export const CivilianHandler: ClassHandler = {
   init: CivilianInit,
   update: CivilianUpdate,
+  debug: CivilianDebug,
   // A civilian has no hit table and no hit points: the shot test marks it and
   // `CivilianCheckShot` is what a hit *means*. See `combat/shot.ts`.
   ownsShotResult: true,

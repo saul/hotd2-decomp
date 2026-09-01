@@ -206,8 +206,22 @@ def check_classes() -> None:
             failures.append(f"game/class{c:02x}/ has no SpawnClass member; "
                             f"add one rather than keying the registry on 0x{c:02X}")
 
-    table = re.findall(r"^\| `0x([0-9A-Fa-f]{2})` \| [^|]+ \| (\d+) \|",
-                       SPAWNS.read_text(), re.M)
+    # A row may cover several classes -- the doc groups them where the engine
+    # does, `0x16`/`0x17` for the wave field and its sources, `0x27`, `0x28`
+    # for the two path riders -- and splitting those to suit this parser would
+    # be the tail wagging the dog. The placement count is per row, so a shared
+    # row's count is attributed to its first class and the rest score zero;
+    # that keeps the total honest, which is what the coverage line reports.
+    ROW = re.compile(r"^\| ((?:`0x[0-9A-Fa-f]{2}`[/,] *)*`0x[0-9A-Fa-f]{2}`) "
+                     r"\| [^|]+ \| ([\d/]+) \|", re.M)
+    table: list[tuple[str, str]] = []
+    for ids, counts in ROW.findall(SPAWNS.read_text()):
+        found = re.findall(r"0x([0-9A-Fa-f]{2})", ids)
+        # "6/8" gives a count per class; a single number covers the whole row.
+        each = counts.split("/")
+        for i, c in enumerate(found):
+            table.append((c, each[i] if len(each) == len(found)
+                          else (each[0] if i == 0 else "0")))
     if not table:
         failures.append("spawns.md: could not read the class table")
         return

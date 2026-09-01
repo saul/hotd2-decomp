@@ -7420,3 +7420,51 @@ Also named the two finish-sequence camera drivers this turn's earlier
 minor 7) and `CameraDriverSelectMode` (`FUN_00402650`, minors 4 and 6). Having
 them named is what makes "these are alternatives, not a conjunction" a citable
 statement rather than a note in a comment.
+
+## The hostage that cannot leave the count — verified, and still unexplained
+
+Stage 1 block 1 step 8 op 12 is `wait_scripted_actors 0`. The only civilian in
+play there is `0x1828`, the hostage, and I chased every link of how it leaves
+`g_civilians_alive`. **Every one now checks out against the disassembly, and
+the wait still cannot pass.** Writing that down rather than shipping a guess.
+
+* `CivilianInit`'s `INC word ptr [0x009CA0E8]` at `0x0048A6FE` is
+  **unconditional** — read myself this time, not delegated. The
+  `TEST dword ptr [ECX],0x8000000` three instructions later guards two *other*
+  counters, `0x009A21BA` and `word[0x009C9100 + stage*2]`.
+* The op-`0x2C` decrement at `0x0048BA3C` is guarded by
+  `TEST dword ptr [EAX],0x80000` — `0x00080000`, and nothing else in that
+  handler decrements. This hostage's stream (index 1) is four commands:
+  `Wait 0x8300000`, `SetMotion 399,-1`, `SetOnShot`, `End`. **No
+  `LeaveCountNow`, no `Rescued`, no `RemoveOffCamera`.**
+* So its only exit is the remove-delay teardown, whose cue `CivilianInit` seeds
+  from the descriptor at `0x0048A481`/`0x0048A48F`: `sub+0x26 = tail+0x02`,
+  `sub+0x28 = tail+0x04` — confirming the exporter's `removePath`/`removeFrame`
+  decode. For this civilian that is **path 39, frame 280**, and the countdown
+  length comes from `tail+0x06` at removal time.
+* The cue test at `0x0048B02F`/`0x0048B03B` is exact equality against
+  `g_active_cam_path` and `g_cam_path_frame`, which is what the port does.
+* Camera path 39 runs frames 0..190 and 191..269 in step 8, and **270..365 in
+  step 9**. Frame 280 is only reached *after* the wait.
+* The wait's operand really is 0.
+
+So the data says the script blocks on a civilian that cannot leave until the
+step after the block. That is impossible in a shipping game, so one of these
+readings is still wrong — most likely something about which frame counter
+`0x009A6110` actually carries, since both camera drivers write it through
+`__ftol` at the *end* of their work and one of them has just copied a deferred
+rail pose. `[open]` — and the next thing to read.
+
+Two things did come out of it.
+
+**A gate the port does not have.** `CivilianUpdate` at `0x0048AF8E` skips the
+whole removal path unless `[0x009A2230] == 0` or the wait word carries
+`0x20000000`. The port removes unconditionally. `[open]`.
+
+**`verify_civilian_count.py` was excusing exactly this case.** It treated
+`UNCOUNTED` as a way out of `g_civilians_alive` — which I had *myself proved*
+it is not, in the commit that introduced the file. With that removed, the
+streams that depend entirely on the remove-delay teardown go from the 5 I
+claimed to **11**, and stream 1 — this hostage — is the first of them. A check
+built on a fact the same session disproved is worse than no check, because it
+reads as coverage.

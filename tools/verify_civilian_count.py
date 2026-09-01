@@ -61,7 +61,7 @@ EXPECT_REMOVE_OFF_CAMERA = 90
 #: Streams that leave the count only by the remove-delay teardown -- they carry
 #: none of the three bits above. Listed rather than counted so that a stream
 #: moving into or out of this set is visible in the diff.
-EXPECT_TEARDOWN_ONLY = [54, 55, 56, 82, 132]
+EXPECT_TEARDOWN_ONLY = [1, 54, 55, 56, 82, 97, 98, 132, 133, 134, 135]
 
 
 def main() -> int:
@@ -88,8 +88,16 @@ def main() -> int:
 
     leave = [i for i, w in enumerate(words) if w & LEAVE_COUNT_NOW]
     offcam = [i for i, w in enumerate(words) if w & REMOVE_OFF_CAMERA]
+    # `UNCOUNTED` is deliberately *not* in this test. It exempts a civilian
+    # from two other counters (0x009A21BA and word[0x009C9100 + stage*2]) and
+    # not from this one -- `CivilianInit`'s `INC word ptr [0x009CA0E8]` at
+    # 0x0048A6FE is unconditional, three instructions ahead of the
+    # `TEST dword ptr [ECX],0x8000000` that guards those two. Treating it as an
+    # exit here excused stage 1's hostage 0x1828, whose stream carries only
+    # `UNCOUNTED` and which therefore depends entirely on the remove-delay
+    # teardown -- the case this list exists to make visible.
     teardown_only = [i for i, w in enumerate(words)
-                     if not w & (LEAVE_COUNT_NOW | REMOVE_OFF_CAMERA | UNCOUNTED)]
+                     if not w & (LEAVE_COUNT_NOW | REMOVE_OFF_CAMERA)]
     stranded = [i for i in offcam if not words[i] & LEAVE_COUNT_NOW]
 
     print(f"civilian scripts: {len(streams)} streams")

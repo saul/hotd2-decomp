@@ -58,20 +58,31 @@ export function CamSetPathTarget(target: Vec3): void {
 }
 
 /**
- * Has the camera path just reached a cue frame?
+ * Has the camera path reached a cue frame?
  *
  * The engine writes `g_cam_path_frame` once a frame through `__ftol`, stepping
  * by exactly one, so its own cue tests are plain equality: the counter cannot
- * pass a cue without landing on it. Here the clock is real elapsed time and a
- * slow frame advances it by two or more, which steps straight over an exact
- * cue and strands whatever was waiting on it. So the equality becomes a
- * crossing -- identical whenever the engine's assumption holds, and correct
- * when it does not.
+ * pass a cue without landing on it, and a script that is waiting is polled on
+ * the frame it lands. Neither holds here.
  *
- * Only for the one-shot cues. Class 0x24 and 0x25 already ask `>=`, which is
- * what their code does. [diverges]
+ * The clock is real elapsed time, so a slow frame advances it by two or more
+ * and steps straight over an exact cue. And `seek` restores the camera frame
+ * from the address without running the game, so a script can begin waiting on
+ * a cue the camera is *already past* -- on a path that plays once, forward,
+ * and never comes back to it.
+ *
+ * That second one is not hypothetical: it is stage 1's hostage. Its death
+ * script waits on `(39, 60)`, and resuming at `block=1&step=8&op=12&frame=100`
+ * put the camera at 100 before the civilian had been killed. The cue could
+ * never fire, the script never reached its `LeaveCountNow`, and
+ * `wait_scripted_actors 0` waited for ever.
+ *
+ * So a cue is what it reads as: **reached**. One-shot, and already-passed
+ * counts as reached — which is exactly how classes 0x24 and 0x25 ask the same
+ * question. In live play the first frame this is true is the frame the engine's
+ * equality is true; the two only differ once something starts waiting late,
+ * and there the engine would simply never answer. [diverges]
  */
 export function CamPathCueReached(path: number, frame: number): boolean {
-  if (G.g_active_cam_path !== path) return false;
-  return G.g_cam_path_frame_prev < frame && frame <= G.g_cam_path_frame;
+  return G.g_active_cam_path === path && G.g_cam_path_frame >= frame;
 }

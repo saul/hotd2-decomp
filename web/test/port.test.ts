@@ -3297,12 +3297,20 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   check("...and so does one a slow frame steps over",
         CamPathCueReached(39, 280));
 
+  // **Already past counts as reached.** A cue is one-shot, and the paths play
+  // once, forward. `seek` restores the camera frame from the address without
+  // running the game, so a script can start waiting on a cue the camera has
+  // already gone by -- and on a crossing test that cue could never fire again.
+  // That is stage 1's hostage: its death script waits on `(39, 60)`, and
+  // resuming at `block=1&step=8&op=12&frame=100` put the camera at 100 first.
+  // The script never reached its `LeaveCountNow` and `wait_scripted_actors 0`
+  // waited for ever.
   G.g_cam_path_frame_prev = 280; G.g_cam_path_frame = 281;
-  check("...but it does not fire again once it is behind",
-        !CamPathCueReached(39, 280));
+  check("...and a cue the camera is already past still reads as reached",
+        CamPathCueReached(39, 280));
 
   G.g_cam_path_frame_prev = 279; G.g_cam_path_frame = 281;
-  check("...nor on a different path", !CamPathCueReached(40, 280));
+  check("...but not on a different path", !CamPathCueReached(40, 280));
 
   G.g_cam_path_frame_prev = 0; G.g_cam_path_frame = 0;
   check("...nor before the path has reached it", !CamPathCueReached(39, 280));

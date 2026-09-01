@@ -7524,3 +7524,51 @@ and the player does hand the descriptor over at spawn — so those are ruled out
 should maul. And one testable consequence of the data: **if the captor is shot
 before it kills the hostage, the hostage has no way out of the count until step
 9** — which would be a deadlock the game's own data allows.
+
+## Found it: a seek lands past a one-shot camera cue
+
+`?stage=1&mode=play&block=1&step=8&op=12&frame=100` reproduces exactly, in an
+integration harness driving the walker and the game together:
+
+```
+seeked to 1/8/12 cam frame 100
+  STUCK at 1/8/12: wait=0x46 civilians  cam=39@190  civAlive=1
+  hostage: dead=true  pc=4  wait=0x8100080  motion=378
+```
+
+The captor **does** kill the hostage, and its death script does start. It parks
+at pc 4 on the camera cue its own script sets with op `0x0D` — **(39, 60)**.
+The address restores the camera to frame **100**, already past it, and path 39
+plays 0→190 exactly once and never returns. So the cue could not fire, the
+script never reached its closing `LeaveCountNow`, `g_civilians_alive` stayed 1,
+and `wait_scripted_actors 0` waited for ever.
+
+Played from the start it works: op 12 is reached with the count at 1 and
+releases 261 frames later — the death script's motion 377 playing out — which
+is why every earlier check passed.
+
+The fix is to stop pretending a cue is an event and let it be what it reads as:
+**reached**. `CamPathCueReached` now asks `g_active_cam_path == path &&
+g_cam_path_frame >= frame`, which is exactly how classes 0x24 and 0x25 already
+ask the same question. In live play the first frame it is true is the frame the
+engine's equality is true; the two differ only when something starts waiting
+late, and there the engine would never answer at all.
+
+Worth naming the shape, because it is the third variant of one bug this
+session. The engine's cue tests are safe because its frame counter steps by
+exactly one *and* whatever is waiting is polled on the frame it lands. This
+port breaks both halves: the clock is elapsed time, so it can step over a cue;
+and `seek` moves the camera without running the game, so a script can begin
+waiting behind one. Equality, then crossing, then reached — each fix was
+correct about the case in front of it and blind to the next.
+
+### Four harness bugs, and the one that mattered
+
+`charType` passed as 1; the descriptor assigned after `ActorSpawn` instead of
+at spawn; `GameUpdate` called with an options object when it takes positional
+arguments, which made `dt` undefined and `NaN`'d the clip clock; and hit points
+never set, so every enemy sat at `hp = 0` and `dead = false` and no enemy gate
+could ever open. Each one produced a confident wrong diagnosis before it was
+caught. The harness only earned its answer once it built actors the way
+`render/characters.ts` does — which is the argument `game/descriptor.ts` was
+written to make, arriving from the other direction.

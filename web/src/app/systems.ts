@@ -150,7 +150,14 @@ export class GameSystem implements System {
     const live = actors.filter((o) => ActorIsEnemy(o.cls)).length;
     if (!actors.length) return "idle";
     const held = G.g_attack_permits.filter((p) => p !== -1).length;
-    return `${held} attacking${G.g_camera_is_tracking ? " · camera locked" : ""}`
+    // `g_attack_committed` is the global latch: while one enemy is attacking
+    // from **off screen**, `TryClaimAttackSlot` refuses everyone, including
+    // the ones you can see. That reads on screen as a crowd parked in
+    // `HoldAtRange` with a *free* permit, which is the one symptom this row
+    // could not previously tell apart from a permit that leaked.
+    const latched = G.g_attack_committed !== 0;
+    return `${held} attacking${latched ? " · committed off screen" : ""}`
+         + `${G.g_camera_is_tracking ? " · camera locked" : ""}`
          + ` · ${live} live`
          + (actors.length > live ? ` · ${actors.length - live} scripted` : "");
   }

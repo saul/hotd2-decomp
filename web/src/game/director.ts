@@ -8,7 +8,7 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
-import { makeActor, type Actor } from "./actor";
+import { makeActor, ThrowerFlag, ZombieFlag2, type Actor } from "./actor";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { CameraTrackEnemiesTick, UpdateCameraFreeFlag }
   from "./camera/track";
@@ -17,6 +17,7 @@ import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
 import { Class44Selector } from "./class44";
 import { T } from "./tables";
+import { ReleaseAttackSlot } from "./combat/permits";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ActorByAt, G } from "./globals";
@@ -200,11 +201,24 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
     if (obj.visible) ActorAdvanceMotion(obj, dt);
     const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {
-      // A dead or unloaded actor must not sit on a permit.
-      if (obj.attackPermit >= 0) {
-        G.g_attack_permits[obj.attackPermit] = -1;
-        obj.attackPermit = -1;
-      }
+      // A dead or unloaded actor must not sit on a permit — and clearing the
+      // array is **not** how you give one back. `ReleaseAttackSlot`
+      // (`FUN_00456520`) also lifts `g_attack_committed`, the latch a claim
+      // raises when the actor it granted to was off screen, and
+      // `TryClaimAttackSlot` reads that latch on its first line and gives up
+      // before a player is even picked. So a zombie killed while holding an
+      // off-screen permit left the latch raised for ever and **every**
+      // remaining enemy was refused: a crowd walks to the ring and stands
+      // there, wanting a permit that nobody holds.
+      //
+      // The engine does this from the death state itself —
+      // `ZombieStateDeath6` (`FUN_00454D20`) sub 1 runs
+      // `ZombieReleasePermitAndUntrack` (`FUN_004565A0`), whose first line is
+      // the release. Class 0x30 has no death state here, so this sweep is
+      // where it lands; it must be the whole function and not half of it.
+      ReleaseAttackSlot(obj, obj.cls === SpawnClassValue.Thrower
+                        ? ThrowerFlag.OffScreenPermit
+                        : ZombieFlag2.OffScreenPermit);
       // ...but a class whose *death* is a state machine still has to run it.
       // Class 0x31 falls, lands, plays its death clip and rots; stopping here
       // left the body frozen wherever its hit points ran out.

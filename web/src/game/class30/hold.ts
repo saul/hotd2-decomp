@@ -21,6 +21,7 @@
  */
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
+import { G } from "../globals";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { TryClaimAttackSlot } from "../combat/permits";
 import { CharacterTypeOf, FirstBakedOf, MotionRowOf } from "../tables";
@@ -52,8 +53,7 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3, rng: Rng,
   // never set on the ported path.
   obj.cooldown = 0;
 
-  if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP && obj.cooldown < 1
-      && TryClaimAttackSlot(obj, host)) {
+  if (ZombieAttackRefusal(obj) === null && TryClaimAttackSlot(obj, host)) {
     // Body condition 4 goes to state 0x34 instead; that state is unread, and
     // no stage-2 spawn carries condition 4 into this state.
     obj.state = ZombieState.Strike;
@@ -67,4 +67,39 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3, rng: Rng,
     FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
     rng, 5, MotionFade.Normal);
   TurnActorTowardCameraEye(obj, eye, HOLD_TURN_RATE);
+}
+
+/**
+ * Why this actor may not swing, in the order the hub asks — or `null`.
+ *
+ * **The condition and the explanation are one function on purpose.** A crowd
+ * standing at the ring looks identical whichever of the five reasons it is,
+ * and the sidebar could only say "wants a permit", which is the symptom. A
+ * second copy of the test written for the panel would be a copy that drifts,
+ * so the state machine asks this and the panel prints the same answer.
+ *
+ * The first three are `ZombieStateHoldAtRange`'s own gate. The last two are
+ * what `TryClaimAttackSlot` (`FUN_00455DE0`) refuses on, read rather than
+ * called so that asking does not take the permit.
+ */
+export function ZombieAttackRefusal(obj: Actor): string | null {
+  if (obj.rank >= obj.allowance) {
+    return `out of rank — ${obj.rank} in the queue, ${obj.allowance} allowed`;
+  }
+  if (obj.queueRank >= QUEUE_CAP) {
+    return `queued ${obj.queueRank}, past the cap of ${QUEUE_CAP}`;
+  }
+  if (obj.cooldown >= 1) return `cooling down, ${obj.cooldown} left`;
+  // The global latch. One enemy may attack unseen, and while one is, nobody
+  // may claim at all — including the ones you can see, which is what makes
+  // this so hard to read off the screen.
+  if (G.g_attack_committed !== 0) {
+    return "another enemy is committed off screen";
+  }
+  const held = G.g_attack_permits.findIndex((p) => p !== -1);
+  if (held !== -1) {
+    return `all ${G.g_max_attackers} permits held — 0x`
+      + `${(G.g_attack_permits[held] ?? 0).toString(16).toUpperCase()} has it`;
+  }
+  return null;
 }

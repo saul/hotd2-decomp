@@ -15,7 +15,7 @@ import type { Vec3 } from "../vec";
 import { ZombieStateApproach } from "./approach";
 import { ZombieStateAttackRun } from "./attack_run";
 import { ZombieStateBackOff } from "./backoff";
-import { ZombieStateHoldAtRange } from "./hold";
+import { ZombieAttackRefusal, ZombieStateHoldAtRange } from "./hold";
 import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
@@ -226,6 +226,11 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
   const wants = obj.state === ZombieState.HoldAtRange
              || obj.state === ZombieState.AttackRun;
   const permit = obj.attackPermit >= 0;
+  // **Why it is not swinging**, which is the question every crowd parked at
+  // the ring asks and the one the row could not answer. Only in the hub: the
+  // attack run has not asked for a permit yet, it is still closing.
+  const refusal = obj.state === ZombieState.HoldAtRange && !permit
+    ? ZombieAttackRefusal(obj) : null;
   const detail = [
     `rank ${obj.rank}/${obj.allowance} · queue ${obj.queueRank}`
       + ` · cooldown ${obj.cooldown}`,
@@ -239,8 +244,9 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
   }
   return {
     summary: `${ZombieState[obj.state] ?? obj.state}/${obj.sub}`
-      + (obj.dead ? " · dead" : permit ? " · permit" : wants ? " · wants a permit" : ""),
-    detail,
+      + (obj.dead ? " · dead" : permit ? " · permit"
+         : wants ? " · wants a permit" : ""),
+    detail: refusal ? [`blocked: ${refusal}`, ...detail] : detail,
     hot: permit,
   };
 }

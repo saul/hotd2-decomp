@@ -7719,3 +7719,40 @@ the **camera** (`g_camera_free`, and `EvtOpWaitScriptedActors46` at
 `FUN_0045FCD0` does test it, along with `g_evt_gameplay_live`) read as one held
 by an actor. Both fixed; the second is why the panel now says which half is
 blocking.
+
+## The permit the corpse never gave back
+
+Reported as "they get close and then never attack": two enemies at the ring in
+`HoldAtRange`, both saying *wants a permit*, and nobody holding one.
+
+Both halves of that are readable now. The sidebar row said only "wants a
+permit", which is the symptom and not the reason, so
+`ZombieAttackRefusal` in `class30/hold.ts` is the gate and its explanation in
+one function — the hub asks it and the panel prints the same answer, because a
+second copy written for the panel is a copy that drifts. Five reasons: out of
+rank, past the queue cap, cooling down, another enemy committed off screen, or
+all permits held and by whom.
+
+The bug it names: **`GameUpdate`'s dead-actor sweep cleared
+`g_attack_permits` without lifting `g_attack_committed`.** That latch is raised
+by a claim granted to an actor that was off screen, and `TryClaimAttackSlot`
+(`FUN_00455DE0`) reads it on its first line and gives up before a player is
+even picked. So a zombie killed while holding an off-screen permit refused
+every remaining enemy in the scene, for ever.
+
+The engine does not have this hole because the release is not a sweep: it is
+`ZombieStateDeath6` (`FUN_00454D20`) sub 1 calling
+`ZombieReleasePermitAndUntrack` (`FUN_004565A0`), whose first line is
+`ReleaseAttackSlot` (`FUN_00456520`) and whose remainder drops the actor out of
+camera tracking. `[proved]` — both now named in `functions.tsv`.
+
+The port has no class-0x30 death state at all: `GameUpdate` skips dead actors
+unless the handler sets `updatesWhenDead`, which class 0x31 does and class 0x30
+does not, and the death clip is played by `ActorAdvanceMotion`'s `obj.death`
+instead. The sweep is therefore where the release has to land for now, and it
+calls `ReleaseAttackSlot` rather than reimplementing half of it. **Porting
+state 6 properly is still open** and would put the release where the engine
+keeps it.
+
+The regression test drives it end to end and was checked against the old code
+first: it fails `latch 1 permits [-1]`, which is the whole bug in one line.

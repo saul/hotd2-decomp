@@ -706,6 +706,27 @@ console.log("ActorIsOnScreen:");
   check("and the next enemy may claim", TryClaimAttackSlot(other, onscreen),
         `permit ${other.attackPermit}`);
   ReleaseAttackSlot(other);
+
+  // **Dying holds the latch if the release is only half done.** The engine
+  // frees it from the death state — `ZombieStateDeath6` (`FUN_00454D20`) sub 1
+  // runs `ZombieReleasePermitAndUntrack` (`FUN_004565A0`), whose first line is
+  // `ReleaseAttackSlot`. The port has no class-0x30 death state, so
+  // `GameUpdate`'s dead-actor sweep does it; clearing `g_attack_permits`
+  // there without lifting `g_attack_committed` left every remaining enemy
+  // refused on `TryClaimAttackSlot`'s first line, and a crowd walked to the
+  // ring and stood there wanting a permit nobody held.
+  check("an off-screen attacker takes the latch again",
+        TryClaimAttackSlot(z, offscreen) && G.g_attack_committed === 1,
+        `latch ${G.g_attack_committed}`);
+  z.dead = true;
+  GameUpdate(EYE, 1 / 60, offscreen, rng, events);
+  check("...and dying gives back the whole permit, latch included",
+        G.g_attack_committed === 0 && z.attackPermit === -1
+        && G.g_attack_permits.every((p) => p === -1),
+        `latch ${G.g_attack_committed} permits ${JSON.stringify(G.g_attack_permits)}`);
+  check("so the enemies still standing can attack",
+        TryClaimAttackSlot(other, onscreen), `permit ${other.attackPermit}`);
+  ReleaseAttackSlot(other);
 }
 
 // -- 4. damage ---------------------------------------------------------------

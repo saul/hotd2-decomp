@@ -32,6 +32,15 @@ import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
 import { OPS as OPS_TABLE } from "./ops";
 import { WAIT_RULES, passedBecause, type WaitContext } from "./waits";
+import {
+  ChannelBlock, type ChannelTween, type FogState, type LightState,
+} from "./state/channels";
+import { ActionRing } from "./state/queued";
+
+export type { ChannelTween, FogState, LightState };
+export {
+  CH_AMBIENT, CH_FOG_FAR, CH_FOG_NEAR, CH_FOG_R, CH_LIGHT_R, CHANNEL_COUNT,
+} from "./state/channels";
 
 
 export interface ActiveSpawn extends SpawnJson {
@@ -50,35 +59,6 @@ export interface ActiveSpawn extends SpawnJson {
  * and channel 5 sets all three at once. It is a linear D3D fog model, which
  * is the same model three.js `Fog` implements.
  */
-export interface FogState {
-  near: number;
-  far: number;
-  /** 0-255 per component, as stored. */
-  rgb: [number, number, number];
-}
-
-/**
- * One channel of the scene light block, mid-tween.
- *
- * The game's block is `{enabled, from, to, rate}` per channel, and **both**
- * tween opcodes end up in that shape: `0x21` takes the per-frame `rate`
- * straight from an operand, and `0x23` takes a frame count and pre-divides,
- * `rate = |to - from| / frames`. So one stepper serves both.
- */
-export interface ChannelTween {
-  to: number;
-  /** Per-frame step magnitude, always positive. */
-  rate: number;
-}
-
-/** Light-block channel indices, as the tween handlers number them. */
-export const CH_FOG_NEAR = 0;
-export const CH_FOG_FAR = 1;
-export const CH_FOG_R = 2;
-export const CH_LIGHT_R = 6;
-export const CH_AMBIENT = 10;
-export const CHANNEL_COUNT = 11;
-
 export interface CamCommand {
   slot: number;
   startFrame: number;
@@ -192,16 +172,6 @@ export interface WalkerHost {
   showMessage(group: number): string | undefined;
   /** Cut a dialogue short, as raising the skip flag does. */
   endDialogue(): void;
-}
-
-/** Fog off (a range past the 8000 far plane) and a neutral white light. */
-function defaultChannels(): number[] {
-  const c = new Array(CHANNEL_COUNT).fill(0);
-  c[CH_FOG_NEAR] = 65000;
-  c[CH_FOG_FAR] = 65001;
-  c[CH_LIGHT_R] = c[CH_LIGHT_R + 1] = c[CH_LIGHT_R + 2] = 1;
-  c[CH_AMBIENT] = 0.5;
-  return c;
 }
 
 /**
@@ -368,6 +338,37 @@ export class Walker {
    * (65000/65001) to disable fog.
    */
   /**
+   * The light block. See `script/state/channels.ts`.
+   *
+   * The five fields below are accessors onto it rather than storage: forty
+   * call sites and a snapshot key list already speak in `channels`, `tweens`,
+   * `fogSet`, `lightSet` and `lightDir`, and renaming them all would be churn
+   * that the round-trip test could not tell from a mistake.
+   */
+  readonly lightBlock = new ChannelBlock();
+
+  get channels(): number[] { return this.lightBlock.channels; }
+  set channels(v: number[]) { this.lightBlock.channels = v; }
+  get tweens(): (ChannelTween | null)[] { return this.lightBlock.tweens; }
+  set tweens(v: (ChannelTween | null)[]) { this.lightBlock.tweens = v; }
+  get fogSet(): boolean { return this.lightBlock.fogSet; }
+  set fogSet(v: boolean) { this.lightBlock.fogSet = v; }
+  get lightSet(): boolean { return this.lightBlock.lightSet; }
+  set lightSet(v: boolean) { this.lightBlock.lightSet = v; }
+  get lightDir(): { pitchDeg: number; yawDeg: number } {
+    return this.lightBlock.lightDir;
+  }
+  set lightDir(v: { pitchDeg: number; yawDeg: number }) {
+    this.lightBlock.lightDir = v;
+  }
+
+  /** Fog, derived from channels 0-4. */
+  get fog(): FogState { return this.lightBlock.fog; }
+
+  /** The directional light, derived from channels 6-8 and 10 plus `0x18`. */
+  get light(): LightState { return this.lightBlock.light; }
+
+  /**
    * The scene light block, as 11 channels -- the same numbering the tween
    * handlers use. Keeping the raw channels (rather than separate fog and
    * light structs) is what lets one stepper animate all of them, which is
@@ -376,40 +377,12 @@ export class Walker {
    *   0 fog near   1 fog far   2,3,4 fog RGB (0-255)   5 = 2,3,4 together
    *   6,7,8 light RGB (0..1)   9 = 6,7,8 together      10 ambient
    */
-  channels: number[] = defaultChannels();
-  tweens: (ChannelTween | null)[] = new Array(CHANNEL_COUNT).fill(null);
-  /** True once the script has actually set a fog channel. */
-  fogSet = false;
   /**
    * The scene light: colour from tween channels 6/7/8, ambient from 10, and
    * the direction from opcodes 0x18/0x19 (and 0x17's slerp target, taken
    * immediately). Fed to `SetLightingDefaultSingle`'s single directional
    * light in the game.
    */
-  lightDir = { pitchDeg: 0, yawDeg: 0 };
-  lightSet = false;
-
-  /** Fog, derived from channels 0-4. */
-  get fog(): FogState {
-    const c = this.channels;
-    return {
-      near: c[CH_FOG_NEAR],
-      far: c[CH_FOG_FAR],
-      rgb: [c[CH_FOG_R], c[CH_FOG_R + 1], c[CH_FOG_R + 2]],
-    };
-  }
-
-  /** The directional light, derived from channels 6-8 and 10 plus 0x18. */
-  get light(): { rgb: [number, number, number]; ambient: number;
-                 pitchDeg: number; yawDeg: number } {
-    const c = this.channels;
-    return {
-      rgb: [c[CH_LIGHT_R], c[CH_LIGHT_R + 1], c[CH_LIGHT_R + 2]],
-      ambient: c[CH_AMBIENT],
-      pitchDeg: this.lightDir.pitchDeg,
-      yawDeg: this.lightDir.yawDeg,
-    };
-  }
 
   /** True while any channel is still animating. */
   get tweening(): boolean {
@@ -443,7 +416,11 @@ export class Walker {
    * `goto_scene_state` sites have exactly one outstanding `queue_event 0x21`
    * at that point.
    */
-  queuedEventsPending = 0;
+  /** The action ring. See `script/state/queued.ts`. */
+  readonly ring = new ActionRing();
+
+  get queuedEventsPending(): number { return this.ring.pending; }
+  set queuedEventsPending(v: number) { this.ring.pending = v; }
 
   /**
    * How many block transitions found the action ring still owing work.
@@ -464,7 +441,8 @@ export class Walker {
    * scene state 6/7 starts is *not* one: its `cam_play` was retired when it
    * was stashed.
    */
-  private camPending = false;
+  private get camPending(): boolean { return this.ring.camPending; }
+  private set camPending(v: boolean) { this.ring.camPending = v; }
   /**
    * The arcade branch-preview shots, from the most recent `store_six`
    * (`queue_event` sel 0x60): one camera pose per route the next branch can
@@ -580,14 +558,9 @@ export class Walker {
     this.parked = false;
     this.stashedCam = null;
     this.sceneState = { major: 0, minor: 0 };
-    this.queuedEventsPending = 0;
-    this.camPending = false;
+    this.ring.reset();
     this.branchPreview = null;
-    this.channels = defaultChannels();
-    this.tweens = new Array(CHANNEL_COUNT).fill(null);
-    this.fogSet = false;
-    this.lightDir = { pitchDeg: 0, yawDeg: 0 };
-    this.lightSet = false;
+    this.lightBlock.reset();
     this.checkpointBlock = this.script.entry_block;
     this.flags.clear();
     this.loadedSlots.clear();
@@ -795,7 +768,7 @@ export class Walker {
     this.settleCameraAction();
 
     // Light and fog animate on the same 60 Hz clock as everything else.
-    this.stepTweens(dt * fps);
+    this.lightBlock.step(dt * fps);
 
     // The shutter's 40-frame close, after which the firing gate drops and the
     // game starts offering a skip.
@@ -1060,74 +1033,9 @@ export class Walker {
    * Channel 5 is "all three fog components at once" and 9 the same for the
    * light colour, which is why they fan out to three channels here.
    */
+  /** One of the light-block opcodes. See `script/state/channels.ts`. */
   applyLightChannel(op: OpJson): string | undefined {
-    const ch = op.channel;
-    if (ch === undefined || ch < 0 || ch > 10) return undefined;
-
-    const targets: number[] =
-      ch === 5 ? [CH_FOG_R, CH_FOG_R + 1, CH_FOG_R + 2]
-      : ch === 9 ? [CH_LIGHT_R, CH_LIGHT_R + 1, CH_LIGHT_R + 2]
-      : [ch];
-
-    // Channel 5/9 with an explicit per-component triple (the `set` form)
-    // carries `components`; otherwise one value covers every target.
-    const values: (number | null)[] =
-      op.components && op.components.length === 3 && ch === 5
-        ? op.components
-        : targets.map(() => (op.value ?? null));
-
-    let touched = false;
-    for (let i = 0; i < targets.length; i++) {
-      const c = targets[i];
-      const to = values[i];
-      if (to === null || to === undefined || !Number.isFinite(to)) continue;
-      touched = true;
-
-      if (op.tween === "rate" && op.rate) {
-        this.tweens[c] = { to, rate: Math.abs(op.rate) };
-      } else if (op.tween === "time" && op.frames) {
-        const rate = Math.abs(to - this.channels[c]) / op.frames;
-        // The handler falls through to an immediate set when frames is 0.
-        this.tweens[c] = rate > 0 ? { to, rate } : null;
-        if (rate <= 0) this.channels[c] = to;
-      } else {
-        this.tweens[c] = null;
-        this.channels[c] = to;
-      }
-    }
-    if (!touched) return undefined;
-
-    if (ch <= 5) this.fogSet = true;
-    else this.lightSet = true;
-
-    if (op.tween === "time" && op.frames) {
-      return `${op.channel_name} -> ${op.value} over ${op.frames} frames`;
-    }
-    if (op.tween === "rate") return `${op.channel_name} -> ${op.value}`;
-    return undefined;
-  }
-
-  /**
-   * Advance every running channel tween by `frames`.
-   *
-   * Steps toward the target and stops exactly on it, which is what clearing
-   * the block's `enabled` word amounts to.
-   */
-  private stepTweens(frames: number): void {
-    if (frames <= 0) return;
-    for (let c = 0; c < CHANNEL_COUNT; c++) {
-      const t = this.tweens[c];
-      if (!t) continue;
-      const cur = this.channels[c];
-      const delta = t.to - cur;
-      const step = t.rate * frames;
-      if (Math.abs(delta) <= step) {
-        this.channels[c] = t.to;
-        this.tweens[c] = null;
-      } else {
-        this.channels[c] = cur + Math.sign(delta) * step;
-      }
-    }
+    return this.lightBlock.apply(op);
   }
 
   /**
@@ -1154,71 +1062,24 @@ export class Walker {
    */
   retireSceneSequence(): void {
     this.settleCameraAction();
-    this.retireQueuedEvent();
+    this.ring.retire();
   }
 
   /** `set_action_drain_mode`'s signed `pending += delta`. */
   addQueuedEvents(delta: number): void {
-    if (delta < 0) {
-      // A negative delta is the script retiring an action by hand, and the
-      // one it means is the `cam_play` still playing -- 0x33 is what cuts a
-      // shot short so the `finish_sequence` queued behind it can start.
-      this.camPending = false;
-    }
-    this.queuedEventsPending = Math.max(0, this.queuedEventsPending + delta);
+    this.ring.add(delta);
   }
 
-  /** One action handler completing: the `pending--` every one of them ends on. */
-  private retireQueuedEvent(): void {
-    // The engine lets this go negative and `wait_queued_events_done` tests
-    // `!= 0`, so a negative count there would park for ever. It cannot happen
-    // in the shipped scripts, but a skipped `queue_event` does not queue while
-    // its `goto_scene_state` still retires -- so the floor is kept.
-    if (this.queuedEventsPending > 0) this.queuedEventsPending -= 1;
-  }
-
-  /**
-   * Retire an outstanding `cam_play` because something has taken the camera
-   * off it.
-   *
-   * The engine runs the ring **one action at a time**: a second `cam_play`
-   * queued behind a first does not start until the first retires. This client
-   * runs an action the moment it is queued, so the moment `this.cam` is
-   * replaced the previous action is over as far as the count is concerned.
-   *
-   * Without this the count leaks, and it leaks precisely where nothing is
-   * ticking -- `seek` and `stepOnce` run instructions without a clock, so a
-   * block's worth of `cam_play`s all set `camPending` and only the last can
-   * ever be retired. A reload into such an address then parked for ever on the
-   * next `wait_queued_events_done`.
-   */
-  private supersedeCameraAction(): void {
-    if (!this.camPending) return;
-    this.camPending = false;
-    this.retireQueuedEvent();
-  }
-
-  /**
-   * Retire the `cam_play` whose path has just finished.
-   *
-   * `CamAdvancePathFrame` does this itself on the frame the path ends, so it
-   * has to happen wherever the camera can reach its end -- the clock in
-   * `tick`, and the skip, which ends the move where it stands.
-   */
   /** Public because `wait_queued_events_done` settles it. See `waits/`. */
   settleCameraAction(): void {
-    if (!this.camPending) return;
-    if (!this.cam || this.cam.done || this.cam.isStatic) {
-      this.camPending = false;
-      this.retireQueuedEvent();
-    }
+    this.ring.settle(this.cam);
   }
 
   applyQueueEvent(op: OpJson): string | undefined {
     // `EvtOpQueueEvent30` adds one for every action it queues. The handler
     // takes it back when it completes; the branches below say which of them
     // complete immediately and which stay outstanding.
-    this.queuedEventsPending += 1;
+    this.ring.queued();
 
     if (op.action === "cam_play") {
       const slot = op.slot ?? -1;
@@ -1258,7 +1119,7 @@ export class Walker {
         const at = op.resume ? (this.cam ? this.cam.frame + 1 : 0) : start;
         this.stashedCam = { slot, start: at, end };
         // `FUN_00403490` stashes and returns; the action is done.
-        this.retireQueuedEvent();
+        this.ring.retire();
         return `stashed ${at}..${end} for a later scene state 6/7`;
       }
 
@@ -1268,7 +1129,7 @@ export class Walker {
       // takes this path (0 of the 1110 non-deferred plays name -1), but it is
       // the other half of the opcode.
       const from = op.resume && this.cam ? this.cam.frame : start;
-      this.supersedeCameraAction();
+      this.ring.supersede();
       this.cam = {
         slot,
         startFrame: from,
@@ -1284,12 +1145,12 @@ export class Walker {
       this.host.startCamera(this.cam);
       if (this.cam.isStatic) {
         // `CamEvalStaticPose` writes the pose and retires; nothing is playing.
-        this.retireQueuedEvent();
+        this.ring.retire();
         return "static pose";
       }
       // `CamAdvancePathFrame` stays installed and retires on the frame the
       // path reaches its end -- `settleCameraAction` is where that lands.
-      this.camPending = true;
+      this.ring.claimCamera();
       return undefined;
     }
 
@@ -1298,7 +1159,7 @@ export class Walker {
       // operand as minor. Eight sites in the game, operands 1 and 3, both
       // inside row 1's live set. It retires like any other handler.
       this.enterSceneState(this.sceneState.major, op.args?.[0] ?? 0);
-      this.retireQueuedEvent();
+      this.ring.retire();
       return `scene state ${this.sceneState.major}/${this.sceneState.minor}`;
     }
 
@@ -1306,7 +1167,7 @@ export class Walker {
       // FUN_00403DB0 reads these back indexed by branch_choice, so they are
       // the shot the arcade shows for each route the branch can take.
       this.branchPreview = op.branch_preview;
-      this.retireQueuedEvent();
+      this.ring.retire();
       return `${op.branch_preview.length} branch preview shots`;
     }
 
@@ -1323,7 +1184,7 @@ export class Walker {
         const st = this.stashedCam;
         if (!st) return "state 6/7 with nothing stashed";
         // The stashed play takes the camera over; whatever was on it is done.
-        this.supersedeCameraAction();
+        this.ring.supersede();
         this.cam = {
           slot: st.slot,
           startFrame: st.start,
@@ -1354,7 +1215,7 @@ export class Walker {
     // (0x14), `set_flag` (0x15), `hold_camera_preset` (0x20) and a `store_six`
     // with no preview: none is modelled here, and every one of them ends on
     // the same `pending--`, so the ring must not be left owing work for them.
-    this.retireQueuedEvent();
+    this.ring.retire();
     return undefined;
   }
 
@@ -1485,8 +1346,7 @@ export class Walker {
     // That is a real bound, not a tidy-up: it is why a miscounted action costs
     // at most one block rather than deadlocking the stage.
     if (this.queuedEventsPending !== 0) this.ringResidue += 1;
-    this.queuedEventsPending = 0;
-    this.camPending = false;
+    this.ring.reset();
     if (this.options.clearSpawnsOnBlock) this.spawns = [];
     // The preview shots belong to the branch in the block that stored them --
     // every `store_six` in the game sits in a branch block. Carrying one

@@ -287,8 +287,26 @@ things:
 |---|---|---|
 | **The VM** — program counter over block/step/op, the dispatch table, `executeOne`, `apply` | fused | `script/vm.ts`, ~250 lines |
 | **Resumption** — what makes the VM *stop*: wait policies, the enemy gates, the skip request, the firing gate | `SKIPPABLE_WAITS`, `ENEMY_GATE_WAITS`, `waitSatisfied`, `WAIT_NOTES` | `script/waits/*.ts`, one file per policy kind, registered the way `ops/` register |
-| **Script-driven state** — channel tweens, scene state, queued events, the camera action lifecycle | seven methods and the `CH_*` constants | `script/state/{channels,scene,queued,camera}.ts`, each owning its own save slice |
+| **Script-driven state** — channel tweens, scene state, queued events, the camera action lifecycle | seven methods and the `CH_*` constants | `script/state/{channels,queued}.ts` — **two**, not four; see below |
 | **Seek** — `seek`, `seekInner`, `reaches`, `takeBranchToward` | inside the VM | `script/seek.ts`, a planner that drives the VM's public surface |
+
+**Two state modules, not four.** `channels.ts` is arithmetic over eleven
+numbers with no host, no camera and no cursor, so it comes out whole.
+`queued.ts` is the action ring *and* the outstanding `cam_play`, which the
+plan had as two files and which are one mechanism: the engine runs the ring
+one action at a time, so a shot being replaced **is** the previous action
+completing. Splitting them is what would let the count and the flag be written
+down inconsistently, which is the bug that used to park a reload for ever.
+
+`scene.ts` was not worth making. `enterSceneState` is one assignment and
+`retireSceneSequence` is two calls; a file for them would be indirection with
+nothing inside it.
+
+Neither module owns a save *slice*, either. The plan said each should, but the
+walker's `saveState` is a flat list of forty keys and `loadState` a loop over
+their names — a shape whose whole virtue is that it is one list. The modules
+own the **logic**; the fields stay accessors onto them, so forty call sites and
+the round-trip test go on speaking the same language.
 
 **Seek is the one worth arguing about.** It is not part of the machine: it is a
 tool that drives the machine to a target, the way a debugger does. Keeping it

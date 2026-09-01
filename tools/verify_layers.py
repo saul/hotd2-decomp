@@ -172,7 +172,11 @@ def main() -> int:
             "error"),
     }
 
-    files = sorted(SRC.rglob("*.ts"))
+    # `.tsx` too. The UI layer is written in it, so globbing only
+    # `.ts` had `ui-reads-projection-only`, `no-engine-writes-in-ui`
+    # and `layer-direction` printing `error 0 ok` without ever having
+    # opened the files they exist to police.
+    files = sorted([*SRC.rglob("*.ts"), *SRC.rglob("*.tsx")])
 
     for f in files:
         lay = layer_of(f)

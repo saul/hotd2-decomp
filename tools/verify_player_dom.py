@@ -27,8 +27,11 @@ HTML = ROOT / "web" / "index.html"
 #: `document.querySelector("#view")`. Matching any `"#..."` string instead
 #: swept up CSS colours -- and `"#feed"` is four hex digits, so excluding
 #: colours by shape would have quietly dropped a real one.
+#: The type parameter is optional on both forms -- `querySelector<T>("#id")`
+#: is how every lookup in `ui/` is written, and rejecting it is why this tool
+#: reported `feed`, `tree-filter`, `globals` and `wait-body` as read by nothing.
 SELECTOR = re.compile(
-    r'(?:\$(?:<[^>()]*>)?|querySelector(?:All)?)\s*\(\s*'
+    r'(?:\$|querySelector(?:All)?)(?:<[^>()]*>)?\s*\(\s*'
     r'["\']#([A-Za-z][-\w]*)["\']')
 #: Selectors built at runtime are out of scope; they are flagged, not resolved.
 DYNAMIC = re.compile(r'querySelector(?:All)?\s*\(\s*`[^`]*\$\{')
@@ -44,7 +47,8 @@ def main() -> int:
 
     wanted: dict[str, list[str]] = {}
     dynamic: list[str] = []
-    for path in sorted(SRC.rglob("*.ts")):
+    # `.tsx` too: the UI layer is written in it.
+    for path in sorted([*SRC.rglob("*.ts"), *SRC.rglob("*.tsx")]):
         text = path.read_text()
         rel = str(path.relative_to(ROOT))
         for name in SELECTOR.findall(text):

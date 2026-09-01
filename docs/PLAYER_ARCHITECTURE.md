@@ -841,12 +841,12 @@ those two facts. Steps 13-19 clear them.
 
 ### The checks did not read the UI layer
 
-`verify_layers.py:175` and `verify_player_dom.py:47` both glob
+`verify_layers.py:175` and `verify_player_dom.py:47` both globbed
 `SRC.rglob("*.ts")`. The UI layer is `.tsx`. So `ui-reads-projection-only`,
 `no-engine-writes-in-ui` and `layer-direction` printed `error 0 ok` having
-never opened the 790 lines they exist to police. It is clean today by
-discipline, not by measurement — widening the glob leaves all eleven rules
-green and both ratchets held, so closing it costs nothing.
+never opened the 790 lines they exist to police. It was clean by discipline,
+not by measurement — and widening the glob left all eleven rules green with
+both ratchets held, so closing it cost nothing. **Step 13 did.**
 
 The DOM guard has a second, independent hole. Its `SELECTOR` rejects a type
 parameter, and every lookup in `ui/` uses one:
@@ -857,15 +857,20 @@ parameter, and every lookup in `ui/` uses one:
 | `document.querySelector<HTMLElement>("#feed")` | **no** |
 | `at(sel)` in `App.tsx` | **no** — built at runtime |
 
-That is why the tool lists `feed`, `tree-filter`, `globals` and `wait-body`
-under *"no code reads"*: they are read constantly.
+That is why the tool listed `feed` and `tree-filter` under *"no code
+reads"* while `main.ts` read both every frame; widening the pattern moved them
+across, 12 referenced ids to 14. `globals` and `wait-body` stayed on that list
+for the third reason below, and stay there until step 16.
 
 The third hole is not a defect in the tool. `App.tsx` mounts sixteen portals
 through `at(sel)`, so rename `#globals` in the markup and `createPortal` gets
 `null`, `into` returns `null`, and the panel silently does not render — behind
 a clean `tsc`, a clean `vite build` and a clean `verify_player_dom`. That is
 precisely the failure the tool was written for, reproduced sixteen times by the
-portal design. It is an argument for step 16, not for a cleverer regex.
+portal design. It is an argument for step 16, not for a cleverer regex — so
+step 13 made `into` **throw** on a missing host rather than teach the checker
+to guess. A mount point that has gone is now a blank page and a named id in
+the console, which is the loudest a run-time selector can be made.
 
 ### One attribute, two writers
 
@@ -1059,11 +1064,11 @@ it nibbles at `render-drives-the-port` rather than feeding it.
 
 ## Order of work
 
-Steps 1–9b and 12 are done; 10 is untouched and 11 is half made. Each step compiles,
+Steps 1–9b, 12 and 13 are done; 10 is untouched and 11 is half made. Each step compiles,
 keeps `verify_layers.py` green, and passes `verify_player_ops.py` and `npm run test:port`
 on its own.
 
-Steps 13 and 14 are independent of everything and of each other. 15–18 are one arc and
+Step 14 is independent of everything else. 15–18 are one arc and
 should not be interleaved with anything else touching `index.html` or `style.css`.
 19 edits `script/walker.ts`, which is step 10's territory — check `git status` and
 `ListAgents` before starting it.
@@ -1081,9 +1086,9 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
-| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control. **The inversion is not done** — the panels are portalled into `index.html`'s chrome, and the checks never read `.tsx`. Steps 13-19 | ◐ |
+| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control. **The inversion is not done** — the panels are still portalled into `index.html`'s chrome. Steps 15-18 | ◐ |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
-| 13 | **The checks read the UI layer.** `verify_layers.py` and `verify_player_dom.py` glob `.tsx` too; the DOM selector accepts a type parameter; `into()` throws on a missing host instead of rendering nothing | ☐ |
+| 13 | **The checks read the UI layer.** `verify_layers.py` and `verify_player_dom.py` glob `.tsx` too; the DOM selector accepts a type parameter; `into()` throws on a missing host instead of rendering nothing | ✅ |
 | 14 | **The snapshot oracle.** `CameraFrame` extracted so `GameSystem` is three-free and `System<Context>`; `web/test/state.test.ts` drives the real `World` headless and asserts save/load and seek equivalence frame by frame | ☐ |
 | 15 | **Panels own themselves.** Fold is `ui/` state, not a DOM read; cost becomes demand expressed by mounting; `rememberFolds` deleted and `app/projection/player.ts` loses its `$` | ☐ |
 | 16 | **`index.html` becomes a mount point.** The chrome is React's; `createPortal` and the sixteen mount ids go; the filter, the feed scroller, the loading overlay, the paused overlay and `#status` become projection state; the `.mode` collision goes with the imperative writer | ☐ |

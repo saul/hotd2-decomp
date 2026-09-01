@@ -27,16 +27,25 @@ import { Transport } from "./panels/Transport";
 import { SkipBar } from "./panels/SkipBar";
 import { BranchBar } from "./panels/BranchBar";
 
-const at = (sel: string) => document.querySelector(sel);
+/**
+ * A panel's mount point, or a loud failure.
+ *
+ * Returning `null` for a missing host is precisely the bug
+ * `verify_player_dom.py` was written to catch, reproduced sixteen times over:
+ * rename an id in `index.html` and the panel simply stops rendering, behind a
+ * clean `tsc` and a clean `vite build`. These selectors are built at run time
+ * and no static check can see them, so until step 16 deletes the portals
+ * altogether, throwing is what stands in for one.
+ */
+const into = (sel: string, node: React.ReactNode) => {
+  const host = document.querySelector(sel);
+  if (!host) throw new Error(`ui: no mount point ${sel} in index.html`);
+  return createPortal(node, host);
+};
 
 export function App({ store }: { store: UiStore }) {
   const p = useSyncExternalStore(store.subscribe, store.getSnapshot);
   if (!p) return null;
-
-  const into = (sel: string, node: React.ReactNode) => {
-    const host = at(sel);
-    return host ? createPortal(node, host) : null;
-  };
 
   return (
     <>

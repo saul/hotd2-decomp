@@ -58,7 +58,10 @@ import type {
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
 import { buildProjection, type PlayerView } from "./projection/player";
-import { describeShutter, hudRows } from "./projection/hud";
+import { describeShutter, groupRows, hudRows, type HudInputs }
+  from "./projection/hud";
+import type { RigSource } from "./projection/rigs";
+import type { DebugGroupName, StripRow } from "../ui/projection";
 import {
   branchProjection, skipProjection, soundProjection, transportProjection,
 } from "./projection/chrome";
@@ -91,6 +94,11 @@ import { ResetGameGlobals } from "../game/globals";
  * throws once a page exceeds it, so this stays comfortably the safe side.
  */
 const URL_SYNC_MS = 500;
+
+/** Before a stage is up there is nothing to report, and the shape is fixed. */
+const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
+  camera: [], scene: [], actors: [], props: [], collision: [], shooting: [],
+};
 
 /** The commands that change something worth remembering across a reload. */
 const PREF_COMMANDS: ReadonlySet<string> = new Set([
@@ -183,6 +191,8 @@ export class Player implements PlayerView, PlayerCommands {
   private readonly ui: UiStore;
   /** The sidebar's own state: which classes are boxed, and which are folded. */
   readonly boxedClasses = new Set<number>();
+  /** The rigs panel's selection — see the `boxRig` command. */
+  readonly boxedRigs = new Set<string>();
   readonly shutClasses = new Set<number>();
   /** The wait panel's `box` checkbox — see the `boxWait` command. */
   boxWait = false;
@@ -251,6 +261,10 @@ export class Player implements PlayerView, PlayerCommands {
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
     this.scene.add(this.debug.group);
+    // The outlines the rigs panel draws. The rig roots themselves are nodes of
+    // the stage's own glTF and are already in the scene; this is only the
+    // boxes round the ones the sidebar has ticked.
+    this.scene.add(this.rigs.group);
     this.scene.add(this.breakables.group);
 
     this.ctx = {
@@ -420,40 +434,54 @@ export class Player implements PlayerView, PlayerCommands {
   get minimap(): MinimapGraph | null { return this.minimapGraphData; }
   get feed(): readonly FeedRow[] { return this.feedRows; }
   /**
-   * The HUD strip, built where it is read.
+   * Everything the debug sidebar reads, built where it is read.
    *
-   * It was a field rebuilt by `refreshUi` from nineteen call sites, which is
-   * how a panel came to show the state from *before* the first frame. Every
-   * row is a layer's own one-line `describe`, so building it costs a string
-   * concatenation per layer and the projection's change key decides whether
-   * anyone sees it.
+   * One call, two shapes: the Player strip and the per-subject groups. They
+   * share every input, so building them apart would mean reading the same
+   * dozen layers twice a frame and keeping two argument lists in step.
    */
-  get hudRows(): readonly [string, string, boolean?][] {
+  private get hudInputs(): HudInputs | null {
     const w = this.walker;
-    if (!w || !this.scene3d) return [];
-    return hudRows(w, {
+    if (!w || !this.scene3d) return null;
+    return {
       mode: this.state.mode,
-      region: this.scene3d.visibility === "all",
+      allRegions: this.scene3d.visibility === "all",
       drawn: `${this.scene3d.visibleCount} models, `
            + `${this.scene3d.visibleTriangles.toLocaleString()} tris`,
       eye: this.camera.position,
+      target: this.cam.pose.target,
+      yawBams: this.ctx.view.yawBams,
       describe: {
-        fog: this.sceneFog.describe,
-        light: this.lighting.describe,
-        sky: this.backdrop.describe,
-        rigs: this.rigs.describe,
         characters: this.chars.describe,
         props: this.props.describe,
+        rigs: this.rigs.describe,
         breakables: this.breakables.describe,
         shooting: this.shooting.describe,
         coli: this.coliDebug.describe,
         wedged: this.stuckDebug.describe,
         enemies: this.game.describe,
-        shutter: describeShutter(this.walker, this.toggles.hud),
+        shutter: describeShutter(w, this.toggles.hud),
         rain: this.rain.describe,
+        fog: this.sceneFog.describe,
+        light: this.lighting.describe,
+        sky: this.backdrop.describe,
       },
-    });
+    };
   }
+
+  get hudRows(): readonly StripRow[] {
+    const w = this.walker;
+    const x = this.hudInputs;
+    return w && x ? hudRows(w, x) : [];
+  }
+
+  get groups(): Readonly<Record<DebugGroupName, readonly StripRow[]>> {
+    const w = this.walker;
+    const x = this.hudInputs;
+    return w && x ? groupRows(w, x) : EMPTY_GROUPS;
+  }
+  /** Every rig in the stage, for the rigs panel. See `render/rigs.ts`. */
+  get rigList(): readonly RigSource[] { return this.rigs.list; }
   get hasSaved(): boolean { return !!this.saved; }
   get sound(): SoundProjection { return soundProjection(this); }
   get skip(): SkipProjection | null { return skipProjection(this); }
@@ -971,6 +999,9 @@ export class Player implements PlayerView, PlayerCommands {
     // drawn, so this is computed before anything is folded away.
     this.debug.highlight = highlightSet(
       this.walker, this.boxedClasses, this.boxWait);
+    // Same reasoning, one layer over: the composition root is what sees both
+    // the panel's selection and the layer that can draw it.
+    this.rigs.highlight = this.boxedRigs;
 
     // `stabilise` inside the builder hands back the value the store already
     // holds when nothing moved, so `publish` decides with an identity test.

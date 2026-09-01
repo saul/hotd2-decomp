@@ -27,15 +27,68 @@ import { Globals } from "./Globals";
 import { HudStrip } from "./HudStrip";
 import { Minimap } from "./Minimap";
 import { Panel } from "./Panel";
+import { DebugGroup } from "./DebugGroup";
+import { Rigs, RigsSub } from "./Rigs";
 import { Scopes } from "./Scopes";
 
 export function Sidebar() {
   return (
     <>
-      <div id="hud" className="panel"><HudStrip /></div>
+      {/* The strip folds like everything else. It is the tallest thing in
+          the column and it is not always what you are looking at, and the
+          panels below it have nowhere to go while it is open — `panel-feed`
+          has `flex: 1` and was being squeezed to zero height, summary
+          included, whenever the strip grew. */}
+      <Panel id="panel-hud" title="Player" defaultOpen>
+        <div id="hud" className="scroll"><HudStrip /></div>
+      </Panel>
 
       <WaitPanel />
+
+      <Panel id="panel-camera" title="Camera"
+             subTitle={"Where the shot is and where it is aimed. `Rails` and "
+               + "`Look-at` draw the authored cam/ curves; `Track` is the "
+               + "gameplay camera, which aims at whichever actor holds an "
+               + "attack permit and eases onto it."}>
+        <DebugGroup group="camera" />
+      </Panel>
+
+      <Panel id="panel-scene" title="Scene"
+             subTitle={"The stage itself: which regions are drawn, the "
+               + "backdrop, the weather, and the fog and light ramps the "
+               + "script sets."}>
+        <DebugGroup group="scene" />
+      </Panel>
+
       <ActorsPanel />
+
+      <Panel id="panel-props" title="Props"
+             subTitle={"Scripted scenery, the class-0x41 breakables, and the "
+               + "rigs that ride op_ paths."}>
+        <DebugGroup group="props" />
+      </Panel>
+
+      <Panel id="panel-rigs" title="Rigs" slice="rigs" sub={<RigsSub />}
+             subTitle={"Everything that rides an `op_` path — vehicles, "
+               + "shutters and props assembled from transcribed draw "
+               + "routines. One row per rig: exactly one of its routes is "
+               + "drawn at a time. `box` outlines it in the scene, and does "
+               + "so whether or not it is currently drawn, so a rig that is "
+               + "missing when you expected it can still be located."}>
+        <div className="scroll dbg"><Rigs /></div>
+      </Panel>
+
+      <Panel id="panel-collision" title="Collision"
+             subTitle={"The game's own coli/ world as the port traces it, and "
+               + "which enemies are wedged against it."}>
+        <DebugGroup group="collision" />
+      </Panel>
+
+      <Panel id="panel-shooting" title="Shooting"
+             subTitle={"Click to shoot: the ray, the per-bone hit spheres, "
+               + "the damage escalation and the score, all the game's own."}>
+        <DebugGroup group="shooting" />
+      </Panel>
 
       <Panel id="panel-route" title="Route graph">
         <Minimap />

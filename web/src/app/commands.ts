@@ -84,6 +84,8 @@ export interface PlayerCommands {
   readonly walker: Walker | null;
   /** Sets, so the contents move while the reference does not. */
   readonly boxedClasses: Set<number>;
+  /** The rigs panel's outline selection, by rig name. */
+  readonly boxedRigs: Set<string>;
   readonly shutClasses: Set<number>;
   readonly camera: PerspectiveCamera;
   readonly scene: Scene;
@@ -137,6 +139,10 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       return;
     case "boxWait":
       p.boxWait = c.on;
+      return;
+    case "boxRig":
+      if (c.on) p.boxedRigs.add(c.name);
+      else p.boxedRigs.delete(c.name);
       return;
     case "seek":
       p.seekTo(c.block, c.step, c.op);

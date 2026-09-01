@@ -62,8 +62,9 @@ const UI = join(WEB, "src", "ui");
 
 const rules = {
   "selectors-return-fields": {
-    why: "a `useSlice` selector names a field of the projection; one that "
-       + "builds a value returns a new object on every read, and the "
+    why: "a `useSlice` selector names a field of the projection -- a path, "
+       + "indexed or not, optionally with a literal fallback. One that "
+       + "*builds* a value returns a new object on every read, and the "
        + "subscription never settles",
     severity: "error",
     hits: [],
@@ -116,6 +117,15 @@ function isFieldPath(n) {
     return isFieldPath(n.expression);
   }
   if (ts.isPropertyAccessExpression(n)) return isFieldPath(n.expression);
+  // `s.groups[group]` is a read of a field, exactly as `s.groups.camera` is,
+  // and `stabilise` has settled what comes back either way. What must not be
+  // in the subscript is a **call**: that is a value computed per read, and the
+  // reference it produces would be new every time. So the index may be a
+  // literal or a path, and nothing else.
+  if (ts.isElementAccessExpression(n)) {
+    const i = n.argumentExpression;
+    return isFieldPath(n.expression) && (isLiteral(i) || isFieldPath(i));
+  }
   if (ts.isBinaryExpression(n)) {
     const op = n.operatorToken.kind;
     if (op === ts.SyntaxKind.QuestionQuestionToken

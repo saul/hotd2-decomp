@@ -47,6 +47,13 @@ export type UiCommand =
    * user had clicked, rather than being told.
    */
   | { kind: "boxWait"; on: boolean }
+  /**
+   * The rigs panel's per-rig outline.
+   *
+   * Keyed by name rather than by index, because the list is rebuilt every
+   * frame and an index would follow whatever happened to be in that position.
+   */
+  | { kind: "boxRig"; name: string; on: boolean }
   | { kind: "setLightMode"; mode: string }
   | { kind: "setFogMode"; mode: string }
   | { kind: "setPillarbox"; on: boolean }

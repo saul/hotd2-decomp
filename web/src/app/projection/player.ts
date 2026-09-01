@@ -19,12 +19,14 @@ import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type {
   BranchProjection, FeedRow, LoadingProjection, MinimapGraph, SkipProjection,
-  SoundProjection, StatusProjection, TransportProjection, TreeProjection,
-  UiProjection,
+  SoundProjection, StatusProjection, StripRow, TransportProjection,
+  TreeProjection, UiProjection,
 } from "../../ui/projection";
+import type { DebugGroupName } from "../../ui/projection";
 import { stabilise } from "./stable";
 import { actorsProjection, waitProjection } from "./sidebar";
 import { globalsProjection } from "./globals";
+import { rigsProjection, type RigSource } from "./rigs";
 import { inspectorText, opSummary } from "./script";
 
 /**
@@ -54,6 +56,8 @@ export interface PlayerView {
   readonly paths: CamPaths | null;
   readonly camEye: { x: number; y: number; z: number };
   readonly boxedClasses: ReadonlySet<number>;
+  readonly boxedRigs: ReadonlySet<string>;
+  readonly rigList: readonly RigSource[];
   readonly shutClasses: ReadonlySet<number>;
   readonly boxWait: boolean;
   /**
@@ -68,7 +72,8 @@ export interface PlayerView {
   readonly tree: TreeProjection | null;
   readonly minimap: MinimapGraph | null;
   readonly feed: readonly FeedRow[];
-  readonly hudRows: readonly [string, string, boolean?][];
+  readonly hudRows: readonly StripRow[];
+  readonly groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   readonly appScope: Scope;
   readonly stageLoadedAt: number;
   readonly hasSaved: boolean;
@@ -114,6 +119,10 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     // Built only while something is showing it: it walks every global and
     // every actor and formats them all.
     globals: v.wants("globals") ? globalsProjection() : null,
+    // Also demand-gated: stage 2 has 335 rig instances and every one of
+    // them is a row. The *selection* is not gated — the outlines follow
+    // the ticks whether or not the panel that made them is open.
+    rigs: v.wants("rigs") ? rigsProjection(v.rigList, v.boxedRigs) : null,
     tree: v.tree,
     minimap: v.minimap,
     current: w ? { block: w.block, step: w.step, op: w.opIndex } : null,
@@ -121,6 +130,7 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     inspector: w?.currentOp
       ? inspectorText(w.currentOp, { summary: opSummary(w.currentOp) }) : "",
     hudRows: v.hudRows,
+    groups: v.groups,
     skip: v.skip,
     branch: v.branch,
     scopes: v.appScope.snapshot(),

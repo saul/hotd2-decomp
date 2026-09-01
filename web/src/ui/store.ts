@@ -31,10 +31,11 @@ import type { Dispatch, UiCommand } from "./commands";
  *
  * A closed set, because each one is a real cost with a name: `globals` walks
  * every global and every actor and formats them all, `actors` groups the pool
- * by class, `wait` resolves what the script is blocked on. Everything else in
+ * by class, `wait` resolves what the script is blocked on, `rigs` walks every
+ * instance in the stage — 335 of them in stage 2. Everything else in
  * the projection is a handful of fields and is always built.
  */
-export type UiSlice = "wait" | "actors" | "globals";
+export type UiSlice = "wait" | "actors" | "globals" | "rigs";
 
 export class UiStore {
   private current: UiProjection | null = null;

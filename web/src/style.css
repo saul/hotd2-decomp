@@ -228,6 +228,39 @@ body.resizing { cursor: col-resize; user-select: none; }
 #hud .v { font-family: var(--mono); }
 #hud .v.hot { color: var(--accent-2); }
 
+/* ---- debug groups: a subject's switches, then its numbers ---- */
+
+.grp { padding: 6px 10px 8px; }
+.grp-switches {
+  display: flex; flex-wrap: wrap; gap: 2px 12px;
+  padding-bottom: 6px; font-size: 12px;
+}
+.grp-switches label {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+}
+.grp-switches input { margin: 0; }
+.grp-rows {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+  font-size: 12px;
+}
+.grp-rows .k { color: var(--dim); }
+.grp-rows .v { font-family: var(--mono); overflow-wrap: anywhere; }
+.grp-rows .v.hot { color: var(--accent-2); }
+
+/* ---- rigs ---- */
+
+.rig-row {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 1px 10px; font-size: 12px; font-family: var(--mono);
+}
+.rig-row.dead { color: var(--dim); }
+.rig-box { cursor: pointer; color: var(--dim); flex: none; }
+.rig-box:hover { color: var(--accent); }
+.rig-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rig-slot { color: var(--dim); flex: none; }
+.rig-held { color: var(--warn); flex: none; }
+.rig-note { flex: none; }
+
 #minimap { display: block; width: 100%; }
 
 /* ---- feed ---- */

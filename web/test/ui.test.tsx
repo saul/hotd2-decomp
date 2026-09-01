@@ -79,6 +79,12 @@ function projection(): UiProjection {
     actorPanel: { sub: "12 actors", groups: [] },
     globals: { rows: [{ name: "g_frame", value: "10", address: "009C7108" }],
                actors: [], liveActors: 0, thrown: [] },
+    rigs: { sub: "1/2 showing", rows: [
+      { name: "obj_432840", slot: 12, visible: true, frozen: false,
+        note: "", routes: 2, boxed: true },
+      { name: "obj_484ff0_props", slot: null, visible: false, frozen: true,
+        note: "held", routes: 1, boxed: false },
+    ] },
     tree: { blocks: [{ index: 0, kind: "next", targets: [1], stepCount: 2,
                        title: "block 0", steps: [] }] },
     minimap: { entry: 0, nodes: [{ index: 0, kind: "next", next: [1] }] },
@@ -94,6 +100,14 @@ function projection(): UiProjection {
              status: "ported", title: "" }],
     inspector: "cam_play",
     hudRows: [["mode", "play"]],
+    groups: {
+      camera: [["slot", "57"], ["yaw", "180.0°  0x8000"]],
+      scene: [["region", "2", true]],
+      actors: [["characters", "6 of 267 up"]],
+      props: [["props", "44/44 up"]],
+      collision: [["coli", "0 quads selected"]],
+      shooting: [["shooting", "off"]],
+    },
     skip: { canSkip: true, sub: "region 3", stacked: false },
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
@@ -268,7 +282,15 @@ check("nothing stands between #viewport and its canvas",
       "a boundary that wraps the canvas in an element of its own would also "
       + "be a boundary that can unmount it");
 check("nothing stands between #right and the first panel in it",
-      /id="right"[^>]*>\s*<div id="hud"/.test(warm));
+      /id="right"[^>]*>\s*<details id="panel-hud"/.test(warm));
+// The strip folds like every other panel. It is the tallest thing in the
+// column, and `panel-feed` below it has `flex: 1` -- so while the strip was a
+// bare div with no scroller and no fold, a long row could squeeze the feed to
+// zero height, summary included, and the panel simply was not on the page.
+check("the player strip is a panel, and it scrolls",
+      /<details id="panel-hud"[^>]*open/.test(warm)
+      && /<div id="hud" class="scroll"/.test(warm),
+      "an unscrollable strip pushes the panels below it off the column");
 
 console.log("\nEverything inside #viewport is React's:\n");
 

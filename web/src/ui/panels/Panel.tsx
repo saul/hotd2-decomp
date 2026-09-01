@@ -38,7 +38,14 @@ export function Panel({
   /** Also the CSS hook and the persistence key. */
   id: string;
   title: string;
-  sub?: string;
+  /**
+   * The dim text beside the title.
+   *
+   * A node and not a string, so a count that changes every frame can be a
+   * component with its own subscription — the panel then does not re-render
+   * to move a number in its own header.
+   */
+  sub?: ReactNode;
   subTitle?: string;
   /** The projection slice this panel is the only consumer of, if any. */
   slice?: UiSlice;

@@ -12,6 +12,7 @@
  * adding a row here without handling it fails to compile.
  */
 import type { ToggleName } from "../commands";
+import type { DebugGroupName } from "../projection";
 import { useDispatch } from "../store_context";
 import { useSlice } from "../useSlice";
 
@@ -21,40 +22,54 @@ export interface ToggleSpec {
   /** The state the player starts in. */
   on: boolean;
   title: string;
+  /**
+   * Which sidebar group draws this control, if any.
+   *
+   * The table stays the one owner of what a toggle *is* — its name, its
+   * default and the sentence that says what it does — and this only routes the
+   * control to the panel that shows what it affects. A second table for the
+   * sidebar's toggles would be a second place to add a row and a second place
+   * to forget to, and `applyToggle`'s exhaustiveness over `ToggleName` would
+   * not notice either.
+   *
+   * Undefined means the top bar, which keeps only what is about the session
+   * rather than about a layer.
+   */
+  group?: DebugGroupName;
 }
 
 export const TOGGLES: readonly ToggleSpec[] = [
-  { name: "allRegions", label: "All regions", on: false,
+  { name: "allRegions", label: "All regions", on: false, group: "scene",
     title: "Draw every region at once. Consecutive regions overlap heavily, so this is how the interpenetration becomes legible as a deliberate mechanism rather than an export bug." },
-  { name: "rails", label: "Rails", on: true,
+  { name: "rails", label: "Rails", on: true, group: "camera",
     title: "Camera eye rails, one polyline per cam/ path." },
-  { name: "aimRails", label: "Look-at", on: false,
+  { name: "aimRails", label: "Look-at", on: false, group: "camera",
     title: "The look-at track: where each camera path is aimed, as opposed to where it sits." },
-  { name: "sky", label: "Sky", on: true,
+  { name: "sky", label: "Sky", on: true, group: "scene",
     title: "The camera-following backdrop dome the script selects with evt 0x1B/0x1C." },
-  { name: "hud", label: "HUD", on: true,
+  { name: "hud", label: "HUD", on: true, group: "scene",
     title: "The screen-space layer: the letterbox shutter (evt 0x1F) and the dialogue subtitles (evt 0x2D)." },
-  { name: "rigs", label: "Rigs", on: true,
+  { name: "rigs", label: "Rigs", on: true, group: "props",
     title: "Objects that ride op_ object paths \u2014 vehicles and props, assembled from transcribed draw routines. They appear only while the camera is on a path that selects them." },
-  { name: "spawns", label: "Spawns", on: true,
+  { name: "spawns", label: "Spawns", on: true, group: "actors",
     title: "" },
-  { name: "chars", label: "Characters", on: true,
+  { name: "chars", label: "Characters", on: true, group: "actors",
     title: "Spawned characters assembled from the EXE skeleton and posed from mot/. A spawn whose class has no motion rule yet keeps its marker instead \u2014 an unposed character is a heap of parts, not a character." },
-  { name: "props", label: "Props", on: true,
+  { name: "props", label: "Props", on: true, group: "props",
     title: "Scripted scenery: doors, shutters and the vans they hang off. They swing when the script sets their flag (evt 0x48) and vanish on a second one. Also draws a bounding box and an origin cross on every prop the bundle names \u2014 green drawn, amber hidden, magenta no geometry, red no glTF node \u2014 so a prop that is not on screen can be told from one that was never exported." },
-  { name: "breakables", label: "Breakables", on: true,
+  { name: "breakables", label: "Breakables", on: true, group: "props",
     title: "The class-0x41 breakable props \u2014 the barrels and boxes the game hides its items in. Built at run time by PlaceBreakableGroup from the exe's own member records, two shots each, and a stack collapses when what it stands on is destroyed." },
-  { name: "unported", label: "Unported", on: false,
+  { name: "unported", label: "Unported", on: false, group: "actors",
     title: "Empty boxes wherever the script has spawned an actor whose class has no module in the port's g_class_handlers. The game would be running a state machine for it; this player is not. docs/formats/spawns.md says what each class is." },
-  { name: "coli", label: "Collision", on: false,
+  { name: "coli", label: "Collision", on: false, group: "collision",
     title: "The game's own coli/ collision, as the port traces it: amber for the blobs the script has selected into the sphere-and-segment set, blue for the ray-only ones, with a spike on each quad's normal so the one-sided winding is visible. A quad in neither set is not tested by anything and is not drawn." },
-  { name: "stuck", label: "Wedged", on: false,
+  { name: "stuck", label: "Wedged", on: false, group: "collision",
     title: "Which enemies are wedged. ZombiePushOutOfWorldAndActors traces every zombie's body sphere against the selected collision each frame and shoves it back out; one frame of that is normal, half a second of it is an actor that cannot get where its state is taking it. Marks those in red at the sphere the push actually tests. Counts only the world half, not the shoulder-past-another-zombie half." },
-  { name: "boxes", label: "Boxes", on: false,
+  { name: "boxes", label: "Boxes", on: false, group: "actors",
     title: "Bounding boxes on the actor holding an attack permit \u2014 the one about to swing, and the one SelectCameraLookAtTarget is aiming at \u2014 and, while wait_enemies_alive is blocking, on every enemy keeping it blocked." },
-  { name: "trackEnemies", label: "Track", on: true,
+  { name: "trackEnemies", label: "Track", on: true, group: "camera",
     title: "The gameplay camera. With enemies registered, SelectCameraLookAtTarget aims at the one holding an attack permit -- the one about to swing -- or the midpoint of two, and TurnLookAtToward eases the camera onto it. Off restores the authored cam/ path exactly." },
-  { name: "shoot", label: "Shoot", on: false,
+  { name: "shoot", label: "Shoot", on: false, group: "shooting",
     title: "Click to shoot. Ray from the camera through the crosshair, tested against each character's per-bone hit spheres; hit points, the per-bone damage escalation, the sever step, the sounds and the score are the game's own. With this on, the live-enemy waits become real: the script holds until you have killed them. See docs/formats/combat.md." },
 ];
 
@@ -72,7 +87,7 @@ export function Toggles() {
   if (!state) return null;
   return (
     <>
-      {TOGGLES.map((t) => (
+      {TOGGLES.filter((t) => !t.group).map((t) => (
         <label key={t.name} title={t.title}>
           <input type="checkbox" checked={state[t.name]}
                  onChange={(e) => dispatch({ kind: "toggle", name: t.name,

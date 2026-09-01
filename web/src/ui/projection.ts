@@ -18,6 +18,20 @@
 import type { ScopeRow } from "./panels/scope_types";
 import type { ToggleName } from "./commands";
 
+/** One row of a key/value readout: label, value, and whether it is hot. */
+export type StripRow = readonly [string, string, boolean?];
+
+/**
+ * The debug sidebar's groups.
+ *
+ * One panel per subject, each holding that subject's switches *and* its
+ * numbers — because a control and the readout it affects belong together, and
+ * they used to sit on opposite sides of the page with only a shared word
+ * connecting them.
+ */
+export type DebugGroupName =
+  "camera" | "scene" | "actors" | "props" | "collision" | "shooting";
+
 /** One route out of a branch point, as a button. */
 export interface BranchOption {
   target: number;
@@ -141,6 +155,33 @@ export interface FeedRow {
   cat: string;
   status: string;
   title: string;
+}
+
+/**
+ * One object rig, as the rigs panel lists it.
+ *
+ * A rig is a thing that rides an `op_` path — a vehicle, a shutter, a prop
+ * assembled from a transcribed draw routine. `boxed` is this panel's own
+ * selection, drawn as an outline in the scene by `render/rigs.ts`.
+ */
+export interface RigRow {
+  name: string;
+  /** The `op_` slot the current route rides, or null when no route is live. */
+  slot: number | null;
+  visible: boolean;
+  /** The path ran out and the pose is held. */
+  frozen: boolean;
+  note: string;
+  /** How many routes this rig has. Exactly one is ever drawn. */
+  routes: number;
+  boxed: boolean;
+}
+
+/** The rigs panel. Null while it is folded. */
+export interface RigsProjection {
+  /** `12/335 showing`. */
+  sub: string;
+  rows: RigRow[];
 }
 
 /** One weapon in flight, as the globals panel lists it. */
@@ -305,6 +346,8 @@ export interface UiProjection {
   actorPanel: ActorsProjection | null;
   /** Null while the panel is folded — it is the expensive one to build. */
   globals: GlobalsProjection | null;
+  /** The object rigs. Null while the panel is folded. */
+  rigs: RigsProjection | null;
   /** Rebuilt on a stage load only, and held by reference until then. */
   tree: TreeProjection | null;
   /** Also per stage; the minimap paints it to a canvas itself. */
@@ -320,8 +363,16 @@ export interface UiProjection {
   feed: readonly FeedRow[];
   /** The inspector's body, already serialised. */
   inspector: string;
-  /** The HUD strip: label, value, and whether it is worth the eye. */
-  hudRows: readonly [string, string, boolean?][];
+  /** The Player strip: label, value, and whether it is worth the eye. */
+  hudRows: readonly StripRow[];
+  /**
+   * Each debug group's readouts.
+   *
+   * The switches are not here: they come from the `TOGGLES` table, which is
+   * the one owner of what a toggle is and which carries the `group` that says
+   * where it is drawn. This is only the numbers beside them.
+   */
+  groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   skip: SkipProjection | null;
   branch: BranchProjection | null;
   scopes: ScopeRow | null;

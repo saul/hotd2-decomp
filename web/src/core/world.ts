@@ -19,29 +19,35 @@ export type Phase = "script" | "game" | "render" | "hud";
 
 const ORDER: Phase[] = ["script", "game", "render", "hud"];
 
-export class World {
-  private readonly byPhase = new Map<Phase, System[]>(
-    ORDER.map((p) => [p, [] as System[]]));
+/**
+ * `C` is the context this world's systems are handed. `app/` builds one
+ * concrete object and names its widest type here; an engine system that only
+ * declares `Context` is still accepted, because a function that takes the
+ * narrow one takes the wide one too.
+ */
+export class World<C extends Context = Context> {
+  private readonly byPhase = new Map<Phase, System<C>[]>(
+    ORDER.map((p) => [p, [] as System<C>[]]));
 
-  add<T extends System>(phase: Phase, system: T): T {
+  add<T extends System<C>>(phase: Phase, system: T): T {
     this.byPhase.get(phase)!.push(system);
     return system;
   }
 
   /** Every system, in tick order. */
-  *systems(): Generator<System> {
+  *systems(): Generator<System<C>> {
     for (const p of ORDER) yield* this.byPhase.get(p)!;
   }
 
-  attach(ctx: Context): void {
+  attach(ctx: C): void {
     for (const s of this.systems()) s.attach?.(ctx);
   }
 
-  detach(ctx: Context): void {
+  detach(ctx: C): void {
     for (const s of this.systems()) s.detach?.(ctx);
   }
 
-  update(ctx: Context, t: Tick): void {
+  update(ctx: C, t: Tick): void {
     for (const s of this.systems()) s.update?.(ctx, t);
   }
 
@@ -51,7 +57,7 @@ export class World {
    * A system that implements `save` contributes a slice under its id; every
    * other system is expected to rebuild itself from those in `resync`.
    */
-  save(ctx: Context): Snapshot {
+  save(ctx: C): Snapshot {
     const parts: Record<string, unknown> = {};
     for (const s of this.systems()) {
       if (!s.save) continue;
@@ -77,7 +83,7 @@ export class World {
    * refusing outright, because a half-applied snapshot is indistinguishable
    * from a gameplay bug.
    */
-  load(snap: Snapshot, ctx: Context): string | null {
+  load(snap: Snapshot, ctx: C): string | null {
     const refusal = snapshotRefusal(snap, ctx.stage);
     if (refusal) return refusal;
     ctx.rng.state = snap.rng >>> 0;

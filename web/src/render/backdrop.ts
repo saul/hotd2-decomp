@@ -40,14 +40,15 @@
 
 import { Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { BackdropJson, BackdropPreset } from "../bundle";
-import { IDLE_TICK, type Context, type System, type Tick }
+import { IDLE_TICK, type System, type Tick }
   from "../core/system";
+import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
 
 /** The scale the draw applies. Negative Z is deliberate. */
 const DOME_SCALE = new Vector3(1.2, 1.2, -1.2);
 
-export class Backdrop implements System {
+export class Backdrop implements System<RenderContext> {
   readonly id = "render.backdrop";
   readonly group = new Group();
   private presets: BackdropPreset[] = [];
@@ -139,7 +140,7 @@ export class Backdrop implements System {
    * `frames` is the elapsed time in 60 Hz frames, matching the per-frame
    * `angle += spin` the draw does.
    */
-  update(ctx: Context, t: Tick): void {
+  update(ctx: RenderContext, t: Tick): void {
     const w = ctx.walker;
     if (!w) return;
     const preset = w.backdropPreset;
@@ -183,7 +184,7 @@ export class Backdrop implements System {
    * changes — so a load re-seats it from the preset rather than carrying a
    * rotation that belongs to wherever the player was before the seek.
    */
-  resync(ctx: Context): void {
+  resync(ctx: RenderContext): void {
     this.preset = -1;
     this.update(ctx, IDLE_TICK);
   }

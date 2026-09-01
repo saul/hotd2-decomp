@@ -1,4 +1,3 @@
-import type { PerspectiveCamera, Scene } from "three";
 import type { Walker } from "../script/walker";
 import type { Scope } from "./scope";
 import type { Events } from "./events";
@@ -7,10 +6,14 @@ import type { Rng } from "./rng";
 /**
  * What every system is handed. Built once per stage load and passed to every
  * call, so nothing has to capture anything.
+ *
+ * **No renderer.** There is no scene and no camera here, which is what makes
+ * the engine's half of the player runnable with no browser at all. `render/`
+ * widens this to a `RenderContext` — see `render/context.ts` — and `System`
+ * is generic over which of the two a layer needs, so a layer that asks for
+ * the wider one says so in its signature.
  */
 export interface Context {
-  readonly scene: Scene;
-  readonly camera: PerspectiveCamera;
   readonly events: Events;
   /** The world's seeded generator. The only random source in the player. */
   readonly rng: Rng;
@@ -67,19 +70,19 @@ export const IDLE_TICK: Tick =
  * without them contributes nothing and is expected to rebuild itself in
  * `resync`.
  */
-export interface System {
+export interface System<C extends Context = Context> {
   /** Unique, stable, and the key its slice takes in a snapshot. */
   readonly id: string;
-  attach?(ctx: Context): void;
-  update?(ctx: Context, t: Tick): void;
-  detach?(ctx: Context): void;
+  attach?(ctx: C): void;
+  update?(ctx: C, t: Tick): void;
+  detach?(ctx: C): void;
   /** This system's slice of the save state. Plain JSON data only. */
   save?(): unknown;
   /** Restore that slice. Called before `resync`. */
-  load?(slice: unknown, ctx: Context): void;
+  load?(slice: unknown, ctx: C): void;
   /**
    * Rebuild whatever is derived from game state. Called on every system after
    * a load, in tick order, so a renderer can re-pose from the restored actors.
    */
-  resync?(ctx: Context): void;
+  resync?(ctx: C): void;
 }

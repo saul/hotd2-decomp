@@ -28,7 +28,8 @@ import {
   Sprite, SpriteMaterial, Vector3,
 } from "three";
 import type { ActiveSpawn } from "../script/walker";
-import type { Context, System } from "../core/system";
+import type { System } from "../core/system";
+import type { RenderContext } from "./context";
 import type { Actor } from "../game/actor";
 import { ZombieState } from "../game/class30/states";
 import { ThrowerState } from "../game/class31/states";
@@ -108,7 +109,7 @@ export interface HighlightSource {
 
 const EMPTY: ReadonlySet<number> = new Set<number>();
 
-export class DebugBoxLayer implements System {
+export class DebugBoxLayer implements System<RenderContext> {
   readonly id = "render.debug_boxes";
   readonly group = new Group();
   /** Empty boxes for spawned classes with no module. */
@@ -271,7 +272,7 @@ export class DebugBoxLayer implements System {
    * two can never disagree about who is present. `waiting` is true while the
    * interpreter is parked on an enemy-count wait.
    */
-  update(ctx: Context): void {
+  update(ctx: RenderContext): void {
     const w = ctx.walker;
     const spawns = w?.spawns ?? [];
     const waiting = w?.wait?.policy.kind === "enemies";
@@ -356,7 +357,7 @@ export class DebugBoxLayer implements System {
   }
 
   /** The boxes are a pure function of the restored actor list. */
-  resync(ctx: Context): void {
+  resync(ctx: RenderContext): void {
     this.update(ctx);
   }
 }

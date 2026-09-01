@@ -20,7 +20,8 @@
  * the aim could only ever be a frame stale or a frame early.
  */
 import type { PerspectiveCamera } from "three";
-import type { Context, System, Tick } from "../core/system";
+import type { System, Tick } from "../core/system";
+import type { RenderContext } from "./context";
 import { CamAdvancePathFrame, CamSetPathTarget } from "../game/camera/path";
 import { G } from "../game/globals";
 import { Vector3 } from "three";
@@ -57,7 +58,7 @@ export class CameraRig {
    * engine never needs that — it has no seek — but arriving at a deep link
    * with an eased look-at of (0,0,0) points the camera at the world origin.
    */
-  seat(ctx: Context, force = false): void {
+  seat(ctx: RenderContext, force = false): void {
     const w = ctx.walker;
     if (!w || !this.scripted) return;
     const cam = w.cam;
@@ -81,7 +82,7 @@ export class CameraRig {
   }
 
   /** The draw: the block, after the hook has eased it. */
-  draw(ctx: Context): void {
+  draw(ctx: RenderContext): void {
     const w = ctx.walker;
     if (!w || !this.scripted) return;
     if (!w.cam || !this.paths?.paths.get(w.cam.slot)) return;
@@ -98,7 +99,7 @@ export class CameraRig {
   }
 
   /** Seat and draw in one go, for the paths that have no game tick between. */
-  sync(ctx: Context, force = false): void {
+  sync(ctx: RenderContext, force = false): void {
     this.seat(ctx, force);
     this.draw(ctx);
   }
@@ -122,11 +123,11 @@ export class CameraRig {
  * The first half, in the `script` phase: the shot writes the camera block
  * before the port's frame reads it.
  */
-export class CameraSeatSystem implements System {
+export class CameraSeatSystem implements System<RenderContext> {
   readonly id = "camera.seat";
   constructor(private readonly rig: CameraRig) {}
 
-  update(ctx: Context, _t: Tick): void {
+  update(ctx: RenderContext, _t: Tick): void {
     if (!this.rig.driving) return;
     this.rig.seat(ctx);
   }
@@ -136,11 +137,11 @@ export class CameraSeatSystem implements System {
  * The second half, first in the `render` phase: every layer below this one
  * poses against the camera this put where it is.
  */
-export class CameraDrawSystem implements System {
+export class CameraDrawSystem implements System<RenderContext> {
   readonly id = "camera.draw";
   constructor(private readonly rig: CameraRig) {}
 
-  update(ctx: Context, _t: Tick): void {
+  update(ctx: RenderContext, _t: Tick): void {
     if (!this.rig.driving) return;
     this.rig.draw(ctx);
   }
@@ -151,7 +152,7 @@ export class CameraDrawSystem implements System {
    * that came back with it has nothing to ease *from* until the block is on
    * the rail.
    */
-  resync(ctx: Context): void {
+  resync(ctx: RenderContext): void {
     this.rig.sync(ctx, true);
   }
 }

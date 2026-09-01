@@ -63,7 +63,8 @@ import {
   Vector3,
   type Material,
 } from "three";
-import type { Context, System } from "../core/system";
+import type { System } from "../core/system";
+import type { RenderContext } from "./context";
 
 /** 2*pi / 65536 — the constant both matrix rotators multiply by. */
 
@@ -126,7 +127,7 @@ export function lightDirection(pitchDeg: number, yawDeg: number,
   return out.set(cp * Math.sin(y), -Math.sin(p), cp * Math.cos(y));
 }
 
-export class SceneLighting implements System {
+export class SceneLighting implements System<RenderContext> {
   readonly id = "render.lighting";
   readonly group = new Group();
   private readonly dir = new DirectionalLight(0xffffff, DIFFUSE_SCALE);
@@ -239,7 +240,7 @@ export class SceneLighting implements System {
    * frames rather than switching it. `set` and `refreshGuns` no-op when
    * nothing actually moved.
    */
-  update(ctx: Context): void {
+  update(ctx: RenderContext): void {
     const w = ctx.walker;
     if (!w) return;
     this.set(w.light);
@@ -249,7 +250,7 @@ export class SceneLighting implements System {
                          ctx.camera.getWorldDirection(this._fwd));
   }
 
-  resync(ctx: Context): void {
+  resync(ctx: RenderContext): void {
     this.update(ctx);
   }
 

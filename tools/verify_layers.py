@@ -102,9 +102,10 @@ def main() -> int:
             "error"),
         "no-three-in-core": Rule(
             "no-three-in-core",
-            "`Context` holds a `Scene` and a `PerspectiveCamera`, so the "
-            "framework every System depends on is renderer-bound",
-            "ratchet", baseline=1, step=9),
+            "the framework every System depends on must not be renderer-bound "
+            "-- `RenderContext` lives in render/, and `System` is generic over "
+            "which context a layer takes",
+            "error"),
         "no-dom-in-engine": Rule(
             "no-dom-in-engine",
             "engine code that touches the DOM cannot be exercised headlessly",

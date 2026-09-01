@@ -7,7 +7,8 @@
  * `update` and `resync` are the same call.
  */
 import { Group, Object3D, Vector3 } from "three";
-import type { Context, System } from "../core/system";
+import type { System } from "../core/system";
+import type { RenderContext } from "./context";
 import { G } from "../game/globals";
 import { BAMS_TO_RAD } from "../core/bams";
 
@@ -15,7 +16,7 @@ export interface SlotSource {
   cloneSlot(slot: number): Object3D | null;
 }
 
-export class ProjectileLayer implements System {
+export class ProjectileLayer implements System<RenderContext> {
   readonly id = "render.projectiles";
   readonly group = new Group();
   /** The character layer, which owns the per-type model templates. */
@@ -29,7 +30,7 @@ export class ProjectileLayer implements System {
     this.nodes.clear();
   }
 
-  update(ctx: Context): void {
+  update(ctx: RenderContext): void {
     ctx.camera.getWorldPosition(this._eye);
     const seen = new Set<number>();
     for (const w of G.g_thrown_weapons) {
@@ -63,7 +64,7 @@ export class ProjectileLayer implements System {
   }
 
   /** A load replaced the weapon list wholesale; rebuild against the new one. */
-  resync(ctx: Context): void {
+  resync(ctx: RenderContext): void {
     this.detach();
     this.update(ctx);
   }

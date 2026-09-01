@@ -355,8 +355,7 @@ web/src/
     scope.ts      the disposal tree: child / defer / own / dispose
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
     world.ts      the registry, the tick order, save() and load()
-    context.ts    engine-only: { bundle, walker, events, rng, stage, frame }
-    render_context.ts  extends Context with { scene, camera }
+    context.ts    engine-only: { walker, scope, events, rng, stage, frame }
     events.ts     a typed bus
     rng.ts        seeded, state exposed — snapshots need it
     snapshot.ts   the Snapshot type and the round-trip check
@@ -371,7 +370,8 @@ web/src/
     waits/        one module per wait policy
     state/        channels, scene, queued events, camera action
     seek.ts       the planner
-  render/       stagescene, rigs, props, backdrop, rain, fog, lighting,
+  render/       context.ts -- RenderContext, which adds { scene, camera }
+                stagescene, rigs, props, backdrop, rain, fog, lighting,
                 campath, characters. Every one a System.
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
   ui/           React. projection.ts, commands.ts, and one file per panel
@@ -608,6 +608,24 @@ in this document, not in the checker.** If a piece of work genuinely cannot be
 done without adding a violation, that means the refactor it depends on has to
 come first — say so and stop, rather than raising the number. Every ratchet
 here is a debt with a named creditor: step 5, 9 or 11.
+
+### `RenderContext` lives in `render/`, not `core/`
+
+The shape above used to put it in `core/render_context.ts`. That would have
+kept three.js in `core/` — the same violation, relocated — so it is declared in
+`render/context.ts` instead, and `System` is generic over which context a layer
+takes:
+
+```ts
+export interface System<C extends Context = Context> { … }
+export class World<C extends Context = Context> { … }
+```
+
+There is still exactly **one** context object at run time. `app/` builds it and
+names `RenderContext` as its type; a system that declares plain `Context` is
+accepted by the same `World`, because a function taking the narrow one takes
+the wide one too. The split is entirely about what each layer is *allowed to
+see*, which is the only thing a boundary can usefully be.
 
 A ratchet that reaches zero and can never come back should become an **error**,
 which is what happened to `one-bams-constant`. There is no longer a reason to

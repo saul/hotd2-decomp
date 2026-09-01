@@ -7,6 +7,7 @@
  */
 import { Matrix4, Vector3 } from "three";
 import type { Context, System, Tick } from "../core/system";
+import type { RenderContext } from "../render/context";
 import { GameUpdate } from "../game/director";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
@@ -51,7 +52,7 @@ export class ScriptSystem implements System {
  * live one. That is the entire implementation, and it is short because the
  * port keeps its state where the engine keeps its state.
  */
-export class GameSystem implements System {
+export class GameSystem implements System<RenderContext> {
   readonly id = "game";
   /** Filled in by the host once the character layer exists. */
   backend: HostBackend | null = null;
@@ -111,7 +112,7 @@ export class GameSystem implements System {
     ResetGameGlobals();
   }
 
-  update(ctx: Context, t: Tick): void {
+  update(ctx: RenderContext, t: Tick): void {
     if (t.frozen || t.dt <= 0) return;
     this._camMat.copy(ctx.camera.matrixWorld);
     this._camInv.copy(ctx.camera.matrixWorldInverse);

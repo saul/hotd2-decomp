@@ -54,7 +54,8 @@ import { Scope } from "../core/scope";
 import { ScopeView } from "../hud/scope_view";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
-import type { Context, Tick } from "../core/system";
+import type { Tick } from "../core/system";
+import type { RenderContext } from "../render/context";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
 import { wireSplitter } from "../hud/splitter";
@@ -129,7 +130,7 @@ class Player {
    */
   private dialogue: SoundJson | null = null;
   /** The registry and the tick order: script -> game -> render -> hud. */
-  private readonly world = new World();
+  private readonly world = new World<RenderContext>();
   /**
    * The root of the disposal tree, and the two scopes under it that matter.
    *
@@ -174,7 +175,7 @@ class Player {
   /** The camera's own state: the pose scratch, the rails, and the two toggles. */
   private readonly cam = new CameraRig();
   /** Everything a system is handed. Built once; the stage index moves. */
-  private readonly ctx: Context;
+  private readonly ctx: RenderContext;
   /** The last snapshot taken, for the Load button. */
   private saved: Snapshot | null = null;
   /** Set while the frame slider is driving the camera by hand. */

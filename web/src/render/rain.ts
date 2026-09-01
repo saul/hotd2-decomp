@@ -44,7 +44,8 @@
 import { Euler, Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { RainJson } from "../bundle";
 import { Rng } from "../core/rng";
-import type { Context, System, Tick } from "../core/system";
+import type { System, Tick } from "../core/system";
+import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
 
 interface Drop {
@@ -54,7 +55,7 @@ interface Drop {
   z: number;
 }
 
-export class Rain implements System {
+export class Rain implements System<RenderContext> {
   readonly id = "render.rain";
   readonly group = new Group();
   private drops: Drop[] = [];
@@ -161,7 +162,7 @@ export class Rain implements System {
    * come from a vector `main.ts` filled *after* this ran, so the volume's
    * rotation was always one frame behind the shot it is meant to sit in.
    */
-  update(ctx: Context, t: Tick): void {
+  update(ctx: RenderContext, t: Tick): void {
     const on = ctx.walker?.rain ?? false;
     const camEye = ctx.camera.position;
     ctx.camera.getWorldDirection(this._fwdW);

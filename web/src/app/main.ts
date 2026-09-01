@@ -26,7 +26,6 @@ import {
   loadStage,
   type Manifest,
   type StageEntry,
-  type OpJson,
 } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
 import { CamPaths } from "../render/campath";
@@ -38,7 +37,7 @@ import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { restoreViewPrefs } from "./viewprefs";
-import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary, rememberFolds } from "../hud/ui";
+import { Minimap, rememberFolds } from "../hud/ui";
 import { Bgm } from "../audio/bgm";
 import { SceneFog, type FogMode } from "../render/fog";
 import { SceneLighting, type LightingMode } from "../render/lighting";
@@ -57,6 +56,10 @@ import type { UiProjection } from "../ui/projection";
 import { EMPTY_TOGGLES, type UiCommand } from "../ui/commands";
 import { globalsProjection } from "./projection/globals";
 import { screenMessage } from "./projection/message";
+import { feedRow, inspectorText, minimapGraph, opSummary, treeProjection }
+  from "./projection/script";
+import type { FeedRow, MinimapGraph, TreeProjection }
+  from "../ui/projection";
 import { actorsProjection, highlightSet, waitProjection }
   from "./projection/sidebar";
 import { Events } from "../core/events";
@@ -111,11 +114,22 @@ class Player {
   private get walker(): Walker | null { return this.ctx.walker; }
   private set walker(w: Walker | null) { this.ctx.walker = w; }
 
-  private readonly tree = new ScriptTree();
-  private readonly feed = new EventFeed();
-  private readonly hud = new Hud();
-  private readonly inspector = new Inspector();
   private readonly minimap = new Minimap();
+  /**
+   * The script tree, built once per stage.
+   *
+   * Thousands of rows and none of them change, so it is kept by reference and
+   * `treeVersion` is what tells the projection's change key it moved — walking
+   * it every frame to notice it had not would cost more than drawing it.
+   */
+  private treeProj: TreeProjection | null = null;
+  private treeVersion = 0;
+  private minimapGraph: MinimapGraph | null = null;
+  /** The event feed, capped. Append-only, so a version beats a compare. */
+  private feedRows: FeedRow[] = [];
+  private feedVersion = 0;
+  /** The HUD strip, rebuilt by `refreshUi` and read by the projection. */
+  private hudRows: [string, string, boolean?][] = [];
   private readonly freeRoam = new FreeRoam($("#viewport"));
   private readonly bgm = new Bgm();
   private readonly sceneFog: SceneFog;
@@ -546,9 +560,11 @@ class Player {
     this.hudLayer.reset();
     this.bgm.setTable(bundle.script.bgm, entry.game_mode);
     this.bgm.setSoundTables(bundle.script.sound);
-    this.tree.build(bundle.script);
-    this.minimap.build(bundle.script);
-    this.feed.clear();
+    this.treeProj = treeProjection(bundle.script);
+    this.treeVersion += 1;
+    this.minimapGraph = minimapGraph(bundle.script);
+    this.minimap.build(this.minimapGraph);
+    this.clearFeed();
 
     if (bundle.script.warnings.length) {
       // Decoder warnings are surfaced, not swallowed: a step that failed to
@@ -813,7 +829,7 @@ class Player {
     $("#btn-stepback").addEventListener("click", () => this.stepBack());
     $("#skip-go").addEventListener("click", () => this.requestSkip());
     $("#btn-reset").addEventListener("click", () => {
-      this.feed.clear();
+      this.clearFeed();
       this.walker?.reset();
       this.walker?.primeToFirstWait();
       this.syncCameraToWalker();
@@ -837,9 +853,8 @@ class Player {
     });
     slider.addEventListener("change", () => { this.scrubbing = false; });
 
-    this.tree.onSeek = (t) => this.seekTo(t.block, t.step, t.op);
-    this.feed.onSeek = (t) => this.seekTo(t.block, t.step, t.op);
     this.minimap.onSeek = (b) => this.seekTo(b, 1, 0);
+    $("#feed-clear").addEventListener("click", () => this.clearFeed());
 
     window.addEventListener("keydown", (e) => {
       if (isTyping(e.target)) return;
@@ -996,7 +1011,7 @@ class Player {
     if (!w) return;
     this.playing = false;
     this.setPlayButton();
-    this.feed.clear();
+    this.clearFeed();
     // A seek replays quietly, so no dialogue or shutter op reaches the layer.
     // Without this the caption from wherever you were still hangs there.
     this.hudLayer.reset();
@@ -1059,8 +1074,17 @@ class Player {
     this.cam.seat(this.ctx, true);
   }
 
+  /** The feed is capped so a long session cannot grow without bound. */
+  private static readonly FEED_MAX = 400;
+
   private onFeed(e: FeedEntry): void {
-    this.feed.push(e);
+    this.feedRows = [...this.feedRows, feedRow(e)].slice(-Player.FEED_MAX);
+    this.feedVersion += 1;
+  }
+
+  private clearFeed(): void {
+    this.feedRows = [];
+    this.feedVersion += 1;
   }
 
   /**
@@ -1138,7 +1162,7 @@ class Player {
         }
         btn.addEventListener("click", () => {
           this.walker?.takeBranch(t);
-          this.feed.clear();
+          this.clearFeed();
           this.syncCameraToWalker();
           this.refreshUi();
         });
@@ -1386,6 +1410,9 @@ class Player {
         if (c.shut) this.shutClasses.add(c.cls);
         else this.shutClasses.delete(c.cls);
         return;
+      case "seek":
+        this.seekTo(c.block, c.step, c.op);
+        return;
       default:
         // The rest of the union is still driven by `wireUi`'s listeners, and
         // moves here panel by panel as step 11 proceeds.
@@ -1423,6 +1450,15 @@ class Player {
       // actor and formats them all.
       globals: $<HTMLDetailsElement>("#globals-panel").open
         ? globalsProjection() : null,
+      tree: this.treeProj,
+      minimap: this.minimapGraph,
+      treeVersion: this.treeVersion,
+      current: w ? { block: w.block, step: w.step, op: w.opIndex } : null,
+      feed: this.feedRows,
+      feedVersion: this.feedVersion,
+      inspector: w?.currentOp
+        ? inspectorText(w.currentOp, { summary: opSummary(w.currentOp) }) : "",
+      hudRows: this.hudRows,
       scopes: this.appScope.snapshot(),
       scopeContext: { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt },
       hasSaved: !!this.saved,
@@ -1430,7 +1466,12 @@ class Player {
     // The whole projection is the key. Same cost as the string compare each
     // panel used to do for itself, done once, and it cannot go stale the way
     // a hand-listed set of fields would the first time one is added.
-    const key = JSON.stringify(p);
+    // Without `tree` and `feed`: the first is thousands of rows that change
+    // only on a stage load and the second is up to four hundred that only
+    // grow, so both carry a version instead. Stringifying them sixty times a
+    // second to discover they had not moved was the one shape of this that
+    // would have been too slow.
+    const key = JSON.stringify({ ...p, tree: null, feed: null, minimap: null });
     if (key === this.lastUiKey) return;
     this.lastUiKey = key;
     p.revision = ++this.uiRevision;
@@ -1453,7 +1494,6 @@ class Player {
   private refreshUi(): void {
     const w = this.walker;
     if (!w || !this.stage) return;
-    this.tree.mark(w.block, w.step, w.opIndex);
     this.minimap.draw(w.block);
     this.showSkipBar();
 
@@ -1476,11 +1516,8 @@ class Player {
       $("#frame-label").textContent = "no camera path";
     }
 
-    const op: OpJson | undefined = w.currentOp;
-    this.inspector.show(op ?? null, op ? { summary: opSummary(op) } : undefined);
-
     const route = w.currentBlock?.route;
-    this.hud.set([
+    this.hudRows = [
       ["mode", this.state.mode],
       ["block", `${w.block}  (${route?.kind ?? "?"}` +
         `${route && route.next.some((n) => n >= 0)
@@ -1521,7 +1558,7 @@ class Player {
       ["last se", w.lastSound === null ? "—"
         : `0x${w.lastSound.toString(16).toUpperCase()}`],
       ["eye", fmtVec(this.camera.position)],
-    ]);
+    ];
 
     this.state.block = w.block;
     this.state.step = w.step;

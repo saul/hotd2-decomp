@@ -724,6 +724,39 @@ in full by `ui-reads-projection-only`. So it became
 **`no-engine-writes-in-ui`** (error, 0), and the debt that matters stays where
 it was: 17, paid down by step 11.
 
+### What the UI boundary cost, and what it caught
+
+`ui-reads-projection-only` went 17 → 0 and is now an **error**; `MAY_IMPORT`
+for `ui` is `{"ui"}`, so the direction rule catches it first and more sharply.
+Six panels moved, and the interesting part was what each one turned out to
+need:
+
+* **The globals panel and the sidebar** were reading `G` and the walker
+  directly — a second reader of engine state with its own idea of when to
+  look, which is how a sidebar comes to disagree with the boxes drawn round
+  the actors it lists. `DebugBoxLayer.highlight` had grown a structural
+  interface and a documented one-frame lag to avoid `render` importing `ui`;
+  with a projection there is nothing to reach for and the lag is gone.
+* **`bgm.ts` was never UI.** It moved to `audio/`, which the layer map puts
+  with `render/`: an output device that reads engine state and owns nothing is
+  the same contract as a renderer. The doc had already said as much — "bgm.ts
+  — audio, not UI" — while leaving it somewhere it could not comply.
+* **Type-only imports count.** `hud/hud.ts` took `MessageVariant` straight
+  from the exporter. No code crosses at run time, but the UI still tracks a
+  schema it does not own; it takes four fields now and `app/` maps the record.
+
+Two things the projection had to be shaped around, both about cost:
+
+* **The script tree is built once per stage, not once per frame.** Thousands
+  of rows, none of which change; only which one is *current* does. It is kept
+  by reference with a `treeVersion` beside it, and the change key is computed
+  without it — the one shape of this that would have been too slow was
+  stringifying it sixty times a second to discover it had not moved. The feed
+  and the minimap graph are the same.
+* **The tree's highlight and filter are applied to committed DOM.** Threading
+  either through props would reconcile every block in the stage to move one
+  outline.
+
 ### The rules must keep asking the real question
 
 `layers-are-systems` used to search `main.ts` for `drawLayers` and count what
@@ -758,7 +791,7 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
-| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ◐ — the seam is in and the scope panel is React |
+| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero and `ui` may no longer import `engine` at all | ◐ — every panel is React; `wireUi` and the `index.html` inversion remain |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
 
 ### Proving a step did not change behaviour

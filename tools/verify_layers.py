@@ -50,7 +50,7 @@ LAYER_OF = {
 MAY_IMPORT = {
     "engine": {"engine"},
     "render": {"engine", "render"},
-    "ui":     {"engine", "ui"},          # tightened to {"ui"} by step 11
+    "ui":     {"ui"},                    # tightened from {"engine","ui"} by step 11
     "app":    {"engine", "render", "ui", "app"},
 }
 
@@ -155,9 +155,10 @@ def main() -> int:
             "error"),
         "ui-reads-projection-only": Rule(
             "ui-reads-projection-only",
-            "the UI must read one plain projection and emit commands, not "
-            "reach into the engine",
-            "ratchet", baseline=4, step=11),
+            "the UI reads one plain projection and emits commands; an import "
+            "from game/, script/ or bundle/ -- type-only included -- makes it "
+            "a second reader of engine state with its own idea of when to look",
+            "error"),
         "layers-are-systems": Rule(
             "layers-are-systems",
             "a layer ticked by hand is outside World, so it is outside "

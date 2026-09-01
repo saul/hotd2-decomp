@@ -6,52 +6,48 @@
  * keeps a copy of game state; a control that wants something to happen
  * dispatches a `UiCommand` and `app/` decides what that means.
  *
- * Panels are being moved here one at a time — see step 11 in
- * `docs/PLAYER_ARCHITECTURE.md`. Whatever is still hand-written DOM lives in
- * `hud/` and is driven from `app/` as before; the two coexist because a
- * big-bang rewrite of the chrome would have no way to prove it changed
- * nothing.
+ * The chrome is still `index.html`'s, so the panels are portalled into its
+ * existing mount points rather than owning the page. That is what let them
+ * move one at a time and be compared against the DOM version each replaced —
+ * step 11 finishes by inverting it, and `index.html` becomes a single mount
+ * point.
  */
 import { useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import type { UiStore } from "./store";
 import { Scopes } from "./panels/Scopes";
 import { Globals } from "./panels/Globals";
 import { ActorBody, WaitBody } from "./panels/Sidebar";
-import { createPortal } from "react-dom";
+import { Tree } from "./panels/Tree";
+import { Feed } from "./panels/Feed";
+import { HudStrip } from "./panels/HudStrip";
 
-/**
- * Where each converted panel goes.
- *
- * The chrome is still `index.html`'s, so React renders into the existing
- * mount points through portals rather than owning the page. That is what lets
- * the panels move one at a time and be compared against the DOM version they
- * replace — step 11 finishes by inverting it, and `index.html` becomes a
- * single mount point.
- */
-const MOUNTS = ["#scopes", "#globals", "#wait-body", "#wait-sub",
-                "#actor-body", "#actor-sub"] as const;
+const at = (sel: string) => document.querySelector(sel);
 
 export function App({ store }: { store: UiStore }) {
   const p = useSyncExternalStore(store.subscribe, store.getSnapshot);
   if (!p) return null;
-  const at = (sel: typeof MOUNTS[number]) => document.querySelector(sel);
-  const scopes = at("#scopes");
-  const globals = at("#globals");
-  const waitBody = at("#wait-body");
-  const waitSub = at("#wait-sub");
-  const actorBody = at("#actor-body");
-  const actorSub = at("#actor-sub");
+
+  const into = (sel: string, node: React.ReactNode) => {
+    const host = at(sel);
+    return host ? createPortal(node, host) : null;
+  };
+
   return (
     <>
-      {scopes && createPortal(
-        <Scopes root={p.scopes}
-                stageLoadedAt={p.scopeContext.stageLoadedAt} />, scopes)}
-      {globals && createPortal(<Globals p={p.globals} />, globals)}
-      {waitSub && createPortal(<>{p.wait?.sub ?? "running"}</>, waitSub)}
-      {waitBody && createPortal(<WaitBody p={p.wait} />, waitBody)}
-      {actorSub && createPortal(<>{p.actorPanel?.sub ?? ""}</>, actorSub)}
-      {actorBody && createPortal(
-        <ActorBody p={p.actorPanel} dispatch={store.dispatch} />, actorBody)}
+      {into("#tree", <Tree p={p.tree} current={p.current}
+                           dispatch={store.dispatch} />)}
+      {into("#feed", <Feed rows={p.feed} dispatch={store.dispatch} />)}
+      {into("#inspector", <>{p.inspector}</>)}
+      {into("#hud", <HudStrip rows={p.hudRows} />)}
+      {into("#scopes", <Scopes root={p.scopes}
+                               stageLoadedAt={p.scopeContext.stageLoadedAt} />)}
+      {into("#globals", <Globals p={p.globals} />)}
+      {into("#wait-sub", <>{p.wait?.sub ?? "running"}</>)}
+      {into("#wait-body", <WaitBody p={p.wait} />)}
+      {into("#actor-sub", <>{p.actorPanel?.sub ?? ""}</>)}
+      {into("#actor-body", <ActorBody p={p.actorPanel}
+                                      dispatch={store.dispatch} />)}
     </>
   );
 }

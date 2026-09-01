@@ -18,6 +18,72 @@
 import type { ScopeRow } from "./panels/scope_types";
 import type { ToggleName } from "./commands";
 
+/** One instruction, as the tree and the feed draw it. */
+export interface TreeOp {
+  i: number;
+  name: string;
+  summary: string;
+  cat: string;
+  /** `ported` / `partial` / `ignored` — the row's colour and its tooltip. */
+  status: string;
+  title: string;
+  /** Lower-cased haystack for the filter box. */
+  query: string;
+}
+
+export interface TreeStep {
+  index: number;
+  label: string;
+  ops: TreeOp[];
+}
+
+export interface TreeBlock {
+  index: number;
+  kind: string;
+  targets: number[];
+  stepCount: number;
+  title: string;
+  steps: TreeStep[];
+}
+
+/**
+ * The whole script.
+ *
+ * Rebuilt only on a stage load — it is thousands of rows and none of them
+ * change. `app/` keeps the same object across frames, so React skips it and
+ * the change key is computed without it. `treeVersion` is what says it moved.
+ */
+export interface TreeProjection {
+  blocks: TreeBlock[];
+}
+
+/**
+ * The route table, as a graph.
+ *
+ * All the minimap needs: which blocks exist, how each leaves, and where it
+ * goes. Handing it the whole `ScriptJson` was the last thing in `hud/`
+ * reading the exporter's shape.
+ */
+export interface MinimapGraph {
+  entry: number;
+  nodes: { index: number; kind: string; next: number[] }[];
+}
+
+/** One line of the event feed. */
+export interface FeedRow {
+  block: number;
+  step: number;
+  opIndex: number;
+  /** `12.3.7` */
+  at: string;
+  name: string;
+  summary: string;
+  note: string;
+  cat: string;
+  status: string;
+  title: string;
+}
+
 /**
  * One subtitle line, as the HUD draws it.
  *
@@ -145,6 +211,21 @@ export interface UiProjection {
   actorPanel: ActorsProjection | null;
   /** Null while the panel is folded — it is the expensive one to build. */
   globals: GlobalsProjection | null;
+  /** Rebuilt on a stage load only. See `treeVersion`. */
+  tree: TreeProjection | null;
+  /** Also per stage; the minimap paints it to a canvas itself. */
+  minimap: MinimapGraph | null;
+  /** Bumped when `tree` is replaced, so the change key need not walk it. */
+  treeVersion: number;
+  /** Where the script is now, for the tree's highlight. */
+  current: { block: number; step: number; op: number } | null;
+  feed: FeedRow[];
+  /** Bumped on every push and on a clear, for the same reason as `treeVersion`. */
+  feedVersion: number;
+  /** The inspector's body, already serialised. */
+  inspector: string;
+  /** The HUD strip: label, value, and whether it is worth the eye. */
+  hudRows: [string, string, boolean?][];
   scopes: ScopeRow | null;
   scopeContext: { frame: number; stageLoadedAt: number };
   /** Whether a snapshot is held, so Load can be enabled. */

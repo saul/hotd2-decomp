@@ -21,7 +21,8 @@ import { join } from "node:path";
 import { Walker, type WalkerHost } from "../src/script/walker";
 import { EvtOpSpawnIfOnePlayer, EvtOpSpawnIfTwoPlayers }
   from "../src/script/ops/spawn";
-import { G } from "../src/game/globals";
+import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
+  from "../src/game/globals";
 import type { OpJson, ScriptJson } from "../src/bundle";
 import { seekTo } from "../src/script/seek";
 
@@ -86,6 +87,78 @@ function shot(w: Walker): string {
 
 /** Private members the drive loop needs; the player reaches them through UI. */
 type Inner = { executeOne(quiet: boolean): boolean };
+
+/**
+ * `saveState` round-trips.
+ *
+ * Nothing covered this. `test/port.test.ts` checks the **game**'s slice --
+ * `G` and the actor pool -- and the walker's own is the other half of a
+ * snapshot: the program counter, the flags, the channel tweens, the scene
+ * state, the queued-event count. A field added to `saveState` and forgotten in
+ * `loadState`'s key list is silent, and so is the reverse.
+ *
+ * The check is `shot()` plus everything else the two lists carry, because the
+ * fingerprint the seek test compares deliberately leaves out the parts a
+ * reload does not have to reproduce.
+ */
+function fullShot(w: Walker): string {
+  const s = w.saveState() as Record<string, unknown>;
+  // Sets serialise as arrays in `saveState`, and key order follows the
+  // literal, so this is stable without sorting.
+  return JSON.stringify(s);
+}
+
+function checkSnapshotRoundTrip(script: ScriptJson, at: [number, number, number]):
+    { ok: boolean; detail: string } {
+  // **Both halves.** A snapshot is the walker's state *and* the port's data
+  // segment -- `World.load` restores the two together, and the ops write to
+  // `G` as they run, so comparing the walker alone would be comparing half a
+  // machine. The first draft of this test did exactly that and reported six
+  // stages diverging; every one was `G` carried over from the previous run.
+  ResetGameGlobals();
+  const a = new Walker(script, mkHost());
+  if (!seekTo(a, ...at)) return { ok: true, detail: "unreachable" };
+  const before = fullShot(a);
+  const gBefore = structuredClone(G) as Globals;
+
+  // Into a *fresh* walker, which is the case the player actually runs: a
+  // snapshot taken in one session and applied to a stage just loaded.
+  ResetGameGlobals();
+  const b = new Walker(script, mkHost());
+  b.reset();
+  b.loadState(JSON.parse(before) as unknown);
+  RestoreGameGlobals(structuredClone(gBefore));
+  const after = fullShot(b);
+  if (before !== after) {
+    // Name the first key that differs -- the whole object is unreadable.
+    const x = JSON.parse(before) as Record<string, unknown>;
+    const y = JSON.parse(after) as Record<string, unknown>;
+    const bad = Object.keys(x).find(
+      (k) => JSON.stringify(x[k]) !== JSON.stringify(y[k]));
+    return { ok: false, detail: bad
+      ? `key "${bad}": ${JSON.stringify(x[bad])} -> ${JSON.stringify(y[bad])}`
+      : "differs, but every key matches -- key order?" };
+  }
+
+  // And the restored walker must *run* the same, not merely look the same.
+  const stepBoth = (w: Walker) => {
+    for (let i = 0; i < 500 && !w.finished && !w.parked; i++) {
+      if (w.wait) { w.stepOverWait(); continue; }
+      if (w.branch) { w.takeBranch(); continue; }
+      if (!(w as unknown as Inner).executeOne(true)) break;
+    }
+    return shot(w);
+  };
+  // Each run starts from the same data segment, or the second is running
+  // against whatever the first left behind.
+  RestoreGameGlobals(structuredClone(gBefore));
+  const ranA = stepBoth(a);
+  RestoreGameGlobals(structuredClone(gBefore));
+  const ranB = stepBoth(b);
+  return ranA === ranB
+    ? { ok: true, detail: "" }
+    : { ok: false, detail: `diverged after 500 ops\n      ${ranA}\n      ${ranB}` };
+}
 
 console.log("Walker.seek round-trips, against the shipped bundle:\n");
 
@@ -639,6 +712,30 @@ for (const stage of STAGES) {
                 + `${blockChanges} block changes `
                 + `(${(idxChanges / Math.max(1, blockChanges)).toFixed(2)}x)`);
   }
+}
+
+// -- the walker's own snapshot ---------------------------------------------
+
+console.log("\nWalker.saveState round-trips, and the restored walker runs the "
+            + "same:\n");
+
+for (const stage of STAGES) {
+  const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+  if (!existsSync(file)) continue;
+  const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+  // Three depths: the entry, something early enough to be reachable in every
+  // stage, and something deep enough to have channel tweens and a scene state.
+  const spots: [number, number, number][] = [[0, 1, 0], [4, 1, 0], [11, 2, 0]];
+  let bad = "";
+  let done = 0;
+  for (const at of spots) {
+    const r = checkSnapshotRoundTrip(script, at);
+    if (r.detail === "unreachable") continue;
+    done++;
+    if (!r.ok && !bad) bad = `${at.join("/")}: ${r.detail}`;
+  }
+  check(`stage ${stage}: ${done} snapshots round-trip and replay identically`,
+        !bad, bad);
 }
 
 if (ran === 0) {

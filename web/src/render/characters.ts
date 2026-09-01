@@ -219,14 +219,11 @@ export class CharacterLayer implements System {
         continue;
       }
 
-      const intro = p?.intro && type.motions[String(p.intro.motion)]
-        ? p.intro : null;
       // The descriptor tail is read by the class's own Init -- the start state
       // is one of its bytes -- so it is handed over at spawn time.
       const a = ActorSpawn(at, p?.class ?? 0, type.type, type.name,
                            DescriptorFromPlacement(p), this.rng);
       a.motion = motion;
-      a.intro = intro;
       a.hp = this.startHp(p);
       a.maxHp = a.hp;
       a.yaw = p?.yaw ?? 0;

@@ -675,7 +675,11 @@ export interface Actor {
   death: { motion: number; t: number } | null;
   /** A stumble, blended over `blend` frames. */
   react: { motion: number; t: number; blend: number; hard: boolean } | null;
-  /** The spawn's intro clip and its delay in seconds. */
+  /**
+   * `ZombieStateMotionCue21`'s parameters — the descriptor's `+0x04` clip and
+   * its `+0x08` hold, in frames. Six spawns across the game carry it, all of
+   * them class 0x30 with initial state 21, and it is read by that state alone.
+   */
   intro: { motion: number; delay: number } | null;
 
   // -- damage bookkeeping ------------------------------------------------

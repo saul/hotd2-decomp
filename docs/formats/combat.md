@@ -740,6 +740,43 @@ state 3   ZombieStateStrike       lunge, swing, land the hit on its own frame
 state 4   ZombieStateBackOff      retreat, still holding the permit
 ```
 
+### The freeze bit, and the one state that clears it
+
+`obj+0x34` bit **`0x4000`** stops `ZombieAdvanceMotion` (`FUN_00454860`)
+stepping `obj+0x194` and `obj+0x198`:
+
+```c
+if ((obj[0x34] & 0x4000) == 0) { obj[0x194]++; obj[0x198]++; }
+```
+
+The model is still drawn — the gate is on the counters — but root motion is the
+difference between two frames of the clip, and a zombie is carried by its clips
+and by nothing else. So the bit freezes the pose *and* pins the actor where it
+stands. `ThrowerAdvanceMotion` (`FUN_00449EF0`) is class 0x31's copy of the
+same gate.
+
+Six spawn records set it at spawn time, through `ActorInitFlags`, and every one
+of them names **initial state 21**:
+
+```
+state 21  ZombieStateMotionCue21  sub 0  play descriptor +0x04, arm +0x08
+                                  sub 1  count it down, then clear 0x4000
+                                  sub 2  play out; clear 0x100 at the landing
+                                         frame, 0x2000 on the way out, and
+                                         hand to descriptor byte 3
+```
+
+This is the **only** routine in the game that clears any of those three bits.
+It is the entrance for the two zombies that come out through the van's
+windscreen in stage 2 and the four in stage 5, all six playing clip `0x39B`
+(923) — 41 authored frames against a play length of 79. The exit test is
+`g_motion_play_length[motion] - 1 <= obj+0x19C`, so it is in the play clock;
+read in authored frames it fires at the halfway point of the jump. `[proved]`
+
+The shot-immunity drop names the clip as well as the frame —
+`obj+0x1B4 == 0x39B && obj+0x19C == 0x26` — which is authored frame 19 of 41,
+the moment the actor is through the glass. Until then it only ricochets.
+
 ### The pause between attacks is the retreat
 
 There is no cooldown timer for an ordinary zombie:

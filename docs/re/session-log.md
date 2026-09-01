@@ -7606,3 +7606,64 @@ line index `+0x38`. The line index is a pure function of the countdown, because
 the end frames are fixed and descending and the task only ever steps forward,
 so the port derives it rather than storing it. That keeps the dialogue table
 out of the save state without changing which line is on screen on any frame.
+
+## Only the first zombie attacked, and it was a state nobody had ported
+
+The report was "only the first enemy in the stage is attacking; when I kill him
+none of the others do", with the sidebar saying `0 attacking · 1 live`. Two
+class-0x30 actors were live in stage 2 block 3 — `0x1E00 char_adv00` and
+`0x1E30 char_adv01`, the pair that comes out through the van's windscreen — and
+both sat in `AttackRun` at 45 and 47 units, wanting a permit, playing motion
+1022, for ever. Their distances were identical at 9 s and at 24 s.
+
+**`ZombieStateMotionCue21` (`FUN_004577F0`) was not ported.** Their spawn
+records name initial state 21, and `mapStartState`'s default arm sent state 21
+to `AttackRun` — the right *final* state, so nothing looked wrong. What it
+skipped is the only code in the game that clears three bits their record sets:
+
+```
+sub 1 -> 2 : obj+0x34 &= 0xffffbfff     clears 0x4000, the pose freeze
+sub 2      : obj+0x1b4 == 0x39b && obj+0x19c == 0x26
+             -> obj+0x34 &= 0xfffffeff  clears 0x100, the shot-immune window
+exit       : obj+0x34 &= 0xffffdfff     clears 0x2000
+```
+
+`ZombieAdvanceMotion` (`FUN_00454860`) steps `obj+0x194` and `obj+0x198` only
+`if ((obj+0x34 & 0x4000) == 0)`. So the freeze does not merely hold a pose: it
+stops the clip, and because `SkeletonApplyRootMotion` works on the difference
+between two frames — and a zombie is carried by its clips and by nothing else —
+it stops the actor moving. Frozen clip, frozen actor, at whatever range the
+record placed it. `[proved]`
+
+All six shipped state-21 records, two in stage 2 and four in stage 5, carry
+`0x4000 | 0x2000 | 0x100` and exit to state 1. They were also unshootable the
+whole time, which nobody had noticed because they were also unreachable.
+
+**What I got wrong on the way.** I spent the first pass on the wrong half. I
+had `ZombieSetMotionIfIdle` refusing to interrupt a playing clip and
+`FirstBakedOf` falling back to the in-place walk as the two suspects, and told
+the user so. Both were wrong: motion 1022 *is* `row[2]`, the run, and its root
+track carries 9.6 units over 31 frames. The clip was right and it was not
+playing. The tell I had in hand and did not read was the flags word in my own
+sidebar — `0x8016101`, with `0x4000` sitting in it — printed next to the state
+on every one of those rows.
+
+I also could not reproduce this headlessly at first and briefly took that as
+information. It was not: `game/` actors are spawned from `render/characters.ts`
+(the `render-drives-the-port` ratchet, 13), so a world with no renderer has no
+zombies in it at all. The reproduction that worked was the screenshot harness
+with `--dump '#panel-actors'`.
+
+**Two smaller things read while here.** `ActorSetMotion` (`FUN_00411930`) is the
+non-fading half of the pair with `ActorSetMotionBlended` — it zeroes the whole
+track including both fade bytes — and is now ported, because state 21 uses it
+and the blended one would have cross-faded a cue that is meant to cut. And the
+exit test is against `g_motion_play_length`, not the authored frame count:
+clip 923 is 41 frames against a play length of 79, so reading it in authored
+frames would hand over at the halfway point of the jump.
+
+One divergence declared: the engine tests `obj+0x19c == 0x26` against a counter
+it steps by exactly one per frame, and this port's cursor comes off a clock the
+player may advance by several frames at once. A missed equality there would
+leave the actor shot-immune for life, so the port takes `>=`. At the engine's
+own rate they are the same frame.

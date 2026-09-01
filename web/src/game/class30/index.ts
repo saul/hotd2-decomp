@@ -26,6 +26,7 @@ import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
+import { ZombieStateMotionCue21 } from "./play_cue";
 import { CharacterTypeOf, MotionRowOf } from "../tables";
 import {
   TARGET_STATES,
@@ -58,6 +59,7 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
   switch (obj.state) {
     case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
     case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt, rng);
+    case ZombieState.MotionCue:   return ZombieStateMotionCue21(obj, eye, dt);
     case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye, rng, host);
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
@@ -186,6 +188,14 @@ export function ZombieEntryState(initial: number): ZombieState {
   if (initial === ZombieState.Emerge || initial === ZombieState.DelayedLeap) {
     return initial;
   }
+  // ...and neither does the cue entrance, for a third reason on top of both:
+  // its spawn record freezes the pose, and `ZombieStateMotionCue21` is the
+  // only thing that unfreezes it. Sent straight to `AttackRun` the actor keeps
+  // `obj+0x34` bit 0x4000 for ever, so its clip never advances and the root
+  // motion that is the only thing carrying it never has a delta. That is
+  // exactly what the two van zombies did: stood at 45 units, wanting a permit
+  // they could never close on.
+  if (initial === ZombieState.MotionCue) return initial;
   // `ZombieStateWalkDistance` *does* end by setting 1, so the fallback below
   // reached the right final state — but only after skipping the walk-in that
   // is the whole point of it. See `class30/walk_distance.ts`.

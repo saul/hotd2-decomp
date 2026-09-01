@@ -23,9 +23,18 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // `if (obj+0x1324 == 0) obj+0x194++` — so a frozen object simply never
   // advances, and the freeze is not a thing that has to be undone afterwards.
   if (obj.frozen !== 0) return;
-  // `ThrowerAdvanceMotion` (`FUN_00449EF0`) skips the play cursor entirely
-  // while `obj+0x34` bit 0x4000 is set, which is how class 0x31 holds a pose
-  // in mid-air and how a corpse stays on the frame it was pinned to.
+  // Both classes gate their own advance on `obj+0x34` bit 0x4000, so this is
+  // shared rather than moved: `ZombieAdvanceMotion` (`FUN_00454860`) draws the
+  // model and only then steps `obj+0x194`/`obj+0x198` `if ((obj+0x34 & 0x4000)
+  // == 0)`, and `ThrowerAdvanceMotion` (`FUN_00449EF0`) is class 0x31's copy
+  // of it. It is how class 0x31 holds a pose in mid-air, how a corpse stays on
+  // the frame it was pinned to, and how a spawn record parks a class-0x30
+  // actor inside a vehicle until `ZombieStateMotionCue21` lets it out.
+  //
+  // The draw still runs in the engine — the gate is on the counters, not on
+  // the model — but root motion is a difference between two frames, so frozen
+  // counters mean no movement either way. **Whoever sets this bit owns
+  // clearing it**: an actor left with it on is a statue.
   if (obj.flags & ActorFlag.PoseFrozen) return;
   if (obj.death) {
     // The death clip plays once and **holds its last frame**: `ZombieStateDeath6`
@@ -46,7 +55,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   }
   // Root motion: the clip's own translation is what walks the actor. Applied
   // only while no one-shot is running, because the one-shot owns the body.
-  if (base && !obj.action && !obj.intro) {
+  if (base && !obj.action) {
     const f = Math.floor(obj.clock * base.fps) % Math.max(1, base.frames);
     const d = rootDelta(base, wasBase, f);
     ApplyRootMotion(obj, d.x, d.z);
@@ -57,22 +66,6 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     // spanning the whole strike -- which teleported a zombie eleven units into
     // the camera the frame its swing ended.
     obj.rootFrame = -1;
-  }
-
-  // The entrance: hold its first frame for the delay, play it once, then hand
-  // over to the looping motion. `ZombieStateMotionCue21` waits for `obj+0x19C`
-  // to reach the clip's length before changing state, so the hand-over is at
-  // the end of the clip and not on a timer.
-  if (obj.intro) {
-    const im = MotionOf(obj, obj.intro.motion);
-    if (!im) {
-      obj.intro = null;
-    } else if (obj.clock * im.fps - obj.intro.delay >= im.frames) {
-      // Restart the loop's clock from the moment the entrance ended, so the
-      // walk does not begin part-way through.
-      obj.clock -= (obj.intro.delay + im.frames) / im.fps;
-      obj.intro = null;
-    }
   }
 
   // A strike or lunge at full weight. The lunge loops; the strike ends itself,

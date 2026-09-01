@@ -180,6 +180,32 @@ from -25 to -34.5 in a few units, which is why the zombies there were in it.
 More than ten units of air, on an actor allowed to leave the floor, is
 `ZombieStateFallToGround` (state 11) instead — also ported.
 
+**A third entrance: the one that arrives on a clip.** `ZombieStateMotionCue21`
+(state 21, `FUN_004577F0`) is ported — the two zombies that come out through
+the van's windscreen in stage 2 and four more in stage 5. It plays the
+descriptor's clip after the descriptor's delay and hands to the descriptor's
+exit at `g_motion_play_length - 1`, the play clock rather than the authored
+frame count.
+
+The reason it matters out of proportion to six spawns: **it is the only thing
+in the game that clears the three flag bits their spawn record sets.** The
+record parks the actor inside the vehicle with `obj+0x34` bit `0x4000`, and
+`ZombieAdvanceMotion` (`FUN_00454860`) then refuses to step `obj+0x194` and
+`obj+0x198` at all. `mapStartState` had been routing state 21 to `AttackRun`
+through its default arm, so the bit was never cleared: the clip never
+advanced, and because a zombie is carried by its clip's own root translation
+and by nothing else, it could not close either. Both van zombies stood at 45
+units wanting a permit, for ever — which read on screen as *only the first
+enemy in the stage attacks*, since they are the pair the script holds
+`wait_enemies_alive` open for. They now close to the ring and fight. The other
+two bits are the shot-immunity window (`0x100`, dropped on the landing frame
+of clip 923) and `0x2000`; both were also stuck on, so neither could be shot.
+
+Its descriptor pair went into `DescriptorFromPlacement` with everything else.
+The port had been faking this state with an ad-hoc `intro` field on `Actor`
+that `render/characters.ts` set and `ActorAdvanceMotion` played out — a
+mechanism the engine does not have, which is now gone.
+
 **And two entrances that place the actor.** A spawn's `y` is where its entrance
 *starts*, not where it stands:
 

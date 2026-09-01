@@ -195,6 +195,11 @@ const TYPE: CharacterType = {
     "102": motion(24), "103": motion(20),
     // 185 (0xB9) is the pose `ZombieStateEmerge` holds while it waits.
     "185": motion(4),
+    // 923 (0x39B), the van jump-out `ZombieStateMotionCue21` plays: 41 frames
+    // against a play length of 79, carrying 13.6 units of root translation.
+    // The odd play length is the point of pinning it -- the cue this state
+    // exits on is expressed in the play clock, not in authored frames.
+    "923": motion(41, 0.332, 79),
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
@@ -574,6 +579,71 @@ console.log("ThrowerStatePathFollow:");
   check("and only then goes for the player",
         z.state === ThrowerState.LeapAside
         || z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
+}
+
+// -- 3c2. the entrance that arrives on a clip -----------------------------
+
+console.log("the cue entrance:");
+{
+  const rng = new Rng(11);
+  const events = scene(0, rng);
+  // The six shipped state-21 records, to the bit: pose frozen, shot-immune,
+  // 0x2000 set, and an exit to the attack run. **All three bits are cleared
+  // by this state and by nothing else in the game**, so a port that routed
+  // state 21 to `AttackRun` -- as the default arm of `mapStartState` did --
+  // left the actor frozen for ever. It wanted a permit, it was inside the
+  // outer ring, and it never moved, because a zombie is carried by its clip's
+  // own root translation and a frozen clip has no delta.
+  const z = ActorSpawn(0x5100, SpawnClass.Zombie, 1, "van", {
+    initialState: ZombieState.MotionCue,
+    attackState: ZombieState.AttackRun,
+    intro: { motion: 923, delay: 10 },
+    flags: ActorFlag.PoseFrozen | ActorFlag.ShotImmune | ActorFlag.ArcSpent,
+  }, rng);
+  z.visible = true;
+  z.hp = 1000;
+  z.pos = vec3(0, 0, 60);
+  const startZ = z.pos.z;
+
+  check("it starts in the cue state, not the attack run",
+        z.state === ZombieState.MotionCue, `state ${z.state}`);
+
+  // The delay: the clip is set on the first frame but the pose is held, so
+  // nothing plays and nothing moves.
+  run(9, rng, events);
+  check("it holds still for the record's delay",
+        (z.flags & ActorFlag.PoseFrozen) !== 0 && z.pos.z === startZ
+        && z.clock === 0,
+        `flags 0x${z.flags.toString(16)} z ${z.pos.z} clock ${z.clock}`);
+
+  run(1, rng, events);
+  check("and the delay running out is what releases it",
+        (z.flags & ActorFlag.PoseFrozen) === 0);
+
+  // Now the clip plays, and its root translation is the entrance.
+  // 45 frames of the play clock is 22 authored frames of a 41-frame clip:
+  // half the jump, and past the 0x26 the shot-immunity window ends on.
+  run(45, rng, events);
+  check("then the clip carries it out", z.pos.z < startZ - 4,
+        `moved ${(startZ - z.pos.z).toFixed(1)}`);
+  check("and it is shootable once it is through the glass",
+        (z.flags & ActorFlag.ShotImmune) === 0,
+        `flags 0x${z.flags.toString(16)}`);
+  check("but it has not handed over part-way",
+        z.state === ZombieState.MotionCue, `state ${z.state}`);
+
+  // 79 is the play length, not the 41 authored frames: reading the exit cue
+  // in authored frames would hand over at halfway, part-way through the jump.
+  run(60, rng, events);
+  check("it hands over at the end of the play clock, not the frame count",
+        z.state !== ZombieState.MotionCue, `state ${z.state}`);
+  check("...to the state the record names", z.state === ZombieState.AttackRun
+        || z.state === ZombieState.HoldAtRange || z.state === ZombieState.Strike,
+        `state ${z.state}`);
+  check("and nothing of the record's freeze is left on it",
+        (z.flags & (ActorFlag.PoseFrozen | ActorFlag.ShotImmune
+                    | ActorFlag.ArcSpent)) === 0,
+        `flags 0x${z.flags.toString(16)}`);
 }
 
 // -- 3d. the on-screen gate -------------------------------------------------

@@ -46,6 +46,25 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
 }
 
 /**
+ * `ActorSetMotion` — `FUN_00411930`. Start a clip at frame zero, no fade.
+ *
+ * The other half of the pair: `ActorSetMotionBlended` (`FUN_004119A0`) takes a
+ * fade length and this one does not, and the annotation on that address says
+ * which is used where — this is the one for **the scripted cues that are meant
+ * to cut**. It clears the track outright, `track[0]`, `track[2]`, `track[4]`
+ * and `track[6]` together with the two fade bytes at `+0x36`/`+0x37`, so there
+ * is nothing left of the outgoing clip to blend from.
+ */
+export function ActorSetMotion(obj: Actor, motion: number): void {
+  obj.motion = motion;
+  obj.clock = 0;
+  obj.fadeFrom = null;
+  obj.fade = 0;
+  obj.fadeLen = 0;
+  obj.rootFrame = -1;
+}
+
+/**
  * `ActorSetMotionBlended` — `FUN_004119A0`. Start a clip at a frame, over a
  * cross-fade.
  *

@@ -35,6 +35,11 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     entranceMotion: p?.entrance_motion ?? 0,
     pounce: p?.pounce ?? null,
     emerge: p?.emerge ?? null,
+    // `ZombieStateMotionCue21`'s two parameters, descriptor `+0x04` and
+    // `+0x08`: the clip the entrance plays and the frames it holds before it
+    // starts. `render/characters.ts` used to set this itself, which made it
+    // the one descriptor field the headless harnesses never saw.
+    intro: p?.intro ?? null,
     delayedLeap: p?.delayed_leap ?? null,
     // The captor family's two script blobs, and the object they work on.
     // `CivilianInit` writes `child+0x1394 = this`, and `civilian_child` is

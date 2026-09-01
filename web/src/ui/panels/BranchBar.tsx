@@ -27,7 +27,10 @@ export const BranchBar = memo(function BranchBar({ p, dispatch, onHover }:
          onPointerLeave={() => onHover(false)}>
       <span className="tag">Branch</span>
       <span className="dim">{p.sub}</span>
-      <span>
+      {/* `routes` rather than an id: a route button is a role, and the bar is
+          already identified, so `#branchbar .routes` names it without minting
+          a second singleton. The class is what `has-preview` hangs off. */}
+      <span className="routes">
         {p.options.map((o) => (
           <button key={o.target}
                   className={o.preview ? "has-preview" : undefined}

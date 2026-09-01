@@ -49,18 +49,29 @@ export const Transport = memo(function Transport(
               onClick={() => dispatch({ kind: "toggleMute" })}>
         <span>{sound.muted ? "🔇" : "🔊"}</span> <span>{sound.text}</span>
       </button>
-      <input type="range" min="0" max="100" step="1" value={sound.volume}
+      {/* The ids are the stylesheet's only hold on these three. Each is a
+          genuine singleton — there is one volume slider, one audio status
+          line, one camera label — so an id says what it is; a role that
+          repeats gets a class under an identified container instead. They
+          were dropped when this bar moved out of `index.html`, and the sheet
+          went on styling ids nothing rendered: the frame slider reflowed on
+          every frame for want of `#frame-label`'s `min-width`, and
+          `#bgm-label.blocked` — the one audio state that needs a click to
+          clear — had no colour to announce itself in. */}
+      <input type="range" id="volume" min="0" max="100" step="1"
+             value={sound.volume}
              title="BGM volume"
              onChange={(e) => dispatch({ kind: "setVolume",
                                          volume: Number(e.target.value) })} />
-      <span className={`dim${sound.blocked && !sound.muted ? " blocked" : ""}`}>
+      <span id="bgm-label"
+            className={`dim${sound.blocked && !sound.muted ? " blocked" : ""}`}>
         {sound.label}
       </span>
 
       <span className="sep" />
 
       <label className="framebar">
-        <span className="dim">{t.camLabel}</span>
+        <span id="frame-label" className="dim">{t.camLabel}</span>
         <input type="range" disabled={!t.hasPath}
                min={t.camFrameLo} max={t.camFrameHi} step="1"
                value={Math.round(t.camFrame)}

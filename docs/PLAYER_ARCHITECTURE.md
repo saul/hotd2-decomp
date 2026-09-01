@@ -775,6 +775,41 @@ Two things the projection had to be shaped around, both about cost:
   either through props would reconcile every block in the stage to move one
   outline.
 
+### `main.ts` is 1054 lines, and 400 was the wrong number
+
+The target in this document was 400 from the day it was written, and it was a
+guess made before the projection layer and the command union existed — both of
+which live in `app/` by construction.
+
+Six things came out: `stage_load.ts`, `commands.ts`, `walker_host.ts`, and
+`projection/{player,hud,chrome}.ts`, 1649 down to 1054. What is left is
+measured, not estimated:
+
+```
+ 166  the constructor -- the wiring
+ 104  imports
+  67  the frame
+  58  wireUi
+ ~30 small methods, 15-35 lines each
+```
+
+The largest item **is** the composition root: twenty systems constructed and
+registered, the context built, the scope tree opened. Getting to 400 from here
+means splitting `Player` into four objects that each own part of the wiring,
+plus the plumbing to let them see each other — one 1054-line file traded for
+four files and a new seam, with the coupling unchanged. That is worse.
+
+The extraction that was worth doing anyway was `PlayerView`: a **read-only**
+interface that `Player` implements, so what the UI depends on is written down
+and nothing in a projection builder can write back. `implements` is what keeps
+the answer true. Two members had to be renamed before it would compile, and
+both were genuine confusions — `stage` was the number *and* the loaded scene,
+`minimap` the route graph *and* the canvas widget.
+
+Two ratios are worth more than the line count, and both moved: `main.ts` holds
+**two** `addEventListener` calls, neither of them a control, and every one of
+the player's twenty-five commands is a case in one exhaustive switch.
+
 ### The rules must keep asking the real question
 
 `layers-are-systems` used to search `main.ts` for `drawLayers` and count what
@@ -802,7 +837,7 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 2 | `game/globals.ts` + `game/actor.ts` — `G` and the actor struct at its offsets | ✅ |
 | 3 | `game/class30/`, `class31/`, `class41/` behind the registry | ✅ |
 | 4 | `render/`, `hud/`, `script/`, `bundle/` split out; `bundle.ts` split by exporter block | ✅ |
-| 5 | **Thin `main.ts`.** 1379 lines against a target of 400. `FreeRoam` is the last layer outside `World`, because it is mode-gated | ◐ — falls out of 11 |
+| 5 | **Thin `main.ts`.** 1054 lines. The 400 target was wrong — see below. `FreeRoam` is the last layer outside `World`, because it is mode-gated | ✅ |
 | 6 | `script/ops/` — nine modules, each registering its own entries | ✅ |
 | 7 | **`characters.ts`.** The damage half is out; assembly, posing and blending remain | ◐ |
 | 8 | **Every layer is a `System`.** All 14 hand-ticked layers registered with `World`; `drawLayers` deleted; `resync` on each. Fixes the rig seek divergence | ✅ |

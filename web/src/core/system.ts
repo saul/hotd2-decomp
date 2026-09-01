@@ -35,6 +35,18 @@ export interface Context {
    * `core/scope.ts` for why that is one rule and not two.
    */
   scope: Scope;
+  /**
+   * Everything a **seek or a snapshot load** rebuilds, as opposed to a stage
+   * switch. Recycled by `app/` immediately before `World.load` runs its
+   * `resync` pass, and again on a seek.
+   *
+   * This is the structural half of the rig bug step 8 fixed by hand: state
+   * that describes *how the game got where it is* rather than where it is
+   * cannot survive a seek, and anything registered here cannot survive one
+   * either. A layer that keeps such state anywhere else is relying on
+   * somebody remembering to reset it.
+   */
+  session: Scope;
   /** Which stage is loaded — the snapshot is keyed on it. */
   stage: number;
   /** 60 Hz frames since the stage loaded. */

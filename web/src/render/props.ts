@@ -49,6 +49,8 @@ import {
 import type { PropsJson, PropHinge, PropStatic } from "../bundle";
 import { IDLE_TICK, type Context, type System, type Tick }
   from "../core/system";
+import type { Scope } from "../core/scope";
+import { attachTo } from "./scope3d";
 import { labelTexture } from "./overlays";
 import { BAMS_TO_RAD } from "../core/bams";
 
@@ -140,6 +142,8 @@ export class PropLayer implements System {
   private json: PropsJson | null = null;
   private enabled = true;
   private markers: Marker[] = [];
+  /** Everything this layer built for the current stage. */
+  private scope: Scope | null = null;
   private readonly q = new Quaternion();
   private readonly qa = new Quaternion();
   private readonly unitBox = new EdgesGeometry(new BoxGeometry(1, 1, 1));
@@ -151,8 +155,20 @@ export class PropLayer implements System {
     this.debug.name = "prop-debug";
   }
 
-  build(root: Object3D, json: PropsJson | undefined): void {
-    this.detach();
+  /** No `detach`: the stage scope owns the marker geometry and the debug group. */
+  build(root: Object3D, stage: Scope, json: PropsJson | undefined): void {
+    this.scope = stage.child("props");
+    this.scope.defer(() => {
+      for (const m of this.markers) {
+        m.box.geometry.dispose();
+        m.cross.geometry.dispose();
+      }
+      this.markers = [];
+      this.debug.clear();
+      this.live = [];
+      this.json = null;
+      this.scope = null;
+    });
     this.json = json ?? null;
     if (!json) return;
 
@@ -181,20 +197,9 @@ export class PropLayer implements System {
     // exported -- the overlay's whole job is to tell those apart, so they stay
     // in the list and are drawn as `Missing`.
     this.live = [...byName.values()];
-    root.add(this.debug);
+    attachTo(this.scope, root, this.debug);
   }
 
-  detach(): void {
-    this.debug.removeFromParent();
-    for (const m of this.markers) {
-      m.box.geometry.dispose();
-      m.cross.geometry.dispose();
-    }
-    this.markers = [];
-    this.debug.clear();
-    this.live = [];
-    this.json = null;
-  }
 
   /**
    * The Props checkbox drives the geometry **and** the overlay together, which

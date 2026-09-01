@@ -29,6 +29,8 @@ import {
 import type { ColiJson } from "../bundle/script";
 import { G } from "../game/globals";
 import type { System } from "../core/system";
+import type { Scope } from "../core/scope";
+import { attachTo } from "./scope3d";
 
 /** Amber: the full set, which both the sphere and the segment tests use. */
 const FULL_COLOUR = 0xffa53d;
@@ -45,21 +47,19 @@ export class ColiDebugLayer implements System {
   private builtFor = "";
   private enabled = false;
 
-  build(parent: Object3D, coli: ColiJson | undefined): void {
-    this.detach();
+  /** No `detach`: the stage scope un-parents the group and drops the refs. */
+  build(parent: Object3D, stage: Scope, coli: ColiJson | undefined): void {
     this.json = coli ?? null;
-    this.root = new Group();
+    this.root = attachTo(stage.child("coli_debug"), parent, new Group());
     this.root.name = "coli_debug";
     this.root.visible = false;
-    parent.add(this.root);
+    stage.child("coli_debug.state").defer(() => {
+      this.root = null;
+      this.json = null;
+      this.builtFor = "";
+    });
   }
 
-  detach(): void {
-    this.root?.removeFromParent();
-    this.root = null;
-    this.json = null;
-    this.builtFor = "";
-  }
 
   setEnabled(on: boolean): void {
     this.enabled = on;

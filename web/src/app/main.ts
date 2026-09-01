@@ -208,6 +208,8 @@ class Player {
       rng: this.rng,
       walker: null,
       scope: this.appScope,
+      // Replaced by `newSession` before anything registers on it.
+      session: this.appScope.child("session:boot"),
       stage: this.state.stage,
       frame: 0,
     };
@@ -401,6 +403,7 @@ class Player {
     this.stageScope?.dispose();
     this.stageScope = this.appScope.child(`stage:${this.state.stage}`);
     this.ctx.scope = this.stageScope;
+    this.newSession();
     this.scopeView.reset();
     if (this.stage) {
       this.scene.remove(this.stage.root);
@@ -415,7 +418,8 @@ class Player {
     this.sceneFog.prepare(this.stage.root);
     // Adopt the dome models before lighting, so its material swap sees the
     // clones the backdrop made rather than the shared originals.
-    this.backdrop.build(this.stage.root, bundle.script.backdrop);
+    this.backdrop.build(this.stage.root, this.ctx.scope,
+                        bundle.script.backdrop);
     this.rigs.build(this.stage.root, bundle.script.rigs, this.paths);
     // The scene reset comes first: it empties the object pool and copies the
     // approach rings into the globals, and `chars.attach` spawns into that
@@ -449,14 +453,16 @@ class Player {
     // character layer is the seam the port already reaches the renderer
     // through, so they are handed to it rather than duplicated in `game/`.
     this.chars.paths = this.paths;
-    this.coliDebug.build(this.stage.root, bundle.script.coli);
+    this.coliDebug.build(this.stage.root, this.ctx.scope,
+                         bundle.script.coli);
     this.stuckDebug.build(this.stage.root, this.ctx.scope);
     this.chars.civilians = bundle.script.civilians ?? null;
-    this.chars.build(this.stage.root, bundle.script.characters);
+    this.chars.build(this.stage.root, this.ctx.scope,
+                     bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
     // Doors, shutters and the vans they hang off; driven by the script's
     // own flags, so nothing here needs a clock of its own.
-    this.props.build(this.stage.root, bundle.script.props);
+    this.props.build(this.stage.root, this.ctx.scope, bundle.script.props);
     // Class 0x41's props are built at run time, so only the templates are
     // adopted here; the nodes follow `G.g_breakable_props`.
     this.breakables.adopt(this.stage.root);
@@ -465,12 +471,11 @@ class Player {
     this.shooting.setTables(bundle.script.characters?.combat);
     this.dialogue = bundle.script.sound ?? null;
     this.bullets.source = this.chars;
-    this.debug.detach();
     this.scene.add(this.bullets.group);
     this.shooting.playSound = (id) => { this.bgm.play(id); };
     this.shooting.setEnabled(
       $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
-    this.rain.build(this.stage.root, bundle.script.rain);
+    this.rain.build(this.stage.root, this.ctx.scope, bundle.script.rain);
     this.lighting.build(this.stage.root);
     this.scene.add(this.stage.root);
 
@@ -982,14 +987,23 @@ class Player {
     // A seek replays quietly, so no dialogue or shutter op reaches the layer.
     // Without this the caption from wherever you were still hangs there.
     this.hudLayer.reset();
-    this.props.reset();
     this.shooting.reset();
     // The replay rebuilds the spawn list, so the placers must be able to run
     // again -- otherwise the pre-seek props stand there for ever.
     ResetPropContainers();
+    // The replay rewrites the world; nothing that described the old one may
+    // outlive it.
+    this.newSession();
     w.seek(block, step, op);
+    // A seek replaces the world exactly as a snapshot load does, so it takes
+    // the same rebuild path. Running only half of it is what let a rig keep a
+    // held pose across a seek.
+    this.world.resync(this.ctx);
+    // No `syncCameraToWalker` and no `props.reset` here any more: the resync
+    // pass does both, and the camera's is the stronger of the two -- it seats
+    // the block on the rail even where the restored shot's action has already
+    // retired. Two rebuild paths that nearly agree is the thing being removed.
     this.hudLayer.setShutterState(w.shutterState);
-    this.syncCameraToWalker();
     this.syncBgmToWalker();
     this.state.block = block;
     this.state.step = step;
@@ -1319,8 +1333,25 @@ class Player {
     return this.world.save(this.ctx);
   }
 
+  /**
+   * Start a new session scope.
+   *
+   * Everything that describes *how the game got where it is* — as opposed to
+   * where it is — hangs off this, and a seek or a snapshot load makes that
+   * history untrue. Recycling the scope is what makes "a seek cannot leave a
+   * layer holding state play would never produce" structural rather than a
+   * thing each `resync` has to remember.
+   */
+  private newSession(): void {
+    this.ctx.session.dispose();
+    this.ctx.session = this.stageScope!.child("session");
+  }
+
   /** Put one back. Returns the reason it was refused, or null. */
   loadSnapshot(snap: Snapshot): string | null {
+    // Before `load`, because `load` ends by resyncing every system and a
+    // system's `resync` claims the *new* session.
+    this.newSession();
     const err = this.world.load(snap, this.ctx);
     if (err) return err;
     // Every layer has resynced, the camera included -- it is the first system

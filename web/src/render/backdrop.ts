@@ -44,6 +44,7 @@ import { IDLE_TICK, type System, type Tick }
   from "../core/system";
 import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
+import type { Scope } from "../core/scope";
 
 /** The scale the draw applies. Negative Z is deliberate. */
 const DOME_SCALE = new Vector3(1.2, 1.2, -1.2);
@@ -75,8 +76,22 @@ export class Backdrop implements System<RenderContext> {
    * leaving it in the stage tree would let the region logic show it in place
    * — at its authored position rather than around the camera.
    */
-  build(root: Object3D, backdrop: BackdropJson | undefined): void {
-    this.detach();
+  /**
+   * No `detach`. The dome models are *adopted* out of the stage tree rather
+   * than made here, so the scope's job is to put them back where they came
+   * from -- which is exactly what the teardown did.
+   */
+  build(root: Object3D, stage: Scope, backdrop: BackdropJson | undefined): void {
+    stage.child("backdrop").defer(() => {
+      for (const [node, parent] of this.home) {
+        node.visible = true;
+        parent.add(node);
+      }
+      this.home.clear();
+      this.bySlot.clear();
+      this.current = null;
+      this.preset = -1;
+    });
     this.presets = backdrop?.presets ?? [];
     if (!this.presets.length) return;
 
@@ -118,16 +133,6 @@ export class Backdrop implements System<RenderContext> {
   }
 
   /** Return the models to the stage tree. */
-  detach(): void {
-    for (const [node, parent] of this.home) {
-      node.visible = true;
-      parent.add(node);
-    }
-    this.home.clear();
-    this.bySlot.clear();
-    this.current = null;
-    this.preset = -1;
-  }
 
   setEnabled(v: boolean): void {
     this.enabled = v;

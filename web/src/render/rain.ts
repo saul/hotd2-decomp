@@ -45,6 +45,7 @@ import { Euler, Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { RainJson } from "../bundle";
 import { Rng } from "../core/rng";
 import type { System, Tick } from "../core/system";
+import type { Scope } from "../core/scope";
 import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
 
@@ -84,8 +85,21 @@ export class Rain implements System<RenderContext> {
    * routine names the slot as a literal. Taking it out of the stage tree stops
    * the region logic from ever showing the single authored copy.
    */
-  build(root: Object3D, cfg: RainJson | undefined): void {
-    this.detach();
+  /**
+   * No `detach`. The stage scope puts the borrowed particle model back and
+   * drops the clones, which is the whole of what the teardown ever did.
+   */
+  build(root: Object3D, stage: Scope, cfg: RainJson | undefined): void {
+    stage.child("rain").defer(() => {
+      for (const d of this.drops) this.group.remove(d.node);
+      this.drops = [];
+      // The template is *borrowed* from the stage tree, not made here, so it
+      // goes home rather than being disposed.
+      if (this.template && this.home) this.home.add(this.template);
+      this.template = null;
+      this.home = null;
+      this.group.visible = false;
+    });
     this.cfg = cfg ?? null;
     if (!cfg || !cfg.enabled_by_script) return;
 
@@ -128,14 +142,6 @@ export class Rain implements System<RenderContext> {
     }
   }
 
-  detach(): void {
-    for (const d of this.drops) this.group.remove(d.node);
-    this.drops = [];
-    if (this.template && this.home) this.home.add(this.template);
-    this.template = null;
-    this.home = null;
-    this.group.visible = false;
-  }
 
   private spawn(): { x: number; y: number; z: number } {
     const c = this.cfg!;

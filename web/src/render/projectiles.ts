@@ -25,9 +25,21 @@ export class ProjectileLayer implements System<RenderContext> {
   private readonly nodes = new Map<number, Object3D>();
   private readonly _eye = new Vector3();
 
-  detach(): void {
-    for (const n of this.nodes.values()) n.removeFromParent();
-    this.nodes.clear();
+  /**
+   * The nodes are **session** state: they track `G.g_thrown_weapons`, which a
+   * seek replaces wholesale. Registering them there rather than clearing them
+   * by hand is what stops a weapon from a future the player rewound out of
+   * still hanging in the air.
+   */
+  attach(ctx: RenderContext): void {
+    this.claimSession(ctx);
+  }
+
+  private claimSession(ctx: RenderContext): void {
+    ctx.session.defer(() => {
+      for (const n of this.nodes.values()) n.removeFromParent();
+      this.nodes.clear();
+    });
   }
 
   update(ctx: RenderContext): void {
@@ -63,9 +75,12 @@ export class ProjectileLayer implements System<RenderContext> {
     }
   }
 
-  /** A load replaced the weapon list wholesale; rebuild against the new one. */
+  /**
+   * A load replaced the weapon list wholesale. The previous session scope has
+   * already dropped the nodes; this claims the new one and rebuilds.
+   */
   resync(ctx: RenderContext): void {
-    this.detach();
+    this.claimSession(ctx);
     this.update(ctx);
   }
 }

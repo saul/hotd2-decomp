@@ -32,7 +32,8 @@
  * save state is unaffected.
  */
 import { Box3, Group, Object3D, Raycaster, Vector3 } from "three";
-import type { Context, System } from "../core/system";
+import type { System } from "../core/system";
+import type { RenderContext } from "./context";
 import { G } from "../game/globals";
 import {
   BreakableState, PropFamily, type BreakableProp,
@@ -161,7 +162,7 @@ interface Live {
   lift?: LiftParts;
 }
 
-export class BreakableLayer implements System {
+export class BreakableLayer implements System<RenderContext> {
   readonly id = "render.breakables";
   readonly group = new Group();
 
@@ -181,7 +182,6 @@ export class BreakableLayer implements System {
    * by slot and take them out of the draw.
    */
   adopt(root: Object3D): void {
-    this.detachAll();
     root.traverse((o) => {
       const x = o.userData as { hod2_kind?: string; hod2_rig?: string };
       if (x?.hod2_kind !== "rig_part") return;
@@ -193,17 +193,29 @@ export class BreakableLayer implements System {
     });
   }
 
-  detach(): void {
-    this.detachAll();
+  /**
+   * Two lifetimes, and they are not the same one.
+   *
+   * The **templates** are adopted out of the stage's glTF, so they belong to
+   * the stage. The **nodes** follow `G.g_breakable_props`, which a seek
+   * replaces wholesale, so they belong to the session. Clearing both together
+   * was why a seek left the pool's node map indexed on props that no longer
+   * existed.
+   */
+  attach(ctx: RenderContext): void {
+    ctx.scope.child("breakables.templates")
+      .defer(() => this.templates.clear());
+    this.claimSession(ctx);
   }
 
-  private detachAll(): void {
-    for (const l of this.nodes.values()) {
-      l.node.removeFromParent();
-      l.shadow?.removeFromParent();
-    }
-    this.nodes.clear();
-    this.templates.clear();
+  private claimSession(ctx: RenderContext): void {
+    ctx.session.defer(() => {
+      for (const l of this.nodes.values()) {
+        l.node.removeFromParent();
+        l.shadow?.removeFromParent();
+      }
+      this.nodes.clear();
+    });
   }
 
   setEnabled(v: boolean): void {
@@ -397,13 +409,12 @@ export class BreakableLayer implements System {
     return best && { prop: best.prop, point: best.point };
   }
 
-  /** A load replaced the prop list wholesale; rebuild against the new one. */
-  resync(_ctx: Context): void {
-    for (const l of this.nodes.values()) {
-      l.node.removeFromParent();
-      l.shadow?.removeFromParent();
-    }
-    this.nodes.clear();
+  /**
+   * A load replaced the prop list wholesale. The previous session scope has
+   * already dropped the nodes; this claims the new one and rebuilds.
+   */
+  resync(ctx: RenderContext): void {
+    this.claimSession(ctx);
     this.update();
   }
 

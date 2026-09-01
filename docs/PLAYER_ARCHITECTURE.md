@@ -514,12 +514,16 @@ The test of whether the helpers are good enough: **`detach()` should disappear**
 from all nine layers. If a layer still needs a hand-written teardown after this,
 a helper is missing.
 
-Two are converted as the proof it works. `StuckDebugLayer` lost its `detach`
-entirely — the stage scope owns the group, and one child scope per marker means
-retiring a marker is `m.scope.dispose()` instead of four hand-written
-`dispose()` calls that were also duplicated in the teardown. `SpawnLayer`'s
-label textures were a real leak: nothing disposed them and a stage switch built
-a fresh set beside the old one. Seven to go.
+**All nine are gone.** The interesting part was that converting them showed
+two lifetimes had been conflated. `BreakableLayer.detachAll` cleared its
+templates *and* its nodes together — but the templates are adopted out of the
+stage's glTF and the nodes follow `G.g_breakable_props`, which a **seek**
+replaces. One belongs to `stage`, the other to `session`, and clearing both
+together is why a seek left the node map indexed on props that no longer
+existed.
+
+`SpawnLayer`'s label textures were a plain leak: nothing disposed them, so a
+stage switch built a fresh set beside the old one.
 
 ### Seeing it: the scope panel
 
@@ -566,6 +570,19 @@ One wrinkle worth knowing. `openedAt` is stamped from a **monotonic** frame
 counter, not `ctx.frame`, because `ctx.frame` restarts at zero on every stage
 load — and "was this opened before the current stage loaded" is the one
 question the panel exists to answer.
+
+### A seek and a load are the same rebuild
+
+`World.load` ended with a `resync` pass over every system. A **seek** had no
+such pass: it called `chars.resync()` and `syncCameraToWalker()` by hand and
+left everything else to notice on its own. Two rebuild paths that nearly agree
+is how they came to disagree.
+
+`World.resync(ctx)` is now public and both take it. `app/` recycles
+`ctx.session` immediately before either, so a layer's `resync` claims the *new*
+session — which is what makes "a seek cannot leave a layer holding state play
+would never produce" structural instead of something each `resync` has to
+remember.
 
 ### The check that could fail
 

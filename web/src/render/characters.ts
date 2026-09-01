@@ -61,6 +61,7 @@ import { ActorSpawn } from "../game/director";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G } from "../game/globals";
 import { Rng } from "../core/rng";
+import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { GameHost } from "../game/host";
 import { ActorKillAll, ResolveHit, type HitResult }
@@ -161,8 +162,17 @@ export class CharacterLayer implements System {
    */
   civilians: CiviliansJson | null = null;
 
-  build(root: Object3D, json: CharactersJson | undefined): void {
-    this.detach();
+  /**
+   * No `detach`. The character hierarchies belong to the stage's own glTF,
+   * which is disposed wholesale on a stage change, so all this ever gave back
+   * were the references -- and the scope does that.
+   */
+  build(root: Object3D, stage: Scope, json: CharactersJson | undefined): void {
+    stage.child("characters").defer(() => {
+      this.instances = [];
+      this.posed.clear();
+      this.json = null;
+    });
     this.json = json ?? null;
     if (!json) return;
 
@@ -256,13 +266,6 @@ export class CharacterLayer implements System {
     }
   }
 
-  detach(): void {
-    // The nodes belong to the stage scene, which is disposed wholesale on a
-    // stage change, so this only drops our references.
-    this.instances = [];
-    this.posed.clear();
-    this.json = null;
-  }
 
   setEnabled(v: boolean): void {
     this.enabled = v;

@@ -348,12 +348,18 @@ export class DebugBoxLayer implements System<RenderContext> {
   }
 
   /** The nodes belong to the scene, which is rebuilt on a stage change. */
-  detach(): void {
-    for (const b of this.pool) b.node.removeFromParent();
-    for (const r of this.rings) r.removeFromParent();
-    this.pool.length = 0;
-    this.rings.length = 0;
-    this.used = 0;
+  /**
+   * A stage has loaded. The pool and the range rings are grown on demand and
+   * hang off this layer's own group, so the stage scope empties them.
+   */
+  attach(ctx: RenderContext): void {
+    ctx.scope.child("debug_boxes").defer(() => {
+      for (const b of this.pool) b.node.removeFromParent();
+      for (const r of this.rings) r.removeFromParent();
+      this.pool.length = 0;
+      this.rings.length = 0;
+      this.used = 0;
+    });
   }
 
   /** The boxes are a pure function of the restored actor list. */

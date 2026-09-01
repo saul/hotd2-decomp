@@ -97,7 +97,19 @@ export class World<C extends Context = Context> {
     // Second pass: the renderers rebuild from the state the first pass put
     // back. Split in two because a renderer's resync may read another
     // system's restored slice, and a single pass would race the order.
-    for (const s of this.systems()) s.resync?.(ctx);
+    this.resync(ctx);
     return null;
+  }
+
+  /**
+   * Rebuild everything derived, in tick order.
+   *
+   * Public because a **seek** needs it as much as a load does: both replace
+   * the game state underneath the renderer, and the two going through
+   * different rebuild paths is how they came to disagree. A seek has no
+   * snapshot to apply, so it calls this on its own.
+   */
+  resync(ctx: C): void {
+    for (const s of this.systems()) s.resync?.(ctx);
   }
 }

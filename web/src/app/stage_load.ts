@@ -26,7 +26,6 @@ import { RailLayer } from "../render/overlays";
 import { Walker } from "../script/walker";
 import { G } from "../game/globals";
 import { GameMode } from "../game/game_mode";
-import { SetGameTables } from "../game/tables";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { minimapGraph, treeProjection } from "./projection/script";
 import { screenMessage } from "./projection/message";
@@ -104,9 +103,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   // range: they walked into the camera and spun on a facing angle that has
   // no direction at zero distance.
   p.world.attach(p.ctx);
-  SetGameTables(bundle.script.characters, bundle.script.breakables,
-                bundle.script.set_pieces, bundle.script.humanoids,
-                bundle.script.coli, bundle.script.civilians);
+  p.applyGameTables(bundle.script);
   G.g_player_lives = [
     bundle.script.characters?.player?.start_lives ?? 2,
     bundle.script.characters?.player?.start_lives ?? 2,

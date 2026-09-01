@@ -25,6 +25,7 @@ import {
   type Manifest,
 } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
+import type { ScriptJson } from "../bundle/stage";
 import { CamPaths } from "../render/campath";
 import { CameraDrawSystem, CameraRig, CameraSeatSystem, CameraTakeSystem }
   from "../render/camera";
@@ -86,6 +87,7 @@ import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { ResetPropContainers } from "../game/class41";
 import { ResetGameGlobals } from "../game/globals";
+import { SetGameTables } from "../game/tables";
 
 /**
  * How often the playing address may be written back to the URL.
@@ -539,6 +541,29 @@ export class Player implements PlayerView, PlayerCommands {
     this.setMode(this.state.mode);
   }
 
+  /**
+   * The stage's tables, kept because a seek has to put them back.
+   *
+   * `ResetGameGlobals` clears the approach rings along with everything else,
+   * and **the replay cannot rewrite them**: they are table-derived, copied out
+   * of the bundle by `SetGameTables`, and no opcode touches them. A seek that
+   * only reset left every ring at zero, so `TestApproachRing` answered band 4
+   * for every actor at every distance, nothing ever reached striking range,
+   * and nothing ever claimed an attack permit. Two enemies stood at d=37
+   * running on the spot.
+   *
+   * Held here so the argument list exists once. `stage_load.ts` sets it and
+   * `seekTo` puts it back.
+   */
+  private gameTables: ScriptJson | null = null;
+
+  /** Point the port's tables at this stage, and copy what `G` holds of them. */
+  applyGameTables(script: ScriptJson): void {
+    this.gameTables = script;
+    SetGameTables(script.characters, script.breakables, script.set_pieces,
+                  script.humanoids, script.coli, script.civilians);
+  }
+
   /** Load the stage the URL names. The sequence is `app/stage_load.ts`. */
   async loadStage(): Promise<void> {
     await loadStageInto(this);
@@ -708,6 +733,10 @@ export class Player implements PlayerView, PlayerCommands {
     // `web/test/state.test.ts` is what found this: two seeks to one address
     // from different histories reached different worlds.
     ResetGameGlobals();
+    // ...but not the half of `G` the replay cannot write. The approach rings
+    // come from the bundle, not from an opcode, so clearing them without
+    // putting them back parks every enemy in the outermost band for ever.
+    if (this.gameTables) this.applyGameTables(this.gameTables);
     // The replay rewrites the world; nothing that described the old one may
     // outlive it.
     this.newSession();

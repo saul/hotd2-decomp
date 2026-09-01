@@ -165,6 +165,14 @@ try {
   // of `Player.frame` — render, then publish — and not of a half-applied one.
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
 
+  // Read text out of the page. A panel is often narrower than what it is
+  // saying -- the actor rows ellipsise exactly where the interesting number
+  // is -- and a screenshot of a truncated row is not evidence.
+  for (const sel of opt("dump", "").split(",").filter(Boolean)) {
+    const text = await page.locator(sel).first().innerText().catch(() => null);
+    console.log(`--- ${sel} ---\n${text ?? "(no such element)"}`);
+  }
+
   mkdirSync(SHOTS, { recursive: true });
   const path = resolve(SHOTS, `${out}.png`);
   const target = el ? page.locator(el) : page;

@@ -458,5 +458,26 @@ check("every region of the page is inside one",
       "the root, the top bar, the script tree, the viewport overlays, the "
       + "sidebar and the transport");
 
+// Every debug group must be rendered by exactly one panel.
+//
+// The names live in `ui/projection.ts` and the panels in `ui/panels/Sidebar.tsx`,
+// and nothing but this ties the two together: routing a toggle to a group that
+// no panel draws compiles, renders, and silently removes the control from the
+// page. That happened to `actors` -- four toggles and two readouts, `boxes`
+// among them, unreachable -- and no check in this repository could see it,
+// because every one of them was about markup that *was* rendered.
+console.log("\nEvery debug group has a panel:\n");
+{
+  const src = readFileSync(join(process.cwd(), "src", "ui", "panels", "Sidebar.tsx"), "utf8");
+  const declared = readFileSync(join(process.cwd(), "src", "ui", "projection.ts"), "utf8")
+    .match(/export type DebugGroupName =([^;]*);/)?.[1] ?? "";
+  const names = [...declared.matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  check("the group names were found at all", names.length > 0, declared);
+  for (const g of names) {
+    const n = [...src.matchAll(new RegExp(`<DebugGroup group="${g}"`, "g"))].length;
+    check(`${g} is rendered by exactly one panel`, n === 1, `found ${n}`);
+  }
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

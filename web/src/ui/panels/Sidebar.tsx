@@ -162,6 +162,10 @@ function ActorsPanel() {
              + "in g_class_handlers explains itself, one without is listed "
              + "by id and left alone. docs/formats/spawns.md is the class "
              + "table."}>
+      {/* The actors group's switches and readouts belong *in* the actors
+          panel rather than beside it: `boxes` boxes the actor the list is
+          telling you about, and `enemies` counts what it is listing. */}
+      <DebugGroup group="actors" />
       <div className="scroll dbg"><ActorBody /></div>
     </Panel>
   );

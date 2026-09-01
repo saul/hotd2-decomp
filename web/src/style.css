@@ -95,7 +95,22 @@ select, input[type="search"] {
   overflow: hidden;
 }
 #left { border-right: 1px solid var(--line); }
-#right { border-left: 1px solid var(--line); gap: 1px; }
+/* The column **scrolls**; the panels in it do not shrink.
+   As a plain flex column with `overflow: hidden`, every panel was a shrinkable
+   item, so opening two or three groups squeezed the ones below them to zero
+   height -- summary included -- and the clip hid what was left. There was no
+   way back from it either: the header you needed in order to fold something
+   was the header that had been squashed away. Each open body caps itself
+   below, so what scrolls here is a list of headers of known height. */
+#right {
+  border-left: 1px solid var(--line);
+  gap: 1px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* A panel is exactly as tall as it needs to be. Never a flex item that can
+   lose its own header to make room for a sibling. */
+#right > .panel { flex: none; }
 
 /* ---- splitter ---- */
 
@@ -145,7 +160,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 
 .panel { background: var(--panel); border-bottom: 1px solid var(--line); min-height: 0; }
-.grow-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.grow-panel { display: flex; flex-direction: column; min-height: 0; }
 
 .panel-head {
   display: flex;
@@ -274,7 +289,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* ---- inspector ---- */
 
-#inspector-panel { max-height: 34%; display: flex; flex-direction: column; }
+#inspector-panel { display: flex; flex-direction: column; }
 #inspector { padding: 8px 10px; font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; }
 #inspector .k { color: var(--dim); }
 
@@ -511,7 +526,11 @@ button.kill:hover { background: #8c2626; }
 .fold[open] { display: flex; flex-direction: column; min-height: 0; }
 /* Open panels share the sidebar rather than one of them taking it all. */
 .fold[open] > .scroll { max-height: 32vh; }
-#panel-feed[open] > .scroll { max-height: none; }
+/* The feed is the one worth more room -- it is a transcript and reading back
+   through it is the point -- but it is bounded like the rest, because
+   `max-height: none` in a column that no longer stretches means a thousand
+   rows push every panel under it off the bottom. */
+#panel-feed[open] > .scroll { max-height: 48vh; }
 .panel-head .hl {
   margin-left: auto; display: inline-flex; align-items: center; gap: 3px;
   font-weight: normal; color: var(--dim);
@@ -527,7 +546,6 @@ button.kill:hover { background: #8c2626; }
 #skipbar:empty, #branchbar:empty { display: none; }
 
 /* -- the scope panel: the disposal tree, and where it is leaking ---------- */
-#scope-panel { max-height: 32%; }
 #scopes {
   padding: 4px 8px 8px;
   font-family: var(--mono);
@@ -548,7 +566,6 @@ button.kill:hover { background: #8c2626; }
 .scope-warn .scope-count,
 .scope-warn .scope-frame { color: #ffb02e; opacity: 0.85; }
 
-#globals-panel { max-height: 40%; }
 #globals {
   padding: 4px 8px 8px;
   font-family: var(--mono);

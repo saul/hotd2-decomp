@@ -16,6 +16,7 @@
     "exactOptionalPropertyTypes": false,
     "skipLibCheck": true,
     "isolatedModules": true,
+    "jsx": "react-jsx",
     "noEmit": true,
     "types": [
       "vite/client",

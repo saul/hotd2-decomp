@@ -49,7 +49,6 @@ MAY_IMPORT = {
 }
 
 IMPORT_RE = re.compile(r"""(?:from|import)\s+["']([^"']+)["']""")
-EXE_CITE_RE = re.compile(r"FUN_00[0-9a-f]{6}|0x00[0-9A-Fa-f]{6}")
 DOM_RE = re.compile(r"\b(document|window|HTMLElement|localStorage)\b")
 #: `G.x = `, `G.x[i] = `, `G.x.y = ` -- an assignment, not a comparison.
 G_WRITE_RE = re.compile(r"\bG\.\w+(?:\[[^\]]*\]|\.\w+)*\s*(?:[-+*/|&^]|\+\+|--)?=(?!=)")
@@ -138,10 +137,16 @@ def main() -> int:
             "an engine function *called* from render/ is a decision the port "
             "should be making; types, enums and pure maths are fine",
             "ratchet", baseline=13, step=11),
-        "no-engine-truth-in-ui": Rule(
-            "no-engine-truth-in-ui",
-            "same, for the UI layer",
-            "ratchet", baseline=7, step=11),
+        # The same correction as its render twin, for the same reason: all
+        # seven hits were citations in doc comments -- the sound name table's
+        # address in bgm.ts, the routine hud.ts draws from. `hud/` never wrote
+        # engine state at all, and the *reading* it does wrong is already
+        # counted, in full, by `ui-reads-projection-only`.
+        "no-engine-writes-in-ui": Rule(
+            "no-engine-writes-in-ui",
+            "the UI reads a projection and emits commands; a panel that "
+            "writes `G` is a fourth way for state to enter the game",
+            "error"),
         "ui-reads-projection-only": Rule(
             "ui-reads-projection-only",
             "the UI must read one plain projection and emit commands, not "
@@ -212,8 +217,9 @@ def main() -> int:
                     if re.search(r"\b" + re.escape(n) + r"\s*\(", code):
                         rules["render-drives-the-port"].hit(f"{rel}: {n}()")
         if lay == "ui":
-            for m in EXE_CITE_RE.finditer(text):
-                rules["no-engine-truth-in-ui"].hit(f"{rel}: {m.group(0)}")
+            for m in G_WRITE_RE.finditer(code):
+                rules["no-engine-writes-in-ui"].hit(
+                    f"{rel}: {m.group(0).strip()}")
         # core/bams.ts is the one definition, so it is not a violation of
         # itself. Everywhere else, importing it is the only option.
         if (re.search(r"\bBAMS_TO_RAD\s*=", code)

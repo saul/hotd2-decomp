@@ -51,7 +51,10 @@ import { ColiDebugLayer } from "../render/coli_debug";
 import { StuckDebugLayer } from "../render/stuck_debug";
 import { World } from "../core/world";
 import { Scope } from "../core/scope";
-import { ScopeView } from "../hud/scope_view";
+import { UiStore } from "../ui/store";
+import { mountUi } from "./ui_root";
+import type { UiProjection } from "../ui/projection";
+import { EMPTY_TOGGLES } from "../ui/commands";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
 import type { Tick } from "../core/system";
@@ -150,7 +153,11 @@ class Player {
   private lifeFrame = 0;
   private stageScope: Scope | null = null;
   private stageLoadedAt = 0;
-  private readonly scopeView = new ScopeView();
+  /** The one thing React subscribes to. See `ui/store.ts`. */
+  private readonly ui = new UiStore();
+  /** Bumped when the projection actually changed, so React can skip a frame. */
+  private uiRevision = 0;
+  private lastUiKey = "";
   private readonly events = new Events();
   /** The one random source in the player, and part of every snapshot. */
   private readonly rng = new Rng(1);
@@ -245,10 +252,8 @@ class Player {
     // The port's data segment on screen, and the sidebar. Driven from the
     // tick rather than from `refreshUi`, which only runs during playback:
     // both are at their most useful when the clock is stopped.
-    this.world.add("hud", panelSystem("hud.scopes", (ctx) => {
-      this.scopeView.update(this.appScope.snapshot(),
-        { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt });
-    }));
+    // The React half. One projection a frame, published only when it differs.
+    this.world.add("hud", panelSystem("ui", (ctx) => this.publishUi(ctx)));
     this.world.add("hud", panelSystem("hud.globals",
       () => this.globalsView.update()));
     this.world.add("hud", panelSystem("hud.debug_panels", (ctx) => {
@@ -339,6 +344,7 @@ class Player {
     });
 
     this.wireUi();
+    mountUi($("#scopes"), this.ui);
     wireSplitter();
     // Watching the viewport rather than the window catches the splitter drag
     // and the branch bar appearing, neither of which resizes the window.
@@ -408,7 +414,6 @@ class Player {
     this.stageScope = this.appScope.child(`stage:${this.state.stage}`);
     this.ctx.scope = this.stageScope;
     this.newSession();
-    this.scopeView.reset();
     if (this.stage) {
       this.scene.remove(this.stage.root);
       this.stage.dispose();
@@ -1356,6 +1361,43 @@ class Player {
   private newSession(): void {
     this.ctx.session.dispose();
     this.ctx.session = this.stageScope!.child("session");
+  }
+
+  /**
+   * Build this frame's projection and hand it to React.
+   *
+   * The `key` is what decides whether anything is published at all. A sidebar
+   * that has not changed being diffed sixty times a second is the cost this
+   * avoids, and it is cheaper to build a short string here than to let React
+   * walk a few hundred rows — the scope tree alone is the whole disposal graph.
+   */
+  private publishUi(ctx: RenderContext): void {
+    const scopes = this.appScope.snapshot();
+    // Cheap and complete: every number the panels draw is in it.
+    const key = JSON.stringify(scopes);
+    if (key === this.lastUiKey) return;
+    this.lastUiKey = key;
+    const p: UiProjection = {
+      revision: ++this.uiRevision,
+      stage: this.state.stage,
+      stages: [],
+      original: !!this.state.original,
+      loading: null,
+      status: "",
+      toggles: EMPTY_TOGGLES,
+      transport: {
+        playing: this.playing, mode: this.state.mode, speed: this.speed,
+        frozen: !!this.state.freeze, camSlot: null, camFrame: 0,
+        camFrameLo: 0, camFrameHi: 0, camLabel: "",
+      },
+      wait: { kind: null, detail: "", blockers: [] },
+      actors: [],
+      globals: [],
+      scopes,
+      scopeContext: { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt },
+      hasSaved: !!this.saved,
+    };
+    this.ui.publish(p);
   }
 
   /** Put one back. Returns the reason it was refused, or null. */

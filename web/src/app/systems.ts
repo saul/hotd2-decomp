@@ -6,7 +6,7 @@
  * Everything of substance is on the other side of them.
  */
 import { Matrix4, Vector3 } from "three";
-import type { Context, System, Tick } from "../core/system";
+import type { System, Tick } from "../core/system";
 import type { RenderContext } from "../render/context";
 import { GameUpdate } from "../game/director";
 import { ActorIsEnemy } from "../game/registry";
@@ -176,6 +176,8 @@ export class GameSystem implements System<RenderContext> {
  * `tools/verify_layers.py` is what keeps that honest — importing `core/system`
  * from `hud/` counts against `ui-reads-projection-only`, and it should.
  */
-export function panelSystem(id: string, tick: (ctx: Context) => void): System {
+export function panelSystem(id: string,
+                            tick: (ctx: RenderContext) => void)
+    : System<RenderContext> {
   return { id, update: (ctx) => tick(ctx) };
 }

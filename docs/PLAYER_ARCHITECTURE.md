@@ -374,7 +374,7 @@ web/src/
                 stagescene, rigs, props, backdrop, rain, fog, lighting,
                 campath, characters. Every one a System.
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
-  ui/           React. projection.ts, commands.ts, and one file per panel
+  ui/           React. projection.ts, commands.ts, store.ts, one file per panel
   hud/          bgm.ts — audio, not UI
 ```
 
@@ -714,6 +714,16 @@ it. Two things fall out:
   real invariant is that a drop never leaves the spawn box's vertical range.
   The port had it right; the first draft of the test did not.
 
+### `no-engine-truth-in-ui` had the same defect, and took the same fix
+
+Its description was literally "same, for the UI layer", and so was the
+problem: all seven hits were citations in doc comments — the sound name
+table's address in `bgm.ts`, the routine `hud.ts` draws from. `hud/` never
+wrote engine state at all, and the *reading* it does wrong is already counted
+in full by `ui-reads-projection-only`. So it became
+**`no-engine-writes-in-ui`** (error, 0), and the debt that matters stays where
+it was: 17, paid down by step 11.
+
 ### The rules must keep asking the real question
 
 `layers-are-systems` used to search `main.ts` for `drawLayers` and count what
@@ -748,7 +758,7 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
-| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ☐ |
+| 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ◐ — the seam is in and the scope panel is React |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
 
 ### Proving a step did not change behaviour

@@ -588,11 +588,24 @@ tr.gdead td { opacity: 0.45; }
 
 /* -- the debug panels ---------------------------------------------------- */
 .dbg { font: 11px/1.45 var(--mono); padding: 4px 6px; }
-.dbg-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* These rows wrap, and it is not a nicety. An actor row is the *end* of the
+   line -- `0x1E00 char_adv00 . d=45 . AttackRun/0 . wants a permit` -- so an
+   ellipsis takes off exactly the part worth reading, and the panel is a fixed
+   width nobody wants to widen just to see one state name. The hanging indent
+   is what keeps a wrapped row readable as one row: the continuation sits under
+   the text rather than under the address, so a column of them still scans. */
+.dbg-row {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding-left: 1.2em;
+  text-indent: -1.2em;
+}
 .dbg-row.hot { color: var(--accent-2); }
 .dbg-row.dead { color: var(--dim); text-decoration: line-through; }
-.dbg-note { color: var(--dim); white-space: pre; overflow: hidden;
-            text-overflow: ellipsis; }
+/* `pre-wrap`, not `pre`: the notes are written with their own line breaks and
+   those have to survive, but a long one still has to come back onto the page. */
+.dbg-note { color: var(--dim); white-space: pre-wrap;
+            overflow-wrap: anywhere; }
 .dbg-group {
   display: flex; align-items: center; gap: 5px; cursor: pointer;
   margin-top: 4px; padding-top: 3px; border-top: 1px solid var(--line);

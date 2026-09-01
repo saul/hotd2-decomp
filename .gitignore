@@ -63,3 +63,7 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# Local-only screenshots of the running player. A shot of a stage is derived
+# game art; see tests/README.md on why no asset ever lands in this repo.
+web/shots/

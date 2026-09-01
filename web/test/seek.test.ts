@@ -23,6 +23,7 @@ import { EvtOpSpawnIfOnePlayer, EvtOpSpawnIfTwoPlayers }
   from "../src/script/ops/spawn";
 import { G } from "../src/game/globals";
 import type { OpJson, ScriptJson } from "../src/bundle";
+import { seekTo } from "../src/script/seek";
 
 const ROOT = join(process.env.HOME ?? "", "hotd2-decomp", "extract", "player");
 const STAGES = [1, 2, 3, 4, 5, 6];
@@ -120,7 +121,7 @@ for (const stage of STAGES) {
   let firstDiff = "";
   for (const smp of samples) {
     const w = new Walker(script, mkHost());
-    if (!w.seek(smp.b, smp.s, smp.o)) { missed++; continue; }
+    if (!seekTo(w, smp.b, smp.s, smp.o)) { missed++; continue; }
     const got = shot(w);
     if (got === smp.state) { exact++; continue; }
     differ++;
@@ -236,7 +237,7 @@ for (const stage of STAGES) {
   if (existsSync(file)) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
     const w = new Walker(script, mkHost());
-    const arrived = w.seek(8, 4, 25);
+    const arrived = seekTo(w, 8, 4, 25);
     check("a deferred `start == -1` resumes forward, it does not rewind",
           arrived && !!w.cam && w.cam.slot === 44 && w.cam.startFrame > 500
             && w.cam.endFrame === 685,
@@ -256,14 +257,14 @@ for (const stage of STAGES) {
     // reachable — including the ones behind the fork the script does not take
     // by default, which is where stage 2 keeps the falling containers.
     check("an unreachable address returns false rather than pretending",
-          w.seek(9999, 1, 0) === false);
+          seekTo(w, 9999, 1, 0) === false);
     const w2 = new Walker(script, mkHost());
-    check("a reachable address returns true", w2.seek(11, 8, 2) === true);
+    check("a reachable address returns true", seekTo(w2, 11, 8, 2) === true);
     // The point of the steering, stated as a check: block 18 is behind block
     // 14's second fork and `branchChoice` defaults to the first.
     const w3 = new Walker(script, mkHost());
     check("an address behind the branch the script does not take by default",
-          w3.seek(18, 4, 7) === true);
+          seekTo(w3, 18, 4, 7) === true);
   }
 }
 
@@ -283,7 +284,7 @@ for (const stage of STAGES) {
     const ENEMY = new Set([0x11, 0x14, 0x19, 0x30, 0x31, 0x32, 0x40, 0x43,
                            0x51]);
     const w = new Walker(script, mkHost());
-    const arrived = w.seek(17, 8, 29);
+    const arrived = seekTo(w, 17, 8, 29);
     const live = w.spawns.filter((s) => ENEMY.has(s.class));
     const stale = live.filter((s) => s.step < 8);
     check("a seek past an enemy gate leaves no enemy from before it",
@@ -565,7 +566,7 @@ for (const stage of STAGES) {
     for (const [b, s] of addrs) {
       const v = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
                                      aliveCivilians: () => 0 });
-      if (!v.seek(b, s, 0)) continue;
+      if (!seekTo(v, b, s, 0)) continue;
       seeks++;
       let at = "", stalls = 0;
       for (let i = 0; i < 60 * 60 * 8 && !v.finished; i++) {

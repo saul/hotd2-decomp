@@ -27,6 +27,7 @@ import { SpawnClass } from "../src/game/spawn_class.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { vec3 } from "../src/game/vec.ts";
 import { Walker } from "../src/script/walker.ts";
+import { seekTo } from "../src/script/seek";
 
 const root = join(process.env.HOME, "hotd2-decomp/extract/player");
 /** Far enough that "stood still" and "charged the camera" cannot be confused. */
@@ -98,7 +99,7 @@ for (let stage = 1; stage <= 6; stage++) {
     const addr = spawnAddr.get(p.at);
     if (addr) {
       const w = mkWalker();
-      if (w.seek(addr[0], addr[1], addr[2])) {
+      if (seekTo(w, addr[0], addr[1], addr[2])) {
         G.g_camera_fixed_eye_y = w.groundY ?? 0;
       }
     }

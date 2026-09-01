@@ -109,7 +109,7 @@ export function waitProjection(w: Walker,
       lines.push({ note: true, text: "Nothing alive is holding it — the camera "
         + `gate (g_camera_free ${G.g_camera_free}) is.` });
     }
-  } else if (kind === "camera" || kind === "queued") {
+  } else if (kind === "queued") {
     lines.push({ note: true, text: `cam path ${G.g_active_cam_path} frame `
       + `${G.g_cam_path_frame} · queued events pending `
       + `${w.queuedEventsPending}` });

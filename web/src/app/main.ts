@@ -36,6 +36,7 @@ import { RailLayer, SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
+import { seekTo as seekWalkerTo } from "../script/seek";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { on } from "./dom";
 import { Minimap, rememberFolds } from "../hud/ui";
@@ -623,7 +624,7 @@ class Player {
     if (this.state.slot !== undefined) {
       this.poseFromSlot(this.state.slot, this.state.frame ?? 0);
     } else if (this.state.block !== undefined) {
-      const arrived = w.seek(this.state.block, this.state.step ?? 1,
+      const arrived = seekWalkerTo(w, this.state.block, this.state.step ?? 1,
                              this.state.op ?? 0);
       if (!arrived) {
         // The address is not on any route the script can take from the entry
@@ -875,7 +876,7 @@ class Player {
     // The replay rewrites the world; nothing that described the old one may
     // outlive it.
     this.newSession();
-    w.seek(block, step, op);
+    seekWalkerTo(w, block, step, op);
     // A seek replaces the world exactly as a snapshot load does, so it takes
     // the same rebuild path. Running only half of it is what let a rig keep a
     // held pose across a seek.

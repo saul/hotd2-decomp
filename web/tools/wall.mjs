@@ -24,6 +24,7 @@ import { SpawnClass } from "../src/game/spawn_class.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { Walker } from "../src/script/walker.ts";
 import { dist2d } from "../src/game/vec.ts";
+import { seekTo } from "../src/script/seek";
 
 const args = process.argv.slice(2)
   .filter((a) => !a.endsWith(".mjs") && !a.endsWith(".ts"));
@@ -47,7 +48,7 @@ const w = new Walker(script, {
   aliveCivilians: () => null, cameraFree: () => null, setShutter: NOOP,
   showMessage: NOOP, endDialogue: NOOP,
 });
-if (!w.seek(Number(block), Number(step), Number(op))) {
+if (!seekTo(w, Number(block), Number(step), Number(op))) {
   throw new Error(`seek to ${block}/${step}/${op} failed`);
 }
 console.log(`at ${w.block}/${w.step}/${w.opIndex}  region ${w.region}`);

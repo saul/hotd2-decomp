@@ -31,6 +31,7 @@ import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
 import { OPS as OPS_TABLE } from "./ops";
+import { WAIT_RULES, passedBecause, type WaitContext } from "./waits";
 
 
 export interface ActiveSpawn extends SpawnJson {
@@ -94,7 +95,6 @@ export interface CamCommand {
 
 export type WaitPolicy =
   | { kind: "frames"; framesLeft: number }
-  | { kind: "camera" }
   /** The real gate: blocks until the player has killed them. */
   | { kind: "enemies" }
   /** `wait_scripted_actors`: blocks until the civilians have left play. */
@@ -205,13 +205,6 @@ function defaultChannels(): number[] {
 }
 
 /**
- * The waits that test the skip flag: `wait_queued_events_done` (0x40),
- * `wait_camera_path_frame` (0x41) and `wait_frames` (0x42). The enemy-count
- * and flag waits above 0x42 do not test it.
- */
-const SKIPPABLE_WAITS = new Set([0x40, 0x41, 0x42]);
-
-/**
  * The two enemy counters' gates: `wait_enemies_alive` (0x43) and
  * `wait_enemies_present` (0x44).
  *
@@ -241,18 +234,6 @@ const ENEMY_GATE_CLASSES: ReadonlySet<number> = new Set<number>([
   SpawnClass.FlyingEnemy,           // 0x43
   SpawnClass.WaterEnemy,            // 0x51
 ]);
-
-/** How far a wait opcode can be honoured from the bundle alone. */
-const WAIT_NOTES: Record<number, string> = {
-  0x40: "approximated: resolves when the current camera move ends",
-  0x43: "the live-enemy gate: real while Shoot is on, and passed when it is "
-      + "off because nothing can then make the count fall",
-  0x44: "the second enemy counter, gated with 0x43",
-  0x45: "passed: the script flag array is written by gameplay",
-  0x46: "the civilian gate: real while Shoot is on, and passed when it is "
-      + "off because rescuing a civilian means killing its captors",
-  0x47: "passed: 'camera settled and no live target' needs the runtime",
-};
 
 /**
  * One opcode's implementation and how far this client honours it.
@@ -695,75 +676,6 @@ export class Walker {
   }
 
   /**
-   * Jump to an exact address and replay everything before it.
-   *
-   * Replaying rather than jumping is the only way the region, the streamed
-   * slots and the camera are right when you land: `region_enter` is an
-   * instruction, so the region at op 14 of block 3 is a function of every
-   * instruction that ran first. Feed output is suppressed during the replay.
-   *
-   * **The replay observes no waits.** A wait is a thing the *player* watches;
-   * a seek is asked for an address, so every one is stepped over the way
-   * `primeToFirstWait` steps over the early ones. Without that the loop stops
-   * at the first blocking instruction and every seek in the stage lands in the
-   * same place -- stage 2 put all of them on block 0 step 1 op 29.
-   *
-   * Returns whether it actually arrived, so a caller that asked for an
-   * unreachable address can say so instead of silently showing another one.
-   */
-  seek(block: number, step = 0, opIndex = 0, maxOps = 500000): boolean {
-    this.reset();
-    const wasReplaying = this.replaying;
-    this.replaying = true;
-    try {
-      return this.seekInner(block, step, opIndex, maxOps);
-    } finally {
-      this.replaying = wasReplaying;
-    }
-  }
-
-  private seekInner(block: number, step: number, opIndex: number,
-                    maxOps: number): boolean {
-    let executed = 0;
-    const arrived = () =>
-      this.block === block && this.step === step && this.opIndex >= opIndex;
-    let steered = -1;
-    while (executed++ < maxOps) {
-      if (arrived() || this.finished) break;
-      // Point the *next* block transition at the goal.
-      //
-      // A branch route only pauses when it has more than one live target;
-      // otherwise `advanceStepOrRoute` takes `next[branchChoice]` silently,
-      // and `branchChoice` is 0 — so without this every seek follows the first
-      // fork and everything on the other one is unreachable. Stage 2 puts
-      // blocks 18, 21 and 22 behind block 14's second fork, and the falling
-      // containers with them.
-      if (this.block !== steered) {
-        steered = this.block;
-        const r = this.currentBlock?.route ?? this.script.routes[this.block];
-        if (r?.kind === "branch" && r.next.length > 1) {
-          const i = r.next.findIndex((n) => this.reaches(n, block));
-          if (i >= 0) this.branchChoice = i;
-        }
-      }
-      if (this.wait) {
-        this.stepOverWait();
-        continue;
-      }
-      // `halt` (0x4E) parks the interpreter and nothing in the script un-parks
-      // it, so anything past one is unreachable in play too. Stop rather than
-      // run script the game never would.
-      if (this.parked) break;
-      if (this.branch) { this.takeBranchToward(block); continue; }
-      if (!this.executeOne(true)) break;
-    }
-    this.wait = null;
-    this.branch = null;
-    this.host.onBranch(null);
-    return arrived();
-  }
-
-  /**
    * Retire the enemies an enemy gate was waiting on.
    *
    * `wait_enemies_alive` (0x43) and `wait_enemies_present` (0x44) block until
@@ -801,40 +713,6 @@ export class Walker {
   private retireGatedEnemies(): void {
     if (!this.replaying) return;
     this.spawns = this.spawns.filter((s) => !ENEMY_GATE_CLASSES.has(s.class));
-  }
-
-  /**
-   * Resolve a branch met during a seek by taking the route the goal is
-   * actually behind.
-   *
-   * Falling back to `next[0]` -- which is what `branch_choice` defaults to --
-   * would make a seek past a branch point land wherever the first route goes,
-   * so an address recorded on the other fork could never be returned to.
-   */
-  private takeBranchToward(goal: number): void {
-    const b = this.branch;
-    if (!b) return;
-    this.takeBranch(b.targets.find((t) => this.reaches(t, goal)) ?? b.targets[0]);
-  }
-
-  /** Whether `goal` is reachable from `from` by following block routes. */
-  private reaches(from: number, goal: number, limit = 1024): boolean {
-    const seen = new Set<number>();
-    const queue = [from];
-    while (queue.length > 0 && seen.size < limit) {
-      const n = queue.shift() as number;
-      if (n === goal) return true;
-      if (n < 0 || seen.has(n)) continue;
-      seen.add(n);
-      const blk = this.blockAt(n);
-      if (!blk || blk.hole) continue;
-      const r = blk.route ?? this.script.routes[n];
-      if (!r) continue;
-      if (r.kind === "goto") queue.push(r.next[0]);
-      else if (r.kind === "branch") queue.push(...r.next);
-      else queue.push(n + 1);          // kind 2, as advanceStepOrRoute reads it
-    }
-    return false;
   }
 
   /**
@@ -1002,7 +880,7 @@ export class Walker {
 
     // The waits are re-run every frame, so one already pending is released
     // the same way a new one is passed straight through.
-    if (this.wait && SKIPPABLE_WAITS.has(this.wait.op.op)) {
+    if (this.wait && WAIT_RULES.get(this.wait.op.op)?.skippable) {
       this.wait = null;
       this.opIndex++;
     }
@@ -1016,35 +894,40 @@ export class Walker {
    * and the term drops out rather than parking the script on a condition
    * nothing can ever satisfy. That is the same rule the counters use.
    */
-  private cameraHasHandedBack(): boolean {
+  /** Public because the enemy gates test it. See `script/waits/`. */
+  cameraHasHandedBack(): boolean {
     return this.host.cameraFree() !== false;
   }
 
   private waitSatisfied(): boolean {
     const w = this.wait;
     if (!w) return true;
-    switch (w.policy.kind) {
-      case "frames":
-        return w.policy.framesLeft <= 0;
-      case "camera":
-        return !this.cam || this.cam.done || this.cam.isStatic;
-      case "enemies":
-        return (this.host.aliveEnemies() ?? 0) <= (w.op.arg ?? 0)
-               && this.cameraHasHandedBack();
-      case "civilians":
-        return (this.host.aliveCivilians() ?? 0) <= (w.op.arg ?? 0)
-               && this.cameraHasHandedBack();
-      case "queued":
-        this.settleCameraAction();
-        return this.queuedEventsPending === 0;
-      default:
-        return true;
-    }
+    const rule = WAIT_RULES.get(w.op.op);
+    return rule?.satisfied?.(w.policy, w.op, this.waitContext) ?? true;
+  }
+
+  /**
+   * What a wait rule may ask of the machine, and nothing more.
+   *
+   * The walker *is* one of these — `WaitContext` is a structural view of the
+   * six members a rule may touch, so this costs nothing and the interface is
+   * the whole of the surface. A rule that needs something not on it is a rule
+   * reaching into the interpreter rather than being driven by it, and it will
+   * not compile.
+   */
+  private get waitContext(): WaitContext {
+    return this;
   }
 
   // -- execution ---------------------------------------------------------
 
-  private executeOne(quiet: boolean): boolean {
+  /**
+   * Take one instruction.
+   *
+   * Public because `script/seek.ts` drives it: a seek is a planner over the
+   * machine's own surface, not a mode inside it.
+   */
+  executeOne(quiet: boolean): boolean {
     if (this.finished || this.parked || this.branch || this.wait) return false;
     const blk = this.currentBlock;
     if (!blk || blk.hole || !blk.steps || blk.steps.length === 0) {
@@ -1322,7 +1205,8 @@ export class Walker {
    * has to happen wherever the camera can reach its end -- the clock in
    * `tick`, and the skip, which ends the move where it stands.
    */
-  private settleCameraAction(): void {
+  /** Public because `wait_queued_events_done` settles it. See `waits/`. */
+  settleCameraAction(): void {
     if (!this.camPending) return;
     if (!this.cam || this.cam.done || this.cam.isStatic) {
       this.camPending = false;
@@ -1474,79 +1358,35 @@ export class Walker {
     return undefined;
   }
 
+  /**
+   * Raise a wait, or record why it did not block.
+   *
+   * The rule for the opcode decides both halves — see `script/waits/`. This
+   * used to be a seventy-line `else if` chain here and a `switch` over the
+   * policies it produced two hundred lines away, two places that had to agree
+   * with nothing checking that they did.
+   */
   applyWait(op: OpJson): string | undefined {
     const blocksOn = op.blocks_on ?? "";
-    const arg = op.arg ?? 0;
-    let policy: WaitPolicy;
+    const rule = WAIT_RULES.get(op.op);
 
-    // Every one of these opcodes opens with the same test -- 0x40 and 0x41
-    // with `if (skip == 0) { ...block... }`, 0x42 with `if (skip != 0)
-    // { clear and advance }` -- so a raised flag walks straight past them.
-    // The flag is not cleared here: it stays up until `set_skippable_region`
-    // closes the region, which is what makes one press skip a whole cutscene
-    // rather than a single wait.
-    if (this.skipRequested && SKIPPABLE_WAITS.has(op.op)) {
+    // Every skippable opcode opens with the same test -- 0x40 and 0x41 with
+    // `if (skip == 0) { ...block... }`, 0x42 with `if (skip != 0) { clear and
+    // advance }` -- so a raised flag walks straight past them. The flag is not
+    // cleared here: it stays up until `set_skippable_region` closes the
+    // region, which is what makes one press skip a whole cutscene rather than
+    // a single wait.
+    if (this.skipRequested && rule?.skippable) {
       return `${blocksOn} -- skipped`;
     }
 
-    if (op.op === 0x42) {
-      policy = { kind: "frames", framesLeft: arg };
-    } else if (op.op === 0x41) {
-      // Operand 0 means "to the end of the path"; otherwise wait until the
-      // path frame passes the operand.
-      const target = arg === 0 ? this.cam?.endFrame ?? 0 : arg;
-      const left = this.cam ? Math.max(0, target - this.cam.frame) : 0;
-      policy = { kind: "frames", framesLeft: left };
-    } else if (op.op === 0x40) {
-      // `EvtOpWaitQueuedEventsDone40` is `g_queued_events_pending == 0`, and
-      // the port now keeps that count for real. It used to resolve on "the
-      // camera move ended", which is the same answer in the common shape --
-      // a lone `cam_play` followed by this wait -- but not when a
-      // `finish_sequence` is outstanding behind the shot.
-      this.settleCameraAction();
-      policy = this.queuedEventsPending === 0
-        ? { kind: "passed", why: "the action ring is empty" }
-        : { kind: "queued" };
-    } else if (op.op === 0x43 || op.op === 0x44) {
-      // With shooting on, the gate is the gate: it opens when they are dead.
-      const alive = this.host.aliveEnemies();
-      if (alive !== null) {
-        policy = alive <= arg && this.cameraHasHandedBack()
-          ? { kind: "passed", why: "no live enemies, and the camera is back" }
-          : { kind: "enemies" };
-      } else {
-        // Shooting off: nothing can make the count fall, so the gate is not a
-        // condition this client can evaluate and it passes. It used to be
-        // paced on a stopwatch instead — a stand-in from before the player
-        // could shoot, which only ever produced a wait of an invented length.
-        policy = { kind: "passed",
-                   why: WAIT_NOTES[op.op] ?? "needs the runtime" };
-      }
-      if (policy.kind === "passed") this.retireGatedEnemies();
-    } else if (op.op === 0x46) {
-      // `EvtOpWaitScriptedActors46` (`FUN_0045FCD0`) -- byte for byte the
-      // `wait_enemies_present` handler with `g_civilians_alive` (0x009CA0E8)
-      // in place of `g_enemies_present`, so it is paced the same way.
-      //
-      // Every one of the 68 sites in the shipped scripts passes operand 0, so
-      // in practice this is always "wait until the last civilian has left
-      // play" -- but the comparison is transcribed, not folded to `=== 0`.
-      const civilians = this.host.aliveCivilians();
-      if (civilians !== null) {
-        policy = civilians <= arg && this.cameraHasHandedBack()
-          ? { kind: "passed", why: "no civilians in play, and the camera is back" }
-          : { kind: "civilians" };
-      } else {
-        policy = { kind: "passed",
-                   why: WAIT_NOTES[op.op] ?? "needs the runtime" };
-      }
-    } else if (op.op === 0x45 && this.flags.has(arg)) {
-      policy = { kind: "passed", why: "flag already set by the script" };
-    } else {
-      policy = { kind: "passed", why: WAIT_NOTES[op.op] ?? "needs the runtime" };
+    const policy = rule
+      ? rule.enter(op, this.waitContext)
+      : passedBecause(op);
+    if (policy.kind === "passed") {
+      if (rule?.retiresEnemies) this.retireGatedEnemies();
+      return `${blocksOn} -- ${policy.why}`;
     }
-
-    if (policy.kind === "passed") return `${blocksOn} -- ${policy.why}`;
     this.wait = { op, blocksOn, policy };
     return blocksOn;
   }

@@ -12,9 +12,13 @@
  *
  * ```
  * script:  CameraSeat   -- CamAdvancePathFrame writes the block
- * game:    GameSystem   -- the hook eases the block's look-at
+ * game:    CameraTake   -- the camera becomes thirty-two floats
+ *          GameSystem   -- the hook eases the block's look-at
  * render:  CameraDraw   -- the block becomes the three.js camera
  * ```
+ *
+ * `CameraTake` is the seam: the port reads the camera it was drawn with last
+ * frame, which is what it has always read, and now reads it as plain numbers.
  *
  * Doing all three in one place is what the player used to do, and it is why
  * the aim could only ever be a frame stale or a frame early.
@@ -130,6 +134,39 @@ export class CameraSeatSystem implements System<RenderContext> {
   update(ctx: RenderContext, _t: Tick): void {
     if (!this.rig.driving) return;
     this.rig.seat(ctx);
+  }
+}
+
+/**
+ * The seam, at the head of the `game` phase: the three.js camera, taken.
+ *
+ * It reads `matrixWorld` and `matrixWorldInverse` as the renderer left them —
+ * which is one frame behind the block, because `CameraDraw` runs after this
+ * and `WebGLRenderer` computes the inverse during `render`. That staleness is
+ * the port's own and predates this system; moving the read out of
+ * `GameSystem` and into a system of its own preserves it exactly, by sitting
+ * in the same place in the order that the read used to sit in.
+ */
+export class CameraTakeSystem implements System<RenderContext> {
+  readonly id = "camera.take";
+  private readonly eye = new Vector3();
+  private readonly fwd = new Vector3();
+
+  update(ctx: RenderContext): void {
+    const cam = ctx.camera;
+    // In this order, and it matters. `getWorldPosition` recomposes
+    // `matrixWorld` in place, so the matrices are copied first — a frame
+    // behind the eye whenever free roam moved the camera after the last draw,
+    // exactly as `GameSystem` read them when the read lived there.
+    ctx.view.take(cam.matrixWorld.elements, cam.matrixWorldInverse.elements);
+    cam.getWorldPosition(this.eye);
+    cam.getWorldDirection(this.fwd);
+    ctx.view.place(this.eye, this.fwd);
+  }
+
+  /** A load moved the camera. The port must not read the old one. */
+  resync(ctx: RenderContext): void {
+    this.update(ctx);
   }
 }
 

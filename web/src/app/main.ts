@@ -26,7 +26,7 @@ import {
 } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
 import { CamPaths } from "../render/campath";
-import { CameraDrawSystem, CameraRig, CameraSeatSystem }
+import { CameraDrawSystem, CameraRig, CameraSeatSystem, CameraTakeSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
 import { SpawnLayer } from "../render/overlays";
@@ -72,6 +72,7 @@ import { Events } from "../core/events";
 import { Rng } from "../core/rng";
 import type { Tick } from "../core/system";
 import type { RenderContext } from "../render/context";
+import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
 import { wireSplitter } from "../hud/splitter";
@@ -84,6 +85,7 @@ import { Rain } from "../render/rain";
 import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { ResetPropContainers } from "../game/class41";
+import { ResetGameGlobals } from "../game/globals";
 
 const $ = <T extends HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
@@ -244,6 +246,9 @@ export class Player implements PlayerView {
     this.ctx = {
       scene: this.scene,
       camera: this.camera,
+      // The camera again, as plain numbers, for the half of the player that
+      // may not know what a `Camera` is. `CameraTakeSystem` fills it in.
+      view: new CameraFrame(),
       events: this.events,
       rng: this.rng,
       walker: null,
@@ -261,6 +266,9 @@ export class Player implements PlayerView {
     // block, `CameraTrackEnemiesTick` eases it, and only then does the draw
     // read it back. See `render/camera.ts`.
     this.world.add("script", new CameraSeatSystem(this.cam));
+    // At the head of the game phase, where `GameSystem` used to read the
+    // camera for itself. Same place in the order, same values.
+    this.world.add("game", new CameraTakeSystem());
     this.world.add("game", this.game);
     this.world.add("game", this.rainSim);
     this.world.add("render", new CameraDrawSystem(this.cam));
@@ -623,6 +631,16 @@ export class Player implements PlayerView {
     // The replay rebuilds the spawn list, so the placers must be able to run
     // again -- otherwise the pre-seek props stand there for ever.
     ResetPropContainers();
+    // ...and the data segment with them. A seek used to leave the whole of `G`
+    // exactly as the run before it left it: the actor pool, the enemy ring
+    // tables, `g_frame`, and -- the one that bites -- `g_coli_full_set`, which
+    // a `collision` op sets and no op ever clears. Seeking *backwards* past
+    // one therefore arrived with the future's collision world loaded. A load
+    // restores the whole segment; a seek has to clear it and let the replay
+    // write it again, or the two are not the same rebuild.
+    // `web/test/state.test.ts` is what found this: two seeks to one address
+    // from different histories reached different worlds.
+    ResetGameGlobals();
     // The replay rewrites the world; nothing that described the old one may
     // outlive it.
     this.newSession();

@@ -1064,11 +1064,11 @@ it nibbles at `render-drives-the-port` rather than feeding it.
 
 ## Order of work
 
-Steps 1–9b, 12 and 13 are done; 10 is untouched and 11 is half made. Each step compiles,
+Steps 1–9b and 12–14 are done; 10 is untouched and 11 is half made. Each step compiles,
 keeps `verify_layers.py` green, and passes `verify_player_ops.py` and `npm run test:port`
 on its own.
 
-Step 14 is independent of everything else. 15–18 are one arc and
+15–18 are one arc and
 should not be interleaved with anything else touching `index.html` or `style.css`.
 19 edits `script/walker.ts`, which is step 10's territory — check `git status` and
 `ListAgents` before starting it.
@@ -1089,13 +1089,56 @@ should not be interleaved with anything else touching `index.html` or `style.css
 | 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `ui-reads-projection-only` is an **error** at zero, `ui` may no longer import `engine` at all, and `wireUi` is two listeners neither of which is a control. **The inversion is not done** — the panels are still portalled into `index.html`'s chrome. Steps 15-18 | ◐ |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, and the rule is now an **error** at zero | ✅ |
 | 13 | **The checks read the UI layer.** `verify_layers.py` and `verify_player_dom.py` glob `.tsx` too; the DOM selector accepts a type parameter; `into()` throws on a missing host instead of rendering nothing | ✅ |
-| 14 | **The snapshot oracle.** `CameraFrame` extracted so `GameSystem` is three-free and `System<Context>`; `web/test/state.test.ts` drives the real `World` headless and asserts save/load and seek equivalence frame by frame | ☐ |
+| 14 | **The snapshot oracle.** `CameraFrame` extracted so `GameSystem` is three-free and `System<Context>`; `web/test/state.test.ts` drives the real `World` headless and asserts save/load and seek equivalence frame by frame. Found two real bugs on its first run — see below | ✅ |
 | 15 | **Panels own themselves.** Fold is `ui/` state, not a DOM read; cost becomes demand expressed by mounting; `rememberFolds` deleted and `app/projection/player.ts` loses its `$` | ☐ |
 | 16 | **`index.html` becomes a mount point.** The chrome is React's; `createPortal` and the sixteen mount ids go; the filter, the feed scroller, the loading overlay, the paused overlay and `#status` become projection state; the `.mode` collision goes with the imperative writer | ☐ |
 | 17 | **`refreshUi` dies.** `hudRows` into `buildProjection`, the minimap paint into its component, all 19 call sites and `setPlayButton`/`refreshPausedOverlay` gone. One update path | ☐ |
 | 18 | **Structural sharing replaces the change key.** `stable()` per slice, panels `memo()`, `publish` shallow-compares the root; `projectionKey`, `treeVersion` and `feedVersion` deleted; `web/test/projection.test.ts` guards the reference identity | ☐ |
 | 19 | **The shutter and the caption become engine state.** `/decomp` `FUN_00413970` and `FUN_00435AA0` first, name `DAT_009CA0F4` and its counter, then onto `Walker` beside `gateCloseLeft`; `Hud` becomes a `System` with `resync`. Clears step 14's assertion C | ☐ |
 | 20 | **This document describes what is.** `## The UI layer` is rewritten from a plan in the present tense into the UI's stated rules; the tree matches the tree; the findings below collapse into those rules and stop being a list of complaints | ☐ |
+
+### What the snapshot oracle found on its first run
+
+Two bugs, both of the shape step 14 was written to catch: state that decides
+the next frame and is not in the snapshot. Neither is visible to any harness
+that only plays forward, which is why both had survived every other check
+here.
+
+**The wait was not saved.** `Walker.loadState` dropped `this.wait` on purpose,
+on the reasoning that it is *"mid-instruction bookkeeping that the next tick
+rebuilds"*. The next tick does rebuild it — as a **fresh** wait. `WaitPolicy`
+carries `framesLeft`, so a save taken three seconds into a five-second
+`wait_frames` came back as a full five-second one, and re-emitted the wait's
+feed row on the way past. Every timed gate in a restored save started again
+from the top. The wait is state and is now in the slice; the **branch** is
+still dropped, and that one is a real decision rather than an oversight — a
+prompt is not a state, and a restored one with nothing driving its countdown
+parks the script for good.
+
+**A seek did not clear the data segment.** `Player.seekTo` recycled the
+session, reset the prop placers and replayed the script — and left the whole of
+`G` exactly as the run before it had left it. The actor pool, the enemy ring
+tables, `g_frame`, and the one that bites: `g_coli_full_set`, which a
+`collision` op sets and no op ever clears. Seeking **backwards** past one
+arrived with the future's collision world still loaded, so the walls an actor
+tested against were the walls of a room the script had not reached yet.
+
+That is the same claim step 8 made and only half kept: a seek and a load are
+the same rebuild. A load restores the segment wholesale, so it was fine; a
+seek has to clear it and let the replay write it again. One line, next to the
+`ResetPropContainers` that was already there for the same reason.
+
+The oracle is stricter than `test:seek` because it compares **two histories**,
+not two replays. Its second group builds a world, plays 1500 frames down a
+different path, and only then loads the snapshot or seeks to the address — so
+anything that survived because nobody reset it is present in one world and
+absent from the other, and the futures part company. Both bugs above were
+found by that pass and neither by the first.
+
+One thing it deliberately does not assert: `hud/` is not in the `World`, so
+the shutter's slide phase and the caption countdown are outside every
+assertion. Step 19 puts them on `Walker`, and assertion C covers them the
+moment it does.
 
 ### Step 20, and why it is a step rather than a tidy-up
 
@@ -1198,11 +1241,17 @@ After the step, every one of those must be **byte-identical**, and
 `verify_player_dom.py` and `verify_objects.py` must still pass. A step is not
 done until that holds.
 
-From step 14 on, `npm run test:state` joins that list — and it is the stricter
+`npm run test:state` is on that list from step 14 — and it is the stricter
 oracle, because the harnesses above only prove that *playing forward* did not
 change. Steps 15-18 are UI-only and must not move a byte of any of them; step
 19 is the one that legitimately changes an output, and assertion C is what says
 it changed in the right direction.
+
+Note that step 14 itself **did** move two of these outputs, and correctly: a
+restored save no longer restarts its wait, and a backwards seek no longer
+carries the future's collision set. Those are the bugs the oracle was written
+to find. "Byte-identical" is the rule for a refactor, not for a fix — what a
+fix owes instead is the failing assertion that named it.
 
 
 ## The check that makes it real: `tools/verify_port.py`

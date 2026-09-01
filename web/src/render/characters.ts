@@ -55,6 +55,7 @@ import type {
 } from "../bundle";
 import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
 import type { Actor } from "../game/actor";
+import type { Vec3 } from "../game/vec";
 import { DescriptorFromPlacement } from "../game/descriptor";
 import { ActorSpawn } from "../game/director";
 import { ActorIsEnemy } from "../game/registry";
@@ -471,6 +472,7 @@ export class CharacterLayer implements System {
   }
 
   private readonly _pathPos = new Vector3();
+  private readonly _bone = new Vector3();
 
   /** The world's generator, handed over by the host. */
   rng = new Rng(1);
@@ -557,11 +559,17 @@ export class CharacterLayer implements System {
   }
 
   /** World position of one bone of one instance, for a spawn point. */
-  boneWorld(at: number, bone: number, out: Vector3): boolean {
+  /**
+   * Where a bone is, in world space. The port asks for this across
+   * `HostBackend` because the skeleton is three.js's and the port is not —
+   * so the answer crosses the seam as three numbers, not as a `Vector3`.
+   */
+  boneWorld(at: number, bone: number, out: Vec3): boolean {
     const inst = this.instances.find((i) => i.at === at);
     const node = inst?.bones.get(bone);
     if (!node) return false;
-    node.getWorldPosition(out);
+    node.getWorldPosition(this._bone);
+    out.x = this._bone.x; out.y = this._bone.y; out.z = this._bone.z;
     return true;
   }
 

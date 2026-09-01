@@ -604,6 +604,12 @@ export class Walker {
       branchPreview: this.branchPreview, stashedCam: this.stashedCam,
       spawns: this.spawns.map((s) => ({ ...s })),
       cam: this.cam && { ...this.cam },
+      // The wait, countdown and all. `web/test/state.test.ts` is what caught
+      // this missing: a save taken three seconds into a five-second
+      // `wait_frames` used to come back as a fresh five-second one, because
+      // dropping it made the next tick re-execute the instruction that armed
+      // it. The op is the script's own JSON, so it clones.
+      wait: this.wait && { ...this.wait, policy: { ...this.wait.policy } },
       finished: this.finished, bgmTrack: this.bgmTrack,
       lastSound: this.lastSound, seq: this.seq,
       // Sets are not JSON; the snapshot is a file the user can keep.
@@ -613,9 +619,15 @@ export class Walker {
   }
 
   /**
-   * Restore it. The wait and the branch are deliberately dropped: both are
-   * mid-instruction bookkeeping that the next tick rebuilds, and a restored
-   * branch prompt with no countdown would park the script for good.
+   * Restore it.
+   *
+   * The **branch** is deliberately dropped: it is a prompt rather than a
+   * state, and a restored one with no countdown behind it would park the
+   * script for good. The **wait** is not, any more. It was, on the reasoning
+   * that the next tick rebuilds it — which is true and is the bug, because
+   * what the next tick rebuilds is a *fresh* wait. Every timed gate in a
+   * restored save started again from the top, and re-emitted its feed row on
+   * the way past.
    */
   loadState(v: unknown): void {
     const s = v as Record<string, never>;
@@ -631,6 +643,10 @@ export class Walker {
     ] as const;
     const self = this as unknown as Record<string, unknown>;
     for (const k of keys) if (s[k] !== undefined) self[k] = s[k];
+    // Not in the key list above: a slice written before the wait was saved
+    // has no `wait` key at all, and leaving the live one standing would be
+    // worse than clearing it.
+    this.wait = (s["wait"] as unknown as PendingWait | null) ?? null;
     this.flags.clear();
     for (const f of (s["flags"] as unknown as number[]) ?? []) this.flags.add(f);
     this.loadedSlots.clear();
@@ -638,7 +654,6 @@ export class Walker {
       this.loadedSlots.add(n);
     }
     this.rng.state = ((s["rng"] as unknown as number) ?? 1) >>> 0;
-    this.wait = null;
     this.branch = null;
     this.host.onBranch(null);
     // The loaded slots and the region are state; telling the host about them

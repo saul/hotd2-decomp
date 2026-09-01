@@ -1,4 +1,5 @@
 import type { Walker } from "../script/walker";
+import type { CameraFrame } from "./camera";
 import type { Scope } from "./scope";
 import type { Events } from "./events";
 import type { Rng } from "./rng";
@@ -47,6 +48,15 @@ export interface Context {
    * somebody remembering to reset it.
    */
   session: Scope;
+  /**
+   * Where the camera is, as plain numbers — see `core/camera.ts`.
+   *
+   * Filled in by `render/` from the camera it last drew with, and read by the
+   * port. It is *not* a `Camera`: naming one here would put three.js in the
+   * type every system declares, and the engine's half of the player would
+   * stop being runnable without a browser.
+   */
+  readonly view: CameraFrame;
   /** Which stage is loaded — the snapshot is keyed on it. */
   stage: number;
   /** 60 Hz frames since the stage loaded. */

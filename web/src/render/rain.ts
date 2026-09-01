@@ -1,7 +1,14 @@
 /**
- * Rain — evt `0x1D`, transcribed from `FUN_004136A0`.
+ * Rain, drawn — the draw half of `DrawRainParticles` (`FUN_004136A0`).
  *
- * Every number here is read out of that routine, not chosen:
+ * **The simulation is not here.** The fifty positions and the fall live in
+ * `game/effects/rain.ts` against `G.g_rain_particles`, which is where the
+ * engine keeps them (`0x007C1EB8`) and what puts them in the snapshot. This
+ * is the part that needs a camera: the camera-relative transform, the
+ * per-drop facing, and the nodes.
+ *
+ * The routine, for reference — every number in both halves is read out of it,
+ * not chosen:
  *
  * ```c
  * if (rain_enabled == 1) {
@@ -43,17 +50,14 @@
 
 import { Euler, Group, Mesh, Object3D, Vector3, type Material } from "three";
 import type { RainJson } from "../bundle";
-import { Rng } from "../core/rng";
-import type { System, Tick } from "../core/system";
-import type { Scope } from "../core/scope";
+import { G } from "../game/globals";
+import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
 
+/** One drawn drop. Its *position* is `G.g_rain_particles[i]`, not here. */
 interface Drop {
   node: Object3D;
-  x: number;
-  y: number;
-  z: number;
 }
 
 export class Rain implements System<RenderContext> {
@@ -65,7 +69,6 @@ export class Rain implements System<RenderContext> {
   private home: Object3D | null = null;
   private enabled = true;
   private on = false;
-  private rand = new Rng(1);
   private readonly _e = new Euler();
   private readonly _v = new Vector3();
   private readonly _fwdW = new Vector3();
@@ -89,8 +92,9 @@ export class Rain implements System<RenderContext> {
    * No `detach`. The stage scope puts the borrowed particle model back and
    * drops the clones, which is the whole of what the teardown ever did.
    */
-  build(root: Object3D, stage: Scope, cfg: RainJson | undefined): void {
-    stage.child("rain").defer(() => {
+  build(ctx: RenderContext, root: Object3D,
+        cfg: RainJson | undefined): void {
+    ctx.scope.child("rain").defer(() => {
       for (const d of this.drops) this.group.remove(d.node);
       this.drops = [];
       // The template is *borrowed* from the stage tree, not made here, so it
@@ -138,21 +142,14 @@ export class Rain implements System<RenderContext> {
       });
       node.scale.set(cfg.scale[0], cfg.scale[1], cfg.scale[2]);
       this.group.add(node);
-      this.drops.push({ node, ...this.spawn() });
+      this.drops.push({ node });
     }
+
   }
 
 
-  private spawn(): { x: number; y: number; z: number } {
-    const c = this.cfg!;
-    const pick = (m: number, off: number) =>
-      Math.floor(this.rand.next() * m) + off;
-    return {
-      x: pick(c.spawn.x[0], c.spawn.x[1]),
-      y: pick(c.spawn.y[0], c.spawn.y[1]),
-      z: pick(c.spawn.z[0], c.spawn.z[1]),
-    };
-  }
+
+
 
   setEnabled(v: boolean): void {
     this.enabled = v;
@@ -160,20 +157,19 @@ export class Rain implements System<RenderContext> {
   }
 
   /**
-   * evt `0x1D`'s flag drives it, and the fall is per 60 Hz frame to match the
-   * routine's `y -= 2.0`. Wall time rather than game time: the rain keeps
-   * falling in free roam and while the script is stepped.
+   * Draw the pool. evt `0x1D`'s flag decides whether it is shown; the
+   * positions come from `G.g_rain_particles`, which `RainSystem` advanced in
+   * the game phase.
    *
    * The yaw is read off the camera here rather than handed in. It used to
    * come from a vector `main.ts` filled *after* this ran, so the volume's
    * rotation was always one frame behind the shot it is meant to sit in.
    */
-  update(ctx: RenderContext, t: Tick): void {
+  update(ctx: RenderContext): void {
     const on = ctx.walker?.rain ?? false;
     const camEye = ctx.camera.position;
     ctx.camera.getWorldDirection(this._fwdW);
     const camYawRad = Math.atan2(-this._fwdW.x, -this._fwdW.z);
-    const frames = t.frozen ? 0 : t.wall * 60;
     this.on = on;
     const show = on && this.enabled && this.drops.length > 0;
     this.group.visible = show;
@@ -184,16 +180,17 @@ export class Rain implements System<RenderContext> {
     const sy = Math.sin(camYawRad);
     const roll = c.roll_bams * BAMS_TO_RAD;
 
-    for (const d of this.drops) {
-      d.y -= c.fall_per_frame * frames;
-      if (d.y <= c.respawn_below) Object.assign(d, this.spawn());
+    for (let i = 0; i < this.drops.length; i++) {
+      const d = this.drops[i];
+      const p = G.g_rain_particles[i];
+      if (!p) break;
 
       // RotY(camera_yaw) applied to the local offset, then the camera eye.
       // Matching MatrixRotateY's row-vector form: x' = x*cos + z*sin,
       // z' = -x*sin + z*cos.
-      const rx = d.x * cy + d.z * sy;
-      const rz = -d.x * sy + d.z * cy;
-      this._v.set(camEye.x + rx, camEye.y + d.y, camEye.z + rz);
+      const rx = p.x * cy + p.z * sy;
+      const rz = -p.x * sy + p.z * cy;
+      this._v.set(camEye.x + rx, camEye.y + p.y, camEye.z + rz);
       d.node.position.copy(this._v);
 
       // The yaw the routine computes from the horizontal offset alone -- the

@@ -669,6 +669,51 @@ different rotation orders, so folding them together would be a bug wearing a
 refactor's clothes. `bamsEuler` could not live in `core/` anyway: it returns a
 three.js `Euler`.
 
+### `no-engine-truth-in-render` was measuring the wrong thing
+
+It grepped `render/` for `FUN_00xxxxxx` and `0x00xxxxxx`, and reported 32.
+**All 32 were citations in doc comments** — the evidence this project requires
+wherever a reading of the binary informs the code — and several said outright
+that the routine itself is in `game/`:
+
+> `ResolveHit` (`FUN_00409430`) is in `game/combat/`, where it belongs
+
+Driving that number to zero would have meant deleting the evidence trail. So
+the measurement was re-aimed at what the rule always meant — *the renderer
+must not be the port* — and split in two:
+
+* **`no-engine-writes-in-render`** (error, 0): a render file assigning to `G`.
+  There was exactly one, `Shooting`'s score setter, and chasing it found the
+  renderer doing the engine's scoring arithmetic (`this.score += points`)
+  instead of calling `ScoreAddForPlayer`, which is the one routine every award
+  and penalty in the game goes through.
+* **`render-drives-the-port`** (ratchet 13, step 11): an engine function
+  *called* from `render/`. Types, enums and pure maths do not count, and
+  `game/vec.ts` is exempt by module because it holds no state.
+
+The second one immediately earned its keep. Moving the rain simulation into
+`game/effects/rain.ts` pushed the count to 15, because `render/rain.ts` was
+still the thing *asking* for each frame's fall. Advancing the pool is a
+decision about the world, not about the picture, so it became `RainSystem` in
+the game phase and the count came back to 13.
+
+### What moving the rain was worth
+
+`DrawRainParticles` (`FUN_004136A0`) interleaves its simulation with its
+drawing, as most of this engine's per-frame code does. The simulation half —
+fifty positions, `p.y -= 2.0`, the respawn box — is now `game/effects/rain.ts`
+against `G.g_rain_particles` (`0x007C1EB8`), which is where the engine keeps
+it. Two things fall out:
+
+* **The rain is in the snapshot.** A save used to restore the whole world
+  except where the rain was, and every drop jumped on a load.
+* **It is reachable by `test:port`**, which is the entire point. Writing those
+  assertions found that the obvious invariant is false: the routine falls
+  *then* tests once, so a respawn may itself land below the line — the box runs
+  to -25 and the line is at -7 — and that drop falls again next frame. The
+  real invariant is that a drop never leaves the spawn box's vertical range.
+  The port had it right; the first draft of the test did not.
+
 ### The rules must keep asking the real question
 
 `layers-are-systems` used to search `main.ts` for `drawLayers` and count what
@@ -700,7 +745,7 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 6 | `script/ops/` — nine modules, each registering its own entries | ✅ |
 | 7 | **`characters.ts`.** The damage half is out; assembly, posing and blending remain | ◐ |
 | 8 | **Every layer is a `System`.** All 14 hand-ticked layers registered with `World`; `drawLayers` deleted; `resync` on each. Fixes the rig seek divergence | ✅ |
-| 9 | **The engine/render boundary, and who owns what.** `Context` loses three.js and `RenderContext` is added; the remaining seven `detach()` methods go, and `session` scopes take over from the hand-written `resync` bodies; the 32 transcribed routines move to `game/`, rig pose authority first | ◐ — `core/scope.ts`, the helpers, `Context.scope` and two converted layers are in |
+| 9 | **The engine/render boundary, and who owns what.** `Context`/`RenderContext` split, `core/scope.ts` and the helpers, all nine `detach()` gone, `session` scopes, and the render/port boundary re-measured | ✅ |
 | 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
 | 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ☐ |

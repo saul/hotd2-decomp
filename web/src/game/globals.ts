@@ -20,6 +20,18 @@ import type { BreakableProp } from "./class41/prop_state";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 
+/**
+ * One rain drop, in the camera's own space.
+ *
+ * Three floats, which is exactly what the exe's array holds: 12 bytes a
+ * particle over `0x007C1EB8 .. 0x007C2114`.
+ */
+export interface RainParticle {
+  x: number;
+  y: number;
+  z: number;
+}
+
 /** One weapon in flight — the pool `ThrownWeaponUpdate` walks. */
 export interface ThrownWeapon {
   /** Unique and stable; the renderer binds its node to this, not to an index. */
@@ -431,6 +443,16 @@ export const G = {
   /** Hands out `ThrownWeapon.id`. Part of the state, so ids never collide. */
   g_thrown_next_id: 1,
 
+  /**
+   * `g_rain_particles` — `0x007C1EB8`. The rain, as fifty positions.
+   *
+   * The array runs `0x007C1EB8 .. 0x007C2114` at 12 bytes a particle, which is
+   * **50** — the count is not stored anywhere, it is the extent of the array.
+   * Camera-relative: `DrawRainParticles` turns each one into a world position
+   * with `RotY(camera_yaw) * p + camera_eye` at draw time.
+   */
+  g_rain_particles: [] as RainParticle[],
+
   /** 60 Hz frames since the scene reset. Not an exe global; the port's clock. */
   g_frame: 0,
 };
@@ -484,6 +506,7 @@ export function ResetGameGlobals(): void {
   G.g_camera_free = 0;
   G.g_enemy_slots = [];
   G.g_thrown_weapons = [];
+  G.g_rain_particles = [];
   G.g_thrown_next_id = 1;
   G.g_breakable_props = [];
   G.g_breakable_members = [];

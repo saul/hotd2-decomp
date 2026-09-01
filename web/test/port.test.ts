@@ -21,6 +21,10 @@ import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { UpdateCameraFreeFlag } from "../src/game/camera/track";
 import { G, ResetGameGlobals } from "../src/game/globals";
+import {
+  RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
+  type RainRules,
+} from "../src/game/effects/rain";
 import { NULL_HOST } from "../src/game/host";
 import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
   from "../src/game/tables";
@@ -3418,6 +3422,67 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
         held.state === ZombieState.HoldAtRange
         && (held.flags & ActorFlag.NoCameraTrack) === 0,
         `state ${held.state} flags 0x${(held.flags >>> 0).toString(16)}`);
+}
+
+// -- the rain, which used to be unreachable from here ----------------------
+
+console.log("\nrain: DrawRainParticles' simulation half");
+
+{
+  const rules: RainRules = {
+    fallPerFrame: 2, respawnBelow: -7,
+    spawn: { x: [0x14, -10], y: [0x32, -25], z: [0x19, -35] },
+  };
+  const rng = new Rng(1);
+  ResetGameGlobals();
+  RainResetParticles(rules, rng);
+  check("the pool is the extent of the array, not a stored count",
+        G.g_rain_particles.length === RAIN_PARTICLE_COUNT,
+        `${G.g_rain_particles.length}`);
+  check("every drop spawns inside the box the routine's three rand()s give",
+        G.g_rain_particles.every((p) =>
+          p.x >= -10 && p.x <= 9 && p.y >= -25 && p.y <= 24
+          && p.z >= -35 && p.z <= -11),
+        JSON.stringify(G.g_rain_particles[0]));
+  // The spawn box is in *front* of the camera: z is never positive, so a drop
+  // is never created behind the view.
+  check("and always in front of the camera",
+        G.g_rain_particles.every((p) => p.z < 0));
+
+  const before = G.g_rain_particles.map((p) => p.y);
+  RainAdvanceParticles(rules, 1, rng);
+  check("one frame is `p.y -= 2.0`, or a respawn into the box",
+        G.g_rain_particles.every((p, i) =>
+          p.y === before[i] - 2 || (p.y >= -25 && p.y <= 24)),
+        `${before[0]} -> ${G.g_rain_particles[0].y}`);
+
+  // The invariant, and it is not "y > -7". The routine falls *then* tests
+  // once, so a respawn may itself land below the line -- the box runs down to
+  // -25 -- and that drop falls again next frame. What must always hold at the
+  // end of a step is that every drop is back inside the spawn box's range.
+  // Sixty seconds, so every drop has wrapped many times.
+  RainAdvanceParticles(rules, 60 * 60, rng);
+  check("a drop never escapes the spawn box's vertical range",
+        G.g_rain_particles.every((p) => p.y >= -25 && p.y <= 24),
+        JSON.stringify(G.g_rain_particles.filter(
+          (p) => p.y < -25 || p.y > 24)));
+
+  // The whole reason it moved: the positions are in `G`, so they are in the
+  // snapshot. A save/restore must put the rain back exactly where it was.
+  const saved = structuredClone(G.g_rain_particles);
+  RainAdvanceParticles(rules, 10, rng);
+  G.g_rain_particles = structuredClone(saved);
+  check("the pool round-trips through a snapshot",
+        JSON.stringify(G.g_rain_particles) === JSON.stringify(saved));
+
+  // Determinism: the same seed must give the same rain, or a replay diverges.
+  ResetGameGlobals();
+  RainResetParticles(rules, new Rng(7));
+  const a = JSON.stringify(G.g_rain_particles);
+  ResetGameGlobals();
+  RainResetParticles(rules, new Rng(7));
+  check("and the same seed gives the same rain",
+        JSON.stringify(G.g_rain_particles) === a);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

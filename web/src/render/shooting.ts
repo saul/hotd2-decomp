@@ -86,6 +86,7 @@ import { G } from "../game/globals";
 import { HitResultCode } from "../game/combat/resolve_hit";
 import { BreakablePropTakeShot } from "../game/class41/prop";
 import { MarkActorShot } from "../game/combat/shot";
+import { ScoreAddForPlayer, ScoreResetAll } from "../game/combat/score";
 import { g_class_handlers } from "../game/registry";
 import type { SpawnClass } from "../game/spawn_class";
 import type { Actor } from "../game/actor";
@@ -209,7 +210,6 @@ export class Shooting implements System {
    * the player's own accuracy tally, not part of the port yet.
    */
   get score(): number { return G.g_player_score[0]; }
-  set score(v: number) { G.g_player_score[0] = v; }
   shots = 0;
   hits = 0;
   /** `DAT_009A5C82` — grows by 10 per consecutive headshot, reset by any other. */
@@ -316,7 +316,7 @@ export class Shooting implements System {
   private _scene: Object3D | null = null;
 
   reset(): void {
-    this.score = 0;
+    ScoreResetAll();
     this.shots = 0;
     this.hits = 0;
     this.headCombo = 0;
@@ -389,7 +389,13 @@ export class Shooting implements System {
     if (out.killed) points += SCORE_KILL;
     // `ResolveHit` scores nothing at all for a result-5 hit.
     if (out.result === HitResultCode.NoEffect) points = 0;
-    this.score += points;
+    // Through `ScoreAddForPlayer`, not `G.g_player_score[0] += points`. Every
+    // award and penalty in the game goes through that one routine, and the
+    // renderer adding to the total behind its back was the last place engine
+    // state was written from `render/`. No `events` argument, because this
+    // path never emitted `player.score` and making it do so now would be a
+    // behaviour change smuggled in with a refactor.
+    ScoreAddForPlayer(0, points);
 
     // `ActorShotFeedback`: a result-5 hit is a ricochet, everything else is
     // blood at the bone, scaled by how bad the hit was.

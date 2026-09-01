@@ -26,3 +26,15 @@ export function ScoreAddForPlayer(player: number, points: number,
     player, points, score: G.g_player_score[player],
   });
 }
+
+/**
+ * Zero every player's running total.
+ *
+ * `[diverges]` — the engine has no such call, because it has no reset button:
+ * the totals are zeroed as part of starting a game. It exists so that the
+ * player's own Reset does not have to write `g_player_score` from `render/`,
+ * which was the last place the renderer changed engine state directly.
+ */
+export function ScoreResetAll(): void {
+  G.g_player_score.fill(0);
+}

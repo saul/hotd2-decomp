@@ -51,6 +51,11 @@ MAY_IMPORT = {
 IMPORT_RE = re.compile(r"""(?:from|import)\s+["']([^"']+)["']""")
 EXE_CITE_RE = re.compile(r"FUN_00[0-9a-f]{6}|0x00[0-9A-Fa-f]{6}")
 DOM_RE = re.compile(r"\b(document|window|HTMLElement|localStorage)\b")
+#: `G.x = `, `G.x[i] = `, `G.x.y = ` -- an assignment, not a comparison.
+G_WRITE_RE = re.compile(r"\bG\.\w+(?:\[[^\]]*\]|\.\w+)*\s*(?:[-+*/|&^]|\+\+|--)?=(?!=)")
+#: A value (non-type) import from game/, and the names it brings in.
+GAME_VALUE_IMPORT_RE = re.compile(
+    r'import\s+(?!type\s)\{([^}]*)\}\s*(?:\n\s*)?from\s+"(\.\./game/[^"]+)"')
 
 
 def layer_of(path: Path) -> str | None:
@@ -115,12 +120,24 @@ def main() -> int:
             "a draw from the ambient generator is state a snapshot cannot "
             "restore; use the seeded Rng",
             "error"),
-        "no-engine-truth-in-render": Rule(
-            "no-engine-truth-in-render",
-            "a transcribed exe routine in render/ is unreachable by "
-            "test:port and verify_port.py -- that is where the stage-1 car "
-            "bug lived",
-            "ratchet", baseline=32, step=9),
+        # This used to grep render/ for `FUN_00xxxxxx` and `0x00xxxxxx`. All
+        # 32 hits were *citations in doc comments* -- the evidence CLAUDE.md
+        # requires wherever a reading of the binary informs the code, several
+        # of them saying outright that the routine itself lives in game/.
+        # Driving that count to zero would have meant deleting the evidence
+        # trail, so the measurement was re-aimed at what the rule always meant:
+        # the renderer must not *be* the port.
+        "no-engine-writes-in-render": Rule(
+            "no-engine-writes-in-render",
+            "render may read engine state and must never write it -- a "
+            "renderer that changes `G` is gameplay that test:port cannot "
+            "reach, which is where the stage-1 car bug lived",
+            "error"),
+        "render-drives-the-port": Rule(
+            "render-drives-the-port",
+            "an engine function *called* from render/ is a decision the port "
+            "should be making; types, enums and pure maths are fine",
+            "ratchet", baseline=13, step=11),
         "no-engine-truth-in-ui": Rule(
             "no-engine-truth-in-ui",
             "same, for the UI layer",
@@ -181,8 +198,19 @@ def main() -> int:
             for _ in re.finditer(r"Math\.random\s*\(", code):
                 rules["no-math-random-in-engine"].hit(f"{rel}: Math.random(")
         if lay == "render":
-            for m in EXE_CITE_RE.finditer(text):
-                rules["no-engine-truth-in-render"].hit(f"{rel}: {m.group(0)}")
+            for m in G_WRITE_RE.finditer(code):
+                rules["no-engine-writes-in-render"].hit(
+                    f"{rel}: {m.group(0).strip()}")
+            for names, spec in GAME_VALUE_IMPORT_RE.findall(text):
+                # `game/vec.ts` is pure maths over plain numbers and holds no
+                # state, so calling into it is not driving anything.
+                if spec.endswith("/vec"):
+                    continue
+                for n in (x.strip() for x in names.split(",")):
+                    if not n or n.startswith("type "):
+                        continue
+                    if re.search(r"\b" + re.escape(n) + r"\s*\(", code):
+                        rules["render-drives-the-port"].hit(f"{rel}: {n}()")
         if lay == "ui":
             for m in EXE_CITE_RE.finditer(text):
                 rules["no-engine-truth-in-ui"].hit(f"{rel}: {m.group(0)}")

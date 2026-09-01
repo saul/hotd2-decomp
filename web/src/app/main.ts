@@ -69,6 +69,7 @@ import { G } from "../game/globals";
 import { SetGameTables } from "../game/tables";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
+import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { ResetPropContainers } from "../game/class41";
 import { SpawnPropContainers } from "../game/director";
@@ -164,6 +165,8 @@ class Player {
   private readonly globalsView = new GlobalsView();
   private readonly debugPanels = new DebugPanels();
   private readonly rain = new Rain();
+  /** The rain pool, advanced in the game phase. See `game/effects/rain.ts`. */
+  private readonly rainSim = new RainSystem();
   private readonly hudLayer = new HudLayer($("#viewport"));
 
   private state: PlayerState = readState();
@@ -222,6 +225,7 @@ class Player {
     // read it back. See `render/camera.ts`.
     this.world.add("script", new CameraSeatSystem(this.cam));
     this.world.add("game", this.game);
+    this.world.add("game", this.rainSim);
     this.world.add("render", new CameraDrawSystem(this.cam));
     // Everything below poses against the camera the draw just placed.
     this.world.add("render", this.spawns);
@@ -475,7 +479,14 @@ class Player {
     this.shooting.playSound = (id) => { this.bgm.play(id); };
     this.shooting.setEnabled(
       $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
-    this.rain.build(this.stage.root, this.ctx.scope, bundle.script.rain);
+    const rainCfg = bundle.script.rain;
+    this.rain.build(this.ctx, this.stage.root, rainCfg);
+    this.rainSim.configure(
+      rainCfg?.enabled_by_script
+        ? { fallPerFrame: rainCfg.fall_per_frame,
+            respawnBelow: rainCfg.respawn_below, spawn: rainCfg.spawn }
+        : null,
+      this.rng);
     this.lighting.build(this.stage.root);
     this.scene.add(this.stage.root);
 

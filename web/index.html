@@ -153,6 +153,14 @@
             <summary class="panel-head"><strong>Inspector</strong></summary>
             <div id="inspector" class="scroll"></div>
           </details>
+          <details class="panel fold" id="scope-panel">
+            <summary class="panel-head">
+              <strong>Scopes</strong>
+              <span class="dim" title="The disposal tree. Every scope shows the frame it was opened at: a child of `stage` whose frame predates the current stage load survived a teardown, and nothing else in the player can tell you that. Repeated names collapse into a tallied row, so a hundred leaked effect scopes is one line rather than a hundred.">lifetimes</span>
+            </summary>
+            <div id="scopes" class="scroll"></div>
+          </details>
+
           <details class="panel fold" id="globals-panel">
             <summary class="panel-head">
               <strong>Globals</strong>

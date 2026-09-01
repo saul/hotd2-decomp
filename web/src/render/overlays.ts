@@ -233,6 +233,13 @@ export class SpawnLayer implements System {
   readonly id = "render.spawns";
   readonly group = new Group();
   private readonly pool: Object3D[] = [];
+  /**
+   * One texture per distinct label text.
+   *
+   * These used to live for the life of the page: nothing disposed them, and a
+   * stage switch built a fresh set beside the old one. The stage scope owns
+   * them now, so the set dies with the stage that produced it.
+   */
   private labels = new Map<string, CanvasTexture>();
   private showLabels = true;
   /**
@@ -285,6 +292,18 @@ export class SpawnLayer implements System {
     this.group.add(g);
     this.pool[i] = g;
     return g;
+  }
+
+  /**
+   * A stage has loaded. `World` calls this before anything is built, which is
+   * where the previous stage's label textures go back.
+   */
+  attach(ctx: Context): void {
+    const labels = this.labels = new Map<string, CanvasTexture>();
+    ctx.scope.child("spawn_labels").defer(() => {
+      for (const t of labels.values()) t.dispose();
+      labels.clear();
+    });
   }
 
   setPosed(posed: ReadonlySet<number>): void {

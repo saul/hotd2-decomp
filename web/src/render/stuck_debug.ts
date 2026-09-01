@@ -35,6 +35,8 @@ import {
 import { G } from "../game/globals";
 import { SpawnClass } from "../game/spawn_class";
 import type { System } from "../core/system";
+import type { Scope } from "../core/scope";
+import { attachTo, ownResources } from "./scope3d";
 
 /** How long the world push has to keep firing before an actor counts as stuck. */
 const STUCK_FRAMES = 30;
@@ -43,7 +45,7 @@ const STUCK_COLOUR = 0xff3355;
 /** How far the marker's pillar rises, so a wedged actor is findable from afar. */
 const PILLAR = 40;
 
-interface Marker { mesh: Mesh; pillar: LineSegments }
+interface Marker { mesh: Mesh; pillar: LineSegments; scope: Scope }
 
 export class StuckDebugLayer implements System {
   readonly id = "render.stuck_debug";
@@ -52,28 +54,30 @@ export class StuckDebugLayer implements System {
   /** Consecutive frames of world push, per spawn address. */
   private readonly runs = new Map<number, number>();
   private readonly markers = new Map<number, Marker>();
+  /** Everything this layer built for the current stage. */
+  private scope: Scope | null = null;
   private stuck = 0;
   private deepest = 0;
 
-  build(parent: Object3D): void {
-    this.detach();
-    this.root = new Group();
+  /**
+   * No `detach`.
+   *
+   * The stage scope owns the group and every marker under it, so a stage
+   * switch gives all of it back without this layer having a teardown path to
+   * get wrong — which is the whole point of `core/scope.ts`. The maps are
+   * cleared from the scope's own undo, so they cannot outlive what they index.
+   */
+  build(parent: Object3D, stage: Scope): void {
+    this.scope = stage.child("stuck_debug");
+    this.root = attachTo(this.scope, parent, new Group());
     this.root.name = "stuck_debug";
     this.root.visible = this.enabled;
-    parent.add(this.root);
-  }
-
-  detach(): void {
-    for (const m of this.markers.values()) {
-      m.mesh.geometry.dispose();
-      (m.mesh.material as MeshBasicMaterial).dispose();
-      m.pillar.geometry.dispose();
-      (m.pillar.material as LineBasicMaterial).dispose();
-    }
-    this.markers.clear();
-    this.runs.clear();
-    this.root?.removeFromParent();
-    this.root = null;
+    this.scope.defer(() => {
+      this.markers.clear();
+      this.runs.clear();
+      this.root = null;
+      this.scope = null;
+    });
   }
 
   setEnabled(v: boolean): void {
@@ -106,8 +110,14 @@ export class StuckDebugLayer implements System {
 
       let m = this.markers.get(o.at);
       if (!m) {
-        m = this.makeMarker(o.bodyRadius);
-        this.root.add(m.mesh, m.pillar);
+        // One scope per marker: it owns the two meshes and the four resources
+        // they made, so retiring a marker below is one call.
+        const ms = this.scope!.child(`marker:${o.at.toString(16)}`);
+        m = this.makeMarker(o.bodyRadius, ms);
+        attachTo(ms, this.root, m.mesh);
+        attachTo(ms, this.root, m.pillar);
+        ownResources(ms, m.mesh);
+        ownResources(ms, m.pillar);
         this.markers.set(o.at, m);
       }
       // The sphere the push actually tests is the *body* sphere at
@@ -119,17 +129,12 @@ export class StuckDebugLayer implements System {
 
     for (const [at, m] of this.markers) {
       if (live.has(at)) continue;
-      m.mesh.removeFromParent();
-      m.pillar.removeFromParent();
-      m.mesh.geometry.dispose();
-      (m.mesh.material as MeshBasicMaterial).dispose();
-      m.pillar.geometry.dispose();
-      (m.pillar.material as LineBasicMaterial).dispose();
+      m.scope.dispose();
       this.markers.delete(at);
     }
   }
 
-  private makeMarker(radius: number): Marker {
+  private makeMarker(radius: number, scope: Scope): Marker {
     const mesh = new Mesh(
       new SphereGeometry(Math.max(0.5, radius), 12, 8),
       new MeshBasicMaterial({ color: STUCK_COLOUR, wireframe: true,
@@ -143,7 +148,7 @@ export class StuckDebugLayer implements System {
       g, new LineBasicMaterial({ color: STUCK_COLOUR, transparent: true,
                                  opacity: 0.6, depthTest: false }));
     pillar.renderOrder = 999;
-    return { mesh, pillar };
+    return { mesh, pillar, scope };
   }
 
   get describe(): string {

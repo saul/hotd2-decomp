@@ -1,5 +1,6 @@
 import type { PerspectiveCamera, Scene } from "three";
 import type { Walker } from "../script/walker";
+import type { Scope } from "./scope";
 import type { Events } from "./events";
 import type { Rng } from "./rng";
 
@@ -22,6 +23,15 @@ export interface Context {
    * thing that gets to decide when a tick stops.
    */
   walker: Walker | null;
+  /**
+   * The stage's disposal scope: everything a layer builds in `attach`/`build`
+   * and must give back when the stage is torn down.
+   *
+   * A layer that registers here needs no `detach` of its own. What goes in it
+   * is the same set as what `resync` must be able to rebuild — see
+   * `core/scope.ts` for why that is one rule and not two.
+   */
+  scope: Scope;
   /** Which stage is loaded — the snapshot is keyed on it. */
   stage: number;
   /** 60 Hz frames since the stage loaded. */

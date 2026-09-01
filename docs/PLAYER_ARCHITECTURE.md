@@ -352,7 +352,7 @@ web/src/
     loop.ts       the 60 Hz accumulator, freeze and speed — in one place
   core/
     system.ts     System { id; attach; update; detach; save?; load?; resync? }
-    scope.ts      the disposal tree: child/defer/own/listen/dispose
+    scope.ts      the disposal tree: child / defer / own / dispose
     world.ts      the registry, the tick order, save() and load()
     context.ts    engine-only: { bundle, walker, events, rng, stage, frame }
     render_context.ts  extends Context with { scene, camera }
@@ -468,46 +468,57 @@ not re-read at the time of writing.
 ### The API
 
 ```ts
-// core/scope.ts -- no three.js, no DOM
+// core/scope.ts -- no three.js, no DOM. Built.
 export class Scope {
   readonly name: string;
-  /** ctx.frame when this scope was opened. The debug view reads it. */
+  /** The clock's value when this scope was opened. The panel reads it. */
   readonly openedAt: number;
   child(name: string): Scope;
   /** Undo something. Runs LIFO on dispose. */
   defer(undo: () => void): void;
   /** Anything with a `dispose()`: geometry, material, texture, render target. */
-  own<T extends { dispose(): void }>(t: T): T;
-  /** Add a listener and register its removal in one call. */
-  listen<E>(target: EventTargetLike, type: string,
-            fn: (e: E) => void, opts?: AddEventListenerOptions): void;
-  dispose(): void;
+  own<T extends Disposable>(t: T): T;
+  dispose(): void;                 // children first, then own undos, LIFO
   get alive(): boolean;
+  snapshot(): ScopeNode;           // the plain projection the panel renders
+  walk(): Generator<Scope>;        // for the leak check
 }
 ```
 
-`EventTargetLike` is a **structural** interface — `addEventListener` and
-`removeEventListener`, nothing else. `HTMLElement` satisfies it without `core/`
-naming a DOM type, so `no-dom-in-engine` stays honest rather than being dodged:
-the rule looks for `document`, `window`, `HTMLElement` and `localStorage`, and
-none of them appear.
-
-Two thin helper modules on top, because the ergonomics are the whole point of
-doing this at all:
+**`Scope` has no `listen`.** Typing one would mean `core/` naming a DOM event
+type, and the engine is meant to run headless — a structural `EventTargetLike`
+was tried and is not worth it: TypeScript will not accept `HTMLElement` against
+a listener parameter the engine can describe without DOM types. So `Scope`
+knows only how to undo a closure, and *what* needs undoing is the calling
+layer's business:
 
 ```ts
-// render/scope3d.ts
-attachTo(scope, parent, node)   // add now, removeFromParent on dispose
-ownGeometry(scope, g) / ownMaterial(scope, m) / ownTexture(scope, t)
-clone(scope, template)          // clone, attach, and own every unique resource
+// render/scope3d.ts                                              built
+attachTo(scope, parent, node)     // add now, removeFromParent on dispose
+ownResources(scope, root)         // every unique geometry/material/texture
+cloneInto(scope, parent, tmpl)    // clone, attach, own
 
-// hud/scope_audio.ts
-play(scope, id)                 // stops when the scope dies
+// app/dom.ts                                                     built
+on(scope, el, type, fn)           // typed via HTMLElementEventMap
+onWindow(scope, type, fn)
+every(scope, ms, fn)              // setInterval, cleared on dispose
+eachFrame(scope, fn)              // rAF loop that stops with the scope
 ```
+
+`ownResources` de-duplicates through three `Set`s before disposing anything,
+because three.js shares geometry and materials freely and disposing one that
+two meshes point at is how a stage switch empties half the next stage.
 
 The test of whether the helpers are good enough: **`detach()` should disappear**
 from all nine layers. If a layer still needs a hand-written teardown after this,
 a helper is missing.
+
+Two are converted as the proof it works. `StuckDebugLayer` lost its `detach`
+entirely — the stage scope owns the group, and one child scope per marker means
+retiring a marker is `m.scope.dispose()` instead of four hand-written
+`dispose()` calls that were also duplicated in the teardown. `SpawnLayer`'s
+label textures were a real leak: nothing disposed them and a stage switch built
+a fresh set beside the old one. Seven to go.
 
 ### Seeing it: the scope panel
 
@@ -547,7 +558,13 @@ interface ScopeNode {
 `app/` builds it from the root and hands it over, so `hud/` needs no import from
 `core/` — the same seam step 11 generalises, arriving early and for a reason.
 This is the first real `UiProjection`, and it is a good one to design against
-because it is read-only, plain, and cheap to diff.
+because it is read-only, plain, and cheap to diff. It works:
+`hud/scope_view.ts` added **zero** to `ui-reads-projection-only`.
+
+One wrinkle worth knowing. `openedAt` is stamped from a **monotonic** frame
+counter, not `ctx.frame`, because `ctx.frame` restarts at zero on every stage
+load — and "was this opened before the current stage loaded" is the one
+question the panel exists to answer.
 
 ### The check that could fail
 
@@ -559,7 +576,9 @@ cycles:
 * the live registration count returns to its first-load value.
 
 That runs headless — it counts registrations, not GPU objects, so no WebGL is
-needed and it can join `npm run test:port`.
+needed. It is `npm run test:scope`, and it is written so that the last case
+*fails* the assertion deliberately: a check that has never been seen to fail is
+not yet a check.
 
 ## Enforcement: `tools/verify_layers.py`
 
@@ -620,8 +639,8 @@ and passes `verify_player_ops.py` and `npm run test:port` on its own.
 | 6 | `script/ops/` — nine modules, each registering its own entries | ✅ |
 | 7 | **`characters.ts`.** The damage half is out; assembly, posing and blending remain | ◐ |
 | 8 | **Every layer is a `System`.** All 14 hand-ticked layers registered with `World`; `drawLayers` deleted; `resync` on each. Fixes the rig seek divergence | ✅ |
-| 9 | **The engine/render boundary, and who owns what.** `Context` loses three.js and `RenderContext` is added; `core/scope.ts` plus the `render`/`hud` helpers, and all nine `detach()` methods go; the 32 transcribed routines move to `game/`, rig pose authority first | ☐ |
-| 9b | **The scope panel.** The live tree in the sidebar, with `openedAt` and sibling tallies. Depends on 9; it is what makes a leak a thing you notice rather than a thing you profile for | ☐ |
+| 9 | **The engine/render boundary, and who owns what.** `Context` loses three.js and `RenderContext` is added; the remaining seven `detach()` methods go, and `session` scopes take over from the hand-written `resync` bodies; the 32 transcribed routines move to `game/`, rig pose authority first | ◐ — `core/scope.ts`, the helpers, `Context.scope` and two converted layers are in |
+| 9b | **The scope panel.** The live tree in the sidebar, with `openedAt`, sibling tallies, warn flags and a high-water mark | ✅ |
 | 10 | **`script/` decomposition.** `vm.ts`, `waits/`, `state/`, `seek.ts`; `WalkerHost` down to ~6 methods | ☐ |
 | 11 | **The UI layer.** `UiProjection` + `UiCommand` + React; `wireUi`/`refreshUi` deleted; `index.html` becomes a mount point | ☐ |
 | 12 | **`core/bams.ts`.** One `BAMS_TO_RAD`, one `bamsEuler` | ☐ |

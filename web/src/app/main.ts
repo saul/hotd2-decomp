@@ -50,6 +50,8 @@ import { Shooting } from "../render/shooting";
 import { ColiDebugLayer } from "../render/coli_debug";
 import { StuckDebugLayer } from "../render/stuck_debug";
 import { World } from "../core/world";
+import { Scope } from "../core/scope";
+import { ScopeView } from "../hud/scope_view";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
 import type { Context, Tick } from "../core/system";
@@ -128,6 +130,25 @@ class Player {
   private dialogue: SoundJson | null = null;
   /** The registry and the tick order: script -> game -> render -> hud. */
   private readonly world = new World();
+  /**
+   * The root of the disposal tree, and the two scopes under it that matter.
+   *
+   * `stage` dies when a different stage is loaded; `session` dies whenever the
+   * game state is replaced under the renderer — a seek or a snapshot load —
+   * and is exactly what `resync` would otherwise have to rebuild by hand.
+   */
+  private readonly appScope = new Scope("app", () => this.lifeFrame);
+  /**
+   * Frames since the page loaded, which never resets.
+   *
+   * `ctx.frame` restarts at zero on every stage load, so it cannot order two
+   * scopes across a stage switch — and "was this opened before the current
+   * stage loaded" is the one question the panel exists to answer.
+   */
+  private lifeFrame = 0;
+  private stageScope: Scope | null = null;
+  private stageLoadedAt = 0;
+  private readonly scopeView = new ScopeView();
   private readonly events = new Events();
   /** The one random source in the player, and part of every snapshot. */
   private readonly rng = new Rng(1);
@@ -185,6 +206,7 @@ class Player {
       events: this.events,
       rng: this.rng,
       walker: null,
+      scope: this.appScope,
       stage: this.state.stage,
       frame: 0,
     };
@@ -216,6 +238,10 @@ class Player {
     // The port's data segment on screen, and the sidebar. Driven from the
     // tick rather than from `refreshUi`, which only runs during playback:
     // both are at their most useful when the clock is stopped.
+    this.world.add("hud", panelSystem("hud.scopes", (ctx) => {
+      this.scopeView.update(this.appScope.snapshot(),
+        { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt });
+    }));
     this.world.add("hud", panelSystem("hud.globals",
       () => this.globalsView.update()));
     this.world.add("hud", panelSystem("hud.debug_panels", (ctx) => {
@@ -368,6 +394,13 @@ class Player {
     // *previous* stage's script there would place the old stage's spawns in
     // the new stage's scene.
     this.walker = null;
+    // Everything the previous stage built goes back before anything of the new
+    // one is made, so a leak shows as a scope that outlived this call rather
+    // than as a slow climb nobody attributes to a stage switch.
+    this.stageScope?.dispose();
+    this.stageScope = this.appScope.child(`stage:${this.state.stage}`);
+    this.ctx.scope = this.stageScope;
+    this.scopeView.reset();
     if (this.stage) {
       this.scene.remove(this.stage.root);
       this.stage.dispose();
@@ -416,7 +449,7 @@ class Player {
     // through, so they are handed to it rather than duplicated in `game/`.
     this.chars.paths = this.paths;
     this.coliDebug.build(this.stage.root, bundle.script.coli);
-    this.stuckDebug.build(this.stage.root);
+    this.stuckDebug.build(this.stage.root, this.ctx.scope);
     this.chars.civilians = bundle.script.civilians ?? null;
     this.chars.build(this.stage.root, bundle.script.characters);
     this.spawns.setPosed(this.chars.posed);
@@ -510,6 +543,10 @@ class Player {
       }
     }
 
+    // The stage is up. Anything opened under it from here belongs to this
+    // stage's run, and anything older that is still under `stage:` did not
+    // come from this load -- which is what the panel flags.
+    this.stageLoadedAt = this.lifeFrame;
     this.applyIncomingState();
     // No `bgm_entry_play` in any stage script starts the stage's own track --
     // they only switch to boss and transition music -- so the opening track
@@ -1113,6 +1150,7 @@ class Player {
 
   private frame = (now: number) => {
     requestAnimationFrame(this.frame);
+    this.lifeFrame += 1;
     const wall = this.loop.wallDelta(now);
 
     // `?freeze=1` halts the clock and renders exactly one frame, so a test can

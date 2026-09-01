@@ -458,6 +458,28 @@ button.kill:hover { background: #8c2626; }
   font-weight: normal; color: var(--dim);
 }
 .panel-head .hl input { margin: 0; }
+/* -- the scope panel: the disposal tree, and where it is leaking ---------- */
+#scope-panel { max-height: 32%; }
+#scopes {
+  padding: 4px 8px 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.scope-row { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.scope-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+/* The tally and the frame are the two numbers a leak shows up in, so they get
+   a fixed column each and never reflow as the tree changes shape. */
+.scope-count { flex: 0 0 auto; color: var(--dim); }
+.scope-frame { flex: 0 0 auto; color: var(--dim); opacity: 0.6; min-width: 44px;
+               text-align: right; }
+.scope-owned { flex: 0 0 auto; color: var(--dim); min-width: 26px;
+               text-align: right; }
+.scope-flag { flex: 0 0 auto; }
+.scope-warn { color: #ffb02e; }
+.scope-warn .scope-count,
+.scope-warn .scope-frame { color: #ffb02e; opacity: 0.85; }
+
 #globals-panel { max-height: 40%; }
 #globals {
   padding: 4px 8px 8px;

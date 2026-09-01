@@ -36,7 +36,8 @@ import { RailLayer, SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
-import { restoreViewPrefs } from "./viewprefs";
+import { readViewPrefs, writeViewPrefs } from "./viewprefs";
+import { on } from "./dom";
 import { Minimap, rememberFolds } from "../hud/ui";
 import { Bgm } from "../audio/bgm";
 import { SceneFog, type FogMode } from "../render/fog";
@@ -59,8 +60,10 @@ import { globalsProjection } from "./projection/globals";
 import { screenMessage } from "./projection/message";
 import { feedRow, inspectorText, minimapGraph, opSummary, treeProjection }
   from "./projection/script";
-import type { FeedRow, MinimapGraph, TreeProjection }
-  from "../ui/projection";
+import type {
+  FeedRow, MinimapGraph, SkipProjection, SoundProjection,
+  TransportProjection, TreeProjection,
+} from "../ui/projection";
 import { actorsProjection, highlightSet, waitProjection }
   from "./projection/sidebar";
 import { Events } from "../core/events";
@@ -94,6 +97,11 @@ const $ = <T extends HTMLElement>(sel: string): T =>
  */
 const URL_SYNC_MS = 500;
 
+/** The commands that change something worth remembering across a reload. */
+const PREF_COMMANDS: ReadonlySet<string> = new Set([
+  "toggle", "setLightMode", "setFogMode", "setPillarbox", "setSpeed",
+]);
+
 class Player {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -102,6 +110,8 @@ class Player {
   private readonly canvas = $<HTMLCanvasElement>("#view");
 
   private manifest!: Manifest;
+  /** Which stages the bundle holds, for the picker. */
+  private stages: number[] = [];
   private stage: StageScene | null = null;
   private spawns = new SpawnLayer();
   private paths: CamPaths | null = null;
@@ -379,20 +389,13 @@ class Player {
       );
     }
 
-    const sel = $<HTMLSelectElement>("#stage-select");
-    const stages = [
+    // The select is React's; this is only the list it draws from.
+    this.stages = [
       ...new Set(this.manifest.stages.map((s) => s.stage ?? s.scene)),
     ].sort((a, b) => a - b);
-    sel.replaceChildren(
-      ...stages.map((n) => {
-        const o = document.createElement("option");
-        o.value = String(n);
-        o.textContent = String(n);
-        return o;
-      }),
-    );
-    if (!stages.includes(this.state.stage)) this.state.stage = stages[0];
-    sel.value = String(this.state.stage);
+    if (!this.stages.includes(this.state.stage)) {
+      this.state.stage = this.stages[0];
+    }
 
     await this.loadStage();
     this.setMode(this.state.mode);
@@ -651,65 +654,24 @@ class Player {
 
   // -- ui wiring ---------------------------------------------------------
 
+  /**
+   * What is left of the wiring.
+   *
+   * Every control the player has is a `UiCommand` now. These are the three
+   * things that are not controls: the keyboard, the browser's own back
+   * button, and the one callback a layer raises *into* the shell.
+   */
   private wireUi(): void {
-    $<HTMLSelectElement>("#stage-select").addEventListener("change", (e) => {
-      this.state.stage = Number((e.target as HTMLSelectElement).value);
-      this.state.block = this.state.step = this.state.op = undefined;
-      this.state.slot = this.state.frame = undefined;
-      this.pushUrl();
-      void this.loadStage();
-    });
-
-    $<HTMLInputElement>("#original-toggle").addEventListener("change", (e) => {
-      this.state.original = (e.target as HTMLInputElement).checked;
-      this.pushUrl();
-      void this.loadStage();
-    });
-
-    for (const b of document.querySelectorAll<HTMLButtonElement>(".mode")) {
-      b.addEventListener("click", () =>
-        this.setMode(b.dataset.mode as PlayerState["mode"]));
-    }
-
-    // The sixteen view toggles are React's now: each dispatches a `toggle`
-    // command and `applyToggle` is exhaustive over the union, so one that is
-    // added and not handled fails to compile.
     rememberFolds();
-    // The save state. Held in memory rather than written out: the value is
-    // plain JSON, so a `copy(player.saveSnapshot())` in the console is a file
-    // whenever one is wanted, and the button is for the loop you actually run
-    // -- snapshot, try something, put it back.
-    $<HTMLButtonElement>("#btn-save").addEventListener("click", () => {
-      this.saved = this.saveSnapshot();
-      $<HTMLButtonElement>("#btn-load").disabled = false;
-      this.onFeed({
-        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
-        op: { i: -1, at: 0, op: -1, name: "state saved", cat: "flow" },
-        note: `block ${this.saved.stage}/${this.saved.frame | 0} · `
-            + `${Object.keys(this.saved.parts).length} slices`,
-      });
-    });
-    $<HTMLButtonElement>("#btn-load").addEventListener("click", () => {
-      if (!this.saved) return;
-      const err = this.loadSnapshot(this.saved);
-      this.onFeed({
-        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
-        op: { i: -1, at: 0, op: -1, name: "state loaded", cat: "flow" },
-        note: err ?? `back to frame ${this.saved.frame | 0}`,
-      });
-    });
-
-    // The debug clear: `killAll` drops every live actor to zero hit points and
-    // starts its directional death, which is what opens the enemy gate.
-    $<HTMLButtonElement>("#btn-kill").addEventListener("click", () => {
-      const n = this.chars.killAll(this.shooting.cameraYawBams);
-      this.onFeed({
-        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
-        op: { i: -1, at: 0, op: -1, name: "kill all", cat: "combat" },
-        note: `${n} enem${n === 1 ? "y" : "ies"} killed`,
-      });
-      this.refreshUi();
-    });
+    // Deciding is not a race. Hovering the branch bar -- to read the routes,
+    // or to preview a shot -- stops the arcade countdown until the pointer
+    // leaves. The bar itself is still hand-built DOM (see `showBranch`), so
+    // this is a listener rather than a command.
+    const bar = $("#branchbar");
+    on(this.appScope, bar, "pointerenter",
+       () => this.runCommand({ kind: "branchHover", over: true }));
+    on(this.appScope, bar, "pointerleave",
+       () => this.runCommand({ kind: "branchHover", over: false }));
     // Every shot goes to the feed, so a session reads back as a transcript.
     this.shooting.onShot = (r, note) => {
       this.onFeed({
@@ -720,84 +682,6 @@ class Player {
       });
       this.refreshUi();
     };
-    $<HTMLInputElement>("#pillarbox").addEventListener("change", (e) => {
-      this.pillarbox = (e.target as HTMLInputElement).checked;
-      this.resize();
-    });
-    $<HTMLSelectElement>("#light-mode").addEventListener("change", (e) => {
-      this.lighting.setMode(
-        (e.target as HTMLSelectElement).value as LightingMode);
-      this.refreshUi();
-    });
-    $<HTMLSelectElement>("#fog-mode").addEventListener("change", (e) => {
-      this.sceneFog.setMode((e.target as HTMLSelectElement).value as FogMode);
-      this.refreshUi();
-    });
-
-    // Deciding is not a race. Hovering the bar -- to read the routes, or to
-    // preview a shot -- stops the arcade countdown until the pointer leaves.
-    const bar = $("#branchbar");
-    bar.addEventListener("pointerenter", () => {
-      this.branchHover = true;
-      this.refreshBranchCountdown();
-    });
-    bar.addEventListener("pointerleave", () => {
-      this.branchHover = false;
-      this.refreshBranchCountdown();
-    });
-
-    const sound = $("#btn-sound");
-    sound.addEventListener("click", () => this.bgm.setMuted(!this.bgm.muted));
-    $<HTMLInputElement>("#volume").addEventListener("input", (e) =>
-      this.bgm.setVolume(Number((e.target as HTMLInputElement).value) / 100));
-    this.bgm.onChange = (bs) => {
-      const on = !this.bgm.muted;
-      // The button states what it currently IS, not what pressing it does.
-      sound.setAttribute("aria-pressed", String(on));
-      $("#sound-icon").textContent = on ? "🔊" : "🔇";
-      $("#sound-text").textContent = on
-        ? (bs.playing ? "Sound on" : "Sound on…")
-        : "Muted";
-      const label = $("#bgm-label");
-      label.classList.toggle("blocked", bs.blocked && !this.bgm.muted);
-      label.textContent = !bs.file
-        ? "no bgm"
-        : bs.blocked && !this.bgm.muted
-          ? "click 🔇 to allow audio"
-          : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`;
-    };
-
-    $("#btn-play").addEventListener("click", () => this.togglePlay());
-    $("#btn-step").addEventListener("click", () => this.stepOnce());
-    $("#btn-stepback").addEventListener("click", () => this.stepBack());
-    $("#skip-go").addEventListener("click", () => this.requestSkip());
-    $("#btn-reset").addEventListener("click", () => {
-      this.clearFeed();
-      this.walker?.reset();
-      this.walker?.primeToFirstWait();
-      this.syncCameraToWalker();
-      this.refreshUi();
-      this.pushUrl();
-    });
-
-    $<HTMLSelectElement>("#speed").addEventListener("change", (e) => {
-      this.speed = Number((e.target as HTMLSelectElement).value);
-    });
-
-    const slider = $<HTMLInputElement>("#frame-slider");
-    slider.addEventListener("input", () => {
-      this.scrubbing = true;
-      const w = this.walker;
-      if (!w?.cam) return;
-      w.cam.frame = Number(slider.value);
-      this.syncCameraToWalker();
-      this.state.frame = w.cam.frame;
-      this.pushUrl();
-    });
-    slider.addEventListener("change", () => { this.scrubbing = false; });
-
-    this.minimap.onSeek = (b) => this.seekTo(b, 1, 0);
-    $("#feed-clear").addEventListener("click", () => this.clearFeed());
 
     window.addEventListener("keydown", (e) => {
       if (isTyping(e.target)) return;
@@ -815,9 +699,34 @@ class Player {
       void this.loadStage();
     });
 
-    // Last, so the restore's dispatched `change` events land on the handlers
-    // registered above rather than on nothing.
-    restoreViewPrefs();
+    // The saved preferences go back through `runCommand`, which is the same
+    // path a click takes -- there is deliberately no second way for a setting
+    // to take effect, because two would drift.
+    const prefs = readViewPrefs();
+    for (const [name, on] of Object.entries(prefs.toggles)) {
+      this.runCommand({ kind: "toggle", name: name as ToggleName, on });
+    }
+    if (prefs.lightMode) {
+      this.runCommand({ kind: "setLightMode", mode: prefs.lightMode });
+    }
+    if (prefs.fogMode) {
+      this.runCommand({ kind: "setFogMode", mode: prefs.fogMode });
+    }
+    if (prefs.pillarbox !== undefined) {
+      this.runCommand({ kind: "setPillarbox", on: prefs.pillarbox });
+    }
+    if (prefs.speed) this.runCommand({ kind: "setSpeed", speed: prefs.speed });
+  }
+
+  /** Every setting worth remembering, as it stands now. */
+  private saveViewPrefs(): void {
+    writeViewPrefs({
+      toggles: this.toggles,
+      lightMode: this.lighting.lightingMode,
+      fogMode: this.sceneFog.fogMode,
+      pillarbox: this.pillarbox,
+      speed: this.speed,
+    });
   }
 
   /**
@@ -885,38 +794,37 @@ class Player {
    * Unlike the branch bar this is an offer, not a question: playback is not
    * waiting on it and ignoring it changes nothing.
    */
-  private showSkipBar(): void {
-    const bar = $("#skipbar");
-    const go = $<HTMLButtonElement>("#skip-go");
+  private skipProjection(): SkipProjection | null {
     const w = this.walker;
     // The bar follows the region, not the offer. `canSkip` adds the firing
     // gate, and gating *visibility* on that made the whole feature invisible
     // whenever the gate happened to be up -- which is not worth the fidelity,
     // since the region is the thing the script actually declares. So the bar
     // shows for the region and the button carries the gate.
-    const open = w?.skippable ?? false;
-    bar.hidden = !open;
-    if (!open || !w) return;
+    if (!w?.skippable) return null;
     const can = w.canSkip;
-    go.disabled = !can;
-    // On the rare frame a branch point is live too, sit above it rather than
-    // under it.
-    bar.classList.toggle("stacked", !$("#branchbar").hidden);
     const held = w.wait?.blocksOn;
-    $("#skip-sub").textContent = !can
-      ? "region open, but the shutter's firing gate is up — the game would not "
-        + "poll Start here"
-      : held
-        ? `holding on ${held} — skips every wait until the region closes`
-        : "skips every wait until set_skippable_region closes";
+    return {
+      canSkip: can,
+      // On the rare frame a branch point is live too, sit above it.
+      stacked: !$("#branchbar").hidden,
+      sub: !can
+        ? "region open, but the shutter's firing gate is up — the game would "
+          + "not poll Start here"
+        : held
+          ? `holding on ${held} — skips every wait until the region closes`
+          : "skips every wait until set_skippable_region closes",
+    };
   }
 
+  /**
+   * The transport button follows `playing` through the projection; this is
+   * only the greyed-out overlay, which is DOM the React tree does not own.
+   *
+   * Every path that changes `playing` or the mode goes through here, which is
+   * why the overlay is refreshed from it rather than from the frame loop.
+   */
   private setPlayButton(): void {
-    const b = $("#btn-play");
-    b.textContent = this.playing ? "❚❚" : "▶";
-    b.classList.toggle("playing", this.playing);
-    // Every path that changes `playing` or the mode goes through here, which
-    // is why the overlay is refreshed from it rather than from the frame loop.
     this.refreshPausedOverlay();
   }
 
@@ -1344,6 +1252,13 @@ class Player {
    * listeners could not have.
    */
   private runCommand(c: UiCommand): void {
+    this.dispatchCommand(c);
+    // One place, rather than a `write` on each of twenty controls. Cheap: it
+    // is a small object and only a command can have changed it.
+    if (PREF_COMMANDS.has(c.kind)) this.saveViewPrefs();
+  }
+
+  private dispatchCommand(c: UiCommand): void {
     switch (c.kind) {
       case "boxClass":
         if (c.on) this.boxedClasses.add(c.cls);
@@ -1360,10 +1275,100 @@ class Player {
         this.toggles = { ...this.toggles, [c.name]: c.on };
         this.applyToggle(c.name, c.on);
         return;
-      default:
-        // The rest of the union is still driven by `wireUi`'s listeners, and
-        // moves here panel by panel as step 11 proceeds.
+      case "setStage":
+        this.state.stage = c.stage;
+        this.state.block = this.state.step = this.state.op = undefined;
+        this.state.slot = this.state.frame = undefined;
+        this.pushUrl();
+        void this.loadStage();
         return;
+      case "setOriginal":
+        this.state.original = c.on;
+        this.pushUrl();
+        void this.loadStage();
+        return;
+      case "setMode":    this.setMode(c.mode); return;
+      case "setSpeed":   this.speed = c.speed; return;
+      case "play":
+      case "pause":      this.togglePlay(); return;
+      case "stepForward": this.stepOnce(); return;
+      case "stepBack":   this.stepBack(); return;
+      case "requestSkip": this.requestSkip(); return;
+      case "branchHover":
+        this.branchHover = c.over;
+        this.refreshBranchCountdown();
+        return;
+      case "reset":
+        this.clearFeed();
+        this.walker?.reset();
+        this.walker?.primeToFirstWait();
+        this.syncCameraToWalker();
+        this.refreshUi();
+        this.pushUrl();
+        return;
+      case "scrubFrame": {
+        // `done` is the pointer coming off the slider. While it is down the
+        // camera systems must not fight the drag for the pose, which is what
+        // `cam.driving` is read for in the frame.
+        this.scrubbing = !c.done;
+        const w = this.walker;
+        if (!w?.cam) return;
+        w.cam.frame = c.frame;
+        this.syncCameraToWalker();
+        this.state.frame = w.cam.frame;
+        this.pushUrl();
+        return;
+      }
+      case "setPillarbox":
+        this.pillarbox = c.on;
+        this.resize();
+        return;
+      case "setLightMode":
+        this.lighting.setMode(c.mode as LightingMode);
+        this.refreshUi();
+        return;
+      case "setFogMode":
+        this.sceneFog.setMode(c.mode as FogMode);
+        this.refreshUi();
+        return;
+      case "setVolume":  this.bgm.setVolume(c.volume / 100); return;
+      case "toggleMute": this.bgm.setMuted(!this.bgm.muted); return;
+      case "saveState": {
+        // Held in memory rather than written out: the value is plain JSON, so
+        // a `copy(player.saveSnapshot())` in the console is a file whenever
+        // one is wanted, and the button is for the loop you actually run --
+        // snapshot, try something, put it back.
+        const snap = this.saved = this.saveSnapshot();
+        this.onFeed({
+          seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+          op: { i: -1, at: 0, op: -1, name: "state saved", cat: "flow" },
+          note: `block ${snap.stage}/${snap.frame | 0} · `
+              + `${Object.keys(snap.parts).length} slices`,
+        });
+        return;
+      }
+      case "loadState": {
+        if (!this.saved) return;
+        const err = this.loadSnapshot(this.saved);
+        this.onFeed({
+          seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+          op: { i: -1, at: 0, op: -1, name: "state loaded", cat: "flow" },
+          note: err ?? `back to frame ${this.saved.frame | 0}`,
+        });
+        return;
+      }
+      case "killAll": {
+        // The debug clear: `killAll` drops every live actor to zero hit points
+        // and starts its directional death, which is what opens the enemy gate.
+        const n = this.chars.killAll(this.shooting.cameraYawBams);
+        this.onFeed({
+          seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+          op: { i: -1, at: 0, op: -1, name: "kill all", cat: "combat" },
+          note: `${n} enem${n === 1 ? "y" : "ies"} killed`,
+        });
+        this.refreshUi();
+        return;
+      }
     }
   }
 
@@ -1405,7 +1410,6 @@ class Player {
         return;
       case "shoot":
         this.shooting.setEnabled(on, this.camera, this.scene);
-        $<HTMLButtonElement>("#btn-kill").hidden = !on;
         return;
     }
   }
@@ -1415,6 +1419,50 @@ class Player {
     for (const [name, on] of Object.entries(this.toggles)) {
       this.applyToggle(name as ToggleName, on);
     }
+  }
+
+  /** The camera slider's range and label, which follow the current shot. */
+  private transportProjection(): TransportProjection {
+    const w = this.walker;
+    const cam = w?.cam;
+    const path = cam ? this.paths?.paths.get(cam.slot) : undefined;
+    const base = {
+      playing: this.playing, mode: this.state.mode, speed: this.speed,
+      frozen: !!this.state.freeze,
+    };
+    if (!cam || !path) {
+      return { ...base, hasPath: false, camFrame: 0, camFrameLo: 0,
+               camFrameHi: 1, camLabel: "no camera path" };
+    }
+    const lo = Math.min(cam.startFrame, cam.endFrame);
+    const hi = Math.max(cam.startFrame, cam.endFrame, lo + 1);
+    return {
+      ...base,
+      hasPath: true,
+      camFrame: cam.frame,
+      camFrameLo: Math.floor(lo),
+      camFrameHi: Math.ceil(hi),
+      camLabel: `${path.file}[${path.index}] slot ${cam.slot}  `
+        + `frame ${cam.frame.toFixed(0)} / ${hi.toFixed(0)}`
+        + (cam.isStatic ? "  (static pose)" : ""),
+    };
+  }
+
+  private soundProjection(): SoundProjection {
+    const bs = this.bgm.current;
+    const on = !this.bgm.muted;
+    return {
+      muted: this.bgm.muted,
+      volume: Math.round(this.bgm.volume * 100),
+      blocked: bs.blocked,
+      // The button states what it currently IS, not what pressing it does.
+      text: on ? (bs.playing ? "Sound on" : "Sound on…") : "Muted",
+      label: !bs.file
+        ? "no bgm"
+        : bs.blocked && on
+          ? "click 🔇 to allow audio"
+          : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`,
+    };
   }
 
   private publishUi(ctx: RenderContext): void {
@@ -1427,16 +1475,16 @@ class Player {
     const p: UiProjection = {
       revision: 0,
       stage: this.state.stage,
-      stages: [],
+      stages: this.stages,
       original: !!this.state.original,
       loading: null,
       status: "",
       toggles: this.toggles,
-      transport: {
-        playing: this.playing, mode: this.state.mode, speed: this.speed,
-        frozen: !!this.state.freeze, camSlot: null, camFrame: 0,
-        camFrameLo: 0, camFrameHi: 0, camLabel: "",
-      },
+      transport: this.transportProjection(),
+      sound: this.soundProjection(),
+      lightMode: this.lighting.lightingMode,
+      fogMode: this.sceneFog.fogMode,
+      pillarbox: this.pillarbox,
       // A folded panel is not built. Its *selection* still counts, though —
       // `highlightSet` is computed below whatever the panels are showing.
       wait: w && $<HTMLDetailsElement>("#panel-wait").open
@@ -1456,6 +1504,7 @@ class Player {
       inspector: w?.currentOp
         ? inspectorText(w.currentOp, { summary: opSummary(w.currentOp) }) : "",
       hudRows: this.hudRows,
+      skip: this.skipProjection(),
       scopes: this.appScope.snapshot(),
       scopeContext: { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt },
       hasSaved: !!this.saved,
@@ -1492,27 +1541,8 @@ class Player {
     const w = this.walker;
     if (!w || !this.stage) return;
     this.minimap.draw(w.block);
-    this.showSkipBar();
 
     const cam = w.cam;
-    const slider = $<HTMLInputElement>("#frame-slider");
-    const path = cam ? this.paths?.paths.get(cam.slot) : undefined;
-    if (cam && path) {
-      const lo = Math.min(cam.startFrame, cam.endFrame);
-      const hi = Math.max(cam.startFrame, cam.endFrame, lo + 1);
-      slider.min = String(Math.floor(lo));
-      slider.max = String(Math.ceil(hi));
-      if (!this.scrubbing) slider.value = String(cam.frame);
-      slider.disabled = false;
-      $("#frame-label").textContent =
-        `${path.file}[${path.index}] slot ${cam.slot}  ` +
-        `frame ${cam.frame.toFixed(0)} / ${hi.toFixed(0)}` +
-        (cam.isStatic ? "  (static pose)" : "");
-    } else {
-      slider.disabled = true;
-      $("#frame-label").textContent = "no camera path";
-    }
-
     const route = w.currentBlock?.route;
     this.hudRows = [
       ["mode", this.state.mode],

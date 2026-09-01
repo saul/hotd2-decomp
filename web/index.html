@@ -10,42 +10,12 @@
     <div id="app">
       <header id="topbar">
         <span class="brand">HOTD2 <span class="dim">stage player</span></span>
-        <label>Stage <select id="stage-select"></select></label>
-        <label title="Game mode 1. Same regions; a few slots resolve to the st_org* models Arcade never draws.">
-          <input type="checkbox" id="original-toggle" /> Original
-        </label>
+        <span id="stage-picker" class="toggles"></span>
         <span class="sep"></span>
-        <div class="modes" role="tablist">
-          <button data-mode="step" class="mode">Step</button>
-          <button data-mode="play" class="mode">Play</button>
-          <button data-mode="free" class="mode">Free roam</button>
-        </div>
+        <div class="modes" role="tablist" id="modes"></div>
         <span class="sep"></span>
         <span id="toggles" class="toggles"></span>
-        <button id="btn-kill" class="kill" hidden
-                title="Kill every live enemy outright -- hit points to zero and the directional death, the same thing that opens the live-enemy gate. Nothing is severed, because no bone was hit.">Kill</button>
-        <button id="btn-save"
-                title="Snapshot the whole game state: the walker's program counter and flags, the data segment, every actor and the random seed. Nothing from three.js -- the renderers rebuild from those, which is the test that the split is in the right place. See docs/PLAYER_ARCHITECTURE.md.">Save</button>
-        <button id="btn-load" disabled
-                title="Restore the last snapshot. The player becomes identical to the moment it was taken, down to the next attack the RNG draws.">Load</button>
-        <label title="The game is 4:3 and its projection is a compile-time constant: 41.1 degrees vertical.">
-          <input type="checkbox" id="pillarbox" checked /> 4:3
-        </label>
-        <label title="The game bakes most illumination into textures and the per-mesh base colour, so unlit is the faithful baseline. 'Scene' adds the one directional light SetLightingDefaultSingle installs, with the direction, colour and ambient the script sets.">
-          Light
-          <select id="light-mode">
-            <option value="unlit" selected>unlit (baked)</option>
-            <option value="scene">+ scene light</option>
-          </select>
-        </label>
-        <label title="Fog colour and range come from the script (evt 0x20-0x27). Radial uses true distance from the eye; planar reproduces the game's view-space-Z falloff, which fogs the screen corners less than the centre.">
-          Fog
-          <select id="fog-mode">
-            <option value="radial" selected>radial</option>
-            <option value="planar">planar (as the game)</option>
-            <option value="off">off</option>
-          </select>
-        </label>
+        <span id="view-settings" class="toggles"></span>
         <span class="grow"></span>
         <span id="status" class="dim"></span>
       </header>
@@ -90,12 +60,7 @@
                shutter's firing gate down. Where the branch bar asks a question
                that playback is waiting on, this one only offers something, so
                it never blocks and never counts down. -->
-          <div id="skipbar" hidden>
-            <span class="tag">Skip</span>
-            <span id="skip-sub" class="dim"></span>
-            <button id="skip-go">Skip ⏭</button>
-            <kbd class="skip-key">Enter</kbd>
-          </div>
+          <div id="skipbar"></div>
           <div id="branchbar" hidden>
             <span class="tag">Branch</span>
             <span id="branch-sub" class="dim"></span>
@@ -154,33 +119,7 @@
         </aside>
       </main>
 
-      <footer id="transport">
-        <button id="btn-reset" title="Back to the entry block">⏮</button>
-        <button id="btn-stepback" title="Previous instruction">◀</button>
-        <button id="btn-play" title="Play / pause (space)">▶</button>
-        <button id="btn-step" title="Next instruction (→)">▶|</button>
-        <label class="speed">Speed
-          <select id="speed">
-            <option value="0.25">0.25×</option>
-            <option value="0.5">0.5×</option>
-            <option value="1" selected>1×</option>
-            <option value="2">2×</option>
-            <option value="4">4×</option>
-            <option value="8">8×</option>
-          </select>
-        </label>
-        <span class="sep"></span>
-        <button id="btn-sound" class="sound" aria-pressed="false"
-                title="Sound on / off. Browsers block audio until the page is clicked, so this is also the gesture that unblocks it."><span id="sound-icon">🔇</span> <span id="sound-text">Muted</span></button>
-        <input type="range" id="volume" min="0" max="100" step="1" value="60"
-               title="BGM volume" />
-        <span id="bgm-label" class="dim"></span>
-        <span class="sep"></span>
-        <label class="framebar">
-          <span id="frame-label" class="dim">no camera path</span>
-          <input type="range" id="frame-slider" min="0" max="1" step="1" value="0" />
-        </label>
-      </footer>
+      <footer id="transport"></footer>
     </div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>

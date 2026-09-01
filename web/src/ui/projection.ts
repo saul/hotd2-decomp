@@ -18,6 +18,21 @@
 import type { ScopeRow } from "./panels/scope_types";
 import type { ToggleName } from "./commands";
 
+/**
+ * The skip offer, shown under the game's own condition.
+ *
+ * The bar follows the **region**, not the offer: `canSkip` adds the firing
+ * gate, and gating visibility on that made the whole feature invisible
+ * whenever the gate happened to be up. So the bar shows for the region and
+ * the button carries the gate. Null when no region is open.
+ */
+export interface SkipProjection {
+  canSkip: boolean;
+  sub: string;
+  /** True on the rare frame a branch point is live too: sit above it. */
+  stacked: boolean;
+}
+
 /** One instruction, as the tree and the feed draw it. */
 export interface TreeOp {
   i: number;
@@ -189,12 +204,23 @@ export interface TransportProjection {
   mode: "play" | "step" | "free";
   speed: number;
   frozen: boolean;
-  /** Null when the shot has no path — free roam, or a stage with no cam. */
-  camSlot: number | null;
+  /** False when the shot has no path — free roam, or a stage with no cam. */
+  hasPath: boolean;
   camFrame: number;
   camFrameLo: number;
   camFrameHi: number;
   camLabel: string;
+}
+
+/** The audio strip: what it is doing, and what the button should say. */
+export interface SoundProjection {
+  muted: boolean;
+  /** 0..100, as the slider reads it. */
+  volume: number;
+  label: string;
+  /** The browser is holding audio until the page is clicked. */
+  blocked: boolean;
+  text: string;
 }
 
 export interface UiProjection {
@@ -207,6 +233,10 @@ export interface UiProjection {
   status: string;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
+  sound: SoundProjection;
+  lightMode: string;
+  fogMode: string;
+  pillarbox: boolean;
   wait: WaitProjection | null;
   actorPanel: ActorsProjection | null;
   /** Null while the panel is folded — it is the expensive one to build. */
@@ -226,6 +256,7 @@ export interface UiProjection {
   inspector: string;
   /** The HUD strip: label, value, and whether it is worth the eye. */
   hudRows: [string, string, boolean?][];
+  skip: SkipProjection | null;
   scopes: ScopeRow | null;
   scopeContext: { frame: number; stageLoadedAt: number };
   /** Whether a snapshot is held, so Load can be enabled. */

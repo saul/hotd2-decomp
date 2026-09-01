@@ -1,5 +1,5 @@
 /**
- * Remember the view toggles across reloads.
+ * Remember the view preferences across reloads.
  *
  * The player's *addressable* state — stage, Original Mode, block/step/op,
  * camera slot and frame, all-regions — lives in the URL, deliberately: a state
@@ -13,103 +13,53 @@
  * URL would make every shared link carry someone else's overlay choices. They
  * belong in `localStorage`, per browser, and that is all this module does.
  *
- * Restoring works by writing the saved value onto the control and then
- * dispatching `change`, so the ordinary handler in `main.ts` applies it. There
- * is deliberately no second code path: a preference that took effect by a
- * different route than a click would drift from one.
+ * `allRegions` is deliberately **not** saved. It is URL state, and having two
+ * sources of truth for it is how a deep link ends up quietly overridden by
+ * whatever the last visitor clicked.
  *
- * `#stage-select`, `#original-toggle` and `#all-regions` are **not** listed
- * here. They are URL state, and having two sources of truth for them is how a
- * deep link ends up quietly overridden by whatever the last visitor clicked.
+ * This used to work by writing values onto DOM controls and dispatching
+ * `change`, so the ordinary handler applied them and there was only one code
+ * path. The controls are React's now and there is no DOM to write to — but the
+ * property is kept, and better: the restored values go back through
+ * `runCommand`, which is the same path a click takes.
  */
+import type { ToggleName } from "../ui/commands";
 
 const KEY = "hod2.viewPrefs";
 
-/** The controls worth remembering, and nothing that is already URL state. */
-const CONTROLS = [
-  "#show-rails",
-  "#show-aim",
-  "#show-sky",
-  "#show-hud",
-  "#show-rigs",
-  "#show-spawns",
-  "#show-chars",
-  "#show-props",
-  "#show-unported",
-  "#show-boxes",
-  "#shoot",
-  "#pillarbox",
-  "#light-mode",
-  "#fog-mode",
-  "#speed",
-] as const;
+/** URL state, so never saved here. See the note above. */
+const NOT_SAVED: ReadonlySet<ToggleName> = new Set<ToggleName>(["allRegions"]);
 
-type Saved = Record<string, boolean | string>;
+export interface ViewPrefs {
+  toggles: Partial<Record<ToggleName, boolean>>;
+  lightMode?: string;
+  fogMode?: string;
+  pillarbox?: boolean;
+  speed?: number;
+}
 
-function read(): Saved {
+export function readViewPrefs(): ViewPrefs {
   // Private browsing and blocked site data both throw rather than return
   // empty, and a preference is never worth breaking startup over.
   try {
     const raw = window.localStorage.getItem(KEY);
     const v: unknown = raw ? JSON.parse(raw) : null;
-    return v && typeof v === "object" ? (v as Saved) : {};
+    if (!v || typeof v !== "object") return { toggles: {} };
+    const p = v as ViewPrefs;
+    return { ...p, toggles: p.toggles ?? {} };
   } catch {
-    return {};
+    return { toggles: {} };
   }
 }
 
-function write(v: Saved): void {
+export function writeViewPrefs(p: ViewPrefs): void {
+  const toggles: Partial<Record<ToggleName, boolean>> = {};
+  for (const [k, on] of Object.entries(p.toggles)) {
+    if (!NOT_SAVED.has(k as ToggleName)) toggles[k as ToggleName] = on;
+  }
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(v));
+    window.localStorage.setItem(KEY, JSON.stringify({ ...p, toggles }));
   } catch {
     /* quota, private mode, or site data blocked -- nothing to do */
   }
-}
-
-function current(): Saved {
-  const out: Saved = {};
-  for (const sel of CONTROLS) {
-    const el = document.querySelector<HTMLElement>(sel);
-    if (el instanceof HTMLInputElement) out[sel] = el.checked;
-    else if (el instanceof HTMLSelectElement) out[sel] = el.value;
-  }
-  return out;
-}
-
-/**
- * Apply the saved preferences and start recording changes.
- *
- * Call once, **after** `main.ts` has registered its `change` handlers — the
- * restore works by dispatching `change`, so the handlers must already be
- * listening or the value lands on the control and nowhere else.
- */
-export function restoreViewPrefs(): void {
-  const saved = read();
-  for (const sel of CONTROLS) {
-    const el = document.querySelector<HTMLElement>(sel);
-    if (!el) continue;
-
-    const want = saved[sel];
-    if (want !== undefined) {
-      let changed = false;
-      if (el instanceof HTMLInputElement && typeof want === "boolean") {
-        changed = el.checked !== want;
-        el.checked = want;
-      } else if (el instanceof HTMLSelectElement && typeof want === "string") {
-        // A stored value for an option that no longer exists would blank the
-        // select, so only take one the markup still offers.
-        const ok = [...el.options].some((o) => o.value === want);
-        if (ok) {
-          changed = el.value !== want;
-          el.value = want;
-        }
-      }
-      if (changed) el.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-
-    el.addEventListener("change", () => write(current()));
-  }
-  // Seed the store so a browser that has never saved still records the
-  // defaults, which makes the next read a plain lookup rather than a merge.
-  write(current());
 }

@@ -36,15 +36,15 @@ export type UiCommand =
   /** The sidebar's per-class "box this" checkbox. */
   | { kind: "boxClass"; cls: number; on: boolean }
   /** The sidebar's per-class fold. */
-  | { kind: "foldClass"; cls: number; shut: boolean };
+  | { kind: "foldClass"; cls: number; shut: boolean }
+  | { kind: "setLightMode"; mode: string }
+  | { kind: "setFogMode"; mode: string }
+  | { kind: "setPillarbox"; on: boolean }
+  | { kind: "setVolume"; volume: number }
+  | { kind: "toggleMute" }
+  | { kind: "requestSkip" }
+  /** Hovering the branch bar stops the arcade countdown. Deciding is not a race. */
+  | { kind: "branchHover"; over: boolean };
 
 /** What a panel is handed to talk back with. */
 export type Dispatch = (c: UiCommand) => void;
-
-/** Every toggle off — the shape of the record, for a projection with no stage. */
-export const EMPTY_TOGGLES: Readonly<Record<ToggleName, boolean>> = {
-  allRegions: false, rails: false, aimRails: false, unported: false,
-  stuck: false, coli: false, boxes: false, rigs: false, sky: false,
-  hud: false, spawns: false, chars: false, props: false, breakables: false,
-  trackEnemies: false, shoot: false,
-};

@@ -22,6 +22,9 @@ import { Tree } from "./panels/Tree";
 import { Feed } from "./panels/Feed";
 import { HudStrip } from "./panels/HudStrip";
 import { Toggles } from "./panels/Toggles";
+import { Modes, StagePicker, ViewSettings } from "./panels/Topbar";
+import { Transport } from "./panels/Transport";
+import { SkipBar } from "./panels/SkipBar";
 
 const at = (sel: string) => document.querySelector(sel);
 
@@ -36,6 +39,13 @@ export function App({ store }: { store: UiStore }) {
 
   return (
     <>
+      {into("#stage-picker", <StagePicker p={p} dispatch={store.dispatch} />)}
+      {into("#modes", <Modes mode={p.transport.mode}
+                             dispatch={store.dispatch} />)}
+      {into("#view-settings", <ViewSettings p={p} dispatch={store.dispatch} />)}
+      {into("#transport", <Transport t={p.transport} sound={p.sound}
+                                     dispatch={store.dispatch} />)}
+      {into("#skipbar", <SkipBar p={p.skip} dispatch={store.dispatch} />)}
       {into("#toggles", <Toggles state={p.toggles}
                                  dispatch={store.dispatch} />)}
       {into("#tree", <Tree p={p.tree} current={p.current}

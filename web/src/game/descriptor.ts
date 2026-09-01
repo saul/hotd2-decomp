@@ -41,6 +41,9 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // the one descriptor field the headless harnesses never saw.
     intro: p?.intro ?? null,
     delayedLeap: p?.delayed_leap ?? null,
+    // The twelve entrance states' tails, one union narrowed by the state --
+    // see `class30/entrance.ts`.
+    entry: p?.entry ?? null,
     // The captor family's two script blobs, and the object they work on.
     // `CivilianInit` writes `child+0x1394 = this`, and `civilian_child` is
     // that pointer as a spawn address.

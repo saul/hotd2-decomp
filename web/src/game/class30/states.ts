@@ -41,12 +41,47 @@ export enum ZombieState {
    * the floor and allowed to leave it.
    */
   FallToGround = 11,
+  /**
+   * `ZombieStateSurfaceOnCameraCue` (`FUN_00456F50`). Comes up out of the
+   * water when the camera path reaches a frame — state 27's cousin, gated on
+   * the camera rather than on a delay. Sixteen spawns.
+   */
+  SurfaceOnCameraCue = 13,
+  /** `ZombieStateRunInPlaceTimed` (`FUN_00457160`). Two spawns. */
+  RunInPlaceTimed = 14,
   /** `ZombieStateWalkDistance` (`FUN_00457220`). */
   WalkDistance = 15,
+  /**
+   * `ZombieStateHoldClipThenBranch` (`FUN_004574D0`). Plays one clip for a
+   * fixed count, then branches to the state the descriptor names. **Thirty-
+   * eight spawns — the commonest entrance in the game after the attack run.**
+   */
+  HoldClipThenBranch = 17,
+  /**
+   * `ZombieStateWaitCameraFrameThenBranch` (`FUN_004575A0`). Holds a clip
+   * until the camera path hits an exact frame. Thirty-seven spawns.
+   */
+  WaitCameraFrameThenBranch = 18,
+  /**
+   * `ZombieStateWaitForCameraFrame` (`FUN_00457620`). The same wait with a
+   * freeze, a permit claim and the one attack cooldown class 0x30 ever arms.
+   */
+  WaitForCameraFrame = 19,
+  /**
+   * `ZombieStateWaitScriptFlagThenBranch` (`FUN_00457780`). State 18 with the
+   * camera gate replaced by a script flag.
+   */
+  WaitScriptFlagThenBranch = 20,
   /** `ZombieStateMotionCue21` (`FUN_004577F0`). */
   MotionCue = 21,
   /** `ZombieStateApproach` (`FUN_004579A0`). */
   Approach = 22,
+  /**
+   * `ZombieStateScriptedGrabAndDespawn` (`FUN_00457B50`). A one-shot scripted
+   * kill that removes the actor afterwards — the only class-0x30 entrance
+   * that ends in a despawn rather than in a state. Six spawns.
+   */
+  ScriptedGrabAndDespawn = 23,
   /** `ZombieStateLeapToPoint` (`FUN_00457CE0`). */
   LeapToPoint = 24,
   /**
@@ -60,6 +95,31 @@ export enum ZombieState {
    * Eighteen spawns.
    */
   Emerge = 27,
+  /**
+   * `ZombieStateRideCarrier` (`FUN_00458960`). A passenger: its position is
+   * its own spawn offset plus `g_carrier_object`'s, every frame. Six spawns,
+   * and it reads nothing from the tail — the tail belongs to the state it
+   * hands over to.
+   */
+  RideCarrier = 29,
+  /**
+   * `ZombieStateArcScriptedEntrance` (`FUN_00458A70`). Waits, crouches, then
+   * rides a scripted ballistic arc to a world point. Three spawns, all
+   * reached from `RideCarrier`.
+   */
+  ArcScriptedEntrance = 30,
+  /**
+   * `ZombieStateWaitScriptFlagThenEnter` (`FUN_00458CE0`). Not counted as an
+   * enemy at all until its script flag comes up — it increments
+   * `g_enemies_present` and `g_enemies_alive` itself. Four spawns.
+   */
+  WaitScriptFlagThenEnter = 31,
+  /**
+   * `ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`). A stationary attacker
+   * on a timer that never approaches and never leaves. Three spawns, and the
+   * only class-0x30 state outside the table's contiguous run.
+   */
+  DelayedStrikeInPlace = 32,
 
   /**
    * `ZombieStateStandAndThrow` (`FUN_00459080`). The stationary thrower: it

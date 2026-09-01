@@ -233,7 +233,7 @@ export enum ArcPhase {
  *
  * This is the unit every threshold in this class is written in: the attack
  * entries' hit frames, the arc script's stage thresholds, and the clip lengths
- * in `g_anim_frame_counts`. `mot/` is authored at 30 Hz, so the baked clip's
+ * in `g_motion_play_length`. `mot/` is authored at 30 Hz, so the baked clip's
  * own frame index is half of it — reading the baked index here is why the
  * pounce never connected: attack 0's hit frame is 62 and clip 303 bakes to 34
  * keys, so the test could never come true.

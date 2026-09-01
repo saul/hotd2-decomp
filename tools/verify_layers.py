@@ -151,7 +151,7 @@ def main() -> int:
             "ui-reads-projection-only",
             "the UI must read one plain projection and emit commands, not "
             "reach into the engine",
-            "ratchet", baseline=17, step=11),
+            "ratchet", baseline=6, step=11),
         "layers-are-systems": Rule(
             "layers-are-systems",
             "a layer ticked by hand is outside World, so it is outside "

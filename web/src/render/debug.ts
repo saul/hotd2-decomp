@@ -96,17 +96,6 @@ interface Boxed {
   colour: number;
 }
 
-/**
- * Whatever is deciding which actors to box.
- *
- * Structural rather than an import: the thing that answers this lives in
- * `hud/`, and `render` may not depend on `ui`. The sidebar hands its choice
- * over by *being* one of these.
- */
-export interface HighlightSource {
-  readonly highlight: ReadonlySet<number>;
-}
-
 const EMPTY: ReadonlySet<number> = new Set<number>();
 
 export class DebugBoxLayer implements System<RenderContext> {
@@ -122,19 +111,17 @@ export class DebugBoxLayer implements System<RenderContext> {
    * Independent of `showBoxes`: the panels box exactly what they list, so
    * ticking "box" next to a row is the same question as reading the row.
    */
-  panels: HighlightSource | null = null;
-  source: BoundsSource | null = null;
-
   /**
-   * What the sidebar asked to be boxed, as of its **last** tick.
+   * Which actors to box.
    *
-   * `render` runs before `hud`, so ticking a box next to a row shows up on the
-   * following frame. Sixteen milliseconds on a debug overlay, and the
-   * alternative is `render` reaching into `ui`.
+   * A plain set written by `app/`, which is the only layer that sees both the
+   * sidebar's selection and this. It used to be pulled off the sidebar object
+   * through a structural interface, so that `render` did not import `ui`; now
+   * that the sidebar is a projection there is nothing to pull from and the
+   * composition root simply hands the answer over.
    */
-  private get highlight(): ReadonlySet<number> {
-    return this.panels?.highlight ?? EMPTY;
-  }
+  highlight: ReadonlySet<number> = EMPTY;
+  source: BoundsSource | null = null;
 
   private readonly pool: Boxed[] = [];
   private readonly rings: LineLoop[] = [];

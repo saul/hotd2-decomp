@@ -54,7 +54,10 @@ import { Scope } from "../core/scope";
 import { UiStore } from "../ui/store";
 import { mountUi } from "./ui_root";
 import type { UiProjection } from "../ui/projection";
-import { EMPTY_TOGGLES } from "../ui/commands";
+import { EMPTY_TOGGLES, type UiCommand } from "../ui/commands";
+import { globalsProjection } from "./projection/globals";
+import { actorsProjection, highlightSet, waitProjection }
+  from "./projection/sidebar";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
 import type { Tick } from "../core/system";
@@ -65,8 +68,6 @@ import { wireSplitter } from "../hud/splitter";
 import { GameSystem, ScriptSystem, panelSystem } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
-import { GlobalsView } from "../hud/globals_view";
-import { DebugPanels } from "../hud/debug_panels";
 import { GameMode } from "../game/game_mode";
 import { G } from "../game/globals";
 import { SetGameTables } from "../game/tables";
@@ -158,6 +159,9 @@ class Player {
   /** Bumped when the projection actually changed, so React can skip a frame. */
   private uiRevision = 0;
   private lastUiKey = "";
+  /** The sidebar's own state: which classes are boxed, and which are folded. */
+  private readonly boxedClasses = new Set<number>();
+  private readonly shutClasses = new Set<number>();
   private readonly events = new Events();
   /** The one random source in the player, and part of every snapshot. */
   private readonly rng = new Rng(1);
@@ -168,9 +172,6 @@ class Player {
   private readonly bullets = new ProjectileLayer();
   /** Debug overlays: unported classes, the permit holder, the awaited enemies. */
   private readonly debug = new DebugBoxLayer();
-  /** The port's data segment, on screen. */
-  private readonly globalsView = new GlobalsView();
-  private readonly debugPanels = new DebugPanels();
   private readonly rain = new Rain();
   /** The rain pool, advanced in the game phase. See `game/effects/rain.ts`. */
   private readonly rainSim = new RainSystem();
@@ -254,16 +255,8 @@ class Player {
     // both are at their most useful when the clock is stopped.
     // The React half. One projection a frame, published only when it differs.
     this.world.add("hud", panelSystem("ui", (ctx) => this.publishUi(ctx)));
-    this.world.add("hud", panelSystem("hud.globals",
-      () => this.globalsView.update()));
-    this.world.add("hud", panelSystem("hud.debug_panels", (ctx) => {
-      if (ctx.walker) this.debugPanels.update(ctx.walker, this.camera.position);
-    }));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
-    // The sidebar decides what it wants boxed and the layer draws it: one
-    // list, read once, so a row and its box cannot disagree.
-    this.debug.panels = this.debugPanels;
     // One generator for the whole player, so a snapshot replays the gore
     // rolls and the death directions as well as the attacks.
     this.chars.rng = this.rng;
@@ -344,7 +337,10 @@ class Player {
     });
 
     this.wireUi();
-    mountUi($("#scopes"), this.ui);
+    // The one place a `UiCommand` means anything. Everything in `ui/` reaches
+    // the world through here and nowhere else.
+    this.ui.onCommand((c) => this.runCommand(c));
+    mountUi(this.ui);
     wireSplitter();
     // Watching the viewport rather than the window catches the splitter drag
     // and the branch bar appearing, neither of which resizes the window.
@@ -1371,14 +1367,40 @@ class Player {
    * avoids, and it is cheaper to build a short string here than to let React
    * walk a few hundred rows — the scope tree alone is the whole disposal graph.
    */
+  /**
+   * What a `UiCommand` means.
+   *
+   * Exhaustive on purpose: the union in `ui/commands.ts` is the list of
+   * everything the UI can ask for, and adding a case there without one here
+   * fails to compile. That is the property `wireUi`'s sixteen anonymous
+   * listeners could not have.
+   */
+  private runCommand(c: UiCommand): void {
+    switch (c.kind) {
+      case "boxClass":
+        if (c.on) this.boxedClasses.add(c.cls);
+        else this.boxedClasses.delete(c.cls);
+        return;
+      case "foldClass":
+        if (c.shut) this.shutClasses.add(c.cls);
+        else this.shutClasses.delete(c.cls);
+        return;
+      default:
+        // The rest of the union is still driven by `wireUi`'s listeners, and
+        // moves here panel by panel as step 11 proceeds.
+        return;
+    }
+  }
+
   private publishUi(ctx: RenderContext): void {
-    const scopes = this.appScope.snapshot();
-    // Cheap and complete: every number the panels draw is in it.
-    const key = JSON.stringify(scopes);
-    if (key === this.lastUiKey) return;
-    this.lastUiKey = key;
+    const w = this.walker;
+    const eye = this.camera.position;
+    // The boxes follow the sidebar's selection whether or not the sidebar is
+    // drawn, so this is computed before anything is folded away.
+    this.debug.highlight = highlightSet(
+      w, this.boxedClasses, $<HTMLInputElement>("#hl-wait").checked);
     const p: UiProjection = {
-      revision: ++this.uiRevision,
+      revision: 0,
       stage: this.state.stage,
       stages: [],
       original: !!this.state.original,
@@ -1390,13 +1412,27 @@ class Player {
         frozen: !!this.state.freeze, camSlot: null, camFrame: 0,
         camFrameLo: 0, camFrameHi: 0, camLabel: "",
       },
-      wait: { kind: null, detail: "", blockers: [] },
-      actors: [],
-      globals: [],
-      scopes,
+      // A folded panel is not built. Its *selection* still counts, though —
+      // `highlightSet` is computed below whatever the panels are showing.
+      wait: w && $<HTMLDetailsElement>("#panel-wait").open
+        ? waitProjection(w, eye) : null,
+      actorPanel: $<HTMLDetailsElement>("#panel-actors").open
+        ? actorsProjection(eye, this.boxedClasses, this.shutClasses) : null,
+      // Built only while the panel is open: it walks every global and every
+      // actor and formats them all.
+      globals: $<HTMLDetailsElement>("#globals-panel").open
+        ? globalsProjection() : null,
+      scopes: this.appScope.snapshot(),
       scopeContext: { frame: ctx.frame, stageLoadedAt: this.stageLoadedAt },
       hasSaved: !!this.saved,
     };
+    // The whole projection is the key. Same cost as the string compare each
+    // panel used to do for itself, done once, and it cannot go stale the way
+    // a hand-listed set of fields would the first time one is added.
+    const key = JSON.stringify(p);
+    if (key === this.lastUiKey) return;
+    this.lastUiKey = key;
+    p.revision = ++this.uiRevision;
     this.ui.publish(p);
   }
 

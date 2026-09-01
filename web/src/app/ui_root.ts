@@ -10,6 +10,10 @@ import { createRoot } from "react-dom/client";
 import { App } from "../ui/App";
 import type { UiStore } from "../ui/store";
 
-export function mountUi(el: HTMLElement, store: UiStore): void {
-  createRoot(el).render(createElement(App, { store }));
+export function mountUi(store: UiStore): void {
+  // A detached host: the panels themselves are portalled into the chrome's
+  // existing mount points, so React owns their contents without owning the
+  // page. Step 11 ends by turning that round.
+  createRoot(document.createElement("div"))
+    .render(createElement(App, { store }));
 }

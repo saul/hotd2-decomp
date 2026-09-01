@@ -18,6 +18,14 @@
 import type { ScopeRow } from "./panels/scope_types";
 import type { ToggleName } from "./commands";
 
+/** One weapon in flight, as the globals panel lists it. */
+export interface ThrownRow {
+  id: number;
+  slot: number;
+  ttl: string;
+  state: string;
+}
+
 /** One actor, as the sidebar and the boxes both read it. */
 export interface ActorRow {
   at: number;
@@ -34,6 +42,12 @@ export interface ActorRow {
   range: number;
   /** True while this actor is what the script is waiting on. */
   blocking: boolean;
+  /** False when the class has no module, so nothing drives it. */
+  ported: boolean;
+  /** `obj+0x120`, the sub-state. */
+  sub: number;
+  /** "dead · permit 0 · no module" — already assembled. */
+  flags: string;
 }
 
 /** One row of the port's data segment. */
@@ -44,12 +58,47 @@ export interface GlobalRow {
   address: string;
 }
 
+/** The data segment as the panel draws it. Absent while the panel is shut. */
+export interface GlobalsProjection {
+  rows: GlobalRow[];
+  actors: ActorRow[];
+  liveActors: number;
+  thrown: ThrownRow[];
+}
+
+/** One line of a debug panel. `note` is the indented, dimmer kind. */
+export interface DebugLine {
+  text: string;
+  note?: boolean;
+  /** Worth the eye: the thing actually holding the wait. */
+  hot?: boolean;
+  dead?: boolean;
+}
+
+/** What the script is waiting on. Null while the panel is folded. */
 export interface WaitProjection {
-  /** `wait_enemies_alive`, `wait_scripted_actors`, … or null when running. */
-  kind: string | null;
-  detail: string;
-  /** Who the wait is on. */
-  blockers: ActorRow[];
+  /** `0x3B wait_enemies_alive`, or "running". */
+  sub: string;
+  lines: DebugLine[];
+}
+
+/** One class's actors, as the sidebar groups them. */
+export interface ActorGroup {
+  cls: number;
+  /** `0x30 Zombie`. The id is always shown, and always first. */
+  name: string;
+  count: number;
+  ported: boolean;
+  open: boolean;
+  boxed: boolean;
+  /** Empty when the group is folded shut. */
+  lines: DebugLine[];
+}
+
+/** The actor sidebar. Null while the panel is folded. */
+export interface ActorsProjection {
+  sub: string;
+  groups: ActorGroup[];
 }
 
 export interface TransportProjection {
@@ -75,9 +124,10 @@ export interface UiProjection {
   status: string;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
-  wait: WaitProjection;
-  actors: ActorRow[];
-  globals: GlobalRow[];
+  wait: WaitProjection | null;
+  actorPanel: ActorsProjection | null;
+  /** Null while the panel is folded — it is the expensive one to build. */
+  globals: GlobalsProjection | null;
   scopes: ScopeRow | null;
   scopeContext: { frame: number; stageLoadedAt: number };
   /** Whether a snapshot is held, so Load can be enabled. */

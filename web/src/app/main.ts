@@ -73,7 +73,7 @@ import type { RenderContext } from "../render/context";
 import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
-import { GameSystem, ScriptSystem, drawSystem, panelSystem, syncPortGlobals }
+import { GameSystem, ScriptSystem, drawSystem, syncPortGlobals }
   from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
@@ -293,16 +293,13 @@ export class Player implements PlayerView, PlayerCommands {
     this.world.add("render", this.stuckDebug);
     this.world.add("render", this.rain);
     this.world.add("render", this.debug);
-    // The one update path. A projection a frame, built from the tick and
-    // published only when it differs -- so the sidebar and the globals panel
-    // are live while the clock is stopped, which is when they are at their
-    // most useful and is exactly when the old second path did not run.
-    // The screen-space layer, before the projection is built: it draws the
+    // The screen-space layer, and the last thing the tick does: it draws the
     // shutter and the caption straight off the walker, and holds no state of
-    // its own for a snapshot to miss.
+    // its own for a snapshot to miss. The projection is *not* built here --
+    // it is built at the end of `frame`, outside the tick, because a world
+    // with no walker in it does not tick at all. See `frame`.
     this.world.add("hud", drawSystem("hud.layer",
                                     (ctx) => this.hudLayer.draw(ctx.walker)));
-    this.world.add("hud", panelSystem("ui", () => this.publishUi()));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore
@@ -461,7 +458,21 @@ export class Player implements PlayerView, PlayerCommands {
 
   // -- bootstrap ---------------------------------------------------------
 
+  /**
+   * The clock first, then the bundle.
+   *
+   * The frame loop starts before anything is awaited, so it is turning for
+   * the whole of the bundle fetch and the first stage load. That is what
+   * makes the loading overlay -- and the failure message, which is the case
+   * where no stage will ever load -- reach the screen through the same
+   * once-a-frame publish as everything else, rather than through a hand-push
+   * at each of the places that happen to know the text changed.
+   */
   async start(): Promise<void> {
+    // Before the first `wallDelta`, or the first frame's delta is however
+    // long the page took to get here.
+    this.loop.start(performance.now());
+    requestAnimationFrame(this.frame);
     try {
       this.manifest = await loadManifest();
     } catch (err) {
@@ -482,8 +493,6 @@ export class Player implements PlayerView, PlayerCommands {
 
     await this.loadStage();
     this.setMode(this.state.mode);
-    this.loop.start(performance.now());
-    requestAnimationFrame(this.frame);
   }
 
   /** Load the stage the URL names. The sequence is `app/stage_load.ts`. */
@@ -806,6 +815,17 @@ export class Player implements PlayerView, PlayerCommands {
       this.world.update(this.ctx, game);
     }
     this.renderer.render(this.scene, this.camera);
+    // The one update path, and it is unconditional on purpose. A projection a
+    // frame, published only when it differs -- so the sidebar and the globals
+    // panel are live while the clock is stopped, and the loading overlay is
+    // live before there is a stage to tick.
+    //
+    // It used to be a system in the `hud` phase, which put it inside the
+    // `if (this.walker)` above: nothing was published at all until the first
+    // stage had loaded, and `setLoading` and `fail` each carried a hand-push
+    // to cover for that. Two update paths in the layer built to have one.
+    // Both hand-pushes are gone, and so is `panelSystem`.
+    this.publishUi();
   };
 
   /** The script-owned globals the port reads. See `app/systems.ts`. */
@@ -995,18 +1015,18 @@ export class Player implements PlayerView, PlayerCommands {
   /**
    * The overlay over the viewport.
    *
-   * Published rather than written: the element is React's, and these are
-   * called from outside the frame loop -- `fail` in particular runs when no
-   * stage will ever load, so there is no tick to pick the change up.
+   * A field and nothing else. The element is React's, and the frame loop is
+   * running from before the bundle is fetched -- so the next frame picks this
+   * up the same way it picks up everything else, including `fail`, which runs
+   * when no stage will ever load and used to be the reason for a second
+   * publish path here.
    */
   setLoading(text: string | null): void {
     this.loading = text === null ? null : { text, failed: false };
-    this.publishUi();
   }
 
   fail(msg: string): void {
     this.loading = { text: msg, failed: true };
-    this.publishUi();
   }
 
   pushUrl(): void {

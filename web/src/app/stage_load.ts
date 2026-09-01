@@ -59,6 +59,17 @@ export async function loadStageInto(p: Player): Promise<void> {
   // Everything the previous stage built goes back before anything of the new
   // one is made, so a leak shows as a scope that outlived this call rather
   // than as a slow climb nobody attributes to a stage switch.
+  //
+  // The mark goes **here**, at the teardown, and not at the end of the load.
+  // What the scope panel asks is "did this survive a teardown", so the frame
+  // it compares against is the frame the teardown happened on. Stamping it
+  // after the awaits instead meant every scope opened *during* the load --
+  // `stage:` and `session` on the two lines below, and every layer's own --
+  // had an `openedAt` older than the mark and was flagged as stale. That was
+  // already wrong on every stage switch; it was invisible on the first load
+  // only because `lifeFrame` could not advance while the frame loop had not
+  // started yet, which step 25 changed.
+  p.stageLoadedAt = p.lifeFrame;
   p.stageScope?.dispose();
   p.stageScope = p.appScope.child(`stage:${p.state.stage}`);
   p.ctx.scope = p.stageScope;
@@ -176,10 +187,6 @@ export async function loadStageInto(p: Player): Promise<void> {
     }
   }
 
-  // The stage is up. Anything opened under it from here belongs to this
-  // stage's run, and anything older that is still under `stage:` did not
-  // come from this load -- which is what the panel flags.
-  p.stageLoadedAt = p.lifeFrame;
   applyIncomingState(p);
   // No `bgm_entry_play` in any stage script starts the stage's own track --
   // they only switch to boss and transition music -- so the opening track

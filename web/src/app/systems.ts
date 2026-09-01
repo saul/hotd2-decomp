@@ -6,7 +6,6 @@
  * Everything of substance is on the other side of them.
  */
 import type { Context, System, Tick } from "../core/system";
-import type { RenderContext } from "../render/context";
 import { GameUpdate } from "../game/director";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
@@ -141,24 +140,6 @@ export class GameSystem implements System {
          + ` · ${live} live`
          + (actors.length > live ? ` · ${actors.length - live} scripted` : "");
   }
-}
-
-/**
- * The `hud/` panels, as systems.
- *
- * They are adapters and they live here rather than in `hud/` on purpose: a
- * panel's job is to read a projection of the game and draw it, and it should
- * not have to know that a `System` exists to do that. `app/` is the
- * composition root and the only layer allowed to see all of them, so the two
- * lines that put a panel in the tick order belong here.
- *
- * `tools/verify_layers.py` is what keeps that honest — importing `core/system`
- * from `hud/` counts against `ui-reads-projection-only`, and it should.
- */
-export function panelSystem(id: string,
-                            tick: (ctx: RenderContext) => void)
-    : System<RenderContext> {
-  return { id, update: (ctx) => tick(ctx) };
 }
 
 /**

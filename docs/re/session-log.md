@@ -7797,3 +7797,115 @@ failure printed. It cost a while to find because nothing is wrong with either
 line on its own. The comment now names the function without re-citing its
 address, which is the right cross-reference for something ten lines up anyway,
 but the dedupe would be better done on position than on the pair.
+
+## The twelve entrance states, and a global whose name was a whole wrong idea
+
+`ZombieEntryState` was a list of exceptions with `AttackRun` as the fallback,
+and the comment on it said the quiet part: *"Seventeen of the 54 are ported.
+Every entrance state that **is** read ends by setting state 1, so an unported
+entrance resolves to `AttackRun` rather than being left to abort."* That
+reasoning is true of some of them and it was never the point. The entrance is
+what puts the actor where the level wants it *before* the attack run starts —
+which is the same lesson state 15 and state 33 each taught separately, and it
+had not been generalised.
+
+Twelve of the 37 unported states have shipped spawns: **127 placements**, with
+17 and 18 alone accounting for 75. All twelve are in, plus their descriptor
+tails, which the exporter had no decoding for at all.
+
+**Three of them named clips the bundle was not baking, and that is the failure
+worth writing down.** Every one of the twelve measures its exit on the play
+clock of a clip the descriptor names. If that clip is not baked,
+`MotionPlayLength` returns 0, the cursor never reaches the last frame, and the
+actor stands there for the rest of the stage. States 13, 24 and 30 all did:
+motions 984, 1010 and 927, named by the descriptor and baked for nobody. It
+does not throw, it does not look wrong in a unit test written against a
+hand-made fixture, and the state machine is *correct* — the data underneath it
+is not there. `web/tools/entrances.mjs` is what caught it, by driving all 127
+shipped spawns against the real bundle with the real camera and asserting that
+every wait ends. Nothing smaller would have.
+
+**`g_two_player_game` is a count of players, not a flag.** The name had been
+sitting in the TSV and in the port, and it is wrong in a way that matters:
+`FUN_004147E0` does `INC word [009C8E80]` once per player as it enters, gated
+on that player's own slot bit 0x10 at `0x579DE8 + slot*8`, right beside a
+*separate* `INC` of `g_max_attackers` on bit 0x20; `FUN_00413F42` does the
+matching `DEC` when a player drops out. `TryClaimAttackSlot`'s
+`g_max_attackers == 2` branch then reads `== 1` to mean *one of the two is
+out* — which is incoherent as a boolean and obvious as a count.
+
+It is now `g_players_in_play`, and the port sets it to **1**, because 1 is what
+a single-player game runs at. The old default of 0 is the attract screen.
+States 24 and 32 both gate their strike on it being non-zero, so shipping them
+against the old value would have parked all nine of those spawns — a bug I
+would have written into the port *because* of the name, having read the state
+correctly.
+
+Two more things fell out of the rename, both pre-existing:
+
+* `ZombieThrownWeaponAimAtCamera` in the port read this global to decide the
+  per-player side offset. **The exe does not read it there at all** — it reads
+  `obj+0x1360`, which `ZombieThrowHandWeapon` sets from `g_max_attackers` one
+  line before it calls the aim. Right answer by accident while the global was
+  stuck at 0; wrong the moment it became 1.
+* Class 0x10's wait bit 0x40000000 was named `TwoPlayers` and tested `>= 1`.
+  The test is right — `CivilianStepScript` keeps waiting while
+  `g_players_in_play < 1` — but it had been dead code, because the global was
+  never set. It is `InPlay` now, and it fires.
+
+**A stale Ghidra label, at the address this project has already been bitten
+by.** `0x004E07D0` carried *both* `g_motion_play_length` (the TSV's name, and
+the right one) and an older `g_anim_frame_counts` label, and the decompiler
+preferred the older. So every state read this session showed its exit as
+`g_anim_frame_counts[motion] - 1 <= obj+0x19C` — the exact shape of the maul-cue
+bug, where an authored-frame reading made 30 of 51 cues unreachable. It happens
+to be the same table, so nothing was misread this time; the stale label is
+deleted, because next time it might not be.
+
+**Wrong turns.** The harness reported 164/164 stuck on its first run and it was
+neither the port nor the data: `GameUpdate` skips an actor the renderer has not
+turned on, and the harness never set `visible`. Then it reported two stage-2
+state-23 spawns stuck — those are **class 0x31** spawns, whose state 23 is
+`ThrowerStateDelayedPounce`, nothing to do with the scripted grab; filtering on
+the state without the class pulled in two throwers that were fighting perfectly
+well. And the unit assertions failed five ways at first because their loop
+called `EnemyZombieUpdate` without `ActorAdvanceMotion` — the same "the clock
+belongs to the port" trap from the other end, since four of the twelve measure
+their exits on a clock nothing was advancing.
+
+## Kill cleared the room and left the hostages standing
+
+Asked for: make the debug `Kill` button take the civilians too. It already
+walked every visible actor, so the missing part was not the loop — it was that
+`dead = true` is not how a civilian dies.
+
+`CivilianCheckShot` reads `ActorFlag.Dead`, not `dead`, and runs the civilian's
+**killed script** off it; that script is what carries `LeaveCountNow` and takes
+her out of `g_civilians_alive` — 59 of the 60 streams the shipped scripts use
+as a death script do. `ActorKillAll` raised only `dead`, so she stayed in the
+count with `wait_scripted_actors` open and nothing on screen to shoot. It
+raises the flag now, exactly as `ResolveHit` does on a killing blow, and
+returns its tally split into enemies and civilians so the feed can say which.
+
+**And that turned up the real one.** With the flag set she ran her killed
+script and then stopped dead on its `motion-loops` wait. `ResolveHit` was
+handing *every* class the shared directional death, and `ActorAdvanceMotion`
+returns on `obj.death` before it touches the base clock — so the clip her
+script was waiting to see loop could never advance. She never reached
+`LeaveCountNow`, on the debug path or on a real shot.
+
+The engine does not do this: `ResolveHit` (`FUN_00409430`) drops hit points and
+nothing else, and the clip comes from the class's own machine —
+`ZombieStateDeath6` (`FUN_00454D20`) sub 0 calls `ChooseDeathMotion` for class
+0x30, `CivilianCheckShot` runs the killed script for class 0x10, `ThrowerOnShot`
+picks its own chain for 0x31. The port already had that set written down:
+`updatesWhenDead`, the classes whose death keeps running. They no longer get
+the shared clip. The `ownReaction` test that used to guard it named class 0x31
+alone, which is why only the civilians were wrong.
+
+**A test that passed for the wrong reason.** My first version of the assertion
+checked `g_civilians_alive === 0` after the clear, and it passed with the fix
+reverted — the fixture's own removal cue drains the count. It asserts the
+killed *script* is what runs now. Worth remembering that reverting the fix and
+re-running is the only thing that tells you which of a test's checks are load
+bearing; two of the four here were not until they were rewritten.

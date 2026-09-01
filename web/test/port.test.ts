@@ -203,6 +203,15 @@ const TYPE: CharacterType = {
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
+    // The twelve entrance states' clips. 184 (0xB8) is the surfacing clip
+    // whose two splash cursors are 0x15 and 0x1B, so its play length has to
+    // reach past both; 186/187 (0xBA/0xBB) the scripted grab's pair; 700 a
+    // plain held clip; 1009/1010 the scripted attacker's strike and idle.
+    "184": motion(20, 0, 45), "186": motion(24), "187": motion(24),
+    "700": motion(18), "1009": motion(20, 0, 41), "1010": motion(16),
+    // 984 (0x3D8) is the surfacing clip for every character type outside
+    // 0xF..0x11, which is the one this file's type 1 takes.
+    "984": motion(24, 0, 47),
   },
 };
 
@@ -3210,6 +3219,255 @@ console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
     runClip(c, 200);
     check("...and rests after the second", c.civ!.loops === 0
           && MotionPlayFrame(c) === 37, String(MotionPlayFrame(c)));
+  }
+}
+
+console.log("\nclass 0x30's twelve entrance states — do the waits end?");
+{
+  // Every one of the twelve is a wait, and a wait transcribed slightly wrong
+  // does not crash: it simply never comes true and the actor stands there for
+  // the rest of the stage. `tools/entrances.mjs` checks all 127 shipped spawns
+  // against the real bundle; this checks the shapes against data written here,
+  // where a cue can be put exactly on and exactly past its frame.
+
+  // **The entry router passes every shipped entrance through now.** It used to
+  // fold 37 of the 54 states into `AttackRun`, which is what sent a zombie
+  // scripted to drown you jogging across the room instead.
+  for (const st of [ZombieState.SurfaceOnCameraCue, ZombieState.RunInPlaceTimed,
+                    ZombieState.HoldClipThenBranch,
+                    ZombieState.WaitCameraFrameThenBranch,
+                    ZombieState.WaitForCameraFrame,
+                    ZombieState.WaitScriptFlagThenBranch,
+                    ZombieState.ScriptedGrabAndDespawn, ZombieState.LeapToPoint,
+                    ZombieState.RideCarrier, ZombieState.ArcScriptedEntrance,
+                    ZombieState.WaitScriptFlagThenEnter,
+                    ZombieState.DelayedStrikeInPlace]) {
+    check(`a state-${st} spawn starts there, not in AttackRun`,
+          ZombieEntryState(st) === st, String(ZombieEntryState(st)));
+  }
+  check("...and a state nothing ships still falls back to AttackRun",
+        ZombieEntryState(53) === ZombieState.AttackRun,
+        String(ZombieEntryState(53)));
+
+  const spawn = (init: number, entry: unknown, exit = ZombieState.AttackRun) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_camera_fixed_eye_y = 0;
+    G.g_players_in_play = 1;
+    const z = ActorSpawn(0x7700, SpawnClass.Zombie, 1, "entrance", {
+      initialState: init, attackState: exit,
+      entry: entry as Actor["entry"],
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 30);
+    return z;
+  };
+  const run = (z: Actor, frames: number, rng = new Rng(3)) => {
+    for (let f = 0; f < frames; f++) {
+      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+      // `GameUpdate` advances the clip; `EnemyZombieUpdate` does not. Four of
+      // the twelve measure their exit on the **play clock**, so a loop that
+      // leaves it at zero stalls them and proves nothing.
+      ActorAdvanceMotion(z, 1 / 60);
+    }
+  };
+
+  // -- state 17: hold a clip for N frames, then branch ---------------------
+  {
+    const z = spawn(ZombieState.HoldClipThenBranch,
+                    { motion: 700, frames: 30 });
+    run(z, 20);
+    check("state 17 is still holding at 20 of its 30 frames",
+          z.state === ZombieState.HoldClipThenBranch && z.motion === 700,
+          `${z.state}/${z.motion}`);
+    run(z, 20);
+    // Where it goes *after* the branch is the attack loop's business — by 40
+    // frames the run may already have reached the ring. What matters is that
+    // the entrance let go.
+    check("...and branches once the count is out",
+          z.state !== ZombieState.HoldClipThenBranch, String(z.state));
+  }
+  {
+    // The `tail+0x03 == 15` arm: it latches the distance **and** enters state
+    // 15 at sub 1, skipping that state's own latch. Entering at sub 0 would
+    // overwrite the distance with `walkDistance`, a different field.
+    const z = spawn(ZombieState.HoldClipThenBranch,
+                    { motion: 700, frames: 5, walk_distance: 9 },
+                    ZombieState.WalkDistance);
+    run(z, 10);
+    check("state 17's exit-15 arm hands to the walk-in",
+          z.state === ZombieState.WalkDistance, String(z.state));
+    // It enters state 15 at **sub 1**, not sub 0 — and this is what proves it.
+    // Sub 0 is that state's own latch, which would overwrite the distance with
+    // `walkDistance`, a different descriptor field that is 0 here.
+    check("...carrying the distance the entrance chose, not state 15's own",
+          z.targetArrive === 9, String(z.targetArrive));
+  }
+
+  // -- state 18: wait for an exact camera frame ----------------------------
+  {
+    const z = spawn(ZombieState.WaitCameraFrameThenBranch,
+                    { motion: 700, cue: 40 });
+    G.g_cam_path_frame = 39;
+    run(z, 5);
+    check("state 18 waits while the camera is short of its frame",
+          z.state === ZombieState.WaitCameraFrameThenBranch, String(z.state));
+    G.g_cam_path_frame = 40;
+    run(z, 1);
+    check("...and goes the frame the camera lands on it",
+          z.state === ZombieState.AttackRun, String(z.state));
+  }
+  {
+    // The equality is the engine's, and it is load-bearing: a path that steps
+    // over the frame parks the actor, which is how the game holds a rank of
+    // zombies a given camera run never triggers.
+    const z = spawn(ZombieState.WaitCameraFrameThenBranch,
+                    { motion: 700, cue: 40 });
+    G.g_cam_path_frame = 41;
+    run(z, 60);
+    check("...but a camera already past it waits for ever, as the exe does",
+          z.state === ZombieState.WaitCameraFrameThenBranch, String(z.state));
+  }
+
+  // -- state 13: the same wait, but `>=` ------------------------------------
+  {
+    const z = spawn(ZombieState.SurfaceOnCameraCue, { cue_frame: 40 });
+    check("state 13 freezes its pose under the water first",
+          (z.flags & ActorFlag.PoseFrozen) !== 0 || z.sub === 0,
+          `flags ${z.flags.toString(16)}`);
+    run(z, 1);                     // sub 0 -> 1: the freeze is taken first
+    G.g_cam_path_frame = 100;
+    run(z, 1);
+    check("...and a camera *past* its frame still releases it — this one is a"
+          + " `>=`, unlike state 18",
+          z.sub === 2 && (z.flags & ActorFlag.PoseFrozen) === 0,
+          `sub ${z.sub} flags ${z.flags.toString(16)}`);
+    run(z, 200);
+    // Into the attack loop — which by 200 frames has usually moved on from
+    // `AttackRun` itself, so the assertion is that the entrance is done.
+    check("...then hands over when the surfacing clip is out",
+          z.state !== ZombieState.SurfaceOnCameraCue, String(z.state));
+  }
+
+  // -- state 20: the script flag ------------------------------------------
+  {
+    const z = spawn(ZombieState.WaitScriptFlagThenBranch,
+                    { motion: 700, cue: 7 });
+    run(z, 30);
+    check("state 20 waits on its script flag",
+          z.state === ZombieState.WaitScriptFlagThenBranch, String(z.state));
+    G.g_script_flags[7] = 1;
+    run(z, 1);
+    check("...and goes when the script raises it",
+          z.state === ZombieState.AttackRun, String(z.state));
+  }
+
+  // -- state 19: the only cooldown class 0x30 ever arms --------------------
+  {
+    const z = spawn(ZombieState.WaitForCameraFrame,
+                    { motion: 700, cue_frame: 10, freeze: true, claim: true,
+                      delay: 5, cooldown: 90 });
+    check("state 19's freeze arm stops the clock", z.frozen === 1 || z.sub === 0,
+          `frozen ${z.frozen}`);
+    G.g_cam_path_frame = 10;
+    run(z, 20);
+    check("state 19 claims a permit on its cue and goes to the strike",
+          z.state === ZombieState.Strike && z.attackPermit >= 0,
+          `${z.state}/${z.attackPermit}`);
+    check("...arming the cooldown, which no other class-0x30 state does",
+          z.hasCooldown && z.cooldown === 90,
+          `${z.hasCooldown}/${z.cooldown}`);
+  }
+  {
+    // A failed claim is not an error — the actor takes the descriptor's branch.
+    const z = spawn(ZombieState.WaitForCameraFrame,
+                    { motion: 700, cue_frame: 10, freeze: false, claim: false,
+                      delay: 0, cooldown: 0 });
+    G.g_cam_path_frame = 10;
+    run(z, 3);
+    check("...and a state-19 spawn that does not claim just branches",
+          z.state === ZombieState.AttackRun && !z.hasCooldown,
+          `${z.state}/${z.hasCooldown}`);
+  }
+
+  // -- state 31: it counts itself into the game ---------------------------
+  {
+    // The clip has to be **longer than 0x4D on the play clock**, because the
+    // exit is `motion != it || 0x4D < cursor` and the cursor wraps. All four
+    // shipped spawns name clip 920, whose play length clears it; a shorter one
+    // would stall in the engine too, which is why this fixture uses 184.
+    const z = spawn(ZombieState.WaitScriptFlagThenEnter,
+                    { flag: 3, idle_motion: 10, motion: 923, delay: 10 });
+    run(z, 30);
+    check("state 31 is not yet an enemy the script can see",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    G.g_script_flags[3] = 1;
+    run(z, 1);
+    check("...and counts itself in when its flag comes up",
+          G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    run(z, 200);
+    check("...then joins the attack loop",
+          z.state !== ZombieState.WaitScriptFlagThenEnter, String(z.state));
+  }
+
+  // -- state 23: the only entrance that ends in a despawn ------------------
+  {
+    const z = spawn(ZombieState.ScriptedGrabAndDespawn,
+                    { cue_frame: -1, motion: 186, hit_frame: 10 });
+    run(z, 4);
+    check("state 23's -1 cue fires at once", z.sub >= 2, String(z.sub));
+    run(z, 200);
+    check("...and it removes the actor rather than setting a state",
+          z.despawned, `despawned ${z.despawned} state ${z.state}`);
+  }
+
+  // -- state 24: flies to its point and then never leaves ------------------
+  {
+    const z = spawn(ZombieState.LeapToPoint,
+                    { dest: [0, 0, 12], frames: 10, delay: 5,
+                      idle_motion: 1010, strike_motion: 1009, hit_frame: 8,
+                      player: 0 });
+    run(z, 12);
+    check("state 24 flies to the point its descriptor names",
+          Math.hypot(z.pos.x - 0, z.pos.z - 12) < 1.5,
+          `${z.pos.x.toFixed(2)},${z.pos.z.toFixed(2)}`);
+    const perch = { x: z.pos.x, z: z.pos.z };
+    run(z, 400);
+    check("...stays in the state for ever, as the exe does",
+          z.state === ZombieState.LeapToPoint, String(z.state));
+    check("...and is pinned to its perch, so the crowd push cannot walk it off",
+          z.pos.x === perch.x && z.pos.z === perch.z,
+          `${z.pos.x.toFixed(2)},${z.pos.z.toFixed(2)}`);
+  }
+  {
+    // `g_players_in_play` is a **count**, not a two-player flag, and both
+    // scripted attackers refuse to strike while it is zero. Leaving the port's
+    // old default of 0 in place would have parked all nine of those spawns.
+    const z = spawn(ZombieState.LeapToPoint,
+                    { dest: [0, 0, 12], frames: 4, delay: 1,
+                      idle_motion: 1010, strike_motion: 1009, hit_frame: 8,
+                      player: 0 });
+    G.g_players_in_play = 0;
+    run(z, 120);
+    check("state 24 will not strike before a player is in play",
+          z.sub === 2, `sub ${z.sub}`);
+    G.g_players_in_play = 1;
+    run(z, 120);
+    check("...and does once one is", z.sub > 2, `sub ${z.sub}`);
+  }
+
+  // -- state 29: the passenger --------------------------------------------
+  {
+    const z = spawn(ZombieState.RideCarrier, null, ZombieState.AttackRun);
+    run(z, 3);
+    // [diverges] With no rideable object ported the ride is over at once,
+    // rather than parking six spawns for the rest of the stage. See
+    // `class30/entrance.ts`.
+    check("state 29 hands over at once when there is no carrier to ride",
+          z.state === ZombieState.AttackRun, String(z.state));
   }
 }
 

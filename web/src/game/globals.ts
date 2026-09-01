@@ -103,10 +103,22 @@ export const G = {
    */
   g_civilians_alive: 0,
   /**
-   * `g_two_player_game` — 0x009C8E80. Set when two players are actually in
-   * play; class 0x10's wait bit 0x40000000 blocks until it is clear.
+   * `g_players_in_play` — 0x009C8E80. **How many players are in play**, and
+   * not the two-player flag its old name claimed.
+   *
+   * `FUN_004147E0` does `INC word [009C8E80]` once per player as it enters —
+   * beside a *separate* `INC` of `g_max_attackers` on a different slot bit —
+   * and `FUN_00413F42` does the matching `DEC` when one drops out. So an
+   * ordinary single-player game runs at **1**, and 0 means nobody has started
+   * yet.
+   *
+   * That distinction is load-bearing: `ZombieStateLeapToPoint` and
+   * `ZombieStateDelayedStrikeInPlace` both refuse to strike while this is 0,
+   * so leaving it at the old default would have parked all nine of those
+   * spawns for ever. Anything that wants "are there two players" reads
+   * `g_max_attackers`, which is what the thrown weapon latches.
    */
-  g_two_player_game: 0,
+  g_players_in_play: 1,
 
   // -- attack permits ----------------------------------------------------
   /**
@@ -316,6 +328,20 @@ export const G = {
    * writes and the set-pieces read for their other removal trigger.
    */
   g_script_flags: [] as number[],
+  /**
+   * `g_carrier_object` — 0x009A5C34, the object the player is riding.
+   *
+   * `ZombieStateRideCarrier` (state 29) adds this object's position to its own
+   * spawn offset every frame, and leaves when the carrier raises `obj+0x34`
+   * bit 0x10000000. `ZombieStateDelayedStrikeInPlace` (state 32) watches the
+   * same object's bit 0x40000000 and gives up 0x14 frames after it appears.
+   *
+   * [diverges] **The port has no rideable object.** Every class that writes
+   * this one — `St1VehicleUpdate` (`FUN_0048E600`) among them — is unported,
+   * so it stays -1 and the two states above take their no-carrier arms. See
+   * `class30/entrance.ts`.
+   */
+  g_carrier_object: -1,
 
   // -- the ground plane --------------------------------------------------
   /**
@@ -522,6 +548,7 @@ export function ResetGameGlobals(): void {
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
   G.g_script_flags = [];
+  G.g_carrier_object = -1;
   G.g_frame = 0;
 }
 

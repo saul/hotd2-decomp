@@ -261,8 +261,15 @@ export enum CivilianWait {
    * script says otherwise.
    */
   PushOutOfWorld = 0x01000000,
-  /** Wait while only one player is in play. */
-  TwoPlayers = 0x40000000,
+  /**
+   * Wait until a player is actually in play — `g_players_in_play >= 1`.
+   *
+   * `CivilianStepScript` keeps waiting while `g_players_in_play < 1`, so this
+   * is a "has the game started" gate and not the player-count test the name
+   * `TwoPlayers` used to claim. In an ordinary single-player run it is met on
+   * frame one.
+   */
+  InPlay = 0x40000000,
   /** The bits that make the loop worth entering at all. */
   Any = 0x40003fff,
   /** Either of these parks the script whatever else the word says. */
@@ -760,7 +767,7 @@ function CivilianCueMet(obj: Actor, word: number): boolean {
   if (!sub) return false;
   if ((word & CivilianWait.CameraCue)
       && CamPathCueReached(sub.cuePath, sub.cueFrame)) return true;
-  if ((word & CivilianWait.TwoPlayers) && G.g_two_player_game >= 1) return true;
+  if ((word & CivilianWait.InPlay) && G.g_players_in_play >= 1) return true;
   return false;
 }
 
@@ -1160,7 +1167,7 @@ export function CivilianCountMotionLoops(obj: Actor): void {
 
   const cur = MotionPlayFrame(obj);
   if (sub.frameLimit === 0) {
-    // `model[2] < g_anim_frame_counts[model[8]]` — the **play** length. The
+    // `model[2] < g_motion_play_length[model[8]]` — the **play** length. The
     // cursor wraps at `play + 1`, so this is false on exactly one frame of
     // each play-through, which is what makes a loop cost one play rather than
     // one frame. Reading `m.frames` here spent a loop halfway through instead.
@@ -1309,7 +1316,7 @@ const WAIT_BIT_NAMES: [number, string][] = [
   [CivilianWait.RemoveOffCamera, "remove-off-camera"],
   [CivilianWait.Uncounted, "uncounted"],
   [CivilianWait.Rescued, "rescued"],
-  [CivilianWait.TwoPlayers, "two-players"],
+  [CivilianWait.InPlay, "in-play"],
 ];
 
 export function CivilianDebug(obj: Actor): ActorDebug {

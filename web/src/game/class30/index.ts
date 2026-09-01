@@ -21,6 +21,16 @@ import { ZombieStateStrike } from "./strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieStateWalkDistance } from "./walk_distance";
 import { ZombieStateStandAndThrow } from "./stand_throw";
+import {
+  ZombieStateArcScriptedEntrance, ZombieStateHoldClipThenBranch,
+  ZombieStateRideCarrier, ZombieStateRunInPlaceTimed,
+  ZombieStateSurfaceOnCameraCue, ZombieStateWaitCameraFrameThenBranch,
+  ZombieStateWaitScriptFlagThenBranch, ZombieStateWaitScriptFlagThenEnter,
+} from "./entrance";
+import {
+  ZombieStateDelayedStrikeInPlace, ZombieStateLeapToPoint,
+  ZombieStateScriptedGrabAndDespawn, ZombieStateWaitForCameraFrame,
+} from "./scripted";
 import { ZombieState } from "./states";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
@@ -76,6 +86,34 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     // frame one and cross geometry the level never meant them to.
     case ZombieState.WalkDistance:
       return ZombieStateWalkDistance(obj, rng);
+
+    // The twelve entrances this port adds — 133 spawns between them. Seven
+    // wait and hand over (`entrance.ts`), four attack outright
+    // (`scripted.ts`), and `ZombieStateRideCarrier` does neither.
+    case ZombieState.SurfaceOnCameraCue:
+      return ZombieStateSurfaceOnCameraCue(obj, events);
+    case ZombieState.RunInPlaceTimed:
+      return ZombieStateRunInPlaceTimed(obj, dt, rng);
+    case ZombieState.HoldClipThenBranch:
+      return ZombieStateHoldClipThenBranch(obj, dt);
+    case ZombieState.WaitCameraFrameThenBranch:
+      return ZombieStateWaitCameraFrameThenBranch(obj);
+    case ZombieState.WaitForCameraFrame:
+      return ZombieStateWaitForCameraFrame(obj, dt);
+    case ZombieState.WaitScriptFlagThenBranch:
+      return ZombieStateWaitScriptFlagThenBranch(obj);
+    case ZombieState.ScriptedGrabAndDespawn:
+      return ZombieStateScriptedGrabAndDespawn(obj, eye, events);
+    case ZombieState.LeapToPoint:
+      return ZombieStateLeapToPoint(obj, eye, dt, rng, events);
+    case ZombieState.RideCarrier:
+      return ZombieStateRideCarrier(obj, rng);
+    case ZombieState.ArcScriptedEntrance:
+      return ZombieStateArcScriptedEntrance(obj, dt);
+    case ZombieState.WaitScriptFlagThenEnter:
+      return ZombieStateWaitScriptFlagThenEnter(obj, dt, rng);
+    case ZombieState.DelayedStrikeInPlace:
+      return ZombieStateDelayedStrikeInPlace(obj, eye, dt, rng, events);
 
     // The two entrances that place the actor. Without them a spawn stands at
     // the y its record names — under the water at stage 2 block 16, and in
@@ -167,51 +205,50 @@ export function EnemyZombieInit(obj: Actor): void {
 /**
  * Which state to actually start in.
  *
- * [diverges] Seventeen of the 54 are ported. Every entrance state that *is*
- * read ends by setting state 1 — `ZombieStateWalkDistance` walks its distance
- * and sets 1, the burst-out entrance plays its clip and sets 1 — so an
- * unported entrance resolves to `AttackRun` rather than being left to abort.
- * Between them states 15 and 27 alone are 37 of stage 2's 90 zombies.
+ * **Every entrance state the game ships is now ported**, so this passes the
+ * descriptor's own byte straight through and the fallback below is reached
+ * only by a state no spawn record names.
+ *
+ * It used to be a list of exceptions, and the list was the bug. Seventeen of
+ * the 54 states were read; the other 37 fell through to `AttackRun`, on the
+ * reasoning that every entrance ends by setting state 1 anyway. That is true
+ * of *some* of them and it is not the point — the entrance is what puts the
+ * actor where the level wants it before the attack run starts. Sending state
+ * 15 to `AttackRun` skipped a scripted walk-in and sent zombies through a
+ * wall; sending state 27 there left them standing under water; sending state
+ * 23 there turned a set-piece drowning into a jog across the room. The twelve
+ * added here are 133 spawns, and states 17 and 18 alone are 75 of them.
+ *
+ * The check is kept, rather than deleted, because it is the thing that says
+ * what happens to a state that is genuinely unmodelled: `ZombieGiveUpAttack`
+ * through the dispatch's default, which releases the permit rather than
+ * silently holding one.
  */
 export function ZombieEntryState(initial: number): ZombieState {
-  // **The captor states are the exception, and folding them into the default
-  // was a real bug.** They do not end by setting state 1; they end by handing
-  // over to the *attack* script, and only when that is spent does
-  // `ZombieScriptEnded` send the actor at the player. Sending them to
-  // `AttackRun` here meant all 47 of the civilians' captors abandoned their
-  // hostage on frame one and charged the camera — the opposite of what a set
-  // piece is for.
-  if (TARGET_STATES.has(initial)) return initial;
-  // The two placing entrances pass through for the same reason as the captor
-  // states: they do not end by setting 1, they end by *moving the actor*, and
-  // sending them to `AttackRun` leaves the spawn wherever its record put it.
-  if (initial === ZombieState.Emerge || initial === ZombieState.DelayedLeap) {
-    return initial;
-  }
-  // ...and neither does the cue entrance, for a third reason on top of both:
-  // its spawn record freezes the pose, and `ZombieStateMotionCue21` is the
-  // only thing that unfreezes it. Sent straight to `AttackRun` the actor keeps
-  // `obj+0x34` bit 0x4000 for ever, so its clip never advances and the root
-  // motion that is the only thing carrying it never has a delta. That is
-  // exactly what the two van zombies did: stood at 45 units, wanting a permit
-  // they could never close on.
-  if (initial === ZombieState.MotionCue) return initial;
-  // `ZombieStateWalkDistance` *does* end by setting 1, so the fallback below
-  // reached the right final state — but only after skipping the walk-in that
-  // is the whole point of it. See `class30/walk_distance.ts`.
-  if (initial === ZombieState.WalkDistance) return initial;
-  // ...and neither does the stationary thrower: it ends by *leaving*, through
-  // state 15 or state 26, and `AttackRun` would have it walk at you instead.
-  if (initial === ZombieState.StandAndThrow) return initial;
-  switch (initial) {
-    case ZombieState.Approach:
-    case ZombieState.AttackRun:
-    case ZombieState.HoldAtRange:
-      return initial;
-    default:
-      return ZombieState.AttackRun;
-  }
+  return ZOMBIE_ENTRY_STATES.has(initial) ? initial : ZombieState.AttackRun;
 }
+
+/**
+ * The states an actor may legitimately *start* in — every state the dispatch
+ * above handles, minus the ones only another state can route to.
+ *
+ * A spawn record naming anything else is a record the port has not read, and
+ * `AttackRun` is the honest fallback: it is what an entrance hands over to.
+ */
+const ZOMBIE_ENTRY_STATES: ReadonlySet<number> = new Set<number>([
+  ZombieState.AttackRun, ZombieState.HoldAtRange, ZombieState.Approach,
+  // The twelve added here.
+  ZombieState.SurfaceOnCameraCue, ZombieState.RunInPlaceTimed,
+  ZombieState.HoldClipThenBranch, ZombieState.WaitCameraFrameThenBranch,
+  ZombieState.WaitForCameraFrame, ZombieState.WaitScriptFlagThenBranch,
+  ZombieState.ScriptedGrabAndDespawn, ZombieState.LeapToPoint,
+  ZombieState.RideCarrier, ZombieState.ArcScriptedEntrance,
+  ZombieState.WaitScriptFlagThenEnter, ZombieState.DelayedStrikeInPlace,
+  // ...and the ones that were already read.
+  ZombieState.WalkDistance, ZombieState.MotionCue, ZombieState.DelayedLeap,
+  ZombieState.Emerge, ZombieState.StandAndThrow, ZombieState.FallToGround,
+  ...TARGET_STATES,
+]);
 
 /**
  * The zombie, for the debug sidebar.

@@ -9,7 +9,7 @@
  * The renderer binds to an actor by `at` and owns the nodes; it holds no state
  * of its own that a snapshot would need.
  */
-import type { ArcStage, CharacterPlacement, TargetScriptJson }
+import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
 import type { CivilianState } from "./class10/state";
 import type { SpawnClass } from "./spawn_class";
@@ -179,6 +179,14 @@ export enum ZombieFlag2 {
   /** Bit `0x2000000` — the bounding sphere sits a half unit up, not one. */
   LowSphere = 0x2000000,
   /**
+   * Bit `0x100000` — the actor is being **carried**: riding
+   * `g_carrier_object` in `ZombieStateRideCarrier`, or in flight in
+   * `ZombieStateArcScriptedEntrance` and `ZombieStateScriptedGrabAndDespawn`.
+   * The states raise it for exactly as long as something other than the actor
+   * itself owns its position.
+   */
+  Carried = 0x100000,
+  /**
    * The class-0x30 half of {@link ThrowerFlag.OffScreenPermit}:
    * `TryClaimAttackSlot` sets it, `ReleaseAttackSlot` and
    * `ZombieStateHoldAtRange` clear it, and each clears
@@ -256,6 +264,13 @@ export interface Actor {
   delayedLeap: {
     delay: number; dest: [number, number, number]; gravity: number;
   } | null;
+  /**
+   * The descriptor tail of whichever of the twelve entrance states this spawn
+   * starts in — see `class30/entrance.ts`. One field rather than twelve
+   * because a spawn has one initial state and every other state's reading of
+   * the same bytes is the next descriptor's.
+   */
+  entry: ZombieEntryTail | null;
   hp: number;               // +0x11C
   maxHp: number;            // +0x11E
   /** `-1` when it holds no permit, else the index into `g_attack_permits`. */
@@ -328,6 +343,19 @@ export interface Actor {
   /** Frames before this actor may claim again. `ZombieStateHoldAtRange`
    *  forces it to zero unless `obj+0x1368` bit 0 is set. */
   cooldown: number;         // +0x133C
+  /**
+   * `obj+0x1368` bit 0 for class 0x30 — **the actor is allowed a cooldown**.
+   *
+   * `ZombieStateWaitForCameraFrame` (state 19) is the only thing in the class
+   * that sets it, so for every other zombie `ZombieStateHoldAtRange` forces
+   * {@link Actor.cooldown} to zero and there is no wait between swings beyond
+   * the strike clip and the retreat.
+   *
+   * A separate field and not a bit of `reactBone`, which is the same offset:
+   * class 0x31 reads `obj+0x1368` as the bone that was hit, and this is the
+   * polymorphism trap that field carries.
+   */
+  hasCooldown: boolean;     // +0x1368 bit 0, class 0x30
   /**
    * The player point the strike measures its lunge against, written by
    * `ActorFacePlayerTarget`. With one attacker it is the camera eye; with two
@@ -734,6 +762,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     accZ: 0,
     emerge: null,
     delayedLeap: null,
+    entry: null,
     hp: 0,
     maxHp: 0,
     attackPermit: -1,
@@ -742,6 +771,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     sub: 0,
     zones: 0,
     attack: -1,
+    hasCooldown: false,
     rank: -1,
     queueRank: 0xe,
     frozen: 0,

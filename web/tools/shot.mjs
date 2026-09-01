@@ -143,10 +143,24 @@ try {
   for (const sel of opt("click", "").split(",").filter(Boolean)) {
     await page.click(sel);
   }
+  // Blur first, and it is not a nicety. The player's shortcuts are on
+  // `window` and skip the event when something typable has focus, so a key
+  // pressed straight after a click goes to the control instead -- Space on a
+  // just-clicked checkbox toggles it back off, which reads as "the toggle does
+  // not work" and is really "the harness undid it".
+  if (opt("press")) await page.evaluate(() => (document.activeElement)?.blur?.());
   for (const key of opt("press", "").split(",").filter(Boolean)) {
     await page.keyboard.press(key);
   }
   if (settle > 0) await page.waitForTimeout(settle);
+  // A second round, after the game has been running for a while: the state
+  // worth photographing is often reached by doing something *to* a running
+  // game rather than to a freshly loaded one.
+  for (const sel of opt("then", "").split(",").filter(Boolean)) {
+    await page.click(sel);
+  }
+  const after = Number(opt("after", "0"));
+  if (after > 0) await page.waitForTimeout(after);
   // One more frame, so the shot is of a frame that has been through the whole
   // of `Player.frame` — render, then publish — and not of a half-applied one.
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));

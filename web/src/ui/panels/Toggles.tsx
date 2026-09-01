@@ -32,8 +32,14 @@ export interface ToggleSpec {
    * to forget to, and `applyToggle`'s exhaustiveness over `ToggleName` would
    * not notice either.
    *
-   * Undefined means the top bar, which keeps only what is about the session
-   * rather than about a layer.
+   * Undefined means the top bar, which keeps what is about the **session**
+   * rather than about a layer. `shoot` is the one that is not obvious and the
+   * one it matters for: every other toggle changes what is *drawn*, but Shoot
+   * changes what the game *does* — it is what makes the live-enemy gates real
+   * conditions instead of ones this client passes — so it is a mode, like
+   * Step and Play, and it stays where a mode goes. Filed as a debug overlay it
+   * ended up two clicks inside a folded panel, and a script sailing through
+   * `wait_enemies_alive` looks broken rather than switched off.
    */
   group?: DebugGroupName;
 }
@@ -69,7 +75,7 @@ export const TOGGLES: readonly ToggleSpec[] = [
     title: "Bounding boxes on the actor holding an attack permit \u2014 the one about to swing, and the one SelectCameraLookAtTarget is aiming at \u2014 and, while wait_enemies_alive is blocking, on every enemy keeping it blocked." },
   { name: "trackEnemies", label: "Track", on: true, group: "camera",
     title: "The gameplay camera. With enemies registered, SelectCameraLookAtTarget aims at the one holding an attack permit -- the one about to swing -- or the midpoint of two, and TurnLookAtToward eases the camera onto it. Off restores the authored cam/ path exactly." },
-  { name: "shoot", label: "Shoot", on: false, group: "shooting",
+  { name: "shoot", label: "Shoot", on: false,
     title: "Click to shoot. Ray from the camera through the crosshair, tested against each character's per-bone hit spheres; hit points, the per-bone damage escalation, the sever step, the sounds and the score are the game's own. With this on, the live-enemy waits become real: the script holds until you have killed them. See docs/formats/combat.md." },
 ];
 

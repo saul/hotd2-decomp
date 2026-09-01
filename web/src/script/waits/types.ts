@@ -64,12 +64,20 @@ export interface WaitRule {
 /** How far a wait opcode can be honoured from the bundle alone. */
 export const WAIT_NOTES: Record<number, string> = {
   0x40: "approximated: resolves when the current camera move ends",
+  // Both counters carry the whole sentence rather than one of them pointing
+  // at the other. `wait_enemies_alive` is **0x44** -- every one of the 99
+  // enemy gates in stage 2 is that opcode, and 0x43 does not appear at all --
+  // so the cross-reference was on the note nobody reads, and what a viewer
+  // watching the script sail through one saw was "the second enemy counter,
+  // gated with 0x43". That reads as a footnote. It needs to read as an
+  // instruction.
   0x43: "the live-enemy gate: real while Shoot is on, and passed when it is "
-      + "off because nothing can then make the count fall",
-  0x44: "the second enemy counter, gated with 0x43",
+      + "off, because nothing can then make the count fall",
+  0x44: "the live-enemy gate: real while Shoot is on, and passed when it is "
+      + "off, because nothing can then make the count fall",
   0x45: "passed: the script flag array is written by gameplay",
   0x46: "the civilian gate: real while Shoot is on, and passed when it is "
-      + "off because rescuing a civilian means killing its captors",
+      + "off, because rescuing a civilian means killing its captors",
   0x47: "passed: 'camera settled and no live target' needs the runtime",
 };
 

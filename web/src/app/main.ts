@@ -53,7 +53,8 @@ import { Scope } from "../core/scope";
 import { UiStore } from "../ui/store";
 import { mountUi } from "./ui_root";
 import type { UiProjection } from "../ui/projection";
-import { EMPTY_TOGGLES, type UiCommand } from "../ui/commands";
+import type { ToggleName, UiCommand } from "../ui/commands";
+import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { globalsProjection } from "./projection/globals";
 import { screenMessage } from "./projection/message";
 import { feedRow, inspectorText, minimapGraph, opSummary, treeProjection }
@@ -177,6 +178,8 @@ class Player {
   /** The sidebar's own state: which classes are boxed, and which are folded. */
   private readonly boxedClasses = new Set<number>();
   private readonly shutClasses = new Set<number>();
+  /** The view toggles. Defaults come from the table the panel renders. */
+  private toggles: Readonly<Record<ToggleName, boolean>> = TOGGLE_DEFAULTS;
   private readonly events = new Events();
   /** The one random source in the player, and part of every snapshot. */
   private readonly rng = new Rng(1);
@@ -493,8 +496,6 @@ class Player {
     this.bullets.source = this.chars;
     this.scene.add(this.bullets.group);
     this.shooting.playSound = (id) => { this.bgm.play(id); };
-    this.shooting.setEnabled(
-      $<HTMLInputElement>("#shoot").checked, this.camera, this.scene);
     const rainCfg = bundle.script.rain;
     this.rain.build(this.ctx, this.stage.root, rainCfg);
     this.rainSim.configure(
@@ -508,12 +509,10 @@ class Player {
 
     this.cam.rails = new RailLayer(this.paths);
     this.scene.add(this.cam.rails.group);
-    this.cam.rails.setVisible($<HTMLInputElement>("#show-rails").checked);
-    this.cam.rails.setAimRailsVisible($<HTMLInputElement>("#show-aim").checked);
-    this.debug.showUnported = $<HTMLInputElement>("#show-unported").checked;
-    this.debug.showBoxes = $<HTMLInputElement>("#show-boxes").checked;
-    this.coliDebug.setEnabled($<HTMLInputElement>("#show-coli").checked);
-    this.stuckDebug.setEnabled($<HTMLInputElement>("#show-stuck").checked);
+    // Everything the new stage's layers have to be told about the toggles,
+    // in one call. This used to be six checkbox reads that had to be kept in
+    // step with the sixteen listeners by hand, and three of them were missing.
+    this.applyAllToggles();
 
     this.walker = new Walker(bundle.script, {
       enterRegion: (r) => this.stage?.enterRegion(r),
@@ -644,7 +643,7 @@ class Player {
       this.syncCameraToWalker(true);
     }
     if (this.state.all) {
-      $<HTMLInputElement>("#all-regions").checked = true;
+      this.toggles = { ...this.toggles, allRegions: true };
       this.stage?.setVisibility("all");
     }
     this.refreshUi();
@@ -672,66 +671,10 @@ class Player {
         this.setMode(b.dataset.mode as PlayerState["mode"]));
     }
 
-    $<HTMLInputElement>("#all-regions").addEventListener("change", (e) => {
-      const all = (e.target as HTMLInputElement).checked;
-      this.state.all = all || undefined;
-      this.stage?.setVisibility(all ? "all" : "region");
-      this.pushUrl();
-      this.refreshUi();
-    });
-
-    $<HTMLInputElement>("#show-rails").addEventListener("change", (e) => {
-      this.cam.rails?.setVisible((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-aim").addEventListener("change", (e) => {
-      this.cam.rails?.setAimRailsVisible((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-unported").addEventListener("change", (e) => {
-      this.debug.showUnported = (e.target as HTMLInputElement).checked;
-    });
-    $<HTMLInputElement>("#show-stuck").addEventListener("change", (e) => {
-      this.stuckDebug.setEnabled((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-coli").addEventListener("change", (e) => {
-      this.coliDebug.setEnabled((e.target as HTMLInputElement).checked);
-    });
+    // The sixteen view toggles are React's now: each dispatches a `toggle`
+    // command and `applyToggle` is exhaustive over the union, so one that is
+    // added and not handled fails to compile.
     rememberFolds();
-    $<HTMLInputElement>("#show-boxes").addEventListener("change", (e) => {
-      this.debug.showBoxes = (e.target as HTMLInputElement).checked;
-    });
-    $<HTMLInputElement>("#show-rigs").addEventListener("change", (e) => {
-      this.rigs.setEnabled((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-sky").addEventListener("change", (e) => {
-      const on = (e.target as HTMLInputElement).checked;
-      this.backdrop.setEnabled(on);
-      this.rain.setEnabled(on);
-    });
-    $<HTMLInputElement>("#show-hud").addEventListener("change", (e) => {
-      this.hudLayer.setEnabled((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-spawns").addEventListener("change", (e) => {
-      this.spawns.setVisible((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-chars").addEventListener("change", (e) => {
-      this.chars.setEnabled((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-props").addEventListener("change", (e) => {
-      this.props.setEnabled((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#show-breakables").addEventListener("change", (e) => {
-      this.breakables.setEnabled((e.target as HTMLInputElement).checked);
-    });
-    $<HTMLInputElement>("#track-enemies").addEventListener("change", (e) => {
-      this.cam.trackEnabled = (e.target as HTMLInputElement).checked;
-      this.syncCameraToWalker();
-    });
-    $<HTMLInputElement>("#shoot").addEventListener("change", (e) => {
-      const on = (e.target as HTMLInputElement).checked;
-      this.shooting.setEnabled(on, this.camera, this.scene);
-      $<HTMLButtonElement>("#btn-kill").hidden = !on;
-      this.refreshUi();
-    });
     // The save state. Held in memory rather than written out: the value is
     // plain JSON, so a `copy(player.saveSnapshot())` in the console is a file
     // whenever one is wanted, and the button is for the loop you actually run
@@ -898,7 +841,7 @@ class Player {
       this.stage?.setVisibility("all");
       this.cam.rails?.setCameraMarkerVisible(true);
     } else {
-      const all = $<HTMLInputElement>("#all-regions").checked;
+      const all = this.toggles.allRegions;
       this.stage?.setVisibility(all ? "all" : "region");
       this.cam.rails?.setCameraMarkerVisible(false);
       this.syncCameraToWalker();
@@ -1413,10 +1356,64 @@ class Player {
       case "seek":
         this.seekTo(c.block, c.step, c.op);
         return;
+      case "toggle":
+        this.toggles = { ...this.toggles, [c.name]: c.on };
+        this.applyToggle(c.name, c.on);
+        return;
       default:
         // The rest of the union is still driven by `wireUi`'s listeners, and
         // moves here panel by panel as step 11 proceeds.
         return;
+    }
+  }
+
+  /**
+   * What each view toggle does.
+   *
+   * Exhaustive over `ToggleName`, so a row added to the table in
+   * `ui/panels/Toggles.tsx` without a case here fails to compile. That is the
+   * property the sixteen anonymous `wireUi` listeners could not have: there
+   * was no list of them, and no way to be told one had been missed.
+   */
+  private applyToggle(name: ToggleName, on: boolean): void {
+    switch (name) {
+      case "allRegions":
+        this.state.all = on || undefined;
+        this.stage?.setVisibility(on ? "all" : "region");
+        this.pushUrl();
+        return;
+      case "rails":        this.cam.rails?.setVisible(on); return;
+      case "aimRails":     this.cam.rails?.setAimRailsVisible(on); return;
+      case "unported":     this.debug.showUnported = on; return;
+      case "stuck":        this.stuckDebug.setEnabled(on); return;
+      case "coli":         this.coliDebug.setEnabled(on); return;
+      case "boxes":        this.debug.showBoxes = on; return;
+      case "rigs":         this.rigs.setEnabled(on); return;
+      case "sky":
+        // One control for both: they are the same weather.
+        this.backdrop.setEnabled(on);
+        this.rain.setEnabled(on);
+        return;
+      case "hud":          this.hudLayer.setEnabled(on); return;
+      case "spawns":       this.spawns.setVisible(on); return;
+      case "chars":        this.chars.setEnabled(on); return;
+      case "props":        this.props.setEnabled(on); return;
+      case "breakables":   this.breakables.setEnabled(on); return;
+      case "trackEnemies":
+        this.cam.trackEnabled = on;
+        this.syncCameraToWalker();
+        return;
+      case "shoot":
+        this.shooting.setEnabled(on, this.camera, this.scene);
+        $<HTMLButtonElement>("#btn-kill").hidden = !on;
+        return;
+    }
+  }
+
+  /** Everything a fresh stage has to be told about the current toggles. */
+  private applyAllToggles(): void {
+    for (const [name, on] of Object.entries(this.toggles)) {
+      this.applyToggle(name as ToggleName, on);
     }
   }
 
@@ -1434,7 +1431,7 @@ class Player {
       original: !!this.state.original,
       loading: null,
       status: "",
-      toggles: EMPTY_TOGGLES,
+      toggles: this.toggles,
       transport: {
         playing: this.playing, mode: this.state.mode, speed: this.speed,
         frozen: !!this.state.freeze, camSlot: null, camFrame: 0,

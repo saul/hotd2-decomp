@@ -458,6 +458,10 @@ button.kill:hover { background: #8c2626; }
   font-weight: normal; color: var(--dim);
 }
 .panel-head .hl input { margin: 0; }
+/* The toggle strip is one React node now, so it needs to lay its own labels
+   out the way the toolbar's flex row used to. */
+.toggles { display: contents; }
+
 /* -- the scope panel: the disposal tree, and where it is leaking ---------- */
 #scope-panel { max-height: 32%; }
 #scopes {

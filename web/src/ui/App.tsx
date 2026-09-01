@@ -21,6 +21,7 @@ import { ActorBody, WaitBody } from "./panels/Sidebar";
 import { Tree } from "./panels/Tree";
 import { Feed } from "./panels/Feed";
 import { HudStrip } from "./panels/HudStrip";
+import { Toggles } from "./panels/Toggles";
 
 const at = (sel: string) => document.querySelector(sel);
 
@@ -35,6 +36,8 @@ export function App({ store }: { store: UiStore }) {
 
   return (
     <>
+      {into("#toggles", <Toggles state={p.toggles}
+                                 dispatch={store.dispatch} />)}
       {into("#tree", <Tree p={p.tree} current={p.current}
                            dispatch={store.dispatch} />)}
       {into("#feed", <Feed rows={p.feed} dispatch={store.dispatch} />)}

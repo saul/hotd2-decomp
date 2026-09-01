@@ -35,7 +35,13 @@ SRC = ROOT / "web" / "src"
 
 LAYER_OF = {
     "core": "engine", "bundle": "engine", "script": "engine", "game": "engine",
-    "render": "render",
+    # `audio/` sits with `render/`: an output device that reads engine state
+    # and owns nothing, which is the same contract. It was in `hud/`, where the
+    # architecture doc had already noted it did not belong -- "bgm.ts -- audio,
+    # not UI" -- and where it counted against a UI rule it could never satisfy,
+    # because a track list is exactly the sort of bundle data an output device
+    # has to read.
+    "render": "render", "audio": "render",
     "hud": "ui", "ui": "ui",
     "app": "app",
 }
@@ -151,7 +157,7 @@ def main() -> int:
             "ui-reads-projection-only",
             "the UI must read one plain projection and emit commands, not "
             "reach into the engine",
-            "ratchet", baseline=6, step=11),
+            "ratchet", baseline=4, step=11),
         "layers-are-systems": Rule(
             "layers-are-systems",
             "a layer ticked by hand is outside World, so it is outside "

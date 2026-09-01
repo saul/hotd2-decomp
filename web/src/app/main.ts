@@ -39,7 +39,7 @@ import { Walker, type BranchChoice, type CamCommand, type FeedEntry } from "../s
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { restoreViewPrefs } from "./viewprefs";
 import { EventFeed, Hud, Inspector, Minimap, ScriptTree, opSummary, rememberFolds } from "../hud/ui";
-import { Bgm } from "../hud/bgm";
+import { Bgm } from "../audio/bgm";
 import { SceneFog, type FogMode } from "../render/fog";
 import { SceneLighting, type LightingMode } from "../render/lighting";
 import { Backdrop } from "../render/backdrop";
@@ -56,6 +56,7 @@ import { mountUi } from "./ui_root";
 import type { UiProjection } from "../ui/projection";
 import { EMPTY_TOGGLES, type UiCommand } from "../ui/commands";
 import { globalsProjection } from "./projection/globals";
+import { screenMessage } from "./projection/message";
 import { actorsProjection, highlightSet, waitProjection }
   from "./projection/sidebar";
 import { Events } from "../core/events";
@@ -316,7 +317,7 @@ class Player {
     this.events.on("civilian.dialogue", (d) => {
       const v = this.dialogue?.messages?.[String(d.group)]?.[0] ?? null;
       if (v?.voice) this.bgm.play(v.voice);
-      this.hudLayer.showMessage(d.group, v);
+      this.hudLayer.showMessage(d.group, screenMessage(v));
     });
     this.events.on("civilian.rescued", (d) => {
       this.onFeed({
@@ -528,7 +529,7 @@ class Player {
         // single-viewer playback corresponds to.
         const v = bundle.script.sound?.messages?.[String(g)]?.[0] ?? null;
         if (v?.voice) this.bgm.play(v.voice);
-        return this.hudLayer.showMessage(g, v);
+        return this.hudLayer.showMessage(g, screenMessage(v));
       },
       // The subtitle task tests the skip flag every frame and ends itself, so
       // the caption goes at once. The voice is a fire-and-forget PlaySoundId

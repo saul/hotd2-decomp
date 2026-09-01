@@ -18,6 +18,23 @@
 import type { ScopeRow } from "./panels/scope_types";
 import type { ToggleName } from "./commands";
 
+/**
+ * One subtitle line, as the HUD draws it.
+ *
+ * Declared here rather than imported from `bundle/` on purpose. A type-only
+ * import carries no code, but it makes `ui/` track the exporter's schema —
+ * and the whole point of a projection is that the UI owns the shape of its
+ * own input. `app/` maps the bundle's `DialogueLine` onto this and would not
+ * compile if the two drifted.
+ */
+export interface SubtitleLine {
+  text: string;
+  /** Added to the centred position, in the game's 640-wide screen. */
+  xOffset: number;
+  /** The frame count this line gives way at. */
+  endFrame: number;
+}
+
 /** One weapon in flight, as the globals panel lists it. */
 export interface ThrownRow {
   id: number;

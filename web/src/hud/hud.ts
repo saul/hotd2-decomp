@@ -75,7 +75,23 @@
  * game's would.
  */
 
-import type { DialogueLine, MessageVariant } from "../bundle";
+import type { SubtitleLine } from "../ui/projection";
+
+/**
+ * What `app/` hands over for evt `0x2D`.
+ *
+ * The bundle's `MessageVariant` has nine fields; four of them are what a
+ * subtitle needs. Taking only those keeps `hud/` off the exporter's schema —
+ * see `ui-reads-projection-only`.
+ */
+export interface ScreenMessage {
+  frames: number;
+  x: number;
+  y: number;
+  lines: SubtitleLine[];
+  /** `STAGE2_VOICE\\...wav`, for the feed line. Null when there is no voice. */
+  voiceFile: string | null;
+}
 
 /** Closed centre offset, and the 40-frame slide to fully open. */
 const SHUTTER_CLOSED_Y = 0.35;
@@ -127,7 +143,7 @@ export class Hud {
   private prevState = 2;
   private counter = 0;
   private msgFramesLeft = 0;
-  private lines: DialogueLine[] = [];
+  private lines: SubtitleLine[] = [];
   private lineIndex = 0;
   private enabled = true;
 
@@ -179,16 +195,16 @@ export class Hud {
   }
 
   /** evt `0x2D`, once the variant has been chosen. */
-  showMessage(group: number, v: MessageVariant | null): string | undefined {
+  showMessage(group: number, v: ScreenMessage | null): string | undefined {
     if (!v) return `dialogue group ${group} has no variant for this player`;
     this.msgFramesLeft = v.frames;
-    this.lines = v.lines ?? [];
+    this.lines = v.lines;
     this.lineIndex = 0;
     this.drawLine();
     const said = this.lines.map((l) => l.text).join(" / ");
     return said
-      ? `“${said}”${v.voice_file ? `  ·  ${v.voice_file}` : ""}`
-      : `dialogue ${v.frames}f${v.voice_file ? ` · ${v.voice_file}` : ""}` +
+      ? `“${said}”${v.voiceFile ? `  ·  ${v.voiceFile}` : ""}`
+      : `dialogue ${v.frames}f${v.voiceFile ? ` · ${v.voiceFile}` : ""}` +
         " (no subtitle lines)";
   }
 
@@ -217,7 +233,7 @@ export class Hud {
     this.message.textContent = l.text;
     // The game centres on 320 and nudges by x_offset, so the caption's own
     // centre is what moves; the transform below anchors it there.
-    const cx = SCREEN_W / 2 + l.x_offset;
+    const cx = SCREEN_W / 2 + l.xOffset;
     this.message.style.left = `${(cx / SCREEN_W) * 100}%`;
     this.message.style.top = `${(TEXT_BASELINE_Y / SCREEN_H) * 100}%`;
     // Match the game's advance so a long line occupies the width it would.
@@ -240,7 +256,7 @@ export class Hud {
       // `if (frames < line.end_frame) line++` -- the countdown, not a timer.
       const cur = this.lines[this.lineIndex];
       if (cur && this.lineIndex < this.lines.length - 1
-          && this.msgFramesLeft < cur.end_frame) {
+          && this.msgFramesLeft < cur.endFrame) {
         this.lineIndex++;
       }
       this.drawLine();

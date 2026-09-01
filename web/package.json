@@ -18,7 +18,8 @@
     "test:projection": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/projection.test.ts",
     "verify:ui": "node tools/verify_ui.mjs",
     "shot": "node tools/shot.mjs",
-    "entrances": "node --experimental-strip-types --no-warnings tools/run_test.mjs tools/entrances.mjs"
+    "entrances": "node --experimental-strip-types --no-warnings tools/run_test.mjs tools/entrances.mjs",
+    "leaps": "node --experimental-strip-types --no-warnings tools/run_test.mjs tools/leaps.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

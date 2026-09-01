@@ -213,6 +213,9 @@ const TYPE: CharacterType = {
     // 984 (0x3D8) is the surfacing clip for every character type outside
     // 0xF..0x11, which is the one this file's type 1 takes.
     "984": motion(24, 0, 47),
+    // State 26's clips: 955 (0x3BB) the jump, and 1015 (0x3F7) the limp of a
+    // corpse shot out of the air -- which is not a landing animation.
+    "955": motion(30), "1015": motion(20),
   },
 };
 
@@ -3506,6 +3509,71 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     // `class30/entrance.ts`.
     check("state 29 hands over at once when there is no carrier to ride",
           z.state === ZombieState.AttackRun, String(z.state));
+  }
+}
+
+console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
+{
+  // `ZombieStateDelayedLeap` freezes the pose for the flight — `obj+0x34` bit
+  // 0x4000, up for everything but the first frame and the last 0x15 — so the
+  // jump clip contributes no root motion while the parabola owns the position.
+  // Without it the port applied both and the actor sank through the floor.
+  // And 0x3F7 is the limp of a corpse shot out of the air, not a landing: a
+  // live actor plays no landing clip at all.
+  const LIMP_MOTION = 0x3f7;
+  const leaper = (hp = 100) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(0x7900, SpawnClass.Zombie, 1, "leaper", {
+      initialState: ZombieState.DelayedLeap,
+      delayedLeap: { delay: 0, dest: [0, -10, 30], gravity: 0.03674 },
+      // All fourteen shipped leapers carry `obj+0x34` bit 0x20000, the
+      // ground-snap exemption — without it the snap pins the actor to the
+      // fixture's floor on frame one and there is no flight to measure.
+      flags: ActorFlag.Airborne,
+    });
+    z.visible = true;
+    z.hp = z.maxHp = hp;
+    z.pos = vec3(0, 20, 0);
+    return z;
+  };
+
+  {
+    const z = leaper();
+    const rng = new Rng(5);
+    let lowest = z.pos.y, sawLimp = false, landed = -1;
+    for (let f = 0; f < 400 && z.state === ZombieState.DelayedLeap; f++) {
+      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+      ActorAdvanceMotion(z, 1 / 60);
+      if (z.motion === LIMP_MOTION) sawLimp = true;
+      if (landed < 0 && z.sub >= 4) { landed = f; break; }
+      lowest = Math.min(lowest, z.pos.y);
+    }
+    check("the leap reaches its named point", landed > 0 && lowest <= -9,
+          `landed ${landed} lowest ${lowest.toFixed(2)}`);
+    // The arc lands a shade *short*, never long: `vel += acc` runs before
+    // `pos += vel`, so the last step is one gravity tick smaller.
+    check("...and does not sink past it — the freeze suppresses root motion",
+          lowest >= -11, `lowest ${lowest.toFixed(2)}`);
+    check("...and a live actor never plays the corpse's limp clip", !sawLimp,
+          `motion ${z.motion}`);
+  }
+  {
+    // Shot out of the air: the limp is exactly what it is for.
+    const z = leaper();
+    const rng = new Rng(5);
+    let sawLimp = false;
+    for (let f = 0; f < 400 && z.state === ZombieState.DelayedLeap; f++) {
+      if (f === 12) z.hp = 0;
+      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+      ActorAdvanceMotion(z, 1 / 60);
+      if (z.motion === LIMP_MOTION) sawLimp = true;
+    }
+    check("an actor killed in flight goes limp on the way down", sawLimp,
+          `motion ${z.motion}`);
+    check("...and lands in the death state, not the attack run",
+          z.state === ZombieState.Death, String(z.state));
   }
 }
 

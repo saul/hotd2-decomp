@@ -34,10 +34,25 @@ const EMERGE_SPLASH_MOTION = 0xb2;
 const EMERGE_SPLASH_FRAMES: readonly [number, number][] =
   [[0x16, 0x62], [0x23, 0x61]];
 
-/** `ZombieStateDelayedLeap`'s two jump clips, and the landing. */
+/**
+ * `ZombieStateDelayedLeap`'s clips.
+ *
+ * `LEAP_MOTION` is the ordinary jump and `LEAP_MOTION_ALT` the wind-up variant
+ * `obj+0x34` bit 0x1000000 selects. `LEAP_LIMP_MOTION` is **not** a landing:
+ * the state plays it only on `hp < 1`, for an actor shot out of the air.
+ */
 const LEAP_MOTION = 0x3bb;
 const LEAP_MOTION_ALT = 0x399;
-const LEAP_LAND_MOTION = 0x3f7;
+const LEAP_LIMP_MOTION = 0x3f7;
+/** `0x399` holds in place to this play-clock frame, then starts moving... */
+const LEAP_ALT_LAUNCH_FRAME = 0x1a;
+/** ...and cross-fades into `LEAP_MOTION` at this one. */
+const LEAP_ALT_HANDOFF_FRAME = 0x23;
+/**
+ * `obj+0x1330 < 0x15` — the pose comes out of its freeze for the last 0x15
+ * frames of the arc, which is the landing anticipation.
+ */
+const LEAP_LANDING_FRAMES = 0x15;
 
 /** The clip frame this actor is on — the engine's `obj+0x19C`, at 60 Hz. */
 function frameOf(obj: Actor): number {
@@ -108,10 +123,25 @@ export function ZombieStateEmerge(obj: Actor, dt: number,
 /**
  * `ZombieStateDelayedLeap` — `FUN_004581A0`, class 0x30 state 26.
  *
- * The arc is set up by `ActorArcBeginFalling` (`FUN_0040A090`), which is not
- * the class-0x31 waypoint arc: the descriptor gives a per-frame **downward
- * acceleration** rather than a duration, and the frame count is counted out by
- * simulating the drop until it passes the destination's height.
+ * Fourteen spawns: the burst-out entrance. The actor waits, then rides a
+ * ballistic arc to a point the descriptor names — stage 3 block 4 step 6 drops
+ * two of them 47 units onto the walkway.
+ *
+ * **The arc is the only thing that moves the actor, and the state enforces
+ * that by freezing the pose.** `obj+0x34 |= 0x4000` goes up for the whole
+ * flight and comes off for the last `0x15` frames, so the leap clip's own root
+ * translation is suppressed while the parabola owns the position and allowed
+ * back for the landing anticipation. The port had no freeze at all, so 0x3BB's
+ * root motion was applied *on top of* the arc every frame and the actor
+ * overshot straight through the floor.
+ *
+ * **And `0x3F7` is the clip a corpse takes, not a landing.** The engine plays
+ * it only on `hp < 1` — an actor shot out of the air goes limp on the way
+ * down. The port had the test inverted and played it for a live actor as it
+ * landed, which is the "gets up from a seated position" the report names: it
+ * is the slump, played on someone who is not dead, and then stood out of.
+ * A live actor plays **no landing clip at all**; it keeps 0x3BB and holds on
+ * its tail for `play_length - rand() % 30 - 1` frames.
  */
 export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
   const p = obj.delayedLeap;
@@ -119,7 +149,9 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
   const frames = dt * 60;
 
   if (obj.sub === 0) {
-    obj.flags |= ActorFlag.PoseFrozen;
+    // `obj+0x34 |= 0x2000`, the arc-armed bit — **not** the pose freeze, which
+    // this state raises later and for a different span.
+    obj.flags |= ActorFlag.ArcSpent;
     obj.backoffFrames = p.delay;           // +0x1334
     obj.sub = 1;
     return;
@@ -129,48 +161,94 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
     obj.backoffFrames -= frames;
     if (obj.backoffFrames >= 0) return;
     ActorArcBeginFalling(obj, p.dest, p.gravity);
-    // The two jump clips: 0x399 when `obj+0x34` bit 0x1000000 is set, else
-    // 0x3BB. Nothing ported sets that bit, so this always takes 0x3BB — the
-    // arm is transcribed and unexercised.
-    ActorSetMotionBlended(obj, LEAP_MOTION, 0, 1);
-    obj.flags &= ~ActorFlag.PoseFrozen;
-    obj.flags2 &= ~ZombieFlag2.CollideWorld;
-    obj.flags |= ActorFlag.Airborne;
+    // The two jump clips and their two fades: 0x399 at fade 5 when `obj+0x34`
+    // bit 0x1000000 is set, else 0x3BB at fade 1. Nothing ported sets that
+    // bit, so this always takes 0x3BB — the arm is transcribed and
+    // unexercised, and `LEAP_MOTION_ALT`'s own wind-up below with it.
+    const alt = (obj.flags & ActorFlag.HoldingWeapon) !== 0;
+    ActorSetMotionBlended(obj, alt ? LEAP_MOTION_ALT : LEAP_MOTION, 0,
+                          alt ? 5 : 1);
+    // `obj+0x136C = (obj+0x136C & 0xDFFEFFFF) | 0x4000` — off the world push
+    // for the flight, and the leap's own bit up.
+    obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.OffScreenPermit);
+    obj.flags2 |= ZombieFlag2.Leaping;
+    obj.flags &= ~ActorFlag.HoldingWeapon;
     obj.sub = 2;
   }
 
-  if (obj.sub === 2 || obj.sub === 3) {
-    obj.vel.x += obj.accX;
-    obj.vel.y += obj.accY;
-    obj.vel.z += obj.accZ;
-    obj.holdFrames -= frames;
-    if (obj.holdFrames < 0) {
-      // Landed: stop, play the landing clip, and rejoin the attack loop.
-      obj.vel.x = obj.vel.y = obj.vel.z = 0;
-      obj.accX = obj.accY = obj.accZ = 0;
-      obj.flags &= ~ActorFlag.Airborne;
-      obj.flags2 |= ZombieFlag2.CollideWorld;
-      if (obj.hp >= 1) ActorSetMotionBlended(obj, LEAP_LAND_MOTION, 0, 5);
-      // `obj+0x1350 = play_length - rand() % 30 - 1`: how long the landing
-      // holds before the actor starts walking.
-      obj.targetLoops = Math.max(0, MotionPlayLength(obj) - rng.int(0x1e) - 1);
-      obj.sub = 4;
-    }
-    return;
-  }
-
-  if (obj.sub === 4) {
-    if (obj.hp < 1) {
-      obj.state = ZombieState.Death;
-      obj.sub = 0;
+  if (obj.sub === 2) {
+    // The 0x399 wind-up: it plays in place to frame 0x1A, then integrates to
+    // 0x23, then cross-fades into 0x3BB for the rest of the arc. A clip that
+    // is not 0x399 skips all of it and falls straight into sub 3.
+    if (obj.motion === LEAP_MOTION_ALT) {
+      const f = MotionPlayFrame(obj);
+      if (f === LEAP_ALT_HANDOFF_FRAME) {
+        ActorSetMotionBlended(obj, LEAP_MOTION, 0, 0xc);
+        obj.sub = 3;
+        return;
+      }
+      if (f > LEAP_ALT_LAUNCH_FRAME) { ZombieLeapIntegrate(obj); }
       return;
     }
-    if (frameOf(obj) >= obj.targetLoops) {
-      obj.state = ZombieState.AttackRun;
-      obj.sub = 0;
-    }
+    obj.sub = 3;
   }
-  void LEAP_MOTION_ALT;
+
+  if (obj.sub === 3) {
+    ZombieLeapIntegrate(obj);
+    // **The freeze.** Off before the clip has started and for the last 0x15
+    // frames of the arc; on for everything between, which is the span the
+    // parabola must own alone.
+    if (MotionPlayFrame(obj) < 1 || obj.holdFrames < LEAP_LANDING_FRAMES) {
+      obj.flags &= ~ActorFlag.PoseFrozen;
+      obj.frozen = 0;
+    } else {
+      obj.flags |= ActorFlag.PoseFrozen;
+      obj.frozen = 1;
+      // Shot out of the air: go limp for the rest of the drop.
+      if (obj.hp < 1 && obj.motion !== LEAP_LIMP_MOTION) {
+        ActorSetMotionBlended(obj, LEAP_LIMP_MOTION, 0, 5);
+      }
+    }
+
+    obj.holdFrames -= frames;
+    if (obj.holdFrames >= 0) return;
+
+    // Down. The push comes back on, the arc stops, and the hold is measured
+    // off **whatever clip is playing** — 0x3BB for a live actor, 0x3F7 for one
+    // that died on the way.
+    obj.flags2 |= ZombieFlag2.CollideWorld;
+    obj.vel.x = obj.vel.y = obj.vel.z = 0;
+    obj.accX = obj.accY = obj.accZ = 0;
+    obj.frozen = 0;
+    obj.flags &= ~ActorFlag.PoseFrozen;
+    obj.targetLoops = MotionPlayLength(obj) - rng.int(0x1e) - 1;
+    // `if (!(obj+0x136C & 0x10000000)) obj+0x34 &= ~0x20000` — the ground snap
+    // comes back, unless something else is still holding the actor up. That
+    // bit is unported and never set, so this always clears.
+    obj.flags &= ~ActorFlag.Airborne;
+    obj.sub = 4;
+  }
+
+  if (obj.sub !== 4) return;
+  if (obj.hp < 1) {
+    obj.state = ZombieState.Death;
+    obj.sub = 0;
+    obj.flags2 = (obj.flags2 & ~ZombieFlag2.Leaping) | ZombieFlag2.DiedInFlight;
+    return;
+  }
+  if (obj.targetLoops <= MotionPlayFrame(obj)) {
+    obj.flags2 &= ~ZombieFlag2.Leaping;
+    obj.flags &= ~ActorFlag.ArcSpent;
+    obj.state = ZombieState.AttackRun;
+    obj.sub = 0;
+  }
+}
+
+/** `vel += acc`, which is the whole of the arc's per-frame step. */
+function ZombieLeapIntegrate(obj: Actor): void {
+  obj.vel.x += obj.accX;
+  obj.vel.y += obj.accY;
+  obj.vel.z += obj.accZ;
 }
 
 /**

@@ -1060,6 +1060,33 @@ Four things worth carrying forward from reading them:
   the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
   the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
 
+### The burst-out leap, and the clip that is not a landing
+
+`ZombieStateDelayedLeap` (state 26, fourteen spawns) rides a ballistic arc to a
+point its record names, and **the arc is the only thing allowed to move the
+actor**. The engine enforces that: `obj+0x34` bit 0x4000, the pose freeze, is
+up for the whole flight and comes off only for the last `0x15` frames, so the
+jump clip contributes no root motion while the parabola owns the position. The
+port had no freeze, so 0x3BB's translation was applied *on top of* the arc
+every frame and the actor sank past its destination and through the floor.
+
+And **`0x3F7` is the limp of a corpse shot out of the air, not a landing.** The
+engine plays it only on `hp < 1`, mid-flight. The port had the test inverted
+and played it for a live actor as it touched down — which is the "gets up from
+a seated position" in the report: the slump, played on someone who is not dead,
+and then stood out of. A live actor plays **no** landing clip; it keeps the
+jump clip and holds on its tail for `play_length - rand() % 30 - 1` frames.
+
+`web/tools/leaps.mjs` measures all fourteen against their named point. Three of
+them — stage 1's, the ones whose record sets `obj+0x34` bit 0x1000000 — take
+the wind-up clip 0x399 and land well below the point *by construction*:
+`ActorArcBeginFalling` solves the parabola from where the actor stands, but sub
+2 then coasts to play-frame `0x1A` and accelerates to `0x23` before sub 3 even
+starts the frame countdown, and `obj+0x1330` is never decremented in sub 2. So
+the fall runs about `0x23` frames longer than the solution. That is the
+engine's arithmetic, not a port bug, and the harness checks that arm for
+landing at all rather than for landing on the point.
+
 `[diverges]` **The port has no rideable object.** Every class that writes
 `g_carrier_object` is unported, so it stays -1, and two states take their
 no-carrier arms: state 29 hands over immediately rather than parking six spawns

@@ -193,6 +193,20 @@ export enum ZombieFlag2 {
    * `g_offscreen_attacker` with it.
    */
   OffScreenPermit = 0x20000,
+  /**
+   * Bit `0x4000` — raised for the length of `ZombieStateDelayedLeap`'s arc and
+   * cleared on both its exits.
+   *
+   * [open] Nothing in the ported call graph reads it back. Kept because the
+   * state really does keep it, and because it is a different word from
+   * `obj+0x34` bit 0x4000 ({@link ActorFlag.PoseFrozen}) which the same state
+   * also toggles — two flags, one value, and mixing them up would freeze the
+   * wrong thing.
+   */
+  Leaping = 0x4000,
+  /** Bit `0x80000000` — raised as a delayed leap hands a dead actor to the
+   *  death state. [open], like {@link ZombieFlag2.Leaping}. */
+  DiedInFlight = 0x80000000,
 }
 
 /**

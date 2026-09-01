@@ -7909,3 +7909,44 @@ reverted — the fixture's own removal cue drains the count. It asserts the
 killed *script* is what runs now. Worth remembering that reverting the fix and
 re-running is the only thing that tells you which of a test's checks are load
 bearing; two of the four here were not until they were rewritten.
+
+## The leap that fell through the floor, and a clip read as a landing
+
+Reported at `?stage=3&mode=play&block=4&step=6&op=10&frame=255`: the delayed-leap
+zombies "fall through the ground, then get up from a seated position". Two
+separate bugs in `ZombieStateDelayedLeap`, and both were things the port had
+simplified away rather than misread.
+
+**The pose freeze.** Sub 3 holds `obj+0x34` bit 0x4000 for the whole flight and
+drops it only for the last `0x15` frames. That is not cosmetic: freezing the
+clock freezes root motion, and root motion is the *only* other thing that moves
+a class-0x30 actor. The engine is saying the parabola owns the position and the
+jump clip may not contribute. The port never froze, so 0x3BB's own translation
+ran under the arc and the actor arrived well below its destination — through
+the floor, exactly as reported. Stage 3's pair now land at -1.9 and -1.8
+against a named -1.0.
+
+**`0x3F7` is a corpse.** The port called it `LEAP_LAND_MOTION` and played it
+`if (obj.hp >= 1)`. The engine plays it `if (hp < 1)`, mid-flight, when the
+player has shot the zombie out of the air — it goes limp for the rest of the
+drop. A live actor plays no landing clip at all. Inverted, it was the slump
+played on someone alive and then stood out of: the "seated position".
+
+The name is the lesson. `LEAP_LAND_MOTION` was a guess from where the call sat
+— it appeared near the end of the state, so it was read as a landing — and the
+guess then justified the inverted test, because a landing clip *would* be for a
+live actor. Naming a thing from where it sits is the failure mode the evidence
+convention exists to stop, and it survived here because the constant looked
+like documentation.
+
+**A third thing, correctly weird.** Three stage-1 spawns set `obj+0x34` bit
+0x1000000 and take the wind-up clip 0x399, whose sub 2 coasts to play-frame
+0x1A and accelerates to 0x23 *before* sub 3 starts the arc's own frame
+countdown — and `obj+0x1330` is never decremented in sub 2. So those three fall
+about 0x23 frames further than the parabola solves for, and do not land on
+their point. That is the engine's arithmetic. `web/tools/leaps.mjs` had to
+learn the difference before it could tell the real overshoot from that one;
+the first two versions of the harness also blamed the state for the ground snap
+that runs *after* the landing, and for spawns that simply start below their
+destination. Three wrong measurements before the right one, on a bug that was
+already fixed.

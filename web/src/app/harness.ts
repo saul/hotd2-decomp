@@ -133,23 +133,32 @@ export class Harness {
   /** Driven frames run so far — `Player.drivenMs` is the one reader. */
   get driven(): number { return this.count; }
 
-  /** How many frames `Player.frame` should run this time round. */
+  /** How many frames one rAF owes. Public so a test can read the cap. */
   take(): number {
     return Math.min(this.pending, Harness.MAX_PER_RAF);
   }
 
   /**
-   * Book `n` frames run. Called by `Player.frame` after it has run them, so
-   * the counter and the trace agree with what actually happened.
+   * Run this rAF's share of what has been asked for. Returns how many.
+   *
+   * The whole of what `Player.frame` does under the flag, in one call: take,
+   * step, trace, book, settle. It lives here rather than in the loop so that
+   * the loop cannot get the order wrong and so that this file can be driven
+   * headlessly by `test:state`.
    */
-  ran(n: number): void {
+  pump(): number {
+    const n = this.take();
+    for (let i = 0; i < n; i++) {
+      this.target.stepOneFrame();
+      // After the frame, so a row is the state the frame left behind.
+      if (this.tracing) this.rows.push(this.snapshot());
+    }
     this.pending -= n;
     this.count += n;
-  }
-
-  /** Record one row, if tracing is on. Called once per driven frame. */
-  record(): void {
-    if (this.tracing) this.rows.push(this.snapshot());
+    // After the frames and before the render, so the promise a driver is
+    // waiting on settles a macrotask after this frame's publish.
+    this.settle();
+    return n;
   }
 
   /**
@@ -167,7 +176,14 @@ export class Harness {
     setTimeout(() => { for (const w of due) w(); }, 0);
   }
 
-  private advance(n: number): Promise<number> {
+  /**
+   * Book `n` frames, and wait for the loop to have run them.
+   *
+   * Public because `test:state` drives it directly — the gate on the whole
+   * seam is `install`, which answers null without the flag, not the reach of
+   * one method.
+   */
+  advance(n: number): Promise<number> {
     const frames = Math.max(0, Math.floor(n));
     this.pending += frames;
     return new Promise((ok) => {

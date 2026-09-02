@@ -52,7 +52,10 @@ import { World } from "../src/core/world";
 import { GameSystem, ScriptSystem, syncPortGlobals } from "../src/app/systems";
 import { describeShutter } from "../src/app/projection/hud";
 import { ResetPropContainers } from "../src/game/class41/index";
-import { ResetGameGlobals } from "../src/game/globals";
+import { G, ResetGameGlobals } from "../src/game/globals";
+import { GameUpdate } from "../src/game/director";
+import type { GameHost } from "../src/game/host";
+import { Harness } from "../src/app/harness";
 import { Walker, type WalkerHost } from "../src/script/walker";
 import { seekTo } from "../src/script/seek";
 import type { ScriptJson } from "../src/bundle";
@@ -243,6 +246,81 @@ const script = (stage: number): ScriptJson | null => {
 };
 
 // -- A. a snapshot, put back, reproduces the run it came from ---------------
+
+// -- the driven clock ---------------------------------------------------
+//
+// Two clocks and they disagreed about what a frame is. This oracle has always
+// driven the world with `LIVE` -- one **whole** frame per tick -- which is why
+// it has always been deterministic; the browser handed the same port
+// `frames: wall * 60` off the rAF timestamp, which is fractional and lands
+// somewhere different every run. `?drive=1` and `app/harness.ts` are the fix,
+// and these are the two properties it turns on. Neither needs a bundle.
+console.log("\nA driven frame is a whole frame:\n");
+{
+  ResetGameGlobals();
+  const rng = new Rng(1);
+  const host: GameHost = {
+    boneWorld: () => false, objectPath: () => null,
+    aimPoint: () => undefined, viewPoint: () => undefined,
+    viewSpaceOf: () => false, setBoneSlot: () => undefined,
+  };
+  const eye = { x: 0, y: 0, z: 0 };
+  let integral = true;
+  for (let i = 1; i <= 600; i++) {
+    GameUpdate(eye, TICK, host, rng);
+    if (!Number.isInteger(G.g_frame) || G.g_frame !== i) integral = false;
+  }
+  // `g_cam_path_frame` is `__ftol`'d in the exe and steps by exactly one, so
+  // an `== cue` is safe there. It is only unsafe here if the port's clock is
+  // ever handed a variable step -- which is `docs/PLAYER_HANGS.md` item 4's
+  // open question, and this is the half of it that is now settled.
+  check("600 whole ticks put `g_frame` on exactly 600, integral throughout",
+        integral, `ended on ${G.g_frame}`);
+
+  ResetGameGlobals();
+  // What a browser actually hands it: 60 Hz nominal with the jitter a rAF
+  // timestamp has. Nothing exotic -- a frame that took 17.4 ms instead of
+  // 16.7 is an ordinary frame.
+  const jitter = [0.0161, 0.0174, 0.0159, 0.0182, 0.0166];
+  let skipped = 0, last = 0;
+  for (let i = 0; i < 600; i++) {
+    GameUpdate(eye, jitter[i % jitter.length], host, rng);
+    // An integer the cursor stepped straight over is a cue nothing can equal.
+    if (Math.floor(G.g_frame) - last > 1) skipped++;
+    last = Math.floor(G.g_frame);
+  }
+  check("...and a wall-derived one does not, so an exact-frame cue is missable",
+        !Number.isInteger(G.g_frame) && skipped > 0,
+        `ended on ${G.g_frame}, ${skipped} integers stepped over`);
+}
+
+console.log("\nThe drive seam is a metronome and nothing else:\n");
+{
+  const rng = new Rng(1);
+  let stepped = 0;
+  const h = new Harness({
+    stepOneFrame: () => { stepped++; },
+    get walker() { return null; },
+    rng,
+  });
+  check("nothing is asked for, so nothing is owed", h.take() === 0);
+  let settled = -1;
+  const p = h.advance(10).then((n) => { settled = n; });
+  check("ten frames asked for, ten frames owed", h.take() === 10);
+  check("and none run until the frame loop runs them", settled === -1);
+  check("...and nothing has been stepped", stepped === 0);
+  // What `Player.frame` does under the flag, and the whole of it.
+  check("one pump runs exactly what was owed", h.pump() === 10);
+  await p;
+  check("the promise settles on the count, once the loop has run them",
+        settled === 10 && h.driven === 10 && stepped === 10,
+        `settled ${settled}, stepped ${stepped}`);
+  // The cap is what stands between a driver that asks for a thousand frames
+  // and a browser that stops answering; the remainder is simply owed.
+  void h.advance(200);
+  check("one rAF never runs more than the cap", h.take() === 64,
+        `take() said ${h.take()}`);
+}
 
 console.log("\nA snapshot determines the next frame:\n");
 

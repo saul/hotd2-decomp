@@ -893,13 +893,7 @@ export class Player implements PlayerView, PlayerCommands {
     // sprites are feedback for a click rather than part of the script's clock;
     // no driven frame is measured with it.
     if (this.drive) {
-      const n = this.drive.take();
-      for (let i = 0; i < n; i++) this.stepOneFrame();
-      this.drive.ran(n);
-      // After the frames and before the render, so the promise the driver is
-      // waiting on settles a macrotask after this frame's publish. See
-      // `Harness.settle`.
-      this.drive.settle();
+      this.drive.pump();
     } else if (!this.state.freeze && this.state.mode === "free") {
       this.freeRoam.update(wall, this.camera);
     } else if (!this.state.freeze && this.playing && this.walker) {
@@ -1035,8 +1029,6 @@ export class Player implements PlayerView, PlayerCommands {
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx, this.gameStopped ? this.loop.idle(TICK)
                                                  : DRIVEN_TICK);
-    // After the frame, so a row is the state the frame left behind.
-    this.drive?.record();
   }
 
   /**

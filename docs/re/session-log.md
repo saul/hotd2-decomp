@@ -8234,3 +8234,50 @@ thing worth pulling on.
 * Wait bit **0x00100000**, which four of her six words carry, is in neither
   `Any` (0x40003FFF) nor the blocked mask (0x14000000), so it does not gate the
   loop. Still unread. `[open]`
+
+## ResetSceneOnEnter: named is not ported, and the three blocks it zeroes
+
+Asked whether `ResetSceneOnEnter` (`FUN_0045EDD0`) was actually ported after I
+cited it in the counter work. It was not: I had named it in Ghidra and the TSV
+and referenced it in prose, but no TypeScript declared it, and `verify_port.py`
+said nothing because I had only ever used the parenthesised cross-reference
+form. **The em-dash form is the one that asserts a port exists**, and a
+citation that never uses it is invisible to the check. Worth remembering: the
+coverage number does not notice functions you talked about.
+
+Reading the three `[open]` blocks first, as asked:
+
+* `DAT_009C9100` and `DAT_009C89C0` are `u16`-per-scene tallies of civilians
+  **seen** and **rescued**, raised by `CivilianInit` and by `CivilianRunScript`
+  op 0x2C beside their run totals at 0x009A21BA and 0x009CA0EC. The rescue one
+  is used with a stride-10 index, `scene * 10 + rescues`, into a per-rescue
+  table.
+* The per-player triple at 0x009A5C82/84/86 is the shot statistics. The middle
+  word was the only unnamed one, and `EvtOpAwardAccuracyBonus2B` gives it away
+  in one line: `g_accuracy_bonus_table[(hits * 100 / it) / 10]` is an accuracy
+  percentage, so it is shots. It is **not** `g_nPlayerFired` (0x009A5C78),
+  which is a per-frame trigger flag; two things that would both be called
+  "shots fired" and are not the same. `[open]` remains on where it is
+  incremented — no instruction reaches it through that address, so the write
+  is on a computed base the disassembler does not resolve.
+* `DAT_009C88C0` was already `g_hit_slots`, and reading `ActorClaimHitSlot` /
+  `ActorFreeHitSlot` / `ActorDespawn` confirmed the shape: 14 dwords, index at
+  `obj+0x3C`, `obj+0x38` bit 6 as the held flag. That bit is in the same word
+  as the two enemy-count latches from the previous commit, which is the third
+  distinct use of `obj+0x38` this session.
+
+The port zeroes six of the engine's thirteen effects, and the doc comment
+itemises all thirteen with a tick or a cross. That shape is the lesson from
+`LEAP_LAND_MOTION`: the danger is not a partial transcription, it is a partial
+transcription that does not say so.
+
+`ResetGameGlobals` keeps its own name and its own job. It is not an exe
+function — the engine has no "empty the pool" call because its pool is a fixed
+array — and now it calls `ResetSceneOnEnter` for the half that is one, which
+mirrors `ResetGameOnStart` -> scene load -> `ResetSceneOnEnter`.
+
+One self-inflicted slip: the edit that moved the two per-player tallies out of
+`ResetGameGlobals` used a replace-first-occurrence, and the first occurrence
+was in the `ResetSceneOnEnter` I had just written two hundred lines above. It
+stripped the new copy and left the old. `tsc` was clean either way; only
+reading the file back caught it.

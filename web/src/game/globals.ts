@@ -494,11 +494,71 @@ export type Globals = typeof G;
  * zero, every enemy reads the outermost band for ever, and nothing reaches
  * striking range.
  */
-export function ResetGameGlobals(): void {
-  G.g_object_list = [];
+/**
+ * `ResetSceneOnEnter` — `FUN_0045EDD0`. Everything a scene starts clean.
+ *
+ * Called once per scene, from the scene load (`FUN_00460030`), which
+ * `ResetGameOnStart` (`FUN_0045FEF0`) reaches at the start of a run. The
+ * nesting matters and is kept here: the run totals are zeroed *there* and the
+ * per-scene ones *here*, which is what makes `g_civilians_rescued_total` a run
+ * figure and `g_civilians_rescued_by_scene` a stage one.
+ *
+ * **The engine's body, line for line, and what the port does with each.** This
+ * is a partial transcription and the list is how you can tell which part:
+ *
+ * | engine | port |
+ * |---|---|
+ * | `g_enemies_alive = 0`, `g_enemies_present = 0` | ✅ |
+ * | `g_civilians_alive = 0` | ✅ |
+ * | the whole 0x100-byte `g_script_flags` | ✅ |
+ * | per player: `g_head_combo_bonus`, `g_player_hit_count` | ✅ |
+ * | per player: `g_player_shot_count` (0x009A5C84) | ❌ not in `G` — nothing
+ *   in the port counts shots, so there is no accuracy denominator to zero.
+ *   `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`) is what reads the pair. |
+ * | `g_civilians_seen_by_scene`, `g_civilians_rescued_by_scene` | ❌ neither
+ *   tally exists; the port raises a `civilian.rescued` event instead. |
+ * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ❌ the port
+ *   has no `obj+0x3C` slot index and never claims one. |
+ * | `g_bHudShutterState` / `Prev` back to 5 | ❌ the walker owns the shutter |
+ * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
+ * | `g_nFiringGate = 0` | ❌ |
+ * | the scene light block, via `FUN_0040E140` | ❌ |
+ * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
+ *   port loads collision and assets from the bundle, not from here |
+ * | five unread words: `DAT_009A2BAC`, `DAT_009C8E8C`, `DAT_009C6F1C`,
+ *   `DAT_009C6F20`, `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`,
+ *   `DAT_009A34DC = 1` | `[open]` |
+ *
+ * Six of thirteen. The name is the engine's and the omissions are itemised on
+ * purpose: a partial transcription that says which part is a work list, and
+ * one that does not is a lie waiting to be believed.
+ */
+export function ResetSceneOnEnter(): void {
   G.g_enemies_alive = 0;
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
+  // `for (i = 0x40; i--;) *p++ = 0` over `g_script_flags` — all 0x100 bytes.
+  G.g_script_flags = [];
+  // The per-player shot statistics, so the accuracy grade is per scene rather
+  // than per run. The third of the triple, `g_player_shot_count`, has no
+  // counterpart in `G`.
+  G.g_head_combo_bonus = [0, 0];
+  G.g_player_hit_count = [0, 0];
+}
+
+/**
+ * The port's own reset: the object pools, the camera and the tables that have
+ * no single owner in the engine, **plus** `ResetSceneOnEnter` for the half
+ * that does.
+ *
+ * Not an exe function, and it should not pretend to be one. `SpawnFromDescriptor`
+ * builds actors one at a time and the engine has no "empty the pool" call at
+ * all, because its pool is a fixed array it walks; the port keeps a list, so
+ * emptying it is a thing that has to happen somewhere.
+ */
+export function ResetGameGlobals(): void {
+  G.g_object_list = [];
+  ResetSceneOnEnter();
   G.g_attack_permits = new Array(G.g_max_attackers).fill(-1);
   G.g_attack_committed = 0;
   G.g_enemy_approach_rings = [];
@@ -518,8 +578,7 @@ export function ResetGameGlobals(): void {
   G.g_player_invuln_frames = 0;
   G.g_player_was_hit = [0, 0];
   G.g_player_hit_motion = [0, 0];
-  G.g_player_hit_count = [0, 0];
-  G.g_head_combo_bonus = [0, 0];
+  // `g_player_hit_count` and `g_head_combo_bonus` are `ResetSceneOnEnter`'s.
   G.g_player_score = [0, 0];
   G.g_nPlayerFired = [0, 0];
   G.g_camera_is_tracking = 0;
@@ -547,7 +606,6 @@ export function ResetGameGlobals(): void {
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
-  G.g_script_flags = [];
   G.g_carrier_object = -1;
   G.g_frame = 0;
 }

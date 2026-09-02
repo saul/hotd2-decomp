@@ -21,7 +21,7 @@ import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { UpdateCameraFreeFlag } from "../src/game/camera/track";
-import { G, ResetGameGlobals } from "../src/game/globals";
+import { G, ResetGameGlobals, ResetSceneOnEnter } from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
   type RainRules,
@@ -3667,6 +3667,42 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     check("state 29 hands over at once when there is no carrier to ride",
           z.state === ZombieState.AttackRun, String(z.state));
   }
+}
+
+console.log("\nResetSceneOnEnter: what a scene starts clean:");
+{
+  // `ResetSceneOnEnter` (`FUN_0045EDD0`) is the engine's per-scene reset, and
+  // the port's `ResetGameGlobals` calls it — the same nesting the exe has,
+  // where `ResetGameOnStart` (`FUN_0045FEF0`) zeroes the run totals and the
+  // scene load zeroes these.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  G.g_enemies_alive = 4;
+  G.g_enemies_present = 7;
+  G.g_civilians_alive = 3;
+  G.g_script_flags[9] = 1;
+  G.g_head_combo_bonus = [130, 140];
+  G.g_player_hit_count = [22, 31];
+  // ...and something it must NOT touch: the run keeps the score across scenes.
+  G.g_player_score = [4200, 900];
+
+  ResetSceneOnEnter();
+  check("a scene starts with both enemy counts at zero",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  check("...and no civilians counted",
+        G.g_civilians_alive === 0, String(G.g_civilians_alive));
+  check("...and every script flag down",
+        (G.g_script_flags[9] ?? 0) === 0, String(G.g_script_flags[9]));
+  // The shot statistics are per **scene**, which is what makes the accuracy
+  // grade `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`) pays a per-stage one.
+  check("...and the per-scene shot statistics cleared for both players",
+        G.g_head_combo_bonus[0] === 0 && G.g_head_combo_bonus[1] === 0
+        && G.g_player_hit_count[0] === 0 && G.g_player_hit_count[1] === 0,
+        `${G.g_head_combo_bonus} / ${G.g_player_hit_count}`);
+  check("...but the score survives, because it is a run total and not a scene one",
+        G.g_player_score[0] === 4200 && G.g_player_score[1] === 900,
+        String(G.g_player_score));
 }
 
 console.log("\nthe two enemy counters, stepped and not derived:");

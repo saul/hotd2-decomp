@@ -1060,6 +1060,51 @@ Four things worth carrying forward from reading them:
   the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
   the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
 
+### `ResetSceneOnEnter`, and the three blocks it zeroes
+
+`ResetSceneOnEnter` (`FUN_0045EDD0`) is what a scene starts clean, called from
+the scene load (`FUN_00460030`) which `ResetGameOnStart` (`FUN_0045FEF0`)
+reaches at the start of a run. **The nesting is the point**: the run totals are
+zeroed there and the per-scene ones here, which is what makes
+`g_civilians_rescued_total` a run figure and `g_civilians_rescued_by_scene` a
+stage one. The port's `ResetGameGlobals` now calls it, in that same shape.
+
+Three blocks of it were `[open]` and are not any more:
+
+* **`g_civilians_seen_by_scene`** (0x009C9100) and
+  **`g_civilians_rescued_by_scene`** (0x009C89C0) — `u16` per scene.
+  `CivilianInit` raises the first beside `g_civilians_alive` and the run total
+  `g_civilians_seen_total` (0x009A21BA); `CivilianRunScript`'s op 0x2C raises
+  the second as it pays the 400-point rescue, beside
+  `g_civilians_rescued_total` (0x009CA0EC), and uses the pre-increment value
+  with a stride-10 index — `scene * 10 + rescues` — into a per-rescue table.
+* **The per-player triple** at `g_head_combo_bonus` (0x009A5C82),
+  **`g_player_shot_count`** (0x009A5C84) and `g_player_hit_count` (0x009A5C86),
+  stride 0x130. The middle one was unnamed;
+  `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`) pays
+  `g_accuracy_bonus_table[(hits * 100 / shots) / 10]` to any player in state 5
+  with more than 0x13 shots, so it is the accuracy **denominator** — and
+  distinct from `g_nPlayerFired` (0x009A5C78), which is a per-frame "the
+  trigger is down" flag rather than a tally. Zeroing all three per scene is
+  what makes the accuracy grade a per-stage one.
+* **`g_hit_slots`** (0x009C88C0) — already named: the 14-slot table
+  `ActorClaimHitSlot` (`FUN_00409270`) claims and `ActorFreeHitSlot`
+  (`FUN_004092D0`) releases, with the slot index at `obj+0x3C` and `obj+0x38`
+  bit 6 saying it holds one. `ActorDespawn` frees it on the way out.
+
+The port zeroes **six of the thirteen** things the engine's body does, and the
+doc comment on `ResetSceneOnEnter` lists all thirteen with a tick or a cross
+against each. That is deliberate: a partial transcription that says which part
+is a work list, and one that does not is a lie waiting to be believed — which
+is exactly how `LEAP_LAND_MOTION` got its name. The seven crosses are the
+shutter, the backdrop and rain flags, the firing gate, the scene light block,
+the loader calls, `g_hit_slots`, and the two per-scene civilian tallies; none
+has a counterpart in `G` yet.
+
+`ResetGameGlobals` keeps its own name and its own job — emptying the object
+pools and the camera, which the engine never needs because its pool is a fixed
+array it walks. It is not an exe function and no longer pretends to cover one.
+
 ### The two enemy counters are stepped, not derived
 
 `g_enemies_alive` and `g_enemies_present` are what 488 enemy gates wait on —

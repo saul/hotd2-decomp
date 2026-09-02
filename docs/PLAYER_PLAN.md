@@ -8,6 +8,10 @@ branching paths, enemy encounters and per-keyframe events.
 is deferred, as planned. Usage lives in [`../web/README.md`](../web/README.md);
 this document remains the plan and the rationale.
 
+Open defects found by driving the player rather than by reading it, with the
+command that reproduces each, are in
+[`PLAYER_HANGS.md`](PLAYER_HANGS.md).
+
 Two decisions changed during the build, both recorded in place below:
 
 - **The client walks the script; it does not interpret it.** The event VM's

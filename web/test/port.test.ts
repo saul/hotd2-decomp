@@ -2763,6 +2763,37 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           a.civ?.turnRate === 77, `turn ${a.civ?.turnRate}`);
   }
 
+  // **The civilian turn cap is a literal, and it is not the script's.**
+  // `CivilianStepTurnToTarget` (`FUN_0048C850`) passes `0x100` to
+  // `ActorTurnTowardPoint` and never reads `sub+0x0E`; the port passed that
+  // field, whose default is ten. Twenty-five times too slow is the difference
+  // between a civilian turning round in a couple of seconds and taking most of
+  // a minute, and stage 2's `0x138BC` had a `Face` wait behind a 194-degree
+  // turn — `wait_scripted_actors` at block 30 waited the whole time.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Face),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 55),
+      cmd(CivilianOp.Wait, 0),
+    ]]);
+    a.pos = vec3(0, 0, 0);
+    a.yaw = 0;
+    if (a.civ) {
+      // 0x8A00 is 194 degrees — the turn her own `SetTargetHeading` asks for.
+      const h = 0x8a00 * ((Math.PI * 2) / 65536);
+      a.civ.target = { x: Math.sin(h) * 100, y: 0, z: Math.cos(h) * 100 };
+      a.civ.targetMode = 1;
+    }
+    let frames = 0;
+    while (frames < 3000 && a.civ?.turnRate !== 55) {
+      cFrame(a, events);
+      frames += 1;
+    }
+    check("a civilian turns at the engine's cap, not the script's rate",
+          a.civ?.turnRate === 55 && frames < 200, `${frames} frames`);
+  }
+
 
   // **The debug clear has to kill what the civilian gate counts too.** A room
   // cleared of enemies with the hostages still standing is a script that has

@@ -311,6 +311,8 @@ const FALL_ACCEL = -0.02722;
 const FALL_PROBE = 100;
 /** `CivilianHookRideChildrenStep`'s turn cap, 0x0048DB6C. */
 const RIDE_TURN_CAP = 0x80;
+/** `CivilianStepTurnToTarget`'s own cap, the literal at `0x0048C8FE`. */
+const CIVILIAN_TURN_CAP = 0x100;
 
 /** `CivilianInit`'s literals. */
 const DEFAULT_TURN_RATE = 10;
@@ -1307,11 +1309,20 @@ function CivilianRunFrameHook(obj: Actor, frames: number): void {
  * `ActorTurnTowardPoint` (`FUN_0048C990`).
  *
  * One capped step of yaw per frame toward whatever `targetMode` names.
+ *
+ * **The cap is a literal.** `FUN_0048C850` passes `0x100` and nothing else;
+ * it never reads `sub+0x0E`, which is what op 3 writes and what this port had
+ * been passing instead. That is 256 BAMS a frame against a default of ten —
+ * twenty-five times too slow — and it is why stage 2's `0x138BC` could not
+ * finish the `Face` wait at command 4 of her stream: `SetTargetHeading 35328`
+ * asks her to turn 194 degrees, which is 138 frames at the engine's rate and
+ * nearly a minute at ten. `wait_scripted_actors` at block 30 waited behind
+ * her the whole time.
  */
 export function CivilianStepTurnToTarget(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
   if (!sub) return;
-  ActorTurnTowardPoint(obj, CivilianTargetPoint(obj, f), sub.turnRate);
+  ActorTurnTowardPoint(obj, CivilianTargetPoint(obj, f), CIVILIAN_TURN_CAP);
 }
 
 /**

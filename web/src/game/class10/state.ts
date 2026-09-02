@@ -20,7 +20,15 @@ export interface CivilianState {
   frameLimit: number;
   /** +0x0C how many more times the clip may loop. Negative loops for ever. */
   loops: number;
-  /** +0x0E op 3 — the per-frame turn cap toward the target, in BAMS. */
+  /**
+   * +0x0E, written by op 3 and by `CivilianInit`'s own 10.
+   *
+   * [open] **Nothing in the civilian's turn reads it.**
+   * `CivilianStepTurnToTarget` (`FUN_0048C850`) passes the literal `0x100` to
+   * `ActorTurnTowardPoint`, and this port passed this field instead — which
+   * made every civilian turn twenty-five times too slowly. What does read it
+   * is unread; it is kept because op 3 writes it and the sidebar shows it.
+   */
   turnRate: number;
   /** +0x10 / +0x12 op 0x0D — the camera cue wait bit 0x80 tests. */
   cuePath: number;

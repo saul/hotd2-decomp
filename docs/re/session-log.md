@@ -8183,3 +8183,54 @@ not read. `[open]`
 Also unread: wait bit **0x100000**, which four of her six wait words carry. It
 is not in `Any` (0x40003FFF) and not in the blocked mask (0x14000000), so it
 does not gate the loop — something else reads it. `[open]`
+
+## Stage 2 reaches its end block, and the last thing in the way was one literal
+
+`CivilianStepTurnToTarget` (`FUN_0048C850`) ends on
+
+```
+ActorTurnTowardPoint(g_cur_actor_xform, &local_24, 0x100);
+```
+
+**a literal cap, and it never reads `sub+0x0E`.** That field is what op 3
+writes and what `CivilianInit` seeds with 10, and the port had been passing it
+as the cap — so every civilian in the game turned at ten BAMS a frame instead
+of two hundred and fifty-six, twenty-five times too slowly.
+
+Stage 2's `0x138BC hito_oyajiaa` is command 4 of stream 95: a `Face` wait
+behind `SetTargetHeading 35328`, which is 194 degrees. At the engine's cap that
+is 138 frames; at ten it is 3533, or fifty-nine seconds, and she is walking on
+her clip's root motion the whole time so the bearing keeps moving. Block 30's
+`wait_scripted_actors` waited behind her, and the whole stage stopped there.
+
+Her stream ends the way the gate expects: command 24 is a wait word carrying
+`LeaveCountNow` (0x80000) and `RemoveOffCamera` (0x02000000), so once she walks
+her three points she takes herself out of `g_civilians_alive`. Nothing was
+supposed to shoot her, and nothing does.
+
+`sub+0x0E` is now `[open]` rather than named: op 3 writes it, the turn does not
+read it, and what does is unread. It is kept because the sidebar shows it.
+
+**`tools/playthrough.mjs` now takes stage 2 to block 35, `(end → 0)`,** in 260
+seconds and 159 instructions. Seven enemy gates still needed the debug clear —
+the shots cannot reach those rooms, which is the camera problem and the next
+thing worth pulling on.
+
+### Read while there, not yet ported
+
+* `CivilianUpdate` has a **second removal path**: wait bit 0x02000000 with the
+  actor off screen, not in mode 2 and holding no children frees its hit slot,
+  decrements `g_civilians_alive` and despawns it on the spot. The port declares
+  the bit and acts on none of it. `[open]`
+* The removal cue is `==` on both halves — `g_active_cam_path == sub+0x26 &&
+  g_cam_path_frame == sub+0x28` — where the port's `CamPathCueReached` takes
+  `>=` on the frame. More forgiving rather than less, so it is not blocking
+  anything, but it is not what the engine does. `[open]`
+* `DAT_009a2230`, which `CivilianUpdate` reads at the top of its removal tail,
+  is the **cutscene-skip flag** — written by `EvtOpSetSkippableRegion2C`,
+  `CheckCutsceneSkipRequest` and `FinishCutsceneSkip`. While it is up, every
+  civilian without wait bit 0x20000000 is given a one-frame countdown and
+  leaves. That is how skipping a cutscene clears the people in it. `[open]`
+* Wait bit **0x00100000**, which four of her six words carry, is in neither
+  `Any` (0x40003FFF) nor the blocked mask (0x14000000), so it does not gate the
+  loop. Still unread. `[open]`

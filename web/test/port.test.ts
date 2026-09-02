@@ -261,12 +261,23 @@ const CHARS = {
   note: "",
 } as unknown as CharactersJson;
 
+/**
+ * The scene state's major while a stage is being played — the `cam/` path
+ * camera row. `IsPlayerAttackable` (`FUN_00409DC0`) demands it before anything
+ * may claim an attack permit, and in the player it arrives every frame from
+ * the walker through `syncPortGlobals`. A fixture has no walker, so it has to
+ * say so itself; leaving it at 0 is a scripted cutscene, in which nothing
+ * attacks.
+ */
+const SCENE_MAJOR_PLAYING = 2;
+
 const EYE = vec3(0, 0, 0);
 
 
 function scene(n: number, rng: Rng): Events {
   ResetGameGlobals();
   SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
   for (let i = 0; i < n; i++) {
     const a = ActorSpawn(0x1000 + i, SpawnClass.Zombie, 1, `zombie ${i}`);
@@ -1976,6 +1987,7 @@ const FLOOR_BLOB = coliQuad([0, 1, 0, 0], 1,
 function thrower(state: number, extra: Record<string, unknown> = {}) {
   ResetGameGlobals();
   SetGameTables(CHARS31);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
   // `g_camera_yaw_bams` is the heading *from* the camera *toward* what it
   // looks at -- `ThrowerStateLeapDown` sets the pouncing actor's own yaw from
@@ -3057,6 +3069,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
   const scene30 = () => {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     T.coli = { files: ["t"], blobs: { floor: FLOOR_BLOB } };
     G.g_coli_full_set = ["floor"];
     G.g_camera_fixed_eye_y = -1e9;     // a miss must not pass as a hit
@@ -3153,6 +3166,7 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
   const scenePush = () => {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     T.coli = { files: ["t"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
     G.g_coli_full_set = ["wall", "floor"];
     G.g_camera_fixed_eye_y = 0;
@@ -3216,6 +3230,7 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
   const walker = (dist: number) => {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     const z = ActorSpawn(0x7100, SpawnClass.Zombie, 1, "walk-in", {
       initialState: ZombieState.WalkDistance, walkDistance: dist,
@@ -3292,6 +3307,7 @@ console.log("\nthe clip clock the scripts count in:");
   // past halfway, which is what left the mauled civilians alive.
   ResetGameGlobals();
   SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   const z = ActorSpawn(0x7200, SpawnClass.Zombie, 1, "clock");
   z.motion = 10;                     // 20 frames, and a play length of 37
   const m = CHARS.types["1"].motions["10"];
@@ -3328,6 +3344,7 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   // script wanted to be within 6. It never arrived and nobody was ever mauled.
   ResetGameGlobals();
   SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
   const c = ActorSpawn(0x7300, SpawnClass.Civilian, 1, "civ", undefined,
                        new Rng(1));
@@ -3369,6 +3386,7 @@ console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
   const dying = (loops: number) => {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
     const c = ActorSpawn(0x7400, SpawnClass.Civilian, 1, "dying", undefined,
                          new Rng(1));
@@ -3451,6 +3469,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
   const spawn = (init: number, entry: unknown, exit = ZombieState.AttackRun) => {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     G.g_players_in_play = 1;
     const z = ActorSpawn(0x7700, SpawnClass.Zombie, 1, "entrance", {
@@ -3709,6 +3728,26 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
 
   // The port's own guard. The engine reads 0x130 bytes below the array here.
   check("...and -1 is nobody", !IsPlayerAttackable(-1), "attackable");
+
+  // **And the gate is wired into the claim**, which is the call site the port
+  // used to leave out. `TryClaimAttackSlot` picks a player and voids the pick
+  // when this refuses, so no enemy takes a permit during a scripted camera.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_player_lives = [2, 2];
+    const z = ActorSpawn(0x7D00, SpawnClass.Zombie, 1, "claimant");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    G.g_scene_state_major_entered = 1;
+    check("no permit is granted while a scripted camera drives",
+          !TryClaimAttackSlot(z) && z.attackPermit === -1,
+          `permit ${z.attackPermit}`);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    check("...and one is the moment the path camera takes over",
+          TryClaimAttackSlot(z) && z.attackPermit === 0,
+          `permit ${z.attackPermit}`);
+  }
 }
 
 console.log("\nResetSceneOnEnter: what a scene starts clean:");
@@ -3719,6 +3758,7 @@ console.log("\nResetSceneOnEnter: what a scene starts clean:");
   // scene load zeroes these.
   ResetGameGlobals();
   SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_enemies_alive = 4;
   G.g_enemies_present = 7;
   G.g_civilians_alive = 3;
@@ -3777,6 +3817,7 @@ console.log("\nthe two enemy counters, stepped and not derived:");
 
   ResetGameGlobals();
   SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   check("a scene starts with both counts at zero",
         G.g_enemies_alive === 0 && G.g_enemies_present === 0,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
@@ -3832,6 +3873,7 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
   const leaper = (hp = 100) => {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     const z = ActorSpawn(0x7900, SpawnClass.Zombie, 1, "leaper", {
       initialState: ZombieState.DelayedLeap,
@@ -3902,6 +3944,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   const thrower = (cond = 7) => {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     const z = ActorSpawn(0x7500, SpawnClass.Zombie, 1, "axe man", {
       initialState: ZombieState.StandAndThrow, condition: cond,
@@ -3954,6 +3997,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   {
     ResetGameGlobals();
     SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;          // the ground plane, far below
     const pinned = ActorSpawn(0x7600, SpawnClass.Zombie, 1, "on a ledge", {
       initialState: ZombieState.StandAndThrow, condition: 7,

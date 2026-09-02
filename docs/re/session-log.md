@@ -8367,3 +8367,30 @@ supplies in the player. `lifetime.mjs` drives a real walker, so it pushes
 Worth recording that `test:port` did **not** catch it: the unit fixtures never
 assert that an enemy attacks, so a gate that refuses everyone passes them. The
 harnesses are what have caught the last four of these.
+
+## The claim gate goes in, and the fixtures were not a running scene
+
+Audited `IsPlayerAttackable`: which clauses are ported, and whether its call
+sites are. Two of three clauses (scene state, attract override) with the third
+a declared stand-in — and of the eight engine functions that call it, the port
+has modules for four. Three of those four already called it. The fourth was
+`TryClaimAttackSlot`, left out on purpose with a comment explaining why.
+
+**The reason had expired.** It said the port's stand-in tested `g_player_lives`
+alone, so wiring the gate would stop every enemy attacking once a player ran
+out. But `PlayerTakeDamage` floors lives at one, so that clause can never fail;
+and the function now tests the scene state, which is precisely the clause that
+belongs at a claim. A comment explaining an omission is only as good as the
+last time somebody checked it still applied.
+
+Wiring it broke **ten unit assertions and the throwers harness** immediately,
+and that is the system working: the fixtures build a scene by hand and never
+set `g_scene_state_major_entered`, so they were all testing a scripted cutscene
+in which nothing may claim a permit. Fixed the way the harnesses were fixed —
+the fixture supplies what the walker supplies in the player — with one named
+constant, `SCENE_MAJOR_PLAYING`, and a line after each `SetGameTables`.
+
+Worth noting against my own complaint from earlier today that `test:port` never
+asserts an enemy attacks: it does, in about ten places. What it had not done
+was fail, because nothing had yet made attacking depend on state the fixture
+did not set. The gap was narrower than I said.

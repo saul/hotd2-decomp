@@ -78,6 +78,9 @@ for (let stage = 1; stage <= 6; stage++) {
   for (const p of throwers) {
     ResetGameGlobals();
     SetGameTables(chars, undefined, undefined, undefined, script.coli);
+    // The scene state the player gets from the walker: `IsPlayerAttackable`
+    // refuses a permit unless the major is 2, the `cam/` path camera row.
+    G.g_scene_state_major_entered = 2;
     G.g_camera_fixed_eye_y = EYE.y;
     // One at a time: the permit queue is the pacing, and two throwers sharing
     // it would measure the queue rather than the state.

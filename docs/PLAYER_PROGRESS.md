@@ -1094,9 +1094,20 @@ window after a hit stops the damage and nothing else, so the enemies keep
 taking their turns through it. That is the engine's answer to "why is there no
 pause after I am hit".
 
-`TryClaimAttackSlot` still does not call it, which is deliberate and older than
-this change — see the note in `combat/permits.ts`. The callers today are the
-two scripted attackers, class 0x30 states 24 and 32.
+**And it is wired into the claim now.** `TryClaimAttackSlot` used to leave the
+gate out on purpose, and the reason was good at the time: the port's
+`IsPlayerAttackable` tested `g_player_lives` alone, so calling it there would
+have stopped every enemy attacking once a player was out of lives. Two things
+changed. `g_player_lives` floors at one, so that clause can no longer fail; and
+the function now tests the scene state, which is exactly the clause that
+belongs there. The engine's shape is kept — pick a player, void the pick if the
+gate refuses, and claim only if it survived, with no retry on the other player.
+
+Of the eight engine functions that call it, the port has modules for four and
+all four now do: `TryClaimAttackSlot`, `ThrowerTryClaimAttackSlot` (which
+delegates), the two scripted attackers through `ZombieScriptedPickPlayer`, and
+`ThrowerStateGrabPlayer`. The rest are `ThrowerStateLeapStrike`, which no
+shipped spawn can reach, and three calls in classes with no module.
 
 ### `ResetSceneOnEnter`, and the three blocks it zeroes
 

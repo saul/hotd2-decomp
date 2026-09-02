@@ -50,6 +50,21 @@ export function CheckPlayerCanBeHit(player: number): boolean {
  * answered by the thing that stands in for it, which is that the player has a
  * life left. `g_player_lives` floors at one for the same reason.
  *
+ * **Its call sites.** Eight functions in the engine call it; the port has
+ * modules for four of them and all four now do:
+ *
+ * | engine | port |
+ * |---|---|
+ * | `TryClaimAttackSlot` (`FUN_00455DE0`) | ✅ `combat/permits.ts` |
+ * | `ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) | ✅ — delegates to it |
+ * | `ZombieStateLeapToPoint` ×3, `ZombieStateDelayedStrikeInPlace` ×3 |
+ *   ✅ `ZombieScriptedPickPlayer`, which is the pattern both inline |
+ * | `ThrowerStateGrabPlayer` ×3 | ✅ `class31/scripted.ts` |
+ * | `ThrowerStateLeapStrike` | — the port has the state, and no shipped spawn
+ *   can reach it |
+ * | `FUN_0047FE90`, and two calls at 0x0047DAB3/0x0047DAD3 | — unread, in
+ *   classes the port has no module for |
+ *
  * The `player >= 0` guard is the port's own. The engine is called with -1 by
  * `TryClaimAttackSlot` and the scripted attackers, reads `g_player_state`
  * 0x130 bytes below the array, and relies on whatever is there not being 5.

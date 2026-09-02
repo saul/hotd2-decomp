@@ -7,6 +7,7 @@
  */
 import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor } from "../actor";
 import { G } from "../globals";
+import { IsPlayerAttackable } from "./player";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
 
@@ -64,19 +65,23 @@ export function TryClaimAttackSlot(obj: Actor, host?: GameHost,
   // The latch is read first and gives up before a player is even picked.
   if (G.g_attack_committed !== 0) return false;
   for (let i = 0; i < G.g_max_attackers; i++) {
-    // [open] `obj+0x121` is a **player index**, not a slot: the engine picks
-    // which player to come for and then voids the choice when
-    // `IsPlayerAttackable` (`FUN_00409DC0`) says no. That gate is deliberately
-    // **not** wired up here, and the reason is worth keeping.
+    // `obj+0x121` is a **player index**, not a slot: the engine picks which
+    // player to come for and then **voids the choice** when
+    // `IsPlayerAttackable` (`FUN_00409DC0`) says no —
+    // `if (!IsPlayerAttackable(obj+0x121)) obj+0x121 = -1;`, and the claim
+    // below only happens if the pick survived. It does not try the other
+    // player afterwards, so a refusal fails the whole claim.
     //
-    // The engine's `IsPlayerAttackable` tests the player *state word*
-    // (`g_player_state`, 0x009A5C62), which must be 5. `PlayerTakeDamage`
-    // never writes it — losing your last life does not make you unattackable;
-    // the continue sequence does, and this port has no continue. The port's
-    // stand-in for that function tests `g_player_lives`, so calling it here
-    // would stop every enemy attacking after two hits, which is a divergence
-    // rather than a fix. It goes in when there is a player state to test.
+    // This gate used to be left out on purpose, and the reason was good at the
+    // time: the port's `IsPlayerAttackable` tested `g_player_lives` alone, so
+    // wiring it here would have stopped every enemy attacking once a player
+    // was out of lives — a divergence rather than a fix. Two things have
+    // changed. `g_player_lives` floors at one, so that clause can no longer
+    // fail; and the function now tests the **scene state**, which is the
+    // clause that matters here — no enemy may claim while the follow camera or
+    // a scripted view-angle turn is driving.
     if (G.g_attack_permits[i] === -1) {
+      if (!IsPlayerAttackable(i)) return false;
       // Granted either way; off screen it also latches, so this actor is the
       // only one that may be attacking unseen.
       if (host && !ActorIsOnScreen(obj, host)) {

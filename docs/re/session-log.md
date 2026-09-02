@@ -8619,3 +8619,83 @@ two hours of work. Rebuilding it was cheap only because the edits had been
 applied by a script that was still on disk — which is now the habit worth
 keeping: **apply structural edits from a saved script, and commit before
 perturbing anything.**
+
+---
+
+## Session — the camera was not facing a wall, it was aimed at NaN
+
+`docs/PLAYER_HANGS.md` item 1 had a picture attached — stage 2 block 3, the
+viewport a flat olive wall, two zombies alive at 23 and 25 units that twenty
+shots a volley never touched — and a reading to go with it: the shot had run
+to the end of its path and retired, so the camera stopped where the rail ran
+out. That reading was wrong, and the picture is what made it plausible.
+
+The sidebar's camera group says it in four lines:
+
+```
+eye        -837.9, 6.8, -572.2      <- fine
+look at    NaN, NaN, NaN
+yaw        NaN° 0x0NAN
+tracking   locked on an actor
+```
+
+`g_cam_path_target` was fine too. So the rail was never the problem: the aim
+was, and a camera aimed at NaN draws whatever is in front of it.
+
+**The chain.** `SkeletonEmitNode` records bone 1's world position into
+`obj+0x100`; `SelectCameraLookAtTarget` (`FUN_00403050`) reads it;
+`TurnLookAtToward` (`FUN_00403C00`) eases onto it. One `undefined` read from a
+motion array at the bottom is a NaN in the camera at the top, four layers away,
+with nothing in between to complain. Every guard in `turn.ts` is a guard
+against a *degenerate* vector — zero length, coincident points — and none of
+them is a guard against NaN, which sails through `< 1e-4` and `Math.min`
+alike.
+
+**The fault.** `Poser.pose` had a second entrance path posing `obj.intro` —
+the spawn descriptor's `+0x04`/`+0x08`, which names the clip the entrance
+*will* play. Descriptor data. Permanent. `ZombieStateMotionCue21` reads it
+every time it runs, so nothing clears it and nothing can. The renderer drew the
+van jump-out for the actor's whole life, and the frame was clamped at the
+bottom only — `Math.max(0, Math.floor(t))` — so past the clip's 41 frames it
+indexed off the end of `root` and posed `undefined`:
+
+```
+apply at=0x1e00 state=3.2 f=45 frames=41 intro=923/0 motion=1022
+```
+
+Two states after the entrance handed over, the game walking it on clip 1022
+and the renderer still drawing 923, forty frames past the end.
+
+**The exe.** There is no second channel. `ZombieStateMotionCue21`
+(`FUN_004577F0`) sub 0 calls `ActorSetMotion` (`FUN_00411930`), which writes
+the clip to `obj+0x1B4` and zeroes the cursor at `obj+0x19C`; sub 2 hands over
+on `g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C`. The motion block holds
+the loop and the reaction and nothing else. `class30/play_cue.ts` had all of
+this right already — the renderer was simply not reading `obj.motion`. So the
+fix is a deletion.
+
+**The entrance still plays**, which is the thing to be careful about when
+deleting a branch called `intro`: it is real, it is `zom.bin` 923, and the
+zombies really do come out through the van's windscreen. It plays because the
+*state machine* puts it in `obj.motion`, which is where the engine puts it.
+`replay.mjs` shows the whole arc — `MotionCue/0` at 956, sub 0 sets 923, sub 1
+holds the delay, sub 2 plays it out, `AttackRun` at t=1.3s, which is 41 frames
+at 30 Hz.
+
+**What it bought.** Stage 2 goes from three unclearable rooms to two, and block
+3 — the one with the picture — now clears by shooting. Blocks 9 and 28 have
+finite aims and are a different fault.
+
+### Two things worth keeping
+
+**A picture is evidence of a symptom, not of a cause.** "The camera is parked
+facing a wall" was written from a screenshot and a transport bar reading
+`(static pose)`, and it sent the item's "where to start" at
+`CamStartPathPlayback` and `CameraRig.seat` — neither of which had anything to
+do with it. The number that mattered was three rows down in a panel that was
+collapsed by default.
+
+**Read the whole chain before instrumenting the middle of it.** The first
+perturbation I tried, to prove the NaN's origin, was in the camera. The NaN
+was four layers upstream in a renderer array index. What found it was a
+`Number.isFinite` check at the *write* rather than at the read.

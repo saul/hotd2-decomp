@@ -59,7 +59,7 @@ any.
 The branch countdown answers itself with the **lowest block number** so that one
 run takes the same route as the next; see item 9.
 
-### Stage 2 — reaches block 37 `(end → 7)`, 14145 frames, 157 instructions
+### Stage 2 — reaches block 37 `(end → 7)`, 13860 frames, 156 instructions
 
 Route: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 9 → 28 → 37.
 
@@ -67,19 +67,20 @@ Route: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 9 → 28 →
 column** — every block is entered on the same frame in every one. Item 8 is
 fixed; see it.
 
-Rooms that had to be cheated past — the same three every run. The wall-clock
+Rooms that had to be cheated past — the same two every run. The wall-clock
 tool cheated past **seven** on the same route (block 3 three times, then 5, 6,
-9 and 28) in 153 instructions against 157. Landing a whole volley on one exact
-frame, rather than smeared across however many the browser happened to run, is
-why four of them now clear:
+9 and 28) in 153 instructions. Landing a whole volley on one exact frame,
+rather than smeared across however many the browser happened to run, cleared
+four of them; **block 3 was the fifth, and item 1 is why** — the camera was
+aimed at a NaN, so nothing was in frame to shoot:
 
 | block | step/op | wait |
 |---|---|---|
-| 3 | 1 / 26 | `0x44 wait_enemies_alive` |
 | 9 | 6 / 5 | `0x44 wait_enemies_alive` |
 | 28 | 5 / 7 | `0x44 wait_enemies_alive` |
 
-Block 3's is the one with a picture: the viewport is a flat wall. See item 1.
+Both of these have a **finite** camera aim, so they are not item 1 over again.
+They are the next thing to read. `[open]`
 
 The route above is **not** the one this file recorded before (0 → 1 → 2 → 3 →
 30 → 5 → 6 → 17 → 18 → 19 → 20 → 35), and the difference is not the driven
@@ -176,40 +177,103 @@ about, because each turns a row that said nothing into a number:
 
 ---
 
-## 1. The camera is parked facing a wall, so the enemies cannot be shot
+## 1. The camera aimed at NaN — **fixed**, and block 3 clears
 
-**The biggest one, and the reason every cheated room above is cheated.**
+The tell was in the sidebar's camera group, and it is the whole answer:
 
-Both stages show it and the tell is the same: the transport bar says
-`(static pose)` and the frame the shots go into is not the frame the fight is
-in. It is intermittent on stage 1 and reliable on stage 2, which fits a camera
-that stops where its path ran out rather than one that is aimed wrongly.
-
-At stage 2 block 3 step 1 op 26 the two van zombies are alive at 23 and 25
-units, and twenty shots a volley never touch them. The transport bar reads
-`cp_st2[4] slot 59 frame 205 / 205 (static pose)` and the viewport is a flat
-olive wall. They are not in frame at all, so **a player could not clear this
-room either**. This is not the harness failing to aim.
-
-Reproduce:
-
-```sh
-node tools/shot.mjs --url '?stage=2&block=3&step=1&op=0' --out wall \
-  --click 'label[title^="Click to shoot"] input' --press Space --settle 8000
+```
+eye        -837.9, 6.8, -572.2
+look at    NaN, NaN, NaN
+yaw        NaN° 0x0NAN
+tracking   locked on an actor
 ```
 
-Where to start: the shot has run to the end of its path and retired, and
-`CameraRig.seat` then stops advancing the block (`force || !cam.done ||
-!trackEnabled`). Whether the engine leaves a retired shot where it is, or hands
-over to something the port does not have, is `[open]` — read
-`CamStartPathPlayback` and `CameraTrackEnemiesTick` before changing anything.
-`docs/PLAYER_ARCHITECTURE.md` has the camera's two halves and why they sit
-either side of the game phase.
+The eye is fine and the path's own target is fine (`-763.3, 6.8, -581.6`).
+What is NaN is `g_camera_lookat_target`, which is the point the fight is
+supposed to be framed around — so the shot was never "parked facing a wall" in
+the sense of a path that ran out. **It was aimed at nothing**, and a camera
+aimed at nothing draws whatever happens to be in front of it. The flat olive
+wall was the symptom, not the fault.
 
-Stage 1's block 4 is the same shape with a different picture — the street
-renders perfectly and the two `zstin` are simply outside it, one of them six
-units from the camera. Worth doing that one first: it is smaller, and a scene
-that draws correctly rules out half the possible causes.
+### Where it came from
+
+`SkeletonEmitNode` records bone 1's world position into `obj+0x100`;
+`SelectCameraLookAtTarget` (`FUN_00403050`) reads it; `TurnLookAtToward`
+(`FUN_00403C00`) eases the aim onto it. One `undefined` read at the bottom of
+that chain is a NaN in the camera at the top of it, and nothing in between
+says a word.
+
+The `undefined` was in `Poser.pose`. It had a **second entrance path**:
+
+```ts
+if (inst.a.intro) {
+  const im = inst.type.motions[String(inst.a.intro.motion)];
+  const t = inst.a.clock * im.fps - inst.a.intro.delay;
+  this.apply(inst, im, Math.max(0, Math.floor(t)), false);   // no upper clamp
+  return;
+}
+```
+
+`obj.intro` is not a play state. It is the spawn **descriptor's** `+0x04` and
+`+0x08` — which clip the entrance will play and how long it holds first — read
+by `ZombieStateMotionCue21` every time it runs, and therefore kept for the
+actor's whole life. Nothing clears it because nothing can. So the renderer drew
+the van jump-out for ever, and `Math.max(0, ...)` clamps only the bottom: past
+the clip's 41 frames it indexed off the end of `root` and posed `undefined`.
+
+Caught in the act, forty frames past the end and two states after the
+entrance had handed over:
+
+```
+apply at=0x1e00 state=3.2 f=45 frames=41 intro=923/0 motion=1022
+```
+
+The game had it walking on clip 1022 while the renderer drew clip 923.
+
+### What the engine does
+
+**There is no second channel.** The entrance is real — the van jump-out is
+`zom.bin` 923 and the two stage-2 zombies do come out through the windscreen —
+but the engine plays it by putting it in the ordinary motion.
+`ZombieStateMotionCue21` (`FUN_004577F0`) sub 0 calls `ActorSetMotion`
+(`FUN_00411930`), which writes the clip id to `obj+0x1B4` and zeroes the play
+cursor at `obj+0x19C`; sub 2 hands over when
+`g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C`. The motion block holds the
+loop and the reaction, and that is all it holds.
+
+`class30/play_cue.ts` already ported every line of that correctly. The renderer
+simply was not reading it — so the fix is to delete the invented path, not to
+add anything. `replay.mjs` shows the entrance running exactly as it should
+once it does:
+
+```
+t=0.0s  MotionCue/0   motion=956     <- the spawn's clip, before sub 0 runs
+t=0.2s  MotionCue/1   motion=923     <- ActorSetMotion put the cue in
+t=0.5s  MotionCue/2   motion=923     <- playing it out
+t=1.3s  AttackRun/0   motion=923     <- handed over at the end of the clip
+```
+
+### The check
+
+`web/test/pose.test.ts` (`npm run test:pose`) drives every path through the
+poser 600 frames past the end of every clip and asserts the arithmetic stays
+finite, then asserts the two halves of this bug directly: an actor whose
+descriptor names a cue clip poses `obj.motion` and not the descriptor's, **and
+the entrance is still drawn** when the state machine has put it in
+`obj.motion`. Watched failing on the old code: the first two go red, the third
+stays green, which is the shape a fix that removes an invention should have.
+
+### What is left
+
+Stage 2 goes from **three** rooms that could not be cleared to **two**, and
+block 3 — the one with the picture — now clears by shooting. Blocks 9 and 28
+still do not, and they are **not** this fault: their aim is finite
+(`slot 68 frame 51 / 260` and `slot 98 frame 766 / 870`, both with real
+look-at points). Something else puts those enemies where the shots cannot
+reach, and it wants its own investigation. `[open]`
+
+Stage 1's block 4, the other case this item used to carry, now clears on its
+own — see item 8.
 
 ## 2. An actor the script stopped placing kept its bookkeeping — **fixed**
 

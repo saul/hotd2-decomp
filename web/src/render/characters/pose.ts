@@ -42,22 +42,26 @@ pose(inst: Instance): void {
       return;
     }
   }
-  // The entrance, if there is one: hold its first frame for the delay, play
-  // it once, then hand over to the looping motion. `FUN_004577F0` waits for
-  // `obj+0x19C` to reach the motion's length before changing state, so the
-  // hand-over is at the end of the clip and not on a timer.
-  let m = inst.type.motions[String(inst.a.motion)];
-  let f = 0;
-  if (inst.a.intro) {
-    const im = inst.type.motions[String(inst.a.intro.motion)];
-    const t = inst.a.clock * im.fps - inst.a.intro.delay;
-    // `ActorAdvanceMotion` clears the intro when it is over; until then this
-    // draws it.
-    this.apply(inst, im, Math.max(0, Math.floor(t)), false);
-    return;
-  }
+  // **The entrance is not a second channel.** The van jump-out is real and it
+  // is `zom.bin` 923, but the engine plays it by putting it in the ordinary
+  // motion: `ZombieStateMotionCue21` (`FUN_004577F0`) sub 0 calls
+  // `ActorSetMotion` (`FUN_00411930`), which writes the clip to `obj+0x1B4`
+  // and zeroes the play cursor at `obj+0x19C`, and the state hands over when
+  // `g_motion_play_length[motion] - 1 <= obj+0x19C`. There is no third track:
+  // the engine's motion block holds the loop and the reaction, and that is
+  // all.
+  //
+  // This used to pose `obj.intro` instead, which is the **descriptor's**
+  // `+0x04`/`+0x08` — permanent spawn data describing which clip the entrance
+  // *will* play. Nothing clears it because nothing can, so the renderer drew
+  // the jump for the actor's whole life while the game walked it on another
+  // clip, and past the clip's 41 frames it indexed off the end of `root` and
+  // posed `undefined`. That is a NaN bone, so a NaN `obj+0x100`, so a NaN
+  // `g_camera_lookat_target`: the aim the fight is supposed to follow, and
+  // three of stage 2's rooms could not be cleared because of it.
+  const m = inst.type.motions[String(inst.a.motion)];
   if (!m || m.frames <= 0) return;
-  f = Math.floor(inst.a.clock * m.fps) % m.frames;
+  const f = Math.floor(inst.a.clock * m.fps) % m.frames;
 
   // A strike or lunge the director started: it owns the body, and it reports
   // its own play position back so the hit can land on its frame.

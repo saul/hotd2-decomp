@@ -5,9 +5,25 @@
  * is a thing that looks exactly like a slow bit until you have stared at it for
  * a minute. This drives one instead: it reads the walker's address out of the
  * HUD, and **an address that has not moved is the whole signal.** This is an
- * arcade game — no authored sequence in it is fifteen seconds long — so
- * fifteen seconds on one instruction is a hang, and the tool says which
- * instruction and what it was waiting for.
+ * arcade game — no authored sequence in it is fifteen seconds long — so fifteen
+ * seconds on one instruction is a hang, and the tool says which instruction and
+ * what it was waiting for.
+ *
+ * ## Everything here is counted in frames, not milliseconds
+ *
+ * It used to poll every 250 ms and start shooting after N *milliseconds* of no
+ * address movement, which meant the shots landed on a different game frame in
+ * every run — and the port takes its time straight off the wall clock, so the
+ * same stage on the same seed played four different ways over five runs
+ * (`docs/PLAYER_HANGS.md` item 8). A tool that cannot compare one playthrough
+ * with the previous one is not worth much.
+ *
+ * So it runs the page under `?drive=1` — the seam in `web/src/app/harness.ts`
+ * — which hands it the game clock. rAF keeps running and the renderer keeps
+ * drawing; this is the real page, the real UI and the real shot path. But game
+ * time advances only when this asks for it, and only in whole 60 Hz frames
+ * with the walker and the port in step. **Fifteen seconds is now nine hundred
+ * frames**, and it is nine hundred frames whatever the browser was doing.
  *
  * It starts each stage at its **entry block** and never deep-links to an
  * address: a seek is its own rebuild path with its own bugs, and a run that
@@ -20,7 +36,9 @@
  * spawns out from under them. So shooting goes on, and when the script is
  * parked on an **enemy** gate this fires a volley through the real shot path:
  * pointer events on `#viewport`, `Shooting.fire`, the ray, the per-bone
- * spheres, `ResolveHit`. Nothing is faked.
+ * spheres, `ResolveHit`. Nothing is faked. Under the driven clock the game is
+ * stopped between two `advance` calls, so the whole volley lands on one exact
+ * frame rather than smeared across however many the browser happened to run.
  *
  * A volley is a grid because the harness cannot see where the actors are: the
  * projection carries no screen positions and inventing a seam to publish them
@@ -38,7 +56,7 @@
  * knowing on its own, so it is **reported** rather than silently papered over.
  *
  *   node tools/playthrough.mjs --stage 2
- *   node tools/playthrough.mjs --stage 2 --headless --hang 20
+ *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
  *
  * Exit status is 0 only if the stage reached an end block.
  */
@@ -54,15 +72,27 @@ const opt = (n, d = null) => {
 const flag = (n) => args.includes(`--${n}`);
 
 const stage = opt("stage", "2");
-/** Seconds on one instruction before the tool starts shooting at the problem. */
-const PATIENCE = Number(opt("patience", "3")) * 1000;
-/** Seconds on one instruction before it is a hang. */
-const HANG = Number(opt("hang", "15")) * 1000;
-/** Seconds of shooting at one gate before falling back to the debug clear. */
-const SHOOT_FOR = Number(opt("shoot-for", "8")) * 1000;
-/** Wall-clock cap for the whole run. */
-const BUDGET = Number(opt("budget", "600")) * 1000;
-const POLL = 250;
+const seed = opt("seed", "1");
+/** Game frames on one instruction before the tool starts shooting. 3s. */
+const PATIENCE = Number(opt("patience", "180"));
+/** Game frames on one instruction before it is a hang. 15s, and see above. */
+const HANG = Number(opt("hang", "900"));
+/** Game frames of shooting at one gate before falling back to the clear. 8s. */
+const SHOOT_FOR = Number(opt("shoot-for", "480"));
+/** Game frames for the whole run. Ten minutes of game time. */
+const BUDGET = Number(opt("budget", "36000"));
+/** Game frames run between two reads of the HUD. A quarter of a second. */
+const POLL = Number(opt("poll", "15"));
+/**
+ * A wall-clock stop, and **not** a claim about the game.
+ *
+ * Every deadline above is in frames because that is what the game is measured
+ * in. This one is here for the case where the page stops answering at all —
+ * a throw in the frame loop, a lost context — because then no frame will ever
+ * be run and a frame budget can never be reached. It is reported as what it
+ * is: the browser gave up, not the stage.
+ */
+const WALL_STOP = Number(opt("wall-stop", "1800")) * 1000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -97,9 +127,7 @@ async function readState(page) {
 }
 
 /** One volley: pointer events across the frame, through the real shot path. */
-async function volley(page) {
-  const box = await page.locator("#viewport").boundingBox();
-  if (!box) return;
+async function volley(page, box) {
   const COLS = 5, ROWS = 4;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -112,21 +140,36 @@ async function volley(page) {
 
 const started = Date.now();
 const { page, state, close } = await openPlayer({
-  url: `?stage=${stage}`, size: opt("size", "1280x800"),
+  // `drive=1` is the whole of what makes this comparable between runs; `seed`
+  // is the other half, and it was already a URL flag.
+  url: `?stage=${stage}&drive=1&seed=${seed}`, size: opt("size", "1280x800"),
   headless: flag("headless"), quiet: true,
 });
 
 let exit = 1;
 try {
   await waitForLoad(page);
+  const version = await page.evaluate(
+    () => globalThis.__hotd2Drive?.version ?? null);
+  if (version === null) {
+    throw new Error("the page has no drive seam — is ?drive=1 wired up? "
+                    + "see web/src/app/harness.ts");
+  }
   await enableShooting(page);
   await page.keyboard.press("Space");                 // play
+  const box = await page.locator("#viewport").boundingBox();
+  if (!box) throw new Error("#viewport has no box");
+
+  /** Run n whole game frames. The only thing in this file that advances time. */
+  const advance = (n) =>
+    page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
 
   let addr = null;
-  let addrAt = Date.now();
+  /** The frame the current address was first seen on. */
+  let addrAt = 0;
+  let frames = 0;
   let volleys = 0;
   let killedHere = false;
-  let killed = 0;
   /** Every gate the shots could not clear — the rooms that are not playable. */
   const unclearable = [];
   let steps = 0;
@@ -137,7 +180,7 @@ try {
     const here = `${s.block} ${s.step}`;
     if (here !== addr) {
       addr = here;
-      addrAt = Date.now();
+      addrAt = frames;
       volleys = 0;
       killedHere = false;
       steps += 1;
@@ -147,13 +190,16 @@ try {
       if (blk !== last) {
         last = blk;
         const t = ((Date.now() - started) / 1000).toFixed(0);
-        console.log(`  ${t}s  block ${s.block}  ${s.spawns}  lives ${s.lives}`);
+        console.log(`  f${String(frames).padStart(6)}  ${t}s  `
+                    + `block ${s.block}  ${s.spawns}  lives ${s.lives}`);
       }
     }
 
     if (/\(end/.test(s.block)) {
       const t = ((Date.now() - started) / 1000).toFixed(1);
-      console.log(`\nreached an end block after ${t}s, ${steps} instructions`);
+      console.log(`\nreached an end block after ${frames} game frames `
+                  + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `
+                  + `wall clock), ${steps} instructions`);
       if (unclearable.length) {
         // **Reaching the end block is not the same as the stage being
         // playable.** Every line here is a room whose enemies the shots could
@@ -167,15 +213,15 @@ try {
     }
 
     // Take every skip the script offers, which is what an arcade player does
-    // and what keeps a stage inside a sane wall clock: stage 1 opens with
-    // nearly a minute of cathedral before the first zombie. `Enter` is the
-    // player's own binding for it, and a skippable region walks the whole
-    // cutscene rather than one wait.
+    // and what keeps a stage inside a sane clock: stage 1 opens with nearly a
+    // minute of cathedral before the first zombie. `Enter` is the player's own
+    // binding for it, and a skippable region walks the whole cutscene rather
+    // than one wait.
     if (s.skip.startsWith("offered")) {
       await page.keyboard.press("Enter");
     }
 
-    const stalled = Date.now() - addrAt;
+    const stalled = frames - addrAt;
     if (stalled > HANG) {
       console.log(`\nHUNG at block ${s.block} step/op ${s.step}`);
       if (s.policy === "civilians") {
@@ -183,8 +229,9 @@ try {
                     + " you do not shoot civilians in this game, so one that"
                     + " does not come down on its own is the bug.");
       }
-      console.log(`  ${stalled / 1000}s on one instruction, and no authored `
-                  + `sequence in this game is that long.`);
+      console.log(`  ${stalled} game frames (${(stalled / 60).toFixed(1)}s) on `
+                  + `one instruction, and no authored sequence in this game is `
+                  + `that long.`);
       for (const line of s.waitText.split("\n").filter((l) => l.trim()
                                                       && l.trim() !== "box")) {
         console.log(`    ${line.trim()}`);
@@ -196,6 +243,8 @@ try {
       const holders = [...s.waitText.matchAll(/0x[0-9A-F]+/g)].map((m) => m[0]);
       if (holders.length) {
         await page.click("#panel-actors summary").catch(() => {});
+        // Wall time, and it is not a game deadline: the panel is React's and
+        // this is waiting for it to be drawn, not for the game to do anything.
         await sleep(400);
         const actors = await page.locator("#panel-actors").innerText()
           .catch(() => "");
@@ -216,15 +265,18 @@ try {
     }
 
     if (stalled > PATIENCE && s.policy === "enemies") {
-      // Time, not volley count: a volley is twenty round trips to the browser
-      // and takes about a second, so counting them made the fallback land
-      // after the hang deadline rather than before it.
+      // Frames, not volley count and not wall time. A volley is twenty round
+      // trips to the browser, which used to take about a second and made the
+      // fallback land after the hang deadline rather than before it; under the
+      // driven clock it takes **no game time at all**, because the game is
+      // stopped between two `advance` calls. So the whole volley lands on one
+      // frame, and the deadline it is measured against is a count of frames
+      // this tool chose to run.
       if (stalled < SHOOT_FOR) {
         volleys += 1;
-        await volley(page);
+        await volley(page, box);
       } else if (!killedHere) {
         killedHere = true;
-        killed += 1;
         unclearable.push(`${s.block.split(" ")[0]} step/op ${s.step}`
                          + `  ${s.sub.split("\n").find((l) => l.startsWith("0x"))
                                  ?? s.policy}`);
@@ -237,17 +289,24 @@ try {
           + `-${s.step.replace(/\D+/g, "_")}.png`) });
         console.log(`      enemy gate at block ${s.block} ${s.step} did `
                     + `not clear in ${volleys} volleys over `
-                    + `${(SHOOT_FOR / 1000).toFixed(0)}s — the enemies are `
+                    + `${SHOOT_FOR - PATIENCE} frames — the enemies are `
                     + `somewhere the shots cannot reach. Using the debug clear.`);
         await page.click('button[title^="Kill every live actor"]');
       }
     }
 
-    if (Date.now() - started > BUDGET) {
-      console.log(`\nout of budget after ${BUDGET / 1000}s at block ${s.block}`);
+    if (frames > BUDGET) {
+      console.log(`\nout of budget after ${BUDGET} game frames at block `
+                  + `${s.block}`);
       break;
     }
-    await sleep(POLL);
+    if (Date.now() - started > WALL_STOP) {
+      console.log(`\nthe browser stopped answering: ${frames} game frames in `
+                  + `${(WALL_STOP / 1000).toFixed(0)}s of wall clock. This is `
+                  + `not a hang in the stage — the page is not running.`);
+      break;
+    }
+    frames = await advance(POLL);
   }
   if (state.faults) console.log(`\n${state.faults} console errors on the way`);
 } finally {

@@ -42,9 +42,22 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // draws it. The callback stays because the walker's contract has one.
     onBranch: () => {},
     playSound: (id) => p.bgm.play(id),
+    // `g_enemies_alive` — the engine's own counter, stepped by
+    // `CountEnemyZombieIn` / `CountEnemyThrowerIn` and the four retires in
+    // `game/combat/counts.ts`, exactly as `g_civilians_alive` below is.
+    //
+    // It used to be `chars.aliveCount`, which recounts
+    // `instances.filter(visible && !dead && isEnemy)` in the **renderer**.
+    // That is the derived count `counts.ts` exists to explain is not the same
+    // quantity, and three things followed from it: an actor hidden for one
+    // frame left the gate's count, a class 0x31 whose death is a four-state
+    // chain left it on the first frame of the fall while it was still on
+    // screen attacking, and an enemy class the port cannot run at all — 0x43
+    // and 0x51 are in `ENEMY_CLASSES` — was counted and could never die.
+    //
     // Null unless Shoot is on: only then is there anything that can make
     // the count fall, so only then is the gate a real condition.
-    aliveEnemies: () => p.shooting.isEnabled ? p.chars.aliveCount : null,
+    aliveEnemies: () => p.shooting.isEnabled ? G.g_enemies_alive : null,
     // `g_civilians_alive` is maintained by the class-0x10 port itself --
     // `CivilianInit` raises it, op 0x2C's `LeaveCountNow` and the removal
     // path drop it -- so this is the engine's own counter, not a restatement

@@ -299,21 +299,51 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
  * is the difference between the two sets: a bullet is stopped by scenery a body
  * walks through.
  *
- * The depth is `radius - sqrt(distance²)` — how far the sphere must move along
- * `g_coli_hit_normal` to be exactly tangent — and its callers apply **all** of
- * it. The `depth * 0.1` an earlier note here mentioned belongs to a different
- * hook: `ColiTestSphereAgainstActors`, the actor-versus-actor test, which also
- * pushes on X and Z only.
+ * **The test is sign-blind, and that is the whole of it.** `ColiSphereVsMesh`
+ * (`FUN_004AAF60`) compares `distance²` against `radius²` and never asks which
+ * side of the quad the centre is on — `local_38 = fVar6² / |n|²`, with no test
+ * on `fVar6`. What the sign decides is what the *caller* does with it:
+ *
+ * ```c
+ * g_coli_hit_depth = fVar6;                              // signed, in the mesh test
+ * ...
+ * if (0.0 <= g_coli_hit_depth) g_coli_hit_depth = radius - sqrt(dist_sq);
+ * else                         g_coli_hit_depth = sqrt(dist_sq) + radius;
+ * ```
+ *
+ * So a body whose centre has gone **past** the surface is pushed `radius +
+ * distance` — all the way back out — rather than not at all. This port
+ * rejected that case outright (`if (d < 0) continue`), which is exactly a
+ * thrower standing well inside a wall with nothing objecting: its origin was
+ * outside, its sphere centre was not.
+ *
+ * **The direction does not change with the side, and that is the point.** In
+ * the face case — the centre projects inside the quad — `ColiSphereVsMesh`
+ * falls through to its store with `fVar1`, `param_5` and `local_48` still
+ * holding `nx, ny, nz` as they were loaded at the top of the quad loop, so the
+ * normal is the quad's own. (The `centre − closest` form the same three
+ * variables carry is the *edge* branches', which this does not model.) So a
+ * body that has got behind a wall is pushed `radius + distance` **along the
+ * wall's outward normal** — back out the front and left exactly tangent —
+ * rather than shoved further in. Reading the store without tracing which
+ * branch reached it says the opposite, and the opposite drives it deeper.
+ *
+ * Nearest wins, not deepest: `ColiSphereVsMesh` keeps the candidate with the
+ * smallest `dist²` and `ColiSelectNearestHitCandidate` does the same across
+ * meshes. Those agree while every hit is in front and diverge the moment one
+ * is behind, because then a *larger* distance is a *larger* depth.
  *
  * [diverges] The engine clamps to the nearest point on an *edge* when the
  * centre projects outside the quad and reports `centre - that point` as the
  * normal; this takes the face case alone, which is exact for a sphere resting
- * on a face and an approximation near an edge.
+ * on a face and an approximation near an edge. It is also the one case that
+ * still gets no push at all: a centre behind a wall whose projection has left
+ * the quad. `[open]`
  */
 export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
                                              cz: number, r: number): boolean {
   G.g_coli_hit_surface = 0;
-  let best = -Infinity;
+  let best = Infinity;
   let hit = false;
   for (const b of blobsOf(G.g_coli_full_set)) {
     if (cx + r < b.min[0] || b.max[0] < cx - r) continue;
@@ -322,8 +352,13 @@ export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
     for (let i = 0; i < b.n; i++) {
       const p = i * 4;
       const nx = b.plane[p], ny = b.plane[p + 1], nz = b.plane[p + 2];
-      const d = nx * cx + ny * cy + nz * cz + b.plane[p + 3];
-      if (d < 0 || d >= r) continue;
+      // `fVar6`, the **signed** plane distance, unnormalised — the engine
+      // divides by `|n|²` rather than assuming a unit normal.
+      const s = nx * cx + ny * cy + nz * cz + b.plane[p + 3];
+      const nl2 = nx * nx + ny * ny + nz * nz;
+      if (nl2 === 0) continue;
+      const distSq = (s * s) / nl2;
+      if (distSq > r * r) continue;
       // ...and the centre must project inside the quad, or a sphere beside a
       // wall would be pushed by the plane the wall lies in.
       const [u, v] = PLANE_AXES[b.axis[i]] ?? PLANE_AXES[1];
@@ -342,13 +377,17 @@ export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
         else if (s !== sign) inside = false;
       }
       if (!inside) continue;
-      const depth = r - d;
-      if (depth <= best) continue;
-      best = depth;
+      if (distSq >= best) continue;
+      best = distSq;
       hit = true;
-      G.g_coli_hit_normal = [nx, ny, nz];
+      const dist = Math.sqrt(distSq);
+      // `radius - dist` in front of the surface, `radius + dist` behind it.
+      G.g_coli_hit_depth = s >= 0 ? r - dist : r + dist;
+      // The quad's own normal, normalised as `ColiTestSphereAgainstFullSet`
+      // does before it returns. Unsigned: the side is already in the depth.
+      const k = 1 / Math.sqrt(nl2);
+      G.g_coli_hit_normal = [nx * k, ny * k, nz * k];
       G.g_coli_hit_surface = b.surface[i];
-      G.g_coli_hit_depth = depth;
     }
   }
   return hit;

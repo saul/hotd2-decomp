@@ -41,10 +41,13 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
-import { ActorFlag, ZombieFlag2, type Actor } from "../src/game/actor";
+import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor }
+  from "../src/game/actor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
-import { ReleaseAttackSlot, TryClaimAttackSlot }
-  from "../src/game/combat/permits";
+import {
+  ReleaseAttackSlot, ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot,
+  TryClaimAttackSlot,
+} from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount, UNCOUNTED_CHAR_TYPE,
@@ -4384,6 +4387,220 @@ console.log("\nrain: DrawRainParticles' simulation half");
           const a = HingePose({ side }, slam);
           return Math.abs(a.rx) < 0x10000 && Math.abs(a.ry) < 0x10000;
         }));
+}
+
+// ---------------------------------------------------------------------------
+// class 0x31: the permit it gives back, the body it has, and the death it dies
+// ---------------------------------------------------------------------------
+{
+  console.log("\nclass 0x31, what stopped the throwers working:");
+
+  // **The permit latch, and the wrong function.** `obj+0x136C` carries the
+  // off-screen latch in bit 0x8000 for a thrower and 0x20000 for a zombie —
+  // one word, two classes, two bits — so `ReleaseAttackSlot` (`FUN_00456520`)
+  // called on a thrower frees the permit *array* and leaves
+  // `g_attack_committed` raised. `TryClaimAttackSlot` reads that latch on its
+  // first line, so after one off-screen pounce nothing in the scene could ever
+  // attack again: every thrower parked in `WaitForPermit` wanting a permit
+  // that nobody held.
+  const offscreen = {
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = 900; out.y = 0; out.z = 40;      // off the side of a 640 frame
+      return true;
+    },
+  };
+  {
+    const z = thrower(ThrowerState.StandAndDecide);
+    check("a thrower off the side of the frame takes a permit and latches",
+          ThrowerTryClaimAttackSlot(z, offscreen)
+          && G.g_attack_committed === 1
+          && (z.flags2 & ThrowerFlag.OffScreenPermit) !== 0,
+          `latch ${G.g_attack_committed} flags2 ${z.flags2.toString(16)}`);
+    // The zombie's release reads the wrong bit — it is what the port called.
+    ReleaseAttackSlot(z);
+    check("...and the class-0x30 release cannot lift it",
+          G.g_attack_committed === 1, `latch ${G.g_attack_committed}`);
+    ThrowerReleaseAttackPermit(z);
+    check("only `ThrowerReleaseAttackPermit` does",
+          G.g_attack_committed === 0
+          && (z.flags2 & ThrowerFlag.OffScreenPermit) === 0);
+  }
+
+  // The same thing end to end, through the state machine: pounce, leap aside,
+  // and the next claim must succeed. This is the reported symptom exactly —
+  // "after their first attack they stop attacking and just wait".
+  {
+    const rng = new Rng(5);
+    const events = new Events();
+    const z = thrower(ThrowerState.StandAndDecide);
+    T.coli = { files: ["test"], blobs: { floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["floor"];
+    z.pos = vec3(0, 0, 20);                    // inside CLOSE_RANGE, so state 8
+    let pounced = false;
+    for (let i = 0; i < 1200; i++) {
+      GameUpdate(EYE, 1 / 60, offscreen, rng, events);
+      if (z.state === ThrowerState.Pounce) pounced = true;
+      if (pounced && z.state === ThrowerState.StandAndDecide) break;
+    }
+    check("a thrower that has pounced once can claim again",
+          pounced && G.g_attack_committed === 0
+          && ThrowerTryClaimAttackSlot(z, offscreen),
+          `pounced ${pounced} latch ${G.g_attack_committed}`
+          + ` state ${z.state} permit ${z.attackPermit}`);
+    ThrowerReleaseAttackPermit(z);
+  }
+
+  // **The body sphere.** `ThrowerPushOutOfWorld` (`FUN_00449D40`) is the hook
+  // `EnemyThrowerInit` installs at `obj+0x12F0`, and only its third job — the
+  // surface snap — used to run. So a thrower was tested against the world at
+  // its origin and stood a whole radius inside a wall.
+  {
+    const rng = new Rng(7);
+    const events = new Events();
+    const z = thrower(ThrowerState.StandAndDecide);
+    check("a thrower is born colliding, and with a radius",
+          (z.flags2 & ThrowerFlag.CollideWorld) !== 0
+          && (z.flags2 & ThrowerFlag.CollideActors) !== 0
+          && z.bodyRadius === 4,
+          `flags2 ${z.flags2.toString(16)} r ${z.bodyRadius}`);
+
+    T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["wall", "floor"];
+    // **The reported symptom, exactly.** The wall's solid side is x > 30, so
+    // an origin at x = 28 is legally outside it — and a four-unit body sphere
+    // is two units *inside* it. Nothing measured that, so the model stood in
+    // the wall.
+    z.pos = vec3(28, 0, 45);
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    check("and a body sphere inside a wall its origin is clear of is pushed out",
+          z.pos.x <= 26 + 1e-6, `x ${z.pos.x.toFixed(2)}`);
+    // The sphere is the actor lifted by 1.4 radii, not by a constant: that is
+    // `FUN_00449E80`'s own literal and it is what makes the body, rather than
+    // the feet, the thing the wall pushes.
+    check("the sphere sits 1.4 radii above a grounded thrower",
+          Math.abs(z.camPoint.y - (z.pos.y + z.bodyRadius * 1.4)) < 1e-6,
+          `${z.camPoint.y} vs ${z.pos.y}`);
+  }
+
+  // **The order.** The hook runs *after* the state, because every state here
+  // writes `obj.pos` outright — a push applied first is overwritten before
+  // anything draws it. `LeapToPoint` is the sharpest case: its last frame
+  // snaps the actor onto the descriptor's named point, so if that point is
+  // inside a wall the push is the only thing between it and standing there.
+  {
+    const rng = new Rng(11);
+    const events = new Events();
+    // After `thrower()`, never before: it calls `SetGameTables(CHARS31)` with
+    // no collision, which clears `T.coli`.
+    const z = thrower(ThrowerState.LeapToPoint, {
+      // Two units past the wall's plane at x = 30, so the body is inside it.
+      leap: { dest: [28, 0, 45], frames: 4 },
+    });
+    T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["wall", "floor"];
+    z.pos = vec3(0, 0, 45);
+    for (let i = 0; i < 10; i++) GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    check("a state that writes `pos` outright is still pushed clear after it",
+          z.state === ThrowerState.StandAndDecide && z.pos.x <= 26 + 1e-6,
+          `state ${z.state} x ${z.pos.x.toFixed(2)}`);
+  }
+
+  // **Behind the surface.** `ColiSphereVsMesh` compares `distance²` against
+  // `radius²` and never asks which side the centre is on; the caller turns a
+  // negative plane distance into `radius + distance`, which puts a body that
+  // has got through a wall back out the front, exactly tangent. The port
+  // rejected the case (`if (d < 0) continue`), so a body far enough in was not
+  // pushed at all — which is "quite far into the wall".
+  {
+    ResetGameGlobals();
+    T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["wall", "floor"];
+    // The wall's outward normal is -x, so the solid side is x > 30.
+    check("a sphere in front of a wall is pushed to tangent",
+          ColiTestSphereAgainstFullSet(28, 5.6, 45, 4)
+          && Math.abs(G.g_coli_hit_depth - 2) < 1e-6
+          && Math.abs((G.g_coli_hit_normal[0] ?? 0) + 1) < 1e-6,
+          `depth ${G.g_coli_hit_depth} n ${G.g_coli_hit_normal.join(",")}`);
+    check("a sphere whose centre is *behind* it is a hit too",
+          ColiTestSphereAgainstFullSet(33, 5.6, 45, 4),
+          "no hit");
+    // 3 behind + 4 radius = 7, along the same outward normal: 33 - 7 = 26,
+    // which is four units clear on the walkable side.
+    check("...and its depth carries the side, not its normal",
+          Math.abs(G.g_coli_hit_depth - 7) < 1e-6
+          && Math.abs((G.g_coli_hit_normal[0] ?? 0) + 1) < 1e-6,
+          `depth ${G.g_coli_hit_depth} n ${G.g_coli_hit_normal.join(",")}`);
+    check("so one push lands it exactly tangent, on the outside",
+          Math.abs((33 + (G.g_coli_hit_normal[0] ?? 0) * G.g_coli_hit_depth) - 26)
+          < 1e-6);
+  }
+
+  // **On the wall.** `ThrowerSnapToSurface` calls `ThrowerFindSurfaceUnderfoot`
+  // (`FUN_0044C640`), not `TraceActorSurfaceContactPoint` (`FUN_0044C370`) —
+  // two different routines, and the port had been calling the second for the
+  // first. The one that matters re-places a clinging actor **6.5 units off**
+  // the surface it found; the other returns the hit itself. With the origin in
+  // the wall plane and the sphere centred on it — a wall stance leaves y alone
+  // — half the actor is inside the geometry, and the push cannot help because
+  // this runs after it.
+  {
+    const rng = new Rng(13);
+    const events = new Events();
+    const z = thrower(ThrowerState.StandAndDecide);
+    T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["wall", "floor"];
+    // Clinging to the wall at x = 30, facing along -z so the cardinal puts the
+    // probe across the x axis.
+    z.flags2 |= ThrowerFlag.OffGround | ThrowerFlag.WallA;
+    z.yaw = 0;
+    z.pos = vec3(29.5, 12, 45);
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    const off = 30 - z.pos.x;
+    check("a thrower on a wall stands 6.5 units off it, not in it",
+          Math.abs(off - 6.5) < 1e-3, `${off.toFixed(3)} off the wall`);
+    // ...and that is enough for the body to be clear: the sphere is centred on
+    // the actor's own y for a wall stance, so on the plane it would be half in.
+    check("...which is what puts its body outside the geometry",
+          !ColiTestSphereAgainstFullSet(z.camPoint.x, z.camPoint.y,
+                                        z.camPoint.z, z.bodyRadius),
+          `depth ${G.g_coli_hit_depth}`);
+    check("and a wall stance leaves the sphere level with the actor",
+          Math.abs(z.camPoint.y - z.pos.y) < 1e-6,
+          `${z.camPoint.y} vs ${z.pos.y}`);
+  }
+
+  // **The Kill button.** `ActorKillAll` sets `dead` and `ActorFlag.Dead`, and
+  // class 0x31's death chain is entered by `ThrowerOnShot` reading
+  // `pendingHit` — which nothing was writing. So the button left a thrower
+  // flagged dead and still pouncing at you, while the gate, which was counting
+  // the renderer's instances rather than `g_enemies_alive`, opened anyway.
+  {
+    const rng = new Rng(9);
+    const events = new Events();
+    const z = thrower(ThrowerState.StandAndDecide);
+    T.coli = { files: ["test"], blobs: { floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["floor"];
+    const before = G.g_enemies_alive;
+    check("one thrower is one enemy alive", before === 1, `${before}`);
+
+    ActorKillAll(0, rng);
+    check("the kill leaves the hit its death chain reads",
+          z.dead && z.pendingHit !== null,
+          `dead ${z.dead} hit ${JSON.stringify(z.pendingHit)}`);
+    // `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) runs on the first frame of
+    // the fall, not when the body settles: the room clears when you land the
+    // shot.
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    check("...and it leaves `g_enemies_alive` on the first frame of the fall",
+          G.g_enemies_alive === 0 && z.state === ThrowerState.FallAndLand,
+          `alive ${G.g_enemies_alive} state ${z.state}`);
+
+    // It must not leave twice, however many of the four fall states run.
+    for (let i = 0; i < 600; i++) GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    check("and only once, whatever the rest of the fall does",
+          G.g_enemies_alive === 0, `alive ${G.g_enemies_alive}`);
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

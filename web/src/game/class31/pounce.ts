@@ -16,7 +16,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
-import { ReleaseAttackSlot } from "../combat/permits";
+import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ColiTraceSegmentAllSets } from "../coli";
 import { G } from "../globals";
 import type { GameHost } from "../host";
@@ -159,7 +159,7 @@ export function ThrowerStateLeapAside(obj: Actor, eye: Vec3, dt: number,
     if (ActorArcStep(obj, 1, dt)) return;
     obj.sinceLanding = 0;
     obj.flags &= ~ActorFlag.BackingOff;
-    ReleaseAttackSlot(obj);
+    ThrowerReleaseAttackPermit(obj);
     ZombieSetMotionIfIdle(obj, ThrowerMotionOf(obj, ThrowerMotion.Land), rng,
                           0, MotionFade.Quick);
     obj.sub = 2;
@@ -207,7 +207,7 @@ export function ThrowerStateWithdraw(obj: Actor, eye: Vec3, dt: number,
   if (obj.action && ActorClipFrame(obj) >= 0) return;
 
   obj.sinceLanding = 0;
-  ReleaseAttackSlot(obj);
+  ThrowerReleaseAttackPermit(obj);
   obj.flags &= ~ActorFlag.BackingOff;
   obj.state = ThrowerState.StandAndDecide;
   obj.sub = 0;

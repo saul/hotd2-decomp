@@ -33,7 +33,7 @@
  * ({@link ThrowerFlag}). That is the engine's own polymorphism and the reason
  * there are four functions here rather than two.
  */
-import { CountFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, CountFlag, ThrowerFlag, type Actor } from "../actor";
 import { G } from "../globals";
 
 /**
@@ -69,6 +69,43 @@ export function ThrowerRetireFromAliveCount(obj: Actor): void {
   if (obj.flags2 & ThrowerFlag.LeftAlive) return;
   obj.flags2 |= ThrowerFlag.LeftAlive;
   G.g_enemies_alive -= 1;
+}
+
+/**
+ * `ThrowerReleaseSlotOnDeath` — `FUN_0044D050`.
+ *
+ * The routine every class-0x31 fall opens with, and the reason a room clears
+ * on the frame you land the killing shot rather than when the body finally
+ * stops bouncing. It does nothing at all unless the actor is dying:
+ *
+ * ```c
+ * if ((obj+0x34 & 0x4000000) || obj+0x11C < 1) {
+ *     if (!(obj+0x34 & 0x800000) || g_enemies_present != 1) {
+ *         obj+0x34 |= 0x10000;                       // NoCameraTrack
+ *         if (obj+0x120 != -1) g_enemy_slots[obj+0x120 * 8] = 0;
+ *     }
+ *     ThrowerRetireFromAliveCount(obj);
+ * }
+ * ```
+ *
+ * Two things worth keeping straight. The **camera** is let go here and the
+ * **permit** is not — those are different slots, `obj+0x120` and `obj+0x121`,
+ * and `ThrowerReleaseAttackPermit` is what frees the other one. And the guard
+ * on the untrack is a deliberate exception: the *last* enemy present keeps the
+ * camera while it dies, so the shot that clears a room is not cut away from.
+ *
+ * [diverges] `obj+0x34 & 0x800000` has no port. Nothing reads or writes bit
+ * 0x800000 of `obj+0x34` anywhere the port models, so the untrack is
+ * unconditional here — which is the arm the exe takes whenever more than one
+ * enemy is present. `[open]`
+ */
+export function ThrowerReleaseSlotOnDeath(obj: Actor): void {
+  if (!(obj.flags & ActorFlag.Dead) && obj.hp >= 1) return;
+  obj.flags |= ActorFlag.NoCameraTrack;
+  if (G.g_enemies_present !== 1) {
+    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  }
+  ThrowerRetireFromAliveCount(obj);
 }
 
 /** `ThrowerRetireFromPresentCount` — `FUN_0044D020`. Bit 0x1000000. */

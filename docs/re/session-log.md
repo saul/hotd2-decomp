@@ -8851,3 +8851,184 @@ collapsed by default.
 perturbation I tried, to prove the NaN's origin, was in the camera. The NaN
 was four layers upstream in a renderer array index. What found it was a
 `Number.isFinite` check at the *write* rather than at the read.
+
+## Session — why the wall-crawlers stopped attacking
+
+Three reports about class 0x31 in stage 2, and they turned out to be four
+separate defects: they stop attacking after their first pounce and sit in
+`WaitForPermit` wanting a permit; shooting one sometimes lets the script run
+on while it is still alive and attacking; and their bodies stand well inside
+walls, as though only the origin were tested.
+
+**1. One word, two classes, two bits — again.** `ThrowerReleaseAttackPermit`
+(`FUN_0044CFB0`) and `ReleaseAttackSlot` (`FUN_00456520`) are the same eleven
+instructions except for one constant:
+
+```
+ThrowerReleaseAttackPermit   TEST  obj+0x136C, 0x8000
+ReleaseAttackSlot            TEST  obj+0x136C, 0x20000
+```
+
+and `FUN_0044CA40`, the thrower's claim, sets `0x8000`. The bit is the
+off-screen-permit latch, and clearing it is the **only** thing that lowers
+`g_attack_committed` — which `TryClaimAttackSlot` reads on its first line. The
+port called the class-0x30 release at eight class-0x31 sites and poked
+`g_attack_permits[]` by hand at two more, so the first thrower to claim while
+off screen latched the whole scene shut. Every enemy in it, not just the
+throwers. `get_xrefs_to 0x0044CFB0` lists the eight sites the exe calls it
+from, which is how the port's list was checked rather than guessed.
+
+This is the same shape as `obj+0x11C` being hit points for one class and a
+sub-type for another, and as the two enemy-count latches living in `obj+0x38`
+for class 0x30 and `obj+0x136C` for class 0x31. **The rule to carry forward:
+when two classes share an offset, they do not share the routine that reads it,
+and a shared helper with a default argument is a trap.** The default is what
+made this compile.
+
+**2. A `[diverges]` that had stopped being true.** `ThrowerPushOutOfWorld`
+(`FUN_00449D40`) is the per-frame collision hook `EnemyThrowerInit` installs
+at `obj+0x12F0`. It pushes the body sphere out of other actors, then out of
+the world, then — in states 7 and 8 only — snaps to the surface. Only the snap
+was ported, under a note saying the engine's penetration depth had not been
+read. It had: `ColiTestSphereAgainstFullSet` writes `g_coli_hit_depth` and
+`g_coli_hit_normal`, and `ZombiePushOutOfWorldAndActors` has pushed by both
+since class 0x30 was ported. The note was true when it was written and nobody
+re-read it afterwards. **A `[diverges]` is a claim with a date on it.**
+
+Two supporting facts came out of `EnemyThrowerInit` at the same time, both of
+which the port had wrong rather than missing: `param_1[0x4db] = uVar4 |
+0x180000` seeds **both** collision bits on every spawn, where the port wrote
+`flags2 = 0`; and `param_1[0x4a]` is the body radius, 5.0 for character type
+0x16 and 4.0 for 0x17 through 0x19, which the port never set at all. And the
+sphere is not class 0x30's: `ThrowerPlaceCollisionSphere` (`FUN_00449E80`)
+lifts it 1.4 radii and *lowers* it by the same on the ceiling.
+
+**3. `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) had no port.** Every class
+0x31 fall opens with it; it drops `g_enemies_alive` the frame the actor is
+knocked off its feet rather than when the body settles, and lets the camera
+slot go — `obj+0x120`, which is a different slot from the permit at
+`obj+0x121`. Its guard is worth recording: the last enemy *present* keeps the
+camera while it dies, so the shot that clears a room is not cut away from.
+
+**4. The Kill button, and a gate counting the renderer.** The user's second
+report was the debug clear, not shooting. `ActorKillAll` sets `dead` and
+`ActorFlag.Dead`; class 0x31's death chain is entered by `ThrowerOnShot`
+reading `pendingHit`, which only `ResolveHit` was writing. So the button left
+a thrower flagged dead and still pouncing.
+
+That it *also* let the script run on was a second bug underneath:
+`wait_enemies_alive` was reading `chars.aliveCount` —
+`instances.filter(visible && !dead && isEnemy)` recounted in the **renderer**
+every time the gate asked. `game/combat/counts.ts` already carries a long note
+explaining that the derived count is a different quantity from
+`g_enemies_alive` and why deriving it was wrong; the counter was fixed and the
+one caller that mattered was never moved onto it. The comment beside it on the
+civilian gate even says "this is the engine's own counter, not a restatement
+of it", which reads as a contrast nobody followed up. It reads
+`G.g_enemies_alive` now.
+
+**What the reduction cost.** Nothing, this time: the symptoms were specific
+enough to read straight out of the disassembly, and the eleven new assertions
+in `test/port.test.ts` reproduce all four before fixing any. Six of them fail
+against the old code, and one of the failures is the report verbatim — the
+thrower pounces, `g_attack_committed` stays at 1, and it never claims again.
+
+### ...and the follow-up: they were still in the wall
+
+Porting `ThrowerPushOutOfWorld` was not enough, and the two things left are
+both worth keeping.
+
+**The order.** The push went in where the old surface-snap call had been —
+*before* the state dispatch — and every class-0x31 state writes `obj.pos`
+outright, so it was overwritten before anything drew it. `EnemyThrowerUpdate`
+does not call the hook at all; nothing in the program calls `obj+0x12F0`
+directly, and `search_instructions` for that offset finds only the two inits
+that write it and one routine that copies it. So the ordering had to come from
+somewhere else, and two things give it: `FUN_00405160` — which copies the
+sphere `ThrowerPlaceCollisionSphere` writes into the per-frame collision list
+— is reached from the *end* of `EnemyThrowerUpdate` through `FUN_00409B70`, so
+the sphere must already be placed by then; and the hook's own last act is the
+surface snap that holds a wall-crawler on its wall, which a state running
+afterwards would undo every frame. Class 0x30's port already had it after the
+state, which is the third witness.
+
+**The sphere test rejected the case that matters.** `ColiSphereVsMesh`
+(`FUN_004AAF60`) compares `distance²` against `radius²` — `local_38 = fVar6² /
+|n|²` — and never tests the sign of `fVar6`. The sign is read later, by the
+caller:
+
+```c
+if (0.0 <= g_coli_hit_depth) g_coli_hit_depth = radius - sqrt(dist_sq);
+else                         g_coli_hit_depth = sqrt(dist_sq) + radius;
+```
+
+so a body whose centre has got past a wall is pushed `radius + distance` and
+lands exactly tangent on the outside. The port had `if (d < 0 || d >= r)
+continue` — no push at all for a body far enough in, which is the report.
+Selection changed with it: the engine keeps the **nearest** candidate, not the
+deepest, and those agree only while every hit is in front, because behind the
+surface a larger distance is a larger depth.
+
+**One near miss worth writing down.** The store at the end of
+`ColiSphereVsMesh` reads `g_coli_hit_normal_x = fVar1`, and `fVar1` is
+`param_1 - local_44` — centre minus closest point. Read on its own that says
+the normal flips with the side, and the first cut of this fix implemented
+exactly that. It is wrong: `fVar1`, `param_5` and `local_48` are only assigned
+the difference on the **edge and vertex** branches. On the face branch they
+still hold `nx`, `ny`, `nz` as loaded at the top of the quad loop, so the
+normal is the quad's own and unsigned. With the signed version a body behind a
+wall is driven *deeper*. **A store several branches below where its inputs are
+set is not read by looking at the store.**
+
+`tools/body_push.mjs` is the measurement, and it is what turned this from an
+argument into a fact: place each class-0x31 spawn's body sphere the way
+`FUN_00449E80` does, test it, push once, test again. **Twelve of the game's 51
+spawns start with the body inside the world**, four of them with the centre
+behind the surface; the two the report named — `0x1F50` and `0x1F88`, stage 2
+block 3 step 4, the same two addresses in the first message — are 2.67 units
+in. All twelve are clear after one frame.
+
+### ...and the second follow-up: on the wall it was a third routine
+
+Still in the wall, and this time the word that mattered was **"on the wall"**.
+
+`ThrowerSnapToSurface` (`FUN_0044C600`) calls `ThrowerFindSurfaceUnderfoot`
+(`FUN_0044C640`). The port called `TraceActorSurfaceContactPoint`
+(`FUN_0044C370`) — which is a real function, faithfully ported, with real
+callers of its own, and simply not this one. They look alike: both quantise
+the yaw to a cardinal, both build the same pitched probe, both branch the same
+three ways on the stance bits. The differences are all in the tail:
+
+```c
+/* ThrowerFindSurfaceUnderfoot, the wall arm */
+MatrixTranslate(hit.x, obj->y, hit.z);
+MatrixRotateX(rx);
+MatrixRotateY(ry + 0x8000);
+point = (0, 0, 6.5);          /* <- the actor stands 6.5 units OFF the wall */
+```
+
+`TraceActorSurfaceContactPoint` returns the hit point itself. So the port
+planted a clinging thrower's origin **in the wall plane**, and because
+`ThrowerPlaceCollisionSphere` leaves y alone for a wall stance, the body
+sphere is centred there too: half the actor inside the geometry, for as long
+as it clings. The push-out cannot help, because the snap runs *after* the push
+inside the same hook and puts it straight back. Against the old code the
+assertion reads `0.000 off the wall` and the sphere is `depth 4` — the whole
+radius.
+
+Two smaller differences came with it: the underfoot probe reaches ten units
+each side (fifteen on the ceiling) where the other reaches a thousand, and its
+misses have answers — `(1000, y, 1000)` for a wall, `-1000` for a ceiling —
+which are values chosen to fail the range test and route the actor to state 8
+or state 11 rather than a bare `false`. And `TraceActorSurfaceContactPoint`'s
+own overshoot is `0x40900000`, 4.5, where the port had 20.
+
+**Three rounds on one symptom, and each round the reading was right and the
+thing it was attached to was wrong.** The push was ported correctly and put in
+the wrong place in the frame; the sphere test was corrected correctly for the
+face case and the sign was read off the wrong branch; and the snap was a
+faithful port of a function that was not the one being called. The lesson is
+narrower than "read more carefully": **when a routine is reached through a
+pointer or a wrapper, check which routine, not which shape.** Two functions
+sixty bytes apart, with the same first forty lines, are exactly the pair a
+name-based search will hand you the wrong one of.

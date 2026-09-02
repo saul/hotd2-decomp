@@ -12,6 +12,7 @@
  */
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ThrowerReleaseSlotOnDeath } from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionOf, T } from "../tables";
@@ -197,6 +198,9 @@ export function ThrowerStateKnockedTumbling(obj: Actor, eye: Vec3, dt: number,
       obj.flags |= ActorFlag.ArcSpent;
     }
     obj.arcKind = SelectActorGravityAxis(obj);
+    // As `ThrowerStateFallAndLand`'s own sub 0: the alive count falls when the
+    // actor is knocked off its feet, not when the body settles.
+    ThrowerReleaseSlotOnDeath(obj);
     obj.sinceLanding = 0;
     obj.sub = 1;
   }

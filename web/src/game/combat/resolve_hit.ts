@@ -399,6 +399,16 @@ export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
     obj.dead = true;
     obj.react = null;
     obj.flags |= ActorFlag.Dead;
+    // **A class that reads a hit has to be given one.** `ResolveHit` records
+    // `pendingHit` for class 0x31 and `ThrowerOnShot` is the only thing that
+    // routes a thrower into its death chain — so without this the button left
+    // a thrower flagged dead and still pouncing, while the enemy gate, which
+    // was counting something else, opened behind it. The bone is 1, the
+    // torso: bone 0 never reacts and bone 2 would decapitate, and this stands
+    // in for a killing shot rather than a particular one.
+    if (obj.cls === SpawnClass.Thrower) {
+      obj.pendingHit = { bone: 1, result: HitResultCode.Damaged };
+    }
     // Same rule as `ResolveHit` above: a class that runs its own death gets
     // its own clip, and the shared one would stop the clock it counts on.
     if (!g_class_handlers[obj.cls]?.updatesWhenDead) {

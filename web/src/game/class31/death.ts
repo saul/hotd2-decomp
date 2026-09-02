@@ -13,8 +13,11 @@
  * out of wall ends up back on the ground.
  */
 import type { Rng } from "../../core/rng";
-import { ThrowerRetireFromAliveCount, ThrowerRetireFromPresentCount }
-  from "../combat/counts";
+import {
+  ThrowerReleaseSlotOnDeath, ThrowerRetireFromAliveCount,
+  ThrowerRetireFromPresentCount,
+} from "../combat/counts";
+import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { G } from "../globals";
 import { QueryGroundHeightAt } from "../coli";
@@ -135,6 +138,11 @@ export function ThrowerStateFallAndLand(obj: Actor, eye: { x: number;
     } else {
       obj.flags |= ActorFlag.ArcSpent;
     }
+    // The last line of the engine's own case 0, and the one the port did not
+    // have: a thrower leaves `g_enemies_alive` on the frame it is knocked off
+    // its feet, not when the body stops bouncing three seconds later. The
+    // whole fall used to run before the room-clear gate could see it.
+    ThrowerReleaseSlotOnDeath(obj);
     obj.sub = 1;
   }
 
@@ -247,11 +255,11 @@ function ThrowerDie(obj: Actor): void {
 export function ThrowerStateDeathClip(obj: Actor): void {
   if (obj.sub === 0) {
     playOnce(obj, DEATH_CLIP[obj.charType] ?? DEATH_CLIP[0x19]);
-    if (obj.attackPermit >= 0) {
-      G.g_attack_permits[obj.attackPermit] = -1;
-      obj.attackPermit = -1;
-    }
-    ThrowerRetireFromAliveCount(obj);
+    // `ThrowerReleaseAttackPermit` then `ThrowerReleaseSlotOnDeath`, in the
+    // engine's order (0x0044A983 then 0x0044A989). Clearing the permit array
+    // by hand -- which is what this did -- leaves `g_attack_committed` up.
+    ThrowerReleaseAttackPermit(obj);
+    ThrowerReleaseSlotOnDeath(obj);
     obj.dead = true;
     obj.sub = 1;
   }
@@ -354,8 +362,7 @@ export function ThrowerLeave(obj: Actor): void {
   // of the alive retire; this is the one that also takes the actor off screen.
   ThrowerRetireFromAliveCount(obj);
   ThrowerRetireFromPresentCount(obj);
-  if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
-  obj.attackPermit = -1;
+  ThrowerReleaseAttackPermit(obj);
   obj.dead = true;
   obj.visible = false;
   obj.action = null;
@@ -412,6 +419,7 @@ export function ThrowerStateFallToSurface(obj: Actor, dt: number): void {
   obj.fallFromY = 0;
   obj.sub = 0;
   obj.landSurface = G.g_coli_hit_surface;
+  ThrowerReleaseSlotOnDeath(obj);
   if (!obj.dead && obj.landSurface !== SURFACE_KILL) {
     obj.state = (obj.flags & ActorFlag.BackingOff)
       ? ThrowerState.LeapAside : ThrowerState.StandAndDecide;

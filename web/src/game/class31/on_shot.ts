@@ -12,7 +12,7 @@
  */
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { HitResultCode } from "../combat/resolve_hit";
-import { ReleaseAttackSlot } from "../combat/permits";
+import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ThrowerState } from "./states";
 
 /** The character type that tumbles instead of stumbling. */
@@ -69,7 +69,7 @@ export function ThrowerOnShot(obj: Actor): void {
 
   obj.flags2 &= ~(ThrowerFlag.Pouncing | ThrowerFlag.BandLatched | 0x200);
   obj.flags &= ~(ActorFlag.BackingOff | 0x10000000);
-  if (obj.attackPermit >= 0) ReleaseAttackSlot(obj);
+  if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
 
   if (obj.dead) {
     obj.flags2 |= ThrowerFlag.DeathLatched;

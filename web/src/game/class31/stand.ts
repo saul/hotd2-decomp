@@ -9,7 +9,7 @@
  * range.
  */
 import type { Rng } from "../../core/rng";
-import { ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
@@ -112,6 +112,10 @@ export function ThrowerStateWaitForPermit(obj: Actor, eye: Vec3, rng: Rng,
                                           host: GameHost): void {
   if (obj.sub === 0) {
     if (!ThrowerTryClaimAttackSlot(obj, host)) {
+      // `if ((obj+0x34 & 0x40000000) != 0) return;` — an actor already in a
+      // reaction holds whatever clip that reaction is playing rather than
+      // dropping into the wait's idle.
+      if (obj.flags & ActorFlag.Reacting) return;
       const stance = ThrowerStanceOf(obj) & 3;
       let motion: number | undefined;
       if (obj.charType === CHAR_ZSLMAN) {
@@ -131,6 +135,10 @@ export function ThrowerStateWaitForPermit(obj: Actor, eye: Vec3, rng: Rng,
   }
 
   obj.sub = 0;
+  // `obj+0x136C |= 0x180000` — the claim is also where the engine turns both
+  // collision halves back on, so an actor that has been through a corpse
+  // state (which clears them) collides again when it next commits.
+  obj.flags2 |= ThrowerFlag.Collide;
   // Character type 0x17 does not pounce. It splits two ways, and **it raises
   // the throw-table bit on the way out** — which is what makes both of its
   // attacks resolve against `g_class31_throws` rather than the melee row.

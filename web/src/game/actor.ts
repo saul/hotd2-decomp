@@ -167,8 +167,27 @@ export enum ThrowerFlag {
    *
    * Class 0x30 keeps the same fact in bit `0x20000` of the same word — which
    * is `Pouncing` here, and harmless only because no actor is both classes.
+   *
+   * **The release has to match.** `ReleaseAttackSlot` (`FUN_00456520`) tests
+   * `0x20000` and `ThrowerReleaseAttackPermit` (`FUN_0044CFB0`) tests this;
+   * calling the first one on a thrower clears the permit but leaves
+   * `g_attack_committed` raised, and then nothing in the scene may claim
+   * again. Every class-0x31 release site in the exe calls the second.
    */
   OffScreenPermit = 0x8000,
+  /**
+   * `ThrowerPushOutOfWorld` (`FUN_00449D40`) tests this before pushing the
+   * body sphere out of the **world**, at the full radius.
+   *
+   * Class 0x30's answer to the same question is
+   * {@link ZombieFlag2.CollideWorld}, bit `0x20000000` — a different bit in
+   * the same word, exactly like the permit latch above.
+   */
+  CollideWorld = 0x80000,
+  /** ...and out of other **actors**, at two thirds of it. */
+  CollideActors = 0x100000,
+  /** Both, which is what `EnemyThrowerInit` seeds every spawn with. */
+  Collide = 0x180000,
 }
 
 /**

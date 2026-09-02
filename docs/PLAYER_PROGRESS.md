@@ -1085,6 +1085,144 @@ which is what the engine does when there is no wall — and against the real dat
 **38 of the game's 49 class-0x31 spawns stand on the collision mesh, 22 have a
 wall in reach and 11 a ceiling**, 9 and 2 of them in stage 2.
 
+### Four things that stopped the throwers working
+
+**Reported:** "after their first attack they stop attacking and just wait" —
+`WaitForPermit/0 · wants a permit`; "sometimes when I shoot them once the game
+continues past them but they're still alive and trying to attack me"; "their
+bbox goes quite far into the wall — it looks like only their origin is
+measured against the coli". Four separate defects, and the first one alone
+stalls every enemy in the scene.
+
+**1. The permit was released with the wrong function.** `obj+0x136C` carries
+the off-screen-permit latch in bit **`0x8000`** for a thrower and
+**`0x20000`** for a zombie — one word, two classes, two bits, the same
+polymorphism the counters have. So `ReleaseAttackSlot` (`FUN_00456520`) called
+on a thrower frees the permit *array* and leaves `g_attack_committed` raised,
+and `TryClaimAttackSlot` reads that latch on its **first line**. One thrower
+that claimed while off screen — which a wall-crawler at forty-five units off
+to one side does routinely — and nothing in the scene could ever attack again.
+Every class-0x31 release site in the exe calls `ThrowerReleaseAttackPermit`
+(`FUN_0044CFB0`); the port called the class-0x30 one at **eight** of them, and
+two more cleared `g_attack_permits[]` by hand, which does not lift the latch
+either.
+
+**2. `ThrowerPushOutOfWorld` (`FUN_00449D40`) was two thirds unported.** It is
+the hook `EnemyThrowerInit` installs at `obj+0x12F0` — class 0x30's slot holds
+`ZombiePushOutOfWorldAndActors` — and it does three things: push the body
+sphere out of other actors at two thirds of the radius and a tenth of the
+depth, push it out of the world at the full radius and the full depth, and, in
+states 7 and 8 only, snap back onto the surface it is clinging to. Only the
+snap ran. The `[diverges]` that said so claimed the engine's penetration depth
+had never been read; it had — `ColiTestSphereAgainstFullSet` writes
+`g_coli_hit_depth` and `g_coli_hit_normal`, and class 0x30 has pushed by both
+since it was ported. So a thrower was tested against the world **at its origin
+and nowhere else**, which is the bbox in the wall.
+
+Two things had to come with it. `EnemyThrowerInit` seeds `obj+0x136C |=
+0x180000` — every thrower is born colliding, against the world and against
+actors both — and the port set `flags2 = 0`; and `obj+0x128`, the radius the
+push tests with, is **5.0 for character type 0x16 and 4.0 for 0x17–0x19** and
+the port never set it at all. The sphere is also not class 0x30's:
+`ThrowerPlaceCollisionSphere` (`FUN_00449E80`) lifts it **1.4 radii**, and
+*lowers* it by the same for an actor on the ceiling, because a hanging
+thrower's body is below the point it holds on by.
+
+**3. `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) had no port.** Every one of
+class 0x31's falls opens with it, and it is what drops `g_enemies_alive` on
+the frame the actor is knocked off its feet rather than three seconds later
+when the body stops bouncing. It also lets the **camera** slot go —
+`obj+0x120`, which is not the permit — with a deliberate exception: the *last*
+enemy present keeps the camera while it dies, so the shot that clears a room
+is not cut away from.
+
+**4. The Kill button did not kill a thrower, and the gate was counting the
+wrong thing.** Class 0x31's death is a four-state chain entered by
+`ThrowerOnShot` reading `pendingHit`, which `ResolveHit` writes and
+`ActorKillAll` did not — so the button left a thrower flagged dead and still
+pouncing at you. Meanwhile `wait_enemies_alive` read **`chars.aliveCount`**, a
+recount of `instances.filter(visible && !dead && isEnemy)` in the *renderer* —
+the derived count `game/combat/counts.ts` exists to explain is a different
+quantity. Three things followed: an actor hidden for one frame left the gate's
+count, a class-0x31 corpse left it on the first frame of the fall while it was
+still on screen, and an enemy class the port cannot run at all (0x43 and 0x51
+are both in `ENEMY_CLASSES`) was counted and could never die. It reads
+`G.g_enemies_alive` now, which is what the exe's gate reads and what the
+civilian gate beside it has always read.
+
+**2b. And two more things wrong underneath it, which is why the first fix was
+not enough.** With the push ported, the bodies were still in the wall.
+
+The **order** was wrong. `ThrowerPushOutOfWorld` went in where the old
+surface-snap call sat — *before* the state — and every class-0x31 state writes
+`obj.pos` outright, so the push was overwritten before anything drew it. It
+runs after the state now, the same place `EnemyZombieUpdate` runs its own. Two
+things say that is right: `FUN_00405160`, which copies the sphere
+`ThrowerPlaceCollisionSphere` writes into the per-frame collision list, is
+reached from the *end* of `EnemyThrowerUpdate`, so the sphere must already be
+placed; and the hook's own last act is the surface snap, which would be undone
+every frame by the state if it ran first.
+
+And `ColiTestSphereAgainstFullSet` **rejected the case that matters**.
+`ColiSphereVsMesh` (`FUN_004AAF60`) compares `distance²` against `radius²` and
+never asks which side of the quad the centre is on; the caller reads the sign
+afterwards:
+
+```c
+if (0.0 <= g_coli_hit_depth) g_coli_hit_depth = radius - sqrt(dist_sq);
+else                         g_coli_hit_depth = sqrt(dist_sq) + radius;
+```
+
+so a body whose centre has got **past** a wall is pushed `radius + distance`
+along that wall's outward normal — back out the front, exactly tangent. The
+port had `if (d < 0 || d >= r) continue`, which is *no push at all* for a body
+far enough in. That is "quite far into the wall" precisely. Selection changed
+with it: the engine keeps the **nearest** candidate, not the deepest, and the
+two only agree while every hit is in front.
+
+Worth recording because it was nearly written the other way round: the store
+in `ColiSphereVsMesh` reads `g_coli_hit_normal_x = fVar1`, and `fVar1` is
+`centre − closest` — but **only on the edge branches**. On the face branch it
+still holds the quad's `nx` from the top of the loop. Taking the store at face
+value gives a normal that flips with the side, and a body behind a wall is
+then driven deeper rather than out.
+
+`tools/body_push.mjs` measures it against the shipped data: **twelve of the
+game's 51 class-0x31 spawns have their body sphere inside the world at their
+own spawn point**, four of them with the centre behind the surface. The two
+the report named — `0x1F50` and `0x1F88`, stage 2 block 3 step 4 — are 2.67
+units in. Every one of the twelve is clear after a single frame's push.
+
+**2c. And on the wall it was a third thing again — the one that made the bbox
+"intersect massively".** `ThrowerSnapToSurface` (`FUN_0044C600`) calls
+`ThrowerFindSurfaceUnderfoot` (`FUN_0044C640`). The port called
+`TraceActorSurfaceContactPoint` (`FUN_0044C370`) instead, which is a real
+function with real callers — `react.ts` uses it for the surface a knockdown
+bounces off — but a **different** one, and the differences are exactly the
+thing being reported:
+
+* it probes ten units each side of the actor, not a thousand;
+* on a **wall** it re-places the actor **6.5 units off** the surface it found,
+  where the other returns the hit point itself;
+* missing has answers rather than a bare `false` — a wall that is not there
+  returns `(1000, y, 1000)` and a ceiling `-1000`, both of which fail the range
+  test and route the actor to state 8 or state 11.
+
+The middle one is it. A wall stance leaves the sphere's y alone
+(`ThrowerPlaceCollisionSphere` again), so an origin planted **in** the wall
+plane centres a four-unit body sphere on the surface: half the actor inside
+the geometry, permanently. And the push cannot save it, because the snap runs
+*after* the push inside the same hook and puts it straight back. Measured
+against the old code the assertion reads `0.000 off the wall`, with the sphere
+`depth 4` — the entire radius.
+
+One constant went with it: `TraceActorSurfaceContactPoint`'s own overshoot is
+`0x40900000`, **4.5**, and the port had 20.
+
+Nineteen assertions in `test/port.test.ts` cover all of it, and the ones that
+matter were made to fail against the old code first — including the reported
+symptom end to end: *pounced true, latch 1, permit −1.*
+
 `web/tools/coli_walls.mjs` runs that query through the port and asserts those
 four numbers against `tools/verify_thrower_walls.py`, which answers the same
 question in independent Python off the `coli/` files. The grounded count agrees

@@ -18,10 +18,11 @@ import type { Events } from "../../core/events";
 import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
-import { ActorFlag, DamageZone, type Actor } from "../actor";
+import { ActorFlag, DamageZone, ThrowerFlag, type Actor } from "../actor";
 import type { ActorDebug } from "../registry";
 import { TurnActorTowardCamera } from "../actor_turn";
-import { ReleaseAttackSlot, ThrowerTryClaimAttackSlot } from "../combat/permits";
+import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
+  from "../combat/permits";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, ThrowHandsOf } from "../tables";
@@ -38,7 +39,8 @@ import {
 import {
   ThrowerStateStandAndDecide, ThrowerStateWaitForPermit,
 } from "./stand";
-import { ThrowerSnapToSurface, ThrowerStateLeapToSurface } from "./surface";
+import { ThrowerStateLeapToSurface } from "./surface";
+import { ThrowerPushOutOfWorld } from "./collide";
 import { ThrowerOnShot } from "./on_shot";
 import {
   ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
@@ -139,7 +141,7 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
                                   events?: Events): void {
   const hands = usableHands(obj);
   if (!hands.length) {
-    if (obj.attackPermit >= 0) ReleaseAttackSlot(obj);
+    if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
     obj.state = ThrowerState.StandAndDecide;
     obj.sub = 0;
     return;
@@ -169,7 +171,7 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   const m = MotionOf(obj, hand.motion);
   if (!obj.action || !m) {
     if (obj.sub === ThrowSub.Thrown) ThrowerRearmHand(obj, hand, host);
-    ReleaseAttackSlot(obj);
+    ThrowerReleaseAttackPermit(obj);
     obj.sub = ThrowSub.Draw;
     obj.attack = (obj.attack + 1) % hands.length;
     return;
@@ -200,20 +202,30 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
   // The shot drain, in the engine's own place: before the state runs.
   ThrowerOnShot(obj);
 
-  // `ThrowerPushOutOfWorld` (`FUN_00449D40`), the collision hook at
-  // `obj+0x12F0`, runs `ThrowerSnapToSurface` every frame — **but only in
-  // states 7 and 8**. That is what holds a wall-crawler on its wall while it
-  // stands and waits, and what drops it into the fall the moment the wall has
-  // gone out from under it.
-  //
-  // [diverges] The hook's other two jobs, the two sphere push-outs, are not
-  // here: `ColiTestSphereAgainstFullSet` is ported but nothing has read the
-  // engine's own penetration depth, so pushing by it would be invention.
-  if (obj.state === ThrowerState.StandAndDecide
-      || obj.state === ThrowerState.WaitForPermit) {
-    ThrowerSnapToSurface(obj);
-  }
+  ThrowerRunState(obj, eye, dt, rng, host, events);
 
+  // `ThrowerPushOutOfWorld` (`FUN_00449D40`), the collision hook at
+  // `obj+0x12F0`, and it runs **after** the state — the same place
+  // `EnemyZombieUpdate` runs its own. That ordering is the whole of it: every
+  // state here writes `obj.pos` outright, so a push that ran first was
+  // overwritten before anything drew it, and the body stayed in the wall.
+  //
+  // Two things say it is after. `FUN_00405160`, which registers the sphere
+  // `ThrowerPlaceCollisionSphere` writes into the per-frame list, is reached
+  // from the *end* of `EnemyThrowerUpdate` through `FUN_00409B70` — so the
+  // sphere has to have been placed by then. And the hook's own last act is
+  // `ThrowerSnapToSurface` for states 7 and 8, which is what holds a
+  // wall-crawler on its wall; a snap applied before the state moves the actor
+  // would be undone every frame.
+  ThrowerPushOutOfWorld(obj);
+}
+
+/**
+ * The state table, dispatched. `g_class31_states` (0x00592960) is 35 entries
+ * and every one has an arm here.
+ */
+function ThrowerRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
+                         host: GameHost, events?: Events): void {
   const stance = ThrowerStanceOf(obj) & 3;
   switch (obj.state) {
     case ThrowerState.HitReaction:
@@ -303,6 +315,11 @@ export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
  * `pos += vel`, at the engine's own 60 Hz. The arc's velocity is per frame, so
  * the port scales it by however much of a frame this tick covered.
  */
+/** `param_1[0x4a]` in `EnemyThrowerInit`: `obj+0x128`, the body sphere. */
+const CHAR_ZSASS = 0x16;
+const BODY_RADIUS_ZSASS = 5.0;
+const BODY_RADIUS_OTHER = 4.0;
+
 function ActorIntegrate(obj: Actor, dt: number): void {
   const frames = dt * GAME_HZ;
   obj.pos.x += obj.vel.x * frames;
@@ -325,7 +342,16 @@ export function EnemyThrowerInit(obj: Actor): void {
   // `obj+0x1316`, from the descriptor's `+0x20`: the surface the actor starts
   // attached to. Every shipped stage-2 spawn starts on the ground; stage 6's
   // eight `BlinkIn` spawns cover all four stances.
-  obj.flags2 = 0;
+  //
+  // `param_1[0x4db] = uVar4 | 0x180000` — **every** thrower is born colliding,
+  // against the world and against other actors both. Without these two bits
+  // `ThrowerPushOutOfWorld` does nothing at all and the body is tested at its
+  // origin alone, which draws a thrower standing a radius deep in a wall.
+  obj.flags2 = ThrowerFlag.Collide;
+  // `param_1[0x4a]`, at `obj+0x128`: 5.0 for character type 0x16 and 4.0 for
+  // 0x17 through 0x19. It is the radius both push-outs test with.
+  obj.bodyRadius = obj.charType === CHAR_ZSASS
+    ? BODY_RADIUS_ZSASS : BODY_RADIUS_OTHER;
   obj.alpha = 1;
   obj.pendingHit = null;
   obj.knockCount = 0;

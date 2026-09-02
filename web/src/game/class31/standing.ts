@@ -17,7 +17,8 @@ import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, DamageZone, ThrowerFlag, type Actor } from "../actor";
 import { ActorFacePlayerTarget } from "../actor_turn";
-import { ThrowerTryClaimAttackSlot, ReleaseAttackSlot } from "../combat/permits";
+import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
+  from "../combat/permits";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf } from "../tables";
 import { vec3, type Vec3 } from "../vec";
@@ -195,7 +196,7 @@ export function ThrowerStateStrikeOnTheSpot(obj: Actor, dt: number, rng: Rng,
 
   if (obj.sub === 4) {
     obj.flags &= ~ActorFlag.BackingOff;
-    if (obj.attackPermit >= 0) ReleaseAttackSlot(obj);
+    if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
     const idle = ThrowerMotionOf(obj, ThrowerMotion.IdleAlt);
     if (idle !== undefined) playOnce(obj, idle);
     obj.slideTimer = PIN_PAUSE_FRAMES;

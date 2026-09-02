@@ -193,6 +193,11 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // Class 0x24's set-pieces are choreographed against the camera: every one
   // of their removal and freeze triggers is a `cp_` slot plus a frame.
   G.g_active_cam_path = w.cam ? w.cam.slot : -1;
+  // `g_scene_state_major_entered` — 0x009C6F08, and the first thing
+  // `IsPlayerAttackable` (`FUN_00409DC0`) tests. The walker already tracks the
+  // pair `EvtEnterSceneState` records; this is the half the combat code reads,
+  // and without it here nothing in the game would ever be allowed to attack.
+  G.g_scene_state_major_entered = w.sceneState.major;
   // `__ftol` -- both camera drivers end on `g_cam_path_frame = __ftol(...)`,
   // so this global is an **integer** that steps by exactly one a frame. The
   // walker's clock is a float (`dt * 60`), and handing that straight over

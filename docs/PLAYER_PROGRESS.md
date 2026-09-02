@@ -1060,6 +1060,44 @@ Four things worth carrying forward from reading them:
   the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
   the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
 
+### `IsPlayerAttackable`: two of three clauses
+
+The engine's gate is three tests and the port had none of them, standing in
+with "the player has a life left". Two are ported now:
+
+1. **`g_scene_state_major_entered` must be 2** — the `cam/` path camera row of
+   `g_scene_state_table`. So nothing commits an attack while the follow camera
+   or a scripted view-angle turn is driving; being hit during a camera move is
+   simply not possible. Measured across the port's own walker, major 2 is
+   almost all of gameplay (minors 4, 6, 7) and major 1 minor 3
+   (`CameraFromViewAngles`) is the brief scripted-turn spell — 3 to 8 seconds
+   in the blocks sampled. The walker already tracked the pair; `syncPortGlobals`
+   pushes the half the combat code reads.
+2. **`g_app_state == 5` returns true whatever the player state** — the
+   attract-mode override. The demo has no real player, so its `g_player_state`
+   is never 5 and without this nothing would ever attack it. Inert in the port,
+   which has no attract mode, and transcribed because the clause is real.
+
+`[diverges]` **The third clause is still a stand-in.** `g_player_state`
+(0x009A5C62) must be 5, and *nothing in the port ever writes 5*: every writer
+is the game's shell — attract, continue, name entry, game over — reached
+through the per-player hook the scene-state table installs at `_DAT_009A5CDC`,
+an indirect call with no port equivalent. `AdvanceToNextScene` (`FUN_0045FFF0`)
+is the one writer that is plainly readable, and it goes the other way: it puts
+a player at 5 back to **2** for the duration of a scene load, which is why no
+enemy attacks across a stage change. Until the shell exists, "in play" is
+answered by "has a life left", and `g_player_lives` floors at one for the same
+reason.
+
+Note what the gate does **not** test: `g_player_invuln_frames`. The 90-frame
+window after a hit stops the damage and nothing else, so the enemies keep
+taking their turns through it. That is the engine's answer to "why is there no
+pause after I am hit".
+
+`TryClaimAttackSlot` still does not call it, which is deliberate and older than
+this change — see the note in `combat/permits.ts`. The callers today are the
+two scripted attackers, class 0x30 states 24 and 32.
+
 ### `ResetSceneOnEnter`, and the three blocks it zeroes
 
 `ResetSceneOnEnter` (`FUN_0045EDD0`) is what a scene starts clean, called from

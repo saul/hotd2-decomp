@@ -159,6 +159,9 @@ for (let f = 0; f < total; f++) {
     for (const a of live.values()) { a.hp = 0; a.dead = true; }
   }
   walker.tick(1 / 60);
+  // What `syncPortGlobals` pushes and the combat code reads: without it
+  // `IsPlayerAttackable` refuses and the scripted attackers never strike.
+  G.g_scene_state_major_entered = walker.sceneState.major;
   syncSpawns(walker.spawns);
   eye.y = walker.groundY ?? 0;
   G.g_camera_fixed_eye_y = eye.y;

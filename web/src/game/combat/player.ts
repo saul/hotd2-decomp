@@ -30,13 +30,48 @@ export function CheckPlayerCanBeHit(player: number): boolean {
  * the engine's answer to "why is there no pause after I am hit", and it is
  * why there is not one here either.
  *
- * [diverges] The engine tests the scene state, the app state and the per-player
- * state word at `g_player_state`; the port has none of those and tests the one
- * thing that stands in for all three — the player is alive.
+ * The engine's three clauses, in order, and two of them are ported:
+ *
+ * 1. `g_scene_state_major_entered` must be **2** — the `cam/` path camera row
+ *    of `g_scene_state_table`. So nothing attacks while the follow camera or a
+ *    scripted view-angle turn is driving. Measured across the port's own
+ *    walker, major 2 is almost all of gameplay and major 1 minor 3
+ *    (`CameraFromViewAngles`) is the brief scripted-turn spell.
+ * 2. `g_app_state == 5` returns true whatever the player state — the
+ *    **attract-mode override**, because the demo has no real player and would
+ *    otherwise never be attacked. Inert here; the port has no attract mode.
+ * 3. `g_player_state[player] == 5`, in play.
+ *
+ * [diverges] **The third clause is a stand-in.** Nothing in the port ever
+ * writes `g_player_state = 5`: every writer is the game's shell — attract,
+ * continue, name entry, game over — reached through the per-player hook the
+ * scene-state table installs at `_DAT_009A5CDC`, an indirect call the port has
+ * no equivalent of. Until that shell exists, "is this player in play" is
+ * answered by the thing that stands in for it, which is that the player has a
+ * life left. `g_player_lives` floors at one for the same reason.
+ *
+ * The `player >= 0` guard is the port's own. The engine is called with -1 by
+ * `TryClaimAttackSlot` and the scripted attackers, reads `g_player_state`
+ * 0x130 bytes below the array, and relies on whatever is there not being 5.
  */
 export function IsPlayerAttackable(player: number): boolean {
-  return player >= 0 && (G.g_player_lives[player] ?? 0) > 0;
+  if (G.g_scene_state_major_entered !== SCENE_STATE_PATH_CAMERA) return false;
+  if (G.g_app_state === APP_STATE_ATTRACT) return true;
+  if (player < 0) return false;
+  if (G.g_player_state[player] === PLAYER_STATE_IN_PLAY) return true;
+  return (G.g_player_lives[player] ?? 0) > 0;
 }
+
+/**
+ * The scene state's major that `IsPlayerAttackable` demands — row 2 of
+ * `g_scene_state_table`, the `cam/` path cameras. See `EvtEnterSceneState`
+ * (`FUN_00403BD0`) for the whole table.
+ */
+const SCENE_STATE_PATH_CAMERA = 2;
+/** `g_app_state` while the attract demo runs; the override's value. */
+const APP_STATE_ATTRACT = 5;
+/** `g_player_state` for a player who is in play. */
+const PLAYER_STATE_IN_PLAY = 5;
 
 /**
  * `PlayerTakeDamage` — `FUN_00415300`.

@@ -40,6 +40,7 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
 import { ActorFlag, ZombieFlag2, type Actor } from "../src/game/actor";
+import { IsPlayerAttackable } from "../src/game/combat/player";
 import { ReleaseAttackSlot, TryClaimAttackSlot }
   from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
@@ -3667,6 +3668,47 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     check("state 29 hands over at once when there is no carrier to ride",
           z.state === ZombieState.AttackRun, String(z.state));
   }
+}
+
+console.log("\nIsPlayerAttackable: the scene has to be running:");
+{
+  // Three clauses, two of them ported. The first is the interesting one:
+  // nothing may attack unless the scene state's major is 2, the `cam/` path
+  // camera row -- so a scripted view-angle turn is a window in which the
+  // player cannot be hit.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  G.g_player_lives = [2, 2];
+  check("a player is not attackable before a scene state is entered",
+        !IsPlayerAttackable(0), "attackable at major 0");
+
+  G.g_scene_state_major_entered = 1;
+  check("...nor while the follow camera or a scripted turn drives",
+        !IsPlayerAttackable(0), "attackable at major 1");
+
+  G.g_scene_state_major_entered = 2;
+  check("...but is once the path camera is driving", IsPlayerAttackable(0),
+        "not attackable at major 2");
+
+  // The attract override: the demo has no real player, so `g_player_state` is
+  // never 5, and without this the demo would never be attacked.
+  G.g_scene_state_major_entered = 2;
+  G.g_player_lives = [0, 0];
+  check("a player with no lives left is not attackable — the port's stand-in "
+        + "for the state word", !IsPlayerAttackable(0), "still attackable");
+  G.g_app_state = 5;
+  check("...unless the attract demo is running, which overrides it",
+        IsPlayerAttackable(0), "override did not fire");
+  G.g_app_state = 0;
+
+  // ...and the engine's own third clause, for when a player state exists.
+  G.g_player_state = [5, 0];
+  check("a player the state word says is in play is attackable regardless",
+        IsPlayerAttackable(0) && !IsPlayerAttackable(1),
+        `${IsPlayerAttackable(0)}/${IsPlayerAttackable(1)}`);
+
+  // The port's own guard. The engine reads 0x130 bytes below the array here.
+  check("...and -1 is nobody", !IsPlayerAttackable(-1), "attackable");
 }
 
 console.log("\nResetSceneOnEnter: what a scene starts clean:");

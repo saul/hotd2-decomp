@@ -94,6 +94,11 @@ for (let stage = 1; stage <= 6; stage++) {
     // A single player, in play. `g_players_in_play` is a **count**; leaving it
     // at 0 is the attract screen, and states 24 and 32 refuse to strike there.
     G.g_players_in_play = 1;
+    // ...and the scene state the player gets from the walker through
+    // `syncPortGlobals`. `IsPlayerAttackable` (`FUN_00409DC0`) refuses unless
+    // the major is 2 -- the `cam/` path camera row -- so a harness that leaves
+    // it at 0 is testing a scripted cutscene, where nothing may attack.
+    G.g_scene_state_major_entered = 2;
     G.g_player_lives = [2, 2];
 
     const a = ActorSpawn(sp.at, sp.class, p.char_type,

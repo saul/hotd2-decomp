@@ -8316,3 +8316,54 @@ stage load is the scene enter. The gap that remains is `ResetGameOnStart`: the
 port has no *run*, so every stage load is a fresh start, and the run totals
 that reset owns are not in `G` either. Nothing is silently wrong; the run/scene
 split simply only half exists, and a continue sequence would need the rest.
+
+## IsPlayerAttackable is a scene-state gate, and the attract playlist
+
+Two asks: document the attract demo playlist, and finish `IsPlayerAttackable`.
+
+The playlist is `g_attract_demo_playlist` (0x00589828), walked by
+`RunAttractDemo` (`FUN_00426800`) with a cursor in `DAT_009A3400` and
+terminated by a scene of -1. Three 0x14-byte entries ship: scene 0 block 4,
+scene 1 block 28, scene 3 block 5 — stages 1, 2 and 4, each entered at a block
+chosen for the shot rather than from the top. Written up in `formats/evt.md`
+beside the scene table, which already had scenes 10 and 11 as `advevtbl` and
+`adv2evtbl`.
+
+`IsPlayerAttackable` (`FUN_00409DC0`) turned out to be three clauses, none of
+which the port had:
+
+    if (g_scene_state_major_entered != 2) return false;
+    if (g_app_state == 5) return true;
+    return g_player_state[player * 0x98] == 5;
+
+The first is the good one and it is script-driven, which is what the question
+was really about. Major 2 is the `cam/` path camera row of
+`g_scene_state_table`, so **nothing may attack while the follow camera or a
+scripted view-angle turn is driving**. The walker already tracked the pair
+`EvtEnterSceneState` records — with a thorough annotation behind it — so this
+was a global away. Measured first, which is the only reason it was safe to
+ship: major 2 is almost all of gameplay and major 1 minor 3 is a 3-to-8-second
+spell in the blocks sampled.
+
+The second is the attract override, and it explains itself once the playlist is
+understood: the demo has no real player, `g_player_state` is never 5, and
+without the override nothing would attack the demo.
+
+The third is not portable. Every writer of `g_player_state = 5` is in the
+game's shell, reached through the per-player hook the scene-state table
+installs at `_DAT_009A5CDC` — an indirect call, which is also why searching for
+the write by address finds nothing. `AdvanceToNextScene` is the one plainly
+readable writer and it goes the other way, 5 -> 2 for the duration of a scene
+load. So "in play" stays answered by "has a life left", declared.
+
+**The regression the harnesses caught.** Gating on the scene state broke
+`tools/entrances.mjs` immediately: the harness spawns actors directly and never
+set `g_scene_state_major_entered`, so it was testing a scripted cutscene in
+which nothing may attack, and states 24 and 32 stopped striking. Same class of
+fix as `g_players_in_play = 1` — the harness has to supply what the walker
+supplies in the player. `lifetime.mjs` drives a real walker, so it pushes
+`walker.sceneState.major` instead, which is the faithful thing.
+
+Worth recording that `test:port` did **not** catch it: the unit fixtures never
+assert that an enemy attacks, so a gate that refuses everyone passes them. The
+harnesses are what have caught the last four of these.

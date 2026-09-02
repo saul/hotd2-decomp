@@ -312,6 +312,38 @@ export const G = {
   g_active_cam_path: -1,
   g_cam_path_frame: 0,
   /**
+   * `g_scene_state_major_entered` — 0x009C6F08. The copy of the scene state's
+   * major that only a full `EvtEnterSceneState` (`FUN_00403BD0`) stamps.
+   *
+   * **`IsPlayerAttackable` requires it to be 2** — the `cam/` path camera row
+   * of `g_scene_state_table` — so no enemy commits an attack while the follow
+   * camera or a scripted view-angle turn is driving. Pushed from the walker's
+   * own `sceneState`, which already tracks it.
+   */
+  g_scene_state_major_entered: 0,
+  /**
+   * `g_app_state` — 0x009C8E98. `IsPlayerAttackable`'s attract-mode override:
+   * at 5 it returns true whatever the player state, because the demo has no
+   * real player and would otherwise never be attacked.
+   *
+   * The port has no attract mode, so this stays 0 and the clause is inert —
+   * transcribed because the clause is real.
+   */
+  g_app_state: 0,
+  /**
+   * `g_player_state` — 0x009A5C62 + player*0x98, s16. 5 is *in play*, and
+   * `IsPlayerAttackable`'s third clause. `AdvanceToNextScene` (`FUN_0045FFF0`)
+   * puts a player at 5 back to 2 for the duration of a scene load, and 8, 9
+   * and 4 are the name-entry, not-participating and credit states.
+   *
+   * [diverges] **The port never writes 5.** Everything that does is the game's
+   * shell — attract, continue, name entry, game over — reached through the
+   * per-player hook the scene-state table installs at `_DAT_009A5CDC`, which
+   * is an indirect call and not a routine the port has. So this stays at its
+   * initial value and `IsPlayerAttackable` falls back to the stand-in below.
+   */
+  g_player_state: [0, 0] as number[],
+  /**
    * The previous frame's `g_cam_path_frame`.
    *
    * Not an engine global. The engine's counter steps by exactly one, so it
@@ -639,6 +671,9 @@ export function ResetGameGlobals(): void {
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
+  G.g_scene_state_major_entered = 0;
+  G.g_app_state = 0;
+  G.g_player_state = [0, 0];
   G.g_cam_path_frame = 0;
   G.g_cam_path_frame_prev = 0;
   G.g_coli_full_set = [];

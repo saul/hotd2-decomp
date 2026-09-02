@@ -84,6 +84,72 @@ Everything is keyed by a small **scene id** in `DAT_009A1A08`:
 
 `st1evtbl - Copy.bin` is a stray duplicate and is not referenced.
 
+### Which scenes are entered, and by what
+
+`g_scene_index` is set by exactly four routines, and `LoadSceneAndReset`
+(`FUN_00460030`) is what actually loads one — its last act is
+`ResetSceneOnEnter` (`FUN_0045EDD0`), the per-scene reset.
+
+| routine | scene |
+|---|---|
+| `ResetGameOnStart` (`FUN_0045FEF0`) | 6 for `g_GameMode` 2, else 0 |
+| `AdvanceToNextScene` (`FUN_0045FFF0`) | the next stage, at each transition |
+| `RunAttractDemo` (`FUN_00426800`) | whatever the playlist names |
+| `FUN_0041F9B0` / `FUN_0041FB00` | 10 and 11, the two attract screens |
+
+The last two call `ResetSceneOnEnter` **directly** rather than through the scene
+load, which is how they get a clean scene without a stage's worth of assets.
+
+`AdvanceToNextScene` is worth one line of its own: before it loads, it walks
+both players and puts any whose `g_player_state` is 5 — *in play* — back to 2.
+`IsPlayerAttackable` (`FUN_00409DC0`) demands 5, so **no enemy commits an
+attack across a scene change**.
+
+## The attract demo playlist — SOLVED
+
+`g_attract_demo_playlist` (`0x00589828`) is what the machine plays when nobody
+is holding a gun. `RunAttractDemo` (`FUN_00426800`) walks it with a cursor in
+`DAT_009A3400`, wrapping to 0 when it reads a scene of `-1`.
+
+**Entry: 0x14 bytes.**
+
+| off | type | field |
+|---|---|---|
+| `+0x00` | `s16` | scene id — `-1` terminates the list |
+| `+0x02` | `s16` | `g_evt_block_index`, the block to start at |
+| `+0x04` | `s16` | `[open]` — copied to `DAT_007DC910` |
+| `+0x06` | `s16` | `[open]` |
+| `+0x08` | `s16` | BGM track, passed to `BgmStopThenPlay` |
+| `+0x0C` | `u32` | that call's third argument |
+| `+0x10` | `u32` | a pointer into `0x005898xx` — `[open]` |
+
+**The three shipped entries:**
+
+| # | scene | stage | block | BGM |
+|---|---|---|---|---|
+| 0 | 0 | 1 | 4 | `0x10000001` |
+| 1 | 1 | 2 | 28 | `0x10000000` |
+| 2 | 3 | 4 | 5 | `0x10000000` |
+
+So the attract loop demos **stages 1, 2 and 4**, each from a block chosen for
+the shot rather than from the top. It calls `LoadSceneAndReset` with its second
+argument `1`, which takes the preload path — a `DAT_00598028`-times loop
+through `FUN_00437F90` and `SetupSceneProjection` — and advances to the next
+entry when `g_app_state` reaches 5.
+
+Two things fall out of this that matter beyond the attract mode:
+
+* **It proves scenes 0–5 are the six playable stages.** The playlist names
+  scene 0, 1 and 3 and the demos are of stages 1, 2 and 4.
+* **The demo enters a stage scene at an arbitrary block**, which is
+  structurally what the browser player does when it seeks. It is the closest
+  the engine comes to having a seek of its own.
+
+`g_app_state` reaching 5 is also `IsPlayerAttackable`'s second clause, which
+returns true unconditionally there — the demo has no real player, so
+`g_player_state` is never 5, and without the override nothing would ever attack
+the demo.
+
 ## Container
 
 Three levels of indirection, read by `FUN_0045EB60/70/90`:

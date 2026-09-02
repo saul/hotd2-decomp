@@ -74,6 +74,18 @@ export interface ClassHandler {
    */
   updatesWhenDead?: boolean;
   /**
+   * Can this actor be hurt at all, right now?
+   *
+   * Class 0x10's answer is `sub.onShotScript < 0` — a civilian with no on-shot
+   * script has its hit bits cleared every frame by `CivilianCheckShot`, which
+   * is how the ones behind glass work. **The debug clear has to ask**, because
+   * killing one of those strands it: it is dead, it is still counted in
+   * `g_civilians_alive`, and it has no killed script to run the
+   * `LeaveCountNow` that would take it out. `wait_scripted_actors` then holds
+   * for ever on an actor no player could have touched.
+   */
+  invulnerable?(obj: Actor): boolean;
+  /**
    * This class reads `obj+0x34` bit 3 itself, so a shot must **not** go
    * through `ResolveHit`.
    *

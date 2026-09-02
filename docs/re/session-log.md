@@ -8080,3 +8080,60 @@ at all — so those corpses stayed counted for ever and the scripts kept
 stepping. Neither the old number nor the new one is the engine's: the engine
 would keep them counted for one death clip. The reason is written into the
 harness beside the constants.
+
+## A tool that plays a stage, and the two places stage 2 stops
+
+`web/tools/playthrough.mjs` drives the player from a stage's entry block to an
+end block and says where it hangs. It reads the walker's address out of the
+HUD, and **an address that has not moved is the whole signal**: this is an
+arcade game, no authored sequence in it is fifteen seconds long, so fifteen
+seconds on one instruction is a hang and the tool prints the instruction, the
+wait, and whatever is holding it.
+
+It starts at the entry block and never deep-links to an address, because a seek
+is its own rebuild path with its own bugs and a run that began mid-stage would
+be testing that instead of the stage.
+
+Shooting has to be **on** or the run is worthless: with it off
+`WalkerHost.aliveEnemies` answers null, every live-enemy gate passes untested,
+and the walker drops the spawns out from under the fight. So the tool fires
+volleys through the real path — pointer events on `#viewport`, `Shooting.fire`,
+the ray, the per-bone spheres, `ResolveHit`. A volley is a grid across the
+frame because the projection carries no screen positions and inventing a seam
+to publish them would be a seam only this tool used.
+
+**It never shoots at a civilian gate and never clears one.** You are not meant
+to shoot civilians in this game — they are mauled or you move past them — so a
+`wait_scripted_actors` that does not come down on its own is a bug by
+definition, and a tool that killed its way through it would hide the thing it
+exists to find. That rule came from the user and it immediately paid: my first
+version cleared civilian gates with the debug button and manufactured a hang
+that no player could reach.
+
+The bootstrap — vite on a free port, Chrome on the real GPU, the console and
+404 listeners — moved to `tools/lib/player.mjs`, shared with `shot.mjs`.
+Copying it would have been the third time this repository grew two harnesses
+that drifted.
+
+### What it found
+
+**Block 3, `wait_enemies_alive`.** The two van zombies are alive at 23 and 25
+units and twenty shots a volley never touch them: the camera is parked at
+`cp_st2[4]` frame 205/205 staring at a flat wall, so they are not in frame at
+all. A player could not clear this room either. `[open]`
+
+**Block 30, `wait_scripted_actors`.** `0x138BC hito_oyajiaa` holds
+`g_civilians_alive` at 1, parked on the `in-front` wait bit, 200 units away.
+Her script sets a heading (op 7) and then waits to be in front of it; the
+script cannot advance until she is done and she cannot finish until something
+moves. `CivilianInFront` tests the *target point* against her facing, and
+whether that is what `FUN_0048B1E0` does is not yet read. `[open]`
+
+### And a fix the tool forced
+
+`ActorKillAll` was killing civilians a shot could never touch. `CivilianCheckShot`'s
+first branch is `if (sub.onShotScript < 0) { clear the hit bits; return; }` —
+that is how the ones behind glass work — so such a civilian has no killed
+script, and killing it left it dead, still counted, and unable to run the
+`LeaveCountNow` that would take it out of the count. `ClassHandler.invulnerable`
+is that question asked of the class, and the debug clear now asks it.

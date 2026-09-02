@@ -392,6 +392,9 @@ export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
   const out: KillAllResult = { enemies: 0, civilians: 0 };
   for (const obj of G.g_object_list) {
     if (!obj.visible || obj.dead) continue;
+    // What a shot could not touch, this must not touch either — see
+    // `ClassHandler.invulnerable`.
+    if (g_class_handlers[obj.cls]?.invulnerable?.(obj)) continue;
     obj.hp = 0;
     obj.dead = true;
     obj.react = null;

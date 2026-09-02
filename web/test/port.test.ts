@@ -2740,6 +2740,24 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("the clear counts her as a civilian, not an enemy",
           cleared.civilians === 1 && cleared.enemies === 0,
           JSON.stringify(cleared));
+    // **And what a shot could not touch, the clear must not touch either.**
+    // A civilian with no on-shot script has its hit bits cleared every frame by
+    // `CivilianCheckShot` — the ones behind glass — so no player can kill it.
+    // The clear killing it anyway strands it: dead, still counted in
+    // `g_civilians_alive`, and with no killed script to run the
+    // `LeaveCountNow` that would take it out. Stage 2's `0x138BC` is one, and
+    // it held `wait_scripted_actors` open for ever.
+    {
+      const safe = ActorSpawn(0x4020, SpawnClass.Civilian, 1, "behind glass");
+      safe.visible = true;
+      if (safe.civ) safe.civ.onShotScript = -1;
+      ActorKillAll(0, new Rng(4));
+      check("the clear leaves a civilian no shot could reach alive",
+            !safe.dead && (safe.flags & ActorFlag.Dead) === 0,
+            `dead ${safe.dead} flags 0x${safe.flags.toString(16)}`);
+      safe.visible = false;
+    }
+
     check("...and raises the bit her own machine reads",
           (a.flags & ActorFlag.Dead) !== 0, `flags 0x${a.flags.toString(16)}`);
     // The shared directional death is class 0x30's, from its state 6. Handed

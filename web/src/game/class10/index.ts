@@ -1380,6 +1380,8 @@ export const CivilianHandler: ClassHandler = {
   // A shot civilian keeps running: its on-shot script is what plays the fall,
   // the voice and the removal, and stopping at `dead` froze it upright.
   updatesWhenDead: true,
+  // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
+  invulnerable: (obj) => (obj.civ?.onShotScript ?? -1) < 0,
 };
 
 export type { CivilianState };

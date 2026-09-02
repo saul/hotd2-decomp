@@ -31,23 +31,30 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { ReleaseAttackSlot } from "../combat/permits";
+import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
+  from "../combat/counts";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { MotionFade, MotionRow, ZombieState } from "./states";
 
 /**
- * `ZombieReleaseAndDespawn` — `FUN_00455490`. Free the permit and go.
+ * `ZombieReleaseAndDespawn` — `FUN_00455490`. Free the permit, leave both
+ * counts, and go.
  *
- * The engine also runs `ReleaseEnemyAliveCount` and `ReleaseEnemyPresentCount`
- * before despawning; the port keeps neither counter — the walker's own
- * `liveEnemies` is what opens an enemy gate — so those two have nothing to
- * decrement here.
+ * All three, in the engine's order: `ReleaseEnemyAliveCount`,
+ * `ReleaseEnemyPresentCount`, `ReleaseAttackSlot`, then the array clear and
+ * `ActorDespawn`. The counter half used to be dropped here, because the port
+ * derived `g_enemies_alive` from the pool instead of stepping it; it does not
+ * any more — see `combat/counts.ts`.
  *
- * [open] No shipped spawn reaches it: it is the `obj+0x34 & 0x20000000` arm of
- * the state below, and that bit is set on three class-0x31 spawn records and
- * on no class-0x30 one at all. Transcribed because the arm is real.
+ * [open] No shipped spawn reaches the state-15 arm: it is the
+ * `obj+0x34 & 0x20000000` branch, set on three class-0x31 spawn records and on
+ * no class-0x30 one. `ZombieStateStandAndThrow` reaches it, though, and
+ * `ZombieStateScriptedGrabAndDespawn` ends in it.
  */
 export function ZombieReleaseAndDespawn(obj: Actor): void {
+  ReleaseEnemyAliveCount(obj);
+  ReleaseEnemyPresentCount(obj);
   ReleaseAttackSlot(obj);
   ActorDespawn(obj);
 }

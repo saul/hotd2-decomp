@@ -1060,6 +1060,48 @@ Four things worth carrying forward from reading them:
   the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
   the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
 
+### The two enemy counters are stepped, not derived
+
+`g_enemies_alive` and `g_enemies_present` are what 488 enemy gates wait on —
+434 of `wait_enemies_alive` (0x44) and 54 of `wait_enemies_present` (0x43) —
+and the port used to **recount them from the pool every frame**
+(`SyncDerivedActorCounts`, now gone). That is a different quantity from the
+one the engine keeps, and the differences are the whole point of the counters:
+
+* **An actor can be alive and deliberately uncounted.** `EnemyZombieInit`
+  (`FUN_00452DA0`) counts a zombie into both — but only when its character type
+  is not 9 *and* its initial state is not 31. State 31,
+  `ZombieStateWaitScriptFlagThenEnter`, counts itself in when its script flag
+  comes up, which is exactly what makes those four stage-2 spawns invisible to
+  the gates until the script lets them in. Derived from `visible`, they were
+  counted from frame one and the state had no effect at all.
+* **A corpse is present but not alive.** The alive count falls at death, in
+  `ZombieReleasePermitAndUntrack` (`FUN_004565A0`); the present count falls
+  when the death clip ends, in `ZombieEnterCorpseState` (`FUN_00456740`).
+* **Each release is latched, once per actor.** `ReleaseEnemyAliveCount`
+  (`FUN_00456560`) tests `obj+0x38` bit 1, `ReleaseEnemyPresentCount`
+  (`FUN_00456580`) bit 2 — and class 0x31 latches the same two facts in
+  `obj+0x136C` bits 0x800000 and 0x1000000 instead
+  (`ThrowerRetireFromAliveCount`, `ThrowerRetireFromPresentCount`). Six
+  routines call the class-0x30 pair and more than one can reach the same
+  actor; without the latch the count goes negative and a gate opens early.
+
+All of that is in `game/combat/counts.ts` now, and
+`web/tools/lifetime.mjs` asserts the two things that can go wrong: no counter
+ever goes negative, and killing every enemy in a block drives the alive count
+to zero and lets the walker advance. Across 115 block starts in the six stages,
+both hold; the room clears in one frame every time.
+
+`[diverges]` **The corpse window is zero-length for class 0x30.** The port has
+no class-0x30 death state, so both of its releases land on the same frame
+instead of a death clip apart. Class 0x31 keeps the window, because it has its
+death states and calls the two retires where the exe does. Porting
+`ZombieStateDeath6` (`FUN_00454D20`) — three subs, and the motion choice is
+already ported — is what closes it, and it would also change how every zombie
+death looks in the player, which is why it is called out here rather than done
+quietly. The old derived behaviour had that window at *infinity*: a shot zombie
+stayed `present` for ever, so none of the 54 present gates could ever open.
+
 ### An actor that removes itself was rebuilt on the next frame
 
 `SpawnFromDescriptor` (`FUN_00408A20`) builds an object when the spawn opcode

@@ -8031,3 +8031,52 @@ the loop counter read 1, then 2, then 1, which looks like a stuck decrement and
 is really a list being restarted. A per-transition trace is what settled it,
 and it took four samples to notice that Shoot being off let the script run away
 and drop the spawns underneath the scene I was watching.
+
+## The enemy counters were derived, and derivation cannot express a corpse
+
+Asked why the port derives the actor counts at all, which is the right
+question: it should not. `SyncDerivedActorCounts` recounted
+`g_object_list.filter(visible && isEnemy)` at the top of every `GameUpdate`,
+and the engine keeps two real counters that each `Init` raises and each
+teardown lowers.
+
+The writers, read out of the binary: `EnemyZombieInit` (`FUN_00452DA0`) and
+`EnemyThrowerInit` increment both; `ReleaseEnemyAliveCount` (`FUN_00456560`)
+and `ReleaseEnemyPresentCount` (`FUN_00456580`) decrement, each latched on
+`obj+0x38` bits 1 and 2; class 0x31 does the same through
+`ThrowerRetireFromAliveCount` / `ThrowerRetireFromPresentCount` latched on
+`obj+0x136C` bits 0x800000 and 0x1000000 — the same two facts in a different
+word, which is this binary's habit. `ResetSceneOnEnter` (`FUN_0045EDD0`) is
+the only non-incremental write: it zeroes both on entering a scene.
+
+Two things the derived version could not express, and both are load-bearing:
+
+**A zombie can be alive and uncounted.** `EnemyZombieInit` skips the increment
+when the initial state is 0x1F. That is `ZombieStateWaitScriptFlagThenEnter`,
+ported earlier this session, and the increment I transcribed into it was dead
+code precisely *because* the count was derived — I noted that at the time and
+did not draw the obvious conclusion, which was that the derivation was the bug.
+
+**A corpse is present but not alive.** The alive count falls at death and the
+present count when the death clip ends, and that gap is the only reason the
+game has two counters at all. The port has no class-0x30 death state, so the
+gap is zero-length; it is declared, and closing it means porting
+`ZombieStateDeath6`.
+
+**The wrong turn, and the harness that caught it.** My first mapping released
+`present` on `!obj.visible` as well as on death. The engine never ties either
+count to whether the actor is drawn, and because the release is latched, doing
+so is permanent: an actor invisible for a single frame before the renderer
+turns it on leaves both counts and never returns. `tools/civilians.mjs` caught
+it — two rescues short — and I then spent three wrong hypotheses on *why*
+before printing the counts, which answered it immediately. Same mistake as the
+emerge bug earlier today: reasoning about a count instead of printing it.
+
+The civilians harness's `moved` and `rescued` baselines moved from 40/23 to
+37/21, and that is a real behaviour change rather than a check being loosened.
+A civilian script advances *while* enemies are present, the harness kills every
+captor by fiat at the halfway mark, and the derived `present` had no dead test
+at all — so those corpses stayed counted for ever and the scripts kept
+stepping. Neither the old number nor the new one is the engine's: the engine
+would keep them counted for one death clip. The reason is written into the
+harness beside the constants.

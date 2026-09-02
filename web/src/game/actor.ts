@@ -123,6 +123,18 @@ export interface PathPoint {
 export enum ThrowerFlag {
   /** `ThrowerFindWallBeside`'s own refusal bit. */
   NoWallLeap = 0x2,
+  /**
+   * Bit `0x800000` — this actor has left `g_enemies_alive`, the latch
+   * `ThrowerRetireFromAliveCount` (`FUN_0044CFF0`) tests and sets.
+   *
+   * Class 0x30 keeps the same two facts in `obj+0x38` — see
+   * {@link CountFlag} — and this word's 0x800000 is class 0x30's
+   * {@link ZombieFlag2.Shoved}. Two classes, one offset, three meanings.
+   */
+  LeftAlive = 0x800000,
+  /** Bit `0x1000000` — ...and `g_enemies_present`, for
+   *  `ThrowerRetireFromPresentCount` (`FUN_0044D020`). */
+  LeftPresent = 0x1000000,
   /** Off the ground — set with any of the three surface bits. */
   OffGround = 0x20,
   /** State 15's wall. Stance `+1`. */
@@ -157,6 +169,31 @@ export enum ThrowerFlag {
    * is `Pouncing` here, and harmless only because no actor is both classes.
    */
   OffScreenPermit = 0x8000,
+}
+
+/**
+ * `obj+0x38`'s two accounting latches, for class 0x30.
+ *
+ * Each counter may only be left **once** per actor, and the latch is what
+ * guarantees it: `ReleaseEnemyAliveCount` (`FUN_00456560`) and
+ * `ReleaseEnemyPresentCount` (`FUN_00456580`) each test their bit, set it, and
+ * only then decrement. Six routines call them and several can run on the same
+ * actor, so without the latch a zombie would take the count negative and
+ * `wait_enemies_alive` would open a block early.
+ */
+export enum CountFlag {
+  /** Bit 1 — this actor has already left `g_enemies_alive`. */
+  LeftAlive = 0x2,
+  /** Bit 2 — ...and `g_enemies_present`. */
+  LeftPresent = 0x4,
+  /**
+   * Bit 0 — `ZombieEnterCorpseState` (`FUN_00456740`) skips the present
+   * release when it is set, and `ZombieReleasePermitAndUntrack`
+   * (`FUN_004565A0`) skips dropping the actor from camera tracking.
+   *
+   * [open] Nothing in the ported call graph sets it.
+   */
+  KeepCounted = 0x1,
 }
 
 /** `obj+0x136C` for class 0x30, where the bits differ from the thrower's. */
@@ -240,6 +277,12 @@ export interface Actor {
 
   // -- the engine's own fields -------------------------------------------
   flags: number;            // +0x34
+  /**
+   * `obj+0x38` — a second flag word, and the one the **enemy counters** latch
+   * in. See {@link CountFlag}; class 0x31 latches the same two facts in
+   * `obj+0x136C` instead, which is the usual polymorphism.
+   */
+  flags38: number;          // +0x38
   pos: Vec3;                // +0x40
   /** Yaw in BAMS. The engine keeps a triple at +0x64/68/6C; only Y turns. */
   yaw: number;              // +0x68
@@ -781,7 +824,7 @@ export function ActorUpdateBoundingSphere(obj: Actor): void {
 export function makeActor(at: number, cls: SpawnClass, charType: number,
                           name: string): Actor {
   return {
-    at, cls, charType, name,
+    at, cls, charType, name, flags38: 0,
     flags: 0,
     pos: vec3(),
     yaw: 0,

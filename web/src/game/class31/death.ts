@@ -13,6 +13,8 @@
  * out of wall ends up back on the ground.
  */
 import type { Rng } from "../../core/rng";
+import { ThrowerRetireFromAliveCount, ThrowerRetireFromPresentCount }
+  from "../combat/counts";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { G } from "../globals";
 import { QueryGroundHeightAt } from "../coli";
@@ -221,6 +223,10 @@ export function ThrowerStateFallAndLand(obj: Actor, eye: { x: number;
  * clip first; everything else goes straight to a corpse.
  */
 function ThrowerDie(obj: Actor): void {
+  // `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) runs the moment the hit
+  // points fall below 1 and always ends in the alive retire. The *present*
+  // retire is `ThrowerEnterCorpseState`'s, one clip later.
+  ThrowerRetireFromAliveCount(obj);
   obj.dead = true;
   if (obj.landSurface === SURFACE_KILL) obj.flags |= ActorFlag.Dead;
   if (obj.charType === CHAR_ZSASS) {
@@ -245,6 +251,7 @@ export function ThrowerStateDeathClip(obj: Actor): void {
       G.g_attack_permits[obj.attackPermit] = -1;
       obj.attackPermit = -1;
     }
+    ThrowerRetireFromAliveCount(obj);
     obj.dead = true;
     obj.sub = 1;
   }
@@ -258,6 +265,11 @@ export function ThrowerStateDeathClip(obj: Actor): void {
  * everything else sinks.
  */
 export function ThrowerEnterCorpseState(obj: Actor): void {
+  // `unless (obj+0x38 & 1) ThrowerRetireFromPresentCount` — the *present*
+  // count falls here and not at death, which is what makes a corpse still on
+  // stage present but not alive. That distinction is the only reason the game
+  // has both `wait_enemies_present` and `wait_enemies_alive`.
+  ThrowerRetireFromPresentCount(obj);
   obj.flags2 &= ~0x180000;
   obj.flags |= ActorFlag.PoseFrozen;
   obj.dead = true;
@@ -338,6 +350,10 @@ export function ThrowerStateCorpse(obj: Actor, dt: number, rng: Rng,
  * subroutine every other exit calls.
  */
 export function ThrowerLeave(obj: Actor): void {
+  // `ThrowerLeave` and `ThrowerReleaseSlotOnDeath` are the engine's two callers
+  // of the alive retire; this is the one that also takes the actor off screen.
+  ThrowerRetireFromAliveCount(obj);
+  ThrowerRetireFromPresentCount(obj);
   if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
   obj.attackPermit = -1;
   obj.dead = true;

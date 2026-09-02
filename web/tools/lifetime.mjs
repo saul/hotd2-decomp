@@ -138,13 +138,41 @@ if (!seekTo(walker, Number(block), Number(step), op)) {
 console.log(`stage ${stage}, seeked to block ${block} step ${step}\n`);
 
 const eye = vec3(0, 0, 0);
+let minAlive = 0, minPresent = 0, maxAlive = 0;
 const total = Number(seconds) * 60;
+/**
+ * `KILL=<seconds>` shoots the room clean at that moment.
+ *
+ * This is the invariant the counters exist for: a block parked on
+ * `wait_enemies_alive` -- 434 of the 488 enemy gates -- may only advance once
+ * the count reaches zero. If a release is missing the count never falls and
+ * the script sits there for ever; that is invisible while the counts are
+ * derived from the pool, and it is the whole risk of stepping them instead.
+ */
+const killAt = process.env.KILL ? Number(process.env.KILL) * 60 : -1;
+const startedAt = { block: walker.block, step: walker.step };
+let clearedAt = -1;
 for (let f = 0; f < total; f++) {
+  if (f === killAt) {
+    // Not `despawned`: the engine's own kill is hit points reaching zero, and
+    // the release paths hang off that.
+    for (const a of live.values()) { a.hp = 0; a.dead = true; }
+  }
   walker.tick(1 / 60);
   syncSpawns(walker.spawns);
   eye.y = walker.groundY ?? 0;
   G.g_camera_fixed_eye_y = eye.y;
   GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+  // **The counters are the gates.** They are stepped now, not derived, so a
+  // missing release parks the script on a `wait_enemies_alive` for ever and a
+  // double release takes the count negative and opens one early. Both show up
+  // here and nowhere else.
+  minAlive = Math.min(minAlive, G.g_enemies_alive);
+  minPresent = Math.min(minPresent, G.g_enemies_present);
+  maxAlive = Math.max(maxAlive, G.g_enemies_alive);
+  if (clearedAt < 0 && killAt >= 0 && f > killAt && G.g_enemies_alive === 0) {
+    clearedAt = f;
+  }
   for (const [at, a] of live) {
     const init = places.get(at)?.initial_state;
     const inIt = a.state === init;
@@ -181,6 +209,26 @@ for (const r of rows) {
 
 console.log(`\n${rows.length - rebuilt} of ${rows.length} were built once and `
           + `entered their entrance once`);
+console.log(`enemies alive: peak ${maxAlive}, floor ${minAlive}; `
+          + `present floor ${minPresent}; `
+          + `final ${G.g_enemies_alive} alive / ${G.g_enemies_present} present`);
+if (killAt >= 0) {
+  const moved = walker.block !== startedAt.block || walker.step !== startedAt.step;
+  console.log(`killed at ${killAt / 60}s: alive reached 0 `
+    + `${clearedAt < 0 ? "NEVER" : `after ${((clearedAt - killAt) / 60).toFixed(2)}s`}`
+    + `, walker ${moved ? `advanced to ${walker.block}/${walker.step}`
+                        : `still parked at ${startedAt.block}/${startedAt.step}`}`);
+  if (clearedAt < 0) {
+    console.log("FAIL: every enemy is dead and the alive count did not reach "
+              + "zero -- a release is missing and the gate can never open");
+    process.exitCode = 1;
+  }
+}
+if (minAlive < 0 || minPresent < 0) {
+  console.log("FAIL: a counter went negative -- something released twice "
+            + "without its latch, and an enemy gate will open early");
+  process.exitCode = 1;
+}
 if (rebuilt) {
   console.log("FAIL: an actor built twice runs its class `Init` twice, and an "
             + "entrance state entered twice replays its entrance -- see "

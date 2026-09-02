@@ -32,6 +32,7 @@ import {
   ZombieStateScriptedGrabAndDespawn, ZombieStateWaitForCameraFrame,
 } from "./scripted";
 import { ZombieState } from "./states";
+import { CountEnemyZombieIn } from "../combat/counts";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
@@ -201,6 +202,9 @@ export function EnemyZombieInit(obj: Actor): void {
   obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
   obj.shoveTimer = 0;
   obj.state = ZombieEntryState(obj.initialState);
+  // ...and the actor counts itself in, which is the engine's own last act
+  // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.
+  CountEnemyZombieIn(obj);
 }
 
 /**

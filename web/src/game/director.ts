@@ -18,6 +18,10 @@ import { PropContainerType } from "./class41";
 import { Class44Selector } from "./class44";
 import { T } from "./tables";
 import { ReleaseAttackSlot } from "./combat/permits";
+import {
+  ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
+  ThrowerRetireFromAliveCount, ThrowerRetireFromPresentCount,
+} from "./combat/counts";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ActorByAt, G } from "./globals";
@@ -155,29 +159,6 @@ export interface FrameResult {
  * `eye` is the camera, which in this game *is* the player: every range test in
  * the enemy code measures to it.
  */
-/**
- * The two enemy counts, derived from the pool rather than stepped.
- *
- * [diverges] The engine keeps both as counters that each class's `Init` raises
- * and its teardown lowers. This predates the spawn-on-opcode work and is the
- * last of the counters still derived; `g_civilians_alive` is stepped where the
- * engine steps it.
- */
-export function SyncDerivedActorCounts(): void {
-  // Only the classes whose handler increments it — not every visible actor.
-  // A set-piece or a civilian in this count is a `wait_enemies_alive` that
-  // never unblocks.
-  G.g_enemies_alive = G.g_object_list
-    .filter((o) => !o.dead && o.visible && ActorIsEnemy(o.cls)).length;
-  // The looser of the two. `EnemyThrowerInit` raises it and
-  // `ThrowerRetireFromPresentCount` drops it — on *leaving*, not on dying — so
-  // a corpse still on stage is present and not alive. Class 0x10's wait bit
-  // 0x01 reads it, and reading zero would have unblocked every one of those
-  // waits on frame one.
-  G.g_enemies_present = G.g_object_list
-    .filter((o) => o.visible && ActorIsEnemy(o.cls)).length;
-}
-
 export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
                            events?: Events): FrameResult {
   const frames = dt * GAME_HZ;
@@ -187,10 +168,24 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // Once a frame, for everyone: the rank the approach state tests against the
   // ring table's allowance.
   RankEnemiesByDistance(eye);
-  SyncDerivedActorCounts();
 
   // `ActorDespawn` unlinked these; the pool is a list, so they leave here.
   if (G.g_object_list.some((o) => o.despawned)) {
+    // An actor that leaves the pool leaves both counts with it. The engine's
+    // own despawn paths call the releases first -- `ZombieReleaseAndDespawn`
+    // (`FUN_00455490`) is both of them and an `ActorDespawn` -- and this is
+    // the backstop for the ones the port reaches another way. The latches make
+    // it idempotent, so a route that already released pays nothing here.
+    for (const o of G.g_object_list) {
+      if (!o.despawned || !ActorIsEnemy(o.cls)) continue;
+      if (o.cls === SpawnClassValue.Thrower) {
+        ThrowerRetireFromAliveCount(o);
+        ThrowerRetireFromPresentCount(o);
+      } else {
+        ReleaseEnemyAliveCount(o);
+        ReleaseEnemyPresentCount(o);
+      }
+    }
     G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
   }
 
@@ -219,6 +214,29 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
       ReleaseAttackSlot(obj, obj.cls === SpawnClassValue.Thrower
                         ? ThrowerFlag.OffScreenPermit
                         : ZombieFlag2.OffScreenPermit);
+      // ...and the same reasoning for the enemy counters, which the engine
+      // steps from the same teardown: `ZombieReleasePermitAndUntrack` drops
+      // the alive count, and `ZombieEnterCorpseState` (`FUN_00456740`) the
+      // present count when the death clip ends.
+      //
+      // **Only on death.** Not on `!visible`: the engine never ties either
+      // count to whether the actor is drawn, and because the releases are
+      // latched, doing so is permanent — an actor invisible for one frame
+      // before the renderer turns it on would leave both counts and never
+      // return, which cost two civilian rescues in `tools/civilians.mjs`
+      // before this line said `dead`.
+      //
+      // [diverges] Class 0x30 has no death state here, so both of its
+      // releases land on the same frame. That collapses the window in which a
+      // class-0x30 corpse is *present but not alive*; class 0x31 keeps that
+      // window, because it has its death states and calls the two retires
+      // where the exe does. Porting `ZombieStateDeath6` (`FUN_00454D20`) and
+      // `ZombieEnterCorpseState` is what closes it.
+      if (obj.dead && ActorIsEnemy(obj.cls)
+          && obj.cls !== SpawnClassValue.Thrower) {
+        ReleaseEnemyAliveCount(obj);
+        ReleaseEnemyPresentCount(obj);
+      }
       // ...but a class whose *death* is a state machine still has to run it.
       // Class 0x31 falls, lands, plays its death clip and rots; stopping here
       // left the body frozen wherever its hit points ran out.

@@ -206,8 +206,27 @@ console.log(`${total} civilians driven, ${moved} advanced, `
  * counting authored frames -- so every kill cue past halfway was simply never
  * reached and the maul was an animation with no consequence. 30 of the game's
  * 51 cues are in that range; `tools/verify_maul_cues.py` is the corpus check.
+ *
+ * **`moved` and `rescued` fell by three and two when the enemy counters
+ * stopped being derived.** A civilian script advances *while* enemies are
+ * present -- `CivilianStepScript` needs `goal < g_enemies_present` to be true
+ * to step -- and this harness kills every captor at the halfway mark by
+ * setting `dead` directly. While the counts were recounted from the pool,
+ * `g_enemies_present` was `visible && isEnemy` with **no dead test**, so those
+ * corpses stayed counted for ever and the scripts kept stepping. They do not
+ * now: the port releases both counts on death.
+ *
+ * Neither number is the engine's. There, a shot zombie keeps its place in
+ * `g_enemies_present` for exactly the length of its death clip --
+ * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) drops the alive count at
+ * death and `ZombieEnterCorpseState` (`FUN_00456740`) drops the present count
+ * when the clip ends -- and that window is the entire reason the game has two
+ * counters. The port has no class-0x30 death state to hang it on, so the
+ * window is zero-length here; the old behaviour was a window of *infinity*,
+ * which left all 54 `wait_enemies_present` gates unable to open at all.
+ * Closing it properly means porting `ZombieStateDeath6` (`FUN_00454D20`).
  */
-const EXPECT = { total: 53, moved: 40, rescued: 23, holding: 4,
+const EXPECT = { total: 53, moved: 37, rescued: 21, holding: 4,
                  captors: 57, inCaptorState: 55, mauled: 10 };
 const got = { total, moved, rescued, holding, captors, inCaptorState, mauled };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);

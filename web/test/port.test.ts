@@ -43,6 +43,9 @@ import { ActorFlag, ZombieFlag2, type Actor } from "../src/game/actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot }
   from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
+import {
+  ReleaseEnemyAliveCount, ReleaseEnemyPresentCount, UNCOUNTED_CHAR_TYPE,
+} from "../src/game/combat/counts";
 import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
@@ -3572,6 +3575,65 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     check("state 29 hands over at once when there is no carrier to ride",
           z.state === ZombieState.AttackRun, String(z.state));
   }
+}
+
+console.log("\nthe two enemy counters, stepped and not derived:");
+{
+  // `g_enemies_alive` and `g_enemies_present` are what 488 enemy gates wait
+  // on. The port used to recount the pool every frame, which cannot express
+  // either of the two things the engine uses them for: a corpse that is
+  // present but not alive, and an actor deliberately left out of the count.
+  const zombie = (init: number, charType = 1) => {
+    const z = ActorSpawn(0x7B00 + init, SpawnClass.Zombie, charType, "counted",
+                         { initialState: init });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    return z;
+  };
+
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  check("a scene starts with both counts at zero",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+
+  const a = zombie(ZombieState.AttackRun);
+  check("an ordinary zombie counts itself in at Init",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+
+  // `EnemyZombieInit`'s two exclusions, and they are the point of the rewrite.
+  zombie(ZombieState.AttackRun, UNCOUNTED_CHAR_TYPE);
+  check("...but character type 9 is not an enemy and is never counted",
+        G.g_enemies_alive === 1, String(G.g_enemies_alive));
+  const late = zombie(ZombieState.WaitScriptFlagThenEnter);
+  check("...and a state-31 spawn is not counted until its flag comes up",
+        G.g_enemies_alive === 1, String(G.g_enemies_alive));
+
+  // The state counts itself in, which is the whole reason it exists.
+  late.entry = { flag: 3, idle_motion: 10, motion: 923, delay: 0 };
+  G.g_camera_fixed_eye_y = 0;
+  G.g_script_flags[3] = 1;
+  for (let f = 0; f < 3; f++) {
+    EnemyZombieUpdate(late, EYE, 1 / 60, new Rng(1), NULL_HOST);
+  }
+  check("...and then it does", G.g_enemies_alive === 2 && G.g_enemies_present === 2,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+
+  // The latch: six routines call the releases and more than one can reach the
+  // same actor, so without it the count goes negative and a gate opens early.
+  ReleaseEnemyAliveCount(a);
+  ReleaseEnemyAliveCount(a);
+  ReleaseEnemyAliveCount(a);
+  check("the alive release is latched — three calls, one decrement",
+        G.g_enemies_alive === 1, String(G.g_enemies_alive));
+  check("...and it did not touch the present count",
+        G.g_enemies_present === 2, String(G.g_enemies_present));
+
+  // Which is the distinction the derived count could not express at all.
+  ReleaseEnemyPresentCount(a);
+  check("a corpse leaves `alive` before it leaves `present`",
+        G.g_enemies_present === 1, String(G.g_enemies_present));
 }
 
 console.log("\nclass 0x30 state 26: the arc alone moves the leap:");

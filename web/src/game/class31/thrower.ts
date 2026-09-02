@@ -15,6 +15,7 @@
  * data; the code is a gate.
  */
 import type { Events } from "../../core/events";
+import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
@@ -333,6 +334,9 @@ export function EnemyThrowerInit(obj: Actor): void {
   obj.arcPhase = 0;
   obj.arcScript = null;
   obj.state = ThrowerEntryState(obj);
+  // `INC word [g_enemies_present]` then `INC word [g_enemies_alive]`, with no
+  // guard at all -- unlike class 0x30's, which excludes two kinds.
+  CountEnemyThrowerIn();
 }
 
 /**

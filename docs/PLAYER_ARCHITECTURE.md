@@ -472,10 +472,11 @@ What is on disk. Where a line is still a plan it says so.
 web/src/
   app/          the composition root: the only layer that sees all the others
     main.ts       `Player` — 1123 lines. See "why main.ts is this size" below
-    loop.ts       the 60 Hz accumulator, freeze and speed — in one place
-    harness.ts    the drive seam: under `?drive=1`, game time advances only
-                  when a driver asks and only in whole 60 Hz frames. Inert
-                  without the flag; may do nothing a `UiCommand` cannot
+    loop.ts       the pacer: one fixed 60 Hz tick, never skipped, the
+                  catch-up spread rather than dropped. freeze and speed too
+    harness.ts    the drive seam: under `?drive=1` the accumulator is fed by
+                  a driver instead of by the wall, and nothing else changes.
+                  Inert without the flag; may do nothing a `UiCommand` cannot
     systems.ts    the adapters: GameSystem, ScriptSystem, drawSystem
     commands.ts   the one exhaustive switch over `UiCommand`
     ui_root.ts    createRoot on #app, and the canvas coming back
@@ -544,21 +545,64 @@ one `world.add(...)` and never touches the loop. **A layer ticked by hand is a
 layer outside `save`/`load`/`resync`** — that is not a style point, it is the
 rig seek bug.
 
-**1a. There are two clocks, and only one of them is whole.** `Loop.advance`
-drains the accumulator and steps the **walker** once per whole frame;
-`Player.gameTick` hands the **port** `frames: wall * speed * 60`, taken
-straight off the rAF timestamp, so it is fractional and different on every
-frame. Everything in `game/` integrates that. The engine's own frame is fixed
-and `g_cam_path_frame` is `__ftol`'d — it steps by exactly one — so an
-`== cue` is safe there and is not automatically safe here. `test:state` has
-always driven the world at one whole frame per tick, which is why the headless
-oracle has always been deterministic and the page was not.
+**1a. One clock, one fixed tick, and it is never skipped.** The simulation
+advances in whole 60 Hz ticks — the walker and the port together, by exactly
+one — and a **frame** is something else: one `requestAnimationFrame`, one
+drawing of the scene. A drawn frame runs however many whole ticks the
+accumulator owes. Usually one on a 60 Hz display, usually none on 144 Hz,
+several after a stall.
 
-`app/harness.ts` and `?drive=1` are the answer for anything that has to
-*compare two runs*: under the flag the walker and the port advance together,
-one whole frame at a time, when a driver asks. **Whether ordinary interactive
-play should also advance in whole frames is an open decision**, not a settled
-one — see `docs/PLAYER_HANGS.md` item 8.
+This is what the engine does. `obj+0x19C` counts up one per game frame and
+both camera drivers end on `g_cam_path_frame = __ftol(...)`, an integer that
+steps by one, which is why an exact-frame cue is safe there. It is why a port
+that advanced by a *fraction* of a frame was not running the same game — and
+that is what it did: `Player.gameTick` handed `game/` `frames: wall * 60`
+taken straight off the rAF timestamp, so the same stage on the same seed
+played four different ways over five runs (`PLAYER_HANGS.md` item 8).
+
+**Owed time is spread, never dropped.** A burst larger than the per-frame cap
+leaves the remainder in the accumulator for the next frame; the cap exists so
+that one callback cannot block the tab while it simulates a minute, not to
+discard anything. The clamp that used to sit in `wallDelta` —
+`Math.min(0.1, ...)` — *was* a discard, and a silent one.
+
+**A debt worth dropping is never allowed to form**, which is what makes the
+line above affordable. The clock stops rather than accruing:
+
+* **the tab is hidden** — the loop stops, and `Loop.resume` moves the clock up
+  without banking the gap. A backgrounded tab does not simulate its minute in
+  one lurch, because it never owed one.
+* **paused, or free roam** — there is no game time to owe, and `Player` stops
+  asking for frames at all. `Player.rafId` is null and the loop is genuinely
+  asleep.
+
+The sleep is the part that can rot. A loop that sleeps must be **woken** by
+everything that changes what is on screen, and a missing waker does not throw,
+does not fail a type check, and does not fail a headless test — it leaves a
+panel showing something that is no longer true. So the wakers are few and all
+of them are chokepoints (`runCommand`, the keydown handler, `popstate`,
+`setLoading`, `fail`, a shot, the harness, the tab becoming visible), and
+`tools/pacing.mjs` proves it on the real page: it counts the page's own rAF
+calls by wrapping the browser API before the app boots, and asserts that
+playing runs the loop, pausing stops it, and an input wakes it for one frame
+without advancing any game time.
+
+**Interpolation between ticks is deliberately not done.** A fast display
+redraws the same simulated state more than once. Doing better needs the
+previous *and* current pose in `render/` — a second copy of state above the
+engine line, which `resync` would then have to rebuild — and at 60 Hz
+simulated it buys nothing until the display is faster. It is a visual nicety
+and it is not what correctness needed.
+
+`speed` scales what goes **into** the accumulator, never the size of a tick.
+Half speed is half as many ticks a second, each still exactly 1/60 s. There is
+no such thing as a short tick.
+
+`app/harness.ts` and `?drive=1` are the same loop with the **wall replaced by
+a driver** as the thing the accumulator is fed from. Nothing else changes: the
+same `stepOneFrame`, the same rAF, the same draw and publish. That is the
+point — a harness that stepped the world down a path of its own would be
+proving that path, and the player does not have it.
 
 **1b. One owner per fact, and the context is where a shared one lives.**
 Anything more than one layer reads goes on the `Context` — the walker, the

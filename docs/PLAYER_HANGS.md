@@ -293,23 +293,23 @@ slowly; that is fixed. What now needs finding is **what actually reads
 `sub+0x0E`**, because op 3 sets it deliberately. The field is kept and the
 sidebar shows it. `[open]`
 
-## 8. The same stage does not play the same way twice — **fixed for anything driven; a decision is open for interactive play**
+## 8. The same stage does not play the same way twice — **fixed**
 
 Stage 1 gave four different outcomes over five runs on identical code and an
 identical route. The gameplay was never the problem: **the clock and the input
 timing were.**
 
-**The mechanism.** There are two clocks and they disagree about what a frame
+**The mechanism.** There were two clocks and they disagreed about what a frame
 is.
 
-* `Loop.advance` (`web/src/app/loop.ts`) drains a 60 Hz accumulator and steps
-  the **walker** once per *whole* frame.
-* `Player.gameTick` (`web/src/app/main.ts`) returns
+* `Loop.advance` (`web/src/app/loop.ts`) drained a 60 Hz accumulator and
+  stepped the **walker** once per *whole* frame.
+* `Player.gameTick` (`web/src/app/main.ts`) returned
   `{ dt: wall * speed, frames: dt * 60 }` — taken straight off the rAF
-  timestamp, so it is **fractional and different on every frame** — and that
-  tick drives `world.update`, which is the whole of `game/` and every render
-  layer. Every motion clock, timer and state advance in the port therefore
-  moved by a browser-dependent amount, and `g_frame` was a float.
+  timestamp, so **fractional and different on every frame** — and that tick
+  drove `world.update`, which is the whole of `game/` and every render layer.
+  Every motion clock, timer and state advance in the port therefore moved by a
+  browser-dependent amount, and `g_frame` was a float.
 
 And the harness scheduled on wall time on top of that: `playthrough.mjs` polled
 every 250 ms and fired a volley after N *milliseconds* of no address movement,
@@ -318,14 +318,31 @@ so the shots landed on a different game frame in every run.
 The cheap experiment this item asked for was the right one, and the answer is
 yes.
 
-**The fix.** `?drive=1` and `web/src/app/harness.ts`. Under the flag, rAF keeps
-running and the renderer keeps drawing — it is the real page, the real UI and
-the real shot path — but game time advances only when a driver asks for it, and
-only in whole 60 Hz frames with the walker and the port in step. Inputs are
-scheduled by **frame number**; the game is stopped between two `advance` calls,
-so a pointer event dispatched there lands on an exact frame and cannot
-interleave with a tick. The seam is inert without the flag and may do nothing a
-`UiCommand` cannot.
+**The fix, in two parts.**
+
+*One clock, everywhere.* `Loop` is the pacer and `Player.stepOneFrame` is the
+tick; a drawn frame runs however many whole 60 Hz ticks the accumulator owes,
+and `gameTick` is gone. **This is interactive play too, not only a driven
+run** — the user's call, and the reason is that the engine's frame is fixed:
+`obj+0x19C` counts up by one per game frame and `g_cam_path_frame` is
+`__ftol`'d, so an `== cue` is safe there and a port integrating a fraction of a
+frame was not running the same game.
+
+Nothing is skipped, either. The catch-up is *spread* — a burst larger than the
+per-frame cap stays in the accumulator for the next frame — and the
+`Math.min(0.1, ...)` clamp in `wallDelta`, which silently lost 400 ms of game
+time in a 500 ms stall, is gone. That is affordable because a debt worth
+dropping is no longer allowed to form: a hidden tab stops the clock and resumes
+without banking the gap, and a paused player stops asking for frames at all.
+`tools/pacing.mjs` proves that arrangement on the real page.
+
+*A different time source for a driver.* `?drive=1` and
+`web/src/app/harness.ts` feed the same accumulator from the driver instead of
+from the wall, and change nothing else — the same `stepOneFrame`, the same
+rAF, the same draw and publish. Inputs are scheduled by **frame number**; the
+game is stopped between two `advance` calls, so a pointer event dispatched
+there lands on an exact frame and cannot interleave with a tick. The seam is
+inert without the flag and may do nothing a `UiCommand` cannot.
 
 **The proof, and it was watched failing.** `tools/determinism.mjs` runs the
 same stage on the same seed with the same frame-scheduled inputs twice and
@@ -336,17 +353,17 @@ RNG state already apart. With the fix it is identical over 2000 frames, and
 five full playthroughs of each of stages 1 and 2 are byte-identical apart from
 the wall-clock column.
 
-**What is still open, and it is a decision rather than a reading.**
-`?drive=1` makes a *driven* run whole-frame. **Ordinary interactive play is
-untouched and still hands the port a fractional wall-derived tick.** Making it
-whole-frame as well is very likely the more faithful thing — the engine's frame
-is fixed, and `g_cam_path_frame` is `__ftol`'d so it steps by exactly one,
-which is why an `== cue` is safe there — but it changes how the port behaves
-for a human at the keyboard, and that is the user's call, not an implementer's.
-Item 4 depends on the answer: `>=` where the engine has `==` is only needed
-*because* the clock can hand over a variable step.
+**Item 4 is now unblocked.** `>=` where the engine has `==` was only needed
+*because* the clock could hand over a variable step. It no longer can, so the
+port can take the engine's own comparison — read the routine first.
 
-The family of **exact-frame cues** is the reason it matters. `atLastFrame` in
+**Interpolation between ticks is deliberately not done.** A fast display
+redraws the same simulated state more than once. Doing better needs the
+previous and current pose in `render/`, which is a second copy of state above
+the engine line that `resync` would have to rebuild, and at 60 Hz simulated it
+buys nothing until the display is faster.
+
+The family of **exact-frame cues** is the reason all of this matters. `atLastFrame` in
 `class30/target.ts` (equality, and deliberately so — `>=` would double-count
 loops), the kill cue in `ZombieStateTargetMotionScript`, and
 `CivilianStepScript`'s motion-frame wait are all `===` against a cursor derived

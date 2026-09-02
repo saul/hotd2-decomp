@@ -701,10 +701,13 @@ bundle that already holds every asset, dead in this build, or gated on
 machinery the player does not have (a scene state machine, the action ring,
 collision). The one genuine unknown left is `variant_*`.
 
-## The three clocks
+## Wall time, game time, and what stops when
 
-Wall time, game time and the script's own 60 Hz accumulator are separate, and
-which of them a thing rides decides what happens when you stop.
+There were three clocks and there are now two: **game time**, which is the
+fixed 60 Hz tick below, and **wall time**, which is what the feedback for a
+click rides. The script's own accumulator used to be a third; it is the one the
+port runs on now. Which of the two a thing rides decides what happens when you
+stop.
 
 | mode | script | port and render | wall-time effects |
 |---|---|---|---|
@@ -737,41 +740,61 @@ hold correctly: a half-open door stays half open, the rain stops, and the
 impact sprites — feedback for a click rather than script state — still play out
 on wall time.
 
-### The fourth clock: `?drive=1`
+### The clock: one fixed tick, and who feeds it
 
-There is a fourth, and it exists because the three above are all measured
-against the wall.
+**The simulation advances in whole 60 Hz ticks and never skips one.** A
+*frame* is a different thing — one `requestAnimationFrame`, one drawing of the
+scene — and a drawn frame runs however many whole ticks the accumulator owes:
+usually one on a 60 Hz display, usually none on 144 Hz, several after a stall.
 
-The script's accumulator hands the **walker** whole 60 Hz frames.
-`Player.gameTick` hands the **port** `frames: wall * speed * 60`, straight off
-the rAF timestamp — fractional, and different on every frame. So a stage played
-twice integrated a different amount of time between the same two instructions,
-`g_frame` was a float, and every `===` against a frame cursor was a coin toss.
-Stage 1 gave four different outcomes over five runs on identical code and an
-identical route.
+It was not always one clock. The script's accumulator handed the **walker**
+whole frames while `Player.gameTick` handed the **port**
+`frames: wall * speed * 60` straight off the rAF timestamp — fractional, and
+different on every frame. So a stage played twice integrated a different amount
+of time between the same two instructions, `g_frame` was a float, and every
+`===` against a frame cursor was a coin toss. Stage 1 gave four different
+outcomes over five runs on identical code and an identical route.
 
-`?drive=1` and `app/harness.ts` hand the game clock to whoever is driving.
+The engine's frame is fixed: `obj+0x19C` counts up by one per game frame, and
+both camera drivers end on `g_cam_path_frame = __ftol(...)`, an integer that
+steps by one. That is why an exact-frame cue is safe there, and why a port
+integrating a fraction of a frame was not running the same game.
+
+**Nothing is dropped.** A burst bigger than the per-frame cap leaves the
+remainder in the accumulator for the next frame — the catch-up is spread, not
+discarded — and the `Math.min(0.1, ...)` that used to sit in `wallDelta`, which
+lost 400 ms of game time in a 500 ms stall and said nothing, is gone. That is
+affordable because a debt worth dropping is never allowed to form: **a hidden
+tab stops the clock** and resumes without banking the gap, and **a paused
+player stops asking for frames at all.**
+
+The loop genuinely sleeps, so anything that changes what is on screen has to
+wake it. The wakers are chokepoints — `runCommand`, the keydown handler,
+`popstate`, `setLoading`, `fail`, a shot, the harness, the tab becoming
+visible — and `tools/pacing.mjs` proves the whole arrangement on the real page,
+counting the page's own rAF calls from outside the module graph.
+
+Interpolation between ticks is deliberately not done: it needs the previous and
+current pose in `render/`, which is a second copy of state above the engine
+line, and at 60 Hz simulated it buys nothing until the display is faster.
+
+#### `?drive=1` is the same loop with a different time source
+
+| | script | port | who feeds the accumulator |
+|---|---|---|---|
+| Play | whole ticks | whole ticks | the wall clock |
+| `?drive=1` | whole ticks | whole ticks | the driver |
+
 Under the flag rAF keeps running and the renderer keeps drawing — it is the
 real page, the real UI, the real shot path — but game time advances only when
-`advance(n)` asks for it, and only in whole frames, walker and port together.
-A driver schedules its input by **frame number**: the game is stopped between
-two calls, so a pointer event dispatched there lands on an exact frame.
-
-| | script | port | who decides when |
-|---|---|---|---|
-| Play | whole frames | `wall * 60` | the wall clock |
-| `?drive=1` | whole frames | **whole frames** | the driver |
+`advance(n)` asks for it. A driver schedules its input by **frame number**: the
+game is stopped between two calls, so a pointer event dispatched there lands on
+an exact frame.
 
 The seam is inert without the flag and may do nothing a `UiCommand` cannot:
 stepping frames is Step mode with the count made explicit, reading state is the
 projection plus the globals the sidebar already shows. `tools/playthrough.mjs`
 and `tools/determinism.mjs` are the two drivers.
-
-**Ordinary interactive play still takes the fractional tick.** Making it whole
-as well is very likely more faithful — the engine's frame is fixed and
-`g_cam_path_frame` is `__ftol`'d, so it steps by exactly one — but it changes
-what a human at the keyboard sees, and that decision is recorded as open in
-`docs/PLAYER_HANGS.md` item 8.
 
 ---
 

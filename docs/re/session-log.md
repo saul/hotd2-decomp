@@ -8552,3 +8552,70 @@ either way. Item 4 depends on the answer.
 2. Sweep stages 3–6 (item 11) — now worth doing, because a result is a result.
 3. Item 1, the camera parked facing a wall, is the next real one: stage 2 still
    cheats past blocks 3, 9 and 28, the same three every run.
+
+---
+
+## Session — one clock, and a loop that is allowed to sleep
+
+Follows the determinism session above. That one made a *driven* run
+reproducible and left the interactive clock as a question for the user. The
+answer came back as a design rather than a yes/no: **decouple render frames
+from ticks — the simulation advances 1/60 s at a time and never skips; render
+as fast as you like; when the tab loses focus stop simulating; when the game is
+paused stop asking for frames at all.**
+
+That is what is now in `app/loop.ts`, and most of it was deletion. The
+accumulator already existed and was already right — it was simply that only the
+walker used it, and `world.update` was handed the raw rAF delta beside it. The
+previous session's `stepOneFrame` turned out to be the missing half: the whole
+of one tick, walker and port together. Wiring it into `Loop.advance` and
+deleting `gameTick` collapsed the two clocks into one, and made `?drive=1`
+**the same loop with the accumulator fed by a driver instead of by the wall**
+rather than a second path that has to be kept equivalent to the first. The
+guard the previous session needed — `if (!this.drive && this.walker)`, there to
+stop the port getting a second helping of time — is gone with it.
+
+**The silent skip was not where it looked.** The `MAX_CATCHUP_FRAMES` cap in
+`advance` never dropped anything: it stopped the drain and left the remainder
+in the accumulator, so the next frame ran it. The actual discard was
+`Math.min(0.1, ...)` in `wallDelta` — a 500 ms stall lost 400 ms of game time
+and nothing said so. Worth writing down because the cap *looks* like the
+dangerous one and is the safe one.
+
+**Stopping the loop is the part that can rot.** A loop that sleeps must be
+woken by everything that changes the screen, and a missing waker does not
+throw, does not fail `tsc` and does not fail a headless test — it leaves a
+panel showing something that is no longer true. So `tools/pacing.mjs` drives
+the real page *undriven*, counts the page's own `requestAnimationFrame` calls
+by wrapping the browser API before the app boots, and asserts that playing runs
+the loop, pausing stops it dead, and an input wakes it for exactly one frame
+without advancing any game time. It was watched failing: with the sleep removed
+it reports 60 frames in a second where it wants 0.
+
+It also pins the tick in one number — **61 drawn, 61 simulated** — which is the
+thing that was not true before.
+
+### Two assertions I got wrong before the code was wrong
+
+Both worth keeping, because both looked like bugs.
+
+1. My first attempt at breaking the determinism check made `Tick.frames`
+   fractional and **nothing happened**. The port integrates `dt`, not `frames`.
+   Had I stopped there I would have recorded a false pass for a check that does
+   bite: jittering `dt` by 1% diverges at trace index 106.
+2. `pacing.mjs` first pressed `Digit1` to test the wake and failed on "it did
+   not start the loop again" — 27 frames. That is correct behaviour. `Digit1`
+   is Step mode, where the script stands still but the **port keeps running**,
+   which is what makes a zombie loop its walk while you read the tree. The test
+   now presses an unbound key, which asks the narrower question it meant to.
+
+### The wrong turn
+
+`git checkout -- src/app/main.ts`, to undo a deliberate one-line perturbation,
+discarded the whole of that file's uncommitted work with it. This is the second
+time in this project that exact command has done exactly that. The perturbation
+was three lines and reverting it by hand would have cost nothing; the file was
+two hours of work. Rebuilding it was cheap only because the edits had been
+applied by a script that was still on disk — which is now the habit worth
+keeping: **apply structural edits from a saved script, and commit before
+perturbing anything.**

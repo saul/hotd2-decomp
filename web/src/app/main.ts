@@ -34,6 +34,7 @@ import { SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
+import { install as installHarness, type Harness } from "./harness";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { Bgm } from "../audio/bgm";
@@ -77,6 +78,16 @@ import type { RenderContext } from "../render/context";
 import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
 import { Loop, TICK } from "./loop";
+
+/**
+ * What one driven frame is worth.
+ *
+ * Whole, and `wall` is `dt`: under the driven clock there is no wall time to
+ * be had, so the feedback that rides it — the impact sprites — advances by the
+ * same amount as everything else instead of by however long the browser took.
+ */
+const DRIVEN_TICK: Tick =
+  { dt: TICK, frames: 1, wall: TICK, frozen: false };
 import { GameSystem, ScriptSystem, drawSystem, syncPortGlobals }
   from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
@@ -233,6 +244,13 @@ export class Player implements PlayerView, PlayerCommands {
   readonly hudLayer: HudLayer;
 
   state: PlayerState = readState();
+  /**
+   * Who owns the game clock — `app/harness.ts`.
+   *
+   * Null unless `?drive=1`, and every driven branch below tests it, so the
+   * ordinary player has exactly the loop it always had.
+   */
+  private drive: Harness | null = null;
   playing = false;
   /** The address last written to the URL, and when — see `syncUrlToWalker`. */
   private urlSyncKey = "";
@@ -519,6 +537,9 @@ export class Player implements PlayerView, PlayerCommands {
     // Before the first `wallDelta`, or the first frame's delta is however
     // long the page took to get here.
     this.loop.start(performance.now());
+    // Before the first frame, because the first frame is the first one the
+    // driver may have to be given. `install` answers null without the flag.
+    this.drive = installHarness(this.state, this);
     requestAnimationFrame(this.frame);
     try {
       this.manifest = await loadManifest();
@@ -864,7 +885,22 @@ export class Player implements PlayerView, PlayerCommands {
     this.loop.speed = this.speed;
     this.loop.running = this.playing && this.state.mode !== "free"
                         && !!this.walker && !this.walker.branch;
-    if (!this.state.freeze && this.state.mode === "free") {
+    // The driven clock. `?drive=1` hands the whole of the game's time to
+    // `app/harness.ts`: nothing here advances by itself, and what does advance
+    // does so in whole 60 Hz frames with the walker and the port in step —
+    // which is the only reason a run can be compared with the one before it.
+    // Wall time is still read above, because the crosshair and the impact
+    // sprites are feedback for a click rather than part of the script's clock;
+    // no driven frame is measured with it.
+    if (this.drive) {
+      const n = this.drive.take();
+      for (let i = 0; i < n; i++) this.stepOneFrame();
+      this.drive.ran(n);
+      // After the frames and before the render, so the promise the driver is
+      // waiting on settles a macrotask after this frame's publish. See
+      // `Harness.settle`.
+      this.drive.settle();
+    } else if (!this.state.freeze && this.state.mode === "free") {
       this.freeRoam.update(wall, this.camera);
     } else if (!this.state.freeze && this.playing && this.walker) {
       if (this.walker.branch) {
@@ -884,7 +920,11 @@ export class Player implements PlayerView, PlayerCommands {
       }
     }
 
-    if (this.walker) {
+    // `!this.drive`, because under the driven clock this *is* `stepOneFrame`
+    // and running it again here would give the port a second helping of time
+    // that the walker never got — the exact disagreement between the two
+    // clocks that the flag exists to end.
+    if (!this.drive && this.walker) {
       // The port and the render layers run on wall time, not on the walker's
       // accumulator, and they run in every mode: a zombie loops its walk while
       // you step through the script one instruction at a time, and the rain
@@ -954,6 +994,60 @@ export class Player implements PlayerView, PlayerCommands {
   private get gameStopped(): boolean {
     if (this.state.mode === "free") return true;
     return this.state.mode === "play" && !this.playing;
+  }
+
+  /**
+   * One whole 60 Hz frame — the walker and the port, together.
+   *
+   * The driven clock's only unit of work, and the shape the engine's own frame
+   * has: `g_cam_path_frame` is `__ftol`'d and steps by exactly one, so an
+   * exact-frame cue is safe there and is only unsafe here because the port is
+   * normally handed `frames: wall * 60`. This hands it 1.
+   *
+   * Everything below is the ordinary loop's own body with the accumulator
+   * taken out, in the same order and under the same conditions: the walker
+   * only runs while the transport is playing and off a branch, the port only
+   * runs when `gameTick` would not have idled it, and `world.update` is the
+   * one call for the whole tick order. Nothing is skipped and nothing is
+   * added — a driven frame must be a frame, or the trace is measuring the
+   * harness.
+   *
+   * `speed` is deliberately not applied. Under the flag a frame is a frame;
+   * the driver sets the rate by asking for more or fewer of them.
+   */
+  stepOneFrame(): void {
+    const w = this.walker;
+    if (!w || this.state.freeze) return;
+    if (this.playing && this.state.mode !== "free") {
+      if (w.branch) {
+        // On the script's clock rather than the wall's. The countdown is what
+        // picks the route when nobody answers it, so a branch that expired
+        // after a variable number of frames put the whole rest of the stage on
+        // a different frame in every run.
+        if (!this.branchHover) w.tickBranchCountdown(TICK);
+      } else if (!w.finished) {
+        w.tick(TICK);
+        this.syncUrlToWalker(this.drivenMs);
+      }
+    }
+    this.pushPortGlobals();
+    this.cam.driving = !this.scrubbing;
+    this.cam.scripted = this.state.mode !== "free";
+    this.world.update(this.ctx, this.gameStopped ? this.loop.idle(TICK)
+                                                 : DRIVEN_TICK);
+    // After the frame, so a row is the state the frame left behind.
+    this.drive?.record();
+  }
+
+  /**
+   * Wall time, as the driven clock reckons it.
+   *
+   * Only `syncUrlToWalker`'s throttle reads it, and the URL is not game state
+   * — but a driven run that read `performance.now()` for anything at all would
+   * have a second clock again, and the whole point is that it does not.
+   */
+  private get drivenMs(): number {
+    return (this.drive?.driven ?? 0) * (TICK * 1000);
   }
 
   /** Game time for this frame: wall clock scaled by `speed`, zero while frozen. */

@@ -3,6 +3,7 @@
  *
  *     ?stage=2&block=3&step=1&op=14
  *     ?stage=2&slot=59&frame=170
+ *     ?stage=1&drive=1&seed=1        the driven clock, for a harness
  *
  * This is a user-facing deep-link feature and the hook a visual-regression
  * harness needs, which is why it is built in from the start rather than
@@ -24,6 +25,14 @@ export interface PlayerState {
   seed?: number;
   /** Halt the tick loop and render exactly one frame. For tests. */
   freeze?: boolean;
+  /**
+   * Hand the game clock to `app/harness.ts` — see the file for what that
+   * means and why it is a flag rather than a mode.
+   *
+   * Inert unless it is set: with it absent the player has no `advance`, no
+   * trace, and the same two clocks it has always had.
+   */
+  drive?: boolean;
 }
 
 const DEFAULTS: PlayerState = { stage: 2, original: false, mode: "step" };
@@ -56,6 +65,7 @@ export function readState(search = window.location.search): PlayerState {
     all: bool(q.get("all")),
     seed: num(q.get("seed")),
     freeze: bool(q.get("freeze")),
+    drive: bool(q.get("drive")),
   };
 }
 
@@ -72,6 +82,9 @@ export function writeState(s: PlayerState, replace = true): void {
   if (s.all) q.set("all", "1");
   if (s.seed !== undefined && s.seed !== 1) q.set("seed", String(s.seed));
   if (s.freeze) q.set("freeze", "1");
+  // Written back like every other flag, so the address sync that runs while
+  // the script plays does not quietly hand the clock back to the wall.
+  if (s.drive) q.set("drive", "1");
   const url = `${window.location.pathname}?${q.toString()}`;
   if (replace) window.history.replaceState(null, "", url);
   else window.history.pushState(null, "", url);

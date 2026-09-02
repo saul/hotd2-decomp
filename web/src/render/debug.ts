@@ -15,17 +15,17 @@
  *   into a one-glance answer.
  * * **The enemies the script is waiting for.** `wait_enemies_alive` blocks
  *   until the count falls; these are the actors keeping it blocked.
- * * **The approach rings**, on the ground at the camera. `TestApproachRing`
- *   turns the distance to these into the band that decides everything —
- *   whether an actor may close, whether it may attack, whether it is too
- *   close and must retreat. Drawing them turns "why is it doing that" into
- *   one glance, and an empty ring table into three missing circles rather
- *   than an afternoon.
+ *
+ * It used to draw the **approach rings** flat on the ground at the camera as
+ * well. They are gone: three circles that follow the camera everywhere read as
+ * scenery rather than as data, and the band each actor is actually in is
+ * already on its own box and in the sidebar row, where it belongs to the actor
+ * it describes. `G.g_enemy_approach_rings` is unchanged and
+ * `TestApproachRing` still decides everything; only the drawing has gone.
  */
 import {
-  Box3, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture,
-  EdgesGeometry, Group, LineBasicMaterial, LineLoop, LineSegments,
-  Sprite, SpriteMaterial, Vector3,
+  Box3, BoxGeometry, CanvasTexture, EdgesGeometry, Group, LineBasicMaterial,
+  LineSegments, Sprite, SpriteMaterial, Vector3,
 } from "three";
 import type { ActiveSpawn } from "../script/walker";
 import type { System } from "../core/system";
@@ -54,18 +54,11 @@ const PERMIT = 0xffb02e;
 const AWAITED = 0x4dff8c;
 /** Cyan: picked out by a sidebar panel, whatever it is doing. */
 const SELECTED = 0x26d9ff;
-/** The three rings: inner is strike range, then mid, then outer. */
-const RING_COLOURS = [0xff6b6b, 0xffd166, 0x6bcBff];
-
 /**
  * Label textures, cached by colour and text. A permit moving between actors
  * flips a label twice a second, and a fresh `CanvasTexture` per flip is a leak.
  */
 const LABELS = new Map<string, CanvasTexture>();
-
-/** Segments in a drawn ring, and how far under the eye it sits. */
-const RING_SEGMENTS = 64;
-const RING_DROP = 14;
 
 /** The descriptor offset, as it is written everywhere else in this project. */
 const hex = (at: number): string => `0x${at.toString(16).toUpperCase()}`;
@@ -124,7 +117,6 @@ export class DebugBoxLayer implements System<RenderContext> {
   source: BoundsSource | null = null;
 
   private readonly pool: Boxed[] = [];
-  private readonly rings: LineLoop[] = [];
   private readonly unit = new EdgesGeometry(new BoxGeometry(1, 1, 1));
   private readonly _box = new Box3();
   private readonly _size = new Vector3();
@@ -134,46 +126,6 @@ export class DebugBoxLayer implements System<RenderContext> {
 
   constructor() {
     this.group.name = "debug-boxes";
-  }
-
-  /**
-   * `g_enemy_approach_rings` and its two siblings, drawn flat at the camera.
-   *
-   * Ring set 0 is what almost everything uses; character type 0 uses set 2.
-   * Only the set the live actors actually measure against is drawn, so the
-   * circles mean something rather than being a diagram.
-   */
-  private updateRings(eye: Vector3): void {
-    const live = G.g_object_list.filter((o) => o.visible && !o.dead);
-    const set = live.find((o) => o.cls === SpawnClass.Zombie)?.ringSet ?? 0;
-    const radii = [
-      G.g_enemy_approach_rings[set] ?? G.g_enemy_approach_rings[0] ?? 0,
-      G.g_enemy_approach_ring_mid[set] ?? G.g_enemy_approach_ring_mid[0] ?? 0,
-      G.g_enemy_approach_ring_outer[set] ?? G.g_enemy_approach_ring_outer[0] ?? 0,
-    ];
-    radii.forEach((r, i) => {
-      let loop = this.rings[i];
-      if (!loop) {
-        const pts: number[] = [];
-        for (let a = 0; a < RING_SEGMENTS; a++) {
-          const t = (a / RING_SEGMENTS) * Math.PI * 2;
-          pts.push(Math.cos(t), 0, Math.sin(t));
-        }
-        const g = new BufferGeometry();
-        g.setAttribute("position",
-                       new BufferAttribute(new Float32Array(pts), 3));
-        loop = new LineLoop(g, new LineBasicMaterial({
-          color: RING_COLOURS[i], transparent: true, opacity: 0.55,
-          depthTest: false,
-        }));
-        this.group.add(loop);
-        this.rings[i] = loop;
-      }
-      // A zero radius is the tell that the ring table never loaded.
-      loop.visible = r > 0;
-      loop.scale.set(r, 1, r);
-      loop.position.set(eye.x, eye.y - RING_DROP, eye.z);
-    });
   }
 
   private acquire(colour: number): Boxed {
@@ -269,11 +221,8 @@ export class DebugBoxLayer implements System<RenderContext> {
                       || this.highlight.size > 0;
     if (!this.group.visible) {
       for (const b of this.pool) b.node.visible = false;
-      for (const r of this.rings) r.visible = false;
       return;
     }
-    if (this.showBoxes) this.updateRings(this._eye);
-    else for (const r of this.rings) r.visible = false;
 
     const id = this.labels(spawns);
 
@@ -336,15 +285,13 @@ export class DebugBoxLayer implements System<RenderContext> {
 
   /** The nodes belong to the scene, which is rebuilt on a stage change. */
   /**
-   * A stage has loaded. The pool and the range rings are grown on demand and
-   * hang off this layer's own group, so the stage scope empties them.
+   * A stage has loaded. The pool is grown on demand and hangs off this layer's
+   * own group, so the stage scope empties it.
    */
   attach(ctx: RenderContext): void {
     ctx.scope.child("debug_boxes").defer(() => {
       for (const b of this.pool) b.node.removeFromParent();
-      for (const r of this.rings) r.removeFromParent();
       this.pool.length = 0;
-      this.rings.length = 0;
       this.used = 0;
     });
   }

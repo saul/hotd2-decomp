@@ -8704,6 +8704,74 @@ applied by a script that was still on disk — which is now the habit worth
 keeping: **apply structural edits from a saved script, and commit before
 perturbing anything.**
 
+## Session — the camera flickering between two look-at points
+
+Report: "the camera is rapidly trying to switch between two different look-at
+points between frames — looking one place, then a slightly different place on
+the next frame." Stage 1, before the first zombies appear.
+
+Not a decomp bug. `CameraTrackEnemiesTick` and `CamAdvancePathFrame` are both
+faithful; what was wrong was **when the player runs them**.
+
+A camera frame in the port is two systems either side of the game phase, and
+`render/camera.ts` has said so since it was written:
+
+```
+script:  CameraSeat  -- CamAdvancePathFrame writes the block from the rail
+game:    GameSystem  -- CameraTrackEnemiesTick eases the block's aim
+render:  CameraDraw  -- the block becomes the three.js camera
+```
+
+`Player.frame` draws once per rAF and ticks at a fixed 60 Hz, so on a display
+faster than 60 most frames owe no tick and take the `tickStopped` path — which
+runs the **whole** tick order on `Loop.idle`, because the impact sprites ride
+wall time and have to keep moving while the clock is stopped. `GameSystem`
+refuses a tick with no time in it. `CameraSeatSystem` did not. So on those
+frames the block went back on the rail, the ease was skipped, and the un-eased
+aim was drawn: one frame eased, the next on the rail, at the refresh rate.
+
+It is invisible at 60 Hz — there are no idle frames there at all — which is
+why it survived. Driving the real loop against the shipped stage 1 bundle:
+
+| display | idle frames | flickering frames | camera travel |
+|---|---|---|---|
+| 60 Hz | 0 of 600 | 0 | 626 deg |
+| 75 Hz | 240 of 1200 | 144 | 2220 deg |
+| 120 Hz | 600 of 1200 | 785 | 5733 deg |
+| 144 Hz | 701 of 1200 | 499 | 3676 deg |
+
+Nine tenths of the camera's movement at 120 Hz was the flicker, and the worst
+frame swung 10.8 degrees and came straight back.
+
+**The reproduction is the finding.** The first probe showed nothing, because
+it ran with an empty object pool: with no enemy registered
+`SelectCameraLookAtTarget` writes the path's own target, `TurnLookAtToward`
+re-emits it along the same ray, and the eased aim and the rail aim are the
+same direction. The two halves are indistinguishable until the camera *wants*
+to look somewhere the rail does not. Spawning one tracked enemy turned zero
+flickering frames into 785 of 1200 on the next run. A reduction that cannot
+tell the two cases apart is not a reduction.
+
+The fix is one line in `CameraSeatSystem.update` — `if (t.frozen || t.dt <= 0)
+return;`, the same test `GameSystem` makes one system later — and at 60 Hz the
+camera travel is unchanged to the digit, which is what says it is a no-op
+where every frame owes a tick. The draw stays ungated on purpose: placing the
+camera from an unchanged block is idempotent and a resize needs it. The seek,
+the stage load and the frame slider never went through the system anyway; they
+seat through `Player.syncCameraToWalker`.
+
+The rest of the render layer was checked for the same shape. `PropLayer`
+advances its swing counter by `t.dt * 60` and `BackdropLayer` guards its
+`angle += spin` on `t.frozen`, so both already answer no. The camera was the
+only half-frame writer.
+
+Worth naming as a rule, because `verify_layers.py` cannot see it:
+`no-engine-writes-in-render` is zero, and this system writes `G` on every
+frame — through `CamAdvancePathFrame`, which lives in `game/`, so it counts
+against the `render-drives-the-port` ratchet instead and is one of its twelve.
+A renderer that calls into the port inherits the port's rules about *when*,
+and nothing was checking that. `test/camera.test.ts` now does, for this one.
+
 ---
 
 ## Session — the camera was not facing a wall, it was aimed at NaN

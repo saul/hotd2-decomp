@@ -778,6 +778,51 @@ Interpolation between ticks is deliberately not done: it needs the previous and
 current pose in `render/`, which is a second copy of state above the engine
 line, and at 60 Hz simulated it buys nothing until the display is faster.
 
+#### A frame that owes no tick must not do part of one
+
+The corollary, and it cost the camera. `Player.tickStopped` runs the **whole**
+tick order on `Loop.idle` — it has to, because the impact sprites and the
+crosshair are feedback for a click and keep moving while the clock is stopped
+— so every system in that order decides for itself whether a tick with no time
+in it is any of its business. `GameSystem` answers no. A system that is *half*
+of a game-time job has to answer no as well.
+
+`CameraSeatSystem` did not, and the report was **"the camera rapidly switches
+between two look-at points between frames"**. A camera frame is two systems
+either side of the game phase: the seat writes the block from the rail, and
+`CameraTrackEnemiesTick` eases that block's aim onto whatever the fight wants.
+On a frame that owed no tick the seat ran, put the block back on the rail, the
+ease did not run, and the draw put the un-eased aim on screen. One frame eased,
+the next on the rail, at the display's refresh rate.
+
+**It is invisible at 60 Hz**, which is why it lasted: there, every drawn frame
+owes a tick and there is no idle frame to draw the wrong half. Driving the real
+loop against the shipped stage 1 bundle with one enemy registered:
+
+| display | idle frames | flickering frames | camera travel |
+|---|---|---|---|
+| 60 Hz | 0 of 600 | **0** | 626° |
+| 75 Hz | 240 of 1200 | 144 | 2220° |
+| 120 Hz | 600 of 1200 | **785** | 5733° |
+| 144 Hz | 701 of 1200 | 499 | 3676° |
+
+At 120 Hz nine tenths of the camera's movement was the flicker, and the worst
+single frame swung **10.8°** and came straight back. With the seat gated on
+`t.frozen || t.dt <= 0` — the same test `GameSystem` makes, one system later —
+the count is zero at every rate and the 60 Hz travel is unchanged to the digit,
+which is what says the fix is a no-op on a display that owes every frame a tick.
+
+Nothing else wanted the ungated seat: the seek, the stage load and the frame
+slider all seat through `Player.syncCameraToWalker`, which calls
+`CameraRig.sync` directly. The **draw** is deliberately still ungated — placing
+the three.js camera from a block that has not changed is idempotent, and a
+resize needs it.
+
+`test/camera.test.ts` is the guard: it plays stage 1 at 60 and 120 Hz through
+the real `Loop`, `Walker`, `CameraRig` and `CameraTrackEnemiesTick`, and
+asserts that a frame owing no tick draws the pose the last tick left. It was
+made to fail against the old code first — 785 flickering frames of 1200.
+
 #### `?drive=1` is the same loop with a different time source
 
 | | script | port | who feeds the accumulator |

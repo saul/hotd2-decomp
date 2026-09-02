@@ -129,13 +129,38 @@ export class CameraRig {
 /**
  * The first half, in the `script` phase: the shot writes the camera block
  * before the port's frame reads it.
+ *
+ * ## Why this refuses a frame that advances no game time
+ *
+ * Seating the block is the **first half** of a camera frame;
+ * `CameraTrackEnemiesTick`, inside `GameSystem`, is the second, and it is the
+ * half that eases the aim off the rail and onto whatever the fight wants. So
+ * the two have to run together or not at all, and `GameSystem` already
+ * refuses a tick with no time in it — this makes the same test, deliberately
+ * spelled the same way.
+ *
+ * Without it the camera **flickered between two aims at the display's refresh
+ * rate**, and only on a display faster than 60 Hz. `Player.frame` draws every
+ * rAF but ticks at a fixed 60, so on a 120 Hz panel every other frame owes no
+ * tick and takes the `tickStopped` path — which runs the whole tick order
+ * with `Loop.idle`. This system seated the block back on the rail, `GameSystem`
+ * returned early, and the draw put the *un-eased* aim on screen. One frame
+ * eased, the next on the rail, sixty times a second: a stage-1 measurement put
+ * it at 3.5 degrees each way with one enemy registered.
+ *
+ * Nothing else needed it. The seek, the stage load and the frame slider all
+ * seat the block through `Player.syncCameraToWalker`, which calls
+ * `CameraRig.sync` directly and never went through this system; and the draw
+ * still runs every rendered frame, because placing the three.js camera from a
+ * block that has not changed is idempotent and a resize needs it.
  */
 export class CameraSeatSystem implements System<RenderContext> {
   readonly id = "camera.seat";
   constructor(private readonly rig: CameraRig) {}
 
-  update(ctx: RenderContext, _t: Tick): void {
+  update(ctx: RenderContext, t: Tick): void {
     if (!this.rig.driving) return;
+    if (t.frozen || t.dt <= 0) return;
     this.rig.seat(ctx);
   }
 }

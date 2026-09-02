@@ -31,6 +31,23 @@
  * deliberately not done yet; the decoupling is what correctness needed, and
  * interpolation would put a second copy of every pose above the engine line.
  *
+ * ## A frame that owes no tick must not do part of one
+ *
+ * The corollary, and it has already cost a bug. `Player.tickStopped` runs the
+ * **whole tick order** on `idle`, because the layers that ride wall time —
+ * the impact sprites, the crosshair — have to keep moving while the clock is
+ * stopped. Every system in that order therefore has to decide for itself
+ * whether it has anything to do on a tick with no time in it, and a system
+ * that is *half* of a game-time job must answer no.
+ *
+ * `CameraSeatSystem` did not. It writes the camera block from the rail and
+ * `CameraTrackEnemiesTick` eases that block onto the fight, the two either
+ * side of the game phase — so on every frame that owed no tick the block went
+ * back on the rail, the ease was skipped, and the un-eased aim was drawn. At
+ * 60 Hz there are no such frames and nothing showed. At 120 Hz there is one
+ * every other frame, and the camera flickered between two aims by up to ten
+ * degrees. `test/camera.test.ts` is the guard.
+ *
  * ## Owed time is spread, never dropped
  *
  * `wallDelta` is **not** clamped, and the per-frame cap does not discard: a

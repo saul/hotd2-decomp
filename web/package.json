@@ -17,6 +17,7 @@
     "test:state": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/state.test.ts",
     "test:ui": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/ui.test.tsx",
     "test:projection": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/projection.test.ts",
+    "test:camera": "node --experimental-strip-types --no-warnings tools/run_test.mjs test/camera.test.ts",
     "verify:ui": "node tools/verify_ui.mjs",
     "shot": "node tools/shot.mjs",
     "pacing": "node tools/pacing.mjs",

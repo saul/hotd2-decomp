@@ -108,6 +108,44 @@ export function ZombieScriptForState(obj: Actor): TargetScriptJson | null {
   return (obj.state === obj.attackState ? p.attack : p.target) ?? null;
 }
 
+/** The tail's two blobs, as `obj+0x1398` distinguishes them by address. */
+const SCRIPT_TARGET = 0;                       // tail +0x04
+const SCRIPT_ATTACK = 1;                       // tail +0x08
+
+/** Which blob `ZombieScriptForState` picks for the state the actor is in now. */
+function blobForState(obj: Actor): number {
+  return obj.state === obj.attackState ? SCRIPT_ATTACK : SCRIPT_TARGET;
+}
+
+/**
+ * Write `obj+0x1398`: point the cursor into a blob, `pc` entries in.
+ *
+ * Every place the engine assigns that pointer goes through here, and nowhere
+ * else re-derives it. `ZombieStateWalkToTarget` sets it to `blob + 10` — past
+ * the head — and `ZombieStateTargetMotionScript` to `blob + 4` per entry
+ * consumed; both are this, in entries rather than shorts.
+ */
+function aimCursor(obj: Actor, blob: number, pc: number): void {
+  obj.scriptBlob = blob;
+  obj.scriptPc = pc;
+}
+
+/**
+ * Read `obj+0x1398`: the blob the cursor is walking, whatever the state is now.
+ *
+ * **This is the one that was missing.** A captor's walk leaves the cursor in
+ * the *attack* blob and then enters state 35, which is not its attack state —
+ * so a reader that asked `ZombieScriptForState` got the target blob back,
+ * replayed the approach clip it had already finished, and bounced to the walk
+ * again. Two zombies circled a hostage in stage 3 for ever and her script,
+ * parked on `children-alive`, never moved.
+ */
+function cursorScript(obj: Actor): TargetScriptJson | null {
+  const p = obj.script;
+  if (!p) return null;
+  return (obj.scriptBlob === SCRIPT_ATTACK ? p.attack : p.target) ?? null;
+}
+
 /** The entry the cursor is on, or null past the end of the list. */
 function entryAt(s: TargetScriptJson | null, pc: number):
     TargetScriptEntry | null {
@@ -164,7 +202,9 @@ export function ZombieScriptEnded(obj: Actor): void {
       break;
     case ZombieState.TargetMotionScript:
     case ZombieState.TargetScriptWithFlag:
-      obj.scriptPc = 0;
+      // `obj+0x1398 = ZombieScriptForState(...)` — the blob's *start*, chosen
+      // with the state this function has just written.
+      aimCursor(obj, blobForState(obj), 0);
       obj.sub = 1;
       break;
     case ZombieState.WalkPastPoint: {
@@ -274,7 +314,7 @@ function loadEntry(obj: Actor, e: TargetScriptEntry, blend: number): void {
   obj.scriptMotion = e.motion;
   obj.targetLoops = e.loops;
   obj.targetCue = e.mode;
-  obj.scriptPc += 1;
+  obj.scriptPc += 1;                           // `0x1398 = psVar6 + 4`
 }
 
 /**
@@ -298,12 +338,12 @@ export function ZombieStateWalkToTarget(obj: Actor): void {
       ActorSetMotionBlended(obj, m, s?.head.frame ?? 0, obj.sub === 0 ? 0 : 10);
     }
     obj.scriptMotion = obj.motion;
-    obj.scriptPc = 0;
+    aimCursor(obj, blobForState(obj), 0);       // `0x1398 = puVar6 + 10`
     obj.sub = 2;
   } else if (obj.sub === 2 && t) {
     const d = Math.hypot(obj.pos.x - t.pos.x, obj.pos.z - t.pos.z);
     if (d <= obj.targetArrive) {
-      if (!entryAt(s, obj.scriptPc)) {
+      if (!entryAt(cursorScript(obj), obj.scriptPc)) {
         ZombieScriptEnded(obj);
       } else {
         obj.state = ZombieState.TargetMotionScript;
@@ -330,17 +370,20 @@ export function ZombieStateWalkToTarget(obj: Actor): void {
  */
 export function ZombieStateTargetMotionScript(obj: Actor, rng: Rng,
                                               events?: Events): void {
-  const s = ZombieScriptForState(obj);
   const t = targetOf(obj);
   if (obj.sub === 0) {
+    // `psVar6 = ZombieScriptForState(...)` — the only sub that picks a blob.
+    const s = ZombieScriptForState(obj);
     const e = s?.entries[0];
-    if (e) { obj.scriptPc = 0; loadEntry(obj, e, 0); }
+    if (e) { aimCursor(obj, blobForState(obj), 0); loadEntry(obj, e, 0); }
     obj.sub = 2;
   } else if (obj.sub === 1) {
-    const e = entryAt(s, obj.scriptPc);
+    // `psVar6 = *(short **)(obj+0x1398)` — the cursor, not the state.
+    const e = entryAt(cursorScript(obj), obj.scriptPc);
     if (e) loadEntry(obj, e, 10);
     obj.sub += 1;
   } else if (obj.sub === 2) {
+    const s = cursorScript(obj);
     if (t && frameOf(obj) === obj.targetCue && !(t.flags & ActorFlag.Dead)) {
       t.flags |= ActorFlag.Dead;
       ZombiePlayTargetKillSound(obj, events);
@@ -374,10 +417,10 @@ export function ZombieStateTargetMotionScript(obj: Actor, rng: Rng,
  * finished, so the stage can move on.
  */
 export function ZombieStateTargetScriptWithFlag(obj: Actor): void {
-  const s = ZombieScriptForState(obj);
+  const s = obj.sub === 0 ? ZombieScriptForState(obj) : cursorScript(obj);
   if (obj.sub === 0 || obj.sub === 1) {
     const e = obj.sub === 0 ? s?.entries[0] : entryAt(s, obj.scriptPc);
-    if (obj.sub === 0) obj.scriptPc = 0;
+    if (obj.sub === 0) aimCursor(obj, blobForState(obj), 0);
     if (e) {
       loadEntry(obj, e, obj.sub === 0 ? 0 : 10);
       obj.resumeSub = e.flag ?? 0;
@@ -389,7 +432,9 @@ export function ZombieStateTargetScriptWithFlag(obj: Actor): void {
       obj.targetLoops -= 1;
       if (obj.targetLoops === 0) {
         if (obj.targetCue >= 0) {
-          if (!entryAt(s, obj.scriptPc)) { ZombieScriptEnded(obj); return; }
+          if (!entryAt(cursorScript(obj), obj.scriptPc)) {
+            ZombieScriptEnded(obj); return;
+          }
           obj.state = ZombieState.TargetMotionScript;
         }
         obj.sub = 1;

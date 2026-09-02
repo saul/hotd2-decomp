@@ -37,7 +37,8 @@ import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
 import { ZombieStateMotionCue21 } from "./play_cue";
-import { CharacterTypeOf, MotionRowOf } from "../tables";
+import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength, MotionRowOf }
+  from "../tables";
 import {
   TARGET_STATES,
   ZombieStateAwaitCivilianOrder, ZombieStateDragTarget,
@@ -278,6 +279,18 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
     detail.push(`target 0x${obj.targetAt.toString(16).toUpperCase()}`
       + ` · initial ${ZombieState[obj.initialState] ?? obj.initialState}`
       + ` · attack ${ZombieState[obj.attackState] ?? obj.attackState}`);
+    // The captor family's own cursor. A zombie parked on a civilian looks the
+    // same whether its entry list has run out, its loop counter is stuck or
+    // the play cursor never reaches the frame the loop is counted on — and
+    // that last one is invisible without the numbers side by side. Which blob
+    // it is walking matters most: the walk leaves the cursor in the attack
+    // script and hands over to a state that is not the attack state.
+    if (TARGET_STATES.has(obj.state)) {
+      detail.push(`${obj.scriptBlob ? "attack" : "target"} script`
+        + ` · entry ${obj.scriptPc} · loops ${obj.targetLoops}`
+        + ` · cue ${obj.targetCue} · wants ${obj.scriptMotion}`
+        + ` · frame ${MotionPlayFrame(obj)}/${MotionPlayLength(obj)}`);
+    }
   }
   return {
     summary: `${ZombieState[obj.state] ?? obj.state}/${obj.sub}`

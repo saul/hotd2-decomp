@@ -593,8 +593,24 @@ export interface Actor {
    * and it survives a snapshot. Shared by every state in the family, which is
    * how `ZombieStateWalkToTarget` can hand `ZombieStateTargetMotionScript` a
    * half-walked list.
+   *
+   * **A pointer says which list as well as how far in**, and that half is
+   * {@link scriptBlob}. Without it the cursor was re-aimed from `obj.state`
+   * on every read, so a captor that arrived and entered state 35 went back to
+   * the blob it had already finished instead of the one the walk left it in.
    */
   scriptPc: number;         // +0x1398
+  /**
+   * Which of the descriptor tail's two script blobs {@link scriptPc} indexes:
+   * 0 is `+0x04`, 1 is `+0x08`. The other half of `obj+0x1398`.
+   *
+   * `ZombieScriptForState` (`FUN_0045CA10`) is called only where the engine
+   * writes that pointer — `ZombieScriptEnded`, and each scripted state's
+   * entry sub — and never on the steps in between, which read the pointer
+   * back. Deriving it from the state instead is a test moved across a
+   * function boundary, and it moved the answer with it.
+   */
+  scriptBlob: number;       // +0x1398, which blob the pointer is in
   /** `obj+0x1320` — the clip the captor script wants; the tail re-blends to it. */
   scriptMotion: number;     // +0x1320, aliases `holdFrames`
   /** `obj+0x1350` — the captor script's remaining loop count. Aliases `landSurface`. */
@@ -850,6 +866,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     targetAt: -1,
     script: null,
     scriptPc: 0,
+    scriptBlob: 0,
     scriptMotion: 0,
     targetLoops: 0,
     targetCue: 0,

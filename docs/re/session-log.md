@@ -7987,3 +7987,47 @@ immediately. The state's real effect — those four spawns are not counted until
 their script flag comes up — is unmodelled, because the port derives the count
 from `visible` and they are visible the whole time. `[open]`, and narrower than
 it looks: four spawns, all in stage 2.
+
+## Two zombies circled a hostage, and the cursor was half a pointer
+
+Stage 3's `0x5294 hito_mario2` sat on `children-alive` for ever while her two
+`znkage` captors walked in circles. Both were parked in state 35 sub 2 replaying
+the same clip, loop counter cycling and never reaching the maul.
+
+**`obj+0x1398` is a pointer, and a pointer says *which list* as well as how far
+in.** The port had only the index and re-derived the blob from `obj.state` on
+every read, through `ZombieScriptForState` (`FUN_0045CA10`). The engine calls
+that function **only where it writes the pointer**:
+
+```
+ZombieScriptEnded          0x23/0x24 arm -> 0x1398 = blob            (start)
+ZombieStateWalkToTarget    subs 0 and 1  -> 0x1398 = blob + 10       (past the head)
+ZombieStateTargetMotionScript sub 0      -> 0x1398 = blob + 4        (past entry 0)
+```
+
+and every step in between reads it back. `ZombieStateTargetMotionScript` sub 1
+is explicit about it — `psVar6 = *(short **)(param_1 + 0x1398)` — and never
+re-selects. `[proved]`
+
+The two answers are not the same, which is the whole bug. These captors have
+initial state 0x23 and attack state 0x22, so the **walk** — which is the attack
+state — leaves the cursor in the attack blob and then enters state 0x23, which
+is *not* their attack state. Re-deriving there hands back the target blob, so
+the captor replayed the approach clip it had already finished, ran off its end,
+bounced back into the walk, arrived again, and went round. The maul entry —
+motion 969 with mode 40, the frame the kill lands on — was never reached, so
+the hostage never died and her script never left the gate.
+
+`Actor` carries `scriptBlob` beside `scriptPc` now: the other half of the
+pointer, written wherever the engine writes `0x1398` and read wherever it reads
+it. The traced arc afterwards is the documented one, end to end — target script,
+walk, maul, `AttackRun` — *deal with the civilian, then come for the camera*.
+
+**What made it findable** was putting the captor's cursor in the sidebar: which
+blob, which entry, the loop count, the cue frame and the play cursor against
+its length. Before that a stuck captor and a looping one were the same row.
+Two of the three sampled snapshots I took earlier were actively misleading —
+the loop counter read 1, then 2, then 1, which looks like a stuck decrement and
+is really a list being restarted. A per-transition trace is what settled it,
+and it took four samples to notice that Shoot being off let the script run away
+and drop the spawns underneath the scene I was watching.

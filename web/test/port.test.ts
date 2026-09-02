@@ -2764,7 +2764,8 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
                        civCmds: CivilianCmdJson[][] = [[
                          { op: CivilianOp.Wait, args: [0] },
                          { op: CivilianOp.End, args: [] },
-                       ]]) => {
+                       ]],
+                       attackScript: TargetScriptJson | null = null) => {
     ResetGameGlobals();
     SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
       entries: [0], scripts: civCmds, items: [],
@@ -2783,7 +2784,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     civ.pos = vec3(0, 0, 0);
     const z = ActorSpawn(0x4100, SpawnClass.Zombie, 1, "captor", {
       initialState: initial, attackState: attack,
-      script: { target, attack: null }, targetAt: 0x4000,
+      script: { target, attack: attackScript }, targetAt: 0x4000,
     }, rng);
     z.visible = true;
     z.pos = vec3(0, 0, 40);
@@ -2890,6 +2891,67 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     check("...and only a finished attack script sends it at the player",
           z.state === ZombieState.AttackRun, `state ${z.state}`);
   }
+
+  // **The cursor carries which blob it is in, not just how far.** A captor's
+  // descriptor has two script blobs and `obj+0x1398` is a *pointer* into one
+  // of them; `ZombieScriptForState` (`FUN_0045CA10`) is called only where the
+  // engine writes that pointer, never on the steps that read it back.
+  //
+  // This port kept an index and re-derived the blob from `obj.state` on every
+  // read. A captor whose initial state is 35 and whose attack state is 34
+  // therefore broke: the walk leaves the cursor in the **attack** blob and
+  // hands over to state 35, which is not its attack state, so the next read
+  // returned the *target* blob, replayed the approach clip it had already
+  // finished, and bounced back to the walk. Stage 3's two `znkage` circled
+  // their hostage for ever and her script never left `children-alive`.
+  {
+    const target: TargetScriptJson = {
+      state: ZombieState.TargetMotionScript, head: {},
+      entries: [{ motion: 10, frame: 0, loops: 1, mode: -1 }],
+    };
+    const attack: TargetScriptJson = {
+      state: ZombieState.WalkToTarget,
+      head: { arrive: 50, loops: 1, motion: 10, frame: 0 },
+      entries: [{ motion: 12, frame: 0, loops: 1, mode: 5 }],
+    };
+    // The shipped shape: start in the maul state, walk as the attack state.
+    const { civ, z, events } = captorScene(
+      ZombieState.TargetMotionScript, ZombieState.WalkToTarget, target,
+      undefined, attack);
+    z.pos = vec3(0, 0, 20);                    // already inside `arrive`
+    check("it starts on the target blob", z.scriptBlob === 0,
+          `blob ${z.scriptBlob}`);
+
+    // Play it out: the target entry ends, the walk takes over, and the walk
+    // arrives at once because it is already inside the radius.
+    for (let i = 0; i < 400; i++) {
+      if (z.state === ZombieState.TargetMotionScript && z.scriptBlob === 1) break;
+      // `EnemyZombieUpdate` does not advance the clip -- `GameUpdate` does, and
+      // every cue in this family is a play-cursor comparison, so the clock has
+      // to run or no entry ever ends.
+      ActorAdvanceMotion(z, 1 / 60);
+      zFrame(z, events);
+    }
+    check("...and the walk hands the maul the attack blob, not the target one",
+          z.scriptBlob === 1 && z.state === ZombieState.TargetMotionScript,
+          `blob ${z.scriptBlob} state ${z.state}`);
+    // Sub 1 is the frame that loads the entry the cursor points at, so the
+    // clip is only on the actor once it has run.
+    ActorAdvanceMotion(z, 1 / 60);
+    zFrame(z, events);
+    check("...so the clip it plays is the maul's, not the approach's again",
+          z.motion === 12, `motion ${z.motion}`);
+
+    // And the maul's cue kills the civilian, which is the whole point of the
+    // hand-over: `mode` is the play frame the kill lands on.
+    for (let i = 0; i < 400 && !(civ.flags & ActorFlag.Dead); i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      zFrame(z, events);
+    }
+    check("...and its cue frame is what kills the hostage",
+          (civ.flags & ActorFlag.Dead) !== 0, `flags 0x${civ.flags.toString(16)}`);
+  }
+
 }
 
 console.log("\nclass 0x30's placement: the ground snap and the two entrances:");

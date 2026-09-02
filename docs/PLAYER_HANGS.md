@@ -67,7 +67,11 @@ Route: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 9 → 28 →
 column** — every block is entered on the same frame in every one. Item 8 is
 fixed; see it.
 
-Rooms that had to be cheated past — the same three every run:
+Rooms that had to be cheated past — the same three every run. The wall-clock
+tool cheated past **seven** on the same route (block 3 three times, then 5, 6,
+9 and 28) in 153 instructions against 157. Landing a whole volley on one exact
+frame, rather than smeared across however many the browser happened to run, is
+why four of them now clear:
 
 | block | step/op | wait |
 |---|---|---|
@@ -454,7 +458,11 @@ of the commit that recorded the route, so the two disagreed before this work
 started.
 
 Either the route line was written from an older run, or something answered
-block 3's branch with 30. The second would be the interesting one. `[open]`
+block 3's branch with 30. **The pre-change `playthrough.mjs`, run out of git
+against this same tree, also takes 3 → 4** — so it is not the driven clock and
+it is very probably the first. Left `[open]` only because nothing has been read
+that says what `g_script_branch_var` (`0x009C88A4`) would have answered; see
+item 9. Not worth chasing on its own.
 
 ---
 

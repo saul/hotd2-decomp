@@ -127,6 +127,8 @@ try {
   let volleys = 0;
   let killedHere = false;
   let killed = 0;
+  /** Every gate the shots could not clear — the rooms that are not playable. */
+  const unclearable = [];
   let steps = 0;
   let last = null;
 
@@ -151,9 +153,16 @@ try {
 
     if (/\(end/.test(s.block)) {
       const t = ((Date.now() - started) / 1000).toFixed(1);
-      console.log(`\nreached an end block after ${t}s, ${steps} instructions`
-                  + `${killed ? ` (${killed} gates needed the debug clear)` : ""}`);
-      exit = state.faults ? 1 : 0;
+      console.log(`\nreached an end block after ${t}s, ${steps} instructions`);
+      if (unclearable.length) {
+        // **Reaching the end block is not the same as the stage being
+        // playable.** Every line here is a room whose enemies the shots could
+        // not touch, walked past only because this tool is allowed to cheat.
+        console.log(`\n${unclearable.length} rooms could NOT be cleared by `
+                    + `shooting — the stage is not playable through:`);
+        for (const g of unclearable) console.log(`  block ${g}`);
+      }
+      exit = state.faults || unclearable.length ? 1 : 0;
       break;
     }
 
@@ -216,6 +225,16 @@ try {
       } else if (!killedHere) {
         killedHere = true;
         killed += 1;
+        unclearable.push(`${s.block.split(" ")[0]} step/op ${s.step}`
+                         + `  ${s.sub.split("\n").find((l) => l.startsWith("0x"))
+                                 ?? s.policy}`);
+        // A picture of the moment the shots gave up. Every one of these so
+        // far has been the same thing — the camera parked somewhere the
+        // enemies are not — and that is only visible in the frame.
+        mkdirSync(SHOTS, { recursive: true });
+        await page.screenshot({ path: resolve(SHOTS,
+          `unclear-stage${stage}-b${s.block.split(" ")[0]}`
+          + `-${s.step.replace(/\D+/g, "_")}.png`) });
         console.log(`      enemy gate at block ${s.block} ${s.step} did `
                     + `not clear in ${volleys} volleys over `
                     + `${(SHOOT_FOR / 1000).toFixed(0)}s — the enemies are `

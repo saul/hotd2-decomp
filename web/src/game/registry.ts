@@ -86,6 +86,20 @@ export interface ClassHandler {
    */
   invulnerable?(obj: Actor): boolean;
   /**
+   * The world is taking this actor away — do whatever your own removal does
+   * besides the despawn itself.
+   *
+   * The engine has no such moment: an object leaves through its own state
+   * machine, and whatever bookkeeping goes with that leaves with it. This port
+   * has one because the character layer materialises actors from the walker's
+   * spawn list and has to unmake them when an entry goes. Without this the
+   * unmaking dropped the actor and kept its bookkeeping: a civilian released
+   * this way stayed in `g_civilians_alive` for ever, and
+   * `wait_scripted_actors` held on a count nothing could bring down and nobody
+   * on screen to explain it.
+   */
+  retire?(obj: Actor): void;
+  /**
    * This class reads `obj+0x34` bit 3 itself, so a shot must **not** go
    * through `ResolveHit`.
    *

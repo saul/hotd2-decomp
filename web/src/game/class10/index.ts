@@ -1442,6 +1442,11 @@ export const CivilianHandler: ClassHandler = {
   updatesWhenDead: true,
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj) => (obj.civ?.onShotScript ?? -1) < 0,
+  // The half of `CivilianCheckRemoval` that is not the despawn: the count goes
+  // with the actor, and `sub+0x04` bit 0 says it has already gone.
+  retire: (obj) => {
+    if (obj.civ && !(obj.civ.flags2 & 1)) G.g_civilians_alive -= 1;
+  },
 };
 
 export type { CivilianState };

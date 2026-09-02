@@ -300,7 +300,7 @@ export class CharacterLayer implements System {
    * the script phase and a spawn ticks on the frame its opcode ran. Idempotent
    * in both directions: an `at` already made is left alone.
    */
-  syncSpawns(spawns: readonly { at: number }[]): void {
+  syncSpawns(spawns: readonly { at: number }[]): Actor[] {
     const want = new Set<number>();
     for (const s of spawns) if (this.pending.has(s.at) || this.live.has(s.at)) {
       want.add(s.at);
@@ -352,17 +352,24 @@ export class CharacterLayer implements System {
     // pool sweep in `GameUpdate` takes it off `g_object_list`; the hierarchy
     // goes back to `pending` so the same spawn can be placed a second time,
     // which a route that re-enters a region does.
+    // **Taking the actor out of the world is not this layer's call.** The ones
+    // it lets go are handed back for `app/` to retire — and only the ones that
+    // did *not* remove themselves, because an actor that ran its own despawn
+    // has already done its own bookkeeping and would be counted out twice.
+    const gone: Actor[] = [];
     for (let i = this.instances.length - 1; i >= 0; i--) {
       const inst = this.instances[i];
       if (want.has(inst.at) && !inst.a.despawned) continue;
       // Told itself to go, rather than being unloaded with its region.
       if (inst.a.despawned) this.spent.add(inst.at);
+      else gone.push(inst.a);
       this.release(inst);
       this.instances.splice(i, 1);
     }
     // ...and an `at` the script has stopped listing is no longer spent: its
     // spawn opcode may run again, and then it is a new object.
     for (const at of this.spent) if (!want.has(at)) this.spent.delete(at);
+    return gone;
   }
 
   /** Put one instance's nodes back and return its record to `pending`. */

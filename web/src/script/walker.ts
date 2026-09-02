@@ -1514,7 +1514,15 @@ export class Walker {
       choice = route.next.indexOf(target);
       if (choice < 0) choice = 0;
     } else {
-      const pick = b.targets[Math.floor(this.rng.next() * b.targets.length)];
+      // [diverges] **The unattended pick is the lowest block number.** The
+      // arcade answers its own countdown and this client has to answer it
+      // somehow; drawing from `ctx.rng`, as this did, made one run of a stage
+      // take a different route from the next, which is exactly wrong for the
+      // thing the choice is mostly used by — `tools/playthrough.mjs` comparing
+      // a playthrough against the one before it. The engine's own selector is
+      // `g_script_branch_var` and is not read yet; until it is, a rule you can
+      // predict beats a coin toss you cannot.
+      const pick = Math.min(...b.targets);
       choice = route ? Math.max(0, route.next.indexOf(pick)) : 0;
     }
     this.branchChoice = choice;

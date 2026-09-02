@@ -381,14 +381,29 @@ export function ThrowerEntryState(obj: Actor): ThrowerState {
  * the number is shown raw rather than named with the wrong vocabulary.
  */
 export function EnemyThrowerDebug(obj: Actor): ActorDebug {
+  // `ThrowerStateWaitForPermit` is a pose held until a permit frees, so an
+  // actor parked in it looks exactly like one whose own logic has stalled.
+  // `ThrowerTryClaimAttackSlot` refuses on two things and neither is visible
+  // from the row without saying so.
+  const waiting = obj.state === ThrowerState.WaitForPermit
+    && obj.attackPermit < 0;
+  const held = G.g_attack_permits.findIndex((p) => p !== -1);
+  const why = !waiting ? null
+    : G.g_attack_committed !== 0 ? "another enemy is committed off screen"
+    : held !== -1
+      ? `all ${G.g_max_attackers} permits held — 0x`
+        + `${(G.g_attack_permits[held] ?? 0).toString(16).toUpperCase()} has it`
+      : "a permit is free — the claim is not being made";
+  const detail = [
+    `rank ${obj.rank}/${obj.allowance} · queue ${obj.queueRank}`,
+    `hp ${obj.hp}/${obj.maxHp} · motion ${obj.motion}`
+      + ` · flags 0x${(obj.flags >>> 0).toString(16)}`,
+  ];
   return {
-    summary: `state ${obj.state}/${obj.sub}`
-      + (obj.dead ? " · dead" : obj.attackPermit >= 0 ? " · permit" : ""),
-    detail: [
-      `rank ${obj.rank}/${obj.allowance} · queue ${obj.queueRank}`,
-      `hp ${obj.hp}/${obj.maxHp} · motion ${obj.motion}`
-        + ` · flags 0x${(obj.flags >>> 0).toString(16)}`,
-    ],
+    summary: `${ThrowerState[obj.state] ?? obj.state}/${obj.sub}`
+      + (obj.dead ? " · dead" : obj.attackPermit >= 0 ? " · permit"
+         : waiting ? " · wants a permit" : ""),
+    detail: why ? [`blocked: ${why}`, ...detail] : detail,
     hot: obj.attackPermit >= 0,
   };
 }

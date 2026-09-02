@@ -15,6 +15,8 @@ import type { Actor } from "./actor";
 import type { GameHost } from "./host";
 import { SpawnClass } from "./spawn_class";
 import type { Vec3 } from "./vec";
+import { ZombieReleaseAndDespawn } from "./class30/walk_distance";
+import { ThrowerLeave } from "./class31/death";
 import { EnemyZombieDebug, EnemyZombieInit, EnemyZombieUpdate }
   from "./class30";
 import { EnemyThrowerDebug, EnemyThrowerInit, EnemyThrowerUpdate }
@@ -86,19 +88,19 @@ export interface ClassHandler {
    */
   invulnerable?(obj: Actor): boolean;
   /**
-   * The world is taking this actor away — do whatever your own removal does
-   * besides the despawn itself.
+   * The class's own **leave the field** routine, ending in `ActorDespawn`.
    *
-   * The engine has no such moment: an object leaves through its own state
-   * machine, and whatever bookkeeping goes with that leaves with it. This port
-   * has one because the character layer materialises actors from the walker's
-   * spawn list and has to unmake them when an entry goes. Without this the
-   * unmaking dropped the actor and kept its bookkeeping: a civilian released
-   * this way stayed in `g_civilians_alive` for ever, and
-   * `wait_scripted_actors` held on a count nothing could bring down and nobody
-   * on screen to explain it.
+   * `ZombieReleaseAndDespawn` (`FUN_00455490`) for class 0x30 and
+   * `ThrowerLeave` (`FUN_0044AD60`) for 0x31 are the engine's, and they are
+   * the same shape: retire from the alive count, then the present count,
+   * release the attack permit, clear the camera-tracking slot, despawn. Class
+   * 0x10 does it inline at the bottom of `CivilianUpdate` (`FUN_0048A920`)
+   * instead of in a function of its own.
+   *
+   * A class with no entry here has no such routine and gets a bare
+   * `ActorDespawn` — which is what the engine gives it too.
    */
-  retire?(obj: Actor): void;
+  leave?(obj: Actor): void;
   /**
    * This class reads `obj+0x34` bit 3 itself, so a shot must **not** go
    * through `ResolveHit`.
@@ -125,11 +127,13 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
   [SpawnClass.Civilian]: CivilianHandler,
   [SpawnClass.Zombie]: {
     init: EnemyZombieInit,
+    leave: ZombieReleaseAndDespawn,
     update: (o, f) => EnemyZombieUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
     debug: EnemyZombieDebug,
   },
   [SpawnClass.Thrower]: {
     init: EnemyThrowerInit,
+    leave: ThrowerLeave,
     update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
     updatesWhenDead: true,
     debug: EnemyThrowerDebug,

@@ -8394,3 +8394,57 @@ Worth noting against my own complaint from earlier today that `test:port` never
 asserts an enemy attacks: it does, in about ten places. What it had not done
 was fail, because nothing had yet made attacking depend on state the fixture
 did not set. The gap was narrower than I said.
+
+## `ActorRetireFromWorld` was a name I invented, and it was the wrong shape
+
+Asked to decomp it. It is not in the exe and never was — I wrote a port-only
+helper and gave it an exe-style name, which in this repository reads as a claim
+that a `FUN_` address is behind it. That is my mistake and the name is gone.
+
+What the binary actually says, which is the useful half:
+
+**`ActorDespawn` (`FUN_00409CC0`) has 171 call sites and every one of them is
+inside a class's own state machine.** There is no site anywhere that removes an
+object because a script stopped listing it, because the engine has no spawn
+list to stop listing it — an object exists from `SpawnFromDescriptor` until its
+own logic despawns it. So the port's seam is a real divergence, not a missing
+port, and it is declared as one now.
+
+The nearest thing the engine has is a per-class **leave the field** routine,
+and there are two, both the same shape:
+
+```
+ZombieReleaseAndDespawn   FUN_00455490   ReleaseEnemyAliveCount
+ThrowerLeave              FUN_0044AD60   ReleaseEnemyPresentCount
+                                          ReleaseAttackSlot
+                                          g_enemy_slots[obj+0x120] = 0
+                                          (thrower also clears obj+0x34 bit 0)
+                                          ActorDespawn
+```
+
+Class 0x10 has no such function: `CivilianUpdate` (`FUN_0048A920`) does it
+inline at the bottom — free the hit slot, free the draw record at `model+0x45C`,
+`if ((sub+0x04 & 1) == 0) g_civilians_alive--`, despawn. It is
+`CivilianLeaveField` in the port, with the two frees `[open]` because neither
+`g_hit_slots` nor that record is modelled at all.
+
+Both engine routines were **already ported** by the concurrent workstream while
+I was reading, so the work was not to write them but to stop having written
+something else: `ClassHandler.leave` points class 0x30 at
+`ZombieReleaseAndDespawn`, 0x31 at `ThrowerLeave`, 0x10 at
+`CivilianLeaveField`, and `RetireUnlistedActor` in `director.ts` calls whichever
+there is. A class with no entry gets a bare `ActorDespawn`, which is what the
+engine gives it too.
+
+One thing the reading ruled out rather than found. Both leave routines clear
+`g_enemy_slots[obj+0x120]`, and `g_camera_free` is derived from that array —
+which the room-clear gates test — so a stale entry looked like a good candidate
+for the camera-gate hangs. It is not: the port rebuilds `g_enemy_slots` from
+the pool every frame in `UpdateCameraEnemySlots`, so a despawned actor drops
+out on its own. Different mechanism, same result, and the entry that would have
+been stale cannot be.
+
+I also put `RetireUnlistedActor` in `despawn.ts` first, which reintroduced the
+exact import cycle that file exists to avoid — its own doc comment says so.
+It lives in `director.ts` now, beside `ActorSpawn`, which is where the port's
+unspawn belongs anyway.

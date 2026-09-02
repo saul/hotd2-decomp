@@ -15,7 +15,8 @@ import type {
 } from "../src/bundle";
 import { Rng } from "../src/core/rng";
 import { Events } from "../src/core/events";
-import { ActorSpawn, GameUpdate } from "../src/game/director";
+import { ActorSpawn, GameUpdate, RetireUnlistedActor }
+  from "../src/game/director";
 import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
@@ -2839,7 +2840,33 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       safe.visible = true;
       if (safe.civ) safe.civ.onShotScript = -1;
       ActorKillAll(0, new Rng(4));
-      check("the clear leaves a civilian no shot could reach alive",
+      // **A civilian the script stops listing leaves the count with it.** The
+    // engine has no such moment — every one of `ActorDespawn`'s 171 call sites
+    // is inside a class's own state machine — so `RetireUnlistedActor` is the
+    // port's seam for a spawn list entry going away, and it runs the class's
+    // own leave routine rather than inventing one. Unmaking used to be a hide:
+    // the actor stayed in the pool, invisible and still counted, and
+    // `wait_scripted_actors` held on a number nothing could bring down.
+    {
+      const before = G.g_civilians_alive;
+      // The fixture has one civilian record, so this borrows it: what is being
+      // measured is the count, not the address.
+      const going = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "unlisted");
+      going.visible = true;
+      check("a civilian joins the count when it is made",
+            G.g_civilians_alive === before + 1, `${G.g_civilians_alive}`);
+      RetireUnlistedActor(going);
+      check("...and leaves it when the script stops listing it",
+            G.g_civilians_alive === before && going.despawned,
+            `${G.g_civilians_alive} despawned ${going.despawned}`);
+      // Calling it twice **would** count it out twice, and the engine is no
+      // different: `CivilianUpdate`'s tail guards on `sub+0x04` bit 0, which
+      // op 0x2C's `LeaveCountNow` sets and a despawn does not. Not doing it
+      // twice is the caller's job, and `CharacterLayer.syncSpawns` hands back
+      // only the actors that had not already removed themselves.
+    }
+
+    check("the clear leaves a civilian no shot could reach alive",
             !safe.dead && (safe.flags & ActorFlag.Dead) === 0,
             `dead ${safe.dead} flags 0x${safe.flags.toString(16)}`);
       safe.visible = false;

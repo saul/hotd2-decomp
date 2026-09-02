@@ -87,7 +87,7 @@ import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { ResetPropContainers } from "../game/class41";
 import { ResetGameGlobals } from "../game/globals";
-import { ActorRetireFromWorld } from "../game/despawn";
+import { RetireUnlistedActor } from "../game/director";
 import { SetGameTables } from "../game/tables";
 
 /**
@@ -929,7 +929,7 @@ export class Player implements PlayerView, PlayerCommands {
     // the layer that noticed: `render/` may perform a spawn, it does not get
     // to decide a lifetime. `verify_layers.py` is what keeps that honest.
     for (const a of this.chars.syncSpawns(this.walker.spawns)) {
-      ActorRetireFromWorld(a);
+      RetireUnlistedActor(a);
     }
   }
 

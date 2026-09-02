@@ -9,6 +9,7 @@
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import { makeActor, ThrowerFlag, ZombieFlag2, type Actor } from "./actor";
+import { ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { CameraTrackEnemiesTick, UpdateCameraFreeFlag }
   from "./camera/track";
@@ -68,6 +69,32 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  * `0x40000` tells `EnemyZombieInit` not to compute the aim angles, and
  * `0x4000` freezes the pose.
  */
+/**
+ * Take an actor out of the world because the **script stopped listing it**.
+ *
+ * **There is no such function in the exe, and no call site for one.** All 171
+ * `ActorDespawn` (`FUN_00409CC0`) references are inside a class's own state
+ * machine: an object leaves when its own logic decides to, and the walker's
+ * spawn list is not a thing the engine has. This port materialises actors from
+ * that list in `CharacterLayer`, so it also has to unmake them when an entry
+ * goes, and this is that seam.
+ *
+ * [diverges] It runs the class's own leave routine, which is the nearest thing
+ * the engine has to "you are done" — `ZombieReleaseAndDespawn` for 0x30,
+ * `ThrowerLeave` for 0x31, `CivilianLeaveField` for 0x10 — and a bare
+ * `ActorDespawn` for a class with none. What it is standing in for is a region
+ * unload, and what that really does to the objects in it is `[open]`.
+ *
+ * Doing less than this is what the bug was: unmaking used to be a *hide*, so
+ * the actor stayed in `g_object_list` with its counts and its permit, and
+ * `wait_scripted_actors` held on a number nothing could bring down.
+ */
+export function RetireUnlistedActor(obj: Actor): void {
+  const leave = g_class_handlers[obj.cls]?.leave;
+  if (leave) leave(obj);
+  else ActorDespawn(obj);
+}
+
 export function ActorInitFlags(obj: Actor, spawnFlags: number): void {
   obj.flags = spawnFlags | 1;
 }

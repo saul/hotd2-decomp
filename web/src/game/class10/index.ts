@@ -1186,7 +1186,24 @@ function CivilianCheckRemoval(obj: Actor): void {
   // A civilian still holding children does not leave: the engine restarts the
   // countdown instead, which is what keeps a hostage on stage until rescued.
   if (sub.childCount !== 0) { sub.removeDelay = 1; return; }
-  if (!(sub.flags2 & 1)) G.g_civilians_alive -= 1;
+  CivilianLeaveField(obj);
+}
+
+/**
+ * Class 0x10's leave: the tail `CivilianUpdate` (`FUN_0048A920`) runs inline
+ * rather than in a routine of its own, which is why this has no address.
+ *
+ * `if ((sub+0x04 & 1) == 0) g_civilians_alive--;` and then the despawn. Bit 0
+ * is the "already left the count" stamp op 0x2C's `LeaveCountNow` sets, so a
+ * civilian that took itself out early is not taken out twice.
+ *
+ * [open] The engine also frees the actor's hit slot —
+ * `g_hit_slots[obj+0x3C] = 0` — and the draw record at `model+0x45C`. Neither
+ * is modelled by this port at all, so neither is here.
+ */
+export function CivilianLeaveField(obj: Actor): void {
+  const sub = obj.civ;
+  if (sub && !(sub.flags2 & 1)) G.g_civilians_alive -= 1;
   ActorDespawn(obj);
 }
 
@@ -1442,11 +1459,7 @@ export const CivilianHandler: ClassHandler = {
   updatesWhenDead: true,
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj) => (obj.civ?.onShotScript ?? -1) < 0,
-  // The half of `CivilianCheckRemoval` that is not the despawn: the count goes
-  // with the actor, and `sub+0x04` bit 0 says it has already gone.
-  retire: (obj) => {
-    if (obj.civ && !(obj.civ.flags2 & 1)) G.g_civilians_alive -= 1;
-  },
+  leave: CivilianLeaveField,
 };
 
 export type { CivilianState };

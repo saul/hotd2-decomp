@@ -8281,3 +8281,38 @@ One self-inflicted slip: the edit that moved the two per-player tallies out of
 was in the `ResetSceneOnEnter` I had just written two hundred lines above. It
 stripped the new copy and left the old. `tsc` was clean either way; only
 reading the file back caught it.
+
+## A scene is not quite a stage, and the demo seeks
+
+Asked where `LoadSceneAndReset` (`FUN_00460030`) is called from, and whether
+`ResetSceneOnEnter` is a *stage* enter or a *scene* enter. It is a scene enter,
+and a scene is the broader thing.
+
+`g_scene_index` names a loadable unit. Scenes 0..5 are the six playable stages
+— proved rather than assumed: `g_attract_demo_playlist` (0x00589828) is three
+0x14-byte entries terminated by a scene of -1, and they name scene 0 block 4,
+scene 1 block 28 and scene 3 block 5, which are stages 1, 2 and 4. Scene 6 is
+the entry `ResetGameOnStart` picks for `g_GameMode` 2, and scenes 10 and 11 are
+the two attract screens at `FUN_0041F9B0` and `FUN_0041FB00`, which call
+`ResetSceneOnEnter` directly rather than through the scene load.
+
+`LoadSceneAndReset` has three callers, all of them the same act:
+
+* `ResetGameOnStart` — the first scene of a run.
+* `AdvanceToNextScene` (`FUN_0045FFF0`) — the stage-to-stage transition. It
+  first walks the two players and puts any whose `g_player_state` is 5 back to
+  2, so nobody is "in play" across the load; `IsPlayerAttackable` therefore
+  refuses and no enemy commits an attack while a scene changes.
+* `RunAttractDemo` (`FUN_00426800`) — the demo playlist.
+
+**The demo enters a stage scene at an arbitrary block.** That is structurally
+the same thing the browser port does when it seeks, and it is the closest the
+engine comes to having a seek at all — worth knowing, because the port's seek
+had been treated as a pure invention.
+
+For the port this changes nothing in behaviour and one thing in accuracy: one
+bundle is one stage is one scene, `w.script.scene` carries the index, and the
+stage load is the scene enter. The gap that remains is `ResetGameOnStart`: the
+port has no *run*, so every stage load is a fresh start, and the run totals
+that reset owns are not in `G` either. Nothing is silently wrong; the run/scene
+split simply only half exists, and a continue sequence would need the rest.

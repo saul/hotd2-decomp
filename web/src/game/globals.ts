@@ -503,22 +503,43 @@ export type Globals = typeof G;
  * per-scene ones *here*, which is what makes `g_civilians_rescued_total` a run
  * figure and `g_civilians_rescued_by_scene` a stage one.
  *
- * **Where it is called from, on both sides.** The engine has three callers and
- * every one of them is the same act — entering a scene:
+ * **A scene is not quite a stage.** `g_scene_index` names a loadable unit:
+ * scenes 0..5 are the six playable stages — `g_attract_demo_playlist`
+ * (0x00589828) proves it by naming scene 0, 1 and 3 for its demos of stages 1,
+ * 2 and 4 — scene 6 is the entry `ResetGameOnStart` picks for `g_GameMode` 2,
+ * and scenes 10 and 11 are the two attract screens. In the port one bundle is
+ * one stage is one scene, and `w.script.scene` carries the index, so a stage
+ * enter *is* a scene enter for the scenes the port has.
+ *
+ * **Where it is called from, on both sides.** Three direct callers in the
+ * engine, and every one of them is the same act:
  *
  * | engine | port |
  * |---|---|
- * | `FUN_00460030`, the scene load | `app/stage_load.ts` → `world.attach` →
- *   `GameSystem.attach` → {@link ResetGameGlobals} → here. That is the only
- *   path into a stage. |
+ * | `LoadSceneAndReset` (`FUN_00460030`) | `app/stage_load.ts` →
+ *   `world.attach` → `GameSystem.attach` → {@link ResetGameGlobals} → here.
+ *   That is the only path into a stage. |
  * | `FUN_0041F9B0`, attract scene 10 | — the port has no attract mode |
  * | `FUN_0041FB00`, attract scene 11 | — likewise |
  *
- * The port has one caller the engine does not: a **seek**, in `main.ts`. A
- * seek rebuilds the world from a replay, so it has to start from a scene as
- * clean as a fresh load — the engine never needs it because it cannot seek.
- * A snapshot *load* deliberately does not reset: it restores the whole data
- * segment, counters and all, which is the thing a reset would undo.
+ * `LoadSceneAndReset` is itself reached three ways, and the port has an
+ * equivalent for one of them: `ResetGameOnStart` for the first scene of a run,
+ * `AdvanceToNextScene` (`FUN_0045FFF0`) for each stage transition — which is
+ * the port's stage load — and `RunAttractDemo` (`FUN_00426800`) for the demo
+ * playlist. **The demo enters a stage scene at an arbitrary block**, which is
+ * structurally what the port's seek does.
+ *
+ * So the port has one caller the engine does not: a **seek**, in `main.ts`. It
+ * rebuilds the world from a replay and so must start from a scene as clean as
+ * a fresh load. A snapshot *load* deliberately does not reset — it restores
+ * the whole data segment, counters and all, which a reset would undo.
+ *
+ * `[open]` The port has no equivalent of `ResetGameOnStart`, because it has no
+ * *run*: every stage load is a fresh start. Nothing is silently wrong — the
+ * run totals that reset owns (`g_civilians_seen_total`,
+ * `g_civilians_rescued_total`) are not in `G` either — but the run/scene split
+ * only half exists here, and a port that grows a continue sequence will need
+ * the other half.
  *
  * **The engine's body, line for line, and what the port does with each.** This
  * is a partial transcription and the list is how you can tell which part:

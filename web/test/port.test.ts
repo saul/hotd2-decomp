@@ -54,6 +54,7 @@ import { ZombieScriptEnded, ZombieStateHoldForCameraCue }
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
+         CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
@@ -2720,6 +2721,48 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("the class Init's motion outlives the record's",
           posed.motion === 10, `motion ${posed.motion}`);
   }
+
+  // **`LAB_0048b52e` is one label reached from three places.** The in-front
+  // test, the camera cue and the timer sit together at the bottom of
+  // `CivilianStepScript` (`FUN_0048B1E0`), and all three arrival arms fall
+  // into them — a word with neither `Reach` nor `Face` jumps straight there.
+  // The port had that tail written out twice with the in-front test in only
+  // one copy, so a word carrying `InFront` alone ran no test at all and could
+  // be released by nothing but a timer it did not have. Stage 2's `0x138BC`
+  // held `g_civilians_alive` at one and `wait_scripted_actors` at block 30
+  // never came down.
+  {
+    // A wait word leads its block and governs the wait that *follows* it, so
+    // the in-front word has to be the first command: the Init then parks on
+    // the wait at index 1 with that word governing it.
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.InFront),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.Wait, 0),
+    ]]);
+    // The target is behind her, so the wait holds...
+    a.pos = vec3(0, 0, 0);
+    a.yaw = 0;
+    // Behind her: the rotated delta's z is negative at yaw 0. `targetMode` is
+    // left at `None` so the turn step does not run and this is the in-front
+    // test on its own.
+    if (a.civ) {
+      a.civ.target = { x: 0, y: 0, z: -30 };
+      a.civ.targetMode = CivilianTarget.None;
+    }
+    const before = a.civ?.cursor;
+    cFrame(a, events);
+    check("an in-front wait holds while the target is behind",
+          a.civ?.cursor === before && a.civ?.turnRate !== 77,
+          `cursor ${a.civ?.cursor}`);
+    // ...and releases the frame it is in front, with no timer involved.
+    a.yaw = 0x8000;                              // half a turn: now in front
+    cFrame(a, events);
+    check("...and releases the frame it comes round, timer or no timer",
+          a.civ?.turnRate === 77, `turn ${a.civ?.turnRate}`);
+  }
+
 
   // **The debug clear has to kill what the civilian gate counts too.** A room
   // cleared of enemies with the hostages still standing is a script that has

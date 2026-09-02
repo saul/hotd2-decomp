@@ -8137,3 +8137,49 @@ that is how the ones behind glass work — so such a civilian has no killed
 script, and killing it left it dead, still counted, and unable to run the
 `LeaveCountNow` that would take it out of the count. `ClassHandler.invulnerable`
 is that question asked of the class, and the debug clear now asks it.
+
+## Block 30's deadlock: one label, reached from three places
+
+The playthrough stopped at stage 2 block 30 on `wait_scripted_actors`, held by
+`0x138BC hito_oyajiaa` on the `in-front` wait bit, two hundred units out.
+
+`CivilianStepScript` (`FUN_0048B1E0`) is one loop with a shared tail.
+`LAB_0048B52E` holds the in-front test (bit 0x40), then the camera cue (0x80)
+and the in-play gate (0x40000000), then the timer at `sub+0x14` — and all three
+arrival arms fall into it:
+
+* a word with neither `Reach` (0x10) nor `Face` (0x20) jumps straight there;
+* the `Face` arm goes there when the heading error is not yet zero;
+* the `Reach` arm goes there while the actor is outside `sub+0x3C`.
+
+The port had that tail written out **twice**, once per arm, with the in-front
+test in only one copy. So a word carrying `InFront` alone — hers is
+`0x00100040` — ran no test at all and could be released by nothing but a timer
+it did not have. The other copy dropped the cue and the timer instead, so an
+actor that had not arrived skipped both of those. One label, two half-copies,
+two different holes. `[proved]`
+
+Two smaller things fell out of reading it. The in-front test reads
+`sub+0x30..0x38` **raw** — the engine computes the mode-resolved point into
+locals for the reach and turn tests and then transforms the raw fields here
+regardless, which differs whenever `targetMode` is negative. And it builds the
+full inverse orientation (`-ry`, `-rz`, `-rx`); the port rotates by yaw alone,
+now declared, exact for anything standing upright and none of these is not.
+
+### Still open
+
+She advances past the in-front wait now and parks on the **`Face`** one at
+cursor 7, and that is a different question. The numbers, which the sidebar now
+prints: target `(-712,-824)`, heading error **-27341** BAMS, turn rate **10**.
+Ten BAMS a frame against 27341 is 2734 frames — forty-five seconds to come
+round, which no arcade game asks of you. The turn itself is faithful
+(`ActorTurnTowardPoint`, one capped step a frame) and 10 is `CivilianInit`'s
+own default at `sub+0x0E`, so the suspect is her facing rather than the rate:
+she is walking *away* while she turns, her clip 675 carrying -11.76 over 26
+frames, and her distance to her own target grew from 123 to 422 while I
+watched. Either her spawn yaw is wrong or something sets a rate the port has
+not read. `[open]`
+
+Also unread: wait bit **0x100000**, which four of her six wait words carry. It
+is not in `Any` (0x40003FFF) and not in the blocked mask (0x14000000), so it
+does not gate the loop — something else reads it. `[open]`

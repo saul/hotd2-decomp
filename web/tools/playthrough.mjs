@@ -180,6 +180,25 @@ try {
                                                       && l.trim() !== "box")) {
         console.log(`    ${line.trim()}`);
       }
+      // The wait panel names who is holding it; the actors panel says why.
+      // Printing the holder's own rows is the difference between "a civilian
+      // is in the count" and "she is facing the wrong way and her turn rate is
+      // zero", and the second is the one you can act on.
+      const holders = [...s.waitText.matchAll(/0x[0-9A-F]+/g)].map((m) => m[0]);
+      if (holders.length) {
+        await page.click("#panel-actors summary").catch(() => {});
+        await sleep(400);
+        const actors = await page.locator("#panel-actors").innerText()
+          .catch(() => "");
+        const lines = actors.split("\n");
+        for (const h of holders) {
+          const i = lines.findIndex((l) => l.includes(h));
+          if (i < 0) continue;
+          console.log("");
+          for (const l of lines.slice(i, i + 6)) console.log(`    ${l.trim()}`);
+        }
+      }
+      console.log("");
       mkdirSync(SHOTS, { recursive: true });
       const path = resolve(SHOTS, `hang-stage${stage}.png`);
       await page.screenshot({ path });

@@ -692,20 +692,8 @@ export function CivilianStepScript(obj: Actor, f: ClassFrame): boolean {
     if (!((word & CivilianWait.Any) !== 0 || sub.timer >= 0)) break;
     if (word & CivilianWait.Blocked) break;
 
-    if (CivilianWaitStillHolds(obj, word)) {
-      if ((word & (CivilianWait.Reach | CivilianWait.Face)) === 0) {
-        if (!CivilianCueMet(obj, word)) {
-          const t = sub.timer;
-          if (t < 0) break;
-          sub.timer = t - 1;
-          if (t !== 0) break;
-        }
-      } else if (!CivilianArrived(obj, word, f)) {
-        break;
-      } else {
-        sub.targetMode = CivilianTarget.None;
-      }
-    }
+    if (CivilianWaitStillHolds(obj, word)
+        && CivilianArrived(obj, word, f) === "wait") break;
 
     sub.timer = -1;
     ran = true;
@@ -771,34 +759,83 @@ function CivilianCueMet(obj: Actor, word: number): boolean {
   return false;
 }
 
-/** Wait bits 0x10 / 0x20 / 0x40: has the actor reached or faced its target? */
-function CivilianArrived(obj: Actor, word: number, f: ClassFrame): boolean {
+/**
+ * Wait bits 0x10 / 0x20 / 0x40, and the tail all three share.
+ *
+ * **`LAB_0048b52e` is one label reached from three places**, and splitting it
+ * is what broke this. In `CivilianStepScript` (`FUN_0048B1E0`) the in-front
+ * test, the camera cue and the timer sit together at the bottom, and the
+ * arrival arms *fall into* them: a word with neither `Reach` nor `Face` jumps
+ * straight there, `Face` goes there when the heading error is not yet zero,
+ * and `Reach` goes there while the actor is still outside its radius.
+ *
+ * The port had that tail written out twice, with the in-front test in only one
+ * copy — so a word carrying `InFront` **alone** never ran it and could be
+ * released by nothing but its timer. Stage 2's `0x138BC hito_oyajiaa` has such
+ * a word and no timer: she held `g_civilians_alive` at one, two hundred units
+ * out, and `wait_scripted_actors` at block 30 never came down. The other copy
+ * dropped the cue and the timer instead, so an actor that had not arrived
+ * skipped both.
+ */
+function CivilianArrived(obj: Actor, word: number,
+                         f: ClassFrame): "advance" | "wait" {
   const sub = obj.civ;
-  if (!sub) return false;
+  if (!sub) return "wait";
+
+  /** `LAB_0048b52e` — in front, or the cue, or the timer. */
+  const tail = (): "advance" | "wait" => {
+    if (CivilianInFront(obj, word)) {
+      sub.targetMode = CivilianTarget.None;          // `LAB_0048b67e`
+      return "advance";
+    }
+    if (CivilianCueMet(obj, word)) return "advance";
+    const t = sub.timer;
+    if (t < 0) return "wait";
+    sub.timer = t - 1;
+    return t !== 0 ? "wait" : "advance";
+  };
+
+  if ((word & (CivilianWait.Reach | CivilianWait.Face)) === 0) return tail();
+
   const to = CivilianTargetPoint(obj, f);
   if ((word & CivilianWait.Reach) === 0) {
     // Turn only: arrived the frame the heading error rounds to zero.
-    const err = HeadingError(obj, to);
-    if (err === 0) { sub.targetMode = CivilianTarget.None; return true; }
-    return CivilianInFront(obj, word, to);
+    if (HeadingError(obj, to) === 0) {
+      sub.targetMode = CivilianTarget.None;
+      return "advance";
+    }
+    return tail();
   }
-  const d = Math.hypot(obj.pos.x - to.x, obj.pos.z - to.z);
-  if (sub.radius < d) return CivilianInFront(obj, word, to);
+  if (sub.radius < Math.hypot(obj.pos.x - to.x, obj.pos.z - to.z)) return tail();
   if (sub.targetMode > 0 && sub.radius <= 1) {
     obj.pos.x = to.x;
     obj.pos.z = to.z;
   }
-  return true;
+  sub.targetMode = CivilianTarget.None;
+  return "advance";
 }
 
-/** Wait bit 0x40, which can end the wait on its own. */
-function CivilianInFront(obj: Actor, word: number,
-                         to: { x: number; y: number; z: number }): boolean {
+/**
+ * Wait bit 0x40, which can end the wait on its own.
+ *
+ * It reads `sub+0x30..0x38` **raw**, not the target the mode resolves to: the
+ * engine computes the mode-resolved point into locals for the reach and turn
+ * tests and then transforms `civ[0xC..0xE]` here regardless. For a positive
+ * `targetMode` the two are the same point, and for a negative one they are not.
+ *
+ * [diverges] The engine builds the full inverse orientation — `-ry`, `-rz`,
+ * `-rx` — and transforms the delta through it. This rotates by yaw alone,
+ * which is exact for anything standing upright and wrong only for a civilian
+ * that is not, and none of them is.
+ */
+function CivilianInFront(obj: Actor, word: number): boolean {
   if ((word & CivilianWait.InFront) === 0) return false;
+  const sub = obj.civ;
+  if (!sub) return false;
   const a = obj.yaw * ((Math.PI * 2) / 65536);
-  const dx = to.x - obj.pos.x;
-  const dz = to.z - obj.pos.z;
-  // The engine rotates the delta into the actor's own frame and tests z.
+  const dx = sub.target.x - obj.pos.x;
+  const dz = sub.target.z - obj.pos.z;
+  // The rotated delta's z: positive is in front of the actor.
   return dz * Math.cos(a) - dx * Math.sin(a) > 0;
 }
 
@@ -1354,6 +1391,18 @@ export function CivilianDebug(obj: Actor): ActorDebug {
       + ` · motion ${obj.motion}`,
     `wait 0x${word.toString(16)}${bits.length ? " · " + bits.join(" ") : ""}`,
   ];
+  // The turn-and-reach bits are the ones that read as "nothing is happening":
+  // the actor stands still whether it is out of range, facing the wrong way,
+  // or turning at a rate of zero and so never facing anything. The numbers
+  // that separate those cannot be inferred from the row without them.
+  if (word & (CivilianWait.Reach | CivilianWait.Face | CivilianWait.InFront)) {
+    const t = sub.target;
+    on.push(`target ${sub.targetMode < 0 ? CivilianTarget[sub.targetMode]
+             ?? sub.targetMode : `(${t.x.toFixed(0)},${t.z.toFixed(0)})`}`
+      + ` · d=${Math.hypot(obj.pos.x - t.x, obj.pos.z - t.z).toFixed(0)}`
+      + `/${sub.radius} · heading err ${HeadingError(obj, t)}`
+      + ` · turn ${sub.turnRate}`);
+  }
   if (on.length) detail.push(`on ${on.join(" · ")}`);
   if (parked) {
     detail.push("no loop bit and no timer — parked until something "

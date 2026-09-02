@@ -298,15 +298,22 @@ console.log("\nThe drive seam is a metronome and nothing else:\n");
 {
   const rng = new Rng(1);
   let stepped = 0;
+  let woken = 0;
   const h = new Harness({
     stepOneFrame: () => { stepped++; },
+    wake: () => { woken++; },
     get walker() { return null; },
     rng,
   });
   check("nothing is asked for, so nothing is owed", h.take() === 0);
+  check("...and the loop has not been woken for nothing", woken === 0);
   let settled = -1;
   const p = h.advance(10).then((n) => { settled = n; });
   check("ten frames asked for, ten frames owed", h.take() === 10);
+  // The loop sleeps when nothing wants a frame. Booking frames is the thing
+  // that has to wake it, or a driver would wait for a frame nobody asked for.
+  check("...and booking them woke the loop", woken === 1);
+  check("...and the harness now says it wants a frame", h.wants);
   check("and none run until the frame loop runs them", settled === -1);
   check("...and nothing has been stepped", stepped === 0);
   // What `Player.frame` does under the flag, and the whole of it.

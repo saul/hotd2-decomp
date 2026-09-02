@@ -8,29 +8,29 @@
  *
  * ## Why
  *
- * The player has two clocks and they disagree about what a frame is.
- * `Loop.advance` drains a 60 Hz accumulator and steps the walker once per
- * *whole* frame; `Player.gameTick` hands the port `frames: wall * speed * 60`,
- * which is fractional and lands somewhere different on every rAF. So a
- * playthrough that fires its shots after N *milliseconds* fires them on a
- * different game frame every run, the port integrates a different amount of
- * time between them, and the same stage on the same seed plays four different
- * ways over five runs. That is `docs/PLAYER_HANGS.md` item 8, and until it is
- * gone no other item on that list can be investigated honestly — you cannot
- * tell a fix from a coin landing your way.
+ * The player once had two clocks that disagreed about what a frame is, and a
+ * playthrough that fired its shots after N *milliseconds* fired them on a
+ * different game frame every run: the same stage on the same seed played four
+ * different ways over five runs, `docs/PLAYER_HANGS.md` item 8. Both halves
+ * are fixed. The simulation is a fixed 60 Hz tick that is never skipped
+ * (`app/loop.ts`), and this is the other half — **what the accumulator is fed
+ * from.**
  *
- * Under `?drive=1`:
+ * Ordinarily that is the wall clock. Under `?drive=1` it is the driver, and
+ * nothing else changes:
  *
- * * `requestAnimationFrame` keeps running and the renderer keeps drawing, so
- *   the page is the page — the real UI, the real shot path, the real
- *   everything. Nothing is stubbed and nothing is re-implemented beside it.
- * * **Game time advances only when something calls `advance`**, and only in
- *   whole 60 Hz frames, the walker and the port stepping together.
+ * * the ticks are the same `Player.stepOneFrame`, through the same rAF, the
+ *   same draw and the same publish. The page is the page — the real UI, the
+ *   real shot path, the real everything. Nothing is stubbed and nothing is
+ *   re-implemented beside it.
+ * * **Game time advances only when something calls `advance`**, in whole 60 Hz
+ *   ticks, the walker and the port stepping together.
  * * A driver therefore schedules its input by **frame number**. Between two
- *   `advance` calls the game is stopped, so a pointer event dispatched there
- *   lands at an exact frame boundary — JS is single-threaded and a pump is one
- *   synchronous loop inside one rAF callback, so nothing can interleave with
- *   it.
+ *   `advance` calls the game is stopped — and, since `Player.wantsFrame` asks
+ *   this harness whether it owes anything, genuinely idle rather than merely
+ *   not advancing. A pointer event dispatched there lands at an exact frame
+ *   boundary: JS is single-threaded and a pump is one synchronous loop inside
+ *   one rAF callback, so nothing can interleave with it.
  *
  * ## What it may do
  *
@@ -44,8 +44,8 @@
  *
  * `install` returns null unless `state.drive` is set, `Player` holds null, and
  * every driven branch in `app/main.ts` is `if (this.drive)`. With the flag
- * absent there is no global, no trace buffer and no behaviour change: the two
- * clocks are exactly the two clocks they were.
+ * absent there is no global and no trace buffer, and the loop is fed by the
+ * wall exactly as it is for a player.
  */
 import { G } from "../game/globals";
 import type { Walker } from "../script/walker";
@@ -96,6 +96,8 @@ const q = (v: number): number => Math.round(v * Q);
 export interface DriveTarget {
   /** Advance exactly one whole 60 Hz frame: walker and port together. */
   stepOneFrame(): void;
+  /** Ask the loop for a frame. It sleeps when nothing wants one. */
+  wake(): void;
   readonly walker: Walker | null;
   readonly rng: Rng;
 }
@@ -132,6 +134,15 @@ export class Harness {
 
   /** Driven frames run so far — `Player.drivenMs` is the one reader. */
   get driven(): number { return this.count; }
+
+  /**
+   * Does the loop owe this harness a frame?
+   *
+   * `Player.wantsFrame` asks, and between two `advance` calls the answer is
+   * no: a driven run is genuinely idle while the driver is dispatching a
+   * click, which is one fewer thing that can happen underneath it.
+   */
+  get wants(): boolean { return this.pending > 0; }
 
   /** How many frames one rAF owes. Public so a test can read the cap. */
   take(): number {
@@ -190,6 +201,10 @@ export class Harness {
   advance(n: number): Promise<number> {
     const frames = Math.max(0, Math.floor(n));
     this.pending += frames;
+    // The loop sleeps when nothing wants a frame, and what this just booked
+    // is exactly that. Without it a driver's first `advance` after an idle
+    // stretch would wait for a frame nobody was going to ask for.
+    this.target.wake();
     return new Promise((ok) => {
       this.waiters.push(() => ok(this.count));
       // Nothing was asked for and nothing is outstanding: settle on the spot,

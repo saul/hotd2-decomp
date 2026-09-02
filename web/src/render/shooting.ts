@@ -178,6 +178,11 @@ class ImpactSprites {
     e.s.scale.setScalar(k * 8);
   }
 
+  /** Is any sprite still alive? `Player.wantsFrame` is the reader. */
+  get busy(): boolean {
+    return this.pool.some((e) => e.life > 0);
+  }
+
   update(dt: number): void {
     for (const e of this.pool) {
       if (e.life <= 0) continue;
@@ -297,6 +302,17 @@ export class Shooting implements System {
    */
   update(_ctx: Context, t: Tick): void {
     this.impacts?.update(t.wall);
+  }
+
+  /**
+   * Is there still feedback in flight?
+   *
+   * A paused player stops asking for frames, and a shot fired while it is
+   * paused would otherwise leave its sprite hanging in the air. This is what
+   * keeps the loop awake until the last one has gone.
+   */
+  get busy(): boolean {
+    return this.impacts?.busy ?? false;
   }
 
   private pickOne<T>(xs: T[] | undefined): T | undefined {

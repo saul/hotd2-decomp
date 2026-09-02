@@ -540,7 +540,15 @@ export class Player implements PlayerView, PlayerCommands {
     // Before the first frame, because the first frame is the first one the
     // driver may have to be given. `install` answers null without the flag.
     this.drive = installHarness(this.state, this);
-    requestAnimationFrame(this.frame);
+    // **The tab going into the background stops the clock rather than banking
+    // it.** Chrome stops delivering rAF to a hidden tab, so the alternative is
+    // one enormous delta on the way back and a lurch of catch-up that never
+    // happened to the player. `Loop.resume` is what makes it not owed.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) this.stopFrames();
+      else this.wake();
+    });
+    this.wake();
     try {
       this.manifest = await loadManifest();
     } catch (err) {
@@ -603,6 +611,9 @@ export class Player implements PlayerView, PlayerCommands {
   private wireUi(): void {
     // Every shot goes to the feed, so a session reads back as a transcript.
     this.shooting.onShot = (r, note) => {
+      // The sprite and the feed row both want drawing, and a shot is allowed
+      // while the transport is stopped.
+      this.wake();
       this.onFeed({
         seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
         op: { i: -1, at: 0, op: -1,
@@ -613,6 +624,9 @@ export class Player implements PlayerView, PlayerCommands {
 
     window.addEventListener("keydown", (e) => {
       if (isTyping(e.target)) return;
+      // Before the branches, not after: every one of them changes something
+      // worth drawing, and a paused player has no loop running to draw it.
+      this.wake();
       if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
       else if (e.code === "ArrowRight") { e.preventDefault(); this.stepOnce(); }
       else if (e.code === "ArrowLeft") { e.preventDefault(); this.stepBack(); }
@@ -624,6 +638,7 @@ export class Player implements PlayerView, PlayerCommands {
 
     window.addEventListener("popstate", () => {
       this.state = readState();
+      this.wake();
       void this.loadStage();
     });
 
@@ -874,81 +889,139 @@ export class Player implements PlayerView, PlayerCommands {
     this.cam.sync(this.ctx, force);
   }
 
+  /**
+   * One drawn frame: the ticks it owes, then the draw, then the publish.
+   *
+   * The pacing rule is `app/loop.ts` — whole 60 Hz ticks, never skipped, the
+   * catch-up spread rather than dropped. What is left here is the three
+   * things a frame does and the order they go in.
+   *
+   * A frame may run **no** ticks: on a 144 Hz display most of them do not, and
+   * a paused player never does. It still draws and still publishes, because
+   * the crosshair, the impact sprites and the whole of the UI are answers to a
+   * click rather than to a tick.
+   */
   private frame = (now: number) => {
-    requestAnimationFrame(this.frame);
+    this.rafId = null;
+    this.frameNow = now;
     this.lifeFrame += 1;
     const wall = this.loop.wallDelta(now);
 
-    // `?freeze=1` halts the clock and renders exactly one frame, so a test can
-    // assert against a state rather than against a race.
     this.loop.freeze = !!this.state.freeze;
     this.loop.speed = this.speed;
-    this.loop.running = this.playing && this.state.mode !== "free"
-                        && !!this.walker && !this.walker.branch;
-    // The driven clock. `?drive=1` hands the whole of the game's time to
-    // `app/harness.ts`: nothing here advances by itself, and what does advance
-    // does so in whole 60 Hz frames with the walker and the port in step —
-    // which is the only reason a run can be compared with the one before it.
-    // Wall time is still read above, because the crosshair and the impact
-    // sprites are feedback for a click rather than part of the script's clock;
-    // no driven frame is measured with it.
-    if (this.drive) {
-      this.drive.pump();
-    } else if (!this.state.freeze && this.state.mode === "free") {
+    this.loop.running = !this.gameStopped && !!this.walker;
+
+    if (!this.state.freeze && this.state.mode === "free") {
       this.freeRoam.update(wall, this.camera);
-    } else if (!this.state.freeze && this.playing && this.walker) {
-      if (this.walker.branch) {
-        if (!this.branchHover) this.walker.tickBranchCountdown(wall);
-      } else {
-        // The 60 Hz frames the walker actually advanced. The shutter slide and
-        // the dialogue countdown are script state measured in those frames, so
-        // they are driven from here rather than from wall time -- otherwise a
-        // caption put up in Step mode quietly expires two seconds later while
-        // playback is paused, which is exactly long enough to look at the
-        // script tree and miss it.
-        this.loop.advance(wall, () => {
-          this.walker!.tick(TICK);
-          return !this.walker!.branch && !this.walker!.finished;
-        });
-        this.syncUrlToWalker(now);
-      }
     }
 
-    // `!this.drive`, because under the driven clock this *is* `stepOneFrame`
-    // and running it again here would give the port a second helping of time
-    // that the walker never got — the exact disagreement between the two
-    // clocks that the flag exists to end.
-    if (!this.drive && this.walker) {
-      // The port and the render layers run on wall time, not on the walker's
-      // accumulator, and they run in every mode: a zombie loops its walk while
-      // you step through the script one instruction at a time, and the rain
-      // keeps falling in free roam. Only the shutter and the dialogue
-      // countdown ride the script's own clock, and they took `tick` above.
-      const game = this.gameTick(wall);
-      this.pushPortGlobals();
-      // One call, and the order inside it is `World`'s: the shot seats the
-      // camera block, the port's frame eases it, the draw reads it back, and
-      // every render layer poses against the camera that draw placed.
-      // `CamStartPathPlayback` -> `CamAdvancePathFrame` runs in Step mode too:
-      // the walker is not advancing, but the port is, and the camera hook
-      // still has to have a rail to fall back onto.
-      this.cam.driving = !this.scrubbing;
-      this.cam.scripted = this.state.mode !== "free";
-      this.world.update(this.ctx, game);
-    }
+    // **One clock, and the harness is on it.** `?drive=1` replaces the wall
+    // as the thing the accumulator is fed from and changes nothing else: the
+    // ticks below are the same `stepOneFrame`, through the same rAF, the same
+    // draw and the same publish. A harness that stepped the world down a path
+    // of its own would be proving that path, and the player does not have it.
+    const ran = this.drive
+      ? this.drive.pump()
+      : this.loop.advance(wall, () => this.stepOneFrame()).frames;
+
+    // No tick ran, so the systems that ride wall time have not had their
+    // frame. The impact sprites are the reason this exists: they are feedback
+    // for a click and they must keep flying while the transport is stopped.
+    //
+    // Never under the drive flag. There is no wall time in a driven run —
+    // admitting real milliseconds here would put a browser-dependent number
+    // back into exactly the loop the flag exists to take it out of.
+    if (!this.drive && ran === 0 && this.walker) this.tickStopped(wall);
+
     this.renderer.render(this.scene, this.camera);
     // The one update path, and it is unconditional on purpose. A projection a
     // frame, published only when it differs -- so the sidebar and the globals
     // panel are live while the clock is stopped, and the loading overlay is
     // live before there is a stage to tick.
-    //
-    // It used to be a system in the `hud` phase, which put it inside the
-    // `if (this.walker)` above: nothing was published at all until the first
-    // stage had loaded, and `setLoading` and `fail` each carried a hand-push
-    // to cover for that. Two update paths in the layer built to have one.
-    // Both hand-pushes are gone, and so is `panelSystem`.
     this.publishUi();
+    // Last, so that what the frame did decides whether there is another one.
+    this.schedule();
   };
+
+  /**
+   * The frame a stopped player still gets.
+   *
+   * Everything `stepOneFrame` does except advance any game time: the render
+   * layers pose against the camera, and the systems that ride `t.wall` get
+   * the real delta. `world.update` is the one call for the whole tick order
+   * whether or not the order has anything to do.
+   */
+  private tickStopped(wall: number): void {
+    this.pushPortGlobals();
+    this.cam.driving = !this.scrubbing;
+    this.cam.scripted = this.state.mode !== "free";
+    this.world.update(this.ctx, this.loop.idle(wall));
+  }
+
+  // -- asking for frames --------------------------------------------------
+
+  /**
+   * The frame that has been asked for and not yet run, if there is one.
+   *
+   * `null` means the loop is asleep. It sleeps whenever nothing wants a frame
+   * — paused with no sprites out, or the tab in the background — and anything
+   * that changes what is on screen has to `wake` it. That is a real
+   * obligation, so the wakers are few and they are all chokepoints:
+   * `runCommand`, the keydown handler, `popstate`, `setLoading`, `fail`, a
+   * shot, the harness, and the tab becoming visible. `tools/pacing.mjs` is
+   * what proves the sleep and the waking, on the real page.
+   */
+  private rafId: number | null = null;
+  /** The rAF timestamp of the frame being run, for `syncUrlToWalker`. */
+  private frameNow = 0;
+
+  /**
+   * Ask for a frame.
+   *
+   * Idempotent, and it resumes the clock rather than banking the time the
+   * loop spent asleep — a player that was paused for a minute must not
+   * simulate the minute when it starts again.
+   */
+  wake(): void {
+    if (this.rafId !== null || document.hidden) return;
+    this.loop.resume(performance.now());
+    this.rafId = requestAnimationFrame(this.frame);
+  }
+
+  /** Keep going only while something wants it. Called at the end of a frame. */
+  private schedule(): void {
+    if (this.rafId !== null || document.hidden || !this.wantsFrame()) return;
+    this.rafId = requestAnimationFrame(this.frame);
+  }
+
+  /** Stop asking. The tab going into the background is the only caller. */
+  private stopFrames(): void {
+    if (this.rafId === null) return;
+    cancelAnimationFrame(this.rafId);
+    this.rafId = null;
+  }
+
+  /**
+   * Is there anything for another frame to do?
+   *
+   * The answer is no more often than it looks: a paused player with no sprites
+   * out has nothing to draw that is not already drawn, and `?freeze=1` means
+   * *one* frame by definition. Step mode is not in that list on purpose — the
+   * script stands still there but the port does not, which is what makes a
+   * zombie loop its walk while you read the tree.
+   */
+  private wantsFrame(): boolean {
+    // The harness owns the clock, so it owns the question. Between two
+    // `advance` calls a driven run is genuinely idle, which is one fewer thing
+    // that can happen while a driver is dispatching a click.
+    if (this.drive) return this.drive.wants;
+    if (this.loading) return true;
+    if (this.state.freeze) return false;
+    if (this.state.mode === "free") return true;
+    if (!this.gameStopped) return true;
+    // Feedback for a click outlives the click.
+    return this.shooting.busy;
+  }
 
   /** The script-owned globals the port reads. See `app/systems.ts`. */
   private pushPortGlobals(): void {
@@ -1009,9 +1082,9 @@ export class Player implements PlayerView, PlayerCommands {
    * `speed` is deliberately not applied. Under the flag a frame is a frame;
    * the driver sets the rate by asking for more or fewer of them.
    */
-  stepOneFrame(): void {
+  stepOneFrame(): boolean {
     const w = this.walker;
-    if (!w || this.state.freeze) return;
+    if (!w || this.state.freeze) return false;
     if (this.playing && this.state.mode !== "free") {
       if (w.branch) {
         // On the script's clock rather than the wall's. The countdown is what
@@ -1021,7 +1094,10 @@ export class Player implements PlayerView, PlayerCommands {
         if (!this.branchHover) w.tickBranchCountdown(TICK);
       } else if (!w.finished) {
         w.tick(TICK);
-        this.syncUrlToWalker(this.drivenMs);
+        // Driven runs count their own milliseconds; an interactive one uses
+        // the rAF timestamp. Either way this is a throttle on writing to the
+        // URL bar and nothing reads it back as game time.
+        this.syncUrlToWalker(this.drive ? this.drivenMs : this.frameNow);
       }
     }
     this.pushPortGlobals();
@@ -1029,6 +1105,10 @@ export class Player implements PlayerView, PlayerCommands {
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx, this.gameStopped ? this.loop.idle(TICK)
                                                  : DRIVEN_TICK);
+    // A finished stage is the one thing that stops the accumulator mid-drain:
+    // the ticks it would have run are not owed, because there is nothing left
+    // to run them.
+    return !w.finished;
   }
 
   /**
@@ -1040,13 +1120,6 @@ export class Player implements PlayerView, PlayerCommands {
    */
   private get drivenMs(): number {
     return (this.drive?.driven ?? 0) * (TICK * 1000);
-  }
-
-  /** Game time for this frame: wall clock scaled by `speed`, zero while frozen. */
-  private gameTick(wall: number): Tick {
-    if (this.state.freeze || this.gameStopped) return this.loop.idle(wall);
-    const dt = wall * this.speed;
-    return { dt, frames: dt * 60, wall, frozen: false };
   }
 
   /**
@@ -1104,7 +1177,15 @@ export class Player implements PlayerView, PlayerCommands {
    * fails to compile. That is the property `wireUi`'s sixteen anonymous
    * listeners could not have.
    */
+  /**
+   * Every UI command, and a frame to show what it did.
+   *
+   * The `wake` is here rather than at each command because this is the one
+   * door: a setting that took effect and did not redraw would look like the
+   * setting not working, and a paused player is asleep.
+   */
   private runCommand(c: UiCommand): void {
+    this.wake();
     this.dispatchCommand(c);
     // One place, rather than a `write` on each of twenty controls. Cheap: it
     // is a small object and only a command can have changed it.
@@ -1209,10 +1290,12 @@ export class Player implements PlayerView, PlayerCommands {
    */
   setLoading(text: string | null): void {
     this.loading = text === null ? null : { text, failed: false };
+    this.wake();
   }
 
   fail(msg: string): void {
     this.loading = { text: msg, failed: true };
+    this.wake();
   }
 
   pushUrl(): void {

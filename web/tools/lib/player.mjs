@@ -61,7 +61,8 @@ export async function serve(port) {
  * a throw at startup surfaces here and nowhere else.
  */
 export async function openPlayer({ url = "", size = "1600x1000",
-                                   headless = false, quiet = false } = {}) {
+                                   headless = false, quiet = false,
+                                   init = null } = {}) {
   const [width, height] = size.split("x").map(Number);
   const port = await freePort();
   if (!quiet) console.log(`vite on :${port}`);
@@ -93,6 +94,13 @@ export async function openPlayer({ url = "", size = "1600x1000",
       console.log(`  failed ${r.url()} (${r.failure()?.errorText ?? "?"})`);
     }
   });
+
+  // Instrumentation that has to be in place before the app's first line runs
+  // -- `tools/pacing.mjs` counts the page's own `requestAnimationFrame` calls
+  // this way. It is deliberately not a seam in `src/`: nothing in the player
+  // should know it can be watched, and wrapping a browser API from outside is
+  // the one form of watching that cannot change what is watched.
+  if (init) await page.addInitScript(init);
 
   await page.goto(`http://127.0.0.1:${port}/${url}`,
                   { waitUntil: "domcontentloaded" });

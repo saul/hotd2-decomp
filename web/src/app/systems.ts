@@ -91,6 +91,16 @@ export class GameSystem implements System {
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),
   };
 
+  /**
+   * **Entering a scene.** `loadStageInto` calls `world.attach` and this is the
+   * game's share of it, standing in for the engine's `FUN_00460030` — the
+   * scene load, whose last act is `ResetSceneOnEnter` (`FUN_0045EDD0`).
+   *
+   * `ResetGameGlobals` is the port's own wrapper: it empties the object pools
+   * the engine never has to, and calls `ResetSceneOnEnter` for the half that
+   * is a real routine. Order matters and `stage_load.ts` says so — the tables
+   * go in **after** this, because the reset zeroes the data segment.
+   */
   attach(): void {
     ResetGameGlobals();
   }

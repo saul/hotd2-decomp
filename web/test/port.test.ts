@@ -3703,6 +3703,20 @@ console.log("\nResetSceneOnEnter: what a scene starts clean:");
   check("...but the score survives, because it is a run total and not a scene one",
         G.g_player_score[0] === 4200 && G.g_player_score[1] === 900,
         String(G.g_player_score));
+
+  // **The scene enter has to go through it.** `GameSystem.attach` -- the port's
+  // stand-in for the engine's scene load -- calls `ResetGameGlobals`, and that
+  // is the only path into a stage. If the two are ever decoupled, a stage
+  // switch carries the last stage's script flags and enemy counts into the
+  // next one, which is precisely what the engine's reset exists to stop.
+  G.g_enemies_alive = 9;
+  G.g_script_flags[4] = 1;
+  G.g_civilians_alive = 2;
+  ResetGameGlobals();
+  check("the pool reset still performs the scene reset",
+        G.g_enemies_alive === 0 && G.g_civilians_alive === 0
+        && (G.g_script_flags[4] ?? 0) === 0,
+        `${G.g_enemies_alive}/${G.g_civilians_alive}/${G.g_script_flags[4]}`);
 }
 
 console.log("\nthe two enemy counters, stepped and not derived:");

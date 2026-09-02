@@ -503,6 +503,23 @@ export type Globals = typeof G;
  * per-scene ones *here*, which is what makes `g_civilians_rescued_total` a run
  * figure and `g_civilians_rescued_by_scene` a stage one.
  *
+ * **Where it is called from, on both sides.** The engine has three callers and
+ * every one of them is the same act — entering a scene:
+ *
+ * | engine | port |
+ * |---|---|
+ * | `FUN_00460030`, the scene load | `app/stage_load.ts` → `world.attach` →
+ *   `GameSystem.attach` → {@link ResetGameGlobals} → here. That is the only
+ *   path into a stage. |
+ * | `FUN_0041F9B0`, attract scene 10 | — the port has no attract mode |
+ * | `FUN_0041FB00`, attract scene 11 | — likewise |
+ *
+ * The port has one caller the engine does not: a **seek**, in `main.ts`. A
+ * seek rebuilds the world from a replay, so it has to start from a scene as
+ * clean as a fresh load — the engine never needs it because it cannot seek.
+ * A snapshot *load* deliberately does not reset: it restores the whole data
+ * segment, counters and all, which is the thing a reset would undo.
+ *
  * **The engine's body, line for line, and what the port does with each.** This
  * is a partial transcription and the list is how you can tell which part:
  *

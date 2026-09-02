@@ -1060,6 +1060,33 @@ Four things worth carrying forward from reading them:
   the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
   the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
 
+### An actor that removes itself was rebuilt on the next frame
+
+`SpawnFromDescriptor` (`FUN_00408A20`) builds an object when the spawn opcode
+runs and calls its class `Init` there and **once**. `ActorDespawn` frees it,
+and nothing recreates it — the opcode has already run.
+
+`CharacterLayer.syncSpawns` did recreate it. An actor that despawns itself
+fails its `!despawned` test, is released back to `pending`, is still listed in
+`Walker.spawns`, and is therefore made again on the very next frame — running
+`Init` again and restarting its state machine from its descriptor's entry
+state. So it lived its whole life over and over: a civilian on its removal cue
+was rebuilt **1784 times in 90 seconds**, and stage 2's stationary thrower
+threw its axes nineteen times. Every self-despawning actor was affected —
+the captor states, `ZombieReleaseAndDespawn`, class 0x10's removal, and class
+0x30's state 23.
+
+The layer now remembers which spawns are *spent*, and clears that only when the
+script stops listing the `at` — so a route that re-enters a region still places
+it a second time, which is what the release path is for.
+
+`web/tools/lifetime.mjs` is the harness this needed and the other five did not
+have: it drives the real `Walker` and mirrors `syncSpawns`' own bookkeeping
+with no renderer attached, and asserts that each spawn's `Init` runs once and
+each entrance state is entered once. Every other harness builds its actor by
+hand, which is the state machine and **not the object lifetime** — the gap both
+of these bugs lived in. 115 block starts across the six stages now drive clean.
+
 ### The burst-out leap, and the clip that is not a landing
 
 `ZombieStateDelayedLeap` (state 26, fourteen spawns) rides a ballistic arc to a

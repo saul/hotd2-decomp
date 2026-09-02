@@ -128,6 +128,27 @@ export class CharacterLayer implements System {
    */
   private pending = new Map<number, Pending>();
   private readonly live = new Set<number>();
+  /**
+   * Spawns that have **removed themselves** and must not be built again until
+   * their opcode runs afresh.
+   *
+   * `ActorDespawn` is the engine's own removal — `ZombieReleaseAndDespawn`
+   * (`FUN_00455490`) at the end of the stationary thrower's exit, the captor
+   * states, a civilian on its removal cue — and in the engine the object is
+   * simply gone: `SpawnFromDescriptor` (`FUN_00408A20`) builds it once, when
+   * the opcode executes, and nothing recreates it.
+   *
+   * Without this the layer rebuilt it **on the very next frame**, because
+   * `Walker.spawns` still lists it: a despawned actor fails the `!despawned`
+   * test below, is released back to `pending`, is still wanted, and is made
+   * again — so it lives its whole life over and over. A civilian on its
+   * removal cue was rebuilt 1784 times in 90 seconds, and stage 2's stationary
+   * thrower threw its axes nineteen times.
+   *
+   * An `at` the script no longer lists is cleared, so a route that re-enters a
+   * region does place it a second time, which is what `release` is for.
+   */
+  private readonly spent = new Set<number>();
   /** Each spawn's authored position, so a second placement starts where the
    * first did rather than where the last one walked to. */
   private readonly home = new Map<number, { x: number; y: number; z: number }>();
@@ -167,6 +188,7 @@ export class CharacterLayer implements System {
       this.instances = [];
       this.pending.clear();
       this.live.clear();
+      this.spent.clear();
       this.home.clear();
       this.posed.clear();
       this.json = null;
@@ -297,6 +319,8 @@ export class CharacterLayer implements System {
     }
 
     for (const at of want) {
+      // It ran `ActorDespawn` on itself; the opcode has to run again first.
+      if (this.spent.has(at)) continue;
       const rec = this.pending.get(at);
       if (!rec) continue;
       const p = rec.place;
@@ -331,9 +355,14 @@ export class CharacterLayer implements System {
     for (let i = this.instances.length - 1; i >= 0; i--) {
       const inst = this.instances[i];
       if (want.has(inst.at) && !inst.a.despawned) continue;
+      // Told itself to go, rather than being unloaded with its region.
+      if (inst.a.despawned) this.spent.add(inst.at);
       this.release(inst);
       this.instances.splice(i, 1);
     }
+    // ...and an `at` the script has stopped listing is no longer spent: its
+    // spawn opcode may run again, and then it is a new object.
+    for (const at of this.spent) if (!want.has(at)) this.spent.delete(at);
   }
 
   /** Put one instance's nodes back and return its record to `pending`. */

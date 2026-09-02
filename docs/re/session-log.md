@@ -7950,3 +7950,40 @@ the first two versions of the harness also blamed the state for the ground snap
 that runs *after* the landing, and for spawns that simply start below their
 destination. Three wrong measurements before the right one, on a bug that was
 already fixed.
+
+## The actor that lived its life over and over
+
+Reported as "0x4EE0 znebi2 keeps emerging repeatedly". The state machine was
+not the problem — driven on its own, `ZombieStateEmerge` runs once and hands to
+`AttackRun` at about frame 80, every time. So the repeat had to be *above* the
+state machine, and it was: the object was being **built again**.
+
+`SpawnFromDescriptor` builds an object when the spawn opcode runs and calls the
+class `Init` there and once. `CharacterLayer.syncSpawns` released any instance
+failing `want.has(at) && !a.despawned` back to `pending` — including one that
+had called `ActorDespawn` on *itself* — and since `Walker.spawns` still listed
+it, remade it on the next frame. `Init` ran again, the state went back to the
+descriptor's entry state, and the entrance played again. A civilian on its
+removal cue was rebuilt 1784 times in 90 seconds.
+
+**Every harness in the tree missed it, and for one reason.** They all build the
+actor by hand and drive `GameUpdate`. That is the state machine; it is not the
+object lifetime, which in the player is `Walker.spawns` plus `syncSpawns`.
+`web/tools/lifetime.mjs` closes that: the real walker, `syncSpawns`
+transcribed, no renderer, and two invariants — each spawn's `Init` runs once,
+and each entrance state is entered once. It found the rebuild immediately, and
+115 block starts across the six stages are clean after the fix.
+
+The wrong turn worth recording: the first suspicion was `retireGated`, then the
+enemy counters, then `g_enemies_alive` being derived rather than incremented —
+three plausible mechanisms reasoned about at length, none of them it. The
+harness took twenty minutes to write and answered it in one run. Guessing at a
+lifetime bug from the state machine's source is not a shortcut.
+
+And a note on `SyncDerivedActorCounts`: `g_enemies_alive` and
+`g_enemies_present` are **recomputed from the actor list every frame**, so
+`ZombieStateWaitScriptFlagThenEnter`'s transcribed `++` on both is overwritten
+immediately. The state's real effect — those four spawns are not counted until
+their script flag comes up — is unmodelled, because the port derives the count
+from `visible` and they are visible the whole time. `[open]`, and narrower than
+it looks: four spawns, all in stage 2.

@@ -473,6 +473,9 @@ web/src/
   app/          the composition root: the only layer that sees all the others
     main.ts       `Player` — 1123 lines. See "why main.ts is this size" below
     loop.ts       the 60 Hz accumulator, freeze and speed — in one place
+    harness.ts    the drive seam: under `?drive=1`, game time advances only
+                  when a driver asks and only in whole 60 Hz frames. Inert
+                  without the flag; may do nothing a `UiCommand` cannot
     systems.ts    the adapters: GameSystem, ScriptSystem, drawSystem
     commands.ts   the one exhaustive switch over `UiCommand`
     ui_root.ts    createRoot on #app, and the canvas coming back
@@ -540,6 +543,22 @@ already-scaled `dt` and the count of 60 Hz frames advanced. Adding a system is
 one `world.add(...)` and never touches the loop. **A layer ticked by hand is a
 layer outside `save`/`load`/`resync`** — that is not a style point, it is the
 rig seek bug.
+
+**1a. There are two clocks, and only one of them is whole.** `Loop.advance`
+drains the accumulator and steps the **walker** once per whole frame;
+`Player.gameTick` hands the **port** `frames: wall * speed * 60`, taken
+straight off the rAF timestamp, so it is fractional and different on every
+frame. Everything in `game/` integrates that. The engine's own frame is fixed
+and `g_cam_path_frame` is `__ftol`'d — it steps by exactly one — so an
+`== cue` is safe there and is not automatically safe here. `test:state` has
+always driven the world at one whole frame per tick, which is why the headless
+oracle has always been deterministic and the page was not.
+
+`app/harness.ts` and `?drive=1` are the answer for anything that has to
+*compare two runs*: under the flag the walker and the port advance together,
+one whole frame at a time, when a driver asks. **Whether ordinary interactive
+play should also advance in whole frames is an open decision**, not a settled
+one — see `docs/PLAYER_HANGS.md` item 8.
 
 **1b. One owner per fact, and the context is where a shared one lives.**
 Anything more than one layer reads goes on the `Context` — the walker, the

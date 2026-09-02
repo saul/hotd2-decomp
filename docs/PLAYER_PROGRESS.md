@@ -737,6 +737,42 @@ hold correctly: a half-open door stays half open, the rain stops, and the
 impact sprites — feedback for a click rather than script state — still play out
 on wall time.
 
+### The fourth clock: `?drive=1`
+
+There is a fourth, and it exists because the three above are all measured
+against the wall.
+
+The script's accumulator hands the **walker** whole 60 Hz frames.
+`Player.gameTick` hands the **port** `frames: wall * speed * 60`, straight off
+the rAF timestamp — fractional, and different on every frame. So a stage played
+twice integrated a different amount of time between the same two instructions,
+`g_frame` was a float, and every `===` against a frame cursor was a coin toss.
+Stage 1 gave four different outcomes over five runs on identical code and an
+identical route.
+
+`?drive=1` and `app/harness.ts` hand the game clock to whoever is driving.
+Under the flag rAF keeps running and the renderer keeps drawing — it is the
+real page, the real UI, the real shot path — but game time advances only when
+`advance(n)` asks for it, and only in whole frames, walker and port together.
+A driver schedules its input by **frame number**: the game is stopped between
+two calls, so a pointer event dispatched there lands on an exact frame.
+
+| | script | port | who decides when |
+|---|---|---|---|
+| Play | whole frames | `wall * 60` | the wall clock |
+| `?drive=1` | whole frames | **whole frames** | the driver |
+
+The seam is inert without the flag and may do nothing a `UiCommand` cannot:
+stepping frames is Step mode with the count made explicit, reading state is the
+projection plus the globals the sidebar already shows. `tools/playthrough.mjs`
+and `tools/determinism.mjs` are the two drivers.
+
+**Ordinary interactive play still takes the fractional tick.** Making it whole
+as well is very likely more faithful — the engine's frame is fixed and
+`g_cam_path_frame` is `__ftol`'d, so it steps by exactly one — but it changes
+what a human at the keyboard sees, and that decision is recorded as open in
+`docs/PLAYER_HANGS.md` item 8.
+
 ---
 
 ## Deliberate non-goals

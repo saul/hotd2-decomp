@@ -148,13 +148,17 @@ export class Harness {
    */
   pump(): number {
     const n = this.take();
+    this.pending -= n;
     for (let i = 0; i < n; i++) {
       this.target.stepOneFrame();
-      // After the frame, so a row is the state the frame left behind.
+      // Booked one at a time, and **before** the row is taken: a row is the
+      // state frame `f` left behind, so `f` has to be that frame's number and
+      // not the number the pump started on. Booking `n` at the end gave every
+      // row in one pump the same `f`, which a diff by index survives and a
+      // human reading the trace does not.
+      this.count += 1;
       if (this.tracing) this.rows.push(this.snapshot());
     }
-    this.pending -= n;
-    this.count += n;
     // After the frames and before the render, so the promise a driver is
     // waiting on settles a macrotask after this frame's publish.
     this.settle();

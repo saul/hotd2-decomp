@@ -8448,3 +8448,107 @@ I also put `RetireUnlistedActor` in `despawn.ts` first, which reintroduced the
 exact import cycle that file exists to avoid — its own doc comment says so.
 It lives in `director.ts` now, beside `ActorSpawn`, which is where the port's
 unspawn belongs anyway.
+
+---
+
+## Session — the same stage four different ways, and it was never the gameplay
+
+`docs/PLAYER_HANGS.md` item 8: stage 1 gave four different outcomes over five
+runs on identical code and an identical route. Until that was gone no other
+item on the list could be investigated honestly, because a fix and a coin
+landing your way look the same.
+
+**It was the clock, and the input timing, exactly as the item guessed.** Two
+clocks: `Loop.advance` drains a 60 Hz accumulator and steps the *walker* once
+per whole frame, while `Player.gameTick` returns `{ dt: wall * speed,
+frames: dt * 60 }` off the rAF timestamp and hands *that* to `world.update` —
+which is the whole of `game/`. So every motion clock, timer and state advance
+in the port moved by a browser-dependent amount and `g_frame` was a float. On
+top of it `playthrough.mjs` polled every 250 ms and started shooting after N
+*milliseconds*, so the shots landed on a different game frame every run.
+
+The fix is `?drive=1` and `web/src/app/harness.ts` — a drive seam `shot.mjs`'s
+own docstring had nominated before it existed. Under the flag rAF keeps running
+and the renderer keeps drawing, but game time advances only when a driver asks
+and only in whole frames, walker and port together. It is inert without the
+flag and does nothing a `UiCommand` cannot.
+
+### What was watched failing
+
+The rule here is that a test you have not seen fail is not evidence, so the
+driven clock was temporarily replaced in `Player.frame` by the old pair — the
+walker on the accumulator, the port on `gameTick(wall)` once per rAF — and
+`tools/determinism.mjs` run against it. It exits **1 at trace index 0**:
+`g_frame` 19 in one run and 18 in the other, with the RNG state already apart.
+Put back, 2000 frames identical, and five full playthroughs of each of stages 1
+and 2 byte-identical apart from the wall-clock column.
+
+The "before" was captured rather than quoted, by running the pre-change
+`playthrough.mjs` out of git against the same source tree — it never passes
+`drive=1`, so every driven branch is inert and the behaviour is exactly as it
+was.
+
+### What was got wrong on the way
+
+* **Three doc files were edited in the shared checkout instead of the
+  worktree.** `cd /Users/llm-sandbox/hotd2-decomp && python3 …` is the whole
+  mistake, and it is an easy one to make because every *other* command in the
+  session was relative. Every edit happened to be an additive replacement
+  against a unique anchor, so reversing new → old restored all three byte for
+  byte — and `PLAYER_PROGRESS.md` had a peer's uncommitted hinge work in it at
+  the time, which survived intact. Verified by diffing each restored file
+  against its blob at `961ae67`. **Check the path before writing outside
+  `web/`.**
+* **`DriveTarget.stepOneFrame` was dead for the first two commits.** The pump
+  was open-coded in `Player.frame` and the harness never called the target it
+  had been handed, so the interface lied about what it needed. Moved into
+  `Harness.pump` — take, step, trace, book, settle — which is also what made
+  the seam drivable from `test:state` with no browser.
+* **The first `advance` resolved too early.** It settled inside the rAF, and a
+  driver that read the HUD the instant the promise came back was racing React's
+  commit of that frame's projection. It settles from a `setTimeout(0)` now,
+  which is the cheapest thing that is after it.
+* **The stage-2 route changed and it looked like the fix had done it.** It had
+  not: `Walker.takeBranch` with no argument picks `Math.min(...targets)` and
+  block 3 offers `4, 30`, so 4 is the only answer it can give — and the commit
+  that made the pick the lowest block is an ancestor of the commit that
+  recorded the route as going to 30. The two disagreed before this started.
+  Filed as item 16 rather than assumed either way.
+
+### Found on the way, and filed rather than carried
+
+* **Item 12** — `game/effects/rain.ts` ticks the pool with `t.wall * 60` and
+  draws from **`ctx.rng`, the world's generator**. Every particle that
+  respawns burns three `next()` calls, so a cosmetic layer shifts the stream
+  position for every gameplay draw — the attack picks, the death directions,
+  `ResolveHit`'s one-in-four headshot burst. Deterministic under the driven
+  clock and not under the wall.
+* **Item 13** — the `Math.random` ban covers `core/ bundle/ script/ game/` and
+  not `render/`. Both hits there were checked and are genuinely sound-only
+  (`shooting.ts`'s `pickOne`) and cosmetic (`breakables.ts`'s rattle), so
+  nothing is broken; the hole is.
+* **Item 14** — with pillarbox off, `camera.aspect = w / h` and `Shooting.fire`
+  unprojects through that camera, so the window's shape changes what a click
+  hits. Pillarbox defaults on and pins it to 4/3, but the toggle is persisted.
+* **Item 15** — `void p.loadStage()` is fire-and-forget with no in-flight
+  guard; two stage switches can interleave their rebuild halves.
+* `game/class30/strike.ts` picks its fallback attack with
+  `Number(Object.keys(list)[0])`, which is a silent dependency on V8 ordering
+  integer-like keys ascending. Deterministic in practice; noted, not filed.
+
+### The decision that is the user's
+
+`?drive=1` makes a **driven** run whole-frame. Interactive play still takes the
+fractional tick. Making it whole as well is very likely more faithful — the
+engine's frame is fixed and both camera drivers end on
+`g_cam_path_frame = __ftol(...)`, an integer that steps by exactly one, which
+is why an `== cue` is safe there and is not automatically safe here — but it
+changes what a human at the keyboard sees and it is a `[diverges]`-shaped call
+either way. Item 4 depends on the answer.
+
+**Next actions**
+
+1. Put the interactive-clock question to the user; item 4 is blocked on it.
+2. Sweep stages 3–6 (item 11) — now worth doing, because a result is a result.
+3. Item 1, the camera parked facing a wall, is the next real one: stage 2 still
+   cheats past blocks 3, 9 and 28, the same three every run.

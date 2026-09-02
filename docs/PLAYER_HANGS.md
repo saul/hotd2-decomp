@@ -14,14 +14,38 @@ node tools/playthrough.mjs --stage 2            # add --headless to run it blind
 
 It drives the player from a stage's **entry block** — never a deep link, a seek
 is its own rebuild path with its own bugs — to an end block, and exits non-zero
-if it does not get there. An address that has not moved for fifteen seconds is a
-hang: this is an arcade game and no authored sequence in it is that long. On a
-hang it prints the instruction, the wait, the actors holding it and their own
-debug rows, and writes `web/shots/hang-stage<N>.png`.
+if it does not get there. An address that has not moved for **nine hundred game
+frames** is a hang: this is an arcade game, no authored sequence in it is
+fifteen seconds long, and fifteen seconds is nine hundred frames. On a hang it
+prints the instruction, the wait, the actors holding it and their own debug
+rows, and writes `web/shots/hang-stage<N>.png`.
+
+**Every deadline in it is counted in frames, not milliseconds.** It runs the
+page under `?drive=1` — the seam in `web/src/app/harness.ts` — which hands it
+the game clock: rAF keeps running and the renderer keeps drawing, so this is
+the real page, the real UI and the real shot path, but game time advances only
+when the tool asks and only in whole 60 Hz frames. That is what makes one run
+comparable with the next, and it is what item 8 was about. It also makes a
+stage about six times faster in wall clock, because a driven frame does not
+have to wait for the next vsync.
+
+The check that this stays true is its own tool:
+
+```sh
+node tools/determinism.mjs --stage 1 --headless
+```
+
+Two runs of the same stage on the same seed with the same **frame-scheduled**
+inputs, traced frame by frame and diffed. The trace is game state only — the
+frame, the walker's address, `ctx.rng`'s whole state, `g_frame`, the gate
+counters and one digest per live actor. It exits non-zero on the first frame
+that differs and prints both sides.
 
 It shoots at **enemy** gates through the real path — pointer events on
 `#viewport`, `Shooting.fire`, the ray, the per-bone spheres, `ResolveHit` — and
-falls back to the Kill button after eight seconds, saying so. It never shoots at
+falls back to the Kill button after 480 frames, saying so. Under the driven
+clock the game is stopped between two `advance` calls, so a whole volley lands
+on one exact frame instead of smeared across however many the browser ran. It never shoots at
 or clears a **civilian** gate: you are not meant to shoot civilians in this
 game, so a `wait_scripted_actors` that does not come down on its own is a bug by
 definition and clearing it would hide the thing the tool exists to find.
@@ -35,28 +59,53 @@ any.
 The branch countdown answers itself with the **lowest block number** so that one
 run takes the same route as the next; see item 9.
 
-### Stage 2 — reaches block 35 `(end → 0)`, ~260s, ~157 instructions
+### Stage 2 — reaches block 37 `(end → 7)`, 14145 frames, 157 instructions
 
-Route: 0 → 1 → 2 → 3 → 30 → 5 → 6 → 17 → 18 → 19 → 20 → 35.
+Route: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 10 → 9 → 28 → 37.
 
-Rooms that had to be cheated past, from one run (the set varies between runs —
-see item 8):
+**Five runs, and the printout is byte-identical apart from the wall-clock
+column** — every block is entered on the same frame in every one. Item 8 is
+fixed; see it.
+
+Rooms that had to be cheated past — the same three every run:
 
 | block | step/op | wait |
 |---|---|---|
 | 3 | 1 / 26 | `0x44 wait_enemies_alive` |
-| 3 | 4 / 18 | `0x44 wait_enemies_alive` |
-| 6 | 3 / 9 | `0x44 wait_enemies_alive` |
-| 18 | 7 / 10 | `0x44 wait_enemies_alive` |
+| 9 | 6 / 5 | `0x44 wait_enemies_alive` |
+| 28 | 5 / 7 | `0x44 wait_enemies_alive` |
 
 Block 3's is the one with a picture: the viewport is a flat wall. See item 1.
 
-### Stage 1 — completes **intermittently**, ~137s, ~101 instructions
+The route above is **not** the one this file recorded before (0 → 1 → 2 → 3 →
+30 → 5 → 6 → 17 → 18 → 19 → 20 → 35), and the difference is not the driven
+clock: `Walker.takeBranch` with no argument picks `Math.min(...targets)` and
+block 3's targets are `4, 30`, so 4 is the only answer it can give. Either the
+earlier route was recorded before that rule landed, or the branch was answered
+some other way; the run above is what the current tree does, five times out of
+five. See item 16.
 
-Route: 0 → 1 → 9 → 2 → 3 → 4 → 6 → 5 → 14, the same every run.
+### Stage 1 — reaches block 14 `(end → 0)`, 7725 frames, 98 instructions
 
-Five runs gave four different outcomes, which is itself the most interesting
-thing about this stage:
+Route: 0 → 1 → 9 → 2 → 3 → 4 → 6 → 5 → 14.
+
+**Five runs, byte-identical apart from the wall-clock column, and no room
+needed the debug clear.** Every block is entered on the same frame every time:
+
+```
+  f     0  block 0  (goto → 1)    3 placed  lives 2
+  f   435  block 1  (branch → 10,9)
+  f  3420  block 9  (branch → 2,7,12)
+  f  3870  block 2  (goto → 3)
+  f  4530  block 3  (goto → 4)    5 placed, 4 the enemy gate waits on
+  f  5925  block 4  (branch → 6,13)   lives 1 · invulnerable 68f
+  f  7380  block 6  (branch → 11,5)
+  f  7605  block 5  (goto → 14)
+  f  7725  block 14 (end → 0)
+```
+
+Before the clock was fixed, five runs gave four different outcomes — which was
+the most interesting thing about the stage, and is now item 8's evidence:
 
 | outcome | seen |
 |---|---|
@@ -66,20 +115,49 @@ thing about this stage:
 | hung at block 1 step/op 5 / 56 | once |
 | hung at block 3 step/op 5 / 13 | once |
 
+That was re-measured rather than quoted, by running the pre-change
+`playthrough.mjs` out of git against the same tree — it never passes `drive=1`,
+so every driven branch is inert and the behaviour is exactly as it was. **Five
+runs, five different outcomes:**
+
+| run | outcome |
+|---|---|
+| 1 | hung at block 3 step/op 2 / 12 — `The script is not blocked`, lives 1 → 2, block 3 entered three times |
+| 2 | reached the end, **102** instructions, block 4 step/op 3 / 19 needed the clear |
+| 3 | reached the end, **100** instructions, block 4 step/op 3 / 19 needed the clear |
+| 4 | reached the end, **98** instructions, block **1** step/op 9 / 16 needed the clear |
+| 5 | hung at block 2 step/op 1 / 8 |
+
+Against 5/5 identical afterwards, at 98 instructions with nothing cheated.
+
+None of those recurs on the driven clock. **That does not mean the underlying
+faults are gone** — the two `zstin` below are still off screen where a player
+could not shoot them, and the run above simply never reaches the state that
+exposed it. What it means is that the four outcomes were one route sampled at
+four different sets of frames, and that a hang found from here on is a fact
+rather than a coin.
+
 **Block 4 step 3 op 19** is `wait_enemies_alive` held by two `zstin` — class
 0x31 — in `WaitForPermit` at 30 and 6 units, off screen, with the camera parked
 at `cp_st1[10] slot 42 frame 429 / 429 (static pose)`. Unlike stage 2's the
 scene renders perfectly; the two enemies are simply not in the frame. The
 thrower row now prints why a permit was refused, which is the next thing to
-read off it. `[open]`
+read off it. On the driven clock this room now clears by shooting, so it is
+**not** reproducible from the entry block any more — pin it with a URL.
+`[open]`
 
 **Block 5 step 1 op 10** is `wait_scripted_actors` with `g_civilians_alive 1`
 and **no actor listed as holding it** — the count and the pool disagree. Item 2
 was one way that happened and is fixed; whether it was *this* one is
-unestablished. `[open]`
+unestablished, and it no longer reproduces from the entry block. `[open]`
 
-**Blocks 1 and 3** were not captured in detail. Re-run until they recur and
-read the wait panel. `[open]`
+**Blocks 1 and 3** were not captured in detail and do not recur. One of the two
+*was* captured on the way to fixing item 8, from the old wall-clock tool: block
+3 step/op 2 / 12, fifteen seconds on one instruction with the wait panel saying
+**"The script is not blocked"** and the lives counter having gone 1 → 2 with
+block 3 re-entered twice. An instruction that is not a wait and does not
+advance is a different fault from the four in the table at the top of this
+file. `[open]`
 
 Three sidebar readouts were added while finding these and are worth knowing
 about, because each turns a row that said nothing into a number:
@@ -211,26 +289,68 @@ slowly; that is fixed. What now needs finding is **what actually reads
 `sub+0x0E`**, because op 3 sets it deliberately. The field is kept and the
 sidebar shows it. `[open]`
 
-## 8. The same stage does not play the same way twice
+## 8. The same stage does not play the same way twice — **fixed for anything driven; a decision is open for interactive play**
 
 Stage 1 gave four different outcomes over five runs on identical code and an
-identical route. That is not the harness being flaky in an uninteresting way —
-it means something in the port is sensitive to *when* frames land.
+identical route. The gameplay was never the problem: **the clock and the input
+timing were.**
 
-The suspect worth reading first is the family of **exact-frame cues**. The
-engine counts `obj+0x19C` up by one per game frame, so `== some frame` is safe
-there; this port derives the cursor from a clock the player may advance by
-several frames at once (`Tick.dt` is `frames * TICK`), and a cue that is
-compared with `===` can be stepped straight over. Three of them are already
-known: `atLastFrame` in `class30/target.ts` (equality, and deliberately so —
-`>=` would double-count loops), the kill cue in
-`ZombieStateTargetMotionScript`, and `CivilianStepScript`'s motion-frame wait.
-`ZombieStateMotionCue21`'s shot-immunity cue was changed to `>=` for exactly
-this reason and carries the note.
+**The mechanism.** There are two clocks and they disagree about what a frame
+is.
 
-A cheap experiment before reading anything: pin the player to one game frame
-per tick and see whether stage 1 becomes deterministic. If it does, that is the
-whole answer. `[open]`
+* `Loop.advance` (`web/src/app/loop.ts`) drains a 60 Hz accumulator and steps
+  the **walker** once per *whole* frame.
+* `Player.gameTick` (`web/src/app/main.ts`) returns
+  `{ dt: wall * speed, frames: dt * 60 }` — taken straight off the rAF
+  timestamp, so it is **fractional and different on every frame** — and that
+  tick drives `world.update`, which is the whole of `game/` and every render
+  layer. Every motion clock, timer and state advance in the port therefore
+  moved by a browser-dependent amount, and `g_frame` was a float.
+
+And the harness scheduled on wall time on top of that: `playthrough.mjs` polled
+every 250 ms and fired a volley after N *milliseconds* of no address movement,
+so the shots landed on a different game frame in every run.
+
+The cheap experiment this item asked for was the right one, and the answer is
+yes.
+
+**The fix.** `?drive=1` and `web/src/app/harness.ts`. Under the flag, rAF keeps
+running and the renderer keeps drawing — it is the real page, the real UI and
+the real shot path — but game time advances only when a driver asks for it, and
+only in whole 60 Hz frames with the walker and the port in step. Inputs are
+scheduled by **frame number**; the game is stopped between two `advance` calls,
+so a pointer event dispatched there lands on an exact frame and cannot
+interleave with a tick. The seam is inert without the flag and may do nothing a
+`UiCommand` cannot.
+
+**The proof, and it was watched failing.** `tools/determinism.mjs` runs the
+same stage on the same seed with the same frame-scheduled inputs twice and
+diffs the traces. With the driven clock temporarily replaced by the old pair —
+walker on the accumulator, port on `wall * 60` once per rAF — it exits 1 on
+**trace index 0**, with `g_frame` at 19 in one run and 18 in the other and the
+RNG state already apart. With the fix it is identical over 2000 frames, and
+five full playthroughs of each of stages 1 and 2 are byte-identical apart from
+the wall-clock column.
+
+**What is still open, and it is a decision rather than a reading.**
+`?drive=1` makes a *driven* run whole-frame. **Ordinary interactive play is
+untouched and still hands the port a fractional wall-derived tick.** Making it
+whole-frame as well is very likely the more faithful thing — the engine's frame
+is fixed, and `g_cam_path_frame` is `__ftol`'d so it steps by exactly one,
+which is why an `== cue` is safe there — but it changes how the port behaves
+for a human at the keyboard, and that is the user's call, not an implementer's.
+Item 4 depends on the answer: `>=` where the engine has `==` is only needed
+*because* the clock can hand over a variable step.
+
+The family of **exact-frame cues** is the reason it matters. `atLastFrame` in
+`class30/target.ts` (equality, and deliberately so — `>=` would double-count
+loops), the kill cue in `ZombieStateTargetMotionScript`, and
+`CivilianStepScript`'s motion-frame wait are all `===` against a cursor derived
+from that clock. `ZombieStateMotionCue21`'s shot-immunity cue was already
+changed to `>=` for this reason and carries the note. `test:state` now asserts
+both halves: six hundred whole ticks leave `g_frame` integral at every step,
+and six hundred jittered ones step over integers.
+
 
 ## 9. The branch countdown is a port decision, not the engine's
 
@@ -256,6 +376,85 @@ porting state 6 would move it home. `[open]`
 Stages 1 and 2 are above. `--stage 3` through `--stage 6` have not been run at
 all. Expect more of the same shape. Stage 1's opening is nearly a minute of
 cathedral, so the tool takes every skip the script offers.
+
+## 12. The rain draws from the **shared gameplay RNG**, a variable number of times
+
+`web/src/game/effects/rain.ts` ticks the pool with
+`RainAdvanceParticles(this.rules, t.frozen ? 0 : t.wall * 60, ctx.rng)`.
+
+Two things wrong with that line, and only one of them is the clock:
+
+* it is `t.wall`, not `t.dt` — so the rain runs on the wall clock even where
+  everything else runs on the game's;
+* `ctx.rng` is the **world's** generator, the one every gameplay draw comes
+  from. Each particle that crosses `respawnBelow` burns three `next()` calls,
+  and how many cross depends on how much time was handed over. So a cosmetic
+  layer **shifts the RNG stream position for every draw in `game/`** — the
+  attack picks, the death directions, `ResolveHit`'s one-in-four headshot
+  burst.
+
+Under `?drive=1` this is deterministic, because `t.wall` is `TICK`. In ordinary
+interactive play it is not, and it is aliasing gameplay onto the weather either
+way. Whether the engine's rain uses the same `rand()` as combat is `[open]` —
+`checkpoint` reseeding it with 0 during gameplay is noted in that file and is
+where to start reading.
+
+## 13. The `Math.random` ban has a hole, and both current hits are harmless
+
+`tools/verify_port.py` greps only `game/`; `tools/verify_layers.py`'s
+`no-math-random-in-engine` covers `core/ bundle/ script/ game/`. Neither sees
+`render/`, which has two:
+
+* `web/src/render/shooting.ts:303` — `pickOne`, choosing which impact and which
+  hurt/kill voice to play. **Sound only.** Checked: the return feeds
+  `playSound(...)` and nothing else, and the caller's game-state writes
+  (`ScoreAddForPlayer`, `chars.hit` → `ResolveHit`) are all upstream of it.
+* `web/src/render/breakables.ts:379` — a draw-time rattle the engine recomputes
+  from `rand()` every frame and never writes back. **Cosmetic.**
+
+So nothing is broken today. But `render/` is where the stage-1 car spin lived
+precisely because transcribed behaviour drifted there where no check could
+reach it, and a rule with a hole in it is how the next one gets in. Widening
+the layer rule to `render/` would need both hits routed through a generator —
+a *render-only* one, not `ctx.rng`, or it becomes item 12 again. `[open]`
+
+## 14. With pillarbox off, the window size changes what you hit
+
+`Player.resize` sets `camera.aspect = w / h` when `pillarbox` is false
+(`web/src/app/main.ts`), and `Shooting.fire` unprojects through that same
+camera with `Raycaster.setFromCamera`. So the ray a click produces depends on
+the shape of the browser window.
+
+`pillarbox` defaults to true, where the aspect is pinned to 4/3 and the shot is
+safe — but it is a toggle and it is persisted to `localStorage` by
+`app/viewprefs.ts`, so a player who turned it off once is aiming through a
+different frustum for ever. The game is 4:3 with a fixed vertical FOV
+(`SetupSceneProjection`), which says the picture may be widened but the *shot*
+may not. `[open]` — what the engine does with a non-4:3 window is the question,
+and it very likely never had one.
+
+## 15. Two stage loads can interleave
+
+`void p.loadStage()` in `app/commands.ts` (twice) and `app/main.ts` is
+fire-and-forget with no in-flight guard, and `loadStage` awaits twice in the
+middle of tearing one stage down and building the next. Two stage switches
+issued while the first is still awaiting will interleave their rebuild halves
+over one `Player`, and which one wins depends on how fast the fetches came
+back. Not a hang and not reachable from the harness, which loads one stage;
+reachable from the stage select. `[open]`
+
+## 16. Stage 2's recorded route is not the route it takes
+
+This file recorded 0 → 1 → 2 → 3 → **30** → 5 → 6 → 17 → 18 → 19 → 20 → 35.
+The current tree takes 0 → 1 → 2 → 3 → **4** → 5 → 6 → 7 → 8 → 10 → 9 → 28 →
+37, five times out of five, and it is not the driven clock that changed it:
+`Walker.takeBranch` with no argument picks `Math.min(...targets)` and block 3
+offers `4, 30`. The commit that made the pick the lowest block is an ancestor
+of the commit that recorded the route, so the two disagreed before this work
+started.
+
+Either the route line was written from an older run, or something answered
+block 3's branch with 30. The second would be the interesting one. `[open]`
 
 ---
 

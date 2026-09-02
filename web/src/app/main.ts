@@ -1071,13 +1071,11 @@ export class Player implements PlayerView, PlayerCommands {
    * exact-frame cue is safe there and is only unsafe here because the port is
    * normally handed `frames: wall * 60`. This hands it 1.
    *
-   * Everything below is the ordinary loop's own body with the accumulator
-   * taken out, in the same order and under the same conditions: the walker
-   * only runs while the transport is playing and off a branch, the port only
-   * runs when `gameTick` would not have idled it, and `world.update` is the
-   * one call for the whole tick order. Nothing is skipped and nothing is
-   * added — a driven frame must be a frame, or the trace is measuring the
-   * harness.
+   * **The one unit of simulated work in the player**, driven or not: the wall
+   * clock reaches it through `Loop.advance`, and a driver reaches it through
+   * `Harness.pump`. The walker only runs while the transport is playing and
+   * off a branch, the port runs unless the transport has stopped it, and
+   * `world.update` is the one call for the whole tick order.
    *
    * `speed` is deliberately not applied. Under the flag a frame is a frame;
    * the driver sets the rate by asking for more or fewer of them.

@@ -38,8 +38,18 @@ export interface GameHost {
   viewPoint(x: number, y: number, z: number, out: Vec3): void;
   /**
    * The actor's tracked point in the camera's own space — `obj+0x70/74/78`,
-   * which `ActorRegisterCameraPoint` fills each frame. `ActorIsOnScreen` needs
-   * it to decide whether the actor may take an attack permit at all.
+   * which `FUN_00409B70` fills each frame for every actor.
+   *
+   * **The field, in the engine's own sign, and no opinion about it.** `-z` is
+   * in front: `ThrowerPickLandingPoint` (`FUN_0044CBA0`) unprojects at a
+   * literal `-15.5`. It used to hand the depth over *positive* and refuse an
+   * actor behind the camera, which is a judgement neither reader asked for —
+   * `ActorIsOnScreen` (`FUN_00409C10`) divides by z with no sign test at all,
+   * and `ThrowerBeginKnockbackArc` (`FUN_0044D120`) subtracts from it. Both
+   * now get what the engine gets.
+   *
+   * False means there is no camera to measure against, which the engine never
+   * has and a headless run always does.
    */
   viewSpaceOf(at: number, out: Vec3): boolean;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */

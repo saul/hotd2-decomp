@@ -9032,3 +9032,52 @@ narrower than "read more carefully": **when a routine is reached through a
 pointer or a wrapper, check which routine, not which shape.** Two functions
 sixty bytes apart, with the same first forty lines, are exactly the pair a
 name-based search will hand you the wrong one of.
+
+### ...and a third: the bodies flew at the camera
+
+Reported separately, once the walls were right: "when I kill them they seem to
+be pulled towards me rather than away."
+
+`ThrowerBeginKnockbackArc` (`FUN_0044D120`) takes the actor's **view-space**
+tracked point, subtracts `t` from its z and transforms it back to world
+through the view-to-world matrix. The port's note read that as "pulled `t`
+units nearer" and approximated it with a lerp from the actor toward the eye,
+under a `[diverges]` saying the camera's matrix could not be reached.
+
+Both halves were wrong, and the second one settled the first. `GameHost` has
+had `viewSpaceOf` and `viewPoint` — the view-space point and the inverse
+transform — since `ThrowerPickLandingPoint` was ported; the seam existed the
+whole time. And that same routine is what settles the sign: it unprojects its
+landing point at a literal **`-15.5`**, so the engine's camera space has **−z
+in front**, and `z - t` with `t >= 0` is *further in front* — away from the
+viewer.
+
+The approximation was wrong in shape as well as direction. Moving along the
+camera's z keeps the body's screen x and y, so it recedes across the frame;
+moving toward the eye converges on a point. And `k = min(1, t / d)` pinned the
+destination **at the eye** whenever `t >= d`, which is inside about twelve
+units alive and fifteen dead — and a thrower pounces to 15.5 units in front.
+So every close kill put the corpse on the camera. That is the "pulled towards
+me" exactly.
+
+It was also two copies of one routine: `ThrowerBeginTumbleArc` had the formula
+inlined again in `react.ts`, so it carried the same inversion. The exe has one
+function with two callers.
+
+**Same lesson as the wall, in the third variation:** the sign was not in the
+routine being read, it was in a sibling the port had already transcribed
+correctly and nobody cross-checked against. `-15.5` had been sitting in
+`leap_down.ts` the entire time.
+
+The first cut of this fix negated the depth back at the call site and left an
+`[open]` saying `viewSpaceOf` refused an actor behind the camera where the
+engine reads the field regardless. That was the wrong place to stop. The seam
+was carrying a *judgement* neither of its readers had asked for:
+`ActorIsOnScreen` (`FUN_00409C10`) divides by `obj+0x78` with no sign test and
+compares against symmetric bounds, so an actor behind the camera projects to
+the mirrored position and reads as on screen — a quirk, but the engine's, and
+the routine only gates the off-screen latch. So the fix belongs in the seam:
+`viewSpaceOf` is `obj+0x70/74/78` in the engine's own sign with no opinion
+about it, false means only "there is no camera", and both readers now get what
+the engine gets. **A seam that pre-digests a field for one caller is a seam
+that will lie to the second one.**

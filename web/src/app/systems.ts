@@ -77,15 +77,21 @@ export class GameSystem implements System {
     // unprojects a screen offset at a depth to get one -- see
     // `ThrowerPickLandingPoint`.
     viewPoint: (x, y, z, out) => this.view?.toWorld(x, y, z, out),
-    // `obj+0x70/74/78`: the actor's tracked point in the camera's own space.
-    // Camera-local -Z is forward, and `ActorIsOnScreen` divides by z, so the
-    // depth is handed over positive.
+    // `obj+0x70/74/78`: the actor's tracked point in the camera's own space,
+    // handed over exactly as the engine holds it. Camera-local -Z is forward
+    // in three.js and in the engine both, so `toView` is already the right
+    // sign and there is nothing to flip.
+    //
+    // It used to negate z and refuse an actor behind the camera. Neither
+    // reader wanted that: `ActorIsOnScreen` divides by z with no sign test —
+    // the bounds are symmetric, so an actor directly behind the camera reads
+    // as on screen, and that is the engine's own behaviour — and the
+    // knockback arc subtracts from the depth, where a flipped sign threw
+    // bodies at the viewer instead of away.
     viewSpaceOf: (at, out) => {
       const a = ActorByAt(at);
-      if (!a || !this.view) return false;
+      if (!a || !this.view) return false;              // no camera at all
       this.view.toView(a.lookAt.x, a.lookAt.y, a.lookAt.z, out);
-      if (out.z >= 0) return false;                    // behind the camera
-      out.z = -out.z;
       return true;
     },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),

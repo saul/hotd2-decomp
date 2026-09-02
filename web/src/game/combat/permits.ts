@@ -30,6 +30,13 @@ const _view = vec3();
  * Projects the actor's tracked point and asks whether it lands inside the
  * frame. Both claim functions call it — but **not to refuse the claim**. See
  * {@link TryClaimAttackSlot}.
+ *
+ * There is **no sign test**, because the engine has none: it divides by
+ * `obj+0x78` whatever its sign and compares against symmetric bounds, so an
+ * actor directly behind the camera projects to the mirrored position and
+ * reads as on screen. That is a quirk rather than a mistake — the routine
+ * only gates the off-screen *latch* — and it is transcribed rather than
+ * tidied. A zero depth divides to an infinity, which fails the bounds.
  */
 export function ActorIsOnScreen(obj: Actor, host: GameHost): boolean {
   if (!host.viewSpaceOf(obj.at, _view)) return true;   // not posed: no opinion

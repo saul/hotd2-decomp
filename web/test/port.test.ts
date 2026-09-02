@@ -23,7 +23,8 @@ import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { UpdateCameraFreeFlag } from "../src/game/camera/track";
-import { G, ResetGameGlobals, ResetSceneOnEnter } from "../src/game/globals";
+import { ActorByAt, G, ResetGameGlobals, ResetSceneOnEnter }
+  from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
   type RainRules,
@@ -65,6 +66,7 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
   from "../src/game/class10";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
+import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
 import { ThrowerState } from "../src/game/class31/states";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
@@ -702,7 +704,8 @@ console.log("ActorIsOnScreen:");
   const offscreen = {
     ...NULL_HOST,
     viewSpaceOf: (_at: number, out: Vec3) => {
-      out.x = 900; out.y = 0; out.z = 40;   // far off the right of a 640-wide frame
+      // Forty units in front — `-z` — and far off the right of a 640 frame.
+      out.x = 900; out.y = 0; out.z = -40;
       return true;
     },
   };
@@ -726,7 +729,7 @@ console.log("ActorIsOnScreen:");
   const onscreen = {
     ...NULL_HOST,
     viewSpaceOf: (_at: number, out: Vec3) => {
-      out.x = 0; out.y = 0; out.z = 40;
+      out.x = 0; out.y = 0; out.z = -40;     // dead centre, forty in front
       return true;
     },
   };
@@ -1943,10 +1946,31 @@ const CHARS31 = {
  * stand. `viewPoint` takes a point in camera space, where -Z is forward, so
  * the z term is negated on the way out.
  */
+/**
+ * A camera at `EYE` looking down **+z in world**, which is where this file
+ * stands its actors.
+ *
+ * `viewSpaceOf` is the exact inverse of `viewPoint`, and it has to be: the
+ * knockback arc reads one and writes through the other, so a stub answering
+ * only half of the seam tested the formula against nothing. Both are in the
+ * engine's own sign, `-z` in front, and neither has an opinion about an actor
+ * behind the camera. See `game/host.ts`.
+ */
 const CAM_HOST = {
   ...NULL_HOST,
   viewPoint: (x: number, y: number, z: number, out: Vec3) => {
     out.x = EYE.x + x; out.y = EYE.y + y; out.z = EYE.z - z;
+  },
+  viewSpaceOf: (at: number, out: Vec3) => {
+    const a = ActorByAt(at);
+    if (!a) return false;
+    // The tracked point when the renderer has filled one, the origin
+    // otherwise — `lookAtOf`'s own fallback.
+    const p = (a.lookAt.x || a.lookAt.y || a.lookAt.z) ? a.lookAt : a.pos;
+    out.x = p.x - EYE.x;
+    out.y = p.y - EYE.y;
+    out.z = EYE.z - p.z;                  // `-z` in front, as the engine has it
+    return true;
   },
 };
 
@@ -4406,7 +4430,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
   const offscreen = {
     ...NULL_HOST,
     viewSpaceOf: (_at: number, out: Vec3) => {
-      out.x = 900; out.y = 0; out.z = 40;      // off the side of a 640 frame
+      out.x = 900; out.y = 0; out.z = -40;     // off the side of a 640 frame
       return true;
     },
   };
@@ -4568,6 +4592,52 @@ console.log("\nrain: DrawRainParticles' simulation half");
     check("and a wall stance leaves the sphere level with the actor",
           Math.abs(z.camPoint.y - z.pos.y) < 1e-6,
           `${z.camPoint.y} vs ${z.pos.y}`);
+  }
+
+  // **Which way a shot body flies.** `ThrowerBeginKnockbackArc`
+  // (`FUN_0044D120`) moves the actor's **view-space** point along the camera's
+  // own z and transforms it back: `p = (obj+0x70, obj+0x74, obj+0x78 - t)`.
+  // That space has −z in front — `ThrowerPickLandingPoint` unprojects at a
+  // literal −15.5 — so `z - t` is *further in front*, and the body is thrown
+  // away from the viewer. The port lerped from the actor toward the eye
+  // instead, under a `[diverges]` claiming the camera matrix was out of reach,
+  // and `k = min(1, t / d)` pinned the destination *on* the camera for
+  // anything inside about fifteen units. A thrower pounces to 15.5 in front,
+  // so that was every close kill: "when I kill them they seem to be pulled
+  // towards me rather than away".
+  {
+    const z = thrower(ThrowerState.StandAndDecide);
+    T.coli = { files: ["test"], blobs: { floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["floor"];
+    // Off to one side and well inside the range that used to pin it: the
+    // lateral offset is what tells the two shapes apart.
+    z.pos = vec3(6, 0, 14);
+    z.lookAt = vec3(6, 8, 14);
+    const wasZ = z.pos.z;
+    ThrowerBeginKnockbackArc(z, CAM_HOST);
+    check("a shot body is thrown away from the camera, not at it",
+          z.arcTo.z > wasZ, `${wasZ} -> ${z.arcTo.z.toFixed(2)}`);
+    // Along the camera's z, so the screen-space offset survives: the body
+    // recedes rather than converging on the viewer.
+    check("...and it keeps its offset across the screen",
+          Math.abs(z.arcTo.x - z.pos.x) < 1e-6,
+          `x ${z.pos.x} -> ${z.arcTo.x.toFixed(2)}`);
+    check("and it ends further from the eye than it began",
+          Math.hypot(z.arcTo.x - EYE.x, z.arcTo.z - EYE.z)
+          > Math.hypot(z.pos.x - EYE.x, z.pos.z - EYE.z),
+          `${Math.hypot(z.pos.x - EYE.x, z.pos.z - EYE.z).toFixed(2)}`
+          + ` -> ${Math.hypot(z.arcTo.x - EYE.x, z.arcTo.z - EYE.z).toFixed(2)}`);
+    check("and it never lands on the camera",
+          Math.hypot(z.arcTo.x - EYE.x, z.arcTo.z - EYE.z) > 1,
+          `${z.arcTo.x.toFixed(2)},${z.arcTo.z.toFixed(2)} vs eye`);
+
+    // Dead is half as far again — `if (obj+0x34 & 0x4000000) t *= 1.5`.
+    const alive = z.arcTo.z - z.pos.z;
+    z.flags |= ActorFlag.Dead;
+    ThrowerBeginKnockbackArc(z, CAM_HOST);
+    check("a body that was already dead is thrown half as far again",
+          Math.abs((z.arcTo.z - z.pos.z) - alive * 1.5) < 1e-4,
+          `${alive.toFixed(3)} -> ${(z.arcTo.z - z.pos.z).toFixed(3)}`);
   }
 
   // **The Kill button.** `ActorKillAll` sets `dead` and `ActorFlag.Dead`, and

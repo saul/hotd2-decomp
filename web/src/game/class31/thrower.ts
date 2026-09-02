@@ -231,7 +231,7 @@ function ThrowerRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.HitReaction:
       return ThrowerStateHitReaction(obj, eye, rng, host);
     case ThrowerState.FallAndLand:
-      return ThrowerStateFallAndLand(obj, eye, dt, rng);
+      return ThrowerStateFallAndLand(obj, host, dt, rng);
     case ThrowerState.Death:
       return ThrowerStateDeathClip(obj);
     case ThrowerState.Corpse:
@@ -263,7 +263,7 @@ function ThrowerRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.StrikeOnTheSpot:
       return ThrowerStateStrikeOnTheSpot(obj, dt, rng, host, events);
     case ThrowerState.KnockedTumbling:
-      return ThrowerStateKnockedTumbling(obj, eye, dt, rng);
+      return ThrowerStateKnockedTumbling(obj, host, dt, rng);
     case ThrowerState.BlinkIn:
       return ThrowerStateBlinkInThreeHops(obj, dt, stance);
     case ThrowerState.StandAndDecide:

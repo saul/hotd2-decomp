@@ -1219,9 +1219,54 @@ against the old code the assertion reads `0.000 off the wall`, with the sphere
 One constant went with it: `TraceActorSurfaceContactPoint`'s own overshoot is
 `0x40900000`, **4.5**, and the port had 20.
 
-Nineteen assertions in `test/port.test.ts` cover all of it, and the ones that
-matter were made to fail against the old code first — including the reported
-symptom end to end: *pounced true, latch 1, permit −1.*
+**5. And the corpses flew the wrong way.** `ThrowerBeginKnockbackArc`
+(`FUN_0044D120`) moves the actor's **view-space** point along the camera's own
+z and transforms it back:
+
+```c
+t = 15.0 / |obj+0x70..0x78| * 10.0;   // the view-space tracked point
+if (t < 0.0) t = 0.0;
+if (obj+0x34 & 0x4000000) t *= 1.5;   // already dead: half again
+p = (obj+0x70, obj+0x74, obj+0x78 - t);
+MatrixTransformPoint(&p, &dest);      // through the view-to-world matrix
+```
+
+That space has **−z in front** — `ThrowerPickLandingPoint` (`FUN_0044CBA0`)
+unprojects its landing point at a literal `-15.5`, and the port has carried
+that number, negative, since it was written. So `z - t` is *more* negative:
+further in front of the camera, which is **away from the viewer**.
+
+The port read the store as "pulled `t` units nearer" and approximated it with
+a lerp from the actor toward the eye, under a `[diverges]` saying the camera's
+matrix was out of reach. It is not — `GameHost.viewSpaceOf` is the view-space
+point and `GameHost.viewPoint` the inverse transform, and both have been on
+the seam since the landing point was ported. The lerp was wrong twice: the
+direction, and the shape. Moving along the camera's z keeps the body's screen
+x and y so it recedes; moving toward the eye converges on a point, and `k =
+min(1, t / d)` pinned the destination **on the camera** for anything inside
+about fifteen units. A thrower pounces to 15.5 units in front, so that was
+every close kill.
+
+**And the seam was the thing to fix, not the caller.** `GameHost.viewSpaceOf`
+used to hand the depth over *positive* and refuse an actor behind the camera —
+a judgement neither of its two readers asked for. `ActorIsOnScreen`
+(`FUN_00409C10`) divides by `obj+0x78` with **no sign test at all** and
+compares against symmetric bounds, so an actor directly behind the camera
+projects to the mirrored position and reads as on screen; that is the engine's
+own behaviour and it is transcribed rather than tidied, because the routine
+only gates the off-screen latch. And the knockback subtracts from the depth,
+where a flipped sign is the difference between a body thrown away and a body
+thrown at you. The seam now carries `obj+0x70/74/78` as the engine holds it,
+with no opinion, and false means only "there is no camera" — which the engine
+never has and a headless run always does.
+
+It was also a second copy: `ThrowerBeginTumbleArc` in `react.ts` had the same
+formula inlined, and the exe has one routine with two callers — `FUN_0044A450`
+and `ThrowerStateKnockedTumbling`. There is one now.
+
+Twenty-four assertions in `test/port.test.ts` cover all of it, and the ones
+that matter were made to fail against the old code first — including the
+reported symptom end to end: *pounced true, latch 1, permit −1.*
 
 `web/tools/coli_walls.mjs` runs that query through the port and asserts those
 four numbers against `tools/verify_thrower_walls.py`, which answers the same

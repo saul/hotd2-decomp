@@ -2,8 +2,9 @@
  * Falling over, and dying.
  *
  * Class 0x31's death is four states, not a clip: it is knocked off its feet
- * and rides a ballistic arc *at the camera* (`ThrowerBeginKnockbackArc` aims
- * the body at you, harder the nearer it already is), bounces on the ground,
+ * and rides a ballistic arc *away from the camera* (`ThrowerBeginKnockbackArc`
+ * throws the body back, harder the nearer it already was), bounces on the
+ * ground,
  * lies still for a random moment, and then either gets up — because being
  * knocked down is survivable — or plays its own death clip and becomes a
  * corpse that sinks into the floor for two seconds and despawns.
@@ -20,6 +21,8 @@ import {
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { G } from "../globals";
+import type { GameHost } from "../host";
+import { vec3 } from "../vec";
 import { QueryGroundHeightAt } from "../coli";
 import { MotionOf, T } from "../tables";
 import { GAME_HZ } from "../class30/states";
@@ -27,6 +30,12 @@ import { ActorArcVelocity, ActorClipFrame, ActorClipLength } from "./arc";
 import { ThrowerState, ThrowerMotion } from "./states";
 import { ThrowerMotionOf, ThrowerStanceOf } from "./tables";
 
+
+/** `ActorArcBeginToAtSpeed`'s `minFrames`. */
+const ARC_MIN_FRAMES = 15;
+
+const _view = vec3();
+const _dest = vec3();
 
 /** `obj+0x5C` — gravity, -196 units per second squared at 60 Hz. */
 export const FALL_GRAVITY = -0.05444444;
@@ -71,36 +80,72 @@ function playOnce(obj: Actor, motion: number): void {
 }
 
 /**
- * `ThrowerBeginKnockbackArc` — `FUN_0044D120`.
+ * `ThrowerBeginKnockbackArc` — `FUN_0044D120`. Where a shot body flies.
  *
- * The body flies **at the camera**, and harder the nearer it already is:
- * `t = clamp(15.0 / |view-space centre| * 10.0, 0, ∞)`, half as far again when
- * the actor was already dead, and the target is the actor's own tracked point
- * pulled `t` units nearer along the camera's own axis.
+ * **Away from the camera, not at it**, and harder the nearer it already is:
  *
- * [diverges] The engine builds that point in the camera's matrix, which the
- * port cannot reach; here it is the straight line from the actor to the eye.
- * The direction is the same and the distance is the same formula.
+ * ```c
+ * t = 15.0 / |obj+0x70..0x78| * 10.0;      // the view-space tracked point
+ * if (t < 0.0) t = 0.0;
+ * if (obj+0x34 & 0x4000000) t *= 1.5;      // already dead: half again
+ * // then, in the camera's own frame:
+ * MatrixStackSetTopFromArray(view_to_world);
+ * p = (obj+0x70, obj+0x74, obj+0x78 - t);
+ * MatrixTransformPoint(&p, &dest);
+ * ```
+ *
+ * The sign is the whole of it. `obj+0x78` is the depth in the **camera's own**
+ * space, and that space has **−z in front**: `ThrowerPickLandingPoint`
+ * (`FUN_0044CBA0`) unprojects its landing point at a literal `-15.5` and the
+ * port has carried that number, negative, since it was written. So `z - t`
+ * with `t >= 0` is *more* negative, which is *further in front of the camera*
+ * — the body is thrown away from the viewer.
+ *
+ * This used to read the store as "pulled `t` units nearer" and approximate it
+ * with a lerp from the actor toward the eye, under a `[diverges]` saying the
+ * camera's matrix was out of reach. It is not: `GameHost.viewSpaceOf` is the
+ * view-space point and `GameHost.viewPoint` is the inverse transform, and both
+ * have been on the seam since `ThrowerPickLandingPoint` was ported. The lerp
+ * was wrong twice over — the direction, and the shape. Moving along the
+ * camera's z keeps the body's screen x and y, so it recedes; moving toward the
+ * eye converges on a point, and `k = min(1, t / d)` pinned it *at* the eye for
+ * anything inside about fifteen units. A thrower shot mid-pounce lands 15.5
+ * units in front of the camera, so that was every close kill.
+ *
+ * `GameHost.viewSpaceOf` hands the field over in the engine's own sign and
+ * with no opinion about it, so this is `z - t` verbatim. It used to negate the
+ * depth and refuse an actor behind the camera; that judgement belonged to
+ * neither reader and is gone.
  */
-export function ThrowerBeginKnockbackArc(obj: Actor, eye: { x: number;
-                                                            y: number;
-                                                            z: number }): void {
-  const d = Math.hypot(obj.pos.x - eye.x, obj.pos.y - eye.y, obj.pos.z - eye.z);
-  if (d < 1e-3) return;
-  let t = Math.max(0, (15.0 / d) * 10.0);
-  if (obj.flags & ActorFlag.Dead) t *= 1.5;
-  const k = Math.min(1, t / d);
+export function ThrowerBeginKnockbackArc(obj: Actor, host: GameHost): void {
+  // The standing arc first: no knockback at all, over the minimum duration.
+  // [diverges] The engine always has a camera; a host that cannot answer is
+  // the port's own case, and leaving `arcTotal` at zero would collapse the
+  // whole fall into one frame rather than merely skip the throw.
   obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
-  obj.arcTo = {
-    x: obj.pos.x + (eye.x - obj.pos.x) * k,
-    y: obj.charType === CHAR_ZSLMAN && (obj.flags2 & 0xc0) ? obj.pos.y
-       : obj.pos.y + (eye.y - obj.pos.y) * k,
-    z: obj.pos.z + (eye.z - obj.pos.z) * k,
-  };
+  obj.arcTo = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
   obj.arcFrames = 0;
+  obj.arcTotal = ARC_MIN_FRAMES;
+  if (!host.viewSpaceOf(obj.at, _view)) return;
+  const len = Math.hypot(_view.x, _view.y, _view.z);
+  if (len < 1e-4) return;
+  let t = (15.0 / len) * 10.0;
+  if (t < 0) t = 0;
+  if (obj.flags & ActorFlag.Dead) t *= 1.5;
+  // `p = (obj+0x70, obj+0x74, obj+0x78 - t)`, then back through the
+  // view-to-world matrix. `-z` is in front, so this is away from the viewer.
+  host.viewPoint(_view.x, _view.y, _view.z - t, _dest);
+  obj.arcTo = {
+    x: _dest.x,
+    // A wall-clinging `zslman` keeps its own height: `local_14` is overwritten
+    // with `obj+0x44` after the transform.
+    y: obj.charType === CHAR_ZSLMAN && (obj.flags2 & 0xc0) ? obj.pos.y
+       : _dest.y,
+    z: _dest.z,
+  };
   // `ActorArcBeginToAtSpeed`'s own duration rule, which is what `FUN_0044DB50`
   // gives it: 30 units per `minFrames`, floored at `minFrames`.
-  obj.arcTotal = Math.max(15, Math.trunc(Math.hypot(
+  obj.arcTotal = Math.max(ARC_MIN_FRAMES, Math.trunc(Math.hypot(
     obj.arcTo.x - obj.arcFrom.x, obj.arcTo.z - obj.arcFrom.z) / 2));
 }
 
@@ -112,9 +157,7 @@ export function ThrowerBeginKnockbackArc(obj: Actor, eye: { x: number;
  * survivable: it lies there for a random three to thirty frames, plays a
  * get-up clip and goes back to deciding.
  */
-export function ThrowerStateFallAndLand(obj: Actor, eye: { x: number;
-                                                           y: number;
-                                                           z: number },
+export function ThrowerStateFallAndLand(obj: Actor, host: GameHost,
                                         dt: number, rng: Rng): void {
   const frames = dt * GAME_HZ;
 
@@ -134,7 +177,7 @@ export function ThrowerStateFallAndLand(obj: Actor, eye: { x: number;
       obj.knockCount += 1;
     }
     if (!(obj.flags & ActorFlag.ArcSpent) && obj.knockCount < KNOCKBACK_ARCS) {
-      ThrowerBeginKnockbackArc(obj, eye);
+      ThrowerBeginKnockbackArc(obj, host);
     } else {
       obj.flags |= ActorFlag.ArcSpent;
     }

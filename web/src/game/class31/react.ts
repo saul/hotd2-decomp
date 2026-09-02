@@ -23,6 +23,7 @@ import { ThrowerState } from "./states";
 import { Class31SetOf, ThrowerStanceOf } from "./tables";
 import { ThrowerEnterCorpseState, FALL_GRAVITY, SURFACE_KILL } from "./death";
 import { vec3, type Vec3 } from "../vec";
+import { ThrowerBeginKnockbackArc } from "./death";
 import { TraceActorSurfaceContactPoint } from "./surface";
 
 /** `g_bone_reaction_group` has sixteen entries, so the bone clamps here. */
@@ -174,8 +175,8 @@ const AXIS_OF: Record<number, "x" | "y" | "z"> = {
  * engine's own probe, against the game's own `coli/` quads — so a wall bounce
  * finds the wall rather than settling on the frame cap.
  */
-export function ThrowerStateKnockedTumbling(obj: Actor, eye: Vec3, dt: number,
-                                            rng: Rng): void {
+export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
+                                            dt: number, rng: Rng): void {
   const frames = dt * GAME_HZ;
   const stance = ThrowerStanceOf(obj) & 3;
 
@@ -193,7 +194,7 @@ export function ThrowerStateKnockedTumbling(obj: Actor, eye: Vec3, dt: number,
     }
     playOnce(obj, clip);
     if (!(obj.flags & ActorFlag.ArcSpent) && obj.knockCount < 2) {
-      ThrowerBeginTumbleArc(obj, eye);
+      ThrowerBeginTumbleArc(obj, host);
     } else {
       obj.flags |= ActorFlag.ArcSpent;
     }
@@ -277,17 +278,19 @@ export function ThrowerStateKnockedTumbling(obj: Actor, eye: Vec3, dt: number,
   obj.sub = 0;
 }
 
-/** The tumble's own launch: the same "at the camera" arc the fall uses. */
-function ThrowerBeginTumbleArc(obj: Actor, eye: Vec3): void {
-  const d = Math.hypot(obj.pos.x - eye.x, obj.pos.y - eye.y, obj.pos.z - eye.z);
-  if (d < 1e-3) { obj.arcTotal = 1; obj.arcFrames = 1; return; }
-  const t = Math.max(0, (15.0 / d) * 10.0) * (obj.dead ? 1.5 : 1);
-  const k = Math.min(1, t / d);
-  obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
-  obj.arcTo = { x: obj.pos.x + (eye.x - obj.pos.x) * k, y: obj.pos.y,
-                z: obj.pos.z + (eye.z - obj.pos.z) * k };
-  obj.arcFrames = 0;
-  obj.arcTotal = Math.max(15, Math.trunc(t / 2));
+/**
+ * The tumble's launch, which is the **same routine** the fall uses:
+ * `ThrowerStateKnockedTumbling` and `FUN_0044A450` are the only two callers of
+ * `ThrowerBeginKnockbackArc` (`FUN_0044D120`). This was a second copy of the
+ * formula, so it carried the same inverted direction; now it is the one
+ * function plus the velocity this state steps the arc with, which the fall
+ * derives another way.
+ */
+function ThrowerBeginTumbleArc(obj: Actor, host: GameHost): void {
+  ThrowerBeginKnockbackArc(obj, host);
+  // The tumble keeps its own height and steps the arc from a velocity rather
+  // than through `ActorArcVelocity`.
+  obj.arcTo.y = obj.pos.y;
   obj.vel.x = (obj.arcTo.x - obj.arcFrom.x) / obj.arcTotal;
   obj.vel.z = (obj.arcTo.z - obj.arcFrom.z) / obj.arcTotal;
   obj.vel.y = 0;

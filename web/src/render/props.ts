@@ -7,16 +7,16 @@
  * that only the running script knows: whether a prop is still there, and how
  * far its hinge has swung.
  *
- * ## The hinge, from `FUN_00473CF0`
+ * ## The hinge, from `HingeUpdate` (`FUN_00473CF0`)
  *
  * ```c
  * if (remove_flag >= 0 && g_script_flags[remove_flag]) { despawn(); }
  * if (g_script_flags[open_flag]) {
- *     f = frame++;                          // clamped at 59, or 129 on curve 4
+ *     f = frame++;                          // stops at 59, or 129 on curve 4
  *     rx = curve[f].rx; ry = curve[f].ry; rz = curve[f].rz;
- *     obj.rz  = base_rz + rz;
- *     obj.rx  = base_rx + side * rx;
- *     obj.yaw = ry * swing_scale * (side < 1 ? -1 : +1);
+ *     obj.rz  = base_rz + rz;                        // never mirrored
+ *     if (side > 0) { obj.rx = base_rx + rx; obj.yaw = +ftol(ry * scale); }
+ *     else          { obj.rx = base_rx - rx; obj.yaw = -ftol(ry * scale); }
  * }
  * Translate(pos); RotY(base_yaw); RotZ(obj.rz); RotY(obj.yaw); RotX(obj.rx);
  * ```
@@ -25,6 +25,30 @@
  * angle and the **swing** are separate, which is what lets four baked curves
  * serve doors hung at any angle in the level. `side` mirrors the swing, so one
  * curve opens a pair of doors outward.
+ *
+ * ### `side` is a sign here, and a magnitude somewhere else
+ *
+ * `side` is `obj+0x1DC`, and the exe reads it in exactly two places:
+ *
+ * * `TEST EAX,EAX; JLE` at `0x00473EE6` — a **sign test**. The branches
+ *   differ only in `ADD ECX` vs `SUB ECX` on the X angle and a `NEG EAX` on
+ *   the yaw. The magnitude never reaches either angle.
+ * * `IMUL EAX, [ESI+0x1DC]` at `0x00473FB5` — the amplitude, in BAMS, of the
+ *   damped yaw wobble a prop does **when it is shot**.
+ *
+ * So the field is a wobble amplitude whose sign happens also to pick the side,
+ * and `PropBuildVanDoors` (`FUN_00472C90`) writing it as literally −1 and +1
+ * for the van's two doors is what makes it look like nothing else. It is not:
+ * stage 1 has four hinges carrying **±512 and ±416**, and multiplying the X
+ * angle by one of those throws the door through a hundred turns rather than
+ * the two-degree judder the curve holds. That was this layer's bug, not the
+ * exporter's — see `docs/PLAYER_PROGRESS.md`.
+ *
+ * `scale` is `obj+0x2C0`, an `FMUL` that `PropBuildHinge` (`FUN_00472BD0`),
+ * `PropBuildVanDoors` and `PropBuildHingeScaled` (`FUN_00472EB0`) all seed
+ * with `1.0f` and nothing here writes, so it is an identity and is not
+ * carried. `base_rx`/`base_rz` (`obj+0x1CC`, `obj+0x1D4`) are likewise never
+ * written by any of the three, so they are the pool's zero. Both `[proved]`.
  *
  * That composite is applied here as `qY(base) · qZ(rz) · qY(swing) · qX(rx)` —
  * written as four axis-angle quaternions in that order rather than as an Euler,
@@ -37,8 +61,8 @@
  * so nothing has to be approximated. Curve 2 is the van: 179 degrees by frame
  * 12, settling back to 137 — a door thrown hard enough to rebound.
  *
- * `FUN_00473CF0` also swings a prop when it is *shot*, one damped sine over 16
- * frames. There is no shooting here, so that is not run.
+ * `HingeUpdate` also swings a prop when it is *shot*, one damped sine over
+ * 16 frames. There is no shooting here, so that is not run.
  */
 
 import {
@@ -53,6 +77,7 @@ import type { Scope } from "../core/scope";
 import { attachTo } from "./scope3d";
 import { labelTexture } from "./overlays";
 import { BAMS_TO_RAD } from "../core/bams";
+import { HingePose } from "./hinge";
 
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Y = new Vector3(0, 1, 0);
@@ -248,14 +273,19 @@ export class PropLayer implements System {
       if (!l.hinge || gone || !l.curve.length) continue;
 
       if (flags.has(l.hinge.open_flag)) {
+        // `CMP EDI,0x3C; JL` -- or `CMP EDI,0x82; JGE` on curve 4. Past the
+        // end the exe stops writing the angles at all, so the prop holds the
+        // last frame it posed; clamping the cursor is the same pose.
         l.frame = Math.min(l.curve.length - 1, l.frame + frames);
       }
       const k = l.curve[Math.floor(l.frame)];
       if (!k) continue;
-      const side = l.hinge.side;
-      const rx = side * k[0];
-      const ry = side < 1 ? -k[1] : k[1];
-      const rz = k[2];
+      // `TEST EAX,EAX; JLE` -- the **sign** of `side`, never its magnitude.
+      // Four of the game's 56 hinges carry a magnitude (stage 1's, at 512 and
+      // 416), because the same field is the shot wobble's amplitude. Scaling
+      // by it sent those four spinning through 103 turns of X at the point in
+      // the curve where the door slams and the judder peaks.
+      const { rx, ry, rz } = HingePose(l.hinge, k);
 
       // RotY(base); RotZ(rz); RotY(swing); RotX(rx) -- the engine's order.
       this.q.setFromAxisAngle(AXIS_Y, l.hinge.base_yaw * BAMS_TO_RAD);

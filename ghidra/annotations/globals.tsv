@@ -176,7 +176,7 @@
 00593084	g_pDeathMotionsArc8000	6 death motions for the 0x8000 arc: 985, 989, 987, 988, 989, 990. Their root carries z by +7.4/+8.2
 0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
 005960b4	g_pHingeCurvesXYZ	hinge swing curves, 6-byte {s16 rx, ry, rz} frames. Curve 2 is the van doors: 179 deg by frame 12, settling to 137
-005960c8	g_pHingeCurvesYaw	hinge swing curves, u16 yaw-only frames, for the selectors the xyz table has no entry for
+005960c8	g_pHingeCurvesYaw	hinge swing curves, u16 yaw-only frames (XOR EDX,EDX; MOV DX -- zero extended). HingeUpdate switches on the selector at 0x473E8D, not on which pointer is populated: 0/2/3 read g_pHingeCurvesXYZ and everything else reads this. Slot 1 is 60 frames, slot 4 is 130
 0059f4d0	g_ShotHitList	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
 005a4c84	g_nShotHitCount	entries in g_ShotHitList this frame
 009a2cb8	g_ShotRecords	per player, 0x68 bytes: world ray origin, direction, -pitch/-yaw and their sin/cos

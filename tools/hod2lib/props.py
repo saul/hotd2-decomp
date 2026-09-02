@@ -23,26 +23,26 @@ they are two halves of one set piece:
 * **class 0x44** (`FUN_00472B10`) is a **prop placer**: it dispatches on
   ``obj+0x11C`` through the 18 builders at ``0x00595AB8`` and each builds child
   actors. Selectors **1, 2 and 4 all share one child behaviour**,
-  `FUN_00473CF0` -- 53 of the 123 class-0x44 spawns in the game -- and that
-  behaviour is a hinge.
+  `HingeUpdate` (`FUN_00473CF0`) -- 53 of the 123 class-0x44 spawns in the
+  game -- and that behaviour is a hinge.
 
 ## The hinge
 
-`FUN_00473CF0`, per frame:
+`HingeUpdate` (`FUN_00473CF0`), per frame:
 
 ```c
 if (remove_flag >= 0 && g_script_flags[remove_flag]) { despawn(); }
 if (g_script_flags[open_flag]) {
-    f = frame++;                       /* obj+0x2A8, clamped at 59 or 129 */
+    f = frame++;                       /* obj+0x2A8; stops at 60, 130 on 4 */
     if (curve in {0, 2, 3}) {          /* 6-byte {s16 rx, ry, rz} frames */
         rx = xyz[curve][f].rx;  rz = xyz[curve][f].rz;
-        ry = xyz[curve][f].ry;
+        ry = xyz[curve][f].ry;         /* MOVSX -- signed */
     } else {                           /* u16 yaw-only frames */
-        rx = rz = 0;  ry = y[curve][f];
+        rx = rz = 0;  ry = y[curve][f];   /* XOR EDX,EDX; MOV DX -- unsigned */
     }
-    obj.rz  = base_rz + rz;
-    obj.rx  = base_rx + side * rx;
-    obj.yaw = ftol(ry * swing_scale) * (side < 1 ? -1 : +1);
+    obj.rz  = base_rz + rz;                            /* never mirrored */
+    if (side > 0) { obj.rx = base_rx + rx; obj.yaw = +ftol(ry * scale); }
+    else          { obj.rx = base_rx - rx; obj.yaw = -ftol(ry * scale); }
 }
 Translate(pos); RotY(base_yaw); RotZ(obj.rz); RotY(obj.yaw); RotX(obj.rx);
 Scale(scale); AssetDrawSlot(slot);
@@ -50,8 +50,33 @@ Scale(scale); AssetDrawSlot(slot);
 
 Note the two Y rotations with a Z between them: the hinge's *mounting* yaw and
 its *swing* are separate, which is what lets one pair of curves serve doors
-mounted at any angle. `side` (+1 / -1) mirrors the swing, so a pair of doors
-opens outward from one curve.
+mounted at any angle. `side` mirrors the swing, so a pair of doors opens
+outward from one curve.
+
+## `side` is read for its sign; its magnitude belongs to something else
+
+``side`` is ``obj+0x1DC``, and `HingeUpdate` touches it exactly twice:
+
+* ``TEST EAX,EAX; JLE`` at ``0x00473EE6``. The two arms differ only in
+  ``ADD ECX`` vs ``SUB ECX`` on the X angle and a ``NEG EAX`` on the yaw --
+  a **sign test**. The magnitude reaches neither angle.
+* ``IMUL EAX, [ESI+0x1DC]`` at ``0x00473FB5`` -- the amplitude, in BAMS, of the
+  damped yaw wobble the prop does when it is **shot**.
+
+So it is a wobble amplitude whose sign also picks the side.
+`PropBuildVanDoors` (`FUN_00472C90`) hands those two doors a literal -1 and
++1, which is what makes it look like a pure mirror; selectors 1 and 4 read an
+authored ``i32``, and stage 1 has four
+hinges carrying **+/-512 and +/-416**. A consumer that multiplies by it rather
+than by its sign throws those four doors through ~100 turns of X at the frame
+where the curve's slam judder peaks. The player did exactly that until it was
+found; see ``docs/PLAYER_PROGRESS.md``.
+
+``scale`` is ``obj+0x2C0``: all three constructors seed it ``1.0f`` and
+neither `HingeUpdate` nor the draw path writes it, so the ``FMUL`` is an
+identity and it is not exported. ``base_rx``/``base_rz`` (``obj+0x1CC`` and
+``obj+0x1D4``) are never written by any of the three either, so they are the
+pool's zero.
 
 ## The curves
 
@@ -70,7 +95,7 @@ yaw only, and live in a separate table.
 
 ## What is not here
 
-`FUN_00473CF0` also has an impact wobble -- when the prop is shot, a flag on
+`HingeUpdate` also has an impact wobble -- when the prop is shot, a flag on
 ``obj+0x34`` starts ``obj+0x1E8 += 0x1000`` and swings the yaw by a sine of it
 until it passes 0x10000, i.e. one damped cycle over 16 frames. There is no
 shooting in the player, so it is transcribed in the notes and not run.
@@ -93,11 +118,18 @@ PROP_BUILDERS = 0x00595AB8
 HINGE_CURVES_XYZ = 0x005960B4
 #: ``u16`` yaw-only frames, for the others.
 HINGE_CURVES_Y = 0x005960C8
-#: `FUN_00473CF0` clamps the frame counter here: 0x81 for curve 4, else 0x3B.
+#: `HingeUpdate` stops posing here -- ``CMP EDI,0x82; JGE`` on curve 4,
+#: ``CMP EDI,0x3C; JL`` on the rest, so the last frame it reads is 129 or 59.
+#: These are the frame *counts*.
 HINGE_FRAMES = {4: 0x82}
 HINGE_FRAMES_DEFAULT = 0x3C
+#: The selectors `HingeUpdate` sends to `HINGE_CURVES_XYZ`; every other one
+#: goes to the yaw-only table. An explicit ``AX == 0 / 2 / 3`` switch at
+#: 0x00473E8D, not a test of whether the pointer is populated.
+HINGE_CURVES_XYZ_SELECTORS = (0, 2, 3)
 
-#: The two rear doors selector 2 builds, from `FUN_00472C90`. The offsets are
+#: The two rear doors selector 2 builds, from `PropBuildVanDoors`
+#: (`FUN_00472C90`). The offsets are
 #: literals in the code and the slots are ``0x1794 + i``; only the van uses it.
 VAN_DOOR_SLOT = 0x1794
 VAN_DOOR_OFFSETS = ((-9.29, 11.5, 22.68), (9.29, 11.5, 22.68))
@@ -115,7 +147,10 @@ class Hinge:
     slot: int
     pos: tuple[float, float, float]
     base_yaw: int               #: BAMS, the mounting angle
-    side: int                   #: +1 or -1; mirrors the swing
+    #: ``obj+0x1DC``. Its **sign** mirrors the swing; its magnitude is the
+    #: shot-wobble amplitude and must never scale the pose. Not always +/-1:
+    #: stage 1 carries +/-512 and +/-416.
+    side: int
     curve: int
     open_flag: int              #: script flag that starts the swing
     remove_flag: int            #: script flag that deletes it, or -1
@@ -156,29 +191,42 @@ class StaticProp:
 
 
 def hinge_curve(tables, sel: int) -> list[tuple[int, int, int]]:
-    """One swing curve as ``[(rx, ry, rz), ...]`` in BAMS, frame by frame."""
+    """One swing curve as ``[(rx, ry, rz), ...]`` in BAMS, frame by frame.
+
+    Which table a selector reads is the exe's own switch, not an inference from
+    which pointer is populated. The two agree on the shipped data -- XYZ slots
+    1 and 4 are null -- but a rule that holds only by luck is the
+    adjacent-array trap waiting for the first re-authored curve.
+    """
     n = HINGE_FRAMES.get(sel, HINGE_FRAMES_DEFAULT)
     xyz = tables._v2r(HINGE_CURVES_XYZ)
     yon = tables._v2r(HINGE_CURVES_Y)
     if xyz is None or yon is None or not (0 <= sel < 6):
         return []
-    p = struct.unpack_from("<I", tables.data, xyz + sel * 4)[0]
-    o = tables._v2r(p) if p else None
-    if o is not None:
+    if sel in HINGE_CURVES_XYZ_SELECTORS:
+        p = struct.unpack_from("<I", tables.data, xyz + sel * 4)[0]
+        o = tables._v2r(p) if p else None
+        if o is None:
+            return []
+        # Three MOVSX loads at 0x00473EC8: every component is signed.
         return [tuple(struct.unpack_from("<3h", tables.data, o + f * 6))
                 for f in range(n)]
     p = struct.unpack_from("<I", tables.data, yon + sel * 4)[0]
     o = tables._v2r(p) if p else None
     if o is None:
         return []
-    return [(0, struct.unpack_from("<h", tables.data, o + f * 2)[0], 0)
+    # ``XOR EDX,EDX; MOV DX, word ptr [EAX + EDI*2]`` at 0x00473EAA -- zero
+    # extended, so a yaw-only curve past 180 degrees stays past it rather than
+    # folding negative. Nothing shipped reaches 0x8000, so this changes no
+    # exported byte; reading it the way the exe does is what keeps it true.
+    return [(0, struct.unpack_from("<H", tables.data, o + f * 2)[0], 0)
             for f in range(n)]
 
 
 def posed_rot_bams(hinge: "Hinge", curve, frame: int) -> tuple[int, int, int]:
     """The hinge's orientation at *frame*, as one BAMS ``(rx, ry, rz)`` triple.
 
-    `FUN_00473CF0` composes ``RotY(base_yaw); RotZ(rz); RotY(swing); RotX(rx)``,
+    `HingeUpdate` composes ``RotY(base_yaw); RotZ(rz); RotY(swing); RotX(rx)``,
     which is not a single Rz-Ry-Rx Euler as written -- so it is multiplied out
     and decomposed. Used to bake a still for verification; the player applies
     the four rotations directly and never needs this.
@@ -188,11 +236,12 @@ def posed_rot_bams(hinge: "Hinge", curve, frame: int) -> tuple[int, int, int]:
         return (0, hinge.base_yaw, 0)
     f = max(0, min(frame, len(curve) - 1))
     rx, ry, rz = curve[f]
-    side = hinge.side
+    # ``TEST EAX,EAX; JLE`` -- the sign of ``side``, never its magnitude.
+    mirror = -1 if hinge.side <= 0 else 1
     seq = [rot_matrix((0, hinge.base_yaw, 0)),
            rot_matrix((0, 0, rz)),
-           rot_matrix((0, -ry if side < 1 else ry, 0)),
-           rot_matrix((side * rx, 0, 0))]
+           rot_matrix((0, mirror * ry, 0)),
+           rot_matrix((mirror * rx, 0, 0))]
     M = seq[0]
     for N in seq[1:]:
         M = [[sum(M[i][k] * N[k][j] for k in range(3)) for j in range(3)]

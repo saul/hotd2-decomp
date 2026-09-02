@@ -258,7 +258,7 @@
 00472bd0	PropBuildHinge	selector 1, 37 spawns: one hinge from the parameter tail
 00472c90	PropBuildVanDoors	selector 2: two doors at literal offsets (+/-9.29, 11.5, 22.68), slots 0x1794/0x1795, half a turn apart
 00472eb0	PropBuildHingeScaled	selector 4, 13 spawns: as selector 1 with a per-instance scale and the flags at different offsets
-00473cf0	HingeUpdate	shared by class 0x44 selectors 1/2/4. Swings on g_script_flags[open_flag] through g_pHingeCurvesXYZ / g_pHingeCurvesYaw; transform is RotY(base); RotZ(rz); RotY(swing); RotX(rx)
+00473cf0	HingeUpdate	shared by class 0x44 selectors 1/2/4. Swings on g_script_flags[open_flag] through g_pHingeCurvesXYZ (selectors 0/2/3) / g_pHingeCurvesYaw; transform is RotY(base); RotZ(rz); RotY(swing); RotX(rx). obj+0x1DC is read for its SIGN only here (TEST/JLE at 0x473EE6: ADD vs SUB on rx, NEG on yaw) -- its magnitude is the shot-wobble amplitude at IMUL 0x473FB5, and 4 of 56 hinges carry +/-512 or +/-416. obj+0x2C0 (the FMUL on the yaw) is 1.0f from every constructor; obj+0x1CC/0x1D4 are never written. Frame stops at 60, 130 on curve 4.
 00409a00	FindSkeletonNodeForBone	Search g_character_skeletons[char_type] for the node whose bone index (+0x14) is the argument. Starts at the root's children, so the root itself is never returned.
 00409a50	FindSkeletonNodeForBoneRec	Recursive half of FindSkeletonNodeForBone. Node layout: +0x14 u16 bone, +0x16 u16 child count, +0x18 child pointers.
 00409ab0	SeverBoneChildren	Run when a bone reaches its sever step (effect-table next == 1, or a torso hit that kills). Calls RemoveBoneSubtree on every CHILD of that bone -- the bone itself keeps the stump model ActorSwapDamagedPart just gave it, and everything below it disappears.

@@ -13,7 +13,12 @@ export interface PropHinge {
   /** The class-0x44 builder that made it: 1, 2 or 4. */
   selector: number;
   slot: number;
-  /** +1 or −1; mirrors the swing so a pair opens outward. */
+  /**
+   * `obj+0x1DC`. Its **sign** mirrors the swing so a pair opens outward; its
+   * magnitude is the amplitude of the wobble the prop does when it is shot,
+   * and must never scale the pose — see `render/hinge.ts`. Four of the game's
+   * 56 hinges carry ±512 or ±416, so ±1 is not safe to assume.
+   */
   side: number;
   curve: number;
   /** BAMS mounting angle, separate from the swing. */

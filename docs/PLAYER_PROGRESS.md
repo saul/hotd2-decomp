@@ -1407,18 +1407,18 @@ position because they are two halves of one thing:
   reaches a given frame. The van body is one of these.
 * **class 0x44** (`FUN_00472B10`) is a **prop placer** dispatching on
   `obj+0x11C` through 18 builders at `0x00595AB8`. Selectors **1, 2 and 4 share
-  one child behaviour**, `FUN_00473CF0` — 53 of the 123 class-0x44 spawns — and
-  that behaviour is a hinge.
+  one child behaviour**, `HingeUpdate` (`FUN_00473CF0`) — 53 of the 123
+  class-0x44 spawns — and that behaviour is a hinge.
 
 The hinge, per frame:
 
 ```c
 if (remove_flag >= 0 && g_script_flags[remove_flag]) despawn();
 if (g_script_flags[open_flag]) {
-    f = frame++;                       /* clamped at 59, or 129 on curve 4 */
-    obj.rz = base_rz + curve[f].rz;
-    obj.rx = base_rx + side * curve[f].rx;
-    obj.yaw = curve[f].ry * swing_scale * (side < 1 ? -1 : +1);
+    f = frame++;                       /* stops at 60, or 130 on curve 4 */
+    obj.rz = base_rz + curve[f].rz;                    /* never mirrored */
+    if (side > 0) { obj.rx = base_rx + curve[f].rx; obj.yaw = +ftol(ry * s); }
+    else          { obj.rx = base_rx - curve[f].rx; obj.yaw = -ftol(ry * s); }
 }
 Translate(pos); RotY(base_yaw); RotZ(rz); RotY(swing); RotX(rx);
 ```
@@ -1426,6 +1426,57 @@ Translate(pos); RotY(base_yaw); RotZ(rz); RotY(swing); RotX(rx);
 Two Y rotations with a Z between them: the **mounting** angle and the **swing**
 are separate, which is what lets four baked curves serve doors hung at any angle,
 and `side` mirrors the swing so one curve opens a pair outward.
+
+### `side` is a sign, and the doors that spun proved it
+
+**This was wrong for as long as the layer existed, and it is worth the space.**
+The pseudocode above used to read `obj.rx = base_rx + side * curve[f].rx`, and
+`render/props.ts` transcribed that faithfully. It is not what the exe does.
+`side` is `obj+0x1DC`, and `HingeUpdate` (`FUN_00473CF0`) reads it in exactly
+two places:
+
+* `TEST EAX,EAX; JLE` at `0x00473EE6`. The two arms differ only in `ADD ECX`
+  vs `SUB ECX` on the X angle and a `NEG EAX` on the yaw — a **sign test**.
+  Neither magnitude nor scale reaches an angle.
+* `IMUL EAX,[ESI+0x1DC]` at `0x00473FB5` — the amplitude, in BAMS, of the
+  damped yaw wobble a prop does when it is **shot**.
+
+So the field is a wobble amplitude whose sign doubles as the mirror.
+`PropBuildVanDoors` (`FUN_00472C90`) hands the van's two doors a literal −1
+and +1, which is exactly why it looked like nothing else; selectors 1 and 4
+read an authored `i32`, and
+**four of the game's 56 hinges carry ±512 and ±416** — `prop_06dc_0`,
+`prop_0724_0` (curve 0, 512) and `prop_3758_0`, `prop_37a0_0` (curve 3, 416),
+all in stage 1, all pairs.
+
+Multiplying by those put up to **6,765,568 BAMS — 103 turns — on the X axis of
+a door**. And it read as *"spins at the end of the swing"* rather than *"opens
+to the wrong angle"* because of the shape of the curves: the yaw does 95 % of
+its travel by frame 12, and `rx`/`rz` are the **slam judder** that starts at
+that frame and rings down over the remaining 47. So the door swings open
+correctly, and then, having arrived, whirls. The other 52 hinges were fine,
+which is what made it *sometimes*.
+
+`HingePose` in `render/hinge.ts` is now the only place the three angles are
+computed, and `test/port.test.ts` asserts a magnitude never reaches one.
+
+Two things the exe does that the port deliberately does not carry, both now
+`[proved]` rather than assumed: the `FMUL float ptr [ESI+0x2C0]` on the yaw is
+an identity — `PropBuildHinge` (`FUN_00472BD0`), `PropBuildVanDoors`
+(`FUN_00472C90`) and `PropBuildHingeScaled` (`FUN_00472EB0`) all seed
+`obj+0x2C0` with `1.0f` and nothing writes it again — and `base_rx`/`base_rz`
+(`obj+0x1CC`, `obj+0x1D4`) are never written by any of the three, so they are
+the pool's zero.
+
+**Where this belongs.** `HingeUpdate` is a script-flag-driven state machine
+with a frame counter, which is engine behaviour living in `render/`. It passes
+`no-engine-writes-in-render` because it writes no `G` — but the counter is
+state a snapshot cannot reach, which is why `PropLayer.resync` carries a
+`[diverges]` that shuts every door on a seek. Moving it to `game/class44/`
+would fix that and put it where `test:port` can drive it; it is not a line
+edit, because the hinges reach the player as `props.json` and named glTF nodes
+rather than as evt spawns through `DescriptorFromPlacement`, so the renderer
+would have to learn to read hinge state back out of the pool.
 
 | Curve | Frames | Shape |
 |---|---|---|
@@ -1457,7 +1508,7 @@ animation-paused bit but is not established. Holding the first frame reproduces
 the stagger, and that is what the player does.
 
 Not decoded: the other fifteen class-0x44 builders have their own child
-behaviours, and `FUN_00473CF0`'s impact wobble (one damped sine over 16 frames
+behaviours, and `HingeUpdate`'s impact wobble (one damped sine over 16 frames
 when a prop is shot) has nothing to drive it here.
 
 ## Every opcode, and what the player does with it

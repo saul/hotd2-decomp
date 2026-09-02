@@ -8555,6 +8555,90 @@ either way. Item 4 depends on the answer.
 
 ---
 
+## Session — the doors that spun at the end of their swing
+
+Report: "door/window props sometimes spin uncontrollably at the end of their
+swing." *Sometimes* was the whole clue. Four of the game's 56 hinges do it,
+and the four are two pairs in stage 1.
+
+`HingeUpdate` (`FUN_00473CF0`) is the hinge behaviour class 0x44's selectors
+1, 2 and 4 share. Its pose block had been transcribed — into
+`render/props.ts`, which is its own finding — as
+
+```c
+obj.rx  = base_rx + side * curve[f].rx;
+obj.yaw = curve[f].ry * swing_scale * (side < 1 ? -1 : +1);
+```
+
+The yaw half is right. The X half is not. The disassembly at `0x00473EE0`:
+
+```
+00473ee0  MOV   EAX, dword ptr [ESI + 0x1dc]     ; "side"
+00473ee6  TEST  EAX, EAX
+00473ee8  MOV   dword ptr [ESI + 0x6c], EDX      ; rz = base_rz + curve.rz
+00473eeb  JLE   0x00473f13
+00473ef1  MOV   EAX, dword ptr [ESI + 0x1cc]
+00473ef7  ADD   EAX, ECX                         ; rx = base_rx + curve.rx
+...
+00473f17  MOV   EDX, dword ptr [ESI + 0x1cc]
+00473f1d  SUB   EDX, ECX                         ; rx = base_rx - curve.rx
+00473f2d  NEG   EAX                              ; yaw = -ftol(...)
+```
+
+`ADD` against `SUB`. `obj+0x1DC` is read for its **sign** and nothing else on
+this path. Its magnitude is used once, elsewhere: `IMUL EAX,[ESI+0x1DC]` at
+`0x00473FB5`, the amplitude of the damped yaw wobble a prop does when it is
+**shot** — a field the port had named `side` because `PropBuildVanDoors`
+(`FUN_00472C90`) writes the van's two doors as a literal −1 and +1, and 52 of
+the 56 hinges are that pair of values. The other four carry ±512 and ±416,
+which are 2.8° and 2.3° of shot-wobble. Multiplied into `rx` they are 103
+turns.
+
+Why "at the end of the swing": in curves 0 and 3 the yaw is 95 % done by frame
+12, and `rx`/`rz` are the slam judder that starts there and rings down over
+the remaining 47 frames. The door opens correctly and *then* whirls.
+
+**The lesson is the one CLAUDE.md already has, in a new shape.** "Object
+fields are polymorphic" is usually about one field meaning different things to
+different classes. This is one field meaning two things to *one* routine — a
+sign to the pose and a magnitude to the wobble — and the shipped data hiding
+it by making 52 of 56 instances ±1. A name taken from what a field is *used
+for in the case in front of you* is still a name taken from where it sits.
+
+Three things read and settled while in there, none of which had been:
+
+* the frame stop is `CMP EDI,0x3C; JL` (`CMP EDI,0x82; JGE` on curve 4), and
+  past it the routine stops writing the angles rather than clamping — the prop
+  holds the last frame it posed, which is what the port's clamp reproduces;
+* `obj+0x2C0`, the `FMUL` on the yaw, is seeded `1.0f` by all three
+  constructors and never written again, so it is an identity `[proved]`;
+* `obj+0x1CC`/`obj+0x1D4` (`base_rx`, `base_rz`) are written by none of the
+  three, so they are the pool's zero `[proved]`.
+
+Two latent divergences in the exporter, fixed although they change no exported
+byte today. `hinge_curve` picked the XYZ table over the yaw-only one by asking
+whether the XYZ pointer was populated; the exe switches on `AX == 0 / 2 / 3`
+at `0x00473E8D`. The two agree only because slots 1 and 4 of that table happen
+to be null — the adjacent-array trap with the trap not yet sprung. And the
+yaw-only table is loaded `XOR EDX,EDX; MOV DX, word ptr [EAX + EDI*2]`, zero
+extended; the exporter read it `<h`. Nothing shipped reaches 0x8000, so it is
+a no-op on the data and a real difference in what the code claims.
+
+The pose is now `HingePose` in `web/src/render/hinge.ts` — pure BAMS integer
+arithmetic, no three.js — so `test/port.test.ts` can drive it, and does. It
+was made to fail against the old expression before being trusted.
+
+`HingeUpdate` (`FUN_00473CF0`) living in `render/` at all is the finding under
+the finding. It writes no `G`, so `verify_layers.py`'s
+`no-engine-writes-in-render` — the rule the stage-1 car bug produced — passes
+it. But the swing counter is state the snapshot cannot reach, which is why
+`PropLayer.resync` already carries a `[diverges]` shutting every door on a
+seek. The move to `game/class44/` is written up in `docs/PLAYER_PROGRESS.md`;
+it is not a line edit, because hinges reach the player as `props.json` plus
+named glTF nodes rather than as evt spawns through `DescriptorFromPlacement`.
+
+---
+
 ## Session — one clock, and a loop that is allowed to sleep
 
 Follows the determinism session above. That one made a *driven* run

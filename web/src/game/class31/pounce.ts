@@ -14,7 +14,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ColiTraceSegmentAllSets } from "../coli";
@@ -57,7 +57,7 @@ const CHAR_ZSLMAN = 0x18;
  * ground. And the attack index is not chosen here at all: passing the null
  * script sentinel to `ActorArcBeginToWaypoint` is what makes it roll one.
  */
-export function ThrowerStateLeapDown(obj: Actor, dt: number, rng: Rng,
+export function ThrowerStateLeapDown(obj: ThrowerActor, dt: number, rng: Rng,
                                      host: GameHost, events?: Events): void {
   if (obj.sub === 0) {
     ThrowerPickLandingPoint(obj, host, _dest);
@@ -67,14 +67,15 @@ export function ThrowerStateLeapDown(obj: Actor, dt: number, rng: Rng,
     ActorArcBeginToWaypoint(obj, _dest, null, 1, () => {
       obj.attack = obj.charType === CHAR_ZSLMAN
         ? 3 : ThrowerPickAttack(obj, rng.int(10));
-      obj.stance = ThrowerStanceOf(obj);
+      obj.thr.stance = ThrowerStanceOf(obj);
       InstallArcMotionScript(obj,
-        ThrowerAttackOf(obj, obj.stance, obj.attack)?.script ?? null);
+        ThrowerAttackOf(obj, obj.thr.stance, obj.attack)?.script ?? null);
     });
     obj.flags |= ActorFlag.BackingOff;      // 0x10000000 -- registered as busy
     if (obj.charType !== CHAR_ZSLMAN) {
       // Off the wall. The stance the swing was drawn against is already
-      // latched in `obj.stance`, so clearing these does not change the attack.
+      // latched in `obj.thr.stance`, so clearing these does not change the
+      // attack.
       obj.flags2 &= ~(ThrowerFlag.Surface | ThrowerFlag.OffGround
                     | ThrowerFlag.Struck | 0x200);
     }
@@ -106,7 +107,7 @@ export function ThrowerStateLeapDown(obj: Actor, dt: number, rng: Rng,
 }
 
 /** Which arc script the leap back plays — by attack, then by character. */
-function asideScript(obj: Actor): string {
+function asideScript(obj: ThrowerActor): string {
   if (obj.attack === 3 && obj.charType !== CHAR_ZSLMAN) return "aside_attack3";
   if (obj.charType === CHAR_ZSASS) return "aside_zsass";
   if (obj.charType === CHAR_ZSLMAN) {
@@ -125,7 +126,7 @@ function asideScript(obj: Actor): string {
  * street. When the trace misses, the engine's own fallback is the ground plane
  * `g_camera_fixed_eye_y`, which is what a host with no collision always gets.
  */
-export function ThrowerStateLeapAside(obj: Actor, eye: Vec3, dt: number,
+export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
                                       rng: Rng): void {
   if (obj.sub === 0) {
     const side = (obj.flags2 & 0x10) ? 1 : (rng.int(2) === 0 ? 1 : -1);
@@ -157,7 +158,7 @@ export function ThrowerStateLeapAside(obj: Actor, eye: Vec3, dt: number,
       TurnActorAwayFromPoint(obj, obj.strikeStart, -0x100, dt);
     }
     if (ActorArcStep(obj, 1, dt)) return;
-    obj.sinceLanding = 0;
+    obj.thr.sinceLanding = 0;
     obj.flags &= ~ActorFlag.BackingOff;
     ThrowerReleaseAttackPermit(obj);
     ZombieSetMotionIfIdle(obj, ThrowerMotionOf(obj, ThrowerMotion.Land), rng,
@@ -167,8 +168,8 @@ export function ThrowerStateLeapAside(obj: Actor, eye: Vec3, dt: number,
 
   // Sub 2: stand where it landed until it is clear of the camera *and* the
   // landing clip has played out. That wait is the pause between attacks.
-  obj.sinceLanding += dt * GAME_HZ;
-  const clear = obj.sinceLanding > LEAP_ASIDE_FRAMES
+  obj.thr.sinceLanding += dt * GAME_HZ;
+  const clear = obj.thr.sinceLanding > LEAP_ASIDE_FRAMES
              || dist2(obj, eye) >= LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR;
   if (clear && !obj.action) {
     obj.state = ThrowerState.StandAndDecide;
@@ -176,7 +177,7 @@ export function ThrowerStateLeapAside(obj: Actor, eye: Vec3, dt: number,
   }
 }
 
-function dist2(obj: Actor, eye: Vec3): number {
+function dist2(obj: ThrowerActor, eye: Vec3): number {
   const dx = obj.pos.x - eye.x;
   const dz = obj.pos.z - eye.z;
   return dx * dx + dz * dz;
@@ -190,23 +191,23 @@ function dist2(obj: Actor, eye: Vec3): number {
  * the landing clip, and go back to standing once ninety frames have passed or
  * the actor is fifty units clear.
  */
-export function ThrowerStateWithdraw(obj: Actor, eye: Vec3, dt: number,
+export function ThrowerStateWithdraw(obj: ThrowerActor, eye: Vec3, dt: number,
                                      rng: Rng): void {
   if (obj.sub === 0) {
     obj.flags |= ActorFlag.BackingOff;
     obj.flags2 |= 0x180000;
     ZombieSetMotionIfIdle(obj, ThrowerMotionOf(obj, ThrowerMotion.Land), rng,
                           0, MotionFade.Normal);
-    obj.sinceLanding = 0;
+    obj.thr.sinceLanding = 0;
     obj.sub = 1;
   }
 
-  obj.sinceLanding += dt * GAME_HZ;
-  if (obj.sinceLanding < LEAP_ASIDE_FRAMES
+  obj.thr.sinceLanding += dt * GAME_HZ;
+  if (obj.thr.sinceLanding < LEAP_ASIDE_FRAMES
       && dist2(obj, eye) < LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR) return;
   if (obj.action && ActorClipFrame(obj) >= 0) return;
 
-  obj.sinceLanding = 0;
+  obj.thr.sinceLanding = 0;
   ThrowerReleaseAttackPermit(obj);
   obj.flags &= ~ActorFlag.BackingOff;
   obj.state = ThrowerState.StandAndDecide;

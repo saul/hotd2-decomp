@@ -17,6 +17,7 @@ import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
   from "./class24/state";
+import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
@@ -886,18 +887,12 @@ export interface ActorBase {
   /**
    * The route a `ThrowerStatePathFollow` spawn walks before it fights, from
    * its descriptor: a delay and a list of waypoints.
+   *
+   * Decoded descriptor, written by the class-agnostic
+   * `DescriptorFromPlacement`, so it stays on the head; which leg of it the
+   * spawn is on is `ThrowerTail.pathLeg`, on class 0x31's arm.
    */
   path: { delay: number; points: PathPoint[] } | null;
-  /**
-   * Which leg of it — the engine keeps a cursor at `obj+0x1394`.
-   *
-   * A {@link ListCursor}: `ThrowerStatePathFollow` (`FUN_0044EE00`) walks a
-   * pointer over the descriptor's 0x10-byte waypoint records. Same offset as
-   * {@link Actor.targetAt}, different kind of field.
-   */
-  pathLeg: ListCursor;      // +0x1394, class 0x31
-  /** `obj+0x1330` in sub 1: the delay before the first leg. */
-  pathDelay: number;
   /** `obj+0x1334` — how many it lasts. */
   arcTotal: number;
   /** `obj+0x13CC` — where the arc ends. */
@@ -919,15 +914,6 @@ export interface ActorBase {
   arcScript: ArcStage[] | null;
   /** `obj+0x136C` — see {@link ThrowerFlag}. */
   flags2: number;
-  /** `obj+0x1364` — the stance row the current attack was drawn against. */
-  stance: number;
-  /**
-   * `obj+0x135C` — the distance band `ThrowerPickNextState` last committed to.
-   * The same word as `pathSlot`; see `arcPhase`.
-   */
-  moveBand: number;
-  /** `obj+0x1338` — frames since a leap landed. */
-  sinceLanding: number;
   /**
    * `ThrowerStateWalkDistance`'s target, from the descriptor — and
    * `ZombieStateWalkDistance`'s, which reads the same float at **`desc+0x04`**:
@@ -1081,31 +1067,6 @@ export interface ActorBase {
    * its clearest form. See `class10/state.ts`.
    */
   civ: CivilianState | null;                             // +0x1310
-  /** `obj+0x1368` — the bone that was hit. Class 0x31 alone reads it that way. */
-  reactBone: number;        // +0x1368
-  /** `obj+0x1328` — re-entries into the knockdown; two caps the arc. */
-  knockCount: number;       // +0x1328
-  /**
-   * `obj+0x1350` — the surface under the landing point. `0x5A` kills.
-   *
-   * **Doubly used inside class 0x31 itself**, which is the one overlay no
-   * `cls` test can separate: `ThrowerStateFallAndLand` (`FUN_0044A450`) and
-   * `ThrowerStateKnockedTumbling` (`FUN_00450E40`) write `g_coli_hit_surface`
-   * here and compare it against `0x5A`, while `ThrowerStateThrow`
-   * (`FUN_0044FAF0`) writes the constant `0x19`
-   * (`c7865013000019000000`, eight sites at 0x0044FBE1..0x0044FC58) and later
-   * compares the clip cursor `obj+0x19C` against it —
-   * `MOV ECX, [ESI+0x19c]` / `MOV EAX, [ESI+0x1350]` / `CMP ECX, EAX`
-   * (`8b8e9c010000` / `8b8650130000` / `3bc8`) at 0x0044FC9B, a **frame
-   * number**, not a surface. `[proved]`
-   *
-   * The two never overlap in time — a thrower is either falling or throwing —
-   * and the port stores only the surface reading: the throw's release frame is
-   * returned by `ThrowerThrowCue` instead, from the entry for three character
-   * types and from the constant `0x19` for 0x18. Read sites name which reading
-   * they mean; see `throwCueFrame` in `class31/thrower.ts`.
-   */
-  landSurface: number;      // +0x1350
   /**
    * `obj+0x1394` — **the object this actor was built for**, by spawn address.
    *
@@ -1168,10 +1129,6 @@ export interface ActorBase {
   resumeSub: number;        // +0x1358
   /** `obj+0x1370` — how close `ZombieStateWalkToTarget` has to get. */
   targetArrive: number;     // +0x1370
-  /** `obj+0x1388` — the height a fall began at, and a flag while it is set. */
-  fallFromY: number;        // +0x1388
-  /** `obj+0x1354` — the axis gravity pulls along. See `ThrowerArcKind`. */
-  arcKind: number;          // +0x1354
   /** `obj+0x138C` — the draw alpha the blinking states write. */
   alpha: number;            // +0x138C
   /**
@@ -1180,33 +1137,9 @@ export interface ActorBase {
    * `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) counts it down and, 60
    * frames after a push, flips `obj+0x136C` bit 0x400000 — the direction
    * `ZombieStateBackOff` retreats in. **Not** the attack cooldown, which is
-   * the next field along.
+   * `obj+0x133C`.
    */
   shoveTimer: number;       // +0x1338
-  /** `obj+0x133C` is the cooldown; this is the frame the corpse is pinned to. */
-  corpseFrame: number;      // +0x194, pinned
-  /** `ThrowerStateBlinkInThreeHops`' two counters. */
-  hopsLeft: number;         // +0x1348
-  hopFrames: number;        // +0x1344
-  /**
-   * `obj+0x1384` — how far character type 0x18's weapons have grown back,
-   * `0` to `1` at `0.025` a drawn frame.
-   *
-   * A field of its own, and not `hopFrames`: `ThrowerStateRestoreBothHands`
-   * (`FUN_0044F900`) zeroes **`+0x1384`** (`c7868413000000000000` at
-   * 0x0044F99C) and raises {@link ThrowerFlag.Regrowing}
-   * (`81c900000008` at 0x0044F9A6), and `ThrowerDrawBonePart` (`FUN_00449F90`)
-   * is what advances it — `FLD [EDI+0x1384]` (`d98784130000`),
-   * `FADD [0x004C4CB0]` = `cdcccc3c` = **0.025f**, `FST [EDI+0x1384]`, then
-   * `FCOMP [0x004C4380]` = `0000803f` = **1.0f**, and on passing it writes
-   * `1.0f` back and clears the flag (`81e1fffffff7`) at
-   * 0x0044A14A..0x0044A179. `[proved]`
-   *
-   * The port used to keep this on `hopFrames` (`+0x1344`), which is
-   * `ThrowerStateBlinkInThreeHops`' hop dwell. States 30 and 34 cannot run at
-   * once so it never bit, but it was the wrong address.
-   */
-  handRegrow: number;       // +0x1384
 
   /**
    * How close the bite may bring this actor to its target.
@@ -1407,8 +1340,10 @@ export interface ActorBase {
 export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedHumanoid; hum: HumanoidTail })
   | (ActorBase & { cls: SpawnClass.SetPieceProp; prop: SetPiecePropTail })
+  | (ActorBase & { cls: SpawnClass.Thrower; thr: ThrowerTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
-      SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp> });
+      SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
+      | SpawnClass.Thrower> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1417,6 +1352,9 @@ export type HumanoidActor = Extract<Actor,
 /** An actor already narrowed to class 0x24. */
 export type SetPiecePropActor = Extract<Actor,
   { cls: SpawnClass.SetPieceProp }>;
+
+/** An actor already narrowed to class 0x31, for that class's own routines. */
+export type ThrowerActor = Extract<Actor, { cls: SpawnClass.Thrower }>;
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
@@ -1488,16 +1426,11 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     arcFrom: vec3(),
     arcFrames: 0,
     path: null,
-    pathLeg: 0,
-    pathDelay: 0,
     arcTotal: 0,
     arcTo: vec3(),
     arcPhase: 0,
     arcScript: null,
     flags2: 0,
-    stance: 0,
-    moveBand: 0,
-    sinceLanding: 0,
     walkDistance: 0,
     walkTravelled: 0,
     worldPushDepth: 0,
@@ -1520,9 +1453,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pushNormal: vec3(),
     sphereCentre: vec3(),
     civ: null,
-    reactBone: 0,
-    knockCount: 0,
-    landSurface: 0,
     targetAt: -1,
     script: null,
     scriptPc: 0,
@@ -1532,14 +1462,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     targetCue: 0,
     resumeSub: 0,
     targetArrive: 0,
-    fallFromY: 0,
-    arcKind: 0,
     alpha: 1,
     shoveTimer: 0,
-    corpseFrame: -1,
-    hopsLeft: 0,
-    hopFrames: 0,
-    handRegrow: 0,
     strikeFloor: 0,
     struck: false,
     descFlags: 0,
@@ -1574,6 +1498,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.SetPieceProp) {
     return { ...head, cls, prop: makeSetPiecePropTail() };
+  }
+  if (cls === SpawnClass.Thrower) {
+    return { ...head, cls, thr: makeThrowerTail() };
   }
   return { ...head, cls };
 }

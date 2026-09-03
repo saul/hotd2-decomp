@@ -53,7 +53,8 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
 import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2,
-         type Actor, type HumanoidActor, type SetPiecePropActor }
+         type Actor, type HumanoidActor, type SetPiecePropActor,
+         type ThrowerActor }
   from "../src/game/actor";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
@@ -1565,7 +1566,8 @@ const hFrame = (a: HumanoidActor, events: Events, rng: Rng) =>
  * class-agnostic and belong in the head. What the union does catch is the
  * cross-class *tail* read, and that is what these pin.
  */
-function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor): void {
+function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
+                                     t: ThrowerActor): void {
   // @ts-expect-error a bare `Actor` has no arm until `cls` is narrowed
   void a.hum;
   // @ts-expect-error class 0x25's hand-prop selector is not on the head
@@ -1578,22 +1580,40 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor): void {
   // fields at one address — this arm, `condition`, and class 0x10's tail
   // pointer — and now two of the three are separated.
   void h.selector;
-  // **And here is what it still does not protect.** `obj+0x1330` and
-  // `obj+0x1334` compile on a humanoid, and class 0x24 now having an arm did
-  // *not* fix that — which is the sharper version of the rule. Those two words
-  // are not class 0x24's to take: `obj+0x1330` has 38 uses across classes 0x30
-  // and 0x31 and is also the shared arc record's elapsed-frame word, and
-  // `obj+0x1334` is class 0x30's `backoffFrames`. Class 0x24's arm holds one
-  // field, not three, for exactly that reason.
+  // @ts-expect-error ...and neither is class 0x31's arm
+  void a.thr;
+  // @ts-expect-error `obj+0x1350` as the surface under a thrower's landing
+  void a.landSurface;
+  // @ts-expect-error `obj+0x1354` as the axis its knockback arc falls along
+  void a.arcKind;
+  // The two words 0x25 and 0x31 share are the ones worth pinning both ways:
+  // `obj+0x1394` is a command cursor to one class and a waypoint cursor to the
+  // other, and `obj+0x1330` a hand-prop selector against a path delay.
+  // @ts-expect-error a humanoid has no waypoint cursor
+  void h.pathLeg;
+  // @ts-expect-error and a thrower has no command cursor
+  void t.pc;
+  // @ts-expect-error nor the hand-prop selector that shares its path delay
+  void t.bonePropMode;
+  // **And here is what it still does not protect, with three arms in.**
+  // `obj+0x1330` and `obj+0x1334` compile on a humanoid, and class 0x24
+  // having an arm did *not* fix it — which is the sharper version of the rule
+  // than "wait for the other arms". Those words are **not class 0x24's to
+  // take**: `obj+0x1330` has 38 uses across classes 0x30 and 0x31 and is also
+  // the shared arc record's elapsed-frame word, and `obj+0x1334` is class
+  // 0x30's `backoffFrames`. Class 0x24's arm holds one field for that reason.
   //
-  // So: **a word separates only when every class sharing it has an arm**, and
-  // some words — the arc record's — belong to no class and never will. A
-  // `@ts-expect-error` on either line is an *unused directive* today and fails
-  // the build, which is why neither is written as one.
+  // So a word separates only when **every** class sharing it has an arm — and
+  // some words never will, because the arc record belongs to no class:
+  // `class30/entrance.ts` and `class30/knockback.ts` drive it through
+  // `class31/arc.ts`, which is why that module still takes a bare `Actor`.
+  // A `@ts-expect-error` on either line below is an *unused directive* today
+  // and fails the build, which is why neither is written as one.
   void h.slideTimer;
   void h.backoffFrames;
   // The arm is reachable once, and only once, `cls` has been tested.
   if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.bonePropMode;
+  if (a.cls === SpawnClass.Thrower) void a.thr.landSurface;
 }
 void unionRejectsCrossClassReads;
 
@@ -2405,6 +2425,10 @@ function thrower(state: number, extra: Record<string, unknown> = {}) {
   const a = ActorSpawn(0x9000, SpawnClass.Thrower, 0x19, "zstin", {
     initialState: state, condition: 0, ...extra,
   });
+  // Narrowing, not a cast. `ActorSpawn` returns the union and class 0x31's
+  // routines take the arm, so the fixture has to prove the actor is a thrower
+  // the same way the director does -- see `humanoidScene` for class 0x25.
+  if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
   a.visible = true;
   a.hp = 100;
   a.motion = 936;
@@ -2457,7 +2481,7 @@ console.log("class 0x31, the climb:");
   }
   check("with nothing to climb it never enters a surface leap", !climbed,
         `state ${z.state}`);
-  check("...and its stance is still the ground", z.stance === 0
+  check("...and its stance is still the ground", z.thr.stance === 0
         && (z.flags2 & 0x1c0) === 0, `flags2 ${z.flags2.toString(16)}`);
   z.state = ThrowerState.StandAndDecide;
   z.sub = 0;
@@ -2618,7 +2642,7 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   z.attackPermit = 0;
   G.g_attack_permits[0] = z.at;
   z.attack = 0;
-  z.stance = 0;
+  z.thr.stance = 0;
   z.action = { motion: 303, ticks: 62, loop: false };
   check("a swing on its hit frame connects from four hundred units away",
         ThrowerStrikeConnect(z, events) && hits === 1, `${hits} hits`);
@@ -2889,6 +2913,8 @@ console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
     const a = ActorSpawn(at, SpawnClass.Thrower, charType, "t", {
       initialState: ThrowerState.Throw, condition: 0,
     });
+    // Narrowing, not a cast -- see `thrower` above.
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
     a.visible = true;
     a.hp = 100;
     a.pos = vec3(0, 0, 80);

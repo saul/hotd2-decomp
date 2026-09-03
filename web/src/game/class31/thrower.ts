@@ -18,7 +18,7 @@ import type { Events } from "../../core/events";
 import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
-import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, type Actor }
+import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, type ThrowerActor }
   from "../actor";
 import {
   DeadSweep, registerClass, type ActorDebug, type ClassFrame,
@@ -69,7 +69,7 @@ import { ThrowerStanceOf } from "./tables";
 import { ThrowerState, ThrowSub } from "./states";
 
 /** Hands whose arm has not been shot off. `ThrowerStateThrow` refuses the rest. */
-function usableHands(obj: Actor): ThrowHandJson[] {
+function usableHands(obj: ThrowerActor): ThrowHandJson[] {
   return ThrowHandsOf(obj)
     .filter((h) => (obj.zones & DamageZone.All & h.cancel_mask) !== h.cancel_mask);
 }
@@ -147,13 +147,14 @@ const ZSLMAN_RELEASE_FRAME = 0x19;
  * type's frame.
  *
  * The release frame in the exe is `obj+0x1350` — the **same word** as
- * {@link Actor.landSurface}, which states 2 and 33 use for the surface under
+ * {@link ThrowerTail.landSurface}, which states 2 and 33 use for the surface
+ * under
  * the body. The switch writes the constant `0x19` into it and the compare at
  * 0x0044FC9B..0x0044FCA7 reads it back (`8b8e9c010000` / `8b8650130000` /
  * `3bc8`): one address, two readings, both inside class 0x31, and no `cls`
  * test can tell them apart. The port keeps only the surface reading in the
  * field and returns the frame from here, so the two are never confused at a
- * use site; see the note on {@link Actor.landSurface}.
+ * use site; see the note on {@link ThrowerTail.landSurface}.
  *
  * Every other character type compares `obj+0x19C` against the throw entry's
  * own `+0x08` at 0x0044FC8D (`0fbf4708` then `39869c010000`). `[proved]`
@@ -169,7 +170,7 @@ const ZSLMAN_RELEASE_FRAME = 0x19;
  * once is undetermined; the fallback below is what the port does if the table
  * is ever indexed outside itself.
  */
-function ThrowerThrowCue(obj: Actor, hand: ThrowHandJson):
+function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
     { motion: number; release: number } {
   const entry = { motion: hand.motion, release: hand.release_frame };
   if (obj.charType !== CHAR_ZSLMAN) return entry;
@@ -183,7 +184,7 @@ function ThrowerThrowCue(obj: Actor, hand: ThrowHandJson):
  * `AimThrownWeapon` — `FUN_004503D0`. A point `aim_ahead` in front of the
  * camera; the camera looks down its own local -Z, which is where the player is.
  */
-export function AimThrownWeapon(obj: Actor, host: GameHost, eye: Vec3,
+export function AimThrownWeapon(obj: ThrowerActor, host: GameHost, eye: Vec3,
                                 out: Vec3): void {
   const cfg = CharacterTypeOf(obj)?.throw;
   host.aimPoint(cfg?.aim_ahead ?? 0, out);
@@ -194,7 +195,7 @@ export function AimThrownWeapon(obj: Actor, host: GameHost, eye: Vec3,
  * `SpawnThrownWeapon` — `FUN_004504E0`. The hand goes bare and the weapon
  * takes off.
  */
-export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
+export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
                                   host: GameHost, eye: Vec3,
                                   events?: Events): void {
   const cfg = CharacterTypeOf(obj)?.throw;
@@ -244,7 +245,7 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
  * one-hand swap the port's throw loop does on its way out, and it exists
  * because the port's throw is a loop where the engine's is a state.
  */
-function ThrowerRearmHand(obj: Actor, hand: ThrowHandJson,
+function ThrowerRearmHand(obj: ThrowerActor, hand: ThrowHandJson,
                           host: GameHost): void {
   if (hand.held) {
     obj.boneSlot[String(hand.bone)] = hand.held;
@@ -258,7 +259,7 @@ function ThrowerRearmHand(obj: Actor, hand: ThrowHandJson,
  * frame the hand names, then re-arm and give the permit up so the next enemy —
  * or this one — can take a turn.
  */
-export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
+export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, eye: Vec3,
                                   events?: Events): void {
   const hands = usableHands(obj);
   if (!hands.length) {
@@ -303,7 +304,8 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   }
   // The frame the weapon leaves the hand. The local name is here so the frame
   // reading of `obj+0x1350` is never confused with the landing-surface one at
-  // a use site; see {@link ThrowerThrowCue} and {@link Actor.landSurface}.
+  // a use site; see {@link ThrowerThrowCue} and
+  // {@link ThrowerTail.landSurface}.
   const throwCueFrame = cue.release;
   if (obj.sub === ThrowSub.Winding && obj.action.ticks >= throwCueFrame) {
     obj.sub = ThrowSub.Thrown;
@@ -320,7 +322,7 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
  * what makes its fall and its knock-back physical — but the leap states do not
  * use it at all: they write the position outright from the arc's closed form.
  */
-export function EnemyThrowerUpdate(obj: Actor, f: ClassFrame): void {
+export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   const { eye, dt, rng, host, events } = f;
   // The cooldown is also the post-knockdown window in which shots ricochet:
   // `EnemyThrowerUpdate` clears `obj+0x34` bit 0x100 when it reaches zero.
@@ -353,7 +355,7 @@ export function EnemyThrowerUpdate(obj: Actor, f: ClassFrame): void {
  * The state table, dispatched. `g_class31_states` (0x00592960) is 35 entries
  * and every one has an arm here.
  */
-function ThrowerRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
+function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
                          host: GameHost, events?: Events): void {
   const stance = ThrowerStanceOf(obj) & 3;
   switch (obj.state) {
@@ -449,7 +451,7 @@ const CHAR_ZSASS = 0x16;
 const BODY_RADIUS_ZSASS = 5.0;
 const BODY_RADIUS_OTHER = 4.0;
 
-function ActorIntegrate(obj: Actor, dt: number): void {
+function ActorIntegrate(obj: ThrowerActor, dt: number): void {
   const frames = dt * GAME_HZ;
   obj.pos.x += obj.vel.x * frames;
   obj.pos.y += obj.vel.y * frames;
@@ -464,7 +466,7 @@ function ActorIntegrate(obj: Actor, dt: number): void {
  * in the throw state an earlier port assumed, which is why the two `zsass`
  * above the street stood in mid-air instead of dropping into it.
  */
-export function EnemyThrowerInit(obj: Actor): void {
+export function EnemyThrowerInit(obj: ThrowerActor): void {
   obj.sub = ThrowSub.Draw;
   obj.attack = 0;
   obj.attackPermit = -1;
@@ -512,9 +514,9 @@ export function EnemyThrowerInit(obj: Actor): void {
     ? BODY_RADIUS_ZSASS : BODY_RADIUS_OTHER;
   obj.alpha = 1;
   obj.pendingHit = null;
-  obj.knockCount = 0;
-  obj.stance = 0;
-  obj.moveBand = 0;
+  obj.thr.knockCount = 0;
+  obj.thr.stance = 0;
+  obj.thr.moveBand = 0;
   obj.arcPhase = 0;
   obj.arcScript = null;
   obj.state = ThrowerEntryState(obj);
@@ -530,7 +532,7 @@ export function EnemyThrowerInit(obj: Actor): void {
  * 27 and 34 — and so are the two, 21 and 22, that no descriptor names.
  * Anything else resolves to the hub, which is where every entrance ends.
  */
-export function ThrowerEntryState(obj: Actor): ThrowerState {
+export function ThrowerEntryState(obj: ThrowerActor): ThrowerState {
   switch (obj.initialState) {
     case ThrowerState.GrabPlayer:
       return obj.grab ? ThrowerState.GrabPlayer : ThrowerState.StandAndDecide;
@@ -564,7 +566,7 @@ export function ThrowerEntryState(obj: Actor): ThrowerState {
  * The thrower. Its states are class 0x31's own table, not class 0x30's, so
  * the number is shown raw rather than named with the wrong vocabulary.
  */
-export function EnemyThrowerDebug(obj: Actor): ActorDebug {
+export function EnemyThrowerDebug(obj: ThrowerActor): ActorDebug {
   // `ThrowerStateWaitForPermit` is a pose held until a permit frees, so an
   // actor parked in it looks exactly like one whose own logic has stalled.
   // `ThrowerTryClaimAttackSlot` refuses on two things and neither is visible
@@ -608,7 +610,7 @@ export function EnemyThrowerDebug(obj: Actor): ActorDebug {
  * engine leaves it, and a sweep that retired both here would collapse the one
  * window class 0x30 has already lost.
  */
-function EnemyThrowerDeadSweep(obj: Actor, why: DeadSweep): void {
+function EnemyThrowerDeadSweep(obj: ThrowerActor, why: DeadSweep): void {
   ThrowerReleaseAttackPermit(obj);
   if (why !== DeadSweep.Despawned) return;
   ThrowerRetireFromAliveCount(obj);

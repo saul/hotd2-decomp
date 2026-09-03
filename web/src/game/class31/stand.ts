@@ -9,7 +9,7 @@
  * range.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
@@ -52,7 +52,8 @@ const WAIT_DEFAULT = 0x127;
  * wall or the ceiling skips the turn entirely — `obj+0x136C` bit 0x20 — which
  * is why a clinging thrower does not swing round to track you.
  */
-export function ThrowerStateStandAndDecide(obj: Actor, eye: Vec3, dt: number,
+export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
+                                           dt: number,
                                            rng: Rng, host: GameHost): void {
   const stance = ThrowerStanceOf(obj) & 3;
   if (obj.sub === 0) {
@@ -91,7 +92,8 @@ export function ThrowerStateStandAndDecide(obj: Actor, eye: Vec3, dt: number,
  * step the yaw 0x200 toward the camera and report whether it has arrived
  * within 0x200. Ghidra types the routine `void`; the value falls through EAX.
  */
-function TurnTowardCameraAndTest(obj: Actor, eye: Vec3, dt: number): boolean {
+function TurnTowardCameraAndTest(obj: ThrowerActor, eye: Vec3,
+                                 dt: number): boolean {
   TurnActorTowardCameraEye(obj, eye, STAND_TURN_RATE, dt);
   const want = Math.atan2(obj.pos.x - eye.x, obj.pos.z - eye.z);
   const bams = Math.round((want * 65536) / (Math.PI * 2)) & 0xffff;
@@ -108,7 +110,8 @@ function TurnTowardCameraAndTest(obj: Actor, eye: Vec3, dt: number): boolean {
  * This is the throttle: there is one permit in single player, so however many
  * throwers are on you, only one is ever coming.
  */
-export function ThrowerStateWaitForPermit(obj: Actor, eye: Vec3, rng: Rng,
+export function ThrowerStateWaitForPermit(obj: ThrowerActor, eye: Vec3,
+                                          rng: Rng,
                                           host: GameHost): void {
   if (obj.sub === 0) {
     if (!ThrowerTryClaimAttackSlot(obj, host)) {
@@ -164,6 +167,7 @@ const PERCH_SURFACE = 0x35;
 const PERCH_HEIGHT = 15;
 
 /** Is this actor far enough from the camera to be out of its face? */
-export function ThrowerIsClear(obj: Actor, eye: Vec3, clear: number): boolean {
+export function ThrowerIsClear(obj: ThrowerActor, eye: Vec3,
+                               clear: number): boolean {
   return dist2d(obj.pos, eye) >= clear;
 }

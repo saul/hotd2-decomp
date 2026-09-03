@@ -292,14 +292,89 @@ export enum ThrowerStance {
  */
 export interface ActorClip { motion: number; ticks: number; loop: boolean }
 
+/**
+ * **Another actor**, by spawn address — the port's stand-in for a raw actor
+ * pointer. `-1` is the engine's null.
+ *
+ * It exists to keep `obj+0x1394`'s two kinds apart. That one word holds a
+ * pointer in every site read, but not the *same* kind of pointer:
+ *
+ * * an **actor pointer**, the parent — class 0x2D at 0x00426B7F and
+ *   0x00428341, and `CivilianInit` (`FUN_0048A3E0`) writing itself onto each
+ *   captor it builds, `MOV dword ptr [EDI + 0x1394], ESI`, bytes
+ *   `89b794130000`, at 0x0048A7D9. That is this type;
+ * * a **walking descriptor pointer**, which is {@link ListCursor}.
+ *
+ * `[proved]`, and it corrects the survey this came from: the third kind it
+ * listed, "a small integer" for class 0x25, is not there. `ScriptedHumanoidInit`
+ * (`FUN_004840D0`) seeds `obj+0x1394` with a pointer (0x004840FB),
+ * `ScriptedHumanoidUpdate` (`FUN_004842A0`) reads it beside `obj+0x1390`
+ * (0x004842BE) and stores an advanced pointer back (0x00484A9C). Class 0x25's
+ * cursor is the same kind as class 0x31's.
+ *
+ * TypeScript aliases are structural, so this documents rather than enforces;
+ * the enforcement is the union, which is not this wave's work. What it does
+ * buy is that a reader cannot mistake `targetAt` for an index.
+ */
+export type ActorRef = number;
+
+/**
+ * **A cursor into a decoded list** — the port's index form of an exe pointer
+ * that walks a descriptor.
+ *
+ * The engine keeps a raw address and advances it by the record stride; the
+ * port has no flat address space, so it keeps how far in. `[diverges]` in
+ * representation only, and it is what makes the cursor survive a snapshot.
+ *
+ * `[proved]` for both users of `obj+0x1394` in this shape:
+ * `ThrowerStatePathFollow` (`FUN_0044EE00`) sets it to `obj+0x1390 + 8`
+ * (`MOV dword ptr [EBX + 0x1394], EAX`, bytes `898394130000`, 0x0044EE35) and
+ * then adds 0x10 a leg (`ADD EDX, 0x10`, bytes `83c210`, 0x0044EF0E, stored at
+ * 0x0044EF13), stopping on `CMP word ptr [EAX], -1`; class 0x25's VM does the
+ * same over its own command stream. `-1` is "the list has ended" and is the
+ * port's, not a value the engine's pointer can hold.
+ */
+export type ListCursor = number;
+
 export interface Actor {
   // -- identity ----------------------------------------------------------
   /** The spawn's script address. Stable, and the key the renderer binds on. */
   at: number;
-  /** The spawn class — `g_class_handlers` is indexed by it. */
+  /**
+   * The spawn class — `g_class_handlers` is indexed by it.
+   *
+   * [port-only] **The engine has no `cls` field.** `SpawnFromDescriptor`
+   * (`FUN_00408A20`) uses the descriptor's first word once, to index
+   * `g_class_handlers`, and stores the *handler pointer* at `obj+0x00`; the id
+   * itself is never written to the actor. `cls` stands for that pointer, and
+   * for the same thing it selects — which class's code owns this actor's
+   * tail — so it is written at construction and never again.
+   *
+   * It is **not** what the engine's class-agnostic code switches on. That is
+   * {@link Actor.charType}; see its note.
+   */
   cls: SpawnClass;
-  /** The character type index; `game/tables.ts` resolves the data. */
-  charType: number;
+  /**
+   * `obj+0x1F4` — the character type, **s16**, and the head's real type tag.
+   *
+   * It lives inside the embedded model record: `ActorSetMotion`
+   * (`FUN_00411930`) reads it as `*(short *)(model + 0x60)` and
+   * `0x194 + 0x60 == 0x1F4`. `EvtOpSpawnPlaced09` and every class `Init` write
+   * it 16 bits wide — `MOV word ptr [ESI + 0x1F4], AX`, bytes
+   * `668986f4010000`, at 0x00408801, 0x004088ED, 0x00449643 and 0x00452DEA
+   * among eleven sites. `[proved]`
+   *
+   * **The engine's class-agnostic code gates on this, not on the class.**
+   * `RankEnemiesByDistance` (`FUN_004090B0`) tests it against 0xB —
+   * `CMP word ptr [EAX + 0x1F4], DI`, bytes `6639b8f4010000`, at 0x004090EB —
+   * `ResolveHit` against 0xC, `ActorSwapDamagedPart` against 0xD, and
+   * `ShotTestSphere`, `DamageRankModifier`, `ActorDrawShadow`,
+   * `ActorPlayHitVoice` and `SkeletonWalkNode` index tables with it. A port
+   * routine that gates on `cls` where the exe gates on this is a divergence
+   * even where the shipped data agrees: class 0x30 covers many character
+   * types and class 0x31 covers four. `game/tables.ts` resolves the data.
+   */
+  charType: number;         // +0x1F4, s16
   /** Display name, for the feed. Copied from the type at spawn. */
   name: string;
 
@@ -309,6 +384,19 @@ export interface Actor {
    * `obj+0x38` — a second flag word, and the one the **enemy counters** latch
    * in. See {@link CountFlag}; class 0x31 latches the same two facts in
    * `obj+0x136C` instead, which is the usual polymorphism.
+   *
+   * [open] Bits `0x1`/`0x2`/`0x4` are class 0x30's counting latches, but bit
+   * **`0x40` is class-agnostic and this port does not model it**, and neither
+   * is `obj+0x3C`, the s32 beside it. `ActorInitFlags` (`FUN_00408970`) zeroes
+   * both; `ActorClaimHitSlot` (`FUN_00409270`) does
+   * `obj+0x3C = -1; if (g_hit_slots[i] == 0) { obj+0x38 |= 0x40;
+   * g_hit_slots[i] = obj; obj+0x3C = i; }`; and `ActorDespawn`
+   * (`FUN_00409CC0`) reads the byte back —
+   * `if ((obj+0x38 & 0x40) && obj+0x3C != -1) { g_hit_slots[obj+0x3C] = 0;
+   * obj+0x3C = -1; }` — before `ActorKill`. `[proved]` Class draws also use
+   * `obj+0x3C` as a per-actor seed. `game/globals.ts` already records
+   * `g_hit_slots` as not ported; porting the hit-slot system is a job of its
+   * own and until it happens this word carries only class 0x30's three bits.
    */
   flags38: number;          // +0x38
   pos: Vec3;                // +0x40
@@ -319,9 +407,12 @@ export interface Actor {
    *
    * `SkeletonEmitNode` (`FUN_004114C0`) records one bone's world position here
    * as it walks the skeleton — bone 1, the torso, for an ordinary humanoid —
-   * and `FUN_00409B70` then raises it by 4.0 before registering the actor for
-   * camera tracking. `SelectCameraLookAtTarget` reads this and never reads
-   * `pos`. Aiming at the origin instead put the camera on the feet.
+   * and `ActorRegisterCameraPoint` (`FUN_00409B70`) then raises `obj+0x104` by
+   * **its float argument**, which is a per-call-site value and not a field:
+   * 4.0 for class 0x30 and 0x10, 0.0 for class 0x31. See
+   * `camera/track.ts`'s `CAMERA_POINT_RISE`. `SelectCameraLookAtTarget` reads
+   * this and never reads `pos`. Aiming at the origin instead put the camera on
+   * the feet.
    */
   lookAt: Vec3;             // +0x100
   /** `EnemyThrowerUpdate` integrates `vel += acc` and then `pos += vel`. */
@@ -358,8 +449,20 @@ export interface Actor {
   entry: ZombieEntryTail | null;
   hp: number;               // +0x11C
   maxHp: number;            // +0x11E
-  /** `-1` when it holds no permit, else the index into `g_attack_permits`. */
-  attackPermit: number;     // +0x121
+  /**
+   * `obj+0x121` — **a signed byte with `0xFF` as its sentinel**, not a
+   * non-negative count. `-1` when it holds no permit, else the index into
+   * `g_attack_permits`.
+   *
+   * `[proved]` on both halves: read `MOVSX EAX, byte ptr [ESI + 0x121]`
+   * (bytes `0fbe8621010000`) at 0x0044CB35 and 0x0045A155, and tested against
+   * the sentinel by `SelectCameraLookAtTarget` (`FUN_00403050`) —
+   * `MOV DL, byte ptr [ECX + 0x121]; CMP DL, 0xFF` (bytes `8a9121010000`,
+   * `80faff`) at 0x00403075, and `CMP byte ptr [EAX + 0x121], 0xFF` (bytes
+   * `80b821010000ff`) at 0x00403080. Every class `Init` seeds it to `0xFF`.
+   * A `number` that cannot go negative is the wrong shape for it.
+   */
+  attackPermit: number;     // +0x121, s8, 0xFF = none
   /** `ActorBodyConditionFromHands` — indexes the attack and motion tables. */
   condition: number;        // +0x130C
   state: number;            // +0x1310
@@ -396,8 +499,14 @@ export interface Actor {
    * counts its hold in it, and class 0x25's VM its frame conditions.
    */
   holdFrames: number;       // +0x1320
-  /** `obj+0x1394` — class 0x25's command cursor, as an index. -1 has left. */
-  pc: number;               // +0x1394
+  /**
+   * `obj+0x1394` — class 0x25's command cursor, as an index. -1 has left.
+   *
+   * A {@link ListCursor}, and **not** the same kind of field as
+   * {@link Actor.targetAt} even though the exe puts both at this offset. See
+   * the two aliases for the readings that separate them.
+   */
+  pc: ListCursor;           // +0x1394, class 0x25
   /** `obj+0x132C` / `+0x1328` / `+0x1354` / `+0x1350` — the turn. */
   turnMode: number;         // +0x132C
   turnFrames: number;       // +0x1328
@@ -465,8 +574,14 @@ export interface Actor {
    * its descriptor: a delay and a list of waypoints.
    */
   path: { delay: number; points: PathPoint[] } | null;
-  /** Which leg of it — the engine keeps a cursor at `obj+0x1394`. */
-  pathLeg: number;
+  /**
+   * Which leg of it — the engine keeps a cursor at `obj+0x1394`.
+   *
+   * A {@link ListCursor}: `ThrowerStatePathFollow` (`FUN_0044EE00`) walks a
+   * pointer over the descriptor's 0x10-byte waypoint records. Same offset as
+   * {@link Actor.targetAt}, different kind of field.
+   */
+  pathLeg: ListCursor;      // +0x1394, class 0x31
   /** `obj+0x1330` in sub 1: the delay before the first leg. */
   pathDelay: number;
   /** `obj+0x1334` — how many it lasts. */
@@ -501,9 +616,16 @@ export interface Actor {
   sinceLanding: number;
   /**
    * `ThrowerStateWalkDistance`'s target, from the descriptor — and
-   * `ZombieStateWalkDistance`'s, which reads the same float at tail `+0x04`.
+   * `ZombieStateWalkDistance`'s, which reads the same float at **`desc+0x04`**:
+   * `*(float *)(obj+0x1390 + 4)`, four bytes into the descriptor parameter tail
+   * `SpawnFromDescriptor` (`FUN_00408A20`) hangs at `obj+0x1390`.
+   *
+   * The comment here used to say "tail `+0x04`", which reads as `obj+0x04` —
+   * and `obj+0x04` is inside the task control block `ActorAlloc`
+   * (`FUN_004A6FA0`) owns, which no class may touch. This is not an actor
+   * field at all: it is one immutable descriptor value two classes read.
    */
-  walkDistance: number;
+  walkDistance: number;     // desc+0x04
   /**
    * `obj+0x1374` — how far `ZombieStateWalkDistance` has come from
    * `arcFrom`. The engine writes it every frame and never reads it back.
@@ -611,20 +733,38 @@ export interface Actor {
    *
    * `ColiTestSphereAgainstActors` does not move the actor it finds: it writes
    * the opposite push onto it and lets it apply that on its own next frame.
-   * `pushedBy` is the actor that did it, by spawn address, or `-1`.
+   * `pushedBy` is the actor that did it, by spawn address, or `-1` — an
+   * {@link ActorRef}. Ghidra types `obj+0x138` as `float`; it holds a pointer.
    */
-  pushedBy: number;         // +0x138
+  pushedBy: ActorRef;       // +0x138
   pushDepth: number;        // +0x13C
   pushNormal: Vec3;         // +0x140
   /**
-   * `obj+0x12C` — the point `CivilianUpdate`'s camera-point switch writes,
-   * selected by `sub+0x80` (op 0x17). Mode 0 is the actor's own position;
-   * modes 1-3 read matrices out of the model block and are `[open]`.
+   * `obj+0x12C/0x130/0x134` — **the actor's collision-sphere centre**.
    *
-   * It is **not** the shot sphere: that is `obj+0x100`, which the draw writes
-   * and `ActorRegisterCameraPoint` lifts.
+   * `RegisterForShotTest` (`FUN_00405160`) publishes it, with `obj+0x34`, into
+   * the per-frame dynamic list at 0x0059D8E8, and that list feeds *both*
+   * consumers: the gunshot hit test, and — after the copy to 0x005A30A0 —
+   * `ColiTestSphereAgainstActors` (`FUN_00405B10`), the actor-versus-actor
+   * push. `ThrowerPushOutOfWorld` passes its address as a vec3
+   * (`LEA EAX, [ESI + 0x12C]` at 0x00449D69 and 0x00449E02). The radius that
+   * goes with it is {@link Actor.radius} for the shot and
+   * {@link Actor.bodyRadius} for the push. `[proved]`
+   *
+   * It was called `camPoint` here, after `CivilianUpdate`'s camera-point
+   * switch (`sub+0x80`, op 0x17) — one class's writer naming a field three
+   * class-agnostic routines read. Renamed for that reason; the writers are
+   * `ActorUpdateBoundingSphere` (`FUN_00454AC0`) for class 0x30,
+   * `ThrowerPlaceCollisionSphere` (`FUN_00449E80`) for class 0x31, and that
+   * switch for class 0x10. Of the switch, only mode 0 — the actor's own
+   * position — is ported; modes 1-3 read matrices out of the model block and
+   * are `[open]`.
+   *
+   * It is **not** what the camera aims at: that is `obj+0x100`
+   * ({@link Actor.lookAt}), which the skeleton walk writes and
+   * `ActorRegisterCameraPoint` lifts.
    */
-  camPoint: Vec3;           // +0x12C
+  sphereCentre: Vec3;       // +0x12C
   /**
    * Class 0x10's `ActorAllocSub(0xC4)` block at `obj+0x1310`.
    *
@@ -642,14 +782,19 @@ export interface Actor {
   /**
    * `obj+0x1394` — **the object this actor was built for**, by spawn address.
    *
-   * Polymorphic, like everything at this end of the struct:
-   * `ThrowerStatePathFollow` keeps a waypoint cursor here, and
-   * `ScriptedHumanoidInit` a command pointer. For a class-0x30 zombie it is a
-   * *parent actor*, written by `CivilianInit` for the 47 captors it builds —
-   * and the whole `ZombieStateWalkToTarget` family walks at it instead of at
-   * the camera. `-1` for an actor that has none.
+   * An {@link ActorRef}, and the *other* kind of thing this offset holds.
+   * `ThrowerStatePathFollow` (`FUN_0044EE00`) and `ScriptedHumanoidInit`
+   * (`FUN_004840D0`) keep a walking **descriptor** pointer here — see
+   * {@link ListCursor} — while for a class-0x30 zombie it is a **parent
+   * actor**, written by `CivilianInit` (`FUN_0048A3E0`) for the 47 captors it
+   * builds, and the whole `ZombieStateWalkToTarget` family walks at it instead
+   * of at the camera. `-1` for an actor that has none.
+   *
+   * Two pointers to different kinds of thing, one word: a `pathLeg` assigned
+   * into a `targetAt` would be a live actor id in the port and is exactly what
+   * the two aliases exist to make visible at a glance.
    */
-  targetAt: number;         // +0x1394
+  targetAt: ActorRef;       // +0x1394, classes 0x2D and 0x30
   /**
    * The two captor scripts off the descriptor tail, decoded — `+0x04` for the
    * initial state and `+0x08` for the attack state. `ZombieScriptForState`
@@ -777,8 +922,15 @@ export interface Actor {
   dead: boolean;
   /** The script has this spawn live and the renderer is showing it. */
   visible: boolean;
-  /** The looping base motion. */
-  motion: number;
+  /**
+   * `obj+0x1B4` — the looping base motion id.
+   *
+   * It is `model[8]` of the embedded skinned-model record at `obj+0x194`, and
+   * `0x194 + 0x20 == 0x1B4`: `ActorSetMotion` (`FUN_00411930`) is
+   * `model[8] = id` and nothing else writes it. Every class `Init` calls it.
+   * `[proved]`
+   */
+  motion: number;           // +0x1B4
   /**
    * `obj+0x19C` — the play cursor, **in whole 60 Hz ticks**, not in seconds.
    *
@@ -867,9 +1019,9 @@ const LOW_SPHERE = 0x2000000;
  * same answer without the ordering hazard.
  */
 export function ActorUpdateBoundingSphere(obj: Actor): void {
-  obj.camPoint.x = obj.pos.x;
-  obj.camPoint.z = obj.pos.z;
-  obj.camPoint.y = obj.pos.y + obj.bodyRadius
+  obj.sphereCentre.x = obj.pos.x;
+  obj.sphereCentre.z = obj.pos.z;
+  obj.sphereCentre.y = obj.pos.y + obj.bodyRadius
     + ((obj.flags2 & LOW_SPHERE) ? SPHERE_RISE_LOW : SPHERE_RISE);
 }
 
@@ -953,7 +1105,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pushedBy: -1,
     pushDepth: 0,
     pushNormal: vec3(),
-    camPoint: vec3(),
+    sphereCentre: vec3(),
     civ: null,
     reactBone: 0,
     knockCount: 0,

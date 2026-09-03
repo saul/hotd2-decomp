@@ -252,6 +252,48 @@ blocks until the list is shorter than `sub+0x20`, and the block it unblocks
 ends with a wait word carrying `0x10000000` — which is where
 `ScoreAddForPlayer` pays **400**, to that player or, when it is `-1`, to both.
 
+### Letting the captors go
+
+`CivilianUpdate` ends at `LAB_0048B0CE`, the tail every path out of it falls
+into except the two that despawn. It is four instructions of gate and a loop:
+
+```
+0048b0ce  TEST  dword ptr [ESI + 0x34], 0x4000000   ; f7463400000004 -- dead?
+0048b0d5  JZ    return
+0048b0d7  MOV   DX, word ptr [ECX + 0x1e]           ; ECX = g_cur_civilian
+0048b0db  CMP   DX, BX / JZ return                  ; BX = 0
+0048b0e5  JLE   return
+0048b0e7  MOV   EDX, 0xfeffffff                     ; ~0x1000000
+0048b0ec  MOV   ECX, [ECX + 0x60] / MOV ECX, [ECX + EAX*4]     ; child = arr[i]
+0048b0f2  MOV   EBX, [ECX + 0x34] / AND EBX, EDX / MOV [ECX + 0x34], EBX
+0048b106  MOV   ESI, [ECX + 0x136c] / OR ESI, EDI / MOV [ECX + 0x136c], ESI
+0048b121  JL    0048b0ec                            ; EDI = 1, from 0x0048AF7D
+```
+
+Once the civilian is **dead** — `obj+0x34` bit `0x4000000`, which the shot
+branch sets — every surviving captor gets `obj+0x34` bit `0x1000000` **cleared**
+and `obj+0x136C` bit `0x1` **set**, on every frame for as long as the body is
+still in play. `[proved]`
+
+* `obj+0x34` bit `0x1000000` is "this actor is holding something". Class 0x30's
+  clip picker `FUN_004560B0` reads it at 0x004560DD —
+  `TEST dword ptr [ESI + 0x34], 0x1000000`, bytes `f7463400000001` — and starts
+  motion `0x3F9` while it is set. Clearing it is what takes the captor out of
+  its hold clip. A sweep for `TEST r/m32, 0x1000000` finds that site and
+  0x00430C88 and no others.
+* `obj+0x136C` bit `0x1` selects **the scene light array** at draw time. Its
+  only readers are class 0x31's two draw-slot wrappers `FUN_0044A200` and
+  `FUN_0044A240`: `TEST byte ptr [EAX + 0x136C], 0x1`, bytes `f6806c13000001`,
+  at 0x0044A205 and 0x0044A245, choosing `SubmitSlotWithSceneLightArray`
+  (`FUN_004185E0`) over `AssetDrawSlot` (`FUN_00418560`) when the array at
+  0x009A2BB4 — written by `EvtOpSetSceneLighting14` — is non-null. A
+  byte-pattern sweep of the image finds those two and no others, and the dword
+  form finds none.
+
+  `[open]`: **the captors are class 0x30**, so in the shipped game nothing
+  reads the bit that is set on them. The write is transcribed because the
+  engine makes it, not because an effect can be pointed at.
+
 Shooting the civilian instead is the mirror. `sub+0x4C` is the gate: with no
 on-shot script the hit bits are cleared every frame and the actor cannot be
 hurt at all. With one, a survivable hit calls `PlayerTakeDamageTimed` — which

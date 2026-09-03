@@ -38,6 +38,7 @@
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
+import { SpawnClass } from "../spawn_class";
 import { TURN_RATE_UNTRACKED } from "./constants";
 import { SelectCameraLookAtTarget } from "./select_target";
 import { ComputeLookAtAngleError, LookAtCosineSquared, TurnLookAtToward }
@@ -56,15 +57,65 @@ import { vec3 } from "../vec";
 const CAMERA_TRACK_BONE = 1;
 
 /**
- * The lift `ActorRegisterCameraPoint` applies before the camera reads it.
+ * The lift each class asks `ActorRegisterCameraPoint` for.
  *
- * [diverges] `FUN_00409B70` takes the amount as a float argument — 4.0 for a
- * class-0x30 zombie and **0 for a class-0x31 thrower** — and the port applies
- * 4.0 to both, which is what `render/characters.ts` did before this moved. Two
- * classes' camera aim rides on it, so making the split is a gameplay change
- * and not a line to fold into a refactor.
+ * **It is the routine's float argument, not a field on the actor.**
+ * `FUN_00409B70` reads it off the stack — `FLD float ptr [ESP + 0x38]`, bytes
+ * `d9442438`, at 0x00409BF2, which with the prologue's `SUB ESP, 0x18` and one
+ * `PUSH ESI` still live is the first argument — and adds it to `obj+0x104`
+ * (`FADD float ptr [ESI + 0x104]`, `FSTP float ptr [ESI + 0x104]`). `[proved]`
+ *
+ * All fifteen call sites, re-read with `disassemble_bytes` and the raw hex
+ * quoted, because the decompiler drops float arguments:
+ *
+ * | site | caller | push | value |
+ * |---|---|---|---|
+ * | 0x0045347A | `EnemyZombieUpdate`, class 0x30 | `6800008040` | **4.0** |
+ * | 0x00449991 | `EnemyThrowerUpdate`, class 0x31 | `6a00` | **0.0** |
+ * | 0x0048ADB0 | `CivilianUpdate`, class 0x10 | `6800008040` | **4.0** |
+ * | 0x00427D01 / 0x004283D2 / 0x00428AB2 | the 0x0042xxxx family | `680000a040` | 5.0 |
+ * | 0x0042C273, 0x0049C8CE | ditto | `6800000040` | 2.0 |
+ * | 0x0042C986, 0x0042D5D0 | ditto | `6800007041` | 15.0 |
+ * | 0x0042CF93, 0x0047CA3A | ditto, and class 0x32 | `6a00` | 0.0 |
+ * | 0x00490917, 0x004912EA | the 0x0049xxxx family | `680000c040` | 6.0 |
+ * | 0x00491A49 | `FUN_004919D0` | `PUSH EAX` = `[EDX + 0x70]` | **runtime** |
+ *
+ * So it is per-call-site, and at fourteen of the fifteen a constant — the
+ * survey's "per-call-site constant" needs that one qualification.
+ *
+ * Three of the port's seven classes appear above. **The other four —
+ * 0x24, 0x25, 0x41, 0x44 — never call the routine at all**: those fifteen are
+ * every reference to 0x00409B70 in the binary and none of them is in those
+ * classes' code. They get 0 here, because 0 is the only value that does not
+ * invent a lift the engine never applies to them.
+ *
+ * [diverges] *Who* is registered is still not the engine's set: `director.ts`
+ * calls this for every visible actor, where the engine calls it from fifteen
+ * places. Narrowing it to the three proved classes would leave `lookAt` at the
+ * origin for the rest, which `SelectCameraLookAtTarget` and the HUD marker
+ * both read. That is a separate change from the lift, and this table is what
+ * makes it possible to make later.
  */
-const CAMERA_TRACK_RISE = 4;
+const CAMERA_POINT_RISE: Partial<Record<SpawnClass, number>> = {
+  [SpawnClass.Civilian]: 4,
+  [SpawnClass.Zombie]: 4,
+  [SpawnClass.Thrower]: 0,
+};
+
+/** What {@link CAMERA_POINT_RISE} gives a class with no exe call site. */
+const CAMERA_POINT_RISE_NONE = 0;
+
+/**
+ * The float argument this class's `Update` pushes. See
+ * {@link CAMERA_POINT_RISE}.
+ *
+ * [port-only] The engine has no such lookup: each `Update` pushes its own
+ * literal at its own call site. The port calls `ActorRegisterCameraPoint` from
+ * one place, so the fifteen literals have to be a table, and this is it.
+ */
+export function CameraPointRiseFor(cls: SpawnClass): number {
+  return CAMERA_POINT_RISE[cls] ?? CAMERA_POINT_RISE_NONE;
+}
 
 const _bone = vec3();
 
@@ -73,9 +124,11 @@ const _bone = vec3();
  * actor.
  *
  * It transforms `obj+0x100` into view space for the shot test, registers the
- * actor for both, and raises the height by its float argument. The port's half
- * is the height and the registration: the world position of the bone is the
- * skeleton's, and the skeleton is three.js's, so it comes across `GameHost`.
+ * actor for both, and raises the height by its float argument — `rise`, which
+ * the caller supplies exactly as the engine's caller pushes it. The port's
+ * half is the height and the registration: the world position of the bone is
+ * the skeleton's, and the skeleton is three.js's, so it comes across
+ * `GameHost`.
  *
  * This ran in `render/characters.ts` until step 21, writing `a.lookAt` from a
  * renderer — which meant turning the Characters view toggle off froze the
@@ -86,10 +139,11 @@ const _bone = vec3();
  * A host with no pose for this actor leaves the point where it was, which is
  * what a character with no skeleton in the scene should look like.
  */
-export function ActorRegisterCameraPoint(obj: Actor, host: GameHost): void {
+export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
+                                         rise: number): void {
   if (!host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone)) return;
   obj.lookAt.x = _bone.x;
-  obj.lookAt.y = _bone.y + CAMERA_TRACK_RISE;
+  obj.lookAt.y = _bone.y + rise;
   obj.lookAt.z = _bone.z;
 }
 

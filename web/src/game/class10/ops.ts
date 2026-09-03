@@ -65,7 +65,8 @@ export enum CivilianOp {
   PickHeldItem = 0x15,
   /** Ramp `obj+0x128` to a new radius over N frames. */
   SetRadiusRamp = 0x16,
-  /** Which point `ActorRegisterCameraPoint` registers for the shot test. */
+  /** Which point `CivilianUpdate`'s switch writes into `obj+0x12C`, the
+   *  collision-sphere centre the shot test and the actor push both read. */
   SetCameraPointMode = 0x17,
   /** Teleport: six floats, position then rotation. */
   SetPose = 0x18,

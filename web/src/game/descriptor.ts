@@ -33,6 +33,9 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     ringSet: p?.ring_set ?? 0,
     leap: p?.leap ?? null,
     path: p?.path ?? null,
+    // `desc+0x04` -- `*(float *)(obj+0x1390 + 4)`, four bytes into the
+    // descriptor parameter tail. Not `obj+0x04`, which is inside the task
+    // control block `ActorAlloc` (`FUN_004A6FA0`) owns.
     walkDistance: p?.walk_distance ?? 0,
     entranceMotion: p?.entrance_motion ?? 0,
     pounce: p?.pounce ?? null,

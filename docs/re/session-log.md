@@ -9353,3 +9353,80 @@ which `ZombieOnShot` picks for 44 shipped spawns with body condition 5 or 6.
 The port routes them to state 6 instead, which gives the same clip pick, the
 same teardown in the same order and the same corpse — they die where they stood
 rather than where they were thrown. Declared `[diverges]` at the write site.
+
+## 2026-09-03 — D1–D3, and two write-ups that were wrong about their own subject
+
+Three fidelity decisions were put to the user as `D1`–`D3` and all three were
+approved. All three landed. **Two of the three write-ups — mine — were wrong
+about the thing they were describing**, and that is the part worth keeping.
+
+### D1: the bit was never unportable, and nobody looked at the data
+
+The entry said `obj+0x34 & 0x800000` "has no port — nothing the port models
+reads or writes it", twice, in two `[diverges]` notes. The port has carried it
+since the exporter started emitting `init_flags`: `descriptor.ts` puts the
+spawn word straight onto `obj.flags`, and **six shipped spawns set the bit** —
+three on stage 1, three on stage 3, all class 0x30, all initial state 18.
+
+The claim was never checked against a single exported placement. It is the
+same failure as `evt.py`'s "unused in every shipped file" comment about the
+descriptor's `+0x20` word, which was also false whole-corpus, in the same
+week. **A claim about what the shipped data contains is one grep from being
+settled, and both times the claim was written instead.**
+
+Two more corrections fell out. The port had split the flag from its
+`g_enemy_slots` clear **twice**, not once — `ThrowerReleaseSlotOnDeath` already
+had half a guard, on the slot but not the flag, which is the same fault
+mirrored. And the two classes guard on **different counters**:
+`g_enemies_alive` for class 0x30, `g_enemies_present` for 0x31. Reading class
+0x31 rather than assuming symmetry also showed it has **no untracking wrapper
+at all**, proved by scanning its whole range for `OR …, 0x10000`.
+
+### D3: asserting a table from an address
+
+The entry said the fix required exporting an `.rdata` table at `0x0044FD1C`.
+`.rdata` starts at `0x004C4000`. The address is 475 KB below it, **inside
+`ThrowerStateThrow`'s own function body**, and what is there is a
+compiler-emitted dense switch: one xref in the whole program, from the `JMP`
+a few instructions above, with the payload as `MOV` immediates in the arms.
+
+Checking which section an address is in is **one tool call**. The write-up
+asserted a table's existence, its section, and an entire exporter's worth of
+work without making it. That is the adjacent-array trap arriving from the
+other direction — not "where does this table end" but "is this a table at
+all".
+
+The agent stopped rather than substituting a different job, which was correct:
+the stop condition in the brief is what caught it. The real fix was `game/`
+constants beside a sibling literal table that had been one file away the whole
+time, and `tools/hod2lib/class31.py` had **already classified those eight
+motion ids as `.text` literals**, under a comment naming this very branch. The
+project knew. The write-up did not ask it.
+
+And the divergence was bigger than stated: a second type check diverts the
+**clip** as well as the frame, so the port had been playing the wrong
+animation for `zslman`, not merely throwing late.
+
+### D2: the decompiler dropped both multiplies, again
+
+`FUN_004550E0` overwrites **its own argument slot** with the scale, so Ghidra
+renders the condition-dependent divisor as noise assigned to `float param_1`.
+Both `FMUL`s were invisible — the `0.5` on the sway and the drop, and the
+`3.0` — and `bcdf0123` turned out to be **−0.027222222**, the arc engine's own
+half-gravity negated. Every constant had to be re-read from the disassembly,
+which is the trap `CLAUDE.md` lists first and which still cost a pass.
+
+One structural finding: state 9 fills the **shared** arc record through
+`ActorArcBeginToAtSpeed` but rides it with its own stepper, and sub 2 then
+abandons the arc entirely and integrates by hand, reusing `obj+0x1334` as a
+fall counter. One word, two meanings, inside one state — the intra-class
+aliasing S3 cannot fix, found in new code rather than old.
+
+### What follows from all three
+
+The reviews and write-ups in this repo are now good enough to be trusted, and
+that is the hazard. Three separate documents asserted a fact about the binary
+or the data that a single command would have refuted, and each survived
+because the next reader treated a written claim as a finished one. `[open]`
+that nobody re-tests becomes a wrong answer with a citation attached; so does
+`[proved]` that was never proved.

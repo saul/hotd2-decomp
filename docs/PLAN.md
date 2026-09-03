@@ -6,6 +6,12 @@ This file replaces it, because the questions changed: the formats are solved,
 and what is left is **behaviour** — the code that decides what appears, where,
 and when.
 
+A whole-repo review on 2026-09-03 (GitHub issue #1) is transposed into
+[`REVIEW-2026-09-03.md`](REVIEW-2026-09-03.md), with sixteen findings and a
+five-phase plan. **Read it before this file**: it argues that several of the
+numbers below are measured by checks that cannot fire, and phase 0 of that plan
+is the work that makes them trustworthy.
+
 ## Where this actually stands
 
 Measured, not estimated:

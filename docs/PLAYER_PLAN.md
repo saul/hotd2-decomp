@@ -8,6 +8,9 @@ branching paths, enemy encounters and per-keyframe events.
 is deferred, as planned. Usage lives in [`../web/README.md`](../web/README.md);
 this document remains the plan and the rationale.
 
+Findings from the 2026-09-03 whole-repo review, and the phased plan they
+imply, are in [`REVIEW-2026-09-03.md`](REVIEW-2026-09-03.md).
+
 Open defects found by driving the player rather than by reading it, with the
 command that reproduces each, are in
 [`PLAYER_HANGS.md`](PLAYER_HANGS.md).

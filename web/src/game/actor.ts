@@ -12,8 +12,9 @@
 import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
 import type { CivilianState } from "./class10/state";
-import type { SpawnClass } from "./spawn_class";
+import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
+import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
@@ -576,7 +577,11 @@ export type ActorRef = number;
  */
 export type ListCursor = number;
 
-export interface Actor {
+/**
+ * The fields **every** class has — the ones a class-agnostic engine routine
+ * touches. See {@link Actor} for the per-class arms and why they are separate.
+ */
+export interface ActorBase {
   // -- identity ----------------------------------------------------------
   /** The spawn's script address. Stable, and the key the renderer binds on. */
   at: number;
@@ -769,85 +774,6 @@ export interface Actor {
    * address as `scriptMotion`, which is a motion id and not a counter at all.
    */
   holdFrames: number;       // +0x1320
-  /**
-   * `obj+0x1394` — class 0x25's command cursor. -1 has left the VM, and
-   * `ScriptedHumanoidIdle` (`FUN_00484D40`) is what runs from then on.
-   *
-   * A {@link ListCursor}, and **not** the same kind of field as
-   * {@link Actor.targetAt} even though the exe puts both at this offset — see
-   * the two aliases for the readings that separate them. The engine keeps a
-   * **pointer** here: `MOV dword ptr [EDI + 0x1394], ESI` (`89b794130000`) at
-   * `0x00484A9C`, with `ESI` stepped by 8 or 16 bytes per command. An index is
-   * the port's shape for the same cursor.
-   */
-  pc: ListCursor;           // +0x1394, class 0x25
-  /** `obj+0x132C` / `+0x1328` / `+0x1354` / `+0x1350` — the turn. */
-  turnMode: number;         // +0x132C
-  turnFrames: number;       // +0x1328
-  turnStep: number;         // +0x1354
-  turnTarget: number;       // +0x1350
-  /** `obj+0x1358` / `+0x135C` — riding an object path. */
-  pathMode: number;         // +0x1358
-  pathSlot: number;         // +0x135C
-  /**
-   * `obj+0x1360` — an **index into a 24-byte record table**, not an offset
-   * along the path: `g_class25_path_offsets` — `0x00596B18`. Zero means none.
-   *
-   * `[proved]`: `MOV EAX,[EDI+0x1360]; CMP EAX,EBX; JZ; LEA EAX,[EAX+EAX*0x2];
-   * LEA EBP,[EAX*0x8 + 0x596b18]` (`8d0440`, `8d2cc5186b5900`) at
-   * `0x00484B77`–`0x00484B89`.
-   */
-  pathOffsetRecord: number; // +0x1360
-  /**
-   * `obj+0x1330` — class 0x25's `op 14`, and it **is** a draw mode: which of
-   * the character's hand props the per-bone hook draws.
-   *
-   * `[proved]`: the reader is `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`),
-   * the callback `ScriptedHumanoidInit` (`FUN_004840D0`) installs at
-   * `obj+0x12EC` — `MOV EAX, dword ptr [ESI + 0x1330]; CMP EAX,0x2; JNZ`
-   * (`8b8630130000`, `83f802`) at `0x0048535F`, and `CMP EAX,0x1` at
-   * `0x004854F9`. `ScriptedHumanoidDraw` (`FUN_00484FF0`) never reads it,
-   * which had been taken to mean nothing did.
-   */
-  bonePropMode: number;     // +0x1330
-  /**
-   * `obj+0x1334` — the frame counter `ScriptedHumanoidBoneDrawHook`
-   * (`FUN_00485260`) increments once per drawn frame, and indexes the
-   * 13-entry cel tables as `n % 13`: `g_class25_bone_prop_cels` —
-   * `0x00596C80` for `bonePropMode` 2, `g_class25_bone_prop_cels_alt` —
-   * `0x00596C90` for 1.
-   *
-   * `[proved]`: `MOV EAX,[ESI+0x1334]; INC EAX; MOV [ESI+0x1334],EAX`
-   * (`8b8634130000`, `40`, `898634130000`) at `0x0048549B`/`0x004854A4` and
-   * again at `0x004854DD`/`0x004854E9`. The port keeps it because the exe
-   * keeps it on the actor and the VM writes it (`op 14` mode 2 zeroes it);
-   * drawing the prop itself is the renderer's and is not ported.
-   *
-   * Aliases `backoffFrames` (class 0x30) and `arcTotal` (class 0x31).
-   */
-  bonePropFrame: number;    // +0x1334, aliases `backoffFrames`
-  /**
-   * `obj+0x1364` — class 0x25's `op 12`: a **persistent** toggle, not the
-   * one-shot effect the port used to call it. Mode 1 sets it and mode 0
-   * clears it; any other mode leaves it alone.
-   *
-   * `[proved]`: `MOV dword ptr [EDI + 0x1364], 0x1` (`c7876413000001000000`)
-   * at `0x004848BE` and `MOV dword ptr [EDI + 0x1364], EBX` (`899f64130000`,
-   * `EBX = 0`) at `0x004848DE`. Read every frame by
-   * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) at `0x00485287`:
-   * `MOV EAX,[ESI+0x1364]; TEST EAX,EAX; JZ; CMP word ptr [EBX + 0x14], 0x2;
-   * JNZ; CALL 0x00485BA0` — so it decorates **bone 2** for as long as it is
-   * set. `FUN_00485BA0` and `FUN_00485D70` are `[open]`.
-   *
-   * Aliases the class-0x30 / class-0x31 attack stance row.
-   */
-  boneDecoration: number;   // +0x1364, aliases `stance`
-  /**
-   * `obj+0x13C0` — where the actor was last frame. The VM's "am I closing on
-   * this point" condition compares against it, which is the only reason it is
-   * kept.
-   */
-  prevPos: Vec3;            // +0x13C0
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
   /** Frames spent retreating; `ZombieStateBackOff` gives up past 0xF0. */
@@ -1385,6 +1311,58 @@ export interface Actor {
   boneSlot: Record<string, number>;
 }
 
+/**
+ * An actor: the shared head, plus the arm its class owns.
+ *
+ * ## Why this is a union, and what it does and does not fix
+ *
+ * The struct's tail is reused. `obj+0x1330` is a hand-prop selector for class
+ * 0x25, a slide countdown for 0x24 and an arc frame counter for 0x31 — one
+ * word, three meanings, and that is the *engine's* design, not a porting
+ * mistake. A flat interface asserts that all of those coexist on every actor,
+ * which is false of every actor that has ever existed. Discriminating on `cls`
+ * asserts what the engine asserts: this word means what this actor's class
+ * says it means.
+ *
+ * **It does not remove every alias, and the honest claim is narrower than the
+ * plan's.** Two kinds of aliasing look alike in a flat struct and only one is
+ * cross-class:
+ *
+ * * *Between* classes — `obj+0x1330` as class 0x25's `bonePropMode` against
+ *   class 0x24's `slideTimer`. A `cls` discriminant fixes this, and it is what
+ *   the arms below are for.
+ * * *Within* one class — `obj+0x1330` is also class 0x30's general-purpose
+ *   per-state dword, with 98 accesses across 24 routines, read differently by
+ *   each state. Putting all of those on the class-0x30 arm leaves them
+ *   aliasing each other exactly as much as before. Fixing that would need a
+ *   second discriminant, the *state*, and it is not obviously right either:
+ *   the engine really does reuse one word across states, so a per-state union
+ *   would model the port's safety rather than the engine's structure. It is
+ *   not attempted, and the aliases are documented on the fields instead.
+ *
+ * A third group cannot go on any arm: `obj+0x1330`/`+0x1334`/`+0x1360`/
+ * `+0x13C0`/`+0x13CC` are the **shared arc record** that `ActorArcBegin` and
+ * `ActorArcStep` lay down, and class-0x30 and class-0x31 states both call
+ * those routines directly. They stay in the head.
+ *
+ * ## The arms are not all the same shape
+ *
+ * Class 0x10's `civ` is a nullable pointer to a block the engine *allocates*
+ * (`ActorAllocSub(0xC4)`), so its offsets are the block's and it is genuinely
+ * absent until `CivilianInit` runs. Every other arm is a view onto words that
+ * are always there — `ActorAllocSub` has 37 call sites and none of the other
+ * class Inits is one of them [proved] — so those arms are **not** nullable.
+ * Spelling them alike would invent an absent state the engine does not have
+ * and force every reader into a check it never makes.
+ */
+export type Actor =
+  | (ActorBase & { cls: SpawnClass.ScriptedHumanoid; hum: HumanoidTail })
+  | (ActorBase & { cls: Exclude<SpawnClass, SpawnClass.ScriptedHumanoid> });
+
+/** An actor already narrowed to class 0x25, for that class's own routines. */
+export type HumanoidActor = Extract<Actor,
+  { cls: SpawnClass.ScriptedHumanoid }>;
+
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
 const SPHERE_RISE = 1;
@@ -1414,8 +1392,11 @@ export function ActorUpdateBoundingSphere(obj: Actor): void {
 
 export function makeActor(at: number, cls: SpawnClass, charType: number,
                           name: string): Actor {
-  return {
-    at, cls, charType, name, flags38: 0,
+  // The head, without `cls`: which arm this actor gets is decided below, and
+  // assigning `cls` here would widen it back to `SpawnClass` and defeat the
+  // narrowing the union exists for.
+  const head: Omit<ActorBase, "cls"> = {
+    at, charType, name, flags38: 0,
     flags: 0,
     pos: vec3(),
     yaw: 0,
@@ -1442,18 +1423,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     selector: 0,
     slideTimer: 0,
     holdFrames: 0,
-    pc: 0,
-    turnMode: 0,
-    turnFrames: 0,
-    turnStep: 0,
-    turnTarget: 0,
-    pathMode: 0,
-    pathSlot: -1,
-    pathOffsetRecord: 0,
-    bonePropMode: 0,
-    bonePropFrame: 0,
-    boneDecoration: 0,
-    prevPos: vec3(),
     ringSet: 0,
     backoffFrames: 0,
     allowance: 0,
@@ -1541,4 +1510,12 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     removed: [],
     boneSlot: {},
   };
+  // One `return` per arm. TypeScript narrows `cls` inside each branch, so the
+  // arm's fields are required exactly where they belong and no cast is needed
+  // — which is the point: a cast here would be the one place the union could
+  // be lied to, and there is no cast here.
+  if (cls === SpawnClass.ScriptedHumanoid) {
+    return { ...head, cls, hum: makeHumanoidTail() };
+  }
+  return { ...head, cls };
 }

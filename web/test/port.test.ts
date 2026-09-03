@@ -50,7 +50,8 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
-import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2, type Actor }
+import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2,
+         type Actor, type HumanoidActor }
   from "../src/game/actor";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
@@ -1502,7 +1503,7 @@ console.log("\nclass 0x41 type 34 is a falling container:");
 
 function humanoidScene(cmds: HumanoidProgram["cmds"],
                        over: Partial<HumanoidProgram> = {}):
-    { a: ReturnType<typeof ActorSpawn>; events: Events } {
+    { a: HumanoidActor; events: Events } {
   ResetGameGlobals();
   const prog: HumanoidProgram = {
     charType: 1, removePath: 90, removeFrame: 900, flags2: 0,
@@ -1512,14 +1513,58 @@ function humanoidScene(cmds: HumanoidProgram["cmds"],
   G.g_active_cam_path = -1;
   G.g_cam_path_frame = 0;
   const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "humanoid");
+  // Narrowing, not a cast. `ActorSpawn` returns the union, and class 0x25's
+  // routines take the arm -- so the test has to prove the actor is a humanoid
+  // the same way the director does. Before the union this fixture handed an
+  // un-narrowed actor straight into `ScriptedHumanoidUpdate`.
+  if (a.cls !== SpawnClass.ScriptedHumanoid) throw new Error("not class 0x25");
   a.visible = true;
   a.pos = vec3(0, 0, 0);
   return { a, events: new Events() };
 }
 
-const hFrame = (a: ReturnType<typeof ActorSpawn>, events: Events, rng: Rng) =>
+const hFrame = (a: HumanoidActor, events: Events, rng: Rng) =>
   ScriptedHumanoidUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
                               events });
+
+/**
+ * **The union's whole point, checked by the compiler.**
+ *
+ * These do not run. `@ts-expect-error` fails `tsc` if the line it guards
+ * *compiles*, so each one asserts that a misread is rejected — which is the
+ * only way to test a type. Before the class-0x25 arm existed, every line below
+ * compiled happily and read a word belonging to another class.
+ *
+ * This is the honest version of what the review predicted. It expected F6 —
+ * `RankEnemiesByDistance` writing zombie fields onto every class — to become a
+ * type error here. It cannot: `FUN_004090B0` writes `obj+0x131D`/`+0x131E`
+ * unconditionally on every ranked entry, with the `charType == 0xB` test
+ * gating only the reads that follow, so those two bytes are genuinely
+ * class-agnostic and belong in the head. What the union does catch is the
+ * cross-class *tail* read, and that is what these pin.
+ */
+function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor): void {
+  // @ts-expect-error a bare `Actor` has no arm until `cls` is narrowed
+  void a.hum;
+  // @ts-expect-error class 0x25's hand-prop selector is not on the head
+  void a.bonePropMode;
+  // @ts-expect-error nor is its command cursor
+  void a.pc;
+  // **And here is what it does not yet protect.** `obj+0x1330` is also class
+  // 0x24's `slideTimer` and `obj+0x1334` is class 0x30's `backoffFrames`, and
+  // both still compile on a humanoid — because those two classes have no arm
+  // yet, so their fields are still on the head where every class can see them.
+  // A `@ts-expect-error` on either line is an *unused directive* today and
+  // fails the build, which is why neither is written as one. **The union only
+  // separates a word once every class that shares it has been cut over.**
+  // When class 0x24 and class 0x30 grow arms, these two become errors and the
+  // directives should be added above them.
+  void h.slideTimer;
+  void h.backoffFrames;
+  // The arm is reachable once, and only once, `cls` has been tested.
+  if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.bonePropMode;
+}
+void unionRejectsCrossClassReads;
 
 console.log("\nclass 0x25, the VM runs until a command blocks:");
 {
@@ -1535,17 +1580,17 @@ console.log("\nclass 0x25, the VM runs until a command blocks:");
   ]);
   hFrame(a, events, rng);
   check("a run of setup commands all take effect in one frame",
-        a.pos.x === 5 && a.pos.z === 7 && a.bonePropMode === 2
-        && a.turnMode === HumanoidTurn.FaceCamera && a.pc === 3,
-        `pc ${a.pc}`);
+        a.pos.x === 5 && a.pos.z === 7 && a.hum.bonePropMode === 2
+        && a.hum.turnMode === HumanoidTurn.FaceCamera && a.hum.pc === 3,
+        `pc ${a.hum.pc}`);
 
   // The wait costs frames, and exactly the number it asks for.
   for (let i = 0; i < 29; i++) hFrame(a, events, rng);
-  check("the wait holds the cursor while it counts", a.pc === 3 && !a.dead,
-        `pc ${a.pc} hold ${a.holdFrames}`);
+  check("the wait holds the cursor while it counts", a.hum.pc === 3 && !a.dead,
+        `pc ${a.hum.pc} hold ${a.hum.stallFrames}`);
   hFrame(a, events, rng);
   check("and releases on the frame it names, running on to the kill",
-        a.dead, `pc ${a.pc} hold ${a.holdFrames}`);
+        a.dead, `pc ${a.hum.pc} hold ${a.hum.stallFrames}`);
 }
 
 console.log("\nclass 0x25, the camera conditions:");
@@ -1557,15 +1602,15 @@ console.log("\nclass 0x25, the camera conditions:");
     { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
   ]);
   hFrame(a, events, rng);
-  check("it waits while the camera is elsewhere", a.pc === 0);
+  check("it waits while the camera is elsewhere", a.hum.pc === 0);
   G.g_active_cam_path = 57;
   G.g_cam_path_frame = 39;
   hFrame(a, events, rng);
-  check("and while the path matches but the frame has not come", a.pc === 0);
+  check("and while the path matches but the frame has not come", a.hum.pc === 0);
   G.g_cam_path_frame = 40;
   hFrame(a, events, rng);
   check("then runs on when the camera arrives",
-        a.pos.y === 12 && a.pc === -1, `pc ${a.pc} y ${a.pos.y}`);
+        a.pos.y === 12 && a.hum.pc === -1, `pc ${a.hum.pc} y ${a.pos.y}`);
 }
 
 console.log("\nclass 0x25, jumps and the stall guard:");
@@ -1579,7 +1624,7 @@ console.log("\nclass 0x25, jumps and the stall guard:");
   ]);
   for (let i = 0; i < 200; i++) hFrame(a, events, rng);
   check("a loop of wait-and-jump runs for ever without hanging a frame",
-        !a.dead && a.pc === 0, `pc ${a.pc}`);
+        !a.dead && a.hum.pc === 0, `pc ${a.hum.pc}`);
 }
 
 console.log("\nclass 0x25, the removal trigger:");
@@ -1610,17 +1655,17 @@ console.log("\nclass 0x25, the two draw fields the VM writes:");
     { op: HumanoidOp.SetBonePropMode, mode: 7, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
   ]);
-  a.bonePropFrame = 9;
+  a.hum.bonePropFrame = 9;
   hFrame(a, events, rng);
   check("op 12 mode 1 sets the bone decoration and it stays set",
-        a.boneDecoration === 1);
+        a.hum.boneDecoration === 1);
   check("op 14 mode 2 picks hand prop 2 and restarts the cel counter",
-        a.bonePropMode === 2 && a.bonePropFrame === 0);
+        a.hum.bonePropMode === 2 && a.hum.bonePropFrame === 0);
 
   for (let i = 0; i < 4; i++) hFrame(a, events, rng);
-  check("op 12 mode 0 clears it again", a.boneDecoration === 0);
+  check("op 12 mode 0 clears it again", a.hum.boneDecoration === 0);
   check("and a mode op 14 does not know leaves the prop alone",
-        a.bonePropMode === 2, `mode ${a.bonePropMode}`);
+        a.hum.bonePropMode === 2, `mode ${a.hum.bonePropMode}`);
 }
 
 console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
@@ -1635,8 +1680,8 @@ console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
   ]);
   hFrame(a, events, rng);
   check("the frame that runs op -1 still falls through the normal tail",
-        a.pc === -1 && a.holdFrames === 1 && a.turnMode === HumanoidTurn.FaceCamera,
-        `pc ${a.pc} hold ${a.holdFrames}`);
+        a.hum.pc === -1 && a.hum.stallFrames === 1 && a.hum.turnMode === HumanoidTurn.FaceCamera,
+        `pc ${a.hum.pc} hold ${a.hum.stallFrames}`);
 
   const yaw = a.yaw;
   // Move it somewhere the FaceCamera turn would aim it differently.
@@ -1645,8 +1690,8 @@ console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
   hFrame(a, events, rng);
   hFrame(a, events, rng);
   check("and after that it stops turning and stops counting",
-        a.yaw === yaw && a.holdFrames === 1,
-        `yaw ${a.yaw} was ${yaw} hold ${a.holdFrames}`);
+        a.yaw === yaw && a.hum.stallFrames === 1,
+        `yaw ${a.yaw} was ${yaw} hold ${a.hum.stallFrames}`);
 
   // The removal test is the one thing the idle routine does keep.
   G.g_active_cam_path = 90;
@@ -1672,7 +1717,7 @@ console.log("\nclass 0x25, the object path's attachment offset:");
                               events });
   const r = g_class25_path_offsets[1];
   check("op 11's b indexes the 24-byte offset table",
-        a.pathOffsetRecord === 1 && r.dx === 4.5 && r.dyaw === 0x8000);
+        a.hum.pathOffsetRecord === 1 && r.dx === 4.5 && r.dyaw === 0x8000);
   check("and the record is added to the path's point, with its yaw delta",
         Math.abs(a.pos.x - (10 + r.dx)) < 1e-6
         && Math.abs(a.pos.y - (0 + r.dy)) < 1e-6

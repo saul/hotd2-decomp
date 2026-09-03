@@ -46,11 +46,13 @@ export enum ZombieState {
   CorpseBlink = 8,
   /**
    * `ZombieStateDeathKnockbackArc` (`FUN_004550E0`). The other death: the body
-   * is thrown on a ballistic arc, falls under gravity and bounces before it
-   * becomes a corpse. `ZombieOnShot` picks it over {@link Death} for an actor
-   * that is being carried, is in state 0x34, or has body condition 5 or 6.
+   * is thrown on a ballistic arc built in the camera's own matrix, falls under
+   * gravity — with a water case that reads its height from
+   * `g_camera_fixed_eye_y` — and bounces before it becomes a corpse.
+   * `ZombieOnShot` picks it over {@link Death} for an actor that is being
+   * carried, is in state 0x34, or has body condition 5 or 6.
    *
-   * **Not ported** — see the `[diverges]` in `class30/on_shot.ts`.
+   * See `class30/knockback.ts`.
    */
   DeathKnockbackArc = 9,
   /** `ActorAbortAttackAndLeave` (`FUN_0045D9F0`). */

@@ -652,8 +652,23 @@ export interface ActorBase {
    */
   flags38: number;          // +0x38
   pos: Vec3;                // +0x40
-  /** Yaw in BAMS. The engine keeps a triple at +0x64/68/6C; only Y turns. */
+  /**
+   * Yaw in BAMS, the middle word of the engine's rotation triple at
+   * +0x64/68/6C. Almost everything turns only about Y — this used to say
+   * "only Y turns", and `ZombieStateDeathKnockbackArc` (`FUN_004550E0`) is
+   * the counter-example: see {@link Actor.pitch}.
+   */
   yaw: number;              // +0x68
+  /**
+   * `obj+0x64` — the **x** word of the same triple.
+   *
+   * One writer is ported: body condition 4's knockback spins the falling body
+   * by `±(rand() % 5) * 0x100` BAMS at 0x004551D5. `render/` poses an actor
+   * from `yaw` alone, so nothing draws this yet; it is state the engine keeps
+   * on the actor, so the port keeps it where the engine does and the renderer
+   * is the half that has to catch up.
+   */
+  pitch: number;            // +0x64
   /**
    * What the camera aims at, and **not** the actor's origin.
    *
@@ -1407,6 +1422,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     flags: 0,
     pos: vec3(),
     yaw: 0,
+    pitch: 0,
     lookAt: vec3(),
     vel: vec3(),
     accY: 0,

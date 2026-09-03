@@ -54,9 +54,32 @@ G.g_player_lives = [2, 2];
 const rng = new Rng(1);
 const events = new Events();
 
+// A camera to measure against, in the engine's own view convention: **-Z in
+// front**, +Y up, `viewPoint` the exact inverse of `viewSpaceOf`. Class 0x30
+// state 9 and class 0x31's knockback both build their landing point in the
+// camera's own matrix, so with `NULL_HOST` alone every thrown body would fall
+// straight down and this tool could not tell that apart from a body that was
+// never thrown. `eye` is set below, so this reads it lazily.
 const host = {
   ...NULL_HOST,
   aliveEnemies: () => G.g_enemies_alive,
+  viewSpaceOf: (at, out) => {
+    const a = G.g_object_list.find((o) => o.at === at);
+    if (!a) return false;
+    // The engine's `obj+0x100` is a *posed bone*, written by the skeleton walk
+    // — so headlessly it is (0,0,0) and using it would aim every throw at the
+    // world origin. The actor's own origin is the honest stand-in here; the
+    // real player answers this from three.js.
+    out.x = a.pos.x - eye.x;
+    out.y = a.pos.y - eye.y;
+    out.z = -(a.pos.z - eye.z);
+    return true;
+  },
+  viewPoint: (x, y, z, out) => {
+    out.x = eye.x + x;
+    out.y = eye.y + y;
+    out.z = eye.z - z;
+  },
 };
 
 const walker = new Walker(script, {
@@ -165,9 +188,18 @@ console.log(`\nActorKillAll -> ${n.enemies} enemies, ${n.civilians} civilians`);
 const after = 900;
 const trail = new Map();   // at -> ["6/0@+1", ...]
 const gone = new Map();    // at -> the frame it left g_object_list
+const stood = new Map();   // at -> where the body was when the chain began
+const thrown = new Map();  // at -> how far it got from there
 function trace(frame) {
   for (const o of G.g_object_list) {
     if (!ActorIsEnemy(o.cls)) continue;
+    // How far the death chain actually carried the body. Class 0x30 state 9
+    // and class 0x31 state 2 throw it; state 6 does not, and the difference
+    // between "0.0 units" and "7.2 units" is the whole of what D2 changed.
+    if (!stood.has(o.at)) stood.set(o.at, [o.pos.x, o.pos.z]);
+    const [sx, sz] = stood.get(o.at);
+    const d = Math.hypot(o.pos.x - sx, o.pos.z - sz);
+    if (d > (thrown.get(o.at) ?? 0)) thrown.set(o.at, d);
     const seen = trail.get(o.at) ?? [];
     const now = `${o.state}/${o.sub}`;
     if (!seen.length || !seen[seen.length - 1].startsWith(`${now}@`)) {
@@ -196,7 +228,9 @@ console.log("\nthe death chain, state/sub per enemy:");
 for (const [at, seen] of trail) {
   const left = gone.has(at) ? `left the pool at +${gone.get(at)}f`
                             : "**still in the pool**";
-  console.log(`  0x${at.toString(16)}: ${seen.join(" -> ")}  (${left})`);
+  const moved = (thrown.get(at) ?? 0).toFixed(1);
+  console.log(`  0x${at.toString(16)}: ${seen.join(" -> ")}`
+    + `  (${left}, thrown ${moved} units)`);
 }
 
 console.log(`after ${after} frames:`, row());

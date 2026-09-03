@@ -42,11 +42,9 @@ function check(name: string, ok: boolean, detail = ""): void {
 /** A host that records nothing: the walker's own state is what is compared. */
 const mkHost = (): WalkerHost => ({
   enterRegion: () => undefined,
-  loadRegion: () => undefined,
   loadSlot: () => undefined,
   unloadSlot: () => undefined,
   startCamera: () => undefined,
-  releaseCamera: () => undefined,
   onFeed: () => undefined,
   onBranch: () => undefined,
   playSound: () => undefined,

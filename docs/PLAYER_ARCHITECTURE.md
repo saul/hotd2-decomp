@@ -53,15 +53,15 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 | `game/` | 15423 | 80 | engine | **the port.** No three.js, no DOM, no `Math.random` |
 | `render/` | 5761 | 23 | render | three.js. Observes engine state, owns nothing |
 | `app/` | 3232 | 17 | app | `main.ts` (1123), the loop, the adapters, the projection |
-| `script/` | 2883 | 22 | engine | `walker.ts` — the machine; `ops/`, `waits/`, `state/` |
+| `script/` | 3170 | 25 | engine | `walker.ts` — the machine; `ops/`, `waits/`, `state/` |
 | `ui/` | 2456 | 24 | ui | React: one projection in, one command union out |
 | `bundle/` | 1246 | 8 | engine | one module per exporter block |
 | `core/` | 724 | 8 | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
 | `hud/` | 349 | 1 | ui | the shutter and the caption, drawn |
 | `audio/` | 248 | 1 | ui | `bgm.ts` |
 
-32,322 lines. The four largest files are `script/walker.ts` (1525),
-`game/class10/index.ts` (1378), `app/main.ts` (1123) and `game/actor.ts` (842).
+32,322 lines. The four largest files are `game/class10/index.ts` (1468),
+`app/main.ts` (1387), `script/walker.ts` (1377) and `game/actor.ts` (1002).
 68 declared `[diverges]`.
 
 ### The three open ratchets
@@ -307,36 +307,64 @@ What it is for, in rough order of value:
   reproducible.
 * **Resume.** The deep link already carries a stage, a block and a seed; a
   snapshot carries the rest.
-## `script/`: four machines wearing one class
+## `script/`: the machine, and the state the script drives
 
-`walker.ts` is 1525 lines and the target is "the machine only, ~300". The
-opcodes are not the bulk — they are already out, in `ops/`, and it barely
-moved. What is in there is four separable things:
+`walker.ts` is 1377 lines. Four separable things used to be fused in it;
+**three are out**, and the fourth is deliberately staying.
 
-| Concern | Today | Target |
-|---|---|---|
-| **The VM** — program counter over block/step/op, the dispatch table, `executeOne`, `apply` | fused | `script/vm.ts`, ~250 lines |
-| **Resumption** — what makes the VM *stop*: wait policies, the enemy gates, the skip request, the firing gate | `SKIPPABLE_WAITS`, `ENEMY_GATE_WAITS`, `waitSatisfied`, `WAIT_NOTES` | `script/waits/*.ts`, one file per policy kind, registered the way `ops/` register |
-| **Script-driven state** — channel tweens, scene state, queued events, the camera action lifecycle | seven methods and the `CH_*` constants | `script/state/{channels,queued}.ts` — **two**, not four; see below |
-| **Seek** — `seek`, `seekInner`, `reaches`, `takeBranchToward` | inside the VM | `script/seek.ts`, a planner that drives the VM's public surface |
+| Concern | Where it is |
+|---|---|
+| **The VM** — program counter over block/step/op, the dispatch table, `executeOne`, `apply` | `walker.ts`. **Not split into a `vm.ts`**, and not going to be — see below |
+| **The opcodes** | `script/ops/*.ts`, one module per category, merged by `ops/index.ts` |
+| **Resumption** — what makes the VM *stop*: wait policies, the enemy gates, the skip request | `script/waits/*.ts`, one file per policy kind, registered the way `ops/` register |
+| **Script-driven state** — channel tweens, queued events, the shutter and its firing gate, the `queue_event` actions | `script/state/{channels,queued,shutter,camera_action}.ts` |
+| **Seek** — `seek`, `seekInner`, `reaches`, `takeBranchToward` | `script/seek.ts`, a planner that drives the VM's public surface |
 
-**Two state modules, not four.** `channels.ts` is arithmetic over eleven
-numbers with no host, no camera and no cursor, so it comes out whole.
-`queued.ts` is the action ring *and* the outstanding `cam_play`, which the
-plan had as two files and which are one mechanism: the engine runs the ring
-one action at a time, so a shot being replaced **is** the previous action
-completing. Splitting them is what would let the count and the flag be written
-down inconsistently, which is the bug that used to park a reload for ever.
+**No `vm.ts`.** The plan had one, at ~250 lines, and the extraction is not
+worth making: the machine is the part of `walker.ts` that was never the
+problem. What made the file long was everything registering *around* the
+machine, and the residue — addressing, `executeOne`, `advanceStepOrRoute`,
+`goToBlock`, the branch — is one cohesive thing that nothing else needs to
+name. Splitting it would move the file boundary without moving a decision.
+
+**Four state modules, and the reason each is one.** `channels.ts` is
+arithmetic over eleven numbers with no host, no camera and no cursor, so it
+comes out whole. `queued.ts` is the action ring *and* the outstanding
+`cam_play`, which the plan had as two files and which are one mechanism: the
+engine runs the ring one action at a time, so a shot being replaced **is** the
+previous action completing. Splitting *those* is what would let the count and
+the flag be written down inconsistently, which is the bug that used to park a
+reload for ever. `shutter.ts` is the nine-state machine `HudDrawShutterState`
+runs *and* the firing gate it writes, for the same reason: `DAT_009C8E00` is
+written on four of that function's paths and nowhere else in the game, so a
+gate outside the shutter is a second owner of one word — which is what the
+port already had once, when the slide counter existed twice and a seek reset
+one copy while restoring the other.
+
+`camera_action.ts` is the one that was still a hidden switch. `queue_event`
+(0x30) dispatches on a selector, and the port had that as ~140 lines of
+`if (op.action === "…")` inside `applyQueueEvent` — the exact shape `ops/`
+exists to remove, and where the ring and camera accounting bugs have
+historically lived, because "which branch retires the action" was a fact
+spread over the whole method instead of a line in each handler. It is a table
+now, and `applyQueueEvent` is a lookup and a call.
+
+**The tables refuse a duplicate.** `ops/`, `waits/` and `camera_action.ts` are
+assembled by `script/registry.ts`, which throws at module load if two modules
+claim one opcode or one action name. A spread has exactly one behaviour for a
+collision and it is silence, and a table that cannot report one cannot tell
+"this moved category" from "two modules implement it and disagree".
 
 `scene.ts` was not worth making. `enterSceneState` is one assignment and
 `retireSceneSequence` is two calls; a file for them would be indirection with
 nothing inside it.
 
-Neither module owns a save *slice*, either. The plan said each should, but the
+No module owns a save *slice*, either. The plan said each should, but the
 walker's `saveState` is a flat list of forty keys and `loadState` a loop over
-their names — a shape whose whole virtue is that it is one list. The modules
-own the **logic**; the fields stay accessors onto them, so forty call sites and
-the round-trip test go on speaking the same language.
+their names — a shape whose whole virtue is that it is one list, held against
+the save by `WALKER_RESTORED_KEYS`. The modules own the **logic**; the fields
+stay accessors onto them, so forty call sites and the round-trip test go on
+speaking the same language.
 
 **Seek is the one worth arguing about.** It is not part of the machine: it is a
 tool that drives the machine to a target, the way a debugger does. Keeping it
@@ -344,13 +372,15 @@ inside is why `fix(gameplay): a camera cue the seek landed past could never
 fire` was a walker bug rather than a planner bug. Outside, a seek defect cannot
 break playback.
 
-`WalkerHost` has **23 methods**, which is the same smell measured from the
+`WalkerHost` is **12 methods**, which is the same smell measured from the
 other side: the machine reaching into everything. It collapses to about six.
-Outward notifications (`onFeed`, `onBranch`) become events on the bus, because
-they are notifications and not host services. Script-driven state is mutated
-directly by the ops that own it. What is genuinely left is a small read-only
-port for the questions the script asks about the world — `aliveEnemies`,
-`aliveCivilians`, `cameraFree`.
+`loadRegion` and `releaseCamera` are gone — they were `() => {}` on every
+implementation, and a hook every host answers with nothing is not a seam.
+Outward notifications (`onFeed`, `onBranch`) become events on the bus next,
+because they are notifications and not host services. Script-driven state is
+mutated directly by the ops that own it. What is genuinely left is a small
+read-only port for the questions the script asks about the world —
+`aliveEnemies`, `aliveCivilians`, `cameraFree`.
 
 ## The UI layer
 
@@ -516,11 +546,14 @@ web/src/
   bundle/       one module per exporter block, re-exported by index.ts
   script/
     walker.ts     the machine, and the script's own state
+    registry.ts   table assembly that refuses a duplicate key
     ops/          the opcodes, one module per group
     waits/        one module per wait policy
-    state/        channels, scene, queued events, camera action
+    state/        channels, queued events, shutter, camera actions
     seek.ts       the planner
-    (`vm.ts` is not split out yet: the machine shares a file with the state)
+    (there is deliberately no `vm.ts`: the machine is the part that was
+     never the problem -- see "`script/`: the machine, and the state the
+     script drives")
   render/       three.js. Reads engine state, owns nothing.
     context.ts    RenderContext, which adds { scene, camera, paths }
     camera.ts     the shot, the take and the draw — three systems, in order
@@ -1034,11 +1067,13 @@ is a developer tool and not a CI gate.
 
 Two things, and they are different in kind.
 
-**`script/` decomposition.** `script/walker.ts` is 1525 lines holding four
-machines in one class — the instruction pump, the opcodes' state, the wait
-policies and the seek planner — and `WalkerHost` is 14 methods. The split is
-`vm.ts`, `waits/`, `state/`, `seek.ts`, with `WalkerHost` down to about six.
-"four machines wearing one class" above is the reasoning.
+**`WalkerHost`.** `ops/`, `waits/`, `state/` and `seek.ts` are all out of
+`walker.ts`, and there is deliberately no `vm.ts`; what is left of that plan is
+the port itself, at 12 methods against a target of about six. `onFeed` and
+`onBranch` become events on the bus — they are notifications, not host
+services — and the three streaming calls belong to the ops that make them.
+"`script/`: the machine, and the state the script drives" above is the
+reasoning.
 
 **The three ratchets.** Steps 21 and 23 below close all three. Closing
 `render-drives-the-port` and `no-actor-writes-in-render` means the port owning

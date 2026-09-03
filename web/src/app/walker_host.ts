@@ -20,8 +20,10 @@
  * * **Output devices** — `playSound`, `setShutter`, `showMessage`,
  *   `endDialogue`. Audio and the screen-space layer, reached directly.
  *
- * `loadRegion` and `releaseCamera` do nothing at all, and have not since the
- * streaming moved into `enterRegion`.
+ * `loadRegion` and `releaseCamera` are gone. They did nothing at all on every
+ * implementation, and had not since the streaming moved into `enterRegion` --
+ * a hook every host answers with `() => {}` is not a seam, it is two more
+ * lines each test stub had to write to satisfy the type.
  */
 import { Walker, type WalkerHost } from "../script/walker";
 import type { ScriptJson } from "../bundle";
@@ -32,11 +34,9 @@ import type { Player } from "./main";
 export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
   return {
     enterRegion: (r) => p.scene3d?.enterRegion(r),
-    loadRegion: () => {},
     loadSlot: (s) => p.scene3d?.loadSlot(s),
     unloadSlot: (s) => p.scene3d?.unloadSlot(s),
     startCamera: (c) => p.onCamera(c),
-    releaseCamera: () => {},
     onFeed: (e) => p.onFeed(e),
     // Nothing to do: the branch bar is a projection now, so the next frame
     // draws it. The callback stays because the walker's contract has one.

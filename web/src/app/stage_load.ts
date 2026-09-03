@@ -180,9 +180,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   // step with the sixteen listeners by hand, and three of them were missing.
   p.applyAllToggles();
 
-  p.walker = new Walker(
-    bundle.script, makeWalkerHost(p, bundle.script),
-    { seed: p.state.seed ?? 1 });
+  // No seed: the walker draws no random numbers. `?seed=` reseeds the world's
+  // generator, `p.rng`, a few lines above -- which is the only random source
+  // in the player.
+  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script));
   p.script.walker = p.walker;
 
   // The dialogue table for the stage. The walker carries the group; the words

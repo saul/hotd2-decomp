@@ -17,15 +17,14 @@ export const OPS: Record<number, OpImpl> = {
       },
     },
     0x28: {                                     // region_load
-      // Decoded and reported, but the host hook is deliberately empty: the
+      // Decoded and reported, and there is deliberately nothing to call: the
       // bundle holds every region's geometry from the start, so there is
-      // nothing to preload. A `run` that only writes a feed note is still
-      // `shown`.
+      // nothing to preload. It used to call `host.loadRegion`, which was a
+      // no-op on every implementation and had been since the streaming moved
+      // into `enterRegion` -- a hook every host answers with `() => {}` is not
+      // a seam. A `run` that only writes a feed note is still `shown`.
       status: "shown",
-      run: (w, op) => {
-        if (op.region !== undefined) w.host.loadRegion(op.region);
-        return "preload";
-      },
+      run: () => "preload",
     },
     0x50: {                                     // asset_load_slot
       status: "done",

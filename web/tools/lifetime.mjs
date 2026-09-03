@@ -66,8 +66,8 @@ G.g_player_lives = [2, 2];
 
 const NOOP = () => undefined;
 const walker = new Walker(script, {
-  enterRegion: NOOP, loadRegion: NOOP, loadSlot: NOOP, unloadSlot: NOOP,
-  startCamera: NOOP, releaseCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
+  enterRegion: NOOP, loadSlot: NOOP, unloadSlot: NOOP,
+  startCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
   playSound: NOOP, aliveEnemies: () => liveEnemies(), aliveCivilians: () => null,
   cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
   endDialogue: NOOP,

@@ -66,8 +66,8 @@ for (let stage = 1; stage <= 6; stage++) {
   }
   const NOOP = () => undefined;
   const mkWalker = () => new Walker(script, {
-    enterRegion: NOOP, loadRegion: NOOP, loadSlot: NOOP, unloadSlot: NOOP,
-    startCamera: NOOP, releaseCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
+    enterRegion: NOOP, loadSlot: NOOP, unloadSlot: NOOP,
+    startCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
     playSound: NOOP, aliveEnemies: () => null, aliveCivilians: () => null,
     cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
     endDialogue: NOOP,

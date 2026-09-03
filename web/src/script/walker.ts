@@ -25,7 +25,6 @@
  * block on, and `WaitPolicy` says what the walker did instead.
  */
 
-import { Rng } from "../core/rng";
 import { G } from "../game/globals";
 import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
@@ -36,6 +35,8 @@ import {
   ChannelBlock, type ChannelTween, type FogState, type LightState,
 } from "./state/channels";
 import { ActionRing } from "./state/queued";
+import { Shutter } from "./state/shutter";
+import { ACTIONS, UNMODELLED } from "./state/camera_action";
 
 export type { ChannelTween, FogState, LightState };
 export {
@@ -72,9 +73,6 @@ export interface CamCommand {
   pathIndex: number | null;
   done: boolean;
 }
-
-/** The shutter's slide, in frames. `0x28` in `HudDrawShutterState`. */
-const SHUTTER_FRAMES = 40;
 
 export type WaitPolicy =
   | { kind: "frames"; framesLeft: number }
@@ -118,22 +116,18 @@ export interface WalkerOptions {
   branchCountdown: number;
   /** Clear spawn markers when the block changes. */
   clearSpawnsOnBlock: boolean;
-  seed: number;
 }
 
 export const DEFAULT_OPTIONS: WalkerOptions = {
   branchCountdown: 1.5,
   clearSpawnsOnBlock: true,
-  seed: 1,
 };
 
 export interface WalkerHost {
   enterRegion(r: number): void;
-  loadRegion(r: number): void;
   loadSlot(slot: number): void;
   unloadSlot(slot: number): void;
   startCamera(cmd: CamCommand): void;
-  releaseCamera(): void;
   onFeed(entry: FeedEntry): void;
   onBranch(choice: BranchChoice | null): void;
   /** Any sound id, dispatched by namespace as `PlaySoundId` does. */
@@ -169,7 +163,6 @@ export interface WalkerHost {
    * swung back onto the path. Without it every room hands over abruptly.
    */
   cameraFree(): boolean | null;
-  /** evt `0x1F`: the HUD shutter state. */
   /**
    * evt `0x2D`: start a dialogue group's voice, and say how long it runs.
    *
@@ -258,11 +251,11 @@ export const WALKER_RESTORED_KEYS = [
 /**
  * Saved keys `loadState` handles by hand rather than by copy, each for a
  * reason stated where it happens: `wait` must be cleared when absent rather
- * than left standing, `flags` and `loadedSlots` are `Set`s and a snapshot is
- * JSON, and `rng` is a field of another object.
+ * than left standing, and `flags` and `loadedSlots` are `Set`s where a
+ * snapshot is JSON.
  */
 export const WALKER_RESTORED_BY_HAND = [
-  "wait", "flags", "loadedSlots", "rng",
+  "wait", "flags", "loadedSlots",
 ] as const;
 
 export class Walker {
@@ -309,38 +302,24 @@ export class Walker {
   backdropPreset = -1;
   backdropMode = 0;
   /**
-   * `g_bHudShutterState` — `0x009CA0F4`. evt 0x1F, states 0..8.
+   * The HUD shutter and its firing gate. See `script/state/shutter.ts`.
    *
-   * The state is the script's; the *drawing* of it is `hud/hud.ts`, which is
-   * a `System` and reads these three fields rather than keeping its own copy.
-   * It kept its own copy until step 19, and a snapshot load put the state back
-   * without the slide phase behind it — so a save taken mid-close came back as
-   * a shutter frozen half shut.
+   * The four fields below are accessors onto it rather than storage, on the
+   * same reasoning as `lightBlock`: the save slice, `hud/hud.ts` and the HUD
+   * strip already speak in `shutterState`, `shutterPrev`, `shutterCounter` and
+   * `firingGate`, and renaming them all would be churn the round-trip test
+   * could not tell from a mistake.
    */
-  shutterState = 2;
-  /**
-   * `g_bHudShutterPrev` — `0x009C8E9C`. What state 7 restores.
-   *
-   * `HudDrawShutterState` (`FUN_00413970`) also compares it against the state
-   * to notice a change and seed the counter, and writes it on every path
-   * except state 8 — so a blackout does not become the state a later 7
-   * restores.
-   */
-  shutterPrev = 2;
-  /**
-   * The shutter's slide counter: 0 fully closed, 40 fully open.
-   *
-   * **Not a global.** It is a field on the draw task, at `+0x50`, which is why
-   * `globals.tsv` names the two states and not this. State 1 counts it up to
-   * 0x28 and hands over to 2; state 3 counts it down to 0, draws the closed
-   * bars and hands over to 4 — dropping the firing gate on the way.
-   *
-   * That last clause is why this replaced `gateCloseLeft`. The exe has **one**
-   * counter doing both jobs; the port had two, one of them in the snapshot and
-   * one of them not, and they could disagree — a seek reset the shutter's copy
-   * while restoring the gate's.
-   */
-  shutterCounter = 0;
+  readonly shutter = new Shutter();
+
+  get shutterState(): number { return this.shutter.state; }
+  set shutterState(v: number) { this.shutter.state = v; }
+  get shutterPrev(): number { return this.shutter.prev; }
+  set shutterPrev(v: number) { this.shutter.prev = v; }
+  get shutterCounter(): number { return this.shutter.counter; }
+  set shutterCounter(v: number) { this.shutter.counter = v; }
+  get firingGate(): boolean { return this.shutter.firingGate; }
+  set firingGate(v: boolean) { this.shutter.firingGate = v; }
   /**
    * evt 0x2D: the subtitle task's own fields.
    *
@@ -354,14 +333,6 @@ export class Walker {
    */
   captionGroup = -1;
   captionFrames = 0;
-  /**
-   * `DAT_009C8E00` -- the firing gate, set by the shutter machine
-   * (`FUN_00413970`): 1 in states 0, 1 and 6, and 0 in state 5 and when a
-   * state-3 close completes. It is not simply "the shutter is open": states 0
-   * and 5 both draw a closed shutter and set it to 1 and 0 respectively, so a
-   * boss intro can be letterboxed and still let you shoot.
-   */
-  firingGate = false;
   /**
    * `DAT_009A2D7C` -- set by `set_skippable_region` (0x2C). Non-zero means the
    * script has opened a region the player is allowed to skip out of.
@@ -566,7 +537,6 @@ export class Walker {
   /** The most recent `se_play` operand, for the HUD. */
   lastSound: number | null = null;
 
-  private rng: Rng;
   private seq = 0;
   private readonly liveBlocks: BlockJson[];
 
@@ -575,7 +545,6 @@ export class Walker {
     this.script = script;
     this.host = host;
     this.options = { ...DEFAULT_OPTIONS, ...options };
-    this.rng = new Rng(this.options.seed);
     this.liveBlocks = script.blocks.filter((b) => !b.hole);
     this.block = script.entry_block;
     // The step cursor is `G.g_evt_step_index`, so it outlives the object that
@@ -612,8 +581,7 @@ export class Walker {
 
   // -- control -----------------------------------------------------------
 
-  reset(seed = this.options.seed): void {
-    this.rng.reseed(seed);
+  reset(): void {
     this.block = this.script.entry_block;
     // FUN_0045EBC0 picks the first step by game mode: 1 for normal Arcade
     // play, 5 for Original Mode on scene 0, 0 only on the continue and
@@ -631,13 +599,9 @@ export class Walker {
     this.forcePathAdvance = false;
     this.backdropPreset = -1;
     this.backdropMode = 0;
-    this.shutterState = this.shutterPrev = 2;
-    this.shutterCounter = 0;
+    this.shutter.reset();
     this.captionGroup = -1;
     this.captionFrames = 0;
-    // BSS, so the gate starts down: FUN_0045EBC0 does not touch DAT_009C8E00,
-    // and nothing raises it until the shutter machine's first state 0, 1 or 6.
-    this.firingGate = false;
     this.skippable = false;
     this.skipRequested = false;
     this.rain = false;
@@ -662,7 +626,6 @@ export class Walker {
     this.lastSound = null;
     this.seq = 0;
     this.host.onBranch(null);
-    this.host.releaseCamera();
   }
 
   /**
@@ -705,7 +668,6 @@ export class Walker {
       lastSound: this.lastSound, seq: this.seq,
       // Sets are not JSON; the snapshot is a file the user can keep.
       flags: [...this.flags], loadedSlots: [...this.loadedSlots],
-      rng: this.rng.state,
     };
   }
 
@@ -736,7 +698,6 @@ export class Walker {
     for (const n of (s["loadedSlots"] as unknown as number[]) ?? []) {
       this.loadedSlots.add(n);
     }
-    this.rng.state = ((s["rng"] as unknown as number) ?? 1) >>> 0;
     this.branch = null;
     this.host.onBranch(null);
     // The loaded slots and the region are state; telling the host about them
@@ -834,7 +795,7 @@ export class Walker {
     // Stepping advances instructions, not frames, so a shutter close that is
     // still counting down would never finish and would hold the firing gate up
     // for the rest of the session.
-    if (this.shutterState === 3) this.settleShutter();
+    if (this.shutterState === 3) this.shutter.settle();
     return this.executeOne(false);
   }
 
@@ -889,7 +850,7 @@ export class Walker {
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.lightBlock.step(dt * fps);
 
-    this.tickShutter(dt * fps);
+    this.shutter.step(dt * fps);
     // The caption is a countdown in script frames, not in wall time: stepping
     // onto a `play_dialogue` and having the line expire two seconds later
     // while nothing is playing makes it unreadable.
@@ -922,66 +883,9 @@ export class Walker {
     }
   }
 
-  /**
-   * The firing gate, exactly as `FUN_00413970` drives it.
-   *
-   * States 0, 1 and 6 raise it; state 5 drops it at once; state 3 drops it
-   * only when the 40-frame close completes, which is why the countdown is
-   * kept rather than the gate simply following the state.
-   */
-  applyFiringGate(state: number): void {
-    if (state === 0 || state === 1 || state === 6) this.firingGate = true;
-    else if (state === 5) this.firingGate = false;
-  }
-
-  /**
-   * evt `0x1F`, the whole transition — `HudDrawShutterState`, `FUN_00413970`.
-   *
-   * The seeding is the exe's: the draw routine compares the state against
-   * `g_bHudShutterPrev` and, on a change, sets the counter to 0x28 entering
-   * state 3 and 0 entering state 1. State 7 assigns the previous state back
-   * rather than being a state of its own.
-   */
+  /** evt `0x1F`. The whole transition is `script/state/shutter.ts`. */
   setShutter(state: number): void {
-    if (state !== this.shutterState) {
-      if (state === 3) this.shutterCounter = SHUTTER_FRAMES;
-      else if (state === 1) this.shutterCounter = 0;
-    }
-    if (state === 7) {
-      this.shutterState = this.shutterPrev;
-    } else {
-      this.shutterPrev = this.shutterState;
-      this.shutterState = state;
-    }
-    this.applyFiringGate(this.shutterState);
-  }
-
-  /**
-   * The slide, on the script's own clock.
-   *
-   * State 1 counts up and hands over to 2; state 3 counts down and hands over
-   * to 4, dropping the firing gate as it goes. Everything else holds. The
-   * counter is one field doing both jobs, exactly as it is in the exe.
-   */
-  private tickShutter(frames: number): void {
-    if (frames <= 0) return;
-    if (this.shutterState === 1) {
-      this.shutterCounter = Math.min(SHUTTER_FRAMES,
-                                     this.shutterCounter + frames);
-      if (this.shutterCounter >= SHUTTER_FRAMES) {
-        this.shutterPrev = this.shutterState = 2;
-      }
-    } else if (this.shutterState === 3) {
-      this.shutterCounter = Math.max(0, this.shutterCounter - frames);
-      if (this.shutterCounter <= 0) this.settleShutter();
-    }
-  }
-
-  /** The end of a state-3 close: bars shut, gate down, state 4. */
-  private settleShutter(): void {
-    this.shutterCounter = 0;
-    this.shutterPrev = this.shutterState = 4;
-    this.firingGate = false;
+    this.shutter.set(state);
   }
 
   /**
@@ -1243,148 +1147,22 @@ export class Walker {
     this.ring.settle(this.cam);
   }
 
+  /**
+   * `queue_event` (0x30): queue one action and run it.
+   *
+   * The action is a table lookup — `script/state/camera_action.ts` — and not a
+   * chain of `if (op.action === "...")` here. It was 140 lines of that, which
+   * is the shape `ops/` exists to remove: which branch retires the ring was a
+   * fact spread over the whole method, and the ring and camera accounting bugs
+   * lived in exactly that spread.
+   *
+   * `EvtOpQueueEvent30` adds one to `g_queued_events_pending` for every action
+   * it queues; each handler says for itself whether it takes that one back.
+   */
   applyQueueEvent(op: OpJson): string | undefined {
-    // `EvtOpQueueEvent30` adds one for every action it queues. The handler
-    // takes it back when it completes; the branches below say which of them
-    // complete immediately and which stay outstanding.
     this.ring.queued();
-
-    if (op.action === "cam_play") {
-      const slot = op.slot ?? -1;
-      const start = op.start ?? 0;
-      const end = op.end ?? 0;
-
-      // `EvtActionCamPlay40` (`FUN_00403360`) branches in this order, and the
-      // order is transcribed rather than rearranged:
-      //
-      //     if (start == end)  CamEvalStaticPose();      // a held pose
-      //     else if (flags & 2) FUN_00403490();          // stash, do not play
-      //     else                CamStartPathPlayback();
-      //
-      // The static test comes first, so a `flags & 2` play whose start equals
-      // its end would hold rather than stash. No shipped script has one — 0 of
-      // the 392 deferred plays — but the port used to test the flag first, and
-      // a transcription that only happens to agree with the data is not one.
-      if (start !== end && ((op.flags ?? 0) & 2) !== 0) {
-        // `FUN_00403490`, the stash. It is not a plain copy of the operands:
-        //
-        //     g_stashed_path_frame = operands[0];
-        //     if (g_stashed_path_frame == -1)
-        //         g_stashed_path_frame = g_cam_path_frame + 1;
-        //
-        // so **`start == -1` means resume here too**, from the frame the
-        // camera is on plus one. The port stashed the literal -1, and the
-        // `finish_sequence 6|7` that follows then set the camera to frame -1
-        // — off the front of the curve — and replayed the whole path from
-        // there. Four plays in the game say -1 and all four are deferred:
-        // stage 1 blocks 3 and 8, in both the Arcade and Original bundles.
-        // Block 8 step 4 op 23 asks to resume at frame 682 of a 685-frame
-        // shot and was replaying 686 frames instead.
-        //
-        // The engine's rail hook increments before it evaluates, so its first
-        // drawn frame is this one plus another; the port draws this one. One
-        // frame, on a tail that is usually three. [diverges]
-        const at = op.resume ? (this.cam ? this.cam.frame + 1 : 0) : start;
-        this.stashedCam = { slot, start: at, end };
-        // `FUN_00403490` stashes and returns; the action is done.
-        this.ring.retire();
-        return `stashed ${at}..${end} for a later scene state 6/7`;
-      }
-
-      // `CamStartPathPlayback`'s own `start == -1`: resume from the current
-      // frame, with no `+ 1` — `CamAdvancePathFrame` increments after it
-      // evaluates, where the rail hook increments before. No shipped script
-      // takes this path (0 of the 1110 non-deferred plays name -1), but it is
-      // the other half of the opcode.
-      const from = op.resume && this.cam ? this.cam.frame : start;
-      this.ring.supersede();
-      this.cam = {
-        slot,
-        startFrame: from,
-        endFrame: end,
-        frame: from,
-        flags: op.flags ?? 0,
-        isStatic: !!op.static,
-        deferred: false,
-        file: op.cam?.file ?? null,
-        pathIndex: op.cam?.path ?? null,
-        done: !!op.static,
-      };
-      this.host.startCamera(this.cam);
-      if (this.cam.isStatic) {
-        // `CamEvalStaticPose` writes the pose and retires; nothing is playing.
-        this.ring.retire();
-        return "static pose";
-      }
-      // `CamAdvancePathFrame` stays installed and retires on the frame the
-      // path reaches its end -- `settleCameraAction` is where that lands.
-      this.ring.claimCamera();
-      return undefined;
-    }
-
-    if (op.action === "scene_state") {
-      // Selector 0x11, `EvtActionSceneState11` -- the current major with the
-      // operand as minor. Eight sites in the game, operands 1 and 3, both
-      // inside row 1's live set. It retires like any other handler.
-      this.enterSceneState(this.sceneState.major, op.args?.[0] ?? 0);
-      this.ring.retire();
-      return `scene state ${this.sceneState.major}/${this.sceneState.minor}`;
-    }
-
-    if (op.action === "store_six" && op.branch_preview) {
-      // FUN_00403DB0 reads these back indexed by branch_choice, so they are
-      // the shot the arcade shows for each route the branch can take.
-      this.branchPreview = op.branch_preview;
-      this.ring.retire();
-      return `${op.branch_preview.length} branch preview shots`;
-    }
-
-    if (op.action === "finish_sequence") {
-      // `EvtActionFinishSequence21` is the one handler that does NOT retire
-      // itself -- it installs a camera driver and pins the ring's dequeue mode
-      // at "still running". `goto_scene_state` is what takes it back.
-      this.enterSceneState(2, op.args?.[0] ?? 0);
-      // Selector 0x21 is EvtEnterSceneState(2, minor) -- it picks a *camera
-      // routine*, it does not hand control back from a path. Row 2's live
-      // cells are 4, 6 and 7, and those are the only operands that occur.
-      const minor = op.args?.[0];
-      if (minor === 6 || minor === 7) {
-        const st = this.stashedCam;
-        if (!st) return "state 6/7 with nothing stashed";
-        // The stashed play takes the camera over; whatever was on it is done.
-        this.ring.supersede();
-        this.cam = {
-          slot: st.slot,
-          startFrame: st.start,
-          endFrame: st.end,
-          frame: st.start,
-          flags: 0,
-          // State 7 uses `<` rather than `<=` on the end frame; one frame.
-          isStatic: st.start === st.end,
-          deferred: true,
-          file: op.cam?.file ?? null,
-          pathIndex: op.cam?.path ?? null,
-          done: st.start === st.end,
-        };
-        this.stashedCam = null;
-        this.host.startCamera(this.cam);
-        return `plays the stashed range ${st.start}..${st.end}`;
-      }
-      if (minor === 4 && this.cam) {
-        // CameraSnapToPathEye: hold where the path is now.
-        this.cam.done = true;
-        this.cam.isStatic = true;
-        this.host.startCamera(this.cam);
-        return "snap to path eye";
-      }
-      return op.camera_state ? `camera state ${op.camera_state}` : undefined;
-    }
-    // `set_player_flag` (0x10), `set_update_routine` (0x12), `set_global`
-    // (0x14), `set_flag` (0x15), `hold_camera_preset` (0x20) and a `store_six`
-    // with no preview: none is modelled here, and every one of them ends on
-    // the same `pending--`, so the ring must not be left owing work for them.
-    this.ring.retire();
-    return undefined;
+    const action = (op.action ? ACTIONS[op.action] : undefined) ?? UNMODELLED;
+    return action(this, op);
   }
 
   /**

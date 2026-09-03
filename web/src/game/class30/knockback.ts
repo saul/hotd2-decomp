@@ -38,7 +38,9 @@
  * quarter of the impact speed until the body settles or 0x78 frames pass.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import {
+  ActorFlag, ZombieFlag2, type Actor, type ZombieActor,
+} from "../actor";
 import { ActorArcBeginToAtSpeed, ARC_GRAVITY_HALF } from "../class31/arc";
 import { QueryGroundHeightAt } from "../coli";
 import { G } from "../globals";
@@ -207,7 +209,7 @@ export function ActorArcVelocityY(obj: Actor, step: number): boolean {
  * global at 0x004553D4 and 0x00455411, so dropping it would silently change
  * which surface the bounce is decided on.
  */
-export function ZombieStateDeathKnockbackArc(obj: Actor, dt: number, rng: Rng,
+export function ZombieStateDeathKnockbackArc(obj: ZombieActor, dt: number, rng: Rng,
                                              host: GameHost): void {
   const frames = dt * GAME_HZ;
 

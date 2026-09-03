@@ -21,7 +21,7 @@
  *   swung, because the countdown is gated on `obj+0x136C & 0x40000` as well.
  */
 import type { Rng } from "../../core/rng";
-import { ZombieFlag2, type Actor } from "../actor";
+import { ZombieFlag2, type ZombieActor } from "../actor";
 import { G } from "../globals";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { TryClaimAttackSlot } from "../combat/permits";
@@ -36,7 +36,7 @@ import { MotionFade, MotionRow, QUEUE_CAP, ZombieState } from "./states";
 /** `FUN_00409E80`'s turn rate here is a literal 0x40 BAMS. */
 const HOLD_TURN_RATE = 0x40;
 
-export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3, rng: Rng,
+export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
                                        host: GameHost): void {
   // Called for its side effect: it refreshes `obj+0x1358`, the queue depth
   // this actor is allowed to sit at.
@@ -94,11 +94,11 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3, rng: Rng,
   // claim gate below tests `obj+0x133C` again, and the idle and the turn at
   // the bottom of this state run on every frame of the wait. An early return
   // here is why a cooling zombie played no idle and never turned to face you.
-  if (!obj.hasCooldown) {
+  if (!obj.zom.hasCooldown) {
     obj.cooldown = 0;
   } else if (obj.flags2 & ZombieFlag2.StrikeAnchor) {
     obj.cooldown -= 1;
-    if (obj.cooldown < 1) obj.hasCooldown = false;
+    if (obj.cooldown < 1) obj.zom.hasCooldown = false;
   }
 
   if (ZombieAttackRefusal(obj) === null && TryClaimAttackSlot(obj, host)) {
@@ -146,7 +146,7 @@ export function ZombieStateHoldAtRange(obj: Actor, eye: Vec3, rng: Rng,
  * them. The last two are what `TryClaimAttackSlot` (`FUN_00455DE0`) refuses
  * on, read rather than called so that asking does not take the permit.
  */
-export function ZombieAttackRefusal(obj: Actor): string | null {
+export function ZombieAttackRefusal(obj: ZombieActor): string | null {
   // `00455815 f6c404` / `00455818 7535` — the first thing the exe asks, and it
   // jumps past the whole claim. A spawn still playing its authored entry clip
   // does not queue for a permit at all.

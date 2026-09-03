@@ -27,7 +27,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { CharacterTypeOf } from "../tables";
@@ -42,7 +42,7 @@ import { STAND_THROW_CONDITION } from "./stand_throw";
  * permit the weapon inherited — so in two-player each is thrown at rather than
  * both at the midpoint between them.
  */
-export function ZombieThrownWeaponAimAtCamera(obj: Actor, host: GameHost,
+export function ZombieThrownWeaponAimAtCamera(obj: ZombieActor, host: GameHost,
                                               eye: Vec3, out: Vec3): void {
   const k = CharacterTypeOf(obj)?.zombie_throw;
   host.aimPoint(k?.aim_ahead ?? 4, out);
@@ -72,7 +72,7 @@ export function ZombieThrownWeaponAimAtCamera(obj: Actor, host: GameHost,
  * empty fist. The projectile inherits the thrower's attack permit and the
  * thrower's is cleared, so the weapon holds the slot until it lands.
  */
-export function SpawnZombieThrownWeapon(obj: Actor, bone: number, eye: Vec3,
+export function SpawnZombieThrownWeapon(obj: ZombieActor, bone: number, eye: Vec3,
                                         host: GameHost, rng: Rng,
                                         events?: Events): void {
   const kit = CharacterTypeOf(obj)?.zombie_throw;

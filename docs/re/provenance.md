@@ -1,6 +1,61 @@
 # Build provenance
 
-Artefacts left in the shipped game that reveal how it was built.
+Artefacts left in the shipped game that reveal how it was built, and what this
+project's own copy of it is.
+
+## What `manifest.csv` records
+
+`manifest.csv` is the fixed input set every later tool is validated against:
+SHA-256 and size for all 2,048 files of one HOTD2 (PC) installation. Check an
+install against it with
+
+```sh
+python3 tools/baseline.py --game-dir ~/"THE HOUSE OF THE DEAD 2" --verify
+```
+
+and regenerate it by dropping `--verify`. **Regenerating is a claim, so it
+belongs here with a reason** — that is the whole point of the section below.
+
+### The install is disc-restored, as of 2026-09-03
+
+Five files in the local tree had rotted: scattered bytes smashed to `0xFF` or
+`0xEE` on the media, all in files the project reads heavily. They were restored
+from the retail disc (`hotd2.iso`) on 2026-08-31, and the manifest was **not**
+regenerated at the time — so for three days the recorded baseline pinned the
+damaged copies while the tree held the good ones. `--verify` and this section
+exist because of that gap.
+
+| Restored file | SHA-256 now |
+|---|---|
+| `cam/cp_demo.bin` | `62e0ddaa2c4755e3…` |
+| `cam/cp_st1.bin` | `264bbd98d4957982…` |
+| `cam/cp_title.bin` | `832071403ca65897…` |
+| `cam/op_st1.bin` | `f49b2a8155713ab8…` |
+| `evt/st1evtbl.bin` | `8f78e4fd2a79c8e4…` |
+
+`evt/st1evtbl.bin` was restored from `evt/st1evtbl - Copy.bin`, a stray
+Explorer-made duplicate that sat beside it and had not rotted; the manifest
+recorded both, and the duplicate is gone now, which is why a manifest from
+before this date reports it missing.
+
+**`Hod2.exe` differs from the disc by one byte** — `JZ` → `JNZ` at
+`0x004A6857`, a deliberate no-CD patch — and that is the copy every address in
+`ghidra/annotations` and every table in `hod2lib/exetab.py` was read from. The
+manifest records the patched executable on purpose. `ExeTables` refuses any
+other, because ~70 hard virtual addresses read out of a different build produce
+plausible garbage rather than an error.
+
+`pol/tv2.bin` also differs from the disc by 14 bytes and is **[open]** — it has
+not been established whether that is rot or a real difference, and nothing the
+project reads depends on it yet.
+
+The full comparison — method, all seven differences, and the ~400 lines of
+parser it invalidated — is in
+[`session-log.md`](session-log.md), "compare the installed game tree against
+the retail disc". The short version is the sentence that cost the most:
+*"both retail copies checked are byte-identical, so this is how the game
+ships"*. Two copies of the same **installed** tree are not two retail copies,
+and nothing had ever been compared against the disc.
 
 ## `pol/files.txt`
 

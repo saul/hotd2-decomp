@@ -86,6 +86,63 @@ def write_manifest(game_dir: Path, out: Path) -> int:
     return len(rows)
 
 
+def verify_manifest(game_dir: Path, manifest: Path) -> int:
+    """Check an installation against a recorded manifest. Returns an exit code.
+
+    **Nothing checked the manifest against an install until this existed, and
+    it cost the project a fortnight.** ``manifest.csv`` was generated on
+    2026-08-29 and pinned four ``cam/`` files and ``evt/st1evtbl.bin`` that had
+    rotted on local media -- scattered bytes smashed to ``0xFF``. Two days of
+    work went into a restoration engine, a ``Curve.damage`` model and a
+    documented "NaN padding convention" to explain the damage, and
+    ``docs/re/anomalies.md`` grew a section describing it as how the game
+    ships. The load-bearing sentence was "both retail copies checked are
+    byte-identical" -- two copies of the same *installed* tree, never compared
+    against the disc. All of it was deleted when they finally were.
+
+    So this reports three kinds of difference and does not editorialise about
+    which is which: a hash that moved may be rot, may be a patch you applied on
+    purpose, may be a different release. It is for the reader to say. The one
+    thing it will not do is let an install drift from its record in silence.
+    """
+    if not manifest.is_file():
+        print(f"error: no manifest at {manifest}", file=sys.stderr)
+        return 2
+    recorded = {r["path"]: r for r in csv.DictReader(manifest.open())}
+    on_disk = {p.relative_to(game_dir).as_posix()
+               for p in game_dir.rglob("*") if p.is_file()}
+
+    changed: list[tuple[str, int, int]] = []
+    for rel, row in sorted(recorded.items()):
+        f = game_dir / rel
+        if not f.is_file():
+            continue
+        if sha256(f) != row["sha256"]:
+            changed.append((rel, int(row["size"]), f.stat().st_size))
+    missing = sorted(set(recorded) - on_disk)
+    extra = sorted(on_disk - set(recorded))
+
+    for rel, was, now in changed:
+        delta = "same size" if was == now else f"{was} -> {now} bytes"
+        print(f"  CHANGED  {rel}  ({delta})")
+    for rel in missing:
+        print(f"  MISSING  {rel}")
+    for rel in extra:
+        print(f"  EXTRA    {rel}")
+
+    n = len(changed) + len(missing) + len(extra)
+    print(f"\n{len(recorded)} recorded, {len(changed)} changed, "
+          f"{len(missing)} missing, {len(extra)} not in the manifest")
+    if n == 0:
+        print("install matches the manifest")
+        return 0
+    print("\nIf these differences are intended -- a restore from the disc, a "
+          "patch you applied --\nregenerate the manifest and say why in "
+          "docs/re/provenance.md. If they are not,\nyou have found bit-rot, "
+          "and every reading taken from those files is suspect.")
+    return 1
+
+
 # --------------------------------------------------------------------------
 # Container classification
 # --------------------------------------------------------------------------
@@ -317,6 +374,9 @@ def main() -> int:
                     help="where to write the CSVs (default: repo root)")
     ap.add_argument("--skip-manifest", action="store_true",
                     help="skip SHA-256 hashing (much faster)")
+    ap.add_argument("--verify", action="store_true",
+                    help="check the install against manifest.csv and exit, "
+                         "writing nothing")
     args = ap.parse_args()
 
     game_dir: Path = args.game_dir.expanduser().resolve()
@@ -328,6 +388,9 @@ def main() -> int:
     if missing:
         print(f"warning: missing expected directories: {', '.join(missing)}",
               file=sys.stderr)
+
+    if args.verify:
+        return verify_manifest(game_dir, args.out_dir / "manifest.csv")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 

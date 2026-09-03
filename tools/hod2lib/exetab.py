@@ -32,6 +32,7 @@ array, where each entry covers a 2x2 pixel block).
 
 from __future__ import annotations
 
+import hashlib
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,14 +70,51 @@ class TexEntry:
         return self.layout in (LAYOUT_TWIDDLED, LAYOUT_TWIDDLED_RECT)
 
 
+#: SHA-256 of the `Hod2.exe` every address in this file was read from, and the
+#: one `manifest.csv` records. See `docs/re/provenance.md`.
+#:
+#: It is the retail 2001-05-09 build with one byte changed -- `JZ` -> `JNZ` at
+#: `0x004A6857`, a no-CD patch -- because that is the copy installed here and
+#: therefore the copy `ghidra/annotations` was built against.
+#:
+#: **The gate exists because the failure mode is silence.** This module reads
+#: some seventy hard virtual addresses; against a different build every one of
+#: them still resolves to *something*, and what comes back is plausible
+#: garbage -- a texture bank with the wrong count, a table that decodes into
+#: nonsense -- rather than an error. Everything downstream then inherits it.
+HOD2_EXE_SHA256 = "1d5e056711509c700724ad2b35de1938d7069c68423e3b4dd16ec19d56125524"
+HOD2_EXE_SIZE = 1699840
+
+
+class ExeTablesError(RuntimeError):
+    """The executable handed over is not the one these addresses describe."""
+
+
 class ExeTables:
     """Reads the compiled-in texture descriptor tables out of Hod2.exe."""
 
-    def __init__(self, exe_path: str | Path):
+    def __init__(self, exe_path: str | Path, *, allow_any_build: bool = False):
         self.data = Path(exe_path).read_bytes()
+        if not allow_any_build:
+            self._check_build(Path(exe_path))
         self._sections = self._parse_sections()
         self._cache: dict[str, list[TexEntry]] = {}
         self.banks = self._parse_banks()
+
+    def _check_build(self, path: Path) -> None:
+        got = hashlib.sha256(self.data).hexdigest()
+        if got == HOD2_EXE_SHA256:
+            return
+        raise ExeTablesError(
+            f"{path} is not the build these tables were read from.\n"
+            f"  expected sha256 {HOD2_EXE_SHA256} ({HOD2_EXE_SIZE} bytes)\n"
+            f"  got      sha256 {got} ({len(self.data)} bytes)\n"
+            "This module reads ~70 hard virtual addresses; against another "
+            "build they resolve to plausible garbage rather than failing, so "
+            "it refuses instead. See docs/re/provenance.md. Pass "
+            "allow_any_build=True only if you are deliberately probing a "
+            "different executable and expect the results to be wrong."
+        )
 
     # -- PE plumbing ----------------------------------------------------
     def _parse_sections(self):

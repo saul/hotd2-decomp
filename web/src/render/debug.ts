@@ -71,7 +71,7 @@ function stateOf(a: Actor): string {
   // an offset it never touches -- so reading `a.state` here printed 0 for
   // every set-piece the moment that was corrected.
   if (a.cls === SpawnClass.SetPieceProp) {
-    return `${SetPieceState[a.selector] ?? a.selector}/${a.sub}`;
+    return `${SetPieceState[a.prop.selector] ?? a.prop.selector}/${a.sub}`;
   }
   // Three classes named by hand, which is the shape `ClassHandler.debug()`
   // exists to remove -- but `debug()` is an engine call and

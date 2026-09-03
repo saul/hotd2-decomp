@@ -44,7 +44,7 @@
  */
 import type { Rng } from "../../core/rng";
 import { ticksOfAuthoredFrame } from "../../core/play_cursor";
-import type { Actor } from "../actor";
+import type { Actor, SetPiecePropActor } from "../actor";
 import { G } from "../globals";
 import {
   registerClass, type ClassFrame, type ClassHandler,
@@ -126,9 +126,9 @@ export function SetPieceParamsOf(a: Actor): SetPieceParams | null {
  * renderer's — the character layer already assembles a spawn from its
  * character type, which is what this class is.
  */
-export function SetPiecePropInit(obj: Actor, rng?: Rng): void {
+export function SetPiecePropInit(obj: SetPiecePropActor, rng?: Rng): void {
   const p = SetPieceParamsOf(obj);
-  obj.selector = p?.selector ?? SetPieceState.Idle;
+  obj.prop.selector = p?.selector ?? SetPieceState.Idle;
   obj.sub = 0;
   obj.frozen = 0;
   obj.holdFrames = 0;
@@ -136,8 +136,8 @@ export function SetPiecePropInit(obj: Actor, rng?: Rng): void {
   obj.accY = 0;
   obj.vel = { x: 0, y: 0, z: 0 };
   // Selectors 2 and 3 open frozen; a camera cue or the landing releases them.
-  if (obj.selector === SetPieceState.StartAndStopOnCues
-      || obj.selector === SetPieceState.DropToGround) {
+  if (obj.prop.selector === SetPieceState.StartAndStopOnCues
+      || obj.prop.selector === SetPieceState.DropToGround) {
     obj.frozen = 1;
   }
   if (p) {
@@ -181,9 +181,9 @@ export function SetPiecePhaseTicks(p: SetPieceParams, fps: number,
  * reaching a path at a frame. Selector 5 is the one exception — it has no
  * flag variant and is always the camera.
  */
-export function SetPieceShouldRemove(obj: Actor, p: SetPieceParams): boolean {
+export function SetPieceShouldRemove(obj: SetPiecePropActor, p: SetPieceParams): boolean {
   const byFlag = (obj.flags & SETPIECE_FLAG_REMOVE_ON_SCRIPT_FLAG) !== 0
-    && obj.selector !== SetPieceState.DelayedDrift;
+    && obj.prop.selector !== SetPieceState.DelayedDrift;
   if (byFlag) return G.g_script_flags[p.removePath] === 1;
   return G.g_active_cam_path === p.removePath
       && G.g_cam_path_frame >= p.removeFrame;
@@ -199,7 +199,7 @@ function AtCue(path: number, frame: number): boolean {
  * installed. The engine installs the routine directly; the port switches,
  * which is the same call made once removed.
  */
-export function SetPiecePropUpdate(obj: Actor, f: ClassFrame): void {
+export function SetPiecePropUpdate(obj: SetPiecePropActor, f: ClassFrame): void {
   const p = SetPieceParamsOf(obj);
   if (!p) return;
 
@@ -210,7 +210,7 @@ export function SetPiecePropUpdate(obj: Actor, f: ClassFrame): void {
     return;
   }
 
-  switch (obj.selector) {
+  switch (obj.prop.selector) {
     case SetPieceState.Idle:
       if (p.hold > 0) SetPieceStateHoldThenPlay(obj, p);
       break;
@@ -240,9 +240,9 @@ export function SetPiecePropUpdate(obj: Actor, f: ClassFrame): void {
   // here but leave the flag where the states put it.
 
   // Three of the six freeze again on the motion's last frame.
-  if (obj.selector === SetPieceState.DropToGround
-      || obj.selector === SetPieceState.Slide
-      || obj.selector === SetPieceState.DelayedDrift) {
+  if (obj.prop.selector === SetPieceState.DropToGround
+      || obj.prop.selector === SetPieceState.Slide
+      || obj.prop.selector === SetPieceState.DelayedDrift) {
     if (SetPieceAtLastFrame(obj)) obj.frozen = 1;
   }
 }
@@ -271,7 +271,7 @@ export function SetPiecePropUpdate(obj: Actor, f: ClassFrame): void {
  * predicate: the counter only ever passes `hold` on the swap frame, and this
  * routine is not installed to step it again.
  */
-function SetPieceStateHoldThenPlay(obj: Actor, p: SetPieceParams): void {
+function SetPieceStateHoldThenPlay(obj: SetPiecePropActor, p: SetPieceParams): void {
   if (obj.holdFrames > p.hold) return;
   const held = obj.holdFrames;
   obj.holdFrames = held + 1;
@@ -285,7 +285,7 @@ function SetPieceStateHoldThenPlay(obj: Actor, p: SetPieceParams): void {
 }
 
 /** `SetPieceStateDropToGround` — falls, lands, then plays. */
-function SetPieceStateDropToGround(obj: Actor): void {
+function SetPieceStateDropToGround(obj: SetPiecePropActor): void {
   if (obj.sub === 0) {
     obj.accY = 0;
     obj.vel.y = 0;
@@ -305,7 +305,7 @@ function SetPieceStateDropToGround(obj: Actor): void {
 }
 
 /** `SetPieceStateSlide` — a fixed heading for 0x27 frames, then a 0x19 hold. */
-function SetPieceStateSlide(obj: Actor): void {
+function SetPieceStateSlide(obj: SetPiecePropActor): void {
   if (obj.sub === 0) {
     obj.slideTimer = SLIDE_FRAMES;
     obj.vel.x = SLIDE_VX;
@@ -324,7 +324,7 @@ function SetPieceStateSlide(obj: Actor): void {
 }
 
 /** `SetPieceStateDelayedDrift` — waits for frame 0x32, then eases down. */
-function SetPieceStateDelayedDrift(obj: Actor): void {
+function SetPieceStateDelayedDrift(obj: SetPiecePropActor): void {
   if (obj.sub === 0) {
     if (SetPieceFrame(obj) < DRIFT_START_FRAME) return;
     obj.accY = 0;
@@ -349,7 +349,7 @@ function SetPieceStateDelayedDrift(obj: Actor): void {
  * `DRIFT_START_FRAME` and every other literal this class compares against come
  * out of the exe in those units.
  */
-export function SetPieceFrame(obj: Actor): number {
+export function SetPieceFrame(obj: SetPiecePropActor): number {
   return MotionPlayFrame(obj);
 }
 
@@ -361,7 +361,7 @@ export function SetPieceFrame(obj: Actor): number {
  * the authored frame count in for it, which halves every cue this class reads:
  * `DRIFT_START_FRAME` is 0x32 against clips of about thirty frames.
  */
-export function SetPieceAtLastFrame(obj: Actor): boolean {
+export function SetPieceAtLastFrame(obj: SetPiecePropActor): boolean {
   const len = MotionPlayLength(obj);
   // Equality: the cursor wraps at `len + 1`, so `>=` covers two frames.
   return len > 0 && SetPieceFrame(obj) === len - 1;

@@ -59,7 +59,7 @@ function value(v: unknown): string {
  */
 function stateName(a: Actor): string {
   if (a.cls === SpawnClass.SetPieceProp) {
-    return SetPieceState[a.selector] ?? `selector ${a.selector}`;
+    return SetPieceState[a.prop.selector] ?? `selector ${a.prop.selector}`;
   }
   if (a.cls !== SpawnClass.Zombie) return `state ${a.state}`;
   return ZombieState[a.state] ?? `state ${a.state}`;

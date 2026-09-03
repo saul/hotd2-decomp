@@ -15,6 +15,8 @@ import type { CivilianState } from "./class10/state";
 import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
+import { makeSetPiecePropTail, type SetPiecePropTail }
+  from "./class24/state";
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
@@ -808,20 +810,6 @@ export interface ActorBase {
    * the pose. Selectors 2 and 3 start frozen and a camera cue releases them.
    */
   frozen: number;           // +0x1324
-  /**
-   * `obj+0x130C` — **class 0x24's** state selector, and the index
-   * `SetPiecePropInit` (`FUN_00482CE0`) dispatches on.
-   *
-   * `[proved]`: `MOV dword ptr [EDI + 0x130c], EAX` (`89870c130000`) at
-   * `0x00482D04` with `EAX = MOVSX byte [tail+0x5]`, read back at
-   * `0x00482E0D` and jumped through as `JMP dword ptr [EAX*0x4 + 0x482ec8]`
-   * (`ff2485c82e4800`) at `0x00482E1C`. Class 0x24 **never touches
-   * `+0x1310`**, which is where this used to live in the port.
-   *
-   * Aliases `condition` (`+0x130C` for the combat classes) and class 0x10's
-   * descriptor-tail pointer at the same address: one address, three fields.
-   */
-  selector: number;         // +0x130C, aliases `condition`
   /** `obj+0x1330` — the set-piece slide's countdown, in frames. */
   slideTimer: number;       // +0x1330
   /**
@@ -1418,11 +1406,17 @@ export interface ActorBase {
  */
 export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedHumanoid; hum: HumanoidTail })
-  | (ActorBase & { cls: Exclude<SpawnClass, SpawnClass.ScriptedHumanoid> });
+  | (ActorBase & { cls: SpawnClass.SetPieceProp; prop: SetPiecePropTail })
+  | (ActorBase & { cls: Exclude<SpawnClass,
+      SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
   { cls: SpawnClass.ScriptedHumanoid }>;
+
+/** An actor already narrowed to class 0x24. */
+export type SetPiecePropActor = Extract<Actor,
+  { cls: SpawnClass.SetPieceProp }>;
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
@@ -1482,7 +1476,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     rank: -1,
     queueRank: 0xe,
     frozen: 0,
-    selector: 0,
     slideTimer: 0,
     holdFrames: 0,
     ringSet: 0,
@@ -1578,6 +1571,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // be lied to, and there is no cast here.
   if (cls === SpawnClass.ScriptedHumanoid) {
     return { ...head, cls, hum: makeHumanoidTail() };
+  }
+  if (cls === SpawnClass.SetPieceProp) {
+    return { ...head, cls, prop: makeSetPiecePropTail() };
   }
   return { ...head, cls };
 }

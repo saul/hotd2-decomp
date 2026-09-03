@@ -53,7 +53,7 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
 import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2,
-         type Actor, type HumanoidActor }
+         type Actor, type HumanoidActor, type SetPiecePropActor }
   from "../src/game/actor";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
@@ -1572,15 +1572,24 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor): void {
   void a.bonePropMode;
   // @ts-expect-error nor is its command cursor
   void a.pc;
-  // **And here is what it does not yet protect.** `obj+0x1330` is also class
-  // 0x24's `slideTimer` and `obj+0x1334` is class 0x30's `backoffFrames`, and
-  // both still compile on a humanoid — because those two classes have no arm
-  // yet, so their fields are still on the head where every class can see them.
-  // A `@ts-expect-error` on either line is an *unused directive* today and
-  // fails the build, which is why neither is written as one. **The union only
-  // separates a word once every class that shares it has been cut over.**
-  // When class 0x24 and class 0x30 grow arms, these two become errors and the
-  // directives should be added above them.
+  // @ts-expect-error class 0x24's state selector is not on the head either
+  void a.selector;
+  // @ts-expect-error ...and a humanoid cannot read it: `obj+0x130C` is three
+  // fields at one address — this arm, `condition`, and class 0x10's tail
+  // pointer — and now two of the three are separated.
+  void h.selector;
+  // **And here is what it still does not protect.** `obj+0x1330` and
+  // `obj+0x1334` compile on a humanoid, and class 0x24 now having an arm did
+  // *not* fix that — which is the sharper version of the rule. Those two words
+  // are not class 0x24's to take: `obj+0x1330` has 38 uses across classes 0x30
+  // and 0x31 and is also the shared arc record's elapsed-frame word, and
+  // `obj+0x1334` is class 0x30's `backoffFrames`. Class 0x24's arm holds one
+  // field, not three, for exactly that reason.
+  //
+  // So: **a word separates only when every class sharing it has an arm**, and
+  // some words — the arc record's — belong to no class and never will. A
+  // `@ts-expect-error` on either line is an *unused directive* today and fails
+  // the build, which is why neither is written as one.
   void h.slideTimer;
   void h.backoffFrames;
   // The arm is reachable once, and only once, `cls` has been tested.
@@ -1800,7 +1809,7 @@ const SETPIECE_BASE: SetPieceParams = {
 
 /** A stage with one set-piece of the given shape, and the camera at nothing. */
 function setPieceScene(over: Partial<SetPieceParams>, rng: Rng): {
-  a: ReturnType<typeof ActorSpawn>; events: Events;
+  a: SetPiecePropActor; events: Events;
 } {
   ResetGameGlobals();
   const params = { ...SETPIECE_BASE, ...over };
@@ -1809,13 +1818,15 @@ function setPieceScene(over: Partial<SetPieceParams>, rng: Rng): {
   G.g_active_cam_path = -1;
   G.g_cam_path_frame = 0;
   const a = ActorSpawn(0x3000, SpawnClass.SetPieceProp, 1, "set-piece");
+  // Narrowing, not a cast — the same reason the humanoid fixture does it.
+  if (a.cls !== SpawnClass.SetPieceProp) throw new Error("not class 0x24");
   a.visible = true;
   a.pos = vec3(0, 40, 0);
   void rng;
   return { a, events: new Events() };
 }
 
-const frame = (a: ReturnType<typeof ActorSpawn>, events: Events, rng: Rng) =>
+const frame = (a: SetPiecePropActor, events: Events, rng: Rng) =>
   SetPiecePropUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST, events });
 
 console.log("\nclass 0x24, the removal trigger:");
@@ -1912,8 +1923,8 @@ console.log("\nclass 0x24, the selector is +0x130C:");
   const { a, events } = setPieceScene(
     { selector: SetPieceState.DropToGround }, rng);
   check("the Init writes the selector to +0x130C and leaves +0x1310 alone",
-        a.selector === SetPieceState.DropToGround && a.state === 0,
-        `selector ${a.selector} state ${a.state}`);
+        a.prop.selector === SetPieceState.DropToGround && a.state === 0,
+        `selector ${a.prop.selector} state ${a.state}`);
 
   // `+0x1310` is the combat classes' state word; class 0x24 never reads it,
   // so writing it must not change which state routine runs.

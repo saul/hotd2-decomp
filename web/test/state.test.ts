@@ -59,6 +59,10 @@ import { Harness } from "../src/app/harness";
 import { Walker, WALKER_RESTORED_BY_HAND, WALKER_RESTORED_KEYS,
   type WalkerHost } from "../src/script/walker";
 import { seekTo } from "../src/script/seek";
+import { OPS } from "../src/script/ops";
+import { WAIT_RULES } from "../src/script/waits";
+import { ACTIONS } from "../src/script/state/camera_action";
+import { hexKey, mergeTables } from "../src/script/registry";
 import type { ScriptJson } from "../src/bundle";
 import { BUNDLE_ROOT, skipNoBundle } from "../tools/lib/bundle_root";
 
@@ -88,11 +92,9 @@ function check(name: string, ok: boolean, detail = ""): void {
  */
 const mkHost = (): WalkerHost => ({
   enterRegion: () => undefined,
-  loadRegion: () => undefined,
   loadSlot: () => undefined,
   unloadSlot: () => undefined,
   startCamera: () => undefined,
-  releaseCamera: () => undefined,
   onFeed: () => undefined,
   onBranch: () => undefined,
   playSound: () => undefined,
@@ -417,6 +419,45 @@ console.log("\nWhat a save writes is what a load reads:\n");
         why !== null && why.includes("probe"), String(why));
   check("...and nothing was applied before the refusal",
         restoredWith === "never called", String(restoredWith));
+}
+
+console.log("\nNo two modules register the same name:\n");
+{
+  // **A dispatch table built by spreading cannot report a collision.**
+  // `{ ...camera, ...collision }` where both name `0x30` keeps whichever came
+  // last, in silence, and the table then cannot tell "this opcode moved
+  // category" from "two modules implement it and disagree". The same is true
+  // of `new Map(entries)` for the waits and of `queue_event`'s actions, which
+  // was a chain of string comparisons where the *second* `if` for a name was
+  // simply unreachable.
+  //
+  // Every one of the three is assembled with a check now, and the check
+  // throws at **module load** -- so importing the tables at all is most of
+  // this test. If `OPS`, `WAIT_RULES` and `ACTIONS` are here, no name in them
+  // is claimed twice.
+  check("the opcode table loaded, so no opcode is registered twice",
+        Object.keys(OPS).length > 0, `${Object.keys(OPS).length} opcodes`);
+  check("the wait rules loaded, so no wait opcode is registered twice",
+        WAIT_RULES.size > 0, `${WAIT_RULES.size} rules`);
+  check("the action table loaded, so no action name is registered twice",
+        Object.keys(ACTIONS).length > 0,
+        Object.keys(ACTIONS).sort().join(", "));
+
+  // And the check itself fires, which is the half that a passing import
+  // cannot demonstrate. A guard nobody has watched fail is a comment.
+  let threw = "";
+  try {
+    mergeTables<Record<number, string>>("opcode", [
+      ["camera", { 0x30: "one" }],
+      ["collision", { 0x30: "two" }],
+    ], hexKey);
+  } catch (e) {
+    threw = String(e);
+  }
+  check("a duplicate is refused, naming both modules and the key",
+        threw.includes("0x30") && threw.includes("camera")
+        && threw.includes("collision"),
+        threw || "nothing was thrown");
 }
 
 console.log("\nA snapshot determines the next frame:\n");

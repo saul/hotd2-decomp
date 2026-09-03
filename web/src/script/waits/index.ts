@@ -17,9 +17,24 @@ const RULES: readonly WaitRule[] = [
   waitEnemiesAlive, waitScriptedActors, waitScriptFlag,
 ];
 
-export const WAIT_RULES: ReadonlyMap<number, WaitRule> = new Map(
-  RULES.flatMap((r) => r.ops.map((op) => [op, r] as const)),
-);
+/**
+ * The rules by opcode, with the same duplicate check `ops/` and
+ * `state/camera_action.ts` carry: `new Map(entries)` keeps the last of two
+ * entries for one key and says nothing, and two rules claiming one wait is a
+ * gate evaluated by the rule that happens to be listed second.
+ */
+export const WAIT_RULES: ReadonlyMap<number, WaitRule> = (() => {
+  const byOp = new Map<number, WaitRule>();
+  for (const rule of RULES) {
+    for (const op of rule.ops) {
+      if (byOp.has(op)) {
+        throw new Error(`duplicate wait rule for opcode 0x${op.toString(16)}`);
+      }
+      byOp.set(op, rule);
+    }
+  }
+  return byOp;
+})();
 
 export { passedBecause, WAIT_NOTES } from "./types";
 export type { WaitContext, WaitRule } from "./types";

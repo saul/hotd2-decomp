@@ -23,10 +23,11 @@
  *
  * Bump this in the same commit as the shape change. 2 was the first honest
  * value -- "not whatever those old snapshots were" -- and 3 is the play
- * cursor becoming a tick count and `g_cam_path_frame_prev` leaving `G`.
- * Two bumps in a day, after 28 commits of none, is the check working.
+ * cursor becoming a tick count and `g_cam_path_frame_prev` leaving `G`; 4 is
+ * the walker's `rng` leaving its slice, a generator nothing ever drew from.
+ * Three bumps in a day, after 28 commits of none, is the check working.
  */
-export const SNAPSHOT_VERSION = 3;
+export const SNAPSHOT_VERSION = 4;
 
 export interface Snapshot {
   version: number;

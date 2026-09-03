@@ -64,9 +64,9 @@ const camJson = JSON.parse(
 
 /** Records nothing: the drawn camera is what is compared. */
 const mkHost = (): WalkerHost => ({
-  enterRegion: () => undefined, loadRegion: () => undefined,
+  enterRegion: () => undefined,
   loadSlot: () => undefined, unloadSlot: () => undefined,
-  startCamera: () => undefined, releaseCamera: () => undefined,
+  startCamera: () => undefined,
   onFeed: () => undefined, onBranch: () => undefined,
   playSound: () => undefined, aliveEnemies: () => null,
   aliveCivilians: () => null, cameraFree: () => null,

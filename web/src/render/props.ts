@@ -66,16 +66,16 @@
  */
 
 import {
-  Box3, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture,
-  EdgesGeometry, Group, LineBasicMaterial, LineSegments, Object3D, Quaternion,
-  Sprite, SpriteMaterial, Vector3,
+  Box3, BoxGeometry, BufferAttribute, BufferGeometry, EdgesGeometry, Group,
+  LineBasicMaterial, LineSegments, Object3D, Quaternion, Sprite,
+  SpriteMaterial, Vector3,
 } from "three";
 import type { PropsJson, PropHinge, PropStatic } from "../bundle";
 import { IDLE_TICK, type Context, type System, type Tick }
   from "../core/system";
 import type { Scope } from "../core/scope";
 import { attachTo } from "./scope3d";
-import { labelTexture } from "./overlays";
+import { LabelCache } from "./overlays";
 import { BAMS_TO_RAD } from "../core/bams";
 import { HingePose } from "./hinge";
 
@@ -135,8 +135,6 @@ function onScreen(o: Object3D): boolean {
 const ORIGIN_ARM = 2.5;
 /** The box drawn for a prop that has no measurable bounds. */
 const STAND_IN = 3;
-/** Label textures, cached by colour and text — one per flip is a leak. */
-const LABELS = new Map<string, CanvasTexture>();
 
 interface Live {
   node: Object3D;
@@ -185,11 +183,15 @@ export class PropLayer implements System {
   /** No `detach`: the stage scope owns the marker geometry and the debug group. */
   build(root: Object3D, stage: Scope, json: PropsJson | undefined): void {
     this.scope = stage.child("props");
+    const labels = this.labels = new LabelCache();
     this.scope.defer(() => {
       for (const m of this.markers) {
         m.box.geometry.dispose();
         m.cross.geometry.dispose();
       }
+      // ...and the label textures, which nothing disposed at all: a stage
+      // switch built a fresh set beside the old one and the page kept both.
+      labels.dispose();
       this.markers = [];
       this.debug.clear();
       this.live = [];
@@ -389,14 +391,20 @@ export class PropLayer implements System {
     return m;
   }
 
+  /**
+   * The label textures, capped and owned by the stage scope.
+   *
+   * Module-level and never disposed until now: a stage switch built a fresh
+   * set beside the old one and the page kept both. `SpawnLayer` fixed this
+   * shape first; this layer and `debug.ts` did not follow it.
+   */
+  private labels = new LabelCache();
+
   private setLabel(m: Marker, text: string): void {
     const key = `${m.colour.toString(16)}|${text}`;
     if (m.label.userData.text === key) return;
-    let tex = LABELS.get(key);
-    if (!tex) {
-      LABELS.set(key, (tex = labelTexture(
-        text, `#${m.colour.toString(16).padStart(6, "0")}`)));
-    }
+    const tex = this.labels.get(
+      key, text, `#${m.colour.toString(16).padStart(6, "0")}`);
     (m.label.material as SpriteMaterial).map = tex;
     (m.label.material as SpriteMaterial).needsUpdate = true;
     const img = tex.image as HTMLCanvasElement;

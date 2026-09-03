@@ -221,6 +221,68 @@ export function labelTexture(text: string, colour = "#ffe14d"): CanvasTexture {
 }
 
 /**
+ * Label textures, cached by text, capped, and owned by a scope.
+ *
+ * Three layers grew the same module-level `Map<string, CanvasTexture>` keyed
+ * on label text, and two of them were wrong in two ways at once.
+ *
+ * **Unowned.** Nothing disposed them, so a stage switch built a fresh set
+ * beside the old one and the page kept every texture it had ever drawn.
+ * `SpawnLayer` fixed that by handing its map to the stage scope; `debug.ts`
+ * and `props.ts` did not follow.
+ *
+ * **Unbounded.** `debug.ts`'s key contains `d=${d.toFixed(0)}` — the actor's
+ * distance from the eye, in whole units — so **every metre an actor moves
+ * mints a texture**, for every actor, for the whole stage. A scope only frees
+ * that at the end of the stage that made it.
+ *
+ * So this is capped as well as owned, and capped rather than having the
+ * volatile field quantised out of the key: `d` is the one that bites today,
+ * but a cap is right whatever a future label decides to put in its text, and
+ * it does not make the overlay less informative to fix a leak. The eviction is
+ * plain insertion order, which for a debug overlay redrawn every frame is
+ * close enough to least-recently-used, and evicting disposes.
+ */
+export class LabelCache {
+  private readonly map = new Map<string, CanvasTexture>();
+
+  /**
+   * `cap` is generous next to what is ever on screen at once — a few dozen
+   * boxes — and small next to the thousands an unbounded cache reached.
+   */
+  constructor(private readonly cap = 256) {}
+
+  get(key: string, text: string, colour: string): CanvasTexture {
+    const hit = this.map.get(key);
+    if (hit) {
+      // Re-insert, so the ones in use are not the ones evicted.
+      this.map.delete(key);
+      this.map.set(key, hit);
+      return hit;
+    }
+    while (this.map.size >= this.cap) {
+      const oldest = this.map.keys().next();
+      if (oldest.done) break;
+      this.map.get(oldest.value)?.dispose();
+      this.map.delete(oldest.value);
+    }
+    const tex = labelTexture(text, colour);
+    this.map.set(key, tex);
+    return tex;
+  }
+
+  /** How many textures are live. The scope panel and the tests read this. */
+  get size(): number {
+    return this.map.size;
+  }
+
+  dispose(): void {
+    for (const t of this.map.values()) t.dispose();
+    this.map.clear();
+  }
+}
+
+/**
  * Spawn markers.
  *
  * They are markers and not models on purpose: the class -> model mapping is
@@ -238,9 +300,11 @@ export class SpawnLayer implements System {
    *
    * These used to live for the life of the page: nothing disposed them, and a
    * stage switch built a fresh set beside the old one. The stage scope owns
-   * them now, so the set dies with the stage that produced it.
+   * them now, so the set dies with the stage that produced it — and the cap
+   * came with {@link LabelCache}, which this layer's fix grew into once
+   * `debug.ts` turned out to be putting a moving distance in its key.
    */
-  private labels = new Map<string, CanvasTexture>();
+  private labels = new LabelCache();
   private showLabels = true;
   /**
    * Spawn offsets that have a real assembled character in the scene.
@@ -299,11 +363,8 @@ export class SpawnLayer implements System {
    * where the previous stage's label textures go back.
    */
   attach(ctx: Context): void {
-    const labels = this.labels = new Map<string, CanvasTexture>();
-    ctx.scope.child("spawn_labels").defer(() => {
-      for (const t of labels.values()) t.dispose();
-      labels.clear();
-    });
+    const labels = this.labels = new LabelCache();
+    ctx.scope.child("spawn_labels").defer(() => labels.dispose());
   }
 
   setPosed(posed: ReadonlySet<number>): void {
@@ -335,8 +396,7 @@ export class SpawnLayer implements System {
         o.add(sprite);
       }
       if (sprite.userData.text !== text) {
-        let tex = this.labels.get(text);
-        if (!tex) this.labels.set(text, (tex = labelTexture(text)));
+        const tex = this.labels.get(text, text, "#ffe14d");
         (sprite.material as SpriteMaterial).map = tex;
         (sprite.material as SpriteMaterial).needsUpdate = true;
         sprite.scale.set((tex.image as HTMLCanvasElement).width / 22,

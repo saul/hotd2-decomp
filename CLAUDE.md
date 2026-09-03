@@ -23,8 +23,16 @@ python3 tools/verify_port.py              # the port matches the annotations
 python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 cd web && npx tsc --noEmit && npm run test:port && npm run test:seek \
     && npm run test:scope && npm run test:state && npm run test:ui \
-    && npm run test:projection && npm run test:camera && npm run verify:ui
+    && npm run test:projection && npm run test:camera && npm run test:pose \
+    && npm run test:render && npm run verify:ui
+python3 tools/baseline.py --game-dir ~/"THE HOUSE OF THE DEAD 2" --verify
 ```
+
+`test:seek`, `test:state` and `test:camera` need an exported bundle. Without
+one they print `SKIP` and **exit 3**, which stops the chain above — that is
+deliberate. Exit 0 means a test ran and asserted things; 1 means it found them
+wrong; 3 means it asserted nothing. Build a bundle with
+`tools/export_player.py`, or point `HOTD2_BUNDLE` at one.
 
 ### Layers, and the direction dependencies point
 

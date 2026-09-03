@@ -14,6 +14,7 @@
     "test:seek": "node tools/run_test.mjs test/seek.test.ts",
     "test:scope": "node tools/run_test.mjs test/scope.test.ts",
     "test:pose": "node tools/run_test.mjs test/pose.test.ts",
+    "test:render": "node tools/run_test.mjs test/render.test.ts",
     "test:state": "node tools/run_test.mjs test/state.test.ts",
     "test:ui": "node tools/run_test.mjs test/ui.test.tsx",
     "test:projection": "node tools/run_test.mjs test/projection.test.ts",

@@ -24,7 +24,7 @@
  * `TestApproachRing` still decides everything; only the drawing has gone.
  */
 import {
-  Box3, BoxGeometry, CanvasTexture, EdgesGeometry, Group, LineBasicMaterial,
+  Box3, BoxGeometry, EdgesGeometry, Group, LineBasicMaterial,
   LineSegments, Sprite, SpriteMaterial, Vector3,
 } from "three";
 import type { ActiveSpawn } from "../script/walker";
@@ -37,7 +37,7 @@ import { G } from "../game/globals";
 import { dist2d } from "../game/vec";
 import { g_class_handlers } from "../game/registry";
 import { SpawnClass } from "../game/spawn_class";
-import { labelTexture } from "./overlays";
+import { LabelCache } from "./overlays";
 
 /**
  * Magenta: the port is not simulating this one.
@@ -54,11 +54,6 @@ const PERMIT = 0xffb02e;
 const AWAITED = 0x4dff8c;
 /** Cyan: picked out by a sidebar panel, whatever it is doing. */
 const SELECTED = 0x26d9ff;
-/**
- * Label textures, cached by colour and text. A permit moving between actors
- * flips a label twice a second, and a fresh `CanvasTexture` per flip is a leak.
- */
-const LABELS = new Map<string, CanvasTexture>();
 
 /** The descriptor offset, as it is written everywhere else in this project. */
 const hex = (at: number): string => `0x${at.toString(16).toUpperCase()}`;
@@ -128,6 +123,15 @@ export class DebugBoxLayer implements System<RenderContext> {
     this.group.name = "debug-boxes";
   }
 
+  /**
+   * The label textures, capped and owned by the stage scope.
+   *
+   * This was a module-level `Map<string, CanvasTexture>` that nothing ever
+   * disposed, and its key carries `d=${d.toFixed(0)}` — so **every metre every
+   * boxed actor moved minted a texture**, kept for the life of the page.
+   */
+  private labelCache = new LabelCache();
+
   private acquire(colour: number): Boxed {
     let b = this.pool[this.used];
     if (!b) {
@@ -158,11 +162,8 @@ export class DebugBoxLayer implements System<RenderContext> {
     b.lines.scale.copy(size);
     b.label.position.set(0, size.y / 2 + 0.6, 0);
     if (b.label.userData.text !== key) {
-      let tex = LABELS.get(key);
-      if (!tex) {
-        LABELS.set(key, (tex = labelTexture(
-          text, `#${b.colour.toString(16).padStart(6, "0")}`)));
-      }
+      const tex = this.labelCache.get(
+        key, text, `#${b.colour.toString(16).padStart(6, "0")}`);
       (b.label.material as SpriteMaterial).map = tex;
       (b.label.material as SpriteMaterial).needsUpdate = true;
       const img = tex.image as HTMLCanvasElement;
@@ -289,10 +290,16 @@ export class DebugBoxLayer implements System<RenderContext> {
    * own group, so the stage scope empties it.
    */
   attach(ctx: RenderContext): void {
+    const labels = this.labelCache = new LabelCache();
     ctx.scope.child("debug_boxes").defer(() => {
       for (const b of this.pool) b.node.removeFromParent();
       this.pool.length = 0;
       this.used = 0;
+      // The label textures with them. This map used to be module-level and
+      // unbounded: its key carries the actor's whole-unit distance from the
+      // eye, so every metre every boxed actor moved minted a `CanvasTexture`
+      // that nothing ever freed, for the life of the page.
+      labels.dispose();
     });
   }
 

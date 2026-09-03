@@ -9,7 +9,15 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
-import type { ActorDebug } from "../registry";
+import {
+  DeadSweep, registerClass, type ActorDebug, type ClassFrame,
+  type ClassHandler,
+} from "../registry";
+import { SpawnClass } from "../spawn_class";
+import { ReleaseAttackSlot } from "../combat/permits";
+import {
+  ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
+} from "../combat/counts";
 import type { GameHost } from "../host";
 import type { Vec3 } from "../vec";
 import { ZombieStateApproach } from "./approach";
@@ -19,7 +27,8 @@ import { ZombieAttackRefusal, ZombieStateHoldAtRange } from "./hold";
 import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
-import { ZombieStateWalkDistance } from "./walk_distance";
+import { ZombieReleaseAndDespawn, ZombieStateWalkDistance }
+  from "./walk_distance";
 import { ZombieStateStandAndThrow } from "./stand_throw";
 import {
   ZombieStateArcScriptedEntrance, ZombieStateHoldClipThenBranch,
@@ -53,8 +62,8 @@ import {
 /** `EnemyZombieInit`'s literal for `obj+0x128` — `0x40600000`. */
 const ZOMBIE_BODY_RADIUS = 3.5;
 
-export function EnemyZombieUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
-                                  host: GameHost, events?: Events): void {
+export function EnemyZombieUpdate(obj: Actor, f: ClassFrame): void {
+  const { eye, dt, rng, host, events } = f;
   ZombieRunState(obj, eye, dt, rng, host, events);
   // The engine's own order, and the two halves the port did not have.
   // `EnemyZombieUpdate` integrates the velocity straight after the state —
@@ -304,3 +313,45 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
     hot: permit,
   };
 }
+
+/**
+ * What a class-0x30 zombie gives back when `GameUpdate`'s sweep reaches it.
+ *
+ * The permit first, on every reason: `ReleaseAttackSlot` (`FUN_00456520`) is
+ * also the only thing that lifts `g_attack_committed`, so an actor that leaves
+ * holding an off-screen permit refuses **every** later claim in the scene.
+ * `ZombieFlag2.OffScreenPermit` is `obj+0x136C` bit 0x20000000 — class 0x31
+ * latches the same fact in a different word, which is the whole reason this is
+ * the class's answer and not the sweep's.
+ *
+ * **The counts, only when it is dead or gone.** Not on `!visible`: the engine
+ * never ties either count to whether the actor is drawn, and because the
+ * releases are latched, doing so is permanent — an actor invisible for one
+ * frame before the renderer turns it on would leave both counts and never
+ * return, which cost two civilian rescues in `tools/civilians.mjs` before the
+ * old sweep's test said `dead`.
+ *
+ * [diverges] Class 0x30 has no death state here, so both of its releases land
+ * on the same frame. That collapses the window in which a class-0x30 corpse is
+ * *present but not alive*; class 0x31 keeps that window, because it has its
+ * death states and calls the two retires where the exe does. Porting
+ * `ZombieStateDeath6` (`FUN_00454D20`) and `ZombieEnterCorpseState`
+ * (`FUN_00456740`) is what closes it.
+ */
+function EnemyZombieDeadSweep(obj: Actor, why: DeadSweep): void {
+  ReleaseAttackSlot(obj, ZombieFlag2.OffScreenPermit);
+  if (why === DeadSweep.Unloaded) return;
+  ReleaseEnemyAliveCount(obj);
+  ReleaseEnemyPresentCount(obj);
+}
+
+/** Class 0x30's row of `g_class_handlers`, filled by the class itself. */
+export const EnemyZombieHandler: ClassHandler = {
+  init: EnemyZombieInit,
+  update: EnemyZombieUpdate,
+  leave: ZombieReleaseAndDespawn,
+  onDeadSweep: EnemyZombieDeadSweep,
+  debug: EnemyZombieDebug,
+};
+
+registerClass(SpawnClass.Zombie, EnemyZombieHandler);

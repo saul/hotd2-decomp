@@ -316,6 +316,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("game", this.game);
     this.world.add("game", this.rainSim);
     this.world.add("render", new CameraDrawSystem(this.cam));
+    // ...and free roam is the other half of that: the draw returns early
+    // while `cam.scripted` is false, and this flies the camera instead. It is
+    // a system rather than a hand-rolled tick so that a seek and a snapshot
+    // load both reach it -- see `render/freeroam.ts`.
+    this.world.add("render", this.freeRoam);
     // Everything below poses against the camera the draw just placed.
     this.world.add("render", this.spawns);
     this.world.add("render", this.sceneFog);
@@ -913,15 +918,18 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * which never resets, because `ctx.frame` restarts on every stage load and
    * so cannot order two scopes across a stage switch.
    *
-   * Free roam is here rather than in the tick because it rides wall time and
-   * is not game state: you are flying the camera around a scene, not watching
-   * it, and the ticks that follow have to see where you flew it to.
+   * Free roam used to fly here, by hand, for the reason that it rides wall
+   * time rather than game time. It is a render-phase `System` now — step 23 —
+   * so it is inside `resync` and a seek can no longer leave the camera
+   * somewhere play would never put it. The ordering that made a hand call
+   * look necessary is expressed as its position in the tick order instead.
    */
-  beginFrame(wall: number): void {
+  // `_wall` because nothing left in this hook rides wall time: free roam was
+  // the only thing that did. The parameter stays because `PacerHost` declares
+  // it, and a hook that drops it would have to be re-added to move anything
+  // back here.
+  beginFrame(_wall: number): void {
     this.lifeFrame += 1;
-    if (!this.state.freeze && this.state.mode === "free") {
-      this.freeRoam.update(wall, this.camera);
-    }
   }
 
   /**

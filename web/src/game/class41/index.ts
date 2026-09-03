@@ -22,7 +22,9 @@
  */
 import type { Actor } from "../actor";
 import { G } from "../globals";
-import type { ClassFrame, ClassHandler } from "../registry";
+import {
+  registerClass, type ClassFrame, type ClassHandler,
+} from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { PlaceBreakableGroup } from "./group";
@@ -175,3 +177,9 @@ export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,
 } from "./group";
+
+/**
+ * A placer, not an actor: it builds its children and kills itself on its
+ * first frame. It draws nothing, so it needs no renderer.
+ */
+registerClass(SpawnClass.PropContainerPlacer, PropContainerPlacerHandler);

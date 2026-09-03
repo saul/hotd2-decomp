@@ -19,10 +19,17 @@ import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
 import { ActorFlag, DamageZone, ThrowerFlag, type Actor } from "../actor";
-import type { ActorDebug } from "../registry";
+import {
+  DeadSweep, registerClass, type ActorDebug, type ClassFrame,
+  type ClassHandler,
+} from "../registry";
+import { SpawnClass } from "../spawn_class";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
+import {
+  ThrowerRetireFromAliveCount, ThrowerRetireFromPresentCount,
+} from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, ThrowHandsOf } from "../tables";
@@ -192,8 +199,8 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
  * what makes its fall and its knock-back physical — but the leap states do not
  * use it at all: they write the position outright from the arc's closed form.
  */
-export function EnemyThrowerUpdate(obj: Actor, eye: Vec3, dt: number, rng: Rng,
-                                   host: GameHost, events?: Events): void {
+export function EnemyThrowerUpdate(obj: Actor, f: ClassFrame): void {
+  const { eye, dt, rng, host, events } = f;
   // The cooldown is also the post-knockdown window in which shots ricochet:
   // `EnemyThrowerUpdate` clears `obj+0x34` bit 0x100 when it reaches zero.
   if (obj.cooldown > 0) {
@@ -434,3 +441,38 @@ export function EnemyThrowerDebug(obj: Actor): ActorDebug {
     hot: obj.attackPermit >= 0,
   };
 }
+
+/**
+ * What a class-0x31 thrower gives back when `GameUpdate`'s sweep reaches it.
+ *
+ * The permit on every reason, in **its own** bit: `ThrowerFlag.OffScreenPermit`
+ * is `obj+0x136C` bit 0x40000000, because class 0x30 already uses 0x20000000
+ * of the same word for its own actors — the note on
+ * `ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) is where that split is proved.
+ *
+ * The counts **only on a despawn**, and that is not an omission. Class 0x31's
+ * death is four states and it runs the two retires where the exe does —
+ * `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) drops the alive count as the
+ * fall opens, `ThrowerStateCorpse` the present count when the body is done —
+ * so a thrower that has merely died is *present but not alive*, exactly as the
+ * engine leaves it, and a sweep that retired both here would collapse the one
+ * window class 0x30 has already lost.
+ */
+function EnemyThrowerDeadSweep(obj: Actor, why: DeadSweep): void {
+  ThrowerReleaseAttackPermit(obj);
+  if (why !== DeadSweep.Despawned) return;
+  ThrowerRetireFromAliveCount(obj);
+  ThrowerRetireFromPresentCount(obj);
+}
+
+/** Class 0x31's row of `g_class_handlers`, filled by the class itself. */
+export const EnemyThrowerHandler: ClassHandler = {
+  init: EnemyThrowerInit,
+  update: EnemyThrowerUpdate,
+  leave: ThrowerLeave,
+  onDeadSweep: EnemyThrowerDeadSweep,
+  updatesWhenDead: true,
+  debug: EnemyThrowerDebug,
+};
+
+registerClass(SpawnClass.Thrower, EnemyThrowerHandler);

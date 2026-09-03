@@ -228,10 +228,12 @@ def main() -> int:
             "error"),
         "layers-are-systems": Rule(
             "layers-are-systems",
-            "a layer ticked by hand is outside World, so it is outside "
-            "save/load/resync -- which is why a seek could leave a rig held "
-            "in a pose play would never produce",
-            "ratchet", baseline=1, step=23),
+            "every layer with an update() is in World, so every one of them "
+            "is inside save/load/resync -- a layer ticked by hand from "
+            "Player.frame is not asked to rebuild, and a seek then leaves it "
+            "holding a pose play would never produce. FreeRoam was the last "
+            "one and it now owns the camera from the render phase",
+            "error"),
         "one-bams-constant": Rule(
             "one-bams-constant",
             "BAMS_TO_RAD belongs to core/bams.ts and nowhere else -- the nine "

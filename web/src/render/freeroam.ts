@@ -6,9 +6,37 @@
  * free roam, because a region holds only the handful of models the game draws
  * from one point on the rail and the rest of the level would simply not be
  * there.
+ *
+ * ## It is a system, and that is not bookkeeping
+ *
+ * It used to be ticked by hand out of `Player.frame`, before `world.update`
+ * ran, which put it outside the one thing `World` is for: `resync`. A seek or
+ * a snapshot load replaces the game state underneath every layer and then asks
+ * each of them to place itself against the new state -- and a layer nobody
+ * asks does not move. Free roam owns `camera.position` and `camera.rotation`
+ * outright while it is enabled (`CameraRig.scripted` is false, so the draw
+ * system does not touch them), so a rebuild that skipped it left the camera
+ * wherever the *previous* state's last frame had put it, which is a shot no
+ * play of the stage could produce. It is registered in the `render` phase
+ * after `CameraDrawSystem` for the same reason: it is the last word on where
+ * the camera is.
+ *
+ * Its own pose is **derived, never saved**. When it is off it re-adopts the
+ * scripted camera on every `resync`, which is what makes entering free roam
+ * after a seek start from the shot the seek produced; when it is on it puts
+ * the camera back where the viewer flew it. So it contributes no snapshot
+ * slice, and `World.load` has nothing to refuse.
+ *
+ * One behaviour change came with the move, deliberately: it now flies on
+ * `t.wall` whether or not the transport is frozen. The hand-rolled tick was
+ * gated on `!state.freeze` and so froze the free camera with the game, which
+ * is backwards -- freeze stops *game* time, and a frozen frame is exactly the
+ * one `Tick.wall` exists to carry.
  */
 
 import { PerspectiveCamera, Vector3 } from "three";
+import type { System, Tick } from "../core/system";
+import type { RenderContext } from "./context";
 
 const MOVE_KEYS: Record<string, [number, number, number]> = {
   KeyW: [0, 0, -1],
@@ -19,7 +47,8 @@ const MOVE_KEYS: Record<string, [number, number, number]> = {
   KeyQ: [0, -1, 0],
 };
 
-export class FreeRoam {
+export class FreeRoam implements System<RenderContext> {
+  readonly id = "render.freeroam";
   enabled = false;
   /** Units per second at speed 1. Stage 2 spans about 6700 units. */
   speed = 60;
@@ -59,8 +88,27 @@ export class FreeRoam {
     this.yaw = Math.atan2(-dir.x, -dir.z);
   }
 
-  update(dt: number, camera: PerspectiveCamera): void {
+  update(ctx: RenderContext, t: Tick): void {
     if (!this.enabled) return;
+    this.fly(ctx.camera, t.wall);
+  }
+
+  /**
+   * Put the camera where free roam says it is.
+   *
+   * Off, it does the opposite and takes its own pose from the camera, so the
+   * next entry into free roam starts from the shot the rebuild produced.
+   */
+  resync(ctx: RenderContext): void {
+    if (!this.enabled) {
+      this.adoptFrom(ctx.camera);
+      return;
+    }
+    this.fly(ctx.camera, 0);
+  }
+
+  /** One step of the fly cam. `dt` of zero re-places without moving. */
+  private fly(camera: PerspectiveCamera, dt: number): void {
     // YXZ so yaw turns about world up and pitch about the camera's own right
     // axis; no roll can accumulate from mouse movement.
     camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");

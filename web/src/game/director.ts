@@ -8,8 +8,8 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
-import { makeActor, ThrowerFlag, ZombieFlag2, type Actor } from "./actor";
-import { ActorDespawn } from "./despawn";
+import { makeActor, type Actor } from "./actor";
+import { ActorDeadSweep, ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { CameraTrackEnemiesTick, UpdateCameraFreeFlag }
   from "./camera/track";
@@ -18,17 +18,15 @@ import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
 import { Class44Selector } from "./class44";
 import { T } from "./tables";
-import { ReleaseAttackSlot } from "./combat/permits";
-import {
-  ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
-  ThrowerRetireFromAliveCount, ThrowerRetireFromPresentCount,
-} from "./combat/counts";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ActorByAt, G } from "./globals";
 import type { GameHost } from "./host";
 import { ActorAdvanceMotion } from "./motion";
-import { ActorIsEnemy, g_class_handlers } from "./registry";
+import { DeadSweep, g_class_handlers } from "./registry";
+// For its side effect: every class module's own `registerClass` call. Nothing
+// in this file names a class, and that is the point -- see `game/classes.ts`.
+import "./classes";
 import { SpawnClass as SpawnClassValue, type SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 
@@ -203,15 +201,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
     // (`FUN_00455490`) is both of them and an `ActorDespawn` -- and this is
     // the backstop for the ones the port reaches another way. The latches make
     // it idempotent, so a route that already released pays nothing here.
+    //
+    // **Which** releases those are is the class's own answer and not a
+    // `switch` here -- see `ClassHandler.onDeadSweep`.
     for (const o of G.g_object_list) {
-      if (!o.despawned || !ActorIsEnemy(o.cls)) continue;
-      if (o.cls === SpawnClassValue.Thrower) {
-        ThrowerRetireFromAliveCount(o);
-        ThrowerRetireFromPresentCount(o);
-      } else {
-        ReleaseEnemyAliveCount(o);
-        ReleaseEnemyPresentCount(o);
-      }
+      if (!o.despawned) continue;
+      ActorDeadSweep(o, DeadSweep.Despawned);
     }
     G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
   }
@@ -238,32 +233,18 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
       // `ZombieReleasePermitAndUntrack` (`FUN_004565A0`), whose first line is
       // the release. Class 0x30 has no death state here, so this sweep is
       // where it lands; it must be the whole function and not half of it.
-      ReleaseAttackSlot(obj, obj.cls === SpawnClassValue.Thrower
-                        ? ThrowerFlag.OffScreenPermit
-                        : ZombieFlag2.OffScreenPermit);
+      //
       // ...and the same reasoning for the enemy counters, which the engine
       // steps from the same teardown: `ZombieReleasePermitAndUntrack` drops
       // the alive count, and `ZombieEnterCorpseState` (`FUN_00456740`) the
       // present count when the death clip ends.
       //
-      // **Only on death.** Not on `!visible`: the engine never ties either
-      // count to whether the actor is drawn, and because the releases are
-      // latched, doing so is permanent — an actor invisible for one frame
-      // before the renderer turns it on would leave both counts and never
-      // return, which cost two civilian rescues in `tools/civilians.mjs`
-      // before this line said `dead`.
-      //
-      // [diverges] Class 0x30 has no death state here, so both of its
-      // releases land on the same frame. That collapses the window in which a
-      // class-0x30 corpse is *present but not alive*; class 0x31 keeps that
-      // window, because it has its death states and calls the two retires
-      // where the exe does. Porting `ZombieStateDeath6` (`FUN_00454D20`) and
-      // `ZombieEnterCorpseState` is what closes it.
-      if (obj.dead && ActorIsEnemy(obj.cls)
-          && obj.cls !== SpawnClassValue.Thrower) {
-        ReleaseEnemyAliveCount(obj);
-        ReleaseEnemyPresentCount(obj);
-      }
+      // Which bit of which flags word latches the permit, and which pair of
+      // retires takes the actor out of the counts, are the **class's** two
+      // answers. They were written here as `obj.cls === SpawnClass.Thrower`
+      // twice; they are now `ClassHandler.onDeadSweep`, and the three reasons
+      // the sweep can fire are `DeadSweep`.
+      ActorDeadSweep(obj, obj.dead ? DeadSweep.Dead : DeadSweep.Unloaded);
       // ...but a class whose *death* is a state machine still has to run it.
       // Class 0x31 falls, lands, plays its death clip and rots; stopping here
       // left the body frozen wherever its hit points ran out.

@@ -60,11 +60,9 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 | `hud/` | 349 | 1 | ui | the shutter and the caption, drawn |
 | `audio/` | 248 | 1 | ui | `bgm.ts` |
 
-32,322 lines. The four largest files are `game/class10/index.ts` (1468),
-`app/main.ts` (1387), `script/walker.ts` (1377) and `game/actor.ts` (1002).
-68 declared `[diverges]`.
+NUMBERS_PENDING. `game/class10/index.ts` was one of the largest files and is now the class's assembly point, with the civilian split across thirteen modules on the exe's own function boundaries.
 
-### The three open ratchets
+### The two open ratchets
 
 Every layer rule in `tools/verify_layers.py` is an **error** at zero except
 three, which are ratchets: a count that may fall and may never rise, tied to
@@ -107,9 +105,14 @@ sharp one: it gates alive-counting, and the comment at
 unblocked every wait gate in the game. **Step 21**, with the other one — the
 seam has to exist before the writes can go through it.
 
-**`layers-are-systems`, at 1.** `FreeRoam` is never `world.add`ed, and it is
-mode-gated: it only runs in free roam, where the script is not playing and
-there is nothing for a snapshot to be wrong about. **Step 23.**
+**`layers-are-systems` is closed.** It was at 1 — `FreeRoam` was never
+`world.add`ed — and step 23 cleared it. The argument that it was harmless was
+that free roam is mode-gated, so the script is not playing and there is nothing
+for a snapshot to be wrong about; that is true of the *game* state and not of
+the camera, which free roam owns outright while it is enabled. A layer outside
+`World` is not asked to `resync`, so a seek or a load left the camera wherever
+the previous state's last frame had put it. It is a render-phase system now,
+after `CameraDrawSystem`, and the rule is an **error** at zero.
 
 A ratchet is only meaningful with its baseline written down, so both numbers
 stay here even though the reason they are non-zero is current rather than
@@ -545,7 +548,10 @@ web/src/
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
     class10/ class24/ class25/ class30/ class31/ class41/ class44/
-                  one module per class, behind `registry.ts`
+                  one module per class. Each calls `registerClass` itself
+    registry.ts   the handler contracts and an empty table. Imports no class
+    classes.ts    the manifest: the side-effect imports that fill the table
+    despawn.ts    `ActorDespawn`, and the sweep that asks the class what it holds
     globals.ts    `G`, the data segment      actor.ts   the struct at its offsets
     camera/ combat/ effects/                 coli.ts, motion.ts, tables.ts, ...
   bundle/       one module per exporter block, re-exported by index.ts
@@ -1118,7 +1124,7 @@ numbered as that plan numbers them, so there is one list and not two.
 | 15–20 | **Phase 2 — fixtures, golden output, CI.** A bundle-free `mini_stage` so `seek`/`state`/`camera` run everywhere; a determinism test; the export hash suite | ☐ |
 | 21 | **`g_shot_requests` + `host.pickShot` + the camera curve into `game/`.** Clears `render-drives-the-port` **and** `no-actor-writes-in-render`, and the shot queue is an input replay log for free | ☐ |
 | 22 | Discriminated-union `Actor` tail; the ~25 offset aliases go | ☐ |
-| 23 | Self-registering class modules, `ClassFrame` everywhere, `class10` split. Clears `layers-are-systems` | ☐ |
+| 23 | Self-registering class modules, `ClassFrame` everywhere, `onDeadSweep`, `class10` split. Cleared `layers-are-systems` | ☑ |
 | 24 | `script/` decomposition: `state/shutter.ts`, `state/camera_action.ts` as a registry | ☐ |
 | 25 | Bundle schema hash in `manifest.json`, per-stage format | ☐ |
 | 26 | **S7 — `app/pacer.ts`** out of `main.ts` and `hudInputs` into `projection/hud.ts` (done); S8 — the `characters.py` split and the `.rdata`/`.text` rule | ◐ |

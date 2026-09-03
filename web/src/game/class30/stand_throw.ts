@@ -102,10 +102,10 @@ export function ZombiePickThrowingHand(obj: Actor, rng: Rng): number {
   const order = preferRight ? [right, left] : [left, right];
   for (const h of order) {
     if (!h || !ZombieHandIsArmed(obj, h.bone)) continue;
-    obj.attackIndex = h.bone === 5 ? 0 : 1;
+    obj.attack = h.bone === 5 ? 0 : 1;
     return h.bone;
   }
-  obj.attackIndex = 1;
+  obj.attack = 1;
   return 0;
 }
 
@@ -182,14 +182,14 @@ export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
     }
     obj.flags |= ActorFlag.Committed;
     obj.throwHand = ZombiePickThrowingHand(obj, rng);
-    const a = AttackListOf(obj)[String(obj.attackIndex)];
+    const a = AttackListOf(obj)[String(obj.attack)];
     if (a) ActorSetMotionBlended(obj, a.strike, 0, 4);
     obj.sub = Sub.Release;
     return;
   }
 
   if (obj.sub === Sub.Release) {
-    const a = AttackListOf(obj)[String(obj.attackIndex)];
+    const a = AttackListOf(obj)[String(obj.attack)];
     // `obj+0x19C == entry+0x08`, the hit frame, in the play clock.
     if (!a || MotionPlayFrame(obj) !== a.hit_frame) return;
     if (obj.throwHand) {

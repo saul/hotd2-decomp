@@ -17,6 +17,7 @@ import type { Walker } from "../../script/walker";
 import type { CamPaths } from "../../render/campath";
 import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
+import type { HistoryView } from "../ring";
 import type {
   BranchProjection, FeedRow, LoadingProjection, MinimapGraph, SkipProjection,
   SoundProjection, StatusProjection, StripRow, TransportProjection,
@@ -77,6 +78,8 @@ export interface PlayerView {
   readonly appScope: Scope;
   readonly stageLoadedAt: number;
   readonly hasSaved: boolean;
+  /** How much rewindable history the snapshot ring is holding. */
+  readonly history: HistoryView;
   readonly sound: SoundProjection;
   readonly skip: SkipProjection | null;
   readonly branch: BranchProjection | null;

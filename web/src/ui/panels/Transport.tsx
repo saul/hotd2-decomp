@@ -25,7 +25,14 @@ export function Transport() {
     <>
       <button title="Back to the entry block"
               onClick={() => dispatch({ kind: "reset" })}>⏮</button>
-      <button title="Previous instruction"
+      {/* Two different axes, side by side on purpose. `⏪` puts the world
+          back where it was half a second ago, mid-fight, through the
+          snapshot ring; `◀` steps the *script* back one instruction, which
+          replays from the entry block and throws the fight away. */}
+      <button title={`Rewind (shift+←) — ${t.rewindLabel}`}
+              disabled={!t.canRewind}
+              onClick={() => dispatch({ kind: "rewind" })}>⏪</button>
+      <button title="Previous instruction (←)"
               onClick={() => dispatch({ kind: "stepBack" })}>◀</button>
       <button title="Play / pause (space)"
               onClick={() => dispatch({ kind: t.playing ? "pause" : "play" })}>

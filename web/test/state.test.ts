@@ -56,6 +56,7 @@ import { G, ResetGameGlobals } from "../src/game/globals";
 import { GameUpdate } from "../src/game/director";
 import type { GameHost } from "../src/game/host";
 import { Harness } from "../src/app/harness";
+import { SnapshotRing } from "../src/app/ring";
 import { Walker, WALKER_RESTORED_BY_HAND, WALKER_RESTORED_KEYS,
   type WalkerHost } from "../src/script/walker";
 import { seekTo } from "../src/script/seek";
@@ -298,6 +299,52 @@ console.log("\nA driven frame is a whole frame:\n");
   check("...and a wall-derived one does not, so an exact-frame cue is missable",
         !Number.isInteger(G.g_frame) && skipped > 0,
         `ended on ${G.g_frame}, ${skipped} integers stepped over`);
+}
+
+// -- the rewind ring ----------------------------------------------------
+//
+// Bundle-free, because the ring is arithmetic over frame numbers: what it
+// holds, how much of it, and the one rule that keeps it a single timeline.
+// The half that needs a real world -- that a rewind *lands* on the state it
+// saved and replays forward identically -- is the last section of this file.
+console.log("\nThe rewind ring holds one timeline, bounded:\n");
+{
+  const ring = new SnapshotRing();
+  const at = (frame: number): Snapshot =>
+    ({ version: 0, stage: 1, frame, rng: 0, parts: {} });
+  const RUN = 3600;
+  let taken = 0;
+  for (let f = 0; f < RUN; f++) {
+    ring.offer(f, () => { taken++; return at(f); });
+  }
+  check("one snapshot every cadence and not one more",
+        taken === RUN / SnapshotRing.EVERY, `${taken} taken over ${RUN}`);
+  // The whole of the memory bound. Sixty slots at the measured 51.6 KiB is
+  // about three megabytes, which is the number `app/ring.ts` justifies.
+  check("...and never more slots than the bound",
+        ring.view.depth === SnapshotRing.SLOTS, `${ring.view.depth} held`);
+  check("...so the window is the cadence times the bound",
+        ring.view.frames === (SnapshotRing.SLOTS - 1) * SnapshotRing.EVERY,
+        `${ring.view.frames} frames`);
+
+  const a = ring.take(RUN);
+  const b = a ? ring.take(a.frame) : null;
+  check("each take walks back one cadence",
+        !!a && !!b && a.frame - b.frame === SnapshotRing.EVERY,
+        `${a?.frame} then ${b?.frame}`);
+  check("...and taking one removes it, so a rewind cannot stand still",
+        ring.view.depth === SnapshotRing.SLOTS - 2, `${ring.view.depth} left`);
+
+  // The rule that makes it one timeline. A seek, a load or a rewind puts the
+  // clock back; everything the ring was holding is then the future of a run
+  // that no longer happened, and offering it back would hand out a state this
+  // one never passed through.
+  ring.offer(100, () => at(100));
+  check("an older frame drops the future it left behind",
+        ring.view.depth === 1, `${ring.view.depth} held`);
+  check("...and nothing at or after now counts as history",
+        ring.take(100) === null);
+  check("...nor does an empty ring", ring.take(1000) === null);
 }
 
 console.log("\nThe drive seam is a metronome and nothing else:\n");
@@ -577,6 +624,76 @@ console.log("\nThe shutter and the caption are script state:\n");
           describeShutter(r.walker, true) === "closing",
           `read back "${describeShutter(r.walker, true)}"`);
   }
+}
+
+// -- a rewind is a load, and lands where it said it would -----------------
+//
+// The property the ring is worth having only if it holds: **a rewind puts the
+// world back exactly where it was, and the run from there is the run that
+// happened.** It is asserted here rather than trusted because a ring is
+// exactly the sort of thing that can look right and be off by one cadence --
+// and because the load path it uses is the one `test:scope` exists to police,
+// so a rewind that took a shortcut round `resync` would be a rig held in a
+// pose play never produced.
+//
+// `Player.rewind` is mirrored rather than called, the same way `loadInto`
+// mirrors `Player.loadSnapshot`: what is being tested is the ring and the load
+// path, not the browser.
+
+console.log("\nA rewind lands on the state it saved, and replays forward:\n");
+
+/** How many cadences back the walk goes. Ten of them is five seconds. */
+const REWINDS = 10;
+
+for (const stage of STAGES) {
+  const s = script(stage);
+  if (!s) continue;
+
+  const r = build(stage, s);
+  const ring = new SnapshotRing();
+  // The run that happened, frame by frame, with the ring filling as it goes --
+  // which is exactly what `Player.stepOneFrame` does.
+  const seen = new Map<number, string>();
+  for (let i = 0; i < WARM; i++) {
+    step(r);
+    ring.offer(r.ctx.frame, () => r.world.save(r.ctx));
+    seen.set(r.ctx.frame, fingerprint(r));
+  }
+  const end = r.ctx.frame;
+
+  let snap: Snapshot | null = null;
+  for (let i = 0; i < REWINDS; i++) {
+    const next = ring.take(snap ? snap.frame : r.ctx.frame);
+    if (!next) break;
+    snap = next;
+  }
+  if (!snap) {
+    check(`stage ${stage}: the ring held something to rewind to`, false,
+          `${WARM} frames reached frame ${end}`);
+    continue;
+  }
+
+  const err = loadInto(r, snap);
+  check(`stage ${stage}: a rewind of ${end - snap.frame} frames is accepted`,
+        !err, err ?? "");
+  if (err) continue;
+
+  // One: the state it landed on is the state that was there.
+  check(`stage ${stage}: ...and lands on the state frame ${snap.frame} was in`,
+        fingerprint(r) === seen.get(snap.frame),
+        `frame ${r.ctx.frame} does not match what frame ${snap.frame} held`);
+
+  // Two: and the run from there is the run that happened. Every frame of it,
+  // not just the last -- a divergence that heals is still a divergence.
+  const replay: string[] = [];
+  const want: string[] = [];
+  for (let f = r.ctx.frame; f < end; f++) {
+    step(r);
+    replay.push(fingerprint(r));
+    want.push(seen.get(r.ctx.frame) ?? `no record of frame ${r.ctx.frame}`);
+  }
+  check(`stage ${stage}: ...and replays the ${replay.length} frames after it `
+        + `identically`, !firstDiff(want, replay), firstDiff(want, replay));
 }
 
 if (ran === 0) skipNoBundle("state");

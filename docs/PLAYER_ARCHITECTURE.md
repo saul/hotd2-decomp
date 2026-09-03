@@ -302,9 +302,14 @@ What it is for, in rough order of value:
 * **Determinism as an assertion.** Load the same snapshot twice, run both, and
   compare — a divergence means state escaped the two places it is allowed to
   be. That check is three lines and it guards rules 1 through 3 permanently.
-* **Rewind in the debugger.** A ring of snapshots, one a second, and the
-  awkward "it only happens after the second zombie dies" bug becomes
-  reproducible.
+* **Rewind in the debugger.** Built — `app/ring.ts`. A snapshot every half
+  second, sixty deep: **thirty seconds of history for about three megabytes**
+  and 0.6 ms of work a second, both measured on the shipped bundle. The
+  `rewind` command goes through `World.load` → `resync`, the same path a Load
+  and a seek take, so it cannot leave a layer holding state play would never
+  produce; `test:state` asserts that a rewind lands on the state that was
+  saved and that the frames after it replay identically. The awkward "it only
+  happens after the second zombie dies" bug is now reproducible.
 * **Resume.** The deep link already carries a stage, a block and a seed; a
   snapshot carries the rest.
 ## `script/`: four machines wearing one class
@@ -913,9 +918,9 @@ commands is a case in one exhaustive switch.
 
 The extractions that were worth making are the ones that named a seam rather
 than moved lines: `stage_load.ts`, `commands.ts`, `walker_host.ts`, `pacer.ts`,
-`projection/{player,hud,chrome,sidebar,globals,script,stable}.ts`, and the two
-interfaces `PlayerView` and `PlayerCommands`. A line count is not a design
-goal; a declared surface is.
+`ring.ts`, `projection/{player,hud,chrome,sidebar,globals,script,stable}.ts`,
+and the two interfaces `PlayerView` and `PlayerCommands`. A line count is not a
+design goal; a declared surface is.
 
 `pacer.ts` was the last one with a seam to name, and it is the shape of the
 argument. `loop.ts` decides **how much game time a frame owes**; `pacer.ts`
@@ -1082,7 +1087,7 @@ numbered as that plan numbers them, so there is one list and not two.
 | 24 | `script/` decomposition: `state/shutter.ts`, `state/camera_action.ts` as a registry | ☐ |
 | 25 | Bundle schema hash in `manifest.json`, per-stage format | ☐ |
 | 26 | **S7 — `app/pacer.ts`** out of `main.ts` and `hudInputs` into `projection/hud.ts` (done); S8 — the `characters.py` split and the `.rdata`/`.text` rule | ◐ |
-| 27 | The snapshot ring and a `rewind` command | ☐ |
+| 27 | **The snapshot ring and a `rewind` command** — `app/ring.ts` | ☑ |
 | 28–32 | **Phase 4 — docs that describe the tree.** `README`, a generated `STATUS.md`, `PLAN.md`, `LESSONS.md` | ☐ |
 
 **If a rule here cannot be satisfied by the work in front of you, say so, name

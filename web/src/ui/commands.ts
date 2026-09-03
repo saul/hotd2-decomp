@@ -27,6 +27,16 @@ export type UiCommand =
   | { kind: "pause" }
   | { kind: "stepForward" }
   | { kind: "stepBack" }
+  /**
+   * Back half a second of game time, through the snapshot ring.
+   *
+   * A different axis from `stepBack`, which is a *script* step: it seeks to
+   * the previous instruction, which replays from the entry block and throws
+   * the fight away. This puts the world back where it was, mid-fight, and is
+   * the one the "it only happens after the second zombie dies" bug wants.
+   * See `app/ring.ts`.
+   */
+  | { kind: "rewind" }
   | { kind: "reset" }
   | { kind: "seek"; block: number; step: number; op: number }
   | { kind: "scrubFrame"; frame: number; done: boolean }

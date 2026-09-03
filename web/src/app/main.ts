@@ -77,6 +77,7 @@ import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
 import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
+import { SnapshotRing, type HistoryView } from "./ring";
 import { GameSystem, ScriptSystem, drawSystem, syncPortGlobals }
   from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
@@ -220,6 +221,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * stage, an actor or a panel.
    */
   private readonly pacer = new Pacer(this);
+  /**
+   * The history a `rewind` walks back through. See `app/ring.ts`.
+   *
+   * Offered one frame's state per tick and takes one on its own cadence, so
+   * the composition root does not have to know what that cadence is.
+   */
+  private readonly ring = new SnapshotRing();
   readonly script = new ScriptSystem();
   /** Approach, attack permits, and the look-at the camera tracks. */
   readonly game = new GameSystem();
@@ -459,6 +467,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** Every rig in the stage, for the rigs panel. See `render/rigs.ts`. */
   get rigList(): readonly RigSource[] { return this.rigs.list; }
   get hasSaved(): boolean { return !!this.saved; }
+  /** How much rewindable history is held. See `app/ring.ts`. */
+  get history(): HistoryView { return this.ring.view; }
   get sound(): SoundProjection { return soundProjection(this); }
   get skip(): SkipProjection | null { return skipProjection(this); }
   get branch(): BranchProjection | null { return branchProjection(this); }
@@ -534,6 +544,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   /** Load the stage the URL names. The sequence is `app/stage_load.ts`. */
   async loadStage(): Promise<void> {
+    // Three megabytes of another stage's history. `snapshotRefusal` would
+    // refuse every slot of it anyway -- a snapshot names the stage it was
+    // taken against -- so keeping it is guaranteed waste.
+    this.ring.clear();
     await loadStageInto(this);
   }
 
@@ -567,7 +581,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       this.wake();
       if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
       else if (e.code === "ArrowRight") { e.preventDefault(); this.stepOnce(); }
-      else if (e.code === "ArrowLeft") { e.preventDefault(); this.stepBack(); }
+      // Shift reads as "a bigger step back", and it is: `stepBack` moves one
+      // instruction, `rewind` moves half a second of game time. Deliberately
+      // not a letter -- `tools/pacing.mjs` presses `KeyZ` to prove that a key
+      // the player binds nothing to still wakes the loop, and every letter
+      // bound here is one that check can no longer use.
+      else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        if (e.shiftKey) this.rewind(); else this.stepBack();
+      }
       else if (e.code === "Digit1") this.setMode("step");
       else if (e.code === "Digit2") this.setMode("play");
       else if (e.code === "Digit3") this.setMode("free");
@@ -685,6 +707,46 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     }
   }
 
+  /**
+   * Back half a second of game time, through the snapshot ring.
+   *
+   * **Not the same axis as `stepBack`,** which is why both exist. `stepBack`
+   * is a *script* step: it seeks to the previous instruction, and a seek
+   * replays from the entry block with the data segment cleared, so the fight
+   * you were watching is gone. This puts the world back exactly as it stood
+   * half a second ago, mid-fight, which is the thing the awkward bug wants —
+   * *it only happens after the second zombie dies*.
+   *
+   * It goes through `loadSnapshot`, so it is the same `World.load` → `resync`
+   * a Load button press and a seek take. A rewind cannot leave a rig in a pose
+   * play would never produce, because there is no second rebuild path for it
+   * to take.
+   *
+   * The transport is deliberately left alone. A rewind is a jump in time, not
+   * a change of transport state — the same as Load — and rewinding while
+   * playing is precisely how you watch the moment again.
+   */
+  rewind(): void {
+    const snap = this.ring.take(this.ctx.frame);
+    const at = this.ctx.frame;
+    if (!snap) {
+      this.onFeed({
+        seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+        op: { i: -1, at: 0, op: -1, name: "rewind", cat: "flow" },
+        note: "nothing in the ring older than this frame",
+      });
+      return;
+    }
+    const err = this.loadSnapshot(snap);
+    this.onFeed({
+      seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
+      op: { i: -1, at: 0, op: -1, name: "rewind", cat: "flow" },
+      note: err ?? `frame ${at | 0} → ${snap.frame | 0}`
+          + ` · ${this.ring.view.depth} slots left`,
+    });
+    this.pushUrl();
+  }
+
   seekTo(block: number, step: number, op: number): void {
     const w = this.walker;
     if (!w) return;
@@ -721,8 +783,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // "the same address" meant the same script state and a different game.
     this.rng.reseed(this.state.seed ?? 1);
     // The replay rewrites the world; nothing that described the old one may
-    // outlive it.
+    // outlive it. The rewind ring is part of that: `ctx.frame` goes back to
+    // near zero with `g_frame`, so every slot it holds is the future of a
+    // timeline this seek has just left.
     this.newSession();
+    this.ring.clear();
     seekWalkerTo(w, block, step, op);
     // A seek replaces the world exactly as a snapshot load does, so it takes
     // the same rebuild path. Running only half of it is what let a rig keep a
@@ -1010,6 +1075,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx,
                       this.gameStopped ? STOPPED_TICK : DRIVEN_TICK);
+    // The history a rewind walks back through, offered every tick and taken
+    // on the ring's own cadence. Here rather than in the pacer because a
+    // snapshot is game state and this is the one place game state moves.
+    if (!this.gameStopped) {
+      this.ring.offer(this.ctx.frame, () => this.saveSnapshot());
+    }
     // A finished stage is the one thing that stops the accumulator mid-drain:
     // the ticks it would have run are not owed, because there is nothing left
     // to run them.

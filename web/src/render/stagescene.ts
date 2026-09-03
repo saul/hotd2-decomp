@@ -18,10 +18,10 @@ import {
   Object3D,
   Sphere,
   Vector3,
-  type Material,
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ScriptJson } from "../bundle";
+import { subtreeResources } from "./scope3d";
 
 export interface ModelInfo {
   node: Object3D;
@@ -182,14 +182,22 @@ export class StageScene {
     return n;
   }
 
+  /**
+   * Free everything the glTF brought in.
+   *
+   * The stage tree is loaded outside any scope -- `StageScene.load` is an
+   * `await` in the middle of `stage_load.ts` and there is no scope to hang it
+   * on until it exists -- so this is the hand-written half of `ownResources`,
+   * and it goes through the same walk to stay the same walk. It used to be its
+   * own loop over meshes, freeing geometries and materials and **never the
+   * textures**, which on a stage of 2,200 materials is nearly all of the
+   * memory: a stage switch handed back the cheap half.
+   */
   dispose(): void {
-    this.root.traverse((o) => {
-      const mesh = o as Mesh;
-      if (!mesh.isMesh) return;
-      mesh.geometry?.dispose();
-      const mat = mesh.material as Material | Material[];
-      for (const m of Array.isArray(mat) ? mat : [mat]) m?.dispose();
-    });
+    const { geometries, materials, textures } = subtreeResources(this.root);
+    for (const g of geometries) g.dispose();
+    for (const m of materials) m.dispose();
+    for (const t of textures) t.dispose();
   }
 }
 

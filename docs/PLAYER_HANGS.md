@@ -501,7 +501,14 @@ So nothing is broken today. But `render/` is where the stage-1 car spin lived
 precisely because transcribed behaviour drifted there where no check could
 reach it, and a rule with a hole in it is how the next one gets in. Widening
 the layer rule to `render/` would need both hits routed through a generator —
-a *render-only* one, not `ctx.rng`, or it becomes item 12 again. `[open]`
+a *render-only* one, not `ctx.rng`, or it becomes item 12 again.
+
+**Closed**, 2026-09-03, as part of F14 in
+[`REVIEW-2026-09-03.md`](REVIEW-2026-09-03.md). Both layers own an `Rng`
+reseeded on stage load — `Shooting` in `reset`, `BreakableLayer` in `adopt` —
+and `verify_layers.py` gained `no-math-random-in-render` at zero, watched
+firing before it was believed. It is a separate generator from `ctx.rng`
+exactly as this entry required, so item 12 is untouched and still `[open]`.
 
 ## 14. With pillarbox off, the window size changes what you hit
 

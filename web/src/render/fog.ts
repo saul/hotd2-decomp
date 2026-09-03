@@ -100,6 +100,34 @@ export const FOG_RANGE_SCALE = 2;
  */
 const radialUniform = { value: 1 };
 
+/**
+ * Put the fog state on **one** material: the per-mesh fog bit, and the uniform
+ * the patched chunk needs.
+ *
+ * Exported because `prepare` is not the only place materials appear. It runs
+ * once per stage, over the tree the loader just built -- and then `Backdrop`
+ * and `Rain` *clone* materials out of that tree, because the dome must not
+ * write depth and a drop must not occlude the drop behind it. `Material.copy`
+ * copies `fog` and `userData` and does **not** copy `onBeforeCompile`, so the
+ * clones compiled without `vFogRadial` and fell back to planar fog while the
+ * stage around them fogged radially: the sky banded differently as the camera
+ * turned, which reads as a shading bug and is a lifetime one.
+ *
+ * Anything that clones a material after the stage loads calls this on the
+ * clone. It is idempotent.
+ */
+export function prepareFogMaterial(m: Material | null | undefined): void {
+  if (!m) return;
+  const mat = m as Material & { fog?: boolean };
+  mat.fog = fogEnabledFor(mat);
+  // Inject the mode uniform. onBeforeCompile is per *program*, not per
+  // material, so the cost is one call per distinct shader.
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.vFogRadial = radialUniform;
+  };
+  mat.needsUpdate = true;
+}
+
 export class SceneFog implements System {
   readonly id = "render.fog";
   private readonly scene: Scene;
@@ -122,17 +150,7 @@ export class SceneFog implements System {
       const mesh = o as Mesh;
       if (!mesh.isMesh) return;
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const m of mats) {
-        if (!m) continue;
-        const mat = m as Material & { fog?: boolean };
-        mat.fog = fogEnabledFor(mat);
-        // Inject the mode uniform. onBeforeCompile is per *program*, not per
-        // material, so the cost is one call per distinct shader.
-        mat.onBeforeCompile = (shader) => {
-          shader.uniforms.vFogRadial = radialUniform;
-        };
-        mat.needsUpdate = true;
-      }
+      for (const m of mats) prepareFogMaterial(m);
     });
   }
 

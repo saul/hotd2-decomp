@@ -92,8 +92,18 @@ import type { SpawnClass } from "../game/spawn_class";
 import type { Actor } from "../game/actor";
 import type { BreakableLayer } from "./breakables";
 import type { BreakableProp } from "../game/class41/prop_state";
+import { Rng } from "../core/rng";
+import type { Scope } from "../core/scope";
 
 /** `FUN_00404AD0` builds its segment as origin + direction * 1000. */
+/**
+ * The seed the voice picker starts every stage from.
+ *
+ * Any constant would do; what matters is that it is one, and that `reset`
+ * puts it back. A stage played twice sounds the same.
+ */
+const SOUND_PICK_SEED = 0x50554e43;
+
 const SHOT_RANGE = 1000;
 
 const BAMS = 65536 / (Math.PI * 2);
@@ -199,6 +209,24 @@ class ImpactSprites {
   clear(): void {
     for (const e of this.pool) { e.life = 0; e.s.visible = false; }
   }
+
+  /**
+   * Give the pool back.
+   *
+   * The sprites are added to the scene and the splat is a `CanvasTexture`
+   * built here, so all of it is this object's -- and none of it was ever
+   * freed, because nothing owned this object. It is on the app scope now, so
+   * "for the life of the page" is a *statement about the scope* rather than
+   * about a `new` nobody wrote down.
+   */
+  dispose(): void {
+    for (const e of this.pool) {
+      e.s.removeFromParent();
+      (e.s.material as SpriteMaterial).dispose();
+    }
+    this.pool.length = 0;
+    this.tex.dispose();
+  }
 }
 
 export class Shooting implements System {
@@ -226,6 +254,8 @@ export class Shooting implements System {
 
   private combat: CombatJson | null = null;
   private impacts: ImpactSprites | null = null;
+  /** Draw-time noise only — see `pickOne`. Reseeded by `reset`. */
+  private readonly rng = new Rng(SOUND_PICK_SEED);
   /** The breakable props, so a barrel in front of a zombie takes the shot. */
   breakables: BreakableLayer | null = null;
   private readonly _v = new Vector3();
@@ -243,7 +273,8 @@ export class Shooting implements System {
    */
   constructor(private readonly viewport: HTMLElement,
               private readonly dot: HTMLElement,
-              private readonly chars: CharacterLayer) {
+              private readonly chars: CharacterLayer,
+              private readonly scope: Scope) {
     viewport.addEventListener("pointerdown", (e) => {
       if (!this.enabled || e.button !== 0) return;
       e.preventDefault();
@@ -271,7 +302,10 @@ export class Shooting implements System {
     this._camera = camera ?? this._camera;
     this._scene = scene ?? this._scene;
     if (this._scene && !this.impacts) {
-      this.impacts = new ImpactSprites(this._scene);
+      // Owned, not merely made: the pool and its splat texture live as long as
+      // the page and that is a decision, so it is written down where the
+      // disposal tree can show it.
+      this.impacts = this.scope.own(new ImpactSprites(this._scene));
     }
   }
 
@@ -315,8 +349,19 @@ export class Shooting implements System {
     return this.impacts?.busy ?? false;
   }
 
+  /**
+   * One of a table's entries, from the layer's **own** seeded generator.
+   *
+   * Not `ctx.rng`: which impact grunt plays is feedback, not state, and drawing
+   * from the world generator would make the port's next draw depend on how many
+   * shots the viewer had fired — two loads of one snapshot would then diverge
+   * on the first swing, which is the exact failure `core/rng.ts` exists to
+   * prevent. Not `Math.random()` either: a driven run has to replay, and an
+   * ambient draw is the one thing a replay cannot reproduce. Seeded per stage,
+   * carried by nothing.
+   */
   private pickOne<T>(xs: T[] | undefined): T | undefined {
-    return xs?.length ? xs[Math.floor(Math.random() * xs.length)] : undefined;
+    return xs?.length ? xs[this.rng.int(xs.length)] : undefined;
   }
 
   /**
@@ -351,6 +396,9 @@ export class Shooting implements System {
     this.headCombo = 0;
     this.impacts?.clear();
     this.chars.revive();
+    // A stage always starts from the same voice line, so two runs of the same
+    // stage sound the same.
+    this.rng.reseed(SOUND_PICK_SEED);
   }
 
   private fire(e: PointerEvent): void {

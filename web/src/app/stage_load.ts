@@ -23,6 +23,7 @@ import type { StageEntry } from "../bundle";
 import { StageScene } from "../render/stagescene";
 import { CamPaths } from "../render/campath";
 import { RailLayer } from "../render/overlays";
+import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
 import { G } from "../game/globals";
 import { GameMode } from "../game/game_mode";
@@ -43,6 +44,17 @@ function entryFor(p: Player, stage: number,
 }
 
 export async function loadStageInto(p: Player): Promise<void> {
+  // **Which load owns the scope.** Two of the four callers are
+  // `void p.loadStage()` in `ui/commands.ts` -- fire and forget -- so picking
+  // a stage twice in the time one bundle takes to fetch used to run both
+  // loads. The second tore down the scope the first was still building into,
+  // and then both wrote to `p.scene3d` and `p.walker` in whatever order their
+  // fetches finished in. The teardown below is deliberately still
+  // unconditional: the newest call wins, and every older one bails at its
+  // next `await` and frees whatever it had got as far as making.
+  const seq = ++p.stageLoadSeq;
+  const superseded = () => seq !== p.stageLoadSeq;
+
   const entry = entryFor(p, p.state.stage, p.state.original) ??
     entryFor(p, p.state.stage, false);
   if (!entry) return p.fail(`stage ${p.state.stage} is not in this bundle`);
@@ -77,11 +89,17 @@ export async function loadStageInto(p: Player): Promise<void> {
     p.scene.remove(p.scene3d.root);
     p.scene3d.dispose();
   }
-  if (p.cam.rails) p.scene.remove(p.cam.rails.group);
+  // The rails go back with the scope now -- `attachTo` takes the group out of
+  // the scene and `ownResources` frees the polylines and cone meshes the
+  // layer built. Both are below, at the point the new one is made.
+  p.cam.rails = null;
 
   const bundle = await loadStage(entry);
+  if (superseded()) return;
   p.paths = new CamPaths(bundle.cam);
-  p.scene3d = await StageScene.load(bundle.geometryUrl, bundle.script);
+  const scene3d = await StageScene.load(bundle.geometryUrl, bundle.script);
+  if (superseded()) return scene3d.dispose();
+  p.scene3d = scene3d;
   // Honour the per-mesh fog bit and compile the radial-fog variant.
   p.sceneFog.prepare(p.scene3d.root);
   // Adopt the dome models before lighting, so its material swap sees the
@@ -150,8 +168,13 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.lighting.build(p.scene3d.root);
   p.scene.add(p.scene3d.root);
 
+  // Made per stage, from that stage's curves, and never freed until now: one
+  // `Line` per camera path and per object path, each with a geometry and a
+  // material of its own, plus the marker cones. Six stage switches was six
+  // full sets still on the GPU.
   p.cam.rails = new RailLayer(p.paths);
-  p.scene.add(p.cam.rails.group);
+  attachTo(p.ctx.scope, p.scene, p.cam.rails.group);
+  ownResources(p.ctx.scope, p.cam.rails.group);
   // Everything the new stage's layers have to be told about the toggles,
   // in one call. This used to be six checkbox reads that had to be kept in
   // step with the sixteen listeners by hand, and three of them were missing.

@@ -275,7 +275,8 @@ export class Player implements PlayerView, PlayerCommands {
     // insert into: the crosshair and the four hud divs are `#viewport`'s
     // children and `#viewport` is React's element, so React renders them and
     // hands them across in `UiHost`. See `ui/panels/Viewport.tsx`.
-    this.shooting = new Shooting(host.viewport, host.crosshair, this.chars);
+    this.shooting = new Shooting(host.viewport, host.crosshair, this.chars,
+                                 this.appScope);
     this.hudLayer = new HudLayer(host.hud);
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
@@ -586,6 +587,12 @@ export class Player implements PlayerView, PlayerCommands {
    * `seekTo` puts it back.
    */
   private gameTables: ScriptJson | null = null;
+
+  /**
+   * Which stage load is the live one. See `stage_load.ts` — every call takes
+   * the next number and bails at its next `await` if a later one has started.
+   */
+  stageLoadSeq = 0;
 
   /** Point the port's tables at this stage, and copy what `G` holds of them. */
   applyGameTables(script: ScriptJson): void {

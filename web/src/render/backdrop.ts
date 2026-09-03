@@ -45,6 +45,7 @@ import { IDLE_TICK, type System, type Tick }
 import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
 import type { Scope } from "../core/scope";
+import { prepareFogMaterial } from "./fog";
 
 /** The scale the draw applies. Negative Z is deliberate. */
 const DOME_SCALE = new Vector3(1.2, 1.2, -1.2);
@@ -122,6 +123,10 @@ export class Backdrop implements System<RenderContext> {
           // and the depth change must not leak into it.
           const clone = (m as Material).clone();
           clone.depthWrite = false;
+          // The clone is made *after* `sceneFog.prepare` has walked the stage
+          // tree, and `Material.copy` does not carry `onBeforeCompile` -- so
+          // without this the dome fogs planar while the stage fogs radial.
+          prepareFogMaterial(clone);
           if (Array.isArray(mesh.material)) {
             mesh.material[mesh.material.indexOf(m)] = clone;
           } else {
@@ -142,8 +147,17 @@ export class Backdrop implements System<RenderContext> {
   /**
    * Apply the script's state and advance the spin.
    *
-   * `frames` is the elapsed time in 60 Hz frames, matching the per-frame
-   * `angle += spin` the draw does.
+   * `frames` is the number of 60 Hz frames the tick actually advanced,
+   * matching the per-frame `angle += spin` the draw does.
+   *
+   * It used to be `t.wall * 60` — wall-clock seconds — with a note saying that
+   * kept the dome turning while the script was stepped an instruction at a
+   * time. That is a clock the port does not have: the same run at a different
+   * frame rate, or at any transport speed but 1x, put the sky at a different
+   * angle, and a driven run could not be compared against itself. The rule
+   * that `render/` reads the engine's clock and never its own is the same rule
+   * `verify_layers` enforces as `performance`/`Date` in `engine`; this was the
+   * one place above the line that broke it.
    */
   update(ctx: RenderContext, t: Tick): void {
     const w = ctx.walker;
@@ -151,9 +165,7 @@ export class Backdrop implements System<RenderContext> {
     const preset = w.backdropPreset;
     const mode = w.backdropMode;
     const camera = ctx.camera.position;
-    // Wall time, not game time: the dome keeps turning while the script is
-    // stepped an instruction at a time, and stops dead when the clock does.
-    const frames = t.frozen ? 0 : t.wall * 60;
+    const frames = t.frozen ? 0 : t.frames;
     const p = this.presets[preset];
     this.mode = mode;
 

@@ -164,6 +164,19 @@ def main() -> int:
         # Driving that count to zero would have meant deleting the evidence
         # trail, so the measurement was re-aimed at what the rule always meant:
         # the renderer must not *be* the port.
+        # Added at zero once the two sites it would have counted were fixed:
+        # `Shooting.pickOne` and `BreakableLayer.shake`. Neither is a layer
+        # violation in the `no-math-random-in-engine` sense -- nothing in
+        # `render/` is snapshotted -- so the reason is the *other* half of why
+        # the engine's generator is seeded: a driven run has to replay, and an
+        # ambient draw is the one thing a replay cannot reproduce. Each layer
+        # owns a seeded `Rng` reseeded on stage load.
+        "no-math-random-in-render": Rule(
+            "no-math-random-in-render",
+            "a renderer that draws from the ambient generator cannot be "
+            "replayed; a layer's own seeded Rng, reseeded per stage, can -- "
+            "and must not be `ctx.rng`, which the port draws from",
+            "error"),
         "no-engine-writes-in-render": Rule(
             "no-engine-writes-in-render",
             "render may read engine state and must never write it -- a "
@@ -275,6 +288,8 @@ def main() -> int:
             for _ in re.finditer(r"Math\.random\s*\(", code):
                 rules["no-math-random-in-engine"].hit(f"{rel}: Math.random(")
         if lay == "render":
+            for _ in re.finditer(r"Math\.random\s*\(", code):
+                rules["no-math-random-in-render"].hit(f"{rel}: Math.random(")
             for m in G_WRITE_RE.finditer(code):
                 rules["no-engine-writes-in-render"].hit(
                     f"{rel}: {m.group(0).strip()}")

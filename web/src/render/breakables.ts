@@ -41,6 +41,7 @@ import {
 import { KIND_SHADOW } from "../game/class41/kinded";
 import { GENERIC_DRAW_SLOT } from "../game/class41/generic";
 import { BAMS_TO_RAD } from "../core/bams";
+import { Rng } from "../core/rng";
 
 /** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;
@@ -54,6 +55,8 @@ const SHADOW_SCALE = 10;
 const SHAKE_SPREAD = 0x97;
 const SHAKE_CENTRE = 75;
 const SHAKE_SCALE = 0.01;
+/** Where the rattle starts on every stage load. Any constant; one constant. */
+const SHAKE_SEED = 0x52415454;
 
 /** Templates come from the hidden `slots_breakable` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
@@ -171,6 +174,8 @@ export class BreakableLayer implements System<RenderContext> {
   private enabled = true;
   private readonly _box = new Box3();
   private readonly _hit = new Vector3();
+  /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
+  private readonly rng = new Rng(SHAKE_SEED);
 
   constructor() {
     this.group.name = "breakables";
@@ -182,6 +187,8 @@ export class BreakableLayer implements System<RenderContext> {
    * by slot and take them out of the draw.
    */
   adopt(root: Object3D): void {
+    // A stage always rattles the same way -- see `shake`.
+    this.rng.reseed(SHAKE_SEED);
     root.traverse((o) => {
       const x = o.userData as { hod2_kind?: string; hod2_rig?: string };
       if (x?.hod2_kind !== "rig_part") return;
@@ -372,12 +379,18 @@ export class BreakableLayer implements System<RenderContext> {
    * The draw-time rattle. Not state: the engine recomputes it from `rand()`
    * every frame and never writes it back, which is why a shaking prop does not
    * drag its hull along with it.
+   *
+   * The draw is from this layer's own seeded generator rather than
+   * `Math.random()`. Not `ctx.rng`, because a rattle nothing saves must not
+   * advance the generator the port draws its attacks from — a snapshot loaded
+   * twice would then diverge on whichever prop happened to be shaking. And not
+   * the ambient one, because a driven run has to replay, and the whole reason
+   * the engine's `rand()` is seeded is that the arcade run is reproducible.
    */
   private shake(p: BreakableProp): [number, number] {
     if (p.shake <= 0.01) return [0, 0];
     const draw = () =>
-      (Math.floor(Math.random() * SHAKE_SPREAD) - SHAKE_CENTRE)
-      * p.shake * SHAKE_SCALE;
+      (this.rng.int(SHAKE_SPREAD) - SHAKE_CENTRE) * p.shake * SHAKE_SCALE;
     return [draw(), draw()];
   }
 

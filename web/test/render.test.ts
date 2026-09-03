@@ -33,6 +33,13 @@ stubCanvas();
 export {};
 
 const { LabelCache } = await import("../src/render/overlays");
+const { SceneFog } = await import("../src/render/fog");
+const { Backdrop } = await import("../src/render/backdrop");
+const { Rain } = await import("../src/render/rain");
+const { Scope } = await import("../src/core/scope");
+const { ownResources, subtreeResources } = await import("../src/render/scope3d");
+const { CanvasTexture, Group, Mesh, MeshBasicMaterial, PlaneGeometry, Scene } =
+  await import("three");
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -92,6 +99,115 @@ console.log("\nlabel textures: owned, and bounded");
   check("dispose frees every texture and empties the cache",
         c4.size === 0 && keptFreed === 1,
         `${c4.size} left, ${keptFreed} freed`);
+}
+
+console.log("\nthe fog hook survives a late clone");
+
+{
+  // `SceneFog.prepare` is the only thing that puts the radial-fog uniform on
+  // a material, and it runs once, over the stage tree, in `stage_load.ts`.
+  // Both `Backdrop` and `Rain` then *clone* materials out of that tree --
+  // after `prepare` has been and gone -- and `Material.copy` does not copy
+  // `onBeforeCompile`. So the dome and the rain compiled without the uniform
+  // and fogged planar while everything around them fogged radial: the sky
+  // banded differently as the camera turned.
+  //
+  // The assertion is on the own property rather than on the function, because
+  // three puts a no-op `onBeforeCompile` on the prototype. Inheriting it is
+  // exactly the failure.
+  const hooked = (o: object) =>
+    Object.prototype.hasOwnProperty.call(o, "onBeforeCompile");
+
+  const slotted = (slot: number) => {
+    const mesh = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+    mesh.userData = { hod2_slot: slot };
+    const root = new Group();
+    root.add(mesh);
+    return root;
+  };
+
+  const fog = new SceneFog(new Scene());
+
+  {
+    const root = slotted(7);
+    fog.prepare(root);
+    check("prepare hooks what is in the stage tree",
+          hooked(((root.children[0] as InstanceType<typeof Mesh>)
+            .material as object)));
+
+    const backdrop = new Backdrop();
+    backdrop.build(root, new Scope("stage"), {
+      presets: [{ preset: 0, slot_a: 7, slot_b: 0, dy: 0,
+                  spin_bams: 0, angle0_bams: 0 }],
+      used: [0], note: "",
+    });
+    const mats: object[] = [];
+    backdrop.group.traverse((o) => {
+      const m = (o as InstanceType<typeof Mesh>).material;
+      if (m) mats.push(m as object);
+    });
+    check("the dome's clones keep it", mats.length > 0 && mats.every(hooked),
+          `${mats.filter(hooked).length} of ${mats.length} hooked`);
+  }
+
+  {
+    const root = slotted(0x53);
+    fog.prepare(root);
+    const rain = new Rain();
+    // `build` reads nothing off the context but the scope.
+    const ctx = { scope: new Scope("stage") } as unknown as
+      Parameters<typeof rain.build>[0];
+    rain.build(ctx, root, {
+      slot: 0x53, file: null, entry: null, count: 3,
+      fall_per_frame: 2, respawn_below: -7,
+      spawn: { x: [20, -10], y: [50, -25], z: [25, -35] },
+      scale: [1.5, 3.5, 1], roll_bams: 0x100, alpha: 0.5,
+      draw_layer: 0xe, enabled_by_script: 1,
+    });
+    const mats: object[] = [];
+    rain.group.traverse((o) => {
+      const m = (o as InstanceType<typeof Mesh>).material;
+      if (m) mats.push(m as object);
+    });
+    check("and so do the rain drops'", mats.length > 0 && mats.every(hooked),
+          `${mats.filter(hooked).length} of ${mats.length} hooked`);
+  }
+}
+
+console.log("\nwhat a subtree is holding");
+
+{
+  // `StageScene.dispose` had its own loop over meshes, freeing geometries and
+  // materials and never looking at a **texture**. On a stage of 2,200
+  // materials the textures are nearly all of the memory, so a stage switch
+  // handed back the cheap half and kept the expensive one. It goes through the
+  // same walk `ownResources` does now, and this is that walk.
+  const tex = new CanvasTexture(
+    (globalThis as unknown as { document: { createElement: () => never } })
+      .document.createElement());
+  const mat = new MeshBasicMaterial();
+  mat.map = tex;
+  const mesh = new Mesh(new PlaneGeometry(1, 1), mat);
+  // Two meshes sharing one material and one geometry: disposing either twice
+  // is what empties half the next stage.
+  const twin = new Mesh(mesh.geometry, mat);
+  const root = new Group();
+  root.add(mesh, twin);
+
+  const held = subtreeResources(root);
+  check("the walk sees the textures a material carries",
+        held.textures.has(tex), `${held.textures.size} textures`);
+  check("...and counts a shared geometry and material once each",
+        held.geometries.size === 1 && held.materials.size === 1,
+        `${held.geometries.size} geometries, ${held.materials.size} materials`);
+
+  const scope = new Scope("stage");
+  ownResources(scope, root);
+  let freed = 0;
+  tex.addEventListener("dispose", () => { freed++; });
+  scope.dispose();
+  check("and a scope that owns the subtree frees the texture exactly once",
+        freed === 1, `${freed} dispose events`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

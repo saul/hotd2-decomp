@@ -54,6 +54,7 @@ import { G } from "../game/globals";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
+import { prepareFogMaterial } from "./fog";
 
 /** One drawn drop. Its *position* is `G.g_rain_particles[i]`, not here. */
 interface Drop {
@@ -136,6 +137,9 @@ export class Rain implements System<RenderContext> {
           clone.transparent = true;
           clone.opacity = cfg.alpha;
           clone.depthWrite = false;
+          // Cloned after `sceneFog.prepare` ran over the stage tree; the hook
+          // it installed is not something `Material.copy` carries.
+          prepareFogMaterial(clone);
           return clone;
         });
         mesh.material = Array.isArray(mesh.material) ? swap : swap[0];

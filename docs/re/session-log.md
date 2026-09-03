@@ -9081,3 +9081,56 @@ the routine only gates the off-screen latch. So the fix belongs in the seam:
 about it, false means only "there is no camera", and both readers now get what
 the engine gets. **A seam that pre-digests a field for one caller is a seam
 that will lie to the second one.**
+
+## Session — working the review's open findings, and a throttle that was off
+
+Continuing the transposition of GitHub issue #1 into
+[`../REVIEW-2026-09-03.md`](../REVIEW-2026-09-03.md). The review had four
+findings left open; this took the three the user named, F6, F14 and F15.
+
+### F6 was filed as harmless and was the crowd throttle
+
+The finding was a tidiness one: `RankEnemiesByDistance` ends with a sweep of
+`G.g_object_list` writing `rank = -1, queueRank = 0` onto everything it had
+not ranked, which puts class-0x30 offsets on every other class's struct.
+"Harmless today because nothing else reads them."
+
+`FUN_004090B0` says otherwise, and the reading is short enough to quote. Three
+passes — write the raw rank and `0xE`, null the entries that are dead or
+retreating, renumber the survivors — and **all three walk the registration
+list**. There is no fourth pass. An actor that drops out of the set keeps its
+last rank; one that never joins keeps what its spawn wrote.
+
+Those two spawn values are not the same kind of default, and that is the whole
+point:
+
+| | value | what it does |
+|---|---|---|
+| `obj+0x131D` `rank` | `0xFF`, read as `-1` | passes every `rank < allowance` |
+| `obj+0x131E` `queueRank` | `0xE` | fails `queueRank < 3` |
+
+An unranked enemy may *walk in* and may not *swing*. Writing `queueRank = 0`
+puts it at the front of the queue instead, so every enemy past the fourteenth
+passed the cap the pass exists to enforce. The finding was right about the
+line and wrong about the consequence, and reading the routine was the only
+thing that could tell the two apart.
+
+The same four lines carried a second divergence. `RegisterForDistanceRank`
+(`FUN_00409010`) refuses its fifteenth caller *before* `SortEnemiesByDistance`
+runs, so the queue is the first fourteen in object-update order and then
+sorted. The port filtered the whole list, sorted it, and sliced fourteen off
+the front — the nearest fourteen, which is a different set whenever more than
+fourteen are alive. Capping before the sort is a one-line move and it had to
+come with this fix rather than after it.
+
+**One thing is left `[open]` on purpose.** Pass one also sets `DAT_009C7310`
+when a registered actor of char type `0xB`, inside its own allowance, carries
+`obj+0x136C & 0x2000000`. Its only reader is `0x004114C0`, a recursive walk of
+a model's node tree that pushes and pops the matrix stack and, at one selected
+node id, writes a transformed point onto the player object at `+0x100` and
+`+0x10C` — so the flag picks *which bone* of the player a point is taken from.
+That is as far as it was read. It is not named in `functions.tsv` and the
+global is not named in `globals.tsv`, because what the captured point is for
+has not been established and a name would assert that it had been. The port
+records the omission in `combat/rank.ts` where a reader of that routine will
+meet it.

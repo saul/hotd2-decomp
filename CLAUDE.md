@@ -22,10 +22,10 @@ python3 tools/verify_layers.py            # player layer boundaries
 python3 tools/verify_port.py              # the port matches the annotations, docs included
 python3 tools/verify_exporters.py         # no exporter swallows a failure in silence
 python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
-cd web && npx tsc --noEmit && npm run test:port && npm run test:seek \
-    && npm run test:scope && npm run test:state && npm run test:ui \
-    && npm run test:projection && npm run test:camera && npm run test:pose \
-    && npm run test:render && npm run verify:ui
+cd web && npx tsc --noEmit && npm run test:port && npm run test:bundle \
+    && npm run test:seek && npm run test:scope && npm run test:state \
+    && npm run test:ui && npm run test:projection && npm run test:camera \
+    && npm run test:pose && npm run test:render && npm run verify:ui
 python3 tools/baseline.py --game-dir ~/"THE HOUSE OF THE DEAD 2" --verify
 ```
 

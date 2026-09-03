@@ -9214,3 +9214,69 @@ finding was `ShotBuildSegment -> FUN_00405260`, which is a call and not a
 claim about identity. `session-log.md` is exempt from the check entirely: it
 records what was believed *when*, and a check demanding it be current would be
 asking for exactly the rewrite `/decomp` forbids.
+
+## 2026-09-03 — Phase 3 of the review, six items in parallel, and the one that hid
+
+Steps 21, 23, 24, 25, 26 and 27 were run as six independent agents in six git
+worktrees, merged one at a time with the whole check chain re-run between each.
+The worktree isolation was the right call for a reason worth recording: three
+of the six came up branched eighteen commits behind `main`, from a commit that
+predated the review document itself, and were working without Phase 0 or Phase
+1 under them. In a shared tree that would have surfaced as a typecheck failure
+someone else caused; as separate branches it surfaced as a `git worktree list`
+showing three different base commits, before any of them had written a line.
+**Check the base, not the diff.**
+
+The merges cost eight conflicts and every one was two agents being right about
+their own half. The instructive one: step 27 moved the hand-rolled free-roam
+tick into the new `beginFrame` pacing hook, and step 23 deleted it because
+`FreeRoam` had become a `System`. Neither was wrong and the union of the two
+patches was. Taking the hook and dropping the call left `beginFrame(wall)` with
+an unused parameter, which is the honest residue: the hook exists now for a
+reason that has gone away, and saying so in four lines is better than deleting
+a `PacerHost` member someone will re-add.
+
+### The thing that went in green and should not have
+
+Step 25 added two refusals to the bundle loader — a `format` that must match
+and a schema digest over `web/src/bundle/*.ts` that must match — and bumped
+`BUNDLE_FORMAT` to 3. Both refusals are well argued and both were unreachable.
+**Nothing in the check chain calls `loadManifest` or `loadStage`**: every suite
+reads the bundle's JSON straight off disk. So the full chain ran green, ten for
+ten, against an `extract/player` at format 2 that the client would refuse to
+open. A bundle the player rejects was, to the checks, a passing bundle.
+
+That is F7–F10 of this very review — *the checks measure proxies that have
+drifted from the property* — reintroduced by the fix for F8, in the same pass
+that closed it. It is worth being precise about why it was invisible: the
+version constant finally caught something for the first time in the project's
+life, and the reward for that was silence, because the only thing that could
+have noticed was a code path no test exercises.
+
+The fix follows `core/snapshot.ts`'s existing idiom rather than inventing one:
+`snapshotRefusal` is already a pure `string | null` beside a loader that throws
+on it, so `manifestRefusal` and `stageFormatRefusal` are now the same shape and
+a bundle-free `test:bundle` drives them. Fifteen assertions, and neutering
+`manifestRefusal` produces seven failures — the test was made to fail before it
+was believed. One of the assertions is the live repo state: *the format-2 bundle
+on disk is refused.*
+
+**The general lesson, which is the third time this project has paid for it:** a
+check added in the same commit as the thing it checks is asserted by its author
+against the state that author just left. Ask separately whether anything can
+*call* it. `ghidra/run.sh` printing nothing under `set -e`, three tests exiting
+0 having asserted nothing, and now two refusals nothing invokes are one failure
+mode wearing three hats.
+
+### Left open
+
+`S3` (step 22, the discriminated-union `Actor` tail) is deliberately not
+started: it rewrites field access in every file steps 21 and 23 touch. Its
+ground truth is measured — 116 field declarations, 24 exe offsets carrying more
+than one TS name, `+0x1330` aliased five ways, 27 fields used by exactly one
+class and 11 genuinely shared. `flags2` at `obj+0x136C` is the one that matters
+most, because it is already class-polymorphic in the exe and a shared `number`
+is actively lying about it.
+
+Also open, and now marked as such in the review: `core/system.ts` still imports
+`Walker`, so the framework names the one machine it hosts. No phase owns it.

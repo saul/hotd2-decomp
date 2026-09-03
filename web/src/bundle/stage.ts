@@ -82,19 +82,29 @@ function schemaDrift(theirs: Record<string, string> | undefined): string[] {
   return [...names].filter((n) => SCHEMA_FILES[n] !== theirs?.[n]).sort();
 }
 
-export async function loadManifest(): Promise<Manifest> {
-  const m = await getJson<Manifest>(`${ROOT}/manifest.json`);
+/**
+ * Why this client will not read this manifest, or `null` if it will.
+ *
+ * Split out of {@link loadManifest} and pure, for the reason `snapshotRefusal`
+ * is: **a refusal nothing can call is a refusal nothing tests.** Both of the
+ * checks below went in green against a bundle they should have rejected —
+ * `extract/player` was format 2 while `SUPPORTED_FORMAT` was 3 — because every
+ * test reads the bundle's JSON directly and none of them goes through
+ * `loadManifest`. That is the same shape as F7-F10 in the review: the property
+ * was right and the thing measuring it could not fire. `test:bundle` drives
+ * this function, so now it can.
+ */
+export function manifestRefusal(m: Manifest | null | undefined): string | null {
+  if (!m || typeof m !== "object") return "not a manifest";
   if (m.format !== SUPPORTED_FORMAT) {
-    throw new Error(
-      `bundle format ${m.format}, this client reads ${SUPPORTED_FORMAT}. ` +
-        `Rebuild with tools/export_player.py.`,
-    );
+    return `bundle format ${m.format}, this client reads ${SUPPORTED_FORMAT}. `
+      + `Rebuild with tools/export_player.py.`;
   }
   // **This refuses rather than warns, and the reason is what the failure
   // looks like when it is not caught.** A bundle whose shape does not match
   // the declarations reading it does not crash: `getJson<T>` is a bare cast,
   // so a renamed field arrives as `undefined` and the stage renders *almost*
-  // right — no enemies in one region, a camera that never turns — which is
+  // right -- no enemies in one region, a camera that never turns -- which is
   // indistinguishable from a gameplay bug and has cost this project days more
   // than once. A warning in a console nobody has open is not a check.
   //
@@ -103,23 +113,33 @@ export async function loadManifest(): Promise<Manifest> {
   // editing a doc comment here costs nothing. See `tools/hod2lib/schema.py`.
   if (m.schema?.hash !== SCHEMA_HASH) {
     const drift = schemaDrift(m.schema?.files);
-    throw new Error(
-      `this bundle was exported against a different web/src/bundle/ schema` +
-        (drift.length ? `: ${drift.join(", ")} changed since` : "") +
-        `. Rebuild with tools/export_player.py.`,
-    );
+    return `this bundle was exported against a different web/src/bundle/ `
+      + `schema`
+      + (drift.length ? `: ${drift.join(", ")} changed since` : "")
+      + `. Rebuild with tools/export_player.py.`;
   }
+  return null;
+}
+
+export async function loadManifest(): Promise<Manifest> {
+  const m = await getJson<Manifest>(`${ROOT}/manifest.json`);
+  const no = manifestRefusal(m);
+  if (no) throw new Error(no);
   return m;
 }
 
 /** The stage's own version, which the manifest's does not imply. */
+export function stageFormatRefusal(what: string,
+                                   format: number | undefined): string | null {
+  if (format === SUPPORTED_FORMAT) return null;
+  return `${what} is bundle format ${format ?? "(none)"}, this client reads `
+    + `${SUPPORTED_FORMAT}. It was carried into this bundle from an older `
+    + `export; rebuild it with tools/export_player.py --all.`;
+}
+
 function checkStageFormat(what: string, format: number | undefined): void {
-  if (format === SUPPORTED_FORMAT) return;
-  throw new Error(
-    `${what} is bundle format ${format ?? "(none)"}, this client reads ` +
-      `${SUPPORTED_FORMAT}. It was carried into this bundle from an older ` +
-      `export; rebuild it with tools/export_player.py --all.`,
-  );
+  const no = stageFormatRefusal(what, format);
+  if (no) throw new Error(no);
 }
 
 export async function loadStage(entry: StageEntry): Promise<StageBundle> {

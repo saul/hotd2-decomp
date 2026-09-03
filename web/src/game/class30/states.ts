@@ -1,5 +1,5 @@
 /**
- * `g_class30_states` (0x00592AE8) — the 54 states class 0x30 dispatches on.
+ * `g_class30_states` (0x00592AE8) — the 59 entries class 0x30 dispatches on.
  *
  * Read out of the table itself, which matters: an earlier revision of this
  * file guessed the indices and put the strike at 2. Two is
@@ -33,8 +33,36 @@ export enum ZombieState {
   WaitTurn = 5,
   /** `ZombieStateDeath6` (`FUN_00454D20`). */
   Death = 6,
+  /**
+   * `ZombieStateCorpseSink` (`FUN_00454F20`). The corpse: two seconds sinking
+   * into the floor at 0.04 a frame, then the actor leaves the pool. Every
+   * character type but 0x12 and 3 ends here.
+   */
+  CorpseSink = 7,
+  /**
+   * `ZombieStateCorpseBlink` (`FUN_00454FD0`). The same two seconds, flickering
+   * instead of sinking — character types 0x12 and 3.
+   */
+  CorpseBlink = 8,
+  /**
+   * `ZombieStateDeathKnockbackArc` (`FUN_004550E0`). The other death: the body
+   * is thrown on a ballistic arc, falls under gravity and bounces before it
+   * becomes a corpse. `ZombieOnShot` picks it over {@link Death} for an actor
+   * that is being carried, is in state 0x34, or has body condition 5 or 6.
+   *
+   * **Not ported** — see the `[diverges]` in `class30/on_shot.ts`.
+   */
+  DeathKnockbackArc = 9,
   /** `ActorAbortAttackAndLeave` (`FUN_0045D9F0`). */
   Leave = 10,
+  /**
+   * `ZombieStateDeathFallAndBounce` (`FUN_00456DF0`). Where {@link Death}
+   * sends an actor that still has hold of a weapon — `obj+0x34` bit
+   * `0x1000000`, {@link ActorFlag.HoldingWeapon} — whose death clip is 0x3F9.
+   * It falls under gravity, bounces once at a quarter of its speed, plays the
+   * landing clip 0x3F8 and settles into {@link ZombieEnterCorpseState}.
+   */
+  DeathFallAndBounce = 0xC,
   /**
    * `ZombieStateFallToGround` (`FUN_00454B90`). Where
    * `ActorSnapToGroundHeight` sends an actor that is more than ten units above

@@ -364,7 +364,21 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   // `LeaveCountNow` — could never count that loop. She never left
   // `g_civilians_alive`, and `wait_scripted_actors` never opened.
   const ownDeath = g_class_handlers[obj.cls]?.updatesWhenDead ?? false;
-  if (ownReaction) obj.pendingHit = { bone, result };
+  // **The hit record, for the two classes whose update reads one.**
+  // `MarkActorShot` (`FUN_00404DB0`) raises `obj+0x34` bit 3 and writes
+  // `obj+0x190` for *every* actor, and both `ThrowerOnShot` (`FUN_004499A0`)
+  // and `ZombieOnShot` (`FUN_00453EB0`) open by testing that bit. This used to
+  // be the thrower's alone, so class 0x30 had no edge into its own death
+  // states at all -- which is why a killed zombie stood where it fell.
+  //
+  // Not keyed on `updatesWhenDead`, though the two sets happen to differ by
+  // one: class 0x10 is in that set and `CivilianCheckShot` reads `pendingHit`
+  // as one of three things that mean "hit this frame", so widening the write
+  // would change when a civilian's on-shot script runs. Two named classes,
+  // because two engine routines read the field.
+  if (obj.cls === SpawnClass.Thrower || obj.cls === SpawnClass.Zombie) {
+    obj.pendingHit = { bone, result };
+  }
   const react = survived && !ownReaction
     ? ActorReactToHit(obj, bone, result) : undefined;
 
@@ -425,13 +439,22 @@ export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
     obj.react = null;
     obj.flags |= ActorFlag.Dead;
     // **A class that reads a hit has to be given one.** `ResolveHit` records
-    // `pendingHit` for class 0x31 and `ThrowerOnShot` is the only thing that
-    // routes a thrower into its death chain — so without this the button left
-    // a thrower flagged dead and still pouncing, while the enemy gate, which
-    // was counting something else, opened behind it. The bone is 1, the
+    // `pendingHit` for the classes whose own routine reads one, and
+    // `ThrowerOnShot` / `ZombieOnShot` are the only things that route a
+    // thrower or a zombie into its death chain — so without this the button
+    // left a thrower flagged dead and still pouncing, while the enemy gate,
+    // which was counting something else, opened behind it. The bone is 1, the
     // torso: bone 0 never reacts and bone 2 would decapitate, and this stands
     // in for a killing shot rather than a particular one.
-    if (obj.cls === SpawnClass.Thrower) {
+    //
+    // Class 0x30 is routed the same way, and **not** hand-assembled. It used
+    // to be given `dead`, the flag and a death clip here and nothing else,
+    // which is three of the eleven things `ZombieStateDeath6` does and none of
+    // the teardown: no permit release, no untrack, no retire from either
+    // count, no corpse and no despawn. Reproducing a state machine's effects
+    // at its call site is exactly what `ThrowerOnShot`'s note above was
+    // written against, and the same reasoning covers both classes now.
+    if (obj.cls === SpawnClass.Thrower || obj.cls === SpawnClass.Zombie) {
       obj.pendingHit = { bone: 1, result: HitResultCode.Damaged };
     }
     // Same rule as `ResolveHit` above: a class that runs its own death gets

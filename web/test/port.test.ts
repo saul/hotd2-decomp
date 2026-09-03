@@ -64,6 +64,8 @@ import {
   TryClaimAttackSlot,
 } from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
+import { ZombieEnterCorpseState } from "../src/game/class30/death";
+import { ZombieOnShot } from "../src/game/class30/on_shot";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount, UNCOUNTED_CHAR_TYPE,
   UNCOUNTED_INITIAL_STATE,
@@ -248,6 +250,10 @@ const TYPE: CharacterType = {
     // State 26's clips: 955 (0x3BB) the jump, and 1015 (0x3F7) the limp of a
     // corpse shot out of the air -- which is not a landing animation.
     "955": motion(30), "1015": motion(20),
+    // The death of an actor still holding something: 1017 (0x3F9) is what
+    // `ChooseDeathMotion` gives it and 1016 (0x3F8) the clip
+    // `ZombieStateDeathFallAndBounce` cuts to when the body lands.
+    "1017": motion(40), "1016": motion(20),
   },
 };
 
@@ -811,11 +817,11 @@ console.log("ActorIsOnScreen:");
   // **Dying holds the latch if the release is only half done.** The engine
   // frees it from the death state — `ZombieStateDeath6` (`FUN_00454D20`) sub 1
   // runs `ZombieReleasePermitAndUntrack` (`FUN_004565A0`), whose first line is
-  // `ReleaseAttackSlot`. The port has no class-0x30 death state, so
-  // `GameUpdate`'s dead-actor sweep does it; clearing `g_attack_permits`
-  // there without lifting `g_attack_committed` left every remaining enemy
-  // refused on `TryClaimAttackSlot`'s first line, and a crowd walked to the
-  // ring and stood there wanting a permit nobody held.
+  // `ReleaseAttackSlot`. The port now runs that state, and `GameUpdate`'s
+  // dead-actor sweep is the backstop behind it; clearing `g_attack_permits`
+  // without lifting `g_attack_committed` left every remaining enemy refused on
+  // `TryClaimAttackSlot`'s first line, and a crowd walked to the ring and
+  // stood there wanting a permit nobody held.
   check("an off-screen attacker takes the latch again",
         TryClaimAttackSlot(z, offscreen) && G.g_attack_committed === 1,
         `latch ${G.g_attack_committed}`);
@@ -859,7 +865,16 @@ console.log("ResolveHit:");
   z.hp = 1;
   const kill = ResolveHit(z, 1, 0, NULL_HOST, rng);
   check("zero hit points kills, once", kill.killed && z.dead);
-  check("and picks a directional death", z.death !== null);
+  // **The clip is not `ResolveHit`'s.** Class 0x30 runs its own death states
+  // now, so it is in `updatesWhenDead` and the shared directional clip is
+  // withheld exactly as it is from class 0x31 and class 0x10:
+  // `ChooseDeathMotion` (`FUN_004560B0`) picks it, from `ZombieStateDeath6`
+  // sub 0. What `ResolveHit` leaves instead is the hit record `ZombieOnShot`
+  // (`FUN_00453EB0`) reads on the actor's next update.
+  check("no shared death clip: class 0x30 has its own state machine",
+        z.death === null, `death ${JSON.stringify(z.death)}`);
+  check("...and the hit its death chain reads is left on the actor",
+        z.pendingHit !== null, `${JSON.stringify(z.pendingHit)}`);
   const again = ResolveHit(z, 1, 0, NULL_HOST, rng);
   check("a hit on a corpse scores nothing", !again.killed
         && again.result === 0);
@@ -5330,8 +5345,21 @@ console.log("\n`ActorDeadSweep`, and what each class gives back:");
         G.g_enemies_alive === 1 && G.g_enemies_present === 1,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
 
+  // **A dead zombie keeps both counts here**, the same as a dead thrower
+  // below. Class 0x30's death is four states and they retire from the counts
+  // where the exe does -- `ZombieReleasePermitAndUntrack` (`FUN_004565A0`)
+  // drops the alive count as state 6 opens, `ZombieEnterCorpseState`
+  // (`FUN_00456740`) the present count when the death clip ends. The sweep
+  // used to retire both on this reason, which collapsed the one window
+  // `wait_enemies_present` and `wait_enemies_alive` exist to tell apart.
   ActorDeadSweep(z, DeadSweep.Dead);
-  check("a dead one leaves both, on the same frame",
+  check("a dead zombie gives the permit back",
+        z.attackPermit === -1 && G.g_attack_permits[0] === -1);
+  check("...and keeps both counts: its own death states retire them",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  ActorDeadSweep(z, DeadSweep.Despawned);
+  check("a despawned one leaves both",
         G.g_enemies_alive === 0 && G.g_enemies_present === 0,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
   ActorDeadSweep(z, DeadSweep.Despawned);
@@ -5885,6 +5913,264 @@ console.log("\na dead civilian releases its captors:");
         captor.flags.toString(16));
   check("...and sets `obj+0x136C` bit 0x1 on each",
         (captor.flags2 & 1) === 1, captor.flags2.toString(16));
+}
+
+// -- 15. class 0x30's own death chain ---------------------------------------
+
+/**
+ * The bug this section exists for: **a killed zombie never left the pool.**
+ *
+ * `ResolveHit` set `dead`, the director stopped updating the actor, and it
+ * stood there for the rest of the stage still counted in `g_enemies_present`.
+ * `tools/killall.mjs` showed three of them at `dead=true visible=true
+ * state=18` nine hundred frames after the kill.
+ *
+ * Every assertion below fails without `class30/death.ts` and
+ * `class30/on_shot.ts`: there was no edge into state 6, and no state 6.
+ */
+console.log("class 0x30, the death chain:");
+{
+  const rng = new Rng(11);
+  const events = scene(1, rng);
+  const z = G.g_object_list[0];
+  z.hp = 1;
+  const alive0 = G.g_enemies_alive;
+  const present0 = G.g_enemies_present;
+  check("one zombie, alive and present", alive0 === 1 && present0 === 1,
+        `${alive0}/${present0}`);
+  TryClaimAttackSlot(z, NULL_HOST);
+
+  ResolveHit(z, 1, 0, NULL_HOST, rng);
+  check("the killing shot leaves a hit record for `ZombieOnShot`",
+        z.pendingHit !== null && z.dead);
+  check("...and nothing has moved the actor into a state yet",
+        z.state !== ZombieState.Death, `state ${z.state}`);
+
+  // One update. `EnemyZombieUpdate` runs `ZombieOnShot` first, so state 6 is
+  // entered and its subs 0, 1 and 2 all run on this frame -- the engine falls
+  // through 0x00454D42 into 0x00454D49 and on into 0x00454D90.
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("one update puts it in `ZombieState.Death`",
+        z.state === ZombieState.Death, `state ${z.state}`);
+  check("...at sub 2, because subs 0 and 1 are a fallthrough",
+        z.sub === 2, `sub ${z.sub}`);
+  check("...playing a death clip picked by `ChooseDeathMotion`",
+        z.motion === 900 || z.motion === 901, `motion ${z.motion}`);
+  check("...with `obj+0x34` bits 0x22000 raised",
+        (z.flags & (ActorFlag.Airborne | ActorFlag.ArcSpent))
+          === (ActorFlag.Airborne | ActorFlag.ArcSpent),
+        z.flags.toString(16));
+  check("...the permit and the latch given back",
+        z.attackPermit === -1 && G.g_attack_committed === 0
+        && G.g_attack_permits.every((x) => x === -1));
+  check("...out of `g_enemies_alive`", G.g_enemies_alive === 0,
+        `${G.g_enemies_alive}`);
+  // The whole point of two counters: the body is on stage, so it is present.
+  check("...but still present, because the corpse is not finished",
+        G.g_enemies_present === 1, `${G.g_enemies_present}`);
+  check("...and still in the pool",
+        G.g_object_list.some((o) => o.at === z.at));
+
+  // The death clip plays **exactly once**: state 6 leaves at
+  // `g_motion_play_length[obj+0x1B4] - 1`, which for the fixture's 30-frame
+  // clips is 58 ticks.
+  const clipTicks = MotionPlayLength(z);
+  let toCorpse = -1;
+  for (let i = 0; i < 400 && toCorpse < 0; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    if (z.state === ZombieState.CorpseSink) toCorpse = i + 1;
+  }
+  check("the clip runs once and hands to `ZombieEnterCorpseState`",
+        toCorpse > 0 && toCorpse <= clipTicks + 2,
+        `after ${toCorpse} frames, clip ${clipTicks}`);
+  check("...which is what drops `g_enemies_present`",
+        G.g_enemies_present === 0, `${G.g_enemies_present}`);
+  check("...and freezes the pose", (z.flags & ActorFlag.PoseFrozen) !== 0,
+        z.flags.toString(16));
+  check("...and takes the corpse out of both pushes",
+        (z.flags2 & (ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors))
+          === 0, z.flags2.toString(16));
+
+  // 0x78 frames of sinking, then `ActorDespawn`. **The engine's own timer, not
+  // an invented one** -- `FUN_00454F20` writes `obj+0x1330 = 0x78` and counts
+  // it down, and calls `ActorDespawn` itself at the end.
+  const y0 = z.pos.y;
+  let left = -1;
+  for (let i = 0; i < 400 && left < 0; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    if (!G.g_object_list.some((o) => o.at === z.at)) left = i + 1;
+  }
+  check("the corpse sinks", z.pos.y < y0 - 1, `${y0} -> ${z.pos.y}`);
+  check("...and leaves the pool after 0x78 frames",
+        left >= 0x76 && left <= 0x7a, `after ${left} frames`);
+  check("...taking both counts with it, once",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+}
+
+console.log("class 0x30, the corpse that blinks:");
+{
+  const rng = new Rng(12);
+  const events = scene(0, rng);
+  // `ZombieEnterCorpseState` sends character types 0x12 and 3 to state 8.
+  const z = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "blinker");
+  z.visible = true;
+  z.hp = 1;
+  z.charType = 3;
+  z.motion = 900;
+  ZombieEnterCorpseState(z);
+  check("character type 3 becomes a blinking corpse",
+        z.state === ZombieState.CorpseBlink, `state ${z.state}`);
+  z.charType = 1;
+  z.state = ZombieState.Death;
+  ZombieEnterCorpseState(z);
+  check("...and every other type a sinking one",
+        z.state === ZombieState.CorpseSink, `state ${z.state}`);
+
+  z.charType = 3;
+  z.state = ZombieState.CorpseBlink;
+  z.sub = 0;
+  const alpha: number[] = [];
+  const y0 = z.pos.y;
+  for (let i = 0; i < 4; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    alpha.push(z.alpha);
+  }
+  check("the blink is the countdown's parity, first frame visible",
+        alpha[0] === 1 && alpha[1] === 0 && alpha[2] === 1 && alpha[3] === 0,
+        JSON.stringify(alpha));
+  check("...and it does not sink", z.pos.y === y0, `${y0} -> ${z.pos.y}`);
+}
+
+console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
+{
+  const rng = new Rng(13);
+  scene(0, rng);
+
+  // `TEST CH, 0x40` at 0x00453F88: a zombie shot in mid-leap keeps flying.
+  const leaper = ActorSpawn(0x3100, SpawnClass.Zombie, 1, "leaper");
+  leaper.visible = true;
+  leaper.state = ZombieState.DelayedLeap;
+  leaper.flags2 |= ZombieFlag2.Leaping;
+  leaper.dead = true;
+  leaper.flags |= ActorFlag.Dead;
+  leaper.pendingHit = { bone: 1, result: 1 };
+  ZombieOnShot(leaper);
+  check("a zombie shot mid-leap is not sent to a death state",
+        leaper.state === ZombieState.DelayedLeap, `state ${leaper.state}`);
+  check("...but the death is latched, so the next shot cannot re-enter",
+        (leaper.flags2 & ZombieFlag2.DiedInFlight) !== 0,
+        leaper.flags2.toString(16));
+
+  // The once-only latch. A burst must not knock a corpse back to sub 0.
+  const z = ActorSpawn(0x3200, SpawnClass.Zombie, 1, "shot twice");
+  z.visible = true;
+  z.dead = true;
+  z.flags |= ActorFlag.Dead;
+  z.pendingHit = { bone: 1, result: 1 };
+  ZombieOnShot(z);
+  check("a killed zombie enters state 6", z.state === ZombieState.Death);
+  z.sub = 2;
+  z.pendingHit = { bone: 1, result: 1 };
+  ZombieOnShot(z);
+  check("...and a second shot does not restart it", z.sub === 2, `sub ${z.sub}`);
+
+  // The carried arm. The engine picks state 9 here; the port takes state 9's
+  // terminus instead -- see the `[diverges]` in `class30/on_shot.ts` -- so
+  // what is pinned is the *near-target latch*, which is state 9's own input
+  // and is `[proved]` at 0x00454006.
+  const carried = ActorSpawn(0x3300, SpawnClass.Zombie, 1, "carried");
+  carried.visible = true;
+  carried.dead = true;
+  carried.flags |= ActorFlag.Dead;
+  carried.flags2 |= ZombieFlag2.Carried;
+  carried.state = 0x1b;
+  carried.pos = vec3(0, 0, 0);
+  carried.arcTo = { x: 10, y: 0, z: 0 };
+  carried.pendingHit = { bone: 1, result: 1 };
+  ZombieOnShot(carried);
+  check("a carried zombie shot within 18.0 of its arc target latches bit 0x8",
+        (carried.flags2 & ZombieFlag2.ShotNearArcTarget) !== 0,
+        carried.flags2.toString(16));
+
+  const far = ActorSpawn(0x3400, SpawnClass.Zombie, 1, "carried, far");
+  far.visible = true;
+  far.dead = true;
+  far.flags |= ActorFlag.Dead;
+  far.flags2 |= ZombieFlag2.Carried;
+  far.state = 0x1b;
+  far.pos = vec3(0, 0, 0);
+  far.arcTo = { x: 30, y: 0, z: 0 };
+  far.pendingHit = { bone: 1, result: 1 };
+  ZombieOnShot(far);
+  check("...and one further away than that does not",
+        (far.flags2 & ZombieFlag2.ShotNearArcTarget) === 0,
+        far.flags2.toString(16));
+}
+
+console.log("class 0x30, dying with a weapon still in hand:");
+{
+  const rng = new Rng(14);
+  const events = scene(0, rng);
+  const z = ActorSpawn(0x3500, SpawnClass.Zombie, 1, "axe man");
+  z.visible = true;
+  z.hp = 1;
+  z.pos = vec3(0, 40, 0);
+  // `obj+0x34` bit 0x1000000, which `ZombieStateStandAndThrow` raises while a
+  // thrower has a weapon. `ChooseDeathMotion` gives it clip 0x3F9 and
+  // `ZombieStateDeath6` sub 2 reads the same bit.
+  z.flags |= ActorFlag.HoldingWeapon;
+  z.dead = true;
+  z.flags |= ActorFlag.Dead;
+  z.pendingHit = { bone: 1, result: 1 };
+
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("it takes clip 0x3F9, not a directional death", z.motion === 0x3f9,
+        `motion ${z.motion}`);
+  check("...and state 6 hands it to state 12 rather than to a corpse",
+        z.state === ZombieState.DeathFallAndBounce, `state ${z.state}`);
+
+  // Sixty ticks of the death clip, then the fall opens.
+  for (let i = 0; i < 40; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("state 12 holds the clip before it falls", z.sub === 1, `sub ${z.sub}`);
+  const y0 = z.pos.y;
+  for (let i = 0; i < 40; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("...then falls under gravity", z.sub === 2 && z.pos.y < y0,
+        `sub ${z.sub}, ${y0} -> ${z.pos.y}`);
+  for (let i = 0; i < 400; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    if (z.state === ZombieState.CorpseSink) break;
+  }
+  check("...and settles into the corpse", z.state === ZombieState.CorpseSink,
+        `state ${z.state} sub ${z.sub} y ${z.pos.y}`);
+}
+
+console.log("`ActorKillAll` routes class 0x30 through its death chain:");
+{
+  const rng = new Rng(15);
+  const events = scene(2, rng);
+  const [a, b] = G.g_object_list;
+  const n = ActorKillAll(0, rng);
+  check("the button kills both", n.enemies === 2 && a.dead && b.dead);
+  // The whole reason to route rather than hand-assemble: what the old code set
+  // by hand -- `dead`, the flag, a clip -- is three of the eleven things
+  // `ZombieStateDeath6` does, and none of the teardown.
+  check("...leaving the hit its death chain reads, not a clip",
+        a.pendingHit !== null && a.death === null,
+        `${JSON.stringify(a.pendingHit)} / ${JSON.stringify(a.death)}`);
+  run(1, rng, events);
+  check("...so one update puts both in state 6",
+        a.state === ZombieState.Death && b.state === ZombieState.Death,
+        `${a.state} / ${b.state}`);
+  // 900 frames is what `tools/killall.mjs` ran, and what used to leave three
+  // bodies standing.
+  run(900, rng, events);
+  check("...and 900 frames later the pool is empty of them",
+        !G.g_object_list.some((o) => o.at === a.at || o.at === b.at),
+        `${G.g_object_list.length} left`);
+  check("...with both counters back at zero",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

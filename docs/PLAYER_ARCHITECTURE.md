@@ -64,11 +64,11 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 `game/class10/index.ts` (1378), `app/main.ts` (1123) and `game/actor.ts` (842).
 68 declared `[diverges]`.
 
-### The two open ratchets
+### The three open ratchets
 
 Every layer rule in `tools/verify_layers.py` is an **error** at zero except
-two, which are ratchets: a count that may fall and may never rise, tied to the
-step that clears it. Both are real rather than accounting.
+three, which are ratchets: a count that may fall and may never rise, tied to
+the step that clears it. All three are real rather than accounting.
 
 **`render-drives-the-port`, at 12.** The camera shot calls
 `CamAdvancePathFrame` and `CamSetPathTarget`; the character layer spawns
@@ -76,8 +76,9 @@ actors; the shooting layer takes a shot at a breakable and scores it. Every one
 is the *renderer* deciding something the port should decide, because the input
 that triggers it — a pointer, a curve evaluation — lives on this side of the
 seam. Closing it means the port owning a shot queue rather than the layer that
-noticed the click: gameplay work, not a refactor. **It has no step.** Assigning
-one is a decision for this document, never a line edit in the checker.
+noticed the click: gameplay work, not a refactor. **Step 21** is where it
+happens; assigning that was a decision for this document, never a line edit in
+the checker.
 
 It came down from 13 when the character layer stopped calling each class's
 `Init`. That call was the one that mattered most, because it was not only in
@@ -92,9 +93,23 @@ adopted at build, but nothing is a game object until the instruction that makes
 one has run. What is left of the rule here is `ActorSpawn` and `ActorDespawn`
 themselves — the layer still *performs* the spawn, it no longer *decides* it.
 
+**`no-actor-writes-in-render`, at 6.** `render/characters.ts` writes
+`inst.a.visible` twice, `inst.a.lookAt` three times, and
+`render/characters/gore.ts` writes `inst.a.boneSlot`. All six are the same
+shape: the renderer computing something only three.js can compute — a bone's
+world position, whether a model has been built — and writing it *straight onto
+the actor* instead of handing it across the `GameHost` seam that exists for
+exactly this. They are engine writes; `no-engine-writes-in-render` reported
+`ok` over them for months because its regex only ever matched `G.…=`, and an
+actor field is engine state whichever handle reaches it. `a.visible` is the
+sharp one: it gates alive-counting, and the comment at
+`render/characters.ts:414` records that folding the view switch into it once
+unblocked every wait gate in the game. **Step 21**, with the other one — the
+seam has to exist before the writes can go through it.
+
 **`layers-are-systems`, at 1.** `FreeRoam` is never `world.add`ed, and it is
 mode-gated: it only runs in free roam, where the script is not playing and
-there is nothing for a snapshot to be wrong about.
+there is nothing for a snapshot to be wrong about. **Step 23.**
 
 A ratchet is only meaningful with its baseline written down, so both numbers
 stay here even though the reason they are non-zero is current rather than
@@ -1025,15 +1040,45 @@ policies and the seek planner — and `WalkerHost` is 14 methods. The split is
 `vm.ts`, `waits/`, `state/`, `seek.ts`, with `WalkerHost` down to about six.
 "four machines wearing one class" above is the reasoning.
 
-**A step for `render-drives-the-port`.** The ratchet stands at 13 with no step
-assigned, which is the one place this document currently owes an answer.
-Closing it means the port owning a shot queue rather than the layer that
-noticed the click — gameplay work rather than a refactor, and a `/gameplay-port`
-job rather than a restructuring one.
+**The three ratchets.** Steps 21 and 23 below close all three. Closing
+`render-drives-the-port` and `no-actor-writes-in-render` means the port owning
+a shot queue rather than the layer that noticed the click — gameplay work
+rather than a refactor, and a `/gameplay-port` job rather than a restructuring
+one.
 
 Everything else here is built. Work that changes the shape of the player
 updates this document in the same commit; a plan that describes a layout the
 tree no longer has is worse than no plan.
+
+## Order of work
+
+**This is the table `CLAUDE.md` and the `/gameplay-port` skill send you to when
+a rule blocks the work in front of you, and the one `verify_layers.py` names in
+`step N`.** It went missing in an edit and stayed missing: for a while every
+escalation path in the repo pointed at a section that did not exist, and the
+checker printed step numbers against nothing. A rule you cannot escalate is a
+rule people route around.
+
+The steps are the phases of [`REVIEW-2026-09-03.md`](REVIEW-2026-09-03.md),
+numbered as that plan numbers them, so there is one list and not two.
+`☐` untouched · `◐` in progress · `☑` done.
+
+| Step | What | State |
+|---|---|---|
+| 1–7 | **Phase 0 — make the checks tell the truth.** The test skip, the bundle path, `verify_port`'s coverage and duplicate-address rules, `verify_layers`' widened regexes, the two version constants, this table, the install manifest | ◐ |
+| 8–14 | **Phase 1 — the gameplay bugs and the leaks.** Integer motion clock, seek reseed, the duplicate `ThrowerLeave`, `stepOnce`, the count latches, the unowned GPU caches, the UI defects | ◐ |
+| 15–20 | **Phase 2 — fixtures, golden output, CI.** A bundle-free `mini_stage` so `seek`/`state`/`camera` run everywhere; a determinism test; the export hash suite | ☐ |
+| 21 | **`g_shot_requests` + `host.pickShot` + the camera curve into `game/`.** Clears `render-drives-the-port` **and** `no-actor-writes-in-render`, and the shot queue is an input replay log for free | ☐ |
+| 22 | Discriminated-union `Actor` tail; the ~25 offset aliases go | ☐ |
+| 23 | Self-registering class modules, `ClassFrame` everywhere, `class10` split. Clears `layers-are-systems` | ☐ |
+| 24 | `script/` decomposition: `state/shutter.ts`, `state/camera_action.ts` as a registry | ☐ |
+| 25–27 | Bundle schema hash, `app/pacer.ts`, the snapshot ring and `rewind` | ☐ |
+| 28–32 | **Phase 4 — docs that describe the tree.** `README`, a generated `STATUS.md`, `PLAN.md`, `LESSONS.md` | ☐ |
+
+**If a rule here cannot be satisfied by the work in front of you, say so, name
+the step above that clears it, and ask whether to do that step first or change
+the plan.** Raising a baseline is a change to this document. There is no
+suppression comment, on purpose.
 
 ## The check that makes it real: `tools/verify_port.py`
 

@@ -55,12 +55,34 @@ MAY_IMPORT = {
 }
 
 IMPORT_RE = re.compile(r"""(?:from|import)\s+["']([^"']+)["']""")
-DOM_RE = re.compile(r"\b(document|window|HTMLElement|localStorage)\b")
+#: `performance` and `Date` are here with the DOM because they are the same
+#: kind of leak: a value the engine cannot get twice. A port that reads
+#: wall-clock time cannot be replayed from a snapshot any more than one
+#: that reads `Math.random()` can, and `render/backdrop.ts` spinning on
+#: `t.wall * 60` is the bug this would have caught had it been an engine
+#: file. Both are at zero.
+DOM_RE = re.compile(
+    r"\b(document|window|HTMLElement|localStorage|performance|Date)\b")
 #: `G.x = `, `G.x[i] = `, `G.x.y = ` -- an assignment, not a comparison.
 G_WRITE_RE = re.compile(r"\bG\.\w+(?:\[[^\]]*\]|\.\w+)*\s*(?:[-+*/|&^]|\+\+|--)?=(?!=)")
+#: `inst.a.visible = `, `inst.a.lookAt.x = `, `inst.a.boneSlot[b] = ` -- a write
+#: to a *game object's* fields from outside the engine.
+#:
+#: `no-engine-writes-in-render` only ever matched `G.…=`, so it reported `ok`
+#: over six of these. They are the same violation by a different route: an
+#: actor field is engine state whether it is reached through `G` or through a
+#: renderer's own handle on the object, and `a.visible` in particular gates
+#: alive-counting -- the comment at `render/characters.ts:414` records that a
+#: previous version of that line broke every wait gate in the game.
+ACTOR_WRITE_RE = re.compile(
+    r"\.a\.\w+(?:\[[^\]]*\]|\.\w+)*\s*(?:[-+*/|&^]|\+\+|--)?=(?!=)")
 #: A value (non-type) import from game/, and the names it brings in.
+#:
+#: `(\.\./)+` rather than `\.\./`: at depth 1 this could not see
+#: `render/characters/*.ts`, so a whole subdirectory of the layer was exempt
+#: from the rule about driving the port.
 GAME_VALUE_IMPORT_RE = re.compile(
-    r'import\s+(?!type\s)\{([^}]*)\}\s*(?:\n\s*)?from\s+"(\.\./game/[^"]+)"')
+    r'import\s+(?!type\s)\{([^}]*)\}\s*(?:\n\s*)?from\s+"((?:\.\./)+game/[^"]+)"')
 #: Every way there is of putting a node into the document.
 #:
 #: `document.createElement` is deliberately **not** here. Two calls build a
@@ -148,11 +170,25 @@ def main() -> int:
             "renderer that changes `G` is gameplay that test:port cannot "
             "reach, which is where the stage-1 car bug lived",
             "error"),
+        # Six sites, all one shape: `render/` computing something only three.js
+        # can compute -- a bone's world position, whether a model is built --
+        # and writing it straight onto the actor instead of handing it across
+        # the declared `GameHost` seam. A ratchet rather than an error because
+        # closing it is the same work as closing `render-drives-the-port`, and
+        # for the same reason: the seam has to exist before the writes can go
+        # through it. Step 21 is where both are cleared.
+        "no-actor-writes-in-render": Rule(
+            "no-actor-writes-in-render",
+            "an actor's fields are engine state whether they are reached "
+            "through `G` or through a renderer's handle on the object -- "
+            "`a.visible` gates alive-counting, and folding a view switch into "
+            "it once unblocked every wait gate in the game",
+            "ratchet", baseline=6, step=21),
         "render-drives-the-port": Rule(
             "render-drives-the-port",
             "an engine function *called* from render/ is a decision the port "
             "should be making; types, enums and pure maths are fine",
-            "ratchet", baseline=12, step=11),
+            "ratchet", baseline=12, step=21),
         # The same correction as its render twin, for the same reason: all
         # seven hits were citations in doc comments -- the sound name table's
         # address in bgm.ts, the routine hud.ts draws from. `hud/` never wrote
@@ -182,7 +218,7 @@ def main() -> int:
             "a layer ticked by hand is outside World, so it is outside "
             "save/load/resync -- which is why a seek could leave a rig held "
             "in a pose play would never produce",
-            "ratchet", baseline=1, step=5),
+            "ratchet", baseline=1, step=23),
         "one-bams-constant": Rule(
             "one-bams-constant",
             "BAMS_TO_RAD belongs to core/bams.ts and nowhere else -- the nine "
@@ -242,6 +278,10 @@ def main() -> int:
             for m in G_WRITE_RE.finditer(code):
                 rules["no-engine-writes-in-render"].hit(
                     f"{rel}: {m.group(0).strip()}")
+            for m in ACTOR_WRITE_RE.finditer(code):
+                line = code.count("\n", 0, m.start()) + 1
+                rules["no-actor-writes-in-render"].hit(
+                    f"{rel}:{line}: {m.group(0).strip()}")
             for names, spec in GAME_VALUE_IMPORT_RE.findall(text):
                 # `game/vec.ts` is pure maths over plain numbers and holds no
                 # state, so calling into it is not driving anything.
@@ -279,7 +319,10 @@ def main() -> int:
     # `world.add` is ticked by hand or not at all.
     layers: dict[str, str] = {}                       # class name -> file
     for f in files:
-        if f.parent.name != "render":
+        # The whole of `render/`, not only the files sitting directly in it:
+        # `f.parent.name != "render"` exempted every subdirectory, so a layer
+        # in `render/characters/` was outside a rule about layers.
+        if layer_of(f) != "render":
             continue
         cls = None
         for line in f.read_text(encoding="utf-8", errors="replace").splitlines():

@@ -811,9 +811,26 @@ export class Walker {
     this.opIndex++;
   }
 
-  /** Take one instruction, ignoring any wait. Returns false when stuck. */
+  /**
+   * Take one instruction, ignoring any wait. Returns false when stuck.
+   *
+   * **`stepOverWait`, not `this.wait = null`.** `executeOne` does not advance
+   * `opIndex` when it raises a wait -- the cursor stays on the blocking
+   * instruction, which is what makes the wait re-arm itself every tick until
+   * it is satisfied. Clearing the field and calling `executeOne` therefore ran
+   * *the same instruction again*, raised the same wait with a fresh
+   * `framesLeft`, and left the cursor exactly where it started: the
+   * ArrowRight key did nothing at all on any blocking instruction, for ever.
+   *
+   * The seek and test loops never saw it because they call `stepOverWait()`
+   * first; this path is the interactive one, and it had no test.
+   *
+   * Stepping past a gate retires what the gate was waiting on, for the same
+   * reason a seek does -- otherwise the next instruction runs against a world
+   * the script never expected, with the enemies still standing.
+   */
   stepOnce(): boolean {
-    this.wait = null;
+    this.stepOverWait();
     // Stepping advances instructions, not frames, so a shutter close that is
     // still counting down would never finish and would hold the firing gate up
     // for the rest of the session.

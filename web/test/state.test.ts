@@ -224,6 +224,10 @@ function seekInto(r: Rig, at: [number, number, number]): boolean {
   // function of `ctx.frame`. Left stale, the two seeks would be handed
   // different cameras and diverge on the harness's own account.
   r.ctx.frame = 0;
+  // The same for the generator, and for the same reason `app/main.ts`'s
+  // `seekTo` does it: a seek is a rebuild from the address, and a rebuild that
+  // inherits the last run's random state is not one.
+  r.ctx.rng.reseed(1);
   const ok = seekTo(r.walker, ...at);
   r.world.resync(r.ctx);
   return ok;
@@ -329,6 +333,35 @@ console.log("\nThe drive seam is a metronome and nothing else:\n");
   void h.advance(200);
   check("one rAF never runs more than the cap", h.take() === 64,
         `take() said ${h.take()}`);
+}
+
+console.log("\nStepping past a wait steps past it:\n");
+for (const stage of STAGES) {
+  const sc = script(stage);
+  if (!sc) continue;
+  // **`Walker.stepOnce` re-armed the wait it was trying to step past.** It
+  // cleared `this.wait` and called `executeOne`, but `executeOne` does not
+  // advance `opIndex` when it raises a wait -- the cursor stays on the
+  // blocking instruction, which is exactly what makes a wait re-arm itself
+  // every tick until it is satisfied. So the same instruction ran again, the
+  // same wait came back with a fresh countdown, and the cursor did not move:
+  // the ArrowRight key did nothing on any blocking instruction, for ever.
+  //
+  // The seek and test loops never saw it because they call `stepOverWait()`
+  // first. This path is the interactive one, and it had no test at all.
+  const r = build(stage, sc);
+  r.walker.primeToFirstWait();
+  // Run frames until something actually blocks, so the assertion is about a
+  // real wait rather than a hand-made one.
+  for (let i = 0; i < 3000 && !r.walker.wait; i++) advance(r, 1);
+  if (!r.walker.wait) continue;
+  const at = [r.walker.block, r.walker.step, r.walker.opIndex].join("/");
+  r.walker.stepOnce();
+  const now = [r.walker.block, r.walker.step, r.walker.opIndex].join("/");
+  check(`stage ${stage}: one step past a wait leaves the instruction it was on`,
+        now !== at, `still at ${at}`);
+  r.ctx.session.dispose();
+  break;
 }
 
 console.log("\nWhat a save writes is what a load reads:\n");
@@ -458,7 +491,23 @@ for (const stage of STAGES) {
 
   const d = build(stage, s);
   advance(d, DETOUR);
+  // **The world RNG is part of "the same address".** A seek resets `G`, the
+  // containers, the session scope and the walker, and for a long time left
+  // this alone -- so two seeks to one address from different histories
+  // replayed the script identically and then diverged on the first
+  // `rng.int()`. Some thirty-five draw sites in the port consume it: which
+  // idle a zombie picks, which attack, the start phase of every clip.
+  //
+  // The cold/warm comparison below could not catch that on its own, and it is
+  // worth saying why rather than trusting it: nothing in `DETOUR` frames of
+  // these fixtures happens to draw, so both runs reached the seek with the
+  // generator still on its seed. Perturbing it first is what makes the
+  // assertion real.
+  for (let i = 0; i < 7; i++) d.ctx.rng.int(1000);
   const warm = seekInto(d, at);
+  check(`stage ${stage}: a seek reseeds the world RNG`,
+        d.ctx.rng.state === c.ctx.rng.state,
+        `cold ${c.ctx.rng.state}, warm ${d.ctx.rng.state}`);
   const warmRun: string[] = [];
   if (warm) advance(d, HORIZON, (x) => warmRun.push(fingerprint(x)));
 

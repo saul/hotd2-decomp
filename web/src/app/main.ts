@@ -774,6 +774,14 @@ export class Player implements PlayerView, PlayerCommands {
     // come from the bundle, not from an opcode, so clearing them without
     // putting them back parks every enemy in the outermost band for ever.
     if (this.gameTables) this.applyGameTables(this.gameTables);
+    // The world RNG, with everything else. A seek resets `G`, the containers,
+    // the session scope and the walker -- and left this alone, so two seeks to
+    // one address from different histories replayed the script identically and
+    // then diverged on the first `rng.int()`. Some thirty-five draw sites in
+    // the port consume it: which idle a zombie picks, which attack, the start
+    // phase of every clip. `stage_load.ts` was the only place that reseeded, so
+    // "the same address" meant the same script state and a different game.
+    this.rng.reseed(this.state.seed ?? 1);
     // The replay rewrites the world; nothing that described the old one may
     // outlive it.
     this.newSession();

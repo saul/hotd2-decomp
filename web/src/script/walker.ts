@@ -233,6 +233,38 @@ export interface OpImpl {
   run?: (w: Walker, op: OpJson, quiet: boolean) => string | undefined;
 }
 
+/**
+ * The keys {@link Walker.loadState} copies straight back onto the walker.
+ *
+ * Module-level, and exported, so a test can hold it against what
+ * {@link Walker.saveState} actually writes. A key added to the save and
+ * forgotten here is dropped in silence -- the walker keeps whatever the
+ * running session had, and the snapshot looks like it round-tripped. That is
+ * the same failure `SNAPSHOT_VERSION` was supposed to catch and never could,
+ * since it sat at 1 through every shape change either side ever made.
+ */
+export const WALKER_RESTORED_KEYS = [
+  "block", "step", "opIndex", "region", "rollEnabled", "useFixedEyeY",
+  "fixedEyeY", "groundY", "forcePathAdvance", "backdropPreset",
+  "backdropMode", "shutterState", "shutterPrev", "shutterCounter",
+  "captionGroup", "captionFrames", "firingGate",
+  "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
+  "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
+  "lightSet", "checkpointBlock", "branchPreview", "stashedCam", "spawns",
+  "sceneState", "queuedEventsPending", "camPending",
+  "cam", "finished", "bgmTrack", "lastSound", "seq",
+] as const;
+
+/**
+ * Saved keys `loadState` handles by hand rather than by copy, each for a
+ * reason stated where it happens: `wait` must be cleared when absent rather
+ * than left standing, `flags` and `loadedSlots` are `Set`s and a snapshot is
+ * JSON, and `rng` is a field of another object.
+ */
+export const WALKER_RESTORED_BY_HAND = [
+  "wait", "flags", "loadedSlots", "rng",
+] as const;
+
 export class Walker {
   readonly script: ScriptJson;
   readonly host: WalkerHost;
@@ -690,19 +722,10 @@ export class Walker {
    */
   loadState(v: unknown): void {
     const s = v as Record<string, never>;
-    const keys = [
-      "block", "step", "opIndex", "region", "rollEnabled", "useFixedEyeY",
-      "fixedEyeY", "groundY", "forcePathAdvance", "backdropPreset",
-      "backdropMode", "shutterState", "shutterPrev", "shutterCounter",
-      "captionGroup", "captionFrames", "firingGate",
-      "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
-      "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
-      "lightSet", "checkpointBlock", "branchPreview", "stashedCam", "spawns",
-      "sceneState", "queuedEventsPending", "camPending",
-      "cam", "finished", "bgmTrack", "lastSound", "seq",
-    ] as const;
     const self = this as unknown as Record<string, unknown>;
-    for (const k of keys) if (s[k] !== undefined) self[k] = s[k];
+    for (const k of WALKER_RESTORED_KEYS) {
+      if (s[k] !== undefined) self[k] = s[k];
+    }
     // Not in the key list above: a slice written before the wait was saved
     // has no `wait` key at all, and leaving the live one standing would be
     // worse than clearing it.

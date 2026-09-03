@@ -44,7 +44,17 @@ __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
 #: Bumped when the on-disk shape changes in a way the client must notice. The
 #: client refuses a bundle it does not know how to read rather than rendering
 #: something subtly wrong.
-BUNDLE_FORMAT = 1
+#:
+#: **It stayed at 1 across 23 commits to this file** -- the ones that added
+#: ``coli``, ``civilians``, ``humanoids`` and ``set_pieces``, and the one that
+#: renumbered ``game_mode``. ``web/src/bundle/stage.ts`` has checked it the
+#: whole time and could never fire, so a bundle built before collision existed
+#: loaded happily and lost it, with no message. A version check whose constant
+#: nobody bumps is documentation, not a check.
+#:
+#: Bump it in the same commit as the shape change. 2 is the first honest
+#: value: it says "not whatever those older bundles were".
+BUNDLE_FORMAT = 2
 
 #: Every asset slot the three container families can draw. The group props
 #: use the first four; `KindedPropUpdate` adds the three kinded models and the

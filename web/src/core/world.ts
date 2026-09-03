@@ -86,6 +86,23 @@ export class World<C extends Context = Context> {
   load(snap: Snapshot, ctx: C): string | null {
     const refusal = snapshotRefusal(snap, ctx.stage);
     if (refusal) return refusal;
+    // **Refuse before restoring anything.** A system that saves a slice and
+    // does not get one back keeps whatever the running game had, which is the
+    // definition of half-applied -- and the docstring above has been promising
+    // to refuse outright since the day it was written while this loop
+    // `continue`d past exactly that case. A stale bundle lost collision and
+    // civilians this way, silently, because `SNAPSHOT_VERSION` had never moved
+    // and so the version check could not catch it either.
+    //
+    // Only systems that *save* are required to load: a system with `load` and
+    // no `save` has nothing to be missing.
+    const missing: string[] = [];
+    for (const s of this.systems()) {
+      if (s.save && s.load && snap.parts[s.id] === undefined) missing.push(s.id);
+    }
+    if (missing.length > 0) {
+      return `snapshot has no slice for ${missing.join(", ")}`;
+    }
     ctx.rng.state = snap.rng >>> 0;
     ctx.frame = snap.frame;
     for (const s of this.systems()) {

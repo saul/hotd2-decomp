@@ -4,7 +4,16 @@
  * Part of the bundle the exporter writes; see docs/formats/ for each block.
  */
 
-export const SUPPORTED_FORMAT = 1;
+/**
+ * The `format` this client reads, and the exporter's `BUNDLE_FORMAT` must
+ * match it exactly. Both sat at 1 through every shape change either side ever
+ * made — `coli`, `civilians`, `humanoids`, `set_pieces`, the renumbered
+ * `game_mode` — so this check has never once been able to fire, and a bundle
+ * built before collision existed loaded and silently lost it.
+ *
+ * The two constants move together, in the same commit as the shape change.
+ */
+export const SUPPORTED_FORMAT = 2;
 
 export interface Manifest {
   format: number;

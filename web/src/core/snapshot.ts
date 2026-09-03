@@ -11,8 +11,20 @@
  * Bumped whenever any system's slice changes shape. An older snapshot is
  * refused rather than half-applied — a partially restored actor list is a
  * crash that looks like a gameplay bug.
+ *
+ * **It stayed at 1 for 28 commits to `globals.ts` and every `saveState` shape
+ * change there has been.** The check below existed the whole time and could
+ * never fire, which is worse than not having it: it is also an argument
+ * against looking. Two things keep it honest now — `World.load` refuses a
+ * snapshot whose slices do not cover the systems that save, so a shape change
+ * that drops or renames a slice is caught even at an unchanged version; and
+ * `test:port` asserts that what `saveState` writes is exactly what
+ * `loadState` reads back.
+ *
+ * Bump this in the same commit as the shape change. 2 is the first honest
+ * value: it says "not whatever those old snapshots were".
  */
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 
 export interface Snapshot {
   version: number;

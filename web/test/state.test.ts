@@ -56,7 +56,8 @@ import { G, ResetGameGlobals } from "../src/game/globals";
 import { GameUpdate } from "../src/game/director";
 import type { GameHost } from "../src/game/host";
 import { Harness } from "../src/app/harness";
-import { Walker, type WalkerHost } from "../src/script/walker";
+import { Walker, WALKER_RESTORED_BY_HAND, WALKER_RESTORED_KEYS,
+  type WalkerHost } from "../src/script/walker";
 import { seekTo } from "../src/script/seek";
 import type { ScriptJson } from "../src/bundle";
 import { BUNDLE_ROOT, skipNoBundle } from "../tools/lib/bundle_root";
@@ -328,6 +329,61 @@ console.log("\nThe drive seam is a metronome and nothing else:\n");
   void h.advance(200);
   check("one rAF never runs more than the cap", h.take() === 64,
         `take() said ${h.take()}`);
+}
+
+console.log("\nWhat a save writes is what a load reads:\n");
+{
+  // **The version constants could not catch a dropped key, so this does.**
+  // `SNAPSHOT_VERSION` and `BUNDLE_FORMAT` both sat at 1 from the day they
+  // were introduced, through 28 commits to `globals.ts`, every `saveState`
+  // shape change there has been, and 23 commits to `bundle.py` that added
+  // `coli`, `civilians`, `humanoids` and `set_pieces`. Both checks existed the
+  // whole time and neither could ever fire.
+  //
+  // The shape that actually bites is a key added to `Walker.saveState` and
+  // forgotten in `loadState`: the walker keeps whatever the running session
+  // had, the snapshot looks like it round-tripped, and the divergence surfaces
+  // later as a gameplay bug. `wait` was exactly this once -- a save taken three
+  // seconds into a five-second `wait_frames` came back as a fresh five-second
+  // one.
+  const empty: ScriptJson = { stage: 1, blocks: [] } as unknown as ScriptJson;
+  const w = new Walker(empty, mkHost());
+  const saved = Object.keys(w.saveState() as Record<string, unknown>).sort();
+  const restored = [...WALKER_RESTORED_KEYS, ...WALKER_RESTORED_BY_HAND].sort();
+  const dropped = saved.filter((k) => !restored.includes(k as never));
+  const phantom = restored.filter((k) => !saved.includes(k));
+  check("every key `saveState` writes is one `loadState` reads",
+        dropped.length === 0,
+        `dropped on load: ${dropped.join(", ")}`);
+  check("...and every key `loadState` reads is one `saveState` writes",
+        phantom.length === 0,
+        `restored but never saved: ${phantom.join(", ")}`);
+
+  // **A slice that is missing is a refusal, not a shrug.** `World.load`'s own
+  // docstring has promised to refuse outright since the day it was written --
+  // "a half-applied snapshot is indistinguishable from a gameplay bug" -- and
+  // the loop underneath it `continue`d past exactly that case, leaving the
+  // system with whatever the running game had. With `SNAPSHOT_VERSION` frozen
+  // at 1 the version check could not catch it either, so a snapshot that lost
+  // a whole system loaded clean.
+  const w2 = new World();
+  let restoredWith: unknown = "never called";
+  w2.add("game", {
+    id: "probe",
+    save: () => ({ v: 1 }),
+    load: (slice: unknown) => { restoredWith = slice; },
+  });
+  const ctx2 = { stage: 1, frame: 0, rng: new Rng(1) } as unknown as Context;
+  const good = w2.save(ctx2);
+  check("a whole snapshot loads",
+        w2.load(good, ctx2) === null && restoredWith !== "never called");
+  restoredWith = "never called";
+  const gutted = { ...good, parts: {} };
+  const why = w2.load(gutted, ctx2);
+  check("one with no slice for a saving system is refused, by name",
+        why !== null && why.includes("probe"), String(why));
+  check("...and nothing was applied before the refusal",
+        restoredWith === "never called", String(restoredWith));
 }
 
 console.log("\nA snapshot determines the next frame:\n");

@@ -383,6 +383,7 @@ for (const stage of STAGES) {
     const spawn = { at: 1, class: 0x30, flags: 0, pos: [0, 0, 0] as
                     [number, number, number], orient: [0, 0, 0] as
                     [number, number, number], hp: 1, yaw_deg: 0,
+                    desc_flags: 0,
                     block: 0, step: 0, opIndex: 0, opcode: 9 };
 
     // Playback, with the last enemy just killed: the gate opens and the

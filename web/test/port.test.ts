@@ -43,8 +43,9 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
-import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor }
+import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2, type Actor }
   from "../src/game/actor";
+import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
   from "../src/game/combat/rank";
@@ -2195,6 +2196,88 @@ console.log("class 0x31, the climb:");
         `flags2 0x${z.flags2.toString(16)} stance ${ThrowerStanceOf(z)}`);
   check("...and left it up on the wall", z.pos.y > 5,
         `y ${z.pos.y.toFixed(1)}`);
+}
+
+// **The descriptor's own flag word, which the exporter used to throw away.**
+//
+// `SpawnFromDescriptor` (`FUN_00408A20`) copies the spawn record's `+0x20`
+// u16 into `obj+0x1316` before the class `Init` runs, and `EnemyThrowerInit`
+// (`FUN_00449620`) makes it the low half of `obj+0x136C`:
+//
+//   00449762  MOVSX EAX, word ptr [ESI + 0x1316]   0fbf8616130000
+//   00449769  OR    EAX, 0x180000                  0d00001800
+//   0044977a  MOV   dword ptr [ESI + 0x136c], EAX  89866c130000
+//
+// `tools/hod2lib/evt.py` called that word "unused in every shipped file". It
+// is not: 23 of 51 class-0x31 and 76 of 345 class-0x30 descriptors set it, and
+// the five stage-6 `zslman` that blink in on a wall or the ceiling get their
+// whole stance from it and nowhere else. Dropping it gave all five stance 0 —
+// the ground motion row, the ground attack row, the floor gravity axis, and no
+// `OffGround`.
+console.log("class 0x31, the stance the spawn descriptor names:");
+{
+  // The seam first: bundle field -> actor field. It is one hop and it is the
+  // hop that was missing.
+  const d = DescriptorFromPlacement({ desc_flags: 0x100 } as never);
+  check("`desc_flags` reaches `Actor.descFlags` (`obj+0x1316`)",
+        d.descFlags === 0x100, `${d.descFlags}`);
+  check("a placement without one is zero, not undefined",
+        DescriptorFromPlacement({} as never).descFlags === 0, "");
+
+  // Then the three stances the shipped stage-6 spawns actually carry, and the
+  // ground for contrast. `st6evtbl.bin` off=001604/001630/002680 are 0x100,
+  // off=002654 is 0x40 and off=0026ac is 0x80 -- all character type 0x18
+  // entering state 34.
+  const cases: [number, number][] = [
+    [0, ThrowerStance.Ground],
+    [ThrowerFlag.WallA, ThrowerStance.WallA],
+    [ThrowerFlag.WallB, ThrowerStance.WallB],
+    [ThrowerFlag.Ceiling, ThrowerStance.Ceiling],
+  ];
+  for (const [word, want] of cases) {
+    const z = thrower(ThrowerState.StandAndDecide, { descFlags: word });
+    check(`descriptor word 0x${word.toString(16)} gives stance ${want}`,
+          ThrowerStanceOf(z) === want,
+          `flags2 0x${(z.flags2 >>> 0).toString(16)}`
+          + ` stance ${ThrowerStanceOf(z)}`);
+    check("...and the surface bits are the descriptor's own",
+          (z.flags2 & ThrowerFlag.Surface) === word,
+          `0x${(z.flags2 & ThrowerFlag.Surface).toString(16)}`);
+    // `OR AL, 0x20` (`0c20`) on each of the three non-ground arms of the jump
+    // table at 0x00449900; the ground arm at 0x004497A7 does not.
+    check("...and only a non-ground stance is off the ground",
+          !!(z.flags2 & ThrowerFlag.OffGround) === (want !== 0),
+          `flags2 0x${(z.flags2 >>> 0).toString(16)}`);
+    // `| 0x180000` is unconditional and comes after, so it survives whatever
+    // the descriptor said.
+    check("...and it is still born colliding",
+          (z.flags2 & ThrowerFlag.Collide) === ThrowerFlag.Collide,
+          `0x${(z.flags2 >>> 0).toString(16)}`);
+  }
+
+  // Bit 0 is the other bit the shipped data sets -- 18 of the 51 -- and it is
+  // a draw selector, not a stance. It must not move the stance.
+  {
+    const z = thrower(ThrowerState.StandAndDecide,
+                      { descFlags: ThrowerFlag.AltPartDraw });
+    check("bit 0 carries through without changing the stance",
+          (z.flags2 & ThrowerFlag.AltPartDraw) !== 0
+          && ThrowerStanceOf(z) === ThrowerStance.Ground
+          && (z.flags2 & ThrowerFlag.OffGround) === 0,
+          `flags2 0x${(z.flags2 >>> 0).toString(16)}`);
+  }
+
+  // Two surface bits at once overflow the four-arm table: `CMP ECX, 0x3` /
+  // `JA` (`83f903` / `7745`) at 0x0044979B skips the whole switch, so the
+  // actor keeps the bits but gets neither `OffGround` nor a `+0x134C`. No
+  // shipped descriptor does it; the arm is here because the engine has it.
+  {
+    const z = thrower(ThrowerState.StandAndDecide,
+                      { descFlags: ThrowerFlag.WallA | ThrowerFlag.Ceiling });
+    check("two surface bits at once fall out of the switch",
+          (z.flags2 & ThrowerFlag.OffGround) === 0,
+          `flags2 0x${(z.flags2 >>> 0).toString(16)}`);
+  }
 }
 
 console.log("class 0x31, the pounce and the leap back:");
@@ -4853,6 +4936,83 @@ console.log("\nrain: DrawRainParticles' simulation half");
     check("a body that was already dead is thrown half as far again",
           Math.abs((z.arcTo.z - z.pos.z) - alive * 1.5) < 1e-4,
           `${alive.toFixed(3)} -> ${(z.arcTo.z - z.pos.z).toFixed(3)}`);
+  }
+
+  // **How long that arc lasts, which is not one number.**
+  // `ActorArcBeginToAtSpeed` (`FUN_0044DB50`) picks its floor from two flag
+  // words before it divides:
+  //
+  //   0044dbaa  TEST EAX, 0x2000000    a900000002   ; EAX = obj+0x136C
+  //   0044dbc9  JZ   0044dbda                       ; clear -> 15
+  //   0044dbce  MOV  EDI, 0xa                       ; set   -> 10 ...
+  //   0044dbd3  TEST EAX, 0x44000000   a900000044   ; ... EAX = obj+0x34
+  //   0044dbd8  JZ   0044dbdf                       ;     unless dead/reacting
+  //   0044dbda  MOV  EDI, 0xf                       ;     -> 15
+  //   0044dbe7  FDIVR float ptr [0x0055ccd4]        ; = 0000f041 = 30.0f
+  //
+  // so `arcTotal = max(N, dist2d / (30.0 / N))`. `ThrowerShotFeedback`
+  // (`FUN_00449B20`) raises `ThrowerFlag.LowSphere` as half of
+  // `OR EDX, 0x6000000` on the head shot that knocks a thrower down, so a
+  // **live** knocked-down thrower takes the 10 branch — and the port had 15
+  // and `dist2d / 2` hardcoded, which is only ever the other one.
+  {
+    const near = () => {
+      const a = thrower(ThrowerState.StandAndDecide);
+      T.coli = { files: ["test"], blobs: { floor: FLOOR_BLOB } };
+      G.g_coli_full_set = ["floor"];
+      // Close enough that the travel never reaches either floor, so the
+      // assertion is about the floor itself and not about the division.
+      a.pos = vec3(0, 0, 60);
+      a.lookAt = vec3(0, 8, 60);
+      return a;
+    };
+
+    const plain = near();
+    ThrowerBeginKnockbackArc(plain, CAM_HOST);
+    check("an ordinary shot body's arc is floored at 15 frames",
+          plain.arcTotal === 15, `${plain.arcTotal}`);
+
+    const knocked = near();
+    knocked.flags2 |= ThrowerFlag.LowSphere;
+    ThrowerBeginKnockbackArc(knocked, CAM_HOST);
+    check("a live knocked-down thrower's is floored at 10, not 15",
+          knocked.arcTotal === 10, `${knocked.arcTotal}`);
+
+    // ...and the second test kills the branch again: `0x44000000` is
+    // `Dead | Reacting` on `obj+0x34`.
+    for (const f of [ActorFlag.Dead, ActorFlag.Reacting]) {
+      const back = near();
+      back.flags2 |= ThrowerFlag.LowSphere;
+      back.flags |= f;
+      ThrowerBeginKnockbackArc(back, CAM_HOST);
+      check(`...but obj+0x34 0x${f.toString(16)} puts it back to 15`,
+            back.arcTotal === 15, `${back.arcTotal}`);
+    }
+
+    // The divisor moves with the floor: 30 units per `N` frames, so the same
+    // distance takes fewer frames on the 10 branch. Far enough out that both
+    // clear their floor.
+    // `t = 15/|view| * 10`, so the throw is longest from close in — which is
+    // also the only place either floor is cleared.
+    const far = (low: boolean) => {
+      const a = near();
+      if (low) a.flags2 |= ThrowerFlag.LowSphere;
+      a.pos = vec3(0, 0, 4);
+      a.lookAt = vec3(0, 1, 4);
+      ThrowerBeginKnockbackArc(a, CAM_HOST);
+      const d = Math.hypot(a.arcTo.x - a.arcFrom.x, a.arcTo.z - a.arcFrom.z);
+      return { total: a.arcTotal, d };
+    };
+    const slow = far(false);
+    const fast = far(true);
+    check("a long arc runs at 30 units per its own floor",
+          slow.total > 15 && fast.total > 10
+          && slow.total === Math.trunc(slow.d / (30 / 15))
+          && fast.total === Math.trunc(fast.d / (30 / 10)),
+          `${slow.total} vs ${Math.trunc(slow.d / 2)},`
+          + ` ${fast.total} vs ${Math.trunc(fast.d / 3)}`);
+    check("...so the knocked-down one gets there in fewer frames",
+          fast.total < slow.total, `${fast.total} vs ${slow.total}`);
   }
 
   // **The Kill button.** `ActorKillAll` sets `dead` and `ActorFlag.Dead`, and

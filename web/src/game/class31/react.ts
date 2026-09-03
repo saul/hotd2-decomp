@@ -251,6 +251,10 @@ export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
     obj.accY = 0;
     obj.flags = (obj.flags & ~(ActorFlag.ArcSpent | ActorFlag.PoseFrozen))
               | ActorFlag.ShotImmune;
+    // `AND CH, 0xbf` (`80e5bf`) on `obj+0x136C` at 0x004512F3, in the same
+    // breath as `AND DH, 0xdf` / `OR DH, 0x1` on `obj+0x34`: the body has
+    // settled, so the next landing may puff again.
+    obj.flags2 &= ~ThrowerFlag.LandingDustEmitted;
     obj.slideTimer = (rng.int(10) + 1) * 3;
     obj.sub = 3;
   }

@@ -95,7 +95,8 @@ export class Rain implements System<RenderContext> {
    */
   build(ctx: RenderContext, root: Object3D,
         cfg: RainJson | undefined): void {
-    ctx.scope.child("rain").defer(() => {
+    const scope = ctx.scope.child("rain");
+    scope.defer(() => {
       for (const d of this.drops) this.group.remove(d.node);
       this.drops = [];
       // The template is *borrowed* from the stage tree, not made here, so it
@@ -140,6 +141,13 @@ export class Rain implements System<RenderContext> {
           // Cloned after `sceneFog.prepare` ran over the stage tree; the hook
           // it installed is not something `Material.copy` carries.
           prepareFogMaterial(clone);
+          // Owned one at a time rather than with `ownResources`, and that is
+          // the whole reason there is a comment here: `Object3D.clone` shares
+          // geometry with the template, and the template is the stage's. Only
+          // the materials are this layer's to free, and the drop nodes leave
+          // the tree entirely on teardown, so nothing else would ever free
+          // them.
+          scope.own(clone);
           return clone;
         });
         mesh.material = Array.isArray(mesh.material) ? swap : swap[0];

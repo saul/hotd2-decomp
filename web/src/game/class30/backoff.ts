@@ -11,14 +11,15 @@
  * promptly instead of after a fresh walk-in.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionPlayFrame, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
-import { BACKOFF_MAX_FRAMES, GAME_HZ, MotionFade, MotionRow, ZombieState } from "./states";
+import { BACKOFF_MAX_FRAMES, MotionFade, MotionRow, ZombieState }
+  from "./states";
 
 /** `FUN_00409F90`'s rate here, positive when `obj+0x136C & 0x400000` is set. */
 const BACKOFF_TURN_RATE = -0x40;
@@ -29,6 +30,22 @@ const BACKOFF_TURN_RATE = -0x40;
  */
 const BACKOFF_HELD_MOTION = 0x100;
 const BACKOFF_HELD_MIN_FRAME = 0x43;
+/**
+ * `ZombieStateBackOff`'s third exit, and the two constants it is made of.
+ *
+ * ```
+ * 00455d57  83be0c13000004   CMP   dword ptr [ESI + 0x130c], 0x4
+ * 00455d60  d9048de02b9a00   FLD   float ptr [ECX*0x4 + 0x9a2be0]   ; the ring
+ * 00455d67  d80df4445600     FMUL  float ptr [0x005644f4]
+ * 00455d6d  d85c2410         FCOMP float ptr [ESP + 0x10]           ; d
+ * ```
+ *
+ * and 0x005644f4 holds `3333333f`, which is 0.7. A body-condition-4 actor —
+ * both arms gone — gives the retreat up at 70% of the inner radius instead of
+ * having to reach the ring itself.
+ */
+const BACKOFF_SHORT_CONDITION = 4;
+const BACKOFF_SHORT_FRACTION = 0.7;
 
 export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
                                    rng: Rng): void {
@@ -68,11 +85,27 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
   // anchor is further out than the actor now is, so the unflipped angle points
   // inward and the back-away clip's +Z root would carry it into the camera.
   TurnActorAwayFromPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);
-  obj.backoffFrames += dt * GAME_HZ;
+  // `00455d29 8b8e34130000` / `00455d32 41` — `MOV ECX,[ESI+0x1334]; INC ECX`.
+  // One increment per **update**, not `dt` seconds' worth: the exe has no
+  // frame time here at all, and the 0xF0 it is compared against below counts
+  // updates.
+  obj.backoffFrames += 1;
 
   // Distance is measured against the remembered player point, the same one the
-  // lunge used.
-  const d = dist2d(obj.pos, obj.hasStrikeAnchor ? obj.target : eye);
+  // lunge used: `00455c37 d94648` / `00455c3a d8a6ec130000` and
+  // `00455c40 d94640` / `00455c43 d8a6e4130000` read `obj+0x13E4`/`obj+0x13EC`
+  // unconditionally.
+  //
+  // [diverges] The exe has no fallback because it has no need of one: the tail
+  // is never zeroed, so `obj+0x13E4` holds whatever the previous occupant of
+  // that heap block left there for an actor that has not yet faced the player.
+  // The port cannot reproduce reading uninitialised memory and will not
+  // pretend to, so an actor that has never captured a strike anchor — which is
+  // exactly the one that has never run `ActorFacePlayerTarget` — measures
+  // against the eye instead. Since {@link ZombieFlag2.StrikeAnchor} is never
+  // cleared once set, this only ever affects the too-close entry from the hub.
+  const d = dist2d(obj.pos,
+                   (obj.flags2 & ZombieFlag2.StrikeAnchor) ? obj.target : eye);
   // **The retreat has a floor, and it is the clip's.** The engine's exit is
   // `(far enough || 240 frames) && (motion != 0x100 || frame > 0x43)` — so a
   // character whose back-away is motion 256 may not return to the hub until
@@ -82,12 +115,17 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
   // had yet.
   const clipHeld = obj.motion === BACKOFF_HELD_MOTION
     && MotionPlayFrame(obj) <= BACKOFF_HELD_MIN_FRAME;
-  if ((d > ApproachInnerRadius(obj) || obj.backoffFrames > BACKOFF_MAX_FRAMES)
+  const inner = ApproachInnerRadius(obj);
+  if ((d > inner || obj.backoffFrames > BACKOFF_MAX_FRAMES
+       || (obj.condition === BACKOFF_SHORT_CONDITION
+           && inner * BACKOFF_SHORT_FRACTION < d))
       && !clipHeld) {
-    obj.cooldown = 0;
+    // `00455d96 f6866813000001` — and **only** when the cooldown latch is
+    // down. A state-19 attacker keeps its counter across the retreat; zeroing
+    // it here unconditionally is the other half of what disarmed that loop.
+    if (!obj.hasCooldown) obj.cooldown = 0;
     obj.flags &= ~ActorFlag.BackingOff;
     ReleaseAttackSlot(obj);          // only now is the next enemy free
-    obj.hasStrikeAnchor = false;
     obj.state = ZombieState.HoldAtRange;
     obj.sub = 0;
   }

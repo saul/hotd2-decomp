@@ -37,7 +37,12 @@ import {
   ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
   QueryGroundHeightAt, QueryGroundSurfaceAt,
 } from "../src/game/coli";
-import { ZombieState } from "../src/game/class30/states";
+import { MotionRow, StrikeSub, ZombieState }
+  from "../src/game/class30/states";
+import { ZombieAttackRefusal, ZombieStateHoldAtRange }
+  from "../src/game/class30/hold";
+import { ZombieStateBackOff } from "../src/game/class30/backoff";
+import { ZombieStateStrike } from "../src/game/class30/strike";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
@@ -5166,6 +5171,248 @@ console.log("\nwhere the camera follows an actor:");
   check("a host with no pose leaves it where it was",
         z.lookAt.x === held.x && z.lookAt.y === held.y
         && z.lookAt.z === held.z, JSON.stringify(z.lookAt));
+}
+
+
+/**
+ * The strike anchor, `obj+0x136C & 0x40000`, and the four things that hang off
+ * it.
+ *
+ * `ZombieStateStrike` raises it when it captures `strikeStart`
+ * (`00455b98 a900000400` / `00455ba5 0d00000400`) and **on the melee path
+ * nothing ever clears it again**: the one `AND` in the program that does is in
+ * `FUN_0045DA60` (`0045db39 25fffffbff`), which an ordinary zombie never
+ * reaches. The port modelled it as a boolean, cleared it in three places, and
+ * left it out of the two tests in `ZombieStateHoldAtRange` that read it -- one
+ * misreading with four separate symptoms, which is what these assert.
+ */
+console.log("\nthe strike anchor and the cooldown it gates:");
+{
+  const rng = new Rng(41);
+  const events = scene(0, rng);
+  void events;
+  const INNER = APPROACH.rings[0].inner;
+
+  const zombie = (name: string, over: Partial<Actor> = {}): Actor => {
+    const z = ActorSpawn(0x7900, SpawnClass.Zombie, 1, name);
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+    // `motion_row[condition][MotionRow.Walk]`, the clip the hub plays while an
+    // actor waits its turn.
+    z.motion = TYPE.motion_row["0"][MotionRow.Walk];
+    z.pos = vec3(0, 0, 40);
+    z.target = vec3(0, 0, 0);
+    Object.assign(z, over);
+    return z;
+  };
+  const clear = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+
+  // -- B1. the too-close retreat has an escape, and it is `flags2 & 0x40400`
+  //
+  // `0045577c  f7866c13000000040400   TEST dword ptr [ESI+0x136c], 0x40400`
+  // and the `JNZ` at `00455786` jumps past the whole retreat. Without it a
+  // zombie that finishes a swing inside the ring -- which is where a swing
+  // ends, because the attack's own distance is inside it -- is bounced
+  // straight back into `BackOff` on its first frame in the hub.
+  {
+    clear();
+    const z = zombie("inside-the-ring, has swung",
+                     { pos: vec3(0, 0, INNER - 5) });
+    z.flags2 |= ZombieFlag2.StrikeAnchor;
+    ZombieStateHoldAtRange(z, EYE, new Rng(1), NULL_HOST);
+    check("an actor that has already swung is exempt from the too-close retreat",
+          z.state !== ZombieState.BackOff, ZombieState[z.state] ?? String(z.state));
+  }
+  {
+    clear();
+    const z = zombie("inside-the-ring, mid entry clip",
+                     { pos: vec3(0, 0, INNER - 5) });
+    z.flags2 |= ZombieFlag2.EntryClipPlaying;
+    ZombieStateHoldAtRange(z, EYE, new Rng(1), NULL_HOST);
+    check("...and so is one still playing its authored entry clip",
+          z.state !== ZombieState.BackOff, ZombieState[z.state] ?? String(z.state));
+  }
+  {
+    clear();
+    const z = zombie("inside-the-ring, never swung",
+                     { pos: vec3(0, 0, INNER - 5) });
+    ZombieStateHoldAtRange(z, EYE, new Rng(1), NULL_HOST);
+    check("...but one carrying neither bit still backs off",
+          z.state === ZombieState.BackOff, ZombieState[z.state] ?? String(z.state));
+  }
+
+  // -- B2. `ZombieStateBackOff` does not clear the anchor ------------------
+  //
+  // Its only `AND` on `obj+0x136C` is `00455cc0  81e1ffffbfff`, which clears
+  // `0x400000` -- the turn flip -- and nothing else.
+  {
+    clear();
+    const z = zombie("retreating", { state: ZombieState.BackOff });
+    z.flags2 |= ZombieFlag2.StrikeAnchor;
+    z.target = vec3(0, 0, 0);
+    z.pos = vec3(0, 0, INNER + 15);
+    ZombieStateBackOff(z, EYE, 1 / 60, new Rng(2));
+    check("the retreat hands back to the hub", z.state === ZombieState.HoldAtRange,
+          ZombieState[z.state] ?? String(z.state));
+    check("...and leaves the strike anchor standing",
+          (z.flags2 & ZombieFlag2.StrikeAnchor) !== 0,
+          `0x${z.flags2.toString(16)}`);
+  }
+
+  // -- B3. the cooldown countdown: its gate, its latch, and its fallthrough -
+  //
+  // `004557dc a801` arms it, `004557e0 f7866c13000000000400` gates it on the
+  // anchor, `004557f2 4a` is the one decrement and `004557ff 24fe` disarms the
+  // latch when it runs out. There is no `RET` on that path: the exe falls
+  // through to the idle and the turn at the bottom of the state.
+  {
+    clear();
+    const z = zombie("cooling, never swung", { hasCooldown: true, cooldown: 10 });
+    ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
+    check("a cooldown does not run down for an actor that has never swung",
+          z.cooldown === 10, String(z.cooldown));
+  }
+  {
+    clear();
+    const z = zombie("cooling", { hasCooldown: true, cooldown: 2 });
+    z.flags2 |= ZombieFlag2.StrikeAnchor;
+    ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
+    check("...and does for one that has", z.cooldown === 1, String(z.cooldown));
+    check("...with the latch still armed at one", z.hasCooldown,
+          String(z.hasCooldown));
+    ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
+    check("...and the latch disarms itself as the counter runs out",
+          z.cooldown === 0 && !z.hasCooldown, `${z.cooldown}/${z.hasCooldown}`);
+  }
+  {
+    clear();
+    const z = zombie("cooling and idling",
+                     { hasCooldown: true, cooldown: 30, motion: 12 });
+    z.flags2 |= ZombieFlag2.StrikeAnchor;
+    z.yaw = 0x4000;
+    ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
+    check("a cooling zombie still plays the row's idle", z.motion === 10,
+          String(z.motion));
+    check("...and still turns to face you", z.yaw !== 0x4000,
+          `0x${z.yaw.toString(16)}`);
+  }
+  {
+    clear();
+    const z = zombie("retreating with a cooldown",
+                     { state: ZombieState.BackOff, hasCooldown: true,
+                       cooldown: 50, pos: vec3(0, 0, INNER + 15) });
+    z.flags2 |= ZombieFlag2.StrikeAnchor;
+    ZombieStateBackOff(z, EYE, 1 / 60, new Rng(2));
+    check("the retreat leaves an armed cooldown alone",
+          z.state === ZombieState.HoldAtRange && z.cooldown === 50,
+          `${z.state}/${z.cooldown}`);
+  }
+  {
+    clear();
+    const z = zombie("retreating without one",
+                     { state: ZombieState.BackOff, cooldown: 50,
+                       pos: vec3(0, 0, INNER + 15) });
+    ZombieStateBackOff(z, EYE, 1 / 60, new Rng(2));
+    check("...and zeroes an unarmed one, as `00455d9f` does", z.cooldown === 0,
+          String(z.cooldown));
+  }
+
+  // -- B4. a camera-cued attacker strikes from where it stands -------------
+  //
+  // `00455b24  f6866813000001` -- the lunge is skipped outright while the
+  // cooldown latch is armed, so state 19's four spawns swing at whatever range
+  // the cue left them at instead of walking in first.
+  {
+    clear();
+    const atk = TYPE.attacks["0"]["1"];
+    const z = zombie("cued attacker",
+                     { state: ZombieState.Strike, sub: StrikeSub.Lunge,
+                       attack: 1, hasCooldown: true,
+                       pos: vec3(0, 0, atk.distance + 20) });
+    ZombieStateStrike(z, EYE, new Rng(4));
+    check("a cooldown-armed attacker starts the swing where it stands",
+          z.sub === StrikeSub.Swinging && z.action?.motion === atk.strike,
+          `${z.sub}/${z.action?.motion}`);
+  }
+  {
+    clear();
+    const atk = TYPE.attacks["0"]["1"];
+    const z = zombie("ordinary attacker",
+                     { state: ZombieState.Strike, sub: StrikeSub.Lunge,
+                       attack: 1, pos: vec3(0, 0, atk.distance + 20) });
+    ZombieStateStrike(z, EYE, new Rng(4));
+    check("...and one without the latch still lunges in",
+          z.sub === StrikeSub.Lunge && z.action?.motion === atk.lunge,
+          `${z.sub}/${z.action?.motion}`);
+  }
+
+  // -- B5. the retreat's third exit ----------------------------------------
+  //
+  // `00455d57 83be0c13000004` then `00455d67 d80df4445600`, whose operand at
+  // 0x005644f4 is `3333333f` = 0.7: a body-condition-4 actor -- both arms gone
+  // -- leaves the retreat at 70% of the inner radius.
+  {
+    clear();
+    const z = zombie("armless, retreating",
+                     { state: ZombieState.BackOff, condition: 4,
+                       pos: vec3(0, 0, INNER * 0.8) });
+    ZombieStateBackOff(z, EYE, 1 / 60, new Rng(2));
+    check("condition 4 leaves the retreat at 0.7 of the ring",
+          z.state === ZombieState.HoldAtRange,
+          ZombieState[z.state] ?? String(z.state));
+  }
+  {
+    clear();
+    const z = zombie("whole, retreating",
+                     { state: ZombieState.BackOff, condition: 0,
+                       pos: vec3(0, 0, INNER * 0.8) });
+    ZombieStateBackOff(z, EYE, 1 / 60, new Rng(2));
+    check("...and every other condition has to reach the ring itself",
+          z.state === ZombieState.BackOff,
+          ZombieState[z.state] ?? String(z.state));
+  }
+
+  // -- B6. the entry clip refuses the claim, and clears itself -------------
+  //
+  // `00455815 f6c404` is the refusal; `00455904 80e4fb` is the clear, two
+  // frames from the end of the clip on the play clock.
+  {
+    clear();
+    const z = zombie("mid entry clip");
+    z.flags2 |= ZombieFlag2.EntryClipPlaying;
+    check("an actor still playing its entry clip may not claim",
+          ZombieAttackRefusal(z) !== null, String(ZombieAttackRefusal(z)));
+    z.playTicks = MotionPlayLength(z, z.motion) - 2;
+    ZombieStateHoldAtRange(z, EYE, new Rng(5), NULL_HOST);
+    check("...and the hub clears the bit two frames from the end of it",
+          (z.flags2 & ZombieFlag2.EntryClipPlaying) === 0,
+          `0x${z.flags2.toString(16)}`);
+  }
+
+  // -- B7. the retreat's clock is an integer -------------------------------
+  //
+  // `00455d29`/`00455d32`: `MOV ECX,[ESI+0x1334]; INC ECX` -- one increment
+  // per **update**, and `00455d3b 3df0000000` compares the result against
+  // 0xF0. The port accumulated `dt * 60` instead, which is the same number
+  // only while the frame is exactly 1/60 of a second; the step given here is
+  // deliberately not, because that is the only thing that can tell an integer
+  // counter apart from an accumulator.
+  {
+    clear();
+    const z = zombie("counting", { state: ZombieState.BackOff,
+                                   pos: vec3(0, 0, 5) });
+    for (let i = 0; i < 7; i++) ZombieStateBackOff(z, EYE, 1 / 50, new Rng(2));
+    check("`backoffFrames` counts updates, not seconds", z.backoffFrames === 7,
+          String(z.backoffFrames));
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

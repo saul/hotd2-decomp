@@ -253,16 +253,144 @@ export enum ZombieFlag2 {
    * Bit `0x4000` — raised for the length of `ZombieStateDelayedLeap`'s arc and
    * cleared on both its exits.
    *
-   * [open] Nothing in the ported call graph reads it back. Kept because the
-   * state really does keep it, and because it is a different word from
-   * `obj+0x34` bit 0x4000 ({@link ActorFlag.PoseFrozen}) which the same state
-   * also toggles — two flags, one value, and mixing them up would freeze the
-   * wrong thing.
+   * **`ZombieOnShot` reads it back**, which closes an `[open]` this comment
+   * used to carry: `00453f88 f6c540` (`TEST CH, 0x40`) and the `JNZ` two bytes
+   * later jump past the death-state change, so a zombie shot mid-leap keeps
+   * flying. `[proved]`
+   *
+   * It is a different word from `obj+0x34` bit 0x4000
+   * ({@link ActorFlag.PoseFrozen}) which the same state also toggles — two
+   * flags, one value, and mixing them up would freeze the wrong thing.
    */
   Leaping = 0x4000,
-  /** Bit `0x80000000` — raised as a delayed leap hands a dead actor to the
-   *  death state. [open], like {@link ZombieFlag2.Leaping}. */
+  /**
+   * Bit `0x80000000` — this actor's death has already been dispatched.
+   *
+   * Also no longer `[open]`: `ZombieOnShot` sets it at `00453f53`
+   * (`0d00000080`) and refuses a second death on the test five instructions
+   * earlier, `00453f3b a900000080`. `[proved]`
+   */
   DiedInFlight = 0x80000000,
+  /**
+   * Bit `0x40000` — **`ZombieStateStrike` has captured `strikeStart`**, which
+   * is to say this actor has swung at least once.
+   *
+   * `ZombieStateStrike` tests it and, when clear, copies `obj+0x40/0x44/0x48`
+   * into `obj+0x13D8/0x13DC/0x13E0` and raises it in the same word:
+   * `00455b98 a900000400` (`TEST EAX, 0x40000`), `00455ba5 0d00000400`
+   * (`OR EAX, 0x40000`), `00455bb0 89866c130000`. `[proved]`
+   *
+   * **Nothing on the melee path ever clears it.** The one `AND` in the program
+   * that does is in `FUN_0045DA60` (`0045db39 25fffffbff`), reached only
+   * through `FUN_0045D9F0` and gated on two bits an ordinary zombie does not
+   * carry; `EnemyZombieInit` clears it only because it *assigns* the whole
+   * word (`00452eaf`, from `00452e9a`'s `(s16)obj+0x1316 | 0x60000000`). So
+   * after its first swing an actor keeps this bit for the rest of its life,
+   * and its two other readers in `ZombieStateHoldAtRange` — the too-close
+   * escape at `0045577c` and the cooldown gate at `004557e0` — are permanent
+   * from then on. It was a separate `hasStrikeAnchor: boolean` here, which is
+   * why neither of those two was ever wired up.
+   */
+  StrikeAnchor = 0x40000,
+  /**
+   * Bit `0x400` — set by `EnemyZombieInitByCharType` for character type 2, and
+   * cleared by `ZombieStateHoldAtRange` two frames from the end of the clip
+   * (`00455904 80e4fb`, guarded by `obj+0x19C >= play_length(obj+0x1B4) - 2`).
+   *
+   * While it is up the same state exempts the actor from the too-close retreat
+   * (`0045577c f7866c13000000040400`, the `0x40400` pair with
+   * {@link ZombieFlag2.StrikeAnchor}) and refuses the attack claim outright
+   * (`00455815 f6c404`). `ZombieOnShot` also clears it (`00453efd`).
+   * `[proved]` — the ops. That the clip in question is the *authored entrance*
+   * one is `[likely]`: it is what character type 2's spawns carry.
+   */
+  EntryClipPlaying = 0x400,
+  /**
+   * Bit `0x10000` — a one-shot effect (splash, dust, sound) has already fired
+   * for the clip that is running.
+   *
+   * Set by `ZombieStrikeFrameSplash` (0x00456DCB), `ZombieStateEmerge`
+   * (0x0045888A) and `ZombieStateArcScriptedEntrance` (0x00458C15); cleared by
+   * whoever starts the next clip, `ZombieStateStrike` among them
+   * (`00455b77 81e2fffffeff`). `[proved]`
+   */
+  OneShotFired = 0x10000,
+  /**
+   * Bit `0x80000` — **a strike has just started**, published for one frame
+   * through `g_cur_actor`.
+   *
+   * `ZombieStateStrike` raises it as it starts the swing
+   * (`00455b7e 81ca00000800`) and the per-actor hook at `obj+0x12EC` consumes
+   * and clears it in `FUN_004534A0` (`00453899` tests, `004538b4
+   * 81a06c130000fffff7ff` clears). Not class 0x31's `CollideWorld`, which is
+   * the same bit on the thrower's reading of this word. `[proved]`
+   */
+  StrikeStarted = 0x80000,
+  /**
+   * Bit `0x200000` — which of the motion row's two waiting clips this actor
+   * plays.
+   *
+   * `ZombieStateAttackRun` writes it as `flags2 |= g_wait_turn_variant[i] <<
+   * 0x15` (`0045[55]cc 8b149524615600`, `c1e215`), so a table value of 0
+   * leaves it alone and the bit is sticky once set; `ZombieStateWaitTurn`
+   * reads it straight back out with `SHR EAX, 0x15` + `AND EAX, 1`
+   * (0x00455690). `[proved]`
+   */
+  WaitTurnVariant = 0x200000,
+  /**
+   * Bit `0x8000` — `ChooseDeathMotion` picks death motion 0x3DB for character
+   * type 10 while it is up (`00456191 f6c480`), and `FUN_00457FB0` sets it
+   * (`00458120`). `[proved]`
+   *
+   * The same value as {@link ThrowerFlag.OffScreenPermit}: two classes, one
+   * bit, different meanings.
+   */
+  DeathMotionVariant = 0x8000,
+  /**
+   * Bit `0x8` — the shot that killed this actor landed within 18.0 of the
+   * point recorded at `obj+0x13CC/0x13D4`.
+   *
+   * `ZombieOnShot` raises it (`00454006 83c908`) immediately before sending
+   * the actor to state 9, and `FUN_004550E0` reads it back (`004552AE`).
+   * `[proved]` for the op and the distance; what state 9 then does with it is
+   * `[likely]` "die into the recorded spot".
+   */
+  ShotNearArcTarget = 0x8,
+  /**
+   * Bit `0x1000` — a hit-reaction clip is running on the **overlay** track,
+   * `obj+0x1B8`/`obj+0x1A0`.
+   *
+   * `ActorPlayHitReaction` sets it, `FUN_00454660` tests and clears it when
+   * that track finishes (`0045468a`, `00454716`), and `ZombieSetMotionIfIdle`
+   * refuses to start an idle while either this or
+   * {@link ZombieFlag2.HitClipBase} is up (0x0045477E). `[proved]`
+   */
+  HitClipOverlay = 0x1000,
+  /** Bit `0x2000` — the same, for the **base** track `obj+0x1B4`/`obj+0x19C`
+   *  (`FUN_00454660` at 0x004546CF and 0x00454734). `[proved]` */
+  HitClipBase = 0x2000,
+  /**
+   * Bit `0x200` — `ActorPlayHitReaction` raises it (`00454611`, `OR AH, 0x2`);
+   * `ZombieStateDeath6` and `FUN_00454F20`/`FUN_00454FD0` clear it. `[proved]`
+   *
+   * With {@link ZombieFlag2.HitReactionAlt} **both** set, and
+   * `obj+0x34 & 0x50000000` clear, `FUN_004547C0` takes the zone-indexed
+   * reaction row instead of the ordinary one (`004547cb f6c401`,
+   * `004547d4 f6c402`, `004547e0 f7c600000050`).
+   */
+  HitReactionPending = 0x200,
+  /** Bit `0x100` — the other half of that gate. `[open]`: nothing found raises
+   *  it; `ActorSnapToGroundHeight` (0x00454B3B) reads it and
+   *  `FUN_00454F20`/`FUN_00454FD0` clear it with `AND EDX, 0xdffffdff`. */
+  HitReactionAlt = 0x100,
+  /**
+   * Bit `0x10000000` — this actor was spawned in the air.
+   *
+   * `EnemyZombieInitByCharType` sets it (0x00453023) when the spawn record's
+   * `obj+0x34 & 8` says so, and `EnemyZombieUpdate` gates part of its frame on
+   * it (`0045341c`). `[proved]`
+   */
+  SpawnedInAir = 0x10000000,
 }
 
 /**
@@ -366,8 +494,19 @@ export interface Actor {
   sub: number;              // +0x1312
   /** Destroyed zones — a mask of {@link DamageZone}. */
   zones: number;            // +0x1318
-  /** The attack index the strike drew. */
-  attack: number;           // +0x131A
+  /**
+   * The attack index the strike drew — **one signed byte at `obj+0x131A`**,
+   * read everywhere as `MOVSX EAX, byte ptr [ESI+0x131a]`
+   * (`ZombieStateStrike` 0x00455A5A, `0fbe861a130000`) and written as a byte
+   * (0x00455AD0, `88861a130000`).
+   *
+   * It used to be two fields. `attackIndex` was the second name, given to
+   * `ZombiePickThrowingHand`'s hand pick — but the hand pick writes this same
+   * byte, because hand 0/1 *is* attack entry 0/1 of the row, and modelling
+   * them apart let a throw's pick and a melee pick both survive when the exe
+   * has one of them overwrite the other.
+   */
+  attack: number;           // +0x131A, s8
   /**
    * Rank in the distance queue, nearest first, and **signed**: the engine
    * reads `(s8)obj+0x131D` everywhere, and `EnemyZombieInit` writes 0xFF, so
@@ -432,13 +571,33 @@ export interface Actor {
    * `obj+0x1368` bit 0 for class 0x30 — **the actor is allowed a cooldown**.
    *
    * `ZombieStateWaitForCameraFrame` (state 19) is the only thing in the class
-   * that sets it, so for every other zombie `ZombieStateHoldAtRange` forces
-   * {@link Actor.cooldown} to zero and there is no wait between swings beyond
-   * the strike clip and the retreat.
+   * that sets it (`00457731`, `OR AL, 0x1`), and it arms **once**:
+   * `ZombieStateHoldAtRange` clears it again when the countdown expires
+   * (`004557ff 24fe`). Three routines read it — `ZombieStateHoldAtRange`
+   * (`004557dc a801`), `ZombieStateStrike` (`00455b24 f6866813000001`, which
+   * skips the lunge while it is up) and `ZombieStateBackOff`
+   * (`00455d96 f6866813000001`, which then leaves {@link Actor.cooldown}
+   * alone).
    *
    * A separate field and not a bit of `reactBone`, which is the same offset:
    * class 0x31 reads `obj+0x1368` as the bone that was hit, and this is the
    * polymorphism trap that field carries.
+   *
+   * [diverges] For class 0x30 the whole dword is a **flags word** and the port
+   * models one bit of it as this boolean. The other six bits class 0x30
+   * provably touches have no port:
+   *
+   * * `0x2` — entered water. `ActorCheckWaterEntry` sets it (0x00456998) and
+   *   tests it (0x00456925); `EnemyZombieUpdate` reads it (0x00453486).
+   * * `0x8` / `0x10` / `0x40` / `0x80` — kill-move death-clip selectors, each
+   *   set by `ZombieStateTargetMotionScript` for one motion id and read back
+   *   by `ChooseDeathMotion` to pick the matching death.
+   * * `0x20` — set by `EnemyZombieInitByCharType` for character types 9 and
+   *   0x12 (0x00453180), tested by `FUN_004534A0` (0x00453665 `TEST CL, 0x20`)
+   *   and `FUN_00453AE0` (0x00453B07). `[open]` what it selects.
+   *
+   * Making this a word is the same job as splitting it from `reactBone`, which
+   * is the union wave; the gap is recorded here rather than half-fixed.
    */
   hasCooldown: boolean;     // +0x1368 bit 0, class 0x30
   /**
@@ -509,12 +668,6 @@ export interface Actor {
    * `arcFrom`. The engine writes it every frame and never reads it back.
    */
   walkTravelled: number;    // +0x1374
-  /**
-   * `obj+0x131A` — which entry of `g_class30_attacks[type][condition]` the
-   * next attack uses. `ZombiePickThrowingHand` writes 0 for bone 5 and 1 for
-   * bone 8; the melee states index the same table with the pick list.
-   */
-  attackIndex: number;      // +0x131A
   /** `obj+0x1330` — `ZombieStateStandAndThrow`'s idle countdown. */
   throwDelay: number;       // +0x1330
   /** The bone the current throw leaves from, 5 or 8. */
@@ -732,8 +885,6 @@ export interface Actor {
    */
   strikeFloor: number;
 
-  /** `obj+0x136C & 0x40000` — `strikeStart` has been captured. */
-  hasStrikeAnchor: boolean;
   /**
    * This swing has already landed its hit.
    *
@@ -935,7 +1086,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     walkDistance: 0,
     walkTravelled: 0,
     worldPushDepth: 0,
-    attackIndex: 0,
     throwDelay: 0,
     throwHand: 0,
     standThrow: undefined,
@@ -975,7 +1125,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     hopsLeft: 0,
     hopFrames: 0,
     strikeFloor: 0,
-    hasStrikeAnchor: false,
     struck: false,
     initialState: 0,
     attackState: 0,

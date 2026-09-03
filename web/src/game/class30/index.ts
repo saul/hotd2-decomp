@@ -205,7 +205,10 @@ export function EnemyZombieInit(obj: Actor): void {
   obj.sub = 0;
   obj.backoffFrames = 0;
   obj.cooldown = 0;
-  obj.hasStrikeAnchor = false;
+  // `EnemyZombieInit` *assigns* `obj+0x136C` (`00452e78`, then
+  // `00452eaf` with `(s16)obj+0x1316 | 0x60000000`), so a pooled actor
+  // starts a life with no strike anchor however its last one ended.
+  obj.flags2 &= ~ZombieFlag2.StrikeAnchor;
   obj.struck = false;
   // `EnemyZombieInit`: `obj+0x136C |= 0x60000000` — take part in both pushes.
   obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;

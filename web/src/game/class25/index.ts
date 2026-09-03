@@ -42,7 +42,10 @@ import type { Actor } from "../actor";
 import { authoredFrameOfTicks, ticksOfAuthoredFrame }
   from "../../core/play_cursor";
 import { G } from "../globals";
-import type { ClassFrame, ClassHandler } from "../registry";
+import {
+  registerClass, type ClassFrame, type ClassHandler,
+} from "../registry";
+import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { VecToAngles } from "../vec";
 
@@ -435,3 +438,8 @@ export const ScriptedHumanoidHandler: ClassHandler = {
   init: ScriptedHumanoidInit,
   update: ScriptedHumanoidUpdate,
 };
+
+/**
+ * A bytecode VM driving a skinned character. Not an enemy.
+ */
+registerClass(SpawnClass.ScriptedHumanoid, ScriptedHumanoidHandler);

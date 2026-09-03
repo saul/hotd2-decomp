@@ -6,8 +6,26 @@
  * is a table rather than a chain of `if`s: the cat is class 0x53, the
  * civilians 0x10, the scripted humanoids 0x25, and running class 0x30's state
  * machine over all of them is what had the cat walking at the player. Reading
- * a new class means adding a module and one row here, and until then that
- * class keeps its looping motion and stays where the script put it.
+ * a new class means adding a module and one `registerClass` call in it, and
+ * until then that class keeps its looping motion and stays where the script
+ * put it.
+ *
+ * ## This file knows nothing about any class
+ *
+ * It holds the contracts and the empty table; each class module fills its own
+ * row. That direction is not taste. When the table was built here, `registry`
+ * had to import every class module, so a class module that needed anything
+ * from `registry` — the `ClassHandler` type, `ActorIsEnemy` — closed a cycle,
+ * and ESM resolves a cycle by handing out whatever the half-evaluated module
+ * has, which for a `const` table is `undefined`. That has cost this project an
+ * hour three separate times, in `class41/pool.ts`, in `class44/index.ts` and
+ * in `director.ts`, each time as *the class simply never ran and nothing said
+ * why*. Registration inverts the edge: every class module points at this one
+ * and nothing points back.
+ *
+ * The side-effect imports that make the modules evaluate at all live in
+ * `game/classes.ts`, which is the one place the set of ported classes is
+ * written down.
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
@@ -15,17 +33,6 @@ import type { Actor } from "./actor";
 import type { GameHost } from "./host";
 import { SpawnClass } from "./spawn_class";
 import type { Vec3 } from "./vec";
-import { ZombieReleaseAndDespawn } from "./class30/walk_distance";
-import { ThrowerLeave } from "./class31/death";
-import { EnemyZombieDebug, EnemyZombieInit, EnemyZombieUpdate }
-  from "./class30";
-import { EnemyThrowerDebug, EnemyThrowerInit, EnemyThrowerUpdate }
-  from "./class31/thrower";
-import { PropContainerPlacerHandler } from "./class41";
-import { Class44PlacerHandler } from "./class44";
-import { SetPiecePropHandler } from "./class24";
-import { ScriptedHumanoidHandler } from "./class25";
-import { CivilianHandler } from "./class10";
 
 export interface ClassFrame {
   eye: Vec3;
@@ -54,6 +61,26 @@ export interface ActorDebug {
   hot?: boolean;
 }
 
+/**
+ * Why `GameUpdate`'s sweep has reached this actor.
+ *
+ * [port-only] The engine has no sweep at all: all 171 `ActorDespawn`
+ * (`FUN_00409CC0`) references are inside a class's own state machine, so an
+ * object gives its counts and its permit back on the way out and nothing has
+ * to come along afterwards. The port reaches a despawn by routes the engine
+ * does not have — `RetireUnlistedActor`, a class whose death states are not
+ * ported — so it needs the backstop, and the backstop has to know *which* of
+ * the three ways an actor is leaving. See {@link ActorDespawn}'s file.
+ */
+export enum DeadSweep {
+  /** `ActorDespawn` has taken it out of the pool this frame. */
+  Despawned = 0,
+  /** Its hit points ran out and it is still in the pool. */
+  Dead = 1,
+  /** Not drawn: the character layer has not loaded it, or has taken it away. */
+  Unloaded = 2,
+}
+
 export interface ClassHandler {
   /**
    * The class's `Init` — what the spawn opcode's constructor leaves behind.
@@ -64,7 +91,15 @@ export interface ClassHandler {
    * `ctx.rng` is a save state that does not restore.
    */
   init(obj: Actor, rng?: Rng): void;
-  /** The class's `Update` — one call per 60 Hz frame. */
+  /**
+   * The class's `Update` — one call per 60 Hz frame.
+   *
+   * One calling convention, and it is this one. Class 0x30 and 0x31 used to be
+   * adapted in the table — `(o, f) => EnemyZombieUpdate(o, f.eye, f.dt, ...)`
+   * — which meant the table held a closure for two classes and the function
+   * itself for the other five, and a reader had two shapes to keep straight
+   * for no gain. `ClassFrame` goes all the way down instead.
+   */
   update(obj: Actor, f: ClassFrame): void;
   /**
    * Keep ticking this class after it dies.
@@ -102,6 +137,24 @@ export interface ClassHandler {
    */
   leave?(obj: Actor): void;
   /**
+   * What this class gives back when the sweep finds one of its actors dead,
+   * undrawn or despawned.
+   *
+   * The same argument as {@link debug}, for the other end of an actor's life.
+   * The sweep used to test `obj.cls === SpawnClass.Thrower` twice from the
+   * outside — once to pick between `ReleaseEnemyAliveCount` and
+   * `ThrowerRetireFromAliveCount`, once to pick which bit of which flags word
+   * holds the off-screen permit latch — because those are the two facts the
+   * two classes disagree about, and both are the *class's* business. A class
+   * that has been ported knows what it holds; one that has not should not be
+   * guessed at from a `switch` in `director.ts`.
+   *
+   * A class with no entry gets the generic teardown in `despawn.ts`, which is
+   * the one thing that can be said about a class nobody has read: an unported
+   * class never claims a permit, because it has no update to claim one with.
+   */
+  onDeadSweep?(obj: Actor, why: DeadSweep): void;
+  /**
    * This class reads `obj+0x34` bit 3 itself, so a shot must **not** go
    * through `ResolveHit`.
    *
@@ -123,31 +176,34 @@ export interface ClassHandler {
   debug?(obj: Actor): ActorDebug;
 }
 
-export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
-  [SpawnClass.Civilian]: CivilianHandler,
-  [SpawnClass.Zombie]: {
-    init: EnemyZombieInit,
-    leave: ZombieReleaseAndDespawn,
-    update: (o, f) => EnemyZombieUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
-    debug: EnemyZombieDebug,
-  },
-  [SpawnClass.Thrower]: {
-    init: EnemyThrowerInit,
-    leave: ThrowerLeave,
-    update: (o, f) => EnemyThrowerUpdate(o, f.eye, f.dt, f.rng, f.host, f.events),
-    updatesWhenDead: true,
-    debug: EnemyThrowerDebug,
-  },
-  // A placer, not an actor: it builds its children and kills itself on its
-  // first frame. It draws nothing, so it needs no renderer.
-  [SpawnClass.PropContainerPlacer]: PropContainerPlacerHandler,
-  // Same shape: a placer that builds and dies. Only selector 16 is ported.
-  [SpawnClass.PropPlacer]: Class44PlacerHandler,
-  // A skinned actor choreographed against the camera, not an enemy.
-  [SpawnClass.SetPieceProp]: SetPiecePropHandler,
-  // A bytecode VM driving a skinned character. Not an enemy.
-  [SpawnClass.ScriptedHumanoid]: ScriptedHumanoidHandler,
-};
+/**
+ * The table itself. Empty at module evaluation; each class module fills its
+ * own row through {@link registerClass}.
+ */
+export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {};
+
+/**
+ * Put one class in the table.
+ *
+ * [port-only] The engine builds the whole table in one pass —
+ * `BuildClassHandlerTable` (`FUN_0040AC90`) walks the `{id, handler}` pairs at
+ * `g_class_handler_pairs` and writes them into `g_class_handlers` — so there
+ * is no per-class registration routine to port. This is that walk turned
+ * inside out, one pair at a time, from the module that owns the pair.
+ *
+ * **A second registration for a class is an error, loudly.** The engine's
+ * table is written once from a static array and cannot have the problem; a
+ * pile of side-effect imports can, and a row silently overwritten by a second
+ * module is a class whose behaviour depends on module evaluation order — which
+ * is the failure this whole arrangement exists to make impossible.
+ */
+export function registerClass(cls: SpawnClass, handler: ClassHandler): void {
+  if (g_class_handlers[cls] !== undefined) {
+    throw new Error(`class 0x${cls.toString(16).toUpperCase()} `
+      + `(${SpawnClass[cls] ?? "?"}) is registered twice`);
+  }
+  g_class_handlers[cls] = handler;
+}
 
 /**
  * The classes whose handler increments `g_enemies_alive`.
@@ -162,6 +218,10 @@ export const g_class_handlers: Partial<Record<SpawnClass, ClassHandler>> = {
  * falls: anything wrongly counted here is a stage that never continues. It
  * started mattering the moment class 0x24 was ported, because that put 21
  * animated non-enemies into stage 2's object list.
+ *
+ * It is a literal set and not a scan of {@link g_class_handlers} on purpose:
+ * four of the five classes in it have no module, so a table-derived answer
+ * would leave them out and open every gate they are supposed to hold.
  */
 export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
   SpawnClass.Zombie, SpawnClass.Thrower, SpawnClass.FlyingEnemy,
@@ -172,7 +232,3 @@ export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
 export function ActorIsEnemy(cls: number): boolean {
   return ENEMY_CLASSES.has(cls);
 }
-
-/** The classes with a ported behaviour, for the UI and `verify_port.py`. */
-export const PORTED_CLASSES: SpawnClass[] =
-  Object.keys(g_class_handlers).map(Number);

@@ -23,7 +23,10 @@
  */
 import type { Actor } from "../actor";
 import { G } from "../globals";
-import type { ClassFrame, ClassHandler } from "../registry";
+import {
+  registerClass, type ClassFrame, type ClassHandler,
+} from "../registry";
+import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { PlaceFallingContainer } from "./container";
 
@@ -95,3 +98,9 @@ export const Class44PlacerHandler: ClassHandler = {
 };
 
 export * from "./container";
+
+/**
+ * The same shape: a placer that builds and dies. Only selector 16 is
+ * ported.
+ */
+registerClass(SpawnClass.PropPlacer, Class44PlacerHandler);

@@ -330,6 +330,11 @@ export class Player implements PlayerView, PlayerCommands {
     this.world.add("game", this.game);
     this.world.add("game", this.rainSim);
     this.world.add("render", new CameraDrawSystem(this.cam));
+    // ...and free roam is the other half of that: the draw returns early
+    // while `cam.scripted` is false, and this flies the camera instead. It is
+    // a system rather than a hand-rolled tick so that a seek and a snapshot
+    // load both reach it -- see `render/freeroam.ts`.
+    this.world.add("render", this.freeRoam);
     // Everything below poses against the camera the draw just placed.
     this.world.add("render", this.spawns);
     this.world.add("render", this.sceneFog);
@@ -925,10 +930,6 @@ export class Player implements PlayerView, PlayerCommands {
     this.loop.freeze = !!this.state.freeze;
     this.loop.speed = this.speed;
     this.loop.running = !this.gameStopped && !!this.walker;
-
-    if (!this.state.freeze && this.state.mode === "free") {
-      this.freeRoam.update(wall, this.camera);
-    }
 
     // **One clock, and the harness is on it.** `?drive=1` replaces the wall
     // as the thing the accumulator is fed from and changes nothing else: the

@@ -54,7 +54,7 @@ import type { TargetScriptEntry, TargetScriptJson }
 import { ActorFlag, type Actor } from "../actor";
 import type { GameHost } from "../host";
 import { TurnActorAwayFromPoint } from "../actor_turn";
-import { CivilianWait } from "../class10";
+import { CivilianWait } from "../class10/ops";
 import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";

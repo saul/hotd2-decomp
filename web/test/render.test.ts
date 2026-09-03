@@ -30,6 +30,30 @@ function stubCanvas(): void {
 }
 stubCanvas();
 
+/**
+ * Just enough `window` for a layer that installs listeners in its constructor.
+ *
+ * `FreeRoam` does, because the element it reads is the app's viewport and it
+ * outlives every stage. Being a `System` is about `World` owning its **tick**
+ * and its **resync**, which is what this file checks; the listeners are still
+ * the constructor's and still `dispose()`'s.
+ */
+function stubWindow(): void {
+  const noop = () => undefined;
+  (globalThis as unknown as { window: unknown }).window =
+    { addEventListener: noop, removeEventListener: noop };
+}
+stubWindow();
+
+/** The `HTMLElement` `FreeRoam` takes: three listeners and a pointer capture. */
+function stubViewport(): unknown {
+  return {
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    setPointerCapture: () => undefined,
+  };
+}
+
 export {};
 
 const { LabelCache } = await import("../src/render/overlays");
@@ -38,9 +62,9 @@ const { Backdrop } = await import("../src/render/backdrop");
 const { Rain } = await import("../src/render/rain");
 const { Scope } = await import("../src/core/scope");
 const { ownResources, subtreeResources } = await import("../src/render/scope3d");
-const { isTyping } = await import("../src/render/freeroam");
-const { CanvasTexture, Group, Mesh, MeshBasicMaterial, PlaneGeometry, Scene } =
-  await import("three");
+const { FreeRoam, isTyping } = await import("../src/render/freeroam");
+const { CanvasTexture, Group, Mesh, MeshBasicMaterial, PerspectiveCamera,
+        PlaneGeometry, Scene } = await import("three");
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -228,6 +252,53 @@ console.log("\nwhose keystroke is it");
   check("a contenteditable does too", isTyping(el("DIV", true)));
   check("and an ordinary element does not", !isTyping(el("DIV")));
   check("nor does a keystroke with no target", !isTyping(null));
+}
+
+console.log("\nfree roam: a system, so a rebuild reaches it");
+
+{
+  // The bug the `layers-are-systems` rule is about. `FreeRoam` was ticked by
+  // hand out of `Player.frame`, so `world.resync` -- the one call a seek and a
+  // snapshot load both make -- never reached it, and the camera was left
+  // wherever the previous state's last frame had put it.
+  const roam = new FreeRoam(stubViewport() as HTMLElement);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  // The one field of `RenderContext` this layer reads. Nothing else in a
+  // context is a camera, so a partial one is honest here rather than a stub.
+  type Ctx = Parameters<typeof roam.resync>[0];
+  const ctx = { camera } as unknown as Ctx;
+
+  check("it is a system with an id", roam.id === "render.freeroam", roam.id);
+
+  // Off, its own pose is derived from the camera on every resync -- which is
+  // what makes entering free roam after a seek start from the shot the seek
+  // produced, rather than from wherever it was left last time.
+  camera.position.set(100, 20, -300);
+  camera.updateMatrixWorld(true);
+  roam.resync(ctx);
+  check("resync with free roam off adopts the scripted camera",
+        camera.position.x === 100 && camera.position.z === -300,
+        `${camera.position.toArray().join(",")}`);
+
+  // On, it is the last word: the resync puts the camera back where the viewer
+  // flew it, whatever replaced the game state underneath.
+  roam.enabled = true;
+  camera.position.set(-7, -7, -7);
+  roam.resync(ctx);
+  check("...and with it on, resync re-places the camera from its own pose",
+        camera.position.x === 100 && camera.position.y === 20
+        && camera.position.z === -300,
+        `${camera.position.toArray().join(",")}`);
+
+  // And the tick is `World`'s, on the tick's own wall clock. Nothing is
+  // pressed, so a tick must move nothing -- the assertion that the update
+  // reads `t.wall` and not a captured delta.
+  roam.update(ctx, { dt: 0, frames: 0, wall: 1, frozen: true });
+  check("a tick with no key down moves nothing",
+        camera.position.x === 100 && camera.position.z === -300,
+        `${camera.position.toArray().join(",")}`);
+
+  roam.dispose();
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

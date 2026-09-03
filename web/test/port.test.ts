@@ -56,7 +56,10 @@ import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount, UNCOUNTED_CHAR_TYPE,
   UNCOUNTED_INITIAL_STATE,
 } from "../src/game/combat/counts";
-import { ActorDespawn } from "../src/game/despawn";
+import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
+import { DeadSweep, g_class_handlers, registerClass }
+  from "../src/game/registry";
+import { PORTED_CLASSES } from "../src/game/classes";
 import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
@@ -3127,7 +3130,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     return { civ, z, events: new Events() };
   };
   const zFrame = (z: ReturnType<typeof ActorSpawn>, events: Events) =>
-    EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST, events);
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST, events });
 
   // The bug this family fixes: an unmodelled captor state fell through
   // `ZombieEntryState` to `AttackRun` and the zombie went for the camera.
@@ -3357,15 +3360,15 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     z.state = ZombieEntryState(ZombieState.Emerge);
     check("state 27 is an entrance, not a synonym for AttackRun",
           z.state === ZombieState.Emerge, `state ${z.state}`);
-    EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
     check("...which holds the submerged pose and freezes the clock",
           z.motion === 0xb9 && z.frozen === 1, `motion ${z.motion}`);
     for (let i = 0; i < 29; i++) {
-      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
     }
     check("it waits the descriptor's delay out", z.motion === 0xb9,
           `motion ${z.motion}`);
-    EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
     check("and then plays the clip the descriptor names",
           z.motion === 12 && z.frozen === 0, `motion ${z.motion}`);
     // And the snap has it standing on the floor rather than under it.
@@ -3747,7 +3750,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
   };
   const run = (z: Actor, frames: number, rng = new Rng(3)) => {
     for (let f = 0; f < frames; f++) {
-      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
       // `GameUpdate` advances the clip; `EnemyZombieUpdate` does not. Four of
       // the twelve measure their exit on the **play clock**, so a loop that
       // leaves it at zero stalls them and proves nothing.
@@ -4104,7 +4107,7 @@ console.log("\nthe two enemy counters, stepped and not derived:");
   G.g_camera_fixed_eye_y = 0;
   G.g_script_flags[3] = 1;
   for (let f = 0; f < 3; f++) {
-    EnemyZombieUpdate(late, EYE, 1 / 60, new Rng(1), NULL_HOST);
+    EnemyZombieUpdate(late, { eye: EYE, dt: 1 / 60, rng: new Rng(1), host: NULL_HOST });
   }
   check("...and then it does", G.g_enemies_alive === 2 && G.g_enemies_present === 2,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
@@ -4158,7 +4161,7 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
     const rng = new Rng(5);
     let lowest = z.pos.y, sawLimp = false, landed = -1;
     for (let f = 0; f < 400 && z.state === ZombieState.DelayedLeap; f++) {
-      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
       ActorAdvanceMotion(z, 1 / 60);
       if (z.motion === LIMP_MOTION) sawLimp = true;
       if (landed < 0 && z.sub >= 4) { landed = f; break; }
@@ -4180,7 +4183,7 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
     let sawLimp = false;
     for (let f = 0; f < 400 && z.state === ZombieState.DelayedLeap; f++) {
       if (f === 12) z.hp = 0;
-      EnemyZombieUpdate(z, EYE, 1 / 60, rng, NULL_HOST);
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
       ActorAdvanceMotion(z, 1 / 60);
       if (z.motion === LIMP_MOTION) sawLimp = true;
     }
@@ -4886,6 +4889,143 @@ console.log("\nrain: DrawRainParticles' simulation half");
     check("and only once, whatever the rest of the fall does",
           G.g_enemies_alive === 0, `alive ${G.g_enemies_alive}`);
   }
+}
+
+// -- the class table, and who fills it --------------------------------------
+
+console.log("\n`g_class_handlers`, filled by the classes themselves:");
+{
+  // The table is empty at `registry.ts`'s own evaluation and each class module
+  // writes its own row. That is only true if the modules have been evaluated,
+  // and the one thing that guarantees they have is `director.ts`'s side-effect
+  // import of `game/classes.ts` -- which this file gets by importing
+  // `ActorSpawn`. A missing import here is seven classes with no behaviour and
+  // nothing at all saying so, which is exactly the failure the old ESM cycle
+  // produced three times.
+  const want: [SpawnClass, string][] = [
+    [SpawnClass.Civilian, "0x10 civilian"],
+    [SpawnClass.SetPieceProp, "0x24 set piece"],
+    [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
+    [SpawnClass.Zombie, "0x30 zombie"],
+    [SpawnClass.Thrower, "0x31 thrower"],
+    [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
+    [SpawnClass.PropPlacer, "0x44 prop placer"],
+  ];
+  for (const [cls, name] of want) {
+    check(`${name} registered itself`,
+          typeof g_class_handlers[cls]?.update === "function",
+          `handler ${JSON.stringify(g_class_handlers[cls] ?? null)}`);
+  }
+  check("...and `PORTED_CLASSES` is those seven and nothing else",
+        PORTED_CLASSES.length === want.length
+        && want.every(([c]) => PORTED_CLASSES.includes(c)),
+        PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
+  // The cat is 0x53 and has no module. It must stay absent rather than fall
+  // back to anything -- an `if` is what had it walking at the player.
+  check("a class with no module has no row",
+        g_class_handlers[0x53 as SpawnClass] === undefined);
+
+  // Loud, not last-one-wins. A row silently overwritten by a second module is
+  // a class whose behaviour depends on evaluation order.
+  let threw = "";
+  try {
+    registerClass(SpawnClass.Zombie, { init: () => undefined,
+                                       update: () => undefined });
+  } catch (e) {
+    threw = String(e);
+  }
+  check("registering a class twice throws", threw.includes("twice"), threw);
+  check("...and the first registration is untouched",
+        g_class_handlers[SpawnClass.Zombie]?.debug !== undefined);
+}
+
+// -- the sweep asks the class -----------------------------------------------
+
+console.log("\n`ActorDeadSweep`, and what each class gives back:");
+{
+  const rng = new Rng(3);
+  scene(0, rng);
+
+  // Class 0x30. The permit on every reason; the counts on death and despawn
+  // and never on a frame the renderer simply has not drawn.
+  const z = ActorSpawn(0x2000, SpawnClass.Zombie, 1, "zombie");
+  z.visible = true;
+  z.hp = 10;
+  check("one zombie is one enemy alive and present",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  check("...and it takes a permit", TryClaimAttackSlot(z, NULL_HOST));
+
+  ActorDeadSweep(z, DeadSweep.Unloaded);
+  check("an undrawn zombie gives the permit back",
+        z.attackPermit === -1 && G.g_attack_permits[0] === -1);
+  check("...and keeps both counts, because it is not dead",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+
+  ActorDeadSweep(z, DeadSweep.Dead);
+  check("a dead one leaves both, on the same frame",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  ActorDeadSweep(z, DeadSweep.Despawned);
+  check("...and the latches make a second sweep free",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+}
+{
+  const rng = new Rng(3);
+  scene(0, rng);
+
+  // Class 0x31 disagrees about both facts, which is why the sweep asks. Its
+  // death is four states and it retires from the counts where the exe does, so
+  // a dead thrower is still *present*.
+  const w = ActorSpawn(0x2100, SpawnClass.Thrower, 0x35, "thrower");
+  w.visible = true;
+  w.hp = 10;
+  check("one thrower is one enemy alive and present",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  check("...and it takes a permit in its own bit",
+        ThrowerTryClaimAttackSlot(w, NULL_HOST) && w.attackPermit >= 0);
+
+  ActorDeadSweep(w, DeadSweep.Dead);
+  check("a dead thrower gives the permit back",
+        w.attackPermit === -1 && G.g_attack_permits[0] === -1);
+  check("...and stays present and alive: its own death states do that",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+
+  ActorDeadSweep(w, DeadSweep.Despawned);
+  check("a despawned one leaves both, in `obj+0x136C`'s latches",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+}
+{
+  const rng = new Rng(3);
+  scene(0, rng);
+
+  // A class with no `onDeadSweep` at all: the generic enemy release. Class
+  // 0x51 has no module, so this is the fallback doing the only thing that can
+  // honestly be said about an unread class.
+  const f = ActorSpawn(0x2200, SpawnClass.WaterEnemy, 0, "water enemy");
+  f.visible = true;
+  G.g_enemies_alive = 1;
+  G.g_enemies_present = 1;
+  ActorDeadSweep(f, DeadSweep.Unloaded);
+  check("an undrawn unported enemy keeps both counts",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  ActorDeadSweep(f, DeadSweep.Dead);
+  check("...and a dead one leaves both",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+
+  // ...and a non-enemy is not counted either way.
+  const c = ActorSpawn(0x2300, SpawnClass.ScriptedHumanoid, 0, "humanoid");
+  ActorDeadSweep(c, DeadSweep.Dead);
+  check("a non-enemy leaves the counters alone",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

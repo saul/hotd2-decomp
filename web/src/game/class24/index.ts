@@ -44,7 +44,10 @@ import type { Rng } from "../../core/rng";
 import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import type { Actor } from "../actor";
 import { G } from "../globals";
-import type { ClassFrame, ClassHandler } from "../registry";
+import {
+  registerClass, type ClassFrame, type ClassHandler,
+} from "../registry";
+import { SpawnClass } from "../spawn_class";
 import { MotionPlayFrame, MotionPlayLength, T } from "../tables";
 
 /** `obj+0x130C` for this class — which state routine the Init installs. */
@@ -333,3 +336,7 @@ export const SetPiecePropHandler: ClassHandler = {
   update: SetPiecePropUpdate,
 };
 
+/**
+ * A skinned actor choreographed against the camera, not an enemy.
+ */
+registerClass(SpawnClass.SetPieceProp, SetPiecePropHandler);

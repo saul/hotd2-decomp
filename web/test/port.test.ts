@@ -64,11 +64,12 @@ import {
   TryClaimAttackSlot,
 } from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
-import { ZombieEnterCorpseState } from "../src/game/class30/death";
+import { ZombieEnterCorpseState, ZombieReleasePermitAndUntrack }
+  from "../src/game/class30/death";
 import { ZombieOnShot } from "../src/game/class30/on_shot";
 import {
-  ReleaseEnemyAliveCount, ReleaseEnemyPresentCount, UNCOUNTED_CHAR_TYPE,
-  UNCOUNTED_INITIAL_STATE,
+  ReleaseEnemyAliveCount, ReleaseEnemyPresentCount, ThrowerReleaseSlotOnDeath,
+  UNCOUNTED_CHAR_TYPE, UNCOUNTED_INITIAL_STATE,
 } from "../src/game/combat/counts";
 import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
 import { DeadSweep, g_class_handlers, registerClass }
@@ -6171,6 +6172,135 @@ console.log("`ActorKillAll` routes class 0x30 through its death chain:");
   check("...with both counters back at zero",
         G.g_enemies_alive === 0 && G.g_enemies_present === 0,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
+}
+
+// -- D1: where `NoCameraTrack` is raised, and the guard on it ---------------
+
+/**
+ * **`ReleaseAttackSlot` (`FUN_00456520`) does not untrack, and the caller
+ * that does is guarded.**
+ *
+ * The port used to raise `obj+0x34` bit 0x10000 inside the permit release,
+ * unconditionally, on every path in both ported enemy classes. The engine
+ * raises it in `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) instead, in
+ * the same arm as the `g_enemy_slots` clear, and skips both when the actor
+ * carries `ActorFlag.KeepCameraWhenLast` and is the last enemy alive.
+ *
+ * Every assertion below fails on the code as it stood before D1: the first
+ * four because the release wrote the flag, the last three because the guard
+ * did not exist.
+ */
+console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
+{
+  const rng = new Rng(21);
+  scene(0, rng);
+
+  // 1. The permit release, on its own, on both classes.
+  {
+    const z = ActorSpawn(0x2400, SpawnClass.Zombie, 1, "zombie");
+    z.visible = true;
+    z.hp = 10;
+    check("a zombie takes a permit", TryClaimAttackSlot(z, NULL_HOST));
+    ReleaseAttackSlot(z);
+    check("`ReleaseAttackSlot` gives the permit back",
+          z.attackPermit === -1 && G.g_attack_permits[0] === -1);
+    check("...and does not touch `obj+0x34`",
+          (z.flags & ActorFlag.NoCameraTrack) === 0,
+          `flags ${z.flags.toString(16)}`);
+
+    const w = ActorSpawn(0x2401, SpawnClass.Thrower, 0x35, "thrower");
+    w.visible = true;
+    w.hp = 10;
+    check("...and a thrower's release is the same routine, same silence",
+          ThrowerTryClaimAttackSlot(w, NULL_HOST)
+          && (ThrowerReleaseAttackPermit(w), w.attackPermit === -1)
+          && (w.flags & ActorFlag.NoCameraTrack) === 0,
+          `flags ${w.flags.toString(16)}`);
+  }
+}
+{
+  const rng = new Rng(22);
+  scene(0, rng);
+
+  // 2. The guard, in `ZombieReleasePermitAndUntrack`. Three cases, and the
+  //    count is read *before* `ReleaseEnemyAliveCount` runs, so "1" means
+  //    "this actor is the last one".
+  const zombie = (at: number, flags = 0): Actor => {
+    const a = ActorSpawn(at, SpawnClass.Zombie, 1, `zombie ${at}`);
+    a.visible = true;
+    a.hp = 10;
+    a.flags |= flags;
+    G.g_enemy_slots = [...G.g_enemy_slots, a.at];
+    return a;
+  };
+
+  {
+    const last = zombie(0x2500, ActorFlag.KeepCameraWhenLast);
+    G.g_enemies_alive = 1;
+    ZombieReleasePermitAndUntrack(last);
+    check("the last enemy alive carrying the bit keeps camera tracking",
+          (last.flags & ActorFlag.NoCameraTrack) === 0,
+          `flags ${last.flags.toString(16)}`);
+    check("...and keeps its `g_enemy_slots` slot with it",
+          G.g_enemy_slots.includes(last.at), G.g_enemy_slots.join());
+    check("...and still leaves `g_enemies_alive`, which is outside the arm",
+          G.g_enemies_alive === 0, `${G.g_enemies_alive}`);
+  }
+  {
+    const plain = zombie(0x2501);
+    G.g_enemies_alive = 1;
+    ZombieReleasePermitAndUntrack(plain);
+    check("one without the bit loses tracking even as the last alive",
+          (plain.flags & ActorFlag.NoCameraTrack) !== 0,
+          `flags ${plain.flags.toString(16)}`);
+    check("...and loses the slot with it",
+          !G.g_enemy_slots.includes(plain.at), G.g_enemy_slots.join());
+  }
+  {
+    const held = zombie(0x2502, ActorFlag.KeepCameraWhenLast);
+    G.g_enemies_alive = 2;                     // it is not the last one
+    ZombieReleasePermitAndUntrack(held);
+    check("with two alive the guard does not fire",
+          (held.flags & ActorFlag.NoCameraTrack) !== 0
+          && !G.g_enemy_slots.includes(held.at),
+          `flags ${held.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
+  }
+}
+{
+  const rng = new Rng(23);
+  scene(0, rng);
+
+  // 3. Class 0x31's is the same guard on the other counter --
+  //    `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) reads `g_enemies_present`.
+  //    The port used to guard the slot clear alone and raise the flag either
+  //    way, which is the half of D1 that lived in `combat/counts.ts`.
+  const thrown = (at: number, flags = 0): Actor => {
+    const a = ActorSpawn(at, SpawnClass.Thrower, 0x35, `thrower ${at}`);
+    a.visible = true;
+    a.hp = 0;                                  // dying, so the routine acts
+    a.flags |= flags;
+    G.g_enemy_slots = [...G.g_enemy_slots, a.at];
+    return a;
+  };
+
+  {
+    const last = thrown(0x2600, ActorFlag.KeepCameraWhenLast);
+    G.g_enemies_present = 1;
+    ThrowerReleaseSlotOnDeath(last);
+    check("the last enemy present carrying the bit keeps both",
+          (last.flags & ActorFlag.NoCameraTrack) === 0
+          && G.g_enemy_slots.includes(last.at),
+          `flags ${last.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
+  }
+  {
+    const plain = thrown(0x2601);
+    G.g_enemies_present = 1;
+    ThrowerReleaseSlotOnDeath(plain);
+    check("...and one without the bit loses both",
+          (plain.flags & ActorFlag.NoCameraTrack) !== 0
+          && !G.g_enemy_slots.includes(plain.at),
+          `flags ${plain.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

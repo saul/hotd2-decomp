@@ -230,20 +230,30 @@ export function ChooseDeathMotion(obj: Actor, rng: Rng): void {
  * The **alive** count falls here and the **present** count does not: that is
  * `ZombieEnterCorpseState`'s, one death clip later.
  *
- * [diverges] `obj+0x34` bit 0x800000 has no port — nothing the port models
- * reads or writes it — so the exception that keeps the camera on the last
- * enemy alive while it dies cannot be taken, and the untrack is unconditional.
- * The same `[diverges]` is already written on `ThrowerReleaseSlotOnDeath`,
- * which makes the same test. `[open]`
+ * Three things this routine keeps together that the port used to split.
+ * `ReleaseAttackSlot` (`FUN_00456520`) is the permit and **only** the permit —
+ * it does not touch `obj+0x34`. The `NoCameraTrack` raise and the
+ * `g_enemy_slots` clear are one arm, taken or skipped together. And the arm is
+ * guarded: an actor carrying {@link ActorFlag.KeepCameraWhenLast} that is the
+ * **last enemy alive** keeps camera tracking *and* keeps its slot, so the
+ * killing shot of a fight is not cut away from. Six shipped spawns carry that
+ * bit; see the flag's own comment for where they are and how it gets there.
  */
 export function ZombieReleasePermitAndUntrack(obj: Actor): void {
   ReleaseAttackSlot(obj);
   if (obj.flags38 & CountFlag.KeepCounted) return;
-  obj.flags |= ActorFlag.NoCameraTrack;
-  // The camera slot at `obj+0x120`, which is a different slot from the permit
-  // at `obj+0x121`. Modelled as a filter by `at`, for the reason
-  // `ThrowerLeave` gives: the port keeps `g_enemy_slots` as a list of actors.
-  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  // `004565bd a900008000` / `004565c4 66390d4a909c00` with CX = 1 — the test
+  // is on `g_enemies_alive` (`0x009C904A`), which has not been decremented
+  // yet: `ReleaseEnemyAliveCount` is the call *after* this arm, so "1" here
+  // means "this actor is the last one".
+  if (!(obj.flags & ActorFlag.KeepCameraWhenLast) || G.g_enemies_alive !== 1) {
+    obj.flags |= ActorFlag.NoCameraTrack;
+    // The camera slot at `obj+0x120`, which is a different slot from the
+    // permit at `obj+0x121`. Modelled as a filter by `at`, for the reason
+    // `ThrowerLeave` gives: the port keeps `g_enemy_slots` as a list of
+    // actors.
+    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  }
   ReleaseEnemyAliveCount(obj);
 }
 

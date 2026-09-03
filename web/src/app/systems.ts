@@ -6,15 +6,24 @@
  * Everything of substance is on the other side of them.
  */
 import type { Context, System, Tick } from "../core/system";
+import type { RenderContext } from "../render/context";
+import type { CameraRig } from "../render/camera";
+import { CamSeatPathFrame } from "../game/camera/path";
 import { GameUpdate } from "../game/director";
+import { ProcessShotRequests } from "../game/combat/shot";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../game/globals";
-import type { GameHost } from "../game/host";
+import type { GameHost, ShotPick, ShotRay } from "../game/host";
 import type { Vec3 } from "../game/vec";
 import type { CameraFrame } from "../core/camera";
 import type { Walker } from "../script/walker";
-import { SpawnPropContainers } from "../game/director";
+import {
+  RetireUnlistedActor, SpawnPropContainers, SpawnScriptedCharacters,
+  type CharacterSpawnRequest,
+} from "../game/director";
+import type { Actor } from "../game/actor";
+import type { Rng } from "../core/rng";
 
 /** What the renderer answers for the port. See `game/host.ts`. */
 export interface HostBackend {
@@ -23,6 +32,8 @@ export interface HostBackend {
   /** `CamEvalObjectPath6` — a point on an `op_` path, for class 0x25. */
   objectPath?(slot: number, frame: number):
     { x: number; y: number; z: number } | null;
+  /** `ShotTestSphere` — the nearest thing along one shot segment. */
+  pickShot?(ray: ShotRay): ShotPick | null;
 }
 
 /**
@@ -95,6 +106,9 @@ export class GameSystem implements System {
       return true;
     },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),
+    // The hit spheres ride bones the renderer poses, so the intersection is
+    // the renderer's; what a hit *means* is `game/combat/shot.ts`.
+    pickShot: (ray) => this.backend?.pickShot?.(ray) ?? null,
   };
 
   /**
@@ -112,8 +126,19 @@ export class GameSystem implements System {
   }
 
   update(ctx: Context, t: Tick): void {
-    if (t.frozen || t.dt <= 0) return;
     this.view = ctx.view;
+    if (t.frozen || t.dt <= 0) {
+      // **A trigger pull is input, not elapsed time.** The player deliberately
+      // lets you shoot with the transport stopped — `Player.wantsFrame` keeps
+      // asking for frames while a shot's feedback is still in flight, and the
+      // feed row for a shot fired while paused is half of what the step mode
+      // is for. `GameUpdate` drains the queue at its head, but it is not going
+      // to run on this tick, so the queue is drained here instead. Nothing
+      // else about the frame happens: the shot lands, and the world does not
+      // move under it.
+      ProcessShotRequests(this.host, ctx.rng, ctx.events);
+      return;
+    }
     // `g_camera_yaw_bams` — class 0x31 wants the yaw on its own, not the whole
     // matrix: the leap aside builds its landing point with a bare
     // `MatrixRotateY` and the wall search refuses unless the actor faces
@@ -156,6 +181,56 @@ export class GameSystem implements System {
          + ` · ${live} live`
          + (actors.length > live ? ` · ${actors.length - live} scripted` : "");
   }
+}
+
+/** What {@link CharacterBindSystem} and {@link syncCharacterSpawns} need. */
+export interface CharacterPool {
+  bindToPool(pool: readonly Actor[]): void;
+  readySpawns(spawns: readonly { at: number }[]): CharacterSpawnRequest[];
+  syncSpawns(spawns: readonly { at: number }[],
+             made: readonly Actor[]): Actor[];
+  rng: Rng;
+}
+
+/**
+ * The character layer, rebound to the object pool.
+ *
+ * A snapshot load replaces every actor with a restored copy and a seek wipes
+ * the pool outright, so after either the renderer's references are stale.
+ * Binding rather than re-spawning is the whole point: a restored actor carries
+ * its hit points, its severed bones and its state, and calling `ActorSpawn`
+ * would throw all of it away.
+ *
+ * It is a system in the `game` phase rather than a line inside
+ * `CharacterLayer.resync` because the pool is engine state and the lookup used
+ * to be `ActorByAt` — an engine function called from `render/`. The `game`
+ * phase resyncs before the `render` one, so the character layer still finds
+ * itself bound by the time it redraws.
+ */
+export class CharacterBindSystem implements System {
+  readonly id = "game.characters";
+  constructor(private readonly chars: CharacterPool) {}
+  resync(): void {
+    this.chars.bindToPool(G.g_object_list);
+  }
+}
+
+/**
+ * The script's character spawns, made real.
+ *
+ * Three steps in three layers, and the split is the point of step 21. The
+ * renderer says which adopted hierarchies the script is currently asking for
+ * and where the exporter put them (`readySpawns`); the port builds the
+ * objects, reading the descriptor tail and running each class's `Init`
+ * (`SpawnScriptedCharacters`); the renderer binds its nodes to what came back
+ * and hands over the ones the script has stopped listing, which the port
+ * retires. `render/characters.ts` used to do all three, which put
+ * `SpawnFromDescriptor`'s decisions in a layer no headless test can reach.
+ */
+export function syncCharacterSpawns(chars: CharacterPool,
+                                    spawns: readonly { at: number }[]): void {
+  const made = SpawnScriptedCharacters(chars.readySpawns(spawns), chars.rng);
+  for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
 }
 
 /**
@@ -219,4 +294,97 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // safety net for a spawn list restored by a snapshot load rather than by
   // an instruction. It is idempotent — `ActorByAt` refuses a second one.
   SpawnPropContainers(w.spawns);
+}
+
+/**
+ * Seat the camera block on this frame of the shot the script is playing.
+ *
+ * **Why this lives in `app/` and not in `render/camera.ts`, where it used to.**
+ * Seating the block is an engine decision: it evaluates a `cam/` curve and
+ * writes `g_camera_block_eye` and `g_cam_path_target`, two globals a snapshot
+ * carries. A renderer that calls `CamAdvancePathFrame` is the port being
+ * driven from `render/`, which is exactly what `render-drives-the-port`
+ * counts. The evaluation itself moved to `game/camera/curve.ts` — it is
+ * Hermite maths over bundle keys and never needed three.js — and what is left
+ * is composition: taking the walker's shot, the walker's roll flag and the
+ * rig's two chrome toggles and handing them to `CamSeatPathFrame`. That is
+ * this layer's whole job, and it is the same job `syncPortGlobals` above does.
+ *
+ * `force` seats the block even though the shot's action has retired. The
+ * engine never needs it — it has no seek — but arriving at a deep link with an
+ * eased look-at of (0,0,0) points the camera at the world origin.
+ */
+export function seatCamera(rig: CameraRig, ctx: RenderContext,
+                           force = false): void {
+  const w = ctx.walker;
+  if (!w || !rig.scripted) return;
+  const cam = w.cam;
+  if (!cam) return;
+  const p = ctx.paths?.paths.get(cam.slot);
+  if (!p) return;
+  const pose = CamSeatPathFrame(p, cam.frame, w.rollEnabled,
+                                force || !cam.done || !rig.trackEnabled);
+  // Roll is the one channel the camera block has no word for, so the draw
+  // takes it off the pose the seat evaluated. See `CamSeatPathFrame`.
+  rig.pose.roll = pose.roll;
+}
+
+/** Seat and draw in one go, for the paths that have no game tick between. */
+export function syncCamera(rig: CameraRig, ctx: RenderContext,
+                           force = false): void {
+  seatCamera(rig, ctx, force);
+  rig.draw(ctx);
+}
+
+/**
+ * The first half of a camera frame, in the `script` phase: the shot writes the
+ * camera block before the port's frame reads it.
+ *
+ * ## Why this refuses a frame that advances no game time
+ *
+ * Seating the block is the **first half** of a camera frame;
+ * `CameraTrackEnemiesTick`, inside `GameSystem`, is the second, and it is the
+ * half that eases the aim off the rail and onto whatever the fight wants. So
+ * the two have to run together or not at all, and `GameSystem` already
+ * refuses a tick with no time in it — this makes the same test, deliberately
+ * spelled the same way.
+ *
+ * Without it the camera **flickered between two aims at the display's refresh
+ * rate**, and only on a display faster than 60 Hz. `Player.frame` draws every
+ * rAF but ticks at a fixed 60, so on a 120 Hz panel every other frame owes no
+ * tick and takes the `tickStopped` path — which runs the whole tick order
+ * with `Loop.idle`. This system seated the block back on the rail, `GameSystem`
+ * returned early, and the draw put the *un-eased* aim on screen. One frame
+ * eased, the next on the rail, sixty times a second: a stage-1 measurement put
+ * it at 3.5 degrees each way with one enemy registered.
+ *
+ * Nothing else needed it. The seek, the stage load and the frame slider all
+ * seat the block through `Player.syncCameraToWalker`, which calls
+ * {@link syncCamera} directly and never went through this system; and the draw
+ * still runs every rendered frame, because placing the three.js camera from a
+ * block that has not changed is idempotent and a resize needs it.
+ */
+export class CameraSeatSystem implements System<RenderContext> {
+  readonly id = "camera.seat";
+  constructor(private readonly rig: CameraRig) {}
+
+  update(ctx: RenderContext, t: Tick): void {
+    if (!this.rig.driving) return;
+    if (t.frozen || t.dt <= 0) return;
+    seatCamera(this.rig, ctx);
+  }
+
+  /**
+   * A load or a seek replaced the walker's camera command wholesale.
+   *
+   * `force`, because the restored shot's action may already have retired and
+   * the eased look-at that came back with it has nothing to ease *from* until
+   * the block is on the rail. This is the half `CameraDrawSystem.resync` used
+   * to do for it, back when the rig could seat the block itself; the `script`
+   * phase resyncs before the `render` one, so the draw still finds a seated
+   * block.
+   */
+  resync(ctx: RenderContext): void {
+    seatCamera(this.rig, ctx, true);
+  }
 }

@@ -31,7 +31,7 @@
  * this file draws its own random numbers — they do not reach the port, so the
  * save state is unaffected.
  */
-import { Box3, Group, Object3D, Raycaster, Vector3 } from "three";
+import { Box3, Group, Object3D, Ray, Vector3 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
@@ -400,12 +400,18 @@ export class BreakableLayer implements System<RenderContext> {
    * The engine's own test is `RegisterForShotTest` plus a segment-versus-mesh
    * pass over the collision meshes, and those are not in the bundle — so this
    * measures against the drawn geometry's bounds instead, nearest first.
-   * [diverges] declared in `shooting.ts` alongside the character pick, which
+   * [diverges] declared in `characters.ts` alongside the character pick, which
    * makes the same trade.
+   *
+   * `id` rather than the prop: this feeds `GameHost.pickShot`, and what
+   * crosses that seam is what the engine identifies an object by, not a
+   * reference the port would then be free to write through. `t` is the
+   * distance along a unit-length direction, so the caller can sort props and
+   * bones into the one list the engine's shot test walks.
    */
-  pick(ray: Raycaster): { prop: BreakableProp; point: Vector3 } | null {
+  pickRay(ray: Ray): { id: number; point: Vector3; t: number } | null {
     if (!this.enabled) return null;
-    let best: { prop: BreakableProp; point: Vector3; d: number } | null = null;
+    let best: { id: number; point: Vector3; t: number } | null = null;
     for (const p of G.g_breakable_props) {
       if (p.dead || p.state === BreakableState.Removed
           || p.family === PropFamily.Effect) continue;
@@ -413,13 +419,13 @@ export class BreakableLayer implements System<RenderContext> {
       if (!l || !l.node.visible) continue;
       this._box.setFromObject(l.node);
       if (this._box.isEmpty()) continue;
-      if (!ray.ray.intersectBox(this._box, this._hit)) continue;
-      const d = ray.ray.origin.distanceTo(this._hit);
-      if (!best || d < best.d) {
-        best = { prop: p, point: this._hit.clone(), d };
+      if (!ray.intersectBox(this._box, this._hit)) continue;
+      const t = ray.origin.distanceTo(this._hit);
+      if (!best || t < best.t) {
+        best = { id: p.id, point: this._hit.clone(), t };
       }
     }
-    return best && { prop: best.prop, point: best.point };
+    return best;
   }
 
   /**

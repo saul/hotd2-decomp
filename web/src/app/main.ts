@@ -26,8 +26,9 @@ import {
 } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
 import type { ScriptJson } from "../bundle/stage";
-import { CamPaths } from "../render/campath";
-import { CameraDrawSystem, CameraRig, CameraSeatSystem, CameraTakeSystem }
+import { CamPaths } from "../game/camera/curve";
+import { QueueShotRequest } from "../game/combat/shot";
+import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
 import { SpawnLayer } from "../render/overlays";
@@ -78,8 +79,10 @@ import type { Snapshot } from "../core/snapshot";
 import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing, type HistoryView } from "./ring";
-import { GameSystem, ScriptSystem, drawSystem, syncPortGlobals }
-  from "./systems";
+import {
+  CameraSeatSystem, CharacterBindSystem, GameSystem, ScriptSystem, drawSystem,
+  seatCamera, syncCamera, syncCharacterSpawns, syncPortGlobals,
+} from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { DebugBoxLayer } from "../render/debug";
 import { Hud as HudLayer } from "../hud/hud";
@@ -88,7 +91,6 @@ import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { ResetPropContainers } from "../game/class41";
 import { ResetGameGlobals } from "../game/globals";
-import { RetireUnlistedActor } from "../game/director";
 import { SetGameTables } from "../game/tables";
 
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
@@ -262,7 +264,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // children and `#viewport` is React's element, so React renders them and
     // hands them across in `UiHost`. See `ui/panels/Viewport.tsx`.
     this.shooting = new Shooting(host.viewport, host.crosshair, this.chars,
-                                 this.appScope);
+                                 this.appScope, this.events);
+    // A click is input. The renderer says what the viewer did; the port owns
+    // the queue and decides what it means. See `game/combat/shot.ts`.
+    this.shooting.onFire = (ray) => QueueShotRequest(0, ray);
     this.hudLayer = new HudLayer(host.hud);
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
@@ -314,6 +319,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // camera for itself. Same place in the order, same values.
     this.world.add("game", new CameraTakeSystem());
     this.world.add("game", this.game);
+    // After the port's frame, in the same phase: the renderer's references to
+    // the object pool, rebound. A load replaces every actor and a seek wipes
+    // the pool, and `render/` may not look one up for itself.
+    this.world.add("game", new CharacterBindSystem(this.chars));
     this.world.add("game", this.rainSim);
     this.world.add("render", new CameraDrawSystem(this.cam));
     // ...and free roam is the other half of that: the draw returns early
@@ -840,7 +849,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // than swinging onto it. That is what keeps the script's cuts sharp — and
     // 148 of the 631 consecutive `cam_play` pairs in stages 1-6 are cuts, some
     // of them a full 173 degrees.
-    this.cam.seat(this.ctx, true);
+    seatCamera(this.cam, this.ctx, true);
   }
 
   /** The feed is capped so a long session cannot grow without bound. */
@@ -899,10 +908,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * a seek, a slider drag, a stage that has just finished loading.
    *
    * `force` puts the aim on the rail even though the shot's action has
-   * retired. See `CameraRig.seat`.
+   * retired. See `seatCamera` in `app/systems.ts`.
    */
   syncCameraToWalker(force = false): void {
-    this.cam.sync(this.ctx, force);
+    syncCamera(this.cam, this.ctx, force);
   }
 
   // -- what a frame is made of -------------------------------------------
@@ -1016,11 +1025,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // — the script phase, so an actor spawned by an instruction ticks on the
     // frame that instruction ran, exactly as `SpawnFromDescriptor`'s does.
     // What the script stopped placing leaves the world here rather than in
-    // the layer that noticed: `render/` may perform a spawn, it does not get
-    // to decide a lifetime. `verify_layers.py` is what keeps that honest.
-    for (const a of this.chars.syncSpawns(this.walker.spawns)) {
-      RetireUnlistedActor(a);
-    }
+    // the layer that noticed: `render/` may notice that a spawn is placeable,
+    // it does not get to decide that an object exists or that a lifetime has
+    // ended. `verify_layers.py` is what keeps that honest, and
+    // `syncCharacterSpawns` is where the three layers meet.
+    syncCharacterSpawns(this.chars, this.walker.spawns);
   }
 
   /**

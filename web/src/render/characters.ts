@@ -56,27 +56,13 @@ import type {
 import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
 import type { Actor } from "../game/actor";
 import type { Vec3 } from "../game/vec";
-import { DescriptorFromPlacement } from "../game/descriptor";
-import { ActorSpawn } from "../game/director";
-import { ActorIsEnemy } from "../game/registry";
-import { ActorByAt, G } from "../game/globals";
+import type { CharacterSpawnRequest } from "../game/director";
 import { Rng } from "../core/rng";
 import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
-import type { GameHost } from "../game/host";
-import { ActorKillAll, type KillAllResult, ResolveHit, type HitResult }
-  from "../game/combat/resolve_hit";
+import type { ShotPick, ShotRay } from "../game/host";
+import type { BreakableLayer } from "./breakables";
 import { BAMS_TO_RAD } from "../core/bams";
-
-/**
- * The bone `SkeletonEmitNode` records into `obj+0x100`, and the 4.0
- * `FUN_00409B70` adds to its height before the camera reads it.
- */
-const CAMERA_TRACK_BONE = 1;
-const CAMERA_TRACK_RISE = 4;
-
-/** The engine's frame clock. Motion clips are authored at half of it. */
-
 
 /**
  * The exporter names a bone's node `chr_<name>_spawn###_<part>`, where *part*
@@ -283,24 +269,8 @@ export class CharacterLayer implements System {
     }
   }
 
-  /**
-   * Make the game objects the script has spawned, and unmake the rest.
-   *
-   * **This is the engine's object lifetime, and the reason it is a seam at
-   * all.** In the exe an actor comes into existence in `SpawnFromDescriptor`
-   * (`FUN_00408A20`) when opcode 0x0B/0x0C/0x0D runs, and its class `Init`
-   * runs there and once. This layer used to build all of them at scene load
-   * and gate them with `visible` instead, which meant every `Init` in the
-   * stage had already run before the first frame: stage 1 counted all seven of
-   * its civilians in `g_civilians_alive` from the entry block, six of them
-   * belonging to blocks 4, 6, 8, 9 and 13, and `wait_scripted_actors` — whose
-   * 68 sites all want zero — could never pass.
-   *
-   * Driven from `syncPortGlobals`, beside `SpawnPropContainers`, so it runs in
-   * the script phase and a spawn ticks on the frame its opcode ran. Idempotent
-   * in both directions: an `at` already made is left alone.
-   */
-  syncSpawns(spawns: readonly { at: number }[]): Actor[] {
+  /** Which adopted hierarchies the script is asking for, this frame. */
+  private wantedSpawns(spawns: readonly { at: number }[]): Set<number> {
     const want = new Set<number>();
     for (const s of spawns) if (this.pending.has(s.at) || this.live.has(s.at)) {
       want.add(s.at);
@@ -317,36 +287,59 @@ export class CharacterLayer implements System {
         want.add(inst.at);
       }
     }
+    return want;
+  }
 
-    for (const at of want) {
+  /**
+   * The spawns that are ready to become game objects, and the two facts about
+   * each that only the scene knows.
+   *
+   * **This layer no longer calls `ActorSpawn`.** It says which adopted
+   * hierarchies the script is currently asking for and where the exporter put
+   * them; `SpawnFromDescriptor`'s job — the class, the character type, the
+   * descriptor tail, the hit points and the class's own `Init` — is the port's,
+   * in `SpawnScriptedCharacters`. `app/systems.ts` puts the two together, and
+   * that is the whole of the change: a renderer may notice that a spawn is
+   * placeable, it does not get to decide that an object exists.
+   */
+  readySpawns(spawns: readonly { at: number }[]): CharacterSpawnRequest[] {
+    const out: CharacterSpawnRequest[] = [];
+    for (const at of this.wantedSpawns(spawns)) {
       // It ran `ActorDespawn` on itself; the opcode has to run again first.
       if (this.spent.has(at)) continue;
       const rec = this.pending.get(at);
       if (!rec) continue;
-      const p = rec.place;
-      // The descriptor tail is read by the class's own Init -- the start state
-      // is one of its bytes -- so it is handed over at spawn time.
-      // **Everything the record carries goes in before `Init` runs**, which
-      // is the order `SpawnFromDescriptor` (`FUN_00408A20`) has: it fills the
-      // object from the record and only then calls the class's `Init`. Setting
-      // them afterwards let the record overwrite what `Init` decided —
-      // `CivilianInit` (`FUN_0048A3E0`) runs the civilian's script as its last
-      // act, so a hostage whose script opens `SetMotion 371` had it replaced
-      // by the placement's own 660 on the same frame, and every civilian in
-      // the game stood in its spawn pose while its script ran on underneath.
-      const a = ActorSpawn(at, p?.class ?? 0, rec.type.type, rec.type.name,
-                           { ...DescriptorFromPlacement(p),
-                             motion: rec.motion,
-                             hp: this.startHp(p), maxHp: this.startHp(p),
-                             yaw: p?.yaw ?? 0, pos: { ...rec.home },
-                             visible: true },
-                           this.rng);
-      this.pending.delete(at);
-      this.live.add(at);
-      this.instances.push({ at, a, type: rec.type, root: rec.root,
-                            pivot: rec.pivot, bones: rec.bones,
-                            gore: new Map(), parentAt: rec.parentAt });
+      out.push({ at, motion: rec.motion, pos: { ...rec.home } });
     }
+    return out;
+  }
+
+  /**
+   * Bind the objects the port has just made, and hand back the ones the script
+   * has stopped listing.
+   *
+   * **This is the engine's object lifetime, and the reason it is a seam at
+   * all.** In the exe an actor comes into existence in `SpawnFromDescriptor`
+   * (`FUN_00408A20`) when opcode 0x0B/0x0C/0x0D runs, and its class `Init`
+   * runs there and once. This layer used to build all of them at scene load
+   * and gate them with `visible` instead, which meant every `Init` in the
+   * stage had already run before the first frame: stage 1 counted all seven of
+   * its civilians in `g_civilians_alive` from the entry block, six of them
+   * belonging to blocks 4, 6, 8, 9 and 13, and `wait_scripted_actors` — whose
+   * 68 sites all want zero — could never pass.
+   *
+   * Driven from `syncCharacterSpawns`, beside `SpawnPropContainers`, so it
+   * runs in the script phase and a spawn ticks on the frame its opcode ran.
+   * Idempotent in both directions: an `at` already made is left alone.
+   */
+  syncSpawns(spawns: readonly { at: number }[],
+             made: readonly Actor[]): Actor[] {
+    const want = this.wantedSpawns(spawns);
+    // The objects the port has just made, bound to the hierarchies that were
+    // waiting for them. Adoption, not construction: everything about the actor
+    // was decided by `SpawnScriptedCharacters`, and all that happens here is
+    // that a set of nodes learns which object it draws.
+    this.adopt(made);
 
     // ...and out again. `ActorDespawn` is the engine's own removal and the
     // pool sweep in `GameUpdate` takes it off `g_object_list`; the hierarchy
@@ -375,7 +368,13 @@ export class CharacterLayer implements System {
   /** Put one instance's nodes back and return its record to `pending`. */
   private release(inst: Instance): void {
     inst.root.visible = false;
-    inst.a.visible = false;
+    // **Not `inst.a.visible = false`.** Whether an actor is in the world is
+    // the port's, and it already says so: `ActorDespawn` (`FUN_00409CC0`)
+    // clears the flag, and `app/` runs `RetireUnlistedActor` on everything
+    // this hands back. Writing it here also wrote it on the actors this is
+    // merely *unbinding* — a snapshot load's stale copies, a seek's wiped
+    // pool — which is a renderer reaching into objects the game no longer
+    // owns.
     this.restoreNodes(inst);
     this.live.delete(inst.at);
     const p = this.json?.placements.find((x) => x.at === inst.at);
@@ -404,16 +403,18 @@ export class CharacterLayer implements System {
    */
   update(_ctx: Context): void {
     for (const inst of this.instances) {
-      // Everything here has a game object because the script spawned it, so
-      // presence is not this layer's question any more — `syncSpawns` owns it.
-      // What is left is the one frame between `ActorDespawn` and the pool
-      // sweep: a corpse stays, because `FUN_00454D20` plays the clip out
-      // before handing the body on, so removing it the instant HP hits zero
-      // would be wrong.
-      inst.a.visible = !inst.a.despawned;
       // **`Characters` is a view switch and must not touch `a.visible`.**
       // Folded into it, turning the checkbox off emptied `g_enemies_alive` and
       // `g_civilians_alive` and unblocked every gate that reads them.
+      //
+      // It no longer writes it at all. `inst.a.visible = !inst.a.despawned`
+      // stood here to cover the one frame between `ActorDespawn` and the pool
+      // sweep — but `ActorDespawn` (`FUN_00409CC0`) already clears the flag, so
+      // that half was a no-op, and the other half **put `visible` back to true
+      // on every actor the port had deliberately hidden**: a class-0x24
+      // set-piece past its removal trigger and a class-0x25 humanoid the script
+      // had killed both stayed on screen, because the renderer un-hid them once
+      // a frame.
       const show = this.enabled && inst.a.visible;
       inst.root.visible = show;
       if (!show) continue;
@@ -426,31 +427,21 @@ export class CharacterLayer implements System {
       // can be run with no renderer at all, and so a swing keeps its play
       // position across a save state. This only reads them.
       this.poser.pose(inst);
-      this.trackLookAt(inst);
+      // A bone `RemoveBoneSubtree` took off is hidden here rather than where
+      // the shot resolved: `ResolveHit` runs in the port now, and what a
+      // severed subtree *looks like* is this layer's half of it. `a.removed`
+      // only grows within a life and `restoreNodes` clears the count, so this
+      // does nothing on every frame but the one a limb comes off.
+      if (inst.hidden !== inst.a.removed.length) {
+        for (const b of inst.a.removed) {
+          const node = inst.bones.get(b);
+          if (node) node.visible = false;
+        }
+        inst.hidden = inst.a.removed.length;
+      }
       if (inst.a.civ) this.syncHeldItems(inst);
     }
   }
-
-  /**
-   * `obj+0x100`: what the camera aims at.
-   *
-   * `SkeletonEmitNode` records one bone's world position as it walks the
-   * skeleton, and `FUN_00409B70` raises it by 4.0 before the actor registers
-   * for camera tracking. The bone is **1** for an ordinary humanoid — the
-   * torso — with 2 and 9 selected by flags this port does not model.
-   * `SelectCameraLookAtTarget` reads this and never reads the position, which
-   * is why aiming at the origin put the camera on the feet.
-   */
-  private trackLookAt(inst: Instance): void {
-    const node = inst.bones.get(CAMERA_TRACK_BONE);
-    if (!node) return;
-    node.getWorldPosition(this._track);
-    inst.a.lookAt.x = this._track.x;
-    inst.a.lookAt.y = this._track.y + CAMERA_TRACK_RISE;
-    inst.a.lookAt.z = this._track.z;
-  }
-
-  private readonly _track = new Vector3();
 
   /**
    * `CivilianDrawHeldItems` — `FUN_0048CD10`. What is in a civilian's hands.
@@ -504,19 +495,27 @@ export class CharacterLayer implements System {
   }
 
   /**
-   * Test a ray against every live character's per-bone hit spheres.
+   * `ShotTestSphere` (`FUN_00404630`) — what one shot segment hits first.
    *
-   * `FUN_00404630` broad-phases on the actor's own sphere before descending
-   * into the bones; here the bone spheres are cheap enough (fifteen per
-   * character, a few dozen characters) that the broad phase would cost more
-   * than it saves, so it is skipped — the answer is the same.
+   * The **renderer's half of a shot, and only that half.** The engine
+   * broad-phases on the actor's own sphere before descending into the bones;
+   * here the bone spheres are cheap enough (fifteen per character, a few dozen
+   * characters) that the broad phase would cost more than it saves, so it is
+   * skipped — the answer is the same.
    *
    * The sphere is `PTR_DAT_004D032C`'s centre and radius, carried on the bone
    * and therefore moving with the animation exactly as `FUN_004107E0` makes it.
-   * Nearest along the ray wins, matching `FUN_00404DB0`'s sort.
+   * Nearest along the ray wins, matching `FUN_00404DB0`'s sort — and the props
+   * are in the same sort, because the engine walks **one** candidate list: a
+   * barrel in front of a zombie stops the bullet.
+   *
+   * What the hit *means* is not decided here and must not be. That is
+   * `game/combat/shot.ts`, which is what the port calls this from.
    */
-  pick(ray: Ray): { inst: Instance; bone: number; point: Vector3 } | null {
-    let best: { inst: Instance; bone: number; point: Vector3 } | null = null;
+  pickShot(ray: ShotRay): ShotPick | null {
+    this._ray.origin.set(ray.origin.x, ray.origin.y, ray.origin.z);
+    this._ray.direction.set(ray.dir.x, ray.dir.y, ray.dir.z);
+    let best: ShotPick | null = null;
     let bestT = Infinity;
     for (const inst of this.instances) {
       if (!inst.root.visible || inst.a.dead) continue;
@@ -529,67 +528,42 @@ export class CharacterLayer implements System {
         if (!node) continue;
         this._c.set(b.hit_centre![0], b.hit_centre![1], b.hit_centre![2]);
         node.localToWorld(this._c);
-        ray.closestPointToPoint(this._c, this._p);
-        const t = this._p.sub(ray.origin).dot(ray.direction);
+        this._ray.closestPointToPoint(this._c, this._p);
+        const t = this._p.sub(this._ray.origin).dot(this._ray.direction);
         if (t <= 0) continue;                         // behind the muzzle
-        if (ray.distanceSqToPoint(this._c) > b.hit_radius * b.hit_radius) continue;
+        if (this._ray.distanceSqToPoint(this._c)
+            > b.hit_radius * b.hit_radius) continue;
         if (t < bestT) {
           bestT = t;
-          best = { inst, bone: b.bone, point: this._c.clone() };
+          best = { kind: "actor", at: inst.at, bone: b.bone,
+                   point: { x: this._c.x, y: this._c.y, z: this._c.z } };
         }
       }
     }
-    return best;
-  }
-
-  /**
-   * `ActorInitHitPoints` (`FUN_0040A8B0`): the descriptor's hit points plus the
-   * difficulty delta, clamped to `[1, 300]`.
-   */
-  private startHp(p: CharacterPlacement | undefined): number {
-    const d = this.json?.difficulty;
-    if (!p) return 0;
-    if (!d?.hp_delta?.length) return p.hp;
-    const hp = p.hp + (d.hp_delta[G.g_difficulty] ?? 0);
-    return Math.min(d.hp_max, Math.max(d.hp_min, hp));
-  }
-
-  /**
-   * Charge a hit. `ResolveHit` (`FUN_00409430`) is in `game/combat/`, where it
-   * belongs: it decides hit points, which model each bone draws, what comes
-   * off and which way the actor falls, and all of that is state that has to be
-   * in a snapshot. This is the renderer's half — turn a picked `Instance` into
-   * an actor, and apply the model swaps the port asked for.
-   */
-  hit(inst: Instance, bone: number, cameraYawBams = 0): HitResult {
-    const before = inst.a.removed.length;
-    const out = ResolveHit(inst.a, bone, cameraYawBams, this.host, this.rng);
-    // `RemoveBoneSubtree` zeroed some draw slots; hide what it named. A zero
-    // slot is invisible *and* unshootable, which is why the pick tests it too.
-    for (const b of inst.a.removed.slice(before)) {
-      const node = inst.bones.get(b);
-      if (node) node.visible = false;
+    // The props ride the same list. `BreakableLayer.pick` measures distance
+    // rather than the along-ray parameter, which for a normalised direction is
+    // the same number.
+    const prop = this.breakables?.pickRay(this._ray) ?? null;
+    if (prop && prop.t < bestT) {
+      best = { kind: "prop", propId: prop.id,
+               point: { x: prop.point.x, y: prop.point.y, z: prop.point.z } };
     }
     // Say so rather than doing nothing quietly: a bundle exported before the
     // reaction tables were added has no `reaction_groups`, and a silent no-op
     // looks exactly like "the game has no staggers".
-    if (!this.hasReactions && !this.warnedNoReactions) {
+    if (best?.kind === "actor" && !this.hasReactions
+        && !this.warnedNoReactions) {
       this.warnedNoReactions = true;
       console.warn(
         "[characters] no hit-reaction data in this bundle — re-export it "
         + "(tools/export_player.py). Zombies will not stagger when shot.");
     }
-    return out;
+    return best;
   }
 
-  /** What the port swaps models through. */
-  private readonly host: GameHost = {
-    boneWorld: () => false,
-    aimPoint: () => {},
-    viewPoint: () => {},
-    viewSpaceOf: () => false,
-    setBoneSlot: (at, bone, slot) => this.setBoneSlot(at, bone, slot),
-  };
+  /** The breakable props, so a barrel in front of a zombie takes the shot. */
+  breakables: BreakableLayer | null = null;
+  private readonly _ray = new Ray();
 
   /**
    * `CamEvalObjectPath6` — the `op_` object paths class 0x25's actors ride.
@@ -600,7 +574,7 @@ export class CharacterLayer implements System {
    */
   paths: {
     objectPath(slot: number):
-      { position(t: number, out?: Vector3): Vector3 } | undefined;
+      { position(t: number, out?: Vec3): Vec3 } | undefined;
   } | null = null;
 
   objectPath(slot: number, frame: number):
@@ -654,6 +628,7 @@ export class CharacterLayer implements System {
       }
     }
     inst.gore.clear();
+    inst.hidden = 0;
     for (const g of inst.held?.values() ?? []) g.removeFromParent();
     inst.held?.clear();
     for (const node of inst.bones.values()) {
@@ -671,22 +646,35 @@ export class CharacterLayer implements System {
    * carries its hit points, its severed bones and its state, and calling
    * `ActorSpawn` would throw all of it away.
    */
-  private bindToPool(): void {
-    for (const [at, rec] of [...this.pending]) {
-      const a = ActorByAt(at);
-      if (!a || a.despawned) continue;
-      this.pending.delete(at);
-      this.live.add(at);
-      this.instances.push({ at, a, type: rec.type, root: rec.root,
-                            pivot: rec.pivot, bones: rec.bones,
-                            gore: new Map(), parentAt: rec.parentAt });
-    }
+  bindToPool(pool: readonly Actor[]): void {
+    const byAt = new Map<number, Actor>();
+    for (const a of pool) if (!a.despawned) byAt.set(a.at, a);
+    this.adopt([...byAt.values()]);
     for (let i = this.instances.length - 1; i >= 0; i--) {
       const inst = this.instances[i];
-      const a = ActorByAt(inst.at);
-      if (a && !a.despawned) { inst.a = a; continue; }
+      const a = byAt.get(inst.at);
+      if (a) { inst.a = a; continue; }
       this.release(inst);
       this.instances.splice(i, 1);
+    }
+  }
+
+  /**
+   * Give each new actor the hierarchy that was waiting for its spawn address.
+   *
+   * The one place a record moves from `pending` to `instances`. Silent about
+   * an actor with no hierarchy: a class-0x41 placer has no character at all
+   * and is in the same pool.
+   */
+  private adopt(actors: readonly Actor[]): void {
+    for (const a of actors) {
+      const rec = this.pending.get(a.at);
+      if (!rec) continue;
+      this.pending.delete(a.at);
+      this.live.add(a.at);
+      this.instances.push({ at: a.at, a, type: rec.type, root: rec.root,
+                            pivot: rec.pivot, bones: rec.bones,
+                            gore: new Map(), parentAt: rec.parentAt });
     }
   }
 
@@ -755,9 +743,9 @@ export class CharacterLayer implements System {
    * between game state and render state is in the right place.
    */
   resync(_ctx: Context): void {
-    // Which spawns exist at all is the pool's answer, not this layer's: a load
-    // restores it and a seek replays the script into it.
-    this.bindToPool();
+    // Which spawns exist at all is the pool's answer, not this layer's, and it
+    // is not this layer that asks: `CharacterBindSystem` in `app/systems.ts`
+    // hands the pool over in the `game` phase, which resyncs before this one.
     for (const inst of this.instances) {
       // Put every bone and every swapped part back, then re-apply what the
       // restored actor says was destroyed.
@@ -776,20 +764,6 @@ export class CharacterLayer implements System {
       inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
       this.poser.pose(inst);
     }
-  }
-
-  /** Live, visible, shootable actors — what the enemy-wait opcodes count. */
-  get aliveCount(): number {
-    // The combat gate counts enemies, not everything with a skeleton: the cat
-    // and the class-0x24 set-pieces are posed actors too, and counting them
-    // holds `wait_enemies_alive` open for ever.
-    return this.instances.filter(
-      (i) => i.root.visible && !i.a.dead && ActorIsEnemy(i.a.cls)).length;
-  }
-
-  /** The debug clear. `ActorKillAll` is the port's; this only counts. */
-  killAll(cameraYawBams = 0): KillAllResult {
-    return ActorKillAll(cameraYawBams, this.rng);
   }
 
   get describe(): string {

@@ -27,7 +27,7 @@ import {
   CanvasTexture,
   Vector3,
 } from "three";
-import type { CamPath, CamPaths } from "./campath";
+import type { CamPath, CamPaths } from "../game/camera/curve";
 import type { Context, System } from "../core/system";
 
 const RAIL_EYE = 0x26d9ff;
@@ -161,11 +161,15 @@ export class RailLayer {
     if (!p || end <= start) return;
     const n = Math.max(2, Math.min(600, Math.ceil(end - start) + 1));
     const pts = new Float32Array(n * 3);
-    const v = new Vector3();
     for (let i = 0; i < n; i++) {
       const t = start + ((end - start) * i) / (n - 1);
-      p.pose(t, false).eye.toArray(pts as unknown as number[], i * 3);
-      void v;
+      // `CamPose.eye` is the port's plain `Vec3` now -- the evaluator lives in
+      // `game/camera/curve.ts` and knows nothing about three.js -- so the
+      // three components are copied out rather than `toArray`d.
+      const eye = p.pose(t, false).eye;
+      pts[i * 3] = eye.x;
+      pts[i * 3 + 1] = eye.y;
+      pts[i * 3 + 2] = eye.z;
     }
     this.activeSpan = new Line(
       polylineGeometry(pts),

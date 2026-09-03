@@ -30,9 +30,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PerspectiveCamera, Scene, Vector3 } from "three";
 import { Walker, type WalkerHost } from "../src/script/walker";
-import { CamPaths } from "../src/render/campath";
-import { CameraDrawSystem, CameraRig, CameraSeatSystem }
-  from "../src/render/camera";
+import { CamPaths } from "../src/game/camera/curve";
+import { CameraDrawSystem, CameraRig } from "../src/render/camera";
+import { CameraSeatSystem } from "../src/app/systems";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { SetGameTables } from "../src/game/tables";
 import { ActorSpawn, GameUpdate } from "../src/game/director";
@@ -108,7 +108,7 @@ function play(hz: number, rafs: number, spawnAt: number): Run {
     scene: new Scene(), camera, view: new CameraFrame(), events: new Events(),
     rng: new Rng(1), walker: w, paths: new CamPaths(camJson),
     scope: null, session: null, stage: 1, frame: 0,
-  } as unknown as Parameters<CameraRig["seat"]>[0];
+  } as unknown as Parameters<CameraRig["draw"]>[0];
 
   // The three systems `app/main.ts` registers, in the order it registers
   // them: seat in `script`, `GameSystem` in `game`, draw first in `render`.
@@ -121,7 +121,7 @@ function play(hz: number, rafs: number, spawnAt: number): Run {
       GameUpdate({ x: e.x, y: e.y, z: e.z }, t.dt, NULL_HOST, ctx.rng,
                  ctx.events);
     }
-    draw.update(ctx, t);
+    draw.update(ctx);
   };
 
   const loop = new Loop();

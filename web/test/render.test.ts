@@ -301,5 +301,111 @@ console.log("\nfree roam: a system, so a rebuild reaches it");
   roam.dispose();
 }
 
+/**
+ * The spawn split step 21 made: renderer asks, port decides, `app/` composes.
+ *
+ * `CharacterLayer.syncSpawns` used to call `ActorSpawn` and
+ * `DescriptorFromPlacement` itself, which put `SpawnFromDescriptor`
+ * (`FUN_00408A20`) — the engine's object lifetime, the class `Init` and the
+ * hit-point roll — inside a renderer. It is three calls now and this drives
+ * all three, because the seam is easy to get subtly wrong: an `at` that is
+ * ready but never adopted draws nothing, and one adopted twice lives its whole
+ * life over and over.
+ */
+console.log("\ncharacter spawns: readySpawns -> the port -> adopt");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters, RetireUnlistedActor } =
+    await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Object3D } = await import("three");
+
+  // The exporter's own node shape: one `rig` per spawn descriptor, one
+  // `rig_part` per bone, named `<rig>_<part>`.
+  const TYPE = {
+    type: 1, name: "test", file: "t.bin", bone_count: 2, actor_radius: 10,
+    bones: [{ bone: 0, part: "bone00_1", slot: 1, offset: [0, 0, 0],
+              parent: null, damage_rank: [], hit_radius: 2, steps: [] }],
+    head_bone: 2, reactions: {}, attacks: {}, motions: { "10": {} },
+  };
+  const PLACE = {
+    at: 0x100, class: 0x30, char_type: 1, motion: 10, hp: 7, yaw: 0x2000,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+  };
+  const CHARS = {
+    types: { "1": TYPE }, placements: [PLACE],
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 5, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_test_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_test", hod2_spawn_at: 0x100 };
+  rig.position.set(11, 22, 33);
+  const bone = new Object3D();
+  bone.name = "chr_test_spawn000_bone00_1";
+  rig.add(bone);
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+
+  // Nothing is a game object until the script's spawn opcode has run: the
+  // hierarchy is adopted at build, and that is all.
+  check("building the scene makes no game object", G.g_object_list.length === 0,
+        `${G.g_object_list.length}`);
+  check("...and no spawn is ready until the script lists it",
+        chars.readySpawns([]).length === 0);
+
+  const listed = [{ at: 0x100 }];
+  const ready = chars.readySpawns(listed);
+  check("a listed spawn is ready, with the position only the glTF has",
+        ready.length === 1 && ready[0].pos.x === 11 && ready[0].pos.z === 33,
+        JSON.stringify(ready));
+  check("...and the motion the placement authored", ready[0].motion === 10);
+
+  const made = SpawnScriptedCharacters(ready);
+  check("the port makes exactly one object", made.length === 1
+        && G.g_object_list.length === 1, `${G.g_object_list.length}`);
+  const a = made[0];
+  check("it carries the descriptor's class and the type's name",
+        a.cls === 0x30 && a.name === "test", `${a.cls} ${a.name}`);
+  check("`ActorInitHitPoints` added the difficulty delta", a.hp === 12,
+        `hp ${a.hp}`);
+  check("and the placement's yaw and the scene's position",
+        a.yaw === 0x2000 && a.pos.x === 11 && a.pos.z === 33,
+        `${a.yaw} ${JSON.stringify(a.pos)}`);
+
+  chars.syncSpawns(listed, made);
+  check("the layer adopted it, so nothing is ready twice",
+        chars.readySpawns(listed).length === 0);
+  check("...and a second pass makes no second object",
+        SpawnScriptedCharacters(chars.readySpawns(listed)).length === 0
+        && G.g_object_list.length === 1, `${G.g_object_list.length}`);
+
+  // ...and out again. The layer hands the actor back; `app/` retires it
+  // through the port, which is the direction the whole split runs in.
+  const gone = chars.syncSpawns([], []);
+  check("dropping it from the script hands the actor back",
+        gone.length === 1 && gone[0] === a, `${gone.length}`);
+  for (const o of gone) RetireUnlistedActor(o);
+  check("...and retiring it takes it out of the world",
+        a.despawned && !a.visible);
+  check("and the hierarchy is placeable again",
+        chars.readySpawns(listed).length === 1);
+
+  stage.dispose();
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

@@ -53,8 +53,8 @@ import {
 } from "three";
 import type { RigsJson, RigRoute } from "../bundle";
 import type { Context, System } from "../core/system";
-import type { CamPaths } from "./campath";
-import { OP_CHANNELS } from "./campath";
+import type { CamPaths } from "../game/camera/curve";
+import { OP_CHANNELS } from "../game/camera/curve";
 import { BAMS_TO_RAD } from "../core/bams";
 
 /** BAMS -> radians. */

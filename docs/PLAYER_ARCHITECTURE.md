@@ -50,74 +50,113 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 
 | Directory | Lines | Files | Layer | What it owns |
 |---|---|---|---|---|
-| `game/` | 15423 | 80 | engine | **the port.** No three.js, no DOM, no `Math.random` |
-| `render/` | 5761 | 23 | render | three.js. Observes engine state, owns nothing |
-| `app/` | 3232 | 17 | app | `main.ts` (1123), the loop, the adapters, the projection |
-| `script/` | 3170 | 25 | engine | `walker.ts` — the machine; `ops/`, `waits/`, `state/` |
-| `ui/` | 2456 | 24 | ui | React: one projection in, one command union out |
-| `bundle/` | 1246 | 8 | engine | one module per exporter block |
-| `core/` | 724 | 8 | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
+| `game/` | 19386 | 99 | engine | **the port.** No three.js, no DOM, no `Math.random` |
+| `render/` | 6125 | 24 | render | three.js. Observes engine state, owns nothing |
+| `app/` | 4756 | 21 | app | `main.ts`, `pacer.ts`, `loop.ts`, `ring.ts`, the adapters, the projection |
+| `script/` | 3169 | 25 | engine | `walker.ts` — the machine; `ops/`, `waits/`, `state/` |
+| `ui/` | 2785 | 26 | ui | React: one projection in, one command union out |
+| `bundle/` | 1325 | 8 | engine | one module per exporter block |
+| `core/` | 856 | 9 | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
 | `hud/` | 349 | 1 | ui | the shutter and the caption, drawn |
 | `audio/` | 248 | 1 | ui | `bgm.ts` |
 
-NUMBERS_PENDING. `game/class10/index.ts` was one of the largest files and is now the class's assembly point, with the civilian split across thirteen modules on the exe's own function boundaries.
+38,999 lines. The four largest are `script/walker.ts` (1376), `app/main.ts`
+(1355), `game/actor.ts` (1002) and `game/class30/target.ts` (877);
+`game/class10/index.ts` used to be the largest of all and is now the class's
+assembly point at 137, with the civilian split across thirteen modules on the
+exe's own function boundaries. 82 declared `[diverges]`.
 
-### The two open ratchets
+### No open ratchets
 
-Every layer rule in `tools/verify_layers.py` is an **error** at zero except
-three, which are ratchets: a count that may fall and may never rise, tied to
-the step that clears it. All three are real rather than accounting.
-
-**`render-drives-the-port`, at 12.** The camera shot calls
-`CamAdvancePathFrame` and `CamSetPathTarget`; the character layer spawns
-actors; the shooting layer takes a shot at a breakable and scores it. Every one
-is the *renderer* deciding something the port should decide, because the input
-that triggers it — a pointer, a curve evaluation — lives on this side of the
-seam. Closing it means the port owning a shot queue rather than the layer that
-noticed the click: gameplay work, not a refactor. **Step 21** is where it
-happens; assigning that was a decision for this document, never a line edit in
-the checker.
-
-It came down from 13 when the character layer stopped calling each class's
-`Init`. That call was the one that mattered most, because it was not only in
-the wrong layer — it ran at the **wrong time**. `CharacterLayer.build` made an
-actor for every placement in the stage's glTF the moment the stage loaded, so
-every `Init` in the level had run before the first frame, and
-`CharacterLayer.revive` then ran all of them a second time. The engine makes an
-object in `SpawnFromDescriptor` (`FUN_00408A20`) when opcode 0x0B/0x0C/0x0D
-runs, and once. `CharacterLayer.syncSpawns`, driven from the script phase
-beside `SpawnPropContainers`, is that lifetime: the hierarchies are still
-adopted at build, but nothing is a game object until the instruction that makes
-one has run. What is left of the rule here is `ActorSpawn` and `ActorDespawn`
-themselves — the layer still *performs* the spawn, it no longer *decides* it.
-
-**`no-actor-writes-in-render`, at 6.** `render/characters.ts` writes
-`inst.a.visible` twice, `inst.a.lookAt` three times, and
-`render/characters/gore.ts` writes `inst.a.boneSlot`. All six are the same
-shape: the renderer computing something only three.js can compute — a bone's
-world position, whether a model has been built — and writing it *straight onto
-the actor* instead of handing it across the `GameHost` seam that exists for
-exactly this. They are engine writes; `no-engine-writes-in-render` reported
-`ok` over them for months because its regex only ever matched `G.…=`, and an
-actor field is engine state whichever handle reaches it. `a.visible` is the
-sharp one: it gates alive-counting, and the comment at
-`render/characters.ts:414` records that folding the view switch into it once
-unblocked every wait gate in the game. **Step 21**, with the other one — the
-seam has to exist before the writes can go through it.
+**Every rule in `tools/verify_layers.py` is now an `error` at zero.** Phase 3
+closed the last three: `render-drives-the-port` (12) and
+`no-actor-writes-in-render` (6) in step 21, `layers-are-systems` (1) in step
+23. This is the first time the file has had nothing pending in it, and the
+property it is worth stating plainly is that a *new* violation of any of the
+fourteen rules now fails the build rather than moving a number.
 
 **`layers-are-systems` is closed.** It was at 1 — `FreeRoam` was never
-`world.add`ed — and step 23 cleared it. The argument that it was harmless was
-that free roam is mode-gated, so the script is not playing and there is nothing
-for a snapshot to be wrong about; that is true of the *game* state and not of
-the camera, which free roam owns outright while it is enabled. A layer outside
-`World` is not asked to `resync`, so a seek or a load left the camera wherever
-the previous state's last frame had put it. It is a render-phase system now,
-after `CameraDrawSystem`, and the rule is an **error** at zero.
+`world.add`ed. The argument that it was harmless was that free roam is
+mode-gated, so the script is not playing and there is nothing for a snapshot to
+be wrong about; that is true of the *game* state and not of the camera, which
+free roam owns outright while it is enabled. A layer outside `World` is not
+asked to `resync`, so a seek or a load left the camera wherever the previous
+state's last frame had put it. It is a render-phase system now, after
+`CameraDrawSystem`.
 
-A ratchet is only meaningful with its baseline written down, so both numbers
-stay here even though the reason they are non-zero is current rather than
-historical. Lowering one is the point. Raising one is a change to this
-document first.
+The ratchet mechanism stays in the checker, and so does the rule about it: a
+count that may fall and may never rise, tied to the step that clears it.
+Lowering one is the point. **Raising one is a change to this document first**,
+and there is deliberately no suppression comment. The one ratchet still live in
+the repo is `UNCITED_BASELINE` in `tools/verify_port.py`, at 91 — every
+exported function in `game/` should cite the exe function it ports or declare
+itself `[port-only]`, and the backlog is read down by whoever next opens each
+file with Ghidra beside them.
+
+### Input intent: what step 21 closed, and the rule it settled
+
+Two rules used to be ratchets here — `render-drives-the-port` at 12 and
+`no-actor-writes-in-render` at 6 — and they were one problem with two
+symptoms. The renderer owns the pointer, the crosshair, the camera the ray is
+unprojected through and the skeleton the hit spheres ride, so the *input* to a
+gameplay decision arrives on its side of the seam. It had therefore ended up
+making the decision as well: `ResolveHit`, `MarkActorShot`,
+`BreakablePropTakeShot` and the score ran inside a `pointerdown` handler, the
+character layer called `ActorSpawn`, and the camera rig called
+`CamAdvancePathFrame`. None of it could be reached by `test:port`, and the head
+combo had a second private copy that no snapshot carried.
+
+Both are errors at zero now, and the shape that got them there is worth stating
+because every future case of "the renderer knows something the port needs"
+should take it:
+
+* **The renderer answers questions; it never decides.** `GameHost.pickShot`
+  (`ShotTestSphere`, `FUN_00404630`) returns the nearest actor-and-bone or prop
+  along a segment. `GameHost.boneWorld` returns where a bone is.
+  `CharacterLayer.readySpawns` returns which adopted hierarchies the script is
+  currently asking for and where the exporter put them. Each is a fact only
+  three.js can produce, and each crosses the seam as plain numbers.
+* **The port decides, and writes.** `ProcessShotRequests` dispatches to
+  `MarkActorShot` / `BreakablePropTakeShot` / `ResolveHit` and pays through
+  `ScoreAddForPlayer`; `SpawnScriptedCharacters` is `SpawnFromDescriptor`
+  (`FUN_00408A20`); `ActorRegisterCameraPoint` (`FUN_00409B70`) writes
+  `obj+0x100` from the bone the host reported. Nothing in `render/` assigns an
+  actor field.
+* **`app/` composes.** `syncCharacterSpawns` and `seatCamera` in
+  `app/systems.ts` are the two places the three layers meet, beside
+  `syncPortGlobals`, which has always had that job. A debug action — the Kill
+  button — is a `UiCommand` handled in `app/commands.ts`, not an engine call
+  from a renderer.
+
+**Where the intent enters `G`, and why not from `render/`.** `Shooting.fire`
+turns a click into a segment and hands it to an `onFire` callback;
+`app/main.ts` wires that to `QueueShotRequest`, which pushes onto
+`G.g_shot_requests`. Pushing from the renderer directly would have satisfied
+the checker — `no-engine-writes-in-render` greps for `G.x =` and a `.push()` is
+not an assignment — and that is exactly why it is not done. The rule is about
+**who decides**, not about the spelling; a violation that the regex happens to
+miss is still the violation. So the intent goes through the composition root,
+which is the layer whose job is to know about both sides.
+
+**The camera followed the same route.** The Hermite evaluation moved from
+`render/campath.ts` to `game/camera/curve.ts` over `Vec3` — it is plain maths
+over bundle keys and never needed three.js — and `CamSeatPathFrame` runs
+`CamEvalPath7` and `CamAdvancePathFrame` in the engine's order.
+`render/campath.ts` keeps `applyPose`, which is genuinely three.js, and the
+`path.y - 15` eye rule, which is a property of the draw. `CameraSeatSystem`
+lives in `app/systems.ts`; the rig keeps the pose scratch, the rails and the
+draw.
+
+**What the queue buys, and what is still missing.** `g_shot_requests` is plain
+data in the data segment, so a snapshot carries any pull the frame has not
+drained and recording it per frame gives an **input log** — the regression
+harness the plan has wanted since the beginning. The half that is not built is
+the other end: replaying a log headlessly needs a `pickShot` that a run with no
+renderer can answer, which means the skeleton's forward kinematics in `game/`.
+Until that exists a headless replay resolves every shot as a miss, so the
+harness is deliberately not shipped rather than shipped half-working.
+`web/test/port.test.ts` drives the queue with a stubbed `pickShot`, which is
+what proves the seam is the right shape.
 
 ## The gameplay code is a **port**, not an interpretation
 
@@ -553,7 +592,9 @@ web/src/
     classes.ts    the manifest: the side-effect imports that fill the table
     despawn.ts    `ActorDespawn`, and the sweep that asks the class what it holds
     globals.ts    `G`, the data segment      actor.ts   the struct at its offsets
-    camera/ combat/ effects/                 coli.ts, motion.ts, tables.ts, ...
+    camera/       curve.ts (the `cam/` Hermite), path.ts, track.ts, slots.ts
+    combat/       shot.ts (the queue, the score), resolve_hit.ts, permits.ts
+    effects/                                 coli.ts, motion.ts, tables.ts, ...
   bundle/       one module per exporter block, re-exported by index.ts
   script/
     walker.ts     the machine, and the script's own state
@@ -567,8 +608,9 @@ web/src/
      script drives")
   render/       three.js. Reads engine state, owns nothing.
     context.ts    RenderContext, which adds { scene, camera, paths }
-    camera.ts     the shot, the take and the draw — three systems, in order
-    stagescene, rigs, props, backdrop, rain, fog, lighting, campath,
+    camera.ts     the rig, the take and the draw (the *seat* is app/systems)
+    campath.ts    a pose -> a three.js camera (the curves are game/camera/)
+    stagescene, rigs, props, backdrop, rain, fog, lighting,
     characters, shooting, breakables, projectiles, overlays, debug
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
   ui/           React. One projection in, one command union out.
@@ -891,15 +933,16 @@ python3 tools/verify_layers.py --list   # every violation
 
 Two severities, and the difference is the whole design:
 
-* **error** — must be zero, and a new one fails immediately. Ten of the twelve
-  rules: the layer direction; `three`, DOM and `Math.random` inside the engine;
-  `three` in `core/` specifically, because `System` must not be renderer-bound;
-  the engine written from `render/` or from `ui/`; `ui/` reading anything but
-  the projection; one `BAMS_TO_RAD`; and no DOM insertion anywhere under
-  `web/src/`.
+* **error** — must be zero, and a new one fails immediately. Thirteen of the
+  fourteen rules: the layer direction; `three`, DOM and `Math.random` inside
+  the engine; `three` in `core/` specifically, because `System` must not be
+  renderer-bound; the engine or an actor written from `render/`, and the engine
+  from `ui/`; an engine function *called* from `render/`; `ui/` reading
+  anything but the projection; one `BAMS_TO_RAD`; and no DOM insertion anywhere
+  under `web/src/`.
 * **ratchet** — a violation the architecture has not reached yet. The count is
   recorded here against the step that clears it, and the build fails if it
-  **grows**. Two of them; see "The two open ratchets" above.
+  **grows**. One of them; see "The one open ratchet" above.
 
 Several of these rules are worded to measure the thing they are *about* rather
 than a proxy for it, and the distinction has bitten. `render-drives-the-port`
@@ -917,8 +960,8 @@ escape hatch is to fix the layering or to change the plan.
 in this document, not in the checker.** If a piece of work genuinely cannot be
 done without adding a violation, that means the refactor it depends on has to
 come first — say so and stop, rather than raising the number. Every ratchet
-here is a debt, and one of them currently has no named creditor — which is
-itself recorded above rather than quietly tolerated.
+here is a debt with a named creditor: the step of the order of work that pays
+it.
 
 ### `RenderContext` lives in `render/`, not `core/`
 
@@ -1056,7 +1099,7 @@ can:
 | `test:projection` | that unchanged slices keep their identity |
 | `test:ui` | that the page has the shape the stylesheet expects |
 | `verify:ui` | the two rules that need an AST |
-| `verify_layers` | the layer boundaries, and the two ratchets |
+| `verify_layers` | the layer boundaries, and the one open ratchet |
 | `verify_port` | that every citation matches `functions.tsv` |
 | `verify_player_dom` | that the stylesheet and the markup agree, both ways |
 | `verify_player_ops` | that the op table matches the implementation |
@@ -1094,11 +1137,13 @@ services — and the three streaming calls belong to the ops that make them.
 "`script/`: the machine, and the state the script drives" above is the
 reasoning.
 
-**The three ratchets.** Steps 21 and 23 below close all three. Closing
-`render-drives-the-port` and `no-actor-writes-in-render` means the port owning
-a shot queue rather than the layer that noticed the click — gameplay work
-rather than a refactor, and a `/gameplay-port` job rather than a restructuring
-one.
+**The last ratchet, and the harness the shot queue makes possible.** Step 21
+closed `render-drives-the-port` and `no-actor-writes-in-render` and made both
+errors — see "Input intent" above for the shape and for the rule it settled.
+`layers-are-systems` is still at 1 and step 23 pays it. What step 21 set up and
+did not finish is the **input replay harness**: `g_shot_requests` is a log, but
+replaying one headlessly needs a `pickShot` a run with no renderer can answer,
+and that means the skeleton's forward kinematics in `game/`.
 
 Everything else here is built. Work that changes the shape of the player
 updates this document in the same commit; a plan that describes a layout the
@@ -1122,7 +1167,7 @@ numbered as that plan numbers them, so there is one list and not two.
 | 1–7 | **Phase 0 — make the checks tell the truth.** The test skip, the bundle path, `verify_port`'s coverage and duplicate-address rules, `verify_layers`' widened regexes, the two version constants, this table, the install manifest | ◐ |
 | 8–14 | **Phase 1 — the gameplay bugs and the leaks.** Integer motion clock, seek reseed, the duplicate `ThrowerLeave`, `stepOnce`, the count latches, the unowned GPU caches, the UI defects | ◐ |
 | 15–20 | **Phase 2 — fixtures, golden output, CI.** A bundle-free `mini_stage` so `seek`/`state`/`camera` run everywhere; a determinism test; the export hash suite | ☐ |
-| 21 | **`g_shot_requests` + `host.pickShot` + the camera curve into `game/`.** Clears `render-drives-the-port` **and** `no-actor-writes-in-render`, and the shot queue is an input replay log for free | ☐ |
+| 21 | **`g_shot_requests` + `host.pickShot` + the camera curve into `game/`.** `render-drives-the-port` and `no-actor-writes-in-render` are **errors at zero**; the shot queue is in `G` and is an input log. The replay *harness* is not built: it needs a `pickShot` a headless run can answer — see "Input intent" above | ◐ |
 | 22 | Discriminated-union `Actor` tail; the ~25 offset aliases go | ☐ |
 | 23 | Self-registering class modules, `ClassFrame` everywhere, `onDeadSweep`, `class10` split. Cleared `layers-are-systems` | ☑ |
 | 24 | `script/` decomposition: `state/shutter.ts`, `state/camera_action.ts` as a registry | ☐ |

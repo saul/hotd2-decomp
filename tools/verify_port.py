@@ -158,14 +158,17 @@ def check_names(named: dict[str, str]) -> dict[str, tuple[str, str]]:
 
 
 # Every exported function in `game/` should either cite the exe function it
-# ports or say that it is scaffolding. 97 do neither today, and tagging all of
-# them in one pass would mean asserting 97 things nobody has read -- several of
-# them plainly *are* exe functions that were simply never cited
-# (`ActorKillAll`, `CountEnemyZombieIn`, `GameUpdate`). So this is a ratchet in
+# ports or say that it is scaffolding. 91 do neither today -- 97 when this was
+# written -- and tagging them all in one pass would mean asserting 91 things
+# nobody has read; several of them plainly *are* exe functions that were simply
+# never cited. Phase 3 read six of them down as a side effect of splitting the
+# files they live in, which is the intended way for this number to move: it
+# falls when someone opens the file for another reason with Ghidra beside them.
+# So this is a ratchet in
 # the sense `verify_layers.py` uses the word: the count may fall and may never
 # rise. A new export must declare which kind it is; the backlog gets read down
 # by whoever next opens the file with Ghidra beside them.
-UNCITED_BASELINE = 92
+UNCITED_BASELINE = 91
 EXPORT_FN = re.compile(r"^export (?:async )?function ([A-Za-z_][A-Za-z0-9_]*)",
                        re.M)
 PORT_ONLY = re.compile(r"\[port-only\]")

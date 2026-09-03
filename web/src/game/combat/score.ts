@@ -27,14 +27,13 @@ export function ScoreAddForPlayer(player: number, points: number,
   });
 }
 
-/**
- * Zero every player's running total.
- *
- * `[diverges]` — the engine has no such call, because it has no reset button:
- * the totals are zeroed as part of starting a game. It exists so that the
- * player's own Reset does not have to write `g_player_score` from `render/`,
- * which was the last place the renderer changed engine state directly.
+/*
+ * `ScoreResetAll` used to be here: a `[port-only]` reset the player's own
+ * button called, added so that `render/shooting.ts` would not write
+ * `g_player_score` itself. Nothing calls it any more. Both callers of
+ * `Shooting.reset` — the seek and the stage load — run `ResetGameGlobals`
+ * around it, which zeroes the score and `g_head_combo_bonus` exactly as
+ * `ResetSceneOnEnter` (`FUN_0045EDD0`) does, so the extra entry point was one
+ * more way for the data segment to be cleared and one more thing to keep in
+ * step with the real reset.
  */
-export function ScoreResetAll(): void {
-  G.g_player_score.fill(0);
-}

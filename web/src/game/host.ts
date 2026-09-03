@@ -13,6 +13,43 @@
  */
 import type { Vec3 } from "./vec";
 
+/**
+ * The segment one trigger pull tests.
+ *
+ * `BuildShotRay` (`FUN_00406110`) unprojects the crosshair with the game's own
+ * projection distance and writes the per-player shot record; `ShotBuildSegment`
+ * (`FUN_00404AD0`) turns it into `origin -> origin + direction * 1000`. The
+ * port carries the two halves it needs — where the shot starts and which way
+ * it points — because a queued request has to survive a snapshot and be
+ * replayable, and a `Raycaster` is neither plain nor the port's.
+ */
+export interface ShotRay {
+  origin: Vec3;
+  /** Unit length, as `ShotBuildSegment` scales it. */
+  dir: Vec3;
+}
+
+/**
+ * What a shot ray found: the nearest thing along it, or nothing.
+ *
+ * The engine walks **one** depth-sorted candidate list — `MarkActorShot`
+ * (`FUN_00404DB0`) sorts it — so a barrel in front of a zombie stops the
+ * bullet. The two kinds are different objects in the engine's pools (an actor
+ * against a 0x378 breakable), which is why this is a union rather than one
+ * shape with two optional halves.
+ */
+export type ShotPick =
+  | {
+      kind: "actor";
+      /** The actor's spawn address, which is the port's identity for it. */
+      at: number;
+      /** The bone whose hit sphere the ray entered. */
+      bone: number;
+      /** Where the ray met it, in world space — for the impact effect. */
+      point: Vec3;
+    }
+  | { kind: "prop"; propId: number; point: Vec3 };
+
 export interface GameHost {
   /**
    * `CamEvalObjectPath6` — a point on an `op_` object path at a frame.
@@ -54,6 +91,19 @@ export interface GameHost {
   viewSpaceOf(at: number, out: Vec3): boolean;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */
   setBoneSlot(at: number, bone: number, slot: number): void;
+  /**
+   * `ShotTestSphere` (`FUN_00404630`) — what one shot segment hits first.
+   *
+   * The **decision** a hit leads to is the port's and lives in
+   * `combat/shot.ts`; the intersection test is not, because the hit spheres
+   * ride bones the skeleton poses and the skeleton is three.js's. So the port
+   * asks for the nearest candidate and does everything else itself.
+   *
+   * Optional, because a host with no scene is a valid host: a headless run
+   * queues no shots, and one that did would get `undefined` here and resolve
+   * every request as a miss.
+   */
+  pickShot?(ray: ShotRay): ShotPick | null;
 }
 
 /*

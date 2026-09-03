@@ -32,6 +32,48 @@ export interface EventMap {
   "sound.play": { id: number };
   /** `ScoreAddForPlayer` ran. Negative `points` is a penalty. */
   "player.score": { player: number; points: number; score: number };
+  /**
+   * `ProcessShotRequests` resolved one queued trigger pull.
+   *
+   * This is how the *feedback* for a shot gets back to the layer that can draw
+   * it. The port decides what a shot did; the blood sprite, the impact sound
+   * and the feed row are the renderer's, and they arrive here rather than
+   * being computed twice. The ray comes back with it so a miss can be traced
+   * against the drawn geometry, which is the only place an impact point for a
+   * miss exists at all.
+   */
+  "shot.resolved": {
+    player: number;
+    /** `marked` is an actor whose own class scores it — see `combat/shot.ts`. */
+    kind: "miss" | "actor" | "marked" | "prop";
+    ray: {
+      origin: { x: number; y: number; z: number };
+      dir: { x: number; y: number; z: number };
+    };
+    /** Where it landed. Absent on a miss: the port has no world geometry. */
+    point?: { x: number; y: number; z: number };
+    /** The actor, for `actor` and `marked`. */
+    at?: number;
+    bone?: number;
+    who?: string;
+    /** The character type, which picks the voice set. */
+    charType?: number;
+    head?: boolean;
+    killed?: boolean;
+    damage?: number;
+    hp?: number;
+    /** `g_hit_result`. */
+    result?: number;
+    severed?: boolean;
+    gore?: boolean;
+    react?: number;
+    death?: number;
+    /** The prop, for `prop`. */
+    propGroup?: number;
+    propMember?: number;
+    propHp?: number;
+    points: number;
+  };
 
   // -- class 0x10, the civilians -----------------------------------------
   /** A civilian's captors are all dead: +400, and it walks off. */

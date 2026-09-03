@@ -17,6 +17,7 @@
  */
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
+import type { ShotRequest } from "./combat/shot";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 
@@ -182,6 +183,26 @@ export const G = {
   g_player_score: [0, 0],
   /** `g_nPlayerFired` — 0x009A5C78. Shots taken, for the accuracy grade. */
   g_nPlayerFired: [0, 0],
+  /**
+   * The trigger pulls this frame has not resolved yet.
+   *
+   * `[port-only]`, and it is the one piece of *input* the data segment holds.
+   * The engine has no queue — `BuildShotRay` (`FUN_00406110`) writes the
+   * per-player shot record from the gun hardware and the game loop reads it on
+   * the same frame — but the player's click arrives on a DOM event with no
+   * game frame around it, so the intent is recorded here and
+   * `ProcessShotRequests` drains it at the head of `GameUpdate`.
+   *
+   * Two things fall out of that, and both are the point of it. The renderer
+   * stops making gameplay decisions: it hands over a segment and the port
+   * decides what the segment means. And because the queue is plain data in the
+   * snapshot, **it is an input log** — record it per frame and a session
+   * replays into a headless run, which is the regression harness this player
+   * has never had.
+   *
+   * Normally empty by the end of the frame that read it.
+   */
+  g_shot_requests: [] as ShotRequest[],
 
   // -- difficulty --------------------------------------------------------
   /** `g_difficulty` — 0x009C8E94. Scales spawn HP only. */
@@ -639,6 +660,9 @@ export function ResetGameGlobals(): void {
   // `g_player_hit_count` and `g_head_combo_bonus` are `ResetSceneOnEnter`'s.
   G.g_player_score = [0, 0];
   G.g_nPlayerFired = [0, 0];
+  // Input, and a scene that is starting has none pending. A seek that left a
+  // click queued would otherwise fire it into the replayed world.
+  G.g_shot_requests = [];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();

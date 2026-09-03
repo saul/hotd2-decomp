@@ -21,7 +21,7 @@
 import { loadStage } from "../bundle";
 import type { StageEntry } from "../bundle";
 import { StageScene } from "../render/stagescene";
-import { CamPaths } from "../render/campath";
+import { CamPaths } from "../game/camera/curve";
 import { RailLayer } from "../render/overlays";
 import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
@@ -150,7 +150,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   // Class 0x41's props are built at run time, so only the templates are
   // adopted here; the nodes follow `G.g_breakable_props`.
   p.breakables.adopt(p.scene3d.root);
-  p.shooting.breakables = p.breakables;
+  p.chars.breakables = p.breakables;
   p.shooting.reset();
   p.shooting.setTables(bundle.script.characters?.combat);
   p.dialogue = bundle.script.sound ?? null;

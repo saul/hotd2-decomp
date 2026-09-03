@@ -14,7 +14,7 @@
 import type { RenderContext } from "../../render/context";
 import type { Scope } from "../../core/scope";
 import type { Walker } from "../../script/walker";
-import type { CamPaths } from "../../render/campath";
+import type { CamPaths } from "../../game/camera/curve";
 import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type { HistoryView } from "../ring";

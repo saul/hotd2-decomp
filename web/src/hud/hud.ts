@@ -118,7 +118,7 @@ export interface ScreenMessage {
 /**
  * Closed centre offset, and the step per slide frame.
  *
- * The slide's *length* is `SHUTTER_FRAMES` in `script/walker.ts`, where the
+ * The slide's *length* is `SHUTTER_FRAMES` in `script/state/shutter.ts`, where
  * counter lives — this layer only turns a counter into a height.
  */
 const SHUTTER_CLOSED_Y = 0.35;

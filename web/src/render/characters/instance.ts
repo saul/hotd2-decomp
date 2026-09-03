@@ -25,6 +25,15 @@ export interface Instance {
   /** Damaged parts currently swapped in, so a second hit can replace them. */
   gore: Map<number, Object3D>;
   /**
+   * How many of `a.removed` have been hidden.
+   *
+   * Render bookkeeping, not state: `a.removed` is the port's list of bones a
+   * `RemoveBoneSubtree` took off, and this is only how far down it this
+   * instance's nodes have been caught up. `restoreNodes` clears it, `resync`
+   * re-applies the whole list, and a snapshot carries neither.
+   */
+  hidden?: number;
+  /**
    * The class-0x10 civilian that built this actor, for the fifty captors whose
    * descriptors the walker never sees. They come and go with their parent.
    */

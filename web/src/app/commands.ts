@@ -28,6 +28,7 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import type { PlayerState } from "./urlstate";
 import type { CamCommand, FeedEntry, Walker } from "../script/walker";
 import type { Snapshot } from "../core/snapshot";
+import { ActorKillAll } from "../game/combat/resolve_hit";
 import type { Bgm } from "../audio/bgm";
 import type { Backdrop } from "../render/backdrop";
 import type { BreakableLayer } from "../render/breakables";
@@ -260,7 +261,11 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       // Civilians go with them — they are what `wait_scripted_actors` counts,
       // and a room cleared of enemies with the hostages still standing is a
       // script that has not moved.
-      const n = p.chars.killAll(p.shooting.cameraYawBams);
+      // `ActorKillAll` from here rather than through the character layer: a
+      // debug clear is a *command*, and the composition root is what turns a
+      // click into one. `render/` calling it was the port being driven from a
+      // renderer, which is what step 21 closed.
+      const n = ActorKillAll(p.shooting.cameraYawBams, p.chars.rng);
       const parts = [`${n.enemies} enem${n.enemies === 1 ? "y" : "ies"}`];
       if (n.civilians) parts.push(`${n.civilians} civilian`
                                   + (n.civilians === 1 ? "" : "s"));

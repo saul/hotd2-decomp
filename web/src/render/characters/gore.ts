@@ -36,9 +36,12 @@ export function swapGore(parts: ReadonlyMap<number, Object3D>,
   const tmpl = parts.get(slot);
   const node = inst.bones.get(bone);
   if (!tmpl || !node) return false;
-  // `obj+0x20C + bone*0x90` -- the draw record. Recorded on the actor so a
-  // snapshot carries which model each bone is showing.
-  inst.a.boneSlot[bone] = slot;
+  // **The draw record is not written here.** `obj+0x20C + bone*0x90` is the
+  // actor's, and the port writes it beside every `host.setBoneSlot` call --
+  // `ActorSwapDamagedPart` (`FUN_004098E0`) and class 0x30 and 0x31's hand
+  // swaps. Recording it a second time from the renderer meant the snapshot's
+  // copy depended on whether a hierarchy happened to be in the scene when the
+  // swap was asked for, which is exactly the wrong dependency.
 
   const self = node as Mesh;
   if (self.isMesh) {

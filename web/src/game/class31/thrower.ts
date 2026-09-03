@@ -96,6 +96,11 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
   const from = vec3();
   if (!host.boneWorld(obj.at, hand.bone, from)) return;
 
+  // `obj+0x20C + bone*0x90` -- the draw record, recorded on the actor beside
+  // the call that asks the renderer for it, so a snapshot carries which model
+  // each bone is showing. `render/characters/gore.ts` used to record it, which
+  // made the snapshot depend on whether a hierarchy was in the scene.
+  obj.boneSlot[String(hand.bone)] = hand.bare;
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
   obj.zones |= hand.cancel_mask & DamageZone.All;
 
@@ -135,7 +140,10 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
  */
 function ThrowerRearmHand(obj: Actor, hand: ThrowHandJson,
                           host: GameHost): void {
-  if (hand.held) host.setBoneSlot(obj.at, hand.bone, hand.held);
+  if (hand.held) {
+    obj.boneSlot[String(hand.bone)] = hand.held;
+    host.setBoneSlot(obj.at, hand.bone, hand.held);
+  }
   obj.zones &= ~(hand.cancel_mask & DamageZone.All);
 }
 

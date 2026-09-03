@@ -45,6 +45,8 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
 import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor }
   from "../src/game/actor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
+import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
+  from "../src/game/combat/rank";
 import {
   ReleaseAttackSlot, ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot,
   TryClaimAttackSlot,
@@ -509,6 +511,54 @@ console.log("the queue throttle:");
   ZombieStateWaitTurn(z, EYE, rng);
   check("and rejoins the attack run when the queue moves on",
         z.state === ZombieState.AttackRun, ZombieState[z.state]);
+}
+
+// -- 3a'. what the ranking pass is allowed to touch --------------------------
+
+console.log("RankEnemiesByDistance:");
+{
+  const rng = new Rng(11);
+  const events = scene(0, rng);
+  void events;
+  // Sixteen registrants, two more than the list holds, laid out so that
+  // *object order* and *distance order* disagree: the last to spawn is the
+  // nearest. The exe caps at registration -- `RegisterForDistanceRank` refuses
+  // the fifteenth -- and only then sorts, so the nearest actor here is one of
+  // the two that never enters the queue at all.
+  const zs: Actor[] = [];
+  for (let i = 0; i < RANK_SLOTS + 2; i++) {
+    const a = ActorSpawn(0x7000 + i, SpawnClass.Zombie, 1, `rank ${i}`);
+    a.visible = true;
+    a.hp = 10;
+    a.pos = vec3(0, 0, 200 - i * 10);
+    zs.push(a);
+  }
+  // A class the ranking pass does not register, with both fields poisoned.
+  const other = ActorSpawn(0x7100, SpawnClass.Thrower, 1, "not a zombie");
+  other.visible = true;
+  other.hp = 10;
+  other.pos = vec3(0, 0, 5);
+  other.rank = 41;
+  other.queueRank = 42;
+
+  RankEnemiesByDistance(EYE);
+
+  check("it ranks exactly what the list holds", zs.filter((a) => a.rank >= 0).length === RANK_SLOTS,
+        `${zs.filter((a) => a.rank >= 0).length} ranked`);
+  check("the cap is applied in object order, before the sort, so the nearest "
+        + "actor past it is not ranked",
+        zs[RANK_SLOTS].rank === -1 && zs[RANK_SLOTS + 1].rank === -1,
+        `ranks ${zs[RANK_SLOTS].rank}, ${zs[RANK_SLOTS + 1].rank}`);
+  // The one that matters: an unranked actor must keep the 0xE the spawn
+  // wrote, which fails `queueRank < QUEUE_CAP`. Resetting it to 0 puts every
+  // enemy past the fourteenth at the *front* of the queue and takes the crowd
+  // throttle off entirely.
+  check("and an unranked actor keeps a queue rank that fails the cap",
+        zs[RANK_SLOTS].queueRank >= QUEUE_CAP,
+        `queueRank ${zs[RANK_SLOTS].queueRank}, cap ${QUEUE_CAP}`);
+  check("it writes nothing onto a class that does not register",
+        other.rank === 41 && other.queueRank === 42,
+        `rank ${other.rank}, queueRank ${other.queueRank}`);
 }
 
 // -- 3b. the drop -----------------------------------------------------------

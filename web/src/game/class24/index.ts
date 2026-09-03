@@ -17,7 +17,9 @@
  * `SetPiecePropInit` (`FUN_00482CE0`) is not an update. It builds the actor,
  * then **installs one of six state routines as the object's own entry point**
  * and never runs again — the same trick the container families use, and the
- * reason `state` here is the selector rather than a state machine's position.
+ * reason `selector` here is a choice of routine rather than a state machine's
+ * position. It lives at `obj+0x130C`, not at `obj+0x1310`, which class 0x24
+ * never touches.
  *
  * ## Everything is in the parameter tail
  *
@@ -50,7 +52,15 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { MotionPlayFrame, MotionPlayLength, T } from "../tables";
 
-/** `obj+0x130C` for this class — which state routine the Init installs. */
+/**
+ * `obj+0x130C` for this class — which state routine the Init installs.
+ *
+ * `SetPiecePropInit` (`FUN_00482CE0`) writes it from `tail+0x05`
+ * (`MOV dword ptr [EDI + 0x130c], EAX` @`0x00482D04`) and dispatches on it
+ * (`JMP dword ptr [EAX*0x4 + 0x482ec8]` @`0x00482E1C`). **Not `+0x1310`** —
+ * class 0x24 never touches that word, and the port used to keep the selector
+ * there, one dword away from where the engine reads it.
+ */
 export enum SetPieceState {
   /** `SetPieceStateIdle`, or `SetPieceStateHoldThenPlay` if `hold` is set. */
   Idle = 0,
@@ -118,7 +128,7 @@ export function SetPieceParamsOf(a: Actor): SetPieceParams | null {
  */
 export function SetPiecePropInit(obj: Actor, rng?: Rng): void {
   const p = SetPieceParamsOf(obj);
-  obj.state = p?.selector ?? SetPieceState.Idle;
+  obj.selector = p?.selector ?? SetPieceState.Idle;
   obj.sub = 0;
   obj.frozen = 0;
   obj.holdFrames = 0;
@@ -126,8 +136,8 @@ export function SetPiecePropInit(obj: Actor, rng?: Rng): void {
   obj.accY = 0;
   obj.vel = { x: 0, y: 0, z: 0 };
   // Selectors 2 and 3 open frozen; a camera cue or the landing releases them.
-  if (obj.state === SetPieceState.StartAndStopOnCues
-      || obj.state === SetPieceState.DropToGround) {
+  if (obj.selector === SetPieceState.StartAndStopOnCues
+      || obj.selector === SetPieceState.DropToGround) {
     obj.frozen = 1;
   }
   if (p) {
@@ -173,7 +183,7 @@ export function SetPiecePhaseTicks(p: SetPieceParams, fps: number,
  */
 export function SetPieceShouldRemove(obj: Actor, p: SetPieceParams): boolean {
   const byFlag = (obj.flags & SETPIECE_FLAG_REMOVE_ON_SCRIPT_FLAG) !== 0
-    && obj.state !== SetPieceState.DelayedDrift;
+    && obj.selector !== SetPieceState.DelayedDrift;
   if (byFlag) return G.g_script_flags[p.removePath] === 1;
   return G.g_active_cam_path === p.removePath
       && G.g_cam_path_frame >= p.removeFrame;
@@ -200,7 +210,7 @@ export function SetPiecePropUpdate(obj: Actor, f: ClassFrame): void {
     return;
   }
 
-  switch (obj.state) {
+  switch (obj.selector) {
     case SetPieceState.Idle:
       if (p.hold > 0) SetPieceStateHoldThenPlay(obj, p);
       break;
@@ -230,22 +240,48 @@ export function SetPiecePropUpdate(obj: Actor, f: ClassFrame): void {
   // here but leave the flag where the states put it.
 
   // Three of the six freeze again on the motion's last frame.
-  if (obj.state === SetPieceState.DropToGround
-      || obj.state === SetPieceState.Slide
-      || obj.state === SetPieceState.DelayedDrift) {
+  if (obj.selector === SetPieceState.DropToGround
+      || obj.selector === SetPieceState.Slide
+      || obj.selector === SetPieceState.DelayedDrift) {
     if (SetPieceAtLastFrame(obj)) obj.frozen = 1;
   }
 }
 
-/** `SetPieceStateHoldThenPlay` — hold, then swap to the second motion. */
+/**
+ * `SetPieceStateHoldThenPlay` — `FUN_00482F60`. Hold, then swap the motion.
+ *
+ * **The counter is tested before it is stepped.** The engine reads
+ * `obj+0x1320`, writes back `+1`, and compares the value it *read*:
+ *
+ * ```
+ * 00482ff0  8b8e20130000  MOV   ECX, dword ptr [ESI + 0x1320]
+ * 00482ff6  0fbf500c      MOVSX EDX, word ptr [EAX + 0xc]     ; tail+0x0C
+ * 00482ffb  8d5901        LEA   EBX, [ECX + 0x1]
+ * 00482ffe  899e20130000  MOV   dword ptr [ESI + 0x1320], EBX
+ * 00483004  3bca          CMP   ECX, EDX
+ * 00483007  7c1b          JL    0x00483024                    ; skip the swap
+ * ```
+ *
+ * So the swap lands on the frame `holdFrames` reaches `hold`, having counted
+ * `hold` frames of hold. Incrementing first and then testing, as the port did,
+ * fires it one frame early.
+ *
+ * `0x0048301E` then writes `SetPieceStateIdle` over the object's entry point,
+ * which is why this runs at most once more. `holdFrames > hold` is that same
+ * predicate: the counter only ever passes `hold` on the swap frame, and this
+ * routine is not installed to step it again.
+ */
 function SetPieceStateHoldThenPlay(obj: Actor, p: SetPieceParams): void {
-  if (obj.holdFrames >= p.hold) return;
-  obj.holdFrames += 1;
-  if (obj.holdFrames >= p.hold && p.cuePath > 0) {
-    // The one state where `tail+0x0E` is a motion id rather than a path.
-    obj.motion = p.cuePath;
-    obj.playTicks = 0;
-  }
+  if (obj.holdFrames > p.hold) return;
+  const held = obj.holdFrames;
+  obj.holdFrames = held + 1;
+  if (held < p.hold) return;
+  // The one state where `tail+0x0E` is a motion id rather than a path.
+  // `FUN_004119A0(obj+0x194, tail+0x0E, 0, tail+0x10)` — the engine has no
+  // guard on the motion id, and `tail+0x10` is the blend length rather than a
+  // cue frame here. The port has no motion blend, so the clip simply starts.
+  obj.motion = p.cuePath;
+  obj.playTicks = 0;
 }
 
 /** `SetPieceStateDropToGround` — falls, lands, then plays. */

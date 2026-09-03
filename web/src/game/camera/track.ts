@@ -38,7 +38,7 @@
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
-import { T } from "../tables";
+import { TURN_RATE_UNTRACKED } from "./constants";
 import { SelectCameraLookAtTarget } from "./select_target";
 import { ComputeLookAtAngleError, LookAtCosineSquared, TurnLookAtToward }
   from "./turn";
@@ -140,7 +140,7 @@ export function CameraTrackEnemiesTick(): void {
         || Math.abs(LookAtCosineSquared(eye, want, have)) > 0.99999) {
       G.g_camera_settled = 1;
     }
-    G.g_camera_turn_rate = T.tracking?.rate_untracked ?? 12;
+    G.g_camera_turn_rate = TURN_RATE_UNTRACKED;
     return;
   }
   ComputeLookAtAngleError();

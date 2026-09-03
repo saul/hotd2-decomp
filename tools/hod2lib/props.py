@@ -110,6 +110,7 @@ import struct
 from dataclasses import dataclass, field
 
 from . import degraded
+from .bams import bams_from_matrix, rot_matrix
 
 __all__ = ["Hinge", "StaticProp", "hinge_curve", "resolve_for_stage",
            "props_json"]
@@ -233,7 +234,6 @@ def posed_rot_bams(hinge: "Hinge", curve, frame: int) -> tuple[int, int, int]:
     and decomposed. Used to bake a still for verification; the player applies
     the four rotations directly and never needs this.
     """
-    from .characters import bams_from_matrix, rot_matrix
     if not curve:
         return (0, hinge.base_yaw, 0)
     f = max(0, min(frame, len(curve) - 1))

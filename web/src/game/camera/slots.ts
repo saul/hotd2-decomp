@@ -10,7 +10,8 @@
  */
 import { ActorFlag, type Actor } from "../actor";
 import { G } from "../globals";
-import { T } from "../tables";
+import { CAMERA_ATTACK_SLOTS, CAMERA_MAX_CANDIDATES,
+         CAMERA_TRACK_DISTANCE_SCALE } from "./constants";
 import { ActorIsEnemy } from "../registry";
 import { dist3d, type Vec3 } from "../vec";
 
@@ -41,18 +42,17 @@ export function RegisterForCameraTracking(obj: Actor): boolean {
 
 /** `UpdateCameraEnemySlots` — `FUN_00408DD0`. Fill `g_enemy_slots` for the frame. */
 export function UpdateCameraEnemySlots(eye: Vec3): void {
-  const scale = T.tracking?.distance_scale ?? 10;
   const cand = G.g_object_list
     .filter(RegisterForCameraTracking)
-    .sort((p, q) => Math.round(dist3d(p.pos, eye) * scale)
-                  - Math.round(dist3d(q.pos, eye) * scale))
-    .slice(0, T.tracking?.max_candidates ?? 14);
+    .sort((p, q) => Math.round(dist3d(p.pos, eye) * CAMERA_TRACK_DISTANCE_SCALE)
+                  - Math.round(dist3d(q.pos, eye) * CAMERA_TRACK_DISTANCE_SCALE))
+    .slice(0, CAMERA_MAX_CANDIDATES);
 
   // Slots 0 and 1 are reserved for permit holders; the rest fill from 2.
   const attackers: number[] = [];
   const rest: number[] = [];
   for (const c of cand) {
-    if (c.attackPermit >= 0 && attackers.length < (T.tracking?.attack_slots ?? 2)) {
+    if (c.attackPermit >= 0 && attackers.length < CAMERA_ATTACK_SLOTS) {
       attackers.push(c.at);
     } else {
       rest.push(c.at);

@@ -317,10 +317,6 @@ export interface CharacterPlacement {
 export interface DeathSet {
   front: number[];
   back: number[];
-  right: number;
-  left: number;
-  /** ±45° in BAMS. */
-  arc: number;
 }
 
 /** A sound id paired with the filename `g_se_name_list` gives it. */
@@ -448,42 +444,35 @@ export interface ThrowJson {
   blink_frames: number;
 }
 
-/** `PlayerTakeDamage` — a strike costs exactly one life. */
+/**
+ * `PlayerTakeDamage` — what the *shell* needs, which is one number.
+ *
+ * The cost of a hit is four `.text` immediates and they live in
+ * `game/combat/player.ts` now; this is the one the app reads before the game
+ * starts, to fill the life counter. See `docs/formats/bundle.md`.
+ */
 export interface PlayerDamageJson {
-  life_cost: number;
-  score: number;
-  invuln_frames: number;
-  rank_delta: number;
   start_lives: number;
 }
 
-/** The advance rings — see docs/formats/combat.md §10. */
+/**
+ * The advance rings — see docs/formats/combat.md §10. The radii are `.rdata`;
+ * the step allowances that used to travel with them are immediates, and live
+ * in `game/class30/ring.ts`.
+ */
 export interface ApproachJson {
   /** `{inner, mid, outer}` per ring set, from `DAT_004C4CD0`. */
   rings: { inner: number; mid: number; outer: number }[];
-  /** Steps to walk: `base` inside the middle ring, plus the adds further out. */
-  steps: { base: number; mid_add: number; outer_add: number };
-  ring_set_for_char0: number;
 }
 
-/** What the gameplay camera aims at and how fast it turns. */
+/**
+ * The turn-rate curves — `PTR_DAT_00576C04`, the one `.rdata` table the camera
+ * director reads. The numbers that used to sit beside them here were `.text`
+ * immediates and are in `game/camera/constants.ts`.
+ */
 export interface TrackingJson {
   /** Four 64-entry turn-rate curves; a larger value is a *slower* turn. */
   curves: number[][];
-  /** The one the scene reset selects. */
-  curve: number;
-  /** Angle error is clamped here (0x1FFF BAMS = 45°) before `>> 7`. */
-  error_clamp: number;
-  /** Flat rate used when nothing is being tracked. */
-  rate_untracked: number;
-  /** `TurnLookAtToward` re-emits the look-at this far from the eye. */
-  lookat_radius: number;
-  /** Sort key is `|actor − eye| × this`, ascending. */
-  distance_scale: number;
-  attack_slots: number;
-  slots: number;
-  max_candidates: number;
-  face_offset: number;
 }
 
 /** `ActorInitHitPoints` and `ResetDamageRank`. */
@@ -492,8 +481,6 @@ export interface DifficultyJson {
   hp_delta: number[];
   /** Starting adaptive rank by menu difficulty — what damage is indexed by. */
   initial_rank: number[];
-  /** Menu difficulty the player defaults to (Normal). */
-  default: number;
   hp_min: number;
   hp_max: number;
 }
@@ -574,8 +561,6 @@ export interface CharactersJson {
   bone_zones: number[];
   /** `DAT_004C84A8` — bone → reaction group: head, torso, each limb. */
   reaction_groups: number[];
-  /** `ActorPlayHitReaction`'s cross-fade lengths, in frames. */
-  reaction_blend: { frames: number; sever: number; hard_set_from_bone: number };
   approach: ApproachJson;
   tracking: TrackingJson;
   player: PlayerDamageJson;

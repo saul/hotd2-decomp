@@ -241,19 +241,16 @@ const TYPE: CharacterType = {
 
 const APPROACH: ApproachJson = {
   rings: [{ inner: 25, mid: 38, outer: 51 }],
-  steps: { base: 2, mid_add: 3, outer_add: 4 },
-  ring_set_for_char0: 1,
 };
 
+// Four curves, because `TURN_CURVE_DEFAULT` selects the second one — the
+// fixture used to carry one and say `curve: 0`, which it could do only while
+// the number it was indexing with travelled beside it.
 const TRACKING: TrackingJson = {
-  curves: [new Array(64).fill(16)], curve: 0, error_clamp: 0x1fff,
-  rate_untracked: 12, lookat_radius: 100, distance_scale: 10,
-  attack_slots: 2, slots: 8, max_candidates: 14, face_offset: 12,
+  curves: [0, 1, 2, 3].map(() => new Array(64).fill(16)),
 };
 
-const PLAYER: PlayerDamageJson = {
-  life_cost: 1, score: -100, invuln_frames: 90, rank_delta: 2, start_lives: 2,
-};
+const PLAYER: PlayerDamageJson = { start_lives: 2 };
 
 /** One stage's `characters` block, with only what the port reads filled in. */
 const CHARS = {
@@ -266,11 +263,10 @@ const CHARS = {
   bone_zones: [0xff, 0xff, 0, 0xff, 1, 1],
   // Bone -> reaction group, which picks the stumble within the row.
   reaction_groups: [0, 1, 0, 1, 2, 2],
-  reaction_blend: { frames: 10, sever: 20, hard_set_from_bone: 9 },
-  deaths: { front: [900], back: [901], left: 902, right: 903, arc: 0x2000 },
+  deaths: { front: [900], back: [901] },
   difficulty: {
     hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
-    initial_rank: [0, 0, 2, 0, 0], default: 2,
+    initial_rank: [0, 0, 2, 0, 0],
   },
   combat: undefined,
   note: "",

@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib import bundle, stage as stagelib  # noqa: E402
+from hod2lib import bundle, schema, stage as stagelib  # noqa: E402
 
 
 def main() -> int:
@@ -59,6 +59,21 @@ def main() -> int:
 
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
+
+    # **The client's half of the schema check, regenerated here.**
+    #
+    # `manifest.json` carries a digest of `web/src/bundle/*.ts`; the browser
+    # compares it against `web/src/bundle/schema_hash.ts`, which is generated
+    # and committed. Writing it on every export means the two halves cannot
+    # disagree in a bundle this tool produced -- and if the file changes, it
+    # changes in the working tree where `git status` will show it, rather than
+    # in a build directory nobody reads. `tools/verify_exporters.py` fails
+    # when the committed copy is stale, which is what stops it drifting for
+    # anyone who edits a declaration without exporting.
+    hash_path, rewrote = schema.write_client_hash()
+    if rewrote:
+        print(f"regenerated {hash_path.name} -- commit it with the "
+              f"declaration change that moved it")
 
     entries = []
     for n in wanted:
@@ -119,6 +134,15 @@ def main() -> int:
             kept.append(e["name"])
     if kept:
         print(f"carried forward from the previous manifest: {', '.join(kept)}")
+    # A carried entry was written by whatever tool built it, which is not
+    # necessarily this one. Its files are on disk and index fine; the client
+    # refuses that stage on its own `format` and says so. Say it here too --
+    # the person who ran a partial export is the one who can fix it.
+    stale = sorted(e["name"] for e in entries
+                   if e.get("format") != bundle.BUNDLE_FORMAT)
+    if stale:
+        print(f"stale stage format, the client will refuse these: "
+              f"{', '.join(stale)} -- rebuild them (--all)", file=sys.stderr)
     entries.sort(key=lambda e: (e.get("stage", 0), e.get("name", "")))
 
     path = bundle.write_manifest(

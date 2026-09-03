@@ -37,7 +37,7 @@ from pathlib import Path
 from . import degraded
 from . import (__version__, characters as charlib, evt as evtlib, gltf,
                props as propslib, rigs as rigslib,
-               spawnres as spawnreslib,
+               schema as schemalib, spawnres as spawnreslib,
                script as scriptlib, stage as stagelib)
 
 __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
@@ -53,9 +53,17 @@ __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
 #: loaded happily and lost it, with no message. A version check whose constant
 #: nobody bumps is documentation, not a check.
 #:
-#: Bump it in the same commit as the shape change. 2 is the first honest
-#: value: it says "not whatever those older bundles were".
-BUNDLE_FORMAT = 2
+#: Bump it in the same commit as the shape change. 2 was the first honest
+#: value: it said "not whatever those older bundles were".
+#:
+#: 3 adds the `schema` digest below and a per-stage `format`.
+#:
+#: **This integer is still the coarse check, and it is not the one that will
+#: fire.** Bumping it is a thing a person has to remember, which is how it
+#: came to sit at 1 for 23 commits. It says "the *layout* moved" -- a new file
+#: in a stage directory, a block renamed -- and the digest beside it, which
+#: nobody has to remember, catches the field-level drift.
+BUNDLE_FORMAT = 3
 
 #: Every asset slot the three container families can draw. The group props
 #: use the first four; `KindedPropUpdate` adds the three kinded models and the
@@ -815,11 +823,19 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     # which are not JSON and which every browser rejects with a parse error
     # naming a byte offset rather than a field. A bundle that cannot be parsed
     # is worse than an export that fails, so this raises here instead.
+    # Every file a stage directory holds names the format it was written in,
+    # not just the manifest that indexes them. A manifest is rewritten by any
+    # export; these are not, so a `stage2/` copied in from an older bundle --
+    # or carried forward by `export_player.py` because its files were still on
+    # disk -- is otherwise a stale stage inside a fresh bundle, which is the
+    # one arrangement a single top-level version can never see.
+    cam_json["format"] = BUNDLE_FORMAT
     (out_dir / f"{name}.cam.json").write_text(
         json.dumps(cam_json, allow_nan=False))
 
     say(f"  {name}: event script")
     script_json = prog.to_json()
+    script_json["format"] = BUNDLE_FORMAT      # see the note on `cam.json`
     # The region table travels with the script because the client's region
     # visibility is driven by opcodes 0x28/0x29, and it needs to resolve a
     # region id to the models that region draws. glTF nodes carry
@@ -848,6 +864,10 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     lost = degraded.drain()
     entry = {
         "name": name,
+        # The entry's own format, which is not the manifest's: a partial
+        # export carries forward the entries it did not rebuild, so a fresh
+        # manifest can index a stage directory written by an older tool.
+        "format": BUNDLE_FORMAT,
         "stage": stage.stage,
         "scene": stage.scene,
         "game_mode": stage.game_mode,
@@ -892,9 +912,23 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
 
 def write_manifest(out_root: Path, stages: list[dict], *, game_dir: Path,
                    notes: dict | None = None) -> Path:
-    """Write ``manifest.json``: what is in the bundle and what it came from."""
+    """Write ``manifest.json``: what is in the bundle and what it came from.
+
+    Carries the schema digest as well as the version, so the client can tell
+    "this bundle predates a field you read" from "this bundle is fine".
+    """
     doc = {
         "format": BUNDLE_FORMAT,
+        # The digest of the TypeScript declarations this bundle was written
+        # to satisfy. `BUNDLE_FORMAT` above is bumped by hand and therefore
+        # sometimes is not; this moves whenever a declaration in
+        # `web/src/bundle/` does, which is the drift it exists to catch.
+        # `web/src/bundle/stage.ts` refuses a bundle whose digest is not the
+        # one it was compiled against. See `hod2lib/schema.py`.
+        "schema": {
+            "hash": schemalib.schema_hash(),
+            "files": schemalib.file_digests(),
+        },
         "tool": "hod2lib",
         "tool_version": __version__,
         "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

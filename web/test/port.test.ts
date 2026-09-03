@@ -16,6 +16,8 @@ import type {
 import { Rng } from "../src/core/rng";
 import { HingePose } from "../src/render/hinge";
 import { Events } from "../src/core/events";
+import { authoredFrameHeld, authoredFrameOfTicks,
+         ticksOfAuthoredFrame } from "../src/core/play_cursor";
 import { ActorSpawn, GameUpdate, RetireUnlistedActor }
   from "../src/game/director";
 import { ActorKillAll } from "../src/game/combat/resolve_hit";
@@ -1565,6 +1567,36 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor): void {
   if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.bonePropMode;
 }
 void unionRejectsCrossClassReads;
+
+console.log("\na one-shot clip holds its last frame; a loop wraps:");
+
+{
+  // The death clip is the one with no terminator: it is meant to hold until
+  // `FUN_00456740` takes the body, which is unread. So if the conversion
+  // wraps, a killed zombie plays its death animation and then plays it again,
+  // for ever -- which is exactly what it did. `Math.min(frames - 1, ...)`
+  // around `authoredFrameOfTicks` cannot fix that, because the modulo is
+  // *inside* and hands the clamp a small number every lap.
+  const fps = 30, frames = 20;
+  const lastTick = ticksOfAuthoredFrame(frames - 1, fps);   // 38 at 30 Hz
+  check("both agree while the clip is still running",
+        authoredFrameHeld(lastTick, fps, frames)
+        === authoredFrameOfTicks(lastTick, fps, frames),
+        `${authoredFrameHeld(lastTick, fps, frames)}`);
+  check("the held clip stops on its last frame",
+        authoredFrameHeld(lastTick + 2, fps, frames) === frames - 1
+        && authoredFrameHeld(lastTick + 200, fps, frames) === frames - 1,
+        `${authoredFrameHeld(lastTick + 200, fps, frames)}`);
+  check("...where the wrapping one has gone back to the start",
+        authoredFrameOfTicks(lastTick + 2, fps, frames) === 0,
+        `${authoredFrameOfTicks(lastTick + 2, fps, frames)}`);
+  check("and a looping clip still wraps, which is what it is for",
+        authoredFrameOfTicks(lastTick + 4, fps, frames) === 1,
+        `${authoredFrameOfTicks(lastTick + 4, fps, frames)}`);
+  check("a zero-length clip is frame 0 either way",
+        authoredFrameHeld(99, fps, 0) === 0
+        && authoredFrameOfTicks(99, fps, 0) === 0);
+}
 
 console.log("\nclass 0x25, the VM runs until a command blocks:");
 {

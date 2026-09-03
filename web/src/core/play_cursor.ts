@@ -51,6 +51,34 @@ export function authoredFrameOfTicks(ticks: number, fps: number,
   return f % frames;
 }
 
+/**
+ * The authored frame of a clip that **plays once and holds its last pose**.
+ *
+ * The difference from {@link authoredFrameOfTicks} is the whole bug this
+ * exists for. That function ends in `f % frames`, which is right for a looping
+ * clip and wrong for a one-shot — and three call sites wrote
+ * `Math.min(frames - 1, authoredFrameOfTicks(...))` believing the `Math.min`
+ * would hold the last frame. It cannot: the wrap happens *inside*, so once the
+ * clip runs past its length the modulo restarts it at 0 and `Math.min` is
+ * handed a small number, every time.
+ *
+ * The death clip is where that showed. It has no terminator — it is meant to
+ * hold until `FUN_00456740` takes the body, which is unread — so a killed
+ * zombie played its death animation and then played it again, for ever.
+ * `obj.action` shares the shape but ends itself, so it only wrapped in the
+ * frames between its last authored frame and the state noticing.
+ *
+ * Clamping here rather than at each call site is the same argument the head of
+ * this file makes: one definition of the conversion, because the versions that
+ * disagreed were the bug.
+ */
+export function authoredFrameHeld(ticks: number, fps: number,
+                                  frames: number): number {
+  if (frames <= 0) return 0;
+  const f = Math.floor(ticks * (fps || TICKS_PER_SECOND) / TICKS_PER_SECOND);
+  return Math.min(f, frames - 1);
+}
+
 /** An authored frame of a clip back to the cursor ticks that reach it. */
 export function ticksOfAuthoredFrame(frame: number, fps: number): number {
   if (!fps) return Math.max(0, Math.round(frame));

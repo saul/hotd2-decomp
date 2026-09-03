@@ -24,7 +24,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { ticksOfAuthoredFrame } from "../../core/play_cursor";
@@ -50,7 +50,7 @@ const _p = vec3();
  * the draw alpha and `obj+0x136C` bit 2 is the flag `ThrowerDrawBonePart`
  * reads to decide whether to use it.
  */
-function ThrowerBlink(obj: Actor): void {
+function ThrowerBlink(obj: ThrowerActor): void {
   if (Math.floor(G.g_frame) & 1) {
     obj.alpha = 0;
     obj.flags2 |= ThrowerFlag.Blinking;
@@ -71,7 +71,7 @@ function ThrowerBlink(obj: Actor): void {
  * the state table names it and a bare number in a switch is how the cat ended
  * up running the zombie's machine.
  */
-export function ThrowerStateRideObjectPath(obj: Actor, dt: number,
+export function ThrowerStateRideObjectPath(obj: ThrowerActor, dt: number,
                                            host: GameHost): void {
   if (obj.sub === 0) {
     obj.slideTimer = 0;
@@ -112,7 +112,7 @@ const RIDE_FRAMES = 0xc4;
  *
  * **Dead code**: no shipped spawn starts in it, and no state reaches it.
  */
-export function ThrowerStateLeapStrike(obj: Actor, dt: number, rng: Rng,
+export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
                                        host: GameHost,
                                        events?: Events): void {
   if (obj.sub === 0) {
@@ -195,7 +195,7 @@ const GRAB_BLINK_FRAMES = 15;
  * not is the second camera block's path frame (`g_cam_path_frame_2`), which
  * the cue also accepts and the port has no second block for.
  */
-export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
+export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
                                        rng: Rng, events?: Events): void {
   const g = obj.grab;
   if (!g) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
@@ -290,7 +290,7 @@ export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
 }
 
 /** Subs 2 to 4 hang off the camera's yaw, half a turn round. X and Z only. */
-function ThrowerGrabRide(obj: Actor, eye: Vec3): void {
+function ThrowerGrabRide(obj: ThrowerActor, eye: Vec3): void {
   if (obj.sub < GrabSub.Descend || obj.sub > GrabSub.Grab) return;
   ActorLocalPoint(eye, G.g_camera_yaw_bams + 0x8000, obj.arcFrom.x,
                   obj.arcFrom.y, obj.arcFrom.z, _p);
@@ -303,7 +303,8 @@ function ThrowerGrabRide(obj: Actor, eye: Vec3): void {
  * outright, and if that player cannot be attacked or is already someone else's
  * target, try the other one before giving up.
  */
-function ThrowerGrabTakePermit(obj: Actor, named: number, rng: Rng): void {
+function ThrowerGrabTakePermit(obj: ThrowerActor, named: number,
+                               rng: Rng): void {
   let p = named === -1 ? rng.int(2) : named;
   if (!IsPlayerAttackable(p) || G.g_attack_permits[p] === 1) {
     if (p === 0) {
@@ -341,7 +342,7 @@ export enum CueCondition {
  *
  * A selector above 2 waits for ever, and that is the engine's own behaviour.
  */
-export function ThrowerStateWaitForCue(obj: Actor, dt: number,
+export function ThrowerStateWaitForCue(obj: ThrowerActor, dt: number,
                                        rng: Rng): void {
   const c = obj.cue;
   if (!c) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
@@ -399,12 +400,12 @@ const BLINK_IDLE_BY_STANCE = [0x208, 0x1fd, 0x1f3, 0x205];
  * measured from the origin captured on entry rather than from where the actor
  * currently is.
  */
-export function ThrowerStateBlinkInThreeHops(obj: Actor, dt: number,
+export function ThrowerStateBlinkInThreeHops(obj: ThrowerActor, dt: number,
                                              stance: number): void {
   if (obj.sub >= 2) ThrowerBlink(obj);
 
   if (obj.sub === 0) {
-    obj.hopsLeft = BLINK_HOPS;
+    obj.thr.hopsLeft = BLINK_HOPS;
     obj.flags |= ActorFlag.NoCameraTrack;
     const m = BLINK_IDLE_BY_STANCE[stance & 3] ?? BLINK_IDLE_BY_STANCE[0];
     if (MotionOf(obj, m)) {
@@ -426,19 +427,19 @@ export function ThrowerStateBlinkInThreeHops(obj: Actor, dt: number,
 
   if (obj.sub === 2) {
     ActorLocalPoint(obj.arcFrom, obj.yaw, 0, 0,
-                    obj.hopsLeft * BLINK_HOP_UNITS, obj.pos);
-    obj.hopFrames = BLINK_HOP_FRAMES;
+                    obj.thr.hopsLeft * BLINK_HOP_UNITS, obj.pos);
+    obj.thr.hopFrames = BLINK_HOP_FRAMES;
     obj.sub = 3;
   }
 
   if (obj.sub === 3) {
-    obj.hopFrames -= dt * GAME_HZ;
-    if (obj.hopFrames > 0) return;
+    obj.thr.hopFrames -= dt * GAME_HZ;
+    if (obj.thr.hopFrames > 0) return;
     obj.sub = 4;
   }
 
-  obj.hopsLeft -= 1;
-  if (obj.hopsLeft > 0) { obj.sub = 2; return; }
+  obj.thr.hopsLeft -= 1;
+  if (obj.thr.hopsLeft > 0) { obj.sub = 2; return; }
   obj.flags2 &= ~ThrowerFlag.Blinking;
   obj.alpha = 1;
   obj.flags &= ~ActorFlag.NoCameraTrack;

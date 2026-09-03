@@ -1059,8 +1059,9 @@ export interface ActorBase {
    * number**, not a surface. `[proved]`
    *
    * The two never overlap in time — a thrower is either falling or throwing —
-   * and the port stores only the surface reading: the throw's release frame
-   * comes from the exported hand entry instead. Read sites name which reading
+   * and the port stores only the surface reading: the throw's release frame is
+   * returned by `ThrowerThrowCue` instead, from the entry for three character
+   * types and from the constant `0x19` for 0x18. Read sites name which reading
    * they mean; see `throwCueFrame` in `class31/thrower.ts`.
    */
   landSurface: number;      // +0x1350

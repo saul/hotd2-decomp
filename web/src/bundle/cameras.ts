@@ -20,6 +20,12 @@ export interface CamPathJson {
 }
 
 export interface CamJson {
+  /**
+   * `BUNDLE_FORMAT` at the time this file was written. Every file in a stage
+   * directory carries it, because a manifest is rewritten by any export and
+   * these are not — see {@link StageEntry.format}.
+   */
+  format?: number;
   fps: number;
   /** Keyed by **global path slot**, which is what a `cam_play` operand is. */
   paths: Record<string, CamPathJson>;

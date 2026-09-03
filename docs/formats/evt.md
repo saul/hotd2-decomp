@@ -778,10 +778,61 @@ Header is 0x24 bytes, identical for opcodes `0x09`, `0x0B`, `0x0C`, `0x0D`
 +0x14  s32  orientation a -> object +0x64
 +0x18  s32  orientation b -> object +0x68
 +0x1C  s32  orientation c -> object +0x6C
-+0x20  u16  (always 0)
++0x20  u16  class flag word -> object +0x1316 -> object +0x136C  (see below)
 +0x22  u16  see below      -> object +0x11C *and* +0x11E
 +0x24  ...  variable behaviour tail
 ```
+
+### `+0x20` — the class flag word, and the reading that was wrong
+
+This document and `tools/hod2lib/evt.py` both used to call `+0x20` "always 0" /
+"unused in every shipped file". **Both were false whole-corpus.**
+
+`SpawnFromDescriptor` (`FUN_00408A20`) copies it to `obj+0x1316` —
+`MOV AX, word ptr [EDI + 0x20]` (`668b4720`) then
+`MOV word ptr [ESI + 0x1316], AX` (`66898616130000`) at `0x00408A77` — and both
+combat classes make it the low half of their flag word at `obj+0x136C`,
+**sign-extended**: `[proved]`
+
+```
+EnemyThrowerInit  00449762  MOVSX EAX, word ptr [ESI + 0x1316]   0fbf8616130000
+                  00449769  OR    EAX, 0x180000                  0d00001800
+                  0044977a  MOV   dword ptr [ESI + 0x136c], EAX  89866c130000
+
+EnemyZombieInit   00452e9a  MOVSX EDX, word ptr [ESI + 0x1316]   0fbf9616130000
+                  00452ea4  OR    EDX, 0x60000000                81ca00000060
+                  00452eaf  MOV   dword ptr [ESI + 0x136c], EDX  89966c130000
+```
+
+The constant each ORs on is that class's own pair of collision bits, so the
+descriptor supplies everything below them.
+
+Counts over every shipped `evt/*.bin`:
+
+| class | n | nonzero | values |
+|---|---|---|---|
+| `0x31` | 51 | 23 | `0x1`×18, `0x40`×1, `0x80`×1, `0x100`×3 |
+| `0x30` | 345 | 76 | `0x1`×5, `0x2`×13, `0x5`×1, `0x6`×1, `0x20`×52, `0x22`×3, `0x40`×1 |
+
+For class 0x31 the bits are the **starting surface** — `0x40` wall A, `0x80`
+wall B, `0x100` ceiling — plus bit 0, which selects the alternate part-draw
+entry point in `ThrowerDrawPart` (`FUN_0044A200`). The five class-0x31
+descriptors that carry a surface bit are all in `st6evtbl.bin`, all character
+type 0x18 (`zslman`) entering state 34:
+
+```
+st6evtbl.bin off=001604 +0x20=0x0100  ceiling  pos=(415, 2544, -9936)
+st6evtbl.bin off=001630 +0x20=0x0100  ceiling  pos=(388, 2544, -9941)
+st6evtbl.bin off=002654 +0x20=0x0040  wall A   pos=(350, 2514, -9485)
+st6evtbl.bin off=002680 +0x20=0x0100  ceiling  pos=(351, 2544, -9465)
+st6evtbl.bin off=0026ac +0x20=0x0080  wall B   pos=(350, 2514, -9445)
+```
+
+Class 0x30's bit names are `[open]` and belong with that class.
+
+`obj+0x1316` is polymorphic like the rest of the tail: `FUN_00431810`
+increments it as a counter and `ScriptedHumanoidUpdate` compares it against a
+register. Only the two combat classes read it as flags.
 
 ### The parameter tail — SOLVED
 

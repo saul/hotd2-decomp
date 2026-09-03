@@ -1318,7 +1318,7 @@ its picks would allow are refused by identity.
 
 | Stance | Bit | Set by |
 |---|---|---|
-| 0 ground | — | the spawn, from the descriptor's `+0x20` |
+| 0 ground | — | the spawn, from the descriptor's `+0x20` (see [evt.md](evt.md#0x20--the-class-flag-word-and-the-reading-that-was-wrong)) |
 | 1 | `0x40` | state 15 arriving |
 | 2 | `0x80` | state 14 arriving |
 | 3 ceiling | `0x100` | state 16 arriving |

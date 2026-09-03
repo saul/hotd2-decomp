@@ -32,8 +32,32 @@ import { ThrowerState, ThrowerMotion } from "./states";
 import { ThrowerMotionOf, ThrowerStanceOf } from "./tables";
 
 
-/** `ActorArcBeginToAtSpeed`'s `minFrames`. */
-const ARC_MIN_FRAMES = 15;
+/**
+ * `ActorArcBeginToAtSpeed`'s `minFrames` — **10 or 15, not always 15.**
+ *
+ * ```
+ * 0044dbaa  TEST EAX, 0x2000000    a900000002   ; EAX = obj+0x136C
+ * 0044dbc9  JZ   0044dbda                       ; clear -> 15
+ * 0044dbce  MOV  EDI, 0xa                       ; set   -> 10 ...
+ * 0044dbd3  TEST EAX, 0x44000000   a900000044   ; ... EAX = obj+0x34
+ * 0044dbd8  JZ   0044dbdf                       ;     unless dead or reacting
+ * 0044dbda  MOV  EDI, 0xf                       ;     -> 15
+ * ```
+ *
+ * `[proved]`. `ThrowerShotFeedback` (`FUN_00449B20`) raises
+ * {@link ThrowerFlag.LowSphere} as half of `OR EDX, 0x6000000` on the head
+ * shot that knocks a thrower down, so a live knocked-down thrower takes the
+ * **10**-frame branch — and 10 frames is 3 units of travel each rather than 2.
+ * The port hardcoded 15 and `dist2d / 2`, which is exactly the `N = 15` arm.
+ */
+function ArcMinFrames(obj: Actor): number {
+  if (!(obj.flags2 & ThrowerFlag.LowSphere)) return 15;
+  return (obj.flags & (ActorFlag.Dead | ActorFlag.Reacting)) ? 15 : 10;
+}
+
+/** `[0x0055CCD4]` = `0000f041` = 30.0f: the world units an arc covers in
+ *  `ArcMinFrames` frames. */
+const ARC_UNITS_PER_MIN = 30.0;
 
 const _view = vec3();
 const _dest = vec3();
@@ -126,7 +150,8 @@ export function ThrowerBeginKnockbackArc(obj: Actor, host: GameHost): void {
   obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
   obj.arcTo = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
   obj.arcFrames = 0;
-  obj.arcTotal = ARC_MIN_FRAMES;
+  const minFrames = ArcMinFrames(obj);
+  obj.arcTotal = minFrames;
   if (!host.viewSpaceOf(obj.at, _view)) return;
   const len = Math.hypot(_view.x, _view.y, _view.z);
   if (len < 1e-4) return;
@@ -145,9 +170,13 @@ export function ThrowerBeginKnockbackArc(obj: Actor, host: GameHost): void {
     z: _dest.z,
   };
   // `ActorArcBeginToAtSpeed`'s own duration rule, which is what `FUN_0044DB50`
-  // gives it: 30 units per `minFrames`, floored at `minFrames`.
-  obj.arcTotal = Math.max(ARC_MIN_FRAMES, Math.trunc(Math.hypot(
-    obj.arcTo.x - obj.arcFrom.x, obj.arcTo.z - obj.arcFrom.z) / 2));
+  // gives it: `dist2d / (30.0 / minFrames)`, floored at `minFrames`. The
+  // divisor is a `FILD`/`FDIVR` pair the decompiler drops entirely —
+  // `FILD [ESP+0xc]` (`db44240c`) then `FDIVR [0x0055ccd4]` (`d83dd4cc5500`)
+  // at 0x0044DBE3, where `[0x0055CCD4]` = `0000f041` = 30.0f.
+  obj.arcTotal = Math.max(minFrames, Math.trunc(Math.hypot(
+    obj.arcTo.x - obj.arcFrom.x, obj.arcTo.z - obj.arcFrom.z)
+    / (ARC_UNITS_PER_MIN / minFrames)));
 }
 
 /**
@@ -240,8 +269,13 @@ export function ThrowerStateFallAndLand(obj: Actor, host: GameHost,
     }
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.accY = 0;
+    // `AND AH, 0x9f` (`80e49f`) then `OR AH, 0x1` (`80cc01`) on `obj+0x34`,
+    // and in between `AND EBP, 0xffffbfff` (`81e5ffbfffff`) on `obj+0x136C`
+    // at 0x0044A6E6 — the body has settled, so the next landing may puff
+    // again.
     obj.flags = (obj.flags & ~(ActorFlag.ArcSpent | ActorFlag.PoseFrozen))
               | ActorFlag.ShotImmune;
+    obj.flags2 &= ~ThrowerFlag.LandingDustEmitted;
     obj.slideTimer = (rng.int(10) + 1) * 3;
     obj.sub = 3;
   }

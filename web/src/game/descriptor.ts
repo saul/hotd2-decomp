@@ -69,5 +69,10 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // The spawn record's own flags word — `ActorInitFlags` (`FUN_00408970`)
     // makes it `obj+0x34` before the class's `Init` ORs its own bits on.
     flags: p?.init_flags ?? 0,
+    // ...and the descriptor's *second* word, at `+0x20`, which
+    // `SpawnFromDescriptor` (`FUN_00408A20`) puts at `obj+0x1316` — also
+    // before `Init` runs, which is what lets `EnemyThrowerInit` read it as the
+    // low half of `obj+0x136C`. The exporter used to drop it.
+    descFlags: p?.desc_flags ?? 0,
   };
 }

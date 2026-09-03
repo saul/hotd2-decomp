@@ -121,8 +121,40 @@ export interface PathPoint {
  * (`FUN_00450CF0`) writes. `ThrowerStateLeapToSurface` sets one on arrival.
  */
 export enum ThrowerFlag {
+  /**
+   * Bit 0 — draw every part through the engine's **other** entry point.
+   *
+   * `ThrowerDrawPart` (`FUN_0044A200`) and `ThrowerDrawPartWithAlpha`
+   * (`FUN_0044A240`) branch on it, but only while the global at `0x009A2BB4`
+   * — written by `EvtOpSetSceneLighting14` — is non-zero. For character type
+   * 0x17 `EnemyThrowerInit` (`FUN_00449620`) also raises `obj+0x38` bit 3 for
+   * it (`OR dword ptr [ESI + 0x38], 0x8` — `834e3808` at 0x00449802).
+   *
+   * **Never written by class-0x31 code**: it comes from the spawn
+   * descriptor's `+0x20` word, and 18 of the 51 shipped class-0x31 spawns set
+   * it. `[proved]` mechanism, `[open]` what the alternate entry point does —
+   * the port has no reader.
+   */
+  AltPartDraw = 0x1,
   /** `ThrowerFindWallBeside`'s own refusal bit. */
   NoWallLeap = 0x2,
+  /**
+   * Bit 3 — `EnemyThrowerInit`'s character-type-0x18 arm, on seeing it, zeroes
+   * `handRegrow` and `arcKind` and seeds `turnTarget` from the spawn yaw
+   * `obj+0x68`: `TEST byte ptr [ESI + 0x136c], 0x8` (`f6866c13000008`) at
+   * 0x0044984D, then the three stores at 0x00449859..0x00449865.
+   *
+   * Descriptor-seeded like {@link AltPartDraw}, and **no shipped class-0x31
+   * spawn sets it**, so the arm is dead in the retail data. `[proved]`
+   */
+  SeedTurnFromSpawnYaw = 0x8,
+  /**
+   * Bit 4 — `ThrowerStateLeapAside` (`FUN_0044B880`) skips its random
+   * side-pick when it is set (`8a836c130000` then `a810` at
+   * 0x0044B917/0x0044B920). Descriptor-seeded; no shipped spawn sets it, so
+   * the leap always draws its side. `[proved]`
+   */
+  LeapAsideFixedSide = 0x10,
   /**
    * Bit `0x800000` — this actor has left `g_enemies_alive`, the latch
    * `ThrowerRetireFromAliveCount` (`FUN_0044CFF0`) tests and sets.
@@ -153,8 +185,42 @@ export enum ThrowerFlag {
   DeathLatched = 0x200000,
   /** Knocked down — what routes states 1 and 2 into the get-up. */
   KnockedDown = 0x4000000,
+  /**
+   * Bit 9 — `ActorArcStep` (`FUN_0044D860`) remembers here that the arc
+   * script suppressed `obj+0x34` bit `0x100`, so the fade can put it back:
+   * set with `OR DH, 0x2` (`80ce02`) at 0x0044D8B2 and cleared with
+   * `AND AH, 0xfd` (`80e4fd`) at 0x0044D97A, both guarded on the character
+   * type being 0x16..0x19. `[proved]` The port's arc does not suppress that
+   * bit, so it has no reader here.
+   */
+  ArcSuppressedShotImmune = 0x200,
   /** `ThrowerStrikeConnect` uses `g_class31_throws` instead of the melee row. */
   UseThrowTable = 0x400,
+  /**
+   * Bit 12 — raised on entry to `ThrowerStateWalkDistance` (`FUN_0044E2A0`,
+   * `OR CH, 0x10` — `80cd10` at 0x0044E32E) and cleared on the way out
+   * (`AND ~0x1000` at 0x0044E3DE).
+   *
+   * **Nothing in the program tests it.** `[proved]` for the set and the
+   * clear, `[open]` for a reader — there is no `TEST` against `obj+0x136C`
+   * with `0x1000` anywhere.
+   */
+  Walking = 0x1000,
+  /**
+   * Bit 14 — the landing puff has already been emitted for this landing.
+   *
+   * `ThrowerEmitGroundDust` (`FUN_0044D260`) refuses while it is set and sets
+   * it when it emits: `MOV EDI, 0x4000` (`bf00400000`) at 0x0044D531,
+   * `TEST EDI, EAX` (`85c7`), then `OR EAX, EDI` (`0bc7`) and the store back
+   * at 0x0044D5D9. `ThrowerStateFallAndLand` (`AND EBP, 0xffffbfff` —
+   * `81e5ffbfffff` at 0x0044A6E6) and `ThrowerStateKnockedTumbling`
+   * (0x004512F3) clear it as the body settles, which is what makes the puff
+   * once per landing rather than once per actor. `[proved]`
+   *
+   * The port clears it where the exe does; the emitter itself is a particle
+   * effect and is not ported, so nothing sets it yet.
+   */
+  LandingDustEmitted = 0x4000,
   /** `ThrowerPickNextState` has committed to a band; `moveBand` holds which. */
   BandLatched = 0x2000,
   /** This swing has already connected. */
@@ -188,6 +254,42 @@ export enum ThrowerFlag {
   CollideActors = 0x100000,
   /** Both, which is what `EnemyThrowerInit` seeds every spawn with. */
   Collide = 0x180000,
+  /**
+   * Bit `0x2000000` — the same bit class 0x30 keeps as
+   * {@link ZombieFlag2.LowSphere}, and one of the few in this word that is
+   * genuinely **shared**: `RankEnemiesByDistance` and `SkeletonEmitNode` read
+   * it on actors of any class.
+   *
+   * For a thrower it is raised by `ThrowerShotFeedback` (`FUN_00449B20`) as
+   * half of `OR EDX, 0x6000000` (`81ca00000006` at 0x00449C36) — the other
+   * half being {@link KnockedDown} — and read by `ActorArcBeginToAtSpeed`
+   * (`FUN_0044DB50`), where it halves the arc's minimum duration. See
+   * `ARC_MIN_FRAMES` in `class31/death.ts`. `[proved]`
+   */
+  LowSphere = 0x2000000,
+  /**
+   * Bit `0x8000000` — character type 0x18's weapons are growing back, and
+   * {@link Actor.handRegrow} is how far.
+   *
+   * `ThrowerStateRestoreBothHands` (`FUN_0044F900`) sets it
+   * (`81c900000008` at 0x0044F9A6) and then waits on it
+   * (`TEST dword ptr [ESI + 0x136c], 0x8000000` — `f7866c13000000000008`
+   * at 0x0044F9B9); `ThrowerDrawBonePart` (`FUN_00449F90`) clears it when the
+   * accumulator passes 1.0 (`81e1fffffff7` at 0x0044A169). `SkeletonEmitNode`
+   * reads it too, to pick bone 9 as the camera point. `[proved]`
+   */
+  Regrowing = 0x8000000,
+  /**
+   * Bit `0x10000000` — make `SkeletonEmitNode` (`FUN_004114C0`) track **bone
+   * 2** instead of the caller's bone (`MOV ECX, 0x2` at 0x00411589).
+   *
+   * `ThrowerStateLeapToPoint` (`FUN_0044E4C0`) tests and sets it
+   * (0x0044E577/0x0044E57E) and clears it at 0x0044E54B;
+   * `ThrowerStateLeapDown` (`FUN_0044B670`) clears it at 0x0044B841. A
+   * draw-and-camera bit in a gameplay word, which is why class 0x31 has no
+   * reader of its own. `[proved]`
+   */
+  TrackBone2 = 0x10000000,
 }
 
 /**
@@ -999,7 +1101,25 @@ export interface Actor {
   reactBone: number;        // +0x1368
   /** `obj+0x1328` — re-entries into the knockdown; two caps the arc. */
   knockCount: number;       // +0x1328
-  /** `obj+0x1350` — the surface under the landing point. `0x5A` kills. */
+  /**
+   * `obj+0x1350` — the surface under the landing point. `0x5A` kills.
+   *
+   * **Doubly used inside class 0x31 itself**, which is the one overlay no
+   * `cls` test can separate: `ThrowerStateFallAndLand` (`FUN_0044A450`) and
+   * `ThrowerStateKnockedTumbling` (`FUN_00450E40`) write `g_coli_hit_surface`
+   * here and compare it against `0x5A`, while `ThrowerStateThrow`
+   * (`FUN_0044FAF0`) writes the constant `0x19`
+   * (`c7865013000019000000`, eight sites at 0x0044FBE1..0x0044FC58) and later
+   * compares the clip cursor `obj+0x19C` against it —
+   * `MOV ECX, [ESI+0x19c]` / `MOV EAX, [ESI+0x1350]` / `CMP ECX, EAX`
+   * (`8b8e9c010000` / `8b8650130000` / `3bc8`) at 0x0044FC9B, a **frame
+   * number**, not a surface. `[proved]`
+   *
+   * The two never overlap in time — a thrower is either falling or throwing —
+   * and the port stores only the surface reading: the throw's release frame
+   * comes from the exported hand entry instead. Read sites name which reading
+   * they mean; see `throwCueFrame` in `class31/thrower.ts`.
+   */
   landSurface: number;      // +0x1350
   /**
    * `obj+0x1394` — **the object this actor was built for**, by spawn address.
@@ -1083,6 +1203,25 @@ export interface Actor {
   /** `ThrowerStateBlinkInThreeHops`' two counters. */
   hopsLeft: number;         // +0x1348
   hopFrames: number;        // +0x1344
+  /**
+   * `obj+0x1384` — how far character type 0x18's weapons have grown back,
+   * `0` to `1` at `0.025` a drawn frame.
+   *
+   * A field of its own, and not `hopFrames`: `ThrowerStateRestoreBothHands`
+   * (`FUN_0044F900`) zeroes **`+0x1384`** (`c7868413000000000000` at
+   * 0x0044F99C) and raises {@link ThrowerFlag.Regrowing}
+   * (`81c900000008` at 0x0044F9A6), and `ThrowerDrawBonePart` (`FUN_00449F90`)
+   * is what advances it — `FLD [EDI+0x1384]` (`d98784130000`),
+   * `FADD [0x004C4CB0]` = `cdcccc3c` = **0.025f**, `FST [EDI+0x1384]`, then
+   * `FCOMP [0x004C4380]` = `0000803f` = **1.0f**, and on passing it writes
+   * `1.0f` back and clears the flag (`81e1fffffff7`) at
+   * 0x0044A14A..0x0044A179. `[proved]`
+   *
+   * The port used to keep this on `hopFrames` (`+0x1344`), which is
+   * `ThrowerStateBlinkInThreeHops`' hop dwell. States 30 and 34 cannot run at
+   * once so it never bit, but it was the wrong address.
+   */
+  handRegrow: number;       // +0x1384
 
   /**
    * How close the bite may bring this actor to its target.
@@ -1116,6 +1255,24 @@ export interface Actor {
   struck: boolean;
 
   // -- descriptor --------------------------------------------------------
+  /**
+   * `obj+0x1316` — the spawn descriptor's `+0x20` word, **sign-extended**.
+   *
+   * `SpawnFromDescriptor` (`FUN_00408A20`) copies it in before the class's
+   * `Init` runs — `MOV AX, word ptr [EDI + 0x20]` (`668b4720`) then
+   * `MOV word ptr [ESI + 0x1316], AX` (`66898616130000`) at 0x00408A77 — and
+   * each combat class's `Init` makes it the low half of {@link flags2}:
+   * `EnemyThrowerInit` (`FUN_00449620`) ORs `0x180000` onto it,
+   * `EnemyZombieInit` (`FUN_00452DA0`) ORs `0x60000000`.
+   *
+   * For class 0x31 the bits are the **starting surface**, and dropping this
+   * word is why five stage-6 `zslman` all blinked in standing on the floor.
+   * Class 0x30 has 76 shipped spawns that set it and does not read it here
+   * yet.
+   *
+   * Not the same word as {@link flags}, which is the descriptor's `+0x04`.
+   */
+  descFlags: number;        // +0x1316
   /**
    * The state `EnemyZombieInit` starts this actor in — descriptor byte +2.
    * Every entrance state in stage 2 funnels into `AttackRun`.
@@ -1348,8 +1505,10 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     corpseFrame: -1,
     hopsLeft: 0,
     hopFrames: 0,
+    handRegrow: 0,
     strikeFloor: 0,
     struck: false,
+    descFlags: 0,
     initialState: 0,
     attackState: 0,
     delegate: 0,

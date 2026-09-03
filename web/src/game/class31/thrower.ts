@@ -18,7 +18,8 @@ import type { Events } from "../../core/events";
 import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
-import { ActorFlag, DamageZone, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, type Actor }
+  from "../actor";
 import {
   DeadSweep, registerClass, type ActorDebug, type ClassFrame,
   type ClassHandler,
@@ -191,8 +192,23 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
     obj.attack = (obj.attack + 1) % hands.length;
     return;
   }
-  if (obj.sub === ThrowSub.Winding
-      && obj.action.ticks >= hand.release_frame) {
+  // The frame the weapon leaves the hand. In the exe this is `obj+0x1350` —
+  // the **same word** as `Actor.landSurface`, which states 2 and 33 use for
+  // the surface under the body. `ThrowerStateThrow` writes the constant `0x19`
+  // into it at eight sites (`c7865013000019000000`, 0x0044FBE1..0x0044FC58)
+  // and compares the clip cursor against it at 0x0044FCA1 — one address, two
+  // readings, both inside class 0x31, and no `cls` test can tell them apart.
+  // The local name is here so the two readings are never confused at a use
+  // site; see the note on {@link Actor.landSurface}.
+  //
+  // The port takes the frame from the exported hand entry instead of storing
+  // it, because that is where the other three character types get theirs:
+  // 0x0044FC8D compares `obj+0x19C` against the throw entry's own `+0x08`
+  // (`0fbf4708` then `39869c010000`) and only character type 0x18 takes the
+  // `obj+0x1350` path (`CMP word ptr [ESI+0x1f4], 0x18` — `6683bef401000018`
+  // at 0x0044FC83). `[proved]`
+  const throwCueFrame = hand.release_frame;
+  if (obj.sub === ThrowSub.Winding && obj.action.ticks >= throwCueFrame) {
     obj.sub = ThrowSub.Thrown;
     SpawnThrownWeapon(obj, hand, host, eye, events);
   }
@@ -357,13 +373,42 @@ export function EnemyThrowerInit(obj: Actor): void {
   obj.attackPermit = -1;
   // `obj+0x1316`, from the descriptor's `+0x20`: the surface the actor starts
   // attached to. Every shipped stage-2 spawn starts on the ground; stage 6's
-  // eight `BlinkIn` spawns cover all four stances.
+  // eight `BlinkIn` spawns cover all four stances, and five of them carry a
+  // surface bit.
   //
-  // `param_1[0x4db] = uVar4 | 0x180000` — **every** thrower is born colliding,
-  // against the world and against other actors both. Without these two bits
-  // `ThrowerPushOutOfWorld` does nothing at all and the body is tested at its
-  // origin alone, which draws a thrower standing a radius deep in a wall.
-  obj.flags2 = ThrowerFlag.Collide;
+  //   00449762  MOVSX EAX, word ptr [ESI + 0x1316]   0fbf8616130000
+  //   00449769  OR    EAX, 0x180000                  0d00001800
+  //   0044977a  MOV   dword ptr [ESI + 0x136c], EAX  89866c130000
+  //
+  // `| 0x180000` — **every** thrower is born colliding, against the world and
+  // against other actors both. Without these two bits `ThrowerPushOutOfWorld`
+  // does nothing at all and the body is tested at its origin alone, which
+  // draws a thrower standing a radius deep in a wall.
+  //
+  // The word is **sign-extended**, not zero-extended, so a descriptor setting
+  // `0x8000` would raise the whole high half. None does; the shift pair says
+  // so anyway rather than pretending the question is not there.
+  obj.flags2 = ((obj.descFlags << 16) >> 16) | ThrowerFlag.Collide;
+  // Then the stance, from bits 6/7/8 of what the descriptor just supplied —
+  // `ECX = 3*bit8 + 2*bit7 + bit6` at 0x00449770..0x00449794, a four-arm jump
+  // table at `0x00449900`, and each non-ground arm raises `OffGround`
+  // (`OR AL, 0x20` — `0c20`). Two surface bits at once make the index exceed
+  // 3 and the whole thing is skipped: `CMP ECX, 0x3` / `JA` (`83f903` /
+  // `7745`) at 0x0044979B.
+  //
+  // Each arm also writes `obj+0x134C` = 0.0/1.0/2.0/3.0. Nothing in class
+  // 0x31 reads that float — its only readers in the program are `FUN_0040F220`
+  // and class 0x30's `FUN_004534A0`, which seed it with quite different
+  // numbers — so its meaning is `[open]` and the port does not carry it.
+  //
+  // Two surface bits at once therefore leave the actor on the ground with no
+  // `OffGround` at all — the engine falls out of the switch rather than
+  // picking a stance. No shipped spawn does it; the arm is here because the
+  // engine has it.
+  const stance = ThrowerStanceOf(obj);
+  if (stance !== ThrowerStance.Ground && stance <= ThrowerStance.Ceiling) {
+    obj.flags2 |= ThrowerFlag.OffGround;
+  }
   // `param_1[0x4a]`, at `obj+0x128`: 5.0 for character type 0x16 and 4.0 for
   // 0x17 through 0x19. It is the radius both push-outs test with.
   obj.bodyRadius = obj.charType === CHAR_ZSASS

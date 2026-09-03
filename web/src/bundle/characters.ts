@@ -263,6 +263,21 @@ export interface CharacterPlacement {
    */
   init_flags?: number;
   /**
+   * The descriptor's **second** word, at `+0x20` — not `+0x04`, which is
+   * {@link CharacterPlacement.init_flags}. `SpawnFromDescriptor`
+   * (`FUN_00408A20`) copies it to `obj+0x1316`, and each combat class's `Init`
+   * sign-extends it into the class flag word `obj+0x136C`:
+   * `EnemyThrowerInit` (`FUN_00449620`) ORs `0x180000` onto it,
+   * `EnemyZombieInit` (`FUN_00452DA0`) ORs `0x60000000`.
+   *
+   * For class 0x31 the bits are the starting surface — `0x40` wall A, `0x80`
+   * wall B, `0x100` ceiling — so a `zslman` that blinks in on the ceiling gets
+   * its stance from here and nowhere else. Absent when the word is zero, and
+   * absent on the fifty-odd class-0x10 child placements, which the exporter
+   * builds outside the script walker.
+   */
+  desc_flags?: number;
+  /**
    * `ZombieStateStandAndThrow`'s tail. `exit_state` is the same `tail+0x03`
    * byte as {@link CharacterPlacement.attack_state}, and it is what says whether
    * `walk_distance` or `leap` is the reading of `tail+0x10`.

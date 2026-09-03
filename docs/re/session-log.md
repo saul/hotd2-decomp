@@ -9280,3 +9280,76 @@ is actively lying about it.
 
 Also open, and now marked as such in the review: `core/system.ts` still imports
 `Walker`, so the framework names the one machine it hosts. No phase owns it.
+
+## 2026-09-03 — the Kill button, and two bugs wearing one symptom
+
+Reported as "the Kill button doesn't properly kill the zombies", with the
+enemies row reading `1 attacking · 0 live · 1 scripted`, plus "the zombie death
+animations are looping". Two separate defects; the second is most of the first.
+
+### A one-shot clip cannot hold its last frame through a modulo
+
+`authoredFrameOfTicks` ends in `f % frames`. That is right for a looping clip
+and wrong for a one-shot, and **three call sites wrapped it in
+`Math.min(frames - 1, ...)` believing the clamp would hold the last frame.**
+It cannot: the wrap is inside, so past the clip's length the modulo restarts at
+0 and the clamp is handed a small number every lap.
+
+The death clip is where it showed, because it is the only one with no
+terminator. `obj.action` has the same shape but ends itself, so it wrapped only
+in the frames between its last authored frame and the state noticing — which is
+why this survived so long.
+
+The engine settles it: `ZombieStateDeath6` (`FUN_00454D20`) sub 2 waits for
+`g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C` and then leaves. The clip
+plays exactly once. `authoredFrameHeld` is the clamping conversion, next to the
+wrapping one, for the reason `play_cursor.ts`'s own header already gives.
+
+### "A routine that is not read" was read in ninety seconds
+
+The port's comments said `ZombieEnterCorpseState` (`FUN_00456740`) hands the
+body to something unread, so class 0x30 had no death chain at all: no
+`updatesWhenDead`, no state 6, and `ZombieOnShot` (`FUN_00453EB0`) — which
+`EnemyZombieUpdate` calls at `0x0045340E`, before the state dispatch — was
+missing entirely, so **nothing in the port ever wrote state 6.** A killed
+zombie sat in the pool at its last live state, dead and drawn, for ever.
+`tools/killall.mjs` showed three of them still there 900 frames after the kill.
+
+`FUN_00456740` decompiles cleanly and says exactly what a corpse is: clear
+class 0x30's `CollideWorld`/`CollideActors`, clear `obj+0x34` bit 0 — the bit
+`RankEnemiesByDistance` tests, so the corpse leaves the distance queue — raise
+`PoseFrozen`, release the present count if not already latched, step the cursor
+back one frame, and go to state 7 (or 8 for character types 0x12 and 3).
+
+The lesson is not "read harder". It is that **"unread" was written down once
+and then trusted as a fact for months**, in a project whose whole convention
+exists to stop exactly that. `[open]` is a useful answer; `[open]` that nobody
+re-tests becomes a wrong answer with a citation attached.
+
+### Two things that looked like bugs and were not
+
+* **`g_enemies_present` staying at 2 after a kill.** It drops fine — about 60
+  frames later, because class 0x31 retires from inside its own four death
+  states. Reading the counter one frame after the kill says nothing. Nearly
+  reported as a leak.
+* **The permit in `1 attacking`.** Not reproduced on any path the harness can
+  reach. `IsPlayerAttackable` requires `g_scene_state_major_entered == 2`,
+  which the walker sets in the real player and a stub host does not, so no
+  enemy in the harness ever claims one. Still open.
+
+### Open, and proved, and not acted on
+
+`ReleaseAttackSlot` (`FUN_00456520`) **does not touch `obj+0x34`** — it frees
+the permit slot and lifts the off-screen latch, nothing more. The port's
+version raises `NoCameraTrack` unconditionally. The engine raises it in the
+*caller*, `ZombieReleasePermitAndUntrack` (`FUN_004565A0`), and **guarded**:
+`if (!(obj+0x34 & 0x800000) || g_enemies_alive != 1)`, so the last remaining
+enemy of that kind keeps camera tracking. The port's version defeats that
+guard for every class that releases a permit. Left alone because it changes
+camera behaviour across two classes and that is the user's call.
+
+Also open: class 0x30 state 9, `ZombieStateDeathKnockbackArc` (`FUN_004550E0`),
+which `ZombieOnShot` picks for 44 shipped spawns with body condition 5 or 6.
+The port routes them to state 6 instead, which gives the same clip pick, the
+same teardown in the same order and the same corpse — they die where they stood
+rather than where they were thrown. Declared `[diverges]` at the write site.

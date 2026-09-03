@@ -215,6 +215,32 @@ constant we never found — it is tagged and explained on the spot:
 `[diverges]` is greppable, and the count of them is the honest measure of how
 finished this is.
 
+**5. Tables from `.rdata` go in the bundle; immediates from `.text` go in
+`game/`.** A number the exporter *reads out of the EXE* — a per-character
+damage row, the four turn-rate curves, the approach radii — travels in
+`<stage>.script.json`, because reading it is what `hod2lib` is for. A number
+the compiler *put inside a routine* does not:
+
+```ts
+/** Frames of invulnerability after a hit — `0x5A`. */
+const PLAYER_INVULN_FRAMES = 90;
+```
+
+The failure this closes: 90 used to be exported as `characters.player
+.invuln_frames`, so the constant lived in `hod2lib/combat.py` with the Ghidra
+citation that proves it, while `PlayerTakeDamage` in `game/combat/player.ts`
+read it as `d?.invuln_frames ?? 90` — a bare literal with no citation, in the
+file that is supposed to be the transcription. `verify_port.py` scans `game/`
+and could see neither half. Worse, the `?? 90` fallback is a second copy that
+nothing compares against the first: `?? 12` sat next to a table saying 1.5 and
+neither was wrong enough to notice.
+
+An immediate that is a **join key** into exported data — an asset slot, a
+motion id the exporter has to bake — stays in the bundle, because the value is
+only meaningful against something else the exporter wrote. `docs/formats/
+bundle.md` has the rule in full, and the list of immediates still on the wrong
+side of it.
+
 ### What that buys
 
 Every gameplay bug this session came from *reinterpreting* rather than

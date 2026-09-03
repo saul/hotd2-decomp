@@ -213,8 +213,10 @@ def main() -> int:
     o = tables._v2r(0x004E07D0)
     play = lambda m: struct.unpack_from("<h", tables.data, o + m * 2)[0]
     dset = ch.death_motions(tables)
-    deaths = list(dset["front"]) + list(dset["back"]) + [dset["right"],
-                                                         dset["left"]]
+    # `right` and `left` are literals in the routine rather than table rows,
+    # so they are read off the module: the bundle no longer carries them.
+    deaths = (list(dset["front"]) + list(dset["back"])
+              + [ch.DEATH_RIGHT, ch.DEATH_LEFT])
     shortest_death = min(play(m) for m in deaths)
     react_motions: set[int] = set()
     n_types = 0
@@ -244,22 +246,28 @@ def main() -> int:
     for i, r in enumerate(ap["rings"]):
         if not (0 < r["inner"] < r["mid"] <= r["outer"]):
             fails.append(f"ring set {i} is not ordered: {r}")
-    st = ap["steps"]
-    if not (st["base"] > 0 and st["mid_add"] > 0 and st["outer_add"] > 0):
-        fails.append(f"approach step counts are not all positive: {st}")
+    # The step allowances and the index of the selected curve were checked
+    # here and are not any more: they are `.text` immediates, they live in
+    # `web/src/game/class30/ring.ts` and `web/src/game/camera/constants.ts`
+    # now (docs/formats/bundle.md), and asserting that a tuple typed three
+    # lines above is positive was never a check that could fail. **Every**
+    # curve is checked instead of the one the exe selects, which is strictly
+    # stronger and needs no constant at all.
     tr = ch.camera_tracking(tables)
     for i, c in enumerate(tr["curves"]):
         if len(c) != ch.TURN_RATE_CURVE_LEN:
             fails.append(f"turn-rate curve {i} is {len(c)} entries")
-        elif i and any(v <= 0 for v in c):     # curve 0 is a runtime buffer
+            continue
+        if i == 0:
+            continue                           # curve 0 is a runtime buffer
+        if any(v <= 0 for v in c):
             fails.append(f"turn-rate curve {i} has a non-positive rate: "
                          f"min {min(c)}")
-    sel = tr["curves"][tr["curve"]]
-    if any(sel[i + 1] > sel[i] for i in range(len(sel) - 1)):
-        fails.append(f"turn-rate curve {tr['curve']} is not non-increasing")
-    print(f"  {len(ap['rings'])} ring sets, steps "
-          f"{st['base']}/+{st['mid_add']}/+{st['outer_add']}; "
-          f"curve {tr['curve']} runs {sel[0]} -> {sel[-1]}")
+        if any(c[k + 1] > c[k] for k in range(len(c) - 1)):
+            fails.append(f"turn-rate curve {i} is not non-increasing")
+    print(f"  {len(ap['rings'])} ring sets; "
+          f"{len(tr['curves']) - 1} turn-rate curves, all non-increasing, "
+          f"{tr['curves'][1][0]} -> {tr['curves'][1][-1]}")
 
     # 8 ------------------------------------------------------------------
     n_atk = n_pick = 0

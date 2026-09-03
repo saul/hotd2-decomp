@@ -25,6 +25,22 @@ import type { Actor } from "../actor";
 import { G } from "../globals";
 import { dist2d, type Vec3 } from "../vec";
 
+// -- `.text` immediates ----------------------------------------------------
+//
+// `FUN_00408D60` computes the allowance from three literals, and the scene
+// reset copies them into `g_enemy_approach_steps` and its two neighbours.
+// They are compiled into the routine, not read out of a table, so they belong
+// here rather than in the bundle — see `docs/formats/bundle.md`. The radii
+// beside them are `.rdata` (`g_approach_ring_defaults`) and still travel with
+// it. Overridden at runtime by evt `0x0F` (54 uses) and `0x12` (6 uses).
+
+/** The allowance inside the mid ring. */
+export const APPROACH_STEP_BASE = 2;
+/** Added between mid and outer. */
+export const APPROACH_STEP_MID_ADD = 3;
+/** Added again beyond outer. */
+export const APPROACH_STEP_OUTER_ADD = 4;
+
 /** The band: 1 strike range, 2 inside mid, 3 inside outer, 4 beyond. */
 export type RingBand = 1 | 2 | 3 | 4;
 

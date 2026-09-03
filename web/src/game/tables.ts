@@ -16,6 +16,9 @@ import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
+import { TURN_CURVE_DEFAULT, TURN_RATE_UNTRACKED } from "./camera/constants";
+import { APPROACH_STEP_BASE, APPROACH_STEP_MID_ADD, APPROACH_STEP_OUTER_ADD }
+  from "./class30/ring";
 
 export const T = {
   /** The whole `characters` block: tables, types and placements. */
@@ -44,9 +47,12 @@ export const T = {
    */
   coli: null as ColiJson | null,
   types: {} as Record<string, CharacterType>,
-  get approach() { return T.chars?.approach ?? null; },
+  /**
+   * The turn-rate curves and the approach radii — the two `.rdata` tables the
+   * camera director reads. The immediates that used to sit beside them in this
+   * block are in `game/camera/constants.ts` now; see `docs/formats/bundle.md`.
+   */
   get tracking() { return T.chars?.tracking ?? null; },
-  get player() { return T.chars?.player ?? null; },
 };
 
 /**
@@ -90,15 +96,15 @@ export function SetGameTables(chars: CharactersJson | undefined,
   G.g_enemy_approach_rings = rings.map((r) => r.inner);
   G.g_enemy_approach_ring_mid = rings.map((r) => r.mid);
   G.g_enemy_approach_ring_outer = rings.map((r) => r.outer);
-  G.g_enemy_approach_steps = chars?.approach?.steps?.base ?? 0;
-  G.g_enemy_approach_steps_mid = chars?.approach?.steps?.mid_add ?? 0;
-  G.g_enemy_approach_steps_outer = chars?.approach?.steps?.outer_add ?? 0;
+  G.g_enemy_approach_steps = APPROACH_STEP_BASE;
+  G.g_enemy_approach_steps_mid = APPROACH_STEP_MID_ADD;
+  G.g_enemy_approach_steps_outer = APPROACH_STEP_OUTER_ADD;
   // The same reset picks the camera's turn-rate curve: `FUN_0045EEC0` writes
-  // `g_camera_turn_curve = 1`, and `tracking.curve` is that constant read out
-  // of the exe. It is a runtime global because the engine can point it at any
-  // of the four curves, not because anything shipped ever does.
-  G.g_camera_turn_curve = chars?.tracking?.curve ?? 1;
-  G.g_camera_turn_rate = chars?.tracking?.rate_untracked ?? 12;
+  // `g_camera_turn_curve = 1`. It is a runtime global because the engine can
+  // point it at any of the four curves, not because anything shipped ever
+  // does — the four curves themselves are `.rdata` and come from the bundle.
+  G.g_camera_turn_curve = TURN_CURVE_DEFAULT;
+  G.g_camera_turn_rate = TURN_RATE_UNTRACKED;
   // `ResetDamageRank` (`FUN_00460770`) seeds the adaptive rank from the menu
   // difficulty; there is no adaptive update ported yet, so it stays at seed.
   G.g_damage_rank = Math.min(15, Math.max(0,

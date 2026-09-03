@@ -18,6 +18,33 @@ import { ActorIsEnemy, g_class_handlers } from "../registry";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, T } from "../tables";
 
+// -- `.text` immediates ----------------------------------------------------
+//
+// Literals inside the routines below, not entries in a table the exporter can
+// read, so they live here with their citation rather than in the bundle. See
+// `docs/formats/bundle.md`.
+
+/**
+ * `ActorPlayHitReaction` (`FUN_004544C0`) cross-fades over this many frames,
+ * +1, into the actor's second motion track.
+ */
+const REACT_BLEND = 10;
+/** ...and over this many when the hit severed something (`obj+0x1364 == 3`). */
+const REACT_BLEND_SEVER = 20;
+/** The bone from which the reaction is hard-set instead of cross-faded. */
+const REACT_BLEND_MAX_BONE = 9;
+
+/**
+ * `ChooseDeathMotionDirectional` (`FUN_00456220`) names two of its four arcs
+ * with a literal motion; the other two draw from `.rdata` tables, which is why
+ * `deaths.front` and `deaths.back` still come from the bundle and these do not.
+ */
+const DEATH_RIGHT = 992;
+/** The 0xC000 arc. */
+const DEATH_LEFT = 991;
+/** `0x2000` BAMS = 45°, the half-width of each arc. */
+const DEATH_ARC = 0x2000;
+
 /**
  * `g_hit_result` (0x009A58F8) — what a shot did. The score, the impact sprite
  * and the ricochet sound all switch on it.
@@ -170,14 +197,12 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
   const motion = group === undefined
     ? undefined : type?.reactions?.["0"]?.[group];
   if (!motion || !MotionOf(obj, motion)) return undefined;
-  const b = T.chars?.reaction_blend;
   obj.react = {
     motion,
     ticks: 0,
-    blend: result === HitResultCode.Severed ? (b?.sever ?? 20)
-                                            : (b?.frames ?? 10),
-    // `ActorSetMotion` hard-sets the leg reactions: no cross-fade.
-    hard: bone >= (b?.hard_set_from_bone ?? 9),
+    blend: result === HitResultCode.Severed ? REACT_BLEND_SEVER : REACT_BLEND,
+    // `ActorSetMotion` (`FUN_00411930`) hard-sets the leg reactions: no fade.
+    hard: bone >= REACT_BLEND_MAX_BONE,
   };
   return motion;
 }
@@ -216,10 +241,10 @@ export function ChooseDeathMotionDirectional(obj: Actor, cameraYawBams: number,
   const inArc = (centre: number): boolean => {
     let x = (rel - centre) & 0xffff;
     if (x > 0x8000) x -= 0x10000;
-    return Math.abs(x) <= d.arc;
+    return Math.abs(x) <= DEATH_ARC;
   };
-  if (inArc(0x4000)) return d.right;
-  if (inArc(0xc000)) return d.left;
+  if (inArc(0x4000)) return DEATH_RIGHT;
+  if (inArc(0xc000)) return DEATH_LEFT;
   const pool = inArc(0x8000) ? d.back : d.front;
   return pool[rng.int(pool.length)];
 }

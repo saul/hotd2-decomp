@@ -9,7 +9,6 @@
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
 import { G } from "../globals";
-import { T } from "../tables";
 
 /**
  * `CheckPlayerCanBeHit` — `FUN_004153E0`. The invulnerability window, which is
@@ -88,6 +87,25 @@ const APP_STATE_ATTRACT = 5;
 /** `g_player_state` for a player who is in play. */
 const PLAYER_STATE_IN_PLAY = 5;
 
+// -- what a hit costs ------------------------------------------------------
+//
+// `.text` immediates, so they live here rather than in the bundle — see
+// `docs/formats/bundle.md`. Every one of them is a literal inside
+// `PlayerTakeDamage` (`FUN_00415300`); none of them is an entry in a table
+// the exporter could read.
+
+/** A strike costs exactly one life. There is no variable damage. */
+const PLAYER_LIFE_COST = 1;
+/** ...and 100 points, applied once per hit. */
+const PLAYER_HIT_SCORE = -100;
+/** Frames of invulnerability after a hit — `0x5A`. */
+const PLAYER_INVULN_FRAMES = 90;
+/**
+ * ...and the adaptive rank drops by this, which is how being hit makes the
+ * game easier. `UpdateDamageRank` consumes it.
+ */
+const PLAYER_HIT_RANK_DELTA = -2;
+
 /**
  * `PlayerTakeDamage` — `FUN_00415300`.
  *
@@ -105,7 +123,6 @@ export function PlayerTakeDamage(player: number, src: Actor | null,
                                  attack = -1): boolean {
   if (!CheckPlayerCanBeHit(player)) return false;
 
-  const d = T.player;
   // [diverges] Floored at **one**, not zero. Reaching zero is the continue
   // sequence, and this port has none: the engine's `g_player_state`
   // (0x009A5C62) leaves 5 and `IsPlayerAttackable` above then makes
@@ -116,13 +133,14 @@ export function PlayerTakeDamage(player: number, src: Actor | null,
   // Until there is a player state to lose, there is no last life to lose
   // either. Named on purpose: this is a stand-in, not the rule.
   G.g_player_lives[player] =
-    Math.max(1, G.g_player_lives[player] - (d?.life_cost ?? 1));
-  G.g_player_score[player] += d?.score ?? -100;
-  G.g_player_invuln_frames = d?.invuln_frames ?? 90;
+    Math.max(1, G.g_player_lives[player] - PLAYER_LIFE_COST);
+  G.g_player_score[player] += PLAYER_HIT_SCORE;
+  G.g_player_invuln_frames = PLAYER_INVULN_FRAMES;
   G.g_player_was_hit[player] = 1;
   G.g_player_hit_motion[player] = hitMotion;
   // Being hit drops the adaptive rank by two, floored at zero.
-  G.g_damage_rank = Math.max(0, G.g_damage_rank - Math.abs(d?.rank_delta ?? 2));
+  G.g_damage_rank =
+    Math.max(0, G.g_damage_rank - Math.abs(PLAYER_HIT_RANK_DELTA));
   // A non-head hit ends the headshot chain; taking one certainly does.
   G.g_head_combo_bonus[player] = 0;
 

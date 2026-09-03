@@ -24,8 +24,8 @@
  */
 import type { Actor } from "../actor";
 import { ActorByAt, G } from "../globals";
-import { T } from "../tables";
 import type { Vec3 } from "../vec";
+import { ACTOR_FACE_OFFSET } from "./constants";
 
 /** The actor the camera is locked on, for the UI. Derived, not state. */
 export function CameraFocusActor(): number {
@@ -42,8 +42,7 @@ export function CameraFocusActor(): number {
  */
 function lookAtOf(a: Actor): Vec3 {
   if (a.lookAt.x !== 0 || a.lookAt.y !== 0 || a.lookAt.z !== 0) return a.lookAt;
-  return { x: a.pos.x, y: a.pos.y + (T.tracking?.face_offset ?? 12),
-           z: a.pos.z };
+  return { x: a.pos.x, y: a.pos.y + ACTOR_FACE_OFFSET, z: a.pos.z };
 }
 
 /** Writes `g_camera_lookat_target` and sets `g_camera_is_tracking`. */

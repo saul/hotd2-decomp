@@ -19,6 +19,7 @@
  */
 import { G } from "../globals";
 import { T } from "../tables";
+import { LOOKAT_RADIUS, TURN_ERROR_CLAMP } from "./constants";
 import { BAMS, type Vec3 } from "../vec";
 
 /** The angle between two directions, in BAMS. `FUN_00401D70`. */
@@ -57,13 +58,13 @@ export function ComputeLookAtAngleError(): void {
   const eye = G.g_camera_block_eye;
   const cur = G.g_camera_block_target;
   const want = G.g_camera_lookat_target;
-  const t = T.tracking;
   let bams = angleBetweenBams(
     cur.x - eye.x, cur.y - eye.y, cur.z - eye.z,
     want.x - eye.x, want.y - eye.y, want.z - eye.z);
-  const clamp = t?.error_clamp ?? 0x1fff;
-  if (bams > clamp) bams = clamp;
-  const curve = t?.curves?.[G.g_camera_turn_curve];
+  if (bams > TURN_ERROR_CLAMP) bams = TURN_ERROR_CLAMP;
+  // The curves are `.rdata` — `PTR_DAT_00576C04` — so they come from the
+  // bundle; the clamp beside them is an immediate, so it does not.
+  const curve = T.tracking?.curves?.[G.g_camera_turn_curve];
   if (!curve?.length) return;
   G.g_camera_turn_rate =
     curve[Math.min(curve.length - 1, Math.max(0, bams >> 7))] ?? 0;
@@ -77,7 +78,6 @@ export function ComputeLookAtAngleError(): void {
  */
 export function TurnLookAtToward(eye: Vec3, desired: Vec3, current: Vec3,
                                  out: Vec3, num: number, rate: number): void {
-  const radius = T.tracking?.lookat_radius ?? 100;
   const a = { x: current.x - eye.x, y: current.y - eye.y, z: current.z - eye.z };
   const b = { x: desired.x - eye.x, y: desired.y - eye.y, z: desired.z - eye.z };
   const la = Math.hypot(a.x, a.y, a.z);
@@ -92,9 +92,9 @@ export function TurnLookAtToward(eye: Vec3, desired: Vec3, current: Vec3,
   const f = num / (num + rate);
 
   if (angle < 1e-5) {
-    out.x = eye.x + b.x * radius;
-    out.y = eye.y + b.y * radius;
-    out.z = eye.z + b.z * radius;
+    out.x = eye.x + b.x * LOOKAT_RADIUS;
+    out.y = eye.y + b.y * LOOKAT_RADIUS;
+    out.z = eye.z + b.z * LOOKAT_RADIUS;
     return;
   }
   // Slerp the direction by that fraction, then re-emit at the radius.
@@ -106,7 +106,7 @@ export function TurnLookAtToward(eye: Vec3, desired: Vec3, current: Vec3,
   let z = a.z * w0 + b.z * w1;
   const l = Math.hypot(x, y, z) || 1;
   x /= l; y /= l; z /= l;
-  out.x = eye.x + x * radius;
-  out.y = eye.y + y * radius;
-  out.z = eye.z + z * radius;
+  out.x = eye.x + x * LOOKAT_RADIUS;
+  out.y = eye.y + y * LOOKAT_RADIUS;
+  out.z = eye.z + z * LOOKAT_RADIUS;
 }

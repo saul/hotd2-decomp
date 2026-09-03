@@ -6,7 +6,7 @@
  * bottom of the update. They are here with it rather than in files of their
  * own for exactly that reason.
  */
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { CamPathCueReached } from "../camera/path";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
@@ -138,7 +138,8 @@ function CivilianWriteSphereCentre(obj: Actor): void {
  * a leftover or a path the data never takes is undetermined; the port keeps
  * the write because the engine makes it, not because it can point at an effect.
  */
-const FLAGS2_SCENE_LIT = 0x1;
+// The bit is `ThrowerFlag.SceneLit`. It lives on that enum because its only
+// two *readers* are class 0x31's draw; this class is one of its two writers.
 
 /**
  * The captor release at the tail of `CivilianUpdate` — `LAB_0048B0CE`.
@@ -193,7 +194,7 @@ export function CivilianReleaseCaptors(obj: Actor): void {
     const kid = ActorByAt(sub.children[i]);
     if (!kid) continue;
     kid.flags &= ~ActorFlag.HoldingWeapon;
-    kid.flags2 |= FLAGS2_SCENE_LIT;
+    kid.flags2 |= ThrowerFlag.SceneLit;
   }
 }
 

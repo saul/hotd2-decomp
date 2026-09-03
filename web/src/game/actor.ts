@@ -130,12 +130,22 @@ export enum ThrowerFlag {
    * 0x17 `EnemyThrowerInit` (`FUN_00449620`) also raises `obj+0x38` bit 3 for
    * it (`OR dword ptr [ESI + 0x38], 0x8` — `834e3808` at 0x00449802).
    *
-   * **Never written by class-0x31 code**: it comes from the spawn
-   * descriptor's `+0x20` word, and 18 of the 51 shipped class-0x31 spawns set
-   * it. `[proved]` mechanism, `[open]` what the alternate entry point does —
-   * the port has no reader.
+   * **What the branch does is not `[open]`.** `FUN_0044A200` is
+   * `if ((obj+0x136C & 1) && g_scene_light_array) SubmitSlotWithSceneLightArray
+   * (FUN_004185E0) else AssetDrawSlot (FUN_00418560)` — the bit picks the
+   * lit submission path. `[proved]`, from two readings that met here: one
+   * survey called the effect undetermined and the other read the branch
+   * targets.
+   *
+   * **Two writers, and they are in different classes.** It comes from the
+   * spawn descriptor's `+0x20` word — 18 of the 51 shipped class-0x31 spawns
+   * set it — *and* class 0x10's captor release raises it on every surviving
+   * child (`CivilianReleaseCaptors`). Those children are class 0x30, whose
+   * draw path never tests this bit, so that write changes nothing in the
+   * shipped game. Transcribed because the engine makes it; its purpose there
+   * is `[open]`.
    */
-  AltPartDraw = 0x1,
+  SceneLit = 0x1,
   /** `ThrowerFindWallBeside`'s own refusal bit. */
   NoWallLeap = 0x2,
   /**
@@ -144,7 +154,7 @@ export enum ThrowerFlag {
    * `obj+0x68`: `TEST byte ptr [ESI + 0x136c], 0x8` (`f6866c13000008`) at
    * 0x0044984D, then the three stores at 0x00449859..0x00449865.
    *
-   * Descriptor-seeded like {@link AltPartDraw}, and **no shipped class-0x31
+   * Descriptor-seeded like {@link SceneLit}, and **no shipped class-0x31
    * spawn sets it**, so the arm is dead in the retail data. `[proved]`
    */
   SeedTurnFromSpawnYaw = 0x8,

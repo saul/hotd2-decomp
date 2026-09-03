@@ -2392,9 +2392,9 @@ console.log("class 0x31, the stance the spawn descriptor names:");
   // a draw selector, not a stance. It must not move the stance.
   {
     const z = thrower(ThrowerState.StandAndDecide,
-                      { descFlags: ThrowerFlag.AltPartDraw });
+                      { descFlags: ThrowerFlag.SceneLit });
     check("bit 0 carries through without changing the stance",
-          (z.flags2 & ThrowerFlag.AltPartDraw) !== 0
+          (z.flags2 & ThrowerFlag.SceneLit) !== 0
           && ThrowerStanceOf(z) === ThrowerStance.Ground
           && (z.flags2 & ThrowerFlag.OffGround) === 0,
           `flags2 0x${(z.flags2 >>> 0).toString(16)}`);

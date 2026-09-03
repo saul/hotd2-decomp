@@ -45,8 +45,9 @@ import { Events } from "../src/core/events";
 import { CameraFrame } from "../src/core/camera";
 import type { Tick } from "../src/core/system";
 import type { CamJson, ScriptJson } from "../src/bundle";
+import { BUNDLE_ROOT, skipNoBundle } from "../tools/lib/bundle_root";
 
-const ROOT = join(process.env.HOME ?? "", "hotd2-decomp", "extract", "player");
+const ROOT = BUNDLE_ROOT;
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -56,10 +57,7 @@ function check(name: string, ok: boolean, detail = ""): void {
 
 const dir = join(ROOT, "stage1");
 const scriptPath = join(dir, "stage1.script.json");
-if (!existsSync(scriptPath)) {
-  console.log("\ncamera: no bundle built; skipping");
-  process.exit(0);
-}
+if (!existsSync(scriptPath)) skipNoBundle("camera");
 const script = JSON.parse(readFileSync(scriptPath, "utf8")) as ScriptJson;
 const camJson = JSON.parse(
   readFileSync(join(dir, "stage1.cam.json"), "utf8")) as CamJson;

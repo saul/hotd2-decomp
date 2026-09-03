@@ -22,6 +22,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
@@ -38,7 +39,7 @@ import { seekTo } from "../src/script/seek.ts";
 const args = process.argv.slice(2)
   .filter((a) => !a.endsWith(".mjs") && !a.endsWith(".ts"));
 const [stage = "2", block = "9", step = "4", seconds = "30"] = args;
-const root = join(process.env.HOME, "hotd2-decomp/extract/player");
+const root = BUNDLE_ROOT;
 const script = JSON.parse(readFileSync(
   join(root, `stage${stage}`, `stage${stage}.script.json`), "utf8"));
 const chars = script.characters;

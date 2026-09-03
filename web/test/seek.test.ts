@@ -25,8 +25,10 @@ import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../src/game/globals";
 import type { OpJson, ScriptJson } from "../src/bundle";
 import { seekTo } from "../src/script/seek";
+import { BUNDLE_ROOT, skipNoBundle }
+  from "../tools/lib/bundle_root";
 
-const ROOT = join(process.env.HOME ?? "", "hotd2-decomp", "extract", "player");
+const ROOT = BUNDLE_ROOT;
 const STAGES = [1, 2, 3, 4, 5, 6];
 /** Every Nth instruction becomes a sample. Prime, to avoid landing in step. */
 const SAMPLE_EVERY = 37;
@@ -763,9 +765,6 @@ for (const stage of STAGES) {
         !bad, bad);
 }
 
-if (ran === 0) {
-  console.log("  no bundle under extract/player -- run tools/export_player.py");
-  process.exit(0);
-}
+if (ran === 0) skipNoBundle("seek");
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

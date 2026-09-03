@@ -15,6 +15,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
@@ -26,7 +27,7 @@ import { ZombieState } from "../src/game/class30/states.ts";
 import { TARGET_STATES } from "../src/game/class30/target.ts";
 import { vec3 } from "../src/game/vec.ts";
 
-const root = join(process.env.HOME, "hotd2-decomp/extract/player");
+const root = BUNDLE_ROOT;
 /**
  * The camera, parked five thousand units from anything. That is the whole
  * point: with the eye far away, "closed on the civilian" and "closed on the

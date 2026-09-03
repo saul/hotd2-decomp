@@ -21,6 +21,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
@@ -31,7 +32,7 @@ import { SetGameTables } from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { vec3 } from "../src/game/vec.ts";
 
-const root = join(process.env.HOME, "hotd2-decomp/extract/player");
+const root = BUNDLE_ROOT;
 const SECONDS = 60;
 
 /** The twelve, and which of them are the scripted attackers that never exit. */

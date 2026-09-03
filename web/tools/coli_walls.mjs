@@ -32,6 +32,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ColiTraceSegmentAllSets, QueryGroundHeightAt } from "../src/game/coli.ts";
@@ -50,7 +51,7 @@ function local(p, yaw, x, y, z) {
   return { x: p.x + x * c + z * s, y: p.y + y, z: p.z - x * s + z * c };
 }
 
-const root = join(process.env.HOME, "hotd2-decomp/extract/player");
+const root = BUNDLE_ROOT;
 let total = 0, grounded = 0, walls = 0, ceilings = 0;
 
 console.log("class 0x31 spawns, through the port's own collision:");

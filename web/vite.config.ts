@@ -14,8 +14,13 @@ import { extname, join, normalize, resolve } from "node:path";
  *
  * For a production build, put the bundle in `dist/bundle/` yourself -- the app
  * fetches `bundle/manifest.json` relative to the page either way.
+ *
+ * `HOTD2_BUNDLE` points all of this at an export somewhere else. It is the
+ * same variable `tools/lib/bundle_root.ts` reads, on purpose: the dev server
+ * and the headless tests disagreeing about where the bundle is was F10.
  */
-const BUNDLE_DIR = resolve(__dirname, "..", "extract", "player");
+const BUNDLE_DIR = process.env.HOTD2_BUNDLE
+  ?? resolve(__dirname, "..", "extract", "player");
 
 /**
  * BGM is streamed from the user's own install rather than copied into the

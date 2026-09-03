@@ -59,8 +59,9 @@ import { Harness } from "../src/app/harness";
 import { Walker, type WalkerHost } from "../src/script/walker";
 import { seekTo } from "../src/script/seek";
 import type { ScriptJson } from "../src/bundle";
+import { BUNDLE_ROOT, skipNoBundle } from "../tools/lib/bundle_root";
 
-const ROOT = join(process.env.HOME ?? "", "hotd2-decomp", "extract", "player");
+const ROOT = BUNDLE_ROOT;
 const STAGES = [1, 2, 3, 4, 5, 6];
 const TICK = 1 / 60;
 /** Frames played before a snapshot is taken. Long enough to have a fight in. */
@@ -473,9 +474,6 @@ console.log("\nThe shutter and the caption are script state:\n");
   }
 }
 
-if (ran === 0) {
-  console.log("  no bundle under extract/player -- run tools/export_player.py");
-  process.exit(0);
-}
+if (ran === 0) skipNoBundle("state");
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

@@ -9,12 +9,13 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ColiTestSphereAgainstFullSet, QueryGroundHeightAt }
   from "../src/game/coli.ts";
 
-const root = join(process.env.HOME, "hotd2-decomp/extract/player");
+const root = BUNDLE_ROOT;
 const only = Number(process.argv[3] ?? 0);
 const SPHERE_LIFT = 1.4;
 

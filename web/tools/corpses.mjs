@@ -26,6 +26,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
@@ -35,7 +36,7 @@ import { SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { vec3 } from "../src/game/vec.ts";
 
-const root = join(process.env.HOME, "hotd2-decomp/extract/player");
+const root = BUNDLE_ROOT;
 /** Parked far away, so nothing in the set piece is reacting to a camera. */
 const EYE = vec3(5000, 40, 5000);
 /** Long enough for the walk-in, the grab and the maul to play out. */

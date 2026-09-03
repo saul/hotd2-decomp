@@ -276,19 +276,20 @@ and `obj+0x136C` bit `0x1` **set**, on every frame for as long as the body is
 still in play. `[proved]`
 
 * `obj+0x34` bit `0x1000000` is "this actor is holding something". Class 0x30's
-  clip picker `FUN_004560B0` reads it at 0x004560DD —
-  `TEST dword ptr [ESI + 0x34], 0x1000000`, bytes `f7463400000001` — and starts
-  motion `0x3F9` while it is set. Clearing it is what takes the captor out of
-  its hold clip. A sweep for `TEST r/m32, 0x1000000` finds that site and
-  0x00430C88 and no others.
+  death-motion picker `ChooseDeathMotion` (`FUN_004560B0`) reads it at
+  0x004560DD — `TEST dword ptr [ESI + 0x34], 0x1000000`, bytes
+  `f7463400000001` — and takes motion `0x3F9` ahead of every other branch while
+  it is set. Clearing it is what gives a released captor its ordinary death
+  clip back. A sweep for `TEST r/m32, 0x1000000` finds that site and 0x00430C88
+  and no others.
 * `obj+0x136C` bit `0x1` selects **the scene light array** at draw time. Its
-  only readers are class 0x31's two draw-slot wrappers `FUN_0044A200` and
-  `FUN_0044A240`: `TEST byte ptr [EAX + 0x136C], 0x1`, bytes `f6806c13000001`,
-  at 0x0044A205 and 0x0044A245, choosing `SubmitSlotWithSceneLightArray`
-  (`FUN_004185E0`) over `AssetDrawSlot` (`FUN_00418560`) when the array at
-  0x009A2BB4 — written by `EvtOpSetSceneLighting14` — is non-null. A
-  byte-pattern sweep of the image finds those two and no others, and the dword
-  form finds none.
+  only readers are class 0x31's two part-draw wrappers, `ThrowerDrawPart`
+  (`FUN_0044A200`) and `ThrowerDrawPartWithAlpha` (`FUN_0044A240`):
+  `TEST byte ptr [EAX + 0x136C], 0x1`, bytes `f6806c13000001`, at 0x0044A205
+  and 0x0044A245, choosing `SubmitSlotWithSceneLightArray` (`FUN_004185E0`)
+  over `AssetDrawSlot` (`FUN_00418560`) when the array at 0x009A2BB4 — written
+  by `EvtOpSetSceneLighting14` — is non-null. A byte-pattern sweep of the image
+  finds those two and no others, and the dword form finds none.
 
   `[open]`: **the captors are class 0x30**, so in the shipped game nothing
   reads the bit that is set on them. The write is transcribed because the

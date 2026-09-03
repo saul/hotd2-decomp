@@ -113,11 +113,12 @@ function CivilianWriteSphereCentre(obj: Actor): void {
  * `obj+0x136C` bit `0x1` — **draw this actor with the scene light array**.
  *
  * `[proved]`, and it closes an `[open]` the survey left. The only readers in
- * the binary are class 0x31's two draw-slot wrappers, `FUN_0044A200` and
- * `FUN_0044A240`: each does `MOV EAX, [g_cur_actor]; TEST byte ptr
- * [EAX + 0x136C], 0x1` — bytes `f6806c13000001`, at 0x0044A205 and 0x0044A245
- * — and, when the bit is set *and* the scene light array at 0x009A2BB4
- * (written by `EvtOpSetSceneLighting14`) is non-null, calls
+ * the binary are class 0x31's two part-draw wrappers, `ThrowerDrawPart`
+ * (`FUN_0044A200`) and `ThrowerDrawPartWithAlpha` (`FUN_0044A240`): each does
+ * `MOV EAX, [g_cur_actor]; TEST byte ptr [EAX + 0x136C], 0x1` — bytes
+ * `f6806c13000001`, at 0x0044A205 and 0x0044A245 — and, when the bit is set
+ * *and* the scene light array at 0x009A2BB4 (written by
+ * `EvtOpSetSceneLighting14`) is non-null, calls
  * `SubmitSlotWithSceneLightArray` (`FUN_004185E0`) instead of `AssetDrawSlot`
  * (`FUN_00418560`). Those two are the whole reader set: a byte-pattern sweep
  * for `TEST byte ptr [r + 0x136C], 1` over the image returns exactly those two
@@ -166,15 +167,17 @@ const FLAGS2_SCENE_LIT = 0x1;
  * edge, and both writes are idempotent, so running it every frame is what the
  * engine does and costs nothing. The port had neither write.
  *
- * `ActorFlag.HoldingWeapon` is `obj+0x34` bit `0x1000000` and the name is
+ * `ActorFlag.HoldingWeapon` is `obj+0x34` bit `0x1000000`, and the name is
  * narrower than the bit: it was taken from `ZombieStateStandAndThrow`, one
- * writer. `FUN_004560B0` reads the same bit at 0x004560DD —
- * `TEST dword ptr [ESI + 0x34], 0x1000000`, bytes `f7463400000001` — and
- * starts motion 0x3F9 on the actor while it is set — it is class 0x30's clip
- * picker — which is the same bit doing the same job for a captor that has hold
- * of a civilian. (A sweep for `TEST r/m32, 0x1000000` finds that site and
- * 0x00430C88 and no more; the `OR`/`AND` forms were not swept, so this is the
- * *reader* set, not every reference.)
+ * writer. The other reader is class 0x30's **death-motion picker**,
+ * `ChooseDeathMotion` (`FUN_004560B0`), at 0x004560DD —
+ * `TEST dword ptr [ESI + 0x34], 0x1000000`, bytes `f7463400000001` — which
+ * takes motion 0x3F9 ahead of every other branch while it is set. So this
+ * clear is what gives a released captor its ordinary death clip back instead
+ * of the one for an actor that still has hold of something. (A sweep for
+ * `TEST r/m32, 0x1000000` finds that site and 0x00430C88 and no more; the
+ * `OR`/`AND` forms were not swept, so this is the *reader* set, not every
+ * reference.)
  *
  * `ECX` is reloaded from `g_cur_civilian` (0x007DD0A0) on every iteration and
  * the count is re-read each time round, so a child list that shortens mid-loop

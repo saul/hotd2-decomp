@@ -24,14 +24,13 @@
  * hook has it to itself. That is the state stage 2 block 17 step 5 sits in
  * while `wait_enemies_alive` holds.
  *
- * [diverges] `CamEvalPath7` itself is not here. The Hermite curves ship in the
- * camera bundle and are evaluated on the render side (`render/campath.ts`),
- * because that evaluator also has to draw the rails and answer the frame
- * scrubber; `game/` takes the pose it produced. The write into the block —
- * which is the part that matters to the camera's behaviour — is here.
+ * `CamEvalPath7` itself is `camera/curve.ts` — `CamPath.pose`, over `Vec3`,
+ * because the Hermite maths is plain numbers over bundle keys and never needed
+ * three.js. `CamSeatPathFrame` below runs the two in the engine's order.
  */
 import { G } from "../globals";
-import type { Vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
+import type { CamPath, CamPose } from "./curve";
 
 /** Seat the camera block on the path pose for this frame. */
 export function CamAdvancePathFrame(eye: Vec3, target: Vec3): void {
@@ -55,6 +54,46 @@ export function CamSetPathTarget(target: Vec3): void {
   G.g_cam_path_target.x = target.x;
   G.g_cam_path_target.y = target.y;
   G.g_cam_path_target.z = target.z;
+}
+
+/**
+ * The pose the last seat evaluated.
+ *
+ * Scratch, not state: it is rewritten every frame the block is seated, and
+ * everything that survives a frame is already in `g_camera_block_eye` /
+ * `g_camera_block_target`. It is module-level rather than allocated per call
+ * because the seat runs every frame of every stage.
+ */
+const _pose: CamPose = { eye: vec3(), target: vec3(), roll: 0 };
+
+/**
+ * One frame of a `cam_play`: evaluate the path, publish its own aim, and —
+ * while the action is live — seat the camera block on it.
+ *
+ * `[port-only]`. Each half is an exe routine, and this is the order the engine
+ * runs them in; what is the port's own is the *condition*. In the engine the
+ * queued action simply stops being called once the shot reaches its end frame,
+ * so there is no `advance` flag to read — the caller here has to say whether
+ * the action is still live, because the player also has a frame scrubber, a
+ * seek, and a Track toggle, none of which the engine has.
+ *
+ * The evaluated pose comes back so the draw can take the **roll** off it. Roll
+ * is the one channel `CamEvalPath7` (`FUN_004041E0`) produces that the camera
+ * block has no word for — the engine hands it straight to the draw — so it is
+ * returned rather than parked in a global whose address nobody has read.
+ */
+export function CamSeatPathFrame(path: CamPath, frame: number,
+                                 rollEnabled: boolean,
+                                 advance: boolean): CamPose {
+  path.pose(frame, rollEnabled, _pose);
+  // The path's own aim, which `SelectCameraLookAtTarget` falls back to.
+  CamSetPathTarget(_pose.target);
+  // `CamAdvancePathFrame` runs only while the action is live. Once the shot
+  // reaches its end frame the action retires and the block is left where it
+  // is, for the camera hook to ease from -- which is the state the player
+  // spends every fight in.
+  if (advance) CamAdvancePathFrame(_pose.eye, _pose.target);
+  return _pose;
 }
 
 /**

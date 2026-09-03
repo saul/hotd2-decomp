@@ -15,7 +15,7 @@
  */
 import type { PerspectiveCamera, Scene } from "three";
 import type { Context } from "../core/system";
-import type { CamPaths } from "./campath";
+import type { CamPaths } from "../game/camera/curve";
 
 export interface RenderContext extends Context {
   readonly scene: Scene;

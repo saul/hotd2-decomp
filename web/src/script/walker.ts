@@ -602,7 +602,7 @@ export class Walker {
   /**
    * How many of the live spawns are the classes an enemy gate waits on.
    *
-   * The player's own count is `chars.aliveCount`, which knows what has been
+   * The game's own count is `g_enemies_alive`, which knows what has been
    * shot; this is the script's view, and it is what the status panel reports
    * alongside the placement count.
    */

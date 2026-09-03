@@ -1,10 +1,23 @@
 /**
- * Shooting: the trigger, the score, the crosshair.
+ * Shooting: the trigger, the feedback, the crosshair.
  *
- * The hit test itself lives in `characters.ts`, because that is where the bones
- * are and the spheres ride them. This is the half the game keeps in the player
- * rather than the actor: turning a click into a ray, and turning a hit into
- * points.
+ * **What this layer decides about a shot is now exactly two things**: where
+ * the segment points, and what the impact looks and sounds like. Between them
+ * sits the port. `fire` hands the segment to `onFire`, which `app/main.ts`
+ * wires to `QueueShotRequest`; `ProcessShotRequests` drains the queue at the
+ * head of `GameUpdate` and decides everything — which candidate along the
+ * segment counts, what the hit does to the actor, what it is worth — and the
+ * `shot.resolved` event brings the answer back here to be drawn.
+ *
+ * It used to do all of it inside the `pointerdown` handler: `ResolveHit`,
+ * `MarkActorShot`, `BreakablePropTakeShot`, `ScoreAddForPlayer` and a private
+ * head-combo counter that shadowed `g_head_combo_bonus`. None of that could be
+ * reached by `test:port` and none of it was in a snapshot. See
+ * `game/combat/shot.ts` and docs/PLAYER_ARCHITECTURE.md, "Input intent".
+ *
+ * The hit test itself is `characters.ts`, because that is where the bones are
+ * and the spheres ride them — the port asks for it by name across
+ * `GameHost.pickShot`.
  *
  * Read out of the binary; the full account is in `docs/formats/combat.md`.
  *
@@ -19,18 +32,6 @@
  * The game's segment is 1000 units. Nothing here needs the bound — the bone
  * spheres are all well inside it — but it is applied so a shot past everything
  * behaves the same way.
- *
- * ## The score, from `FUN_00409430`
- *
- * ```
- * any hit not on the head     +10
- * a hit on bone 2, the head   +120, then a per-player combo that grows by 10
- * HP reaching zero            +80
- * ```
- *
- * The head combo is added *before* it increments, so consecutive headshots pay
- * 120, 130, 140 …, and **any non-head hit resets it to zero**. That reset is
- * the whole reason the counter exists, so it is reproduced exactly.
  *
  * ## Dying
  *
@@ -81,17 +82,10 @@ import {
 } from "three";
 import type { CharacterLayer } from "./characters";
 import type { CombatJson } from "../bundle";
+import type { Events, EventMap } from "../core/events";
 import type { Context, System, Tick } from "../core/system";
 import { G } from "../game/globals";
 import { HitResultCode } from "../game/combat/resolve_hit";
-import { BreakablePropTakeShot } from "../game/class41/prop";
-import { MarkActorShot } from "../game/combat/shot";
-import { ScoreAddForPlayer, ScoreResetAll } from "../game/combat/score";
-import { g_class_handlers } from "../game/registry";
-import type { SpawnClass } from "../game/spawn_class";
-import type { Actor } from "../game/actor";
-import type { BreakableLayer } from "./breakables";
-import type { BreakableProp } from "../game/class41/prop_state";
 import { Rng } from "../core/rng";
 import type { Scope } from "../core/scope";
 
@@ -116,12 +110,6 @@ const BLOOD_FRAMES = 25;
 const IMPACT_HZ = 60;
 /** `FUN_00405260` has no material here — 3 is the game's "other" surface. */
 const MISS_MATERIAL = 3;
-
-/** `ScoreAddForPlayer` constants, from `FUN_00409430`. */
-const SCORE_HIT = 10;
-const SCORE_HEAD = 120;
-const SCORE_HEAD_COMBO_STEP = 10;
-const SCORE_KILL = 80;
 
 export interface ShotResult {
   hit: boolean;
@@ -238,17 +226,34 @@ export class Shooting implements System {
   /**
    * The running score is a global — `G.g_player_score` — because
    * `PlayerTakeDamage` also writes it, and two counters that both call
-   * themselves the score is how they drift. Shots and hits stay here: they are
-   * the player's own accuracy tally, not part of the port yet.
+   * themselves the score is how they drift. So is the head combo, which used
+   * to have a second private copy here: `g_head_combo_bonus` is the engine's
+   * and `ResetSceneOnEnter` zeroes it, and only one of the two was ever in a
+   * snapshot.
+   *
+   * `shots` and `hits` are the display's own tally and stay here: `shots`
+   * counts clicks the *viewer* made, including one aimed at nothing while the
+   * game was between stages, which is not what `g_nPlayerFired` counts.
    */
   get score(): number { return G.g_player_score[0]; }
   shots = 0;
   hits = 0;
-  /** `DAT_009A5C82` — grows by 10 per consecutive headshot, reset by any other. */
-  private headCombo = 0;
 
   /** Called with a one-line description of each shot, for the event feed. */
   onShot: (r: ShotResult, note: string) => void = () => {};
+  /**
+   * A trigger pull, handed to whoever queues it.
+   *
+   * `app/main.ts` wires this to `QueueShotRequest`. It is a callback rather
+   * than a call into `game/` because **a renderer does not get to change
+   * engine state**, and a `.push` onto `g_shot_requests` from here is that
+   * violation wearing a different verb — `no-engine-writes-in-render` only
+   * greps for `G.x =`, but the rule is about who decides, not about the
+   * spelling. So this layer says *what the viewer did* and the composition
+   * root turns it into input the port owns. See docs/PLAYER_ARCHITECTURE.md,
+   * "Input intent".
+   */
+  onFire: (ray: { origin: Vector3; dir: Vector3 }) => void = () => {};
   /** Wired to the bundle's sound player; ids are `g_se_name_list` ids. */
   playSound: (id: number) => void = () => {};
 
@@ -256,9 +261,16 @@ export class Shooting implements System {
   private impacts: ImpactSprites | null = null;
   /** Draw-time noise only — see `pickOne`. Reseeded by `reset`. */
   private readonly rng = new Rng(SOUND_PICK_SEED);
-  /** The breakable props, so a barrel in front of a zombie takes the shot. */
-  breakables: BreakableLayer | null = null;
   private readonly _v = new Vector3();
+  /**
+   * The resolved shot's point, held apart from `_v`.
+   *
+   * `viewZ` transforms **into** `_v`, so handing it the same vector as the hit
+   * point would leave the point in view space by the time the sprite is placed
+   * — a scratch aliasing itself, which reads as an impact drawn a few hundred
+   * units behind the camera.
+   */
+  private readonly _at = new Vector3();
 
   /**
    * The viewport and the crosshair are React's, and arrive through `UiHost`.
@@ -274,7 +286,12 @@ export class Shooting implements System {
   constructor(private readonly viewport: HTMLElement,
               private readonly dot: HTMLElement,
               private readonly chars: CharacterLayer,
-              private readonly scope: Scope) {
+              private readonly scope: Scope,
+              events: Events) {
+    // The feedback for a shot comes back from the port, because the port is
+    // what decides what the shot did. Owned by the app scope, like everything
+    // else this layer holds that outlives a stage.
+    scope.defer(events.on("shot.resolved", (r) => this.onResolved(r)));
     viewport.addEventListener("pointerdown", (e) => {
       if (!this.enabled || e.button !== 0) return;
       e.preventDefault();
@@ -390,17 +407,29 @@ export class Shooting implements System {
   private _scene: Object3D | null = null;
 
   reset(): void {
-    ScoreResetAll();
     this.shots = 0;
     this.hits = 0;
-    this.headCombo = 0;
     this.impacts?.clear();
     this.chars.revive();
+    // No `ScoreResetAll` here any more. The score is engine state and this is
+    // a renderer; both callers of `reset` (the seek and the stage load) run
+    // `ResetGameGlobals` around it, which zeroes `g_player_score` and
+    // `g_head_combo_bonus` the way `ResetSceneOnEnter` does.
     // A stage always starts from the same voice line, so two runs of the same
     // stage sound the same.
     this.rng.reseed(SOUND_PICK_SEED);
   }
 
+  /**
+   * The trigger, and the whole of what this layer decides about a shot.
+   *
+   * `BuildShotRay` (`FUN_00406110`) unprojects the crosshair with the game's
+   * own projection distance and `ShotBuildSegment` (`FUN_00404AD0`) turns it
+   * into a 1000-unit segment; that is a camera question, so it is answered
+   * here. Everything after it — which candidate along the segment counts, what
+   * the hit does, what it is worth — is the port's, and reaches it as a queued
+   * request. See `game/combat/shot.ts`.
+   */
   private fire(e: PointerEvent): void {
     if (!this._camera) return;
     const r = this.viewport.getBoundingClientRect();
@@ -409,143 +438,103 @@ export class Shooting implements System {
     this.ray.setFromCamera(this.ndc, this._camera as never);
     this.ray.far = SHOT_RANGE;
     this.shots++;
+    this.onFire({ origin: this.ray.ray.origin, dir: this.ray.ray.direction });
+  }
 
-    const pick = this.chars.pick(this.ray.ray);
-    // The engine's shot test walks one depth-sorted list, so whichever is
-    // nearer takes the shot: a barrel in front of a zombie stops the bullet.
-    const prop = this.breakables?.pick(this.ray) ?? null;
-    if (prop && (!pick
-                 || this.ray.ray.origin.distanceToSquared(prop.point)
-                    < this.ray.ray.origin.distanceToSquared(pick.point))) {
-      this.hitProp(prop.prop, prop.point);
-      return;
-    }
-    if (!pick) {
-      // A miss still resets nothing -- the game only clears the head combo on
-      // a hit that is not a head. `FUN_00405260` takes the material from the
-      // collision triangle; there is none here, so the visible geometry gives
-      // the point and material 3 ("other") gives the sound.
-      const where = this._scene
-        ? this.ray.intersectObject(this._scene, true).find((h) => h.object.visible)
-        : undefined;
-      const mat = String(MISS_MATERIAL);
-      const ric = this.combat?.ricochet[mat];
-      if (ric) this.playSound(ric.id);
-      if (where && this.impacts) {
-        const sp = this.combat?.impact_sprite[mat]
-          ?? this.combat?.impact_sprite_default;
-        const frames = sp ? Math.max(1, sp[1] - sp[0] + 1) : BLOOD_FRAMES;
-        this.impacts.spawn(where.point, this.viewZ(where.point),
-                           sp ? sp[2] : 1, frames);
-      }
-      this.onShot({ hit: false, points: 0 },
-                  `miss${ric ? ` · ${ric.file.split("\\").pop()}` : ""}`);
-      return;
-    }
-
-    // A class that reads `obj+0x34` bit 3 itself takes the shot as the engine
-    // delivers it -- marked, and nothing else. `CivilianUpdate` is what a hit
-    // on a civilian *means*: a life, two hundred points and the on-shot
-    // script. Same shape as `hitProp` below, and for the same reason.
-    const handler = g_class_handlers[pick.inst.a.cls as SpawnClass];
-    if (handler?.ownsShotResult) {
-      this.hitMarkedOnly(pick.inst, pick.bone, pick.point);
-      return;
-    }
-
-    const out = this.chars.hit(pick.inst, pick.bone, this.cameraYawBams);
+  /**
+   * What the port did with a shot, drawn.
+   *
+   * `ActorShotFeedback`: a result-5 hit is a ricochet, everything else is
+   * blood at the bone, scaled by how bad the hit was. None of it is state and
+   * none of it is a decision — the decision arrived in the payload.
+   */
+  private onResolved(r: EventMap["shot.resolved"]): void {
+    if (r.kind === "miss") return this.drawMiss(r);
     this.hits++;
-    let points = 0;
-    if (out.head) {
-      points += SCORE_HEAD + this.headCombo;
-      this.headCombo += SCORE_HEAD_COMBO_STEP;
-    } else {
-      points += SCORE_HIT;
-      this.headCombo = 0;
-    }
-    if (out.killed) points += SCORE_KILL;
-    // `ResolveHit` scores nothing at all for a result-5 hit.
-    if (out.result === HitResultCode.NoEffect) points = 0;
-    // Through `ScoreAddForPlayer`, not `G.g_player_score[0] += points`. Every
-    // award and penalty in the game goes through that one routine, and the
-    // renderer adding to the total behind its back was the last place engine
-    // state was written from `render/`. No `events` argument, because this
-    // path never emitted `player.score` and making it do so now would be a
-    // behaviour change smuggled in with a refactor.
-    ScoreAddForPlayer(0, points);
+    if (r.kind === "prop") return this.drawPropHit(r);
+    const point = this._at.set(r.point?.x ?? 0, r.point?.y ?? 0,
+                               r.point?.z ?? 0);
 
-    // `ActorShotFeedback`: a result-5 hit is a ricochet, everything else is
-    // blood at the bone, scaled by how bad the hit was.
+    if (r.kind === "marked") {
+      // `ActorShotFeedback` still runs: it is flesh, so it is blood at the
+      // shot point, at the "damaged" severity -- there is no hit result to
+      // scale by.
+      const scale = this.combat?.blood_scale["1"] ?? 0.5;
+      this.impacts?.spawn(point, this.viewZ(point), scale, BLOOD_FRAMES);
+      this.onShot({ hit: true, bone: r.bone, points: 0 },
+                  `${r.who} · marked, its own class scores it`);
+      return;
+    }
+
     const c = this.combat;
-    if (out.result === HitResultCode.NoEffect) {
+    if (r.result === HitResultCode.NoEffect) {
       const ric = c?.no_effect.sound;
       if (ric) this.playSound(ric.id);
       const sp = c?.impact_sprite[String(c.no_effect.material)];
       if (sp && this.impacts) {
-        this.impacts.spawn(pick.point, this.viewZ(pick.point), sp[2],
+        this.impacts.spawn(point, this.viewZ(point), sp[2],
                            Math.max(1, sp[1] - sp[0] + 1));
       }
     } else {
-      this.voice(pick.inst.type.type,
-                 out.killed ? (out.head ? "head" : "kill") : "hurt");
-      const scale = c?.blood_scale[String(out.result)] ?? 0.5;
-      this.impacts?.spawn(pick.point, this.viewZ(pick.point), scale,
-                          BLOOD_FRAMES);
+      this.voice(r.charType ?? 0,
+                 r.killed ? (r.head ? "head" : "kill") : "hurt");
+      const scale = c?.blood_scale[String(r.result)] ?? 0.5;
+      this.impacts?.spawn(point, this.viewZ(point), scale, BLOOD_FRAMES);
     }
 
-    const who = pick.inst.type.name;
-    const note = `${who} bone ${pick.bone}${out.head ? " (head)" : ""}` +
-      ` −${out.damage} hp${out.killed ? ", killed" : ` → ${out.hp}`}` +
-      (out.severed ? " · limb severed" : out.gore ? " · part swapped" : "") +
-      (out.result === HitResultCode.NoEffect ? " · no effect (ricochet)" : "") +
-      (out.react ? ` · stagger ${out.react}` : "") +
-      (out.death !== undefined ? ` · death ${out.death}` : "") +
-      `  +${points}`;
-    this.onShot({ hit: true, bone: pick.bone, head: out.head,
-                  damage: out.damage, killed: out.killed, hp: out.hp,
-                  result: out.result, points },
-                note);
+    const note = `${r.who} bone ${r.bone}${r.head ? " (head)" : ""}` +
+      ` −${r.damage} hp${r.killed ? ", killed" : ` → ${r.hp}`}` +
+      (r.severed ? " · limb severed" : r.gore ? " · part swapped" : "") +
+      (r.result === HitResultCode.NoEffect ? " · no effect (ricochet)" : "") +
+      (r.react ? ` · stagger ${r.react}` : "") +
+      (r.death !== undefined ? ` · death ${r.death}` : "") +
+      `  +${r.points}`;
+    this.onShot({ hit: true, bone: r.bone, head: r.head, damage: r.damage,
+                  killed: r.killed, hp: r.hp, result: r.result,
+                  points: r.points }, note);
   }
 
   /**
-   * Land a shot on an actor whose own class decides what it means.
+   * A shot that hit nothing the port knows about.
    *
-   * `MarkActorShot` (`FUN_00404DB0`) raises `obj+0x34` bit 3 and the bit that
-   * names the shooter, and that is the whole of the engine's shot test for an
-   * actor with no hit table. Scoring it here would be a second implementation
-   * of the rule -- the civilian charges its own hundred twice, and the life
-   * comes off in `PlayerTakeDamageTimed`.
+   * `FUN_00405260` takes the material from the collision triangle; there is
+   * none here, so the visible geometry gives the point and material 3
+   * ("other") gives the sound. The ray comes back with the event because this
+   * is the one impact point only the renderer can find.
    */
-  private hitMarkedOnly(inst: { a: Actor; type: { name: string } },
-                        bone: number, point: Vector3): void {
-    MarkActorShot(inst.a, 0, bone);
-    this.hits++;
-    this.headCombo = 0;
-    // `ActorShotFeedback` still runs: it is flesh, so it is blood at the shot
-    // point, at the "damaged" severity -- there is no hit result to scale by.
-    const scale = this.combat?.blood_scale["1"] ?? 0.5;
-    this.impacts?.spawn(point, this.viewZ(point), scale, BLOOD_FRAMES);
-    this.onShot({ hit: true, bone, points: 0 },
-                `${inst.type.name} · marked, its own class scores it`);
+  private drawMiss(r: EventMap["shot.resolved"]): void {
+    this.ray.ray.origin.set(r.ray.origin.x, r.ray.origin.y, r.ray.origin.z);
+    this.ray.ray.direction.set(r.ray.dir.x, r.ray.dir.y, r.ray.dir.z);
+    this.ray.far = SHOT_RANGE;
+    const where = this._scene
+      ? this.ray.intersectObject(this._scene, true).find((h) => h.object.visible)
+      : undefined;
+    const mat = String(MISS_MATERIAL);
+    const ric = this.combat?.ricochet[mat];
+    if (ric) this.playSound(ric.id);
+    if (where && this.impacts) {
+      const sp = this.combat?.impact_sprite[mat]
+        ?? this.combat?.impact_sprite_default;
+      const frames = sp ? Math.max(1, sp[1] - sp[0] + 1) : BLOOD_FRAMES;
+      this.impacts.spawn(where.point, this.viewZ(where.point),
+                         sp ? sp[2] : 1, frames);
+    }
+    this.onShot({ hit: false, points: 0 },
+                `miss${ric ? ` · ${ric.file.split("\\").pop()}` : ""}`);
   }
 
   /**
-   * Land a shot on a breakable prop.
+   * A shot that landed on a breakable prop.
    *
-   * All this does is set the hit bits, because that is all the engine's shot
-   * test does: `BreakablePropUpdate` reads `obj+0x34` on its next frame and is
-   * what cracks the prop, pays the ten points through `BreakablePropAwardHit`
-   * and releases whatever it was hiding. Scoring or breaking it from here
-   * would be a second implementation of the rule, and the two would drift.
-   *
-   * The sounds are the port's too — it emits `prop.cracked` / `prop.broken`
-   * with the id the engine plays, and the feed plays them.
+   * A prop is not flesh: the impact is the hard-surface spark, which is what
+   * `SpawnPropHitSpark` (`FUN_00465860`) puts at the shot point. `propHp` is
+   * still what it was when the shot landed — `BreakablePropUpdate` consumes
+   * the hit on its next frame — so this says what the shot is about to do
+   * rather than what it did.
    */
-  private hitProp(p: BreakableProp, point: Vector3): void {
-    BreakablePropTakeShot(p, 0);
-    this.hits++;
-    // A prop is not flesh: the impact is the hard-surface spark, which is what
-    // `SpawnPropHitSpark` (`FUN_00465860`) puts at the shot point.
+  private drawPropHit(r: EventMap["shot.resolved"]): void {
+    const point = this._at.set(r.point?.x ?? 0, r.point?.y ?? 0,
+                               r.point?.z ?? 0);
     const c = this.combat;
     const sp = c?.impact_sprite[String(MISS_MATERIAL)]
       ?? c?.impact_sprite_default;
@@ -553,17 +542,16 @@ export class Shooting implements System {
       this.impacts.spawn(point, this.viewZ(point), sp[2],
                          Math.max(1, sp[1] - sp[0] + 1));
     }
-    // `hp` is still what it was: the port has not consumed the hit yet, so
-    // this says what the shot is about to do rather than what it did.
     this.onShot({ hit: true, points: 0 },
-                `breakable group ${p.group} member ${p.member}`
-                + (p.hp > 1 ? " · cracked" : " · broken"));
+                `breakable group ${r.propGroup} member ${r.propMember}`
+                + ((r.propHp ?? 0) > 1 ? " · cracked" : " · broken"));
   }
 
   get describe(): string {
     if (!this.enabled) return "off";
     const acc = this.shots ? Math.round((this.hits / this.shots) * 100) : 0;
     return `${this.score} pts · ${this.hits}/${this.shots} (${acc}%)`
-      + (this.headCombo ? ` · head +${this.headCombo}` : "");
+      + (G.g_head_combo_bonus[0]
+         ? ` · head +${G.g_head_combo_bonus[0]}` : "");
   }
 }

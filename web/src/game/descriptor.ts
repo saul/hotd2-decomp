@@ -15,8 +15,10 @@
  * that builds its actor differently from the thing it is checking is testing
  * the port and not the player.
  *
- * `render/characters.ts` supplies the rest — the motion, the hit points, the
- * yaw and the position, which come from the glTF node rather than from here.
+ * `SpawnScriptedCharacters` supplies the rest — the motion, the hit points
+ * (`ActorInitHitPoints`), the yaw, and the position, which comes from the glTF
+ * node rather than from the placement and so crosses from `render/` as a
+ * `CharacterSpawnRequest`.
  */
 import type { CharacterPlacement } from "../bundle/characters";
 import type { Actor } from "./actor";

@@ -29,7 +29,8 @@ import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
   type RainRules,
 } from "../src/game/effects/rain";
-import { NULL_HOST } from "../src/game/host";
+import { NULL_HOST, type ShotPick } from "../src/game/host";
+import { QueueShotRequest } from "../src/game/combat/shot";
 import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
   from "../src/game/tables";
 import {
@@ -4886,6 +4887,150 @@ console.log("\nrain: DrawRainParticles' simulation half");
     check("and only once, whatever the rest of the fall does",
           G.g_enemies_alive === 0, `alive ${G.g_enemies_alive}`);
   }
+}
+
+
+// -- 12. the shot queue: input in, decisions in the port ---------------------
+
+/**
+ * **The whole of a shot, with no renderer anywhere near it.**
+ *
+ * Until step 21 every line below ran in `render/shooting.ts` behind a
+ * `pointerdown` handler: the score, the head combo, `MarkActorShot`,
+ * `BreakablePropTakeShot` and `ResolveHit` itself. None of it could be
+ * asserted here, and the head combo had a second private copy that no snapshot
+ * carried. Now a click is *input* — a segment on `g_shot_requests` — and
+ * `ProcessShotRequests` drains it at the head of `GameUpdate`, which is what
+ * makes this section possible at all.
+ *
+ * The host is the only stub: the hit spheres ride bones a skeleton poses, so
+ * `pickShot` is answered by the renderer in the player and by three lines here.
+ */
+console.log("\nthe shot queue:");
+{
+  const rng = new Rng(21);
+  const events = scene(3, rng);
+  // Bone 1 -- the torso, the one bone in the fixture with a `Last` effect row
+  // -- stands in for the head, so a "headshot" lands on a real table entry and
+  // the score is the only thing under test.
+  SetGameTables({
+    ...CHARS, types: { "1": { ...TYPE, head_bone: 1 } },
+  } as unknown as CharactersJson);
+  for (const o of G.g_object_list) o.hp = 100;
+  const [z0, z1, z2] = G.g_object_list;
+
+  let pick: ShotPick | null = null;
+  const host = { ...NULL_HOST, pickShot: () => pick };
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
+  const seen: { kind: string; points: number }[] = [];
+  events.on("shot.resolved", (r) => seen.push({ kind: r.kind, points: r.points }));
+
+  // A miss.
+  pick = null;
+  QueueShotRequest(0, RAY);
+  check("a trigger pull waits on the queue", G.g_shot_requests.length === 1);
+  check("...and carries the frame it was pulled on",
+        G.g_shot_requests[0].frame === Math.round(G.g_frame),
+        `${G.g_shot_requests[0].frame} vs ${G.g_frame}`);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("the frame drains it", G.g_shot_requests.length === 0);
+  check("a miss scores nothing", G.g_player_score[0] === 0
+        && seen.at(-1)?.kind === "miss");
+  check("but it is still a shot fired", G.g_nPlayerFired[0] === 1);
+
+  // Two headshots, then a body shot.
+  pick = { kind: "actor", at: z0.at, bone: 1, point: vec3() };
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("a headshot pays 120", G.g_player_score[0] === 120,
+        `${G.g_player_score[0]}`);
+  check("...and arms `g_head_combo_bonus`, which is the engine's own global",
+        G.g_head_combo_bonus[0] === 10, `${G.g_head_combo_bonus[0]}`);
+
+  pick = { kind: "actor", at: z1.at, bone: 1, point: vec3() };
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("the second consecutive headshot pays 130",
+        G.g_player_score[0] === 250, `${G.g_player_score[0]}`);
+
+  pick = { kind: "actor", at: z2.at, bone: 4, point: vec3() };
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("a hit that is not on the head pays ten and clears the combo",
+        G.g_player_score[0] === 260 && G.g_head_combo_bonus[0] === 0,
+        `${G.g_player_score[0]} / ${G.g_head_combo_bonus[0]}`);
+  check("and the hit reached `ResolveHit` -- hit points came off",
+        z2.hp === 97, `hp ${z2.hp}`);
+
+  // Two pulls between frames both land, in the order they were made.
+  const before = G.g_player_score[0];
+  pick = { kind: "actor", at: z2.at, bone: 4, point: vec3() };
+  QueueShotRequest(0, RAY);
+  QueueShotRequest(0, RAY);
+  check("two pulls before the next frame both queue",
+        G.g_shot_requests.length === 2);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("...and both resolve on it", G.g_player_score[0] === before + 20
+        && G.g_shot_requests.length === 0, `${G.g_player_score[0]}`);
+
+  // A class that scores its own shot is only marked.
+  {
+    const civ = ActorSpawn(0x4100, SpawnClass.Civilian, 1, "hostage");
+    civ.visible = true;
+    const score = G.g_player_score[0];
+    const hp = civ.hp;
+    pick = { kind: "actor", at: civ.at, bone: 0, point: vec3() };
+    QueueShotRequest(0, RAY);
+    GameUpdate(EYE, 1 / 60, host, rng, events);
+    // The mark is consumed on the same frame: `CivilianCheckShot` reads
+    // `obj+0x34` bit 3 in her own update, which runs after the queue drains.
+    // What is under test is that the shot never reached `ResolveHit` -- no
+    // damage, no hit table, no gore, exactly as `ShotTestSphere` has it for an
+    // actor without the skeleton bit.
+    check("a civilian is marked, not resolved",
+          seen.at(-1)?.kind === "marked" && civ.hp === hp,
+          `${seen.at(-1)?.kind} hp ${civ.hp} vs ${hp}`);
+    check("...and the shot itself is worth nothing -- her class charges it",
+          G.g_player_score[0] === score, `${G.g_player_score[0]}`);
+  }
+
+  // The scene reset zeroes the queue: a seek must not fire a click from the
+  // run it replaced.
+  QueueShotRequest(0, RAY);
+  ResetGameGlobals();
+  check("a scene reset empties the queue", G.g_shot_requests.length === 0);
+}
+
+/**
+ * `ActorRegisterCameraPoint` (`FUN_00409B70`): the tracked bone, lifted.
+ *
+ * This ran in `render/characters.ts`, which meant the Characters view toggle
+ * froze the camera's idea of where every actor was — a view switch changing
+ * game state, which is what `no-actor-writes-in-render` exists to catch.
+ */
+console.log("\nwhere the camera follows an actor:");
+{
+  const rng = new Rng(22);
+  const events = scene(1, rng);
+  const z = G.g_object_list[0];
+  const host = {
+    ...NULL_HOST,
+    boneWorld: (_at: number, bone: number, out: Vec3) => {
+      if (bone !== 1) return false;
+      out.x = 10; out.y = 20; out.z = 30;
+      return true;
+    },
+  };
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("the tracked bone becomes `obj+0x100`, raised by four",
+        z.lookAt.x === 10 && z.lookAt.y === 24 && z.lookAt.z === 30,
+        JSON.stringify(z.lookAt));
+
+  const held = { ...z.lookAt };
+  GameUpdate(EYE, 1 / 60, { ...NULL_HOST }, rng, events);
+  check("a host with no pose leaves it where it was",
+        z.lookAt.x === held.x && z.lookAt.y === held.y
+        && z.lookAt.z === held.z, JSON.stringify(z.lookAt));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

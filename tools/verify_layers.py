@@ -183,25 +183,39 @@ def main() -> int:
             "renderer that changes `G` is gameplay that test:port cannot "
             "reach, which is where the stage-1 car bug lived",
             "error"),
-        # Six sites, all one shape: `render/` computing something only three.js
-        # can compute -- a bone's world position, whether a model is built --
-        # and writing it straight onto the actor instead of handing it across
-        # the declared `GameHost` seam. A ratchet rather than an error because
-        # closing it is the same work as closing `render-drives-the-port`, and
-        # for the same reason: the seam has to exist before the writes can go
-        # through it. Step 21 is where both are cleared.
+        # Closed by step 21, and an error since. Six sites, all one shape:
+        # `render/` computing something only three.js can compute -- a bone's
+        # world position, whether a model is built -- and writing it straight
+        # onto the actor instead of handing it across the declared `GameHost`
+        # seam. The seam is what they go through now: `boneWorld` answers where
+        # a bone is and `ActorRegisterCameraPoint` (`FUN_00409B70`) writes
+        # `obj+0x100` from it, `setBoneSlot` is asked for beside the actor's own
+        # `boneSlot` record, and `a.visible` is `ActorDespawn`'s alone.
         "no-actor-writes-in-render": Rule(
             "no-actor-writes-in-render",
             "an actor's fields are engine state whether they are reached "
-            "through `G` or through a renderer's handle on the object -- "
-            "`a.visible` gates alive-counting, and folding a view switch into "
-            "it once unblocked every wait gate in the game",
-            "ratchet", baseline=6, step=21),
+            "through `G` or through a renderer's handle on the object -- what "
+            "only three.js can work out goes across `GameHost` and the port "
+            "writes it; `a.visible` in particular is the port's, and a "
+            "renderer that set it back to true drew set-pieces the script had "
+            "removed",
+            "error"),
+        # Closed by step 21 too, and the two halves of one seam. The renderer
+        # answers questions -- `pickShot` for the hit spheres the skeleton
+        # carries, `readySpawns` for the hierarchies the glTF has -- and the
+        # port makes every decision that follows: `ProcessShotRequests` drains
+        # `g_shot_requests` at the head of `GameUpdate`, `SpawnScriptedCharacters`
+        # is `SpawnFromDescriptor`, and the camera block is seated by
+        # `CamSeatPathFrame` over `game/camera/curve.ts`. A debug action -- the
+        # Kill button -- is a command through `app/`, not an engine call from a
+        # renderer.
         "render-drives-the-port": Rule(
             "render-drives-the-port",
             "an engine function *called* from render/ is a decision the port "
-            "should be making; types, enums and pure maths are fine",
-            "ratchet", baseline=12, step=21),
+            "should be making; the renderer answers questions across "
+            "`GameHost` and `app/` composes -- types, enums and pure maths "
+            "are fine",
+            "error"),
         # The same correction as its render twin, for the same reason: all
         # seven hits were citations in doc comments -- the sound name table's
         # address in bgm.ts, the routine hud.ts draws from. `hud/` never wrote

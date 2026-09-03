@@ -11,8 +11,8 @@ import type { Rng } from "../core/rng";
 import { makeActor, ThrowerFlag, ZombieFlag2, type Actor } from "./actor";
 import { ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
-import { CameraTrackEnemiesTick, UpdateCameraFreeFlag }
-  from "./camera/track";
+import { ActorRegisterCameraPoint, CameraTrackEnemiesTick,
+  UpdateCameraFreeFlag } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
@@ -25,6 +25,9 @@ import {
 } from "./combat/counts";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
+import { ProcessShotRequests } from "./combat/shot";
+import { DescriptorFromPlacement } from "./descriptor";
+import type { CharacterPlacement } from "../bundle/characters";
 import { ActorByAt, G } from "./globals";
 import type { GameHost } from "./host";
 import { ActorAdvanceMotion } from "./motion";
@@ -110,15 +113,90 @@ export interface ScriptSpawn {
 }
 
 /**
+ * The two facts about a character spawn that only the scene knows.
+ *
+ * Everything else about the object — its class, its character type, the whole
+ * descriptor tail and its hit points — is in the bundle's `characters` block,
+ * which `T` already holds. The position is not: the exporter bakes it into the
+ * glTF node rather than emitting it beside the placement, so it comes across
+ * from the renderer. The motion comes with it because the renderer is what
+ * resolved the placement's clip against the type's motion table and refused
+ * the ones it could not build.
+ */
+export interface CharacterSpawnRequest {
+  at: number;
+  motion: number;
+  pos: Vec3;
+}
+
+/**
+ * `ActorInitHitPoints` — `FUN_0040A8B0`. The descriptor's hit points plus the
+ * difficulty delta, clamped to `[1, 300]`.
+ */
+export function ActorInitHitPoints(p: CharacterPlacement | undefined): number {
+  const d = T.chars?.difficulty;
+  if (!p) return 0;
+  if (!d?.hp_delta?.length) return p.hp;
+  const hp = p.hp + (d.hp_delta[G.g_difficulty] ?? 0);
+  return Math.min(d.hp_max, Math.max(d.hp_min, hp));
+}
+
+/**
+ * Put the script's character spawns into the object pool.
+ *
+ * `SpawnFromDescriptor` (`FUN_00408A20`), for the classes that have a
+ * skeleton. In the exe an actor comes into existence here — when opcode
+ * 0x0B/0x0C/0x0D runs — and its class `Init` runs there and once.
+ *
+ * **Everything the record carries goes in before `Init` runs**, which is the
+ * order the engine has: it fills the object from the record and only then
+ * calls the class's `Init`. Setting them afterwards let the record overwrite
+ * what `Init` decided — `CivilianInit` (`FUN_0048A3E0`) runs the civilian's
+ * script as its last act, so a hostage whose script opens `SetMotion 371` had
+ * it replaced by the placement's own 660 on the same frame, and every civilian
+ * in the game stood in its spawn pose while its script ran on underneath.
+ *
+ * Idempotent: an `at` already in the pool is left alone.
+ *
+ * `[port-only]` as a *function*, and only as a function: everything inside the
+ * loop is `SpawnFromDescriptor`, but the loop is not. The engine has no list
+ * of live spawns to walk — one opcode makes one object, once — and the walker's
+ * spawn list is the port's own answer to a region load. `SpawnPropContainers`
+ * below is the same shape for the same reason.
+ *
+ * This was `render/characters.ts`'s until step 21. It is the engine's object
+ * lifetime, and a renderer that decides an object exists is a renderer running
+ * the game.
+ */
+export function SpawnScriptedCharacters(
+    reqs: readonly CharacterSpawnRequest[], rng?: Rng): Actor[] {
+  const made: Actor[] = [];
+  const placements = T.chars?.placements ?? [];
+  for (const req of reqs) {
+    if (ActorByAt(req.at)) continue;
+    const p = placements.find((x) => x.at === req.at);
+    const type = T.types[String(p?.char_type ?? 0)];
+    const hp = ActorInitHitPoints(p);
+    made.push(ActorSpawn(req.at, (p?.class ?? 0) as SpawnClass,
+                         type?.type ?? 0, type?.name ?? `spawn ${req.at}`,
+                         { ...DescriptorFromPlacement(p),
+                           motion: req.motion,
+                           hp, maxHp: hp,
+                           yaw: p?.yaw ?? 0, pos: { ...req.pos },
+                           visible: true },
+                         rng));
+  }
+  return made;
+}
+
+/**
  * Put the script's class-0x41 spawns into the object pool.
  *
- * Nothing else does: `ActorSpawn` is otherwise reached only from the character
- * layer, and only for spawns that resolve to a skeleton — so a placer, which
- * has no character at all, never reached the registry and no prop was ever
- * built. Extracting spawning from the renderer is step 5 of
- * PLAYER_ARCHITECTURE.md; until then this is the one class that needs the
- * bridge, and saying so explicitly beats a general fallback that would also
- * re-spawn every enemy the character layer already owns.
+ * Nothing else does: the character spawn above only builds spawns that resolve
+ * to a skeleton, so a placer, which has no character at all, would never reach
+ * the registry and no prop would ever be built. Saying so explicitly beats a
+ * general fallback that would also re-spawn every enemy the character layer
+ * already owns.
  *
  * It lives here rather than in `class41/` because putting it there made
  * `class41 -> director -> registry -> class41` a cycle, and ESM resolved it by
@@ -190,6 +268,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
                            events?: Events): FrameResult {
   const frames = dt * GAME_HZ;
   G.g_frame += frames;
+  // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
+  // record and the frame reads it, so the trigger pulls the viewer made since
+  // the last frame are resolved before anything moves -- an enemy is shot
+  // where it was standing when the crosshair was over it, not where this
+  // frame is about to put it.
+  ProcessShotRequests(host, rng, events);
   TickPlayerInvulnerability(frames);
 
   // Once a frame, for everyone: the rank the approach state tests against the
@@ -220,7 +304,13 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   for (const obj of G.g_object_list) {
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
-    if (obj.visible) ActorAdvanceMotion(obj, dt);
+    if (obj.visible) {
+      ActorAdvanceMotion(obj, dt);
+      // `ActorRegisterCameraPoint` (`FUN_00409B70`): the tracked bone, lifted,
+      // is where the camera follows this actor. Off the pose the renderer last
+      // drew, which is the frame the engine's own reader sees too.
+      ActorRegisterCameraPoint(obj, host);
+    }
     const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {
       // A dead or unloaded actor must not sit on a permit — and clearing the

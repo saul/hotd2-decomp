@@ -35,12 +35,63 @@
  *   store is there, it just never stores anything but zero. Same conclusion,
  *   sounder reason.)
  */
+import type { Actor } from "../actor";
 import { G } from "../globals";
+import type { GameHost } from "../host";
 import { T } from "../tables";
 import { SelectCameraLookAtTarget } from "./select_target";
 import { ComputeLookAtAngleError, LookAtCosineSquared, TurnLookAtToward }
   from "./turn";
 import { vec3 } from "../vec";
+
+/**
+ * The bone the camera follows.
+ *
+ * `SkeletonEmitNode` (`FUN_004114C0`) records one bone's **world position**
+ * into `obj+0x100` as it walks the skeleton, and that is what
+ * `SelectCameraLookAtTarget` aims at — never `obj+0x40`. The bone is **1** for
+ * an ordinary humanoid (character types 0..0x14); 2 and 9 are selected by
+ * flags this port does not model.
+ */
+const CAMERA_TRACK_BONE = 1;
+
+/**
+ * The lift `ActorRegisterCameraPoint` applies before the camera reads it.
+ *
+ * [diverges] `FUN_00409B70` takes the amount as a float argument — 4.0 for a
+ * class-0x30 zombie and **0 for a class-0x31 thrower** — and the port applies
+ * 4.0 to both, which is what `render/characters.ts` did before this moved. Two
+ * classes' camera aim rides on it, so making the split is a gameplay change
+ * and not a line to fold into a refactor.
+ */
+const CAMERA_TRACK_RISE = 4;
+
+const _bone = vec3();
+
+/**
+ * `ActorRegisterCameraPoint` — `FUN_00409B70`. Where the camera follows this
+ * actor.
+ *
+ * It transforms `obj+0x100` into view space for the shot test, registers the
+ * actor for both, and raises the height by its float argument. The port's half
+ * is the height and the registration: the world position of the bone is the
+ * skeleton's, and the skeleton is three.js's, so it comes across `GameHost`.
+ *
+ * This ran in `render/characters.ts` until step 21, writing `a.lookAt` from a
+ * renderer — which meant turning the Characters view toggle off froze the
+ * camera's idea of where everything was. A view switch is not allowed to
+ * change what the game thinks; that it could is the shape
+ * `no-actor-writes-in-render` exists to catch.
+ *
+ * A host with no pose for this actor leaves the point where it was, which is
+ * what a character with no skeleton in the scene should look like.
+ */
+export function ActorRegisterCameraPoint(obj: Actor, host: GameHost): void {
+  if (!host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone)) return;
+  obj.lookAt.x = _bone.x;
+  obj.lookAt.y = _bone.y + CAMERA_TRACK_RISE;
+  obj.lookAt.z = _bone.z;
+}
 
 /** `FUN_00403C00`'s numerator. Every call site in the engine passes 1. */
 const TURN_NUMERATOR = 1;

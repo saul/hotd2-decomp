@@ -11,7 +11,7 @@
  * the `game` phase:
  *
  * ```
- * script:  CameraSeat   -- CamAdvancePathFrame writes the block
+ * script:  CameraSeat   -- CamSeatPathFrame writes the block      (app/systems)
  * game:    CameraTake   -- the camera becomes thirty-two floats
  *          GameSystem   -- the hook eases the block's look-at
  * render:  CameraDraw   -- the block becomes the three.js camera
@@ -22,10 +22,18 @@
  *
  * Doing all three in one place is what the player used to do, and it is why
  * the aim could only ever be a frame stale or a frame early.
+ *
+ * **The seat is not in this file.** Seating the block is an engine decision —
+ * it evaluates a `cam/` curve and writes `g_camera_block_eye` — and a renderer
+ * that calls `CamAdvancePathFrame` is the port being driven from `render/`.
+ * The evaluation is `game/camera/curve.ts` and the frame is
+ * `CamSeatPathFrame`; the system that runs it is `app/systems.ts`, which is
+ * the composition root and the one layer allowed to hand the script's state to
+ * the port. What is left here is the rig — the pose scratch, the rails and the
+ * two chrome toggles — and the two systems that only read.
  */
-import type { System, Tick } from "../core/system";
+import type { System } from "../core/system";
 import type { RenderContext } from "./context";
-import { CamAdvancePathFrame, CamSetPathTarget } from "../game/camera/path";
 import { G } from "../game/globals";
 import { Vector3 } from "three";
 import { applyPose, cameraEyeY, type CameraPose } from "./campath";
@@ -57,36 +65,6 @@ export class CameraRig {
     roll: 0,
   };
 
-  /**
-   * The queued `cam_play` action: evaluate the path, write the camera block.
-   *
-   * `force` seats the block even though the shot's action has retired. The
-   * engine never needs that — it has no seek — but arriving at a deep link
-   * with an eased look-at of (0,0,0) points the camera at the world origin.
-   */
-  seat(ctx: RenderContext, force = false): void {
-    const w = ctx.walker;
-    if (!w || !this.scripted) return;
-    const cam = w.cam;
-    if (!cam) return;
-    const p = ctx.paths?.paths.get(cam.slot);
-    if (!p) return;
-    p.pose(cam.frame, w.rollEnabled, this.pose);
-    // The block holds the **raw** curve eye, as `CamEvalPath7` leaves it. The
-    // `path.y - 15` rule is a property of the draw (`g_camera_eye_y`), not of
-    // the block, so it is applied in the draw -- see the note on
-    // `APPLY_EYE_Y_RULE` in render/campath.ts for why it is off anyway.
-    // The path's own aim, which `SelectCameraLookAtTarget` falls back to.
-    CamSetPathTarget(this.pose.target);
-    // `CamAdvancePathFrame` runs only while the action is live. Once the shot
-    // reaches its end frame the action retires and the block is left where it
-    // is, for the camera hook to ease from -- which is the state the player
-    // spends every fight in.
-    if (force || !cam.done || !this.trackEnabled) {
-      CamAdvancePathFrame(this.pose.eye, this.pose.target);
-    }
-  }
-
   /** The draw: the block, after the hook has eased it. */
   draw(ctx: RenderContext): void {
     const w = ctx.walker;
@@ -99,15 +77,13 @@ export class CameraRig {
     // The orientation comes from the block's eye/target pair; only the eye's
     // height is adjusted, and only after. Doing it the other way round tilts
     // the shot.
+    // The block holds the **raw** curve eye, as `CamEvalPath7` leaves it. The
+    // `path.y - 15` rule is a property of the draw (`g_camera_eye_y`), not of
+    // the block, so it is applied here -- see the note on `APPLY_EYE_Y_RULE`
+    // in render/campath.ts for why it is off anyway.
     applyPose(ctx.camera, this.pose,
               cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY));
     this.rails?.setCameraPose(ctx.camera.position, this.pose.target);
-  }
-
-  /** Seat and draw in one go, for the paths that have no game tick between. */
-  sync(ctx: RenderContext, force = false): void {
-    this.seat(ctx, force);
-    this.draw(ctx);
   }
 
   /** `?slot=59&frame=170`: pose straight off a path, no script. */
@@ -123,45 +99,6 @@ export class CameraRig {
     this.rails?.highlight(slot, p.start, p.end);
     this.rails?.setCameraPose(camera.position, this.pose.target);
     return true;
-  }
-}
-
-/**
- * The first half, in the `script` phase: the shot writes the camera block
- * before the port's frame reads it.
- *
- * ## Why this refuses a frame that advances no game time
- *
- * Seating the block is the **first half** of a camera frame;
- * `CameraTrackEnemiesTick`, inside `GameSystem`, is the second, and it is the
- * half that eases the aim off the rail and onto whatever the fight wants. So
- * the two have to run together or not at all, and `GameSystem` already
- * refuses a tick with no time in it — this makes the same test, deliberately
- * spelled the same way.
- *
- * Without it the camera **flickered between two aims at the display's refresh
- * rate**, and only on a display faster than 60 Hz. `Player.frame` draws every
- * rAF but ticks at a fixed 60, so on a 120 Hz panel every other frame owes no
- * tick and takes the `tickStopped` path — which runs the whole tick order
- * with `Loop.idle`. This system seated the block back on the rail, `GameSystem`
- * returned early, and the draw put the *un-eased* aim on screen. One frame
- * eased, the next on the rail, sixty times a second: a stage-1 measurement put
- * it at 3.5 degrees each way with one enemy registered.
- *
- * Nothing else needed it. The seek, the stage load and the frame slider all
- * seat the block through `Player.syncCameraToWalker`, which calls
- * `CameraRig.sync` directly and never went through this system; and the draw
- * still runs every rendered frame, because placing the three.js camera from a
- * block that has not changed is idempotent and a resize needs it.
- */
-export class CameraSeatSystem implements System<RenderContext> {
-  readonly id = "camera.seat";
-  constructor(private readonly rig: CameraRig) {}
-
-  update(ctx: RenderContext, t: Tick): void {
-    if (!this.rig.driving) return;
-    if (t.frozen || t.dt <= 0) return;
-    this.rig.seat(ctx);
   }
 }
 
@@ -206,18 +143,21 @@ export class CameraDrawSystem implements System<RenderContext> {
   readonly id = "camera.draw";
   constructor(private readonly rig: CameraRig) {}
 
-  update(ctx: RenderContext, _t: Tick): void {
+  update(ctx: RenderContext): void {
     if (!this.rig.driving) return;
     this.rig.draw(ctx);
   }
 
   /**
-   * A load replaced the walker's camera command wholesale. `force`, because
-   * the restored shot's action may already have retired and the eased look-at
-   * that came back with it has nothing to ease *from* until the block is on
-   * the rail.
+   * A load replaced the walker's camera command wholesale.
+   *
+   * Only the draw. `CameraSeatSystem.resync` has already put the block back on
+   * the rail — it runs in the `script` phase, which `World.resync` reaches
+   * first — so by the time this runs there is something to draw. It used to
+   * seat the block itself, which is how a renderer came to be calling
+   * `CamAdvancePathFrame`.
    */
   resync(ctx: RenderContext): void {
-    this.rig.sync(ctx, true);
+    this.rig.draw(ctx);
   }
 }

@@ -105,6 +105,7 @@ import {
 } from "../src/game/class24";
 import {
   HumanoidCond, HumanoidOp, HumanoidTurn, ScriptedHumanoidUpdate,
+  g_class25_path_offsets,
   type HumanoidProgram,
 } from "../src/game/class25";
 
@@ -1519,14 +1520,14 @@ console.log("\nclass 0x25, the VM runs until a command blocks:");
   // first frame, because only a wait costs one.
   const { a, events } = humanoidScene([
     { op: HumanoidOp.SetPos, mode: 0, a: 0, b: 0, f0: 5, f1: 7 },
-    { op: HumanoidOp.SetHitMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.SetBonePropMode, mode: 2, a: 0, b: 0 },
     { op: HumanoidOp.TurnMode, mode: 1, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 30, b: 0 },
     { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
   ]);
   hFrame(a, events, rng);
   check("a run of setup commands all take effect in one frame",
-        a.pos.x === 5 && a.pos.z === 7 && a.hitMode === 2
+        a.pos.x === 5 && a.pos.z === 7 && a.bonePropMode === 2
         && a.turnMode === HumanoidTurn.FaceCamera && a.pc === 3,
         `pc ${a.pc}`);
 
@@ -1586,6 +1587,90 @@ console.log("\nclass 0x25, the removal trigger:");
   G.g_cam_path_frame = 900;
   hFrame(a, events, rng);
   check("and leaves when it does", a.dead);
+}
+
+console.log("\nclass 0x25, the two draw fields the VM writes:");
+{
+  const rng = new Rng(4);
+  // `op 14` picks the hand prop and mode 2 restarts the cel counter; `op 12`
+  // is a persistent bone toggle, not the one-shot effect it was read as.
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.SetBoneDecoration, mode: 1, a: 0, b: 0 },
+    { op: HumanoidOp.SetBonePropMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 4, b: 0 },
+    { op: HumanoidOp.SetBoneDecoration, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.SetBonePropMode, mode: 7, a: 0, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  a.bonePropFrame = 9;
+  hFrame(a, events, rng);
+  check("op 12 mode 1 sets the bone decoration and it stays set",
+        a.boneDecoration === 1);
+  check("op 14 mode 2 picks hand prop 2 and restarts the cel counter",
+        a.bonePropMode === 2 && a.bonePropFrame === 0);
+
+  for (let i = 0; i < 4; i++) hFrame(a, events, rng);
+  check("op 12 mode 0 clears it again", a.boneDecoration === 0);
+  check("and a mode op 14 does not know leaves the prop alone",
+        a.bonePropMode === 2, `mode ${a.bonePropMode}`);
+}
+
+console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
+{
+  const rng = new Rng(4);
+  // Face the camera, then end. `op -1` installs `ScriptedHumanoidIdle`
+  // (`FUN_00484D40`), which runs the removal test and the draw and nothing
+  // else -- no stall counter, no turn, no path follow, no `prevPos` capture.
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.TurnMode, mode: 1, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ]);
+  hFrame(a, events, rng);
+  check("the frame that runs op -1 still falls through the normal tail",
+        a.pc === -1 && a.holdFrames === 1 && a.turnMode === HumanoidTurn.FaceCamera,
+        `pc ${a.pc} hold ${a.holdFrames}`);
+
+  const yaw = a.yaw;
+  // Move it somewhere the FaceCamera turn would aim it differently.
+  a.pos.x = 500;
+  a.pos.z = -500;
+  hFrame(a, events, rng);
+  hFrame(a, events, rng);
+  check("and after that it stops turning and stops counting",
+        a.yaw === yaw && a.holdFrames === 1,
+        `yaw ${a.yaw} was ${yaw} hold ${a.holdFrames}`);
+
+  // The removal test is the one thing the idle routine does keep.
+  G.g_active_cam_path = 90;
+  G.g_cam_path_frame = 900;
+  hFrame(a, events, rng);
+  check("but the removal trigger still fires", a.dead);
+}
+
+console.log("\nclass 0x25, the object path's attachment offset:");
+{
+  const rng = new Rng(4);
+  // `op 11`'s `b` is an index into `g_class25_path_offsets` (0x00596B18), not
+  // a distance: record 1 is {4.5, 3.0, -1.5} with a half-turn of yaw.
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.FollowPath, mode: 1, a: 5, b: 1 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  const pathHost = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: 10, y: 0, z: 20 }),
+  };
+  ScriptedHumanoidUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: pathHost,
+                              events });
+  const r = g_class25_path_offsets[1];
+  check("op 11's b indexes the 24-byte offset table",
+        a.pathOffsetRecord === 1 && r.dx === 4.5 && r.dyaw === 0x8000);
+  check("and the record is added to the path's point, with its yaw delta",
+        Math.abs(a.pos.x - (10 + r.dx)) < 1e-6
+        && Math.abs(a.pos.y - (0 + r.dy)) < 1e-6
+        && Math.abs(a.pos.z - (20 + r.dz)) < 1e-6
+        && a.yaw === r.dyaw,
+        `pos ${a.pos.x},${a.pos.y},${a.pos.z} yaw ${a.yaw}`);
 }
 
 console.log("\nclass 0x25, it is not an enemy:");
@@ -1714,6 +1799,47 @@ console.log("\nclass 0x24, the slide:");
   const rest = a.pos.x;
   for (let i = 0; i < 200; i++) frame(a, events, rng);
   check("and stays stopped", a.pos.x === rest);
+}
+
+console.log("\nclass 0x24, the selector is +0x130C:");
+{
+  const rng = new Rng(2);
+  const { a, events } = setPieceScene(
+    { selector: SetPieceState.DropToGround }, rng);
+  check("the Init writes the selector to +0x130C and leaves +0x1310 alone",
+        a.selector === SetPieceState.DropToGround && a.state === 0,
+        `selector ${a.selector} state ${a.state}`);
+
+  // `+0x1310` is the combat classes' state word; class 0x24 never reads it,
+  // so writing it must not change which state routine runs.
+  a.state = SetPieceState.Slide;
+  frame(a, events, rng);
+  check("and the dispatch ignores +0x1310",
+        a.sub === 1 && a.vel.x === 0, `sub ${a.sub} vx ${a.vel.x}`);
+}
+
+console.log("\nclass 0x24, the hold-then-play count:");
+{
+  const rng = new Rng(2);
+  const HOLD = 4;
+  const { a, events } = setPieceScene(
+    { selector: SetPieceState.Idle, hold: HOLD, cuePath: 21, motion: 10 },
+    rng);
+  // The engine compares the counter *before* stepping it, so the swap lands
+  // on the frame after the hold has been counted out in full.
+  for (let i = 0; i < HOLD; i++) frame(a, events, rng);
+  check("the hold runs its full count before the motion swaps",
+        a.motion === 10 && a.holdFrames === HOLD,
+        `motion ${a.motion} hold ${a.holdFrames}`);
+  frame(a, events, rng);
+  check("and swaps on the next frame, tail+0x0E being a motion id here",
+        a.motion === 21 && a.playTicks === 0,
+        `motion ${a.motion}`);
+  frame(a, events, rng);
+  frame(a, events, rng);
+  check("then the entry point is SetPieceStateIdle and it never swaps again",
+        a.motion === 21 && a.holdFrames === HOLD + 1,
+        `hold ${a.holdFrames}`);
 }
 
 console.log("\nclass 0x24, the script-flag removal variant:");

@@ -389,30 +389,102 @@ export interface Actor {
    * the pose. Selectors 2 and 3 start frozen and a camera cue releases them.
    */
   frozen: number;           // +0x1324
+  /**
+   * `obj+0x130C` — **class 0x24's** state selector, and the index
+   * `SetPiecePropInit` (`FUN_00482CE0`) dispatches on.
+   *
+   * `[proved]`: `MOV dword ptr [EDI + 0x130c], EAX` (`89870c130000`) at
+   * `0x00482D04` with `EAX = MOVSX byte [tail+0x5]`, read back at
+   * `0x00482E0D` and jumped through as `JMP dword ptr [EAX*0x4 + 0x482ec8]`
+   * (`ff2485c82e4800`) at `0x00482E1C`. Class 0x24 **never touches
+   * `+0x1310`**, which is where this used to live in the port.
+   *
+   * Aliases `condition` (`+0x130C` for the combat classes) and class 0x10's
+   * descriptor-tail pointer at the same address: one address, three fields.
+   */
+  selector: number;         // +0x130C, aliases `condition`
   /** `obj+0x1330` — the set-piece slide's countdown, in frames. */
   slideTimer: number;       // +0x1330
   /**
    * `obj+0x1320` — frames a wait has been stalled for. `SetPieceStateHoldThenPlay`
    * counts its hold in it, and class 0x25's VM its frame conditions.
+   *
+   * Both count **up** and both are reset by the routine that reads them, but
+   * they are not the same field: class 0x24 tests it against `tail+0x0C` and
+   * class 0x25 against a command's `a`, and class 0x30 aliases the same
+   * address as `scriptMotion`, which is a motion id and not a counter at all.
    */
   holdFrames: number;       // +0x1320
-  /** `obj+0x1394` — class 0x25's command cursor, as an index. -1 has left. */
+  /**
+   * `obj+0x1394` — class 0x25's command cursor, as an index. -1 has left the
+   * VM, and `ScriptedHumanoidIdle` (`FUN_00484D40`) is what runs from then on.
+   *
+   * The engine keeps a **pointer** here — `MOV dword ptr [EDI + 0x1394], ESI`
+   * (`89b794130000`) at `0x00484A9C`, with `ESI` stepped by 8 or 16 bytes per
+   * command — so an index is the port's shape for the same cursor.
+   */
   pc: number;               // +0x1394
   /** `obj+0x132C` / `+0x1328` / `+0x1354` / `+0x1350` — the turn. */
   turnMode: number;         // +0x132C
   turnFrames: number;       // +0x1328
   turnStep: number;         // +0x1354
   turnTarget: number;       // +0x1350
-  /** `obj+0x1358` / `+0x135C` / `+0x1360` — riding an object path. */
+  /** `obj+0x1358` / `+0x135C` — riding an object path. */
   pathMode: number;         // +0x1358
   pathSlot: number;         // +0x135C
-  pathOffset: number;       // +0x1360
   /**
-   * `obj+0x1330` — class 0x25's `op 14`. **Not** a draw mode: the class's own
-   * draw routine never reads it and poses unconditionally. `[open]` — its only
-   * reader is the hit handler at `obj+0x12EC`, which is unread.
+   * `obj+0x1360` — an **index into a 24-byte record table**, not an offset
+   * along the path: `g_class25_path_offsets` — `0x00596B18`. Zero means none.
+   *
+   * `[proved]`: `MOV EAX,[EDI+0x1360]; CMP EAX,EBX; JZ; LEA EAX,[EAX+EAX*0x2];
+   * LEA EBP,[EAX*0x8 + 0x596b18]` (`8d0440`, `8d2cc5186b5900`) at
+   * `0x00484B77`–`0x00484B89`.
    */
-  hitMode: number;          // +0x1330
+  pathOffsetRecord: number; // +0x1360
+  /**
+   * `obj+0x1330` — class 0x25's `op 14`, and it **is** a draw mode: which of
+   * the character's hand props the per-bone hook draws.
+   *
+   * `[proved]`: the reader is `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`),
+   * the callback `ScriptedHumanoidInit` (`FUN_004840D0`) installs at
+   * `obj+0x12EC` — `MOV EAX, dword ptr [ESI + 0x1330]; CMP EAX,0x2; JNZ`
+   * (`8b8630130000`, `83f802`) at `0x0048535F`, and `CMP EAX,0x1` at
+   * `0x004854F9`. `ScriptedHumanoidDraw` (`FUN_00484FF0`) never reads it,
+   * which had been taken to mean nothing did.
+   */
+  bonePropMode: number;     // +0x1330
+  /**
+   * `obj+0x1334` — the frame counter `ScriptedHumanoidBoneDrawHook`
+   * (`FUN_00485260`) increments once per drawn frame, and indexes the
+   * 13-entry cel tables as `n % 13`: `g_class25_bone_prop_cels` —
+   * `0x00596C80` for `bonePropMode` 2, `g_class25_bone_prop_cels_alt` —
+   * `0x00596C90` for 1.
+   *
+   * `[proved]`: `MOV EAX,[ESI+0x1334]; INC EAX; MOV [ESI+0x1334],EAX`
+   * (`8b8634130000`, `40`, `898634130000`) at `0x0048549B`/`0x004854A4` and
+   * again at `0x004854DD`/`0x004854E9`. The port keeps it because the exe
+   * keeps it on the actor and the VM writes it (`op 14` mode 2 zeroes it);
+   * drawing the prop itself is the renderer's and is not ported.
+   *
+   * Aliases `backoffFrames` (class 0x30) and `arcTotal` (class 0x31).
+   */
+  bonePropFrame: number;    // +0x1334, aliases `backoffFrames`
+  /**
+   * `obj+0x1364` — class 0x25's `op 12`: a **persistent** toggle, not the
+   * one-shot effect the port used to call it. Mode 1 sets it and mode 0
+   * clears it; any other mode leaves it alone.
+   *
+   * `[proved]`: `MOV dword ptr [EDI + 0x1364], 0x1` (`c7876413000001000000`)
+   * at `0x004848BE` and `MOV dword ptr [EDI + 0x1364], EBX` (`899f64130000`,
+   * `EBX = 0`) at `0x004848DE`. Read every frame by
+   * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) at `0x00485287`:
+   * `MOV EAX,[ESI+0x1364]; TEST EAX,EAX; JZ; CMP word ptr [EBX + 0x14], 0x2;
+   * JNZ; CALL 0x00485BA0` — so it decorates **bone 2** for as long as it is
+   * set. `FUN_00485BA0` and `FUN_00485D70` are `[open]`.
+   *
+   * Aliases the class-0x30 / class-0x31 attack stance row.
+   */
+  boneDecoration: number;   // +0x1364, aliases `stance`
   /**
    * `obj+0x13C0` — where the actor was last frame. The VM's "am I closing on
    * this point" condition compares against it, which is the only reason it is
@@ -900,6 +972,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     rank: -1,
     queueRank: 0xe,
     frozen: 0,
+    selector: 0,
     slideTimer: 0,
     holdFrames: 0,
     pc: 0,
@@ -909,8 +982,10 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     turnTarget: 0,
     pathMode: 0,
     pathSlot: -1,
-    pathOffset: 0,
-    hitMode: 0,
+    pathOffsetRecord: 0,
+    bonePropMode: 0,
+    bonePropFrame: 0,
+    boneDecoration: 0,
     prevPos: vec3(),
     ringSet: 0,
     backoffFrames: 0,

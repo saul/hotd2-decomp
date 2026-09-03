@@ -46,6 +46,7 @@ import {
   ZombieStateCorpseBlink, ZombieStateCorpseSink, ZombieStateDeath6,
   ZombieStateDeathFallAndBounce,
 } from "./death";
+import { ZombieStateDeathKnockbackArc } from "./knockback";
 import { CountEnemyZombieIn } from "../combat/counts";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
@@ -99,6 +100,11 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     // The death chain. `updatesWhenDead` on the handler below is what lets
     // these run at all -- see `class30/death.ts` for the whole graph.
     case ZombieState.Death:       return ZombieStateDeath6(obj, rng);
+    // The other death, and the reason `ZombieRunState` is handed the host at
+    // all on a dead actor: state 9's landing point is a point in the camera's
+    // own space. See `class30/knockback.ts`.
+    case ZombieState.DeathKnockbackArc:
+      return ZombieStateDeathKnockbackArc(obj, dt, rng, host);
     case ZombieState.DeathFallAndBounce:
       return ZombieStateDeathFallAndBounce(obj, dt, rng);
     case ZombieState.CorpseSink:  return ZombieStateCorpseSink(obj, dt);

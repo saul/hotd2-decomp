@@ -256,6 +256,9 @@ const TYPE: CharacterType = {
     // `ChooseDeathMotion` gives it and 1016 (0x3F8) the clip
     // `ZombieStateDeathFallAndBounce` cuts to when the body lands.
     "1017": motion(40), "1016": motion(20),
+    // 987 (0x3DB) is the clip `ChooseDeathMotion` gives body conditions 5 and
+    // 6 — the two that die through state 9 rather than state 6.
+    "987": motion(24),
   },
 };
 
@@ -6212,10 +6215,9 @@ console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
   ZombieOnShot(z);
   check("...and a second shot does not restart it", z.sub === 2, `sub ${z.sub}`);
 
-  // The carried arm. The engine picks state 9 here; the port takes state 9's
-  // terminus instead -- see the `[diverges]` in `class30/on_shot.ts` -- so
-  // what is pinned is the *near-target latch*, which is state 9's own input
-  // and is `[proved]` at 0x00454006.
+  // The carried arm. What is pinned here is the *near-target latch*, which is
+  // state 9's own input and is `[proved]` at 0x00454006; where the arm leads
+  // is the next block's.
   const carried = ActorSpawn(0x3300, SpawnClass.Zombie, 1, "carried");
   carried.visible = true;
   carried.dead = true;
@@ -6243,6 +6245,150 @@ console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
   check("...and one further away than that does not",
         (far.flags2 & ZombieFlag2.ShotNearArcTarget) === 0,
         far.flags2.toString(16));
+}
+
+console.log("class 0x30 state 9: the body is thrown, not dropped:");
+{
+  // A camera at (0, 6, 0) looking down world +Z, in the engine's own view
+  // convention: **-Z in front**, +Y up, and `viewPoint` its exact inverse.
+  // `app/systems.ts` builds the real pair out of three.js's camera; this is
+  // the smallest thing that is consistent with itself, which is all state 9
+  // asks of the seam.
+  const CAM = vec3(0, 6, 0);
+  const camHost = {
+    ...NULL_HOST,
+    viewSpaceOf: (at: number, out: Vec3) => {
+      const a = ActorByAt(at);
+      if (!a) return false;
+      out.x = a.lookAt.x - CAM.x;
+      out.y = a.lookAt.y - CAM.y;
+      out.z = -(a.lookAt.z - CAM.z);
+      return true;
+    },
+    viewPoint: (x: number, y: number, z: number, out: Vec3) => {
+      out.x = CAM.x + x;
+      out.y = CAM.y + y;
+      out.z = CAM.z - z;
+    },
+  };
+
+  const shot = (condition: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(0x3600, SpawnClass.Zombie, 1, "knocked back",
+                         { condition });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.motion = 10;
+    z.pos = vec3(0, 0, 40);
+    z.lookAt = vec3(0, 4, 40);
+    return z;
+  };
+  const kill = (z: Actor) => {
+    z.hp = 0;
+    z.dead = true;
+    z.flags |= ActorFlag.Dead;
+    z.pendingHit = { bone: 1, result: 1 };
+  };
+
+  // 1. **The state.** `ZombieOnShot` (`FUN_00453EB0`) writes 9, not 6, for
+  //    body conditions 5 and 6 — 44 shipped spawns carry one of them.
+  {
+    const rng = new Rng(21);
+    const events = new Events();
+    const z = shot(5);
+    TryClaimAttackSlot(z, camHost);
+    kill(z);
+    GameUpdate(EYE, 1 / 60, camHost, rng, events);
+    check("body condition 5 dies through state 9, not state 6",
+          z.state === ZombieState.DeathKnockbackArc, `state ${z.state}`);
+    check("...and takes the same clip `ChooseDeathMotion` gives state 6",
+          z.motion === 0x3db, `motion ${z.motion}`);
+    // Sub 0 runs `ZombieReleasePermitAndUntrack` on the frame the state opens,
+    // exactly as state 6's does, and the present count waits for the corpse.
+    check("...giving the permit back and leaving `alive` on the same frame",
+          z.attackPermit === -1 && G.g_attack_permits.every((p) => p === -1)
+          && G.g_enemies_alive === 0, `alive ${G.g_enemies_alive}`);
+    check("...but staying *present* until the corpse state",
+          G.g_enemies_present === 1, `present ${G.g_enemies_present}`);
+  }
+
+  // 2. **The throw.** Sub 1 rides the shared arc record — `ActorArcVelocityY`
+  //    (`FUN_0044DDE0`) sets the velocity, `EnemyZombieUpdate` integrates it —
+  //    to a landing point built in the camera's own matrix. The body must end
+  //    up somewhere else.
+  {
+    const rng = new Rng(22);
+    const events = new Events();
+    const z = shot(5);
+    kill(z);
+    let far = 0;
+    for (let f = 0; f < 60; f++) {
+      GameUpdate(EYE, 1 / 60, camHost, rng, events);
+      far = Math.max(far, dist2d(z.pos, vec3(0, 0, 40)));
+      if (z.state !== ZombieState.DeathKnockbackArc) break;
+    }
+    // Condition 5's depth offset is -7.0 at scale 1.0, so the landing point is
+    // seven units further from the camera than the body's tracked point.
+    check("the arc carries the body away from where it stood", far > 5,
+          `moved ${far.toFixed(2)} units`);
+    check("...along the camera's own -Z, which is away from the viewer",
+          z.pos.z > 44, `z ${z.pos.z.toFixed(2)}`);
+    check("...and it is the shared arc record that carried it",
+          z.arcTotal >= 0 && Math.abs(z.arcTo.z - 47) < 2.5,
+          `arcTo.z ${z.arcTo.z.toFixed(2)}`);
+  }
+
+  // 3. **The terminus.** Same corpse, same order: `alive` at the state's own
+  //    opening, `present` at `ZombieEnterCorpseState`, then the pool.
+  {
+    const rng = new Rng(23);
+    const events = new Events();
+    const z = shot(6);
+    kill(z);
+    let sawCorpse = -1, presentAtCorpse = -1, sawArc = false, restedAt = 0;
+    for (let f = 0; f < 900; f++) {
+      GameUpdate(EYE, 1 / 60, camHost, rng, events);
+      if (z.state === ZombieState.DeathKnockbackArc) sawArc = true;
+      if (sawCorpse < 0 && (z.state === ZombieState.CorpseSink
+                         || z.state === ZombieState.CorpseBlink)) {
+        sawCorpse = f;
+        presentAtCorpse = G.g_enemies_present;
+        restedAt = dist2d(z.pos, vec3(0, 0, 40));
+      }
+    }
+    check("condition 6 reaches the corpse state through the arc",
+          sawArc && sawCorpse > 0,
+          `arc ${sawArc} state ${z.state} sub ${z.sub}`);
+    check("...and the corpse lies where it was thrown, not where it stood",
+          restedAt > 5, `${restedAt.toFixed(2)} units from the spot`);
+    check("...and `present` falls there, one clip after `alive`",
+          presentAtCorpse === 0, `present ${presentAtCorpse}`);
+    check("...and the corpse leaves the pool",
+          !G.g_object_list.some((o) => o.at === 0x3600),
+          `${G.g_object_list.length} left`);
+    check("...with both counters back at zero",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  // The control. A condition the arc does not claim still dies where it
+  // stands, which is what every one of the 44 used to do.
+  {
+    const rng = new Rng(24);
+    const events = new Events();
+    const z = shot(0);
+    kill(z);
+    let far = 0;
+    for (let f = 0; f < 60; f++) {
+      GameUpdate(EYE, 1 / 60, camHost, rng, events);
+      far = Math.max(far, dist2d(z.pos, vec3(0, 0, 40)));
+    }
+    check("an ordinary body still dies through state 6, where it stood",
+          far < 1, `state ${z.state}, moved ${far.toFixed(2)}`);
+  }
 }
 
 console.log("class 0x30, dying with a weapon still in hand:");

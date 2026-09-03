@@ -64,19 +64,14 @@ const STATE_UNREAD_0x34 = 0x34;
  * same reason — so what is left here is the half no shared routine can do,
  * which is choosing a state.
  *
- * [diverges] **State 9 is not ported.** `ZombieStateDeathKnockbackArc`
- * (`FUN_004550E0`) throws the body along a ballistic arc built in the camera's
- * own space, drops it under gravity, bounces it on the ground and on water,
- * and ends — after its own `ChooseDeathMotion` and its own
- * `ZombieReleasePermitAndUntrack` — in `ZombieEnterCorpseState`, exactly where
- * {@link ZombieState.Death} ends. So the port takes that terminus directly:
- * the same clip pick, the same teardown in the same order, the same corpse,
- * without the throw. The body dies where it stood instead of where it was
- * thrown. It is the smaller of two wrong answers — the alternative is a state
- * with no handler, which falls to `ZombieGiveUpAttack` and puts a dead actor
- * back into `ZombieStateWaitTurn` and then at the player. **Porting
- * `FUN_004550E0` is the fix and it is a job of its own.** It is **D2** in
- * `docs/REVIEW-2026-09-03.md`'s "Open decisions", awaiting a call.
+ * **State 9 is ported.** It used to carry a `[diverges]` here saying it was
+ * not: every actor this half of the routine chose state 9 for was sent to
+ * {@link ZombieState.Death} instead, on the argument that the two states share
+ * a terminus, so the 44 shipped spawns carrying body condition 5 or 6 died
+ * where they stood rather than where they were thrown. That was **D2** in
+ * `docs/REVIEW-2026-09-03.md`, and `class30/knockback.ts` now transcribes
+ * `FUN_004550E0` — the camera-space landing point, the arc, the water case and
+ * the bounce — so the write below is the engine's own.
  */
 export function ZombieOnShot(obj: Actor): void {
   const hit = obj.pendingHit;
@@ -110,13 +105,6 @@ export function ZombieOnShot(obj: Actor): void {
          < ARC_TARGET_NEAR) {
     obj.flags2 |= ZombieFlag2.ShotNearArcTarget;
   }
-  // **State 9 belongs here**: the engine writes `obj+0x1310 = 9` at
-  // 0x0045400F and the body is thrown along a ballistic arc before it becomes
-  // a corpse. `ZombieStateDeathKnockbackArc` (`FUN_004550E0`) is not ported,
-  // and its terminus is `ZombieEnterCorpseState` -- the same one state 6
-  // reaches -- so the port sends these actors through state 6 instead. They
-  // get the same clip pick, the same teardown in the same order and the same
-  // corpse, and die where they stood rather than where they were thrown.
-  // [diverges]
-  obj.state = ZombieState.Death;
+  // `MOV word [ESI+0x1310], 0x9` at 0x0045400F.
+  obj.state = ZombieState.DeathKnockbackArc;
 }

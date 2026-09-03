@@ -75,7 +75,8 @@ const STATE_UNREAD_0x34 = 0x34;
  * thrown. It is the smaller of two wrong answers — the alternative is a state
  * with no handler, which falls to `ZombieGiveUpAttack` and puts a dead actor
  * back into `ZombieStateWaitTurn` and then at the player. **Porting
- * `FUN_004550E0` is the fix and it is a job of its own.**
+ * `FUN_004550E0` is the fix and it is a job of its own.** It is **D2** in
+ * `docs/REVIEW-2026-09-03.md`'s "Open decisions", awaiting a call.
  */
 export function ZombieOnShot(obj: Actor): void {
   const hit = obj.pendingHit;

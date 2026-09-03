@@ -207,6 +207,14 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   // (`0fbf4708` then `39869c010000`) and only character type 0x18 takes the
   // `obj+0x1350` path (`CMP word ptr [ESI+0x1f4], 0x18` — `6683bef401000018`
   // at 0x0044FC83). `[proved]`
+  //
+  // **For character type 0x18 that is wrong by 23 frames.** The exe compares
+  // against the constant `0x19` = 25 that it has written to `obj+0x1350`; the
+  // bundle gives `zslman` a `release_frame` of 48, so the port throws late.
+  // Reading it correctly needs the stance-indexed throw-clip table at
+  // `0x0044FD1C` exported first, which is an exporter change with a gameplay
+  // change behind it — **D3** in `docs/REVIEW-2026-09-03.md`'s "Open
+  // decisions", awaiting a call.
   const throwCueFrame = hand.release_frame;
   if (obj.sub === ThrowSub.Winding && obj.action.ticks >= throwCueFrame) {
     obj.sub = ThrowSub.Thrown;

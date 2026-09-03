@@ -30,6 +30,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import { CountEnemyZombieJoin } from "../combat/counts";
 import { ActorByAt, G } from "../globals";
 import {
   ActorArcBegin, ActorArcStep, ArcPhase, InstallArcMotionScript,
@@ -315,8 +316,7 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: Actor, dt: number,
     // `obj+0x34 &= ~0x10000` — back into camera tracking, and into the two
     // counts that gate the script's own waits.
     obj.flags &= ~ActorFlag.NoCameraTrack;
-    G.g_enemies_present += 1;
-    G.g_enemies_alive += 1;
+    CountEnemyZombieJoin(obj);
     obj.holdFrames = t?.delay ?? 0;
     obj.sub = 2;
   }

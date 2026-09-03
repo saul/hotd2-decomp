@@ -52,7 +52,9 @@ import {
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount, UNCOUNTED_CHAR_TYPE,
+  UNCOUNTED_INITIAL_STATE,
 } from "../src/game/combat/counts";
+import { ActorDespawn } from "../src/game/despawn";
 import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
@@ -882,15 +884,15 @@ console.log("the camera eases back onto the rail, it does not cut:");
 
 console.log("save state:");
 {
-  const digest = (): string => JSON.stringify({
-    g: G.g_object_list.map((o) => [
-      o.at, o.state, o.sub, o.attackPermit, o.pos.x.toFixed(6),
-      o.pos.z.toFixed(6), o.yaw.toFixed(6), o.attack, o.zones,
-    ]),
-    lives: G.g_player_lives, invuln: G.g_player_invuln_frames,
-    permits: G.g_attack_permits, score: G.g_player_score,
-    look: G.g_camera_lookat_target, aim: G.g_camera_block_target,
-  });
+  // **The whole data segment, not a sample of it.**
+  //
+  // This used to fingerprint nine actor fields and six globals, which is a
+  // reasonable guess at what matters and therefore cannot catch what does not
+  // occur to you. `G` *is* the save state -- `GameSystem.save()` hands the
+  // world exactly this object -- so comparing anything less than all of it
+  // asserts something weaker than the contract. The staleness of `lookAt`, for
+  // one, was invisible to the old digest.
+  const digest = (): string => JSON.stringify(G);
 
   const rng = new Rng(11);
   const events = scene(3, rng);
@@ -918,6 +920,45 @@ console.log("save state:");
   run(300, rng, events);
   check("and identically after a round trip through JSON",
         digest() === after);
+
+  // **Saving and loading every fifty frames must change nothing at all.**
+  //
+  // One save and one load can round-trip cleanly and still lose something that
+  // only matters a few frames later -- a field restored but never read again,
+  // a derived value the load happens to leave correct because the very next
+  // tick recomputes it. Doing it repeatedly, across a fight, is what turns a
+  // "restores" assertion into a "the snapshot fully determines the future"
+  // one, which is the claim the architecture doc actually makes.
+  {
+    const rngA = new Rng(11);
+    const eventsA = scene(3, rngA);
+    run(600, rngA, eventsA);
+    const straight = digest();
+
+    const rngB = new Rng(11);
+    const eventsB = scene(3, rngB);
+    for (let i = 0; i < 12; i++) {
+      run(50, rngB, eventsB);
+      const s2 = JSON.parse(
+        JSON.stringify({ globals: G, rng: rngB.state })) as
+          { globals: Record<string, unknown>; rng: number };
+      Object.assign(G, s2.globals);
+      rngB.state = s2.rng;
+    }
+    check("600 frames with a save and load every 50 is 600 plain frames",
+          digest() === straight,
+          firstFieldThatDiffers(straight, digest()));
+  }
+}
+
+/** Which key of `G` two whole-segment digests part company on. */
+function firstFieldThatDiffers(a: string, b: string): string {
+  const ga = JSON.parse(a) as Record<string, unknown>;
+  const gb = JSON.parse(b) as Record<string, unknown>;
+  for (const k of Object.keys(ga)) {
+    if (JSON.stringify(ga[k]) !== JSON.stringify(gb[k])) return `at G.${k}`;
+  }
+  return "identical by key, different as a string";
 }
 
 // -- 6. determinism, which is what guards the rules above -------------------
@@ -2322,6 +2363,40 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
   check("...and the `_OFF` stopper fires on each of the 10 non-blinking frames",
         offs === 10, `${offs}`);
 
+}
+
+console.log("the counts an actor never joined:");
+{
+  // **An enemy the engine declines to count must not leave the count.**
+  //
+  // `CountEnemyZombieIn` skips two kinds -- character type 9, which has no
+  // update handler at all, and initial state 0x1F, which counts itself in
+  // later when its script flag comes up. The release paths are latched so that
+  // six routines can all call them and only the first one counts, but the
+  // latch said nothing about an actor that was never counted *in*. The engine
+  // never had to care: it has no sweep, and nothing reaches an uncounted actor
+  // with a release. The port's despawn sweep does, and it took both counters
+  // to **-1** -- so every later `wait_enemies_alive <= 0` opened immediately.
+  // A room that clears without killing anything is the same class of bug as
+  // one that never clears, and much harder to notice.
+  for (const [what, ct, initial] of [
+    ["initial state 0x1F", 1, UNCOUNTED_INITIAL_STATE],
+    ["character type 9", UNCOUNTED_CHAR_TYPE, 0],
+  ] as const) {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    const z = ActorSpawn(0x1000, SpawnClass.Zombie, ct, "zom",
+                         { initialState: initial });
+    check(`a zombie with ${what} is not in the counts`,
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
+    ActorDespawn(z);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, new Rng(1));
+    check(`...and retiring it does not take them below zero`,
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
+  }
 }
 
 console.log("class 0x31, the grab ends in the engine's one leave routine:");

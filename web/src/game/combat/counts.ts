@@ -135,8 +135,44 @@ export const UNCOUNTED_INITIAL_STATE = 0x1f;
  * find from either side.
  */
 export function CountEnemyZombieIn(obj: Actor): void {
-  if (obj.charType === UNCOUNTED_CHAR_TYPE) return;
-  if (obj.initialState === UNCOUNTED_INITIAL_STATE) return;
+  if (obj.charType === UNCOUNTED_CHAR_TYPE
+      || obj.initialState === UNCOUNTED_INITIAL_STATE) {
+    // **Latched as already gone, because it never arrived.**
+    //
+    // The latches exist so that six routines can all call the release and only
+    // the first one counts. They said nothing about an actor that was never
+    // counted *in*, and the engine never had to care: it has no sweep, so
+    // nothing reaches an uncounted actor with a release. The port does --
+    // `GameUpdate`'s despawn sweep is a declared backstop for the paths the
+    // port arrives at another way -- and it took both counters to **-1**,
+    // which opens every later `wait_enemies_alive <= 0` immediately. A room
+    // that clears without killing anything is the same class of bug as one
+    // that never clears, and harder to see.
+    //
+    // "Has already left the alive count" is true of an actor that was never in
+    // it, so this is the existing bit meaning the existing thing rather than a
+    // new field. {@link CountEnemyZombieJoin} is the one way back in.
+    obj.flags38 |= CountFlag.LeftAlive | CountFlag.LeftPresent;
+    return;
+  }
+  G.g_enemies_present += 1;
+  G.g_enemies_alive += 1;
+}
+
+/**
+ * Join the counts late, as `ZombieStateWaitScriptFlagThenEnter`
+ * (`FUN_00458CE0`) does when its script flag comes up.
+ *
+ * [port-only] The engine has no such routine: `FUN_00458CE0` increments both
+ * globals inline, because it has nothing to undo. The port has to clear the
+ * latches with them, since {@link CountEnemyZombieIn} set them when it
+ * declined to count this actor at spawn — otherwise the actor joins the counts
+ * and can never leave them, which hangs the next gate instead of opening it.
+ * Named rather than inlined so that the pairing with `CountEnemyZombieIn` is
+ * visible from both sides.
+ */
+export function CountEnemyZombieJoin(obj: Actor): void {
+  obj.flags38 &= ~(CountFlag.LeftAlive | CountFlag.LeftPresent);
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
 }

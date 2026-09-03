@@ -34,7 +34,6 @@ import { SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
 import { readState, writeState, type PlayerState } from "./urlstate";
-import { install as installHarness, type Harness } from "./harness";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { Bgm } from "../audio/bgm";
@@ -60,8 +59,7 @@ import type {
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
 import { buildProjection, type PlayerView } from "./projection/player";
-import { describeShutter, groupRows, hudRows, type HudInputs }
-  from "./projection/hud";
+import { groupRows, hudInputs, hudRows } from "./projection/hud";
 import type { RigSource } from "./projection/rigs";
 import type { DebugGroupName, StripRow } from "../ui/projection";
 import {
@@ -77,17 +75,8 @@ import type { Tick } from "../core/system";
 import type { RenderContext } from "../render/context";
 import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
-import { Loop, TICK } from "./loop";
-
-/**
- * What one driven frame is worth.
- *
- * Whole, and `wall` is `dt`: under the driven clock there is no wall time to
- * be had, so the feedback that rides it — the impact sprites — advances by the
- * same amount as everything else instead of by however long the browser took.
- */
-const DRIVEN_TICK: Tick =
-  { dt: TICK, frames: 1, wall: TICK, frozen: false };
+import { TICK } from "./loop";
+import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { GameSystem, ScriptSystem, drawSystem, syncPortGlobals }
   from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
@@ -101,14 +90,6 @@ import { ResetGameGlobals } from "../game/globals";
 import { RetireUnlistedActor } from "../game/director";
 import { SetGameTables } from "../game/tables";
 
-/**
- * How often the playing address may be written back to the URL.
- *
- * Safari throttles `history.replaceState` to about one call every 300 ms and
- * throws once a page exceeds it, so this stays comfortably the safe side.
- */
-const URL_SYNC_MS = 500;
-
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
 const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
   camera: [], scene: [], actors: [], props: [], collision: [], shooting: [],
@@ -119,7 +100,7 @@ const PREF_COMMANDS: ReadonlySet<string> = new Set([
   "toggle", "setLightMode", "setFogMode", "setPillarbox", "setSpeed",
 ]);
 
-export class Player implements PlayerView, PlayerCommands {
+export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
@@ -231,10 +212,17 @@ export class Player implements PlayerView, PlayerCommands {
   private readonly events = new Events();
   /** The one random source in the player, and part of every snapshot. */
   readonly rng = new Rng(1);
-  private readonly loop = new Loop();
+  /**
+   * Who asks for frames, and when. See `app/pacer.ts`.
+   *
+   * Handed `this`: the pacer drives the frame and calls back into the four
+   * hooks of `PacerHost` below, which is the whole of what it knows about a
+   * stage, an actor or a panel.
+   */
+  private readonly pacer = new Pacer(this);
   readonly script = new ScriptSystem();
   /** Approach, attack permits, and the look-at the camera tracks. */
-  private readonly game = new GameSystem();
+  readonly game = new GameSystem();
   readonly bullets = new ProjectileLayer();
   /** Debug overlays: unported classes, the permit holder, the awaited enemies. */
   readonly debug = new DebugBoxLayer();
@@ -244,17 +232,7 @@ export class Player implements PlayerView, PlayerCommands {
   readonly hudLayer: HudLayer;
 
   state: PlayerState = readState();
-  /**
-   * Who owns the game clock — `app/harness.ts`.
-   *
-   * Null unless `?drive=1`, and every driven branch below tests it, so the
-   * ordinary player has exactly the loop it always had.
-   */
-  private drive: Harness | null = null;
   playing = false;
-  /** The address last written to the URL, and when — see `syncUrlToWalker`. */
-  private urlSyncKey = "";
-  private urlSyncAt = 0;
   speed = 1;
   /** The camera's own state: the pose scratch, the rails, and the two toggles. */
   readonly cam = new CameraRig();
@@ -467,51 +445,15 @@ export class Player implements PlayerView, PlayerCommands {
   get tree(): TreeProjection | null { return this.treeProj; }
   get minimap(): MinimapGraph | null { return this.minimapGraphData; }
   get feed(): readonly FeedRow[] { return this.feedRows; }
-  /**
-   * Everything the debug sidebar reads, built where it is read.
-   *
-   * One call, two shapes: the Player strip and the per-subject groups. They
-   * share every input, so building them apart would mean reading the same
-   * dozen layers twice a frame and keeping two argument lists in step.
-   */
-  private get hudInputs(): HudInputs | null {
-    const w = this.walker;
-    if (!w || !this.scene3d) return null;
-    return {
-      mode: this.state.mode,
-      allRegions: this.scene3d.visibility === "all",
-      drawn: `${this.scene3d.visibleCount} models, `
-           + `${this.scene3d.visibleTriangles.toLocaleString()} tris`,
-      eye: this.camera.position,
-      target: this.cam.pose.target,
-      yawBams: this.ctx.view.yawBams,
-      describe: {
-        characters: this.chars.describe,
-        props: this.props.describe,
-        rigs: this.rigs.describe,
-        breakables: this.breakables.describe,
-        shooting: this.shooting.describe,
-        coli: this.coliDebug.describe,
-        wedged: this.stuckDebug.describe,
-        enemies: this.game.describe,
-        shutter: describeShutter(w, this.toggles.hud),
-        rain: this.rain.describe,
-        fog: this.sceneFog.describe,
-        light: this.lighting.describe,
-        sky: this.backdrop.describe,
-      },
-    };
-  }
-
   get hudRows(): readonly StripRow[] {
     const w = this.walker;
-    const x = this.hudInputs;
+    const x = hudInputs(this);
     return w && x ? hudRows(w, x) : [];
   }
 
   get groups(): Readonly<Record<DebugGroupName, readonly StripRow[]>> {
     const w = this.walker;
-    const x = this.hudInputs;
+    const x = hudInputs(this);
     return w && x ? groupRows(w, x) : EMPTY_GROUPS;
   }
   /** Every rig in the stage, for the rigs panel. See `render/rigs.ts`. */
@@ -535,21 +477,10 @@ export class Player implements PlayerView, PlayerCommands {
    * at each of the places that happen to know the text changed.
    */
   async start(): Promise<void> {
-    // Before the first `wallDelta`, or the first frame's delta is however
-    // long the page took to get here.
-    this.loop.start(performance.now());
-    // Before the first frame, because the first frame is the first one the
-    // driver may have to be given. `install` answers null without the flag.
-    this.drive = installHarness(this.state, this);
-    // **The tab going into the background stops the clock rather than banking
-    // it.** Chrome stops delivering rAF to a hidden tab, so the alternative is
-    // one enormous delta on the way back and a lurch of catch-up that never
-    // happened to the player. `Loop.resume` is what makes it not owed.
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) this.stopFrames();
-      else this.wake();
-    });
-    this.wake();
+    // The clock, the drive seam and the hidden-tab handling, in the order
+    // `app/pacer.ts` says they have to go in. It ends by asking for the first
+    // frame, so the loop is turning for the whole of the fetch below.
+    this.pacer.start(this.state);
     try {
       this.manifest = await loadManifest();
     } catch (err) {
@@ -904,59 +835,29 @@ export class Player implements PlayerView, PlayerCommands {
     this.cam.sync(this.ctx, force);
   }
 
+  // -- what a frame is made of -------------------------------------------
+  //
+  // The four hooks of `PacerHost`, in the order `app/pacer.ts` calls them.
+  // Between them they are everything a frame *does*; when it happens, and
+  // whether it happens at all, is the pacer's.
+
   /**
-   * One drawn frame: the ticks it owes, then the draw, then the publish.
+   * The frame has begun, before any tick it owes.
    *
-   * The pacing rule is `app/loop.ts` — whole 60 Hz ticks, never skipped, the
-   * catch-up spread rather than dropped. What is left here is the three
-   * things a frame does and the order they go in.
+   * `lifeFrame` is the scope panel's clock — frames since the page loaded,
+   * which never resets, because `ctx.frame` restarts on every stage load and
+   * so cannot order two scopes across a stage switch.
    *
-   * A frame may run **no** ticks: on a 144 Hz display most of them do not, and
-   * a paused player never does. It still draws and still publishes, because
-   * the crosshair, the impact sprites and the whole of the UI are answers to a
-   * click rather than to a tick.
+   * Free roam is here rather than in the tick because it rides wall time and
+   * is not game state: you are flying the camera around a scene, not watching
+   * it, and the ticks that follow have to see where you flew it to.
    */
-  private frame = (now: number) => {
-    this.rafId = null;
-    this.frameNow = now;
+  beginFrame(wall: number): void {
     this.lifeFrame += 1;
-    const wall = this.loop.wallDelta(now);
-
-    this.loop.freeze = !!this.state.freeze;
-    this.loop.speed = this.speed;
-    this.loop.running = !this.gameStopped && !!this.walker;
-
     if (!this.state.freeze && this.state.mode === "free") {
       this.freeRoam.update(wall, this.camera);
     }
-
-    // **One clock, and the harness is on it.** `?drive=1` replaces the wall
-    // as the thing the accumulator is fed from and changes nothing else: the
-    // ticks below are the same `stepOneFrame`, through the same rAF, the same
-    // draw and the same publish. A harness that stepped the world down a path
-    // of its own would be proving that path, and the player does not have it.
-    const ran = this.drive
-      ? this.drive.pump()
-      : this.loop.advance(wall, () => this.stepOneFrame()).frames;
-
-    // No tick ran, so the systems that ride wall time have not had their
-    // frame. The impact sprites are the reason this exists: they are feedback
-    // for a click and they must keep flying while the transport is stopped.
-    //
-    // Never under the drive flag. There is no wall time in a driven run —
-    // admitting real milliseconds here would put a browser-dependent number
-    // back into exactly the loop the flag exists to take it out of.
-    if (!this.drive && ran === 0 && this.walker) this.tickStopped(wall);
-
-    this.renderer.render(this.scene, this.camera);
-    // The one update path, and it is unconditional on purpose. A projection a
-    // frame, published only when it differs -- so the sidebar and the globals
-    // panel are live while the clock is stopped, and the loading overlay is
-    // live before there is a stage to tick.
-    this.publishUi();
-    // Last, so that what the frame did decides whether there is another one.
-    this.schedule();
-  };
+  }
 
   /**
    * The frame a stopped player still gets.
@@ -966,54 +867,49 @@ export class Player implements PlayerView, PlayerCommands {
    * the real delta. `world.update` is the one call for the whole tick order
    * whether or not the order has anything to do.
    */
-  private tickStopped(wall: number): void {
+  idleTick(t: Tick): void {
+    if (!this.walker) return;
     this.pushPortGlobals();
     this.cam.driving = !this.scrubbing;
     this.cam.scripted = this.state.mode !== "free";
-    this.world.update(this.ctx, this.loop.idle(wall));
+    this.world.update(this.ctx, t);
   }
 
-  // -- asking for frames --------------------------------------------------
-
-  /**
-   * The frame that has been asked for and not yet run, if there is one.
-   *
-   * `null` means the loop is asleep. It sleeps whenever nothing wants a frame
-   * — paused with no sprites out, or the tab in the background — and anything
-   * that changes what is on screen has to `wake` it. That is a real
-   * obligation, so the wakers are few and they are all chokepoints:
-   * `runCommand`, the keydown handler, `popstate`, `setLoading`, `fail`, a
-   * shot, the harness, and the tab becoming visible. `tools/pacing.mjs` is
-   * what proves the sleep and the waking, on the real page.
-   */
-  private rafId: number | null = null;
-  /** The rAF timestamp of the frame being run, for `syncUrlToWalker`. */
-  private frameNow = 0;
+  /** Draw, then publish. Every frame, whether or not it owed a tick. */
+  endFrame(): void {
+    this.renderer.render(this.scene, this.camera);
+    // The one update path, and it is unconditional on purpose. A projection a
+    // frame, published only when it differs -- so the sidebar and the globals
+    // panel are live while the clock is stopped, and the loading overlay is
+    // live before there is a stage to tick.
+    this.publishUi();
+  }
 
   /**
    * Ask for a frame.
    *
-   * Idempotent, and it resumes the clock rather than banking the time the
-   * loop spent asleep — a player that was paused for a minute must not
-   * simulate the minute when it starts again.
+   * The player's half of the chokepoint: everything that changes what is on
+   * screen calls this, and `app/pacer.ts` is what it means. The wakers are
+   * few and they are all chokepoints -- `runCommand`, the keydown handler,
+   * `popstate`, `setLoading`, `fail`, a shot, and the harness.
+   * `web/tools/pacing.mjs` is what proves the sleep and the waking, on the
+   * real page.
    */
   wake(): void {
-    if (this.rafId !== null || document.hidden) return;
-    this.loop.resume(performance.now());
-    this.rafId = requestAnimationFrame(this.frame);
+    this.pacer.wake();
   }
 
-  /** Keep going only while something wants it. Called at the end of a frame. */
-  private schedule(): void {
-    if (this.rafId !== null || document.hidden || !this.wantsFrame()) return;
-    this.rafId = requestAnimationFrame(this.frame);
-  }
-
-  /** Stop asking. The tab going into the background is the only caller. */
-  private stopFrames(): void {
-    if (this.rafId === null) return;
-    cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+  /**
+   * Is there game time for a frame to owe?
+   *
+   * `Loop.running` is set from this, and it is the difference between a
+   * transport that is stopped and one that is merely between ticks: a paused
+   * player, a free-roam session and a page with no stage on it accrue no debt
+   * at all rather than accruing one nobody wants paid. See `app/loop.ts`,
+   * "a debt worth dropping is never allowed to form".
+   */
+  get gameRunning(): boolean {
+    return !this.gameStopped && !!this.walker;
   }
 
   /**
@@ -1024,12 +920,11 @@ export class Player implements PlayerView, PlayerCommands {
    * *one* frame by definition. Step mode is not in that list on purpose — the
    * script stands still there but the port does not, which is what makes a
    * zombie loop its walk while you read the tree.
+   *
+   * The driven case is not here: under `?drive=1` the harness owns the clock,
+   * so it owns the question, and `Pacer` asks it instead.
    */
-  private wantsFrame(): boolean {
-    // The harness owns the clock, so it owns the question. Between two
-    // `advance` calls a driven run is genuinely idle, which is one fewer thing
-    // that can happen while a driver is dispatching a click.
-    if (this.drive) return this.drive.wants;
+  wantsFrame(): boolean {
     if (this.loading) return true;
     if (this.state.freeze) return false;
     if (this.state.mode === "free") return true;
@@ -1107,32 +1002,18 @@ export class Player implements PlayerView, PlayerCommands {
         if (!this.branchHover) w.tickBranchCountdown(TICK);
       } else if (!w.finished) {
         w.tick(TICK);
-        // Driven runs count their own milliseconds; an interactive one uses
-        // the rAF timestamp. Either way this is a throttle on writing to the
-        // URL bar and nothing reads it back as game time.
-        this.syncUrlToWalker(this.drive ? this.drivenMs : this.frameNow);
+        this.syncUrlToWalker();
       }
     }
     this.pushPortGlobals();
     this.cam.driving = !this.scrubbing;
     this.cam.scripted = this.state.mode !== "free";
-    this.world.update(this.ctx, this.gameStopped ? this.loop.idle(TICK)
-                                                 : DRIVEN_TICK);
+    this.world.update(this.ctx,
+                      this.gameStopped ? STOPPED_TICK : DRIVEN_TICK);
     // A finished stage is the one thing that stops the accumulator mid-drain:
     // the ticks it would have run are not owed, because there is nothing left
     // to run them.
     return !w.finished;
-  }
-
-  /**
-   * Wall time, as the driven clock reckons it.
-   *
-   * Only `syncUrlToWalker`'s throttle reads it, and the URL is not game state
-   * — but a driven run that read `performance.now()` for anything at all would
-   * have a second clock again, and the whole point is that it does not.
-   */
-  private get drivenMs(): number {
-    return (this.drive?.driven ?? 0) * (TICK * 1000);
   }
 
   /**
@@ -1327,15 +1208,14 @@ export class Player implements PlayerView, PlayerCommands {
    * button with one entry per instruction, and throttled because Safari
    * rate-limits the history API to roughly one call every 300 ms.
    */
-  private syncUrlToWalker(nowMs: number): void {
+  private syncUrlToWalker(): void {
     const w = this.walker;
     if (!w || this.state.mode === "free" || this.state.slot !== undefined) {
       return;
     }
-    const key = `${w.block}/${w.step}/${w.opIndex}`;
-    if (key === this.urlSyncKey || nowMs - this.urlSyncAt < URL_SYNC_MS) return;
-    this.urlSyncKey = key;
-    this.urlSyncAt = nowMs;
+    // *What* goes in the URL is here; *how often* is `Pacer.mayWriteUrl`,
+    // which owns the throttle and the clock it is measured against.
+    if (!this.pacer.mayWriteUrl(`${w.block}/${w.step}/${w.opIndex}`)) return;
     this.state.block = w.block;
     this.state.step = w.step;
     this.state.op = w.opIndex;

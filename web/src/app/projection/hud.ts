@@ -52,6 +52,82 @@ export function describeShutter(
 
 export interface XYZ { x: number; y: number; z: number }
 
+/** Anything with a one-line readout. Every render layer has one. */
+interface Describes { readonly describe: string }
+
+/**
+ * What {@link hudInputs} reads off the player.
+ *
+ * Structural and named for the members `Player` already has, so it is a third
+ * declared surface beside `PlayerView` and `PlayerCommands` rather than a
+ * second argument list to keep in step. It was a private getter in `main.ts`,
+ * where the shape of what the sidebar reads sat thirty lines from the code
+ * that reads it and the composition root was formatting `tris` counts.
+ */
+export interface HudSource {
+  readonly walker: Walker | null;
+  readonly scene3d: {
+    readonly visibility: string;
+    readonly visibleCount: number;
+    readonly visibleTriangles: number;
+  } | null;
+  readonly state: { readonly mode: string };
+  readonly toggles: { readonly hud: boolean };
+  readonly camera: { readonly position: XYZ };
+  /** The camera rig's pose scratch — where the block is aimed. */
+  readonly cam: { readonly pose: { readonly target: XYZ } };
+  readonly ctx: { readonly view: { readonly yawBams: number } };
+  readonly chars: Describes;
+  readonly props: Describes;
+  readonly rigs: Describes;
+  readonly breakables: Describes;
+  readonly shooting: Describes;
+  readonly coliDebug: Describes;
+  readonly stuckDebug: Describes;
+  /** `app/systems.ts`'s `GameSystem`: permits, tracking, live enemies. */
+  readonly game: Describes;
+  readonly rain: Describes;
+  readonly sceneFog: Describes;
+  readonly lighting: Describes;
+  readonly backdrop: Describes;
+}
+
+/**
+ * Everything the debug sidebar reads, built where it is read.
+ *
+ * One call, two shapes: the Player strip and the per-subject groups. They
+ * share every input, so building them apart would mean reading the same dozen
+ * layers twice a frame and keeping two argument lists in step.
+ */
+export function hudInputs(p: HudSource): HudInputs | null {
+  const w = p.walker;
+  if (!w || !p.scene3d) return null;
+  return {
+    mode: p.state.mode,
+    allRegions: p.scene3d.visibility === "all",
+    drawn: `${p.scene3d.visibleCount} models, `
+         + `${p.scene3d.visibleTriangles.toLocaleString()} tris`,
+    eye: p.camera.position,
+    target: p.cam.pose.target,
+    yawBams: p.ctx.view.yawBams,
+    describe: {
+      characters: p.chars.describe,
+      props: p.props.describe,
+      rigs: p.rigs.describe,
+      breakables: p.breakables.describe,
+      shooting: p.shooting.describe,
+      coli: p.coliDebug.describe,
+      wedged: p.stuckDebug.describe,
+      enemies: p.game.describe,
+      shutter: describeShutter(w, p.toggles.hud),
+      rain: p.rain.describe,
+      fog: p.sceneFog.describe,
+      light: p.lighting.describe,
+      sky: p.backdrop.describe,
+    },
+  };
+}
+
 /** What the strip and the groups need that is not the walker's. */
 export interface HudInputs {
   mode: string;

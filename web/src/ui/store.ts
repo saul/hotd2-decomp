@@ -35,7 +35,7 @@ import type { Dispatch, UiCommand } from "./commands";
  * instance in the stage — 335 of them in stage 2. Everything else in
  * the projection is a handful of fields and is always built.
  */
-export type UiSlice = "wait" | "actors" | "globals" | "rigs";
+export type UiSlice = "wait" | "actors" | "globals" | "rigs" | "scopes";
 
 export class UiStore {
   private current: UiProjection | null = null;

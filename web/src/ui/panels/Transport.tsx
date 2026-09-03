@@ -79,9 +79,13 @@ export function Transport() {
                onChange={(e) => dispatch({ kind: "scrubFrame",
                                            frame: Number(e.target.value),
                                            done: false })}
-               // `change` fires when the drag ends; `input` fires throughout.
-               onMouseUp={() => dispatch({ kind: "scrubFrame",
-                                           frame: t.camFrame, done: true })}
+               // `pointerup`, not `mouseup`: a range input is dragged with a
+               // finger or a pen as readily as with a mouse, and those emit no
+               // mouse event -- so a touch scrub never sent `done` and the
+               // camera stayed off the script until the next mouse drag ended
+               // it. Pointer events cover all three devices.
+               onPointerUp={() => dispatch({ kind: "scrubFrame",
+                                             frame: t.camFrame, done: true })}
                onKeyUp={() => dispatch({ kind: "scrubFrame",
                                          frame: t.camFrame, done: true })} />
       </label>

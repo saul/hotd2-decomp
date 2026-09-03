@@ -102,7 +102,7 @@ export function Sidebar() {
         <Inspector />
       </Panel>
 
-      <Panel id="scope-panel" title="Scopes" sub="lifetimes"
+      <Panel id="scope-panel" title="Scopes" slice="scopes" sub="lifetimes"
              subTitle={"The disposal tree. Every scope shows the frame it was "
                + "opened at: a child of `stage` whose frame predates the "
                + "current stage load survived a teardown, and nothing else in "

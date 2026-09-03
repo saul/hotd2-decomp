@@ -38,6 +38,7 @@ const { Backdrop } = await import("../src/render/backdrop");
 const { Rain } = await import("../src/render/rain");
 const { Scope } = await import("../src/core/scope");
 const { ownResources, subtreeResources } = await import("../src/render/scope3d");
+const { isTyping } = await import("../src/render/freeroam");
 const { CanvasTexture, Group, Mesh, MeshBasicMaterial, PlaneGeometry, Scene } =
   await import("three");
 
@@ -208,6 +209,25 @@ console.log("\nwhat a subtree is holding");
   scope.dispose();
   check("and a scope that owns the subtree frees the texture exactly once",
         freed === 1, `${freed} dispose events`);
+}
+
+console.log("\nwhose keystroke is it");
+
+{
+  // The page's shortcuts are suppressed while a control has focus. `BUTTON`
+  // was missing, and buttons are the one focusable thing the browser
+  // **activates on Space** -- so Space with the play button focused ran the
+  // shortcut and clicked the button, and playback toggled twice, which reads
+  // as the key doing nothing.
+  const el = (tagName: string, contentEditable = false) =>
+    ({ tagName, isContentEditable: contentEditable }) as unknown as EventTarget;
+
+  for (const tag of ["INPUT", "TEXTAREA", "SELECT", "BUTTON"]) {
+    check(`${tag} keeps its own keys`, isTyping(el(tag)));
+  }
+  check("a contenteditable does too", isTyping(el("DIV", true)));
+  check("and an ordinary element does not", !isTyping(el("DIV")));
+  check("nor does a keystroke with no target", !isTyping(null));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

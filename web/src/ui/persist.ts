@@ -9,23 +9,53 @@
  *
  * `localStorage`, wrapped: a browser set to block site data throws on the
  * accessor rather than returning null, and a layout preference is not worth a
- * blank page.
+ * blank page. One key per preference — see `PREFIX`.
  */
 import { useCallback, useState } from "react";
 
-const KEY = "hod2.ui";
+/**
+ * One `localStorage` entry per preference.
+ *
+ * It was one entry holding an object, read-modified-written on every change.
+ * Two tabs open, or two panels folded in the same tick, and the second write
+ * was built on a snapshot taken before the first — so the first was silently
+ * undone. A key per name has no read-modify-write in it at all, which is the
+ * whole fix: `setItem` on distinct keys cannot lose anything.
+ */
+const PREFIX = "hod2.ui.";
 
-function readAll(): Record<string, unknown> {
+/**
+ * The single blob that used to hold all of them, still read as a fallback.
+ *
+ * A viewer with folds saved under the old scheme keeps them until the first
+ * time each one moves. Nothing writes here any more, so it drains rather than
+ * needing a migration pass.
+ */
+const LEGACY_KEY = "hod2.ui";
+
+/**
+ * The stored value for `name`, or `undefined` if there is not one.
+ *
+ * Wrapped, because a browser set to block site data throws on the accessor
+ * rather than returning null, and a layout preference is not worth a blank
+ * page. Exported for `test:ui`, which is where the last-writer-wins case is
+ * pinned.
+ */
+export function readPersisted(name: string): unknown {
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "{}") as Record<string, unknown>;
+    const raw = localStorage.getItem(PREFIX + name);
+    if (raw !== null) return JSON.parse(raw) as unknown;
+    const legacy = localStorage.getItem(LEGACY_KEY) ?? "{}";
+    const all = JSON.parse(legacy) as Record<string, unknown>;
+    return name in all ? all[name] : undefined;
   } catch {
-    return {};                    // first run, private window, or blocked
+    return undefined;             // first run, private window, or blocked
   }
 }
 
-function writeOne(name: string, value: unknown): void {
+export function writePersisted(name: string, value: unknown): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ ...readAll(), [name]: value }));
+    localStorage.setItem(PREFIX + name, JSON.stringify(value));
   } catch { /* ignore */ }
 }
 
@@ -38,12 +68,12 @@ function writeOne(name: string, value: unknown): void {
  */
 export function usePersisted<T>(name: string, initial: T): [T, (v: T) => void] {
   const [value, setValue] = useState<T>(() => {
-    const all = readAll();
-    return name in all ? all[name] as T : initial;
+    const stored = readPersisted(name);
+    return stored === undefined ? initial : stored as T;
   });
   const set = useCallback((next: T) => {
     setValue(next);
-    writeOne(name, next);
+    writePersisted(name, next);
   }, [name]);
   return [value, set];
 }

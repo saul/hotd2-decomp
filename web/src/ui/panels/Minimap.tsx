@@ -141,7 +141,10 @@ export function Minimap() {
                 const d = (n.x - x) ** 2 + (n.y - y) ** 2;
                 if (d < bestD) { bestD = d; best = n.index; }
               }
-              if (best >= 0) dispatch({ kind: "seek", block: best, step: 0, op: 0 });
+              // Step 1, not 0. Step 0 is the checkpoint step, which ordinary
+              // play never enters -- seeking there put the walker somewhere
+              // the run itself could not reach.
+              if (best >= 0) dispatch({ kind: "seek", block: best, step: 1, op: 0 });
             }} />
   );
 }

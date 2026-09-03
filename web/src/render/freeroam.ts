@@ -123,10 +123,24 @@ export class FreeRoam {
   };
 }
 
+/**
+ * Is this keystroke the page's, or the focused control's?
+ *
+ * `BUTTON` is in the list for a reason that is not obvious from the name: the
+ * browser activates a focused button on **Space**, and the transport's play
+ * button dispatches `pause`/`play` when it is activated. So Space with the
+ * play button focused ran the shortcut *and* clicked the button, and playback
+ * toggled twice — which reads as the key doing nothing at all.
+ *
+ * `web/tools/shot.mjs` blurs the active element before it sends any key, and
+ * that workaround is the evidence: it was written because the shortcut did
+ * not work after a click. It stays, because blurring before a scripted
+ * keystroke is right whatever this function says.
+ */
 export function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
-    el.isContentEditable;
+    tag === "BUTTON" || el.isContentEditable;
 }

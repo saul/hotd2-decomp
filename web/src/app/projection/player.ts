@@ -133,7 +133,12 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     groups: v.groups,
     skip: v.skip,
     branch: v.branch,
-    scopes: v.appScope.snapshot(),
+    // The last ungated expensive slice. `snapshot()` walks the whole disposal
+    // tree and allocates a plain object per scope, once a frame, whether or
+    // not anything is showing it -- and the tree it walks grows with every
+    // layer that starts owning its resources properly, so the cost was going
+    // up as the rest of this review's work went in.
+    scopes: v.wants("scopes") ? v.appScope.snapshot() : null,
     scopeContext: { frame: ctx.frame, stageLoadedAt: v.stageLoadedAt },
     hasSaved: v.hasSaved,
   });

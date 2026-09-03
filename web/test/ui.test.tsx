@@ -47,6 +47,7 @@ import { ErrorBoundary } from "../src/ui/ErrorBoundary";
 import { UiStore } from "../src/ui/store";
 import { Transport } from "../src/ui/panels/Transport";
 import { TOGGLE_DEFAULTS } from "../src/ui/panels/Toggles";
+import { readPersisted, writePersisted } from "../src/ui/persist";
 import type { UiProjection } from "../src/ui/projection";
 
 let failures = 0;
@@ -477,6 +478,57 @@ console.log("\nEvery debug group has a panel:\n");
     const n = [...src.matchAll(new RegExp(`<DebugGroup group="${g}"`, "g"))].length;
     check(`${g} is rendered by exactly one panel`, n === 1, `found ${n}`);
   }
+}
+
+// Every preference gets its own `localStorage` key, and the reason is a
+// property a round-trip test would miss: the old scheme read one blob, spread
+// it, and wrote it back, so a write from *another tab* between the read and
+// the write was undone. What makes that impossible is that a write touches
+// exactly one key and reads none -- which is what is asserted here, by
+// watching the stub rather than by reading a value back.
+console.log("\nOne key per preference:\n");
+{
+  const writes: [string, string][] = [];
+  const store = new Map<string, string>();
+  (globalThis as unknown as { localStorage: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => { writes.push([k, v]); store.set(k, v); },
+  };
+
+  writePersisted("panel-a", true);
+  writePersisted("panel-b", false);
+  check("a write touches one key, named for the preference",
+        writes.length === 2 && writes[0][0] === "hod2.ui.panel-a"
+        && writes[1][0] === "hod2.ui.panel-b",
+        writes.map(([k]) => k).join(", "));
+  check("...and no key is written twice, so no write can undo another",
+        new Set(writes.map(([k]) => k)).size === writes.length);
+  check("what went in comes back",
+        readPersisted("panel-a") === true
+        && readPersisted("panel-b") === false);
+  check("and an unset one is undefined, not a default guessed here",
+        readPersisted("panel-c") === undefined);
+
+  // Folds saved under the single blob keep working until each one next moves.
+  store.set("hod2.ui", JSON.stringify({ "panel-d": true }));
+  check("the old single blob is still read as a fallback",
+        readPersisted("panel-d") === true);
+
+  // A browser set to block site data throws on the accessor. A layout
+  // preference is not worth a blank page.
+  (globalThis as unknown as { localStorage: unknown }).localStorage = {
+    getItem: () => { throw new Error("blocked"); },
+    setItem: () => { throw new Error("blocked"); },
+  };
+  let threw = false;
+  try {
+    writePersisted("panel-a", true);
+    check("a blocked store reads as unset rather than throwing",
+          readPersisted("panel-a") === undefined);
+  } catch {
+    threw = true;
+  }
+  check("...and neither call escapes", !threw);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

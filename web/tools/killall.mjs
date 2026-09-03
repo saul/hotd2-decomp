@@ -157,17 +157,46 @@ console.log(permitOwners());
 const n = ActorKillAll(0, rng);
 console.log(`\nActorKillAll -> ${n.enemies} enemies, ${n.civilians} civilians`);
 
-// Class 0x31's death is four states and it retires the counts from inside
-// them, not from the sweep -- so one frame proves nothing. Run the chain out.
+// Both enemy classes die through a **chain of states** and retire the counts
+// from inside it, not from the sweep -- so one frame proves nothing. Run the
+// chain out, and record every state each actor passes through: a body that
+// never reaches its corpse state, and one that reaches it and never leaves,
+// look identical in the counters and are different bugs.
 const after = 900;
+const trail = new Map();   // at -> ["6/0@+1", ...]
+const gone = new Map();    // at -> the frame it left g_object_list
+function trace(frame) {
+  for (const o of G.g_object_list) {
+    if (!ActorIsEnemy(o.cls)) continue;
+    const seen = trail.get(o.at) ?? [];
+    const now = `${o.state}/${o.sub}`;
+    if (!seen.length || !seen[seen.length - 1].startsWith(`${now}@`)) {
+      seen.push(`${now}@+${frame}f`);
+    }
+    trail.set(o.at, seen);
+  }
+  for (const at of trail.keys()) {
+    if (gone.has(at)) continue;
+    if (!G.g_object_list.some((o) => o.at === at)) gone.set(at, frame);
+  }
+}
+trace(0);
 for (let i = 0; i < after; i++) {
   walker.tick(1 / 60);
   GameUpdate(eye, 1 / 60, host, rng, events);
+  trace(i + 1);
   if (i === 0 || i === 59 || i === 299 || i === after - 1) {
     console.log(`  +${i + 1}f: ${row()}`
       + ` | alive=${G.g_enemies_alive} present=${G.g_enemies_present}`
       + ` states=[${G.g_object_list.map((o) => `${o.cls.toString(16)}:${o.state}/${o.sub}`).join(" ")}]`);
   }
+}
+
+console.log("\nthe death chain, state/sub per enemy:");
+for (const [at, seen] of trail) {
+  const left = gone.has(at) ? `left the pool at +${gone.get(at)}f`
+                            : "**still in the pool**";
+  console.log(`  0x${at.toString(16)}: ${seen.join(" -> ")}  (${left})`);
 }
 
 console.log(`after ${after} frames:`, row());

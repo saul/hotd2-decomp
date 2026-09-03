@@ -492,9 +492,16 @@ export enum ZombieFlag2 {
    * `004547d4 f6c402`, `004547e0 f7c600000050`).
    */
   HitReactionPending = 0x200,
-  /** Bit `0x100` — the other half of that gate. `[open]`: nothing found raises
-   *  it; `ActorSnapToGroundHeight` (0x00454B3B) reads it and
-   *  `FUN_00454F20`/`FUN_00454FD0` clear it with `AND EDX, 0xdffffdff`. */
+  /**
+   * Bit `0x100` — the other half of that gate. `[open]`: nothing found raises
+   * it, and `ActorSnapToGroundHeight` (0x00454B3B) is the one reader.
+   *
+   * This used to say `ZombieStateCorpseSink` (`FUN_00454F20`) and
+   * `ZombieStateCorpseBlink` (`FUN_00454FD0`) clear it with
+   * `AND EDX, 0xdffffdff`. **They do not**: `0xdffffdff` has bit 8 set, so
+   * that mask clears `0x20000000` and `0x200` and leaves this one alone. No
+   * writer of bit 0x100 has been found at all.
+   */
   HitReactionAlt = 0x100,
   /**
    * Bit `0x10000000` — this actor was spawned in the air.

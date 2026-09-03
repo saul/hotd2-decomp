@@ -39,9 +39,14 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // clearing it**: an actor left with it on is a statue.
   if (obj.flags & ActorFlag.PoseFrozen) return;
   if (obj.death) {
-    // The death clip plays once and **holds its last frame**: `ZombieStateDeath6`
-    // waits for it to finish and hands the body to a routine that is not read,
-    // so the corpse stays put rather than doing something invented.
+    // The death clip plays once and **holds its last frame**, which is what
+    // `ZombieStateDeath6` (`FUN_00454D20`) waits for: it leaves at
+    // `g_motion_play_length - 1` and hands the body to `ZombieEnterCorpseState`
+    // (`FUN_00456740`).
+    //
+    // **Classes 0x30, 0x31 and 0x10 no longer arrive here.** All three are
+    // `updatesWhenDead` and run their own death states over the base track, so
+    // this is the shared clip for the classes that have no such machine.
     obj.death.ticks += SecondsToTicks(dt);
     return;
   }

@@ -125,28 +125,36 @@ export function ThrowerTryClaimAttackSlot(obj: Actor,
  * `ReleaseAttackSlot` — `FUN_00456520`, and `ThrowerReleaseAttackPermit`
  * (`FUN_0044CFB0`) is the same function with the other bit.
  *
+ * Fifteen instructions, and this is all of them:
+ *
+ * ```
+ * 00456526  MOV  AL, byte [ECX + 0x121]        ; 8a8121010000
+ * 0045652c  CMP  AL, 0xff                      ; 3cff
+ * 00456533  MOV  [EAX*0x4 + 0x9a2ba0], EDX     ; 891485a02b9a00   g_attack_permits
+ * 0045653a  MOV  byte [ECX + 0x121], 0xff      ; c68121010000ff
+ * 00456547  TEST EAX, 0x20000                  ; a900000200       obj+0x136C
+ * 0045654e  AND  EAX, 0xfffdffff               ; 25fffffdff
+ * 00456559  MOV  [0x009a34f0], EDX             ; 8915f0349a00     g_attack_committed
+ * ```
+ *
+ * **It never touches `obj+0x34`.** The permit is one thing and camera tracking
+ * is another, and the routine that joins them is the *caller* —
+ * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) for class 0x30 — where the
+ * `NoCameraTrack` raise travels together with the `g_enemy_slots` clear and
+ * both are guarded by {@link ActorFlag.KeepCameraWhenLast}. This used to raise
+ * the bit here, unconditionally, which defeated that guard on every release
+ * path in both ported enemy classes; it is **D1** of
+ * `docs/REVIEW-2026-09-03.md`, and the decision was to match the engine.
+ *
  * Releasing an off-screen permit is the **only** thing that lifts
- * `g_attack_committed`, so forgetting it here would stall every enemy in the
- * scene rather than just this one.
+ * `g_attack_committed`, so forgetting *that* here would stall every enemy in
+ * the scene rather than just this one.
  */
 export function ReleaseAttackSlot(obj: Actor,
                                   offScreenBit: number =
                                     ZombieFlag2.OffScreenPermit): void {
   if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
   obj.attackPermit = -1;
-  // **`FUN_00456520` does not do this, and the engine guards it.** `[proved]`:
-  // that routine frees the slot, writes `0xFF` back to `obj+0x121`, and lifts
-  // the off-screen latch — it never touches `obj+0x34`. The bit is raised by
-  // the *caller*, `ZombieReleasePermitAndUntrack` (`FUN_004565A0`), under
-  // `if (!(obj+0x34 & 0x800000) || g_enemies_alive != 1)`, together with the
-  // `g_enemy_slots` clear that travels with it — so the **last** remaining
-  // enemy of that kind keeps camera tracking and keeps its slot.
-  //
-  // Raising it unconditionally here defeats that guard on every release path
-  // in both ported enemy classes. Left as it is because moving it changes what
-  // the camera follows in the last moments of a fight: it is **D1** in
-  // `docs/REVIEW-2026-09-03.md`'s "Open decisions", awaiting a call.
-  obj.flags |= ActorFlag.NoCameraTrack;
   if (obj.flags2 & offScreenBit) {
     obj.flags2 &= ~offScreenBit;
     G.g_attack_committed = 0;

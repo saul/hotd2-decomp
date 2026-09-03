@@ -44,6 +44,44 @@ export enum ActorFlag {
    */
   NoCameraTrack = 0x10000,
   /**
+   * `obj+0x34` bit `0x800000` — **do not untrack this actor if it is the last
+   * one.** Every routine that would raise {@link NoCameraTrack} and free the
+   * actor's camera slot skips both when this bit is set and the relevant
+   * enemy counter is down to one, so the killing shot of a fight is not cut
+   * away from.
+   *
+   * `[proved]`, and it is a **spawn-record** bit rather than a state bit.
+   * Nothing in `Hod2.exe` writes it: an exhaustive scan of `.text` for every
+   * encoding that can set bit 23 of the dword at `+0x34` — `0D`/`81 /1` with
+   * an immediate, `80 /1` on the byte at `+0x36`, `C7 /0` on the word — finds
+   * no site at all, and Ghidra's own operand search finds only the five
+   * `TEST ..., 0x800000` reads listed below. It reaches the actor exactly one
+   * way, through `ActorInitFlags` (`FUN_00408970`), which is
+   * `obj+0x34 = spawn_flags | 1`. **Six shipped spawns carry it**, all class
+   * 0x30 and all starting in state 18: three in stage 1 (character type 7,
+   * `init_flags 0x800000`) and three in stage 3 (type 11, `0x8800000`).
+   *
+   * The five readers, each `a900008000`:
+   *
+   * | site | routine | counter |
+   * |---|---|---|
+   * | `0x004565BD` | `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) | `g_enemies_alive == 1` |
+   * | `0x0044D068` | `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) | `g_enemies_present == 1` |
+   * | `0x0044AA52` | `ThrowerStateCorpseSink` (`FUN_0044A9D0`) | `g_enemies_present == 0` |
+   * | `0x0044AC3F` | `ThrowerStateCorpseBlink` (`FUN_0044AB70`) | `g_enemies_present == 0` |
+   * | `0x0043BA4B` | not in a Ghidra function; outside both ported classes | `g_enemies_alive == 1` |
+   *
+   * The two corpse states read it with the **opposite** polarity — they
+   * untrack *only* when the bit is set and the count has reached zero — which
+   * is why this is named for what the bit is, not for the arm any one reader
+   * takes. `ZombieStateCorpseSink` (`FUN_00454F20`) does not test it at all:
+   * `00454f9f 81ca00000100` is unconditional.
+   *
+   * **Not** {@link ZombieFlag2.Shoved}, which is bit `0x800000` of
+   * `obj+0x136C`. One value, two words, two classes.
+   */
+  KeepCameraWhenLast = 0x800000,
+  /**
    * `obj+0x34` bit `0x10000000` — this actor is mid-attack and will not be
    * re-ranked out of it. `ZombieStateStandAndThrow` raises it for the length
    * of the throw clip and `ZombieStateTargetMotionScript` for an entry whose

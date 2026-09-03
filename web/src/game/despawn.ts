@@ -56,9 +56,26 @@ export function ActorDeadSweep(obj: Actor, why: DeadSweep): void {
   }
   // `ReleaseAttackSlot` is still run on the two reasons the old sweep ran it
   // on, and with its default bit, because that is what it did for every class
-  // before the hook existed. For an unported class it can only ever be the
-  // `flags |= NoCameraTrack` — there is no permit to give back — and taking
-  // that write away was not this item's decision to make.
+  // before the hook existed.
+  //
+  // **It gets no untrack and no guard, and that is a decision, not an
+  // oversight.** D1 moved the `NoCameraTrack` raise out of `ReleaseAttackSlot`
+  // and into the callers, where the engine has it — and every one of those
+  // callers is a *named exe routine belonging to a class*, which is exactly
+  // what this fallback does not have. `ZombieReleasePermitAndUntrack`
+  // (`FUN_004565A0`) reads `g_enemies_alive` and `ThrowerReleaseSlotOnDeath`
+  // (`FUN_0044D050`) reads `g_enemies_present`; there is no third answer to
+  // copy for a class nobody has read, and picking one of the two would be the
+  // outside guess this fallback exists to avoid. Nothing is lost by it:
+  // `RegisterForCameraTracking` (`FUN_00408EC0`) already refuses a `dead` or
+  // invisible actor, which is every actor that reaches this line.
+  //
+  // The call itself is kept rather than deleted. For a class with no module it
+  // is a provable no-op today — nothing but a class handler ever claims a
+  // permit, so `attackPermit` is -1 and the off-screen bit is clear — but it
+  // is also the one piece of teardown that would matter the moment such a
+  // class gained a claim, and `g_attack_committed` left up stalls every enemy
+  // in the scene rather than just this one.
   if (why !== DeadSweep.Despawned) ReleaseAttackSlot(obj);
   if (why === DeadSweep.Unloaded || !ActorIsEnemy(obj.cls)) return;
   ReleaseEnemyAliveCount(obj);

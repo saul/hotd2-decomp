@@ -21,10 +21,12 @@
  * `test:port` asserts that what `saveState` writes is exactly what
  * `loadState` reads back.
  *
- * Bump this in the same commit as the shape change. 2 is the first honest
- * value: it says "not whatever those old snapshots were".
+ * Bump this in the same commit as the shape change. 2 was the first honest
+ * value -- "not whatever those old snapshots were" -- and 3 is the play
+ * cursor becoming a tick count and `g_cam_path_frame_prev` leaving `G`.
+ * Two bumps in a day, after 28 commits of none, is the check working.
  */
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 export interface Snapshot {
   version: number;

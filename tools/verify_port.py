@@ -156,7 +156,7 @@ def check_names(named: dict[str, str]) -> dict[str, tuple[str, str]]:
 # the sense `verify_layers.py` uses the word: the count may fall and may never
 # rise. A new export must declare which kind it is; the backlog gets read down
 # by whoever next opens the file with Ghidra beside them.
-UNCITED_BASELINE = 97
+UNCITED_BASELINE = 96
 EXPORT_FN = re.compile(r"^export (?:async )?function ([A-Za-z_][A-Za-z0-9_]*)",
                        re.M)
 PORT_ONLY = re.compile(r"\[port-only\]")

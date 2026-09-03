@@ -343,7 +343,7 @@ console.log("class 0x30, three zombies, ten seconds:");
   // two zombies given the same order at the same moment do not take the same
   // steps at the same time. Starting them all at frame zero made a crowd move
   // in lockstep, which a crowd of shambling corpses never does.
-  const phases = new Set(G.g_object_list.map((o) => o.clock.toFixed(4)));
+  const phases = new Set(G.g_object_list.map((o) => o.playTicks));
   check("and they are not in lockstep", phases.size > 1,
         `${phases.size} distinct motion phases among ${G.g_object_list.length}`);
   check("nothing walked inside the inner ring",
@@ -649,8 +649,8 @@ console.log("the cue entrance:");
   run(9, rng, events);
   check("it holds still for the record's delay",
         (z.flags & ActorFlag.PoseFrozen) !== 0 && z.pos.z === startZ
-        && z.clock === 0,
-        `flags 0x${z.flags.toString(16)} z ${z.pos.z} clock ${z.clock}`);
+        && z.playTicks === 0,
+        `flags 0x${z.flags.toString(16)} z ${z.pos.z} ticks ${z.playTicks}`);
 
   run(1, rng, events);
   check("and the delay running out is what releases it",
@@ -1578,12 +1578,12 @@ console.log("\nclass 0x24, the freeze cues:");
   // And a frozen actor's clip does not advance -- the freeze is in
   // `ActorAdvanceMotion`, where the engine keeps it.
   a.motion = 10;
-  const before = a.clock;
+  const before = a.playTicks;
   ActorAdvanceMotion(a, 1 / 60);
-  check("a frozen set-piece holds its pose", a.clock === before);
+  check("a frozen set-piece holds its pose", a.playTicks === before);
   a.frozen = 0;
   ActorAdvanceMotion(a, 1 / 60);
-  check("and an unfrozen one does not", a.clock > before);
+  check("and an unfrozen one does not", a.playTicks > before);
 }
 
 console.log("\nclass 0x24, the drop:");
@@ -2158,13 +2158,13 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   G.g_attack_permits[0] = z.at;
   z.attack = 0;
   z.stance = 0;
-  z.action = { motion: 303, t: 62 / 60, loop: false };
+  z.action = { motion: 303, ticks: 62, loop: false };
   check("a swing on its hit frame connects from four hundred units away",
         ThrowerStrikeConnect(z, events) && hits === 1, `${hits} hits`);
   // ...and the cancel mask is the only thing that stops it.
   z.flags2 = 0;
   z.zones = 2;                          // attack 0 names zone 2, the right arm
-  z.action = { motion: 303, t: 62 / 60, loop: false };
+  z.action = { motion: 303, ticks: 62, loop: false };
   G.g_player_invuln_frames = 0;
   const before = hits;
   ThrowerStrikeConnect(z, events);
@@ -3062,7 +3062,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     // one, and it agreed with a `frameOf` that was also counting in authored
     // frames: two halves of the same mistake, which is why the corpus (three
     // of stage 1's four maul cues never firing) caught it and this did not.
-    z.clock = 3 / 60;
+    z.playTicks = 3;
     zFrame(z, events);
     check("on the cue frame it kills the civilian outright",
           (civ.flags & ActorFlag.Dead) !== 0 && killed,
@@ -3415,7 +3415,7 @@ console.log("\nthe clip clock the scripts count in:");
   z.motion = 10;                     // 20 frames, and a play length of 37
   const m = CHARS.types["1"].motions["10"];
   check("the play clock runs at twice the authored frames",
-        (() => { z.clock = 1 / m.fps; return MotionPlayFrame(z) === 2; })(),
+        (() => { z.playTicks = 2; return MotionPlayFrame(z) === 2; })(),
         `frame ${MotionPlayFrame(z)}`);
   check("...and the play length comes from the bundle, not from frames * 2",
         MotionPlayLength(z) === 37 && m.frames * 2 - 2 === 38,
@@ -3427,7 +3427,7 @@ console.log("\nthe clip clock the scripts count in:");
   // to the play length and then returns to zero.
   const seen = new Set<number>();
   for (let i = 0; i < 80; i++) {
-    z.clock = i / (m.fps * 2);
+    z.playTicks = i;
     seen.add(MotionPlayFrame(z));
   }
   check("a cue past the authored frame count is still reachable",
@@ -3436,6 +3436,42 @@ console.log("\nthe clip clock the scripts count in:");
   check("...and the cursor wraps at the play length rather than running away",
         Math.max(...seen) === 37 && seen.size === 38,
         `max ${Math.max(...seen)} of ${seen.size}`);
+
+  // **Every cursor value is observed, once, from every start phase.**
+  //
+  // The check above sets `playTicks` by hand, which is why it passed for
+  // months while the cursor was skipping values: the bug was in *accumulating*
+  // it. The clock was seconds, advanced `clock += 1/60` and read back as
+  // `Math.floor(clock * fps * 2)`, and repeated float addition of 1/60 does
+  // not land on multiples of 1/60 -- so the cursor went 6, 8 and 30, 32 while
+  // showing 5 twice. Sixteen call sites compare it with `===`, correctly,
+  // because `>=` double-fires across the `% (len + 1)` wrap. A cue authored at
+  // 7, 15, 31 or 507 could therefore never fire, and the actor parked for
+  // ever. Most of `docs/PLAYER_HANGS.md` is that sentence.
+  //
+  // So this drives the real advance, one tick at a time, from every phase a
+  // clip can start on -- because which value gets lost moves with the phase.
+  const len = MotionPlayLength(z);
+  let worst = "";
+  for (let phase = 0; phase <= len && !worst; phase++) {
+    z.playTicks = phase;
+    const counts = new Map<number, number>();
+    // One full cycle plus a little, so the wrap is included.
+    for (let i = 0; i <= len; i++) {
+      const f = MotionPlayFrame(z);
+      counts.set(f, (counts.get(f) ?? 0) + 1);
+      ActorAdvanceMotion(z, 1 / 60);
+    }
+    for (let f = 0; f <= len; f++) {
+      const n = counts.get(f) ?? 0;
+      if (n !== 1) {
+        worst = `from phase ${phase}, cursor ${f} was observed ${n} times`;
+        break;
+      }
+    }
+  }
+  check("every cursor value is observed exactly once, from every start phase",
+        worst === "", worst);
 }
 
 console.log("\nclass 0x10's body radius, and the hook that ramps it:");
@@ -3495,7 +3531,7 @@ console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
                          new Rng(1));
     c.visible = true;
     c.motion = 10;                   // 20 frames, play length 37
-    c.clock = 0;
+    c.playTicks = 0;
     c.civ!.loops = loops;
     return c;
   };
@@ -4139,7 +4175,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     z.motion = 102;                      // 24 frames, so a play length of 46
     // The recover arm waits for `obj+0x19C == play_length - 1` exactly, and
     // the cursor wraps -- so this is frame 45 of 46, not "some time later".
-    z.clock = 45 / (30 * 2);
+    z.playTicks = 45;
     ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
     check("with both hands empty it starts the leave delay",
           z.throwDelay === 2, String(z.throwDelay));
@@ -4213,20 +4249,26 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
 //
 // `g_cam_path_frame` is an integer in the engine -- both camera drivers end on
 // `__ftol` -- and it steps by exactly one, so the engine's cue tests are plain
-// `==`. This port's clock is real elapsed time. Handing the walker's float
-// straight to the global made `==` a coin toss (fine at a fixed 1/60, never
-// equal under a browser's variable frame time), and a slow frame can still
-// step over an exact cue even once it is truncated. Class 0x10's removal cue
-// is one of those, and a civilian that misses it never leaves
-// `g_civilians_alive` -- so `wait_scripted_actors` waits for ever.
+// `==`. Handing the walker's float straight to the global made `==` a coin
+// toss, and class 0x10's removal cue is one of those: a civilian that misses
+// it never leaves `g_civilians_alive`, so `wait_scripted_actors` waits for
+// ever. `CamPathCueReached` answers `>=` instead.
+//
+// The `g_cam_path_frame_prev` these cases used to set is gone. It was a
+// declared divergence -- a crossing test, to cover a tick that advanced the
+// camera by more than one frame -- and two things retired it: the loop calls
+// `w.tick(TICK)` exactly once per frame, so the camera steps by exactly one;
+// and `CamPathCueReached` never read the field in the first place, having
+// moved to `>=` when "already past counts as reached" went in. It was carried
+// in every snapshot regardless.
 {
   ResetGameGlobals();
   G.g_active_cam_path = 39;
 
-  G.g_cam_path_frame_prev = 279; G.g_cam_path_frame = 280;
+  G.g_cam_path_frame = 280;
   check("a cue the camera lands on fires", CamPathCueReached(39, 280));
 
-  G.g_cam_path_frame_prev = 279; G.g_cam_path_frame = 281;
+  G.g_cam_path_frame = 281;
   check("...and so does one a slow frame steps over",
         CamPathCueReached(39, 280));
 
@@ -4238,14 +4280,14 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   // resuming at `block=1&step=8&op=12&frame=100` put the camera at 100 first.
   // The script never reached its `LeaveCountNow` and `wait_scripted_actors 0`
   // waited for ever.
-  G.g_cam_path_frame_prev = 280; G.g_cam_path_frame = 281;
+  G.g_cam_path_frame = 281;
   check("...and a cue the camera is already past still reads as reached",
         CamPathCueReached(39, 280));
 
-  G.g_cam_path_frame_prev = 279; G.g_cam_path_frame = 281;
+  G.g_cam_path_frame = 281;
   check("...but not on a different path", !CamPathCueReached(40, 280));
 
-  G.g_cam_path_frame_prev = 0; G.g_cam_path_frame = 0;
+  G.g_cam_path_frame = 0;
   check("...nor before the path has reached it", !CamPathCueReached(39, 280));
 }
 

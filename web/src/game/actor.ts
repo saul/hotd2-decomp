@@ -281,7 +281,16 @@ export enum ThrowerStance {
 }
 
 /** A motion the actor is playing at full weight. `t` is seconds. */
-export interface ActorClip { motion: number; t: number; loop: boolean }
+/**
+ * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
+ *
+ * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
+ * engine counts frames and the port compares against frame numbers. Holding it
+ * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
+ * a frame test written `===` could be stepped over -- which is what the
+ * `struck` latch on this interface's owner used to exist to work around.
+ */
+export interface ActorClip { motion: number; ticks: number; loop: boolean }
 
 export interface Actor {
   // -- identity ----------------------------------------------------------
@@ -728,9 +737,16 @@ export interface Actor {
   /**
    * This swing has already landed its hit.
    *
-   * [diverges] The engine tests `obj+0x19C == hit_frame` for exact equality
-   * against a counter that advances one per update, so it can only fire once.
-   * The port advances clips in seconds, so it latches instead.
+   * Kept, but **no longer a divergence.** It used to read: "the engine tests
+   * `obj+0x19C == hit_frame` for exact equality against a counter that
+   * advances one per update, so it can only fire once. The port advances clips
+   * in seconds, so it latches instead." Every clip clock in the port is now a
+   * whole-tick counter, so the equality fires exactly once on its own and the
+   * latch is not standing in for anything.
+   *
+   * It stays because the engine has it too: class 0x31 reads and clears its
+   * own equivalent around the grab, and a latch that agrees with the engine is
+   * not a workaround.
    */
   struck: boolean;
 
@@ -763,8 +779,24 @@ export interface Actor {
   visible: boolean;
   /** The looping base motion. */
   motion: number;
-  /** Seconds into that loop. */
-  clock: number;
+  /**
+   * `obj+0x19C` — the play cursor, **in whole 60 Hz ticks**, not in seconds.
+   *
+   * It was seconds, accumulated as `clock += dt` with `dt = 1/60`, and read
+   * back as `Math.floor(clock * fps * 2)`. Repeated float addition of 1/60
+   * does not land on multiples of 1/60, so the derived cursor **skipped
+   * values**: it went 6, 8 and 30, 32, never showing 7 or 31, and showed 5
+   * twice. Sixteen call sites test this cursor with `===` — correctly, because
+   * `>=` double-fires across the `% (len + 1)` wrap — so an authored cue of 7,
+   * 15, 31 or 507 could never fire and the actor simply parked. That is the
+   * shape of most of `docs/PLAYER_HANGS.md`.
+   *
+   * The engine's field is an integer incremented once per frame, and the
+   * architecture doc's "whole ticks, never a fraction" rule was true of
+   * `G.g_frame` and false of this. Now it is true of both: seconds are derived
+   * at the point of use, never accumulated.
+   */
+  playTicks: number;
   /**
    * The clip being faded *out* of, and how far into it.
    *
@@ -777,7 +809,7 @@ export interface Actor {
    * Without it every transition is a cut, which is what made the bite jump
    * straight into the walk-back.
    */
-  fadeFrom: { motion: number; t: number } | null;
+  fadeFrom: { motion: number; ticks: number } | null;
   /** Frames of the cross-fade left. */
   fade: number;
   /** How many it started with, so the weight is a ratio. */
@@ -792,9 +824,10 @@ export interface Actor {
   /** A one-shot or lunge at full weight: the lunge loops, the strike does not. */
   action: ActorClip | null;
   /** The death clip, once. */
-  death: { motion: number; t: number } | null;
+  death: { motion: number; ticks: number } | null;
   /** A stumble, blended over `blend` frames. */
-  react: { motion: number; t: number; blend: number; hard: boolean } | null;
+  react: { motion: number; ticks: number; blend: number; hard: boolean }
+    | null;
   /**
    * `ZombieStateMotionCue21`'s parameters — the descriptor's `+0x04` clip and
    * its `+0x08` hold, in frames. Six spawns across the game carry it, all of
@@ -951,7 +984,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     dead: false,
     visible: false,
     motion: 0,
-    clock: 0,
+    playTicks: 0,
     fadeFrom: null,
     fade: 0,
     fadeLen: 0,

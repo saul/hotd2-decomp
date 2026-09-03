@@ -143,7 +143,7 @@ const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
   // is the other half, and it was already a URL flag.
   url: `?stage=${stage}&drive=1&seed=${seed}`, size: opt("size", "1280x800"),
-  headless: flag("headless"), quiet: true,
+  headless: flag("headless"), quiet: !flag("loud"),
 });
 
 let exit = 1;

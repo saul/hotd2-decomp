@@ -66,7 +66,7 @@ export function ThrowerStateEntranceClip(obj: Actor): void {
   if (obj.sub === 0) {
     const m = MotionOf(obj, obj.entranceMotion);
     if (!m) { obj.state = ThrowerState.StandAndDecide; return; }
-    obj.action = { motion: obj.entranceMotion, t: 0, loop: false };
+    obj.action = { motion: obj.entranceMotion, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
     obj.sub = 1;
   }
@@ -99,7 +99,7 @@ export function ThrowerStateDelayedPounce(obj: Actor, dt: number, rng: Rng,
   if (!p) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
 
   if (obj.sub === 0) {
-    obj.action = { motion: p.motion, t: 0, loop: false };
+    obj.action = { motion: p.motion, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
     obj.slideTimer = p.frames;
     obj.sub = 1;

@@ -122,7 +122,6 @@ for (let stage = 1; stage <= 6; stage++) {
     let leftAt = -1, maxSub = a.sub;
     for (let f = 0; f < SECONDS * 60; f++) {
       // The camera runs its path, which is what every camera cue waits on.
-      G.g_cam_path_frame_prev = G.g_cam_path_frame;
       G.g_cam_path_frame += 1;
       // ...and the script raises its flags. Two states wait on one; nothing
       // else in this harness would ever set them.

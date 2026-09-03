@@ -9,6 +9,8 @@ import type {
   AttackJson, BakedMotion, BreakablesJson, CharactersJson, CharacterType,
   ColiJson, ThrowHandJson,
 } from "../bundle";
+import { authoredFrameOfTicks, ticksOfAuthoredFrame, ticksOfSeconds }
+  from "../core/play_cursor";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
@@ -134,8 +136,53 @@ export function MotionPlayFrame(a: Actor): number {
   // then takes `model[2] / 2` as the authored frame and blends the odd values
   // between two, which is what the 60 Hz clock over 30 Hz data actually means.
   const len = MotionPlayLength(a, a.motion);
-  const cursor = Math.floor(a.clock * m.fps * 2);
-  return len > 0 ? cursor % (len + 1) : cursor;
+  // `a.playTicks` **is** `model[0]`: one increment per 60 Hz frame. It used to
+  // be `Math.floor(clock * fps * 2)` over a float accumulation of `1/60`, and
+  // that dropped whole cursor values -- 7, 15, 31, 507 -- so any cue naming
+  // one of them never fired. See `Actor.playTicks`.
+  return len > 0 ? a.playTicks % (len + 1) : a.playTicks;
+}
+
+/**
+ * The **authored** frame of a clip: which of `m.frames` poses to draw.
+ *
+ * The third of what were three different frame units in this port, and the
+ * only one the animation data itself is indexed by. `MotionPlayFrame` counts
+ * in the engine's 60 Hz cursor, at about twice this; `playTicks` is that
+ * cursor. Every conversion between them goes through here, so a clip authored
+ * at something other than 30 Hz would need changing in one place.
+ *
+ * [port-only] The engine has no such routine: `FUN_004111A0` reads `model[2]`
+ * and takes `model[2] / 2` inline, because at 30 Hz that is the whole
+ * conversion. This exists so the port has one spelling of it rather than the
+ * three it grew.
+ */
+export function MotionAuthoredFrame(a: Actor, m: BakedMotion): number {
+  return authoredFrameOfTicks(a.playTicks, m.fps, m.frames);
+}
+
+/**
+ * Seconds of game time to whole cursor ticks.
+ *
+ * [port-only] The engine never converts: it increments `obj+0x19C` once per
+ * frame and has no notion of a duration in seconds anywhere near a motion.
+ * This is the port's edge, where `Tick.dt` -- which is a real number of
+ * seconds because a browser hands one over -- becomes the whole frames the
+ * game counts in.
+ */
+export function SecondsToTicks(seconds: number): number {
+  return ticksOfSeconds(seconds);
+}
+
+/**
+ * An authored frame of `m` to the play cursor's ticks.
+ *
+ * [port-only] The engine's states write `obj+0x19C` directly, in cursor units,
+ * because that is the only unit they have. The bundle's clips are indexed by
+ * authored frame, so the port needs the conversion the engine does not.
+ */
+export function FrameToTicks(frame: number, m: BakedMotion | null): number {
+  return ticksOfAuthoredFrame(frame, m?.fps ?? 0);
 }
 
 /**

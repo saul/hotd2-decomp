@@ -119,7 +119,7 @@ for (let stage = 1; stage <= 6; stage++) {
         ?.motions[String(a.motion)];
       if (!m) continue;
       // What the renderer actually shows: the clip and the frame within it.
-      const key = `${a.motion}:${Math.floor(a.clock * m.fps)
+      const key = `${a.motion}:${Math.floor(a.playTicks * m.fps / 60)
                                  % Math.max(1, m.frames)}`;
       const prev = last.get(a.at);
       if (prev !== undefined && prev !== key) restless.add(a.at);

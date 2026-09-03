@@ -13,8 +13,10 @@
 import { ActorFlag, type Actor } from "./actor";
 import { ActorStartFade } from "./class30/motion_cue";
 import { MotionFade } from "./class30/states";
+import { authoredFrameOfTicks, ticksOfAuthoredFrame }
+  from "../core/play_cursor";
 import { ApplyRootMotion, rootDelta } from "./root_motion";
-import { MotionOf } from "./tables";
+import { MotionAuthoredFrame, MotionOf, SecondsToTicks } from "./tables";
 
 /** One actor's clocks, `dt` seconds of game time. */
 export function ActorAdvanceMotion(obj: Actor, dt: number): void {
@@ -40,23 +42,29 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     // The death clip plays once and **holds its last frame**: `ZombieStateDeath6`
     // waits for it to finish and hands the body to a routine that is not read,
     // so the corpse stays put rather than doing something invented.
-    obj.death.t += dt;
+    obj.death.ticks += SecondsToTicks(dt);
     return;
   }
   const base = MotionOf(obj, obj.motion);
   const wasBase = obj.rootFrame;
-  obj.clock += dt;
+  // **The play cursor counts frames, not seconds.** `obj+0x19C` is an integer
+  // the engine increments once per frame; accumulating `dt` and flooring it
+  // back out lost whole cursor values to float drift, and every `===` cue on
+  // one of them silently never fired. `dt` is always a whole number of ticks
+  // here -- `Tick.dt` is `frames * TICK` -- so this is a conversion, not a
+  // rounding-off of something finer.
+  obj.playTicks += SecondsToTicks(dt);
   // The outgoing clip keeps running underneath, which is what makes the blend
   // land in the right place rather than freezing a pose and dissolving it.
   if (obj.fadeFrom) {
-    obj.fadeFrom.t += dt;
+    obj.fadeFrom.ticks += SecondsToTicks(dt);
     obj.fade -= dt * 60;
     if (obj.fade <= 0) obj.fadeFrom = null;
   }
   // Root motion: the clip's own translation is what walks the actor. Applied
   // only while no one-shot is running, because the one-shot owns the body.
   if (base && !obj.action) {
-    const f = Math.floor(obj.clock * base.fps) % Math.max(1, base.frames);
+    const f = MotionAuthoredFrame(obj, base);
     const d = rootDelta(base, wasBase, f);
     ApplyRootMotion(obj, d.x, d.z);
     obj.rootFrame = f;
@@ -73,7 +81,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   const act = obj.action;
   if (act) {
     const wasAct = obj.rootActionFrame;
-    act.t += dt;
+    act.ticks += SecondsToTicks(dt);
     const am = MotionOf(obj, act.motion);
     if (!am) {
       obj.action = null;
@@ -85,19 +93,20 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       // Suppressing it left the actor already at the ring when the swing
       // ended, so the retreat finished on its first frame and it bit again
       // immediately.
-      const f = Math.min(am.frames - 1, Math.floor(act.t * am.fps));
+      const f = Math.min(am.frames - 1,
+                         authoredFrameOfTicks(act.ticks, am.fps, am.frames));
       const d = rootDelta(am, wasAct, f);
       ApplyRootMotion(obj, d.x, d.z);
       obj.rootActionFrame = f;
-      if (act.t * am.fps >= am.frames) {
+      if (act.ticks >= ticksOfAuthoredFrame(am.frames, am.fps)) {
         if (act.loop) {
-          act.t = 0;
+          act.ticks = 0;
           obj.rootActionFrame = -1;
         } else {
           // A one-shot ending is a transition like any other: the next state
           // will set its own clip, and it must fade out of the swing rather
           // than out of whatever the base motion happened to be.
-          ActorStartFade(obj, act.motion, act.t, MotionFade.Normal);
+          ActorStartFade(obj, act.motion, act.ticks, MotionFade.Normal);
           obj.action = null;
         }
       }
@@ -107,8 +116,10 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // The stumble runs on its own track; the loop underneath keeps going, which
   // is what makes the cross-fade back land in the right place.
   if (obj.react) {
-    obj.react.t += dt;
+    obj.react.ticks += SecondsToTicks(dt);
     const rm = MotionOf(obj, obj.react.motion);
-    if (!rm || obj.react.t * rm.fps >= rm.frames) obj.react = null;
+    if (!rm || obj.react.ticks >= ticksOfAuthoredFrame(rm.frames, rm.fps)) {
+      obj.react = null;
+    }
   }
 }

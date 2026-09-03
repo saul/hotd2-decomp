@@ -16,7 +16,7 @@
  */
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
-import { MotionOf } from "../tables";
+import { FrameToTicks, MotionOf } from "../tables";
 import { MotionFade } from "./states";
 
 export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
@@ -37,11 +37,11 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
     obj.fade = fade;
     obj.fadeLen = fade;
   } else {
-    ActorStartFade(obj, obj.motion, obj.clock, fade);
+    ActorStartFade(obj, obj.motion, obj.playTicks, fade);
   }
   obj.motion = motion;
   const frames = Math.max(1, spread === "clip" ? m.frames : spread);
-  obj.clock = rng.int(frames) / Math.max(1, m.fps);
+  obj.playTicks = FrameToTicks(rng.int(frames), m);
   obj.rootFrame = -1;
 }
 
@@ -57,7 +57,7 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
  */
 export function ActorSetMotion(obj: Actor, motion: number): void {
   obj.motion = motion;
-  obj.clock = 0;
+  obj.playTicks = 0;
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
@@ -83,11 +83,11 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
       obj.fade = fade;
       obj.fadeLen = fade;
     } else {
-      ActorStartFade(obj, obj.motion, obj.clock, fade);
+      ActorStartFade(obj, obj.motion, obj.playTicks, fade);
     }
   }
   obj.motion = motion;
-  obj.clock = Math.max(0, frame) / Math.max(1, m.fps);
+  obj.playTicks = FrameToTicks(Math.max(0, frame), m);
   obj.rootFrame = -1;
 }
 
@@ -98,14 +98,14 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
  * `MotionCrossFadeTo` (`FUN_00411B70`) is the same operation for the stumble,
  * which this port already does. This is it for an ordinary motion change.
  */
-export function ActorStartFade(obj: Actor, fromMotion: number, fromT: number,
-                               frames: number): void {
+export function ActorStartFade(obj: Actor, fromMotion: number,
+                               fromTicks: number, frames: number): void {
   if (frames <= 0 || !MotionOf(obj, fromMotion)) {
     obj.fadeFrom = null;
     obj.fade = 0;
     return;
   }
-  obj.fadeFrom = { motion: fromMotion, t: fromT };
+  obj.fadeFrom = { motion: fromMotion, ticks: fromTicks };
   obj.fade = frames;
   obj.fadeLen = frames;
 }

@@ -127,7 +127,7 @@ for (let stage = 1; stage <= 6; stage++) {
       if (process.env.TRACE && String(p.at) === process.env.TRACE && i % 30 === 0) {
         console.log(`   f${i} ${ZombieState[a.state]}/${a.sub} `
           + `pos ${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)} motion=${a.motion} `
-          + `clock=${a.clock.toFixed(2)} rootFrame=${a.rootFrame}`);
+          + `ticks=${a.playTicks} rootFrame=${a.rootFrame}`);
       }
       if (a.state === ZombieState.StandAndThrow) {
         peak = Math.max(peak, Math.hypot(a.pos.x - start.x, a.pos.z - start.z));

@@ -173,7 +173,7 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
   const b = T.chars?.reaction_blend;
   obj.react = {
     motion,
-    t: 0,
+    ticks: 0,
     blend: result === HitResultCode.Severed ? (b?.sever ?? 20)
                                             : (b?.frames ?? 10),
     // `ActorSetMotion` hard-sets the leg reactions: no cross-fade.
@@ -360,7 +360,7 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     if (!ownDeath) {
       death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
       if (death !== undefined && MotionOf(obj, death)) {
-        obj.death = { motion: death, t: 0 };
+        obj.death = { motion: death, ticks: 0 };
       }
     }
   }
@@ -414,7 +414,7 @@ export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
     if (!g_class_handlers[obj.cls]?.updatesWhenDead) {
       const death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
       if (death !== undefined && MotionOf(obj, death)) {
-        obj.death = { motion: death, t: 0 };
+        obj.death = { motion: death, ticks: 0 };
       }
     }
     if (ActorIsEnemy(obj.cls)) out.enemies += 1;

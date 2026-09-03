@@ -41,6 +41,7 @@
  * had the crowd marching in step earlier in this project, solved in the data.
  */
 import type { Rng } from "../../core/rng";
+import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { ClassFrame, ClassHandler } from "../registry";
@@ -129,8 +130,8 @@ export function SetPiecePropInit(obj: Actor, rng?: Rng): void {
   if (p) {
     obj.motion = p.motion;
     const m = T.types[String(obj.charType)]?.motions[String(p.motion)];
-    obj.clock = SetPiecePhaseSeconds(p, m?.fps ?? 30, m?.frames ?? 1,
-                                     rng ?? FALLBACK_RNG);
+    obj.playTicks = SetPiecePhaseTicks(p, m?.fps ?? 30, m?.frames ?? 1,
+                                       rng ?? FALLBACK_RNG);
   }
 }
 
@@ -151,10 +152,13 @@ const FALLBACK_RNG = { int: (n: number) => (n >> 1) } as unknown as Rng;
  * No shipped spawn actually uses `-1` — all 28 the six stages reach carry a
  * literal frame — so the random arm is transcribed and unexercised.
  */
-export function SetPiecePhaseSeconds(p: SetPieceParams, fps: number,
-                                     frames: number, rng: Rng): number {
+// [port-only] The randomised start phase, in cursor ticks. The engine picks
+// it inline in `SetPiecePropInit`; this is the same expression, named so the
+// unit is stated once.
+export function SetPiecePhaseTicks(p: SetPieceParams, fps: number,
+                                   frames: number, rng: Rng): number {
   const frame = p.phase === -1 ? rng.int(Math.max(1, frames)) : p.phase;
-  return frame / Math.max(1, fps);
+  return ticksOfAuthoredFrame(frame, fps);
 }
 
 /**
@@ -237,7 +241,7 @@ function SetPieceStateHoldThenPlay(obj: Actor, p: SetPieceParams): void {
   if (obj.holdFrames >= p.hold && p.cuePath > 0) {
     // The one state where `tail+0x0E` is a motion id rather than a path.
     obj.motion = p.cuePath;
-    obj.clock = 0;
+    obj.playTicks = 0;
   }
 }
 

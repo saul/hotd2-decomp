@@ -212,7 +212,6 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // goes fractional and a cue frame is simply never equal to it. Class 0x10's
   // removal cue never fired, so a civilian never left `g_civilians_alive` and
   // `wait_scripted_actors` waited for ever.
-  G.g_cam_path_frame_prev = G.g_cam_path_frame;
   G.g_cam_path_frame = w.cam ? Math.trunc(w.cam.frame) : 0;
   G.g_script_flags = [];
   for (const flag of w.flags) G.g_script_flags[flag] = 1;

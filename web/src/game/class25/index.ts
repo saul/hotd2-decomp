@@ -39,6 +39,8 @@
  * condition is unmet.
  */
 import type { Actor } from "../actor";
+import { authoredFrameOfTicks, ticksOfAuthoredFrame }
+  from "../../core/play_cursor";
 import { G } from "../globals";
 import type { ClassFrame, ClassHandler } from "../registry";
 import { T } from "../tables";
@@ -179,7 +181,7 @@ export function ScriptedHumanoidInit(obj: Actor): void {
   const fps = m?.fps ?? 30;
   // `rand() % 10` rather than a frame anywhere in the clip: the phase here is
   // a tenth of a second's worth of stagger, not a random pose.
-  obj.clock = (p.phase === -1 ? 0 : p.phase) / Math.max(1, fps);
+  obj.playTicks = ticksOfAuthoredFrame(p.phase === -1 ? 0 : p.phase, fps);
 }
 
 /** The removal test, identical in shape to class 0x24's. */
@@ -191,10 +193,10 @@ export function HumanoidShouldRemove(obj: Actor, p: HumanoidProgram): boolean {
       && G.g_cam_path_frame >= p.removeFrame;
 }
 
-/** The motion frame the clip is showing. */
+/** The **authored** frame the clip is showing — not the 60 Hz play cursor. */
 function MotionFrame(obj: Actor): number {
   const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
-  return Math.floor(obj.clock * (m?.fps ?? 30));
+  return authoredFrameOfTicks(obj.playTicks, m?.fps ?? 30, m?.frames ?? 0);
 }
 
 function AtLastMotionFrame(obj: Actor): boolean {
@@ -281,13 +283,13 @@ function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
     case HumanoidOp.SetMotion:
     case HumanoidOp.SetMotionBlended: {
       obj.motion = c.a;
-      obj.clock = 0;
+      obj.playTicks = 0;
       obj.rootFrame = -1;
       // Mode 1 clears the draw flag and mode 2 sets it; `SetMotion` also takes
       // a phase in `b`, and -1 there is the same tenth-of-a-second stagger.
       if (c.op === HumanoidOp.SetMotion && c.b !== -1) {
         const m = T.types[String(obj.charType)]?.motions[String(c.a)];
-        obj.clock = c.b / Math.max(1, m?.fps ?? 30);
+        obj.playTicks = ticksOfAuthoredFrame(c.b, m?.fps ?? 30);
       }
       obj.holdFrames = 0;
       obj.pc += 1;

@@ -163,7 +163,7 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   const hand = hands[Math.min(Math.max(0, obj.attack), hands.length - 1)];
   if (obj.sub === ThrowSub.Draw) {
     obj.attack = hands.indexOf(hand);
-    obj.action = { motion: hand.motion, t: 0, loop: false };
+    obj.action = { motion: hand.motion, ticks: 0, loop: false };
     obj.sub = ThrowSub.Winding;
     return;
   }
@@ -176,7 +176,8 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
     obj.attack = (obj.attack + 1) % hands.length;
     return;
   }
-  if (obj.sub === ThrowSub.Winding && obj.action.t * GAME_HZ >= hand.release_frame) {
+  if (obj.sub === ThrowSub.Winding
+      && obj.action.ticks >= hand.release_frame) {
     obj.sub = ThrowSub.Thrown;
     SpawnThrownWeapon(obj, hand, host, eye, events);
   }

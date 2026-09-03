@@ -239,7 +239,7 @@ export enum ArcPhase {
  * keys, so the test could never come true.
  */
 export function ActorClipFrame(obj: Actor): number {
-  return obj.action ? obj.action.t * GAME_HZ : -1;
+  return obj.action ? obj.action.ticks : -1;
 }
 
 /** ...and the same clip's length, in the same units. */
@@ -251,7 +251,7 @@ export function ActorClipLength(obj: Actor, motion: number): number {
 function playStage(obj: Actor, stage: ArcStage | undefined): void {
   if (!stage || stage.motion <= 0) return;
   if (!MotionOf(obj, stage.motion)) return;
-  obj.action = { motion: stage.motion, t: stage.start / GAME_HZ, loop: false };
+  obj.action = { motion: stage.motion, ticks: stage.start, loop: false };
   obj.rootActionFrame = -1;
 }
 

@@ -45,7 +45,7 @@ const TUMBLE_COOLDOWN = 0x14;
 
 function playOnce(obj: Actor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
-  obj.action = { motion, t: 0, loop: false };
+  obj.action = { motion, ticks: 0, loop: false };
   obj.rootActionFrame = -1;
 }
 
@@ -69,7 +69,7 @@ export function ThrowerStateHitReaction(obj: Actor, eye: Vec3, rng: Rng,
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.accY = 0;
     if (motion !== undefined && MotionOf(obj, motion)) {
-      obj.react = { motion, t: 0, blend: bone < REACT_HARD_SET_BONE
+      obj.react = { motion, ticks: 0, blend: bone < REACT_HARD_SET_BONE
                                           ? REACT_FADE : 0,
                     hard: bone >= REACT_HARD_SET_BONE };
       playOnce(obj, motion);

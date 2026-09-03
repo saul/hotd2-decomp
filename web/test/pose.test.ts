@@ -80,14 +80,21 @@ function finite(inst: Instance): boolean {
 }
 
 /** Drive one instance across a wide sweep of clocks and report the first NaN. */
-function sweep(name: string, make: (t: number) => Instance): void {
+/**
+ * `make` is handed a tick count, and that is the only clock there is.
+ *
+ * It used to be `t = i / 60` seconds, passed as both the play cursor and the
+ * one-shot tracks' position, because the port kept those in different units.
+ * It keeps them in one now -- whole 60 Hz ticks, which is what the engine
+ * counts -- so there is nothing left to confuse.
+ */
+function sweep(name: string, make: (ticks: number) => Instance): void {
   const poser = new Poser();
   for (let i = 0; i <= 600; i++) {
-    const t = i / 60;
-    const inst = make(t);
+    const inst = make(i);
     poser.pose(inst);
     if (!finite(inst)) {
-      check(name, false, `not finite at clock ${t.toFixed(3)}s`);
+      check(name, false, `not finite at tick ${i}`);
       return;
     }
   }
@@ -106,24 +113,25 @@ const CLIPS: Record<string, BakedMotion> = {
 };
 
 sweep("the looping motion wraps rather than running out",
-      (t) => instance(CLIPS, { motion: 1022, clock: t }));
+      (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks }));
 
 sweep("a one-shot action holds its last frame",
-      (t) => instance(CLIPS, { motion: 1022, clock: t,
-                               action: { motion: 1013, t } as Actor["action"] }));
+      (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks,
+                               action: { motion: 1013, ticks } as Actor["action"] }));
 
 sweep("a death clip holds its last frame",
-      (t) => instance(CLIPS, { motion: 1022, clock: t,
-                               death: { motion: 975, t } as Actor["death"] }));
+      (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks,
+                               death: { motion: 975, ticks } as Actor["death"] }));
 
 sweep("a hit reaction blends without running out",
-      (t) => instance(CLIPS, { motion: 1022, clock: t,
-                               react: { motion: 975, t, blend: 10,
+      (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks,
+                               react: { motion: 975, ticks, blend: 10,
                                         hard: false } as Actor["react"] }));
 
 sweep("a cross-fade out of the previous clip stays finite",
-      (t) => instance(CLIPS, { motion: 1022, clock: t, fade: 5, fadeLen: 10,
-                               fadeFrom: { motion: 923, t } as
+      (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks, fade: 5,
+                               fadeLen: 10,
+                               fadeFrom: { motion: 923, ticks } as
                                  Actor["fadeFrom"] }));
 
 console.log("\nthe descriptor's cue clip is not a second channel\n");
@@ -138,7 +146,7 @@ console.log("\nthe descriptor's cue clip is not a second channel\n");
   const poser = new Poser();
   // Long past the 41 frames of the entrance clip, with the descriptor still
   // naming it, which is the state every van zombie spends its life in.
-  const inst = instance(CLIPS, { motion: 1022, clock: 6,
+  const inst = instance(CLIPS, { motion: 1022, playTicks: 360,
                                  intro: { motion: 923, delay: 0 } });
   poser.pose(inst);
   check("an actor whose descriptor names a cue clip still poses finitely",
@@ -147,17 +155,17 @@ console.log("\nthe descriptor's cue clip is not a second channel\n");
   // And it poses the clip the *game* has running. Bone 1's first BAMS
   // component is the clip id, so the two are told apart by the pose itself.
   const a = new Quaternion().copy(inst.bones.get(1)!.quaternion);
-  const same = instance(CLIPS, { motion: 1022, clock: 6 });
+  const same = instance(CLIPS, { motion: 1022, playTicks: 360 });
   poser.pose(same);
   check("...and poses `obj.motion`, not the descriptor's clip",
         a.equals(same.bones.get(1)!.quaternion));
 
   // During the entrance the state machine has put the cue clip in `obj.motion`
   // itself, so the jump is drawn -- by the ordinary path, with no second one.
-  const during = instance(CLIPS, { motion: 923, clock: 0.5,
+  const during = instance(CLIPS, { motion: 923, playTicks: 30,
                                    intro: { motion: 923, delay: 0 } });
   poser.pose(during);
-  const cue = instance(CLIPS, { motion: 923, clock: 0.5 });
+  const cue = instance(CLIPS, { motion: 923, playTicks: 30 });
   poser.pose(cue);
   check("...and the entrance itself is still drawn, through `obj.motion`",
         finite(during)

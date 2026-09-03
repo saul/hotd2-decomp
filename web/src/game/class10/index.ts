@@ -103,8 +103,8 @@ import { PlayerTakeDamageTimed } from "../combat/player";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import type { ActorDebug, ClassFrame, ClassHandler } from "../registry";
-import { CharacterTypeOf, MotionOf, MotionPlayFrame, MotionPlayLength, T }
-  from "../tables";
+import { CharacterTypeOf, FrameToTicks, MotionOf, MotionPlayFrame,
+  MotionPlayLength, T } from "../tables";
 import { makeCivilianState, type CivilianState } from "./state";
 
 /**
@@ -655,7 +655,7 @@ function CivilianSetMotion(obj: Actor, motion: number, frame: number): void {
   if (obj.motion === motion) return;
   obj.motion = motion;
   const m = MotionOf(obj, motion);
-  obj.clock = m && m.fps ? frame / m.fps : 0;
+  obj.playTicks = FrameToTicks(frame, m);
   obj.rootFrame = -1;
 }
 
@@ -885,12 +885,12 @@ export function CivilianReapplyWaitCommand(obj: Actor, script: number,
     switch (c.op as CivilianOp) {
       case CivilianOp.SetMotion:
         sub.loops = a[1];
-        obj.clock = 0;
+        obj.playTicks = 0;
         break;
       case CivilianOp.SetMotionFrom: {
         sub.loops = a[1];
         const m = MotionOf(obj, obj.motion);
-        obj.clock = m && m.fps ? a[2] / m.fps : 0;
+        obj.playTicks = FrameToTicks(a[2] ?? 0, m);
         break;
       }
       case CivilianOp.SetMotionFrame: sub.motionCompare = a[0]; break;
@@ -1239,7 +1239,7 @@ export function CivilianCountMotionLoops(obj: Actor): void {
   if (sub.wait & CivilianWait.MotionLoops) {
     sub.loops -= 1;
     if (sub.loops !== 0) {
-      obj.clock = 0;
+      obj.playTicks = 0;
       obj.rootFrame = -1;
       return;
     }
@@ -1267,10 +1267,13 @@ function CivilianHoldLastFrame(obj: Actor): void {
   const m = MotionOf(obj, obj.motion);
   if (!m?.fps) return;
   // The cursor is at the play length when the last loop is spent -- the one
-  // value that wraps to zero on the next tick -- so pinning the clock there
-  // is exactly the engine's "stop incrementing `model[0]`".
-  const hold = MotionPlayLength(obj) / (m.fps * 2);
-  if (obj.clock > hold) obj.clock = hold;
+  // value that wraps to zero on the next tick -- so pinning it there is
+  // exactly the engine's "stop incrementing `model[0]`". Both sides are cursor
+  // ticks now, which is what `g_motion_play_length` was always counted in;
+  // this used to divide by `fps * 2` to reach the seconds the clock was kept
+  // in, and that conversion is the one this whole change deletes.
+  const hold = MotionPlayLength(obj);
+  if (obj.playTicks > hold) obj.playTicks = hold;
 }
 
 /** `sub+0x5C`, called once a frame before anything else moves the actor. */

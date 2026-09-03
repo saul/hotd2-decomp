@@ -20,6 +20,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { AttackJson } from "../../bundle";
+import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import { DamageZone, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
@@ -27,7 +28,7 @@ import { dist2d, type Vec3 } from "../vec";
 import { ZombieGiveUpAttack } from "./leave";
 import { ActorFacePlayerTarget } from "../actor_turn";
 import { ActorStartFade } from "./motion_cue";
-import { GAME_HZ, MotionFade, StrikeSub, ZombieState } from "./states";
+import { MotionFade, StrikeSub, ZombieState } from "./states";
 
 /**
  * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
@@ -70,7 +71,8 @@ function endStrike(obj: Actor): void {
   // `ActorAdvanceMotion` cannot do it here: this ends the clip a frame early,
   // before its own end-of-clip branch would fire.
   if (obj.action) {
-    ActorStartFade(obj, obj.action.motion, obj.action.t, MotionFade.Normal);
+    ActorStartFade(obj, obj.action.motion, obj.action.ticks,
+                   MotionFade.Normal);
   }
   obj.action = null;
   obj.strikeFloor = 0;
@@ -99,12 +101,12 @@ export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
       // Still short: play the lunge. Its own root motion is what closes the
       // gap -- the state writes no velocity.
       if (obj.action?.motion !== atk.lunge) {
-        obj.action = { motion: atk.lunge, t: 0, loop: true };
+        obj.action = { motion: atk.lunge, ticks: 0, loop: true };
         obj.rootActionFrame = -1;
       }
       return;
     }
-    obj.action = { motion: atk.strike, t: 0, loop: false };
+    obj.action = { motion: atk.strike, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
     // Where the clip finishes, not where it peaks: the attack's own distance
     // less the clip's net travel.
@@ -128,10 +130,12 @@ export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
   // counter at `obj+0x19C`, which advances once per 60 Hz update.
   const m = MotionOf(obj, atk.strike);
   if (!obj.action || !m) { endStrike(obj); return; }
-  const frame = obj.action.t * GAME_HZ;
+  const frame = obj.action.ticks;
   if (!obj.struck && frame >= atk.hit_frame) {
     obj.struck = true;
     ActorStrikeConnect(obj, atk, events);
   }
-  if (obj.action.t * m.fps >= m.frames - 1) endStrike(obj);
+  if (obj.action.ticks >= ticksOfAuthoredFrame(m.frames - 1, m.fps)) {
+    endStrike(obj);
+  }
 }

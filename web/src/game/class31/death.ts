@@ -76,7 +76,7 @@ const CHAR_ZSLMAN = 0x18;
 
 function playOnce(obj: Actor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
-  obj.action = { motion, t: 0, loop: false };
+  obj.action = { motion, ticks: 0, loop: false };
   obj.rootActionFrame = -1;
 }
 
@@ -373,7 +373,9 @@ export function ThrowerStateCorpse(obj: Actor, dt: number, rng: Rng,
   // the advance, so the corpse holds one chosen frame of its death clip rather
   // than finishing it.
   if (obj.corpseFrame >= 0 && obj.action) {
-    obj.action.t = obj.corpseFrame / GAME_HZ;
+    // `obj.corpseFrame` is already a frame number; it used to be divided by
+    // GAME_HZ only to be multiplied back on read.
+    obj.action.ticks = obj.corpseFrame;
   }
 
   if (blink) {

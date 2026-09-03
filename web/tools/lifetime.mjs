@@ -188,7 +188,7 @@ for (let f = 0; f < total; f++) {
     if (a && f % 5 === 0) {
       console.log(`   f${String(f).padStart(4)} `
         + `${ZombieState[a.state] ?? a.state}/${a.sub} motion=${a.motion} `
-        + `clock=${a.clock.toFixed(2)} y=${a.pos.y.toFixed(2)} `
+        + `ticks=${a.playTicks} y=${a.pos.y.toFixed(2)} `
         + `hp=${a.hp} frozen=${a.frozen} vis=${a.visible}`);
     }
   }

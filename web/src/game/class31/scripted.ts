@@ -27,6 +27,7 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
+import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionOf } from "../tables";
@@ -200,7 +201,7 @@ export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
   if (!g) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
 
   if (obj.sub === GrabSub.Anchor) {
-    obj.action = { motion: GRAB_RIDE, t: 0, loop: false };
+    obj.action = { motion: GRAB_RIDE, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
     // The spawn position *is* the camera-relative offset, kept for ever.
     obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
@@ -229,7 +230,7 @@ export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.pos.y = eye.y + obj.arcTo.y;
     events?.emit("sound.play", { id: GRAB_LAND });
-    obj.action = { motion: GRAB_RIDE, t: 0, loop: false };
+    obj.action = { motion: GRAB_RIDE, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
     obj.slideTimer = g.hold_frames;
     events?.emit("sound.play", { id: GRAB_SWORD_ON });
@@ -268,7 +269,7 @@ export function ThrowerStateGrabPlayer(obj: Actor, eye: Vec3, dt: number,
       return ThrowerGrabRide(obj, eye);
     }
     obj.strikeStart = { x: eye.x, y: eye.y, z: eye.z };
-    obj.action = { motion: GRAB_FINISH, t: 0, loop: false };
+    obj.action = { motion: GRAB_FINISH, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
     obj.sub = GrabSub.ThrowAway;
   }
@@ -313,7 +314,7 @@ function ThrowerGrabTakePermit(obj: Actor, named: number, rng: Rng): void {
   }
   if (p !== -1) {
     G.g_attack_permits[p] = obj.at;
-    obj.action = { motion: rng.int(2) === 0 ? GRAB_B : GRAB_A, t: 0,
+    obj.action = { motion: rng.int(2) === 0 ? GRAB_B : GRAB_A, ticks: 0,
                    loop: false };
     obj.rootActionFrame = -1;
     obj.struck = false;
@@ -348,7 +349,8 @@ export function ThrowerStateWaitForCue(obj: Actor, dt: number,
   if (obj.sub === 0) {
     const m = MotionOf(obj, c.motion);
     if (m) {
-      obj.action = { motion: c.motion, t: rng.int(m.frames) / m.fps,
+      obj.action = { motion: c.motion,
+                     ticks: ticksOfAuthoredFrame(rng.int(m.frames), m.fps),
                      loop: false };
       obj.rootActionFrame = -1;
     }
@@ -406,7 +408,7 @@ export function ThrowerStateBlinkInThreeHops(obj: Actor, dt: number,
     obj.flags |= ActorFlag.NoCameraTrack;
     const m = BLINK_IDLE_BY_STANCE[stance & 3] ?? BLINK_IDLE_BY_STANCE[0];
     if (MotionOf(obj, m)) {
-      obj.action = { motion: m, t: 0, loop: false };
+      obj.action = { motion: m, ticks: 0, loop: false };
       obj.rootActionFrame = -1;
     }
     obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };

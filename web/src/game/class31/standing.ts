@@ -61,7 +61,7 @@ const REGROW_PER_FRAME = 0.025;
 function playOnce(obj: Actor, motion: number, from = 0): void {
   const m = MotionOf(obj, motion);
   if (!m) return;
-  obj.action = { motion, t: from / 60, loop: false };
+  obj.action = { motion, ticks: from, loop: false };
   obj.rootActionFrame = -1;
 }
 
@@ -115,7 +115,7 @@ export function ThrowerStateCloseAndStrike(obj: Actor, eye: Vec3, rng: Rng,
     if (d > e.distance) {
       if (obj.motion !== e.lunge && MotionOf(obj, e.lunge)) {
         obj.motion = e.lunge;
-        obj.clock = 0;
+        obj.playTicks = 0;
         obj.rootFrame = -1;
       }
       return;
@@ -269,7 +269,7 @@ export function ThrowerStateRestoreBothHands(obj: Actor, dt: number,
     const m = RESTORE_IDLE_BY_STANCE[stance & 3] ?? RESTORE_IDLE_BY_STANCE[0];
     if (obj.motion !== m && MotionOf(obj, m)) {
       obj.motion = m;
-      obj.clock = 0;
+      obj.playTicks = 0;
       obj.rootFrame = -1;
     }
     obj.hopFrames = 0;
@@ -284,7 +284,10 @@ export function ThrowerStateRestoreBothHands(obj: Actor, dt: number,
   }
 
   const len = ActorClipLength(obj, obj.motion);
-  if (obj.clock * 60 < len - 1) return;
+  // `obj+0x19C` against the clip length, both in cursor ticks. This read
+  // `obj.clock * 60` when the clock was seconds -- the same number by a
+  // conversion that no longer has to happen.
+  if (obj.playTicks < len - 1) return;
   obj.state = ThrowerState.StandAndDecide;
   obj.sub = 0;
 }

@@ -15,6 +15,7 @@
 import { Quaternion, Vector3 } from "three";
 import type { BakedMotion } from "../../bundle";
 import { BAMS_TO_RAD } from "../../core/bams";
+import { authoredFrameOfTicks } from "../../core/play_cursor";
 import type { Instance } from "./instance";
 
 /** The port's clock. `mot/` authors at 30; the engine's frames are 60 Hz. */
@@ -35,7 +36,8 @@ pose(inst: Instance): void {
     const dm = inst.type.motions[String(inst.a.death.motion)];
     if (dm) {
       const f = Math.min(dm.frames - 1,
-                         Math.floor(inst.a.death.t * dm.fps));
+                         authoredFrameOfTicks(inst.a.death.ticks, dm.fps,
+                                              dm.frames));
       // The death clip is not consumed by `ActorAdvanceMotion` -- a falling
       // body's travel is the clip's, and nothing else moves it.
       this.apply(inst, dm, f, false);
@@ -61,7 +63,7 @@ pose(inst: Instance): void {
   // three of stage 2's rooms could not be cleared because of it.
   const m = inst.type.motions[String(inst.a.motion)];
   if (!m || m.frames <= 0) return;
-  const f = Math.floor(inst.a.clock * m.fps) % m.frames;
+  const f = authoredFrameOfTicks(inst.a.playTicks, m.fps, m.frames);
 
   // A strike or lunge the director started: it owns the body, and it reports
   // its own play position back so the hit can land on its frame.
@@ -69,7 +71,8 @@ pose(inst: Instance): void {
   if (act) {
     const am = inst.type.motions[String(act.motion)];
     if (am) {
-      const af = Math.min(am.frames - 1, Math.floor(act.t * am.fps));
+      const af = Math.min(am.frames - 1,
+                          authoredFrameOfTicks(act.ticks, am.fps, am.frames));
       // Fading *into* the swing: the lunge is set with a fade of 10 and the
       // strike with 5, so the arm comes up rather than appearing raised.
       if (!this.blendFromFade(inst, am, af)) this.apply(inst, am, af);
@@ -84,7 +87,8 @@ pose(inst: Instance): void {
   // what `FUN_00411B70` states.
   if (inst.a.react) {
     const rm = inst.type.motions[String(inst.a.react.motion)];
-    const rf = rm ? inst.a.react.t * rm.fps : 0;
+    const rf = rm ? authoredFrameOfTicks(inst.a.react.ticks, rm.fps,
+                                         rm.frames) : 0;
     if (rm && rf < rm.frames) {
       // `blend` is in **60 Hz game frames**; `rf` counts the clip's own
       // frames, which mot/ authors at 30. Comparing them directly stretched
@@ -118,7 +122,7 @@ private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
   if (!pm || pm.frames <= 0) return false;
   // The outgoing clip keeps playing underneath; `ActorAdvanceMotion` runs
   // its clock. Weight goes 0 -> 1 onto the incoming one.
-  const pf = Math.floor(fade.t * pm.fps) % pm.frames;
+  const pf = authoredFrameOfTicks(fade.ticks, pm.fps, pm.frames);
   const w = 1 - inst.a.fade / inst.a.fadeLen;
   this.applyBlend(inst, pm, pf, m, f, Math.min(1, Math.max(0, w)));
   return true;

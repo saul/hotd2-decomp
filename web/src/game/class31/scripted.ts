@@ -35,6 +35,7 @@ import { GAME_HZ } from "../class30/states";
 import {
   ActorArcBegin, ActorArcStep, ActorClipFrame, ActorClipLength, ActorLocalPoint,
 } from "./arc";
+import { ThrowerLeave } from "./death";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerState } from "./states";
 import { ThrowerStrikeConnect } from "./strike";
@@ -318,14 +319,6 @@ function ThrowerGrabTakePermit(obj: Actor, named: number, rng: Rng): void {
     obj.struck = false;
   }
   obj.attackPermit = p;
-}
-
-/** `ThrowerLeave` — `FUN_0044AD60`. Release everything and go. */
-function ThrowerLeave(obj: Actor): void {
-  if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
-  obj.attackPermit = -1;
-  obj.dead = true;
-  obj.visible = false;
 }
 
 /** `ThrowerStateWaitForCue`'s condition selector, the s16 at tail `+0x08`. */

@@ -77,9 +77,18 @@ def cited_files() -> list[Path]:
     return game_files() + sorted(p for p in SCRIPT.rglob("*.ts"))
 
 
-def check_names(named: dict[str, str]) -> set[str]:
-    """Rule 1: one exe function, one TS function, same name."""
-    ported: set[str] = set()
+def check_names(named: dict[str, str]) -> dict[str, tuple[str, str]]:
+    """Rule 1: one exe function, one TS function, same name.
+
+    Returns the ports found, keyed by **address** rather than by name. Keying
+    by name was how one exe function came to be transcribed twice with
+    different bodies (`FUN_0044AD60`, once in `class31/death.ts` retiring from
+    both counts and once privately in `class31/scripted.ts` releasing only the
+    permit): the set swallowed the second, and the thrower's counts diverged
+    depending on which exit it took. An address is the identity the rule is
+    actually about.
+    """
+    ported: dict[str, tuple[str, str]] = {}
     unnamed: set[str] = set()
     for path in cited_files():
         text = path.read_text()
@@ -104,7 +113,15 @@ def check_names(named: dict[str, str]) -> set[str]:
                 return
             if not is_def:
                 return
-            ported.add(real)
+            # One exe function, one TS function -- the port's first rule, and
+            # until now nothing checked it across files.
+            prev = ported.get(addr)
+            if prev is not None and prev[1] != str(rel):
+                failures.append(
+                    f"{rel}: {fun} (`{real}`) is also ported in {prev[1]} -- "
+                    f"one exe function, one TS function; make one of them "
+                    f"call the other")
+            ported[addr] = (real, str(rel))
             # A definition must actually be declared, or the doc is decoration.
             if not re.search(rf"\b(function|const)\s+{re.escape(name)}\b", text):
                 failures.append(
@@ -129,6 +146,53 @@ def check_names(named: dict[str, str]) -> set[str]:
         notes.append(f"unnamed citations: {len(unnamed)} -- "
                      + ", ".join(sorted(unnamed)))
     return ported
+
+
+# Every exported function in `game/` should either cite the exe function it
+# ports or say that it is scaffolding. 97 do neither today, and tagging all of
+# them in one pass would mean asserting 97 things nobody has read -- several of
+# them plainly *are* exe functions that were simply never cited
+# (`ActorKillAll`, `CountEnemyZombieIn`, `GameUpdate`). So this is a ratchet in
+# the sense `verify_layers.py` uses the word: the count may fall and may never
+# rise. A new export must declare which kind it is; the backlog gets read down
+# by whoever next opens the file with Ghidra beside them.
+UNCITED_BASELINE = 97
+EXPORT_FN = re.compile(r"^export (?:async )?function ([A-Za-z_][A-Za-z0-9_]*)",
+                       re.M)
+PORT_ONLY = re.compile(r"\[port-only\]")
+
+
+def check_uncited_exports() -> None:
+    """Rule 1's converse: an export that claims nothing about the exe."""
+    uncited: list[str] = []
+    for path in game_files():
+        text = path.read_text()
+        rel = path.relative_to(ROOT)
+        defined = {n for n, _ in DEF.findall(text)}
+        lines = text.splitlines()
+        for i, line in enumerate(lines, 1):
+            m = EXPORT_FN.match(line)
+            if not m or m.group(1) in defined:
+                continue
+            # `[port-only]` anywhere in the enclosing comment block, on the
+            # same terms as `[diverges]`: this file's scaffolding, no exe
+            # function behind it.
+            if PORT_ONLY.search(comment_block(lines, i - 1)):
+                continue
+            uncited.append(f"{rel}:{i} {m.group(1)}")
+    n = len(uncited)
+    status = "held" if n == UNCITED_BASELINE else (
+        "IMPROVED -- lower the baseline" if n < UNCITED_BASELINE else "RISEN")
+    notes.append(f"uncited exports: {n} of {UNCITED_BASELINE} baseline "
+                 f"({status})")
+    if n > UNCITED_BASELINE:
+        for u in uncited:
+            notes.append(f"  {u}")
+        failures.append(
+            f"uncited exports rose to {n} from a baseline of "
+            f"{UNCITED_BASELINE} -- a new `export function` in game/ must "
+            f"either cite the exe function it ports (`Name` -- `FUN_...`) or "
+            f"be tagged [port-only]")
 
 
 def check_globals(named: dict[str, str]) -> int:
@@ -156,33 +220,87 @@ def check_globals(named: dict[str, str]) -> int:
     return len(seen)
 
 
-def check_coverage(named: dict[str, str], ported: set[str]) -> None:
-    """Rule 2: report the coverage over the gameplay address ranges."""
-    # The enemy, camera-director, player-damage and thrower code. Taken from
-    # where the ported functions actually live, so the denominator is the code
-    # this port is trying to cover rather than the whole binary.
-    ranges = [(0x00402800, 0x00403E00),   # the camera director
-              (0x00408C00, 0x0040B000),   # slots, ranking, class table
-              (0x00415200, 0x00415500),   # player damage
-              (0x00449000, 0x00451000),   # class 0x31
-              (0x00452C00, 0x0045E000)]   # class 0x30
-    total = 0
-    for addr, name in named.items():
-        a = int(addr, 16)
-        if any(lo <= a < hi for lo, hi in ranges):
-            total += 1
-    notes.append(f"coverage: {len(ported)} of {total} annotated gameplay "
+# The enemy, camera-director, player-damage and thrower code. Taken from where
+# the ported functions actually live, so the denominator is the code this port
+# is trying to cover rather than the whole binary.
+GAMEPLAY_RANGES = [(0x00402800, 0x00403E00),   # the camera director
+                   (0x00408C00, 0x0040B000),   # slots, ranking, class table
+                   (0x00415200, 0x00415500),   # player damage
+                   (0x00449000, 0x00451000),   # class 0x31
+                   (0x00452C00, 0x0045E000)]   # class 0x30
+
+
+def in_gameplay(addr: str) -> bool:
+    a = int(addr, 16)
+    return any(lo <= a < hi for lo, hi in GAMEPLAY_RANGES)
+
+
+def check_coverage(named: dict[str, str],
+                   ported: dict[str, tuple[str, str]]) -> None:
+    """Rule 2: report the coverage over the gameplay address ranges.
+
+    **Both halves of the fraction are filtered by the same ranges.** They were
+    not: the denominator was the annotated functions inside the ranges above
+    and the numerator was every ported definition anywhere, opcode handlers and
+    classes 0x10/0x24/0x25/0x41 included -- all of which live outside them. The
+    figure the architecture doc calls "the most honest progress metric this
+    project could have" was reading about fifteen points high, in the flattering
+    direction, and getting better every time a class outside the ranges was
+    ported. The out-of-range ports are real work; they are reported on their own
+    line rather than folded into a ratio they are not part of.
+    """
+    total = sum(1 for addr in named if in_gameplay(addr))
+    inside = [a for a in ported if in_gameplay(a)]
+    outside = len(ported) - len(inside)
+    notes.append(f"coverage: {len(inside)} of {total} annotated gameplay "
                  f"functions have a port "
-                 f"({100 * len(ported) // max(1, total)}%)")
+                 f"({100 * len(inside) // max(1, total)}%)")
+    notes.append(f"  and {outside} ported functions outside the gameplay "
+                 f"ranges (opcodes, classes 0x10/0x24/0x25/0x41)")
+
+
+def comment_block(lines: list[str], i: int) -> str:
+    """The prose of the comment `lines[i]` sits in, tag and markers stripped.
+
+    Walks out in both directions over contiguous comment lines, so a reason
+    written above the tag counts as much as one written after it.
+    """
+    def is_comment(t: str) -> bool:
+        t = t.strip()
+        return t.startswith(("*", "//", "/*"))
+
+    lo = i
+    while lo > 0 and is_comment(lines[lo - 1]):
+        lo -= 1
+    hi = i
+    while hi + 1 < len(lines) and is_comment(lines[hi + 1]):
+        hi += 1
+    text = " ".join(lines[lo:hi + 1])
+    for junk in ("[diverges]", "/**", "*/", "//", "*"):
+        text = text.replace(junk, " ")
+    return " ".join(text.split())
 
 
 def check_divergences() -> None:
     """Rule 4: the places the port is knowingly wrong, in one list."""
     found: list[str] = []
     for path in game_files():
-        for n, line in enumerate(path.read_text().splitlines(), 1):
-            if DIVERGES.search(line):
-                found.append(f"{path.relative_to(ROOT)}:{n}")
+        lines = path.read_text().splitlines()
+        for n, line in enumerate(lines, 1):
+            if not DIVERGES.search(line):
+                continue
+            where = f"{path.relative_to(ROOT)}:{n}"
+            found.append(where)
+            # A tag with no prose around it is a confession with no content:
+            # the count goes up and nobody can tell what the port does
+            # instead. The reason is looked for in the whole comment block, in
+            # both directions, because the convention here is to explain first
+            # and tag last -- every existing divergence reads
+            # "...and there the engine would simply never answer. [diverges]".
+            if len(comment_block(lines, n - 1)) < 60:
+                failures.append(
+                    f"{where}: [diverges] with no reason around it -- say what "
+                    f"the engine does and what this does instead")
     notes.append(f"divergences: {len(found)} declared")
     for f in found:
         notes.append(f"  {f}")
@@ -266,6 +384,7 @@ def main() -> int:
     ported = check_names(named)
     check_globals(annotations(GLOBALS))
     check_coverage(named, ported)
+    check_uncited_exports()
     check_divergences()
     check_classes()
     check_snapshot_rules()

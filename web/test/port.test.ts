@@ -2321,6 +2321,54 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
   const offs = heard.filter((h) => h === 0x2023a9).length;
   check("...and the `_OFF` stopper fires on each of the 10 non-blinking frames",
         offs === 10, `${offs}`);
+
+}
+
+console.log("class 0x31, the grab ends in the engine's one leave routine:");
+{
+  // **`ThrowerLeave` (`FUN_0044AD60`) was transcribed twice, with different
+  // bodies.** `class31/death.ts` exported the real one -- retire from the
+  // alive count, retire from the present count, release the attack permit,
+  // drop the camera slot, despawn. `class31/scripted.ts` had a *private*
+  // function of the same name and the same citation that released the permit
+  // and set `dead`, and retired from neither count.
+  //
+  // `ThrowerStateGrabPlayer` (`FUN_0044EF90`) is one of the exe's two callers
+  // of the real routine, and it was calling the thin copy. So every thrower
+  // that finished its grab-and-throw left `g_enemies_alive` and
+  // `g_enemies_present` one too high for the rest of the stage, and any later
+  // `wait_enemies_alive` could never open -- a hang, from a duplicate.
+  //
+  // Nothing caught it because `verify_port.py` keyed its ports by *name*, and
+  // a set swallows the second of two. It keys by address now.
+  //
+  // The counts are what this asserts, because the counts are what hangs.
+  const rng = new Rng(61);
+  const events = new Events();
+  const z = thrower(ThrowerState.GrabPlayer, {
+    attackState: 7,
+    grab: {
+      offset: [0, -40, 0], cue_frame: 20, drop_frames: 10, hold_frames: 25,
+      player: 0,
+    },
+  });
+  z.pos = vec3(0, 60, 0);
+  check("`EnemyThrowerInit` counted it in, alive and present",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
+  G.g_cam_path_frame = 20;
+  for (let i = 0; i < 900 && !z.despawned; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  }
+  check("the throw-away ends in a despawn, not a body left standing",
+        z.despawned, `state ${z.state} sub ${z.sub}`);
+  check("...and it leaves both counts, so the next wait can open",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
+  check("...and gives the attack permit back",
+        G.g_attack_permits.every((x) => x === -1), G.g_attack_permits.join());
+  check("...and drops out of the camera's enemy slots",
+        !G.g_enemy_slots.includes(z.at), G.g_enemy_slots.join());
 }
 
 // -- 14. the collision, against real quads -----------------------------------

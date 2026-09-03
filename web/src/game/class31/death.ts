@@ -24,6 +24,7 @@ import { G } from "../globals";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
 import { QueryGroundHeightAt } from "../coli";
+import { ActorDespawn } from "../despawn";
 import { MotionOf, T } from "../tables";
 import { GAME_HZ } from "../class30/states";
 import { ActorArcVelocity, ActorClipFrame, ActorClipLength } from "./arc";
@@ -398,7 +399,24 @@ export function ThrowerStateCorpse(obj: Actor, dt: number, rng: Rng,
 /**
  * `ThrowerLeave` — `FUN_0044AD60`. Occupies state slot 6 and is never entered
  * as one: nothing in the program writes 6 to `obj+0x1310`. It is the
- * subroutine every other exit calls.
+ * subroutine every other exit calls, and it is **the whole of** class 0x31's
+ * leave — the engine has exactly one:
+ *
+ * ```c
+ * ThrowerRetireFromAliveCount(obj);
+ * ThrowerRetireFromPresentCount(obj);
+ * ThrowerReleaseAttackPermit(obj);
+ * if (obj+0x120 != -1) g_enemy_slots[obj+0x120 * 8] = 0;
+ * obj+0x34 &= ~1;
+ * ActorDespawn(obj);
+ * ```
+ *
+ * Its two callers are `ThrowerStrikeConnect` (`FUN_0044CE60`) and
+ * `ThrowerStateGrabPlayer` (`FUN_0044EF90`), and a second transcription of it
+ * lived privately in `class31/scripted.ts` doing only the permit release —
+ * so a thrower that finished its grab-and-throw never left either count, and
+ * `wait_enemies_alive` after one could not open. One exe function, one TS
+ * function; `verify_port.py` now checks it by address.
  */
 export function ThrowerLeave(obj: Actor): void {
   // `ThrowerLeave` and `ThrowerReleaseSlotOnDeath` are the engine's two callers
@@ -406,9 +424,15 @@ export function ThrowerLeave(obj: Actor): void {
   ThrowerRetireFromAliveCount(obj);
   ThrowerRetireFromPresentCount(obj);
   ThrowerReleaseAttackPermit(obj);
-  obj.dead = true;
-  obj.visible = false;
-  obj.action = null;
+  // The camera slot, `obj+0x120` — a different slot from the permit at
+  // `obj+0x121`. Modelled as a filter by `at` for the same reason
+  // `ThrowerReleaseSlotOnDeath` is: the port keeps `g_enemy_slots` as the
+  // list of actors rather than a fixed array of eight-byte records.
+  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  // `obj+0x34 &= ~1`. [open] Bit 0 of the flag word has no port: nothing in
+  // the ported call graph reads or writes it, so there is nothing to clear.
+  // Named here rather than dropped, so the next reader knows it was seen.
+  ActorDespawn(obj);
 }
 
 /**

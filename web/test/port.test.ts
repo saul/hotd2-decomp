@@ -53,7 +53,7 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
 import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2,
-         type Actor, type HumanoidActor }
+         type Actor, type HumanoidActor, type ZombieActor }
   from "../src/game/actor";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
@@ -307,6 +307,21 @@ const SCENE_MAJOR_PLAYING = 2;
 
 const EYE = vec3(0, 0, 0);
 
+/**
+ * `ActorSpawn` narrowed to class 0x30.
+ *
+ * Narrowing, not a cast, and the same proof the director makes: `makeActor`
+ * picks the arm from `cls`, so a fixture that wants to drive class 0x30's
+ * states has to establish the class rather than assert it. The `throw` is
+ * unreachable, and that is the point — a cast here would be the one place the
+ * union could be lied to.
+ */
+function spawnZombie(at: number, charType: number, name: string,
+                     desc?: Partial<Actor>, rng?: Rng): ZombieActor {
+  const a = ActorSpawn(at, SpawnClass.Zombie, charType, name, desc, rng);
+  if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
+  return a;
+}
 
 function scene(n: number, rng: Rng): Events {
   ResetGameGlobals();
@@ -314,7 +329,7 @@ function scene(n: number, rng: Rng): Events {
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
   for (let i = 0; i < n; i++) {
-    const a = ActorSpawn(0x1000 + i, SpawnClass.Zombie, 1, `zombie ${i}`);
+    const a = spawnZombie(0x1000 + i, 1, `zombie ${i}`);
     a.visible = true;
     a.attackState = 1;
     a.hp = 10;
@@ -427,7 +442,7 @@ console.log("a spawn whose descriptor names no attack state:");
   // does, and nothing starts there. An earlier port gated the permit on it and
   // those spawns walked up and stood still, which is exactly the bug this
   // asserts against.
-  const z = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "no-attack-state");
+  const z = spawnZombie(0x3000, 1, "no-attack-state");
   z.visible = true;
   z.attackState = -1;
   z.hp = 10;
@@ -450,7 +465,7 @@ console.log("the queue throttle:");
   // arrive: the whole point of `ZombieStateWaitTurn` is that dropping out of
   // the distance queue is temporary. Without it the actor parked in
   // `HoldAtRange` for ever and stood still -- which is what shipped.
-  const z = ActorSpawn(0x4000, SpawnClass.Zombie, 1, "lone");
+  const z = spawnZombie(0x4000, 1, "lone");
   z.attackState = 1;
   z.hp = 1000;
   z.pos = vec3(0, 0, 120);
@@ -550,7 +565,7 @@ console.log("RankEnemiesByDistance:");
   // the two that never enters the queue at all.
   const zs: Actor[] = [];
   for (let i = 0; i < RANK_SLOTS + 2; i++) {
-    const a = ActorSpawn(0x7000 + i, SpawnClass.Zombie, 1, `rank ${i}`);
+    const a = spawnZombie(0x7000 + i, 1, `rank ${i}`);
     a.visible = true;
     a.hp = 10;
     a.pos = vec3(0, 0, 200 - i * 10);
@@ -705,7 +720,7 @@ console.log("the cue entrance:");
   // left the actor frozen for ever. It wanted a permit, it was inside the
   // outer ring, and it never moved, because a zombie is carried by its clip's
   // own root translation and a frozen clip has no delta.
-  const z = ActorSpawn(0x5100, SpawnClass.Zombie, 1, "van", {
+  const z = spawnZombie(0x5100, 1, "van", {
     initialState: ZombieState.MotionCue,
     attackState: ZombieState.AttackRun,
     intro: { motion: 923, delay: 10 },
@@ -763,7 +778,7 @@ console.log("ActorIsOnScreen:");
 {
   const rng = new Rng(2);
   const events = scene(0, rng);
-  const z = ActorSpawn(0x5000, SpawnClass.Zombie, 1, "offscreen");
+  const z = spawnZombie(0x5000, 1, "offscreen");
   z.visible = true;
   z.attackState = 1;
   z.hp = 1000;
@@ -796,7 +811,7 @@ console.log("ActorIsOnScreen:");
 
   // The latch is the throttle: while one enemy is attacking unseen, nobody
   // else may claim at all — not even one in plain sight.
-  const other = ActorSpawn(0x5004, SpawnClass.Zombie, 1, "second");
+  const other = spawnZombie(0x5004, 1, "second");
   other.visible = true;
   other.hp = 1000;
   other.pos = vec3(5, 0, 40);
@@ -1554,8 +1569,9 @@ const hFrame = (a: HumanoidActor, events: Events, rng: Rng) =>
  *
  * These do not run. `@ts-expect-error` fails `tsc` if the line it guards
  * *compiles*, so each one asserts that a misread is rejected — which is the
- * only way to test a type. Before the class-0x25 arm existed, every line below
- * compiled happily and read a word belonging to another class.
+ * only way to test a type. Before the class-0x25 and class-0x30 arms existed,
+ * every line below compiled happily and read a word belonging to another
+ * class.
  *
  * This is the honest version of what the review predicted. It expected F6 —
  * `RankEnemiesByDistance` writing zombie fields onto every class — to become a
@@ -1565,26 +1581,78 @@ const hFrame = (a: HumanoidActor, events: Events, rng: Rng) =>
  * class-agnostic and belong in the head. What the union does catch is the
  * cross-class *tail* read, and that is what these pin.
  */
-function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor): void {
+function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
+                                     z: ZombieActor): void {
   // @ts-expect-error a bare `Actor` has no arm until `cls` is narrowed
   void a.hum;
+  // @ts-expect-error and it has no class-0x30 arm either
+  void a.zom;
   // @ts-expect-error class 0x25's hand-prop selector is not on the head
   void a.bonePropMode;
   // @ts-expect-error nor is its command cursor
   void a.pc;
-  // **And here is what it does not yet protect.** `obj+0x1330` is also class
-  // 0x24's `slideTimer` and `obj+0x1334` is class 0x30's `backoffFrames`, and
-  // both still compile on a humanoid — because those two classes have no arm
-  // yet, so their fields are still on the head where every class can see them.
-  // A `@ts-expect-error` on either line is an *unused directive* today and
-  // fails the build, which is why neither is written as one. **The union only
-  // separates a word once every class that shares it has been cut over.**
-  // When class 0x24 and class 0x30 grow arms, these two become errors and the
-  // directives should be added above them.
-  void h.slideTimer;
+  // The class-0x30 tail, one address at a time. Each of these was a field on
+  // `ActorBase` before this change, readable off a civilian or a set-piece.
+  // (`a.holdFrames` still compiles: that name is class 0x24's `obj+0x1320`
+  //  and stays in the head. Class 0x30's hold, `obj+0x1330`, is on the arm.)
+  // @ts-expect-error `obj+0x1330` — the stand-and-throw idle countdown
+  void a.throwDelay;
+  // @ts-expect-error `obj+0x1330` — the corpse countdown
+  void a.corpseTimer;
+  // @ts-expect-error `obj+0x1334` — the back-off counter
+  void a.backoffFrames;
+  // @ts-expect-error `obj+0x1338` — frames since the last shove
+  void a.shoveTimer;
+  // @ts-expect-error `obj+0x1368` bit 0, which class 0x31 reads as `reactBone`
+  void a.hasCooldown;
+  // @ts-expect-error `obj+0x1398` — the captor script cursor
+  void a.scriptPc;
+  // @ts-expect-error ...and which of the two blobs it is walking
+  void a.scriptBlob;
+  // @ts-expect-error `obj+0x1320` — the clip the captor script wants
+  void a.scriptMotion;
+  // @ts-expect-error `obj+0x1350`, which class 0x31 reads as `landSurface`
+  void a.targetLoops;
+  // @ts-expect-error `obj+0x1354`, which class 0x31 reads as `arcKind`
+  void a.targetCue;
+  // @ts-expect-error `obj+0x1358`, which this class also reads as `allowance`
+  void a.resumeSub;
+  // @ts-expect-error `obj+0x132C`, which class 0x25 reads as `hum.turnMode`
+  void a.delegate;
+  // @ts-expect-error `obj+0x1370` — how close the walk has to get
+  void a.targetArrive;
+  // @ts-expect-error `obj+0x1374` — how far it has come
+  void a.walkTravelled;
+  // @ts-expect-error `obj+0x135C`, which class 0x25 reads as `hum.pathSlot`
+  void a.throwHand;
+  // ...and the other way round: the zombie arm does not carry class 0x25's.
+  // @ts-expect-error class 0x25's command cursor is not on a zombie
+  void z.hum;
+  // @ts-expect-error nor is its hand-prop cel index, `obj+0x1334`
+  void z.bonePropFrame;
+  // `obj+0x1334` as class 0x30's back-off counter is now behind its own arm,
+  // so a humanoid can no longer be asked for it. This line used to be a plain
+  // `void h.backoffFrames` with a comment saying why it could not be a
+  // directive: class 0x30 had no arm, the field was on the head, and every
+  // class could see it.
+  // @ts-expect-error class 0x30's back-off counter is not on the head either
   void h.backoffFrames;
+  // **And here is what it still does not protect.** `obj+0x1330` is class
+  // 0x24's `slideTimer`, and it compiles on a humanoid — because class 0x24
+  // has no arm yet, so its fields are on the head where every class can see
+  // them. A `@ts-expect-error` here is an *unused directive* today and fails
+  // the build, which is why it is not written as one. **The union only
+  // separates a word once every class that shares it has been cut over** —
+  // and class 0x30's reading of that same word moved out from under
+  // `slideTimer` in this change, to {@link ZombieTail.corpseTimer}, so when
+  // class 0x24 grows an arm this line becomes an error and the directive
+  // should be added above it.
+  void h.slideTimer;
   // The arm is reachable once, and only once, `cls` has been tested.
   if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.bonePropMode;
+  if (a.cls === SpawnClass.Zombie) void a.zom.backoffFrames;
+  // And a zombie's own arm needs no test at all.
+  void z.zom.corpseTimer;
 }
 void unionRejectsCrossClassReads;
 
@@ -2795,7 +2863,7 @@ console.log("the counts an actor never joined:");
     ResetGameGlobals();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-    const z = ActorSpawn(0x1000, SpawnClass.Zombie, ct, "zom",
+    const z = spawnZombie(0x1000, ct, "zom",
                          { initialState: initial });
     check(`a zombie with ${what} is not in the counts`,
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,
@@ -3080,7 +3148,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       },
     });
     const kids = children.map((at) => {
-      const k = ActorSpawn(at, SpawnClass.Zombie, 1, "captor");
+      const k = spawnZombie(at, 1, "captor");
       k.visible = true;
       return k;
     });
@@ -3566,7 +3634,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     const civ = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian");
     civ.visible = true;
     civ.pos = vec3(0, 0, 0);
-    const z = ActorSpawn(0x4100, SpawnClass.Zombie, 1, "captor", {
+    const z = spawnZombie(0x4100, 1, "captor", {
       initialState: initial, attackState: attack,
       script: { target, attack: attackScript }, targetAt: 0x4000,
     }, rng);
@@ -3574,7 +3642,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     z.pos = vec3(0, 0, 40);
     return { civ, z, events: new Events() };
   };
-  const zFrame = (z: ReturnType<typeof ActorSpawn>, events: Events) =>
+  const zFrame = (z: ZombieActor, events: Events) =>
     EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST, events });
 
   // The bug this family fixes: an unmodelled captor state fell through
@@ -3597,7 +3665,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
                                            script);
     zFrame(z, events);
     check("...and walks at the civilian rather than the camera",
-          z.sub === 2 && z.targetArrive === 10, `sub ${z.sub}`);
+          z.sub === 2 && z.zom.targetArrive === 10, `sub ${z.sub}`);
     zFrame(z, events);
     check("out of reach it stays in the walk",
           z.state === ZombieState.WalkToTarget
@@ -3626,8 +3694,8 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     events.on("sound.play", () => { killed = true; });
     zFrame(z, events);
     check("the maul opens on the script's first entry",
-          z.motion === 10 && z.targetCue === 3 && z.sub === 2,
-          `motion ${z.motion} cue ${z.targetCue}`);
+          z.motion === 10 && z.zom.targetCue === 3 && z.sub === 2,
+          `motion ${z.motion} cue ${z.zom.targetCue}`);
     check("and has not touched the civilian yet",
           !(civ.flags & ActorFlag.Dead));
     // Cue 3 in the **play** clock, which ticks at 60 Hz over 30 Hz data — so
@@ -3703,13 +3771,13 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
       ZombieState.TargetMotionScript, ZombieState.WalkToTarget, target,
       undefined, attack);
     z.pos = vec3(0, 0, 20);                    // already inside `arrive`
-    check("it starts on the target blob", z.scriptBlob === 0,
-          `blob ${z.scriptBlob}`);
+    check("it starts on the target blob", z.zom.scriptBlob === 0,
+          `blob ${z.zom.scriptBlob}`);
 
     // Play it out: the target entry ends, the walk takes over, and the walk
     // arrives at once because it is already inside the radius.
     for (let i = 0; i < 400; i++) {
-      if (z.state === ZombieState.TargetMotionScript && z.scriptBlob === 1) break;
+      if (z.state === ZombieState.TargetMotionScript && z.zom.scriptBlob === 1) break;
       // `EnemyZombieUpdate` does not advance the clip -- `GameUpdate` does, and
       // every cue in this family is a play-cursor comparison, so the clock has
       // to run or no entry ever ends.
@@ -3717,8 +3785,8 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
       zFrame(z, events);
     }
     check("...and the walk hands the maul the attack blob, not the target one",
-          z.scriptBlob === 1 && z.state === ZombieState.TargetMotionScript,
-          `blob ${z.scriptBlob} state ${z.state}`);
+          z.zom.scriptBlob === 1 && z.state === ZombieState.TargetMotionScript,
+          `blob ${z.zom.scriptBlob} state ${z.state}`);
     // Sub 1 is the frame that loads the entry the cursor points at, so the
     // clip is only on the actor once it has run.
     ActorAdvanceMotion(z, 1 / 60);
@@ -3749,7 +3817,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     T.coli = { files: ["t"], blobs: { floor: FLOOR_BLOB } };
     G.g_coli_full_set = ["floor"];
     G.g_camera_fixed_eye_y = -1e9;     // a miss must not pass as a hit
-    const z = ActorSpawn(0x6000, SpawnClass.Zombie, 1, "placed");
+    const z = spawnZombie(0x6000, 1, "placed");
     z.visible = true;
     z.hp = z.maxHp = 100;
     z.radius = 10;
@@ -3827,10 +3895,15 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     const z = scene30();
     z.pos = vec3(0, 40, 0);
     ActorArcBeginFalling(z, [30, 0, 0], 0.04);
+    // `z.zom.holdFrames`, not `z.holdFrames`: the head still has a field of
+    // that name and it is class 0x24's `obj+0x1320`. This assertion read the
+    // wrong word the moment class 0x30's reading moved to the arm, and said
+    // so — which is why the arm's doc calls the surviving head field a trap.
     check("the delayed leap's frame count comes from the drop and the gravity",
-          z.holdFrames > 40 && z.holdFrames < 50, `${z.holdFrames} frames`);
+          z.zom.holdFrames > 40 && z.zom.holdFrames < 50,
+          `${z.zom.holdFrames} frames`);
     check("...and the flat speed divides the distance by it",
-          Math.abs(z.vel.x - 30 / z.holdFrames) < 1e-4, `vx ${z.vel.x}`);
+          Math.abs(z.vel.x - 30 / z.zom.holdFrames) < 1e-4, `vx ${z.vel.x}`);
     check("...with gravity on the y axis", Math.abs(z.accY + 0.04) < 1e-6,
           `accY ${z.accY}`);
   }
@@ -3853,7 +3926,7 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
   // world push could never find anything to be pushed out of.
   {
     scenePush();
-    const z = ActorSpawn(0x7000, SpawnClass.Zombie, 1, "radii");
+    const z = spawnZombie(0x7000, 1, "radii");
     check("the Init sets the shot radius and the body radius",
           z.radius === 10 && z.bodyRadius === 3.5,
           `shot ${z.radius} body ${z.bodyRadius}`);
@@ -3863,7 +3936,7 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
   // back out rather than through.
   {
     scenePush();
-    const z = ActorSpawn(0x7001, SpawnClass.Zombie, 1, "walled");
+    const z = spawnZombie(0x7001, 1, "walled");
     z.visible = true;
     z.hp = z.maxHp = 100;
     z.pos = vec3(29, 0, 45);
@@ -3878,8 +3951,8 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
   // what makes it one test per actor rather than one per pair.
   {
     scenePush();
-    const a = ActorSpawn(0x7002, SpawnClass.Zombie, 1, "a");
-    const b = ActorSpawn(0x7003, SpawnClass.Zombie, 1, "b");
+    const a = spawnZombie(0x7002, 1, "a");
+    const b = spawnZombie(0x7003, 1, "b");
     for (const z of [a, b]) { z.visible = true; z.hp = z.maxHp = 100; }
     a.pos = vec3(0, 0, 0);
     b.pos = vec3(2, 0, 0);             // well inside 3.5 + 3.5
@@ -3908,7 +3981,7 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
-    const z = ActorSpawn(0x7100, SpawnClass.Zombie, 1, "walk-in", {
+    const z = spawnZombie(0x7100, 1, "walk-in", {
       initialState: ZombieState.WalkDistance, walkDistance: dist,
     });
     z.visible = true;
@@ -3928,8 +4001,8 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
     const z = walker(8);
     ZombieStateWalkDistance(z, new Rng(1));
     check("the first frame latches the distance and the start point",
-          z.targetArrive === 8 && z.arcFrom.x === 0 && z.arcFrom.z === 0
-          && z.sub === 2, `arrive ${z.targetArrive} sub ${z.sub}`);
+          z.zom.targetArrive === 8 && z.arcFrom.x === 0 && z.arcFrom.z === 0
+          && z.sub === 2, `arrive ${z.zom.targetArrive} sub ${z.sub}`);
     check("...and it is still walking", z.state === ZombieState.WalkDistance,
           String(z.state));
 
@@ -3937,8 +4010,8 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
     ZombieStateWalkDistance(z, new Rng(1));
     check("short of the distance it keeps walking",
           z.state === ZombieState.WalkDistance
-          && Math.abs(z.walkTravelled - 7.9) < 1e-4,
-          `${ZombieState[z.state]} travelled ${z.walkTravelled.toFixed(2)}`);
+          && Math.abs(z.zom.walkTravelled - 7.9) < 1e-4,
+          `${ZombieState[z.state]} travelled ${z.zom.walkTravelled.toFixed(2)}`);
 
     z.pos.z = -8.1;                       // past it
     ZombieStateWalkDistance(z, new Rng(1));
@@ -3958,8 +4031,8 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
     z.pos.y = -100;
     ZombieStateWalkDistance(z, new Rng(1));
     check("the distance is 2D -- falling is not walking",
-          z.state === ZombieState.WalkDistance && z.walkTravelled === 0,
-          `${ZombieState[z.state]} travelled ${z.walkTravelled}`);
+          z.state === ZombieState.WalkDistance && z.zom.walkTravelled === 0,
+          `${ZombieState[z.state]} travelled ${z.zom.walkTravelled}`);
   }
 
   // The other arm: with `obj+0x34` bit 0x20000000 the state retires the actor
@@ -3984,7 +4057,7 @@ console.log("\nthe clip clock the scripts count in:");
   ResetGameGlobals();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-  const z = ActorSpawn(0x7200, SpawnClass.Zombie, 1, "clock");
+  const z = spawnZombie(0x7200, 1, "clock");
   z.motion = 10;                     // 20 frames, and a play length of 37
   const m = CHARS.types["1"].motions["10"];
   check("the play clock runs at twice the authored frames",
@@ -4184,7 +4257,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     G.g_players_in_play = 1;
-    const z = ActorSpawn(0x7700, SpawnClass.Zombie, 1, "entrance", {
+    const z = spawnZombie(0x7700, 1, "entrance", {
       initialState: init, attackState: exit,
       entry: entry as Actor["entry"],
     });
@@ -4193,7 +4266,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     z.pos = vec3(0, 0, 30);
     return z;
   };
-  const run = (z: Actor, frames: number, rng = new Rng(3)) => {
+  const run = (z: ZombieActor, frames: number, rng = new Rng(3)) => {
     for (let f = 0; f < frames; f++) {
       EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
       // `GameUpdate` advances the clip; `EnemyZombieUpdate` does not. Four of
@@ -4232,7 +4305,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     // Sub 0 is that state's own latch, which would overwrite the distance with
     // `walkDistance`, a different descriptor field that is 0 here.
     check("...carrying the distance the entrance chose, not state 15's own",
-          z.targetArrive === 9, String(z.targetArrive));
+          z.zom.targetArrive === 9, String(z.zom.targetArrive));
   }
 
   // -- state 18: wait for an exact camera frame ----------------------------
@@ -4306,8 +4379,8 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
           z.state === ZombieState.Strike && z.attackPermit >= 0,
           `${z.state}/${z.attackPermit}`);
     check("...arming the cooldown, which no other class-0x30 state does",
-          z.hasCooldown && z.cooldown === 90,
-          `${z.hasCooldown}/${z.cooldown}`);
+          z.zom.hasCooldown && z.cooldown === 90,
+          `${z.zom.hasCooldown}/${z.cooldown}`);
   }
   {
     // A failed claim is not an error — the actor takes the descriptor's branch.
@@ -4317,8 +4390,8 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     G.g_cam_path_frame = 10;
     run(z, 3);
     check("...and a state-19 spawn that does not claim just branches",
-          z.state === ZombieState.AttackRun && !z.hasCooldown,
-          `${z.state}/${z.hasCooldown}`);
+          z.state === ZombieState.AttackRun && !z.zom.hasCooldown,
+          `${z.state}/${z.zom.hasCooldown}`);
   }
 
   // -- state 31: it counts itself into the game ---------------------------
@@ -4448,7 +4521,7 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
     ResetGameGlobals();
     SetGameTables(CHARS);
     G.g_player_lives = [2, 2];
-    const z = ActorSpawn(0x7D00, SpawnClass.Zombie, 1, "claimant");
+    const z = spawnZombie(0x7D00, 1, "claimant");
     z.visible = true;
     z.hp = z.maxHp = 100;
     G.g_scene_state_major_entered = 1;
@@ -4520,7 +4593,7 @@ console.log("\nthe two enemy counters, stepped and not derived:");
   // either of the two things the engine uses them for: a corpse that is
   // present but not alive, and an actor deliberately left out of the count.
   const zombie = (init: number, charType = 1) => {
-    const z = ActorSpawn(0x7B00 + init, SpawnClass.Zombie, charType, "counted",
+    const z = spawnZombie(0x7B00 + init, charType, "counted",
                          { initialState: init });
     z.visible = true;
     z.hp = z.maxHp = 100;
@@ -4587,7 +4660,7 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
-    const z = ActorSpawn(0x7900, SpawnClass.Zombie, 1, "leaper", {
+    const z = spawnZombie(0x7900, 1, "leaper", {
       initialState: ZombieState.DelayedLeap,
       delayedLeap: { delay: 0, dest: [0, -10, 30], gravity: 0.03674 },
       // All fourteen shipped leapers carry `obj+0x34` bit 0x20000, the
@@ -4658,7 +4731,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
-    const z = ActorSpawn(0x7500, SpawnClass.Zombie, 1, "axe man", {
+    const z = spawnZombie(0x7500, 1, "axe man", {
       initialState: ZombieState.StandAndThrow, condition: cond,
       standThrow: { delay_two_hands: 2, delay_one_hand: 2,
                     delay_after_throw: 2, exit_state: 0, walk_distance: 5 },
@@ -4711,7 +4784,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;          // the ground plane, far below
-    const pinned = ActorSpawn(0x7600, SpawnClass.Zombie, 1, "on a ledge", {
+    const pinned = spawnZombie(0x7600, 1, "on a ledge", {
       initialState: ZombieState.StandAndThrow, condition: 7,
       flags: GROUND_SNAP_EXEMPT,
     });
@@ -4728,7 +4801,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
 
     // ...and one without the bit settles onto the ground plane, as every
     // other stationary thrower in the game does.
-    const loose = ActorSpawn(0x7601, SpawnClass.Zombie, 1, "not pinned", {
+    const loose = spawnZombie(0x7601, 1, "not pinned", {
       initialState: ZombieState.StandAndThrow, condition: 7,
     });
     loose.visible = true;
@@ -4751,14 +4824,14 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     z.playTicks = 45;
     ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
     check("with both hands empty it starts the leave delay",
-          z.throwDelay === 2, String(z.throwDelay));
+          z.zom.throwDelay === 2, String(z.zom.throwDelay));
     for (let i = 0; i < 4; i++) {
       ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
     }
     check("...and then walks away rather than despawning on the spot",
-          z.state === ZombieState.WalkDistance && z.targetArrive === 5
+          z.state === ZombieState.WalkDistance && z.zom.targetArrive === 5
           && !z.despawned,
-          `${ZombieState[z.state]} arrive ${z.targetArrive} `
+          `${ZombieState[z.state]} arrive ${z.zom.targetArrive} `
           + `despawned ${z.despawned}`);
     check("...backwards, on `row[4]`",
           (z.flags & ActorFlag.BackingOff) !== 0);
@@ -4874,7 +4947,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   const captor = (state: number, attackState: number,
                   point: [number, number, number], yaw = 0) => {
     ResetGameGlobals();
-    const z = ActorSpawn(0x18e8, SpawnClass.Zombie, 1, "captor");
+    const z = spawnZombie(0x18e8, 1, "captor");
     z.state = state;
     z.attackState = attackState;
     z.yaw = yaw;
@@ -4917,7 +4990,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
 {
   const staged = (cue: { path: number; frame: number } | null) => {
     ResetGameGlobals();
-    const z = ActorSpawn(0xa030, SpawnClass.Zombie, 1, "staged captor");
+    const z = spawnZombie(0xa030, 1, "staged captor");
     z.state = ZombieState.TargetMotionScript;
     z.attackState = ZombieState.AttackRun;
     z.cameraCue = cue;
@@ -4929,9 +5002,9 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   ZombieScriptEnded(held);
   check("a captor with a camera cue holds instead of turning on the player",
         held.state === ZombieState.HoldForCameraCue
-        && held.delegate === ZombieState.AttackRun
+        && held.zom.delegate === ZombieState.AttackRun
         && (held.flags & ActorFlag.NoCameraTrack) !== 0,
-        `state ${held.state} delegate ${held.delegate}`);
+        `state ${held.state} delegate ${held.zom.delegate}`);
 
   // Without a cue it goes straight through, which is the other 66 spawns.
   const free = staged(null);
@@ -4954,9 +5027,9 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   ZombieStateHoldForCameraCue(held, (o) => { o.state = ZombieState.Strike; });
   check("a delegate that reaches Strike is bounced, and gives the permit back",
         held.state === ZombieState.HoldForCameraCue
-        && held.delegate === ZombieState.HoldAtRange
+        && held.zom.delegate === ZombieState.HoldAtRange
         && held.attackPermit === -1,
-        `state ${held.state} delegate ${held.delegate} permit ${held.attackPermit}`);
+        `state ${held.state} delegate ${held.zom.delegate} permit ${held.attackPermit}`);
 
   // The camera arrives: it graduates to the delegate and is visible again.
   G.g_active_cam_path = 75;
@@ -5470,7 +5543,7 @@ console.log("\n`ActorDeadSweep`, and what each class gives back:");
 
   // Class 0x30. The permit on every reason; the counts on death and despawn
   // and never on a frame the renderer simply has not drawn.
-  const z = ActorSpawn(0x2000, SpawnClass.Zombie, 1, "zombie");
+  const z = spawnZombie(0x2000, 1, "zombie");
   z.visible = true;
   z.hp = 10;
   check("one zombie is one enemy alive and present",
@@ -5726,8 +5799,8 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   void events;
   const INNER = APPROACH.rings[0].inner;
 
-  const zombie = (name: string, over: Partial<Actor> = {}): Actor => {
-    const z = ActorSpawn(0x7900, SpawnClass.Zombie, 1, name);
+  const zombie = (name: string, over: Partial<Actor> = {}): ZombieActor => {
+    const z = spawnZombie(0x7900, 1, name);
     z.visible = true;
     z.hp = z.maxHp = 100;
     z.attackState = 1;
@@ -5808,27 +5881,29 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   // through to the idle and the turn at the bottom of the state.
   {
     clear();
-    const z = zombie("cooling, never swung", { hasCooldown: true, cooldown: 10 });
+    const z = zombie("cooling, never swung", { cooldown: 10 });
+    z.zom.hasCooldown = true;
     ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
     check("a cooldown does not run down for an actor that has never swung",
           z.cooldown === 10, String(z.cooldown));
   }
   {
     clear();
-    const z = zombie("cooling", { hasCooldown: true, cooldown: 2 });
+    const z = zombie("cooling", { cooldown: 2 });
+    z.zom.hasCooldown = true;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
     check("...and does for one that has", z.cooldown === 1, String(z.cooldown));
-    check("...with the latch still armed at one", z.hasCooldown,
-          String(z.hasCooldown));
+    check("...with the latch still armed at one", z.zom.hasCooldown,
+          String(z.zom.hasCooldown));
     ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
     check("...and the latch disarms itself as the counter runs out",
-          z.cooldown === 0 && !z.hasCooldown, `${z.cooldown}/${z.hasCooldown}`);
+          z.cooldown === 0 && !z.zom.hasCooldown, `${z.cooldown}/${z.zom.hasCooldown}`);
   }
   {
     clear();
-    const z = zombie("cooling and idling",
-                     { hasCooldown: true, cooldown: 30, motion: 12 });
+    const z = zombie("cooling and idling", { cooldown: 30, motion: 12 });
+    z.zom.hasCooldown = true;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     z.yaw = 0x4000;
     ZombieStateHoldAtRange(z, EYE, new Rng(3), NULL_HOST);
@@ -5840,8 +5915,9 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   {
     clear();
     const z = zombie("retreating with a cooldown",
-                     { state: ZombieState.BackOff, hasCooldown: true,
-                       cooldown: 50, pos: vec3(0, 0, INNER + 15) });
+                     { state: ZombieState.BackOff, cooldown: 50,
+                       pos: vec3(0, 0, INNER + 15) });
+    z.zom.hasCooldown = true;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     ZombieStateBackOff(z, EYE, 1 / 60, new Rng(2));
     check("the retreat leaves an armed cooldown alone",
@@ -5868,8 +5944,8 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     const atk = TYPE.attacks["0"]["1"];
     const z = zombie("cued attacker",
                      { state: ZombieState.Strike, sub: StrikeSub.Lunge,
-                       attack: 1, hasCooldown: true,
-                       pos: vec3(0, 0, atk.distance + 20) });
+                       attack: 1, pos: vec3(0, 0, atk.distance + 20) });
+    z.zom.hasCooldown = true;
     ZombieStateStrike(z, EYE, new Rng(4));
     check("a cooldown-armed attacker starts the swing where it stands",
           z.sub === StrikeSub.Swinging && z.action?.motion === atk.strike,
@@ -5943,8 +6019,8 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     const z = zombie("counting", { state: ZombieState.BackOff,
                                    pos: vec3(0, 0, 5) });
     for (let i = 0; i < 7; i++) ZombieStateBackOff(z, EYE, 1 / 50, new Rng(2));
-    check("`backoffFrames` counts updates, not seconds", z.backoffFrames === 7,
-          String(z.backoffFrames));
+    check("`backoffFrames` counts updates, not seconds", z.zom.backoffFrames === 7,
+          String(z.zom.backoffFrames));
   }
 }
 /**
@@ -6001,12 +6077,12 @@ console.log("\nthe engine's body-radius fallback:");
 {
   const rng = new Rng(24);
   scene(0, rng);
-  const other = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "no body radius");
+  const other = spawnZombie(0x3000, 1, "no body radius");
   other.visible = true;
   other.pos = vec3(0, 0, 0);
   other.radius = 6;
   other.bodyRadius = 0;
-  const self = ActorSpawn(0x3001, SpawnClass.Zombie, 1, "pusher");
+  const self = spawnZombie(0x3001, 1, "pusher");
   self.visible = true;
   self.pos = vec3(2, 0, 0);
 
@@ -6033,7 +6109,7 @@ console.log("\na dead civilian releases its captors:");
   civ.visible = true;
   civ.hp = 1;
   g_class_handlers[SpawnClass.Civilian]!.init(civ, rng);
-  const captor = ActorSpawn(0x4001, SpawnClass.Zombie, 1, "captor");
+  const captor = spawnZombie(0x4001, 1, "captor");
   captor.visible = true;
   captor.hp = 10;
   captor.flags |= ActorFlag.HoldingWeapon;
@@ -6153,7 +6229,7 @@ console.log("class 0x30, the corpse that blinks:");
   const rng = new Rng(12);
   const events = scene(0, rng);
   // `ZombieEnterCorpseState` sends character types 0x12 and 3 to state 8.
-  const z = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "blinker");
+  const z = spawnZombie(0x3000, 1, "blinker");
   z.visible = true;
   z.hp = 1;
   z.charType = 3;
@@ -6188,7 +6264,7 @@ console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
   scene(0, rng);
 
   // `TEST CH, 0x40` at 0x00453F88: a zombie shot in mid-leap keeps flying.
-  const leaper = ActorSpawn(0x3100, SpawnClass.Zombie, 1, "leaper");
+  const leaper = spawnZombie(0x3100, 1, "leaper");
   leaper.visible = true;
   leaper.state = ZombieState.DelayedLeap;
   leaper.flags2 |= ZombieFlag2.Leaping;
@@ -6203,7 +6279,7 @@ console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
         leaper.flags2.toString(16));
 
   // The once-only latch. A burst must not knock a corpse back to sub 0.
-  const z = ActorSpawn(0x3200, SpawnClass.Zombie, 1, "shot twice");
+  const z = spawnZombie(0x3200, 1, "shot twice");
   z.visible = true;
   z.dead = true;
   z.flags |= ActorFlag.Dead;
@@ -6218,7 +6294,7 @@ console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
   // The carried arm. What is pinned here is the *near-target latch*, which is
   // state 9's own input and is `[proved]` at 0x00454006; where the arm leads
   // is the next block's.
-  const carried = ActorSpawn(0x3300, SpawnClass.Zombie, 1, "carried");
+  const carried = spawnZombie(0x3300, 1, "carried");
   carried.visible = true;
   carried.dead = true;
   carried.flags |= ActorFlag.Dead;
@@ -6232,7 +6308,7 @@ console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
         (carried.flags2 & ZombieFlag2.ShotNearArcTarget) !== 0,
         carried.flags2.toString(16));
 
-  const far = ActorSpawn(0x3400, SpawnClass.Zombie, 1, "carried, far");
+  const far = spawnZombie(0x3400, 1, "carried, far");
   far.visible = true;
   far.dead = true;
   far.flags |= ActorFlag.Dead;
@@ -6277,7 +6353,7 @@ console.log("class 0x30 state 9: the body is thrown, not dropped:");
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
-    const z = ActorSpawn(0x3600, SpawnClass.Zombie, 1, "knocked back",
+    const z = spawnZombie(0x3600, 1, "knocked back",
                          { condition });
     z.visible = true;
     z.hp = z.maxHp = 100;
@@ -6395,7 +6471,7 @@ console.log("class 0x30, dying with a weapon still in hand:");
 {
   const rng = new Rng(14);
   const events = scene(0, rng);
-  const z = ActorSpawn(0x3500, SpawnClass.Zombie, 1, "axe man");
+  const z = spawnZombie(0x3500, 1, "axe man");
   z.visible = true;
   z.hp = 1;
   z.pos = vec3(0, 40, 0);
@@ -6479,7 +6555,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
 
   // 1. The permit release, on its own, on both classes.
   {
-    const z = ActorSpawn(0x2400, SpawnClass.Zombie, 1, "zombie");
+    const z = spawnZombie(0x2400, 1, "zombie");
     z.visible = true;
     z.hp = 10;
     check("a zombie takes a permit", TryClaimAttackSlot(z, NULL_HOST));
@@ -6507,8 +6583,8 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
   // 2. The guard, in `ZombieReleasePermitAndUntrack`. Three cases, and the
   //    count is read *before* `ReleaseEnemyAliveCount` runs, so "1" means
   //    "this actor is the last one".
-  const zombie = (at: number, flags = 0): Actor => {
-    const a = ActorSpawn(at, SpawnClass.Zombie, 1, `zombie ${at}`);
+  const zombie = (at: number, flags = 0): ZombieActor => {
+    const a = spawnZombie(at, 1, `zombie ${at}`);
     a.visible = true;
     a.hp = 10;
     a.flags |= flags;

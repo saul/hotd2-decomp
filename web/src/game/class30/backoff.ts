@@ -11,7 +11,7 @@
  * promptly instead of after a fresh walk-in.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionPlayFrame, MotionRowOf } from "../tables";
@@ -47,7 +47,7 @@ const BACKOFF_HELD_MIN_FRAME = 0x43;
 const BACKOFF_SHORT_CONDITION = 4;
 const BACKOFF_SHORT_FRACTION = 0.7;
 
-export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
+export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
                                    rng: Rng): void {
   if (obj.sub === 0) {
     // `obj+0x1338`, **not** the attack cooldown at `obj+0x133C`. This is the
@@ -56,8 +56,8 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
     // is the direction this state retreats in. An earlier revision wrote it
     // into `cooldown` — two different fields, one of them the thing that
     // paces attacks.
-    obj.shoveTimer = 0x3c;            // +0x1338
-    obj.backoffFrames = 0;            // +0x1334
+    obj.zom.shoveTimer = 0x3c;            // +0x1338
+    obj.zom.backoffFrames = 0;            // +0x1334
     // `obj+0x34 |= 0x20000000`: out of the compacted queue while retreating,
     // so whoever is behind moves up and can take its turn.
     obj.flags |= ActorFlag.BackingOff;
@@ -89,7 +89,7 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
   // One increment per **update**, not `dt` seconds' worth: the exe has no
   // frame time here at all, and the 0xF0 it is compared against below counts
   // updates.
-  obj.backoffFrames += 1;
+  obj.zom.backoffFrames += 1;
 
   // Distance is measured against the remembered player point, the same one the
   // lunge used: `00455c37 d94648` / `00455c3a d8a6ec130000` and
@@ -116,14 +116,14 @@ export function ZombieStateBackOff(obj: Actor, eye: Vec3, dt: number,
   const clipHeld = obj.motion === BACKOFF_HELD_MOTION
     && MotionPlayFrame(obj) <= BACKOFF_HELD_MIN_FRAME;
   const inner = ApproachInnerRadius(obj);
-  if ((d > inner || obj.backoffFrames > BACKOFF_MAX_FRAMES
+  if ((d > inner || obj.zom.backoffFrames > BACKOFF_MAX_FRAMES
        || (obj.condition === BACKOFF_SHORT_CONDITION
            && inner * BACKOFF_SHORT_FRACTION < d))
       && !clipHeld) {
     // `00455d96 f6866813000001` — and **only** when the cooldown latch is
     // down. A state-19 attacker keeps its counter across the retreat; zeroing
     // it here unconditionally is the other half of what disarmed that loop.
-    if (!obj.hasCooldown) obj.cooldown = 0;
+    if (!obj.zom.hasCooldown) obj.cooldown = 0;
     obj.flags &= ~ActorFlag.BackingOff;
     ReleaseAttackSlot(obj);          // only now is the next enemy free
     obj.state = ZombieState.HoldAtRange;

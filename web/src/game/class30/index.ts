@@ -8,7 +8,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import {
   DeadSweep, registerClass, type ActorDebug, type ClassFrame,
   type ClassHandler,
@@ -68,7 +68,7 @@ import {
 /** `EnemyZombieInit`'s literal for `obj+0x128` — `0x40600000`. */
 const ZOMBIE_BODY_RADIUS = 3.5;
 
-export function EnemyZombieUpdate(obj: Actor, f: ClassFrame): void {
+export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   const { eye, dt, rng, host, events } = f;
   // `EnemyZombieUpdate` (`FUN_004533F0`) runs the shot response **before** the
   // state, at 0x0045340E: the shot that killed this actor puts it in a death
@@ -86,7 +86,7 @@ export function EnemyZombieUpdate(obj: Actor, f: ClassFrame): void {
   ZombiePushOutOfWorldAndActors(obj, dt * 60);
 }
 
-function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
+function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
                         host: GameHost, events?: Events): void {
   switch (obj.state) {
     case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
@@ -214,7 +214,7 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
  * **none** of the 90 class-0x30 spawns starts in `Approach`. The old port
  * started everything there, which is why nothing ever reached the hub.
  */
-export function EnemyZombieInit(obj: Actor): void {
+export function EnemyZombieInit(obj: ZombieActor): void {
   obj.attackPermit = -1;
   // `EnemyZombieInit`: `obj+0x124 = g_actor_radius_by_char[type]`, the shot
   // sphere, and `obj+0x128 = 3.5`, the body one. The port had neither, so
@@ -227,7 +227,7 @@ export function EnemyZombieInit(obj: Actor): void {
   // its first frame before `RankEnemiesByDistance` had ever seen it.
   obj.rank = -1;
   obj.sub = 0;
-  obj.backoffFrames = 0;
+  obj.zom.backoffFrames = 0;
   obj.cooldown = 0;
   // `EnemyZombieInit` *assigns* `obj+0x136C` (`00452e78`, then
   // `00452eaf` with `(s16)obj+0x1316 | 0x60000000`), so a pooled actor
@@ -236,7 +236,7 @@ export function EnemyZombieInit(obj: Actor): void {
   obj.struck = false;
   // `EnemyZombieInit`: `obj+0x136C |= 0x60000000` — take part in both pushes.
   obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
-  obj.shoveTimer = 0;
+  obj.zom.shoveTimer = 0;
   obj.state = ZombieEntryState(obj.initialState);
   // ...and the actor counts itself in, which is the engine's own last act
   // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.
@@ -300,7 +300,7 @@ const ZOMBIE_ENTRY_STATES: ReadonlySet<number> = new Set<number>([
  * either out of rank or waiting on the single permit, and those two look
  * identical on screen.
  */
-export function EnemyZombieDebug(obj: Actor): ActorDebug {
+export function EnemyZombieDebug(obj: ZombieActor): ActorDebug {
   const wants = obj.state === ZombieState.HoldAtRange
              || obj.state === ZombieState.AttackRun;
   const permit = obj.attackPermit >= 0;
@@ -326,9 +326,9 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
     // it is walking matters most: the walk leaves the cursor in the attack
     // script and hands over to a state that is not the attack state.
     if (TARGET_STATES.has(obj.state)) {
-      detail.push(`${obj.scriptBlob ? "attack" : "target"} script`
-        + ` · entry ${obj.scriptPc} · loops ${obj.targetLoops}`
-        + ` · cue ${obj.targetCue} · wants ${obj.scriptMotion}`
+      detail.push(`${obj.zom.scriptBlob ? "attack" : "target"} script`
+        + ` · entry ${obj.zom.scriptPc} · loops ${obj.zom.targetLoops}`
+        + ` · cue ${obj.zom.targetCue} · wants ${obj.zom.scriptMotion}`
         + ` · frame ${MotionPlayFrame(obj)}/${MotionPlayLength(obj)}`);
     }
   }
@@ -369,7 +369,7 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
  * and is the whole reason the script has both `wait_enemies_present` and
  * `wait_enemies_alive`.
  */
-function EnemyZombieDeadSweep(obj: Actor, why: DeadSweep): void {
+function EnemyZombieDeadSweep(obj: ZombieActor, why: DeadSweep): void {
   ReleaseAttackSlot(obj, ZombieFlag2.OffScreenPermit);
   if (why !== DeadSweep.Despawned) return;
   ReleaseEnemyAliveCount(obj);

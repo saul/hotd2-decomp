@@ -8,7 +8,7 @@
  * (`class31/on_shot.ts`) is the same routine for class 0x31 and has been the
  * only thing routing a thrower into its fall since it was written.
  */
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { ZombieState } from "./states";
 
 /** `FCOMP [0x0055d178]` — `00009041` = 18.0f. */
@@ -73,7 +73,7 @@ const STATE_UNREAD_0x34 = 0x34;
  * `FUN_004550E0` — the camera-space landing point, the arc, the water case and
  * the bounce — so the write below is the engine's own.
  */
-export function ZombieOnShot(obj: Actor): void {
+export function ZombieOnShot(obj: ZombieActor): void {
   const hit = obj.pendingHit;
   if (!hit) return;
   obj.pendingHit = null;

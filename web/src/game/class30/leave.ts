@@ -18,11 +18,11 @@
  * `ZombieStateHoldAtRange`'s too-close retreat, which is a behaviour the exe
  * only ever gives an actor that has never swung.
  */
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { ZombieState } from "./states";
 
-export function ZombieGiveUpAttack(obj: Actor): void {
+export function ZombieGiveUpAttack(obj: ZombieActor): void {
   obj.action = null;
   ReleaseAttackSlot(obj);
   obj.state = ZombieState.WaitTurn;

@@ -15,6 +15,7 @@ import type { CivilianState } from "./class10/state";
 import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
+import { makeZombieTail, type ZombieTail } from "./class30/state";
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
@@ -822,7 +823,12 @@ export interface ActorBase {
    * descriptor-tail pointer at the same address: one address, three fields.
    */
   selector: number;         // +0x130C, aliases `condition`
-  /** `obj+0x1330` — the set-piece slide's countdown, in frames. */
+  /**
+   * `obj+0x1330` — the set-piece slide's countdown, in frames.
+   *
+   * Class 0x30's corpse countdown was this field and is now
+   * {@link ZombieTail.corpseTimer}: same word, a different class's clock.
+   */
   slideTimer: number;       // +0x1330
   /**
    * `obj+0x1320` — frames a wait has been stalled for. `SetPieceStateHoldThenPlay`
@@ -831,51 +837,23 @@ export interface ActorBase {
    * Both count **up** and both are reset by the routine that reads them, but
    * they are not the same field: class 0x24 tests it against `tail+0x0C` and
    * class 0x25 against a command's `a`, and class 0x30 aliases the same
-   * address as `scriptMotion`, which is a motion id and not a counter at all.
+   * address as `zom.scriptMotion`, which is a motion id and not a counter at
+   * all.
+   *
+   * **Class 0x30 does not share this field**, and used to. Its holds are
+   * counted at `obj+0x1330` — `[proved]` at `ZombieStateEmerge`
+   * (`0x00458596`), `ZombieStateRunInPlaceTimed` (`0x004571B0`) and
+   * `ActorArcBeginFalling` — so the port had two addresses under one name.
+   * That reading is now {@link ZombieTail.holdFrames}.
    */
-  holdFrames: number;       // +0x1320
+  holdFrames: number;       // +0x1320, class 0x24
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
-  /** Frames spent retreating; `ZombieStateBackOff` gives up past 0xF0. */
-  backoffFrames: number;    // +0x1334
   /** How deep in the distance queue this actor may be and still attack. */
   allowance: number;        // +0x1358
   /** Frames before this actor may claim again. `ZombieStateHoldAtRange`
    *  forces it to zero unless `obj+0x1368` bit 0 is set. */
   cooldown: number;         // +0x133C
-  /**
-   * `obj+0x1368` bit 0 for class 0x30 — **the actor is allowed a cooldown**.
-   *
-   * `ZombieStateWaitForCameraFrame` (state 19) is the only thing in the class
-   * that sets it (`00457731`, `OR AL, 0x1`), and it arms **once**:
-   * `ZombieStateHoldAtRange` clears it again when the countdown expires
-   * (`004557ff 24fe`). Three routines read it — `ZombieStateHoldAtRange`
-   * (`004557dc a801`), `ZombieStateStrike` (`00455b24 f6866813000001`, which
-   * skips the lunge while it is up) and `ZombieStateBackOff`
-   * (`00455d96 f6866813000001`, which then leaves {@link Actor.cooldown}
-   * alone).
-   *
-   * A separate field and not a bit of `reactBone`, which is the same offset:
-   * class 0x31 reads `obj+0x1368` as the bone that was hit, and this is the
-   * polymorphism trap that field carries.
-   *
-   * [diverges] For class 0x30 the whole dword is a **flags word** and the port
-   * models one bit of it as this boolean. The other six bits class 0x30
-   * provably touches have no port:
-   *
-   * * `0x2` — entered water. `ActorCheckWaterEntry` sets it (0x00456998) and
-   *   tests it (0x00456925); `EnemyZombieUpdate` reads it (0x00453486).
-   * * `0x8` / `0x10` / `0x40` / `0x80` — kill-move death-clip selectors, each
-   *   set by `ZombieStateTargetMotionScript` for one motion id and read back
-   *   by `ChooseDeathMotion` to pick the matching death.
-   * * `0x20` — set by `EnemyZombieInitByCharType` for character types 9 and
-   *   0x12 (0x00453180), tested by `FUN_004534A0` (0x00453665 `TEST CL, 0x20`)
-   *   and `FUN_00453AE0` (0x00453B07). `[open]` what it selects.
-   *
-   * Making this a word is the same job as splitting it from `reactBone`, which
-   * is the union wave; the gap is recorded here rather than half-fixed.
-   */
-  hasCooldown: boolean;     // +0x1368 bit 0, class 0x30
   /**
    * The player point the strike measures its lunge against, written by
    * `ActorFacePlayerTarget`. With one attacker it is the camera eye; with two
@@ -952,15 +930,6 @@ export interface ActorBase {
    * field at all: it is one immutable descriptor value two classes read.
    */
   walkDistance: number;     // desc+0x04
-  /**
-   * `obj+0x1374` — how far `ZombieStateWalkDistance` has come from
-   * `arcFrom`. The engine writes it every frame and never reads it back.
-   */
-  walkTravelled: number;    // +0x1374
-  /** `obj+0x1330` — `ZombieStateStandAndThrow`'s idle countdown. */
-  throwDelay: number;       // +0x1330
-  /** The bone the current throw leaves from, 5 or 8. */
-  throwHand: number;
   /** `ZombieStateStandAndThrow`'s descriptor tail, from the bundle. */
   standThrow: CharacterPlacement["stand_throw"];
   /**
@@ -1141,60 +1110,12 @@ export interface ActorBase {
    */
   script: { target: TargetScriptJson | null;
             attack: TargetScriptJson | null } | null;
-  /**
-   * `obj+0x1398` — the cursor into the captor script's entry list.
-   *
-   * The engine keeps a pointer; an index is the same edge without the address,
-   * and it survives a snapshot. Shared by every state in the family, which is
-   * how `ZombieStateWalkToTarget` can hand `ZombieStateTargetMotionScript` a
-   * half-walked list.
-   *
-   * **A pointer says which list as well as how far in**, and that half is
-   * {@link scriptBlob}. Without it the cursor was re-aimed from `obj.state`
-   * on every read, so a captor that arrived and entered state 35 went back to
-   * the blob it had already finished instead of the one the walk left it in.
-   */
-  scriptPc: number;         // +0x1398
-  /**
-   * Which of the descriptor tail's two script blobs {@link scriptPc} indexes:
-   * 0 is `+0x04`, 1 is `+0x08`. The other half of `obj+0x1398`.
-   *
-   * `ZombieScriptForState` (`FUN_0045CA10`) is called only where the engine
-   * writes that pointer — `ZombieScriptEnded`, and each scripted state's
-   * entry sub — and never on the steps in between, which read the pointer
-   * back. Deriving it from the state instead is a test moved across a
-   * function boundary, and it moved the answer with it.
-   */
-  scriptBlob: number;       // +0x1398, which blob the pointer is in
-  /** `obj+0x1320` — the clip the captor script wants; the tail re-blends to it. */
-  scriptMotion: number;     // +0x1320, aliases `holdFrames`
-  /** `obj+0x1350` — the captor script's remaining loop count. Aliases `landSurface`. */
-  targetLoops: number;      // +0x1350
-  /**
-   * `obj+0x1354` — the script entry's cue frame or mode, and, once
-   * `ZombieStateTargetLostPause` is entered, the state to come back to.
-   * Aliases `arcKind`; the two never overlap in time.
-   */
-  targetCue: number;        // +0x1354
-  /** `obj+0x1358` — the sub to come back to. Aliases `allowance`/`pathMode`. */
-  resumeSub: number;        // +0x1358
-  /** `obj+0x1370` — how close `ZombieStateWalkToTarget` has to get. */
-  targetArrive: number;     // +0x1370
   /** `obj+0x1388` — the height a fall began at, and a flag while it is set. */
   fallFromY: number;        // +0x1388
   /** `obj+0x1354` — the axis gravity pulls along. See `ThrowerArcKind`. */
   arcKind: number;          // +0x1354
   /** `obj+0x138C` — the draw alpha the blinking states write. */
   alpha: number;            // +0x138C
-  /**
-   * `obj+0x1338` — frames since this actor was last shoved out of another.
-   *
-   * `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) counts it down and, 60
-   * frames after a push, flips `obj+0x136C` bit 0x400000 — the direction
-   * `ZombieStateBackOff` retreats in. **Not** the attack cooldown, which is
-   * the next field along.
-   */
-  shoveTimer: number;       // +0x1338
   /** `obj+0x133C` is the cooldown; this is the frame the corpse is pinned to. */
   corpseFrame: number;      // +0x194, pinned
   /** `ThrowerStateBlinkInThreeHops`' two counters. */
@@ -1281,11 +1202,6 @@ export interface ActorBase {
    * is where an ordinary zombie actually decides to swing, does not.
    */
   attackState: number;
-  /**
-   * `obj+0x132C` — the state `ZombieStateHoldForCameraCue` runs on this
-   * actor's behalf while it waits for its camera cue.
-   */
-  delegate: number;
   /**
    * The descriptor tail's `+0x0C`/`+0x0E`, or null when `+0x0C` is -1.
    * The camera path and frame a captor's exit waits for.
@@ -1418,11 +1334,17 @@ export interface ActorBase {
  */
 export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedHumanoid; hum: HumanoidTail })
-  | (ActorBase & { cls: Exclude<SpawnClass, SpawnClass.ScriptedHumanoid> });
+  | (ActorBase & { cls: SpawnClass.Zombie; zom: ZombieTail })
+  | (ActorBase & {
+      cls: Exclude<SpawnClass, SpawnClass.ScriptedHumanoid | SpawnClass.Zombie>;
+    });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
   { cls: SpawnClass.ScriptedHumanoid }>;
+
+/** An actor already narrowed to class 0x30, for that class's own routines. */
+export type ZombieActor = Extract<Actor, { cls: SpawnClass.Zombie }>;
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
@@ -1478,7 +1400,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     sub: 0,
     zones: 0,
     attack: -1,
-    hasCooldown: false,
     rank: -1,
     queueRank: 0xe,
     frozen: 0,
@@ -1486,7 +1407,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     slideTimer: 0,
     holdFrames: 0,
     ringSet: 0,
-    backoffFrames: 0,
     allowance: 0,
     cooldown: 0,
     target: vec3(),
@@ -1506,10 +1426,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     moveBand: 0,
     sinceLanding: 0,
     walkDistance: 0,
-    walkTravelled: 0,
     worldPushDepth: 0,
-    throwDelay: 0,
-    throwHand: 0,
     standThrow: undefined,
     entranceMotion: 0,
     pounce: null,
@@ -1532,17 +1449,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     landSurface: 0,
     targetAt: -1,
     script: null,
-    scriptPc: 0,
-    scriptBlob: 0,
-    scriptMotion: 0,
-    targetLoops: 0,
-    targetCue: 0,
-    resumeSub: 0,
-    targetArrive: 0,
     fallFromY: 0,
     arcKind: 0,
     alpha: 1,
-    shoveTimer: 0,
     corpseFrame: -1,
     hopsLeft: 0,
     hopFrames: 0,
@@ -1552,7 +1461,6 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     descFlags: 0,
     initialState: 0,
     attackState: 0,
-    delegate: 0,
     cameraCue: null,
     dead: false,
     visible: false,
@@ -1578,6 +1486,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // be lied to, and there is no cast here.
   if (cls === SpawnClass.ScriptedHumanoid) {
     return { ...head, cls, hum: makeHumanoidTail() };
+  }
+  if (cls === SpawnClass.Zombie) {
+    return { ...head, cls, zom: makeZombieTail() };
   }
   return { ...head, cls };
 }

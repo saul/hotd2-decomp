@@ -29,7 +29,7 @@
  * have.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, CountFlag, ZombieFlag2, type Actor } from "../actor";
+import { ActorFlag, CountFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
@@ -154,7 +154,7 @@ const CHAR_CARRIED_DEATH_HI = 0x11;
  * remaps it through `obj+0x136C` bits 1, 2 and 4; the port's
  * `ChooseDeathMotionDirectional` returns the id and has never had the remap.
  */
-export function ChooseDeathMotion(obj: Actor, rng: Rng): void {
+export function ChooseDeathMotion(obj: ZombieActor, rng: Rng): void {
   const play = (motion: number, frame = 0): void => {
     ActorSetMotionBlended(obj, motion, frame, MotionFade.Quick);
   };
@@ -239,7 +239,7 @@ export function ChooseDeathMotion(obj: Actor, rng: Rng): void {
  * killing shot of a fight is not cut away from. Six shipped spawns carry that
  * bit; see the flag's own comment for where they are and how it gets there.
  */
-export function ZombieReleasePermitAndUntrack(obj: Actor): void {
+export function ZombieReleasePermitAndUntrack(obj: ZombieActor): void {
   ReleaseAttackSlot(obj);
   if (obj.flags38 & CountFlag.KeepCounted) return;
   // `004565bd a900008000` / `004565c4 66390d4a909c00` with CX = 1 — the test
@@ -278,7 +278,7 @@ export function ZombieReleasePermitAndUntrack(obj: Actor): void {
  * {@link ZombieFlag2.OneShotFired}, is cleared below exactly as the engine
  * clears it.
  */
-export function ZombieStateDeath6(obj: Actor, rng: Rng): void {
+export function ZombieStateDeath6(obj: ZombieActor, rng: Rng): void {
   if (obj.sub === 0) {
     ChooseDeathMotion(obj, rng);
     obj.sub += 1;
@@ -348,7 +348,7 @@ export function ZombieStateDeath6(obj: Actor, rng: Rng): void {
  * the port's `RegisterForDistanceRank` stands in for it with `!dead`, which a
  * corpse already fails. `[proved]` for the test, `[open]` for the bit's name.
  */
-export function ZombieEnterCorpseState(obj: Actor): void {
+export function ZombieEnterCorpseState(obj: ZombieActor): void {
   obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors);
   obj.flags = (obj.flags & ~ActorFlag.Airborne)
             | ActorFlag.PoseFrozen | CORPSE_UNREAD_BIT;
@@ -367,14 +367,14 @@ export function ZombieEnterCorpseState(obj: Actor): void {
  * [diverges] `SpawnGroundRingEffect` is the first call of each, and it is an
  * effect the port does not draw.
  */
-function ZombieCorpseBegin(obj: Actor): void {
+function ZombieCorpseBegin(obj: ZombieActor): void {
   // `AND EDX, 0xdffffdff` — **0x20000000 and 0x200 only.** The comment on
   // `ZombieFlag2.HitReactionAlt` used to name this instruction as the thing
   // that clears bit 0x100; `0xdffffdff` has bit 8 set, so it does not.
   obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.HitReactionPending);
   // `OR EAX, 0xa0000` — off the floor for the sink, and no ground decal.
   obj.flags |= ActorFlag.Airborne | CORPSE_NO_DECAL_BIT;
-  obj.slideTimer = CORPSE_FRAMES;
+  obj.zom.corpseTimer = CORPSE_FRAMES;
   // `obj+0x1350 = obj+0x68` — the spawn yaw stashed in the field the port
   // calls `landSurface`. `[open]`: nothing in the ported call graph reads it
   // back for a class-0x30 corpse, and writing a heading into a field named for
@@ -389,7 +389,7 @@ function ZombieCorpseBegin(obj: Actor): void {
  * `obj+0x34 |= 0x10000` / `g_enemy_slots[obj+0x120 * 8] = 0` / `ActorDespawn`
  * at 0x00454F9C..0x00454FBB, and the identical three at 0x0045508C.
  */
-function ZombieCorpseLeave(obj: Actor): void {
+function ZombieCorpseLeave(obj: ZombieActor): void {
   obj.flags |= ActorFlag.NoCameraTrack;
   G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
   ActorDespawn(obj);
@@ -423,14 +423,14 @@ function ZombieCorpseLeave(obj: Actor): void {
  * `ZombiePushOutOfWorldAndActors` skips its ground snap on — without it the
  * floor would put the body back every frame.
  */
-export function ZombieStateCorpseSink(obj: Actor, dt: number): void {
+export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
   const frames = dt * GAME_HZ;
-  obj.slideTimer -= frames;
+  obj.zom.corpseTimer -= frames;
   obj.pos.y -= CORPSE_SINK * frames;
-  if (obj.slideTimer < 1) ZombieCorpseLeave(obj);
+  if (obj.zom.corpseTimer < 1) ZombieCorpseLeave(obj);
 }
 
 /**
@@ -446,16 +446,16 @@ export function ZombieStateCorpseSink(obj: Actor, dt: number): void {
  * [diverges] The port has one draw alpha per actor rather than a byte per
  * part, which is `ThrowerStateCorpse`'s answer to the same routine.
  */
-export function ZombieStateCorpseBlink(obj: Actor, dt: number): void {
+export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
   // Parity is read **before** the decrement, so the first frame is visible.
-  obj.alpha = (Math.floor(obj.slideTimer) & 1) ? 0 : 1;
+  obj.alpha = (Math.floor(obj.zom.corpseTimer) & 1) ? 0 : 1;
 
   const frames = dt * GAME_HZ;
-  obj.slideTimer -= frames;
-  if (obj.slideTimer >= 1) return;
+  obj.zom.corpseTimer -= frames;
+  if (obj.zom.corpseTimer >= 1) return;
   obj.alpha = 1;
   ZombieCorpseLeave(obj);
 }
@@ -480,7 +480,7 @@ export function ZombieStateCorpseBlink(obj: Actor, dt: number): void {
  * {@link ZombieFlag2.OneShotFired}, which is the gate below and is set here
  * where the hook would set it.
  */
-export function ZombieStateDeathFallAndBounce(obj: Actor, dt: number,
+export function ZombieStateDeathFallAndBounce(obj: ZombieActor, dt: number,
                                               rng: Rng): void {
   const frames = dt * GAME_HZ;
 

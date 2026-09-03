@@ -22,7 +22,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, type Actor, type ZombieActor } from "../actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
 import { G } from "../globals";
 import { AttackListOf, CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
@@ -63,7 +63,7 @@ enum Sub {
 }
 
 /** Which hands still hold their weapon: 0, 1 or 2. */
-export function ZombieArmedHands(obj: Actor): number {
+export function ZombieArmedHands(obj: ZombieActor): number {
   const hands = CharacterTypeOf(obj)?.zombie_throw?.hands;
   if (!hands) return 0;
   let n = 0;
@@ -79,7 +79,7 @@ export function ZombieArmedHands(obj: Actor): number {
  * the skeleton started it with. Shooting the weapon out of the hand, or
  * severing the arm, changes that slot and disarms the hand.
  */
-function ZombieHandIsArmed(obj: Actor, bone: number): boolean {
+function ZombieHandIsArmed(obj: ZombieActor, bone: number): boolean {
   const h = CharacterTypeOf(obj)?.zombie_throw?.hands
     .find((x) => x.bone === bone);
   if (!h) return false;
@@ -94,7 +94,7 @@ function ZombieHandIsArmed(obj: Actor, bone: number): boolean {
  * armed. Writes the attack index at `obj+0x131A` — 0 for bone 5, 1 for bone 8
  * — and returns the bone, or 0 when both hands are empty.
  */
-export function ZombiePickThrowingHand(obj: Actor, rng: Rng): number {
+export function ZombiePickThrowingHand(obj: ZombieActor, rng: Rng): number {
   const hands = CharacterTypeOf(obj)?.zombie_throw?.hands ?? [];
   const right = hands.find((h) => h.bone === 5);
   const left = hands.find((h) => h.bone === 8);
@@ -122,7 +122,7 @@ export function ZombiePickThrowingHand(obj: Actor, rng: Rng): number {
  * success; the state it routes into does not claim again for a condition-8
  * actor, which is why the claim arm skips it.
  */
-export function ZombieShouldStandAndThrow(obj: Actor): boolean {
+export function ZombieShouldStandAndThrow(obj: ZombieActor): boolean {
   if (obj.condition !== ATTACK_RUN_THROW_CONDITION) return false;
   // `FUN_0040A040(g_camera_yaw_bams - 0x8000, obj+0x68, 0x400)` — the camera's
   // *backward* yaw against the actor's facing, because an actor faces away
@@ -138,7 +138,7 @@ export const ATTACK_RUN_THROW_CONDITION = 8;
 /** `FUN_0040A040`'s window here: 0x400 BAMS, a little over five degrees. */
 const FACING_WINDOW = 0x400;
 
-export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
+export function ZombieStateStandAndThrow(obj: ZombieActor, eye: Vec3, rng: Rng,
                                          host: GameHost,
                                          events?: Events): void {
   const tail = obj.standThrow;
@@ -157,7 +157,7 @@ export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
       const armed = ZombieArmedHands(obj);
       if (armed === 0) { ZombieReleaseAndDespawn(obj); return; }
       obj.flags |= ActorFlag.HoldingWeapon;
-      obj.throwDelay = armed === 2
+      obj.zom.throwDelay = armed === 2
         ? (tail?.delay_two_hands ?? 0) : (tail?.delay_one_hand ?? 0);
     }
     obj.sub = Sub.Wait;
@@ -166,8 +166,8 @@ export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
   if (obj.sub === Sub.Wait) {
     if (standing) {
       ZombieSetMotionIfIdle(obj, idle, rng, "clip", MotionFade.Quick);
-      obj.throwDelay -= 1;
-      if (obj.throwDelay > 0) return;
+      obj.zom.throwDelay -= 1;
+      if (obj.zom.throwDelay > 0) return;
     }
     obj.sub = Sub.Claim;
   }
@@ -181,7 +181,7 @@ export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
       return;
     }
     obj.flags |= ActorFlag.Committed;
-    obj.throwHand = ZombiePickThrowingHand(obj, rng);
+    obj.zom.throwHand = ZombiePickThrowingHand(obj, rng);
     const a = AttackListOf(obj)[String(obj.attack)];
     if (a) ActorSetMotionBlended(obj, a.strike, 0, 4);
     obj.sub = Sub.Release;
@@ -192,8 +192,8 @@ export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
     const a = AttackListOf(obj)[String(obj.attack)];
     // `obj+0x19C == entry+0x08`, the hit frame, in the play clock.
     if (!a || MotionPlayFrame(obj) !== a.hit_frame) return;
-    if (obj.throwHand) {
-      SpawnZombieThrownWeapon(obj, obj.throwHand, eye, host, rng, events);
+    if (obj.zom.throwHand) {
+      SpawnZombieThrownWeapon(obj, obj.zom.throwHand, eye, host, rng, events);
     }
     obj.sub = Sub.Recover;
     return;
@@ -208,15 +208,15 @@ export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
     if (!standing) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
     // The stationary one throws again while it still has a hand.
     if (ZombieArmedHands(obj) > 0) { obj.sub = Sub.Arm; return; }
-    obj.throwDelay = tail?.delay_after_throw ?? 0;
+    obj.zom.throwDelay = tail?.delay_after_throw ?? 0;
     obj.sub = Sub.Leave;
     return;
   }
 
   if (obj.sub === Sub.Leave) {
     ZombieSetMotionIfIdle(obj, idle, rng, "clip", MotionFade.Quick);
-    obj.throwDelay -= 1;
-    if (obj.throwDelay >= 1) return;
+    obj.zom.throwDelay -= 1;
+    if (obj.zom.throwDelay >= 1) return;
     ZombieStandAndThrowLeave(obj, tail);
   }
   // Sub 6 is the despawn arm, reached only when `obj+0x38` bit 0x10 is set.
@@ -233,13 +233,13 @@ export function ZombieStateStandAndThrow(obj: Actor, eye: Vec3, rng: Rng,
  * arm of `ZombieStateWalkDistance` that retires the actor instead of sending
  * it at the camera: this is the one place in the game that reaches it.
  */
-function ZombieStandAndThrowLeave(obj: Actor,
+function ZombieStandAndThrowLeave(obj: ZombieActor,
                                   tail: Actor["standThrow"]): void {
   obj.flags &= ~ActorFlag.HoldingWeapon;
   if (tail?.leap) {
     obj.state = ZombieState.DelayedLeap;
     obj.sub = 1;
-    obj.backoffFrames = 0;
+    obj.zom.backoffFrames = 0;
     obj.delayedLeap = { delay: 0, dest: tail.leap.dest,
                         gravity: tail.leap.gravity };
     // `if (condition == 7) condition = 5` — and 5 is the other value
@@ -248,8 +248,8 @@ function ZombieStandAndThrowLeave(obj: Actor,
     return;
   }
   obj.flags |= ActorFlag.BackingOff;
-  obj.targetArrive = tail?.walk_distance ?? 0;
-  obj.walkDistance = obj.targetArrive;
+  obj.zom.targetArrive = tail?.walk_distance ?? 0;
+  obj.walkDistance = obj.zom.targetArrive;
   obj.state = ZombieState.WalkDistance;
   obj.sub = 1;
 }

@@ -18,7 +18,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { ActorFacePlayerTarget } from "../actor_turn";
 import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
@@ -93,7 +93,7 @@ export function ZombieScriptedPickPlayer(want: number, rng: Rng): number {
 }
 
 /** The clip's last frame, on the play clock. Equality: the cursor wraps. */
-function atLastFrame(obj: Actor): boolean {
+function atLastFrame(obj: ZombieActor): boolean {
   const len = MotionPlayLength(obj);
   return len > 0 && MotionPlayFrame(obj) === len - 1;
 }
@@ -112,7 +112,7 @@ function atLastFrame(obj: Actor): boolean {
  * cooldown to zero. So for an ordinary zombie there is no wait between swings
  * beyond the strike clip and the retreat — and for these four there is.
  */
-export function ZombieStateWaitForCameraFrame(obj: Actor, dt: number): void {
+export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): void {
   const t = obj.entry;
 
   if (obj.sub === 0) {
@@ -154,16 +154,16 @@ export function ZombieStateWaitForCameraFrame(obj: Actor, dt: number): void {
       obj.sub = 0;
       return;
     }
-    obj.holdFrames = t?.delay ?? 0;
+    obj.zom.holdFrames = t?.delay ?? 0;
     obj.sub = 3;
   }
 
   if (obj.sub !== 3) return;
-  obj.holdFrames -= dt * 60;
-  if (obj.holdFrames >= 1) return;
+  obj.zom.holdFrames -= dt * 60;
+  if (obj.zom.holdFrames >= 1) return;
   // `obj+0x1368 |= 1` — the flag that lets `ZombieStateHoldAtRange` keep a
   // cooldown instead of zeroing it — and the cooldown itself.
-  obj.hasCooldown = true;
+  obj.zom.hasCooldown = true;
   obj.cooldown = t?.cooldown ?? 0;
   obj.state = ZombieState.Strike;
   obj.sub = 0;
@@ -180,13 +180,13 @@ export function ZombieStateWaitForCameraFrame(obj: Actor, dt: number): void {
  * 1's pair, whose clip is `0xB1` and whose damage kind is therefore 0 rather
  * than 9.
  */
-export function ZombieStateScriptedGrabAndDespawn(obj: Actor, eye: Vec3,
+export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
                                                   events?: Events): void {
   const t = obj.entry;
   if (!t) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
 
   if (obj.sub === 0) {
-    obj.holdFrames = t.cue_frame ?? -1;
+    obj.zom.holdFrames = t.cue_frame ?? -1;
     if (t.motion === GRAB_MOTION_PAIRED) {
       ActorSetMotion(obj, GRAB_MOTION_WAIT);
       obj.flags |= ActorFlag.ShotImmune;
@@ -202,7 +202,7 @@ export function ZombieStateScriptedGrabAndDespawn(obj: Actor, eye: Vec3,
 
   if (obj.sub === 1) {
     // `-1` fires at once; otherwise the camera path frame must equal it.
-    if (obj.holdFrames !== -1 && G.g_cam_path_frame !== obj.holdFrames) return;
+    if (obj.zom.holdFrames !== -1 && G.g_cam_path_frame !== obj.zom.holdFrames) return;
     if (t.motion === GRAB_MOTION_PAIRED) {
       ActorSetMotionBlended(obj, GRAB_MOTION_PAIRED, 0, 1);
     }
@@ -247,7 +247,7 @@ export function ZombieStateScriptedGrabAndDespawn(obj: Actor, eye: Vec3,
  * **pins** the position back to where the flight ended, so the actor cannot be
  * shoved off its perch by the crowd push.
  */
-export function ZombieStateLeapToPoint(obj: Actor, eye: Vec3, dt: number,
+export function ZombieStateLeapToPoint(obj: ZombieActor, eye: Vec3, dt: number,
                                        rng: Rng, events?: Events): void {
   const t = obj.entry;
   if (!t?.dest) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
@@ -257,22 +257,22 @@ export function ZombieStateLeapToPoint(obj: Actor, eye: Vec3, dt: number,
     if (t.idle_motion !== undefined) ActorSetMotion(obj, t.idle_motion);
     obj.flags |= ActorFlag.ArcSpent;
     obj.flags2 |= ZombieFlag2.Carried;
-    obj.holdFrames = t.frames ?? 1;
-    const n = Math.max(1, obj.holdFrames);
+    obj.zom.holdFrames = t.frames ?? 1;
+    const n = Math.max(1, obj.zom.holdFrames);
     obj.vel.x = (t.dest[0] - obj.pos.x) / n;
     obj.vel.y = (t.dest[1] - obj.pos.y) / n;
     obj.vel.z = (t.dest[2] - obj.pos.z) / n;
     obj.sub = 1;
   } else if (obj.sub === 1) {
-    obj.holdFrames -= frames;
-    if (obj.holdFrames > 0) return;
+    obj.zom.holdFrames -= frames;
+    if (obj.zom.holdFrames > 0) return;
     // Landed. `obj+0x13C0/C4/C8` is the perch every later sub pins back to.
     obj.arcFrom.x = obj.pos.x;
     obj.arcFrom.y = obj.pos.y;
     obj.arcFrom.z = obj.pos.z;
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.accX = obj.accY = obj.accZ = 0;
-    obj.holdFrames = t.delay ?? 0;
+    obj.zom.holdFrames = t.delay ?? 0;
     obj.sub = 2;
   }
 
@@ -284,8 +284,8 @@ export function ZombieStateLeapToPoint(obj: Actor, eye: Vec3, dt: number,
   }
 
   if (obj.sub === 3) {
-    obj.holdFrames -= frames;
-    if (obj.holdFrames > 0 || G.g_players_in_play === 0) {
+    obj.zom.holdFrames -= frames;
+    if (obj.zom.holdFrames > 0 || G.g_players_in_play === 0) {
       ZombieLeapPin(obj);
       return;
     }
@@ -313,7 +313,7 @@ export function ZombieStateLeapToPoint(obj: Actor, eye: Vec3, dt: number,
   if (obj.sub === 5 && atLastFrame(obj)) {
     ReleaseAttackSlot(obj);
     // Back to sub 2 — never out of the state. The re-arm is twice the delay.
-    obj.holdFrames = (t.delay ?? 0) * 2;
+    obj.zom.holdFrames = (t.delay ?? 0) * 2;
     if (t.idle_motion !== undefined) {
       ActorSetMotionBlended(obj, t.idle_motion, rng.int(10), MotionFade.Quick);
     }
@@ -329,7 +329,7 @@ export function ZombieStateLeapToPoint(obj: Actor, eye: Vec3, dt: number,
  * Every sub past the flight rewrites the position from the point the flight
  * ended at, so `ZombiePushOutOfWorldAndActors` cannot walk the actor off it.
  */
-function ZombieLeapPin(obj: Actor): void {
+function ZombieLeapPin(obj: ZombieActor): void {
   if (obj.sub <= 1) return;
   obj.pos.x = obj.arcFrom.x;
   obj.pos.y = obj.arcFrom.y;
@@ -349,23 +349,23 @@ function ZombieLeapPin(obj: Actor): void {
  * `ActorStrikeConnect` decides whether it lands — which means shooting the arm
  * off stops it, exactly as it does in the ordinary loop.
  */
-export function ZombieStateDelayedStrikeInPlace(obj: Actor, eye: Vec3,
+export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
                                                 dt: number, rng: Rng,
                                                 events?: Events): void {
   const t = obj.entry;
   const frames = dt * 60;
 
   if (obj.sub === 0) {
-    obj.holdFrames = t?.delay ?? 0;
+    obj.zom.holdFrames = t?.delay ?? 0;
     obj.sub = 1;
   } else if (obj.sub === 1) {
-    obj.holdFrames -= frames;
-    if (obj.holdFrames > 0) { ZombieDelayedStrikeIdle(obj, rng); return; }
+    obj.zom.holdFrames -= frames;
+    if (obj.zom.holdFrames > 0) { ZombieDelayedStrikeIdle(obj, rng); return; }
     obj.sub = 2;
   }
 
   if (obj.sub === 2) {
-    obj.holdFrames = t?.rearm ?? 0;
+    obj.zom.holdFrames = t?.rearm ?? 0;
     obj.sub = 3;
   }
 
@@ -375,8 +375,8 @@ export function ZombieStateDelayedStrikeInPlace(obj: Actor, eye: Vec3,
   }
 
   if (obj.sub === 4) {
-    obj.holdFrames -= frames;
-    if (obj.holdFrames > 0 || G.g_players_in_play === 0) {
+    obj.zom.holdFrames -= frames;
+    if (obj.zom.holdFrames > 0 || G.g_players_in_play === 0) {
       ZombieDelayedStrikeIdle(obj, rng);
       return;
     }
@@ -419,7 +419,7 @@ export function ZombieStateDelayedStrikeInPlace(obj: Actor, eye: Vec3,
  * `row[(obj+0x136C >> 0x15) & 1]` — the walk pair, selected on the same bit
  * `ZombieStateApproach` reads, from `rand() % 5`.
  */
-function ZombieDelayedStrikeIdle(obj: Actor, rng: Rng): void {
+function ZombieDelayedStrikeIdle(obj: ZombieActor, rng: Rng): void {
   if (obj.flags & ActorFlag.Committed) return;
   const row = MotionRowOf(obj);
   const alt = (obj.flags2 >>> 0x15) & 1;
@@ -442,15 +442,15 @@ function ZombieDelayedStrikeIdle(obj: Actor, rng: Rng): void {
  * retiring. See `entrance.ts`'s note on `ZombieStateRideCarrier` — the same
  * missing piece, and the same fix would clear both.
  */
-function ZombieDelayedStrikeGiveUp(obj: Actor, dt: number): void {
+function ZombieDelayedStrikeGiveUp(obj: ZombieActor, dt: number): void {
   const carrier = G.g_carrier_object >= 0
     ? ActorByAt(G.g_carrier_object) : undefined;
   if (!carrier || !(carrier.flags2 & ZombieFlag2.CollideActors)) {
-    obj.backoffFrames = 0;
+    obj.zom.backoffFrames = 0;
     return;
   }
-  obj.backoffFrames += dt * 60;
-  if (obj.backoffFrames <= CARRIER_GIVE_UP_FRAMES) return;
+  obj.zom.backoffFrames += dt * 60;
+  if (obj.zom.backoffFrames <= CARRIER_GIVE_UP_FRAMES) return;
   obj.state = ZombieState.Leave;
   obj.sub = 0;
 }

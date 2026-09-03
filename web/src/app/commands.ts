@@ -113,6 +113,7 @@ export interface PlayerCommands {
   togglePlay(): void;
   stepOnce(): void;
   stepBack(): void;
+  rewind(): void;
   requestSkip(): void;
   poseFromSlot(slot: number, frame: number): void;
   syncCameraToWalker(force?: boolean): void;
@@ -169,6 +170,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "pause":      p.togglePlay(); return;
     case "stepForward": p.stepOnce(); return;
     case "stepBack":   p.stepBack(); return;
+    case "rewind":     p.rewind(); return;
     case "requestSkip": p.requestSkip(); return;
     case "branchHover":
       p.branchHover = c.over;

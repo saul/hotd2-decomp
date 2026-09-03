@@ -278,6 +278,10 @@ export interface TransportProjection {
   camFrameLo: number;
   camFrameHi: number;
   camLabel: string;
+  /** Is there a snapshot behind the present to go back to? */
+  canRewind: boolean;
+  /** What the rewind button says it will do, and how much history is held. */
+  rewindLabel: string;
 }
 
 /** The audio strip: what it is doing, and what the button should say. */

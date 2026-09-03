@@ -1,6 +1,14 @@
 /**
  * How the player paces ticks and frames.
  *
+ * **The rule is here; the machinery that makes it true of a browser is
+ * `app/pacer.ts`.** This file is a pure accumulator with no idea that a
+ * browser exists — it decides how much game time a frame owes. `Pacer` decides
+ * whether there is a frame at all: the rAF driving, the sleep and the waking,
+ * the hidden tab, and the drive seam that replaces the wall as what the
+ * accumulator is fed from. The two are one design in two files, and are worth
+ * reading together.
+ *
  * ## The rule
  *
  * **The simulation advances in whole 60 Hz ticks, and a tick is never
@@ -33,7 +41,7 @@
  *
  * ## A frame that owes no tick must not do part of one
  *
- * The corollary, and it has already cost a bug. `Player.tickStopped` runs the
+ * The corollary, and it has already cost a bug. `Player.idleTick` runs the
  * **whole tick order** on `idle`, because the layers that ride wall time —
  * the impact sprites, the crosshair — have to keep moving while the clock is
  * stopped. Every system in that order therefore has to decide for itself
@@ -62,13 +70,13 @@
  * ## A debt worth dropping is never allowed to form
  *
  * Which is the only reason the previous point is affordable. The clock stops
- * instead of accruing, and `Player` owns both halves:
+ * instead of accruing, and `Pacer` owns both halves:
  *
  * * **the tab is hidden** — the loop stops, and `resume` is called when it
  *   comes back so the time spent in the background is not owed. A backgrounded
  *   tab does not get its minute simulated in one lurch, because it never
  *   banked one.
- * * **paused, or in free roam** — there is no game time to owe, and `Player`
+ * * **paused, or in free roam** — there is no game time to owe, and `Pacer`
  *   stops asking for frames at all rather than running an empty loop.
  *
  * ## `speed`
@@ -144,7 +152,7 @@ export class Loop {
    * `wall` is the tick's own `wall` when ticks ran: the click feedback that
    * rides wall time is then frame-paced along with everything else, and over
    * any second the two agree because that is what an accumulator is for. When
-   * no tick ran, `Player` sends the wall-time systems an `idle` tick carrying
+   * no tick ran, `Pacer` sends the wall-time systems an `idle` tick carrying
    * the real delta instead, so a paused player's impact sprites still fly.
    */
   advance(wall: number, step: () => boolean): Tick {

@@ -7,6 +7,7 @@
  * kind of thing — and out of `main.ts` because a composition root that also
  * formats strings is doing two jobs.
  */
+import { SnapshotRing } from "../ring";
 import type { Player } from "../main";
 import type {
   BranchProjection, SkipProjection, SoundProjection, TransportProjection,
@@ -82,6 +83,22 @@ export function branchProjection(p: Player): BranchProjection | null {
   };
 }
 
+/**
+ * How much history the ring is holding, as a sentence.
+ *
+ * The button's own step is a cadence rather than a promise -- the newest slot
+ * can be anything up to one cadence old -- so the label says the step it is
+ * aiming at and then the window it has, which is the number that decides
+ * whether a rewind can reach the thing you want to see again.
+ */
+function rewindLabel(p: Player): string {
+  const h = p.history;
+  if (!h.depth) return "nothing to rewind to yet";
+  const step = (SnapshotRing.EVERY / 60).toFixed(1);
+  return `back ~${step} s  ·  ${(h.frames / 60).toFixed(0)} s of history`
+    + ` in ${h.depth} slot${h.depth === 1 ? "" : "s"}`;
+}
+
 /** The camera slider's range and label, which follow the current shot. */
 export function transportProjection(p: Player): TransportProjection {
   const w = p.walker;
@@ -90,6 +107,8 @@ export function transportProjection(p: Player): TransportProjection {
   const base = {
     playing: p.playing, mode: p.state.mode, speed: p.speed,
     frozen: !!p.state.freeze,
+    canRewind: p.history.depth > 0,
+    rewindLabel: rewindLabel(p),
   };
   if (!cam || !path) {
     return { ...base, hasPath: false, camFrame: 0, camFrameLo: 0,

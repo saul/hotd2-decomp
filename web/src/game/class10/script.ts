@@ -229,7 +229,7 @@ function CivilianApplyWaitWord(obj: Actor, word: number,
   sub.wait = word & ~0x04000000;
   if (sub.wait & CivilianWait.LeaveCountNow) {
     G.g_civilians_alive -= 1;
-    sub.flags2 |= 1;
+    sub.subFlags |= 1;
   }
   if (sub.wait & 0x4000) sub.frameLimit = 0;
   if (sub.wait & 0x40000) obj.flags &= ~0x10000;

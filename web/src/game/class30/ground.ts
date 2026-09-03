@@ -87,8 +87,8 @@ export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void 
       ActorUpdateBoundingSphere(obj);
       obj.pushedBy = -1;
     }
-    if (ColiTestSphereAgainstActors(obj, obj.camPoint.x, obj.camPoint.y,
-                                    obj.camPoint.z, obj.bodyRadius)) {
+    if (ColiTestSphereAgainstActors(obj, obj.sphereCentre.x, obj.sphereCentre.y,
+                                    obj.sphereCentre.z, obj.bodyRadius)) {
       let f = G.g_coli_hit_depth * PUSH_FRACTION;
       if (obj.flags & AIRBORNE_EITHER) f *= PUSH_AIRBORNE;
       // x and z only: an actor is never pushed up out of another.
@@ -105,8 +105,8 @@ export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void 
   // for ever. See `Actor.worldPushDepth`.
   obj.worldPushDepth = 0;
   if (obj.flags2 & ZombieFlag2.CollideWorld) {
-    if (ColiTestSphereAgainstFullSet(obj.camPoint.x, obj.camPoint.y,
-                                     obj.camPoint.z, obj.bodyRadius)) {
+    if (ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,
+                                     obj.sphereCentre.z, obj.bodyRadius)) {
       const d = G.g_coli_hit_depth;
       obj.worldPushDepth = d;
       obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * d;

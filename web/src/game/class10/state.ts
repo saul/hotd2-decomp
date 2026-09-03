@@ -14,8 +14,19 @@
 export interface CivilianState {
   /** +0x00 the wait word op 0x2C loads, `& 0xFBFFFFFF`. See `CivilianWait`. */
   wait: number;
-  /** +0x04 bit 0: this civilian has already left `g_civilians_alive`. */
-  flags2: number;
+  /**
+   * +0x04 bit 0: this civilian has already left `g_civilians_alive`.
+   *
+   * This is `sub+0x04`, a word of the 0xC4-byte block, and it has **nothing
+   * to do with `Actor.flags2` (`obj+0x136C`)** — a different address on a
+   * different object. It was called `flags2` here, which is a name a reader
+   * of the union will get wrong exactly once. `[proved]`: `CivilianUpdate`
+   * (`FUN_0048A920`) and `CivilianLeaveField` test it as
+   * `if ((g_cur_civilian[1] & 1) == 0) g_civilians_alive--;`, and
+   * `CivilianRunScript` (`FUN_0048B9E0`) op 0x2C sets bit 0 at 0x0048BA3C.
+   * Bit 0 is the only bit anything reads.
+   */
+  subFlags: number;
   /** +0x08 op 2 — stop the clip on this frame instead of the clip's length. */
   frameLimit: number;
   /** +0x0C how many more times the clip may loop. Negative loops for ever. */
@@ -113,7 +124,12 @@ export interface CivilianState {
   /** +0x78 / +0x7C op 0x16 — the radius ramp `PoseHookGrowAndPushOutOfWorld` runs. */
   scaleTarget: number;
   scaleStep: number;
-  /** +0x80 op 0x17 — which point `ActorRegisterCameraPoint` registers. */
+  /**
+   * +0x80 op 0x17 — which point `CivilianUpdate`'s switch writes into
+   * `obj+0x12C`, the collision-sphere centre — `Actor.sphereCentre`. It is not
+   * what `ActorRegisterCameraPoint` (`FUN_00409B70`) registers: that is
+   * `obj+0x100`, which the skeleton walk writes.
+   */
   cameraPointMode: number;
   /** +0x81 op 0x2A — which death voice, or `0xFF` to pick by character type. */
   deathVoice: number;
@@ -142,7 +158,7 @@ export interface CivilianState {
 /** A fresh sub-block, with `CivilianInit`'s own initial values. */
 export function makeCivilianState(): CivilianState {
   return {
-    wait: 0, flags2: 0, frameLimit: 0, loops: 0,
+    wait: 0, subFlags: 0, frameLimit: 0, loops: 0,
     turnRate: 10, cuePath: 0, cueFrame: 0, timer: -1, motionCompare: 0,
     hookBusy: 0, flagIndex: 0, skipCount: 0, childCount: 0, childrenGoal: 0,
     enemiesGoal: 0, civiliansGoal: 0, removePath: 0, removeFrame: 0,

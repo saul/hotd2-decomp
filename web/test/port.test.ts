@@ -22,7 +22,8 @@ import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { UpdateCameraFreeFlag } from "../src/game/camera/track";
+import { CameraPointRiseFor, UpdateCameraFreeFlag }
+  from "../src/game/camera/track";
 import { ActorByAt, G, ResetGameGlobals, ResetSceneOnEnter }
   from "../src/game/globals";
 import {
@@ -34,7 +35,8 @@ import { QueueShotRequest } from "../src/game/combat/shot";
 import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
   from "../src/game/tables";
 import {
-  ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
+  ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet,
+  ColiTraceSegmentAllSets,
   QueryGroundHeightAt, QueryGroundSurfaceAt,
 } from "../src/game/coli";
 import { MotionRow, StrikeSub, ZombieState }
@@ -4849,8 +4851,8 @@ console.log("\nrain: DrawRainParticles' simulation half");
     // `FUN_00449E80`'s own literal and it is what makes the body, rather than
     // the feet, the thing the wall pushes.
     check("the sphere sits 1.4 radii above a grounded thrower",
-          Math.abs(z.camPoint.y - (z.pos.y + z.bodyRadius * 1.4)) < 1e-6,
-          `${z.camPoint.y} vs ${z.pos.y}`);
+          Math.abs(z.sphereCentre.y - (z.pos.y + z.bodyRadius * 1.4)) < 1e-6,
+          `${z.sphereCentre.y} vs ${z.pos.y}`);
   }
 
   // **The order.** The hook runs *after* the state, because every state here
@@ -4932,12 +4934,12 @@ console.log("\nrain: DrawRainParticles' simulation half");
     // ...and that is enough for the body to be clear: the sphere is centred on
     // the actor's own y for a wall stance, so on the plane it would be half in.
     check("...which is what puts its body outside the geometry",
-          !ColiTestSphereAgainstFullSet(z.camPoint.x, z.camPoint.y,
-                                        z.camPoint.z, z.bodyRadius),
+          !ColiTestSphereAgainstFullSet(z.sphereCentre.x, z.sphereCentre.y,
+                                        z.sphereCentre.z, z.bodyRadius),
           `depth ${G.g_coli_hit_depth}`);
     check("and a wall stance leaves the sphere level with the actor",
-          Math.abs(z.camPoint.y - z.pos.y) < 1e-6,
-          `${z.camPoint.y} vs ${z.pos.y}`);
+          Math.abs(z.sphereCentre.y - z.pos.y) < 1e-6,
+          `${z.sphereCentre.y} vs ${z.pos.y}`);
   }
 
   // **Which way a shot body flies.** `ThrowerBeginKnockbackArc`
@@ -5539,6 +5541,113 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     check("`backoffFrames` counts updates, not seconds", z.backoffFrames === 7,
           String(z.backoffFrames));
   }
+}
+/**
+ * B25. The lift is `ActorRegisterCameraPoint`'s **float argument**, pushed by
+ * whichever class's `Update` calls it, and the three ported classes that call
+ * it do not agree: `PUSH 0x40800000` (`6800008040`) at `EnemyZombieUpdate`
+ * 0x00453475 and `CivilianUpdate` 0x0048ADAB, `PUSH 0x0` (`6a00`) at
+ * `EnemyThrowerUpdate` 0x0044998F.
+ *
+ * The port applied 4.0 to all of them and said so in a `[diverges]`. This is
+ * the assertion that closes it: it fails on the old code, where a thrower's
+ * `lookAt.y` came out at 24.
+ */
+console.log("\nthe camera-point lift is per class:");
+{
+  const rng = new Rng(23);
+  const events = scene(1, rng);
+  const zombie = G.g_object_list[0];
+  const thrower = ActorSpawn(0x2000, SpawnClass.Thrower, 0x16, "thrower");
+  thrower.visible = true;
+  thrower.hp = 10;
+  thrower.pos = vec3(0, 0, 60);
+  const prop = ActorSpawn(0x2001, SpawnClass.SetPieceProp, 1, "prop");
+  prop.visible = true;
+  const host = {
+    ...NULL_HOST,
+    boneWorld: (_at: number, bone: number, out: Vec3) => {
+      if (bone !== 1) return false;
+      out.x = 10; out.y = 20; out.z = 30;
+      return true;
+    },
+  };
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("class 0x30 lifts by 4.0", zombie.lookAt.y === 24,
+        String(zombie.lookAt.y));
+  check("class 0x31 lifts by 0.0 -- `PUSH 0x0` at 0x0044998F",
+        thrower.lookAt.y === 20, String(thrower.lookAt.y));
+  check("a class the exe never registers gets no lift", prop.lookAt.y === 20,
+        String(prop.lookAt.y));
+  check("`CameraPointRiseFor` is the table, not a constant",
+        CameraPointRiseFor(SpawnClass.Civilian) === 4
+        && CameraPointRiseFor(SpawnClass.Zombie) === 4
+        && CameraPointRiseFor(SpawnClass.Thrower) === 0
+        && CameraPointRiseFor(SpawnClass.ScriptedHumanoid) === 0);
+}
+
+/**
+ * B27. `ColiTestSphereAgainstActors` (`FUN_00405B10`) fills a zero body radius
+ * in from the shot radius and **stores it back**:
+ * `MOV EAX, [EBX + 0x124]; MOV [EBX + 0x128], EAX` at 0x00405BB1/0x00405BB7.
+ * A class that never sets `obj+0x128` still takes part in the crowd push.
+ */
+console.log("\nthe engine's body-radius fallback:");
+{
+  const rng = new Rng(24);
+  scene(0, rng);
+  const other = ActorSpawn(0x3000, SpawnClass.Zombie, 1, "no body radius");
+  other.visible = true;
+  other.pos = vec3(0, 0, 0);
+  other.radius = 6;
+  other.bodyRadius = 0;
+  const self = ActorSpawn(0x3001, SpawnClass.Zombie, 1, "pusher");
+  self.visible = true;
+  self.pos = vec3(2, 0, 0);
+
+  // `ActorUpdateBoundingSphere` puts the other actor's centre at
+  // `y = bodyRadius + 1`, so the probe is level with it and two units aside:
+  // inside `1 + 6` only if the fallback filled the radius in.
+  const hit = ColiTestSphereAgainstActors(self, 2, 7, 0, 1);
+  check("a zero body radius still collides -- it falls back to `obj+0x124`",
+        hit, String(hit));
+  check("...and the fallback is stored back onto the actor",
+        other.bodyRadius === 6, String(other.bodyRadius));
+}
+
+/**
+ * B24. `CivilianUpdate`'s tail at `LAB_0048B0CE`: once the civilian carries
+ * `obj+0x34` bit `0x4000000`, every surviving captor gets `obj+0x34` bit
+ * `0x1000000` cleared and `obj+0x136C` bit `0x1` set, every frame.
+ */
+console.log("\na dead civilian releases its captors:");
+{
+  const rng = new Rng(25);
+  const events = scene(0, rng);
+  const civ = ActorSpawn(0x4000, SpawnClass.Civilian, 0x20, "civilian");
+  civ.visible = true;
+  civ.hp = 1;
+  g_class_handlers[SpawnClass.Civilian]!.init(civ, rng);
+  const captor = ActorSpawn(0x4001, SpawnClass.Zombie, 1, "captor");
+  captor.visible = true;
+  captor.hp = 10;
+  captor.flags |= ActorFlag.HoldingWeapon;
+  civ.civ!.children = [captor.at];
+  civ.civ!.childCount = 1;
+
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a living civilian holds its captors",
+        (captor.flags & ActorFlag.HoldingWeapon) !== 0
+        && (captor.flags2 & 1) === 0,
+        `${captor.flags.toString(16)} / ${captor.flags2.toString(16)}`);
+
+  civ.flags |= ActorFlag.Dead;
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a dead one clears `obj+0x34` bit 0x1000000 on each",
+        (captor.flags & ActorFlag.HoldingWeapon) === 0,
+        captor.flags.toString(16));
+  check("...and sets `obj+0x136C` bit 0x1 on each",
+        (captor.flags2 & 1) === 1, captor.flags2.toString(16));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

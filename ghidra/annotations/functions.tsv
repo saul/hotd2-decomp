@@ -49,7 +49,7 @@
 00405160	RegisterForShotTest	Appends the actor to the per-frame list at 0x0059D8E8: {obj, obj+0x34, obj+0x12C, +0x130, +0x134}, stride 5 dwords. Skipped when obj+0x34 bit 0x8000 is set, and taken only when bit 0x10 is set or obj+0x78 <= 0. It feeds two consumers, not one: the gunshot hit test, and -- after FUN_00405360 copies it to 0x005A30A0 -- ColiTestSphereAgainstActors, which is the actor-versus-actor push. So a class that never calls this takes no part in separating a crowd.
 00406310	CheckSphereInFrustum
 00407340	SpawnSpriteEffect	billboarded sprite-animation effect by kind
-004073b0	SpriteEffectSlotRange	maps an effect kind to its asset slot range
+004073b0	SpawnSpriteEffectFromParams	The body behind SpawnSpriteEffect (FUN_00407340), which only marshals a position/facing pair and a kind into the 12-float parameter block and passes -1.0 for 'no scale override'. This allocates the actor (ActorAlloc(LAB_00407A70, 0x68)), takes the texture range +0x60/+0x64 and base scale +0x50 from a switch on the kind byte at params[9], applies a distance scale law, and calls PlayImpactSoundForMaterial. Kinds 1/2/3/5/6 are the collision materials; 0x53 seeds a random phase from rand(); 0x5A recurses to spawn kinds 0x5B and 0x5C alongside it. Named SpriteEffectSlotRange until 2026-09-03, which described only the switch.
 004083d0	AttachedEffectThink	obj+0x1390 is a PARENT ACTOR here, not a descriptor tail
 00408770	SpawnAttachedEffect
 004088a0	EvtOpSpawnPlaced09	alloc 0x13F4; reads desc+0x24/+0x25 inline; does NOT set obj+0x1390

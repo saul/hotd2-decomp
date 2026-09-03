@@ -81,6 +81,10 @@ def main() -> int:
                   f"{c['textures']} textures, {c['regions']} regions, "
                   f"{c['blocks']} blocks ({c['branch_points']} branch points), "
                   f"{c['cam_paths']} cam paths, {c['spawns']} spawns")
+            if c.get("degraded"):
+                print(f"  -> {c['degraded']} DEGRADED: this bundle is missing "
+                      f"parts of the game (see the warnings above, and "
+                      f"`degraded` in the manifest entry)", file=sys.stderr)
 
     if not entries:
         raise SystemExit("nothing was built")
@@ -127,6 +131,27 @@ def main() -> int:
         })
     total = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
     print(f"\n{len(entries)} stage bundles, {total / 1e6:.1f} MB -> {path}")
+
+    # **A degraded export fails. There is no flag for this.**
+    #
+    # It was tempting to put it behind `--strict` and leave the default
+    # permissive, and that would have reproduced F16 one level up: a switch
+    # nobody passes is a check that never fires, which is the whole finding.
+    # If anything under `hod2lib` answered a failure with an empty result then
+    # this bundle is missing part of the game, and a tool that prints a
+    # warning and exits 0 is telling the next person it went fine.
+    #
+    # The files are still written. That is deliberate -- an incomplete bundle
+    # is often exactly what you want to *look at* while finding out why -- but
+    # the exit code says what it is.
+    short = {e["name"]: e["counts"]["degraded"] for e in entries
+             if e.get("counts", {}).get("degraded")}
+    if short:
+        where = ", ".join(f"{n} ({k})" for n, k in sorted(short.items()))
+        print(f"degraded: {where}", file=sys.stderr)
+        print("the bundle is written but incomplete; this is a failure",
+              file=sys.stderr)
+        return 1
     return 0
 
 

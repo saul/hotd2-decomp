@@ -34,6 +34,7 @@ import struct
 import time
 from pathlib import Path
 
+from . import degraded
 from . import (__version__, characters as charlib, evt as evtlib, gltf,
                props as propslib, rigs as rigslib,
                spawnres as spawnreslib,
@@ -237,7 +238,10 @@ def _generic_types(prog) -> set[int]:
     """The class-0x41 types `PlaceGenericProp` builds, from the dispatch table."""
     try:
         rows = prog.stage.tables.class41_dispatch()
-    except Exception:
+    except Exception as exc:
+        degraded.note("the class-0x41 dispatch table",
+                      "no generic prop types, so every one is treated as "
+                      "drawing nothing", exc)
         return set()
     ctor = 0x00461CF0
     return {r["type"] for r in rows if r["ctor"] == ctor}
@@ -532,7 +536,9 @@ def breakable_slot_entry(stage, prog=None) -> dict | None:
         if stem not in cache:
             try:
                 cache[stem] = stagelib.load_asset(stage.game, stem)
-            except Exception:
+            except Exception as exc:
+                degraded.note(f"breakable prop asset {stem}",
+                              f"slot {slot:#06x} draws nothing", exc)
                 cache[stem] = ([], None)
         models, bank = cache[stem]
         if rec[1] >= len(models):
@@ -734,6 +740,11 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     neither.
     """
     say = progress or (lambda *_: None)
+    # The count belongs to this stage, so it starts here rather than at the
+    # top of the process. `export_player.py` builds up to twelve of these in
+    # one run and a single running total would say nothing about which one
+    # came out short.
+    degraded.reset()
     name = stage.name
     out_dir = out_root / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -755,7 +766,9 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
         try:
             models, bank = stagelib.load_asset(
                 stage.game, rain["file"].removesuffix(".bin"))
-        except Exception:
+        except Exception as exc:
+            degraded.note(f"the rain particle asset {rain['file']}",
+                          "no rain model, so the stage draws no rain", exc)
             models = []
         if rain["entry"] is not None and rain["entry"] < len(models):
             parts = list(parts) + [("rain_fx", [models[rain["entry"]]], bank)]
@@ -830,6 +843,9 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
 
     n_spawns = sum(len(o.detail.get("spawns", ()))
                    for b in prog.live_blocks() for s in b.steps for o in s.ops)
+    # Drained here, at the end of the stage and before the entry is built, so
+    # the list is exactly what this stage lost. See `degraded.py`.
+    lost = degraded.drain()
     entry = {
         "name": name,
         "stage": stage.stage,
@@ -854,7 +870,15 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
             "characters": len(char_defs),
             "props": len(hinges) + len(statics),
             "posed_spawns": sum(1 for p in char_places if p.motion is not None),
+            # **Zero is the only good value here.** Every other count says how
+            # much is in the bundle; this one says how much of the game did
+            # not make it, because something under `hod2lib` answered a
+            # failure with an empty result. It answered *silently* until F16.
+            "degraded": len(lost),
         },
+        # And what each one was. A bundle missing a stage's characters should
+        # be able to say so without the export log, which nobody keeps.
+        "degraded": lost,
         "sources": {},
     }
     for p in stage.source_files():

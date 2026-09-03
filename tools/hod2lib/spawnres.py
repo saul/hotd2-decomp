@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from . import degraded
+
 __all__ = ["CHAR_TYPE_RULES", "ResolvedSpawn", "resolve_spawn",
            "resolve_stage_spawns"]
 
@@ -96,7 +98,9 @@ def resolve_stage_spawns(stage, prog=None) -> list[ResolvedSpawn]:
     if prog is None:
         try:
             prog = scriptlib.load(stage)
-        except Exception:
+        except Exception as exc:
+            degraded.note("the stage's event script",
+                          "no resolved spawns", exc)
             return []
     out = []
     for rec in evtlib.spawns(prog.evt):

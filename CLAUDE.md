@@ -19,7 +19,8 @@ boundaries still exist.
 
 ```sh
 python3 tools/verify_layers.py            # player layer boundaries
-python3 tools/verify_port.py              # the port matches the annotations
+python3 tools/verify_port.py              # the port matches the annotations, docs included
+python3 tools/verify_exporters.py         # no exporter swallows a failure in silence
 python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 cd web && npx tsc --noEmit && npm run test:port && npm run test:seek \
     && npm run test:scope && npm run test:state && npm run test:ui \
@@ -95,7 +96,10 @@ work exactly as you found it, and never rewrite history.
 
 `ghidra/annotations/*.tsv` is appended to by both workstreams: add rows with
 `python3 tools/annotate.py`, which upserts rather than duplicating, and never
-re-sort the file.
+re-sort the file. `./ghidra/run.sh export-annotations` **merges** into those
+files rather than rewriting them — it keeps the order, the body comments, and
+any row the live database has no symbol for. It used to rewrite, and against
+the database as it stands that would delete 196 of `functions.tsv`'s 556 rows.
 
 ## Things that have cost this project real time
 
@@ -106,6 +110,13 @@ re-sort the file.
 * Object fields are polymorphic — `obj+0x11C` is hit points for combat classes
   and a sub-type selector for others. Check the class.
 * A negative result from one agent is not a fact.
+* **A tool that prints nothing has not necessarily succeeded.**
+  `ghidra/run.sh` ran the headless analyzer under `set -e` and grepped the log
+  *after*, so a run that died on the project lock — which is every run made
+  while the Ghidra GUI is open — printed nothing, exited 0, and left
+  `git diff ghidra/annotations` clean. That is indistinguishable from "there
+  was nothing to export", and a session's renames stay uncommitted while you
+  believe they are saved.
 * **Verify against the disc, not against another copy of your install.** Four
   `cam/` files were rotted in the local extract, and a whole restoration
   engine plus a documented "NaN padding convention" were built to explain the

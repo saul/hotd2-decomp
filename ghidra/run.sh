@@ -63,12 +63,32 @@ case "${1:-}" in
     ;;
 
   script)
+    # **A failed run must not look like a quiet one.**
+    #
+    # This was `"$HEADLESS" ... > log 2>&1` followed by a grep, under
+    # `set -e`. When the headless analyzer exits non-zero -- which it does
+    # whenever the Ghidra GUI holds the project lock -- `set -e` killed the
+    # script *before* the grep, so the command printed nothing at all and the
+    # caller saw an empty output and an unchanged `git diff ghidra/annotations`.
+    # That reads exactly like "there was nothing to export". It is not: it is
+    # "the database was never opened", and a session's worth of renames stays
+    # uncommitted while you believe it is saved.
     NAME="${2:?usage: run.sh script <ScriptName>}"
+    set +e
     "$HEADLESS" "$PROJECT_DIR" "$PROJECT_NAME" \
       -process "$PROGRAM" -noanalysis \
       -scriptPath "$SCRIPTS" -postScript "$NAME" \
       > "$OUT/script.log" 2>&1
+    rc=$?
+    set -e
     grep -iE "\[hotd2\]|ERROR|Exception" "$OUT/script.log" | head -20 || true
+    if [[ $rc -ne 0 ]]; then
+      echo "error: headless exited $rc; $NAME did not run. Full log: $OUT/script.log" >&2
+      if grep -q "LockException" "$OUT/script.log"; then
+        echo "       the project is locked -- close the Ghidra GUI and retry." >&2
+      fi
+      exit $rc
+    fi
     ;;
 
   list)

@@ -58,7 +58,7 @@ import math
 import struct
 from dataclasses import dataclass, field
 
-from . import mot as motlib, spawnres
+from . import degraded, mot as motlib, spawnres
 
 __all__ = ["MOTION_RULES", "Character", "Placement", "resolve_for_stage"]
 
@@ -1140,7 +1140,9 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     if prog is None:
         try:
             prog = scriptlib.Program(stage)
-        except Exception:
+        except Exception as exc:
+            degraded.note("the stage's event script",
+                          "no characters at all -- an empty stage", exc)
             return {}, [], []
 
     # The script's spawn dicts carry the placement; the evt.Spawn records carry
@@ -1154,7 +1156,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                     by_at.setdefault(sp["at"], sp)
     try:
         recs = {r.offset: r for r in evtlib.spawns(prog.evt)}
-    except Exception:
+    except Exception as exc:
+        degraded.note("the evt spawn descriptors",
+                      "characters lose the parameter tail their motion rules "
+                      "read, and class 0x10's children are not spawned", exc)
         recs = {}
 
     # **Class 0x10's children are not script spawns.** `CivilianInit`
@@ -1188,7 +1193,9 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     class31 = class31_tables(tables)
     try:
         civscripts = tables.civilian_scripts()
-    except Exception:
+    except Exception as exc:
+        degraded.note("the civilian script table",
+                      "no civilian follows a script", exc)
         civscripts = {"entries": [], "scripts": []}
     per_type: dict[int, list[dict]] = {}
     dset = death_motions(tables)
@@ -2129,7 +2136,10 @@ def _rig_entry(stage, tables, char: Character, spawns: list[dict],
 
     try:
         models, bank = stagelib.load_asset(stage.game, char.name)
-    except Exception:
+    except Exception as exc:
+        degraded.note(f"character asset {char.name}",
+                      f"{char.name} has no model, so every spawn of it is "
+                      f"invisible", exc)
         return None
     slots = tables.asset_slots()
 
@@ -2229,7 +2239,10 @@ def _gore_entry(stage, tables, char: Character) -> dict | None:
         if stem not in cache:
             try:
                 cache[stem] = stagelib.load_asset(stage.game, stem)
-            except Exception:
+            except Exception as exc:
+                degraded.note(f"damaged-variant asset {stem}",
+                              f"slot {slot:#06x} keeps its undamaged model",
+                              exc)
                 cache[stem] = ([], None)
         models, bank = cache[stem]
         if rec[1] >= len(models):

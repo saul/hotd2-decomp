@@ -27,7 +27,7 @@ from enum import IntEnum
 from dataclasses import dataclass, field
 from pathlib import Path as _Path
 
-from . import cam as camlib, coli as colilib, container as C, evt, exetab, nl1, texbank
+from . import cam as camlib, coli as colilib, container as C, degraded, evt, exetab, nl1, texbank
 from .campaths import CamPaths
 
 
@@ -333,7 +333,10 @@ class Stage:
                     continue
                 try:
                     got = nl1.parse(cont.model(entry))
-                except Exception:
+                except Exception as exc:
+                    degraded.note(f"model {entry} of {fname}",
+                                  "that model is absent from the geometry",
+                                  exc)
                     continue
                 for m in (got if isinstance(got, list) else [got]):
                     slot_id = slot_of.get((fname, entry))

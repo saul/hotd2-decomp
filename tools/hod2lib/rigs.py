@@ -48,6 +48,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import degraded
+
 __all__ = ["Route", "FixedPose", "RigPart", "Rig", "RIGS", "rig_for_slot"]
 
 Vec3 = tuple[float, float, float]
@@ -985,7 +987,9 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
         if file_stem not in cache:
             try:
                 cache[file_stem] = stagelib.load_asset(stage.game, file_stem)
-            except Exception:
+            except Exception as exc:
+                degraded.note(f"rig asset {file_stem}",
+                              "every rig built from it is dropped", exc)
                 cache[file_stem] = ([], None)
         return cache[file_stem]
 
@@ -1001,7 +1005,9 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
     if wanted:
         try:
             prog = scriptlib.load(stage)
-        except Exception:
+        except Exception as exc:
+            degraded.note("the stage's event script",
+                          "no rig is placed at a spawn descriptor", exc)
             prog = None
         if prog is not None:
             for blk in prog.blocks:
@@ -1015,8 +1021,10 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
                 for rec in evtlib.spawns(prog.evt):
                     if rec.cls in wanted:
                         raw.setdefault(rec.cls, []).append(rec)
-            except Exception:
-                pass
+            except Exception as exc:
+                degraded.note("the evt spawn descriptors",
+                              "rigs lose the parameter tail their motion "
+                              "rules read", exc)
 
     out: list[dict] = []
     blocked: list[Rig] = []

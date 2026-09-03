@@ -9134,3 +9134,83 @@ global is not named in `globals.tsv`, because what the captured point is for
 has not been established and a name would assert that it had been. The port
 records the omission in `combat/rank.ts` where a reader of that routine will
 meet it.
+
+### F16: the exporter's silence, and a tool that deleted what it was saving
+
+Three parts, and the middle one turned out to be much worse than the review
+said.
+
+**Nineteen swallowed failures, not fifteen.** The shape of every one of them is
+right — an install missing a `pol/` file should still export, and refusing a
+stage because one prop model will not parse is worse than exporting without it.
+What was wrong is that they said nothing, so a parser regression under
+`hod2lib` produced a valid bundle with no characters, exit code 0, and an empty
+stage in the player that looks exactly like a gameplay bug. They record through
+`hod2lib/degraded.py` now; the count and the list reach `manifest.json`, and
+`export_player.py` exits non-zero. There is no `--strict`, on purpose: a switch
+nobody passes is the same finding one level up.
+
+All six stages export with zero degradations, so the check went in at zero. It
+was proved able to fire by making `load_asset` refuse every `char_*` asset —
+stage 3 came back `degraded: 7` with the seven records naming each character,
+and exit code 1.
+
+**`ExportAnnotations.java` would have deleted 196 of 556 rows.** The review
+said it re-sorts and drops body comments; both true, and not the half of it.
+It built a fresh list from the database and overwrote the file, so every row
+whose symbol is *still auto-named in the database* simply vanished. Measured
+against the live database: 189 of those, plus 7 addresses it has no function
+for. Globals were written as `address, name` with no third column at all, so
+one run would have stripped the comment from **195 of the 282 global rows**.
+`PLAN.md` says to run this after every session.
+
+It merges now. The interesting design question was which side wins, and the
+answer is not "the database": the database wins on **names**, because a rename
+is the thing this script exists to capture, and the **file** wins on comments
+the database has none of, because a Ghidra label carries no comment and the
+file is the only place a global's prose exists.
+
+**The tool had been reporting success for runs that never happened.** This is
+how the above was found. `ghidra/run.sh` ran the headless analyzer under
+`set -e` and grepped the log afterwards, so a run that died on the project lock
+— every run made while the Ghidra GUI is open — printed *nothing*, exited 0,
+and left a clean `git diff ghidra/annotations`. That is indistinguishable from
+"there was nothing to export". It captures the exit code now and names the lock
+case.
+
+Which is also why the new Java was not executed: the project is locked by the
+open GUI. It compiles against the real Ghidra API, and the merge algorithm was
+run against the real files and the real symbol list — 2 rows updated, 20
+appended, 196 kept, every `#` line intact. That is as far as it was taken, and
+the first person to run it with the GUI closed should read the diff.
+
+### ...and the citation that was wrong twice
+
+`docs/formats/combat.md` called `FUN_004073B0` `SpawnImpactSprite`; the TSV
+called it `SpriteEffectSlotRange`. **Both were wrong**, which is not what the
+review's "docs↔TSV disagree" framing suggests and is the reason the fix was a
+read rather than a copy.
+
+The routine allocates the effect actor — `ActorAlloc(LAB_00407A70, 0x68)` —
+positions it, takes its texture range `+0x60/+0x64` and base scale `+0x50` from
+a switch on the kind byte, applies a distance scale law and calls
+`PlayImpactSoundForMaterial`. So it is not a slot-range lookup; and impact is
+one of fourteen kinds rather than what it is for — `0x53` is rain, and `0x5A`
+recurses to spawn `0x5B` and `0x5C` beside itself.
+
+Then the first rename attempt collided: `SpawnSpriteEffect` was **already** the
+TSV's name for `FUN_00407340`, one address up, which is the wrapper 37 callers
+use and which does nothing but marshal a position, a facing and a kind into the
+12-float block and pass `-1.0` for "no scale override". `tools/annotate.py`
+upserts by address and had nothing to say about a duplicate *name*; the
+duplicate was caught by an `awk | sort | uniq -d` afterwards, which is luck
+rather than process. `FUN_004073B0` is `SpawnSpriteEffectFromParams`: named for
+the one thing that distinguishes it from its wrapper, which is what it takes.
+
+`verify_port.py` holds the edge now, over `docs/` as well as `game/`. One
+choice worth recording: an **arrow** between a name and an address is not
+matched, because the docs use arrows for call chains — the prototype's first
+finding was `ShotBuildSegment -> FUN_00405260`, which is a call and not a
+claim about identity. `session-log.md` is exempt from the check entirely: it
+records what was believed *when*, and a check demanding it be current would be
+asking for exactly the rewrite `/decomp` forbids.

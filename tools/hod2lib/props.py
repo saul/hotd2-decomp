@@ -109,6 +109,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass, field
 
+from . import degraded
+
 __all__ = ["Hinge", "StaticProp", "hinge_curve", "resolve_for_stage",
            "props_json"]
 
@@ -265,7 +267,9 @@ def resolve_for_stage(stage, prog=None):
     if prog is None:
         try:
             prog = scriptlib.Program(stage)
-        except Exception:
+        except Exception as exc:
+            degraded.note("the stage's event script",
+                          "no doors, shutters or static props", exc)
             return [], []
 
     by_at: dict[int, dict] = {}
@@ -276,7 +280,9 @@ def resolve_for_stage(stage, prog=None):
                     by_at.setdefault(sp["at"], sp)
     try:
         recs = {r.offset: r for r in evtlib.spawns(prog.evt)}
-    except Exception:
+    except Exception as exc:
+        degraded.note("the evt spawn descriptors",
+                      "no doors, shutters or static props", exc)
         return [], []
 
     hinges: list[Hinge] = []
@@ -384,7 +390,9 @@ def rig_entries(stage, hinges: list[Hinge], statics: list[StaticProp],
         if stem not in cache:
             try:
                 cache[stem] = stagelib.load_asset(stage.game, stem)
-            except Exception:
+            except Exception as exc:
+                degraded.note(f"prop asset {stem}",
+                              "every prop drawn from it is dropped", exc)
                 cache[stem] = ([], None)
         return cache[stem]
 

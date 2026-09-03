@@ -11,8 +11,11 @@ are enforced, and they are cheaply checkable because both sides are text:
   3. every `[diverges]` tag is gathered into one list;
   4. the class modules line up with `SpawnClass` and with the class table in
      docs/formats/spawns.md;
-  5. and the three ways state can escape a save snapshot are grepped for:
-     three.js in `game/`, `Math.random(`, and `export let` in globals.ts.
+  5. the three ways state can escape a save snapshot are grepped for:
+     three.js in `game/`, `Math.random(`, and `export let` in globals.ts;
+  6. and the same citation rule is applied to `docs/`, which was the one edge
+     nothing checked -- `combat.md` named `FUN_004073B0` as `SpawnImpactSprite`
+     while the TSV called it something else entirely, and both were wrong.
 
 Exit code is non-zero when a check fails. Run from anywhere.
 """
@@ -28,6 +31,12 @@ FUNCS = ROOT / "ghidra" / "annotations" / "functions.tsv"
 GLOBALS = ROOT / "ghidra" / "annotations" / "globals.tsv"
 SCRIPT = ROOT / "web" / "src" / "script"
 SPAWNS = ROOT / "docs" / "formats" / "spawns.md"
+DOCS = ROOT / "docs"
+#: The session log is a record of what was believed **when**, so it is full of
+#: names that were later changed and that is the point of it. `/decomp` says
+#: in as many words never to rewrite it; a check that demanded it be current
+#: would be asking for exactly that.
+DOCS_SKIP = {"session-log.md"}
 
 # Two citation forms, and the difference matters.
 #
@@ -376,6 +385,48 @@ def check_snapshot_rules() -> None:
                         "so it cannot be snapshotted -- put it in `G`")
 
 
+def check_docs_citations(named: dict[str, str]) -> None:
+    """`docs/` cites the binary too, and nothing was checking those.
+
+    Only the two forms that assert *this name is this address* are tested --
+    ``Name (`FUN_…`)`` and ``Name -- `FUN_…` `` -- because an arrow between a
+    name and an address is a **call chain**, not a claim about identity, and
+    the docs use arrows that way constantly.
+
+    A disagreement fails: the doc and the TSV cannot both be right about what
+    lives at an address, and the one thing worse than an unnamed routine is
+    two names for it in two files. An address `docs/` cites that the TSV does
+    not name at all is a *work list* rather than a failure -- it is a routine
+    somebody read far enough to point at and not far enough to name, which is
+    the honest state of a lot of this.
+    """
+    seen: dict[str, tuple[str, str]] = {}
+    cited: set[str] = set()
+    for path in sorted(DOCS.rglob("*.md")):
+        if path.name in DOCS_SKIP:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        rel = path.relative_to(ROOT)
+        for m in ANY_FUN.finditer(text):
+            cited.add(m.group(1)[4:].lower())
+        for pat in (DEF, REF):
+            for m in pat.finditer(text):
+                name, addr = m.group(1), m.group(2)[4:].lower()
+                if addr in named and named[addr] != name:
+                    failures.append(
+                        f"{rel}: cites `{addr}` as `{name}`; "
+                        f"functions.tsv says `{named[addr]}`")
+                seen[addr] = (name, str(rel))
+    unknown = sorted(a for a in cited if a not in named)
+    notes.append(f"docs: {len(seen)} name/address citations checked against "
+                 f"functions.tsv")
+    if unknown:
+        shown = ", ".join("FUN_" + a.upper() for a in unknown[:10])
+        notes.append(f"  and {len(unknown)} addresses docs point at that "
+                     f"Ghidra has not named: {shown}"
+                     + (", ..." if len(unknown) > 10 else ""))
+
+
 def main() -> int:
     if not GAME.is_dir():
         print(f"no {GAME}", file=sys.stderr)
@@ -388,6 +439,7 @@ def main() -> int:
     check_divergences()
     check_classes()
     check_snapshot_rules()
+    check_docs_citations(named)
 
     for n in notes:
         print(n)

@@ -510,7 +510,7 @@ Every shot makes a noise and leaves a mark, and both are plain switch
 statements, so this half is fully determined. The sound ids resolve through
 `g_se_name_list`, which is what makes the material codes readable at all.
 
-### Missing — `ShotBuildSegment` -> `FUN_00405260` -> `SpawnImpactSprite`
+### Missing — `ShotBuildSegment` -> `SpawnWorldImpact` -> `SpawnSpriteEffect`
 
 A shot that reaches the world takes the **surface material** from the collision
 triangle it hit (`ColiSegmentVsMesh`, the hit record's `+0x30`), and that
@@ -533,11 +533,23 @@ metal, other, water and wood. `coli.py` already observed the surface palette
 `(0, 2, 3, 0x32, 0x34, 0x35, 0x38, 0x3C, 0x3D, 0x5A, 0x63)` in the collision
 files independently, and it lands inside this table.
 
-`SpawnImpactSprite` (`FUN_004073B0`) is a second switch on the same material
-giving `(first asset slot, last asset slot, scale)` — an animated sprite that runs
-the range and dies. Material 1 is slots `0x091A..0x092F` at 1.0; water is
-`0x08F8..0x0903` at **4.0**, a big splash; and the default arm is a single
-frame at 0.1, so a shot into untagged geometry barely shows.
+`SpawnWorldImpact` (`FUN_00405260`) calls `SpawnSpriteEffect`
+(`FUN_00407340`), a wrapper that marshals the point, the facing and the
+material into a 12-float block and hands it to
+`SpawnSpriteEffectFromParams` (`FUN_004073B0`). **That** is where the second
+switch on the same material lives, giving `(first asset slot, last asset slot,
+scale)` — an animated sprite that runs the range and dies. Material 1 is slots
+`0x091A..0x092F` at 1.0; water is `0x08F8..0x0903` at **4.0**, a big splash;
+and the default arm is a single frame at 0.1, so a shot into untagged geometry
+barely shows.
+
+This paragraph called `FUN_004073B0` `SpawnImpactSprite` until 2026-09-03,
+against a TSV that called it `SpriteEffectSlotRange` — and *both* were wrong.
+The routine allocates the effect actor and plays its sound, so it is not a
+slot-range lookup; and impact is one of its fourteen kinds, not what it is
+for: `0x53` is rain and `0x5A` spawns two more effects beside itself. Worse,
+`SpawnImpactSprite` would have collided with the wrapper's own name one
+address up. See `docs/re/session-log.md`.
 
 ### Hitting — `ActorShotFeedback` and `ActorPlayHitVoice`
 
@@ -570,7 +582,7 @@ set A, everything else set B.
 | 1 damaged + swapped | blood at the bone, scale **0.75** |
 | 2 damaged only | blood at the bone, scale **0.5** |
 | 3, 4 severed | blood at the bone, scale **1.0** |
-| 5 no effect | `SpawnImpactSprite` material 3 (0x51 for type 3) and `COMMON\BULLET_MET3_22.WAV` — the shot bounced off |
+| 5 no effect | `SpawnSpriteEffect` material 3 (0x51 for type 3) and `COMMON\BULLET_MET3_22.WAV` — the shot bounced off |
 
 The blood itself, `FUN_00407230`, is a 25-frame flipbook over asset slots
 `0x3A..0x52`, drawn in **view space** at the bone with an explicit scale:

@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from hod2lib import degraded
 from hod2lib import (coli as colilib, evt as evtlib, gltf, rigs as rigslib,
                      script as scriptlib, stage as stagelib)  # noqa: E402
 
@@ -115,7 +116,8 @@ def _breakable_json(st, prog) -> list[dict]:
     from hod2lib import evt as _evt
     try:
         groups = st.tables.breakable_groups()
-    except Exception:
+    except Exception as exc:
+        degraded.note("the breakable group table", "no item containers", exc)
         return []
     out: list[dict] = []
     for rec in _evt.spawns(prog.evt):
@@ -161,8 +163,9 @@ def _objects_json(st) -> dict:
     prog = None
     try:
         prog = scriptlib.load(st)
-    except Exception:
-        pass
+    except Exception as exc:
+        degraded.note("the stage's event script",
+                      "no spawns and no object paths in the sidecar", exc)
 
     spawns: list[dict] = []
     if prog is not None:
@@ -243,7 +246,14 @@ def _coli_json(st, sets) -> dict:
     activated: list[dict] = []
     try:
         prog = scriptlib.load(st)
-    except Exception:                      # no evt for this scene
+    except Exception as exc:
+        # This used to read `# no evt for this scene`, which is not a thing
+        # that happens here: `Stage.evt()` *returns None* for a scene with no
+        # evt file and raises nothing. Whatever reaches this handler is a
+        # parse failure, and the comment had been standing in for a reading
+        # nobody made.
+        degraded.note("the stage's event script",
+                      "no activated collision sets", exc)
         prog = None
     if prog is not None:
         for blk in prog.blocks:
@@ -435,6 +445,14 @@ def main() -> int:
             print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
                   f"cameras + rails ({', '.join(c.name for c in cam_files)})")
         print(f"  -> {info['gltf']}")
+        # This tool has no manifest to record it in, so the exit code is the
+        # record: an export that gave up on part of the stage is not a
+        # success, and `hod2lib.degraded` has already said which parts.
+        lost = degraded.drain()
+        if lost:
+            print(f"  {len(lost)} thing(s) could not be read; the export is "
+                  f"incomplete", file=sys.stderr)
+            return 1
         return 0
 
     if not args.name:

@@ -89,7 +89,8 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
 import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
-import { ThrowerState } from "../src/game/class31/states";
+import { ThrowerState, ThrowSub } from "../src/game/class31/states";
+import { ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
@@ -2253,9 +2254,55 @@ const CLASS31 = {
   },
 };
 
+/**
+ * `g_class31_throws`' own entry, exactly as the exporter writes it — motion 9
+ * for bone 5, motion 8 for bone 8, `release_frame` **48**.
+ *
+ * Shared by the two throwing character types below, and that sharing is the
+ * point: 0x16 reads it and 0x18 does not, off the same bytes. An assertion
+ * that 0x18 plays 0x1F7 and lets go on 25 is only worth something if the
+ * entry it is supposed to be ignoring says something else.
+ */
+const THROW31_ENTRY = {
+  hands: {
+    "0": [
+      { bone: 5, motion: 9, release_frame: 48, range: 20, player_motion: 6,
+        cancel_mask: 2, held: null, bare: 8177, projectile: 8162 },
+      { bone: 8, motion: 8, release_frame: 48, range: 20, player_motion: 6,
+        cancel_mask: 4, held: null, bare: 8173, projectile: 8161 },
+    ],
+  },
+  spin: 0, speed: 1.2, aim_ahead: 4, aim_side: 0.6,
+  stick_frames: 30, blink_frames: 60,
+};
+
+/** The entry's own two clips, and the eight the `.text` switch names. */
+const THROW31_MOTIONS = {
+  "9": motion(40), "8": motion(40),
+  // Right hand then left, per stance: ground, WallA, WallB, ceiling.
+  "503": motion(40), "502": motion(40),        // 0x1F7, 0x1F6
+  "508": motion(40), "507": motion(40),        // 0x1FC, 0x1FB
+  "498": motion(40), "497": motion(40),        // 0x1F2, 0x1F1
+  "516": motion(40), "515": motion(40),        // 0x204, 0x203
+};
+
+/** Character type 0x16, `zsass` — the thrower that *does* read its entry. */
+const TYPE31_ZSASS: CharacterType = {
+  ...TYPE31,
+  type: 0x16, name: "zsass", file: "zsass.bin",
+  throw: THROW31_ENTRY,
+  motions: { ...TYPE31.motions, ...THROW31_MOTIONS },
+};
+
+/** Character type 0x18, `zslman` — the one whose throw ignores its entry. */
+const TYPE31_ZSLMAN: CharacterType = {
+  ...TYPE31_ZSASS,
+  type: 0x18, name: "zslman", file: "zslman.bin",
+};
+
 const CHARS31 = {
   ...CHARS,
-  types: { "1": TYPE, "25": TYPE31 },
+  types: { "1": TYPE, "22": TYPE31_ZSASS, "24": TYPE31_ZSLMAN, "25": TYPE31 },
   class31: CLASS31,
 } as unknown as CharactersJson;
 
@@ -2803,6 +2850,95 @@ console.log("class 0x31, the grab ends in the engine's one leave routine:");
         G.g_attack_permits.every((x) => x === -1), G.g_attack_permits.join());
   check("...and drops out of the camera's enemy slots",
         !G.g_enemy_slots.includes(z.at), G.g_enemy_slots.join());
+}
+
+/**
+ * `ThrowerStateThrow` and the two compares that divert character type 0x18.
+ *
+ * D3 of `docs/REVIEW-2026-09-03.md`. The write-up called it a 23-frame late
+ * release; it was that **and** the wrong clip, because `FUN_0044FAF0` tests
+ * the character type twice — at 0x0044FB7A for the clip and again at
+ * 0x0044FC83 for the release frame — and the port had been reading the
+ * exported throw entry for both.
+ *
+ * The three checks below are the three things that were wrong or at risk:
+ * the release frame, the clip, and the other character types not moving.
+ */
+console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
+{
+  /** A thrower of a given character type, mid-throw and holding the permit. */
+  const throwing = (charType: number, at: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS31);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(at, SpawnClass.Thrower, charType, "t", {
+      initialState: ThrowerState.Throw, condition: 0,
+    });
+    a.visible = true;
+    a.hp = 100;
+    a.pos = vec3(0, 0, 80);
+    // The engine only ever *enters* state 0x1F holding the permit --
+    // `ThrowerTryEnterState`'s case 0x1F claims one first -- so seed it,
+    // rather than letting the state take the no-permit exit.
+    a.attackPermit = 0;
+    a.sub = ThrowSub.Draw;
+    return a;
+  };
+
+  // 1. The release frame. `MOV dword ptr [ESI+0x1350], 0x19` at 0x0044FBE1
+  //    and seven more; the bundle's entry says 48.
+  const z = throwing(0x18, 0x9200);
+  ThrowerStateThrow(z, NULL_HOST, EYE);
+  z.action!.ticks = 24;
+  ThrowerStateThrow(z, NULL_HOST, EYE);
+  check("type 0x18 has not let go on frame 24",
+        z.sub === ThrowSub.Winding, `sub ${z.sub}`);
+  z.action!.ticks = 25;
+  ThrowerStateThrow(z, NULL_HOST, EYE);
+  check("...and lets go on 25, the constant the switch writes, not the "
+        + "entry's 48", z.sub === ThrowSub.Thrown, `sub ${z.sub}`);
+
+  // 2. The clip, per hand and per stance -- the whole reachable table.
+  //    `obj.attack` picks the hand: 0 is bone 5, 1 is bone 8.
+  const STANCE = [
+    ["ground", 0 as number],
+    ["WallA", ThrowerFlag.WallA],
+    ["WallB", ThrowerFlag.WallB],
+    ["ceiling", ThrowerFlag.Ceiling],
+  ] as const;
+  const WANT = [[0x1f7, 0x1fc, 0x1f2, 0x204], [0x1f6, 0x1fb, 0x1f1, 0x203]];
+  let clips = true;
+  const got: string[] = [];
+  for (let hand = 0; hand < 2; hand++) {
+    for (let s = 0; s < STANCE.length; s++) {
+      const a = throwing(0x18, 0x9210 + hand * 8 + s);
+      a.attack = hand;
+      a.flags2 |= STANCE[s][1];
+      ThrowerStateThrow(a, NULL_HOST, EYE);
+      const want = WANT[hand][s];
+      if (a.action?.motion !== want) {
+        clips = false;
+        got.push(`${STANCE[s][0]}/${hand}: ${a.action?.motion} want ${want}`);
+      }
+    }
+  }
+  check("the stance and the hand pick the clip the `.text` table names, "
+        + "all eight of them", clips, got.join("; "));
+
+  // 3. The control. Three of the four character types read the entry, at
+  //    0x0044FC8D -- `MOVSX EAX, word ptr [EDI + 0x8]`. Same fixture bytes.
+  const y = throwing(0x16, 0x9230);
+  ThrowerStateThrow(y, NULL_HOST, EYE);
+  check("type 0x16 still plays the throw entry's own clip",
+        y.action?.motion === 9, `motion ${y.action?.motion}`);
+  y.action!.ticks = 47;
+  ThrowerStateThrow(y, NULL_HOST, EYE);
+  check("...and has not let go on 47", y.sub === ThrowSub.Winding, `sub ${y.sub}`);
+  y.action!.ticks = 48;
+  ThrowerStateThrow(y, NULL_HOST, EYE);
+  check("...and lets go on the entry's own 48, not on 25",
+        y.sub === ThrowSub.Thrown, `sub ${y.sub}`);
 }
 
 // -- 14. the collision, against real quads -----------------------------------

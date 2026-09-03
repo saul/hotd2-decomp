@@ -74,6 +74,111 @@ function usableHands(obj: Actor): ThrowHandJson[] {
     .filter((h) => (obj.zones & DamageZone.All & h.cancel_mask) !== h.cancel_mask);
 }
 
+/** Character type 0x18 — `zslman`. It has its own clip for everything. */
+const CHAR_ZSLMAN = 0x18;
+
+/**
+ * `ThrowerStateThrow`'s throw clips for character type 0x18, by hand and by
+ * stance — and **the throw entry it does not read**.
+ *
+ * Type 0x18 is diverted out of the shared path *twice*, by two copies of the
+ * same compare, and the second one is the one that was missed:
+ *
+ * * `CMP word ptr [ESI+0x1f4], 0x18` (`6683bef401000018`) at **0x0044FB7A**
+ *   picks the **clip**. Every other type takes it from the throw entry's
+ *   `+0x00` (`MOVSX EDX, word ptr [EDI]` — `0fbf17` at 0x0044FB84); type 0x18
+ *   jumps to 0x0044FB98 and takes it from the switch below instead.
+ * * `CMP word ptr [ESI+0x1f4], 0x18` again at **0x0044FC83** picks the
+ *   **release frame**, as {@link ThrowerThrowCue} describes.
+ *
+ * So for `zslman` the exported entry's `motion` *and* its `release_frame` are
+ * both dead. The bundle gives it `motion: 9 / 8` and `release_frame: 48`; the
+ * engine plays 0x1F7 / 0x1F6 and releases on 25. The port used to read both
+ * from the entry, which made it play the wrong clip and then let go 23 frames
+ * into the wrong clip. Saying only "23 frames late" understates it. `[proved]`
+ *
+ * **The index.** `handIdx + 10*stance`, where `handIdx` is `obj+0x131A` — 0
+ * for bone 5, 1 for bone 8, from `ThrowerPickThrowingHand` (`FUN_0044F630`) —
+ * and `stance` is `3*bit8 + 2*bit7 + bit6` of `obj+0x136C`
+ * (`8b866c130000` at 0x0044FB98, then the shifts and `LEA`s to 0x0044FBBB).
+ * That index runs into a 32-byte table of jump-table selectors at
+ * `0x0044FD1C` (`MOV CL, byte ptr [EAX + 0x44fd1c]` — `8a881cfd4400` at
+ * 0x0044FBCF), bounded by `CMP EAX, 0x1f` / `JA` (`83f81f`, `0f8797000000`)
+ * at 0x0044FBC4, and out through the nine-entry jump table at `0x0044FCF8`
+ * (`ff248df8fc4400`).
+ *
+ * **It is `.text`, not a table, which is why it is here and not in the
+ * bundle.** `.rdata` starts at 0x004C4000; 0x0044FD1C sits inside
+ * `ThrowerStateThrow`'s own body, has exactly one xref in the program — the
+ * `MOV CL` above — and its nine jump targets are all addresses inside this
+ * one function. It is a compiler-emitted dense switch, and the clip ids are
+ * `MOV` immediates in its arms (`b8f7010000` = `MOV EAX, 0x1F7`). Under the
+ * `.rdata` travels, `.text` does not rule in `docs/formats/bundle.md` that
+ * puts it here, beside `stand.ts`'s `WAIT_BY_STANCE_ZSLMAN`, which is the
+ * same shape read out of the neighbouring state.
+ *
+ * **24 of those 32 bytes are unreachable padding, not data.** `handIdx` is 0
+ * or 1 and `stance` is 0..3, so the only indices that can occur are 0, 1, 10,
+ * 11, 20, 21, 30 and 31 — the eight below. The other 24 bytes all hold `0x08`,
+ * the selector for the default arm, because a dense switch has to be dense.
+ * Reading the raw table as an eight-by-four grid of clips would be reading the
+ * compiler's padding as the game's data.
+ */
+const THROW_BY_STANCE_ZSLMAN = [
+  // handIdx 0 — bone 5, the right hand. Ground, WallA, WallB, Ceiling.
+  [0x1f7, 0x1fc, 0x1f2, 0x204],
+  // handIdx 1 — bone 8, the left.
+  [0x1f6, 0x1fb, 0x1f1, 0x203],
+];
+
+/**
+ * The frame type 0x18 lets go on: `0x19` = 25, written to `obj+0x1350` by
+ * **all eight** arms of the switch above, the same ten bytes each time
+ * (`c7865013000019000000`, at 0x0044FBE1, FBF2, FC03, FC14, FC25, FC36, FC47
+ * and FC58). It is uniform across every arm, which is why the release frame
+ * does not depend on which clip was picked.
+ */
+const ZSLMAN_RELEASE_FRAME = 0x19;
+
+/**
+ * The clip a throw plays and the frame the weapon leaves the hand — one
+ * routine because `ThrowerStateThrow` decides both on the character type, and
+ * splitting them is how the port came to play one type's clip against another
+ * type's frame.
+ *
+ * The release frame in the exe is `obj+0x1350` — the **same word** as
+ * {@link Actor.landSurface}, which states 2 and 33 use for the surface under
+ * the body. The switch writes the constant `0x19` into it and the compare at
+ * 0x0044FC9B..0x0044FCA7 reads it back (`8b8e9c010000` / `8b8650130000` /
+ * `3bc8`): one address, two readings, both inside class 0x31, and no `cls`
+ * test can tell them apart. The port keeps only the surface reading in the
+ * field and returns the frame from here, so the two are never confused at a
+ * use site; see the note on {@link Actor.landSurface}.
+ *
+ * Every other character type compares `obj+0x19C` against the throw entry's
+ * own `+0x08` at 0x0044FC8D (`0fbf4708` then `39869c010000`). `[proved]`
+ *
+ * `[open]` — **the default arm.** The exe's stance is `3*bit8 + 2*bit7 + bit6`,
+ * a sum, not a selector: if two surface bits were ever set at once it exceeds
+ * 3, the index leaves the table's range, and the switch takes its default —
+ * which plays the clip passed in as the routine's *second argument* and
+ * **does not write `obj+0x1350` at all**, so the compare would read a landing
+ * surface as a frame number. The port's {@link ThrowerStanceOf} `& 3` cannot
+ * produce that, so the two formulas agree exactly while the bits stay
+ * exclusive and diverge if they ever do not. Whether the engine can set two at
+ * once is undetermined; the fallback below is what the port does if the table
+ * is ever indexed outside itself.
+ */
+function ThrowerThrowCue(obj: Actor, hand: ThrowHandJson):
+    { motion: number; release: number } {
+  const entry = { motion: hand.motion, release: hand.release_frame };
+  if (obj.charType !== CHAR_ZSLMAN) return entry;
+  const handIdx = hand.bone === 5 ? 0 : 1;
+  const motion = THROW_BY_STANCE_ZSLMAN[handIdx]?.[ThrowerStanceOf(obj) & 3];
+  if (motion === undefined) return entry;
+  return { motion, release: ZSLMAN_RELEASE_FRAME };
+}
+
 /**
  * `AimThrownWeapon` — `FUN_004503D0`. A point `aim_ahead` in front of the
  * camera; the camera looks down its own local -Z, which is where the player is.
@@ -177,14 +282,18 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
   }
 
   const hand = hands[Math.min(Math.max(0, obj.attack), hands.length - 1)];
+  // The clip and the release frame together — see {@link ThrowerThrowCue}.
+  // Both are the throw entry's for three of the four character types and
+  // neither is for 0x18.
+  const cue = ThrowerThrowCue(obj, hand);
   if (obj.sub === ThrowSub.Draw) {
     obj.attack = hands.indexOf(hand);
-    obj.action = { motion: hand.motion, ticks: 0, loop: false };
+    obj.action = { motion: cue.motion, ticks: 0, loop: false };
     obj.sub = ThrowSub.Winding;
     return;
   }
 
-  const m = MotionOf(obj, hand.motion);
+  const m = MotionOf(obj, cue.motion);
   if (!obj.action || !m) {
     if (obj.sub === ThrowSub.Thrown) ThrowerRearmHand(obj, hand, host);
     ThrowerReleaseAttackPermit(obj);
@@ -192,30 +301,10 @@ export function ThrowerStateThrow(obj: Actor, host: GameHost, eye: Vec3,
     obj.attack = (obj.attack + 1) % hands.length;
     return;
   }
-  // The frame the weapon leaves the hand. In the exe this is `obj+0x1350` —
-  // the **same word** as `Actor.landSurface`, which states 2 and 33 use for
-  // the surface under the body. `ThrowerStateThrow` writes the constant `0x19`
-  // into it at eight sites (`c7865013000019000000`, 0x0044FBE1..0x0044FC58)
-  // and compares the clip cursor against it at 0x0044FCA1 — one address, two
-  // readings, both inside class 0x31, and no `cls` test can tell them apart.
-  // The local name is here so the two readings are never confused at a use
-  // site; see the note on {@link Actor.landSurface}.
-  //
-  // The port takes the frame from the exported hand entry instead of storing
-  // it, because that is where the other three character types get theirs:
-  // 0x0044FC8D compares `obj+0x19C` against the throw entry's own `+0x08`
-  // (`0fbf4708` then `39869c010000`) and only character type 0x18 takes the
-  // `obj+0x1350` path (`CMP word ptr [ESI+0x1f4], 0x18` — `6683bef401000018`
-  // at 0x0044FC83). `[proved]`
-  //
-  // **For character type 0x18 that is wrong by 23 frames.** The exe compares
-  // against the constant `0x19` = 25 that it has written to `obj+0x1350`; the
-  // bundle gives `zslman` a `release_frame` of 48, so the port throws late.
-  // Reading it correctly needs the stance-indexed throw-clip table at
-  // `0x0044FD1C` exported first, which is an exporter change with a gameplay
-  // change behind it — **D3** in `docs/REVIEW-2026-09-03.md`'s "Open
-  // decisions", awaiting a call.
-  const throwCueFrame = hand.release_frame;
+  // The frame the weapon leaves the hand. The local name is here so the frame
+  // reading of `obj+0x1350` is never confused with the landing-surface one at
+  // a use site; see {@link ThrowerThrowCue} and {@link Actor.landSurface}.
+  const throwCueFrame = cue.release;
   if (obj.sub === ThrowSub.Winding && obj.action.ticks >= throwCueFrame) {
     obj.sub = ThrowSub.Thrown;
     SpawnThrownWeapon(obj, hand, host, eye, events);

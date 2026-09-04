@@ -180,11 +180,27 @@ export class RigLayer implements System {
         e.routes.push(route);
       }
     }
+    // **Only the rigs this block names.** `hod2_kind: "rig"` is the exporter's
+    // tag for *every* transcribed hierarchy in the stage, and four layers own
+    // different sets of them: the characters (`chr_`), their damaged-part
+    // templates (`gore_`), the props (`prop_`), the breakable slot templates,
+    // and these. Adopting all of them made this layer set `visible` on nodes
+    // it does not own, once a frame, from a rule that has nothing to do with
+    // them — and because a rig with no route is ungated, the *first* instance
+    // of every character type was shown at its authored spawn point, in the
+    // bind pose the exporter baked, before the script had spawned anything.
+    // The character layer hides them at stage load and only writes visibility
+    // for actors that exist, so nothing put them back. That is bug B3.
+    //
+    // `rigs.rigs[].name` is the index source and the only one: in the six
+    // shipped stages it names 2–3 rigs against 45–335 tagged nodes.
+    const owned = new Set(json.rigs.map((r) => r.name));
 
     root.traverse((o) => {
       const x = o.userData as { hod2_kind?: string; hod2_path_slot?: number;
                                hod2_rig?: string };
       if (x?.hod2_kind !== "rig") return;
+      if (!x.hod2_rig || !owned.has(x.hod2_rig)) return;
       const slot = x.hod2_path_slot;
       const bound = slot === undefined ? undefined : routesBySlot.get(slot);
       const routes = bound?.routes ?? [];

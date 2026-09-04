@@ -49,7 +49,7 @@
  * trying to derive that.
  */
 
-import { Box3, Group, Mesh, Object3D, Ray, Vector3 } from "three";
+import { Box3, Group, Object3D, Ray, Vector3 } from "three";
 import type {
   CharacterPlacement, CharacterType, CharactersJson,
 } from "../bundle";
@@ -85,7 +85,7 @@ const boneSuffix = (part: string) => `_${part}`;
  */
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
-import { swapGore } from "./characters/gore";
+import { restoreGore, swapGore } from "./characters/gore";
 export type { Instance };
 
 
@@ -217,6 +217,15 @@ export class CharacterLayer implements System {
       }
     });
 
+    // **Every character hierarchy starts hidden, before anything can reject
+    // one.** An actor is drawn because the port says it is alive, and until
+    // then the exporter's baked bind pose is standing in the level. Three of
+    // the guards below `continue` -- a placement with no motion, a character
+    // type the bundle does not carry, a partial bone match -- and each of them
+    // used to leave the hierarchy exactly as the glTF loaded it, which is
+    // visible. Nothing in the stage's lifetime would have hidden it again.
+    for (const node of roots) node.visible = false;
+
     for (const node of roots) {
       const at = (node.userData as { hod2_spawn_at: number }).hod2_spawn_at;
       const motion = motionOf.get(at);
@@ -265,7 +274,6 @@ export class CharacterLayer implements System {
       this.home.set(at, { x: node.position.x, y: node.position.y,
                           z: node.position.z });
       this.posed.add(at);
-      node.visible = false;
     }
   }
 
@@ -616,17 +624,7 @@ export class CharacterLayer implements System {
 
   /** Put one instance's nodes back to bind: bones, gore swaps, held items. */
   private restoreNodes(inst: Instance): void {
-    for (const [bone, g] of inst.gore) {
-      const node = inst.bones.get(bone);
-      const self = node as Mesh | undefined;
-      if (self?.isMesh) {
-        // The saved original, put back.
-        self.geometry = (g as Mesh).geometry;
-        self.material = (g as Mesh).material;
-      } else {
-        g.removeFromParent();
-      }
-    }
+    for (const [bone, g] of inst.gore) restoreGore(inst, bone, g);
     inst.gore.clear();
     inst.hidden = 0;
     for (const g of inst.held?.values() ?? []) g.removeFromParent();

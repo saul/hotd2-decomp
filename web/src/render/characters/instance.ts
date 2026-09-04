@@ -6,9 +6,36 @@
  * whose state is the port's and goes in the snapshot — or three.js nodes,
  * which are the renderer's and do not.
  */
-import type { Group, Object3D } from "three";
+import type { Group, Mesh, Object3D } from "three";
 import type { Actor } from "../../game/actor";
 import type { CharacterType } from "../../bundle";
+
+/**
+ * What one gore swap did to a bone, and therefore what undoing it must put
+ * back.
+ *
+ * `AssetDrawSlot` (`FUN_00418560`) draws **one whole model** for the slot a
+ * bone's draw record names, and a model is a chain of meshes — the glTF
+ * carries it as one node with several primitives. So a swap has to draw every
+ * primitive of the damaged part, which is why the extras are tracked here
+ * rather than being assumed away: 57 of 57 of `char_adv02`'s damaged variants
+ * are multi-primitive, and eight of its fifteen bones are single-primitive
+ * nodes.
+ */
+export interface GoreSwap {
+  /**
+   * The bone's own geometry and material from before the first swap, parked
+   * on a detached `Mesh`.
+   *
+   * Only a **single-primitive** bone has one: glTF loads that node as a `Mesh`
+   * and its child *bones* hang off it, so it cannot be hidden — the swap
+   * writes over what it draws instead. A multi-primitive bone is a `Group`
+   * whose own primitives are hidden, and there is nothing to save.
+   */
+  keep: Mesh | null;
+  /** Nodes the swap parented to the bone. Removed when it is undone. */
+  added: Object3D[];
+}
 
 export interface Instance {
   /** evt offset of the spawn descriptor — the identity the walker uses. */
@@ -23,7 +50,7 @@ export interface Instance {
   /** Bone index (as the skeleton numbers them) to its node. */
   bones: Map<number, Object3D>;
   /** Damaged parts currently swapped in, so a second hit can replace them. */
-  gore: Map<number, Object3D>;
+  gore: Map<number, GoreSwap>;
   /**
    * How many of `a.removed` have been hidden.
    *

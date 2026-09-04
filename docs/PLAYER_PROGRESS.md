@@ -142,6 +142,29 @@ with the acceleration the arc needs and the damage kind (4 flat, 6 arced).
 facing the camera stops and throws rather than closing, and fourteen spawns are
 condition 8.
 
+**The body condition is recomputed now, and that is what fixed the throwers.**
+`ActorBodyConditionFromHands` (`FUN_00455920`) has exactly one caller —
+`ZombieStateHoldAtRange` (`FUN_00455720`) runs it on its second line — and the
+port did not have the call at all. Conditions 7 and 8 index the **throw** row
+rather than a swing (reach 99, clip 1005/1004, hit frame 35), so a condition-8
+`znonoopa` that closed on the camera kept condition 8 into `ZombieStateStrike`,
+which read the throw as a melee: the lunge test passed at once at twenty-four
+units, the swing began, and `ApplyRootMotion`'s strike floor — set from the
+attack's own `distance` — shoved the actor back out to exactly ninety-nine
+units on the next frame. It then stood there for the rest of the stage playing
+the throw animation and landing the hit from across the room without ever
+letting go of the axe. Seventy-five units of teleport, in one frame, and it is
+both halves of the bug report: "gets close, then teleports back and starts
+throwing", and "plays the animation but never throws".
+
+With the call in, the walker keeps condition 8 through the whole approach —
+which is the window `ZombieShouldStandAndThrow` reads, so it still throws on
+the way in — and loses it on its first frame at the ring, after which it swings
+the nineteen-unit melee at your face. The engine's own operand bug at
+`0x0045599C` is transcribed with it: `znonoopa`'s left hand can never count as
+armed, so it always lands on condition 1 with the left-arm zone bit set, which
+pins its pick to the right-arm swing.
+
 `web/tools/throwers.mjs` measures it: nine throwers, all nine net under 0.2
 units of movement against the 4.2-unit swing their throw clips carry and
 return, all nine throw both hands, all nine leave — seven by state 15 and two
@@ -153,6 +176,24 @@ unreachable.
 registers for the shot test every frame, and in the tutorial that is the whole
 lesson. The port's projectile pool is plain records and its shot test walks
 actors, so `ZombieThrownWeaponStateShotDown` is named rather than half-done.
+
+The shape of what that costs is now read rather than guessed. In the engine a
+thrown weapon is **not a record in a pool at all** — it is a whole object.
+`SpawnThrownWeapon` (`FUN_004504E0`) allocates `0x13F4` bytes with its own
+update `ThrownWeaponUpdate` (`FUN_00450780`), links it into the same object
+list every actor lives on, and calls `ActorClaimHitSlot` (`FUN_00409270`),
+which is what puts it in `g_hit_slots` — `0x009C88C0`, fourteen slots — and
+raises `obj+0x38` bit `0x40`. It dispatches on its own two-entry state table
+`g_thrown_weapon_states` — `0x00592AE0`: state 0 `ThrownWeaponFlyToTarget`
+(`FUN_0044FD40`) and state 1 `ThrownWeaponDeflected` (`FUN_00450050`), which
+`ThrownWeaponUpdate` routes into the moment `obj+0x34` bit `0x8` — the
+pending-shot bit — is set on it. It also
+**inherits the thrower's attack permit** (`obj+0x121` is copied across and the
+thrower's is cleared), and only gives it back when it lands or is deflected. So
+"shoot the axe down" is not a special case bolted onto a projectile: it is the
+ordinary shot path finding an ordinary object. Making the port able to do it
+means the pool becoming actors, which is a change to the shot path and to the
+snapshot, not to the projectile.
 
 **A new overlay, `Wedged`**, answers the question the collision one leaves open.
 `#show-coli` says what the engine can feel; this marks in red every zombie the

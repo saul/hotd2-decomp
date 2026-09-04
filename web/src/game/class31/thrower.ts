@@ -67,6 +67,12 @@ import {
 import { ThrowerStanceOf } from "./tables";
 import { ThrowerState, ThrowSub } from "./states";
 
+/**
+ * How high the hand is above the actor's own origin, for the fallback in
+ * {@link SpawnThrownWeapon}. The same four units `ZombieThrowHandWeapon` uses.
+ */
+const HAND_HEIGHT = 4;
+
 /** Hands whose arm has not been shot off. `ThrowerStateThrow` refuses the rest. */
 function usableHands(obj: Actor): ThrowHandJson[] {
   return ThrowHandsOf(obj)
@@ -94,7 +100,21 @@ export function SpawnThrownWeapon(obj: Actor, hand: ThrowHandJson,
   const cfg = CharacterTypeOf(obj)?.throw;
   if (!cfg) return;
   const from = vec3();
-  if (!host.boneWorld(obj.at, hand.bone, from)) return;
+  // [diverges] The engine reads the hand's own recorded position —
+  // `obj + 0x274 + bone * 0x90`, transformed by the camera matrix — and so it
+  // **cannot fail**: `SpawnThrownWeapon` (`FUN_004504E0`) has no path that
+  // declines to make the weapon. The port has no skeleton in `game/`, so it
+  // asks the host, and a host that cannot answer used to make this `return`.
+  // That is the whole of "the thrower plays the animation and no axe appears":
+  // `ThrowerStateThrow` had already advanced its own sub-state to `Thrown`, so
+  // the throw was counted and the weapon was not. Fall back to the actor's own
+  // position lifted by a chest height, exactly as `ZombieThrowHandWeapon`
+  // (`FUN_0045A240`) does on the class-0x30 side.
+  if (!host.boneWorld(obj.at, hand.bone, from)) {
+    from.x = obj.pos.x;
+    from.y = obj.pos.y + HAND_HEIGHT;
+    from.z = obj.pos.z;
+  }
 
   // `obj+0x20C + bone*0x90` -- the draw record, recorded on the actor beside
   // the call that asks the renderer for it, so a snapshot carries which model

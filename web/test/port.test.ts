@@ -31,7 +31,7 @@ import {
 } from "../src/game/effects/rain";
 import { NULL_HOST, type ShotPick } from "../src/game/host";
 import { QueueShotRequest } from "../src/game/combat/shot";
-import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
+import { AttackListOf, MotionPlayFrame, MotionPlayLength, SetGameTables, T }
   from "../src/game/tables";
 import {
   ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
@@ -43,7 +43,7 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
-import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor }
+import { ActorFlag, DamageZone, ThrowerFlag, ZombieFlag2, type Actor }
   from "../src/game/actor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
@@ -75,6 +75,8 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
 import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
+import { ActorBodyConditionFromHands, SPENT_CONDITION }
+  from "../src/game/class30/condition";
 import { ThrowerState } from "../src/game/class31/states";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
@@ -2449,6 +2451,105 @@ console.log("the counts an actor never joined:");
   }
 }
 
+
+console.log("class 0x31, the thrower actually lets go of the weapon:");
+{
+  // **`ThrowerStateThrow` advancing its own sub-state is not a throw.** The
+  // release, `SpawnThrownWeapon` (`FUN_004504E0`), reads the hand's recorded
+  // position and allocates the projectile; it has no path in the engine that
+  // declines. The port asks the host for that position, and a host that could
+  // not answer used to make the whole routine `return` — after the state had
+  // already moved to `ThrowSub.Thrown`. So the clip played, the hand went
+  // bare, the permit changed hands, and no axe ever left it.
+  const HANDS = [
+    { bone: 5, motion: 8, release_frame: 6, range: 20, player_motion: 6,
+      cancel_mask: 2, held: 8098, bare: 8095, projectile: 8081 },
+    { bone: 8, motion: 9, release_frame: 6, range: 20, player_motion: 6,
+      cancel_mask: 4, held: 8094, bare: 8091, projectile: 8080 },
+  ];
+  const TYPE_THROWER = {
+    ...TYPE31,
+    motions: { ...TYPE31.motions, "8": motion(24), "9": motion(24) },
+    // `g_class31_throws` verbatim in shape: hands by body condition, then the
+    // scalars `ThrowerStateThrow` and `ThrownWeaponFlyToTarget` read.
+    throw: {
+      hands: { "0": HANDS },
+      // `SpawnThrownWeapon` writes 0x600 into `obj+0x135C` for `zsass`.
+      spin: 0x600, speed: 1.2, aim_ahead: 4, aim_side: 0.6,
+      stick_frames: 30, blink_frames: 60,
+    },
+  } as unknown as CharacterType;
+  const CHARS_THROW = {
+    ...CHARS31, types: { "1": TYPE, "25": TYPE_THROWER },
+  } as unknown as CharactersJson;
+
+  ResetGameGlobals();
+  SetGameTables(CHARS_THROW);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_camera_yaw_bams = 0;
+  const z = ActorSpawn(0x9200, SpawnClass.Thrower, 0x19, "thrower", {
+    initialState: ThrowerState.StandAndDecide, condition: 0,
+  });
+  z.visible = true;
+  z.hp = 100;
+  z.pos = vec3(0, 0, 60);
+  z.yaw = 0;
+  // `ThrowerEntryState` resolves state 31 to the hub — the throw is a state the
+  // router picks, never a spawn's entrance — so it is set here rather than
+  // asked for in the descriptor.
+  z.state = ThrowerState.Throw;
+  z.sub = 0;
+
+  const rng = new Rng(23);
+  const events = new Events();
+  let threw = 0;
+  events.on("enemy.threw", () => { threw += 1; });
+
+  // `NULL_HOST` on purpose: it answers `boneWorld` with `false`, which is the
+  // exact condition that used to swallow the throw.
+  let seen: (typeof G.g_thrown_weapons)[number] | undefined;
+  for (let i = 0; i < 300 && !seen; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    seen = G.g_thrown_weapons[0];
+  }
+  check("the release makes a weapon even when the host has no skeleton",
+        seen !== undefined && threw >= 1,
+        `pool ${G.g_thrown_weapons.length}, ${threw} throws`);
+  if (seen) {
+    check("...at the hand's own height, not at the actor's feet",
+          seen.pos.y > z.pos.y, `${seen.pos.y} vs ${z.pos.y}`);
+    check("...carrying the character type's own tumble",
+          seen.spin === 0x600 || seen.spin === -0x600, String(seen.spin));
+
+    // ...and it is a thing that moves. `ThrownWeaponFlyToTarget` sets the
+    // velocity once, at launch, and the flight is a straight line at a
+    // constant speed until the ttl runs out.
+    const launch = { ...seen.pos };
+    const before = dist2d(seen.pos, EYE);
+    for (let i = 0; i < 20; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    check("...and it travels", dist2d(seen.pos, launch) > 10,
+          `${dist2d(seen.pos, launch).toFixed(1)} units`);
+    check("...toward the camera", dist2d(seen.pos, EYE) < before,
+          `${dist2d(seen.pos, EYE).toFixed(1)} from ${before.toFixed(1)}`);
+    check("...tumbling as it goes", seen.spinAngle !== 0,
+          String(seen.spinAngle));
+
+    // The hit is **timed, not tested**: the weapon damages the player when its
+    // flight time runs out, wherever it happens to be. That is
+    // `ThrownWeaponFlyToTarget`'s own shape, the same as the melee hit frame.
+    let damaged = 0;
+    events.on("player.damaged", () => { damaged += 1; });
+    for (let i = 0; i < 200 && !seen.hit; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    check("...and lands on the player when the flight time is up",
+          seen.hit && damaged >= 1, `hit ${seen.hit}, ${damaged} damaged`);
+  }
+}
+
 console.log("class 0x31, the grab ends in the engine's one leave routine:");
 {
   // **`ThrowerLeave` (`FUN_0044AD60`) was transcribed twice, with different
@@ -4331,6 +4432,161 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     ordinary.yaw = 0;
     check("...nor does an ordinary body condition",
           !ZombieShouldStandAndThrow(ordinary));
+  }
+}
+
+// -- 33b. the body condition, and the throw row it keeps out of the strike --
+
+console.log("\nActorBodyConditionFromHands:");
+{
+  /**
+   * `znonoopa.bin` cut down: character type 0x14, whose conditions 7 and 8
+   * name the **throw** — `distance` 99, the clip that swings the axe — and
+   * whose conditions 0..2 name an ordinary reach at nineteen units. Both rows
+   * are in the shipped table, which is why which one is selected matters more
+   * than anything else on this actor.
+   */
+  const AXE_HANDS = [
+    { bone: 5, held: 7929, bare: 7926, weapon_bone: 6, projectile: 585 },
+    { bone: 8, held: 7925, bare: 7923, weapon_bone: 9, projectile: 585 },
+  ];
+  const MELEE = {
+    "0": { strike: 100, lunge: 101, distance: 19, hit_frame: 10,
+           player_motion: 4, cancel_mask: 2 },
+    "1": { strike: 100, lunge: 101, distance: 19, hit_frame: 10,
+           player_motion: 5, cancel_mask: 4 },
+  };
+  const TYPE_AXE = {
+    ...TYPE,
+    type: 0x14, name: "znonoopa", file: "znonoopa.bin",
+    attacks: { ...TYPE.attacks, "1": MELEE, "2": MELEE },
+    attack_picks: { ...TYPE.attack_picks,
+                    "1": new Array(80).fill(0), "2": new Array(80).fill(0) },
+    zombie_throw: { ...TYPE.zombie_throw, hands: AXE_HANDS },
+    motion_row: { ...TYPE.motion_row,
+                  "1": [10, 10, 12, 12, 14], "2": [10, 10, 12, 12, 14] },
+    // **The throw clips carry root motion here**, unlike the base fixture's.
+    // `ApplyRootMotion` returns before the strike floor when the delta is
+    // zero, so a clip that stands perfectly still cannot show the shove — and
+    // the shove is the whole of the teleport.
+    motions: { ...TYPE.motions, "102": motion(24, 0.05),
+               "103": motion(20, 0.05) },
+  } as unknown as CharacterType;
+  const CHARS_AXE = {
+    ...CHARS, types: { "1": TYPE, "20": TYPE_AXE },
+  } as unknown as CharactersJson;
+
+  const axeman = (cond: number, at = 0x6784) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_AXE);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(at, SpawnClass.Zombie, 0x14, "znonoopa", {
+      initialState: ZombieState.AttackRun, condition: cond,
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 60);
+    z.motion = 12;
+    return z;
+  };
+
+  // The trap this whole routine exists to avoid, stated as a fact about the
+  // table rather than as a claim about the code.
+  {
+    const z = axeman(8);
+    check("body condition 8 selects the throw row, reach ninety-nine",
+          AttackListOf(z)["0"]?.distance === 99,
+          String(AttackListOf(z)["0"]?.distance));
+    z.condition = 1;
+    check("...and the melee row is nineteen",
+          AttackListOf(z)["0"]?.distance === 19,
+          String(AttackListOf(z)["0"]?.distance));
+  }
+
+  // `ZombieStateHoldAtRange` is the one caller, so an actor that reaches the
+  // ring can no longer be on the throw row.
+  {
+    const z = axeman(8);
+    const rng = new Rng(4);
+    const events = new Events();
+    let sawStrike = false;
+    let struckOnThrowRow = false;
+    let maxStep = 0;
+    let prev = { ...z.pos };
+    for (let i = 0; i < 900; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      maxStep = Math.max(maxStep, Math.hypot(z.pos.x - prev.x,
+                                             z.pos.y - prev.y,
+                                             z.pos.z - prev.z));
+      prev = { ...z.pos };
+      if (z.state === ZombieState.Strike) {
+        sawStrike = true;
+        if (z.condition === 8 || z.condition === 7) struckOnThrowRow = true;
+      }
+    }
+    check("a condition-8 walker reaches the strike", sawStrike);
+    check("...never on the throw row", !struckOnThrowRow,
+          `condition ${z.condition}`);
+    // The teleport, in one number. The run clip carries 1.289 units a frame
+    // and the lunge 0.6; anything above a couple of units in a single frame is
+    // `ApplyRootMotion`'s floor shoving the actor out to the throw's own
+    // ninety-nine-unit range, which is what "gets close, then teleports back
+    // and starts throwing" looked like.
+    check("...and it never jumps across the room in one frame", maxStep < 3,
+          `${maxStep.toFixed(2)} units`);
+    check("...it ends up on a hand-derived condition",
+          z.condition <= 2, String(z.condition));
+  }
+
+  // The routine on its own: the two sticky values, and the operand the engine
+  // reads wrong.
+  {
+    const z = axeman(7);
+    ActorBodyConditionFromHands(z);
+    check("condition 7 is sticky -- the stationary thrower's own row survives",
+          z.condition === 7, String(z.condition));
+    const spent = axeman(SPENT_CONDITION);
+    ActorBodyConditionFromHands(spent);
+    check("...and so is 5", spent.condition === SPENT_CONDITION,
+          String(spent.condition));
+
+    const intact = axeman(8);
+    ActorBodyConditionFromHands(intact);
+    // `0x0045599C` compares the **right** hand's slot against the left hand's
+    // held value, so `znonoopa`'s left hand can never count as armed. One
+    // hand, condition 1, and `DamageZone.LeftArm` already set -- which is what
+    // pins its attack pick to the right-arm swing.
+    check("both hands intact still gives condition 1, not 2",
+          intact.condition === 1, String(intact.condition));
+    check("...with the left arm marked destroyed, as the engine has it",
+          (intact.zones & DamageZone.LeftArm) !== 0,
+          `zones ${intact.zones}`);
+
+    const empty = axeman(8);
+    empty.boneSlot["5"] = 0;
+    ActorBodyConditionFromHands(empty);
+    check("a thrown right hand takes it to zero", empty.condition === 0,
+          String(empty.condition));
+
+    // Character type 1 has no 1-or-2 row, so the routine only ever writes 0.
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    const znassb = ActorSpawn(0x6800, SpawnClass.Zombie, 1, "znassb", {
+      initialState: ZombieState.AttackRun, condition: 8,
+    });
+    znassb.boneSlot["5"] = 7081;             // `znassb`'s own held slots
+    znassb.boneSlot["8"] = 7077;
+    ActorBodyConditionFromHands(znassb);
+    check("character type 1 with both hands armed is left alone",
+          znassb.condition === 8, String(znassb.condition));
+    znassb.boneSlot["5"] = 0;
+    znassb.boneSlot["8"] = 0;
+    ActorBodyConditionFromHands(znassb);
+    check("...and only falls to zero when both are empty",
+          znassb.condition === 0, String(znassb.condition));
   }
 }
 

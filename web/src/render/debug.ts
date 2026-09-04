@@ -32,6 +32,7 @@ import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import type { Actor } from "../game/actor";
 import { ZombieState } from "../game/class30/states";
+import { SetPieceState } from "../game/class24";
 import { ThrowerState } from "../game/class31/states";
 import { G } from "../game/globals";
 import { dist2d } from "../game/vec";
@@ -66,6 +67,18 @@ function stateOf(a: Actor): string {
   if (a.cls === SpawnClass.Thrower) {
     return `${ThrowerState[a.state] ?? a.state}/${a.sub}`;
   }
+  // Class 0x24 keeps its selector at `obj+0x130C`, not at `obj+0x1310` --
+  // an offset it never touches -- so reading `a.state` here printed 0 for
+  // every set-piece the moment that was corrected.
+  if (a.cls === SpawnClass.SetPieceProp) {
+    return `${SetPieceState[a.prop.selector] ?? a.prop.selector}/${a.sub}`;
+  }
+  // Three classes named by hand, which is the shape `ClassHandler.debug()`
+  // exists to remove -- but `debug()` is an engine call and
+  // `render-drives-the-port` is an error at zero, so this layer may read a
+  // field and look it up in an enum and may not ask the class. The seam that
+  // fixes it properly is the projection: `app/` may call `debug()`, and this
+  // function should eventually read the string it produces. [port-only]
   return `state ${a.state}`;
 }
 

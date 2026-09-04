@@ -15,7 +15,8 @@
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
-import { ActorFlag, DamageZone, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, DamageZone, ThrowerFlag, type ThrowerActor }
+  from "../actor";
 import { ActorFacePlayerTarget } from "../actor_turn";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
@@ -55,10 +56,18 @@ const HANDS: Record<number, { bone: number; bare: number; armed: number;
 
 /** The stance idle `ThrowerStateRestoreBothHands` holds while it regrows. */
 const RESTORE_IDLE_BY_STANCE = [0x208, 0x1fd, 0x1f3, 0x205];
-/** The weapon grows back at this a **drawn** frame, so forty frames in all. */
+/**
+ * The weapon grows back at this a **drawn** frame, so forty frames in all.
+ *
+ * `[0x004C4CB0]` = `cdcccc3c` = 0.025f, the `FADD` in `ThrowerDrawBonePart`
+ * (`FUN_00449F90`) at 0x0044A150; the clamp it is compared against,
+ * `[0x004C4380]` = `0000803f`, is 1.0f.
+ */
 const REGROW_PER_FRAME = 0.025;
+/** ...and the value {@link ThrowerTail.handRegrow} is done at. */
+const REGROW_FULL = 1.0;
 
-function playOnce(obj: Actor, motion: number, from = 0): void {
+function playOnce(obj: ThrowerActor, motion: number, from = 0): void {
   const m = MotionOf(obj, motion);
   if (!m) return;
   obj.action = { motion, ticks: from, loop: false };
@@ -66,7 +75,7 @@ function playOnce(obj: Actor, motion: number, from = 0): void {
 }
 
 /** One entry of `g_class31_throws`, which both standing attacks read. */
-function ThrowerStrikeEntry(obj: Actor, index: number) {
+function ThrowerStrikeEntry(obj: ThrowerActor, index: number) {
   return Class31SetOf(obj)?.strikes?.[String(index)] ?? null;
 }
 
@@ -89,7 +98,8 @@ function ThrowerStrikeEntry(obj: Actor, index: number) {
  * row, which is what gives `zskamere` the always-connect entries 0, 1 and 3
  * here and the limb-gated 4, 5 and 6 in state 32.
  */
-export function ThrowerStateCloseAndStrike(obj: Actor, eye: Vec3, rng: Rng,
+export function ThrowerStateCloseAndStrike(obj: ThrowerActor, eye: Vec3,
+                                           rng: Rng,
                                            host: GameHost,
                                            events?: Events): void {
   if (obj.sub === 0) {
@@ -140,9 +150,8 @@ export function ThrowerStateCloseAndStrike(obj: Actor, eye: Vec3, rng: Rng,
 }
 
 /** The 0x17 override: draw from behaviour set 0's pick table. */
-function ThrowerPickAttackFromSet0(obj: Actor, roll: number): number {
-  const picks = Class31SetOf({ ...obj, condition: 0 } as Actor)?.attack_picks
-             ?? [];
+function ThrowerPickAttackFromSet0(obj: ThrowerActor, roll: number): number {
+  const picks = Class31SetOf({ ...obj, condition: 0 })?.attack_picks ?? [];
   if (!picks.length) return ThrowerPickAttack(obj, roll);
   return picks[(roll % 10) + (obj.zones & 7) * 10] ?? 0;
 }
@@ -158,7 +167,8 @@ function ThrowerPickAttackFromSet0(obj: Actor, roll: number): number {
  * The position is restored from the pin at the top of *every* cycle, not once,
  * which is what keeps a strike's own root motion from walking it off its perch.
  */
-export function ThrowerStateStrikeOnTheSpot(obj: Actor, dt: number, rng: Rng,
+export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
+                                            rng: Rng,
                                             host: GameHost,
                                             events?: Events): void {
   if (obj.sub === 0) {
@@ -209,7 +219,7 @@ export function ThrowerStateStrikeOnTheSpot(obj: Actor, dt: number, rng: Rng,
 }
 
 /** Put one hand's weapon back and clear the arm it counted as destroyed. */
-function ThrowerRestoreHand(obj: Actor, host: GameHost,
+function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
                             h: { bone: number; bare: number; armed: number;
                                  zone: DamageZone }): boolean {
   if (obj.boneSlot[String(h.bone)] !== h.bare) return false;
@@ -230,7 +240,7 @@ function ThrowerRestoreHand(obj: Actor, host: GameHost,
  * The earlier note on this routine said it "puts the weapon back in whichever
  * hand is bare", which read as a choice. It is not one.
  */
-export function ThrowerStateRearm(obj: Actor, host: GameHost): void {
+export function ThrowerStateRearm(obj: ThrowerActor, host: GameHost): void {
   if (obj.charType !== CHAR_ZSASS) {
     obj.state = ThrowerState.StandAndDecide;
     obj.sub = 0;
@@ -255,14 +265,30 @@ export function ThrowerStateRearm(obj: Actor, host: GameHost): void {
  * `ThrowerStateRestoreBothHands` — `FUN_0044F900`, class 0x31 state 30.
  *
  * Character type 0x18's version, and it is slower on purpose: the weapon
- * **grows back**. `ThrowerDrawBonePart` scales it up by 0.025 a *drawn* frame
- * and clears the flag at 1.0, so the wait is forty frames of being on screen —
- * a thrower that is not being drawn does not re-arm.
+ * **grows back**. The state itself only zeroes the accumulator and raises the
+ * latch, then waits on it:
+ *
+ * ```
+ * 0044f99c  MOV  dword ptr [ESI + 0x1384], 0x0      c7868413000000000000
+ * 0044f9a6  OR   ECX, 0x8000000                     81c900000008
+ * 0044f9b9  TEST dword ptr [ESI + 0x136c], 0x8000000  f7866c13000000000008
+ * ```
+ *
+ * `ThrowerDrawBonePart` (`FUN_00449F90`) is what advances `obj+0x1384` by
+ * 0.025 a *drawn* frame and clears the latch at 1.0, so the wait is forty
+ * frames of being on screen — a thrower that is not being drawn does not
+ * re-arm.
  *
  * [diverges] The port has no per-bone draw hook to hang the growth on, so the
- * forty frames are counted here and `Actor.alpha` is not involved.
+ * forty frames are counted here and `Actor.alpha` is not involved. The
+ * accumulator and the latch are the engine's own —
+ * {@link ThrowerTail.handRegrow} (`obj+0x1384`) and
+ * {@link ThrowerFlag.Regrowing}. This used to run on
+ * `ThrowerTail.hopFrames`, which is `obj+0x1344`,
+ * `ThrowerStateBlinkInThreeHops`' hop dwell: states 30 and 34 cannot run at
+ * once so it never bit, but it was the wrong field.
  */
-export function ThrowerStateRestoreBothHands(obj: Actor, dt: number,
+export function ThrowerStateRestoreBothHands(obj: ThrowerActor, dt: number,
                                              stance: number,
                                              host: GameHost): void {
   if (obj.sub === 0) {
@@ -272,13 +298,17 @@ export function ThrowerStateRestoreBothHands(obj: Actor, dt: number,
       obj.playTicks = 0;
       obj.rootFrame = -1;
     }
-    obj.hopFrames = 0;
+    obj.thr.handRegrow = 0;
+    obj.flags2 |= ThrowerFlag.Regrowing;
     obj.sub = 1;
   }
 
   if (obj.sub === 1) {
-    obj.hopFrames += REGROW_PER_FRAME * dt * 60;
-    if (obj.hopFrames < 1) return;
+    obj.thr.handRegrow += REGROW_PER_FRAME * dt * 60;
+    if (obj.thr.handRegrow < REGROW_FULL) return;
+    // `ThrowerDrawBonePart` pins it at exactly 1.0 and drops the latch.
+    obj.thr.handRegrow = REGROW_FULL;
+    obj.flags2 &= ~ThrowerFlag.Regrowing;
     for (const h of HANDS[CHAR_ZSLMAN] ?? []) ThrowerRestoreHand(obj, host, h);
     obj.sub = 2;
   }
@@ -293,6 +323,6 @@ export function ThrowerStateRestoreBothHands(obj: Actor, dt: number,
 }
 
 /** Whether this character has hands the two restore states know about. */
-export function ThrowerHasHands(obj: Actor): boolean {
+export function ThrowerHasHands(obj: ThrowerActor): boolean {
   return HANDS[CharacterTypeOf(obj)?.type ?? -1] !== undefined;
 }

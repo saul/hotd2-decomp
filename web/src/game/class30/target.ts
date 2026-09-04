@@ -51,7 +51,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { TargetScriptEntry, TargetScriptJson }
   from "../../bundle/characters";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, type Actor, type ZombieActor } from "../actor";
 import type { GameHost } from "../host";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { CivilianWait } from "../class10/ops";
@@ -102,7 +102,7 @@ export const TARGET_STATES: ReadonlySet<number> = new Set<number>([
  * another state*: it keeps reading the blob the entering state was reading,
  * which is exactly what makes the shared cursor work.
  */
-export function ZombieScriptForState(obj: Actor): TargetScriptJson | null {
+export function ZombieScriptForState(obj: ZombieActor): TargetScriptJson | null {
   const p = obj.script;
   if (!p) return null;
   return (obj.state === obj.attackState ? p.attack : p.target) ?? null;
@@ -113,7 +113,7 @@ const SCRIPT_TARGET = 0;                       // tail +0x04
 const SCRIPT_ATTACK = 1;                       // tail +0x08
 
 /** Which blob `ZombieScriptForState` picks for the state the actor is in now. */
-function blobForState(obj: Actor): number {
+function blobForState(obj: ZombieActor): number {
   return obj.state === obj.attackState ? SCRIPT_ATTACK : SCRIPT_TARGET;
 }
 
@@ -125,9 +125,9 @@ function blobForState(obj: Actor): number {
  * the head — and `ZombieStateTargetMotionScript` to `blob + 4` per entry
  * consumed; both are this, in entries rather than shorts.
  */
-function aimCursor(obj: Actor, blob: number, pc: number): void {
-  obj.scriptBlob = blob;
-  obj.scriptPc = pc;
+function aimCursor(obj: ZombieActor, blob: number, pc: number): void {
+  obj.zom.scriptBlob = blob;
+  obj.zom.scriptPc = pc;
 }
 
 /**
@@ -140,10 +140,10 @@ function aimCursor(obj: Actor, blob: number, pc: number): void {
  * again. Two zombies circled a hostage in stage 3 for ever and her script,
  * parked on `children-alive`, never moved.
  */
-function cursorScript(obj: Actor): TargetScriptJson | null {
+function cursorScript(obj: ZombieActor): TargetScriptJson | null {
   const p = obj.script;
   if (!p) return null;
-  return (obj.scriptBlob === SCRIPT_ATTACK ? p.attack : p.target) ?? null;
+  return (obj.zom.scriptBlob === SCRIPT_ATTACK ? p.attack : p.target) ?? null;
 }
 
 /** The entry the cursor is on, or null past the end of the list. */
@@ -161,14 +161,14 @@ function entryAt(s: TargetScriptJson | null, pc: number):
  * interrupted; `-2` raises `0x400` and clears `0x2000`; anything else raises
  * `0x2400`. [open] `0x400` and `0x2000` have no reader that has been read.
  */
-export function ZombieApplyScriptMode(obj: Actor, mode: number): void {
+export function ZombieApplyScriptMode(obj: ZombieActor, mode: number): void {
   if (mode === -3) { obj.flags |= 0x100; return; }
   if (mode === -2) { obj.flags = (obj.flags & ~0x2000) | 0x400; return; }
   obj.flags |= 0x2400;
 }
 
 /** The civilian's own script block, when this actor has a civilian. */
-function targetOf(obj: Actor): Actor | null {
+function targetOf(obj: ZombieActor): Actor | null {
   return obj.targetAt >= 0 ? ActorByAt(obj.targetAt) ?? null : null;
 }
 
@@ -178,7 +178,7 @@ function targetOf(obj: Actor): Actor | null {
  * A null target reports 0, which is what lets the same states run on a spawn
  * that has no civilian at all — and twelve of the 59 are exactly that.
  */
-export function ZombieTargetIsDead(obj: Actor): boolean {
+export function ZombieTargetIsDead(obj: ZombieActor): boolean {
   const t = targetOf(obj);
   if (!t || !(t.flags & ActorFlag.Dead)) return false;
   ZombieScriptEnded(obj);
@@ -192,7 +192,7 @@ export function ZombieTargetIsDead(obj: Actor): boolean {
  * its *attack* script goes to `AttackRun`, and everything before that has been
  * spent on the civilian.
  */
-export function ZombieScriptEnded(obj: Actor): void {
+export function ZombieScriptEnded(obj: ZombieActor): void {
   if (obj.state === obj.attackState) obj.state = ZombieState.AttackRun;
   else obj.state = obj.attackState;
 
@@ -252,7 +252,7 @@ export function ZombieScriptEnded(obj: Actor): void {
   //
   // Three spawns in the game reach it, all in stage 2.
   if (obj.state === ZombieState.AttackRun && obj.cameraCue) {
-    obj.delegate = ZombieState.AttackRun;
+    obj.zom.delegate = ZombieState.AttackRun;
     obj.state = ZombieState.HoldForCameraCue;
     obj.flags |= ActorFlag.NoCameraTrack;
   }
@@ -262,16 +262,16 @@ export function ZombieScriptEnded(obj: Actor): void {
 }
 
 /** Send the actor to `TargetLostPause`, remembering where it was. */
-function loseTarget(obj: Actor): void {
+function loseTarget(obj: ZombieActor): void {
   if (obj.state === ZombieState.WalkPastPoint) return;
-  obj.targetCue = obj.state;
-  obj.resumeSub = obj.sub;
+  obj.zom.targetCue = obj.state;
+  obj.zom.resumeSub = obj.sub;
   obj.state = ZombieState.TargetLostPause;
   obj.sub = 0;
 }
 
 /** The clip frame this actor is on — the engine's `obj+0x19C`. */
-function frameOf(obj: Actor): number {
+function frameOf(obj: ZombieActor): number {
   return MotionPlayFrame(obj);
 }
 
@@ -281,7 +281,7 @@ function frameOf(obj: Actor): number {
  * Both halves count in the **play** clock, not in authored frames. Measuring
  * this in frames ends every entry at halfway and takes the kill cue with it.
  */
-function atLastFrame(obj: Actor): boolean {
+function atLastFrame(obj: ZombieActor): boolean {
   const len = MotionPlayLength(obj);
   // **Equality, because the cursor wraps.** `>=` is true for both `len - 1`
   // and `len`, so every entry would spend two of its loops per play-through.
@@ -293,28 +293,28 @@ function atLastFrame(obj: Actor): boolean {
  * the script asked for, blend back to it — hard when the loop count is nearly
  * spent, soft otherwise.
  */
-function reblend(obj: Actor): void {
+function reblend(obj: ZombieActor): void {
   if (obj.flags & ActorFlag.Reacting) return;
-  if (obj.motion === obj.scriptMotion || !obj.scriptMotion) return;
+  if (obj.motion === obj.zom.scriptMotion || !obj.zom.scriptMotion) return;
   const m = MotionOf(obj, obj.motion);
-  if (obj.targetLoops < 2) {
-    ActorSetMotionBlended(obj, obj.scriptMotion, Math.max(0, (m?.frames ?? 1) - 1), 1);
+  if (obj.zom.targetLoops < 2) {
+    ActorSetMotionBlended(obj, obj.zom.scriptMotion, Math.max(0, (m?.frames ?? 1) - 1), 1);
     return;
   }
-  ActorSetMotionBlended(obj, obj.scriptMotion, 0, 10);
-  obj.targetLoops -= 1;
+  ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
+  obj.zom.targetLoops -= 1;
 }
 
 /** Take one entry off the list into the actor's fields. */
-function loadEntry(obj: Actor, e: TargetScriptEntry, blend: number): void {
+function loadEntry(obj: ZombieActor, e: TargetScriptEntry, blend: number): void {
   ZombieApplyScriptMode(obj, e.mode);
   if (obj.motion !== e.motion || blend === 0) {
     ActorSetMotionBlended(obj, e.motion, e.frame, blend);
   }
-  obj.scriptMotion = e.motion;
-  obj.targetLoops = e.loops;
-  obj.targetCue = e.mode;
-  obj.scriptPc += 1;                           // `0x1398 = psVar6 + 4`
+  obj.zom.scriptMotion = e.motion;
+  obj.zom.targetLoops = e.loops;
+  obj.zom.targetCue = e.mode;
+  obj.zom.scriptPc += 1;                           // `0x1398 = psVar6 + 4`
 }
 
 /**
@@ -326,31 +326,31 @@ function loadEntry(obj: Actor, e: TargetScriptEntry, blend: number): void {
  * over to the maul **and raises the civilian's `Free` wait bit**, which is
  * the civilian's cue to stop standing there and start reacting.
  */
-export function ZombieStateWalkToTarget(obj: Actor): void {
+export function ZombieStateWalkToTarget(obj: ZombieActor): void {
   const s = ZombieScriptForState(obj);
   const t = targetOf(obj);
   if (obj.sub === 0 || obj.sub === 1) {
     obj.flags |= 0x400;
-    obj.targetArrive = s?.head.arrive ?? 0;
-    obj.targetLoops = s?.head.loops ?? 0;
+    obj.zom.targetArrive = s?.head.arrive ?? 0;
+    obj.zom.targetLoops = s?.head.loops ?? 0;
     const m = s?.head.motion ?? 0;
     if (obj.sub === 0 || obj.motion !== m) {
       ActorSetMotionBlended(obj, m, s?.head.frame ?? 0, obj.sub === 0 ? 0 : 10);
     }
-    obj.scriptMotion = obj.motion;
+    obj.zom.scriptMotion = obj.motion;
     aimCursor(obj, blobForState(obj), 0);       // `0x1398 = puVar6 + 10`
     obj.sub = 2;
   } else if (obj.sub === 2 && t) {
     const d = Math.hypot(obj.pos.x - t.pos.x, obj.pos.z - t.pos.z);
-    if (d <= obj.targetArrive) {
-      if (!entryAt(cursorScript(obj), obj.scriptPc)) {
+    if (d <= obj.zom.targetArrive) {
+      if (!entryAt(cursorScript(obj), obj.zom.scriptPc)) {
         ZombieScriptEnded(obj);
       } else {
         obj.state = ZombieState.TargetMotionScript;
         obj.sub = 1;
         // **The grab.** `**(uint **)(target+0x1310) |= 0x800` -- the civilian's
         // own wait word, and `Free` is the bit that makes its next block run.
-        if (obj.targetLoops !== 0 && t.civ) t.civ.wait |= CivilianWait.Free;
+        if (obj.zom.targetLoops !== 0 && t.civ) t.civ.wait |= CivilianWait.Free;
       }
     } else {
       TurnActorAwayFromPoint(obj, t.pos, TARGET_TURN_RATE, 1 / 60);
@@ -368,7 +368,7 @@ export function ZombieStateWalkToTarget(obj: Actor): void {
  * shot raises, so `CivilianUpdate` runs its killed branch and charges both
  * players a hundred points for the rescue they did not make.
  */
-export function ZombieStateTargetMotionScript(obj: Actor, rng: Rng,
+export function ZombieStateTargetMotionScript(obj: ZombieActor, rng: Rng,
                                               events?: Events): void {
   const t = targetOf(obj);
   if (obj.sub === 0) {
@@ -379,12 +379,12 @@ export function ZombieStateTargetMotionScript(obj: Actor, rng: Rng,
     obj.sub = 2;
   } else if (obj.sub === 1) {
     // `psVar6 = *(short **)(obj+0x1398)` — the cursor, not the state.
-    const e = entryAt(cursorScript(obj), obj.scriptPc);
+    const e = entryAt(cursorScript(obj), obj.zom.scriptPc);
     if (e) loadEntry(obj, e, 10);
     obj.sub += 1;
   } else if (obj.sub === 2) {
     const s = cursorScript(obj);
-    if (t && frameOf(obj) === obj.targetCue && !(t.flags & ActorFlag.Dead)) {
+    if (t && frameOf(obj) === obj.zom.targetCue && !(t.flags & ActorFlag.Dead)) {
       t.flags |= ActorFlag.Dead;
       ZombiePlayTargetKillSound(obj, events);
     }
@@ -394,12 +394,12 @@ export function ZombieStateTargetMotionScript(obj: Actor, rng: Rng,
     if (!reacting || !ZombieTargetIsDead(obj)) {
       if (atLastFrame(obj)) {
         if (!ZombieTargetIsDead(obj)) {
-          obj.targetLoops -= 1;
-          if (obj.targetLoops === 0) {
-            if (!entryAt(s, obj.scriptPc)) ZombieScriptEnded(obj);
+          obj.zom.targetLoops -= 1;
+          if (obj.zom.targetLoops === 0) {
+            if (!entryAt(s, obj.zom.scriptPc)) ZombieScriptEnded(obj);
             else obj.sub = 1;
           }
-        } else if (s?.entries[obj.scriptPc]?.motion === -1) {
+        } else if (s?.entries[obj.zom.scriptPc]?.motion === -1) {
           loseTarget(obj);
         }
       }
@@ -416,23 +416,23 @@ export function ZombieStateTargetMotionScript(obj: Actor, rng: Rng,
  * the cue frame. That is how a set piece's zombie tells the evt script it has
  * finished, so the stage can move on.
  */
-export function ZombieStateTargetScriptWithFlag(obj: Actor): void {
+export function ZombieStateTargetScriptWithFlag(obj: ZombieActor): void {
   const s = obj.sub === 0 ? ZombieScriptForState(obj) : cursorScript(obj);
   if (obj.sub === 0 || obj.sub === 1) {
-    const e = obj.sub === 0 ? s?.entries[0] : entryAt(s, obj.scriptPc);
+    const e = obj.sub === 0 ? s?.entries[0] : entryAt(s, obj.zom.scriptPc);
     if (obj.sub === 0) aimCursor(obj, blobForState(obj), 0);
     if (e) {
       loadEntry(obj, e, obj.sub === 0 ? 0 : 10);
-      obj.resumeSub = e.flag ?? 0;
+      obj.zom.resumeSub = e.flag ?? 0;
     }
     obj.sub = obj.sub === 0 ? 2 : obj.sub + 1;
   } else if (obj.sub === 2) {
-    if (frameOf(obj) === obj.targetCue) G.g_script_flags[obj.resumeSub] = 1;
+    if (frameOf(obj) === obj.zom.targetCue) G.g_script_flags[obj.zom.resumeSub] = 1;
     if (atLastFrame(obj)) {
-      obj.targetLoops -= 1;
-      if (obj.targetLoops === 0) {
-        if (obj.targetCue >= 0) {
-          if (!entryAt(cursorScript(obj), obj.scriptPc)) {
+      obj.zom.targetLoops -= 1;
+      if (obj.zom.targetLoops === 0) {
+        if (obj.zom.targetCue >= 0) {
+          if (!entryAt(cursorScript(obj), obj.zom.scriptPc)) {
             ZombieScriptEnded(obj); return;
           }
           obj.state = ZombieState.TargetMotionScript;
@@ -454,7 +454,7 @@ export function ZombieStateTargetScriptWithFlag(obj: Actor): void {
  * the stage once its business with the civilian is done — walking out of frame
  * rather than charging the player.
  */
-export function ZombieStateRetireOffScreen(obj: Actor, host: GameHost,
+export function ZombieStateRetireOffScreen(obj: ZombieActor, host: GameHost,
                                            rng: Rng): void {
   const s = ZombieScriptForState(obj);
   if (obj.sub === 0) {
@@ -463,28 +463,28 @@ export function ZombieStateRetireOffScreen(obj: Actor, host: GameHost,
     obj.target = vec3(h.point?.[0] ?? 0, h.point?.[1] ?? 0, h.point?.[2] ?? 0);
     const m = h.motion ?? 0;
     ActorSetMotionBlended(obj, m, h.frame ?? 0, obj.motion === m ? 0 : 10);
-    obj.scriptMotion = m;
-    obj.targetLoops = h.loops ?? 0;
-    obj.targetCue = h.mode ?? 0;
-    obj.scriptPc = 0;
+    obj.zom.scriptMotion = m;
+    obj.zom.targetLoops = h.loops ?? 0;
+    obj.zom.targetCue = h.mode ?? 0;
+    obj.zom.scriptPc = 0;
     obj.sub = 2;
   } else if (obj.sub === 1) {
-    const e = entryAt(s, obj.scriptPc);
+    const e = entryAt(s, obj.zom.scriptPc);
     if (e) {
       if (obj.motion !== e.motion) {
         ActorSetMotionBlended(obj, e.motion, e.frame, 10);
       }
-      obj.scriptMotion = e.motion;
-      obj.targetLoops = e.loops;
-      obj.targetCue = e.mode;
-      obj.scriptPc += 1;
+      obj.zom.scriptMotion = e.motion;
+      obj.zom.targetLoops = e.loops;
+      obj.zom.targetCue = e.mode;
+      obj.zom.scriptPc += 1;
     }
     obj.sub += 1;
   } else if (obj.sub === 2) {
     if (atLastFrame(obj)) {
-      obj.targetLoops -= 1;
-      if (obj.targetLoops === 0) {
-        obj.sub = entryAt(s, obj.scriptPc) ? 1 : obj.sub + 1;
+      obj.zom.targetLoops -= 1;
+      if (obj.zom.targetLoops === 0) {
+        obj.sub = entryAt(s, obj.zom.scriptPc) ? 1 : obj.sub + 1;
       }
     }
   } else if (obj.sub === 4) {
@@ -502,13 +502,13 @@ export function ZombieStateRetireOffScreen(obj: Actor, host: GameHost,
       ZombieRetireAndCredit(obj, rng);
     }
   };
-  switch (obj.targetCue) {
+  switch (obj.zom.targetCue) {
     case 1: TurnActorAwayFromPoint(obj, obj.target, TARGET_TURN_RATE, 1 / 60);
             retire(); break;
     case 0: retire(); break;
     case 2: TurnActorAwayFromPoint(obj, obj.target, TARGET_TURN_RATE, 1 / 60);
             break;
-    case 3: if (obj.targetLoops === 0) ZombieRetireAndCredit(obj, rng); break;
+    case 3: if (obj.zom.targetLoops === 0) ZombieRetireAndCredit(obj, rng); break;
     default: break;
   }
   reblend(obj);
@@ -522,7 +522,7 @@ export function ZombieStateRetireOffScreen(obj: Actor, host: GameHost,
  * what `CivilianPruneDeadChildren` reads back to decide who is paid the 400,
  * so a captor that walks off screen still counts as dealt with.
  */
-export function ZombieRetireAndCredit(obj: Actor, rng: Rng): void {
+export function ZombieRetireAndCredit(obj: ZombieActor, rng: Rng): void {
   obj.flags |= 0x4008001;
   const t = targetOf(obj);
   if (t) {
@@ -542,10 +542,10 @@ export function ZombieRetireAndCredit(obj: Actor, rng: Rng): void {
  * killer from the civilian's `sub+0x6C`, so the player who earned the rescue
  * is credited with the captors that simply gave up.
  */
-export function ZombieStateAwaitCivilianOrder(obj: Actor, rng: Rng): void {
+export function ZombieStateAwaitCivilianOrder(obj: ZombieActor, rng: Rng): void {
   const t = targetOf(obj);
   if (obj.sub === 0) {
-    obj.targetLoops = obj.flags;          // `obj+0x1350` holds the saved flags
+    obj.zom.targetLoops = obj.flags;          // `obj+0x1350` holds the saved flags
     obj.flags |= 0x18000;
     obj.sub += 1;
     return;
@@ -564,7 +564,7 @@ export function ZombieStateAwaitCivilianOrder(obj: Actor, rng: Rng): void {
   }
   obj.state = t.civ.childOrder;
   obj.sub = 0;
-  obj.flags = obj.targetLoops;
+  obj.flags = obj.zom.targetLoops;
 }
 
 /**
@@ -574,7 +574,7 @@ export function ZombieStateAwaitCivilianOrder(obj: Actor, rng: Rng): void {
  * `ActorPointIsAhead` (`FUN_0045BC10`) is the test — and then hands over to
  * the maul, or ends the script if the list is spent.
  */
-export function ZombieStateWalkPastPoint(obj: Actor): void {
+export function ZombieStateWalkPastPoint(obj: ZombieActor): void {
   const s = ZombieScriptForState(obj);
   if (obj.sub === 0 || obj.sub === 1) {
     obj.flags |= 0x2400;
@@ -584,12 +584,12 @@ export function ZombieStateWalkPastPoint(obj: Actor): void {
     if (obj.motion !== m) {
       ActorSetMotionBlended(obj, m, h.frame ?? 0, obj.sub === 0 ? 0 : 10);
     }
-    obj.scriptMotion = m;
-    obj.scriptPc = 0;
+    obj.zom.scriptMotion = m;
+    obj.zom.scriptPc = 0;
     obj.sub = 2;
   }
   if (ActorPointIsAhead(obj, obj.target)) {
-    if (!entryAt(s, obj.scriptPc)) ZombieScriptEnded(obj);
+    if (!entryAt(s, obj.zom.scriptPc)) ZombieScriptEnded(obj);
     else if (!ZombieTargetIsDead(obj)) {
       obj.state = ZombieState.TargetMotionScript;
       obj.sub = 1;
@@ -602,7 +602,7 @@ export function ZombieStateWalkPastPoint(obj: Actor): void {
  * `ZombieStateWalkToPoint` — `FUN_0045BE30`. Class 0x30 state 41. The same
  * header, but it walks *to* the point — within 5.0 — turning as it goes.
  */
-export function ZombieStateWalkToPoint(obj: Actor): void {
+export function ZombieStateWalkToPoint(obj: ZombieActor): void {
   const s = ZombieScriptForState(obj);
   if (obj.sub === 0 || obj.sub === 1) {
     const h = s?.head ?? {};
@@ -611,13 +611,13 @@ export function ZombieStateWalkToPoint(obj: Actor): void {
     if (obj.motion !== m) {
       ActorSetMotionBlended(obj, m, h.frame ?? 0, obj.sub === 0 ? 0 : 10);
     }
-    obj.scriptMotion = m;
-    obj.scriptPc = 0;
+    obj.zom.scriptMotion = m;
+    obj.zom.scriptPc = 0;
     obj.sub = 2;
   } else if (obj.sub === 2) {
     const d = Math.hypot(obj.pos.x - obj.target.x, obj.pos.z - obj.target.z);
     if (d <= POINT_ARRIVE) {
-      if (!entryAt(s, obj.scriptPc)) ZombieScriptEnded(obj);
+      if (!entryAt(s, obj.zom.scriptPc)) ZombieScriptEnded(obj);
       else { obj.state = ZombieState.TargetMotionScript; obj.sub = 1; }
     } else {
       TurnActorAwayFromPoint(obj, obj.target, TARGET_TURN_RATE, 1 / 60);
@@ -633,7 +633,7 @@ export function ZombieStateWalkToPoint(obj: Actor): void {
  * the local `z`. Yaw alone is exact for anything upright, which every actor in
  * this family is.
  */
-export function ActorPointIsAhead(obj: Actor, p: Vec3): boolean {
+export function ActorPointIsAhead(obj: ZombieActor, p: Vec3): boolean {
   const a = obj.yaw * ((Math.PI * 2) / 65536);
   const dx = p.x - obj.pos.x;
   const dz = p.z - obj.pos.z;
@@ -648,15 +648,15 @@ export function ActorPointIsAhead(obj: Actor, p: Vec3): boolean {
  * header's cue frame it kills the civilian and switches to the kill clip; if
  * the civilian is already dead it plays the aftermath instead.
  */
-export function ZombieStateDragTarget(obj: Actor): void {
+export function ZombieStateDragTarget(obj: ZombieActor): void {
   const s = ZombieScriptForState(obj);
   const t = targetOf(obj);
   if (obj.sub === 4) { ActorDespawn(obj); return; }
   if (obj.sub === 0) {
     obj.flags |= 0x2400;
     ActorSetMotionBlended(obj, DRAG_MOTION, 0, 0);
-    obj.targetLoops = s?.head.loops ?? 0;
-    obj.targetCue = s?.head.cue ?? 0;
+    obj.zom.targetLoops = s?.head.loops ?? 0;
+    obj.zom.targetCue = s?.head.cue ?? 0;
     obj.sub += 1;
     obj.flags |= 0x10000000;
   } else if (obj.sub === 2) {
@@ -669,8 +669,8 @@ export function ZombieStateDragTarget(obj: Actor): void {
   }
   if (obj.sub === 1 || obj.sub === 2) {
     if (t) { obj.pos = { ...t.pos }; obj.yaw = t.yaw; }
-    if (atLastFrame(obj)) obj.targetLoops -= 1;
-    if (obj.targetLoops === 0 && frameOf(obj) === obj.targetCue) {
+    if (atLastFrame(obj)) obj.zom.targetLoops -= 1;
+    if (obj.zom.targetLoops === 0 && frameOf(obj) === obj.zom.targetCue) {
       if (t && !(t.flags & ActorFlag.Dead)) {
         ActorSetMotionBlended(obj, DRAG_KILL_MOTION, 0, 2);
         obj.flags |= 0x10100;
@@ -697,7 +697,7 @@ export function ZombieStateDragTarget(obj: Actor): void {
  * civilian's own **bone matrix**; `game/` has no skeleton, so this aims at the
  * actor's position lifted by the same offsets in its own facing.
  */
-export function ZombieStatePounceOnTarget(obj: Actor, dt: number): void {
+export function ZombieStatePounceOnTarget(obj: ZombieActor, dt: number): void {
   const t = targetOf(obj);
   if (!t) return;
   const frames = dt * 60;
@@ -714,7 +714,7 @@ export function ZombieStatePounceOnTarget(obj: Actor, dt: number): void {
       if (obj.motion !== POUNCE_WAIT_MOTION) {
         ActorSetMotionBlended(obj, POUNCE_WAIT_MOTION, 0, 10);
       }
-      obj.scriptMotion = POUNCE_WAIT_MOTION;
+      obj.zom.scriptMotion = POUNCE_WAIT_MOTION;
       if (ZombieTargetIsDead(obj)) loseTarget(obj);
       return;
     }
@@ -815,46 +815,46 @@ export function ZombieStatePounceOnTarget(obj: Actor, dt: number): void {
  * this is the only code in the captor family that touches `g_attack_permits`.
  */
 export function ZombieStateHoldForCameraCue(
-    obj: Actor, runState: (obj: Actor, state: ZombieState) => void): void {
+    obj: ZombieActor, runState: (obj: ZombieActor, state: ZombieState) => void): void {
   // The engine calls `g_class30_states[obj+0x132C]` directly. The dispatcher
   // lives in `class30/index.ts` and importing it here would close a cycle, so
   // it is handed in — the one shape difference from the engine's table lookup.
-  runState(obj, obj.delegate);
+  runState(obj, obj.zom.delegate);
 
   const cue = obj.cameraCue;
   if (cue && G.g_active_cam_path === cue.path
       && G.g_cam_path_frame === cue.frame) {
     obj.flags &= ~ActorFlag.NoCameraTrack;
-    obj.state = obj.delegate;
+    obj.state = obj.zom.delegate;
     return;
   }
   if (obj.state === ZombieState.HoldForCameraCue) return;
   if (obj.state === ZombieState.Strike) {
-    obj.delegate = ZombieState.HoldAtRange;
+    obj.zom.delegate = ZombieState.HoldAtRange;
     ReleaseAttackSlot(obj);
     obj.state = ZombieState.HoldForCameraCue;
     return;
   }
-  obj.delegate = obj.state;
+  obj.zom.delegate = obj.state;
   obj.state = ZombieState.HoldForCameraCue;
 }
 
-export function ZombieStateTargetLostPause(obj: Actor, rng: Rng,
+export function ZombieStateTargetLostPause(obj: ZombieActor, rng: Rng,
                                            walkMotion: number): void {
   if (obj.sub === 0) {
-    obj.targetLoops = rng.int(LOST_PAUSE_SPREAD) + LOST_PAUSE_MIN;
+    obj.zom.targetLoops = rng.int(LOST_PAUSE_SPREAD) + LOST_PAUSE_MIN;
     if (walkMotion && obj.motion !== walkMotion) {
       ActorSetMotionBlended(obj, walkMotion, 0, 10);
     }
-    obj.scriptMotion = obj.motion;
+    obj.zom.scriptMotion = obj.motion;
     obj.sub += 1;
     return;
   }
   if (obj.sub === 1) {
-    obj.targetLoops -= 1;
-    if (obj.targetLoops === 0) {
-      obj.state = obj.targetCue;
-      obj.sub = obj.resumeSub;
+    obj.zom.targetLoops -= 1;
+    if (obj.zom.targetLoops === 0) {
+      obj.state = obj.zom.targetCue;
+      obj.sub = obj.zom.resumeSub;
     }
   }
   reblend(obj);
@@ -864,7 +864,7 @@ export function ZombieStateTargetLostPause(obj: Actor, rng: Rng,
  * `ZombiePlayTargetKillSound` — `FUN_0045CBD0`. The noise a zombie makes as it
  * kills a civilian: by clip first, then by character type.
  */
-export function ZombiePlayTargetKillSound(obj: Actor, events?: Events): void {
+export function ZombiePlayTargetKillSound(obj: ZombieActor, events?: Events): void {
   const m = obj.motion;
   let id: number;
   if (m === 0xfe || m === 0xff || m === 0x3cb) id = 0x1d16a9;

@@ -11,7 +11,7 @@
  * have taken its head off and it has not died of it.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerReleaseSlotOnDeath } from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
@@ -43,7 +43,7 @@ const TUMBLE_FRAME_CAP = 0x78;
 const TUMBLE_STANDOFF = 4.5;
 const TUMBLE_COOLDOWN = 0x14;
 
-function playOnce(obj: Actor, motion: number): void {
+function playOnce(obj: ThrowerActor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
   obj.action = { motion, ticks: 0, loop: false };
   obj.rootActionFrame = -1;
@@ -59,9 +59,9 @@ function playOnce(obj: Actor, motion: number): void {
  * **hard-cut** rather than blend, so a leg shot reads as a buckle where an arm
  * shot reads as a flinch.
  */
-export function ThrowerStateHitReaction(obj: Actor, eye: Vec3, rng: Rng,
+export function ThrowerStateHitReaction(obj: ThrowerActor, eye: Vec3, rng: Rng,
                                         host: GameHost): void {
-  const bone = Math.min(REACT_BONE_MAX, Math.max(0, obj.reactBone));
+  const bone = Math.min(REACT_BONE_MAX, Math.max(0, obj.thr.reactBone));
   const group = T.chars?.reaction_groups?.[bone] ?? 0;
   const motion = Class31SetOf(obj)?.reactions?.[group];
 
@@ -104,7 +104,7 @@ export function ThrowerStateHitReaction(obj: Actor, eye: Vec3, rng: Rng,
  * rig does not have. The port's motion lookup returns nothing and the state
  * ends immediately, which is the least-wrong reading of an engine bug.
  */
-export function ThrowerStateGetUp(obj: Actor, eye: Vec3, rng: Rng,
+export function ThrowerStateGetUp(obj: ThrowerActor, eye: Vec3, rng: Rng,
                                   host: GameHost): void {
   if (obj.sub === 0) {
     obj.flags |= ActorFlag.ShotImmune;
@@ -139,7 +139,7 @@ export enum ThrowerArcKind {
  * cardinals off the yaw directly, which is the same answer wherever the snap
  * would have succeeded and a floor fall where it would not.
  */
-export function SelectActorGravityAxis(obj: Actor): ThrowerArcKind {
+export function SelectActorGravityAxis(obj: ThrowerActor): ThrowerArcKind {
   if (obj.flags2 & ThrowerFlag.Ceiling) return ThrowerArcKind.Ceiling;
   if (!(obj.flags2 & (ThrowerFlag.WallA | ThrowerFlag.WallB))) {
     return ThrowerArcKind.Floor;
@@ -175,7 +175,7 @@ const AXIS_OF: Record<number, "x" | "y" | "z"> = {
  * engine's own probe, against the game's own `coli/` quads — so a wall bounce
  * finds the wall rather than settling on the frame cap.
  */
-export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
+export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
                                             dt: number, rng: Rng): void {
   const frames = dt * GAME_HZ;
   const stance = ThrowerStanceOf(obj) & 3;
@@ -188,21 +188,21 @@ export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
     if (!reentry) {
       obj.vel.x = obj.vel.y = obj.vel.z = 0;
       obj.accY = 0;
-      obj.knockCount = 0;
+      obj.thr.knockCount = 0;
     } else {
-      obj.knockCount += 1;
+      obj.thr.knockCount += 1;
     }
     playOnce(obj, clip);
-    if (!(obj.flags & ActorFlag.ArcSpent) && obj.knockCount < 2) {
+    if (!(obj.flags & ActorFlag.ArcSpent) && obj.thr.knockCount < 2) {
       ThrowerBeginTumbleArc(obj, host);
     } else {
       obj.flags |= ActorFlag.ArcSpent;
     }
-    obj.arcKind = SelectActorGravityAxis(obj);
+    obj.thr.arcKind = SelectActorGravityAxis(obj);
     // As `ThrowerStateFallAndLand`'s own sub 0: the alive count falls when the
     // actor is knocked off its feet, not when the body settles.
     ThrowerReleaseSlotOnDeath(obj);
-    obj.sinceLanding = 0;
+    obj.thr.sinceLanding = 0;
     obj.sub = 1;
   }
 
@@ -215,18 +215,18 @@ export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
       obj.pos.z += obj.vel.z * frames;
       return;
     }
-    obj.sinceLanding = 0;
+    obj.thr.sinceLanding = 0;
     obj.flags &= ~ActorFlag.PoseFrozen;
     obj.sub = 2;
   }
 
   if (obj.sub === 2) {
     if (ActorClipFrame(obj) >= 0x2b) obj.flags |= ActorFlag.PoseFrozen;
-    obj.sinceLanding += frames;
-    const axis = AXIS_OF[obj.arcKind] ?? "y";
-    const pull = obj.arcKind === ThrowerArcKind.Ceiling
-              || obj.arcKind === ThrowerArcKind.WallPlusX
-              || obj.arcKind === ThrowerArcKind.WallPlusZ
+    obj.thr.sinceLanding += frames;
+    const axis = AXIS_OF[obj.thr.arcKind] ?? "y";
+    const pull = obj.thr.arcKind === ThrowerArcKind.Ceiling
+              || obj.thr.arcKind === ThrowerArcKind.WallPlusX
+              || obj.thr.arcKind === ThrowerArcKind.WallPlusZ
       ? -FALL_GRAVITY : FALL_GRAVITY;
     obj.vel[axis] += pull * frames;
     obj.pos.x += obj.vel.x * frames;
@@ -235,15 +235,15 @@ export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
 
     const contact = ThrowerTumbleContact(obj, axis);
     const past = pull < 0 ? obj.pos[axis] <= contact : obj.pos[axis] >= contact;
-    if (!past && obj.sinceLanding < TUMBLE_FRAME_CAP) return;
+    if (!past && obj.thr.sinceLanding < TUMBLE_FRAME_CAP) return;
 
     obj.pos[axis] = contact;
-    obj.landSurface = G.g_coli_hit_surface;
+    obj.thr.landSurface = G.g_coli_hit_surface;
     for (const k of ["x", "y", "z"] as const) {
       obj.vel[k] *= k === axis ? -0.5 : 0.5;
     }
     if (Math.abs(obj.vel[axis]) > SETTLE_SPEED
-        && obj.sinceLanding < TUMBLE_FRAME_CAP) {
+        && obj.thr.sinceLanding < TUMBLE_FRAME_CAP) {
       obj.flags &= ~ActorFlag.PoseFrozen;
       return;
     }
@@ -251,12 +251,16 @@ export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
     obj.accY = 0;
     obj.flags = (obj.flags & ~(ActorFlag.ArcSpent | ActorFlag.PoseFrozen))
               | ActorFlag.ShotImmune;
+    // `AND CH, 0xbf` (`80e5bf`) on `obj+0x136C` at 0x004512F3, in the same
+    // breath as `AND DH, 0xdf` / `OR DH, 0x1` on `obj+0x34`: the body has
+    // settled, so the next landing may puff again.
+    obj.flags2 &= ~ThrowerFlag.LandingDustEmitted;
     obj.slideTimer = (rng.int(10) + 1) * 3;
     obj.sub = 3;
   }
 
   if (obj.sub === 3) {
-    if (obj.dead || obj.landSurface === SURFACE_KILL) {
+    if (obj.dead || obj.thr.landSurface === SURFACE_KILL) {
       if (obj.action) return;               // wait the tumble clip out
       ThrowerEnterCorpseState(obj);
       return;
@@ -286,7 +290,7 @@ export function ThrowerStateKnockedTumbling(obj: Actor, host: GameHost,
  * function plus the velocity this state steps the arc with, which the fall
  * derives another way.
  */
-function ThrowerBeginTumbleArc(obj: Actor, host: GameHost): void {
+function ThrowerBeginTumbleArc(obj: ThrowerActor, host: GameHost): void {
   ThrowerBeginKnockbackArc(obj, host);
   // The tumble keeps its own height and steps the arc from a velocity rather
   // than through `ActorArcVelocity`.
@@ -304,15 +308,16 @@ function ThrowerBeginTumbleArc(obj: Actor, host: GameHost): void {
  * not a floor special case any more. The `4.5` standoff is the engine's, and
  * its sign follows the axis the arc kind names.
  */
-function ThrowerTumbleContact(obj: Actor, axis: "x" | "y" | "z"): number {
+function ThrowerTumbleContact(obj: ThrowerActor,
+                              axis: "x" | "y" | "z"): number {
   if (!TraceActorSurfaceContactPoint(obj, _contact)) {
     return obj.pos[axis] + (obj.vel[axis] >= 0 ? TUMBLE_STANDOFF
                                                : -TUMBLE_STANDOFF);
   }
   if (axis === "y") return _contact.y;
   // A wall's contact point stands off by 4.5 the way the actor came at it.
-  const away = obj.arcKind === ThrowerArcKind.WallPlusX
-            || obj.arcKind === ThrowerArcKind.WallPlusZ;
+  const away = obj.thr.arcKind === ThrowerArcKind.WallPlusX
+            || obj.thr.arcKind === ThrowerArcKind.WallPlusZ;
   return _contact[axis] + (away ? -TUMBLE_STANDOFF : TUMBLE_STANDOFF);
 }
 

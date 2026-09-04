@@ -14,7 +14,8 @@
  * The port stores that byte in `Actor.condition`, which is the same offset.
  */
 import type { ArcStage, Class31Attack, Class31Set } from "../../bundle/characters";
-import { ThrowerFlag, ThrowerStance, type Actor } from "../actor";
+import { ThrowerFlag, ThrowerStance, type Actor, type ThrowerActor }
+  from "../actor";
 import { T } from "../tables";
 import { InstallArcMotionScript } from "./arc";
 import { ThrowerMotion } from "./states";
@@ -82,10 +83,10 @@ export function ThrowerPickState(a: Actor, band: number,
  * `ThrowerLoadAttackArcScript` — `FUN_0044B610`. Install the arc motion script
  * of the attack the actor has drawn, against the stance it is in.
  */
-export function ThrowerLoadAttackArcScript(obj: Actor): void {
-  obj.stance = ThrowerStanceOf(obj);
+export function ThrowerLoadAttackArcScript(obj: ThrowerActor): void {
+  obj.thr.stance = ThrowerStanceOf(obj);
   InstallArcMotionScript(obj,
-    ThrowerAttackOf(obj, obj.stance, obj.attack)?.script ?? null);
+    ThrowerAttackOf(obj, obj.thr.stance, obj.attack)?.script ?? null);
 }
 
 /** One of the arc scripts a *state* names rather than an attack entry. */

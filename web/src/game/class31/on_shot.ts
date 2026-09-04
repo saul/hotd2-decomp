@@ -10,7 +10,7 @@
  * That is the bug this file fixes: before it, a `zstin` died face-down in
  * `zom.bin`'s directional death, which is a different creature's animation.
  */
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { HitResultCode } from "../combat/resolve_hit";
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ThrowerState } from "./states";
@@ -31,7 +31,7 @@ const HEAD_BONE = 2;
  * stumble and the knockdown into the get-up instead of straight back to the
  * hub. Without it state 17 is unreachable.
  */
-export function ThrowerShotFeedback(obj: Actor, bone: number,
+export function ThrowerShotFeedback(obj: ThrowerActor, bone: number,
                                     result: number): void {
   if (result === HitResultCode.Damaged && bone === HEAD_BONE) {
     obj.flags2 |= ThrowerFlag.KnockedDown | 0x2000000;
@@ -51,14 +51,14 @@ export function ThrowerShotFeedback(obj: Actor, bone: number,
  * * **`obj+0x34` bit 0x2000 vetoes the reaction entirely** — an actor that has
  *   already spent two knockback arcs takes further shots without flinching.
  */
-export function ThrowerOnShot(obj: Actor): void {
+export function ThrowerOnShot(obj: ThrowerActor): void {
   const hit = obj.pendingHit;
   if (!hit) return;
   obj.pendingHit = null;
   // Bone 0 is the root; a hit there never reacts.
   if (hit.bone <= 0) return;
 
-  obj.reactBone = hit.bone;
+  obj.thr.reactBone = hit.bone;
   ThrowerShotFeedback(obj, hit.bone, hit.result);
 
   // Downed, so the shot only ricochets; the result was forced to 5.

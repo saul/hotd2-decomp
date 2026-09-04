@@ -13,6 +13,7 @@ import globalsSrc from "../../game/globals.ts?raw";
 import { G } from "../../game/globals";
 import type { Actor } from "../../game/actor";
 import { SpawnClass } from "../../game/spawn_class";
+import { SetPieceState } from "../../game/class24";
 import { ZombieState } from "../../game/class30/states";
 import { g_class_handlers } from "../../game/registry";
 import type { ActorRow, GlobalRow, GlobalsProjection, ThrownRow }
@@ -43,8 +44,23 @@ function value(v: unknown): string {
   return String(v);
 }
 
-/** Class 0x30 is the only class whose state indices are named. */
+/**
+ * The classes whose state indices are named.
+ *
+ * Class 0x24 is here because its selector is `obj+0x130C`, not `obj+0x1310`:
+ * once that was corrected, `a.state` was permanently 0 for a set-piece and
+ * this row read `state 0` for all 21 of them on stage 2.
+ *
+ * [port-only] This layer *may* ask the class -- `app/` sees everything, and
+ * `ClassHandler.debug()` is the seam built for exactly this. It does not yet,
+ * because the debug-box labels in `render/debug.ts` need the same string and
+ * that layer may not make an engine call. Both should read one summary from
+ * this projection; until they do, two places name classes by hand.
+ */
 function stateName(a: Actor): string {
+  if (a.cls === SpawnClass.SetPieceProp) {
+    return SetPieceState[a.prop.selector] ?? `selector ${a.prop.selector}`;
+  }
   if (a.cls !== SpawnClass.Zombie) return `state ${a.state}`;
   return ZombieState[a.state] ?? `state ${a.state}`;
 }

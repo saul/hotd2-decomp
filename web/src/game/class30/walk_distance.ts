@@ -28,7 +28,7 @@
  * the clip — see `game/root_motion.ts` — and this only measures.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, type ZombieActor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
@@ -52,14 +52,14 @@ import { MotionFade, MotionRow, ZombieState } from "./states";
  * no class-0x30 one. `ZombieStateStandAndThrow` reaches it, though, and
  * `ZombieStateScriptedGrabAndDespawn` ends in it.
  */
-export function ZombieReleaseAndDespawn(obj: Actor): void {
+export function ZombieReleaseAndDespawn(obj: ZombieActor): void {
   ReleaseEnemyAliveCount(obj);
   ReleaseEnemyPresentCount(obj);
   ReleaseAttackSlot(obj);
   ActorDespawn(obj);
 }
 
-export function ZombieStateWalkDistance(obj: Actor, rng: Rng): void {
+export function ZombieStateWalkDistance(obj: ZombieActor, rng: Rng): void {
   // The engine's own shape: sub 0 latches the distance and falls *through*
   // into sub 1's arm, so the start point is recorded on the same frame. Only
   // sub 2 skips straight to the walk.
@@ -67,7 +67,7 @@ export function ZombieStateWalkDistance(obj: Actor, rng: Rng): void {
     // `obj+0x1370 = *(f32 *)(obj+0x1390 + 4)`. The field is shared with
     // `ZombieStateWalkToTarget`'s arrive radius; a spawn has one initial
     // state, so the two never overlap.
-    obj.targetArrive = obj.walkDistance;
+    obj.zom.targetArrive = obj.walkDistance;
     obj.sub = 1;
   }
   if (obj.sub !== 2) {
@@ -100,8 +100,8 @@ export function ZombieStateWalkDistance(obj: Actor, rng: Rng): void {
   // keeps it even though nothing else reads it back.
   const dx = obj.arcFrom.x - obj.pos.x;
   const dz = obj.arcFrom.z - obj.pos.z;
-  obj.walkTravelled = Math.sqrt(dx * dx + dz * dz);
-  if (obj.targetArrive > obj.walkTravelled) return;
+  obj.zom.walkTravelled = Math.sqrt(dx * dx + dz * dz);
+  if (obj.zom.targetArrive > obj.zom.walkTravelled) return;
 
   obj.strikeStart.x = obj.pos.x;
   obj.strikeStart.y = obj.pos.y;

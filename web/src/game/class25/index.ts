@@ -38,7 +38,7 @@
  * whole scheduling model: `waitFrames` counts up in `holdFrames` while a
  * condition is unmet.
  */
-import type { Actor } from "../actor";
+import type { Actor, HumanoidActor } from "../actor";
 import { authoredFrameOfTicks, ticksOfAuthoredFrame }
   from "../../core/play_cursor";
 import { G } from "../globals";
@@ -75,16 +75,24 @@ export enum HumanoidOp {
   IfPlayerCount = 10,
   /** Ride an object path. */
   FollowPath = 11,
-  /** A one-shot effect this port does not run. */
-  Effect = 12,
+  /**
+   * `obj+0x1364` — a **persistent** bone decoration. Mode 1 sets it and mode 0
+   * clears it; the per-bone draw hook then decorates bone 2 for as long as it
+   * is set. It used to be read here as a one-shot effect.
+   */
+  SetBoneDecoration = 12,
   /** `PlaySoundId`. */
   PlaySound = 13,
   /**
-   * `obj+0x1330`. **Not** a draw mode: `ScriptedHumanoidUpdate`'s draw routine
-   * never reads it and poses the actor unconditionally. `[open]` — the only
-   * reader is the hit handler installed at `obj+0x12EC`, which is unread.
+   * `obj+0x1330` — which of the character's hand props is drawn.
+   *
+   * It **is** a draw mode. `ScriptedHumanoidDraw` (`FUN_00484FF0`) never reads
+   * it, which had been taken to mean nothing did; the reader is
+   * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`), the per-bone callback
+   * `ScriptedHumanoidInit` (`FUN_004840D0`) installs at `obj+0x12EC`.
+   * Mode 2 also zeroes the cel counter at `obj+0x1334`.
    */
-  SetHitMode = 14,
+  SetBonePropMode = 14,
   /** Jump. */
   Jump = 15,
   /** Swap one bone's draw slot. */
@@ -93,7 +101,11 @@ export enum HumanoidOp {
   Handoff = 17,
   /** `ActorKill`. */
   Kill = 18,
-  /** Fall out of the VM into the idle routine at `LAB_00484D40`. */
+  /**
+   * Fall out of the VM: the engine writes `ScriptedHumanoidIdle`
+   * (`FUN_00484D40`) over the object's entry point and the actor stops
+   * turning, stops following its path and stops counting.
+   */
   End = -1,
 }
 
@@ -148,6 +160,75 @@ export interface HumanoidProgram {
 /** `obj+0x34` bit that swaps the removal trigger, as for class 0x24. */
 export const HUMANOID_FLAG_REMOVE_ON_SCRIPT_FLAG = 0x2000000;
 
+// -- exe `.rdata`, not the bundle ------------------------------------------
+//
+// Two tables this class reads out of the image. They are not authored per
+// stage and no exporter emits them, so they travel with the code that reads
+// them — the same call `class30/ring.ts` makes for its own immediates.
+
+/** One row of `g_class25_path_offsets` — `0x00596B18`. 24 bytes. */
+export interface HumanoidPathOffset {
+  /** `+0x00/04/08`, rotated through the path's orientation and added to pos. */
+  dx: number; dy: number; dz: number;
+  /** `+0x10`, added to `obj+0x68` unmasked when non-zero. */
+  dyaw: number;
+}
+
+/**
+ * `g_class25_path_offsets` — `0x00596B18`. The attachment offset `op 11`'s
+ * `b` names, on top of whatever object path the actor is riding.
+ *
+ * **Fifteen records**, `0x00596B18`..`0x00596C7F`, ending exactly where
+ * `g_class25_bone_prop_cels` — `0x00596C80` begins; the extent used to be
+ * `[open]` and that abutment is what closes it. Index 0 is the "no offset"
+ * sentinel and is all zeroes. Record 1's `dyaw` of `0x8000` is exactly a half
+ * turn, which is the check on the reading; shipped data reaches indices 1..5.
+ *
+ * `+0x0C` and `+0x14` are zero in all fifteen and nothing reads them.
+ */
+export const g_class25_path_offsets: readonly HumanoidPathOffset[] = [
+  { dx: 0, dy: 0, dz: 0, dyaw: 0 },
+  { dx: 4.5, dy: 3.0, dz: -1.5, dyaw: 0x8000 },
+  { dx: -7.35, dy: 0, dz: 3.78, dyaw: 0 },
+  { dx: -1.54, dy: 0, dz: 6.97, dyaw: 0 },
+  { dx: 4.62, dy: -8.0, dz: 1.42, dyaw: 0x8000 },
+  { dx: -4.78, dy: -8.0, dz: 0.86, dyaw: 0x8000 },
+  { dx: 4.56, dy: -8.28, dz: -7.02, dyaw: 0x8000 },
+  { dx: -4.68, dy: -8.28, dz: -7.02, dyaw: 0x8000 },
+  { dx: 0.56, dy: 0.89, dz: -3.12, dyaw: 0 },
+  { dx: 2.66, dy: 0.89, dz: 4.18, dyaw: 0 },
+  { dx: -4.92, dy: 0, dz: 0, dyaw: 0x8000 },
+  { dx: 4.95, dy: 0, dz: 0, dyaw: 0x8000 },
+  { dx: 4.5, dy: 6.6, dz: -2.9, dyaw: 0x18e3 },
+  { dx: 4.0, dy: 6.6, dz: -6.5, dyaw: 0x18e3 },
+  { dx: 5.0, dy: 6.6, dz: 0.7, dyaw: 0x238e },
+];
+
+// The two cel tables the counter at `obj+0x1334` feeds are the renderer's and
+// are not transcribed here: `g_class25_bone_prop_cels` — `0x00596C80` (a
+// ping-pong ramp 0->6->0, used when `bonePropMode` is 2) and
+// `g_class25_bone_prop_cels_alt` — `0x00596C90` (a two-cel blink, used when it
+// is 1). `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) indexes both with
+// `bonePropFrame % 13`, and each table is exactly thirteen bytes long. The
+// port keeps the counter because the VM writes it, and nothing more.
+
+/**
+ * The object-path slots that get an extra lift.
+ *
+ * `[proved]`, and unexplained: with an offset record applied, slots `0x156`
+ * through `0x15C` inclusive take a further `+2.0` in y —
+ * `CMP EAX,0x156; JL; CMP EAX,0x15c; JG; FLD; FADD double ptr [0x0055caf8];
+ * FSTP float ptr [EDI + 0x44]` at `0x00484C0C`–`0x00484C2A`, and
+ * `0x0055CAF8` reads `00 00 00 00 00 00 00 40` = 2.0.
+ */
+export const PATH_SLOT_LIFT_LO = 0x156;
+export const PATH_SLOT_LIFT_HI = 0x15c;
+export const PATH_SLOT_LIFT = 2.0;
+
+/** The character types `ScriptedHumanoidInit` seeds `bonePropMode` to 1 for. */
+export const BONE_PROP_CHAR_LO = 0x39;
+export const BONE_PROP_CHAR_HI = 0x3b;
+
 /** How many commands may run in one frame before the VM is called stuck. */
 export const MAX_COMMANDS_PER_FRAME = 256;
 
@@ -163,20 +244,31 @@ export function HumanoidProgramOf(a: Actor): HumanoidProgram | null {
  * chosen character, or 0x21. Nothing in the port chooses a player character,
  * so the descriptor's own type stands.
  */
-export function ScriptedHumanoidInit(obj: Actor): void {
+export function ScriptedHumanoidInit(obj: HumanoidActor): void {
   const p = HumanoidProgramOf(obj);
-  obj.pc = 0;
-  obj.holdFrames = 0;
+  obj.hum.pc = 0;
+  obj.hum.stallFrames = 0;
   // The Init pre-applies the first command: `obj+0x1324 = 1` when the block
   // opens with an op-1 wait, so an actor whose first instruction is "hold"
   // does not play a frame before it takes effect.
   obj.frozen = 0;
-  obj.turnMode = HumanoidTurn.None;
-  obj.turnFrames = 0;
-  obj.turnStep = 0;
-  obj.turnTarget = 0;
-  obj.pathSlot = -1;
-  obj.pathMode = 0;
+  obj.hum.turnMode = HumanoidTurn.None;
+  obj.hum.turnFrames = 0;
+  obj.hum.turnStep = 0;
+  obj.hum.turnTarget = 0;
+  // [port-only] `+0x135C` is one of two words in the tail the Init leaves
+  // alone; the port seeds it so a `pathMode` of 0 can never index a slot.
+  obj.hum.pathSlot = -1;
+  obj.hum.pathMode = 0;
+  obj.hum.pathOffsetRecord = 0;
+  obj.hum.boneDecoration = 0;
+  obj.hum.bonePropFrame = 0;
+  // `MOVSX ECX, word ptr [EDI + 0x60]` (= `obj+0x1F4`), `CMP ECX,0x39 / JL /
+  // CMP ECX,0x3b / JG` at `0x00484247`-`0x00484253`: character types 0x39
+  // through 0x3B open with hand prop 1, everything else with 0.
+  obj.hum.bonePropMode =
+    (obj.charType >= BONE_PROP_CHAR_LO && obj.charType <= BONE_PROP_CHAR_HI)
+      ? 1 : 0;
   if (!p) return;
   if (p.cmds[0]?.op === HumanoidOp.WaitThenHold) obj.frozen = 1;
   obj.motion = p.motion;
@@ -188,7 +280,7 @@ export function ScriptedHumanoidInit(obj: Actor): void {
 }
 
 /** The removal test, identical in shape to class 0x24's. */
-export function HumanoidShouldRemove(obj: Actor, p: HumanoidProgram): boolean {
+export function HumanoidShouldRemove(obj: HumanoidActor, p: HumanoidProgram): boolean {
   if ((obj.flags & HUMANOID_FLAG_REMOVE_ON_SCRIPT_FLAG) !== 0) {
     return G.g_script_flags[p.removePath] === 1;
   }
@@ -197,21 +289,21 @@ export function HumanoidShouldRemove(obj: Actor, p: HumanoidProgram): boolean {
 }
 
 /** The **authored** frame the clip is showing — not the 60 Hz play cursor. */
-function MotionFrame(obj: Actor): number {
+function MotionFrame(obj: HumanoidActor): number {
   const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
   return authoredFrameOfTicks(obj.playTicks, m?.fps ?? 30, m?.frames ?? 0);
 }
 
-function AtLastMotionFrame(obj: Actor): boolean {
+function AtLastMotionFrame(obj: HumanoidActor): boolean {
   const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
   return !!m?.frames && MotionFrame(obj) >= m.frames - 1;
 }
 
 /** Whether a command's condition is met. Shared by opcodes 0, 1 and 4. */
-function CondMet(obj: Actor, c: HumanoidCmd): boolean {
+function CondMet(obj: HumanoidActor, c: HumanoidCmd): boolean {
   switch (c.mode) {
     case HumanoidCond.Frames:
-      return obj.holdFrames === c.a;
+      return obj.hum.stallFrames === c.a;
     case HumanoidCond.CameraAt:
       return G.g_active_cam_path === c.a && G.g_cam_path_frame >= c.b;
     case HumanoidCond.MotionFrame:
@@ -224,7 +316,7 @@ function CondMet(obj: Actor, c: HumanoidCmd): boolean {
       // in this game is.
       const px = c.f0 ?? 0, pz = c.f1 ?? 0;
       const now = Math.hypot(obj.pos.x - px, obj.pos.z - pz);
-      const was = Math.hypot(obj.prevPos.x - px, obj.prevPos.z - pz);
+      const was = Math.hypot(obj.hum.prevPos.x - px, obj.hum.prevPos.z - pz);
       return now < was;
     }
     case HumanoidCond.Always:
@@ -242,9 +334,18 @@ function CondMet(obj: Actor, c: HumanoidCmd): boolean {
  * per-frame tail. So a block of setup commands all take effect at once, and
  * only a wait costs a frame.
  */
-export function ScriptedHumanoidUpdate(obj: Actor, f: ClassFrame): void {
+export function ScriptedHumanoidUpdate(obj: HumanoidActor, f: ClassFrame): void {
   const p = HumanoidProgramOf(obj);
   if (!p) return;
+
+  // Opcode -1 wrote `ScriptedHumanoidIdle` over the object's entry point
+  // (`MOV dword ptr [EDI], 0x484d40` @`0x00484A87`), so from the *next* frame
+  // this routine is not what the engine calls. The port dispatches on the
+  // cursor instead, which is the same call made once removed.
+  if (obj.hum.pc < 0) {
+    ScriptedHumanoidIdle(obj);
+    return;
+  }
 
   if (HumanoidShouldRemove(obj, p)) {
     obj.dead = true;
@@ -254,7 +355,7 @@ export function ScriptedHumanoidUpdate(obj: Actor, f: ClassFrame): void {
 
   let ran = 0;
   while (ran++ < MAX_COMMANDS_PER_FRAME) {
-    const c = p.cmds[obj.pc];
+    const c = p.cmds[obj.hum.pc];
     if (!c) break;
     if (!RunCommand(obj, c, f)) break;
   }
@@ -262,7 +363,7 @@ export function ScriptedHumanoidUpdate(obj: Actor, f: ClassFrame): void {
 }
 
 /** One command. Returns whether the cursor moved — false parks the VM. */
-function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
+function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean {
   switch (c.op) {
     case HumanoidOp.WaitThenPlay:
     case HumanoidOp.WaitThenHold:
@@ -273,14 +374,14 @@ function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
       // animation run and op 1 holds the pose, and the engine writes it by
       // reusing the opcode as the value.
       obj.frozen = c.op === HumanoidOp.WaitThenHold ? 1 : 0;
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.WaitUntil:
       if (!CondMet(obj, c)) return false;
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.SetMotion:
@@ -294,77 +395,99 @@ function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
         const m = T.types[String(obj.charType)]?.motions[String(c.a)];
         obj.playTicks = ticksOfAuthoredFrame(c.b, m?.fps ?? 30);
       }
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
     }
 
     case HumanoidOp.TurnOver:
-      obj.turnFrames = c.a;
-      obj.turnMode = HumanoidTurn.Over;
+      obj.hum.turnFrames = c.a;
+      obj.hum.turnMode = HumanoidTurn.Over;
       // Mode 0 turns one way and mode 1 the other; both divide the sweep by
       // the frame count, which is what makes it a constant-rate turn.
-      obj.turnStep = (c.mode === 0 ? -1 : 1) * Math.trunc(c.b / Math.max(1, c.a));
-      obj.turnTarget = obj.yaw + (c.mode === 0 ? -c.b : c.b);
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.turnStep = (c.mode === 0 ? -1 : 1) * Math.trunc(c.b / Math.max(1, c.a));
+      obj.hum.turnTarget = obj.yaw + (c.mode === 0 ? -c.b : c.b);
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.TurnMode:
-      obj.turnMode = c.mode === 1 ? HumanoidTurn.FaceCamera : HumanoidTurn.None;
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.turnMode = c.mode === 1 ? HumanoidTurn.FaceCamera : HumanoidTurn.None;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.FacePoint:
       obj.yaw = VecToAngles(obj.pos.x - (c.f0 ?? 0), 0,
                             obj.pos.z - (c.f1 ?? 0)).yaw & 0xffff;
-      obj.turnMode = HumanoidTurn.None;
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.turnMode = HumanoidTurn.None;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.SetPos:
       if (c.mode === 1) obj.pos.y = c.f0 ?? obj.pos.y;
       else { obj.pos.x = c.f0 ?? obj.pos.x; obj.pos.z = c.f1 ?? obj.pos.z; }
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.FollowPath:
       // Mode 0 stops following; 1 takes the path's rotation too, 2 only its
-      // position.
-      obj.pathMode = c.mode;
-      if (c.mode !== 0) { obj.pathSlot = c.a; obj.pathOffset = c.b; }
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      // position. Anything above 2 falls straight through to `0x004848A4` and
+      // writes nothing but the stall reset -- it does **not** set `pathMode`,
+      // which a bare `pathMode = mode` would.
+      if (c.mode === 0) obj.hum.pathMode = 0;
+      else if (c.mode === 1 || c.mode === 2) {
+        obj.hum.pathMode = c.mode;
+        obj.hum.pathSlot = c.a;
+        obj.hum.pathOffsetRecord = c.b;
+      }
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.PlaySound:
       // The id is a full dword at `+4`, not the s16 the other opcodes use.
       f.events?.emit("sound.play", { id: (c.a & 0xffff) | (c.b << 16) });
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
-    case HumanoidOp.SetHitMode:
-      obj.hitMode = c.mode;
-      obj.holdFrames = 0;
-      obj.pc += 1;
+    case HumanoidOp.SetBonePropMode:
+      // `0x0048490C`-`0x00484956`: mode 0, 1 and 2 write 0, 1 and 2, and mode
+      // 2 alone restarts the cel counter. Any other mode leaves both alone.
+      if (c.mode === 2) {
+        obj.hum.bonePropMode = 2;
+        obj.hum.bonePropFrame = 0;
+      } else if (c.mode === 1) obj.hum.bonePropMode = 1;
+      else if (c.mode === 0) obj.hum.bonePropMode = 0;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
+      return true;
+
+    case HumanoidOp.SetBoneDecoration:
+      // `0x004848B2`-`0x004848E4`: mode 1 sets the toggle and calls
+      // `FUN_00485D70` (`[open]`, and the renderer's), mode 0 clears it, and
+      // any other mode leaves it as it was.
+      if (c.mode === 1) obj.hum.boneDecoration = 1;
+      else if (c.mode === 0) obj.hum.boneDecoration = 0;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.Jump:
       if (c.next === undefined || c.next < 0) return false;
-      obj.pc = c.next;
-      obj.holdFrames = 0;
+      obj.hum.pc = c.next;
+      obj.hum.stallFrames = 0;
       return true;
 
     case HumanoidOp.IfPlayerCount:
       // The engine skips forward to a `-2` terminator when the count does not
       // match. One player is the port's only configuration, so the arms for
       // two never run; taking the matching arm is the same decision.
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.Kill:
@@ -372,7 +495,7 @@ function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
       // `-1` installs the idle routine and `18` is `ActorKill`; both leave the
       // VM. The actor stays drawn for `End` and goes for `Kill`.
       if (c.op === HumanoidOp.Kill) { obj.dead = true; obj.visible = false; }
-      obj.pc = -1;
+      obj.hum.pc = -1;
       return false;
 
     // [diverges] These three need routines this port has not read:
@@ -382,15 +505,14 @@ function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
     // of the program still runs — stalling on it would park the actor for ever.
     case HumanoidOp.SetHandModel:
     case HumanoidOp.SetBoneModel:
-    case HumanoidOp.Effect:
     case HumanoidOp.Handoff:
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
 
     default:
-      obj.holdFrames = 0;
-      obj.pc += 1;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
       return true;
   }
 }
@@ -398,40 +520,138 @@ function RunCommand(obj: Actor, c: HumanoidCmd, f: ClassFrame): boolean {
 /**
  * The tail every blocked frame runs: count the stall, turn, ride the path, and
  * remember where we were for the `NearerThanBefore` test.
+ *
+ * `0x00484A8D`-`0x00484C7C`, and it belongs to `ScriptedHumanoidUpdate`
+ * (`FUN_004842A0`) alone. The frame that runs `op -1` reaches it — the entry
+ * point is overwritten at `0x00484A87` and execution falls straight through —
+ * but no frame after that does, because `ScriptedHumanoidIdle`
+ * (`FUN_00484D40`) has none of it.
  */
-function HumanoidFrameTail(obj: Actor, f: ClassFrame): void {
-  obj.holdFrames += 1;
+function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
+  obj.hum.stallFrames += 1;
 
-  if (obj.turnMode === HumanoidTurn.Over) {
-    obj.yaw += obj.turnStep;
-    obj.turnFrames -= 1;
-    if (obj.turnFrames === 0) {
+  if (obj.hum.turnMode === HumanoidTurn.Over) {
+    obj.yaw += obj.hum.turnStep;
+    obj.hum.turnFrames -= 1;
+    if (obj.hum.turnFrames === 0) {
       // The last frame snaps to the target rather than accumulating rounding.
-      obj.yaw = obj.turnTarget;
-      obj.turnMode = HumanoidTurn.None;
+      obj.yaw = obj.hum.turnTarget;
+      obj.hum.turnMode = HumanoidTurn.None;
     }
-  } else if (obj.turnMode === HumanoidTurn.FaceCamera) {
+  } else if (obj.hum.turnMode === HumanoidTurn.FaceCamera) {
     obj.yaw = VecToAngles(obj.pos.x - f.eye.x, 0, obj.pos.z - f.eye.z).yaw
       & 0xffff;
   }
 
-  if (obj.pathMode !== 0 && obj.pathSlot >= 0) {
+  if (obj.hum.pathMode !== 0 && obj.hum.pathSlot >= 0) {
     // `CamEvalObjectPath6(slot, g_cam_path_frame)` — the object paths run on
     // the *camera's* frame, which is what keeps a scripted actor in step with
     // the shot it belongs to.
-    const p = f.host.objectPath?.(obj.pathSlot, G.g_cam_path_frame);
+    const p = f.host.objectPath?.(obj.hum.pathSlot, G.g_cam_path_frame);
     if (p) {
       obj.pos.x = p.x;
       obj.pos.y = p.y;
       obj.pos.z = p.z;
       // Mode 2 takes the position only; mode 1 takes the orientation too.
-      if (obj.pathMode !== 2 && p.yaw !== undefined) obj.yaw = p.yaw;
+      if (obj.hum.pathMode !== 2 && p.yaw !== undefined) obj.yaw = p.yaw;
+      HumanoidApplyPathOffset(obj, 0, p.yaw ?? 0, 0);
     }
   }
 
-  obj.prevPos.x = obj.pos.x;
-  obj.prevPos.y = obj.pos.y;
-  obj.prevPos.z = obj.pos.z;
+  obj.hum.prevPos.x = obj.pos.x;
+  obj.hum.prevPos.y = obj.pos.y;
+  obj.hum.prevPos.z = obj.pos.z;
+}
+
+/**
+ * The attachment offset the followed path carries, from
+ * `g_class25_path_offsets` — `0x00596B18`.
+ *
+ * `[proved]` at `0x00484B77`–`0x00484C79`, and it is why `obj+0x1360` is a
+ * record index rather than a distance: the record's three floats are rotated
+ * through the **path's** orientation and added to the position, its `+0x10` is
+ * added to the yaw unmasked, and a slot in `PATH_SLOT_LIFT_LO`..`_HI` takes a
+ * further 2.0 in y on top. The port stored the index and never read it, so a
+ * scripted actor rode its path with none of this applied — 22 of the 24
+ * `op 11` commands the six stages carry name a non-zero record.
+ *
+ * The engine builds the rotation as
+ * `MatrixLoadIdentity; MatrixRotateZ(rz); MatrixRotateY(ry); MatrixRotateX(rx)`
+ * and the stack post-multiplies, so **X applies to the vector first and Z
+ * last** — the same composition `class41/prop.ts` spells out for `Ry·Rz·Rx`.
+ *
+ * [diverges] `rx` and `rz` arrive as zero, because `GameHost.objectPath`
+ * publishes only the path's position and yaw while `CamEvalObjectPath6`
+ * (`FUN_004042D0`) returns all six values. Applying the offset with the yaw
+ * alone is strictly closer to the engine than not applying it, but a path with
+ * pitch or roll will place the attachment wrong until the host seam carries
+ * the other two angles — that is a change to `game/host.ts` and to the
+ * renderer that fills it, not to this file.
+ *
+ * Private, and deliberately: the engine has this inline in
+ * `ScriptedHumanoidUpdate`'s tail and there is no exe function here to name.
+ */
+function HumanoidApplyPathOffset(obj: HumanoidActor, rx: number, ry: number,
+                                 rz: number): void {
+  const r = g_class25_path_offsets[obj.hum.pathOffsetRecord];
+  // Index 0 is the sentinel and the engine's `JZ` skips the whole block.
+  if (obj.hum.pathOffsetRecord === 0 || !r) return;
+
+  const bams = (a: number) => (a * Math.PI * 2) / 65536;
+  let ca = Math.cos(bams(rx)), sa = Math.sin(bams(rx));
+  let x = r.dx;
+  let y = r.dy * ca - r.dz * sa;
+  let z = r.dy * sa + r.dz * ca;
+
+  ca = Math.cos(bams(ry)); sa = Math.sin(bams(ry));
+  const yx = x * ca + z * sa;
+  z = -x * sa + z * ca;
+  x = yx;
+
+  ca = Math.cos(bams(rz)); sa = Math.sin(bams(rz));
+  const zx = x * ca - y * sa;
+  y = x * sa + y * ca;
+  x = zx;
+
+  obj.pos.x += x;
+  obj.pos.y += y;
+  obj.pos.z += z;
+
+  if (obj.hum.pathSlot >= PATH_SLOT_LIFT_LO && obj.hum.pathSlot <= PATH_SLOT_LIFT_HI) {
+    obj.pos.y += PATH_SLOT_LIFT;
+  }
+
+  // `MOV ECX,[EBP+0x10]; MOV EDX,[ESI]; ADD EDX,ECX; MOV [ESI],EDX` with
+  // `ESI = obj+0x68` at `0x00484C69`-`0x00484C72`. No mask: the engine lets
+  // the yaw run outside 0..0xFFFF here, as `op 5`'s `turnTarget` does.
+  if (r.dyaw !== 0) obj.yaw += r.dyaw;
+}
+
+/**
+ * `ScriptedHumanoidIdle` — `FUN_00484D40`. What opcode -1 installs.
+ *
+ * `[proved]` exhaustively: the cutscene-skip teardown, the same removal test
+ * `ScriptedHumanoidUpdate` (`FUN_004842A0`) opens with, then
+ * `ScriptedHumanoidDraw` (`FUN_00484FF0`) and `RET` at `0x00484DE2`.
+ *
+ * **And nothing else** — no `obj+0x1320` step, no turn, no object-path follow,
+ * no `obj+0x13C0` capture. So a class-0x25 actor whose program has ended stops
+ * dead where it stands. The port used to leave `pc` at -1 and keep running
+ * `HumanoidFrameTail` every frame, which kept the 69 of the six stages' 137
+ * scripted humanoids that reach an `op -1` turning and riding their paths for
+ * ever after their programs had finished.
+ *
+ * The skip teardown is not ported: `g_cutscene_skipping` — `0x009A2230` is
+ * never raised, because the player has no cutscene skip.
+ */
+export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
+  const p = HumanoidProgramOf(obj);
+  if (!p) return;
+  if (HumanoidShouldRemove(obj, p)) {
+    obj.dead = true;
+    obj.visible = false;
+  }
+  // `CALL 0x00484FF0` — the draw, which is the renderer's.
 }
 
 export const ScriptedHumanoidHandler: ClassHandler = {

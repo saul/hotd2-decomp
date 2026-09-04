@@ -46,14 +46,14 @@ const ACTOR_PUSH_FRACTION = 0.1;
  * has its sphere level with it.
  */
 export function ThrowerPlaceCollisionSphere(obj: Actor): void {
-  obj.camPoint.x = obj.pos.x;
-  obj.camPoint.z = obj.pos.z;
+  obj.sphereCentre.x = obj.pos.x;
+  obj.sphereCentre.z = obj.pos.z;
   if (obj.flags2 & ThrowerFlag.Ceiling) {
-    obj.camPoint.y = obj.pos.y - obj.bodyRadius * SPHERE_LIFT;
+    obj.sphereCentre.y = obj.pos.y - obj.bodyRadius * SPHERE_LIFT;
   } else if (!(obj.flags2 & (ThrowerFlag.WallA | ThrowerFlag.WallB))) {
-    obj.camPoint.y = obj.pos.y + obj.bodyRadius * SPHERE_LIFT;
+    obj.sphereCentre.y = obj.pos.y + obj.bodyRadius * SPHERE_LIFT;
   } else {
-    obj.camPoint.y = obj.pos.y;
+    obj.sphereCentre.y = obj.pos.y;
   }
 }
 
@@ -74,8 +74,8 @@ export function ThrowerPushOutOfWorld(obj: Actor): void {
   ThrowerPlaceCollisionSphere(obj);
 
   if (obj.flags2 & ThrowerFlag.CollideActors) {
-    if (ColiTestSphereAgainstActors(obj, obj.camPoint.x, obj.camPoint.y,
-                                    obj.camPoint.z,
+    if (ColiTestSphereAgainstActors(obj, obj.sphereCentre.x, obj.sphereCentre.y,
+                                    obj.sphereCentre.z,
                                     obj.bodyRadius * ACTOR_RADIUS_SCALE)) {
       const f = G.g_coli_hit_depth * ACTOR_PUSH_FRACTION;
       // x and z only, exactly as the engine writes it: `obj+0x40` and
@@ -92,8 +92,8 @@ export function ThrowerPushOutOfWorld(obj: Actor): void {
   // stops being marked -- the same reasoning as class 0x30's.
   obj.worldPushDepth = 0;
   if (obj.flags2 & ThrowerFlag.CollideWorld) {
-    if (ColiTestSphereAgainstFullSet(obj.camPoint.x, obj.camPoint.y,
-                                     obj.camPoint.z, obj.bodyRadius)) {
+    if (ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,
+                                     obj.sphereCentre.z, obj.bodyRadius)) {
       const d = G.g_coli_hit_depth;
       obj.worldPushDepth = d;
       obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * d;

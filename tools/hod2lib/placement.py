@@ -364,6 +364,18 @@ class Placement:
             d["stand_throw"] = self.stand_throw
         if self.init_flags:
             d["init_flags"] = self.init_flags
+        # The descriptor's own `+0x20` word, which `SpawnFromDescriptor`
+        # (`FUN_00408A20`) copies to `obj+0x1316` and both `EnemyThrowerInit`
+        # and `EnemyZombieInit` make the low half of `obj+0x136C`. Read off the
+        # spawn dict rather than carried as a field of its own, the same way
+        # `yaw` and `civilian_child` are -- see `evt.SPAWN_DESC_FLAGS`.
+        #
+        # A class-0x10 child placement reaches this the long way round: those
+        # spawn dicts are built by `characters.py` rather than by the script
+        # walker, so the key had to be added there too. Nine of the game's 75
+        # civilian children set the word, eight class 0x30 and one 0x18.
+        if self.spawn.get("desc_flags"):
+            d["desc_flags"] = self.spawn["desc_flags"]
         if self.entrance_motion is not None:
             d["entrance_motion"] = self.entrance_motion
         if self.pounce:

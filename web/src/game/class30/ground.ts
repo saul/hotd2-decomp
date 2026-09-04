@@ -15,7 +15,7 @@
  * without them — buried at one end of the slope and floating at the other.
  */
 import {
-  ActorFlag, ActorUpdateBoundingSphere, ZombieFlag2, type Actor,
+  ActorFlag, ActorUpdateBoundingSphere, ZombieFlag2, type ZombieActor,
 } from "../actor";
 import {
   ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet,
@@ -46,7 +46,7 @@ const AIRBORNE_EITHER = 0x18000000;
  * units is always stuck to it, which is what lets a zombie walk a slope
  * without ever leaving the ground.
  */
-export function ActorSnapToGroundHeight(obj: Actor): void {
+export function ActorSnapToGroundHeight(obj: ZombieActor): void {
   const ground = QueryGroundHeightAt(obj.pos.x, obj.pos.y + GROUND_PROBE_RISE,
                                      obj.pos.z);
   if (!(obj.flags2 & ZombieFlag2.MayFall)
@@ -68,7 +68,7 @@ export function ActorSnapToGroundHeight(obj: Actor): void {
  * through a wall, and the actor-versus-actor push, which is what stops a crowd
  * occupying one point.
  */
-export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void {
+export function ZombiePushOutOfWorldAndActors(obj: ZombieActor, frames: number): void {
   obj.flags2 &= ~ZombieFlag2.Shoved;
   ActorUpdateBoundingSphere(obj);
 
@@ -87,8 +87,8 @@ export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void 
       ActorUpdateBoundingSphere(obj);
       obj.pushedBy = -1;
     }
-    if (ColiTestSphereAgainstActors(obj, obj.camPoint.x, obj.camPoint.y,
-                                    obj.camPoint.z, obj.bodyRadius)) {
+    if (ColiTestSphereAgainstActors(obj, obj.sphereCentre.x, obj.sphereCentre.y,
+                                    obj.sphereCentre.z, obj.bodyRadius)) {
       let f = G.g_coli_hit_depth * PUSH_FRACTION;
       if (obj.flags & AIRBORNE_EITHER) f *= PUSH_AIRBORNE;
       // x and z only: an actor is never pushed up out of another.
@@ -105,8 +105,8 @@ export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void 
   // for ever. See `Actor.worldPushDepth`.
   obj.worldPushDepth = 0;
   if (obj.flags2 & ZombieFlag2.CollideWorld) {
-    if (ColiTestSphereAgainstFullSet(obj.camPoint.x, obj.camPoint.y,
-                                     obj.camPoint.z, obj.bodyRadius)) {
+    if (ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,
+                                     obj.sphereCentre.z, obj.bodyRadius)) {
       const d = G.g_coli_hit_depth;
       obj.worldPushDepth = d;
       obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * d;
@@ -122,9 +122,9 @@ export function ZombiePushOutOfWorldAndActors(obj: Actor, frames: number): void 
   if (!(obj.flags & ActorFlag.Airborne)) ActorSnapToGroundHeight(obj);
   ActorUpdateBoundingSphere(obj);
 
-  obj.shoveTimer -= frames;
-  if (obj.shoveTimer < 0 && (obj.flags2 & ZombieFlag2.Shoved)) {
-    obj.shoveTimer = SHOVE_PERIOD;
+  obj.zom.shoveTimer -= frames;
+  if (obj.zom.shoveTimer < 0 && (obj.flags2 & ZombieFlag2.Shoved)) {
+    obj.zom.shoveTimer = SHOVE_PERIOD;
     // Which way `ZombieStateBackOff` turns, flipped so a wedged actor does not
     // keep retreating into the same corner.
     obj.flags2 ^= ZombieFlag2.BackOffTurnFlip;

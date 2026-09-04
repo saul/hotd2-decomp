@@ -554,7 +554,10 @@ class EvtFile:
 #   +0x14  s32  orientation a   -> object +0x64
 #   +0x18  s32  orientation b   -> object +0x68   (BAMS yaw: 0x4000 == 90 deg)
 #   +0x1C  s32  orientation c   -> object +0x6C
-#   +0x20  u16  (unused in every shipped file)
+#   +0x20  u16  second flag word -> object +0x1316, and from there into the
+#               class's own flag word at object +0x136C. **Not unused**: this
+#               comment used to say "(unused in every shipped file)" and that
+#               was false whole-corpus. See SPAWN_DESC_FLAGS below.
 #   +0x22  u16  hit points  -- written to BOTH object +0x11C and +0x11E,
 #                              i.e. current and maximum of the same quantity
 #   +0x24  ...  variable behaviour tail. 0x0B/0x0C store its address in the
@@ -567,6 +570,53 @@ class EvtFile:
 
 SPAWN_HEADER = 0x24
 SPAWN_STRIDE_09 = 0x28
+
+#: What the descriptor's ``+0x20`` word means, and the count of shipped
+#: descriptors that set each bit.
+#:
+#: **[proved]** ``SpawnFromDescriptor`` (``FUN_00408A20``) copies it to
+#: ``obj+0x1316`` -- ``MOV AX, word ptr [EDI + 0x20]`` (``668b4720``) then
+#: ``MOV word ptr [ESI + 0x1316], AX`` (``66898616130000``) at 0x00408A77 --
+#: and ``EnemyThrowerInit`` (``FUN_00449620``) makes it the low half of the
+#: class flag word ``obj+0x136C``:
+#:
+#: .. code-block:: none
+#:
+#:     00449762  MOVSX EAX, word ptr [ESI + 0x1316]   0fbf8616130000
+#:     00449769  OR    EAX, 0x180000                  0d00001800
+#:     0044977a  MOV   dword ptr [ESI + 0x136c], EAX  89866c130000
+#:
+#: It is **sign-extended**, so a descriptor setting 0x8000 would raise the
+#: whole high half; no shipped descriptor does.
+#:
+#: Whole-corpus counts over every ``evt/*.bin`` (re-derived 2026-09-03):
+#:
+#: =======  ====  ========  ==================================================
+#: class    n     nonzero   values
+#: =======  ====  ========  ==================================================
+#: 0x31     51    23        0x1 x18, 0x40 x1, 0x80 x1, 0x100 x3
+#: 0x30     345   76        0x1 x5, 0x2 x13, 0x5 x1, 0x6 x1, 0x20 x52,
+#:                          0x22 x3, 0x40 x1
+#: =======  ====  ========  ==================================================
+#:
+#: For class 0x31 the bits are the **starting surface**: 0x40 wall A, 0x80
+#: wall B, 0x100 ceiling, and bit 0 the alternate part-draw entry point
+#: (``ThrowerDrawPart``, ``FUN_0044A200``). The five class-0x31 descriptors
+#: with surface bits are all in ``st6evtbl.bin``, all character type 0x18
+#: entering state 34.
+#:
+#: Class 0x30 seeds its own flag word from it exactly the same way --
+#: ``EnemyZombieInit`` (``FUN_00452DA0``) does ``MOVSX EDX, word ptr
+#: [ESI + 0x1316]`` (``0fbf9616130000``) at 0x00452E9A, ``OR EDX, 0x60000000``
+#: (``81ca00000060``), ``MOV dword ptr [ESI + 0x136c], EDX``
+#: (``89966c130000``) at 0x00452EAF -- so the field is exported for both
+#: classes. **[proved]** The names of class 0x30's bits are [open] here and
+#: belong with that class.
+#:
+#: Beware: ``obj+0x1316`` is polymorphic like the rest of the tail.
+#: ``FUN_00431810`` increments it as a counter and ``ScriptedHumanoidUpdate``
+#: compares it against a register; neither is a flag word.
+SPAWN_DESC_FLAGS = 0x20
 
 #: What each player-count-gated opcode forwards to, from the table at
 #: ``g_evt_spawn_gated_handlers`` (0x00577650), which is indexed by the opcode
@@ -636,6 +686,12 @@ class Spawn:
     pos: tuple[float, float, float]
     orient: tuple[int, int, int]
     hp: int
+    #: The ``+0x20`` word, which reaches ``obj+0x1316`` and from there the
+    #: class flag word ``obj+0x136C``. See :data:`SPAWN_DESC_FLAGS`. Carried
+    #: whole rather than bit by bit, because that is what the engine does with
+    #: it -- ``EnemyThrowerInit`` ORs 0x180000 onto the sign-extended word and
+    #: stores the result.
+    desc_flags: int = 0
     #: The file this descriptor was read from, so the tail can be read lazily.
     evt: "EvtFile | None" = None
 
@@ -697,7 +753,10 @@ def read_spawn(evt: EvtFile, off: int, opcode: int = 0x09) -> Spawn:
     # of eleven handlers, class 0x26 one of eight states -- so the name `hp`
     # is the historical one, not a claim. See docs/formats/evt.md.
     hp = struct.unpack_from("<H", evt.raw, off + 0x22)[0]
-    return Spawn(off, opcode, cls, flags, pos, orient, hp, evt)
+    # +0x20 -> obj+0x1316 -> the class flag word obj+0x136C. See
+    # SPAWN_DESC_FLAGS: this used to be documented as unused and is not.
+    desc = struct.unpack_from("<H", evt.raw, off + SPAWN_DESC_FLAGS)[0]
+    return Spawn(off, opcode, cls, flags, pos, orient, hp, desc, evt)
 
 
 def spawns(evt: EvtFile, opcodes: tuple[int, ...] = SPAWN_OPCODES) -> list[Spawn]:

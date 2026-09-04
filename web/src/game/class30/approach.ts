@@ -10,7 +10,7 @@
  * `row[0]` or `row[1]`, carries no root translation. See `game/root_motion.ts`.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, type ZombieActor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
@@ -19,7 +19,7 @@ import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionFade, MotionRow, QUEUE_CAP } from "./states";
 
-export function ZombieStateApproach(obj: Actor, eye: Vec3, rng: Rng,
+export function ZombieStateApproach(obj: ZombieActor, eye: Vec3, rng: Rng,
                                     host: GameHost): void {
   if (obj.sub === 0) {
     // The same band test `TestApproachRing` does, inlined here in the exe.

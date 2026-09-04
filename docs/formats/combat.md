@@ -839,11 +839,63 @@ The character is `zsass.bin`, and it spawns holding something in each hand.
 ### The throw
 
 `ThrowerStateThrow` (`FUN_0044FAF0`) takes **the same attack permit the
-zombies compete for**, picks a hand, reads its entry from
-`g_class31_throws[body_condition]` — the identical 0x10-byte layout as the
-melee table — and calls `SpawnThrownWeapon` on the frame `+0x08` names: **48**
-for conditions 0, 1 and 3, 35 for condition 2. Right hand plays motion 9, left
+zombies compete for**, picks a hand with `ThrowerPickThrowingHand`
+(`FUN_0044F630`), reads its entry from `g_class31_throws[set]` — indexed by
+`obj+0x130C`, the behaviour set (`MOV EAX, dword ptr [ESI + 0x130c]`,
+`8b860c130000`), *not* the body condition, and the identical 0x10-byte layout
+as the melee table — and calls `SpawnThrownWeapon` on the frame `+0x08` names:
+**48** for sets 0, 1 and 3, 35 for set 2. Right hand plays motion 9, left
 motion 8.
+
+**Character type 0x18 reads neither of those numbers.** It is diverted out of
+the shared path twice, by two copies of `CMP word ptr [ESI+0x1f4], 0x18`
+(`6683bef401000018`):
+
+* at **0x0044FB7A**, for the **clip**. Every other type takes it from the
+  entry's `+0x00` (`MOVSX EDX, word ptr [EDI]` — `0fbf17` at 0x0044FB84);
+  0x18 jumps to 0x0044FB98 and picks by hand and stance instead —
+  `handIdx + 10*stance`, where `handIdx` is `obj+0x131A` (0 for bone 5, 1 for
+  bone 8) and `stance` is `3*bit8 + 2*bit7 + bit6` of `obj+0x136C`:
+
+  | stance | bone 5 | bone 8 |
+  | --- | --- | --- |
+  | 0 ground | `0x1F7` | `0x1F6` |
+  | 1 WallA | `0x1FC` | `0x1FB` |
+  | 2 WallB | `0x1F2` | `0x1F1` |
+  | 3 ceiling | `0x204` | `0x203` |
+
+* at **0x0044FC83**, for the **release frame**. Every other type compares
+  `obj+0x19C` against the entry's `+0x08` at 0x0044FC8D (`0fbf4708` then
+  `39869c010000`); 0x18 compares it against `obj+0x1350`, into which all eight
+  arms of the switch above have written the constant `0x19` = **25** (the same
+  ten bytes each time, `c7865013000019000000`). Uniform across every arm, so
+  the release frame does not depend on which clip was picked.
+
+`[proved]`. `obj+0x1350` is the **same word** states 2 and 33 use for the
+landing surface — one address, two readings, both inside class 0x31, and no
+`cls` test separates them.
+
+**That mapping is `.text`, and does not travel in the bundle.** The 32-byte
+table at `0x0044FD1C` it indexes is a compiler-emitted dense switch, not a
+data table: `.rdata` starts at 0x004C4000, the table sits inside
+`ThrowerStateThrow`'s own body, it has exactly one xref in the program (the
+`MOV CL, byte ptr [EAX + 0x44fd1c]` — `8a881cfd4400` — at 0x0044FBCF), its
+nine jump targets through `0x0044FCF8` are all addresses inside that one
+function, and the clip ids are `MOV` immediates in its arms
+(`b8f7010000` = `MOV EAX, 0x1F7`). Only eight of its 32 bytes are reachable —
+`handIdx` is 0 or 1 and `stance` is 0..3, so the indices that can occur are
+0, 1, 10, 11, 20, 21, 30 and 31; the other 24 all hold `0x08`, the default
+arm's selector, because a dense switch has to be dense. Under
+`docs/formats/bundle.md`'s rule it is transcribed in
+`web/src/game/class31/thrower.ts`, where `THROW_BY_STANCE_ZSLMAN` and
+`ZSLMAN_RELEASE_FRAME` carry the citation.
+
+`[open]` — the exe's stance is a **sum**, not a selector. If two surface bits
+were ever set at once it would exceed 3, the index would leave the table, and
+the default arm would run: it plays the clip passed in as the routine's second
+argument and **does not write `obj+0x1350` at all**, so the compare would then
+read a landing surface as a frame number. Whether the engine can set two at
+once is undetermined.
 
 `SpawnThrownWeapon` (`FUN_004504E0`) does five things worth stating:
 
@@ -1318,7 +1370,7 @@ its picks would allow are refused by identity.
 
 | Stance | Bit | Set by |
 |---|---|---|
-| 0 ground | — | the spawn, from the descriptor's `+0x20` |
+| 0 ground | — | the spawn, from the descriptor's `+0x20` (see [evt.md](evt.md#0x20--the-class-flag-word-and-the-reading-that-was-wrong)) |
 | 1 | `0x40` | state 15 arriving |
 | 2 | `0x80` | state 14 arriving |
 | 3 ceiling | `0x100` | state 16 arriving |

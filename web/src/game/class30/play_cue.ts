@@ -22,7 +22,7 @@
  * carried by its clip's own root translation and nothing else, it never
  * closes either. Two zombies stood at 45 units in `AttackRun` for ever.
  */
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import { ActorFlag } from "../actor";
 import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import type { Vec3 } from "../vec";
@@ -43,7 +43,7 @@ const VAN_JUMP_MOTION = 0x39b;
  */
 const VAN_JUMP_VULNERABLE_FRAME = 0x26;
 
-export function ZombieStateMotionCue21(obj: Actor, eye: Vec3,
+export function ZombieStateMotionCue21(obj: ZombieActor, eye: Vec3,
                                        dt: number): void {
   const p = obj.intro;
   // [diverges] The engine has no such test: `obj+0x1390` is the descriptor and
@@ -59,14 +59,14 @@ export function ZombieStateMotionCue21(obj: Actor, eye: Vec3,
   if (obj.sub === 0) {
     ActorSetMotion(obj, p.motion);
     obj.sub = 1;
-    obj.holdFrames = p.delay;          // +0x1330
+    obj.zom.holdFrames = p.delay;          // +0x1330
     // and falls into the countdown, which therefore spends its first frame
     // here: a delay of 0 clears the freeze on the same frame the clip starts.
   }
 
   if (obj.sub === 1) {
-    obj.holdFrames -= dt * 60;
-    if (obj.holdFrames > 0) return;
+    obj.zom.holdFrames -= dt * 60;
+    if (obj.zom.holdFrames > 0) return;
     obj.sub = 2;
     // The pose is released. Until this line `ZombieAdvanceMotion` has not
     // been advancing the clip at all.
@@ -95,7 +95,7 @@ export function ZombieStateMotionCue21(obj: Actor, eye: Vec3,
 }
 
 /** The tail of state 21: clear the last bit and take the descriptor's exit. */
-function ZombieCueHandOver(obj: Actor, eye: Vec3): void {
+function ZombieCueHandOver(obj: ZombieActor, eye: Vec3): void {
   obj.flags &= ~ActorFlag.ArcSpent;
   // Descriptor byte 3. A record that names state 21 again would never leave,
   // so the engine substitutes the attack run — all six shipped records name

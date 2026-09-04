@@ -13,7 +13,7 @@
 import { ActorFlag, type Actor } from "./actor";
 import { ActorStartFade } from "./class30/motion_cue";
 import { MotionFade } from "./class30/states";
-import { authoredFrameOfTicks, ticksOfAuthoredFrame }
+import { authoredFrameHeld, ticksOfAuthoredFrame }
   from "../core/play_cursor";
 import { ApplyRootMotion, rootDelta } from "./root_motion";
 import { MotionAuthoredFrame, MotionOf, SecondsToTicks } from "./tables";
@@ -39,9 +39,14 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // clearing it**: an actor left with it on is a statue.
   if (obj.flags & ActorFlag.PoseFrozen) return;
   if (obj.death) {
-    // The death clip plays once and **holds its last frame**: `ZombieStateDeath6`
-    // waits for it to finish and hands the body to a routine that is not read,
-    // so the corpse stays put rather than doing something invented.
+    // The death clip plays once and **holds its last frame**, which is what
+    // `ZombieStateDeath6` (`FUN_00454D20`) waits for: it leaves at
+    // `g_motion_play_length - 1` and hands the body to `ZombieEnterCorpseState`
+    // (`FUN_00456740`).
+    //
+    // **Classes 0x30, 0x31 and 0x10 no longer arrive here.** All three are
+    // `updatesWhenDead` and run their own death states over the base track, so
+    // this is the shared clip for the classes that have no such machine.
     obj.death.ticks += SecondsToTicks(dt);
     return;
   }
@@ -93,8 +98,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       // Suppressing it left the actor already at the ring when the swing
       // ended, so the retreat finished on its first frame and it bit again
       // immediately.
-      const f = Math.min(am.frames - 1,
-                         authoredFrameOfTicks(act.ticks, am.fps, am.frames));
+      const f = authoredFrameHeld(act.ticks, am.fps, am.frames);
       const d = rootDelta(am, wasAct, f);
       ApplyRootMotion(obj, d.x, d.z);
       obj.rootActionFrame = f;

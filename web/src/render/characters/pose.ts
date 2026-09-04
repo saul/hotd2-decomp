@@ -15,7 +15,8 @@
 import { Quaternion, Vector3 } from "three";
 import type { BakedMotion } from "../../bundle";
 import { BAMS_TO_RAD } from "../../core/bams";
-import { authoredFrameOfTicks } from "../../core/play_cursor";
+import { authoredFrameHeld, authoredFrameOfTicks }
+  from "../../core/play_cursor";
 import type { Instance } from "./instance";
 
 /** The port's clock. `mot/` authors at 30; the engine's frames are 60 Hz. */
@@ -35,9 +36,7 @@ pose(inst: Instance): void {
   if (inst.a.death) {
     const dm = inst.type.motions[String(inst.a.death.motion)];
     if (dm) {
-      const f = Math.min(dm.frames - 1,
-                         authoredFrameOfTicks(inst.a.death.ticks, dm.fps,
-                                              dm.frames));
+      const f = authoredFrameHeld(inst.a.death.ticks, dm.fps, dm.frames);
       // The death clip is not consumed by `ActorAdvanceMotion` -- a falling
       // body's travel is the clip's, and nothing else moves it.
       this.apply(inst, dm, f, false);
@@ -71,8 +70,7 @@ pose(inst: Instance): void {
   if (act) {
     const am = inst.type.motions[String(act.motion)];
     if (am) {
-      const af = Math.min(am.frames - 1,
-                          authoredFrameOfTicks(act.ticks, am.fps, am.frames));
+      const af = authoredFrameHeld(act.ticks, am.fps, am.frames);
       // Fading *into* the swing: the lunge is set with a fade of 10 and the
       // strike with 5, so the arm comes up rather than appearing raised.
       if (!this.blendFromFade(inst, am, af)) this.apply(inst, am, af);

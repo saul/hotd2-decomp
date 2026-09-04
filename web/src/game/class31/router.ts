@@ -21,7 +21,7 @@
  * comes at you when you let it close.
  */
 import type { Rng } from "../../core/rng";
-import { ThrowerFlag, type Actor } from "../actor";
+import { ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { dist2d, type Vec3 } from "../vec";
@@ -50,13 +50,13 @@ const CHAR_ZSASS = 0x16;
 enum ThrowerArm { Right = 2, Left = 4 }
 
 /** `ThrowerHasBareHand` — `FUN_0044F720`. One hand has thrown and not re-armed. */
-export function ThrowerHasBareHand(obj: Actor): boolean {
+export function ThrowerHasBareHand(obj: ThrowerActor): boolean {
   if (obj.charType !== CHAR_ZSASS && obj.charType !== CHAR_ZSLMAN) return false;
   return (obj.zones & (ThrowerArm.Right | ThrowerArm.Left)) !== 0;
 }
 
 /** `ThrowerBothHandsArmed` — `FUN_0044F5D0`. A weapon is still in a hand. */
-export function ThrowerBothHandsArmed(obj: Actor): boolean {
+export function ThrowerBothHandsArmed(obj: ThrowerActor): boolean {
   if (obj.charType !== CHAR_ZSASS && obj.charType !== CHAR_ZSLMAN) return false;
   return (obj.zones & (ThrowerArm.Right | ThrowerArm.Left))
        !== (ThrowerArm.Right | ThrowerArm.Left);
@@ -70,7 +70,7 @@ export function ThrowerBothHandsArmed(obj: Actor): boolean {
  * enters the wait state only when the permit claim **fails**, because state 8
  * is what an actor does while it has not got one.
  */
-export function ThrowerTryEnterState(obj: Actor, state: number, rng: Rng,
+export function ThrowerTryEnterState(obj: ThrowerActor, state: number, rng: Rng,
                                      host: GameHost): boolean {
   if (state === obj.state) return false;
   const enter = () => { obj.state = state; obj.sub = 0; return true; };
@@ -124,7 +124,7 @@ export function ThrowerTryEnterState(obj: Actor, state: number, rng: Rng,
  * candidate is accepted the band is remembered, and the actor only asks again
  * when the band changes.
  */
-export function ThrowerPickNextState(obj: Actor, eye: Vec3, rng: Rng,
+export function ThrowerPickNextState(obj: ThrowerActor, eye: Vec3, rng: Rng,
                                      host: GameHost): void {
   const d = dist2d(obj.pos, eye);
   const band = d > BAND_NEAR_MIN && d <= BAND_NEAR_MAX
@@ -141,14 +141,14 @@ export function ThrowerPickNextState(obj: Actor, eye: Vec3, rng: Rng,
   }
 
   if (obj.flags2 & ThrowerFlag.BandLatched) {
-    if (band === obj.moveBand) return;
+    if (band === obj.thr.moveBand) return;
     obj.flags2 &= ~ThrowerFlag.BandLatched;
     return;
   }
 
   const pick = ThrowerPickState(obj, band, rng.int(10));
   if (pick !== undefined && ThrowerTryEnterState(obj, pick, rng, host)) {
-    obj.moveBand = band;
+    obj.thr.moveBand = band;
     obj.flags2 |= ThrowerFlag.BandLatched;
     return;
   }

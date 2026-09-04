@@ -600,6 +600,12 @@ class Program:
                 "yaw_deg": s.yaw_deg,
                 "orient": list(s.orient),
                 "hp": s.hp,
+                # +0x20 -> obj+0x1316 -> the class flag word obj+0x136C.
+                # `evt.SPAWN_DESC_FLAGS` has the whole-corpus counts; the
+                # short version is that 23 of 51 class-0x31 and 76 of 345
+                # class-0x30 descriptors set it, so dropping it lost five
+                # stage-6 throwers their starting surface.
+                "desc_flags": s.desc_flags,
             })
         return out
 

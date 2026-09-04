@@ -21,6 +21,12 @@ at `descriptor + 0x24`** in every case; only the object field and the
 allocation size differ. `hod2lib.evt.Spawn.param(k, kind)` reads it with the
 same `k` a handler writes as `obj+0x1390 + k`.
 
+`obj+0x1316` — the header's `+0x20` word — is the seed of the combat classes'
+flag word `obj+0x136C`, and it is **not** the "always 0" this document and the
+exporter both used to claim: 23 of 51 class-0x31 and 76 of 345 class-0x30
+descriptors set it. It reaches the bundle as `desc_flags`. See
+[evt.md](evt.md#0x20--the-class-flag-word-and-the-reading-that-was-wrong).
+
 The handler itself comes from the 112-slot array at `0x009A2280`, built by
 `FUN_0040AC90` from the `{class_id, handler}` pairs at `0x00593358` — 56
 entries, of which **35 are used** by the shipped stages.

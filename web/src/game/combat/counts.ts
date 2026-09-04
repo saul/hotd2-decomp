@@ -94,15 +94,21 @@ export function ThrowerRetireFromAliveCount(obj: Actor): void {
  * on the untrack is a deliberate exception: the *last* enemy present keeps the
  * camera while it dies, so the shot that clears a room is not cut away from.
  *
- * [diverges] `obj+0x34 & 0x800000` has no port. Nothing reads or writes bit
- * 0x800000 of `obj+0x34` anywhere the port models, so the untrack is
- * unconditional here — which is the arm the exe takes whenever more than one
- * enemy is present. `[open]`
+ * The guard is `ZombieReleasePermitAndUntrack`'s with **the other counter** —
+ * `0044d068 a900008000` then `0044d06f 66833d06709c0001`, which is
+ * `g_enemies_present`, where class 0x30 reads `g_enemies_alive`. Both halves
+ * of the arm sit inside it: `0044d079 0d00000100` writes `NoCameraTrack` and
+ * `0044d08e c604c5c05e9a0000` clears the slot, and the `JZ` at `0044d077`
+ * jumps past both. The port used to guard the slot clear alone and raise the
+ * flag unconditionally, which is half of **D1** in
+ * `docs/REVIEW-2026-09-03.md`; the bit is now modelled as
+ * {@link ActorFlag.KeepCameraWhenLast}.
  */
 export function ThrowerReleaseSlotOnDeath(obj: Actor): void {
   if (!(obj.flags & ActorFlag.Dead) && obj.hp >= 1) return;
-  obj.flags |= ActorFlag.NoCameraTrack;
-  if (G.g_enemies_present !== 1) {
+  if (!(obj.flags & ActorFlag.KeepCameraWhenLast)
+      || G.g_enemies_present !== 1) {
+    obj.flags |= ActorFlag.NoCameraTrack;
     G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
   }
   ThrowerRetireFromAliveCount(obj);

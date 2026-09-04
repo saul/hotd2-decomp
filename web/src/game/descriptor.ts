@@ -33,6 +33,9 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     ringSet: p?.ring_set ?? 0,
     leap: p?.leap ?? null,
     path: p?.path ?? null,
+    // `desc+0x04` -- `*(float *)(obj+0x1390 + 4)`, four bytes into the
+    // descriptor parameter tail. Not `obj+0x04`, which is inside the task
+    // control block `ActorAlloc` (`FUN_004A6FA0`) owns.
     walkDistance: p?.walk_distance ?? 0,
     entranceMotion: p?.entrance_motion ?? 0,
     pounce: p?.pounce ?? null,
@@ -66,5 +69,10 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // The spawn record's own flags word — `ActorInitFlags` (`FUN_00408970`)
     // makes it `obj+0x34` before the class's `Init` ORs its own bits on.
     flags: p?.init_flags ?? 0,
+    // ...and the descriptor's *second* word, at `+0x20`, which
+    // `SpawnFromDescriptor` (`FUN_00408A20`) puts at `obj+0x1316` — also
+    // before `Init` runs, which is what lets `EnemyThrowerInit` read it as the
+    // low half of `obj+0x136C`. The exporter used to drop it.
+    descFlags: p?.desc_flags ?? 0,
   };
 }

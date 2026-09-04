@@ -1347,6 +1347,31 @@ Four things worth carrying forward from reading them:
   the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
   the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
 
+#### A camera cue is the end of a shot, and the port used to step over it
+
+Six of the 44 spawns whose entrance waits on an **exact** camera frame — states
+18, 19 and 23 — name the *last frame of the `cam_play` in front of them*. Stage
+1's `0x2254` waits on 179 and op 4 of its own step is `cam_play 115..179`;
+stage 2's `0xFAF4` waits on 229 behind `cam_play 100..229`. That is how the
+game says "come through the door as this shot ends".
+
+`CamAdvancePathFrame` (`FUN_004035E0`) publishes the camera block's `+0xD0`
+*before* it tests the end of the range, and it runs in `EvtRunQueuedActions`,
+a task the scene creates **after** `EvtInterpreterLoop` — so the frame a shot
+ends on is live for one whole object update before the script can even see the
+action retire. `Walker.tick` collapsed both tasks and ran the camera half
+first, so the gate fell through on the same tick and the next `cam_play` took
+the camera before `syncPortGlobals` read it: 178, then 180. Those six zombies
+stood in their entrance clip for the rest of the stage.
+
+The instructions now run first and the camera after, which is the task order.
+**`web/tools/entrances.mjs` could never have found this**: it drives the
+entrances with a camera of its own that steps by one for ever, so every
+equality cue in the game is hit by construction. `npm run cam-cues`
+(`web/tools/cam_cues.mjs`) drives the real walker and the real `GameSystem`
+over the real script instead, seeking to each spawn's own instruction — 44
+entrances, 6 stuck before, 0 now.
+
 ### `IsPlayerAttackable`: two of three clauses
 
 The engine's gate is three tests and the port had none of them, standing in

@@ -10,7 +10,7 @@
  * the script has put over a drop now falls to the floor instead of hanging.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { QueryGroundHeightAt } from "../coli";
 import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import { ActorSetMotionBlended } from "./motion_cue";
@@ -27,7 +27,7 @@ const BOUNCE = -0.25;
 const BOUNCE_MOTION = 0x41d;
 const LIGHT_CONDITION = 4;
 
-export function ZombieStateFallToGround(obj: Actor, dt: number,
+export function ZombieStateFallToGround(obj: ZombieActor, dt: number,
                                         rng: Rng): void {
   const frames = dt * 60;
   if (obj.sub === 0) {

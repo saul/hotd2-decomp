@@ -613,7 +613,10 @@ web/src/
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
     class10/ class24/ class25/ class30/ class31/ class41/ class44/
-                  one module per class. Each calls `registerClass` itself
+                  one module per class. Each calls `registerClass` itself.
+                  The four that write the actor struct's tail words directly
+                  also have a `state.ts`: the discriminated union's arm for
+                  that class, and the only place its tail words are named
     registry.ts   the handler contracts and an empty table. Imports no class
     classes.ts    the manifest: the side-effect imports that fill the table
     despawn.ts    `ActorDespawn`, and the sweep that asks the class what it holds
@@ -1194,10 +1197,10 @@ numbered as that plan numbers them, so there is one list and not two.
 | 8–14 | **Phase 1 — the gameplay bugs and the leaks.** Integer motion clock, seek reseed, the duplicate `ThrowerLeave`, `stepOnce`, the count latches, the unowned GPU caches, the UI defects | ◐ |
 | 15–20 | **Phase 2 — fixtures, golden output, CI.** A bundle-free `mini_stage` so `seek`/`state`/`camera` run everywhere; a determinism test; the export hash suite | ☐ |
 | 21 | **`g_shot_requests` + `host.pickShot` + the camera curve into `game/`.** `render-drives-the-port` and `no-actor-writes-in-render` are **errors at zero**; the shot queue is in `G` and is an input log. The replay *harness* is not built: it needs a `pickShot` a headless run can answer — see "Input intent" above | ◐ |
-| 22 | Discriminated-union `Actor` tail; the ~25 offset aliases go | ☐ |
+| 22 | **Discriminated-union `Actor` tail.** All four arms in — `hum` (0x25, 13 words), `thr` (0x31, 14), `zom` (0x30, 15), `prop` (0x24, **1**). 30 load-bearing `@ts-expect-error` directives in `port.test.ts`. What is left is `[open]` and named: `DescriptorFromPlacement` returns one `Partial<Actor>`, which distributes over the union, so descriptor-sourced words cannot leave the head until it is split — a job for all four arms at once | ☑ |
 | 23 | Self-registering class modules, `ClassFrame` everywhere, `onDeadSweep`, `class10` split. Cleared `layers-are-systems` | ☑ |
-| 24 | `script/` decomposition: `state/shutter.ts`, `state/camera_action.ts` as a registry | ☐ |
-| 25 | Bundle schema hash in `manifest.json`, per-stage format | ☐ |
+| 24 | `script/` decomposition: `state/shutter.ts`, `state/camera_action.ts` as a registry | ☑ |
+| 25 | Bundle schema hash in `manifest.json`, per-stage format | ☑ |
 | 26 | **S7 — `app/pacer.ts`** out of `main.ts` and `hudInputs` into `projection/hud.ts` (done); S8 — the `characters.py` split and the `.rdata`/`.text` rule | ◐ |
 | 27 | **The snapshot ring and a `rewind` command** — `app/ring.ts` | ☑ |
 | 28–32 | **Phase 4 — docs that describe the tree.** `README`, a generated `STATUS.md`, `PLAN.md`, `LESSONS.md` | ☐ |

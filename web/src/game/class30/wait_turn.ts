@@ -12,7 +12,7 @@
  * than closing. That is the shape of a crowd in this game.
  */
 import type { Rng } from "../../core/rng";
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
@@ -22,7 +22,7 @@ import { MotionFade, MotionRow, ZombieState } from "./states";
 /** `FUN_00409E80`'s rate here is the same literal 0x40 the hold uses. */
 const WAIT_TURN_RATE = 0x40;
 
-export function ZombieStateWaitTurn(obj: Actor, eye: Vec3, rng: Rng): void {
+export function ZombieStateWaitTurn(obj: ZombieActor, eye: Vec3, rng: Rng): void {
   if (obj.sub === 0) obj.sub = 1;
 
   ZombieSetMotionIfIdle(obj,

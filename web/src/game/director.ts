@@ -11,7 +11,7 @@ import type { Rng } from "../core/rng";
 import { makeActor, type Actor } from "./actor";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
-import { ActorRegisterCameraPoint, CameraTrackEnemiesTick,
+import { ActorRegisterCameraPoint, CameraPointRiseFor, CameraTrackEnemiesTick,
   UpdateCameraFreeFlag } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
@@ -304,7 +304,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
       // `ActorRegisterCameraPoint` (`FUN_00409B70`): the tracked bone, lifted,
       // is where the camera follows this actor. Off the pose the renderer last
       // drew, which is the frame the engine's own reader sees too.
-      ActorRegisterCameraPoint(obj, host);
+      //
+      // The lift is the routine's **float argument**, pushed by whichever
+      // class's `Update` makes the call -- 4.0 for a zombie or a civilian,
+      // **0 for a thrower**. `CameraPointRiseFor` is that table; see it for
+      // all fifteen call sites and for what the port does differently.
+      ActorRegisterCameraPoint(obj, host, CameraPointRiseFor(obj.cls));
     }
     const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {

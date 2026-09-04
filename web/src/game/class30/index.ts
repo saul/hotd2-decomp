@@ -8,7 +8,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import {
   DeadSweep, registerClass, type ActorDebug, type ClassFrame,
   type ClassHandler,
@@ -41,6 +41,12 @@ import {
   ZombieStateScriptedGrabAndDespawn, ZombieStateWaitForCameraFrame,
 } from "./scripted";
 import { ZombieState } from "./states";
+import { ZombieOnShot } from "./on_shot";
+import {
+  ZombieStateCorpseBlink, ZombieStateCorpseSink, ZombieStateDeath6,
+  ZombieStateDeathFallAndBounce,
+} from "./death";
+import { ZombieStateDeathKnockbackArc } from "./knockback";
 import { CountEnemyZombieIn } from "../combat/counts";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
@@ -62,8 +68,13 @@ import {
 /** `EnemyZombieInit`'s literal for `obj+0x128` — `0x40600000`. */
 const ZOMBIE_BODY_RADIUS = 3.5;
 
-export function EnemyZombieUpdate(obj: Actor, f: ClassFrame): void {
+export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   const { eye, dt, rng, host, events } = f;
+  // `EnemyZombieUpdate` (`FUN_004533F0`) runs the shot response **before** the
+  // state, at 0x0045340E: the shot that killed this actor puts it in a death
+  // state on the same frame that state first runs. Without this call class
+  // 0x30 had no edge into `ZombieState.Death` at all.
+  ZombieOnShot(obj);
   ZombieRunState(obj, eye, dt, rng, host, events);
   // The engine's own order, and the two halves the port did not have.
   // `EnemyZombieUpdate` integrates the velocity straight after the state —
@@ -75,7 +86,7 @@ export function EnemyZombieUpdate(obj: Actor, f: ClassFrame): void {
   ZombiePushOutOfWorldAndActors(obj, dt * 60);
 }
 
-function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
+function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
                         host: GameHost, events?: Events): void {
   switch (obj.state) {
     case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
@@ -85,6 +96,19 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
+
+    // The death chain. `updatesWhenDead` on the handler below is what lets
+    // these run at all -- see `class30/death.ts` for the whole graph.
+    case ZombieState.Death:       return ZombieStateDeath6(obj, rng);
+    // The other death, and the reason `ZombieRunState` is handed the host at
+    // all on a dead actor: state 9's landing point is a point in the camera's
+    // own space. See `class30/knockback.ts`.
+    case ZombieState.DeathKnockbackArc:
+      return ZombieStateDeathKnockbackArc(obj, dt, rng, host);
+    case ZombieState.DeathFallAndBounce:
+      return ZombieStateDeathFallAndBounce(obj, dt, rng);
+    case ZombieState.CorpseSink:  return ZombieStateCorpseSink(obj, dt);
+    case ZombieState.CorpseBlink: return ZombieStateCorpseBlink(obj, dt);
 
     // The stationary thrower. It is the only class-0x30 state that never
     // moves the actor at all, which is exactly why folding it into
@@ -190,7 +214,7 @@ function ZombieRunState(obj: Actor, eye: Vec3, dt: number, rng: Rng,
  * **none** of the 90 class-0x30 spawns starts in `Approach`. The old port
  * started everything there, which is why nothing ever reached the hub.
  */
-export function EnemyZombieInit(obj: Actor): void {
+export function EnemyZombieInit(obj: ZombieActor): void {
   obj.attackPermit = -1;
   // `EnemyZombieInit`: `obj+0x124 = g_actor_radius_by_char[type]`, the shot
   // sphere, and `obj+0x128 = 3.5`, the body one. The port had neither, so
@@ -203,13 +227,16 @@ export function EnemyZombieInit(obj: Actor): void {
   // its first frame before `RankEnemiesByDistance` had ever seen it.
   obj.rank = -1;
   obj.sub = 0;
-  obj.backoffFrames = 0;
+  obj.zom.backoffFrames = 0;
   obj.cooldown = 0;
-  obj.hasStrikeAnchor = false;
+  // `EnemyZombieInit` *assigns* `obj+0x136C` (`00452e78`, then
+  // `00452eaf` with `(s16)obj+0x1316 | 0x60000000`), so a pooled actor
+  // starts a life with no strike anchor however its last one ended.
+  obj.flags2 &= ~ZombieFlag2.StrikeAnchor;
   obj.struck = false;
   // `EnemyZombieInit`: `obj+0x136C |= 0x60000000` — take part in both pushes.
   obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
-  obj.shoveTimer = 0;
+  obj.zom.shoveTimer = 0;
   obj.state = ZombieEntryState(obj.initialState);
   // ...and the actor counts itself in, which is the engine's own last act
   // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.
@@ -273,7 +300,7 @@ const ZOMBIE_ENTRY_STATES: ReadonlySet<number> = new Set<number>([
  * either out of rank or waiting on the single permit, and those two look
  * identical on screen.
  */
-export function EnemyZombieDebug(obj: Actor): ActorDebug {
+export function EnemyZombieDebug(obj: ZombieActor): ActorDebug {
   const wants = obj.state === ZombieState.HoldAtRange
              || obj.state === ZombieState.AttackRun;
   const permit = obj.attackPermit >= 0;
@@ -299,9 +326,9 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
     // it is walking matters most: the walk leaves the cursor in the attack
     // script and hands over to a state that is not the attack state.
     if (TARGET_STATES.has(obj.state)) {
-      detail.push(`${obj.scriptBlob ? "attack" : "target"} script`
-        + ` · entry ${obj.scriptPc} · loops ${obj.targetLoops}`
-        + ` · cue ${obj.targetCue} · wants ${obj.scriptMotion}`
+      detail.push(`${obj.zom.scriptBlob ? "attack" : "target"} script`
+        + ` · entry ${obj.zom.scriptPc} · loops ${obj.zom.targetLoops}`
+        + ` · cue ${obj.zom.targetCue} · wants ${obj.zom.scriptMotion}`
         + ` · frame ${MotionPlayFrame(obj)}/${MotionPlayLength(obj)}`);
     }
   }
@@ -331,16 +358,20 @@ export function EnemyZombieDebug(obj: Actor): ActorDebug {
  * return, which cost two civilian rescues in `tools/civilians.mjs` before the
  * old sweep's test said `dead`.
  *
- * [diverges] Class 0x30 has no death state here, so both of its releases land
- * on the same frame. That collapses the window in which a class-0x30 corpse is
- * *present but not alive*; class 0x31 keeps that window, because it has its
- * death states and calls the two retires where the exe does. Porting
- * `ZombieStateDeath6` (`FUN_00454D20`) and `ZombieEnterCorpseState`
- * (`FUN_00456740`) is what closes it.
+ * The counts **only on a despawn**, which is the same shape
+ * `EnemyThrowerDeadSweep` has and for the same reason. Class 0x30 now runs its
+ * own death states and calls the two retires where the exe does —
+ * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) drops the alive count as
+ * state 6 opens, `ZombieEnterCorpseState` (`FUN_00456740`) the present count
+ * when the death clip ends — so a zombie that has merely died is *present but
+ * not alive*, exactly as the engine leaves it. This used to retire both here
+ * on `DeadSweep.Dead`, which collapsed that window on the frame of the kill
+ * and is the whole reason the script has both `wait_enemies_present` and
+ * `wait_enemies_alive`.
  */
-function EnemyZombieDeadSweep(obj: Actor, why: DeadSweep): void {
+function EnemyZombieDeadSweep(obj: ZombieActor, why: DeadSweep): void {
   ReleaseAttackSlot(obj, ZombieFlag2.OffScreenPermit);
-  if (why === DeadSweep.Unloaded) return;
+  if (why !== DeadSweep.Despawned) return;
   ReleaseEnemyAliveCount(obj);
   ReleaseEnemyPresentCount(obj);
 }
@@ -351,6 +382,12 @@ export const EnemyZombieHandler: ClassHandler = {
   update: EnemyZombieUpdate,
   leave: ZombieReleaseAndDespawn,
   onDeadSweep: EnemyZombieDeadSweep,
+  // **Class 0x30's death is four states**, the same as class 0x31's, and the
+  // director stops updating a dead actor without this. It also takes the
+  // shared directional death clip away from the class in `ResolveHit` and
+  // `ActorKillAll`, which is right: `ChooseDeathMotion` (`FUN_004560B0`) is
+  // the engine's own picker and `ZombieStateDeath6` calls it.
+  updatesWhenDead: true,
   debug: EnemyZombieDebug,
 };
 

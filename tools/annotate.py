@@ -11,8 +11,11 @@ Rules, which are the ones the decomp skill states:
 * an address already present keeps its **name** unless `--rename` is given,
   because the port cites that name and a silent rename breaks it;
 * the comment is replaced, because that is what improves as more is read;
-* rows stay in file order -- both workstreams append here, so nothing is
-  re-sorted.
+* **a new row is inserted in address order**, not appended. The file used to
+  be append-only, and two workstreams appending at the tail is where every TSV
+  merge conflict came from: unrelated rows, same last line, every time. Sorted
+  insertion puts them in different parts of the file. `ExportAnnotations.java`
+  holds the same invariant from the other end.
 
     python3 tools/annotate.py functions 004090b0 RankEnemiesByDistance "..."
 """
@@ -55,10 +58,24 @@ def main() -> int:
         print(f"updated 0x{addr.upper()} `{args.name}`")
         return 0
 
-    # New: append, because the file is append-only for both workstreams.
+    # New: insert in address order. The header block and its blank line stay
+    # where they are; the row goes before the first data row with a higher
+    # address, or at the end when there is none.
+    row = "\t".join([addr, args.name, args.comment])
     while lines and not lines[-1]:
         lines.pop()
-    lines.append("\t".join([addr, args.name, args.comment]))
+    here = int(addr, 16)
+    at = None
+    for i, line in enumerate(lines):
+        if not line or line.startswith("#"):
+            continue
+        if int(line.split("\t")[0], 16) > here:
+            at = i
+            break
+    if at is None:
+        lines.append(row)
+    else:
+        lines.insert(at, row)
     path.write_text("\n".join(lines) + "\n")
     print(f"added 0x{addr.upper()} `{args.name}`")
     return 0

@@ -245,7 +245,7 @@ rg -n --hidden -g '!node_modules' -g '!extract' 'OldName'
 Every hit gets updated, in **one commit**:
 
 1. `ghidra/annotations/functions.tsv` / `globals.tsv` — edit the row in place.
-   Do not re-sort the file; both workstreams append to it.
+   The files are sorted by address and a rename does not move a row.
 2. The live Ghidra database, over MCP (`rename_function` / `rename_symbol`).
    MCP renames leave no trail, so export and diff:
    `./ghidra/run.sh export-annotations && git diff ghidra/annotations` — that
@@ -317,8 +317,9 @@ the next frame. Two consequences worth knowing before you write code:
 
 Identical to `/decomp` — peers edit this tree concurrently. `git add -A` and
 `git add .` are banned. Check `git status --porcelain` first, stage explicit
-paths, confirm with `git diff --cached --stat`. Never re-sort or reformat
-`ghidra/annotations/*.tsv`.
+paths, confirm with `git diff --cached --stat`. `ghidra/annotations/*.tsv` is
+sorted by address and `tools/annotate.py` keeps it that way; do not reorder or
+reformat it by anything else.
 
 One repo quirk: `web/src/game/` is re-included by an explicit `!web/src/game/`
 in `.gitignore`, because the root `game/` rule exists to stop game assets ever

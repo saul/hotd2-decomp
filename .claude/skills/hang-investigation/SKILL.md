@@ -198,7 +198,8 @@ Two questions decide the shape of the fix:
 
 Everything you understood gets named in `ghidra/annotations/functions.tsv` and
 `globals.tsv` via `python3 tools/annotate.py` — **in the same commit as the
-finding**, and never by re-sorting the file.
+finding**. It inserts in address order, which is the order those files are
+kept in; do not reorder them by anything else.
 
 ### 6. Fix it — `/gameplay-port`
 

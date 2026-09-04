@@ -208,12 +208,42 @@ public class ExportAnnotations extends GhidraScript {
             }
         }
 
+        // **Everything new goes in address order, and the file leaves sorted.**
+        //
+        // These used to be appended at the tail, which is where every merge
+        // conflict in `ghidra/annotations/` has come from: two branches adding
+        // unrelated rows to the same last line. `tools/annotate.py` inserts in
+        // order from the other end, and this keeps the invariant whole -- the
+        // header block and its blank line stay put, every data row after it is
+        // sorted by address.
         int added = 0;
+        List<String> head = new ArrayList<>();
+        List<String> data = new ArrayList<>();
+        boolean inHead = true;
+        for (String line : out) {
+            String t = line.trim();
+            if (inHead && (t.isEmpty() || t.startsWith("#"))) { head.add(line); continue; }
+            inHead = false;
+            if (t.isEmpty()) continue;
+            data.add(line);
+        }
         for (Map.Entry<Long, Entry> e : db.entrySet()) {   // TreeMap: by address
             if (seen.containsKey(e.getKey())) continue;
-            out.add(row(e.getKey(), e.getValue().name, e.getValue().comment));
+            data.add(row(e.getKey(), e.getValue().name, e.getValue().comment));
             added++;
         }
+        data.sort((x, y) -> {
+            Long a = parseAddr(x.split("\t", 2)[0]);
+            Long b = parseAddr(y.split("\t", 2)[0]);
+            if (a == null || b == null) return 0;
+            return Long.compare(a, b);
+        });
+        while (!head.isEmpty() && head.get(head.size() - 1).trim().isEmpty()) {
+            head.remove(head.size() - 1);
+        }
+        out = new ArrayList<>(head);
+        out.add("");
+        out.addAll(data);
 
         try (PrintWriter w = new PrintWriter(f)) {
             for (String s : out) w.println(s);

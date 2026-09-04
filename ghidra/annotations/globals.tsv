@@ -7,245 +7,105 @@
 #
 # Windows TEB fields and resource labels are excluded: Ghidra creates those itself.
 #
-# --- game mode, scene and script state -------------------------------------
-009ca08c	g_GameMode	1 = original/story, 2 = arcade, 3 = boss rush
-009c6f0c	g_scene_state_major
-009c6f14	g_scene_state_minor
-00576c14	g_scene_state_table	the 6x9 scene state machine
-009c7200	g_script_flags	byte array the evt script sets and waits on
-009c88a4	g_script_branch_var	route branch selector, read by EvtAdvanceStepOrRoute
-009a2bb0	g_evt_step_index	The event VM's STEP index -- not a block counter and NOT monotonic. EvtAdvanceStepOrRoute increments it at the top and assigns it 1 in the route branch, so it runs 1..k within a block and drops back to 1 on a block change; FUN_0045EBC0 seeds it with 0, 1 or 5 by game mode. Class 0x41 and 0x44 props age one tick every time it CHANGES (PropExpireByStepLifetime), which makes obj+0x11C a lifetime in STEPS. Blocks average 3.99 steps, so reading it as a block count makes props live about four times too long. A block with one live step goes 1 -> 1 across its transition and does not age a prop at all.
-009c7108	g_evt_ip	the evt interpreter's instruction pointer
-009a2d74	g_nEvtSkipFlag
-009a2d7c	g_nEvtSkippableRegion
-009a1a18	g_nSkipRequested	CORRECTION: previously named ...DeadEnd on the basis that nothing read it. CheckCutsceneSkipRequest does -- it is only ever reached through a function pointer, so no xref showed it
-009a6184	g_evt_action_operands
-005776ec	g_evt_action_table	queue_event action groups, 16 selectors each
-# --- cameras and paths ------------------------------------------------------
-009a2d78	g_active_cam_path	the cp_ slot currently playing; gates most object rigs
-009a6040	g_camera_blocks	per-camera blocks, stride 0x1A4
-009a6110	g_cam_path_frame	camera block 0's current path frame (+0xD0 of the block)
-009c6f00	g_camera_index
-004c479c	g_cam_path_file_id
-00576d38	g_cam_path_length	per-slot play length, stride 4
-00576cf0	g_camera_preset_table
-009c71e0	g_camera_eye_x
-009c71e4	g_camera_eye_y
-009c71e8	g_camera_eye_z
-009c71ec	g_camera_pitch_bams
-009c71f0	g_camera_yaw_bams
-009c71f4	g_camera_roll_bams
-009c7080	g_camera_update_hook
-009c8e58	g_camera_fixed_eye_y	also labelled g_ground_plane_y; the two are the same word
-009c70f4	g_camera_use_fixed_y
-009c70ac	g_stashed_path_frame
-009c70b0	g_stashed_path_end_frame
-# --- actors, enemies, spawning ---------------------------------------------
-009a2280	g_class_handlers	112 slots, built by BuildClassHandlerTable
-00593358	g_class_handler_pairs	{class_id, handler}, 56 entries, negative id terminates
-009c7006	g_enemies_present
-009c904a	g_enemies_alive
-009a26a0	g_cur_actor
-009c8e4c	g_cur_enemy
-009c88c0	g_hit_slots	14 slots claimed by ActorClaimHitSlot
-0059d8e8	g_shot_test_list	stride 5 dwords
-005a4c80	g_shot_test_count
-009a5ec0	g_enemy_slots
-009c72e0	g_actor_kill_all	1 makes every class handler self-destruct
-009a5c34	g_carrier_object	the current rideable object. ZombieStateRideCarrier (class 0x30 state 29) adds this object's +0x40/44/48 to its own recorded spawn position every frame and leaves when the carrier raises its obj+0x34 bit 0x10000000; ZombieStateDelayedStrikeInPlace (state 32) gives up to state 10 0x14 frames after the same object raises bit 0x40000000. Distinct from g_civilian_carrier (0x009A2C88), which is class 0x10's own.
-005776b0	g_difficulty_hp_delta	{-30, -15, 0, 0, 0} added to obj+0x11E
-009c8e94	g_difficulty	Menu difficulty 0..4. Only scales starting hit points, through g_difficulty_hp_delta; per-hit damage uses g_damage_rank instead.
-009c8e98	g_app_state	The application state -- which of the game's top-level screens is running. Committed only by CommitAppState (0x0040E860) from the pending request at g_app_state_pending (0x007C17A0). PROVED values: 5 = the attract demo (RunAttractDemo runs only while it is 5, and it is IsPlayerAttackable's unconditional-attack override); 6 = IN PLAY -- FUN_00414FC0, the start-press-with-a-credit path, requests exactly 6, and CommitAppState leaves g_player_state alone only for 6 and 7 (if (pending < 6 || pending > 7) g_player_state = 9), so 6 and 7 are the only states with live players; 7 = the game-over/continue-expired arm (FUN_00460530 requests it when the continue countdown runs out, and FUN_00414FC0 refuses a start press while it is 7); 0x10 = BOOT -- FUN_0040E4A0 stamps it after FUN_0040A920's whole-segment reset, its one caller is the startup routine FUN_0049E4A0 that reads Hod2.ini, and the main loop FUN_0049E220 draws nothing while it holds. Requested-but-unnamed: 3 (the screen FUN_004043C0 returns to from 5, 9, 10 and 0x0B), 4 (from 3 on a start press with credits), 0x0C and 0x0F. LIVE READS THAT TURN ON 6: ResolveHit ORs obj+0x34 |= 0xE00 when it is NOT 6 (0x00409495) and gates the 1-in-4 head pop on == 6 (0x00409741); PlaySoundId picks the plain BGM table over the _AR one when it is 6 and g_GameMode is 0; CivilianRunScript's op 0x2B runs only while it is 6.
-009a2be0	g_enemy_approach_rings
-009c8e40	g_enemy_approach_steps
-009a32a0	g_frame_counter	free-running, incremented once per frame; NOT the cam path frame
-# --- spawn class tables discovered per class --------------------------------
-00592ae8	g_class30_states	59 entries, indices 0x00-0x3A, ending at 0x00592C74 where a table of DATA pointers (0x00565FDC...) begins; the zombie's state machine. Indices 0x00 and 0x31 are both the stub at 0x0041EBB0. (This row previously said 54; the raw bytes say 59, and 0x36-0x3A are ActorCheckWaterEntry, FUN_004569B0, FUN_00456B70, ZombieStrikeStartSplash and ZombieStrikeFrameSplash.)
-00592bc0	g_class30_draw	the zombie's draw pointer, immediately after its state table
-00592960	g_class31_states	36 entries
+# **Rows are sorted by address, and every writer must keep them that way.**
+# tools/annotate.py inserts in order; ExportAnnotations.java re-sorts on write.
+# The file used to be append-only and grouped into topical sections, and both
+# workstreams appending at the tail is where every TSV merge conflict came
+# from -- two branches adding unrelated rows to the same last line. Sorted
+# insertion puts them in different parts of the file instead. The sections
+# went with it: each one spanned nearly the whole segment, so address order
+# broke the twelve of them into 149 fragments.
+
 004330c4	g_class33_selector_targets	jump targets for spawn class 0x33
 004330f8	g_class33_selector_index	byte index into the targets; valid selectors 1-11 and 99
-00595ab8	g_class44_subtypes	18 entries, indexed by obj+0x11C
-00593580	g_class41_constructors	79 entries, indexed by obj+0x130C
-005936bc	g_class41_updates	79 child entry functions
+0048d9f0	CivilianHookStartFall
+0048da20	CivilianHookFallStep
+0048da90	CivilianHookRideChildren
+0048dab0	CivilianHookRideChildrenStep
+0048db90	CivilianHookLaunchUp
+0048dbd0	CivilianHookLaunch
 0048e32c	g_class26_states	8 entries; entries 6 and 7 share a target
-005703b4	g_class26_path_by_selector	selector 6 -> path 0x183, 7 -> 0x184
-005926a8	g_prop_behaviours	10 behaviour functions shared by classes 0x12/0x13/0x15
-00589ae0	g_class28_route_table	{path slot, freeze frame} pairs
-00565ef4	g_st2car_path_table	object path per instance index
-00565f2c	g_st2car_asset_variants	int[2][4]; row 1 is the post-crash set
-00565f0c	g_class21_hp_by_rank	1 or 2 hit points by difficulty rank
-# --- items and breakables ---------------------------------------------------
-00593d14	g_breakable_group_counts	nine member counts: {4,2,3,9,5,3,3,6,7}
-00593cf0	g_breakable_group_ptrs	nine pointers to 10-byte member records
-0059505a	g_item_score_table	per-kind pickup score, stride 0xC
-# --- rendering --------------------------------------------------------------
-007e7990	g_MatrixStackTop
-007e7994	g_matrix_mode
-00571210	g_identity_matrix
-007e7948	g_projection_matrix_cache
-009a2d70	g_projection_distance_px
-009c7300	g_screen_offset_x
-009c7304	g_screen_offset_y
-00598ab0	g_SrcBlendTable
-00598ad0	g_DstBlendTable
-00598af0	g_TexAddressModeTable
-00598b00	g_ZFuncTable
-00598b20	g_CullModeTable
-0057a280	g_ModelFixupSlotList
-00576a8c	g_SceneRegionTableMode1
-00576abc	g_SceneRegionIdTableMode1
-00598778	g_d3du_unused_fov_degrees
-007de5c8	g_d3du_unused_projection
-# --- lighting and atmosphere ------------------------------------------------
-009a3540	g_scene_light_block0
-009a59e0	g_scene_light_block1
-009a3570	g_scene_fog_near
-009a3574	g_scene_fog_far
-009a3558	g_scene_light_pitch_bams
-009a355c	g_scene_light_yaw_bams
-009a354c	g_scene_light_dir_view
-009a3780	g_scene_light_colour_r
-009a378c	g_scene_light_ambient
-007e7998	g_render_light_colour_r
-007e79a4	g_render_ambient
-007e79a8	g_render_light_dir_x
-007e79b4	g_render_light_generation
-009c89e0	g_light_tween_block0
-009c8920	g_light_tween_block1
-009a1a88	g_entity_light_array	stride 0x1D dwords
-009ca090	g_backdrop_mode
-00579968	g_backdrop_preset_table
-007c2118	g_backdrop_preset_last
-007c1eb8	g_rain_particles
-009c8e50	g_rain_enabled
-# --- collision --------------------------------------------------------------
-009c7040	g_collision_meshes_full
-009ca0c0	g_collision_meshes_ray_only
-009cac40	g_coli_hit_surface	The material id of whatever the last collision trace hit, 0 for a miss. A side output: every caller reads it straight after its own query rather than being handed it. Class 0x31 latches it into obj+0x1350 where it lands, because 0x5A kills whatever touches it. Across the whole corpus 53 (0x35) is the commonest id at 874 quads, 5 and 55 are the wet surfaces, and 90 (0x5A) is seven quads.
-009cac44	g_coli_hit_quad
-009cac48	g_coli_hit_dist_sq
-009cac50	g_coli_hit_z
-009cac54	g_coli_hit_x
-009cac58	g_coli_hit_y
-009cac64	g_coli_hit_normal_x
-009cac5c	g_coli_allow_backface
-0098f200	g_coli_buffer_common
-00990a00	g_coli_buffer_scene
-004d1cc4	g_coli_filename_table
-007dcbb0	g_water_level	seeded to -24.90; class 0x16/0x17 own the wave field
-# --- audio ------------------------------------------------------------------
-005845f8	g_se_name_list	{u32 id; char name[48]}, stride 0x34, 324 records, id 0xFFFF ends
-005887fc	g_looping_se_ids	SE ids PlaySoundId (0x0041CFD0) plays LOOPED, walked as dwords until 0xFFFFFFFF. 44 entries, paired index for index with g_looping_se_stop_ids; seven ids appear twice, which is harmless because the walk stops at the first match.
-005888b0	g_looping_se_stop_ids	The stopper for each entry of g_looping_se_ids, same index, same length. An id found here makes PlaySoundId call SoundStopAllLoopingSe before playing it. All 44 pairs are X.wav against X_OFF.wav -- UFO_44, CHAIN_SAW_22, RAIN3ST_44, QUAKE_22, LASER_SWORD_22 -- which is what proves the pairing rather than the tables merely being adjacent.
-00580354	g_bgm_names_ar
-005803f8	g_bgm_names_plain
-0058044a	g_voice_records
-009c8fb8	g_current_bgm_id
-00588b58	s_sound_bgm_prefix
-# --- misc -------------------------------------------------------------------
-009a2c8c	g_queued_events_pending	Outstanding queued actions. +1 per queue_event (evt 0x30); every action handler does -1 when it completes -- EXCEPT EvtActionFinishSequence21 (selector 0x21), which installs a persistent camera driver and pins g_evt_action_advance at 0, so it never retires itself. evt 0x31/0x32 (goto_scene_state) and 0x33 (set_action_drain_mode, always delta -1) are its script-side retirement, and evt 0x40 blocks while this is non-zero. MEASURED: all 316 goto_scene_state sites in the shipped evt files have exactly one outstanding unretired queue_event 0x21 at that point. FUN_0045EBC0 zeroes it per block, so an imbalance cannot accumulate past a block boundary.
-00567990	g_accuracy_bonus_table
-00589da8	g_screen_message_records
-009a5920	g_route_history
-009c8e00	g_nFiringGate
-009c911e	g_wCaptionMode
-# --- skinned characters and mot/ ---------------------------------------------
-004e0430	g_character_skeletons	char type -> skeleton block; count at +0x16, node pointers at +0x18
-004e0724	g_character_bone_counts	char type -> bones in a motion frame; one more than the top bone index
-004e07d0	g_motion_play_length	motion id -> the clip clock the scripts compare against, s16 per id. NOT the frame count: the animation clock ticks once per 60 Hz frame over data authored at 30 Hz, so across the 220 motions the bundles bake it is 2n-2 for 91 and 2n-3 for the other 129 and never anything else. Every cue expressed in clip frames is in these units -- ZombieStateTargetMotionScript's kill frame, ZombieStateMotionCue21's exit, the class-0x25 VM's -1 for the last frame, class 0x24's 0x32 drift cue. Comparing them against the authored frame count loses every cue past halfway.
-004e2c40	g_motion_bank_of	motion id -> bank id, the argument MotionRequestBankLoad takes
-004d1b00	g_asset_bank_names	bank id -> filename; SHARED with the camera paths
-004e2b14	g_motion_bank_ids	bank id -> s16 array of the motion ids it holds
-004e2bdc	g_motion_bank_count	bank id -> how many motions
-009a37e0	g_motion_slots	motion id -> {u32 base; u32 state}, state 2 = resident
-00579914	g_motion_job_substeps	three entries; entry 3 onward is the "mot\%s" string
-00579920	s_mot_path_format
-009a5c4c	g_frame_bone_rotations	frame + 0x0C: the s16 triple array SkeletonWalkNode indexes
-009ca0a4	g_skeleton_node_out	where SkeletonWalkNode writes each bone's resolved matrix, stride 0x90
-0052ed08	g_pCharacterExtraParts	{u32 count; u32 *descriptors[]}; each descriptor's first word is an asset slot the SKELETON DOES NOT NAME. 68 of 76 character types have one or two; the cat has none. Without them a humanoid has a hole where its waist should be
-004d032c	g_character_part_tables	char type -> per-bone {slot, ...} overrides, stride 0x14
-
-# --- combat: shots, damage, dismemberment, death; characters, motion, props ---
+004c43a4	g_camera_track_key_scale	10.0f. RegisterForCameraTracking's sort key is the distance from the camera eye times this, as an int.
+004c479c	g_cam_path_file_id
+004c4cd0	g_approach_ring_defaults	Four {inner, mid, outer} f32 ring sets copied into g_enemy_approach_rings by the scene reset. 25/38/51 for most characters, 37/48/51 for set 2. No stage script uses evt 0x0E, so these are what every encounter runs on.
+004c4d18	g_bone_damage_zone	u8[16], bone -> destroyed-zone bit index for obj+0x1318. char_adv00: bone 2 (head) -> 0, bones 3-5 (right arm) -> 1, bones 6-8 (left arm) -> 2, all others 0xFF -- the shift is masked with 0x1F so those land harmlessly on bit 31.
+004c4d28	g_actor_radius_by_char	One float per character type, copied to obj+0x124 by EnemyZombieInit, EnemyThrowerInit, CivilianInit (0x0048A6DC), ScriptedHumanoidInit (0x004841F7), OneHitTargetInit (0x00448F76) and the class-0x21 handler (0x00451780) -- six classes, so obj+0x124 is ONE field with one meaning across every class that sets it, and is not polymorphic. Index 7 is 10.0 and indices 1..6 are 15.0. Paired with the separate dword obj+0x128, a per-class authored constant: 1.0 for a class-0x10 civilian (CivilianInit 0x0048A433 loads 0x3f800000 into EDI, 0x0048A6D6 stores it), 3.5 for the zombie (CivilianInit 0x0048A7DF writes 0x40600000 onto each child it builds), and 5.0 for thrower type 0x16 or 4.0 for types 0x17-0x19. The two are written by adjacent instructions in one basic block, which is the proof they are two fields and not an overlay. obj+0x128 is also the radius class 0x10's op 0x16 ramp walks.
 004c7160	g_pBoneEffectSlots	per character: u16[bone][6], the asset slot the bone is redrawn with after each successive hit
 004c8350	g_pBoneDamage	per character: u16[bone][6], damage for each successive hit on that bone. char_adv00's head runs 100/120/140/160
-004d0d84	g_pBoneDamageByRank	per character: s8[bone][0x10], a difficulty addend on top of g_pBoneDamage
-0058b6b8	g_pDialogueVariants	evt 0x2D: u16[group][3], the variant per player configuration
-0058bc68	g_pDialogueText	evt 0x2D: 0x40-byte {f32 x_offset, char text[0x3A], u16 end_frame} subtitle lines
-005919a8	g_pDialogueLines	evt 0x2D: u16[variant][4] subtitle line ids, 0xFFFF-terminated
-00593084	g_pDeathMotionsArc8000	6 death motions for the 0x8000 arc: 985, 989, 987, 988, 989, 990. Their root carries z by +7.4/+8.2
-0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
-005960b4	g_pHingeCurvesXYZ	hinge swing curves, 6-byte {s16 rx, ry, rz} frames. Curve 2 is the van doors: 179 deg by frame 12, settling to 137
-005960c8	g_pHingeCurvesYaw	hinge swing curves, u16 yaw-only frames (XOR EDX,EDX; MOV DX -- zero extended). HingeUpdate switches on the selector at 0x473E8D, not on which pointer is populated: 0/2/3 read g_pHingeCurvesXYZ and everything else reads this. Slot 1 is 60 frames, slot 4 is 130
-0059f4d0	g_coli_candidates	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
-005a4c84	g_coli_candidate_count	entries in g_coli_candidates this frame
-009a2cb8	g_ShotRecords	per player, 0x68 bytes: world ray origin, direction, -pitch/-yaw and their sin/cos
-009a5c78	g_nPlayerFired	set to 1 by the player update when the trigger is down and ammo remains; cleared by ProcessPlayerShots
-004c4d18	g_bone_damage_zone	u8[16], bone -> destroyed-zone bit index for obj+0x1318. char_adv00: bone 2 (head) -> 0, bones 3-5 (right arm) -> 1, bones 6-8 (left arm) -> 2, all others 0xFF -- the shift is masked with 0x1F so those land harmlessly on bit 31.
-005679f4	g_initial_damage_rank	s8[5], difficulty -> starting g_damage_rank: -3, -1, 1, 4, 8. Not clamped on the way in; UpdateDamageRank clamps to [0,15] on its first pass.
-009c8e96	g_damage_rank	Adaptive 0..15 rank. DamageRankModifier indexes g_pBoneDamageByRank[char][bone*0x10 + rank] with it and adds the signed byte to the table damage.
-009a2d88	g_shot_bone	int[2], per player: the bone index this player's shot hit. DispatchHit copies it from (s8)obj+0x190+player before calling ResolveHit.
-009a58f8	g_hit_result	int[2], per player, written by ResolveHit: 0 = nothing, 1 = damaged and part swapped, 2 = damaged only, 3 = severed, 5 = no effect (the effect table's `2` sentinel). Result 5 scores nothing.
-009a5c82	g_head_combo_bonus	+player*0x98. Added to the 120-point headshot award and then incremented by 10, so consecutive headshots pay 120, 130, 140 ...; any non-head hit zeroes it.
-009a5c86	g_player_hit_count	+player*0x98. Hits that scored, for the end-of-stage accuracy grade evt 0x2B reads.
 004c84a8	g_bone_reaction_group	u16[16], bone -> hit-reaction group. Eight groups partitioning the body: 1 head, 2 torso, 3 right arm (bones 3-5), 4 left arm (6-8), 5 pelvis (9), 6 right leg (10-12), 7 left leg (13-15).
-00577674	g_hit_voice_table	15 sound ids for ActorPlayHitVoice: five flesh impacts (BLOOD02/03/04/06, BONE01), then hurt/kill/head voices as (set A, set B) pairs, then two two-entry pools.
-00592cbc	g_pHitReactionMotionsAlt	Per character type -> per body condition -> a row whose entries at +0x10 are indexed by the last-hit zone (obj+0x1319). Taken only when obj+0x136C & 0x100, which is [open].
-00592fc8	g_pHitReactionMotions	Per character type -> per body condition (obj+0x130C) -> u32[8] motion ids indexed by g_bone_reaction_group. Only two distinct rows exist for the humanoids: the ordinary one is head 977, torso 982, r.arm 981, l.arm 979, pelvis 974, r.leg 961, l.leg 960.
-009a2be4	g_enemy_approach_ring_mid	f32, stride 0xC, one per ring set. The middle radius; see g_enemy_approach_rings.
-009a2be8	g_enemy_approach_ring_outer	f32, stride 0xC, one per ring set. The outer radius; see g_enemy_approach_rings.
-009c8e44	g_enemy_approach_steps_mid	Added to g_enemy_approach_steps when the actor starts between the middle and outer rings.
-009c8e48	g_enemy_approach_steps_outer	Added on top of g_enemy_approach_steps_mid when the actor starts outside the outer ring, so a distant enemy walks further before it can attack.
-009a2ba0	g_attack_permits	s32[2], one per player, stride 4 -- not bytes; DAT_009A2BA4 is element 1. An approaching enemy must claim one through TryClaimAttackSlot before it may attack, so only g_max_attackers enemies commit at a time. The holder's index is kept in obj+0x121, and SelectCameraLookAtTarget focuses the camera on whoever holds one. Class 0x31 state 27 bypasses the claim and writes the slot itself.
-009a34f0	g_attack_committed	Set by BOTH claim functions when the actor they are about to grant a permit to is OFF SCREEN -- ActorIsOnScreen returns 0 -- and read first by both, which gives up before a player is even picked. So one enemy may be attacking unseen and while one is, nobody else may claim at all. Cleared by ReleaseAttackSlot, ThrowerReleaseAttackPermit and ZombieStateHoldAtRange, each gated on the actor's own bit: obj+0x136C bit 0x20000 for class 0x30, bit 0x8000 for class 0x31. Being off screen does NOT refuse the claim.
-009a60d8	g_camera_block_target	The camera block's current look-at point (block+0xD8). StepCameraLookAtDamped eases it toward g_camera_lookat_target rather than snapping.
-009c6fa8	g_camera_lookat_target	The point the camera *wants* to look at, chosen by SelectCameraLookAtTarget: a single attacking enemy, the midpoint of two, or the cam/ path's own target when no enemies are registered.
-009c70d8	g_cam_path_target	The look-at CamEvalPath7 evaluates from the path's target channels, independent of its eye channels -- which is how a path holds the eye still and sweeps the aim.
-009c8e84	g_max_attackers	How many enemies may hold an attack permit at once: 1 or 2.
-004c4cd0	g_approach_ring_defaults	Four {inner, mid, outer} f32 ring sets copied into g_enemy_approach_rings by the scene reset. 25/38/51 for most characters, 37/48/51 for set 2. No stage script uses evt 0x0E, so these are what every encounter runs on.
-004c43a4	g_camera_track_key_scale	10.0f. RegisterForCameraTracking's sort key is the distance from the camera eye times this, as an int.
-00576c04	g_camera_turn_rate_curves	Four 64-byte curves indexed by the look-at angle error clamped to 0x1FFF and shifted right 7. The scene reset selects curve 1: rate 64 below about 18 degrees, ramping to 16 past 23. A larger value is a SLOWER turn.
-0059c988	g_camera_is_tracking	Zeroed by SelectCameraLookAtTarget when no enemy is registered; CameraTrackEnemiesTick uses it to choose between the angle-error curve and a flat rate.
-009c6f38	g_camera_turn_curve	Index into g_camera_turn_rate_curves; the scene reset sets 1.
-009c6f36	g_camera_turn_rate	The rate TurnLookAtToward divides by, refreshed every frame.
-005a4dc8	g_camera_candidates	{u32 distance key; void *actor} pairs, at most 14, radix-sorted nearest-first before the slots are assigned.
-009ca93c	g_camera_candidate_count	How many entries g_camera_candidates holds this frame.
-00592f18	g_class30_attacks	Per character type -> per body condition -> 0x10-byte attack entries: {s16 strike motion; s16 lunge motion; f32 distance; s16 hit frame; s16 player damage motion; u16 cancel mask}. The cancel mask names zones (1 head, 2 right arm, 4 left arm) whose destruction makes the strike whiff; 8 is outside the 3-bit mask and so never cancels.
-00592dc0	g_class30_attack_picks	Per character type -> per body condition -> s32[80]: which attack to use, indexed (rand%10 + (destroyed_zones & 7) * 10). Ten choices per destroyed-zone combination, so a zombie that has lost its head or an arm reaches for a different attack.
-009a5c66	g_player_lives	+player*0x98. PlayerTakeDamage decrements it by one per strike; the continue screen restores 1 or 2.
-009c8e08	g_player_invuln_frames	+player. Set to 0x5A by PlayerTakeDamage and counted down; a strike is ignored while it is non-zero.
-009a3794	g_damage_rank_pending	Accumulates rank adjustments -- PlayerTakeDamage subtracts 2 -- and UpdateDamageRank adds it in and clears it on its next pass.
-009a5cd0	g_player_was_hit	+player*0x98. Set by PlayerTakeDamage so the player entity plays its damage motion, which is stored alongside at g_player_hit_motion.
-009a5cd2	g_player_hit_motion	+player*0x130. The motion the player entity plays when hit, taken from the attack entry's +0x0A.
-007dcc4c	g_water_wave_field	The wave-field manager: {u32 active count; u32 slot mask; f32 plane_y; u32; void *sources[8]}. Created by class 0x16, filled by class 0x17.
-005644e4	g_wave_source_kinds	{handler, object size} per wave-source kind, stride 8: 0 travelling (WaveSourceTravellingTick), 1 circular (WaveSourceCircularTick).
-004d5464	g_wave_circular_falloff	0.01f. A circular ripple's amplitude scales by max(0, 1 - r * this), so it dies at 100 units.
-00592a00	g_class31_throws	Two rows of eight 0x10-byte entries, A at 00564818 (sets 0, 1 and 3) and B at 00564898 (set 2), indexed by obj+0x131A in the same layout as g_class30_attacks: {s16 strike; s16 lunge; f32 distance; s16 hit frame; s16 player damage motion; u16 cancel mask}. Each row is two groups of four -- right hand, left hand, unused, both-arms-gone -- and g_class31_attack_picks hands sets 0, 1 and 3 the indices 0, 1 and 3 and set 2 the indices 4, 5 and 6. Row A entry 3 is all zero.
-00592ae0	g_thrown_weapon_states	The projectile's two states: flight (ThrownWeaponFlyToTarget) and deflected (ThrownWeaponDeflected). Sits immediately before g_class30_states.
-009c7000	g_active_player	Which player may be targeted, computed by SelectAttackablePlayer from g_players_in_play: -1 nobody, 0 player 0 only, 1 player 1 only, 2 both. TryClaimAttackSlot offers a permit accordingly when g_max_attackers is 1, and class 0x31 state 22 uses it to force a target when the claim fails.
-009c8e80	g_players_in_play	How many players are currently in play, s16 -- NOT a two-player flag. FUN_004147E0 does INC word [009C8E80] once per player as it enters, gated on that player's slot flag bit 0x10 at 0x579DE8 + slot*8, alongside a separate INC of g_max_attackers on bit 0x20; FUN_00413F42 does DEC when one drops out, and both resets zero it. So it is 1 in an ordinary single-player game and 0 only before anyone has started. TryClaimAttackSlot's g_max_attackers == 2 branch reads == 1 to mean one of the two players is out and picks a free permit at random; SelectAttackablePlayer switches on 0/1/2 as a count. Class 0x30 states 24 and 32 and class 0x10's wait bit 0x40000000 all gate on it being non-zero, which is a `has the game started` test and not a player-count one.
-004c4d28	g_actor_radius_by_char	One float per character type, copied to obj+0x124 by EnemyZombieInit, EnemyThrowerInit, CivilianInit (0x0048A6DC), ScriptedHumanoidInit (0x004841F7), OneHitTargetInit (0x00448F76) and the class-0x21 handler (0x00451780) -- six classes, so obj+0x124 is ONE field with one meaning across every class that sets it, and is not polymorphic. Index 7 is 10.0 and indices 1..6 are 15.0. Paired with the separate dword obj+0x128, a per-class authored constant: 1.0 for a class-0x10 civilian (CivilianInit 0x0048A433 loads 0x3f800000 into EDI, 0x0048A6D6 stores it), 3.5 for the zombie (CivilianInit 0x0048A7DF writes 0x40600000 onto each child it builds), and 5.0 for thrower type 0x16 or 4.0 for types 0x17-0x19. The two are written by adjacent instructions in one basic block, which is the proof they are two fields and not an overlay. obj+0x128 is also the radius class 0x10's op 0x16 ramp walks.
-007dcdd4	g_breakable_members	group*9 + member -> the live BreakablePropUpdate object, or 0 once it is destroyed. Stride 9 because the largest breakable group has nine members. The topple test reads it to find the props a member supports.
-009c7010	g_item_set_countdown	Per item-set: how many more props of that set must be destroyed before its hidden item drops. PlaceBreakableGroup seeds it with rand()%n + 1, so which break releases the item is random. Groups 6 and 7 both use set 2, so the later placement overwrites the earlier one's countdown.
-005937f8	g_breakable_hull_points	96 x {s16 x, s16 y, s16 z}, scaled by 0.001, the prop's collision hull. BreakablePropGroundContact transforms all 96 to find which corner a toppling prop lands on.
-00593a78	g_shatter_fragment_offsets	15 x {s16 x, s16 y, s16 z} in thousandths -- where each shatter fragment starts, relative to the prop.
-00593ad4	g_shatter_fragment_angles	15 x {s16 rx, s16 ry, s16 rz} in BAMS -- each shatter fragment's initial orientation.
-00593db8	g_prop_kind_params	Per class-0x41-type-4 object kind, stride 0xC: {s16 effect_id @+0, s16 effect_arg @+2, ..., s16 radius @+8}. PlaceKindedProp copies them into the prop's +0x324/+0x328/+0x124.
-00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
-00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
-009c9118	g_prop_target_set	Selects which members of a breakable group PlaceBreakableGroup turns into one-shot targets (+0x11C = 1, asset 0x1A0F) while g_GameMode == 2: set 0 takes members 2, 3, 4 and 6; set 1 takes 0, 1 and 5; set 2 takes 0 and 6; set 3 takes the same four as set 0. What the four sets *are* is [open] -- the mode names come from the g_GameMode row, not from anything read here.
-009a2bc0	g_evt_block_index	The event block currently executing, written by EvtAdvanceStepOrRoute and recorded byte-wise into g_route_history. NOT g_evt_step_index (0x009A2BB0), which is the step index within the current block and is what prop lifetimes measure.
-009a60c0	g_camera_block_eye	g_camera_blocks + 0x80: the eased eye position of camera block g_camera_index, a vec3 FUN_00402EF0 eases toward the pose the path evaluated. FUN_00403B00 reads it as the eye when it measures the angle to the look-at target at block+0x98 (g_camera_block_target), which is what proves the three words are a position.
-009a1a08	g_scene_index	Which scene is loaded, zero-based -- ColiLoadForScene indexes its file list with it, so scene 1 is stage 2. Class 0x41 and class 0x40 branch on it for the per-stage sound sets and for PropExpireByStepLifetime's scene-1 sweep.
+004d032c	g_character_part_tables	char type -> per-bone {slot, ...} overrides, stride 0x14
+004d0d84	g_pBoneDamageByRank	per character: s8[bone][0x10], a difficulty addend on top of g_pBoneDamage
+004d1b00	g_asset_bank_names	bank id -> filename; SHARED with the camera paths
+004d1cc4	g_coli_filename_table
 004d5390	g_effect_trees	29 pointers, one per effect id, to the root node of that effect's part tree: {u32 asset slot; s16 bone index; u16 child count; u32 children[]}. Same shape as g_character_skeletons but with no bind offsets -- an effect's translations come per-frame from its motion. Bounded by g_effect_bone_counts at 0x004D5404: 0x74 / 4 = 29 entries, and every tree's node count matches its bone count.
 004d5404	g_effect_bone_counts	s16 per effect id: how many bones its motion frames carry, which is what fixes the frame stride align4(n * 0x12 - 0xF) = n translations of 0xC plus n rotations of 6.
 004d5440	g_effect_interp_mode	u8 per effect id: 0 plays one motion key per frame; 1 and 2 halve the rate and interpolate, 2 additionally slerping through matrices when an axis differs by more than 0x3000.
-00595aa0	g_original_item_tables	Pointer per scene index to that scene's Original Mode item table, read by PickOriginalModeItem: stride 8, entries at +0..+3 (item ids) and cumulative rand() weights at +4..+7.
-005957d8	g_original_item_records	One 0xC record per Original Mode item id: u16 model slot, u16 second model slot, f32 draw scale, u16 pickup id passed to FUN_00475E40.
-009c90c0	g_original_items_taken	One byte per Original Mode item id, incremented on pickup and capped at 99.
-009c6f2f	g_camera_settled	Raised by CameraTrackEnemiesTick and CameraTurnOntoPathTarget once the eased look-at has caught up with the desired one (|VecCosSquaredSigned| > 0.99999). EvtOpWaitTargetsClear47 gates on it, so op 0x47 means nothing without the ease.
-009c6f33	g_camera_ease_eye	Selects how CameraEaseBlockEyeToPathPose moves the camera block's eye onto the path pose: set = a sixteenth a frame, clear = snap. Raised only by EvtActionSetFlag15; cleared by the scene reset and by EvtOpGotoSceneState31.
+004d5464	g_wave_circular_falloff	0.01f. A circular ripple's amplitude scales by max(0, 1 - r * this), so it dies at 100 units.
+004e0430	g_character_skeletons	char type -> skeleton block; count at +0x16, node pointers at +0x18
+004e0724	g_character_bone_counts	char type -> bones in a motion frame; one more than the top bone index
+004e07d0	g_motion_play_length	motion id -> the clip clock the scripts compare against, s16 per id. NOT the frame count: the animation clock ticks once per 60 Hz frame over data authored at 30 Hz, so across the 220 motions the bundles bake it is 2n-2 for 91 and 2n-3 for the other 129 and never anything else. Every cue expressed in clip frames is in these units -- ZombieStateTargetMotionScript's kill frame, ZombieStateMotionCue21's exit, the class-0x25 VM's -1 for the last frame, class 0x24's 0x32 drift cue. Comparing them against the authored frame count loses every cue past halfway.
+004e2b14	g_motion_bank_ids	bank id -> s16 array of the motion ids it holds
+004e2bdc	g_motion_bank_count	bank id -> how many motions
+004e2c40	g_motion_bank_of	motion id -> bank id, the argument MotionRequestBankLoad takes
+0052ed08	g_pCharacterExtraParts	{u32 count; u32 *descriptors[]}; each descriptor's first word is an asset slot the SKELETON DOES NOT NAME. 68 of 76 character types have one or two; the cat has none. Without them a humanoid has a hole where its waist should be
+005644e4	g_wave_source_kinds	{handler, object size} per wave-source kind, stride 8: 0 travelling (WaveSourceTravellingTick), 1 circular (WaveSourceCircularTick).
+005647a4	g_class20_idle_motions	u32[4] = {1021, 1023, 1024, 1025}. OneHitTargetInit (0x00448ED0) picks one with rand() & 3 when the spawn's tail+0x06 names no motion. All four are ids char_adv00 (character type 7) carries, which is the corroboration; the shipped class-0x20 spawns that DO name one name 1024, which is in the table.
+00564918	g_class31_arc_leap_land	State 20's arc motion script for characters other than 0x17, chosen at random from this and the byte-identical copy at 00564948: {0x12C,50,0,55}{0x12C,56,0,63}{0x12C,64,5,98}.
+005649a8	g_class31_arc_backoff_c16	State 10's arc motion script for character type 0x16: {0x001,3,5,16}{0x001,17,5,24}{0x001,25,5,34}.
+00564a38	g_class31_arc_to_wall_a	State 15's arc motion script {0x123,0,5,15}{0x123,16,5,33}{0x123,34,5,43}; on completion the state sets obj+0x136C bit 6.
+00564a68	g_class31_arc_to_wall_b	State 14's arc motion script {0x122,0,5,15}{0x122,16,5,33}{0x122,34,5,43}; on completion the state sets obj+0x136C bit 7.
+00564a98	g_class31_arc_to_ceiling	State 16's arc motion script {0x135,0,5,29}{0x135,30,5,59}{0x135,60,5,87}; on completion the state sets obj+0x136C bit 8.
+00564ac8	g_class31_arc_backoff_c19	State 10's arc motion script for character type 0x19 and any type other than 0x16, 0x17 and 0x18: {0x11A,0,5,38}{0x11A,39,0,65}{0x11A,66,0,79}.
+00564af8	g_class31_arc_backoff_headbutt	State 10's arc motion script when obj+0x131A is 3 and the character is not 0x18: {0x11A,30,5,38}{0x11A,39,0,65}{0x11A,66,0,79}.
+00564d08	g_class31_arc_backoff_c18	State 10's four arc motion scripts for character type 0x18, one per stance at stride 0x30: motions 0x1EB, 0x1F9, 0x1EF and 0x201, each cut {0,5,1}{2,5,21}{22,0,43}.
+00565d98	g_class31_hit_reaction_row_a	s32[8], reaction group to stumble motion, shared by behaviour sets 0, 1 and 3: 3A7 3A3 3A7 3AA 3AB 3A7 3A2 3A1.
+00565db8	g_class31_hit_reaction_row_b	s32[8], the same for behaviour set 2 (zskamere): 1BD 1BD 1BD 1BF 1BE 1BD 1BD 1BD.
+00565e28	g_class31_arc_path_c17	Arc motion script {0x1B7,0,0,19}{0x1B7,20,0,31}{0x1B7,32,0,42}, used by character type 0x17 in states 20 and 26.
+00565e58	g_class31_arc_path_style1	State 26's arc motion script when the waypoint's style word is 1: {0x12D,12,1,12} three times.
+00565e88	g_class31_arc_path_style2	State 26's arc motion script when the waypoint's style word is 2: {0x12D,7,0,11}{0x12C,48,1,65}{0x12D,17,1,22}.
+00565eb8	g_class31_arc_path_style0	State 26's arc motion script for any other waypoint style: {0x12D,0,0,8}{0x12D,9,0,17}{0x12D,18,0,23}.
+00565ef4	g_st2car_path_table	object path per instance index
+00565f0c	g_class21_hp_by_rank	1 or 2 hit points by difficulty rank
+00565f2c	g_st2car_asset_variants	int[2][4]; row 1 is the post-crash set
+00566124	g_wait_turn_variant	s32[10] of 0 and 1. ZombieStateAttackRun picks one with (rand() >> 4) %% 10 and ORs it into obj+0x136C at bit 21, which is the bit ZombieStateWaitTurn indexes the motion row with -- so which idle a waiting zombie plays is a coin flip from a table, not a duration.
+00567990	g_accuracy_bonus_table
+005679f4	g_initial_damage_rank	s8[5], difficulty -> starting g_damage_rank: -3, -1, 1, 4, 8. Not clamped on the way in; UpdateDamageRank clamps to [0,15] on its first pass.
+0056b0e4	g_hp_percent_by_rank	u8[16], g_damage_rank -> the percentage of a spawn's descriptor hit points it actually starts with: 60 60 70 80 90 100 100 100 105 110 115 120 125 125 130 130. CivilianInit applies it to every child it builds.
+005702a8	g_civilian_scripts	Class 0x10's script table: 67 dword pointers into 0x0056B9E4..0x005702A8, indexed by the spawn tail's byte +0x01. CivilianRunScript walks the stream it names. Ops 0x0E/0x0F/0x1E/0x1F point at further streams that live in the gaps between the table's own entries, so the whole set is 136 streams and 1967 commands. Decoded by ExeTables.civilian_scripts.
+005703b4	g_class26_path_by_selector	selector 6 -> path 0x183, 7 -> 0x184
+00571210	g_identity_matrix
+00576a8c	g_SceneRegionTableMode1
+00576abc	g_SceneRegionIdTableMode1
+00576c04	g_camera_turn_rate_curves	Four 64-byte curves indexed by the look-at angle error clamped to 0x1FFF and shifted right 7. The scene reset selects curve 1: rate 64 below about 18 degrees, ramping to 16 past 23. A larger value is a SLOWER turn.
+00576c14	g_scene_state_table	the 6x9 scene state machine
+00576cf0	g_camera_preset_table
+00576d38	g_cam_path_length	per-slot play length, stride 4
+00577650	g_evt_spawn_gated_handlers	Forward table for the player-count-gated spawn opcodes 0x01-0x08, indexed by the opcode itself; entry 0 is unused. Entries 1-4 and 5-8 are the same four handlers: EvtOpSpawnPlaced09, EvtOpSpawnSimple0A, EvtOpSpawnObj0B, EvtOpSpawnObjC0C. Read by EvtOpSpawnIfOnePlayer and EvtOpSpawnIfTwoPlayers.
+00577674	g_hit_voice_table	15 sound ids for ActorPlayHitVoice: five flesh impacts (BLOOD02/03/04/06, BONE01), then hurt/kill/head voices as (set A, set B) pairs, then two two-entry pools.
+005776b0	g_difficulty_hp_delta	{-30, -15, 0, 0, 0} added to obj+0x11E
+005776ec	g_evt_action_table	queue_event action groups, 16 selectors each
+005798f0	g_app_state_next_table	Six pointers indexed by g_wCaptionMode (0x009C911E), every one of them 0x004E1014, followed by a -1. Each points at a byte table indexed by g_app_state giving the state to request next; AppStateAdvanceByTable (0x0040E960) is next = table[caption][app_state]. The bytes at 0x004E1014 are 0A 00 00 09 00 0B 03 03 00 05 03 0A, so 5 -> 0x0B, 6 -> 3, 7 -> 3, 9 -> 5, 0x0A -> 3, 0x0B -> 0x0A.
+00579914	g_motion_job_substeps	three entries; entry 3 onward is the "mot\%s" string
+00579920	s_mot_path_format
+00579968	g_backdrop_preset_table
+0057a280	g_ModelFixupSlotList
+00580354	g_bgm_names_ar
+005803f8	g_bgm_names_plain
+0058044a	g_voice_records
+005845f8	g_se_name_list	{u32 id; char name[48]}, stride 0x34, 324 records, id 0xFFFF ends
+005887fc	g_looping_se_ids	SE ids PlaySoundId (0x0041CFD0) plays LOOPED, walked as dwords until 0xFFFFFFFF. 44 entries, paired index for index with g_looping_se_stop_ids; seven ids appear twice, which is harmless because the walk stops at the first match.
+005888b0	g_looping_se_stop_ids	The stopper for each entry of g_looping_se_ids, same index, same length. An id found here makes PlaySoundId call SoundStopAllLoopingSe before playing it. All 44 pairs are X.wav against X_OFF.wav -- UFO_44, CHAIN_SAW_22, RAIN3ST_44, QUAKE_22, LASER_SWORD_22 -- which is what proves the pairing rather than the tables merely being adjacent.
+00588b58	s_sound_bgm_prefix
+00589828	g_attract_demo_playlist	The attract demo playlist RunAttractDemo (0x00426800) walks: 0x14 bytes an entry -- {s16 scene; s16 block; s16; s16; s16 bgm; u32 bgm_param; u32 ptr} -- terminated by a scene of -1. Three entries ship: scene 0 block 4, scene 1 block 28, scene 3 block 5, so the demo plays stages 1, 2 and 4. Proof that scenes 0..5 ARE the six playable stages, alongside scene 6 (the g_GameMode 2 entry ResetGameOnStart picks) and scenes 10 and 11 (the two attract screens at 0x0041F9B0 and 0x0041FB00).
+00589ae0	g_class28_route_table	{path slot, freeze frame} pairs
+00589da8	g_screen_message_records
+0058b6b8	g_pDialogueVariants	evt 0x2D: u16[group][3], the variant per player configuration
+0058bc68	g_pDialogueText	evt 0x2D: 0x40-byte {f32 x_offset, char text[0x3A], u16 end_frame} subtitle lines
+005919a8	g_pDialogueLines	evt 0x2D: u16[variant][4] subtitle line ids, 0xFFFF-terminated
+005926a8	g_prop_behaviours	10 behaviour functions shared by classes 0x12/0x13/0x15
+00592960	g_class31_states	36 entries
 005929f0	g_class31_motion_sets	Four s32[6] rows at 005647B8, stride 0x18, indexed by obj+0x130C -- the behaviour set, which EnemyThrowerInit takes from the spawn descriptor's byte +1: +0 and +4 the idle pair (state 8 picks between them at random, or +0 for character type 0x17), +8 and +0C the walk pair picked by obj+0x34 bit 27 (states 7 and 18), +10 the landing clip (states 10 and 25), +14 the airborne clip (state 2). Set 0 is zstin, set 1 zsass, set 2 zskamere, set 3 zslman.
+00592a00	g_class31_throws	Two rows of eight 0x10-byte entries, A at 00564818 (sets 0, 1 and 3) and B at 00564898 (set 2), indexed by obj+0x131A in the same layout as g_class30_attacks: {s16 strike; s16 lunge; f32 distance; s16 hit frame; s16 player damage motion; u16 cancel mask}. Each row is two groups of four -- right hand, left hand, unused, both-arms-gone -- and g_class31_attack_picks hands sets 0, 1 and 3 the indices 0, 1 and 3 and set 2 the indices 4, 5 and 6. Row A entry 3 is all zero.
 00592a10	g_class31_melee_attacks	Three rows of 0x10-byte entries at 00564E58 (set 0, five stances), 00564F98 (sets 1 and 2, one stance) and 00564FD8 (set 3, five stances), indexed attack + stance*4 where the stance is obj+0x136C bit6 + bit7*2 + bit8*3 -- the surface: ground, one wall, the other, ceiling -- plus 4 while bit 17 marks a pounce. The entry is {u32 pointer to a 12-dword arc motion script; s32 hit frame, -1 meaning the arc's landing phase; s32 player damage motion; u32 cancel mask}.
 00592a20	g_class31_attack_picks	Two s32[8][10] blocks at 00565118 (sets 0, 1 and 3) and 00565258 (set 2), read as a byte at (rand()/16 % 10 + (obj+0x1318 & 7) * 10) * 4 and stored to obj+0x131A. Intact gives a coin flip between the right hand (0 or 4) and the left (1 or 5), one arm gone forces the other, and both arms gone gives the head-butt slot (3 or 6).
 00592a30	g_class31_action_pick_bands	Four rows of three pointers, stride 0xC, one per behaviour set; the band index is 0 unused, 1 for 40 < distance <= 50 and 2 for everything else. Reached through g_class31_action_picks.
@@ -256,91 +116,227 @@
 00592ac8	g_class31_corpse_frames_m1bc	Corpse pose frames {18, 21} for motion 0x1BC, character type 0x17's death clip.
 00592ad0	g_class31_corpse_frames_m11d	Corpse pose frames {48, 40} for motion 0x11D, the death clip of character types 0x18 and 0x19.
 00592ad8	g_class31_corpse_frames_m11e	Corpse pose frames {74, 70} for motion 0x11E, character type 0x16's death clip.
-009c8aa0	g_arc_scripts	One 0x30-byte three-stage arc motion script per enemy slot, indexed by obj+0x3C. InstallArcMotionScript copies into it and ActorArcStep walks it.
-005649a8	g_class31_arc_backoff_c16	State 10's arc motion script for character type 0x16: {0x001,3,5,16}{0x001,17,5,24}{0x001,25,5,34}.
-00564a38	g_class31_arc_to_wall_a	State 15's arc motion script {0x123,0,5,15}{0x123,16,5,33}{0x123,34,5,43}; on completion the state sets obj+0x136C bit 6.
-00564a68	g_class31_arc_to_wall_b	State 14's arc motion script {0x122,0,5,15}{0x122,16,5,33}{0x122,34,5,43}; on completion the state sets obj+0x136C bit 7.
-00564a98	g_class31_arc_to_ceiling	State 16's arc motion script {0x135,0,5,29}{0x135,30,5,59}{0x135,60,5,87}; on completion the state sets obj+0x136C bit 8.
-00564ac8	g_class31_arc_backoff_c19	State 10's arc motion script for character type 0x19 and any type other than 0x16, 0x17 and 0x18: {0x11A,0,5,38}{0x11A,39,0,65}{0x11A,66,0,79}.
-00564af8	g_class31_arc_backoff_headbutt	State 10's arc motion script when obj+0x131A is 3 and the character is not 0x18: {0x11A,30,5,38}{0x11A,39,0,65}{0x11A,66,0,79}.
-00564d08	g_class31_arc_backoff_c18	State 10's four arc motion scripts for character type 0x18, one per stance at stride 0x30: motions 0x1EB, 0x1F9, 0x1EF and 0x201, each cut {0,5,1}{2,5,21}{22,0,43}.
-00564918	g_class31_arc_leap_land	State 20's arc motion script for characters other than 0x17, chosen at random from this and the byte-identical copy at 00564948: {0x12C,50,0,55}{0x12C,56,0,63}{0x12C,64,5,98}.
-00565e28	g_class31_arc_path_c17	Arc motion script {0x1B7,0,0,19}{0x1B7,20,0,31}{0x1B7,32,0,42}, used by character type 0x17 in states 20 and 26.
-00565e58	g_class31_arc_path_style1	State 26's arc motion script when the waypoint's style word is 1: {0x12D,12,1,12} three times.
-00565e88	g_class31_arc_path_style2	State 26's arc motion script when the waypoint's style word is 2: {0x12D,7,0,11}{0x12C,48,1,65}{0x12D,17,1,22}.
-00565eb8	g_class31_arc_path_style0	State 26's arc motion script for any other waypoint style: {0x12D,0,0,8}{0x12D,9,0,17}{0x12D,18,0,23}.
-009c8908	g_hit_player_order	int[2]: which players resolve a hit this frame and in what order, written by ChooseHitPlayerOrder -- 0 or 1 in slot 0 for a one-player game, a randomised pair for two, -1 for an unused slot. This is the array ZombieOnShot and ThrowerOnShot walk; it is not g_hit_slots at 0x009C88C0.
-00565d98	g_class31_hit_reaction_row_a	s32[8], reaction group to stumble motion, shared by behaviour sets 0, 1 and 3: 3A7 3A3 3A7 3AA 3AB 3A7 3A2 3A1.
-00565db8	g_class31_hit_reaction_row_b	s32[8], the same for behaviour set 2 (zskamere): 1BD 1BD 1BD 1BF 1BE 1BD 1BD 1BD.
-009a5c50	g_blink_frame_counter	One of the three free-running counters FUN_0040E730 steps once a game tick, beside g_frame_counter (0x009A32A0) and DAT_009A2BAC. Class 0x31 states 5, 27 and 34 read its low bit for the blink parity, which is the only use found -- what distinguishes it from the other two is [open].
-009a6458	g_cam_path_frame_2	Camera block 2's current path frame -- the same +0xD0 field again, at g_camera_blocks + 2*0x1A4. A scripted state waiting on a camera cue accepts either this or g_cam_path_frame: class 0x31 state 27 does, and so does class 0x33 at 0x00433B1A.
-005702a8	g_civilian_scripts	Class 0x10's script table: 67 dword pointers into 0x0056B9E4..0x005702A8, indexed by the spawn tail's byte +0x01. CivilianRunScript walks the stream it names. Ops 0x0E/0x0F/0x1E/0x1F point at further streams that live in the gaps between the table's own entries, so the whole set is 136 streams and 1967 commands. Decoded by ExeTables.civilian_scripts.
-0056b0e4	g_hp_percent_by_rank	u8[16], g_damage_rank -> the percentage of a spawn's descriptor hit points it actually starts with: 60 60 70 80 90 100 100 100 105 110 115 120 125 125 130 130. CivilianInit applies it to every child it builds.
-007dd09c	g_cur_actor_model	Scratch pointer to the skinned-model block of the object being updated -- obj+0x194 for class 0x10. Its +0x08 is the clip frame, +0x20 the motion id, +0x60 the character type, +0x116C the draw scale and +0x1170 the part list.
-007dd0a0	g_cur_civilian	Scratch pointer to class 0x10's 0xC4-byte script block at obj+0x1310. +0x00 the wait word, +0x0C the clip's remaining loops, +0x14 the wait timer, +0x1E the surviving-child count, +0x48 the script cursor, +0x4C the on-shot script, +0x5C the per-frame hook, +0x60 the child array, +0x6C the player a rescue pays.
-007dd0a4	g_cur_actor_xform	Scratch pointer to the transform block of the object being updated -- obj+0x40. Floats 0..2 position, 3..5 the per-frame step op 0x26 interpolates by, 9..11 pitch/yaw/roll.
-009ca0e8	g_civilians_alive	How many class-0x10 civilians are in play; the condition for evt opcode 0x46 wait_scripted_actors, whose 68 sites all pass operand 0. CivilianInit raises it UNCONDITIONALLY -- the INC word ptr at 0x0048A6FE is on the straight-line fall-through with no branch around it. (It is the two counters three instructions later, 0x009A21BA and word[0x009C9100 + stage*2], that the wait word's 0x08000000 exempts; an earlier note here wrongly put that guard on this counter.) Three ways back out, all decrementing once: op 0x2C carrying 0x00080000 (CivilianRunScript 0x0048BA3C), which also stamps sub+0x04 bit 0; and two CivilianUpdate teardowns, 0x0048B003 after the remove-delay countdown and 0x0048B0AC in the off-camera branch, both skipped when that bit is set.
-009a2c88	g_civilian_carrier	The object a class-0x10 civilian rides. Distinct from g_carrier_object (0x009A5C34), the player's own rideable. FUN_00440190 -- a class-0x13 sub-constructor with nine handlers -- writes itself here, and CivilianInit reads it into sub+0x68 when the descriptor's +0x22 is non-zero, which is 7 of the 47 civilians. CivilianUpdateOnCarrier then pushes its translate/rotate around the whole update.
-009a5c62	g_player_state	s16 per player, +player*0x98. IsPlayerAttackable requires 5 -- in play and alive -- before an enemy may commit an attack, and TryClaimAttackSlot voids a permit it has just picked when it is not. It does NOT change on being hit: the invulnerability window is g_player_invuln_frames, a separate byte array, so there is no post-hit pause in the attack queue.
-00566124	g_wait_turn_variant	s32[10] of 0 and 1. ZombieStateAttackRun picks one with (rand() >> 4) %% 10 and ORs it into obj+0x136C at bit 21, which is the bit ZombieStateWaitTurn indexes the motion row with -- so which idle a waiting zombie plays is a coin flip from a table, not a duration.
-009c8ea0	g_evt_yield	The evt VM's yield flag, and the whole of its frame pacing. EvtInterpreterLoop runs 'do { dispatch[*pc](); } while (g_evt_yield == 0)' and does NOT clear it at entry, so: a wait handler reached with it clear sets it and returns WITHOUT testing its condition (every wait therefore costs at least one frame); on later frames it tests, and a satisfied wait clears it and advances pc, whereupon the loop keeps dispatching in the SAME frame until the next wait. Opcode 0x4E halt is nothing but 'g_evt_yield = 1' with pc unchanged (FUN_0045EFF0). The unused dispatch slots 0x00/0x2A/0x34/0x3C/0x4C point at a bare RET, which leaves the flag clear and spins the loop forever -- reaching one hangs the game.
-007dcca4	g_evt_gameplay_live	Recomputed once per frame at the top of EvtInterpreterLoop and read by nothing else: 'may the script advance'. Set when a player is in state 5 with lives left (in 2P mode, state 5 alone for either player), else FUN_00413280(). Every wait opcode except 0x41 requires it, so the script -- including wait_frames' countdown -- freezes on the continue screen rather than running on while the player is dead.
-007dcca8	g_evt_wait_alive_hysteresis	The extra frame wait_enemies_alive costs. Used ONLY by EvtOpWaitEnemiesAlive44 -- 0045FC42 reads it, 0045FC4B and 0045FC60 write it, and those three are every reference in the program. The handler requires 0 < it before it will pass, zeroes it when it does, and increments it on every frame it does not. It is NOT reset when the count condition fails, so it does not mean 'the g_enemies_alive condition must hold for two consecutive frames' -- an earlier note here said that and it is wrong. It means 'this instance of the instruction must already have been evaluated once and refused'. On top of g_evt_yield's first-visit yield that makes 0x44 the only wait in the VM that cannot pass before its third frame on the program counter; 0x43 is the same handler without this term and costs two.
-00577650	g_evt_spawn_gated_handlers	Forward table for the player-count-gated spawn opcodes 0x01-0x08, indexed by the opcode itself; entry 0 is unused. Entries 1-4 and 5-8 are the same four handlers: EvtOpSpawnPlaced09, EvtOpSpawnSimple0A, EvtOpSpawnObj0B, EvtOpSpawnObjC0C. Read by EvtOpSpawnIfOnePlayer and EvtOpSpawnIfTwoPlayers.
+00592ae0	g_thrown_weapon_states	The projectile's two states: flight (ThrownWeaponFlyToTarget) and deflected (ThrownWeaponDeflected). Sits immediately before g_class30_states.
+00592ae8	g_class30_states	59 entries, indices 0x00-0x3A, ending at 0x00592C74 where a table of DATA pointers (0x00565FDC...) begins; the zombie's state machine. Indices 0x00 and 0x31 are both the stub at 0x0041EBB0. (This row previously said 54; the raw bytes say 59, and 0x36-0x3A are ActorCheckWaterEntry, FUN_004569B0, FUN_00456B70, ZombieStrikeStartSplash and ZombieStrikeFrameSplash.)
+00592bc0	g_class30_draw	the zombie's draw pointer, immediately after its state table
+00592cbc	g_pHitReactionMotionsAlt	Per character type -> per body condition -> a row whose entries at +0x10 are indexed by the last-hit zone (obj+0x1319). Taken only when obj+0x136C & 0x100, which is [open].
+00592dc0	g_class30_attack_picks	Per character type -> per body condition -> s32[80]: which attack to use, indexed (rand%10 + (destroyed_zones & 7) * 10). Ten choices per destroyed-zone combination, so a zombie that has lost its head or an arm reaches for a different attack.
+00592f18	g_class30_attacks	Per character type -> per body condition -> 0x10-byte attack entries: {s16 strike motion; s16 lunge motion; f32 distance; s16 hit frame; s16 player damage motion; u16 cancel mask}. The cancel mask names zones (1 head, 2 right arm, 4 left arm) whose destruction makes the strike whiff; 8 is outside the 3-bit mask and so never cancels.
+00592fc8	g_pHitReactionMotions	Per character type -> per body condition (obj+0x130C) -> u32[8] motion ids indexed by g_bone_reaction_group. Only two distinct rows exist for the humanoids: the ordinary one is head 977, torso 982, r.arm 981, l.arm 979, pelvis 974, r.leg 961, l.leg 960.
+00593084	g_pDeathMotionsArc8000	6 death motions for the 0x8000 arc: 985, 989, 987, 988, 989, 990. Their root carries z by +7.4/+8.2
+0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
 00593170	g_zombie_thrown_weapon_states	The four states ZombieThrownWeaponUpdate dispatches on: 0 the shared no-op, 1 ZombieThrownWeaponStateStraight (the axe), 2 ZombieThrownWeaponStateArc, 3 ZombieThrownWeaponStateShotDown. Class 0x30's projectile is a separate family from class 0x31's at g_thrown_weapon_states (0x00592AE0), which has two states rather than four.
-009a1a10	g_evt_action_advance	Dequeue mode for EvtRunQueuedActions. 0 = the current handler is still running, do not dequeue; 1 = it finished, dequeue the next action AND call it in the same frame; 2 = it finished, dequeue but defer the first call to next frame. Always cleared to 0 on a dequeue, so a handler must re-assert it. Every action handler ends with 1 except EvtActionFinishSequence21, which sets 0 to keep its camera driver alive. Script resets use 2; evt 0x33 writes it from an operand (127x mode 2, 1x mode 1 across the shipped scripts).
-009a610c	g_evt_action_handler	Slot 0 of the four 0x1A4-byte evt-action blocks: the handler for the queued action currently running. EvtRunQueuedActions is the ONLY caller -- CALL dword ptr [0x009A610C] at 0x00402323, always with argument 0 -- so slots 1..3 are written but never invoked and the 'param_1 != 0' arm of every action handler is dead. Set on dequeue; re-pointed by handlers (CamStartPathPlayback -> CamAdvancePathFrame; EvtActionFinishSequence21 -> DAT_00576B20[minor], non-null only for minors 4/6/7); parked on the bare RET FUN_0041EBB0 when the ring drains. evt 0x31/0x32 install that bare RET, which is what tears down the finish-sequence camera driver.
-009c6f2d	g_camera_free	1 when no g_enemy_slots entry is claimed and the return-to-path swing has finished. FUN_00402E00 recomputes it from the slot array every frame; FUN_00402650 clears it every frame the camera mode at 0x009C6F20 is not 2, and skips the clear in mode 2 so CameraTurnOntoPathTarget can latch it when the eased look-at catches the path target (|VecCosSquaredSigned| > 0.99999). Wait ops 0x43/0x44/0x46 will not advance without it, so a room-clear gate holds until the camera is back on its rail; 0x47 accepts it OR g_camera_settled. Enemy deaths and EvtActionHoldCameraPreset20 force it to 1 to skip the swing.
-009c6fd8	g_evt_cam_override_valid	Set to 1 by queue_event selector 0x60 (EvtActionStoreSixOperands60) together with three (frame, path) pairs at 0x009C6FDC..0x009C6FF0. The row-5 camera hooks FUN_00402890 and FUN_00402740 test it and call FUN_00403DB0, which re-seats g_active_cam_path and DAT_009C70BC from pair index DAT_009C88A4. Cleared by FUN_004021D0, ResetSceneCombatState and evt opcode 0x31 -- but NOT 0x32.
-009ca0f4	g_bHudShutterState	HUD letterbox state 0..8; evt 0x1F writes it, HudDrawShutterState drives it. The 40-frame slide counter is a task field at +0x50, not a global.
-009c8e9c	g_bHudShutterPrev	The state HudDrawShutterState last settled on: it seeds the slide counter on a change, and state 7 restores it. Written on every path except state 8.
-009a5c84	g_player_shot_count	+player*0x98 (0x130 bytes). The accuracy denominator: EvtOpAwardAccuracyBonus2B (0x0045FE40) pays g_accuracy_bonus_table[(g_player_hit_count * 100 / this) / 10] to any player whose g_player_state is 5 and who has fired more than 0x13 shots, so this is shots and g_player_hit_count at +4 is hits. Distinct from g_nPlayerFired (0x009A5C78), which is a per-frame "the trigger is down" flag and not a tally. ResetSceneOnEnter zeroes it with the other two, so the accuracy grade is per scene. [open] No instruction writes it through this address -- the increment reaches it on a computed base the disassembler does not resolve here.
-009c9100	g_civilians_seen_by_scene	u16 per scene, indexed g_scene_index*2. CivilianInit increments it on the same straight line as g_civilians_seen_total (0x009A21BA) and g_civilians_alive, so it is every class-0x10 actor the scene created. Paired with g_civilians_rescued_by_scene for the end-of-stage rescue tally. ResetGameOnStart zeroes the first three dwords -- six scenes -- and ResetSceneOnEnter zeroes this scene only.
-009c89c0	g_civilians_rescued_by_scene	u16 per scene, indexed g_scene_index*2. CivilianRunScript op 0x2C raises it as it pays the 400-point rescue, beside g_civilians_rescued_total (0x009CA0EC), and uses the pre-increment value with a stride-10 index -- scene*10 + rescues -- into a per-rescue table. The counterpart of g_civilians_seen_by_scene.
-009ca0ec	g_civilians_rescued_total	u16. Every rescue across the run; CivilianRunScript op 0x2C raises it beside the per-scene g_civilians_rescued_by_scene. Zeroed by ResetGameOnStart and NOT by ResetSceneOnEnter, which is what makes it a run total rather than a scene one.
-009a21ba	g_civilians_seen_total	u16. Every class-0x10 actor created across the run; CivilianInit raises it beside the per-scene g_civilians_seen_by_scene. Zeroed by ResetGameOnStart only.
-00589828	g_attract_demo_playlist	The attract demo playlist RunAttractDemo (0x00426800) walks: 0x14 bytes an entry -- {s16 scene; s16 block; s16; s16; s16 bgm; u32 bgm_param; u32 ptr} -- terminated by a scene of -1. Three entries ship: scene 0 block 4, scene 1 block 28, scene 3 block 5, so the demo plays stages 1, 2 and 4. Proof that scenes 0..5 ARE the six playable stages, alongside scene 6 (the g_GameMode 2 entry ResetGameOnStart picks) and scenes 10 and 11 (the two attract screens at 0x0041F9B0 and 0x0041FB00).
-009c6f08	g_scene_state_major_entered	The copy of g_scene_state_major that only a full EvtEnterSceneState (0x00403BD0) stamps -- FUN_00403BB0 is the same routine WITHOUT this pair, so these two say a real scene-state entry happened rather than a bare table jump. **IsPlayerAttackable (0x00409DC0) reads this one and requires 2**, which is the cam/ path camera row of g_scene_state_table: enemies may only commit an attack while a scripted path camera is driving. Measured over the ports own walker, major 2 is almost all of gameplay (minors 4, 6 and 7) and major 1 minor 3 -- CameraFromViewAngles -- is the brief scripted-turn spell where nobody may attack. Also written directly by EvtOpGotoSceneState31, which sets it to 1, and by EvtOpGotoSceneStateWhenPlayersAlive32 and FUN_0040A920.
-009c6f10	g_scene_state_minor_entered	The minor half of the pair EvtEnterSceneState stamps beside g_scene_state_minor; see g_scene_state_major_entered (0x009C6F08).
+00593358	g_class_handler_pairs	{class_id, handler}, 56 entries, negative id terminates
+00593580	g_class41_constructors	79 entries, indexed by obj+0x130C
+005936bc	g_class41_updates	79 child entry functions
+005937f8	g_breakable_hull_points	96 x {s16 x, s16 y, s16 z}, scaled by 0.001, the prop's collision hull. BreakablePropGroundContact transforms all 96 to find which corner a toppling prop lands on.
+00593a78	g_shatter_fragment_offsets	15 x {s16 x, s16 y, s16 z} in thousandths -- where each shatter fragment starts, relative to the prop.
+00593ad4	g_shatter_fragment_angles	15 x {s16 rx, s16 ry, s16 rz} in BAMS -- each shatter fragment's initial orientation.
+00593cf0	g_breakable_group_ptrs	nine pointers to 10-byte member records
+00593d14	g_breakable_group_counts	nine member counts: {4,2,3,9,5,3,3,6,7}
+00593db8	g_prop_kind_params	Per class-0x41-type-4 object kind, stride 0xC: {s16 effect_id @+0, s16 effect_arg @+2, ..., s16 radius @+8}. PlaceKindedProp copies them into the prop's +0x324/+0x328/+0x124.
+00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
+0059505a	g_item_score_table	per-kind pickup score, stride 0xC
+00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
+005957d8	g_original_item_records	One 0xC record per Original Mode item id: u16 model slot, u16 second model slot, f32 draw scale, u16 pickup id passed to FUN_00475E40.
+00595aa0	g_original_item_tables	Pointer per scene index to that scene's Original Mode item table, read by PickOriginalModeItem: stride 8, entries at +0..+3 (item ids) and cumulative rand() weights at +4..+7.
+00595ab8	g_class44_subtypes	18 entries, indexed by obj+0x11C
+005960b4	g_pHingeCurvesXYZ	hinge swing curves, 6-byte {s16 rx, ry, rz} frames. Curve 2 is the van doors: 179 deg by frame 12, settling to 137
+005960c8	g_pHingeCurvesYaw	hinge swing curves, u16 yaw-only frames (XOR EDX,EDX; MOV DX -- zero extended). HingeUpdate switches on the selector at 0x473E8D, not on which pointer is populated: 0/2/3 read g_pHingeCurvesXYZ and everything else reads this. Slot 1 is 60 frames, slot 4 is 130
+00596738	g_class32_states	Class 0x32's state table: 11 function pointers dispatched by Class32Update as CALL dword ptr [EDX*0x4 + 0x596738]. Entries are 0x00480140, 0x00480290, 0x00480470, 0x0047CA50, 0x0047D220, 0x0047D410, 0x0047D5E0, 0x0047D890, 0x0047DD50, 0x0047DD50 and FUN_0041EBB0 -- the last being the no-op handler BuildClassHandlerTable uses to fill unmapped slots. Per-state float constants follow at 0x00596770/0x00596774 and 0x005967A0.
 00596b18	g_class25_path_offsets	Class 0x25 object-path attachment offsets, read by ScriptedHumanoidStepPath via op 11's record index at obj+0x1360: LEA EAX,[EAX+EAX*2]; LEA EBP,[EAX*8 + 0x596b18], so 24 bytes a record -- three floats, then a BAMS yaw delta at +0x10. The floats are rotated by the PATH's rx/ry/rz as CamEvalObjectPath6 returns them (not the actor's) and added to the path point. 15 records, 0x00596B18..0x00596C7F, ending exactly where g_class25_bone_prop_cels (0x00596C80) begins -- that abutment is what closes the extent, which was [open]. Records 0..14: {0,0,0}; {4.5,3,-1.5,dyaw 0x8000}; {-7.35,0,3.78}; {-1.54,0,6.97}; {4.62,-8,1.42,0x8000}; {-4.78,-8,0.86,0x8000}; {4.56,-8.28,-7.02,0x8000}; {-4.68,-8.28,-7.02,0x8000}; {0.56,0.89,-3.12}; {2.66,0.89,4.18}; {-4.92,0,0,0x8000}; {4.95,0,0,0x8000}; {4.5,6.6,-2.9,0x18e3}; {4,6.6,-6.5,0x18e3}; {5,6.6,0.7,0x238e}. Shipped data reaches indices 1..5 only.
 00596c80	g_class25_bone_prop_cels	u8[13]: 00 01 02 03 04 05 06 05 04 03 02 01 00 -- a ping-pong ramp 0->6->0. ScriptedHumanoidBoneDrawHook (0x00485260) indexes it with (obj+0x1334 %% 13): MOV ECX,0xd; CDQ; IDIV ECX; MOVSX EDX, byte ptr [EDX + 0x596c80] -- EDX after IDIV is the REMAINDER, so the index is 0..12 and the table is exactly 13 entries long. That exact fit is the structural check on the whole reading. The cel is added to a per-character asset-slot base and the sum is drawn. Used by the obj+0x1330 == 2 arm.
 00596c90	g_class25_bone_prop_cels_alt	u8[13]: 00 01 01 01 01 01 01 01 00 00 00 00 00 -- a two-cel blink over the same 13-frame cycle. The counterpart of g_class25_bone_prop_cels (0x00596C80), read the same way -- (obj+0x1334 %% 13) -- by ScriptedHumanoidBoneDrawHook at 0x004854C5, on the obj+0x1330 == 1 arm.
-009a2230	g_cutscene_skipping	Non-zero while a skippable cutscene is being skipped. [likely], named from its three writers, all already identified: EvtOpSetSkippableRegion2C (0x0045FD9D), CheckCutsceneSkipRequest (0x00435F7C) and FinishCutsceneSkip (0x00435FA0). Readers tear their scripted actor down at once when it is set: ScriptedHumanoidUpdate (0x004842A0, first instruction) and ScriptedHumanoidIdle (0x00484D40, first instruction) both free the model handle at obj+0x1304 and ActorKill, gated on word obj+0x1316 being zero in the Update's case; CivilianUpdate (0x0048AF8E) and CivilianRunScript (0x0048BF36) do the same for class 0x10. EvtOpPlayDialogue2D and DrawDialogueSubtitleTask also read it. Not modelled by the browser player, which has no skip.
-005a4d50	g_distance_rank_count	How many actors are in the distance-rank queue this frame. RegisterForDistanceRank (FUN_00409010) refuses the fifteenth caller (CMP ESI,0xE), RankEnemiesByDistance zeroes it at the end of its three passes, and FUN_00409080 zeroes it at scene setup. RegisterForDistanceRank has exactly one caller in the whole binary -- EnemyZombieUpdate at 0x0045346D -- so the queue holds class-0x30 actors and nothing else, and obj+0x131D/0x131E are written only onto those.
-005a4d58	g_distance_rank_list	The distance-rank queue: 14 pairs of {u32 key, actor*} at stride 8, key at +0x00 and the actor pointer at +0x04 (0x005A4D5C). The key is |actor.xz - camera.xz| scaled by g_camera_track_key_scale and converted with __ftol, so it is a u16 -- which is why SortEnemiesByDistance radix-sorts it in exactly two 8-bit passes. RankEnemiesByDistance's second pass nulls the pointer of any entry that is not live or that carries obj+0x34 bit 0x20000000, and its third pass numbers the survivors into obj+0x131E.
-005a4e38	g_distance_rank_scratch	SortEnemiesByDistance's ping-pong buffer: the {key, actor*} pairs are counted into a 256-bucket histogram, scattered here, and copied back to g_distance_rank_list, once per 8-bit digit. Not read anywhere else.
-009c7310	g_close_ranked_enemy	s32, zeroed at the top of RankEnemiesByDistance and set to 1 while walking the sorted list if any entry has character type 0xB (a s16 at obj+0x1F4), a queue index below its own obj+0x1358 allowance, and obj+0x136C bit 0x2000000 set. That is the one place in the program where a CLASS-0x30 tail field (obj+0x1358) is read without a class test -- the guard is the character type. [open] who reads this global.
-00596738	g_class32_states	Class 0x32's state table: 11 function pointers dispatched by Class32Update as CALL dword ptr [EDX*0x4 + 0x596738]. Entries are 0x00480140, 0x00480290, 0x00480470, 0x0047CA50, 0x0047D220, 0x0047D410, 0x0047D5E0, 0x0047D890, 0x0047DD50, 0x0047DD50 and FUN_0041EBB0 -- the last being the no-op handler BuildClassHandlerTable uses to fill unmapped slots. Per-state float constants follow at 0x00596770/0x00596774 and 0x005967A0.
-009c8a74	g_zombie_voice_holders	How many class-0x30 actors currently hold a groan voice. EnemyZombieInitByCharType increments it and latches obj+0x131B when it takes one; ZombiePlayDeathVoice plays the death scream only when it is 1 -- the last holder -- and counts it back down. ResetSceneCombatState zeroes it.
-009c6f28	g_cam_path_frames_left	end - cursor for the camera block CamAdvancePathFrame just stepped, written every frame AFTER it publishes g_cam_path_frame and BEFORE it tests the end. EvtOpWaitCameraPathFrame41 with operand 0 releases on '< 1', which is how 'wait to the end of the path' is spelled. Because the interpreter task runs before EvtRunQueuedActions, the script sees this a frame after the camera wrote it.
-009a6144	g_cam_path_cursor	Camera block 0's +0x104: the NEXT path frame CamAdvancePathFrame will publish. g_cam_path_frame (+0xD0) is the one it published last. The publish is 'g_cam_path_frame = cursor' and happens before the 'end <= cursor' test, so the frame a path ends on IS published, and the action is retired in the same call.
-009a6148	g_cam_path_end_frame	Camera block 0's +0x108: the last frame of the range a cam_play asked for. CamStartPathPlayback writes it from the action's second operand, or from g_stashed_path_end_frame for a flags-and-4 play.
-005647a4	g_class20_idle_motions	u32[4] = {1021, 1023, 1024, 1025}. OneHitTargetInit (0x00448ED0) picks one with rand() & 3 when the spawn's tail+0x06 names no motion. All four are ids char_adv00 (character type 7) carries, which is the corroboration; the shipped class-0x20 spawns that DO name one name 1024, which is in the table.
-009a244a	g_one_hit_target_kills	Incremented by OneHitTargetUpdate (0x004491FD) the frame a class-0x20 actor is shot. Also written by FUN_00497640 and read/written by FUN_004525C0; what reads it for is [open]. It is NOT g_enemies_alive: class 0x20's Init increments no counter, so no wait_enemies_alive gate ever sees one of these actors.
-007c17a0	g_app_state_pending	The REQUESTED application state, -1 for none. RequestAppState (0x0040E850) writes it, ClearPendingAppState (0x0040E840) and CommitAppState (0x0040E860) reset it to -1. CommitAppState runs at the end of the per-frame tick FUN_0040E730 and applies the request there. It is NOT the only writer of g_app_state: five functions write it across six sites (FUN_0049F380 twice, CommitAppState, FUN_0040E4A0, FUN_0040A920, FUN_0041E1D0), and at least FUN_0049F380 (c705988e9c0006000000 @ 0x0049F546, storing 6) and FUN_0040E4A0 (storing 0x10) store a literal straight into the word, so a change does not always land on a frame boundary. [proved]
-005798f0	g_app_state_next_table	Six pointers indexed by g_wCaptionMode (0x009C911E), every one of them 0x004E1014, followed by a -1. Each points at a byte table indexed by g_app_state giving the state to request next; AppStateAdvanceByTable (0x0040E960) is next = table[caption][app_state]. The bytes at 0x004E1014 are 0A 00 00 09 00 0B 03 03 00 05 03 0A, so 5 -> 0x0B, 6 -> 3, 7 -> 3, 9 -> 5, 0x0A -> 3, 0x0B -> 0x0A.
-0048d9f0	CivilianHookStartFall
-0048da20	CivilianHookFallStep
-0048da90	CivilianHookRideChildren
-0048dab0	CivilianHookRideChildrenStep
-0048db90	CivilianHookLaunchUp
-0048dbd0	CivilianHookLaunch
+00598778	g_d3du_unused_fov_degrees
+00598ab0	g_SrcBlendTable
+00598ad0	g_DstBlendTable
+00598af0	g_TexAddressModeTable
+00598b00	g_ZFuncTable
+00598b20	g_CullModeTable
+0059c988	g_camera_is_tracking	Zeroed by SelectCameraLookAtTarget when no enemy is registered; CameraTrackEnemiesTick uses it to choose between the angle-error curve and a flat rate.
 0059d898	g_coli_dynamic_matrix
 0059d8d8	g_coli_query_ref_x
 0059d8dc	g_coli_query_ref_y
 0059d8e0	g_coli_query_ref_z
 0059d8e4	g_coli_dynamic_count
+0059d8e8	g_shot_test_list	stride 5 dwords
 0059ecd8	g_coli_candidate_sort_keys
+0059f4d0	g_coli_candidates	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
 005a3098	g_coli_dynamic_list
 005a4488	g_coli_candidate_sort_scratch
+005a4c80	g_shot_test_count
+005a4c84	g_coli_candidate_count	entries in g_coli_candidates this frame
 005a4c88	g_coli_dynamic_blob
+005a4d50	g_distance_rank_count	How many actors are in the distance-rank queue this frame. RegisterForDistanceRank (FUN_00409010) refuses the fifteenth caller (CMP ESI,0xE), RankEnemiesByDistance zeroes it at the end of its three passes, and FUN_00409080 zeroes it at scene setup. RegisterForDistanceRank has exactly one caller in the whole binary -- EnemyZombieUpdate at 0x0045346D -- so the queue holds class-0x30 actors and nothing else, and obj+0x131D/0x131E are written only onto those.
+005a4d58	g_distance_rank_list	The distance-rank queue: 14 pairs of {u32 key, actor*} at stride 8, key at +0x00 and the actor pointer at +0x04 (0x005A4D5C). The key is |actor.xz - camera.xz| scaled by g_camera_track_key_scale and converted with __ftol, so it is a u16 -- which is why SortEnemiesByDistance radix-sorts it in exactly two 8-bit passes. RankEnemiesByDistance's second pass nulls the pointer of any entry that is not live or that carries obj+0x34 bit 0x20000000, and its third pass numbers the survivors into obj+0x131E.
+005a4dc8	g_camera_candidates	{u32 distance key; void *actor} pairs, at most 14, radix-sorted nearest-first before the slots are assigned.
+005a4e38	g_distance_rank_scratch	SortEnemiesByDistance's ping-pong buffer: the {key, actor*} pairs are counted into a 256-bucket histogram, scattered here, and copied back to g_distance_rank_list, once per 8-bit digit. Not read anywhere else.
+007c17a0	g_app_state_pending	The REQUESTED application state, -1 for none. RequestAppState (0x0040E850) writes it, ClearPendingAppState (0x0040E840) and CommitAppState (0x0040E860) reset it to -1. CommitAppState runs at the end of the per-frame tick FUN_0040E730 and applies the request there. It is NOT the only writer of g_app_state: five functions write it across six sites (FUN_0049F380 twice, CommitAppState, FUN_0040E4A0, FUN_0040A920, FUN_0041E1D0), and at least FUN_0049F380 (c705988e9c0006000000 @ 0x0049F546, storing 6) and FUN_0040E4A0 (storing 0x10) store a literal straight into the word, so a change does not always land on a frame boundary. [proved]
+007c1eb8	g_rain_particles
+007c2118	g_backdrop_preset_last
+007dcbb0	g_water_level	seeded to -24.90; class 0x16/0x17 own the wave field
+007dcc4c	g_water_wave_field	The wave-field manager: {u32 active count; u32 slot mask; f32 plane_y; u32; void *sources[8]}. Created by class 0x16, filled by class 0x17.
+007dcca4	g_evt_gameplay_live	Recomputed once per frame at the top of EvtInterpreterLoop and read by nothing else: 'may the script advance'. Set when a player is in state 5 with lives left (in 2P mode, state 5 alone for either player), else FUN_00413280(). Every wait opcode except 0x41 requires it, so the script -- including wait_frames' countdown -- freezes on the continue screen rather than running on while the player is dead.
+007dcca8	g_evt_wait_alive_hysteresis	The extra frame wait_enemies_alive costs. Used ONLY by EvtOpWaitEnemiesAlive44 -- 0045FC42 reads it, 0045FC4B and 0045FC60 write it, and those three are every reference in the program. The handler requires 0 < it before it will pass, zeroes it when it does, and increments it on every frame it does not. It is NOT reset when the count condition fails, so it does not mean 'the g_enemies_alive condition must hold for two consecutive frames' -- an earlier note here said that and it is wrong. It means 'this instance of the instruction must already have been evaluated once and refused'. On top of g_evt_yield's first-visit yield that makes 0x44 the only wait in the VM that cannot pass before its third frame on the program counter; 0x43 is the same handler without this term and costs two.
+007dcdd4	g_breakable_members	group*9 + member -> the live BreakablePropUpdate object, or 0 once it is destroyed. Stride 9 because the largest breakable group has nine members. The topple test reads it to find the props a member supports.
+007dd09c	g_cur_actor_model	Scratch pointer to the skinned-model block of the object being updated -- obj+0x194 for class 0x10. Its +0x08 is the clip frame, +0x20 the motion id, +0x60 the character type, +0x116C the draw scale and +0x1170 the part list.
+007dd0a0	g_cur_civilian	Scratch pointer to class 0x10's 0xC4-byte script block at obj+0x1310. +0x00 the wait word, +0x0C the clip's remaining loops, +0x14 the wait timer, +0x1E the surviving-child count, +0x48 the script cursor, +0x4C the on-shot script, +0x5C the per-frame hook, +0x60 the child array, +0x6C the player a rescue pays.
+007dd0a4	g_cur_actor_xform	Scratch pointer to the transform block of the object being updated -- obj+0x40. Floats 0..2 position, 3..5 the per-frame step op 0x26 interpolates by, 9..11 pitch/yaw/roll.
+007de5c8	g_d3du_unused_projection
+007e7948	g_projection_matrix_cache
+007e7990	g_MatrixStackTop
+007e7994	g_matrix_mode
+007e7998	g_render_light_colour_r
+007e79a4	g_render_ambient
+007e79a8	g_render_light_dir_x
+007e79b4	g_render_light_generation
+0098f200	g_coli_buffer_common
+00990a00	g_coli_buffer_scene
+009a1a08	g_scene_index	Which scene is loaded, zero-based -- ColiLoadForScene indexes its file list with it, so scene 1 is stage 2. Class 0x41 and class 0x40 branch on it for the per-stage sound sets and for PropExpireByStepLifetime's scene-1 sweep.
+009a1a10	g_evt_action_advance	Dequeue mode for EvtRunQueuedActions. 0 = the current handler is still running, do not dequeue; 1 = it finished, dequeue the next action AND call it in the same frame; 2 = it finished, dequeue but defer the first call to next frame. Always cleared to 0 on a dequeue, so a handler must re-assert it. Every action handler ends with 1 except EvtActionFinishSequence21, which sets 0 to keep its camera driver alive. Script resets use 2; evt 0x33 writes it from an operand (127x mode 2, 1x mode 1 across the shipped scripts).
 009a1a14	g_coli_pending_full_list
+009a1a18	g_nSkipRequested	CORRECTION: previously named ...DeadEnd on the basis that nothing read it. CheckCutsceneSkipRequest does -- it is only ever reached through a function pointer, so no xref showed it
+009a1a88	g_entity_light_array	stride 0x1D dwords
+009a21ba	g_civilians_seen_total	u16. Every class-0x10 actor created across the run; CivilianInit raises it beside the per-scene g_civilians_seen_by_scene. Zeroed by ResetGameOnStart only.
+009a2230	g_cutscene_skipping	Non-zero while a skippable cutscene is being skipped. [likely], named from its three writers, all already identified: EvtOpSetSkippableRegion2C (0x0045FD9D), CheckCutsceneSkipRequest (0x00435F7C) and FinishCutsceneSkip (0x00435FA0). Readers tear their scripted actor down at once when it is set: ScriptedHumanoidUpdate (0x004842A0, first instruction) and ScriptedHumanoidIdle (0x00484D40, first instruction) both free the model handle at obj+0x1304 and ActorKill, gated on word obj+0x1316 being zero in the Update's case; CivilianUpdate (0x0048AF8E) and CivilianRunScript (0x0048BF36) do the same for class 0x10. EvtOpPlayDialogue2D and DrawDialogueSubtitleTask also read it. Not modelled by the browser player, which has no skip.
+009a2280	g_class_handlers	112 slots, built by BuildClassHandlerTable
+009a244a	g_one_hit_target_kills	Incremented by OneHitTargetUpdate (0x004491FD) the frame a class-0x20 actor is shot. Also written by FUN_00497640 and read/written by FUN_004525C0; what reads it for is [open]. It is NOT g_enemies_alive: class 0x20's Init increments no counter, so no wait_enemies_alive gate ever sees one of these actors.
+009a26a0	g_cur_actor
+009a2ba0	g_attack_permits	s32[2], one per player, stride 4 -- not bytes; DAT_009A2BA4 is element 1. An approaching enemy must claim one through TryClaimAttackSlot before it may attack, so only g_max_attackers enemies commit at a time. The holder's index is kept in obj+0x121, and SelectCameraLookAtTarget focuses the camera on whoever holds one. Class 0x31 state 27 bypasses the claim and writes the slot itself.
+009a2bb0	g_evt_step_index	The event VM's STEP index -- not a block counter and NOT monotonic. EvtAdvanceStepOrRoute increments it at the top and assigns it 1 in the route branch, so it runs 1..k within a block and drops back to 1 on a block change; FUN_0045EBC0 seeds it with 0, 1 or 5 by game mode. Class 0x41 and 0x44 props age one tick every time it CHANGES (PropExpireByStepLifetime), which makes obj+0x11C a lifetime in STEPS. Blocks average 3.99 steps, so reading it as a block count makes props live about four times too long. A block with one live step goes 1 -> 1 across its transition and does not age a prop at all.
+009a2bc0	g_evt_block_index	The event block currently executing, written by EvtAdvanceStepOrRoute and recorded byte-wise into g_route_history. NOT g_evt_step_index (0x009A2BB0), which is the step index within the current block and is what prop lifetimes measure.
+009a2be0	g_enemy_approach_rings
+009a2be4	g_enemy_approach_ring_mid	f32, stride 0xC, one per ring set. The middle radius; see g_enemy_approach_rings.
+009a2be8	g_enemy_approach_ring_outer	f32, stride 0xC, one per ring set. The outer radius; see g_enemy_approach_rings.
+009a2c88	g_civilian_carrier	The object a class-0x10 civilian rides. Distinct from g_carrier_object (0x009A5C34), the player's own rideable. FUN_00440190 -- a class-0x13 sub-constructor with nine handlers -- writes itself here, and CivilianInit reads it into sub+0x68 when the descriptor's +0x22 is non-zero, which is 7 of the 47 civilians. CivilianUpdateOnCarrier then pushes its translate/rotate around the whole update.
+009a2c8c	g_queued_events_pending	Outstanding queued actions. +1 per queue_event (evt 0x30); every action handler does -1 when it completes -- EXCEPT EvtActionFinishSequence21 (selector 0x21), which installs a persistent camera driver and pins g_evt_action_advance at 0, so it never retires itself. evt 0x31/0x32 (goto_scene_state) and 0x33 (set_action_drain_mode, always delta -1) are its script-side retirement, and evt 0x40 blocks while this is non-zero. MEASURED: all 316 goto_scene_state sites in the shipped evt files have exactly one outstanding unretired queue_event 0x21 at that point. FUN_0045EBC0 zeroes it per block, so an imbalance cannot accumulate past a block boundary.
+009a2cb8	g_ShotRecords	per player, 0x68 bytes: world ray origin, direction, -pitch/-yaw and their sin/cos
+009a2d70	g_projection_distance_px
+009a2d74	g_nEvtSkipFlag
+009a2d78	g_active_cam_path	the cp_ slot currently playing; gates most object rigs
+009a2d7c	g_nEvtSkippableRegion
+009a2d88	g_shot_bone	int[2], per player: the bone index this player's shot hit. DispatchHit copies it from (s8)obj+0x190+player before calling ResolveHit.
+009a32a0	g_frame_counter	free-running, incremented once per frame; NOT the cam path frame
 009a34d8	g_coli_pending_ray_list
+009a34f0	g_attack_committed	Set by BOTH claim functions when the actor they are about to grant a permit to is OFF SCREEN -- ActorIsOnScreen returns 0 -- and read first by both, which gives up before a player is even picked. So one enemy may be attacking unseen and while one is, nobody else may claim at all. Cleared by ReleaseAttackSlot, ThrowerReleaseAttackPermit and ZombieStateHoldAtRange, each gated on the actor's own bit: obj+0x136C bit 0x20000 for class 0x30, bit 0x8000 for class 0x31. Being off screen does NOT refuse the claim.
+009a3540	g_scene_light_block0
+009a354c	g_scene_light_dir_view
+009a3558	g_scene_light_pitch_bams
+009a355c	g_scene_light_yaw_bams
+009a3570	g_scene_fog_near
+009a3574	g_scene_fog_far
+009a3780	g_scene_light_colour_r
+009a378c	g_scene_light_ambient
+009a3794	g_damage_rank_pending	Accumulates rank adjustments -- PlayerTakeDamage subtracts 2 -- and UpdateDamageRank adds it in and clears it on its next pass.
+009a37e0	g_motion_slots	motion id -> {u32 base; u32 state}, state 2 = resident
+009a58f8	g_hit_result	int[2], per player, written by ResolveHit: 0 = nothing, 1 = damaged and part swapped, 2 = damaged only, 3 = severed, 5 = no effect (the effect table's `2` sentinel). Result 5 scores nothing.
+009a5920	g_route_history
+009a59e0	g_scene_light_block1
+009a5c34	g_carrier_object	the current rideable object. ZombieStateRideCarrier (class 0x30 state 29) adds this object's +0x40/44/48 to its own recorded spawn position every frame and leaves when the carrier raises its obj+0x34 bit 0x10000000; ZombieStateDelayedStrikeInPlace (state 32) gives up to state 10 0x14 frames after the same object raises bit 0x40000000. Distinct from g_civilian_carrier (0x009A2C88), which is class 0x10's own.
+009a5c4c	g_frame_bone_rotations	frame + 0x0C: the s16 triple array SkeletonWalkNode indexes
+009a5c50	g_blink_frame_counter	One of the three free-running counters FUN_0040E730 steps once a game tick, beside g_frame_counter (0x009A32A0) and DAT_009A2BAC. Class 0x31 states 5, 27 and 34 read its low bit for the blink parity, which is the only use found -- what distinguishes it from the other two is [open].
+009a5c62	g_player_state	s16 per player, +player*0x98. IsPlayerAttackable requires 5 -- in play and alive -- before an enemy may commit an attack, and TryClaimAttackSlot voids a permit it has just picked when it is not. It does NOT change on being hit: the invulnerability window is g_player_invuln_frames, a separate byte array, so there is no post-hit pause in the attack queue.
+009a5c66	g_player_lives	+player*0x98. PlayerTakeDamage decrements it by one per strike; the continue screen restores 1 or 2.
+009a5c78	g_nPlayerFired	set to 1 by the player update when the trigger is down and ammo remains; cleared by ProcessPlayerShots
+009a5c82	g_head_combo_bonus	+player*0x98. Added to the 120-point headshot award and then incremented by 10, so consecutive headshots pay 120, 130, 140 ...; any non-head hit zeroes it.
+009a5c84	g_player_shot_count	+player*0x98 (0x130 bytes). The accuracy denominator: EvtOpAwardAccuracyBonus2B (0x0045FE40) pays g_accuracy_bonus_table[(g_player_hit_count * 100 / this) / 10] to any player whose g_player_state is 5 and who has fired more than 0x13 shots, so this is shots and g_player_hit_count at +4 is hits. Distinct from g_nPlayerFired (0x009A5C78), which is a per-frame "the trigger is down" flag and not a tally. ResetSceneOnEnter zeroes it with the other two, so the accuracy grade is per scene. [open] No instruction writes it through this address -- the increment reaches it on a computed base the disassembler does not resolve here.
+009a5c86	g_player_hit_count	+player*0x98. Hits that scored, for the end-of-stage accuracy grade evt 0x2B reads.
+009a5cd0	g_player_was_hit	+player*0x98. Set by PlayerTakeDamage so the player entity plays its damage motion, which is stored alongside at g_player_hit_motion.
+009a5cd2	g_player_hit_motion	+player*0x130. The motion the player entity plays when hit, taken from the attack entry's +0x0A.
+009a5ec0	g_enemy_slots
+009a6040	g_camera_blocks	per-camera blocks, stride 0x1A4
+009a60c0	g_camera_block_eye	g_camera_blocks + 0x80: the eased eye position of camera block g_camera_index, a vec3 FUN_00402EF0 eases toward the pose the path evaluated. FUN_00403B00 reads it as the eye when it measures the angle to the look-at target at block+0x98 (g_camera_block_target), which is what proves the three words are a position.
+009a60d8	g_camera_block_target	The camera block's current look-at point (block+0xD8). StepCameraLookAtDamped eases it toward g_camera_lookat_target rather than snapping.
+009a610c	g_evt_action_handler	Slot 0 of the four 0x1A4-byte evt-action blocks: the handler for the queued action currently running. EvtRunQueuedActions is the ONLY caller -- CALL dword ptr [0x009A610C] at 0x00402323, always with argument 0 -- so slots 1..3 are written but never invoked and the 'param_1 != 0' arm of every action handler is dead. Set on dequeue; re-pointed by handlers (CamStartPathPlayback -> CamAdvancePathFrame; EvtActionFinishSequence21 -> DAT_00576B20[minor], non-null only for minors 4/6/7); parked on the bare RET FUN_0041EBB0 when the ring drains. evt 0x31/0x32 install that bare RET, which is what tears down the finish-sequence camera driver.
+009a6110	g_cam_path_frame	camera block 0's current path frame (+0xD0 of the block)
+009a6144	g_cam_path_cursor	Camera block 0's +0x104: the NEXT path frame CamAdvancePathFrame will publish. g_cam_path_frame (+0xD0) is the one it published last. The publish is 'g_cam_path_frame = cursor' and happens before the 'end <= cursor' test, so the frame a path ends on IS published, and the action is retired in the same call.
+009a6148	g_cam_path_end_frame	Camera block 0's +0x108: the last frame of the range a cam_play asked for. CamStartPathPlayback writes it from the action's second operand, or from g_stashed_path_end_frame for a flags-and-4 play.
+009a6184	g_evt_action_operands
+009a6458	g_cam_path_frame_2	Camera block 2's current path frame -- the same +0xD0 field again, at g_camera_blocks + 2*0x1A4. A scripted state waiting on a camera cue accepts either this or g_cam_path_frame: class 0x31 state 27 does, and so does class 0x33 at 0x00433B1A.
+009c6f00	g_camera_index
+009c6f08	g_scene_state_major_entered	The copy of g_scene_state_major that only a full EvtEnterSceneState (0x00403BD0) stamps -- FUN_00403BB0 is the same routine WITHOUT this pair, so these two say a real scene-state entry happened rather than a bare table jump. **IsPlayerAttackable (0x00409DC0) reads this one and requires 2**, which is the cam/ path camera row of g_scene_state_table: enemies may only commit an attack while a scripted path camera is driving. Measured over the ports own walker, major 2 is almost all of gameplay (minors 4, 6 and 7) and major 1 minor 3 -- CameraFromViewAngles -- is the brief scripted-turn spell where nobody may attack. Also written directly by EvtOpGotoSceneState31, which sets it to 1, and by EvtOpGotoSceneStateWhenPlayersAlive32 and FUN_0040A920.
+009c6f0c	g_scene_state_major
+009c6f10	g_scene_state_minor_entered	The minor half of the pair EvtEnterSceneState stamps beside g_scene_state_minor; see g_scene_state_major_entered (0x009C6F08).
+009c6f14	g_scene_state_minor
+009c6f28	g_cam_path_frames_left	end - cursor for the camera block CamAdvancePathFrame just stepped, written every frame AFTER it publishes g_cam_path_frame and BEFORE it tests the end. EvtOpWaitCameraPathFrame41 with operand 0 releases on '< 1', which is how 'wait to the end of the path' is spelled. Because the interpreter task runs before EvtRunQueuedActions, the script sees this a frame after the camera wrote it.
+009c6f2d	g_camera_free	1 when no g_enemy_slots entry is claimed and the return-to-path swing has finished. FUN_00402E00 recomputes it from the slot array every frame; FUN_00402650 clears it every frame the camera mode at 0x009C6F20 is not 2, and skips the clear in mode 2 so CameraTurnOntoPathTarget can latch it when the eased look-at catches the path target (|VecCosSquaredSigned| > 0.99999). Wait ops 0x43/0x44/0x46 will not advance without it, so a room-clear gate holds until the camera is back on its rail; 0x47 accepts it OR g_camera_settled. Enemy deaths and EvtActionHoldCameraPreset20 force it to 1 to skip the swing.
+009c6f2f	g_camera_settled	Raised by CameraTrackEnemiesTick and CameraTurnOntoPathTarget once the eased look-at has caught up with the desired one (|VecCosSquaredSigned| > 0.99999). EvtOpWaitTargetsClear47 gates on it, so op 0x47 means nothing without the ease.
+009c6f33	g_camera_ease_eye	Selects how CameraEaseBlockEyeToPathPose moves the camera block's eye onto the path pose: set = a sixteenth a frame, clear = snap. Raised only by EvtActionSetFlag15; cleared by the scene reset and by EvtOpGotoSceneState31.
+009c6f36	g_camera_turn_rate	The rate TurnLookAtToward divides by, refreshed every frame.
+009c6f38	g_camera_turn_curve	Index into g_camera_turn_rate_curves; the scene reset sets 1.
+009c6fa8	g_camera_lookat_target	The point the camera *wants* to look at, chosen by SelectCameraLookAtTarget: a single attacking enemy, the midpoint of two, or the cam/ path's own target when no enemies are registered.
+009c6fd8	g_evt_cam_override_valid	Set to 1 by queue_event selector 0x60 (EvtActionStoreSixOperands60) together with three (frame, path) pairs at 0x009C6FDC..0x009C6FF0. The row-5 camera hooks FUN_00402890 and FUN_00402740 test it and call FUN_00403DB0, which re-seats g_active_cam_path and DAT_009C70BC from pair index DAT_009C88A4. Cleared by FUN_004021D0, ResetSceneCombatState and evt opcode 0x31 -- but NOT 0x32.
+009c7000	g_active_player	Which player may be targeted, computed by SelectAttackablePlayer from g_players_in_play: -1 nobody, 0 player 0 only, 1 player 1 only, 2 both. TryClaimAttackSlot offers a permit accordingly when g_max_attackers is 1, and class 0x31 state 22 uses it to force a target when the claim fails.
+009c7006	g_enemies_present
+009c7010	g_item_set_countdown	Per item-set: how many more props of that set must be destroyed before its hidden item drops. PlaceBreakableGroup seeds it with rand()%n + 1, so which break releases the item is random. Groups 6 and 7 both use set 2, so the later placement overwrites the earlier one's countdown.
 009c701c	g_coli_active_set_task
+009c7040	g_collision_meshes_full
+009c7080	g_camera_update_hook
+009c70ac	g_stashed_path_frame
+009c70b0	g_stashed_path_end_frame
+009c70d8	g_cam_path_target	The look-at CamEvalPath7 evaluates from the path's target channels, independent of its eye channels -- which is how a path holds the eye still and sweeps the aim.
+009c70f4	g_camera_use_fixed_y
+009c7108	g_evt_ip	the evt interpreter's instruction pointer
 009c71c8	g_coli_hit_object
+009c71e0	g_camera_eye_x
+009c71e4	g_camera_eye_y
+009c71e8	g_camera_eye_z
+009c71ec	g_camera_pitch_bams
+009c71f0	g_camera_yaw_bams
+009c71f4	g_camera_roll_bams
+009c7200	g_script_flags	byte array the evt script sets and waits on
+009c72e0	g_actor_kill_all	1 makes every class handler self-destruct
+009c7300	g_screen_offset_x
+009c7304	g_screen_offset_y
+009c7310	g_close_ranked_enemy	s32, zeroed at the top of RankEnemiesByDistance and set to 1 while walking the sorted list if any entry has character type 0xB (a s16 at obj+0x1F4), a queue index below its own obj+0x1358 allowance, and obj+0x136C bit 0x2000000 set. That is the one place in the program where a CLASS-0x30 tail field (obj+0x1358) is read without a class test -- the guard is the character type. [open] who reads this global.
+009c88a4	g_script_branch_var	route branch selector, read by EvtAdvanceStepOrRoute
+009c88c0	g_hit_slots	14 slots claimed by ActorClaimHitSlot
+009c8908	g_hit_player_order	int[2]: which players resolve a hit this frame and in what order, written by ChooseHitPlayerOrder -- 0 or 1 in slot 0 for a one-player game, a randomised pair for two, -1 for an unused slot. This is the array ZombieOnShot and ThrowerOnShot walk; it is not g_hit_slots at 0x009C88C0.
+009c8920	g_light_tween_block1
+009c89c0	g_civilians_rescued_by_scene	u16 per scene, indexed g_scene_index*2. CivilianRunScript op 0x2C raises it as it pays the 400-point rescue, beside g_civilians_rescued_total (0x009CA0EC), and uses the pre-increment value with a stride-10 index -- scene*10 + rescues -- into a per-rescue table. The counterpart of g_civilians_seen_by_scene.
+009c89e0	g_light_tween_block0
+009c8a74	g_zombie_voice_holders	How many class-0x30 actors currently hold a groan voice. EnemyZombieInitByCharType increments it and latches obj+0x131B when it takes one; ZombiePlayDeathVoice plays the death scream only when it is 1 -- the last holder -- and counts it back down. ResetSceneCombatState zeroes it.
 009c8a80	g_coli_applied_full_list
+009c8aa0	g_arc_scripts	One 0x30-byte three-stage arc motion script per enemy slot, indexed by obj+0x3C. InstallArcMotionScript copies into it and ActorArcStep walks it.
+009c8e00	g_nFiringGate
+009c8e08	g_player_invuln_frames	+player. Set to 0x5A by PlayerTakeDamage and counted down; a strike is ignored while it is non-zero.
 009c8e14	g_coli_applied_ray_list
+009c8e40	g_enemy_approach_steps
+009c8e44	g_enemy_approach_steps_mid	Added to g_enemy_approach_steps when the actor starts between the middle and outer rings.
+009c8e48	g_enemy_approach_steps_outer	Added on top of g_enemy_approach_steps_mid when the actor starts outside the outer ring, so a distant enemy walks further before it can attack.
+009c8e4c	g_cur_enemy
+009c8e50	g_rain_enabled
+009c8e58	g_camera_fixed_eye_y	also labelled g_ground_plane_y; the two are the same word
+009c8e80	g_players_in_play	How many players are currently in play, s16 -- NOT a two-player flag. FUN_004147E0 does INC word [009C8E80] once per player as it enters, gated on that player's slot flag bit 0x10 at 0x579DE8 + slot*8, alongside a separate INC of g_max_attackers on bit 0x20; FUN_00413F42 does DEC when one drops out, and both resets zero it. So it is 1 in an ordinary single-player game and 0 only before anyone has started. TryClaimAttackSlot's g_max_attackers == 2 branch reads == 1 to mean one of the two players is out and picks a free permit at random; SelectAttackablePlayer switches on 0/1/2 as a count. Class 0x30 states 24 and 32 and class 0x10's wait bit 0x40000000 all gate on it being non-zero, which is a `has the game started` test and not a player-count one.
+009c8e84	g_max_attackers	How many enemies may hold an attack permit at once: 1 or 2.
+009c8e94	g_difficulty	Menu difficulty 0..4. Only scales starting hit points, through g_difficulty_hp_delta; per-hit damage uses g_damage_rank instead.
+009c8e96	g_damage_rank	Adaptive 0..15 rank. DamageRankModifier indexes g_pBoneDamageByRank[char][bone*0x10 + rank] with it and adds the signed byte to the table damage.
+009c8e98	g_app_state	The application state -- which of the game's top-level screens is running. Committed only by CommitAppState (0x0040E860) from the pending request at g_app_state_pending (0x007C17A0). PROVED values: 5 = the attract demo (RunAttractDemo runs only while it is 5, and it is IsPlayerAttackable's unconditional-attack override); 6 = IN PLAY -- FUN_00414FC0, the start-press-with-a-credit path, requests exactly 6, and CommitAppState leaves g_player_state alone only for 6 and 7 (if (pending < 6 || pending > 7) g_player_state = 9), so 6 and 7 are the only states with live players; 7 = the game-over/continue-expired arm (FUN_00460530 requests it when the continue countdown runs out, and FUN_00414FC0 refuses a start press while it is 7); 0x10 = BOOT -- FUN_0040E4A0 stamps it after FUN_0040A920's whole-segment reset, its one caller is the startup routine FUN_0049E4A0 that reads Hod2.ini, and the main loop FUN_0049E220 draws nothing while it holds. Requested-but-unnamed: 3 (the screen FUN_004043C0 returns to from 5, 9, 10 and 0x0B), 4 (from 3 on a start press with credits), 0x0C and 0x0F. LIVE READS THAT TURN ON 6: ResolveHit ORs obj+0x34 |= 0xE00 when it is NOT 6 (0x00409495) and gates the 1-in-4 head pop on == 6 (0x00409741); PlaySoundId picks the plain BGM table over the _AR one when it is 6 and g_GameMode is 0; CivilianRunScript's op 0x2B runs only while it is 6.
+009c8e9c	g_bHudShutterPrev	The state HudDrawShutterState last settled on: it seeds the slide counter on a change, and state 7 restores it. Written on every path except state 8.
+009c8ea0	g_evt_yield	The evt VM's yield flag, and the whole of its frame pacing. EvtInterpreterLoop runs 'do { dispatch[*pc](); } while (g_evt_yield == 0)' and does NOT clear it at entry, so: a wait handler reached with it clear sets it and returns WITHOUT testing its condition (every wait therefore costs at least one frame); on later frames it tests, and a satisfied wait clears it and advances pc, whereupon the loop keeps dispatching in the SAME frame until the next wait. Opcode 0x4E halt is nothing but 'g_evt_yield = 1' with pc unchanged (FUN_0045EFF0). The unused dispatch slots 0x00/0x2A/0x34/0x3C/0x4C point at a bare RET, which leaves the flag clear and spins the loop forever -- reaching one hangs the game.
+009c8fb8	g_current_bgm_id
+009c904a	g_enemies_alive
+009c90c0	g_original_items_taken	One byte per Original Mode item id, incremented on pickup and capped at 99.
+009c9100	g_civilians_seen_by_scene	u16 per scene, indexed g_scene_index*2. CivilianInit increments it on the same straight line as g_civilians_seen_total (0x009A21BA) and g_civilians_alive, so it is every class-0x10 actor the scene created. Paired with g_civilians_rescued_by_scene for the end-of-stage rescue tally. ResetGameOnStart zeroes the first three dwords -- six scenes -- and ResetSceneOnEnter zeroes this scene only.
+009c9118	g_prop_target_set	Selects which members of a breakable group PlaceBreakableGroup turns into one-shot targets (+0x11C = 1, asset 0x1A0F) while g_GameMode == 2: set 0 takes members 2, 3, 4 and 6; set 1 takes 0, 1 and 5; set 2 takes 0 and 6; set 3 takes the same four as set 0. What the four sets *are* is [open] -- the mode names come from the g_GameMode row, not from anything read here.
+009c911e	g_wCaptionMode
+009ca08c	g_GameMode	1 = original/story, 2 = arcade, 3 = boss rush
+009ca090	g_backdrop_mode
+009ca0a4	g_skeleton_node_out	where SkeletonWalkNode writes each bone's resolved matrix, stride 0x90
+009ca0c0	g_collision_meshes_ray_only
+009ca0e8	g_civilians_alive	How many class-0x10 civilians are in play; the condition for evt opcode 0x46 wait_scripted_actors, whose 68 sites all pass operand 0. CivilianInit raises it UNCONDITIONALLY -- the INC word ptr at 0x0048A6FE is on the straight-line fall-through with no branch around it. (It is the two counters three instructions later, 0x009A21BA and word[0x009C9100 + stage*2], that the wait word's 0x08000000 exempts; an earlier note here wrongly put that guard on this counter.) Three ways back out, all decrementing once: op 0x2C carrying 0x00080000 (CivilianRunScript 0x0048BA3C), which also stamps sub+0x04 bit 0; and two CivilianUpdate teardowns, 0x0048B003 after the remove-delay countdown and 0x0048B0AC in the off-camera branch, both skipped when that bit is set.
+009ca0ec	g_civilians_rescued_total	u16. Every rescue across the run; CivilianRunScript op 0x2C raises it beside the per-scene g_civilians_rescued_by_scene. Zeroed by ResetGameOnStart and NOT by ResetSceneOnEnter, which is what makes it a run total rather than a scene one.
+009ca0f4	g_bHudShutterState	HUD letterbox state 0..8; evt 0x1F writes it, HudDrawShutterState drives it. The 40-frame slide counter is a task field at +0x50, not a global.
+009ca93c	g_camera_candidate_count	How many entries g_camera_candidates holds this frame.
+009cac40	g_coli_hit_surface	The material id of whatever the last collision trace hit, 0 for a miss. A side output: every caller reads it straight after its own query rather than being handed it. Class 0x31 latches it into obj+0x1350 where it lands, because 0x5A kills whatever touches it. Across the whole corpus 53 (0x35) is the commonest id at 874 quads, 5 and 55 are the wet surfaces, and 90 (0x5A) is seven quads.
+009cac44	g_coli_hit_quad
+009cac48	g_coli_hit_dist_sq
 009cac4c	g_coli_hit_depth
+009cac50	g_coli_hit_z
+009cac54	g_coli_hit_x
+009cac58	g_coli_hit_y
+009cac5c	g_coli_allow_backface
 009cac60	g_coli_hit_plane_d
+009cac64	g_coli_hit_normal_x
 009cac68	g_coli_hit_normal_y
 009cac6c	g_coli_hit_normal_z

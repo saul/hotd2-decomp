@@ -197,9 +197,11 @@ git diff --cached --stat
 If you have already committed someone else's work, undo it rather than leaving
 it: `git reset --soft HEAD~1` then `git restore --staged <their paths>`.
 
-Leave their uncommitted changes exactly as you found them. Do not "tidy",
-reformat, or re-sort a shared file — `ghidra/annotations/*.tsv` in particular is
-appended to by both workstreams.
+Leave their uncommitted changes exactly as you found them. Do not "tidy" or
+reformat a shared file. `ghidra/annotations/*.tsv` is **sorted by address** and
+`tools/annotate.py` inserts in order — so adding a row is a one-line diff in
+the middle of the file, not a change to its last line, and two agents adding
+unrelated rows no longer collide. Do not reorder it by anything else.
 
 ## Done means
 

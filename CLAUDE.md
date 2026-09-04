@@ -94,12 +94,26 @@ If a peer has edited a file you also changed, stage only your own hunks — see
 the `/decomp` skill for the patch-filtering recipe. Leave their uncommitted
 work exactly as you found it, and never rewrite history.
 
-`ghidra/annotations/*.tsv` is appended to by both workstreams: add rows with
-`python3 tools/annotate.py`, which upserts rather than duplicating, and never
-re-sort the file. `./ghidra/run.sh export-annotations` **merges** into those
-files rather than rewriting them — it keeps the order, the body comments, and
-any row the live database has no symbol for. It used to rewrite, and against
-the database as it stands that would delete 196 of `functions.tsv`'s 556 rows.
+`ghidra/annotations/*.tsv` is written by both workstreams. Add rows with
+`python3 tools/annotate.py`, which upserts rather than duplicating and
+**inserts in address order**. The files are **sorted by address**, and every
+writer keeps them that way — `annotate.py` on insert, `ExportAnnotations.java`
+on write.
+
+They used to be append-only and grouped into topical sections, and that is
+where every merge conflict in them came from: two branches adding unrelated
+rows to the same last line. Sorted insertion puts them in different parts of
+the file. The sections went with the change — each spanned nearly the whole
+segment, so address order broke twelve of them into 149 fragments.
+
+`./ghidra/run.sh export-annotations` **merges** into those files rather than
+rewriting them — it keeps the body comments and any row the live database has
+no symbol for. It used to rewrite, and against the database as it stands that
+would delete 196 of `functions.tsv`'s 556 rows. Its filter is a prefix list
+and therefore a version-drift hazard: `switchD` silently stopped matching
+Ghidra 12's `switchdataD_`, so 316 auto-labels landed in `globals.tsv` and
+three of them overwrote curated names. It refuses a generated name over a
+curated one now, but check an export's diff rather than trusting it.
 
 ## Things that have cost this project real time
 

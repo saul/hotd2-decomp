@@ -658,6 +658,26 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   if (stance !== ThrowerStance.Ground && stance <= ThrowerStance.Ceiling) {
     obj.flags2 |= ThrowerFlag.OffGround;
   }
+  // **`zslman` cannot be dismembered**, and it is born that way rather than
+  // being made so by a hit:
+  //
+  //   00449810  6683f918  CMP  CX, 0x18                  ; CX is obj+0x1F4
+  //   00449814  7557      JNZ  0x0044986d
+  //   00449816  8b4634    MOV  EAX, dword ptr [ESI + 0x34]
+  //   0044981d  80cc04    OR   AH, 0x4                   ; |= 0x400
+  //   00449820  894634    MOV  dword ptr [ESI + 0x34], EAX
+  //
+  // `[proved]`. `CX` is the character type — the two arms above this one test
+  // it against 0x17 (`6683f917` at `0x004497EC`) and the stance switch reads
+  // the same register.
+  //
+  // The bit is {@link ActorFlag.NoDismember}, and `ResolveHit`'s two guards on
+  // it — the sever at `0x004095BD` and bone 1's death wound at `0x004096C0` —
+  // stop the limb leaving and the torso being cut, while the kill block that
+  // scores and raises `Dead` sits outside both. So a `zslman` still dies
+  // normally; it just does not come apart. This is the fourth writer of the
+  // flag and the one the class-0x30 pass could not reach, because it is here.
+  if (obj.charType === CHAR_ZSLMAN) obj.flags |= ActorFlag.NoDismember;
   // `param_1[0x4a]`, at `obj+0x128`: 5.0 for character type 0x16 and 4.0 for
   // 0x17 through 0x19. It is the radius both push-outs test with.
   obj.bodyRadius = obj.charType === CHAR_ZSASS

@@ -170,8 +170,8 @@ export enum ActorFlag {
    * * `ZombieApplyScriptMode` (`FUN_0045CA30`) — mode `-2` raises it and
    *   clears `0x2000`, anything else raises `0x2400`. Already ported;
    * * `EnemyThrowerInit` (`FUN_00449620`), but **only for character type
-   *   0x18** (`00449810 6683f918 CMP CX,0x18` / `JNZ`). That writer is in
-   *   `class31/`, which the port has not given it; `[open]` there, not here.
+   *   0x18** (`00449810 6683f918 CMP CX,0x18` / `JNZ`) — so every `zslman` is
+   *   born with it. Ported in `class31/thrower.ts`, which owns that Init.
    *
    * ...and `ResolveHit` itself raises `0xE00` — this bit and the two either
    * side — while `g_app_state` is not 6, which is out of play. No site that

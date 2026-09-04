@@ -2938,6 +2938,29 @@ function thrower(state: number, extra: Record<string, unknown> = {}) {
   return a;
 }
 
+console.log("\nEnemyThrowerInit: zslman is born NoDismember");
+// `EnemyThrowerInit` (`FUN_00449620`) is the fourth writer of the flag, and
+// the only one outside class 0x30: character type 0x18, `zslman`, is **born**
+// with it -- `CMP CX,0x18` / `OR AH,0x4` at `0x00449810`..`0x00449820`. The
+// class-0x30 pass that found the other three could not reach this one,
+// because it lives in class 0x31's Init.
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS31);
+  const zslman = ActorSpawn(0x9100, SpawnClass.Thrower, 0x18, "zslman",
+                            { initialState: ThrowerState.StandAndDecide,
+                              condition: 0 });
+  check("`zslman` is born NoDismember",
+        (zslman.flags & ActorFlag.NoDismember) !== 0,
+        `flags ${zslman.flags.toString(16)}`);
+  const zstin = ActorSpawn(0x9101, SpawnClass.Thrower, 0x19, "zstin",
+                           { initialState: ThrowerState.StandAndDecide,
+                             condition: 0 });
+  check("...and no other thrower character type is",
+        (zstin.flags & ActorFlag.NoDismember) === 0,
+        `flags ${zstin.flags.toString(16)}`);
+}
+
 console.log("class 0x31, ThrowerStateWalkDistance:");
 {
   const rng = new Rng(11);

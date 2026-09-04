@@ -346,6 +346,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 "at": off, "class": kid.cls, "flags": kid.init_flags,
                 "pos": list(kid.pos), "yaw_deg": kid.yaw_deg,
                 "orient": list(kid.orient), "hp": kid.hp,
+                # The descriptor's +0x20 word, the same as the script-walker
+                # path carries. These 75 children are built here rather than
+                # by the walker, so a key added there does not reach them:
+                # nine of them set the word, eight class 0x30 and one 0x18.
+                "desc_flags": kid.desc_flags,
                 "civilian_child": rec.offset,
             })
 

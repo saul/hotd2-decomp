@@ -104,8 +104,8 @@ export function PoseHookGrowAndPushOutOfWorld(obj: Actor): void {
   }
   if (!(sub.wait & CivilianWait.PushOutOfWorld)) return;
   ActorUpdateBoundingSphere(obj);
-  if (!ColiTestSphereAgainstFullSet(obj.camPoint.x, obj.camPoint.y,
-                                    obj.camPoint.z, obj.bodyRadius)) {
+  if (!ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,
+                                    obj.sphereCentre.z, obj.bodyRadius)) {
     return;
   }
   const d = G.g_coli_hit_depth;

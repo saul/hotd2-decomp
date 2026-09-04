@@ -13,7 +13,7 @@
  * the stab connects because the arc put the actor there on that frame.
  */
 import type { Events } from "../../core/events";
-import { ThrowerFlag, type Actor } from "../actor";
+import { ThrowerFlag, type ThrowerActor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { ArcPhase } from "./arc";
 import { ActorClipFrame } from "./arc";
@@ -32,12 +32,13 @@ const HIT_ON_LANDING = -1;
  * it began, **not** out of the live flags — so an actor that arrives on a wall
  * mid-pounce still uses the row its swing was drawn against.
  */
-export function ThrowerStrikeConnect(obj: Actor, events?: Events): boolean {
+export function ThrowerStrikeConnect(obj: ThrowerActor,
+                                     events?: Events): boolean {
   // `obj+0x136C & 0x400` sends character type 0x17 to `g_class31_throws`
   // instead; nothing this port runs sets that bit.
   if (obj.flags2 & ThrowerFlag.UseThrowTable) return false;
   if (obj.flags2 & ThrowerFlag.Struck) return false;
-  const e = ThrowerAttackOf(obj, obj.stance, obj.attack);
+  const e = ThrowerAttackOf(obj, obj.thr.stance, obj.attack);
   if (!e) return false;
 
   const frame = ActorClipFrame(obj);

@@ -98,6 +98,31 @@ class-0x30 thrower's `held`/`bare`/`projectile` slots are switch arms in
 `.text`, and they travel anyway, because the client uses them to pick a model
 out of the glTF.
 
+**A motion id alone does not make the exception, and this is where that was
+nearly got wrong.** `ThrowerStateThrow`'s character-0x18 arm picks its throw
+clip by hand and stance, and D3 of `docs/REVIEW-2026-09-03.md` proposed
+exporting the table it indexes — the 32 bytes at `0x0044FD1C` — as an `.rdata`
+row set. It is not one. `.rdata` starts at `0x004C4000`; that table is inside
+the function's own body, has one xref, and is a compiler-emitted dense switch
+whose nine jump targets are all addresses in that function and whose clip ids
+are `MOV` immediates in its arms. Two things settle it:
+
+* **the test is whether the exporter had to write the thing being joined to,
+  not whether the value looks like an id.** All eight of those clips are
+  already baked for character type 0x18 — `tools/hod2lib/class31.py`'s
+  `CLASS31_LITERAL_MOTIONS` lists them, under the heading that says class
+  0x31's states name them as literals rather than through a table. The ids
+  join to geometry that is in the bundle for reasons that have nothing to do
+  with this switch, so nothing about them needs the exporter's cooperation.
+* **what was actually missing was the mapping, and a mapping between two
+  `.text` immediates is `.text`.**
+
+So it went to `web/src/game/class31/thrower.ts` as `THROW_BY_STANCE_ZSLMAN`
+and `ZSLMAN_RELEASE_FRAME`, beside `class31/stand.ts`'s
+`WAIT_BY_STANCE_ZSLMAN`, which is the same shape read out of the neighbouring
+state and was already on the right side of the line. No schema change, no
+`BUNDLE_FORMAT` bump, no re-export. See `docs/formats/combat.md` §"The throw".
+
 ### What moved
 
 | was | now | proved by |

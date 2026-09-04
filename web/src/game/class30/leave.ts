@@ -11,14 +11,19 @@
  * that state has a way back into the loop, and it releases the permit first:
  * there are only `g_max_attackers` of them and one held by an actor nothing
  * advances blocks every other enemy for good.
+ *
+ * It used to clear {@link ZombieFlag2.StrikeAnchor} as well. Nothing in the
+ * exe clears that bit outside `FUN_0045DA60` and `EnemyZombieInit`'s whole-word
+ * assignment, and clearing it here would put the actor back under
+ * `ZombieStateHoldAtRange`'s too-close retreat, which is a behaviour the exe
+ * only ever gives an actor that has never swung.
  */
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { ZombieState } from "./states";
 
-export function ZombieGiveUpAttack(obj: Actor): void {
+export function ZombieGiveUpAttack(obj: ZombieActor): void {
   obj.action = null;
-  obj.hasStrikeAnchor = false;
   ReleaseAttackSlot(obj);
   obj.state = ZombieState.WaitTurn;
   obj.sub = 0;

@@ -257,14 +257,26 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
     // `if (obj+0x128 == 0) obj+0x128 = obj+0x124` -- the engine's own lazy
     // default, kept because it is what gives a class that never set a body
     // radius one at all.
+    //
+    // `[proved]`, and it is a **store**, not a local substitution:
+    //
+    //     00405b8a  FLD   float ptr [EBX + 0x128]
+    //     00405bb1  MOV   EAX, dword ptr [EBX + 0x124]
+    //     00405bb7  MOV   dword ptr [EBX + 0x128], EAX
+    //
+    // so the actor keeps the filled-in radius afterwards and every later
+    // reader -- the class's own push, the debug marker -- sees it too. Writing
+    // it back is the behaviour, not a shortcut; `port.test.ts`'s
+    // "engine fallback" assertion is on the field after the call, for that
+    // reason.
     if (o.bodyRadius === 0) o.bodyRadius = o.radius;
     // The engine tests a list every actor registers into once a frame; the
     // port derives the sphere from the position instead, so an actor that has
     // not ticked yet is still measured where it actually is.
     ActorUpdateBoundingSphere(o);
-    const dx = cx - o.camPoint.x;
-    const dy = cy - o.camPoint.y;
-    const dz = cz - o.camPoint.z;
+    const dx = cx - o.sphereCentre.x;
+    const dy = cy - o.sphereCentre.y;
+    const dz = cz - o.sphereCentre.z;
     const d = Math.hypot(dx, dy, dz);
     if (d > r + o.bodyRadius) continue;
     if (d >= bestDist) continue;
@@ -273,17 +285,17 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
   }
   if (!best) return false;
 
-  const dx = cx - best.camPoint.x;
-  const dy = cy - best.camPoint.y;
-  const dz = cz - best.camPoint.z;
+  const dx = cx - best.sphereCentre.x;
+  const dy = cy - best.sphereCentre.y;
+  const dz = cz - best.sphereCentre.z;
   const len = Math.hypot(dx, dy, dz);
   if (len === 0) return false;                    // exactly co-located: no way out
   const nx = dx / len, ny = dy / len, nz = dz / len;
   G.g_coli_hit_normal = [nx, ny, nz];
   G.g_coli_hit_depth = r + best.bodyRadius - len;
-  G.g_coli_hit_x = best.camPoint.x;
-  G.g_coli_hit_y = best.camPoint.y;
-  G.g_coli_hit_z = best.camPoint.z;
+  G.g_coli_hit_x = best.sphereCentre.x;
+  G.g_coli_hit_y = best.sphereCentre.y;
+  G.g_coli_hit_z = best.sphereCentre.z;
   // The deferred half: the other actor is told which way it was pushed and by
   // how much, and moves itself next frame.
   best.pushedBy = self.at;

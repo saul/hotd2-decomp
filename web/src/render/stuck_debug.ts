@@ -123,7 +123,7 @@ export class StuckDebugLayer implements System {
       // The sphere the push actually tests is the *body* sphere at
       // `obj+0x12C`, not the actor's feet -- drawing it at `pos` would put the
       // marker below whatever the actor is wedged in.
-      m.mesh.position.set(o.camPoint.x, o.camPoint.y, o.camPoint.z);
+      m.mesh.position.set(o.sphereCentre.x, o.sphereCentre.y, o.sphereCentre.z);
       m.pillar.position.copy(m.mesh.position);
     }
 

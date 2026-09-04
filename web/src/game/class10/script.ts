@@ -197,6 +197,10 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.SetAttachTarget:
       case CivilianOp.SetPairA:
       case CivilianOp.SetScale:
+        // `model+0x116C`. It scales the root motion as well as the draw --
+        // see `ActorModelScale` in `game/root_motion.ts`.
+        obj.scale = AsFloat(a[0]);
+        break;
       case CivilianOp.InPlayOnly:
         break;
       default:

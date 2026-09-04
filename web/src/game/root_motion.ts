@@ -30,14 +30,52 @@
  * no per-state or per-class switch, and nothing carries an actor but its
  * clips.
  *
- * [diverges] The engine rotates the delta by the full `Rz · Ry · Rx` and a
- * per-character scale; this rotates by yaw alone. That is exact for anything
- * standing upright and wrong for a class-0x31 actor on a wall or a ceiling,
- * whose pitch and roll are not zero — which is `[open]` until something needs
- * it, because the clips those stances play carry no root translation.
+ * **And the delta is scaled by the character's own size.**
+ * `SkeletonApplyRootMotion` runs `MatrixScale(model+0x116C)` into the same
+ * matrix it rotates the delta through, so a character drawn at 0.9 covers 0.9
+ * of the ground its clip authored. `ActorBuildSkinnedModel` (`FUN_00410440`)
+ * sets that field from the character type alone — see {@link ActorModelScale}.
+ *
+ * This port applied 1.0 to everything, and the note here called the field
+ * "drawing only". The place it showed is stage 1's block-1 rescue: the
+ * civilian (type 38, scale 0.9) flees at 0.6885 units an authored frame and
+ * her captor (type 8, scale 1.0) walks at 0.800. Unscaled the gap closes at
+ * 0.112 a frame; scaled, at 0.180. Both are small, and **the ratio between two
+ * small numbers is not small** — 1.6x — so the grab landed 244 ticks after the
+ * spawn instead of 158, long after its camera shot had cut away.
+ *
+ * [diverges] The engine rotates the delta by the full `Rz · Ry · Rx`; this
+ * rotates by yaw alone. That is exact for anything standing upright and wrong
+ * for a class-0x31 actor on a wall or a ceiling, whose pitch and roll are not
+ * zero — which is `[open]` until something needs it, because the clips those
+ * stances play carry no root translation.
  */
 import type { BakedMotion } from "../bundle";
 import type { Actor } from "./actor";
+
+/**
+ * The character's size, as `ActorBuildSkinnedModel` (`FUN_00410440`) sets it.
+ *
+ * `[port-only]` — one arm of that routine rather than the whole of it: the
+ * engine writes `model+0x116C` inline while building the model, and this port
+ * has no model-build function to write it from.
+ *
+ * Written to `model+0x116C` from the character type and nothing else, by a
+ * jump table over types 30..56 with everything outside it at 1.0.
+ * `[proved]` from the raw bytes at `0x00410451`: `MOVSX EAX,[ESI+0x60]`,
+ * `ADD EAX,-0x1e`, `CMP EAX,0x1a`, `JA` to the 1.0 arm, then an index byte
+ * table at `0x00410568` of `00 01 02 02 02 ...` selecting between
+ * `0x3f19999a`, `0x3f333333` and `0x3f666666`.
+ *
+ * It scales the drawn model *and* the root motion, which is the same statement
+ * twice: a smaller character takes smaller steps.
+ */
+export function ActorModelScale(charType: number): number {
+  if (charType === 30) return 0.6;
+  if (charType === 31) return 0.7;
+  if (charType >= 32 && charType <= 56) return 0.9;
+  return 1.0;
+}
 
 /**
  * The root translation between two frames of a clip, wrapping across the loop.
@@ -72,6 +110,9 @@ export function rootDelta(m: BakedMotion, prev: number, next: number):
  */
 export function ApplyRootMotion(obj: Actor, dx: number, dz: number): void {
   if (dx === 0 && dz === 0) return;
+  // `MatrixScale(model+0x116C)`, in the same matrix as the rotation.
+  dx *= obj.scale;
+  dz *= obj.scale;
   const a = obj.yaw * ((Math.PI * 2) / 65536);
   const s = Math.sin(a);
   const c = Math.cos(a);

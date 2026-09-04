@@ -1031,13 +1031,23 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * script stands still there but the port does not, which is what makes a
    * zombie loop its walk while you read the tree.
    *
+   * **Free roam is above the freeze, and that is the whole of it.** `freeze`
+   * stops *game* time; the free camera is not game state and flies on
+   * `Tick.wall`, which `render/freeroam.ts` says in its own header and which
+   * `FreeRoam.update` has done since it became a system. But this test sat
+   * below the freeze, so a frozen free-roam player was asked for no frames at
+   * all: WASD moved the camera exactly one frame — the one the keydown waker
+   * bought — and then the loop went back to sleep and the keys did nothing.
+   * Pausing to look around is the obvious way to use free roam, so it was the
+   * common case that was broken.
+   *
    * The driven case is not here: under `?drive=1` the harness owns the clock,
    * so it owns the question, and `Pacer` asks it instead.
    */
   wantsFrame(): boolean {
     if (this.loading) return true;
-    if (this.state.freeze) return false;
     if (this.state.mode === "free") return true;
+    if (this.state.freeze) return false;
     if (!this.gameStopped) return true;
     // Feedback for a click outlives the click.
     return this.shooting.busy;

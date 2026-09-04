@@ -270,7 +270,8 @@ export const WALKER_RESTORED_KEYS = [
   "captionGroup", "captionFrames", "firingGate",
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
-  "lightSet", "checkpointBlock", "branchPreview", "stashedCam", "spawns",
+  "lightSet", "checkpointBlock", "branchPreview", "camOverrideValid",
+  "stashedCam", "spawns",
   "sceneState", "queuedEventsPending", "camPending",
   "cam", "finished", "bgmTrack", "lastSound", "seq",
 ] as const;
@@ -534,6 +535,30 @@ export class Walker {
    * take, indexed by `branch_choice`.
    */
   branchPreview: NonNullable<OpJson["branch_preview"]> | null = null;
+
+  /**
+   * `g_evt_cam_override_valid` — `0x009C6FD8`.
+   *
+   * Selector 0x60 (`store_six`) stores three `(frame, path)` pairs *and* sets
+   * this, and the row-5 camera hooks `FUN_00402890` / `FUN_00402740` open with
+   *
+   *     if (g_cam_path_frames_left < 0 && g_evt_cam_override_valid)
+   *         FUN_00403DB0(&g_camera_block);
+   *
+   * which re-seats `g_active_cam_path` and the path frame from the pair
+   * `g_script_branch_var` selects. So a shot that has run out does not sit at
+   * its own last frame — it moves to where the *next* shot will pick up, and
+   * stays there until it does.
+   *
+   * The port had the pairs (as `branchPreview`) and neither the flag nor the
+   * re-seat, so the camera held the old shot's final frame through the whole
+   * fight and then cut. Stage 1 block 3 step 3 is the shape: the stashed shot
+   * ends at path frame 525, the `store_six` names 555, and step 4 opens at
+   * 556 — so the engine spends the fight at 555 and continues, and this port
+   * spent it at 525 and jerked **27 degrees** on the frame the fight ended,
+   * against a median frame-to-frame turn of 0.09.
+   */
+  camOverrideValid = false;
   checkpointBlock = 0;
   readonly flags = new Set<number>();
   readonly loadedSlots = new Set<number>();
@@ -640,6 +665,7 @@ export class Walker {
     this.sceneState = { major: 0, minor: 0 };
     this.ring.reset();
     this.branchPreview = null;
+    this.camOverrideValid = false;
     this.lightBlock.reset();
     this.checkpointBlock = this.script.entry_block;
     this.flags.clear();
@@ -682,7 +708,8 @@ export class Walker {
       channels: [...this.channels], tweens: this.tweens.map((t) => t && {...t}),
       fogSet: this.fogSet, lightDir: { ...this.lightDir },
       lightSet: this.lightSet, checkpointBlock: this.checkpointBlock,
-      branchPreview: this.branchPreview, stashedCam: this.stashedCam,
+      branchPreview: this.branchPreview,
+      camOverrideValid: this.camOverrideValid, stashedCam: this.stashedCam,
       spawns: this.spawns.map((s) => ({ ...s })),
       cam: this.cam && { ...this.cam },
       // The wait, countdown and all. `web/test/state.test.ts` is what caught

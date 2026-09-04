@@ -335,9 +335,36 @@ export function seatCamera(rig: CameraRig, ctx: RenderContext,
   if (!w || !rig.scripted) return;
   const cam = w.cam;
   if (!cam) return;
-  const p = ctx.paths?.paths.get(cam.slot);
+  // **A shot that has run out moves to where the next one picks up.**
+  //
+  // `FUN_00402890` and `FUN_00402740`, the two row-5 camera hooks, both open
+  // with `if (g_cam_path_frames_left < 0 && g_evt_cam_override_valid)
+  // FUN_00403DB0(...)`, and that routine re-seats `g_active_cam_path` and the
+  // path frame from the `(path, frame)` pair `g_script_branch_var` selects out
+  // of the last `store_six`. So the camera does not hold its own last frame
+  // through a fight; it sits at the frame the script has already said the next
+  // shot continues from, and the join is seamless.
+  //
+  // It lives here rather than in `game/` because the port's shot is the
+  // walker's `CamCommand`, not `g_active_cam_path` — the composition root is
+  // the layer that can see both. [diverges] the engine tests
+  // `g_cam_path_frames_left < 0`, strictly past the end; `cam.done` is true at
+  // the end, so the re-seat happens one frame earlier here. Both spend the
+  // whole wait at the same frame, which is what is on screen.
+  const over = cam.done && w.camOverrideValid
+    ? w.branchPreview?.[w.branchChoice] ?? null : null;
+  const slot = over?.slot ?? cam.slot;
+  const at = over ? over.frame : cam.frame;
+  const p = ctx.paths?.paths.get(slot);
   if (!p) return;
-  const pose = CamSeatPathFrame(p, cam.frame, w.rollEnabled,
+  // **The override writes the path pose and nothing else.** `FUN_00403DB0`
+  // calls `CamEvalPath7` into `g_cam_path_eye` / `g_cam_path_target` -- the
+  // path's own pose -- and never touches the camera block. The block reaches
+  // it the only way it ever reaches anything: `CameraEaseBlockEyeToPathPose`
+  // eases the eye and `TurnLookAtToward` eases the aim, both inside the same
+  // hook, one frame at a time. So `advance` stays false here; forcing it
+  // hard-wrote the block and simply moved the 27-degree cut one frame earlier.
+  const pose = CamSeatPathFrame(p, at, w.rollEnabled,
                                 force || !cam.done || !rig.trackEnabled);
   // Roll is the one channel the camera block has no word for, so the draw
   // takes it off the pose the seat evaluated. See `CamSeatPathFrame`.

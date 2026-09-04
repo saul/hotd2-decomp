@@ -216,9 +216,12 @@ const BRANCH: Record<string, ActionImpl> = {
       w.ring.retire();
       return undefined;
     }
-    // FUN_00403DB0 reads these back indexed by branch_choice, so they are
-    // the shot the arcade shows for each route the branch can take.
+    // `FUN_00403DB0` reads these back indexed by `g_script_branch_var`, so
+    // they are the shot the arcade shows for each route the branch can take
+    // — **and the shot a run-out camera moves to**, which is the half that was
+    // missing. See `Walker.camOverrideValid`.
     w.branchPreview = op.branch_preview;
+    w.camOverrideValid = true;
     w.ring.retire();
     return `${op.branch_preview.length} branch preview shots`;
   },

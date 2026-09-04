@@ -87,8 +87,9 @@ import {
 import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
-import { ZombieScriptEnded, ZombieStateHoldForCameraCue }
+import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue }
   from "../src/game/class30/target";
+import { ActorModelScale } from "../src/game/root_motion";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
@@ -5988,9 +5989,19 @@ console.log("\nActorBodyConditionFromHands:");
 // The captor's exit: `ZombieScriptEnded` (`FUN_0045C8D0`) and the shortcut in
 // its `WalkPastPoint` arm. Stage 1's `0x18E8` is the shape that matters --
 // initial state 34 (`WalkToTarget`), attack state 40 (`WalkPastPoint`), an
-// attack script whose point sits in front of it and no entries at all. When
-// the maul ends, the engine tests the point and turns on the player *at once*
-// rather than walking the leg first.
+// attack script whose point sits in front of it and no entries at all.
+//
+// **These two assertions were the mirror image of the engine**, because they
+// were written against `ActorPointIsAhead`'s inverted yaw term -- see
+// `PointLocalZ` in `class30/target.ts`. `MatrixRotateY(-yaw)` gives
+// `z' = dx*sin + dz*cos`; the port had `dz*cos - dx*sin`, the *forward*
+// rotation, so the predicate answered a point in front where the engine
+// answers a point behind. The setups below are unchanged and the expectations
+// are swapped, which is the whole of the correction.
+//
+// The semantics that come out are the ones the state's name asks for: a point
+// you have **already walked past** leaves nothing to walk, so the captor turns
+// on the player at once; a point still in front of you is a leg to walk first.
 {
   const captor = (state: number, attackState: number,
                   point: [number, number, number], yaw = 0) => {
@@ -6005,20 +6016,21 @@ console.log("\nActorBodyConditionFromHands:");
     return z;
   };
 
-  // Facing +X (yaw 0xC000) with the point at x = -25: already ahead.
+  // At x = -80 facing +X (yaw 0xC000), the point at x = -25 is **in front**:
+  // there is a leg to walk, so the captor walks it.
   const ahead = captor(ZombieState.TargetMotionScript, ZombieState.WalkPastPoint,
                        [-25, 2, -309], 0xc000);
   ZombieScriptEnded(ahead);
-  check("a captor whose point is already ahead turns on the player at once",
-        ahead.state === ZombieState.AttackRun && ahead.sub === 0,
+  check("a captor whose point is still in front walks the leg first",
+        ahead.state === ZombieState.WalkPastPoint && ahead.sub === 1,
         `state ${ahead.state} sub ${ahead.sub}`);
 
-  // Facing -X, so the same point is behind: it walks the leg first.
+  // Facing -X, so the same point is behind him: nothing left to walk past.
   const behind = captor(ZombieState.TargetMotionScript, ZombieState.WalkPastPoint,
                         [-25, 2, -309], 0x4000);
   ZombieScriptEnded(behind);
-  check("...and one whose point is behind walks it first",
-        behind.state === ZombieState.WalkPastPoint && behind.sub === 1,
+  check("...and one who is already past it turns on the player at once",
+        behind.state === ZombieState.AttackRun && behind.sub === 0,
         `state ${behind.state} sub ${behind.sub}`);
 
   // The role flip itself: a captor already *in* its attack state goes to
@@ -8009,6 +8021,58 @@ console.log("\na stashed path is played by a hook that steps first:");
         w2.cam?.frame === 10, `frame ${w2.cam?.frame}`);
   check("...and with the action retired",
         w2.cam?.done === true, `done ${w2.cam?.done}`);
+}
+
+// The character's size, and the two things it decides.
+//
+// `ActorBuildSkinnedModel` (`FUN_00410440`) writes `model+0x116C` from the
+// character type alone, and `SkeletonApplyRootMotion` scales the clip's root
+// delta by it -- so a smaller character takes smaller steps. This port applied
+// 1.0 to everything and called the field "drawing only".
+{
+  check("the scale table is the engine's jump table, not a guess",
+        ActorModelScale(30) === 0.6 && ActorModelScale(31) === 0.7
+        && ActorModelScale(32) === 0.9 && ActorModelScale(56) === 0.9
+        && ActorModelScale(29) === 1 && ActorModelScale(57) === 1
+        && ActorModelScale(8) === 1,
+        `${[29, 30, 31, 32, 56, 57].map(ActorModelScale).join(", ")}`);
+
+  // Stage 1's rescue, in one line: the civilian is type 38 and her captor
+  // type 8, so she flees at 0.9 of her clip and he walks at all of his.
+  // Unscaled the gap closes at 0.800 - 0.688 = 0.112 an authored frame;
+  // scaled, at 0.800 - 0.619 = 0.180. Both are small, and the ratio between
+  // two small numbers is not small: 1.6x, which is a grab 158 ticks after the
+  // spawn instead of 244 -- inside its camera shot instead of long after it.
+  const civRun = 0.6885 * ActorModelScale(38);
+  const captorWalk = 0.800 * ActorModelScale(8);
+  const ratio = (captorWalk - civRun) / (0.800 - 0.6885);
+  check("...so the captor closes on the civilian 1.6x faster than unscaled",
+        Math.abs(ratio - 1.61) < 0.02, `${ratio.toFixed(2)}x`);
+}
+
+// `ActorPointIsAhead` (`FUN_0045BC10`): the world delta rotated into the
+// actor's own frame by `MatrixRotateY(-yaw)`, and whether that local z is
+// positive. `MatrixRotateY(t)` builds `row0 = (cos, 0, -sin)`,
+// `row2 = (sin, 0, cos)`, and the transform is D3D's row-vector form, so
+// `z' = dz*cos(t) - dx*sin(t)`; at `t = -yaw` that is `dx*sin + dz*cos`. The
+// port had `dz*cos - dx*sin` -- the *forward* rotation -- so the dx term
+// carried the wrong sign and the predicate answered the mirror question.
+//
+// The clips face -Z, so a positive local z is a point **behind** the actor,
+// which is the question a state named "walk past point" is asking.
+{
+  const past = (yaw: number, px: number, pz: number) =>
+    ActorPointIsAhead({ pos: vec3(0, 0, 0), yaw } as never, vec3(px, 0, pz));
+  // Facing +X (yaw 0xC000): a point at +55 is in front of the actor.
+  check("a point in front of the actor does not read as walked past",
+        past(0xc000, 55, 0) === false);
+  check("...and one behind it does", past(0xc000, -55, 0) === true);
+  check("...and both answers flip with the facing",
+        past(0x4000, 55, 0) === true && past(0x4000, -55, 0) === false);
+  // The sideways pair is what the sign error could not tell apart: only the
+  // dx term separates them, so with the wrong sign these two agreed.
+  check("...and the two sideways points are separated by the yaw term",
+        past(0xc000, 0, 55) !== past(0xc000, 0, -55));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -10772,3 +10772,164 @@ printed the failure, then printed SKIP under it, and exited 3. Every machine
 without game assets is that tree. `finishOrSkip` is one helper rather than the
 same four lines twice, because the bug was that each copy looked right on its
 own.
+
+## Stage 1's rescue: a scale nobody applied, and a rotation with one sign wrong
+
+Two bugs in one set piece, both `[proved]`, and the second is the trap this
+repo's own skill warns about.
+
+### The chase that could not be won
+
+`?stage=1&mode=play&block=1&step=9&op=16` sits on `wait_enemies_alive <= 0`.
+The civilian `0x18A8` (type 38) has one **child** in her descriptor tail — the
+captor `0x18E8` (type 8, initial state 34 `WalkToTarget`, attack state 40
+`WalkPastPoint`) — and nothing in the evt stream points at it, which is why the
+script walker never sees these.
+
+Neither state moves the actor. `ZombieStateWalkToTarget` (`FUN_0045A890`) turns
+with `FUN_00409F90(obj, target.x, target.z, 0x1a0)` and tests the 2D distance
+against `obj+0x1370`; the walking is the clip's, through
+`SkeletonApplyRootMotion`. So the chase is decided entirely by two numbers in
+the motion data:
+
+    civilian  motion 386   21 frames @30   net -13.77   0.6885 / frame
+    captor    motion 958   31 frames @30   net -24.00   0.8000 / frame
+
+She flees at 0.6885 and he walks at 0.8000. The gap closes at 0.112 a frame,
+and 14 units of it took **244 ticks**.
+
+**The missing factor is the character's own size.** `ActorBuildSkinnedModel`
+(`FUN_00410440`) writes `model+0x116C` from the character type and nothing
+else, and `SkeletonApplyRootMotion` runs `MatrixScale(model+0x116C)` into the
+same matrix it rotates the root delta through. A smaller character takes
+smaller steps — the scale and the stride are one statement.
+
+`[proved]` from the bytes at `0x00410451`: `MOVSX EAX,[ESI+0x60]` (the
+character type), `ADD EAX,-0x1e`, `CMP EAX,0x1a`, `JA` to the 1.0 arm, then an
+index table at `0x00410568` of `00 01 02 02 02 ...` over a jump table at
+`0x0041055C` of `[0x410478, 0x410484, 0x41046c]` storing `0x3f19999a`,
+`0x3f333333` and `0x3f666666`. So **type 30 → 0.6, type 31 → 0.7, types 32–56
+→ 0.9, everything else → 1.0**.
+
+The civilian is type 38 → 0.9; the captor type 8 → 1.0. The gap closes at
+0.180 rather than 0.112, and the grab lands at **158 ticks instead of 244** —
+inside its camera shot rather than four seconds after it.
+
+**The ratio is the point, and it is not the ratio of the scales.** 0.9 looks
+like an 11% correction; it is a 61% one, because the closing rate is the
+*difference* of two nearly equal numbers and the correction lands entirely on
+one of them. A first draft of the assertion said "exactly half" and was wrong
+by that much; the check now names 1.6x and the comment shows the subtraction.
+
+### `ActorPointIsAhead` had the forward rotation, not the inverse
+
+After the maul, `ZombieStateWalkPastPoint` (state 40) walks to a point and
+`ZombieScriptEnded` (`FUN_0045C8D0`) — the routine that **turns a captor on the
+player** — fires when the point is behind. The captor entered state 40 already
+past his point, walked away from it for ever, and `wait_enemies_alive` never
+came down. "He just keeps on walking."
+
+`ActorPointIsAhead` (`FUN_0045BC10`) builds `MatrixRotateY(-yaw)`, transforms
+the world delta and returns whether the local z is positive. The port computed
+
+    dz * cos(a) - dx * sin(a)          // wrong
+
+`MatrixRotateY(t)` (`FUN_004A9AE0`) writes, on identity, `row0 = (cos, 0,
+-sin)` and `row2 = (sin, 0, cos)`; the transform is D3D's row-vector form, so
+`z' = dz*cos(t) - dx*sin(t)`. At `t = -yaw` that is
+
+    dx * sin(yaw) + dz * cos(yaw)      // right
+
+The port had written the **forward** rotation — the one `ApplyRootMotion`
+correctly uses to take a delta from clip space to world — where the inverse was
+wanted. The two differ only in the sign of the sideways term, so they agree
+exactly for a point straight ahead or straight behind and disagree by the whole
+of it otherwise.
+
+**And `test/port.test.ts` asserted the mirror image.** Two checks encoded the
+inverted predicate, one of them saying a captor "whose point is already ahead
+turns on the player at once". They were not wrong about the code; they were
+derived from it. The setups were fine and only the expectations were swapped,
+and what comes out is the reading the state's own name asks for: a point you
+have already walked past leaves nothing to walk.
+
+`CivilianInFront` in `class10/step.ts` carried the same expression — the engine
+inlines the same construction in `CivilianStepScript` — so it was wrong in the
+same way and is now one shared `PointLocalZ`.
+
+### What was checked and found faithful
+
+Worth recording, because two hours went into ruling them out. The civilian VM's
+wait conjunction in `CivilianStepScript` (`FUN_0048B1E0`) matches the port
+**exactly**, including `0x40003fff` for "worth entering", `0x14000000` for
+"blocked", and the absence of any test for bits `0x40000`, `0x100000` and
+`0x200000` — which the shipped scripts use freely and which are genuinely not
+waits. The port ignoring them is correct. `ZombieStateWalkToTarget` and
+`ZombieStateWalkPastPoint` are otherwise transcribed correctly.
+
+## WASD died in free roam because the *pacer* was asked the wrong question
+
+`FreeRoam.update` flies on `t.wall` whether or not the transport is frozen, and
+its own header says so — that was a deliberate change when it became a system.
+But `Player.wantsFrame` tested `state.freeze` **before** `mode === "free"`, so a
+frozen free-roam player was asked for no frames at all: a held W moved the
+camera exactly one frame, the one the keydown waker bought, and then the loop
+went back to sleep.
+
+Measured at `?stage=1&mode=free`: 30 units of travel over 0.8s running, 0.3
+units frozen. The same shape as `N1` — the obligation written down in a comment
+and the call missing — and pausing to look around is the obvious way to use
+free roam, so it was the common case that broke.
+
+## The camera cut at block 3 step 3, and where that one actually stands
+
+`store_six` (`queue_event` selector 0x60) stores three `(frame, path)` pairs
+**and sets `g_evt_cam_override_valid`** (`0x009C6FD8`). Both row-5 camera hooks
+open with
+
+    if (g_cam_path_frames_left < 0 && g_evt_cam_override_valid)
+        FUN_00403DB0(&g_camera_block);
+
+and that routine re-seats `g_active_cam_path` and the path frame from the pair
+`g_script_branch_var` selects, then evaluates the path into
+`g_cam_path_eye` / `g_cam_path_target` — the **rail pose**, not the camera
+block. The block reaches it by easing, which is the only way the block ever
+moves.
+
+The port had the pairs, as `branchPreview`, and neither the flag nor the
+re-seat. So a shot that had run out held its own last frame instead of moving
+to where the next one picks up. The shape shows in stage 1's slot 41:
+
+    b3 s3 op34   501 -> 525   flags=2 (stashed)
+    b3 s3 op35   555          store_six
+    b3 s4 op 5   556 -> 655   live
+
+and the same pattern one step earlier (265, store_six 270, then 271). Frames
+526–554 are never played by anything; the override is what puts the camera
+there to wait.
+
+Implemented, and it turned a hard hold at 525 into an ease. **It did not close
+the bug**, and the reason is worth writing down rather than leaving as a
+half-claim: the aim eases at about a twelfth of the remaining angle a frame, so
+22 degrees wants ~30 frames, and this join gets **three** — because
+`g_enemies_alive` is **0** when `wait_enemies_alive 0` is reached. The
+room-clear gate opens two frames after the shot ends, and the camera never gets
+the fight it is supposed to ease through.
+
+So the remaining cut is downstream of a liveness question, not a camera one,
+and that is where the next session should start. Two further camera mechanisms
+are named, `[proved]` and unimplemented, and may or may not matter once the
+fight is real: `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`) eases the block
+**eye** a sixteenth a frame while `g_camera_ease_eye` (`0x009C6F33`) is set, and
+that flag is raised only by `EvtActionSetFlag15` — selector 0x15, which this
+port lists as unmodelled.
+
+**Two measurement mistakes made while finding this, both worth keeping.**
+First: the look-at *point* is the wrong quantity. `TurnLookAtToward` turns a
+direction and re-projects it, so the point slides tens of units along the ray
+while the camera does not move — a "49-unit jump" that was 0 degrees. The
+measure is the angle of `(target - eye)`, and `tools/lookat_live.mjs` uses it.
+Second: both harnesses were skipping the fight. `player.mjs`'s own note says it
+— with shooting off, `WalkerHost.aliveEnemies` answers null and every
+live-enemy gate passes on the spot — and a camera measured across a fight that
+did not happen measures nothing.

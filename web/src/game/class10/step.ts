@@ -188,6 +188,13 @@ function CivilianArrived(obj: Actor, word: number,
  * `-rx` — and transforms the delta through it. This rotates by yaw alone,
  * which is exact for anything standing upright and wrong only for a civilian
  * that is not, and none of them is.
+ *
+ * **The yaw term had the wrong sign**, the same way `ActorPointIsAhead`'s did:
+ * the engine's `MatrixRotateY(-yaw)` gives `z' = dx·sin + dz·cos`, and this
+ * computed the forward rotation's `dz·cos - dx·sin`. The two routines are one
+ * construction — `CivilianStepScript` inlines what `FUN_0045BC10` does — so
+ * they now share one expression rather than two copies of it, which is the
+ * only reason the second copy was still wrong after the first was read.
  */
 function CivilianInFront(obj: Actor, word: number): boolean {
   if ((word & CivilianWait.InFront) === 0) return false;
@@ -196,6 +203,6 @@ function CivilianInFront(obj: Actor, word: number): boolean {
   const a = obj.yaw * ((Math.PI * 2) / 65536);
   const dx = sub.target.x - obj.pos.x;
   const dz = sub.target.z - obj.pos.z;
-  // The rotated delta's z: positive is in front of the actor.
-  return dz * Math.cos(a) - dx * Math.sin(a) > 0;
+  // The rotated delta's z, `MatrixRotateY(-yaw)`. See `PointLocalZ`.
+  return dx * Math.sin(a) + dz * Math.cos(a) > 0;
 }

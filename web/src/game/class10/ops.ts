@@ -98,7 +98,14 @@ export enum CivilianOp {
   SetPairA = 0x25,
   /** Move to a point over N frames; a point below 1 means the camera. */
   MoveOverFrames = 0x26,
-  /** The model scale, `model+0x116C`. Drawing only. */
+  /**
+   * The character's size, `model+0x116C`.
+   *
+   * **Not drawing only**, which is what this said. `SkeletonApplyRootMotion`
+   * scales the clip's root delta by the same field, so a script that shrinks a
+   * civilian also slows her walk — the two are one statement, because a
+   * smaller character takes smaller steps.
+   */
   SetScale = 0x27,
   /** Which bone the camera point rides. Drawing only. */
   SetCameraBone = 0x28,

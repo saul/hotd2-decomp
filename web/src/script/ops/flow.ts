@@ -43,9 +43,11 @@ export const OPS: Record<number, OpImpl> = {
     // starts coming from the player's own view angles at 0x009A60CC/D0/D4.
     //
     // The port draws the camera from the path, not from a view struct, so what
-    // it takes from this is the state and the retirement. Three further
-    // effects are read but not modelled, and are listed rather than buried:
-    // clearing `g_evt_cam_override_valid` (only the row-5 hooks read it),
+    // it takes from this is the state, the retirement and the camera-override
+    // clear. `g_evt_cam_override_valid` used to be listed here as read-but-not-
+    // modelled, on the grounds that only the row-5 hooks read it and the port
+    // had none; `seatCamera` is one now, so the clear is real work and is done.
+    // Two effects remain unmodelled and are listed rather than buried:
     // clearing `g_camera_ease_eye`, and clearing bit 0 of both players' flags,
     // which hides the on-screen player rigs -- this client draws none.
     // [diverges]
@@ -55,6 +57,7 @@ export const OPS: Record<number, OpImpl> = {
         const minor = op.scene_state_minor ?? 3;
         w.enterSceneState(1, minor);
         w.retireSceneSequence();
+        w.camOverrideValid = false;
         return `scene state 1/${minor}`;
       },
     },
@@ -70,6 +73,8 @@ export const OPS: Record<number, OpImpl> = {
         const minor = op.scene_state_minor ?? 3;
         w.enterSceneState(1, minor);
         w.retireSceneSequence();
+        // 0x32 omits two of 0x31's clears; the override is not one of them.
+        w.camOverrideValid = false;
         return `scene state 1/${minor} -- the alive gate is always open here`;
       },
     },

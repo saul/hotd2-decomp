@@ -27,7 +27,8 @@
     "cam-cues": "node tools/run_test.mjs tools/cam_cues.mjs",
     "leaps": "node tools/run_test.mjs tools/leaps.mjs",
     "lifetime": "node tools/run_test.mjs tools/lifetime.mjs",
-    "test:texfilter": "node tools/run_test.mjs test/texfilter.test.ts"
+    "test:texfilter": "node tools/run_test.mjs test/texfilter.test.ts",
+    "lookat": "node tools/lookat_live.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

@@ -11,6 +11,7 @@
  */
 import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
+import { ActorModelScale } from "./root_motion";
 import type { CivilianState } from "./class10/state";
 import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
@@ -744,6 +745,15 @@ export interface ActorBase {
    * types and class 0x31 covers four. `game/tables.ts` resolves the data.
    */
   charType: number;         // +0x1F4, s16
+  /**
+   * `model+0x116C` — the character's size, and the factor
+   * `SkeletonApplyRootMotion` scales its root delta by.
+   *
+   * `ActorBuildSkinnedModel` sets it from {@link Actor.charType} alone; the
+   * civilian VM's op 0x27 `SetScale` is the only thing that changes it after.
+   * See `ActorModelScale` in `game/root_motion.ts`.
+   */
+  scale: number;
   /** Display name, for the feed. Copied from the type at spawn. */
   name: string;
 
@@ -1403,6 +1413,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // narrowing the union exists for.
   const head: Omit<ActorBase, "cls"> = {
     at, charType, name, flags38: 0,
+    // `ActorBuildSkinnedModel` writes this from the character type alone.
+    scale: ActorModelScale(charType),
     flags: 0,
     pos: vec3(),
     yaw: 0,

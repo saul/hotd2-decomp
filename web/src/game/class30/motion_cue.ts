@@ -56,12 +56,55 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
  * is nothing left of the outgoing clip to blend from.
  */
 export function ActorSetMotion(obj: Actor, motion: number): void {
+  // The cut takes the swing with it — see {@link ActorEndOneShot}. This one
+  // leaves nothing to blend from, so the swing is dropped rather than faded.
+  obj.action = null;
+  obj.rootActionFrame = -1;
   obj.motion = motion;
   obj.playTicks = 0;
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
   obj.rootFrame = -1;
+}
+
+/**
+ * **There is only one track**, and this is what that costs the port.
+ *
+ * `ZombieStateStrike` (`FUN_00455A40`) plays its lunge and its swing on the
+ * actor's *ordinary* motion:
+ *
+ * ```
+ * 00455b54  6a00 6a00 ff77 04 57   SetCurrentActorMotionBlended(obj+0x194,
+ * 00455b5b  e8..                     entry->lunge, 0, 10)
+ * 00455b8a  6a05 6a00 ff37 57      FUN_004119A0(obj+0x194, entry->strike, 0, 5)
+ * 00455bd6  0fbf0c4dd0074e00       MOVSX ECX, [g_motion_play_length + 0x1B4*2]
+ * ```
+ *
+ * — `obj+0x1B4` and the play cursor at `obj+0x19C`, the same pair every other
+ * state reads. The port gives the swing a channel of its own (`obj.action`,
+ * `[port-only]`) because the poser needs it at full weight while the walk
+ * keeps its clock; the engine needs no such thing, because writing the motion
+ * **is** ending the swing.
+ *
+ * So both primitives that write that track end the one-shot, which is the
+ * whole of **B5**: `ZombieOnShot` (`FUN_00453EB0`) sets state 6 on the frame
+ * the actor dies, `ZombieStateDeath6` calls `ChooseDeathMotion`, and in the
+ * engine the death clip lands on top of the swing. Without this the port left
+ * `obj.action` running, `render/characters/pose.ts` kept posing the strike
+ * over the death state, and the actor finished its swing and only then fell —
+ * which is exactly what was reported.
+ *
+ * The fade is out of **what is on screen**, which while a one-shot runs is the
+ * one-shot and not `obj.motion`: that is `ZombieStateStrike`'s own `endStrike`
+ * reasoning, and it is here so that every caller gets it.
+ */
+function ActorEndOneShot(obj: Actor, fade: number): void {
+  const act = obj.action;
+  if (!act) return;
+  obj.action = null;
+  obj.rootActionFrame = -1;
+  ActorStartFade(obj, act.motion, act.ticks, fade);
 }
 
 /**
@@ -78,6 +121,9 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
                                       frame: number, fade: number): void {
   const m = MotionOf(obj, motion);
   if (!m) return;
+  // One track: writing it ends whatever one-shot was on it. See
+  // {@link ActorEndOneShot} — this is the edge B5 was missing.
+  ActorEndOneShot(obj, fade);
   if (obj.motion !== motion) {
     if (obj.fadeFrom && obj.fade > 0) {
       obj.fade = fade;

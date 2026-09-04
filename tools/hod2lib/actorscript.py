@@ -90,6 +90,41 @@ def target_script_motions(script: dict | None) -> list[int]:
     return [m for m in out if 0 < m < 4096]
 
 
+def civilian_ordered_states(block: dict, entry: int) -> list[int]:
+    """The states class 0x10's op 0x1A orders its captors into, from *entry*.
+
+    `ZombieStateAwaitCivilianOrder` (`FUN_0045BAD0`) copies ``sub+0x2C``
+    straight into ``obj+0x1310`` and calls that state's handler on the spot, so
+    a captor whose descriptor starts it in state 39 is really a captor of
+    whatever state its civilian names. Op 0x1A is where the name is, and
+    ``0x31`` is the order to die rather than a state to enter.
+
+    That matters to :func:`target_script` and not only to the port: the blob at
+    the descriptor tail's ``+0x04`` is decoded with the header shape of the
+    state that **reads** it -- `ZombieScriptForState` (`FUN_0045CA10`) hands
+    that pointer to whichever state the actor is in -- and for the six such
+    spawns across the shipped stages that is never the state the descriptor
+    started them in.
+    """
+    scripts = block.get("scripts") or []
+    entries = block.get("entries") or []
+    if not (0 <= entry < len(entries)):
+        return []
+    out: list[int] = []
+    seen: set[int] = set()
+    pending = [entries[entry]]
+    while pending:
+        i = pending.pop()
+        if i in seen or not (0 <= i < len(scripts)):
+            continue
+        seen.add(i)
+        for c in scripts[i]:
+            if c["op"] == 0x1A and c["args"] and c["args"][0] != 0x31:
+                out.append(c["args"][0])
+            pending += [j for j in (c.get("scripts") or []) if j >= 0]
+    return out
+
+
 def civilian_motion_ids(block: dict, entry: int) -> list[int]:
     """Every clip class 0x10's script *entry* can reach.
 

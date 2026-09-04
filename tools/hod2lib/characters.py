@@ -109,8 +109,8 @@ from .class31 import (  # noqa: F401
                       class31_motion_ids, class31_tables)
 from .actorscript import (  # noqa: F401
                           TARGET_SCRIPT_SHAPE, civilian_item_slots,
-                          civilian_motion_ids, target_script,
-                          target_script_motions)
+                          civilian_motion_ids, civilian_ordered_states,
+                          target_script, target_script_motions)
 from .placement import (  # noqa: F401
                         BACK_AWAY_STATES, CUE_STATES, ENTRANCE_CLIP_STATES,
                         ENTRY_TAIL_STATES, GRAB_STATES, LEAP_STATES,
@@ -269,6 +269,7 @@ __all__ = [
     "resolve_for_stage",
     "rig_entry",
     "rot_matrix",
+    "civilian_ordered_states",
     "target_script",
     "target_script_motions",
     "throw_tables",
@@ -509,8 +510,34 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         tscript = ascript = None
         camera_cue = None
         if sp["class"] == 0x30:
+            # **The header shape belongs to the state that reads the blob,
+            # not to the state the descriptor starts the actor in.**
+            # `ZombieScriptForState` (`FUN_0045CA10`) is
+            # `state == tail[3] ? tail+0x08 : tail+0x04`, so tail+0x04 is read
+            # by *whatever* state the actor is in that is not its attack
+            # state -- and a captor whose initial state is 39,
+            # `ZombieStateAwaitCivilianOrder`, is put into a state by its
+            # civilian's op 0x1A rather than by its own descriptor.
+            #
+            # Keying the shape on tail[1] therefore dropped the blob for the
+            # six such spawns in the game, because 39 has no shape of its own.
+            # Two of them are stage 1 block 9's captors 0x4B74 and 0x4BD0:
+            # their civilian orders state 34, their tail+0x04 is
+            # `00 00 40 41 | 00 00 | 02 04 | 00 00` -- arrive 12.0, motion
+            # 1026 -- and with no script at all `ZombieStateWalkToTarget` read
+            # an arrive radius of zero and stood there for ever. All six decode
+            # cleanly under the ordered state's shape and under no other.
+            tstate = tail[1]
+            if tstate not in TARGET_SCRIPT_SHAPE:
+                parent = recs.get(sp.get("civilian_child") or -1)
+                if parent is not None:
+                    for st in civilian_ordered_states(
+                            civscripts, parent.param(0x01, "i8") or 0):
+                        if st in TARGET_SCRIPT_SHAPE:
+                            tstate = st
+                            break
             tscript = target_script(prog, prog.evt.to_offset(
-                rec.param(4, "u32") or 0), tail[1])
+                rec.param(4, "u32") or 0), tstate)
             ascript = target_script(prog, prog.evt.to_offset(
                 rec.param(8, "u32") or 0), tail[2])
             # The captor family's camera cue, at tail +0x0C/+0x0E.

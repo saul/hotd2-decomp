@@ -189,13 +189,37 @@ export function SeverBoneChildren(obj: Actor, bone: number): void {
  * torso, each arm, pelvis, each leg. For the common zombie that is motions
  * 977, 982, 981, 979, 974, 961, 960 — all 29 frames except the legs at 39, so
  * a leg shot staggers for longer.
+ *
+ * **The row is the actor's, not row zero.** This read `reactions["0"]` for
+ * every actor and was the one lookup in the port that ignored the body
+ * condition — `AttackListOf`, `AttackPicksOf`, `MotionRowOf` and
+ * `ThrowHandsOf` all index by it, and the annotation on this address already
+ * said this one does too. The engine:
+ *
+ * ```
+ * 004544e5  0fbf86f4010000  MOVSX EAX, word ptr [ESI + 0x1f4]    ; character
+ * 004544ec  8b8e0c130000    MOV   ECX, dword ptr [ESI + 0x130c]  ; condition
+ * 004544f3  c1e002          SHL   EAX, 0x2
+ * 004544f9  8b98c82f5900    MOV   EBX, dword ptr [EAX + 0x592fc8]
+ * 004544ff  668b3c55a8844c00 MOV  DI, word ptr [EDX*0x2 + 0x4c84a8] ; group
+ * 00454507  c1e102          SHL   ECX, 0x2
+ * 0045450a  8b1c0b          MOV   EBX, dword ptr [EBX + ECX]     ; the row
+ * 0045450d  8b3cbb          MOV   EDI, dword ptr [EBX + EDI*0x4] ; the clip
+ * ```
+ *
+ * `[proved]`. Twenty-one character types carry a **second** row at body
+ * condition 3 — motions 257–263, 43 frames instead of 29 — and nothing in the
+ * port could reach it. `znkager`'s crawling body condition 4 is the same row
+ * as 0, so this is not why a crawler stands up when it is shot; see
+ * `ZombieStateStrike`'s note on the crawler's own attack table for that.
  */
 export function ActorPlayHitReaction(obj: Actor, bone: number,
                                      result: HitResultCode): number | undefined {
   const group = T.chars?.reaction_groups?.[bone];
   const type = CharacterTypeOf(obj);
-  const motion = group === undefined
-    ? undefined : type?.reactions?.["0"]?.[group];
+  const row = type?.reactions?.[String(obj.condition)]
+           ?? type?.reactions?.["0"];
+  const motion = group === undefined ? undefined : row?.[group];
   if (!motion || !MotionOf(obj, motion)) return undefined;
   obj.react = {
     motion,

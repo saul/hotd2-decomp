@@ -95,7 +95,9 @@ import { ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
-import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
+import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
+  from "../src/game/combat/resolve_hit";
+import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
 import type { BreakablesJson } from "../src/bundle";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
@@ -171,7 +173,11 @@ const TYPE: CharacterType = {
       damage_rank: [], hit_radius: 3,
       steps: [[0x21, EffectCode.Last, 3]] },
   ],
-  head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977] },
+  // Two rows, because the engine picks one with `obj+0x130C` — the shipped
+  // characters carry a second set at body condition 3 (motions 257-263) and
+  // the port used to read row 0 for every actor.
+  head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977],
+                             "3": [257, 258, 259, 260, 261, 262, 263] },
   attacks: {
     "0": {
       // `distance` is deliberately just *outside* the inner ring, as the real
@@ -241,6 +247,10 @@ const TYPE: CharacterType = {
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
+    // ...and the second stumble row, the one body condition 3 selects: 43
+    // frames rather than 29, which is how the two are told apart on screen.
+    "257": motion(43), "258": motion(43), "259": motion(43), "260": motion(43),
+    "261": motion(43), "262": motion(43), "263": motion(43),
     // The twelve entrance states' clips. 184 (0xB8) is the surfacing clip
     // whose two splash cursors are 0x15 and 0x1B, so its play length has to
     // reach past both; 186/187 (0xBA/0xBB) the scripted grab's pair; 700 a
@@ -6275,6 +6285,83 @@ console.log("class 0x30, the death chain:");
   check("...taking both counts with it, once",
         G.g_enemies_alive === 0 && G.g_enemies_present === 0,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
+}
+
+/**
+ * **B5 — a fatal hit mid-swing must not wait for the swing to finish.**
+ *
+ * `ZombieStateStrike` (`FUN_00455A40`) plays the swing on the actor's
+ * *ordinary* motion — `FUN_004119A0(obj+0x194, entry->strike, 0, 5)` at
+ * 0x00455B8A, read back through `obj+0x1B4`/`obj+0x19C` — so when
+ * `ChooseDeathMotion` (`FUN_004560B0`) writes the same track the swing is over
+ * by construction. The port gives the swing a channel of its own so the poser
+ * can hold it at full weight, and nothing was ending it: the actor finished
+ * its bite and only then fell over.
+ *
+ * The fix is in `ActorSetMotionBlended` / `ActorSetMotion`, so this asserts
+ * both the primitive and the whole death path through `GameUpdate`.
+ */
+console.log("class 0x30, a fatal hit lands *during* the swing:");
+{
+  const rng = new Rng(37);
+  const events = scene(1, rng);
+  const z = G.g_object_list[0] as ZombieActor;
+  const atk = TYPE.attacks["0"]["1"];
+
+  // Mid-swing: the state machine's own shape after `StrikeSub.Lunge`.
+  z.state = ZombieState.Strike;
+  z.sub = StrikeSub.Swinging;
+  z.attack = 1;
+  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  z.hp = 1;
+
+  ActorSetMotionBlended(z, TYPE.motion_row["0"][MotionRow.BackAway], 0, 10);
+  check("writing the motion track ends the one-shot on it",
+        z.action === null, JSON.stringify(z.action));
+  check("...fading out of the swing, not out of the base clip",
+        z.fadeFrom?.motion === atk.strike && z.fadeFrom?.ticks === 4,
+        JSON.stringify(z.fadeFrom));
+
+  // ...and the whole path: shoot it dead while the swing runs.
+  z.state = ZombieState.Strike;
+  z.sub = StrikeSub.Swinging;
+  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  ResolveHit(z, 1, 0, NULL_HOST, rng);
+  check("the shot kills it mid-swing", z.dead && z.pendingHit !== null);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("one update takes it out of the swing and into `Death`",
+        z.state === ZombieState.Death, `state ${z.state}`);
+  check("...and the swing is gone, so the death clip is what is posed",
+        z.action === null && (z.motion === 900 || z.motion === 901),
+        `action ${JSON.stringify(z.action)} motion ${z.motion}`);
+}
+
+/**
+ * **B12 — the stumble comes from the actor's own body-condition row.**
+ *
+ * `004544ec 8b8e0c130000` reads `obj+0x130C` and `0045450a 8b1c0b` indexes the
+ * character's reaction table with it. The port read row `"0"` for every actor,
+ * so the 21 character types with a second row at body condition 3 could never
+ * reach it.
+ */
+console.log("class 0x30, the stumble is indexed by body condition:");
+{
+  const rng = new Rng(38);
+  scene(0, rng);
+  const z = spawnZombie(0x3400, 1, "stumbler");
+  z.visible = true;
+  z.hp = z.maxHp = 100;
+  check("condition 0 takes row 0",
+        ActorPlayHitReaction(z, 1, HitResultCode.Damaged)
+          === TYPE.reactions["0"][1], String(z.react?.motion));
+  z.condition = 3;
+  check("...and condition 3 takes row 3, which row 0 never named",
+        ActorPlayHitReaction(z, 1, HitResultCode.Damaged)
+          === TYPE.reactions["3"][1], String(z.react?.motion));
+  z.condition = 9;                       // a row the fixture does not carry
+  check("...and a condition with no row of its own falls back to row 0",
+        ActorPlayHitReaction(z, 1, HitResultCode.Damaged)
+          === TYPE.reactions["0"][1], String(z.react?.motion));
 }
 
 console.log("class 0x30, the corpse that blinks:");

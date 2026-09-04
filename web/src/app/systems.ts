@@ -29,9 +29,16 @@ import type { Rng } from "../core/rng";
 export interface HostBackend {
   boneWorld(at: number, bone: number, out: Vec3): boolean;
   setBoneSlot(at: number, bone: number, slot: number): void;
-  /** `CamEvalObjectPath6` — a point on an `op_` path, for class 0x25. */
+  /**
+   * `CamEvalObjectPath6` — a point *and its orientation* on an `op_` path.
+   *
+   * Six values because the engine's routine returns six: this interface said
+   * three, so `GameHost.objectPath`'s optional `yaw` could never arrive and a
+   * path rider kept its spawn facing. See `CharacterLayer.objectPath`.
+   */
   objectPath?(slot: number, frame: number):
-    { x: number; y: number; z: number } | null;
+    { x: number; y: number; z: number;
+      pitch?: number; yaw?: number; roll?: number } | null;
   /** `ShotTestSphere` — the nearest thing along one shot segment. */
   pickShot?(ray: ShotRay): ShotPick | null;
 }

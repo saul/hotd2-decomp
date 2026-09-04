@@ -1269,6 +1269,54 @@ A second path reaches the same state: `ZombieShouldStandAndThrow`
 is already within `0x400` BAMS of the way it is facing. Fourteen spawns are
 condition 8, and they never turn to line the shot up.
 
+#### Where the recompute happens, and why it is the whole of condition 8
+
+`ActorBodyConditionFromHands` has **exactly one caller in the binary**:
+`ZombieStateHoldAtRange` (`FUN_00455720`) runs it on its second line, right
+after `TestApproachRing`. Nothing else in the program calls it. Two things
+follow, and neither is obvious from the routine on its own:
+
+* **A walker keeps its descriptor's condition all the way in.**
+  `ZombieStateAttackRun` never recomputes, so a condition-8 spawn is still
+  condition 8 for the whole approach — which is exactly the window
+  `ZombieShouldStandAndThrow` reads. It throws while it is closing on you.
+* **It loses it the moment it arrives.** The first frame at the ring rewrites
+  the condition from the hands, so it is 0, 1 or 2 from then on and can never
+  be 8 again. That is the "sometimes it throws, sometimes it comes for your
+  face" — the throw is the approach and the face is the arrival, in that order.
+
+That matters because conditions **7 and 8 index a different kind of row**.
+`g_class30_attacks[0x14][8]` is not a swing:
+
+| index | strike clip | lunge | `distance` | `hit_frame` | cancel |
+|---|---|---|---|---|---|
+| 0 | 1005 | 783 | **99.0** | 35 | `0x2` |
+| 1 | 1004 | 783 | **99.0** | 35 | `0x4` |
+
+Ninety-nine units is a throw's reach, and `ZombieStateStandAndThrow` is the
+only state that reads that row — it uses `strike` as the throw clip and
+`hit_frame` as the frame the weapon leaves the hand. `ZombieStateStrike`
+reading the same row would start its swing ninety-nine units out and land the
+hit from across the room. The engine never gets there because the recompute
+runs first, on the way into the strike.
+
+#### The operand `0x0045599C` reads wrong
+
+```
+00455962  MOV EDI, dword ptr [EAX + 0x4dc]     ; bone 5, the right hand
+00455968  CMP EDI, 0x1ece                      ; tutorial.bin  right held
+00455970  CMP EDI, 0x1ef9                      ; znonoopa.bin  right held
+00455990  CMP dword ptr [EAX + 0x68c], 0x1eca  ; tutorial.bin  LEFT held
+0045599c  CMP EDI, 0x1ef5                      ; znonoopa.bin  left held -- EDI!
+```
+
+The last comparison still holds the **right** hand's slot. `znonoopa`'s right
+hand reads `0x1EF9` armed or `0x1EF6` bare and neither is `0x1EF5`, so its left
+hand can never count as armed. Every `znonoopa` that reaches the ring therefore
+lands on **condition 1** with `DamageZone.LeftArm` already set, which puts its
+attack pick in row 40..49 — ten copies of attack 0, the right-arm swing at
+nineteen units. `[proved]`, and the port keeps it.
+
 | **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance — class 0x30's state 15 is the same routine on the same `f32` at tail `+0x04` |
 | **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
 | 20 | `ThrowerStateLeapToPoint` | the scripted drop |

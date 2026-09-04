@@ -63,6 +63,8 @@ const { Rain } = await import("../src/render/rain");
 const { Scope } = await import("../src/core/scope");
 const { ownResources, subtreeResources } = await import("../src/render/scope3d");
 const { FreeRoam, isTyping } = await import("../src/render/freeroam");
+const { RigLayer } = await import("../src/render/rigs");
+const { CamPaths } = await import("../src/game/camera/curve");
 const { CanvasTexture, Group, Mesh, MeshBasicMaterial, PerspectiveCamera,
         PlaneGeometry, Scene } = await import("three");
 
@@ -405,6 +407,202 @@ console.log("\ncharacter spawns: readySpawns -> the port -> adopt");
         chars.readySpawns(listed).length === 1);
 
   stage.dispose();
+}
+
+console.log("\nthe backdrop's second model");
+
+{
+  // `DrawBackdropDome` (`0x004132D0`) draws **twice**: the preset's `slot_a`
+  // spun and scaled `(1.2, 1.2, -1.2)`, then -- outside that push, at
+  // `0x0041345E` -- `slot_b` with the translate and nothing else. `slot_b`
+  // was ignored here, which is not the same as it being absent: it is an
+  // ordinary node of the stage glTF with an asset slot the script loads and
+  // no region, so `StageScene` drew it in place, at its authored position,
+  // for the whole stage and whatever the mode said. Stages 1-4 all use a
+  // preset that has one.
+  const node = (slot: number) => {
+    const mesh = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+    mesh.userData = { hod2_slot: slot };
+    return mesh;
+  };
+  const root = new Group();
+  const home = new Group();
+  const a = node(6049);
+  const b = node(6912);
+  home.add(a, b);
+  root.add(home);
+
+  const backdrop = new Backdrop();
+  const stage = new Scope("stage");
+  // Stage 3's preset 6, verbatim -- and at index 6, because the layer looks a
+  // preset up by its position in the table, which is how the exporter writes
+  // it (`presets[i].preset === i` in all six bundles).
+  const filler = (i: number) => ({ preset: i, slot_a: 0, slot_b: 0, dy: 0,
+                                   spin_bams: 0, angle0_bams: 0 });
+  backdrop.build(root, stage, {
+    presets: [...Array.from({ length: 6 }, (_, i) => filler(i)),
+              { preset: 6, slot_a: 6049, slot_b: 6912, dy: 0,
+                spin_bams: 2, angle0_bams: 0 }],
+    used: [6], note: "",
+  });
+  check("both of the preset's slots leave the stage tree",
+        a.parent !== home && b.parent !== home,
+        `a -> ${a.parent?.name}, b -> ${b.parent?.name}`);
+
+  const ctx = (mode: number, eye: [number, number, number]) => ({
+    walker: { backdropPreset: 6, backdropMode: mode },
+    camera: { position: { x: eye[0], y: eye[1], z: eye[2] } },
+  }) as unknown as Parameters<typeof backdrop.update>[0];
+  const TICK = { dt: 1 / 60, frames: 1, wall: 1 / 60, frozen: false };
+
+  // `mode == 0` returns at `0x0041331A`, before the first push: neither draw
+  // happens.
+  backdrop.update(ctx(0, [0, 0, 0]), TICK);
+  check("mode 0 draws neither model",
+        !backdrop.group.visible && !b.visible, `${b.visible}`);
+
+  backdrop.update(ctx(1, [100, -15, -3000]), TICK);
+  const dome = backdrop.group.children.find((c) => c.name === "backdrop_dome");
+  const flat = backdrop.group.children.find((c) => c.name === "backdrop_flat");
+  check("mode 1 draws both", backdrop.group.visible && a.visible && b.visible);
+  check("...both centred on the camera",
+        !!flat && flat.position.x === 100 && flat.position.y === -15
+        && flat.position.z === -3000, JSON.stringify(flat?.position));
+  // The second draw is a bare `MatrixTranslate`. No spin, and no inside-out
+  // scale -- the negative Z belongs to the dome's push, which was popped.
+  check("...and the second takes no rotation and no scale",
+        !!flat && flat.rotation.y === 0 && flat.scale.z === 1,
+        `${flat?.rotation.y} ${flat?.scale.z}`);
+  check("...while the dome takes both",
+        !!dome && dome.rotation.y !== 0 && dome.scale.z === -1.2,
+        `${dome?.rotation.y} ${dome?.scale.z}`);
+
+  stage.dispose();
+  check("and the scope puts both back where they came from",
+        a.parent === home && b.parent === home);
+}
+
+console.log("\nrigs: whose nodes these are, and what happens off the table");
+
+{
+  const RIGS = {
+    rigs: [{
+      name: "obj_48ead0", routine: "FUN_0048EAD0", note: "",
+      routes: [
+        { slot: 342, bias: [0, 2, 0] as [number, number, number],
+          cam_paths: [124], file: null, index: null, duration: null,
+          length: 1575, hold_frame: null, stop_frame: null, note: "" },
+        { slot: 343, bias: [0, 2, 0] as [number, number, number],
+          cam_paths: [125], file: null, index: null, duration: null,
+          length: 1530, hold_frame: null, stop_frame: null, note: "" },
+      ],
+    }],
+    blocked: [], note: "",
+  };
+  const rigRoot = (rig: string, slot: number | undefined) => {
+    const o = new Group();
+    o.name = `${rig}_${slot ?? "x"}`;
+    o.userData = slot === undefined
+      ? { hod2_kind: "rig", hod2_rig: rig }
+      : { hod2_kind: "rig", hod2_rig: rig, hod2_path_slot: slot };
+    return o;
+  };
+  const root = new Group();
+  const boatA = rigRoot("obj_48ead0", 342);
+  const boatB = rigRoot("obj_48ead0", 343);
+  // Two spawns of one character skin -- the shape that made this matter. The
+  // exporter puts every character through the rig writer, so `chr_` roots
+  // carry `hod2_kind: "rig"` too, and stage 3 has 135 of them against nine
+  // that belong to a transcribed routine.
+  const chrA = rigRoot("chr_char_adv05", undefined);
+  const chrB = rigRoot("chr_char_adv05", undefined);
+  const gore = rigRoot("gore_char_adv05", undefined);
+  chrA.visible = false;
+  chrB.visible = false;
+  gore.visible = false;
+  root.add(boatA, boatB, chrA, chrB, gore);
+
+  const rigs = new RigLayer();
+  const curve = { channels: {}, file: "op_st3", index: 0, start: 0,
+                  duration: 2000 };
+  const paths = new CamPaths({
+    fps: 60, paths: {}, object_paths: { "342": curve, "343": curve },
+  } as never);
+  rigs.build(root, RIGS as never, paths);
+
+  check("only the rigs the bundle names are claimed", rigs.count === 2,
+        `${rigs.count} instances`);
+
+  const at = (slot: number | null) => ({
+    walker: slot === null ? { cam: null } : { cam: { slot, frame: 10 } },
+  }) as unknown as Parameters<typeof rigs.update>[0];
+
+  // Nothing else may write these. Before this, an empty gate made every
+  // `chr_` root "the route the camera selected", so one arbitrary spawn of
+  // each skin was forced visible -- with no game object, so no pose, so a
+  // heap of parts on the origin -- and every other one was forced hidden
+  // over the layer that owns it.
+  rigs.update(at(124));
+  check("...and the character hierarchies are left alone",
+        !chrA.visible && !chrB.visible && !gore.visible);
+
+  check("the shot's own route is the one drawn",
+        boatA.visible && !boatB.visible);
+
+  // `FUN_0048EAD0`'s `default:` skips the pose and still draws. The old rule
+  // held the instance only once `frozen`, so the boat vanished on every shot
+  // outside the table -- which is most of stage 3's opening.
+  const wasX = boatA.position.x;
+  rigs.update(at(121));
+  check("a camera path the routine does not name still draws it",
+        boatA.visible && !boatB.visible);
+  check("...at the pose it last held", boatA.position.x === wasX,
+        `${boatA.position.x} was ${wasX}`);
+
+  rigs.update(at(125));
+  check("and the next shot hands over to its own route",
+        !boatA.visible && boatB.visible);
+
+  // A seek clears `showing`; the fallback has to be deterministic or a rig
+  // comes back on a different root than the one play would have shown.
+  rigs.resync(at(null));
+  check("with no shot at all it falls back to the first root",
+        boatA.visible && !boatB.visible);
+}
+
+console.log("\nthe object-path seam carries six values");
+
+{
+  // `CamEvalObjectPath6` (`FUN_004042D0`) fills `{float x,y,z; int rx,ry,rz}`,
+  // and `ScriptedHumanoidUpdate`'s tail copies the angles onto `obj+0x64/68/
+  // 6C` at `0x00484B6E`-`0x00484B74` whenever the follow mode is not 2. This
+  // seam handed back the position alone, so `p.yaw` was always `undefined`: a
+  // rider took its path's place and kept its spawn facing, and the engine's
+  // attachment offset was rotated through a yaw of zero.
+  const { CharacterLayer } = await import("../src/render/characters");
+  const chars = new CharacterLayer();
+  const key = (v: number) => [[0, v, 0, 0], [100, v, 0, 0]];
+  chars.paths = new CamPaths({
+    fps: 60,
+    paths: {},
+    object_paths: {
+      "340": {
+        file: "op_st3", index: 0, start: 0, duration: 100,
+        channels: {
+          pos_x: key(5), pos_y: key(6), pos_z: key(7),
+          rot_x: key(0x100), rot_y: key(0x4000), rot_z: key(0x200),
+        },
+      },
+    },
+  } as never);
+  const p = chars.objectPath(340, 50);
+  check("a point on an `op_` path answers with its position",
+        !!p && p.x === 5 && p.y === 6 && p.z === 7, JSON.stringify(p));
+  check("...and with the BAMS triple channels 3-5 hold",
+        !!p && p.pitch === 0x100 && p.yaw === 0x4000 && p.roll === 0x200,
+        JSON.stringify(p));
+  check("a slot the bundle has no curve for is still null",
+        chars.objectPath(999, 0) === null);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -59,9 +59,17 @@ export interface GameHost {
    * renderer's job and its result is three.js's. Optional, because a host with
    * no camera paths is a valid host — the port then leaves the actor where it
    * was, which is what a missing path should look like.
+   *
+   * **Six values.** `FUN_004042D0` fills `{float x,y,z; int rx,ry,rz}` and
+   * `ScriptedHumanoidUpdate`'s tail writes all three angles onto `obj+0x64`,
+   * `+0x68` and `+0x6C` at `0x00484B6E`-`0x00484B74`. `pitch`/`roll` are here
+   * so the attachment-offset rotation in `class25` can stop passing zeros for
+   * them; they are optional because a host that only knows a position is
+   * still a host.
    */
   objectPath?(slot: number, frame: number):
-    { x: number; y: number; z: number; yaw?: number } | null;
+    { x: number; y: number; z: number;
+      pitch?: number; yaw?: number; roll?: number } | null;
 
   /** World position of one bone on one actor. False if it is not posed. */
   boneWorld(at: number, bone: number, out: Vec3): boolean;

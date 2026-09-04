@@ -312,7 +312,7 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
  * walks through.
  *
  * **The test is sign-blind, and that is the whole of it.** `ColiSphereVsMesh`
- * (`FUN_004AAF60`) compares `distance²` against `radius²` and never asks which
+ * (`FUN_004AAFF0`) compares `distance²` against `radius²` and never asks which
  * side of the quad the centre is on — `local_38 = fVar6² / |n|²`, with no test
  * on `fVar6`. What the sign decides is what the *caller* does with it:
  *

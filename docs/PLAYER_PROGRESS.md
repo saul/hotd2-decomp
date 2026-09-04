@@ -1317,7 +1317,7 @@ placed; and the hook's own last act is the surface snap, which would be undone
 every frame by the state if it ran first.
 
 And `ColiTestSphereAgainstFullSet` **rejected the case that matters**.
-`ColiSphereVsMesh` (`FUN_004AAF60`) compares `distance²` against `radius²` and
+`ColiSphereVsMesh` (`FUN_004AAFF0`) compares `distance²` against `radius²` and
 never asks which side of the quad the centre is on; the caller reads the sign
 afterwards:
 

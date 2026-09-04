@@ -10297,3 +10297,34 @@ stands, an exporter that *rewrote* would delete a third of `functions.tsv`.
 which needs the two read side by side, and the GUI was closed, so the new row
 is held out of the file rather than guessed at. It is still in the database and
 the next export will re-propose it.
+
+### Correction, same day: the `ColiSphereVsMesh` collision was a wrong address
+
+The entry above says the database has a duplicate function name and that
+telling the two apart needs them read side by side. With the GUI back up, they
+were, and it is not a duplicate:
+
+**`0x004AAF60` is not a function.** `get_function_by_address` there returns
+`ColiSegmentVsMesh`, whose body is `0x004AAA40..0x004AAFEF` — so the address
+is *inside* it, and not even on an instruction boundary: the instruction at
+`0x004AAF5D` is `MOV EAX,[ESP+0x10]` (`8b442410`), four bytes, ending at
+`0x004AAF61`. It has **zero xrefs**. The real `ColiSphereVsMesh` begins at
+`0x004AAFF0`, immediately after the segment test ends.
+
+So the curated row was mis-addressed by 0x90 and had been since it was
+written, and the GUI rename the export picked up was right. The row keeps its
+prose and moves to `0x004AAFF0` — the comment describes that code exactly:
+`g_coli_hit_depth = fVar6`, the signed unnormalised plane distance, and
+`local_38 <= fVar4` against `radius²` with no sign test.
+
+**Nothing objected for as long as it was wrong.** `verify_port.py` lists an
+address the TSV does not know under **unnamed citations** — a work list — not
+as a failure, so `FUN_004AAF60` sat in `web/src/game/coli.ts` and
+`PLAYER_PROGRESS.md` reading like a citation and pointing into the middle of
+another function. The count went 85 to 84 when it was fixed. A work list is a
+weaker signal than it looks: a wrong address and an unread one are the same
+row in it.
+
+This is also the adjacent-function form of the trap `CLAUDE.md` records for
+tables. Two collision routines, back to back, and the wrong end of the
+boundary was recorded.

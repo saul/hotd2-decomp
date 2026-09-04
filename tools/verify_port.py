@@ -247,6 +247,21 @@ def in_gameplay(addr: str) -> bool:
     return any(lo <= a < hi for lo, hi in GAMEPLAY_RANGES)
 
 
+def coverage_counts(named: dict[str, str],
+                    ported: dict[str, tuple[str, str]]) -> tuple[int, int, int]:
+    """(ported in range, annotated in range, ported outside the ranges).
+
+    Split out of `check_coverage` so `tools/status.py` renders the same
+    numbers from the same measurement rather than parsing this file's prose.
+    A number quoted in a document and computed in a checker is two sources for
+    one fact, and that is how the architecture doc came to claim a coverage
+    figure fifteen points from the one the checker printed.
+    """
+    total = sum(1 for addr in named if in_gameplay(addr))
+    inside = [a for a in ported if in_gameplay(a)]
+    return len(inside), total, len(ported) - len(inside)
+
+
 def check_coverage(named: dict[str, str],
                    ported: dict[str, tuple[str, str]]) -> None:
     """Rule 2: report the coverage over the gameplay address ranges.
@@ -261,12 +276,10 @@ def check_coverage(named: dict[str, str],
     ported. The out-of-range ports are real work; they are reported on their own
     line rather than folded into a ratio they are not part of.
     """
-    total = sum(1 for addr in named if in_gameplay(addr))
-    inside = [a for a in ported if in_gameplay(a)]
-    outside = len(ported) - len(inside)
-    notes.append(f"coverage: {len(inside)} of {total} annotated gameplay "
+    n_inside, total, outside = coverage_counts(named, ported)
+    notes.append(f"coverage: {n_inside} of {total} annotated gameplay "
                  f"functions have a port "
-                 f"({100 * len(inside) // max(1, total)}%)")
+                 f"({100 * n_inside // max(1, total)}%)")
     notes.append(f"  and {outside} ported functions outside the gameplay "
                  f"ranges (opcodes, classes 0x10/0x24/0x25/0x41)")
 
@@ -318,23 +331,32 @@ def check_divergences() -> None:
         notes.append(f"  {f}")
 
 
-def check_classes() -> None:
-    """Which spawn classes have behaviour, which are simply unread."""
+def class_counts() -> tuple[int, int, int, int]:
+    """(classes with a module, read classes, covered placements, placements).
+
+    The measurement behind `check_classes`' report line, split out for
+    `tools/status.py` on the same argument as `coverage_counts`. Returns
+    zeroes if `spawns.md`'s table cannot be read; `check_classes` is the one
+    that turns that into a failure.
+    """
+    ported, _members, known = read_class_table()
+    if not known:
+        return 0, 0, 0, 0
+    covered = sum(n for c, n in known if c in ported)
+    return len(ported), len(known), covered, sum(n for _, n in known)
+
+
+def read_class_table() -> tuple[set[int], dict[int, str], list[tuple[int, int]]]:
+    """The three things every class check reads: what the port has, what the
+    `SpawnClass` enum names, and what `spawns.md` records."""
     have = {d.name for d in GAME.iterdir()
             if d.is_dir() and d.name.startswith("class")}
     ported = {int(n[5:], 16) for n in have if n[5:].isalnum()}
 
-    # Every class module must have a `SpawnClass` member, so no registry key is
-    # ever a bare number. This is the rule that keeps the cat from running the
-    # zombie's state machine.
     enum_src = (GAME / "spawn_class.ts").read_text()
     members = {int(v, 16): n for n, v in
                re.findall(r"^\s*([A-Z][A-Za-z0-9]*) = 0x([0-9a-fA-F]{2}),",
                           enum_src, re.M)}
-    for c in sorted(ported):
-        if c not in members:
-            failures.append(f"game/class{c:02x}/ has no SpawnClass member; "
-                            f"add one rather than keying the registry on 0x{c:02X}")
 
     # A row may cover several classes -- the doc groups them where the engine
     # does, `0x16`/`0x17` for the wave field and its sources, `0x27`, `0x28`
@@ -352,13 +374,27 @@ def check_classes() -> None:
         for i, c in enumerate(found):
             table.append((c, each[i] if len(each) == len(found)
                           else (each[0] if i == 0 else "0")))
-    if not table:
+    known = [(int(c, 16), int(n)) for c, n in table]
+    return ported, members, known
+
+
+def check_classes() -> None:
+    """Which spawn classes have behaviour, which are simply unread."""
+    ported, members, known = read_class_table()
+    if not known:
         failures.append("spawns.md: could not read the class table")
         return
-    known = [(int(c, 16), int(n)) for c, n in table]
-    covered = sum(n for c, n in known if c in ported)
-    total = sum(n for _, n in known)
-    notes.append(f"classes: {len(ported)} of {len(known)} read classes have a "
+
+    # Every class module must have a `SpawnClass` member, so no registry key is
+    # ever a bare number. This is the rule that keeps the cat from running the
+    # zombie's state machine.
+    for c in sorted(ported):
+        if c not in members:
+            failures.append(f"game/class{c:02x}/ has no SpawnClass member; "
+                            f"add one rather than keying the registry on 0x{c:02X}")
+
+    n_ported, n_known, covered, total = class_counts()
+    notes.append(f"classes: {n_ported} of {n_known} read classes have a "
                  f"module, covering {covered} of {total} placements")
     for c, n in sorted(known, key=lambda x: -x[1])[:6]:
         if c not in ported:

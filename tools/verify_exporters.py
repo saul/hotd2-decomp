@@ -83,6 +83,34 @@ def check_schema_hash() -> list[str]:
             + (f" -- {', '.join(moved)} changed" if moved else "")]
 
 
+def check_module_list() -> list[str]:
+    """`hod2lib/__init__.py`'s module list against the package on disk.
+
+    That docstring is the front door to the library and it announced `mot` as
+    "the last unsolved format" for weeks after `mot.py` landed, through a
+    bundle format bump, while nine other modules it never mentioned were added
+    around it. A list of files is checkable, so it is checked.
+    """
+    pkg = ROOT / "tools" / "hod2lib"
+    on_disk = {p.stem for p in pkg.glob("*.py")
+               if not p.stem.startswith("_")}
+    doc = (pkg / "__init__.py").read_text().split('"""')[1]
+    # A module row is exactly four spaces, the name, then two or more spaces.
+    # The docstring's prose sits in column 0 and a wrapped description indents
+    # past the name column, so neither can be mistaken for a row. Free prose
+    # and a regex do not mix: an earlier draft of this check read `is`,
+    # `which` and `unimplemented` as modules.
+    named = {m for m in
+             re.findall(r"^    ([a-z][a-z0-9_]*) +\S", doc, re.M)}
+    out = []
+    for m in sorted(named - on_disk):
+        out.append(f"hod2lib/__init__.py names `{m}`, which does not exist")
+    for m in sorted(on_disk - named):
+        out.append(f"hod2lib/{m}.py is not in `__init__.py`'s module list -- "
+                   f"add a line saying what it is")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     # Accepted and unused: the verifier suite passes it to every tools/verify_*
@@ -109,6 +137,7 @@ def main() -> int:
             bad.append(f"{rel}:{i + 1}: {line.strip()} -- says nothing")
 
     stale = check_schema_hash()
+    undocumented = check_module_list()
 
     print("exporters -- what a swallowed failure has to say\n")
     print(f"  {total} broad handlers, {len(bad)} of them silent"
@@ -133,6 +162,17 @@ def main() -> int:
         return 1
     print(f"  {len(schema.file_digests(ROOT))} declaration files, digest "
           f"{schema.schema_hash(ROOT)[:16]}...\n")
+    print("clean")
+
+    print("\nthe library's own account of itself\n")
+    if undocumented:
+        for m in undocumented:
+            print(f"FAIL {m}")
+        print("\nOne line per module in `hod2lib/__init__.py`'s docstring, "
+              "saying what it is.")
+        return 1
+    print("  every hod2lib module is named in `__init__.py`, and every name "
+          "exists\n")
     print("clean")
     return 0
 

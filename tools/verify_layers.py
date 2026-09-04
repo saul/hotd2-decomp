@@ -120,19 +120,15 @@ class Rule:
         self.hits.append(where)
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--list", action="store_true",
-                    help="print every violation, not just the first few")
-    # Accepted and unused: the verifier suite passes it to every tools/verify_*
-    ap.add_argument("--game-dir", default=None, help=argparse.SUPPRESS)
-    args = ap.parse_args()
+def build_rules() -> dict[str, Rule]:
+    """Every rule, fresh, with empty hit lists.
 
-    if not SRC.is_dir():
-        print(f"error: {SRC} not found", file=sys.stderr)
-        return 2
-
-    rules = {
+    Hoisted out of `main` so `tools/status.py` can render the ratchet
+    table from the same construction the checker runs, rather than from a
+    number retyped into a document. The architecture doc described this
+    file's ratchets three different ways at once, one of them pointing at
+    a heading that no longer existed."""
+    return {
         "layer-direction": Rule(
             "layer-direction",
             "a layer may only import from itself and the layers below it",
@@ -254,6 +250,21 @@ def main() -> int:
             "per-file copies did not agree to six significant figures",
             "error"),
     }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--list", action="store_true",
+                    help="print every violation, not just the first few")
+    # Accepted and unused: the verifier suite passes it to every tools/verify_*
+    ap.add_argument("--game-dir", default=None, help=argparse.SUPPRESS)
+    args = ap.parse_args()
+
+    if not SRC.is_dir():
+        print(f"error: {SRC} not found", file=sys.stderr)
+        return 2
+
+    rules = build_rules()
 
     # `.tsx` too. The UI layer is written in it, so globbing only
     # `.ts` had `ui-reads-projection-only`, `no-engine-writes-in-ui`

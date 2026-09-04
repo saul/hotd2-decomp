@@ -32,8 +32,19 @@
  * Telling those apart is the whole of the difficulty: hiding a multi-primitive
  * bone's children wholesale takes the rest of the limb with it, and taking
  * only the first primitive of the damaged part takes most of the part with it
- * — which is what "the zombie lost its midriff" and "big missing render
- * section" look like.
+ * — which is what "big missing render section" looks like.
+ *
+ * ## `[open]` The abdomen a shot `char_adv02` has nothing to draw with
+ *
+ * A second, separate hole with the same symptom, and this one is **not** in
+ * this file. Char type 0's bone 1 escalates to slot `0x1B70` on the first
+ * torso hit, and that model is chest-only — `y 1.3..5.5` against the
+ * undamaged `y -2.0..5.5` — while the pelvis tops out at `y -0.45`. The type
+ * is one of the 21 with a null `EXTRA_PARTS` entry, so it has no abdomen part
+ * to keep the band filled the way `char_adv00`'s `0x1F02` does. Every step of
+ * the port's draw is the exe's — one slot per bone, one model per slot — so
+ * nothing here can fill it without inventing geometry. The evidence, and what
+ * has been ruled out, is in `tools/hod2lib/characters.py`'s module docstring.
  */
 import { Mesh, type Object3D } from "three";
 import type { GoreSwap, Instance } from "./instance";

@@ -407,5 +407,197 @@ console.log("\ncharacter spawns: readySpawns -> the port -> adopt");
   stage.dispose();
 }
 
+/**
+ * B3: an actor drawn before it simulates.
+ *
+ * `hod2_kind: "rig"` is the exporter's tag for **every** transcribed hierarchy
+ * in a stage, and four layers own different sets of them — `RigLayer` the
+ * `op_` path riders, `CharacterLayer` the `chr_` skeletons and their `gore_`
+ * templates, `PropLayer` the `prop_` doors, `BreakableLayer` the slot
+ * templates. `RigLayer` used to adopt all of them and write `root.visible` on
+ * every one once a frame; a rig with no route is ungated, so the first
+ * instance of each character type was shown at its authored spawn point, in
+ * the bind pose, with no game object behind it.
+ *
+ * The rule this pins down: **a layer may only place the nodes its own bundle
+ * block names.** `rigs.rigs[].name` is that index source.
+ */
+console.log("\nrig layer: only the rigs its own block names");
+{
+  const { RigLayer } = await import("../src/render/rigs");
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D } = await import("three");
+
+  const TYPE = {
+    type: 1, name: "test", file: "t.bin", bone_count: 2, actor_radius: 10,
+    bones: [{ bone: 0, part: "bone00_1", slot: 1, offset: [0, 0, 0],
+              parent: null, damage_rank: [], hit_radius: 2, steps: [] }],
+    head_bone: 2, reactions: {}, attacks: {}, motions: { "10": {} },
+  };
+  const CHARS = {
+    types: { "1": TYPE },
+    placements: [
+      { at: 0x100, class: 0x30, char_type: 1, motion: 10, hp: 7, yaw: 0,
+        body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0 },
+      // ...and one the bundle cannot pose: no motion, so `build` rejects it.
+      { at: 0x200, class: 0x30, char_type: 1, motion: null, hp: 7, yaw: 0,
+        body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0 },
+    ],
+  };
+
+  const root = new Object3D();
+  const chrRig = (at: number, name: string): InstanceType<typeof Object3D> => {
+    const rig = new Object3D();
+    rig.name = name;
+    rig.userData = { hod2_kind: "rig", hod2_rig: "chr_test",
+                     hod2_spawn_at: at };
+    const bone = new Object3D();
+    bone.name = `${name}_bone00_1`;
+    rig.add(bone);
+    root.add(rig);
+    return rig;
+  };
+  const posed = chrRig(0x100, "chr_test_spawn000");
+  const unposed = chrRig(0x200, "chr_test_spawn001");
+
+  // The damaged-part templates ride in a rig of their own, and they are not
+  // this layer's either.
+  const gore = new Object3D();
+  gore.name = "gore_test_fixed000";
+  gore.userData = { hod2_kind: "rig", hod2_rig: "gore_test" };
+  root.add(gore);
+
+  // ...and one rig that really is `RigLayer`'s, because the block names it.
+  const owned = new Object3D();
+  owned.name = "obj_dead00_fixed000";
+  owned.userData = { hod2_kind: "rig", hod2_rig: "obj_dead00" };
+  root.add(owned);
+
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  check("a character with no motion is rejected and left hidden",
+        !unposed.visible);
+  check("...and one the layer adopted is hidden until its opcode runs",
+        !posed.visible);
+
+  const rigs = new RigLayer();
+  rigs.build(root, { rigs: [{ name: "obj_dead00", routes: [] }] } as never,
+             { objectPaths: new Map() } as never);
+  check("the layer adopts only the rigs its block names", rigs.count === 1,
+        `${rigs.count} of 4 tagged nodes`);
+  check("...so the panel lists rigs, not characters",
+        !rigs.list.some((r) => r.name.startsWith("chr_")),
+        rigs.list.map((r) => r.name).join(","));
+
+  rigs.update({ walker: null } as never);
+  check("a frame of the rig layer does not draw an unspawned character",
+        !posed.visible && !unposed.visible,
+        `${posed.visible} ${unposed.visible}`);
+  check("...nor the hidden damaged-part templates", !gore.visible);
+  check("and its own rig is placed", owned.visible);
+
+  stage.dispose();
+}
+
+/**
+ * B10: "the zombie loses its midriff on one shot".
+ *
+ * `SkeletonDrawNodeSlot` (`FUN_00411050`) hands `record[bone].slot` to
+ * `AssetDrawSlot` (`FUN_00418560`), which draws **one whole model**;
+ * `WalkMeshChainAndDraw` walks every mesh in its chain. The exporter writes
+ * that chain as one glTF node with one primitive per mesh, so a swap that
+ * takes only the first primitive draws a fraction of the damaged part. All 57
+ * of `char_adv02`'s damaged variants are multi-primitive and eight of its
+ * fifteen bones are single-primitive nodes, which is exactly the pairing that
+ * used to go wrong.
+ */
+console.log("\ngore swap: the whole damaged model, both shapes of bone");
+{
+  const { swapGore, restoreGore } =
+    await import("../src/render/characters/gore");
+  const { BufferGeometry, Mesh, MeshBasicMaterial, Object3D } =
+    await import("three");
+
+  type Node = InstanceType<typeof Object3D>;
+  type MeshNode = InstanceType<typeof Mesh>;
+
+  /** The geometries a subtree would actually put on screen. */
+  const drawn = (node: Node): Set<unknown> => {
+    const out = new Set<unknown>();
+    node.traverseVisible((o) => {
+      if ((o as MeshNode).isMesh) out.add((o as MeshNode).geometry);
+    });
+    return out;
+  };
+  const mesh = (): MeshNode =>
+    new Mesh(new BufferGeometry(), new MeshBasicMaterial());
+
+  // One damaged part, three meshes in its chain.
+  const tmpl = new Object3D();
+  tmpl.name = "gore_test_fixed000_gore_0041";
+  const prims = [mesh(), mesh(), mesh()];
+  for (const p of prims) tmpl.add(p);
+  const parts = new Map<number, Node>([[0x41, tmpl]]);
+  const want = new Set<unknown>(prims.map((p) => p.geometry));
+
+  // -- a single-primitive bone: glTF loads it as a `Mesh` and its child bone
+  //    hangs off it, so the node itself cannot be hidden.
+  {
+    const bone = mesh();
+    const own = bone.geometry;
+    const child = mesh();                       // the child *bone*, not a part
+    bone.add(child);
+    const inst = { bones: new Map<number, Node>([[3, bone], [4, child]]),
+                   gore: new Map() };
+    check("a single-primitive bone swaps",
+          swapGore(parts, inst as never, 3, 0x41));
+    const shown = drawn(bone);
+    check("...and draws all three meshes of the damaged part",
+          [...want].every((g) => shown.has(g)),
+          `${shown.size} drawn, ${want.size} wanted`);
+    check("...without leaving its own model in the picture",
+          !shown.has(own));
+    check("...and without disturbing the child bone",
+          child.visible && child.parent === bone && shown.has(child.geometry));
+
+    // The escalating hit: swapped again, the additions are replaced and the
+    // pristine model is still the one a seek puts back.
+    swapGore(parts, inst as never, 3, 0x41);
+    check("a second swap does not stack a second copy",
+          drawn(bone).size === want.size + 1, `${drawn(bone).size}`);
+    for (const [b, g] of inst.gore) restoreGore(inst as never, b, g);
+    const back = drawn(bone);
+    check("restoring puts the bone's own model back and takes the part off",
+          back.has(own) && back.size === 2
+          && ![...want].some((g) => back.has(g)), `${back.size}`);
+  }
+
+  // -- a multi-primitive bone: a `Group` whose children are its own primitives
+  //    *and* its child bones. Only the first kind may be hidden.
+  {
+    const bone = new Object3D();
+    const ownPrims = [mesh(), mesh()];
+    for (const p of ownPrims) bone.add(p);
+    const child = mesh();
+    bone.add(child);
+    const inst = { bones: new Map<number, Node>([[1, bone], [2, child]]),
+                   gore: new Map() };
+    check("a multi-primitive bone swaps",
+          swapGore(parts, inst as never, 1, 0x41));
+    const shown = drawn(bone);
+    check("...drawing the whole damaged part",
+          [...want].every((g) => shown.has(g)), `${shown.size}`);
+    check("...with its own primitives hidden",
+          !ownPrims.some((p) => shown.has(p.geometry)));
+    check("...and the limb below it still drawn",
+          shown.has(child.geometry));
+    for (const [b, g] of inst.gore) restoreGore(inst as never, b, g);
+    check("restoring takes the clone off again",
+          ![...want].some((g) => drawn(bone).has(g)));
+  }
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

@@ -194,11 +194,18 @@ export class CharacterLayer implements System {
 
     // The hidden per-type templates holding the damaged parts. One copy each;
     // a swap clones from here, which shares geometry and material in three.js.
+    //
+    // **The rig root is hidden, not only the parts it holds.** A swap clones a
+    // part and re-parents the copy onto a bone, so nothing it draws depends on
+    // the template being visible — while a part whose name the slot pattern
+    // below does not match would otherwise be left standing in the level as a
+    // body part with no body.
     root.traverse((o) => {
       const x = o.userData as { hod2_kind?: string; hod2_rig?: string };
-      if (x?.hod2_kind !== "rig_part") return;
-      const rig = x.hod2_rig ?? "";
+      const rig = x?.hod2_rig ?? "";
       if (!rig.startsWith("gore_")) return;
+      if (x?.hod2_kind === "rig") { o.visible = false; return; }
+      if (x?.hod2_kind !== "rig_part") return;
       const m = /_gore_([0-9a-f]{4})$/.exec(o.name);
       if (m) {
         this.goreParts.set(Number.parseInt(m[1], 16), o);

@@ -30,26 +30,42 @@ bug rather than a missing feature.
 Characters with no motion rule keep their spawn marker. See
 docs/formats/mot.md and docs/formats/spawns.md.
 
-**[open] The waist is missing on the humanoids.** Assembled and posed,
-`char_adv00`'s torso (bone 1) occupies ``y 0.25..4.25`` and its pelvis (bone 9)
-``-3.55..-0.96``, leaving a 1.2-unit hole where an abdomen should be. This is
-not a client bug -- it is in `export_character.py`'s output too -- and it is not
-a broken parent chain: the two are separate roots in the EXE skeleton, which is
-what `FUN_00410590` iterates.
+**The waist was missing on the humanoids, and it is the extra-part list.**
+`charbuild.extra_parts` reads ``EXTRA_PARTS`` (0x0052ED08) and
+`charbuild._second_root` hangs what it names off the **pelvis** root; slot
+``0x1F02`` -- the one that sits between `char_adv00`'s bone slots ``0x1F00,
+0x1F01, 0x1F03, 0x1F06`` -- is that character's abdomen, and with it in place
+the render matches the game. The bundle carries one per spawn: 32 of stage 2's
+`char_adv00` hierarchies have a ``_extra0_1f02`` node. `[proved]`
 
-What is known: `char_adv00.bin` holds 113 models and the skeleton names only
-15, and the unused ones include slot ``0x1F02``, which sits *between* the bone
-slots ``0x1F00, 0x1F01, 0x1F03, 0x1F06 ...``. Those interleaved gaps are most
-likely the shot-off damage variants class 0x30 switches between, not a missing
-limb. `FUN_004107E0` writes exactly one slot per bone into the draw record and
-`FUN_00411050` draws that one slot, so the game really does draw 15 parts.
+The old guess in this docstring was that the gap was in the skeleton walk. It
+was not: `FUN_004107E0` writes exactly one slot per bone into the draw record,
+`FUN_00411050` (`SkeletonDrawNodeSlot`) draws that one slot through
+`AssetDrawSlot`, and ``PTR_DAT_004D032C[char_type]`` -- the untested lead --
+turned out to be the per-bone **hit sphere** (`combat.HIT_SPHERES`), which is
+why its first word is compared against the node's slot.
 
-The untested lead is the second per-bone table `FUN_004107E0` consults:
-``PTR_DAT_004D032C[char_type]``, stride ``0x14``, indexed ``bone - 1``. It
-compares its first word against the node's asset slot and, on a match, copies
-three more words plus a scale into the draw record. What those are has not been
-established. The cat is unaffected -- 18 models, 18 bones, a clean 1:1 -- so
-whatever this is, it is a humanoid thing.
+**[open] Twenty-one character types have no extra part, and one shows it.**
+``EXTRA_PARTS`` is a null pointer for 21 of the 86 types that have a skeleton
+-- the cat and most of the bosses among them, where nothing is obviously
+missing. Type 0 is `char_adv02`, the commonest zombie, and it is: its
+*undamaged* torso model (slot ``0x1B3D``) reaches ``y -2.0..5.5`` and covers
+its own abdomen, so it looks right until it is shot. The first two damaged
+stages of bone 1, slots ``0x1B70`` and ``0x1B71``, are **chest-only** --
+``y 1.3..5.5``, and the parse is exact, 124 and 102 vertices against the
+model's own declared counts -- so from the first torso hit until the third
+there is nothing drawn between the pelvis (top at ``y -0.45``) and the chest.
+
+What has been ruled out for the missing band: `AssetDrawSlot` (`FUN_00418560`)
+draws one model per slot, so a bone cannot draw two; `FUN_004122E0`, the only
+other thing `SkeletonDrawWalk` consults per node, **suppresses** a draw rather
+than adding one, and only for bone 9 on ten named slots; and `harold.bin`
+carries five lower-torso models at slots ``0x1B6B..0x1B6F``, of exactly the
+missing extent and exactly as many as bone 1 has damage stages, which **no
+table in the EXE references** -- an exhaustive scan finds the run only in the
+`pol/` slot lists themselves. Whether the retail game shows the same hole is
+undetermined; if it does not, something outside the skeleton walk draws it.
+See `web/src/render/characters/gore.ts`.
 """
 
 from __future__ import annotations

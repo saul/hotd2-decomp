@@ -14,9 +14,9 @@
  * * **Notifications out** — `onFeed`, `onBranch`, `startCamera`. These want
  *   to be events on the bus, not host methods; the script is telling, not
  *   asking.
- * * **Questions about the world** — `aliveEnemies`, `aliveCivilians`,
- *   `cameraFree`. The genuinely irreducible part, and the read-only port the
- *   doc says should be all that survives.
+ * * **Questions about the world** — `aliveEnemies`, `presentEnemies`,
+ *   `aliveCivilians`, `cameraFree`. The genuinely irreducible part, and the
+ *   read-only port the doc says should be all that survives.
  * * **Output devices** — `playSound`, `setShutter`, `showMessage`,
  *   `endDialogue`. Audio and the screen-space layer, reached directly.
  *
@@ -58,6 +58,10 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // Null unless Shoot is on: only then is there anything that can make
     // the count fall, so only then is the gate a real condition.
     aliveEnemies: () => p.shooting.isEnabled ? G.g_enemies_alive : null,
+    // `g_enemies_present` — the other one, for `wait_enemies_present` (0x43).
+    // Same counters file, same two classes, different retire: a corpse is
+    // still present. Null on the same terms as the alive count.
+    presentEnemies: () => p.shooting.isEnabled ? G.g_enemies_present : null,
     // `g_civilians_alive` is maintained by the class-0x10 port itself --
     // `CivilianInit` raises it, op 0x2C's `LeaveCountNow` and the removal
     // path drop it -- so this is the engine's own counter, not a restatement

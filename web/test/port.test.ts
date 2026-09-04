@@ -3787,6 +3787,58 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
           `dead ${z.dead} state ${z.state}`);
   }
 
+  // **B6 — an ordered captor still needs its target script.**
+  //
+  // A captor whose descriptor starts it in state 39 is put into a state by
+  // the civilian, and `ZombieScriptForState` (`FUN_0045CA10`) then hands *that*
+  // state the tail+0x04 blob. The exporter used to decode that blob with state
+  // 39's header shape, which does not exist, so it exported `null` — and this
+  // state reads a zero arrive radius out of a missing script and walks at the
+  // civilian for ever. Stage 1 block 9's 0x4B74 and 0x4BD0 are the two that
+  // did it; their real header is `arrive 12.0, motion 1026`.
+  //
+  // The producer is checked by `tools/verify_captor_scripts.py`; this is the
+  // consumer, and it is the assertion that says a null script is not survivable
+  // rather than merely unusual.
+  {
+    const ordered: TargetScriptJson = {
+      state: ZombieState.WalkToTarget,
+      head: { arrive: 12, loops: 1, motion: 10, frame: 0 },
+      entries: [{ motion: 10, frame: 0, loops: 1, mode: 5 }],
+    };
+    const { civ, z, events } = captorScene(ZombieState.AwaitCivilianOrder,
+      ZombieState.WalkPastPoint, ordered,
+      [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
+        { op: CivilianOp.SetChildCue, args: [ZombieState.WalkToTarget, 2] },
+        { op: CivilianOp.Wait, args: [0] },
+        { op: CivilianOp.End, args: [] }]]);
+    zFrame(z, events);                       // sub 0 -> 1
+    zFrame(z, events);                       // takes the order
+    check("an ordered captor enters the state its civilian named",
+          z.state === ZombieState.WalkToTarget, `state ${z.state}`);
+    zFrame(z, events);
+    check("...and reads the tail+0x04 header the order's state gives it",
+          z.zom.targetArrive === 12, `arrive ${z.zom.targetArrive}`);
+    z.pos = vec3(0, 0, 6);                   // inside 12, outside the old 0
+    zFrame(z, events);
+    check("...so it can arrive, and hand over to the maul",
+          z.state === ZombieState.TargetMotionScript, `state ${z.state}`);
+    check("...which is what frees the civilian",
+          (civ.civ!.wait & CivilianWait.Free) !== 0,
+          `wait ${civ.civ!.wait.toString(16)}`);
+  }
+  {
+    // The failure itself, stated: with no script the radius is zero and the
+    // captor can never reach it, whatever it does.
+    const { z, events } = captorScene(ZombieState.WalkToTarget, 1, null);
+    zFrame(z, events);
+    z.pos = vec3(0, 0, 0.5);
+    zFrame(z, events);
+    check("a captor with no target script has a radius nothing satisfies",
+          z.zom.targetArrive === 0 && z.state === ZombieState.WalkToTarget,
+          `arrive ${z.zom.targetArrive} state ${z.state}`);
+  }
+
   // The script ends by flipping roles, and only the *attack* script running
   // out sends the actor at the player.
   {

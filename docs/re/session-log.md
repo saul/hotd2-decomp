@@ -9503,3 +9503,107 @@ yet". Both were merge residue from arms landing in sequence, and the checker
 that catches an unused directive cannot catch a comment that describes the
 wrong line. The real directive count is **30**; an earlier note in this session
 said 33, which was a `grep` counting prose mentions of the string.
+
+## Three class-0x30 bugs: a second motion track, a row that ignored the body condition, and a header shape read off the wrong state
+
+### B5 — the swing outlives the actor because the port has two tracks
+
+`ZombieStateStrike` (`FUN_00455A40`) plays both the lunge and the swing on the
+actor's **ordinary** motion — `FUN_004119A0(obj+0x194, entry->strike, 0, 5)` at
+0x00455B8A, exiting on `g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C`.
+There is no second channel anywhere in the class. The port invented one
+(`Actor.action`) because `render/characters/pose.ts` has to hold the swing at
+full weight while the walk keeps its clock, and `pose()` gives it precedence
+over `obj.motion`.
+
+So `ZombieOnShot` (`FUN_00453EB0`) setting state 6 on the frame of the kill,
+and `ZombieStateDeath6` calling `ChooseDeathMotion` on that same frame, did
+everything right and changed nothing on screen: `obj.action` still held the
+bite, the poser still drew it, and only when the clip ran out did the actor
+fall. **"They finish their swing then immediately die" was one missing edge**,
+not a state-machine fault — the whole death chain was already correct.
+
+The fix is where the engine's own coincidence lives: `ActorSetMotion` and
+`ActorSetMotionBlended` are the two routines that write that single track, so
+in the port they end the one-shot on it, fading out of the swing rather than
+out of the base clip. Every state that sets a motion inherits it.
+
+Worth keeping in mind for the next one: **`obj.action` is the port's, and any
+engine routine that writes `obj+0x1B4` must be assumed to end it.**
+
+### B12a — `ActorPlayHitReaction` read row zero for every actor
+
+```
+004544e5  0fbf86f4010000    MOVSX EAX, word ptr [ESI + 0x1f4]     ; character
+004544ec  8b8e0c130000      MOV   ECX, dword ptr [ESI + 0x130c]   ; condition
+004544f9  8b98c82f5900      MOV   EBX, dword ptr [EAX + 0x592fc8]
+0045450a  8b1c0b            MOV   EBX, dword ptr [EBX + ECX]      ; the row
+```
+
+The annotation on `FUN_004544C0` had said `g_pHitReactionMotions[char][obj+
+0x130C][group]` since it was written; the port read `reactions["0"]`. Twenty-one
+character types carry a second row at body condition 3 — motions 257–263, 43
+frames against 29 — and nothing in the port could reach it. `[proved]`
+
+It is **not** why a crawler stands up when it is shot: `znkager`'s condition-4
+row is `0x00567850`, byte-identical to its condition-0 row, so the engine picks
+the same standing stumble. Reading the table before believing the symptom is
+what stopped a plausible fix being made to the wrong place.
+
+### B12b — the crawler's own attack cannot land, in the engine
+
+`znkager` is character type 12 and every one of its 20 spawns carries body
+condition 4. Its cond-4 pick row is ten 2s then ten 3s, so an undamaged crawler
+always draws attack **2**:
+
+```
+00566e70  e5 03  1b 04  00 00 d0 41  28 00  09 00  01 00  00 00
+          ^997   ^1051  ^26.0f       ^40 hit frame
+```
+
+and `g_motion_play_length[997]` is `0x0014` = 20 at 0x004E0F9A. The hit lands on
+`obj+0x19C == 40` and the state leaves at 19, so **clip 997 never reaches its
+own hit frame**. `hod2lib/combat.py` rejects the entry for exactly that reason
+and the port then falls back to attack 3, which is a different clip that *does*
+connect — the port is currently more dangerous than the game here. Recorded as
+a `[diverges]` in `class30/strike.ts` rather than fixed, because the faithful
+version means baking a clip and keeping an entry the exporter is currently
+right to call impossible.
+
+The crawler also flip-flops `HoldAtRange` ↔ `BackOff` once per frame for about
+ninety frames after it arrives, because condition 4's retreat exit is `ring *
+0.7 < d` while the hub's entry is `d < ring - 1`, and 0.7·25 < 24. Both tests
+were re-read against 0x004557AE and 0x00455D60 and **the port matches the exe on
+both**, so this is the engine's own behaviour and was left alone.
+
+### B6 — the header shape belongs to the state that reads the blob
+
+`ZombieScriptForState` (`FUN_0045CA10`) is `state == tail[3] ? tail+0x08 :
+tail+0x04`. The exporter decoded tail+0x04 with the header shape of
+**tail[1]**, the descriptor's initial state — which is right for 63 of the 69
+captors and wrong for the six whose initial state is 39,
+`ZombieStateAwaitCivilianOrder`. Those are put into a state by their civilian's
+op 0x1A (`0045BB4F: obj+0x1310 = sub+0x2C`, then the handler is called on the
+spot), and it is *that* state's shape the blob is read under. 39 has no shape,
+so the exporter emitted `target_script: null`, and
+`ZombieStateWalkToTarget` took `arrive` and `motion` as zero: a radius nothing
+satisfies, and two zombies walking at a hostage for ever.
+
+Six for six, the ordered state is the one that decodes:
+
+| spawn | ordered | tail+0x04 under that shape |
+|---|---|---|
+| 1 · 0x3D24 | 36 | one entry, motion 967, flag 34 |
+| 1 · 0x4B74 | 34 | arrive 12.0, motion 1026 |
+| 1 · 0x4BD0 | 34 | arrive 12.0, motion 1022 |
+| 2 · 0x52AC | 35 | one entry, motion 968 |
+| 2 · 0xA08C | 35 | one entry, motion 178 |
+| 2 · 0xA0E0 | 35 | one entry, motion 183 |
+
+and no other shape gives any of them a terminating, plausible list.
+`verify_captor_scripts.py` went from 99 scripts to 105 and from 69 spawns to
+70 — its docstring had claimed the odd one "reads the civilian's own block
+rather than a script of its own", which was a guess standing in for a reading.
+
+**A bundle re-export is needed before this reaches the player**; the change is
+in `hod2lib`, not in the JSON that is already on disk.

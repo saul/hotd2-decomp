@@ -42,9 +42,33 @@ export function ZombiePickAttack(obj: ZombieActor, rng: Rng): number {
   const picks = AttackPicksOf(obj);
   const v = picks[rng.int(10) + (obj.zones & DamageZone.All) * 10];
   if (v !== undefined && list[String(v)]) return v;
-  // The pick named an entry the exporter filtered out -- those are the
-  // destroyed-zone rows the game itself would read as a zero motion. Fall back
-  // to any usable attack rather than freezing mid-swing.
+  // [diverges] The pick named an entry the bundle does not carry, and this
+  // reaches for another. That is **not** what the engine does: it indexes the
+  // table blind and plays whatever is there.
+  //
+  // The case it matters in is the crawler. `znkager` (character type 12, body
+  // condition 4 on every one of its 20 spawns) has a cond-4 pick row of ten
+  // 2s followed by ten 3s, so an undamaged one always draws attack **2** —
+  // and attack 2 is
+  //
+  // ```
+  // 00566e70  e5 03  1b 04  00 00 d0 41  28 00  09 00  01 00  00 00
+  //           ^997   ^1051  ^26.0f       ^40    ^9     ^mask 1
+  // ```
+  //
+  // whose hit frame is 40 against `g_motion_play_length[997]`, which is
+  // `0x0014` = **20** at 0x004E0F9A. `ZombieStateStrike` lands the hit on
+  // `obj+0x19C == entry[4]` and leaves at `play_length - 1`, so clip 997 can
+  // never reach frame 40: **in the engine an undamaged crawler swings and
+  // misses, every time.** `tools/hod2lib/combat.py` drops the entry for
+  // exactly that reason ("a hit frame at or past the clip's length means the
+  // entry was not really there"), which leaves the port with only attack 3 —
+  // a *different* clip, at hit frame 3, that does connect.
+  //
+  // So the port is currently more dangerous than the game here, and the
+  // faithful fix is to keep the entry and bake clip 997 so the swing whiffs
+  // the way the engine's does. That is an exporter change and a change to what
+  // `attack_tables` is allowed to reject, so it is the user's call. `[proved]`
   const keys = Object.keys(list);
   return keys.length ? Number(keys[0]) : -1;
 }

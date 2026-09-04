@@ -154,6 +154,20 @@ CLASS31_LITERAL_MOTIONS = {
     0x215, 0x1FE, 0x1F4, 0x206, 0x216, 0x1FF, 0x1F5, 0x207,
     # `ThrowerStateThrow`'s character-0x18 branch.
     0x1F7, 0x1F6, 0x1FC, 0x1FB, 0x1F2, 0x1F1, 0x204, 0x203,
+    # `ThrowerStateRearm` (state 29), and it is not a typo: character 0x16's
+    # re-arm clip really is id **5**. `0044f7b9 6a05` / `0044f7c6 6a05` --
+    # `SetCurrentActorMotionBlended(obj+0x194, 5, 0, 5)`, the fade and the id
+    # both 5. Leaving it out is what let a `zsass` that had thrown once
+    # flip-flop between state 7 and state 29 for ever: the state ran with no
+    # clip, so its **midpoint** never arrived, the hands were never re-armed,
+    # `ThrowerHasBareHand` (`FUN_0044F720`) stayed true, and state 7's
+    # `ThrowerTryEnterState(0x1D)` accepted every frame -- which pre-empts
+    # `ThrowerPickNextState` and with it the only route to state 8. The actor
+    # never attacked however close it got.
+    0x005,
+    # `ThrowerStateFallAndLand` (state 2)'s get-up, for every type but 0x17:
+    # `0044a788 681b010000` then the call at 0x0044A78E.
+    0x11B,
 }
 
 

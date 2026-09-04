@@ -10465,3 +10465,74 @@ those offsets, the answer is `motion 1048, cue 150`, 1048 is a real 60-frame
 floating (snapped to `y 6.20` and holding, so that is the floor), and 1047/1048
 are not a swapped pair of door halves (`char_adv01` has 1048 and not 1047).
 `[open]`, and it wants eyes on the render rather than another reading.
+
+## One number missing from a hand-kept list, and a `zsass` never attacks again
+
+Reported: at stage 2 block 17 step 7, `0xBA90 zsass` closes on the camera and
+walks through it, and nothing forces an attack when it is in range.
+
+The route to an attack at close range is one function.
+`ThrowerStateStandAndDecide` (`FUN_0044B180`, state 7) ends:
+
+```c
+if (char == 0x18) { if (ThrowerTryEnterState(0x1E) == 1) goto done; }
+else              { if (ThrowerTryEnterState(0x1D) == 1) goto done; }
+if (obj+0x1310 != 0xB) ThrowerPickNextState(obj);
+```
+
+and `ThrowerPickNextState` (`FUN_0044ADB0`) is the *whole* of "attack when it
+gets close": `d <= 30.0` writes state 8, which claims a permit and pounces.
+**So a state-29 proposal that is always accepted pre-empts the router
+entirely**, and the actor can be standing on the lens and never ask.
+
+State 29 is `ThrowerStateRearm`, gated on `ThrowerHasBareHand`
+(`FUN_0044F720`) — which reads the two hand **draw slots**, `obj+0x4DC` and
+`obj+0x68C`. `ThrowerStateRearm` plays motion **5** and, at that clip's exact
+**midpoint**, swaps each bare slot back to its armed one and clears the
+matching `obj+0x1318` zone bit. The re-arm is the only thing that can make
+`ThrowerHasBareHand` false again.
+
+Motion 5 was not in `hod2lib.class31.CLASS31_LITERAL_MOTIONS`. So it was baked
+for no character at all, `MotionOf` returned nothing, `playOnce` set no action,
+`ActorClipFrame` returned **-1** — and `-1 >= trunc(len / 2)` is false, so the
+midpoint the whole state exists for never arrived. The state ran to completion
+in a single frame with no clip, the hands stayed bare, and state 7 proposed it
+again immediately. Measured on the real camera: **7 ↔ 29, every frame, for
+ever**, from the first throw onward, with the router never once reached while
+the idle's root motion carried the actor forward.
+
+`0x11B` — `ThrowerStateFallAndLand`'s get-up, `0044a788 681b010000` — was
+missing from the same list. A sweep of the nine call sites of
+`SetCurrentActorMotionBlended` (`FUN_0044D230`) plus the direct callers of
+`FUN_004119A0`/`FUN_00411930` inside class 0x31's range found no third: states
+2 and 29 were the two gaps, and states 1, 3, 17, 30 and 34 all check out.
+
+### The list is the hazard, and it now has a checker
+
+`CLASS31_LITERAL_MOTIONS` exists because most class-0x31 motion ids arrive
+through `g_class31_motion_sets` and the attack tables — which the exporter
+collects from the data — while a handful of states name a clip inline, where
+nothing collects them. Its own comment already said *"Leaving these out is not
+a subtle failure"*, and it had been wrong twice anyway. A hand-kept list whose
+omissions are silent will go stale again.
+
+The port names the same ids in its own `const`s, so the two halves can be
+checked against each other, and `verify_port.py` does it now — plus the
+bundle, because a listed id can still be refused by `bake`. The bundle arm's
+claim is deliberately weak (*some* class-0x31 character carries each id):
+which type may reach which clip is a per-state rule, and asserting one nobody
+has read would be a guess. Baked for nobody is the failure that happened.
+
+Both arms were watched failing before they were trusted.
+
+### What the harness had to become
+
+`tools/zombies.mjs` seats its eye on an enemy and leaves it there, which is
+fine for a state trace and useless here: every threshold in this bug is a
+distance to `g_camera_eye`. The repro drives the real `Walker` and the real
+`GameSystem` the way `tools/cam_cues.mjs` does, and additionally evaluates the
+camera path itself — `CamPaths` from the stage's `cam.json`, then
+`CamSeatPathFrame` each tick before `syncPortGlobals`. `cam_cues.mjs` gets away
+without that because its own question is about the *frame number*; anything
+asking about **where the camera is** has to seat it, or every distance in the
+trace is measured from the origin.

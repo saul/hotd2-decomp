@@ -388,6 +388,88 @@ def check_snapshot_rules() -> None:
                         "so it cannot be snapshotted -- put it in `G`")
 
 
+def check_class31_literal_clips() -> None:
+    """Every clip a class-0x31 state names as a literal must be baked.
+
+    Class 0x31's motion ids mostly arrive through `g_class31_motion_sets` and
+    the attack tables, and the exporter collects those from the data. A handful
+    of states name a clip **inline** instead, and nothing collects those -- so
+    `hod2lib.class31.CLASS31_LITERAL_MOTIONS` is a hand-kept list, which is
+    exactly the shape that goes stale. The port names the same ids in its own
+    `const`s, and the two halves had drifted twice:
+
+    * `REARM_CLIP` (5), `ThrowerStateRearm` (`FUN_0044F7A0`). Without the clip
+      the state ran with no motion, so its **midpoint** -- where the hands are
+      re-armed -- never arrived. `ThrowerHasBareHand` (`FUN_0044F720`) stayed
+      true for ever, `ThrowerStateStandAndDecide`'s
+      `ThrowerTryEnterState(0x1D)` accepted every frame, and that **pre-empts**
+      `ThrowerPickNextState` -- the only route to state 8. A `zsass` that had
+      thrown once walked into the camera and never attacked again.
+    * `GET_UP_CLIP` (0x11B), `ThrowerStateFallAndLand` (`FUN_0044A450`).
+
+    So this is the producer and the consumer checked against each other, which
+    is the only thing that could have caught either: a missing clip is not an
+    error anywhere -- `MotionOf` simply returns nothing and the state falls
+    through.
+    """
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        from hod2lib.class31 import CLASS31_LITERAL_MOTIONS as baked
+    except ImportError as exc:                       # pragma: no cover
+        failures.append(f"cannot read CLASS31_LITERAL_MOTIONS: {exc}")
+        return
+    lit = re.compile(r"^const\s+([A-Z][A-Z0-9_]*(?:CLIP|MOTION))\s*"
+                     r"(?::\s*number\s*)?=\s*(0x[0-9a-fA-F]+|\d+)\s*;", re.M)
+    found = 0
+    named_lits: set[tuple[str, int]] = set()
+    for path in sorted((GAME / "class31").glob("*.ts")):
+        for name, value in lit.findall(path.read_text()):
+            found += 1
+            n = int(value, 0)
+            named_lits.add((name, n))
+            if n in baked:
+                continue
+            failures.append(
+                f"web/src/game/class31/{path.name}: {name} = {value} is not in "
+                f"CLASS31_LITERAL_MOTIONS, so the exporter never bakes it and "
+                f"the state it belongs to plays no clip at all")
+    # ...and the same question of the bundle, when there is one. The list
+    # being right is not the same as the clip surviving `bake`, which refuses a
+    # motion whose implied bone count is not the character's.
+    #
+    # The claim is deliberately weak — **some** class-0x31 character carries
+    # each id — because which types may reach which clip is a per-state rule
+    # (state 29 is character 0x16's alone, state 2's get-up is every type but
+    # 0x17) and asserting one this file has not read would be a guess. Baked
+    # for nobody is the failure that actually happened.
+    stages = sorted((ROOT / "extract" / "player").glob("stage*/stage*.script.json"))
+    if not stages:
+        notes.append(f"{found} class-0x31 literal clip ids check out against "
+                     f"the exporter's bake list (no bundle to check them in)")
+        return
+    import json
+    carried: set[int] = set()
+    types31: set[int] = set()
+    for path in stages:
+        doc = json.loads(path.read_text())
+        chars = doc.get("characters") or {}
+        for p31 in chars.get("placements") or []:
+            if p31.get("class") == 0x31:
+                types31.add(p31["char_type"])
+        for key, t in (chars.get("types") or {}).items():
+            if int(key) not in types31:
+                continue
+            carried |= {int(m) for m in (t.get("motions") or {})}
+    for name, n in sorted(named_lits):
+        if n not in carried:
+            failures.append(
+                f"class-0x31 clip {name} = 0x{n:X} is baked for no character "
+                f"type in extract/player -- the state that names it plays no "
+                f"clip at all, and nothing else will say so")
+    notes.append(f"{found} class-0x31 literal clip ids check out against the "
+                 f"exporter's bake list and {len(stages)} exported stages")
+
+
 def check_docs_citations(named: dict[str, str]) -> None:
     """`docs/` cites the binary too, and nothing was checking those.
 
@@ -442,6 +524,7 @@ def main() -> int:
     check_divergences()
     check_classes()
     check_snapshot_rules()
+    check_class31_literal_clips()
     check_docs_citations(named)
 
     for n in notes:

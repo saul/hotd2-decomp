@@ -1157,6 +1157,32 @@ front of the camera, tumbling, and costs a life on arrival: the hit is timed,
 not tested. Throwing leaves the hand bare and sets the arm's destroyed-zone
 bit, so the cancel mask treats a thrown arm and a shot-off one alike.
 
+**And it re-arms, which turns out to hold the whole state machine up.**
+`ThrowerStateStandAndDecide` (`FUN_0044B180`) offers state 29 to
+`ThrowerTryEnterState` and asks `ThrowerPickNextState` (`FUN_0044ADB0`) only if
+that is refused — and the router is the *whole* of "attack when it gets
+close": `d <= 30` writes state 8, which claims a permit and pounces. So a
+state-29 proposal that is always accepted pre-empts the router entirely, and
+the actor can be standing on the lens without ever asking.
+
+That is what happened. `ThrowerStateRearm` (`FUN_0044F7A0`) plays motion **5**
+and swaps each bare hand slot back to its armed one at that clip's exact
+**midpoint**; `ThrowerHasBareHand` (`FUN_0044F720`) reads those same slots, so
+the re-arm is the only thing that can make the gate false again. Motion 5 was
+missing from the exporter's `CLASS31_LITERAL_MOTIONS`, so it was baked for
+nobody, `ActorClipFrame` returned `-1`, the midpoint never arrived — and the
+hub proposed the re-arm again the very next frame. **7 ↔ 29, every frame, for
+ever**, from the first throw on, while the idle's root motion walked the actor
+into the camera. `0x11B`, `ThrowerStateFallAndLand`'s get-up, was missing from
+the same list.
+
+The list is hand-kept because most class-0x31 clip ids arrive through the
+motion sets and the attack tables, which the exporter collects from the data,
+while a handful of states name one inline. Its omissions are silent —
+`MotionOf` returning nothing is not an error anywhere — so `verify_port.py`
+now checks the port's own class-0x31 clip constants against the list, and
+against the exported bundle.
+
 **Class 0x31's wall-crawler is in.** `zstin.bin` — stage 2's knife zombie, the
 one at `17/5` — does not walk at you and swing. It walks in the distance its
 descriptor names, and from then on it is driven by a **pick table**: at 40–50

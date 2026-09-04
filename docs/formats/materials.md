@@ -276,7 +276,7 @@ So clamp **and** flip together gives `MIRROR`, not clamp.
 Fog and lighting are **scene** state, not per-mesh — only the *enable* is per
 mesh (TSP bit 23, inverted). Both live in the light block evt opcodes
 `0x17`–`0x27` drive, and both are pushed to the device from the per-frame
-scene update `FUN_00401F40`.
+scene update `UpdateSceneViewAndLight` (`0x00401F40`).
 
 #### Fog range is doubled — [proved]
 
@@ -307,10 +307,8 @@ SetFogColour((g_scene_fog_r << 8 | g_scene_fog_g) << 8 | g_scene_fog_b);
 
 `SetFogColour` (`0x004ABDD0`) passes it to `D3DRENDERSTATE_FOGCOLOR` (`0x22`)
 and does nothing else. `g_scene_fog_r/g/b` (`0x009A3564/68/6C`) are the integer
-form of light-block channels **2, 3 and 4** — `FUN_00460250` seeds them
-`255/0/0` alongside the mirrored float channel array at
-`0x009C89E4 + channel*0x10`, which is what pins the channel numbering:
-`0 = near, 1 = far, 2/3/4 = fog RGB as floats 0…255, 6/7/8 = light RGB`.
+form of light-block channels **2, 3 and 4** — see the channel map below, which
+`ApplyLightChannelOperand` states outright.
 
 Two things follow, and they are the difference between the right colour and a
 colour that is two to five times too bright:
@@ -323,6 +321,34 @@ colour that is two to five times too bright:
   sRGB write path and no gamma stage to opt into. A renderer that mixes in
   linear light and encodes afterwards computes a different sum — over a dark
   surface at half fog it lands about `10/255` too bright.
+
+#### The eleven light-block channels — [proved]
+
+`ApplyLightChannelOperand` (`0x0040B3F0`) is the body of evt opcodes `0x20` and
+`0x24`, and its `switch` on the channel index **is** the channel map. These are
+dword offsets into the block at `g_scene_light_block0` (`0x009A3540`):
+
+| ch | block | global | |
+|---:|---|---|---|
+| 0 | `[0x0C]` +0x30 | `g_scene_fog_near` | |
+| 1 | `[0x0D]` +0x34 | `g_scene_fog_far` | |
+| 2 | `[0x09]` +0x24 | `g_scene_fog_r` | |
+| 3 | `[0x0A]` +0x28 | `g_scene_fog_g` | |
+| 4 | `[0x0B]` +0x2C | `g_scene_fog_b` | |
+| 5 | — | — | writes 2 and 3, then **falls through** into case 4 |
+| 6 | `[0x90]` +0x240 | `g_scene_light_colour_r` | |
+| 7 | `[0x91]` +0x244 | `g_scene_light_colour_g` | |
+| 8 | `[0x92]` +0x248 | `g_scene_light_colour_b` | |
+| 9 | — | — | writes 6, 7 and 8 |
+| 10 | `[0x93]` +0x24C | `g_scene_light_ambient` | |
+
+Each case also writes a parallel **tween block** (`g_light_tween_block0`,
+`0x009C89E0`) at dword indices `1, 5, 9, 0xD, 0x11, 0x15, 0x19, 0x1D, 0x21` —
+stride `0x10`, value at `+4`. That is **nine** slots for eleven channel
+numbers, because the two aliases have none: the tween index is a *compacted*
+one (`0,1,2,3,4,6,7,8,10 → 0…8`) and coincides with the channel number only up
+to 4. Reading the map off that array rather than off this `switch` puts every
+channel from 6 up one slot out.
 
 #### Fog is per-pixel and planar — [proved]
 
@@ -347,17 +373,38 @@ fog on a wall shifts as the camera turns.
 
 #### The directional light — [proved]
 
-`SetLightingDefaultSingle` (`0x004AA120`) is short enough to give in full:
+`SetLightingDefaultSingle` (`0x004AA120`) is short enough to give in full.
+The decompiler drops every FPU argument in it — `__ftol()` with no arguments,
+`unaff_EDI` — so this is from the disassembly, with the constants read out of
+the image at `0x00570F5C` (255.0), `0x00565DE4` (1.4) and `0x004C4D10` (0.3):
 
 ```c
-SetRenderState(D3DRENDERSTATE_AMBIENT, pack_argb(ambient));
-light.diffuse  = light_colour * 1.4;      /* block +0x240..+0x248 */
-light.specular = light.diffuse;
-light.ambient  = light_colour * 0.3;
+t = light_colour * ambient;                       /* [esp+0xC/0x10/0x14] */
+SetRenderState(D3DRENDERSTATE_AMBIENT, 0xFF000000 | pack(t * 255));
+light.diffuse  = t * 1.4;                         /* block +0x240..+0x248 */
+light.specular = light.diffuse;                   /* copied dword-for-dword */
+light.ambient  = light_colour * 0.3;              /* NOT scaled by ambient */
 light.direction = g_render_light_dir;
 SetLight(0, &light);  LightEnable(0, TRUE);
 for (i = 1; i < 16; i++) LightEnable(i, FALSE);
 ```
+
+**Channel 10 is a master brightness, not an ambient term.** It multiplies the
+light colour into the D3D ambient render state *and* into the light's diffuse,
+so lowering it dims the directional light with it; only `light.ambient`
+escapes. And the render-state ambient is `colour * ambient` — **tinted**, never
+a neutral grey. In the fixed-function sum the two ambients add, so with one
+unattenuated light the total ambient multiplier is `colour * (ambient + 0.3)`.
+
+An earlier version of this section had `pack_argb(ambient)` and
+`light.diffuse = light_colour * 1.4`. Both were wrong, and the browser player
+was built from them.
+
+The D3DLIGHT7 at `0x007E79C0` is laid out `+0x04` diffuse, `+0x14` specular,
+`+0x24` ambient, `+0x40` direction. The three `ftol` conversions truncate and
+are **not** clamped, so a `colour * ambient` product above 1.0 would carry into
+the next byte of the packed D3DCOLOR — `[open]` whether any shipped script does
+it.
 
 `BuildSceneLightDirection` (`0x0040E0B0`) makes the direction by rotating
 `(0, 0, 1)` — `MatrixRotateY(yaw)` then `MatrixRotateX(pitch)`, both BAMS

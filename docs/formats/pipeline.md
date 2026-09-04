@@ -507,7 +507,7 @@ condition holds.
 **[open] How a `cam/` path is selected has not been traced.** The camera is
 evaluated by `FUN_004041E0(slot, t, …)` reading a global path slot; what writes
 that slot is not yet found. Opcodes `0x18`/`0x19` were an earlier guess and are
-**wrong** — they write view+0x18/+0x1C, which `FUN_00401F40` passes to
+**wrong** — they write view+0x18/+0x1C, which `UpdateSceneViewAndLight` (`0x00401F40`) passes to
 `FUN_0040E0B0` as *rotation angles*, not path ids.
 
 What is certain is that the camera and the script share a world space: **[measured]**

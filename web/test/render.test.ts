@@ -65,8 +65,11 @@ const { ownResources, subtreeResources } = await import("../src/render/scope3d")
 const { FreeRoam, isTyping } = await import("../src/render/freeroam");
 const { RigLayer } = await import("../src/render/rigs");
 const { CamPaths } = await import("../src/game/camera/curve");
-const { CanvasTexture, Group, Mesh, MeshBasicMaterial, PerspectiveCamera,
-        PlaneGeometry, Scene, ShaderChunk } = await import("three");
+const { AmbientLight, CanvasTexture, DirectionalLight, Group, Mesh,
+        MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene,
+        ShaderChunk } = await import("three");
+const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE }
+  = await import("../src/render/lighting");
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -287,6 +290,80 @@ console.log("\nthe fog blend happens in the space D3D blends in");
     (1 - f) * enc(dec(surf)) + f * enc(dec(fogc)))));
   check("half fog over a dark surface lands where the hardware put it",
         Math.abs(d3d - ours) <= 1, `D3D ${d3d}, port ${ours}`);
+}
+
+console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
+
+{
+  // `SetLightingDefaultSingle` (`0x004AA120`), from the disassembly because
+  // the decompiler drops every FPU argument in it:
+  //
+  //   t = colour * ambient
+  //   D3DRENDERSTATE_AMBIENT = pack(t * 255)      <- TINTED by the colour
+  //   light.diffuse          = t * 1.4            <- scaled by ambient too
+  //   light.ambient          = colour * 0.3       <- and this one is not
+  //
+  // The port had `diffuse = colour * 1.4` (no ambient) and
+  // `ambient = <scalar> + colour * 0.3` (untinted). Both are checked here
+  // against the engine's own default light colour, which is where the
+  // difference is loudest.
+  const srgbToLinear = (c: number) =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+
+  const lights = new SceneLighting(new Scene());
+  const dir = lights.group.children.find(
+    (o) => (o as { isDirectionalLight?: boolean }).isDirectionalLight,
+  ) as InstanceType<typeof DirectionalLight>;
+  const amb = lights.group.children.find(
+    (o) => (o as { isAmbientLight?: boolean }).isAmbientLight,
+  ) as InstanceType<typeof AmbientLight>;
+  check("the layer has one directional light and one ambient",
+        !!dir && !!amb);
+
+  // `FUN_00460250` seeds the scene light colour to exactly this.
+  const rgb: [number, number, number] = [1.0, 0.2, 0.1];
+  const a = 0.5;
+  lights.set({ rgb, ambient: a, pitchDeg: 0, yawDeg: 0 });
+
+  const wantDir = rgb.map((c) => srgbToLinear(c * a * DIFFUSE_SCALE));
+  check("diffuse is colour * ambient * 1.4, through the sRGB transfer",
+        near(dir.color.r, wantDir[0]) && near(dir.color.g, wantDir[1])
+        && near(dir.color.b, wantDir[2]),
+        `${dir.color.r},${dir.color.g},${dir.color.b} want ${wantDir}`);
+
+  const wantAmb = rgb.map((c) => srgbToLinear(c * (a + LIGHT_AMBIENT_SCALE)));
+  check("...and ambient is colour * (ambient + 0.3), tinted on both terms",
+        near(amb.color.r, wantAmb[0]) && near(amb.color.g, wantAmb[1])
+        && near(amb.color.b, wantAmb[2]),
+        `${amb.color.r},${amb.color.g},${amb.color.b} want ${wantAmb}`);
+
+  // The signature of the bug, stated as a property rather than a number: the
+  // engine's light is deep orange, so its ambient must stay deep orange. The
+  // old `ambient + colour*0.3` gave (0.8, 0.56, 0.53) -- near-grey.
+  check("...so a strongly tinted light keeps a strongly tinted ambient",
+        amb.color.g < amb.color.r * 0.2 && amb.color.b < amb.color.r * 0.1,
+        `r=${amb.color.r.toFixed(3)} g=${amb.color.g.toFixed(3)} `
+        + `b=${amb.color.b.toFixed(3)}`);
+
+  // Turning the master brightness down must dim the directional light with
+  // it -- the property the port was missing entirely.
+  const wasR = dir.color.r;
+  lights.set({ rgb, ambient: a / 2, pitchDeg: 0, yawDeg: 0 });
+  check("the ambient channel is a master brightness and dims the light too",
+        dir.color.r < wasR * 0.5,
+        `${wasR.toFixed(4)} -> ${dir.color.r.toFixed(4)}`);
+
+  // `BuildSceneLightDirection` (`0x0040E0B0`): rotate (0,0,1) by Y then X,
+  // giving (cos p · sin y, −sin p, cos p · cos y), the direction the light
+  // comes *from*.
+  const d = lightDirection(0, 90);
+  check("the direction is the rotated unit Z, and +90 deg yaw faces +X",
+        near(d.x, 1) && near(d.y, 0) && Math.abs(d.z) < 1e-4,
+        `${d.x.toFixed(3)},${d.y.toFixed(3)},${d.z.toFixed(3)}`);
+  const dp = lightDirection(90, 0);
+  check("...and a +90 deg pitch points straight down",
+        near(dp.y, -1), `${dp.y.toFixed(3)}`);
 }
 
 console.log("\nwhat a subtree is holding");

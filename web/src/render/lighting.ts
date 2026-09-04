@@ -8,18 +8,35 @@
  * `0x18`/`0x19` set the direction, `0x17` slerps it, and the `0x20`–`0x27`
  * tween channels 6/7/8 set its colour and 10 the ambient.
  *
- * `SetLightingDefaultSingle` (`0x004AA120`) is the whole setup, and it is
- * short enough to transcribe exactly:
+ * `SetLightingDefaultSingle` (`0x004AA120`) is the whole setup. The
+ * decompiler drops every FPU argument in it — `__ftol()` with no arguments,
+ * `unaff_EDI` — so this is from the disassembly, with `255.0`, `1.4` and
+ * `0.3` read out of the image at `0x00570F5C`, `0x00565DE4` and `0x004C4D10`:
  *
  * ```c
- * SetRenderState(D3DRENDERSTATE_AMBIENT, pack_argb(ambient));
- * light.diffuse  = light_colour * 1.4;
+ * t = light_colour * ambient;                       // [esp+0xC/0x10/0x14]
+ * SetRenderState(D3DRENDERSTATE_AMBIENT, 0xFF000000 | pack(t * 255));
+ * light.diffuse  = t * 1.4;
  * light.specular = light.diffuse;
- * light.ambient  = light_colour * 0.3;
- * light.direction = g_render_light_dir;      // negated on the way in
+ * light.ambient  = light_colour * 0.3;              // NOT scaled by ambient
+ * light.direction = g_render_light_dir;             // negated on the way in
  * SetLight(0, &light);  LightEnable(0, TRUE);
  * for (i = 1; i < 16; i++) LightEnable(i, FALSE);
  * ```
+ *
+ * **The ambient channel is a master brightness, not a separate ambient
+ * term**, and this port had it as one. Channel 10 multiplies the light colour
+ * into the D3D ambient render state *and* into the light's diffuse, so
+ * turning it down dims the directional light with it; only `light.ambient`
+ * escapes it. And the render-state ambient is `colour * ambient` — **tinted**,
+ * never a neutral grey. The port summed an untinted scalar with `colour*0.3`,
+ * which against the engine's own `(1.0, 0.2, 0.1)` light is a near-white
+ * ambient where the engine has a deep orange one.
+ *
+ * In D3D's fixed-function sum the two ambients add:
+ * `material.ambient * (D3DRENDERSTATE_AMBIENT + light.ambient)`, one light and
+ * no attenuation, so the total is `colour * (ambient + 0.3)` — one
+ * `AmbientLight`, which is why the sum is kept and only the tint corrected.
  *
  * **The direction.** `FUN_0040E0B0(pitch, yaw, world_out, view_out)` builds it
  * by rotating `(0, 0, 1)`:
@@ -37,22 +54,46 @@
  * dir = ( cos(pitch) * sin(yaw), -sin(pitch), cos(pitch) * cos(yaw) )
  * ```
  *
- * and `FUN_004AA0E0` negates it, so `dir` is the direction the light *comes
- * from*. Both angles are BAMS: the rotators multiply by `9.58738e-05`, which
- * is 2*pi/65536.
+ * and it is negated on the way to the device, so `dir` is the direction the
+ * light *comes from*. Both angles are BAMS: the rotators multiply by
+ * `9.58738e-05`, which is 2*pi/65536.
  *
- * **What is approximate here.** D3D fixed-function lighting and three.js's
+ * `BuildSceneLightDirection` produces the vector twice, in world space and in
+ * view space, and `UpdateSceneViewAndLight` (`0x00401F40`) sends the **view**
+ * one to D3D — because D3D7 wants a light direction already in view space.
+ * three.js does that transform itself, so the port keeps the **world** vector
+ * and places the light with it. Reaching for the view vector to "match the
+ * exe" here would transform it twice.
+ *
+ * **The colour space, and why the multiplier converts.** These are the same
+ * framebuffer-encoded quantities the fog colour is (see `render/fog.ts`):
+ * D3D multiplies them against gamma-encoded texels. Writing `L` for the
+ * engine's multiplier and `L'` for a linear-space one, matching
+ * `tex^γ · L' == (tex · L)^γ` gives `L' = L^γ` — so the linear-space
+ * equivalent of a gamma-space multiply is the multiplier put through
+ * sRGB→linear. `setRGB`'s default is the linear working space, so the port
+ * was using `L` where it needed `L'`: the engine's `(1.0, 0.2, 0.1)` was
+ * being applied about three times too weakly in green and blue, which reads
+ * as a light that is far less saturated than the game's.
+ *
+ * The whole product `colour · ambient · 1.4` goes through the transfer, not
+ * just the colour, because the scalars are gamma-space scalars too — an
+ * `ambient` of 0.5 is a 0.22 multiplier in linear light, not a 0.5 one.
+ *
+ * **What is still approximate.** D3D fixed-function lighting and three.js's
  * Lambert model are not the same shader, and the game's material ambient and
- * specular terms are not modelled. This reproduces the *inputs* faithfully —
- * direction, colour, the 1.4 and 0.3 scalings, the global ambient — and
- * accepts that the response curve is three.js's. It is off by default for
- * that reason.
+ * specular terms are not modelled — `MeshLambertMaterial` has no specular at
+ * all, so `light.specular` goes nowhere. The equality above is exact for the
+ * *multiplicative* part and not for `N·L`, which stays three.js's. This
+ * reproduces the inputs faithfully and accepts that the response curve
+ * diverges; it is off by default for that reason.
  */
 
 import {
   AmbientLight,
   SpotLight,
   Color,
+  SRGBColorSpace,
   DirectionalLight,
   Group,
   Mesh,
@@ -256,17 +297,21 @@ export class SceneLighting implements System<RenderContext> {
 
   private refresh(): void {
     const [r, g, b] = this.state.rgb;
-    // light.diffuse = colour * 1.4. three.js splits colour and intensity, so
-    // the 1.4 rides on the intensity and the colour stays in gamut.
-    this.dir.color.setRGB(r, g, b);
-    this.dir.intensity = DIFFUSE_SCALE * this.intensity;
+    const a = this.state.ambient;
 
-    // The global D3DRENDERSTATE_AMBIENT plus the light's own ambient term.
-    this.amb.color.setRGB(
-      this.state.ambient + r * LIGHT_AMBIENT_SCALE,
-      this.state.ambient + g * LIGHT_AMBIENT_SCALE,
-      this.state.ambient + b * LIGHT_AMBIENT_SCALE,
-    );
+    // `light.diffuse = colour * ambient * 1.4`. The ambient channel is a
+    // master brightness and scales this too -- leaving it out is what made
+    // the directional light twice as bright as the engine's at the default
+    // ambient of 0.5.
+    this.dir.color.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
+                          b * a * DIFFUSE_SCALE, SRGBColorSpace);
+    this.dir.intensity = this.intensity;
+
+    // `D3DRENDERSTATE_AMBIENT + light.ambient` = `colour * (ambient + 0.3)`.
+    // Tinted by the light colour on both terms; the port used to add an
+    // untinted `ambient` to `colour * 0.3`.
+    const amb = a + LIGHT_AMBIENT_SCALE;
+    this.amb.color.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace);
     this.amb.intensity = this.intensity;
 
     // A directional light shines from its position toward its target, and the

@@ -11133,3 +11133,65 @@ a file a peer session also writes; it happened to cost nothing only because
 that peer had committed thirty seconds earlier. `annotate.py` now refuses a
 name or comment containing a tab or a newline — this is `L?`-shaped: *a tool
 that prints success has not necessarily written a valid file.*
+
+## 2026-09-04 — Scene lighting, and a correction to the entry above
+
+Same session, same question asked of the light instead of the fog. Three
+findings, one of which corrects something written an hour earlier.
+
+**`SetLightingDefaultSingle` had been transcribed wrong, and the port was built
+from the transcription.** `docs/formats/materials.md` gave it as
+
+```c
+SetRenderState(D3DRENDERSTATE_AMBIENT, pack_argb(ambient));
+light.diffuse = light_colour * 1.4;
+```
+
+and the disassembly says
+
+```c
+t = light_colour * ambient;
+SetRenderState(D3DRENDERSTATE_AMBIENT, 0xFF000000 | pack(t * 255));
+light.diffuse = t * 1.4;
+light.ambient = light_colour * 0.3;      /* this one alone escapes `ambient` */
+```
+
+So **channel 10 is a master brightness, not a separate ambient term** — it
+scales the directional light too — and the global ambient is **tinted by the
+light colour**, never a neutral grey. The port had `diffuse = colour * 1.4`
+(twice too bright at the engine's own default ambient of 0.5) and
+`ambient = <scalar> + colour * 0.3`, which against the engine's `(1.0, 0.2,
+0.1)` light gives `(0.80, 0.56, 0.53)` — near-white where the engine has a deep
+orange `(0.60, 0.02, 0.01)`. That is not a subtle difference and it is now four
+assertions in `test:render`.
+
+Why it was wrong: the decompiler **drops every FPU argument** in this routine —
+`__ftol()` appears with no arguments and the operands come through as
+`unaff_EDI`/`unaff_ESI`/`unaff_EBX`. The earlier reading took the shape from
+the decompiler and the two scalars from the only constants it *did* show. This
+is the trap already in `LESSONS.md`, applied to a routine that looks harmless
+because it is short.
+
+**The colour space, again, and why a multiplier converts.** The light colour is
+the same kind of framebuffer-encoded quantity the fog colour is; D3D multiplies
+it against gamma-encoded texels. Matching `tex^γ · L' == (tex · L)^γ` gives
+`L' = L^γ`, so the linear-space equivalent of a gamma-space multiply is the
+multiplier put through sRGB→linear — the *whole* product `colour · ambient ·
+1.4`, since the scalars are gamma-space scalars too. Exact for the
+multiplicative part; `N·L` stays three.js's, which the module already declared.
+
+**The correction.** The fog entry above says `FUN_00460250` seeds a mirrored
+float array at `0x009C89E4 + channel*0x10` "which is what pins the channel
+numbering". It does not, above channel 4. That array is `g_light_tween_block0`
+and it has **nine** slots for eleven channel numbers, because the two alias
+channels (5 = all fog components, 9 = all light components) have none — so its
+index is a compacted one and coincides with the channel number only up to 4.
+The fog conclusion is unaffected, because fog is channels 2/3/4, but the
+*reasoning as stated* would have put every channel from 6 up one slot out.
+
+`ApplyLightChannelOperand` (`FUN_0040B3F0`) is the thing that actually pins it:
+a `switch` on the channel index writing named dword offsets into the block. It
+confirms the map the port already had. **This is the "data is for verifying,
+never for forming" rule catching me in the act** — a channel map was read off a
+seeding function's addresses, it happened to be right where it was checked, and
+it was asserted for the range where it was not.

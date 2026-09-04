@@ -82,7 +82,7 @@ def relocate(word: int) -> int:
 #   "var"   -- [op][list ...][-1] repeated, selected by a global, ended by -2
 #   "queue" -- [op][id][...]; total = 2 + (id >> 4)   (FUN_0045F7F0)
 #   "tween" -- [op][sub][...]; size depends on sub-opcode
-#   "set"   -- [op][sub][...]; FUN_0040B3F0 sub-opcode sizes
+#   "set"   -- [op][sub][...]; ApplyLightChannelOperand sub-opcode sizes
 #   "halt"  -- does not advance pc
 #   "next"  -- replaces pc entirely (end of block)
 #   "bad"   -- maps to the empty stub, never legitimately encoded
@@ -162,11 +162,11 @@ OPCODES: dict[int, Op] = {
     # 0x20-0x27 tween the two light/fog blocks, NOT view structs. Channels:
     # 0/1 fog near/far, 2-4 fog RGB, 5 fog RGB triple, 6-8 light RGB,
     # 9 light RGB triple, 10 ambient.
-    0x20: ("light0_set", "set", 0),          # FUN_0040B3F0(0)
+    0x20: ("light0_set", "set", 0),          # ApplyLightChannelOperand(0)
     0x21: ("light0_tween_rate", "tween", 0),  # FUN_0040B650(0)
     0x22: ("light0_stop", "fix", 2),         # FUN_0040C1F0(0)
     0x23: ("light0_tween_time", "tween", 0),  # FUN_0040BA90(0)
-    0x24: ("light1_set", "set", 0),          # FUN_0040B3F0(1)
+    0x24: ("light1_set", "set", 0),          # ApplyLightChannelOperand(1)
     0x25: ("light1_tween_rate", "tween", 0),  # FUN_0040B650(1)
     0x26: ("light1_stop", "fix", 2),         # FUN_0040C1F0(1)
     0x27: ("light1_tween_time", "tween", 0),  # FUN_0040BA90(1)
@@ -296,7 +296,7 @@ QUEUE_ACTIONS: dict[int, str] = {
     0x60: "store_six",
 }
 
-#: Sub-opcode sizes for the "set" class (FUN_0040B3F0), in dwords, including
+#: Sub-opcode sizes for the "set" class (ApplyLightChannelOperand), in dwords, including
 #: the opcode and the sub-opcode. Sub 5 and 9 take three value operands.
 SET_SIZES = {0: 3, 1: 3, 2: 3, 3: 3, 4: 3, 5: 5, 6: 3, 7: 3, 8: 3, 9: 5, 10: 3}
 SET_DEFAULT = 2

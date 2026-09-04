@@ -13,23 +13,21 @@
 import type { Rng } from "../../core/rng";
 import type { ZombieActor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
-import { FirstBakedOf, MotionRowOf } from "../tables";
+import { MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
-import { MotionFade, MotionRow, ZombieState } from "./states";
+import { MotionFade, ZombieRunMotion, ZombieState } from "./states";
 import { ZombieShouldStandAndThrow } from "./stand_throw";
 
 export function ZombieStateAttackRun(obj: ZombieActor, eye: Vec3, dt: number,
                                     rng: Rng): void {
   const row = MotionRowOf(obj);
-  // `row[2 + ((obj+0x34 >> 0x1B) & 1)]`, taking whichever variant this bundle
-  // actually carries -- and falling back to the walk for a skeleton that has
-  // no run clip of its own, which is `znchain` and the two `znebi`.
-  ZombieSetMotionIfIdle(obj, FirstBakedOf(obj, row, MotionRow.Run,
-                                          MotionRow.RunAlt, MotionRow.Walk,
-                                          MotionRow.WalkAlt), rng, "clip",
-                             MotionFade.Normal);
+  // `row[2 + ((obj+0x34 >> 0x1B) & 1)]` — the spawn record says which of the
+  // pair this one takes, and `ZombieRunMotion` is that index. It used to be
+  // "the first of the pair this bundle carries", which is always the jog.
+  ZombieSetMotionIfIdle(obj, ZombieRunMotion(obj, row), rng, "clip",
+                        MotionFade.Normal);
 
   if (TestApproachRing(obj, eye) === 1) {
     obj.state = ZombieState.HoldAtRange;

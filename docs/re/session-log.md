@@ -11023,3 +11023,56 @@ itself. The distance law is two cases: kind `'S'` (`0x53`) scales by
 scale outright. Every range resolves to a real pol file, so none of it is
 blocked on reading — it is blocked on **exporting the artwork**, which is a
 bundle block, a `schema.SOURCES` entry and a `BUNDLE_FORMAT` bump.
+
+## Every zombie in the game jogged, and half of them should sprint
+
+`ZombieStateAttackRun` (`FUN_004554D0`) picks its clip with
+
+    row[2 + ((obj+0x34 >> 0x1B) & 1)]
+
+and states 14 and 15 index the same pair. The port had
+
+    FirstBakedOf(obj, row, Run, RunAlt, Walk, WalkAlt)
+
+— "the first of the pair this bundle carries" — which is **always** row 2,
+because row 2 is always baked. The selector bit was never read.
+
+The pair is not two takes of one gait. Measured on the shipped banks:
+
+    char_adv02   row[2] motion 272   0.296 / frame     row[3] motion 264   1.289
+    char_adv01   row[2] motion 1022  0.320 / frame     row[3] motion 968   1.000
+    znebi2       row[2] motion 190   0.393 / frame     row[3] motion 179   0.731
+
+Row 2 is a jog and row 3 is the sprint. Across all six stages the split is
+**210 jog to 192 sprint**, and the sprinters close **2.06x faster** on average.
+So 48% of the class-0x30 spawns in the game were running at less than half the
+speed the placement data asks for, which is exactly "they only ever walk to the
+player".
+
+**Nothing in the image ORs that bit.** `search_instructions` over `+0x34` finds
+four `TEST`s and no `OR`, and the four writers of the whole word are
+`MOV [reg+0x34], 0x80000001` in the prop placers. It arrives from the **spawn
+record's own flags word** through `ActorInitFlags` (`FUN_00408970`) — so which
+gait a zombie uses is placement data, decided per spawn, not a runtime state.
+That is also why "even when shot" made no difference: being shot was never
+going to change it.
+
+Two things worth keeping about how the fallback hid this. It was written for
+"a skeleton that has no run clip of its own, which is `znchain` and the two
+`znebi`" — and the measurement says **zero** of the 402 spawns lack a run
+clip, so the fallback never fired for the reason it was added and only ever
+served to discard the selector. And `FirstBakedOf` cannot tell "the bundle is
+missing this" from "the data chose the other one", which is the shape of the
+bug: a lookup that answers a different question from the one the engine asks
+will agree with it most of the time.
+
+`ZombieRunMotion` is that expression, named once and used by all three states,
+`[port-only]` because it is one line out of `ZombieStateAttackRun` rather than
+a routine of its own. It keeps a fallback for a row with nothing baked, which
+is a property of the bundle and not of the engine.
+
+Also read while there and folded into the annotation: `ZombieStateAttackRun`
+starts its clip at a **random frame** (`rand() % g_motion_play_length[motion]`,
+fade 10) so a crowd does not march in step, and rolls `rand() & 0xFF < 4` each
+frame for a 1-in-64 shout when `obj+0x136C` carries both `0x2000000` and
+`0x1000000`.

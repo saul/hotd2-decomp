@@ -35,7 +35,7 @@ import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
   from "../combat/counts";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
-import { MotionFade, MotionRow, ZombieState } from "./states";
+import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
 
 /**
  * `ZombieReleaseAndDespawn` — `FUN_00455490`. Free the permit, leave both
@@ -92,7 +92,8 @@ export function ZombieStateWalkDistance(obj: ZombieActor, rng: Rng): void {
   // gap.
   const motion = (obj.flags & ActorFlag.BackingOff)
     ? FirstBakedOf(obj, row, MotionRow.BackAway)
-    : FirstBakedOf(obj, row, MotionRow.Run, MotionRow.RunAlt,
+    : ZombieRunMotion(obj, row) ?? FirstBakedOf(obj, row,
+                            MotionRow.Run, MotionRow.RunAlt,
                    MotionRow.Walk, MotionRow.WalkAlt);
   ZombieSetMotionIfIdle(obj, motion, rng, "clip", MotionFade.Quick);
 

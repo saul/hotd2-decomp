@@ -42,7 +42,7 @@ import {
   FirstBakedOf, MotionPlayFrame, MotionPlayLength, MotionRowOf, T,
 } from "../tables";
 import { ActorSetMotion, ZombieSetMotionIfIdle } from "./motion_cue";
-import { MotionFade, MotionRow, ZombieState } from "./states";
+import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
 
 /**
  * The arc script `ZombieStateArcScriptedEntrance` installs, by character type
@@ -204,7 +204,8 @@ export function ZombieStateRunInPlaceTimed(obj: ZombieActor, dt: number,
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]` — the run pair, the same selection
   // `ZombieStateAttackRun` and `ZombieStateWalkDistance` make.
-  const motion = FirstBakedOf(obj, row, MotionRow.Run, MotionRow.RunAlt,
+  const motion = ZombieRunMotion(obj, row) ?? FirstBakedOf(obj, row,
+                                        MotionRow.Run, MotionRow.RunAlt,
                               MotionRow.Walk, MotionRow.WalkAlt);
 
   if (obj.sub === 0) {

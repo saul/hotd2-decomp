@@ -90,6 +90,7 @@ import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue }
   from "../src/game/class30/target";
 import { ActorModelScale } from "../src/game/root_motion";
+import { ZOMBIE_SPRINTS, ZombieRunMotion } from "../src/game/class30/states";
 import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
@@ -8127,6 +8128,34 @@ console.log("\na stashed path is played by a hook that steps first:");
   })());
   check("...and is dropped when its two seconds are out",
         SeveredHeadUpdate(g, rng) === false, `timer ${g.timer}`);
+}
+
+// Which of the run pair a zombie takes, and who decides.
+//
+// `ZombieStateAttackRun` (`FUN_004554D0`) indexes its motion row with
+// `2 + ((obj+0x34 >> 0x1B) & 1)`. Nothing in the image ORs that bit: it comes
+// off the spawn record through `ActorInitFlags`, so it is placement data. The
+// port took "the first of the pair this bundle carries" instead, which is
+// always row 2, so 192 of the 402 shipped class-0x30 spawns jogged where the
+// data says they sprint.
+{
+  const row = [900, 901, 902, 903, 904];
+  const zombie = (flags: number) => {
+    ResetGameGlobals();
+    const z = spawnZombie(0x4000, 1, "runner");
+    z.flags = flags;
+    return z;
+  };
+  check("an unflagged spawn takes the jog, row 2",
+        ZombieRunMotion(zombie(0), row) === 902);
+  check("...and a flagged one takes the sprint, row 3",
+        ZombieRunMotion(zombie(ZOMBIE_SPRINTS), row) === 903);
+  // The bit is 0x08000000 and nothing else in the word may reach the index.
+  check("...and no other flag moves the index",
+        ZombieRunMotion(zombie(0xf7ffffff), row) === 902,
+        `${ZombieRunMotion(zombie(0xf7ffffff), row)}`);
+  check("...while the whole word does",
+        ZombieRunMotion(zombie(0xffffffff), row) === 903);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

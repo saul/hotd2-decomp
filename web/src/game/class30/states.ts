@@ -18,6 +18,9 @@
  * `Approach` is a *second* entry path — it claims the permit early and routes
  * to the descriptor's own attack state — and no spawn in stage 2 starts there.
  */
+
+import type { Actor } from "../actor";
+import { FirstBakedOf, MotionOf } from "../tables";
 export enum ZombieState {
   /** `g_class30_states[0]` is the engine's no-op. */
   NoOp = 0,
@@ -212,16 +215,59 @@ export enum StrikeSub {
  * `PTR_PTR_00592CBC[charType][condition]` is the row; each state indexes it
  * with a fixed offset, and those offsets are what these are.
  */
+/**
+ * `obj+0x34` bit `0x08000000` — **this spawn sprints.**
+ *
+ * `ZombieStateAttackRun` (`FUN_004554D0`) indexes its motion row with
+ * `2 + ((obj+0x34 >> 0x1B) & 1)`, and states 14 and 15 use the same pair. The
+ * bit is never `OR`ed anywhere in the image: it arrives on the actor from the
+ * **spawn record's own flags word**, through `ActorInitFlags`
+ * (`FUN_00408970`), so it is placement data and not a runtime decision.
+ *
+ * **192 of the 402 class-0x30 spawns in the shipped stages set it.** This port
+ * took the first *baked* motion of the pair instead, which is always `Run`,
+ * so every zombie in the game jogged and none of them ever ran — including the
+ * 48% the data says should. There is no fallback to lose by reading the bit:
+ * the pair is baked for every character type that has a row.
+ */
+export const ZOMBIE_SPRINTS = 0x08000000;
+
 export enum MotionRow {
   /** `ZombieStateApproach`: `row[(obj+0x136C >> 0x15) & 1]`, and the idle
    *  `ZombieStateHoldAtRange` plays as `row[0]`. In place — measured. */
   Walk = 0,
   WalkAlt = 1,
-  /** `ZombieStateAttackRun`: `row[2 + ((obj+0x34 >> 0x1B) & 1)]`. */
+  /**
+   * `ZombieStateAttackRun`: `row[2 + ((obj+0x34 >> 0x1B) & 1)]`.
+   *
+   * **A pair, and the spawn record picks which.** `Run` is a jog and `RunAlt`
+   * is the sprint — measured on the shipped banks, 0.30 units an authored
+   * frame against 1.29 for `char_adv02`, 0.32 against 1.00 for `char_adv01`.
+   * See {@link ZombieRunMotion}.
+   */
   Run = 2,
   RunAlt = 3,
   /** `ZombieStateBackOff`: `row[4]`, the byte offset 0x10 in the row. */
   BackAway = 4,
+}
+
+/**
+ * `row[2 + ((obj+0x34 >> 0x1B) & 1)]` — which of the run pair this actor takes.
+ *
+ * `[port-only]` — one expression out of `ZombieStateAttackRun`
+ * (`FUN_004554D0`), named because three states index the pair the same way and
+ * two of them were getting it wrong in the same place.
+ *
+ * Falls back to the walk only when the row has no run at all, which is a
+ * property of the bundle rather than of the engine: a skeleton with no run
+ * clip baked would otherwise be handed `undefined` and stand still.
+ */
+export function ZombieRunMotion(obj: Actor, row: number[]): number | undefined {
+  const want = MotionRow.Run + ((obj.flags >>> 27) & 1);
+  const m = row[want];
+  if (m !== undefined && MotionOf(obj, m)) return m;
+  return FirstBakedOf(obj, row, MotionRow.Run, MotionRow.RunAlt,
+                      MotionRow.Walk, MotionRow.WalkAlt);
 }
 
 /**

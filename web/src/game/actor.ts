@@ -12,8 +12,13 @@
 import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
 import type { CivilianState } from "./class10/state";
-import type { SpawnClass } from "./spawn_class";
+import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
+import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
+import { makeSetPiecePropTail, type SetPiecePropTail }
+  from "./class24/state";
+import { makeThrowerTail, type ThrowerTail } from "./class31/state";
+import { makeZombieTail, type ZombieTail } from "./class30/state";
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
@@ -42,6 +47,44 @@ export enum ActorFlag {
    * how the camera comes to consider only enemies that have committed.
    */
   NoCameraTrack = 0x10000,
+  /**
+   * `obj+0x34` bit `0x800000` — **do not untrack this actor if it is the last
+   * one.** Every routine that would raise {@link NoCameraTrack} and free the
+   * actor's camera slot skips both when this bit is set and the relevant
+   * enemy counter is down to one, so the killing shot of a fight is not cut
+   * away from.
+   *
+   * `[proved]`, and it is a **spawn-record** bit rather than a state bit.
+   * Nothing in `Hod2.exe` writes it: an exhaustive scan of `.text` for every
+   * encoding that can set bit 23 of the dword at `+0x34` — `0D`/`81 /1` with
+   * an immediate, `80 /1` on the byte at `+0x36`, `C7 /0` on the word — finds
+   * no site at all, and Ghidra's own operand search finds only the five
+   * `TEST ..., 0x800000` reads listed below. It reaches the actor exactly one
+   * way, through `ActorInitFlags` (`FUN_00408970`), which is
+   * `obj+0x34 = spawn_flags | 1`. **Six shipped spawns carry it**, all class
+   * 0x30 and all starting in state 18: three in stage 1 (character type 7,
+   * `init_flags 0x800000`) and three in stage 3 (type 11, `0x8800000`).
+   *
+   * The five readers, each `a900008000`:
+   *
+   * | site | routine | counter |
+   * |---|---|---|
+   * | `0x004565BD` | `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) | `g_enemies_alive == 1` |
+   * | `0x0044D068` | `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) | `g_enemies_present == 1` |
+   * | `0x0044AA52` | `ThrowerStateCorpseSink` (`FUN_0044A9D0`) | `g_enemies_present == 0` |
+   * | `0x0044AC3F` | `ThrowerStateCorpseBlink` (`FUN_0044AB70`) | `g_enemies_present == 0` |
+   * | `0x0043BA4B` | not in a Ghidra function; outside both ported classes | `g_enemies_alive == 1` |
+   *
+   * The two corpse states read it with the **opposite** polarity — they
+   * untrack *only* when the bit is set and the count has reached zero — which
+   * is why this is named for what the bit is, not for the arm any one reader
+   * takes. `ZombieStateCorpseSink` (`FUN_00454F20`) does not test it at all:
+   * `00454f9f 81ca00000100` is unconditional.
+   *
+   * **Not** {@link ZombieFlag2.Shoved}, which is bit `0x800000` of
+   * `obj+0x136C`. One value, two words, two classes.
+   */
+  KeepCameraWhenLast = 0x800000,
   /**
    * `obj+0x34` bit `0x10000000` — this actor is mid-attack and will not be
    * re-ranked out of it. `ZombieStateStandAndThrow` raises it for the length
@@ -121,8 +164,50 @@ export interface PathPoint {
  * (`FUN_00450CF0`) writes. `ThrowerStateLeapToSurface` sets one on arrival.
  */
 export enum ThrowerFlag {
+  /**
+   * Bit 0 — draw every part through the engine's **other** entry point.
+   *
+   * `ThrowerDrawPart` (`FUN_0044A200`) and `ThrowerDrawPartWithAlpha`
+   * (`FUN_0044A240`) branch on it, but only while the global at `0x009A2BB4`
+   * — written by `EvtOpSetSceneLighting14` — is non-zero. For character type
+   * 0x17 `EnemyThrowerInit` (`FUN_00449620`) also raises `obj+0x38` bit 3 for
+   * it (`OR dword ptr [ESI + 0x38], 0x8` — `834e3808` at 0x00449802).
+   *
+   * **What the branch does is not `[open]`.** `FUN_0044A200` is
+   * `if ((obj+0x136C & 1) && g_scene_light_array) SubmitSlotWithSceneLightArray
+   * (FUN_004185E0) else AssetDrawSlot (FUN_00418560)` — the bit picks the
+   * lit submission path. `[proved]`, from two readings that met here: one
+   * survey called the effect undetermined and the other read the branch
+   * targets.
+   *
+   * **Two writers, and they are in different classes.** It comes from the
+   * spawn descriptor's `+0x20` word — 18 of the 51 shipped class-0x31 spawns
+   * set it — *and* class 0x10's captor release raises it on every surviving
+   * child (`CivilianReleaseCaptors`). Those children are class 0x30, whose
+   * draw path never tests this bit, so that write changes nothing in the
+   * shipped game. Transcribed because the engine makes it; its purpose there
+   * is `[open]`.
+   */
+  SceneLit = 0x1,
   /** `ThrowerFindWallBeside`'s own refusal bit. */
   NoWallLeap = 0x2,
+  /**
+   * Bit 3 — `EnemyThrowerInit`'s character-type-0x18 arm, on seeing it, zeroes
+   * `handRegrow` and `arcKind` and seeds `turnTarget` from the spawn yaw
+   * `obj+0x68`: `TEST byte ptr [ESI + 0x136c], 0x8` (`f6866c13000008`) at
+   * 0x0044984D, then the three stores at 0x00449859..0x00449865.
+   *
+   * Descriptor-seeded like {@link SceneLit}, and **no shipped class-0x31
+   * spawn sets it**, so the arm is dead in the retail data. `[proved]`
+   */
+  SeedTurnFromSpawnYaw = 0x8,
+  /**
+   * Bit 4 — `ThrowerStateLeapAside` (`FUN_0044B880`) skips its random
+   * side-pick when it is set (`8a836c130000` then `a810` at
+   * 0x0044B917/0x0044B920). Descriptor-seeded; no shipped spawn sets it, so
+   * the leap always draws its side. `[proved]`
+   */
+  LeapAsideFixedSide = 0x10,
   /**
    * Bit `0x800000` — this actor has left `g_enemies_alive`, the latch
    * `ThrowerRetireFromAliveCount` (`FUN_0044CFF0`) tests and sets.
@@ -153,8 +238,42 @@ export enum ThrowerFlag {
   DeathLatched = 0x200000,
   /** Knocked down — what routes states 1 and 2 into the get-up. */
   KnockedDown = 0x4000000,
+  /**
+   * Bit 9 — `ActorArcStep` (`FUN_0044D860`) remembers here that the arc
+   * script suppressed `obj+0x34` bit `0x100`, so the fade can put it back:
+   * set with `OR DH, 0x2` (`80ce02`) at 0x0044D8B2 and cleared with
+   * `AND AH, 0xfd` (`80e4fd`) at 0x0044D97A, both guarded on the character
+   * type being 0x16..0x19. `[proved]` The port's arc does not suppress that
+   * bit, so it has no reader here.
+   */
+  ArcSuppressedShotImmune = 0x200,
   /** `ThrowerStrikeConnect` uses `g_class31_throws` instead of the melee row. */
   UseThrowTable = 0x400,
+  /**
+   * Bit 12 — raised on entry to `ThrowerStateWalkDistance` (`FUN_0044E2A0`,
+   * `OR CH, 0x10` — `80cd10` at 0x0044E32E) and cleared on the way out
+   * (`AND ~0x1000` at 0x0044E3DE).
+   *
+   * **Nothing in the program tests it.** `[proved]` for the set and the
+   * clear, `[open]` for a reader — there is no `TEST` against `obj+0x136C`
+   * with `0x1000` anywhere.
+   */
+  Walking = 0x1000,
+  /**
+   * Bit 14 — the landing puff has already been emitted for this landing.
+   *
+   * `ThrowerEmitGroundDust` (`FUN_0044D260`) refuses while it is set and sets
+   * it when it emits: `MOV EDI, 0x4000` (`bf00400000`) at 0x0044D531,
+   * `TEST EDI, EAX` (`85c7`), then `OR EAX, EDI` (`0bc7`) and the store back
+   * at 0x0044D5D9. `ThrowerStateFallAndLand` (`AND EBP, 0xffffbfff` —
+   * `81e5ffbfffff` at 0x0044A6E6) and `ThrowerStateKnockedTumbling`
+   * (0x004512F3) clear it as the body settles, which is what makes the puff
+   * once per landing rather than once per actor. `[proved]`
+   *
+   * The port clears it where the exe does; the emitter itself is a particle
+   * effect and is not ported, so nothing sets it yet.
+   */
+  LandingDustEmitted = 0x4000,
   /** `ThrowerPickNextState` has committed to a band; `moveBand` holds which. */
   BandLatched = 0x2000,
   /** This swing has already connected. */
@@ -188,6 +307,42 @@ export enum ThrowerFlag {
   CollideActors = 0x100000,
   /** Both, which is what `EnemyThrowerInit` seeds every spawn with. */
   Collide = 0x180000,
+  /**
+   * Bit `0x2000000` — the same bit class 0x30 keeps as
+   * {@link ZombieFlag2.LowSphere}, and one of the few in this word that is
+   * genuinely **shared**: `RankEnemiesByDistance` and `SkeletonEmitNode` read
+   * it on actors of any class.
+   *
+   * For a thrower it is raised by `ThrowerShotFeedback` (`FUN_00449B20`) as
+   * half of `OR EDX, 0x6000000` (`81ca00000006` at 0x00449C36) — the other
+   * half being {@link KnockedDown} — and read by `ActorArcBeginToAtSpeed`
+   * (`FUN_0044DB50`), where it halves the arc's minimum duration. See
+   * `ARC_MIN_FRAMES` in `class31/death.ts`. `[proved]`
+   */
+  LowSphere = 0x2000000,
+  /**
+   * Bit `0x8000000` — character type 0x18's weapons are growing back, and
+   * {@link Actor.handRegrow} is how far.
+   *
+   * `ThrowerStateRestoreBothHands` (`FUN_0044F900`) sets it
+   * (`81c900000008` at 0x0044F9A6) and then waits on it
+   * (`TEST dword ptr [ESI + 0x136c], 0x8000000` — `f7866c13000000000008`
+   * at 0x0044F9B9); `ThrowerDrawBonePart` (`FUN_00449F90`) clears it when the
+   * accumulator passes 1.0 (`81e1fffffff7` at 0x0044A169). `SkeletonEmitNode`
+   * reads it too, to pick bone 9 as the camera point. `[proved]`
+   */
+  Regrowing = 0x8000000,
+  /**
+   * Bit `0x10000000` — make `SkeletonEmitNode` (`FUN_004114C0`) track **bone
+   * 2** instead of the caller's bone (`MOV ECX, 0x2` at 0x00411589).
+   *
+   * `ThrowerStateLeapToPoint` (`FUN_0044E4C0`) tests and sets it
+   * (0x0044E577/0x0044E57E) and clears it at 0x0044E54B;
+   * `ThrowerStateLeapDown` (`FUN_0044B670`) clears it at 0x0044B841. A
+   * draw-and-camera bit in a gameplay word, which is why class 0x31 has no
+   * reader of its own. `[proved]`
+   */
+  TrackBone2 = 0x10000000,
 }
 
 /**
@@ -253,16 +408,151 @@ export enum ZombieFlag2 {
    * Bit `0x4000` — raised for the length of `ZombieStateDelayedLeap`'s arc and
    * cleared on both its exits.
    *
-   * [open] Nothing in the ported call graph reads it back. Kept because the
-   * state really does keep it, and because it is a different word from
-   * `obj+0x34` bit 0x4000 ({@link ActorFlag.PoseFrozen}) which the same state
-   * also toggles — two flags, one value, and mixing them up would freeze the
-   * wrong thing.
+   * **`ZombieOnShot` reads it back**, which closes an `[open]` this comment
+   * used to carry: `00453f88 f6c540` (`TEST CH, 0x40`) and the `JNZ` two bytes
+   * later jump past the death-state change, so a zombie shot mid-leap keeps
+   * flying. `[proved]`
+   *
+   * It is a different word from `obj+0x34` bit 0x4000
+   * ({@link ActorFlag.PoseFrozen}) which the same state also toggles — two
+   * flags, one value, and mixing them up would freeze the wrong thing.
    */
   Leaping = 0x4000,
-  /** Bit `0x80000000` — raised as a delayed leap hands a dead actor to the
-   *  death state. [open], like {@link ZombieFlag2.Leaping}. */
+  /**
+   * Bit `0x80000000` — this actor's death has already been dispatched.
+   *
+   * Also no longer `[open]`: `ZombieOnShot` sets it at `00453f53`
+   * (`0d00000080`) and refuses a second death on the test five instructions
+   * earlier, `00453f3b a900000080`. `[proved]`
+   */
   DiedInFlight = 0x80000000,
+  /**
+   * Bit `0x40000` — **`ZombieStateStrike` has captured `strikeStart`**, which
+   * is to say this actor has swung at least once.
+   *
+   * `ZombieStateStrike` tests it and, when clear, copies `obj+0x40/0x44/0x48`
+   * into `obj+0x13D8/0x13DC/0x13E0` and raises it in the same word:
+   * `00455b98 a900000400` (`TEST EAX, 0x40000`), `00455ba5 0d00000400`
+   * (`OR EAX, 0x40000`), `00455bb0 89866c130000`. `[proved]`
+   *
+   * **Nothing on the melee path ever clears it.** The one `AND` in the program
+   * that does is in `FUN_0045DA60` (`0045db39 25fffffbff`), reached only
+   * through `FUN_0045D9F0` and gated on two bits an ordinary zombie does not
+   * carry; `EnemyZombieInit` clears it only because it *assigns* the whole
+   * word (`00452eaf`, from `00452e9a`'s `(s16)obj+0x1316 | 0x60000000`). So
+   * after its first swing an actor keeps this bit for the rest of its life,
+   * and its two other readers in `ZombieStateHoldAtRange` — the too-close
+   * escape at `0045577c` and the cooldown gate at `004557e0` — are permanent
+   * from then on. It was a separate `hasStrikeAnchor: boolean` here, which is
+   * why neither of those two was ever wired up.
+   */
+  StrikeAnchor = 0x40000,
+  /**
+   * Bit `0x400` — set by `EnemyZombieInitByCharType` for character type 2, and
+   * cleared by `ZombieStateHoldAtRange` two frames from the end of the clip
+   * (`00455904 80e4fb`, guarded by `obj+0x19C >= play_length(obj+0x1B4) - 2`).
+   *
+   * While it is up the same state exempts the actor from the too-close retreat
+   * (`0045577c f7866c13000000040400`, the `0x40400` pair with
+   * {@link ZombieFlag2.StrikeAnchor}) and refuses the attack claim outright
+   * (`00455815 f6c404`). `ZombieOnShot` also clears it (`00453efd`).
+   * `[proved]` — the ops. That the clip in question is the *authored entrance*
+   * one is `[likely]`: it is what character type 2's spawns carry.
+   */
+  EntryClipPlaying = 0x400,
+  /**
+   * Bit `0x10000` — a one-shot effect (splash, dust, sound) has already fired
+   * for the clip that is running.
+   *
+   * Set by `ZombieStrikeFrameSplash` (0x00456DCB), `ZombieStateEmerge`
+   * (0x0045888A) and `ZombieStateArcScriptedEntrance` (0x00458C15); cleared by
+   * whoever starts the next clip, `ZombieStateStrike` among them
+   * (`00455b77 81e2fffffeff`). `[proved]`
+   */
+  OneShotFired = 0x10000,
+  /**
+   * Bit `0x80000` — **a strike has just started**, published for one frame
+   * through `g_cur_actor`.
+   *
+   * `ZombieStateStrike` raises it as it starts the swing
+   * (`00455b7e 81ca00000800`) and the per-actor hook at `obj+0x12EC` consumes
+   * and clears it in `FUN_004534A0` (`00453899` tests, `004538b4
+   * 81a06c130000fffff7ff` clears). Not class 0x31's `CollideWorld`, which is
+   * the same bit on the thrower's reading of this word. `[proved]`
+   */
+  StrikeStarted = 0x80000,
+  /**
+   * Bit `0x200000` — which of the motion row's two waiting clips this actor
+   * plays.
+   *
+   * `ZombieStateAttackRun` writes it as `flags2 |= g_wait_turn_variant[i] <<
+   * 0x15` (`0045[55]cc 8b149524615600`, `c1e215`), so a table value of 0
+   * leaves it alone and the bit is sticky once set; `ZombieStateWaitTurn`
+   * reads it straight back out with `SHR EAX, 0x15` + `AND EAX, 1`
+   * (0x00455690). `[proved]`
+   */
+  WaitTurnVariant = 0x200000,
+  /**
+   * Bit `0x8000` — `ChooseDeathMotion` picks death motion 0x3DB for character
+   * type 10 while it is up (`00456191 f6c480`), and `FUN_00457FB0` sets it
+   * (`00458120`). `[proved]`
+   *
+   * The same value as {@link ThrowerFlag.OffScreenPermit}: two classes, one
+   * bit, different meanings.
+   */
+  DeathMotionVariant = 0x8000,
+  /**
+   * Bit `0x8` — the shot that killed this actor landed within 18.0 of the
+   * point recorded at `obj+0x13CC/0x13D4`.
+   *
+   * `ZombieOnShot` raises it (`00454006 83c908`) immediately before sending
+   * the actor to state 9, and `FUN_004550E0` reads it back (`004552AE`).
+   * `[proved]` for the op and the distance; what state 9 then does with it is
+   * `[likely]` "die into the recorded spot".
+   */
+  ShotNearArcTarget = 0x8,
+  /**
+   * Bit `0x1000` — a hit-reaction clip is running on the **overlay** track,
+   * `obj+0x1B8`/`obj+0x1A0`.
+   *
+   * `ActorPlayHitReaction` sets it, `FUN_00454660` tests and clears it when
+   * that track finishes (`0045468a`, `00454716`), and `ZombieSetMotionIfIdle`
+   * refuses to start an idle while either this or
+   * {@link ZombieFlag2.HitClipBase} is up (0x0045477E). `[proved]`
+   */
+  HitClipOverlay = 0x1000,
+  /** Bit `0x2000` — the same, for the **base** track `obj+0x1B4`/`obj+0x19C`
+   *  (`FUN_00454660` at 0x004546CF and 0x00454734). `[proved]` */
+  HitClipBase = 0x2000,
+  /**
+   * Bit `0x200` — `ActorPlayHitReaction` raises it (`00454611`, `OR AH, 0x2`);
+   * `ZombieStateDeath6` and `FUN_00454F20`/`FUN_00454FD0` clear it. `[proved]`
+   *
+   * With {@link ZombieFlag2.HitReactionAlt} **both** set, and
+   * `obj+0x34 & 0x50000000` clear, `FUN_004547C0` takes the zone-indexed
+   * reaction row instead of the ordinary one (`004547cb f6c401`,
+   * `004547d4 f6c402`, `004547e0 f7c600000050`).
+   */
+  HitReactionPending = 0x200,
+  /**
+   * Bit `0x100` — the other half of that gate. `[open]`: nothing found raises
+   * it, and `ActorSnapToGroundHeight` (0x00454B3B) is the one reader.
+   *
+   * This used to say `ZombieStateCorpseSink` (`FUN_00454F20`) and
+   * `ZombieStateCorpseBlink` (`FUN_00454FD0`) clear it with
+   * `AND EDX, 0xdffffdff`. **They do not**: `0xdffffdff` has bit 8 set, so
+   * that mask clears `0x20000000` and `0x200` and leaves this one alone. No
+   * writer of bit 0x100 has been found at all.
+   */
+  HitReactionAlt = 0x100,
+  /**
+   * Bit `0x10000000` — this actor was spawned in the air.
+   *
+   * `EnemyZombieInitByCharType` sets it (0x00453023) when the spawn record's
+   * `obj+0x34 & 8` says so, and `EnemyZombieUpdate` gates part of its frame on
+   * it (`0045341c`). `[proved]`
+   */
+  SpawnedInAir = 0x10000000,
 }
 
 /**
@@ -292,14 +582,93 @@ export enum ThrowerStance {
  */
 export interface ActorClip { motion: number; ticks: number; loop: boolean }
 
-export interface Actor {
+/**
+ * **Another actor**, by spawn address — the port's stand-in for a raw actor
+ * pointer. `-1` is the engine's null.
+ *
+ * It exists to keep `obj+0x1394`'s two kinds apart. That one word holds a
+ * pointer in every site read, but not the *same* kind of pointer:
+ *
+ * * an **actor pointer**, the parent — class 0x2D at 0x00426B7F and
+ *   0x00428341, and `CivilianInit` (`FUN_0048A3E0`) writing itself onto each
+ *   captor it builds, `MOV dword ptr [EDI + 0x1394], ESI`, bytes
+ *   `89b794130000`, at 0x0048A7D9. That is this type;
+ * * a **walking descriptor pointer**, which is {@link ListCursor}.
+ *
+ * `[proved]`, and it corrects the survey this came from: the third kind it
+ * listed, "a small integer" for class 0x25, is not there. `ScriptedHumanoidInit`
+ * (`FUN_004840D0`) seeds `obj+0x1394` with a pointer (0x004840FB),
+ * `ScriptedHumanoidUpdate` (`FUN_004842A0`) reads it beside `obj+0x1390`
+ * (0x004842BE) and stores an advanced pointer back (0x00484A9C). Class 0x25's
+ * cursor is the same kind as class 0x31's.
+ *
+ * TypeScript aliases are structural, so this documents rather than enforces;
+ * the enforcement is the union, which is not this wave's work. What it does
+ * buy is that a reader cannot mistake `targetAt` for an index.
+ */
+export type ActorRef = number;
+
+/**
+ * **A cursor into a decoded list** — the port's index form of an exe pointer
+ * that walks a descriptor.
+ *
+ * The engine keeps a raw address and advances it by the record stride; the
+ * port has no flat address space, so it keeps how far in. `[diverges]` in
+ * representation only, and it is what makes the cursor survive a snapshot.
+ *
+ * `[proved]` for both users of `obj+0x1394` in this shape:
+ * `ThrowerStatePathFollow` (`FUN_0044EE00`) sets it to `obj+0x1390 + 8`
+ * (`MOV dword ptr [EBX + 0x1394], EAX`, bytes `898394130000`, 0x0044EE35) and
+ * then adds 0x10 a leg (`ADD EDX, 0x10`, bytes `83c210`, 0x0044EF0E, stored at
+ * 0x0044EF13), stopping on `CMP word ptr [EAX], -1`; class 0x25's VM does the
+ * same over its own command stream. `-1` is "the list has ended" and is the
+ * port's, not a value the engine's pointer can hold.
+ */
+export type ListCursor = number;
+
+/**
+ * The fields **every** class has — the ones a class-agnostic engine routine
+ * touches. See {@link Actor} for the per-class arms and why they are separate.
+ */
+export interface ActorBase {
   // -- identity ----------------------------------------------------------
   /** The spawn's script address. Stable, and the key the renderer binds on. */
   at: number;
-  /** The spawn class — `g_class_handlers` is indexed by it. */
+  /**
+   * The spawn class — `g_class_handlers` is indexed by it.
+   *
+   * [port-only] **The engine has no `cls` field.** `SpawnFromDescriptor`
+   * (`FUN_00408A20`) uses the descriptor's first word once, to index
+   * `g_class_handlers`, and stores the *handler pointer* at `obj+0x00`; the id
+   * itself is never written to the actor. `cls` stands for that pointer, and
+   * for the same thing it selects — which class's code owns this actor's
+   * tail — so it is written at construction and never again.
+   *
+   * It is **not** what the engine's class-agnostic code switches on. That is
+   * {@link Actor.charType}; see its note.
+   */
   cls: SpawnClass;
-  /** The character type index; `game/tables.ts` resolves the data. */
-  charType: number;
+  /**
+   * `obj+0x1F4` — the character type, **s16**, and the head's real type tag.
+   *
+   * It lives inside the embedded model record: `ActorSetMotion`
+   * (`FUN_00411930`) reads it as `*(short *)(model + 0x60)` and
+   * `0x194 + 0x60 == 0x1F4`. `EvtOpSpawnPlaced09` and every class `Init` write
+   * it 16 bits wide — `MOV word ptr [ESI + 0x1F4], AX`, bytes
+   * `668986f4010000`, at 0x00408801, 0x004088ED, 0x00449643 and 0x00452DEA
+   * among eleven sites. `[proved]`
+   *
+   * **The engine's class-agnostic code gates on this, not on the class.**
+   * `RankEnemiesByDistance` (`FUN_004090B0`) tests it against 0xB —
+   * `CMP word ptr [EAX + 0x1F4], DI`, bytes `6639b8f4010000`, at 0x004090EB —
+   * `ResolveHit` against 0xC, `ActorSwapDamagedPart` against 0xD, and
+   * `ShotTestSphere`, `DamageRankModifier`, `ActorDrawShadow`,
+   * `ActorPlayHitVoice` and `SkeletonWalkNode` index tables with it. A port
+   * routine that gates on `cls` where the exe gates on this is a divergence
+   * even where the shipped data agrees: class 0x30 covers many character
+   * types and class 0x31 covers four. `game/tables.ts` resolves the data.
+   */
+  charType: number;         // +0x1F4, s16
   /** Display name, for the feed. Copied from the type at spawn. */
   name: string;
 
@@ -309,19 +678,50 @@ export interface Actor {
    * `obj+0x38` — a second flag word, and the one the **enemy counters** latch
    * in. See {@link CountFlag}; class 0x31 latches the same two facts in
    * `obj+0x136C` instead, which is the usual polymorphism.
+   *
+   * [open] Bits `0x1`/`0x2`/`0x4` are class 0x30's counting latches, but bit
+   * **`0x40` is class-agnostic and this port does not model it**, and neither
+   * is `obj+0x3C`, the s32 beside it. `ActorInitFlags` (`FUN_00408970`) zeroes
+   * both; `ActorClaimHitSlot` (`FUN_00409270`) does
+   * `obj+0x3C = -1; if (g_hit_slots[i] == 0) { obj+0x38 |= 0x40;
+   * g_hit_slots[i] = obj; obj+0x3C = i; }`; and `ActorDespawn`
+   * (`FUN_00409CC0`) reads the byte back —
+   * `if ((obj+0x38 & 0x40) && obj+0x3C != -1) { g_hit_slots[obj+0x3C] = 0;
+   * obj+0x3C = -1; }` — before `ActorKill`. `[proved]` Class draws also use
+   * `obj+0x3C` as a per-actor seed. `game/globals.ts` already records
+   * `g_hit_slots` as not ported; porting the hit-slot system is a job of its
+   * own and until it happens this word carries only class 0x30's three bits.
    */
   flags38: number;          // +0x38
   pos: Vec3;                // +0x40
-  /** Yaw in BAMS. The engine keeps a triple at +0x64/68/6C; only Y turns. */
+  /**
+   * Yaw in BAMS, the middle word of the engine's rotation triple at
+   * +0x64/68/6C. Almost everything turns only about Y — this used to say
+   * "only Y turns", and `ZombieStateDeathKnockbackArc` (`FUN_004550E0`) is
+   * the counter-example: see {@link Actor.pitch}.
+   */
   yaw: number;              // +0x68
+  /**
+   * `obj+0x64` — the **x** word of the same triple.
+   *
+   * One writer is ported: body condition 4's knockback spins the falling body
+   * by `±(rand() % 5) * 0x100` BAMS at 0x004551D5. `render/` poses an actor
+   * from `yaw` alone, so nothing draws this yet; it is state the engine keeps
+   * on the actor, so the port keeps it where the engine does and the renderer
+   * is the half that has to catch up.
+   */
+  pitch: number;            // +0x64
   /**
    * What the camera aims at, and **not** the actor's origin.
    *
    * `SkeletonEmitNode` (`FUN_004114C0`) records one bone's world position here
    * as it walks the skeleton — bone 1, the torso, for an ordinary humanoid —
-   * and `FUN_00409B70` then raises it by 4.0 before registering the actor for
-   * camera tracking. `SelectCameraLookAtTarget` reads this and never reads
-   * `pos`. Aiming at the origin instead put the camera on the feet.
+   * and `ActorRegisterCameraPoint` (`FUN_00409B70`) then raises `obj+0x104` by
+   * **its float argument**, which is a per-call-site value and not a field:
+   * 4.0 for class 0x30 and 0x10, 0.0 for class 0x31. See
+   * `camera/track.ts`'s `CAMERA_POINT_RISE`. `SelectCameraLookAtTarget` reads
+   * this and never reads `pos`. Aiming at the origin instead put the camera on
+   * the feet.
    */
   lookAt: Vec3;             // +0x100
   /** `EnemyThrowerUpdate` integrates `vel += acc` and then `pos += vel`. */
@@ -358,16 +758,39 @@ export interface Actor {
   entry: ZombieEntryTail | null;
   hp: number;               // +0x11C
   maxHp: number;            // +0x11E
-  /** `-1` when it holds no permit, else the index into `g_attack_permits`. */
-  attackPermit: number;     // +0x121
+  /**
+   * `obj+0x121` — **a signed byte with `0xFF` as its sentinel**, not a
+   * non-negative count. `-1` when it holds no permit, else the index into
+   * `g_attack_permits`.
+   *
+   * `[proved]` on both halves: read `MOVSX EAX, byte ptr [ESI + 0x121]`
+   * (bytes `0fbe8621010000`) at 0x0044CB35 and 0x0045A155, and tested against
+   * the sentinel by `SelectCameraLookAtTarget` (`FUN_00403050`) —
+   * `MOV DL, byte ptr [ECX + 0x121]; CMP DL, 0xFF` (bytes `8a9121010000`,
+   * `80faff`) at 0x00403075, and `CMP byte ptr [EAX + 0x121], 0xFF` (bytes
+   * `80b821010000ff`) at 0x00403080. Every class `Init` seeds it to `0xFF`.
+   * A `number` that cannot go negative is the wrong shape for it.
+   */
+  attackPermit: number;     // +0x121, s8, 0xFF = none
   /** `ActorBodyConditionFromHands` — indexes the attack and motion tables. */
   condition: number;        // +0x130C
   state: number;            // +0x1310
   sub: number;              // +0x1312
   /** Destroyed zones — a mask of {@link DamageZone}. */
   zones: number;            // +0x1318
-  /** The attack index the strike drew. */
-  attack: number;           // +0x131A
+  /**
+   * The attack index the strike drew — **one signed byte at `obj+0x131A`**,
+   * read everywhere as `MOVSX EAX, byte ptr [ESI+0x131a]`
+   * (`ZombieStateStrike` 0x00455A5A, `0fbe861a130000`) and written as a byte
+   * (0x00455AD0, `88861a130000`).
+   *
+   * It used to be two fields. `attackIndex` was the second name, given to
+   * `ZombiePickThrowingHand`'s hand pick — but the hand pick writes this same
+   * byte, because hand 0/1 *is* attack entry 0/1 of the row, and modelling
+   * them apart let a throw's pick and a melee pick both survive when the exe
+   * has one of them overwrite the other.
+   */
+  attack: number;           // +0x131A, s8
   /**
    * Rank in the distance queue, nearest first, and **signed**: the engine
    * reads `(s8)obj+0x131D` everywhere, and `EnemyZombieInit` writes 0xFF, so
@@ -389,58 +812,37 @@ export interface Actor {
    * the pose. Selectors 2 and 3 start frozen and a camera cue releases them.
    */
   frozen: number;           // +0x1324
-  /** `obj+0x1330` — the set-piece slide's countdown, in frames. */
+  /**
+   * `obj+0x1330` — the set-piece slide's countdown, in frames.
+   *
+   * Class 0x30's corpse countdown was this field and is now
+   * {@link ZombieTail.corpseTimer}: same word, a different class's clock.
+   */
   slideTimer: number;       // +0x1330
   /**
    * `obj+0x1320` — frames a wait has been stalled for. `SetPieceStateHoldThenPlay`
    * counts its hold in it, and class 0x25's VM its frame conditions.
+   *
+   * Both count **up** and both are reset by the routine that reads them, but
+   * they are not the same field: class 0x24 tests it against `tail+0x0C` and
+   * class 0x25 against a command's `a`, and class 0x30 aliases the same
+   * address as `zom.scriptMotion`, which is a motion id and not a counter at
+   * all.
+   *
+   * **Class 0x30 does not share this field**, and used to. Its holds are
+   * counted at `obj+0x1330` — `[proved]` at `ZombieStateEmerge`
+   * (`0x00458596`), `ZombieStateRunInPlaceTimed` (`0x004571B0`) and
+   * `ActorArcBeginFalling` — so the port had two addresses under one name.
+   * That reading is now {@link ZombieTail.holdFrames}.
    */
-  holdFrames: number;       // +0x1320
-  /** `obj+0x1394` — class 0x25's command cursor, as an index. -1 has left. */
-  pc: number;               // +0x1394
-  /** `obj+0x132C` / `+0x1328` / `+0x1354` / `+0x1350` — the turn. */
-  turnMode: number;         // +0x132C
-  turnFrames: number;       // +0x1328
-  turnStep: number;         // +0x1354
-  turnTarget: number;       // +0x1350
-  /** `obj+0x1358` / `+0x135C` / `+0x1360` — riding an object path. */
-  pathMode: number;         // +0x1358
-  pathSlot: number;         // +0x135C
-  pathOffset: number;       // +0x1360
-  /**
-   * `obj+0x1330` — class 0x25's `op 14`. **Not** a draw mode: the class's own
-   * draw routine never reads it and poses unconditionally. `[open]` — its only
-   * reader is the hit handler at `obj+0x12EC`, which is unread.
-   */
-  hitMode: number;          // +0x1330
-  /**
-   * `obj+0x13C0` — where the actor was last frame. The VM's "am I closing on
-   * this point" condition compares against it, which is the only reason it is
-   * kept.
-   */
-  prevPos: Vec3;            // +0x13C0
+  holdFrames: number;       // +0x1320, class 0x24
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
-  /** Frames spent retreating; `ZombieStateBackOff` gives up past 0xF0. */
-  backoffFrames: number;    // +0x1334
   /** How deep in the distance queue this actor may be and still attack. */
   allowance: number;        // +0x1358
   /** Frames before this actor may claim again. `ZombieStateHoldAtRange`
    *  forces it to zero unless `obj+0x1368` bit 0 is set. */
   cooldown: number;         // +0x133C
-  /**
-   * `obj+0x1368` bit 0 for class 0x30 — **the actor is allowed a cooldown**.
-   *
-   * `ZombieStateWaitForCameraFrame` (state 19) is the only thing in the class
-   * that sets it, so for every other zombie `ZombieStateHoldAtRange` forces
-   * {@link Actor.cooldown} to zero and there is no wait between swings beyond
-   * the strike clip and the retreat.
-   *
-   * A separate field and not a bit of `reactBone`, which is the same offset:
-   * class 0x31 reads `obj+0x1368` as the bone that was hit, and this is the
-   * polymorphism trap that field carries.
-   */
-  hasCooldown: boolean;     // +0x1368 bit 0, class 0x30
   /**
    * The player point the strike measures its lunge against, written by
    * `ActorFacePlayerTarget`. With one attacker it is the camera eye; with two
@@ -463,12 +865,12 @@ export interface Actor {
   /**
    * The route a `ThrowerStatePathFollow` spawn walks before it fights, from
    * its descriptor: a delay and a list of waypoints.
+   *
+   * Decoded descriptor, written by the class-agnostic
+   * `DescriptorFromPlacement`, so it stays on the head; which leg of it the
+   * spawn is on is `ThrowerTail.pathLeg`, on class 0x31's arm.
    */
   path: { delay: number; points: PathPoint[] } | null;
-  /** Which leg of it — the engine keeps a cursor at `obj+0x1394`. */
-  pathLeg: number;
-  /** `obj+0x1330` in sub 1: the delay before the first leg. */
-  pathDelay: number;
   /** `obj+0x1334` — how many it lasts. */
   arcTotal: number;
   /** `obj+0x13CC` — where the arc ends. */
@@ -490,35 +892,18 @@ export interface Actor {
   arcScript: ArcStage[] | null;
   /** `obj+0x136C` — see {@link ThrowerFlag}. */
   flags2: number;
-  /** `obj+0x1364` — the stance row the current attack was drawn against. */
-  stance: number;
-  /**
-   * `obj+0x135C` — the distance band `ThrowerPickNextState` last committed to.
-   * The same word as `pathSlot`; see `arcPhase`.
-   */
-  moveBand: number;
-  /** `obj+0x1338` — frames since a leap landed. */
-  sinceLanding: number;
   /**
    * `ThrowerStateWalkDistance`'s target, from the descriptor — and
-   * `ZombieStateWalkDistance`'s, which reads the same float at tail `+0x04`.
+   * `ZombieStateWalkDistance`'s, which reads the same float at **`desc+0x04`**:
+   * `*(float *)(obj+0x1390 + 4)`, four bytes into the descriptor parameter tail
+   * `SpawnFromDescriptor` (`FUN_00408A20`) hangs at `obj+0x1390`.
+   *
+   * The comment here used to say "tail `+0x04`", which reads as `obj+0x04` —
+   * and `obj+0x04` is inside the task control block `ActorAlloc`
+   * (`FUN_004A6FA0`) owns, which no class may touch. This is not an actor
+   * field at all: it is one immutable descriptor value two classes read.
    */
-  walkDistance: number;
-  /**
-   * `obj+0x1374` — how far `ZombieStateWalkDistance` has come from
-   * `arcFrom`. The engine writes it every frame and never reads it back.
-   */
-  walkTravelled: number;    // +0x1374
-  /**
-   * `obj+0x131A` — which entry of `g_class30_attacks[type][condition]` the
-   * next attack uses. `ZombiePickThrowingHand` writes 0 for bone 5 and 1 for
-   * bone 8; the melee states index the same table with the pick list.
-   */
-  attackIndex: number;      // +0x131A
-  /** `obj+0x1330` — `ZombieStateStandAndThrow`'s idle countdown. */
-  throwDelay: number;       // +0x1330
-  /** The bone the current throw leaves from, 5 or 8. */
-  throwHand: number;
+  walkDistance: number;     // desc+0x04
   /** `ZombieStateStandAndThrow`'s descriptor tail, from the bundle. */
   standThrow: CharacterPlacement["stand_throw"];
   /**
@@ -611,20 +996,38 @@ export interface Actor {
    *
    * `ColiTestSphereAgainstActors` does not move the actor it finds: it writes
    * the opposite push onto it and lets it apply that on its own next frame.
-   * `pushedBy` is the actor that did it, by spawn address, or `-1`.
+   * `pushedBy` is the actor that did it, by spawn address, or `-1` — an
+   * {@link ActorRef}. Ghidra types `obj+0x138` as `float`; it holds a pointer.
    */
-  pushedBy: number;         // +0x138
+  pushedBy: ActorRef;       // +0x138
   pushDepth: number;        // +0x13C
   pushNormal: Vec3;         // +0x140
   /**
-   * `obj+0x12C` — the point `CivilianUpdate`'s camera-point switch writes,
-   * selected by `sub+0x80` (op 0x17). Mode 0 is the actor's own position;
-   * modes 1-3 read matrices out of the model block and are `[open]`.
+   * `obj+0x12C/0x130/0x134` — **the actor's collision-sphere centre**.
    *
-   * It is **not** the shot sphere: that is `obj+0x100`, which the draw writes
-   * and `ActorRegisterCameraPoint` lifts.
+   * `RegisterForShotTest` (`FUN_00405160`) publishes it, with `obj+0x34`, into
+   * the per-frame dynamic list at 0x0059D8E8, and that list feeds *both*
+   * consumers: the gunshot hit test, and — after the copy to 0x005A30A0 —
+   * `ColiTestSphereAgainstActors` (`FUN_00405B10`), the actor-versus-actor
+   * push. `ThrowerPushOutOfWorld` passes its address as a vec3
+   * (`LEA EAX, [ESI + 0x12C]` at 0x00449D69 and 0x00449E02). The radius that
+   * goes with it is {@link Actor.radius} for the shot and
+   * {@link Actor.bodyRadius} for the push. `[proved]`
+   *
+   * It was called `camPoint` here, after `CivilianUpdate`'s camera-point
+   * switch (`sub+0x80`, op 0x17) — one class's writer naming a field three
+   * class-agnostic routines read. Renamed for that reason; the writers are
+   * `ActorUpdateBoundingSphere` (`FUN_00454AC0`) for class 0x30,
+   * `ThrowerPlaceCollisionSphere` (`FUN_00449E80`) for class 0x31, and that
+   * switch for class 0x10. Of the switch, only mode 0 — the actor's own
+   * position — is ported; modes 1-3 read matrices out of the model block and
+   * are `[open]`.
+   *
+   * It is **not** what the camera aims at: that is `obj+0x100`
+   * ({@link Actor.lookAt}), which the skeleton walk writes and
+   * `ActorRegisterCameraPoint` lifts.
    */
-  camPoint: Vec3;           // +0x12C
+  sphereCentre: Vec3;       // +0x12C
   /**
    * Class 0x10's `ActorAllocSub(0xC4)` block at `obj+0x1310`.
    *
@@ -633,23 +1036,22 @@ export interface Actor {
    * its clearest form. See `class10/state.ts`.
    */
   civ: CivilianState | null;                             // +0x1310
-  /** `obj+0x1368` — the bone that was hit. Class 0x31 alone reads it that way. */
-  reactBone: number;        // +0x1368
-  /** `obj+0x1328` — re-entries into the knockdown; two caps the arc. */
-  knockCount: number;       // +0x1328
-  /** `obj+0x1350` — the surface under the landing point. `0x5A` kills. */
-  landSurface: number;      // +0x1350
   /**
    * `obj+0x1394` — **the object this actor was built for**, by spawn address.
    *
-   * Polymorphic, like everything at this end of the struct:
-   * `ThrowerStatePathFollow` keeps a waypoint cursor here, and
-   * `ScriptedHumanoidInit` a command pointer. For a class-0x30 zombie it is a
-   * *parent actor*, written by `CivilianInit` for the 47 captors it builds —
-   * and the whole `ZombieStateWalkToTarget` family walks at it instead of at
-   * the camera. `-1` for an actor that has none.
+   * An {@link ActorRef}, and the *other* kind of thing this offset holds.
+   * `ThrowerStatePathFollow` (`FUN_0044EE00`) and `ScriptedHumanoidInit`
+   * (`FUN_004840D0`) keep a walking **descriptor** pointer here — see
+   * {@link ListCursor} — while for a class-0x30 zombie it is a **parent
+   * actor**, written by `CivilianInit` (`FUN_0048A3E0`) for the 47 captors it
+   * builds, and the whole `ZombieStateWalkToTarget` family walks at it instead
+   * of at the camera. `-1` for an actor that has none.
+   *
+   * Two pointers to different kinds of thing, one word: a `pathLeg` assigned
+   * into a `targetAt` would be a live actor id in the port and is exactly what
+   * the two aliases exist to make visible at a glance.
    */
-  targetAt: number;         // +0x1394
+  targetAt: ActorRef;       // +0x1394, classes 0x2D and 0x30
   /**
    * The two captor scripts off the descriptor tail, decoded — `+0x04` for the
    * initial state and `+0x08` for the attack state. `ZombieScriptForState`
@@ -657,65 +1059,8 @@ export interface Actor {
    */
   script: { target: TargetScriptJson | null;
             attack: TargetScriptJson | null } | null;
-  /**
-   * `obj+0x1398` — the cursor into the captor script's entry list.
-   *
-   * The engine keeps a pointer; an index is the same edge without the address,
-   * and it survives a snapshot. Shared by every state in the family, which is
-   * how `ZombieStateWalkToTarget` can hand `ZombieStateTargetMotionScript` a
-   * half-walked list.
-   *
-   * **A pointer says which list as well as how far in**, and that half is
-   * {@link scriptBlob}. Without it the cursor was re-aimed from `obj.state`
-   * on every read, so a captor that arrived and entered state 35 went back to
-   * the blob it had already finished instead of the one the walk left it in.
-   */
-  scriptPc: number;         // +0x1398
-  /**
-   * Which of the descriptor tail's two script blobs {@link scriptPc} indexes:
-   * 0 is `+0x04`, 1 is `+0x08`. The other half of `obj+0x1398`.
-   *
-   * `ZombieScriptForState` (`FUN_0045CA10`) is called only where the engine
-   * writes that pointer — `ZombieScriptEnded`, and each scripted state's
-   * entry sub — and never on the steps in between, which read the pointer
-   * back. Deriving it from the state instead is a test moved across a
-   * function boundary, and it moved the answer with it.
-   */
-  scriptBlob: number;       // +0x1398, which blob the pointer is in
-  /** `obj+0x1320` — the clip the captor script wants; the tail re-blends to it. */
-  scriptMotion: number;     // +0x1320, aliases `holdFrames`
-  /** `obj+0x1350` — the captor script's remaining loop count. Aliases `landSurface`. */
-  targetLoops: number;      // +0x1350
-  /**
-   * `obj+0x1354` — the script entry's cue frame or mode, and, once
-   * `ZombieStateTargetLostPause` is entered, the state to come back to.
-   * Aliases `arcKind`; the two never overlap in time.
-   */
-  targetCue: number;        // +0x1354
-  /** `obj+0x1358` — the sub to come back to. Aliases `allowance`/`pathMode`. */
-  resumeSub: number;        // +0x1358
-  /** `obj+0x1370` — how close `ZombieStateWalkToTarget` has to get. */
-  targetArrive: number;     // +0x1370
-  /** `obj+0x1388` — the height a fall began at, and a flag while it is set. */
-  fallFromY: number;        // +0x1388
-  /** `obj+0x1354` — the axis gravity pulls along. See `ThrowerArcKind`. */
-  arcKind: number;          // +0x1354
   /** `obj+0x138C` — the draw alpha the blinking states write. */
   alpha: number;            // +0x138C
-  /**
-   * `obj+0x1338` — frames since this actor was last shoved out of another.
-   *
-   * `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) counts it down and, 60
-   * frames after a push, flips `obj+0x136C` bit 0x400000 — the direction
-   * `ZombieStateBackOff` retreats in. **Not** the attack cooldown, which is
-   * the next field along.
-   */
-  shoveTimer: number;       // +0x1338
-  /** `obj+0x133C` is the cooldown; this is the frame the corpse is pinned to. */
-  corpseFrame: number;      // +0x194, pinned
-  /** `ThrowerStateBlinkInThreeHops`' two counters. */
-  hopsLeft: number;         // +0x1348
-  hopFrames: number;        // +0x1344
 
   /**
    * How close the bite may bring this actor to its target.
@@ -732,8 +1077,6 @@ export interface Actor {
    */
   strikeFloor: number;
 
-  /** `obj+0x136C & 0x40000` — `strikeStart` has been captured. */
-  hasStrikeAnchor: boolean;
   /**
    * This swing has already landed its hit.
    *
@@ -752,6 +1095,24 @@ export interface Actor {
 
   // -- descriptor --------------------------------------------------------
   /**
+   * `obj+0x1316` — the spawn descriptor's `+0x20` word, **sign-extended**.
+   *
+   * `SpawnFromDescriptor` (`FUN_00408A20`) copies it in before the class's
+   * `Init` runs — `MOV AX, word ptr [EDI + 0x20]` (`668b4720`) then
+   * `MOV word ptr [ESI + 0x1316], AX` (`66898616130000`) at 0x00408A77 — and
+   * each combat class's `Init` makes it the low half of {@link flags2}:
+   * `EnemyThrowerInit` (`FUN_00449620`) ORs `0x180000` onto it,
+   * `EnemyZombieInit` (`FUN_00452DA0`) ORs `0x60000000`.
+   *
+   * For class 0x31 the bits are the **starting surface**, and dropping this
+   * word is why five stage-6 `zslman` all blinked in standing on the floor.
+   * Class 0x30 has 76 shipped spawns that set it and does not read it here
+   * yet.
+   *
+   * Not the same word as {@link flags}, which is the descriptor's `+0x04`.
+   */
+  descFlags: number;        // +0x1316
+  /**
    * The state `EnemyZombieInit` starts this actor in — descriptor byte +2.
    * Every entrance state in stage 2 funnels into `AttackRun`.
    */
@@ -763,11 +1124,6 @@ export interface Actor {
    */
   attackState: number;
   /**
-   * `obj+0x132C` — the state `ZombieStateHoldForCameraCue` runs on this
-   * actor's behalf while it waits for its camera cue.
-   */
-  delegate: number;
-  /**
    * The descriptor tail's `+0x0C`/`+0x0E`, or null when `+0x0C` is -1.
    * The camera path and frame a captor's exit waits for.
    */
@@ -777,8 +1133,15 @@ export interface Actor {
   dead: boolean;
   /** The script has this spawn live and the renderer is showing it. */
   visible: boolean;
-  /** The looping base motion. */
-  motion: number;
+  /**
+   * `obj+0x1B4` — the looping base motion id.
+   *
+   * It is `model[8]` of the embedded skinned-model record at `obj+0x194`, and
+   * `0x194 + 0x20 == 0x1B4`: `ActorSetMotion` (`FUN_00411930`) is
+   * `model[8] = id` and nothing else writes it. Every class `Init` calls it.
+   * `[proved]`
+   */
+  motion: number;           // +0x1B4
   /**
    * `obj+0x19C` — the play cursor, **in whole 60 Hz ticks**, not in seconds.
    *
@@ -846,6 +1209,73 @@ export interface Actor {
   boneSlot: Record<string, number>;
 }
 
+/**
+ * An actor: the shared head, plus the arm its class owns.
+ *
+ * ## Why this is a union, and what it does and does not fix
+ *
+ * The struct's tail is reused. `obj+0x1330` is a hand-prop selector for class
+ * 0x25, a slide countdown for 0x24 and an arc frame counter for 0x31 — one
+ * word, three meanings, and that is the *engine's* design, not a porting
+ * mistake. A flat interface asserts that all of those coexist on every actor,
+ * which is false of every actor that has ever existed. Discriminating on `cls`
+ * asserts what the engine asserts: this word means what this actor's class
+ * says it means.
+ *
+ * **It does not remove every alias, and the honest claim is narrower than the
+ * plan's.** Two kinds of aliasing look alike in a flat struct and only one is
+ * cross-class:
+ *
+ * * *Between* classes — `obj+0x1330` as class 0x25's `bonePropMode` against
+ *   class 0x24's `slideTimer`. A `cls` discriminant fixes this, and it is what
+ *   the arms below are for.
+ * * *Within* one class — `obj+0x1330` is also class 0x30's general-purpose
+ *   per-state dword, with 98 accesses across 24 routines, read differently by
+ *   each state. Putting all of those on the class-0x30 arm leaves them
+ *   aliasing each other exactly as much as before. Fixing that would need a
+ *   second discriminant, the *state*, and it is not obviously right either:
+ *   the engine really does reuse one word across states, so a per-state union
+ *   would model the port's safety rather than the engine's structure. It is
+ *   not attempted, and the aliases are documented on the fields instead.
+ *
+ * A third group cannot go on any arm: `obj+0x1330`/`+0x1334`/`+0x1360`/
+ * `+0x13C0`/`+0x13CC` are the **shared arc record** that `ActorArcBegin` and
+ * `ActorArcStep` lay down, and class-0x30 and class-0x31 states both call
+ * those routines directly. They stay in the head.
+ *
+ * ## The arms are not all the same shape
+ *
+ * Class 0x10's `civ` is a nullable pointer to a block the engine *allocates*
+ * (`ActorAllocSub(0xC4)`), so its offsets are the block's and it is genuinely
+ * absent until `CivilianInit` runs. Every other arm is a view onto words that
+ * are always there — `ActorAllocSub` has 37 call sites and none of the other
+ * class Inits is one of them [proved] — so those arms are **not** nullable.
+ * Spelling them alike would invent an absent state the engine does not have
+ * and force every reader into a check it never makes.
+ */
+export type Actor =
+  | (ActorBase & { cls: SpawnClass.ScriptedHumanoid; hum: HumanoidTail })
+  | (ActorBase & { cls: SpawnClass.SetPieceProp; prop: SetPiecePropTail })
+  | (ActorBase & { cls: SpawnClass.Thrower; thr: ThrowerTail })
+  | (ActorBase & { cls: SpawnClass.Zombie; zom: ZombieTail })
+  | (ActorBase & { cls: Exclude<SpawnClass,
+      SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
+      | SpawnClass.Thrower | SpawnClass.Zombie> });
+
+/** An actor already narrowed to class 0x25, for that class's own routines. */
+export type HumanoidActor = Extract<Actor,
+  { cls: SpawnClass.ScriptedHumanoid }>;
+
+/** An actor already narrowed to class 0x24. */
+export type SetPiecePropActor = Extract<Actor,
+  { cls: SpawnClass.SetPieceProp }>;
+
+/** An actor already narrowed to class 0x31, for that class's own routines. */
+export type ThrowerActor = Extract<Actor, { cls: SpawnClass.Thrower }>;
+
+/** An actor already narrowed to class 0x30, for that class's own routines. */
+export type ZombieActor = Extract<Actor, { cls: SpawnClass.Zombie }>;
+
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
 const SPHERE_RISE = 1;
@@ -867,19 +1297,23 @@ const LOW_SPHERE = 0x2000000;
  * same answer without the ordering hazard.
  */
 export function ActorUpdateBoundingSphere(obj: Actor): void {
-  obj.camPoint.x = obj.pos.x;
-  obj.camPoint.z = obj.pos.z;
-  obj.camPoint.y = obj.pos.y + obj.bodyRadius
+  obj.sphereCentre.x = obj.pos.x;
+  obj.sphereCentre.z = obj.pos.z;
+  obj.sphereCentre.y = obj.pos.y + obj.bodyRadius
     + ((obj.flags2 & LOW_SPHERE) ? SPHERE_RISE_LOW : SPHERE_RISE);
 }
 
 export function makeActor(at: number, cls: SpawnClass, charType: number,
                           name: string): Actor {
-  return {
-    at, cls, charType, name, flags38: 0,
+  // The head, without `cls`: which arm this actor gets is decided below, and
+  // assigning `cls` here would widen it back to `SpawnClass` and defeat the
+  // narrowing the union exists for.
+  const head: Omit<ActorBase, "cls"> = {
+    at, charType, name, flags38: 0,
     flags: 0,
     pos: vec3(),
     yaw: 0,
+    pitch: 0,
     lookAt: vec3(),
     vel: vec3(),
     accY: 0,
@@ -896,24 +1330,12 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     sub: 0,
     zones: 0,
     attack: -1,
-    hasCooldown: false,
     rank: -1,
     queueRank: 0xe,
     frozen: 0,
     slideTimer: 0,
     holdFrames: 0,
-    pc: 0,
-    turnMode: 0,
-    turnFrames: 0,
-    turnStep: 0,
-    turnTarget: 0,
-    pathMode: 0,
-    pathSlot: -1,
-    pathOffset: 0,
-    hitMode: 0,
-    prevPos: vec3(),
     ringSet: 0,
-    backoffFrames: 0,
     allowance: 0,
     cooldown: 0,
     target: vec3(),
@@ -922,22 +1344,13 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     arcFrom: vec3(),
     arcFrames: 0,
     path: null,
-    pathLeg: 0,
-    pathDelay: 0,
     arcTotal: 0,
     arcTo: vec3(),
     arcPhase: 0,
     arcScript: null,
     flags2: 0,
-    stance: 0,
-    moveBand: 0,
-    sinceLanding: 0,
     walkDistance: 0,
-    walkTravelled: 0,
     worldPushDepth: 0,
-    attackIndex: 0,
-    throwDelay: 0,
-    throwHand: 0,
     standThrow: undefined,
     entranceMotion: 0,
     pounce: null,
@@ -953,33 +1366,16 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pushedBy: -1,
     pushDepth: 0,
     pushNormal: vec3(),
-    camPoint: vec3(),
+    sphereCentre: vec3(),
     civ: null,
-    reactBone: 0,
-    knockCount: 0,
-    landSurface: 0,
     targetAt: -1,
     script: null,
-    scriptPc: 0,
-    scriptBlob: 0,
-    scriptMotion: 0,
-    targetLoops: 0,
-    targetCue: 0,
-    resumeSub: 0,
-    targetArrive: 0,
-    fallFromY: 0,
-    arcKind: 0,
     alpha: 1,
-    shoveTimer: 0,
-    corpseFrame: -1,
-    hopsLeft: 0,
-    hopFrames: 0,
     strikeFloor: 0,
-    hasStrikeAnchor: false,
     struck: false,
+    descFlags: 0,
     initialState: 0,
     attackState: 0,
-    delegate: 0,
     cameraCue: null,
     dead: false,
     visible: false,
@@ -999,4 +1395,21 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     removed: [],
     boneSlot: {},
   };
+  // One `return` per arm. TypeScript narrows `cls` inside each branch, so the
+  // arm's fields are required exactly where they belong and no cast is needed
+  // — which is the point: a cast here would be the one place the union could
+  // be lied to, and there is no cast here.
+  if (cls === SpawnClass.ScriptedHumanoid) {
+    return { ...head, cls, hum: makeHumanoidTail() };
+  }
+  if (cls === SpawnClass.SetPieceProp) {
+    return { ...head, cls, prop: makeSetPiecePropTail() };
+  }
+  if (cls === SpawnClass.Thrower) {
+    return { ...head, cls, thr: makeThrowerTail() };
+  }
+  if (cls === SpawnClass.Zombie) {
+    return { ...head, cls, zom: makeZombieTail() };
+  }
+  return { ...head, cls };
 }

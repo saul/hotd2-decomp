@@ -18,7 +18,7 @@
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieState } from "./states";
@@ -55,11 +55,11 @@ const LEAP_ALT_HANDOFF_FRAME = 0x23;
 const LEAP_LANDING_FRAMES = 0x15;
 
 /** The clip frame this actor is on — the engine's `obj+0x19C`, at 60 Hz. */
-function frameOf(obj: Actor): number {
+function frameOf(obj: ZombieActor): number {
   return MotionPlayFrame(obj);
 }
 
-function atLastFrame(obj: Actor): boolean {
+function atLastFrame(obj: ZombieActor): boolean {
   const len = MotionPlayLength(obj);
   // Equality: the cursor wraps at `len + 1`, so `>=` covers two frames.
   return len > 0 && frameOf(obj) === len - 1;
@@ -75,7 +75,7 @@ function atLastFrame(obj: Actor): boolean {
  * out, throwing a splash at frames 22 and 35 if it is clip 178, and hands over
  * to `AttackRun`.
  */
-export function ZombieStateEmerge(obj: Actor, dt: number,
+export function ZombieStateEmerge(obj: ZombieActor, dt: number,
                                   events?: Events): void {
   const p = obj.emerge;
   if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
@@ -87,14 +87,14 @@ export function ZombieStateEmerge(obj: Actor, dt: number,
     obj.flags |= ActorFlag.PoseFrozen;
     obj.frozen = 1;
     ActorSetMotionBlended(obj, SUBMERGED_MOTION, 0, 0);
-    obj.holdFrames = p.delay;              // +0x1330
+    obj.zom.holdFrames = p.delay;              // +0x1330
     obj.sub = 1;
     return;
   }
 
   if (obj.sub === 1) {
-    obj.holdFrames -= dt * 60;
-    if (obj.holdFrames > 0) return;
+    obj.zom.holdFrames -= dt * 60;
+    if (obj.zom.holdFrames > 0) return;
     obj.frozen = 0;
     obj.flags &= ~ActorFlag.PoseFrozen;
     ActorSetMotionBlended(obj, p.motion, 0, 0);
@@ -143,7 +143,7 @@ export function ZombieStateEmerge(obj: Actor, dt: number,
  * A live actor plays **no landing clip at all**; it keeps 0x3BB and holds on
  * its tail for `play_length - rand() % 30 - 1` frames.
  */
-export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
+export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): void {
   const p = obj.delayedLeap;
   if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
   const frames = dt * 60;
@@ -152,14 +152,14 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
     // `obj+0x34 |= 0x2000`, the arc-armed bit — **not** the pose freeze, which
     // this state raises later and for a different span.
     obj.flags |= ActorFlag.ArcSpent;
-    obj.backoffFrames = p.delay;           // +0x1334
+    obj.zom.backoffFrames = p.delay;           // +0x1334
     obj.sub = 1;
     return;
   }
 
   if (obj.sub === 1) {
-    obj.backoffFrames -= frames;
-    if (obj.backoffFrames >= 0) return;
+    obj.zom.backoffFrames -= frames;
+    if (obj.zom.backoffFrames >= 0) return;
     ActorArcBeginFalling(obj, p.dest, p.gravity);
     // The two jump clips and their two fades: 0x399 at fade 5 when `obj+0x34`
     // bit 0x1000000 is set, else 0x3BB at fade 1. Nothing ported sets that
@@ -198,7 +198,7 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
     // **The freeze.** Off before the clip has started and for the last 0x15
     // frames of the arc; on for everything between, which is the span the
     // parabola must own alone.
-    if (MotionPlayFrame(obj) < 1 || obj.holdFrames < LEAP_LANDING_FRAMES) {
+    if (MotionPlayFrame(obj) < 1 || obj.zom.holdFrames < LEAP_LANDING_FRAMES) {
       obj.flags &= ~ActorFlag.PoseFrozen;
       obj.frozen = 0;
     } else {
@@ -210,8 +210,8 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
       }
     }
 
-    obj.holdFrames -= frames;
-    if (obj.holdFrames >= 0) return;
+    obj.zom.holdFrames -= frames;
+    if (obj.zom.holdFrames >= 0) return;
 
     // Down. The push comes back on, the arc stops, and the hold is measured
     // off **whatever clip is playing** — 0x3BB for a live actor, 0x3F7 for one
@@ -221,7 +221,7 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
     obj.accX = obj.accY = obj.accZ = 0;
     obj.frozen = 0;
     obj.flags &= ~ActorFlag.PoseFrozen;
-    obj.targetLoops = MotionPlayLength(obj) - rng.int(0x1e) - 1;
+    obj.zom.targetLoops = MotionPlayLength(obj) - rng.int(0x1e) - 1;
     // `if (!(obj+0x136C & 0x10000000)) obj+0x34 &= ~0x20000` — the ground snap
     // comes back, unless something else is still holding the actor up. That
     // bit is unported and never set, so this always clears.
@@ -236,7 +236,7 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
     obj.flags2 = (obj.flags2 & ~ZombieFlag2.Leaping) | ZombieFlag2.DiedInFlight;
     return;
   }
-  if (obj.targetLoops <= MotionPlayFrame(obj)) {
+  if (obj.zom.targetLoops <= MotionPlayFrame(obj)) {
     obj.flags2 &= ~ZombieFlag2.Leaping;
     obj.flags &= ~ActorFlag.ArcSpent;
     obj.state = ZombieState.AttackRun;
@@ -245,7 +245,7 @@ export function ZombieStateDelayedLeap(obj: Actor, dt: number, rng: Rng): void {
 }
 
 /** `vel += acc`, which is the whole of the arc's per-frame step. */
-function ZombieLeapIntegrate(obj: Actor): void {
+function ZombieLeapIntegrate(obj: ZombieActor): void {
   obj.vel.x += obj.accX;
   obj.vel.y += obj.accY;
   obj.vel.z += obj.accZ;
@@ -260,7 +260,7 @@ function ZombieLeapIntegrate(obj: Actor): void {
  * and the initial y speed is `(n²a + 2Δy) / 2n`, which is the launch that
  * arrives exactly on the last one.
  */
-export function ActorArcBeginFalling(obj: Actor,
+export function ActorArcBeginFalling(obj: ZombieActor,
                                      dest: readonly [number, number, number],
                                      accel: number): void {
   let n = 0;
@@ -273,7 +273,7 @@ export function ActorArcBeginFalling(obj: Actor,
       y += v;
     }
   }
-  obj.holdFrames = n;                       // +0x1330, the frame count
+  obj.zom.holdFrames = n;                       // +0x1330, the frame count
   obj.accY = -accel;                        // +0x5C
   obj.accX = 0;                             // +0x58
   obj.accZ = 0;                             // +0x60

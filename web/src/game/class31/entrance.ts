@@ -10,7 +10,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { MotionOf } from "../tables";
@@ -38,7 +38,7 @@ const _dest = vec3();
  * is the clip's own root motion, exactly as class 0x30's is; there is no
  * velocity here at all.
  */
-export function ThrowerStateWalkDistance(obj: Actor, rng: Rng): void {
+export function ThrowerStateWalkDistance(obj: ThrowerActor, rng: Rng): void {
   if (obj.sub === 0) {
     ZombieSetMotionIfIdle(obj, ThrowerMotionOf(obj, ThrowerMotion.Walk), rng,
                           "clip", MotionFade.Quick);
@@ -62,7 +62,7 @@ export function ThrowerStateWalkDistance(obj: Actor, rng: Rng): void {
  * One clip, named by the descriptor, played to two frames off its end. Stage
  * 2's `zstin` all name motion 296.
  */
-export function ThrowerStateEntranceClip(obj: Actor): void {
+export function ThrowerStateEntranceClip(obj: ThrowerActor): void {
   if (obj.sub === 0) {
     const m = MotionOf(obj, obj.entranceMotion);
     if (!m) { obj.state = ThrowerState.StandAndDecide; return; }
@@ -92,7 +92,8 @@ export function ThrowerStateEntranceClip(obj: Actor): void {
  * row 0's frame. That is what the code does, and it is not a transcription
  * slip.
  */
-export function ThrowerStateDelayedPounce(obj: Actor, dt: number, rng: Rng,
+export function ThrowerStateDelayedPounce(obj: ThrowerActor, dt: number,
+                                          rng: Rng,
                                           host: GameHost,
                                           events?: Events): void {
   const p = obj.pounce;

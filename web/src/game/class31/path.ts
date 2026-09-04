@@ -15,7 +15,7 @@
  * `obj+0x1354`, which `SelectActorGravityAxis` writes from the surface the
  * actor is attached to.
  */
-import type { Actor } from "../actor";
+import type { ThrowerActor } from "../actor";
 import { GAME_HZ } from "../class30/states";
 import { ActorArcVelocity } from "./arc";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
@@ -30,7 +30,7 @@ enum PathSub {
   Travelling = 3,
 }
 
-export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
+export function ThrowerStatePathFollow(obj: ThrowerActor, dt: number): void {
   const path = obj.path;
   if (!path || !path.points.length) {
     obj.state = ThrowerState.StandAndDecide;
@@ -40,19 +40,19 @@ export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
 
   if (obj.sub === PathSub.Begin) {
     obj.arcFrames = 0;
-    obj.pathLeg = 0;
-    obj.pathDelay = path.delay;
+    obj.thr.pathLeg = 0;
+    obj.thr.pathDelay = path.delay;
     obj.sub = PathSub.Delay;
   }
 
   if (obj.sub === PathSub.Delay) {
-    obj.pathDelay -= dt * GAME_HZ;
-    if (obj.pathDelay >= 1) return;
+    obj.thr.pathDelay -= dt * GAME_HZ;
+    if (obj.thr.pathDelay >= 1) return;
     obj.sub = PathSub.StartLeg;
   }
 
   if (obj.sub === PathSub.StartLeg) {
-    const wp = path.points[obj.pathLeg];
+    const wp = path.points[obj.thr.pathLeg];
     if (!wp) { endPath(obj); return; }
     // `ActorArcBeginTo`: the duration is the 2D distance scaled by the step,
     // rounded down to a multiple of it.
@@ -68,7 +68,7 @@ export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
   }
 
   // Travelling: the same arc integrator the drop uses.
-  const wp = path.points[obj.pathLeg];
+  const wp = path.points[obj.thr.pathLeg];
   if (!wp) { endPath(obj); return; }
   if (obj.arcFrames < obj.arcTotal) {
     ActorArcVelocity(obj);
@@ -84,8 +84,8 @@ export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
   obj.pos.y = wp.dest[1];
   obj.pos.z = wp.dest[2];
   obj.vel.x = obj.vel.y = obj.vel.z = 0;
-  obj.pathLeg++;
-  if (obj.pathLeg >= path.points.length) { endPath(obj); return; }
+  obj.thr.pathLeg++;
+  if (obj.thr.pathLeg >= path.points.length) { endPath(obj); return; }
   obj.sub = PathSub.StartLeg;
 }
 
@@ -94,7 +94,7 @@ export function ThrowerStatePathFollow(obj: Actor, dt: number): void {
  * else claims an attack permit and goes to state 9 —
  * `ThrowerStateLeapDown`, which brings it off the roof and into shot.
  */
-function endPath(obj: Actor): void {
+function endPath(obj: ThrowerActor): void {
   obj.leap = null;
   obj.sub = 0;
   if (CharacterTypeOf(obj)?.type === 0x17) {

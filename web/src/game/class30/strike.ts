@@ -21,7 +21,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { AttackJson } from "../../bundle";
 import { ticksOfAuthoredFrame } from "../../core/play_cursor";
-import { DamageZone, type Actor } from "../actor";
+import { DamageZone, ZombieFlag2, type ZombieActor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
@@ -37,7 +37,7 @@ import { MotionFade, StrikeSub, ZombieState } from "./states";
  * from a different ten, so shooting a limb off changes which attack it reaches
  * for as well as whether that attack can connect.
  */
-export function ZombiePickAttack(obj: Actor, rng: Rng): number {
+export function ZombiePickAttack(obj: ZombieActor, rng: Rng): number {
   const list = AttackListOf(obj);
   const picks = AttackPicksOf(obj);
   const v = picks[rng.int(10) + (obj.zones & DamageZone.All) * 10];
@@ -54,7 +54,7 @@ export function ZombiePickAttack(obj: Actor, rng: Rng): number {
  * attack needs has been shot off. Mask 8 is outside the three-bit zone mask,
  * so those attacks can never be cancelled.
  */
-export function ActorStrikeConnect(obj: Actor, atk: AttackJson,
+export function ActorStrikeConnect(obj: ZombieActor, atk: AttackJson,
                                    events?: Events): boolean {
   if ((obj.zones & DamageZone.All & atk.cancel_mask) === atk.cancel_mask) return false;
   return PlayerTakeDamage(0, obj, atk.player_motion, events, "strike",
@@ -66,7 +66,7 @@ export function ActorStrikeConnect(obj: Actor, atk: AttackJson,
  * permit through the retreat — so the next enemy cannot start until this one
  * has actually backed away.
  */
-function endStrike(obj: Actor): void {
+function endStrike(obj: ZombieActor): void {
   // The swing is what is on screen, so it is what the retreat fades out of.
   // `ActorAdvanceMotion` cannot do it here: this ends the clip a frame early,
   // before its own end-of-clip branch would fire.
@@ -80,7 +80,7 @@ function endStrike(obj: Actor): void {
   obj.sub = 0;
 }
 
-export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
+export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
                                   events?: Events): void {
   // Every frame of the strike, before anything else: face the player and
   // record where they are.
@@ -97,7 +97,19 @@ export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
   if (obj.sub === StrikeSub.Lunge) {
     // Distance is to the point `ActorFacePlayerTarget` remembered, not to the
     // camera: with two players those are different places.
-    if (dist2d(obj.pos, obj.target) > atk.distance) {
+    //
+    // And the lunge is skipped outright while the cooldown latch is armed:
+    //
+    // ```
+    // 00455b1a  d85f04           FCOMP float ptr [EDI + 0x4]   ; entry.distance
+    // 00455b22  7530             JNZ   0x00455b54              ; already inside
+    // 00455b24  f6866813000001   TEST  byte ptr [ESI+0x1368], 0x1
+    // 00455b2b  7527             JNZ   0x00455b54
+    // ```
+    //
+    // so a camera-cued (state-19) attacker swings from wherever the cue left
+    // it standing, at whatever range that is, instead of walking in first.
+    if (dist2d(obj.pos, obj.target) > atk.distance && !obj.zom.hasCooldown) {
       // Still short: play the lunge. Its own root motion is what closes the
       // gap -- the state writes no velocity.
       if (obj.action?.motion !== atk.lunge) {
@@ -116,11 +128,14 @@ export function ZombieStateStrike(obj: Actor, eye: Vec3, rng: Rng,
     obj.strikeFloor = Math.max(0, atk.distance - net);
     // `ZombieStateStrike` remembers where the swing began; the retreat walks
     // back out along that line.
-    if (!obj.hasStrikeAnchor) {
+    // `00455b98 a900000400` / `00455ba5 0d00000400` / `00455bb0` — tested and
+    // raised in one read-modify-write of `obj+0x136C`, which is why it is a
+    // bit and not a field of its own.
+    if (!(obj.flags2 & ZombieFlag2.StrikeAnchor)) {
       obj.strikeStart.x = obj.pos.x;
       obj.strikeStart.y = obj.pos.y;
       obj.strikeStart.z = obj.pos.z;
-      obj.hasStrikeAnchor = true;
+      obj.flags2 |= ZombieFlag2.StrikeAnchor;
     }
     obj.sub = StrikeSub.Swinging;
     return;

@@ -11,7 +11,7 @@
  * clip and sets state 1. Between them that is 37 of stage 2's 90 zombies.
  */
 import type { Rng } from "../../core/rng";
-import type { Actor } from "../actor";
+import type { ZombieActor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { FirstBakedOf, MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
@@ -20,7 +20,7 @@ import { TestApproachRing } from "./ring";
 import { MotionFade, MotionRow, ZombieState } from "./states";
 import { ZombieShouldStandAndThrow } from "./stand_throw";
 
-export function ZombieStateAttackRun(obj: Actor, eye: Vec3, dt: number,
+export function ZombieStateAttackRun(obj: ZombieActor, eye: Vec3, dt: number,
                                     rng: Rng): void {
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]`, taking whichever variant this bundle

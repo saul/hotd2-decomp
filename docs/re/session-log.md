@@ -9281,6 +9281,228 @@ is actively lying about it.
 Also open, and now marked as such in the review: `core/system.ts` still imports
 `Walker`, so the framework names the one machine it hosts. No phase owns it.
 
+## 2026-09-03 — the Kill button, and two bugs wearing one symptom
+
+Reported as "the Kill button doesn't properly kill the zombies", with the
+enemies row reading `1 attacking · 0 live · 1 scripted`, plus "the zombie death
+animations are looping". Two separate defects; the second is most of the first.
+
+### A one-shot clip cannot hold its last frame through a modulo
+
+`authoredFrameOfTicks` ends in `f % frames`. That is right for a looping clip
+and wrong for a one-shot, and **three call sites wrapped it in
+`Math.min(frames - 1, ...)` believing the clamp would hold the last frame.**
+It cannot: the wrap is inside, so past the clip's length the modulo restarts at
+0 and the clamp is handed a small number every lap.
+
+The death clip is where it showed, because it is the only one with no
+terminator. `obj.action` has the same shape but ends itself, so it wrapped only
+in the frames between its last authored frame and the state noticing — which is
+why this survived so long.
+
+The engine settles it: `ZombieStateDeath6` (`FUN_00454D20`) sub 2 waits for
+`g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C` and then leaves. The clip
+plays exactly once. `authoredFrameHeld` is the clamping conversion, next to the
+wrapping one, for the reason `play_cursor.ts`'s own header already gives.
+
+### "A routine that is not read" was read in ninety seconds
+
+The port's comments said `ZombieEnterCorpseState` (`FUN_00456740`) hands the
+body to something unread, so class 0x30 had no death chain at all: no
+`updatesWhenDead`, no state 6, and `ZombieOnShot` (`FUN_00453EB0`) — which
+`EnemyZombieUpdate` calls at `0x0045340E`, before the state dispatch — was
+missing entirely, so **nothing in the port ever wrote state 6.** A killed
+zombie sat in the pool at its last live state, dead and drawn, for ever.
+`tools/killall.mjs` showed three of them still there 900 frames after the kill.
+
+`FUN_00456740` decompiles cleanly and says exactly what a corpse is: clear
+class 0x30's `CollideWorld`/`CollideActors`, clear `obj+0x34` bit 0 — the bit
+`RankEnemiesByDistance` tests, so the corpse leaves the distance queue — raise
+`PoseFrozen`, release the present count if not already latched, step the cursor
+back one frame, and go to state 7 (or 8 for character types 0x12 and 3).
+
+The lesson is not "read harder". It is that **"unread" was written down once
+and then trusted as a fact for months**, in a project whose whole convention
+exists to stop exactly that. `[open]` is a useful answer; `[open]` that nobody
+re-tests becomes a wrong answer with a citation attached.
+
+### Two things that looked like bugs and were not
+
+* **`g_enemies_present` staying at 2 after a kill.** It drops fine — about 60
+  frames later, because class 0x31 retires from inside its own four death
+  states. Reading the counter one frame after the kill says nothing. Nearly
+  reported as a leak.
+* **The permit in `1 attacking`.** Not reproduced on any path the harness can
+  reach. `IsPlayerAttackable` requires `g_scene_state_major_entered == 2`,
+  which the walker sets in the real player and a stub host does not, so no
+  enemy in the harness ever claims one. Still open.
+
+### Open, and proved, and not acted on
+
+`ReleaseAttackSlot` (`FUN_00456520`) **does not touch `obj+0x34`** — it frees
+the permit slot and lifts the off-screen latch, nothing more. The port's
+version raises `NoCameraTrack` unconditionally. The engine raises it in the
+*caller*, `ZombieReleasePermitAndUntrack` (`FUN_004565A0`), and **guarded**:
+`if (!(obj+0x34 & 0x800000) || g_enemies_alive != 1)`, so the last remaining
+enemy of that kind keeps camera tracking. The port's version defeats that
+guard for every class that releases a permit. Left alone because it changes
+camera behaviour across two classes and that is the user's call.
+
+Also open: class 0x30 state 9, `ZombieStateDeathKnockbackArc` (`FUN_004550E0`),
+which `ZombieOnShot` picks for 44 shipped spawns with body condition 5 or 6.
+The port routes them to state 6 instead, which gives the same clip pick, the
+same teardown in the same order and the same corpse — they die where they stood
+rather than where they were thrown. Declared `[diverges]` at the write site.
+
+## 2026-09-03 — D1–D3, and two write-ups that were wrong about their own subject
+
+Three fidelity decisions were put to the user as `D1`–`D3` and all three were
+approved. All three landed. **Two of the three write-ups — mine — were wrong
+about the thing they were describing**, and that is the part worth keeping.
+
+### D1: the bit was never unportable, and nobody looked at the data
+
+The entry said `obj+0x34 & 0x800000` "has no port — nothing the port models
+reads or writes it", twice, in two `[diverges]` notes. The port has carried it
+since the exporter started emitting `init_flags`: `descriptor.ts` puts the
+spawn word straight onto `obj.flags`, and **six shipped spawns set the bit** —
+three on stage 1, three on stage 3, all class 0x30, all initial state 18.
+
+The claim was never checked against a single exported placement. It is the
+same failure as `evt.py`'s "unused in every shipped file" comment about the
+descriptor's `+0x20` word, which was also false whole-corpus, in the same
+week. **A claim about what the shipped data contains is one grep from being
+settled, and both times the claim was written instead.**
+
+Two more corrections fell out. The port had split the flag from its
+`g_enemy_slots` clear **twice**, not once — `ThrowerReleaseSlotOnDeath` already
+had half a guard, on the slot but not the flag, which is the same fault
+mirrored. And the two classes guard on **different counters**:
+`g_enemies_alive` for class 0x30, `g_enemies_present` for 0x31. Reading class
+0x31 rather than assuming symmetry also showed it has **no untracking wrapper
+at all**, proved by scanning its whole range for `OR …, 0x10000`.
+
+### D3: asserting a table from an address
+
+The entry said the fix required exporting an `.rdata` table at `0x0044FD1C`.
+`.rdata` starts at `0x004C4000`. The address is 475 KB below it, **inside
+`ThrowerStateThrow`'s own function body**, and what is there is a
+compiler-emitted dense switch: one xref in the whole program, from the `JMP`
+a few instructions above, with the payload as `MOV` immediates in the arms.
+
+Checking which section an address is in is **one tool call**. The write-up
+asserted a table's existence, its section, and an entire exporter's worth of
+work without making it. That is the adjacent-array trap arriving from the
+other direction — not "where does this table end" but "is this a table at
+all".
+
+The agent stopped rather than substituting a different job, which was correct:
+the stop condition in the brief is what caught it. The real fix was `game/`
+constants beside a sibling literal table that had been one file away the whole
+time, and `tools/hod2lib/class31.py` had **already classified those eight
+motion ids as `.text` literals**, under a comment naming this very branch. The
+project knew. The write-up did not ask it.
+
+And the divergence was bigger than stated: a second type check diverts the
+**clip** as well as the frame, so the port had been playing the wrong
+animation for `zslman`, not merely throwing late.
+
+### D2: the decompiler dropped both multiplies, again
+
+`FUN_004550E0` overwrites **its own argument slot** with the scale, so Ghidra
+renders the condition-dependent divisor as noise assigned to `float param_1`.
+Both `FMUL`s were invisible — the `0.5` on the sway and the drop, and the
+`3.0` — and `bcdf0123` turned out to be **−0.027222222**, the arc engine's own
+half-gravity negated. Every constant had to be re-read from the disassembly,
+which is the trap `CLAUDE.md` lists first and which still cost a pass.
+
+One structural finding: state 9 fills the **shared** arc record through
+`ActorArcBeginToAtSpeed` but rides it with its own stepper, and sub 2 then
+abandons the arc entirely and integrates by hand, reusing `obj+0x1334` as a
+fall counter. One word, two meanings, inside one state — the intra-class
+aliasing S3 cannot fix, found in new code rather than old.
+
+### What follows from all three
+
+The reviews and write-ups in this repo are now good enough to be trusted, and
+that is the hazard. Three separate documents asserted a fact about the binary
+or the data that a single command would have refuted, and each survived
+because the next reader treated a written claim as a finished one. `[open]`
+that nobody re-tests becomes a wrong answer with a citation attached; so does
+`[proved]` that was never proved.
+
+## 2026-09-04 — the actor tail, all four arms, and what the union caught
+
+`Actor` is a five-way discriminated union now: `ActorBase` plus `hum` (class
+0x25, 13 words), `thr` (0x31, 14), `zom` (0x30, 15) and `prop` (0x24, **one**).
+Four worktrees, merged one at a time; the last merge took eleven conflicts
+across `game/actor.ts` and `test/port.test.ts`.
+
+The item was proposed as a type-safety refactor. It paid for itself as a bug
+hunt instead, which is worth recording because that is not what it was sold as.
+
+### `holdFrames` was one field for two addresses
+
+Class 0x24 counts its hold at `obj+0x1320`. Class 0x30 counts **every** hold at
+`obj+0x1330` — `MOV dword ptr [ESI + 0x1330], EAX` (`899630130000`) at
+`0x00458596` in `ZombieStateEmerge`, and again in `ZombieStateRunInPlaceTimed`
+and `ActorArcBeginFalling` [proved]. One TypeScript name covered both, so two
+assertions in `port.test.ts` had been reading the right name at the wrong
+offset and passing. Nothing in the flat struct could have caught that: the two
+classes never both ran in one test.
+
+In the same pass, `slideTimer` — class 0x24's word — was being read off zombies
+at six sites in `class30/death.ts`; and `throwHand`, tagged `[port-only]`, is
+`obj+0x135C`, stored by `ZombieStateStandAndThrow` (`89865c130000`,
+`0x00459270`) and read back by the next sub. A `[port-only]` tag is a claim
+about the binary and decays like any other.
+
+### Class 0x24's arm is one field, and that is the finding
+
+The survey listed three. `holdFrames` has 43 uses in `class30/` against four
+here; `slideTimer` has 22 in `class31/` against five. **A word only separates
+when every class sharing it has an arm** — and taking a word from the class
+that barely touches it would have made the union assert something false about
+the engine. One field was the honest answer, and the arm's doc comment says so
+at length rather than looking thin by accident.
+
+### Two survey entries did not survive the read
+
+`accX`/`accZ` are not class 0x30's: they are two thirds of one acceleration
+triple whose middle word classes 0x10, 0x24 and 0x31 integrate, and
+`ClearCurrentActorVelocityAndAccel` clears all three for any actor. And
+`obj+0x1368`/`+0x136C` are zeroed by `ScriptedHumanoidInit` and read by nobody
+— **an Init that zeroes a range is not evidence of ownership.**
+
+### What four arms still do not protect, written down rather than implied
+
+`h.slideTimer` compiles, and both 0x24 and 0x30 growing an arm did not change
+it. The head aliases *itself* at `obj+0x1330`: `slideTimer` and `arcFrames` are
+the same address, because the arc record belongs to no class and
+`class31/arc.ts` drives it from a bare `Actor`. No `cls` discriminant separates
+a word from itself. Intra-class aliasing is likewise untouched — `obj+0x1330`
+is class 0x30's general-purpose per-state dword across 98 accesses.
+
+The rule the four arms actually establish: **a word separates when every class
+sharing it has an arm *and* no class-agnostic routine drives it.**
+
+One blocker every arm hit independently and none worked around:
+`DescriptorFromPlacement` returns a single `Partial<Actor>`, which *distributes*
+over the union, so any descriptor-sourced field on an arm is an excess-property
+error. Eight class-0x30 words are stuck in the head for that reason alone.
+Splitting it is a job for all four arms at once, and it is `[open]`.
+
+### The merge itself left two lies in the file that checks for lies
+
+Closing the item, `port.test.ts` had two paragraphs explaining why
+`h.backoffFrames` and `h.slideTimer` could not carry `@ts-expect-error`
+directives. One sat directly above a line that now *has* one — TypeScript walks
+a directive backwards past comment-only lines, so the build stayed green while
+the prose beside it was false. The other still said class 0x24 "has no arm
+yet". Both were merge residue from arms landing in sequence, and the checker
+that catches an unused directive cannot catch a comment that describes the
+wrong line. The real directive count is **30**; an earlier note in this session
+said 33, which was a `grep` counting prose mentions of the string.
 ## 2026-09-04 — B4 and B8: the room-clear gate answered on its own frame
 
 Two reports, and they turned out to be one mechanism seen twice. **B4**:

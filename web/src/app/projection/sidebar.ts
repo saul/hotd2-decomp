@@ -73,7 +73,7 @@ export function waitBlockers(w: Walker): Actor[] {
     // and a gate held open by the **camera** looked as though an actor held it.
     return G.g_object_list.filter(
       (a) => a.cls === SpawnClass.Civilian && a.visible && inPlay(a)
-          && !((a.civ?.flags2 ?? 0) & 1));
+          && !((a.civ?.subFlags ?? 0) & 1));
   }
   return [];
 }

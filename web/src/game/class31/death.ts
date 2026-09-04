@@ -19,7 +19,7 @@ import {
   ThrowerRetireFromPresentCount,
 } from "../combat/counts";
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
@@ -32,8 +32,32 @@ import { ThrowerState, ThrowerMotion } from "./states";
 import { ThrowerMotionOf, ThrowerStanceOf } from "./tables";
 
 
-/** `ActorArcBeginToAtSpeed`'s `minFrames`. */
-const ARC_MIN_FRAMES = 15;
+/**
+ * `ActorArcBeginToAtSpeed`'s `minFrames` — **10 or 15, not always 15.**
+ *
+ * ```
+ * 0044dbaa  TEST EAX, 0x2000000    a900000002   ; EAX = obj+0x136C
+ * 0044dbc9  JZ   0044dbda                       ; clear -> 15
+ * 0044dbce  MOV  EDI, 0xa                       ; set   -> 10 ...
+ * 0044dbd3  TEST EAX, 0x44000000   a900000044   ; ... EAX = obj+0x34
+ * 0044dbd8  JZ   0044dbdf                       ;     unless dead or reacting
+ * 0044dbda  MOV  EDI, 0xf                       ;     -> 15
+ * ```
+ *
+ * `[proved]`. `ThrowerShotFeedback` (`FUN_00449B20`) raises
+ * {@link ThrowerFlag.LowSphere} as half of `OR EDX, 0x6000000` on the head
+ * shot that knocks a thrower down, so a live knocked-down thrower takes the
+ * **10**-frame branch — and 10 frames is 3 units of travel each rather than 2.
+ * The port hardcoded 15 and `dist2d / 2`, which is exactly the `N = 15` arm.
+ */
+function ArcMinFrames(obj: ThrowerActor): number {
+  if (!(obj.flags2 & ThrowerFlag.LowSphere)) return 15;
+  return (obj.flags & (ActorFlag.Dead | ActorFlag.Reacting)) ? 15 : 10;
+}
+
+/** `[0x0055CCD4]` = `0000f041` = 30.0f: the world units an arc covers in
+ *  `ArcMinFrames` frames. */
+const ARC_UNITS_PER_MIN = 30.0;
 
 const _view = vec3();
 const _dest = vec3();
@@ -74,7 +98,7 @@ const CHAR_ZSASS = 0x16;
 const CHAR_ZSKAMERE = 0x17;
 const CHAR_ZSLMAN = 0x18;
 
-function playOnce(obj: Actor, motion: number): void {
+function playOnce(obj: ThrowerActor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
   obj.action = { motion, ticks: 0, loop: false };
   obj.rootActionFrame = -1;
@@ -118,7 +142,8 @@ function playOnce(obj: Actor, motion: number): void {
  * depth and refuse an actor behind the camera; that judgement belonged to
  * neither reader and is gone.
  */
-export function ThrowerBeginKnockbackArc(obj: Actor, host: GameHost): void {
+export function ThrowerBeginKnockbackArc(obj: ThrowerActor,
+                                        host: GameHost): void {
   // The standing arc first: no knockback at all, over the minimum duration.
   // [diverges] The engine always has a camera; a host that cannot answer is
   // the port's own case, and leaving `arcTotal` at zero would collapse the
@@ -126,7 +151,8 @@ export function ThrowerBeginKnockbackArc(obj: Actor, host: GameHost): void {
   obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
   obj.arcTo = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
   obj.arcFrames = 0;
-  obj.arcTotal = ARC_MIN_FRAMES;
+  const minFrames = ArcMinFrames(obj);
+  obj.arcTotal = minFrames;
   if (!host.viewSpaceOf(obj.at, _view)) return;
   const len = Math.hypot(_view.x, _view.y, _view.z);
   if (len < 1e-4) return;
@@ -145,9 +171,13 @@ export function ThrowerBeginKnockbackArc(obj: Actor, host: GameHost): void {
     z: _dest.z,
   };
   // `ActorArcBeginToAtSpeed`'s own duration rule, which is what `FUN_0044DB50`
-  // gives it: 30 units per `minFrames`, floored at `minFrames`.
-  obj.arcTotal = Math.max(ARC_MIN_FRAMES, Math.trunc(Math.hypot(
-    obj.arcTo.x - obj.arcFrom.x, obj.arcTo.z - obj.arcFrom.z) / 2));
+  // gives it: `dist2d / (30.0 / minFrames)`, floored at `minFrames`. The
+  // divisor is a `FILD`/`FDIVR` pair the decompiler drops entirely —
+  // `FILD [ESP+0xc]` (`db44240c`) then `FDIVR [0x0055ccd4]` (`d83dd4cc5500`)
+  // at 0x0044DBE3, where `[0x0055CCD4]` = `0000f041` = 30.0f.
+  obj.arcTotal = Math.max(minFrames, Math.trunc(Math.hypot(
+    obj.arcTo.x - obj.arcFrom.x, obj.arcTo.z - obj.arcFrom.z)
+    / (ARC_UNITS_PER_MIN / minFrames)));
 }
 
 /**
@@ -158,7 +188,7 @@ export function ThrowerBeginKnockbackArc(obj: Actor, host: GameHost): void {
  * survivable: it lies there for a random three to thirty frames, plays a
  * get-up clip and goes back to deciding.
  */
-export function ThrowerStateFallAndLand(obj: Actor, host: GameHost,
+export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
                                         dt: number, rng: Rng): void {
   const frames = dt * GAME_HZ;
 
@@ -172,12 +202,13 @@ export function ThrowerStateFallAndLand(obj: Actor, host: GameHost,
       obj.vel.x = obj.vel.y = obj.vel.z = 0;
       obj.accY = 0;
       if (clip !== undefined) playOnce(obj, clip);
-      obj.knockCount = 0;
+      obj.thr.knockCount = 0;
     } else {
       if (obj.charType !== CHAR_ZSASS && clip !== undefined) playOnce(obj, clip);
-      obj.knockCount += 1;
+      obj.thr.knockCount += 1;
     }
-    if (!(obj.flags & ActorFlag.ArcSpent) && obj.knockCount < KNOCKBACK_ARCS) {
+    if (!(obj.flags & ActorFlag.ArcSpent)
+        && obj.thr.knockCount < KNOCKBACK_ARCS) {
       ThrowerBeginKnockbackArc(obj, host);
     } else {
       obj.flags |= ActorFlag.ArcSpent;
@@ -207,7 +238,7 @@ export function ThrowerStateFallAndLand(obj: Actor, host: GameHost,
     }
     obj.accY = FALL_GRAVITY;
     obj.flags &= ~ActorFlag.PoseFrozen;
-    obj.sinceLanding = 0;
+    obj.thr.sinceLanding = 0;
     obj.sub = 2;
   }
 
@@ -215,39 +246,45 @@ export function ThrowerStateFallAndLand(obj: Actor, host: GameHost,
     if (ActorClipFrame(obj) >= (FREEZE_FALL[obj.charType] ?? 44)) {
       obj.flags |= ActorFlag.PoseFrozen;
     }
-    obj.sinceLanding += frames;
+    obj.thr.sinceLanding += frames;
     obj.vel.y += obj.accY * frames;
     // `QueryGroundHeightAt` falls back to the script's own ground plane when
     // the trace misses, which is the engine's own answer.
     const ground = QueryGroundHeightAt(obj.pos.x, obj.pos.y + FALL_PROBE_RISE,
                                        obj.pos.z);
-    if (obj.pos.y + obj.vel.y > ground && obj.sinceLanding < FALL_FRAME_CAP) {
+    if (obj.pos.y + obj.vel.y > ground
+        && obj.thr.sinceLanding < FALL_FRAME_CAP) {
       obj.pos.x += obj.vel.x * frames;
       obj.pos.y += obj.vel.y * frames;
       obj.pos.z += obj.vel.z * frames;
       return;
     }
     obj.pos.y = ground;
-    obj.landSurface = G.g_coli_hit_surface;
+    obj.thr.landSurface = G.g_coli_hit_surface;
     obj.vel.y *= BOUNCE_NORMAL;
     obj.vel.x *= BOUNCE_TANGENT;
     obj.vel.z *= BOUNCE_TANGENT;
     if (Math.abs(obj.vel.y) > SETTLE_SPEED
-        && obj.sinceLanding < FALL_FRAME_CAP
+        && obj.thr.sinceLanding < FALL_FRAME_CAP
         && obj.charType !== CHAR_ZSASS) {
       obj.flags &= ~ActorFlag.PoseFrozen;
       return;                                    // bounce again
     }
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.accY = 0;
+    // `AND AH, 0x9f` (`80e49f`) then `OR AH, 0x1` (`80cc01`) on `obj+0x34`,
+    // and in between `AND EBP, 0xffffbfff` (`81e5ffbfffff`) on `obj+0x136C`
+    // at 0x0044A6E6 — the body has settled, so the next landing may puff
+    // again.
     obj.flags = (obj.flags & ~(ActorFlag.ArcSpent | ActorFlag.PoseFrozen))
               | ActorFlag.ShotImmune;
+    obj.flags2 &= ~ThrowerFlag.LandingDustEmitted;
     obj.slideTimer = (rng.int(10) + 1) * 3;
     obj.sub = 3;
   }
 
   if (obj.sub === 3) {
-    const alive = !obj.dead && obj.landSurface !== SURFACE_KILL;
+    const alive = !obj.dead && obj.thr.landSurface !== SURFACE_KILL;
     if (!alive) return ThrowerDie(obj);
     if (obj.charType === CHAR_ZSASS) {
       if (obj.action) return;
@@ -274,13 +311,13 @@ export function ThrowerStateFallAndLand(obj: Actor, host: GameHost,
  * The two ways out of a fall that killed. Character 0x16 plays its own death
  * clip first; everything else goes straight to a corpse.
  */
-function ThrowerDie(obj: Actor): void {
+function ThrowerDie(obj: ThrowerActor): void {
   // `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) runs the moment the hit
   // points fall below 1 and always ends in the alive retire. The *present*
   // retire is `ThrowerEnterCorpseState`'s, one clip later.
   ThrowerRetireFromAliveCount(obj);
   obj.dead = true;
-  if (obj.landSurface === SURFACE_KILL) obj.flags |= ActorFlag.Dead;
+  if (obj.thr.landSurface === SURFACE_KILL) obj.flags |= ActorFlag.Dead;
   if (obj.charType === CHAR_ZSASS) {
     obj.state = ThrowerState.Death;
     obj.sub = 0;
@@ -296,7 +333,7 @@ function ThrowerDie(obj: Actor): void {
  * whatever was playing is a fall — releases the permit and the tracking slot
  * in that order, and becomes a corpse when the clip runs out.
  */
-export function ThrowerStateDeathClip(obj: Actor): void {
+export function ThrowerStateDeathClip(obj: ThrowerActor): void {
   if (obj.sub === 0) {
     playOnce(obj, DEATH_CLIP[obj.charType] ?? DEATH_CLIP[0x19]);
     // `ThrowerReleaseAttackPermit` then `ThrowerReleaseSlotOnDeath`, in the
@@ -316,7 +353,7 @@ export function ThrowerStateDeathClip(obj: Actor): void {
  * `ThrowerEnterCorpseState` — `FUN_0044D0A0`. Character type 0x18 blinks out;
  * everything else sinks.
  */
-export function ThrowerEnterCorpseState(obj: Actor): void {
+export function ThrowerEnterCorpseState(obj: ThrowerActor): void {
   // `unless (obj+0x38 & 1) ThrowerRetireFromPresentCount` — the *present*
   // count falls here and not at death, which is what makes a corpse still on
   // stage present but not alive. That distinction is the only reason the game
@@ -338,7 +375,7 @@ export function ThrowerEnterCorpseState(obj: Actor): void {
  * use of it reads outside the array, into mesh floats or a string. The port
  * keeps the current frame instead of reproducing an out-of-bounds read.
  */
-function ThrowerCorpsePoseFrame(obj: Actor, rng: Rng): number {
+function ThrowerCorpsePoseFrame(obj: ThrowerActor, rng: Rng): number {
   const row = T.chars?.class31?.corpse_frames?.[String(obj.action?.motion
                                                       ?? obj.motion)];
   if (!row) return -1;
@@ -360,11 +397,11 @@ function ThrowerCorpsePoseFrame(obj: Actor, rng: Rng): number {
  * corpse does not finish its death animation: it is frozen on a chosen frame
  * of it.
  */
-export function ThrowerStateCorpse(obj: Actor, dt: number, rng: Rng,
+export function ThrowerStateCorpse(obj: ThrowerActor, dt: number, rng: Rng,
                                    blink: boolean): void {
   if (obj.sub === 0) {
     obj.slideTimer = CORPSE_FRAMES;
-    obj.corpseFrame = ThrowerCorpsePoseFrame(obj, rng);
+    obj.thr.corpseFrame = ThrowerCorpsePoseFrame(obj, rng);
     obj.flags |= 0x20000;
     obj.sub = 1;
   }
@@ -372,10 +409,10 @@ export function ThrowerStateCorpse(obj: Actor, dt: number, rng: Rng,
   // The pose pin: the engine rewrites the play cursor every frame and freezes
   // the advance, so the corpse holds one chosen frame of its death clip rather
   // than finishing it.
-  if (obj.corpseFrame >= 0 && obj.action) {
-    // `obj.corpseFrame` is already a frame number; it used to be divided by
+  if (obj.thr.corpseFrame >= 0 && obj.action) {
+    // `obj.thr.corpseFrame` is already a frame number; it used to be divided by
     // GAME_HZ only to be multiplied back on read.
-    obj.action.ticks = obj.corpseFrame;
+    obj.action.ticks = obj.thr.corpseFrame;
   }
 
   if (blink) {
@@ -420,7 +457,7 @@ export function ThrowerStateCorpse(obj: Actor, dt: number, rng: Rng,
  * `wait_enemies_alive` after one could not open. One exe function, one TS
  * function; `verify_port.py` now checks it by address.
  */
-export function ThrowerLeave(obj: Actor): void {
+export function ThrowerLeave(obj: ThrowerActor): void {
   // `ThrowerLeave` and `ThrowerReleaseSlotOnDeath` are the engine's two callers
   // of the alive retire; this is the one that also takes the actor off screen.
   ThrowerRetireFromAliveCount(obj);
@@ -446,13 +483,13 @@ export function ThrowerLeave(obj: Actor): void {
  * under ten none at all, which is what makes a short drop read as a step and a
  * long one as a landing.
  */
-export function ThrowerStateFallToSurface(obj: Actor, dt: number): void {
+export function ThrowerStateFallToSurface(obj: ThrowerActor, dt: number): void {
   const frames = dt * GAME_HZ;
   const is17 = obj.charType === CHAR_ZSKAMERE;
 
   if (obj.sub === 0) {
     obj.flags |= ActorFlag.ArcSpent;
-    obj.fallFromY = obj.pos.y;
+    obj.thr.fallFromY = obj.pos.y;
     obj.flags2 &= ~(ThrowerFlag.Surface | ThrowerFlag.OffGround);
     playOnce(obj, is17 ? 0x1bc : 0x3a5);
     obj.sub = 1;
@@ -470,26 +507,26 @@ export function ThrowerStateFallToSurface(obj: Actor, dt: number): void {
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.accY = 0;
     obj.pos.y = ground;
-    const drop = Math.abs(obj.fallFromY - ground);
+    const drop = Math.abs(obj.thr.fallFromY - ground);
     if (drop > 15) {
       playOnce(obj, is17 ? 0x1bc : 0x3a5);
-      obj.fallFromY = 0;
+      obj.thr.fallFromY = 0;
     } else if (drop > 10) {
       playOnce(obj, is17 ? 0x1ba : 0x3a9);
-      obj.fallFromY = 0;
+      obj.thr.fallFromY = 0;
     }
     obj.sub = 2;
   }
 
   // Sub 2: a landing clip zeroed `fallFromY`, so this leaves at once; with no
   // landing clip it waits the fall clip out instead.
-  if (obj.fallFromY !== 0 && obj.action) return;
+  if (obj.thr.fallFromY !== 0 && obj.action) return;
   obj.flags &= ~ActorFlag.ArcSpent;
-  obj.fallFromY = 0;
+  obj.thr.fallFromY = 0;
   obj.sub = 0;
-  obj.landSurface = G.g_coli_hit_surface;
+  obj.thr.landSurface = G.g_coli_hit_surface;
   ThrowerReleaseSlotOnDeath(obj);
-  if (!obj.dead && obj.landSurface !== SURFACE_KILL) {
+  if (!obj.dead && obj.thr.landSurface !== SURFACE_KILL) {
     obj.state = (obj.flags & ActorFlag.BackingOff)
       ? ThrowerState.LeapAside : ThrowerState.StandAndDecide;
     return;
@@ -498,6 +535,6 @@ export function ThrowerStateFallToSurface(obj: Actor, dt: number): void {
 }
 
 /** Which stance the corpse and fall states report, for the debug feed. */
-export function ThrowerFallStance(obj: Actor): number {
+export function ThrowerFallStance(obj: ThrowerActor): number {
   return ThrowerStanceOf(obj) & 3;
 }

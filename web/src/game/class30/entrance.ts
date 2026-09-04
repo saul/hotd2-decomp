@@ -29,7 +29,9 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
+import {
+  ActorFlag, ZombieFlag2, type Actor, type ZombieActor,
+} from "../actor";
 import { CountEnemyZombieJoin } from "../combat/counts";
 import { ActorByAt, G } from "../globals";
 import {
@@ -46,7 +48,7 @@ import { MotionFade, MotionRow, ZombieState } from "./states";
  * — `DAT_00567898` for type 0 and `DAT_00567958` for every other, exported
  * into `combat.arc_scripts` by `CLASS30_ARC_SCRIPTS`.
  */
-function ZombieArcEntranceScript(obj: Actor) {
+function ZombieArcEntranceScript(obj: ZombieActor) {
   const t = T.chars?.combat?.arc_scripts;
   return (obj.charType === 0
     ? t?.entrance_type0 : t?.entrance_other) ?? null;
@@ -103,11 +105,11 @@ function CamCueHit(frame: number): boolean {
  * walk overwrite the distance this state just chose with the one at state
  * 15's own `tail+0x04`, which for these spawns is a different field entirely.
  */
-function ZombieEntranceBranch(obj: Actor, walkDistance: number | undefined):
+function ZombieEntranceBranch(obj: ZombieActor, walkDistance: number | undefined):
     void {
   if (obj.attackState === ZombieState.WalkDistance
       && walkDistance !== undefined) {
-    obj.targetArrive = walkDistance;
+    obj.zom.targetArrive = walkDistance;
     obj.state = ZombieState.WalkDistance;
     obj.sub = 1;
     return;
@@ -124,7 +126,7 @@ function ZombieEntranceBranch(obj: Actor, walkDistance: number | undefined):
  * Since it is guarded on the clip not already being current, that only bites
  * on the frame the pose is taken back from a reaction.
  */
-function ZombieHoldEntranceClip(obj: Actor, motion: number | undefined): void {
+function ZombieHoldEntranceClip(obj: ZombieActor, motion: number | undefined): void {
   if (motion === undefined || motion <= 0) return;
   if (obj.flags & ActorFlag.Reacting) return;
   if (obj.motion === motion) return;
@@ -132,7 +134,7 @@ function ZombieHoldEntranceClip(obj: Actor, motion: number | undefined): void {
 }
 
 /** The clip's last frame, on the play clock. Equality: the cursor wraps. */
-function atLastFrame(obj: Actor): boolean {
+function atLastFrame(obj: ZombieActor): boolean {
   const len = MotionPlayLength(obj);
   return len > 0 && MotionPlayFrame(obj) === len - 1;
 }
@@ -149,7 +151,7 @@ function atLastFrame(obj: Actor): boolean {
  * The wait is `g_cam_path_frame >= cue`, a **`>=`** where states 18 and 19 use
  * an equality — so this one cannot be missed by a path that skips the frame.
  */
-export function ZombieStateSurfaceOnCameraCue(obj: Actor,
+export function ZombieStateSurfaceOnCameraCue(obj: ZombieActor,
                                               events?: Events): void {
   const t = obj.entry;
 
@@ -196,7 +198,7 @@ export function ZombieStateSurfaceOnCameraCue(obj: Actor,
  * distance, down to writing the same `obj+0x13D8` end point when it finishes,
  * and like it the state never moves the actor: the clip's root motion does.
  */
-export function ZombieStateRunInPlaceTimed(obj: Actor, dt: number,
+export function ZombieStateRunInPlaceTimed(obj: ZombieActor, dt: number,
                                            rng: Rng): void {
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]` — the run pair, the same selection
@@ -205,7 +207,7 @@ export function ZombieStateRunInPlaceTimed(obj: Actor, dt: number,
                               MotionRow.Walk, MotionRow.WalkAlt);
 
   if (obj.sub === 0) {
-    obj.holdFrames = obj.entry?.frames ?? 0;
+    obj.zom.holdFrames = obj.entry?.frames ?? 0;
     obj.sub = 1;
   }
   if (obj.sub !== 1) return;
@@ -214,8 +216,8 @@ export function ZombieStateRunInPlaceTimed(obj: Actor, dt: number,
   // them is not in lockstep. Fade 5.
   ZombieSetMotionIfIdle(obj, motion, rng, "clip", MotionFade.Quick);
 
-  obj.holdFrames -= dt * 60;
-  if (obj.holdFrames >= 1) return;
+  obj.zom.holdFrames -= dt * 60;
+  if (obj.zom.holdFrames >= 1) return;
   obj.strikeStart.x = obj.pos.x;
   obj.strikeStart.y = obj.pos.y;
   obj.strikeStart.z = obj.pos.z;
@@ -234,17 +236,17 @@ export function ZombieStateRunInPlaceTimed(obj: Actor, dt: number,
  * Shipped values are a clip at `+0x04`, 14 to 420 frames at `+0x08`, and a
  * 1-to-10 unit walk distance at `+0x0C`.
  */
-export function ZombieStateHoldClipThenBranch(obj: Actor, dt: number): void {
+export function ZombieStateHoldClipThenBranch(obj: ZombieActor, dt: number): void {
   const t = obj.entry;
   if (obj.sub === 0) {
-    obj.holdFrames = t?.frames ?? 0;
+    obj.zom.holdFrames = t?.frames ?? 0;
     obj.sub = 1;
   } else if (obj.sub !== 1) {
     return;
   }
   ZombieHoldEntranceClip(obj, t?.motion);
-  obj.holdFrames -= dt * 60;
-  if (obj.holdFrames >= 1) return;
+  obj.zom.holdFrames -= dt * 60;
+  if (obj.zom.holdFrames >= 1) return;
   ZombieEntranceBranch(obj, t?.walk_distance);
 }
 
@@ -256,7 +258,7 @@ export function ZombieStateHoldClipThenBranch(obj: Actor, dt: number): void {
  * keeping: a spawn whose frame the path steps over waits for ever, which is
  * how the game parks a rank of zombies that a given camera run never triggers.
  */
-export function ZombieStateWaitCameraFrameThenBranch(obj: Actor): void {
+export function ZombieStateWaitCameraFrameThenBranch(obj: ZombieActor): void {
   const t = obj.entry;
   if (obj.sub === 0) {
     ZombieHoldEntranceClip(obj, t?.motion);
@@ -275,7 +277,7 @@ export function ZombieStateWaitCameraFrameThenBranch(obj: Actor): void {
  * clip 198. Byte for byte the state above with the camera gate replaced by
  * `g_script_flags[tail+0x08] == 1`.
  */
-export function ZombieStateWaitScriptFlagThenBranch(obj: Actor): void {
+export function ZombieStateWaitScriptFlagThenBranch(obj: ZombieActor): void {
   const t = obj.entry;
   if (obj.sub === 0) {
     ZombieHoldEntranceClip(obj, t?.motion);
@@ -300,7 +302,7 @@ export function ZombieStateWaitScriptFlagThenBranch(obj: Actor): void {
  * up, and it increments `g_enemies_present` and `g_enemies_alive` itself when
  * it joins. Until then `wait_enemies_alive` cannot see it.
  */
-export function ZombieStateWaitScriptFlagThenEnter(obj: Actor, dt: number,
+export function ZombieStateWaitScriptFlagThenEnter(obj: ZombieActor, dt: number,
                                                    rng: Rng): void {
   const t = obj.entry;
 
@@ -317,13 +319,13 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: Actor, dt: number,
     // counts that gate the script's own waits.
     obj.flags &= ~ActorFlag.NoCameraTrack;
     CountEnemyZombieJoin(obj);
-    obj.holdFrames = t?.delay ?? 0;
+    obj.zom.holdFrames = t?.delay ?? 0;
     obj.sub = 2;
   }
 
   if (obj.sub === 2) {
-    obj.holdFrames -= dt * 60;
-    if (obj.holdFrames >= 1) return;
+    obj.zom.holdFrames -= dt * 60;
+    if (obj.zom.holdFrames >= 1) return;
     ZombieSetMotionIfIdle(obj, t?.motion, rng, 10, MotionFade.Quick);
     obj.sub = 3;
   }
@@ -362,7 +364,7 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: Actor, dt: number,
  * vehicle classes (`St1VehicleUpdate`, `FUN_0048E5B0` and its peers), which is
  * a separate port and not a line edit here.
  */
-export function ZombieStateRideCarrier(obj: Actor, rng: Rng): void {
+export function ZombieStateRideCarrier(obj: ZombieActor, rng: Rng): void {
   if (obj.sub === 0) {
     // `obj+0x13E4/E8/EC = obj+0x40/44/48` — the engine writes x, then z, then
     // y, into the three words `ActorFacePlayerTarget` otherwise uses.
@@ -416,21 +418,21 @@ export function ZombieStateRideCarrier(obj: Actor, rng: Rng): void {
  * screen shake at `DAT_009C8E8C = 0x20` for body condition 5. The port has
  * neither sound nor shake here, so the landing is silent.
  */
-export function ZombieStateArcScriptedEntrance(obj: Actor,
+export function ZombieStateArcScriptedEntrance(obj: ZombieActor,
                                                dt: number): void {
   const t = obj.entry;
 
   if (obj.sub === 0) {
-    obj.holdFrames = t?.delay ?? 0;
+    obj.zom.holdFrames = t?.delay ?? 0;
     obj.sub = 1;
   }
 
   if (obj.sub === 1) {
-    obj.holdFrames -= dt * 60;
-    if (obj.holdFrames >= 1) return;
+    obj.zom.holdFrames -= dt * 60;
+    if (obj.zom.holdFrames >= 1) return;
     const crouch = obj.charType === 0 ? ARC_CROUCH_TYPE0 : ARC_CROUCH_OTHER;
     ActorSetMotion(obj, crouch.motion);
-    obj.holdFrames = crouch.hold;
+    obj.zom.holdFrames = crouch.hold;
     obj.sub = 2;
     // `obj+0x34 |= 0x2000` — the arc is armed but has not begun.
     obj.flags |= ActorFlag.ArcSpent;
@@ -438,7 +440,7 @@ export function ZombieStateArcScriptedEntrance(obj: Actor,
 
   if (obj.sub === 2) {
     // The crouch is measured on the play clock, not on the timer.
-    if (MotionPlayFrame(obj) < obj.holdFrames) return;
+    if (MotionPlayFrame(obj) < obj.zom.holdFrames) return;
     obj.sub = 3;
   }
 

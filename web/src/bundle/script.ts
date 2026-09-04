@@ -48,6 +48,17 @@ export interface SpawnJson {
   yaw_deg: number;
   orient: [number, number, number];
   hp: number;
+  /**
+   * The descriptor's `+0x20` word. `SpawnFromDescriptor` (`FUN_00408A20`)
+   * copies it to `obj+0x1316` and both combat classes make it the low half of
+   * their flag word `obj+0x136C` — `EnemyThrowerInit` (`FUN_00449620`) with
+   * `| 0x180000`, `EnemyZombieInit` (`FUN_00452DA0`) with `| 0x60000000`.
+   *
+   * The exporter used to drop it as "unused in every shipped file". It is not:
+   * 23 of 51 class-0x31 and 76 of 345 class-0x30 descriptors set it. See
+   * `docs/formats/evt.md`.
+   */
+  desc_flags: number;
 }
 
 /**

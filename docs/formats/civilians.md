@@ -147,7 +147,7 @@ Two consequences worth knowing, both the engine's:
 | `0x28` | `SetCameraBone` | |
 | `0x29` | `SetActorFlags` | OR'd into `obj+0x34` |
 | `0x2A` | `SetDeathVoice` | or `0xFF` to pick by character type |
-| `0x2B` | `DebugOnly` | taken only while `g_app_state == 6` |
+| `0x2B` | `InPlayOnly` | taken only while `g_app_state == 6`, which is **in play** — so this is the ordinary path, not a debug one. Writes `cmd+4` (s16) to the script context's `+0xBC` and `&cmd[8]` to its `+0xC0`; what those are is `[open]` |
 | `0x2C` | `Wait` | the wait word |
 | `0x2D` | `End` | |
 

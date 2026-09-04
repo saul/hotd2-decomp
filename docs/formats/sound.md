@@ -41,9 +41,18 @@ Three ids are special-cased in the SE path: `0x000100A0` is
 ```
 
 ```c
-if (DAT_009C8E98 == 6 && g_GameMode == 0) name = plain[id & 0xFFF];
-else                                      name = ar   [id & 0xFFF];
+if (g_app_state == 6 && g_GameMode == 0) name = plain[id & 0xFFF];   /* 6 == in play */
+else                                     name = ar   [id & 0xFFF];
 ```
+
+`g_app_state == 6` is **in play** — see `docs/re/addresses.md`. What is not
+settled is the other half: the only writers of `g_GameMode` (`0x009CA08C`) that
+write **0** are `RunAttractDemo` and the two attract screens `FUN_0041F9B0` and
+`FUN_0041FB00`, and the attract demo runs at `g_app_state` 5, not 6. So on the
+reading above the plain table would never be selected at all. Either
+`g_GameMode` is left at 0 on some path into play that has not been read, or the
+plain table is dead in the shipped build. **[open]**, and worth an hour: it
+decides whether twenty tracks ever play.
 
 **The two tables are contiguous, and that is what fixes their lengths.**
 Neither is terminated and neither count is stored anywhere:
@@ -126,4 +135,4 @@ script-driven so the inference is visible rather than assumed.
 | `0x0058044A` | `g_voice_records` | `0x24`-byte records |
 | `0x00588B58` | `s_sound_bgm_prefix` | the `Sound\BGM\` path prefix |
 | `0x009C8FB8` | `g_current_bgm_id` | id currently playing; cleared by the stop |
-| `0x009C8E98` | — | selects plain vs `_AR`; also read by `EvtInterpreterLoop` and `FUN_0045EBC0`. Its meaning is **[open]** |
+| `0x009C8E98` | `g_app_state` | the top-level screen; **6 is in play**, so the plain table is the one a stage being played uses. See `docs/re/addresses.md` |

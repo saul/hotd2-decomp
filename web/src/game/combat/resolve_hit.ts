@@ -12,7 +12,7 @@
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
-import { G } from "../globals";
+import { AppState, G } from "../globals";
 import { SpawnClass } from "../spawn_class";
 import { ActorIsEnemy, g_class_handlers } from "../registry";
 import type { GameHost } from "../host";
@@ -44,6 +44,18 @@ const DEATH_RIGHT = 992;
 const DEATH_LEFT = 991;
 /** `0x2000` BAMS = 45°, the half-width of each arc. */
 const DEATH_ARC = 0x2000;
+
+/**
+ * The one character type `ResolveHit`'s sever arm singles out —
+ * `004095C2  6683bff40100000c  CMP word ptr [EDI+0x1f4], 0xc`. What is
+ * special about type 0x0C here is `[open]`; the test is transcribed because
+ * the engine makes it.
+ */
+const SEVER_GATED_CHAR = 0xc;
+/** ...unless `obj+0x136C` bit 7 is up, which lets it sever anyway. */
+const SEVER_GATED_OVERRIDE = 0x80;
+/** ...and bones below this one sever whatever the type. */
+const SEVER_GATED_FIRST_BONE = 9;
 
 /**
  * `g_hit_result` (0x009A58F8) — what a shot did. The score, the impact sprite
@@ -146,9 +158,16 @@ function markZone(obj: Actor, bone: number): void {
  * `ActorSwapDamagedPart` — `FUN_004098E0`. Replace a bone's model with the
  * damaged variant at *slot*, and set the zone bit when this bone has reached
  * its last stage.
+ *
+ * **{@link ActorFlag.NoPartSwap} refuses it outright**, before anything: the
+ * engine's first act after reading the bone's table entry is
+ * `00409913 8b4834` / `00409916 f6c502 TEST CH,0x2` / `00409919 757f JNZ`,
+ * and the jump target is the epilogue. Nothing is swapped, `obj+0x78` keeps
+ * whatever it held and the `obj+0x1318` zone bit is not raised.
  */
 export function ActorSwapDamagedPart(obj: Actor, bone: number, slot: number,
                                      last: boolean, host: GameHost): boolean {
+  if (obj.flags & ActorFlag.NoPartSwap) return false;
   if (!slot) return false;
   // `obj+0x20C + bone*0x90` -- the draw record.
   obj.boneSlot[bone] = slot;
@@ -291,9 +310,43 @@ export function ChooseDeathMotionDirectional(obj: Actor, cameraYawBams: number,
  * left a forearm animating below a destroyed upper arm. For `char_adv00` the
  * sever code sits at step 5 of the upper arms, forearms, thighs and shins, so
  * a limb comes off on the fifth hit and takes everything below it with it.
+ *
+ * **Three suppression bits, and they are read on every path below.** Before it
+ * looks at anything else the routine raises `obj+0x34 |= 0xE00` on the actor
+ * it is charging, unless `g_app_state` is {@link AppState.InPlay}:
+ *
+ * ```
+ * 00409495  a1988e9c00  MOV EAX, [0x009c8e98]     ; g_app_state
+ * 0040949A  83f806      CMP EAX, 0x6
+ * 0040949D  7409        JZ  0x004094a8            ; in play: skip the OR
+ * 0040949F  8b4734      MOV EAX, dword ptr [EDI + 0x34]
+ * 004094A2  80cc0e      OR  AH, 0xe               ; |= 0x0E00
+ * 004094A5  894734      MOV dword ptr [EDI + 0x34], EAX
+ * ```
+ *
+ * `[proved]`, and `80cc0e` occurs exactly once in `.text`. The three bits are
+ * {@link ActorFlag.NoPartSwap}, {@link ActorFlag.NoDismember} and
+ * {@link ActorFlag.NoHitResult}: nothing is reskinned, nothing comes off, and
+ * the shot reports zero — which is the attract demo, `g_app_state` 5, playing
+ * a stage without ever gibbing anything.
+ *
+ * **The port sits at 6, so the OR never fires here** — but `NoDismember` has
+ * four other writers and 68 shipped class-0x30 spawns carry it in
+ * `init_flags`, so the guards below are live in ordinary play. See the flag's
+ * own comment for the whole list.
+ *
+ * The second read of `g_app_state` is the head pop; it is on the kill path
+ * below.
  */
 export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
                            host: GameHost, rng: Rng): HitResult {
+  // `00409495`: out of play, this hit does nothing visible. Raised on the
+  // actor, not scoped to the shot -- the engine ORs into `obj+0x34` and never
+  // clears it, so an actor shot once in the attract demo stays inert.
+  if (G.g_app_state !== AppState.InPlay) {
+    obj.flags |= ActorFlag.NoPartSwap | ActorFlag.NoDismember
+      | ActorFlag.NoHitResult;
+  }
   const type = CharacterTypeOf(obj);
   const b = type?.bones.find((x) => x.bone === bone);
   const n = obj.hits[bone] ?? 0;
@@ -325,8 +378,11 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
       obj.hp -= damage;
       if (bone === 1) {
         // The torso's last stage is the death wound: only on the hit that
-        // takes it below one hit point.
-        if (obj.hp < 1 && !obj.latched.includes(bone)) {
+        // takes it below one hit point, and only on an actor that comes
+        // apart -- `004096BD 8b4734` / `004096C0 f6c404 TEST AH,0x4` /
+        // `004096C3 752d JNZ`, which lands past the swap and the sever.
+        if (obj.hp < 1 && !obj.latched.includes(bone)
+            && !(obj.flags & ActorFlag.NoDismember)) {
           result = HitResultCode.Severed;
           swap(); sever(); obj.latched.push(bone);
         }
@@ -340,7 +396,25 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   } else if (code === EffectCode.Sever) {
     result = HitResultCode.Plain;
     obj.hp -= damage;
-    if (!obj.latched.includes(bone)) {
+    // The sever's own guard, and the engine writes it as one `if` around the
+    // whole arm whose `else` is "damage only" -- so folding it into the inner
+    // test is the same thing, because both halves charge the damage:
+    //
+    // ```
+    // 004095BA  8b5734                MOV  EDX, dword ptr [EDI + 0x34]
+    // 004095BD  f6c604                TEST DH, 0x4              ; NoDismember
+    // 004095C0  756a                  JNZ  0x0040962c           ; damage only
+    // 004095C2  6683bff40100000c      CMP  word ptr [EDI+0x1f4], 0xc
+    // ```
+    //
+    // ...then character type 0x0C is let through anyway when `obj+0x136C` bit
+    // 0x80 is up, and every bone below 9 is let through whatever the type. One
+    // creature with one exception, transcribed rather than summarised.
+    const dismemberable = !(obj.flags & ActorFlag.NoDismember)
+      && (obj.charType !== SEVER_GATED_CHAR
+          || (obj.flags2 & SEVER_GATED_OVERRIDE) !== 0
+          || bone < SEVER_GATED_FIRST_BONE);
+    if (dismemberable && !obj.latched.includes(bone)) {
       result = HitResultCode.Severed;
       swap(); sever(); obj.latched.push(bone);
     }
@@ -359,6 +433,12 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     }
   }
   if (result === HitResultCode.NoEffect) damage = 0;
+
+  // `004096F6`: the actor reports nothing at all. The engine writes straight
+  // over `g_hit_result` here, *after* the whole dispatch above has run and
+  // before the already-dead test -- so the damage and the model swaps it just
+  // did all stand, and only the reported result is thrown away.
+  if (obj.flags & ActorFlag.NoHitResult) result = HitResultCode.None;
 
   // A hit on something already dead scores nothing and cannot kill twice.
   if (wasDead && result === HitResultCode.Plain) result = HitResultCode.None;
@@ -413,7 +493,14 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     obj.dead = true;
     // The 1-in-4 headshot burst: `ResolveHit` swaps the head to slot 0, which
     // is `RemoveBoneSubtree`'s "gone" -- the head simply leaves.
-    if (head && rng.next() < 0.25) {
+    //
+    // `ResolveHit`'s **second** read of `g_app_state` opens this block, and it
+    // is the same question as the first: `00409741 833d988e9c0006 CMP dword
+    // ptr [0x009c8e98], 0x6` / `00409748 756c JNZ 0x004097b6`, which lands past
+    // the whole head-pop condition on the flag raise and the score. So the head
+    // only ever comes off in play. Inert here, like the `0xE00` OR, and for the
+    // same reason.
+    if (G.g_app_state === AppState.InPlay && head && rng.next() < 0.25) {
       RemoveBoneSubtree(obj, bone);
       severed = true;
     }

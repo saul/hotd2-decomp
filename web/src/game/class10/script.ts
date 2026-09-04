@@ -197,7 +197,7 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.SetAttachTarget:
       case CivilianOp.SetPairA:
       case CivilianOp.SetScale:
-      case CivilianOp.DebugOnly:
+      case CivilianOp.InPlayOnly:
         break;
       default:
         break;

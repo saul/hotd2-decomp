@@ -122,6 +122,79 @@ export enum ActorFlag {
    * is one sphere of radius `obj+0x124`. No class-0x10 script ever sets it.
    */
   ShootPerBone = 0x80,
+  /**
+   * `obj+0x34` bit `0x200` — **this actor's parts do not get swapped.**
+   * `ActorSwapDamagedPart` (`FUN_004098E0`) returns before it touches
+   * anything, so the bone keeps the model it has, `obj+0x78` is not cleared
+   * and the `obj+0x1318` zone bit is not set.
+   *
+   * `[proved]`, and it is the whole body of the routine that is skipped:
+   *
+   * ```
+   * 00409913  8b4834  MOV  ECX, dword ptr [EAX + 0x34]   ; EAX = g_cur_actor
+   * 00409916  f6c502  TEST CH, 0x2                       ; bit 0x200
+   * 00409919  757f    JNZ  0x0040999a                    ; the epilogue
+   * ```
+   *
+   * **Nothing in play raises it.** `f6c502` appears twice in `.text` and the
+   * other site is not an actor; the only writer is `ResolveHit`'s out-of-play
+   * `|= 0xE00` (see {@link NoDismember}), and no shipped spawn record carries
+   * it — across all twelve stage scripts every `init_flags` value has `0x400`
+   * as its whole low three nibbles.
+   */
+  NoPartSwap = 0x200,
+  /**
+   * `obj+0x34` bit `0x400` — **this actor does not come apart.** Both of
+   * `ResolveHit`'s dismemberment arms test it and take the damage-only path
+   * instead: the effect table's sever code, and the torso's death wound.
+   *
+   * `[proved]`, two readers, both in `ResolveHit` (`FUN_00409430`):
+   *
+   * | site | arm |
+   * |---|---|
+   * | `004095BD  f6c604  TEST DH, 0x4` | effect code 1, the sever |
+   * | `004096C0  f6c404  TEST AH, 0x4` | code 0 on bone 1, the death wound |
+   *
+   * Hit points still come off and the actor still dies — the kill block that
+   * raises {@link Dead} and scores is *outside* both guards. What it stops is
+   * the limb leaving and the torso being cut in half.
+   *
+   * **It fires in ordinary play**, which is why it is modelled rather than
+   * treated as an out-of-play quirk. Four writers reach `obj+0x34`:
+   *
+   * * `ActorInitFlags` (`FUN_00408970`) from the **spawn record** — 68 shipped
+   *   class-0x30 spawns carry it (7 in stage 1, 27 in stage 2, 22 in stage 3,
+   *   12 in stage 4, none in 5 or 6), and they are the scripted ones;
+   * * `ZombieStateWalkToTarget` (`FUN_0045A890`) — `0045A96A 8b4634` /
+   *   `0045A96E 80cc04` / `0045A972 894634`;
+   * * `ZombieApplyScriptMode` (`FUN_0045CA30`) — mode `-2` raises it and
+   *   clears `0x2000`, anything else raises `0x2400`. Already ported;
+   * * `EnemyThrowerInit` (`FUN_00449620`), but **only for character type
+   *   0x18** (`00449810 6683f918 CMP CX,0x18` / `JNZ`). That writer is in
+   *   `class31/`, which the port has not given it; `[open]` there, not here.
+   *
+   * ...and `ResolveHit` itself raises `0xE00` — this bit and the two either
+   * side — while `g_app_state` is not 6, which is out of play. No site that
+   * clears it on `obj+0x34` has been found: the four `AND ..H, 0xfb` sites in
+   * `.text` all write `obj+0x136C` or are CRT code, so it is a latch.
+   */
+  NoDismember = 0x400,
+  /**
+   * `obj+0x34` bit `0x800` — **the shot reports nothing.** `ResolveHit` forces
+   * `g_hit_result` (`0x009A58F8`) to zero after it has worked the result out,
+   * so the shot scores nothing and draws no impact.
+   *
+   * ```
+   * 004096F6  8b4f34              MOV  ECX, dword ptr [EDI + 0x34]
+   * 004096F9  f6c508              TEST CH, 0x8
+   * 004096FC  740b                JZ   0x00409709
+   * 004096FE  c70485f8589a000000  MOV  dword ptr [EAX*4 + 0x9a58f8], 0x0
+   * ```
+   *
+   * `[proved]`. Like {@link NoPartSwap} nothing in play raises it — only
+   * `ResolveHit`'s out-of-play `|= 0xE00`.
+   */
+  NoHitResult = 0x800,
 }
 
 /**

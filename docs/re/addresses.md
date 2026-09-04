@@ -502,4 +502,4 @@ in [`../formats/sound.md`](../formats/sound.md).
 | `0x0058044A` | `g_voice_records` | `0x24`-byte records; `s16 == -1` marks an empty slot |
 | `0x00588B58` | `s_sound_bgm_prefix` | the `Sound\BGM\` path prefix |
 | `0x009C8FB8` | `g_current_bgm_id` | id currently playing; cleared by the stop control |
-| `0x009C8E98` | — | selects plain vs `_AR` when `== 6` and `g_GameMode == 0`. Also read by `EvtInterpreterLoop`'s scene-5 special case and by `FUN_0045EBC0`; its meaning is **open** |
+| `0x009C8E98` | `g_app_state` | the top-level screen. **6 is in play**, 5 the attract demo, 7 the game-over arm, 0x10 boot; 3, 4, 9, 0x0A, 0x0B, 0x0C and 0x0F are the shell's other screens and stay **open**. `PlaySoundId` picks the plain BGM table over `_AR` when it is 6 and `g_GameMode == 0`; `ResolveHit` suppresses gore when it is not 6 |

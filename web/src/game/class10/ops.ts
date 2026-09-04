@@ -106,8 +106,27 @@ export enum CivilianOp {
   SetActorFlags = 0x29,
   /** Which death voice to use, or `0xFF` to pick one by character type. */
   SetDeathVoice = 0x2A,
-  /** A six-word command taken only while the app state is 6. `[open]`. */
-  DebugOnly = 0x2B,
+  /**
+   * A six-word command taken only while `g_app_state` is 6 — which is
+   * **in play**, so this is the ordinary path and not a debug one. It used to
+   * be called `DebugOnly` on the strength of that gate alone, back when
+   * `g_app_state`'s meaning was `[open]`.
+   *
+   * ```
+   * 0048C202  833d988e9c0006  CMP dword ptr [0x009c8e98], 0x6
+   * 0048C209  751f            JNZ (past the whole arm)
+   * 0048C20B  668b5604        MOV DX, word ptr [ESI + 0x4]
+   * 0048C20F  668990bc000000  MOV word ptr [EAX + 0xbc], DX
+   * 0048C216  8b0da0d07d00    MOV ECX, dword ptr [0x007dd0a0]
+   * 0048C21C  8d4608          LEA EAX, [ESI + 0x8]
+   * 0048C21F  8981c0000000    MOV dword ptr [ECX + 0xc0], EAX
+   * ```
+   *
+   * So it writes the s16 at `cmd+4` into the script context's `+0xBC` and a
+   * **pointer back into the stream**, at `cmd+8`, into its `+0xC0`. What those
+   * two fields are is `[open]`, and the port does nothing with the op.
+   */
+  InPlayOnly = 0x2B,
   /** Load the wait word and suspend. See {@link CivilianWait}. */
   Wait = 0x2C,
   /** End of stream. */

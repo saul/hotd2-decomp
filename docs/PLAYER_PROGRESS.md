@@ -1490,8 +1490,12 @@ with "the player has a life left". Two are ported now:
    pushes the half the combat code reads.
 2. **`g_app_state == 5` returns true whatever the player state** — the
    attract-mode override. The demo has no real player, so its `g_player_state`
-   is never 5 and without this nothing would ever attack it. Inert in the port,
-   which has no attract mode, and transcribed because the clause is real.
+   is never 5 and without this nothing would ever attack it. Inert in the port
+   and transcribed because the clause is real — but inert for a reason that is
+   now *stated*: **the port sits at `g_app_state = 6`, which is in play.** It
+   used to sit at 0 on the strength of "the port has no attract mode", which
+   was a guess about what 0 meant, and it was wrong. See
+   **`g_app_state` and `ResolveHit`'s three suppression bits** below.
 
 `[diverges]` **The third clause is still a stand-in.** `g_player_state`
 (0x009A5C62) must be 5, and *nothing in the port ever writes 5*: every writer
@@ -1508,6 +1512,42 @@ Note what the gate does **not** test: `g_player_invuln_frames`. The 90-frame
 window after a hit stops the damage and nothing else, so the enemies keep
 taking their turns through it. That is the engine's answer to "why is there no
 pause after I am hit".
+
+### `g_app_state` and `ResolveHit`'s three suppression bits
+
+`g_app_state` (`0x009C8E98`) was `[open]` in `PROGRESS.md` and the port sat at
+**0** with a comment saying every clause that read it was inert "because the
+port has no attract mode". The comment was a guess about what 0 meant, and it
+was wrong twice over.
+
+**6 is the in-play state.** Two proofs:
+
+* `FUN_00414FC0`, the start press that spends a credit, calls
+  `RequestAppState(6)` (`FUN_0040E850`) and puts the player into play.
+  Pressing Start *is* the transition into 6.
+* `CommitAppState` (`FUN_0040E860`), the only writer, ends with
+  `if (pending < 6 || pending > 7) g_player_state = 9` for both players — so 6
+  and 7 are the only two states it leaves a live player in, and 7 is the arm
+  `FUN_00460530` requests when the continue countdown expires.
+
+That matters because `ResolveHit` (`FUN_00409430`) raises
+`obj+0x34 |= 0xE00` on whatever it hits whenever `g_app_state` is **not** 6,
+and the three bits stop the model swap, the dismemberment and the hit result
+respectively. Transcribed literally against a `g_app_state` of 0, that would
+have set all three on every enemy on its first hit and taken the gore out of
+the entire game — a far worse bug than the one being closed. So the port now
+sits at `AppState.InPlay`, and the OR is inert here exactly as it is in the
+engine while a stage runs.
+
+**One of the three fires in play anyway**, which is why they are modelled and
+not just written down. `ActorFlag.NoDismember` (`0x400`) has four other
+writers, and 68 shipped class-0x30 spawns carry it in `init_flags` — 7 in
+stage 1, 27 in stage 2, 22 in stage 3, 12 in stage 4. Those actors take damage
+and die normally and **do not come apart**, which the port did not do before.
+`NoPartSwap` (`0x200`) and `NoHitResult` (`0x800`) have no in-play writer at
+all: no shipped spawn record carries either.
+
+`docs/formats/combat.md` §4 has the bytes.
 
 **And it is wired into the claim now.** `TryClaimAttackSlot` used to leave the
 gate out on purpose, and the reason was good at the time: the port's

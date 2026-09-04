@@ -145,6 +145,63 @@ damage += (s8) g_pBoneDamageByRank[char_type][bone*0x10 + rank];
 if ((s16) damage < 0) damage = 0;
 ```
 
+### Three bits on `obj+0x34` that can switch the whole thing off
+
+**[proved]**, and they are the first thing `ResolveHit` does. Before it looks
+at a table it raises three bits on the actor it is charging, unless
+`g_app_state` (`0x009C8E98`) is **6, the in-play state**:
+
+```
+00409495  a1988e9c00  MOV EAX, [0x009c8e98]        ; g_app_state
+0040949A  83f806      CMP EAX, 0x6
+0040949D  7409        JZ  0x004094a8               ; in play -- skip
+0040949F  8b4734      MOV EAX, dword ptr [EDI + 0x34]
+004094A2  80cc0e      OR  AH, 0xe                  ; |= 0x0E00
+004094A5  894734      MOV dword ptr [EDI + 0x34], EAX
+```
+
+`80cc0e` occurs exactly once in the whole of `.text`. The three bits have four
+readers between them, all in `ResolveHit` and `ActorSwapDamagedPart`:
+
+| Bit | Reader | Effect |
+|---|---|---|
+| `0x200` | `00409916  f6c502  TEST CH, 0x2` | `ActorSwapDamagedPart` returns before it does anything — no model swap, no `obj+0x78` clear, no `obj+0x1318` zone bit |
+| `0x400` | `004095BD  f6c604  TEST DH, 0x4` | the effect table's **sever** code takes the damage-only arm |
+| `0x400` | `004096C0  f6c404  TEST AH, 0x4` | the torso's **death wound** on bone 1 is skipped |
+| `0x800` | `004096F9  f6c508  TEST CH, 0x8` | `g_hit_result` is written back to 0 after the dispatch has run |
+
+So out of play a shot still lands and still charges damage; nothing comes off,
+nothing is reskinned and nothing is reported. That is the **attract demo**,
+which is `g_app_state` 5: it plays a stage and shoots at it without ever gibbing
+anything. `ResolveHit`'s **second** read of `g_app_state` says the same thing
+about the head — `00409741 833d988e9c0006` / `00409748 756c` gates the 1-in-4
+headshot burst on being in play.
+
+`0x400` is **not** only an out-of-play bit. It is a real actor flag with three
+other writers:
+
+* `ActorInitFlags` (`FUN_00408970`) from the spawn record — **68 shipped
+  class-0x30 spawns** carry it (7 in stage 1, 27 in stage 2, 22 in stage 3, 12
+  in stage 4, none in 5 or 6). No shipped spawn carries `0x200` or `0x800`;
+* `ZombieStateWalkToTarget` (`FUN_0045A890`), `0045A96E 80cc04`;
+* `ZombieApplyScriptMode` (`FUN_0045CA30`), mode `-2`;
+* `EnemyThrowerInit` (`FUN_00449620`), but only for character type `0x18`
+  (`00449810 6683f918 CMP CX,0x18` / `JNZ`).
+
+Nothing clears it on `obj+0x34`: the four `AND ..H, 0xfb` sites in `.text` all
+write `obj+0x136C` or are CRT code.
+
+The sever arm carries one more condition beside the bit, and it is one
+creature's exception:
+
+```c
+if (!(obj[0x34] & 0x400)
+    && (char_type != 0x0C || (obj[0x136C] & 0x80) || bone < 9)) { /* sever */ }
+else                                                            { /* damage only */ }
+```
+
+What is special about character type `0x0C` here is **[open]**.
+
 ### `[i + 1]` is a control code, not the next slot
 
 This is the whole shape of the system and it was read wrong once. `ResolveHit`
@@ -283,7 +340,7 @@ the per-character ones. `ResolveDamagedPartSphere` falls back to character type
 
 | Value | Meaning |
 |---|---|
-| 0 | nothing happened |
+| 0 | nothing happened — also what `obj+0x34` bit `0x800` forces |
 | 1 | damaged, part swapped |
 | 2 | damaged only |
 | 3 | severed |

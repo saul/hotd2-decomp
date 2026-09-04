@@ -8,7 +8,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
-import { G } from "../globals";
+import { AppState, G } from "../globals";
 
 /**
  * `CheckPlayerCanBeHit` — `FUN_004153E0`. The invulnerability window, which is
@@ -38,7 +38,11 @@ export function CheckPlayerCanBeHit(player: number): boolean {
  *    (`CameraFromViewAngles`) is the brief scripted-turn spell.
  * 2. `g_app_state == 5` returns true whatever the player state — the
  *    **attract-mode override**, because the demo has no real player and would
- *    otherwise never be attacked. Inert here; the port has no attract mode.
+ *    otherwise never be attacked. Inert here, but for a reason that is now
+ *    stated rather than assumed: the port sits at `AppState.InPlay`, 6, which
+ *    is what the engine is in while a stage runs. It used to sit at 0 and call
+ *    this clause inert on the strength of "the port has no attract mode" — see
+ *    `g_app_state` in `game/globals.ts` for what that cost.
  * 3. `g_player_state[player] == 5`, in play.
  *
  * [diverges] **The third clause is a stand-in.** Nothing in the port ever
@@ -70,7 +74,7 @@ export function CheckPlayerCanBeHit(player: number): boolean {
  */
 export function IsPlayerAttackable(player: number): boolean {
   if (G.g_scene_state_major_entered !== SCENE_STATE_PATH_CAMERA) return false;
-  if (G.g_app_state === APP_STATE_ATTRACT) return true;
+  if (G.g_app_state === AppState.Attract) return true;
   if (player < 0) return false;
   if (G.g_player_state[player] === PLAYER_STATE_IN_PLAY) return true;
   return (G.g_player_lives[player] ?? 0) > 0;
@@ -82,8 +86,6 @@ export function IsPlayerAttackable(player: number): boolean {
  * (`FUN_00403BD0`) for the whole table.
  */
 const SCENE_STATE_PATH_CAMERA = 2;
-/** `g_app_state` while the attract demo runs; the override's value. */
-const APP_STATE_ATTRACT = 5;
 /** `g_player_state` for a player who is in play. */
 const PLAYER_STATE_IN_PLAY = 5;
 

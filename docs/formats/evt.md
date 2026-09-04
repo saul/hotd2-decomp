@@ -150,6 +150,11 @@ returns true unconditionally there — the demo has no real player, so
 `g_player_state` is never 5, and without the override nothing would ever attack
 the demo.
 
+It is `ResolveHit`'s clause too, the other way round: at anything but **6, the
+in-play state**, `ResolveHit` (`FUN_00409430`) raises `obj+0x34 |= 0xE00` on
+whatever it hits, which stops the part swap, the dismemberment and the hit
+result. So the attract demo shoots at a stage's enemies and never gibs one.
+
 ## Container
 
 Three levels of indirection, read by `FUN_0045EB60/70/90`:

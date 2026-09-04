@@ -10007,3 +10007,79 @@ it return `None`. `export_player.py` then failed with
 `cannot unpack non-iterable NoneType object` five frames away from the cause.
 Anchoring on a line that is unique in the file is not the same as anchoring on
 a line that is unique in the *right scope*.
+
+## 2026-09-04 — fifteen reported bugs, seven worktrees, and four breaks in the seams
+
+The bug list in `docs/BUGS.md` went out to seven agents grouped so no two owned
+the same files. Thirteen of the fifteen are fixed or explained; two turned out
+not to be port bugs at all. The findings are in each fix's doc comments. What
+belongs here is the process, because the process failed in a way none of the
+agents could have caught.
+
+### Every agent was green, and the merge was broken four times
+
+Each of the seven ran its own full chain and each was clean. The damage was
+entirely **between** them:
+
+1. `port.test.ts`'s new camera-cue Walker host predated `WalkerHost` gaining
+   `presentEnemies`. Merged textually with no conflict. `test:port` **passed**,
+   because the runner strips types. Only `tsc` saw it.
+2. The same method missing from three `.mjs` harnesses — `cam_cues`, `killall`,
+   `zombies` — from three different worktrees off the same base. `.mjs` is not
+   typechecked, so `tsc` was blind and only *running* each tool found it. One
+   was found by running it; the other two by sweeping for the pattern.
+3. `render/rigs.ts`: two agents independently diagnosed the same
+   `RigLayer` over-adoption bug from opposite symptoms and wrote the same fix
+   with different identifiers. Textual conflict, semantically a duplicate.
+4. Self-inflicted: three conflicts in a row had been "keep main's block, then
+   append this branch's", so the fourth got the same treatment — and it fell
+   **inside an `import` statement**, producing two concatenated clauses and a
+   syntax error. The union rule is right for append-only files and appended
+   test blocks and wrong the moment a conflict is inside one statement.
+
+The rule that follows: a fan-out is not merged until the *union* has been
+typechecked and the harnesses have been **run**, and neither is implied by
+every branch being green on its own.
+
+### The base, not the diff — a third time
+
+Five of the seven worktrees branched from a base **35 commits behind** `main`,
+missing all four union arms, D1–D3 and the class-0x30 death chain: precisely
+the code they were sent to edit. This has now cost this project three separate
+sessions, and each time it was found by looking at a *result* rather than at
+the setup. `git merge-base main <branch>` on every branch, before reading a
+line of any report, is cheaper than any of the recoveries have been.
+
+### Three of my own briefs were wrong, and the agents refused them
+
+`0x6784 znonoopa` was filed as class 0x31; it is class 0x30 (`class: 48` in the
+shipped placement). B8's "the droppers have not joined the counters yet" was a
+plausible race that the code refutes on its straight line. B13's two candidate
+causes were both in the VM, and the bug was in the exporter. In each case the
+agent disproved the lead and said so, and in each case the write-up was better
+for having had something specific to refute. **A brief's job is to be checkable,
+not to be right** — but a lead stated confidently is still a lead that has to be
+re-verified before it is repeated, and I repeated the class-0x31 one into two
+different briefs.
+
+### Two checks that would have found bugs years earlier
+
+`verify_scripted_clips.py` asks the *exporter* whether every (program, clip)
+pair got baked. All 118 missing clips were perfectly bakeable, so every
+decode-side check passed for as long as the bug existed. The question a check
+asks matters more than how thoroughly it asks it.
+
+And `verify_captor_scripts.py` went 69/99 → 70/105 because a blob's header
+shape belongs to *the state that reads it*, not to the descriptor's initial
+state. Both bugs were invisible to anything that only read what was written.
+
+### Two reported bugs that were the engine being itself
+
+The barrels do not smash because `BreakablePropUpdate` has no actor-contact
+test — nothing in the game smashes a breakable because an enemy walked into it.
+And `znkager`'s undamaged attack is clip 997 at hit frame 40, where clip 997 is
+20 frames long: in the real game an undamaged crawler swings and misses, every
+time. The port falls back to an attack that connects, which makes it **more
+dangerous than the original**. Both are recorded as findings rather than
+counted as fixes, because "the port matches the engine" and "the bug is fixed"
+are different claims and only one of them is true here.

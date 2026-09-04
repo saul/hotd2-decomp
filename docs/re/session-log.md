@@ -11195,3 +11195,62 @@ confirms the map the port already had. **This is the "data is for verifying,
 never for forming" rule catching me in the act** — a channel map was read off a
 seeding function's addresses, it happened to be right where it was checked, and
 it was asserted for the range where it was not.
+
+## The head that came off but never flew: three bugs behind one symptom
+
+Reported as "still no headshots causing head to go rolling", then "the head
+just seems to fall off, not fly off". The physics was right the whole time;
+nothing else was.
+
+**1. `boneSlot` is empty until something swaps a part.** `ResolveHit` read the
+head's model with `obj.boneSlot[bone] ?? 0` and skipped the spawn when that was
+0 — which is the *common* case, because a clean headshot kill has swapped
+nothing. The engine reads `obj+0x32C`, the bone's current model whether or not
+anything has touched it, so the port needs the skeleton's own pristine slot as
+the fallback. `CharacterBone.slot` is it.
+
+**This is the one worth remembering.** The physics had four assertions and all
+four passed, because they drove `SeveredHeadUpdate` directly. Not one of them
+went through `ResolveHit`. **Testing the mechanism is not testing the trigger**,
+and a mechanism with no caller is exactly as useful as no mechanism.
+
+**2. The pristine head model was in no rig the client could clone from.**
+`CharacterLayer.cloneSlot` looks only at `goreParts`, built from nodes tagged
+`gore_`, and `gore_entry`'s `want` set is gore variants, held slots and thrown
+weapons. A head that had never been shot draws its *undamaged* model, and that
+slot is named by the skeleton as a bone rather than by slot — so `cloneSlot`
+returned null, the render layer skipped it, and the head came off the body with
+nothing drawn in its place. Char type 8's head is slot 8016 and the exported
+gore set was `[8013, 8015, 8017, 8018, ...]`: every damaged variant and not the
+original.
+
+**3. And the gate above it enumerated a subset of what the body emitted.**
+
+    if ct in chars and (chars[ct].gore or chars[ct].held_slots)
+
+A character type with neither got no rig at all, so adding the head slot to
+`want` still produced nothing for 108 of the type/stage pairs. The comment
+directly above that line records the *previous* time this happened — "gating on
+gore left every held item with nothing to clone from" — and adding
+`held_slots` to the condition fixed that instance without fixing the shape. The
+gate now calls `gore_entry` and lets it answer, since it already returns None
+when it has no parts. A gate that lists what the body will want is a second
+source for one fact, and it will be wrong again the next time the body grows.
+
+Also closed while there: the launch point is now `GameHost.boneWorld` — the
+posed head bone, which is what `obj+0x394` is in the engine — rather than the
+actor's origin raised by a constant. `ResolveHit` already held the host, so the
+`[diverges]` was never necessary; the constant survives only as the fallback
+for a host with no scene.
+
+And one gate that looked real and is not. `ResolveHit`'s head-pop condition
+includes `CMP word ptr [EDI + 0x3b8], 1 / JG skip`. `obj+0x3B8` has **exactly
+one reference in the whole image**, this read, and `FUN_004A73D0` zeroes every
+actor from `obj+0x34` to the end of its block at allocation — so it is 0 for
+the life of every actor and the jump can never be taken. Not modelled, and
+deliberately not given a field: naming it would be naming where it sits. The
+character-type exemption beside it (3, 0x12, 0x18) is real and is ported.
+
+Trajectory, measured from the launch: apex 4.7 units above the head bone at
+frame 20, first ground contact at frame 60, settled at 80, 15.6 units
+travelled. It flies.

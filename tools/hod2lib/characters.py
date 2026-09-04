@@ -760,13 +760,18 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     # client clones from it on a hit -- emitting them on all 108 instances
     # instead would multiply the geometry for something only a few bones ever
     # show.
-    # The gate is not `gore` alone: a class-0x10 civilian has no damaged parts
-    # at all and still needs a template, because the models it holds ride the
-    # same hidden rig. Gating on gore left every held item with nothing to
-    # clone from.
+    # **The gate asks `gore_entry` rather than guessing what it will emit.**
+    # It used to test `gore or held_slots`, and every time something new
+    # started riding this rig the gate was left behind: gating on `gore` alone
+    # left every held item with nothing to clone from, and adding `held_slots`
+    # then left every *head* with nothing to clone from once the severed head
+    # started cloning the pristine head model. A gate that enumerates a subset
+    # of what the body uses will be wrong again the next time the body grows.
+    #
+    # `gore_entry` already returns None when it has no parts, so asking it is
+    # both cheaper to keep correct and exactly as selective.
     entries += [gore_entry(stage, tables, chars[ct])
-                for ct in sorted(per_type)
-                if ct in chars and (chars[ct].gore or chars[ct].held_slots)]
+                for ct in sorted(per_type) if ct in chars]
     return chars, placements, [e for e in entries if e]
 
 

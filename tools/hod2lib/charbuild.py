@@ -337,6 +337,18 @@ def gore_entry(stage, tables, char: Character) -> dict | None:
     # hands do: the client clones by asset slot, and the skeleton names none of
     # them.
     want.update(char.held_slots)
+    # **And the head's own undamaged model**, which the skeleton *does* name --
+    # but names as a bone, not by slot, and the client clones by slot.
+    #
+    # `ResolveHit`'s 1-in-4 headshot burst throws the head as an independent
+    # object drawing `obj+0x32C`, the model the head bone is wearing. That is a
+    # gore variant only if the head had already been shot; on a clean headshot
+    # kill -- the common case -- it is the pristine slot, and the pristine slot
+    # was in no rig the client could clone from. So the head came off the body
+    # and nothing flew.
+    head = next((b for b in char.bones if b.get("bone") == 2), None)
+    if head and head.get("slot"):
+        want.add(head["slot"])
     for hands in (char.throw or {}).get("hands", {}).values():
         for h in hands:
             want.update(v for v in (h["held"], h["bare"], h["projectile"])

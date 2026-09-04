@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 24535 | 112 | engine |
+| `game/` | 24566 | 112 | engine |
 | `render/` | 6765 | 26 | render |
 | `app/` | 4888 | 21 | app |
 | `script/` | 3484 | 25 | engine |
@@ -28,7 +28,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 884 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | ui |
-| **total** | **45535** | **231** | |
+| **total** | **45566** | **231** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -46,7 +46,7 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 40 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 197 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **8 of 35** read classes have a module, covering 1259 of 1546 placements |
-| Declared `[diverges]` | **102** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **101** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **85** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 49 members against `PlayerView`'s 38** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.

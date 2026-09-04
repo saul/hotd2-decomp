@@ -188,6 +188,16 @@ const TYPE: CharacterType = {
     { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
       damage_rank: [], hit_radius: 3,
       steps: [[0x21, EffectCode.Last, 3]] },
+    // `head_bone: 2` below named a bone this table did not have, so anything
+    // that reads the head's *own* record -- the model the severed head flies
+    // with, for one -- had nothing to find. No steps: a head hit here is a
+    // plain hit, which is what the headshot-burst assertions want.
+    // No `steps`, so a head hit here is a plain hit that swaps nothing --
+    // which is the case the severed head has to work in, since `boneSlot` only
+    // has an entry once something has been swapped. The damage comes from
+    // `damage_rank`, which `DamageRankModifier` indexes with `g_damage_rank`.
+    { bone: 2, part: "head", slot: 0x30, offset: [0, 0, 0], parent: null,
+      damage_rank: new Array(16).fill(5), hit_radius: 2, steps: [] },
   ],
   // Two rows, because the engine picks one with `obj+0x130C` — the shipped
   // characters carry a second set at body condition 3 (motions 257-263) and
@@ -8156,6 +8166,73 @@ console.log("\na stashed path is played by a hook that steps first:");
         `${ZombieRunMotion(zombie(0xf7ffffff), row)}`);
   check("...while the whole word does",
         ZombieRunMotion(zombie(0xffffffff), row) === 903);
+}
+
+// The headshot burst, end to end.
+//
+// The physics assertions above drive `SeveredHeadUpdate` directly, which is
+// exactly why the first cut of this shipped doing nothing: `ResolveHit` read
+// the head's model out of `obj.boneSlot`, which is **empty until something
+// swaps a part**, so a clean headshot kill -- the common case -- found slot 0
+// and spawned no head at all. Testing the physics is not testing the trigger.
+{
+  const rng = new Rng(11);
+  scene(1, rng);
+  G.g_app_state = AppState.InPlay;
+  const z = G.g_object_list[0];
+
+  // One in four, so drive it until it fires rather than guessing a seed.
+  let fired = 0, tries = 0;
+  for (; tries < 60 && fired === 0; tries++) {
+    G.g_severed_heads.length = 0;
+    z.hp = 1;
+    z.dead = false;
+    z.flags = 0;
+    z.removed.length = 0;
+    z.boneSlot = {};
+    ResolveHit(z, 2, 0, NULL_HOST, rng);
+    fired = G.g_severed_heads.length;
+  }
+  check("a headshot kill throws a head", fired === 1, `after ${tries} kills`);
+  check("...carrying the skeleton's own head model, with nothing swapped",
+        G.g_severed_heads[0]?.slot === 0x30,
+        `slot ${G.g_severed_heads[0]?.slot}`);
+
+  // ...and the three types the engine spares keep theirs, whatever the roll.
+  const spared = (t: number) => {
+    const r = new Rng(11);
+    scene(1, r);
+    G.g_app_state = AppState.InPlay;
+    const a = G.g_object_list[0];
+    a.charType = t;
+    for (let i = 0; i < 40; i++) {
+      a.hp = 1; a.dead = false; a.flags = 0; a.removed.length = 0;
+      ResolveHit(a, 2, 0, NULL_HOST, r);
+    }
+    return G.g_severed_heads.length;
+  };
+  check("...and character types 3, 0x12 and 0x18 never lose one",
+        spared(3) === 0 && spared(0x12) === 0 && spared(0x18) === 0);
+  G.g_app_state = AppState.Attract;
+
+  if (process.env.HEAD_TRACE) {
+    ResetGameGlobals();
+    const r = new Rng(3);
+    SpawnSeveredHead(vec3(0, 11, 0), 0x30, 0, 0);
+    const h = G.g_severed_heads[0]!;
+    let f = 0, apex = 0, dist = 0;
+    while (SeveredHeadUpdate(h, r) && f < 400) {
+      apex = Math.max(apex, h.pos.y);
+      dist = Math.hypot(h.pos.x, h.pos.z);
+      if (f < 6 || f % 10 === 0) {
+        console.log(`    f${String(f).padStart(3)} y=${h.pos.y.toFixed(2)}`
+          + ` vy=${h.vel.y.toFixed(3)} d=${dist.toFixed(2)} phase=${h.phase}`);
+      }
+      f++;
+    }
+    console.log(`    apex ${apex.toFixed(2)} (from 11), travelled `
+      + `${dist.toFixed(2)}, alive ${f} frames`);
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

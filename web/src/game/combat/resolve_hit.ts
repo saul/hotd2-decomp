@@ -10,6 +10,7 @@
  * The full account is docs/formats/combat.md.
  */
 import { SpawnSeveredHead } from "../effects/severed_head";
+import { vec3 } from "../vec";
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
@@ -340,16 +341,21 @@ export function ChooseDeathMotionDirectional(obj: Actor, cameraYawBams: number,
  * below.
  */
 /**
- * How far above the actor's origin the head is thrown from.
+ * The fallback launch height, for a host that cannot pose a skeleton.
  *
- * [diverges] The engine takes `obj+0x394`, the posed head point, through the
- * camera block's matrix. This port has no posed bone in `game/` -- the
- * skeleton is three.js's -- so the launch point is the actor's origin raised
- * by a humanoid's head height. The throw and everything after it are the
- * engine's; only the first position is approximate, and the head is moving
- * within one frame.
+ * The real launch point is `GameHost.boneWorld` -- the posed head bone, which
+ * is what `obj+0x394` is in the engine. This stands in only for a headless
+ * host, which queues no shots in the first place.
  */
 const HEAD_LAUNCH_RISE = 11;
+
+/**
+ * `0040974A`: character types 3, 0x12 and 0x18 keep their heads.
+ *
+ * `MOVSX ECX,[EDI+0x1f4]` then three `CMP`/`JZ` straight to the skip, before
+ * the bone test and before the roll.
+ */
+const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
 
 export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
                            host: GameHost, rng: Rng): HitResult {
@@ -513,7 +519,19 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     // the whole head-pop condition on the flag raise and the score. So the head
     // only ever comes off in play. Inert here, like the `0xE00` OR, and for the
     // same reason.
-    if (G.g_app_state === AppState.InPlay && head && rng.next() < 0.25) {
+    // `0040974A..0040976D`, the gates between the app-state test and the roll.
+    // Two of the three are real and one is not:
+    //
+    // * three character types never lose a head — that one was missing here,
+    //   so this port took heads off three the engine spares;
+    // * `CMP word ptr [EDI + 0x3b8], 1 / JG skip` is **dead**.
+    //   `obj+0x3B8` has exactly one reference in the whole image, this read,
+    //   and `FUN_004A73D0` zeroes every actor from `obj+0x34` to the end of
+    //   its block at allocation. So it is 0 for the life of every actor and
+    //   the test can never take its jump. Not modelled, and not given a field:
+    //   a name for it would be a name for where it sits.
+    if (G.g_app_state === AppState.InPlay && head
+        && !HEADLESS_EXEMPT.has(obj.charType) && rng.next() < 0.25) {
       // **The head is thrown, not just deleted.** `ResolveHit` runs three
       // calls here and this port had only the third: `SpawnBoneHitSprite`,
       // then `SpawnSeveredHead` (`FUN_0040A130`), then the swap to slot 0.
@@ -524,9 +542,22 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
       //
       // The model has to be read **before** the subtree goes, because that is
       // what zeroes the slot the head is drawn with.
-      const slot = obj.boneSlot[bone] ?? 0;
-      const at = { x: obj.pos.x, y: obj.pos.y + HEAD_LAUNCH_RISE,
-                   z: obj.pos.z };
+      //
+      // **`boneSlot` is only written by a swap.** It starts empty, so a head
+      // that has never been shot before the killing shot has no entry in it —
+      // which is the *common* case, and it is why the first cut of this spawned
+      // nothing at all. `obj+0x32C` in the engine is the bone's current model
+      // whether or not anything has swapped it, so the fallback here is the
+      // skeleton's own pristine slot for that bone.
+      const slot = obj.boneSlot[bone]
+        ?? type?.bones.find((b) => b.bone === bone)?.slot ?? 0;
+      // `SpawnSeveredHead` seeds from `obj+0x394`, the **posed head point**.
+      // `GameHost.boneWorld` is that same fact, and `ResolveHit` already holds
+      // the host, so the head starts where the head actually is rather than at
+      // a guessed height above the actor's origin. The fallback is only for a
+      // host with no scene, which queues no shots anyway.
+      const at = vec3(obj.pos.x, obj.pos.y + HEAD_LAUNCH_RISE, obj.pos.z);
+      host.boneWorld(obj.at, bone, at);
       if (slot > 0) SpawnSeveredHead(at, slot, 0, obj.yaw);
       RemoveBoneSubtree(obj, bone);
       severed = true;

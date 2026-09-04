@@ -72,6 +72,18 @@ export interface CamCommand {
   file: string | null;
   pathIndex: number | null;
   done: boolean;
+  /**
+   * Whether the camera task has already published a frame for this shot on
+   * this tick.
+   *
+   * `CamStartPathPlayback` (`FUN_00403510`) ends by calling
+   * `CamAdvancePathFrame` itself, and `EvtRunQueuedActions` calls the action
+   * handler once a frame — so the frame a shot *starts* on is published by the
+   * start, and the path does not step again until the next frame. Without
+   * this the port's own advance would run over the top of it in the same tick
+   * and every shot would be a frame ahead of the engine's.
+   */
+  started: boolean;
 }
 
 export type WaitPolicy =
@@ -133,15 +145,30 @@ export interface WalkerHost {
   /** Any sound id, dispatched by namespace as `PlaySoundId` does. */
   playSound(id: number): string | undefined;
   /**
-   * Live enemies the player can still shoot, or `null` when shooting is off.
+   * `g_enemies_alive` (`0x009C904A`) — enemies the player can still shoot, or
+   * `null` when shooting is off.
    *
-   * `wait_enemies_present` / `wait_enemies_alive` are the game's combat gate:
-   * they block until `g_enemies_present` / `g_enemies_alive` fall to the
-   * operand, and those counters only move because the player kills things.
-   * With shooting enabled that is a real condition again, so the walker waits
-   * on it instead of on a stopwatch.
+   * `wait_enemies_alive` (**0x44**, `EvtOpWaitEnemiesAlive44`) is the game's
+   * combat gate and 434 of the 488 enemy gates in the shipped scripts: it
+   * blocks until this counter falls to the operand, and the counter only moves
+   * because the player kills things. With shooting enabled that is a real
+   * condition again, so the walker waits on it instead of on a stopwatch.
    */
   aliveEnemies(): number | null;
+  /**
+   * `g_enemies_present` (`0x009C7006`), or `null` on the same terms.
+   *
+   * **The other counter, and not a synonym.** `wait_enemies_present`
+   * (**0x43**, `EvtOpWaitEnemiesPresent43`, `FUN_0045FBC0`) reads this one,
+   * and it is the looser of the two: an enemy leaves `g_enemies_alive` in
+   * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) as its death state opens
+   * and leaves this one in `ZombieEnterCorpseState` (`FUN_00456740`) when the
+   * death clip ends, so a corpse on stage is present and not alive. The port
+   * answered both opcodes with the alive count until B4/B8 were read, which
+   * made the two gates the same gate — the one thing the game keeps two
+   * counters in order to distinguish.
+   */
+  presentEnemies(): number | null;
   /**
    * Class-0x10 civilians still in play (`g_civilians_alive`, `0x009CA0E8`),
    * or `null` when the gate is not a condition this client can evaluate.
@@ -176,8 +203,8 @@ export interface WalkerHost {
 }
 
 /**
- * The two enemy counters' gates: `wait_enemies_alive` (0x43) and
- * `wait_enemies_present` (0x44).
+ * The two enemy counters' gates: `wait_enemies_present` (0x43) and
+ * `wait_enemies_alive` (0x44).
  *
  * They are the only waits whose *postcondition* says something about the
  * actors rather than about the clock, which is why they get their own set —
@@ -831,21 +858,73 @@ export class Walker {
   /**
    * Advance simulated time. `dt` is in seconds; the game runs at 60 Hz and
    * every frame-valued quantity in the data is on that clock.
+   *
+   * **The camera moves after the instructions, and that is not cosmetic.**
+   * The engine runs two tasks here, not one: `EvtInterpreterLoop` and
+   * `EvtRunQueuedActions` (`FUN_00402320`), created in that order — first and
+   * third — by the scene's task list at `0x00460710`. That *is* the execution
+   * order: `ActorAlloc` (`FUN_004A6FA0`) appends a task at its parent's tail
+   * (`+0x2C`) and `TaskRunTree` (`FUN_004A71A0`) walks the `+0x28` list from
+   * the head through `+0x1C`. `CamAdvancePathFrame` (`FUN_004035E0`) lives in
+   * the second task and does three things in one call, in this order:
+   *
+   * ```c
+   * g_cam_path_frame = cur;          // publish -- BEFORE the end test
+   * DAT_009C6F28 = end - cur;        // what wait_camera_path_frame 0 reads
+   * if (end <= cur) { cur++; g_evt_action_advance = 1;
+   *                   g_queued_events_pending--; return; }
+   * cur++;
+   * ```
+   *
+   * so on the frame a path reaches its end the engine **publishes that last
+   * frame** and only then retires the action — and the interpreter, which ran
+   * earlier in the same frame, cannot act on either the retirement or the
+   * `end - cur` it just wrote until the next one. Every object update in
+   * between sees the path's final frame.
+   *
+   * The port collapses both tasks into this method, and it used to run the
+   * camera half first. So the frame a shot ended on was advanced past,
+   * `wait_queued_events_done` and `wait_camera_path_frame 0` both fell through
+   * in the *same* tick, and the `cam_play` behind them moved the camera on
+   * before `syncPortGlobals` ever read it: stage 1's `cam_play 115..179`
+   * published 178 and then 180. Frame 179 — which is what three class-0x30
+   * zombies wait on with an exact `==`, because the game times an entrance to
+   * the end of a shot by writing the shot's own end frame as the cue — was
+   * never a value the port held, and those zombies stood in their entrance
+   * clip for the rest of the stage. `tools/cam_cues.mjs` is the harness for it.
    */
   tick(dt: number, fps = 60): void {
     if (this.finished || this.branch || this.parked) return;
-    let frames = dt * fps;
+    this.runInstructions(dt, fps);
+    this.advanceCameraPath(dt * fps);
+  }
 
-    // A camera move runs one frame per tick, exactly as CamAdvancePathFrame
-    // does: increment until the frame counter reaches the terminator.
-    if (this.cam && !this.cam.done && !this.cam.isStatic) {
-      const remaining = this.cam.endFrame - this.cam.frame;
-      const used = Math.min(frames, Math.max(0, remaining));
-      this.cam.frame += used;
-      if (this.cam.frame >= this.cam.endFrame) this.cam.done = true;
+  /**
+   * `EvtRunQueuedActions`' share of one frame: step the path, then retire the
+   * action if the path has ended. See {@link tick} for why it is last.
+   */
+  private advanceCameraPath(frames: number): void {
+    const cam = this.cam;
+    if (cam && !cam.done && !cam.isStatic) {
+      // A shot that started during this tick's instructions has already
+      // published its first frame — `CamStartPathPlayback` calls
+      // `CamAdvancePathFrame` itself and the ring calls the handler once.
+      if (cam.started) {
+        cam.started = false;
+      } else {
+        const remaining = cam.endFrame - cam.frame;
+        const used = Math.min(frames, Math.max(0, remaining));
+        cam.frame += used;
+        if (cam.frame >= cam.endFrame) cam.done = true;
+      }
     }
     // `CamAdvancePathFrame` retires its action on the frame the path ends.
     this.settleCameraAction();
+  }
+
+  /** `EvtInterpreterLoop`'s share of one frame. See {@link tick}. */
+  private runInstructions(dt: number, fps: number): void {
+    let frames = dt * fps;
 
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.lightBlock.step(dt * fps);

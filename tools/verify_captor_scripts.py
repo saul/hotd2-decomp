@@ -6,7 +6,9 @@ actor was built for, which for the 47 class-0x10 captors is the civilian.
 Each takes a script through `ZombieScriptForState` (`FUN_0045CA10`): the
 descriptor tail's ``+0x08`` when the actor is in the tail's attack state,
 ``+0x04`` otherwise. The blob opens with a header whose shape belongs to the
-entering state and continues as a list of ``s16[4]`` motion entries.
+state that **reads** it -- which for a captor started in state 39 is the state
+its civilian's op 0x1A orders, not the one in its own descriptor -- and
+continues as a list of ``s16[4]`` motion entries.
 
 The check that the header lengths are right is that **every** blob terminates:
 a list ends on the first entry whose motion is below 1, and a wrong header
@@ -29,16 +31,26 @@ from hod2lib import script as scriptlib, stage as stagelib  # noqa: E402
 
 #: What the shipped stages hold. A change here is a change in the reading.
 #:
-#: 70 spawns reach *some* captor state; 69 reach one that takes a script. The
-#: odd one starts in `ZombieStateAwaitCivilianOrder`, which reads the
-#: civilian's own block rather than a script of its own, and attacks in state 1.
+#: 70 spawns reach a captor state, and -- once the **ordered** state below is
+#: read -- all 70 of them take a script. The odd one out was stage 2's 0x52AC,
+#: whose descriptor says initial state 39 and attack state 1, neither of which
+#: has a header shape; its civilian orders it into state 35.
 #:
 #: These were 58 and 86 while `evt.SPAWN_OPCODES` stopped at the four ungated
 #: spawn opcodes. Adding the player-count-gated 0x03/0x04/0x07/0x08 brought 11
 #: more captors and 13 more scripts into view -- enemies the shipped scripts
 #: place, and that a one- or two-player game really does get.
-EXPECT_SPAWNS = 69
-EXPECT_SCRIPTS = 99
+#:
+#: The scripts went 99 -> 105 when the **ordered** state was read. A captor
+#: whose initial state is 39 (`ZombieStateAwaitCivilianOrder`) is put into a
+#: state by its civilian's op 0x1A, and `ZombieScriptForState` (`FUN_0045CA10`)
+#: then hands *that* state the tail+0x04 blob -- so the blob's header shape is
+#: the ordered state's, not the descriptor's. Six spawns are in that position
+#: and every one of them decodes cleanly under the ordered shape and under no
+#: other; this file used to say the odd one "reads the civilian's own block
+#: rather than a script of its own", which was wrong.
+EXPECT_SPAWNS = 70
+EXPECT_SCRIPTS = 105
 
 
 def main() -> int:
@@ -63,6 +75,7 @@ def main() -> int:
         # The civilians' captors are not in the instruction stream; they exist
         # only as pointers in a class-0x10 tail. Without this the check misses
         # the 47 spawns it is most about.
+        parent: dict[int, object] = {}
         for r in list(recs.values()):
             if r.cls != 0x10:
                 continue
@@ -70,8 +83,15 @@ def main() -> int:
             for k in range(max(0, min(cnt, 32))):
                 w = r.param(0x10 + k * 4, "u32")
                 off = prog.evt.to_offset(w) if w else None
-                if off is not None and off not in recs:
+                if off is None:
+                    continue
+                if off not in recs:
                     recs[off] = evtlib.read_spawn(prog.evt, off, 0x0B)
+                parent[off] = r
+        try:
+            civscripts = prog.stage.tables.civilian_scripts()
+        except Exception:                                  # noqa: BLE001
+            civscripts = {"entries": [], "scripts": []}
 
         for rec in recs.values():
             if rec.cls != 0x30:
@@ -79,6 +99,14 @@ def main() -> int:
             init = rec.param(2, "i8") or 0
             atk = rec.param(3, "i8") or 0
             shapes = charlib.TARGET_SCRIPT_SHAPE
+            # The state that actually reads tail+0x04. See EXPECT_SCRIPTS.
+            if init not in shapes and rec.offset in parent:
+                p = parent[rec.offset]
+                for st in charlib.civilian_ordered_states(
+                        civscripts, p.param(0x01, "i8") or 0):
+                    if st in shapes:
+                        init = st
+                        break
             if init not in shapes and atk not in shapes:
                 continue
             spawns += 1

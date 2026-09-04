@@ -142,6 +142,29 @@ with the acceleration the arc needs and the damage kind (4 flat, 6 arced).
 facing the camera stops and throws rather than closing, and fourteen spawns are
 condition 8.
 
+**The body condition is recomputed now, and that is what fixed the throwers.**
+`ActorBodyConditionFromHands` (`FUN_00455920`) has exactly one caller —
+`ZombieStateHoldAtRange` (`FUN_00455720`) runs it on its second line — and the
+port did not have the call at all. Conditions 7 and 8 index the **throw** row
+rather than a swing (reach 99, clip 1005/1004, hit frame 35), so a condition-8
+`znonoopa` that closed on the camera kept condition 8 into `ZombieStateStrike`,
+which read the throw as a melee: the lunge test passed at once at twenty-four
+units, the swing began, and `ApplyRootMotion`'s strike floor — set from the
+attack's own `distance` — shoved the actor back out to exactly ninety-nine
+units on the next frame. It then stood there for the rest of the stage playing
+the throw animation and landing the hit from across the room without ever
+letting go of the axe. Seventy-five units of teleport, in one frame, and it is
+both halves of the bug report: "gets close, then teleports back and starts
+throwing", and "plays the animation but never throws".
+
+With the call in, the walker keeps condition 8 through the whole approach —
+which is the window `ZombieShouldStandAndThrow` reads, so it still throws on
+the way in — and loses it on its first frame at the ring, after which it swings
+the nineteen-unit melee at your face. The engine's own operand bug at
+`0x0045599C` is transcribed with it: `znonoopa`'s left hand can never count as
+armed, so it always lands on condition 1 with the left-arm zone bit set, which
+pins its pick to the right-arm swing.
+
 `web/tools/throwers.mjs` measures it: nine throwers, all nine net under 0.2
 units of movement against the 4.2-unit swing their throw clips carry and
 return, all nine throw both hands, all nine leave — seven by state 15 and two
@@ -153,6 +176,24 @@ unreachable.
 registers for the shot test every frame, and in the tutorial that is the whole
 lesson. The port's projectile pool is plain records and its shot test walks
 actors, so `ZombieThrownWeaponStateShotDown` is named rather than half-done.
+
+The shape of what that costs is now read rather than guessed. In the engine a
+thrown weapon is **not a record in a pool at all** — it is a whole object.
+`SpawnThrownWeapon` (`FUN_004504E0`) allocates `0x13F4` bytes with its own
+update `ThrownWeaponUpdate` (`FUN_00450780`), links it into the same object
+list every actor lives on, and calls `ActorClaimHitSlot` (`FUN_00409270`),
+which is what puts it in `g_hit_slots` — `0x009C88C0`, fourteen slots — and
+raises `obj+0x38` bit `0x40`. It dispatches on its own two-entry state table
+`g_thrown_weapon_states` — `0x00592AE0`: state 0 `ThrownWeaponFlyToTarget`
+(`FUN_0044FD40`) and state 1 `ThrownWeaponDeflected` (`FUN_00450050`), which
+`ThrownWeaponUpdate` routes into the moment `obj+0x34` bit `0x8` — the
+pending-shot bit — is set on it. It also
+**inherits the thrower's attack permit** (`obj+0x121` is copied across and the
+thrower's is cleared), and only gives it back when it lands or is deflected. So
+"shoot the axe down" is not a special case bolted onto a projectile: it is the
+ordinary shot path finding an ordinary object. Making the port able to do it
+means the pool becoming actors, which is a change to the shot path and to the
+snapshot, not to the projectile.
 
 **A new overlay, `Wedged`**, answers the question the collision one leaves open.
 `#show-coli` says what the engine can feel; this marks in red every zombie the
@@ -1409,6 +1450,31 @@ Four things worth carrying forward from reading them:
   the three spawns whose byte 3 is 26 carry a `ZombieStateDelayedLeap` tail and
   the three whose byte 3 is 30 carry a `ZombieStateArcScriptedEntrance` one.
 
+#### A camera cue is the end of a shot, and the port used to step over it
+
+Six of the 44 spawns whose entrance waits on an **exact** camera frame — states
+18, 19 and 23 — name the *last frame of the `cam_play` in front of them*. Stage
+1's `0x2254` waits on 179 and op 4 of its own step is `cam_play 115..179`;
+stage 2's `0xFAF4` waits on 229 behind `cam_play 100..229`. That is how the
+game says "come through the door as this shot ends".
+
+`CamAdvancePathFrame` (`FUN_004035E0`) publishes the camera block's `+0xD0`
+*before* it tests the end of the range, and it runs in `EvtRunQueuedActions`,
+a task the scene creates **after** `EvtInterpreterLoop` — so the frame a shot
+ends on is live for one whole object update before the script can even see the
+action retire. `Walker.tick` collapsed both tasks and ran the camera half
+first, so the gate fell through on the same tick and the next `cam_play` took
+the camera before `syncPortGlobals` read it: 178, then 180. Those six zombies
+stood in their entrance clip for the rest of the stage.
+
+The instructions now run first and the camera after, which is the task order.
+**`web/tools/entrances.mjs` could never have found this**: it drives the
+entrances with a camera of its own that steps by one for ever, so every
+equality cue in the game is hit by construction. `npm run cam-cues`
+(`web/tools/cam_cues.mjs`) drives the real walker and the real `GameSystem`
+over the real script instead, seeking to each spawn's own instruction — 44
+entrances, 6 stuck before, 0 now.
+
 ### `IsPlayerAttackable`: two of three clauses
 
 The engine's gate is three tests and the port had none of them, standing in
@@ -1544,6 +1610,59 @@ already ported — is what closes it, and it would also change how every zombie
 death looks in the player, which is why it is called out here rather than done
 quietly. The old derived behaviour had that window at *infinity*: a shot zombie
 stayed `present` for ever, so none of the 54 present gates could ever open.
+
+### The room-clear gate answered on the frame the spawn ran
+
+Two reports, one mechanism. **B4**: "camera doesn't seem to wait for zombies to
+die before advancing". **B8**: at stage 1 block 4 step 4 op 28, "the two later
+of three zombies that drop from the high ledge don't seem to pause the camera —
+the game advances while the two are dropping (maybe a race condition?)".
+
+It was a race, and the two halves of it are these.
+
+**The engine's wait opcodes never answer on their first frame.**
+`EvtInterpreterLoop` runs `do { dispatch[*pc](); } while (g_evt_yield == 0)`
+and does not clear the flag at entry, so every wait handler but `0x40` opens
+`if (g_evt_yield == 0) { g_evt_yield = 1; return; }` — the frame the
+instruction is *reached* ends there, with the condition unread.
+`EvtOpWaitEnemiesAlive44` (`FUN_0045FC10`) costs one frame more again, for
+`g_evt_wait_alive_hysteresis` (`0x007DCCA8`), which it requires above zero and
+only ever zeroes on a pass. The port had no yield: `applyWait` read the counter
+and could walk straight through on its own frame.
+
+**And the port's actors are made one tick later than the instruction that
+spawns them.** `EvtOpSpawnObj0B` reaches `EnemyZombieInit` (`FUN_00452DA0`)
+inside the opcode, and the two `INC`s are on its straight line — the count is
+up before the interpreter takes another instruction. The port pushes the spawn
+onto `Walker.spawns` and builds the actor in `syncCharacterSpawns`, which
+`app/main.ts` calls *after* `walker.tick()` returns. So for the whole of the
+tick that ran the spawn, the counters still say zero.
+
+Stage 1 block 4 step 5 puts the two together: `spawn_placed`,
+`set_script_flag`, `spawn_obj` — two class-0x30 on the ledge at y = 61 —
+`queue_event`, `wait_enemies_alive 0`, with nothing between the spawn and the
+gate. Every one of those ran in a single tick, the gate read zero, and the
+block advanced while the pair were still falling. Block 4 step 4's op 28 (the
+address in the report) and step 1's two gates have the same shape. What made it
+look like the enemies were at fault is that they are not: a dropper is in both
+counters from its `Init`, throughout its descent — `test/port.test.ts` asserts
+that, because ruling it out is what turned the search towards the script.
+
+Both are now transcribed. The three counter gates — `0x43`, `0x44`, `0x46` —
+model the yield by blocking from `WaitRule.enter` unconditionally and testing
+only in `WaitRule.satisfied`, and `0x44` carries the hysteresis in
+`G.g_evt_wait_alive_hysteresis`. `0x41`, `0x42` and `0x45` have the same yield
+in the engine and still do not model it `[diverges]`: `0x42`'s countdown would
+become `operand + 2` frames, and every camera cue in six stages is timed
+against that clock.
+
+**And they are two counters.** `EvtOpWaitEnemiesPresent43` (`FUN_0045FBC0`)
+reads `g_enemies_present`; `EvtOpWaitEnemiesAlive44` reads `g_enemies_alive`.
+One `WaitRule` claimed both opcodes and answered both with the alive count, so
+the 54 present gates opened as soon as the last enemy died rather than when the
+last corpse finished — collapsing the single distinction the game keeps two
+counters in order to make. `WalkerHost` now has `presentEnemies()` beside
+`aliveEnemies()`.
 
 ### An actor that removes itself was rebuilt on the next frame
 
@@ -1891,10 +2010,10 @@ missed. Meanings and confidence marks live in
 | `3E` | `nop1` | nop | n/a | proved no-ops |
 | `3F` | `nop0` | nop | n/a | proved no-ops |
 | `40` | `wait_queued_events_done` | wait | ~approx~ | **`g_queued_events_pending == 0`, counted for real** — `queue_event` adds one, each handler takes one back, `finish_sequence` never does and `0x31`/`0x33` do it for it. Still `approx` because the ring's *ordering* is not modelled: the port runs an action when it is queued, not one at a time |
-| `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path |
-| `42` | `wait_frames` | wait | **done** | **exact** frame countdown |
-| `43` | `wait_enemies_present` | wait | ~approx~ | the combat gate. **Real while Shoot is on** — the script holds until they are dead **and the camera has swung back** (`g_camera_free`); with Shoot off nothing can make the count fall, so it passes and the feed says so |
-| `44` | `wait_enemies_alive` | wait | ~approx~ | the combat gate, gated with `0x43`. The engine's extra frame of hysteresis is **not** ported [diverges] |
+| `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path. It does **not** carry `EvtOpWaitCameraPathFrame41`'s first-visit `g_evt_yield` yield [diverges] — see `0x43` |
+| `42` | `wait_frames` | wait | **done** | **exact** frame countdown — of `operand` frames. `EvtOpWaitFrames42` loads the counter on its `g_evt_yield` frame and decrements *before* testing, so the engine's is `operand + 2` [diverges]: retiming it moves every camera cue in six stages and wants its own change |
+| `43` | `wait_enemies_present` | wait | ~approx~ | the **corpse-clear** gate, on `g_enemies_present` — not a synonym for `0x44`, and answered with the alive count until B4/B8. **Real while Shoot is on** — the script holds until they are dead **and the camera has swung back** (`g_camera_free`); with Shoot off nothing can make the count fall, so it passes and the feed says so. Yields the frame it is reached, as `g_evt_yield` makes it |
+| `44` | `wait_enemies_alive` | wait | ~approx~ | the **live-enemy** gate, on `g_enemies_alive`, and 434 of the 488 enemy gates. Same side conditions as `0x43` plus `g_evt_wait_alive_hysteresis`, so it costs one frame more — both are now ported |
 | `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
 | `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real while Shoot is on**; with Shoot off nothing can rescue a civilian, so it passes rather than deadlocking. All 68 sites pass operand 0 |
 | `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |

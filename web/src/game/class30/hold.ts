@@ -29,6 +29,7 @@ import { CharacterTypeOf, FirstBakedOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
 import { dist2d, type Vec3 } from "../vec";
+import { ActorBodyConditionFromHands } from "./condition";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius, TestApproachRing } from "./ring";
 import { MotionFade, MotionRow, QUEUE_CAP, ZombieState } from "./states";
@@ -41,6 +42,16 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
   // Called for its side effect: it refreshes `obj+0x1358`, the queue depth
   // this actor is allowed to sit at.
   TestApproachRing(obj, eye);
+  // And immediately after it, in the engine's own order: the body condition is
+  // re-derived from the hands. This is the **only** call site of it in the
+  // binary, and leaving it out is not a missing detail — it is what let a
+  // `znonoopa` reach `ZombieStateStrike` still on body condition 8, whose
+  // attack row is the *throw*: `distance` 99, clip 1005. The lunge test passed
+  // at once, the strike began ninety-nine units out, `strikeFloor` shoved the
+  // actor back to exactly that range on the next frame, and it stood there
+  // playing the throw animation and landing the hit without ever letting go of
+  // the axe.
+  ActorBodyConditionFromHands(obj);
 
   const charType = CharacterTypeOf(obj)?.type ?? -1;
   // **The retreat has an escape, and it is two bits of `obj+0x136C`:**

@@ -49,7 +49,7 @@
  * trying to derive that.
  */
 
-import { Box3, Group, Mesh, Object3D, Ray, Vector3 } from "three";
+import { Box3, Group, Object3D, Ray, Vector3 } from "three";
 import type {
   CharacterPlacement, CharacterType, CharactersJson,
 } from "../bundle";
@@ -85,7 +85,7 @@ const boneSuffix = (part: string) => `_${part}`;
  */
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
-import { swapGore } from "./characters/gore";
+import { restoreGore, swapGore } from "./characters/gore";
 export type { Instance };
 
 
@@ -194,11 +194,18 @@ export class CharacterLayer implements System {
 
     // The hidden per-type templates holding the damaged parts. One copy each;
     // a swap clones from here, which shares geometry and material in three.js.
+    //
+    // **The rig root is hidden, not only the parts it holds.** A swap clones a
+    // part and re-parents the copy onto a bone, so nothing it draws depends on
+    // the template being visible — while a part whose name the slot pattern
+    // below does not match would otherwise be left standing in the level as a
+    // body part with no body.
     root.traverse((o) => {
       const x = o.userData as { hod2_kind?: string; hod2_rig?: string };
-      if (x?.hod2_kind !== "rig_part") return;
-      const rig = x.hod2_rig ?? "";
+      const rig = x?.hod2_rig ?? "";
       if (!rig.startsWith("gore_")) return;
+      if (x?.hod2_kind === "rig") { o.visible = false; return; }
+      if (x?.hod2_kind !== "rig_part") return;
       const m = /_gore_([0-9a-f]{4})$/.exec(o.name);
       if (m) {
         this.goreParts.set(Number.parseInt(m[1], 16), o);
@@ -216,6 +223,15 @@ export class CharacterLayer implements System {
         roots.push(o);
       }
     });
+
+    // **Every character hierarchy starts hidden, before anything can reject
+    // one.** An actor is drawn because the port says it is alive, and until
+    // then the exporter's baked bind pose is standing in the level. Three of
+    // the guards below `continue` -- a placement with no motion, a character
+    // type the bundle does not carry, a partial bone match -- and each of them
+    // used to leave the hierarchy exactly as the glTF loaded it, which is
+    // visible. Nothing in the stage's lifetime would have hidden it again.
+    for (const node of roots) node.visible = false;
 
     for (const node of roots) {
       const at = (node.userData as { hod2_spawn_at: number }).hod2_spawn_at;
@@ -265,7 +281,6 @@ export class CharacterLayer implements System {
       this.home.set(at, { x: node.position.x, y: node.position.y,
                           z: node.position.z });
       this.posed.add(at);
-      node.visible = false;
     }
   }
 
@@ -573,16 +588,39 @@ export class CharacterLayer implements System {
    * talks to.
    */
   paths: {
-    objectPath(slot: number):
-      { position(t: number, out?: Vec3): Vec3 } | undefined;
+    objectPath(slot: number): {
+      position(t: number, out?: Vec3): Vec3;
+      channel(i: number, t: number): number;
+    } | undefined;
   } | null = null;
 
+  /**
+   * **All six values, not three.**
+   *
+   * `CamEvalObjectPath6` (`FUN_004042D0`) fills `{float x,y,z; int rx,ry,rz}`,
+   * and `ScriptedHumanoidUpdate`'s tail copies the second half straight onto
+   * the actor when the follow mode is not 2 — `MOV [EDI+0x64],EAX; MOV
+   * [EDI+0x68],ECX; MOV [EDI+0x6c],EDX` at `0x00484B6E`-`0x00484B74`, out of
+   * `[ESP+0x4c/0x50/0x54]`. It also rotates the attachment offset through the
+   * same triple. This seam used to hand back the position alone, so `p.yaw`
+   * was always `undefined`: a rider took its path's *place* and kept its spawn
+   * facing, and the offset record was rotated by a yaw of zero. Stage 3's
+   * boat riders are the visible case — two class-0x25 actors on `op_st3` 0
+   * with offset records 4 and 5, seated facing wherever the descriptor left
+   * them while the boat turned under them.
+   *
+   * `op_` channels 3, 4 and 5 are the BAMS triple; `channel` is what
+   * `render/rigs.ts` already reads them with.
+   */
   objectPath(slot: number, frame: number):
-      { x: number; y: number; z: number } | null {
+      { x: number; y: number; z: number;
+        pitch: number; yaw: number; roll: number } | null {
     const p = this.paths?.objectPath(slot);
     if (!p) return null;
     const v = p.position(frame, this._pathPos);
-    return { x: v.x, y: v.y, z: v.z };
+    return { x: v.x, y: v.y, z: v.z,
+             pitch: p.channel(3, frame), yaw: p.channel(4, frame),
+             roll: p.channel(5, frame) };
   }
 
   private readonly _pathPos = new Vector3();
@@ -616,17 +654,7 @@ export class CharacterLayer implements System {
 
   /** Put one instance's nodes back to bind: bones, gore swaps, held items. */
   private restoreNodes(inst: Instance): void {
-    for (const [bone, g] of inst.gore) {
-      const node = inst.bones.get(bone);
-      const self = node as Mesh | undefined;
-      if (self?.isMesh) {
-        // The saved original, put back.
-        self.geometry = (g as Mesh).geometry;
-        self.material = (g as Mesh).material;
-      } else {
-        g.removeFromParent();
-      }
-    }
+    for (const [bone, g] of inst.gore) restoreGore(inst, bone, g);
     inst.gore.clear();
     inst.hidden = 0;
     for (const g of inst.held?.values() ?? []) g.removeFromParent();

@@ -36,7 +36,7 @@ import {
 import { NULL_HOST, type ShotPick } from "../src/game/host";
 import { MarkActorShot, QueueShotRequest }
   from "../src/game/combat/shot";
-import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
+import { AttackListOf, MotionPlayFrame, MotionPlayLength, SetGameTables, T }
   from "../src/game/tables";
 import {
   ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet,
@@ -54,7 +54,7 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
-import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2,
+import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
   from "../src/game/actor";
@@ -98,13 +98,18 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
 import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
+import { ActorBodyConditionFromHands, SPENT_CONDITION }
+  from "../src/game/class30/condition";
 import { ThrowerState, ThrowSub } from "../src/game/class31/states";
 import { ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
-import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
-import type { BreakablesJson } from "../src/bundle";
+import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
+  from "../src/game/combat/resolve_hit";
+import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
+import type { BreakablesJson, ScriptJson } from "../src/bundle";
+import { Walker } from "../src/script/walker";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -179,7 +184,11 @@ const TYPE: CharacterType = {
       damage_rank: [], hit_radius: 3,
       steps: [[0x21, EffectCode.Last, 3]] },
   ],
-  head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977] },
+  // Two rows, because the engine picks one with `obj+0x130C` — the shipped
+  // characters carry a second set at body condition 3 (motions 257-263) and
+  // the port used to read row 0 for every actor.
+  head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977],
+                             "3": [257, 258, 259, 260, 261, 262, 263] },
   attacks: {
     "0": {
       // `distance` is deliberately just *outside* the inner ring, as the real
@@ -249,6 +258,10 @@ const TYPE: CharacterType = {
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
+    // ...and the second stumble row, the one body condition 3 selects: 43
+    // frames rather than 29, which is how the two are told apart on screen.
+    "257": motion(43), "258": motion(43), "259": motion(43), "260": motion(43),
+    "261": motion(43), "262": motion(43), "263": motion(43),
     // The twelve entrance states' clips. 184 (0xB8) is the surfacing clip
     // whose two splash cursors are 0x15 and 0x1B, so its play length has to
     // reach past both; 186/187 (0xBA/0xBB) the scripted grab's pair; 700 a
@@ -3247,6 +3260,105 @@ console.log("the counts an actor never joined:");
   }
 }
 
+
+console.log("class 0x31, the thrower actually lets go of the weapon:");
+{
+  // **`ThrowerStateThrow` advancing its own sub-state is not a throw.** The
+  // release, `SpawnThrownWeapon` (`FUN_004504E0`), reads the hand's recorded
+  // position and allocates the projectile; it has no path in the engine that
+  // declines. The port asks the host for that position, and a host that could
+  // not answer used to make the whole routine `return` — after the state had
+  // already moved to `ThrowSub.Thrown`. So the clip played, the hand went
+  // bare, the permit changed hands, and no axe ever left it.
+  const HANDS = [
+    { bone: 5, motion: 8, release_frame: 6, range: 20, player_motion: 6,
+      cancel_mask: 2, held: 8098, bare: 8095, projectile: 8081 },
+    { bone: 8, motion: 9, release_frame: 6, range: 20, player_motion: 6,
+      cancel_mask: 4, held: 8094, bare: 8091, projectile: 8080 },
+  ];
+  const TYPE_THROWER = {
+    ...TYPE31,
+    motions: { ...TYPE31.motions, "8": motion(24), "9": motion(24) },
+    // `g_class31_throws` verbatim in shape: hands by body condition, then the
+    // scalars `ThrowerStateThrow` and `ThrownWeaponFlyToTarget` read.
+    throw: {
+      hands: { "0": HANDS },
+      // `SpawnThrownWeapon` writes 0x600 into `obj+0x135C` for `zsass`.
+      spin: 0x600, speed: 1.2, aim_ahead: 4, aim_side: 0.6,
+      stick_frames: 30, blink_frames: 60,
+    },
+  } as unknown as CharacterType;
+  const CHARS_THROW = {
+    ...CHARS31, types: { "1": TYPE, "25": TYPE_THROWER },
+  } as unknown as CharactersJson;
+
+  ResetGameGlobals();
+  SetGameTables(CHARS_THROW);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_camera_yaw_bams = 0;
+  const z = ActorSpawn(0x9200, SpawnClass.Thrower, 0x19, "thrower", {
+    initialState: ThrowerState.StandAndDecide, condition: 0,
+  });
+  z.visible = true;
+  z.hp = 100;
+  z.pos = vec3(0, 0, 60);
+  z.yaw = 0;
+  // `ThrowerEntryState` resolves state 31 to the hub — the throw is a state the
+  // router picks, never a spawn's entrance — so it is set here rather than
+  // asked for in the descriptor.
+  z.state = ThrowerState.Throw;
+  z.sub = 0;
+
+  const rng = new Rng(23);
+  const events = new Events();
+  let threw = 0;
+  events.on("enemy.threw", () => { threw += 1; });
+
+  // `NULL_HOST` on purpose: it answers `boneWorld` with `false`, which is the
+  // exact condition that used to swallow the throw.
+  let seen: (typeof G.g_thrown_weapons)[number] | undefined;
+  for (let i = 0; i < 300 && !seen; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    seen = G.g_thrown_weapons[0];
+  }
+  check("the release makes a weapon even when the host has no skeleton",
+        seen !== undefined && threw >= 1,
+        `pool ${G.g_thrown_weapons.length}, ${threw} throws`);
+  if (seen) {
+    check("...at the hand's own height, not at the actor's feet",
+          seen.pos.y > z.pos.y, `${seen.pos.y} vs ${z.pos.y}`);
+    check("...carrying the character type's own tumble",
+          seen.spin === 0x600 || seen.spin === -0x600, String(seen.spin));
+
+    // ...and it is a thing that moves. `ThrownWeaponFlyToTarget` sets the
+    // velocity once, at launch, and the flight is a straight line at a
+    // constant speed until the ttl runs out.
+    const launch = { ...seen.pos };
+    const before = dist2d(seen.pos, EYE);
+    for (let i = 0; i < 20; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    check("...and it travels", dist2d(seen.pos, launch) > 10,
+          `${dist2d(seen.pos, launch).toFixed(1)} units`);
+    check("...toward the camera", dist2d(seen.pos, EYE) < before,
+          `${dist2d(seen.pos, EYE).toFixed(1)} from ${before.toFixed(1)}`);
+    check("...tumbling as it goes", seen.spinAngle !== 0,
+          String(seen.spinAngle));
+
+    // The hit is **timed, not tested**: the weapon damages the player when its
+    // flight time runs out, wherever it happens to be. That is
+    // `ThrownWeaponFlyToTarget`'s own shape, the same as the melee hit frame.
+    let damaged = 0;
+    events.on("player.damaged", () => { damaged += 1; });
+    for (let i = 0; i < 200 && !seen.hit; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    check("...and lands on the player when the flight time is up",
+          seen.hit && damaged >= 1, `hit ${seen.hit}, ${damaged} damaged`);
+  }
+}
+
 console.log("class 0x31, the grab ends in the engine's one leave routine:");
 {
   // **`ThrowerLeave` (`FUN_0044AD60`) was transcribed twice, with different
@@ -4102,6 +4214,58 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     check("...and the captor obeys it: 0x31 is die",
           z.dead && (z.flags & ActorFlag.Dead) !== 0,
           `dead ${z.dead} state ${z.state}`);
+  }
+
+  // **B6 — an ordered captor still needs its target script.**
+  //
+  // A captor whose descriptor starts it in state 39 is put into a state by
+  // the civilian, and `ZombieScriptForState` (`FUN_0045CA10`) then hands *that*
+  // state the tail+0x04 blob. The exporter used to decode that blob with state
+  // 39's header shape, which does not exist, so it exported `null` — and this
+  // state reads a zero arrive radius out of a missing script and walks at the
+  // civilian for ever. Stage 1 block 9's 0x4B74 and 0x4BD0 are the two that
+  // did it; their real header is `arrive 12.0, motion 1026`.
+  //
+  // The producer is checked by `tools/verify_captor_scripts.py`; this is the
+  // consumer, and it is the assertion that says a null script is not survivable
+  // rather than merely unusual.
+  {
+    const ordered: TargetScriptJson = {
+      state: ZombieState.WalkToTarget,
+      head: { arrive: 12, loops: 1, motion: 10, frame: 0 },
+      entries: [{ motion: 10, frame: 0, loops: 1, mode: 5 }],
+    };
+    const { civ, z, events } = captorScene(ZombieState.AwaitCivilianOrder,
+      ZombieState.WalkPastPoint, ordered,
+      [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
+        { op: CivilianOp.SetChildCue, args: [ZombieState.WalkToTarget, 2] },
+        { op: CivilianOp.Wait, args: [0] },
+        { op: CivilianOp.End, args: [] }]]);
+    zFrame(z, events);                       // sub 0 -> 1
+    zFrame(z, events);                       // takes the order
+    check("an ordered captor enters the state its civilian named",
+          z.state === ZombieState.WalkToTarget, `state ${z.state}`);
+    zFrame(z, events);
+    check("...and reads the tail+0x04 header the order's state gives it",
+          z.zom.targetArrive === 12, `arrive ${z.zom.targetArrive}`);
+    z.pos = vec3(0, 0, 6);                   // inside 12, outside the old 0
+    zFrame(z, events);
+    check("...so it can arrive, and hand over to the maul",
+          z.state === ZombieState.TargetMotionScript, `state ${z.state}`);
+    check("...which is what frees the civilian",
+          (civ.civ!.wait & CivilianWait.Free) !== 0,
+          `wait ${civ.civ!.wait.toString(16)}`);
+  }
+  {
+    // The failure itself, stated: with no script the radius is zero and the
+    // captor can never reach it, whatever it does.
+    const { z, events } = captorScene(ZombieState.WalkToTarget, 1, null);
+    zFrame(z, events);
+    z.pos = vec3(0, 0, 0.5);
+    zFrame(z, events);
+    check("a captor with no target script has a radius nothing satisfies",
+          z.zom.targetArrive === 0 && z.state === ZombieState.WalkToTarget,
+          `arrive ${z.zom.targetArrive} state ${z.state}`);
   }
 
   // The script ends by flipping roles, and only the *attack* script running
@@ -5225,6 +5389,161 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     ordinary.yaw = 0;
     check("...nor does an ordinary body condition",
           !ZombieShouldStandAndThrow(ordinary));
+  }
+}
+
+// -- 33b. the body condition, and the throw row it keeps out of the strike --
+
+console.log("\nActorBodyConditionFromHands:");
+{
+  /**
+   * `znonoopa.bin` cut down: character type 0x14, whose conditions 7 and 8
+   * name the **throw** — `distance` 99, the clip that swings the axe — and
+   * whose conditions 0..2 name an ordinary reach at nineteen units. Both rows
+   * are in the shipped table, which is why which one is selected matters more
+   * than anything else on this actor.
+   */
+  const AXE_HANDS = [
+    { bone: 5, held: 7929, bare: 7926, weapon_bone: 6, projectile: 585 },
+    { bone: 8, held: 7925, bare: 7923, weapon_bone: 9, projectile: 585 },
+  ];
+  const MELEE = {
+    "0": { strike: 100, lunge: 101, distance: 19, hit_frame: 10,
+           player_motion: 4, cancel_mask: 2 },
+    "1": { strike: 100, lunge: 101, distance: 19, hit_frame: 10,
+           player_motion: 5, cancel_mask: 4 },
+  };
+  const TYPE_AXE = {
+    ...TYPE,
+    type: 0x14, name: "znonoopa", file: "znonoopa.bin",
+    attacks: { ...TYPE.attacks, "1": MELEE, "2": MELEE },
+    attack_picks: { ...TYPE.attack_picks,
+                    "1": new Array(80).fill(0), "2": new Array(80).fill(0) },
+    zombie_throw: { ...TYPE.zombie_throw, hands: AXE_HANDS },
+    motion_row: { ...TYPE.motion_row,
+                  "1": [10, 10, 12, 12, 14], "2": [10, 10, 12, 12, 14] },
+    // **The throw clips carry root motion here**, unlike the base fixture's.
+    // `ApplyRootMotion` returns before the strike floor when the delta is
+    // zero, so a clip that stands perfectly still cannot show the shove — and
+    // the shove is the whole of the teleport.
+    motions: { ...TYPE.motions, "102": motion(24, 0.05),
+               "103": motion(20, 0.05) },
+  } as unknown as CharacterType;
+  const CHARS_AXE = {
+    ...CHARS, types: { "1": TYPE, "20": TYPE_AXE },
+  } as unknown as CharactersJson;
+
+  const axeman = (cond: number, at = 0x6784) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_AXE);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(at, SpawnClass.Zombie, 0x14, "znonoopa", {
+      initialState: ZombieState.AttackRun, condition: cond,
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 60);
+    z.motion = 12;
+    return z;
+  };
+
+  // The trap this whole routine exists to avoid, stated as a fact about the
+  // table rather than as a claim about the code.
+  {
+    const z = axeman(8);
+    check("body condition 8 selects the throw row, reach ninety-nine",
+          AttackListOf(z)["0"]?.distance === 99,
+          String(AttackListOf(z)["0"]?.distance));
+    z.condition = 1;
+    check("...and the melee row is nineteen",
+          AttackListOf(z)["0"]?.distance === 19,
+          String(AttackListOf(z)["0"]?.distance));
+  }
+
+  // `ZombieStateHoldAtRange` is the one caller, so an actor that reaches the
+  // ring can no longer be on the throw row.
+  {
+    const z = axeman(8);
+    const rng = new Rng(4);
+    const events = new Events();
+    let sawStrike = false;
+    let struckOnThrowRow = false;
+    let maxStep = 0;
+    let prev = { ...z.pos };
+    for (let i = 0; i < 900; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      maxStep = Math.max(maxStep, Math.hypot(z.pos.x - prev.x,
+                                             z.pos.y - prev.y,
+                                             z.pos.z - prev.z));
+      prev = { ...z.pos };
+      if (z.state === ZombieState.Strike) {
+        sawStrike = true;
+        if (z.condition === 8 || z.condition === 7) struckOnThrowRow = true;
+      }
+    }
+    check("a condition-8 walker reaches the strike", sawStrike);
+    check("...never on the throw row", !struckOnThrowRow,
+          `condition ${z.condition}`);
+    // The teleport, in one number. The run clip carries 1.289 units a frame
+    // and the lunge 0.6; anything above a couple of units in a single frame is
+    // `ApplyRootMotion`'s floor shoving the actor out to the throw's own
+    // ninety-nine-unit range, which is what "gets close, then teleports back
+    // and starts throwing" looked like.
+    check("...and it never jumps across the room in one frame", maxStep < 3,
+          `${maxStep.toFixed(2)} units`);
+    check("...it ends up on a hand-derived condition",
+          z.condition <= 2, String(z.condition));
+  }
+
+  // The routine on its own: the two sticky values, and the operand the engine
+  // reads wrong.
+  {
+    const z = axeman(7);
+    ActorBodyConditionFromHands(z);
+    check("condition 7 is sticky -- the stationary thrower's own row survives",
+          z.condition === 7, String(z.condition));
+    const spent = axeman(SPENT_CONDITION);
+    ActorBodyConditionFromHands(spent);
+    check("...and so is 5", spent.condition === SPENT_CONDITION,
+          String(spent.condition));
+
+    const intact = axeman(8);
+    ActorBodyConditionFromHands(intact);
+    // `0x0045599C` compares the **right** hand's slot against the left hand's
+    // held value, so `znonoopa`'s left hand can never count as armed. One
+    // hand, condition 1, and `DamageZone.LeftArm` already set -- which is what
+    // pins its attack pick to the right-arm swing.
+    check("both hands intact still gives condition 1, not 2",
+          intact.condition === 1, String(intact.condition));
+    check("...with the left arm marked destroyed, as the engine has it",
+          (intact.zones & DamageZone.LeftArm) !== 0,
+          `zones ${intact.zones}`);
+
+    const empty = axeman(8);
+    empty.boneSlot["5"] = 0;
+    ActorBodyConditionFromHands(empty);
+    check("a thrown right hand takes it to zero", empty.condition === 0,
+          String(empty.condition));
+
+    // Character type 1 has no 1-or-2 row, so the routine only ever writes 0.
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    const znassb = ActorSpawn(0x6800, SpawnClass.Zombie, 1, "znassb", {
+      initialState: ZombieState.AttackRun, condition: 8,
+    });
+    znassb.boneSlot["5"] = 7081;             // `znassb`'s own held slots
+    znassb.boneSlot["8"] = 7077;
+    ActorBodyConditionFromHands(znassb);
+    check("character type 1 with both hands armed is left alone",
+          znassb.condition === 8, String(znassb.condition));
+    znassb.boneSlot["5"] = 0;
+    znassb.boneSlot["8"] = 0;
+    ActorBodyConditionFromHands(znassb);
+    check("...and only falls to zero when both are empty",
+          znassb.condition === 0, String(znassb.condition));
   }
 }
 
@@ -6598,6 +6917,83 @@ console.log("class 0x30, the death chain:");
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
 }
 
+/**
+ * **B5 — a fatal hit mid-swing must not wait for the swing to finish.**
+ *
+ * `ZombieStateStrike` (`FUN_00455A40`) plays the swing on the actor's
+ * *ordinary* motion — `FUN_004119A0(obj+0x194, entry->strike, 0, 5)` at
+ * 0x00455B8A, read back through `obj+0x1B4`/`obj+0x19C` — so when
+ * `ChooseDeathMotion` (`FUN_004560B0`) writes the same track the swing is over
+ * by construction. The port gives the swing a channel of its own so the poser
+ * can hold it at full weight, and nothing was ending it: the actor finished
+ * its bite and only then fell over.
+ *
+ * The fix is in `ActorSetMotionBlended` / `ActorSetMotion`, so this asserts
+ * both the primitive and the whole death path through `GameUpdate`.
+ */
+console.log("class 0x30, a fatal hit lands *during* the swing:");
+{
+  const rng = new Rng(37);
+  const events = scene(1, rng);
+  const z = G.g_object_list[0] as ZombieActor;
+  const atk = TYPE.attacks["0"]["1"];
+
+  // Mid-swing: the state machine's own shape after `StrikeSub.Lunge`.
+  z.state = ZombieState.Strike;
+  z.sub = StrikeSub.Swinging;
+  z.attack = 1;
+  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  z.hp = 1;
+
+  ActorSetMotionBlended(z, TYPE.motion_row["0"][MotionRow.BackAway], 0, 10);
+  check("writing the motion track ends the one-shot on it",
+        z.action === null, JSON.stringify(z.action));
+  check("...fading out of the swing, not out of the base clip",
+        z.fadeFrom?.motion === atk.strike && z.fadeFrom?.ticks === 4,
+        JSON.stringify(z.fadeFrom));
+
+  // ...and the whole path: shoot it dead while the swing runs.
+  z.state = ZombieState.Strike;
+  z.sub = StrikeSub.Swinging;
+  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  ResolveHit(z, 1, 0, NULL_HOST, rng);
+  check("the shot kills it mid-swing", z.dead && z.pendingHit !== null);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("one update takes it out of the swing and into `Death`",
+        z.state === ZombieState.Death, `state ${z.state}`);
+  check("...and the swing is gone, so the death clip is what is posed",
+        z.action === null && (z.motion === 900 || z.motion === 901),
+        `action ${JSON.stringify(z.action)} motion ${z.motion}`);
+}
+
+/**
+ * **B12 — the stumble comes from the actor's own body-condition row.**
+ *
+ * `004544ec 8b8e0c130000` reads `obj+0x130C` and `0045450a 8b1c0b` indexes the
+ * character's reaction table with it. The port read row `"0"` for every actor,
+ * so the 21 character types with a second row at body condition 3 could never
+ * reach it.
+ */
+console.log("class 0x30, the stumble is indexed by body condition:");
+{
+  const rng = new Rng(38);
+  scene(0, rng);
+  const z = spawnZombie(0x3400, 1, "stumbler");
+  z.visible = true;
+  z.hp = z.maxHp = 100;
+  check("condition 0 takes row 0",
+        ActorPlayHitReaction(z, 1, HitResultCode.Damaged)
+          === TYPE.reactions["0"][1], String(z.react?.motion));
+  z.condition = 3;
+  check("...and condition 3 takes row 3, which row 0 never named",
+        ActorPlayHitReaction(z, 1, HitResultCode.Damaged)
+          === TYPE.reactions["3"][1], String(z.react?.motion));
+  z.condition = 9;                       // a row the fixture does not carry
+  check("...and a condition with no row of its own falls back to row 0",
+        ActorPlayHitReaction(z, 1, HitResultCode.Damaged)
+          === TYPE.reactions["0"][1], String(z.react?.motion));
+}
+
 console.log("class 0x30, the corpse that blinks:");
 {
   const rng = new Rng(12);
@@ -7033,6 +7429,140 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
           && !G.g_enemy_slots.includes(plain.at),
           `flags ${plain.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
   }
+}
+/**
+ * **B8, the half of it that lives in `game/`.**
+ *
+ * The report — "the two later zombies that drop from the high ledge don't
+ * pause the camera... maybe a race condition?" — has an obvious suspect: a
+ * zombie still in the air has not joined the enemy counters yet, so
+ * `wait_enemies_alive` sees zero and lets the block go. It is not what
+ * happens, and pinning that down is what turned the search towards the script
+ * side, where the bug actually was.
+ *
+ * `EnemyZombieInit` (`FUN_00452DA0`) does its two `INC`s in `Init`, on the
+ * straight line after the state is seeded. The only two spawns it declines are
+ * character type 9 and initial state 31 — neither of which any entrance state
+ * is — so a dropper is in both counters from the frame the spawn instruction
+ * runs and stays there for the whole descent.
+ */
+console.log("\nan entrance state is counted from its first frame:");
+{
+  const rng = new Rng(31);
+  const events = new Events();
+  // Stage 1 block 4 step 5's pair, in shape: class 0x30 on the ledge at
+  // y = 61 with `ZombieStateDelayedLeap` (26) as the initial state.
+  const drop = (at: number): Actor => ActorSpawn(at, SpawnClass.Zombie, 1,
+    "ledge dropper", { initialState: ZombieState.DelayedLeap, hp: 100,
+                       maxHp: 100, visible: true, pos: vec3(0, 61, -20) }, rng);
+
+  ResetGameGlobals();
+  const a = drop(0xb000);
+  const b = drop(0xb001);
+  check("both droppers join the counters in `Init`, before a frame runs",
+        G.g_enemies_alive === 2 && G.g_enemies_present === 2,
+        `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
+  check("...and they really are in the entrance state",
+        a.state === ZombieState.DelayedLeap
+        && b.state === ZombieState.DelayedLeap,
+        `${a.state} / ${b.state}`);
+
+  // The whole descent. `UNCOUNTED_INITIAL_STATE` is the one state that is
+  // allowed to be uncounted while it waits, and 26 is not it.
+  check("state 26 is not the state that counts itself in later",
+        (ZombieState.DelayedLeap as number) !== UNCOUNTED_INITIAL_STATE);
+  let lowAlive = G.g_enemies_alive;
+  for (let i = 0; i < 240; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    lowAlive = Math.min(lowAlive, G.g_enemies_alive);
+  }
+  check("...and neither leaves the count while it is still falling",
+        lowAlive === 2 && G.g_enemies_alive === 2,
+        `lowest ${lowAlive}, now ${G.g_enemies_alive}`);
+}
+
+/**
+ * **The camera hands the port every frame of a path, including the last one.**
+ *
+ * The engine runs two tasks: `EvtInterpreterLoop` (`FUN_0045ECC0`) and then
+ * `EvtRunQueuedActions` (`FUN_00402320`), and `CamAdvancePathFrame`
+ * (`FUN_004035E0`) — which lives in the second — publishes the camera block's
+ * `+0xD0` *before* it tests the end of the range and retires the action. So the
+ * frame a shot ends on is a value `g_cam_path_frame` really holds, for one
+ * whole object update, before the shot behind it can start.
+ *
+ * The port used to run its camera half first and its instructions second, so
+ * `wait_queued_events_done` fell through on the same tick the path ended, the
+ * `cam_play` behind it took the camera, and the end frame was never published
+ * at all. Stage 1's `cam_play 115..179` went 178, 180 — and three class-0x30
+ * zombies whose entrance cue is exactly 179 stood in their entrance clip for
+ * the rest of the stage, which is how the game writes "come through the door
+ * as this shot ends". Stage 2's `0xFAF4` is the same bug on `100..229`.
+ *
+ * This is that script in miniature, and the assertion is the invariant rather
+ * than the symptom: **no integer between the first shot's start and the second
+ * shot's end may be missing from what the walker publishes.**
+ * `tools/cam_cues.mjs` is the same check against all 44 shipped spawns.
+ */
+console.log("\nthe camera path publishes every frame, ends included:");
+{
+  const camOp = (i: number, start: number, end: number) => ({
+    i, at: i, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 7, 0],
+    start, end, slot: 7, flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [7], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        camOp(0, 0, 10),
+        // The gate the shipped scripts put between two shots.
+        { i: 1, at: 1, op: 0x40, name: "wait_queued_events_done", cat: "wait",
+          blocks_on: "queued events pending == 0" },
+        camOp(2, 11, 20),
+        { i: 3, at: 3, op: 0x41, name: "wait_camera_path_frame", cat: "wait",
+          arg: 0, blocks_on: "camera path frame past arg" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  // No `primeToFirstWait`: it steps *over* waits to get a scene on screen, and
+  // the wait between the two shots is the whole point here. The first tick
+  // runs the instructions from cold, exactly as the player's does.
+
+  // What `syncPortGlobals` copies into `g_cam_path_frame`, once a tick.
+  const published: number[] = [];
+  for (let f = 0; f < 60; f++) {
+    w.tick(1 / 60);
+    published.push(w.cam ? Math.trunc(w.cam.frame) : -1);
+  }
+  const missing: number[] = [];
+  for (let n = 0; n <= 20; n++) if (!published.includes(n)) missing.push(n);
+  const head = published.slice(0, 16).join(",");
+  check("every frame of both shots reaches the port",
+        missing.length === 0, `missing ${missing.join(", ")} of ${head}`);
+  check("...including 10, the frame the first shot ends on",
+        published.includes(10), head);
+  // And it is published for exactly one tick, as `CamAdvancePathFrame` does:
+  // one call, one publish, and the shot behind it cannot start until the tick
+  // after the interpreter has seen the retirement.
+  check("...for exactly one tick, not two",
+        published.filter((n) => n === 10).length === 1, head);
+  check("...and the shot behind it starts on the tick after",
+        published[published.indexOf(10) + 1] === 11, head);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

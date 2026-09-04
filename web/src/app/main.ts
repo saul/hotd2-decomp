@@ -85,6 +85,7 @@ import {
   seatCamera, syncCamera, syncCharacterSpawns, syncPortGlobals,
 } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
+import { SeveredHeadLayer } from "../render/severed_heads";
 import { DebugBoxLayer } from "../render/debug";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
@@ -237,6 +238,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** Approach, attack permits, and the look-at the camera tracks. */
   readonly game = new GameSystem();
   readonly bullets = new ProjectileLayer();
+  readonly heads = new SeveredHeadLayer();
   /** Debug overlays: unported classes, the permit holder, the awaited enemies. */
   readonly debug = new DebugBoxLayer();
   readonly rain = new Rain();
@@ -359,6 +361,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.props);
     this.world.add("render", this.breakables);
     this.world.add("render", this.bullets);
+    this.world.add("render", this.heads);
     this.world.add("render", this.shooting);
     this.world.add("render", this.coliDebug);
     this.world.add("render", this.stuckDebug);

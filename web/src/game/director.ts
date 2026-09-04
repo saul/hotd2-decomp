@@ -21,6 +21,7 @@ import { T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ProcessShotRequests } from "./combat/shot";
+import { SeveredHeadsTick } from "./effects/severed_head";
 import { DescriptorFromPlacement } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
 import { ActorByAt, G } from "./globals";
@@ -300,6 +301,8 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // where it was standing when the crosshair was over it, not where this
   // frame is about to put it.
   ProcessShotRequests(host, rng, events);
+  // The heads the burst threw, stepped where the engine steps its tasks.
+  SeveredHeadsTick(rng, events);
   TickPlayerInvulnerability(frames);
 
   // Once a frame, for everyone: the rank the approach state tests against the

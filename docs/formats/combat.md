@@ -361,10 +361,36 @@ the end-of-stage accuracy grade that evt `0x2B` reads. A **result-5** hit scores
 nothing at all and does not count towards accuracy.
 
 **The headshot burst.** When a head hit is the one that kills, `ResolveHit`
-rolls `rand() % 4` and on a zero runs `FUN_00407200`, `FUN_0040A130` (a blood
-spray at `obj+0x394`) and `ActorSwapDamagedPart(rec, 0, 2)` — slot **0**, which
-is `RemoveBoneSubtree`'s "gone". One headshot kill in four takes the head off.
-Gated on app state 6, character type not 3/0x12/0x18, and `obj+0x3B8 < 2`.
+rolls `rand() % 4` and on a zero runs three routines: `SpawnBoneHitSprite`
+(`FUN_00407200`), `SpawnSeveredHead` (`FUN_0040A130`), and
+`ActorSwapDamagedPart(rec, 0, 2)` — slot **0**, which is `RemoveBoneSubtree`'s
+"gone". One headshot kill in four takes the head off. Gated on app state 6,
+character type not 3/0x12/0x18, and `obj+0x3B8 < 2`.
+
+**`FUN_0040A130` is not a blood spray**, which is what this page said until
+2026-09-04 and why the port removed the head and drew nothing in its place. It
+is `ActorAlloc(SeveredHeadUpdate, 0x1A8)` — an independent object with its own
+per-frame routine, seeded at `obj+0x394` and carrying the head's own asset slot
+from `obj+0x32C`. The head is *thrown*:
+
+| | |
+|---|---|
+| gravity | `-0.0204167` (`0xBCA740DA`) a frame, into `+0x50` |
+| launch up | `(rand() % 20 + 1) * 0.01 + 0.3`, so 0.31 to 0.50 |
+| launch out | `MatrixRotateY(camera yaw)` over `(0, 0, -0.2)` — always **away from the viewer** |
+| spin | yaw `±(rand() % 0x800 + 0x800)`, pitch the same without the sign, BAMS a frame |
+| bounce | on `QueryGroundHeightAt`, `y` snaps to the ground and the vertical speed is negated and scaled by **0.25** |
+| bounce sound | `0x1116A9` for head slots `0x2015`/`0x1DC1`; else `0x4416A9` on a wet surface (`g_coli_hit_surface` `0x37` or 5) and `0x2616A9` otherwise |
+| settle | once `|vy| <= 0.15`: velocities zeroed, `0x78` frames on the clock |
+| settled | sinks `0.04` a frame, both spins decay by a tenth, then it frees itself |
+| draw | `AssetDrawSlot(+0x1A4)` under translate · `Ry(yaw)` · `Rx(pitch)` · scale `+0x118` |
+
+The scale is 1.0, or 2.0 in Original Mode with the big-head item
+(`DAT_009C88A8`) unless the character type is `0xE`, which takes 1.8.
+
+The ground test is against the position the head is **about to reach** —
+`ground < y + vy` — so a head falling faster than its own height above the
+floor cannot pass through it.
 
 Shooting a **civilian** (class 0x10) costs a life and −100 twice; rescuing one
 awards +400.

@@ -9,6 +9,7 @@
  *
  * The full account is docs/formats/combat.md.
  */
+import { SpawnSeveredHead } from "../effects/severed_head";
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
@@ -338,6 +339,18 @@ export function ChooseDeathMotionDirectional(obj: Actor, cameraYawBams: number,
  * The second read of `g_app_state` is the head pop; it is on the kill path
  * below.
  */
+/**
+ * How far above the actor's origin the head is thrown from.
+ *
+ * [diverges] The engine takes `obj+0x394`, the posed head point, through the
+ * camera block's matrix. This port has no posed bone in `game/` -- the
+ * skeleton is three.js's -- so the launch point is the actor's origin raised
+ * by a humanoid's head height. The throw and everything after it are the
+ * engine's; only the first position is approximate, and the head is moving
+ * within one frame.
+ */
+const HEAD_LAUNCH_RISE = 11;
+
 export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
                            host: GameHost, rng: Rng): HitResult {
   // `00409495`: out of play, this hit does nothing visible. Raised on the
@@ -501,6 +514,20 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     // only ever comes off in play. Inert here, like the `0xE00` OR, and for the
     // same reason.
     if (G.g_app_state === AppState.InPlay && head && rng.next() < 0.25) {
+      // **The head is thrown, not just deleted.** `ResolveHit` runs three
+      // calls here and this port had only the third: `SpawnBoneHitSprite`,
+      // then `SpawnSeveredHead` (`FUN_0040A130`), then the swap to slot 0.
+      // `docs/formats/combat.md` recorded the middle one as "a blood spray at
+      // `obj+0x394`", which is why it was never ported -- it is an
+      // `ActorAlloc` of an object with its own per-frame routine that carries
+      // the head's own model and bounces it off the floor.
+      //
+      // The model has to be read **before** the subtree goes, because that is
+      // what zeroes the slot the head is drawn with.
+      const slot = obj.boneSlot[bone] ?? 0;
+      const at = { x: obj.pos.x, y: obj.pos.y + HEAD_LAUNCH_RISE,
+                   z: obj.pos.z };
+      if (slot > 0) SpawnSeveredHead(at, slot, 0, obj.yaw);
       RemoveBoneSubtree(obj, bone);
       severed = true;
     }

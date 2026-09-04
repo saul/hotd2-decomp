@@ -15,6 +15,7 @@
  * something survives a frame and is not reachable from here, the snapshot is
  * wrong and so is the port.
  */
+import type { SeveredHead } from "./effects/severed_head";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
@@ -255,6 +256,18 @@ export const G = {
    * Normally empty by the end of the frame that read it.
    */
   g_shot_requests: [] as ShotRequest[],
+  /**
+   * `[port-only]` — the heads the 1-in-4 headshot burst has thrown.
+   *
+   * The engine allocates each one as a task with its own per-frame routine
+   * (`SpawnSeveredHead`, `FUN_0040A130`); this port has a fixed object pool and
+   * a snapshot that must survive `clonePlain`, so they are plain records here
+   * and `SeveredHeadsTick` steps them. Same shape and same reason as
+   * `g_shot_requests` above.
+   */
+  g_severed_heads: [] as SeveredHead[],
+  /** `[port-only]` — see {@link SeveredHead.id}. */
+  g_severed_head_seq: 0,
 
   // -- difficulty --------------------------------------------------------
   /** `g_difficulty` — 0x009C8E94. Scales spawn HP only. */
@@ -777,6 +790,8 @@ export function ResetGameGlobals(): void {
   // Input, and a scene that is starting has none pending. A seek that left a
   // click queued would otherwise fire it into the replayed world.
   G.g_shot_requests = [];
+  G.g_severed_heads = [];
+  G.g_severed_head_seq = 0;
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();

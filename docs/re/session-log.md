@@ -10933,3 +10933,93 @@ Second: both harnesses were skipping the fight. `player.mjs`'s own note says it
 — with shooting off, `WalkerHost.aliveEnemies` answers null and every
 live-enemy gate passes on the spot — and a camera measured across a fight that
 did not happen measures nothing.
+
+## The head that was documented as a blood spray
+
+`ResolveHit`'s 1-in-4 headshot burst runs **three** routines at `0x00409790`
+and this port had one of them:
+
+    00409793  CALL 0x00407200   SpawnBoneHitSprite(obj, bone 2)
+    004097a0  CALL 0x0040a130   <- this one
+    004097aa  CALL 0x004098e0   ActorSwapDamagedPart(rec, 0, 2)
+
+`docs/formats/combat.md` recorded the middle call as "a blood spray at
+`obj+0x394`". It is not. `FUN_0040A130` is
+`ActorAlloc(FUN_0040A230, 0x1A8)` — an **independent object with its own
+per-frame routine**, seeded at the posed head point and carrying the head's own
+asset slot out of `obj+0x32C`. So the port removed the head from the skeleton,
+drew nothing in its place, and the doc said that was right.
+
+`FUN_0040A230` is the whole of the physics, and every constant is in the
+function: gravity `-0.0204167` (`0xBCA740DA`), an upward kick of
+`(rand() % 20 + 1) * 0.01 + 0.3`, and a horizontal push of `0.2` along the
+camera's own yaw — `MatrixRotateY(g_camera_block+0xD0)` applied to
+`(0, 0, -0.2)` — so the head is always thrown **away from the viewer**,
+whichever side the shot came from. Two spin rates, both `rand() % 0x800 +
+0x800` BAMS a frame, and only the yaw takes a random sign. Then
+`QueryGroundHeightAt` every frame, a bounce that keeps a quarter of the
+vertical speed, a sound picked from the head model and the surface underneath
+it, a settle once `|vy| <= 0.15`, and 120 frames of sinking at 0.04 before it
+frees itself.
+
+**The ground test is against the position the head is about to reach**
+(`ground < y + vy`), not the one it is at — the difference between a head that
+bounces and a head that falls through the floor on the frame it is moving
+fastest.
+
+Both routines are named now, `combat.md` carries the table, and the physics is
+`game/effects/severed_head.ts` with `render/severed_heads.ts` drawing it on the
+`ProjectileLayer` pattern: the port owns where the head is, the layer owns only
+the node, and `update` and `resync` are one call.
+
+Two port-shaped decisions, both declared. The heads are **plain records in
+`G`** rather than allocations, because `game/` has a fixed pool and a snapshot
+slice has to survive `clonePlain`; and they carry an `id` the engine has no
+need for, because a head *is* its task pointer there and the draw happens
+inside the routine that moves it. The launch point is the actor's origin raised
+by a constant rather than the posed head bone — `[diverges]`, because the
+skeleton is three.js's and `game/` cannot ask it for a bone position without
+the host, and the head is moving within one frame anyway.
+
+### What the sprite work needs, measured
+
+The other half of the shooting effects is artwork the bundle does not carry,
+and the `[open]` on it is now closed as a *question*: `DrawBloodSpray`'s 25
+frames, slots `0x3A..0x52`, are `pol/common.bin` models **0–24**, which use
+textures 1–25 — one per frame, a clean flipbook. Resolved through
+`ExeTables.asset_slots()`, which the exporter already has.
+
+`SpawnSpriteEffectFromParams` (`FUN_004073B0`) is the other sprite system, and
+it is a slot **range** per kind rather than a model list. The whole table, read
+out of the switch:
+
+| kind | slots | frames | base scale | file |
+|---|---|---|---|---|
+| 1, 0x33 | `0x91A..0x92F` | 22 | 1.0 | common |
+| 2, 0x34 | `0xDC3..0xDD1` | 15 | 1.0 | common |
+| 3, 0x35, 0x52 | `0xE25..0xE33` | 15 | 1.0 | common |
+| 5, 0x37 | `0x8F8..0x903` | 12 | 4.0 | common |
+| 6, 0x38 | `0x904..0x919` | 22 | 1.0 | common |
+| 0x41 | `0xDD7..0xE22` | 76 | 1.0 | water_hamon |
+| 0x44 | `0xFD4..0x1031` | 94 | 1.0 | eff_dokan |
+| 0x45 | `0x174A..0x1785` | 60 | 1.0 | eff_shop |
+| 0x46, 0x4B | `0x94..0xA2` | 15 | 0.7 | common |
+| 0x50 | `0x23A..0x248` | 15 | 1.0 | eff_2 |
+| 0x51 | `0x54..0x62` | 15 | 1.0 | eff_2 |
+| 0x53 | `0x125..0x13D` | 25 | 1.0 | eff_org5b |
+| 0x5A, 0x5B | `0xAA4..0xAB6` | 19 | 2.0 | boss1q |
+| 0x5C | `0xA87..0xAA3` | 29 | 2.0 | boss1q |
+| 0x5D | `0xAB7..0xAD3` | 29 | 1.0 | boss1q |
+| 0x61 | `0x1339..0x1356` | 30 | 1.0 | common |
+| 0x62 | same | 30 | 1.5 | common |
+| 0x63 | `0x91A..0x92F` | 22 | 5.0 | common |
+| default | `0x904` | 1 | 0.1 | common |
+
+Kinds 1/2/3/5/6 are the collision materials, `0x53` also seeds a random phase
+(the rain variant), and `0x5A` recurses to spawn `0x5B` and `0x5C` alongside
+itself. The distance law is two cases: kind `'S'` (`0x53`) scales by
+`|z * -0.0285714|` out to -35, and everything except `'c'` (`0x63`) by
+`z * -0.0667` out to -15 with a floor of 0.25. `params[6] != -1` overrides the
+scale outright. Every range resolves to a real pol file, so none of it is
+blocked on reading — it is blocked on **exporting the artwork**, which is a
+bundle block, a `schema.SOURCES` entry and a `BUNDLE_FORMAT` bump.

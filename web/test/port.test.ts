@@ -90,6 +90,8 @@ import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue }
   from "../src/game/class30/target";
 import { ActorModelScale } from "../src/game/root_motion";
+import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
+  from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
@@ -8073,6 +8075,58 @@ console.log("\na stashed path is played by a hook that steps first:");
   // dx term separates them, so with the wrong sign these two agreed.
   check("...and the two sideways points are separated by the yaw term",
         past(0xc000, 0, 55) !== past(0xc000, 0, -55));
+}
+
+// The head that comes off, and where it lands.
+//
+// `SpawnSeveredHead` (`FUN_0040A130`) is an `ActorAlloc` of an object with its
+// own per-frame routine -- not the blood spray `docs/formats/combat.md` called
+// it, which is why the port removed the head and drew nothing. The physics is
+// `SeveredHeadUpdate` (`FUN_0040A230`): thrown up and away from the camera,
+// spun on two axes, bounced off the floor at a quarter of its speed, then
+// settled, sunk and freed.
+{
+  ResetGameGlobals();
+  const rng = new Rng(7);
+  SpawnSeveredHead(vec3(0, 40, 0), 0x1234, 0, 0);
+  check("a burst puts one head in the pool", G.g_severed_heads.length === 1);
+  const h = G.g_severed_heads[0]!;
+  check("...carrying the model the head was drawn with", h.slot === 0x1234);
+
+  SeveredHeadUpdate(h, rng);
+  check("...thrown upward between 0.31 and 0.50",
+        h.vel.y > 0.28 && h.vel.y < 0.51, `${h.vel.y}`);
+  check("...and spun on both axes",
+        Math.abs(h.spinYaw) >= 0x800 && h.spinPitch >= 0x800,
+        `yaw ${h.spinYaw} pitch ${h.spinPitch}`);
+  check("...and it is falling, not still launching",
+        h.phase === SeveredHeadPhase.Falling, `phase ${h.phase}`);
+
+  // No collision in this fixture, so the ground answers a constant; what the
+  // assertion is about is that gravity is applied and the head comes down.
+  const apex = () => {
+    let top = h.pos.y, last = h.pos.y;
+    for (let i = 0; i < 120 && SeveredHeadUpdate(h, rng); i++) {
+      top = Math.max(top, h.pos.y);
+      last = h.pos.y;
+    }
+    return { top, last };
+  };
+  const { top, last } = apex();
+  check("...it rises and then falls", top > 40 && last < top,
+        `apex ${top.toFixed(1)}, ended ${last.toFixed(1)}`);
+
+  // The settle path, driven directly: a head at rest counts out and is dropped.
+  const g = G.g_severed_heads[0]!;
+  g.phase = SeveredHeadPhase.Settled;
+  g.timer = 2;
+  check("a settled head sinks", (() => {
+    const before = g.pos.y;
+    SeveredHeadUpdate(g, rng);
+    return g.pos.y < before;
+  })());
+  check("...and is dropped when its two seconds are out",
+        SeveredHeadUpdate(g, rng) === false, `timer ${g.timer}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

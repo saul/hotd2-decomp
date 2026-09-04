@@ -160,6 +160,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.dialogue = bundle.script.sound ?? null;
   p.bullets.source = p.chars;
   p.scene.add(p.bullets.group);
+  // Same template source as the weapons: the head that flies is a bone model
+  // off the character the shot killed.
+  p.heads.source = p.chars;
+  p.scene.add(p.heads.group);
   p.shooting.playSound = (id) => { p.bgm.play(id); };
   const rainCfg = bundle.script.rain;
   p.rain.build(p.ctx, p.scene3d.root, rainCfg);

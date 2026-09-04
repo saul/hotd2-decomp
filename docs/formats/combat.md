@@ -892,10 +892,29 @@ arm's selector, because a dense switch has to be dense. Under
 
 `[open]` — the exe's stance is a **sum**, not a selector. If two surface bits
 were ever set at once it would exceed 3, the index would leave the table, and
-the default arm would run: it plays the clip passed in as the routine's second
-argument and **does not write `obj+0x1350` at all**, so the compare would then
-read a landing surface as a frame number. Whether the engine can set two at
-once is undetermined.
+the default arm would run: it plays **the actor pointer itself** as a motion id
+(`MOV EAX, dword ptr [ESP + 0xc]` at 0x0044FC64, which after `PUSH ESI` /
+`PUSH EDI` is the routine's one and only argument — Ghidra renders it
+`iVar3 = param_1`) and **does not write `obj+0x1350` at all**, so the compare
+would then read a landing surface as a frame number. Whether the engine can set
+two at once is undetermined. An earlier note here called it "the routine's
+second argument"; `ThrowerStateThrow` has no second argument.
+
+**The clip does not start at frame zero.** `ActorSetMotionBlended`
+(`FUN_004119A0`) is `param_1[2] = param_3; param_1[6] = param_3 / 2` — so its
+third argument is written straight into the play **cursor** `obj+0x19C` and its
+half into `obj+0x1AC`, in cursor ticks, not authored frames. This state passes
+`0x1A` for every character type but 0x18 and `0` for 0x18 — `PUSH 0x4 /
+PUSH 0x1a` (`6a04 6a1a`) at 0x0044FB87 against `PUSH 0x4 / PUSH 0x0`
+(`6a04 6a00`) at 0x0044FC68, both falling into the one `CALL 0x004119a0` at
+0x0044FC74, over a fade of 4. So a `zsass` throw is **22 cursor ticks of
+wind-up**, not 48. `[proved]`
+
+**And the three sub-states fall through into each other.** The dispatch at the
+top is `SUB EAX, 0 / JZ` then `DEC EAX / JZ` twice (0x0044FB16..0x0044FB23),
+and each arm ends by *incrementing* `obj+0x1312` and running on into the next —
+so a throw can start and release on the same frame, and a sub-state above 2
+falls out of the routine doing nothing at all.
 
 `SpawnThrownWeapon` (`FUN_004504E0`) does five things worth stating:
 
@@ -908,7 +927,48 @@ once is undetermined.
   the player the thrower had claimed;
 * picks the flying model: `0x1F91` right, `0x1F90` left.
 
-`ThrowerStateRearm` (state 29) later puts the weapon back and clears the bit.
+The permit hand-off is literal, and it is the reason a throw looks like it
+holds a slot for ever: `MOV AL, [EDI+0x121]` (`8a8721010000`, 0x004506BB),
+`MOV [ESI+0x121], AL` (`888621010000`, 0x004506C4), then
+`MOV [EDI+0x121], BL` (`889f21010000`, 0x004506D5) with `BL` zeroed at
+0x0045050A — so the **thrower is left holding 0, not −1** — and the off-screen
+commit latch `obj+0x136C` bit `0x8000` moves across with it. The slot goes back
+to the pool only at the very end of the weapon's life, in
+`ThrownWeaponFlyToTarget`'s sub-4 arm (`CALL 0x0044cfb0` — `e88ccfffff` —
+at 0x0045001F), in the same breath as the despawn. `[proved]`
+
+#### The exit, and what it does not do
+
+```
+0044fcbb  MOV   EDX, dword ptr [ESI + 0x1b4]           8b96b4010000
+0044fcc1  MOV   ECX, dword ptr [ESI + 0x19c]           8b8e9c010000
+0044fcc7  MOVSX EAX, word ptr [EDX*0x2 + 0x4e07d0]     0fbf0455d0074e00
+0044fccf  DEC   EAX                                    48
+0044fcd0  CMP   ECX, EAX                               3bc8
+0044fcd2  JL    0x0044fcf3                             7c1f
+0044fcd4  PUSH  0x2916a9                               68a9162900
+0044fcd9  CALL  0x0041cfd0            PlaySoundId      e8f2d2fcff
+0044fce1  MOV   word ptr [ESI + 0x1310], 0x7           66c786101300000700
+0044fcea  MOV   word ptr [ESI + 0x1312], 0x0           66c786121300000000
+```
+
+On the throw clip's last frame — `g_motion_play_length` of the base track's own
+motion against the base track's own cursor — it plays `0x2916A9` and **hands
+back to the hub**. That is the whole of the state's ending: it puts no weapon
+back and it releases no permit. `ThrowerReleaseAttackPermit` has exactly eight
+call sites in the program and `ThrowerStateThrow` is not one of them.
+
+The re-arm is state 7's job, not the throw's, and it is offered **before** the
+router is asked: `ThrowerStateStandAndDecide` calls
+`ThrowerTryEnterState(0x1D)` — `0x1E` for character type 0x18 — on every one of
+its frames (`PUSH 0x1d / CALL 0x0044afb0`, `6a1d e834fcffff`, at 0x0044B375;
+`PUSH 0x1e`, `6a1e e819fcffff`, at 0x0044B390) and only reaches
+`ThrowerPickNextState` at 0x0044B3AA when that is refused. So the loop is
+**hub → throw → hub → re-arm → hub**, each leg a state that owns one thing.
+`[proved]`
+
+`ThrowerStateRearm` (state 29) is what puts the weapon back and clears the bit;
+`ThrowerStateRestoreBothHands` (state 30) is character type 0x18's version.
 
 ### The flight — `ThrownWeaponFlyToTarget`
 

@@ -1188,6 +1188,56 @@ which is what the engine does when there is no wall — and against the real dat
 **38 of the game's 49 class-0x31 spawns stand on the collision mesh, 22 have a
 wall in reach and 11 a ceiling**, 9 and 2 of them in stage 2.
 
+### The throw is a state, not a loop — and the re-arm belongs to state 29
+
+`ThrowerStateThrow` (`FUN_0044FAF0`) ends on the throw clip's last frame and
+writes state **7**, the hub, and nothing else:
+
+```
+0044fcbb  MOV   EDX, dword ptr [ESI + 0x1b4]           8b96b4010000
+0044fcc7  MOVSX EAX, word ptr [EDX*0x2 + 0x4e07d0]     0fbf0455d0074e00
+0044fcd0  CMP   ECX, EAX / JL                          3bc8 7c1f
+0044fcd4  PUSH  0x2916a9 / CALL PlaySoundId            68a9162900
+0044fce1  MOV   word ptr [ESI + 0x1310], 0x7           66c786101300000700
+```
+
+The port instead **looped inside the throw**: it left only when its own one-shot
+clip channel emptied, swapped one hand's weapon back itself, reset its own
+sub-state and went round again — so a `zsass` threw both weapons in one visit,
+never reached the hub, and `ThrowerStateRearm` (`FUN_0044F7A0`, state 29) never
+ran at all. The one-hand swap carried a `[diverges]` saying as much.
+
+The re-arm is the hub's, and it is offered **before** the router is asked:
+`ThrowerStateStandAndDecide` calls `ThrowerTryEnterState(0x1D)` — `0x1E` for
+character type 0x18 — on every one of its frames (0x0044B375 and 0x0044B390)
+and only reaches `ThrowerPickNextState` when that is refused. So the shape is
+**hub → throw → hub → re-arm → hub**, and `class31/standing.ts`'s claim that
+"neither [state 29 nor 30] is reachable through the router — no pick band names
+them" was true of the pick bands and wrong about the engine.
+
+Three more things came out of reading the state properly, all `[proved]`:
+
+* **The three sub-states fall through into each other** (`SUB EAX, 0 / JZ` then
+  `DEC EAX / JZ` twice at 0x0044FB16), so a throw can start and release on the
+  same frame.
+* **The clip does not start at frame zero.** `ActorSetMotionBlended`'s third
+  argument is written straight into the play cursor (`param_1[2] = param_3`),
+  and this state passes `0x1A` for every type but 0x18, which passes 0. A
+  `zsass` throw is 22 cursor ticks of wind-up against its entry's release frame
+  of 48, not 48.
+* **The state releases no permit.** `SpawnThrownWeapon` hands `obj+0x121` to
+  the projectile actor and leaves the thrower holding **0** — not −1 — and the
+  weapon frees the slot at the end of its stick-and-blink life, in
+  `ThrownWeaponFlyToTarget`. The port's weapon is a plain pool record shared
+  with class 0x30's, which has its own state table and its own release site, so
+  a record cannot carry a permit and releasing from the shared flight routine
+  would free a class-0x30 slot through class 0x31's routine — the exact
+  wrong-bit mistake `ThrowerReleaseAttackPermit`'s note warns about. The slot
+  therefore goes back in `SpawnThrownWeapon`, where the engine hands it over,
+  about 90 frames early, and that is now the `[diverges]` the re-arm one used to
+  be. Making `G.g_thrown_weapons` carry a permit is the fix, and it is a change
+  to both classes' projectiles.
+
 ### Four things that stopped the throwers working
 
 **Reported:** "after their first attack they stop attacking and just wait" —

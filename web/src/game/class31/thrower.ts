@@ -33,8 +33,10 @@ import {
 } from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
-import { CharacterTypeOf, MotionOf, ThrowHandsOf } from "../tables";
+import { CharacterTypeOf, MotionPlayLength, ThrowHandsOf }
+  from "../tables";
 import { vec3, type Vec3 } from "../vec";
+import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
 import { ThrowerStateLeapToPoint } from "./leap";
 import {
@@ -74,14 +76,64 @@ import { ThrowerState, ThrowSub } from "./states";
  */
 const HAND_HEIGHT = 4;
 
-/** Hands whose arm has not been shot off. `ThrowerStateThrow` refuses the rest. */
+/**
+ * Hands that still hold a weapon — the port's reading of the engine's draw-slot
+ * test, which is what {@link ThrowerPickThrowingHand} chooses between.
+ */
 function usableHands(obj: ThrowerActor): ThrowHandJson[] {
   return ThrowHandsOf(obj)
     .filter((h) => (obj.zones & DamageZone.All & h.cancel_mask) !== h.cancel_mask);
 }
 
+/** The two bones a weapon hangs off, and which throw entry each indexes. */
+const RIGHT_HAND_BONE = 5;
+const LEFT_HAND_BONE = 8;
+
+/**
+ * The cross-fade `ThrowerStateThrow` starts its clip over, and the cursor it
+ * starts it at for every character type but 0x18. See {@link ThrowerThrowCue}.
+ */
+const THROW_FADE = 4;
+const THROW_START_CURSOR = 0x1a;
+
+/**
+ * `PlaySoundId(0x2916A9)` — `COMMON\ENE_WALK6_22.WAV`, the same id state 27's
+ * landing plays. `ThrowerStateThrow` fires it on the throw clip's last frame,
+ * one frame before it hands back to the hub.
+ */
+const SFX_THROW_DONE = 0x2916a9;
+
 /** Character type 0x18 — `zslman`. It has its own clip for everything. */
 const CHAR_ZSLMAN = 0x18;
+
+/**
+ * `ThrowerPickThrowingHand` — `FUN_0044F630`. Which bone throws this time.
+ *
+ * A coin decides which hand is **preferred**, not which one throws: the other
+ * is taken whenever the preferred one is already bare, and 0 comes back only
+ * when both are. Parity 0 prefers bone 5 and parity 1 bone 8, and the two arms
+ * are otherwise the same three tests in the opposite order.
+ * `ThrowerStateThrow` turns the bone into the throw entry's index with
+ * `CMP EAX, 0x5` / `SETNZ DL` (`83f805` / `0f95c2` at 0x0044FB51), so bone 5
+ * is entry 0 and everything else — including the 0 that means *neither* — is
+ * entry 1.
+ *
+ * Character types 0x17 and 0x19 carry no weapon and always get 0, which is the
+ * same thing `ThrowerBothHandsArmed` (`FUN_0044F5D0`) says at the gate.
+ *
+ * The engine reads each hand's **draw slot** — `obj+0x4DC` against `0x1FA2`
+ * and `obj+0x68C` against `0x1F9E` for character type 0x16, `0x1FF3` and
+ * `0x1FEF` for 0x18, which are the `held` ids the bundle carries — where the
+ * port reads the destroyed-zone mask, for the reason
+ * `ThrowerHasBareHand` (`FUN_0044F720`) states in `router.ts`.
+ */
+export function ThrowerPickThrowingHand(obj: ThrowerActor, rng: Rng): number {
+  if (obj.charType !== CHAR_ZSASS && obj.charType !== CHAR_ZSLMAN) return 0;
+  const armed = usableHands(obj);
+  if (!armed.length) return 0;
+  const want = rng.int(2) === 0 ? RIGHT_HAND_BONE : LEFT_HAND_BONE;
+  return armed.some((h) => h.bone === want) ? want : armed[0].bone;
+}
 
 /**
  * `ThrowerStateThrow`'s throw clips for character type 0x18, by hand and by
@@ -165,10 +217,22 @@ const ZSLMAN_RELEASE_FRAME = 0x19;
  * Every other character type compares `obj+0x19C` against the throw entry's
  * own `+0x08` at 0x0044FC8D (`0fbf4708` then `39869c010000`). `[proved]`
  *
+ * **And the clip does not start at frame zero.** `ActorSetMotionBlended`
+ * (`FUN_004119A0`) is called with a start **cursor**, not an authored frame —
+ * `param_1[2] = param_3; param_1[6] = param_3 / 2` writes `obj+0x19C` and its
+ * half at `obj+0x1AC` — and this state passes `0x1A` for every character type
+ * but 0x18, which passes 0. `[proved]`: `PUSH 0x4 / PUSH 0x1a` (`6a04 6a1a`)
+ * at 0x0044FB87 against `PUSH 0x4 / PUSH 0x0` (`6a04 6a00`) at 0x0044FC68,
+ * both falling into the one `CALL 0x004119a0` at 0x0044FC74. So a `zsass`
+ * throw is 22 cursor ticks of wind-up against its entry's release frame of 48,
+ * not 48.
+ *
  * `[open]` — **the default arm.** The exe's stance is `3*bit8 + 2*bit7 + bit6`,
  * a sum, not a selector: if two surface bits were ever set at once it exceeds
  * 3, the index leaves the table's range, and the switch takes its default —
- * which plays the clip passed in as the routine's *second argument* and
+ * which plays **the actor pointer itself** as a motion id (`MOV EAX, dword
+ * ptr [ESP + 0xc]` at 0x0044FC64, which after `PUSH ESI` / `PUSH EDI` is the
+ * routine's one and only argument; Ghidra renders it `iVar3 = param_1`) and
  * **does not write `obj+0x1350` at all**, so the compare would read a landing
  * surface as a frame number. The port's {@link ThrowerStanceOf} `& 3` cannot
  * produce that, so the two formulas agree exactly while the bits stay
@@ -177,13 +241,19 @@ const ZSLMAN_RELEASE_FRAME = 0x19;
  * is ever indexed outside itself.
  */
 function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
-    { motion: number; release: number } {
-  const entry = { motion: hand.motion, release: hand.release_frame };
-  if (obj.charType !== CHAR_ZSLMAN) return entry;
-  const handIdx = hand.bone === 5 ? 0 : 1;
+    { motion: number; release: number; start: number } {
+  if (obj.charType !== CHAR_ZSLMAN) {
+    return { motion: hand.motion, release: hand.release_frame,
+             start: THROW_START_CURSOR };
+  }
+  const handIdx = hand.bone === RIGHT_HAND_BONE ? 0 : 1;
   const motion = THROW_BY_STANCE_ZSLMAN[handIdx]?.[ThrowerStanceOf(obj) & 3];
-  if (motion === undefined) return entry;
-  return { motion, release: ZSLMAN_RELEASE_FRAME };
+  // The default arm, which the port cannot reach — see above. It leaves
+  // `obj+0x1350` alone, so the entry's own frame is the nearest thing to it.
+  if (motion === undefined) {
+    return { motion: hand.motion, release: hand.release_frame, start: 0 };
+  }
+  return { motion, release: ZSLMAN_RELEASE_FRAME, start: 0 };
 }
 
 /**
@@ -231,6 +301,36 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
   obj.zones |= hand.cancel_mask & DamageZone.All;
 
+  // [diverges] **The engine hands the permit to the weapon**, it does not free
+  // it. `SpawnThrownWeapon` copies `obj+0x121` into the new actor and writes
+  // the thrower's to **0** — not -1; `EBX` is zeroed at 0x0045050A —
+  //
+  //   004506bb  MOV AL, byte ptr [EDI + 0x121]      8a8721010000  the thrower
+  //   004506c4  MOV byte ptr [ESI + 0x121], AL      888621010000  the weapon
+  //   004506d5  MOV byte ptr [EDI + 0x121], BL      889f21010000  BL == 0
+  //
+  // and moves the off-screen latch with it when `obj+0x136C` bit 0x8000 is up
+  // (`TEST EAX, ECX` / `JZ` — `85c8 741d` at 0x004506DB, then `OR` on the
+  // weapon's word and `AND AH, 0x7F` on the thrower's).
+  // The slot is then freed by the weapon, at the very end of its life:
+  // `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) calls
+  // `ThrowerReleaseAttackPermit` in its sub-4 arm, after the 30 stick frames
+  // and the 60 blink frames have run out, in the same breath as the despawn.
+  // `ThrowerStateThrow` itself releases nothing — `FUN_0044CFB0` has exactly
+  // eight call sites in the program and it is not one of them.
+  //
+  // The port's weapon is a plain record in `G.g_thrown_weapons`, a pool it
+  // shares with class 0x30's thrown weapon, which has its own state table
+  // (`g_zombie_thrown_weapon_states`, driven by `ZombieThrownWeaponUpdate`
+  // — `FUN_0045A4F0`) and so its own release site. A record cannot hold a
+  // permit and releasing from the shared flight routine would free a class
+  // 0x30 actor's slot through class 0x31's routine, which is the exact
+  // wrong-bit mistake the note on `ThrowerReleaseAttackPermit` warns about.
+  // So the slot goes back here, where the engine hands it over, roughly 90
+  // frames earlier than the engine gives it up. Making the pool carry a permit
+  // is the fix, and it is a change to both classes' projectiles.
+  ThrowerReleaseAttackPermit(obj);
+
   const target = vec3();
   AimThrownWeapon(obj, host, eye, target);
   const d = Math.hypot(target.x - from.x, target.y - from.y,
@@ -257,80 +357,110 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
 }
 
 /**
- * Put one hand's weapon back.
+ * `ThrowerStateThrow` — `FUN_0044FAF0`, class 0x31 state 31.
  *
- * [diverges] Not `ThrowerStateRearm` (`FUN_0044F7A0`), which is class 0x31's
- * state 29 and lives in `standing.ts`: that one is character type 0x16's, has
- * its own clip and restores *both* hands on the clip's midpoint. This is the
- * one-hand swap the port's throw loop does on its way out, and it exists
- * because the port's throw is a loop where the engine's is a state.
- */
-function ThrowerRearmHand(obj: ThrowerActor, hand: ThrowHandJson,
-                          host: GameHost): void {
-  if (hand.held) {
-    obj.boneSlot[String(hand.bone)] = hand.held;
-    host.setBoneSlot(obj.at, hand.bone, hand.held);
-  }
-  obj.zones &= ~(hand.cancel_mask & DamageZone.All);
-}
-
-/**
- * `ThrowerStateThrow` — `FUN_0044FAF0`. Play the clip, let go on the exact
- * frame the hand names, then re-arm and give the permit up so the next enemy —
- * or this one — can take a turn.
+ * Play the clip, let go on the frame the hand names, and **hand back to the
+ * hub on the clip's last frame**. It does not put the weapon back and it does
+ * not give the permit up: state 7 offers `ThrowerStateRearm` (`FUN_0044F7A0`,
+ * state 29) — `ThrowerStateRestoreBothHands` (`FUN_0044F900`, state 30) for
+ * character type 0x18 — to `ThrowerTryEnterState` (`FUN_0044AFB0`) *before* it
+ * asks the router anything, and that gate passes exactly when
+ * `ThrowerHasBareHand` (`FUN_0044F720`) says an arm is empty. So the loop is
+ * hub → throw → hub → re-arm → hub, and each leg is a state that owns one
+ * thing.
+ *
+ * The three sub-states **fall through into each other**, which is why a throw
+ * can start and release on the same frame: the engine's dispatch is
+ * `SUB EAX, 0 / JZ` then `DEC EAX / JZ` twice (0x0044FB16..0x0044FB23), and
+ * each arm ends by *incrementing* `obj+0x1312` and running straight on into
+ * the next.
+ *
+ * The exit, all of it:
+ *
+ * ```
+ * 0044fcbb  MOV   EDX, dword ptr [ESI + 0x1b4]           8b96b4010000
+ * 0044fcc1  MOV   ECX, dword ptr [ESI + 0x19c]           8b8e9c010000
+ * 0044fcc7  MOVSX EAX, word ptr [EDX*0x2 + 0x4e07d0]     0fbf0455d0074e00
+ * 0044fccf  DEC   EAX                                    48
+ * 0044fcd0  CMP   ECX, EAX                               3bc8
+ * 0044fcd2  JL    0x0044fcf3                             7c1f
+ * 0044fcd4  PUSH  0x2916a9                               68a9162900
+ * 0044fcd9  CALL  0x0041cfd0            PlaySoundId      e8f2d2fcff
+ * 0044fce1  MOV   word ptr [ESI + 0x1310], 0x7           66c786101300000700
+ * 0044fcea  MOV   word ptr [ESI + 0x1312], 0x0           66c786121300000000
+ * ```
+ *
+ * — `g_motion_play_length` of the **base track's** motion against the **base
+ * track's** cursor, which is why the port runs the throw on `obj.motion` and
+ * `obj.playTicks` rather than on the one-shot channel it has no counterpart
+ * for. The port used instead to loop here and leave only when its own clip
+ * channel emptied, re-arming one hand on the way out; that is the divergence
+ * this replaces.
  */
 export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, eye: Vec3,
-                                  events?: Events): void {
-  const hands = usableHands(obj);
-  if (!hands.length) {
-    if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
-    obj.state = ThrowerState.StandAndDecide;
-    obj.sub = 0;
-    return;
-  }
-  if (obj.attackPermit < 0) {
-    // The engine only ever *enters* this state with a permit —
-    // `ThrowerTryEnterState`'s case `0x1F` claims one first and refuses
-    // otherwise — so an actor here without one has nothing to do. Looping
-    // instead left a `zslman` walking into the camera on its idle's root
-    // motion while it waited for a permit that the hub would have asked for.
-    if (!ThrowerTryClaimAttackSlot(obj, host)) {
+                                  rng: Rng, events?: Events): void {
+  if (obj.sub === ThrowSub.Draw) {
+    // `if (obj+0x121 == 0xFF && !ThrowerTryClaimAttackSlot(obj)) obj+0x121 = 0`
+    // — `CMP byte ptr [ESI + 0x121], 0xff` at 0x0044FB2C, and on a refusal
+    // `MOV byte ptr [ESI + 0x121], AL` with AL already zero (0x0044FB42).
+    // **Zero, not -1**: the actor goes on to throw holding what reads as
+    // permit slot 0. It is very nearly dead code — `ThrowerTryEnterState`'s
+    // case 0x1F claims one before it writes the state — but it is the engine's
+    // own answer to arriving without one, and the port's used to be a bail to
+    // the hub.
+    if (obj.attackPermit < 0 && !ThrowerTryClaimAttackSlot(obj, host)) {
+      obj.attackPermit = 0;
+    }
+    const bone = ThrowerPickThrowingHand(obj, rng);
+    // `CMP EAX, 0x5 / SETNZ DL / MOV byte ptr [ESI + 0x131a], DL`. The exe
+    // also files the bone itself at `obj+0x1358`; the port hands the entry
+    // straight to `SpawnThrownWeapon`, so it has nowhere to put it —
+    // {@link ThrowerActor.allowance} is that offset read as a different field.
+    obj.attack = bone === RIGHT_HAND_BONE ? 0 : 1;
+    // Neither hand is armed. The engine has no such path — `ThrowerTryEnterState`
+    // refuses state 0x1F unless `ThrowerBothHandsArmed` (`FUN_0044F5D0`) is
+    // true — so this is that precondition made explicit rather than a
+    // behaviour of its own; on any reachable entry the pick returns 5 or 8.
+    if (bone === 0) {
+      if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
       obj.state = ThrowerState.StandAndDecide;
       obj.sub = 0;
       return;
     }
-    obj.sub = ThrowSub.Draw;
-  }
-
-  const hand = hands[Math.min(Math.max(0, obj.attack), hands.length - 1)];
-  // The clip and the release frame together — see {@link ThrowerThrowCue}.
-  // Both are the throw entry's for three of the four character types and
-  // neither is for 0x18.
-  const cue = ThrowerThrowCue(obj, hand);
-  if (obj.sub === ThrowSub.Draw) {
-    obj.attack = hands.indexOf(hand);
-    obj.action = { motion: cue.motion, ticks: 0, loop: false };
+    const cue = ThrowerThrowCue(obj, ThrowHandsOf(obj)[obj.attack]);
+    ActorSetMotionBlended(obj, cue.motion, 0, THROW_FADE);
+    // `FUN_004119A0`'s third argument is the play **cursor**, not an authored
+    // frame — `param_1[2] = param_3` writes `obj+0x19C` outright — and the
+    // port's wrapper takes an authored frame, so the cursor is written here.
+    obj.playTicks = cue.start;
     obj.sub = ThrowSub.Winding;
-    return;
+    // ...and falls straight through, as `INC word ptr [ESI + 0x1312]` at
+    // 0x0044FC7C does into the release test at 0x0044FC83.
   }
 
-  const m = MotionOf(obj, cue.motion);
-  if (!obj.action || !m) {
-    if (obj.sub === ThrowSub.Thrown) ThrowerRearmHand(obj, hand, host);
-    ThrowerReleaseAttackPermit(obj);
-    obj.sub = ThrowSub.Draw;
-    obj.attack = (obj.attack + 1) % hands.length;
-    return;
-  }
-  // The frame the weapon leaves the hand. The local name is here so the frame
-  // reading of `obj+0x1350` is never confused with the landing-surface one at
-  // a use site; see {@link ThrowerThrowCue} and
-  // {@link ThrowerTail.landSurface}.
-  const throwCueFrame = cue.release;
-  if (obj.sub === ThrowSub.Winding && obj.action.ticks >= throwCueFrame) {
-    obj.sub = ThrowSub.Thrown;
+  if (obj.sub === ThrowSub.Winding) {
+    // The frame the weapon leaves the hand. The local name is here so the
+    // frame reading of `obj+0x1350` is never confused with the landing-surface
+    // one at a use site; see {@link ThrowerThrowCue} and
+    // {@link ThrowerTail.landSurface}.
+    const hand = ThrowHandsOf(obj)[obj.attack];
+    if (!hand) return;
+    const throwCueFrame = ThrowerThrowCue(obj, hand).release;
+    if (obj.playTicks < throwCueFrame) return;
     SpawnThrownWeapon(obj, hand, host, eye, events);
+    obj.sub = ThrowSub.Thrown;
+    // ...and falls through again, into 0x0044FCBB.
   }
+
+  // A sub-state past 2 is the engine's `POP EDI / POP ESI / RET` at
+  // 0x0044FB29: the dispatch has three arms and nothing else.
+  if (obj.sub !== ThrowSub.Thrown) return;
+  // The clip's last frame, and out to the hub. `g_motion_play_length - 1`
+  // against the cursor, both on the base track.
+  if (obj.playTicks < MotionPlayLength(obj, obj.motion) - 1) return;
+  events?.emit("sound.play", { id: SFX_THROW_DONE });
+  obj.state = ThrowerState.StandAndDecide;
+  obj.sub = 0;
 }
 
 /**
@@ -448,7 +578,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
       return ThrowerStatePathFollow(obj, dt);
     case ThrowerState.Throw:
       TurnActorTowardCamera(obj, eye, dt);
-      return ThrowerStateThrow(obj, host, eye, events);
+      return ThrowerStateThrow(obj, host, eye, rng, events);
     // State 0 is the engine's shared no-op: an actor placed in it does nothing
     // for ever, which is what the engine does too.
     case ThrowerState.Idle:

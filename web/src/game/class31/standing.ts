@@ -8,10 +8,19 @@
  * `obj+0x136C` bit `0x400` on the way in, which is what makes both of them
  * resolve against `g_class31_throws` rather than the melee table.
  *
- * States 29 and 30 put a thrown weapon back in a hand. Neither is reachable
- * through the router — no pick band names them — so only a spawn descriptor or
- * a script's next-state byte can enter them, and no shipped descriptor does.
- * They are ported because the state table names them.
+ * States 29 and 30 put a thrown weapon back in a hand, and they are **the
+ * other half of the throw**. No pick band names them, which once read as "no
+ * shipped data can reach them" — it is wrong. `ThrowerStateStandAndDecide`
+ * (`FUN_0044B180`) offers 0x1D, or 0x1E for character type 0x18, to
+ * `ThrowerTryEnterState` on every one of its frames and only asks
+ * `ThrowerPickNextState` if that is refused — `PUSH 0x1d / CALL 0x0044afb0`
+ * (`6a1d e834fcffff`) at 0x0044B375 against `PUSH 0x1e / CALL 0x0044afb0`
+ * (`6a1e e819fcffff`) at 0x0044B390, both jumping past the
+ * `CALL 0x0044adb0` at 0x0044B3AA on a 1. The
+ * gate passes when `ThrowerHasBareHand` (`FUN_0044F720`) says an arm is empty
+ * and the actor is in state 7. `ThrowerStateThrow` (`FUN_0044FAF0`) ends by
+ * writing state 7, so every throw runs straight into one of these two on the
+ * next frame. `[proved]`
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";

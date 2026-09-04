@@ -10083,3 +10083,67 @@ time. The port falls back to an attack that connects, which makes it **more
 dangerous than the original**. Both are recorded as findings rather than
 counted as fixes, because "the port matches the engine" and "the bug is fixed"
 are different claims and only one of them is true here.
+
+## The class-0x31 throw exits to the hub; it does not loop
+
+`ThrowerStateThrow` (`FUN_0044FAF0`) had one thing missing from the port and it
+was the ending. On the throw clip's last frame the engine plays `0x2916A9` and
+writes `obj+0x1310 = 7`, `obj+0x1312 = 0` — `66c786101300000700` at 0x0044FCE1
+— and does nothing else. The port instead looped inside the state, leaving only
+when its own one-shot clip channel emptied, and re-armed one hand itself on the
+way round. That re-arm carried a `[diverges]`; this closes it.
+
+The half that made the shape obvious is in a state nobody was looking at.
+`ThrowerStateStandAndDecide` offers 0x1D — 0x1E for character type 0x18 — to
+`ThrowerTryEnterState` on **every** frame, before it asks `ThrowerPickNextState`
+anything (`PUSH 0x1d / CALL 0x0044afb0` at 0x0044B375, `PUSH 0x1e` at
+0x0044B390, both jumping past the `CALL 0x0044adb0` at 0x0044B3AA). So states 29
+and 30 are not "unreachable because no pick band names them", which is what
+`class31/standing.ts` said: the hub reaches them directly, and every throw runs
+into one of them on the next frame. The pick bands were the wrong place to look.
+
+Three more readings came out of it, all `[proved]`:
+
+* The three sub-states **fall through** into each other — `SUB EAX, 0 / JZ`
+  then `DEC EAX / JZ` twice at 0x0044FB16 — so a throw can start and release on
+  the same frame.
+* The clip **does not start at frame zero**. `ActorSetMotionBlended`'s third
+  argument is the play cursor, not a blend length and not an authored frame:
+  `FUN_004119A0` is `param_1[2] = param_3; param_1[6] = param_3 / 2`, writing
+  `obj+0x19C` and its half at `obj+0x1AC`. The state passes `0x1A` for every
+  character type but 0x18 and 0 for 0x18. A `zsass` throw is 22 cursor ticks of
+  wind-up against its entry's release frame of 48.
+* The state **releases no permit at all**. `ThrowerReleaseAttackPermit` has
+  exactly eight call sites and this is not one; `SpawnThrownWeapon` copies
+  `obj+0x121` to the projectile actor and leaves the thrower holding **0**, not
+  −1 (`889f21010000` at 0x004506D5, `BL` zeroed at 0x0045050A), moving the
+  `0x8000` commit latch with it, and `ThrownWeaponFlyToTarget` frees the slot in
+  its sub-4 arm after 30 stick frames and 60 blink frames.
+
+### What I got wrong on the way
+
+The write-up in `thrower.ts` said the unreachable default arm of the `zslman`
+switch "plays the clip passed in as the routine's *second argument*".
+`ThrowerStateThrow` has no second argument: after `PUSH ESI` / `PUSH EDI`,
+`[ESP + 0xc]` is the **first** one, the actor pointer, and Ghidra renders the
+arm `iVar3 = param_1`. The arm plays a pointer as a motion id. Corrected in the
+port and in `combat.md`.
+
+And I ran `tools/annotate.py` once from the shared checkout instead of from the
+worktree, which edited a peer-visible `functions.tsv`. The worktree's own copy
+was still pristine, so restoring the one changed row from it was exact — but
+the lesson is that every command in a worktree-isolated session has to `cd` to
+the worktree, not to the repo root, and a read-only `grep` that does the wrong
+thing is indistinguishable from a write that does.
+
+### What is still open
+
+The permit still goes back in `SpawnThrownWeapon` rather than with the weapon,
+and that is now the `[diverges]` the re-arm used to be. The faithful fix is for
+`G.g_thrown_weapons` to carry `obj+0x121` — but the pool is shared with class
+0x30's thrown weapon, which is driven by `ZombieThrownWeaponUpdate`
+(`FUN_0045A4F0`) through its own state table and has its own release site, so
+releasing from the shared flight routine would free a class-0x30 actor's slot
+through class 0x31's routine: exactly the wrong-bit mistake the note on
+`ThrowerReleaseAttackPermit` warns about. Splitting the two projectiles is the
+job, and it is not the throw's.

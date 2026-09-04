@@ -3278,7 +3278,16 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
   ];
   const TYPE_THROWER = {
     ...TYPE31,
-    motions: { ...TYPE31.motions, "8": motion(24), "9": motion(24) },
+    // **Character type 0x16.** `ThrowerPickThrowingHand` (`FUN_0044F630`)
+    // answers 0 for every type but 0x16 and 0x18 — as does
+    // `ThrowerBothHandsArmed` (`FUN_0044F5D0`), the gate on the state — so a
+    // `zstin` in state 0x1F is a thing the engine cannot make.
+    type: 0x16,
+    motions: {
+      ...TYPE31.motions, "8": motion(24), "9": motion(24),
+      // `ThrowerStateRearm`'s clip: motion id 5, a literal, not a set entry.
+      "5": motion(20),
+    },
     // `g_class31_throws` verbatim in shape: hands by body condition, then the
     // scalars `ThrowerStateThrow` and `ThrownWeaponFlyToTarget` read.
     throw: {
@@ -3289,7 +3298,7 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
     },
   } as unknown as CharacterType;
   const CHARS_THROW = {
-    ...CHARS31, types: { "1": TYPE, "25": TYPE_THROWER },
+    ...CHARS31, types: { "1": TYPE, "22": TYPE_THROWER },
   } as unknown as CharactersJson;
 
   ResetGameGlobals();
@@ -3297,7 +3306,7 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
   G.g_camera_yaw_bams = 0;
-  const z = ActorSpawn(0x9200, SpawnClass.Thrower, 0x19, "thrower", {
+  const z = ActorSpawn(0x9200, SpawnClass.Thrower, 0x16, "thrower", {
     initialState: ThrowerState.StandAndDecide, condition: 0,
   });
   z.visible = true;
@@ -3420,8 +3429,16 @@ console.log("class 0x31, the grab ends in the engine's one leave routine:");
  */
 console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
 {
-  /** A thrower of a given character type, mid-throw and holding the permit. */
-  const throwing = (charType: number, at: number) => {
+  const rng = new Rng(97);
+  /**
+   * A thrower of a given character type, mid-throw and holding the permit.
+   *
+   * `drop` is the destroyed-zone bit of the hand that is **not** to throw:
+   * `ThrowerPickThrowingHand` (`FUN_0044F630`) tosses a coin for a preferred
+   * hand and takes the other whenever the preferred one is bare, so baring one
+   * arm is how a test names the hand without owning the coin.
+   */
+  const throwing = (charType: number, at: number, drop = 0) => {
     ResetGameGlobals();
     SetGameTables(CHARS31);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
@@ -3434,6 +3451,10 @@ console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
     a.visible = true;
     a.hp = 100;
     a.pos = vec3(0, 0, 80);
+    a.zones |= drop;
+    // `ThrowerEntryState` resolves a descriptor's 31 to the hub -- the throw is
+    // a state the router picks, never an entrance -- so it is set here.
+    a.state = ThrowerState.Throw;
     // The engine only ever *enters* state 0x1F holding the permit --
     // `ThrowerTryEnterState`'s case 0x1F claims one first -- so seed it,
     // rather than letting the state take the no-permit exit.
@@ -3443,20 +3464,22 @@ console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
   };
 
   // 1. The release frame. `MOV dword ptr [ESI+0x1350], 0x19` at 0x0044FBE1
-  //    and seven more; the bundle's entry says 48.
+  //    and seven more; the bundle's entry says 48. The cursor is the base
+  //    track's, `obj+0x19C`, which is what 0x0044FC9B reads.
   const z = throwing(0x18, 0x9200);
-  ThrowerStateThrow(z, NULL_HOST, EYE);
-  z.action!.ticks = 24;
-  ThrowerStateThrow(z, NULL_HOST, EYE);
+  ThrowerStateThrow(z, NULL_HOST, EYE, rng);
+  z.playTicks = 24;
+  ThrowerStateThrow(z, NULL_HOST, EYE, rng);
   check("type 0x18 has not let go on frame 24",
         z.sub === ThrowSub.Winding, `sub ${z.sub}`);
-  z.action!.ticks = 25;
-  ThrowerStateThrow(z, NULL_HOST, EYE);
+  z.playTicks = 25;
+  ThrowerStateThrow(z, NULL_HOST, EYE, rng);
   check("...and lets go on 25, the constant the switch writes, not the "
         + "entry's 48", z.sub === ThrowSub.Thrown, `sub ${z.sub}`);
 
   // 2. The clip, per hand and per stance -- the whole reachable table.
-  //    `obj.attack` picks the hand: 0 is bone 5, 1 is bone 8.
+  //    Bone 5 is entry 0 and bone 8 entry 1; baring the other arm is what
+  //    forces the pick, since the coin is the engine's and not the test's.
   const STANCE = [
     ["ground", 0 as number],
     ["WallA", ThrowerFlag.WallA],
@@ -3464,37 +3487,169 @@ console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
     ["ceiling", ThrowerFlag.Ceiling],
   ] as const;
   const WANT = [[0x1f7, 0x1fc, 0x1f2, 0x204], [0x1f6, 0x1fb, 0x1f1, 0x203]];
+  const OTHER_ARM = [DamageZone.LeftArm, DamageZone.RightArm];
   let clips = true;
   const got: string[] = [];
   for (let hand = 0; hand < 2; hand++) {
     for (let s = 0; s < STANCE.length; s++) {
-      const a = throwing(0x18, 0x9210 + hand * 8 + s);
-      a.attack = hand;
+      const a = throwing(0x18, 0x9210 + hand * 8 + s, OTHER_ARM[hand]);
       a.flags2 |= STANCE[s][1];
-      ThrowerStateThrow(a, NULL_HOST, EYE);
+      ThrowerStateThrow(a, NULL_HOST, EYE, rng);
       const want = WANT[hand][s];
-      if (a.action?.motion !== want) {
+      if (a.motion !== want || a.attack !== hand) {
         clips = false;
-        got.push(`${STANCE[s][0]}/${hand}: ${a.action?.motion} want ${want}`);
+        got.push(`${STANCE[s][0]}/${hand}: ${a.motion} want ${want}`);
       }
     }
   }
   check("the stance and the hand pick the clip the `.text` table names, "
         + "all eight of them", clips, got.join("; "));
 
+  // 2b. And the clip does not start at frame zero. `PUSH 0x4 / PUSH 0x1a`
+  //     (`6a04 6a1a`) at 0x0044FB87 for every type but 0x18, `PUSH 0x0`
+  //     (`6a00`) at 0x0044FC6A for 0x18 -- and `FUN_004119A0` writes that
+  //     third argument straight into the play cursor, `param_1[2] = param_3`.
+  const s18 = throwing(0x18, 0x9240);
+  ThrowerStateThrow(s18, NULL_HOST, EYE, rng);
+  check("type 0x18's throw starts its clip at cursor 0",
+        s18.playTicks === 0, `cursor ${s18.playTicks}`);
+
   // 3. The control. Three of the four character types read the entry, at
   //    0x0044FC8D -- `MOVSX EAX, word ptr [EDI + 0x8]`. Same fixture bytes.
-  const y = throwing(0x16, 0x9230);
-  ThrowerStateThrow(y, NULL_HOST, EYE);
+  const y = throwing(0x16, 0x9230, DamageZone.LeftArm);
+  ThrowerStateThrow(y, NULL_HOST, EYE, rng);
   check("type 0x16 still plays the throw entry's own clip",
-        y.action?.motion === 9, `motion ${y.action?.motion}`);
-  y.action!.ticks = 47;
-  ThrowerStateThrow(y, NULL_HOST, EYE);
+        y.motion === 9, `motion ${y.motion}`);
+  check("...from cursor 0x1A, not from zero", y.playTicks === 0x1a,
+        `cursor ${y.playTicks}`);
+  y.playTicks = 47;
+  ThrowerStateThrow(y, NULL_HOST, EYE, rng);
   check("...and has not let go on 47", y.sub === ThrowSub.Winding, `sub ${y.sub}`);
-  y.action!.ticks = 48;
-  ThrowerStateThrow(y, NULL_HOST, EYE);
+  y.playTicks = 48;
+  ThrowerStateThrow(y, NULL_HOST, EYE, rng);
   check("...and lets go on the entry's own 48, not on 25",
         y.sub === ThrowSub.Thrown, `sub ${y.sub}`);
+
+  // 4. **The exit.** `g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C` and
+  //    out to state 7 -- `MOV word ptr [ESI + 0x1310], 0x7`
+  //    (`66c786101300000700`) at 0x0044FCE1, with `obj+0x1312` zeroed on the
+  //    next instruction. Motion 9 is 40 authored frames, so its play length is
+  //    78 and the last frame is 77.
+  y.playTicks = 76;
+  ThrowerStateThrow(y, NULL_HOST, EYE, rng);
+  check("the throw holds until the clip's last frame",
+        y.state === ThrowerState.Throw && y.sub === ThrowSub.Thrown,
+        `state ${y.state} sub ${y.sub}`);
+  y.playTicks = 77;
+  ThrowerStateThrow(y, NULL_HOST, EYE, rng);
+  check("...then hands back to the hub, sub zeroed -- it does not loop",
+        y.state === ThrowerState.StandAndDecide && y.sub === 0,
+        `state ${y.state} sub ${y.sub}`);
+  check("...leaving the hand bare for state 29 to deal with",
+        (y.zones & DamageZone.RightArm) !== 0
+        && y.boneSlot["5"] === 8177, `zones ${y.zones}`);
+}
+
+/**
+ * The whole loop, in one actor: hub -> throw -> hub -> re-arm -> hub.
+ *
+ * `ThrowerStateThrow` (`FUN_0044FAF0`) ends by writing state 7 and nothing
+ * else; it is `ThrowerStateStandAndDecide` (`FUN_0044B180`) that offers state
+ * 0x1D to `ThrowerTryEnterState` (`FUN_0044AFB0`) before it asks the router
+ * anything, and `ThrowerStateRearm` (`FUN_0044F7A0`) that puts the weapon
+ * back. The port used to do all of it inside the throw, looping there for ever
+ * and swapping one hand back on its way round -- so the actor never reached
+ * the hub, state 29 never ran, and nothing downstream of the hub could
+ * happen either.
+ */
+console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
+{
+  const HANDS = [
+    { bone: 5, motion: 9, release_frame: 30, range: 20, player_motion: 6,
+      cancel_mask: 2, held: 0x1fa2, bare: 0x1f9f, projectile: 8081 },
+    { bone: 8, motion: 8, release_frame: 30, range: 20, player_motion: 6,
+      cancel_mask: 4, held: 0x1f9e, bare: 0x1f9b, projectile: 8080 },
+  ];
+  const TYPE_REARM = {
+    ...TYPE31,
+    type: 0x16, name: "zsass", file: "zsass.bin",
+    motions: {
+      ...TYPE31.motions, "8": motion(24), "9": motion(24), "5": motion(20),
+    },
+    throw: {
+      hands: { "0": HANDS },
+      spin: 0x600, speed: 1.2, aim_ahead: 4, aim_side: 0.6,
+      stick_frames: 30, blink_frames: 60,
+    },
+  } as unknown as CharacterType;
+  const CHARS_REARM = {
+    ...CHARS31, types: { "1": TYPE, "22": TYPE_REARM },
+  } as unknown as CharactersJson;
+
+  ResetGameGlobals();
+  SetGameTables(CHARS_REARM);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_camera_yaw_bams = 0;
+  const z = ActorSpawn(0x9300, SpawnClass.Thrower, 0x16, "zsass", {
+    initialState: ThrowerState.StandAndDecide, condition: 0,
+  });
+  if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  z.visible = true;
+  z.hp = 100;
+  z.pos = vec3(0, 0, 80);
+  z.yaw = 0;
+  // Straight into the throw, holding the permit, the way case 0x1F leaves it.
+  z.state = ThrowerState.Throw;
+  z.sub = ThrowSub.Draw;
+  z.attackPermit = 0;
+
+  const rng = new Rng(41);
+  const events = new Events();
+  const ARMS = DamageZone.RightArm | DamageZone.LeftArm;
+  const ARMED = { "5": 0x1fa2, "8": 0x1f9e } as Record<string, number>;
+  // Which hand the coin gave it. `ThrowerPickThrowingHand` owns that choice,
+  // so the test reads it back rather than pinning it.
+  let bare = "";
+  // **One weapon per visit to state 31.** This is what tells the engine's
+  // shape from the loop the port used to run: a state that hands back to the
+  // hub throws once and lets state 29 re-arm it, where a state that re-arms a
+  // hand itself and resets its own sub goes straight round again and empties
+  // both hands before it ever leaves.
+  let threw = 0;
+  let threwBeforeHub = -1;
+  events.on("enemy.threw", () => { threw += 1; });
+  const seen = new Set<number>();
+  for (let i = 0; i < 600; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    seen.add(z.state);
+    if (threwBeforeHub < 0 && threw > 0
+        && z.state === ThrowerState.StandAndDecide) {
+      threwBeforeHub = threw;
+    }
+    if (!bare && (z.zones & ARMS) !== 0) {
+      bare = (z.zones & DamageZone.RightArm) !== 0 ? "5" : "8";
+    }
+    if (bare && seen.has(ThrowerState.Rearm) && (z.zones & ARMS) === 0) break;
+  }
+
+  check("the throw let a weapon go and left an arm bare", bare !== "",
+        `states ${[...seen].join(",")}`);
+  check("the clip's end hands back to the hub, state 7",
+        seen.has(ThrowerState.StandAndDecide),
+        `states ${[...seen].join(",")}`);
+  check("...after exactly one throw, not after both hands are empty",
+        threwBeforeHub === 1, `${threwBeforeHub} throws before the hub`);
+  check("...and the hub offers state 29, which is where the re-arm lives",
+        seen.has(ThrowerState.Rearm), `states ${[...seen].join(",")}`);
+  check("...so the hand that threw holds its weapon again",
+        bare !== "" && z.boneSlot[bare] === ARMED[bare],
+        `bone ${bare} ${z.boneSlot[bare]}`);
+  check("...with neither arm still counted destroyed", (z.zones & ARMS) === 0,
+        `zones ${z.zones}`);
+  check("...and the permit is back in the pool", z.attackPermit < 0
+        && G.g_attack_permits.every((p) => p === -1),
+        `permit ${z.attackPermit}, pool ${G.g_attack_permits.join(",")}`);
 }
 
 // -- 14. the collision, against real quads -----------------------------------

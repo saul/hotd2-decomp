@@ -80,7 +80,8 @@ import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { EffectCode, ResolveHit } from "../src/game/combat/resolve_hit";
-import type { BreakablesJson } from "../src/bundle";
+import type { BreakablesJson, ScriptJson } from "../src/bundle";
+import { Walker } from "../src/script/walker";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -5166,6 +5167,89 @@ console.log("\nwhere the camera follows an actor:");
   check("a host with no pose leaves it where it was",
         z.lookAt.x === held.x && z.lookAt.y === held.y
         && z.lookAt.z === held.z, JSON.stringify(z.lookAt));
+}
+
+/**
+ * **The camera hands the port every frame of a path, including the last one.**
+ *
+ * The engine runs two tasks: `EvtInterpreterLoop` (`FUN_0045ECC0`) and then
+ * `EvtRunQueuedActions` (`FUN_00402320`), and `CamAdvancePathFrame`
+ * (`FUN_004035E0`) — which lives in the second — publishes the camera block's
+ * `+0xD0` *before* it tests the end of the range and retires the action. So the
+ * frame a shot ends on is a value `g_cam_path_frame` really holds, for one
+ * whole object update, before the shot behind it can start.
+ *
+ * The port used to run its camera half first and its instructions second, so
+ * `wait_queued_events_done` fell through on the same tick the path ended, the
+ * `cam_play` behind it took the camera, and the end frame was never published
+ * at all. Stage 1's `cam_play 115..179` went 178, 180 — and three class-0x30
+ * zombies whose entrance cue is exactly 179 stood in their entrance clip for
+ * the rest of the stage, which is how the game writes "come through the door
+ * as this shot ends". Stage 2's `0xFAF4` is the same bug on `100..229`.
+ *
+ * This is that script in miniature, and the assertion is the invariant rather
+ * than the symptom: **no integer between the first shot's start and the second
+ * shot's end may be missing from what the walker publishes.**
+ * `tools/cam_cues.mjs` is the same check against all 44 shipped spawns.
+ */
+console.log("\nthe camera path publishes every frame, ends included:");
+{
+  const camOp = (i: number, start: number, end: number) => ({
+    i, at: i, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 7, 0],
+    start, end, slot: 7, flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [7], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        camOp(0, 0, 10),
+        // The gate the shipped scripts put between two shots.
+        { i: 1, at: 1, op: 0x40, name: "wait_queued_events_done", cat: "wait",
+          blocks_on: "queued events pending == 0" },
+        camOp(2, 11, 20),
+        { i: 3, at: 3, op: 0x41, name: "wait_camera_path_frame", cat: "wait",
+          arg: 0, blocks_on: "camera path frame past arg" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  // No `primeToFirstWait`: it steps *over* waits to get a scene on screen, and
+  // the wait between the two shots is the whole point here. The first tick
+  // runs the instructions from cold, exactly as the player's does.
+
+  // What `syncPortGlobals` copies into `g_cam_path_frame`, once a tick.
+  const published: number[] = [];
+  for (let f = 0; f < 60; f++) {
+    w.tick(1 / 60);
+    published.push(w.cam ? Math.trunc(w.cam.frame) : -1);
+  }
+  const missing: number[] = [];
+  for (let n = 0; n <= 20; n++) if (!published.includes(n)) missing.push(n);
+  const head = published.slice(0, 16).join(",");
+  check("every frame of both shots reaches the port",
+        missing.length === 0, `missing ${missing.join(", ")} of ${head}`);
+  check("...including 10, the frame the first shot ends on",
+        published.includes(10), head);
+  // And it is published for exactly one tick, as `CamAdvancePathFrame` does:
+  // one call, one publish, and the shot behind it cannot start until the tick
+  // after the interpreter has seen the retirement.
+  check("...for exactly one tick, not two",
+        published.filter((n) => n === 10).length === 1, head);
+  check("...and the shot behind it starts on the tick after",
+        published[published.indexOf(10) + 1] === 11, head);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

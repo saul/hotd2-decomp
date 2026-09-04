@@ -62,10 +62,34 @@ import ghidra.program.model.symbol.SymbolType;
 
 public class ExportAnnotations extends GhidraScript {
 
+    /**
+     * Matched **case-insensitively** — see {@link #isAuto}.
+     *
+     * `switchD` used to be here in that spelling and matched nothing: Ghidra
+     * 12 labels a jump table `switchdataD_004330c4`, and `switchdataD_`
+     * does not start with `switchD` (the seventh character is `d`, not `D`).
+     * 316 of them reached `globals.tsv` on the first export after the
+     * upgrade, and three of them *overwrote* curated names —
+     * `g_class33_selector_targets`, `g_class33_selector_index` and
+     * `g_class26_states` all became `switchdataD_...`. A prefix list is a
+     * version-drift hazard, so this one is deliberately loose.
+     */
     private static final String[] AUTO_PREFIX = {
         "FUN_", "SUB_", "LAB_", "DAT_", "UNK_", "EXT_", "_DAT_", "__DAT_",
-        "Catch@", "Unwind@", "switchD", "caseD", "PTR_", "s_", "u_", "ADDR_",
+        "Catch@", "Unwind@", "switchd", "switchdata", "cased", "casedata",
+        "jumptable", "PTR_", "s_", "u_", "ADDR_",
         "thunk_", "Rsrc_", "AddressOfEntryPoint", "entry",
+        // MSVC artefacts the RTTI analyser applies on any fresh import.
+        "RTTI_", "vftable", "vbtable",
+    };
+    /**
+     * Whole names Ghidra generates that carry no prefix at all. `default` is
+     * the label on a jump table's default arm; 148 rows of it arrived at once,
+     * every one of them named `default`, which is also the only thing that has
+     * ever put duplicate *names* in `globals.tsv`.
+     */
+    private static final String[] AUTO_EXACT = {
+        "default", "vftable", "switch", "case",
     };
     /* Recovered by Ghidra's function ID analyser on any fresh import. */
     private static final String[] LIB_PREFIX = {
@@ -104,8 +128,7 @@ public class ExportAnnotations extends GhidraScript {
             String n = s.getName();
             if (isAuto(n) || isLibrary(n)) continue;
             Address a = s.getAddress();
-            MemoryBlock b = currentProgram.getMemory().getBlock(a);
-            if (b == null || !b.isInitialized()) continue;   // drops TEB
+            if (!inProgramSection(a)) continue;   // really drops TEB
             if (currentProgram.getFunctionManager().getFunctionAt(a) != null) continue;
             // A label carries no comment of its own, so the file's third
             // column is the only place a global's prose exists. Never
@@ -128,6 +151,7 @@ public class ExportAnnotations extends GhidraScript {
         List<String> out = new ArrayList<>();
         Map<Long, Boolean> seen = new LinkedHashMap<>();
         int updated = 0, keptUnknown = 0, keptComment = 0;
+        int downgraded = 0, aliasKept = 0;
 
         if (f.isFile()) {
             try (java.io.BufferedReader r =
@@ -153,7 +177,30 @@ public class ExportAnnotations extends GhidraScript {
                     String had = c.length > 2 ? c[2] : "";
                     String comment = e.comment.isEmpty() ? had : e.comment;
                     if (e.comment.isEmpty() && !had.isEmpty()) keptComment++;
-                    String row = row(addr, e.name, comment);
+                    // **A curated name is never replaced by a generated one.**
+                    // The collection filters above should mean no generated
+                    // name ever reaches here, but they are prefix lists and a
+                    // prefix list goes stale on a Ghidra upgrade -- which is
+                    // exactly how `g_class26_states` became
+                    // `switchdataD_0048e32c`. Belt and braces, because the
+                    // cost of being wrong is a silent downgrade of work
+                    // nobody will notice until they go looking for the name.
+                    String name = e.name;
+                    if (isAuto(name) || isLibrary(name)) {
+                        name = c[1];
+                        downgraded++;
+                    }
+                    // Two labels on one address: the database yields them in
+                    // no particular order, so which one "wins" would otherwise
+                    // change between runs. The file decides -- it is where the
+                    // choice of canonical alias was made. `0x009C8E58` carries
+                    // both `g_camera_fixed_eye_y` and `g_ground_plane_y`, and
+                    // the port cites the first.
+                    if (!name.equals(c[1]) && aliasAt(addr, c[1])) {
+                        name = c[1];
+                        aliasKept++;
+                    }
+                    String row = row(addr, name, comment);
                     if (!row.equals(line)) updated++;
                     out.add(row);
                     seen.put(addr, Boolean.TRUE);
@@ -173,8 +220,20 @@ public class ExportAnnotations extends GhidraScript {
         }
         println(String.format(
             "[hotd2] %s.tsv: %d updated, %d appended, %d kept (not in the "
-            + "database), %d comments kept from the file",
-            what, updated, added, keptUnknown, keptComment));
+            + "database), %d comments kept from the file, %d generated names "
+            + "refused, %d aliases kept",
+            what, updated, added, keptUnknown, keptComment,
+            downgraded, aliasKept));
+    }
+
+    /** Does the database also carry `want` as a label on this address? */
+    private boolean aliasAt(long addr, String want) {
+        Address a = currentProgram.getAddressFactory().getDefaultAddressSpace()
+                        .getAddress(addr);
+        for (Symbol s : currentProgram.getSymbolTable().getSymbols(a)) {
+            if (s.getName().equals(want)) return true;
+        }
+        return false;
     }
 
     private static Long parseAddr(String s) {
@@ -191,8 +250,29 @@ public class ExportAnnotations extends GhidraScript {
     }
 
     private static boolean isAuto(String n) {
-        for (String p : AUTO_PREFIX) if (n.startsWith(p)) return true;
+        String l = n.toLowerCase();
+        for (String p : AUTO_PREFIX) if (l.startsWith(p.toLowerCase())) return true;
+        for (String e : AUTO_EXACT) if (l.equals(e)) return true;
         return false;
+    }
+
+    /**
+     * Is this address in one of the four sections `Hod2.exe` actually has?
+     *
+     * The old guard here was `!block.isInitialized()`, with the comment
+     * "drops TEB". It does not: Ghidra's synthetic TEB block *is* initialized,
+     * so 86 Windows thread-block fields — `TlsSlots`, `LockCount`,
+     * `TxnScopeContext`, at addresses like `0xffdfffd4` — were exported as
+     * though they were program globals. `verify_annotations.py` rejects every
+     * one of them with "is in no section", which is the check this should have
+     * been making all along: the same one, asked here.
+     */
+    private boolean inProgramSection(Address a) {
+        MemoryBlock b = currentProgram.getMemory().getBlock(a);
+        if (b == null || !b.isInitialized() || !b.isLoaded()) return false;
+        String n = b.getName();
+        return n.equals(".text") || n.equals(".rdata")
+            || n.equals(".data") || n.equals(".rsrc");
     }
 
     private static boolean isLibrary(String n) {

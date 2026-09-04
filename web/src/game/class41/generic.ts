@@ -13,7 +13,7 @@
  * then *runs*:
  *
  * ```c
- * obj = ActorAlloc(g_class41_entries[type], 0x378);
+ * obj = ActorAlloc(g_class41_updates[type], 0x378);
  * ```
  *
  * So `PlaceGenericProp` is one function that builds thirty different objects,

@@ -10219,3 +10219,81 @@ releasing from the shared flight routine would free a class-0x30 actor's slot
 through class 0x31's routine: exactly the wrong-bit mistake the note on
 `ThrowerReleaseAttackPermit` warns about. Splitting the two projectiles is the
 job, and it is not the throw's.
+
+## 2026-09-04 — the first clean export since the Ghidra upgrade, and what it caught
+
+With the GUI closed, `./ghidra/run.sh export-annotations` ran for the first
+time in a while. It worked — and its output would have broken the build, for
+four separate reasons, every one of them in `ExportAnnotations.java`'s filter
+rather than in the database.
+
+### `switchD` never matched `switchdataD_`
+
+The filter's auto-label prefix list carried `"switchD"`. Ghidra 12 spells a
+jump table's label `switchdataD_004330c4`, and that does not start with
+`switchD` — the seventh character is `d`, not `D`. So **316 jump-table labels
+went into `globals.tsv`**, and three of them *overwrote curated names*:
+`g_class33_selector_targets`, `g_class33_selector_index` and
+`g_class26_states` all became `switchdataD_...`. A silent downgrade of work,
+in the file whose header calls itself the source of truth.
+
+The prefix list is now matched case-insensitively and the comparison is
+looser. But the real lesson is that a prefix list is a version-drift hazard,
+so the merge also **refuses to replace a curated name with a generated one**
+even if a future Ghidra invents a spelling nobody predicted. That guard cost
+three lines and would have saved all three names on its own.
+
+### `default` is a name, 148 times
+
+The label on a jump table's default arm has no prefix at all, so nothing
+matched it. 148 rows arrived, every one named `default` — the only thing that
+has ever put duplicate *names* in `globals.tsv`, a file whose whole value is
+that a name identifies one address.
+
+### The TEB guard did not drop the TEB
+
+```java
+if (b == null || !b.isInitialized()) continue;   // drops TEB
+```
+
+Ghidra's synthetic thread-block *is* initialized, so 86 Windows fields —
+`TlsSlots`, `LockCount`, `TxnScopeContext`, at addresses like `0xffdfffd4` —
+were exported as program globals. `verify_annotations.py` rejects each with
+"is in no section", which is exactly the question the exporter should have
+been asking: it now checks section membership directly, the same four sections
+the checker knows about.
+
+**A comment saying what a line does is not evidence that it does it.** That
+one had been sitting there being believed.
+
+### Two labels on one address, and no rule for which wins
+
+`0x009C8E58` carries both `g_camera_fixed_eye_y` and `g_ground_plane_y`. The
+symbol iterator yields them in no guaranteed order, so which one reached the
+file was luck, and this run it picked the one the port does not cite —
+`verify_port.py` failed on two files. The file now decides: if the database
+also carries the name the file already has at that address, the file's choice
+stands, because that is where the canonical alias was chosen.
+
+### After the fix
+
+577 appended globals became 25, and all 25 are real: the `g_coli_*` family and
+the six `CivilianHook*` labels. The 22 appended functions were always real —
+`EvtRunQueuedActions`, `DrawBackdropDome`, `PlaySoundId`, `LzDecompress`, a
+whole `Coli*` set — GUI work that had never reached the TSV. Five genuine
+renames came with them and were propagated to every citation in the port,
+the docs and `hod2lib`.
+
+### Two things the export revealed that are not the exporter's fault
+
+**The database is behind the TSV by 227 function names and 135 globals.**
+`tools/annotate.py` writes the file; only an MCP rename or `apply-annotations`
+writes the database. Every agent that annotated this month widened that gap.
+The merge is what has been protecting those rows — against the database as it
+stands, an exporter that *rewrote* would delete a third of `functions.tsv`.
+
+**The database has one duplicate function name**: `ColiSphereVsMesh` on both
+`0x004AAF60` (curated, with a comment) and `0x004AAFF0` (new, bare). Which is
+which needs the two read side by side, and the GUI was closed, so the new row
+is held out of the file rather than guessed at. It is still in the database and
+the next export will re-propose it.

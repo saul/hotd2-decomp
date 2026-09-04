@@ -77,7 +77,7 @@ BREAKABLE_SLOTS = (
 
 #: What each `PlaceGenericProp` type actually draws, by class-0x41 type.
 #:
-#: **[proved]**, one routine at a time, out of `g_class41_entries`. This exists
+#: **[proved]**, one routine at a time, out of `g_class41_updates`. This exists
 #: because `PlaceGenericProp` writes the descriptor's ``+0x11C`` into *both*
 #: ``obj+0x11C`` (the lifetime `PropExpireByStepLifetime` counts down) and
 #: ``obj+0x28C`` (the asset slot), and only three types ever draw the latter.

@@ -67,7 +67,7 @@
 004330f8	g_class33_selector_index	byte index into the targets; valid selectors 1-11 and 99
 00595ab8	g_class44_subtypes	18 entries, indexed by obj+0x11C
 00593580	g_class41_constructors	79 entries, indexed by obj+0x130C
-005936bc	g_class41_entries	79 child entry functions
+005936bc	g_class41_updates	79 child entry functions
 0048e32c	g_class26_states	8 entries; entries 6 and 7 share a target
 005703b4	g_class26_path_by_selector	selector 6 -> path 0x183, 7 -> 0x184
 005926a8	g_prop_behaviours	10 behaviour functions shared by classes 0x12/0x13/0x15
@@ -177,8 +177,8 @@
 0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
 005960b4	g_pHingeCurvesXYZ	hinge swing curves, 6-byte {s16 rx, ry, rz} frames. Curve 2 is the van doors: 179 deg by frame 12, settling to 137
 005960c8	g_pHingeCurvesYaw	hinge swing curves, u16 yaw-only frames (XOR EDX,EDX; MOV DX -- zero extended). HingeUpdate switches on the selector at 0x473E8D, not on which pointer is populated: 0/2/3 read g_pHingeCurvesXYZ and everything else reads this. Slot 1 is 60 frames, slot 4 is 130
-0059f4d0	g_ShotHitList	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
-005a4c84	g_nShotHitCount	entries in g_ShotHitList this frame
+0059f4d0	g_coli_candidates	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
+005a4c84	g_coli_candidate_count	entries in g_coli_candidates this frame
 009a2cb8	g_ShotRecords	per player, 0x68 bytes: world ray origin, direction, -pitch/-yaw and their sin/cos
 009a5c78	g_nPlayerFired	set to 1 by the player update when the trigger is down and ammo remains; cleared by ProcessPlayerShots
 004c4d18	g_bone_damage_zone	u8[16], bone -> destroyed-zone bit index for obj+0x1318. char_adv00: bone 2 (head) -> 0, bones 3-5 (right arm) -> 1, bones 6-8 (left arm) -> 2, all others 0xFF -- the shift is masked with 0x1F so those land harmlessly on bit 31.
@@ -319,3 +319,28 @@
 009a244a	g_one_hit_target_kills	Incremented by OneHitTargetUpdate (0x004491FD) the frame a class-0x20 actor is shot. Also written by FUN_00497640 and read/written by FUN_004525C0; what reads it for is [open]. It is NOT g_enemies_alive: class 0x20's Init increments no counter, so no wait_enemies_alive gate ever sees one of these actors.
 007c17a0	g_app_state_pending	The REQUESTED application state, -1 for none. RequestAppState (0x0040E850) writes it, ClearPendingAppState (0x0040E840) and CommitAppState (0x0040E860) reset it to -1. CommitAppState runs at the end of the per-frame tick FUN_0040E730 and applies the request there. It is NOT the only writer of g_app_state: five functions write it across six sites (FUN_0049F380 twice, CommitAppState, FUN_0040E4A0, FUN_0040A920, FUN_0041E1D0), and at least FUN_0049F380 (c705988e9c0006000000 @ 0x0049F546, storing 6) and FUN_0040E4A0 (storing 0x10) store a literal straight into the word, so a change does not always land on a frame boundary. [proved]
 005798f0	g_app_state_next_table	Six pointers indexed by g_wCaptionMode (0x009C911E), every one of them 0x004E1014, followed by a -1. Each points at a byte table indexed by g_app_state giving the state to request next; AppStateAdvanceByTable (0x0040E960) is next = table[caption][app_state]. The bytes at 0x004E1014 are 0A 00 00 09 00 0B 03 03 00 05 03 0A, so 5 -> 0x0B, 6 -> 3, 7 -> 3, 9 -> 5, 0x0A -> 3, 0x0B -> 0x0A.
+0048d9f0	CivilianHookStartFall
+0048da20	CivilianHookFallStep
+0048da90	CivilianHookRideChildren
+0048dab0	CivilianHookRideChildrenStep
+0048db90	CivilianHookLaunchUp
+0048dbd0	CivilianHookLaunch
+0059d898	g_coli_dynamic_matrix
+0059d8d8	g_coli_query_ref_x
+0059d8dc	g_coli_query_ref_y
+0059d8e0	g_coli_query_ref_z
+0059d8e4	g_coli_dynamic_count
+0059ecd8	g_coli_candidate_sort_keys
+005a3098	g_coli_dynamic_list
+005a4488	g_coli_candidate_sort_scratch
+005a4c88	g_coli_dynamic_blob
+009a1a14	g_coli_pending_full_list
+009a34d8	g_coli_pending_ray_list
+009c701c	g_coli_active_set_task
+009c71c8	g_coli_hit_object
+009c8a80	g_coli_applied_full_list
+009c8e14	g_coli_applied_ray_list
+009cac4c	g_coli_hit_depth
+009cac60	g_coli_hit_plane_d
+009cac68	g_coli_hit_normal_y
+009cac6c	g_coli_hit_normal_z

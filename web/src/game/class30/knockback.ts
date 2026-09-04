@@ -14,7 +14,7 @@
  * ```
  * 004551f1  MOV  ECX, [0x009c6f00]            ; g_camera_index
  * 00455206  LEA  EAX, [EDX*0x4 + 0x9a6040]    ; g_camera_blocks + i * 0x1A4
- * 0045520e  CALL 004a9230                     ; MatrixLoad
+ * 0045520e  CALL 004a9230                     ; MatrixStackSetTopFromArray
  * 00455290  CALL 004a8a80                     ; MatrixTransformPoint
  * ```
  *

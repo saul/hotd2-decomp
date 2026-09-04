@@ -49,6 +49,8 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import degraded
+
 __all__ = [
     "GROUP_HEADER", "QUAD", "BUF_COMMON", "BUF_SCENE", "WET_SURFACES",
     "Quad", "Group", "Blob", "ColiFile", "load", "scene_files",
@@ -191,7 +193,16 @@ def load(path: str | Path) -> ColiFile:
     while off < len(b):
         try:
             blob, end = _parse_blob(b, off)
-        except (ColiError, struct.error):
+        except (ColiError, struct.error) as exc:
+            # Stopping is right; `consumed` and `coverage` record where. But
+            # only `verify_coli.py` ever looked at them, and it runs over the
+            # game directory rather than over an export -- so on the *export*
+            # path a file that stopped a third of the way through went into
+            # the bundle a third complete, with nothing said. The wall the
+            # player walks through is the same shape either way.
+            degraded.note(f"{f.name} past {off:#x}",
+                          f"{100 * off // max(1, len(b))}% of its collision "
+                          f"blobs", exc)
             break
         if end <= off:
             break

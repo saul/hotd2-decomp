@@ -11,7 +11,7 @@ import { CamPathCueReached } from "../camera/path";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import type { ClassFrame } from "../registry";
-import { T } from "../tables";
+import { T, SecondsToTicks } from "../tables";
 import { CivilianPruneDeadChildren } from "./children";
 import { CivilianRunFrameHook, PoseHookGrowAndPushOutOfWorld } from "./hooks";
 import { CivilianCountMotionLoops } from "./loops";
@@ -32,7 +32,7 @@ import { CivilianStepTurnToTarget } from "./turn";
 export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
   if (!sub) return;
-  const frames = f.dt * 60;
+  const frames = SecondsToTicks(f.dt);
 
   CivilianPruneDeadChildren(obj);
   CivilianRunFrameHook(obj, frames);

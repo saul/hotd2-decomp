@@ -63,7 +63,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // land in the right place rather than freezing a pose and dissolving it.
   if (obj.fadeFrom) {
     obj.fadeFrom.ticks += SecondsToTicks(dt);
-    obj.fade -= dt * 60;
+    obj.fade -= SecondsToTicks(dt);
     if (obj.fade <= 0) obj.fadeFrom = null;
   }
   // Root motion: the clip's own translation is what walks the actor. Applied

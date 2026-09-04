@@ -6,6 +6,7 @@
  * no-op and a collision push-out, and `SkeletonWalkNode` reads every rotation
  * straight from the motion bank.
  */
+import { SecondsToTicks } from "./tables";
 import type { Actor } from "./actor";
 import { VecToAngles, bamsDelta, bamsWrap, type Vec3 } from "./vec";
 
@@ -32,7 +33,7 @@ const TURN_RATE = 4;
  */
 export function TurnAngleToward(cur: number, want: number, rate: number,
                                 dt: number): number {
-  const step = Math.abs(rate) * dt * 60;
+  const step = Math.abs(rate) * SecondsToTicks(dt);
   const d = bamsDelta(want, cur);
   if (Math.abs(d) <= step) return bamsWrap(want);
   return bamsWrap(cur + Math.sign(d) * step);

@@ -19,7 +19,7 @@
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
-import { MotionPlayFrame, MotionPlayLength } from "../tables";
+import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieState } from "./states";
 
@@ -93,7 +93,7 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
   }
 
   if (obj.sub === 1) {
-    obj.zom.holdFrames -= dt * 60;
+    obj.zom.holdFrames -= SecondsToTicks(dt);
     if (obj.zom.holdFrames > 0) return;
     obj.frozen = 0;
     obj.flags &= ~ActorFlag.PoseFrozen;
@@ -146,7 +146,7 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
 export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): void {
   const p = obj.delayedLeap;
   if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
-  const frames = dt * 60;
+  const frames = SecondsToTicks(dt);
 
   if (obj.sub === 0) {
     // `obj+0x34 |= 0x2000`, the arc-armed bit — **not** the pose freeze, which

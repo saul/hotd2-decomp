@@ -38,10 +38,24 @@ carries the version it was written in, `loadStage` checks all three, and the
 exporter prints which stages a partial run left behind.
 
 **3. The schema digest, which nobody has to remember.** `manifest.json` carries
-a SHA-256 over the *declarations* in `web/src/bundle/*.ts` — per file, plus one
+a SHA-256 over the *declarations* in `web/src/bundle/` — per file, plus one
 digest over those — and the client compares it against the same digest
 generated into `web/src/bundle/schema_hash.ts`. `hod2lib/schema.py` is the one
 implementation of it.
+
+**Over a named set of files, not the whole directory.** It was
+`web/src/bundle/*.ts`, which put `stage.ts`'s loader in the hash along with its
+interfaces — so rewording a refusal string invalidated every bundle on disk and
+demanded a full re-export, for an edit that cannot change one byte of a bundle.
+The digest is only worth having if it is cheap to keep. `schema.SOURCES` names
+the seven declaration files; the loading half lives in `web/src/bundle/load.ts`
+and is not hashed.
+
+The named list has the opposite hazard — a new declaration file nobody adds to
+it is a block of the bundle that **nothing checks**, silently — so
+`verify_exporters.py` reads the directory and fails both ways: a listed file
+that grows runtime code, and a `.ts` that declares part of the bundle and is
+not listed.
 
 * **It hashes declarations, not files.** Comments and whitespace are stripped
   first. A digest that moved when someone fixed a typo in a doc comment would

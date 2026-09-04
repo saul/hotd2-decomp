@@ -16,6 +16,7 @@
  * permit system offers, and they do it with the same inlined routine — see
  * {@link ZombieScriptedPickPlayer}.
  */
+import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
@@ -159,7 +160,7 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): voi
   }
 
   if (obj.sub !== 3) return;
-  obj.zom.holdFrames -= dt * 60;
+  obj.zom.holdFrames -= SecondsToTicks(dt);
   if (obj.zom.holdFrames >= 1) return;
   // `obj+0x1368 |= 1` — the flag that lets `ZombieStateHoldAtRange` keep a
   // cooldown instead of zeroing it — and the cooldown itself.
@@ -251,7 +252,7 @@ export function ZombieStateLeapToPoint(obj: ZombieActor, eye: Vec3, dt: number,
                                        rng: Rng, events?: Events): void {
   const t = obj.entry;
   if (!t?.dest) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
-  const frames = dt * 60;
+  const frames = SecondsToTicks(dt);
 
   if (obj.sub === 0) {
     if (t.idle_motion !== undefined) ActorSetMotion(obj, t.idle_motion);
@@ -353,7 +354,7 @@ export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
                                                 dt: number, rng: Rng,
                                                 events?: Events): void {
   const t = obj.entry;
-  const frames = dt * 60;
+  const frames = SecondsToTicks(dt);
 
   if (obj.sub === 0) {
     obj.zom.holdFrames = t?.delay ?? 0;
@@ -449,7 +450,7 @@ function ZombieDelayedStrikeGiveUp(obj: ZombieActor, dt: number): void {
     obj.zom.backoffFrames = 0;
     return;
   }
-  obj.zom.backoffFrames += dt * 60;
+  obj.zom.backoffFrames += SecondsToTicks(dt);
   if (obj.zom.backoffFrames <= CARRIER_GIVE_UP_FRAMES) return;
   obj.state = ZombieState.Leave;
   obj.sub = 0;

@@ -200,16 +200,26 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.minimapGraphData = minimapGraph(bundle.script);
   p.clearFeed();
 
-  if (bundle.script.warnings.length) {
-    // Decoder warnings are surfaced, not swallowed: a step that failed to
-    // disassemble is a hole in the timeline and the user should know.
-    for (const w of bundle.script.warnings) {
-      p.onFeed({
-        seq: -1, block: -1, step: -1, opIndex: -1,
-        op: { i: -1, at: 0, op: -1, name: "decoder warning", cat: "flow" },
-        note: w,
-      });
-    }
+  // Decoder warnings are surfaced, not swallowed: a step that failed to
+  // disassemble is a hole in the timeline and the user should know.
+  //
+  // **Both decoders, on one channel.** The script's have travelled in the
+  // stage JSON from the beginning; the camera's existed and were read only by
+  // `verify_phase6.py`, which runs over the game directory rather than over an
+  // export — so a stage whose `cam/` file had a bad descriptor exported with
+  // those paths quietly missing, and the camera not moving where it should
+  // looked like a gameplay bug. `?? []` because a bundle written before format
+  // 4 carries none.
+  const decoded: string[] = [
+    ...bundle.script.warnings,
+    ...(bundle.cam.warnings ?? []).map((w) => `cam: ${w}`),
+  ];
+  for (const note of decoded) {
+    p.onFeed({
+      seq: -1, block: -1, step: -1, opIndex: -1,
+      op: { i: -1, at: 0, op: -1, name: "decoder warning", cat: "flow" },
+      note,
+    });
   }
 
   applyIncomingState(p);

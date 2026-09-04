@@ -270,7 +270,20 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
                                  this.appScope, this.events);
     // A click is input. The renderer says what the viewer did; the port owns
     // the queue and decides what it means. See `game/combat/shot.ts`.
-    this.shooting.onFire = (ray) => QueueShotRequest(0, ray);
+    //
+    // **And it wakes the pacer.** `Pacer.rafId === null` means the loop is
+    // asleep, which it is whenever nothing wants a frame — a paused player
+    // with no sprites out is the common case, and shooting while paused is a
+    // thing the transport deliberately allows. `QueueShotRequest` only pushes
+    // onto `G.g_shot_requests`; without a `wake` the queue sat there until
+    // some *other* waker ran, so the shot landed on whatever frame a later
+    // keypress or panel click happened to ask for. The pacer's own list of
+    // wakers already said "a shot" — the obligation was written down and the
+    // call was missing.
+    this.shooting.onFire = (ray) => {
+      QueueShotRequest(0, ray);
+      this.pacer.wake();
+    };
     this.hudLayer = new HudLayer(host.hud);
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,

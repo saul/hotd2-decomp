@@ -232,13 +232,23 @@ class Stage:
             try:
                 common_name, scene_name = colilib.scene_files(self.scene)
             except colilib.ColiError:
+                # not-a-loss: `ColiLoadForScene` guards `0 <= scene < 7` and
+                # this is that guard. A scene outside the range has no
+                # collision *in the engine*, so None is the faithful answer
+                # rather than a failure to read one.
                 self._colisets = ()
                 return None
             d = self.game / "coli"
             try:
                 self._colisets = (colilib.load(d / common_name),
                                   colilib.load(d / scene_name))
-            except OSError:
+            except OSError as exc:
+                # An install missing `coli/` exported a bundle with no
+                # collision in it and said nothing: every wall in the stage
+                # becomes passable, every ground query answers zero, and it
+                # reads as a gameplay bug rather than a missing file.
+                degraded.note(f"coli/{common_name} and coli/{scene_name}",
+                              "no collision for this scene at all", exc)
                 self._colisets = ()
         return self._colisets or None
 

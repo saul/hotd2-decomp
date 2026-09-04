@@ -59,7 +59,7 @@ import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import { ActorSetMotionBlended } from "./motion_cue";
-import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
+import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
 import { vec3, type Vec3 } from "../vec";
 
@@ -737,7 +737,7 @@ export function ZombieStateDragTarget(obj: ZombieActor): void {
 export function ZombieStatePounceOnTarget(obj: ZombieActor, dt: number): void {
   const t = targetOf(obj);
   if (!t) return;
-  const frames = dt * 60;
+  const frames = SecondsToTicks(dt);
   const a = t.yaw * ((Math.PI * 2) / 65536);
   const aim = { x: t.pos.x - Math.sin(a) * 2.5, y: t.pos.y + 1,
                 z: t.pos.z - Math.cos(a) * 2.5 };

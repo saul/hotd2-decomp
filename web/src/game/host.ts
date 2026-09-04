@@ -110,6 +110,25 @@ export interface GameHost {
    * Optional, because a host with no scene is a valid host: a headless run
    * queues no shots, and one that did would get `undefined` here and resolve
    * every request as a miss.
+   *
+   * **[diverges] The spheres are where the *last drawn frame* put them.**
+   * The engine tests against the pose it is about to draw, because
+   * `ShotTestSphere` runs inside the same frame's object pass. Here the port's
+   * update comes first and the character layer poses the skeleton afterwards,
+   * so a pick made at the head of tick *n* runs against tick *n-1*'s matrices.
+   * At 60 Hz that is 16 ms of lag on a target the player was tracking, which
+   * is under a fast zombie's own reaction window and has never been the
+   * reported cause of a missed shot — but it is a divergence and it was
+   * untagged.
+   *
+   * **Under `Harness.pump` the lag is not one frame, it is all of them.**
+   * Nothing draws, so the skeleton holds whatever pose the last real render
+   * left, and every pick in a pumped run resolves against that. A harness that
+   * pumps and shoots is measuring the wrong thing; `port.test.ts` stubs
+   * `pickShot` rather than pretending otherwise.
+   *
+   * Closing it means posing in the engine — the skeleton's forward kinematics
+   * in `game/` — which is the same missing piece the headless replay needs.
    */
   pickShot?(ray: ShotRay): ShotPick | null;
 }

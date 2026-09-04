@@ -19,6 +19,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass, field, replace
 
+from . import degraded
+
 __all__ = ["Model", "Mesh", "Strip", "Vertex", "parse", "NL1Error"]
 
 
@@ -507,11 +509,16 @@ def parse(b: bytes, off: int = 0, strict: bool = False) -> Model:
 def parse_container(c) -> list[Model]:
     """Parse every model in a hod2lib.container.Container."""
     out = []
-    for start, end in c.models:
+    for i, (start, end) in enumerate(c.models):
         try:
             out.append(parse(c.data[:end], start))
-        except NL1Error:
-            pass
+        except NL1Error as exc:
+            # Carrying on is right -- one damaged model should not cost the
+            # whole file -- but it was silent, and a parser regression here
+            # produced a container with zero models, exit 0, and a stage that
+            # simply had no geometry in it.
+            degraded.note(f"model {i} of this NaomiLib container",
+                          "that model is not in the export", exc)
     return out
 
 

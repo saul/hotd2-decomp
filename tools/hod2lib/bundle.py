@@ -64,7 +64,7 @@ __all__ = ["BUNDLE_FORMAT", "build_stage", "write_manifest"]
 #: came to sit at 1 for 23 commits. It says "the *layout* moved" -- a new file
 #: in a stage directory, a block renamed -- and the digest beside it, which
 #: nobody has to remember, catches the field-level drift.
-BUNDLE_FORMAT = 3
+BUNDLE_FORMAT = 4
 
 #: Every asset slot the three container families can draw. The group props
 #: use the first four; `KindedPropUpdate` adds the three kinded models and the
@@ -878,6 +878,9 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
         try:
             rel = p.relative_to(stage.game)
         except ValueError:
+            # not-a-loss: `relative_to` refusing means the source sits outside
+            # the game directory, so its bare name is the right key. Nothing
+            # was read and nothing failed.
             rel = Path(p.name)
         entry["sources"][str(rel).replace("\\", "/")] = _sha256(p)
     return entry

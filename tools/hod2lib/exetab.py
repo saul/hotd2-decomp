@@ -154,6 +154,8 @@ class ExeTables:
         try:
             return self.data[r:end].decode("ascii")
         except UnicodeDecodeError:
+            # not-a-loss: the decode is the test. "Are these bytes a string?"
+            # is answered No, which is a reading, not a failure to read.
             return None
 
     # -- tables ---------------------------------------------------------
@@ -835,6 +837,8 @@ class ExeTables:
             try:
                 out[sid] = name.decode("ascii")
             except UnicodeDecodeError:
+                # not-a-loss: as above -- the decode is the test for whether
+                # this slot holds a string, and No is an answer.
                 continue
         return out
 
@@ -1278,6 +1282,8 @@ class ExeTables:
             try:
                 out[sid] = name.decode("ascii")
             except UnicodeDecodeError:
+                # not-a-loss: as above -- the decode is the test for whether
+                # this slot holds a string, and No is an answer.
                 continue
         return out
 
@@ -1488,6 +1494,8 @@ class ExeTables:
             try:
                 out[i] = name.decode("ascii")
             except UnicodeDecodeError:
+                # not-a-loss: as above -- the decode is the test for whether
+                # this slot holds a string, and No is an answer.
                 continue
         return out
 

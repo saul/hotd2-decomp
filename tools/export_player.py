@@ -2,9 +2,14 @@
 """
 Build the static bundle the browser stage player loads.
 
-    python3 tools/export_player.py --game-dir "..." --all
-    python3 tools/export_player.py --game-dir "..." --stage 2
+    python3 tools/export_player.py --game-dir "..." --all       # both modes
+    python3 tools/export_player.py --game-dir "..." --stage 2   # both modes
     python3 tools/export_player.py --game-dir "..." --stage 2 --original
+    python3 tools/export_player.py --game-dir "..." --stage 2 --arcade
+
+**Both game modes unless you ask for one.** Original Mode is half the game, not
+a variant of the export, and a default that built only Arcade left six of the
+twelve stage bundles carried forward from whenever they were last built.
 
 Output lands in ``extract/player/``. Serve that directory (or point the dev
 server at it) and open the player; see ``web/README.md``.
@@ -26,12 +31,63 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hod2lib import bundle, schema, stage as stagelib  # noqa: E402
 
 
+def _report(out: Path, entries: list[dict]) -> None:
+    """What this export could not read, printed at the end where it is read.
+
+    The decoders' warnings already travelled -- `evt`'s in the stage JSON since
+    the beginning, `cam`'s since format 4 -- and the player surfaces both. But
+    the person who runs the export is the person who can act on them, and they
+    were only visible by opening the JSON afterwards. Scrolling back through a
+    few hundred lines of per-stage progress is not "visible".
+
+    So: one block at the end, after the size line, always printed -- including
+    the "nothing" case, because "no warnings" and "I forgot to look" are the
+    two readings of an absent summary and only one of them is good news.
+    """
+    rows: list[tuple[str, str, list[str]]] = []
+    for e in entries:
+        d = out / e["name"]
+        for kind, fname in (("script", e.get("script")), ("cam", e.get("cam"))):
+            f = d / fname if fname else None
+            if not f or not f.is_file():
+                continue
+            try:
+                w = json.loads(f.read_text()).get("warnings") or []
+            except (OSError, ValueError):
+                # not-a-loss: the file was just written and indexed; a read
+                # failure here is about this summary, not about the bundle,
+                # and the export itself has already reported its own errors.
+                continue
+            if w:
+                rows.append((e["name"], kind, w))
+
+    if not rows:
+        print("\ndecoder warnings: none -- every cam/ and evt/ block in every "
+              "stage parsed whole")
+        return
+    # One stream, because two of them interleave: the header went to stdout and
+    # the detail to stderr, and a terminal showed the warnings above the line
+    # introducing them. All of it is a warning, so all of it is stderr.
+    n = sum(len(w) for _, _, w in rows)
+    sys.stdout.flush()
+    print(f"\ndecoder warnings: {n} across {len(rows)} block(s). "
+          f"The player shows these in the feed too.", file=sys.stderr)
+    for name, kind, w in rows:
+        print(f"  {name} ({kind}): {len(w)}", file=sys.stderr)
+        for line in w[:8]:
+            print(f"      {line}", file=sys.stderr)
+        if len(w) > 8:
+            print(f"      ... and {len(w) - 8} more", file=sys.stderr)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", required=True, type=Path)
     ap.add_argument("--stage", type=int, action="append",
                     help="stage number; repeatable")
     ap.add_argument("--all", action="store_true", help="every stage, 1-6")
+    ap.add_argument("--arcade", action="store_true",
+                    help="Arcade Mode only; the default is both modes")
     ap.add_argument("--original", action="store_true",
                     help="also build the Original Mode (game mode 1) variant")
     ap.add_argument("--out", type=Path,
@@ -75,9 +131,25 @@ def main() -> int:
         print(f"regenerated {hash_path.name} -- commit it with the "
               f"declaration change that moved it")
 
+    # **Both modes by default.** `--original` used to *add* Original Mode to a
+    # run that was otherwise Arcade-only, so the plain `--all` everyone runs
+    # built six of the twelve stage bundles and left the other six carried
+    # forward from whenever they were last built. A format bump then left those
+    # six stale, on disk, indexed by a fresh manifest, and refused by the
+    # client -- which is the failure the per-stage `format` exists to catch,
+    # arrived at by a default nobody chose.
+    #
+    # Original Mode is not a variant of the export, it is half of the game:
+    # same regions, a handful of slots resolving to `st_org*` models the
+    # Arcade tables never name. So both, unless the caller asks for one.
+    modes = [False, True]
+    if args.arcade and not args.original:
+        modes = [False]
+    elif args.original and not args.arcade:
+        modes = [True]
+
     entries = []
     for n in wanted:
-        modes = [False, True] if args.original else [False]
         for original in modes:
             try:
                 st = stagelib.Stage(game, stage=n, original=original)
@@ -155,6 +227,7 @@ def main() -> int:
         })
     total = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
     print(f"\n{len(entries)} stage bundles, {total / 1e6:.1f} MB -> {path}")
+    _report(out, entries)
 
     # **A degraded export fails. There is no flag for this.**
     #

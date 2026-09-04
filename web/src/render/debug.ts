@@ -140,10 +140,40 @@ export class DebugBoxLayer implements System<RenderContext> {
    * The label textures, capped and owned by the stage scope.
    *
    * This was a module-level `Map<string, CanvasTexture>` that nothing ever
-   * disposed, and its key carries `d=${d.toFixed(0)}` — so **every metre every
-   * boxed actor moved minted a texture**, kept for the life of the page.
+   * disposed, and its key carried the actor's distance to the metre — so
+   * **every metre every boxed actor moved minted a texture**, kept for the
+   * life of the page. Owned and capped now, *and* the distance is bucketed
+   * out of the text: see {@link DebugBoxLayer.d}. The cap alone left the leak
+   * bounded rather than removed.
    */
   private labelCache = new LabelCache();
+
+  /**
+   * The distance as a label writes it: **bucketed, and marked as bucketed.**
+   *
+   * `d` goes into the label text, the text is baked into a texture, and the
+   * texture is cached by that text — so a per-metre `d` mints a new texture
+   * every metre every boxed actor moves. Capping the cache bounded the memory
+   * and did nothing for the churn: an actor crossing a metre boundary every
+   * frame misses the cache every frame, so a 256-entry cache ran at a 0% hit
+   * rate and disposed 256 textures a second. A cache that never hits is not a
+   * cache, it is an allocator with extra steps.
+   *
+   * Five units, and `≈` on the label so the reading is not mistaken for the
+   * exact one. At a walking 60 u/s that is a mint every twelve frames rather
+   * than every frame. The panels show the exact distance; this is the
+   * over-the-shoulder version, and the bands every decision actually turns on
+   * are far wider than five units.
+   *
+   * The cap stays. It is right whatever a future label decides to put in its
+   * text, and this only fixes the field that bites today.
+   */
+  private static readonly D_BUCKET = 5;
+
+  private static d(d: number): string {
+    const q = Math.round(d / DebugBoxLayer.D_BUCKET) * DebugBoxLayer.D_BUCKET;
+    return `d≈${q}`;
+  }
 
   private acquire(colour: number): Boxed {
     let b = this.pool[this.used];
@@ -265,7 +295,7 @@ export class DebugBoxLayer implements System<RenderContext> {
         const d = dist2d(a.pos, { x: this._eye.x, y: this._eye.y,
                                   z: this._eye.z });
         const who = `${id.get(a.at) ?? "?"} ${hex(a.at)} ${a.name}`
-          + ` d=${d.toFixed(0)} r${a.rank}/${a.allowance} q${a.queueRank}`;
+          + ` ${DebugBoxLayer.d(d)} r${a.rank}/${a.allowance} q${a.queueRank}`;
         this.place(this.acquire(holder ? PERMIT : AWAITED),
                    this._mid, this._size,
                    holder ? `${who} · permit · ${stateOf(a)}`
@@ -288,7 +318,7 @@ export class DebugBoxLayer implements System<RenderContext> {
         this.place(this.acquire(permits.has(a.at) ? PERMIT : SELECTED),
                    this._mid, this._size,
                    `${id.get(a.at) ?? "?"} ${hex(a.at)} ${a.name}`
-                   + ` d=${d.toFixed(0)} · ${stateOf(a)}`);
+                   + ` ${DebugBoxLayer.d(d)} · ${stateOf(a)}`);
       }
     }
 

@@ -55,7 +55,26 @@ EXPORTERS = ["tools/export_player.py", "tools/export_level.py"]
 
 #: `except Exception:` / `except Exception as exc:` / `except (A, B):` -- any
 #: handler broad enough to catch a bug rather than a condition.
-BROAD = re.compile(r"^(\s*)except\s+(Exception|BaseException)\b[^:]*:")
+#: **Every** `except`, not just the broad ones.
+#:
+#: This matched `Exception|BaseException` alone, and three handlers lost game
+#: data under narrower names where it could not see them: a NaomiLib model that
+#: would not parse was dropped from its container, a `coli/` file that stopped
+#: parsing went into the bundle short, and an install with no `coli/` directory
+#: exported a stage with no collision in it at all. Each was `except <specific>:
+#: pass`, each produced a valid bundle and exit 0, and the third turns every
+#: wall in a stage passable -- which reads as a gameplay bug.
+#:
+#: The narrowness of the `except` was never the point. What matters is whether
+#: the handler *says* something, and that question is the same for every
+#: handler, so it is asked of every handler.
+ANY_EXCEPT = re.compile(r"^(\s*)except\b[^:]*:")
+
+#: A handler carrying this, on its own line or the `except` line, is declaring
+#: that nothing was lost -- the failure *is* the answer. The reason is required
+#: and is the whole value of the marker: `classify()` failing to decompress a
+#: blob means the blob is not compressed, which is what it returns.
+NOT_A_LOSS = re.compile(r"#\s*not-a-loss:\s*\S")
 #: How far past the handler to look for the record. A handler that needs more
 #: than this before it says anything is doing too much.
 WINDOW = 6
@@ -81,6 +100,60 @@ def check_schema_hash() -> list[str]:
              if f'"{n}": "{d}"' not in have]
     return [f"{rel}: stale"
             + (f" -- {', '.join(moved)} changed" if moved else "")]
+
+
+#: A declaration file declares. `export function`, `export class` and a
+#: `let`/`var` are code; `export const` is allowed because `SUPPORTED_FORMAT`
+#: is a contract constant a bundle genuinely can disagree with.
+RUNTIME_IN_DECL = re.compile(
+    r"^export\s+(?:async\s+)?(?:function|class|let|var)\b", re.M)
+
+
+def check_schema_sources() -> list[str]:
+    """`schema.SOURCES` names every declaration file, and only those.
+
+    Two failures, and the list closes both.
+
+    The digest used to be taken over `web/src/bundle/*.ts`, so `stage.ts`'s
+    loader was in it: `getJson`, the format checks, and every refusal string.
+    Rewording one of those moved the hash and invalidated every bundle on
+    disk, for an edit that cannot change a byte of a bundle.
+
+    But an explicit list has the opposite failure -- a new declaration file
+    that nobody adds to it is a block of the bundle **nothing checks**, which
+    is worse than the glob and silent. So the directory is still read, and a
+    `.ts` in it that is neither on the list nor the generated file nor a pure
+    loader is a failure.
+    """
+    d = ROOT / schema.SCHEMA_DIR
+    named = set(schema.SOURCES)
+    out: list[str] = []
+    for path in sorted(d.glob("*.ts")):
+        name = path.name
+        text = path.read_text(encoding="utf-8")
+        declares = "export interface" in text or "export type" in text
+        runtime = RUNTIME_IN_DECL.search(text)
+        if name in named:
+            if not path.exists():
+                out.append(f"schema.SOURCES names {name}, which does not exist")
+            if runtime:
+                out.append(
+                    f"{schema.SCHEMA_DIR}/{name} is hashed by the schema "
+                    f"digest and declares `{runtime.group(0).strip()}` -- "
+                    f"runtime code belongs in load.ts, or the file comes off "
+                    f"schema.SOURCES")
+            continue
+        if name in (schema.GENERATED, "index.ts", "load.ts"):
+            continue
+        if declares:
+            out.append(
+                f"{schema.SCHEMA_DIR}/{name} declares part of the bundle and "
+                f"is not in `schema.SOURCES` -- nothing checks that block "
+                f"against the exporter")
+    for name in sorted(named):
+        if not (d / name).exists():
+            out.append(f"schema.SOURCES names {name}, which does not exist")
+    return out
 
 
 def check_module_list() -> list[str]:
@@ -123,32 +196,50 @@ def main() -> int:
         lines = path.read_text(encoding="utf-8").splitlines()
         rel = path.relative_to(ROOT)
         for i, line in enumerate(lines):
-            m = BROAD.match(line)
+            m = ANY_EXCEPT.match(line)
             if not m:
                 continue
             total += 1
-            body = "\n".join(lines[i + 1:i + 1 + WINDOW])
+            # The window counts *code*, not prose. A handler whose reason
+            # takes eight lines of comment to explain is exactly the handler
+            # you want explained, and measuring the two together made a
+            # well-documented site look like a silent one.
+            after = [ln for ln in lines[i + 1:i + 1 + WINDOW * 4]
+                     if ln.strip() and not ln.lstrip().startswith("#")]
+            body = "\n".join(after[:WINDOW])
             if "degraded.note(" in body:
                 continue
             # A handler that re-raises, or that turns the failure into a
             # SystemExit, is not swallowing anything.
             if re.search(r"^\s*(raise\b|return\s+\w+\.fail\()", body, re.M):
                 continue
+            # ...nor one that puts it on a channel something reads: the
+            # `warnings` list travels in the stage JSON and `stage_load.ts`
+            # surfaces it, and a line on stderr is at least on screen.
+            if re.search(r"warnings\.append\(|file=sys\.stderr", body):
+                continue
+            # ...nor one that has said, with a reason, that there is nothing
+            # to lose.
+            raw_span = "\n".join(lines[i:i + 1 + WINDOW])
+            if NOT_A_LOSS.search(line) or NOT_A_LOSS.search(raw_span):
+                continue
             bad.append(f"{rel}:{i + 1}: {line.strip()} -- says nothing")
 
     stale = check_schema_hash()
     undocumented = check_module_list()
+    decl_sources = check_schema_sources()
 
     print("exporters -- what a swallowed failure has to say\n")
-    print(f"  {total} broad handlers, {len(bad)} of them silent"
+    print(f"  {total} handlers, {len(bad)} of them silent"
           f" (baseline 0)\n")
     if bad:
         for b in bad:
             print(f"FAIL {b}")
         print(f"\n{len(bad)} failed. Record the loss with "
               f"`degraded.note(what, lost, exc)` -- see tools/hod2lib/"
-              f"degraded.py -- or narrow the `except` to the condition you "
-              f"actually mean.")
+              f"degraded.py -- or, if the failure *is* the answer and nothing "
+              f"is lost, say so on the handler with a "
+              f"`# not-a-loss: <reason>` comment.")
         return 1
     print("clean")
 
@@ -159,6 +250,13 @@ def main() -> int:
         print("\nRegenerate it and commit it with the declaration change that "
               "moved it:\n  python3 tools/regen_schema_hash.py\n"
               "`tools/export_player.py` does the same thing on every run.")
+        return 1
+    if decl_sources:
+        for m in decl_sources:
+            print(f"FAIL {m}")
+        print("\nThe digest covers what a bundle can disagree with. "
+              "Declarations go on `schema.SOURCES` in tools/hod2lib/schema.py; "
+              "code that runs goes in web/src/bundle/load.ts.")
         return 1
     print(f"  {len(schema.file_digests(ROOT))} declaration files, digest "
           f"{schema.schema_hash(ROOT)[:16]}...\n")

@@ -134,6 +134,19 @@ export class GameSystem implements System {
 
   update(ctx: Context, t: Tick): void {
     this.view = ctx.view;
+    // `g_camera_yaw_bams` — class 0x31 wants the yaw on its own, not the whole
+    // matrix: the leap aside builds its landing point with a bare
+    // `MatrixRotateY` and the wall search refuses unless the actor faces
+    // within 0x2000 of it. `ResolveHit`'s directional death reads it too.
+    //
+    // **Above the frozen return, because where the camera points is not a
+    // function of elapsed time.** It was below, so the paused path drained the
+    // shot queue against whatever yaw the last unpaused tick had left: pause,
+    // turn to look at something, shoot it, and the kill picked its direction
+    // from where you had been facing. Free roam turns the camera every frame
+    // with the transport stopped, which is exactly the case that made it
+    // visible.
+    G.g_camera_yaw_bams = ctx.view.yawBams;
     if (t.frozen || t.dt <= 0) {
       // **A trigger pull is input, not elapsed time.** The player deliberately
       // lets you shoot with the transport stopped — `Player.wantsFrame` keeps
@@ -146,11 +159,6 @@ export class GameSystem implements System {
       ProcessShotRequests(this.host, ctx.rng, ctx.events);
       return;
     }
-    // `g_camera_yaw_bams` — class 0x31 wants the yaw on its own, not the whole
-    // matrix: the leap aside builds its landing point with a bare
-    // `MatrixRotateY` and the wall search refuses unless the actor faces
-    // within 0x2000 of it.
-    G.g_camera_yaw_bams = ctx.view.yawBams;
     // A copy, not the live one: the frame object `GameUpdate` builds holds
     // the reference for the whole pass, and `ctx.view.eye` is written again
     // next tick.

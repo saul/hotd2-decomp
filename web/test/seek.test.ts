@@ -25,7 +25,7 @@ import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../src/game/globals";
 import type { OpJson, ScriptJson } from "../src/bundle";
 import { seekTo } from "../src/script/seek";
-import { BUNDLE_ROOT, skipNoBundle }
+import { BUNDLE_ROOT, finishOrSkip }
   from "../tools/lib/bundle_root";
 
 const ROOT = BUNDLE_ROOT;
@@ -863,6 +863,4 @@ for (const stage of STAGES) {
         !bad, bad);
 }
 
-if (ran === 0) skipNoBundle("seek");
-console.log(failures ? `\n${failures} failed` : "\nall passed");
-process.exit(failures ? 1 : 0);
+finishOrSkip("seek", failures, ran);

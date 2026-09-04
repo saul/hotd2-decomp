@@ -10,3 +10,4 @@ export * from "./sound";
 export * from "./characters";
 export * from "./scene";
 export * from "./stage";
+export * from "./load";

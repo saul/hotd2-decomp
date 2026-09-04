@@ -27,6 +27,7 @@
  *   byte is 15 two of them latch a walk distance first and enter
  *   `ZombieStateWalkDistance` at **sub 1**, skipping its own latch.
  */
+import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import {
@@ -216,7 +217,7 @@ export function ZombieStateRunInPlaceTimed(obj: ZombieActor, dt: number,
   // them is not in lockstep. Fade 5.
   ZombieSetMotionIfIdle(obj, motion, rng, "clip", MotionFade.Quick);
 
-  obj.zom.holdFrames -= dt * 60;
+  obj.zom.holdFrames -= SecondsToTicks(dt);
   if (obj.zom.holdFrames >= 1) return;
   obj.strikeStart.x = obj.pos.x;
   obj.strikeStart.y = obj.pos.y;
@@ -245,7 +246,7 @@ export function ZombieStateHoldClipThenBranch(obj: ZombieActor, dt: number): voi
     return;
   }
   ZombieHoldEntranceClip(obj, t?.motion);
-  obj.zom.holdFrames -= dt * 60;
+  obj.zom.holdFrames -= SecondsToTicks(dt);
   if (obj.zom.holdFrames >= 1) return;
   ZombieEntranceBranch(obj, t?.walk_distance);
 }
@@ -324,7 +325,7 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: ZombieActor, dt: number,
   }
 
   if (obj.sub === 2) {
-    obj.zom.holdFrames -= dt * 60;
+    obj.zom.holdFrames -= SecondsToTicks(dt);
     if (obj.zom.holdFrames >= 1) return;
     ZombieSetMotionIfIdle(obj, t?.motion, rng, 10, MotionFade.Quick);
     obj.sub = 3;
@@ -428,7 +429,7 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor,
   }
 
   if (obj.sub === 1) {
-    obj.zom.holdFrames -= dt * 60;
+    obj.zom.holdFrames -= SecondsToTicks(dt);
     if (obj.zom.holdFrames >= 1) return;
     const crouch = obj.charType === 0 ? ARC_CROUCH_TYPE0 : ARC_CROUCH_OTHER;
     ActorSetMotion(obj, crouch.motion);

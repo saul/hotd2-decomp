@@ -18,7 +18,12 @@
  *  2. paused, it stops asking, and the game does not advance;
  *  3. a keypress while paused wakes it for a frame or two and no more;
  *  4. and the game still did not advance, because a wake is a redraw and not
- *     a tick.
+ *     a tick;
+ *  5. **and a shot fired while paused is drawn.** That waker was written into
+ *     `Pacer`'s own list of obligations and never called: `onFire` pushed onto
+ *     `g_shot_requests` and returned, so the shot sat in the queue until some
+ *     other waker happened to run. Nothing else could have caught it — the
+ *     queue is correct, the drain is correct, and no frame was asked for.
  *
  * The page's own `requestAnimationFrame` is counted by wrapping it before the
  * app boots, from outside the module graph — see the `init` option in
@@ -30,7 +35,7 @@
  *
  * Exit status is 0 only if every assertion held.
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { enableShooting, openPlayer, waitForLoad } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {
@@ -132,6 +137,43 @@ try {
         `${wakeRaf} frames`);
   check("...and no game time passed", e.frame === d.frame,
         `frame ${d.frame} -> ${e.frame}`);
+
+  console.log("\nA shot fired while paused is drawn:\n");
+  // Shooting is off by default, and with it off a viewport click does nothing
+  // at all -- so without this the next assertion would pass on a page where
+  // the shot path never ran. Turning it on is itself a command and wakes the
+  // loop, hence the settle before the baseline is taken.
+  await enableShooting(page);
+  await sleep(400);
+  const f = await probe(page);
+  await sleep(500);
+  const g = await probe(page);
+  check("...the loop went back to sleep first", g.raf - f.raf <= 2,
+        `${g.raf - f.raf} frames in ~0.5s`);
+
+  // The middle of the viewport, which is where the crosshair is. Whether it
+  // hits anything is not the question; `fire` runs either way and queues.
+  const box = await page.locator("#viewport").boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await sleep(400);
+  const h = await probe(page);
+  const shotRaf = h.raf - g.raf;
+  check("the shot was drawn", shotRaf >= 1, `${shotRaf} frames`);
+  check("...and no game time passed", h.frame === g.frame,
+        `frame ${g.frame} -> ${h.frame}`);
+
+  // **Not "a frame or two", the way a keypress is.** `Player.wantsFrame` keeps
+  // asking while the shot's feedback is in flight -- the impact sprites and
+  // the muzzle flash ride wall time and are a click's answer, not a tick's --
+  // so a shot legitimately draws for as long as its sprites live. The
+  // property that matters is that it *stops*: the loop went back to sleep
+  // rather than being left running by the wake.
+  await sleep(1000);
+  const i = await probe(page);
+  check("...and the loop went back to sleep after the feedback",
+        i.raf - h.raf <= 2, `${i.raf - h.raf} frames in ~1s`);
+  check("...still no game time", i.frame === g.frame,
+        `frame ${g.frame} -> ${i.frame}`);
 } finally {
   await close();
 }

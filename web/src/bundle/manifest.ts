@@ -21,8 +21,15 @@
  *
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
+ *
+ * 4: `<stage>.cam.json` carries `warnings`, the `cam/` decoder's own — the
+ * counterpart of {@link ScriptJson.warnings}, which had travelled since the
+ * beginning while the camera's were produced and read by nothing on the export
+ * path. And the schema digest is taken over a **named** set of declaration
+ * files rather than everything in this directory, so the loader's refusal
+ * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 3;
+export const SUPPORTED_FORMAT = 4;
 
 /**
  * The exporter's digest of the declarations in this directory.

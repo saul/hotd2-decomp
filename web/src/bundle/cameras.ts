@@ -30,4 +30,15 @@ export interface CamJson {
   /** Keyed by **global path slot**, which is what a `cam_play` operand is. */
   paths: Record<string, CamPathJson>;
   object_paths: Record<string, CamPathJson>;
+  /**
+   * What the `cam/` parse could not make sense of — a descriptor past the end
+   * of the file, a channel index that is not a curve start.
+   *
+   * The counterpart of {@link ScriptJson.warnings}, and it was missing: the
+   * decoder produced these and only a verifier that runs over the game
+   * directory ever read them, so a stage exported with paths quietly dropped
+   * and the camera not moving where it should. Absent in a bundle written
+   * before format 4.
+   */
+  warnings?: string[];
 }

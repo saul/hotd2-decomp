@@ -73,3 +73,36 @@ export function skipNoBundle(what: string): never {
     + " or point HOTD2_BUNDLE at an existing export.");
   process.exit(EXIT_SKIPPED);
 }
+
+/**
+ * End a bundle-gated suite: **fail beats skip, always.**
+ *
+ * `seek` and `state` both ended with
+ *
+ * ```ts
+ * if (ran === 0) skipNoBundle("state");
+ * process.exit(failures ? 1 : 0);
+ * ```
+ *
+ * which reads correctly and is not. Both files run checks *before* they need a
+ * bundle — `state` has 29 of them — so a tree with no bundle and a genuine
+ * regression in those 29 reported `SKIP` and exited 3. The failure was on
+ * screen, above a line saying the suite had been skipped, and the exit code
+ * agreed with the skip. Every machine without game assets is that tree.
+ *
+ * The order is the whole fix: anything that failed is a failure, whatever else
+ * did not run. A skip only means *nothing ran and nothing was wrong*.
+ *
+ * One helper rather than the same four lines in each file, because the bug was
+ * that the two copies looked right individually.
+ */
+export function finishOrSkip(what: string, failures: number,
+                             ran: number): never {
+  if (failures) {
+    console.log(`\n${failures} failed`);
+    process.exit(1);
+  }
+  if (ran === 0) skipNoBundle(what);
+  console.log("\nall passed");
+  process.exit(0);
+}

@@ -407,6 +407,52 @@ def check_classes() -> None:
             failures.append(f"SpawnClass 0x{c:02X} has no row in spawns.md")
 
 
+#: `dt` is seconds of game time; a tick count derived from it by a bare
+#: multiplication is a float. `core/play_cursor.ts` owns the conversion.
+FRAME_MATH = re.compile(r"\bdt\s*\*\s*60\b")
+TICK_SCOPE = ("game", "render")
+
+
+def check_frame_math() -> None:
+    """No hand-rolled seconds-to-ticks conversion.
+
+    `dt * 60` looks exact and is not: `dt` is `frames * (1 / 60)`, and for 9 of
+    the 241 tick counts a frame can carry -- 31, 62, 111, 123, 124, 125, 207,
+    222 and 240 -- multiplying back gives 30.999999999999996 rather than 31.
+    A counter decremented by that drifts off any exact comparison, and the port
+    is full of them because the engine's own counters step by exactly one.
+
+    It was exact *by accident*: every caller happens to hand over a whole
+    number of frames' worth of time, which is a property of `Loop.advance`
+    rather than of the arithmetic. `ticksOfSeconds` rounds, and its own
+    docstring already named this hazard -- there were simply 20 sites that
+    never adopted it, 19 in `game/` and one in `render/`.
+
+    `core/play_cursor.ts` is where the conversion lives, so that `render/` can
+    pose from the same cursor `game/` counts in without a value import across
+    the layer line -- the same placement and the same argument as
+    `BAMS_TO_RAD`. `game/` reaches it through `SecondsToTicks` in `tables.ts`.
+    """
+    bad: list[str] = []
+    for name in TICK_SCOPE:
+        for path in sorted((ROOT / "web" / "src" / name).rglob("*.ts")):
+            for i, line in enumerate(path.read_text().splitlines(), 1):
+                if line.lstrip().startswith(("*", "//")):
+                    continue          # prose about the hazard is not the hazard
+                if FRAME_MATH.search(line):
+                    bad.append(f"{path.relative_to(ROOT)}:{i}: {line.strip()}")
+    if bad:
+        for b in bad:
+            failures.append(f"hand-rolled tick conversion -- {b}")
+        failures.append(
+            "use `SecondsToTicks` (game/tables.ts) or `ticksOfSeconds` "
+            "(core/play_cursor.ts); `dt * 60` is a float and the counters it "
+            "feeds are compared exactly")
+    else:
+        notes.append(f"frame math: no hand-rolled `dt * 60` under "
+                     f"{'/, '.join(TICK_SCOPE)}/")
+
+
 def check_snapshot_rules() -> None:
     """The three ways state escapes a save. Each has one honest spelling."""
     for path in game_files():
@@ -560,6 +606,7 @@ def main() -> int:
     check_divergences()
     check_classes()
     check_snapshot_rules()
+    check_frame_math()
     check_class31_literal_clips()
     check_docs_citations(named)
 

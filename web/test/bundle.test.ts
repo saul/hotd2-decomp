@@ -19,7 +19,7 @@
  * Run with `npm run test:bundle`.
  */
 import { SCHEMA_FILES, SCHEMA_HASH } from "../src/bundle/schema_hash";
-import { manifestRefusal, stageFormatRefusal } from "../src/bundle/stage";
+import { manifestRefusal, stageFormatRefusal } from "../src/bundle/load";
 import { SUPPORTED_FORMAT, type Manifest } from "../src/bundle/manifest";
 
 let failures = 0;
@@ -70,9 +70,24 @@ console.log("\nschema drift names the declaration files that moved");
   // A digest mismatch alone can only say *that* something moved. Naming the
   // file is the difference between a message you act on and one you learn to
   // ignore, so the naming is asserted, not just the refusal.
-  const names = Object.keys(SCHEMA_FILES);
-  check("the digest covers every declaration module", names.length >= 8,
-        `${names.length}: ${names.join(", ")}`);
+  //
+  // **Named, not counted.** This was `names.length >= 8`, which was the size
+  // of `web/src/bundle/*.ts` minus the generated file — a count standing in
+  // for a set. When the digest stopped hashing the loader and started hashing
+  // a named list of declaration files, the count fell to 7 and the assertion
+  // failed without being able to say what it wanted. A count cannot tell you
+  // that the right seven are covered, only that seven things are.
+  //
+  // Which files belong on the list is `schema.SOURCES`, and
+  // `verify_exporters.py` reads the directory and fails both ways — a listed
+  // file that grows runtime code, and a declaration file nobody listed. This
+  // asserts the client compiled against the same set.
+  const WANT = ["cameras.ts", "characters.ts", "manifest.ts", "scene.ts",
+                "script.ts", "sound.ts", "stage.ts"];
+  const names = Object.keys(SCHEMA_FILES).sort();
+  check("the digest covers exactly the declaration modules",
+        names.join(",") === WANT.join(","),
+        `have ${names.join(", ")}; want ${WANT.join(", ")}`);
 
   const drifted = good();
   const first = names[0];

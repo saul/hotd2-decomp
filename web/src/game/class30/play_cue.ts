@@ -24,7 +24,7 @@
  */
 import type { ZombieActor } from "../actor";
 import { ActorFlag } from "../actor";
-import { MotionPlayFrame, MotionPlayLength } from "../tables";
+import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import type { Vec3 } from "../vec";
 import { ActorSetMotion } from "./motion_cue";
 import { TestApproachRing } from "./ring";
@@ -65,7 +65,7 @@ export function ZombieStateMotionCue21(obj: ZombieActor, eye: Vec3,
   }
 
   if (obj.sub === 1) {
-    obj.zom.holdFrames -= dt * 60;
+    obj.zom.holdFrames -= SecondsToTicks(dt);
     if (obj.zom.holdFrames > 0) return;
     obj.sub = 2;
     // The pose is released. Until this line `ZombieAdvanceMotion` has not

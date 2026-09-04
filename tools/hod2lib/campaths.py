@@ -65,8 +65,22 @@ class CamPaths:
         self.by_slot: dict[int, PathRef] = {}
         self.by_file: dict[str, list[PathRef]] = {}
         self._tables = tables
+        #: What the parse could not make sense of, per file.
+        #:
+        #: `CamFile.warnings` -- a descriptor running past the end of the file,
+        #: a channel index that is not a curve start -- existed and was read by
+        #: `verify_phase6.py` alone, which runs over the *game directory*.
+        #: Nothing on the export path looked at it, so a stage whose `cam/`
+        #: file had a bad descriptor exported a bundle quietly missing those
+        #: paths, and the camera simply did not move where it should have.
+        #: `evt`'s equivalent has travelled in the stage JSON since the
+        #: beginning and `stage_load.ts` surfaces it; this is the same channel
+        #: for the other half of the same scene.
+        self.warnings: list[str] = []
 
         for cf in cam_files:
+            for w in cf.warnings:
+                self.warnings.append(f"{cf.name}: {w}")
             stem = cf.name[:-4] if cf.name.endswith(".bin") else cf.name
             slots = tables.cam_slots_for(stem) if tables else []
             refs: list[PathRef] = []
@@ -137,4 +151,5 @@ class CamPaths:
         for slot, ref in sorted(self.by_slot.items()):
             (objects if ref.is_object_path else paths)[str(slot)] = \
                 self.path_json(ref)
-        return {"fps": fps, "paths": paths, "object_paths": objects}
+        return {"fps": fps, "paths": paths, "object_paths": objects,
+                "warnings": self.warnings}

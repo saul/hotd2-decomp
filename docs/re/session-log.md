@@ -10637,3 +10637,138 @@ one section that step 23 had closed `layers-are-systems`, and three sections
 later that it was still at 1 and step 23 would pay it. Both sentences were
 written in the same commit series. Nothing was lying; the file simply had two
 places to say the same thing.
+
+## Eleven review findings, and what reading each one first changed
+
+`N1`–`N3`, `N6`–`N8`, `N12`–`N16` of the 2026-09-04 review. Four of the eleven
+turned out to be a different shape from the way the review described them, and
+in each case the difference mattered.
+
+### `N7`: the review named the wrong decoder, and the right hole
+
+It says `Program.warnings` is "a fourth silent channel nothing reads". It is
+not: `evt`'s warnings travel in `<stage>.script.json` and `stage_load.ts` has
+put them in the feed from the beginning. The silent one is
+**`CamFile.warnings`** — same idea, same shape, produced by the `cam/` decoder,
+and read by `verify_phase6.py` alone, which runs over the *game directory* and
+never over an export. So a stage whose `cam/` file had a bad descriptor
+exported a bundle quietly missing those paths, and a camera that does not move
+where it should reads as a gameplay bug.
+
+Both decoders now feed one list in `stage_load.ts`, and `cam.json` carries
+`warnings` from format 4.
+
+The other half of `N7` was accurate and undercounted itself. Widening the
+`except` regex from `Exception|BaseException` to **every** handler found 14
+narrow ones; reading all 14 rather than trusting the count showed **three**
+losing game data — a NaomiLib model that will not parse dropped from its
+container, a `coli/` file parsed short going into the bundle short, and an
+install with no `coli/` directory exporting a stage with **no collision at
+all**, which turns every wall in it passable. The other eleven are answers
+rather than failures: `classify()` failing to decompress a blob means the blob
+is not compressed, and a `UnicodeDecodeError` while probing for a string is the
+string test returning No.
+
+The narrowness of an `except` was never the point — whether the handler *says*
+something is — so the check now asks that of every handler, and a handler that
+loses nothing says so with `# not-a-loss: <reason>` on the spot. Nine of those
+were written this session and each one had to be read to be written, which is
+the value of the marker.
+
+### `N16`: exact by accident, and the accident is measurable
+
+`dt * 60` is a float. `dt` is `frames * (1 / 60)`, and multiplying back is not
+exact for **9 of the 241** tick counts a frame can carry — 31 comes out
+30.999999999999996. The port is full of counters compared exactly because the
+engine's own step by exactly one.
+
+The fix needed no new API. `ticksOfSeconds` in `core/play_cursor.ts` already
+rounds, already lives in `core/` so `render/` can reach it without a value
+import across the layer line, and its own docstring already named this hazard.
+`motion.ts` used it. Nineteen sites in `game/` and one in `render/` never
+adopted it. A `verify_port` rule now says so, watched failing.
+
+### `N12`: the cap bounded the leak and did nothing about the churn
+
+The existing doc comment argued *for* the 256-entry cap and *against*
+quantising the distance out of the label key. Both halves of that were right
+about memory and wrong about cost: an actor crossing a metre boundary every
+frame misses the cache every frame, so the cache ran at a 0% hit rate and
+disposed 256 textures a second. A cache that never hits is an allocator with
+extra steps. Five-unit buckets and `d≈` on the label; the cap stays, because it
+is right whatever a future label puts in its text.
+
+### `N6`: an explicit list has the opposite failure, so it is checked both ways
+
+The digest globbed `web/src/bundle/*.ts`, so `stage.ts`'s loader was in it and
+rewording a refusal string invalidated every bundle on disk. The loading half
+moved to `load.ts` and `schema.SOURCES` names the seven declaration files.
+
+But a named list can silently omit a new declaration file, which is a block of
+the bundle **nothing checks** — worse than the glob and quieter. So
+`verify_exporters.py` still reads the directory and fails both ways: a listed
+file that grows runtime code, and a `.ts` that declares part of the bundle and
+is not listed. Both watched failing.
+
+`test/bundle.test.ts` asserted `names.length >= 8` — a count standing in for a
+set, sized to the old glob. It failed on 7 and could not say what it wanted. It
+names the seven now.
+
+### Two defaults that were wrong, found by using them
+
+**`export_player.py --all` built six of the twelve stage bundles.**
+`--original` *added* Original Mode rather than selecting it, so the plain
+`--all` everyone runs left the six Original stages carried forward from
+whenever they were last built. The format bump then left them stale on disk,
+indexed by a fresh manifest, and refused by the client — which is exactly the
+failure the per-stage `format` exists to catch, arrived at by a default nobody
+chose. Both modes now, unless `--arcade` or `--original` asks for one.
+
+**And the export never said what it could not read.** The warnings travelled
+and the player surfaced them, but the person who runs the export is the person
+who can act on them, and they were only visible by opening the JSON afterwards.
+There is a summary at the end now, printed **including the "none" case** —
+"no warnings" and "I forgot to look" are the two readings of an absent summary
+and only one of them is good news.
+
+### `N1`, and a wrong assertion caught by running it
+
+`Pacer`'s own doc comment lists its wakers and "a shot" is among them;
+`onFire` pushed onto `g_shot_requests` and returned. The obligation was written
+down and the call was missing, which is why nothing caught it — there is no
+type for "this callback must wake the loop".
+
+The first assertion written for it was wrong: it asserted the shot draws for
+"a frame or two", copying the shape of the keypress case above it. A shot draws
+for **17** frames, and correctly — `Player.wantsFrame` keeps asking while the
+impact sprites and muzzle flash are in flight, because those ride wall time and
+are a click's answer rather than a tick's. The property worth asserting is that
+it *stops*. Watched failing with the wake removed.
+
+### `N14`: read the field, and say what is still missing
+
+`req.frame` was written on every request and consulted by nothing, so "an input
+log for free" was half true. `ProcessShotRequests` resolves what is due and
+leaves the rest queued. Live play never exercises the second half — a click is
+stamped with the current `g_frame` and is always due — which is the point: the
+line is inert now and load-bearing for a replayer that does not exist yet,
+because that needs a `pickShot` a headless run can answer.
+
+Which is also `N13`, now tagged: the hit spheres ride bones the *render* phase
+poses, so a pick made at the head of tick *n* runs against tick *n-1*'s
+matrices. Under `Harness.pump` nothing draws at all and the lag is every frame.
+Both close the same way — the skeleton's forward kinematics in `game/`.
+
+### `N3`, and why it was invisible
+
+```ts
+if (ran === 0) skipNoBundle("state");
+process.exit(failures ? 1 : 0);
+```
+
+reads correctly and is not. Both files run checks *before* they need a bundle —
+`state` has 29 — so a tree with no bundle and a real regression in those 29
+printed the failure, then printed SKIP under it, and exited 3. Every machine
+without game assets is that tree. `finishOrSkip` is one helper rather than the
+same four lines twice, because the bug was that each copy looked right on its
+own.

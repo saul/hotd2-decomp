@@ -70,6 +70,7 @@ import {
   LineBasicMaterial, LineSegments, Object3D, Quaternion, Sprite,
   SpriteMaterial, Vector3,
 } from "three";
+import { ticksOfSeconds } from "../core/play_cursor";
 import type { PropsJson, PropHinge, PropStatic } from "../bundle";
 import { IDLE_TICK, type Context, type System, type Tick }
   from "../core/system";
@@ -263,7 +264,7 @@ export class PropLayer implements System {
     const w = ctx.walker;
     if (!w) return;
     const flags = w.flags;
-    const frames = t.dt * 60;
+    const frames = ticksOfSeconds(t.dt);
     if (!this.live.length) return;
     for (const l of this.live) {
       if (!l.bound) continue;              // nothing to pose

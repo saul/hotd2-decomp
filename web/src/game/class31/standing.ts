@@ -30,7 +30,7 @@ import { ActorFacePlayerTarget } from "../actor_turn";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import type { GameHost } from "../host";
-import { CharacterTypeOf, MotionOf } from "../tables";
+import { CharacterTypeOf, MotionOf, SecondsToTicks } from "../tables";
 import { vec3, type Vec3 } from "../vec";
 import { ActorClipFrame, ActorClipLength } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
@@ -223,7 +223,7 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
     obj.sub = 5;
   }
 
-  obj.slideTimer -= dt * 60;
+  obj.slideTimer -= SecondsToTicks(dt);
   if (obj.slideTimer < 1) obj.sub = 2;
 }
 
@@ -313,7 +313,7 @@ export function ThrowerStateRestoreBothHands(obj: ThrowerActor, dt: number,
   }
 
   if (obj.sub === 1) {
-    obj.thr.handRegrow += REGROW_PER_FRAME * dt * 60;
+    obj.thr.handRegrow += REGROW_PER_FRAME * SecondsToTicks(dt);
     if (obj.thr.handRegrow < REGROW_FULL) return;
     // `ThrowerDrawBonePart` pins it at exactly 1.0 and drops the latch.
     obj.thr.handRegrow = REGROW_FULL;

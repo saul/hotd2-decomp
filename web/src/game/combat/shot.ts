@@ -134,8 +134,21 @@ export function ProcessShotRequests(host: GameHost, rng: Rng,
                                     events?: Events): void {
   const queued = G.g_shot_requests;
   if (!queued.length) return;
-  G.g_shot_requests = [];
-  for (const req of queued) ResolveShotRequest(req, host, rng, events);
+  // **`req.frame` is read, which is what makes the queue a log rather than a
+  // list.** It was written on every request and consulted by nothing, so the
+  // claim that recording the queue per frame gives an input log for free was
+  // half true: the data was there and no code path could re-time to it.
+  //
+  // A request is resolved on the frame it was pulled on, or on the first frame
+  // after it. Live play never exercises the second half — a click arrives on a
+  // DOM event and is stamped with the current `g_frame`, so it is always due —
+  // but a replay feeds the log in ahead of the clock, and this is the line
+  // that makes the shots land where they landed rather than all at once on the
+  // frame the log was loaded.
+  const now = Math.round(G.g_frame);
+  const due = queued.filter((r) => r.frame <= now);
+  G.g_shot_requests = queued.filter((r) => r.frame > now);
+  for (const req of due) ResolveShotRequest(req, host, rng, events);
 }
 
 /** One request, from segment to score. `[port-only]` — see above. */

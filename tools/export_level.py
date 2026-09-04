@@ -283,6 +283,27 @@ def _coli_json(st, sets) -> dict:
     }
 
 
+def _finish() -> int:
+    """The exit status of an export that has finished writing files.
+
+    **Both export paths, not one.** `--stage` drained the degradation log and
+    exited 1 on a partial export; `--name` returned 0 unconditionally, so a
+    single-asset export whose model would not parse wrote a glTF missing that
+    model and reported success. This tool has no manifest to record the loss
+    in, so the exit code is the record -- which only works if every path that
+    writes files goes through it.
+
+    The files are still written. An incomplete export is usually exactly what
+    you want to look at while finding out why it is incomplete.
+    """
+    lost = degraded.drain()
+    if lost:
+        print(f"  {len(lost)} thing(s) could not be read; the export is "
+              f"incomplete", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", required=True, type=Path)
@@ -445,15 +466,7 @@ def main() -> int:
             print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
                   f"cameras + rails ({', '.join(c.name for c in cam_files)})")
         print(f"  -> {info['gltf']}")
-        # This tool has no manifest to record it in, so the exit code is the
-        # record: an export that gave up on part of the stage is not a
-        # success, and `hod2lib.degraded` has already said which parts.
-        lost = degraded.drain()
-        if lost:
-            print(f"  {len(lost)} thing(s) could not be read; the export is "
-                  f"incomplete", file=sys.stderr)
-            return 1
-        return 0
+        return _finish()
 
     if not args.name:
         raise SystemExit("give --name, --stage or --list")
@@ -480,7 +493,7 @@ def main() -> int:
         print(f"  {info['paths']} cam/ paths -> {info['cameras']} animated "
               f"cameras + rails ({', '.join(c.name for c in cam_files)})")
     print(f"  -> {info['gltf']}")
-    return 0
+    return _finish()
 
 
 if __name__ == "__main__":

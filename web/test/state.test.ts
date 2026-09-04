@@ -65,7 +65,7 @@ import { WAIT_RULES } from "../src/script/waits";
 import { ACTIONS } from "../src/script/state/camera_action";
 import { hexKey, mergeTables } from "../src/script/registry";
 import type { ScriptJson } from "../src/bundle";
-import { BUNDLE_ROOT, skipNoBundle } from "../tools/lib/bundle_root";
+import { BUNDLE_ROOT, finishOrSkip } from "../tools/lib/bundle_root";
 
 const ROOT = BUNDLE_ROOT;
 const STAGES = [1, 2, 3, 4, 5, 6];
@@ -738,6 +738,4 @@ for (const stage of STAGES) {
         + `identically`, !firstDiff(want, replay), firstDiff(want, replay));
 }
 
-if (ran === 0) skipNoBundle("state");
-console.log(failures ? `\n${failures} failed` : "\nall passed");
-process.exit(failures ? 1 : 0);
+finishOrSkip("state", failures, ran);

@@ -100,6 +100,9 @@ def classify(raw: bytes) -> str:
             decompress_file(raw)
             return COMPRESSED
         except LZError:
+            # not-a-loss: this *is* the classification. The header looked like
+            # a plausible size, decompression says it was not one, so the blob
+            # is not compressed -- which is what `BLOB` below reports.
             pass
     return BLOB
 

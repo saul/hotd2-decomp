@@ -6,6 +6,7 @@
  * `ActorAbortAttackAndLeave` rather than a fallthrough, so no unmodelled state
  * can sit on a permit.
  */
+import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { ZombieActor } from "../actor";
@@ -83,7 +84,7 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   obj.pos.x += obj.vel.x;
   obj.pos.y += obj.vel.y;
   obj.pos.z += obj.vel.z;
-  ZombiePushOutOfWorldAndActors(obj, dt * 60);
+  ZombiePushOutOfWorldAndActors(obj, SecondsToTicks(dt));
 }
 
 function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,

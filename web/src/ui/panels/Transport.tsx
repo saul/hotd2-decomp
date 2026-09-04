@@ -91,8 +91,20 @@ export function Transport() {
                // mouse event -- so a touch scrub never sent `done` and the
                // camera stayed off the script until the next mouse drag ended
                // it. Pointer events cover all three devices.
+               //
+               // **And `pointercancel`, which is the half that was missing.**
+               // A pointer that stops being a scrub -- a touch the browser
+               // reinterprets as a page scroll, a pen leaving the digitiser,
+               // the window losing the pointer to a system gesture -- fires
+               // `pointercancel` and never `pointerup`. So `done` was never
+               // sent, the camera stayed off the script, and the only way out
+               // was to start another drag and finish it properly. The same
+               // handler answers both: whatever ended the drag, the drag
+               // ended, and the frame it ended on is the frame to settle at.
                onPointerUp={() => dispatch({ kind: "scrubFrame",
                                              frame: t.camFrame, done: true })}
+               onPointerCancel={() => dispatch({ kind: "scrubFrame",
+                                                 frame: t.camFrame, done: true })}
                onKeyUp={() => dispatch({ kind: "scrubFrame",
                                          frame: t.camFrame, done: true })} />
       </label>

@@ -33,13 +33,31 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-__all__ = ["SCHEMA_DIR", "GENERATED", "declarations", "file_digests",
+__all__ = ["SCHEMA_DIR", "GENERATED", "SOURCES", "declarations", "file_digests",
            "schema_hash", "client_source", "write_client_hash"]
 
 #: The interfaces the bundle is mirrored by, relative to the repository root.
 SCHEMA_DIR = Path("web") / "src" / "bundle"
 #: The generated file, which is excluded from its own digest.
 GENERATED = "schema_hash.ts"
+
+#: **The declaration files, named rather than globbed.**
+#:
+#: This was `d.glob("*.ts")` minus the generated file, which meant the digest
+#: covered `stage.ts`'s loader as well as its interfaces -- `getJson`, the
+#: format checks, and every refusal string in them. Rewording "Rebuild with
+#: tools/export_player.py" moved the hash, which invalidated every bundle on
+#: disk and demanded a full re-export, for an edit that cannot change one byte
+#: of a bundle. The digest is supposed to be cheap to keep; a check that
+#: expensive to satisfy is one that gets deleted.
+#:
+#: A bundle can disagree with a declaration. It cannot disagree with a
+#: function. So the loader moved to `load.ts` and this list names what is
+#: hashed -- and `verify_exporters.py` fails if a file on it grows runtime
+#: code, or if a declaration file appears in the directory and is not on it.
+#: A list that can silently omit a file would be worse than the glob.
+SOURCES = ("cameras.ts", "characters.ts", "manifest.ts", "scene.ts",
+           "script.ts", "sound.ts", "stage.ts")
 
 
 def _repo_root() -> Path:
@@ -92,7 +110,7 @@ def declarations(text: str) -> str:
 
 def _sources(root: Path | None = None) -> list[Path]:
     d = (root or _repo_root()) / SCHEMA_DIR
-    return sorted(p for p in d.glob("*.ts") if p.name != GENERATED)
+    return [d / name for name in sorted(SOURCES)]
 
 
 def file_digests(root: Path | None = None) -> dict[str, str]:

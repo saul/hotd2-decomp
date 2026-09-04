@@ -67,6 +67,7 @@ import {
   branchProjection, skipProjection, soundProjection, transportProjection,
 } from "./projection/chrome";
 import { SceneFog } from "../render/fog";
+import { TextureFilter } from "../render/texfilter";
 import { SceneLighting } from "../render/lighting";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
 import { loadStageInto } from "./stage_load";
@@ -100,7 +101,8 @@ const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
 
 /** The commands that change something worth remembering across a reload. */
 const PREF_COMMANDS: ReadonlySet<string> = new Set([
-  "toggle", "setLightMode", "setFogMode", "setPillarbox", "setSpeed",
+  "toggle", "setLightMode", "setFogMode", "setFilterMode", "setPillarbox",
+  "setSpeed",
 ]);
 
 export class Player implements PlayerView, PlayerCommands, PacerHost {
@@ -148,6 +150,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly freeRoam: FreeRoam;
   readonly bgm = new Bgm();
   readonly sceneFog: SceneFog;
+  readonly texFilter = new TextureFilter();
   readonly lighting: SceneLighting;
   readonly backdrop = new Backdrop();
   readonly rigs = new RigLayer();
@@ -280,6 +283,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
     this.sceneFog = new SceneFog(this.scene);
+    // The anisotropy ceiling is the renderer's to report, so the layer is
+    // told about it once rather than reaching for a global.
+    this.texFilter.setRenderer(this.renderer);
     this.lighting = new SceneLighting(this.scene);
     this.scene.add(this.backdrop.group);
     this.scene.add(this.rain.group);
@@ -461,6 +467,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get frozen(): boolean { return !!this.state.freeze; }
   get lightMode(): string { return this.lighting.lightingMode; }
   get fogMode(): string { return this.sceneFog.fogMode; }
+  get filterMode(): string { return this.texFilter.filterMode; }
+  get anisotropyLimit(): number { return this.texFilter.anisotropyLimit; }
   get camEye(): { x: number; y: number; z: number } {
     return this.camera.position;
   }
@@ -629,6 +637,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (prefs.fogMode) {
       this.runCommand({ kind: "setFogMode", mode: prefs.fogMode });
     }
+    if (prefs.filterMode) {
+      this.runCommand({ kind: "setFilterMode", mode: prefs.filterMode });
+    }
     if (prefs.pillarbox !== undefined) {
       this.runCommand({ kind: "setPillarbox", on: prefs.pillarbox });
     }
@@ -641,6 +652,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       toggles: this.toggles,
       lightMode: this.lighting.lightingMode,
       fogMode: this.sceneFog.fogMode,
+      // Not `anisotropyLimit`: that is what the hardware allows, not something
+      // the viewer chose, and persisting it would carry one machine's ceiling
+      // to another.
+      filterMode: this.texFilter.filterMode,
       pillarbox: this.pillarbox,
       speed: this.speed,
     });

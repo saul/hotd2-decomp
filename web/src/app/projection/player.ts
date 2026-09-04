@@ -53,6 +53,8 @@ export interface PlayerView {
   readonly pillarbox: boolean;
   readonly lightMode: string;
   readonly fogMode: string;
+  readonly filterMode: string;
+  readonly anisotropyLimit: number;
   readonly toggles: Readonly<Record<ToggleName, boolean>>;
   readonly paths: CamPaths | null;
   readonly camEye: { x: number; y: number; z: number };
@@ -112,6 +114,8 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     sound: v.sound,
     lightMode: v.lightMode,
     fogMode: v.fogMode,
+    filterMode: v.filterMode,
+    anisotropyLimit: v.anisotropyLimit,
     pillarbox: v.pillarbox,
     // A slice nothing is showing is not built. Its *selection* still counts,
     // though — the highlight set is computed whatever the panels are showing.

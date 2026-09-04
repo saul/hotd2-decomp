@@ -102,6 +102,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.scene3d = scene3d;
   // Honour the per-mesh fog bit and compile the radial-fog variant.
   p.sceneFog.prepare(p.scene3d.root);
+  // ...and the same moment for the texture filter: the materials only
+  // exist once the glTF is parsed, and the per-mesh sampler it carries is
+  // what the `asset` mode puts back.
+  p.texFilter.prepare(p.scene3d.root);
   // Adopt the dome models before lighting, so its material swap sees the
   // clones the backdrop made rather than the shared originals.
   p.backdrop.build(p.scene3d.root, p.ctx.scope,

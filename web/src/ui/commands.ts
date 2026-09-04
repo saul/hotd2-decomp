@@ -66,6 +66,7 @@ export type UiCommand =
   | { kind: "boxRig"; name: string; on: boolean }
   | { kind: "setLightMode"; mode: string }
   | { kind: "setFogMode"; mode: string }
+  | { kind: "setFilterMode"; mode: string }
   | { kind: "setPillarbox"; on: boolean }
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }

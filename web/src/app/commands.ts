@@ -37,6 +37,8 @@ import type { CharacterLayer } from "../render/characters";
 import type { ColiDebugLayer } from "../render/coli_debug";
 import type { DebugBoxLayer } from "../render/debug";
 import type { FogMode, SceneFog } from "../render/fog";
+import type { TextureFilter, TextureFilterMode }
+  from "../render/texfilter";
 import type { LightingMode, SceneLighting } from "../render/lighting";
 import type { SpawnLayer } from "../render/overlays";
 import type { PropLayer } from "../render/props";
@@ -94,6 +96,7 @@ export interface PlayerCommands {
   readonly cam: CameraRig;
   readonly lighting: SceneLighting;
   readonly sceneFog: SceneFog;
+  readonly texFilter: TextureFilter;
   readonly bgm: Bgm;
   readonly backdrop: Backdrop;
   readonly rain: Rain;
@@ -228,6 +231,9 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       return;
     case "setFogMode":
       p.sceneFog.setMode(c.mode as FogMode);
+      return;
+    case "setFilterMode":
+      p.texFilter.setMode(c.mode as TextureFilterMode);
       return;
     case "setVolume":  p.bgm.setVolume(c.volume / 100); return;
     case "toggleMute": p.bgm.setMuted(!p.bgm.muted); return;

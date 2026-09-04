@@ -343,6 +343,9 @@ export interface UiProjection {
   sound: SoundProjection;
   lightMode: string;
   fogMode: string;
+  /** Texture filtering, and the anisotropy the hardware actually allows. */
+  filterMode: string;
+  anisotropyLimit: number;
   pillarbox: boolean;
   wait: WaitProjection | null;
   /** The wait panel's `box` checkbox. See the `boxWait` command. */

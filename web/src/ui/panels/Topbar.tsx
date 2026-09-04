@@ -28,6 +28,21 @@ const FOG = [
   { value: "off", label: "off" },
 ];
 
+/**
+ * The filter override.
+ *
+ * `asset` is the default and the faithful one: the exporter writes a glTF
+ * sampler per mesh from the game's own TSP filter bit, so the bundle already
+ * says nearest or bilinear per surface. The rest force one everywhere.
+ */
+const FILTER = [
+  { value: "asset", label: "as the game" },
+  { value: "nearest", label: "nearest" },
+  { value: "bilinear", label: "bilinear" },
+  { value: "trilinear", label: "trilinear" },
+  { value: "aniso", label: "anisotropic" },
+];
+
 const MODES: { mode: "step" | "play" | "free"; label: string }[] = [
   { mode: "step", label: "Step" },
   { mode: "play", label: "Play" },
@@ -104,9 +119,12 @@ export function ViewSettings() {
   const pillarbox = useSlice((p) => p?.pillarbox);
   const lightMode = useSlice((p) => p?.lightMode);
   const fogMode = useSlice((p) => p?.fogMode);
+  const filterMode = useSlice((p) => p?.filterMode);
+  const anisoLimit = useSlice((p) => p?.anisotropyLimit) ?? 1;
   // Same argument as the stage select: two controlled `<select>`s with nothing
   // to be controlled by yet.
-  if (lightMode === undefined || fogMode === undefined) return null;
+  if (lightMode === undefined || fogMode === undefined
+      || filterMode === undefined) return null;
   return (
     <>
       <button className="kill" hidden={!shooting}
@@ -140,6 +158,24 @@ export function ViewSettings() {
                                             mode: e.target.value })}>
           {FOG.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </label>
+      <label title={"Every mesh carries its own filter in its TSP word and the"
+        + " exporter writes it into the glTF sampler, so 'as the game' is"
+        + " per-surface nearest or bilinear -- what the hardware actually did."
+        + " The rest force one filter on everything. Trilinear and anisotropic"
+        + " add a mip chain the original never had: they are not more faithful,"
+        + " they stop the long floors and walls shimmering at grazing angles."
+        + ` Anisotropic uses this machine's maximum, ${anisoLimit}x.`}>
+        Filter{" "}
+        <select value={filterMode}
+                onChange={(e) => dispatch({ kind: "setFilterMode",
+                                            mode: e.target.value })}>
+          {FILTER.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.value === "aniso" ? `${o.label} ${anisoLimit}x` : o.label}
+            </option>
           ))}
         </select>
       </label>

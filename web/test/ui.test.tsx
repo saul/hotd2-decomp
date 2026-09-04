@@ -75,6 +75,8 @@ function projection(): UiProjection {
              text: "stage" },
     lightMode: "auto",
     fogMode: "auto",
+    filterMode: "asset",
+    anisotropyLimit: 16,
     pillarbox: false,
     wait: { sub: "0x3B wait_enemies_alive", lines: [{ text: "3 alive" }] },
     waitBoxed: true,

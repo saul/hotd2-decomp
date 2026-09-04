@@ -34,6 +34,7 @@ export interface ViewPrefs {
   toggles: Partial<Record<ToggleName, boolean>>;
   lightMode?: string;
   fogMode?: string;
+  filterMode?: string;
   pillarbox?: boolean;
   speed?: number;
 }

@@ -108,8 +108,7 @@ ghidra/annotations/*.tsv      the names. The source of truth for both.
 Then get the baseline green before you change anything:
 
 ```sh
-cd web && npx tsc --noEmit && npm run test:port
-python3 tools/verify_port.py
+python3 tools/verify_all.py
 ```
 
 ### 2. Read the binary — with `/decomp`
@@ -173,13 +172,12 @@ number cannot be a key.
 Three checks, all of which can fail:
 
 ```sh
-cd web && npx tsc --noEmit          # test/ and tools/ are typechecked too
-npm run test:port                   # the port, headless: no three.js, no DOM
-cd .. && python3 tools/verify_port.py
-python3 tools/verify_layers.py      # layer boundaries -- always, not just on a move
-python3 tools/verify_player_ops.py  # if you touched script/ops/
-python3 tools/verify_player_dom.py  # if you touched index.html or a `$("#id")`
+python3 tools/verify_all.py         # all of them, ~10s, skips counted separately
 ```
+
+`verify_all.py` is the canonical list — `--list` prints what each check
+uniquely sees, `--only <name>` runs one while iterating. **A skip is not a
+pass:** three suites need an exported bundle and exit 3 without one.
 
 `verify_layers.py` holds the boundaries in `docs/PLAYER_ARCHITECTURE.md`. Its
 **error** rules must be zero — the layer direction, and `three` / DOM /
@@ -289,29 +287,20 @@ the next frame. Two consequences worth knowing before you write code:
 
 ## Traps that have already cost this project
 
-* **Clocks belong to the port.** `action.t` was advanced by the renderer, so
-  the strike's hit frame could only arrive if something was drawing it, and a
-  restored save sat on a half-played swing for ever. `ActorAdvanceMotion` is
-  in `game/`.
-* **A clamp added for one state applies to all of them.** The inner-ring stop
-  that keeps actors out of the camera also made the lunge unable to reach an
-  attack whose own distance is *inside* that ring — so zombies swung for ever
-  at a range they could not reach. Give the state its own floor.
-* **A permit held by an actor that cannot attack blocks everyone.** 161 of
-  stage 2's class-0x30 spawns have `attack_state <= 0`. Check before claiming,
-  and release on every path out — `ActorAbortAttackAndLeave` exists for that.
-* **`Math.random()` silently breaks the save state.** Two loads of one snapshot
-  diverge on the first swing. Draw from `ctx.rng` / the `Rng` passed in.
-* **The adjacent-array trap.** Export and read only what the *index source*
-  names; hunting for the end of a table finds the start of the next one.
-* **Object fields are polymorphic.** `obj+0x11C` is hit points for combat
-  classes and a sub-type selector for others. Check the class.
-* **A green build is not a working page.** `document.querySelector("#x") as T`
-  is a lie the type system cannot catch: a missing element is `null`, the cast
-  hides it, and the first `addEventListener` throws at startup behind a clean
-  `tsc` *and* a clean `vite build`. That has already happened here — a shell
-  `cd` failed, the markup edit never ran, and nothing noticed.
-  `verify_player_dom.py` is the guard; run it whenever you add a control.
+**[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list.** The ones that
+bite hardest in a port:
+
+* **L7** — clocks belong to the port. `ActorAdvanceMotion` is in `game/`.
+* **L8** — a clamp added for one state applies to all of them.
+* **L9** — a permit held by an actor that cannot attack blocks everyone.
+* **L10** — `Math.random()` silently breaks the save state.
+* **L11** — do not move a test across a function boundary.
+* **L6** — the adjacent-array trap.
+* **L3** — object fields are polymorphic; check the class.
+* **L15** — a green build is not a working page. `verify_player_dom.py` is the
+  guard; run it whenever you add a control.
+
+A new trap found here goes in `LESSONS.md`, not in this file.
 
 ## Committing: only ever your own hunks
 

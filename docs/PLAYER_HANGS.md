@@ -1,5 +1,11 @@
 # Where the player still stops
 
+**Scope, against the other bug list:** this file is what the *automated
+playthrough* trips on — defects found by driving the player end to end, each
+with the command that reproduces it. Bugs someone *reported from playing*, and
+whether each is fixed, are in [`BUGS.md`](BUGS.md). Neither file states a
+count that [`STATUS.md`](STATUS.md) generates.
+
 A work list, written from a full playthrough of stage 2 rather than from
 reading. Everything here is reproducible with one command and has its evidence
 attached. `[open]` items have **not** been read in the binary yet; do not

@@ -18,22 +18,22 @@ Run these before you commit. They are fast and they are the reason the
 boundaries still exist.
 
 ```sh
-python3 tools/verify_layers.py            # player layer boundaries
-python3 tools/verify_port.py              # the port matches the annotations, docs included
-python3 tools/verify_exporters.py         # no exporter swallows a failure in silence
-python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
-cd web && npx tsc --noEmit && npm run test:port && npm run test:bundle \
-    && npm run test:seek && npm run test:scope && npm run test:state \
-    && npm run test:ui && npm run test:projection && npm run test:camera \
-    && npm run test:pose && npm run test:render && npm run verify:ui
-python3 tools/baseline.py --game-dir ~/"THE HOUSE OF THE DEAD 2" --verify
+python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 ```
 
-`test:seek`, `test:state` and `test:camera` need an exported bundle. Without
-one they print `SKIP` and **exit 3**, which stops the chain above — that is
-deliberate. Exit 0 means a test ran and asserted things; 1 means it found them
-wrong; 3 means it asserted nothing. Build a bundle with
-`tools/export_player.py`, or point `HOTD2_BUNDLE` at one.
+That is the whole thing, and it takes about ten seconds. **`tools/verify_all.py`
+is the canonical list of checks** — one authored table, rendered into
+`docs/STATUS.md` and printed by `--list`. It used to be a shell block copied
+into this file and three skills; four of the five copies were stale and three
+omitted suites that had existed for weeks. Do not write a new copy; add a row
+to `CHECKS` instead, with the one sentence saying what only that check can see.
+
+**Exit 0 means a check ran and asserted things; 1 means it found them wrong;
+3 means it asserted nothing.** `verify_all.py` counts skips separately from
+passes and names them, because a skip that reads as green is how four
+regression tests came to be described as passing on machines that never ran
+them. Three suites need an exported bundle (`tools/export_player.py`, or point
+`HOTD2_BUNDLE` at one) and two need `--game-dir`.
 
 ### Layers, and the direction dependencies point
 
@@ -117,21 +117,17 @@ curated one now, but check an export's diff rather than trusting it.
 
 ## Things that have cost this project real time
 
-* The decompiler silently drops FPU arguments to the matrix calls. Re-read
-  every constant with `disassemble_bytes` and quote the raw hex.
-* `CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}`. Ghidra types all
-  six as float. It is wrong.
-* Object fields are polymorphic — `obj+0x11C` is hit points for combat classes
-  and a sub-type selector for others. Check the class.
-* A negative result from one agent is not a fact.
-* **A tool that prints nothing has not necessarily succeeded.**
-  `ghidra/run.sh` ran the headless analyzer under `set -e` and grepped the log
-  *after*, so a run that died on the project lock — which is every run made
-  while the Ghidra GUI is open — printed nothing, exited 0, and left
-  `git diff ghidra/annotations` clean. That is indistinguishable from "there
-  was nothing to export", and a session's renames stay uncommitted while you
-  believe they are saved.
-* **Verify against the disc, not against another copy of your install.** Four
-  `cam/` files were rotted in the local extract, and a whole restoration
-  engine plus a documented "NaN padding convention" were built to explain the
-  damage before anyone compared against `hotd2.iso`.
+**Read [`docs/LESSONS.md`](docs/LESSONS.md) before your first edit.** Twenty
+entries, each one paid for, each with a stable id so a commit message or a code
+comment can cite `L7` rather than restating it.
+
+It is one file because it used to be four — this one and three skills — with
+six entries duplicated across them in five wordings, already losing clauses.
+Then a new lesson was written into one list of four, which made three of them
+wrong the moment it landed. **Add new lessons there and nowhere else.**
+
+The four groups, so you know when you need it: reading the binary (the
+decompiler drops FPU arguments; Ghidra mistypes `CamEvalObjectPath6`; object
+fields are polymorphic), transcribing behaviour, running the tools (**a tool
+that prints nothing has not necessarily succeeded**), and believing what you
+are looking at (**a negative result from one agent is not a fact**).

@@ -80,11 +80,12 @@ this was tried before. Run `ListAgents` if a peer session may be live.
 Get the baseline green before changing anything, so a failure later is yours:
 
 ```sh
-cd web && npx tsc --noEmit && npm run test:port && npm run test:seek \
-  && npm run test:scope && npm run test:state && npm run test:ui \
-  && npm run test:projection && npm run verify:ui
-cd .. && python3 tools/verify_port.py && python3 tools/verify_layers.py
+python3 tools/verify_all.py
 ```
+
+`verify_all.py` is the canonical list of checks — see `CLAUDE.md`. A check that
+asserted nothing exits 3 and is reported as a **skip**, never as a pass, so
+read the summary line and not just the exit code.
 
 ### 1. Reproduce, and count
 
@@ -233,11 +234,7 @@ Three things, in this order:
 Then the full suite, and a worktree build so the commit stands alone:
 
 ```sh
-cd web && npx tsc --noEmit && npm run test:port && npm run test:seek \
-  && npm run test:scope && npm run test:state && npm run test:ui \
-  && npm run test:projection && npm run verify:ui
-cd .. && python3 tools/verify_port.py && python3 tools/verify_layers.py \
-  && python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
+python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 git worktree add --detach /tmp/standalone HEAD && cd /tmp/standalone/web \
   && npm ci && npx tsc --noEmit        # a commit here was already broken by
                                        # staging a hunk that needed a peer's file
@@ -279,24 +276,18 @@ committed, and reaching for one is the signal to stop and ask the user.
 
 ## Traps this list has already paid for
 
-* **A negative result from one agent is not a fact.** Two agents called the
-  sound ids unresolvable; a third found the table.
-* **Two clocks.** `Loop.advance` drains the accumulator into **whole** frames
-  and steps the walker once each; `Player.gameTick` hands the game phase
-  `frames: dt * 60`, which is fractional and can be several frames at once.
-  Establish which clock the thing you are debugging is on before blaming it —
-  an exact-frame cue is safe in the engine, where `obj+0x19C` counts up by one,
-  and is not automatically safe here.
-* **The screenshot is evidence and the render is not the game.** Stage 1's
-  block 4 renders perfectly and the enemies are simply outside the frame; stage
-  2's block 3 is a flat wall. Same fault class, and only one of them looks
-  broken.
-* **Object fields are polymorphic.** `obj+0x11C` is hit points for combat
-  classes and a sub-type selector for others. Check the class.
-* **The decompiler silently drops FPU arguments** to the matrix calls. Re-read
-  every constant with `disassemble_bytes` and quote the raw hex.
-* **A green build is not a working page.** `tsc` and `vite build` both pass on
-  a `querySelector` that returned null.
+**[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list**, and it is one
+file because it used to be four. The ones that bite hardest here:
+
+* **L17** — a negative result from one agent is not a fact.
+* **L12** — two clocks, and they are not the same clock. Establish which one
+  the thing you are debugging is on before blaming it.
+* **L19** — the screenshot is evidence and the render is not the game.
+* **L3** — object fields are polymorphic; check the class.
+* **L1** — the decompiler silently drops FPU arguments.
+* **L15** — a green build is not a working page.
+
+A new trap found here goes in `LESSONS.md`, not in this file.
 
 ## Done means
 

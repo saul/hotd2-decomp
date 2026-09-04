@@ -48,32 +48,48 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 
 ## Where it is now
 
-| Directory | Lines | Files | Layer | What it owns |
-|---|---|---|---|---|
-| `game/` | 19386 | 99 | engine | **the port.** No three.js, no DOM, no `Math.random` |
-| `render/` | 6125 | 24 | render | three.js. Observes engine state, owns nothing |
-| `app/` | 4756 | 21 | app | `main.ts`, `pacer.ts`, `loop.ts`, `ring.ts`, the adapters, the projection |
-| `script/` | 3169 | 25 | engine | `walker.ts` — the machine; `ops/`, `waits/`, `state/` |
-| `ui/` | 2785 | 26 | ui | React: one projection in, one command union out |
-| `bundle/` | 1325 | 8 | engine | one module per exporter block |
-| `core/` | 856 | 9 | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
-| `hud/` | 349 | 1 | ui | the shutter and the caption, drawn |
-| `audio/` | 248 | 1 | ui | `bgm.ts` |
+| Directory | Layer | What it owns |
+|---|---|---|
+| `game/` | engine | **the port.** No three.js, no DOM, no `Math.random` |
+| `render/` | render | three.js. Observes engine state, owns nothing |
+| `app/` | app | `main.ts`, `pacer.ts`, `loop.ts`, `ring.ts`, the adapters, the projection |
+| `script/` | engine | `walker.ts` — the machine; `ops/`, `waits/`, `state/` |
+| `ui/` | ui | React: one projection in, one command union out |
+| `bundle/` | engine | one module per exporter block |
+| `core/` | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
+| `hud/` | ui | the shutter and the caption, drawn |
+| `audio/` | ui | `bgm.ts` |
 
-38,999 lines. The four largest are `script/walker.ts` (1376), `app/main.ts`
-(1355), `game/actor.ts` (1002) and `game/class30/target.ts` (877);
-`game/class10/index.ts` used to be the largest of all and is now the class's
-assembly point at 137, with the civilian split across thirteen modules on the
-exe's own function boundaries. 82 declared `[diverges]`.
+**Line counts, file counts, the largest files and the divergence count are in
+[`STATUS.md`](STATUS.md), which is generated.** They used to be written here,
+and by the time a review measured them this document was 5,716 lines and
+seventeen divergences out of date while reading as though it had been checked.
+The table above is the half no tool can compute: which layer a directory is in
+and what it is *for*.
 
-### No open ratchets
+One shape worth reading off it anyway: `game/class10/index.ts` used to be the
+largest file in the tree and is now the class's assembly point, with the
+civilian split across thirteen modules on the exe's own function boundaries.
+That is the pattern every class is heading for.
 
-**Every rule in `tools/verify_layers.py` is now an `error` at zero.** Phase 3
+### The ratchets, and where their count lives
+
+**Every rule in `tools/verify_layers.py` is an `error` at zero.** Phase 3
 closed the last three: `render-drives-the-port` (12) and
 `no-actor-writes-in-render` (6) in step 21, `layers-are-systems` (1) in step
-23. This is the first time the file has had nothing pending in it, and the
-property it is worth stating plainly is that a *new* violation of any of the
-fourteen rules now fails the build rather than moving a number.
+23. That was the first time the file had nothing pending in it, and the
+property worth stating plainly is that a *new* violation of any of its rules
+now fails the build rather than moving a number.
+
+**That is not the same as "no ratchets".** `UNCITED_BASELINE` in
+`tools/verify_port.py` is one by this document's own definition — a count that
+may fall and may never rise — and the record called the repo ratchet-free while
+it stood. Every exported function in `game/` should cite the exe function it
+ports or declare itself `[port-only]`; the backlog is read down by whoever next
+opens each file with Ghidra beside them.
+
+**The current count of every ratchet is in [`STATUS.md`](STATUS.md)**, measured
+from the same construction the checker runs. Do not write one here.
 
 **`layers-are-systems` is closed.** It was at 1 — `FreeRoam` was never
 `world.add`ed. The argument that it was harmless was that free roam is
@@ -84,14 +100,10 @@ asked to `resync`, so a seek or a load left the camera wherever the previous
 state's last frame had put it. It is a render-phase system now, after
 `CameraDrawSystem`.
 
-The ratchet mechanism stays in the checker, and so does the rule about it: a
-count that may fall and may never rise, tied to the step that clears it.
-Lowering one is the point. **Raising one is a change to this document first**,
-and there is deliberately no suppression comment. The one ratchet still live in
-the repo is `UNCITED_BASELINE` in `tools/verify_port.py`, at 91 — every
-exported function in `game/` should cite the exe function it ports or declare
-itself `[port-only]`, and the backlog is read down by whoever next opens each
-file with Ghidra beside them.
+The mechanism stays in the checker, and so does the rule about it: a count
+tied to the step that clears it. Lowering one is the point. **Raising one is a
+change to this document first**, and there is deliberately no suppression
+comment.
 
 ### Input intent: what step 21 closed, and the rule it settled
 
@@ -476,8 +488,9 @@ fails to compile.
 readonly throughout, and `app/commands.ts` declares `PlayerCommands`; `Player`
 implements both. So what the UI may *read* and what a click may *move* are each
 written down, and neither can grow without a line appearing in the open. The
-length of `PlayerCommands` — 46 members against `PlayerView`'s 30 — is a
-standing measurement of how much of the player a click can reach.
+length of `PlayerCommands` against `PlayerView`'s is a standing measurement of
+how much of the player a click can reach; both counts are in
+[`STATUS.md`](STATUS.md).
 
 ### How a frame reaches the screen
 
@@ -756,9 +769,11 @@ fixed the cat, made structural instead of an `if`.
 
 The player has a lifetime problem the exe does not. It owns GPU resources, DOM
 nodes, event listeners and audio, and it can switch stage, seek, and restore a
-snapshot — none of which the game can do. Today that is managed by hand:
+snapshot — none of which the game can do. Before scopes it was managed by hand,
+and this is the measurement that argued for them — **a historical snapshot, not
+current state**:
 
-| | count |
+| measured before scopes landed | count |
 |---|---|
 | hand-written `detach()` methods in `render/` and `hud/` | 9 |
 | manual `.dispose()` / `removeFromParent()` calls | 37 |
@@ -766,10 +781,14 @@ snapshot — none of which the game can do. Today that is managed by hand:
 | `removeEventListener` | **6** |
 
 That last row is the argument, and three leaks of the same shape are what it
-predicts: `SpawnLayer.labels` is a `Map<string, CanvasTexture>` that `detach`
-never touches; `SceneLighting.lit` holds cloned `Material`s and is `.clear()`ed
-without disposing them; `props.ts` has a module-level `LABELS` cache with no
-owner at all.
+predicted: `SpawnLayer.labels` was a `Map<string, CanvasTexture>` that `detach`
+never touched; `SceneLighting.lit` held cloned `Material`s and was `.clear()`ed
+without disposing them; `props.ts` had a module-level `LABELS` cache with no
+owner at all. All three are scoped now.
+
+The table stays in the past tense on purpose: it is *evidence for a decision*,
+and evidence does not go out of date. A count of the tree as it stands belongs
+in [`STATUS.md`](STATUS.md), where it is generated.
 
 A **scope** is a named node in a disposal tree. Things register with it; when it
 dies they are undone, children first, in reverse order of registration.
@@ -881,8 +900,8 @@ cannot avoid it.
 
 ### Seeing it: the scope panel
 
-A leak is invisible until it is counted, so the debug sidebar grows a **Scopes**
-panel showing the live tree:
+A leak is invisible until it is counted, so the debug sidebar has a **Scopes**
+panel (`ui/panels/Scopes.tsx`) showing the live tree:
 
 ```
 app                                    opened f0      3 owned
@@ -962,16 +981,18 @@ python3 tools/verify_layers.py --list   # every violation
 
 Two severities, and the difference is the whole design:
 
-* **error** — must be zero, and a new one fails immediately. Thirteen of the
-  fourteen rules: the layer direction; `three`, DOM and `Math.random` inside
+* **error** — must be zero, and a new one fails immediately. Every rule in
+  this file, currently: the layer direction; `three`, DOM and `Math.random` inside
   the engine; `three` in `core/` specifically, because `System` must not be
   renderer-bound; the engine or an actor written from `render/`, and the engine
   from `ui/`; an engine function *called* from `render/`; `ui/` reading
   anything but the projection; one `BAMS_TO_RAD`; and no DOM insertion anywhere
   under `web/src/`.
 * **ratchet** — a violation the architecture has not reached yet. The count is
-  recorded here against the step that clears it, and the build fails if it
-  **grows**. One of them; see "The one open ratchet" above.
+  recorded against the step that clears it, and the build fails if it
+  **grows**. None in this file; see "The ratchets, and where their count
+  lives" above for the one the repo does have, and [`STATUS.md`](STATUS.md)
+  for its current value.
 
 Several of these rules are worded to measure the thing they are *about* rather
 than a proxy for it, and the distinction has bitten. `render-drives-the-port`
@@ -1115,23 +1136,17 @@ first `enum` it meets, in a way that looks like a real failure.
 spawns where the Python reference says 49. Capture it anyway — the test is that
 the output does not change, not that it passes.
 
-Afterwards every one of those must be **byte-identical**, and the full check
-block in `CLAUDE.md` must pass. Each check sees something none of the others
-can:
+Afterwards every one of those must be **byte-identical**, and
+`python3 tools/verify_all.py` must pass.
 
-| check | what only it can see |
-|---|---|
-| `test:port` | the state machines, driven headless against hand-written tables |
-| `test:seek` | that a seek reaches the address it was asked for |
-| `test:scope` | that lifetimes are given back |
-| `test:state` | that a save/load and a seek reach the *same world* as play did |
-| `test:projection` | that unchanged slices keep their identity |
-| `test:ui` | that the page has the shape the stylesheet expects |
-| `verify:ui` | the two rules that need an AST |
-| `verify_layers` | the layer boundaries, and the one open ratchet |
-| `verify_port` | that every citation matches `functions.tsv` |
-| `verify_player_dom` | that the stylesheet and the markup agree, both ways |
-| `verify_player_ops` | that the op table matches the implementation |
+**The list of checks, and the sentence saying why each is not redundant, lives
+in `tools/verify_all.py`** — it is rendered into [`STATUS.md`](STATUS.md) and
+printed by `--list`. It used to be a block copied into `CLAUDE.md`, into two
+skills, and into this document as a table; four of the five copies were stale
+and three of them omitted suites that had existed for weeks. The `sees` field
+beside each check is the load-bearing part: a check whose `sees` duplicates
+another's is a check to delete, and they are only comparable written next to
+each other.
 
 `test:state` is the strictest of them, because the others only prove that
 *playing forward* did not change. It plays two different histories to one
@@ -1166,13 +1181,20 @@ services — and the three streaming calls belong to the ops that make them.
 "`script/`: the machine, and the state the script drives" above is the
 reasoning.
 
-**The last ratchet, and the harness the shot queue makes possible.** Step 21
-closed `render-drives-the-port` and `no-actor-writes-in-render` and made both
-errors — see "Input intent" above for the shape and for the rule it settled.
-`layers-are-systems` is still at 1 and step 23 pays it. What step 21 set up and
-did not finish is the **input replay harness**: `g_shot_requests` is a log, but
-replaying one headlessly needs a `pickShot` a run with no renderer can answer,
-and that means the skeleton's forward kinematics in `game/`.
+**The harness the shot queue makes possible.** Step 21 closed
+`render-drives-the-port` and `no-actor-writes-in-render` and made both errors —
+see "Input intent" above for the shape and for the rule it settled. What it set
+up and did not finish is the **input replay harness**: `g_shot_requests` is a
+log, but replaying one headlessly needs a `pickShot` a run with no renderer can
+answer, and that means the skeleton's forward kinematics in `game/`. Until then
+a headless replay resolves every shot as a miss, so the harness is deliberately
+not shipped rather than shipped half-working.
+
+This paragraph used to end "`layers-are-systems` is still at 1 and step 23 pays
+it", three sections after another one said step 23 had closed it. Both were
+written in the same commit series. That is what a status kept in two places
+does, and it is why the counts now live in [`STATUS.md`](STATUS.md) and are
+generated.
 
 Everything else here is built. Work that changes the shape of the player
 updates this document in the same commit; a plan that describes a layout the
@@ -1187,8 +1209,10 @@ escalation path in the repo pointed at a section that did not exist, and the
 checker printed step numbers against nothing. A rule you cannot escalate is a
 rule people route around.
 
-The steps are the phases of [`REVIEW-2026-09-03.md`](REVIEW-2026-09-03.md),
-numbered as that plan numbers them, so there is one list and not two.
+The steps are the phases of the two whole-repo reviews, numbered as those
+plans number them, **so there is one ordered list and not three**. A review
+file records what was found and the shape of each fix; this table records the
+order and the state, and it is the one that is maintained.
 `☐` untouched · `◐` in progress · `☑` done.
 
 | Step | What | State |
@@ -1203,7 +1227,13 @@ numbered as that plan numbers them, so there is one list and not two.
 | 25 | Bundle schema hash in `manifest.json`, per-stage format | ☑ |
 | 26 | **S7 — `app/pacer.ts`** out of `main.ts` and `hudInputs` into `projection/hud.ts` (done); S8 — the `characters.py` split and the `.rdata`/`.text` rule | ◐ |
 | 27 | **The snapshot ring and a `rewind` command** — `app/ring.ts` | ☑ |
-| 28–32 | **Phase 4 — docs that describe the tree.** `README`, a generated `STATUS.md`, `PLAN.md`, `LESSONS.md` | ☐ |
+| 28–32 | **Phase 4 — docs that describe the tree.** `README` rewritten as the front door; `STATUS.md` **generated** by `tools/status.py` and checked by `verify_all.py`; `LESSONS.md` merged from the four drifting traps lists; the check block collapsed to `tools/verify_all.py`. What is left is `PLAN.md`'s descoping | ◐ |
+| 33–37 | **Review 2 (`N1`–`N20`).** Five phases, one row each below; the findings and the shape of each fix are in [`REVIEW-2026-09-04.md`](REVIEW-2026-09-04.md) and are not restated here | ◐ |
+| 33 | The five regressions the delta introduced (`N1`–`N5`) | ☐ |
+| 34 | The checks that cannot see their neighbour (`N6`–`N11`, `N16`). `N6` bumps `BUNDLE_FORMAT` and forces a re-export | ☐ |
+| 35 | The fixes weaker than the record says (`N12`, `N13`, `N15`) | ☐ |
+| 36 | **The bundle-free fixture** — `test/fixtures/mini_stage`, so `seek`, `state` and `camera` run on a machine with no game assets. **Everything in phase 5 waits on this**, and it is the reason three rows of `STATUS.md`'s check table say `bundle` | ☐ |
+| 37 | `node:test` and one shared `check`; `S3`'s first cut; the replay log made real (`N14`) | ☐ |
 
 **If a rule here cannot be satisfied by the work in front of you, say so, name
 the step above that clears it, and ask whether to do that step first or change
@@ -1219,9 +1249,11 @@ cheaply checkable because both sides are text.
   `ghidra/annotations/functions.tsv`, with the same name.** A renamed symbol or
   a typo'd address fails the build rather than rotting.
 * **Report the coverage.** Count annotated functions in the gameplay address
-  ranges against those with a port. That number — "148 of 293 gameplay
-  functions ported" — is the most honest progress metric this project could
-  have, and it is free.
+  ranges against those with a port. That ratio is the most honest progress
+  metric this project could have, and it is free. **Both halves are filtered by
+  the same address ranges** — they were not, and the figure read fifteen points
+  high in the flattering direction. Its current value is in
+  [`STATUS.md`](STATUS.md); do not quote it here.
 * **List the divergences.** Every `[diverges]` tag, gathered into the report,
   so the places the port is knowingly wrong are one command away instead of
   spread through the tree.

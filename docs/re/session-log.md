@@ -10536,3 +10536,104 @@ camera path itself — `CamPaths` from the stage's `cam.json`, then
 without that because its own question is about the *frame number*; anything
 asking about **where the camera is** has to seat it, or every distance in the
 trace is measured from the origin.
+
+## Four documentation findings, closed by deleting the second source
+
+`N17`–`N20` of the 2026-09-04 review are all one failure wearing four coats: a
+fact written in two places, one of which is not checked. The previous round
+answered that by correcting the numbers, and every one of them was wrong again
+within the week. So this round removed the second source instead.
+
+**What the drift actually measured, before it was removed.**
+`PLAYER_ARCHITECTURE.md` claimed 38,999 lines against 44,715, "82 declared
+`[diverges]`" against 99, a coverage ratio of "148 of 293" against the 156 of
+256 its own checker printed on the same commit, and `PlayerCommands` at 46
+members against 49. `PLAN.md` claimed 202 named functions against 614 and ten
+verifiers against twenty-three. `hod2lib/__init__.py` announced `mot` as "the
+last unsolved format" with `mot.py` beside it in the same directory, at
+`0.6.0`, through a bundle format bump to 3, while nine modules it never
+mentioned were added around it.
+
+Two of those numbers had been *hand-corrected* in the previous round. That is
+the finding: correcting a hand-maintained number is not a fix, it is a
+postponement, and it is worth saying plainly because the correction feels like
+one.
+
+### `tools/status.py` and the friction it buys
+
+`docs/STATUS.md` is generated: the tree by directory, coverage, class coverage,
+the citation count, `[diverges]`, `[open]`, the two UI interface seams, the
+ratchets, and the check table. `status.py --check` is a check in
+`verify_all.py`, so a commit that moves a number and does not regenerate fails.
+
+That friction was the deliberate call, and it is not free — a peer's
+uncommitted edit under `web/src/` will fail the check on your tree too. The
+alternative is the state the reviews found twice. The failure message names the
+one command that fixes it.
+
+The measurements come from the checker, not from a copy of its logic:
+`verify_port.coverage_counts` and `class_counts` were split out of the two
+`check_*` functions that printed them, and `verify_layers.build_rules` was
+hoisted out of `main`. Both refactors leave their checkers' output byte
+identical, which was the point of doing them that way round.
+
+### `tools/verify_all.py`, and what a skip is
+
+One authored table — name, command, the sentence saying what only that check
+can see, what it needs — replacing five shell blocks of which four were stale
+and three omitted suites that had existed for weeks. `status.py` imports
+`CHECKS` and renders it, so the documentation of what is checked and the thing
+that runs it are one source.
+
+**Skips are counted separately from passes and named.** Exit 3 already meant
+"asserted nothing" and `CLAUDE.md` deliberately let it break the shell chain;
+what it could not do was distinguish, in a summary, between a green run of
+twenty-one checks and a green run of eighteen with three that never fired. That
+distinction is `N3`'s whole subject and four of the previous round's regression
+tests lived on the wrong side of it.
+
+The `sees` field is load-bearing rather than decorative: a check whose `sees`
+duplicates another's is a check to delete, and they are only comparable written
+next to each other.
+
+### `docs/LESSONS.md`
+
+Four traps lists became one, `L1`–`L20`, cited by id. Six lessons appeared in
+more than one list in five wordings and the copies had already started losing
+clauses — the polymorphic-field trap (`L3`) was in all four and only `/decomp`'s
+still remembered `obj+0x1390`. The immediate cause of the finding was a new
+lesson written into one list of four, which made three wrong the moment it
+landed.
+
+### The check that came out of it
+
+`verify_exporters.py` now checks `hod2lib/__init__.py`'s module list against
+the package on disk, in both directions. A list of files is checkable, and this
+one had been wrong for weeks.
+
+**Two wrong turns getting there, both about regexes over prose.** The first
+pattern anchored module rows at "name, two spaces, text" and read the wrapped
+continuation of `container`'s description — a line beginning `decompression` —
+as a module. Loosening the anchor to any indent then read `is`, `which` and
+`unimplemented` out of the surrounding paragraphs. The fix was not a cleverer
+regex but a docstring with one unambiguous block: every module row at exactly
+four spaces, prose in column 0, continuations indented past the name. The
+lesson generalises — a checker over free-form prose wants the prose given a
+shape, not the pattern given more cases. Watched failing with `mot` deleted
+from the list before it was trusted.
+
+### What is now canonical for what
+
+`STATUS.md` every count · `verify_all.py` the checks · `LESSONS.md` the traps ·
+`PLAYER_ARCHITECTURE.md`'s Order of work the single ordered plan, with both
+review files contributing findings and neither carrying a competing one ·
+`PROGRESS.md` phase and format status · `BUGS.md` reported bugs ·
+`PLAYER_HANGS.md` what the automated playthrough trips on. `README.md` was
+rewritten around that table; the Blender and glTF material it had accumulated
+moved to `EXPORTING.md`.
+
+`N17`'s sharpest instance is worth keeping: `PLAYER_ARCHITECTURE.md` said in
+one section that step 23 had closed `layers-are-systems`, and three sections
+later that it was still at 1 and step 23 would pay it. Both sentences were
+written in the same commit series. Nothing was lying; the file simply had two
+places to say the same thing.

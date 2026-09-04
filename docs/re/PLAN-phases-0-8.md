@@ -84,7 +84,7 @@ reference. Resolving those gaps is Phase 4.
 
 Found at `0x0040ACD0`. LZSS, 8 KB window, LSB-first flag bits interleaved with
 payload bytes. Verified against all 793 compressed files with zero failures.
-Full spec in [`formats/lz.md`](formats/lz.md).
+Full spec in [`../formats/lz.md`](../formats/lz.md).
 
 Historical note on the original framing, kept because the lesson generalises:
 

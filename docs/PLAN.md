@@ -6,26 +6,29 @@ This file replaces it, because the questions changed: the formats are solved,
 and what is left is **behaviour** — the code that decides what appears, where,
 and when.
 
-A whole-repo review on 2026-09-03 (GitHub issue #1) is transposed into
-[`REVIEW-2026-09-03.md`](REVIEW-2026-09-03.md), with sixteen findings and a
-five-phase plan. **Read it before this file**: it argues that several of the
-numbers below are measured by checks that cannot fire, and phase 0 of that plan
-is the work that makes them trustworthy.
+Two whole-repo reviews are transposed from their GitHub issues into
+[`REVIEW-2026-09-03.md`](REVIEW-2026-09-03.md) (sixteen findings) and
+[`REVIEW-2026-09-04.md`](REVIEW-2026-09-04.md) (twenty). **Read them before
+this file**: the first argues that several of the measurements below were taken
+by checks that could not fire, and its phase 0 is the work that made them
+trustworthy.
 
 ## Where this actually stands
 
-Measured, not estimated:
+**The numbers are in [`STATUS.md`](STATUS.md), which is generated.** This table
+used to carry them and drifted badly — it claimed 202 named functions against
+614, and ten verifiers against two dozen — which is exactly why no document
+states a countable fact any more.
+
+What is *not* countable, and belongs here:
 
 | | |
 |---|---|
-| Asset formats | **8 of 8 solved** — `lz`, container, `nl1`, `texbank`, `cam`, `evt`, `coli`, `mot`. No directory in the game is unread. |
-| Ghidra database | 2,523 functions; **202 named + 145 globals** committed in `ghidra/annotations`, replayable with `./ghidra/run.sh rebuild` |
-| Spawn classes | 35 used; **12 have a character-type rule**; 658 of 1,225 spawns unidentified |
-| Character types | **85 resolved** to a named asset file |
-| Motions | 1,058 across 49 banks, all structurally verified |
-| Object rigs | **12 of 31** `CamEvalObjectPath6` callers transcribed |
-| Player | **W1–W5 shipped** — camera, script walking, play mode, audio, fog, minimap |
-| Verifiers | 10, all passing |
+| Asset formats | **all solved** — `lz`, container, `nl1`, `texbank`, `cam`, `evt`, `coli`, `mot`. No directory in the game is unread. Phase detail in [`PROGRESS.md`](PROGRESS.md). |
+| Ghidra database | replayable from the committed annotations with `./ghidra/run.sh rebuild` |
+| Spawn identification | the largest remaining gap, and the one the player feels most — see **P1** |
+| Object rigs | a minority of the 31 `CamEvalObjectPath6` callers are transcribed — see **P3** |
+| Player | shipped, and now runs the gameplay as a port rather than an interpretation — see [`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md) |
 
 ## What "complete" means — three different bars
 
@@ -41,10 +44,23 @@ visually. *The nearest useful milestone, and the one to aim at.* Needs spawn
 identification and character assembly, both now unblocked.
 
 **3. Behaviour-complete** — every code path that decides what happens is read.
-*Far, and possibly not worth finishing.* The zombie alone has 54 states; class
-`0x41` has 79 constructors. Much of it is per-instance combat detail a player
-does not need. **Recommend explicitly descoping this** rather than leaving it
-as an open-ended obligation.
+*Far, and still not worth finishing in full.* The zombie alone has 54 states;
+class `0x41` has 79 constructors.
+
+**This bar was descoped once and the descoping has since been overtaken**, so
+say what actually happened rather than leaving a stale recommendation standing.
+The browser player turned out to be the reason to read behaviour: a misread
+table is an argument, and a misread table that walks a zombie through a wall is
+a bug report. So the classes the player needs *have* been transcribed —
+including the zombie's combat states, class `0x41`'s item containers and the
+thrower's four behaviour sets — and `tools/verify_port.py` reports how far that
+has got.
+
+The scoping rule that replaces the old descoping: **read what the player makes
+visible, and say `[open]` about the rest.** What is transcribed is measured in
+[`STATUS.md`](STATUS.md); what the port knowingly gets wrong is a `[diverges]`
+with a reason beside it. Neither is an open-ended obligation, and both are
+counted.
 
 The rest of this plan is ordered by what unblocks the player.
 
@@ -100,14 +116,21 @@ The survey also records the trap that cost a session: **the 9-vs-22 split by
 "does it call `AssetDrawSlot`" finds rigs but does not define them.** The
 stage-2 car's poser never draws. Follow the poser to its `obj[0]`.
 
-## P4 — Behaviour, scoped deliberately
+## P4 — Behaviour, scoped by what the player makes visible
 
-Do **only** what the player needs, and write down that the rest is descoped:
+Do what the player needs, and let the port say how far that has got.
 
-* **In scope:** which motion a class starts in; how a class despawns; which
-  camera path gates it. These decide what is on screen.
-* **Out of scope, explicitly:** the zombie's 54 combat states, the 79 class-`0x41`
-  constructors beyond their asset, per-instance AI, damage tuning.
+* **Always in scope:** which motion a class starts in; how a class despawns;
+  which camera path gates it. These decide what is on screen for every class,
+  read or not.
+* **In scope once a class is on screen and misbehaving:** its state machine, in
+  full, through `/gameplay-port`. The zombie's combat states, class `0x41`'s
+  constructors and the thrower's behaviour sets were all listed here as
+  out-of-scope and are now transcribed, because each of them produced a visible
+  defect that could not be fixed without reading it.
+* **Still out of scope:** damage tuning and per-instance combat detail that
+  nothing on screen distinguishes. When one of those turns out to matter, it
+  moves — with a `[proved]` reading behind it, not a guess.
 
 The ten shared behaviour functions at `g_prop_behaviours` (`0x005926A8`) are the
 best-value target — three of them play sounds, and they serve classes `0x12`,

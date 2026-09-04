@@ -101,7 +101,8 @@ Pick the check that could actually fail:
   **Log the path** — the user looks at these.
 * **Use EEVEE, never Workbench.** Workbench fakes wrap modes and lighting and
   has produced false conclusions here twice.
-* Run the full suite before committing: `for v in tools/verify_*.py; do ...`
+* Run the full suite before committing: `python3 tools/verify_all.py --game-dir ...`
+  — the canonical list, and it counts skips separately from passes.
 
 ### 5. Document
 
@@ -147,19 +148,21 @@ Both of these are the difference between naming a thing and guessing at it:
 
 ## Traps that have already cost this project
 
-* **The decompiler silently drops FPU arguments** to the matrix calls.
-  Re-read every constant with `disassemble_bytes` and quote the raw hex.
-* **`CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}`.** Ghidra types
-  all six as float. It is wrong.
-* **Match brace depth on the matrix stack.** `MatrixStackPush(0)` duplicates
-  the top, so parts are siblings — unless a routine holds a push open, which
-  makes a real parent/child chain. Count pushes and pops.
-* **Two consecutive `MatrixTranslate` calls compose by addition.**
-* **Object fields are polymorphic.** `obj+0x11C` is hit points for combat
-  classes and a sub-type selector for others; `obj+0x1390` is a descriptor tail
-  for most classes and a parent actor pointer for one. Check the class.
-* **A negative result from one agent is not a fact.** Two agents reported the
-  sound ids unresolvable; a third found the table.
+**[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list**, and it is one
+file because it used to be four — the polymorphic-field trap was in all of
+them and only one still remembered `obj+0x1390`. The ones that bite hardest
+when reading the binary:
+
+* **L1** — the decompiler silently drops FPU arguments to the matrix calls.
+* **L2** — `CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}`; Ghidra
+  types all six as float.
+* **L4** — match brace depth on the matrix stack.
+* **L5** — two consecutive `MatrixTranslate` calls compose by addition.
+* **L3** — object fields are polymorphic; check the class.
+* **L17** — a negative result from one agent is not a fact.
+* **L18** — verify against the disc, not another copy of your install.
+
+A new trap found here goes in `LESSONS.md`, not in this file.
 
 ## Committing: only ever your own hunks
 

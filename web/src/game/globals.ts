@@ -22,6 +22,48 @@ import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 
 /**
+ * `g_app_state` (`0x009C8E98`) — the game's top-level screen, and something
+ * the engine really does `switch` on: `FUN_004043C0` has arms for 3 and for
+ * 5/9/0x0A/0x0B.
+ *
+ * Only the members the port has evidence for are here; the shell's other
+ * screens stay unnamed rather than guessed. `CommitAppState` (`FUN_0040E860`)
+ * is the writer a state *request* goes through, and it applies the request at
+ * `g_app_state_pending` (`0x007C17A0`) at the end of the frame.
+ */
+export enum AppState {
+  /**
+   * The attract demo. `RunAttractDemo` (`FUN_00426800`) advances only while
+   * this is the state, and it is `IsPlayerAttackable`'s (`FUN_00409DC0`)
+   * unconditional-attack override — the demo has no real player, so its
+   * `g_player_state` is never 5 and nothing would ever attack it.
+   */
+  Attract = 5,
+  /**
+   * A stage, being played. `FUN_00414FC0` requests exactly this on the start
+   * press that spends a credit, and `CommitAppState` leaves `g_player_state`
+   * alone only for 6 and 7 — so 6 and 7 are the only two states with live
+   * players in them, and 7 is the game-over arm. `[proved]`.
+   *
+   * **This is where the port lives.** `ResolveHit` (`FUN_00409430`) reads
+   * `g_app_state` twice and both reads ask "is it 6": at anything else it
+   * suppresses gore, dismemberment and the hit result outright.
+   */
+  InPlay = 6,
+  /**
+   * Boot. Stamped once, by `FUN_0040E4A0`, whose only caller is the startup
+   * routine `FUN_0049E4A0` — the one that reads `Hod2.ini` — and which resets
+   * the whole data segment (`FUN_0040A920`, `g_app_state = 0`) before setting
+   * it. The main loop `FUN_0049E220` draws nothing while it holds
+   * (`0049E3DC`), so it is the state the game is in before the first screen.
+   *
+   * `[proved]`, and it is not a shutdown: `FUN_0040E4A0` has exactly one
+   * xref and it is on the way in, not the way out.
+   */
+  Boot = 0x10,
+}
+
+/**
  * One rain drop, in the camera's own space.
  *
  * Three floats, which is exactly what the exe's array holds: 12 bytes a
@@ -370,14 +412,51 @@ export const G = {
    */
   g_scene_state_major_entered: 0,
   /**
-   * `g_app_state` — 0x009C8E98. `IsPlayerAttackable`'s attract-mode override:
-   * at 5 it returns true whatever the player state, because the demo has no
-   * real player and would otherwise never be attacked.
+   * `g_app_state` — 0x009C8E98. Which of the game's top-level screens is
+   * running. **The port sits at {@link AppState.InPlay}, 6**, because that
+   * is the state the engine is in while a stage is being played, and the port
+   * is never anything else.
    *
-   * The port has no attract mode, so this stays 0 and the clause is inert —
-   * transcribed because the clause is real.
+   * It used to sit at 0 with a comment calling every clause that reads it
+   * inert. That was wrong in a way that only bites once something transcribes
+   * the *other* read: `ResolveHit` (`FUN_00409430`) raises `obj+0x34 |= 0xE00`
+   * on the actor it hits whenever this is **not** 6, and those three bits stop
+   * the part swap, the dismemberment and the hit result. At 0 that fires on
+   * every shot in the game.
+   *
+   * **Why 6 is in play**, `[proved]`, two ways:
+   *
+   * 1. `FUN_00414FC0` — the start-button-with-a-credit path — calls
+   *    `RequestAppState(6)` (`FUN_0040E850`) and sets the player's state.
+   *    Pressing Start *is* the transition into 6.
+   * 2. `CommitAppState` (`FUN_0040E860`) ends with
+   *    `if (pending < 6 || pending > 7) g_player_state = 9` for both players.
+   *    6 and 7 are the only states it leaves a live player alone in, and 7 is
+   *    the game-over arm `FUN_00460530` requests when the continue countdown
+   *    expires.
+   *
+   * A third, independent one: `FUN_0049F380` stores **6 directly** —
+   * `MOV dword ptr [0x009c8e98], 0x6` (`c705988e9c0006000000`) at
+   * `0x0049F546`, beside `[0x009C7019] = 1`.
+   *
+   * That third one is also why `CommitAppState` is **not** the only writer,
+   * which an earlier reading of this global claimed. `g_app_state` has five
+   * writers across six sites — `FUN_0049F380` twice, `CommitAppState`,
+   * `FUN_0040E4A0`, `FUN_0040A920` and `FUN_0041E1D0` — and at least two of
+   * them store a literal straight into the word rather than going through
+   * `RequestAppState`. So a state change does **not** always land on a frame
+   * boundary, and code that assumes it does would be wrong.
+   *
+   * The other values the port has any use for: **5 is the attract demo** —
+   * `RunAttractDemo` (`FUN_00426800`) only advances while it is 5, and that is
+   * `IsPlayerAttackable`'s override — and **0x10 is boot**, before which
+   * nothing is drawn. 3, 4, 9, 0x0A, 0x0B, 0x0C and 0x0F are the shell's other
+   * screens and what each one *is* stays `[open]`.
+   *
+   * There is no `g_app_state_pending` (0x007C17A0) here: the port has no
+   * screen to change to, so the request/commit pair has nothing to do.
    */
-  g_app_state: 0,
+  g_app_state: AppState.InPlay as number,
   /**
    * `g_player_state` — 0x009A5C62 + player*0x98, s16. 5 is *in play*, and
    * `IsPlayerAttackable`'s third clause. `AdvanceToNextScene` (`FUN_0045FFF0`)
@@ -725,7 +804,7 @@ export function ResetGameGlobals(): void {
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
   G.g_scene_state_major_entered = 0;
-  G.g_app_state = 0;
+  G.g_app_state = AppState.InPlay;
   G.g_player_state = [0, 0];
   G.g_cam_path_frame = 0;
   G.g_coli_full_set = [];

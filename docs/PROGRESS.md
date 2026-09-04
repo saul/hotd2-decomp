@@ -440,10 +440,20 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     ([`formats/sound.md`](formats/sound.md)); the scene-entry path that plays
     `ST1_AR`..`ST6_AR` is not. `PlaySoundId` has 496 callers, so this wants the
     scene-entry path, not an xref sweep.
-20. What is `DAT_009C8E98`? It selects the plain vs `_AR` BGM mix
-    (`== 6`), gates `EvtInterpreterLoop`'s hardcoded scene-5 skip (`== 5`), and
-    picks the entry step in `FUN_0045EBC0` (`== 5 || == 9`). Read as "scene id"
-    in one place and "scene state" in another; the two readings disagree.
+20. ~~What is `DAT_009C8E98`?~~ **Closed.** It is `g_app_state`, the game's
+    top-level screen: **6 is in play**, 5 is the attract demo, 7 is the
+    game-over arm and 0x10 is boot. `CommitAppState` (`FUN_0040E860`) applies
+    the request left at `g_app_state_pending` (`0x007C17A0`), but it is **not**
+    the only writer — five functions write the word across six sites, and
+    `FUN_0049F380` and `FUN_0040E4A0` store a literal into it directly, so a
+    change does not always land on a frame boundary. What fixes 6 is that
+    `FUN_00414FC0` — the start press that spends a credit — requests exactly
+    6, that `FUN_0049F380` stores 6 outright
+    (`c705988e9c0006000000` at `0x0049F546`), and that `CommitAppState` ends with
+    `if (pending < 6 || pending > 7) g_player_state = 9`, so 6 and 7 are the
+    only two states it leaves a live player in. Neither of the old readings
+    ("scene id", "scene state") was right. What each of 3, 4, 9, 0x0A, 0x0B,
+    0x0C and 0x0F *is* is still `[open]`.
 21. What sets `obj+0x1368` bits 3, 4, 6 and 7? `ChooseDeathMotion` overrides
     the directional death with motions 428, 421, 633 and 553 for them. It is
     **not** the destroyed-zone mask -- that is `obj+0x1318`, 0x50 bytes

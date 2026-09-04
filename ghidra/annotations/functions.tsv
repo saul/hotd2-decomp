@@ -66,7 +66,7 @@
 00409270	ActorClaimHitSlot	14-slot table at g_hit_slots; sets obj+0x38 |= 0x40
 004092d0	ActorFreeHitSlot
 004092f0	DispatchHit
-00409430	ResolveHit	body-part and damage tables indexed by actor type
+00409430	ResolveHit	body-part and damage tables indexed by actor type. Reads g_app_state (0x009C8E98) TWICE, and both reads are about being out of play. At 0x00409495, when g_app_state != 6 it raises obj+0x34 |= 0xE00 on the actor being hit (a1988e9c00 / 83f806 / 7409 / 8b4734 / 80cc0e / 894734) -- three bits with three readers: 0x200 makes ActorSwapDamagedPart return before it does anything (f6c502 at 0x00409916), 0x400 skips both the sever arm (f6c604 at 0x004095BD) and the torso death-wound arm (f6c404 at 0x004096C0), and 0x800 forces g_hit_result to 0 (f6c508 at 0x004096F9). At 0x00409741 the 1-in-4 head pop on the killing shot is gated on g_app_state == 6 (833d988e9c0006 / 756c), so the head only comes off in play. Neither read fires during ordinary play; both hold in the attract demo, which is g_app_state 5.
 004098c0	ActorApplyDamage	decrements obj+0x11C only
 00409cc0	ActorDespawn
 00409d40	QueryGroundHeightAt
@@ -238,7 +238,7 @@
 004062a0	RayTestSphere	rotates the centre into the shot frame with the precomputed sin/cos and compares the perpendicular distance to the radius
 004093c0	ChooseHitPlayerOrder	picks which players resolve, randomising the order in two-player
 00409870	DamageRankModifier	per-bone, per-difficulty addend from g_pBoneDamageByRank
-004098e0	ActorSwapDamagedPart	writes the effect slot into record[0] -- the slot the bone DRAWS -- so a hit replaces that body part
+004098e0	ActorSwapDamagedPart	writes the effect slot into record[0] -- the slot the bone DRAWS -- so a hit replaces that body part. Refuses outright when g_cur_actor's obj+0x34 bit 0x200 is set: 00409913 8b4834 MOV ECX,[EAX+0x34] / 00409916 f6c502 TEST CH,0x2 / 00409919 757f JNZ (the epilogue), which skips the swap, the obj+0x78 clear and the obj+0x1318 zone bit. Only ResolveHit's out-of-play OR of 0xE00 raises 0x200; no shipped spawn record carries it.
 004099a0	ResolveDamagedPartSphere	gives the swapped part its own hit sphere from the TAIL of g_pBoneHitSpheres, past bone_count-1 entries, terminated by slot == -1
 00411050	SkeletonDrawNodeSlot	draws record[bone].slot; record base obj+0x20C, stride 0x90
 00432ff0	ScriptedSceneryDispatch33	class 0x33, switch on obj+0x11C
@@ -603,3 +603,7 @@
 00449530	OneHitTargetBoneDrawHook	Class 0x20's per-bone draw callback, installed at obj+0x12EC by OneHitTargetInit. Switches on the skeleton node's bone index at node+0x14: bones 4, 7, 11 and 14 draw the node's own asset slot and then a second asset from the node's attachment record at node+0x18, translated by that record's three floats; bone 2 draws at DOUBLE SCALE in g_GameMode 1 when DAT_009C88A8 is set; every other bone draws its slot plainly. Renderer-only -- it writes nothing to the actor.
 00407200	SpawnBoneHitSprite	ActorAlloc(BoneHitSpriteDrawAndTick, 0x50) with the actor at task+0x34, the bone index at task+0x48 and the cel counter at task+0x44 = 0. Called once per hit bone by OneHitTargetUpdate. Renderer-only.
 00407120	BoneHitSpriteDrawAndTick	The task SpawnBoneHitSprite starts: draws asset slot 0x3A + cel at the posed position of bone task+0x48 of actor task+0x34 (the bone record's +0x274/+0x278/+0x27C/+0x284), scaled by depth -- 1.0 beyond -20 units, otherwise 0.25 - z*0.0375 -- and then by 0.15 with g_wCaptionMode 1 or 0.3 without. Steps the cel and kills itself past 0x18, so it is 25 frames long. What the 25 slots from 0x3A are is [open].
+0040e850	RequestAppState	g_app_state_pending = the argument. Does not change g_app_state; CommitAppState applies it at the end of the frame. Fourteen call sites, requesting 3, 4, 6, 7, 0x0C and 0x0F. Start-with-a-credit (FUN_00414FC0) requests 6, which is what makes 6 the in-play state.
+0040e840	ClearPendingAppState	g_app_state_pending = -1. Drops a pending state change without committing it. Called by ResetGameOnStart's teardown path (FUN_0040A920 -> 0x0040E840).
+0040e860	CommitAppState	The only writer of g_app_state, run at the end of the per-frame tick FUN_0040E730. Does nothing while g_app_state_pending is negative. Otherwise it tears the old screen down (AssetDrainAllJobs when the pending state is 0x0E, three other teardowns otherwise), sets DAT_009C71C4 = (pending == 5) -- the attract flag -- clears the per-player counters, then g_app_state = pending and g_app_state_pending = -1. The line that fixes what 6 and 7 mean: if (pending < 6 || pending > 7) g_player_state = 9 for both players, so 6 and 7 are the ONLY states that leave a live player alone.
+0040e960	AppStateAdvanceByTable	RequestAppState(g_app_state_next_table[g_wCaptionMode][g_app_state]) -- the scripted advance out of a screen that has finished. Callers: RunAttractDemo when the demo scene runs out while g_app_state is 5, and the name-entry screen FUN_00481400 when g_GameMode is not 3.

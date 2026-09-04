@@ -10084,6 +10084,78 @@ dangerous than the original**. Both are recorded as findings rather than
 counted as fixes, because "the port matches the engine" and "the bug is fixed"
 are different claims and only one of them is true here.
 
+## `g_app_state == 6` is *in play*, and the port's 0 was not inert
+
+`DAT_009C8E98` had been `[open]` since `PROGRESS.md` item 20, read once as a
+"scene id" and once as a "scene state", and the two readings disagreed. It is
+neither. It is the game's top-level screen, and the two things that fix its
+values are both in the routine that writes it:
+
+* `CommitAppState` (`FUN_0040E860`) — the only writer, run at the end of the
+  per-frame tick from the request left at `g_app_state_pending` (`0x007C17A0`)
+  — ends with `if (pending < 6 || pending > 7) g_player_state = 9`. So 6 and 7
+  are the only two states in which a live player survives the transition.
+* `FUN_00414FC0`, the start press that spends a credit, requests exactly 6.
+
+That makes 6 the in-play state, 5 the attract demo, 7 the game-over arm and
+0x10 boot. 3, 4, 9, 0x0A, 0x0B, 0x0C and 0x0F are the shell's other screens and
+stay `[open]` — they are requested from routines I did not read, and naming a
+screen from the routine that leaves it is exactly the guess this project bans.
+
+### What I got wrong on the way
+
+**I called 0x10 "shutdown" and wrote it into the enum before checking.** It
+looks like a shutdown: `FUN_0040E4A0` tears the data segment down through
+`FUN_0040A920` and then stamps 0x10, and the main loop stops drawing while it
+holds. It has exactly one xref, and that xref is `FUN_0049E4A0` — the startup
+routine that reads `Hod2.ini`. It is the **boot** state. One `get_xrefs_to`
+would have settled it and I did the reading in the wrong order.
+
+### Why the value mattered more than the bits
+
+The brief was three flag bits `ResolveHit` (`FUN_00409430`) raises on
+`obj+0x34` — `0x200` no part swap, `0x400` no dismemberment, `0x800` no hit
+result — under a guard that skips the OR when `g_app_state == 6`. The port kept
+`g_app_state` at 0 and documented every clause reading it as inert. Transcribe
+the OR literally against that and every enemy in the game gets all three bits
+on its first hit, and the gore leaves the whole port. The bug you ship closing a
+divergence can be much larger than the divergence.
+
+The comment that made this possible is worth quoting, because it is the shape
+of the failure rather than the failure itself:
+
+> The port has no attract mode, so this stays 0 and the clause is inert.
+
+"The port has no X" is a fact about the port. "So the global stays 0" is a
+guess about the engine, wearing the fact's clothes. Nothing in the exe says 0
+means "not attract"; `FUN_0040A920` writes 0 as part of a whole-segment reset
+and `FUN_0040E4A0` stamps 0x10 over it a moment later, so 0 is not a state the
+running game is ever in.
+
+### `0x400` is not an out-of-play bit
+
+The three bits looked like one mechanism — "suppress everything while the
+attract demo shoots" — until I checked the shipped spawn records. `0x400`
+appears in `init_flags` on **68 class-0x30 spawns** across stages 1 to 4, and
+`ActorInitFlags` (`FUN_00408970`) is `obj+0x34 = spawn_flags | 1`, so those
+actors carry it from birth. `ZombieStateWalkToTarget`, `ZombieApplyScriptMode`
+and `EnemyThrowerInit` (character type 0x18 only) raise it too. Nothing clears
+it. So it is an ordinary actor flag — *this one does not come apart* — that
+`ResolveHit`'s out-of-play OR happens to set alongside two that really are
+out-of-play only. `0x200` and `0x800` appear in no spawn record and have no
+other writer I could find.
+
+Had I named the three from the OR that sets them together, all three would have
+been called something like "attract suppression" and the 68 spawns would have
+gone on being severable for ever.
+
+### A stale name found on the way
+
+`docs/formats/civilians.md` called civilian script op `0x2B` `DebugOnly`, on
+the strength of nothing but its `g_app_state == 6` gate, back when 6's meaning
+was open. 6 is *in play*, so the op is the ordinary path and the name said the
+opposite of the truth. Renamed to `InPlayOnly`, with what it actually writes
+recorded and its meaning left `[open]`.
 ## The class-0x31 throw exits to the hub; it does not loop
 
 `ThrowerStateThrow` (`FUN_0044FAF0`) had one thing missing from the port and it

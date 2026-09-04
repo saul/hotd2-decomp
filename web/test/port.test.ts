@@ -27,7 +27,7 @@ import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { CameraPointRiseFor, UpdateCameraFreeFlag }
   from "../src/game/camera/track";
-import { ActorByAt, G, ResetGameGlobals, ResetSceneOnEnter }
+import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
   from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
@@ -920,6 +920,90 @@ console.log("ResolveHit:");
   const again = ResolveHit(z, 1, 0, NULL_HOST, rng);
   check("a hit on a corpse scores nothing", !again.killed
         && again.result === 0);
+}
+
+// -- 4a. the three bits `ResolveHit` reads on `obj+0x34` ---------------------
+
+/**
+ * `ResolveHit` (`FUN_00409430`) raises `obj+0x34 |= 0xE00` whenever
+ * `g_app_state` is not `AppState.InPlay`, and the three bits it raises have
+ * three readers inside the same routine and `ActorSwapDamagedPart`.
+ *
+ * The port ignored all three, and sat at `g_app_state = 0` with a comment
+ * calling the clause inert. Transcribing the OR against that would have set
+ * `0xE00` on every actor on its first hit and taken the gore out of the whole
+ * game -- which is why the value matters as much as the bits do.
+ */
+console.log("\nResolveHit's three suppression bits:");
+{
+  const rng = new Rng(5);
+
+  // `NoDismember` is the one that fires in ordinary play: 68 shipped
+  // class-0x30 spawns carry 0x400 in `init_flags`, and `ActorInitFlags`
+  // (`FUN_00408970`) makes that `obj+0x34` before the class's `Init` runs.
+  scene(1, rng);
+  const nd = G.g_object_list[0];
+  nd.hp = 100;
+  nd.flags |= ActorFlag.NoDismember;
+  ResolveHit(nd, 4, 0, NULL_HOST, rng);
+  ResolveHit(nd, 4, 0, NULL_HOST, rng);
+  ResolveHit(nd, 4, 0, NULL_HOST, rng);
+  const sev = ResolveHit(nd, 4, 0, NULL_HOST, rng);
+  check("`NoDismember`: the sever step does not sever",
+        !sev.severed && sev.result !== 3, `result ${sev.result}`);
+  check("...and the forearm stays on", !nd.removed.includes(5),
+        `removed ${JSON.stringify(nd.removed)}`);
+  check("...but every hit still charged its damage", nd.hp < 100,
+        `hp ${nd.hp}`);
+  nd.hp = 1;
+  const ndKill = ResolveHit(nd, 1, 0, NULL_HOST, rng);
+  check("...and the torso death wound is skipped too", !ndKill.severed,
+        `result ${ndKill.result}`);
+  check("...while the actor still dies, because the kill block is outside "
+        + "the guard", ndKill.killed && nd.dead, `killed ${ndKill.killed}`);
+
+  // `NoPartSwap` stops `ActorSwapDamagedPart` before it touches anything.
+  scene(1, rng);
+  const np = G.g_object_list[0];
+  np.hp = 100;
+  np.flags |= ActorFlag.NoPartSwap;
+  const npOut = ResolveHit(np, 4, 0, NULL_HOST, rng);
+  check("`NoPartSwap`: the bone keeps the model it had",
+        np.boneSlot["4"] === undefined, JSON.stringify(np.boneSlot));
+  check("...and nothing reports gore", !npOut.gore);
+  check("...and the damage still lands", np.hp === 100 - 3, `hp ${np.hp}`);
+
+  // `NoHitResult` is written over the finished result, so the swap it just
+  // made stands and only the reported code is thrown away.
+  scene(1, rng);
+  const nr = G.g_object_list[0];
+  nr.hp = 100;
+  nr.flags |= ActorFlag.NoHitResult;
+  const nrOut = ResolveHit(nr, 4, 0, NULL_HOST, rng);
+  check("`NoHitResult`: the shot reports nothing", nrOut.result === 0
+        && G.g_hit_result === 0, `result ${nrOut.result}`);
+  check("...and the swap it made before that still stands",
+        nr.boneSlot["4"] === 0x11, JSON.stringify(nr.boneSlot));
+
+  // And the OR itself, which is what puts all three there.
+  scene(1, rng);
+  const att = G.g_object_list[0];
+  att.hp = 100;
+  const clean = att.flags;
+  ResolveHit(att, 4, 0, NULL_HOST, rng);
+  check("in play the OR does not fire",
+        (att.flags & 0xe00) === (clean & 0xe00), `flags ${att.flags.toString(16)}`);
+  G.g_app_state = AppState.Attract;
+  ResolveHit(att, 4, 0, NULL_HOST, rng);
+  check("out of play it raises all three at once",
+        (att.flags & 0xe00) === 0xe00, `flags ${att.flags.toString(16)}`);
+  check("...and that hit reported nothing", G.g_hit_result === 0,
+        `${G.g_hit_result}`);
+  G.g_app_state = AppState.InPlay;
+
+  // The second read: the head only comes off in play.
+  check("`g_app_state` is back in play for everything after this",
+        G.g_app_state === 6, `${G.g_app_state}`);
 }
 
 // -- 4b. the camera never cuts on its own -----------------------------------
@@ -5192,10 +5276,10 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
   G.g_player_lives = [0, 0];
   check("a player with no lives left is not attackable — the port's stand-in "
         + "for the state word", !IsPlayerAttackable(0), "still attackable");
-  G.g_app_state = 5;
+  G.g_app_state = AppState.Attract;
   check("...unless the attract demo is running, which overrides it",
         IsPlayerAttackable(0), "override did not fire");
-  G.g_app_state = 0;
+  G.g_app_state = AppState.InPlay;
 
   // ...and the engine's own third clause, for when a player state exists.
   G.g_player_state = [5, 0];

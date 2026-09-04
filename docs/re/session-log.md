@@ -9584,3 +9584,219 @@ descent and releases two frames after the kill.
 retimes every camera cue in six stages, so it is a change of its own rather
 than a rider on this one. Nothing else in the VM is known to be missing the
 yield.
+
+## The body condition, and the two bug reports that were one missing call
+
+Two reports, both about the axe throwers:
+
+* **B9.** "znonoopa zombies get close to the player, then teleport back and
+  start throwing. (`0x6784` znonoopa · Strike/2 · permit · d=99)."
+* **B15.** "Throwing zombies don't seem to actually throw their axes, just play
+  the animation."
+
+The first thing found was that they are not two bugs, and that `0x6784` is not
+the class the task assumed. Stage 2's spawn `0x6784` (26500) is **class 0x30**,
+character type 0x14, `znonoopa`, `body_condition: 8` — not class 0x31. Both
+reports are the same missing line in class 0x30.
+
+### What the exe does
+
+`ActorBodyConditionFromHands` (`FUN_00455920`) has **exactly one caller in the
+whole binary**: `ZombieStateHoldAtRange` (`FUN_00455720`) runs it on its second
+line, right after `TestApproachRing`. `get_xrefs_to 0x00455920` returns one row.
+
+That single call site is the whole mechanism, because conditions 7 and 8 index
+a different *kind* of row in `g_class30_attacks`. For character type 0x14:
+
+```
+attacks[8][0] = { strike 1005, lunge 783, distance 99.0, hit_frame 35, mask 2 }
+attacks[1][0] = { strike  778, lunge 783, distance 19.0, hit_frame 46, mask 2 }
+```
+
+Ninety-nine units is a throw's reach, and `ZombieStateStandAndThrow`
+(`FUN_00459080`) is the only state that reads it — `strike` is the throw clip
+and `hit_frame` is the frame the weapon leaves the hand. So:
+
+* a condition-8 walker keeps condition 8 all the way in, because
+  `ZombieStateAttackRun` (`FUN_004554D0`) never recomputes — which is exactly
+  the window `ZombieShouldStandAndThrow` (`FUN_00458E10`) reads, and why it
+  throws on the approach;
+* and it loses it on its first frame at the ring, so `ZombieStateStrike`
+  (`FUN_00455A40`) can never read the throw row as a swing.
+
+### What the port did
+
+The port had no `ActorBodyConditionFromHands` at all. Driving stage 2's `0x6784`
+headlessly reproduced the report exactly, and the trace names the mechanism:
+
+```
+f195 AttackRun/0    d=25.5           pos -824.4,-1064.6
+f199 Strike/0       d=24.5
+f200 Strike/2  atk=0 floor=99 motion=1005   pos -824.7,-1066.2
+f202 JUMP 75.06 -> Strike/2  d=99.00        pos -817.5, -991.5
+... d=99.00 for the next 3400 frames, 24 hits landed on the player
+```
+
+The condition stayed 8, so `ZombiePickAttack` drew the **throw** entry. Its
+`distance` is 99, so the lunge test passed at once at twenty-four units and the
+swing began. `ZombieStateStrike` then set `strikeFloor = distance - net`, and
+`ApplyRootMotion`'s floor — which exists to stop a swing walking *inside* its
+own reach — shoved the actor **out** to exactly ninety-nine units on the next
+frame the clip carried any root translation. Seventy-five units in one frame.
+
+So B9's teleport and B15's "plays the animation but never throws" are the same
+event seen from two sides: the animation being played is the throw clip, and
+`ZombieStateStrike` has no release in it — `ActorStrikeConnect` (`FUN_00456490`)
+damages the player and nothing else. The two indirect calls in that state,
+through `0x00592BCC` and `0x00592BD0`, were checked in case one was the
+release: they are `FUN_00456C50` and `FUN_00456D10`, both water splashes for
+body condition 6. Not the throw.
+
+### The engine's own operand bug, kept
+
+```
+00455962  MOV EDI, dword ptr [EAX + 0x4dc]     ; bone 5, the right hand
+00455968  CMP EDI, 0x1ece                      ; tutorial.bin  right held
+00455970  CMP EDI, 0x1ef9                      ; znonoopa.bin  right held
+00455990  CMP dword ptr [EAX + 0x68c], 0x1eca  ; tutorial.bin  LEFT held
+0045599c  CMP EDI, 0x1ef5                      ; znonoopa.bin  left held -- EDI!
+```
+
+The last comparison still holds the **right** hand's slot; `[EAX+0x68C]` is
+tested only against `tutorial.bin`'s value. A `znonoopa`'s right hand reads
+`0x1EF9` armed or `0x1EF6` bare and neither is `0x1EF5`, so its left hand can
+never count as armed. Every one of them lands on condition **1** with
+`DamageZone.LeftArm` already set, which puts its attack pick in row 40..49 —
+ten copies of attack 0, the right-arm swing. Transcribed rather than corrected:
+it is what the shipped game does. `[proved]` from the disassembly, because the
+decompiler renders it as a plain `obj+0x68C` test and hides it.
+
+### The other half of B15: class 0x31's silent bail
+
+Separately, and real: `SpawnThrownWeapon` (`FUN_004504E0`) in the port did
+
+```ts
+if (!host.boneWorld(obj.at, hand.bone, from)) return;
+```
+
+after `ThrowerStateThrow` had already advanced its sub-state to `Thrown`. The
+engine has no such path — it reads the hand's own recorded translation at
+`obj + 0x274 + bone*0x90` and transforms it by the camera matrix — so a host
+that could not answer produced precisely the reported symptom: the clip plays,
+the hand goes bare, the permit changes hands and no axe exists. Class 0x30's
+`ZombieThrowHandWeapon` (`FUN_0045A240`) already had the fallback; class 0x31
+did not. Now both do, tagged `[diverges]`.
+
+### And what the projectile actually is, for the `[open]` about shooting it down
+
+`SpawnThrownWeapon` allocates a **whole object**, not a pool record:
+`FUN_004A6FA0(ThrownWeaponUpdate, 0x13F4)` links it into the same object list
+every actor lives on, `ActorClaimHitSlot` (`FUN_00409270`) puts it in
+`g_hit_slots` (`0x009C88C0`, fourteen slots), and it dispatches on its own
+two-entry table `g_thrown_weapon_states` (`0x00592AE0`) — `ThrownWeaponFlyToTarget`
+and `ThrownWeaponDeflected` (`FUN_00450050`), the latter entered the moment
+`obj+0x34` bit `0x8` is set on it. It also inherits the thrower's attack permit
+(`obj+0x121` copied across, the thrower's cleared) and only gives it back when
+it lands or is deflected. So "you can shoot the axe out of the air" is not a
+special case: it is the ordinary shot path finding an ordinary object, and the
+port's pool-of-records shape is the reason it cannot. Unchanged, still `[open]`.
+
+### What was got wrong on the way
+
+* The task assigned both bugs to class 0x31 and named `class31/**` as the
+  files. B9's actor is class 0x30 and the fix is in `class30/hold.ts`. Reading
+  the placement out of the bundle before reading any code is what caught it —
+  `0x6784` is `class: 48`.
+* An early reading assumed the release must live inside `ZombieStateStrike`,
+  since that is the state the actor was visibly stuck in. It does not; the
+  state was the wrong one to be in at all.
+
+## 2026-09-04 — the frame a camera shot ends on, and two zombies that never moved
+
+Two bug reports, one root cause, and it was not in `game/` at all.
+
+**B7.** Stage 1 `?block=2&step=2&op=15`: `0x2254`, a class-0x30 zombie in
+`ZombieStateWaitCameraFrameThenBranch` (state 18), never comes through the
+doors and stays in its entrance clip. **B11.** Stage 2 `0xFAF4`, the same state,
+charges through the barrels for ever instead of playing the charge once and
+turning on the player.
+
+### What the placements say
+
+`0x2254` waits on camera frame **179**. The instruction that spawns it is block
+2 step 2 op 3, and op 4 — the very next camera instruction — is
+`cam_play 115..179`. `0xFAF4` waits on **229**; block 22 step 2 op 10 is
+`cam_play 100..229`. The cue *is the shot's own end frame*. That is how the
+game times an entrance to the end of a shot, and 6 of the 44 camera-cue
+entrances in the shipped scripts are written that way.
+
+### The engine publishes that frame; the port did not
+
+`CamAdvancePathFrame` (`FUN_004035E0`) [proved]:
+
+```c
+g_cam_path_frame = cur;            // publish -- BEFORE the end test
+DAT_009C6F28 = end - cur;
+if (end <= cur) { cur++; g_evt_action_advance = 1;
+                  g_queued_events_pending--; return; }
+cur++;
+```
+
+so the last frame of a range is published *and* the action retired in one call.
+The retirement is invisible to the script until the next frame because the two
+live in different tasks: the scene's task list at `0x00460710` creates
+`EvtInterpreterLoop` first and `EvtRunQueuedActions` third, `ActorAlloc`
+(`FUN_004A6FA0`) appends a task at its parent's tail (`+0x2C`), and
+`TaskRunTree` (`FUN_004A71A0`) walks the `+0x28` child list from the head
+through `+0x1C` — so creation order is execution order [proved]. The object
+update therefore sees the end frame for one whole pass.
+
+`Walker.tick` collapsed both tasks and ran the camera half **first**. So on the
+tick the path reached 179 the camera advanced, `wait_queued_events_done`
+settled the ring from inside its own `satisfied` and fell through, ops 6–13 ran
+and the `cam_play` behind them took the camera — all before `syncPortGlobals`
+read `w.cam.frame`. The port published 178 and then 180. Frame 179 was never a
+value it held, and state 18's gate is an exact `CMP ECX,EAX; JZ` [proved at
+`0x004575E7`].
+
+The fix is the task order: instructions first, camera after. Two pieces went
+with it. `CamCommand.started`, because `CamStartPathPlayback` (`FUN_00403510`)
+calls `CamAdvancePathFrame` itself and the ring calls the handler once a frame
+— so a shot that starts during a tick's instructions has already published its
+first frame and must not be stepped again in the same tick. And
+`wait_queued_events_done` no longer calls `settleCameraAction` from inside
+itself: retiring the action is `EvtRunQueuedActions`' job, and a wait that does
+it is a wait that cannot lag by the frame the engine lags by.
+
+### The first attempt fixed 38 of 44 and looked done
+
+Moving only the *settle* to the end of `tick` — leaving the advance at the top
+— fixed both reported spawns and 36 others. It left six: stage 3's four on cue
+1440 and stage 6's two on 685. Those are released by
+`wait_camera_path_frame 0`, which the port models as a frames countdown rather
+than as the engine's per-frame re-read of `end - cur`, so it came down on the
+same tick the camera reached the end and the shot behind it published over the
+top. Only the full reorder covers both gates. **A partial fix that clears the
+two spawns in the bug report is not a fix**; `tools/cam_cues.mjs` is what said
+so, and it exists because `tools/entrances.mjs` drives the entrances with a
+camera of its own (`g_cam_path_frame += 1` for ever), which hits every equality
+cue in the game by construction and is blind to this entire class of bug.
+
+### B11's other half: the barrels are not supposed to smash
+
+The props the stage-2 zombie walks through are breakable group 1 —
+`PlaceBreakableGroup`, two stacked members at about `(-904, -1319)`, 33 units
+from the spawn. `BreakablePropUpdate` (`FUN_00464620`) reacts to exactly two
+things: the hit flags at `obj+0x34 & 8` with the shot count at `+0x47`, and the
+family-4 global at `DAT_009C7265`. **There is no actor-contact test in it**
+[proved]. Nothing in the engine smashes a breakable prop because an enemy
+walked into it, and the port matching that is correct. The generic props beside
+them are class 0x41 type 5, whose object routine `PropDrawOnlyType5`
+(`FUN_00466820`) is a matrix push, a draw and a pop — scenery, and nothing
+else. What was wrong was that the zombie was there at all: with the cue firing
+it leaves for `AttackRun` at camera frame 229 and turns on the player, which is
+what the report asked for.
+
+Whether a class-0x41 prop is in the set `ColiTestSphereAgainstActors` separates
+actors against — so that the zombie is pushed *around* the barrels rather than
+through them — is `[open]` and was not read.

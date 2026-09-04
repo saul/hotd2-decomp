@@ -99,6 +99,9 @@ const CAM_PLAY: Record<string, ActionImpl> = {
       file: op.cam?.file ?? null,
       pathIndex: op.cam?.path ?? null,
       done: !!op.static,
+      // `CamStartPathPlayback` publishes `from` itself; the tick's own advance
+      // must not step over it. See `CamCommand.started`.
+      started: true,
     };
     w.host.startCamera(w.cam);
     if (w.cam.isStatic) {
@@ -151,6 +154,7 @@ const SCENE: Record<string, ActionImpl> = {
         file: op.cam?.file ?? null,
         pathIndex: op.cam?.path ?? null,
         done: st.start === st.end,
+        started: true,
       };
       w.stashedCam = null;
       w.host.startCamera(w.cam);

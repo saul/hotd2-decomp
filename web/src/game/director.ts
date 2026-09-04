@@ -128,12 +128,40 @@ export interface CharacterSpawnRequest {
 }
 
 /**
+ * The classes whose `Init` calls `ActorInitHitPoints`.
+ *
+ * **Exactly two, `[proved]`**: `FUN_0040A8B0` has two callers in the whole
+ * image — `EnemyZombieInit` (`FUN_00452DA0`) at `0x00452DF2` and
+ * `EnemyThrowerInit` (`0x00449620`) at `0x0044964A`. Every other class gets
+ * `obj+0x11C` as `SpawnFromDescriptor` (`FUN_00408A20`) left it: the raw `s16`
+ * at `desc+0x22`, copied to `obj+0x11C` **and** `obj+0x11E` before any `Init`
+ * runs, with no difficulty delta and no clamp.
+ *
+ * That distinction is not academic, because `obj+0x11C` is the most
+ * polymorphic word in the struct. It is a hit-point count for these two, an
+ * animation phase seed for class 0x24, a sub-handler selector for classes
+ * 0x26/0x28/0x33/0x44, and for a class-0x20 sub-type 1 it is the **direction
+ * the actor spins**. The clamp's floor of 1 turns every honest zero into a
+ * one, which for class 0x20 reverses the spin.
+ */
+const HP_SCALED_CLASSES: ReadonlySet<number> = new Set([
+  SpawnClassValue.Zombie, SpawnClassValue.Thrower,
+]);
+
+/**
  * `ActorInitHitPoints` — `FUN_0040A8B0`. The descriptor's hit points plus the
  * difficulty delta, clamped to `[1, 300]`.
+ *
+ * The `cls` argument is the port's, and it is the gate above: this used to be
+ * applied to **every** character placement, which is a routine the engine runs
+ * from two `Init`s being run from the spawn path instead. See
+ * {@link HP_SCALED_CLASSES}.
  */
-export function ActorInitHitPoints(p: CharacterPlacement | undefined): number {
+export function ActorInitHitPoints(p: CharacterPlacement | undefined,
+                                   cls?: number): number {
   const d = T.chars?.difficulty;
   if (!p) return 0;
+  if (cls !== undefined && !HP_SCALED_CLASSES.has(cls)) return p.hp;
   if (!d?.hp_delta?.length) return p.hp;
   const hp = p.hp + (d.hp_delta[G.g_difficulty] ?? 0);
   return Math.min(d.hp_max, Math.max(d.hp_min, hp));
@@ -174,7 +202,7 @@ export function SpawnScriptedCharacters(
     if (ActorByAt(req.at)) continue;
     const p = placements.find((x) => x.at === req.at);
     const type = T.types[String(p?.char_type ?? 0)];
-    const hp = ActorInitHitPoints(p);
+    const hp = ActorInitHitPoints(p, p?.class);
     made.push(ActorSpawn(req.at, (p?.class ?? 0) as SpawnClass,
                          type?.type ?? 0, type?.name ?? `spawn ${req.at}`,
                          { ...DescriptorFromPlacement(p),

@@ -64,6 +64,7 @@ from .arcscript import (  # noqa: F401
                         CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES,
                         arc_script)
 from .charmotion import (  # noqa: F401
+    CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
 from .combat import (  # noqa: F401
@@ -149,6 +150,8 @@ __all__ = [
     "BACK_AWAY_STATES",
     "BLOOD_SCALE_BY_RESULT",
     "BONE_ZONE",
+    "CLASS20_DEATH_MOTION",
+    "CLASS20_IDLE_MOTIONS",
     "CLASS30_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPT_BYTES",
@@ -169,6 +172,7 @@ __all__ = [
     "CLASS31_THROW_TABLE",
     "CUE_STATES",
     "Character",
+    "class20_tail",
     "DEATH_BACK",
     "DEATH_FRONT",
     "DEATH_LEFT",
@@ -275,6 +279,37 @@ __all__ = [
     "torso_stage_count",
     "zombie_throw_tables",
 ]
+
+
+def class20_tail(rec) -> dict:
+    """Class 0x20's descriptor tail, as `OneHitTargetInit` reads it.
+
+    ``{i8 char_type; i8 subtype; s16 remove_path; s16 remove_frame;
+    s16 motion}``, and for sub-type 2 four more floats at ``+0x08``..``+0x14``
+    bounding the actor's x and z.
+
+    **The same eight bytes are three different things across classes** --
+    class 0x30 reads ``+0x01``/``+0x02``/``+0x03`` as the body condition, the
+    initial state and the attack state -- so this is gated on the class and
+    emitted under a class-named key rather than into the shared fields.
+
+    The box is emitted only for sub-type 2 because only sub-type 2 reads it:
+    for the four stage-2 spawns at 0x52EC..0x5370 the tail is **eight bytes**
+    and ``+0x08`` is already the next descriptor's class word.
+    """
+    subtype = rec.param(0x01, "i8") or 0
+    box = None
+    if subtype == 2:
+        v = [rec.param(o, "f32") for o in (0x08, 0x0C, 0x10, 0x14)]
+        if all(x is not None and math.isfinite(x) for x in v):
+            box = v
+    return {"subtype": subtype,
+            "remove_path": rec.param(0x02, "i16") or 0,
+            "remove_frame": rec.param(0x04, "i16") or 0,
+            # 0 is a value here and not an absence: it means the random draw
+            # from `g_class20_idle_motions`, which is the port's to make.
+            "motion": rec.param(0x06, "i16") or 0,
+            "box": box}
 
 
 def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
@@ -506,6 +541,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                     and g is not None and 0 < g < 10):
                 delayed_leap = {"delay": rec.param(4, "i32") or 0,
                                 "dest": dest, "gravity": g}
+        class20 = class20_tail(rec) if sp["class"] == 0x20 else None
         tscript = ascript = None
         camera_cue = None
         if sp["class"] == 0x30:
@@ -546,6 +582,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             pounce=pounce, grab=grab, back_away_delay=back_away_delay,
             cue=cue, leap_strike_frames=leap_strike_frames,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
+            class20=class20,
             hp=sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note
@@ -641,6 +678,20 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # whose landing clip is 0x3BA -- and every class-0x30 actor can now
         # reach it, so it is baked for all of them.
         entry_clips += [0x3BA]
+        # Class 0x25's own clips: the ones its command block names with `op 2`
+        # and `op 3`, which is every clip the program can put on the actor
+        # after the opening one. Baking only the header's motion left 118 of
+        # the six stages' 263 (program, clip) pairs with no frames, and a
+        # class-0x25 actor whose clip has none is not merely undrawn -- its
+        # `op 1` mode 2 wait on the clip's last frame can never fire, so the
+        # VM parks and the skeleton holds one pose for the rest of the stage.
+        if sp["class"] == 0x25:
+            entry_clips += humanoid_motion_ids(prog.evt, rec)
+        # Class 0x20's four idles -- `OneHitTargetInit` picks between them with
+        # `rand() & 3`, so all four have to exist before the draw is made --
+        # and the clip `OneHitTargetUpdate` cues the frame the actor is shot.
+        if sp["class"] == 0x20:
+            entry_clips += list(CLASS20_IDLE_MOTIONS) + [CLASS20_DEATH_MOTION]
         entry_clips += target_script_motions(tscript)
         entry_clips += target_script_motions(ascript)
         if sp["class"] == 0x10:

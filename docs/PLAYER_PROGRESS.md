@@ -283,6 +283,68 @@ its exit was missing the clause that holds a retreat until the back-away clip
 has played. `ResetGameGlobals` also did not re-arm `g_player_lives`, so a seek
 started with whatever the last run ended on.
 
+**Class 0x20, the one-hit target, is ported** (`game/class20/`) — 36 spawns
+across stages 1, 2, 3 and 5, every one of them character type 7,
+`char_adv00.bin`. It is a skinned actor that **dies to any single hit**:
+nothing in the class subtracts from `obj+0x11C`, so the branch on `obj+0x34`
+bit 3 is the whole damage model. It scores like the combat classes — 10 a bone,
+120 plus `g_head_combo_bonus` on the head, 80 for the kill — then plays motion
+988, holds its last frame and sinks for two seconds. `obj+0x130C` chooses
+between standing still, spinning on the spot and being clamped inside a box
+its own descriptor carries.
+
+It had been recorded in `spawns.md` as *"not reached … `[likely]` a combat
+actor"*, on the strength of an HP-scaler call at `0x0044964A`. That address is
+inside `EnemyThrowerInit` (`0x00449620`), which is class **0x31**'s handler;
+class 0x20's is `0x00448ED0`, and the two are merely adjacent in the file. The
+dispatch table `g_class_handler_pairs` names it outright, which is the lesson:
+read the index, not the neighbourhood.
+
+Porting it needed the exporter as well as the port. Class 0x20 had no
+character-type rule, no motion rule and no descriptor of its own, so no
+placement was emitted for any of its 36 spawns and the player drew none of
+them. It has all three now, and its tail travels under its **own** `class20`
+key rather than in the shared placement fields — because `OneHitTargetInit`
+reads `tail+0x00`/`+0x01` as the character type and a sub-type, where
+`EnemyZombieInit` reads the same two bytes as the body condition and the
+initial state.
+
+**Two scripted humanoids that stood frozen were a bundle gap, not a state
+machine.** The report was stage 2, block 9 step 5, spawns `0x55BC` and
+`0x56C8`: alive, on one frame of one clip, for ever. The VM was running
+correctly; their `op 2` had set motion **180**, and the exporter had never
+baked it. A class-0x25 program's `op 1` mode 2 is *hold when the clip reaches
+its last frame*, measured against `BakedMotion.frames` — so a clip with no
+frames pins the authored frame at 0, the wait can never fire, and the VM parks
+on that command with the skeleton stuck where it was. **118 of the six stages'
+263 (program, clip) pairs had no frames at all**: `characters.py` baked the
+command block's *header* motion and nothing the program went on to set.
+`tools/verify_scripted_clips.py` is the corpus check, and it reports 327 of 445
+with the fix backed out.
+
+Reading class 0x25's VM again for that turned up one inverted test.
+`op 4` mode 4 was ported as *the actor is nearer the point than it was last
+frame*; `0x004845AE`-`0x00484604` compares `|prevPos - point|` against
+`|pos - point|` and blocks unless the **previous** distance was the smaller
+one, so the command waits for the actor to **recede**. Two shipped commands use
+it, both in stage 1. The enum member is `FartherThanBefore` now.
+
+Class 0x25 also has a `debug` at last. The sidebar's answer for it was the
+literal string *"ported, but the class says nothing"* — `actorsProjection`
+prints that for any handler with no `debug` — which is indistinguishable from a
+class nobody has read, and was reported as a bug twice. It now names the
+command the VM is parked on, the condition it is waiting for, and, by name, a
+clip with no baked frames.
+
+Porting class 0x20 also found that **`ActorInitHitPoints` was being run for
+every character spawn**, where the engine runs it from two `Init`s.
+`FUN_0040A8B0` has exactly two callers in the image — `EnemyZombieInit` at
+`0x00452DF2` and `EnemyThrowerInit` at `0x0044964A` — and every other class
+gets `obj+0x11C` as `SpawnFromDescriptor` left it, with no difficulty delta and
+no clamp. The clamp's floor of 1 turns an honest zero into a one, and for a
+class-0x20 sub-type 1 that zero **is** the direction the actor spins. The port
+gates it on the class now.
+
 **Class 0x10, the civilians, is ported** (`game/class10/`) — and with it the
 game's **rescue mechanic**, which the player had no part of. It is a second
 bytecode VM, but unlike class 0x25's the scripts are compiled into

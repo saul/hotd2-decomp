@@ -15,14 +15,28 @@ import struct
 from . import mot as motlib
 
 
+#: `g_class20_idle_motions` -- 0x005647A4. The four clips
+#: `OneHitTargetInit` (`FUN_00448ED0`) picks between with `rand() & 3` when the
+#: spawn's tail names none. Read out of `.rdata`: `fd030000 ff030000 00040000
+#: 01040000`. All four are ids character type 7 (`char_adv00.bin`) carries,
+#: which is the corroboration that they are motion ids at all.
+CLASS20_IDLE_MOTIONS: tuple[int, ...] = (1021, 1023, 1024, 1025)
+
+#: The clip `OneHitTargetUpdate` (`FUN_00449020`) cues the frame the actor is
+#: shot -- `ActorSetMotionBlended(obj+0x194, 0x3DC, 0, 5)` -- and
+#: `OneHitTargetPlayDeathClip` then holds on its last frame.
+CLASS20_DEATH_MOTION: int = 988
+
 #: How each class chooses the motion it starts in, from its handler.
 #:
 #: ``("table", base, stride, at, kind)`` reads the spawn's parameter tail at
 #: *at* as *kind* to get a variant, then takes the ``u16`` at
 #: ``base + variant * stride``. ``("literal", id)`` is a constant,
-#: ``("param", at, kind)`` is read straight from the tail, and
-#: ``("block", ptr_at, field)`` follows a pointer in the tail to a command
-#: block and reads a ``s16`` from it.
+#: ``("param", at, kind)`` is read straight from the tail,
+#: ``("param_or", at, kind, default)`` is the same for a field whose **zero is
+#: a value and not an absence** -- class 0x20's, where it means "pick one of
+#: four at random" -- and ``("block", ptr_at, field)`` follows a pointer in the
+#: tail to a command block and reads a ``s16`` from it.
 #:
 #: Class ``0x30`` -- the zombie, and the single largest population in the game
 #: -- is `FUN_00452DA0`, which opens with the assignment::
@@ -56,6 +70,15 @@ MOTION_RULES: dict[int, tuple] = {
     # between. Without this rule the 48 set-piece props resolve to a character
     # with no motion, and the client skips anything it cannot pose.
     0x24: ("param", 0x0A, "i16"),
+    # `OneHitTargetInit` (`FUN_00448ED0`) reads `obj+0x1B4 = (s16)tail+0x06`,
+    # and **zero there means it draws one of four at random**:
+    # `if (tail+6 == 0) obj+0x1B4 = g_class20_idle_motions[rand() & 3]`. The
+    # exporter cannot make that draw -- it is the port's, from `ctx.rng`, or
+    # the save state would not restore -- so the rule names the first of the
+    # four as the clip the placement is posed in and
+    # :data:`CLASS20_IDLE_MOTIONS` gets all four baked. The authored value
+    # travels separately, in the placement's `class20` block.
+    0x20: ("param_or", 0x06, "i16", CLASS20_IDLE_MOTIONS[0]),
     # `ScriptedHumanoidInit` (`FUN_004840D0`) follows a pointer: the tail at
     # `+0x0C` names a command block, and the block's `+0x04` is the motion the
     # actor opens in. 137 of these, and without a rule they resolve to a
@@ -113,6 +136,98 @@ MOTION_STATE_CUE = 21
 MAX_BAKED_FRAMES = 600
 
 
+#: A class-0x25 command is eight bytes, or sixteen when it carries a point.
+#: `ScriptedHumanoidUpdate` (`FUN_004842A0`) advances the cursor by `+2` dwords
+#: for every opcode but 7, 8 and `4` in mode 4, which take `+4`.
+def humanoid_cmd_len(op: int, mode: int) -> int:
+    if op == 8 or op == 7:
+        return 16
+    if op == 4 and mode == 4:
+        return 16
+    return 8
+
+
+def humanoid_block_offset(evt, spawn_rec) -> int | None:
+    """The file offset of a class-0x25 spawn's command block, or ``None``.
+
+    `ScriptedHumanoidInit` (`FUN_004840D0`) reads a pointer out of the
+    parameter tail at ``+0x0C``; the block's header is four ``s16`` and the
+    commands start at ``+0x08``.
+    """
+    if evt is None:
+        return None
+    raw = evt.raw
+    tail = spawn_rec.offset + 0x24
+    if tail + 0x10 > len(raw):
+        return None
+    blk = evt.to_offset(struct.unpack_from("<I", raw, tail + 0x0C)[0])
+    if blk is None or blk + 8 > len(raw):
+        return None
+    return blk
+
+
+def humanoid_command_offsets(evt, spawn_rec) -> list[int]:
+    """Every command offset the block reaches, sorted, jumps followed.
+
+    One walk, shared by the two things that need it: `bundle` emits the
+    commands and `characters` bakes the clips they name. It was two, and the
+    second one did not exist -- which is the whole of B13. `op 2` and `op 3`
+    name a motion the actor plays for the rest of its program, and nothing
+    added those to the bake list, so 118 of the 263 (program, clip) pairs the
+    six stages carry had no frames at all. An unbaked clip is not a cosmetic
+    gap here: `MotionPlayLength` is 0, so `op 1` mode 2 -- *hold when the clip
+    reaches its last frame* -- can never fire and the VM parks on it for ever
+    with the skeleton stuck on whatever pose it last had.
+    """
+    blk = humanoid_block_offset(evt, spawn_rec)
+    if blk is None:
+        return []
+    raw = evt.raw
+    order: list[int] = []
+    seen: set[int] = set()
+    pending = [blk + 8]
+    while pending:
+        p = pending.pop(0)
+        while p not in seen and p + 8 <= len(raw):
+            seen.add(p)
+            order.append(p)
+            op, mode, _a, _b = struct.unpack_from("<4h", raw, p)
+            if op in (18, -1):
+                break
+            if op == 15:
+                t = evt.to_offset(struct.unpack_from("<I", raw, p + 4)[0])
+                if t is not None:
+                    pending.append(t)
+                break
+            p += humanoid_cmd_len(op, mode)
+    order.sort()
+    return order
+
+
+def humanoid_motion_ids(evt, spawn_rec) -> list[int]:
+    """Every clip a class-0x25 program can put on the actor.
+
+    The block header's ``+0x04`` -- which :func:`motion_for` already returns --
+    plus every `op 2` and `op 3` operand. Both opcodes write ``obj+0x1B4``
+    through `ActorSetMotion` / `ActorSetMotionBlended`, and the actor plays
+    that clip until the next one; there is no third way for the VM to change
+    it.
+    """
+    out: list[int] = []
+    blk = humanoid_block_offset(evt, spawn_rec)
+    if blk is None:
+        return out
+    raw = evt.raw
+    hdr = struct.unpack_from("<4h", raw, blk)
+    if hdr[2] > 0:
+        out.append(hdr[2])
+    for off in humanoid_command_offsets(evt, spawn_rec):
+        op, _mode, a, _b = struct.unpack_from("<4h", raw, off)
+        if op in (2, 3) and a > 0:
+            out.append(a)
+    return out
+
+
 def motion_for(tables, spawn_rec, cls: int) -> int | None:
     """The motion id a class handler starts this spawn in, or None."""
     rule = MOTION_RULES.get(cls)
@@ -137,6 +252,13 @@ def motion_for(tables, spawn_rec, cls: int) -> int | None:
     if rule[0] == "param":
         mid = spawn_rec.param(rule[1], rule[2])
         return None if mid is None or mid <= 0 else mid
+    if rule[0] == "param_or":
+        # A tail field whose **zero is a real value** rather than an absence --
+        # class 0x20's, where it means "draw one of four at random". The
+        # default keeps the placement posable; the port makes the draw.
+        _, at, kind, default = rule
+        mid = spawn_rec.param(at, kind)
+        return default if mid is None or mid <= 0 else mid
     if rule[0] == "by_char":
         _, per_char, default = rule
         ct = spawn_rec.param(0x00, "i8")

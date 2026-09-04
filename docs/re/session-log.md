@@ -9503,3 +9503,106 @@ yet". Both were merge residue from arms landing in sequence, and the checker
 that catches an unused directive cannot catch a comment that describes the
 wrong line. The real directive count is **30**; an earlier note in this session
 said 33, which was a `grep` counting prose mentions of the string.
+
+## Class 0x20, and the two humanoids that stood still (B13, B14)
+
+### The frozen humanoids were never a state-machine bug
+
+Stage 2, block 9, step 5, spawns `0x55BC` and `0x56C8` — alive, drawn, on one
+frame of one clip for the rest of the stage. Driving the real `Walker` and
+`GameUpdate` headlessly (`web/tools/humanoids.mjs`) printed the answer on the
+first run: `motion 180 NOT BAKED`. The VM was doing exactly what its program
+said. `op 2` set motion 180 and the exporter had never baked it, because
+`characters.py` added the command block's **header** motion to the bake list
+and nothing the program went on to set.
+
+That turns a data gap into a hang rather than a blank: `op 1` mode 2 is *hold
+when the clip reaches its last frame*, and the port reads that as
+`frame >= m.frames - 1` against a `BakedMotion` that does not exist. `frames`
+is 0, the authored frame is pinned at 0, the wait can never be met and the
+cursor never moves. **118 of the six stages' 263 (program, clip) pairs** were in
+that state.
+
+`tools/verify_scripted_clips.py` is the check, and it is deliberately asked of
+the **exporter** and not of `charmotion.bake`: every one of the 118 clips was
+perfectly bakeable, so a check that only asked whether the data decodes would
+have passed for the whole time the bug was live. Backing the fix out takes it
+from 445/445 to 327/445.
+
+### `op 4` mode 4 was inverted, and the decompiler was right
+
+Ported as `NearerThanBefore`, and it is the opposite. `0x004845AE` builds
+`|pos - point|` and `|prevPos - point|`, `0x004845FD FCOMPP` compares the
+*second* against the first, `0x00484601 TEST AH,0x1` reads C0 and
+`0x00484604 JZ 0x00484A7B` jumps to the blocked path when it is clear — so the
+command proceeds only while the previous distance was the smaller one. The two
+`FXCH`es before the compare cancel and are what makes this easy to read
+backwards; the operand order is what it turns on. Two shipped commands use it,
+both in stage 1.
+
+### "ported, but the class says nothing" was literally that
+
+The other half of the same report. `actorsProjection` prints that string for
+any actor whose handler has no `debug`, and class 0x25's had none — so a fully
+ported class read exactly like an unread one. It is a `debug` now, and the
+first thing it says about an actor is whether its clip has frames.
+
+### Class 0x20 was filed as "not reached", from an address in another function
+
+`spawns.md` had `0x20` in a row of unreached classes with the note *"has a call
+to the HP scaler at `0x0044964A`, so it is `[likely]` a combat actor"*.
+`0x0044964A` is inside `EnemyThrowerInit` (`0x00449620`) — class **0x31**'s
+handler. Class 0x20's is `0x00448ED0`, and the only relationship between them
+is that they are adjacent in the file. Both halves of the note were wrong: it
+is reached, 36 times across four stages, and it has no hit points at all.
+
+This is the adjacent-array trap in its function-pointer form.
+`g_class_handler_pairs` (`0x00593358`) names the handler outright — `20 00 00
+00 d0 8e 44 00` — and reading the index rather than the neighbourhood would
+have cost one memory read.
+
+### What class 0x20 is
+
+A skinned actor that dies to any single hit. There is no hit-point subtraction
+anywhere in the class: `obj+0x34` bit 3 is the entire damage model. It scores
+like the combat classes (10 a bone, 120 + `g_head_combo_bonus` on bone 2, 80
+for the kill), plays motion 988, holds its last frame, sinks 0.04 a frame for
+120 frames and despawns. Un-shot it is removed on a camera cue.
+
+Two of its fields are the polymorphism trap in miniature and both were checked
+against the class rather than assumed:
+
+* `obj+0x11C` — the descriptor's `+0x22`, which the bundle calls `hp` — is the
+  **spin direction** for sub-type 1. Three of the four stage-2 spawns carry 0
+  and the fourth carries 1.
+* `obj+0x1330` is the sink countdown here, `bonePropMode` for class 0x25,
+  `slideTimer` for class 0x24 and the shared arc record's elapsed frame for
+  0x30 and 0x31. It stays on the head, per the rule the four arms established.
+
+`FUN_004494D0` — the `g_GameMode 2` / block `0x0D` held state — is **not
+ported**, and its two gate bytes `DAT_009C72F1`/`DAT_009C72F2` are `[open]`.
+They are read by `ZombieAdvanceMotion`, `CivilianUpdate` and class 0x31 as
+well, so they are a general pause of some kind and worth a session of their
+own.
+
+### `ActorInitHitPoints` was being run for every spawn
+
+Found by asking what `obj+0x11C` is for class 0x20 rather than assuming.
+`FUN_0040A8B0` has **two** callers in the whole image, and one of them is the
+`0x0044964A` that `spawns.md` had attributed to class 0x20 — so the same wrong
+address had produced two separate wrong beliefs. The port applied the routine
+to every character placement in `SpawnScriptedCharacters`, which clamped
+`obj+0x11C` to at least 1 for classes 0x10, 0x20, 0x24 and 0x25. For a
+class-0x20 sub-type 1 that word is the spin direction and the clamp reversed
+it; for class 0x24 it is an animation phase seed and the clamp shifted it. It
+is gated on the class now, and the gate is a five-line `Set` with the two call
+sites quoted beside it.
+
+### One thing that cost twenty minutes
+
+Inserting `class20_tail` with a text anchor put it *inside*
+`resolve_for_stage`, which silently truncated that function to a `def` and made
+it return `None`. `export_player.py` then failed with
+`cannot unpack non-iterable NoneType object` five frames away from the cause.
+Anchoring on a line that is unique in the file is not the same as anchoring on
+a line that is unique in the *right scope*.

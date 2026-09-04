@@ -23,6 +23,12 @@ export enum SpawnClass {
    */
   WaterWaveSource = 0x17,
   /**
+   * `OneHitTargetInit` (`FUN_00448ED0`) — a skinned actor that dies to any one
+   * hit and pays 80 for it. Not an enemy: its Init increments no counter.
+   * **Ported.**
+   */
+  OneHitTarget = 0x20,
+  /**
    * `FUN_00451720` — enemy with **rank-scaled hit points**: `obj+0x11C` is
    * overwritten from the table at `0x00565F0C`, 1 or 2 by difficulty rank.
    */

@@ -326,6 +326,24 @@ export interface CharacterPlacement {
    * out of it this way, staggered by their delays.
    */
   intro?: { motion: number; delay: number };
+  /**
+   * Class 0x20's whole descriptor tail, `OneHitTargetInit` (`FUN_00448ED0`)'s
+   * reading of it — and its own block because the same bytes are class 0x30's
+   * `body_condition` / `initial_state`, which is precisely the polymorphism a
+   * shared field would hide.
+   *
+   * `motion` of 0 is a **value, not an absence**: it means the Init draws one
+   * of `CLASS20_IDLE_MOTIONS` with `rand() & 3`, which is the port's draw to
+   * make from `ctx.rng`. `box` is `[xmin, xmax, zmin, zmax]`, present only for
+   * `subtype` 2, which is the only sub-type that reads those bytes.
+   */
+  class20?: {
+    subtype: number;
+    remove_path: number;
+    remove_frame: number;
+    motion: number;
+    box: [number, number, number, number] | null;
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

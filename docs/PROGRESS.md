@@ -286,7 +286,11 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       by voice filenames — shooting one costs a life, rescuing awards +400), a
       water enemy (`0x51`), a flying enemy (`0x43`), the water-wave field
       (`0x16`/`0x17`), dynamic lights (`0x2B`), and the ending-branch selector
-      (`0x33` selector 11, which picks the ending track from score rank).
+      (`0x33` selector 11, which picks the ending track from score rank). Class
+      `0x20` is the **one-hit target** (`OneHitTargetInit`, `FUN_00448ED0`) —
+      36 spawns, no hit points at all, three idle sub-types and a scoring
+      death; it had been filed as unreached on the strength of an address that
+      is inside class 0x31's handler.
 - [x] **Item placement.** The items are not placed — the *containers* are.
       Class `0x41` type 0 places groups of breakable props from two EXE tables:
       9 groups, 42 props, each a 10-byte record with x/z, item-set, stack level

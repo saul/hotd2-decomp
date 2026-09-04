@@ -39,6 +39,7 @@
  * condition is unmet.
  */
 import type { Actor, HumanoidActor } from "../actor";
+import { ScriptedHumanoidDebug } from "./debug";
 import { authoredFrameOfTicks, ticksOfAuthoredFrame }
   from "../../core/play_cursor";
 import { G } from "../globals";
@@ -119,8 +120,23 @@ export enum HumanoidCond {
   MotionFrame = 2,
   /** Script flag `a` is set. */
   ScriptFlag = 3,
-  /** The actor is nearer the point than it was last frame. */
-  NearerThanBefore = 4,
+  /**
+   * The actor is **farther** from the point than it was last frame.
+   *
+   * `[proved]`, and the port had it inverted. `0x004845AE`-`0x004845FD` builds
+   * `|pos - point|` and `|prevPos - point|` in that order and ends
+   * `FXCH; FXCH; FCOMPP` (`d9c9 d9c9 ded9`), which compares `|prev|` against
+   * `|pos|`; `0x00484601 TEST AH,0x1` (`f6c401`) reads **C0**, set when the
+   * first is the smaller, and `0x00484604 JZ 0x00484A7B` (`0f8471040000`)
+   * takes the blocked path when it is clear. So the command proceeds only
+   * while the previous distance was the shorter one — the actor is receding.
+   * Both `FXCH`es are the compiler shuffling the pair back into place and
+   * cancel; the operand order is what the comparison turns on.
+   *
+   * Two shipped commands use it, both in stage 1 (0x64FC and 0x6658, `op 4`
+   * mode 4), and both are waiting for something to walk away.
+   */
+  FartherThanBefore = 4,
   /** Unconditional. */
   Always = -1,
 }
@@ -310,14 +326,15 @@ function CondMet(obj: HumanoidActor, c: HumanoidCmd): boolean {
       return c.a === -1 ? AtLastMotionFrame(obj) : MotionFrame(obj) === c.a;
     case HumanoidCond.ScriptFlag:
       return G.g_script_flags[c.a] === 1;
-    case HumanoidCond.NearerThanBefore: {
-      // `dist(pos, point) > dist(prevPos, point)` fails the test: the actor
-      // has to be *closing*. Measured flat, x and z only, as every range test
-      // in this game is.
+    case HumanoidCond.FartherThanBefore: {
+      // The actor has to be **receding**: the engine blocks unless
+      // `|prevPos - point| < |pos - point|`. See the enum member for the
+      // instructions. Measured flat, x and z only, as every range test in this
+      // game is.
       const px = c.f0 ?? 0, pz = c.f1 ?? 0;
       const now = Math.hypot(obj.pos.x - px, obj.pos.z - pz);
       const was = Math.hypot(obj.hum.prevPos.x - px, obj.hum.prevPos.z - pz);
-      return now < was;
+      return was < now;
     }
     case HumanoidCond.Always:
       return true;
@@ -519,7 +536,7 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
 
 /**
  * The tail every blocked frame runs: count the stall, turn, ride the path, and
- * remember where we were for the `NearerThanBefore` test.
+ * remember where we were for the `FartherThanBefore` test.
  *
  * `0x00484A8D`-`0x00484C7C`, and it belongs to `ScriptedHumanoidUpdate`
  * (`FUN_004842A0`) alone. The frame that runs `op -1` reaches it — the entry
@@ -657,6 +674,7 @@ export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
 export const ScriptedHumanoidHandler: ClassHandler = {
   init: ScriptedHumanoidInit,
   update: ScriptedHumanoidUpdate,
+  debug: ScriptedHumanoidDebug,
 };
 
 /**

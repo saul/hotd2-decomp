@@ -66,6 +66,12 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     leapStrikeFrames: p?.leap_strike_frames ?? 0,
     // `ZombieStateStandAndThrow`'s delays and its way out.
     standThrow: p?.stand_throw,
+    // Class 0x20's whole tail, under its own key. `OneHitTargetInit`
+    // (`FUN_00448ED0`) reads `tail+0x00`/`+0x01` as the character type and a
+    // sub-type, where `EnemyZombieInit` reads the same two bytes as the body
+    // condition and the initial state -- so this cannot ride on
+    // `condition`/`initialState` above without one class reading the other's.
+    oneHitTarget: p?.class20 ?? null,
     // The spawn record's own flags word — `ActorInitFlags` (`FUN_00408970`)
     // makes it `obj+0x34` before the class's `Init` ORs its own bits on.
     flags: p?.init_flags ?? 0,

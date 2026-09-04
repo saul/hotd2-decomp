@@ -322,6 +322,17 @@ class Placement:
     #: 133 of the game's 356 class-0x30 spawns; before it they all fell through
     #: `ZombieEntryState` to `AttackRun` and charged the camera on frame one.
     entry: dict | None = None
+    #: Class 0x20's whole descriptor tail, decoded by
+    #: :func:`characters.class20_tail`. **Its own block and not the shared
+    #: fields**, because class 0x20 reads those same bytes as something else:
+    #: `OneHitTargetInit` (`FUN_00448ED0`) takes tail+0x00 as the character
+    #: type and tail+0x01 as a sub-type, where the class-0x30 reading of the
+    #: same offsets is the body condition and the initial state. Carrying it
+    #: under a class-named key is what stops one being read as the other.
+    #: ``{subtype, remove_path, remove_frame, motion, box}``, where ``motion``
+    #: of 0 means the random draw and ``box`` is
+    #: ``[xmin, xmax, zmin, zmax]`` or ``None``.
+    class20: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -390,4 +401,6 @@ class Placement:
             d["leap_strike_frames"] = self.leap_strike_frames
         if self.intro:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
+        if self.class20:
+            d["class20"] = self.class20
         return d

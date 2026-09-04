@@ -176,6 +176,16 @@ export const G = {
   /** `g_head_combo_bonus` — 0x009A5C82 + player*0x98. */
   g_head_combo_bonus: [0, 0],
   /**
+   * `g_one_hit_target_kills` — 0x009A244A. Stepped by `OneHitTargetUpdate`
+   * (`FUN_00449020`) the frame a class-0x20 actor is shot.
+   *
+   * What reads it is `[open]`: `FUN_00497640` writes it and `FUN_004525C0`
+   * reads and writes it, and neither has been read. It is kept because the
+   * class writes it and a snapshot has to carry every word the port writes —
+   * and it is **not** `g_enemies_alive`, which class 0x20 never touches.
+   */
+  g_one_hit_target_kills: 0,
+  /**
    * The running score. `[open]` — it is in the same +player*0x98 block as
    * `g_player_lives` (0x009A5C66) but its offset has not been read out, so
    * this carries no address rather than a guessed one.
@@ -658,6 +668,14 @@ export function ResetGameGlobals(): void {
   G.g_player_was_hit = [0, 0];
   G.g_player_hit_motion = [0, 0];
   // `g_player_hit_count` and `g_head_combo_bonus` are `ResetSceneOnEnter`'s.
+  // [diverges] `g_one_hit_target_kills` is **not**: nothing read so far
+  // clears it, and it is deliberately outside the `ResetSceneOnEnter`
+  // transcription above so that list stays a faithful one. It is cleared here,
+  // in the port's own reset, because a counter that outlives a stage reload
+  // makes a snapshot the port cannot reproduce from a fresh run. If a reader
+  // of `FUN_00497640` or `FUN_004525C0` turns out to want the running total,
+  // this is the line that is wrong.
+  G.g_one_hit_target_kills = 0;
   G.g_player_score = [0, 0];
   G.g_nPlayerFired = [0, 0];
   // Input, and a scene that is starting has none pending. A seek that left a

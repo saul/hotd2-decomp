@@ -89,8 +89,20 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x12`, `0x13` | `0043F9D0`/`0043FE10` | 3/23 | **Script-driven animated props**, sharing a 10-entry behaviour table at `0x005926A8`. | `[proved]` |
 | `0x22` | `FUN_0049B0D0` | 4 | Enemy with four behaviour variants plus a companion actor. | `[proved]` |
 | `0x27`, `0x28` | `004329D0`/`00432610` | 2/6 | **Path-riding vehicles/props**; `0x27` swaps model and lights a flame at path frame `0xBE`. | `[proved]` |
+| `0x20` | `OneHitTargetInit` (`FUN_00448ED0`) | 36 | **The one-hit target.** A skinned actor — all 36 are character type 7, `char_adv00.bin` — that **dies to any single hit**: nothing in the class subtracts from `obj+0x11C`, so the branch on `obj+0x34` bit 3 is the whole damage model. Scores like the combat classes — 10 a bone, 120 + `g_head_combo_bonus` on bone 2, 80 for the kill — then plays motion 988, holds its last frame and sinks 0.04 a frame for 120 frames before despawning. Not an enemy: the Init increments no counter, so no `wait_enemies_alive` gate sees one. Un-shot it is removed when the camera reaches `tail+0x02` at frame `tail+0x04`. `obj+0x130C` is a sub-type: 0 stands (7 spawns), 1 spins ±0x40 BAMS a frame with `obj+0x11C` as the direction (5), 2 is clamped into an x/z box at `tail+0x08`..`+0x14` and turns 0x100 away at each wall (24). Motion comes from `tail+0x06`, and **0 there means `g_class20_idle_motions[rand() & 3]`**. **Ported** (`game/class20/`). | `[proved]` |
 | `0x2A` | `FUN_00432D40` | 4 | **Dead class** — the whole handler is `JMP ActorKill`. | `[proved]` |
-| `0x20`, `0x45`, `0x46` | — | 36/37/27 | Not reached. `0x20` has a call to the HP scaler at `0x0044964A`, so it is `[likely]` a combat actor. | `[open]` |
+| `0x45`, `0x46` | — | 37/27 | Not reached. | `[open]` |
+
+The row above used to read *"`0x20`, `0x45`, `0x46` … Not reached. `0x20`
+has a call to the HP scaler at `0x0044964A`, so it is `[likely]` a combat
+actor."* **Both halves were wrong**, and in the same way — `0x0044964A` is
+inside `EnemyThrowerInit` (`0x00449620`), which is class 0x31's handler, not
+class 0x20's. Class 0x20's handler is `0x00448ED0`, and the two are only
+adjacent in the file. That is the adjacent-array trap in its function-pointer
+form: the handler was found by looking near where it ought to be rather than
+by reading `g_class_handler_pairs`, which names it outright. Class 0x20 is
+reached in four of the six stages, has no hit points at all, and is written
+out in full below.
 
 ### The generic props' `+0x11C`: a lifetime that is *sometimes also* a slot
 

@@ -11,14 +11,15 @@
  * Run with `npm run test:port`.
  */
 import type {
-  ApproachJson, CharactersJson, CharacterType, PlayerDamageJson, TrackingJson,
+  ApproachJson, CharacterPlacement, CharactersJson, CharacterType,
+  PlayerDamageJson, TrackingJson,
 } from "../src/bundle";
 import { Rng } from "../src/core/rng";
 import { HingePose } from "../src/render/hinge";
 import { Events } from "../src/core/events";
 import { authoredFrameHeld, authoredFrameOfTicks,
          ticksOfAuthoredFrame } from "../src/core/play_cursor";
-import { ActorSpawn, GameUpdate, RetireUnlistedActor }
+import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor }
   from "../src/game/director";
 import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
@@ -33,7 +34,8 @@ import {
   type RainRules,
 } from "../src/game/effects/rain";
 import { NULL_HOST, type ShotPick } from "../src/game/host";
-import { QueueShotRequest } from "../src/game/combat/shot";
+import { MarkActorShot, QueueShotRequest }
+  from "../src/game/combat/shot";
 import { MotionPlayFrame, MotionPlayLength, SetGameTables, T }
   from "../src/game/tables";
 import {
@@ -53,8 +55,8 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
 import { ActorFlag, ThrowerFlag, ThrowerStance, ZombieFlag2,
-         type Actor, type HumanoidActor, type SetPiecePropActor,
-         type ThrowerActor, type ZombieActor }
+         type Actor, type HumanoidActor, type OneHitTargetActor,
+         type SetPiecePropActor, type ThrowerActor, type ZombieActor }
   from "../src/game/actor";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
@@ -73,9 +75,15 @@ import {
   UNCOUNTED_CHAR_TYPE, UNCOUNTED_INITIAL_STATE,
 } from "../src/game/combat/counts";
 import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
-import { DeadSweep, g_class_handlers, registerClass }
+import { ActorIsEnemy, DeadSweep, g_class_handlers, registerClass }
   from "../src/game/registry";
 import { PORTED_CLASSES } from "../src/game/classes";
+import {
+  CLASS20_DEATH_MOTION, CLASS20_HEAD_BONE, CLASS20_SCORE_HEAD,
+  CLASS20_SCORE_HEAD_COMBO_STEP, CLASS20_SCORE_KILL, CLASS20_SINK_FRAMES,
+  CLASS20_SINK_PER_FRAME, CLASS20_SPIN_STEP, CLASS20_WALL_TURN,
+  OneHitTargetState, OneHitTargetUpdate, g_class20_idle_motions,
+} from "../src/game/class20";
 import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
@@ -1895,6 +1903,325 @@ console.log("\nclass 0x25, it is not an enemy:");
   check("a scripted humanoid is not counted as a live enemy",
         G.g_enemies_alive === 0, String(G.g_enemies_alive));
   check("and is not a camera target", G.g_enemy_slots.length === 0);
+}
+
+console.log("\nclass 0x25, `op 4` mode 4 waits for the actor to RECEDE (B13):");
+{
+  const rng = new Rng(4);
+  // `0x004845AE`-`0x00484604`: the engine compares `|prevPos - point|` against
+  // `|pos - point|` and blocks unless the previous distance was the smaller
+  // one. The port had this the other way round and called it
+  // `NearerThanBefore`.
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.FartherThanBefore,
+      a: 0, b: 0, f0: 0, f1: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  // Frame one leaves `prevPos` at the origin and the actor 10 units out, so
+  // the actor is farther than it was: the command proceeds.
+  a.pos.x = 10;
+  hFrame(a, events, rng);
+  check("moving away from the point passes the test", a.hum.pc === 1,
+        `pc ${a.hum.pc}`);
+
+  const closing = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.FartherThanBefore,
+      a: 0, b: 0, f0: 0, f1: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  closing.a.pos.x = 10;
+  closing.a.hum.prevPos.x = 20;
+  hFrame(closing.a, closing.events, rng);
+  check("...and closing on it does not", closing.a.hum.pc === 0,
+        `pc ${closing.a.hum.pc}`);
+}
+
+console.log("\nclass 0x25, an unbaked clip parks the VM (B13's mechanism):");
+{
+  // The bug as reported was two stage-2 humanoids frozen on one frame. The
+  // cause was not in this file at all: their `op 2` set motion 180 and the
+  // **exporter** had never baked it, because nothing added an `op 2` operand
+  // to the bake list. `tools/verify_scripted_clips.py` is the corpus check for
+  // that; this is the port half, which records what an unbaked clip does so
+  // the symptom is recognisable the next time one appears.
+  const rng = new Rng(4);
+  const cmds = [
+    { op: HumanoidOp.SetMotion, mode: -1, a: 55, b: 0 },
+    { op: HumanoidOp.WaitThenHold, mode: HumanoidCond.MotionFrame,
+      a: -1, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ];
+  // 55 is deliberately not in `TYPE.motions`.
+  const gone = humanoidScene(cmds);
+  for (let i = 0; i < 600; i++) hFrame(gone.a, gone.events, rng);
+  check("a clip with no baked frames parks the wait for ever",
+        gone.a.hum.pc === 1 && gone.a.motion === 55,
+        `pc ${gone.a.hum.pc} motion ${gone.a.motion}`);
+  check("...and the class says so rather than saying nothing",
+        !!g_class_handlers[SpawnClass.ScriptedHumanoid]
+          ?.debug?.(gone.a).detail?.some((d) => d.includes("not baked")),
+        JSON.stringify(g_class_handlers[SpawnClass.ScriptedHumanoid]
+          ?.debug?.(gone.a)));
+
+  // The same program with a clip that *is* baked reaches its last frame and
+  // leaves the VM, which is what the two stage-2 spawns now do.
+  const ok = humanoidScene([
+    { op: HumanoidOp.SetMotion, mode: -1, a: 10, b: 0 },
+    { op: HumanoidOp.WaitThenHold, mode: HumanoidCond.MotionFrame,
+      a: -1, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ]);
+  for (let i = 0; i < 600; i++) {
+    ActorAdvanceMotion(ok.a, 1 / 60);
+    hFrame(ok.a, ok.events, rng);
+  }
+  check("a baked clip reaches its last frame and the program ends",
+        ok.a.hum.pc === -1 && ok.a.frozen === 1,
+        `pc ${ok.a.hum.pc} frozen ${ok.a.frozen}`);
+}
+
+console.log("\nclass 0x25 answers the sidebar (B13's other half):");
+{
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 67, b: 85 },
+  ]);
+  hFrame(a, events, rng);
+  const d = g_class_handlers[SpawnClass.ScriptedHumanoid]?.debug?.(a);
+  // `actorsProjection` prints "ported, but the class says nothing" for any
+  // handler with no `debug`, which is what the bug report quoted.
+  check("the handler has a `debug`", d !== undefined);
+  check("...and it names the command the VM is parked on",
+        !!d?.summary.includes("WaitUntil") && !!d?.summary.includes("pc 0"),
+        d?.summary);
+  check("...and the camera pair it is waiting for",
+        !!d?.summary.includes("cam (67,85)"), d?.summary);
+}
+
+// -- 9b. class 0x20, the one-hit target -------------------------------------
+
+/**
+ * One class-0x20 actor with a descriptor of its own.
+ *
+ * The tail this hands over is the exporter's `class20` block, which is a
+ * **separate key** from `body_condition`/`initial_state` precisely because
+ * `OneHitTargetInit` (`FUN_00448ED0`) reads the same two descriptor bytes as
+ * the character type and a sub-type where `EnemyZombieInit` reads them as the
+ * body condition and the initial state.
+ */
+function targetScene(over: Partial<NonNullable<Actor["oneHitTarget"]>> = {},
+                     rng = new Rng(7)):
+    { a: OneHitTargetActor; events: Events; rng: Rng } {
+  ResetGameGlobals();
+  SetGameTables(CHARS, undefined, undefined, undefined);
+  G.g_active_cam_path = -1;
+  G.g_cam_path_frame = 0;
+  const a = ActorSpawn(0x52ec, SpawnClass.OneHitTarget, 1, "target", {
+    oneHitTarget: {
+      subtype: 0, remove_path: 68, remove_frame: 260, motion: 10, box: null,
+      ...over,
+    },
+  });
+  if (a.cls !== SpawnClass.OneHitTarget) throw new Error("not class 0x20");
+  a.visible = true;
+  a.pos = vec3(0, 0, 0);
+  g_class_handlers[SpawnClass.OneHitTarget]?.init(a, rng);
+  return { a, events: new Events(), rng };
+}
+
+const tFrame = (a: OneHitTargetActor, events: Events, rng: Rng) =>
+  OneHitTargetUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST, events });
+
+console.log("\nclass 0x20, the Init reads its own tail:");
+{
+  const { a } = targetScene({ motion: 1024 });
+  check("an authored motion is taken as it is", a.motion === 1024,
+        String(a.motion));
+  check("...and the state opens on the alive routine",
+        a.tgt.state === OneHitTargetState.Alive, String(a.tgt.state));
+
+  // `if (tail+6 == 0) obj+0x1B4 = g_class20_idle_motions[rand() & 3]`. Which
+  // one is the draw's business; that it is one of the four is the assertion,
+  // and that it comes from `ctx.rng` is what makes the snapshot restore.
+  const drawn = targetScene({ motion: 0 });
+  check("motion 0 draws one of `g_class20_idle_motions`",
+        g_class20_idle_motions.includes(drawn.a.motion), String(drawn.a.motion));
+  const again = targetScene({ motion: 0 }, new Rng(7));
+  check("...from the seeded rng, so two runs of one seed agree",
+        again.a.motion === drawn.a.motion,
+        `${again.a.motion} vs ${drawn.a.motion}`);
+}
+
+console.log("\nclass 0x20, the removal cue:");
+{
+  const { a, events, rng } = targetScene();
+  G.g_active_cam_path = 68;
+  G.g_cam_path_frame = 259;
+  tFrame(a, events, rng);
+  check("one frame short of the cue it stays", !a.despawned && !a.dead);
+  G.g_cam_path_frame = 260;
+  tFrame(a, events, rng);
+  check("at the cue it despawns", a.despawned, `dead ${a.dead}`);
+
+  // The wrong path at the right frame is not the cue. This is the test class
+  // 0x24 and class 0x25 share, and class 0x20 has no script-flag alternative.
+  const other = targetScene();
+  G.g_active_cam_path = 67;
+  G.g_cam_path_frame = 900;
+  tFrame(other.a, other.events, other.rng);
+  check("...and another path at any frame is not it", !other.a.despawned);
+}
+
+console.log("\nclass 0x20 dies to one hit, and pays for it:");
+{
+  const { a, events, rng } = targetScene();
+  G.g_player_score = [0, 0];
+  // Bone 4 is not the head: 10 points, then 80 for the kill.
+  MarkActorShot(a, 0, 4);
+  tFrame(a, events, rng);
+  check("any hit kills it", a.dead && a.tgt.state === OneHitTargetState.Dying,
+        `dead ${a.dead} state ${a.tgt.state}`);
+  check("...for 10 + 80", G.g_player_score[0] === 90,
+        String(G.g_player_score[0]));
+  check("...and it cues the death clip", a.motion === CLASS20_DEATH_MOTION,
+        String(a.motion));
+  check("...and leaves the shot list -- `obj+0x34` bit 0 is cleared",
+        (a.flags & 0x1) === 0, `flags 0x${(a.flags >>> 0).toString(16)}`);
+  check("...and the kill counter moved", G.g_one_hit_target_kills === 1,
+        String(G.g_one_hit_target_kills));
+
+  const head = targetScene();
+  G.g_player_score = [0, 0];
+  MarkActorShot(head.a, 0, CLASS20_HEAD_BONE);
+  tFrame(head.a, head.events, head.rng);
+  check("a head hit pays 120 + the combo + 80",
+        G.g_player_score[0] === CLASS20_SCORE_HEAD + CLASS20_SCORE_KILL,
+        String(G.g_player_score[0]));
+  check("...and grows `g_head_combo_bonus`",
+        G.g_head_combo_bonus[0] === CLASS20_SCORE_HEAD_COMBO_STEP,
+        String(G.g_head_combo_bonus[0]));
+
+  // The head combo is a per-player counter the whole game shares, and any
+  // non-head hit zeroes it -- which is the rule that makes it worth having.
+  const body = targetScene();
+  G.g_head_combo_bonus = [30, 0];
+  MarkActorShot(body.a, 0, 4);
+  tFrame(body.a, body.events, body.rng);
+  check("a non-head hit zeroes the combo", G.g_head_combo_bonus[0] === 0,
+        String(G.g_head_combo_bonus[0]));
+}
+
+console.log("\nclass 0x20's death chain runs to the despawn:");
+{
+  const { a, events, rng } = targetScene();
+  MarkActorShot(a, 0, 4);
+  tFrame(a, events, rng);
+  // `OneHitTargetPlayDeathClip` holds the clip's last frame, then arms the
+  // 120-frame countdown at `obj+0x1330` -- which is the head's `arcFrames`,
+  // because that word is also the shared arc record's and class 0x24's.
+  for (let i = 0; i < 200 && a.tgt.state === OneHitTargetState.Dying; i++) {
+    ActorAdvanceMotion(a, 1 / 60);
+    tFrame(a, events, rng);
+  }
+  check("the death clip hands over to the sink",
+        a.tgt.state === OneHitTargetState.Sinking, String(a.tgt.state));
+  check("...with 120 frames of body armed",
+        a.arcFrames === CLASS20_SINK_FRAMES, String(a.arcFrames));
+  const y0 = a.pos.y;
+  for (let i = 0; i < CLASS20_SINK_FRAMES; i++) tFrame(a, events, rng);
+  check("...which sinks 0.04 a frame",
+        Math.abs((y0 - a.pos.y) - CLASS20_SINK_FRAMES * CLASS20_SINK_PER_FRAME)
+          < 1e-6,
+        `${y0} -> ${a.pos.y}`);
+  check("...and despawns at zero", a.despawned, `arcFrames ${a.arcFrames}`);
+}
+
+console.log("\nclass 0x20's three sub-types:");
+{
+  // Sub-type 0 has no idle motion of its own at all; whatever moves it is the
+  // clip's root translation, which is `ActorAdvanceMotion`'s.
+  const still = targetScene({ subtype: 0 });
+  const yaw0 = still.a.yaw;
+  for (let i = 0; i < 10; i++) tFrame(still.a, still.events, still.rng);
+  check("sub-type 0 neither spins nor is clamped", still.a.yaw === yaw0,
+        String(still.a.yaw));
+
+  // Sub-type 1 spins, and `obj+0x11C` -- the descriptor's `+0x22`, which the
+  // bundle calls `hp` -- is the direction and not a hit-point count.
+  const cw = targetScene({ subtype: 1 });
+  cw.a.hp = 1;
+  for (let i = 0; i < 4; i++) tFrame(cw.a, cw.events, cw.rng);
+  check("sub-type 1 with a non-zero `obj+0x11C` spins one way",
+        cw.a.yaw === 4 * CLASS20_SPIN_STEP, String(cw.a.yaw));
+  const ccw = targetScene({ subtype: 1 });
+  ccw.a.hp = 0;
+  ccw.a.yaw = 0x8000;
+  for (let i = 0; i < 4; i++) tFrame(ccw.a, ccw.events, ccw.rng);
+  check("...and with zero it spins the other", ccw.a.yaw === 0x8000 - 4 * CLASS20_SPIN_STEP,
+        String(ccw.a.yaw));
+
+  // Sub-type 2 is clamped into the tail's box and turns away from the wall.
+  const boxed = targetScene({ subtype: 2, box: [-10, 10, -10, 10] });
+  boxed.a.pos.x = 25;
+  boxed.a.yaw = 0;
+  tFrame(boxed.a, boxed.events, boxed.rng);
+  check("sub-type 2 is clamped to the box's x max", boxed.a.pos.x === 10,
+        String(boxed.a.pos.x));
+  check("...and turns away from that wall",
+        boxed.a.yaw === -CLASS20_WALL_TURN, String(boxed.a.yaw));
+
+  // A corner turns ONCE: the engine's `bVar3` suppresses the z turn after an
+  // x clamp, so this is 0x100 and not 0x200.
+  const corner = targetScene({ subtype: 2, box: [-10, 10, -10, 10] });
+  corner.a.pos.x = 25;
+  corner.a.pos.z = 25;
+  corner.a.yaw = 0;
+  tFrame(corner.a, corner.events, corner.rng);
+  check("a corner clamps both axes", corner.a.pos.x === 10 && corner.a.pos.z === 10,
+        `${corner.a.pos.x},${corner.a.pos.z}`);
+  check("...but turns only once", corner.a.yaw === -CLASS20_WALL_TURN,
+        String(corner.a.yaw));
+}
+
+console.log("\n`ActorInitHitPoints` runs for two classes, not for every spawn:");
+{
+  // `[proved]` -- `FUN_0040A8B0` has exactly two callers in the image,
+  // `EnemyZombieInit` (0x00452DF2) and `EnemyThrowerInit` (0x0044964A). Every
+  // other class reads `obj+0x11C` as `SpawnFromDescriptor` left it, and the
+  // clamp's floor of 1 turns an honest zero into a one. For a class-0x20
+  // sub-type 1 that zero **is** the spin direction, so the clamp reversed it.
+  ResetGameGlobals();
+  SetGameTables(CHARS, undefined, undefined, undefined);
+  const zero = { hp: 0 } as unknown as CharacterPlacement;
+  check("a class-0x30 spawn is scaled and clamped to at least 1",
+        ActorInitHitPoints(zero, SpawnClass.Zombie) >= 1,
+        String(ActorInitHitPoints(zero, SpawnClass.Zombie)));
+  check("...and a class-0x31 spawn too",
+        ActorInitHitPoints(zero, SpawnClass.Thrower) >= 1);
+  check("a class-0x20 spawn keeps its raw `obj+0x11C`",
+        ActorInitHitPoints(zero, SpawnClass.OneHitTarget) === 0,
+        String(ActorInitHitPoints(zero, SpawnClass.OneHitTarget)));
+  check("...and so do the other non-combat classes",
+        ActorInitHitPoints(zero, SpawnClass.ScriptedHumanoid) === 0
+        && ActorInitHitPoints(zero, SpawnClass.SetPieceProp) === 0
+        && ActorInitHitPoints(zero, SpawnClass.Civilian) === 0);
+}
+
+console.log("\nclass 0x20 is not an enemy, and owns its own shot:");
+{
+  const { a, events, rng } = targetScene();
+  tFrame(a, events, rng);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a one-hit target is not counted as a live enemy",
+        G.g_enemies_alive === 0, String(G.g_enemies_alive));
+  check("...and `ActorIsEnemy` agrees", !ActorIsEnemy(SpawnClass.OneHitTarget));
+  // `ownsShotResult` is what keeps `ResolveHit` off it: this actor has no hit
+  // points and no damage row, so the combat path would charge it nothing and
+  // look up a table it has no entry in.
+  check("the class reads `obj+0x34` bit 3 itself",
+        g_class_handlers[SpawnClass.OneHitTarget]?.ownsShotResult === true);
+  check("...and keeps ticking once dead, or the body would hang in the air",
+        g_class_handlers[SpawnClass.OneHitTarget]?.updatesWhenDead === true);
 }
 
 // -- 10. class 0x24, the set-pieces ----------------------------------------
@@ -5545,6 +5872,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
   // produced three times.
   const want: [SpawnClass, string][] = [
     [SpawnClass.Civilian, "0x10 civilian"],
+    [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -5557,7 +5885,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
           typeof g_class_handlers[cls]?.update === "function",
           `handler ${JSON.stringify(g_class_handlers[cls] ?? null)}`);
   }
-  check("...and `PORTED_CLASSES` is those seven and nothing else",
+  check("...and `PORTED_CLASSES` is those eight and nothing else",
         PORTED_CLASSES.length === want.length
         && want.every(([c]) => PORTED_CLASSES.includes(c)),
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));

@@ -39,6 +39,7 @@ CHAR_TYPE_RULES: dict[int, tuple] = {
     0x11: ("tail", 0x00, "u16"),   # plain script-spawned enemy
     0x14: ("tail", 0x00, "u8"),    # multi-part enemy
     0x19: ("literal", 0x7C),       # FUN_004917E0 stores 0x7C
+    0x20: ("tail", 0x00, "i8"),    # one-hit target; OneHitTargetInit's tail+0
     0x22: ("literal", 0x45),       # FUN_0049B0D0 stores 0x45
     0x24: ("tail", 0x04, "i8"),    # set-piece prop: tail+4 -> obj+0x1F4
     0x25: ("tail", 0x00, "i8"),    # scripted humanoid

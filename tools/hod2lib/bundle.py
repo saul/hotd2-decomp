@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 
 from . import degraded
+from . import charmotion
 from . import (__version__, characters as charlib, evt as evtlib, gltf,
                props as propslib, rigs as rigslib,
                schema as schemalib, spawnres as spawnreslib,
@@ -384,15 +385,6 @@ def set_pieces_json(prog) -> dict:
     return out
 
 
-#: A class-0x25 command is eight bytes, or sixteen when it carries a point.
-def _humanoid_cmd_len(op: int, mode: int) -> int:
-    if op == 8 or op == 7:
-        return 16
-    if op == 4 and mode == 4:
-        return 16
-    return 8
-
-
 def scripted_humanoids_json(prog) -> dict:
     """Class 0x25's bytecode, decoded — see `game/class25`.
 
@@ -418,40 +410,21 @@ def scripted_humanoids_json(prog) -> dict:
         if rec.cls != 0x25:
             continue
         tail = rec.offset + 0x24
-        if tail + 0x10 > len(raw):
-            continue
-        blk = prog.evt.to_offset(
-            struct.unpack_from("<I", raw, tail + 0x0C)[0])
-        if blk is None or blk + 8 > len(raw):
+        blk = charmotion.humanoid_block_offset(prog.evt, rec)
+        if blk is None:
             continue
 
-        # Walk the stream once to fix an order, then again to resolve jumps.
-        order: list[int] = []
-        seen: set[int] = set()
-        pending = [blk + 8]
-        while pending:
-            p = pending.pop(0)
-            while p not in seen and p + 8 <= len(raw):
-                seen.add(p)
-                order.append(p)
-                op, mode, a, _b = struct.unpack_from("<4h", raw, p)
-                if op in (18, -1):
-                    break
-                if op == 15:
-                    t = prog.evt.to_offset(
-                        struct.unpack_from("<I", raw, p + 4)[0])
-                    if t is not None:
-                        pending.append(t)
-                    break
-                p += _humanoid_cmd_len(op, mode)
-        order.sort()
+        # The walk lives in `charmotion` because `characters` needs the same
+        # one to bake the clips `op 2` and `op 3` name -- see
+        # :func:`charmotion.humanoid_command_offsets`.
+        order = charmotion.humanoid_command_offsets(prog.evt, rec)
         index = {off: i for i, off in enumerate(order)}
 
         cmds: list[dict] = []
         for off in order:
             op, mode, a, b = struct.unpack_from("<4h", raw, off)
             c: dict = {"op": op, "mode": mode, "a": a, "b": b}
-            if _humanoid_cmd_len(op, mode) == 16:
+            if charmotion.humanoid_cmd_len(op, mode) == 16:
                 c["f0"], c["f1"] = struct.unpack_from("<2f", raw, off + 8)
             if op == 15:
                 t = prog.evt.to_offset(

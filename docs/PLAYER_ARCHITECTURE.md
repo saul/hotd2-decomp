@@ -612,9 +612,9 @@ web/src/
     rng.ts        seeded, state exposed — snapshots need it
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
-    class10/ class24/ class25/ class30/ class31/ class41/ class44/
+    class10/ class20/ class24/ class25/ class30/ class31/ class41/ class44/
                   one module per class. Each calls `registerClass` itself.
-                  The four that write the actor struct's tail words directly
+                  The five that write the actor struct's tail words directly
                   also have a `state.ts`: the discriminated union's arm for
                   that class, and the only place its tail words are named
     registry.ts   the handler contracts and an empty table. Imports no class

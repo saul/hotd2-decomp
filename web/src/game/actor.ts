@@ -15,6 +15,8 @@ import type { CivilianState } from "./class10/state";
 import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
+import { makeOneHitTargetTail, type OneHitTargetTail }
+  from "./class20/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
   from "./class24/state";
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
@@ -907,6 +909,18 @@ export interface ActorBase {
   /** `ZombieStateStandAndThrow`'s descriptor tail, from the bundle. */
   standThrow: CharacterPlacement["stand_throw"];
   /**
+   * Class 0x20's descriptor tail, from the bundle — the sub-type, the removal
+   * cue, the authored motion and sub-type 2's box.
+   *
+   * Its own field and not the shared `condition` / `initialState` pair,
+   * although `OneHitTargetInit` (`FUN_00448ED0`) reads the **same two bytes**
+   * `EnemyZombieInit` (`FUN_00452DA0`) reads as those: `tail+0x00` is the
+   * character type here and `tail+0x01` a sub-type. Two classes, one byte
+   * range, two readings — which is the polymorphism a shared field would hide
+   * rather than record.
+   */
+  oneHitTarget: CharacterPlacement["class20"];
+  /**
    * How deep in the **world** this actor's body sphere was on its last push,
    * and zero when it was clear.
    *
@@ -1258,9 +1272,11 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.SetPieceProp; prop: SetPiecePropTail })
   | (ActorBase & { cls: SpawnClass.Thrower; thr: ThrowerTail })
   | (ActorBase & { cls: SpawnClass.Zombie; zom: ZombieTail })
+  | (ActorBase & { cls: SpawnClass.OneHitTarget; tgt: OneHitTargetTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
-      | SpawnClass.Thrower | SpawnClass.Zombie> });
+      | SpawnClass.Thrower | SpawnClass.Zombie
+      | SpawnClass.OneHitTarget> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1275,6 +1291,10 @@ export type ThrowerActor = Extract<Actor, { cls: SpawnClass.Thrower }>;
 
 /** An actor already narrowed to class 0x30, for that class's own routines. */
 export type ZombieActor = Extract<Actor, { cls: SpawnClass.Zombie }>;
+
+/** An actor already narrowed to class 0x20, for that class's own routines. */
+export type OneHitTargetActor = Extract<Actor,
+  { cls: SpawnClass.OneHitTarget }>;
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
@@ -1352,6 +1372,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     walkDistance: 0,
     worldPushDepth: 0,
     standThrow: undefined,
+    oneHitTarget: null,
     entranceMotion: 0,
     pounce: null,
     grab: null,
@@ -1410,6 +1431,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Zombie) {
     return { ...head, cls, zom: makeZombieTail() };
+  }
+  if (cls === SpawnClass.OneHitTarget) {
+    return { ...head, cls, tgt: makeOneHitTargetTail() };
   }
   return { ...head, cls };
 }

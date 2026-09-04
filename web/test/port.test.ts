@@ -1657,39 +1657,32 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   // so a humanoid can no longer be asked for it. This line used to be a plain
   // `void h.backoffFrames` with a comment saying why it could not be a
   // directive: class 0x30 had no arm, the field was on the head, and every
-  // class could see it.
+  // class could see it. Class 0x30's arm is what made it one.
   // @ts-expect-error class 0x30's back-off counter is not on the head either
+  void h.backoffFrames;
   // **And here is what four arms still do not protect.**
   //
-  // `void h.slideTimer` below still compiles, and neither class 0x24 nor class
-  // 0x30 having an arm fixed it — which is the point. `obj+0x1330` is class
-  // 0x24's slide countdown *and* class 0x30's hold *and* the shared arc
-  // record's elapsed-frame word. Class 0x30's readings moved onto `zom`
-  // (`holdFrames`, `throwDelay`, `corpseTimer` — three names on that one word,
-  // **on one arm**, which the union does not separate and does not pretend
-  // to). Class 0x24's stayed on the head, because with five uses against 38 it
-  // was never that class's word to take.
+  // `void h.slideTimer` below still compiles, and class 0x24 and class 0x30
+  // *both* growing an arm did not fix it — which is the point. `obj+0x1330` is
+  // class 0x24's slide countdown, class 0x31's pin/entrance countdown, class
+  // 0x30's hold, and the shared arc record's elapsed-frame word, all at one
+  // address. Class 0x30's three readings moved onto `zom` (`holdFrames`,
+  // `throwDelay`, `corpseTimer` — three names on that one word, **on one
+  // arm**, which the union does not separate and does not pretend to).
+  // `slideTimer` stayed on the head because class 0x31 still reads it there:
+  // 22 sites in `class31/` against class 0x24's 5.
   //
-  // And `arcFrames`/`arcTotal` on the head belong to **no** class:
-  // `class30/entrance.ts` and `class30/knockback.ts` drive them through
-  // `class31/arc.ts`, which is why that module still takes a bare `Actor`.
+  // And the head aliases *itself* at that address — `slideTimer` and
+  // `arcFrames` are both `obj+0x1330` — because `arcFrames`/`arcTotal` belong
+  // to **no** class: `class30/entrance.ts` and `class30/knockback.ts` drive
+  // them through `class31/arc.ts`, which is why that module still takes a bare
+  // `Actor`. No `cls` discriminant can separate a word from itself.
   //
   // So the honest rule, with every arm in: a word separates when every class
   // sharing it has an arm **and** no class-agnostic routine drives it — and
-  // intra-class aliasing is untouched by any of this. A `@ts-expect-error` on
-  // the line below is an unused directive today and fails the build, which is
-  // why it is not written as one.
-  void h.backoffFrames;
-  // **And here is what it still does not protect.** `obj+0x1330` is class
-  // 0x24's `slideTimer`, and it compiles on a humanoid — because class 0x24
-  // has no arm yet, so its fields are on the head where every class can see
-  // them. A `@ts-expect-error` here is an *unused directive* today and fails
-  // the build, which is why it is not written as one. **The union only
-  // separates a word once every class that shares it has been cut over** —
-  // and class 0x30's reading of that same word moved out from under
-  // `slideTimer` in this change, to {@link ZombieTail.corpseTimer}, so when
-  // class 0x24 grows an arm this line becomes an error and the directive
-  // should be added above it.
+  // intra-class aliasing, and intra-*head* aliasing, are untouched by any of
+  // this. A `@ts-expect-error` on the line below is an unused directive today
+  // and fails the build, which is why it is not written as one.
   void h.slideTimer;
   // The arm is reachable once, and only once, `cls` has been tested.
   if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.bonePropMode;

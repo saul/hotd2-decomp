@@ -9430,3 +9430,76 @@ or the data that a single command would have refuted, and each survived
 because the next reader treated a written claim as a finished one. `[open]`
 that nobody re-tests becomes a wrong answer with a citation attached; so does
 `[proved]` that was never proved.
+
+## 2026-09-04 — the actor tail, all four arms, and what the union caught
+
+`Actor` is a five-way discriminated union now: `ActorBase` plus `hum` (class
+0x25, 13 words), `thr` (0x31, 14), `zom` (0x30, 15) and `prop` (0x24, **one**).
+Four worktrees, merged one at a time; the last merge took eleven conflicts
+across `game/actor.ts` and `test/port.test.ts`.
+
+The item was proposed as a type-safety refactor. It paid for itself as a bug
+hunt instead, which is worth recording because that is not what it was sold as.
+
+### `holdFrames` was one field for two addresses
+
+Class 0x24 counts its hold at `obj+0x1320`. Class 0x30 counts **every** hold at
+`obj+0x1330` — `MOV dword ptr [ESI + 0x1330], EAX` (`899630130000`) at
+`0x00458596` in `ZombieStateEmerge`, and again in `ZombieStateRunInPlaceTimed`
+and `ActorArcBeginFalling` [proved]. One TypeScript name covered both, so two
+assertions in `port.test.ts` had been reading the right name at the wrong
+offset and passing. Nothing in the flat struct could have caught that: the two
+classes never both ran in one test.
+
+In the same pass, `slideTimer` — class 0x24's word — was being read off zombies
+at six sites in `class30/death.ts`; and `throwHand`, tagged `[port-only]`, is
+`obj+0x135C`, stored by `ZombieStateStandAndThrow` (`89865c130000`,
+`0x00459270`) and read back by the next sub. A `[port-only]` tag is a claim
+about the binary and decays like any other.
+
+### Class 0x24's arm is one field, and that is the finding
+
+The survey listed three. `holdFrames` has 43 uses in `class30/` against four
+here; `slideTimer` has 22 in `class31/` against five. **A word only separates
+when every class sharing it has an arm** — and taking a word from the class
+that barely touches it would have made the union assert something false about
+the engine. One field was the honest answer, and the arm's doc comment says so
+at length rather than looking thin by accident.
+
+### Two survey entries did not survive the read
+
+`accX`/`accZ` are not class 0x30's: they are two thirds of one acceleration
+triple whose middle word classes 0x10, 0x24 and 0x31 integrate, and
+`ClearCurrentActorVelocityAndAccel` clears all three for any actor. And
+`obj+0x1368`/`+0x136C` are zeroed by `ScriptedHumanoidInit` and read by nobody
+— **an Init that zeroes a range is not evidence of ownership.**
+
+### What four arms still do not protect, written down rather than implied
+
+`h.slideTimer` compiles, and both 0x24 and 0x30 growing an arm did not change
+it. The head aliases *itself* at `obj+0x1330`: `slideTimer` and `arcFrames` are
+the same address, because the arc record belongs to no class and
+`class31/arc.ts` drives it from a bare `Actor`. No `cls` discriminant separates
+a word from itself. Intra-class aliasing is likewise untouched — `obj+0x1330`
+is class 0x30's general-purpose per-state dword across 98 accesses.
+
+The rule the four arms actually establish: **a word separates when every class
+sharing it has an arm *and* no class-agnostic routine drives it.**
+
+One blocker every arm hit independently and none worked around:
+`DescriptorFromPlacement` returns a single `Partial<Actor>`, which *distributes*
+over the union, so any descriptor-sourced field on an arm is an excess-property
+error. Eight class-0x30 words are stuck in the head for that reason alone.
+Splitting it is a job for all four arms at once, and it is `[open]`.
+
+### The merge itself left two lies in the file that checks for lies
+
+Closing the item, `port.test.ts` had two paragraphs explaining why
+`h.backoffFrames` and `h.slideTimer` could not carry `@ts-expect-error`
+directives. One sat directly above a line that now *has* one — TypeScript walks
+a directive backwards past comment-only lines, so the build stayed green while
+the prose beside it was false. The other still said class 0x24 "has no arm
+yet". Both were merge residue from arms landing in sequence, and the checker
+that catches an unused directive cannot catch a comment that describes the
+wrong line. The real directive count is **30**; an earlier note in this session
+said 33, which was a `grep` counting prose mentions of the string.

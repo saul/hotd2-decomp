@@ -11,19 +11,30 @@
  * individual mesh is fogged at all is per-mesh: TSP bit 23 maps to
  * `D3DRENDERSTATE_FOGENABLE` **inverted**, so fog is on when the bit is clear.
  *
- * **Depth vs range.** D3D7 computes its fog factor from view-space Z by
- * default — planar fog — and offers `D3DRENDERSTATE_RANGEFOGENABLE` for true
- * distance. three.js does the same thing as the D3D default: its `fog_vertex`
- * chunk is `vFogDepth = -mvPosition.z`. Planar fog has a visible artefact:
- * because the fog factor ignores how far off-axis a fragment is, the amount of
- * fog on a wall changes as you *turn* the camera, and the screen corners fog
- * less than the centre at the same true distance.
+ * **Depth vs range: the game is planar, and that is now proved rather than
+ * assumed.** `InitD3DDeviceAndTextureStages` picks the fog stage off the
+ * device caps at `0x004A4FE3`: if `D3DPRASTERCAPS_FOGTABLE` is present it sets
+ * `D3DRENDERSTATE_FOGTABLEMODE` (0x23) to 3, and only if that is missing does
+ * it fall back to `D3DRENDERSTATE_FOGVERTEXMODE` (0x8C) = 3. Both 3s are
+ * `D3DFOG_LINEAR`. So on anything the game shipped against it is **per-pixel
+ * table fog**, and `D3DRENDERSTATE_RANGEFOGENABLE` (0x30) is never set
+ * anywhere in the binary — it would not apply to table fog if it were.
+ * `FOGSTART`/`FOGEND` arrive as 42..1014 rather than a 0..1 device range,
+ * which is what says the depth is eye-space W and not post-projection Z.
  *
- * `RADIAL` patches that one line to use `length(mvPosition.xyz)` instead, so
- * the fog factor is real distance from the eye. `PLANAR` is kept so the two
- * can be compared against each other and against the game.
+ * three.js's default is the same quantity: `fog_vertex` is
+ * `vFogDepth = -mvPosition.z`. So `PLANAR` **is** the game, and it is the
+ * default here.
  *
- * **Two things had to be corrected before the density matched the game.**
+ * `RADIAL` [diverges]: it patches that line to `length(mvPosition.xyz)` so the
+ * factor is true distance from the eye. Planar fog fogs the screen corners
+ * less than the centre at the same real distance, and the fog on a wall
+ * changes as you *turn* — an artefact of the original, not of the port. Radial
+ * is offered because it is the thing people reach for when they see that, and
+ * keeping it next to `planar` is what makes the difference legible. It is not
+ * more correct.
+ *
+ * **Three things had to be corrected before it matched the game.**
  *
  * 1. The game **doubles** both values before handing them to D3D.
  *    `FUN_004ABDF0` is, from the disassembly:
@@ -41,9 +52,32 @@
  *    `D3DFOG_LINEAR` is a straight ramp, `(end - d) / (end - start)`.
  *    smoothstep is an S-curve, so it saturates well before the far plane.
  *    The fragment chunk is patched to the linear form.
+ *
+ * 3. **The colour is sRGB and the blend is in sRGB**, which is the one that
+ *    made the fog visibly the wrong colour rather than merely the wrong
+ *    density. `PushSceneFogColour` (`FUN_0040D5B0`) packs channels 2/3/4 into
+ *    a `0x00RRGGBB` D3DCOLOR and `SetFogColour` (`FUN_004ABDD0`) hands it
+ *    straight to `D3DRENDERSTATE_FOGCOLOR`. Those bytes are framebuffer
+ *    bytes. Two consequences, and the port had both wrong:
+ *
+ *    * `Color.setRGB(r, g, b)` defaults to `ColorManagement.workingColorSpace`
+ *      — **linear-sRGB** — so it took the game's bytes as already-linear and
+ *      the renderer then encoded them again on the way out. Stage 3's
+ *      `RGB(10, 10, 20)` reached the screen as `RGB(56, 56, 79)`: four times
+ *      too bright, and the blue washed out of it, because the sRGB curve
+ *      compresses a 2:1 ratio into 1.4:1. Passing `SRGBColorSpace` is the fix.
+ *    * D3D7's fog blend runs on those encoded bytes —
+ *      `C = f*C_pixel + (1-f)*C_fog` in gamma space, there being no sRGB write
+ *      path in DX7 at all. three.js mixes in linear and encodes afterwards,
+ *      which is a different sum: over a dark surface at half fog it lands
+ *      about 10/255 too bright. The fragment chunk encodes, mixes, and decodes
+ *      so the displayed result is the lerp the hardware did.
  */
 
-import { Color, Fog, Scene, ShaderChunk, type Material, type Mesh } from "three";
+import {
+  Color, Fog, Scene, ShaderChunk, SRGBColorSpace,
+  type Material, type Mesh,
+} from "three";
 import type { Context, System } from "../core/system";
 
 export type FogMode = "off" | "planar" | "radial";
@@ -76,16 +110,56 @@ function patchShaderChunk(): void {
   // D3DFOG_LINEAR is a straight ramp; three.js uses smoothstep, which
   // saturates far too early against the same near/far pair.
   const frag = ShaderChunk.fog_fragment;
-  if (frag.includes("smoothstep( fogNear, fogFar, vFogDepth )")) {
-    ShaderChunk.fog_fragment = frag.replace(
+  if (!frag.includes("smoothstep( fogNear, fogFar, vFogDepth )")
+      || !frag.includes("mix( gl_FragColor.rgb, fogColor, fogFactor )")) {
+    console.warn("three.js fog_fragment is not the expected shape; " +
+                 "fog stays smoothstep and blends in linear space");
+    return;
+  }
+  ShaderChunk.fog_fragment = frag
+    .replace(
       "smoothstep( fogNear, fogFar, vFogDepth )",
       "clamp( ( vFogDepth - fogNear ) / ( fogFar - fogNear ), 0.0, 1.0 )",
+    )
+    // The blend is the D3D7 one: encode, lerp, decode. See note 3 above --
+    // `SetFogColour` hands D3D framebuffer bytes and the fixed-function
+    // blend runs on framebuffer bytes, so the lerp belongs in sRGB. The
+    // renderer re-encodes on the way out, which is why this has to decode
+    // again rather than stop at the encoded value.
+    .replace(
+      "gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );",
+      "gl_FragColor.rgb = hod2SrgbDecode( mix(\n"
+      + "\t\thod2SrgbEncode( gl_FragColor.rgb ),\n"
+      + "\t\thod2SrgbEncode( fogColor ), fogFactor ) );",
     );
-  } else {
-    console.warn("three.js fog_fragment is not the expected shape; " +
-                 "fog falloff stays smoothstep rather than linear");
-  }
+  ShaderChunk.fog_pars_fragment = SRGB_TRANSFER_GLSL
+    + ShaderChunk.fog_pars_fragment;
 }
+
+/**
+ * The sRGB transfer pair, spelled out rather than taken from three's
+ * `colorspace_pars_fragment`.
+ *
+ * That chunk has the encode half (`sRGBTransferOETF`) and no decode half, and
+ * whether it is in scope at `fog_fragment` is an ordering detail of a file
+ * this code does not own. Two twelve-line functions are cheaper than that
+ * coupling. The constants are three's own, so the round trip is exact.
+ *
+ * `max(x, 0)` guards `pow`: a negative component is undefined behaviour there,
+ * and one can arrive from a material that subtracts.
+ */
+const SRGB_TRANSFER_GLSL = /* glsl */`
+vec3 hod2SrgbEncode( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	return mix( pow( c, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ),
+	            c * 12.92, vec3( lessThanEqual( c, vec3( 0.0031308 ) ) ) );
+}
+vec3 hod2SrgbDecode( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	return mix( pow( ( c + 0.055 ) / 1.055, vec3( 2.4 ) ),
+	            c / 12.92, vec3( lessThanEqual( c, vec3( 0.04045 ) ) ) );
+}
+`;
 
 /**
  * The game doubles the near and far plane before setting FOGSTART/FOGEND.
@@ -98,7 +172,7 @@ export const FOG_RANGE_SCALE = 2;
  * a uniform injected into every fogged program. Simpler than it sounds: one
  * shared object, mutated in place.
  */
-const radialUniform = { value: 1 };
+const radialUniform = { value: 0 };
 
 /**
  * Put the fog state on **one** material: the per-mesh fog bit, and the uniform
@@ -132,7 +206,8 @@ export class SceneFog implements System {
   readonly id = "render.fog";
   private readonly scene: Scene;
   private readonly fog = new Fog(0x000000, 65000, 65001);
-  private mode: FogMode = "radial";
+  /** Planar, because that is what table fog does. See the note above. */
+  private mode: FogMode = "planar";
   private last = "";
 
   constructor(scene: Scene) {
@@ -183,7 +258,12 @@ export class SceneFog implements System {
     this.last = key;
     this.fog.near = near * FOG_RANGE_SCALE;
     this.fog.far = far * FOG_RANGE_SCALE;
-    this.fog.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+    // **`SRGBColorSpace` is load-bearing.** These are the bytes
+    // `PushSceneFogColour` (`FUN_0040D5B0`) packs into a D3DCOLOR, so they are
+    // sRGB; `setRGB`'s default is the linear-sRGB working space, which took
+    // `RGB(10, 10, 20)` to the screen as `RGB(56, 56, 79)`.
+    this.fog.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255,
+                          SRGBColorSpace);
     this.activeRange = active && far > near && near * FOG_RANGE_SCALE < 8000;
     this.apply();
   }

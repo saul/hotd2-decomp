@@ -11076,3 +11076,60 @@ starts its clip at a **random frame** (`rand() % g_motion_play_length[motion]`,
 fade 10) so a crowd does not march in step, and rolls `rand() & 0xFF < 4` each
 frame for a 1-in-64 shout when `obj+0x136C` carries both `0x2000000` and
 `0x1000000`.
+
+## 2026-09-04 — Fog: the right numbers pushed through the wrong colour space
+
+Prompted by "are you SURE you've ported the fog settings correctly … especially
+the colours - they seem really off". Yes to the numbers, no to the colours, and
+the reason is one defaulted argument.
+
+`Color.setRGB(r, g, b)` defaults its fourth parameter to
+`ColorManagement.workingColorSpace`, which is **linear-sRGB**. The port handed
+it the game's D3DCOLOR bytes over 255, so it recorded them as light-linear
+values, and `outputColorSpace = SRGBColorSpace` then encoded them a second time
+on the way to the screen. Stage 3's `RGB(10, 10, 20)` fog was displayed as
+`RGB(56, 56, 79)`. The error is worst exactly where this game lives — the
+scripts' fog colours are overwhelmingly dark blues, `(10,10,20)`, `(0,0,37)`,
+`(12,10,8)`, `(0,25,52)` — because the sRGB curve is steepest near black:
+four to five times too bright at the dark end, one time at the light end. It
+also flattens the hue, a 2:1 blue-to-red ratio becoming 1.4:1, so the fog read
+as grey haze rather than as night.
+
+Three findings, in the order they were read out of the exe:
+
+* **`SetFogColour` (`FUN_004ABDD0`)** — `D3DRENDERSTATE_FOGCOLOR`, found by
+  searching for `PUSH 0x22` and noticing the hit sat immediately before
+  `SetFogRange`, which had been read months ago. **`PushSceneFogColour`
+  (`FUN_0040D5B0`)** packs it from three integer globals, now
+  `g_scene_fog_r/g/b`. `FUN_00460250`'s seeding of those *and* of a mirrored
+  float array at `0x009C89E4 + channel*0x10` is what independently confirms the
+  light-block channel numbering the port had assumed.
+* **The blend space.** DX7 fog is `f·C_pixel + (1 − f)·C_fog` on framebuffer
+  bytes; there is no sRGB write path in the API. three.js mixes in linear and
+  encodes afterwards, which is a different sum — about `10/255` too bright over
+  a dark surface at half fog. The fog chunk now encodes, mixes and decodes.
+* **Planar, and provably.** `InitD3DDeviceAndTextureStages` prefers
+  `FOGTABLEMODE = D3DFOG_LINEAR` and only falls back to `FOGVERTEXMODE`, so it
+  is per-pixel table fog; `RANGEFOGENABLE` is set nowhere in the binary and
+  does not apply to table fog anyway. The port's default was `radial`, which is
+  a **`[diverges]`**, and the UI already labelled the option it was not using
+  "planar (as the game)" — the doc comment had even said D3D defaults to planar
+  and then defaulted to the other thing.
+
+**What this cost, and the shape of it.** The range doubling in `SetFogRange`
+was read carefully and written up at length; the colour was three components
+divided by 255 and never questioned, because dividing by 255 *looks* like the
+whole job. The lesson is not "check colour spaces" but that the two halves of
+one push got completely different amounts of attention, and the half that got
+none is the half that had a silent default in it. `getHexString()` reports in
+sRGB, so `SceneFog.describe` round-trips and the assertion is a one-liner —
+available the whole time, never written.
+
+**A wrong turn worth recording.** `annotate.py` accepted a comment containing
+newlines and wrote them straight through, splitting two rows into 24 lines of
+broken TSV, and it printed `added …` for both. Reverting with
+`git checkout -- ghidra/annotations/functions.tsv` was the wrong instrument on
+a file a peer session also writes; it happened to cost nothing only because
+that peer had committed thirty seconds earlier. `annotate.py` now refuses a
+name or comment containing a tab or a newline — this is `L?`-shaped: *a tool
+that prints success has not necessarily written a valid file.*

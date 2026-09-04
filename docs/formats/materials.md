@@ -296,6 +296,55 @@ with the raw pair halves the ramp and the fog comes out roughly twice as
 thick. `FOGSTART`/`FOGEND` also fix the model as `D3DFOG_LINEAR` — a straight
 ramp `(end − d) / (end − start)`, not a curve.
 
+#### Fog colour is an sRGB D3DCOLOR, blended in sRGB — [proved]
+
+`PushSceneFogColour` (`0x0040D5B0`) runs every frame from the scene draw and
+packs three integer globals into one word:
+
+```c
+SetFogColour((g_scene_fog_r << 8 | g_scene_fog_g) << 8 | g_scene_fog_b);
+```
+
+`SetFogColour` (`0x004ABDD0`) passes it to `D3DRENDERSTATE_FOGCOLOR` (`0x22`)
+and does nothing else. `g_scene_fog_r/g/b` (`0x009A3564/68/6C`) are the integer
+form of light-block channels **2, 3 and 4** — `FUN_00460250` seeds them
+`255/0/0` alongside the mirrored float channel array at
+`0x009C89E4 + channel*0x10`, which is what pins the channel numbering:
+`0 = near, 1 = far, 2/3/4 = fog RGB as floats 0…255, 6/7/8 = light RGB`.
+
+Two things follow, and they are the difference between the right colour and a
+colour that is two to five times too bright:
+
+* **Those bytes are framebuffer bytes.** A D3DCOLOR is whatever the display
+  wants, which on any DX7-era target is sRGB-encoded. A renderer with a linear
+  working space must convert them in, not adopt them.
+* **The blend is in that same encoding.** Fixed-function fog is
+  `C = f·C_pixel + (1 − f)·C_fog` evaluated on the encoded values; DX7 has no
+  sRGB write path and no gamma stage to opt into. A renderer that mixes in
+  linear light and encodes afterwards computes a different sum — over a dark
+  surface at half fog it lands about `10/255` too bright.
+
+#### Fog is per-pixel and planar — [proved]
+
+`InitD3DDeviceAndTextureStages` chooses the fog stage from the device caps at
+`0x004A4FE3`:
+
+```
+if (caps & D3DPRASTERCAPS_FOGTABLE)       SetRenderState(0x23 FOGTABLEMODE,  3)
+else if (caps & D3DPRASTERCAPS_FOGVERTEX) SetRenderState(0x8C FOGVERTEXMODE, 3)
+```
+
+Both `3`s are `D3DFOG_LINEAR`, and table fog wins wherever it exists — so the
+shipped configuration is **per-pixel table fog**.
+`D3DRENDERSTATE_RANGEFOGENABLE` (`0x30`) is set **nowhere in the binary**, and
+would not apply to table fog if it were: the factor comes from planar eye-space
+depth, not from distance to the eye. `FOGSTART`/`FOGEND` arriving as `42…1014`
+rather than a `0…1` device range is what says that depth is eye-space **W**.
+
+The visible consequence is an artefact of the original and not a bug to fix:
+the screen corners fog less than the centre at the same true distance, and the
+fog on a wall shifts as the camera turns.
+
 #### The directional light — [proved]
 
 `SetLightingDefaultSingle` (`0x004AA120`) is short enough to give in full:

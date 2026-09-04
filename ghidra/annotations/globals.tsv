@@ -223,6 +223,9 @@
 009a354c	g_scene_light_dir_view
 009a3558	g_scene_light_pitch_bams
 009a355c	g_scene_light_yaw_bams
+009a3564	g_scene_fog_r	Scene fog colour, red, int 0..255 -- light-block channel 2. Read only by PushSceneFogColour (0x0040D5B0), which packs r/g/b into a D3DCOLOR for D3DRENDERSTATE_FOGCOLOR. Seeded to 0xFF by FUN_00460250.
+009a3568	g_scene_fog_g	Scene fog colour, green, int 0..255 -- light-block channel 3. See g_scene_fog_r.
+009a356c	g_scene_fog_b	Scene fog colour, blue, int 0..255 -- light-block channel 4. See g_scene_fog_r.
 009a3570	g_scene_fog_near
 009a3574	g_scene_fog_far
 009a3780	g_scene_light_colour_r

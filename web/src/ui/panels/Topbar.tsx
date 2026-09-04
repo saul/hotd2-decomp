@@ -23,8 +23,8 @@ const LIGHT = [
 ];
 
 const FOG = [
+  { value: "planar", label: "as the game" },
   { value: "radial", label: "radial" },
-  { value: "planar", label: "planar (as the game)" },
   { value: "off", label: "off" },
 ];
 
@@ -151,7 +151,13 @@ export function ViewSettings() {
           ))}
         </select>
       </label>
-      <label title="Fog colour and range come from the script (evt 0x20-0x27). Radial uses true distance from the eye; planar reproduces the game's view-space-Z falloff, which fogs the screen corners less than the centre.">
+      <label title={"Fog colour and range come from the script (evt 0x20-0x27)"
+        + " and the blend is the D3D7 one: a straight ramp, in sRGB, over"
+        + " view-space depth. That is what the game's per-pixel table fog did,"
+        + " so 'as the game' fogs the screen corners less than the centre at"
+        + " the same real distance. Radial uses true distance from the eye"
+        + " instead, which removes that artefact and is not what the hardware"
+        + " did."}>
         Fog{" "}
         <select value={fogMode}
                 onChange={(e) => dispatch({ kind: "setFogMode",

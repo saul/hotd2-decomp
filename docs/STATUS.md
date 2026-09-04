@@ -20,15 +20,15 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
 | `game/` | 24535 | 112 | engine |
-| `render/` | 6640 | 26 | render |
+| `render/` | 6720 | 26 | render |
 | `app/` | 4888 | 21 | app |
 | `script/` | 3484 | 25 | engine |
-| `ui/` | 2837 | 26 | ui |
+| `ui/` | 2843 | 26 | ui |
 | `bundle/` | 1539 | 10 | engine |
 | `core/` | 884 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | ui |
-| **total** | **45404** | **231** | |
+| **total** | **45490** | **231** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -55,8 +55,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 49 
 
 | | |
 |---|---|
-| Named functions | 616 in `ghidra/annotations/functions.tsv` |
-| Named globals | 324 in `ghidra/annotations/globals.tsv` |
+| Named functions | 618 in `ghidra/annotations/functions.tsv` |
+| Named globals | 327 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 23 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

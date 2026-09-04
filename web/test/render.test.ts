@@ -66,7 +66,7 @@ const { FreeRoam, isTyping } = await import("../src/render/freeroam");
 const { RigLayer } = await import("../src/render/rigs");
 const { CamPaths } = await import("../src/game/camera/curve");
 const { CanvasTexture, Group, Mesh, MeshBasicMaterial, PerspectiveCamera,
-        PlaneGeometry, Scene } = await import("three");
+        PlaneGeometry, Scene, ShaderChunk } = await import("three");
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -199,6 +199,94 @@ console.log("\nthe fog hook survives a late clone");
     check("and so do the rain drops'", mats.length > 0 && mats.every(hooked),
           `${mats.filter(hooked).length} of ${mats.length} hooked`);
   }
+}
+
+console.log("\nthe fog colour is the game's colour");
+
+{
+  // The bug this catches shipped for months and is invisible unless you sample
+  // a pixel: `Color.setRGB` defaults to the **linear-sRGB working space**, so
+  // handing it the game's D3DCOLOR bytes claimed they were already linear and
+  // the renderer encoded them a second time on the way out. Stage 3's
+  // RGB(10,10,20) fog reached the screen as RGB(56,56,79) -- four times too
+  // bright, with the blue washed out of it, because the sRGB curve turns a 2:1
+  // ratio into 1.4:1.
+  //
+  // `describe` is the hook: `getHexString()` defaults to `SRGBColorSpace`, so
+  // it converts back out of the working space and reports what a screenshot
+  // would show. Round-tripping through it is exactly the assertion.
+  const walkerWith = (rgb: [number, number, number], near = 21, far = 507) =>
+    ({ walker: { fog: { near, far, rgb }, fogSet: true } }) as unknown as
+      Parameters<InstanceType<typeof SceneFog>["update"]>[0];
+
+  const fog = new SceneFog(new Scene());
+
+  // Every distinct fog colour the six shipped stage scripts set, dark end
+  // first -- the dark end is where the error is worst and where this game
+  // spends its time.
+  for (const rgb of [[10, 10, 20], [0, 0, 37], [12, 10, 8], [0, 25, 52],
+                     [40, 36, 11], [28, 36, 52], [101, 102, 105],
+                     [0, 140, 255], [197, 196, 255]] as [number, number,
+                                                         number][]) {
+    const want = rgb.map((c) => c.toString(16).padStart(2, "0")).join("");
+    fog.update(walkerWith(rgb));
+    check(`RGB(${rgb.join(",")}) survives the round trip`,
+          fog.describe.endsWith(`#${want}`), fog.describe);
+  }
+
+  // The near/far doubling `SetFogRange` (`FUN_004ABDF0`) does, which is the
+  // other half of the same push and the one that was already right.
+  fog.update(walkerWith([10, 10, 20], 21, 507));
+  check("...and the range is still the doubled one the exe sets",
+        fog.describe.includes("42..1014"), fog.describe);
+
+  // Planar is what per-pixel table fog does, so it is the default; radial is
+  // the declared divergence and must be chosen, never inherited.
+  check("the default mode is the game's planar falloff",
+        new SceneFog(new Scene()).fogMode === "planar",
+        new SceneFog(new Scene()).fogMode);
+}
+
+console.log("\nthe fog blend happens in the space D3D blends in");
+
+{
+  // D3D7 fixed-function fog is `f*C_pixel + (1-f)*C_fog` on framebuffer bytes;
+  // there is no sRGB write path in DX7. three.js mixes in linear and encodes
+  // afterwards, which is a different sum -- about 10/255 too bright over a
+  // dark surface at half fog. `patchShaderChunk` rewrites the chunk to encode,
+  // mix and decode.
+  //
+  // Asserting on the GLSL text is unlovely, but the alternative is a GL
+  // context, and the failure mode being guarded against is three.js changing
+  // the chunk under us -- which is a *text* change, and which the code already
+  // warns about rather than throwing on. A silent fallback needs a test that
+  // sees it.
+  const frag = ShaderChunk.fog_fragment;
+  check("the fog factor is D3DFOG_LINEAR's straight ramp, not smoothstep",
+        frag.includes("( vFogDepth - fogNear ) / ( fogFar - fogNear )")
+        && !frag.includes("smoothstep"), frag.trim().split("\n").pop());
+  check("...and the mix runs on encoded values, both sides",
+        frag.includes("hod2SrgbDecode( mix(")
+        && frag.includes("hod2SrgbEncode( gl_FragColor.rgb )")
+        && frag.includes("hod2SrgbEncode( fogColor )"), frag);
+  check("...with the transfer pair declared where the chunk can see it",
+        ShaderChunk.fog_pars_fragment.includes("vec3 hod2SrgbEncode(")
+        && ShaderChunk.fog_pars_fragment.includes("vec3 hod2SrgbDecode("));
+
+  // The arithmetic the shader now does, in JS, against the arithmetic the
+  // hardware did. If these two ever disagree the constants are wrong.
+  const enc = (c: number) => c <= 0.0031308 ? c * 12.92
+                                            : 1.055 * c ** 0.41666 - 0.055;
+  const dec = (c: number) => c <= 0.04045 ? c / 12.92
+                                          : ((c + 0.055) / 1.055) ** 2.4;
+  const surf = 70 / 255, fogc = 10 / 255, f = 0.5;
+  // What D3D put in the framebuffer: the lerp, on bytes.
+  const d3d = Math.round(255 * ((1 - f) * surf + f * fogc));
+  // What the patched shader produces, re-encoded by the renderer's output.
+  const ours = Math.round(255 * enc(dec(
+    (1 - f) * enc(dec(surf)) + f * enc(dec(fogc)))));
+  check("half fog over a dark surface lands where the hardware put it",
+        Math.abs(d3d - ours) <= 1, `D3D ${d3d}, port ${ours}`);
 }
 
 console.log("\nwhat a subtree is holding");

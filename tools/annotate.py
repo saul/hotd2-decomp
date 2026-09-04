@@ -38,6 +38,20 @@ def main() -> int:
                     help="allow changing the name of an address already there")
     args = ap.parse_args()
 
+    # One row is one line, and one line is three tab-separated fields. A
+    # comment pasted in with newlines in it silently splits into rows whose
+    # first field is prose, which breaks `verify_annotations.py`, the exporter
+    # and the address-ordered insert below all at once -- and it looks fine in
+    # the tool's own output, because the write succeeded. Refuse it here
+    # rather than let it reach the file both workstreams share.
+    for field, text in (("name", args.name), ("comment", args.comment)):
+        bad = [c for c in ("\n", "\r", "\t") if c in text]
+        if bad:
+            print(f"{field} contains {' and '.join(repr(c) for c in bad)}; "
+                  f"a TSV row is one line -- write it as running prose",
+                  file=sys.stderr)
+            return 1
+
     path = ROOT / "ghidra" / "annotations" / f"{args.table}.tsv"
     addr = args.address.lower().lstrip("0x").rjust(8, "0")
     lines = path.read_text().split("\n")

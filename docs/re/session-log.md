@@ -9280,3 +9280,85 @@ is actively lying about it.
 
 Also open, and now marked as such in the review: `core/system.ts` still imports
 `Walker`, so the framework names the one machine it hosts. No phase owns it.
+
+## 2026-09-04 — B4 and B8: the room-clear gate answered on its own frame
+
+Two reports, and they turned out to be one mechanism seen twice. **B4**:
+"camera doesn't seem to wait for zombies to die before advancing". **B8**: at
+`?stage=1&mode=play&block=4&step=4&op=28`, "the two later (of three total)
+zombies that drop from the high ledge don't seem to pause the camera... the
+game advances while the two are dropping (maybe a race condition?)".
+
+### What the exe does
+
+`EvtOpWaitEnemiesPresent43` (`FUN_0045FBC0`) reads `g_enemies_present`
+(`0x009C7006`); `EvtOpWaitEnemiesAlive44` (`FUN_0045FC10`) reads
+`g_enemies_alive` (`0x009C904A`). [proved] Both then require
+`g_evt_gameplay_live` and `g_camera_free`. Both — and `0x46`, and `0x41`,
+`0x42`, `0x45` — open with
+
+    if (g_evt_yield == 0) { g_evt_yield = 1; return; }
+
+which ends `EvtInterpreterLoop`'s `do { … } while (g_evt_yield == 0)` for the
+frame **before the condition is read at all**. `0x40` is the one wait without
+it. `0x44` additionally requires `0 < g_evt_wait_alive_hysteresis`
+(`0x007DCCA8`), incrementing it on every frame it does not pass and zeroing it
+only when it does, so it costs a second frame. [proved]
+
+Enemies are counted in at `Init`, not on entering a combat state:
+`EnemyZombieInit` (`FUN_00452DA0`) does both `INC`s on its straight line,
+declining only character type 9 and initial state 31, and `EnemyThrowerInit`
+(`0x00449892`) has no guard at all. [proved] So the "the droppers are not
+counted yet" hypothesis in the report is **wrong**, and ruling it out is what
+turned the search towards the script.
+
+The frame order also checks out: the evt VM is an `ActorAlloc`'d task created
+at scene load, and `FUN_004A71A0` walks each parent's child list from `+0x28`
+following `+0x1C` — creation order — so the VM runs before every enemy it
+spawned. [proved] The port's `walker.tick()` → `syncCharacterSpawns` →
+`GameUpdate()` matches.
+
+### What the port did
+
+Two faults, and the bug needed both.
+
+1. **One `WaitRule` claimed `0x43` and `0x44` and answered both with
+   `aliveEnemies()`.** The 54 present gates therefore opened at death rather
+   than at the end of the death clip — the one distinction the game keeps two
+   counters to make, collapsed.
+2. **No yield.** `applyWait` read the counter on the frame the instruction ran
+   and could return `passed` immediately. That mattered because the port builds
+   the script's characters in `syncCharacterSpawns`, *between* ticks: for the
+   whole of the tick that runs a spawn opcode, the counters are still zero.
+
+Stage 1 block 4 step 5 is `spawn_obj` (two class-0x30 at y = 61),
+`queue_event`, `wait_enemies_alive 0` with nothing in between. Traced with
+`web/tools/enemy_gate.mjs` (new): frame 0 at `b4/s5/o0`, frame 1 already at
+`b4/s6/o0` with the two zombies just created and falling from y = 61. Block 4
+step 4's op 28 — the address in the report — and step 1's two gates have the
+same shape.
+
+With the yield transcribed, the same trace holds at `b4/s5/o4` for the whole
+descent and releases two frames after the kill.
+
+### What was got wrong, and what a doc said that was not true
+
+* I read `g_evt_wait_alive_hysteresis`'s existing annotation as authoritative
+  and it is not: it said "the `g_enemies_alive` condition must hold for two
+  consecutive frames". The counter is never reset when the condition fails —
+  only on a pass — so the handler requires *a previous refused evaluation*, not
+  two good frames. The row is corrected, in the TSV and in the database.
+* `script/waits/enemies.ts` and `script/walker.ts` both had the opcodes swapped
+  in prose — "`wait_enemies_alive` (0x43) and `wait_enemies_present` (0x44)" —
+  while `game/combat/counts.ts` had them the right way round. That is probably
+  how one rule came to serve both.
+* `PLAYER_PROGRESS.md` called `0x41` and `0x42` "exact". Neither models the
+  yield, and `wait_frames` is `operand + 2` frames in the engine, not
+  `operand`. Both rows now say so and carry a `[diverges]`.
+
+### Left open
+
+`0x41`, `0x42` and `0x45` still answer on their own frame. Fixing `0x42`
+retimes every camera cue in six stages, so it is a change of its own rather
+than a rider on this one. Nothing else in the VM is known to be missing the
+yield.

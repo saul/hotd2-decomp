@@ -55,9 +55,32 @@ export interface WaitRule {
    * reproduce by hand — see `Walker.retireGatedEnemies`.
    */
   readonly retires?: "enemies" | "civilians";
-  /** Decide what this wait is waiting for, on the frame the instruction runs. */
+  /**
+   * Decide what this wait is waiting for, on the frame the instruction runs.
+   *
+   * **The engine's first visit, and it does not read the condition.** Every
+   * wait opcode except `0x40` opens with
+   * `if (g_evt_yield == 0) { g_evt_yield = 1; return; }`, which ends
+   * `EvtInterpreterLoop`'s `do { … } while (g_evt_yield == 0)` for the frame
+   * before the test is reached — so a wait costs at least one frame whatever
+   * the world looks like when the script arrives at it. A rule that models
+   * that returns a blocking policy from here unconditionally and does the
+   * whole test in {@link satisfied}.
+   *
+   * `0x43`, `0x44` and `0x46` model it — see `waits/enemies.ts`, where it is
+   * the whole of two bugs. **`0x41`, `0x42` and `0x45` do not**, and that is
+   * `[diverges]`: each would cost a frame it does not currently cost, and
+   * `0x42`'s countdown would become `operand + 2` frames rather than `operand`
+   * (`EvtOpWaitFrames42` loads the counter on the yield frame and then
+   * decrements *before* testing). Every camera cue in six stages is timed
+   * against that clock, so moving them is a retiming of the whole player and
+   * wants its own change rather than a ride on this one.
+   */
   enter(op: OpJson, ctx: WaitContext): WaitPolicy;
-  /** Is it over? Only called for a policy that actually blocks. */
+  /**
+   * Is it over? Only called for a policy that actually blocks, and exactly
+   * once a frame — the engine's later visits, where the condition is read.
+   */
   satisfied?(policy: WaitPolicy, op: OpJson, ctx: WaitContext): boolean;
 }
 
@@ -71,10 +94,15 @@ export const WAIT_NOTES: Record<number, string> = {
   // watching the script sail through one saw was "the second enemy counter,
   // gated with 0x43". That reads as a footnote. It needs to read as an
   // instruction.
-  0x43: "the live-enemy gate: real while Shoot is on, and passed when it is "
-      + "off, because nothing can then make the count fall",
-  0x44: "the live-enemy gate: real while Shoot is on, and passed when it is "
-      + "off, because nothing can then make the count fall",
+  //
+  // ...and they are two counters. 0x43 is `g_enemies_present`, which a corpse
+  // stays in until its death clip ends; 0x44 is `g_enemies_alive`, which it
+  // leaves the moment it dies. See `waits/enemies.ts`.
+  0x43: "the corpse-clear gate (`g_enemies_present`): real while Shoot is on, "
+      + "and passed when it is off, because nothing can then make the count "
+      + "fall",
+  0x44: "the live-enemy gate (`g_enemies_alive`): real while Shoot is on, and "
+      + "passed when it is off, because nothing can then make the count fall",
   0x45: "passed: the script flag array is written by gameplay",
   0x46: "the civilian gate: real while Shoot is on, and passed when it is "
       + "off, because rescuing a civilian means killing its captors",

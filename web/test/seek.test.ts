@@ -49,6 +49,7 @@ const mkHost = (): WalkerHost => ({
   onBranch: () => undefined,
   playSound: () => undefined,
   aliveEnemies: () => null,
+  presentEnemies: () => null,
   aliveCivilians: () => null,
   cameraFree: () => null,
   showMessage: () => null,
@@ -385,19 +386,34 @@ for (const stage of STAGES) {
                     [number, number, number], hp: 1, yaw_deg: 0,
                     block: 0, step: 0, opIndex: 0, opcode: 9 };
 
-    // Playback, with the last enemy just killed: the gate opens and the
-    // corpses stay.
-    const play = new Walker(script, { ...mkHost(), aliveEnemies: () => 0 });
+    // **The gate blocks first, whatever the count says.** Every wait opcode
+    // but `0x40` opens `if (g_evt_yield == 0) { g_evt_yield = 1; return; }`,
+    // so `applyWait` is the engine's first visit and never reads the
+    // condition; the release is a *later* frame, which for a replay is
+    // `stepOverWait`. Handing `applyWait` a dead room and expecting it to walk
+    // straight through was the shape of B4/B8.
+    const play = new Walker(script, { ...mkHost(), presentEnemies: () => 0 });
     play.spawns = [{ ...spawn }];
     play.applyWait(gate);
+    check("the enemy gate blocks on the frame it is reached, dead room or not",
+          play.wait?.policy.kind === "enemies",
+          `policy ${play.wait?.policy.kind ?? "none"}`);
+
+    // Playback: the gate opens and the corpses stay. The same release call as
+    // the replay below, because the guard being tested is `replaying` itself —
+    // `retireGated` returns at once without it. (`tick` is the real playback
+    // release and does not retire at all; it also runs on into the next
+    // instructions, which is why it is not what this asserts against.)
+    play.stepOverWait();
     check("playback keeps the bodies when the gate opens",
           play.spawns.length === 1, `${play.spawns.length} left`);
 
-    // The same call during a replay, where nothing killed anything.
-    const replay = new Walker(script, { ...mkHost(), aliveEnemies: () => 0 });
+    // The same release during a replay, where nothing killed anything.
+    const replay = new Walker(script, { ...mkHost(), presentEnemies: () => 0 });
     replay.replaying = true;
     replay.spawns = [{ ...spawn }];
     replay.applyWait(gate);
+    replay.stepOverWait();
     check("a replay retires them, because nothing else will",
           replay.spawns.length === 0, `${replay.spawns.length} left`);
 
@@ -414,6 +430,7 @@ for (const stage of STAGES) {
     civReplay.replaying = true;
     civReplay.spawns = [{ ...civ } as never, { ...spawn }];
     civReplay.applyWait(civGate);
+    civReplay.stepOverWait();
     check("a replay retires the civilians the civilian gate counts",
           civReplay.spawns.length === 1
           && civReplay.spawns[0]?.class === spawn.class,
@@ -424,6 +441,7 @@ for (const stage of STAGES) {
     const civPlay = new Walker(script, { ...mkHost(), aliveCivilians: () => 0 });
     civPlay.spawns = [{ ...civ } as never];
     civPlay.applyWait(civGate);
+    civPlay.stepOverWait();
     check("playback keeps them, as the enemy gate does",
           civPlay.spawns.length === 1, `${civPlay.spawns.length} left`);
   }
@@ -442,18 +460,34 @@ for (const stage of STAGES) {
                               [0x44, "wait_enemies_alive"],
                               [0x46, "wait_scripted_actors"]] as [number, string][]) {
       const gate = { i: 0, at: 0, op, name, cat: "wait", arg: 0 } as unknown as OpJson;
-      const host = { ...mkHost(), aliveEnemies: () => 0, aliveCivilians: () => 0 };
+      const host = { ...mkHost(), aliveEnemies: () => 0, presentEnemies: () => 0,
+                     aliveCivilians: () => 0 };
 
       const swinging = new Walker(script, { ...host, cameraFree: () => false });
       swinging.applyWait(gate);
+      swinging.tick(1 / 60);
       check(`0x${op.toString(16)} holds while the camera is still claimed`,
             swinging.wait !== null,
             "passed on the death frame");
 
+      // ...and the frame it is *reached* is never the frame it passes: the
+      // condition is not read until the visit after the yield. `0x44` costs a
+      // second one on top, for `g_evt_wait_alive_hysteresis`.
       const back = new Walker(script, { ...host, cameraFree: () => true });
       back.applyWait(gate);
+      check(`0x${op.toString(16)} yields the frame it is reached`,
+            back.wait !== null, "passed on its own frame");
+      back.tick(1 / 60);
+      // `0x44` costs one more: `g_evt_wait_alive_hysteresis` is 0 on the first
+      // evaluation, so that one only increments it.
+      if (op === 0x44) back.tick(1 / 60);
+      // Releasing does not leave the walker idle — it runs on to the *next*
+      // wait in the same frame, exactly as the interpreter's
+      // `do { } while (g_evt_yield == 0)` does. So the check is that this gate
+      // is gone, not that nothing is pending.
       check(`0x${op.toString(16)} passes once the camera is back on its rail`,
-            back.wait === null);
+            back.wait?.op.op !== op,
+            `still on 0x${back.wait?.op.op.toString(16) ?? "-"}`);
     }
 
     // And it releases a gate already held, the frame the camera comes back.
@@ -461,6 +495,7 @@ for (const stage of STAGES) {
                    cat: "wait", arg: 0 } as unknown as OpJson;
     let free = false;
     const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
+                                   presentEnemies: () => 0,
                                    aliveCivilians: () => 0,
                                    cameraFree: () => free });
     w.applyWait(gate);
@@ -498,8 +533,13 @@ for (const stage of STAGES) {
 
     const open = new Walker(script, { ...mkHost(), aliveCivilians: () => 0 });
     open.applyWait(gate);
+    check("the civilian gate yields the frame it is reached, empty or not",
+          open.wait?.policy.kind === "civilians",
+          `policy ${open.wait?.policy.kind ?? "none"}`);
+    open.tick(1 / 60);
     check("the civilian gate opens when the last one has left",
-          open.wait === null);
+          open.wait?.op.op !== 0x46,
+          `still on 0x${open.wait?.op.op.toString(16) ?? "-"}`);
 
     // The count falling is what releases a gate already held -- the walker
     // re-tests every frame, exactly as the interpreter re-runs the handler.
@@ -533,6 +573,65 @@ for (const stage of STAGES) {
     noSim.applyWait(gate);
     check("with no simulation the civilian gate passes instead of hanging",
           noSim.wait === null);
+  }
+}
+
+// **B4 and B8, end to end, against the shipped script.**
+//
+// "Camera doesn't seem to wait for zombies to die before advancing", and "the
+// two later zombies that drop from the high ledge don't pause the camera --
+// the game advances while the two are dropping".
+//
+// Stage 1 block 4 step 5 is the shape both reports found: `spawn_placed`,
+// `set_script_flag`, `spawn_obj` (two class-0x30 on the ledge at y = 61),
+// `queue_event`, `wait_enemies_alive 0`. There is nothing between the spawn
+// and the gate, and the port makes the actors in `syncCharacterSpawns` --
+// *between* `walker.tick()` and `GameUpdate()` -- so on the tick that runs the
+// spawn instruction the counter is still zero. `EvtOpWaitEnemiesAlive44`
+// (`FUN_0045FC10`) cannot answer on that frame: `g_evt_yield` is clear, so it
+// sets the flag and returns without reading the count.
+//
+// The host below is that race, made explicit: it answers zero for the whole of
+// the first tick, exactly as a host asked before the character layer has run
+// would. Everything after block 4 step 5 in stage 1 hangs on this.
+{
+  const file = join(ROOT, "stage1", "stage1.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    // The counter the character layer will raise once the tick is over.
+    let alive = 0;
+    const w = new Walker(script, { ...mkHost(),
+                                   aliveEnemies: () => alive,
+                                   presentEnemies: () => alive,
+                                   cameraFree: () => true });
+    const ok = seekTo(w, 4, 5, 0);
+    // One tick: the spawns are pushed and the gate is reached, both inside it.
+    w.tick(1 / 60);
+    check("the ledge-drop gate does not pass on the frame the spawn ran",
+          ok && w.wait?.op.op === 0x44 && w.step === 5,
+          `wait 0x${w.wait?.op.op.toString(16) ?? "-"}`
+          + ` at ${w.block}/${w.step}/${w.opIndex}`);
+    check("...and the two ledge zombies are the spawns it is holding for",
+          w.spawns.filter((s) => s.class === 0x30
+                          && (s.pos?.[1] ?? 0) > 50).length === 2,
+          `${w.spawns.filter((s) => s.class === 0x30).length} class-0x30 spawns`);
+
+    // Now the character layer has run and they are counted: the gate holds.
+    alive = 2;
+    for (let i = 0; i < 120; i++) w.tick(1 / 60);
+    check("...and goes on holding for the whole descent",
+          w.wait?.op.op === 0x44 && w.step === 5,
+          `wait 0x${w.wait?.op.op.toString(16) ?? "-"}`
+          + ` at ${w.block}/${w.step}/${w.opIndex}`);
+
+    // Killing them opens it, which is the other half: a gate that can never
+    // pass is the same bug facing the other way.
+    alive = 0;
+    w.tick(1 / 60);
+    w.tick(1 / 60);
+    check("...and opens once they are dead",
+          w.step !== 5 || w.wait?.op.op !== 0x44,
+          `still at ${w.block}/${w.step}/${w.opIndex}`);
   }
 }
 

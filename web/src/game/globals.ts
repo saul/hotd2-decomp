@@ -290,6 +290,23 @@ export const G = {
    */
   g_camera_free: 0,
   /**
+   * `g_evt_wait_alive_hysteresis` — 0x007DCCA8. The extra frame
+   * `wait_enemies_alive` (0x44) costs, and nothing else in the program reads
+   * or writes it — `0045FC42` reads, `0045FC4B` and `0045FC60` write, and
+   * those three are every reference there is.
+   *
+   * `EvtOpWaitEnemiesAlive44` (`FUN_0045FC10`) requires `0 < this` before it
+   * will pass, zeroes it when it does, and increments it on every frame it
+   * does not. It is **not** reset when the count condition fails, so the
+   * handler does not require the condition to hold twice running: it requires
+   * that this instance of the instruction has already been evaluated once and
+   * refused. On top of `g_evt_yield`'s first-visit yield, that makes 0x44 the
+   * only wait in the VM that cannot pass until its third frame on the program
+   * counter — and 0x43, the same handler without this term, the only other
+   * one that reads a counter this port also keeps.
+   */
+  g_evt_wait_alive_hysteresis: 0,
+  /**
    * `g_enemy_slots` — 0x009A5EC0. The actors the camera considers, nearest
    * first; slots 0 and 1 are the permit holders. Holds `at`, not pointers.
    */
@@ -671,6 +688,12 @@ export function ResetGameGlobals(): void {
   G.g_camera_turn_curve = 1;
   G.g_camera_settled = 0;
   G.g_camera_free = 0;
+  // Not in `ResetSceneOnEnter` — the engine's copy is only ever zeroed by the
+  // wait that owns it. It is here because this is the port's "nothing is
+  // half-done" call, and a seek that lands mid-`wait_enemies_alive` would
+  // otherwise carry the previous scene's count of refused frames into the
+  // first gate of the new one.
+  G.g_evt_wait_alive_hysteresis = 0;
   G.g_enemy_slots = [];
   G.g_thrown_weapons = [];
   G.g_rain_particles = [];

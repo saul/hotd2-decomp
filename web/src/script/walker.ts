@@ -133,15 +133,30 @@ export interface WalkerHost {
   /** Any sound id, dispatched by namespace as `PlaySoundId` does. */
   playSound(id: number): string | undefined;
   /**
-   * Live enemies the player can still shoot, or `null` when shooting is off.
+   * `g_enemies_alive` (`0x009C904A`) — enemies the player can still shoot, or
+   * `null` when shooting is off.
    *
-   * `wait_enemies_present` / `wait_enemies_alive` are the game's combat gate:
-   * they block until `g_enemies_present` / `g_enemies_alive` fall to the
-   * operand, and those counters only move because the player kills things.
-   * With shooting enabled that is a real condition again, so the walker waits
-   * on it instead of on a stopwatch.
+   * `wait_enemies_alive` (**0x44**, `EvtOpWaitEnemiesAlive44`) is the game's
+   * combat gate and 434 of the 488 enemy gates in the shipped scripts: it
+   * blocks until this counter falls to the operand, and the counter only moves
+   * because the player kills things. With shooting enabled that is a real
+   * condition again, so the walker waits on it instead of on a stopwatch.
    */
   aliveEnemies(): number | null;
+  /**
+   * `g_enemies_present` (`0x009C7006`), or `null` on the same terms.
+   *
+   * **The other counter, and not a synonym.** `wait_enemies_present`
+   * (**0x43**, `EvtOpWaitEnemiesPresent43`, `FUN_0045FBC0`) reads this one,
+   * and it is the looser of the two: an enemy leaves `g_enemies_alive` in
+   * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) as its death state opens
+   * and leaves this one in `ZombieEnterCorpseState` (`FUN_00456740`) when the
+   * death clip ends, so a corpse on stage is present and not alive. The port
+   * answered both opcodes with the alive count until B4/B8 were read, which
+   * made the two gates the same gate — the one thing the game keeps two
+   * counters in order to distinguish.
+   */
+  presentEnemies(): number | null;
   /**
    * Class-0x10 civilians still in play (`g_civilians_alive`, `0x009CA0E8`),
    * or `null` when the gate is not a condition this client can evaluate.
@@ -176,8 +191,8 @@ export interface WalkerHost {
 }
 
 /**
- * The two enemy counters' gates: `wait_enemies_alive` (0x43) and
- * `wait_enemies_present` (0x44).
+ * The two enemy counters' gates: `wait_enemies_present` (0x43) and
+ * `wait_enemies_alive` (0x44).
  *
  * They are the only waits whose *postcondition* says something about the
  * actors rather than about the clock, which is why they get their own set —

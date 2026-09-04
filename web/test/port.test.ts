@@ -6706,6 +6706,56 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
           `flags ${plain.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
   }
 }
+/**
+ * **B8, the half of it that lives in `game/`.**
+ *
+ * The report — "the two later zombies that drop from the high ledge don't
+ * pause the camera... maybe a race condition?" — has an obvious suspect: a
+ * zombie still in the air has not joined the enemy counters yet, so
+ * `wait_enemies_alive` sees zero and lets the block go. It is not what
+ * happens, and pinning that down is what turned the search towards the script
+ * side, where the bug actually was.
+ *
+ * `EnemyZombieInit` (`FUN_00452DA0`) does its two `INC`s in `Init`, on the
+ * straight line after the state is seeded. The only two spawns it declines are
+ * character type 9 and initial state 31 — neither of which any entrance state
+ * is — so a dropper is in both counters from the frame the spawn instruction
+ * runs and stays there for the whole descent.
+ */
+console.log("\nan entrance state is counted from its first frame:");
+{
+  const rng = new Rng(31);
+  const events = new Events();
+  // Stage 1 block 4 step 5's pair, in shape: class 0x30 on the ledge at
+  // y = 61 with `ZombieStateDelayedLeap` (26) as the initial state.
+  const drop = (at: number): Actor => ActorSpawn(at, SpawnClass.Zombie, 1,
+    "ledge dropper", { initialState: ZombieState.DelayedLeap, hp: 100,
+                       maxHp: 100, visible: true, pos: vec3(0, 61, -20) }, rng);
+
+  ResetGameGlobals();
+  const a = drop(0xb000);
+  const b = drop(0xb001);
+  check("both droppers join the counters in `Init`, before a frame runs",
+        G.g_enemies_alive === 2 && G.g_enemies_present === 2,
+        `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
+  check("...and they really are in the entrance state",
+        a.state === ZombieState.DelayedLeap
+        && b.state === ZombieState.DelayedLeap,
+        `${a.state} / ${b.state}`);
+
+  // The whole descent. `UNCOUNTED_INITIAL_STATE` is the one state that is
+  // allowed to be uncounted while it waits, and 26 is not it.
+  check("state 26 is not the state that counts itself in later",
+        (ZombieState.DelayedLeap as number) !== UNCOUNTED_INITIAL_STATE);
+  let lowAlive = G.g_enemies_alive;
+  for (let i = 0; i < 240; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    lowAlive = Math.min(lowAlive, G.g_enemies_alive);
+  }
+  check("...and neither leaves the count while it is still falling",
+        lowAlive === 2 && G.g_enemies_alive === 2,
+        `lowest ${lowAlive}, now ${G.g_enemies_alive}`);
+}
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

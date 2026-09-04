@@ -10328,3 +10328,140 @@ row in it.
 This is also the adjacent-function form of the trap `CLAUDE.md` records for
 tables. Two collision routines, back to back, and the wrong end of the
 boundary was recorded.
+
+## The two ways the engine plays a camera path, and the fix that only knew one
+
+Reported: stage 2 block 16 never clears; the zombie that mauls the civilian
+walks backwards out of the scene instead of turning on the player; the two
+`znebi2` that should come up out of the water are visible the whole time.
+And: *"this used to work and now doesn't."*
+
+It used to work this morning. `f28c464` — *the last frame of a camera path
+never reached the port* — added `CamCommand.started` so that a shot which
+starts during a tick's instructions is not stepped again by the same tick's
+camera advance. That is right, and it is right **for one of the two ways the
+engine plays a path**, which is the way that commit read:
+
+```
+CamAdvancePathFrame (FUN_004035E0)      -- the queued-action rail
+  g_cam_path_frame = cur;               -- publish, THEN
+  g_cam_path_frames_left = end - cur;
+  cur += 1;
+```
+
+`started: true` was put on both branches of `cam_play`. But a `cam_play` with
+`flags & 2` does not play at all: `FUN_00403490` stashes the range, and the
+`finish_sequence 6|7` behind it installs a rail hook that plays it. Both hooks
+are the other order:
+
+```
+CameraStepRailTick   (FUN_0040C790)  -- scene state (2,6), `<=` on the end
+CameraPlayStashedPath (FUN_0040C8A0) -- scene state (2,7), `<`  on the end
+  if (end <op> cur) goto tail;
+  cur += 1;                             -- increment, THEN
+  DAT_009C70BC = (float)cur;            -- publish
+tail:
+  g_cam_path_frames_left = end - cur;
+```
+
+So a stashed `581..660` draws **582..660**. Carrying `started` across made the
+port draw `581..659`, and **the last frame is exactly what the data times
+entrances to**: block 16 step 6 stashes 581..660 on path 75, `0xA030`'s captor
+cue is 660 and its civilian's killed script waits on 650. Both are equalities
+the port could not satisfy from 659.
+
+**The bug the commit fixed and the bug the commit caused are the same bug**,
+one frame at each end of the same shot, and the harness that caught the first
+could not see the second: `tools/cam_cues.mjs` drives all 44 camera-cue
+entrances and every one of them is a class-0x30 state 18/19 spawn on a
+non-deferred play. A captor's cue is state 42, and a civilian's is a
+`CivilianWait.CameraCue` bit; neither is in that list. 44 of 44 stayed green
+across the regression.
+
+### ...and the address in the report was unplayable for a second reason
+
+`?stage=2&mode=play&block=16&step=6&op=10` still deadlocked with that fixed.
+`seekTo` replays instructions and **observes no waits**, so it stepped over
+step 6's `wait_camera_path_frame 0` with the shot on frame 581 of 660 — and
+then replayed the `finish_sequence` two instructions later, which is
+`CameraSnapToPathEye` and froze it there. The seek's own doc already had the
+principle: *"stepping past a gate retires what the gate was waiting on...
+otherwise the next instruction runs against a world the script never
+expected."* The camera is the other half of that world, and only the enemy
+counters had it. `WaitRule.skipRunsCameraOn` is the camera's.
+
+A wait's **postcondition is part of the address**. Two of them now say so.
+
+### A captor waiting on its civilian is not drawn
+
+Third symptom, and its own bug. `ZombieStateAwaitCivilianOrder`
+(`FUN_0045BAD0`) sub 0 saves `obj+0x34` whole into `obj+0x1350`, raises
+`0x18000`, clears `obj+0x1F8` bit 0 — the flag `FUN_0040A590` reads before the
+ground decal — and writes a zero into the first part's draw byte through
+`obj+0x1D4`:
+
+```
+0045bb31  8b86d4010000   MOV  EAX, [ESI + 0x1d4]      ; model+0x40, the parts
+0045bb37  885001         MOV  byte ptr [EAX + 1], DL  ; DL = 0
+```
+
+That byte is the gate `SkeletonDrawWalk` (`FUN_004110D0`) reads before it emits
+a part — `if (parts[i*8 + 1] != 0)` — and the same byte
+`ActorSetPartVisibility` (`FUN_00409D10`) writes for every part at once, which
+is how the corpse blink flickers a body. Taking the order puts all four back.
+
+The port had none of it, and the field that models it — `Actor.alpha`, already
+declared as the port's one-per-actor stand-in for the per-part byte — **was
+written by the corpse blink and read by nothing at all.** `render/characters.ts`
+gates on it now. Two states get their hide back for the price of one line.
+
+The order arm also ends in `g_class30_states[obj+0x1310](obj)`, a tail call
+through the table, so the ordered state runs on the same frame. `runState` is
+handed in the way state 42 already takes it.
+
+**And it is a count, not a countdown.** `sub+0x2E` is decremented by each
+captor parked in state 39, so `op 0x1A(35, 1)` orders exactly one and the
+civilian's killed script issues it twice to raise both `znebi2`. The comment in
+`class10/state.ts` called it frames.
+
+Not a bug, and worth recording because it looks like one: the civilian in that
+set piece is **meant** to die if she is not rescued, and script 33 — her
+on-shot script — waits on `children alive <= 2` before it issues either order.
+The player has to kill a captor to bring the swimmers up.
+
+## `authoredFrameHeld`'s own docstring named this bug a year before it happened
+
+Class 0x20's death animation played twice. `OneHitTargetPlayDeathClip`
+(`FUN_00449380`) steps `obj+0x194` at the top of every frame and, on the frame
+the clip ends, writes the old value straight back (`004493e3 MOV [EDI], EAX`);
+`OneHitTargetSinkAndDespawn` (`FUN_00449430`) never steps it at all. The
+counter stops for good and the body sinks on the last pose.
+
+The port's clock is `ActorAdvanceMotion`'s, shared, and it runs for every actor
+before any class handler — so "does not step it" has to be written as an undo,
+and was not written at all. The poser reads the **base** track with the
+wrapping `authoredFrameOfTicks`, and `char_adv00`'s clip 988 is 82 authored
+frames against a 120-frame sink: measured at once through and 38 frames into a
+third.
+
+`authoredFrameHeld`'s doc comment in `core/play_cursor.ts` already said what
+this is: *"a killed zombie played its death animation and then played it again,
+for ever."* Class 0x30 was given the held track (`obj.death`) and fixed. Class
+0x20 puts its death clip on the **base** track, because that is what the engine
+does — `FUN_004119A0(model, 0x3DC, 0, 5)` — and so it was never covered.
+
+The file's own note said the port *could not* hold the counter, because one
+clock serves every class, and that the visible result was the same. Both halves
+were wrong, and the second one is why nobody looked.
+
+## What was ruled out and not fixed
+
+Stage 1 `0x16D8` `char_adv00` plays the wrong entrance — a ledge hang where a
+chair push belongs. The whole data chain checks out: `FUN_004575A0` plays
+`tail+0x04` and waits on `tail+0x08`, `placement.py:entry_tail` reads exactly
+those offsets, the answer is `motion 1048, cue 150`, 1048 is a real 60-frame
+`zom.bin` clip in `char_adv00`'s own table, and a trace has the port playing
+1048 for the whole cue window. Two theories tested and both dead: it is not
+floating (snapped to `y 6.20` and holding, so that is the floor), and 1047/1048
+are not a swapped pair of door halves (`char_adv01` has 1048 and not 1047).
+`[open]`, and it wants eyes on the render rather than another reading.

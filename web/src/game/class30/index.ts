@@ -171,8 +171,13 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
       return ZombieStateTargetScriptWithFlag(obj);
     case ZombieState.RetireOffScreen:
       return ZombieStateRetireOffScreen(obj, host, rng);
+    // The order arm tail-calls the state it hands over to, so this one takes
+    // the dispatcher for the same reason state 42 does.
     case ZombieState.AwaitCivilianOrder:
-      return ZombieStateAwaitCivilianOrder(obj, rng);
+      return ZombieStateAwaitCivilianOrder(obj, rng, (o, st) => {
+        o.state = st;
+        ZombieRunState(o, eye, dt, rng, host, events);
+      });
     case ZombieState.WalkPastPoint:
       return ZombieStateWalkPastPoint(obj);
     case ZombieState.WalkToPoint:

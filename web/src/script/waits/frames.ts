@@ -23,6 +23,9 @@ export const waitFrames: WaitRule = {
 export const waitCameraPathFrame: WaitRule = {
   ops: [0x41],
   skippable: true,
+  // Stepping past this one is a claim about where the camera is. See
+  // `WaitRule.skipRunsCameraOn`.
+  skipRunsCameraOn: true,
   enter(op: OpJson, ctx: WaitContext): WaitPolicy {
     // Operand 0 means "to the end of the path"; otherwise wait until the path
     // frame passes the operand.

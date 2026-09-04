@@ -334,6 +334,18 @@ bit 3 is the whole damage model. It scores like the combat classes — 10 a bone
 between standing still, spinning on the spot and being clamped inside a box
 its own descriptor carries.
 
+**"Holds its last frame" is a write, not a description.**
+`OneHitTargetPlayDeathClip` (`FUN_00449380`) steps `obj+0x194` every frame and,
+on the frame the clip ends, puts the old value straight back
+(`004493e3 MOV [EDI], EAX`); `OneHitTargetSinkAndDespawn` (`FUN_00449430`)
+never steps it at all. The port's clock is `ActorAdvanceMotion`'s and runs for
+every actor before any handler, so both routines undo that step by hand — and
+until they did, the base track ran on under the sink and the poser, which reads
+it with the **wrapping** `authoredFrameOfTicks`, restarted the clip. Clip 988
+is 82 authored frames against a 120-frame sink: the death animation played
+once, then again, and got 38 frames into a third. This file used to claim the
+port could not hold the counter and that the visible result was the same.
+
 It had been recorded in `spawns.md` as *"not reached … `[likely]` a combat
 actor"*, on the strength of an HP-scaler call at `0x0044964A`. That address is
 inside `EnemyThrowerInit` (`0x00449620`), which is class **0x31**'s handler;
@@ -453,7 +465,20 @@ hostage on frame one and charging the player.
 Two signals run between the classes, both polled rather than called: the captor
 raises `CivilianWait.Free` in the civilian's own wait word the frame it gets
 close enough to grab, and the civilian's op 0x1A writes a state id and a
-countdown that `ZombieStateAwaitCivilianOrder` obeys — `0x31` means die. The
+**count** that `ZombieStateAwaitCivilianOrder` obeys — `0x31` means die. It is
+a count of captors and not a countdown in frames: each one parked in state 39
+consumes one, so `op 0x1A(35, 1)` raises exactly one and a script that wants
+two issues it twice, as stage 2's block-16 hostage does for her two swimmers.
+
+A captor waiting there is also **not drawn**. Sub 0 clears `obj+0x1F8` bit 0
+and writes a zero into the first part's draw byte through `obj+0x1D4` — the
+gate `SkeletonDrawWalk` (`FUN_004110D0`) reads before it emits a part, and the
+same byte `ActorSetPartVisibility` (`FUN_00409D10`) writes for every part at
+once — and taking the order puts both back, then tail-calls the ordered state
+through `g_class30_states` so it runs on the same frame. The port has all of
+it now, and `Actor.alpha`, which models the per-part byte one-per-actor, is
+read by `render/characters.ts` at last: it was written by the corpse blink and
+by nothing that drew. The
 maul kills by raising the same `obj+0x34` bit a killing shot raises, so a
 civilian mauled by its captors costs both players a hundred points exactly as
 a stray bullet would.
@@ -1524,6 +1549,32 @@ equality cue in the game is hit by construction. `npm run cam-cues`
 (`web/tools/cam_cues.mjs`) drives the real walker and the real `GameSystem`
 over the real script instead, seeking to each spawn's own instruction — 44
 entrances, 6 stuck before, 0 now.
+
+#### ...and the *other* way the engine plays a path is the opposite order
+
+`CamAdvancePathFrame` publishes and then increments. Both hooks that play a
+**stashed** range do the reverse — `CameraStepRailTick` (`FUN_0040C790`) for
+scene state (2,6) and `CameraPlayStashedPath` (`FUN_0040C8A0`) for (2,7)
+increment `g_stashed_path_frame` and *then* evaluate, differing from each other
+only in `<=` against `<` on the end. So a `cam_play` with `flags & 2`, which
+stashes rather than plays, draws `start + 1 .. end`: the start frame is stepped
+past and the end frame is reached.
+
+The port modelled both as `CamAdvancePathFrame` and lost the last frame of
+every deferred shot. Stage 2 block 16 step 6 stashes `581..660` on path 75 and
+**both** cues timed to it are equalities on its tail — `0xA030`'s captor cue at
+660 and its civilian's killed-script cue at 650 — so the captor never turned on
+the player, the two `znebi2` were never called up out of the water, and
+`wait_enemies_alive 0` held the block for ever. None of the 44 entrances above
+could see it: every one is a state 18/19 spawn on a non-deferred play.
+
+And a **wait's postcondition is part of an address**. `seekTo` replays
+instructions and observes no waits, so it stepped over that step's
+`wait_camera_path_frame 0` with the shot on frame 581 and then replayed the
+`finish_sequence` behind it, which is `CameraSnapToPathEye` and froze it there
+— the reported address was unplayable even with the frame count fixed.
+`WaitRule.skipRunsCameraOn` runs the shot on to where the wait would have left
+it, the same way `WaitRule.retires` already settled the enemy gates.
 
 ### `IsPlayerAttackable`: two of three clauses
 

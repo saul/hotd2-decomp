@@ -36,8 +36,8 @@ import {
 import { NULL_HOST, type ShotPick } from "../src/game/host";
 import { MarkActorShot, QueueShotRequest }
   from "../src/game/combat/shot";
-import { AttackListOf, MotionPlayFrame, MotionPlayLength, SetGameTables, T }
-  from "../src/game/tables";
+import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
+         SetGameTables, T } from "../src/game/tables";
 import {
   ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet,
   ColiTraceSegmentAllSets,
@@ -110,6 +110,7 @@ import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
 import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker } from "../src/script/walker";
+import { seekTo } from "../src/script/seek";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -250,6 +251,11 @@ const TYPE: CharacterType = {
     "102": motion(24), "103": motion(20),
     // 185 (0xB9) is the pose `ZombieStateEmerge` holds while it waits.
     "185": motion(4),
+    // 988 (0x3DC) is class 0x20's death clip -- `OneHitTargetUpdate` names it
+    // by id. Deliberately shorter than the 120-frame sink that follows, which
+    // is the shape the "plays its death animation twice" report is about:
+    // char_adv00's real one is 82 frames against the same 120.
+    "988": motion(30),
     // 923 (0x39B), the van jump-out `ZombieStateMotionCue21` plays: 41 frames
     // against a play length of 79, carrying 13.6 units of root translation.
     // The odd play length is the point of pinning it -- the cue this state
@@ -2231,6 +2237,52 @@ console.log("\nclass 0x20's death chain runs to the despawn:");
           < 1e-6,
         `${y0} -> ${a.pos.y}`);
   check("...and despawns at zero", a.despawned, `arcFrames ${a.arcFrames}`);
+}
+
+/**
+ * **...and the clip plays once, not twice.**
+ *
+ * `OneHitTargetPlayDeathClip` (`FUN_00449380`) puts `obj+0x194` back on the
+ * frame the clip ends (`004493e3 MOV [EDI], EAX`) and
+ * `OneHitTargetSinkAndDespawn` (`FUN_00449430`) never steps it, so the body
+ * sinks on the death clip's last pose. The port's clock is shared and runs for
+ * every actor before any handler, and the poser reads the base track with the
+ * **wrapping** conversion — so the clip restarted under the sink and the
+ * report was "the death animation plays twice". 82 authored frames against a
+ * 120-frame sink: once through and 38 frames into a third.
+ */
+console.log("\n...and the death clip is held, not looped, under the sink:");
+{
+  const { a, events, rng } = targetScene();
+  const clip = () => {
+    const m = MotionOf(a, a.motion);
+    return m && m.frames > 0
+      ? authoredFrameOfTicks(a.playTicks, m.fps, m.frames) : -1;
+  };
+  MarkActorShot(a, 0, 4);
+  tFrame(a, events, rng);
+  for (let i = 0; i < 400 && a.tgt.state === OneHitTargetState.Dying; i++) {
+    ActorAdvanceMotion(a, 1 / 60);
+    tFrame(a, events, rng);
+  }
+  const m = MotionOf(a, a.motion);
+  const last = (m?.frames ?? 1) - 1;
+  check("the sink starts on the clip's last authored frame",
+        clip() === last, `frame ${clip()} of ${m?.frames}`);
+  // The wrap, if it happens, is a frame number going *down*. One pass and no
+  // restarts is the whole assertion.
+  let restarts = 0;
+  let prev = clip();
+  for (let i = 0; i < CLASS20_SINK_FRAMES - 1; i++) {
+    ActorAdvanceMotion(a, 1 / 60);
+    tFrame(a, events, rng);
+    const now = clip();
+    if (now < prev) restarts += 1;
+    prev = now;
+  }
+  check("...and holds it for the whole 120 frames",
+        restarts === 0 && clip() === last,
+        `${restarts} restart(s), frame ${clip()}`);
 }
 
 console.log("\nclass 0x20's three sub-types:");
@@ -4517,6 +4569,48 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     check("...which is what frees the civilian",
           (civ.civ!.wait & CivilianWait.Free) !== 0,
           `wait ${civ.civ!.wait.toString(16)}`);
+  }
+
+  // **A captor waiting on the order is not drawn.** `FUN_0045BAD0` sub 0
+  // clears `obj+0x1F8` bit 0 and writes 0 to the model's first part-draw byte
+  // through `obj+0x1D4`, and taking the order puts both back — so the two
+  // `znebi2` of stage 2 block 16 are in the water, invisible, until their
+  // civilian calls them up. Reported as "they're always visible"; the port had
+  // neither write, and nothing in `render/` read the flag that models them.
+  //
+  // And the order arm ends in `g_class30_states[obj+0x1310](obj)`, a tail call
+  // through the table, so the state it hands over to runs on the **same**
+  // frame rather than the next one.
+  {
+    const ordered: TargetScriptJson = {
+      state: ZombieState.WalkToTarget,
+      head: { arrive: 12, loops: 1, motion: 10, frame: 0 },
+      entries: [{ motion: 10, frame: 0, loops: 1, mode: 5 }],
+    };
+    const { z, events } = captorScene(ZombieState.AwaitCivilianOrder,
+      ZombieState.WalkPastPoint, ordered,
+      [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
+        { op: CivilianOp.SetChildCue, args: [ZombieState.WalkToTarget, 2] },
+        { op: CivilianOp.Wait, args: [0] },
+        { op: CivilianOp.End, args: [] }]]);
+    check("a captor awaiting the order starts drawn",
+          z.alpha === 1, `alpha ${z.alpha}`);
+    zFrame(z, events);                       // sub 0 -> 1, and the hide
+    check("...and sub 0 takes it off screen",
+          z.alpha === 0 && z.sub === 1, `alpha ${z.alpha} sub ${z.sub}`);
+    const flagsWhileHidden = z.flags;
+    zFrame(z, events);                       // takes the order
+    check("...the order puts it back",
+          z.alpha === 1, `alpha ${z.alpha}`);
+    // `obj+0x34 = obj+0x1350` restores the word whole, so the two bits sub 0
+    // raised come off. Not an equality: the state it hands over to runs on
+    // this same frame and writes its own bits on top.
+    check("...restoring the flags `obj+0x1350` saved",
+          (flagsWhileHidden & 0x18000) === 0x18000
+          && (z.flags & 0x18000) === 0,
+          `flags ${z.flags.toString(16)} vs ${flagsWhileHidden.toString(16)}`);
+    check("...and the state it was ordered into has already run this frame",
+          z.motion === 10, `motion ${z.motion}`);
   }
   {
     // The failure itself, stated: with no script the radius is zero and the
@@ -7825,6 +7919,96 @@ console.log("\nthe camera path publishes every frame, ends included:");
         published.filter((n) => n === 10).length === 1, head);
   check("...and the shot behind it starts on the tick after",
         published[published.indexOf(10) + 1] === 11, head);
+}
+
+/**
+ * The **other** way the engine plays a path, and it is not this one.
+ *
+ * `queue_event cam_play` with `flags & 2` does not play: `FUN_00403490`
+ * stashes the range, and the `finish_sequence 6|7` behind it installs a rail
+ * hook that plays it. Both hooks — `CameraStepRailTick` (`FUN_0040C790`) for
+ * state (2,6) and `CameraPlayStashedPath` (`FUN_0040C8A0`) for (2,7) —
+ * **increment the frame before they evaluate it**, where `CamAdvancePathFrame`
+ * publishes the cursor and then increments. So a stashed `0..10` draws
+ * `1..10`: the start frame is stepped past, and the end frame is reached.
+ *
+ * The port had `started: true` on both, copied from the non-deferred branch
+ * where it is right, and the deferred shot lost its last frame. Stage 2 block
+ * 16 step 6 stashes `581..660` on path 75, and both cues that shot exists to
+ * fire are timed to its tail: `0xA030`'s captor cue is 660 and its civilian's
+ * killed script waits on 650. Neither could be reached from 659, so the captor
+ * never turned on the player, the two `znebi2` were never called up out of the
+ * water and `wait_enemies_alive 0` held block 16 for ever.
+ */
+console.log("\na stashed path is played by a hook that steps first:");
+{
+  const stashOp = (i: number, start: number, end: number) => ({
+    i, at: i, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 7, 2],
+    start, end, slot: 7, flags: 2, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [7], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        stashOp(0, 0, 10),
+        { i: 1, at: 1, op: 0x30, name: "queue_event", cat: "camera",
+          sel: 0x21, action: "finish_sequence", args: [7],
+          scene_state: { major: 2, minor: 7 },
+          camera_state: "play_stashed_path_exclusive" },
+        { i: 2, at: 2, op: 0x41, name: "wait_camera_path_frame", cat: "wait",
+          arg: 0, blocks_on: "camera path frame past arg" },
+        // Somewhere for the seek below to land *past* the wait: `seekTo`
+        // stops the moment `opIndex` reaches its goal, so asking for the wait
+        // itself arrives without ever executing it.
+        { i: 3, at: 3, op: 0x48, name: "set_script_flag", cat: "flow",
+          flag: 1 },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+
+  const host = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+
+  const w = new Walker(script, host);
+  const published: number[] = [];
+  for (let f = 0; f < 40; f++) {
+    w.tick(1 / 60);
+    published.push(w.cam ? Math.trunc(w.cam.frame) : -1);
+  }
+  const head = published.slice(0, 14).join(",");
+  check("the stashed shot reaches its end frame",
+        published.includes(10), head);
+  check("...and steps past its start frame, which the hook never draws",
+        !published.includes(0), head);
+  check("...so its first drawn frame is 1",
+        published[0] === 1, head);
+  check("...and every frame between is published",
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every((n) => published.includes(n)),
+        head);
+
+  // And the seek's half: `seekTo` observes no waits, so an address behind
+  // `wait_camera_path_frame` is reached with the shot still in the middle of
+  // itself unless the wait's postcondition is applied by hand. It used to be
+  // reached with the camera on frame 0 of a shot the script only ever leaves
+  // at 10 — and the `finish_sequence` behind it then froze it there.
+  const w2 = new Walker(script, host);
+  seekTo(w2, 0, 0, 3);
+  check("a seek over the wait lands with the shot at its end",
+        w2.cam?.frame === 10, `frame ${w2.cam?.frame}`);
+  check("...and with the action retired",
+        w2.cam?.done === true, `done ${w2.cam?.done}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

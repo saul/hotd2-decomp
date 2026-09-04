@@ -537,16 +537,51 @@ export function ZombieRetireAndCredit(obj: ZombieActor, rng: Rng): void {
  * `ZombieStateAwaitCivilianOrder` — `FUN_0045BAD0`. Class 0x30 state 39.
  *
  * The captor sitting on the civilian's own script. Class 0x10's op 0x1A writes
- * a state id to `sub+0x2C` and a countdown to `sub+0x2E`; this decrements the
- * countdown and takes the order. `0x31` means die — and the zombie takes its
- * killer from the civilian's `sub+0x6C`, so the player who earned the rescue
- * is credited with the captors that simply gave up.
+ * a state id to `sub+0x2C` and a **count** to `sub+0x2E`; this decrements that
+ * count and takes the order. It is not a countdown in frames: every captor
+ * parked here consumes one, so `op 0x1A(35, 1)` orders exactly one of them and
+ * the script issues it twice to raise two. `0x31` means die — and the zombie
+ * takes its killer from the civilian's `sub+0x6C`, so the player who earned
+ * the rescue is credited with the captors that simply gave up.
+ *
+ * **A captor waiting here is not drawn**, and that is the whole of the
+ * "they were in the water the entire time" report. Sub 0 does four things,
+ * `0x0045BB0F..0x0045BB3A`:
+ *
+ * ```
+ * obj+0x1350 = obj+0x34                  ; save the flags whole
+ * obj+0x34  |= 0x18000
+ * obj+0x1F8 &= 0xFFFFFFFE                ; model+0x64 bit 0 -- the shadow
+ * 0045bb31  MOV  EAX, [ESI + 0x1d4]      ; 8b86d4010000  model+0x40, the parts
+ * 0045bb37  MOV  byte ptr [EAX + 1], DL  ; 885001        DL = 0 -- do not draw
+ * ```
+ *
+ * and taking the order puts all four back. That byte is the draw gate
+ * `SkeletonDrawWalk` (`FUN_004110D0`) reads before it emits a part —
+ * `if (parts[i*8 + 1] != 0)` — and it is the same byte `FUN_00409D10` writes
+ * for every part at once, which is how {@link ZombieStateCorpseBlink} makes a
+ * body flicker. `obj+0x1F8` bit 0 is what `FUN_0040A590` reads before the
+ * ground decal, so the shadow goes with it.
+ *
+ * [diverges] The engine writes part **0** here and the port has one draw flag
+ * for the whole actor, which is the same divergence the corpse blink declares
+ * against `FUN_00409D10` and for the same reason: `game/` has no per-part
+ * model, because the parts live in the skeleton and the skeleton lives in
+ * `render/`.
+ *
+ * The engine also **runs the new state on the same frame** — the last line of
+ * the order arm is `g_class30_states[obj+0x1310](obj)`, a tail call through
+ * the table — so `runState` is handed in the way {@link
+ * ZombieStateHoldForCameraCue} takes it, rather than losing the frame.
  */
-export function ZombieStateAwaitCivilianOrder(obj: ZombieActor, rng: Rng): void {
+export function ZombieStateAwaitCivilianOrder(
+    obj: ZombieActor, rng: Rng,
+    runState?: (obj: ZombieActor, state: ZombieState) => void): void {
   const t = targetOf(obj);
   if (obj.sub === 0) {
     obj.zom.targetLoops = obj.flags;          // `obj+0x1350` holds the saved flags
     obj.flags |= 0x18000;
+    obj.alpha = 0;
     obj.sub += 1;
     return;
   }
@@ -565,6 +600,8 @@ export function ZombieStateAwaitCivilianOrder(obj: ZombieActor, rng: Rng): void 
   obj.state = t.civ.childOrder;
   obj.sub = 0;
   obj.flags = obj.zom.targetLoops;
+  obj.alpha = 1;
+  runState?.(obj, obj.state);
 }
 
 /**

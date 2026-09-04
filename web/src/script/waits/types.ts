@@ -56,6 +56,26 @@ export interface WaitRule {
    */
   readonly retires?: "enemies" | "civilians";
   /**
+   * True if stepping past it means the camera has reached the frame it was
+   * waiting for.
+   *
+   * The same idea as {@link retires}, for the other half of the world a seek
+   * has to hand-reproduce. A wait's postcondition is part of the address:
+   * `seekTo` replays instructions but observes no waits, so without this it
+   * lands on an instruction the script only ever reaches with the shot
+   * finished, holding a camera that is still in the middle of it — and then
+   * the `finish_sequence` behind the wait freezes the shot where the seek left
+   * it. Stage 2 block 16 step 6's `cam_play 581..660` froze at **581**, so
+   * neither of the two cues that shot exists to fire — the captor's frame 660
+   * and its civilian's 650 — could ever be reached at that address, and the
+   * `wait_enemies_alive 0` two instructions later held for ever.
+   *
+   * Only `0x41` carries it. `0x40` is a count of outstanding actions rather
+   * than a statement about the path, and the ring already has `supersede` for
+   * what a seek does to it.
+   */
+  readonly skipRunsCameraOn?: boolean;
+  /**
    * Decide what this wait is waiting for, on the frame the instruction runs.
    *
    * **The engine's first visit, and it does not read the condition.** Every

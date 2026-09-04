@@ -430,7 +430,17 @@ export class CharacterLayer implements System {
       // set-piece past its removal trigger and a class-0x25 humanoid the script
       // had killed both stayed on screen, because the renderer un-hid them once
       // a frame.
-      const show = this.enabled && inst.a.visible;
+      // **`alpha` is a draw gate as well as a fade**, and until now nothing
+      // read it. It is the port's stand-in for the engine's per-part draw byte
+      // — `SkeletonDrawWalk` (`FUN_004110D0`) emits a part only when
+      // `parts[i*8 + 1]` is non-zero — and two states write it:
+      // `ZombieStateCorpseBlink` flickers a body with it and
+      // `ZombieStateAwaitCivilianOrder` holds a captor off screen with it
+      // until its civilian calls it up. Both write 0 or 1 and nothing else, so
+      // a threshold is the whole of what this needs; a genuine fade would have
+      // to reach every material under the root and is not what either state
+      // asks for.
+      const show = this.enabled && inst.a.visible && inst.a.alpha > 0;
       inst.root.visible = show;
       if (!show) continue;
       // The director owns position and facing; apply what it decided. The

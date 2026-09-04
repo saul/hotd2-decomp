@@ -352,11 +352,30 @@ export function OneHitTargetUpdate(obj: Actor, f: ClassFrame): void {
  * arms the 120-frame countdown and hands the body to
  * `OneHitTargetSinkAndDespawn` (`FUN_00449430`).
  *
- * [port-only] The clock is `ActorAdvanceMotion`'s, in `game/motion.ts`, and it
- * is `authoredFrameHeld` — the clamping conversion — that holds the last pose.
- * The engine achieves the hold by not incrementing its own counter; the port
- * cannot, because one clock serves every class. The visible result is the
- * same pose held for the same frames.
+ * **The hold is `*piVar1 = iVar2`, and it is load-bearing.** The routine steps
+ * `obj+0x194` at the top of every frame and, on the frame the clip ends,
+ * *writes the old value back* — and `OneHitTargetSinkAndDespawn` never steps
+ * it at all. So the counter stops for good and the body sinks on the last
+ * pose of the death clip:
+ *
+ * ```
+ * 004493c8  MOV  EAX, [EDI]          ; iVar2 = obj+0x194
+ * 004493ca  LEA  ECX, [EAX + 1]
+ * 004493cd  MOV  [EDI], ECX          ; step it
+ * ...
+ * 004493e3  MOV  [EDI], EAX          ; ...and put it back
+ * 004493e5  MOV  dword ptr [ESI + 0x1330], 0x78
+ * ```
+ *
+ * The port's clock is `ActorAdvanceMotion`'s and it is shared, so "does not
+ * step it" has to be written as an undo — {@link OneHitTargetPinLastFrame}.
+ * Without it the base track ran on under the sink and the poser, which reads
+ * the base track with the **wrapping** `authoredFrameOfTicks`, restarted the
+ * clip: character type 7's clip 988 is 82 frames and the sink is 120, so the
+ * death animation visibly played a second time and got 38 frames into a
+ * third. That is the "plays its death animation twice" report, and this file
+ * used to claim the port could not hold the counter and that the visible
+ * result was the same. It is not, and it can.
  */
 export function OneHitTargetPlayDeathClip(obj: OneHitTargetActor): void {
   const m = MotionOf(obj, obj.motion);
@@ -371,9 +390,31 @@ export function OneHitTargetPlayDeathClip(obj: OneHitTargetActor): void {
   if (authoredFrameHeld(obj.playTicks, m.fps, m.frames) >= m.frames - 1) {
     // `obj+0x1330` is the shared arc word on the head, not a class-0x20 field.
     // See `class20/state.ts`.
+    OneHitTargetPinLastFrame(obj);
     obj.arcFrames = CLASS20_SINK_FRAMES;
     obj.tgt.state = OneHitTargetState.Sinking;
   }
+}
+
+/**
+ * `*piVar1 = iVar2` — put the play counter back where it was.
+ *
+ * [port-only] as a function: in the engine it is one `MOV`, and the sink after
+ * it simply never touches the counter again. Here the counter is stepped for
+ * every actor by `ActorAdvanceMotion` before any class handler runs, so the
+ * two routines that hold this pose have to undo that step themselves.
+ *
+ * Pinned to the ticks of the **last authored frame** rather than to whatever
+ * the counter happened to hold: both conversions agree there — the wrapping
+ * `authoredFrameOfTicks` has not wrapped yet at `frames - 1` — so the pose the
+ * poser draws is the pose the engine holds, and it cannot drift a frame either
+ * way with the clip's fps.
+ */
+function OneHitTargetPinLastFrame(obj: OneHitTargetActor): void {
+  const m = MotionOf(obj, obj.motion);
+  if (!m || m.frames <= 0) return;
+  obj.playTicks = ticksOfAuthoredFrame(m.frames - 1, m.fps);
+  obj.rootFrame = m.frames - 1;
 }
 
 /**
@@ -384,6 +425,9 @@ export function OneHitTargetPlayDeathClip(obj: OneHitTargetActor): void {
  * actor, so it is the renderer's and is not called here.
  */
 export function OneHitTargetSinkAndDespawn(obj: OneHitTargetActor): void {
+  // The engine's sink draws the model and never steps `obj+0x194`, so the body
+  // goes down on the death clip's last pose. See {@link OneHitTargetPinLastFrame}.
+  OneHitTargetPinLastFrame(obj);
   obj.arcFrames -= 1;
   obj.pos.y -= CLASS20_SINK_PER_FRAME;
   if (obj.arcFrames === 0) ActorDespawn(obj);

@@ -792,11 +792,43 @@ export class Walker {
    */
   stepOverWait(): void {
     if (!this.wait) return;
-    const retires = WAIT_RULES.get(this.wait.op.op)?.retires;
+    const rule = WAIT_RULES.get(this.wait.op.op);
+    const retires = rule?.retires;
     if (retires) this.retireGated(retires === "civilians"
       ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
+    if (rule?.skipRunsCameraOn) this.runCameraOnPast(this.wait.op);
     this.wait = null;
     this.opIndex++;
+  }
+
+  /**
+   * The camera half of a wait's postcondition — see
+   * {@link WaitRule.skipRunsCameraOn}.
+   *
+   * Put the shot where the script would have been standing when the wait it
+   * is stepping over opened: at `endFrame` for the operand-0 form, which is
+   * "to the end of the path", and one frame past the operand otherwise, which
+   * is the strict `operand < g_cam_path_frame` of
+   * `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`).
+   *
+   * The frames in between are **not** published, and cannot be: a seek jumps
+   * where playback steps, so nothing that reads `g_cam_path_frame` once a
+   * frame — a class-0x30 camera cue, a civilian's `CameraCue` wait — sees
+   * them. What this buys is the landing state, not the trip: the shot is over
+   * where the address says it is over, and the cues timed to its end are
+   * satisfiable rather than one frame out of reach for ever.
+   */
+  private runCameraOnPast(op: OpJson): void {
+    const cam = this.cam;
+    if (!cam || cam.isStatic) return;
+    const arg = op.arg ?? 0;
+    const to = arg === 0 ? cam.endFrame : Math.min(arg + 1, cam.endFrame);
+    if (to <= cam.frame) return;
+    cam.frame = to;
+    cam.started = false;
+    if (cam.frame >= cam.endFrame) cam.done = true;
+    this.settleCameraAction();
+    this.host.startCamera(cam);
   }
 
   /**

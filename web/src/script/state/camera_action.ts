@@ -71,9 +71,10 @@ const CAM_PLAY: Record<string, ActionImpl> = {
       // Block 8 step 4 op 23 asks to resume at frame 682 of a 685-frame
       // shot and was replaying 686 frames instead.
       //
-      // The engine's rail hook increments before it evaluates, so its first
-      // drawn frame is this one plus another; the port draws this one. One
-      // frame, on a tail that is usually three. [diverges]
+      // The rail hook increments before it evaluates, so the first frame it
+      // draws is this one plus another. That is not this branch's business —
+      // it is `started: false` on the command `finish_sequence` builds below,
+      // and while that was missing it was a `[diverges]` written here.
       const at = op.resume ? (w.cam ? w.cam.frame + 1 : 0) : start;
       w.stashedCam = { slot, start: at, end };
       // `FUN_00403490` stashes and returns; the action is done.
@@ -154,7 +155,40 @@ const SCENE: Record<string, ActionImpl> = {
         file: op.cam?.file ?? null,
         pathIndex: op.cam?.path ?? null,
         done: st.start === st.end,
-        started: true,
+        // **Not `started`, and that is the difference between the engine's
+        // two ways of playing a path.**
+        //
+        // `CamStartPathPlayback` drives the non-deferred play through
+        // `CamAdvancePathFrame` (`FUN_004035E0`), which publishes the cursor
+        // and *then* increments — so the frame a shot starts on is drawn, and
+        // the port's own advance must not step over it. Both routines that
+        // play a **stashed** range do the opposite:
+        //
+        // ```
+        // CameraStepRailTick (FUN_0040C790), state (2,6)'s steady body:
+        //   if (g_stashed_path_end_frame <= g_stashed_path_frame) goto tail;
+        //   g_stashed_path_frame += 1;                    // increment, THEN
+        //   DAT_009C70BC = (float)g_stashed_path_frame;   // publish
+        //   ... CamEvalPath7 at that frame ...
+        // tail:
+        //   g_cam_path_frames_left =
+        //       g_stashed_path_end_frame - g_stashed_path_frame;
+        // ```
+        //
+        // `CameraPlayStashedPath` (`FUN_0040C8A0`), state (2,7), is the same
+        // routine with `<` in place of `<=`. So a stashed `581..660` draws
+        // **582..660**, not 581..659: the start frame is stepped past and the
+        // end frame is reached.
+        //
+        // Carrying `started` over from the other branch cost the shot its
+        // last frame, and the last frame is exactly what the data times
+        // entrances to. Stage 2 block 16 step 6 stashes `581..660` on path
+        // 75; `0xA030`'s captor cue is frame **660** and its civilian's
+        // killed script waits on frame **650**, both tested with an equality
+        // the port could not satisfy from 659. That captor never turned on
+        // the player, the two `znebi2` were never ordered up out of the
+        // water, and `wait_enemies_alive 0` held block 16 for ever.
+        started: false,
       };
       w.stashedCam = null;
       w.host.startCamera(w.cam);

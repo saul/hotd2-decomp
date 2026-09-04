@@ -71,6 +71,7 @@ const walker = new Walker(script, {
   enterRegion() {}, loadSlot() {}, unloadSlot() {}, startCamera() {},
   onFeed() {}, onBranch() {}, playSound() { return undefined; },
   aliveEnemies: () => G.g_enemies_alive,
+  presentEnemies: () => G.g_enemies_present,
   aliveCivilians: () => G.g_civilians_alive,
   cameraFree: () => true,
   showMessage: () => null,

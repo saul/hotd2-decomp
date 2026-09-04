@@ -28,7 +28,7 @@ import { vec3, type Vec3 } from "./vec";
  *
  * Only the members the port has evidence for are here; the shell's other
  * screens stay unnamed rather than guessed. `CommitAppState` (`FUN_0040E860`)
- * is the only writer, and it applies the request left at
+ * is the writer a state *request* goes through, and it applies the request at
  * `g_app_state_pending` (`0x007C17A0`) at the end of the frame.
  */
 export enum AppState {
@@ -429,11 +429,23 @@ export const G = {
    * 1. `FUN_00414FC0` — the start-button-with-a-credit path — calls
    *    `RequestAppState(6)` (`FUN_0040E850`) and sets the player's state.
    *    Pressing Start *is* the transition into 6.
-   * 2. `CommitAppState` (`FUN_0040E860`), the only writer, ends with
+   * 2. `CommitAppState` (`FUN_0040E860`) ends with
    *    `if (pending < 6 || pending > 7) g_player_state = 9` for both players.
    *    6 and 7 are the only states it leaves a live player alone in, and 7 is
    *    the game-over arm `FUN_00460530` requests when the continue countdown
    *    expires.
+   *
+   * A third, independent one: `FUN_0049F380` stores **6 directly** —
+   * `MOV dword ptr [0x009c8e98], 0x6` (`c705988e9c0006000000`) at
+   * `0x0049F546`, beside `[0x009C7019] = 1`.
+   *
+   * That third one is also why `CommitAppState` is **not** the only writer,
+   * which an earlier reading of this global claimed. `g_app_state` has five
+   * writers across six sites — `FUN_0049F380` twice, `CommitAppState`,
+   * `FUN_0040E4A0`, `FUN_0040A920` and `FUN_0041E1D0` — and at least two of
+   * them store a literal straight into the word rather than going through
+   * `RequestAppState`. So a state change does **not** always land on a frame
+   * boundary, and code that assumes it does would be wrong.
    *
    * The other values the port has any use for: **5 is the attract demo** —
    * `RunAttractDemo` (`FUN_00426800`) only advances while it is 5, and that is

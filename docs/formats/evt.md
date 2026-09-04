@@ -437,14 +437,15 @@ model.
 
 ### `1B` / `1C` — the backdrop dome, read out
 
-**[proved]** The draw lives at `0x004132D0`, in a block Ghidra leaves
-undefined (no function is created there, so it does not appear in any xref
-listing by name). Transcribed:
+**[proved]** The draw is `DrawBackdropDome` at `0x004132D0`, registered as a
+draw node by `FUN_004134D0` (`FUN_004A6FA0(DrawBackdropDome, 0x58)`), which
+also seeds `g_backdrop_mode = 1` and both preset words to 0. `param_1` is that
+0x58-byte record and `+0x48` is the spin accumulator. Transcribed:
 
 ```c
 esi = &g_camera_pose[player];                  /* 0x009A60C0 + player*0x69 */
-if (preset != last_preset) { angle = table[preset].angle0; last = preset; }
-if (backdrop_mode == 0) return;                /* 0x1C == 0 is off */
+if (preset != last_preset) { angle = table[preset].angle0; }
+if (backdrop_mode == 0) goto out;              /* 0x1C == 0 is off */
 
 MatrixStackPush(0);
 MatrixTranslate(esi->x, esi->y + table[preset].dy, esi->z);
@@ -453,32 +454,49 @@ if (preset == 5) { MatrixRotateZ(0x8000); MatrixRotateY(-angle); }
 else               MatrixRotateY(angle);
 MatrixScale(1.2f, 1.2f, -1.2f);
 AssetDrawSlot(table[preset].slot_a);
+MatrixStackPop(1);
+
+if (table[preset].slot_b != 0) {               /* 0x0041345E */
+  MatrixStackPush(0);
+  MatrixTranslate(esi->x, esi->y + table[preset].dy, esi->z);
+  AssetDrawSlot(table[preset].slot_b);         /* no rotation, no scale */
+  MatrixStackPop(1);
+}
+out:
+last_preset = preset;                          /* 0x007C2118 */
 ```
 
-Two details are easy to miss and both matter:
+Three details are easy to miss and all three matter:
 
 - **It follows the camera in all three axes**, not just horizontally, so it
   can never be approached.
 - **The Z scale is negative.** The dome is turned inside out — it is modelled
   to be seen from within.
+- **`slot_b` is a second draw of its own**, after the dome and outside its
+  push, with the translate and nothing else — so the spin and the inside-out
+  scale do not apply to it. This section used to stop at
+  `AssetDrawSlot(slot_a)` and read as though the routine ended there; the
+  player took it at its word and left `slot_b` in the stage tree, where
+  `StageScene` drew it at its authored position for the whole stage. Stages
+  1–4 all select a preset that has one.
 
 `angle` and `spin` are BAMS; the shipped spins are 0, 1, 2, 4 and 12 per
 frame, so the fastest dome turns about 4°/s.
 
-| Preset | slot A | dy | spin | Resolves to |
-|---|---|---|---|---|
-| 0 | 6048 | 0 | 12 | `st1_1[20]` |
-| 1 | 6048 | −200 | 4 | `st1_1[20]` |
-| 2 | 6049 | −300 | 2 | `st1_1[21]` |
-| 3 | 6047 | −300 | 0 | `etc_1[65]` |
-| 4 | 6048 | 0 | 4 | `st1_1[20]` |
-| 5 | 6048 | 0 | 4 | `st1_1[20]` — the flipped one |
-| 6 | 6049 | 0 | 2 | `st1_1[21]` |
-| 7 | 6307 | −450 | 1 | `st5_01b[0]` |
-| 8 | 6312 | −1050 | 1 | `st5_01b[5]` |
-| 9 | 6309 | −2400 | 2 | `st5_01b[2]` |
-| 10 | 6310 | −3000 | 0 | `st5_01b[3]` |
-| 11 | 6311 | −3000 | 0 | `st5_01b[4]` |
+| Preset | slot A | slot B | dy | spin | Resolves to |
+|---|---|---|---|---|---|
+| 0 | 6048 | 6911 | 0 | 12 | `st1_1[20]` + `st1_1[38]` |
+| 1 | 6048 | 6911 | −200 | 4 | `st1_1[20]` + `st1_1[38]` |
+| 2 | 6049 | 6912 | −300 | 2 | `st1_1[21]` + `st1_1[39]` |
+| 3 | 6047 | 6912 | −300 | 0 | `etc_1[65]` + `st1_1[39]` |
+| 4 | 6048 | 6911 | 0 | 4 | `st1_1[20]` + `st1_1[38]` |
+| 5 | 6048 | 6911 | 0 | 4 | `st1_1[20]` + `st1_1[38]` — the flipped one |
+| 6 | 6049 | 6912 | 0 | 2 | `st1_1[21]` + `st1_1[39]` |
+| 7 | 6307 | 0 | −450 | 1 | `st5_01b[0]` |
+| 8 | 6312 | 0 | −1050 | 1 | `st5_01b[5]` |
+| 9 | 6309 | 6318 | −2400 | 2 | `st5_01b[2]` + `st5_01b[9]` |
+| 10 | 6310 | 6318 | −3000 | 0 | `st5_01b[3]` + `st5_01b[9]` |
+| 11 | 6311 | 6318 | −3000 | 0 | `st5_01b[4]` + `st5_01b[9]` |
 
 Note every dome lives in `st1_1`, `etc_1` or `st5_01b` regardless of which
 stage uses it — the sky is shared geometry. No region draws these slots; the

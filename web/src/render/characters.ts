@@ -588,16 +588,39 @@ export class CharacterLayer implements System {
    * talks to.
    */
   paths: {
-    objectPath(slot: number):
-      { position(t: number, out?: Vec3): Vec3 } | undefined;
+    objectPath(slot: number): {
+      position(t: number, out?: Vec3): Vec3;
+      channel(i: number, t: number): number;
+    } | undefined;
   } | null = null;
 
+  /**
+   * **All six values, not three.**
+   *
+   * `CamEvalObjectPath6` (`FUN_004042D0`) fills `{float x,y,z; int rx,ry,rz}`,
+   * and `ScriptedHumanoidUpdate`'s tail copies the second half straight onto
+   * the actor when the follow mode is not 2 — `MOV [EDI+0x64],EAX; MOV
+   * [EDI+0x68],ECX; MOV [EDI+0x6c],EDX` at `0x00484B6E`-`0x00484B74`, out of
+   * `[ESP+0x4c/0x50/0x54]`. It also rotates the attachment offset through the
+   * same triple. This seam used to hand back the position alone, so `p.yaw`
+   * was always `undefined`: a rider took its path's *place* and kept its spawn
+   * facing, and the offset record was rotated by a yaw of zero. Stage 3's
+   * boat riders are the visible case — two class-0x25 actors on `op_st3` 0
+   * with offset records 4 and 5, seated facing wherever the descriptor left
+   * them while the boat turned under them.
+   *
+   * `op_` channels 3, 4 and 5 are the BAMS triple; `channel` is what
+   * `render/rigs.ts` already reads them with.
+   */
   objectPath(slot: number, frame: number):
-      { x: number; y: number; z: number } | null {
+      { x: number; y: number; z: number;
+        pitch: number; yaw: number; roll: number } | null {
     const p = this.paths?.objectPath(slot);
     if (!p) return null;
     const v = p.position(frame, this._pathPos);
-    return { x: v.x, y: v.y, z: v.z };
+    return { x: v.x, y: v.y, z: v.z,
+             pitch: p.channel(3, frame), yaw: p.channel(4, frame),
+             roll: p.channel(5, frame) };
   }
 
   private readonly _pathPos = new Vector3();

@@ -40,7 +40,29 @@
  * That is why a rig is treated as **one actor** here rather than one instance
  * per route. Exactly one root is visible at a time: the route whose gate
  * matches the current camera path, or — when none does — the one that was
- * last active and had run past its length, held in its final pose.
+ * last active, held in the pose it last wrote.
+ *
+ * **A rig outside its table does not disappear.** `FUN_0048EAD0`'s
+ * `switch (g_active_cam_path)` has a `default:` that jumps *past* the whole
+ * `CamEvalObjectPath6`/`obj+0x40` block straight to `MatrixStackPush(0)`, so
+ * a camera path the routine does not name skips the pose and **still draws**
+ * — which is what the bundle's own note on this rig has always said: "on a
+ * camera path outside the table the pose is not refreshed and the object
+ * draws at whatever pose it last held". `AssetDrawSlot` (`FUN_00418560`)
+ * then draws nothing for a slot whose flag word lacks `0x8000` and `0x0001`,
+ * so in the engine it is the *streaming* and not the shot that makes a rig
+ * disappear. Holding it only while `frozen` was a second, invented rule, and
+ * it left stage 3's boat undrawn for the whole opening — every shot before
+ * `cp_st3` 124 — while the class-0x25 riders it carries were placed on their
+ * own object paths regardless.
+ *
+ * [diverges] Before the *first* shot that selects a route, the pose the
+ * engine holds is the spawn descriptor's, written when the spawn opcode runs;
+ * the port draws the exporter's baked root pose instead, and it draws from
+ * stage load rather than from the frame that opcode ran, because nothing in
+ * the bundle links a rig to its descriptor. For the rigs the six stages carry
+ * the two agree on *where* — each is spawned at a zero position with a zero
+ * orientation, which is the baked pose — so what diverges is the timing.
  *
  * `FUN_004522A0`'s despawn is `g_script_flags[0] == 1`, i.e. evt
  * `set_script_flag 0`. That is this routine's rule and not a general one, so
@@ -180,27 +202,46 @@ export class RigLayer implements System {
         e.routes.push(route);
       }
     }
-    // **Only the rigs this block names.** `hod2_kind: "rig"` is the exporter's
-    // tag for *every* transcribed hierarchy in the stage, and four layers own
-    // different sets of them: the characters (`chr_`), their damaged-part
-    // templates (`gore_`), the props (`prop_`), the breakable slot templates,
-    // and these. Adopting all of them made this layer set `visible` on nodes
-    // it does not own, once a frame, from a rule that has nothing to do with
-    // them — and because a rig with no route is ungated, the *first* instance
-    // of every character type was shown at its authored spawn point, in the
-    // bind pose the exporter baked, before the script had spawned anything.
-    // The character layer hides them at stage load and only writes visibility
-    // for actors that exist, so nothing put them back. That is bug B3.
-    //
-    // `rigs.rigs[].name` is the index source and the only one: in the six
-    // shipped stages it names 2–3 rigs against 45–335 tagged nodes.
-    const owned = new Set(json.rigs.map((r) => r.name));
+    /**
+     * The rigs this layer implements, by name, and **nothing else**.
+     *
+     * `hod2_kind: "rig"` is the exporter's word for "assembled by the rig
+     * writer", and it puts every *character* through that same writer — a
+     * skeleton is a tree of named parts with a bone offset and an asset slot,
+     * which is a rig. So the marker is on 154 roots in stage 3, 335 in stage
+     * 2, and only nine and six of those belong to a transcribed draw routine.
+     *
+     * Claiming the rest was not harmless. A `chr_` root carries no
+     * `hod2_path_slot`, so it bound to no route, so its gate was empty, so it
+     * was **always** the route the camera selected — and because the actors
+     * here are grouped by rig *name*, and a name is a character skin shared by
+     * up to thirty spawns, this layer wrote `visible = true` on one arbitrary
+     * root of each skin and `false` on all the others, once a frame, over
+     * `CharacterLayer`, which owns those nodes. The one it revealed had no
+     * game object and therefore no pose: every bone offset in this engine runs
+     * along its own local X, so an unposed character is a heap of parts piled
+     * on the origin, which is what "the NPCs are in the wrong orientation"
+     * looks like. It also un-hid one `gore_` template per stage.
+     *
+     * Names, not `hod2_path_slot`: six of stage 1's `obj_432840` roots and the
+     * `fixed000` roots in stages 5 and 6 have no path slot and *are* this
+     * layer's, because their routine hardcodes the pose.
+     *
+     * **Two independent reads reached this same rule**, from opposite
+     * symptoms: the boat's passengers drawn unposed (B2), and civilians and
+     * enemies drawn at their authored spawn points before the script had
+     * spawned anything (B3). Same cause — `CharacterLayer` hides those roots
+     * at stage load and only writes visibility for actors that exist, so once
+     * this layer revealed one, nothing put it back. In the six shipped stages
+     * `rigs.rigs[].name` names 2–10 rigs against 45–335 tagged nodes.
+     */
+    const mine = new Set(json.rigs.map((r) => r.name));
 
     root.traverse((o) => {
       const x = o.userData as { hod2_kind?: string; hod2_path_slot?: number;
                                hod2_rig?: string };
       if (x?.hod2_kind !== "rig") return;
-      if (!x.hod2_rig || !owned.has(x.hod2_rig)) return;
+      if (!x.hod2_rig || !mine.has(x.hod2_rig)) return;
       const slot = x.hod2_path_slot;
       const bound = slot === undefined ? undefined : routesBySlot.get(slot);
       const routes = bound?.routes ?? [];
@@ -278,14 +319,12 @@ export class RigLayer implements System {
         (i) => i.gate.length === 0 ||
                (camSlot !== null && i.gate.includes(camSlot)));
 
-      let show: Instance | null = selected ?? null;
-      if (!show) {
-        // No route selected. The actor does not vanish if its think routine
-        // has already flipped -- that only happens once the path has run out,
-        // so a held instance keeps being drawn.
-        const held = actor.showing;
-        show = held && held.frozen ? held : null;
-      }
+      // No route selected: the routine's `default:` draws anyway, at the pose
+      // it last wrote, so the instance that was showing keeps showing. Before
+      // any shot has ever selected one, that is the first root, at the pose
+      // the exporter baked -- see the `[diverges]` at the top of this file.
+      const show: Instance | null =
+        selected ?? actor.showing ?? actor.instances[0] ?? null;
 
       for (const inst of actor.instances) {
         inst.root.visible = this.enabled && inst === show;

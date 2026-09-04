@@ -6,29 +6,50 @@
  * 12 × 16-byte table at `0x00579968`:
  *
  * ```
- * +0x00  s16  asset slot A   the dome that is drawn
- * +0x02  s16  asset slot B   a second slot, used by the variant paths
+ * +0x00  s16  asset slot A   the dome that is spun
+ * +0x02  s16  asset slot B   a second model, drawn flat around the camera
  * +0x04  f32  dy             Y offset from the camera, 0 .. -3000
  * +0x08  s32  spin           BAMS added to the angle every frame
  * +0x0C  s32  angle0         BAMS the angle resets to when the preset changes
  * ```
  *
- * The draw is the block at `0x004132D0` (which Ghidra leaves undefined), and
- * transcribes to:
+ * The draw is `DrawBackdropDome` at `0x004132D0`, and transcribes to:
  *
  * ```
- * translate(camera.x, camera.y + dy, camera.z)
- * if (mode != 2) angle += spin
- * if (preset == 5) { rotateZ(180 deg); rotateY(-angle); }
- * else               rotateY(angle)
- * scale(1.2, 1.2, -1.2)
- * AssetDrawSlot(slot_a)
+ * if (preset != last_preset) angle = angle0
+ * if (mode == 0) return                     // 0x0041331A
+ * push
+ *   translate(camera.x, camera.y + dy, camera.z)
+ *   if (mode != 2) angle += spin
+ *   if (preset == 5) { rotateZ(180 deg); rotateY(-angle); }
+ *   else               rotateY(angle)
+ *   scale(1.2, 1.2, -1.2)
+ *   AssetDrawSlot(slot_a)
+ * pop
+ * if (slot_b != 0) {                        // 0x0041345E
+ *   push
+ *     translate(camera.x, camera.y + dy, camera.z)
+ *     AssetDrawSlot(slot_b)                 // no rotation, no scale
+ *   pop
+ * }
+ * last_preset = preset
  * ```
  *
- * Two details matter and are easy to miss. It follows the camera in **all
- * three axes**, not just horizontally — so it can never be reached. And the
+ * Three details matter and are easy to miss. It follows the camera in **all
+ * three axes**, not just horizontally — so it can never be reached. The
  * **Z scale is negative**, which turns the dome inside out: it is modelled to
- * be seen from within.
+ * be seen from within. And **`slot_b` is a second draw of its own**, after
+ * the dome and outside its push, with the translate and nothing else: the
+ * preset's spin and its inside-out scale do not apply to it.
+ *
+ * `slot_b` used to be ignored here, and that is not the same as it being
+ * absent. It is an ordinary node of the stage's glTF, with an asset slot the
+ * script loads with `0x50` and no region, so `StageScene` drew it **in place**
+ * — at its authored position, from the frame its slot loaded, for the whole
+ * stage, whatever the mode said. Every one of stages 1–4 uses a preset with a
+ * non-zero `slot_b`; stage 3's is `st1_1` entry 39. So the bug read as a piece
+ * of backdrop stuck in the wrong place and visible when the sky was off, and
+ * both halves are the one omission: it is adopted here now, like `slot_a`.
  *
  * The models need no special export. Every preset a stage uses is already in
  * the bundle because the script loads its asset slot with opcode `0x50`, and
@@ -53,6 +74,16 @@ const DOME_SCALE = new Vector3(1.2, 1.2, -1.2);
 export class Backdrop implements System<RenderContext> {
   readonly id = "render.backdrop";
   readonly group = new Group();
+  /**
+   * The two draws, as two nodes, because they are two matrices.
+   *
+   * `slot_a` is pushed, translated, spun and scaled inside out; `slot_b` is
+   * pushed again after the pop and only translated. A single group cannot
+   * carry both, and parenting B under A would give it A's spin and A's
+   * negative Z.
+   */
+  private readonly domeGroup = new Group();
+  private readonly flatGroup = new Group();
   private presets: BackdropPreset[] = [];
   /** asset slot -> the node that draws it. */
   private readonly bySlot = new Map<number, Object3D>();
@@ -63,9 +94,14 @@ export class Backdrop implements System<RenderContext> {
   private angleBams = 0;
   private enabled = true;
   private current: Object3D | null = null;
+  /** The `slot_b` node of the current preset, if it has one. */
+  private currentFlat: Object3D | null = null;
 
   constructor() {
     this.group.name = "backdrop";
+    this.domeGroup.name = "backdrop_dome";
+    this.flatGroup.name = "backdrop_flat";
+    this.group.add(this.domeGroup, this.flatGroup);
     // The dome is behind everything and must not occlude it.
     this.group.renderOrder = -1000;
   }
@@ -91,13 +127,26 @@ export class Backdrop implements System<RenderContext> {
       this.home.clear();
       this.bySlot.clear();
       this.current = null;
+      this.currentFlat = null;
       this.preset = -1;
     });
     this.presets = backdrop?.presets ?? [];
     if (!this.presets.length) return;
 
+    // **Both slots.** `slot_b` is a draw of its own and has to leave the stage
+    // tree for the same reason `slot_a` does -- see the header.
     const wanted = new Set<number>();
-    for (const p of this.presets) wanted.add(p.slot_a);
+    for (const p of this.presets) {
+      wanted.add(p.slot_a);
+      // 0 is the table's "no second model", and `AssetDrawSlot(0)` draws
+      // nothing (`FUN_00418560`'s first test).
+      if (p.slot_b) wanted.add(p.slot_b);
+    }
+    // Which group a node belongs in. No slot in the shipped table is both, and
+    // if one ever were the spun draw is the one that has to own the node.
+    const domeSlots = new Set(this.presets.map((p) => p.slot_a));
+    const flatSlots = new Set(this.presets.map((p) => p.slot_b)
+      .filter((s) => s && !domeSlots.has(s)));
 
     const found: Object3D[] = [];
     root.traverse((o) => {
@@ -106,15 +155,17 @@ export class Backdrop implements System<RenderContext> {
     });
     for (const node of found) {
       const slot = (node.userData as { hod2_slot: number }).hod2_slot;
+      const flat = flatSlots.has(slot);
       if (node.parent) this.home.set(node, node.parent);
       this.bySlot.set(slot, node);
       node.visible = false;
-      this.group.add(node);
+      (flat ? this.flatGroup : this.domeGroup).add(node);
       // Sky never occludes: draw first and leave the depth buffer alone.
+      // `slot_b` goes after `slot_a`, which is the order the two draws run in.
       node.traverse((c) => {
         const mesh = c as Mesh;
         if (!mesh.isMesh) return;
-        mesh.renderOrder = -1000;
+        mesh.renderOrder = flat ? -999 : -1000;
         const mats = Array.isArray(mesh.material)
           ? mesh.material : [mesh.material];
         for (const m of mats) {
@@ -174,25 +225,32 @@ export class Backdrop implements System<RenderContext> {
       this.preset = preset;
       this.angleBams = p ? p.angle0_bams : 0;
       if (this.current) this.current.visible = false;
+      if (this.currentFlat) this.currentFlat.visible = false;
       this.current = p ? this.bySlot.get(p.slot_a) ?? null : null;
+      this.currentFlat = p && p.slot_b
+        ? this.bySlot.get(p.slot_b) ?? null : null;
     }
 
+    // `mode == 0` returns before the first push, so neither draw happens.
     const on = this.enabled && mode !== 0 && !!p && !!this.current;
     this.group.visible = on;
     if (this.current) this.current.visible = on;
+    if (this.currentFlat) this.currentFlat.visible = on;
     if (!on || !p) return;
 
     // Mode 2 is "drawn but frozen".
     if (mode !== 2) this.angleBams += p.spin_bams * frames;
 
-    this.group.position.set(camera.x, camera.y + p.dy, camera.z);
+    // Both draws start from the same translate.
+    this.domeGroup.position.set(camera.x, camera.y + p.dy, camera.z);
+    this.flatGroup.position.copy(this.domeGroup.position);
     const a = this.angleBams * BAMS_TO_RAD;
     if (preset === 5) {
-      this.group.rotation.set(0, -a, Math.PI, "ZYX");
+      this.domeGroup.rotation.set(0, -a, Math.PI, "ZYX");
     } else {
-      this.group.rotation.set(0, a, 0, "ZYX");
+      this.domeGroup.rotation.set(0, a, 0, "ZYX");
     }
-    this.group.scale.copy(DOME_SCALE);
+    this.domeGroup.scale.copy(DOME_SCALE);
   }
 
   /**
@@ -212,6 +270,7 @@ export class Backdrop implements System<RenderContext> {
     if (!p) return `preset ${this.preset} (no entry)`;
     const state = this.mode === 0 ? "off" : this.mode === 2 ? "frozen" : "spin";
     const have = this.current ? "" : " — model not in this bundle";
-    return `preset ${this.preset} ${state} dy ${p.dy.toFixed(0)}${have}`;
+    const two = this.currentFlat ? " + flat" : "";
+    return `preset ${this.preset} ${state} dy ${p.dy.toFixed(0)}${two}${have}`;
   }
 }

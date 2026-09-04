@@ -100,6 +100,7 @@ const mkHost = (): WalkerHost => ({
   onBranch: () => undefined,
   playSound: () => undefined,
   aliveEnemies: () => null,
+  presentEnemies: () => null,
   aliveCivilians: () => null,
   cameraFree: () => null,
   showMessage: () => null,

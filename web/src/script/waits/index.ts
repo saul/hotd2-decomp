@@ -9,12 +9,13 @@
 import type { WaitRule } from "./types";
 import { waitCameraPathFrame, waitFrames } from "./frames";
 import { waitQueuedEvents } from "./queued";
-import { waitEnemiesAlive, waitScriptedActors } from "./enemies";
+import { waitEnemiesAlive, waitEnemiesPresent, waitScriptedActors }
+  from "./enemies";
 import { waitScriptFlag } from "./flag";
 
 const RULES: readonly WaitRule[] = [
   waitFrames, waitCameraPathFrame, waitQueuedEvents,
-  waitEnemiesAlive, waitScriptedActors, waitScriptFlag,
+  waitEnemiesPresent, waitEnemiesAlive, waitScriptedActors, waitScriptFlag,
 ];
 
 /**

@@ -1,5 +1,12 @@
 # HOTD2 (PC) — Reverse-Engineering & Asset Pipeline Plan
 
+> **Archived, and one deliverable in it was dropped.** The `src/` C reference
+> implementations named in Phase 2 and Phase 7 were never written and are no
+> longer planned: `tools/hod2lib/` is the reference, and a second
+> implementation of each format would be a second thing to keep true. The rest
+> of this file is left as it was written — it is a record of what was planned,
+> not a list of what is outstanding.
+
 **Scope:** RE the asset + render pipeline.
 **Export target:** engine-neutral glTF 2.0 + JSON sidecars.
 **Method:** fully static — the game is never executed.

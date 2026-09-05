@@ -63,7 +63,6 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] Clean-room `tools/hod2lib/lz.py`
 - [x] **793 compressed files decompress to exactly `dword0` bytes, 0 failures**
 - [x] 18,027 models parse out of the decompressed containers
-- [ ] `src/lz.c` reference implementation (deferred to Phase 7)
 
 ## Phase 3 — `hod2lib` core ✅ (one test suite outstanding)
 
@@ -241,11 +240,10 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       `set_collision_set_full  full: coli2.bin+0xb148(6q surf 52,53)`
 - [x] `mot/` — **rigid**: per-bone BAMS rotations plus a root translation, verified 1058/1058 blocks. See [`formats/mot.md`](formats/mot.md)
 
-## Phase 7 — Documentation & C reference
+## Phase 7 — Documentation
 
 - [ ] Complete `docs/formats/*.md` with worked hex examples
 - [ ] Annotated function inventory + Ghidra export
-- [ ] `src/` reference implementations compile cleanly
 
 ## Phase 8 — glTF exporter 🔶 mostly done
 

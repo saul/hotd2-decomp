@@ -120,8 +120,9 @@ false positives.
 
 ## Reference implementation
 
-- [`tools/hod2lib/lz.py`](../../tools/hod2lib/lz.py) — Python
-- `src/lz.c` — C, still to be written (Phase 7)
+[`tools/hod2lib/lz.py`](../../tools/hod2lib/lz.py). It is the only one: a C
+port was planned and has been dropped, because the Python already reads as the
+specification and a second implementation is a second thing to keep true.
 
 ## Remaining questions
 

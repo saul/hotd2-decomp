@@ -28,7 +28,7 @@ a [Unicorn Engine](https://www.unicorn-engine.org/) x86 emulator:
 
 It yields the same ground truth a runtime hook would: bit-for-bit correct output
 on real inputs. That makes it the differential-test oracle for the clean-room
-reimplementation in `tools/hod2lib/lz.py` and `src/lz.c`.
+reimplementation in `tools/hod2lib/lz.py`.
 
 ## Caveats
 

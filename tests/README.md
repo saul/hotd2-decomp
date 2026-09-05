@@ -13,7 +13,6 @@ asset content.
 |---|---|
 | 0 | `baseline.py` reproduces `inventory.csv` byte-for-byte from a known install |
 | 2 | all 793 compressed files decompress to exactly `dword0` bytes ✅ passing |
-| 2 | `hod2lib.lz` and `src/lz.c` agree on every input |
 | 2 | every decompressed `pol/` file parses as a valid container + NL1 |
 | 3 | `hod2lib.nl1` matches the Blender addon on vertex/triangle counts, centroids and radii |
 | 3 | mesh chains terminate cleanly on all 192 raw `pol/` files |

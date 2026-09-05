@@ -161,8 +161,6 @@ The annotation pipeline exists; these finish the job:
 * **Re-export annotations after every interactive session.** The habit, not
   the tooling, is the risk: `./ghidra/run.sh export-annotations` then
   `git diff`. MCP renames leave no trail.
-* **`src/` reference implementations** — `lz.c` and friends, deferred since
-  Phase 7. Worth it only as documentation; the Python is the real reference.
 
 ---
 

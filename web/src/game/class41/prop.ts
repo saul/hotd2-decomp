@@ -20,6 +20,8 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { BREAKABLE_STANDING_RISE, PropRegisterForShotTest }
+  from "./shot_test";
 import { T } from "../tables";
 import { BAMS } from "../vec";
 import {
@@ -271,6 +273,17 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
     case BreakableState.Falling: FallStep(p, events); break;
     case BreakableState.Settled: SettleStep(p); break;
     case BreakableState.Removed: break;
+  }
+
+  // `if (obj+0x192 != 3) { ...transform...; RegisterForShotTest(obj); }` --
+  // the routine's last four lines. The rise is assigned **only** inside the
+  // standing arm, so a prop that is falling or settled publishes its raw
+  // origin; a removed one publishes nothing and cannot be shot again.
+  if (p.state !== BreakableState.Removed) {
+    PropRegisterForShotTest(
+      p, p.x,
+      p.y + (p.state === BreakableState.Standing ? BREAKABLE_STANDING_RISE : 0),
+      p.z);
   }
 }
 

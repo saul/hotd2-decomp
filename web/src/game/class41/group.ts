@@ -9,6 +9,7 @@
 import type { Rng } from "../../core/rng";
 import type { BreakableMember } from "../../bundle";
 import { G } from "../globals";
+import { BREAKABLE_GROUP_RADIUS } from "./shot_test";
 import { T } from "../tables";
 import {
   BreakableFlag, BreakableSlot, BreakableState, makeBreakableProp,
@@ -118,6 +119,9 @@ export function PlaceBreakableGroup(group: number, lifetime: number,
     p.lastStepIndex = G.g_evt_step_index;
     p.stepsElapsed = 0;
     p.hp = 2;
+    // `obj+0x124 = 0x40A00000` — the sphere `ShotTestSphere` measures, and the
+    // whole hit test for a prop. Every group member gets the same 5.0.
+    p.hitRadius = BREAKABLE_GROUP_RADIUS;
     p.slot = BreakableSlot.Default;
     p.state = BreakableState.Standing;
     p.flags = 0x80000000 | BreakableFlag.Live;

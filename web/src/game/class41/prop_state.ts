@@ -228,6 +228,39 @@ export interface BreakableProp {
    */
   hitPos: { x: number; y: number; z: number };   // +0x40
   /**
+   * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
+   * shot against, and the **whole** hit test for a prop: a prop has no
+   * skeleton, so it is always that routine's else-arm.
+   *
+   * `PlaceBreakableGroup` writes 5.0, `PlaceFallingContainer` 8.0, the kinded
+   * props take `g_prop_kind_params[kind].radius`, and `PlaceGenericProp`'s
+   * switch sets one per type. **Zero means the class never set one**, which is
+   * the engine's "not shootable" and the port's too.
+   */
+  hitRadius: number;      // +0x124
+  /**
+   * `obj+0x70` / `+0x74` / `+0x78` — the point `RegisterForShotTest`
+   * (`FUN_00405160`) publishes, and the centre of that sphere.
+   *
+   * Each routine builds it from its own position and its own offset, at its
+   * tail, and they all differ — see `class41/shot_test.ts`. **World space
+   * here, view space in the engine**, which is the one declared difference.
+   */
+  shotX: number;          // +0x70
+  shotY: number;          // +0x74
+  shotZ: number;          // +0x78
+  /**
+   * Whether this prop is in `g_shot_test_list` (0x0059D8E8) this frame.
+   *
+   * [port-only] The engine has a list and a count; the port has a flag on the
+   * object, because its shot test walks the pool rather than a published
+   * array. Cleared for every prop at the top of the pool's frame and set again
+   * by whichever routine reaches its own `RegisterForShotTest`, which is what
+   * makes a prop that returned early — despawned, retired, mid-break —
+   * unshootable for exactly as long as the engine makes it.
+   */
+  shotRegistered: boolean;
+  /**
    * `obj+0x1AC` — which chain a `ChainSegmentUpdate` segment belongs to, and
    * `obj+0x1AD` its index 0..19 within it.
    *
@@ -337,6 +370,9 @@ export function makeBreakableProp(id: number, group: number,
     effectVariant: 0,
     settleTimer: 0,
     hitPos: { x: 0, y: 0, z: 0 },
+    hitRadius: 0,
+    shotX: 0, shotY: 0, shotZ: 0,
+    shotRegistered: false,
     chainGroup: 0,
     chainIndex: 0,
     subKind: 0,

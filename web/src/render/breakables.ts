@@ -31,7 +31,7 @@
  * this file draws its own random numbers — they do not reach the port, so the
  * save state is unaffected.
  */
-import { Box3, Group, Object3D, Ray, Vector3 } from "three";
+import { Group, Object3D, Ray, Vector3 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
@@ -172,7 +172,7 @@ export class BreakableLayer implements System<RenderContext> {
   private readonly templates = new Map<number, Object3D>();
   private readonly nodes = new Map<number, Live>();
   private enabled = true;
-  private readonly _box = new Box3();
+  private readonly _c = new Vector3();
   private readonly _hit = new Vector3();
   /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
   private readonly rng = new Rng(SHAKE_SEED);
@@ -409,20 +409,35 @@ export class BreakableLayer implements System<RenderContext> {
    * distance along a unit-length direction, so the caller can sort props and
    * bones into the one list the engine's shot test walks.
    */
+  /**
+   * `ShotTestSphere` (`FUN_00404630`) for the prop pool.
+   *
+   * **This used to be a bounding-box test on the drawn node**, which meant a
+   * prop the port had no model for could not be shot at all — and the engine
+   * has never needed a model. `RegisterForShotTest` (`FUN_00405160`) publishes
+   * a point and `obj+0x124`, and the sphere is the whole hit test: a prop has
+   * no skeleton, so it is always that routine's else-arm. Nine route-branch
+   * triggers were unreachable because of the box, three of them because their
+   * routine draws no static model at all.
+   *
+   * `game/class41/shot_test.ts` owns which props are registered and where
+   * their spheres are; this owns the ray. The `t <= 0` test below is the
+   * engine's `obj+0x78 <= 0` — its registration culls what is behind the
+   * camera, and the port culls it here instead, because the port's point is in
+   * world space rather than view space.
+   */
   pickRay(ray: Ray): { id: number; point: Vector3; t: number } | null {
     if (!this.enabled) return null;
     let best: { id: number; point: Vector3; t: number } | null = null;
     for (const p of G.g_breakable_props) {
-      if (p.dead || p.state === BreakableState.Removed
-          || p.family === PropFamily.Effect) continue;
-      const l = this.nodes.get(p.id);
-      if (!l || !l.node.visible) continue;
-      this._box.setFromObject(l.node);
-      if (this._box.isEmpty()) continue;
-      if (!ray.intersectBox(this._box, this._hit)) continue;
-      const t = ray.origin.distanceTo(this._hit);
+      if (p.dead || !p.shotRegistered || p.hitRadius <= 0) continue;
+      this._c.set(p.shotX, p.shotY, p.shotZ);
+      ray.closestPointToPoint(this._c, this._hit);
+      const t = this._hit.clone().sub(ray.origin).dot(ray.direction);
+      if (t <= 0) continue;                        // behind the muzzle
+      if (ray.distanceSqToPoint(this._c) > p.hitRadius * p.hitRadius) continue;
       if (!best || t < best.t) {
-        best = { id: p.id, point: this._hit.clone(), t };
+        best = { id: p.id, point: this._c.clone(), t };
       }
     }
     return best;

@@ -22,6 +22,9 @@ import {
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
+import {
+  ClearPropShotTestList, GenericPropRegisterForShotTest, PropRegisterAtOrigin,
+} from "./shot_test";
 import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
 import { HIT_FLAG_MASK, PropFamily, type BreakableProp }
   from "./prop_state";
@@ -39,6 +42,11 @@ import { LiftUpdate } from "./lift";
  * stands in the level for the rest of the stage.
  */
 export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
+  // `DAT_005A4C80 = 0` — `ProcessPlayerShots` empties the registration list at
+  // the end of its pass, so every object has to publish itself again. That is
+  // what makes a prop which returned early this frame unshootable for exactly
+  // as long as the engine makes it. See `class41/shot_test.ts`.
+  ClearPropShotTestList();
   for (const p of G.g_breakable_props) {
     if (p.dead) continue;
     switch (p.family) {
@@ -106,6 +114,11 @@ function GenericPropUpdate(p: BreakableProp): void {
     GENERIC_UPDATE[p.kind]?.(p);
   }
   p.flags &= ~HIT_FLAG_MASK;
+  // The tail thirty of these routines share: publish the sphere. A chain
+  // segment registers its own link's origin; everything else goes through the
+  // per-type offset table.
+  if (p.chainGroup > 0) PropRegisterAtOrigin(p);
+  else GenericPropRegisterForShotTest(p);
 }
 
 /**
@@ -133,6 +146,7 @@ function StoryModeSwitchPoolUpdate(p: BreakableProp): void {
   }
   StoryModeSwitchUpdate(p);
   p.flags &= ~HIT_FLAG_MASK;
+  PropRegisterAtOrigin(p);
 }
 
 /**

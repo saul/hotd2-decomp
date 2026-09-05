@@ -13,6 +13,8 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { FALLING_CONTAINER_RADIUS, PropRegisterForShotTest }
+  from "../class41/shot_test";
 import { T } from "../tables";
 import { BAMS } from "../vec";
 import { MsvcRand } from "../class41/group";
@@ -66,6 +68,8 @@ export function PlaceFallingContainer(at: number, kind: number,
   p.stepsElapsed = 0;
   // Two shots, and unlike the kinded props this really is a shot count.
   p.hp = 2;
+  // `obj+0x124 = 0x41000000` — 8.0, the largest of the three families.
+  p.hitRadius = FALLING_CONTAINER_RADIUS;
   p.slot = FALLING_SLOT_WHOLE;
   p.state = BreakableState.Standing;
   p.flags = 0x80000000 | BreakableFlag.Live;
@@ -231,4 +235,10 @@ export function FallingContainerUpdate(p: BreakableProp, rng: Rng,
     p.pitch += p.spin;
     FallingContainerGroundContact(p);
   }
+
+  // `if (obj+0x11C > 0) { ...transform...; RegisterForShotTest(obj); }` --
+  // the raw origin, no rise, and only while it has shots left. The second one
+  // takes it out of the pool anyway, so this is really "not the frame it
+  // bursts".
+  if (p.hp > 0) PropRegisterForShotTest(p, p.x, p.y, p.z);
 }

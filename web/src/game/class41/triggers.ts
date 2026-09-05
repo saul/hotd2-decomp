@@ -30,6 +30,11 @@ import {
   BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
   type BreakableProp,
 } from "./prop_state";
+import { CHAIN_LINK_DROP, FRAGMENT_RADIUS, STORY_SWITCH_RADIUS }
+  from "./shot_test";
+
+/** `PlaceChainSegments` writes `seg->+0x124 = 2.0` for every link. */
+export const CHAIN_SEGMENT_RADIUS = 2.0;
 
 /** How many segments a chain has, and the stride of `g_chain_segments`. */
 export const CHAIN_SEGMENTS = 0x14;
@@ -88,6 +93,8 @@ export function PlaceChainSegments(pl: BreakablePlacement): BreakableProp[] {
     p.at = pl.at;
     p.kind = 0;
     p.chainGroup = group;
+    // `seg->+0x124 = 2.0` -- twenty small spheres, one per link.
+    p.hitRadius = CHAIN_SEGMENT_RADIUS;
     p.chainIndex = i;
     p.state = BreakableState.Standing;
     p.flags = 0x80000000 | BreakableFlag.Live;
@@ -95,7 +102,15 @@ export function PlaceChainSegments(pl: BreakablePlacement): BreakableProp[] {
     p.stepsElapsed = 0;
     p.lifetime = pl.lifetime_evt_steps ?? 0;
     p.x = pl.pos?.[0] ?? 0;
-    p.y = pl.pos?.[1] ?? 0;
+    // Each link hangs 1.5 below the one above it: the engine composes
+    // `M_i = M_{i-1} * Rz * Rx * T(0, -1.5, 0)` and takes that matrix's world
+    // translation as the shot point, so with no swing the twenty links cover
+    // **thirty units of drop** from the anchor. Placing them all at the anchor
+    // would make a chain of twenty spheres into one link.
+    //
+    // [diverges] The port drops them straight down and does not run the swing;
+    // the engine's `Rz`/`Rx` per link are what make a shot chain sway.
+    p.y = (pl.pos?.[1] ?? 0) + CHAIN_LINK_DROP * (i + 1);
     p.z = pl.pos?.[2] ?? 0;
     // `seg->+0x1B4 = i << 14` — each link starts a quarter turn round from the
     // last, which is the chain's twist.
@@ -128,6 +143,25 @@ export function PlaceChainSegments(pl: BreakablePlacement): BreakableProp[] {
  * for `sub_kind - 6 == 3`, so it fires once per placement rather than once per
  * object.
  */
+/**
+ * Where `PlaceFragmentProps` puts sub-kind 9's pair, out of the pointer table
+ * at `0x005945EC` — `[9]` resolves to `0x00594408`.
+ *
+ * Two objects, the same y and z, **41.683 apart in x**: the left and right of
+ * a corridor, which is what a route-branch pair looks like. They are here as
+ * literals because they are the only sub-kind whose placement the port needs
+ * to be *right* rather than merely present — the branch depends on both being
+ * shootable, and a pair stacked on the placer is one target.
+ *
+ * [open] The other nineteen sub-kinds' tables are read but not carried; those
+ * objects are placed at the placer's own point.
+ */
+export const FRAGMENT_SUBKIND9_POSITIONS:
+    ReadonlyArray<readonly [number, number, number]> = [
+  [86.6348, -4.30138, -224.319],
+  [128.3177, -4.30138, -224.319],
+];
+
 export function PlaceFragmentProps(pl: BreakablePlacement): BreakableProp[] {
   const subKind = pl.sub_kind ?? 0;
   const count = FRAGMENT_COUNTS[subKind] ?? 0;
@@ -138,14 +172,18 @@ export function PlaceFragmentProps(pl: BreakablePlacement): BreakableProp[] {
     p.at = pl.at;
     p.kind = 40;
     p.subKind = subKind;
+    // `obj+0x124 = 0x40B00000` -- 5.5 for every sub-kind.
+    p.hitRadius = FRAGMENT_RADIUS;
     p.state = BreakableState.Standing;
     p.flags = 0x80000000 | BreakableFlag.Live;
     p.lastStepIndex = G.g_evt_step_index;
     p.stepsElapsed = 0;
     p.lifetime = pl.lifetime_evt_steps ?? 0;
-    p.x = pl.pos?.[0] ?? 0;
-    p.y = pl.pos?.[1] ?? 0;
-    p.z = pl.pos?.[2] ?? 0;
+    const at = subKind === FRAGMENT_BRANCH_SUBKIND
+      ? FRAGMENT_SUBKIND9_POSITIONS[i] : undefined;
+    p.x = at ? at[0] : pl.pos?.[0] ?? 0;
+    p.y = at ? at[1] : pl.pos?.[1] ?? 0;
+    p.z = at ? at[2] : pl.pos?.[2] ?? 0;
     p.yaw = pl.yaw ?? 0;
     out.push(p);
   }
@@ -185,6 +223,10 @@ export function PlaceStoryModeSwitch(pl: BreakablePlacement): BreakableProp {
   p.lifetime = 1;
   p.slot = pl.slot ?? 0;
   // `obj+0x2A0` and `obj+0x2A4`. `storyItem` is `+0x2A0`'s offset already.
+  // `obj+0x124 = 8.0`, and only on the `desc+8 == -1` variant -- the other
+  // one goes to `ShotTestMesh`, which the port has not got. See
+  // `STORY_SWITCH_RADIUS`.
+  p.hitRadius = (pl.volume ?? -1) === -1 ? STORY_SWITCH_RADIUS : 0;
   p.storyItem = pl.branch_flag ?? -1;
   p.removeFlag = pl.remove_flag ?? -1;
   p.key0 = pl.keys?.[0] ?? -1;

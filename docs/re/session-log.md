@@ -11639,3 +11639,107 @@ has to catch up; that is a hand-off, not a failure.
 3. `MouseWanderUpdate`'s subtype 1 draws through
    `SubmitSlotWithSceneLightArray` where subtype 0 uses `AssetDrawSlot`: the
    same model, lit or not. `render/slotmodels.ts` draws both the same way.
+
+---
+
+## Session — a prop is a sphere, and never a model
+
+**The task.** The port picked a prop by the **bounding box of its drawn node**.
+That is not a small approximation of the engine's test; it is a different test
+with a different precondition, and it left nine route-branch triggers
+unreachable — three of them because their routine draws no static model at all.
+
+### What the engine does
+
+```c
+ProcessPlayerShots:  (obj+0x34 & 0x10) ? ShotTestMesh : ShotTestSphere
+
+RegisterForShotTest (FUN_00405160):
+  if (!(obj+0x34 & 0x8000) && ((obj+0x34 & 0x10) || obj+0x78 <= 0.0))
+      g_shot_test_list[n++] = ...
+
+ShotTestSphere (FUN_00404630):
+  if (RayTestSphere(player, obj+0x70..0x78, obj+0x124) > 0) {
+      if ((obj+0x34 & 0x80) && skeleton[obj+0x1F4]->nodes > 0) ShotTestSkeleton;
+      else  ...the whole object is one candidate...
+  }
+```
+
+A prop has no skeleton, so it is always the else-arm. Geometry never enters it.
+
+### Twenty-four routines, read by four agents in parallel
+
+Each routine builds its own shot point at its own tail, and **they all differ**.
+The findings that a single general rule would have got wrong:
+
+* **Type 7 registers 57 units below its origin**, against a radius of 12.
+* **Type 11's draw orbits its origin and the sphere does not.** Same for type
+  75, whose model flies a camera path while the sphere stays at the spawn
+  point, and for type 73, whose draw adds `+0x1C8` to z and whose shot point
+  does not. Three separate places where the visible thing and the shootable
+  thing are not in the same spot, in the engine, on purpose.
+* **Type 74's rise is a function of its own radius**: `r · 0.5 − 2`.
+* **Type 57 never reads its own position.** It draws at fixed world
+  coordinates and registers one of them raised by 2.84.
+* **Type 40's rise is picked from the draw slot, not the sub-kind** — a chain
+  of four overrides. Sub-kind 9, the route-branch pair, lands on 8.0.
+* **Type 25 draws nothing and has a radius of 12**, and one scoring hit sets
+  `obj+0x34 |= 0x44000000` — bit 26 removes it from the shot test for good.
+  That was the only branch in arcade mode the port could not reach.
+
+And two placement facts the port had wrong. `PlaceFragmentProps` puts
+sub-kind 9's pair at two table positions **41.683 apart**, not both at the
+placer; `PlaceChainSegments`' twenty links each hang 1.5 below the last, so the
+chain covers thirty units of drop rather than being twenty spheres in one spot.
+
+### The thing that stayed shut, and why
+
+**`StoryModeSwitchUpdate` never writes `obj+0x70..0x78` at all.** It captures
+its draw matrix into `obj+0x150` and calls `RegisterForShotTest` anyway.
+`PlaceStoryModeSwitch` then decides which consumer sees it from the
+descriptor's `+0x08`: `-1` gives the sphere path with a centre nothing ever
+wrote — which, because `RayTestSphere` is a perpendicular distance with no
+divide, makes the switch answer **any shot fired anywhere on screen** — and
+anything else sets bit 4 and sends it to `ShotTestMesh`.
+
+**All nine shipped switches take the mesh path.** So the quirk is real and
+unreachable, and the five branch records those switches answer are still shut:
+they want a ray-versus-mesh test the port has not got. That is the next job and
+it is a different one.
+
+### What it bought, measured
+
+| | before | after |
+|---|---:|---:|
+| Branch records fully reachable | 18 of 33 | **23 of 33** |
+| ...in arcade | 28 of 33 | **29 of 33** |
+
+Arcade is **complete**: the four records still short there are ones the engine
+cannot reach in arcade either — one is a mouse, which is Original Mode's, and
+three are stage 6's, which have no writer anywhere in the binary.
+
+The ten still shut in Original Mode: five want `ShotTestMesh`, two want an
+Original Mode key the port never fills because the pickup is unported, and
+three are stage 6's `[open]`.
+
+### Wrong turns
+
+* I assumed the shot point was the prop's origin for every type and started
+  writing it that way. Type 7 alone would have put the sphere 57 units off.
+  Fanning out and reading all twenty-four was the only thing that would have
+  found that; a spot check of two or three routines would have "confirmed" the
+  wrong rule, because eight of the twenty really are a plain zero.
+* I assumed the story switch would fall out of the same fix and said so in the
+  file comment before checking the shipped data. It does not: every switch in
+  the game takes the other path. The comment is corrected and the measurement
+  is in `docs/formats/spawns.md`.
+
+### Next actions
+
+1. **`ShotTestMesh` (`FUN_00404A00`)** — the volume test at `obj+0x14C`. Five
+   branch records and nine switches want it. The exporter would have to carry
+   the mesh; `render/` already has `coli` geometry to test against.
+2. `g_original_item_slots` is still never filled: `FUN_00475E40`, the pickup,
+   is unported, so two more routes stay shut.
+3. Stage 6's three branches have no writer among the eighteen. Either one was
+   missed, or they are answered by something outside the cross-reference graph.

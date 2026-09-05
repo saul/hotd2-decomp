@@ -127,6 +127,7 @@ import {
   GENERIC_ORIGINAL_MODE_ONLY,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
+import { ClearPropShotTestList } from "../src/game/class41/shot_test";
 import {
   CLASS21_MOTION_FREED, RescueTargetState, RescueTargetUpdate,
 } from "../src/game/class21";
@@ -3006,6 +3007,136 @@ console.log("\nthe branch writers: every route the game can choose:");
     hitAndTick(q);
     check("...and 2 in original mode, on the flag rather than the shot",
           G.g_script_branch_var === 2, String(G.g_script_branch_var));
+  }
+}
+
+console.log("\nprops are shot by a sphere, not by the model they draw:");
+{
+  const rng = new Rng(77);
+
+  // A generic prop that draws NOTHING. Type 25's routine has no static model
+  // at all -- `GENERIC_DRAW_SLOT[25]` is null -- and the engine still gives it
+  // a radius of 12 and registers it every frame. It was the only branch in
+  // arcade mode the port could not reach, for exactly that reason.
+  {
+    propScene(rng, GameMode.Arcade);
+    const p = PlaceGenericProp({ at: 0x9000, container: "generic", type: 0x19,
+                                 slot: 0, lifetime_evt_steps: 0,
+                                 pos: [10, 0, -5] }, rng);
+    G.g_breakable_props.push(p);
+    check("a prop with no model still gets its radius", p.hitRadius === 12,
+          String(p.hitRadius));
+    BreakablePropPoolUpdate(rng);
+    check("...and publishes a sphere", p.shotRegistered);
+    check("...12 units above its own origin, which is where the routine puts it",
+          p.shotX === 10 && p.shotY === 12 && p.shotZ === -5,
+          `${p.shotX}/${p.shotY}/${p.shotZ}`);
+
+    // `obj+0x34 |= 0x44000000` -- bit 26 takes it out of the shot test for
+    // good, which is why its route can only ever be opened once.
+    p.flags |= 0x04000000;
+    BreakablePropPoolUpdate(rng);
+    check("...until one scoring hit sets bit 26, and then never again",
+          !p.shotRegistered);
+  }
+
+  // The offsets are per type and they are not all up. Type 7 registers 57
+  // units BELOW its origin; type 20 one unit below; type 57 ignores its
+  // position and registers a fixed world point.
+  {
+    const at = (type: number) => {
+      propScene(rng, GameMode.Arcade);
+      const p = PlaceGenericProp({ at: 0x9100 + type, container: "generic",
+                                   type, slot: 0, lifetime_evt_steps: 0,
+                                   pos: [0, 100, 0] }, rng);
+      G.g_breakable_props.push(p);
+      BreakablePropPoolUpdate(rng);
+      return p;
+    };
+    check("type 7 registers 57 units below its origin", at(7).shotY === 43,
+          String(at(7).shotY));
+    check("type 20 registers one unit below", at(20).shotY === 99,
+          String(at(20).shotY));
+    const t57 = at(57);
+    check("type 57 ignores its position for a fixed world point",
+          Math.abs(t57.shotX - -697.042) < 1e-3 && t57.shotY !== 100,
+          `${t57.shotX}/${t57.shotY}/${t57.shotZ}`);
+    // Type 74's rise is a function of its own radius: `r * 0.5 - 2`.
+    check("type 74's rise comes from its own radius", at(74).shotY === 100 + 2.5,
+          String(at(74).shotY));
+  }
+
+  // The group props: half a stack level up while standing, the raw origin once
+  // they are falling, and out of the test entirely once removed.
+  {
+    propScene(rng);
+    PlaceBreakableGroup(1, 4, rng);
+    const p = G.g_breakable_props[0];
+    p.x = 0; p.y = 0; p.z = 0;
+    BreakablePropPoolUpdate(rng);
+    check("a standing group prop registers half a stack level up",
+          Math.abs(p.shotY - 3.770148) < 1e-5, String(p.shotY));
+    check("...with the radius PlaceBreakableGroup gives every member",
+          p.hitRadius === 5, String(p.hitRadius));
+    p.state = BreakableState.Falling;
+    BreakablePropPoolUpdate(rng);
+    // Its own y, whatever the fall has done to it this frame -- the rise is
+    // assigned only inside the standing arm, so a falling prop loses it.
+    check("...its raw origin once it is falling", p.shotY === p.y,
+          `${p.shotY} vs ${p.y}`);
+    p.state = BreakableState.Removed;
+    BreakablePropPoolUpdate(rng);
+    check("...and nothing at all once it is removed", !p.shotRegistered);
+  }
+
+  // The list is rebuilt every frame, which is what makes a prop that returned
+  // early unshootable for exactly as long as the engine makes it.
+  {
+    propScene(rng);
+    PlaceBreakableGroup(1, 4, rng);
+    const p = G.g_breakable_props[0];
+    BreakablePropPoolUpdate(rng);
+    check("a prop is in the list after its own frame", p.shotRegistered);
+    ClearPropShotTestList();
+    check("...and out of it the moment the list is cleared", !p.shotRegistered);
+  }
+
+  // The chain's twenty links are twenty spheres, dropping 1.5 apiece. Placing
+  // them all at the anchor would make one link out of twenty.
+  {
+    propScene(rng);
+    const links = PlaceChainSegments({ at: 0x9200, container: "chain",
+                                       chain_group: 0, lifetime_evt_steps: 9,
+                                       pos: [0, 0, 0] });
+    check("each link hangs 1.5 below the one above it",
+          Math.abs(links[0].y - -1.5) < 1e-6
+          && Math.abs(links[19].y - -30.0) < 1e-6,
+          `${links[0].y} .. ${links[19].y}`);
+    check("...and each carries its own 2.0 sphere", links[7].hitRadius === 2,
+          String(links[7].hitRadius));
+  }
+
+  // The fragment pair is two objects 41.683 apart, not two in one place.
+  {
+    propScene(rng);
+    const pair = PlaceFragmentProps({ at: 0x9300, container: "fragment",
+                                      sub_kind: 9, lifetime_evt_steps: 9,
+                                      pos: [0, 0, 0] });
+    G.g_breakable_props.push(...pair);
+    check("sub-kind 9's pair is placed apart, from the engine's own table",
+          Math.abs(pair[1].x - pair[0].x - 41.683) < 1e-2,
+          `${pair[0].x} and ${pair[1].x}`);
+    BreakablePropPoolUpdate(rng);
+    check("...and each registers 8 units up, which its draw slot decides",
+          Math.abs(pair[0].shotY - (pair[0].y + 8.0)) < 1e-5,
+          String(pair[0].shotY));
+    check("...at 5.5 apiece", pair[0].hitRadius === 5.5,
+          String(pair[0].hitRadius));
+    // `obj+0x1B9` -- one shot ends it for ever.
+    pair[0].branchLatched = true;
+    BreakablePropPoolUpdate(rng);
+    check("...until one is broken, and then that one is out of the test",
+          !pair[0].shotRegistered && pair[1].shotRegistered);
   }
 }
 

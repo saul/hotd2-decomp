@@ -337,6 +337,11 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         slot: rec.param(0x04, "i16") || 0,
         // The script flag the route waits on, and the one that removes the
         // object. Both signed bytes, and -1 means "none".
+        // The descriptor's `+0x08`, which decides how the switch is shot:
+        // -1 is the sphere path (radius 8, centre never written, so it answers
+        // any shot on screen) and anything else is the mesh volume, which the
+        // port has not got. See `game/class41/shot_test.ts`.
+        volume: rec.param(0x08, "i32"),
         branch_flag: rec.param(0x10, "i8"),
         remove_flag: rec.param(0x11, "i8"),
         // The four Original Mode item ids that throw the switch without a

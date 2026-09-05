@@ -592,6 +592,70 @@ sprite (`0x116A` / `0x119C`), fades over `0x31` frames and despawns. It draws
 itself with `AssetDrawSlot(obj+0x28C)` plus a ground shadow `AssetDrawSlot(0x10D0)`.
 `[proved]`
 
+## How a prop is shot — a sphere, and never a model
+
+**[proved]** Nothing in the engine's shot test looks at geometry.
+`RegisterForShotTest` (`FUN_00405160`) publishes a point and `obj+0x124`;
+`ShotTestSphere` (`FUN_00404630`) tests that sphere and, only for an object
+with `obj+0x34` bit 7 **and** a character skeleton, descends into the bones. A
+prop has no skeleton, so a prop is always one sphere, whole — and whether it
+draws anything is beside the point. Three of the class-0x41 types that carry a
+shot radius draw no static model at all.
+
+Which of the three tests an object gets is `obj+0x34` bit 4:
+
+| bit 4 | routine | what it measures |
+|---|---|---|
+| clear | `ShotTestSphere` (`FUN_00404630`) | `obj+0x70..0x78`, radius `obj+0x124` |
+| set | `ShotTestMesh` (`FUN_00404A00`) | the volume at `obj+0x14C` / `obj+0x150` |
+
+### Where the sphere is
+
+Each routine builds the point itself, at its tail, and **they all differ**. The
+twenty that were read, as an offset from the object's own position:
+
+| type | routine | offset | radius | note |
+|---|---|---|---:|---|
+| 7 | `FUN_00466930` | `(0, −57.0, 0)` | 12 | 57 units **below** its origin |
+| 11 | `FUN_00467C80` | `(0, 0, 0)` | 2 | its *draw* orbits; the sphere does not |
+| 14 | `PropUpdateType14` | `(0, 0, 0)` | 2 | states 0 and 1 only |
+| 19 | `PropUpdateType19` | derived | 1.5 | a rotated pivot the port does not run |
+| 20 | `FUN_00469380` | `(0, −1.0, 0)` | 7 | |
+| 25 | `PropUpdateType25` | `(0, 12.0, 0)` | 12 | **draws nothing at all** |
+| 40 | `PropUpdateType40` | `(0, 0/2.5/5/8, 0)` | 5.5 | picked from the draw slot |
+| 41 | `FUN_0046CC50` | `(0, 5.0, 0)` | 7 | one sphere however far the hinge opens |
+| 49 | `FUN_0046E6E0` | `(0, 1.0, 0)` | 5 | on a position the tumble rewrites |
+| 56 | `PropUpdateType56` | `(4.8, −0.55, −10.5)` | 1.5 | |
+| 57 | `FUN_0046F350` | a world constant | 5 | never reads its own position |
+| 58, 60 | `FUN_0046F580`, `FUN_0046F840` | `(0, 0, 0)` | 3, 2 | |
+| 69 | `PropUpdateType69` | `(0, 1.5, 0)` | 4 | |
+| 70, 71 | `OriginalItemPropUpdate` | `(0, 1.5, 0)` | 3 | y is live on the bobbing one |
+| 72 | `FUN_00470750` | `(0, 1.5, 0)` | 3 | while falling only |
+| 73 | `PropUpdateType73` | `(0, 8.0, 0)` | 12 | the draw adds `+0x1C8` to z; this does not |
+| 74 | `FUN_00470E20` | `(0, r·0.5 − 2, 0)` | 9 | the only one that reads its own radius |
+| 75 | `FUN_004710C0` | `(0, 0, 0)` | 3 | the model flies a path, **the sphere stays** |
+| 76 | `PropUpdateType76` | `(−2.5, −30.0, −17.5)` | 3 | world axes; the draw applies them rotated |
+| 77 | `FUN_004717A0` | `pos + RotY · path` | 6 | |
+
+The group props are half a stack level up (`3.770148`) while standing and at
+their raw origin once toppling, with a radius of 5; the kinded props take both
+numbers from `g_prop_kind_params`; the falling containers register their raw
+origin at a radius of 8.
+
+### `StoryModeSwitchUpdate` never writes a point
+
+**[proved]** `FUN_00474F30` calls `RegisterForShotTest` unconditionally and
+writes `obj+0x70..0x78` **nowhere**. `PlaceStoryModeSwitch` decides which
+consumer sees it, from the descriptor's `+0x08`:
+
+* not `-1` — `obj+0x34 |= 0x51`, bit 4 **set**, so it goes to `ShotTestMesh`
+  against the volume at `obj+0x14C`. All **nine** shipped switches are this.
+* `-1` — bit 4 clear, radius 8, and the centre is still `(0, 0, 0)` because
+  nothing ever wrote it. `RayTestSphere` is a perpendicular-distance test with
+  no divide, so a centre at the origin is distance zero from every ray: the
+  switch would answer **any shot fired anywhere**. Whether that is intentional
+  is `[open]`; no shipped switch takes the path.
+
 ## Getting spawns into a renderer
 
 `hod2lib.spawnres` resolves a spawn to its character type and asset file, and

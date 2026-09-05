@@ -223,6 +223,10 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // business, not this function's.
   p.slot = GENERIC_SLOT[type] ?? pl.slot ?? 0;
   p.hp = GENERIC_HP[type] ?? 0;
+  // `obj+0x124` — the switch's own per-type hit radius, and the whole of what
+  // makes a generic prop shootable. A type missing from the table is a type
+  // the engine never registers a sphere for.
+  p.hitRadius = GENERIC_RADIUS[type] ?? 0;
 
   // **Three of the switch arms write `g_script_branch_var` at spawn time.**
   // Cases 0x0E and 0x13 write the descriptor's own `+0x11C` and case 0x19

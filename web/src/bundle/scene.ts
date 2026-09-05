@@ -228,6 +228,14 @@ export interface BreakablePlacement {
   branch_flag?: number;
   remove_flag?: number;
   /**
+   * `story_switch` only — the descriptor's `+0x08`, which decides **how it is
+   * shot**. `-1` sends it to `ShotTestSphere` with a radius of 8 and a centre
+   * the routine never writes, so it answers any shot on screen; anything else
+   * sets `obj+0x34` bit 4 and sends it to `ShotTestMesh`, which the port has
+   * not got. See `game/class41/shot_test.ts`.
+   */
+  volume?: number;
+  /**
    * `story_switch` only — the four Original Mode item ids that throw the
    * switch without a shot. `-1` in the first means it has no key and any shot
    * throws it.

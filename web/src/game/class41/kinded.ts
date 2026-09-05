@@ -22,6 +22,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { T } from "../tables";
+import { PropRegisterForShotTest } from "./shot_test";
 import { MsvcRand } from "./group";
 import { ReleaseHiddenItem } from "./items";
 import {
@@ -89,6 +90,10 @@ export function PlaceKindedProp(at: number, kind: number, itemSet: number,
   p.storyItem = -1;
 
   const params = T.breakables?.kinds?.[kind];
+  // `obj+0x124 = (float)g_prop_kind_params[kind].radius`. The bundle has
+  // carried this and the y offset beside it since the table was exported, and
+  // nothing read either until the shot test became a sphere.
+  p.hitRadius = params?.radius ?? 0;
   p.effect = params?.effect ?? 0;
   p.effectVariant = params?.effect_variant ?? 0;
 
@@ -151,6 +156,16 @@ export function KindedPropUpdate(p: BreakableProp, rng: Rng,
       }
       p.effectFrames = frames;
     }
+  }
+
+  // `if (obj+0x32C == 0) { ...transform...; RegisterForShotTest(obj); }` --
+  // a kinded prop leaves the shot test the frame its break effect starts, so
+  // the puff is not a second target. The rise is
+  // `g_prop_kind_params[kind].y_offset`, which the bundle has carried beside
+  // the radius since the table was exported and nothing read until now.
+  if (p.effectFrames === 0) {
+    const rise = T.breakables?.kinds?.[p.kind]?.y_offset ?? 0;
+    PropRegisterForShotTest(p, p.x, p.y + rise, p.z);
   }
 }
 

@@ -128,6 +128,12 @@ import {
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import {
+  CLASS21_MOTION_FREED, RescueTargetState, RescueTargetUpdate,
+} from "../src/game/class21";
+import {
+  PlaceChainSegments, PlaceFragmentProps, PlaceStoryModeSwitch,
+} from "../src/game/class41/triggers";
+import {
   FallingContainerUpdate, PlaceFallingContainer, FALLING_SLOT_LOOSE,
   FALLING_SLOT_WHOLE,
 } from "../src/game/class44";
@@ -2576,6 +2582,358 @@ console.log("\nclass 0x41, the props are in the save state:");
                        || Object.getPrototypeOf(v) === Object.prototype))));
   void events;
 }
+console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
+{
+  const rescueScene = (rng = new Rng(21)) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS, undefined, undefined, undefined);
+    G.g_active_cam_path = 0x39;
+    G.g_cam_path_frame = 0;
+    G.g_damage_rank = 2;
+    // `ActorSpawn` runs the class's own Init, exactly as
+    // `SpawnFromDescriptor` does; calling it again here would count the actor
+    // in twice.
+    const a = ActorSpawn(0x7d0, SpawnClass.RankScaledEnemy, 7, "rescue",
+                         undefined, rng);
+    if (a.cls !== SpawnClass.RankScaledEnemy) throw new Error("not class 0x21");
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    return { a, events: new Events(), rng };
+  };
+  const rFrame = (a: Actor, events: Events, rng: Rng) =>
+    RescueTargetUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
+                            events });
+
+  {
+    const { a, events, rng } = rescueScene();
+    check("the Init counts it as an enemy, twice over",
+          G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    check("...with hit points from g_class21_hp_by_rank", a.hp === 2,
+          String(a.hp));
+
+    // The ride-in is driven by the camera frame, not by a clock: its position
+    // is rebuilt from `50 - g_cam_path_frame` every frame.
+    G.g_cam_path_frame = 0x20;
+    rFrame(a, events, rng);
+    check("it rides in on the camera path",
+          Math.abs(a.pos.z - -(50 - 0x20)) < 1e-4, String(a.pos.z));
+    G.g_cam_path_frame = 0x40;
+    rFrame(a, events, rng);
+    G.g_cam_path_frame = 0xc0;
+    rFrame(a, events, rng);
+    check("...and hands over to the held state past frame 0xBD",
+          a.rescue.state === RescueTargetState.Held,
+          String(a.rescue.state));
+
+    // Two hit points, so the first shot does not free it.
+    G.g_player_score = [0, 0];
+    MarkActorShot(a, 0, 4);
+    rFrame(a, events, rng);
+    check("one shot is not a rescue",
+          G.g_script_branch_var === 0 && a.hp === 1,
+          `var ${G.g_script_branch_var} hp ${a.hp}`);
+    MarkActorShot(a, 0, 4);
+    rFrame(a, events, rng);
+    check("**the last shot writes the route**", G.g_script_branch_var === 1,
+          String(G.g_script_branch_var));
+    check("...and pays 10 + 10 + 80 + 400", G.g_player_score[0] === 500,
+          String(G.g_player_score[0]));
+    check("...and gives both enemy counters back, once",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    check("...and plays the freed clip",
+          a.motion === CLASS21_MOTION_FREED
+          && a.rescue.state === RescueTargetState.Freed,
+          `${a.motion} state ${a.rescue.state}`);
+  }
+
+  // Left alone, the camera abandons it -- and that path gives the counters
+  // back too, which is what stops a `wait_enemies_alive` holding on an actor
+  // that has left the shot.
+  {
+    const { a, events, rng } = rescueScene();
+    a.rescue.state = RescueTargetState.Held;
+    G.g_cam_path_frame = 0x200;
+    rFrame(a, events, rng);
+    check("an abandoned target writes no route",
+          G.g_script_branch_var === 0, String(G.g_script_branch_var));
+    check("...and still gives its counters back",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+}
+
+console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
+{
+  const triggerScene = (cls: SpawnClass, tail: object,
+                        mode = GameMode.Original) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS, undefined, undefined, undefined);
+    G.g_GameMode = mode;
+    const a = ActorSpawn(0x1234, cls, 0x1a, "trigger", tail, new Rng(5));
+    a.visible = true;
+    return a;
+  };
+  const tick = (a: Actor) => g_class_handlers[a.cls]?.update(
+    a, { eye: EYE, dt: 1 / 60, rng: new Rng(1), host: NULL_HOST });
+
+  // Class 0x52's per-sub-type table is the reading stage 4 block 10 proves:
+  // `next = {12, 18, 19}` with one sub-type 3 and one sub-type 4 in it.
+  for (const [sub, want] of [[2, 2], [3, 1], [4, 2]] as [number, number][]) {
+    const a = triggerScene(SpawnClass.Critter, { class52: { subtype: sub } });
+    MarkActorShot(a, 0, 0);
+    tick(a);
+    check(`class 0x52 sub-type ${sub} writes route ${want}`,
+          G.g_script_branch_var === want, String(G.g_script_branch_var));
+  }
+  {
+    const a = triggerScene(SpawnClass.Critter, { class52: { subtype: 0 } });
+    MarkActorShot(a, 0, 0);
+    tick(a);
+    check("...and a wanderer writes nothing", G.g_script_branch_var === 0,
+          String(G.g_script_branch_var));
+    const arcade = triggerScene(SpawnClass.Critter,
+                                { class52: { subtype: 2 } }, GameMode.Arcade);
+    check("...and arcade never builds a trigger at all", arcade.dead);
+  }
+
+  // The cat answers in block 8 and nowhere else, and it is the only writer in
+  // the game that refuses to overwrite an answer already given.
+  {
+    const a = triggerScene(SpawnClass.SkinnedNpc,
+                           { class53: { anim_set: 0, subtype: 2 } });
+    G.g_evt_block_index = 3;
+    MarkActorShot(a, 0, 0);
+    tick(a);
+    check("the cat in block 3 writes nothing", G.g_script_branch_var === 0,
+          String(G.g_script_branch_var));
+    G.g_evt_block_index = 8;
+    MarkActorShot(a, 0, 0);
+    tick(a);
+    check("...and in block 8 it writes 2", G.g_script_branch_var === 2,
+          String(G.g_script_branch_var));
+
+    const b = triggerScene(SpawnClass.SkinnedNpc,
+                           { class53: { anim_set: 0, subtype: 2 } });
+    G.g_evt_block_index = 8;
+    G.g_script_branch_var = 1;
+    MarkActorShot(b, 0, 0);
+    tick(b);
+    check("...but it will not overwrite a route already chosen",
+          G.g_script_branch_var === 1, String(G.g_script_branch_var));
+  }
+}
+
+console.log("\nthe branch writers: every route the game can choose:");
+{
+  const rng = new Rng(88);
+
+  /** One generic prop of `type`, carrying `word` as its `+0x11C`. */
+  const genericProp = (type: number, word: number) => {
+    const p = PlaceGenericProp({ at: 0x1000 + type, container: "generic",
+                                 type, slot: word,
+                                 lifetime_evt_steps: word, pos: [0, 0, 0] },
+                               rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const hitAndTick = (p: { id: number }) => {
+    const live = G.g_breakable_props.find((q) => q.id === p.id);
+    if (!live) return;
+    BreakablePropTakeShot(live, 0);
+    BreakablePropPoolUpdate(rng);
+  };
+
+  // Types 14 and 19: the constructor seeds the DEFAULT route from the
+  // descriptor and the first hit writes the other one. That pairing is the
+  // whole mechanism, and reading either half alone makes it look like two
+  // unrelated writes to the same global.
+  for (const type of [0x0e, 0x13]) {
+    propScene(rng, GameMode.Arcade);
+    const p = genericProp(type, 0);
+    check(`type ${type.toString(16)} seeds the branch from the descriptor`,
+          G.g_script_branch_var === 0, String(G.g_script_branch_var));
+    hitAndTick(p);
+    check(`...and the first shot writes 1 - the descriptor`,
+          G.g_script_branch_var === 1, String(G.g_script_branch_var));
+
+    propScene(rng, GameMode.Arcade);
+    const q = genericProp(type, 1);
+    check(`...so a descriptor of 1 defaults the other way`,
+          G.g_script_branch_var === 1, String(G.g_script_branch_var));
+    hitAndTick(q);
+    check(`...and its shot writes 0`,
+          G.g_script_branch_var === 0, String(G.g_script_branch_var));
+  }
+
+  // Type 25 has a block gate, and it is the difference between it and the two
+  // above. Its one shipped spawn stands in block 0x17 and nowhere else.
+  {
+    propScene(rng, GameMode.Arcade);
+    const p = genericProp(0x19, 0);
+    G.g_evt_block_index = 0x16;
+    hitAndTick(p);
+    check("type 25 in the wrong block writes nothing",
+          G.g_script_branch_var === 0, String(G.g_script_branch_var));
+    G.g_evt_block_index = 0x17;
+    hitAndTick(p);
+    check("...and in block 0x17 it writes 1",
+          G.g_script_branch_var === 1, String(G.g_script_branch_var));
+  }
+
+  // Type 40 takes BOTH of its sub-kind-9 pair, and the counter that agrees
+  // them is a global rather than a field.
+  {
+    propScene(rng);
+    const pair = PlaceFragmentProps({ at: 0x2000, container: "fragment",
+                                      sub_kind: 9, lifetime_evt_steps: 9,
+                                      pos: [0, 0, 0] });
+    G.g_breakable_props.push(...pair);
+    check("the sub-kind 9 placement builds two, from g_class41_fragment_counts",
+          pair.length === 2, String(pair.length));
+    check("...and zeroes the shared counter",
+          G.g_branch_prop_shot_count === 0,
+          String(G.g_branch_prop_shot_count));
+    G.g_script_flags[0x11] = 1;
+    hitAndTick(pair[0]);
+    check("one of the pair is not enough", G.g_script_branch_var === 0,
+          `var ${G.g_script_branch_var} count ${G.g_branch_prop_shot_count}`);
+    hitAndTick(pair[1]);
+    // The count is tested at the top of the routine and the hit at the bottom,
+    // so the route opens on the frame AFTER the second break.
+    BreakablePropPoolUpdate(rng);
+    check("...and both of them are", G.g_script_branch_var === 2,
+          `var ${G.g_script_branch_var} count ${G.g_branch_prop_shot_count}`);
+    check("...and the counter latches at -1 so it opens once",
+          G.g_branch_prop_shot_count === -1,
+          String(G.g_branch_prop_shot_count));
+  }
+
+  // The chain: twenty links, one latch, and it lives on segment 0.
+  {
+    propScene(rng);
+    G.g_evt_block_index = 0x16;
+    const links = PlaceChainSegments({ at: 0x3000, container: "chain",
+                                       chain_group: 1, lifetime_evt_steps: 9,
+                                       pos: [0, 0, 0] });
+    G.g_breakable_props.push(...links);
+    check("a chain is twenty segments", links.length === 0x14,
+          String(links.length));
+    hitAndTick(links[7]);
+    check("shooting any link opens the route", G.g_script_branch_var === 2,
+          String(G.g_script_branch_var));
+    G.g_script_branch_var = 0;
+    hitAndTick(links[3]);
+    check("...and a second link does not, because the latch is segment 0's",
+          G.g_script_branch_var === 0, String(G.g_script_branch_var));
+  }
+
+  // ...and the chain's trigger group is not built at all in arcade.
+  {
+    propScene(rng, GameMode.Arcade);
+    const links = PlaceChainSegments({ at: 0x3000, container: "chain",
+                                       chain_group: 1, lifetime_evt_steps: 9,
+                                       pos: [0, 0, 0] });
+    check("arcade never builds chain group 1", links.length === 0,
+          String(links.length));
+    const other = PlaceChainSegments({ at: 0x3001, container: "chain",
+                                       chain_group: 0, lifetime_evt_steps: 9,
+                                       pos: [0, 0, 0] });
+    check("...but it builds the others", other.length === 0x14,
+          String(other.length));
+  }
+
+  // The story-mode switch: a scene-and-block table, a script flag, and a key.
+  {
+    propScene(rng);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = 3;
+    const sw = PlaceStoryModeSwitch({ at: 0x4000, container: "story_switch",
+                                      lifetime_evt_steps: 1, branch_flag: 114,
+                                      remove_flag: 62, keys: [-1, -1, -1, -1],
+                                      pos: [0, 0, 0] });
+    G.g_breakable_props.push(sw);
+    hitAndTick(sw);
+    check("the switch opens scene 1 block 3", G.g_script_branch_var === 2,
+          String(G.g_script_branch_var));
+    G.g_script_branch_var = 0;
+    BreakablePropPoolUpdate(rng);
+    check("...once: `+0x2A0` goes to -1 with the route",
+          G.g_script_branch_var === 0 && sw.storyItem === -1,
+          `var ${G.g_script_branch_var} flag ${sw.storyItem}`);
+
+    propScene(rng);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = 2;                       // not in the table
+    const sw2 = PlaceStoryModeSwitch({ at: 0x4001, container: "story_switch",
+                                       lifetime_evt_steps: 1, branch_flag: 114,
+                                       remove_flag: 62, keys: [-1, -1, -1, -1],
+                                       pos: [0, 0, 0] });
+    G.g_breakable_props.push(sw2);
+    hitAndTick(sw2);
+    check("...and a block the table does not name writes nothing",
+          G.g_script_branch_var === 0, String(G.g_script_branch_var));
+
+    // A switch that names a key is not thrown by a shot alone.
+    propScene(rng);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = 3;
+    const keyed = PlaceStoryModeSwitch({ at: 0x4002, container: "story_switch",
+                                        lifetime_evt_steps: 1,
+                                        branch_flag: 115, remove_flag: 116,
+                                        keys: [0, 2, 5, 6], pos: [0, 0, 0] });
+    G.g_breakable_props.push(keyed);
+    hitAndTick(keyed);
+    check("a keyed switch refuses a player carrying nothing",
+          G.g_script_branch_var === 0, String(G.g_script_branch_var));
+    G.g_original_item_slots[0] = [5, -1];
+    hitAndTick(keyed);
+    check("...and opens for one carrying item 5", G.g_script_branch_var === 2,
+          String(G.g_script_branch_var));
+  }
+
+  // The switch's own removal flag, which is its lifetime -- `+0x11C` is a
+  // literal 1 for this object and counting against it would retire every
+  // switch in the game one step boundary after it was placed.
+  {
+    propScene(rng);
+    G.g_scene_index = 1;
+    const sw = PlaceStoryModeSwitch({ at: 0x4003, container: "story_switch",
+                                      lifetime_evt_steps: 1, branch_flag: 114,
+                                      remove_flag: 62, keys: [-1, -1, -1, -1],
+                                      pos: [0, 0, 0] });
+    G.g_breakable_props.push(sw);
+    G.g_evt_step_index += 1;
+    BreakablePropPoolUpdate(rng);
+    BreakablePropPoolUpdate(rng);
+    check("a step boundary does not retire a story switch", !sw.dead);
+    G.g_script_flags[62] = 1;
+    BreakablePropPoolUpdate(rng);
+    check("...its own removal flag does", sw.dead);
+  }
+
+  // Original Mode only, every one of them. Arcade reaches types 14, 19 and 25
+  // and nothing else in this file.
+  {
+    propScene(rng, GameMode.Arcade);
+    G.g_evt_block_index = 9;
+    const p = genericProp(0x38, 0);
+    G.g_script_flags[0x05] = 1;
+    hitAndTick(p);
+    check("type 56 writes nothing in arcade", G.g_script_branch_var === 0,
+          String(G.g_script_branch_var));
+
+    propScene(rng);
+    G.g_evt_block_index = 9;
+    const q = genericProp(0x38, 0);
+    G.g_script_flags[0x05] = 1;
+    hitAndTick(q);
+    check("...and 2 in original mode, on the flag rather than the shot",
+          G.g_script_branch_var === 2, String(G.g_script_branch_var));
+  }
+}
+
 console.log("\nclass 0x41 type 32, the lift:");
 {
   const rng = new Rng(41);
@@ -6616,26 +6974,31 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
   const want: [SpawnClass, string][] = [
     [SpawnClass.Civilian, "0x10 civilian"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
+    [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
     [SpawnClass.Thrower, "0x31 thrower"],
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
+    [SpawnClass.Critter, "0x52 critter / branch trigger"],
+    [SpawnClass.SkinnedNpc, "0x53 cat / branch trigger"],
   ];
   for (const [cls, name] of want) {
     check(`${name} registered itself`,
           typeof g_class_handlers[cls]?.update === "function",
           `handler ${JSON.stringify(g_class_handlers[cls] ?? null)}`);
   }
-  check("...and `PORTED_CLASSES` is those eight and nothing else",
+  check("...and `PORTED_CLASSES` is exactly those and nothing else",
         PORTED_CLASSES.length === want.length
         && want.every(([c]) => PORTED_CLASSES.includes(c)),
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
-  // The cat is 0x53 and has no module. It must stay absent rather than fall
-  // back to anything -- an `if` is what had it walking at the player.
+  // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
+  // trigger. Class 0x40, the horde, still has none: an unported class must
+  // stay absent rather than fall back to anything, because an `if` is what had
+  // the cat running the zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[0x53 as SpawnClass] === undefined);
+        g_class_handlers[0x40 as SpawnClass] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.

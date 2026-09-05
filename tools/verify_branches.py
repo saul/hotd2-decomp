@@ -31,17 +31,31 @@ The writers modelled here are the ones attached to a spawned actor:
   2 spawns one of these in blocks 3, 5, 8 and 11, and only block 8's record
   has a slot 2 to go to.
 
-Not modelled: the class 0x41 props that write from inside their own update
-routines (``FUN_00468180``, ``FUN_0046F090``, ``FUN_00474F30`` and the rest).
-Those are reached through the class-0x41 constructor table rather than from
-the spawn class, and most are gated on ``g_GameMode == 1``. They are listed in
-``ghidra/annotations/globals.tsv`` under ``g_script_branch_var``.
+The **props** are the second half, and they answer the same question. Nine
+class-0x41 types and one class-0x44 selector write the variable from inside
+their own update routine, each behind a gate of its own: a block index, a
+script flag, a scene, or an Original Mode item. Their values have to name a
+live slot too, and the block they name has to be a block their placement can
+actually reach.
+
+Not modelled: ``PropUpdateType69``, which does not choose a route but
+**promotes** one -- it turns an existing 1 into a 2 -- so it has no value of
+its own to check.
+
+**What this check does not discriminate**, said plainly: types 14 and 19 write
+``1 - obj+0x11C`` and both shipped spawns carry 0, so writing ``obj+0x11C``
+instead would give 0, which is also a live slot in both their blocks. The
+subtraction is proved by the disassembly and not by the data. Everything else
+here is discriminated -- flip the class 0x52 subtype table, drop the cat's
+block gate, or change ``PropUpdateType25``'s 1 to a 2, and a write lands on a
+hole.
 
     python3 tools/verify_branches.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 """
 from __future__ import annotations
 
 import argparse
+import struct
 import sys
 from pathlib import Path
 
@@ -111,6 +125,94 @@ def block_spawns(evtf, blk):
                 yield evt.read_spawn(evtf, off, ins.opcode)
 
 
+#: The prop writers, as ``type -> (value, blocks, scenes)``.
+#:
+#: ``value`` of ``None`` means "1 minus the descriptor's +0x11C", which is how
+#: types 14 and 19 let the level author name the default route.  ``blocks`` of
+#: ``None`` means the routine has no block gate and fires wherever its object
+#: is standing, so the spawn's own block is used.  ``scenes`` of ``None`` means
+#: no scene gate.
+PROP_WRITERS: dict[int, tuple] = {
+    0x0E: (None, None, None),        # PropUpdateType14
+    0x13: (None, None, None),        # PropUpdateType19
+    0x19: (1, (0x17,), None),        # PropUpdateType25
+    0x38: (2, (9,), None),           # PropUpdateType56
+    0x46: (2, (4,), (2,)),           # OriginalItemPropUpdate
+    0x47: (2, (4,), (2,)),           # OriginalItemPropUpdate
+    0x49: (2, (7,), None),           # PropUpdateType73
+    0x4C: (2, (5, 0x0E), None),      # PropUpdateType76
+}
+
+#: `PropUpdateType40`: the sub-kind whose pair opens a route, and what it says.
+FRAGMENT_SUBKIND, FRAGMENT_BRANCH = 9, 2
+#: `ChainSegmentUpdate`: the chain group, its block, and its value.
+CHAIN_GROUP, CHAIN_BLOCK, CHAIN_BRANCH = 1, 0x16, 2
+#: `StoryModeSwitchUpdate`'s scene-and-block table, and the 2 every arm writes.
+STORY_SWITCH_ROUTES = ((0, 4), (1, 1), (1, 3), (1, 0x0C), (4, 4))
+STORY_SWITCH_BRANCH = 2
+#: What the shipped data holds for the prop half.
+EXPECT_PROP_WRITES = 31
+
+
+def check_prop_writers(game, scene_of) -> tuple[int, list[str]]:
+    """Every prop writer's value against the record of the block it fires in.
+
+    Returns ``(checked, failures)``.  A write into a block that is not a branch
+    at all is skipped rather than failed: the variable is cleared at the next
+    step boundary and nothing ever reads it, which is what most of the 28
+    `PropUpdateType40` placements are doing.
+    """
+    checked, bad = 0, []
+    for stage in STAGES:
+        st = Stage(game, stage=stage)
+        evtf, routes = st.evt(), st.routes
+        raw, scene = evtf.raw, scene_of(stage)
+        for blk in evtf.blocks:
+            if blk.offset < 0:
+                continue
+            for sp in block_spawns(evtf, blk):
+                writes = []
+                if sp.cls == 0x41:
+                    ctor = struct.unpack_from("<b", raw, sp.offset + 0x25)[0]
+                    word = struct.unpack_from("<b", raw, sp.offset + 0x24)[0]
+                    if ctor in PROP_WRITERS:
+                        value, blocks, scenes = PROP_WRITERS[ctor]
+                        if scenes is not None and scene not in scenes:
+                            continue
+                        if value is None:
+                            value = 1 - sp.hp
+                        for b in (blocks if blocks is not None
+                                  else (blk.index,)):
+                            writes.append((b, value, f"class41 type {ctor:#04x}"))
+                    elif ctor == 40 and word == FRAGMENT_SUBKIND:
+                        writes.append((blk.index, FRAGMENT_BRANCH,
+                                       "PropUpdateType40 sub-kind 9"))
+                    elif ctor == 24 and word == CHAIN_GROUP:
+                        writes.append((CHAIN_BLOCK, CHAIN_BRANCH,
+                                       "ChainSegmentUpdate group 1"))
+                elif sp.cls == 0x44 and sp.hp == 17:
+                    for s_, b in STORY_SWITCH_ROUTES:
+                        if s_ == scene:
+                            writes.append((b, STORY_SWITCH_BRANCH,
+                                           "StoryModeSwitchUpdate"))
+                for block, value, who in writes:
+                    if not 0 <= block < len(routes):
+                        continue
+                    rec = routes[block]
+                    if rec[0] != ROUTE_BRANCH:
+                        continue          # nothing reads it; see the docstring
+                    live = [i for i in range(3) if rec[1 + i] >= 0]
+                    checked += 1
+                    if value in live:
+                        print(f"  ok  stage {stage} block {block}: next="
+                              f"{list(rec[1:])}, {value}={who}")
+                    else:
+                        bad.append(f"FAIL stage {stage} block {block}: next="
+                                   f"{list(rec[1:])} but {who} writes {value}, "
+                                   "which names no route")
+    return checked, bad
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", required=True, type=Path)
@@ -175,6 +277,18 @@ def main() -> int:
     if checked != EXPECT_BLOCKS:
         print(f"FAIL expected {EXPECT_BLOCKS} -- a trigger class or a route "
               "record has moved")
+        bad += 1
+
+    print("\nand the props, which write from inside their own routines:")
+    prop_checked, prop_bad = check_prop_writers(game, lambda n: n - 1)
+    for line in prop_bad:
+        print(line)
+    bad += len(prop_bad)
+    print(f"\n{prop_checked} prop writes land in a branch block; every one "
+          f"names a live route slot")
+    if prop_checked != EXPECT_PROP_WRITES:
+        print(f"FAIL expected {EXPECT_PROP_WRITES} -- a gate or a route record "
+              "has moved")
         bad += 1
     print("clean" if not bad else f"{bad} failed")
     return 1 if bad else 0

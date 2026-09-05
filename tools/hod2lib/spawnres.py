@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import struct
+
 from . import degraded
 
 __all__ = ["CHAR_TYPE_RULES", "ResolvedSpawn", "resolve_spawn",
@@ -40,6 +42,13 @@ CHAR_TYPE_RULES: dict[int, tuple] = {
     0x14: ("tail", 0x00, "u8"),    # multi-part enemy
     0x19: ("literal", 0x7C),       # FUN_004917E0 stores 0x7C
     0x20: ("tail", 0x00, "i8"),    # one-hit target; OneHitTargetInit's tail+0
+    # The rescue target. It spawns through opcode 0x09, which copies
+    # `(s8)desc+0x24` straight to `obj+0x1F4`, and `RescueTargetInit` reads
+    # that field rather than writing one -- so the descriptor names the type.
+    # The one shipped spawn carries 7, the same `char_adv00.bin` class 0x20
+    # uses. Without this rule the actor is never built and stage 2's first
+    # branch cannot be answered.
+    0x21: ("desc24",),
     0x22: ("literal", 0x45),       # FUN_0049B0D0 stores 0x45
     0x24: ("tail", 0x04, "i8"),    # set-piece prop: tail+4 -> obj+0x1F4
     0x25: ("tail", 0x00, "i8"),    # scripted humanoid
@@ -64,6 +73,17 @@ class ResolvedSpawn:
         return self.asset_file is not None
 
 
+def _desc24_i8(spawn) -> int | None:
+    """The signed byte at ``desc+0x24``, for the opcode-0x09 spawns."""
+    from . import evt as evtlib
+    if spawn.evt is None:
+        return None
+    off = spawn.offset + evtlib.SPAWN_HEADER
+    if off < 0 or off >= len(spawn.evt.raw):
+        return None
+    return struct.unpack_from("<b", spawn.evt.raw, off)[0]
+
+
 def resolve_spawn(tables, spawn) -> ResolvedSpawn:
     """Identify one spawn descriptor."""
     rule = CHAR_TYPE_RULES.get(spawn.cls)
@@ -81,6 +101,13 @@ def resolve_spawn(tables, spawn) -> ResolvedSpawn:
         ct = rule[1]
     elif rule[0] == "tail":
         ct = spawn.param(rule[1], rule[2])
+    elif rule[0] == "desc24":
+        # Opcode 0x09's path: `FUN_004088A0` copies `(s8)desc+0x24` straight to
+        # `obj+0x1F4` and there is no parameter block, so `Spawn.param` -- which
+        # refuses every opcode but 0x0B/0x0C/0x0D -- cannot read it. This is
+        # that byte, read where it lies. The docstring on `CHAR_TYPE_RULES` has
+        # named this form since it was written; the arm was missing.
+        ct = _desc24_i8(spawn)
 
     if ct is None or ct < 0:
         return ResolvedSpawn(spawn, note="no character-type rule for this class")

@@ -72,6 +72,11 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // condition and the initial state -- so this cannot ride on
     // `condition`/`initialState` above without one class reading the other's.
     oneHitTarget: p?.class20 ?? null,
+    // Class 0x52's and 0x53's tails, under their own keys for the same reason
+    // class 0x20's is: `tail+0x00` is class 0x30's body condition, and a
+    // shared field would have one class read the other's.
+    class52: p?.class52 ?? null,
+    class53: p?.class53 ?? null,
     // The spawn record's own flags word — `ActorInitFlags` (`FUN_00408970`)
     // makes it `obj+0x34` before the class's `Init` ORs its own bits on.
     flags: p?.init_flags ?? 0,

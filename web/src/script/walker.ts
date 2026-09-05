@@ -303,7 +303,18 @@ export class Walker {
   readonly host: WalkerHost;
   options: WalkerOptions;
 
-  block = 0;
+  /**
+   * The block cursor, and it is `g_evt_block_index` — 0x009A2BC0 — itself.
+   *
+   * An accessor over `G` for the same reason {@link step} is one, and with a
+   * second reason of its own: **nine of the sixteen writers of
+   * `g_script_branch_var` gate on this block index.** A trigger that opens a
+   * route in one block is inert in every other, so `game/` has to be able to
+   * read it. It used to be a field here that nothing below the script layer
+   * could see.
+   */
+  get block(): number { return G.g_evt_block_index; }
+  set block(v: number) { G.g_evt_block_index = v; }
   /**
    * The step cursor, and it is `g_evt_step_index` — 0x009A2BB0 — itself.
    *

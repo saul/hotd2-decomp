@@ -333,6 +333,12 @@ class Placement:
     #: of 0 means the random draw and ``box`` is
     #: ``[xmin, xmax, zmin, zmax]`` or ``None``.
     class20: dict | None = None
+    #: Class 0x52's tail -- ``{subtype}``. Subtypes 2, 3 and 4 are shootable
+    #: route-branch triggers; see :func:`characters.class52_tail`.
+    class52: dict | None = None
+    #: Class 0x53's tail -- ``{anim_set, subtype}``. Subtype 2 and up is a
+    #: shootable route-branch trigger; see :func:`characters.class53_tail`.
+    class53: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -403,4 +409,8 @@ class Placement:
             d["intro"] = {"motion": self.intro[0], "delay": self.intro[1]}
         if self.class20:
             d["class20"] = self.class20
+        if self.class52:
+            d["class52"] = self.class52
+        if self.class53:
+            d["class53"] = self.class53
         return d

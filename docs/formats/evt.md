@@ -226,27 +226,45 @@ the store, so a scene ends with the last value standing.
 
 The writers, and what each can produce:
 
-| Writer | Value | Reachable in |
-|---|---|---|
-| `CivilianRunScript` op `0x19` `SetRouteBranch` | the s16 at `cmd+4`; all eleven shipped uses pass **1** | both modes |
-| `FUN_00451980` — class 0x21's live state | 1, when its last part is shot off, beside the rescue counters and +400 | both |
-| `PlaceGenericProp` cases `0x0E`/`0x13`, case `0x19` | the descriptor's `+0x11C` at spawn time; 0 | both |
-| `FUN_00468180`, `FUN_00468F00` | `1 - obj+0x11C`, on the prop's first hit | both |
-| `FUN_00469AE0` | 1, when shot in block `0x17` | both |
-| `Class52BranchTriggerUpdate` | the signed byte at `0x00564442 + subtype` — 2, 1, 2 for subtypes 2, 3, 4 | **original only** |
-| `CatBranchTriggerUpdate` | 2, and only in block 8, and only while the var is still 0 | **original only** |
-| `FUN_00469510`, `FUN_0046F090`, `FUN_00470500`, `FUN_00470B70`, `FUN_00474F30`, `0x0046C628`, `0x0047143C` | 2 | **original only** |
+| Writer | Value | Gate | Mode |
+|---|---|---|---|
+| `CivilianRunScript` op `0x19` `SetRouteBranch` | the s16 at `cmd+4`; all eleven shipped uses pass **1** | the civilian's own script reaching it, always after `SetOnShot 0` | both |
+| `RescueTargetHeldState` — class 0x21 | 1 | its last hit point, beside the rescue counters and +400 | both |
+| `PlaceGenericProp` cases `0x0E`, `0x13` | the descriptor's `+0x11C` | spawn time — this is the **default** its update flips | both |
+| `PlaceGenericProp` case `0x19` | 0 | spawn time | both |
+| `PropUpdateType14`, `PropUpdateType19` | `1 - obj+0x11C` | the first hit | both |
+| `PropUpdateType25` | 1 | the first hit, in block `0x17` | both |
+| `PropUpdateType40` | 2 | **both** sub-kind-9 props broken, with `g_script_flags[0x11]` | original |
+| `PropUpdateType56` | 2 | `g_script_flags[5]`, in block 9. Not a shot at all | original |
+| `PropUpdateType69` | 2 | `g_script_flags[0x23]`, already shot, and the var **already 1** | original |
+| `OriginalItemPropUpdate` (types 70, 71) | `g_scene_index`, which is 2 there | scene 2, block 4, `g_script_flags[0x13]` | original |
+| `PropUpdateType73` | 2 | the first hit, block 7, `g_script_flags[0x12]`, **and** item 5, 6 or 0x0C | original |
+| `PropUpdateType76` | 2 | the first hit in block 5, or in block 0x0E **and** item 0, 2 or 0x0B | original |
+| `ChainSegmentUpdate` | 2 | any of twenty links, chain group 1, block `0x16` | original |
+| `StoryModeSwitchUpdate` | 2 | thrown by a shot or a key, then a `(scene, block)` table and its own flag | original |
+| `Class52BranchTriggerUpdate` | the signed byte at `0x00564442 + subtype` — **2, 1, 2** for subtypes 2, 3, 4 | the first hit | original |
+| `CatBranchTriggerUpdate` | 2 | the first hit, block 8, and **only while the var is still 0** | original |
+
+`PropUpdateType69` is the only writer that reads the variable before writing
+it: it does not choose a route, it **promotes** one, turning a rescue's 1 into
+the story route's 2. `CatBranchTriggerUpdate` is the only one that refuses to
+overwrite an answer already given.
 
 **Every write of 2 in the program is behind `g_GameMode == 1`.** Arcade only
-ever sees 0 or 1, which is why so many arcade-reachable branch records fill
-slots 0 and 1 and leave slot 2 a hole — and why the ones that fill slot 2
-instead of slot 1 (stage 1 block 4, stage 2 blocks 3 and 8, stage 4 blocks 7
-and 9) are the original-mode routes.
+ever sees 0 or 1, and that one fact explains a shape that had looked
+arbitrary: **fourteen** of the game's thirty-three branch records fill slots 0
+and **2** with a hole at 1 — stage 1 block 4, stage 2 blocks 1, 3, 8, 12, 18
+and 22, stage 3 block 4, stage 4 blocks 0, 5, 7, 9 and 14, and stage 5 block 4.
+Every one is an Original Mode road, and every one has an original-mode trigger
+standing in it. The other nineteen all have a live slot 1, which is the
+value arcade's writers say.
 
-`tools/verify_branches.py` is the check: for every branch block that spawns a
-trigger, every value that trigger can write must name a **live** slot of that
-block's own record. Fourteen blocks, and it fails if the class 0x52 subtype
-table is flipped or class 0x53's block gate is dropped.
+`tools/verify_branches.py` is the check, in two halves: for every branch block
+that spawns a trigger, and for every prop write that lands in a branch block,
+the value must name a **live** slot of that block's own record. Fourteen
+blocks and thirty-one prop writes, all clean. It fails if the class 0x52
+subtype table is flipped, the cat's block gate is dropped, or
+`PropUpdateType25`'s 1 becomes a 2.
 
 The **civilian** is the mechanism that matters. Eleven of the 136 command
 streams run op `0x19`, all eleven pass 1, and every one of them puts it after

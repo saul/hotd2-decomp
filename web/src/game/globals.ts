@@ -624,6 +624,50 @@ export const G = {
    */
   g_evt_step_index: 0,
   /**
+   * `g_evt_block_index` — 0x009A2BC0, s16. Which event block is running.
+   *
+   * `Walker.block` is an accessor over this, the same arrangement
+   * {@link g_evt_step_index} has, because **nine of the sixteen writers of
+   * `g_script_branch_var` gate on it**: a shootable trigger that opens a
+   * route in one block is inert in every other. `CatBranchTriggerUpdate` only
+   * answers in block 8, `ChainSegmentUpdate` only in 0x16, `PropUpdateType73`
+   * only in 7. Without it in `G` the port could place those triggers and
+   * would have no way to say when they are live.
+   */
+  g_evt_block_index: 0,
+  /**
+   * `g_branch_prop_shot_count` — 0x007DCF18.
+   *
+   * How many of `PropUpdateType40`'s sub-kind-9 props have been broken.
+   * The routine increments it on each break while `g_GameMode` is 1, and at
+   * **2** — both of them — with `g_script_flags[0x11]` raised it writes
+   * `g_script_branch_var = 2` and stores `-1` here so the route opens once.
+   */
+  g_branch_prop_shot_count: 0,
+  /**
+   * `g_original_item_slots` — 0x009A2240, stride 0x14, two slots a player.
+   *
+   * Original Mode's inventory. `PlayerHoldsOriginalItem` (`FUN_00461C70`)
+   * reads it, and three branch triggers only open their route while the
+   * player is carrying the right id.
+   *
+   * [diverges] **Nothing in the port ever fills it.** The pickup path is
+   * `FUN_00475E40`, which is unported, so every slot stays at -1 and the
+   * three key-gated routes are unreachable — as they would be for a player
+   * who had not found the key. That is the honest state, not a stub: the
+   * alternative is to pretend the player is carrying something.
+   */
+  g_original_item_slots: [[-1, -1], [-1, -1]] as number[][],
+  /**
+   * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
+   *
+   * The twenty-segment chains `PlaceChainSegments` builds, by prop id rather
+   * than by pointer. `ChainSegmentUpdate` re-registers into it every frame,
+   * and segment 0 of a group carries the latch that stops the group opening
+   * its route twice.
+   */
+  g_chain_segments: [] as number[],
+  /**
    * `g_script_branch_var` — 0x009C88A4, s16. **Which route a branch takes.**
    *
    * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) reads it as
@@ -844,7 +888,11 @@ export function ResetGameGlobals(): void {
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
   G.g_evt_step_index = 0;
+  G.g_evt_block_index = 0;
   G.g_script_branch_var = 0;
+  G.g_branch_prop_shot_count = 0;
+  G.g_original_item_slots = [[-1, -1], [-1, -1]];
+  G.g_chain_segments = [];
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;

@@ -31,6 +31,7 @@ import { PlaceBreakableGroup } from "./group";
 import { PlaceKindedProp } from "./kinded";
 import { PlaceGenericProp } from "./generic";
 import { PlaceFallingContainer } from "../class44/container";
+import { PlaceChainSegments, PlaceFragmentProps } from "./triggers";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -53,6 +54,18 @@ export enum PropContainerType {
    * sets paying out on the wrong break.
    */
   FallingContainer = 34,
+  /**
+   * `PlaceChainSegments` (`FUN_00463160`) — twenty hanging links. Group 1 is a
+   * **route-branch trigger**: shooting any link in event block 0x16 opens
+   * stage 2 block 22's second road.
+   */
+  ChainSegments = 24,
+  /**
+   * `PlaceFragmentProps` (`FUN_004636A0`) — a row of objects that burst into
+   * forty pieces. Sub-kind 9 is a **route-branch trigger** and takes both of
+   * the pair.
+   */
+  FragmentProps = 40,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -81,6 +94,20 @@ export const g_class41_constructors:
       obj.at, 0, pl.item_set ?? 0, -1, pl.set_size ?? 0,
       pl.lifetime_evt_steps, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
       f.rng));
+  },
+  [PropContainerType.ChainSegments]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "chain");
+    if (!pl) return;
+    G.g_breakable_props.push(...PlaceChainSegments(pl));
+  },
+  [PropContainerType.FragmentProps]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "fragment");
+    if (!pl) return;
+    G.g_breakable_props.push(...PlaceFragmentProps(pl));
   },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
@@ -168,6 +195,8 @@ export function ResetPropContainers(): void {
 export { PlaceBreakableGroup };
 export * from "./kinded";
 export * from "./generic";
+export * from "./branch";
+export * from "./triggers";
 export * from "./prop_state";
 export * from "./prop";
 export * from "./items";

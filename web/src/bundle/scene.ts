@@ -172,8 +172,17 @@ export interface BreakableMember {
 export interface BreakablePlacement {
   /** The script address of the spawn that places it. */
   at: number;
-  /** Which constructor: the group table, one kinded prop, one container. */
-  container: "group" | "kinded" | "falling" | "generic";
+  /**
+   * Which constructor built it.
+   *
+   * The last three are **route-branch triggers** and are here for that: a
+   * `chain` group 1, a `fragment` sub-kind 9 pair and a `story_switch` each
+   * write `g_script_branch_var`, and without them in the bundle the port
+   * cannot take five of the game's sixteen branches. See
+   * `game/class41/branch.ts`.
+   */
+  container: "group" | "kinded" | "falling" | "generic"
+    | "chain" | "fragment" | "story_switch";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -200,6 +209,30 @@ export interface BreakablePlacement {
   set_size?: number;
   /** `falling` only — the `g_GameMode == 1` drop, `-1` for none. */
   story_item?: number;
+  /**
+   * `chain` only — the group id `PlaceChainSegments` stamps on all twenty
+   * segments. **Group 1 is the branch trigger**, and the constructor refuses
+   * to build it outside Original Mode.
+   */
+  chain_group?: number;
+  /**
+   * `fragment` only — the sub-kind `PlaceFragmentProps` stamps on the row.
+   * **Sub-kind 9 is the branch trigger**, and it takes both of them.
+   */
+  sub_kind?: number;
+  /**
+   * `story_switch` only — the `g_script_flags` index the route waits on, and
+   * the one that removes the object. `-1` means none. `branch_flag` is set to
+   * -1 the frame the route is taken, which is the switch's second latch.
+   */
+  branch_flag?: number;
+  remove_flag?: number;
+  /**
+   * `story_switch` only — the four Original Mode item ids that throw the
+   * switch without a shot. `-1` in the first means it has no key and any shot
+   * throws it.
+   */
+  keys?: number[];
   pos?: [number, number, number];
   /** BAMS. */
   yaw?: number;

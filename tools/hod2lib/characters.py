@@ -189,6 +189,8 @@ __all__ = [
     "CUE_STATES",
     "Character",
     "class20_tail",
+    "class52_tail",
+    "class53_tail",
     "DEATH_BACK",
     "DEATH_FRONT",
     "DEATH_LEFT",
@@ -327,6 +329,34 @@ def class20_tail(rec) -> dict:
             # from `g_class20_idle_motions`, which is the port's to make.
             "motion": rec.param(0x06, "i16") or 0,
             "box": box}
+
+
+def class52_tail(rec) -> dict:
+    """Class 0x52's descriptor tail, as `Class52Init` reads it.
+
+    One s16 at ``+0x00``: the **subtype**. 0 and 1 wander and self-despawn;
+    2, 3 and 4 run `Class52BranchTriggerUpdate`, a shootable route-branch
+    trigger, and only while ``g_GameMode == 1``.
+
+    Emitted under a class-named key for the same reason class 0x20's is: the
+    same two bytes are class 0x30's body condition and initial state.
+    """
+    return {"subtype": rec.param(0x00, "i16") or 0}
+
+
+def class53_tail(rec) -> dict:
+    """Class 0x53's descriptor tail, as `CatInit` reads it.
+
+    Two s16s: ``+0x00`` an animation set that indexes 0x00589A64 for the
+    motion, ``+0x02`` the **subtype**. Subtype 2 and up runs
+    `CatBranchTriggerUpdate`, which writes the route branch in event block 8
+    and nowhere else, and only while ``g_GameMode == 1``.
+
+    All four shipped spawns are stage 2, and only the one in block 8 carries a
+    subtype above 1 -- so the block gate and the data agree exactly.
+    """
+    return {"anim_set": rec.param(0x00, "i16") or 0,
+            "subtype": rec.param(0x02, "i16") or 0}
 
 
 def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
@@ -559,6 +589,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 delayed_leap = {"delay": rec.param(4, "i32") or 0,
                                 "dest": dest, "gravity": g}
         class20 = class20_tail(rec) if sp["class"] == 0x20 else None
+        class52 = class52_tail(rec) if sp["class"] == 0x52 else None
+        class53 = class53_tail(rec) if sp["class"] == 0x53 else None
         tscript = ascript = None
         camera_cue = None
         if sp["class"] == 0x30:
@@ -626,6 +658,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             cue=cue, leap_strike_frames=leap_strike_frames,
             ring_set=(RING_SET_FOR_CHAR0 if res.char_type == 0 else 0),
             class20=class20,
+            class52=class52,
+            class53=class53,
             hp=sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note

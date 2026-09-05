@@ -245,12 +245,17 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
 
-    if (pl.container === "falling" && s.class === SpawnClassValue.PropPlacer) {
+    if (s.class === SpawnClassValue.PropPlacer
+        && (pl.container === "falling" || pl.container === "story_switch")) {
       // Class 0x44 dispatches on `+0x11C`, so the selector goes in `hp` — the
       // same field that is the *group id* for a class-0x41 placer.
+      const sel = pl.container === "story_switch"
+        ? Class44Selector.StoryModeSwitch : Class44Selector.FallingContainer;
       const a = ActorSpawn(s.at, SpawnClassValue.PropPlacer, 0,
-                           `container kind ${pl.kind}`,
-                           { hp: Class44Selector.FallingContainer });
+                           pl.container === "story_switch"
+                             ? "story-mode switch"
+                             : `container kind ${pl.kind}`,
+                           { hp: sel });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;
       a.visible = true;
@@ -263,6 +268,8 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     const type = pl.container === "kinded" ? PropContainerType.KindedProp
       : pl.container === "generic" ? (pl.type ?? 0)
       : pl.container === "falling" ? PropContainerType.FallingContainer
+      : pl.container === "chain" ? PropContainerType.ChainSegments
+      : pl.container === "fragment" ? PropContainerType.FragmentProps
       : PropContainerType.BreakableGroup;
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
                          pl.lifetime_evt_steps,

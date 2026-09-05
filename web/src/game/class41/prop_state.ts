@@ -35,6 +35,13 @@ export enum PropFamily {
   Generic = 4,
   /** `LiftUpdate` (`FUN_0046A360`) — class 0x41 type 32, the lift. */
   Lift = 5,
+  /**
+   * `StoryModeSwitchUpdate` (`FUN_00474F30`) — class 0x44 selector 17, the
+   * branch writer with the widest reach. Its own family and not `Generic`
+   * because `PlaceStoryModeSwitch` is a different constructor and the object
+   * does **not** run `PropExpireByStepLifetime`.
+   */
+  StoryModeSwitch = 6,
 }
 
 /** `obj+0x192` — where a prop is in its life. */
@@ -220,6 +227,59 @@ export interface BreakableProp {
    * test can be transcribed as it is written rather than quietly dropped.
    */
   hitPos: { x: number; y: number; z: number };   // +0x40
+  /**
+   * `obj+0x1AC` — which chain a `ChainSegmentUpdate` segment belongs to, and
+   * `obj+0x1AD` its index 0..19 within it.
+   *
+   * Only `PlaceChainSegments`' twenty-segment objects have these; for every
+   * other family they are 0. `g_chain_segments` is indexed
+   * `[chainGroup * 0x14 + chainIndex]`.
+   */
+  chainGroup: number;     // +0x1AC
+  chainIndex: number;     // +0x1AD
+  /**
+   * `obj+0x1BA` — `PropUpdateType40`'s sub-kind, from the placer.
+   *
+   * Sub-kind **9** is the pair whose two breakages
+   * `g_branch_prop_shot_count` counts; 1 is the one gated on the chain
+   * table; 0, 0x0D and 0x0E pick their own scale and colour. Zero for every
+   * other family.
+   */
+  subKind: number;        // +0x1BA
+  /**
+   * `obj+0x2A4` — the `g_script_flags` index that removes a story-mode
+   * switch, or -1 for none. `StoryModeSwitchUpdate` tests it before anything
+   * else, and it is that object's lifetime, since `+0x11C` is a literal 1.
+   */
+  removeFlag: number;     // +0x2A4
+  /**
+   * `obj+0x1FC`, `+0x202`, `+0x208`, `+0x20E` — the four Original Mode item
+   * ids that throw a story-mode switch. `-1` in the first means it has no key
+   * and any shot throws it.
+   *
+   * Four fields and not an array, because in the engine they are four: the
+   * offsets go up in **sixes**, so each is an s16 inside a larger record and
+   * the four are not adjacent. An array here would invent a stride.
+   */
+  key0: number;           // +0x1FC
+  key1: number;           // +0x202
+  key2: number;           // +0x208
+  key3: number;           // +0x20E
+  /**
+   * The **branch latch** — the field that stops a trigger opening its route
+   * twice.
+   *
+   * One port field for four engine offsets, and they really are four:
+   * `obj+0x34` bit `0x40000000` for types 14, 19, 25 and 76, `obj+0x192` for
+   * types 56 and 73 and the story switch, `obj+0x1B9` for type 40, and
+   * `obj+0x1B0` of a chain's **segment 0** for the chain. They are one field
+   * here because the port transcribes only the branch arm of those routines,
+   * so nothing else reads any of them — and a `+0x192` shared with
+   * {@link BreakableState} would have the latch and the fall state disagree
+   * about what 1 means. Where a routine's other arms are ported later, this
+   * splits.
+   */
+  branchLatched: boolean;
   /** Dead, and due to leave the pool. Not an exe field; the pool is a list. */
   dead: boolean;
 }
@@ -277,6 +337,12 @@ export function makeBreakableProp(id: number, group: number,
     effectVariant: 0,
     settleTimer: 0,
     hitPos: { x: 0, y: 0, z: 0 },
+    chainGroup: 0,
+    chainIndex: 0,
+    subKind: 0,
+    removeFlag: -1,
+    key0: -1, key1: -1, key2: -1, key3: -1,
+    branchLatched: false,
     dead: false,
   };
 }

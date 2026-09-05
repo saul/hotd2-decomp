@@ -344,6 +344,21 @@ export interface CharacterPlacement {
     motion: number;
     box: [number, number, number, number] | null;
   } | null;
+  /**
+   * Class 0x52's tail — one s16, the sub-type. 0 and 1 wander and leave;
+   * **2, 3 and 4 are shootable route-branch triggers** and write
+   * `g_script_branch_var` from a per-subtype byte, in Original Mode only.
+   *
+   * Its own block for the same reason class 0x20's is: `+0x00` here is class
+   * 0x30's `body_condition`.
+   */
+  class52?: { subtype: number } | null;
+  /**
+   * Class 0x53's tail — the cat. `anim_set` indexes the motion playlist at
+   * `0x00589A64`; **sub-type 2 and up is a shootable route-branch trigger**
+   * that answers only in event block 8, in Original Mode only.
+   */
+  class53?: { anim_set: number; subtype: number } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

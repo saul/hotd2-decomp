@@ -71,6 +71,7 @@
  */
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { GENERIC_BRANCH_SEED } from "./branch";
 import type { BreakablePlacement } from "../../bundle";
 import {
   BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
@@ -222,6 +223,23 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // business, not this function's.
   p.slot = GENERIC_SLOT[type] ?? pl.slot ?? 0;
   p.hp = GENERIC_HP[type] ?? 0;
+
+  // **Three of the switch arms write `g_script_branch_var` at spawn time.**
+  // Cases 0x0E and 0x13 write the descriptor's own `+0x11C` and case 0x19
+  // writes 0, and their update routines write `1 - +0x11C` on the first hit —
+  // so the descriptor names the DEFAULT route and shooting the prop takes the
+  // other one. See `class41/branch.ts`.
+  //
+  // The same three arms also increment `g_enemies_alive` (0x0E) or
+  // `g_enemies_present` (0x13 and 0x19), and those are **deliberately not
+  // here**: the give-back lives in the update routines, which are ported only
+  // as far as their branch arm. Counting an enemy in with no way to count it
+  // out is how a `wait_enemies_alive` gate deadlocks a stage, and this port
+  // has a file of those.
+  const seed = GENERIC_BRANCH_SEED[type];
+  if (seed !== undefined) {
+    G.g_script_branch_var = seed === null ? p.lifetime : seed;
+  }
 
   // Case 0x20 is the lift. These are not the prop's orientation: they
   // are its three hinge angles at rest, and `LiftUpdate` swings each one

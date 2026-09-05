@@ -24,12 +24,15 @@ import type { SpawnClass } from "./spawn_class";
 
 import "./class10";
 import "./class20";
+import "./class21";
 import "./class24";
 import "./class25";
 import "./class30";
 import "./class31/thrower";
 import "./class41";
 import "./class44";
+import "./class52";
+import "./class53";
 
 /**
  * The classes with a ported behaviour, for the UI and `verify_port.py`.

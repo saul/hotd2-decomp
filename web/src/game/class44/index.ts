@@ -29,6 +29,7 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { PlaceFallingContainer } from "./container";
+import { PlaceStoryModeSwitch } from "../class41/triggers";
 
 /**
  * `obj+0x11C` for this class — the builder index.
@@ -40,6 +41,12 @@ import { PlaceFallingContainer } from "./container";
 export enum Class44Selector {
   /** `PlaceFallingContainer` (`FUN_00473940`) — the item container. */
   FallingContainer = 16,
+  /**
+   * `PlaceStoryModeSwitch` (`FUN_00473A70`) — the **route-branch trigger with
+   * the widest reach**: twelve spawns over four stages, and five of the game's
+   * sixteen branch records are answered by one. See `game/class41/branch.ts`.
+   */
+  StoryModeSwitch = 17,
 }
 
 /** What one class-0x44 builder does. `undefined` where none is ported. */
@@ -58,6 +65,13 @@ export type Class44Builder = (obj: Actor, f: ClassFrame) => void;
  * `g_class_handlers[0x41]` empty and cost an hour; once is enough.
  */
 export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
+  [Class44Selector.StoryModeSwitch]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "story_switch");
+    if (!pl) return;
+    G.g_breakable_props.push(PlaceStoryModeSwitch(pl));
+  },
   [Class44Selector.FallingContainer]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
       (q) => q.at === obj.at && q.container === "falling");

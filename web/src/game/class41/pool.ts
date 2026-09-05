@@ -13,11 +13,18 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { FallingContainerUpdate } from "../class44/container";
+import {
+  ChainSegmentUpdate, OriginalItemPropUpdate, StoryModeSwitchUpdate,
+  PropUpdateType14,
+  PropUpdateType19, PropUpdateType25, PropUpdateType40, PropUpdateType56,
+  PropUpdateType69, PropUpdateType73, PropUpdateType76,
+} from "./branch";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
 import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
-import { PropFamily, type BreakableProp } from "./prop_state";
+import { HIT_FLAG_MASK, PropFamily, type BreakableProp }
+  from "./prop_state";
 import { LiftUpdate } from "./lift";
 
 /**
@@ -39,6 +46,7 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       case PropFamily.Falling: FallingContainerUpdate(p, rng, events); break;
       case PropFamily.Lift: LiftUpdate(p, events); break;
       case PropFamily.Generic: GenericPropUpdate(p); break;
+      case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }
@@ -48,11 +56,41 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
 }
 
 /**
- * The two lines every unported generic routine still owes the level.
+ * `g_class41_updates[type]`, for the types that have a port.
  *
- * Not a function in the exe — it is the head of thirty of them, and the two
- * things they all do before whatever else they do. A prop that runs neither
- * is a prop that stands in the stage for ever.
+ * This table **is** the engine's indirect call: `ActorAlloc` was handed
+ * `g_class41_updates[obj->+0x130C]` and the object calls through it every
+ * frame, so switching on the type here is that call written out. Nine of the
+ * ten entries are branch triggers — see `class41/branch.ts` — because a route
+ * the stage takes is worth more than a swing.
+ *
+ * A type absent here is placed, drawn and otherwise inert, which is the
+ * standing divergence `class41/generic.ts` declares.
+ */
+const GENERIC_UPDATE: Partial<Record<number, (p: BreakableProp) => void>> = {
+  14: PropUpdateType14,
+  19: PropUpdateType19,
+  25: PropUpdateType25,
+  40: PropUpdateType40,
+  56: PropUpdateType56,
+  69: PropUpdateType69,
+  70: OriginalItemPropUpdate,
+  71: OriginalItemPropUpdate,
+  73: PropUpdateType73,
+  76: PropUpdateType76,
+};
+
+/**
+ * The two lines every unported generic routine still owes the level, and then
+ * whatever that type's own routine does.
+ *
+ * The prologue is not a function in the exe — it is the head of thirty of
+ * them, and the two things they all do before whatever else they do. A prop
+ * that runs neither is a prop that stands in the stage for ever.
+ *
+ * **The hit bits are cleared here**, after the type's routine has read them.
+ * Every one of these routines masks `obj+0x34` itself, and a prop whose hit
+ * bit survived the frame would answer its branch on every frame afterwards.
  */
 function GenericPropUpdate(p: BreakableProp): void {
   // `if (g_GameMode != 1) { ActorDespawn(obj); return; }` — Original Mode's
@@ -61,5 +99,51 @@ function GenericPropUpdate(p: BreakableProp): void {
     ActorDespawnProp(p);
     return;
   }
-  PropExpireByStepLifetime(p);
+  if (PropExpireByStepLifetime(p)) return;
+  if (p.chainGroup > 0) {
+    ChainSegmentUpdate(p, ChainSegmentZero(p.chainGroup));
+  } else {
+    GENERIC_UPDATE[p.kind]?.(p);
+  }
+  p.flags &= ~HIT_FLAG_MASK;
+}
+
+/**
+ * `StoryModeSwitchUpdate`'s own frame — its removal flag, then its route.
+ *
+ * It does **not** run `PropExpireByStepLifetime`: `PlaceStoryModeSwitch`
+ * writes `obj+0x11C` as a literal 1, so that word is not a lifetime here and
+ * counting against it would retire every switch in the game one step boundary
+ * after it was placed.
+ *
+ * [port-only] as a *function*: the head of `StoryModeSwitchUpdate`, split from
+ * the branch arm so the pool has one call to make.
+ */
+function StoryModeSwitchPoolUpdate(p: BreakableProp): void {
+  // `if (obj->+0x2A4 >= 0 && g_script_flags[obj->+0x2A4] == 1) ActorDespawn;`
+  if (p.removeFlag >= 0 && (G.g_script_flags[p.removeFlag] ?? 0) === 1) {
+    ActorDespawnProp(p);
+    return;
+  }
+  // `if (g_scene_index == 1 && g_script_flags[0x77]) ActorDespawn;` — the
+  // scene-1 sweep every prop family answers.
+  if (G.g_scene_index === 1 && (G.g_script_flags[0x77] ?? 0) !== 0) {
+    ActorDespawnProp(p);
+    return;
+  }
+  StoryModeSwitchUpdate(p);
+  p.flags &= ~HIT_FLAG_MASK;
+}
+
+/**
+ * Segment 0 of a chain group — where `ChainSegmentUpdate` keeps the latch
+ * that stops twenty links opening one route twenty times.
+ *
+ * `g_chain_segments[group * 0x14 + 0]`, by prop id, because the port's pool
+ * is a list and the engine's is an array of pointers.
+ */
+function ChainSegmentZero(group: number): BreakableProp | undefined {
+  const id = G.g_chain_segments[group * 0x14];
+  if (!id) return undefined;
+  return G.g_breakable_props.find((q) => q.id === id);
 }

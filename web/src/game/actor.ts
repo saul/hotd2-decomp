@@ -18,6 +18,8 @@ import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
 import { makeOneHitTargetTail, type OneHitTargetTail }
   from "./class20/state";
+import { makeRescueTargetTail, type RescueTargetTail }
+  from "./class21/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
   from "./class24/state";
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
@@ -1004,6 +1006,19 @@ export interface ActorBase {
    */
   oneHitTarget: CharacterPlacement["class20"];
   /**
+   * Class 0x52's descriptor tail — one s16, the sub-type. Sub-types 2, 3 and 4
+   * are shootable route-branch triggers; 0 and 1 wander.
+   *
+   * Its own field for the reason above: `tail+0x00` is class 0x30's body
+   * condition.
+   */
+  class52: CharacterPlacement["class52"];
+  /**
+   * Class 0x53's descriptor tail — the animation set and the sub-type. Sub-type
+   * 2 and up is a shootable route-branch trigger, and only in event block 8.
+   */
+  class53: CharacterPlacement["class53"];
+  /**
    * How deep in the **world** this actor's body sphere was on its last push,
    * and zero when it was clear.
    *
@@ -1356,10 +1371,11 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Thrower; thr: ThrowerTail })
   | (ActorBase & { cls: SpawnClass.Zombie; zom: ZombieTail })
   | (ActorBase & { cls: SpawnClass.OneHitTarget; tgt: OneHitTargetTail })
+  | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
-      | SpawnClass.OneHitTarget> });
+      | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1458,6 +1474,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     worldPushDepth: 0,
     standThrow: undefined,
     oneHitTarget: null,
+    class52: null,
+    class53: null,
     entranceMotion: 0,
     pounce: null,
     grab: null,
@@ -1519,6 +1537,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.OneHitTarget) {
     return { ...head, cls, tgt: makeOneHitTargetTail() };
+  }
+  if (cls === SpawnClass.RankScaledEnemy) {
+    return { ...head, cls, rescue: makeRescueTargetTail() };
   }
   return { ...head, cls };
 }

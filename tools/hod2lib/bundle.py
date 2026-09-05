@@ -321,6 +321,43 @@ def _container_placements(prog) -> list[dict]:
                     "pitch": rec.orient[0], "yaw": rec.orient[1],
                     "roll": rec.orient[2],
                 })
+            elif ctor == 24:
+                # `PlaceChainSegments` (`FUN_00463160`) — twenty segments,
+                # each carrying the placer's `+0x1F4` as a chain group. Group 1
+                # is a **route-branch trigger**: shooting any link in event
+                # block 0x16 writes `g_script_branch_var = 2`, and the
+                # constructor refuses to build group 1 at all outside Original
+                # Mode. Four spawns, stage 2 blocks 22 and 23 and stage 4
+                # block 3.
+                out.append({
+                    "at": rec.offset, "container": "chain",
+                    # `obj+0x1F4`, which for a class-0x41 placer is the
+                    # **s8 at desc+0x24** -- the same byte that is the lifetime
+                    # for a group and the item set for a kinded prop. `+0x25`
+                    # beside it is the constructor type, so a 16-bit read here
+                    # returns both and is wrong.
+                    "chain_group": struct.unpack_from("<b", raw,
+                                                      rec.offset + 0x24)[0],
+                    "lifetime_evt_steps": rec.hp,
+                    "pos": list(rec.pos), "yaw": rec.orient[1],
+                })
+            elif ctor == 40:
+                # `PlaceFragmentProps` (`FUN_004636A0`) — a row of shootable
+                # objects that burst into forty fragments, `g_class41_fragment_counts`
+                # of them, all carrying the placer's `+0x1F4` as a sub-kind.
+                # **Sub-kind 9 is a route-branch trigger**: breaking both of
+                # them with `g_script_flags[0x11]` raised writes
+                # `g_script_branch_var = 2`, and the constructor zeroes the
+                # shared counter `g_branch_prop_shot_count`. 28 spawns.
+                out.append({
+                    "at": rec.offset, "container": "fragment",
+                    # `obj+0x1F4` -- the s8 at desc+0x24; see the chain
+                    # arm above for why this is not a 16-bit read.
+                    "sub_kind": struct.unpack_from("<b", raw,
+                                                   rec.offset + 0x24)[0],
+                    "lifetime_evt_steps": rec.hp,
+                    "pos": list(rec.pos), "yaw": rec.orient[1],
+                })
             elif ctor == 4:
                 out.append({
                     "at": rec.offset, "container": "kinded",
@@ -332,6 +369,32 @@ def _container_placements(prog) -> list[dict]:
                     "lifetime_evt_steps": rec.hp,
                     "pos": list(rec.pos), "yaw": rec.orient[1],
                 })
+        elif rec.hp == 17:                      # class 0x44 selector 17
+            # `PlaceStoryModeSwitch` (`FUN_00473A70`) -- the branch writer with
+            # the widest reach, twelve spawns over four stages.
+            # `StoryModeSwitchUpdate` opens a route in five (scene, block)
+            # pairs, all of them slot 2 of their record, and all of them
+            # Original Mode. See `game/class41/branch.ts`.
+            #
+            # `obj+0x11C` is written as the LITERAL 1 by the constructor, so it
+            # is not a lifetime here and this object does not run
+            # `PropExpireByStepLifetime`; `+0x2A4` names the script flag that
+            # removes it instead. `+0x2A0` is the flag the branch waits on and
+            # is set to -1 once the route is taken, which is the second latch.
+            out.append({
+                "at": rec.offset, "container": "story_switch",
+                "slot": rec.param(0x04, "i16") or 0,
+                # The script flag the route waits on, and the one that removes
+                # the object. Both signed bytes, and -1 means "none".
+                "branch_flag": rec.param(0x10, "i8"),
+                "remove_flag": rec.param(0x11, "i8"),
+                # The four Original Mode item ids that throw the switch without
+                # a shot, through `PlayerHoldsOriginalItem`. -1 in the first
+                # means the switch has no key at all and any shot throws it.
+                "keys": [rec.param(0x20 + k, "i8") for k in range(4)],
+                "lifetime_evt_steps": 1,
+                "pos": list(rec.pos), "yaw": rec.orient[1],
+            })
         elif rec.hp == 16:                      # class 0x44 selector 16
             tail = rec.offset + 0x24
             out.append({

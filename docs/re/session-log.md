@@ -11406,3 +11406,116 @@ kept for its reasoning with the verdict noted on top.
    port's pool actually constructs before doing it.
 3. `docs/formats/spawns.md`'s class 0x52 section still calls the species
    `[open]`; unlike the cat, that one really is.
+
+---
+
+## Session — all sixteen writers of the branch variable
+
+**The task.** The previous session ported one writer of `g_script_branch_var`
+and listed the other fifteen. This is the other fifteen: read, named,
+annotated and ported.
+
+### The shape, once they are read side by side
+
+Sixteen writers, and they are one mechanism written sixteen ways. Nine are
+class-0x41 props, one is a class-0x44 object, three are actor classes and one
+is a civilian opcode; the last two are the resets.
+
+**The pairing that makes it legible** is `PlaceGenericProp` cases `0x0E`,
+`0x13` and `0x19` with `PropUpdateType14`, `19` and `25`. The constructor
+**seeds** the variable with the descriptor's own `+0x11C` at spawn time and the
+update writes `1 - +0x11C` on the first hit — so **the descriptor names the
+default route and shooting the prop takes the other one.** The branch is
+authored in the level, not in the code. Reading the constructor and the update
+apart is why this looked like two unrelated writes to the same global for as
+long as it did.
+
+**Every write of `2` in the program is behind `g_GameMode == 1`.** Fourteen of
+the game's thirty-three branch records fill slots 0 and 2 with a **hole at 1**,
+and every one of those has an original-mode trigger standing in it. The other
+nineteen have a live slot 1, which is what arcade's writers say. That one fact
+turned a table that had looked arbitrary into a rule.
+
+Two writers are unlike the rest. `PropUpdateType69` does not choose a route, it
+**promotes** one — `flag 0x23 && var == 1 && already shot` turns a rescue's 1
+into the story route's 2. `CatBranchTriggerUpdate` is the only writer that
+tests the variable is still 0, so it will not overwrite an answer already
+given.
+
+### The check, and what it can and cannot see
+
+`tools/verify_branches.py` grew a second half. For every prop write that lands
+in a branch block, the value must name a **live** slot of that block's own
+record: **31 of 31**, no exceptions. Watched failing three ways — flip the
+class 0x52 subtype table, drop the cat's block gate, or turn
+`PropUpdateType25`'s 1 into a 2.
+
+Said plainly, what it does **not** discriminate: types 14 and 19 write
+`1 - obj+0x11C` and both shipped spawns carry 0, so writing `+0x11C` instead
+would give 0 — also a live slot in both their blocks. The subtraction is proved
+by the disassembly and not by the data. That is in the file's docstring.
+
+Three cases carry the whole reading on their own:
+
+* **Stage 4 block 10**, `next = {12, 18, 19}` — three live slots, and exactly
+  one class-0x52 sub-type 3 and one sub-type 4 standing in it, writing 1 and 2.
+* **Stage 2 block 8** — of the four cats in the game, only the one in block 8
+  carries a sub-type above 1, and block 8 is the only block the routine
+  answers in. The gate and the data agree without being told to.
+* **Stage 4 block 0** — one sub-kind-9 fragment placement, which
+  `g_class41_fragment_counts[9]` says builds **two**, and the routine wants
+  `g_branch_prop_shot_count` to reach exactly 2.
+
+### Four things that were wrong and are now not
+
+* **`obj+0x1F4` for a class-0x41 placer is the s8 at `desc+0x24`**, and
+  `desc+0x25` beside it is the constructor type. A 16-bit read there returns
+  both, which is how the first export gave chain groups of 6144 and sub-kinds
+  of 10250. Caught because 6144 is 0x1800 and 0x18 is 24, the constructor.
+* **`CHAR_TYPE_RULES` documented a `("desc24",)` form that `resolve_spawn` had
+  no arm for.** Class 0x21 needed it — opcode 0x09 copies `(s8)desc+0x24`
+  straight to `obj+0x1F4` — and without it the rescue target had no character
+  type, so the exporter dropped it and the port could not build stage 2's first
+  branch at all.
+* **`PlaceStoryModeSwitch` writes `obj+0x11C` as the literal 1.** It is not a
+  lifetime for that object, and `PropExpireByStepLifetime` would have retired
+  every switch in the game one step boundary after it was placed — one step
+  before any of them could answer. `obj+0x2A4` names the flag that removes it
+  instead.
+* A nested `/* ... */` inside a `/** ... */` block, **twice**, in two different
+  new files. Same trap as the lighting session. It is now three.
+
+### What is ported and what is not
+
+Every one of the sixteen writes, with its gates. The routines they live in are
+**not** ported past that: the forty fragments, the hinge curves, the flights,
+the fall physics and the draws are all still absent, and each function's doc
+comment lists what it still owes. That line is deliberate — `class41/
+generic.ts` already declares the generic props inert, and this narrows that
+divergence rather than inventing a new one. A prop that swings correctly while
+sending the player down the wrong road is worth less than one that stands still
+and routes right.
+
+The counter increments of `PlaceGenericProp` cases `0x0E`, `0x13` and `0x19`
+are deliberately left out. Their give-back is in the update routines, which are
+ported only as far as the branch arm, and counting an enemy in with no way to
+count it out is how a `wait_enemies_alive` gate deadlocks a stage. This project
+has a file of those.
+
+**Class 0x52 is ported and unreachable.** Its logic, its per-subtype table and
+its mode gate are all here, but the class draws an asset slot rather than a
+character, so the exporter has no geometry for it and `render/`'s shot test —
+which walks character bones and prop nodes — can never reach one. That is a
+renderer and exporter gap, not a branch gap, and it is the only one of the
+sixteen the port cannot fire.
+
+### Next actions
+
+1. **Give class 0x52 a model.** It wants an asset-slot actor the exporter can
+   place and the renderer can hit-test, which is a shape neither has. Three of
+   the ten spawns are triggers, all Original Mode.
+2. `g_original_item_slots` is never filled: the pickup path (`FUN_00475E40`)
+   is unported, so the three key-gated routes are unreachable — correctly, for
+   a player who never found the key, but not for one who did.
+3. The routines these writers live in. `PropUpdateType40`'s forty fragments and
+   `StoryModeSwitchUpdate`'s hinge curve are the two most visible.

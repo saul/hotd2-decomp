@@ -4417,6 +4417,49 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("so her own killed script is what runs", a.civ?.script === 1,
           `stream ${a.civ?.script}`);
   }
+
+  // Op 0x19 -- `g_script_branch_var = (s16)cmd[1]`, which is how the game
+  // decides which way a branching stage goes. Eleven of the 136 shipped
+  // streams run it, all eleven pass 1, and all eleven put it after the
+  // `SetOnShot 0` that makes the civilian safe: a rescued civilian takes the
+  // alternate route.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetOnShot, 0),
+      cmd(CivilianOp.SetRouteBranch, 1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    check("a rescued civilian writes the route branch",
+          G.g_script_branch_var === 1, String(G.g_script_branch_var));
+    // Nothing else in the port writes it, so the actor really is the source.
+    for (let i = 0; i < 10; i++) cFrame(a, events);
+    check("...and nothing in the port's frame walks it back",
+          G.g_script_branch_var === 1, String(G.g_script_branch_var));
+  }
+
+  // The store is a **word**. The command is a dword and no shipped stream
+  // needs the difference, but a port that widened it would be inventing a
+  // route index the engine cannot express.
+  {
+    civScene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetRouteBranch, 0x1_0002),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    check("the branch write is truncated to s16, as `MOV word ptr` is",
+          G.g_script_branch_var === 2, String(G.g_script_branch_var));
+    civScene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetRouteBranch, 0xFFFF),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    check("...and sign-extended, so 0xFFFF is -1 and not 65535",
+          G.g_script_branch_var === -1, String(G.g_script_branch_var));
+  }
 }
 
 console.log("\nclass 0x30's captor family — the zombies work on the civilian:");

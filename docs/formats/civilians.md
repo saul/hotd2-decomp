@@ -129,7 +129,7 @@ Two consequences worth knowing, both the engine's:
 | `0x16` | `SetRadiusRamp` | target radius, frames |
 | `0x17` | `SetCameraPointMode` | which point the shot test registers |
 | `0x18` | `SetPose` | pointer to six floats |
-| `0x19` | `SetGlobalA` | `DAT_009C88A4`. `[open]` |
+| `0x19` | `SetRouteBranch` | **[proved]** `g_script_branch_var = (s16)cmd[1]` — the selector `EvtAdvanceStepOrRoute` indexes a route record's `next[]` with, so **this is how the game decides which way a branching stage goes**. Eleven streams run it, all eleven pass 1, and all eleven put it after the `SetOnShot 0` that makes the civilian safe. See [evt.md](evt.md#how-a-branch-is-decided) |
 | `0x1A` | `SetChildCue` | applied only while children survive |
 | `0x1B` | `SetGlobalB` | `DAT_009CA0F4`. `[open]` |
 | `0x1C` | `SetScriptFlag` | index |

@@ -113,6 +113,13 @@ CHECKS: list[Check] = [
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",
           NEEDS_GAME),
+    Check("verify_branches", ".",
+          ["python3", "tools/verify_branches.py", "--game-dir", "{game_dir}"],
+          "that every value a branch trigger can write into "
+          "`g_script_branch_var` names a route slot its own block actually "
+          "fills -- the one check that ties the gameplay half of branching to "
+          "the route tables",
+          NEEDS_GAME),
     Check("baseline", ".",
           ["python3", "tools/baseline.py", "--game-dir", "{game_dir}",
            "--verify"],

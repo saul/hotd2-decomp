@@ -82,8 +82,8 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x29` | `FUN_00432C80` | 3 | **Static scenery batch** — draws a fixed list of instances, `{int slot; float x,y,z; int rotY; float scale}` at stride `0x18`, from one of three lists chosen by `obj+0x11C`. | `[proved]` |
 | `0x16`/`0x17` | `00442290`/`004422D0` | 6/8 | **The water-wave field.** `0x16` creates the manager and records the water plane Y; `0x17` adds one wave source, `obj+0x11C` selecting travelling or circular, with `{amplitude, wavelength, speed}` from its tail. | `[proved]` |
 | `0x15` | `FUN_00441750` | 4 | **Row spawner for floating props** — N copies spaced by a delta vector, each sampling the wave field. | `[proved]` |
-| `0x52` | `FUN_0043F4C0` | 10 | **Small wandering critter.** Subtypes 0–1 wander and self-despawn; 2–4 are **shootable route-branch triggers** that set the script branch variable and flee. Plays no sound, so the species is `[open]`. | `[proved]` function |
-| `0x53` | `FUN_00431250` | 4 | **Skinned NPC**; subtype ≥2 is a shootable branch trigger that reacts and runs away. | `[proved]` |
+| `0x52` | `Class52Init` (`FUN_0043F4C0`) | 10 | **Small wandering critter.** Subtypes 0–1 wander at 0.4 units a frame along the spawn yaw and self-despawn. Subtypes 2–4 run `Class52BranchTriggerUpdate` (`FUN_0043F720`), a **shootable route-branch trigger**: the first hit writes `g_script_branch_var` from the signed byte at `0x00564442 + subtype` — **2, 1, 2** for subtypes 2, 3, 4 — and it then flees along its yaw until it passes a bound. **Only in Original Mode**: the Init despawns subtypes 2–4 outright unless `g_GameMode == 1`. Stage 4 block 10 is the clean case, `next = [12, 18, 19]` with one subtype-3 and one subtype-4 critter in it. Plays no sound, so the species is `[open]`. | `[proved]` |
+| `0x53` | `CatInit` (`FUN_00431250`) | 4 | **Skinned NPC.** Subtype ≥2 runs `CatBranchTriggerUpdate` (`FUN_00431430`), a shootable branch trigger that writes `g_script_branch_var = 2` — but **only in event block 8, and only while the variable is still 0** — then reacts and runs away. **Only in Original Mode.** All four spawns are stage 2, in blocks 3, 5, 8 and 11; the block gate is what keeps the three outside block 8 from writing a 2 into a record that has no slot 2, and `tools/verify_branches.py` fails if it is dropped. | `[proved]` |
 | `0x40` | `PlaceHorde` (`FUN_0043BD30`) | 9 | **Horde spawner — a flock of enemies, not scenery.** Allocates N members running `HordeMemberInit` (`FUN_0043BEF0`) into `g_horde_members` (0x007DCC20, 10 slots), each carrying its index at `+0x131B`, then `ActorKill`s itself. `obj+0x130C`: 0 → one; 1 → 8, or 10 with two players, 6 in evt blocks 0x0E/0x12 (8 with two players) and 4 in block 0x19; 2 → not a spawner at all. Every member is character type **0x1D = `mol.bin`**, a six-segment chain; each increments *both* enemy counters (except variant 2), dies to one shot for **80 points** playing `STAGE1_SE`/`STAGE2_SE` `PDMG_MORR1/2_44.wav`, and casts a ground shadow at slot `0x10D0`. `HordeMemberUpdate` (`FUN_0043C440`) is a seven-state machine: fly in along a six-segment spline from `g_horde_formation` (0x0055E200), wander a per-variant box (0x0055E568/0x0055E574) avoiding neighbours inside 6.0 units, wind up, dive at the camera, pull out. **Not ported** — an enemy AI of zombie scale. | `[proved]` mechanism; species `[open]` |
 | `0x11`, `0x14`, `0x19`, `0x32` | — | 4/5/4/2 | **Enemies**, all incrementing both enemy counters. `0x19` takes ~15 per-bone model slots straight from its tail. | `[proved]` |
 | `0x12`, `0x13` | `0043F9D0`/`0043FE10` | 3/23 | **Script-driven animated props**, sharing a 10-entry behaviour table at `0x005926A8`. | `[proved]` |
@@ -415,10 +415,16 @@ report gives:
 * It is a **skinned character of type `0x1A`**, so a small animated creature
   rather than a prop.
 
-`[open]`, and deliberately so — nothing in the binary names it. What would
-settle it is resolving character type `0x1A` through the skinned-model part
-pipeline (`FUN_00410590` / `FUN_00412440`) to its actual models and rendering
-them. The obvious shortcut does not work: the first int of
+> **Since settled**, and this section is kept for the reasoning rather than the
+> verdict. `g_character_skeletons` (`0x004E0430`) is the resolution it asks
+> for: character type `0x1A`'s **eighteen nodes all land in `cat.bin`**, which
+> is one of the binary's two name tables and is decisive. The functions are
+> named `CatInit` and `CatBranchTriggerUpdate` on that basis.
+
+`[open]` at the time, and deliberately so — nothing *in the code* named it.
+What would settle it is resolving character type `0x1A` through the
+skinned-model part pipeline (`FUN_00410590` / `FUN_00412440`) to its actual
+models and rendering them. The obvious shortcut does not work: the first int of
 `PTR_DAT_0052ED08[type]` is 1 or 2 for **every** character type, so it is a
 variant count, not a bone count, and cannot separate a quadruped from a human.
 

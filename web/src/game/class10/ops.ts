@@ -70,8 +70,27 @@ export enum CivilianOp {
   SetCameraPointMode = 0x17,
   /** Teleport: six floats, position then rotation. */
   SetPose = 0x18,
-  /** `DAT_009C88A4`. `[open]` — the reader has not been read. */
-  SetGlobalA = 0x19,
+  /**
+   * **Set the route branch.** `g_script_branch_var` (`0x009C88A4`) = the s16
+   * at `cmd+4`; the command is two dwords.
+   *
+   * ```
+   * 0048BECE  668b4e04        MOV CX, word ptr [ESI + 0x4]
+   * 0048BED2  83c608          ADD ESI, 0x8
+   * 0048BED5  66890da4889c00  MOV word ptr [0x009c88a4], CX
+   * ```
+   *
+   * That global is what `EvtAdvanceStepOrRoute` (`FUN_0045F000`) indexes a
+   * `kind == 1` route record's `next[]` with, so **this is how the game
+   * decides which way a branching stage goes.** Eleven of the 136 shipped
+   * civilian streams run it, all eleven pass `1`, and every one of them sits
+   * after the `SetOnShot 0` that makes the civilian unshootable — that is,
+   * after she is safe. A rescued civilian takes the alternate route.
+   *
+   * It was `SetGlobalA`, and `[open]` on the grounds that the reader had not
+   * been read. The reader was two functions away.
+   */
+  SetRouteBranch = 0x19,
   /** `(a, b)` applied only when this civilian still has children. */
   SetChildCue = 0x1A,
   /** `DAT_009CA0F4`, unless the app state is 10. `[open]`. */

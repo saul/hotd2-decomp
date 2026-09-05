@@ -151,7 +151,9 @@ so is the event feed.
   and only an exhausted step table reaches the route table); route kind 2 is
   **not** "the scene ends" but a fall-through to `block + 1`; and a branch
   takes `next[branch_choice]`, where `branch_choice` resets to 0 on every
-  block change. Getting the first of those wrong skips most of a stage,
+  **step** advance — the store is on the routine's normal return path, so it
+  fires whether or not the step list ran out. Getting the first of those wrong
+  skips most of a stage,
   including the `region_enter` and `cam_play` instructions in the later steps.
 - **Deferred camera plays.** `cam_play` with `flags & 2` does not play — it
   stashes the frame range, and a later `queue_event 0x21, 6|7` enters the
@@ -210,14 +212,20 @@ so is the event feed.
   yaw. The other two orientation words reach the object's other rotation
   fields but their value distributions do not look like angles, so they are
   carried raw and not applied.
-- **Branch choice.** `branch_choice` (`DAT_009C88A4`) is genuinely runtime
-  state: every writer in the binary is gameplay code — shooting a door, taking
-  a route — and it resets to 0 on every block change. With no gameplay a
-  branch would always take `next[0]`, so the player asks instead. A bar along
-  the bottom of the rendered view offers the valid route targets, and in Play
-  mode a 5-second countdown runs before a **seeded** RNG picks, so an
-  unattended playthrough is reproducible — and hovering the bar freezes that
-  countdown, because deciding is not a race.
+- **Branch choice.** `g_script_branch_var` (`0x009C88A4`) is genuinely runtime
+  state: every one of its sixteen writers is gameplay code, and it resets to 0
+  on every **step** advance. The one the player runs is a **rescued
+  civilian** — `CivilianRunScript`'s op `0x19`, which eleven of the game's 136
+  civilian streams execute once the `SetOnShot 0` before it has made her
+  unshootable. So the branching is the game's, not the player's: save her and
+  the stage takes the other route, and with nobody saved it takes `next[0]`.
+
+  A bar along the bottom of the rendered view **says which way the game is
+  going** — the marked button — and gives 1.5 seconds to take one of the
+  others instead. Hovering the bar freezes that window, because deciding is
+  not a race. The bar used to present every route identically and pick the
+  lowest block number when the countdown expired, which is a rule the engine
+  does not have.
 
   Routes marked ◉ have an **arcade preview shot**: the `store_six` (`0x60`)
   operands are three `(frame, slot)` camera poses indexed by exactly that
@@ -225,6 +233,10 @@ so is the event feed.
   to the block that stored it — all four in stage 2 sit inside branch blocks —
   and is discarded on any block change, so a branch never shows a shot left
   over from an earlier one. Unused choices store slot 0 and get no preview.
+
+  Every write of `2` in the binary is behind `g_GameMode == 1`, so the third
+  route of a three-way branch is an **Original Mode** road: in arcade the
+  variable only ever holds 0 or 1.
 
   The bar is not a modal: a branch is a fact about where playback has got to,
   not a question that blocks everything else, so the script, the scrubber and

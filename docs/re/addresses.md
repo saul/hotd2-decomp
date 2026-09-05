@@ -201,7 +201,7 @@ classic ring-buffer initialisation.
 | `0x009A1A08` | current scene id |
 | `0x009A2BC0` | current block index |
 | `0x009A2BB0` | current step index |
-| `0x009C88A4` | branch choice for route `kind == 1` |
+| `0x009C88A4` | `g_script_branch_var` — branch choice for route `kind == 1`. Written only by gameplay; cleared on every **step** advance |
 | `0x009C8EA0` | yield flag — set by the `wait_*` opcodes |
 | `0x009A3540` | view struct, player 1 |
 | `0x009A59E0` | view struct, player 2 |

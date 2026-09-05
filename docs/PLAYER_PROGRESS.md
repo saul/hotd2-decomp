@@ -658,7 +658,8 @@ each one.
 |---|---|---|
 | Most of a stage never ran; regions and camera barely changed | **A block's steps are sequential.** `advance_step` advances to the next *step*; only an exhausted step table reaches the route table. Treating every `advance_step` as a block exit ran one step per block | read `EvtAdvanceStepOrRoute` |
 | Scene ended early | Route **kind 2 is not "end"** — it falls through to `block + 1`. The scene ends when that block is a hole | same |
-| Branch buttons picked the wrong route | A branch takes `next[branch_choice]`, not "a target"; `branch_choice` resets to 0 on every block change and every writer of it is gameplay code | same |
+| Branch buttons picked the wrong route | A branch takes `next[branch_choice]`, not "a target"; every writer of `branch_choice` is gameplay code | same |
+| The branch was the viewer's choice, not the game's | `branch_choice` resets on every **step** advance, not every block change, and the writer the port reaches is a rescued civilian's `SetRouteBranch` (`CivilianRunScript` op `0x19`). An unanswered branch used to take the lowest block number; it takes `next[g_script_branch_var]` now, and the bar is a 1.5 s override of a decision the game has already made | read `EvtAdvanceStepOrRoute`'s tail; `tools/verify_branches.py` |
 | Clicking a branch button did nothing | The countdown re-announced the branch every frame, so the UI rebuilt the buttons 60×/s and the click never landed between `pointerdown` and `pointerup` | notify on *change*, not on tick |
 | Branch preview showed an unrelated shot | The `store_six` preview was carried across block changes. All four in stage 2 sit *inside* branch blocks | discard on block change, same lifetime as `branch_choice` |
 | Whole view tilted down | `eye.y = path.y - 15` was applied **before** the look-at, but the game derives pitch and yaw from the *unshifted* `eye - target` and only then overwrites `eye.y` | translate after orienting |

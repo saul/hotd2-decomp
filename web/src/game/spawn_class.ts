@@ -71,8 +71,14 @@ export enum SpawnClass {
   PropPlacer = 0x44,
   /** `FUN_00438540` — water enemy. Rises, bobs, lunges to bite. */
   WaterEnemy = 0x51,
-  /** `FUN_0043F4C0` — small wandering critter. */
+  /**
+   * `Class52Init` (`FUN_0043F4C0`) — small wandering critter. Subtypes 2-4
+   * are shootable route-branch triggers, in Original Mode only.
+   */
   Critter = 0x52,
-  /** `FUN_00431250` — skinned NPC. The cat. */
+  /**
+   * `CatInit` (`FUN_00431250`) — the cat, character type `0x1A`. Subtype 2
+   * and up is a shootable route-branch trigger, in Original Mode only.
+   */
   SkinnedNpc = 0x53,
 }

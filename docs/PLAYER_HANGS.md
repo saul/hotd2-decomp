@@ -445,12 +445,21 @@ and six hundred jittered ones step over integers.
 
 ## 9. The branch countdown is a port decision, not the engine's
 
-`Walker.takeBranch` with no argument now picks the **lowest** block number. It
-used to draw from `ctx.rng`, which made a stage take a different route each
-run. The engine's own selector is `g_script_branch_var` (`0x009C88A4`) and is
-not read yet; until it is, this is `[diverges]` and deliberate, because a
-harness that cannot compare one playthrough with the previous one is not worth
-much. Reading that global would replace it.
+`Walker.takeBranch` with no argument used to pick the **lowest** block number,
+and before that to draw from `ctx.rng`. The engine's own selector is
+`g_script_branch_var` (`0x009C88A4`) and had not been read.
+
+**Closed.** It has been read, and the answer is that the engine does not have a
+countdown at all: it reads the global at the instant the step list runs out and
+goes. The global is written only by gameplay, and the writer the port reaches
+is `CivilianRunScript`'s op `0x19` — `SetRouteBranch` — which eleven of the 136
+shipped civilian streams run once the civilian is safe. So the branch is now
+`next[g_script_branch_var]`, the pick is `0` when nobody was rescued, and the
+1.5-second bar is declared as what it is: a port-only override window, with the
+value **latched** when the branch is reached so gameplay during the pause
+cannot change a decision the engine had already made. See
+[`docs/formats/evt.md`](formats/evt.md#how-a-branch-is-decided) and
+`tools/verify_branches.py`.
 
 ## 10. Class 0x30 has no death state
 
@@ -554,9 +563,30 @@ started.
 Either the route line was written from an older run, or something answered
 block 3's branch with 30. **The pre-change `playthrough.mjs`, run out of git
 against this same tree, also takes 3 → 4** — so it is not the driven clock and
-it is very probably the first. Left `[open]` only because nothing has been read
-that says what `g_script_branch_var` (`0x009C88A4`) would have answered; see
-item 9. Not worth chasing on its own.
+it is very probably the first.
+
+**Closed**, in favour of the first explanation. Stage 2 block 3's record is
+`next = [4, -1, 30]`: block 30 is **slot 2**, and every writer of a 2 in the
+binary is behind `g_GameMode == 1`. Block 3's own trigger is a cat
+(`CatBranchTriggerUpdate`), which writes 2 only in block 8. So in arcade
+nothing can answer block 3 with 30, and the recorded 3 → 30 describes a route
+the game does not have in the mode the harness runs.
+
+**The unattended route has moved, and moved a long way.** `Math.min` and
+`next[0]` disagree at the very first branch of both stages, so a harness run
+that rescues nobody now takes:
+
+```
+stage 1   0 -> 1 -> 10 -> 3 -> 4 -> 6 -> 11 -> 14 -> 15 -> 16 -> 17
+stage 2   0 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 35 -> 36 -> ... -> 42
+```
+
+That is the **failure** road through both stages, and it is the right answer:
+nothing was rescued, so nothing asked for the other one. Stage 1's block 1 is
+reachable the other way today — its trigger is a class 0x10 civilian and the
+port runs her script — but stage 2's block 0 is not: its trigger is class
+0x21, which is unported. Any recorded route in this file or in
+`docs/PLAYER_PROGRESS.md` from before this change describes the old rule.
 
 ---
 

@@ -38,6 +38,16 @@ export interface BranchOption {
   label: string;
   title: string;
   /**
+   * True on the route the **game** is taking — `next[g_script_branch_var]` as
+   * the engine would read it. Exactly one option carries it when the latched
+   * choice names a live target, and none does when it names a hole.
+   *
+   * The bar used to show three equal buttons and a countdown, which said the
+   * choice was the viewer's to make. It is the game's; the buttons are an
+   * override.
+   */
+  chosen: boolean;
+  /**
    * The arcade shows a preview of each route before you commit — the
    * `store_six` operands, indexed by `branch_choice`. Null when a choice is
    * stored as slot 0 / frame 0, which resolves to no path: no preview beats a
@@ -55,7 +65,7 @@ export interface BranchProjection {
   sub: string;
   options: BranchOption[];
   countdown: string;
-  /** True while hovering has stopped the arcade countdown. */
+  /** True while hovering has stopped the override window. */
   paused: boolean;
 }
 

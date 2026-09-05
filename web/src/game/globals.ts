@@ -623,6 +623,35 @@ export const G = {
    * long — blocks average 3.99 steps.
    */
   g_evt_step_index: 0,
+  /**
+   * `g_script_branch_var` — 0x009C88A4, s16. **Which route a branch takes.**
+   *
+   * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) reads it as
+   * `block = route.next[g_script_branch_var]` for a `kind == 1` record, and
+   * `CameraArmStashedPath` (`FUN_00403DB0`) indexes the `store_six` preview
+   * pairs with the same value — which is the check that the preview and the
+   * route it previews are keyed identically.
+   *
+   * It is here, in `G`, and not on the walker, because **the engine keeps one
+   * global and both halves of the game touch it**: the event VM reads it, and
+   * every writer in the binary is gameplay code. `Walker.branchChoice` is an
+   * accessor over this field, the same arrangement `g_evt_step_index` has.
+   *
+   * **It is reset to 0 on every *step* advance, not on every block change.**
+   * The store is on `EvtAdvanceStepOrRoute`'s normal return path, after
+   * `pc = EvtGetStep(...)`, so it fires whether or not the step list ran out.
+   * That is a much stronger claim than the one three documents and this port
+   * used to make, and it is what makes the shipped data legible: almost every
+   * branch block spawns the actor that decides its branch in the block's
+   * **last** step, because a write made earlier would be cleared by the next
+   * step boundary.
+   *
+   * The port writes it from exactly one place, `CivilianOp.SetRouteBranch`,
+   * which is the only writer arcade mode reaches whose class is ported. See
+   * the global's row in `ghidra/annotations/globals.tsv` for the full
+   * inventory of the sixteen writers and which are Original-Mode-only.
+   */
+  g_script_branch_var: 0,
 
   // -- thrown weapons ----------------------------------------------------
   g_thrown_weapons: [] as ThrownWeapon[],
@@ -815,6 +844,7 @@ export function ResetGameGlobals(): void {
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
   G.g_evt_step_index = 0;
+  G.g_script_branch_var = 0;
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;

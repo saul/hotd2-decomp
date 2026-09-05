@@ -49,14 +49,20 @@ export function skipProjection(p: Player): SkipProjection | null {
 }
 
 /**
- * The countdown label. Three states, and each says what it means: running,
- * frozen because the pointer is over the bar, or simply waiting because
- * only Play mode runs the arcade timer at all.
+ * The branch bar's contents.
+ *
+ * **The game has already decided.** `b.choice` is `g_script_branch_var` as it
+ * stood when the step list ran out, and the bar's job is to say which route
+ * that is and give a viewer a moment to take the other one -- not to ask a
+ * question the engine never asks. The countdown label has three states, each
+ * saying what it means: running, frozen because the pointer is over the bar,
+ * or simply waiting because only Play mode runs the window at all.
  */
 export function branchProjection(p: Player): BranchProjection | null {
   const b = p.walker?.branch;
   if (!b) return null;
   const route = p.walker?.currentBlock?.route;
+  const taking = route?.next[b.choice] ?? -1;
   return {
     sub: `block ${b.block} → ${b.targets.join(" or ")}`,
     options: b.targets.map((t) => {
@@ -66,19 +72,26 @@ export function branchProjection(p: Player): BranchProjection | null {
       // Unused choices are stored as slot 0 / frame 0 and resolve to no
       // path; those get no preview rather than a shot of somewhere else.
       const shot = b.preview?.find((q) => q.choice === choice && q.cam);
+      const chosen = t === taking;
       return {
         target: t,
         label: `→ ${t}`,
-        title: `Take route to block ${t}`
-          + (choice >= 0 ? ` (branch_choice ${choice})` : ""),
+        title: chosen
+          ? "The route the game itself is taking, because "
+            + `g_script_branch_var is ${b.choice}. Nothing has to be clicked.`
+          : `Override: take route to block ${t} instead`
+            + (choice >= 0 ? ` (branch_choice ${choice})` : ""),
+        chosen,
         preview: shot ? { slot: shot.slot, frame: shot.frame } : null,
       };
     }),
     countdown: !p.playing
-      ? "waiting for a choice"
+      ? "waiting -- Play runs the window"
       : p.branchHover
-        ? "countdown paused"
-        : `picking in ${Math.max(0, b.countdown).toFixed(1)} s`,
+        ? "window paused"
+        : taking >= 0
+          ? `taking → ${taking} in ${Math.max(0, b.countdown).toFixed(1)} s`
+          : `ending the scene in ${Math.max(0, b.countdown).toFixed(1)} s`,
     paused: p.playing && p.branchHover,
   };
 }

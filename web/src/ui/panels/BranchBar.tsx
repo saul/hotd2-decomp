@@ -1,10 +1,16 @@
 /**
  * The branch point, which playback is waiting on.
  *
- * Where the skip bar offers something, this asks a question — and the arcade
- * answers it on a countdown if you do not. Hovering the bar stops that clock,
- * because deciding is not a race; hovering one route previews its opening
- * shot, which is what the arcade does with the `store_six` operands.
+ * **The game has already chosen**, and the marked button says which way. The
+ * engine reads `g_script_branch_var` and goes with no pause at all; this bar
+ * holds for a second and a half so a viewer can take the other route, and
+ * then takes the game's. Hovering the bar stops that clock, because deciding
+ * is not a race; hovering one route previews its opening shot, which is what
+ * the arcade does with the `store_six` operands.
+ *
+ * It used to present every route identically with a countdown labelled
+ * `picking in`, which is the opposite of what happens: the choice is the
+ * game's and these buttons are an override of it.
  *
  * Not a modal. A branch is a fact about where playback has got to, not an
  * interruption of it.
@@ -32,7 +38,9 @@ export function BranchBar() {
       <span className="routes">
         {p.options.map((o) => (
           <button key={o.target}
-                  className={o.preview ? "has-preview" : undefined}
+                  className={[o.chosen && "chosen",
+                              o.preview && "has-preview"]
+                             .filter(Boolean).join(" ") || undefined}
                   title={o.title}
                   onPointerEnter={() => o.preview && dispatch({
                     kind: "previewBranch", slot: o.preview.slot,

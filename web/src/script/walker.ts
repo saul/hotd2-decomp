@@ -105,7 +105,19 @@ export interface PendingWait {
 export interface BranchChoice {
   block: number;
   targets: number[];
-  /** Seconds left on the arcade countdown before the RNG picks. */
+  /**
+   * What `g_script_branch_var` said when the step list ran out — the route the
+   * game itself is taking, and the one an expired countdown takes.
+   *
+   * **Latched here rather than read again when the countdown expires.** The
+   * engine consults the global at the instant `EvtAdvanceStepOrRoute` runs and
+   * there is no pause; the port's override window is a port-only pause during
+   * which gameplay keeps running and could still write the global. Reading it
+   * late would let 1.5 s of play change a decision the engine had already
+   * made.
+   */
+  choice: number;
+  /** Seconds left on the override window before {@link choice} is taken. */
   countdown: number;
   /** The arcade preview shot for each route, when a `store_six` supplied one. */
   preview: NonNullable<OpJson["branch_preview"]> | null;
@@ -411,11 +423,20 @@ export class Walker {
   /** evt 0x14: the scene light array, which gates 0x15 and 0x16. */
   sceneLighting = false;
   /**
-   * `branch_choice` (`DAT_009C88A4`). Every writer in the binary is gameplay
-   * code, and it is reset to 0 on every block change -- so with no gameplay a
-   * branch always takes `next[0]` until the UI sets it.
+   * `g_script_branch_var` — `0x009C88A4`. Which route a branch takes.
+   *
+   * An accessor over `G`, for the same reason {@link step} is one: the engine
+   * has a single global here and both halves of the game touch it. The event
+   * VM reads it; **every writer in the binary is gameplay code**, and the one
+   * the port reaches is `CivilianOp.SetRouteBranch` — the command eleven of
+   * the shipped civilian scripts run once the civilian is safe.
+   *
+   * It used to be a field on the walker that only the branch UI ever wrote,
+   * which made the choice a thing the player invented rather than a thing the
+   * game decided.
    */
-  branchChoice = 0;
+  get branchChoice(): number { return G.g_script_branch_var; }
+  set branchChoice(v: number) { G.g_script_branch_var = v; }
   /** `halt` (0x4E) parks the interpreter; it does not end the scene. */
   parked = false;
   /**
@@ -1374,16 +1395,31 @@ export class Walker {
    * 2. **`kind == 2` is not "the scene ends".** It falls through to
    *    `block + 1`. The scene ends when the block it lands on is a hole.
    * 3. **A branch takes `next[branch_choice]`**, and `branch_choice` is reset
-   *    to 0 at the end of every block change. Nothing in the script sets it:
-   *    every writer is in gameplay code (shooting a door, taking a route),
-   *    so with no gameplay a branch always takes `next[0]`. That is what the
-   *    branch UI is for -- it sets the choice the player would have made.
+   *    to 0 **on every step advance** -- the store is on the normal return
+   *    path, after `pc = EvtGetStep(...)`, so it fires whether or not the step
+   *    list ran out. This walker used to clear it only on a block change,
+   *    which is the weaker claim three of this project's documents also made.
+   *    The stronger one is what makes the shipped scripts legible: almost
+   *    every branch block spawns the actor that decides its branch in the
+   *    block's **last** step, because a write made any earlier would be wiped
+   *    by the next step boundary. The scene-over path returns before the
+   *    store, so a scene ends with the last value standing.
+   *
+   * Nothing in the *script* ever sets it -- every writer is gameplay code, and
+   * the one the port reaches is a rescued civilian's `SetRouteBranch`. With no
+   * gameplay a branch takes `next[0]`, which is the game's answer and not a
+   * fallback.
    */
   advanceStepOrRoute(quiet: boolean): boolean {
     this.step += 1;
     this.opIndex = 0;
     const blk = this.currentBlock;
-    if (blk?.steps && this.step < blk.steps.length) return true;
+    if (blk?.steps && this.step < blk.steps.length) {
+      // The tail of `EvtAdvanceStepOrRoute`, on the path where the step list
+      // had another step in it. See point 3 above.
+      this.branchChoice = 0;
+      return true;
+    }
 
     const route = blk?.route ?? this.script.routes[this.block];
     if (!route) {
@@ -1394,11 +1430,15 @@ export class Walker {
     if (route.kind === "branch" && !quiet) {
       const targets = route.next.filter((n) => n >= 0);
       if (targets.length > 1) {
-        // Pause and ask. Resolved by takeBranch(), which is what actually
-        // performs the transition.
+        // [diverges] **The pause is the port's, the choice is the game's.**
+        // The engine reads `g_script_branch_var` here and goes; this holds
+        // for `branchCountdown` seconds so a viewer can take the other route,
+        // and takes the engine's answer if nobody does. The value is latched
+        // now, for the reason on `BranchChoice.choice`.
         this.branch = {
           block: this.block,
           targets,
+          choice: this.branchChoice,
           countdown: this.options.branchCountdown,
           preview: this.branchPreview,
         };
@@ -1457,9 +1497,16 @@ export class Walker {
   }
 
   /**
-   * Resolve a paused branch by setting `branch_choice` and taking the
-   * transition. Passing nothing lets the seeded RNG pick, which is what the
-   * arcade countdown does.
+   * Resolve a paused branch by setting `g_script_branch_var` and taking the
+   * transition.
+   *
+   * **Passing nothing takes the route the game took**, which is the value
+   * `advanceStepOrRoute` latched when the step list ran out. That used to be
+   * `Math.min(...targets)` — the lowest block number — a stand-in written
+   * while nothing had read the engine's selector; the selector is read now,
+   * and the stand-in is gone. A stage with no gameplay in it still routes the
+   * same way every run, because 0 is the value the engine leaves behind when
+   * nobody has been rescued.
    */
   takeBranch(target?: number): void {
     const b = this.branch;
@@ -1470,16 +1517,7 @@ export class Walker {
       choice = route.next.indexOf(target);
       if (choice < 0) choice = 0;
     } else {
-      // [diverges] **The unattended pick is the lowest block number.** The
-      // arcade answers its own countdown and this client has to answer it
-      // somehow; drawing from `ctx.rng`, as this did, made one run of a stage
-      // take a different route from the next, which is exactly wrong for the
-      // thing the choice is mostly used by — `tools/playthrough.mjs` comparing
-      // a playthrough against the one before it. The engine's own selector is
-      // `g_script_branch_var` and is not read yet; until it is, a rule you can
-      // predict beats a coin toss you cannot.
-      const pick = Math.min(...b.targets);
-      choice = route ? Math.max(0, route.next.indexOf(pick)) : 0;
+      choice = b.choice;
     }
     this.branchChoice = choice;
     this.branch = null;

@@ -49,6 +49,7 @@ function seekInner(w: Walker, block: number, step: number, opIndex: number,
   const arrived = () =>
     w.block === block && w.step === step && w.opIndex >= opIndex;
   let steered = -1;
+  let steerChoice = -1;
   while (executed++ < maxOps) {
     if (arrived() || w.finished) break;
     // Point the *next* block transition at the goal.
@@ -59,14 +60,22 @@ function seekInner(w: Walker, block: number, step: number, opIndex: number,
     // fork and everything on the other one is unreachable. Stage 2 puts
     // blocks 18, 21 and 22 behind block 14's second fork, and the falling
     // containers with them.
+    //
+    // The graph search is per block; the **assignment is per instruction**,
+    // because `advanceStepOrRoute` clears `g_script_branch_var` on every step
+    // advance exactly as the engine does. Setting it once on block entry
+    // used to work and now does not: a block with more than one step wipes
+    // the steer before the route is ever consulted.
     if (w.block !== steered) {
       steered = w.block;
+      steerChoice = -1;
       const r = w.currentBlock?.route ?? w.script.routes[w.block];
       if (r?.kind === "branch" && r.next.length > 1) {
         const i = r.next.findIndex((n) => reaches(w, n, block));
-        if (i >= 0) w.branchChoice = i;
+        if (i >= 0) steerChoice = i;
       }
     }
+    if (steerChoice >= 0) w.branchChoice = steerChoice;
     if (w.wait) {
       w.stepOverWait();
       continue;

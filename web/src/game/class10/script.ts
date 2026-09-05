@@ -189,9 +189,16 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.PickHeldItem:
         CivilianPickHeldItem(sub, c, f?.rng ?? rng);
         break;
+      // `MOV word ptr [0x009c88a4], CX` -- a **signed 16-bit** store, so the
+      // truncation is the engine's and not a tidy-up. Every shipped stream
+      // passes 1; the mask is here because the command is a dword and the
+      // store is a word, and a port that widened it would be inventing a
+      // route index the engine cannot express.
+      case CivilianOp.SetRouteBranch:
+        G.g_script_branch_var = (a[0] << 16) >> 16;
+        break;
       // Unread. Named so the stream stays legible and so a later reading has
       // somewhere to land; deliberately no behaviour.
-      case CivilianOp.SetGlobalA:
       case CivilianOp.SetGlobalB:
       case CivilianOp.SetAttachMode:
       case CivilianOp.SetAttachTarget:

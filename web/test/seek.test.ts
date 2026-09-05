@@ -341,6 +341,88 @@ for (const stage of STAGES) {
   }
 }
 
+// The branch itself: who decides it, and how long the decision survives.
+//
+// `g_script_branch_var` is cleared on **every step advance**, not on every
+// block change -- the store is on `EvtAdvanceStepOrRoute`'s normal return
+// path, after `pc = EvtGetStep(...)`. This walker used to clear it only on a
+// block change, which is why a value written by gameplay could sit there for
+// a whole block and steer a route it was never meant to reach.
+{
+  const file = join(ROOT, "stage2", "stage2.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+
+    // Find a block with more than one step, so a step advance can be watched
+    // that is not also a block change.
+    const w = new Walker(script, mkHost());
+    seekTo(w, 11, 1, 0);
+    const steps = w.currentBlock?.steps?.length ?? 0;
+    check("stage 2 block 11 has steps to advance through", steps > 2,
+          `${steps} steps`);
+    w.branchChoice = 2;
+    w.advanceStepOrRoute(true);
+    check("a step advance inside a block clears the branch variable",
+          w.block === 11 && G.g_script_branch_var === 0,
+          `block ${w.block}, var ${G.g_script_branch_var}`);
+
+    // ...and the walker's field and the data segment are one thing, as they
+    // are in the engine. A second copy is how the two could ever disagree.
+    w.branchChoice = 1;
+    check("`Walker.branchChoice` is `G.g_script_branch_var`",
+          G.g_script_branch_var === 1 && w.branchChoice === 1,
+          `${w.branchChoice} vs ${G.g_script_branch_var}`);
+  }
+}
+
+// An unanswered branch takes the route the *game* took. This used to be
+// `Math.min(...targets)` -- the lowest block number -- a stand-in from before
+// anything had read the engine's selector.
+{
+  const file = join(ROOT, "stage1", "stage1.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    // Block 1 branches to 10 or 9. The lowest block number is 9 and
+    // `next[0]` is 10, so the old rule and the engine's disagree here --
+    // which is what makes this able to fail.
+    const route = script.routes[1];
+    check("stage 1 block 1 is the branch where the two rules disagree",
+          route?.kind === "branch" && route.next[0] === 10
+            && route.next[1] === 9,
+          JSON.stringify(route));
+
+    const w = new Walker(script, mkHost());
+    seekTo(w, 1, 1, 0);
+    G.g_script_branch_var = 0;
+    w.branch = { block: 1, targets: [10, 9], choice: 0, countdown: 1.5,
+                 preview: null };
+    w.takeBranch();
+    check("nobody rescued: the branch takes next[0], not the lowest block",
+          w.block === 10, `landed in block ${w.block}`);
+
+    // The whole point of the port: a civilian's `SetRouteBranch 1` is what
+    // sends the stage the other way.
+    const w2 = new Walker(script, mkHost());
+    seekTo(w2, 1, 1, 0);
+    G.g_script_branch_var = 1;
+    w2.branch = { block: 1, targets: [10, 9], choice: G.g_script_branch_var,
+                  countdown: 1.5, preview: null };
+    w2.takeBranch();
+    check("a rescue at 1 sends it down the other route", w2.block === 9,
+          `landed in block ${w2.block}`);
+
+    // And the override still wins, which is what the 1.5 s window is for.
+    const w3 = new Walker(script, mkHost());
+    seekTo(w3, 1, 1, 0);
+    G.g_script_branch_var = 1;
+    w3.branch = { block: 1, targets: [10, 9], choice: 1, countdown: 1.5,
+                  preview: null };
+    w3.takeBranch(10);
+    check("a viewer's override beats the game's own choice", w3.block === 10,
+          `landed in block ${w3.block}`);
+  }
+}
+
 // The enemy gate's postcondition, as a check that can fail: past a
 // `wait_enemies_alive` every enemy placed before it is dead, so a seek into
 // the back half of a stage must not arrive with the front half's enemies

@@ -263,7 +263,14 @@ def render() -> str:
         need = c.needs or "—"
         add(f"| `{c.name}` | {c.sees} | {need} |")
     add("")
-    add("Two of them need the installed game and three need an exported")
+    # Counted, not written down. Both numbers were prose until a check was
+    # added that needed the game and neither moved.
+    n_game = sum(1 for c in verify_all.CHECKS
+                 if c.needs == verify_all.NEEDS_GAME)
+    n_bundle = sum(1 for c in verify_all.CHECKS
+                   if c.needs == verify_all.NEEDS_BUNDLE)
+    add(f"{n_game} of them need the installed game and {n_bundle} need an "
+        "exported")
     add("bundle. **That is a known hole, not a design:** a machine with")
     add("neither cannot run the checks that compare two histories, and a")
     add("bundle-free fixture is the open work that closes it.")

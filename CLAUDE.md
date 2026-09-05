@@ -33,7 +33,7 @@ to `CHECKS` instead, with the one sentence saying what only that check can see.
 passes and names them, because a skip that reads as green is how four
 regression tests came to be described as passing on machines that never ran
 them. Three suites need an exported bundle (`tools/export_player.py`, or point
-`HOTD2_BUNDLE` at one) and two need `--game-dir`.
+`HOTD2_BUNDLE` at one) and three need `--game-dir`.
 
 ### Layers, and the direction dependencies point
 

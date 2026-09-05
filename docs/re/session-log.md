@@ -11254,3 +11254,155 @@ character-type exemption beside it (3, 0x12, 0x18) is real and is ported.
 Trajectory, measured from the launch: apex 4.7 units above the head bone at
 frame 20, first ground contact at frame 60, settled at 80, 15.6 units
 travelled. It flies.
+
+---
+
+## Session — a branch is not a question, and it is cleared every step
+
+**The task.** Port the branching logic the event tables drive, and keep a
+1.5-second window for a viewer to override it. The player was pausing at every
+branch point and asking, which was never what the game does.
+
+### What the engine actually does
+
+`g_script_branch_var` (`0x009C88A4`) is the whole mechanism.
+`EvtAdvanceStepOrRoute` reads it as `next[g_script_branch_var]` for a `kind == 1`
+route record, and **nothing in the script writes it** — all sixteen writers are
+gameplay code. There is no pause, no countdown and no question: the value is
+whatever gameplay left behind at the instant the step list ran out, and `0` is
+the answer when nobody did anything.
+
+**The reading that mattered was the reset.** This project had it, in four
+places, as *"reset to 0 on every block change"* — `docs/formats/evt.md`,
+`docs/re/addresses.md`, `web/README.md` and the walker's own doc comment. It is
+wrong, and the annotation in `functions.tsv` had the right pseudocode all
+along:
+
+```c
+if (EvtGetBlock(scene, block) == -1) { ...scene over...; return; }  /* no reset */
+pc = EvtGetStep(scene, block, step);
+branch_choice = 0;                     /* every STEP advance, not every block */
+```
+
+The store is on the normal return path, so it fires whether or not the step
+list ran out. That is a much stronger claim, and it is what makes the shipped
+data legible: **fourteen of the sixteen branch blocks that hold a trigger spawn
+it in the block's last step**, because a write made any earlier would be wiped
+by the next step boundary. The scene-over path returns before the store, so a
+scene ends with the last value standing.
+
+### Who writes it
+
+Reachable in arcade: `CivilianRunScript`'s op `0x19`; `FUN_00451980`, class
+0x21's live state, on the last part being shot off; `PlaceGenericProp` cases
+`0x0E`/`0x13`/`0x19` at spawn time; `FUN_00468180`/`FUN_00468F00` on a prop's
+first hit; `FUN_00469AE0` in block `0x17`.
+
+Everything else — nine sites — writes **2**, and **every one of them is behind
+`g_GameMode == 1`**. So the third road out of a three-way branch is an Original
+Mode road and arcade only ever sees 0 or 1. That one fact explains a shape that
+had looked arbitrary: route records whose live slots are 0 and 2 with a hole at
+1 are the original-mode forks.
+
+### Op 0x19 was two functions from being read
+
+`docs/formats/civilians.md` had it as `SetGlobalA`, `DAT_009C88A4`, `[open] —
+the reader has not been read`. The reader is `EvtAdvanceStepOrRoute`, which
+this project named a long time ago. Ten instructions of disassembly settle it:
+
+```
+0048BECE  668b4e04        MOV CX, word ptr [ESI + 0x4]
+0048BED2  83c608          ADD ESI, 0x8
+0048BED5  66890da4889c00  MOV word ptr [0x009c88a4], CX
+```
+
+Two dwords, an **s16** store. Eleven of the 136 shipped civilian streams run
+it, all eleven pass `1`, and every one of them puts it after the `SetOnShot 0`
+that makes the civilian unshootable — that is, after she is safe. **Rescuing a
+civilian is how the game branches**, and it is the only writer that works in
+arcade whose class the port already runs. Renamed `SetRouteBranch`.
+
+### The check
+
+`tools/verify_branches.py`. For every branch block that spawns a trigger, every
+value that trigger can write must name a **live** slot of that block's own
+route record. Fourteen blocks, all clean, and it fails when made wrong:
+
+* flip the class 0x52 subtype table (`{2:2, 3:1, 4:2}`) and stage 2 block 18
+  writes a 1 into `next = [19, -1, 33]`;
+* drop `CatBranchTriggerUpdate`'s `g_evt_block_index == 8` gate and stage 2
+  block 5 writes a 2 into `next = [21, 6, -1]`.
+
+Stage 4 block 10 is the case that carries the whole reading on its own:
+`next = [12, 18, 19]`, three live slots, with one subtype-3 and one subtype-4
+critter in it, writing 1 and 2. The two alternates and the two triggers line up
+exactly.
+
+### The port
+
+* `G.g_script_branch_var`, with `Walker.branchChoice` an accessor over it — the
+  same arrangement `g_evt_step_index` already had, and for the same reason: the
+  engine has one global and both halves of the game touch it.
+* `advanceStepOrRoute` clears it on the in-block step return, which it never did.
+* `CivilianOp.SetRouteBranch` writes it, truncated to s16 because the store is
+  `MOV word ptr`.
+* `takeBranch()` with no argument takes `next[g_script_branch_var]`. It used to
+  take `Math.min(...targets)`, and before that a seeded RNG draw.
+* The choice is **latched** when the branch is raised. The pause is the port's,
+  not the engine's, and gameplay keeps running during it; reading the global
+  late would let 1.5 s of play change a decision the engine had already made.
+  Marked `[diverges]` on the pause itself, which is what the user asked for.
+* The bar marks the route the game is taking and labels the countdown
+  `taking → N in 1.2 s`. The other buttons are an override.
+
+### Two things this broke, and both were the check working
+
+**`seek.ts` steered once per block.** It set `branchChoice` on block entry and
+relied on it surviving to the route decision. With the reset in, three seek
+assertions failed at once. The graph search stays per block; the assignment is
+now per instruction.
+
+**The unattended route through both stages moved**, because `Math.min` and
+`next[0]` disagree at the first branch of each:
+
+```
+stage 1   0 -> 1 -> 10 -> 3 -> 4 -> 6 -> 11 -> 14 -> 15 -> 16 -> 17
+stage 2   0 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 35 -> ... -> 42
+```
+
+That is the **failure** road through both, and it is the right answer for a
+harness that rescues nobody. It also closes `PLAYER_HANGS` item 16, which had
+wondered how a recorded stage-2 route reached block 30: block 30 is slot 2 of
+`next = [4, -1, 30]`, and no arcade writer produces a 2.
+
+### What is not ported, and why
+
+The other fifteen writers. `FUN_00451980` (class 0x21) is the one that costs
+something real — it is stage 2 block 0's trigger, so the port cannot take that
+branch at all today, and it is a whole enemy class rather than a branch
+mechanism. `Class52BranchTriggerUpdate` and `CatBranchTriggerUpdate` are read
+and named but Original-Mode-only. The class 0x41 prop writers are reached
+through the constructor table rather than the spawn class and are mostly
+original-mode too. All sixteen are listed under `g_script_branch_var` in
+`globals.tsv`.
+
+### A stale `[open]` closed on the way past
+
+`docs/formats/spawns.md` still had class 0x53's species `[open]`, asking for
+character type `0x1A` to be resolved through the model pipeline. That was done
+long ago by a different route: `g_character_skeletons` puts all eighteen of
+type `0x1A`'s nodes in `cat.bin`, and three other files in this repo already
+call it the cat. Named `CatInit` and `CatBranchTriggerUpdate`; the section is
+kept for its reasoning with the verdict noted on top.
+
+### Next actions
+
+1. **Port class 0x21** (`FUN_00451720` / `FUN_00451860` / `FUN_00451980`), the
+   held-hostage enemy. One spawn, stage 2 block 0, and it is the only thing
+   standing between the port and stage 2's first branch. It pays a rescue,
+   +400, and both enemy counters.
+2. `PlaceGenericProp`'s three spawn-time writes are cheap and class 0x41 is
+   ported — cases `0x0E`, `0x13` and `0x19`. Worth checking which types the
+   port's pool actually constructs before doing it.
+3. `docs/formats/spawns.md`'s class 0x52 section still calls the species
+   `[open]`; unlike the cat, that one really is.

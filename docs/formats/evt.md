@@ -192,11 +192,66 @@ between blocks, and the mechanism behind the game's branching paths. Read by
 +0x06  s16 next[2]
 ```
 
-`branch_choice` is `DAT_009C88A4`, reset to 0 on every block change. Stage 2 has
-42 route nodes with 15 branch points — comfortably the most branch-heavy stage,
-which matches the game.
+Stage 2 has 42 route nodes with 15 branch points — comfortably the most
+branch-heavy stage, which matches the game. Exposed as
+`ExeTables.scene_routes(scene)`.
 
-Exposed as `ExeTables.scene_routes(scene)`.
+### How a branch is decided
+
+**[proved]** `branch_choice` is `g_script_branch_var` (`0x009C88A4`), an s16,
+and **nothing in the script ever writes it.** Every one of its sixteen writers
+is gameplay code — a civilian who survives, an enemy whose last part is shot
+off, a prop that is shot. So a branch is not a choice the script offers; it is
+a question gameplay has already answered by the time the step list runs out,
+and `next[0]` is the answer when nobody did anything.
+
+**It is cleared on every *step* advance, not on every block change.** This
+document said the weaker thing, and so did `docs/re/addresses.md`, the player's
+README and the player's own walker. The store is on `EvtAdvanceStepOrRoute`'s
+**normal return path**, after `pc = EvtGetStep(...)`:
+
+```c
+g_evt_step_index += 1;
+if (EvtGetStep(scene, block, step) == -1) { ...follow the route...; step = 1; }
+if (EvtGetBlock(scene, block) == -1) { ...scene over...; return; }   /* no reset */
+pc = EvtGetStep(scene, block, step);
+branch_choice = 0;                       /* every step, not every block */
+```
+
+That is what makes the shipped data legible. **Fourteen of the sixteen branch
+blocks that hold a trigger spawn it in the block's last step** — a write made
+any earlier would be wiped by the next step boundary. `FUN_0045EBC0` zeroes it
+again when it loads a block's program, and the scene-over path returns before
+the store, so a scene ends with the last value standing.
+
+The writers, and what each can produce:
+
+| Writer | Value | Reachable in |
+|---|---|---|
+| `CivilianRunScript` op `0x19` `SetRouteBranch` | the s16 at `cmd+4`; all eleven shipped uses pass **1** | both modes |
+| `FUN_00451980` — class 0x21's live state | 1, when its last part is shot off, beside the rescue counters and +400 | both |
+| `PlaceGenericProp` cases `0x0E`/`0x13`, case `0x19` | the descriptor's `+0x11C` at spawn time; 0 | both |
+| `FUN_00468180`, `FUN_00468F00` | `1 - obj+0x11C`, on the prop's first hit | both |
+| `FUN_00469AE0` | 1, when shot in block `0x17` | both |
+| `Class52BranchTriggerUpdate` | the signed byte at `0x00564442 + subtype` — 2, 1, 2 for subtypes 2, 3, 4 | **original only** |
+| `CatBranchTriggerUpdate` | 2, and only in block 8, and only while the var is still 0 | **original only** |
+| `FUN_00469510`, `FUN_0046F090`, `FUN_00470500`, `FUN_00470B70`, `FUN_00474F30`, `0x0046C628`, `0x0047143C` | 2 | **original only** |
+
+**Every write of 2 in the program is behind `g_GameMode == 1`.** Arcade only
+ever sees 0 or 1, which is why so many arcade-reachable branch records fill
+slots 0 and 1 and leave slot 2 a hole — and why the ones that fill slot 2
+instead of slot 1 (stage 1 block 4, stage 2 blocks 3 and 8, stage 4 blocks 7
+and 9) are the original-mode routes.
+
+`tools/verify_branches.py` is the check: for every branch block that spawns a
+trigger, every value that trigger can write must name a **live** slot of that
+block's own record. Fourteen blocks, and it fails if the class 0x52 subtype
+table is flipped or class 0x53's block gate is dropped.
+
+The **civilian** is the mechanism that matters. Eleven of the 136 command
+streams run op `0x19`, all eleven pass 1, and every one of them puts it after
+the `SetOnShot 0` that makes the civilian unshootable — that is, after she is
+safe. Rescue her and the stage takes the other route.
 
 ## Bytecode
 

@@ -19,24 +19,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 24566 | 112 | engine |
+| `game/` | 24628 | 112 | engine |
 | `render/` | 6765 | 26 | render |
-| `app/` | 4888 | 21 | app |
-| `script/` | 3484 | 25 | engine |
-| `ui/` | 2843 | 26 | ui |
+| `app/` | 4901 | 21 | app |
+| `script/` | 3531 | 25 | engine |
+| `ui/` | 2861 | 26 | ui |
 | `bundle/` | 1539 | 10 | engine |
 | `core/` | 884 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | ui |
-| **total** | **45566** | **231** | |
+| **total** | **45706** | **231** | |
 
 The largest files, which is where the pressure to split next is:
 
+* `script/walker.ts` — 1552
 * `game/actor.ts` — 1524
-* `script/walker.ts` — 1514
 * `app/main.ts` — 1396
 * `game/class30/target.ts` — 939
-* `game/globals.ts` — 840
+* `game/globals.ts` — 870
 
 ## The port
 
@@ -55,9 +55,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 49 
 
 | | |
 |---|---|
-| Named functions | 621 in `ghidra/annotations/functions.tsv` |
+| Named functions | 625 in `ghidra/annotations/functions.tsv` |
 | Named globals | 327 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 23 under `tools/`, run together by `verify_all.py` |
+| Verifier scripts | 24 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -109,9 +109,10 @@ nothing exits 3 and is never counted as green.
 | `test:state` | that a save/load and a seek reach the *same world* play did -- the only check that compares two histories rather than one | bundle |
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
+| `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-Two of them need the installed game and three need an exported
+3 of them need the installed game and 3 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

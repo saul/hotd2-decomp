@@ -467,6 +467,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* A route with an arcade preview shot is worth hovering; one without is not. */
 #branchbar .routes button.has-preview { border-color: #4a5763; }
 #branchbar .routes button.has-preview::after { content: " ◉"; color: var(--accent); }
+/* The route the game itself is taking. Last, so it wins over `has-preview`'s
+   border: which way the stage is about to go outranks whether there is a shot
+   of it. The other buttons are an override and read as one. */
+#branchbar .routes button.chosen {
+  border-color: var(--accent); color: var(--accent-2); font-weight: 600;
+}
 
 #loading {
   position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;

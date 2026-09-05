@@ -42,14 +42,15 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "web" / "src"
 OUT = ROOT / "docs" / "STATUS.md"
 
-#: Directory -> layer. The layers themselves are argued in
-#: `docs/PLAYER_ARCHITECTURE.md`; this is only which bucket a folder is in.
-LAYER_OF = {
-    "game": "engine", "script": "engine", "bundle": "engine", "core": "engine",
-    "render": "render",
-    "ui": "ui", "hud": "ui", "audio": "ui",
-    "app": "app",
-}
+#: Directory -> layer, **taken from the checker** rather than restated.
+#:
+#: This was a copy, and it had already drifted twice: it filed `audio/` under
+#: `ui` where `verify_layers.py` -- the tool that actually enforces the
+#: boundary -- files it under `render`, and it never learned about `hod2lib/`,
+#: so a whole package was missing from the table this file exists to print. A
+#: generated document quoting its own copy of a table is the same fault as a
+#: hand-written one quoting a count.
+LAYER_OF = verify_layers.LAYER_OF
 
 
 def src_files(d: Path) -> list[Path]:

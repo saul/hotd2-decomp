@@ -622,3 +622,72 @@ tr.gdead td { opacity: 0.45; }
 .dbg-gname { font-weight: 600; }
 .dbg-box { margin-left: auto; color: var(--dim); }
 .dbg-box:hover { color: var(--accent); }
+
+/* ---- the export screen ----
+   `app/install/ExportScreen.tsx`, which mounts in its own root over the page
+   when there is no bundle to play. Class selectors only: `verify_player_dom`
+   holds every `#id` in this file to something that renders one, and the host
+   element this covers is created imperatively rather than by a component. */
+
+.export-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: 32px 16px;
+  background: rgba(8, 11, 15, 0.94);
+}
+
+.export-card {
+  width: min(720px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px 24px 24px;
+}
+
+.export-card h1 { font-size: 20px; margin: 0 0 8px; }
+.export-card h2 {
+  font-size: 13px; font-weight: 650; color: var(--dim);
+  margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.export-card section:first-of-type h2 { margin-top: 12px; }
+.export-card p { margin: 6px 0; }
+.export-card code { font-family: var(--mono); color: var(--accent); }
+.export-card button { margin-right: 8px; }
+
+.export-lede { color: var(--text); }
+.export-why {
+  font-family: var(--mono); font-size: 12px; color: var(--warn);
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 4px; padding: 8px 10px; overflow-wrap: anywhere;
+}
+.export-note { color: var(--dim); font-size: 12px; }
+.export-ok { color: var(--ok); }
+.export-error {
+  color: var(--spawn); font-family: var(--mono); font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.export-primary { font-weight: 650; }
+
+.export-stages, .export-modes {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+}
+.export-modes { margin-top: 8px; }
+.export-stages label, .export-modes label {
+  display: inline-flex; align-items: center; gap: 5px;
+}
+
+/* Fixed height, not `max-height`: the feed grows a line at a time and a box
+   that resizes on every line makes the button below it move under the cursor. */
+.export-feed {
+  height: 180px; overflow: auto; margin-top: 12px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 4px; padding: 8px 10px;
+  font-family: var(--mono); font-size: 12px; color: var(--dim);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.export-warn { color: var(--warn); }

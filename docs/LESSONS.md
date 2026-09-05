@@ -127,3 +127,13 @@ broken.
 binary is marked `[proved]`, `[likely]` or `[open]`, and a thing is never named
 for where it sits or what it resembles. This is the rule the other nineteen
 lessons are downstream of.
+
+**L21 -- Anything you copy has moved by the time you finish copying it.**
+`web/src/hod2lib/` was written against `tools/hod2lib/` over one long session,
+and a concurrent workstream committed a new character-type rule to
+`spawnres.py` in the middle of it. The port reproduced the version that had
+been read, exactly and wrongly: stage 2 came out with 291 placements against
+the reference's 292, and nothing but the output comparison could have said so.
+Re-diff the source against `HEAD` before you call a transcription finished --
+`git diff <the commit you started from>..HEAD -- <the source>` -- and make the
+check that compares the two outputs, not the two texts.

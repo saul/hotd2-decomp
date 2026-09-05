@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""No exporter may swallow a failure silently, and the schema digest is current.
+"""No exporter may swallow a failure silently, and the two libraries agree.
 
-Two checks, both about the exporter telling the truth about what it produced.
+Four checks. Three are about the exporter telling the truth about what it
+produced; the fourth is about there being two of it.
 
 Thirty sites under `tools/hod2lib/` and `tools/export_*.py` answer an
 exception with an empty result -- `return {}`, `return []`,
@@ -31,6 +32,15 @@ regenerated only when someone remembers is `BUNDLE_FORMAT` again -- so this
 re-derives it and fails when the committed copy is stale. **That is what makes
 the digest impossible to forget**: the digest catches a stale bundle, and this
 catches a stale digest.
+
+The fourth check exists because `web/src/hod2lib/` is the same library in
+TypeScript, so that a bundle can be built in a browser. Two implementations of
+one format specification is the drift this repository spends most of its checks
+preventing, and `tools/compare_bundles.py` is what proves the *output* agrees.
+This is the cheap half: the two packages hold the same modules, stamp the same
+version into a manifest, and the generated rig table is current. None of it
+needs a game directory, so it runs on every commit rather than only when one is
+to hand.
 
 Run from anywhere; exit code is non-zero when a check fails.
 """
@@ -184,6 +194,82 @@ def check_module_list() -> list[str]:
     return out
 
 
+#: Modules one implementation has and the other does not, with the reason.
+#: A module that appears on neither side of this and only in one package is a
+#: port that was forgotten, which is exactly what the check is for.
+LIBRARY_ONLY = {
+    # Python reads `web/src/bundle/*.ts` off disk to build the digest. The
+    # TypeScript exporter is *compiled against* those declarations, so it
+    # imports `schema_hash.ts` and the digest is right by construction.
+    "schema": "python",
+    # The seam, and the two things `struct` and `json.dumps` give Python for
+    # free. See docs/TS_PORT.md.
+    "io": "typescript",
+    "bytes": "typescript",
+    "pyjson": "typescript",
+    # `hashlib` is Python's; `crypto.subtle` is a module because it is async.
+    "sha256": "typescript",
+    # Generated from `rigs.py` by `tools/gen_rig_data.py`; checked below.
+    "rigs_data": "typescript",
+}
+
+TS_LIB = ROOT / "web" / "src" / "hod2lib"
+
+
+def check_two_libraries() -> list[str]:
+    """The Python package and the TypeScript one, module for module."""
+    out: list[str] = []
+    py = {p.stem for p in LIB.glob("*.py") if not p.stem.startswith("_")}
+    ts = {p.stem for p in TS_LIB.glob("*.ts")}
+    for m in sorted(py - ts):
+        if LIBRARY_ONLY.get(m) == "python":
+            continue
+        out.append(f"tools/hod2lib/{m}.py has no web/src/hod2lib/{m}.ts -- "
+                   f"port it, or say why not in verify_exporters.LIBRARY_ONLY")
+    for m in sorted(ts - py):
+        if LIBRARY_ONLY.get(m) == "typescript":
+            continue
+        out.append(f"web/src/hod2lib/{m}.ts has no tools/hod2lib/{m}.py -- "
+                   f"the reference implementation is the Python one; add it "
+                   f"there, or say why not in verify_exporters.LIBRARY_ONLY")
+    for m in sorted(LIBRARY_ONLY):
+        if m not in py and m not in ts:
+            out.append(f"verify_exporters.LIBRARY_ONLY names `{m}`, which is "
+                       f"in neither package")
+
+    # Two numbers that reach `manifest.json`. `BUNDLE_FORMAT` is the one a
+    # client refuses on; `tool_version` says which library wrote the bundle,
+    # and a bundle must not be able to say which *implementation* did.
+    from hod2lib import bundle as pybundle, __version__ as pyversion
+    src = (TS_LIB / "bundle.ts").read_text(encoding="utf-8")
+    m = re.search(r"export const BUNDLE_FORMAT = (\d+);", src)
+    if not m:
+        out.append("web/src/hod2lib/bundle.ts declares no BUNDLE_FORMAT")
+    elif int(m.group(1)) != pybundle.BUNDLE_FORMAT:
+        out.append(f"BUNDLE_FORMAT is {pybundle.BUNDLE_FORMAT} in Python and "
+                   f"{m.group(1)} in TypeScript")
+    m = re.search(r'export const TOOL_VERSION = "([^"]+)";', src)
+    if not m:
+        out.append("web/src/hod2lib/bundle.ts declares no TOOL_VERSION")
+    elif m.group(1) != pyversion:
+        out.append(f"hod2lib.__version__ is {pyversion!r} and "
+                   f"TOOL_VERSION is {m.group(1)!r}")
+    return out
+
+
+def check_rig_data() -> list[str]:
+    """`rigs_data.ts` against the transcription it is generated from."""
+    import gen_rig_data
+    want = gen_rig_data.render()
+    path = gen_rig_data.OUT
+    have = path.read_text(encoding="utf-8") if path.exists() else None
+    if have == want:
+        return []
+    return [f"{path.relative_to(ROOT)} is stale -- run "
+            f"`python3 tools/gen_rig_data.py` and commit it with the "
+            f"`rigs.py` change that moved it"]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     # Accepted and unused: the verifier suite passes it to every tools/verify_*
@@ -228,6 +314,7 @@ def main() -> int:
     stale = check_schema_hash()
     undocumented = check_module_list()
     decl_sources = check_schema_sources()
+    two_libs = check_two_libraries() + check_rig_data()
 
     print("exporters -- what a swallowed failure has to say\n")
     print(f"  {total} handlers, {len(bad)} of them silent"
@@ -271,6 +358,21 @@ def main() -> int:
         return 1
     print("  every hod2lib module is named in `__init__.py`, and every name "
           "exists\n")
+    print("clean")
+
+    print("\nthe two implementations of the library\n")
+    if two_libs:
+        for m in two_libs:
+            print(f"FAIL {m}")
+        print("\nThe Python package is the reference and the TypeScript one "
+              "has to agree with it. `tools/compare_bundles.py` checks the "
+              "output; this checks the shape. See docs/TS_PORT.md.")
+        return 1
+    n_py = len([p for p in LIB.glob("*.py") if not p.stem.startswith("_")])
+    n_ts = len(list(TS_LIB.glob("*.ts")))
+    print(f"  {n_py} python modules, {n_ts} typescript, same set either way "
+          f"less {len(LIBRARY_ONLY)} declared; BUNDLE_FORMAT and "
+          f"tool_version agree; rigs_data.ts is current\n")
     print("clean")
     return 0
 

@@ -34,6 +34,8 @@ import { StageScene } from "../render/stagescene";
 import { SpawnLayer } from "../render/overlays";
 import { FreeRoam, isTyping } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
+import { hasCachedBundle, useCachedBundle } from "./install";
+import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
@@ -529,15 +531,37 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // `app/pacer.ts` says they have to go in. It ends by asking for the first
     // frame, so the loop is turning for the whole of the fetch below.
     this.pacer.start(this.state);
+    // Two places a bundle can come from, and the server is tried first because
+    // a developer with `extract/player/` populated should not be asked to
+    // export again. `useCachedBundle` points `bundle/load.ts` at the Origin
+    // Private File System instead, which is where an in-page export lands.
+    let failure: string | null = null;
     try {
       this.manifest = await loadManifest();
     } catch (err) {
-      return this.fail(
-        `${err instanceof Error ? err.message : String(err)}\n\n` +
-          "Build a bundle first:\n" +
-          '  python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all',
-      );
+      failure = err instanceof Error ? err.message : String(err);
+      if (await hasCachedBundle()) {
+        useCachedBundle();
+        try {
+          this.manifest = await loadManifest();
+          failure = null;
+        } catch (err2) {
+          failure = err2 instanceof Error ? err2.message : String(err2);
+        }
+      }
     }
+    if (failure !== null) {
+      // No bundle either way. The export screen is the answer to that, so it
+      // is offered rather than described -- the message is what it opens with.
+      this.fail(`${failure}\n\nBuild one from your own copy of the game.`);
+      showExportScreen({
+        reason: failure,
+        onDismiss: null,
+        onReady: () => { window.location.reload(); },
+      });
+      return;
+    }
+    hideExportScreen();
 
     // The select is React's; this is only the list it draws from.
     this.stages = [

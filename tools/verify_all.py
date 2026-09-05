@@ -85,6 +85,11 @@ CHECKS: list[Check] = [
           "the state machines, driven headless against hand-written tables"),
     Check("test:bundle", "web", ["npm", "run", "--silent", "test:bundle"],
           "that the bundle reader refuses what it should refuse"),
+    Check("test:export", "web", ["npm", "run", "--silent", "test:export"],
+          "the three pieces of the TypeScript exporter that comparing two "
+          "bundles cannot check -- `json.dumps`'s separators, the "
+          "case-insensitive path resolve, and an archive something else can "
+          "open"),
     Check("test:scope", "web", ["npm", "run", "--silent", "test:scope"],
           "that lifetimes are given back"),
     Check("test:projection", "web", ["npm", "run", "--silent", "test:projection"],
@@ -124,6 +129,12 @@ CHECKS: list[Check] = [
           ["python3", "tools/baseline.py", "--game-dir", "{game_dir}",
            "--verify"],
           "that the installed assets still hash to `manifest.csv`",
+          NEEDS_GAME),
+    Check("verify_parity", ".",
+          ["python3", "tools/verify_parity.py", "--game-dir", "{game_dir}"],
+          "that the TypeScript exporter and the Python one write the same "
+          "bundle -- the only check that compares two implementations of a "
+          "format rather than one implementation against a file",
           NEEDS_GAME),
 ]
 

@@ -9,6 +9,14 @@ Two halves that must not drift apart:
   transcription of the exe. Workflow: **`/gameplay-port`** for anything under
   `web/src/game/`.
 
+**`web/src/hod2lib/` is `tools/hod2lib/` in TypeScript**, so a bundle can be
+built inside the page. The Python is the reference: a format change lands there
+first and in the TypeScript in the same commit. `tools/verify_exporters.py`
+checks that the two packages hold the same modules and stamp the same version;
+`tools/verify_parity.py` exports a stage both ways and compares the bytes. See
+`docs/TS_PORT.md` for what "identical" means, exactly, and for the three places
+it cannot be.
+
 Read `docs/PLAN.md` for what is worth doing, `docs/PLAYER_ARCHITECTURE.md`
 before changing the player's shape.
 

@@ -73,7 +73,7 @@ the client needs **Node 20+**. Only the optional `tools/blender_*.py` helpers
 want anything else, and those run inside Blender.
 
 ```sh
-# 1. build the bundle. Python parses every format here; the browser parses none
+# 1. build the bundle
 python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 
 # 2. run the client
@@ -83,6 +83,21 @@ cd web && npm install && npm run dev        # http://localhost:5173
 `--all` builds all six stages in **both** game modes. Add `--stage 2` for one
 stage, or `--arcade` / `--original` for one mode. The export prints what it
 could not read at the end, including when that is nothing.
+
+**There are two exporters and they write the same bundle.** `web/src/hod2lib/`
+is the Python library ported to TypeScript, so the same code runs from a CLI
+and inside the page:
+
+```sh
+cd web && npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
+```
+
+That is the faster of the two — about nine times — and it takes the same flags.
+Or skip step 1 entirely: open the client with no bundle and it offers to build
+one from your install, in a worker, into a cache that survives a reload and can
+be downloaded as a zip. The Python remains the reference implementation and
+`tools/verify_parity.py` proves the two agree, byte for byte through the
+geometry. See [`docs/TS_PORT.md`](docs/TS_PORT.md).
 
 Every bit of player state is in the URL, so a bug report is a link:
 `?stage=2&mode=play&block=3&step=1&op=14`, or `?stage=2&slot=59&frame=170` to
@@ -129,6 +144,7 @@ One fact, one home. **No document quotes a number another one computes.**
 | [`docs/re/addresses.md`](docs/re/addresses.md) | the addresses that matter, by subsystem. |
 | `ghidra/annotations/*.tsv` | **the names.** The source of truth for both halves; sorted by address, written only by `tools/annotate.py`. |
 | [`docs/EXPORTING.md`](docs/EXPORTING.md) | exporting to glTF and opening it in Blender, and how to tell an exporter bug from a viewer setting. |
+| [`docs/TS_PORT.md`](docs/TS_PORT.md) | **the two exporters** — what "identical output" means precisely, and how the browser builds a bundle for itself. |
 | [`web/README.md`](web/README.md) | running the player, and an explicit account of what is faithful and what is approximated. |
 | [`docs/PLAYER_ARCHITECTURE.md`](docs/PLAYER_ARCHITECTURE.md) | **the player's shape** — the layers, the rules, the checks that enforce them, and the order of work. |
 | [`docs/PLAYER_PROGRESS.md`](docs/PLAYER_PROGRESS.md) | what the player does, and the reading errors it surfaced. |

@@ -18,7 +18,7 @@
  * it gains from being a file is that the order is visible as one thing rather
  * than as two hundred lines in the middle of a class.
  */
-import { loadStage } from "../bundle";
+import { loadStage, releaseGeometry } from "../bundle";
 import type { StageEntry } from "../bundle";
 import { StageScene } from "../render/stagescene";
 import { CamPaths } from "../game/camera/curve";
@@ -98,6 +98,11 @@ export async function loadStageInto(p: Player): Promise<void> {
   if (superseded()) return;
   p.paths = new CamPaths(bundle.cam);
   const scene3d = await StageScene.load(bundle.geometryUrl, bundle.script);
+  // A bundle read out of the browser's own cache hands over a `blob:` URL, and
+  // a 58 MB blob nothing revokes is 58 MB the tab keeps until it closes. The
+  // loader is done with it by here; over the server it is a plain path and
+  // this is a no-op.
+  releaseGeometry(bundle.geometryUrl);
   if (superseded()) return scene3d.dispose();
   p.scene3d = scene3d;
   // Honour the per-mesh fog bit and compile the radial-fog variant.

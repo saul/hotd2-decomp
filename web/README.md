@@ -10,18 +10,29 @@ Plan and rationale: [`../docs/PLAYER_PLAN.md`](../docs/PLAYER_PLAN.md).
 
 ## Run it
 
-The client does **not** parse `pol/`, `tex/`, `cam/`, `evt/` or `Hod2.exe`.
-Python pre-processes; the browser consumes. So there are two steps.
+The client does not parse `pol/`, `tex/`, `cam/`, `evt/` or `Hod2.exe` *while
+it is playing*: it loads glTF, evaluates Hermite curves and walks the resolved
+event script. Something has to have parsed them first, and there are now three
+ways to arrange that.
 
 ```sh
-# 1. build the bundle (once, or whenever hod2lib changes)
+# 1. build the bundle (once, or whenever the library changes)
 python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
+#    ...or the same thing in TypeScript, about nine times faster
+cd web && npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 
 # 2. run the client
 cd web
 npm install
 npm run dev          # http://localhost:5173
 ```
+
+**Or build one from inside the page.** Open the client with no bundle and it
+offers to: choose the install folder, pick stages and modes, and the export
+runs in a worker into the Origin Private File System. It survives a reload and
+downloads as a zip that unpacks into `extract/player/`. `src/hod2lib/` is the
+library both paths run, and `docs/TS_PORT.md` says what "the same bundle"
+means down to the byte.
 
 Add `--original` to step 1 to build the Original Mode (game mode 1) variants
 too, which the **Original** checkbox then switches between.

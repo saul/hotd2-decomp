@@ -24,10 +24,56 @@ import type { ScriptJson, StageBundle } from "./stage";
 
 const ROOT = "bundle";
 
-async function getJson<T>(url: string): Promise<T> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
-  return (await r.json()) as T;
+/**
+ * Where a bundle's files come from.
+ *
+ * There are two: the dev server, which serves `extract/player/` under
+ * `/bundle/`, and the browser's own cache, which holds an export the page made
+ * itself. They have the same tree and the same names, so this is the whole
+ * difference between them -- one `fetch`, or one `File` out of the Origin
+ * Private File System.
+ *
+ * `geometry` is separate from `json` because a GLB is handed to three.js as a
+ * URL rather than parsed here, and a cached one has to become a `blob:` URL
+ * that is later revoked. {@link releaseGeometry} is that revoke.
+ */
+export interface BundleSource {
+  json<T>(path: string): Promise<T>;
+  geometry(path: string): Promise<string>;
+  release?(url: string): void;
+}
+
+const HTTP: BundleSource = {
+  async json<T>(path: string): Promise<T> {
+    const url = `${ROOT}/${path}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
+    return (await r.json()) as T;
+  },
+  async geometry(path: string): Promise<string> {
+    return `${ROOT}/${path}`;
+  },
+};
+
+let source: BundleSource = HTTP;
+
+/** Read bundles from *src* from now on. Passing null goes back to the server. */
+export function setBundleSource(src: BundleSource | null): void {
+  source = src ?? HTTP;
+}
+
+/** Whether the bundle currently being read is one the page exported. */
+export function usingCachedBundle(): boolean {
+  return source !== HTTP;
+}
+
+/** Give back whatever {@link loadStage} handed out as `geometryUrl`. */
+export function releaseGeometry(url: string): void {
+  source.release?.(url);
+}
+
+function getJson<T>(path: string): Promise<T> {
+  return source.json<T>(path);
 }
 
 /**
@@ -83,7 +129,7 @@ export function manifestRefusal(m: Manifest | null | undefined): string | null {
 }
 
 export async function loadManifest(): Promise<Manifest> {
-  const m = await getJson<Manifest>(`${ROOT}/manifest.json`);
+  const m = await getJson<Manifest>("manifest.json");
   const no = manifestRefusal(m);
   if (no) throw new Error(no);
   return m;
@@ -105,7 +151,7 @@ function checkStageFormat(what: string, format: number | undefined): void {
 
 export async function loadStage(entry: StageEntry): Promise<StageBundle> {
   checkStageFormat(entry.name, entry.format);
-  const dir = `${ROOT}/${entry.name}`;
+  const dir = entry.name;
   const [script, cam] = await Promise.all([
     getJson<ScriptJson>(`${dir}/${entry.script}`),
     getJson<CamJson>(`${dir}/${entry.cam}`),
@@ -115,5 +161,6 @@ export async function loadStage(entry: StageEntry): Promise<StageBundle> {
   // own format while the entry indexing it says whatever this export said.
   checkStageFormat(entry.script, script.format);
   checkStageFormat(entry.cam, cam.format);
-  return { entry, script, cam, geometryUrl: `${dir}/${entry.geometry}` };
+  return { entry, script, cam,
+           geometryUrl: await source.geometry(`${dir}/${entry.geometry}`) };
 }

@@ -20,23 +20,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
 | `game/` | 26441 | 119 | engine |
+| `hod2lib/` | 13420 | 34 | engine |
 | `render/` | 6765 | 26 | render |
-| `app/` | 4901 | 21 | app |
+| `app/` | 6082 | 28 | app |
 | `script/` | 3542 | 25 | engine |
 | `ui/` | 2861 | 26 | ui |
-| `bundle/` | 1587 | 10 | engine |
+| `bundle/` | 1634 | 10 | engine |
 | `core/` | 884 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
-| `audio/` | 248 | 1 | ui |
-| **total** | **47578** | **238** | |
+| `audio/` | 248 | 1 | render |
+| **total** | **62226** | **279** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `script/walker.ts` — 1563
 * `game/actor.ts` — 1545
-* `app/main.ts` — 1396
-* `game/class30/target.ts` — 939
-* `game/globals.ts` — 918
+* `hod2lib/exetab.ts` — 1441
+* `app/main.ts` — 1420
+* `hod2lib/gltf.ts` — 1300
 
 ## The port
 
@@ -57,7 +58,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 49 
 |---|---|
 | Named functions | 645 in `ghidra/annotations/functions.tsv` |
 | Named globals | 331 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 24 under `tools/`, run together by `verify_all.py` |
+| Verifier scripts | 25 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -98,6 +99,7 @@ nothing exits 3 and is never counted as green.
 | `status` | that `docs/STATUS.md` still matches the tree it describes | — |
 | `test:port` | the state machines, driven headless against hand-written tables | — |
 | `test:bundle` | that the bundle reader refuses what it should refuse | — |
+| `test:export` | the three pieces of the TypeScript exporter that comparing two bundles cannot check -- `json.dumps`'s separators, the case-insensitive path resolve, and an archive something else can open | — |
 | `test:scope` | that lifetimes are given back | — |
 | `test:projection` | that unchanged slices keep their identity across a frame | — |
 | `test:ui` | that the page has the shape the stylesheet expects | — |
@@ -111,8 +113,9 @@ nothing exits 3 and is never counted as green.
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
+| `verify_parity` | that the TypeScript exporter and the Python one write the same bundle -- the only check that compares two implementations of a format rather than one implementation against a file | game-dir |
 
-3 of them need the installed game and 3 need an exported
+4 of them need the installed game and 3 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

@@ -35,6 +35,15 @@ SRC = ROOT / "web" / "src"
 
 LAYER_OF = {
     "core": "engine", "bundle": "engine", "script": "engine", "game": "engine",
+    # `hod2lib/` is the asset library -- the TypeScript port of
+    # `tools/hod2lib/`, so that a bundle can be built in the browser. It is an
+    # engine directory because it needs exactly the engine's constraints and
+    # for the same reason: no three.js, no DOM, no clock, no `Math.random()`.
+    # A parser that reads the wall clock cannot be replayed, and one that
+    # touches the document cannot run in the worker it was written for. Its
+    # bytes arrive through an interface; `app/install/` and `web/tools/lib/`
+    # are the two implementations of it.
+    "hod2lib": "engine",
     # `audio/` sits with `render/`: an output device that reads engine state
     # and owns nothing, which is the same contract. It was in `hud/`, where the
     # architecture doc had already noted it did not belong -- "bgm.ts -- audio,

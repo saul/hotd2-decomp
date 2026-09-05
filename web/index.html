@@ -13,6 +13,18 @@
          class came to fight over one attribute, and how a renamed id could
          make a panel silently disappear. -->
     <div id="app"></div>
+    <!-- The export screen's mount point, and the reason it is here rather
+         than created on demand: `no-dom-insertion` in `tools/verify_layers.py`
+         is an error rule at zero, and it is right -- an element appended by a
+         layer has two owners and paints in whatever order the two happened to
+         mount in. So the page declares the element and React owns what is
+         inside it, which is the same contract `#app` has.
+
+         It is a sibling of `#app` rather than a child so that the player's
+         tree and the export screen's are two roots that cannot re-render each
+         other. `app/install/ExportScreen.tsx` fills it; it stays empty, and
+         invisible, whenever a bundle loaded. -->
+    <div id="export-root"></div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

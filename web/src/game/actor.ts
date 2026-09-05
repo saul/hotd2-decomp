@@ -20,6 +20,7 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
   from "./class20/state";
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
+import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
   from "./class24/state";
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
@@ -1014,6 +1015,20 @@ export interface ActorBase {
    */
   class52: CharacterPlacement["class52"];
   /**
+   * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
+   * shot against, and the **whole** hit test for an actor with no skeleton.
+   *
+   * The engine tests this sphere first for every registered object and only
+   * then descends into the bone tree, and only when `obj+0x34` bit 7 is set
+   * and the character type has nodes. A class that sets neither — class 0x52
+   * is the one the port reaches — is hit as one sphere, whole.
+   *
+   * Zero means the class never set one, which for the port means "not
+   * shootable by the sphere test"; the skinned classes are picked through
+   * their bones instead and do not read this.
+   */
+  hitRadius: number;        // +0x124
+  /**
    * Class 0x53's descriptor tail — the animation set and the sub-type. Sub-type
    * 2 and up is a shootable route-branch trigger, and only in event block 8.
    */
@@ -1372,10 +1387,12 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Zombie; zom: ZombieTail })
   | (ActorBase & { cls: SpawnClass.OneHitTarget; tgt: OneHitTargetTail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
+  | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
-      | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy> });
+      | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
+      | SpawnClass.Mouse> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1476,6 +1493,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     oneHitTarget: null,
     class52: null,
     class53: null,
+    hitRadius: 0,
     entranceMotion: 0,
     pounce: null,
     grab: null,
@@ -1540,6 +1558,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.RankScaledEnemy) {
     return { ...head, cls, rescue: makeRescueTargetTail() };
+  }
+  if (cls === SpawnClass.Mouse) {
+    return { ...head, cls, mouse: makeMouseTail() };
   }
   return { ...head, cls };
 }

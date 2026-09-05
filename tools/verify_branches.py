@@ -24,7 +24,7 @@ The writers modelled here are the ones attached to a spawned actor:
   whole reachable set is walked.
 * **class 0x21** -- ``FUN_00451980`` writes 1 when its last part is shot off,
   beside the rescue counters and the +400.
-* **class 0x52** subtypes 2, 3 and 4 -- ``Class52BranchTriggerUpdate`` writes
+* **class 0x52** subtypes 2, 3 and 4 -- ``MouseBranchTriggerUpdate`` writes
   the signed byte at ``0x00564442 + subtype``, which is 2, 1, 2.
 * **class 0x53** subtype >= 2 -- ``CatBranchTriggerUpdate`` writes 2, and
   **only while ``g_evt_block_index == 8``**. That gate is load-bearing: stage
@@ -66,7 +66,7 @@ from hod2lib.stage import Stage  # noqa: E402
 
 STAGES = (1, 2, 3, 4, 5, 6)
 
-#: `Class52BranchTriggerUpdate`: the signed bytes at 0x00564442 + subtype.
+#: `MouseBranchTriggerUpdate`: the signed bytes at 0x00564442 + subtype.
 #: Subtypes 0 and 1 are the wanderers and write nothing.
 CLASS52_BRANCH = {2: 2, 3: 1, 4: 2}
 #: `CatBranchTriggerUpdate` writes 2, and only in this event block.

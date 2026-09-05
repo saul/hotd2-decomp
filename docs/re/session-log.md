@@ -11519,3 +11519,123 @@ sixteen the port cannot fire.
    a player who never found the key, but not for one who did.
 3. The routines these writers live in. `PropUpdateType40`'s forty fragments and
    `StoryModeSwitchUpdate`'s hinge curve are the two most visible.
+
+---
+
+## Session — the mouse, and an actor that is one sphere
+
+**The task.** The previous session ported all sixteen writers of
+`g_script_branch_var` and reported one of them unreachable: class 0x52's
+trigger had its logic, its table and its mode gate, and no way to be shot. The
+report called it a renderer gap. This closes it.
+
+### The species was in the slot table all along
+
+`MouseInit`'s draw slots are `0x1385 + rand() % 10`, and
+`ExeTables.asset_slots()` maps `0x1385`..`0x138E` to **`mouse.bin` entries 0
+to 9**. So the ten values that looked like a random model are the ten frames
+of one animation strip, and the class is a **mouse** — settled by an asset
+filename, which is one of the two name tables this project trusts, exactly as
+`cat.bin` settled class 0x53 last time.
+
+`docs/formats/spawns.md` had the species `[open]` "because the class plays no
+sound". It does not need to make a sound; it needs to be drawn from a named
+file, and it is. Renamed `MouseInit`, `MouseWanderUpdate` and
+`MouseBranchTriggerUpdate`, and `SpawnClass.Critter` is `SpawnClass.Mouse`.
+
+The strip also explains the class. `sub+0x24` and `sub+0x22` are the first and
+last slots, `sub+0x20` the one being drawn, and every moving arm advances and
+wraps it. A wanderer starts on `rand() % 10` so a row of them does not run in
+step; the trigger pins it to frame 0 until it is shot and then runs it while
+fleeing.
+
+### An actor with no skeleton is one sphere
+
+The gap was never really the model. It was that the port's shot test had one
+arm and the engine has three:
+
+```c
+ProcessPlayerShots:  (obj+0x34 & 0x10) ? ShotTestMesh : ShotTestSphere
+
+ShotTestSphere:
+  if (RayTestSphere(player, obj+0x70, obj+0x74, obj+0x78, obj+0x124) > 0) {
+      if ((obj+0x34 & 0x80) && g_character_skeletons[obj+0x1F4]->nodes > 0
+          && !(obj+0x34 & 0x8000))
+          ShotTestSkeleton(obj, player);        // bone by bone
+      else
+          ...the whole actor is one candidate...
+  }
+```
+
+The **else-arm** is the whole hit test for a class with no skeleton, and
+`MouseInit` sets `obj+0x124 = 2.0` and nothing else. `docs/formats/civilians.md`
+had already written the fork down for class 0x10; nobody had noticed it meant a
+class could be shot with no bones at all.
+
+So: `Actor.hitRadius` (`+0x124`), a `render/slotmodels.ts` that clones the
+model per live actor and offers exactly that sphere, and one more source in
+`pickShot` beside the props. `render.test.ts` drives it against a hand-built
+template rig: a ray through the mouse hits, one further off than the radius
+misses, one already past it misses, and a radius of zero is not in the test at
+all. Watched the radius check fail with the comparison widened.
+
+**A bug found while wiring it.** `pickShot` did not update `bestT` after taking
+a prop, so a third source compared against the *bone* distance rather than the
+nearest hit so far. With two sources it could not show; with three it would
+have let a slot actor behind a barrel take the shot.
+
+[diverges] The port still does **not** test the bounding sphere first for a
+skinned actor — it goes straight to the bones, where the engine rejects the
+shot outright unless it is also inside `obj+0x124`. Changing that would alter
+every zombie hit in the game and wants its own measurement. Recorded in
+`render/slotmodels.ts` beside the routine that says otherwise.
+
+### Three layers had to move, and none of them had to bend
+
+* **exporter** — `actor_slot_entry` emits a hidden `slots_actor` rig, the same
+  shape `breakable_slot_entry` has had for the props. And `resolve_for_stage`
+  stopped dropping class 0x52: its `identified` gate is about **geometry**, not
+  about the placement, and the port needs the descriptor tail whatever the
+  renderer can do with it. The escape is one named frozenset, not a hole —
+  reading `desc+0x24` as a character type for every class once "identified" 962
+  of 1225 spawns, most of them as `char_adv02`.
+* **`game/`** — `SpawnSlotActors`, beside `SpawnPropContainers` and for the
+  same reason: the port's ordinary spawn path runs through the character pool,
+  an actor appears when a skinned hierarchy is ready for it, and a class with
+  no character type never gets one.
+* **`render/`** — the new layer. Two lifetimes, as in `breakables.ts`:
+  templates belong to the stage, nodes follow `G.g_object_list`.
+
+No layer rule was bent to do it and none needed to be. `render/` reads engine
+state and owns nothing, which is exactly what this layer does.
+
+### `CHAR_TYPE_RULES` documented a form the code had no arm for
+
+`spawnres.CHAR_TYPE_RULES`' docstring has named a `("desc24",)` form since it
+was written — the opcode-0x09 path, where `FUN_004088A0` copies `(s8)desc+0x24`
+straight to `obj+0x1F4`. `resolve_spawn` had `literal` and `tail` and no
+`desc24`. That was found last session while porting class 0x21 and is written
+down here because a documented form with no implementation is a lie a reader
+cannot see through.
+
+### What this does not do
+
+The mouse is drawn as a static clone per frame rather than as one node whose
+material changes, which is a clone per frame for a running mouse. It is ten
+small models and there are at most four alive; if it ever matters, the fix is a
+node per actor with ten children and a `visible` flip.
+
+`verify_parity` — a peer's check, added to the working tree while this was in
+progress — is **red**, and correctly: it compares the Python exporter against a
+TypeScript one still being written, and this session changed the Python side.
+Four more placements, one more rig, ten more meshes in stage 1. The TS mirror
+has to catch up; that is a hand-off, not a failure.
+
+### Next actions
+
+1. `g_original_item_slots` is still never filled — `FUN_00475E40`, the pickup,
+   is unported — so the three key-gated branch routes remain unreachable.
+2. The sphere-first ordering above, measured rather than argued.
+3. `MouseWanderUpdate`'s subtype 1 draws through
+   `SubmitSlotWithSceneLightArray` where subtype 0 uses `AssetDrawSlot`: the
+   same model, lit or not. `render/slotmodels.ts` draws both the same way.

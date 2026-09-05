@@ -20,7 +20,8 @@ import type { CameraFrame } from "../core/camera";
 import type { Walker } from "../script/walker";
 import {
   RetireUnlistedActor, SpawnPropContainers, SpawnScriptedCharacters,
-  type CharacterSpawnRequest,
+  SpawnSlotActors,
+  type CharacterSpawnRequest, type ScriptSpawn,
 } from "../game/director";
 import type { Actor } from "../game/actor";
 import type { Rng } from "../core/rng";
@@ -243,9 +244,14 @@ export class CharacterBindSystem implements System {
  * `SpawnFromDescriptor`'s decisions in a layer no headless test can reach.
  */
 export function syncCharacterSpawns(chars: CharacterPool,
-                                    spawns: readonly { at: number }[]): void {
+                                    spawns: readonly ScriptSpawn[]): void {
   const made = SpawnScriptedCharacters(chars.readySpawns(spawns), chars.rng);
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
+  // ...and the ones the character pool can never make, because their model is
+  // an asset slot and they have no character type to resolve. See
+  // `SpawnSlotActors`. Same `chars.rng`, because the engine draws from one
+  // `rand()` and every spawn on this frame is on the same stream.
+  SpawnSlotActors(spawns, chars.rng);
 }
 
 /**

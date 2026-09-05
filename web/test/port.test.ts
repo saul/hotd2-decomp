@@ -131,6 +131,10 @@ import {
   CLASS21_MOTION_FREED, RescueTargetState, RescueTargetUpdate,
 } from "../src/game/class21";
 import {
+  MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS, MOUSE_LAST_SLOT,
+  MouseBranchTriggerUpdate, MouseState, MouseWanderUpdate,
+} from "../src/game/class52";
+import {
   PlaceChainSegments, PlaceFragmentProps, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
 import {
@@ -2681,21 +2685,92 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
   // Class 0x52's per-sub-type table is the reading stage 4 block 10 proves:
   // `next = {12, 18, 19}` with one sub-type 3 and one sub-type 4 in it.
   for (const [sub, want] of [[2, 2], [3, 1], [4, 2]] as [number, number][]) {
-    const a = triggerScene(SpawnClass.Critter, { class52: { subtype: sub } });
+    const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: sub } });
     MarkActorShot(a, 0, 0);
     tick(a);
     check(`class 0x52 sub-type ${sub} writes route ${want}`,
           G.g_script_branch_var === want, String(G.g_script_branch_var));
   }
   {
-    const a = triggerScene(SpawnClass.Critter, { class52: { subtype: 0 } });
+    const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: 0 } });
     MarkActorShot(a, 0, 0);
     tick(a);
     check("...and a wanderer writes nothing", G.g_script_branch_var === 0,
           String(G.g_script_branch_var));
-    const arcade = triggerScene(SpawnClass.Critter,
+    // `ActorDespawn` sets `despawned`, not `dead`: the actor has removed
+    // itself and `GameUpdate`'s sweep takes it off `g_object_list`. `dead` is
+    // hit points, and this class has none.
+    const arcade = triggerScene(SpawnClass.Mouse,
                                 { class52: { subtype: 2 } }, GameMode.Arcade);
-    check("...and arcade never builds a trigger at all", arcade.dead);
+    check("...and arcade never builds a trigger at all", arcade.despawned);
+  }
+
+  // The mouse's own machine: the strip, the wander and the flight. It is
+  // ported in full because until now it was ported in half and unreachable.
+  {
+    const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: 0 } });
+    if (a.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+    check("the Init opens on a frame of the ten-slot strip",
+          a.mouse.frame >= MOUSE_FIRST_SLOT
+          && a.mouse.frame <= MOUSE_LAST_SLOT,
+          a.mouse.frame.toString(16));
+    check("...and the shot-test radius `ShotTestSphere` measures against",
+          a.hitRadius === MOUSE_HIT_RADIUS, String(a.hitRadius));
+
+    // The strip wraps rather than running off the end of `mouse.bin`.
+    a.mouse.frame = MOUSE_LAST_SLOT;
+    a.mouse.state = MouseState.Run;
+    MouseWanderUpdate(a, { eye: EYE, dt: 1 / 60, rng: new Rng(3),
+                           host: NULL_HOST });
+    check("the strip wraps from the last slot back to the first",
+          a.mouse.frame === MOUSE_FIRST_SLOT, a.mouse.frame.toString(16));
+
+    // 600 frames and it leaves on its own, which is why four of these in
+    // stage 1 block 1 answer no branch: they are gone before the route is
+    // taken, and they are subtype 0 besides.
+    const b = triggerScene(SpawnClass.Mouse, { class52: { subtype: 0 } });
+    if (b.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+    for (let i = 0; i < 601; i++) {
+      MouseWanderUpdate(b, { eye: EYE, dt: 1 / 60, rng: new Rng(9),
+                             host: NULL_HOST });
+    }
+    check("a wanderer leaves at 600 frames", b.despawned,
+          `life ${b.mouse.life}`);
+  }
+
+  // The trigger's flight: shot, then the per-subtype bound, then stopped.
+  {
+    const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: 3 } });
+    if (a.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+    a.pos = vec3(-500, 0, 0);
+    a.yaw = 0x4000;                    // -x in the port's world convention
+    MarkActorShot(a, 0, 0);
+    MouseBranchTriggerUpdate(a);
+    check("the shot writes the route and starts the flight",
+          G.g_script_branch_var === 1 && a.mouse.state === MouseState.Pause,
+          `var ${G.g_script_branch_var} state ${a.mouse.state}`);
+    MouseBranchTriggerUpdate(a);
+    check("...which resolves to subtype 3's own arm",
+          a.mouse.state === MouseState.FleeSubtype3, String(a.mouse.state));
+    const x0 = a.pos.x;
+    MouseBranchTriggerUpdate(a);
+    check("...and it moves", a.pos.x !== x0, `${x0} -> ${a.pos.x}`);
+    a.pos.x = -80;                     // past subtype 3's bound of -87
+    MouseBranchTriggerUpdate(a);
+    check("...until it passes its bound, and then stops",
+          a.mouse.state === MouseState.Stopped, String(a.mouse.state));
+  }
+
+  // Each trigger subtype has its own removal flag, tested before the switch.
+  {
+    const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: 4 } });
+    G.g_script_flags[0x22] = 1;
+    MouseBranchTriggerUpdate(a);
+    check("subtype 4's own script flag takes it away", a.despawned);
+    const b = triggerScene(SpawnClass.Mouse, { class52: { subtype: 4 } });
+    G.g_script_flags[0x21] = 1;        // subtype 3's, not this one's
+    MouseBranchTriggerUpdate(b);
+    check("...and another subtype's does not", !b.despawned);
   }
 
   // The cat answers in block 8 and nowhere else, and it is the only writer in
@@ -6981,7 +7056,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.Thrower, "0x31 thrower"],
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
-    [SpawnClass.Critter, "0x52 critter / branch trigger"],
+    [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
     [SpawnClass.SkinnedNpc, "0x53 cat / branch trigger"],
   ];
   for (const [cls, name] of want) {

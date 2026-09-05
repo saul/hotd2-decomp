@@ -625,11 +625,14 @@ web/src/
     rng.ts        seeded, state exposed — snapshots need it
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
-    class10/ class20/ class24/ class25/ class30/ class31/ class41/ class44/
+    class10/ class20/ class21/ class24/ class25/ class30/ class31/ class41/
+    class44/ class52/ class53/
                   one module per class. Each calls `registerClass` itself.
-                  The five that write the actor struct's tail words directly
+                  The ones that write the actor struct's tail words directly
                   also have a `state.ts`: the discriminated union's arm for
                   that class, and the only place its tail words are named
+    original_mode.ts  the two-slot inventory, and the one query the branch
+                  triggers make of it
     registry.ts   the handler contracts and an empty table. Imports no class
     classes.ts    the manifest: the side-effect imports that fill the table
     despawn.ts    `ActorDespawn`, and the sweep that asks the class what it holds
@@ -654,6 +657,10 @@ web/src/
     campath.ts    a pose -> a three.js camera (the curves are game/camera/)
     stagescene, rigs, props, backdrop, rain, fog, lighting,
     characters, shooting, breakables, projectiles, overlays, debug
+    slotmodels.ts an actor whose model is an ASSET SLOT rather than a
+                  skeleton, drawn and offered to the shot test as the single
+                  sphere `ShotTestSphere` measures. Its own layer because the
+                  character pool cannot hold one: it has no character type
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders

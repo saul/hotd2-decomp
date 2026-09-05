@@ -93,6 +93,7 @@ import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
+import { SlotModelLayer } from "../render/slotmodels";
 import { ResetPropContainers } from "../game/class41";
 import { ResetGameGlobals } from "../game/globals";
 import { SetGameTables } from "../game/tables";
@@ -160,6 +161,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly chars = new CharacterLayer();
   readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
+  /**
+   * The actors drawn from an asset slot rather than a skeleton — see
+   * `render/slotmodels.ts`. Its own layer because the character pool cannot
+   * hold one: those actors have no character type to resolve.
+   */
+  readonly slotModels = new SlotModelLayer();
   readonly shooting: Shooting;
   /** The `coli/` overlay — see `render/coli_debug.ts`. */
   readonly coliDebug = new ColiDebugLayer();
@@ -313,6 +320,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // boxes round the ones the sidebar has ticked.
     this.scene.add(this.rigs.group);
     this.scene.add(this.breakables.group);
+    this.scene.add(this.slotModels.group);
 
     this.ctx = {
       scene: this.scene,
@@ -362,6 +370,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.chars);
     this.world.add("render", this.props);
     this.world.add("render", this.breakables);
+    this.world.add("render", this.slotModels);
     this.world.add("render", this.bullets);
     this.world.add("render", this.heads);
     this.world.add("render", this.shooting);

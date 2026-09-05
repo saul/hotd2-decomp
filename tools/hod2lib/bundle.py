@@ -537,6 +537,81 @@ def breakables_json(tables, prog) -> dict:
     }
 
 
+#: The asset slots an **actor** class draws, by spawn class.
+#:
+#: Class 0x52's ten are `mouse.bin` entries 0..9 -- `MouseInit` seeds
+#: ``sub+0x24`` and ``sub+0x22`` with the first and last, and every arm of the
+#: class steps between them. They are here rather than in
+#: :data:`BREAKABLE_SLOTS` because the object that draws them is an `Actor`
+#: and not a `BreakableProp`: it is registered for the shot test by
+#: `RegisterForShotTest` with a radius at ``obj+0x124``, not by a bounding box.
+ACTOR_SLOTS: dict[int, tuple[int, ...]] = {
+    0x52: tuple(range(0x1385, 0x138F)),
+}
+
+
+def actor_slot_entry(stage, prog=None) -> dict | None:
+    """A hidden rig holding the models an **actor** class draws by asset slot.
+
+    The counterpart of :func:`breakable_slot_entry`, for the classes whose
+    draw is `AssetDrawSlot` rather than a skeleton. Those spawns cannot go
+    through the character path at all -- `spawnres` has no character-type rule
+    for them because they have no character type -- so without this the client
+    has no geometry, cannot draw them, and `ShotTestSphere` has nothing to
+    hit. Class 0x52's route-branch trigger was ported and unreachable for
+    exactly that reason.
+
+    One part per slot, hidden, cloned per live actor, keyed by slot in the part
+    name -- the same shape the breakable rig and the gore rig use, so the
+    client's adoption code is the same three lines.
+    """
+    from . import rigs as rigslib
+
+    if prog is None:
+        return None
+    want: list[int] = []
+    for rec in evtlib.spawns(prog.evt):
+        for slot in ACTOR_SLOTS.get(rec.cls, ()):
+            if slot not in want:
+                want.append(slot)
+    if not want:
+        return None
+    slots = stage.tables.asset_slots()
+    cache: dict[str, tuple] = {}
+    parts: list[tuple] = []
+    for slot in want:
+        rec = slots.get(slot)
+        if not rec:
+            continue
+        stem = rec[0].removesuffix(".bin")
+        if stem not in cache:
+            try:
+                cache[stem] = stagelib.load_asset(stage.game, stem)
+            except Exception as exc:
+                degraded.note(f"actor slot asset {stem}",
+                              f"slot {slot:#06x} draws nothing", exc)
+                cache[stem] = ([], None)
+        models, bank = cache[stem]
+        if rec[1] >= len(models):
+            continue
+        part = rigslib.RigPart(f"slot_{slot:04x}", (slot,),
+                               note=f"actor draw slot {slot:#06x}")
+        parts.append((part, [(models[rec[1]], bank, stem)]))
+    if not parts:
+        return None
+    rig = rigslib.Rig(name="slots_actor",
+                      routine="asset-slot actor classes (class 0x52)",
+                      world_space=False, parts=tuple(p for p, _ in parts),
+                      note="actor models drawn by asset slot; hidden, cloned "
+                           "per live actor")
+    return {"rig": rig, "routes": [], "anchors": {}, "biases": {},
+            "world": False, "placements": [], "blocked": "",
+            "fixed": [{"kind": "fixed", "translation": [0.0, 0.0, 0.0],
+                       "rotation_bams": [0, 0, 0], "cam_paths": [],
+                       "note": rig.note}],
+            "parts": parts}
+
+
 def breakable_slot_entry(stage, prog=None) -> dict | None:
     """A hidden rig holding the breakable props' models, for the client to clone.
 
@@ -846,9 +921,11 @@ def build_stage(stage, out_root: Path, *, glb: bool = True,
     # stage's generic props name, and only the script knows which those are.
     prog = scriptlib.Program(stage)
     brk = breakable_slot_entry(stage, prog)
+    act = actor_slot_entry(stage, prog)
     info = gltf.export_level(
         name, parts, out_dir,
-        rigs=rig_data + char_entries + prop_entries + ([brk] if brk else []),
+        rigs=rig_data + char_entries + prop_entries
+             + ([brk] if brk else []) + ([act] if act else []),
         write_textures=write_textures,
         cam_files=[],                  # rails are drawn client-side
         unlit=unlit, model_regions=model_regions, glb=glb)

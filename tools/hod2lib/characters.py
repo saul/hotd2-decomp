@@ -189,6 +189,7 @@ __all__ = [
     "CUE_STATES",
     "Character",
     "class20_tail",
+    "SLOT_DRAWN_CLASSES",
     "class52_tail",
     "class53_tail",
     "DEATH_BACK",
@@ -331,11 +332,17 @@ def class20_tail(rec) -> dict:
             "box": box}
 
 
+#: Classes whose actors are drawn by `AssetDrawSlot` rather than by a
+#: skeleton, so `spawnres` can never identify one and the placement has to
+#: survive that anyway. See the note in :func:`resolve_for_stage`.
+SLOT_DRAWN_CLASSES = frozenset({0x52})
+
+
 def class52_tail(rec) -> dict:
-    """Class 0x52's descriptor tail, as `Class52Init` reads it.
+    """Class 0x52's descriptor tail, as `MouseInit` reads it.
 
     One s16 at ``+0x00``: the **subtype**. 0 and 1 wander and self-despawn;
-    2, 3 and 4 run `Class52BranchTriggerUpdate`, a shootable route-branch
+    2, 3 and 4 run `MouseBranchTriggerUpdate`, a shootable route-branch
     trigger, and only while ``g_GameMode == 1``.
 
     Emitted under a class-named key for the same reason class 0x20's is: the
@@ -454,7 +461,22 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             continue
         res = spawnres.resolve_spawn(tables, rec)
         if not res.identified or res.char_type is None:
-            continue
+            # **The gate is about geometry, not about the placement.** A class
+            # whose draw is an `AssetDrawSlot` rather than a skeleton has no
+            # character type to resolve and never will -- class 0x52's mouse
+            # is drawn from `mouse.bin` slots 0x1385..0x138E -- but the port
+            # still needs its descriptor tail to build the actor at all. Those
+            # classes are emitted with `char_type` and `motion` of -1 and
+            # `None`; the renderer's ingest already skips a placement with no
+            # motion, so nothing downstream has to learn about them, and
+            # `game/director.ts` places them from the script's own spawn list.
+            #
+            # Everything else still falls out here, deliberately. Reading
+            # `desc+0x24` as a character type for every class "identified" 962
+            # of 1225 spawns, most of them as `char_adv02` because a lifetime
+            # of 0 is character type 0.
+            if sp["class"] not in SLOT_DRAWN_CLASSES:
+                continue
         motion = motion_for(tables, rec, sp["class"])
         intro = intro_for(tables, rec, sp["class"])
         # The descriptor tail, as `EnemyZombieInit` (class 0x30) and
@@ -644,7 +666,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                     camera_cue = {"path": cue_path,
                                   "frame": rec.param(0xE, "i16") or 0}
         placements.append(Placement(
-            at, sp["class"], res.char_type, motion, sp, intro,
+            # -1, not None: a slot-drawn class has no character type and the
+            # client's field is a number. The renderer skips these on the
+            # `motion` test above it, so -1 never reaches a skeleton lookup.
+            at, sp["class"], -1 if res.char_type is None else res.char_type,
+            motion, sp, intro,
             emerge=emerge, delayed_leap=delayed_leap,
             target_script=tscript, attack_script=ascript,
             camera_cue=camera_cue,

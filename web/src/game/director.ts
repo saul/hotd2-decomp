@@ -234,6 +234,44 @@ export function SpawnScriptedCharacters(
  * A spawn with no row in `breakables.placements` is a constructor this port
  * does not implement — 73 of the 79 — and is left alone rather than guessed at.
  */
+/**
+ * The actors whose model is an **asset slot**, placed from the script's own
+ * spawn list.
+ *
+ * [port-only] The engine has no such routine: `SpawnFromDescriptor`
+ * (`FUN_00408A20`) builds every class the same way and `MouseInit` draws with
+ * `AssetDrawSlot` afterwards. The port needs one because its ordinary spawn
+ * path runs through `render/characters.ts` — an actor appears when a skinned
+ * hierarchy is ready for it — and a class with no character type never gets
+ * one. Class 0x52's mouse was ported and could not be built at all for
+ * exactly that reason, which left one of the sixteen writers of
+ * `g_script_branch_var` unreachable.
+ *
+ * Same shape as {@link SpawnPropContainers} beside it, and same reason for
+ * living here: `class52 -> director -> registry -> class52` would be a cycle.
+ *
+ * The position and yaw come from the **spawn record**, because that is where
+ * they are for every class; the descriptor tail comes from
+ * `characters.placements`, which carries it for these classes even though the
+ * renderer skips them. One source each.
+ */
+export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
+                                rng: Rng): void {
+  const placements = T.chars?.placements;
+  if (!placements?.length) return;
+  for (const s of spawns) {
+    if (s.class !== SpawnClassValue.Mouse) continue;
+    if (ActorByAt(s.at)) continue;
+    const pl = placements.find((p) => p.at === s.at);
+    if (!pl) continue;
+    const a = ActorSpawn(s.at, SpawnClassValue.Mouse, -1, "mouse",
+                         { class52: pl.class52 ?? null, yaw: pl.yaw ?? 0 },
+                         rng);
+    a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
+    a.visible = true;
+  }
+}
+
 export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
   const placements = T.breakables?.placements;
   if (!placements?.length) return;

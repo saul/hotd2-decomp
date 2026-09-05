@@ -19,24 +19,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 26441 | 119 | engine |
-| `hod2lib/` | 13420 | 34 | engine |
-| `render/` | 6765 | 26 | render |
-| `app/` | 6082 | 28 | app |
+| `game/` | 26784 | 120 | engine |
+| `hod2lib/` | 13520 | 34 | engine |
+| `render/` | 7010 | 27 | render |
+| `app/` | 6102 | 28 | app |
 | `script/` | 3542 | 25 | engine |
 | `ui/` | 2861 | 26 | ui |
 | `bundle/` | 1634 | 10 | engine |
 | `core/` | 884 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **62226** | **279** | |
+| **total** | **62934** | **281** | |
 
 The largest files, which is where the pressure to split next is:
 
+* `game/actor.ts` — 1566
 * `script/walker.ts` — 1563
-* `game/actor.ts` — 1545
 * `hod2lib/exetab.ts` — 1441
-* `app/main.ts` — 1420
+* `app/main.ts` — 1429
 * `hod2lib/gltf.ts` — 1300
 
 ## The port
@@ -44,8 +44,8 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **157 of 258** annotated functions in the gameplay address ranges have a port (60%) |
-| Ported outside those ranges | 63 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 220 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 65 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 222 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **11 of 35** read classes have a module, covering 1274 of 1546 placements |
 | Declared `[diverges]` | **103** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **90** — questions the port is honest about not having answered |
@@ -56,7 +56,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 49 
 
 | | |
 |---|---|
-| Named functions | 645 in `ghidra/annotations/functions.tsv` |
+| Named functions | 646 in `ghidra/annotations/functions.tsv` |
 | Named globals | 331 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 25 under `tools/`, run together by `verify_all.py` |
 

@@ -101,6 +101,13 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * and 4 run `Class52BranchTriggerUpdate`, a shootable route-branch trigger,
  * and only while `g_GameMode == 1`.
  */
+/**
+ * Classes whose actors are drawn by `AssetDrawSlot` rather than by a skeleton,
+ * so `spawnres` can never identify one and the placement has to survive that
+ * anyway. See the note in `resolveForStage`.
+ */
+export const SLOT_DRAWN_CLASSES = new Set([0x52]);
+
 export function class52Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: rec.param(0x00, "i16") || 0 };
 }
@@ -218,7 +225,22 @@ export async function resolveForStage(
     if (rec === undefined) continue;
     const cls = sp.class as number;
     const res = resolveSpawn(tables, rec);
-    if (!res.identified || res.charType === null) continue;
+    if (!res.identified || res.charType === null) {
+      // **The gate is about geometry, not about the placement.** A class whose
+      // draw is an `AssetDrawSlot` rather than a skeleton has no character
+      // type to resolve and never will -- class 0x52's mouse is drawn from
+      // `mouse.bin` slots 0x1385..0x138E -- but the port still needs its
+      // descriptor tail to build the actor at all. Those classes are emitted
+      // with `char_type` of -1 and `motion` of null; the renderer's ingest
+      // already skips a placement with no motion, so nothing downstream has to
+      // learn about them.
+      //
+      // Everything else still falls out here, deliberately. Reading
+      // `desc+0x24` as a character type for every class "identified" 962 of
+      // 1225 spawns, most of them as `char_adv02` because a lifetime of 0 is
+      // character type 0.
+      if (!SLOT_DRAWN_CLASSES.has(cls)) continue;
+    }
     const motion = motionFor(tables, rec, cls);
     const intro = introFor(tables, rec, cls);
     // The descriptor tail, as `EnemyZombieInit` (class 0x30) and
@@ -406,7 +428,9 @@ export async function resolveForStage(
     const p = new Placement();
     p.at = at;
     p.cls = cls;
-    p.char_type = res.charType;
+    // -1, not null: a slot-drawn class has no character type and the client's
+    // field is a number. The renderer skips these on the `motion` test.
+    p.char_type = res.charType === null ? -1 : res.charType;
     p.motion = motion;
     p.spawn = sp;
     p.intro = intro;
@@ -438,6 +462,10 @@ export async function resolveForStage(
     placements.push(p);
 
     if (motion === null) continue;         // marker only -- see the module note
+    // A slot-drawn class reaches the placement above with no character type
+    // and no motion, so the `motion` guard has already taken it; this says so
+    // to the compiler, which cannot see that the two are the same set.
+    if (res.charType === null) continue;
     if (!chars.has(res.charType)) {
       const built = build(tables, res.charType, res.assetFile!);
       if (built === null) continue;

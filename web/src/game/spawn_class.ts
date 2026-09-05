@@ -72,10 +72,12 @@ export enum SpawnClass {
   /** `FUN_00438540` — water enemy. Rises, bobs, lunges to bite. */
   WaterEnemy = 0x51,
   /**
-   * `Class52Init` (`FUN_0043F4C0`) — small wandering critter. Subtypes 2-4
-   * are shootable route-branch triggers, in Original Mode only.
+   * `MouseInit` (`FUN_0043F4C0`) — **the mouse**: its ten draw slots
+   * `0x1385`..`0x138E` are `mouse.bin` entries 0 to 9. Subtypes 0 and 1
+   * wander; 2, 3 and 4 are shootable route-branch triggers, in Original Mode
+   * only.
    */
-  Critter = 0x52,
+  Mouse = 0x52,
   /**
    * `CatInit` (`FUN_00431250`) — the cat, character type `0x1A`. Subtype 2
    * and up is a shootable route-branch trigger, in Original Mode only.

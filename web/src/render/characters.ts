@@ -62,6 +62,7 @@ import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { ShotPick, ShotRay } from "../game/host";
 import type { BreakableLayer } from "./breakables";
+import type { SlotModelLayer } from "./slotmodels";
 import { BAMS_TO_RAD } from "../core/bams";
 
 /**
@@ -570,8 +571,19 @@ export class CharacterLayer implements System {
     // the same number.
     const prop = this.breakables?.pickRay(this._ray) ?? null;
     if (prop && prop.t < bestT) {
+      bestT = prop.t;
       best = { kind: "prop", propId: prop.id,
                point: { x: prop.point.x, y: prop.point.y, z: prop.point.z } };
+    }
+    // ...and so do the asset-slot actors, through the **sphere** the engine
+    // tests them with. `ShotTestSphere` (`FUN_00404630`) descends into a bone
+    // tree only for an actor with `obj+0x34` bit 7 and a skeleton; one with
+    // neither is a single sphere at `obj+0x124`, and that is the whole hit
+    // test for class 0x52. See `render/slotmodels.ts`.
+    const slot = this.slotModels?.pickSphere(this._ray) ?? null;
+    if (slot && slot.t < bestT) {
+      best = { kind: "actor", at: slot.at, bone: 0,
+               point: { x: slot.point.x, y: slot.point.y, z: slot.point.z } };
     }
     // Say so rather than doing nothing quietly: a bundle exported before the
     // reaction tables were added has no `reaction_groups`, and a silent no-op
@@ -588,6 +600,13 @@ export class CharacterLayer implements System {
 
   /** The breakable props, so a barrel in front of a zombie takes the shot. */
   breakables: BreakableLayer | null = null;
+  /**
+   * The asset-slot actors, so a mouse in front of a wall takes the shot.
+   *
+   * Set from `app/`, the same way `breakables` is, because this layer owns the
+   * ray and that one owns the spheres.
+   */
+  slotModels: SlotModelLayer | null = null;
   private readonly _ray = new Ray();
 
   /**

@@ -242,7 +242,7 @@ The writers, and what each can produce:
 | `PropUpdateType76` | 2 | the first hit in block 5, or in block 0x0E **and** item 0, 2 or 0x0B | original |
 | `ChainSegmentUpdate` | 2 | any of twenty links, chain group 1, block `0x16` | original |
 | `StoryModeSwitchUpdate` | 2 | thrown by a shot or a key, then a `(scene, block)` table and its own flag | original |
-| `Class52BranchTriggerUpdate` | the signed byte at `0x00564442 + subtype` — **2, 1, 2** for subtypes 2, 3, 4 | the first hit | original |
+| `MouseBranchTriggerUpdate` | the signed byte at `0x00564442 + subtype` — **2, 1, 2** for subtypes 2, 3, 4 | the first hit | original |
 | `CatBranchTriggerUpdate` | 2 | the first hit, block 8, and **only while the var is still 0** | original |
 
 `PropUpdateType69` is the only writer that reads the variable before writing

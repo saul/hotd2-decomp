@@ -478,6 +478,75 @@ export function breakablesJson(tables: ExeTables,
 }
 
 /**
+ * The asset slots an **actor** class draws, by spawn class.
+ *
+ * Class 0x52's ten are `mouse.bin` entries 0..9 -- `MouseInit` seeds
+ * `sub+0x24` and `sub+0x22` with the first and last, and every arm of the
+ * class steps between them. They are here rather than in
+ * {@link BREAKABLE_SLOTS} because the object that draws them is an `Actor`
+ * and not a `BreakableProp`: it is registered for the shot test by
+ * `RegisterForShotTest` with a radius at `obj+0x124`, not by a bounding box.
+ */
+export const ACTOR_SLOTS: Record<number, number[]> = {
+  0x52: Array.from({ length: 10 }, (_, i) => 0x1385 + i),
+};
+
+/**
+ * A hidden rig holding the models an **actor** class draws by asset slot.
+ *
+ * The counterpart of {@link breakableSlotEntry}, for the classes whose draw is
+ * `AssetDrawSlot` rather than a skeleton. Those spawns cannot go through the
+ * character path at all -- `spawnres` has no character-type rule for them
+ * because they have no character type -- so without this the client has no
+ * geometry, cannot draw them, and `ShotTestSphere` has nothing to hit. Class
+ * 0x52's route-branch trigger was ported and unreachable for exactly that
+ * reason.
+ */
+export async function actorSlotEntry(
+    stage: Stage, spawnClasses: readonly number[],
+    cache: AssetCache): Promise<RigInstance | null> {
+  const want: number[] = [];
+  for (const cls of spawnClasses) {
+    for (const slot of ACTOR_SLOTS[cls] ?? []) {
+      if (!want.includes(slot)) want.push(slot);
+    }
+  }
+  if (!want.length) return null;
+  const slots = stage.tables.assetSlots();
+  const parts: RigInstance["parts"] = [];
+  for (const slot of want) {
+    const rec = slots.get(slot);
+    if (!rec) continue;
+    const stem = rec[0].endsWith(".bin") ? rec[0].slice(0, -4) : rec[0];
+    const [models, bank] = await cache.get(
+      "hod2lib.bundle.actor_slot_entry", stem, "actor slot asset",
+      `slot 0x${slot.toString(16).padStart(4, "0")} draws nothing`);
+    if (rec[1] >= models.length) continue;
+    const part = {
+      name: `slot_${slot.toString(16).padStart(4, "0")}`,
+      slots: [slot],
+      note: `actor draw slot 0x${slot.toString(16).padStart(4, "0")}`,
+    };
+    parts.push([part, [[models[rec[1]], bank, stem]]]);
+  }
+  if (!parts.length) return null;
+  const rig: Rig = {
+    name: "slots_actor",
+    routine: "asset-slot actor classes (class 0x52)",
+    worldSpace: false,
+    parts: parts.map(([p]) => p),
+    note: "actor models drawn by asset slot; hidden, cloned per live actor",
+  };
+  return {
+    rig, routes: [], anchors: {}, biases: {}, world: false, placements: [],
+    blocked: "",
+    fixed: [{ kind: "fixed", translation: [0.0, 0.0, 0.0],
+              rotation_bams: [0, 0, 0], cam_paths: [], note: rig.note! }],
+    parts,
+  };
+}
+
+/**
  * A hidden rig holding the breakable props' models, for the client to clone.
  *
  * Class 0x41's props are built at run time by `PlaceBreakableGroup`, not
@@ -791,8 +860,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // stage's generic props name, and only the script knows which those are.
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
   const brk = await breakableSlotEntry(stage, placements, cache);
+  const act = await actorSlotEntry(
+    stage, spawnRecords.map((r) => r.cls), cache);
   const info = await gltf.exportLevel(name, parts, outDir, sink, deflate, {
-    rigs: [...rigData, ...charEntries, ...propEntries, ...(brk ? [brk] : [])],
+    rigs: [...rigData, ...charEntries, ...propEntries,
+           ...(brk ? [brk] : []), ...(act ? [act] : [])],
     writeTextures: opts.writeTextures ?? true,
     camFiles: [],                  // rails are drawn client-side
     unlit: opts.unlit ?? true,

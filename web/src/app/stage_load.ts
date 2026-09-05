@@ -160,6 +160,11 @@ export async function loadStageInto(p: Player): Promise<void> {
   // adopted here; the nodes follow `G.g_breakable_props`.
   p.breakables.adopt(p.scene3d.root);
   p.chars.breakables = p.breakables;
+  // ...and the same two lines for the actors whose model is an asset slot.
+  // `chars` owns the ray; this layer owns the spheres `ShotTestSphere`
+  // measures against.
+  p.slotModels.adopt(p.scene3d.root);
+  p.chars.slotModels = p.slotModels;
   p.shooting.reset();
   p.shooting.setTables(bundle.script.characters?.combat);
   p.dialogue = bundle.script.sound ?? null;

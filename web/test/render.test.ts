@@ -70,6 +70,13 @@ const { AmbientLight, CanvasTexture, DirectionalLight, Group, Mesh,
         ShaderChunk } = await import("three");
 const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE }
   = await import("../src/render/lighting");
+const { SlotModelLayer } = await import("../src/render/slotmodels");
+const { G, ResetGameGlobals } = await import("../src/game/globals");
+const { makeActor } = await import("../src/game/actor");
+const { SpawnClass } = await import("../src/game/spawn_class");
+const { MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS }
+  = await import("../src/game/class52");
+const { Object3D: Obj3D, Ray, Vector3 } = await import("three");
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -959,6 +966,68 @@ console.log("\ngore swap: the whole damaged model, both shapes of bone");
     check("restoring takes the clone off again",
           ![...want].some((g) => drawn(bone).has(g)));
   }
+}
+
+console.log("\nan asset-slot actor is drawn, and can be shot:");
+{
+  // The template rig the exporter emits, built by hand: one hidden part per
+  // asset slot, named the way `slots_actor` names them.
+  const root = new Obj3D();
+  for (let slot = MOUSE_FIRST_SLOT; slot < MOUSE_FIRST_SLOT + 10; slot++) {
+    const part = new Obj3D();
+    part.name = `slots_actor_fixed000_slot_${slot.toString(16)}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+    root.add(part);
+  }
+
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+  check("the layer adopts one template per slot",
+        layer.describe().includes("10 templates"), layer.describe());
+  check("...and takes them out of the draw",
+        !root.children.some((c) => c.visible), "a template is still visible");
+
+  const a = makeActor(0x1234, SpawnClass.Mouse, -1, "mouse");
+  if (a.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+  a.mouse.frame = MOUSE_FIRST_SLOT;
+  a.hitRadius = MOUSE_HIT_RADIUS;
+  a.pos = { x: 0, y: 0, z: -20 };
+  G.g_object_list.push(a);
+  layer.update();
+  check("a live mouse gets a node", layer.describe().startsWith("1 drawn"),
+        layer.describe());
+
+  // `ShotTestSphere` (`FUN_00404630`): one sphere, radius `obj+0x124`. A ray
+  // down -z hits it; one offset by more than the radius does not.
+  const down = new Ray(new Vector3(0, 0, 0), new Vector3(0, 0, -1));
+  const hit = layer.pickSphere(down);
+  check("a ray through it is a hit", hit?.at === 0x1234,
+        JSON.stringify(hit && { at: hit.at, t: hit.t }));
+
+  const wide = new Ray(new Vector3(MOUSE_HIT_RADIUS + 0.5, 0, 0),
+                       new Vector3(0, 0, -1));
+  check("...and one further off than the radius is not",
+        layer.pickSphere(wide) === null);
+
+  // Behind the muzzle is not a hit, which is the `t <= 0` the engine has too.
+  const behind = new Ray(new Vector3(0, 0, -40), new Vector3(0, 0, -1));
+  check("...nor is one already past it", layer.pickSphere(behind) === null);
+
+  // A radius of zero is a class that never set one: not shootable, rather
+  // than shootable at a point.
+  a.hitRadius = 0;
+  check("an actor with no radius is not in the sphere test",
+        layer.pickSphere(down) === null);
+  a.hitRadius = MOUSE_HIT_RADIUS;
+
+  // The strip advances every frame, so the node is re-cloned; the actor
+  // leaving takes its node with it.
+  a.dead = true;
+  layer.update();
+  check("a dead actor loses its node", layer.describe().startsWith("0 drawn"),
+        layer.describe());
+  G.g_object_list.length = 0;
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """No exporter may swallow a failure silently, and the two libraries agree.
 
-Four checks. Three are about the exporter telling the truth about what it
-produced; the fourth is about there being two of it.
+Four checks. Three are about an exporter telling the truth about what it
+produced; the fourth is about `web/src/hod2lib/` and `tools/hod2lib/` being the
+same library twice.
 
 Thirty sites under `tools/hod2lib/` and `tools/export_*.py` answer an
 exception with an empty result -- `return {}`, `return []`,
 `cache[stem] = ([], None)`. That is the right behaviour: an install missing one
-`pol/` file should still produce a bundle, and refusing to export a stage
-because one prop model will not parse would be worse than exporting without it.
+`pol/` file should still produce a glTF, and refusing to export a stage because
+one prop model will not parse would be worse than exporting without it.
 
 What was wrong is that they were **silent**. A parser regression anywhere under
 `hod2lib` produced a valid bundle with zero characters, exit code 0 and no
@@ -18,29 +19,34 @@ thing nothing in this repository could catch. F16 of docs/REVIEW-2026-09-03.md
 is the same finding from the other side.
 
 So this is the rule that keeps them honest: **a broad `except` in an exporter
-must record what it gave up**, through `hod2lib.degraded.note`. The count then
-reaches `manifest.json` and `export_player.py`'s exit code.
+must record what it gave up**, through `hod2lib.degraded.note`. On the bundle
+path the count reaches `manifest.json` and the exporter's exit code; the
+TypeScript half of `degraded` does the same thing on the other side.
 
 Fixing the thirty instances without this check would have been a fix with a
 shelf life.
 
 The second check is what makes the bundle's schema digest work at all.
 ``manifest.json`` carries a hash of the declarations in `web/src/bundle/*.ts`
-and the client compares it against `web/src/bundle/schema_hash.ts`, which is
-generated from the same sources and committed. A generated file that is
-regenerated only when someone remembers is `BUNDLE_FORMAT` again -- so this
-re-derives it and fails when the committed copy is stale. **That is what makes
-the digest impossible to forget**: the digest catches a stale bundle, and this
-catches a stale digest.
+and the client compares it against `web/src/bundle/schema_hash.ts`, which
+`tools/gen_schema_hash.py` generates from the same sources and which is
+committed. A generated file that is regenerated only when someone remembers is
+`BUNDLE_FORMAT` again -- so this re-derives it and fails when the committed
+copy is stale. **That is what makes the digest impossible to forget**: the
+digest catches a stale bundle, and this catches a stale digest.
 
-The fourth check exists because `web/src/hod2lib/` is the same library in
-TypeScript, so that a bundle can be built in a browser. Two implementations of
-one format specification is the drift this repository spends most of its checks
-preventing, and `tools/compare_bundles.py` is what proves the *output* agrees.
-This is the cheap half: the two packages hold the same modules, stamp the same
-version into a manifest, and the generated rig table is current. None of it
-needs a game directory, so it runs on every commit rather than only when one is
-to hand.
+The fourth check exists because `web/src/hod2lib/` is the TypeScript port of
+`tools/hod2lib/`, and it is now the **only** thing that writes a bundle: the
+Python writer was removed once the two agreed byte for byte, and what is left
+of the Python package is the parsers the twenty `verify_*` checks read the game
+with. So the two are no longer a writer and a second writer -- they are one
+library with one half of it duplicated, and the check is that the duplication
+stays honest: every parser has a counterpart, the version they claim is the
+same, and the two generated TypeScript files are current.
+
+`tools/compare_bundles.py` still exists and still compares two bundles; there
+is simply no longer a second implementation to point it at. Its use now is a
+browser export against a CLI one, or one revision against the next.
 
 Run from anywhere; exit code is non-zero when a check fails.
 """
@@ -55,13 +61,14 @@ ROOT = Path(__file__).resolve().parent.parent
 LIB = ROOT / "tools" / "hod2lib"
 sys.path.insert(0, str(ROOT / "tools"))
 
-from hod2lib import schema                                     # noqa: E402
+import gen_rig_data                                             # noqa: E402
+import gen_schema_hash                                          # noqa: E402
 
 #: Only the exporters. `tools/verify_*.py`, `tools/blender_*.py` and the other
 #: one-shot readers are diagnostics -- they print what they found and nobody
 #: builds a bundle out of them, so a broad `except` there costs a line of
 #: output rather than a stage's worth of characters.
-EXPORTERS = ["tools/export_player.py", "tools/export_level.py"]
+EXPORTERS = ["tools/export_level.py"]
 
 #: `except Exception:` / `except Exception as exc:` / `except (A, B):` -- any
 #: handler broad enough to catch a bug rather than a condition.
@@ -97,73 +104,18 @@ def sources() -> list[Path]:
 
 
 def check_schema_hash() -> list[str]:
-    """`web/src/bundle/schema_hash.ts` is what its sources say it should be."""
-    path = ROOT / schema.SCHEMA_DIR / schema.GENERATED
-    rel = path.relative_to(ROOT)
-    want = schema.client_source(ROOT)
+    """The committed `schema_hash.ts` against the declarations it covers."""
+    path = ROOT / gen_schema_hash.SCHEMA_DIR / gen_schema_hash.GENERATED
+    want = gen_schema_hash.client_source(ROOT)
     have = path.read_text(encoding="utf-8") if path.exists() else None
     if have == want:
         return []
-    if have is None:
-        return [f"{rel}: missing -- it is generated, and nothing generated it"]
-    moved = [n for n, d in schema.file_digests(ROOT).items()
-             if f'"{n}": "{d}"' not in have]
-    return [f"{rel}: stale"
-            + (f" -- {', '.join(moved)} changed" if moved else "")]
-
-
-#: A declaration file declares. `export function`, `export class` and a
-#: `let`/`var` are code; `export const` is allowed because `SUPPORTED_FORMAT`
-#: is a contract constant a bundle genuinely can disagree with.
-RUNTIME_IN_DECL = re.compile(
-    r"^export\s+(?:async\s+)?(?:function|class|let|var)\b", re.M)
+    return [f"{path.relative_to(ROOT)} is stale"]
 
 
 def check_schema_sources() -> list[str]:
-    """`schema.SOURCES` names every declaration file, and only those.
-
-    Two failures, and the list closes both.
-
-    The digest used to be taken over `web/src/bundle/*.ts`, so `stage.ts`'s
-    loader was in it: `getJson`, the format checks, and every refusal string.
-    Rewording one of those moved the hash and invalidated every bundle on
-    disk, for an edit that cannot change a byte of a bundle.
-
-    But an explicit list has the opposite failure -- a new declaration file
-    that nobody adds to it is a block of the bundle **nothing checks**, which
-    is worse than the glob and silent. So the directory is still read, and a
-    `.ts` in it that is neither on the list nor the generated file nor a pure
-    loader is a failure.
-    """
-    d = ROOT / schema.SCHEMA_DIR
-    named = set(schema.SOURCES)
-    out: list[str] = []
-    for path in sorted(d.glob("*.ts")):
-        name = path.name
-        text = path.read_text(encoding="utf-8")
-        declares = "export interface" in text or "export type" in text
-        runtime = RUNTIME_IN_DECL.search(text)
-        if name in named:
-            if not path.exists():
-                out.append(f"schema.SOURCES names {name}, which does not exist")
-            if runtime:
-                out.append(
-                    f"{schema.SCHEMA_DIR}/{name} is hashed by the schema "
-                    f"digest and declares `{runtime.group(0).strip()}` -- "
-                    f"runtime code belongs in load.ts, or the file comes off "
-                    f"schema.SOURCES")
-            continue
-        if name in (schema.GENERATED, "index.ts", "load.ts"):
-            continue
-        if declares:
-            out.append(
-                f"{schema.SCHEMA_DIR}/{name} declares part of the bundle and "
-                f"is not in `schema.SOURCES` -- nothing checks that block "
-                f"against the exporter")
-    for name in sorted(named):
-        if not (d / name).exists():
-            out.append(f"schema.SOURCES names {name}, which does not exist")
-    return out
+    """`SOURCES` against the directory, in both directions."""
+    return gen_schema_hash.check_sources(ROOT)
 
 
 def check_module_list() -> list[str]:
@@ -198,10 +150,11 @@ def check_module_list() -> list[str]:
 #: A module that appears on neither side of this and only in one package is a
 #: port that was forgotten, which is exactly what the check is for.
 LIBRARY_ONLY = {
-    # Python reads `web/src/bundle/*.ts` off disk to build the digest. The
-    # TypeScript exporter is *compiled against* those declarations, so it
-    # imports `schema_hash.ts` and the digest is right by construction.
-    "schema": "python",
+    # The bundle writer is the TypeScript's alone. The Python one was removed
+    # once the two agreed byte for byte on all twelve stage bundles; what is
+    # left of `tools/hod2lib/` is the parsers, which twenty `verify_*` checks
+    # read the game with and which have no reason to move.
+    "bundle": "typescript",
     # The seam, and the two things `struct` and `json.dumps` give Python for
     # free. See docs/TS_PORT.md.
     "io": "typescript",
@@ -237,17 +190,15 @@ def check_two_libraries() -> list[str]:
             out.append(f"verify_exporters.LIBRARY_ONLY names `{m}`, which is "
                        f"in neither package")
 
-    # Two numbers that reach `manifest.json`. `BUNDLE_FORMAT` is the one a
-    # client refuses on; `tool_version` says which library wrote the bundle,
-    # and a bundle must not be able to say which *implementation* did.
-    from hod2lib import bundle as pybundle, __version__ as pyversion
+    # `tool_version` is what a manifest says produced it, and it names the
+    # library rather than the implementation -- `hod2lib`, whose Python half is
+    # still where the formats are specified. The two spellings of the version
+    # have to agree or a bundle would be able to say which side wrote it.
+    #
+    # `BUNDLE_FORMAT` has no Python side any more: there is one writer, and a
+    # constant with one definition needs no check.
+    from hod2lib import __version__ as pyversion
     src = (TS_LIB / "bundle.ts").read_text(encoding="utf-8")
-    m = re.search(r"export const BUNDLE_FORMAT = (\d+);", src)
-    if not m:
-        out.append("web/src/hod2lib/bundle.ts declares no BUNDLE_FORMAT")
-    elif int(m.group(1)) != pybundle.BUNDLE_FORMAT:
-        out.append(f"BUNDLE_FORMAT is {pybundle.BUNDLE_FORMAT} in Python and "
-                   f"{m.group(1)} in TypeScript")
     m = re.search(r'export const TOOL_VERSION = "([^"]+)";', src)
     if not m:
         out.append("web/src/hod2lib/bundle.ts declares no TOOL_VERSION")
@@ -259,7 +210,6 @@ def check_two_libraries() -> list[str]:
 
 def check_rig_data() -> list[str]:
     """`rigs_data.ts` against the transcription it is generated from."""
-    import gen_rig_data
     want = gen_rig_data.render()
     path = gen_rig_data.OUT
     have = path.read_text(encoding="utf-8") if path.exists() else None
@@ -335,18 +285,17 @@ def main() -> int:
         for m in stale:
             print(f"FAIL {m}")
         print("\nRegenerate it and commit it with the declaration change that "
-              "moved it:\n  python3 tools/regen_schema_hash.py\n"
-              "`tools/export_player.py` does the same thing on every run.")
+              "moved it:\n  python3 tools/gen_schema_hash.py")
         return 1
     if decl_sources:
         for m in decl_sources:
             print(f"FAIL {m}")
         print("\nThe digest covers what a bundle can disagree with. "
-              "Declarations go on `schema.SOURCES` in tools/hod2lib/schema.py; "
+              "Declarations go on `SOURCES` in tools/gen_schema_hash.py; "
               "code that runs goes in web/src/bundle/load.ts.")
         return 1
-    print(f"  {len(schema.file_digests(ROOT))} declaration files, digest "
-          f"{schema.schema_hash(ROOT)[:16]}...\n")
+    print(f"  {len(gen_schema_hash.file_digests(ROOT))} declaration files, "
+          f"digest {gen_schema_hash.schema_hash(ROOT)[:16]}...\n")
     print("clean")
 
     print("\nthe library's own account of itself\n")
@@ -371,8 +320,8 @@ def main() -> int:
     n_py = len([p for p in LIB.glob("*.py") if not p.stem.startswith("_")])
     n_ts = len(list(TS_LIB.glob("*.ts")))
     print(f"  {n_py} python modules, {n_ts} typescript, same set either way "
-          f"less {len(LIBRARY_ONLY)} declared; BUNDLE_FORMAT and "
-          f"tool_version agree; rigs_data.ts is current\n")
+          f"less {len(LIBRARY_ONLY)} declared; tool_version agrees; "
+          f"rigs_data.ts is current\n")
     print("clean")
     return 0
 

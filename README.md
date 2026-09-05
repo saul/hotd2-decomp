@@ -68,36 +68,35 @@ departs from the exe it says so with a greppable `[diverges]` and a reason.
 ## Getting started
 
 You supply your own copy of the game — see **Legal**. Nothing else is unusual:
-the export and every check need **Python 3 and no third-party packages**, and
-the client needs **Node 20+**. Only the optional `tools/blender_*.py` helpers
+the client and the export need **Node 20+**, and every check needs **Python 3
+with no third-party packages**. Only the optional `tools/blender_*.py` helpers
 want anything else, and those run inside Blender.
 
 ```sh
+cd web && npm install
+
 # 1. build the bundle
-python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
+npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 
 # 2. run the client
-cd web && npm install && npm run dev        # http://localhost:5173
+npm run dev                                 # http://localhost:5173
 ```
 
 `--all` builds all six stages in **both** game modes. Add `--stage 2` for one
 stage, or `--arcade` / `--original` for one mode. The export prints what it
 could not read at the end, including when that is nothing.
 
-**There are two exporters and they write the same bundle.** `web/src/hod2lib/`
-is the Python library ported to TypeScript, so the same code runs from a CLI
-and inside the page:
+**Or skip step 1 and let the page do it.** Open the client with no bundle and
+it offers to build one from your own install: choose the folder, pick the
+stages, and the export runs in a worker into a cache that survives a reload and
+downloads as a zip. It is the same library either way — `web/src/hod2lib/` —
+which is why it can run in both places.
 
-```sh
-cd web && npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
-```
-
-That is the faster of the two — about nine times — and it takes the same flags.
-Or skip step 1 entirely: open the client with no bundle and it offers to build
-one from your install, in a worker, into a cache that survives a reload and can
-be downloaded as a zip. The Python remains the reference implementation and
-`tools/verify_parity.py` proves the two agree, byte for byte through the
-geometry. See [`docs/TS_PORT.md`](docs/TS_PORT.md).
+That library began as a port of `tools/hod2lib/`, and the Python half wrote
+bundles until the two agreed byte for byte on all twelve; then the Python
+writer was removed. What is left of it is the parsers, which twenty checks read
+the game with and which are still where each format is specified in code.
+[`docs/TS_PORT.md`](docs/TS_PORT.md) is the whole account.
 
 Every bit of player state is in the URL, so a bug report is a link:
 `?stage=2&mode=play&block=3&step=1&op=14`, or `?stage=2&slot=59&frame=170` to
@@ -144,7 +143,7 @@ One fact, one home. **No document quotes a number another one computes.**
 | [`docs/re/addresses.md`](docs/re/addresses.md) | the addresses that matter, by subsystem. |
 | `ghidra/annotations/*.tsv` | **the names.** The source of truth for both halves; sorted by address, written only by `tools/annotate.py`. |
 | [`docs/EXPORTING.md`](docs/EXPORTING.md) | exporting to glTF and opening it in Blender, and how to tell an exporter bug from a viewer setting. |
-| [`docs/TS_PORT.md`](docs/TS_PORT.md) | **the two exporters** — what "identical output" means precisely, and how the browser builds a bundle for itself. |
+| [`docs/TS_PORT.md`](docs/TS_PORT.md) | **the exporter** — how the browser builds a bundle for itself, and the record of it being proved byte-identical to the Python one it replaced. |
 | [`web/README.md`](web/README.md) | running the player, and an explicit account of what is faithful and what is approximated. |
 | [`docs/PLAYER_ARCHITECTURE.md`](docs/PLAYER_ARCHITECTURE.md) | **the player's shape** — the layers, the rules, the checks that enforce them, and the order of work. |
 | [`docs/PLAYER_PROGRESS.md`](docs/PLAYER_PROGRESS.md) | what the player does, and the reading errors it surfaced. |

@@ -1,27 +1,37 @@
-# The exporters in TypeScript
+# The exporter in TypeScript
 
-`tools/hod2lib/` is 13,187 lines of Python that turns a HOTD2 install into the
-bundle `web/` loads. It runs on a developer's machine, writes 411 MB into
-`extract/player/`, and the browser fetches the result over HTTP. That works,
-and it means the player cannot be handed to anyone who does not also have
-Python, the repo, and a terminal.
+`tools/hod2lib/` was 13,187 lines of Python that turned a HOTD2 install into
+the bundle `web/` loads. It ran on a developer's machine, wrote 411 MB into
+`extract/player/`, and the browser fetched the result over HTTP. That worked,
+and it meant the player could not be handed to anyone who did not also have
+Python, the repo and a terminal.
 
-`web/src/hod2lib/` is the same library in TypeScript, behind one seam, so that
-the *same code* runs two ways:
+`web/src/hod2lib/` is that library in TypeScript, behind one seam, so that the
+*same code* runs two ways:
 
 * **a thin CLI** — `npm run export -- --game-dir "..." --all` — writing the
-  same `extract/player/` tree the Python writes;
+  same `extract/player/` tree;
 * **in the browser** — the user points the page at their own install, picks
   stages and modes, and the export runs client-side into a cache that survives
   a reload, with a download button for the result.
 
 Nothing about the bundle's *shape* changed. `BUNDLE_FORMAT` did not move.
 
-## The contract: what "identical" means
+**The Python writer is gone.** It was kept exactly as long as it took to prove
+the port, and the proof came in: all twelve stage bundles identical, twice. So
+`hod2lib/bundle.py`, `hod2lib/schema.py` and `tools/export_player.py` were
+removed. What is left of `tools/hod2lib/` is the reading half — twenty
+`verify_*` checks read the game through it, `export_level.py` writes glTF with
+it, and it is still where each format is specified in code.
 
-The lodestar is that a bundle built by the TypeScript is the bundle built by
+The rest of this file is the record of that proof, and the account of what the
+two halves owe each other now that only one of them writes a bundle.
+
+## The contract: what "identical" meant, and what it measured
+
+The lodestar was that a bundle built by the TypeScript is the bundle built by
 the Python. That is worth being precise about, because the four output kinds
-divide two and two:
+divided two and two:
 
 | Output | Guarantee |
 | --- | --- |
@@ -54,7 +64,12 @@ Three deliberate divergences, all of them stated where they happen:
    allowed to move at all, and the comparison prints every value the allowance
    covered rather than hiding it.
 
-Everything else agrees exactly. `tools/compare_bundles.py` is what says so.
+Everything else agreed exactly, on all twelve stage bundles, twice: once
+before the class-0x52 actor rig landed and once after.
+`tools/compare_bundles.py` is what said so, and it is still in the tree --
+there is simply no second implementation to point it at any more. Its use now
+is a browser export against a CLI one, or one revision's output against the
+next's.
 
 ## Where the code lives, and what it may touch
 
@@ -107,23 +122,25 @@ looked the same key up with a space in it once, and the result was every model
 node in the bundle losing its region list — a bundle that loads, draws, and
 shows the whole stage at once.
 
-### The one module that is not a port
+### The two generated TypeScript files
 
-`schema.py` hashes `web/src/bundle/*.ts` off disk. The browser cannot do that
-and does not need to: the TypeScript exporter is *compiled against* those
-declarations, so it imports `SCHEMA_FILES` and `SCHEMA_HASH` from the generated
-`schema_hash.ts` and stamps them into the manifest. A bundle built in the
-browser therefore agrees with the client that built it by construction.
+Neither is a port, and both are checked by `verify_exporters.py`, which fails
+when the committed copy is stale.
 
-### The one table that is generated
+**`schema_hash.ts`.** The digest that ties a bundle to the declarations reading
+it. `tools/gen_schema_hash.py` writes it — that logic was `hod2lib/schema.py`
+and moved out when the Python writer went, because computing a digest over
+files in this repository is a repository job, not a parser. The exporter is
+*compiled against* those declarations, so it imports `SCHEMA_FILES` and
+`SCHEMA_HASH` rather than recomputing them: a bundle agrees with the client
+that built it by construction, in the browser as much as in the CLI.
 
-`rigs.py` is 690 lines of hand-read draw routines: a translation is a `PUSH
-imm32` somebody disassembled, and the `note` beside it is why it is that
-number. Re-typing all of it would be re-doing that work with no second reading
-to catch a slip — and the failure mode is a wheel four units to the left, which
-nothing measures. So `tools/gen_rig_data.py` emits `web/src/hod2lib/
-rigs_data.ts` from the objects themselves, and `verify_exporters.py` fails when
-the committed copy is stale. The evidence travels: `note`, `animated` and
+**`rigs_data.ts`.** `rigs.py` is 690 lines of hand-read draw routines: a
+translation is a `PUSH imm32` somebody disassembled, and the `note` beside it
+is why it is that number. Re-typing all of it would be re-doing that work with
+no second reading to catch a slip — and the failure mode is a wheel four units
+to the left, which nothing measures. So `tools/gen_rig_data.py` emits it from
+the objects themselves. The evidence travels: `note`, `animated` and
 `condition` are fields, not comments.
 
 ## The browser half
@@ -158,52 +175,75 @@ compression on purpose: a GLB is 99% of a bundle and is already packed. It
 streams into a `showSaveFilePicker` handle where there is one, so the whole
 export never has to exist as a `Blob`.
 
-## Proving it
+## How it was proved, and what still checks it
 
-**`tools/verify_parity.py`** exports one stage with both implementations into a
-temporary directory and compares them. It is a `verify_all` row and it needs a
-game directory:
+While both writers existed there was a `verify_all` row, `verify_parity`, that
+exported a stage with each and compared the bytes. It ran on every commit that
+had a game directory to hand, and it caught two real faults: a composite map
+key spelled two ways, which cost every model node in the bundle its region
+list, and a character-type rule a concurrent workstream added to `spawnres.py`
+in the middle of the port, which the TypeScript reproduced from the version it
+had read. Neither was visible in the code; both were one line of output.
+
+The last measurement, over all twelve stage bundles, is the one in the contract
+above: every GLB's BIN chunk byte for byte, every JSON field equal, 34
+quaternion components 1 ULP apart. It was taken twice — before and after the
+class-0x52 actor rig landed on both sides — and then the Python writer was
+removed and `verify_parity.py` with it, because a check that can no longer run
+is worse than no check.
+
+**What still runs, on every commit and with no game directory:**
+
+* **`tools/verify_exporters.py`** — the two packages hold the same modules,
+  with five declared exceptions and a reason on each; the version they claim is
+  the same; and both generated TypeScript files are current.
+* **`npm run test:export`** — the three things comparing two bundles could
+  never check anyway: `json.dumps`'s separators against the real interpreter,
+  the case-insensitive path resolve, and an archive `unzip` can open.
+
+**And `tools/compare_bundles.py` is still there.** A GLB is compared as a GLB —
+JSON chunk parsed, BIN chunk memcmp'd, embedded PNGs decoded to pixels — so a
+differing deflate stream over identical pixels reports as identical and a
+single wrong vertex does not hide inside a 25 MB file. There is no second
+implementation to point it at, but there are two questions left that it answers
+and nothing else does:
 
 ```sh
-python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
+# did that refactor change a single byte?
+cd web && npm run export -- --game-dir "..." --all --out /tmp/before
+#   ...make the change...
+cd web && npm run export -- --game-dir "..." --all --out /tmp/after
+python3 tools/compare_bundles.py /tmp/before /tmp/after
+
+# does the in-page export match the CLI? (unzip the download over /tmp/browser)
+python3 tools/compare_bundles.py /tmp/after /tmp/browser
 ```
 
-**`tools/compare_bundles.py`** is what it calls, and takes any two export
-trees. A GLB is compared as a GLB — JSON chunk parsed, BIN chunk memcmp'd,
-embedded PNGs decoded to pixels — so a differing deflate stream over identical
-pixels reports as identical and a single wrong vertex does not hide inside a
-25 MB file. `--ulps` sets the allowance and prints what it covered.
+### What it costs and what it bought
 
-```sh
-python3 tools/export_player.py --game-dir "..." --all --out /tmp/py
-cd web && npm run export -- --game-dir "..." --all --out /tmp/ts
-python3 tools/compare_bundles.py /tmp/py /tmp/ts --ulps 1
-```
-
-**`tools/verify_exporters.py`** checks the cheap half on every commit, with no
-game directory: the two packages hold the same modules, stamp the same
-`BUNDLE_FORMAT` and `tool_version`, and `rigs_data.ts` is current.
-
-### What it says today
-
-All twelve stage bundles — six stages, both game modes — are identical. The
-CLI is about nine times faster than the reference: 3.2 s against 28.7 s for
-stage 1, and 429 MB in a few minutes rather than most of an hour.
+The CLI is about nine times faster than the Python was: 3.2 s against 28.7 s
+for stage 1, and 429 MB in a few minutes rather than most of an hour. The
+bundle is unchanged.
 
 ## What this does not do
 
-* **The Python does not go away.** Thirty-one tools under `tools/` import
-  `hod2lib`, including nineteen `verify_*` checks that read the game directly.
-  Porting those is not in scope and the Python package stays the reference
-  implementation — the thing the TypeScript has to agree with. That is a real
-  cost: two implementations of one format specification, which is the drift
-  this repo spends most of its checks preventing. The rule is that a format
-  change lands in the Python first and the TypeScript in the same commit, and
-  `verify_parity` is what makes that survivable.
-* **No new bundle format, no new fields, and no fixes folded in.** If the port
-  finds a bug in the Python it is fixed **in the Python**, so both sides move
-  together and the parity check stays meaningful. A fix that exists only in the
-  TypeScript is a divergence wearing a better word.
+* **The Python parsers do not go away.** Twenty-eight tools under `tools/`
+  still import `hod2lib`, including twenty `verify_*` checks that read the game
+  directly and `export_level.py`, which writes the glTF a human opens in
+  Blender and has no TypeScript CLI. So the same formats are still implemented
+  twice — the drift this repo spends most of its checks preventing — and what
+  is left holding that together is `verify_exporters.py` and the rule that a
+  format change lands in both halves in the same commit. It is a weaker
+  guarantee than a byte comparison, and that is the price of having one writer
+  instead of two.
+* **`gltf.py` and `png.py` stayed** even though `gltf.ts` and `png.ts` exist,
+  because `export_level.py`, `export_asset.py`, `export_character.py` and
+  `verify_spawn_facing.py` read them and none of those has been ported. The
+  clean way to remove them is to port `export_level.py`; the glTF *library* is
+  already there.
+* **No new bundle format, no new fields, and no fixes folded in.** The port
+  changed nothing about what a bundle contains, on purpose: a fix that arrived
+  with a rewrite could not have been told from a transcription error.
 * **BGM is still streamed from the install.** 161 MB of uncompressed PCM does
   not belong in a bundle and does not belong in OPFS. The dev server reads it
   out of the game directory named in `manifest.json`; a bundle exported in the

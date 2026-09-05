@@ -11,11 +11,11 @@ compiled into ``Hod2.exe``:
                                   plus every slot opcode 0x50 loads
           ---> cam/ files         cp_st<N>, op_st<N>
 
-This module holds that resolution once. ``export_level.py`` and
-``export_player.py`` both consume it, so the glTF a human opens in Blender and
-the bundle the browser player eats are guaranteed to describe the same set of
-models, regions and draw modes. Duplicating the resolution is exactly how the
-two would drift.
+This module holds that resolution once, and ``web/src/hod2lib/stage.ts``
+holds the same one for the exporter that writes the bundle -- so the glTF a
+human opens in Blender and the bundle the browser player eats describe the same
+set of models, regions and draw modes. Duplicating the resolution is exactly
+how the two would drift, which is what `tools/verify_exporters.py` watches.
 
 Reference: docs/formats/pipeline.md.
 """

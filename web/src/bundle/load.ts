@@ -105,7 +105,8 @@ export function manifestRefusal(m: Manifest | null | undefined): string | null {
   if (!m || typeof m !== "object") return "not a manifest";
   if (m.format !== SUPPORTED_FORMAT) {
     return `bundle format ${m.format}, this client reads ${SUPPORTED_FORMAT}. `
-      + `Rebuild with tools/export_player.py.`;
+      + `Rebuild it: \`npm run export -- --game-dir "..." --all\`, or from `
+      + `your install in the page.`;
   }
   // **This refuses rather than warns, and the reason is what the failure
   // looks like when it is not caught.** A bundle whose shape does not match
@@ -117,13 +118,13 @@ export function manifestRefusal(m: Manifest | null | undefined): string | null {
   //
   // The cost of refusing is one re-export, and only when a declaration
   // actually changed: the digest covers the declarations, not the file, so
-  // editing a doc comment here costs nothing. See `tools/hod2lib/schema.py`.
+  // editing a doc comment here costs nothing. See `tools/gen_schema_hash.py`.
   if (m.schema?.hash !== SCHEMA_HASH) {
     const drift = schemaDrift(m.schema?.files);
     return `this bundle was exported against a different web/src/bundle/ `
       + `schema`
       + (drift.length ? `: ${drift.join(", ")} changed since` : "")
-      + `. Rebuild with tools/export_player.py.`;
+      + `. Rebuild it: \`npm run export -- --game-dir "..." --all\`.`;
   }
   return null;
 }
@@ -141,7 +142,7 @@ export function stageFormatRefusal(what: string,
   if (format === SUPPORTED_FORMAT) return null;
   return `${what} is bundle format ${format ?? "(none)"}, this client reads `
     + `${SUPPORTED_FORMAT}. It was carried into this bundle from an older `
-    + `export; rebuild it with tools/export_player.py --all.`;
+    + `export; rebuild it with \`npm run export -- --all\`.`;
 }
 
 function checkStageFormat(what: string, format: number | undefined): void {

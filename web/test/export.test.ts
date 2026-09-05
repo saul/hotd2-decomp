@@ -1,11 +1,11 @@
 /**
  * The parts of the TypeScript exporter a game directory cannot check.
  *
- * `tools/verify_parity.py` is the real proof: it exports a stage with both
- * implementations and compares the bytes. But it needs an install, so it runs
- * only where there is one -- and three pieces of this port are load-bearing,
- * are *not* exercised by comparing two bundles, and had nothing testing them
- * at all:
+While the Python writer existed, `tools/verify_parity.py` was the real proof:
+ * it exported a stage with each implementation and compared the bytes. Three
+ * pieces of the port were load-bearing, were *not* exercised by comparing two
+ * bundles, and had nothing testing them at all -- and now that the comparison
+ * is gone this is what is left:
  *
  * * **`pyjson`** is compared against recorded `json.dumps` output. A bundle
  *   diff cannot catch a separator bug, because both sides would be read back

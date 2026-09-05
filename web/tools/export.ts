@@ -1,6 +1,7 @@
 /**
  * Build the static bundle the browser stage player loads. The TypeScript
- * exporter's command line, and the port of `tools/export_player.py`.
+ * exporter's command line, ported from the `tools/export_player.py` that
+ * used to be the only way to build a bundle.
  *
  *     npm run export -- --game-dir "..." --all       # both modes
  *     npm run export -- --game-dir "..." --stage 2   # both modes

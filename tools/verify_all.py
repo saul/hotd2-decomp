@@ -130,12 +130,6 @@ CHECKS: list[Check] = [
            "--verify"],
           "that the installed assets still hash to `manifest.csv`",
           NEEDS_GAME),
-    Check("verify_parity", ".",
-          ["python3", "tools/verify_parity.py", "--game-dir", "{game_dir}"],
-          "that the TypeScript exporter and the Python one write the same "
-          "bundle -- the only check that compares two implementations of a "
-          "format rather than one implementation against a file",
-          NEEDS_GAME),
 ]
 
 PASS, FAIL, SKIP = "pass", "fail", "skip"
@@ -212,7 +206,7 @@ def main() -> int:
             print(f"  {c.name}: {why.splitlines()[0] if why else ''}")
         kinds = {c.needs for c, _ in skipped}
         if NEEDS_BUNDLE in kinds:
-            print("  build a bundle with tools/export_player.py, or point "
+            print("  build a bundle with `cd web && npm run export`, or point "
                   "HOTD2_BUNDLE at one.")
         if NEEDS_GAME in kinds:
             print("  pass --game-dir for the checks that compare against the "

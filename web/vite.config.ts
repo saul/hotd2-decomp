@@ -143,7 +143,8 @@ function serveBundle() {
           return res.end(
             "no bundle at " + file +
             "\n\nBuild one first:\n" +
-            '  python3 tools/export_player.py --game-dir "..." --all\n',
+            '  npm run export -- --game-dir "..." --all\n' +
+            '\nOr open the player and build one from your install there.\n',
           );
         }
         res.setHeader("Content-Type", MIME[extname(file)] ?? "application/octet-stream");

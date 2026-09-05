@@ -9,13 +9,15 @@ Two halves that must not drift apart:
   transcription of the exe. Workflow: **`/gameplay-port`** for anything under
   `web/src/game/`.
 
-**`web/src/hod2lib/` is `tools/hod2lib/` in TypeScript**, so a bundle can be
-built inside the page. The Python is the reference: a format change lands there
-first and in the TypeScript in the same commit. `tools/verify_exporters.py`
-checks that the two packages hold the same modules and stamp the same version;
-`tools/verify_parity.py` exports a stage both ways and compares the bytes. See
-`docs/TS_PORT.md` for what "identical" means, exactly, and for the three places
-it cannot be.
+**`web/src/hod2lib/` writes the bundle, and it is the only thing that does.**
+It began as a port of `tools/hod2lib/` so that a bundle could be built inside
+the page; the two were compared byte for byte across all twelve stage bundles,
+and the Python writer was then removed. What is left of the Python package is
+the parsers -- twenty `verify_*` checks read the game through them and
+`export_level.py` writes glTF with them -- so the same formats are still
+implemented twice and `tools/verify_exporters.py` checks the two halves hold
+the same modules and claim the same version. A format change lands in both in
+the same commit. See `docs/TS_PORT.md`.
 
 Read `docs/PLAN.md` for what is worth doing, `docs/PLAYER_ARCHITECTURE.md`
 before changing the player's shape.
@@ -40,8 +42,8 @@ to `CHECKS` instead, with the one sentence saying what only that check can see.
 3 means it asserted nothing.** `verify_all.py` counts skips separately from
 passes and names them, because a skip that reads as green is how four
 regression tests came to be described as passing on machines that never ran
-them. Three suites need an exported bundle (`tools/export_player.py`, or point
-`HOTD2_BUNDLE` at one) and three need `--game-dir`.
+them. Three suites need an exported bundle (`cd web && npm run export`, or
+point `HOTD2_BUNDLE` at one) and three need `--game-dir`.
 
 ### Layers, and the direction dependencies point
 

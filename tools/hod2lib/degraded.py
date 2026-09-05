@@ -22,8 +22,8 @@ So the shape stays and the silence goes. A site that swallows says so:
 
 which prints one line to stderr and appends a record. `build_stage` drains the
 records into the stage's manifest entry, so a bundle carries the list of what
-is missing from it, and **`export_player.py` exits non-zero if that list is
-not empty.** There is no flag for that and there should not be: a `--strict`
+is missing from it, and **the exporter exits non-zero if that list is not
+empty.** There is no flag for that and there should not be: a `--strict`
 nobody passes is a check that never fires, which is the finding this module
 answers, one level up. The files are still written, because an incomplete
 bundle is usually what you want to look at while finding out why.

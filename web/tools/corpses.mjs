@@ -146,7 +146,7 @@ console.log(`\n${total} civilians mauled across the game, ${held} rest on a `
           + `single frame, ${moved} keep animating`);
 if (!total) {
   console.log("\nFAIL  nothing was mauled -- build the bundle with "
-              + "tools/export_player.py --all");
+              + "`npm run export -- --all`");
   process.exit(1);
 }
 if (moved) {

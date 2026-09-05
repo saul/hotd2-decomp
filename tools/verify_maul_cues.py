@@ -23,7 +23,7 @@ So this checks both directions across every captor script in the game:
     python3 tools/verify_maul_cues.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 
 It reads the built bundles for the scripts and the exe for the play lengths, so
-it needs `tools/export_player.py --all` to have run.
+it needs `npm run export -- --all` to have run.
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def main() -> int:
 
     if not rows:
         print("FAIL  no captor script in the bundle names a kill cue "
-              "(build it with tools/export_player.py --all)")
+              "(build it with `npm run export -- --all`, in web/)")
         return 1
 
     unreachable_play = [r for r in rows if r[4] <= 0 or r[3] >= r[4]]

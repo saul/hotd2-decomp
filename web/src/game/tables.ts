@@ -89,7 +89,7 @@ export function SetGameTables(chars: CharactersJson | undefined,
   if (chars && !coli?.blobs && !warnedNoColi) {
     warnedNoColi = true;
     console.warn("[game] no coli/ collision in this bundle -- re-export it "
-                 + "(tools/export_player.py). Nothing will find a wall.");
+                 + "(`npm run export`). Nothing will find a wall.");
   }
 
   const rings = chars?.approach?.rings ?? [];

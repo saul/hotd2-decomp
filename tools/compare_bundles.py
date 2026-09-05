@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Compare two exported bundles, and name the first place they disagree.
 
-There are two exporters now -- `tools/hod2lib/`, which is the reference, and
-`web/src/hod2lib/`, which is the same thing in TypeScript so that it can run in
-a browser. Two implementations of one format specification is exactly the drift
-this repository spends most of its checks preventing, so this is the check that
-makes it survivable.
+Written to prove the TypeScript exporter wrote the same bundle as the Python
+one, which it did -- all twelve stage bundles, byte for byte through every GLB
+buffer -- and which is why there is only one exporter now. The Python writer
+went with that result; `docs/TS_PORT.md` records it.
+
+What it is for today is the same question against a different pair: a bundle
+built in the browser against one built by the CLI, or one revision's output
+against the next's. Both are real: the browser deflates PNGs with
+`CompressionStream` rather than zlib, and "did that refactor change a single
+byte" is not a question a diff can answer over a 25 MB GLB.
 
 **What "identical" means, precisely.** Three of the four output kinds are
 compared for *structural* equality and one for bytes:
@@ -31,7 +36,7 @@ same bytes, but a browser's `CompressionStream` need not, and identical pixels
 is the property that matters either way.
 
     python3 tools/compare_bundles.py A B
-    python3 tools/compare_bundles.py A B --stage stage1
+    python3 tools/compare_bundles.py A B --stage stage1 --ulps 1
 """
 from __future__ import annotations
 

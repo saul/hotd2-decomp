@@ -69,7 +69,7 @@ export function hasBundle(): boolean {
  */
 export function skipNoBundle(what: string): never {
   console.log(`\nSKIP  ${what}: no bundle under ${BUNDLE_ROOT}`);
-  console.log("      build one with tools/export_player.py,"
+  console.log("      build one with `npm run export -- --game-dir ...`,"
     + " or point HOTD2_BUNDLE at an existing export.");
   process.exit(EXIT_SKIPPED);
 }

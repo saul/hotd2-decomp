@@ -1,10 +1,16 @@
 # The player bundle: what travels, and how the two sides stay honest
 
-`tools/export_player.py` writes a directory the browser player fetches. Python
-parses every format exactly once and the client re-implements none of them —
-the reasoning is in `docs/PLAYER_PLAN.md`. This file is about the *contract*
-between the two halves: what is in the bundle, what deliberately is not, and
-the three checks that fire when they drift.
+`web/src/hod2lib/` writes a directory the browser player fetches — from a CLI
+(`npm run export`) or from a worker inside the page itself. Every format is
+parsed exactly once, before play; the client re-implements none of them at run
+time. This file is about the *contract* between the two halves: what is in the
+bundle, what deliberately is not, and the three checks that fire when they
+drift.
+
+The exporter was a port of `tools/hod2lib/`, which wrote this same directory
+until the two agreed byte for byte on all twelve stage bundles; see
+`docs/TS_PORT.md`. Anything below that says "the exporter" means the
+TypeScript one.
 
 ```
 extract/player/
@@ -18,7 +24,7 @@ extract/player/
 
 ## Three versions, and only one of them moves on its own
 
-**1. `format` — `BUNDLE_FORMAT` in `hod2lib/bundle.py`, `SUPPORTED_FORMAT` in
+**1. `format` — `BUNDLE_FORMAT` in `web/src/hod2lib/bundle.ts`, `SUPPORTED_FORMAT` in
 `web/src/bundle/manifest.ts`.** The coarse check: the client refuses a bundle
 whose `format` is not its own. Bump it when the *layout* changes — a file added
 to a stage directory, a block renamed.
@@ -30,7 +36,7 @@ It is bumped by hand, and that is its weakness rather than a detail. It sat at
 documentation with teeth, not as the thing that will catch you.
 
 **2. A `format` on every stage, not only on the manifest.** The manifest is
-rewritten by any export; the stage files are not. `export_player.py` carries
+rewritten by any export; the stage files are not. The exporter carries
 forward the entries a partial export did not rebuild, so `--stage 2` after a
 `--all` leaves a *fresh* manifest indexing five *stale* stage directories. Each
 stage entry, each `<stage>.script.json` and each `<stage>.cam.json` therefore
@@ -40,8 +46,10 @@ exporter prints which stages a partial run left behind.
 **3. The schema digest, which nobody has to remember.** `manifest.json` carries
 a SHA-256 over the *declarations* in `web/src/bundle/` — per file, plus one
 digest over those — and the client compares it against the same digest
-generated into `web/src/bundle/schema_hash.ts`. `hod2lib/schema.py` is the one
-implementation of it.
+generated into `web/src/bundle/schema_hash.ts`. `tools/gen_schema_hash.py` is
+the one implementation of it, and the exporter *imports* what it generates
+rather than recomputing it — so a bundle agrees with the client that built it
+by construction.
 
 **Over a named set of files, not the whole directory.** It was
 `web/src/bundle/*.ts`, which put `stage.ts`'s loader in the hash along with its
@@ -69,10 +77,9 @@ not listed.
   not a check. The remedy is one re-export, and the error names which
   declaration files moved, because "the bundle does not match" is true and
   useless.
-* **`schema_hash.ts` is generated and committed.** `export_player.py` rewrites
-  it on every run, and `tools/regen_schema_hash.py` does it without building a
-  bundle. `tools/verify_exporters.py` re-derives it and **fails when the
-  committed copy is stale**, which is what makes it impossible to forget: the
+* **`schema_hash.ts` is generated and committed.** `tools/gen_schema_hash.py`
+  writes it, and `tools/verify_exporters.py` re-derives it and **fails when the
+  committed copy is stale** — which is what makes it impossible to forget: the
   digest catches a stale bundle, and that check catches a stale digest.
 * The generated file is excluded from its own digest, because a file that
   contained its own hash could not have one.

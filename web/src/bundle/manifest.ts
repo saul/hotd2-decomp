@@ -36,7 +36,7 @@ export const SUPPORTED_FORMAT = 4;
  *
  * Compared against `schema_hash.ts`, which is generated from the same sources
  * and compiled into the client. See {@link SCHEMA_HASH} and
- * `tools/hod2lib/schema.py`.
+ * `tools/gen_schema_hash.py`.
  */
 export interface SchemaDigest {
   /** One digest over {@link SchemaDigest.files}, in filename order. */
@@ -72,7 +72,7 @@ export interface StageEntry {
   name: string;
   /**
    * The format **this stage** was written in, which is not necessarily the
-   * manifest's: `export_player.py` carries forward the entries a partial
+   * manifest's: the exporter carries forward the entries a partial
    * export did not rebuild, so a fresh manifest can index a stage directory
    * an older tool wrote. Absent on an entry carried from before format 3.
    */

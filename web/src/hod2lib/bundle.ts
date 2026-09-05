@@ -1,6 +1,7 @@
 /**
  * Writes the static bundle the browser player loads.
- * The port of `tools/hod2lib/bundle.py`.
+ * Ported from `tools/hod2lib/bundle.py`, which was removed once the two
+ * agreed byte for byte; see docs/TS_PORT.md.
  *
  * The player does **not** parse `pol/`, `tex/`, `cam/`, `evt/` or `Hod2.exe`
  * while it is playing: it loads glTF, evaluates Hermite curves and walks the
@@ -66,12 +67,13 @@ export const BUNDLE_FORMAT = 4;
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
  *
  * It is informational -- the number a reader validates against is
- * {@link BUNDLE_FORMAT} -- but it has to be the *same* informational number on
- * both sides or a bundle would say which implementation wrote it, which is
- * exactly what parity means it must not.
- * `tools/verify_exporters.py` checks the two agree.
+ * {@link BUNDLE_FORMAT} -- and it names the *library*, not the implementation:
+ * `tools/hod2lib/` is still where each format is specified in code, and its
+ * `__version__` has to read the same. `tools/verify_exporters.py` checks that.
+ *
+ * 0.8.0 is the release that removed the Python bundle writer.
  */
-export const TOOL_VERSION = "0.7.0";
+export const TOOL_VERSION = "0.8.0";
 
 /**
  * Every asset slot the three container families can draw. The group props use

@@ -16,14 +16,13 @@ event script. Something has to have parsed them first, and there are now three
 ways to arrange that.
 
 ```sh
-# 1. build the bundle (once, or whenever the library changes)
-python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
-#    ...or the same thing in TypeScript, about nine times faster
-cd web && npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
-
-# 2. run the client
 cd web
 npm install
+
+# 1. build the bundle (once, or whenever `src/hod2lib/` changes)
+npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
+
+# 2. run the client
 npm run dev          # http://localhost:5173
 ```
 

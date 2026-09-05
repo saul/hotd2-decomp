@@ -46,7 +46,7 @@ it buys only convenience.
 **The cost of this choice, stated plainly:** the user runs
 
 ```sh
-python3 tools/export_player.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
+cd web && npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 ```
 
 once, then opens the bundle. That is a real regression from "open the install
@@ -79,10 +79,10 @@ thin argparse shell over it.**
 
 | New module | Absorbs | Consumers |
 |---|---|---|
-| `hod2lib/stage.py` | `export_level.stage_geometry()`, `load_asset()`, `load_cam_paths()` | `export_level.py`, `export_player.py` |
+| `hod2lib/stage.py` | `export_level.stage_geometry()`, `load_asset()`, `load_cam_paths()` | `export_level.py`; ported to `hod2lib/stage.ts` |
 | `hod2lib/script.py` | `dump_stage_script.py`'s operand resolution, as a structured `Program` | `dump_stage_script.py` (text), `bundle.py` (JSON) |
 | `hod2lib/campaths.py` | slot-keyed path resolution, `{global_slot: Path}` | `gltf.py`, `bundle.py` |
-| `hod2lib/bundle.py` | new — writes the web bundle | `export_player.py` |
+| `hod2lib/bundle.ts` | writes the web bundle | `web/tools/export.ts`, and the in-page worker |
 
 `Stage` becomes the single "what is a stage" abstraction: scene id, game mode,
 evt file, route table, regions, geometry slot set, parts, texture banks, cam

@@ -593,7 +593,7 @@ export class CharacterLayer implements System {
       this.warnedNoReactions = true;
       console.warn(
         "[characters] no hit-reaction data in this bundle — re-export it "
-        + "(tools/export_player.py). Zombies will not stagger when shot.");
+        + "(`npm run export`). Zombies will not stagger when shot.");
     }
     return best;
   }

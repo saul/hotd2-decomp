@@ -238,7 +238,7 @@ if (bad || total === 0 || missing.length) {
   }
   if (total && total !== EXPECT.total) {
     console.log("  (a bundle built for fewer than six stages will not match; "
-                + "re-export with tools/export_player.py --all)");
+                + "re-export with `npm run export -- --all`)");
   }
   process.exit(1);
 }

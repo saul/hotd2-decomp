@@ -1,15 +1,19 @@
 /**
  * The schema digest this client was compiled against. **Generated file.**
  *
- * Written by `tools/hod2lib/schema.py` on every export and committed; re-run
- * `tools/export_player.py`, or `python3 -c` over that module, after changing
- * any declaration in this directory. `tools/verify_exporters.py` fails when
- * this file is stale, so it cannot quietly drift from its sources.
+ * Written by `tools/gen_schema_hash.py` and committed; re-run it after
+ * changing any declaration in this directory. `tools/verify_exporters.py`
+ * fails when this file is stale, so it cannot quietly drift from its sources.
+ *
+ * The exporter imports {@link SCHEMA_HASH} and stamps it into
+ * `manifest.json`, and `bundle/load.ts` refuses a bundle whose digest is not
+ * this one -- so the exporter and the client agree by construction rather than
+ * by anyone remembering.
  *
  * The digest covers the *declarations* in `web/src/bundle/*.ts` -- comments
- * and whitespace are stripped before hashing -- so editing a doc comment
- * costs nothing and changing a field invalidates every bundle built before it.
- * See `docs/formats/bundle.md`.
+ * and whitespace are stripped before hashing -- so editing a doc comment costs
+ * nothing and changing a field invalidates every bundle built before it. See
+ * `docs/formats/bundle.md`.
  */
 
 /** The per-file digests, so a mismatch can name the block that moved. */

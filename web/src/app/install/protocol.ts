@@ -30,6 +30,7 @@ export type WorkerIn = ExportRequest;
 export type WorkerOut =
   | { kind: "progress"; line: string }
   | { kind: "warning"; line: string }
-  | { kind: "stage"; name: string; counts: Record<string, number> }
+  | { kind: "stage"; name: string; stage: number; original: boolean;
+      counts: Record<string, number> }
   | { kind: "done"; stages: number; bytes: number; degraded: number }
   | { kind: "error"; message: string };

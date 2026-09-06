@@ -25,6 +25,7 @@
  * mysteriously wrong.
  */
 
+import { BUILDER_FILES, BUILDER_HASH } from "../bundle/builder_hash";
 import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
 import { f32, i16, i32, u32 } from "./bytes";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
@@ -36,6 +37,7 @@ import type { Spawn } from "./evt";
 import type { ExeTables } from "./exetab";
 import * as gltf from "./gltf";
 import type { BundleSink, Deflate, Progress } from "./io";
+import { loadBank } from "./mot";
 import { dumpsIndented, dumpsStrict } from "./pyjson";
 import * as propslib from "./props";
 import { AssetCache, resolveForStage as resolveRigs } from "./rigs";
@@ -361,6 +363,31 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         lifetime_evt_steps: s8(tail),
         pos: [...rec.pos], yaw: rec.orient[1],
       });
+    } else if (rec.hp === 0) {               // class 0x44 selector 0
+      // `PropBuildScriptFlagEffect` -- the only selector that draws an
+      // animated **effect** rather than a model at a pose. The dword at
+      // `tail+0x04` picks the pair (`CMP ECX,0x13F5` at 0x00472B6C): the
+      // matching half is effect 2 captured at bone 2, the other effect 3 at
+      // bone 1. `obj+0x328` is the literal motion 471 either way, and the
+      // spawn's own position is never copied to `obj+0x19C` -- the motion
+      // carries world coordinates, which is why `pos` is carried only so the
+      // placement can be recognised beside the descriptor.
+      const a = (rec.param(0x04, "u32") ?? 0) === propslib.SCRIPT_FLAG_EFFECT_SLOT_A;
+      const pick = a ? propslib.SCRIPT_FLAG_EFFECT_A
+                     : propslib.SCRIPT_FLAG_EFFECT_B;
+      out.push({
+        at: rec.offset, container: "script_flag_effect",
+        effect: pick.effect,
+        capture_bone: pick.captureBone,
+        motion: propslib.SCRIPT_FLAG_EFFECT_MOTION,
+        // `obj+0x28C`, which this family never draws through: the routine
+        // reads its own node slots out of the tree instead.
+        slot: rec.param(0x04, "u16") ?? 0,
+        // `ScriptFlagEffectUpdate` has no `PropExpireByStepLifetime`; script
+        // flag 0x13 is its whole lifetime.
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
     }
   }
   return out;
@@ -472,7 +499,8 @@ export function scriptedHumanoidsJson(evt: evtlib.EvtFile,
  * geometry.
  */
 export function breakablesJson(tables: ExeTables,
-                               placements: Record<string, unknown>[]):
+                               placements: Record<string, unknown>[],
+                               effects: Record<string, unknown> = {}):
     Record<string, unknown> {
   return {
     groups: tables.breakableGroups(),
@@ -480,8 +508,87 @@ export function breakablesJson(tables: ExeTables,
     falling_hull: tables.fallingHullPoints().map((p) => [...p]),
     kinds: tables.propKindParams(),
     placements,
+    effects,
     level_height: 7.540296,
   };
+}
+
+/**
+ * The effect trees and baked motions class 0x44 selector 0 draws through.
+ *
+ * One record per effect id the stage's selector-0 spawns name, and nothing at
+ * all for a stage that has none -- which is every stage but 1.
+ *
+ * **The tree is the index source and the motion is read against it.**
+ * `g_effect_bone_counts[effect]` is the node count *including* the root, and
+ * both `EffectFrameTranslations` and `EffectFrameRotations` derive the stride
+ * from it, so a motion baked at the character stride would be a third of a
+ * frame out per frame. `effectFrames` is the only decoder that may read one.
+ *
+ * The cue list rides along because `ScriptFlagEffectUpdate` picks it by the
+ * same effect id -- `g_script_flag_effect_cues_a` for effect 2 and
+ * `g_script_flag_effect_cues_b` for anything else -- and a consumer that has
+ * the effect has the branch.
+ */
+export async function scriptFlagEffectsJson(
+    stage: Stage, placements: Record<string, unknown>[]):
+    Promise<Record<string, unknown>> {
+  const tables = stage.tables;
+  const out: Record<string, unknown> = {};
+  const banks = tables.motionBanks();
+  for (const pl of placements) {
+    if (pl.container !== "script_flag_effect") continue;
+    const effect = pl.effect as number;
+    const motion = pl.motion as number;
+    if (out[String(effect)] !== undefined) continue;
+    const nodes = propslib.effectTree(tables, effect);
+    const declared = tables.ru16(propslib.EFFECT_BONE_COUNTS + effect * 2) ?? 0;
+    // `spawns.md` proves the two agree on the four effects it lists; a stage
+    // that disagreed would be a tree read at the wrong struct, and baking the
+    // motion at the wrong stride afterwards would hide it in float noise.
+    if (!nodes.length || nodes.length !== declared) {
+      degraded.note("hod2lib.bundle.script_flag_effects",
+                    `effect ${effect} tree`,
+                    "the effect is not exported and nothing draws it",
+                    `${nodes.length} nodes against g_effect_bone_counts `
+                    + `${declared}`);
+      continue;
+    }
+    const bankId = tables.motionBankOf(motion);
+    const bank = bankId !== null && banks.has(bankId)
+      ? await loadBank(stage.source, banks.get(bankId)![0],
+                       banks.get(bankId)![1])
+      : null;
+    const frames = bank ? bank.effectFrames(motion, declared) : [];
+    if (!frames.length) {
+      degraded.note("hod2lib.bundle.script_flag_effects",
+                    `effect ${effect} motion ${motion}`,
+                    "the effect is exported without a pose and holds frame 0",
+                    "no frames decoded");
+    }
+    const t: number[] = [];
+    const r: number[] = [];
+    for (const f of frames) {
+      for (const v of f.t) t.push(v[0], v[1], v[2]);
+      for (const v of f.r) r.push(v[0], v[1], v[2]);
+    }
+    out[String(effect)] = {
+      nodes: nodes.map((n) => ({ slot: n.slot, bone: n.bone,
+                                 children: [...n.children] })),
+      interp: tables.data[tables.v2r(propslib.EFFECT_INTERP_MODE + effect) ?? 0],
+      motion,
+      // The clock `ScriptFlagEffectUpdate` stops two short of, in play frames.
+      play_length: tables.motionPlayLength(motion) ?? 0,
+      frames: frames.length,
+      bones: declared - 1,
+      t, r,
+      cues: propslib.effectSoundCues(
+        tables, effect === propslib.SCRIPT_FLAG_EFFECT_A.effect
+          ? propslib.SCRIPT_FLAG_EFFECT_CUES_A
+          : propslib.SCRIPT_FLAG_EFFECT_CUES_B),
+    };
+  }
+  return out;
 }
 
 /**
@@ -653,6 +760,7 @@ export async function effectSlotEntry(
  */
 export async function breakableSlotEntry(
     stage: Stage, placements: Record<string, unknown>[],
+    effects: Record<string, unknown>,
     cache: AssetCache): Promise<RigInstance | null> {
   const slots = stage.tables.assetSlots();
   const parts: RigInstance["parts"] = [];
@@ -672,6 +780,14 @@ export async function breakableSlotEntry(
     if (GENERIC_DESCRIPTOR_SLOT.includes(pl.type as number)
         && !want.includes(pl.slot as number)) {
       want.push(pl.slot as number);
+    }
+  }
+  // Class 0x44 selector 0 draws an effect tree, so the slots it needs are the
+  // tree's nodes and **not** the descriptor's `obj+0x28C`, which that family
+  // never passes to `AssetDrawSlot`. A node with slot 0 is a pure transform.
+  for (const def of Object.values(effects)) {
+    for (const n of (def as { nodes: { slot: number }[] }).nodes) {
+      if (n.slot && !want.includes(n.slot)) want.push(n.slot);
     }
   }
   for (const slot of want) {
@@ -956,7 +1072,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // Before the glTF: the template rig has to include every asset slot the
   // stage's generic props name, and only the script knows which those are.
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
-  const brk = await breakableSlotEntry(stage, placements, cache);
+  const effectDefs = await scriptFlagEffectsJson(stage, placements);
+  const brk = await breakableSlotEntry(stage, placements, effectDefs, cache);
   const act = await actorSlotEntry(
     stage, spawnRecords.map((r) => r.cls), cache);
   const eff = await effectSlotEntry(stage, cache);
@@ -1005,7 +1122,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.rain = rain;
   scriptJson.characters = charactersJson(charDefs, charPlaces, tables);
   scriptJson.props = propslib.propsJson(tables, hinges, statics);
-  scriptJson.breakables = breakablesJson(tables, placements);
+  scriptJson.breakables = breakablesJson(tables, placements, effectDefs);
   scriptJson.set_pieces = evt ? setPiecesJson(evt, spawnRecords) : {};
   scriptJson.humanoids = evt ? scriptedHumanoidsJson(evt, spawnRecords) : {};
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};
@@ -1022,6 +1139,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // Drained here, at the end of the stage and before the entry is built, so
   // the list is exactly what this stage lost.
   const lost: Degradation[] = degraded.drain();
+  // Counted *after* `exportLevel`, which is the only thing that mutates a
+  // mesh's triangle list, so this is already what the glTF holds. It used to
+  // have `dropped_collapsed_uv` subtracted from it as well, which counted the
+  // same triangles twice: stage 1 reported 32,485 for a file with 34,062 in
+  // it. Whatever the writer left behind is the number.
   const triangles = parts.reduce(
     (n, [, ms]) => n + ms.reduce((k, m) => k + m.triangleCount, 0), 0);
   const sources: Record<string, string> = {};
@@ -1034,6 +1156,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // carries forward the entries it did not rebuild, so a fresh manifest can
     // index a stage directory written by an older tool.
     format: BUNDLE_FORMAT,
+    // Per stage, because the cache is filled one stage at a time and goes out
+    // of date the same way. See `StageEntry.builder`.
+    builder: BUILDER_HASH,
     stage: stage.stage,
     scene: stage.scene,
     game_mode: stage.gameMode,
@@ -1043,7 +1168,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     counts: {
       parts: parts.length,
       models: parts.reduce((n, [, m]) => n + m.length, 0),
-      triangles: triangles - info.dropped_collapsed_uv,
+      triangles,
       materials: info.materials,
       textures: info.textures,
       regions: geo.regions.length,
@@ -1087,6 +1212,9 @@ export async function writeManifest(
   const doc: Record<string, unknown> = {
     format: BUNDLE_FORMAT,
     schema: { hash: SCHEMA_HASH, files: SCHEMA_FILES },
+    // Which exporter wrote it, so a bundle can be told it is out of date
+    // rather than merely unreadable. See `tools/gen_builder_hash.py`.
+    builder: { hash: BUILDER_HASH, files: BUILDER_FILES },
     tool: "hod2lib",
     tool_version: TOOL_VERSION,
     built,

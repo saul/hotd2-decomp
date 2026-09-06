@@ -84,6 +84,41 @@ not listed.
 * The generated file is excluded from its own digest, because a file that
   contained its own hash could not have one.
 
+**4. The builder digest, which says a bundle is merely *old*.** The three
+checks above are all about whether a bundle can be **read**. None of them is
+about whether it is what today's exporter would **write** — and those are
+different questions with different remedies.
+
+`manifest.json` carries a second SHA-256, over the code in
+`web/src/hod2lib/`, and every stage entry carries the same hash on its own.
+`tools/gen_builder_hash.py` generates it into `web/src/bundle/builder_hash.ts`
+in the same shape as the schema one, `verify_exporters.py` fails when the
+committed copy is stale, and the exporter imports rather than recomputes it.
+
+* **It warns; it does not refuse.** A schema mismatch means the bundle cannot
+  be read correctly. An exporter change usually means it reads perfectly and is
+  a little out of date, and refusing would make every unrelated fix in
+  `hod2lib/` cost a full re-export before anything could be opened at all. The
+  page marks the stage stale, the Bundle button says *Bundle needs rebuilding*,
+  and the bundle screen names the files that moved.
+* **It hashes bodies, not just declarations.** The opposite decision from the
+  schema digest and for the opposite reason: a function body is exactly what
+  decides a byte of output. Comments and whitespace are still stripped.
+* **It globs `hod2lib/*.ts` rather than naming them.** Also the opposite
+  decision. There, a named list keeps the loader's text out of a digest a
+  bundle is compared against; here, every file is implementation and one this
+  missed would be a stale bundle nobody is warned about — and a new module is
+  exactly when that would happen.
+* **Per stage as well as per manifest**, for the same reason `format` is: the
+  browser's cache is nothing but partial exports. It is filled one stage at a
+  time and it goes out of date one stage at a time.
+
+The gap it closes is not hypothetical. `nl1.dropCollapsedUvTriangles` was
+deleting 3–5% of every stage's geometry; switching it off changed no
+declaration and no `BUNDLE_FORMAT`, so a stage already in a browser's OPFS
+cache went on winning over the rebuilt one — holes and all — however many times
+the tree was exported, with nothing on the page saying why.
+
 ## The rule: `.rdata` travels, `.text` does not
 
 A number the exporter **reads out of the EXE** goes in the bundle. Reading it

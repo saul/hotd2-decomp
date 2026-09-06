@@ -284,16 +284,27 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
 
-    if (s.class === SpawnClassValue.PropPlacer
-        && (pl.container === "falling" || pl.container === "story_switch")) {
-      // Class 0x44 dispatches on `+0x11C`, so the selector goes in `hp` — the
-      // same field that is the *group id* for a class-0x41 placer.
-      const sel = pl.container === "story_switch"
-        ? Class44Selector.StoryModeSwitch : Class44Selector.FallingContainer;
+    // Class 0x44 dispatches on `+0x11C`, so the selector goes in `hp` — the
+    // same field that is the *group id* for a class-0x41 placer.
+    //
+    // **The default arm is class 0x41's**, so a class-0x44 container that is
+    // not named here does not merely go unbuilt: it is spawned as a
+    // `PropContainerPlacer` and runs `PlaceBreakableGroup` with group 0. The
+    // window halves at evt 0x1580/0x15CC did exactly that for as long as
+    // `script_flag_effect` was missing from this table.
+    const CLASS44_SELECTOR: Record<string, number> = {
+      falling: Class44Selector.FallingContainer,
+      story_switch: Class44Selector.StoryModeSwitch,
+      script_flag_effect: Class44Selector.ScriptFlagEffect,
+    };
+    const sel = CLASS44_SELECTOR[pl.container];
+    if (s.class === SpawnClassValue.PropPlacer && sel !== undefined) {
       const a = ActorSpawn(s.at, SpawnClassValue.PropPlacer, 0,
                            pl.container === "story_switch"
                              ? "story-mode switch"
-                             : `container kind ${pl.kind}`,
+                             : pl.container === "script_flag_effect"
+                               ? `effect ${pl.effect}`
+                               : `container kind ${pl.kind}`,
                            { hp: sel });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;

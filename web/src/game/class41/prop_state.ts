@@ -42,6 +42,12 @@ export enum PropFamily {
    * does **not** run `PropExpireByStepLifetime`.
    */
   StoryModeSwitch = 6,
+  /**
+   * `ScriptFlagEffectUpdate` (`FUN_00473B90`) — class 0x44 selector 0, and
+   * the only object in the game that draws an **animated effect tree** on a
+   * script flag. Stage 1's two window halves, and nothing else.
+   */
+  ScriptFlagEffect = 7,
 }
 
 /** `obj+0x192` — where a prop is in its life. */
@@ -188,8 +194,32 @@ export interface BreakableProp {
   effect: number;         // +0x324
   /**
    * `obj+0x32C` — frames the puff has run, up to `BREAKABLE_EFFECT_FRAMES`.
+   *
+   * The **play cursor** of the four-word `EffectDrawTree` state block for
+   * every family that draws an effect, which is this one, `Kinded` and
+   * `ScriptFlagEffect`. `ScriptFlagEffectUpdate` (`FUN_00473B90`) steps it
+   * only while its script flag is up and stops two short of
+   * `g_motion_play_length[effectVariant]`.
    */
   effectFrames: number;   // +0x32C
+  /**
+   * `obj+0x330` — the previous frame, the fourth word of that state block.
+   *
+   * `EffectDrawTree` (`FUN_0040DDC0`) writes it after every draw and
+   * `EffectPoseNode` reads it to spot a cursor that has just wrapped. Carried
+   * because the engine writes it; for `ScriptFlagEffect` neither wrap branch
+   * is reachable, since the cursor stops before the end rather than looping.
+   */
+  effectPrevFrame: number;   // +0x330
+  /**
+   * `obj+0x2A8` — `ScriptFlagEffectUpdate`'s cursor into the *second* sound
+   * cue list, the one it uses for every effect id but 2.
+   *
+   * The first list's cursor is `obj+0x2A4`, which this struct already carries
+   * as {@link BreakableProp.removeFlag}: check the family before reading
+   * either. Zero for every other family, which never touch this word.
+   */
+  cueCursorB: number;     // +0x2A8
   /** Which update function this object runs. See {@link PropFamily}. */
   family: PropFamily;     // *obj
   /**
@@ -283,6 +313,10 @@ export interface BreakableProp {
    * `obj+0x2A4` — the `g_script_flags` index that removes a story-mode
    * switch, or -1 for none. `StoryModeSwitchUpdate` tests it before anything
    * else, and it is that object's lifetime, since `+0x11C` is a literal 1.
+   *
+   * **`ScriptFlagEffect` reads the same word as a cue cursor** — its index
+   * into `g_script_flag_effect_cues_a` — so this is another of the offsets
+   * L3 is about. Check the family.
    */
   removeFlag: number;     // +0x2A4
   /**
@@ -364,6 +398,8 @@ export function makeBreakableProp(id: number, group: number,
     flags: 0,
     effect: 0,
     effectFrames: 0,
+    effectPrevFrame: 0,
+    cueCursorB: 0,
     family: PropFamily.Group,
     kind: 0,
     floorY: 0,

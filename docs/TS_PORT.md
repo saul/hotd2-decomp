@@ -11,9 +11,10 @@ Python, the repo and a terminal.
 
 * **a thin CLI** — `npm run export -- --game-dir "..." --all` — writing the
   same `extract/player/` tree;
-* **in the browser** — the user points the page at their own install, picks
-  stages and modes, and the export runs client-side into a cache that survives
-  a reload, with a download button for the result.
+* **in the browser** — the user points the page at their own install, picks a
+  stage and a mode, and the export runs client-side into a cache that survives
+  a reload, with a download button for the result. Every other stage is built
+  the moment it is asked for.
 
 Nothing about the bundle's *shape* changed. `BUNDLE_FORMAT` did not move.
 
@@ -170,10 +171,44 @@ first, because 429 MB in the best-effort bucket is 429 MB a browser may drop.
 URL, which `app/stage_load.ts` gives back the moment three.js has parsed it —
 a 58 MB blob nothing revokes is 58 MB the tab keeps until it closes.
 
+**Both at once.** The two sources are live together, and which one a *stage*
+comes from is a per-stage question — a page can be served four stages and hold
+two of its own. `app/bundles.ts` answers it: the cache wins, because an export
+made in the tab is the more recent statement about that stage and the only one
+that can be rebuilt, and a source is only offered a stage whose `format` and
+schema digest this client reads. Nothing in `bundle/` holds a "current"
+source any more; every call names the one it means.
+
+**Building on demand.** A stage neither bundle holds is decoded when it is
+picked, into the cache, with the progress in the loading overlay — that is
+`Player.buildStage`, and it is why the stage picker offers all six as soon as
+the page knows an install. One stage is about a minute; all twelve are 431 MB
+and most of an hour, which is not a thing to ask for before anything has been
+seen.
+
+**Picturing it.** The stage picker's tiles show a frame the player rendered
+the last time that stage was open, captured in `endFrame` (a WebGL back buffer
+does not survive the turn it was drawn in) and kept in OPFS *beside* the cache
+rather than in it. No screenshot is committed to this repository, so the only
+honest picture of stage 4 is one this browser made from the copy of the game
+its owner already has.
+
 **Downloading.** A store-only ZIP writer, sixty lines, no dependency. No
 compression on purpose: a GLB is 99% of a bundle and is already packed. It
 streams into a `showSaveFilePicker` handle where there is one, so the whole
 export never has to exist as a `Blob`.
+
+**The same code on two runtimes is two implementations.** The CLI built all
+twelve bundles and the browser could not build one: `container.classify`
+decides whether a blob is compressed by *trying*, and the LZ decoder
+preallocated its output from the file's own size header. 865 of the game's
+files have a first dword that merely looks like a size, up to 4.03 GB of it in
+`tex/st5_01b.bin`. Node hands over a 4 GB buffer and the decode then fails, so
+the trial worked; a browser refuses, and a `RangeError` is not the `LZError`
+the trial was catching. The grammar cannot produce more than 78.8 bytes out per
+byte in, so that header is now refusable by arithmetic rather than by attempt —
+and the fix changed no byte of any bundle, which is the thing
+`compare_bundles.py` is still here to say. `L22`.
 
 ## How it was proved, and what still checks it
 

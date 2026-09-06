@@ -19,7 +19,7 @@
  * Needs a bundle and playwright, like `pacing.mjs`, so it is not in
  * `verify_all.py`.
  */
-import { openPlayer, waitForLoad, enableShooting } from "./lib/player.mjs";
+import { openPlayer, waitForLoad } from "./lib/player.mjs";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const URL = process.env.PROBE_URL ?? "?stage=1&mode=play&block=3&step=3";
 const SECS = Number(process.env.SECS ?? 12);
@@ -29,11 +29,6 @@ try {
   await waitForLoad(page);
   await page.click("body");
   await page.evaluate(() => document.activeElement?.blur?.());
-  // **Shooting on, or there is no fight.** With it off `WalkerHost.aliveEnemies`
-  // answers null and every live-enemy gate passes on the spot -- including the
-  // `wait_enemies_alive 0` this shot is supposed to sit through. Measuring the
-  // camera across a fight that did not happen measures nothing.
-  if (process.env.NO_SHOOT !== "1") await enableShooting(page);
   // Start the transport. Without this the loop is asleep and nothing is drawn.
   await page.keyboard.press("Space");
   await sleep(400);

@@ -133,6 +133,8 @@ export interface PlayerCommands {
   markAddress(): void;
   pushUrl(): void;
   loadStage(): Promise<void>;
+  /** Put the bundle screen on the page. See `app/install/ExportScreen.tsx`. */
+  openBundles(): void;
   resize(): void;
   saveSnapshot(): Snapshot;
   loadSnapshot(snap: Snapshot): string | null;
@@ -184,6 +186,13 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "requestSkip": p.requestSkip(); return;
     case "branchHover":
       p.branchHover = c.over;
+      return;
+    case "openBundles":
+      // The one command whose effect is not inside the player's own tree:
+      // the bundle screen is a second React root over the page, because
+      // it runs before there is a player at all and none of its state is
+      // game state. `Player` owns the call; `ui/` only says it was clicked.
+      p.openBundles();
       return;
     case "takeBranch":
       p.walker?.takeBranch(c.target);
@@ -336,9 +345,6 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     case "trackEnemies":
       p.cam.trackEnabled = on;
       p.syncCameraToWalker();
-      return;
-    case "shoot":
-      p.shooting.setEnabled(on, p.camera, p.scene);
       return;
     // Both of these are about what is *drawn*, not about what the game does:
     // the port spawns the same records and marks the same materials either

@@ -92,6 +92,19 @@ read against a different skeleton would be read at a different stride, so a
 motion is only meaningful with the character it was authored for — and
 `g_motion_bank_of` is what ties a motion id to its bank, not to a character.
 
+**And an effect's motion is not read at this stride at all.** The effect system
+(`docs/formats/spawns.md`) has its own sampler:
+`EffectFrameTranslations` (`FUN_0040E040`) and `EffectFrameRotations`
+(`FUN_0040E070`) compute `(g_effect_bone_counts[effect] * 0x12 - 0xF) & ~3`,
+which **truncates** rather than rounding up, and a frame is `n-1` translations
+of three floats followed by `n-1` rotations of three BAMS shorts — three
+*floats* per bone where a character has none, because an effect's node tree
+carries no bind offsets and its translations come per frame. `mot.py` and
+`mot.ts` both expose it as `effect_frame_stride` / `effectFrameStride`, and
+`tools/verify_effects.py` holds all 13 `(effect, motion)` pairs against it.
+Reading one of those blocks at the character stride is a third of a frame out
+per frame, and it decodes without complaint.
+
 ### The four bytes the engine skips
 
 The `+ 4` in the sampler steps over a `u32` the loader never reads. It is the

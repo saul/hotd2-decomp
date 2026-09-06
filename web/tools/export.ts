@@ -18,11 +18,12 @@
  * parsing, `node:fs` and a place for the warnings to be printed.
  */
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { BUNDLE_FORMAT, buildStage, writeManifest } from "../src/hod2lib/bundle";
 import * as degraded from "../src/hod2lib/degraded";
 import { Stage } from "../src/hod2lib/stage";
+import { BUNDLE_ROOT } from "./lib/bundle_root";
 import { NodeAssetSource, NodeBundleSink, absolute,
          nodeDeflate } from "./lib/node_io";
 
@@ -170,13 +171,19 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  // Default: the repository's own `extract/player`, found by walking up from
-  // this file the way `tools/lib/bundle_root.ts` does, so a checkout at any
-  // path exports to its own tree.
-  const out = args.out
-    ? absolute(args.out)
-    : resolve(dirname(new URL(import.meta.url).pathname), "..", "..",
-              "extract", "player");
+  // Default: the repository's own `extract/player`, and **asked of
+  // `bundle_root.ts` rather than worked out here**.
+  //
+  // It used to walk up from `import.meta.url`, which is right for a source
+  // file and wrong for this one: `tools/run_ts.mjs` bundles the CLI with
+  // esbuild into a temporary directory and runs *that*, so `import.meta.url`
+  // named `/var/folders/.../hod2-run-XXXX/` and a plain `npm run export`
+  // wrote 431 MB into a temp tree, said where it had put it, and exited 0.
+  // `bundle_root.ts` walks up from the working directory to the checkout that
+  // holds a `.git` and a `web/`, which survives being bundled, and it is the
+  // same answer `vite.config.ts` and every test already use -- one place
+  // where the bundle is, which is the whole reason that module exists.
+  const out = args.out ? absolute(args.out) : BUNDLE_ROOT;
   await mkdir(out, { recursive: true });
   const sink = new NodeBundleSink(out);
 

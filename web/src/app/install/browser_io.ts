@@ -221,6 +221,75 @@ export async function listCached(): Promise<Map<string, File>> {
   return out;
 }
 
+/**
+ * Where the stage thumbnails live: **beside** the cache, not inside it.
+ *
+ * They are the player's own frames, not part of a bundle, and a bundle is a
+ * thing that gets zipped up and unpacked into `extract/player/`. One directory
+ * along costs nothing and keeps {@link listCached} answering the question it
+ * is asked.
+ */
+const THUMB_DIR = "thumbs";
+
+async function thumbDir(create: boolean):
+    Promise<FileSystemDirectoryHandle | null> {
+  try {
+    return await (await opfsRoot()).getDirectoryHandle(THUMB_DIR, { create });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keep a picture of a stage, for the bundle screen's picker.
+ *
+ * **Taken from the player rather than shipped with it.** A screenshot of the
+ * game is game-derived data, and nothing derived from the game is committed to
+ * this repository -- so the only honest picture of stage 4 is one this browser
+ * rendered from the copy of the game its owner already has. A stage nobody has
+ * opened has no picture, which is exactly true of it.
+ */
+export async function writeThumb(stage: number, png: Blob): Promise<void> {
+  const dir = await thumbDir(true);
+  if (!dir) return;
+  const fh = await dir.getFileHandle(`stage${stage}.png`, { create: true });
+  const w = await fh.createWritable();
+  await w.write(png);
+  await w.close();
+}
+
+/** A stage's picture as a `blob:` URL, or null. The caller revokes it. */
+export async function readThumb(stage: number): Promise<string | null> {
+  const dir = await thumbDir(false);
+  if (!dir) return null;
+  try {
+    const fh = await dir.getFileHandle(`stage${stage}.png`);
+    return URL.createObjectURL(await fh.getFile());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a stage already has a picture.
+ *
+ * Asked before the frame-loop capture writes one, so the deliberate picture --
+ * the frame seven seconds into the stage, taken when it was built -- is not
+ * overwritten by whatever the viewer happened to be looking at afterwards.
+ * Separate from {@link readThumb} because that hands back a `blob:` URL the
+ * caller then has to revoke, and this question needs no blob at all.
+ */
+export async function hasThumb(stage: number): Promise<boolean> {
+  const dir = await thumbDir(false);
+  if (!dir) return false;
+  try {
+    await dir.getFileHandle(`stage${stage}.png`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Delete the whole cache. Used by "clear" and before a full rebuild. */
 export async function clearCache(): Promise<void> {
   const root = await opfsRoot();

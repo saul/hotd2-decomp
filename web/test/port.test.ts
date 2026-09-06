@@ -1,12 +1,19 @@
 /**
  * The port, exercised with no renderer at all.
  *
- * This file imports `game/` and nothing else — no three.js, no DOM — which is
- * the point of the boundary. Every gameplay bug in the session that produced
- * this architecture (facing inverted, permits deadlocked, the cat running the
- * zombie's machine, throwers gated on a rank test the engine does not have)
- * would have been caught by one of the assertions below, in a second, without
- * looking at the screen.
+ * This file imports **no three.js and no DOM**, which is the point of the
+ * boundary. Every gameplay bug in the session that produced this architecture
+ * (facing inverted, permits deadlocked, the cat running the zombie's machine,
+ * throwers gated on a rank test the engine does not have) would have been
+ * caught by one of the assertions below, in a second, without looking at the
+ * screen.
+ *
+ * It is `game/` plus the three-free things that sit either side of it:
+ * `core/`, `script/`'s walker, `render/hinge.ts` — the one transcription in
+ * `render/` — and `app/systems.ts`, which is the port's *frame* and imports
+ * three.js only as a type. That last one is how the tick a stopped transport
+ * hands the port is reachable here at all; `test/state.test.ts` drives the
+ * same class for the same reason.
  *
  * Run with `npm run test:port`.
  */
@@ -15,6 +22,9 @@ import type {
   PlayerDamageJson, TrackingJson,
 } from "../src/bundle";
 import { Rng } from "../src/core/rng";
+import { Scope } from "../src/core/scope";
+import { CameraFrame } from "../src/core/camera";
+import type { Context, Tick } from "../src/core/system";
 import { HingePose } from "../src/render/hinge";
 import { Events } from "../src/core/events";
 import { authoredFrameHeld, authoredFrameOfTicks,
@@ -103,6 +113,7 @@ import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
+import { GameSystem } from "../src/app/systems";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
@@ -132,7 +143,7 @@ import {
   LIFT_FAR_CLOSED, LIFT_PANEL_CLOSED, LIFT_PANEL_OPEN, LIFT_PANEL_DELAY,
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
   PropExpireByStepLifetime, GENERIC_DRAW_SLOT,
-  GENERIC_ORIGINAL_MODE_ONLY,
+  GENERIC_ORIGINAL_MODE_ONLY, makeBreakableProp, type BreakableProp,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
@@ -147,8 +158,9 @@ import {
   PlaceChainSegments, PlaceFragmentProps, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
 import {
-  FallingContainerUpdate, PlaceFallingContainer, FALLING_SLOT_LOOSE,
-  FALLING_SLOT_WHOLE,
+  BamsHalfway, FallingContainerUpdate, PlaceFallingContainer,
+  PropBuildScriptFlagEffect, ScriptFlagEffectFlag, ScriptFlagEffectUpdate,
+  SFX_SCRIPT_FLAG_EFFECT, FALLING_SLOT_LOOSE, FALLING_SLOT_WHOLE,
 } from "../src/game/class44";
 import { SpawnPropContainers } from "../src/game/director";
 import {
@@ -785,7 +797,7 @@ console.log("the cue entrance:");
     initialState: ZombieState.MotionCue,
     attackState: ZombieState.AttackRun,
     intro: { motion: 923, delay: 10 },
-    flags: ActorFlag.PoseFrozen | ActorFlag.ShotImmune | ActorFlag.ArcSpent,
+    flags: ActorFlag.PoseFrozen | ActorFlag.ShotImmune | ActorFlag.NoHitReaction,
   }, rng);
   z.visible = true;
   z.hp = 1000;
@@ -829,7 +841,7 @@ console.log("the cue entrance:");
         `state ${z.state}`);
   check("and nothing of the record's freeze is left on it",
         (z.flags & (ActorFlag.PoseFrozen | ActorFlag.ShotImmune
-                    | ActorFlag.ArcSpent)) === 0,
+                    | ActorFlag.NoHitReaction)) === 0,
         `flags 0x${z.flags.toString(16)}`);
 }
 
@@ -1268,7 +1280,44 @@ const BREAKABLES: BreakablesJson = {
   placements: [
     { at: 0xa100, container: "group", group: 1, lifetime_evt_steps: 4 },
     { at: 0xa200, container: "group", group: 2, lifetime_evt_steps: 6 },
+    // Class 0x44 selector 0. Shaped like stage 1's `0x1580`: effect 2,
+    // captured at bone 2, on motion 471.
+    { at: 0xa300, container: "script_flag_effect", effect: 2,
+      capture_bone: 2, motion: 471, slot: 0x13f5, lifetime_evt_steps: 0,
+      pos: [-13.7748, 0, -362.302], yaw: 0 },
   ],
+  // One effect, shaped like the real thing but four keys long: a root that
+  // draws nothing, a bone-1 node that draws nothing, and the bone-2 node that
+  // carries the model. `play_length` is `2n - 2`, the rule `mot.md` states.
+  effects: {
+    "2": {
+      nodes: [
+        { slot: 0, bone: 0, children: [1, 2] },
+        { slot: 0, bone: 1, children: [] },
+        { slot: 0x13f5, bone: 2, children: [] },
+      ],
+      interp: 1,
+      motion: 471,
+      play_length: 6,
+      frames: 4,
+      bones: 2,
+      // Bone 1 stands still; bone 2 walks 10 units along x per key and turns
+      // a quarter turn per key, so a blend is visible in both channels.
+      t: [
+        13, 0, -361, -13, 0, -362,
+        13, 0, -361, -3, 0, -362,
+        13, 0, -361, 7, 0, -362,
+        13, 0, -361, 17, 0, -362,
+      ],
+      r: [
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0x4000, 0,
+        0, 0, 0, 0, 0x8000, 0,
+        0, 0, 0, 0, 0xc000, 0,
+      ],
+      cues: [1, 3],
+    },
+  },
   level_height: 7.540296,
 };
 
@@ -3016,6 +3065,104 @@ console.log("\nthe branch writers: every route the game can choose:");
     check("...and 2 in original mode, on the flag rather than the shot",
           G.g_script_branch_var === 2, String(G.g_script_branch_var));
   }
+}
+
+console.log("\nclass 0x44 selector 0, the effect the script flag plays:");
+{
+  const rng = new Rng(0x44);
+  const PL = BREAKABLES.placements.find(
+    (q) => q.container === "script_flag_effect")!;
+  const build = () => PropBuildScriptFlagEffect(
+    PL.at, PL.effect!, PL.capture_bone!, PL.motion!);
+  /**
+   * The one prop the effect places, or a dead stand-in.
+   *
+   * A stand-in rather than a throw because the failure this guards is
+   * "the exporter emitted nothing", and a `TypeError` out of the harness ends
+   * the run at the first of a dozen checks instead of reporting them.
+   */
+  const only = (): BreakableProp =>
+    G.g_breakable_props[0] ?? makeBreakableProp(-1, 0, 0);
+
+  // The whole of the bug: the exporter emitted nothing for a class-0x44
+  // selector-0 spawn, so nothing was placed and nothing was drawn. This fails
+  // without the `effects` block, without the placement and without the
+  // builder -- `PropBuildScriptFlagEffect` returns an empty array for all
+  // three.
+  {
+    propScene(rng);
+    const made = build();
+    check("the placer builds one prop per drawable node", made.length === 1,
+          `${made.length} props`);
+    check("...and it draws the tree's own slot, not the descriptor's",
+          made[0]?.slot === 0x13f5, `0x${(made[0]?.slot ?? 0).toString(16)}`);
+    check("...seated at motion 471 key 0 rather than at the spawn position",
+          made[0]?.x === -13 && made[0]?.z === -362,
+          `${made[0]?.x}, ${made[0]?.y}, ${made[0]?.z}`);
+  }
+
+  // `if (g_script_flags[0x12] && cursor < play_length - 2) cursor++`.
+  {
+    propScene(rng);
+    const events = new Events();
+    G.g_breakable_props.push(...build());
+    const p = only();
+    for (let i = 0; i < 3; i++) ScriptFlagEffectUpdate(p, events);
+    check("the clip does not run with the flag down", p.effectFrames === 0,
+          String(p.effectFrames));
+
+    G.g_script_flags[ScriptFlagEffectFlag.Advance] = 1;
+    ScriptFlagEffectUpdate(p, events);
+    check("the flag starts it", p.effectFrames === 1, String(p.effectFrames));
+    // An odd cursor is half way between key 0 and key 1: x from -13 to -3,
+    // and the yaw from 0 to 0x4000.
+    check("...an odd cursor blends half way to the next key",
+          p.x === -8 && p.yaw === 0x2000, `${p.x} yaw ${p.yaw}`);
+    ScriptFlagEffectUpdate(p, events);
+    check("...and an even one sits on the key",
+          p.effectFrames === 2 && p.x === -3 && p.yaw === 0x4000,
+          `${p.effectFrames}: ${p.x} yaw ${p.yaw}`);
+
+    // `play_length - 2` is 4 for this fixture, so the cursor stops there and
+    // the clip holds its last pose rather than looping.
+    for (let i = 0; i < 20; i++) ScriptFlagEffectUpdate(p, events);
+    check("...the cursor stops two short of the play length",
+          p.effectFrames === 4, String(p.effectFrames));
+  }
+
+  // The cue list: `cues[cursor] == obj+0x32C`, equality, and the cursor
+  // wraps at the table's -1.
+  {
+    propScene(rng);
+    const events = new Events();
+    let sounds = 0;
+    events.on("sound.play", (d) => {
+      if (d.id === SFX_SCRIPT_FLAG_EFFECT) sounds++;
+    });
+    G.g_breakable_props.push(...build());
+    const p = only();
+    G.g_script_flags[ScriptFlagEffectFlag.Advance] = 1;
+    for (let i = 0; i < 10; i++) ScriptFlagEffectUpdate(p, events);
+    check("both cue frames play the effect's sound", sounds === 2,
+          `${sounds} plays`);
+    check("...and a parked cursor does not play it again",
+          p.effectFrames === 4 && sounds === 2, `${sounds} plays`);
+  }
+
+  // `g_script_flags[0x13]` is the whole lifetime, and it is tested first.
+  {
+    propScene(rng);
+    G.g_breakable_props.push(...build());
+    const p = only();
+    G.g_script_flags[ScriptFlagEffectFlag.Remove] = 1;
+    ScriptFlagEffectUpdate(p);
+    check("the removal flag despawns it", p.dead);
+  }
+
+  // The shortest way round, which is the engine's own u16 fold.
+  check("a BAMS blend takes the short way round",
+        BamsHalfway(0xf000, 0x1000) === 0x10000 && BamsHalfway(0, 0x8000) === 0x4000,
+        `${BamsHalfway(0xf000, 0x1000)}, ${BamsHalfway(0, 0x8000)}`);
 }
 
 console.log("\nprops are shot by a sphere, not by the model they draw:");
@@ -5411,6 +5558,62 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
           `y ${z.pos.y}`);
   }
 
+  // **A zombie in its emerge animation does not stagger when it is shot.**
+  //
+  // `ZombieStateEmerge` (`FUN_004584E0`) raises `obj+0x34` `0x2100` in sub 0
+  // (`00458532 OR DH, 0x21`), drops `0x100` when the clip starts
+  // (`004585EC AND EDX, 0xfff6feff`) and drops `0x2000` on the hand-over
+  // (`0045869F AND DH, 0xdf`). `ActorPlayHitReaction` (`FUN_004544C0`) refuses
+  // outright while `0x2000` is up — `004544D8 TEST dword ptr [ESI+0x34],
+  // 0x10002000` — so the whole entrance is stagger-proof.
+  {
+    const z = scene30();
+    z.pos = vec3(0, -5, 0);
+    z.emerge = { delay: 30, motion: 12 };
+    z.state = ZombieEntryState(ZombieState.Emerge);
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    check("sub 0 raises both of the bits `OR DH, 0x21` names",
+          (z.flags & (ActorFlag.ShotImmune | ActorFlag.NoHitReaction))
+            === (ActorFlag.ShotImmune | ActorFlag.NoHitReaction),
+          `flags ${z.flags.toString(16)}`);
+    check("a shot on the submerged pose plays no stagger",
+          ActorPlayHitReaction(z, 1, HitResultCode.Damaged) === undefined
+            && z.react === null, JSON.stringify(z.react));
+
+    for (let i = 0; i < 30; i++) {
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    }
+    check("the clip that lifts it out is playing, and it is shootable again",
+          z.motion === 12 && (z.flags & ActorFlag.ShotImmune) === 0,
+          `motion ${z.motion} flags ${z.flags.toString(16)}`);
+    check("...but `0x2000` is not in that mask, so it still does not stagger",
+          (z.flags & ActorFlag.NoHitReaction) !== 0
+            && ActorPlayHitReaction(z, 1, HitResultCode.Damaged) === undefined
+            && z.react === null, JSON.stringify(z.react));
+    // End to end, through the routine that actually calls it: the whole shot
+    // lands, hit points come off, and the entrance clip is left alone.
+    const before = z.hp;
+    ResolveHit(z, 1, 0, NULL_HOST, rng);
+    check("...and a whole `ResolveHit` still leaves the entrance running",
+          z.hp < before && z.react === null && z.motion === 12
+            && z.state === ZombieState.Emerge,
+          `hp ${z.hp} react ${JSON.stringify(z.react)} state ${z.state}`);
+
+    // Run the clip out. The base clock is `ActorAdvanceMotion`'s, which is the
+    // director's and not this state's, so the cursor is put on the clip's last
+    // frame directly — 12 is 16 authored frames, so a play length of 30.
+    z.playTicks = MotionPlayLength(z) - 1;
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    check("the emerge hands over to `AttackRun`",
+          z.state === ZombieState.AttackRun, `state ${z.state}`);
+    check("...clearing `0x2000` as it goes",
+          (z.flags & ActorFlag.NoHitReaction) === 0,
+          `flags ${z.flags.toString(16)}`);
+    check("...so now the same shot does stagger",
+          ActorPlayHitReaction(z, 1, HitResultCode.Damaged) !== undefined
+            && z.react !== null, JSON.stringify(z.react));
+  }
+
   // `ActorArcBeginFalling` counts its own frames from the gravity, which is
   // the thing that makes state 26 different from every other arc in the port.
   {
@@ -7441,6 +7644,97 @@ console.log("\nthe shot queue:");
   check("a scene reset empties the queue", G.g_shot_requests.length === 0);
 }
 
+// -- 12a. a stopped clock resolves nothing ----------------------------------
+
+/**
+ * **A frame that owes no tick must not do part of one**, and resolving a shot
+ * is a whole game-time job: it takes hit points off, pays a score, arms the
+ * head combo and fills three effect rings that only `ShotEffectsTick` can
+ * empty again.
+ *
+ * `GameSystem` is the port's frame, and `app/loop.ts` hands it a tick with
+ * `frozen: true` and no time in it whenever the transport is stopped — paused,
+ * free roam, or `?freeze=1`. It used to drain `g_shot_requests` on that tick
+ * anyway, so a click made with the clock stopped landed a hit, killed the
+ * actor, scored it and spawned effects that then hung on screen for ever,
+ * because nothing was stepping them. That is the "shots still register when
+ * paused" report.
+ *
+ * **Step mode is not this case and never was**, which is the whole reason the
+ * fix costs no debug capability: stepping runs the port at full rate while the
+ * *script* stands still, so its ticks carry time and take the live path below.
+ * The two assertions are deliberately the same fixture one after the other.
+ */
+console.log("\nthe shot queue, with the clock stopped:");
+{
+  const rng = new Rng(22);
+  const events = scene(1, rng);
+  const [z] = G.g_object_list;
+  z.hp = 100;
+
+  // Down the camera's own -Z, which is forward: `MuzzlePointInView` refuses a
+  // ray pointing away from the screen, and the muzzle flash below is only an
+  // assertion about a stopped clock if the fixture can light it.
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, -1) };
+  const pick: ShotPick = { kind: "actor", at: z.at, bone: 4, point: vec3() };
+  const game = new GameSystem();
+  game.backend = {
+    boneWorld: () => false,
+    setBoneSlot: () => undefined,
+    pickShot: () => pick,
+  };
+  const scope = new Scope("test:stopped-clock");
+  const view = new CameraFrame();
+  // A camera at the origin looking down -Z. `CameraFrame` starts with both
+  // matrices all zero, which makes every transform NaN and every effect the
+  // shot would spawn refuse itself -- so the muzzle-flash assertion below
+  // would pass on a fixture that could never light one.
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  view.take(I, I);
+  const ctx: Context = {
+    events, rng, walker: null, scope, session: scope.child("session"),
+    view, stage: 1, frame: 0,
+  };
+  // `Loop.idle` and `pacer.ts`'s `STOPPED_TICK`, by value: wall time for the
+  // layers that ride it, and no game time at all.
+  const STOPPED: Tick = { dt: 0, frames: 0, wall: 1 / 60, frozen: true };
+  // What `stepOneFrame` hands the port on a tick that owes one -- play mode,
+  // and step mode, which is the case that must keep working.
+  const LIVE: Tick = { dt: 1 / 60, frames: 1, wall: 1 / 60, frozen: false };
+
+  QueueShotRequest(0, RAY);
+  const frame = G.g_frame;
+  game.update(ctx, STOPPED);
+  check("a stopped clock leaves the pull on the queue",
+        G.g_shot_requests.length === 1, `${G.g_shot_requests.length}`);
+  check("...and takes no hit points off", z.hp === 100, `hp ${z.hp}`);
+  check("...and pays nothing", G.g_player_score[0] === 0,
+        `${G.g_player_score[0]}`);
+  check("...and does not count a shot fired", (G.g_nPlayerFired[0] ?? 0) === 0,
+        `${G.g_nPlayerFired[0]}`);
+  check("...and leaves the muzzle flash unlit",
+        G.g_shot_flash_ring.every((f) => !f.live));
+  check("...and throws no tracer",
+        G.g_shot_tracer_ring.every((t) => !t.live));
+  check("...and does not move the frame counter", G.g_frame === frame,
+        `${G.g_frame} vs ${frame}`);
+  // The camera yaw is the one thing that *is* written on a stopped tick, and
+  // deliberately: where the camera points is not a function of elapsed time,
+  // and free roam turns it every frame with the transport stopped.
+  check("...but it still takes the camera's yaw",
+        G.g_camera_yaw_bams === ctx.view.yawBams);
+
+  // Step mode, and the frame after an unpause: the same request, the same
+  // fixture, a tick with time in it.
+  game.update(ctx, LIVE);
+  check("the first tick with time in it drains the queue",
+        G.g_shot_requests.length === 0, `${G.g_shot_requests.length}`);
+  check("...and the hit reaches `ResolveHit`", z.hp < 100, `hp ${z.hp}`);
+  check("...and pays for it", G.g_player_score[0] > 0,
+        `${G.g_player_score[0]}`);
+  scope.dispose();
+}
+
 /**
  * `ActorRegisterCameraPoint` (`FUN_00409B70`): the tracked bone, lifted.
  *
@@ -7867,8 +8161,8 @@ console.log("class 0x30, the death chain:");
   check("...playing a death clip picked by `ChooseDeathMotion`",
         z.motion === 900 || z.motion === 901, `motion ${z.motion}`);
   check("...with `obj+0x34` bits 0x22000 raised",
-        (z.flags & (ActorFlag.Airborne | ActorFlag.ArcSpent))
-          === (ActorFlag.Airborne | ActorFlag.ArcSpent),
+        (z.flags & (ActorFlag.Airborne | ActorFlag.NoHitReaction))
+          === (ActorFlag.Airborne | ActorFlag.NoHitReaction),
         z.flags.toString(16));
   check("...the permit and the latch given back",
         z.attackPermit === -1 && G.g_attack_committed === 0

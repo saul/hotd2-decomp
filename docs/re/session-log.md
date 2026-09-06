@@ -11891,6 +11891,235 @@ crosshair-aligned spark belongs to shootable **objects** — `SpawnPropHitSpark`
 crosshair nowhere, so a flesh hit gets blood at the bone and no spark. The
 remaining reader, `FUN_004169C0`, is the 2D reticle sprite itself.
 
+## Session — an emerging zombie does not stagger, and the bit that says so
+
+**The report.** *"Zombies in an emerge animation shouldn't play a stagger
+animation when shot."*
+
+### What the engine does
+
+`ZombieOnShot` (`FUN_00453EB0`) has no state test in it at all, so the first
+guess — that the suppression is a state check — is wrong. The refusal is two
+flag bits, and it is inside the routine that picks the clip:
+
+```
+004544cc  85d2            TEST EDX, EDX                             ; the bone
+004544ce  0f8482010000    JZ   0x00454656
+004544d8  f7463400200010  TEST dword ptr [ESI + 0x34], 0x10002000
+004544df  0f8571010000    JNZ  0x00454656          ; ActorPlayHitReaction
+```
+
+`0x10000000` is *mid-attack* — `ZombieStateStandAndThrow` and
+`ZombieStateTargetMotionScript` raise it. `0x2000` is the latch that matters
+here, and `ZombieStateEmerge` (`FUN_004584E0`) holds it across the whole state:
+
+| where | instruction | effect |
+|---|---|---|
+| sub 0 | `00458532  80ce21  OR DH, 0x21` | `0x2000` and `0x100` up |
+| sub 1 → 2 | `004585EC  81e2fffef6ff  AND EDX, 0xfff6feff` | `0x90100` down |
+| exit → state 1 | `0045869F  80e6df  AND DH, 0xdf` | `0x2000` down |
+
+`OR DH, 0x21` is one instruction and two bits, and both are about being shot.
+`0x100` is `ShotImmune`, which `ZombieOnShot` tests at `00453EFB` *after* it
+has already called `DispatchHit` — so damage lands while the actor is
+submerged, but no death state is chosen. `0x2000` outlives it by the length of
+the emerge clip. `[proved]`.
+
+### What the port was doing
+
+Neither half existed. `ActorPlayHitReaction` had no gate, `ZombieStateEmerge`
+raised no flags, and the port calls `ActorReactToHit` from `ResolveHit` rather
+than from `ZombieOnShot` — a declared `[diverges]` in `class30/on_shot.ts` —
+so every shot on a climbing zombie cut its entrance clip with a stumble.
+
+The fix is the engine's own: the two-bit test in `ActorPlayHitReaction`, and
+the three flag writes in `ZombieStateEmerge`, each on the line with the address
+that makes it. No new divergence; the existing one is narrower for it.
+
+### The wrong name is why the raise was never ported
+
+`obj+0x34` bit `0x2000` was `ActorFlag.ArcSpent` here — named after the one
+consequence class 0x31's fall states get from it, that a second knockdown finds
+it already up and launches no further arc. That is a *use*. The image reads the
+bit in exactly two places — `ActorPlayHitReaction` at `004544D8` and
+`ThrowerOnShot` at `00449A95 f6c420 TEST AH, 0x20` — and **both refuse a
+reaction**. Every writer raises it while something else owns the body and
+clears it on the way out: the emerge, the delayed leap, the scripted arc
+entrance, `ZombieStateMotionCue21`'s exit, `ZombieApplyScriptMode`'s `0x2400`,
+`ThrowerStateFallToSurface`, `ThrowerStateRearm`'s exit, and
+`ActorPlayHitReaction`'s own alt arm at `004545F5`. It is `NoHitReaction` now,
+renamed in `actor.ts`, the fifteen use sites, `port.test.ts` and
+`docs/formats/combat.md`. This is `L20` in the small: the name said where the
+bit sits rather than what it is, and a reader looking for "what stops the
+stagger" would never have found `ArcSpent`.
+
+### Found in passing, not fixed — the sprint bit is raised by being shot
+
+`class30/states.ts` says of `ZOMBIE_SPRINTS` (`obj+0x34` bit `0x8000000`) that
+"the bit is never `OR`ed anywhere in the image: it arrives on the actor from
+the spawn record's own flags word". **That is false.** `ZombieOnShot` raises it
+on every registered hit:
+
+```
+00453f03  8b4e34          MOV ECX, dword ptr [ESI + 0x34]
+00453f17  81c900000008    OR  ECX, 0x8000000
+00453f2a  894e34          MOV dword ptr [ESI + 0x34], ECX
+```
+
+So a zombie that has been shot and survived switches from `row[2]` to `row[3]`
+— the jog to the sprint — for the rest of its life. The port does not do it,
+and this is a second bug rather than a second half of this one, so it was left
+alone rather than folded into a commit about the stagger. `[proved]`, and it
+wants its own test.
+
+### Two things noticed and deliberately not touched
+
+* The port's `ZombieStateEmerge` models sub 0's hold with
+  `ActorFlag.PoseFrozen`; the engine raises no `0x4000` there and instead turns
+  root motion off through `FUN_00409D10(obj+0x194, 0)` and
+  `obj+0x1F8 &= ~1`. Same visible effect, different mechanism, and changing it
+  is `L8` waiting to happen. `[open]`.
+* The port's `ActorReactToHit` carries `bone <= 0` and the exe's
+  `FUN_004543F0` does not — the bone test is `TEST EDX, EDX` inside
+  `ActorPlayHitReaction`, and the positive-bone test is in `ZombieOnShot`'s own
+  loop. It is also missing `FUN_004543F0`'s two other arms: result 1 on bone 1
+  for character type 10 (score `0x50`, state `0x19`) and result 4 routing to
+  `ActorAbortAttackAndLeave`. Both `[open]`, neither touched here.
+
+### The test
+
+`web/test/port.test.ts` drives a zombie into state 27, shoots it submerged,
+shoots it again mid-clip, runs a whole `ResolveHit` through it, then puts the
+cursor on the clip's last frame and shoots it once more. Four assertions fail
+without the fix — the first of them reporting `react` as motion 961, which is
+the stagger — and the last one, after the hand-over to `AttackRun`, is what
+stops the fix being "never stagger".
+
+---
+
+## Session — a stopped clock is not a frame, and it was firing shots
+
+**Report:** "Shots still register when paused." Fixed. No binary was read this
+session; nothing in `game/` changed and no annotation was added.
+
+### How far a paused shot was getting: all the way
+
+`GameSystem.update` (`app/systems.ts`) opened with
+
+```ts
+if (t.frozen || t.dt <= 0) {
+  ProcessShotRequests(this.host, ctx.rng, ctx.events);
+  return;
+}
+```
+
+so a click made with the transport stopped resolved **completely** on the next
+drawn frame — `pickShot`, `ResolveHit`, hit points off, `ScoreAddForPlayer`,
+the head combo armed, `MarkActorShot`, `PlayerShotEffectSpawn`, and
+`g_nPlayerFired` counted. The queue was not a queue on that path: it was
+drained by the one branch that exists because there is no game time.
+
+Watched failing in `web/test/port.test.ts` before anything was changed, on a
+one-zombie fixture at hp 100 driven by one frozen tick: `hp 97`, `score 10`,
+`g_nPlayerFired 1`, the pull gone from `g_shot_requests`, and the muzzle flash
+and tracer lit. Six assertions, all red.
+
+### The argument in the comment, and why it does not hold
+
+The branch justified itself by step mode: "the feed row for a shot fired while
+paused is half of what the step mode is for." **Step mode never reaches that
+branch.** `Player.gameStopped` is free roam, or play mode with the transport
+stopped; step mode is neither, so `stepOneFrame` hands the port `DRIVEN_TICK`
+and a shot fired in step mode resolves down the ordinary `GameUpdate` path at
+the head of the next tick. What the branch actually served was **paused, free
+roam and `?freeze=1`** — precisely the three rows `PLAYER_PROGRESS.md`'s mode
+table marks "port and render **stopped**".
+
+That is what decided the reading. Both docs agree with each other and with the
+engine, which has no pause at all; and the debug capability the task warned
+against removing is the live path, not this one.
+
+### The half that was not on paper
+
+The shot's effects became engine state in `ff33131`, and `ShotEffectsTick`
+steps them at the head of `GameUpdate` — on **game** time. So a flash and a
+blood spray spawned by a paused shot could never expire, `Shooting.busy` stayed
+true, `Player.wantsFrame` kept saying yes, and the loop that is supposed to
+sleep while paused ran for ever. `web/tools/pacing.mjs` was already red on that
+exact line before this session touched anything:
+
+```
+FAIL  ...and the loop went back to sleep after the feedback — 60 frames in ~1s
+```
+
+and is green now, twice in a row, on the real page. Nobody had connected the
+two reports; they are one bug. The claim in `PLAYER_PROGRESS.md` that "the
+impact sprites still play out on wall time" had been false since `ff33131` and
+is corrected.
+
+### The fix, in the two layers that own the two halves
+
+1. **`app/systems.ts`** — `if (t.frozen || t.dt <= 0) return;`. A frame that
+   owes no tick must not do part of one, which is the rule `CameraSeatSystem`
+   was made to obey and this branch was the last exception to. The
+   `g_camera_yaw_bams` write stays above it; its comment cited the drain as
+   its reason and now cites what is left (the globals panel, and a snapshot
+   taken in free roam).
+2. **`app/main.ts`** — `onFire` queues only while the game clock is running:
+   `if (this.gameRunning && !this.frozen) QueueShotRequest(0, ray)`.
+
+**Why the second half is not over-reach.** With only the first, the pull stays
+on `g_shot_requests` and `r.frame <= now` makes it due the instant the clock
+restarts — so twenty clicks made while paused, or a free-roam session spent
+clicking at scenery, arrive together on one frame along rays taken from
+wherever the free camera was. That is a delayed version of the same report, and
+it is a thing the engine cannot do. Whether a click is *input at all* is the
+transport's question, and `app/main.ts` is where intent enters `G`
+(`PLAYER_ARCHITECTURE.md`, "Input intent"), so it is answered there rather than
+in `game/`, which must not learn that a player can be paused. The `wake` stays
+unconditional — a click is still drawn, and `Shooting.fire` has already counted
+it in the HUD's own tally.
+
+A pull made in the sliver between a playing frame and a pause still survives on
+the queue and resolves when the clock restarts. That one is input the clock
+genuinely owed.
+
+### Wrong turns
+
+* The first version of the new fixture asserted "the muzzle flash is unlit" and
+  passed **before** the fix as well as after. `CameraFrame` starts with both
+  matrices all zero, so `viewSpaceOfPoint` returns NaN and
+  `MuzzlePointInView` refuses — the fixture could not have lit a flash however
+  broken the code was. Fixed by taking an identity pair and firing down the
+  camera's own -Z; the two effect assertions then failed with the rest. **A
+  fixture that cannot produce the symptom is not an assertion**, and it looked
+  exactly like a pass.
+* One `pacing.mjs` run with the fix in reported three failures with the
+  transport readout at `frame -1` — the regex found no `frame N / M`, i.e. the
+  page was not settled. Two clean runs after it, and the same run passes
+  repeatedly; recorded because "it failed once" was nearly written down as a
+  finding.
+
+### Unsettled
+
+* `[open]` **Free roam is in the stopped group, so a shot cannot land there
+  either** — and a peer is concurrently teaching `Shooting.pointerAt` to
+  survive pointer lock, which is only reachable from free roam. The docs put
+  free roam and paused in one row and this followed them; if free roam is meant
+  to be a place you can shoot, that is a change to the mode table first.
+* `tools/verify_all.py`'s `status` check is red on line counts, from the whole
+  dirty tree rather than from this work. `docs/STATUS.md` is generated against
+  a commit's tree, not a working tree — `ff33131` says so — so it was left
+  alone.
+
+### Next actions
+
+* Decide the free-roam question above, and if it changes, change the table in
+  `PLAYER_PROGRESS.md` before the code.
+* `web/tools/pacing.mjs` is the only check that can see any of this and it
+  cannot run under `tools/run_test.mjs` (playwright, esbuild). It is worth a
+  row in `verify_all.py`'s `CHECKS` that runs it directly, or it will rot.
+
 ### Follow-up — confirmed in the browser, and the blood is green on purpose
 
 *2026-09-06.* "There's still no effects showing — can you confirm in the
@@ -11936,91 +12165,312 @@ The layer's `describe` now names each pool separately — blood, sprites, flash,
 tracer — because "0 drawn" has three different causes with three different
 fixes, and one number could not tell them apart.
 
-### Follow-up — two settings the game already had
+## Session — the window and the gate are one object, and it is an effect
 
-*2026-09-06.* "We can disable the flashes by default... it's for the lightgun
-that we don't have here." And: "add a checkbox for blood colour too, and use
-the red blood everywhere where it can be used."
+Two reports, treated as one investigation on the ask, and they turned out to be
+**literally the same pair of objects**: "the window is never rendered at
+`block=1&step=5`" and "gate c68 does not render, play any sounds" are the
+class-0x44 spawns at evt `0x1580` and `0x15CC`. `c68` is
+`render/overlays.ts` labelling an unposed spawn `c${class}`; the absence of an
+`hp` in the label is the other half of the identification, because those two
+are the only **selector-0** class-0x44 spawns in the game and every other one
+carries a non-zero `obj+0x11C`. Block 1 step 5 op 28 places them, block 10 step
+0 op 30 places them again, and block 10 step 2 op 5 is the `set_script_flag 18`
+that starts them moving.
 
-Both are **display** choices, so both live in `render/` and neither touches
-the port: the same ring records are spawned and the same materials are marked
-whichever way they are set, and a snapshot is identical either way.
+### What the class actually is
 
-**Muzzle flash, off by default.** `EffectLayer` gates the flash ring and the
-Original Mode weapon ring on a toggle. The observation behind it is right: the
-flash is drawn at `(crosshair / proj, -1)` in camera space, which projects
-back to the crosshair pixel exactly, so it sits *under the aim point* rather
-than at a gun. That is a cabinet affordance, and with a mouse it covers what
-you are shooting.
+`props.ts` had class 0x44 as a **hinge placer** — selectors 1, 2 and 4, which
+share `HingeUpdate` (`FUN_00473CF0`) — and `resolveForStage` dropped every
+other selector. Selector 0 is `PropBuildScriptFlagEffect` (`FUN_00472B30`) and
+is not a hinge:
 
-**Red blood, everywhere.** The marking is per **material**, not per effect,
-which is what makes "everywhere" true: the blood banks' global texture slots
-appear in **27 `pol/` files**, and most of the 153 marked materials in stage 1
-are not the spray at all — they are the gore parts a zombie swaps in when a
-limb comes off, and the decals. A setting that recoloured only the flipbook
-would leave green stumps on a red corpse.
+* it **never copies the spawn's position**. There is no `MatrixTranslate`
+  anywhere in the family; `ScriptFlagEffectUpdate` (`FUN_00473B90`) hands the
+  four-word state block at `obj+0x324` to `EffectDrawWithCapture`
+  (`FUN_0040DFD0`) and the parts are placed by *motion 471*, in world
+  coordinates. Frame 0 seats them at `(±13.762, 0, −361.5/−362.8)`, which is
+  the two descriptors' own positions to three decimals — the check that turned
+  a plausible reading into a proved one.
+* the dword at `tail+0x04` picks the pair: `0x13F5` is effect 2 captured at
+  bone 2, anything else effect 3 at bone 1. The *low half* of the same word
+  goes to `obj+0x28C`, which this family never draws through — reading it as
+  the asset slot, the way selector 1 does, gets a slot the tree does not name.
+* `g_script_flags[0x12]` runs the clip and `[0x13]` despawns it, both literals
+  in the routine rather than fields of the descriptor. Each frame in
+  `g_script_flag_effect_cues_a` (0x005961F0) / `_b` (0x00596204) plays
+  `PlaySoundId(0x1816A9)`, tested for **equality** against the play cursor, so
+  a parked cursor never fires again. That is the "play any sounds" half.
 
-`bloodTexturePredicate` in the exporter answers it from the global slot at a
-bank entry's `+0x0C`, so it needs no list of files, and `gltf.ts` writes
-`extras.hod2_blood` on the material. `render/bloodcolour.ts` swaps the two
-channels in the fragment shader for the marked materials.
+### The effect stride is not the character stride
 
-**[measured]** that swap is faithful: 27 of the 39 blood textures are an exact
-`R <-> G` transposition of each other byte for byte, and the other twelve
-differ only in a few units of blue on the green side — `(131, 0, 0)` against
-`(0, 131, 8)` on the worst texel of the worst one. Carrying both banks would
-be exact and would double the blood images; it is `[diverges]` in
-`render/bloodcolour.ts`, and the marking is already per-material if that ever
-becomes worth doing.
+`docs/formats/spawns.md` already had the effect tables read; what it had not
+been made to do is decode one. `EffectFrameTranslations` and
+`EffectFrameRotations` derive the stride from `g_effect_bone_counts[effect]`
+as `(n * 0x12 - 0xF) & ~3`, **truncating**, and the count includes the root,
+which carries no animation — so a frame is `n-1` translations of three floats
+then `n-1` rotations of three BAMS shorts, and the engine's `+4` on the
+translation address cancels its `-8` on the rotation address against `n * 0xC`.
+Motion 471 is 101 frames of 36 bytes, which is that expression at `n = 3`
+exactly. `g_motion_play_length[471]` is 200 = `2n - 2`, and interp mode 1 means
+the cursor is a play frame and the key is `cursor / 2`, blended half way on odd
+cursors.
 
-One thing worth keeping: `customProgramCacheKey` has to change with the swap.
-three.js caches compiled programs across materials, and two materials that
-differ only in an `onBeforeCompile` string share a program without it — so the
-first blood material to compile decides the colour for all 153.
+### Two wrong turns, both caught by a check rather than by reading
 
-### Follow-up — "the red blood switch doesn't work at all", and it did not
+* **The tree walker capped a node's children at 0x40**, an arbitrary bound
+  written for safety, and returned 65 of effect 8's 145 nodes and 65 of effect
+  16's 73. Nothing about that is visible in stage 1, whose two trees are three
+  nodes each. `tools/verify_effects.py` — written afterwards, to assert the
+  node count against `g_effect_bone_counts` across all 29 — is what found it,
+  and it is the reason the check exists in that shape rather than as a spot
+  check on the two effects this bug needed.
+* **The first version of the port fix made the bug worse and looked like it had
+  done nothing.** `SpawnPropContainers` names `falling` and `story_switch` as
+  class-0x44 containers and **falls through to class 0x41's arm** for anything
+  else, so the two window halves were spawned as `PropContainerPlacer`s running
+  `PlaceBreakableGroup` with group 0: six breakable props that do not belong to
+  the stage, no window, and a sidebar reading "30 up (21 drawn)" that looked
+  like progress. The selector table is a `Record` now, so a container with no
+  entry is not built rather than built as something else. The tell was the
+  harness digest printing `c65` for a descriptor the script calls class 68.
 
-*2026-09-06.* Reported, and true. The first cut swapped the two channels in
-the **fragment shader**, through `onBeforeCompile`, with `needsUpdate` and a
-varying `customProgramCacheKey` to force a rebuild. Measured in the page, the
-blood was red under *both* settings and green never appeared: the swap landed
-on whichever state a material first compiled in and never moved again.
+### Where it lives
 
-**What made the check pass while the feature did not work.** Every assertion
-was about the layer's `mode`, and the mode changed correctly every time. The
-browser harness read the same string back and agreed with itself. Nothing
-anywhere asked what the materials were actually **holding**.
+`game/class44/script_flag_effect.ts`, with `PropFamily.ScriptFlagEffect` in the
+container pool — the engine's own grouping, since selectors 0, 16 and 17 all
+`ActorAlloc` a 0x378 object into the same family. That put the render for free:
+`render/breakables.ts` already clones a model per asset slot and poses
+`Rz · Ry · Rx` for the falling container, which is `EffectPoseNode`'s order
+too, so the only change on that side is the family joining that arm and casting
+no shadow.
 
-The fix is to stop depending on a shader rebuild: `render/bloodcolour.ts`
-builds one transposed `CanvasTexture` per distinct map at `prepare` and the
-toggle assigns `material.map`. Reassigning a map is a path three.js takes for
-every video texture in the world and it cannot be cached past. 153 materials
-in stage 1, 107 distinct maps.
+Two `[port-only]` notes rather than divergences. The draw's residency gate,
+`g_motion_slots[471].state == 2`, is always true here because the bundle bakes
+the motion. And the object is not registered for the shot test: `obj+0x34`'s
+bit `0x10` sends `RegisterForShotTest` to `ShotTestMesh`, which the port has
+not got — the same standing gap the story-mode switch's volume has.
 
-`describe` now reports `1/1 swapped` — the count of materials whose `map` is
-**identically** the transpose, walked fresh each time it is asked — so the row
-in the sidebar and the browser harness both assert the thing that was wrong
-rather than the thing that was right. `test/render.test.ts` asserts the same
-property headlessly, including that the transposed pixels really do exchange
-R and G.
+Evidence: `web/shots/props_panel2.png` is the gate standing closed across the
+archway with the three zombies behind the bars, and `web/shots/gk70.png` is the
+same gate thrown open with the zombie coming through, `set_script_flag 18` and
+the script's own `DOORKICK1_22.WAV` in the event feed beside it.
 
-### Two wrong turns on the way to it, both about measuring
+## The Shoot toggle, and the fights nobody was having
 
-* **Counting "strongly red" and "strongly green" pixels proved nothing.** The
-  thresholds are not symmetric against this game: blood composited over a warm
-  stone corridor passes `r > g + 55` easily and never passes `g > r + 55`, so
-  green blood scored zero whether or not it was there. It read as "the switch
-  does nothing" for a reason that had nothing to do with the switch.
-* **Reading the WebGL canvas back with `drawImage` gave an all-zero image.**
-  The context has no `preserveDrawingBuffer`, so the buffer is already cleared
-  by the time a copy runs. Playwright's own screenshot is composited properly;
-  decoding *that* back inside the page is what works.
+Reported as a regression: "we're not waiting for enemies at all now". It was
+not a regression. A pristine tree at `HEAD` with the pre-change bundle gave
+frame-for-frame identical playthroughs on stages 1, 2 and 3, and an identical
+46.75 s parked on `wait_enemies_present` in interactive play. Nothing had
+moved. The player had always behaved that way, and the reason was a default.
 
-In the end the thing that settled it was a screenshot of each setting, looked
-at. `web/shots/bloodshot_green.png` is green blood on two zombies with the row
-reading `green, 0/153 swapped`.
+`WalkerHost.aliveEnemies` and its three siblings answered **null** while the
+Shoot toggle was off, which was off by default. A null count is not a condition
+the walker can evaluate, so it paces the gate on a timeout instead — and that
+is every room clear in the game passed without a fight. The reasoning behind
+the null was correct on its own terms (with nothing able to kill an enemy the
+count cannot fall) and it made one unlabelled checkbox the switch that decided
+whether the port ran the game.
 
-Also repaired here: `tools/lib/player.mjs` stopped exporting `enableShooting`
-midway through this — a peer removed the `shoot` toggle, which is now always
-on — and `tools/effects.mjs` imported it. That is a shared-harness breakage
-rather than a port one, and the tool is fixed to match.
+Two things worth keeping from it:
+
+* **A default that disables the thing under test is not a default, it is a
+  trap.** Every driver under `web/tools/` opened with `enableShooting(page)`,
+  which is the shape of the problem: the harnesses all knew, and the person
+  opening the page did not.
+* **"You broke it" and "it has always been broken" feel identical from
+  inside.** The only thing that separated them was building the old tree and
+  running both. Do that before looking for the change that caused it — I spent
+  the first half of this looking for a culprit that did not exist.
+
+The toggle is gone. `render/shooting.ts` takes its camera at construction; it
+used to get it from the toggle's command, so before that checkbox was found the
+layer had no camera and a click did nothing whatever.
+
+Second thing, from the same report: the remaining checkboxes did not say which
+of them hide part of the game and which add drawing over it. `ToggleSpec.kind`
+says now, and `ui/panels/DebugGroup.tsx` draws the two halves apart, each
+labelled. `spawns` also gained the sentence it had never had — its `title` was
+the empty string.
+
+## Holes in the stage — the exporter was deleting geometry on purpose
+
+Reported on stage 1 from the rooftops north of the piazza: triangles missing,
+"in a few places, and this is one of the most egregious." The cause is not the
+parser, not culling and not the region streaming. `drop_collapsed_uv_triangles`
+was on by default in both halves of the exporter and takes 3–5% of every stage.
+
+Its docstring said, in as many words, "why the game does not show them is still
+unresolved — the hardware may reject zero-area-in-UV polygons, or they may be
+hidden by other geometry along the camera rail. Either way they carry no
+displayable texture information, so dropping them can only improve the result."
+Both halves of that sentence are load-bearing and neither was checked.
+`WalkMeshChainAndDraw` (`FUN_004A7EF0`) submits every strip whole and makes no
+per-triangle test of any kind; the game draws all of them. `[proved]` And the
+improvement is a hole: two of stage 1's 1,577 dropped triangles are paving in
+the piazza, straight through the world, from any rooftop overlooking the
+square. Lesson **L23**.
+
+### What the investigation got wrong, and why
+
+**The first hour was aimed at the wrong thing, on the reader's own numbers.**
+The report came with an eye and a look-at read off the camera group. The eye is
+`p.camera.position` — the live camera. The look-at was `p.cam.pose.target`,
+the *script's* block target, which free roam never writes. In free roam they
+are two different cameras printed under one heading, so every screenshot for
+the first hour was taken from the right place pointing somewhere nobody had
+been looking. The reader is the one who asked whether the shots were facing the
+right way. The row is `block target` now with a `facing` row beside it, so the
+readout cannot say that again.
+
+**Three of my own measuring tools lied before any of them told the truth**, and
+each failure is worth knowing:
+
+* `WebGLRenderer.render` is an **instance** method in three, assigned in the
+  constructor, not a prototype one. Patching the prototype silently did
+  nothing, and a "forcing every material double-sided changes nothing" result
+  stood for twenty minutes.
+* Restoring `PerspectiveCamera.prototype.updateMatrixWorld` after pinning the
+  camera hands it straight back to `FreeRoam`, which re-poses it on the next
+  frame. A raycast taken after that is a raycast from somewhere else.
+* Painting every back face magenta over-reports by exactly the double-sided
+  meshes, whose back faces this port already draws. The marker has to skip
+  them or it accuses the geometry that is on screen.
+
+The control that made the rest trustworthy was shooting the same pose four
+times in one page load — shipped, shipped, double-sided, shipped — and getting
+0, 11.06%, 0. Two separate page loads are not a comparison.
+
+### What was cleared on the way
+
+* **The NL1 parser loses nothing.** Instrumented every `break` in `nl1.parse`:
+  all 389 models across the six stages end on the chain terminator, and not one
+  hits a truncation, a bad back-reference or an implausible mesh size.
+* **Back-face culling is faithful**, which took measuring rather than
+  arguing. Winding against the models' own stored normals, split by the cases
+  the rule keys on: lists at `cull=2` 100.00%, strips at `cull=2` 99.94%,
+  strips at `cull=3` 99.96%. The one population that disagrees is `cull=1` at
+  88.45% — the strips the game does not cull at all, where winding cannot be
+  seen. The doc's corpus-wide 97.81% had those folded in and reads worse than
+  the rule is.
+* **Strip control word bit 7** — inherit the previous strip's culling and
+  shade mode — never changes an answer: 78,012 bit-7 strips, zero where the
+  inherited culling differs from the strip's own. Confirms what
+  `formats/nl1.md` marked `[measured]`.
+* A free camera behind a one-sided wall sees through it, **and so would the
+  game**. Much of what looks like missing geometry in free roam is that, and
+  it is not a defect; on the authored rail, front-face and double-sided renders
+  are identical.
+
+### Two more, from the same investigation
+
+* `counts.triangles` in the manifest subtracted `dropped_collapsed_uv` from a
+  total that had already had them dropped. Stage 1 reported 32,485 for a file
+  holding 34,062.
+* `tools/verify_geometry.py` is new and is the only check in the tree that
+  compares an export against the files it was made from — 216 scenery parts,
+  each required to hold every triangle its `pol/` models declare. Watched
+  failing first, against a bundle built the old way. `compare_bundles.py`
+  compares two exporters with each other, which says they agree and nothing
+  about whether either is complete; that is the gap this filter lived in.
+
+### The fix was right and the page was showing something else
+
+Two follow-ups, and the first one is a lesson about how a fix gets verified.
+
+The report came back: rebuilt, holes unchanged. The fix *was* in
+`extract/player/` -- rendering the reported view from it directly showed no
+holes -- and what was on screen came out of the browser's OPFS cache instead.
+`BundleIndex` prefers the cache per stage, deliberately, and the only version
+checks were the manifest `format` and the schema digest. Turning off a filter
+in `hod2lib/nl1.ts` moves neither. So a stage cached before the fix went on
+winning over the rebuilt one for ever, and nothing on the page said so.
+
+**I had written that gap down myself, one session earlier, as a known
+unfixed item** -- "a future exporter fix that leaves the declarations alone
+would let a stale cached stage win silently" -- and then verified this fix
+against the source the gap does not apply to. A known hole in a contract is a
+thing to check *first* when a fix does not appear to land, not a thing to
+recall afterwards.
+
+The contract has a fourth part now: a builder digest over the code in
+`web/src/hod2lib/`, stamped on the manifest and on every stage entry, which
+**warns rather than refuses**. Refusing is right for a schema mismatch, where
+the bundle cannot be read correctly; it is wrong here, where the bundle reads
+perfectly and is merely old, and where refusing would make every unrelated
+exporter fix cost a full re-export before the page would open at all.
+
+Then: rebuilding in the page needed a manual browser refresh to take effect.
+The screen had two exits and neither adopted what it built. `Play stage N` was
+`window.location.reload()` under a comment saying a stage was not hot-swappable
+from there -- it always was, the top bar's picker is `state.stage = n;
+loadStage()` -- and `Back`, the exit you take after rebuilding the stage you are
+already looking at, did nothing whatever. Neither reloads the page now, and
+`npm run bundle-flow` asserts both.
+
+Writing that check found two more things I had not: the screen opened on stage
+1 Arcade whatever was on screen, and my first attempt to assert the reload
+raced the loading overlay -- `waitForStage` returns the instant `#loading` is
+absent, which immediately after a click is *before* it appears, and reads as an
+instant load of the stage that was already up.
+
+### A picture of a stage is a picture of the stage two seconds in
+
+Asked for, and worth the three failures it took. A stage the bundle screen
+builds is now loaded, stepped 120 frames, and photographed; the load-time
+capture stays only as a fallback for a stage that was never built here.
+
+Every one of the three failures produced a *plausible* wrong answer, which is
+the thing to take from it:
+
+* `loadStageInto` stops the transport on its way in, so `playing = true` set
+  before the load was gone by the time the frames ran. The walker still reached
+  its first wait, the region still streamed, four models were still visible --
+  everything looked live and the picture was a flat fill of the fog.
+* Rendering and copying in one synchronous block, off the frame loop, draws and
+  then copies the clear colour. 222 draw calls and 2,880 triangles went through
+  the renderer and the copy was still uniform. The rule the code already stated
+  -- "the same task as the draw" -- is not the rule; the rule is "the
+  `requestAnimationFrame` callback".
+* The loader's own thumbnail request had just become asynchronous, because it
+  now checks whether a picture already exists. It landed a second after the
+  good one, during the *next* stage's teardown, and overwrote it.
+
+And the check I wrote for it passed on all three. "Is the picture mostly
+non-black" is true of a flat brown field; counting distinct colours is the
+measure that tells a photograph from a wash. **A green assertion over a wrong
+picture is worse than no assertion**, and the only reason this was caught is
+that the image was written to a file and looked at.
+
+Two smaller things from the same pass. The staleness warning asked "is any
+stage old", so rebuilding the one you were playing left it lit -- it asks about
+the slot on screen now. And the screen has a **Build all**, because the
+alternative to twelve minutes of waiting once was six separate visits.
+
+### "None of the screenshots appeared"
+
+The pictures were being taken when the bundle screen closed. That is one step
+removed from what was asked for -- "when building the stage" -- and the
+distance between the two is the whole bug: the tiles stay empty for the entire
+run, so *Build all* looks like it did nothing, and reloading the page instead
+of pressing Back drops the list of stages owing a picture on the floor. After
+twelve minutes of building, reloading is what a person does.
+
+Moving it earlier needed the worker to publish the manifest after every stage
+rather than once at the end, because a stage the index does not name cannot be
+loaded and loading it is how its picture gets taken. That turned out to fix
+something else nobody had reported: **Stop** discarded every completed stage in
+a run, because their files were in the cache and no manifest named them.
+
+Then two of my own bugs, both found by looking at the screen rather than at the
+check:
+
+* `rescan` was not reentrant. Six stages finishing within seconds of each other
+  start six overlapping scans, and each revoked the `blob:` URLs the one before
+  it had just handed to React. The last tile was empty every time, with its
+  picture sitting in the store -- which reads exactly like "the capture
+  failed".
+* Putting the picture read *before* the label install made every tile say "not
+  built" for as long as six image reads take. The labels are what the screen is
+  unreadable without; they go in first now, and the pictures follow.
+

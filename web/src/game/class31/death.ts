@@ -207,11 +207,11 @@ export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
       if (obj.charType !== CHAR_ZSASS && clip !== undefined) playOnce(obj, clip);
       obj.thr.knockCount += 1;
     }
-    if (!(obj.flags & ActorFlag.ArcSpent)
+    if (!(obj.flags & ActorFlag.NoHitReaction)
         && obj.thr.knockCount < KNOCKBACK_ARCS) {
       ThrowerBeginKnockbackArc(obj, host);
     } else {
-      obj.flags |= ActorFlag.ArcSpent;
+      obj.flags |= ActorFlag.NoHitReaction;
     }
     // The last line of the engine's own case 0, and the one the port did not
     // have: a thrower leaves `g_enemies_alive` on the frame it is knocked off
@@ -276,7 +276,7 @@ export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
     // and in between `AND EBP, 0xffffbfff` (`81e5ffbfffff`) on `obj+0x136C`
     // at 0x0044A6E6 — the body has settled, so the next landing may puff
     // again.
-    obj.flags = (obj.flags & ~(ActorFlag.ArcSpent | ActorFlag.PoseFrozen))
+    obj.flags = (obj.flags & ~(ActorFlag.NoHitReaction | ActorFlag.PoseFrozen))
               | ActorFlag.ShotImmune;
     obj.flags2 &= ~ThrowerFlag.LandingDustEmitted;
     obj.slideTimer = (rng.int(10) + 1) * 3;
@@ -488,7 +488,7 @@ export function ThrowerStateFallToSurface(obj: ThrowerActor, dt: number): void {
   const is17 = obj.charType === CHAR_ZSKAMERE;
 
   if (obj.sub === 0) {
-    obj.flags |= ActorFlag.ArcSpent;
+    obj.flags |= ActorFlag.NoHitReaction;
     obj.thr.fallFromY = obj.pos.y;
     obj.flags2 &= ~(ThrowerFlag.Surface | ThrowerFlag.OffGround);
     playOnce(obj, is17 ? 0x1bc : 0x3a5);
@@ -521,7 +521,7 @@ export function ThrowerStateFallToSurface(obj: ThrowerActor, dt: number): void {
   // Sub 2: a landing clip zeroed `fallFromY`, so this leaves at once; with no
   // landing clip it waits the fall clip out instead.
   if (obj.thr.fallFromY !== 0 && obj.action) return;
-  obj.flags &= ~ActorFlag.ArcSpent;
+  obj.flags &= ~ActorFlag.NoHitReaction;
   obj.thr.fallFromY = 0;
   obj.sub = 0;
   obj.thr.landSurface = G.g_coli_hit_surface;

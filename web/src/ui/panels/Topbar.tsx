@@ -114,7 +114,7 @@ export function Status() {
 
 export function ViewSettings() {
   const dispatch = useDispatch();
-  const shooting = useSlice((p) => p?.toggles.shoot);
+
   const hasSaved = useSlice((p) => p?.hasSaved);
   const pillarbox = useSlice((p) => p?.pillarbox);
   const lightMode = useSlice((p) => p?.lightMode);
@@ -127,7 +127,7 @@ export function ViewSettings() {
       || filterMode === undefined) return null;
   return (
     <>
-      <button className="kill" hidden={!shooting}
+      <button className="kill"
               title="Kill every live actor outright -- hit points to zero and the directional death, the same thing that opens the live-enemy gate. Civilians go too, through their own killed script, because they are what wait_scripted_actors counts and a room cleared with the hostages still standing is a script that has not moved. Nothing is severed, because no bone was hit."
               onClick={() => dispatch({ kind: "killAll" })}>Kill</button>
       <button title="Snapshot the whole game state: the walker's program counter and flags, the data segment, every actor and the random seed. Nothing from three.js -- the renderers rebuild from those, which is the test that the split is in the right place. See docs/PLAYER_ARCHITECTURE.md."
@@ -186,5 +186,40 @@ export function ViewSettings() {
         </select>
       </label>
     </>
+  );
+}
+
+/**
+ * The way in to the bundle screen.
+ *
+ * It is in the top bar and not only on the failure path because the export
+ * screen was, at first, reachable *only* when no bundle loaded -- so on any
+ * machine with `extract/player/` populated, which is every developer's, none
+ * of it existed. Rebuilding a stage, switching to the copy the browser
+ * exported for itself and downloading that copy are all things you want with a
+ * bundle already open.
+ *
+ * Outside the `ready` guard in `App.tsx` on purpose: the moment it is most
+ * wanted is the moment nothing loaded.
+ */
+export function BundleButton() {
+  const dispatch = useDispatch();
+  // Undefined before there is a projection at all, which is the state the
+  // screen most wants to be reachable from and the one state in which nothing
+  // is known about what is cached. Not stale until something says so.
+  const stale = useSlice((p) => p?.bundleStale) === true;
+  return (
+    <button
+      className={stale ? "bundle-open stale" : "bundle-open"}
+      // Short on purpose. The button has to say *that* something is wrong in
+      // the width of a tooltip; the screen it opens has the room to say which
+      // stages and what changed under them.
+      title={stale
+        ? "Bundle needs rebuilding — it was built by an older exporter"
+        : "The bundle: which one is loaded, and build another from your copy of the game"}
+      onClick={() => dispatch({ kind: "openBundles" })}
+    >
+      {stale ? "\u26A0 " : ""}Bundle...
+    </button>
   );
 }

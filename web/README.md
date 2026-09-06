@@ -12,8 +12,8 @@ Plan and rationale: [`../docs/PLAYER_PLAN.md`](../docs/PLAYER_PLAN.md).
 
 The client does not parse `pol/`, `tex/`, `cam/`, `evt/` or `Hod2.exe` *while
 it is playing*: it loads glTF, evaluates Hermite curves and walks the resolved
-event script. Something has to have parsed them first, and there are now three
-ways to arrange that.
+event script. Something has to have parsed them first, and there are two ways
+to arrange that: a command, or the page itself.
 
 ```sh
 cd web
@@ -26,12 +26,33 @@ npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 npm run dev          # http://localhost:5173
 ```
 
-**Or build one from inside the page.** Open the client with no bundle and it
-offers to: choose the install folder, pick stages and modes, and the export
-runs in a worker into the Origin Private File System. It survives a reload and
-downloads as a zip that unpacks into `extract/player/`. `src/hod2lib/` is the
-library both paths run, and `docs/TS_PORT.md` says what "the same bundle"
-means down to the byte.
+**Or build one from inside the page.** Press **Bundle...** in the top bar --
+or open the client with no bundle at all, which goes straight there. Choose the
+install folder, pick a stage and a mode, and the export runs in a worker into
+the Origin Private File System. It survives a reload and downloads as a zip
+that unpacks into `extract/player/`. `src/hod2lib/` is the library both paths
+run, and `docs/TS_PORT.md` says what "the same bundle" means down to the byte.
+
+**One stage at a time, and the rest on demand.** Every stage in both modes is
+431 MB and the better part of an hour, which is a strange thing to ask for
+before you have seen anything. So the screen builds the one stage you chose,
+and picking a stage in the top bar that neither bundle holds decodes it then,
+keeps it, and plays it -- about a minute, once. The stage picker therefore
+offers all six as soon as the page knows an install, whether or not they exist
+yet.
+
+A browser holds two bundles at once: the one the page was served out of
+`extract/player/`, and the one it built for itself. Which one a *stage* comes
+from is decided per stage, and the one you built wins -- it is the more recent
+statement about that stage and the only one you can rebuild. Either is used
+only if its `format` and schema digest match this client; a stage that fails
+either check is rebuilt rather than loaded. **Clear cache** on the bundle
+screen puts the served bundle back in charge.
+
+The picture on each stage tile is a frame the player rendered the last time
+that stage was open, kept in the browser beside the cache. Nothing derived from
+the game is committed to this repository, so a stage nobody has opened has no
+picture.
 
 Add `--original` to step 1 to build the Original Mode (game mode 1) variants
 too, which the **Original** checkbox then switches between.
@@ -48,15 +69,16 @@ data and must never end up in a build artifact. For a production build, run
 `npm run build` and copy the bundle to `dist/bundle/` yourself — the app
 fetches `bundle/manifest.json` relative to the page either way.
 
-### Why the bundle step exists
+### Why there is a bundle at all
 
-Doing the extraction in the browser would mean ~2500 lines of TypeScript
-re-implementing `lz`, `container`, `nl1`, `texbank`, `exetab`, `cam`, `evt` and
-the PowerVR2 decoder — a second implementation of every format, free to drift
-from the first. Pre-processing costs one command and buys exactly one
-implementation of each format, with `dump_stage_script.py` still a valid text
-oracle for the JSON the browser eats, because both come out of
-`hod2lib.script`.
+Not to avoid writing the parsers -- `src/hod2lib/` is right there and the
+browser runs it. It is that parsing `pol/`, `tex/`, `cam/`, `evt/` and
+`Hod2.exe` is minutes of work per stage, and doing it once into files the page
+can `fetch` is the difference between a reload that costs nothing and a reload
+that costs a coffee. The bundle is a cache with a format number on it.
+
+The reason it used to be a *Python* step, and the reason it no longer is, are
+both in [`../docs/TS_PORT.md`](../docs/TS_PORT.md).
 
 ---
 
@@ -201,12 +223,13 @@ so is the event feed.
   256-byte flag array written by gameplay — and that gameplay is still being
   decompiled. Re-implementing it here would mean guessing, and a guess dressed
   as an interpreter is worse than an honest walker. So `wait_enemies_present`
-  and friends now block on the real thing whenever **Shoot** is on: the gate
-  opens when the enemies are dead, because the player can kill them. With
-  Shoot off nothing can make the count fall, so the gate passes and the feed
-  says so. (It used to be paced on a per-enemy stopwatch — a stand-in from
-  before there was any shooting, which only ever produced a wait of an
-  invented length.) Every wait the walker cannot honour appears in the feed
+  and friends block on the real thing: the gate opens when the enemies are
+  dead, because the player can kill them. (It used to be paced on a per-enemy
+  stopwatch — a stand-in from before there was any shooting, which only ever
+  produced a wait of an invented length.) **This is not a setting.** Shooting
+  was a checkbox that defaulted to off, and off it took the game with it: the
+  counts read null, a null count is not a condition, and the script walked
+  through every fight without stopping for one. There is no checkbox. Every wait the walker cannot honour appears in the feed
   with the condition it *would* have blocked on and what happened instead.
 - **Runtime-driven rig parts are not animated.** `rigs.py` records the rule —
   "RotY by obj+0x1334", "model cycles `DAT_009A32A0 % 12 + 0x8CE`" — rather
@@ -311,24 +334,32 @@ That is also why "previous instruction" replays rather than undoing.
 
 ## Layout
 
+Four layers, and dependencies point down only. `../CLAUDE.md` states the rule
+and `tools/verify_layers.py` enforces it.
+
 ```
 web/
-  index.html          page skeleton
+  index.html          page skeleton: #app and #export-root
   vite.config.ts      dev server + the /bundle/ middleware
   src/
-    main.ts           the player: modes, render loop, wiring
-    bundle.ts         bundle types and loading
-    campath.ts        Hermite evaluation, camera pose, rail polylines
-    stagescene.ts     glTF loading, region index, visibility rule
-    walker.ts         the script walker and the route graph
-    overlays.ts       camera rails, object rails, spawn markers
-    freeroam.ts       fly camera
-    urlstate.ts       URL <-> player state
-    ui.ts             script tree, event feed, HUD, inspector, route minimap
-    style.css
+    core/ bundle/     engine: no three.js, no DOM, no Math.random
+    script/ game/       the walker, and the gameplay transcribed from the exe
+    hod2lib/          the exporter. runs in the CLI and in the page
+    render/           three.js. reads engine state, owns nothing
+    hud/ ui/          reads one projection, emits commands
+    app/              the composition root: main, stage_load, bundles,
+      install/          and choosing an install, exporting, the cache
 ```
 
 `npm run check` typechecks without building.
+
+`npm run bundle-flow -- --game-dir "..."` drives the whole bundle flow in
+Chrome: the screen, an export, a stage built on demand from the top bar, and
+the second visit coming out of the cache. It is minutes rather than seconds, so
+it is not in `verify_all`; run it when you touch `src/app/install/`,
+`src/app/bundles.ts` or the loader. Nothing else can see any of it -- a green
+`tsc` and a green `vite build` are exactly what an unreachable export screen
+looks like.
 
 ---
 

@@ -39,8 +39,39 @@ export enum ActorFlag {
    * window, counted down by `obj+0x133C`.
    */
   ShotImmune = 0x100,
-  /** No more knockback arcs: two re-entries into one fall have been spent. */
-  ArcSpent = 0x2000,
+  /**
+   * `obj+0x34` bit `0x2000` — **this actor does not react to being shot.**
+   *
+   * `[proved]`, and the image reads it in exactly two places, both of which
+   * refuse a reaction:
+   *
+   * ```
+   * 004544d8  f7463400200010  TEST dword ptr [ESI + 0x34], 0x10002000
+   * 004544df  0f85...         JNZ  0x00454656          ; ActorPlayHitReaction
+   * 00449a95  f6c420          TEST AH, 0x20            ; EAX = obj+0x34
+   * 00449a98  755c            JNZ  0x00449af6          ; ThrowerOnShot
+   * ```
+   *
+   * `ActorPlayHitReaction` (`FUN_004544C0`) returns before it looks up a clip,
+   * and `ThrowerOnShot` (`FUN_004499A0`) skips the stumble, the knockdown and
+   * the tumble. The other half of that first mask is {@link Committed}.
+   *
+   * Every writer raises it while **something else owns the body** and clears
+   * it on the way out — `ZombieStateEmerge` (`00458532 OR DH, 0x21`, cleared
+   * at `0045869F AND DH, 0xdf`), `ZombieStateDelayedLeap`,
+   * `ZombieStateArcScriptedEntrance`, `ZombieStateMotionCue21`'s exit,
+   * `ZombieApplyScriptMode`'s `0x2400`, `ThrowerStateFallToSurface`,
+   * `ThrowerStateRearm`'s exit, and `ActorPlayHitReaction`'s own alt arm
+   * (`004545F5 OR CH, 0x20`), which `ZombieTickAltHitReaction`
+   * (`FUN_004547C0`) takes back down when that reaction has played out.
+   *
+   * **It was called `ArcSpent`**, after the one consequence class 0x31's fall
+   * states get from it — the second knockdown of a life finds it already up
+   * and launches no further arc. That is a *use*, not the bit: the name said
+   * where it sits rather than what it is, and it is why the emerge's raise was
+   * never ported and an emerging zombie staggered when the engine's does not.
+   */
+  NoHitReaction = 0x2000,
   /** Freezes the motion advance, which is how a pose holds mid-air. */
   PoseFrozen = 0x4000,
   /** A reaction is in progress. */

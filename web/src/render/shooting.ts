@@ -21,6 +21,19 @@
  *
  * Read out of the binary; the full account is in `docs/formats/combat.md`.
  *
+ * ## There is no Shoot switch
+ *
+ * There was, it was **off by default**, and off it took the game with it: the
+ * live-enemy gates ask `WalkerHost.aliveEnemies`, which answered null while
+ * shooting was off, and a null count is not a condition -- so `wait_enemies_
+ * alive` and `wait_enemies_present` passed on their timeouts and the script
+ * walked through every fight in the game without stopping for one. That reads
+ * as a broken port, not as a switch nobody had found, and it was reported as
+ * one.
+ *
+ * Shooting is what the game *is*. It is on, it is not a setting, and the
+ * counts the gates read are always the real ones.
+ *
  * ## The ray
  *
  * `FUN_00406110` unprojects the crosshair with the game's own projection
@@ -80,7 +93,7 @@
  * whatever happened to be drawn. That `[open]` is closed.
  */
 
-import { Raycaster, Vector2, Vector3, type Camera, type Object3D } from "three";
+import { Raycaster, Vector2, Vector3, type Camera } from "three";
 import type { CharacterLayer } from "./characters";
 import type { CombatJson } from "../bundle";
 import type { Events, EventMap } from "../core/events";
@@ -120,7 +133,6 @@ export class Shooting implements System {
   private readonly ray = new Raycaster();
   private readonly ndc = new Vector2();
 
-  private enabled = false;
   /**
    * The running score is a global — `G.g_player_score` — because
    * `PlayerTakeDamage` also writes it, and two counters that both call
@@ -179,34 +191,68 @@ export class Shooting implements System {
     // else this layer holds that outlives a stage.
     scope.defer(events.on("shot.resolved", (r) => this.onResolved(r)));
     viewport.addEventListener("pointerdown", (e) => {
-      if (!this.enabled || e.button !== 0) return;
+      if (e.button !== 0) return;
+      // `preventDefault` stops the drag-select a click on the scene would
+      // otherwise start. It also stops the **focus change** the browser would
+      // have made, and that half has to be done by hand: without it a click on
+      // the game does not take the keyboard back off the script filter, so W
+      // goes on going to the text box and the free camera never moves. That
+      // was invisible while shooting was a toggle, because the toggle was off
+      // and this handler returned before `preventDefault` ever ran.
       e.preventDefault();
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body) active.blur?.();
       this.fire(e);
     });
     viewport.addEventListener("pointermove", (e) => {
-      if (!this.enabled) return;
-      const r = viewport.getBoundingClientRect();
-      this.dot.style.left = `${e.clientX - r.left}px`;
-      this.dot.style.top = `${e.clientY - r.top}px`;
+      const p = this.pointerAt(e);
+      this.dot.style.left = `${p.x}px`;
+      this.dot.style.top = `${p.y}px`;
     });
   }
 
-  setEnabled(v: boolean, camera?: Camera, scene?: Object3D): void {
-    this.enabled = v;
-    // Neither the `shooting` class on the viewport nor the crosshair's
-    // `hidden` is set here any more. Both are React's elements and
-    // `p.toggles.shoot` is the same fact this is called with, so both are
-    // rendered rather than toggled -- two layers writing one attribute is the
-    // bug this whole arc is about, and `paused` was the other writer. The flag
-    // itself stays: it gates the pointer handlers above and `walker_host`
-    // reads it through `isEnabled` to decide whether the live-enemy counts
-    // mean anything, and neither of those is a pixel.
-
-    this._camera = camera ?? this._camera;
-    this._scene = scene ?? this._scene;
+  /**
+   * Where the pointer is, in the viewport's own pixels.
+   *
+   * **A locked pointer has no position**, only deltas: `clientX` and `clientY`
+   * stay frozen at wherever the lock was taken. Free roam captures the pointer
+   * to the canvas (`render/freeroam.ts`), so with shooting also on the
+   * crosshair would stick to the spot that was clicked and every shot would
+   * leave from it. A locked pointer is at the centre of the element it is
+   * locked to, which is where the reticle of anything that locks a pointer
+   * sits, so that is what both the crosshair and the ray are given.
+   *
+   * `document.pointerLockElement` is read rather than imported: it is a fact
+   * about the document, and this layer asking another layer whether it has the
+   * pointer would be `render/` importing `render/` sideways for a value the
+   * browser already publishes.
+   */
+  private pointerAt(e: PointerEvent): { x: number; y: number } {
+    const r = this.viewport.getBoundingClientRect();
+    if (document.pointerLockElement
+        && this.viewport.contains(document.pointerLockElement)) {
+      return { x: r.width / 2, y: r.height / 2 };
+    }
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  get isEnabled(): boolean { return this.enabled; }
+  /**
+   * The camera to cast the ray through.
+   *
+   * Called once, from `app/main.ts`, as soon as there is one. It used to be
+   * half of `setEnabled(on, camera, scene)`, whose only caller was the
+   * **Shoot toggle** -- so until somebody found that checkbox this layer had
+   * no camera and a click did nothing at all. There is no toggle now; see the
+   * note at the top of this file.
+   *
+   * The `scene` that travelled beside the camera is gone with it. It had been
+   * stored and never read since the hit test moved to `characters.ts`, and it
+   * only type-checked because the old setter's `scene ?? this._scene` read the
+   * field it was writing.
+   */
+  castThrough(camera: Camera): void {
+    this._camera = camera;
+  }
 
   /**
    * The camera yaw the directional death compares against, in BAMS.
@@ -273,7 +319,6 @@ export class Shooting implements System {
 
   private readonly _back = new Vector3();
   private _camera: Camera | null = null;
-  private _scene: Object3D | null = null;
 
   reset(): void {
     this.shots = 0;
@@ -301,8 +346,8 @@ export class Shooting implements System {
   private fire(e: PointerEvent): void {
     if (!this._camera) return;
     const r = this.viewport.getBoundingClientRect();
-    this.ndc.set(((e.clientX - r.left) / r.width) * 2 - 1,
-                 -((e.clientY - r.top) / r.height) * 2 + 1);
+    const p = this.pointerAt(e);
+    this.ndc.set((p.x / r.width) * 2 - 1, -(p.y / r.height) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this._camera as never);
     this.ray.far = SHOT_RANGE;
     this.shots++;
@@ -370,7 +415,6 @@ export class Shooting implements System {
   }
 
   get describe(): string {
-    if (!this.enabled) return "off";
     const acc = this.shots ? Math.round((this.hits / this.shots) * 100) : 0;
     return `${this.score} pts · ${this.hits}/${this.shots} (${acc}%)`
       + (G.g_head_combo_bonus[0]

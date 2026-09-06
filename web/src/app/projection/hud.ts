@@ -76,7 +76,9 @@ export interface HudSource {
   readonly camera: { readonly position: XYZ };
   /** The camera rig's pose scratch — where the block is aimed. */
   readonly cam: { readonly pose: { readonly target: XYZ } };
-  readonly ctx: { readonly view: { readonly yawBams: number } };
+  readonly ctx: {
+    readonly view: { readonly yawBams: number; readonly forward: XYZ };
+  };
   readonly chars: Describes;
   readonly props: Describes;
   readonly rigs: Describes;
@@ -113,6 +115,7 @@ export function hudInputs(p: HudSource): HudInputs | null {
          + `${p.scene3d.visibleTriangles.toLocaleString()} tris`,
     eye: p.camera.position,
     target: p.cam.pose.target,
+    facing: p.ctx.view.forward,
     yawBams: p.ctx.view.yawBams,
     describe: {
       characters: p.chars.describe,
@@ -141,8 +144,17 @@ export interface HudInputs {
   allRegions: boolean;
   drawn: string;
   eye: XYZ;
-  /** Where the camera is aimed — the block's target, as the rig holds it. */
+  /**
+   * The **script's** block target, as the rig holds it.
+   *
+   * Not "where the camera is looking", which is what the row used to be
+   * labelled: free roam owns the camera outright and never writes this, so in
+   * that mode the eye below and this are two different cameras. {@link facing}
+   * is the one that always describes the camera the frame was drawn with.
+   */
   target: XYZ;
+  /** The unit vector the camera actually looks along. `core/camera.ts`. */
+  facing: XYZ;
   /** The camera's heading in the engine's own units. See `core/bams.ts`. */
   yawBams: number;
   describe: {
@@ -155,6 +167,10 @@ export interface HudInputs {
 
 const fmtVec = (v: XYZ): string =>
   `${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)}`;
+
+/** A unit vector, which wants three decimals rather than one. */
+const fmtUnit = (v: XYZ): string =>
+  `${v.x.toFixed(3)}, ${v.y.toFixed(3)}, ${v.z.toFixed(3)}`;
 
 /** BAMS as the engine stores them, and as a person reads them. */
 const fmtBams = (b: number): string =>
@@ -212,7 +228,11 @@ export function groupRows(w: Walker, x: HudInputs):
           + `${Math.max(cam.startFrame, cam.endFrame).toFixed(0)}`
         : "—"],
       ["eye", fmtVec(x.eye)],
-      ["look at", fmtVec(x.target)],
+      // Two rows because they are two cameras whenever free roam is on, and
+      // one row saying "look at" over the script's target was read as the
+      // aim of the shot on screen.
+      ["facing", fmtUnit(x.facing)],
+      ["block target", fmtVec(x.target)],
       ["yaw", fmtBams(x.yawBams)],
       ["roll channel", w.rollEnabled ? "on (opcode 0x35)" : "off"],
       // `SelectCameraLookAtTarget` aims at the actor holding a permit; the

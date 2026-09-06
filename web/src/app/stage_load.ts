@@ -19,14 +19,14 @@
  * than as two hundred lines in the middle of a class.
  */
 import { loadStage, releaseGeometry } from "../bundle";
-import type { StageEntry } from "../bundle";
+import { sourceOf } from "./bundles";
+import type { StageSlot } from "./bundles";
 import { StageScene } from "../render/stagescene";
 import { CamPaths } from "../game/camera/curve";
 import { RailLayer } from "../render/overlays";
 import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
 import { G } from "../game/globals";
-import { GameMode } from "../game/game_mode";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { minimapGraph, treeProjection } from "./projection/script";
 import { screenMessage } from "./projection/message";
@@ -34,13 +34,24 @@ import { makeWalkerHost } from "./walker_host";
 import type { Player } from "./main";
 import type { StatusProjection } from "../ui/projection";
 
-/** The manifest row for a stage, falling back to Arcade when Original has none. */
-function entryFor(p: Player, stage: number,
-                  original: boolean): StageEntry | undefined {
-  return p.manifest.stages.find(
-    (s) => (s.stage ?? s.scene) === stage
-      && (s.game_mode === GameMode.Original) === original,
-  );
+/**
+ * The stage, built if it has to be.
+ *
+ * Original Mode falls back to Arcade, as it always has: half the stages have
+ * no Original variant and the picker's checkbox is not a promise that one
+ * exists. What is new is the middle step -- a stage neither bundle holds is
+ * *decoded now*, from the install this browser remembers, and kept. Asking for
+ * a stage is how it comes to exist; see `Player.buildStage`.
+ */
+async function slotFor(p: Player, stage: number,
+                       original: boolean): Promise<StageSlot | undefined> {
+  const have = () => p.bundles.find(stage, original)
+    ?? p.bundles.find(stage, false);
+  const first = have();
+  if (first) return first;
+  if (!p.canBuild) return undefined;
+  if (!await p.buildStage(stage, original)) return undefined;
+  return have();
 }
 
 export async function loadStageInto(p: Player): Promise<void> {
@@ -55,9 +66,16 @@ export async function loadStageInto(p: Player): Promise<void> {
   const seq = ++p.stageLoadSeq;
   const superseded = () => seq !== p.stageLoadSeq;
 
-  const entry = entryFor(p, p.state.stage, p.state.original) ??
-    entryFor(p, p.state.stage, false);
-  if (!entry) return p.fail(`stage ${p.state.stage} is not in this bundle`);
+  // Before anything is torn down, because building is minutes and the stage
+  // on screen is better company than an empty viewport. `superseded` covers
+  // the rest: a second pick during a build wins, and this one stops here.
+  const slot = await slotFor(p, p.state.stage, p.state.original);
+  if (superseded()) return;
+  if (!slot) {
+    return p.fail(`stage ${p.state.stage} is in neither bundle`
+      + (p.canBuild ? ", and could not be built" : ". Build it: Bundle..."));
+  }
+  const entry = slot.entry;
 
   p.setLoading(`loading ${entry.name}…`);
   p.playing = false;
@@ -94,7 +112,8 @@ export async function loadStageInto(p: Player): Promise<void> {
   // layer built. Both are below, at the point the new one is made.
   p.cam.rails = null;
 
-  const bundle = await loadStage(entry);
+  const src = sourceOf(slot.from);
+  const bundle = await loadStage(src, entry);
   if (superseded()) return;
   p.paths = new CamPaths(bundle.cam);
   const scene3d = await StageScene.load(bundle.geometryUrl, bundle.script);
@@ -102,7 +121,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   // a 58 MB blob nothing revokes is 58 MB the tab keeps until it closes. The
   // loader is done with it by here; over the server it is a plain path and
   // this is a no-op.
-  releaseGeometry(bundle.geometryUrl);
+  releaseGeometry(src, bundle.geometryUrl);
   if (superseded()) return scene3d.dispose();
   p.scene3d = scene3d;
   // Honour the per-mesh fog bit and compile the radial-fog variant.
@@ -250,6 +269,14 @@ export async function loadStageInto(p: Player): Promise<void> {
   const st = bundle.script.bgm?.stage_track;
   if (st) p.bgm.play(st.id, "stage");
   p.setLoading(null);
+  // The bundle screen's picker shows a frame of each stage, and this is the
+  // **fallback** ask: a few frames along, so the script has placed the camera
+  // and the first region has streamed in, and only if the stage has no picture
+  // already. The real one is `Player.captureThumb`, seven seconds into the stage
+  // and taken when the stage is built. `Player.keepThumb` does the rest in the
+  // frame loop, because a WebGL back buffer does not survive the turn it was
+  // drawn in.
+  p.requestThumb(p.state.stage);
   const status: StatusProjection = {
     text:
       `${entry.name} · ${entry.counts.models} models · ` +

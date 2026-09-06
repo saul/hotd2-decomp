@@ -14,12 +14,12 @@
  * that is hit points for a combat actor and the *group id* for a class-0x41
  * placer. Three classes, three meanings, one offset.
  *
- * Eighteen builders, of which the shipped stages reach all eighteen. Only
- * selector 16 is read and ported: it is the one that hands out items, and it
- * is the only one that shares `g_item_set_countdown` with class 0x41. The rest
- * keep their slot and do nothing, for the same reason class 0x41's other 78
- * do — an unimplemented selector running the wrong builder is the bug that had
- * the cat walking at the player.
+ * Eighteen builders. Three are read and ported: selector 16, which hands out
+ * items and is the only one that shares `g_item_set_countdown` with class
+ * 0x41; selector 17, the branch writer; and selector 0, the animated effect
+ * tree stage 1's window is made of. The rest keep their slot and do nothing,
+ * for the same reason class 0x41's other 78 do — an unimplemented selector
+ * running the wrong builder is the bug that had the cat walking at the player.
  */
 import type { Actor } from "../actor";
 import { G } from "../globals";
@@ -29,6 +29,7 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { PlaceFallingContainer } from "./container";
+import { PropBuildScriptFlagEffect } from "./script_flag_effect";
 import { PlaceStoryModeSwitch } from "../class41/triggers";
 
 /**
@@ -39,6 +40,11 @@ import { PlaceStoryModeSwitch } from "../class41/triggers";
  * reading that has not happened.
  */
 export enum Class44Selector {
+  /**
+   * `PropBuildScriptFlagEffect` (`FUN_00472B30`) — the animated effect tree
+   * that plays on a script flag. Two spawns, both stage 1's window halves.
+   */
+  ScriptFlagEffect = 0,
   /** `PlaceFallingContainer` (`FUN_00473940`) — the item container. */
   FallingContainer = 16,
   /**
@@ -65,6 +71,14 @@ export type Class44Builder = (obj: Actor, f: ClassFrame) => void;
  * `g_class_handlers[0x41]` empty and cost an hour; once is enough.
  */
 export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
+  [Class44Selector.ScriptFlagEffect]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "script_flag_effect");
+    if (!pl) return;
+    G.g_breakable_props.push(...PropBuildScriptFlagEffect(
+      obj.at, pl.effect ?? 0, pl.capture_bone ?? 0, pl.motion ?? 0));
+  },
   [Class44Selector.StoryModeSwitch]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
@@ -112,6 +126,7 @@ export const Class44PlacerHandler: ClassHandler = {
 };
 
 export * from "./container";
+export * from "./script_flag_effect";
 
 /**
  * The same shape: a placer that builds and dies. Only selector 16 is

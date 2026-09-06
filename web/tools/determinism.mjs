@@ -32,7 +32,7 @@
  *
  * Exit status is 0 only if every run traced identically.
  */
-import { openPlayer, waitForLoad, enableShooting } from "./lib/player.mjs";
+import { openPlayer, waitForLoad } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {
@@ -104,7 +104,6 @@ async function once(label) {
     if (version === null) {
       throw new Error("the page has no drive seam — is ?drive=1 wired up?");
     }
-    await enableShooting(page);
     await page.keyboard.press("Space");
     await page.evaluate(() => globalThis.__hotd2Drive.trace(true));
     const box = await page.locator("#viewport").boundingBox();

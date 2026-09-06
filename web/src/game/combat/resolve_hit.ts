@@ -237,6 +237,27 @@ export function SeverBoneChildren(obj: Actor, bone: number): void {
  */
 export function ActorPlayHitReaction(obj: Actor, bone: number,
                                      result: HitResultCode): number | undefined {
+  // **The refusal this routine opens with**, and the reason an emerging zombie
+  // does not stagger:
+  //
+  // ```
+  // 004544d8  f7463400200010  TEST dword ptr [ESI + 0x34], 0x10002000
+  // 004544df  0f8571010000    JNZ  0x00454656          ; the epilogue
+  // ```
+  //
+  // Not a state test — a flag test, and the states that must not be
+  // interrupted are the ones that raise a bit. `ZombieStateEmerge`
+  // (`FUN_004584E0`) holds {@link ActorFlag.NoHitReaction} from its first sub
+  // to the frame it hands over to `AttackRun`; `ZombieStateStandAndThrow` and
+  // `ZombieStateTargetMotionScript` hold {@link ActorFlag.Committed} for the
+  // length of a throw or a maul.
+  //
+  // The port had neither half — no gate here and no raise in the emerge — so
+  // every shot on a zombie climbing out of the water or the ground cut its
+  // entrance clip with a stumble.
+  if (obj.flags & (ActorFlag.NoHitReaction | ActorFlag.Committed)) {
+    return undefined;
+  }
   const group = T.chars?.reaction_groups?.[bone];
   const type = CharacterTypeOf(obj);
   const row = type?.reactions?.[String(obj.condition)]

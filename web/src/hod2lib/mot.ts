@@ -55,6 +55,41 @@ export function frameStride(boneCount: number): number {
   return (boneCount * 6 + 15) & ~3;
 }
 
+/**
+ * Bytes per frame for an **effect**'s motion, which is not the character
+ * stride and is not derived from a character at all.
+ *
+ * `EffectFrameTranslations` (`FUN_0040E040`) and `EffectFrameRotations`
+ * (`FUN_0040E070`) both compute
+ * `(g_effect_bone_counts[effect] * 0x12 - 0xF) & 0xFFFFFFFC`, and the mask
+ * **truncates** rather than rounding up. An effect tree's node count includes
+ * its root, which carries no animation, so one frame holds `n - 1`
+ * translations of three floats followed by `n - 1` rotations of three BAMS
+ * shorts -- `18(n-1)` bytes, which is what that expression comes to whenever
+ * the truncation does not bite.
+ *
+ * Nothing may stand in for this: reading an effect's block at
+ * {@link frameStride} walks a third of a frame per frame.
+ */
+export function effectFrameStride(nodeCount: number): number {
+  return (nodeCount * 0x12 - 0xf) & ~3;
+}
+
+/**
+ * One key of an effect's motion: a translation and a rotation per node,
+ * indexed by the node's `bone - 1`.
+ *
+ * `EffectPoseNode` (`FUN_0040D9D0`) reads `bone - 1` into both arrays, so the
+ * root -- bone 0 -- has no entry and the arrays are one shorter than the
+ * tree's node count.
+ */
+export interface EffectFrame {
+  /** World-space translation per bone index, three floats. */
+  t: [number, number, number][];
+  /** `(rx, ry, rz)` BAMS per bone index. */
+  r: [number, number, number][];
+}
+
 export interface Frame {
   root: [number, number, number];
   /** `(rx, ry, rz)` BAMS per bone, index 0 being the object root. */
@@ -150,6 +185,48 @@ export class MotionBank {
       }
       out.push({ root: [f32(this.raw, o), f32(this.raw, o + 4),
                         f32(this.raw, o + 8)], bones });
+    }
+    return out;
+  }
+
+  /**
+   * Decode a motion as an **effect**'s, at {@link effectFrameStride}.
+   *
+   * *nodeCount* is `g_effect_bone_counts[effect]` -- the tree's node count
+   * including its root -- and the arrays come back one shorter than it, so
+   * a node's key is `frame.t[node.bone - 1]`, exactly as `EffectPoseNode`
+   * indexes them.
+   */
+  effectFrames(motionId: number, nodeCount: number,
+               count: number | null = null): EffectFrame[] {
+    const base = this.offsets.get(motionId);
+    if (base === undefined || nodeCount < 2) return [];
+    const stride = effectFrameStride(nodeCount);
+    if (stride <= 0) return [];
+    const bones = nodeCount - 1;
+    const start = base + 4;
+    const end = this.blockEnd(base);
+    let avail = Math.max(0, Math.floor((end - start) / stride));
+    const declared = this.frameCount(motionId);
+    if (declared > 0 && declared <= avail) avail = declared;
+    const n = count === null ? avail : Math.min(count, avail);
+    const out: EffectFrame[] = [];
+    for (let f = 0; f < n; f++) {
+      const o = start + f * stride;
+      const t: [number, number, number][] = [];
+      const r: [number, number, number][] = [];
+      for (let b = 0; b < bones; b++) {
+        const q = o + b * 12;
+        t.push([f32(this.raw, q), f32(this.raw, q + 4), f32(this.raw, q + 8)]);
+      }
+      // `base + stride*f - 8 + nodeCount*0xC`, which is `bones * 0xC` past
+      // the frame's own start. The `-8` and the `+4` are the engine's, and
+      // they cancel to exactly the end of the translations.
+      for (let b = 0; b < bones; b++) {
+        const q = o + bones * 12 + b * 6;
+        r.push([i16(this.raw, q), i16(this.raw, q + 2), i16(this.raw, q + 4)]);
+      }
+      out.push({ t, r });
     }
     return out;
   }

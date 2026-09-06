@@ -436,8 +436,9 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor,
     ActorSetMotion(obj, crouch.motion);
     obj.zom.holdFrames = crouch.hold;
     obj.sub = 2;
-    // `obj+0x34 |= 0x2000` — the arc is armed but has not begun.
-    obj.flags |= ActorFlag.ArcSpent;
+    // `obj+0x34 |= 0x2000` — the no-hit-reaction latch, raised as the arc is
+    // armed and cleared when the step reports done.
+    obj.flags |= ActorFlag.NoHitReaction;
   }
 
   if (obj.sub === 2) {
@@ -466,7 +467,7 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor,
   if (ActorArcStep(obj, t?.step ?? 1, dt)) return;
 
   obj.flags2 &= ~ZombieFlag2.Carried;
-  obj.flags &= ~ActorFlag.ArcSpent;
+  obj.flags &= ~ActorFlag.NoHitReaction;
   // The engine keeps the permit if it somehow has one and goes straight to the
   // strike; otherwise it joins the attack run.
   if (obj.attackPermit === -1) {

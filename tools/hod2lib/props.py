@@ -113,7 +113,7 @@ from . import degraded
 from .bams import bams_from_matrix, rot_matrix
 
 __all__ = ["Hinge", "StaticProp", "hinge_curve", "resolve_for_stage",
-           "props_json"]
+           "props_json", "EffectNode", "effect_tree", "effect_sound_cues"]
 
 #: `FUN_00472B10`'s 18 builders, indexed by ``obj+0x11C``.
 PROP_BUILDERS = 0x00595AB8
@@ -433,4 +433,101 @@ def rig_entries(stage, hinges: list[Hinge], statics: list[StaticProp],
                        "note": rig.note}],
             "parts": [(part, [(model, bank, rec[0].removesuffix(".bin"))])],
         })
+    return out
+
+
+# -- the effect system, and class 0x44 selector 0 --------------------------
+
+#: `g_effect_trees` — 0x004D5390, one root node per effect id. A node, and the
+#: root the table points at is one::
+#:
+#:     +0x00  u32  asset slot            0 draws nothing
+#:     +0x04  s16  bone index, 1-based   < 1 makes it a pure transform
+#:     +0x06  u16  child count
+#:     +0x08  u32  children[]
+EFFECT_TREES = 0x004D5390
+#: `g_effect_bone_counts` — 0x004D5404, s16 per effect: the node count.
+EFFECT_BONE_COUNTS = 0x004D5404
+#: `g_effect_interp_mode` — 0x004D5440, u8 per effect.
+EFFECT_INTERP_MODE = 0x004D5440
+#: The three tables are 29 long and contiguous, which is what fixes them.
+EFFECT_COUNT = 29
+#: A bound on the walk, so a corrupt pointer cannot run away. Not a guess at
+#: the data: effect 8 has **144 children under its root** and 145 nodes, and a
+#: cap of 0x40 silently returned 65 of them.
+EFFECT_NODE_CAP = 4096
+
+
+@dataclass
+class EffectNode:
+    """One node of an effect tree, flattened depth-first with the root first."""
+
+    #: `+0x00`. ``AssetDrawSlot(0)`` draws nothing, so 0 is a pure transform.
+    slot: int
+    #: `+0x04`, 1-based. `EffectDrawNode` skips the pose and the draw below 1.
+    bone: int
+    #: Indices into the flattened list.
+    children: list[int]
+
+
+def effect_tree(tables, effect: int) -> list[EffectNode]:
+    """One effect's node tree, flattened depth-first from the root.
+
+    The order `EffectDrawNode` (`FUN_0040DE50`) recurses in, so a consumer that
+    walks the list in order sees the parts in the order the engine draws them.
+    """
+    if not 0 <= effect < EFFECT_COUNT:
+        return []
+    root = tables._u32(EFFECT_TREES + effect * 4) or 0
+    if not root:
+        return []
+    out: list[EffectNode] = []
+    seen: set[int] = set()
+
+    def walk(va: int) -> int:
+        r = tables._v2r(va)
+        if r is None or va in seen or len(out) >= EFFECT_NODE_CAP:
+            return -1
+        seen.add(va)
+        here = len(out)
+        slot, bone, n = struct.unpack_from("<IhH", tables.data, r)
+        out.append(EffectNode(slot, bone, []))
+        for k in range(min(n, EFFECT_NODE_CAP)):
+            child = struct.unpack_from("<I", tables.data, r + 8 + k * 4)[0]
+            idx = walk(child) if child else -1
+            if idx >= 0:
+                out[here].children.append(idx)
+        return here
+
+    walk(root)
+    return out
+
+
+#: `PropBuildScriptFlagEffect` (`FUN_00472B30`) — class 0x44 selector 0, and
+#: the literals its object is built from. It is the one selector whose object
+#: draws an animated effect rather than a model at a pose, and nothing in the
+#: family translates by the spawn's own position: the motion carries world
+#: coordinates. Stage 1's two window halves at evt 0x1580 and 0x15CC are the
+#: only two spawns in the game that reach it.
+SCRIPT_FLAG_EFFECT_MOTION = 0x1D7
+#: ``CMP ECX,0x13F5`` at 0x00472B6C, against the dword at ``tail+0x04``.
+SCRIPT_FLAG_EFFECT_SLOT_A = 0x13F5
+SCRIPT_FLAG_EFFECT_A = (2, 2)      # (effect id, capture bone)
+SCRIPT_FLAG_EFFECT_B = (3, 1)
+#: `g_script_flag_effect_cues_a` — 0x005961F0, and its neighbour.
+SCRIPT_FLAG_EFFECT_CUES_A = 0x005961F0
+SCRIPT_FLAG_EFFECT_CUES_B = 0x00596204
+
+
+def effect_sound_cues(tables, va: int) -> list[int]:
+    """A cue list, up to and not including its ``-1`` terminator."""
+    out: list[int] = []
+    for k in range(64):
+        r = tables._v2r(va + k * 2)
+        if r is None:
+            break
+        v = struct.unpack_from("<h", tables.data, r)[0]
+        if v == -1:
+            break
+        out.append(v)
     return out

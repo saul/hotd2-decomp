@@ -77,7 +77,7 @@ export function ThrowerOnShot(obj: ThrowerActor): void {
     obj.state = ThrowerState.FallAndLand;
     return;
   }
-  if (obj.flags & ActorFlag.ArcSpent) return;
+  if (obj.flags & ActorFlag.NoHitReaction) return;
 
   // A second shot while a reaction is already running is a *re-entry*: the
   // clip hard-cuts and the knockback counter goes up instead of resetting.

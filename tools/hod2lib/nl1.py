@@ -371,20 +371,34 @@ def _uv_area(a: Vertex, b_: Vertex, c: Vertex) -> float:
 def drop_collapsed_uv_triangles(mesh: "Mesh", eps: float = 1e-7) -> int:
     """Remove triangles whose UV area is ~zero. Returns how many were dropped.
 
+    **The game draws these.** WalkMeshChainAndDraw (FUN_004A7EF0) submits every
+    strip whole -- DrawPrimitive(D3DPT_TRIANGLESTRIP|LIST, FVF 0x112, verts,
+    count, 0) -- and makes no per-triangle test on the way there. Vertices are
+    copied eight dwords at a time with the UVs verbatim at dwords 6-7. Nothing
+    in the walk, and nothing in D3D7, rejects a polygon for being collinear in
+    texture space. [proved]
+
     Such a triangle has all three vertices on one line in UV space, so a single
     row or column of texels is smeared across its whole 2D extent. On screen
     that is a hard directional streak, and it is what makes affected faces look
-    stretched -- or solid black when the sampled texels happen to be dark.
+    stretched -- or solid black when the sampled texels happen to be dark. That
+    is what this was written to remove, on the reasoning that a face carrying no
+    displayable texture information could only be improved by deleting it.
+
+    The reasoning was wrong and the counter-example is a hole. On stage 1 it
+    takes 1,577 of 35,637 triangles (4.4%), median 3 square units and up to
+    3,849, two of them the paving of the piazza: from the rooftops north of the
+    square the export had a pair of triangular holes straight through the
+    world. A streaked roof is the game; a hole is not.
 
     They are strip-boundary artifacts: measured across st2_07 they are 4.9% of
     first triangles and 4.8% of last triangles in a strip, but only 1.1% of
     middle ones. Only 8.6% involve a back-reference, so this is not a
-    vertex-reuse fault.
+    vertex-reuse fault. Whatever authored them, the game renders them.
 
-    Why the game does not show them is still unresolved -- the hardware may
-    reject zero-area-in-UV polygons, or they may be hidden by other geometry
-    along the camera rail. Either way they carry no displayable texture
-    information, so dropping them can only improve the result.
+    Kept, and reachable through export_level's --drop-collapsed-uv, because an
+    export headed for a modelling tool rather than for the player may genuinely
+    want them gone. It is off by default and no bundle asks for it.
 
     **Untextured meshes are exempt.** A mesh with `texture_id == -1` stores all
     its UVs as literal zero, so every one of its triangles has zero UV area and

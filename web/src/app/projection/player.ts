@@ -44,6 +44,8 @@ export interface PlayerView {
   readonly original: boolean;
   readonly loading: LoadingProjection | null;
   readonly status: StatusProjection;
+  /** See {@link UiProjection.bundleStale}. */
+  readonly bundleStale: boolean;
   /** The clock is stopped and the viewer is meant to notice. */
   readonly paused: boolean;
   readonly mode: "play" | "step" | "free";
@@ -108,6 +110,7 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     original: v.original,
     loading: v.loading,
     status: v.status,
+    bundleStale: v.bundleStale,
     paused: v.paused,
     toggles: v.toggles,
     transport: v.transport,

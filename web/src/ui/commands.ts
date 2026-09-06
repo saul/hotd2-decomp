@@ -15,7 +15,7 @@
 export type ToggleName =
   | "allRegions" | "rails" | "aimRails" | "unported" | "stuck" | "coli"
   | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars" | "props"
-  | "breakables" | "propBoxes" | "trackEnemies" | "shoot"
+  | "breakables" | "propBoxes" | "trackEnemies"
   | "muzzle" | "redBlood";
 
 export type UiCommand =
@@ -77,7 +77,16 @@ export type UiCommand =
   | { kind: "previewBranch"; slot: number; frame: number }
   | { kind: "endPreview" }
   /** Hovering the branch bar stops the arcade countdown. Deciding is not a race. */
-  | { kind: "branchHover"; over: boolean };
+  | { kind: "branchHover"; over: boolean }
+  /**
+   * Open the bundle screen: which bundle is loaded, and build another.
+   *
+   * A command like any other, and it reaches something no other one does --
+   * the export screen is its own React root over the page, in `app/install/`.
+   * `ui/` may not import it and does not need to: this says what was clicked
+   * and the composition root decides that it means "show that screen".
+   */
+  | { kind: "openBundles" };
 
 /** What a panel is handed to talk back with. */
 export type Dispatch = (c: UiCommand) => void;

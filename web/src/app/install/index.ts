@@ -7,18 +7,18 @@
  * cache has the same tree and the same file names.
  */
 
-import { setBundleSource } from "../../bundle";
 import type { BundleSource } from "../../bundle/load";
 import { FileListAssetSource, HandleAssetSource, canPickDirectory, clearCache,
-         listCached, openCached, requestPersist,
-         storageEstimate } from "./browser_io";
+         hasThumb, listCached, openCached, readThumb, requestPersist,
+         storageEstimate, writeThumb } from "./browser_io";
 import { forgetHandle, hasReadPermission, loadHandle, requestReadPermission,
          saveHandle } from "./handle_store";
 import type { ExportRequest, InstallRef, WorkerOut } from "./protocol";
 import { zipBlob, zipStream } from "./zip";
 import type { ZipFile } from "./zip";
 
-export { canPickDirectory, clearCache, requestPersist, storageEstimate };
+export { canPickDirectory, clearCache, hasThumb, readThumb, requestPersist,
+         storageEstimate, writeThumb };
 export type { InstallRef, WorkerOut };
 
 /**
@@ -49,15 +49,16 @@ export async function hasCachedBundle(): Promise<boolean> {
   return (await openCached("manifest.json")) !== null;
 }
 
-/** Read bundles out of the cache from now on. */
-export function useCachedBundle(): void {
-  setBundleSource(cacheSource);
-}
-
-/** Read bundles from the server again. */
-export function useServerBundle(): void {
-  setBundleSource(null);
-}
+/**
+ * The install this page is using, until it is reloaded.
+ *
+ * A `FileSystemDirectoryHandle` can be stored and a `FileList` cannot, so on
+ * Firefox and Safari the only thing that survives the pick is this variable.
+ * That is the difference between "you may build stages on demand for the rest
+ * of this visit" and "you may build the one stage you asked for", and the
+ * second is not worth having.
+ */
+let picked: InstallRef | null = null;
 
 /**
  * Ask the user for their install.
@@ -77,7 +78,8 @@ export async function pickInstall(): Promise<InstallRef | null> {
       return null;                                    // cancelled
     }
     await saveHandle(handle);
-    return { handle, label: handle.name };
+    picked = { handle, label: handle.name };
+    return picked;
   }
   // No directory-handle API: a hidden input, and no way to remember it.
   return new Promise((ok) => {
@@ -87,7 +89,8 @@ export async function pickInstall(): Promise<InstallRef | null> {
       .webkitdirectory = true;
     input.onchange = () => {
       const files = [...(input.files ?? [])];
-      ok(files.length ? { files, label: folderName(files) } : null);
+      picked = files.length ? { files, label: folderName(files) } : null;
+      ok(picked);
     };
     // Safari fires nothing on cancel, so a cancelled pick simply never
     // resolves. That is the browser's behaviour and inventing a timeout for it
@@ -105,11 +108,16 @@ function folderName(files: File[]): string {
 /**
  * The install this browser already knows about, if it still has permission.
  *
+ * The one picked in this page's lifetime wins, because it needs no permission
+ * check and because on a browser with no directory-handle API it is the only
+ * one there is. Otherwise the stored handle, if its grant is still live.
+ *
  * Returns null when there is none, when the API is missing, or when the grant
  * has lapsed -- in the last case {@link regrantInstall} can ask for it back,
  * but only from a click.
  */
 export async function rememberedInstall(): Promise<InstallRef | null> {
+  if (picked) return picked;
   const h = await loadHandle();
   if (!h) return null;
   if (!await hasReadPermission(h)) return null;
@@ -121,11 +129,13 @@ export async function regrantInstall(): Promise<InstallRef | null> {
   const h = await loadHandle();
   if (!h) return null;
   if (!await requestReadPermission(h)) return null;
-  return { handle: h, label: h.name };
+  picked = { handle: h, label: h.name };
+  return picked;
 }
 
 /** Forget the remembered install. */
 export async function forgetInstall(): Promise<void> {
+  picked = null;
   await forgetHandle();
 }
 

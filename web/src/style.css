@@ -77,6 +77,24 @@ select, input[type="search"] {
 .mode + .mode { border-left: 1px solid var(--line); }
 .mode.active { background: var(--accent); color: #04222b; font-weight: 650; }
 
+/* The way back to the export screen, and the only control in the bar that is
+   drawn whether or not a bundle loaded -- it is what you press when one did
+   not. Quiet, because it is not part of playing a stage. */
+.bundle-open {
+  background: var(--panel-2); color: var(--dim); border: 1px solid var(--line);
+  border-radius: 5px; padding: 4px 10px; font: inherit; cursor: pointer;
+}
+.bundle-open:hover { color: var(--text); border-color: var(--accent); }
+
+/* Quiet is wrong when the bundle on screen is out of date: the whole failure
+   this replaces was a stale cached stage that looked exactly like a good one.
+   Amber rather than red -- it is playable, just not current. */
+.bundle-open.stale {
+  color: var(--warn); border-color: var(--warn);
+  background: #2a1a06;
+}
+.bundle-open.stale:hover { color: var(--text); border-color: var(--warn); }
+
 /* ---- layout ---- */
 
 #stagearea {
@@ -254,6 +272,19 @@ body.resizing { cursor: col-resize; user-select: none; }
   display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
 }
 .grp-switches input { margin: 0; }
+
+/* Two kinds of switch, drawn apart and each named -- see `DebugGroup.tsx`.
+   The chip is what makes the split legible; without it the two rows read as
+   one wrapped row. The overlay half is dimmer because it is scaffolding, not
+   the game. */
+.grp-kind {
+  flex: 0 0 100%;
+  font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--dim); cursor: help;
+}
+.grp-debug { border-top: 1px dashed var(--line); padding-top: 5px; }
+.grp-debug label { color: var(--dim); }
+.grp-debug label:hover { color: var(--text); }
 .grp-rows {
   display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
   font-size: 12px;
@@ -507,7 +538,7 @@ body.resizing { cursor: col-resize; user-select: none; }
   white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0 6px;
 }
 
-/* The debug clear, next to the Shoot checkbox. Only shown while shooting. */
+/* The debug clear, in the top bar beside Save and Load. */
 button.kill {
   background: #6b1d1d;
   border: 1px solid #a33;
@@ -625,7 +656,8 @@ tr.gdead td { opacity: 0.45; }
 
 /* ---- the export screen ----
    `app/install/ExportScreen.tsx`, which mounts in its own root over the page
-   when there is no bundle to play. Class selectors only: `verify_player_dom`
+   when no bundle loaded, and from the top bar's button at any time. Class
+   selectors only: `verify_player_dom`
    holds every `#id` in this file to something that renders one, and the host
    element this covers is created imperatively rather than by a component. */
 
@@ -657,7 +689,16 @@ tr.gdead td { opacity: 0.45; }
 .export-card section:first-of-type h2 { margin-top: 12px; }
 .export-card p { margin: 6px 0; }
 .export-card code { font-family: var(--mono); color: var(--accent); }
-.export-card button { margin-right: 8px; }
+/* The card styles its own buttons for the same reason the transport does:
+   there is no base rule, and a default-chrome button on this background is a
+   grey slab. */
+.export-card button {
+  margin-right: 8px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 5px; padding: 4px 11px; font: inherit; cursor: pointer;
+}
+.export-card button:hover:not(:disabled) { border-color: var(--accent); }
+.export-card button:disabled { color: var(--dim); cursor: default; }
 
 .export-lede { color: var(--text); }
 .export-why {
@@ -673,13 +714,42 @@ tr.gdead td { opacity: 0.45; }
 }
 .export-primary { font-weight: 650; }
 
-.export-stages, .export-modes {
+.export-modes {
   display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+  margin-top: 8px;
 }
-.export-modes { margin-top: 8px; }
-.export-stages label, .export-modes label {
-  display: inline-flex; align-items: center; gap: 5px;
+.export-modes label { display: inline-flex; align-items: center; gap: 5px; }
+
+/* One tile per stage. The picture is the player's own frame from the last time
+   that stage was open -- see `Player.requestThumb` -- so a stage nobody has
+   opened shows its number instead, which is the truth about it. */
+.export-tiles {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
+.export-card .export-tile {
+  display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+  margin: 0; padding: 6px; text-align: left; line-height: 1.35;
+}
+.export-card .export-tile.on {
+  border-color: var(--accent); background: var(--panel);
+}
+.export-thumb {
+  display: block; aspect-ratio: 16 / 10; overflow: hidden;
+  border-radius: 3px; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.export-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.export-nothumb {
+  font-family: var(--mono); font-size: 28px; color: var(--line);
+}
+.export-tile-name { font-weight: 650; }
+.export-tile-note { color: var(--dim); font-size: 11px; }
+.export-tile.on .export-tile-name { color: var(--accent); }
+/* Built, playable, and older than the exporter in this page. The note under
+   the tile says what to do about it; this is what makes it findable. */
+.export-card .export-tile.stale { border-color: var(--warn); }
+.export-tile.stale .export-tile-note { color: var(--warn); }
 
 /* Fixed height, not `max-height`: the feed grows a line at a time and a box
    that resizes on every line makes the button below it move under the cursor. */

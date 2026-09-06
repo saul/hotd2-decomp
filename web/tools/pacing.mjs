@@ -19,11 +19,16 @@
  *  3. a keypress while paused wakes it for a frame or two and no more;
  *  4. and the game still did not advance, because a wake is a redraw and not
  *     a tick;
- *  5. **and a shot fired while paused is drawn.** That waker was written into
- *     `Pacer`'s own list of obligations and never called: `onFire` pushed onto
- *     `g_shot_requests` and returned, so the shot sat in the queue until some
- *     other waker happened to run. Nothing else could have caught it — the
- *     queue is correct, the drain is correct, and no frame was asked for.
+ *  5. **and a click made while paused is drawn, and does nothing else.** Two
+ *     defects met here. The waker was written into `Pacer`'s own list of
+ *     obligations and never called: `onFire` pushed onto `g_shot_requests` and
+ *     returned, so the click sat in the queue until some other waker happened
+ *     to run. And once it was woken, `GameSystem` drained the queue on the
+ *     frozen tick, so the shot resolved — hit points, score, and three effect
+ *     rings that only a game tick can empty, which meant the loop then had
+ *     feedback in flight that could never finish and never went back to sleep.
+ *     Nothing else could have caught either: the queue is correct, the drain
+ *     is correct, and no frame was asked for.
  *
  * The page's own `requestAnimationFrame` is counted by wrapping it before the
  * app boots, from outside the module graph — see the `init` option in
@@ -35,7 +40,7 @@
  *
  * Exit status is 0 only if every assertion held.
  */
-import { enableShooting, openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, waitForLoad } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {
@@ -139,11 +144,10 @@ try {
         `frame ${d.frame} -> ${e.frame}`);
 
   console.log("\nA shot fired while paused is drawn:\n");
-  // Shooting is off by default, and with it off a viewport click does nothing
-  // at all -- so without this the next assertion would pass on a page where
-  // the shot path never ran. Turning it on is itself a command and wakes the
-  // loop, hence the settle before the baseline is taken.
-  await enableShooting(page);
+  // Shooting used to be off by default, and with it off a viewport click did
+  // nothing at all -- so this assertion could pass on a page where the shot
+  // path never ran. It is always on now; the settle stays, because the click
+  // below has to land on a loop that has already gone quiet.
   await sleep(400);
   const f = await probe(page);
   await sleep(500);
@@ -152,7 +156,8 @@ try {
         `${g.raf - f.raf} frames in ~0.5s`);
 
   // The middle of the viewport, which is where the crosshair is. Whether it
-  // hits anything is not the question; `fire` runs either way and queues.
+  // hits anything is not the question; `fire` runs either way, and with the
+  // clock stopped the composition root refuses to make it input at all.
   const box = await page.locator("#viewport").boundingBox();
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await sleep(400);
@@ -162,12 +167,12 @@ try {
   check("...and no game time passed", h.frame === g.frame,
         `frame ${g.frame} -> ${h.frame}`);
 
-  // **Not "a frame or two", the way a keypress is.** `Player.wantsFrame` keeps
-  // asking while the shot's feedback is in flight -- the impact sprites and
-  // the muzzle flash ride wall time and are a click's answer, not a tick's --
-  // so a shot legitimately draws for as long as its sprites live. The
-  // property that matters is that it *stops*: the loop went back to sleep
-  // rather than being left running by the wake.
+  // **The property that matters is that it stops.** `Player.wantsFrame` keeps
+  // asking while `Shooting.busy` -- and that reads the port's effect pools,
+  // which `ShotEffectsTick` steps on *game* time. So a shot that resolved with
+  // the clock stopped filled those pools with records nothing could ever
+  // retire, and this line measured 60 frames in a second, for ever. It is the
+  // reason a shot resolving on a frozen tick was not merely wrong on paper.
   await sleep(1000);
   const i = await probe(page);
   check("...and the loop went back to sleep after the feedback",

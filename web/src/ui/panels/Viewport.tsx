@@ -87,14 +87,22 @@ export function Viewport(
   },
 ) {
   const paused = useSlice((p) => p?.paused);
-  // One read, two uses: the `shooting` class hides the system cursor and the
-  // crosshair replaces it. They are the same fact and it is read once, which
-  // is what stops them disagreeing on a frame.
-  const shooting = useSlice((p) => p?.toggles.shoot);
+  // The `shooting` class hides the system cursor and the crosshair replaces
+  // it, and neither is conditional any more: shooting is what the game is,
+  // there is no switch for it, and `render/shooting.ts` says why there is not.
+  // Both still wait for a projection, because before one there is no game to
+  // aim at and the loading overlay is over the top of them anyway.
+  //
+  // Read off `paused` rather than through a second subscription: a selector
+  // must *name* a field, so `(p) => p !== null` is not one -- it builds a
+  // value and the subscription never settles, which `verify:ui` refuses. The
+  // optional chain above already carries the answer, because `paused` is a
+  // `boolean` in every projection and `undefined` only when there is none.
+  const ready = paused !== undefined;
   const hud = useSlice((p) => p?.toggles.hud);
   return (
     <div id="viewport" ref={refs.host}
-         className={[paused && "paused", shooting && "shooting"]
+         className={[paused && "paused", ready && "shooting"]
                     .filter(Boolean).join(" ")}>
       {children}
       {/* Before the first projection there are no toggles and both are
@@ -118,7 +126,7 @@ export function Viewport(
             nothing. */}
         <div className="screen-message" ref={refs.message} />
       </div>
-      <div className="crosshair" ref={refs.crosshair} hidden={!shooting} />
+      <div className="crosshair" ref={refs.crosshair} hidden={!ready} />
     </div>
   );
 }

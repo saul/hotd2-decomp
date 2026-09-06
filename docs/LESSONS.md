@@ -137,3 +137,61 @@ the reference's 292, and nothing but the output comparison could have said so.
 Re-diff the source against `HEAD` before you call a transcription finished --
 `git diff <the commit you started from>..HEAD -- <the source>` -- and make the
 check that compares the two outputs, not the two texts.
+
+**L22 -- A trial parse must bound itself by its input, not by what its input
+claims.** `container.classify` decides whether a blob is compressed by trying
+to decompress it, and the LZ port preallocated its output from the file's own
+u32 size header. 865 of the game's files have a first dword that merely looks
+like a size, up to 4.03 GB of it in `tex/st5_01b.bin`. Node hands over a 4 GB
+buffer and the decode then fails, so the CLI never noticed for a moment; a
+browser refuses, and a `RangeError` is not the `LZError` the trial was catching,
+so it escaped and killed the export at the first raw texture bank. The grammar
+cannot exceed 78.8 bytes out per byte in, which makes that header refusable by
+arithmetic rather than by attempt. **And: the same code on two runtimes is two
+implementations.** Everything about this bug was present in the CLI, passing.
+
+**L23 -- A filter that makes the output look better is a claim about the game,
+and it needs the same evidence as any other.** 5.1% of this game's triangles
+are collinear in UV space, which smears one row of texels across a whole face:
+a hard streak, or a solid black panel. The exporter deleted them by default and
+recorded that "why the game does not show them is still unresolved -- either
+way they carry no displayable texture information, so dropping them can only
+improve the result." It could not: two of stage 1's are paving in the piazza,
+and the bundle had a pair of triangular holes straight through the world. The
+premise was never checked against the binary, and when it finally was,
+`WalkMeshChainAndDraw` turned out to make no per-triangle test of any kind --
+the game draws every one of them. **An unresolved question in the docstring of
+a filter that is on by default is a divergence nobody declared.** The check
+that catches this class is one that compares the export against the files it
+was made from; comparing two exports with each other cannot.
+
+**L24 -- Two live copies of the same data means "I fixed it" is only ever true
+of one of them.** The player reads a stage from the dev server's
+`extract/player/` or from the browser's OPFS cache, whichever holds it, cache
+first. An exporter fix was verified against the server copy, reported as done,
+and the reader was still looking at the cache -- which had been built before
+the fix and which no version check could tell was old, because the only checks
+were the bundle format and a digest of the *declarations*, and the fix changed
+neither. **A version stamp has to cover whatever decides the bytes**, which for
+a bundle is the exporter's code and not its interfaces. And the stamp for
+"stale" must warn where the stamp for "unreadable" refuses: refusing on an
+exporter change makes every unrelated fix cost a full re-export before the page
+will open at all, which is how a check gets deleted. The gap had been written
+down as a known unfixed item one session earlier, which is worth less than
+nothing if it is not the first thing consulted when a fix does not appear to
+land.
+
+**L25 -- A wrong picture passes a weak check three times in a row.** The
+thumbnail a stage is built with is meant to be the frame two seconds in. Three
+separate faults each produced a flat fill of the fog colour -- a transport the
+loader had stopped, a capture taken off the frame callback, and a second
+request landing during the next stage's teardown -- and every one of them left
+the surrounding state looking healthy: the walker at its first wait, the region
+streamed, four models visible, 222 draw calls and 2,880 triangles through the
+renderer. The assertion written for it, "the picture is mostly not black", was
+true of all three. **Counting distinct colours is what tells a photograph from
+a wash**, and the only reason any of it was caught is that the image was
+written to a file and looked at. When a check is about something visual, the
+first version of it should be your own eyes on the artifact; the automated one
+comes second, and has to be able to fail the thing you just saw.
+

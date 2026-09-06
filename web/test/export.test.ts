@@ -207,6 +207,24 @@ console.log("\nLZ: the decoder against its own output");
   check("a zero-length file decompresses to nothing",
         decompressFile(new Uint8Array([0, 0, 0, 0])).length === 0);
 
+  // **The header is not trusted input.** `container.classify` decompresses on
+  // spec to decide whether a blob is compressed at all, and 865 of the game's
+  // files have a first dword that merely looks like a size -- 4.03 GB of it in
+  // `tex/st5_01b.bin`. Preallocating from that number asks the platform for
+  // four gigabytes: node hands it over, so the CLI never noticed, and a
+  // browser refuses with a `RangeError`, which is not an `LZError` and so
+  // escaped the trial and killed the export at stage 2's first texture bank.
+  threw = false;
+  try {
+    // 1 GB claimed from twelve bytes of stream. The grammar's ceiling is
+    // 78.8x, so this is arithmetically impossible rather than merely unlikely.
+    decompressFile(new Uint8Array([0, 0, 0, 0x40, ...stream, 0, 0]));
+  } catch (e) {
+    threw = e instanceof LZError;
+  }
+  check("a size header the grammar cannot reach raises LZError, not RangeError",
+        threw);
+
   // An overlapping copy is intentional -- an offset of -1 is a legal run fill
   // -- and it is the one case a naive `memcpy` gets wrong, so it is spelled
   // out rather than assumed:

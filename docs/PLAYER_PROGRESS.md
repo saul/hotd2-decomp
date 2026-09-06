@@ -172,6 +172,23 @@ by state 26. That walk exit is the one place in the game that reaches
 `ZombieStateWalkDistance`'s retire branch, which the walk-in commit had marked
 unreachable.
 
+**The spawn record's flags word reaches the actor now.** `ActorInitFlags`
+(`FUN_00408970`) makes it `obj+0x34` before the class's `Init` ORs its own bits
+on, and the port had been dropping it. The bit that showed is `0x20000`, which
+exempts an actor from the per-frame ground snap: stage 1's axe man stands on a
+ledge whose collision is two *vertical* quads, so the ground query finds nothing
+under him and the snap dropped him sixty-two units, from where he threw from
+behind the wall he had been standing on. Ninety-five spawns set that bit.
+
+**And the placement-to-`Actor` mapping is one function.** `render/characters.ts`
+built it inline and each headless harness built its own copy, and the copies
+drifted: `throwers.mjs` reported nine working throwers while every one of them
+in the player read a walk distance of zero — the harness passed `stand_throw`
+and the player did not. `DescriptorFromPlacement` in `game/descriptor.ts` is
+the single builder now, and folding the harnesses into it turned up the same
+drift the other way: `replay.mjs` had been passing four class-0x31 descriptor
+fields the player never did.
+
 [open] You are meant to be able to shoot the axe out of the air — the weapon
 registers for the shot test every frame, and in the tutorial that is the whole
 lesson. The port's projectile pool is plain records and its shot test walks
@@ -642,7 +659,7 @@ enumerable place, it can be shown:
 | **W1** | Vite + TS + Three scaffold, bundle loader, static render, URL state | ✅ typechecks and builds clean; all state URL-addressable including `freeze=1` |
 | **W2** | Hermite eval, rails, free-roam camera | ✅ curves evaluated client-side; rails per path with the active sub-range highlighted |
 | **W3** | Script walker, region visibility, step mode | ✅ every op reachable and seekable; only the current region drawn |
-| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; branch points pause with a seeded countdown; with Shoot on the live-enemy waits are the real gate, otherwise a tunable per-enemy timer |
+| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; branch points pause with a seeded countdown; the live-enemy waits are the real gate |
 | **W5** | Audio, fog, route minimap, Arcade/Original toggle, event feed, inspector | ✅ BGM, SE and voice all play, dispatched by namespace; scene fog rendered radially |
 | **W6** | Visual regression harness | deferred — `freeze=1` and the URL state it needs are already in place |
 
@@ -660,9 +677,6 @@ each one.
 | Scene ended early | Route **kind 2 is not "end"** — it falls through to `block + 1`. The scene ends when that block is a hole | same |
 | Branch buttons picked the wrong route | A branch takes `next[branch_choice]`, not "a target"; every writer of `branch_choice` is gameplay code | same |
 | The branch was the viewer's choice, not the game's | `branch_choice` resets on every **step** advance, not every block change, and the writer the port reaches is a rescued civilian's `SetRouteBranch` (`CivilianRunScript` op `0x19`). An unanswered branch used to take the lowest block number; it takes `next[g_script_branch_var]` now, and the bar is a 1.5 s override of a decision the game has already made | read `EvtAdvanceStepOrRoute`'s tail; `tools/verify_branches.py` |
-| Five of the game's branch roads could not be reached at all | Nine class-0x41 props, a class-0x44 switch, a twenty-link chain and three actor classes all write `g_script_branch_var`, and none of them was ported -- three were not even placed, because their constructors are not `PlaceGenericProp`'s and the exporter dropped them | all sixteen writers ported with their gates; `tools/verify_branches.py` checks 31 prop writes and 14 trigger blocks against the route tables |
-| One branch trigger was ported and could not be shot | Class 0x52 draws an **asset slot** rather than a skeleton, so the exporter had no geometry for it and `pickShot` -- which walked character bones and prop boxes -- could reach neither. `ShotTestSphere` (`FUN_00404630`) shows the engine needs no bones either: an actor with no skeleton is one sphere at `obj+0x124` | `render/slotmodels.ts` draws it and offers that sphere; `Actor.hitRadius` carries the radius; the class is a **mouse**, from `mouse.bin` |
-| A prop could only be shot if the port could draw it | `pickRay` tested the **bounding box of the drawn node**. The engine's shot test never looks at geometry: `RegisterForShotTest` publishes a point and `obj+0x124`, and `ShotTestSphere` measures that sphere -- a prop has no skeleton, so it is always the whole-object arm. Three class-0x41 types draw no static model and are shootable anyway | the prop pick is a sphere; 24 routines read for their own shot point, which differ by type and are **not** all at the origin. Branch records reachable: 18 -> 23 of 33, and arcade is complete |
 | Clicking a branch button did nothing | The countdown re-announced the branch every frame, so the UI rebuilt the buttons 60×/s and the click never landed between `pointerdown` and `pointerup` | notify on *change*, not on tick |
 | Branch preview showed an unrelated shot | The `store_six` preview was carried across block changes. All four in stage 2 sit *inside* branch blocks | discard on block change, same lifetime as `branch_choice` |
 | Whole view tilted down | `eye.y = path.y - 15` was applied **before** the look-at, but the game derives pitch and yaw from the *unshifted* `eye - target` and only then overwrites `eye.y` | translate after orienting |
@@ -684,14 +698,6 @@ rebuilds them from the pools, which is the split `SeveredHeadLayer` already
 had. The one thing it cannot rebuild is where a bone is, so the blood asks
 `CharacterLayer.boneSphere` for the same centre and radius `pickShot` tests
 with.
-
-**Two of the game's own settings are now the player's.** The **muzzle flash**
-is off by default, because it is drawn at the crosshair rather than at a gun —
-a light-gun cabinet wanted something bright at the aim point and a mouse does
-not — and the **blood colour** is the game's own Blood Color option, red by
-default. Neither is port state: the same records are spawned and the same
-materials marked either way, so a snapshot does not carry them.
-
 
 ## Findings the player produced
 
@@ -889,9 +895,26 @@ stops the same clock and shows nothing, because it is a mode you chose with its
 own lit button.
 
 `Tick.frozen` and `Tick.dt` are what every layer already keyed off, so they all
-hold correctly: a half-open door stays half open, the rain stops, and the
-impact sprites — feedback for a click rather than script state — still play out
-on wall time.
+hold correctly: a half-open door stays half open and the rain stops.
+
+**The last column is smaller than it was, and the shot is the thing that left
+it.** The impact sprites used to ride wall time — feedback for a click rather
+than script state — and the sentence here used to say so. `ff33131` made every
+one of them engine state: the muzzle flash, the tracer and the blood are pools
+in `G` and `ShotEffectsTick` steps them at the head of `GameUpdate`, on **game**
+time. What still rides the wall is the crosshair and the drawing itself.
+
+**So a shot fired with the clock stopped is not fired.** `GameSystem` used to
+drain `g_shot_requests` inside its own frozen early return, and the result was
+a hit that took hit points off, paid a score and left a flash and a blood spray
+that nothing could ever step, so `Shooting.busy` stayed true and the loop that
+is meant to sleep while paused ran at 60 fps for ever. Both halves are shut
+now: the frozen tick drains nothing, and `app/main.ts` does not turn a click
+into input while the game clock is stopped, so paused clicks do not bank and
+arrive together on the frame it restarts. **Step mode is untouched**, because
+step mode is not a stopped clock — its ticks carry time and resolve a shot down
+the ordinary path, which is what makes "fire, then walk it forward a frame at a
+time" still work.
 
 ### The clock: one fixed tick, and who feeds it
 
@@ -1917,6 +1940,29 @@ for ever, and state 32 never takes its give-up branch. Riding properly needs
 the vehicle classes (`St1VehicleUpdate`, `FUN_0048E600`, and its peers) — a
 separate port, not a line edit.
 
+### The entrance a shot may not interrupt
+
+**A stagger is refused by a flag, not by a state.** `ActorPlayHitReaction`
+(`FUN_004544C0`) opens with `004544D8 TEST dword ptr [ESI+0x34], 0x10002000`
+and returns on either bit: `0x10000000` is *mid-attack* — the throw and the
+maul raise it — and `0x2000` is the **no-hit-reaction latch**, held by every
+routine that owns the actor's body for a stretch and cleared by each of them on
+the way out.
+
+`ZombieStateEmerge` is one of them, and the whole entrance is inside its span:
+`00458532 OR DH, 0x21` in sub 0, `0045869F AND DH, 0xdf` on the hand-over to
+`AttackRun`. The `0x21` is one instruction and two bits — `0x100` is
+`ShotImmune`, dropped by `004585EC AND EDX, 0xfff6feff` as the emerge clip
+starts, so the submerged half of the entrance also chooses no death state,
+while `ZombieOnShot` still lets `DispatchHit` charge the damage first.
+
+The port had neither the gate nor the raise, so a zombie climbing out of the
+water or the ground stumbled out of its own entrance clip on the first shot.
+Both halves are transcribed now, each on the line with the address that writes
+it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
+states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
+readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
+
 ## Shooting
 
 **Done, for the parts that are exact.** Full account in
@@ -2108,9 +2154,38 @@ transition and clears bit 0x4000 of `obj+0x34`, which reads like an
 animation-paused bit but is not established. Holding the first frame reproduces
 the stagger, and that is what the player does.
 
-Not decoded: the other fifteen class-0x44 builders have their own child
+### Selector 0 is not a hinge, and its two spawns are stage 1's window
+
+**Done.** `PropBuildScriptFlagEffect` (`FUN_00472B30`) builds the one child of
+this class that draws an **animated effect tree** rather than a model at a
+pose, and the one that copies **no position at all**: the parts are placed by
+motion 471, in world coordinates. Two spawns, both in stage 1 — evt `0x1580`
+and `0x15CC`, the window the zombies come through and the gate they kick open
+later, which the reports named separately and which are the same pair.
+
+`ScriptFlagEffectUpdate` (`FUN_00473B90`) is three script-flag rules and a
+draw: `g_script_flags[0x13]` despawns it, `[0x12]` steps the play cursor while
+it is below `g_motion_play_length[471] - 2`, and each frame in
+`g_script_flag_effect_cues_a`/`_b` plays `PlaySoundId(0x1816A9)`. The pose is
+`EffectPoseNode` (`FUN_0040D9D0`) at interp mode 1 — key `cursor / 2`, blended
+half way on an odd cursor, the BAMS terms taking the short way round.
+
+It lives in the **container pool** (`PropFamily.ScriptFlagEffect`) rather than
+in `props.json`, because that is the engine's own grouping: selectors 0, 16 and
+17 all `ActorAlloc` a 0x378 object into the same family, and
+`render/breakables.ts` already clones a model per asset slot and poses it
+`Rz · Ry · Rx`, which is this routine's order.
+
+Two `[port-only]` gaps, both declared on the spot: the draw's residency gate
+(`g_motion_slots[471].state == 2`, always true once the bundle bakes the
+motion) and the shot test, which `obj+0x34` bit `0x10` sends to `ShotTestMesh`
+— the same one the story-mode switch's volume wants.
+
+Not decoded: the other **fourteen** class-0x44 builders have their own child
 behaviours, and `HingeUpdate`'s impact wobble (one damped sine over 16 frames
-when a prop is shot) has nothing to drive it here.
+when a prop is shot) has nothing to drive it here. A *general* effect-tree
+renderer is also still missing — the two trees this class places are flat, so
+the port draws one prop per drawable node and never has to compose a chain.
 
 ## Every opcode, and what the player does with it
 
@@ -2204,10 +2279,10 @@ missed. Meanings and confidence marks live in
 | `40` | `wait_queued_events_done` | wait | ~approx~ | **`g_queued_events_pending == 0`, counted for real** — `queue_event` adds one, each handler takes one back, `finish_sequence` never does and `0x31`/`0x33` do it for it. Still `approx` because the ring's *ordering* is not modelled: the port runs an action when it is queued, not one at a time |
 | `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path. It does **not** carry `EvtOpWaitCameraPathFrame41`'s first-visit `g_evt_yield` yield [diverges] — see `0x43` |
 | `42` | `wait_frames` | wait | **done** | **exact** frame countdown — of `operand` frames. `EvtOpWaitFrames42` loads the counter on its `g_evt_yield` frame and decrements *before* testing, so the engine's is `operand + 2` [diverges]: retiming it moves every camera cue in six stages and wants its own change |
-| `43` | `wait_enemies_present` | wait | ~approx~ | the **corpse-clear** gate, on `g_enemies_present` — not a synonym for `0x44`, and answered with the alive count until B4/B8. **Real while Shoot is on** — the script holds until they are dead **and the camera has swung back** (`g_camera_free`); with Shoot off nothing can make the count fall, so it passes and the feed says so. Yields the frame it is reached, as `g_evt_yield` makes it |
+| `43` | `wait_enemies_present` | wait | ~approx~ | the **corpse-clear** gate, on `g_enemies_present` — not a synonym for `0x44`, and answered with the alive count until B4/B8. **Real** — the script holds until they are dead **and the camera has swung back** (`g_camera_free`). Yields the frame it is reached, as `g_evt_yield` makes it |
 | `44` | `wait_enemies_alive` | wait | ~approx~ | the **live-enemy** gate, on `g_enemies_alive`, and 434 of the 488 enemy gates. Same side conditions as `0x43` plus `g_evt_wait_alive_hysteresis`, so it costs one frame more — both are now ported |
 | `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
-| `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real while Shoot is on**; with Shoot off nothing can rescue a civilian, so it passes rather than deadlocking. All 68 sites pass operand 0 |
+| `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real**: it holds until the captors are dead. All 68 sites pass operand 0 |
 | `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |
 | `48` | `set_script_flag` | flow | *tracked* | writes the script flag array 0x45 reads |
 | `49` | `variant_call_a` | flow | shown | a global picks which operand list runs; the client does not evaluate it |

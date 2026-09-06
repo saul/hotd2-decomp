@@ -54,8 +54,8 @@ import { useHasProjection } from "./useSlice";
 import { Sidebar } from "./panels/Sidebar";
 import { Tree } from "./panels/Tree";
 import { Resizer } from "./panels/Resizer";
-import { Toggles } from "./panels/Toggles";
-import { Modes, StagePicker, Status, ViewSettings } from "./panels/Topbar";
+import { BundleButton, Modes, StagePicker, Status, ViewSettings }
+  from "./panels/Topbar";
 import { Transport } from "./panels/Transport";
 import { SkipBar } from "./panels/SkipBar";
 import { BranchBar } from "./panels/BranchBar";
@@ -165,15 +165,13 @@ function Page(
               <Modes />
             </div>
             <span className="sep" />
-            <span id="toggles" className="toggles">
-              <Toggles />
-            </span>
             <span id="view-settings" className="toggles">
               <ViewSettings />
             </span>
           </>}
           <span className="grow" />
           <Status />
+          <BundleButton />
         </ErrorBoundary>
       </header>
 

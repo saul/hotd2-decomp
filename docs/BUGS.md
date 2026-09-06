@@ -6,7 +6,7 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Nineteen reports: **fifteen fixed, three half-done, one open.** Every fix
+Thirty-one reports: **twenty-seven fixed, three half-done, one open.** Every fix
 carries its evidence in the port's doc comments; the reasoning is in
 `docs/re/session-log.md`.
 
@@ -18,12 +18,16 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ## What is left
 
-### One report is unsolved
-
 * `[open]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — it
   hangs from a ledge where it should push a chair aside. Every link of the data
   chain checks out and two theories are dead; it wants eyes on the render
   rather than another reading. Detail below.
+
+* Shouldn't be able to shoot while the shutter is closed. Check the game code to see how the real game handles this
+
+* No gunshot sound, impact sound etc
+
+* Civilians hair doesn't render
 
 ### Three reports are half-done, and each remaining half is named
 
@@ -316,6 +320,384 @@ be port bugs at all, and they are marked as such rather than "fixed".
   anywhere. `verify_port.py` now checks the port's own class-0x31 clip
   constants against it, and against the exported bundle. Both arms watched
   failing before they were trusted.
+
+---
+
+## And one about the entrances
+
+- `[fixed]` **Zombies in an emerge animation played a stagger when shot.**
+  **Two halves, both missing, and the engine's answer is a flag rather than a
+  state test.**
+
+  `ActorPlayHitReaction` (`FUN_004544C0`) refuses before it looks a clip up:
+
+  ```
+  004544d8  f7463400200010  TEST dword ptr [ESI + 0x34], 0x10002000
+  004544df  0f8571010000    JNZ  0x00454656          ; no reaction at all
+  ```
+
+  `0x10000000` is *mid-attack*; `0x2000` is the **no-hit-reaction latch**, and
+  `ZombieStateEmerge` (`FUN_004584E0`) holds it for the whole entrance —
+  `00458532 OR DH, 0x21` in sub 0, and `0045869F AND DH, 0xdf` on the same
+  instruction pair that writes state 1. The `0x21` is one instruction and two
+  bits: `0x100` is `ShotImmune`, which `ZombieOnShot` (`FUN_00453EB0`) tests
+  before it may pick a death state, and `004585EC AND EDX, 0xfff6feff` drops it
+  as the emerge clip starts — so the submerged half takes no death state either
+  and the whole entrance takes no stagger.
+
+  The port had **neither** half: no gate in `ActorPlayHitReaction` and no raise
+  in the emerge, so `ResolveHit` handed every shot on a climbing zombie a
+  stumble that cut the entrance clip.
+
+  **The bit had the wrong name**, which is why the raise was never ported. It
+  was `ArcSpent`, after the one thing class 0x31's fall states get from it —
+  a second knockdown finds it up and launches no further arc. That is a use,
+  not the bit: the image reads it in exactly two places, `ActorPlayHitReaction`
+  and `ThrowerOnShot` (`00449A95 TEST AH, 0x20`), and both refuse a reaction.
+  It is `ActorFlag.NoHitReaction` now, renamed everywhere.
+
+## And one about the transport
+
+- `[fixed]` **Shots still register when paused** — a click with the clock
+  stopped landed the hit, took hit points off, paid the score, armed the head
+  combo and spawned the muzzle flash, the tracer and the blood. `GameSystem`
+  drained `g_shot_requests` inside its own `t.frozen` early return, on the
+  argument that a trigger pull is input rather than elapsed time.
+
+  **The argument does not survive the case it was made for.** It named step
+  mode, and step mode never reaches that branch: stepping stops the *script*
+  and runs the port at full rate, so its ticks carry time and resolve a shot
+  down the ordinary `GameUpdate` path. What the branch actually served was
+  paused, free roam and `?freeze=1` — the three rows `docs/PLAYER_PROGRESS.md`
+  marks "port and render **stopped**". So the fix costs no debug capability:
+  fire a shot in step mode and walk it forward a frame at a time exactly as
+  before.
+
+  It was also not only wrong on paper. The shot's effects became engine state
+  in `ff33131` and `ShotEffectsTick` steps them on **game** time, so a flash
+  and a blood spray spawned with the clock stopped could never expire;
+  `Shooting.busy` stayed true, `Player.wantsFrame` kept saying yes, and the
+  loop that is supposed to sleep while paused ran at 60 fps for ever.
+  `web/tools/pacing.mjs` was already red on exactly that line — "the loop went
+  back to sleep after the feedback", 60 frames in a second — and is green now.
+
+  Two halves, in the two layers that own them. `GameSystem.update` returns on a
+  frozen tick and drains nothing, which is the same answer every other half of
+  a game-time job in that order already gives. And the composition root does
+  not make a click into input the clock can never consume: `app/main.ts`'s
+  `onFire` queues only while the game clock is running, so twenty clicks made
+  while paused no longer bank and arrive together on the frame it restarts —
+  which is what fixing only the first half would have produced. The `wake`
+  stays unconditional; a click is still drawn.
+
+  `web/test/port.test.ts`, "the shot queue, with the clock stopped", is the
+  guard: six of its eleven assertions were watched failing first.
+
+
+## And one about a switch that should never have been one
+
+- `[fixed]` **"we're not waiting for enemies at all"** — reported against the
+  player, and it was true of every fight in the game. **Shooting was a
+  checkbox, and it defaulted to off.**
+
+  The live-enemy gates ask the host for a count. `WalkerHost.aliveEnemies`,
+  `presentEnemies`, `aliveCivilians` and `cameraFree` all answered **null**
+  while the Shoot toggle was off, on the reasoning that with nothing able to
+  kill an enemy the count could never fall — and a null count is not a
+  condition, so `wait_enemies_alive`, `wait_enemies_present` and
+  `wait_scripted_actors` passed on their timeouts. The script walked straight
+  through every room clear.
+
+  The reasoning was sound and the default made it a trap: the switch that
+  decided whether the port ran the game was one unlabelled checkbox, and a
+  script sailing through `wait_enemies_alive` looks like a broken port rather
+  than a switched-off one. It was reported as a regression, and every
+  measurement against a pristine tree said nothing had regressed — because
+  nothing had. It had always been like that.
+
+  **So the toggle is gone.** Shooting is what the game is. The camera reaches
+  `render/shooting.ts` at construction rather than from the toggle's command
+  (until somebody found that checkbox, this layer had no camera and a click did
+  nothing at all), the counts are always the real ones, and the crosshair is up
+  whenever there is a projection. `enableShooting` and the five drivers that
+  called it first are gone with it.
+
+  The null answer stays in the host *contract*: a host with no combat, such as
+  the stubs in `test/`, may still give one, and the walker still paces those
+  gates off the timeout. The player's host never does.
+
+## And one about the controls
+
+- `[fixed]` **Free roam ignored WASD, and the pointer was never captured.**
+  Not a focus thief and not the camera being overwritten: the player's own key
+  guard, `isTyping` in `render/freeroam.ts`, counted **any focused `<button>`
+  as typing**. Free roam is entered by clicking the **Free roam** button, the
+  button keeps focus, so every keystroke after it had a `BUTTON` as its target
+  and both `FreeRoam.onKeyDown` and the global handler in `app/main.ts`
+  returned before looking at the key. Entering free roam with the `3` key
+  instead worked perfectly, which is why it survived: the two ways in did not
+  behave the same.
+
+  `BUTTON` was in that list for a real reason — a focused button is activated
+  by Space, and the transport's play button dispatches `pause`/`play`, so Space
+  used to toggle playback twice. The cure was wider than the disease, and it
+  caught every checkbox in the sidebar too (`INPUT` was matched with the type
+  ignored). The guard asks about the **key** as well as the element now: a
+  button or a link claims Space and Enter, a range input also claims the arrows
+  and Home/End, a text box claims everything, and nothing else claims anything.
+
+  **The pointer locks to the canvas**, requested from the `pointerdown` in the
+  viewport because that is the user gesture the API insists on. A refusal is
+  not an error: Chrome refuses for about a second after an Escape, so the drag
+  path is kept and `movementX`/`movementY` drive the look either way. Leaving
+  free roam releases the lock, the held keys and the drag, which is why
+  `enabled` is an accessor rather than a field. `render/shooting.ts` aims at the
+  centre of the viewport while the pointer is locked, since a locked pointer
+  has no position and the crosshair would otherwise freeze at the click.
+
+  `npm run freeroam` is the check, in real Chrome, and it was watched failing
+  on the keyboard assertions the fix is for. **Asking for a lock and getting
+  one are two different claims**, and only the first is about this code: the
+  request is hooked and asserted everywhere, and the two assertions that need a
+  *granted* lock are skipped by name, with the browser's refusal quoted, when
+  there is none. Chrome refuses on an unfocused window, which made them fail on
+  a clean tree — and a check that does that is a check people learn to ignore.
+
+## And two that were one bug: the window and the gate
+
+- `[fixed]` **"the window is never rendered" (`block=1&step=5`) and "gate c68
+  does not render, play any sounds" (`block=10&step=2`) are the same two
+  objects** — the class-0x44 spawns at evt `0x1580` and `0x15CC`, placed
+  together by block 1 step 5 op 28, block 2 step 0, block 9, block 10 step 0
+  and block 3, and kicked open on `set_script_flag 18` at block 2 step 2 op 6
+  and block 10 step 2 op 5. `c68` is `render/overlays.ts` labelling an unposed
+  spawn `c${class}`, and hp 0 is the selector: they are the only two
+  **selector-0** class-0x44 spawns in the game.
+
+  **An exporter gap, and then a second one in the port's placer.**
+  `web/src/hod2lib/props.ts` knew class 0x44 as a hinge placer — selectors 1, 2
+  and 4, all of which share `HingeUpdate` (`FUN_00473CF0`) — and every other
+  selector fell out of `resolveForStage` unemitted. Selector 0 is not a hinge
+  and has no pose of its own to emit:
+
+  * `PropBuildScriptFlagEffect` (`FUN_00472B30`) allocates an object running
+    `ScriptFlagEffectUpdate` (`FUN_00473B90`) and **never copies the spawn's
+    position**. There is no `MatrixTranslate` anywhere in the family. The parts
+    are placed by *motion 471*, in world coordinates: frame 0 seats them at
+    `(±13.762, 0, −361.5/−362.8)`, which is those two descriptors' positions to
+    three decimals.
+  * What it draws is an **effect tree** — `g_effect_trees[2]` and `[3]`,
+    three nodes each, one of which carries `komono_st1.bin` entries 6 and 7 —
+    posed from that motion at `(nodes * 0x12 - 0xF) & ~3` bytes a frame, which
+    is not the character stride `mot.md` documents.
+  * `g_script_flags[0x12]` runs the clip, `[0x13]` despawns it, and each frame
+    in `g_script_flag_effect_cues_a`/`_b` plays `PlaySoundId(0x1816A9)` —
+    which is the "play any sounds" half of the report, and it is a cue list in
+    the exe rather than anything the script says.
+
+  The port half: `SpawnPropContainers` (`game/director.ts`) named `falling` and
+  `story_switch` as class-0x44 containers and **fell through to class 0x41's
+  arm for everything else**, so the first version of the fix spawned the two
+  window halves as `PropContainerPlacer`s running `PlaceBreakableGroup` with
+  group 0 — six breakable props that do not exist, and still no window. The
+  selector table is a `Record` now, so a container with no entry is not built
+  rather than built as something else.
+
+  `game/class44/script_flag_effect.ts` is the transcription;
+  `PropFamily.ScriptFlagEffect` puts it in the container pool, which is where
+  `render/breakables.ts` already clones a model per asset slot and poses it
+  `Rz · Ry · Rx` — `EffectPoseNode`'s own order. `tools/verify_effects.py` is
+  the new corpus check: 29 of 29 trees walk to their `g_effect_bone_counts`
+  entry and 13 of 13 `(effect, motion)` pairs divide by the effect stride. It
+  caught a real bug in the first draft of the tree walker, which capped a
+  node's children at 0x40 and returned 65 of effect 8's 145 nodes.
+
+  Needed a re-export. Watched failing first: nine of the twelve new assertions
+  in `web/test/port.test.ts` fail with the `effects` block absent from the
+  bundle, which is what the exporter used to produce.
+
+---
+
+## And one about holes in the stage
+
+- `[fixed]` **"triangles are missing in some places on the stage"** — reported
+  on stage 1 from the rooftops north of the piazza, eye
+  `(-1130.3, 125.2, -390.1)`. The cause is not culling, not the parser and not
+  the region streaming: **the exporter was deleting 3–5% of every stage on
+  purpose.**
+
+  `nl1.drop_collapsed_uv_triangles` removes triangles whose three vertices are
+  collinear in UV space, which is 5.1% of the game and which does look wrong on
+  screen — one row of texels smeared across a whole face, a hard streak or a
+  solid black panel. It ran by default in both halves of the exporter. On
+  stage 1 that is 1,577 of 35,637 triangles, median 3 square units and up to
+  3,849, and two of them are paving in the piazza: a pair of triangular holes
+  straight through the world, visible from any rooftop overlooking the square.
+
+  The premise was never checked against the binary. `WalkMeshChainAndDraw`
+  (`FUN_004A7EF0`) submits every strip whole —
+  `DrawPrimitive(D3DPT_TRIANGLESTRIP|LIST, FVF 0x112, verts, count, 0)` — and
+  makes no per-triangle test of any kind; the records are copied eight dwords
+  at a time with the UVs verbatim at dwords 6–7. **The game draws them.**
+  `[proved]` The filter is now `--drop-collapsed-uv` / `dropCollapsedUv`, off
+  by default, in both halves, and no bundle asks for it. Needed a re-export of
+  all twelve.
+
+  Three things were checked and cleared on the way, and each is worth not
+  re-checking:
+
+  * **The NL1 parser loses nothing.** Every one of the 389 models across the
+    six stages ends on its chain terminator; not one hits a truncation, a
+    bad back-reference or an implausible mesh size.
+  * **Back-face culling is faithful.** Winding was re-measured against the
+    models' own stored normals, split by the cases the rule keys on:
+    triangle lists at `cull=2` agree 100.0%, strips at `cull=2` 99.94%, strips
+    at `cull=3` 99.96%. The only population that disagrees is `cull=1`
+    (88.45%), and those are the strips the game does not cull at all. A free
+    camera behind a one-sided wall sees through it, and so would the game.
+  * **Bit 7 of the strip control word** — "reuse the previous strip's culling
+    and shade mode" — never changes an answer: across all 78,012 bit-7 strips
+    in the stage geometry, the inherited culling equals the strip's own.
+
+  Two things came out of the same investigation:
+
+  * `counts.triangles` in the manifest subtracted the dropped count from a
+    total that had already had them dropped, so stage 1 reported 32,485 for a
+    file holding 34,062. Fixed; the number is now whatever the writer left.
+  * The camera group's `look at` row printed the **script's** block target
+    beside the live camera position, which are two different cameras the moment
+    free roam takes over. It is `block target` now, with a `facing` row beside
+    it carrying the direction the frame was actually drawn along. This is what
+    sent the first hour of the investigation off aiming at a point nobody was
+    looking at.
+
+  `tools/verify_geometry.py` is the new check, and the only one that compares
+  an export against the files it was made from: 216 scenery parts, each
+  required to hold every triangle its `pol/` models declare. Watched failing
+  first, against a bundle built the old way. Lesson `L23`.
+
+---
+
+## And two about the bundle you are actually looking at
+
+Both reported while the fix above was being verified, and together they are why
+that fix looked like it had not worked.
+
+- `[fixed]` **"I rebuilt but the holes look the same"** — the browser's OPFS
+  cache wins over the served bundle, per stage, and the only version checks
+  were the manifest `format` and the schema digest. Turning off the
+  collapsed-UV filter moved neither, so a stage cached before the fix went on
+  winning over the rebuilt one indefinitely, with the holes still in it, and
+  nothing on the page said so.
+
+  `manifest.json` and every stage entry now carry a **builder digest** — a
+  SHA-256 over the code in `web/src/hod2lib/`, generated into
+  `web/src/bundle/builder_hash.ts` by `tools/gen_builder_hash.py` in the same
+  shape as the schema digest. It **warns rather than refuses**: an exporter
+  change usually leaves a bundle readable and merely out of date, and refusing
+  would make every unrelated fix cost a full re-export before anything could be
+  opened. The Bundle button turns amber and says *Bundle needs rebuilding*, and
+  the screen behind it marks the stale tiles and names the exporter files that
+  moved. `docs/formats/bundle.md` has the reasoning.
+
+- `[fixed]` **"I rebuilt and *refreshed* and that worked — I shouldn't have to
+  refresh"** — the bundle screen had two exits and neither adopted what it had
+  just built. `Play stage N` was `window.location.reload()`, on a comment
+  claiming a stage was not hot-swappable from there; it always was, because the
+  top bar's stage picker has always been `state.stage = n; loadStage()`. And
+  `Back`, which is the exit you take after rebuilding the stage you are already
+  on, did nothing at all: the page went on drawing the geometry it had.
+
+  The screen now tells the player what it built, and closing it by any route
+  reloads the stage if it was the one replaced. No page reload on either path.
+  Two more things came with it: the screen opens on the stage that is playing
+  rather than on stage 1 Arcade, which is the commonest reason to be there, and
+  `npm run bundle-flow` asserts both — that the play button switches without a
+  reload, and that `Back` picks up a rebuild underneath it. Both assertions
+  were watched failing first, and the second of them is the reported bug.
+
+---
+
+## And two about the bundle screen itself
+
+- `[fixed]` **"the warning should only show if the stage I'm playing is out of
+  date, not if ANY are"** — the first version asked whether any stage either
+  bundle held was stale, which meant rebuilding the one you were playing left
+  the button amber because five others in the served bundle were still old. A
+  warning that stays on after you have done what it asked is one people learn
+  to ignore. `Player.bundleStale` is a getter over the slot the player is
+  actually on now. The bundle screen still lists every stale stage, because
+  that is the screen you go to in order to do something about them — and it
+  gained a **Build all** button, which builds all six in the selected mode.
+
+- `[fixed]` **"when building the stage, it should render a screenshot 2 secs of
+  simulated wallclock time into the stage and use that as the screenshot"** —
+  `Player.captureThumb`. Every stage the bundle screen builds is loaded,
+  stepped 120 frames through `stepOneFrame`, and photographed, before the
+  screen's own closing load puts the player back. Simulated rather than waited
+  out, so it costs a fraction of a second and lands on the same frame every
+  time: the port is deterministic given the stage and the seed, so the picture
+  is a property of the stage rather than of whoever was watching. Audio is
+  muted across it, and the address bar is left alone.
+
+  The load-time capture stays as a fallback for a stage that was only ever
+  served, gated on the stage having no picture yet — so it can no longer
+  overwrite the deliberate one.
+
+  **Three things had to be found before it produced a picture at all**, and
+  each is in a comment where it bit:
+
+  * `loadStageInto` stops the transport on its way in, so `playing = true` set
+    before the load was cleared by the time the frames ran. The walker still
+    reached its first wait and the region still streamed, so it looked like it
+    worked — the picture was a flat fill of the fog colour.
+  * Rendering and copying inline, in one synchronous block off the frame loop,
+    draws and then copies the clear colour. 222 draw calls and 2,880 triangles,
+    measured, and a flat image. The picture has to be taken from the
+    `requestAnimationFrame` callback, so `captureThumb` asks the loop for one
+    and waits.
+  * The loader's own thumbnail request, now asynchronous because it checks
+    whether a picture exists first, landed a second later — during the teardown
+    of the next stage — and overwrote the good one with an empty frame. It is
+    suppressed during a capture, dropped if the stage moved on, and never taken
+    while a load is running.
+
+  `npm run bundle-flow` reads the stored picture back and requires more than
+  200 distinct colours in it. Counting non-black pixels was the first version
+  of that assertion and it passed on the flat fill.
+
+---
+
+## And one about when the picture is taken
+
+- `[fixed]` **"just built all and none of the screenshots appeared, even after
+  refreshing"** — the pictures were taken when the bundle screen *closed*, not
+  when a stage was built. Two consequences, and the report hit both: the tiles
+  stayed empty for the whole run, so a *Build all* looked like it had done
+  nothing; and reloading the page instead of pressing Back — the natural thing
+  after a long build — threw the list of stages owing a picture away, so none
+  was ever taken.
+
+  Each stage is photographed as it lands now, while the screen is still up, and
+  the tile it sits in fills in behind the run. Three things had to change
+  together:
+
+  * **The worker writes the manifest after every stage**, not once at the end.
+    A stage the index does not name cannot be loaded, and loading it is how its
+    picture is taken. This also fixes **Stop**, which used to throw away every
+    completed stage in the run: the files were in the cache and no manifest
+    named them.
+  * `Player.stageBuilt` queues the captures and runs them one at a time, and
+    `closeBundles` waits on that queue before its own load, so the last picture
+    cannot be torn down half-taken.
+  * `ExportScreen.rescan` re-reads the pictures, not just the labels, and is
+    **reentrant**. Six stages finishing seconds apart start six overlapping
+    scans, and each one was revoking the `blob:` URLs the one before it had
+    just put on screen — the last tile came out empty every time with its
+    picture sitting in the store. Only the newest scan installs anything.
+
+  `npm run bundle-flow` asserts the tile has its picture **without the screen
+  being closed**, which is the reported bug stated as a check.
 
 ---
 

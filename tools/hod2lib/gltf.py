@@ -605,7 +605,7 @@ def _pack_glb(doc: dict, blob: bytes) -> bytes:
 
 def export_level(name, parts, out_dir, collision=None, rigs=None,
                  spawns=None, write_textures=True,
-                 uv_check=False, keep_collapsed_uv=False, cam_files=None,
+                 uv_check=False, drop_collapsed_uv=False, cam_files=None,
                  cam_step=2.0, unlit=False, model_regions=None,
                  fold_mirror_uv=False, glb=False):
     """Write one or more parts to <out_dir>/<name>.gltf plus .bin and textures/.
@@ -838,7 +838,10 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
                 # nl1.apply_mirror_uv_fold.
                 if fold_mirror_uv:
                     folded_uvs += nl1.apply_mirror_uv_fold(mesh)
-        if not keep_collapsed_uv:
+        # Off by default: the game draws collinear-in-UV triangles like any
+        # others, and dropping them opens holes. See
+        # nl1.drop_collapsed_uv_triangles.
+        if drop_collapsed_uv:
             for model in models:
                 for mesh in model.meshes:
                     dropped_tris += nl1.drop_collapsed_uv_triangles(mesh)

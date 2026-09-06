@@ -72,7 +72,9 @@ Spec: [`formats/lz.md`](formats/lz.md).
 - [x] ~~Packed s8 normal byte order~~ — **moot**: no vertex-colour meshes exist
 - [x] Cross-validated against the reference `NLimporter.parse_nl()` — UVs match
       byte for byte
-- [x] Collapsed-UV triangles (5.1%) identified and dropped at export
+- [x] Collapsed-UV triangles (5.1%) identified — and **kept**. The game
+      draws them; dropping them opened holes in the world. See
+      [`formats/nl1.md`](formats/nl1.md).
 - [x] **Untextured meshes exempted from the collapsed-UV drop** — their UVs are
       all legitimately zero, so the filter was deleting 903 meshes outright
       (811 triangles / 43 materials on stage 2 alone)
@@ -414,8 +416,11 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     `texture_id == -1` over 41,463 meshes) and the vertex stride is a fixed 32
     bytes everywhere. `FUN_00419270` turned out to be
     `ModelFlipStripCullingParity`, a content patch for four asset slots.
-13. Why does the game not display collapsed-UV triangles? Hardware rejection of
-    zero-UV-area polygons, or hidden by the camera rail? (Phase 5/6)
+13. ~~Why does the game not display collapsed-UV triangles?~~ **SOLVED — it
+    displays them.** `WalkMeshChainAndDraw` submits every strip whole and makes
+    no per-triangle test, so there was never anything to explain. The exporter
+    dropped them by default and the holes that left in stage 1 are what
+    finally asked the question of the binary rather than of the screen.
 14. ~~Are the reported stretched faces among the 128 16-bit-UV meshes, or is
     the anisotropy genuinely authored?~~ **SOLVED** — neither. They were a
     texture/sampler aliasing bug in the exporter, amplified by Blender's

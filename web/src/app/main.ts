@@ -20,10 +20,7 @@ import {
   Scene,
   WebGLRenderer,
 } from "three";
-import {
-  loadManifest,
-  type Manifest,
-} from "../bundle";
+import { type Manifest } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
 import type { ScriptJson } from "../bundle/stage";
 import { CamPaths } from "../game/camera/curve";
@@ -32,9 +29,11 @@ import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
 import { SpawnLayer } from "../render/overlays";
-import { FreeRoam, isTyping } from "../render/freeroam";
+import { FreeRoam, ownsKey } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
-import { hasCachedBundle, useCachedBundle } from "./install";
+import { ALL_STAGES, BundleIndex, slotKey } from "./bundles";
+import { hasThumb, rememberedInstall, runExport,
+         writeThumb } from "./install";
 import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { seekTo as seekWalkerTo } from "../script/seek";
@@ -111,6 +110,12 @@ const PREF_COMMANDS: ReadonlySet<string> = new Set([
   "setSpeed",
 ]);
 
+/**
+ * How far into a stage its picture is taken: seven seconds of the game's own
+ * clock. See {@link Player.captureThumb} for why it is not zero.
+ */
+const THUMB_FRAMES = 420;
+
 export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
@@ -119,9 +124,41 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly viewport: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
 
-  manifest!: Manifest;
-  /** Which stages the bundle holds, for the picker. */
+  /**
+   * Which stages exist, where each comes from, and the merged manifest.
+   * See `app/bundles.ts`; there are two bundles and both are live.
+   */
+  readonly bundles = new BundleIndex();
+  /**
+   * The merged manifest, or null when neither bundle produced one -- which is
+   * a real state now: an install and an empty cache is a page that can play
+   * every stage and has none of them yet. Whatever describes *a* bundle
+   * rather than a stage reads this, such as the build stamp in the status
+   * line.
+   */
+  manifest: Manifest | null = null;
+  /** Which stages the picker offers. See {@link Player.refreshStages}. */
   stages: number[] = [];
+  /**
+   * **The stage on screen** was written by an older exporter than this page.
+   *
+   * Not "any stage is": the first version asked that, and rebuilding the one
+   * you were playing left the warning up because five others in the served
+   * bundle were still old. A warning that stays on after you have done the
+   * thing it asked for is one people learn to ignore. The bundle screen is
+   * where every stale stage is listed, because that is the screen you go to in
+   * order to do something about them.
+   *
+   * A getter rather than a field: it depends on `state.stage`, which the top
+   * bar changes without going near {@link Player.refreshStages}. It is a map
+   * lookup.
+   */
+  get bundleStale(): boolean {
+    return this.bundles.find(this.state.stage, this.state.original)?.stale
+      === true;
+  }
+  /** An install this browser can build from, so a missing stage is buildable. */
+  canBuild = false;
   /** The loaded stage geometry. Named apart from `stage`, the number. */
   scene3d: StageScene | null = null;
   spawns = new SpawnLayer();
@@ -285,7 +322,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.ui = ui;
     this.viewport = host.viewport;
     this.canvas = host.canvas;
-    this.freeRoam = new FreeRoam(host.viewport);
+    this.freeRoam = new FreeRoam(host.viewport, host.canvas);
     // Both take the nodes React rendered for them rather than a parent to
     // insert into: the crosshair and the four hud divs are `#viewport`'s
     // children and `#viewport` is React's element, so React renders them and
@@ -304,8 +341,24 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // keypress or panel click happened to ask for. The pacer's own list of
     // wakers already said "a shot" — the obligation was written down and the
     // call was missing.
+    //
+    // **And a pull the clock can never consume is not queued at all.** The
+    // queue is drained by `GameUpdate`, which runs only on a tick that carries
+    // game time, so a click made while the transport is stopped would sit
+    // there until the clock started again and then land — twenty clicks made
+    // while paused arriving on one frame, along rays taken from wherever the
+    // free-roam camera happened to be. Whether a click is *input* is the
+    // transport's question and this is the one place intent enters `G`, so it
+    // is answered here rather than in `game/`, which has no idea the player
+    // can be paused. Step mode is not stopped and is deliberately unaffected:
+    // the script stands still there while the port runs at full rate, so a
+    // shot fired in it queues and resolves on the very next tick.
+    //
+    // The `wake` is unconditional. It is a redraw, not a tick — `Shooting.fire`
+    // has already counted the click in the HUD's own shots tally — and the
+    // pacer's list of wakers says "a shot" without qualification.
     this.shooting.onFire = (ray) => {
-      QueueShotRequest(0, ray);
+      if (this.gameRunning && !this.frozen) QueueShotRequest(0, ray);
       this.pacer.wake();
     };
     this.hudLayer = new HudLayer(host.hud);
@@ -319,6 +372,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+    // Shooting needs a camera to cast through and a scene to cast at, and
+    // this is the first moment both exist. It used to be handed them by the
+    // Shoot toggle's command, which meant a click did nothing at all until
+    // somebody found that checkbox.
+    this.shooting.castThrough(this.camera);
     this.sceneFog = new SceneFog(this.scene);
     // The anisotropy ceiling is the renderer's to report, so the layer is
     // told about it once rather than reaching for a global.
@@ -556,42 +614,28 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // `app/pacer.ts` says they have to go in. It ends by asking for the first
     // frame, so the loop is turning for the whole of the fetch below.
     this.pacer.start(this.state);
-    // Two places a bundle can come from, and the server is tried first because
-    // a developer with `extract/player/` populated should not be asked to
-    // export again. `useCachedBundle` points `bundle/load.ts` at the Origin
-    // Private File System instead, which is where an in-page export lands.
-    let failure: string | null = null;
-    try {
-      this.manifest = await loadManifest();
-    } catch (err) {
-      failure = err instanceof Error ? err.message : String(err);
-      if (await hasCachedBundle()) {
-        useCachedBundle();
-        try {
-          this.manifest = await loadManifest();
-          failure = null;
-        } catch (err2) {
-          failure = err2 instanceof Error ? err2.message : String(err2);
-        }
-      }
-    }
-    if (failure !== null) {
-      // No bundle either way. The export screen is the answer to that, so it
-      // is offered rather than described -- the message is what it opens with.
-      this.fail(`${failure}\n\nBuild one from your own copy of the game.`);
+    // Both bundles are read, and which one a *stage* comes from is decided
+    // per stage. See `app/bundles.ts`.
+    await this.refreshStages();
+    if (this.bundles.manifest === null && !this.canBuild) {
+      // Nothing to play and nothing to build from. The bundle screen is the
+      // answer to that, so it is offered rather than described -- the reason
+      // the server was refused is what it opens with.
+      const why = this.bundles.refusals.get("server")
+        ?? this.bundles.refusals.get("cache") ?? "no bundle";
+      this.fail(`${why}\n\nBuild one from your own copy of the game.`);
       showExportScreen({
-        reason: failure,
+        reason: why,
         onDismiss: null,
+        onBuilt: () => {},
+        // The one place a reload is still right: `start` gave up before it
+        // built a scene, so there is nothing to swap a stage into.
         onReady: () => { window.location.reload(); },
       });
       return;
     }
     hideExportScreen();
 
-    // The select is React's; this is only the list it draws from.
-    this.stages = [
-      ...new Set(this.manifest.stages.map((s) => s.stage ?? s.scene)),
-    ].sort((a, b) => a - b);
     if (!this.stages.includes(this.state.stage)) {
       this.state.stage = this.stages[0];
     }
@@ -629,6 +673,179 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
                   script.humanoids, script.coli, script.civilians);
   }
 
+  /**
+   * Put the bundle screen on the page.
+   *
+   * It used to appear only when no bundle loaded, which meant that on any
+   * machine with `extract/player/` populated -- every developer's -- none of
+   * it was reachable at all. Rebuilding a stage, switching to the copy the
+   * browser exported for itself, and downloading that copy are all things you
+   * want *with* a bundle already open, so the top bar has a button now.
+   */
+  openBundles(): void {
+    showExportScreen({
+      reason: null,
+      // Open on what is on screen: rebuilding that is the commonest reason to
+      // be here, and it used to mean finding it in the grid again.
+      openOn: { stage: this.state.stage, original: this.state.original },
+      onBuilt: (stage, original) => this.stageBuilt(stage, original),
+      // The install may have been chosen while the screen was up, and that
+      // is what decides whether the picker offers stages nothing holds yet.
+      onDismiss: () => { void this.closeBundles(); },
+      onReady: (stage, original) => { void this.closeBundles(stage, original); },
+    });
+  }
+
+  /**
+   * Stages the bundle screen rebuilt while it was open.
+   *
+   * Emptied by {@link Player.closeBundles}, which is the only reader: what it
+   * is for is deciding whether the scene on screen came out of a file that has
+   * since been replaced.
+   */
+  private readonly rebuilt = new Set<string>();
+
+  /**
+   * The queue of pictures owed, as one chained promise.
+   *
+   * Serial because each one loads a stage, and two stage loads at once is not
+   * a thing this player does. `closeBundles` waits on it before its own load,
+   * so the last capture cannot be torn down half-finished.
+   */
+  private thumbQueue: Promise<void> = Promise.resolve();
+
+  /**
+   * A stage has just finished building. Record it, and photograph it.
+   *
+   * **The picture is taken here, as each stage lands, and not when the screen
+   * closes.** Deferring it lost every picture for anyone who reloaded the page
+   * after a build instead of pressing Back -- which after a twelve-minute
+   * *Build all* is the natural thing to do, and the report that found this.
+   * Taking them as they land also means the tiles fill in while the run is
+   * still going, which is the difference between a screen that looks busy and
+   * one that looks stuck.
+   *
+   * It is only possible because the worker now writes the manifest after every
+   * stage: a stage the index does not name cannot be loaded, and loading it is
+   * how its picture gets taken.
+   */
+  private stageBuilt(stage: number, original: boolean): Promise<void> {
+    this.rebuilt.add(slotKey(stage, original));
+    return this.thumbQueue = this.thumbQueue.then(async () => {
+      // The stage was written moments ago and the index has not seen it.
+      await this.refreshStages();
+      await this.captureThumb(stage, original);
+    }).catch(() => {
+      // A picture is never worth breaking the run over, and the export itself
+      // has its own error path. The tile simply keeps whatever it had.
+    });
+  }
+
+  /**
+   * Take the bundle screen down, and adopt whatever it did.
+   *
+   * **This used to be `window.location.reload()`**, on a comment claiming a
+   * stage was not hot-swappable from here. It is: the top bar's stage picker
+   * has always been `state.stage = n; loadStage()`, which tears the scope down
+   * and rebuilds it from whichever bundle now holds that stage. So the reload
+   * bought nothing, and the *other* exit from the screen -- Back, and Escape
+   * with it -- did not reload, which is the bug: rebuild the stage you are
+   * looking at, press Back, and the page goes on drawing the geometry it
+   * already had. Refreshing by hand was the only way out, and nobody should
+   * have to know that.
+   *
+   * Given a stage, it switches to it. Given none, it reloads the current one
+   * only if the screen rebuilt it -- so dismissing a screen that built nothing
+   * costs a manifest read and no teardown.
+   *
+   * **Every stage the screen built has its picture taken here**, before that
+   * load, because taking one means playing the stage and this is the moment
+   * the player is already between stages. {@link Player.captureThumb} leaves
+   * it pointed at whatever it photographed last, so the load at the end is
+   * both the thing that adopts the rebuild and the thing that undoes them.
+   */
+  private async closeBundles(stage?: number, original?: boolean): Promise<void> {
+    hideExportScreen();
+    await this.refreshStages();
+    const want = stage ?? this.state.stage;
+    const wantOriginal = original ?? this.state.original;
+    const shot = this.rebuilt.size > 0;
+    const switching = want !== this.state.stage
+      || wantOriginal !== this.state.original;
+    const replaced = this.rebuilt.has(slotKey(want, wantOriginal));
+    this.rebuilt.clear();
+    // The pictures were taken as the stages landed; this is the last of them
+    // finishing. Waiting is what keeps the load below from tearing down a
+    // stage that is still being photographed.
+    await this.thumbQueue;
+    // A capture leaves the world holding the stage it photographed, so once
+    // one has run a load is owed whether or not anything else changed.
+    if (!shot && !switching && !replaced) return;
+    if (switching) {
+      this.state.stage = want;
+      this.state.original = wantOriginal;
+      // The same reset the stage picker does: an address in the stage you
+      // just left names nothing in the one you are entering.
+      this.state.block = this.state.step = this.state.op = undefined;
+      this.state.slot = this.state.frame = undefined;
+      this.pushUrl();
+    }
+    await this.loadStage();
+  }
+
+  /**
+   * Re-read both bundles, and work out what the picker may offer.
+   *
+   * **Every stage, when there is an install to build from.** The picker used
+   * to list what the manifest happened to hold, which was right when a bundle
+   * was a thing you were handed and wrong now that the page can make one: a
+   * stage you have not built yet is a stage you can ask for, and asking is
+   * what builds it. See {@link Player.buildStage}.
+   */
+  async refreshStages(): Promise<void> {
+    await this.bundles.refresh();
+    this.canBuild = (await rememberedInstall()) !== null;
+    if (this.bundles.manifest) this.manifest = this.bundles.manifest;
+    const built = [...new Set(this.bundles.built().map((s) => s.stage))];
+    this.stages = (this.canBuild ? [...ALL_STAGES] : built)
+      .sort((a, b) => a - b);
+    if (!this.stages.length) this.stages = built.length ? built : [1];
+  }
+
+  /**
+   * Build one stage from the remembered install, into the cache.
+   *
+   * This is the on-demand half of the bundle screen: picking a stage the page
+   * does not hold decodes it, keeps it, and plays it, and the next time it is
+   * asked for it is already there. The progress goes through the loading
+   * overlay because it *is* the load -- there is nothing else to look at, and
+   * a minute of a blank viewport with no explanation is the worst version of
+   * this.
+   *
+   * Returns whether the stage is now in the index.
+   */
+  async buildStage(stage: number, original: boolean): Promise<boolean> {
+    const install = await rememberedInstall();
+    if (!install) return false;
+    const what = `stage ${stage}${original ? " (Original Mode)" : ""}`;
+    this.setLoading(`building ${what}…`);
+    let failure: string | null = null;
+    const run = runExport(
+      { kind: "export", install, stages: [stage], modes: [original],
+        fresh: false },
+      (msg) => {
+        if (msg.kind === "progress") this.setLoading(`${what}: ${msg.line}`);
+        else if (msg.kind === "error") failure = msg.message;
+      });
+    await run.done;
+    if (failure !== null) {
+      this.fail(`could not build ${what}:\n${failure as string}`);
+      return false;
+    }
+    await this.refreshStages();
+    return this.bundles.find(stage, original) !== undefined;
+  }
+
   /** Load the stage the URL names. The sequence is `app/stage_load.ts`. */
   async loadStage(): Promise<void> {
     // Three megabytes of another stage's history. `snapshotRefusal` would
@@ -662,7 +879,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     };
 
     window.addEventListener("keydown", (e) => {
-      if (isTyping(e.target)) return;
+      // Asked about the key, not only about the element: a focused button
+      // takes Space and Enter and nothing else, so clicking **Free roam** no
+      // longer leaves every shortcut on the page swallowed by the button that
+      // entered it. See `ownsKey` in `render/freeroam.ts`.
+      if (ownsKey(e.target, e.code)) return;
       // Before the branches, not after: every one of them changes something
       // worth drawing, and a paused player has no loop running to draw it.
       this.wake();
@@ -1037,9 +1258,218 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.update(this.ctx, t);
   }
 
+  /** The stage a picture is owed of, or 0. See {@link Player.requestThumb}. */
+  private thumbStage = 0;
+  /** Frames still to let pass. The script places the camera on the way in. */
+  private thumbDelay = 0;
+
+  /**
+   * Keep a picture of this stage, once the next few frames have gone by --
+   * **but only if it has none.**
+   *
+   * The bundle screen's stage picker shows one, and it is the player's own
+   * frame rather than an image in the repository: a screenshot of the game is
+   * game-derived data, and none of that is committed here.
+   *
+   * This is the fallback. {@link Player.captureThumb} is the real one, taken
+   * seven seconds into the stage when it is built, and it is the picture worth
+   * keeping -- so this must not overwrite it. Eight frames after a load is
+   * whatever the script has put on screen by then, which for most stages is a
+   * shutter closing over a camera that has not moved yet. The gate is what
+   * makes the two coexist: a stage the browser built shows the deliberate
+   * frame, a stage that was only ever served shows something rather than
+   * nothing.
+   */
+  requestThumb(stage: number): void {
+    // `captureThumb` loads a stage too, and it is taking the real picture of
+    // it. Two requests for one stage is how the deliberate one got
+    // overwritten by a frame from the middle of the next stage's teardown.
+    if (this.capturing) return;
+    void hasThumb(stage).then((has) => {
+      // Asking the file system is asynchronous, and a stage switch is faster
+      // than it: by the time this answers, the player may be somewhere else.
+      if (has || this.capturing || this.state.stage !== stage) return;
+      this.thumbStage = stage;
+      this.thumbDelay = 8;
+      this.wake();
+    });
+  }
+
+  /**
+   * Keep the frame just drawn, if one is owed.
+   *
+   * It has to happen **here**, in the same task as the draw: the renderer is
+   * not built with `preserveDrawingBuffer`, so the back buffer is gone by the
+   * next turn of the loop and `toBlob` would hand back a blank image. That is
+   * also why this is a frame-loop concern and not something the loader can do
+   * for itself after an await.
+   */
+  private keepThumb(): void {
+    if (this.thumbStage === 0) return;
+    // **Not during a load.** The scene has been torn down and the next one is
+    // not built, so what is on the canvas is the clear colour -- and this is
+    // exactly how a good picture came to be replaced by a flat fill of the
+    // fog: a second request, armed by the loader, landed a second later while
+    // the stage after it was being taken apart. Still armed, so it fires when
+    // there is something to photograph.
+    if (this.loading) return;
+    // The stage moved on while this was waiting. Whatever is on screen now is
+    // not what was asked for.
+    if (this.state.stage !== this.thumbStage) {
+      this.thumbStage = 0;
+      const gone = this.thumbDone;
+      this.thumbDone = null;
+      gone?.();
+      return;
+    }
+    if (this.thumbDelay-- > 0) {
+      // Ask for the next one. The loop sleeps whenever the game clock is
+      // stopped, which is what a stage that has just loaded is: without this
+      // the countdown got exactly the one frame `requestThumb` woke, then sat
+      // at seven for ever and no picture was ever taken.
+      this.wake();
+      return;
+    }
+    const stage = this.thumbStage;
+    this.thumbStage = 0;
+    this.grabThumb(stage);
+    const done = this.thumbDone;
+    this.thumbDone = null;
+    done?.();
+  }
+
+  /** Resolved by {@link Player.keepThumb} once the picture is taken. */
+  private thumbDone: (() => void) | null = null;
+
+  /**
+   * Take the picture on the **next frame**, and wait for it.
+   *
+   * `keepThumb` runs from `endFrame`, in the `requestAnimationFrame` callback
+   * that drew the frame, and that turns out to be the only place this works.
+   * Rendering and copying inline -- `renderer.render(...)` immediately
+   * followed by `drawImage` in the same synchronous block, off the frame loop
+   * -- draws (222 calls, 2,880 triangles, measured) and then copies **the
+   * clear colour**: a flat fill of the fog, every time. So the rule in
+   * {@link Player.grabThumb} is stronger than "the same task"; it is "the
+   * frame callback", and the way to take a picture is to ask the loop for one.
+   */
+  private nextThumb(stage: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.thumbStage = stage;
+      this.thumbDelay = 0;
+      this.thumbDone = resolve;
+      this.wake();
+      // A picture is not worth hanging the page for. The loop is running --
+      // the transport is playing, so `wantsFrame` is true -- but if anything
+      // stops it, the stage load waiting behind this must still happen.
+      setTimeout(() => {
+        if (this.thumbDone !== resolve) return;
+        this.thumbStage = 0;
+        this.thumbDone = null;
+        resolve();
+      }, 4000);
+    });
+  }
+
+  /**
+   * Copy the frame **now on the back buffer** into the thumbnail store.
+   *
+   * Synchronous up to the copy, for the reason above: `drawImage` off the
+   * WebGL canvas has to happen in the task that drew it. `toBlob` afterwards
+   * reads the 2D canvas, which is an ordinary bitmap and keeps.
+   */
+  private grabThumb(stage: number): void {
+    const w = 320;
+    const h = Math.max(1, Math.round(
+      w * this.canvas.height / Math.max(1, this.canvas.width)));
+    const small = document.createElement("canvas");
+    small.width = w;
+    small.height = h;
+    const ctx = small.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(this.canvas, 0, 0, w, h);
+    small.toBlob((blob) => {
+      if (blob) void writeThumb(stage, blob);
+    }, "image/png");
+  }
+
+  /**
+   * Take a stage's picture seven seconds into it, by playing it.
+   *
+   * **What a stage looks like is not what its first frame looks like.** Every
+   * stage opens on a closed shutter, an unplaced camera, or a region that has
+   * not streamed in, so a picture taken on arrival is a picture of the loading
+   * moment. Two seconds of the game's own clock is past all of that and is the
+   * same seven seconds every time, on any machine: the port is deterministic
+   * given the stage and the seed, so this is a property of the stage rather
+   * than of whoever happened to be watching.
+   *
+   * It is simulated rather than waited out. {@link Player.stepOneFrame} is the
+   * one unit of game time in the player and the driven clock already calls it
+   * in a loop; 420 of them is seven seconds and takes a fraction of one.
+   *
+   * **It plays the stage to do it**, which means loading it, so the caller
+   * gets the player back pointed at this stage at frame 120 and must put it
+   * where it belongs afterwards -- {@link Player.closeBundles} does, with the
+   * load it was going to do anyway. Audio is muted across it: a thumbnail of
+   * stage 5 taken while you are playing stage 3 should not start stage 5's
+   * music for seven seconds.
+   */
+  async captureThumb(stage: number, original: boolean): Promise<void> {
+    // Everything this disturbs, put back in the `finally`. The **world** is
+    // not on that list: it is left holding the stage that was photographed,
+    // and the caller reloads. That is deliberate rather than lazy -- the
+    // caller was going to load a stage anyway, and undoing this one here
+    // would mean loading twice for nothing.
+    const was = { ...this.state };
+    const wasMuted = this.bgm.muted;
+    const wasPlaying = this.playing;
+    this.bgm.setMuted(true);
+    this.state.stage = stage;
+    this.state.original = original;
+    this.state.block = this.state.step = this.state.op = undefined;
+    this.state.slot = this.state.frame = undefined;
+    // The walker only advances in `play` with the transport running.
+    this.state.mode = "play";
+    // Nothing goes through `pushUrl` here: the address bar should not spend
+    // seven seconds describing a stage nobody asked to look at.
+    this.capturing = true;
+    try {
+      await this.loadStage();
+      // **After the load, not before.** `loadStageInto` stops the transport
+      // on its way in -- a stage arrives paused whoever asked for it -- so a
+      // `playing` set before the await is a `playing` that has been cleared by
+      // the time the frames run. It looked like it worked: the walker still
+      // reaches its first wait, the region still streams, and the picture
+      // still came out. It came out as a flat fill of the fog colour.
+      this.playing = true;
+      for (let i = 0; i < THUMB_FRAMES; i++) {
+        if (!this.stepOneFrame()) break;
+      }
+      // Handed to the frame loop rather than drawn here; `nextThumb` says why
+      // that is not a detail.
+      await this.nextThumb(stage);
+    } finally {
+      this.capturing = false;
+      Object.assign(this.state, was);
+      this.playing = wasPlaying;
+      this.bgm.setMuted(wasMuted);
+    }
+  }
+
+  /**
+   * A thumbnail is being taken, so the address bar is not the player's.
+   *
+   * `syncUrlToWalker` runs off `stepOneFrame`, and seven seconds of it would
+   * write a hundred addresses in a stage the viewer never asked to see -- and
+   * leave the last one behind if anything threw.
+   */
+  private capturing = false;
+
   /** Draw, then publish. Every frame, whether or not it owed a tick. */
   endFrame(): void {
     this.renderer.render(this.scene, this.camera);
+    this.keepThumb();
     // The one update path, and it is unconditional on purpose. A projection a
     // frame, published only when it differs -- so the sidebar and the globals
     // panel are live while the clock is stopped, and the loading overlay is
@@ -1388,6 +1818,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   private syncUrlToWalker(): void {
     const w = this.walker;
+    if (this.capturing) return;
     if (!w || this.state.mode === "free" || this.state.slot !== undefined) {
       return;
     }

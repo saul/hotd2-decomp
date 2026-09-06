@@ -65,6 +65,7 @@ function projection(): UiProjection {
     loading: null,
     status: { text: "stage2 · 12 models", note: " · bundle 1 min old",
               noteTitle: "built" },
+    bundleStale: false,
     paused: true,
     toggles: TOGGLE_DEFAULTS,
     transport: { playing: false, mode: "play", speed: 1, frozen: false,
@@ -188,7 +189,7 @@ const COLD_IDS = ["topbar", "status", "stagearea", "left", "tree-filter",
  * panel that is folded renders no body at all -- which is the same fact
  * `store.demand` is counting.
  */
-const WARM_IDS = ["topbar", "stage-picker", "modes", "toggles", "view-settings",
+const WARM_IDS = ["topbar", "stage-picker", "modes", "view-settings",
                   "status", "stagearea", "left", "tree-filter", "tree",
                   "left-resize", "viewport", "view", "paused-overlay",
                   "skipbar", "branchbar", "right", "hud", "panel-wait",
@@ -211,6 +212,13 @@ check("and the panels that need a projection are not",
 check("and every id the stylesheet hangs off this state is emitted",
       missing(cold, COLD_IDS).length === 0,
       `missing: ${missing(cold, COLD_IDS).join(", ")}`);
+// The whole of `app/install/` hangs off this one button, and it is the only
+// control in the bar drawn outside the `ready` guard. It has to be in both
+// renders: the export screen shipped reachable only from the failure path,
+// so on every machine that had a bundle none of it existed.
+check("and the way to the bundle screen, which does not wait for a bundle",
+      cold.includes('class="bundle-open"'),
+      "nothing renders `.bundle-open`");
 
 console.log("\nAnd again with one:\n");
 
@@ -240,6 +248,9 @@ check("the script filter is the panel's own control",
 check("every id the stylesheet hangs off is emitted",
       missing(warm, WARM_IDS).length === 0,
       `missing: ${missing(warm, WARM_IDS).join(", ")}`);
+check("and the bundle button is still there once one has loaded",
+      warm.includes('class="bundle-open"'),
+      "nothing renders `.bundle-open`");
 // The fold is what decides whether a body exists, and the body existing is
 // what `store.demand` counts. A panel that rendered its children while shut
 // would claim its slice for ever, and `app/` would build the expensive one for
@@ -342,11 +353,17 @@ for (const [when, html] of [["before a projection", cold],
 check("with no projection there are no toggles, so both are hidden",
       tagOf(cold, "hud-layer").includes("hidden")
       && tagOf(cold, "crosshair").includes("hidden"));
-check("and with one, each follows its toggle rather than its layer",
-      TOGGLE_DEFAULTS.hud && !TOGGLE_DEFAULTS.shoot
+check("and with one, the hud layer follows its toggle and the crosshair is up",
+      TOGGLE_DEFAULTS.hud
       && !tagOf(warm, "hud-layer").includes("hidden")
-      && tagOf(warm, "crosshair").includes("hidden"),
+      && !tagOf(warm, "crosshair").includes("hidden"),
       `hud-layer=${tagOf(warm, "hud-layer")} crosshair=${tagOf(warm, "crosshair")}`);
+// There is no Shoot toggle to follow any more, and the crosshair being up
+// whenever there is a projection is the whole of its rule now. It was off by
+// default, and off it took the live-enemy gates with it -- see the note at the
+// top of `render/shooting.ts`.
+check("...and no toggle named shoot survives anywhere in the table",
+      !(("shoot" as string) in TOGGLE_DEFAULTS));
 
 console.log("\nThe store reaches the panels by context:\n");
 

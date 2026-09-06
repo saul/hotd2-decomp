@@ -182,7 +182,7 @@ export interface BreakablePlacement {
    * `game/class41/branch.ts`.
    */
   container: "group" | "kinded" | "falling" | "generic"
-    | "chain" | "fragment" | "story_switch";
+    | "chain" | "fragment" | "story_switch" | "script_flag_effect";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -241,9 +241,55 @@ export interface BreakablePlacement {
    * throws it.
    */
   keys?: number[];
+  /**
+   * `script_flag_effect` only — class 0x44 selector 0, which draws an
+   * **animated effect tree** rather than a model at a pose.
+   *
+   * `effect` indexes {@link BreakablesJson.effects}; `capture_bone` is
+   * `obj+0x2A0`, the node whose matrix `EffectDrawWithCapture`
+   * (`FUN_0040DFD0`) copies into `obj+0x338`. `slot` is the descriptor's
+   * `obj+0x28C`, which this family never draws through and which is carried
+   * only because the constructor reads it.
+   */
+  effect?: number;
+  capture_bone?: number;
+  motion?: number;
   pos?: [number, number, number];
   /** BAMS. */
   yaw?: number;
+}
+
+/**
+ * One effect id's tree and its baked motion, for class 0x44 selector 0.
+ *
+ * An "effect" is a small rigged object animated by an ordinary motion:
+ * `g_effect_trees[id]` is the node tree, `g_effect_bone_counts[id]` its node
+ * count **including the root**, and the motion is read at
+ * `(nodes * 0x12 - 0xF) & ~3` bytes a frame rather than at the character
+ * stride. See `docs/formats/spawns.md`.
+ */
+export interface EffectDefJson {
+  /** Depth-first from the root, which is index 0 and never draws. */
+  nodes: { slot: number; bone: number; children: number[] }[];
+  /** `g_effect_interp_mode[id]`: 0 one key a frame, 1 and 2 half rate. */
+  interp: number;
+  motion: number;
+  /** `g_motion_play_length[motion]` — the clock the cursor stops 2 short of. */
+  play_length: number;
+  /** Authored keys in {@link t} and {@link r}. */
+  frames: number;
+  /** `nodes.length - 1`: the root carries no animation. */
+  bones: number;
+  /** `frames * bones * 3` floats, world space, indexed by `bone - 1`. */
+  t: number[];
+  /** `frames * bones * 3` BAMS, `(rx, ry, rz)`. */
+  r: number[];
+  /**
+   * The play-cursor frames `ScriptFlagEffectUpdate` (`FUN_00473B90`) plays
+   * `PlaySoundId(0x1816A9)` on, without the table's `-1` terminator.
+   * `g_script_flag_effect_cues_a` for effect 2, `..._b` for anything else.
+   */
+  cues: number[];
 }
 
 /** One row of `g_prop_kind_params`, per class-0x41 type-4 object kind. */
@@ -269,6 +315,11 @@ export interface BreakablesJson {
   /** `g_prop_kind_params`, indexed by kind. */
   kinds: PropKindParams[];
   placements: BreakablePlacement[];
+  /**
+   * Keyed by effect id — only the ones this stage's class-0x44 selector-0
+   * spawns name, which is nothing at all outside stage 1.
+   */
+  effects: Record<string, EffectDefJson>;
   /** 7.540296 — one stack level, in world units. */
   level_height: number;
 }

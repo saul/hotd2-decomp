@@ -313,9 +313,11 @@ def main() -> int:
     ap.add_argument("--out", type=Path,
                     default=Path(__file__).resolve().parent.parent / "extract")
     ap.add_argument("--no-textures", action="store_true")
-    ap.add_argument("--keep-collapsed-uv", action="store_true",
-                    help="keep triangles whose UV area is zero (they render as "
-                         "hard directional streaks; dropped by default)")
+    ap.add_argument("--drop-collapsed-uv", action="store_true",
+                    help="delete triangles whose UV area is zero. They render "
+                         "as hard directional streaks, and the game draws them "
+                         "anyway, so this is for an export headed somewhere "
+                         "other than the player. Kept by default")
     ap.add_argument("--original", action="store_true",
                     help="export Original Mode geometry (game mode 1) instead "
                          "of Arcade. Same regions, but a few slots resolve to "
@@ -405,7 +407,7 @@ def main() -> int:
                                  spawns=spawn_data,
                                  write_textures=not args.no_textures,
                                  uv_check=args.uv_check,
-                                 keep_collapsed_uv=args.keep_collapsed_uv,
+                                 drop_collapsed_uv=args.drop_collapsed_uv,
                                  cam_files=cam_files, cam_step=args.cam_step,
                                  unlit=args.unlit, model_regions=model_regions,
                                  fold_mirror_uv=args.fold_mirror_uv,
@@ -442,7 +444,7 @@ def main() -> int:
         vert = sum(m.vertex_count for _, ms, _ in parts for m in ms)
         tri = sum(m.triangle_count for _, ms, _ in parts for m in ms)
         print(f"\n{name}: {len(parts)} segments, {vert:,} verts, "
-              f"{tri - info['dropped_collapsed_uv']:,} tris, "
+              f"{tri:,} tris, "
               f"{info['materials']} materials, {info['textures']} textures")
         if info['dropped_collapsed_uv']:
             print(f"  dropped {info['dropped_collapsed_uv']:,} collapsed-UV "

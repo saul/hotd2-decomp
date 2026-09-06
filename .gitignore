@@ -67,3 +67,7 @@ venv/
 # Local-only screenshots of the running player. A shot of a stage is derived
 # game art; see tests/README.md on why no asset ever lands in this repo.
 web/shots/
+
+# Agent worktrees. `.claude/worktrees/<id>/` is a full checkout each, made by
+# the tooling and thrown away with it -- repo scratch, not repo content.
+.claude/worktrees/

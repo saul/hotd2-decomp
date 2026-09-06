@@ -125,6 +125,21 @@ CHECKS: list[Check] = [
           "fills -- the one check that ties the gameplay half of branching to "
           "the route tables",
           NEEDS_GAME),
+    Check("verify_effects", ".",
+          ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],
+          "that each of the 29 effect trees walks to exactly the node count "
+          "`g_effect_bone_counts` declares, and that every motion the effect "
+          "system plays divides by the stride that count implies -- the only "
+          "check that reads a motion at the effect stride rather than a "
+          "character's",
+          NEEDS_GAME),
+    Check("verify_geometry", ".",
+          ["python3", "tools/verify_geometry.py", "--game-dir", "{game_dir}"],
+          "that every scenery part in a stage bundle holds every triangle its "
+          "`pol/` models declare -- the only check that compares an export "
+          "against the files it was made from rather than against another "
+          "export",
+          NEEDS_GAME),
     Check("baseline", ".",
           ["python3", "tools/baseline.py", "--game-dir", "{game_dir}",
            "--verify"],

@@ -193,10 +193,10 @@ export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
       obj.thr.knockCount += 1;
     }
     playOnce(obj, clip);
-    if (!(obj.flags & ActorFlag.ArcSpent) && obj.thr.knockCount < 2) {
+    if (!(obj.flags & ActorFlag.NoHitReaction) && obj.thr.knockCount < 2) {
       ThrowerBeginTumbleArc(obj, host);
     } else {
-      obj.flags |= ActorFlag.ArcSpent;
+      obj.flags |= ActorFlag.NoHitReaction;
     }
     obj.thr.arcKind = SelectActorGravityAxis(obj);
     // As `ThrowerStateFallAndLand`'s own sub 0: the alive count falls when the
@@ -249,7 +249,7 @@ export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
     }
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.accY = 0;
-    obj.flags = (obj.flags & ~(ActorFlag.ArcSpent | ActorFlag.PoseFrozen))
+    obj.flags = (obj.flags & ~(ActorFlag.NoHitReaction | ActorFlag.PoseFrozen))
               | ActorFlag.ShotImmune;
     // `AND CH, 0xbf` (`80e5bf`) on `obj+0x136C` at 0x004512F3, in the same
     // breath as `AND DH, 0xdf` / `OR DH, 0x1` on `obj+0x34`: the body has

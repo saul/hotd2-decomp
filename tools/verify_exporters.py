@@ -61,6 +61,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LIB = ROOT / "tools" / "hod2lib"
 sys.path.insert(0, str(ROOT / "tools"))
 
+import gen_builder_hash                                         # noqa: E402
 import gen_rig_data                                             # noqa: E402
 import gen_schema_hash                                          # noqa: E402
 
@@ -107,6 +108,23 @@ def check_schema_hash() -> list[str]:
     """The committed `schema_hash.ts` against the declarations it covers."""
     path = ROOT / gen_schema_hash.SCHEMA_DIR / gen_schema_hash.GENERATED
     want = gen_schema_hash.client_source(ROOT)
+    have = path.read_text(encoding="utf-8") if path.exists() else None
+    if have == want:
+        return []
+    return [f"{path.relative_to(ROOT)} is stale"]
+
+
+def check_builder_hash() -> list[str]:
+    """The committed `builder_hash.ts` against the exporter it covers.
+
+    Same contract as :func:`check_schema_hash` and a different question. That
+    one is "can this client read the bundle"; this one is "is the bundle what
+    this exporter would write". A stale digest here means a bundle that is out
+    of date cannot be told that it is, which is the failure that let a cached
+    stage with holes in it win over the rebuilt one indefinitely.
+    """
+    path = ROOT / gen_builder_hash.OUT_DIR / gen_builder_hash.GENERATED
+    want = gen_builder_hash.client_source(ROOT)
     have = path.read_text(encoding="utf-8") if path.exists() else None
     if have == want:
         return []
@@ -262,6 +280,7 @@ def main() -> int:
             bad.append(f"{rel}:{i + 1}: {line.strip()} -- says nothing")
 
     stale = check_schema_hash()
+    stale_builder = check_builder_hash()
     undocumented = check_module_list()
     decl_sources = check_schema_sources()
     two_libs = check_two_libraries() + check_rig_data()
@@ -296,6 +315,17 @@ def main() -> int:
         return 1
     print(f"  {len(gen_schema_hash.file_digests(ROOT))} declaration files, "
           f"digest {gen_schema_hash.schema_hash(ROOT)[:16]}...\n")
+    print("clean")
+
+    print("\nthe exporter digest a bundle is stamped with\n")
+    if stale_builder:
+        for m in stale_builder:
+            print(f"FAIL {m}")
+        print("\nRegenerate it and commit it with the exporter change that "
+              "moved it:\n  python3 tools/gen_builder_hash.py")
+        return 1
+    print(f"  {len(gen_builder_hash.file_digests(ROOT))} exporter files, "
+          f"digest {gen_builder_hash.builder_hash(ROOT)[:16]}...\n")
     print("clean")
 
     print("\nthe library's own account of itself\n")

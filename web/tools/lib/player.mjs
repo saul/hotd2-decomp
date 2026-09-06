@@ -137,17 +137,9 @@ export async function waitForLoad(page, selector) {
   });
 }
 
-/**
- * Turn shooting on.
- *
- * With it off `WalkerHost.aliveEnemies` answers null and every live-enemy gate
- * passes on the spot, so a playthrough sails through the fights it is there to
- * test — and the spawns are dropped out from under the scene you are watching.
- */
-export async function enableShooting(page) {
-  await page.click('label[title^="Click to shoot"] input');
-  // The player's shortcuts are on `window` and skip the event when something
-  // typable has focus, so a key pressed straight after a click would go to the
-  // control instead -- Space on a just-clicked checkbox toggles it back off.
-  await page.evaluate(() => document.activeElement?.blur?.());
-}
+// `enableShooting` was here, and every driver called it first. Shooting was a
+// checkbox that defaulted to **off**, and off it took the game with it: the
+// live-enemy gates read `WalkerHost.aliveEnemies`, which answered null while
+// it was off, and a null count is not a condition — so a playthrough sailed
+// through every fight it existed to test. There is no toggle now. See the note
+// at the top of `src/render/shooting.ts`.

@@ -10,7 +10,6 @@ import type { RenderContext } from "../render/context";
 import type { CameraRig } from "../render/camera";
 import { CamSeatPathFrame } from "../game/camera/path";
 import { GameUpdate } from "../game/director";
-import { ProcessShotRequests } from "../game/combat/shot";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../game/globals";
@@ -148,25 +147,38 @@ export class GameSystem implements System {
     // within 0x2000 of it. `ResolveHit`'s directional death reads it too.
     //
     // **Above the frozen return, because where the camera points is not a
-    // function of elapsed time.** It was below, so the paused path drained the
-    // shot queue against whatever yaw the last unpaused tick had left: pause,
-    // turn to look at something, shoot it, and the kill picked its direction
-    // from where you had been facing. Free roam turns the camera every frame
-    // with the transport stopped, which is exactly the case that made it
-    // visible.
+    // function of elapsed time.** It was below, and the paused path then
+    // drained the shot queue against whatever yaw the last unpaused tick had
+    // left: pause, turn to look at something, shoot it, and the kill picked
+    // its direction from where you had been facing. That drain is gone — see
+    // below — so what still wants this line is everything else that reads the
+    // yaw while the transport is stopped: the globals panel, and a snapshot
+    // taken in free roam, which turns the camera every frame with no tick
+    // under it.
     G.g_camera_yaw_bams = ctx.view.yawBams;
-    if (t.frozen || t.dt <= 0) {
-      // **A trigger pull is input, not elapsed time.** The player deliberately
-      // lets you shoot with the transport stopped — `Player.wantsFrame` keeps
-      // asking for frames while a shot's feedback is still in flight, and the
-      // feed row for a shot fired while paused is half of what the step mode
-      // is for. `GameUpdate` drains the queue at its head, but it is not going
-      // to run on this tick, so the queue is drained here instead. Nothing
-      // else about the frame happens: the shot lands, and the world does not
-      // move under it.
-      ProcessShotRequests(this.host, ctx.rng, ctx.events);
-      return;
-    }
+    // **And nothing else.** A frame that owes no tick must not do part of one,
+    // and resolving a shot is the whole of a game-time job: `ResolveHit` takes
+    // hit points off, `ScoreAddForPlayer` pays, and `PlayerShotEffectSpawn`
+    // fills three rings that only `ShotEffectsTick` — which runs on this same
+    // tick, one line down — can ever empty again.
+    //
+    // This branch used to drain `g_shot_requests` anyway, on the argument that
+    // a trigger pull is input rather than elapsed time. The argument does not
+    // survive the case it was made for: **step mode never reaches this
+    // branch.** Stepping stops the *script* and runs the port at full rate, so
+    // its ticks carry time and take the path below — the debug capability is
+    // the live path, not this one. What this branch actually served was
+    // paused, free roam and `?freeze=1`, where the shot landed a hit, killed
+    // the actor, scored it, and hung its muzzle flash and its blood on screen
+    // for as long as the transport stayed stopped, because nothing was
+    // stepping them. That is the "shots still register when paused" report.
+    //
+    // The pull is left on the queue rather than dropped here: whether a click
+    // is input at all is the transport's question, and `app/main.ts` answers
+    // it at the one place intent enters `G`. What is left over is a pull made
+    // in the instant between a playing frame and a pause, which is input the
+    // clock genuinely owed, and it resolves on the frame the clock restarts.
+    if (t.frozen || t.dt <= 0) return;
     // A copy, not the live one: the frame object `GameUpdate` builds holds
     // the reference for the whole pass, and `ctx.view.eye` is written again
     // next tick.

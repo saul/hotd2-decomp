@@ -478,9 +478,27 @@ recurring shape: a 4-vertex strip whose vertices are two coincident *pairs* —
 a rim polygon a tenth of a world unit wide, giving a flat card a nominal
 thickness. Those are authored, sub-pixel, and harmless either way.
 
-`drop_collapsed_uv_triangles()` removes them; the exporter does so by default.
-It **skips untextured meshes**, whose UVs are all legitimately zero — see the
-16-bit UV section. Why the hardware does not display the rest is unresolved.
+**The game displays them, and the exporter no longer removes them.**
+`WalkMeshChainAndDraw` (`FUN_004A7EF0`) submits every strip whole —
+`DrawPrimitive(D3DPT_TRIANGLESTRIP|LIST, FVF 0x112, verts, count, 0)` — and
+makes no per-triangle test on the way there: the records are copied eight
+dwords at a time with the UVs verbatim at dwords 6–7. Nothing in the walk, and
+nothing in D3D7, rejects a polygon for being collinear in texture space.
+`[proved]`
+
+`drop_collapsed_uv_triangles()` is still there, behind `--drop-collapsed-uv`,
+for an export headed somewhere other than the player. It is **off by default**
+and no stage bundle asks for it. It also **skips untextured meshes**, whose UVs
+are all legitimately zero — see the 16-bit UV section.
+
+It used to be on by default, and it cost every bundle 3–5% of its triangles:
+1,577 of stage 1's 35,637, median 3 square units and up to 3,849. Two of those
+are paving in the piazza, and from the rooftops north of the square the shipped
+bundle had a pair of triangular holes straight through the world. The reasoning
+had been that a face carrying no displayable texture information could only be
+improved by deleting it. A streaked roof is the game; a hole is not.
+`tools/verify_geometry.py` is the check that would have caught it, and it is
+the only one that compares an export against the files it was made from.
 
 > A collapsed UV triangle and a *clamped* texture axis look identical on screen
 > — both smear one row or column of texels across a face. Session 13 spent a

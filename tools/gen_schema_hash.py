@@ -179,7 +179,10 @@ def check_sources(root: Path | None = None) -> list[str]:
     d = root / SCHEMA_DIR
     out: list[str] = []
     for p in sorted(d.glob("*.ts")):
-        if p.name == GENERATED or p.name == "index.ts" or p.name == "load.ts":
+        # The two generated digests and the loader. `builder_hash.ts` is
+        # `tools/gen_builder_hash.py`'s, and it is a constant rather than a
+        # declaration a bundle can disagree with.
+        if p.name in (GENERATED, "builder_hash.ts", "index.ts", "load.ts"):
             continue
         if p.name not in SOURCES:
             out.append(f"{p.name} is a declaration file and is not on "

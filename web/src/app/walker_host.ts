@@ -55,22 +55,25 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // screen attacking, and an enemy class the port cannot run at all — 0x43
     // and 0x51 are in `ENEMY_CLASSES` — was counted and could never die.
     //
-    // Null unless Shoot is on: only then is there anything that can make
-    // the count fall, so only then is the gate a real condition.
-    aliveEnemies: () => p.shooting.isEnabled ? G.g_enemies_alive : null,
+    // **Never null.** The host may answer null — the walker then paces the
+    // gate off its timeout instead — and all four of these used to, whenever
+    // the Shoot toggle was off, on the reasoning that with nothing able to
+    // kill an enemy the count could never fall. The toggle is gone and
+    // shooting is always on, so the reasoning has no case left to cover: a
+    // gate that reports a real count is the gate the game has.
+    aliveEnemies: () => G.g_enemies_alive,
     // `g_enemies_present` — the other one, for `wait_enemies_present` (0x43).
     // Same counters file, same two classes, different retire: a corpse is
-    // still present. Null on the same terms as the alive count.
-    presentEnemies: () => p.shooting.isEnabled ? G.g_enemies_present : null,
+    // still present.
+    presentEnemies: () => G.g_enemies_present,
     // `g_civilians_alive` is maintained by the class-0x10 port itself --
     // `CivilianInit` raises it, op 0x2C's `LeaveCountNow` and the removal
     // path drop it -- so this is the engine's own counter, not a restatement
-    // of it. Null while Shoot is off, for the reason on `aliveEnemies`.
-    aliveCivilians: () => p.shooting.isEnabled ? G.g_civilians_alive : null,
+    // of it.
+    aliveCivilians: () => G.g_civilians_alive,
     // `g_camera_free` -- the room-clear waits need the camera back on its
-    // rail, not just the count at zero. Null while Shoot is off, where the
-    // counts never fall anyway and the gates pass on their own.
-    cameraFree: () => p.shooting.isEnabled ? G.g_camera_free !== 0 : null,
+    // rail, not just the count at zero.
+    cameraFree: () => G.g_camera_free !== 0,
     // The shutter is the walker's own state now: there is nothing to tell.
     showMessage: (g) => {
       // Variant 0 is the 1P / player-1 configuration, which is what a

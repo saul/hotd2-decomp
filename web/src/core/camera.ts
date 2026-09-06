@@ -35,6 +35,18 @@ export class CameraFrame {
    * unless the actor faces within 0x2000 of it.
    */
   yawBams = 0;
+  /**
+   * The camera's own -Z in world space, normalised -- what
+   * `Camera.getWorldDirection` hands back, kept rather than reduced to
+   * {@link yawBams}.
+   *
+   * The sidebar wants it. Its camera group used to print the eye beside the
+   * *script's* block target, which agree while the script drives the camera
+   * and describe two different cameras the moment free roam takes it over --
+   * so a reader flying around the stage got a position and an aim that had
+   * nothing to do with each other, under one heading.
+   */
+  readonly forward: XYZ = { x: 0, y: 0, z: -1 };
 
   private readonly world = new Float64Array(16);
   private readonly inverse = new Float64Array(16);
@@ -66,6 +78,9 @@ export class CameraFrame {
    */
   place(eye: XYZ, forward: XYZ): void {
     this.eye.x = eye.x; this.eye.y = eye.y; this.eye.z = eye.z;
+    this.forward.x = forward.x;
+    this.forward.y = forward.y;
+    this.forward.z = forward.z;
     const bams = Math.round(
       Math.atan2(forward.x, forward.z) * 65536 / (Math.PI * 2));
     this.yawBams = (bams % 65536 + 65536) % 65536;

@@ -648,7 +648,17 @@ export interface ExportOptions {
   spawns?: Doc[] | null;
   writeTextures?: boolean;
   uvCheck?: boolean;
-  keepCollapsedUv?: boolean;
+  /**
+   * Delete triangles that are collinear in UV space -- see
+   * `nl1.dropCollapsedUvTriangles`, which says why the answer is no.
+   *
+   * **Off, and it used to be on.** It was spelled `keepCollapsedUv` and
+   * defaulted to dropping, so every bundle the player has ever loaded was
+   * short 3-5% of its triangles, some of them whole faces. The game draws
+   * them; `WalkMeshChainAndDraw` has no per-triangle test. This is here for an
+   * export aimed at a modelling tool, and it is the caller's to ask for.
+   */
+  dropCollapsedUv?: boolean;
   camFiles?: CamFile[] | null;
   camStep?: number;
   unlit?: boolean;
@@ -936,7 +946,7 @@ export async function exportLevel(
         if (opts.foldMirrorUv) foldedUvs += nl1.applyMirrorUvFold(mesh);
       }
     }
-    if (!opts.keepCollapsedUv) {
+    if (opts.dropCollapsedUv) {
       for (const model of models) {
         for (const mesh of model.meshes) {
           droppedTris += nl1.dropCollapsedUvTriangles(mesh);

@@ -74,6 +74,13 @@ function atLastFrame(obj: ZombieActor): boolean {
  * emerge clip, whose translation is what lifts the actor out. Sub 2 plays it
  * out, throwing a splash at frames 22 and 35 if it is clip 178, and hands over
  * to `AttackRun`.
+ *
+ * **Three writes to `obj+0x34` span the state, and they are what makes an
+ * emerging zombie unstaggerable.** `OR DH, 0x21` in sub 0, `AND EDX,
+ * 0xfff6feff` as the clip starts, `AND DH, 0xdf` on the hand-over — so
+ * {@link ActorFlag.NoHitReaction} is up for the whole entrance and
+ * {@link ActorFlag.ShotImmune} for the submerged half of it. Each is on its
+ * line below with the address that writes it.
  */
 export function ZombieStateEmerge(obj: ZombieActor, dt: number,
                                   events?: Events): void {
@@ -84,6 +91,13 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
     // Off the world push and out of the ground snap until it is up: the pose
     // is under the floor on purpose.
     obj.flags2 &= ~ZombieFlag2.CollideWorld;
+    // `00458532  80ce21  OR DH, 0x21` — **one instruction, two bits, and both
+    // of them are about being shot.** `0x100` is {@link ActorFlag.ShotImmune},
+    // which `ZombieOnShot` (`FUN_00453EB0`) tests at `00453EFB` before it may
+    // pick a death state; `0x2000` is {@link ActorFlag.NoHitReaction}, which
+    // `ActorPlayHitReaction` (`FUN_004544C0`) tests at `004544D8`. Neither was
+    // ported, which is why a zombie halfway out of the water stumbled.
+    obj.flags |= ActorFlag.ShotImmune | ActorFlag.NoHitReaction;
     obj.flags |= ActorFlag.PoseFrozen;
     obj.frozen = 1;
     ActorSetMotionBlended(obj, SUBMERGED_MOTION, 0, 0);
@@ -97,6 +111,12 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
     if (obj.zom.holdFrames > 0) return;
     obj.frozen = 0;
     obj.flags &= ~ActorFlag.PoseFrozen;
+    // `004585EC  81e2fffef6ff  AND EDX, 0xfff6feff` — the clip that lifts the
+    // actor out has started, so it is shootable again. The mask drops
+    // `0x90100`; the port names two of those three bits and `0x80000` has no
+    // field here. **`0x2000` is not in it** — the stagger stays suppressed for
+    // the whole clip, and only the hand-over below takes it back down.
+    obj.flags &= ~(ActorFlag.ShotImmune | ActorFlag.NoCameraTrack);
     ActorSetMotionBlended(obj, p.motion, 0, 0);
     obj.sub = 2;
     return;
@@ -116,6 +136,9 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
   if (atLastFrame(obj)) {
     obj.state = ZombieState.AttackRun;
     obj.sub = 0;
+    // `0045869F  80e6df  AND DH, 0xdf`, in the same breath as the `1` into
+    // `obj+0x1310`: the entrance is over, so shots stagger again.
+    obj.flags &= ~ActorFlag.NoHitReaction;
     obj.flags2 |= ZombieFlag2.CollideWorld;
   }
 }
@@ -149,9 +172,10 @@ export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): 
   const frames = SecondsToTicks(dt);
 
   if (obj.sub === 0) {
-    // `obj+0x34 |= 0x2000`, the arc-armed bit — **not** the pose freeze, which
+    // `obj+0x34 |= 0x2000` — the no-hit-reaction latch, up for the whole leap
+    // and taken down on the hand-over below. **Not** the pose freeze, which
     // this state raises later and for a different span.
-    obj.flags |= ActorFlag.ArcSpent;
+    obj.flags |= ActorFlag.NoHitReaction;
     obj.zom.backoffFrames = p.delay;           // +0x1334
     obj.sub = 1;
     return;
@@ -238,7 +262,7 @@ export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): 
   }
   if (obj.zom.targetLoops <= MotionPlayFrame(obj)) {
     obj.flags2 &= ~ZombieFlag2.Leaping;
-    obj.flags &= ~ActorFlag.ArcSpent;
+    obj.flags &= ~ActorFlag.NoHitReaction;
     obj.state = ZombieState.AttackRun;
     obj.sub = 0;
   }

@@ -17,15 +17,15 @@ export const OPS: Record<number, OpImpl> = {
     0x41: { status: "done", run: (w, op) => w.applyWait(op) },
     0x42: { status: "done", run: (w, op) => w.applyWait(op) },
     0x40: { status: "approx", run: (w, op) => w.applyWait(op) },
-    // Exact while Shoot is on -- the wait ends when the enemies are dead,
-    // which is the game's own condition. Otherwise there is nothing to kill
-    // them, so the combat setting paces it and the feed says so.
+    // The wait ends when the enemies are dead, which is the game's own
+    // condition. `approx` rather than `done` because a host may still answer
+    // null -- the stubs in `test/` have no combat -- and then the combat
+    // setting paces it and the feed says so. The player's host never does.
     0x43: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x44: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x45: { status: "approx", run: (w, op) => w.applyWait(op) },
-    // 0x46 is the same instruction as 0x43 on `g_civilians_alive`; it is
-    // real while Shoot is on and passes when it is off, so it is paced
-    // exactly as the two enemy gates above are.
+    // 0x46 is the same instruction as 0x43 on `g_civilians_alive`, and is
+    // paced exactly as the two enemy gates above are.
     0x46: { status: "approx", run: (w, op) => w.applyWait(op) },
     0x47: { status: "shown", run: (w, op) => w.applyWait(op) },
 };

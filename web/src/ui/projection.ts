@@ -334,6 +334,16 @@ export interface StatusProjection {
 
 export interface UiProjection {
   stage: number;
+  /**
+   * Some stage the page can open was built by an older exporter.
+   *
+   * A boolean because that is all the top bar can usefully say in the space it
+   * has; which stages, and what moved, is the bundle screen's job. It is not a
+   * refusal — the bundle reads, it is merely out of date — and the whole
+   * reason it is on screen at all is that the previous silent version of this
+   * had a cached stage with holes in it winning over the rebuilt one.
+   */
+  bundleStale: boolean;
   stages: readonly number[];
   original: boolean;
   /** Null once the stage is up. */

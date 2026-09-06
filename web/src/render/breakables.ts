@@ -142,6 +142,9 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // neither does this.
   if (p.family === PropFamily.Falling) return null;
   if (p.family === PropFamily.Generic) return null;
+  // `ScriptFlagEffectUpdate` (`FUN_00473B90`) draws the effect tree and
+  // nothing else -- no second `AssetDrawSlot`, so no shadow.
+  if (p.family === PropFamily.ScriptFlagEffect) return null;
   if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
   return KIND_SHADOW[p.kind] ?? null;
 }
@@ -288,9 +291,15 @@ export class BreakableLayer implements System<RenderContext> {
       l.node.rotation.set(0, 0, 0);
       if (l.lift) {
         this.poseLift(l.lift, p);
-      } else if (p.family === PropFamily.Falling) {
+      } else if (p.family === PropFamily.Falling
+                 || p.family === PropFamily.ScriptFlagEffect) {
         // `FallingContainerUpdate` draws Rz * Ry * Rx; the others Ry * Rz * Rx.
         // The same order its hull test uses, so box and model agree.
+        //
+        // `EffectPoseNode` (`FUN_0040D9D0`) is the same order for the same
+        // reason -- `RotZ; RotY; RotX` after its translate -- and the port has
+        // already resolved its three angles into `pitch`/`yaw`/`roll`, so the
+        // effect tree's nodes ride this arm rather than a fourth one.
         l.node.rotateZ(p.roll * BAMS_TO_RAD);
         l.node.rotateY(p.yaw * BAMS_TO_RAD);
         l.node.rotateX(p.pitch * BAMS_TO_RAD);

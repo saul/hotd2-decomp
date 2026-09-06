@@ -68,7 +68,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-__all__ = ["MOT_DIR_FORMAT", "frame_stride", "Frame", "MotionBank", "load_bank"]
+__all__ = ["MOT_DIR_FORMAT", "frame_stride", "effect_frame_stride", "Frame",
+           "EffectFrame", "MotionBank", "load_bank"]
 
 #: The format string at 0x00579920, used by `FUN_00412C10`.
 MOT_DIR_FORMAT = "mot\\%s"
@@ -79,11 +80,36 @@ def frame_stride(bone_count: int) -> int:
     return (bone_count * 6 + 15) & ~3
 
 
+def effect_frame_stride(node_count: int) -> int:
+    """Bytes per frame for an **effect**'s motion.
+
+    `EffectFrameTranslations` (`FUN_0040E040`) and `EffectFrameRotations`
+    (`FUN_0040E070`) both compute
+    ``(g_effect_bone_counts[effect] * 0x12 - 0xF) & 0xFFFFFFFC``, and the mask
+    **truncates** rather than rounding up. An effect tree's node count includes
+    its root, which carries no animation, so one frame holds ``n - 1``
+    translations of three floats followed by ``n - 1`` rotations of three BAMS
+    shorts. Reading an effect's block at :func:`frame_stride` walks a third of
+    a frame per frame.
+    """
+    return (node_count * 0x12 - 0xF) & ~3
+
+
 @dataclass
 class Frame:
     root: tuple[float, float, float]
     #: (rx, ry, rz) BAMS per bone, index 0 being the object root.
     bones: list[tuple[int, int, int]]
+
+
+@dataclass
+class EffectFrame:
+    """One key of an effect's motion, indexed by a node's ``bone - 1``."""
+
+    #: World-space translation per bone index.
+    t: list[tuple[float, float, float]]
+    #: (rx, ry, rz) BAMS per bone index.
+    r: list[tuple[int, int, int]]
 
 
 @dataclass
@@ -161,6 +187,43 @@ class MotionBank:
             bones = [struct.unpack_from("<3h", self.raw, o + 12 + b * 6)
                      for b in range(bone_count)]
             out.append(Frame((rx, ry, rz), bones))
+        return out
+
+    def effect_frames(self, motion_id: int, node_count: int,
+                      count: int | None = None) -> list["EffectFrame"]:
+        """Decode a motion as an **effect**'s, at :func:`effect_frame_stride`.
+
+        *node_count* is ``g_effect_bone_counts[effect]`` — the tree's node
+        count including its root — and the lists come back one shorter, so a
+        node's key is ``frame.t[node.bone - 1]``, exactly as `EffectPoseNode`
+        indexes them.
+        """
+        base = self.offsets.get(motion_id)
+        if base is None or node_count < 2:
+            return []
+        stride = effect_frame_stride(node_count)
+        if stride <= 0:
+            return []
+        bones = node_count - 1
+        start = base + 4
+        later = [o for o in self.offsets.values() if o > base]
+        end = min(later) if later else len(self.raw)
+        avail = max(0, (end - start) // stride)
+        declared = self.frame_count(motion_id)
+        if 0 < declared <= avail:
+            avail = declared
+        n = avail if count is None else min(count, avail)
+        out: list[EffectFrame] = []
+        for f in range(n):
+            o = start + f * stride
+            t = [struct.unpack_from("<3f", self.raw, o + b * 12)
+                 for b in range(bones)]
+            # `base + stride*f - 8 + node_count*0xC`, which is `bones * 0xC`
+            # past the frame's own start: the engine's `-8` and `+4` cancel to
+            # exactly the end of the translations.
+            r = [struct.unpack_from("<3h", self.raw, o + bones * 12 + b * 6)
+                 for b in range(bones)]
+            out.append(EffectFrame(t, r))
         return out
 
 

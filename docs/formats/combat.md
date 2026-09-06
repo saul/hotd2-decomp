@@ -491,6 +491,33 @@ keep coming.
 
 ### Which clip — `ActorPlayHitReaction`
 
+**It can refuse before it looks anything up**, and this is the second gate on a
+stagger — a flag test rather than a state test:
+
+```
+004544cc  85d2            TEST EDX, EDX                             ; the bone
+004544ce  0f8482010000    JZ   0x00454656
+004544d8  f7463400200010  TEST dword ptr [ESI + 0x34], 0x10002000
+004544df  0f8571010000    JNZ  0x00454656                           ; no reaction
+```
+
+`0x10000000` is *mid-attack*, raised by `ZombieStateStandAndThrow` and
+`ZombieStateTargetMotionScript` for the length of a throw or a maul. `0x2000`
+is the **no-hit-reaction latch**: every routine that raises it does so while
+something else owns the body, and each clears it on the way out —
+`ZombieStateEmerge` (`00458532 OR DH, 0x21` → `0045869F AND DH, 0xdf`),
+`ZombieStateDelayedLeap`, `ZombieStateArcScriptedEntrance`,
+`ZombieStateMotionCue21`'s exit, `ZombieApplyScriptMode`'s `0x2400`,
+`ThrowerStateFallToSurface`, `ThrowerStateRearm`'s exit, and this routine's own
+alt arm at `004545F5`, which `ZombieTickAltHitReaction` (`FUN_004547C0`) takes
+back down.
+
+`ThrowerOnShot` (`00449A95 f6c420 TEST AH, 0x20`) is the only other reader, and
+it skips the stumble, the knockdown and the tumble. **Two readers, both
+refusing a reaction** — which is what the bit is, and the reason a zombie
+climbing out of the water plays its entrance through and does not stagger.
+`[proved]`
+
 ```c
 motion = g_pHitReactionMotions[char_type][obj+0x130C][g_bone_reaction_group[bone]];
 
@@ -1168,11 +1195,12 @@ over the walk on a second track, faded for the upper body and hard-set for the
 legs, and skipped entirely for the hits that do not interrupt — the directional
 death, the gore swap, and every sound in §9.
 
-The live-enemy waits (evt `0x43` / `0x44`) become **real** when shooting is on:
-the script holds until the enemies are dead, which is the game's own condition.
-With shooting off there is nothing that can kill them, so a stopwatch paces
-them instead and the feed says so. `g_enemies_present` is approximated by the
-alive count, because the player never despawns a corpse.
+The live-enemy waits (evt `0x43` / `0x44`) are **real**: the script holds
+until the enemies are dead, which is the game's own condition. It used to
+depend on a Shoot toggle, which defaulted to off — and off, the counts read
+null, the gates were paced by a stopwatch, and the player walked through every
+fight in the game. `g_enemies_present` is approximated by the alive count,
+because the player never despawns a corpse.
 
 Not implemented, and why:
 
@@ -1436,7 +1464,7 @@ its own bits on top. Everything the shipped records set:
 | `0x8` | 4 | `Hit` — a shot the update has not drained |
 | `0x10` | 5 | skipped by `ColiTestSphereAgainstActors` |
 | `0x100` | 6 | `ShotImmune` |
-| `0x2000` | 9 | `ArcSpent` |
+| `0x2000` | 9 | `NoHitReaction` — `ActorPlayHitReaction` and `ThrowerOnShot` both refuse |
 | `0x4000` | 6 | `PoseFrozen` — the motion clock does not advance |
 | `0x8000` | 167 | `RegisterForShotTest` refuses it, and so does the crowd push |
 | `0x10000` | 4 | `NoCameraTrack` |
@@ -1780,7 +1808,9 @@ if (result == 5)                    nothing
 if (obj+0x136C & 0x200000)          nothing: the death is already latched
 release the permit, clear the pounce and band bits
 if (dead)                           state 2,  latch 0x200000, voice 2 on a head shot
-else if (obj+0x34 & 0x2000)         nothing: two knockback arcs are spent
+else if (obj+0x34 & 0x2000)         nothing: the no-hit-reaction latch is up
+                                    (00449A95 TEST AH,0x20) -- here that is
+                                    two knockback arcs already spent
 else if (char == 0x18)              state 33, the tumble
 else if (state == 7 && on ground)   state 1,  the stumble
 else                                state 2,  the knockdown

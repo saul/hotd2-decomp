@@ -30,11 +30,12 @@
  * begins mid-stage would be testing that instead of the stage.
  *
  * The reason it needs to shoot is that the interesting waits are the room
- * clears. With shooting **off** `WalkerHost.aliveEnemies` answers null and
- * every live-enemy gate passes untested, so a playthrough would sail through
- * exactly the fights it exists to exercise — and the walker would drop the
- * spawns out from under them. So shooting goes on, and when the script is
- * parked on an **enemy** gate this fires a volley through the real shot path:
+ * clears, and the reason it can exercise them is that shooting is always on:
+ * it used to be a checkbox that defaulted to off, and with it off
+ * `WalkerHost.aliveEnemies` answered null, every live-enemy gate passed
+ * untested and a playthrough sailed through exactly the fights it exists to
+ * exercise. When the script is parked on an **enemy** gate this fires a volley
+ * through the real shot path:
  * pointer events on `#viewport`, `Shooting.fire`, the ray, the per-bone
  * spheres, `ResolveHit`. Nothing is faked. Under the driven clock the game is
  * stopped between two `advance` calls, so the whole volley lands on one exact
@@ -62,7 +63,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { openPlayer, waitForLoad, enableShooting, SHOTS } from "./lib/player.mjs";
+import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {
@@ -155,7 +156,6 @@ try {
     throw new Error("the page has no drive seam — is ?drive=1 wired up? "
                     + "see web/src/app/harness.ts");
   }
-  await enableShooting(page);
   await page.keyboard.press("Space");                 // play
   const box = await page.locator("#viewport").boundingBox();
   if (!box) throw new Error("#viewport has no box");

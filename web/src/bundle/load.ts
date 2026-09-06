@@ -18,6 +18,7 @@
 import type { CamJson } from "./cameras";
 import { SUPPORTED_FORMAT } from "./manifest";
 import type { Manifest, StageEntry } from "./manifest";
+import { BUILDER_FILES, BUILDER_HASH } from "./builder_hash";
 import { SCHEMA_FILES, SCHEMA_HASH } from "./schema_hash";
 import type { ScriptJson, StageBundle } from "./stage";
 
@@ -27,11 +28,15 @@ const ROOT = "bundle";
 /**
  * Where a bundle's files come from.
  *
- * There are two: the dev server, which serves `extract/player/` under
- * `/bundle/`, and the browser's own cache, which holds an export the page made
- * itself. They have the same tree and the same names, so this is the whole
- * difference between them -- one `fetch`, or one `File` out of the Origin
- * Private File System.
+ * There are two, and they are live at the same time: the dev server, which
+ * serves `extract/player/` under `/bundle/`, and the browser's own cache,
+ * which holds the exports the page made for itself. They have the same tree
+ * and the same names, so this is the whole difference between them -- one
+ * `fetch`, or one `File` out of the Origin Private File System.
+ *
+ * Which one a *stage* comes from is decided per stage, in `app/bundles.ts`,
+ * because a page can perfectly well be served four stages and hold two of its
+ * own. Nothing here holds a current source: every call names the one it means.
  *
  * `geometry` is separate from `json` because a GLB is handed to three.js as a
  * URL rather than parsed here, and a cached one has to become a `blob:` URL
@@ -43,7 +48,8 @@ export interface BundleSource {
   release?(url: string): void;
 }
 
-const HTTP: BundleSource = {
+/** The bundle the page was served, under `/bundle/`. */
+export const serverSource: BundleSource = {
   async json<T>(path: string): Promise<T> {
     const url = `${ROOT}/${path}`;
     const r = await fetch(url);
@@ -55,25 +61,16 @@ const HTTP: BundleSource = {
   },
 };
 
-let source: BundleSource = HTTP;
-
-/** Read bundles from *src* from now on. Passing null goes back to the server. */
-export function setBundleSource(src: BundleSource | null): void {
-  source = src ?? HTTP;
-}
-
-/** Whether the bundle currently being read is one the page exported. */
-export function usingCachedBundle(): boolean {
-  return source !== HTTP;
-}
-
-/** Give back whatever {@link loadStage} handed out as `geometryUrl`. */
-export function releaseGeometry(url: string): void {
-  source.release?.(url);
-}
-
-function getJson<T>(path: string): Promise<T> {
-  return source.json<T>(path);
+/**
+ * Give back whatever {@link loadStage} handed out as `geometryUrl`.
+ *
+ * The source is passed because it has to be the one that handed the URL out:
+ * a `blob:` from the cache must be revoked and an `http:` from the server must
+ * not, and by the time a stage is torn down the *next* stage may already be
+ * loading from the other one.
+ */
+export function releaseGeometry(src: BundleSource, url: string): void {
+  src.release?.(url);
 }
 
 /**
@@ -129,8 +126,8 @@ export function manifestRefusal(m: Manifest | null | undefined): string | null {
   return null;
 }
 
-export async function loadManifest(): Promise<Manifest> {
-  const m = await getJson<Manifest>("manifest.json");
+export async function loadManifest(src: BundleSource): Promise<Manifest> {
+  const m = await src.json<Manifest>("manifest.json");
   const no = manifestRefusal(m);
   if (no) throw new Error(no);
   return m;
@@ -145,17 +142,53 @@ export function stageFormatRefusal(what: string,
     + `export; rebuild it with \`npm run export -- --all\`.`;
 }
 
+/**
+ * Is this stage older than the exporter that would build it now?
+ *
+ * **This warns; it does not refuse**, and the difference from
+ * {@link stageFormatRefusal} beside it is the whole design. A format or schema
+ * mismatch means the bundle cannot be read correctly and using it produces a
+ * stage that renders *almost* right, so it is refused. An exporter change
+ * usually means the bundle reads perfectly and is a little out of date --
+ * refusing would make every unrelated fix in `hod2lib/` cost a forty-minute
+ * re-export before anything could be opened at all.
+ *
+ * The case this exists for: `nl1.dropCollapsedUvTriangles` was deleting 3-5%
+ * of every stage's geometry, and switching it off moved no declaration and no
+ * `BUNDLE_FORMAT`. A stage already in the browser's cache therefore went on
+ * winning over the rebuilt one -- with holes in it -- however many times the
+ * tree was exported, and nothing on the page said why.
+ */
+export function stageBuilderStale(builder: string | undefined): boolean {
+  return builder !== BUILDER_HASH;
+}
+
+/**
+ * Which of the exporter's files moved since this bundle was built, by name.
+ *
+ * The same reasoning as {@link schemaDrift}: the digest can only say *that*
+ * something changed, and a message you can act on names it. Empty when the
+ * bundle predates the digest entirely, which is its own answer.
+ */
+export function builderDrift(theirs: Record<string, string> | undefined):
+    string[] {
+  if (!theirs) return [];
+  const names = new Set([...Object.keys(BUILDER_FILES), ...Object.keys(theirs)]);
+  return [...names].filter((n) => BUILDER_FILES[n] !== theirs[n]).sort();
+}
+
 function checkStageFormat(what: string, format: number | undefined): void {
   const no = stageFormatRefusal(what, format);
   if (no) throw new Error(no);
 }
 
-export async function loadStage(entry: StageEntry): Promise<StageBundle> {
+export async function loadStage(src: BundleSource,
+                                entry: StageEntry): Promise<StageBundle> {
   checkStageFormat(entry.name, entry.format);
   const dir = entry.name;
   const [script, cam] = await Promise.all([
-    getJson<ScriptJson>(`${dir}/${entry.script}`),
-    getJson<CamJson>(`${dir}/${entry.cam}`),
+    src.json<ScriptJson>(`${dir}/${entry.script}`),
+    src.json<CamJson>(`${dir}/${entry.cam}`),
   ]);
   // The manifest entry and the files it names are written together but do not
   // travel together: a stage directory copied in from another bundle keeps its
@@ -163,5 +196,5 @@ export async function loadStage(entry: StageEntry): Promise<StageBundle> {
   checkStageFormat(entry.script, script.format);
   checkStageFormat(entry.cam, cam.format);
   return { entry, script, cam,
-           geometryUrl: await source.geometry(`${dir}/${entry.geometry}`) };
+           geometryUrl: await src.geometry(`${dir}/${entry.geometry}`) };
 }

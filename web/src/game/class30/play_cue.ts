@@ -96,7 +96,7 @@ export function ZombieStateMotionCue21(obj: ZombieActor, eye: Vec3,
 
 /** The tail of state 21: clear the last bit and take the descriptor's exit. */
 function ZombieCueHandOver(obj: ZombieActor, eye: Vec3): void {
-  obj.flags &= ~ActorFlag.ArcSpent;
+  obj.flags &= ~ActorFlag.NoHitReaction;
   // Descriptor byte 3. A record that names state 21 again would never leave,
   // so the engine substitutes the attack run — all six shipped records name
   // it outright anyway.

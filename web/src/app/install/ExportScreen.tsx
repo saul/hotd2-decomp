@@ -1,5 +1,5 @@
 /**
- * The export screen: point the page at a HOTD2 install and build a bundle
+ * The bundle screen: point the page at a HOTD2 install and build a stage
  * without leaving the browser.
  *
  * **Why this is in `app/` and not in `ui/`.** Every panel under `ui/` is part
@@ -13,58 +13,183 @@
  *
  * It mounts into its own root over the page, so it never becomes a second
  * writer of anything `ui/App.tsx` renders.
+ *
+ * It opens two ways: by itself when there is nothing to play, and from the top
+ * bar's `Bundle...` button at any time. It used to open only the first way,
+ * which meant that on any machine with `extract/player/` populated -- every
+ * developer's -- none of it could be reached at all.
+ *
+ * **One stage at a time.** Every stage in both modes is 431 MB and the better
+ * part of an hour of somebody's laptop, which is a strange thing to ask for
+ * before they have seen anything at all. A stage is a minute. The rest are
+ * built when they are asked for, from the top bar, into the same cache -- see
+ * `Player.buildStage` -- so choosing here is choosing where to start and not
+ * what you are limited to.
  */
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 
+import { ALL_STAGES, BundleIndex, slotKey } from "../bundles";
+import type { Origin } from "../bundles";
 import { canPickDirectory, clearCache, downloadCache, forgetInstall,
-         hasCachedBundle, pickInstall, regrantInstall, rememberedInstall,
-         requestPersist, runExport, storageEstimate } from "./index";
+         pickInstall, regrantInstall, rememberedInstall, requestPersist,
+         readThumb, runExport, storageEstimate } from "./index";
 import type { ExportHandle } from "./index";
 import type { InstallRef, WorkerOut } from "./protocol";
 
-const ALL_STAGES = [1, 2, 3, 4, 5, 6];
-
-/** Roughly what a full export costs, so the size warning is not a surprise. */
-const MB_PER_BUNDLE = 35;
-
 interface Props {
-  /** Called when a bundle exists and the player should start on it. */
-  onReady: () => void;
-  /** Called when the user dismisses the screen without exporting. */
+  /** Called when the stage the user chose is in the cache and playable. */
+  onReady: (stage: number, original: boolean) => void;
+  /**
+   * Called the moment an export finishes, with what it built.
+   *
+   * Separate from {@link Props.onReady}, which is a button. **A stage can be
+   * rebuilt underneath the player**, and if it is the one on screen then
+   * everything the page is drawing came out of the copy that was just
+   * replaced. Without this the only way to see the new one was to reload the
+   * page by hand, which is not a step anybody should have to know about.
+   *
+   * It may return a promise, and if it does this screen waits for it before
+   * re-reading the tiles: the player answers by *photographing* the stage,
+   * which takes a second or two, and a rescan that does not wait shows the
+   * tile it just filled in with no picture in it.
+   */
+  onBuilt: (stage: number, original: boolean) => void | Promise<void>;
+  /** Called when the user dismisses the screen. Null when there is no player. */
   onDismiss: (() => void) | null;
-  /** Why the screen opened, when it opened because loading failed. */
+  /**
+   * The stage and mode to open on -- what the player is showing.
+   *
+   * It opened on stage 1 Arcade whatever was on screen, so the commonest
+   * reason to be here at all, "rebuild the thing I am looking at", started
+   * with picking it out of a grid again, and the primary button said
+   * "Build it" for a stage that was already built. Absent when there is no
+   * player to ask.
+   */
+  openOn?: { stage: number; original: boolean };
+  /** Why the screen opened, when it opened because nothing would load. */
   reason: string | null;
 }
 
-function ExportScreen({ onReady, onDismiss, reason }: Props) {
+/** Where a stage already exists, in the words the screen uses for it. */
+const ORIGIN_TEXT: Record<Origin, string> = {
+  cache: "built here",
+  server: "served",
+};
+
+function ExportScreen({ onReady, onBuilt, onDismiss, reason,
+                        openOn }: Props) {
   const [install, setInstall] = useState<InstallRef | null>(null);
-  const [stages, setStages] = useState<number[]>([1]);
-  const [arcade, setArcade] = useState(true);
-  const [original, setOriginal] = useState(true);
+  const [stage, setStage] = useState(openOn?.stage ?? 1);
+  const [original, setOriginal] = useState(openOn?.original ?? false);
   const [lines, setLines] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
-  const [cached, setCached] = useState(false);
   const [quota, setQuota] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [finished, setFinished] = useState<string | null>(null);
+  // What exists right now, in both bundles. Re-read after every export, so the
+  // labels under the stage buttons are what is on disk and not what this
+  // screen remembers doing.
+  const [have, setHave] = useState<Map<string, Origin>>(new Map());
+  // Which of those were written by an older exporter than this page, and what
+  // moved. The button in the top bar can only say *that* something is out of
+  // date; this is the screen with room to say which and why.
+  const [stale, setStale] = useState<Set<string>>(new Set());
+  const [drift, setDrift] = useState<string[]>([]);
+  const [thumbs, setThumbs] = useState<Map<number, string>>(new Map());
   const handle = useRef<ExportHandle | null>(null);
   const feed = useRef<HTMLDivElement | null>(null);
+  /**
+   * The `blob:` URLs this screen has made, so they can be given back.
+   *
+   * A ref rather than state: nothing renders from it, and revoking has to
+   * happen on the *previous* set at the moment the next one replaces it --
+   * which is a thing that happens outside React's render, when a picture is
+   * re-read after an export.
+   */
+  const blobs = useRef<string[]>([]);
+  /**
+   * Which rescan is the current one.
+   *
+   * **This is not decoration.** A *Build all* finishes six stages within a
+   * few seconds of each other and each one starts a rescan, so several are
+   * always in flight together -- and each one revokes the `blob:` URLs the
+   * one before it had just put on screen. The last stage's tile came out
+   * empty every time, with its picture sitting in the store. Only the newest
+   * scan installs anything; the others give their own URLs back and say
+   * nothing.
+   */
+  const scan = useRef(0);
+
+  const rescan = useCallback(async () => {
+    const mine = ++scan.current;
+    const index = new BundleIndex();
+    await index.refresh();
+    const m = new Map<string, Origin>();
+    const old = new Set<string>();
+    for (const s of index.built()) {
+      m.set(slotKey(s.stage, s.original), s.from);
+      if (s.stale) old.add(slotKey(s.stage, s.original));
+    }
+    const e = await storageEstimate();
+    if (mine !== scan.current) return;
+    // The labels first and on their own, because they are what the screen is
+    // unreadable without: six tiles saying "not built" over a cache holding
+    // four is worse than a tile with no picture in it. Reading six images
+    // takes long enough to be visible.
+    setHave(m);
+    setStale(old);
+    setDrift(index.drift);
+    setQuota(e && e.quota
+      ? `${(e.usage / 1e6).toFixed(0)} MB used of `
+        + `${(e.quota / 1e9).toFixed(1)} GB available`
+      : "");
+    // The pictures too, and **not only on mount**. They are taken as each
+    // stage finishes building, so a screen that read them once showed empty
+    // tiles for everything it had just built and only caught up the next time
+    // it was opened.
+    const t = new Map<number, string>();
+    const made: string[] = [];
+    for (const n of ALL_STAGES) {
+      const url = await readThumb(n);
+      if (url) { made.push(url); t.set(n, url); }
+    }
+    if (mine !== scan.current) {
+      for (const url of made) URL.revokeObjectURL(url);
+      return;
+    }
+    for (const url of blobs.current) URL.revokeObjectURL(url);
+    blobs.current = made;
+    setThumbs(t);
+  }, []);
 
   useEffect(() => {
     void (async () => {
-      setCached(await hasCachedBundle());
+      // Thumbnails come with it: they are the player's own frames, kept beside
+      // the bundle that produced them, and a stage nobody has built or opened
+      // has none -- which is the honest picture of such a stage.
+      await rescan();
       const known = await rememberedInstall();
       if (known) setInstall(known);
-      const e = await storageEstimate();
-      if (e && e.quota) {
-        setQuota(`${(e.usage / 1e6).toFixed(0)} MB used of `
-                 + `${(e.quota / 1e9).toFixed(1)} GB available`);
-      }
     })();
-  }, []);
+    // A `blob:` URL nothing revokes holds its blob until the tab closes, and
+    // this screen makes six of them every time it rescans.
+    return () => {
+      for (const url of blobs.current) URL.revokeObjectURL(url);
+      blobs.current = [];
+    };
+  }, [rescan]);
+
+  // Escape closes it, but only when there is something to go back to and
+  // nothing is running: a half-written cache is worth a deliberate Stop.
+  useEffect(() => {
+    if (!onDismiss || running) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onDismiss(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onDismiss, running]);
 
   // The feed scrolls itself, because the interesting line is always the last.
   useEffect(() => {
@@ -85,24 +210,26 @@ function ExportScreen({ onReady, onDismiss, reason }: Props) {
     else setError("permission was not granted; pick the folder again");
   }, []);
 
-  const start = useCallback(async () => {
-    if (!install || !stages.length) return;
-    const modes: boolean[] = [];
-    if (arcade) modes.push(false);
-    if (original) modes.push(true);
-    if (!modes.length) return;
-
+  /**
+   * Run an export. One stage, or every stage, in the mode that is selected.
+   *
+   * One function for both buttons: they differ by the list they pass and by
+   * nothing else, and two copies of the message handling is two places for the
+   * per-stage `onBuilt` to be forgotten.
+   */
+  const start = useCallback(async (stages: number[]) => {
+    if (!install) return;
     setLines([]);
     setWarnings([]);
     setError(null);
     setFinished(null);
     setRunning(true);
-    // A full export is a few hundred megabytes; ask before filling the disk
-    // rather than after.
-    if (stages.length * modes.length >= 4) await requestPersist();
+    // A stage is ~35 MB and the cache is meant to survive a reload, so ask for
+    // persistence before filling it rather than after being evicted.
+    await requestPersist();
 
     handle.current = runExport(
-      { kind: "export", install, stages, modes, fresh: false },
+      { kind: "export", install, stages, modes: [original], fresh: false },
       (msg: WorkerOut) => {
         if (msg.kind === "progress") setLines((l) => [...l, msg.line]);
         else if (msg.kind === "warning") setWarnings((w) => [...w, msg.line]);
@@ -110,40 +237,38 @@ function ExportScreen({ onReady, onDismiss, reason }: Props) {
           setLines((l) => [...l,
             `  -> ${msg.counts.models} models, ${msg.counts.triangles} tris, `
             + `${msg.counts.textures} textures, ${msg.counts.spawns} spawns`]);
+          // Per stage rather than once at the end: a run may build six, and
+          // each of them wants its picture taken and its stage reloaded if it
+          // is the one on screen.
+          // And re-read once the picture is in, so the tile that stage sits
+          // in stops saying "not built" and gets its frame while the rest of
+          // the run carries on.
+          void Promise.resolve(onBuilt(msg.stage, msg.original))
+            .then(rescan, () => rescan());
         } else if (msg.kind === "error") {
           setError(msg.message);
           setRunning(false);
         } else {
           setRunning(false);
-          setCached(true);
           setFinished(
-            `${msg.stages} stage bundle(s), ${(msg.bytes / 1e6).toFixed(0)} MB`
+            `${(msg.bytes / 1e6).toFixed(0)} MB cached`
             + (msg.degraded
                ? ` -- ${msg.degraded} thing(s) could not be read; see below`
                : ""));
-          void storageEstimate().then((e) => {
-            if (e && e.quota) {
-              setQuota(`${(e.usage / 1e6).toFixed(0)} MB used of `
-                       + `${(e.quota / 1e9).toFixed(1)} GB available`);
-            }
-          });
+          void rescan();
         }
       });
-  }, [install, stages, arcade, original]);
+  }, [install, original, rescan, onBuilt]);
 
   const stop = useCallback(() => {
     handle.current?.cancel();
     handle.current = null;
     setRunning(false);
-    setLines((l) => [...l, "stopped; the stages that finished are kept"]);
+    setLines((l) => [...l, "stopped; whatever finished is kept"]);
   }, []);
 
-  const toggleStage = (n: number) =>
-    setStages((s) => s.includes(n) ? s.filter((x) => x !== n)
-                                   : [...s, n].sort((a, b) => a - b));
-
-  const modeCount = (arcade ? 1 : 0) + (original ? 1 : 0);
-  const estimate = stages.length * modeCount * MB_PER_BUNDLE;
+  const where = have.get(slotKey(stage, original));
+  const anything = have.size > 0;
 
   return (
     <div className="export-screen">
@@ -182,53 +307,104 @@ function ExportScreen({ onReady, onDismiss, reason }: Props) {
         </section>
 
         <section>
-          <h2>2. What to build</h2>
-          <div className="export-stages">
-            {ALL_STAGES.map((n) => (
-              <label key={n}>
-                <input type="checkbox" checked={stages.includes(n)}
-                       onChange={() => toggleStage(n)} disabled={running} />
-                Stage {n}
-              </label>
-            ))}
-            <button onClick={() => setStages(ALL_STAGES)} disabled={running}>
-              all
-            </button>
+          <h2>2. The stage</h2>
+          <div className="export-tiles">
+            {ALL_STAGES.map((n) => {
+              const k = slotKey(n, original);
+              const src = have.get(k);
+              const old = stale.has(k);
+              const thumb = thumbs.get(n);
+              return (
+                <button key={n} disabled={running}
+                        className={`export-tile${n === stage ? " on" : ""}`
+                                   + (old ? " stale" : "")}
+                        onClick={() => setStage(n)}>
+                  <span className="export-thumb">
+                    {thumb
+                      ? <img src={thumb} alt="" />
+                      : <span className="export-nothumb">{n}</span>}
+                  </span>
+                  <span className="export-tile-name">Stage {n}</span>
+                  <span className="export-tile-note">
+                    {src ? ORIGIN_TEXT[src] : "not built"}
+                    {old ? " \u00b7 needs rebuilding" : ""}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+        </section>
+
+        {stale.size
+          ? <p className="export-why">
+              {stale.size === 1
+                ? "One stage bundle was"
+                : `${stale.size} stage bundles were`}
+              {" "}built by an older exporter than this page. They still play,
+              and they may be wrong in ways nothing here can see -- rebuild
+              them when you can.
+              {drift.length
+                ? ` Changed since: ${drift.join(", ")}.`
+                : " This bundle predates the check, so what changed is not"
+                  + " recorded."}
+            </p>
+          : null}
+
+        <section>
+          <h2>3. The mode</h2>
           <div className="export-modes">
             <label>
-              <input type="checkbox" checked={arcade} disabled={running}
-                     onChange={(e) => setArcade(e.target.checked)} />
+              <input type="radio" name="mode" checked={!original}
+                     disabled={running}
+                     onChange={() => setOriginal(false)} />
               Arcade Mode
             </label>
             <label>
-              <input type="checkbox" checked={original} disabled={running}
-                     onChange={(e) => setOriginal(e.target.checked)} />
+              <input type="radio" name="mode" checked={original}
+                     disabled={running}
+                     onChange={() => setOriginal(true)} />
               Original Mode
             </label>
           </div>
           <p className="export-note">
-            Roughly {estimate} MB, and a minute or so per bundle.
-            {quota ? ` ${quota}.` : ""}
+            About 35 MB and a minute each. The other stages are also built when
+            you pick them in the top bar, so <b>Build all</b> is for when you
+            would rather wait once.{quota ? ` ${quota}.` : ""}
           </p>
         </section>
 
         <section>
-          <h2>3. Go</h2>
+          <h2>4. Go</h2>
           <p>
             {running
               ? <button onClick={stop}>Stop</button>
-              : <button className="export-primary" onClick={() => void start()}
-                        disabled={!install || !stages.length || !modeCount}>
-                  Export
-                </button>}
-            {cached && !running
+              : <>
+                  <button className="export-primary"
+                          onClick={() => void start([stage])}
+                          disabled={!install}>
+                    {where === "cache" ? "Build it again" : "Build it"}
+                  </button>
+                  <button onClick={() => void start([...ALL_STAGES])}
+                          disabled={!install}
+                          title={`Build all six stages in `
+                            + `${original ? "Original" : "Arcade"} Mode. `
+                            + `About 200 MB and six minutes.`}>
+                    Build all
+                  </button>
+                  {where
+                    ? <button onClick={() => onReady(stage, original)}>
+                        Play stage {stage}{original ? " (Original)" : ""}
+                      </button>
+                    : null}
+                </>}
+            {anything && !running
               ? <>
-                  <button onClick={onReady}>Play the cached bundle</button>
                   <button onClick={() => void downloadCache()}>
                     Download as .zip
                   </button>
-                  <button onClick={() => { void clearCache(); setCached(false); }}>
+                  <button onClick={() => {
+                    void clearCache().then(rescan);
+                  }}>
                     Clear cache
                   </button>
                 </>
@@ -256,7 +432,7 @@ function ExportScreen({ onReady, onDismiss, reason }: Props) {
 let root: Root | null = null;
 
 /**
- * Put the export screen on the page.
+ * Put the bundle screen on the page.
  *
  * Its own React root, in its own element, which **`index.html` declares**. A
  * layer that appends an element to the document is a second owner of the page
@@ -264,11 +440,7 @@ let root: Root | null = null;
  * what `no-dom-insertion` is at zero for. The page declares the host; React
  * owns what is inside it. Same contract as `#app`, one element along.
  */
-export function showExportScreen(opts: {
-  onReady: () => void;
-  onDismiss: (() => void) | null;
-  reason: string | null;
-}): void {
+export function showExportScreen(opts: Props): void {
   const host = document.querySelector("#export-root");
   if (!host) throw new Error("install: no #export-root in index.html");
   root ??= createRoot(host);

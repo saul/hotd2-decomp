@@ -45,6 +45,28 @@ export interface SchemaDigest {
   files: Record<string, string>;
 }
 
+/**
+ * The digest of the exporter that wrote this bundle.
+ *
+ * The other half of the contract from {@link SchemaDigest}, and it answers a
+ * different question. The schema digest says whether this client can *read*
+ * the bundle, and a mismatch is a refusal. This says whether the bundle is
+ * what today's exporter would write, and a mismatch is a **warning**: the
+ * bundle is readable and merely out of date.
+ *
+ * Absent on anything built before this existed, which is itself out of date.
+ *
+ * See `tools/gen_builder_hash.py` for why it is here at all -- an exporter fix
+ * that changes no declaration used to leave a stale copy in the browser's
+ * cache winning over the rebuilt one for ever.
+ */
+export interface BuilderDigest {
+  /** One digest over {@link BuilderDigest.files}, in filename order. */
+  hash: string;
+  /** Per file, so a stale bundle can name what moved. */
+  files: Record<string, string>;
+}
+
 export interface Manifest {
   format: number;
   /**
@@ -52,6 +74,8 @@ export interface Manifest {
    * refuses first — so a `schema` this client reads is always present.
    */
   schema?: SchemaDigest;
+  /** See {@link BuilderDigest}. Absent on a bundle built before it existed. */
+  builder?: BuilderDigest;
   tool: string;
   tool_version: string;
   built: string;
@@ -77,6 +101,16 @@ export interface StageEntry {
    * an older tool wrote. Absent on an entry carried from before format 3.
    */
   format?: number;
+  /**
+   * The exporter **this stage** was written by — {@link BuilderDigest.hash}.
+   *
+   * On the entry rather than only on the manifest for the same reason
+   * {@link StageEntry.format} is: a partial export carries forward the entries
+   * it did not rebuild, and the browser's cache is nothing *but* partial
+   * exports. One stage at a time is how that cache is filled, so one stage at
+   * a time is how it goes out of date.
+   */
+  builder?: string;
   stage: number | null;
   scene: number;
   /** `g_GameMode` as the exe numbers it — see `game/game_mode.ts`. */

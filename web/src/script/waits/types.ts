@@ -118,14 +118,12 @@ export const WAIT_NOTES: Record<number, string> = {
   // ...and they are two counters. 0x43 is `g_enemies_present`, which a corpse
   // stays in until its death clip ends; 0x44 is `g_enemies_alive`, which it
   // leaves the moment it dies. See `waits/enemies.ts`.
-  0x43: "the corpse-clear gate (`g_enemies_present`): real while Shoot is on, "
-      + "and passed when it is off, because nothing can then make the count "
-      + "fall",
-  0x44: "the live-enemy gate (`g_enemies_alive`): real while Shoot is on, and "
-      + "passed when it is off, because nothing can then make the count fall",
+  0x43: "the corpse-clear gate (`g_enemies_present`): real — it ends when the "
+      + "bodies have finished dying",
+  0x44: "the live-enemy gate (`g_enemies_alive`): real — it ends when you "
+      + "have killed them",
   0x45: "passed: the script flag array is written by gameplay",
-  0x46: "the civilian gate: real while Shoot is on, and passed when it is "
-      + "off, because rescuing a civilian means killing its captors",
+  0x46: "the civilian gate: real — it ends when the captors are dead",
   0x47: "passed: 'camera settled and no live target' needs the runtime",
 };
 

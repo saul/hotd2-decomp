@@ -28,7 +28,7 @@
  */
 
 import { BAMS_TO_RAD, bamsFromMatrix, rotMatrix } from "./bams";
-import { i16, u16 } from "./bytes";
+import { i16, u16, u32 } from "./bytes";
 import type { Spawn } from "./evt";
 import type { ExeTables } from "./exetab";
 import type { Model } from "./nl1";
@@ -368,6 +368,117 @@ export async function rigEntries(stage: Stage, hinges: Hinge[],
                 rotation_bams: [...rot], cam_paths: [], note: rig.note! }],
       parts,
     });
+  }
+  return out;
+}
+
+// -- the effect system, and class 0x44 selector 0 -------------------------
+
+/**
+ * `g_effect_trees` -- 0x004D5390, one root node per effect id.
+ *
+ * A node, and the root the table points at is one:
+ *
+ * ```
+ * +0x00  u32  asset slot            0 draws nothing
+ * +0x04  s16  bone index, 1-based   < 1 makes it a pure transform
+ * +0x06  u16  child count
+ * +0x08  u32  children[]
+ * ```
+ *
+ * `g_character_skeletons`' struct minus the bind offsets, because an effect's
+ * translations come per frame from its motion rather than from a rest pose.
+ */
+export const EFFECT_TREES = 0x004d5390;
+/** `g_effect_bone_counts` -- 0x004D5404, s16 per effect: the node count. */
+export const EFFECT_BONE_COUNTS = 0x004d5404;
+/** `g_effect_interp_mode` -- 0x004D5440, u8 per effect. See `spawns.md`. */
+export const EFFECT_INTERP_MODE = 0x004d5440;
+/** The three tables are 29 long and contiguous, which is what fixes them. */
+export const EFFECT_COUNT = 29;
+/**
+ * A bound on the walk, so a corrupt pointer cannot run away.
+ *
+ * It is not a guess at the data: effect 8 has **144 children under its root**
+ * and 145 nodes, and a cap of 0x40 silently returned 65 of them --
+ * `verify_effects.py`'s node-count check is exactly what caught that.
+ */
+export const EFFECT_NODE_CAP = 4096;
+
+/** One node of an effect tree, flattened depth-first with the root first. */
+export interface EffectNode {
+  /** `+0x00`. `AssetDrawSlot(0)` draws nothing, so 0 is a pure transform. */
+  slot: number;
+  /** `+0x04`, 1-based. `EffectDrawNode` skips the pose and the draw below 1. */
+  bone: number;
+  /** Indices into the flattened array. */
+  children: number[];
+}
+
+/**
+ * One effect's node tree, flattened.
+ *
+ * Depth-first from the root, which is index 0 -- the order `EffectDrawNode`
+ * (`FUN_0040DE50`) recurses in, so a consumer that walks the array in order
+ * sees the parts in the order the engine draws them.
+ */
+export function effectTree(tables: ExeTables, effect: number): EffectNode[] {
+  if (!(effect >= 0 && effect < EFFECT_COUNT)) return [];
+  const root = tables.ru32(EFFECT_TREES + effect * 4) ?? 0;
+  if (!root) return [];
+  const out: EffectNode[] = [];
+  const seen = new Set<number>();
+  const walk = (va: number): number => {
+    const r = tables.v2r(va);
+    if (r === null || seen.has(va) || out.length >= EFFECT_NODE_CAP) return -1;
+    seen.add(va);
+    const here = out.length;
+    const n = u16(tables.data, r + 6);
+    out.push({ slot: u32(tables.data, r), bone: i16(tables.data, r + 4),
+               children: [] });
+    for (let k = 0; k < n && k < EFFECT_NODE_CAP; k++) {
+      const child = u32(tables.data, r + 8 + k * 4);
+      const idx = child ? walk(child) : -1;
+      if (idx >= 0) out[here].children.push(idx);
+    }
+    return here;
+  };
+  walk(root);
+  return out;
+}
+
+/**
+ * `PropBuildScriptFlagEffect` (`FUN_00472B30`) -- class 0x44 selector 0, and
+ * the literals its object is built from.
+ *
+ * It is the one selector whose object draws an **animated effect** rather than
+ * a model at a pose: `ScriptFlagEffectUpdate` (`FUN_00473B90`) calls
+ * `EffectDrawWithCapture` with the four-word state block at `obj+0x324`, and
+ * nothing anywhere in the family translates by the spawn's own position --
+ * the motion carries world coordinates. Stage 1's two window halves at evt
+ * `0x1580` and `0x15CC` are the only two spawns in the game that reach it.
+ */
+export const SCRIPT_FLAG_EFFECT_MOTION = 0x1d7;
+/**
+ * `CMP ECX,0x13F5` at `0x00472B6C`: the dword at `tail+0x04`. Matching picks
+ * effect 2 and capture bone 2, and anything else effect 3 and bone 1.
+ */
+export const SCRIPT_FLAG_EFFECT_SLOT_A = 0x13f5;
+export const SCRIPT_FLAG_EFFECT_A = { effect: 2, captureBone: 2 };
+export const SCRIPT_FLAG_EFFECT_B = { effect: 3, captureBone: 1 };
+/** `g_script_flag_effect_cues_a` -- 0x005961F0, and its neighbour. */
+export const SCRIPT_FLAG_EFFECT_CUES_A = 0x005961f0;
+export const SCRIPT_FLAG_EFFECT_CUES_B = 0x00596204;
+
+/** A cue list, up to and not including its `-1` terminator. */
+export function effectSoundCues(tables: ExeTables, va: number): number[] {
+  const out: number[] = [];
+  for (let k = 0; k < 64; k++) {
+    const r = tables.v2r(va + k * 2);
+    if (r === null) break;
+    const v = i16(tables.data, r);
+    if (v === -1) break;
+    out.push(v);
   }
   return out;
 }

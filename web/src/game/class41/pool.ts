@@ -13,6 +13,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { FallingContainerUpdate } from "../class44/container";
+import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, OriginalItemPropUpdate, StoryModeSwitchUpdate,
   PropUpdateType14,
@@ -55,6 +56,8 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       case PropFamily.Lift: LiftUpdate(p, events); break;
       case PropFamily.Generic: GenericPropUpdate(p); break;
       case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
+      case PropFamily.ScriptFlagEffect:
+        ScriptFlagEffectUpdate(p, events); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }

@@ -285,8 +285,9 @@ export function ZombieStateDeath6(obj: ZombieActor, rng: Rng): void {
   }
   if (obj.sub === 1) {
     // `OR EAX, 0x22000` on `obj+0x34` at 0x00454D4D: off the floor, and the
-    // same bit the ballistic entrances raise while an arc is armed.
-    obj.flags |= ActorFlag.Airborne | ActorFlag.ArcSpent;
+    // same no-hit-reaction latch the ballistic entrances raise while an arc
+    // is armed.
+    obj.flags |= ActorFlag.Airborne | ActorFlag.NoHitReaction;
     // `AND AH, 0xfd` then `OR EAX, 0x60000000` at 0x00454D5B — the pending
     // hit reaction is dropped and the body takes part in both pushes again.
     obj.flags2 = (obj.flags2 & ~ZombieFlag2.HitReactionPending)

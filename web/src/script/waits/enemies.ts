@@ -33,10 +33,13 @@
  * and with the gate free to answer on its own frame it read the count as 0,
  * passed, and the block advanced while the two were still falling.
  *
- * With shooting off, nothing can make a count fall, so the gate is not a
- * condition this client can evaluate and it passes — see `WAIT_NOTES`. It used
- * to be paced on a stopwatch instead, a stand-in from before the player could
- * shoot, which only ever produced a wait of an invented length.
+ * A host that answers null has no count to give and the gate passes — see
+ * `WAIT_NOTES`. **The player's host never does**: it always hands over the
+ * real `g_enemies_alive`. It used to answer null whenever the Shoot toggle was
+ * off, which was its default, and the effect was a client that walked through
+ * every fight in the game without stopping for one. The toggle is gone; the
+ * null case is the contract for hosts that have no combat at all, such as the
+ * stubs in `test/`.
  */
 import type { OpJson } from "../../bundle";
 import { G } from "../../game/globals";

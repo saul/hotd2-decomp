@@ -16,11 +16,47 @@
  * reference implementation appends to a `bytearray`, which amortises fine in
  * Python; here it is the difference between decompressing 80 MB of `pol/` and
  * decompressing it four times over, because every doubling copies.
+ *
+ * **That header is not trusted input.** `container.classify` decompresses on
+ * spec to find out whether a blob is compressed at all, so this routine is
+ * handed 865 of the game's files whose first dword merely looks like a size --
+ * up to 4.03 GB of it in `tex/st5_01b.bin`. See {@link maxOutput}.
  */
 
 export class LZError extends Error {
   override name = "LZError";
 }
+
+/**
+ * The most output the grammar can produce from *n* bytes of stream.
+ *
+ * The cheapest 256 bytes of output is a long-form match with a zero length
+ * field: two flag bits, a u16 and a length byte, so 3.25 bytes in for 256
+ * out, and nothing in the grammar beats 78.8x. The highest ratio any file in
+ * the game actually reaches is 25.4x, in `tex/scr_tv.bin`.
+ *
+ * A size header above this is arithmetically impossible, so saying so is a
+ * classification and not a guess -- which is exactly what the caller wants,
+ * because `container.classify` is asking whether the blob is compressed at
+ * all. Without it the answer came from *trying*, and trying meant allocating
+ * whatever the first dword said. Node hands over a 4 GB buffer and the LZ
+ * then fails, which is why the CLI never noticed; a browser refuses, and a
+ * `RangeError` is not an `LZError`, so it escaped the trial's catch and
+ * killed the whole export at the first raw texture bank.
+ */
+function maxOutput(n: number): number {
+  return n * 80 + 0x100;
+}
+
+/**
+ * Cap on the *first* allocation. `room` grows past it as needed.
+ *
+ * Belt and braces beside {@link maxOutput}: a large enough blob can carry a
+ * garbage header that is still under the arithmetic bound, and nothing should
+ * commit hundreds of megabytes before a single byte has been decoded. The
+ * biggest file in the game decompresses to 21 MB, so no real file ever grows.
+ */
+const FIRST_ALLOC = 32 << 20;
 
 /**
  * LSB-first bit reader over a byte stream.
@@ -93,13 +129,19 @@ class BitReader {
  */
 export function decompress(src: Uint8Array, pos = 0,
                            expected: number | null = null): Uint8Array {
+  if (expected !== null && expected > maxOutput(Math.max(0, src.length - pos))) {
+    throw new LZError(
+      `header claims ${expected} bytes from ${src.length - pos} of stream, `
+      + "which the grammar cannot produce; this is not a compressed file");
+  }
   const r = new BitReader(src, pos);
-  let out = new Uint8Array(expected ?? Math.max(0x1000, src.length * 3));
+  let out = new Uint8Array(Math.min(
+    expected ?? Math.max(0x1000, src.length * 3), FIRST_ALLOC));
   let n = 0;
 
   const room = (need: number): void => {
     if (n + need <= out.length) return;
-    let cap = out.length * 2;
+    let cap = Math.max(0x1000, out.length * 2);
     while (cap < n + need) cap *= 2;
     const grown = new Uint8Array(cap);
     grown.set(out.subarray(0, n));

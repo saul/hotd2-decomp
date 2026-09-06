@@ -23,8 +23,18 @@ function stubCanvas(): void {
     fillRect: () => undefined,
     fillText: () => undefined,
   };
+  // `document` is also where the Pointer Lock API lives, and `FreeRoam`
+  // listens on it -- see `stubWindow` below for why a constructor's listeners
+  // are stubbed rather than avoided. `exitPointerLock` counts its calls,
+  // because "leaving free roam releases the pointer" is a thing this file can
+  // check without a browser.
   const doc = {
     createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }),
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    pointerLockElement: null as unknown,
+    exits: 0,
+    exitPointerLock() { this.exits++; },
   };
   (globalThis as unknown as { document: unknown }).document = doc;
 }
@@ -51,6 +61,7 @@ function stubViewport(): unknown {
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
     setPointerCapture: () => undefined,
+    requestPointerLock: () => undefined,
   };
 }
 
@@ -62,7 +73,8 @@ const { Backdrop } = await import("../src/render/backdrop");
 const { Rain } = await import("../src/render/rain");
 const { Scope } = await import("../src/core/scope");
 const { ownResources, subtreeResources } = await import("../src/render/scope3d");
-const { FreeRoam, isTyping } = await import("../src/render/freeroam");
+const { FreeRoam, isTyping, ownsKey }
+  = await import("../src/render/freeroam");
 const { RigLayer } = await import("../src/render/rigs");
 const { CamPaths } = await import("../src/game/camera/curve");
 const { AmbientLight, CanvasTexture, DirectionalLight, Group, Mesh,
@@ -416,20 +428,46 @@ console.log("\nwhat a subtree is holding");
 console.log("\nwhose keystroke is it");
 
 {
-  // The page's shortcuts are suppressed while a control has focus. `BUTTON`
-  // was missing, and buttons are the one focusable thing the browser
-  // **activates on Space** -- so Space with the play button focused ran the
-  // shortcut and clicked the button, and playback toggled twice, which reads
-  // as the key doing nothing.
-  const el = (tagName: string, contentEditable = false) =>
-    ({ tagName, isContentEditable: contentEditable }) as unknown as EventTarget;
+  // A focused control keeps the keys it acts on **and no others**, and both
+  // halves of that have been wrong. `BUTTON` was missing, and buttons are the
+  // one focusable thing the browser *activates on Space* -- so Space with the
+  // play button focused ran the shortcut and clicked the button, and playback
+  // toggled twice, which reads as the key doing nothing. Adding `BUTTON` to
+  // `isTyping` fixed that and broke something larger: free roam is entered by
+  // clicking the Free roam button, which then holds focus, so every WASD
+  // keystroke afterwards had a `BUTTON` as its target and was dropped. The
+  // camera did not move, and the report read "as if some other element is
+  // capturing the keys".
+  //
+  // So the question is asked about the key as well as the element.
+  // `web/tools/freeroam.mjs` is the same property on the real page, with a
+  // real click deciding what has focus.
+  const el = (tagName: string, contentEditable = false, type = "") =>
+    ({ tagName, isContentEditable: contentEditable, type }) as unknown as EventTarget;
 
-  for (const tag of ["INPUT", "TEXTAREA", "SELECT", "BUTTON"]) {
-    check(`${tag} keeps its own keys`, isTyping(el(tag)));
+  for (const tag of ["INPUT", "TEXTAREA", "SELECT"]) {
+    check(`${tag} keeps its own keys`, isTyping(el(tag))
+          && ownsKey(el(tag), "KeyW"));
   }
-  check("a contenteditable does too", isTyping(el("DIV", true)));
+  check("a contenteditable does too",
+        isTyping(el("DIV", true)) && ownsKey(el("DIV", true), "KeyW"));
   check("and an ordinary element does not", !isTyping(el("DIV")));
   check("nor does a keystroke with no target", !isTyping(null));
+
+  // The control cases: not typing, and claiming only what they act on.
+  check("a BUTTON keeps Space and Enter",
+        ownsKey(el("BUTTON"), "Space") && ownsKey(el("BUTTON"), "Enter"));
+  check("...and does not keep W", !isTyping(el("BUTTON"))
+        && !ownsKey(el("BUTTON"), "KeyW"));
+  check("a checkbox keeps Space and not W",
+        ownsKey(el("INPUT", false, "checkbox"), "Space")
+        && !ownsKey(el("INPUT", false, "checkbox"), "KeyW"));
+  check("a range keeps the arrows, which the transport binds too",
+        ownsKey(el("INPUT", false, "range"), "ArrowLeft")
+        && !ownsKey(el("INPUT", false, "range"), "KeyW"));
+  check("a search box is typing, whatever its type says",
+        isTyping(el("INPUT", false, "search"))
+        && ownsKey(el("INPUT", false, "search"), "KeyW"));
 }
 
 console.log("\nfree roam: a system, so a rebuild reaches it");
@@ -439,7 +477,8 @@ console.log("\nfree roam: a system, so a rebuild reaches it");
   // hand out of `Player.frame`, so `world.resync` -- the one call a seek and a
   // snapshot load both make -- never reached it, and the camera was left
   // wherever the previous state's last frame had put it.
-  const roam = new FreeRoam(stubViewport() as HTMLElement);
+  const viewport = stubViewport() as HTMLElement;
+  const roam = new FreeRoam(viewport);
   const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
   // The one field of `RenderContext` this layer reads. Nothing else in a
   // context is a camera, so a partial one is honest here rather than a stub.
@@ -475,6 +514,25 @@ console.log("\nfree roam: a system, so a rebuild reaches it");
   check("a tick with no key down moves nothing",
         camera.position.x === 100 && camera.position.z === -300,
         `${camera.position.toArray().join(",")}`);
+
+  // Leaving free roam has to let the pointer go, or the viewer is left with a
+  // captured cursor over a mode that does not use it. `enabled` is an accessor
+  // for exactly this reason; the browser half is `web/tools/freeroam.mjs`.
+  const doc = document as unknown as
+    { exits: number; pointerLockElement: unknown };
+  doc.pointerLockElement = viewport;
+  const before = doc.exits;
+  roam.enabled = false;
+  check("leaving free roam exits the pointer lock", doc.exits === before + 1,
+        `${doc.exits - before} calls to exitPointerLock`);
+  // ...and a departure with no lock held asks the document for nothing. The
+  // browser would no-op, but a layer that cannot tell whether it holds the
+  // pointer is one that will take somebody else's.
+  doc.pointerLockElement = null;
+  roam.enabled = true;
+  roam.enabled = false;
+  check("...and leaving without one asks for nothing",
+        doc.exits === before + 1, `${doc.exits - before} calls`);
 
   roam.dispose();
 }
@@ -1100,11 +1158,6 @@ console.log("\nthe shot effects are models, one per frame:");
 
   // The muzzle flash rides the camera: its group carries the camera's matrix,
   // so the record's own numbers stay camera-space and it stays on the gun.
-  //
-  // It is **off by default** -- it sits under the crosshair because a light
-  // gun wanted something bright at the aim point, and this player has a mouse
-  // -- so the toggle has to be on for any of this to draw. The port spawns the
-  // records either way, which is what the count below checks.
   G.g_blood_sprays.length = 0;
   const f = G.g_shot_flash_ring[0]!;
   f.live = true;

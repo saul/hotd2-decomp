@@ -256,7 +256,7 @@ export function ZombieStateLeapToPoint(obj: ZombieActor, eye: Vec3, dt: number,
 
   if (obj.sub === 0) {
     if (t.idle_motion !== undefined) ActorSetMotion(obj, t.idle_motion);
-    obj.flags |= ActorFlag.ArcSpent;
+    obj.flags |= ActorFlag.NoHitReaction;
     obj.flags2 |= ZombieFlag2.Carried;
     obj.zom.holdFrames = t.frames ?? 1;
     const n = Math.max(1, obj.zom.holdFrames);

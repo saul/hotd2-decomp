@@ -97,6 +97,22 @@ export interface GameHost {
    * has and a headless run always does.
    */
   viewSpaceOf(at: number, out: Vec3): boolean;
+  /**
+   * A **world point** in the camera's own space — the inverse of
+   * {@link GameHost.viewPoint}, and the same sign convention as
+   * {@link GameHost.viewSpaceOf}: `-z` is in front.
+   *
+   * `SpawnSpriteEffectFromParams` (`FUN_004073B0`) reads exactly this, through
+   * `MatrixStackSetTopFromArray(&g_camera_blocks + camera * 0x1A4)` at the
+   * block's `+0x00` matrix rather than the `+0x40` one every other caller
+   * uses, and it is what decides an impact sprite's size. The muzzle effects
+   * need it too, to recover the crosshair direction the engine reads straight
+   * out of `g_crosshair_x` in pixels.
+   *
+   * Optional, and false with no camera: an effect then keeps its kind's base
+   * scale, which is what the engine uses past fifteen units anyway.
+   */
+  viewSpaceOfPoint?(p: Vec3, out: Vec3): boolean;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */
   setBoneSlot(at: number, bone: number, slot: number): void;
   /**

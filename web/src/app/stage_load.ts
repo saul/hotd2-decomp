@@ -165,6 +165,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   // measures against.
   p.slotModels.adopt(p.scene3d.root);
   p.chars.slotModels = p.slotModels;
+  // ...and once more for the shot effects. `chars` owns the bones, and the
+  // blood is glued to one for its whole life -- see `render/effects.ts`.
+  p.effects.adopt(p.scene3d.root);
+  p.effects.bones = p.chars;
   p.shooting.reset();
   p.shooting.setTables(bundle.script.characters?.combat);
   p.dialogue = bundle.script.sound ?? null;

@@ -56,12 +56,16 @@
  * The voice comes in two sets and `combat.voice_set_a_types` says which set a
  * character type takes; that split is `ActorPlayHitVoice`'s own switch.
  *
- * The **sprite** is `FUN_00407230` for a flesh hit: 25 frames at 60 Hz, drawn
- * at the bone, scaled `(-view_z * 0.0375 + 0.25) * 0.3` and then by the
- * severity of the hit — 0.5 damaged, 0.75 damaged and swapped, 1.0 severed.
- * That geometry and timing are transcribed; the *artwork* is asset slots
- * `0x3A..0x52`, which the bundle does not carry, so a radial splat stands in
- * for it. Marked `[open]` in docs/formats/combat.md rather than pretended.
+ * The **sprites are not here any more.** `ActorShotFeedback` (`FUN_00454050`),
+ * `SpawnWorldImpact` (`FUN_00405260`), `SpawnBloodSpray` (`FUN_00407310`) and
+ * the three per-shot rings of `PlayerShotEffectSpawn` (`FUN_00416F70`) are all
+ * transcribed in `game/effects/` and `game/combat/feedback.ts`, and
+ * `render/effects.ts` draws them from the game's own asset slots. What used to
+ * be here was a canvas gradient standing in for twenty-five models, no muzzle
+ * flash and no tracer at all.
+ *
+ * The **voices** stay, because the pick is seeded here and the tables the ids
+ * come from are the bundle's.
  *
  * ## What this does not do
  *
@@ -70,20 +74,17 @@
  * whose arm has come off still plays a directional death. What happens after
  * the clip is `FUN_00456740`, which is unread, so the corpse simply stays.
  *
- * A **miss** has no material here: `FUN_00405260` takes it from the collision
- * triangle `ColiSegmentVsMesh` hit, and the collision meshes are not in the
- * bundle. The visible geometry gives the impact *point*, and material 3 —
- * the game's own "other" catch-all — gives the sound. `[open]`, and said so.
+ * A **miss** has a material now. `game/coli.ts` traces the shot segment
+ * against the game's own collision sets, so the impact point, the normal and
+ * the surface id are the engine's numbers rather than a raycast against
+ * whatever happened to be drawn. That `[open]` is closed.
  */
 
-import {
-  AdditiveBlending, CanvasTexture, Raycaster, Sprite, SpriteMaterial, Vector2,
-  Vector3, type Camera, type Object3D,
-} from "three";
+import { Raycaster, Vector2, Vector3, type Camera, type Object3D } from "three";
 import type { CharacterLayer } from "./characters";
 import type { CombatJson } from "../bundle";
 import type { Events, EventMap } from "../core/events";
-import type { Context, System, Tick } from "../core/system";
+import type { System } from "../core/system";
 import { G } from "../game/globals";
 import { HitResultCode } from "../game/combat/resolve_hit";
 import { Rng } from "../core/rng";
@@ -102,15 +103,6 @@ const SHOT_RANGE = 1000;
 
 const BAMS = 65536 / (Math.PI * 2);
 
-/**
- * `FUN_00407230`: the blood sprite runs 25 asset slots, one per game frame.
- */
-const BLOOD_FRAMES = 25;
-/** ...and the material impact sprites are frame-per-frame too. */
-const IMPACT_HZ = 60;
-/** `FUN_00405260` has no material here — 3 is the game's "other" surface. */
-const MISS_MATERIAL = 3;
-
 export interface ShotResult {
   hit: boolean;
   bone?: number;
@@ -121,100 +113,6 @@ export interface ShotResult {
   /** `g_hit_result`. */
   result?: HitResultCode;
   points: number;
-}
-
-/**
- * The impact sprites, pooled.
- *
- * `FUN_00407230` draws its 25 frames in **view space** at the bone's position
- * with an explicit scale, which is why the size law is reproduced rather than
- * left to perspective: the sprite is near-constant on screen out to 20 units
- * and fixed in the world beyond that.
- */
-class ImpactSprites {
-  private readonly pool: { s: Sprite; t: number; life: number; k: number }[] = [];
-  private readonly tex = ImpactSprites.splat();
-
-  constructor(private readonly scene: Object3D) {}
-
-  /** A radial splat — a stand-in for asset slots 0x3A..0x52. */
-  private static splat(): CanvasTexture {
-    const c = document.createElement("canvas");
-    c.width = c.height = 64;
-    const g = c.getContext("2d")!;
-    const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-    rg.addColorStop(0, "rgba(255,240,220,0.95)");
-    rg.addColorStop(0.35, "rgba(220,70,50,0.65)");
-    rg.addColorStop(1, "rgba(120,10,10,0)");
-    g.fillStyle = rg;
-    g.fillRect(0, 0, 64, 64);
-    return new CanvasTexture(c);
-  }
-
-  /** *scale* is the game's severity factor; *viewZ* the hit's view-space z. */
-  spawn(at: Vector3, viewZ: number, scale: number, frames: number): void {
-    // `FUN_00407230`: 1.0 past 20 units, otherwise -z*0.0375 + 0.25, then the
-    // 0.3 the non-wide path applies, then the severity.
-    const depth = viewZ < -20 ? 1.0 : -viewZ * 0.0375 + 0.25;
-    const k = Math.max(0.05, depth * 0.3 * scale);
-    let e = this.pool.find((x) => x.life <= 0);
-    if (!e) {
-      const sp = new Sprite(new SpriteMaterial({
-        map: this.tex, transparent: true, depthTest: false,
-        depthWrite: false, blending: AdditiveBlending,
-      }));
-      sp.renderOrder = 900;
-      this.scene.add(sp);
-      e = { s: sp, t: 0, life: 0, k: 1 };
-      this.pool.push(e);
-    }
-    e.s.position.copy(at);
-    e.t = 0;
-    e.k = k;
-    e.life = frames / IMPACT_HZ;
-    e.s.visible = true;
-    e.s.scale.setScalar(k * 8);
-  }
-
-  /** Is any sprite still alive? `Player.wantsFrame` is the reader. */
-  get busy(): boolean {
-    return this.pool.some((e) => e.life > 0);
-  }
-
-  update(dt: number): void {
-    for (const e of this.pool) {
-      if (e.life <= 0) continue;
-      e.t += dt;
-      if (e.t >= e.life) { e.life = 0; e.s.visible = false; continue; }
-      // The sprite is a flipbook in the game; here the stand-in fades and
-      // grows over the same span, so the timing still reads correctly.
-      const u = e.t / e.life;
-      e.s.scale.setScalar(e.k * 8 * (1 + u * 1.6));
-      (e.s.material as SpriteMaterial).opacity = 1 - u;
-    }
-  }
-
-  clear(): void {
-    for (const e of this.pool) { e.life = 0; e.s.visible = false; }
-  }
-
-  /**
-   * Give the pool back.
-   *
-   * The sprites are added to the scene and the splat is a `CanvasTexture`
-   * built here, so all of it is this object's -- and none of it was ever
-   * freed, because nothing owned this object. It is on the app scope now, so
-   * "for the life of the page" is a *statement about the scope* rather than
-   * about a `new` nobody wrote down.
-   */
-  dispose(): void {
-    for (const e of this.pool) {
-      e.s.removeFromParent();
-      (e.s.material as SpriteMaterial).dispose();
-    }
-    this.pool.length = 0;
-    this.tex.dispose();
-  }
 }
 
 export class Shooting implements System {
@@ -258,20 +156,8 @@ export class Shooting implements System {
   playSound: (id: number) => void = () => {};
 
   private combat: CombatJson | null = null;
-  private impacts: ImpactSprites | null = null;
   /** Draw-time noise only — see `pickOne`. Reseeded by `reset`. */
   private readonly rng = new Rng(SOUND_PICK_SEED);
-  private readonly _v = new Vector3();
-  /**
-   * The resolved shot's point, held apart from `_v`.
-   *
-   * `viewZ` transforms **into** `_v`, so handing it the same vector as the hit
-   * point would leave the point in view space by the time the sprite is placed
-   * — a scratch aliasing itself, which reads as an impact drawn a few hundred
-   * units behind the camera.
-   */
-  private readonly _at = new Vector3();
-
   /**
    * The viewport and the crosshair are React's, and arrive through `UiHost`.
    *
@@ -286,7 +172,7 @@ export class Shooting implements System {
   constructor(private readonly viewport: HTMLElement,
               private readonly dot: HTMLElement,
               private readonly chars: CharacterLayer,
-              private readonly scope: Scope,
+              scope: Scope,
               events: Events) {
     // The feedback for a shot comes back from the port, because the port is
     // what decides what the shot did. Owned by the app scope, like everything
@@ -318,12 +204,6 @@ export class Shooting implements System {
 
     this._camera = camera ?? this._camera;
     this._scene = scene ?? this._scene;
-    if (this._scene && !this.impacts) {
-      // Owned, not merely made: the pool and its splat texture live as long as
-      // the page and that is a decision, so it is written down where the
-      // disposal tree can show it.
-      this.impacts = this.scope.own(new ImpactSprites(this._scene));
-    }
   }
 
   get isEnabled(): boolean { return this.enabled; }
@@ -346,24 +226,19 @@ export class Shooting implements System {
   }
 
   /**
-   * Advance the impact sprites.
-   *
-   * Wall time, not game time: they are feedback for a click, not part of the
-   * script's clock, so a paused player still sees them out.
-   */
-  update(_ctx: Context, t: Tick): void {
-    this.impacts?.update(t.wall);
-  }
-
-  /**
    * Is there still feedback in flight?
    *
-   * A paused player stops asking for frames, and a shot fired while it is
-   * paused would otherwise leave its sprite hanging in the air. This is what
-   * keeps the loop awake until the last one has gone.
+   * The effects are **game state** now: they are pools in `G` and
+   * `ShotEffectsTick` steps them at the head of `GameUpdate`, so this asks
+   * the port rather than a pool of its own. `wantsFrame` tests `freeze`
+   * before it gets here, which is what stops a frozen transport being asked
+   * for frames it would never step.
    */
   get busy(): boolean {
-    return this.impacts?.busy ?? false;
+    return G.g_sprite_effects.length > 0
+      || G.g_blood_sprays.length > 0
+      || G.g_shot_tracer_ring.some((t) => t.live)
+      || G.g_shot_flash_ring.some((f) => f.live);
   }
 
   /**
@@ -396,12 +271,6 @@ export class Shooting implements System {
     if (v) this.playSound(v.id);
   }
 
-  /** View-space z of a world point, which is what the sprite scale reads. */
-  private viewZ(at: Vector3): number {
-    if (!this._camera) return -20;
-    return this._v.copy(at).applyMatrix4(this._camera.matrixWorldInverse).z;
-  }
-
   private readonly _back = new Vector3();
   private _camera: Camera | null = null;
   private _scene: Object3D | null = null;
@@ -409,7 +278,6 @@ export class Shooting implements System {
   reset(): void {
     this.shots = 0;
     this.hits = 0;
-    this.impacts?.clear();
     this.chars.revive();
     // No `ScoreResetAll` here any more. The score is engine state and this is
     // a renderer; both callers of `reset` (the seek and the stage load) run
@@ -442,44 +310,36 @@ export class Shooting implements System {
   }
 
   /**
-   * What the port did with a shot, drawn.
+   * What the port did with a shot, in the feed and in the voice.
    *
-   * `ActorShotFeedback`: a result-5 hit is a ricochet, everything else is
-   * blood at the bone, scaled by how bad the hit was. None of it is state and
-   * none of it is a decision — the decision arrived in the payload.
+   * **Every sprite this used to draw is the port's now.** What is left is the
+   * half that is genuinely the renderer's: `ActorPlayHitVoice`
+   * (`FUN_0040A6F0`) picks from a table with a seeded generator this layer
+   * owns, and the event feed is the player's, not the game's.
    */
   private onResolved(r: EventMap["shot.resolved"]): void {
-    if (r.kind === "miss") return this.drawMiss(r);
+    if (r.kind === "miss") return this.noteMiss(r);
     this.hits++;
-    if (r.kind === "prop") return this.drawPropHit(r);
-    const point = this._at.set(r.point?.x ?? 0, r.point?.y ?? 0,
-                               r.point?.z ?? 0);
+    if (r.kind === "prop") {
+      this.onShot({ hit: true, points: 0 },
+                  `breakable group ${r.propGroup} member ${r.propMember}`
+                  + ((r.propHp ?? 0) > 1 ? " · cracked" : " · broken"));
+      return;
+    }
 
     if (r.kind === "marked") {
-      // `ActorShotFeedback` still runs: it is flesh, so it is blood at the
-      // shot point, at the "damaged" severity -- there is no hit result to
-      // scale by.
-      const scale = this.combat?.blood_scale["1"] ?? 0.5;
-      this.impacts?.spawn(point, this.viewZ(point), scale, BLOOD_FRAMES);
+      // The class scores it and the class draws it: `OneHitTargetUpdate`
+      // spawns its own `SpawnBoneHitSprite`. A civilian's own effect is
+      // `SpawnCivilianBloodPool` (`FUN_0048E080`), a decal object that is
+      // still unported -- [open].
       this.onShot({ hit: true, bone: r.bone, points: 0 },
                   `${r.who} · marked, its own class scores it`);
       return;
     }
 
-    const c = this.combat;
-    if (r.result === HitResultCode.NoEffect) {
-      const ric = c?.no_effect.sound;
-      if (ric) this.playSound(ric.id);
-      const sp = c?.impact_sprite[String(c.no_effect.material)];
-      if (sp && this.impacts) {
-        this.impacts.spawn(point, this.viewZ(point), sp[2],
-                           Math.max(1, sp[1] - sp[0] + 1));
-      }
-    } else {
+    if (r.result !== HitResultCode.NoEffect) {
       this.voice(r.charType ?? 0,
                  r.killed ? (r.head ? "head" : "kill") : "hurt");
-      const scale = c?.blood_scale[String(r.result)] ?? 0.5;
-      this.impacts?.spawn(point, this.viewZ(point), scale, BLOOD_FRAMES);
     }
 
     const note = `${r.who} bone ${r.bone}${r.head ? " (head)" : ""}` +
@@ -495,56 +355,18 @@ export class Shooting implements System {
   }
 
   /**
-   * A shot that hit nothing the port knows about.
+   * A shot that hit nothing but the level.
    *
-   * `FUN_00405260` takes the material from the collision triangle; there is
-   * none here, so the visible geometry gives the point and material 3
-   * ("other") gives the sound. The ray comes back with the event because this
-   * is the one impact point only the renderer can find.
+   * The impact and its sound are `SpawnWorldImpact` (`FUN_00405260`) in the
+   * port; what is left here is the feed line, and it can name the surface now
+   * because the port traced the game's own collision and put the material in
+   * the event.
    */
-  private drawMiss(r: EventMap["shot.resolved"]): void {
-    this.ray.ray.origin.set(r.ray.origin.x, r.ray.origin.y, r.ray.origin.z);
-    this.ray.ray.direction.set(r.ray.dir.x, r.ray.dir.y, r.ray.dir.z);
-    this.ray.far = SHOT_RANGE;
-    const where = this._scene
-      ? this.ray.intersectObject(this._scene, true).find((h) => h.object.visible)
-      : undefined;
-    const mat = String(MISS_MATERIAL);
-    const ric = this.combat?.ricochet[mat];
-    if (ric) this.playSound(ric.id);
-    if (where && this.impacts) {
-      const sp = this.combat?.impact_sprite[mat]
-        ?? this.combat?.impact_sprite_default;
-      const frames = sp ? Math.max(1, sp[1] - sp[0] + 1) : BLOOD_FRAMES;
-      this.impacts.spawn(where.point, this.viewZ(where.point),
-                         sp ? sp[2] : 1, frames);
-    }
+  private noteMiss(r: EventMap["shot.resolved"]): void {
+    const ric = r.surface === undefined
+      ? undefined : this.combat?.ricochet[String(r.surface)];
     this.onShot({ hit: false, points: 0 },
                 `miss${ric ? ` · ${ric.file.split("\\").pop()}` : ""}`);
-  }
-
-  /**
-   * A shot that landed on a breakable prop.
-   *
-   * A prop is not flesh: the impact is the hard-surface spark, which is what
-   * `SpawnPropHitSpark` (`FUN_00465860`) puts at the shot point. `propHp` is
-   * still what it was when the shot landed — `BreakablePropUpdate` consumes
-   * the hit on its next frame — so this says what the shot is about to do
-   * rather than what it did.
-   */
-  private drawPropHit(r: EventMap["shot.resolved"]): void {
-    const point = this._at.set(r.point?.x ?? 0, r.point?.y ?? 0,
-                               r.point?.z ?? 0);
-    const c = this.combat;
-    const sp = c?.impact_sprite[String(MISS_MATERIAL)]
-      ?? c?.impact_sprite_default;
-    if (sp && this.impacts) {
-      this.impacts.spawn(point, this.viewZ(point), sp[2],
-                         Math.max(1, sp[1] - sp[0] + 1));
-    }
-    this.onShot({ hit: true, points: 0 },
-                `breakable group ${r.propGroup} member ${r.propMember}`
-                + ((r.propHp ?? 0) > 1 ? " · cracked" : " · broken"));
   }
 
   get describe(): string {

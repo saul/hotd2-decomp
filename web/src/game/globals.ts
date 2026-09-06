@@ -15,7 +15,13 @@
  * something survives a frame and is not reachable from here, the snapshot is
  * wrong and so is the port.
  */
+import type { BloodSpray } from "./effects/blood";
 import type { SeveredHead } from "./effects/severed_head";
+import type { ShotFlash, ShotTracer, ShotWeaponEffect }
+  from "./effects/shot_effects";
+import { makeShotFlashRing, makeShotTracerRing, makeShotWeaponRing }
+  from "./effects/shot_effects";
+import type { SpriteEffect } from "./effects/sprite";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
@@ -268,6 +274,46 @@ export const G = {
   g_severed_heads: [] as SeveredHead[],
   /** `[port-only]` — see {@link SeveredHead.id}. */
   g_severed_head_seq: 0,
+  /**
+   * `[port-only]` — the sprite-effect objects `SpawnSpriteEffectFromParams`
+   * (`FUN_004073B0`) has allocated: impacts, ricochets, splashes and the
+   * boss bursts. Plain records for the same reason as `g_severed_heads`.
+   */
+  g_sprite_effects: [] as SpriteEffect[],
+  /** `[port-only]` — see {@link SpriteEffect.id}. */
+  g_sprite_effect_seq: 0,
+  /**
+   * `[port-only]` — the blood `SpawnBloodSpray` (`FUN_00407310`) and
+   * `SpawnBoneHitSprite` (`FUN_00407200`) have allocated. Each one holds an
+   * actor and a bone, not a position, because the engine re-reads the bone
+   * every frame it draws.
+   */
+  g_blood_sprays: [] as BloodSpray[],
+  /** `[port-only]` — see {@link BloodSpray.id}. */
+  g_blood_spray_seq: 0,
+
+  // -- what leaves the gun -----------------------------------------------
+  /** `g_shot_flash_ring` — 0x009A2960, six records a player. */
+  g_shot_flash_ring: makeShotFlashRing() as ShotFlash[],
+  /** `g_shot_tracer_ring` — 0x009A2460, the round itself. */
+  g_shot_tracer_ring: makeShotTracerRing() as ShotTracer[],
+  /** `g_shot_weapon_ring` — 0x009A2700, Original Mode weapon kind 4 only. */
+  g_shot_weapon_ring: makeShotWeaponRing() as ShotWeaponEffect[],
+  /** `g_shot_effect_cursor` — 0x009CA09C, which ring slot the next shot fills. */
+  g_shot_effect_cursor: [0, 0] as number[],
+  /**
+   * `g_shot_hit_something` — 0x009C9010. Written by `ProcessPlayerShots`
+   * (`FUN_00404570`) when this frame's shot found any candidate; its one
+   * reader kills the tracer on its second frame.
+   */
+  g_shot_hit_something: [0, 0] as number[],
+  /**
+   * `g_original_weapon_kind` — 0x009A2249, +0x09 of the per-player Original
+   * Mode block. `ResetOriginalModeLoadout` (`FUN_0048A0D0`) seeds it with 0
+   * and the port has no pickup that changes it, so every arm behind it is
+   * transcribed and unreached. See {@link OriginalWeaponKind}.
+   */
+  g_original_weapon_kind: [0, 0] as number[],
 
   // -- difficulty --------------------------------------------------------
   /** `g_difficulty` — 0x009C8E94. Scales spawn HP only. */
@@ -865,6 +911,16 @@ export function ResetGameGlobals(): void {
   G.g_shot_requests = [];
   G.g_severed_heads = [];
   G.g_severed_head_seq = 0;
+  G.g_sprite_effects = [];
+  G.g_sprite_effect_seq = 0;
+  G.g_blood_sprays = [];
+  G.g_blood_spray_seq = 0;
+  G.g_shot_flash_ring = makeShotFlashRing();
+  G.g_shot_tracer_ring = makeShotTracerRing();
+  G.g_shot_weapon_ring = makeShotWeaponRing();
+  G.g_shot_effect_cursor = [0, 0];
+  G.g_shot_hit_something = [0, 0];
+  G.g_original_weapon_kind = [0, 0];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();

@@ -671,6 +671,20 @@ each one.
 | Op 0 of every step never ran — a region entered a step late, a `cam_play` skipped, the camera's position jumping 41 units in stage 2's block 17 doorway | `advance_step` (0x4F) moves the program counter itself, and `executeOne` then incremented it again. `EvtAdvanceStepOrRoute` assigns `DAT_009C7108` the address of the new step's *first* instruction; this VM has no shared post-increment | increment only when the handler left the pc alone; `test/seek.test.ts` asserts every step entered runs its op 0 |
 | The camera rewound to before the start of its path once, then carried on (stage 1 block 8 step 4) | `start == -1` means **resume** in the deferred branch too: `FUN_00403490` stashes `g_cam_path_frame + 1`, not the literal -1. The port stashed -1, so `finish_sequence 7` set the clock to frame -1 and replayed all 686 frames | transcribe `FUN_00403490`; `test/seek.test.ts` asserts no play starts before frame 0 |
 | The camera's aim jerked 20 degrees the frame the last enemy died | `SelectCameraLookAtTarget`'s "nothing registered" case is a **fallback to the path's own target**, not an exit, and `CameraTrackEnemiesTick` eases onto it unconditionally — `g_camera_is_tracking` picks only the *rate* | `game/camera/track.ts`, with `g_camera_block_target` as real state in `G` |
+| Nothing left the gun | Two thirds of what a shot looks like was never ported. `PlayerShotEffectSpawn` (`FUN_00416F70`) fills **three** six-deep rings per player on every trigger pull, hit or miss: a nine-frame muzzle flash and a second draw beside it, a tracer thrown down the aim at twenty units a frame, and an Original Mode record. The tracer dies on its second frame when the shot hit something, which is the only reader of `g_shot_hit_something` | `game/effects/shot_effects.ts`; `render/effects.ts` draws the two camera-space rings under the camera's own matrix |
+| The blood was a fading circle | The engine's spray is **twenty-five models**, `pol/common.bin` 0 to 24, one a frame — there is no texture animation anywhere in this engine. The bundle carried none of the artwork, so a canvas gradient stood in for all of it | `slots_effect`, a hidden rig of 162 asset slots, and `game/effects/blood.ts` |
+| The blood sat inside the limb, at its middle | Half right and half not. `DrawBloodSpray` (`FUN_00407230`) does put it at the hit **bone**, and re-reads the bone every one of its twenty-five frames so it tracks — but at the sphere's centre **plus its radius on camera-space z**, which is the near face, the side the shot came from. The port had the centre and left it there | `render/effects.ts` works in camera space, which is what the routine does |
+| A miss had no material | `SpawnWorldImpact` (`FUN_00405260`) takes the sprite kind *and* the sound from the collision triangle, and `render/shooting.ts` had no collision to trace, so it raycast the drawn geometry and called every surface "other". The bundle carries the game's own `coli/` sets now | `ShotHitWorld` in `game/combat/shot.ts`, tracing far-end-first the way `FUN_00404B80` does |
+
+**Where the effects live, and why it is not `render/`.** All of it is engine
+state: `g_sprite_effects`, `g_blood_sprays` and the three rings are pools in
+`G`, they go into a snapshot as plain records, and `ShotEffectsTick` steps them
+at the head of `GameUpdate`. `render/effects.ts` owns only the nodes and
+rebuilds them from the pools, which is the split `SeveredHeadLayer` already
+had. The one thing it cannot rebuild is where a bone is, so the blood asks
+`CharacterLayer.boneSphere` for the same centre and radius `pickShot` tests
+with.
+
 
 ## Findings the player produced
 

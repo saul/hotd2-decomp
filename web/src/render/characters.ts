@@ -598,6 +598,29 @@ export class CharacterLayer implements System {
     return best;
   }
 
+  /**
+   * One bone's hit sphere in world space — the centre into `out`, the radius
+   * returned, or null when the actor is not posed.
+   *
+   * The same two numbers `pickShot` tests with, and the same two
+   * `DrawBloodSpray` (`FUN_00407230`) draws at: `obj + bone * 0x90 + 0x274`
+   * and `+0x284`. The blood is glued to them for its whole twenty-five
+   * frames, which is why this is a live query and not a point handed over at
+   * spawn.
+   */
+  boneSphere(at: number, bone: number, out: Vector3): number | null {
+    for (const inst of this.instances) {
+      if (inst.at !== at) continue;
+      const b = inst.type.bones.find((x) => x.bone === bone);
+      const node = b && inst.bones.get(bone);
+      if (!b || !node || !b.hit_centre) return null;
+      out.set(b.hit_centre[0], b.hit_centre[1], b.hit_centre[2]);
+      node.localToWorld(out);
+      return b.hit_radius ?? null;
+    }
+    return null;
+  }
+
   /** The breakable props, so a barrel in front of a zombie takes the shot. */
   breakables: BreakableLayer | null = null;
   /**

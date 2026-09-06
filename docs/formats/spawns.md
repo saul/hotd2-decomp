@@ -656,6 +656,34 @@ consumer sees it, from the descriptor's `+0x08`:
   switch would answer **any shot fired anywhere**. Whether that is intentional
   is `[open]`; no shipped switch takes the path.
 
+### The spark is at the crosshair, and the blood is not
+
+`SpawnPropHitSpark` (`FUN_00465860`) is the one effect in the whole shot path
+that lands where the shot was **aimed** rather than at the middle of what it
+hit. Its position is the crosshair unprojected to the prop's own camera depth:
+
+```c
+x = -(g_crosshair_x[player] * obj[0x78]) / g_projection_distance_px;
+y = -(g_crosshair_y[player] * obj[0x78]) / g_projection_distance_px;
+z =   obj[0x78];
+transform by the camera matrix;                 /* into the world */
+z = obj[0x1A4];                                 /* ...and then z is replaced */
+```
+
+The last line is two `MOV [ESI+0x3C]` in a row at `0046592B` and `00465936`,
+so the transformed `z` is written and immediately thrown away.
+
+**[proved]** `obj+0x1A4` is the prop's world **z**: `FUN_0046F350` writes the
+literal `0xC4044F9E` into it, which is `-529.244`, and that is the third
+component of the fixed world point the same prop type registers for its shot
+test. Six class-0x41 routines write world-scale negative literals there and
+nothing else does.
+
+Its object is its own type, not a sprite effect — no kind switch, no sound and
+no distance law — but the same flipbook shape. `FUN_00465950` steps the cursor
+**before** it draws, so the slot it is seeded with (`0x904`) is never seen and
+the drawn run is `0x905..0x919`, the tail of the wood strip.
+
 ## Getting spawns into a renderer
 
 `hod2lib.spawnres` resolves a spawn to its character type and asset file, and

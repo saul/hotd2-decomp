@@ -9,6 +9,7 @@
  *
  * The full account is docs/formats/combat.md.
  */
+import { SpawnBoneHitSprite } from "../effects/blood";
 import { SpawnSeveredHead } from "../effects/severed_head";
 import { vec3 } from "../vec";
 import type { Rng } from "../../core/rng";
@@ -556,6 +557,10 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
       // the host, so the head starts where the head actually is rather than at
       // a guessed height above the actor's origin. The fallback is only for a
       // host with no scene, which queues no shots anyway.
+      // The first of the three, and the one this port had all along in the
+      // sense that it did nothing: `SpawnBoneHitSprite` (`FUN_00407200`) is
+      // the twenty-five-frame flipbook at the bone, with no severity.
+      SpawnBoneHitSprite(obj.at, bone);
       const at = vec3(obj.pos.x, obj.pos.y + HEAD_LAUNCH_RISE, obj.pos.z);
       host.boneWorld(obj.at, bone, at);
       if (slot > 0) SpawnSeveredHead(at, slot, 0, obj.yaw);

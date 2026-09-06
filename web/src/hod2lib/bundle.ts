@@ -554,6 +554,96 @@ export async function actorSlotEntry(
 }
 
 /**
+ * The asset slots the **shot effects** flip through.
+ *
+ * Every one of these is a separate model in `pol/common.bin`: the game has no
+ * texture animation, so a twenty-five-frame blood spray is twenty-five models
+ * and `AssetDrawSlot(0x3A + cel)` steps through them. Without them in the
+ * bundle the player had a canvas gradient standing in for all of it and no
+ * muzzle flash or tracer at all.
+ *
+ * What is here is exactly what a **bullet** can produce:
+ *
+ * * `SpawnBloodSpray` (`FUN_00407310`) and `SpawnBoneHitSprite`
+ *   (`FUN_00407200`), 0x3A..0x52;
+ * * the muzzle flash and its second draw, `g_muzzle_flash_slots` and
+ *   `g_muzzle_smoke_slots` for both players — nine each, and the tracer is
+ *   entry +2 of the second run;
+ * * the five collision materials `SpawnWorldImpact` (`FUN_00405260`) and
+ *   `ActorShotFeedback` (`FUN_00454050`) can name, which are also the ranges
+ *   `SpawnPropHitSpark` (`FUN_00465860`) draws from.
+ *
+ * What is **not** here, deliberately: the boss and set-piece kinds of
+ * `SpawnSpriteEffectFromParams`' switch — 0x41, 0x44, 0x45, 0x50, 0x53, 0x5A,
+ * 0x5B, 0x5C, 0x5D, 0x61 — which live in `water_hamon`, `eff_dokan`,
+ * `eff_shop`, `eff_2`, `eff_org5b` and `boss1q`, and which nothing on the shot
+ * path can reach. Kind 0x51 is the one exception a shot could reach — a
+ * ricochet off character type 3 — and it is in `eff_2.bin`; it is carried, and
+ * a bundle whose stage does not ship that file simply has no models for it.
+ */
+export const EFFECT_SLOT_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x003a, 0x0052],    // blood, 25 frames
+  [0x0175, 0x017d],    // muzzle flash, player 0
+  [0x017f, 0x0187],    // muzzle flash, player 1
+  [0x0b76, 0x0b7e],    // the flash's second draw, player 0; +2 is the tracer
+  [0x0b84, 0x0b8c],    // ...and player 1
+  [0x091a, 0x092f],    // kind 1, sand
+  [0x0dc3, 0x0dd1],    // kind 2, metal -- and the bursting head
+  [0x0e25, 0x0e33],    // kind 3, other -- the catch-all ricochet
+  [0x08f8, 0x0903],    // kind 5, water
+  [0x0904, 0x0919],    // kind 6, wood -- and the prop spark, from 0x905
+  [0x0054, 0x0062],    // kind 0x51, the type-3 ricochet
+];
+
+/**
+ * A hidden rig holding the models the shot effects flip through.
+ *
+ * Same shape and same reason as {@link actorSlotEntry}: one part per asset
+ * slot, hidden, cloned by the client. `render/effects.ts` is what clones them.
+ */
+export async function effectSlotEntry(
+    stage: Stage, cache: AssetCache): Promise<RigInstance | null> {
+  const want: number[] = [];
+  for (const [lo, hi] of EFFECT_SLOT_RANGES) {
+    for (let slot = lo; slot <= hi; slot++) {
+      if (!want.includes(slot)) want.push(slot);
+    }
+  }
+  const slots = stage.tables.assetSlots();
+  const parts: RigInstance["parts"] = [];
+  for (const slot of want) {
+    const rec = slots.get(slot);
+    if (!rec) continue;
+    const stem = rec[0].endsWith(".bin") ? rec[0].slice(0, -4) : rec[0];
+    const [models, bank] = await cache.get(
+      "hod2lib.bundle.effect_slot_entry", stem, "shot effect asset",
+      `slot 0x${slot.toString(16).padStart(4, "0")} draws nothing`);
+    if (rec[1] >= models.length) continue;
+    const part = {
+      name: `slot_${slot.toString(16).padStart(4, "0")}`,
+      slots: [slot],
+      note: `shot effect, slot 0x${slot.toString(16).padStart(4, "0")}`,
+    };
+    parts.push([part, [[models[rec[1]], bank, stem]]]);
+  }
+  if (!parts.length) return null;
+  const rig: Rig = {
+    name: "slots_effect",
+    routine: "the shot effects: blood, muzzle flash, tracer, impacts",
+    worldSpace: false,
+    parts: parts.map(([p]) => p),
+    note: "one model per animation frame; hidden, cloned per live effect",
+  };
+  return {
+    rig, routes: [], anchors: {}, biases: {}, world: false, placements: [],
+    blocked: "",
+    fixed: [{ kind: "fixed", translation: [0.0, 0.0, 0.0],
+              rotation_bams: [0, 0, 0], cam_paths: [], note: rig.note! }],
+    parts,
+  };
+}
+
+/**
  * A hidden rig holding the breakable props' models, for the client to clone.
  *
  * Class 0x41's props are built at run time by `PlaceBreakableGroup`, not
@@ -869,9 +959,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const brk = await breakableSlotEntry(stage, placements, cache);
   const act = await actorSlotEntry(
     stage, spawnRecords.map((r) => r.cls), cache);
+  const eff = await effectSlotEntry(stage, cache);
   const info = await gltf.exportLevel(name, parts, outDir, sink, deflate, {
     rigs: [...rigData, ...charEntries, ...propEntries,
-           ...(brk ? [brk] : []), ...(act ? [act] : [])],
+           ...(brk ? [brk] : []), ...(act ? [act] : []),
+           ...(eff ? [eff] : [])],
     writeTextures: opts.writeTextures ?? true,
     camFiles: [],                  // rails are drawn client-side
     unlit: opts.unlit ?? true,

@@ -56,6 +56,10 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { BreakablePropTakeShot } from "../class41/prop";
+import { ColiTraceSegmentAllSets } from "../coli";
+import { PlayerShotEffectSpawn } from "../effects/shot_effects";
+import { SpawnPropHitSpark } from "../effects/sprite";
+import { ActorShotFeedback, SpawnWorldImpact } from "./feedback";
 import { ActorByAt, G } from "../globals";
 import type { GameHost, ShotRay } from "../host";
 import { g_class_handlers } from "../registry";
@@ -158,16 +162,31 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // `g_nPlayerFired` — the accuracy denominator. Counted here rather than
   // where the click landed, so it counts shots the *game* saw.
   G.g_nPlayerFired[player] = (G.g_nPlayerFired[player] ?? 0) + 1;
+  // **The muzzle flash and the round leave the gun before anything is tested.**
+  // `PlayerFireAndReloadUpdate` (`FUN_00414940`) spawns them at the trigger,
+  // between `BuildShotRay` and the gunshot sound, and `ProcessPlayerShots`
+  // runs afterwards; so a shot that hits nothing still throws a tracer.
+  PlayerShotEffectSpawn(player, req.ray, host, () => rng.int(0x10000));
   const pick = host.pickShot?.(req.ray) ?? null;
+  // `g_shot_hit_something` — 0x009C9010, written by `ProcessPlayerShots`
+  // (`FUN_00404570`) as `count > 0`. Its one reader kills the tracer on its
+  // second frame, which is what makes a hit a stub of streak and a miss a
+  // full second of one.
+  G.g_shot_hit_something[player] = pick ? 1 : 0;
 
   if (!pick) {
     // A miss resets nothing -- the game only clears the head combo on a hit
     // that is not a head.
-    events?.emit("shot.resolved", { player, kind: "miss", ray: req.ray,
-                                    points: 0 });
+    const world = ShotHitWorld(req, host, events);
+    events?.emit("shot.resolved", {
+      player, kind: "miss", ray: req.ray, points: 0,
+      point: world ? { x: G.g_coli_hit_x, y: G.g_coli_hit_y,
+                       z: G.g_coli_hit_z } : undefined,
+      surface: world ? G.g_coli_hit_surface : undefined,
+    });
     return;
   }
-  if (pick.kind === "prop") return ResolveShotOnProp(req, pick, events);
+  if (pick.kind === "prop") return ResolveShotOnProp(req, pick, host, events);
 
   const obj = ActorByAt(pick.at);
   if (!obj) {
@@ -192,6 +211,12 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   }
 
   const out = ResolveHit(obj, pick.bone, CameraBackYawBams(), host, rng);
+  // `ActorShotFeedback` (`FUN_00454050`) — the blood, the ricochet sprite and
+  // the ricochet sound, all of which read `g_hit_result`, so it runs after
+  // `ResolveHit` has written it. See `combat/feedback.ts` for why it is here
+  // rather than in each class's own on-shot routine.
+  G.g_hit_result = out.result;
+  ActorShotFeedback(obj, pick.bone, pick.point, host, events);
   let points = 0;
   if (out.head) {
     points += SCORE_HEAD + (G.g_head_combo_bonus[player] ?? 0);
@@ -231,10 +256,17 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
                                                      point: { x: number;
                                                               y: number;
                                                               z: number } },
-                           events?: Events): void {
+                           host: GameHost, events?: Events): void {
   const prop = G.g_breakable_props.find((p) => p.id === pick.propId);
   if (!prop) return;
   BreakablePropTakeShot(prop, req.player);
+  // `SpawnPropHitSpark` (`FUN_00465860`): the crosshair unprojected to the
+  // prop's own camera depth, with `z` then replaced by the prop's `+0x1A4`.
+  // The prop routines call it themselves on the frame they read the hit bit;
+  // it is here because the port's props do not each carry a shot response.
+  // [diverges] in where it is called from, not in what it does.
+  const spark = PropSparkPoint(prop, req.ray, host);
+  if (spark) SpawnPropHitSpark(spark.x, spark.y, prop.z);
   events?.emit("shot.resolved", {
     player: req.player, kind: "prop", ray: req.ray, point: pick.point,
     propGroup: prop.group, propMember: prop.member, propHp: prop.hp,
@@ -256,4 +288,64 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
 export function MarkActorShot(obj: Actor, player: number, bone = 0): void {
   obj.flags |= (1 << ((player + 1) & 0x1f)) | ActorFlag.Hit;
   obj.pendingHit = { bone, result: 0 };
+}
+
+/**
+ * A shot that found no candidate at all — `FUN_00404B80`'s pass, and then
+ * `SpawnWorldImpact` (`FUN_00405260`).
+ *
+ * `[port-only]` as a wrapper; both halves inside it are transcribed. The
+ * engine traces the shot segment against every blob in the two script-selected
+ * collision sets **from the far end back toward the eye**, which is the
+ * argument order that makes the nearest wall to the camera win, and takes the
+ * material, the point and the normal from what it hit.
+ *
+ * `render/shooting.ts` used to answer this by raycasting the drawn geometry
+ * and calling every surface material 3, because there was no collision in the
+ * bundle. There is now.
+ */
+function ShotHitWorld(req: ShotRequest, host: GameHost,
+                      events?: Events): boolean {
+  const o = req.ray.origin;
+  const d = req.ray.dir;
+  const fx = o.x + d.x * SHOT_RANGE;
+  const fy = o.y + d.y * SHOT_RANGE;
+  const fz = o.z + d.z * SHOT_RANGE;
+  if (!ColiTraceSegmentAllSets(fx, fy, fz, o.x, o.y, o.z)) return false;
+  SpawnWorldImpact(req.player,
+                   { x: G.g_coli_hit_x, y: G.g_coli_hit_y, z: G.g_coli_hit_z },
+                   { x: G.g_coli_hit_normal[0], y: G.g_coli_hit_normal[1],
+                     z: G.g_coli_hit_normal[2] },
+                   G.g_coli_hit_surface, host, events);
+  return true;
+}
+
+/** `ShotBuildSegment` (`FUN_00404AD0`) — origin plus direction times this. */
+const SHOT_RANGE = 1000;
+
+/**
+ * Where `SpawnPropHitSpark` puts its spark: the point on this shot's own ray
+ * at the prop's camera-space depth.
+ *
+ * `[port-only]` in spelling. The engine has the crosshair in pixels and the
+ * depth in `obj+0x78`, and divides one by `g_projection_distance_px`; the two
+ * together are the same point on the same line. `z` is not taken from here —
+ * the routine overwrites it with the prop's own field.
+ */
+function PropSparkPoint(prop: { shotX: number; shotY: number; shotZ: number },
+                        ray: ShotRay, host: GameHost):
+                        { x: number; y: number } | null {
+  const a = { x: 0, y: 0, z: 0 };
+  const b = { x: 0, y: 0, z: 0 };
+  const p = { x: 0, y: 0, z: 0 };
+  if (!host.viewSpaceOfPoint?.(ray.origin, a)) return null;
+  if (!host.viewSpaceOfPoint?.(
+        { x: ray.origin.x + ray.dir.x, y: ray.origin.y + ray.dir.y,
+          z: ray.origin.z + ray.dir.z }, b)) return null;
+  if (!host.viewSpaceOfPoint?.(
+        { x: prop.shotX, y: prop.shotY, z: prop.shotZ }, p)) return null;
+  const dz = b.z - a.z;
+  if (dz === 0) return null;
+  const t = (p.z - a.z) / dz;
+  return { x: ray.origin.x + ray.dir.x * t, y: ray.origin.y + ray.dir.y * t };
 }

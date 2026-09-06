@@ -47,6 +47,7 @@
 004e2b14	g_motion_bank_ids	bank id -> s16 array of the motion ids it holds
 004e2bdc	g_motion_bank_count	bank id -> how many motions
 004e2c40	g_motion_bank_of	motion id -> bank id, the argument MotionRequestBankLoad takes
+004ec8bc	g_gunshot_sound_ids	u32 per player: the shot the gun makes, played by PlayerFireAndReloadUpdate.
 0052ed08	g_pCharacterExtraParts	{u32 count; u32 *descriptors[]}; each descriptor's first word is an asset slot the SKELETON DOES NOT NAME. 68 of 76 character types have one or two; the cat has none. Without them a humanoid has a hole where its waist should be
 005644e4	g_wave_source_kinds	{handler, object size} per wave-source kind, stride 8: 0 travelling (WaveSourceTravellingTick), 1 circular (WaveSourceCircularTick).
 005647a4	g_class20_idle_motions	u32[4] = {1021, 1023, 1024, 1025}. OneHitTargetInit (0x00448ED0) picks one with rand() & 3 when the spawn's tail+0x06 names no motion. All four are ids char_adv00 (character type 7) carries, which is the corroboration; the shipped class-0x20 spawns that DO name one name 1024, which is in the table.
@@ -88,6 +89,8 @@
 00579914	g_motion_job_substeps	three entries; entry 3 onward is the "mot\%s" string
 00579920	s_mot_path_format
 00579968	g_backdrop_preset_table
+00579f78	g_muzzle_flash_slots	s16 per player: the first of the nine asset slots the muzzle flash flips through -- 0x175 for player 0 and 0x17F for player 1, both pol/common.bin.
+00579f7c	g_muzzle_smoke_slots	s16 per player: the first of the nine slots the flash's second draw flips through -- 0xB76 for player 0, 0xB84 for player 1. Entry +2 of the same run is the single quad the tracer draws.
 0057a280	g_ModelFixupSlotList
 00580354	g_bgm_names_ar
 005803f8	g_bgm_names_plain
@@ -203,9 +206,14 @@
 009a21ba	g_civilians_seen_total	u16. Every class-0x10 actor created across the run; CivilianInit raises it beside the per-scene g_civilians_seen_by_scene. Zeroed by ResetGameOnStart only.
 009a2230	g_cutscene_skipping	Non-zero while a skippable cutscene is being skipped. [likely], named from its three writers, all already identified: EvtOpSetSkippableRegion2C (0x0045FD9D), CheckCutsceneSkipRequest (0x00435F7C) and FinishCutsceneSkip (0x00435FA0). Readers tear their scripted actor down at once when it is set: ScriptedHumanoidUpdate (0x004842A0, first instruction) and ScriptedHumanoidIdle (0x00484D40, first instruction) both free the model handle at obj+0x1304 and ActorKill, gated on word obj+0x1316 being zero in the Update's case; CivilianUpdate (0x0048AF8E) and CivilianRunScript (0x0048BF36) do the same for class 0x10. EvtOpPlayDialogue2D and DrawDialogueSubtitleTask also read it. Not modelled by the browser player, which has no skip.
 009a2240	g_original_item_slots	The two-slot Original Mode inventory, per player, stride 0x14. PlayerHoldsOriginalItem reads it; three of the branch triggers only open their route while the player is carrying the right id.
+009a2248	g_player_magazine_size	+0x08 of the per-player Original Mode block at g_original_item_slots, stride 0x14. PlayerRefillMagazine uses it in place of the literal 6 when g_GameMode is 1 and it is not -1. ResetOriginalModeLoadout seeds it with 6.
+009a2249	g_original_weapon_kind	+0x09 of the same block: which Original Mode weapon this player carries. 0 in arcade, and every arm that reads it is behind g_GameMode == 1. 3 draws no muzzle flash and adds the 0x53 blast to a hit, 4 swaps the flash's second scale to 0.75 and arms g_shot_weapon_ring, 5 sends the tracer down the object-path arm at half speed.
 009a2280	g_class_handlers	112 slots, built by BuildClassHandlerTable
 009a244a	g_one_hit_target_kills	Incremented by OneHitTargetUpdate (0x004491FD) the frame a class-0x20 actor is shot. Also written by FUN_00497640 and read/written by FUN_004525C0; what reads it for is [open]. It is NOT g_enemies_alive: class 0x20's Init increments no counter, so no wait_enemies_alive gate ever sees one of these actors.
+009a2460	g_shot_tracer_ring	The bullet each shot throws, same shape and cursor as g_shot_flash_ring. +0x04/+0x08/+0x0C the point in WORLD space, +0x18 the billboard spin in BAMS, +0x1C/+0x20/+0x24 the velocity a frame, +0x28 the frame counter (dead past 0x3B), +0x2C the weapon kind, where 5 is the Original Mode arm that rides object path 0x194 and draws slot 0x109D.
 009a26a0	g_cur_actor
+009a2700	g_shot_weapon_ring	The third per-shot ring, written only in Original Mode and drawn only for weapon kind 4: 24 frames from asset slot 0xA6F at scale 0.05, at a camera-space point with a random roll at +0x18. Same 6-per-player stride 0x30 shape as the other two.
+009a2960	g_shot_flash_ring	The muzzle flash left by each shot: 6 records a player, stride 0x30, indexed (cursor + player * 6). +0x00 s16 live, +0x02 s16 player, +0x04/+0x08/+0x0C the point in CAMERA space, +0x10 pitch and +0x14 yaw in BAMS, +0x28 the frame counter (dead past 8, so nine frames), +0x2C the Original Mode weapon kind.
 009a2ba0	g_attack_permits	s32[2], one per player, stride 4 -- not bytes; DAT_009A2BA4 is element 1. An approaching enemy must claim one through TryClaimAttackSlot before it may attack, so only g_max_attackers enemies commit at a time. The holder's index is kept in obj+0x121, and SelectCameraLookAtTarget focuses the camera on whoever holds one. Class 0x31 state 27 bypasses the claim and writes the slot itself.
 009a2bb0	g_evt_step_index	The event VM's STEP index -- not a block counter and NOT monotonic. EvtAdvanceStepOrRoute increments it at the top and assigns it 1 in the route branch, so it runs 1..k within a block and drops back to 1 on a block change; FUN_0045EBC0 seeds it with 0, 1 or 5 by game mode. Class 0x41 and 0x44 props age one tick every time it CHANGES (PropExpireByStepLifetime), which makes obj+0x11C a lifetime in STEPS. Blocks average 3.99 steps, so reading it as a block count makes props live about four times too long. A block with one live step goes 1 -> 1 across its transition and does not age a prop at all.
 009a2bc0	g_evt_block_index	The event block currently executing, written by EvtAdvanceStepOrRoute and recorded byte-wise into g_route_history. NOT g_evt_step_index (0x009A2BB0), which is the step index within the current block and is what prop lifetimes measure.
@@ -244,7 +252,10 @@
 009a5c50	g_blink_frame_counter	One of the three free-running counters FUN_0040E730 steps once a game tick, beside g_frame_counter (0x009A32A0) and DAT_009A2BAC. Class 0x31 states 5, 27 and 34 read its low bit for the blink parity, which is the only use found -- what distinguishes it from the other two is [open].
 009a5c62	g_player_state	s16 per player, +player*0x98. IsPlayerAttackable requires 5 -- in play and alive -- before an enemy may commit an attack, and TryClaimAttackSlot voids a permit it has just picked when it is not. It does NOT change on being hit: the invulnerability window is g_player_invuln_frames, a separate byte array, so there is no post-hit pause in the attack queue.
 009a5c66	g_player_lives	+player*0x98. PlayerTakeDamage decrements it by one per strike; the continue screen restores 1 or 2.
+009a5c70	g_crosshair_x	The player's aim in screen pixels, +player * 0x130 -- the same per-player block as g_player_lives. BuildShotRay unprojects it with g_projection_distance_px and PlayerShotEffectSpawn and SpawnPropHitSpark divide by the same number.
+009a5c74	g_crosshair_y	The other half of g_crosshair_x, +0x04.
 009a5c78	g_nPlayerFired	set to 1 by the player update when the trigger is down and ammo remains; cleared by ProcessPlayerShots
+009a5c7c	g_player_ammo	s16, +player * 0x130. PlayerFireAndReloadUpdate takes one per shot and PlayerRefillMagazine puts back six, or g_player_magazine_size in Original Mode.
 009a5c82	g_head_combo_bonus	+player*0x98. Added to the 120-point headshot award and then incremented by 10, so consecutive headshots pay 120, 130, 140 ...; any non-head hit zeroes it.
 009a5c84	g_player_shot_count	+player*0x98 (0x130 bytes). The accuracy denominator: EvtOpAwardAccuracyBonus2B (0x0045FE40) pays g_accuracy_bonus_table[(g_player_hit_count * 100 / this) / 10] to any player whose g_player_state is 5 and who has fired more than 0x13 shots, so this is shots and g_player_hit_count at +4 is hits. Distinct from g_nPlayerFired (0x009A5C78), which is a per-frame "the trigger is down" flag and not a tally. ResetSceneOnEnter zeroes it with the other two, so the accuracy grade is per scene. [open] No instruction writes it through this address -- the increment reaches it on a computed base the disassembler does not resolve here.
 009a5c86	g_player_hit_count	+player*0x98. Hits that scored, for the end-of-stage accuracy grade evt 0x2B reads.
@@ -322,6 +333,7 @@
 009c8e9c	g_bHudShutterPrev	The state HudDrawShutterState last settled on: it seeds the slide counter on a change, and state 7 restores it. Written on every path except state 8.
 009c8ea0	g_evt_yield	The evt VM's yield flag, and the whole of its frame pacing. EvtInterpreterLoop runs 'do { dispatch[*pc](); } while (g_evt_yield == 0)' and does NOT clear it at entry, so: a wait handler reached with it clear sets it and returns WITHOUT testing its condition (every wait therefore costs at least one frame); on later frames it tests, and a satisfied wait clears it and advances pc, whereupon the loop keeps dispatching in the SAME frame until the next wait. Opcode 0x4E halt is nothing but 'g_evt_yield = 1' with pc unchanged (FUN_0045EFF0). The unused dispatch slots 0x00/0x2A/0x34/0x3C/0x4C point at a bare RET, which leaves the flag clear and spins the loop forever -- reaching one hangs the game.
 009c8fb8	g_current_bgm_id
+009c9010	g_shot_hit_something	int per player, written by ProcessPlayerShots: 1 when this frame's shot found any candidate, 0 when it found none. Its one reader is PlayerShotEffectsThink, which kills the tracer on its second frame so a bullet that hit does not fly on past what it hit.
 009c904a	g_enemies_alive
 009c90c0	g_original_items_taken	One byte per Original Mode item id, incremented on pickup and capped at 99.
 009c9100	g_civilians_seen_by_scene	u16 per scene, indexed g_scene_index*2. CivilianInit increments it on the same straight line as g_civilians_seen_total (0x009A21BA) and g_civilians_alive, so it is every class-0x10 actor the scene created. Paired with g_civilians_rescued_by_scene for the end-of-stage rescue tally. ResetGameOnStart zeroes the first three dwords -- six scenes -- and ResetSceneOnEnter zeroes this scene only.
@@ -329,6 +341,7 @@
 009c911e	g_wCaptionMode
 009ca08c	g_GameMode	1 = original/story, 2 = arcade, 3 = boss rush
 009ca090	g_backdrop_mode
+009ca09c	g_shot_effect_cursor	s16 per player, 0..5: which slot of the three shot-effect rings the next trigger pull fills. PlayerShotEffectSpawn steps it between writing the tracer and writing the Original Mode record.
 009ca0a4	g_skeleton_node_out	where SkeletonWalkNode writes each bone's resolved matrix, stride 0x90
 009ca0c0	g_collision_meshes_ray_only
 009ca0e8	g_civilians_alive	How many class-0x10 civilians are in play; the condition for evt opcode 0x46 wait_scripted_actors, whose 68 sites all pass operand 0. CivilianInit raises it UNCONDITIONALLY -- the INC word ptr at 0x0048A6FE is on the straight-line fall-through with no branch around it. (It is the two counters three instructions later, 0x009A21BA and word[0x009C9100 + stage*2], that the wait word's 0x08000000 exempts; an earlier note here wrongly put that guard on this counter.) Three ways back out, all decrementing once: op 0x2C carrying 0x00080000 (CivilianRunScript 0x0048BA3C), which also stamps sub+0x04 bit 0; and two CivilianUpdate teardowns, 0x0048B003 after the remove-delay countdown and 0x0048B0AC in the off-camera branch, both skipped when that bit is set.

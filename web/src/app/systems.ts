@@ -113,6 +113,13 @@ export class GameSystem implements System {
       this.view.toView(a.lookAt.x, a.lookAt.y, a.lookAt.z, out);
       return true;
     },
+    // The same transform as `viewSpaceOf`, for a point nothing owns: an
+    // impact sprite's size and the muzzle effects' aim both come from it.
+    viewSpaceOfPoint: (p, out) => {
+      if (!this.view) return false;
+      this.view.toView(p.x, p.y, p.z, out);
+      return true;
+    },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),
     // The hit spheres ride bones the renderer poses, so the intersection is
     // the renderer's; what a hit *means* is `game/combat/shot.ts`.

@@ -34,6 +34,14 @@ import {
   type RainRules,
 } from "../src/game/effects/rain";
 import { NULL_HOST, type ShotPick } from "../src/game/host";
+import { ActorShotFeedback } from "../src/game/combat/feedback";
+import { BLOOD_FIRST_SLOT, BLOOD_LAST_CEL, SpawnBloodSpray }
+  from "../src/game/effects/blood";
+import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
+         FLASH_LAST_FRAME } from "../src/game/effects/shot_effects";
+import { ShotEffectsTick } from "../src/game/effects/tick";
+import { SpawnSpriteEffect, SpriteEffectKind }
+  from "../src/game/effects/sprite";
 import { MarkActorShot, QueueShotRequest }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
@@ -8845,6 +8853,163 @@ console.log("\na stashed path is played by a hook that steps first:");
     console.log(`    apex ${apex.toFixed(2)} (from 11), travelled `
       + `${dist.toFixed(2)}, alive ${f} frames`);
   }
+}
+
+
+// -- 26. the shot effects: what leaves the gun, and what sticks to the bone --
+
+/**
+ * **Every sprite a bullet makes, with no renderer anywhere near it.**
+ *
+ * All of this used to be a canvas gradient in `render/shooting.ts`, so none of
+ * it could be asserted and two thirds of it did not exist: there was no muzzle
+ * flash, no tracer, and the blood was a fading circle at the bone rather than
+ * a twenty-five-model flipbook stuck to it.
+ *
+ * The host here is a camera at the origin looking down **+Z**, which is the
+ * direction `RAY` points in every other section of this file, so `viewPoint`
+ * and `viewSpaceOfPoint` are one sign flip each.
+ */
+console.log("\nthe shot effects:");
+{
+  const rng = new Rng(26);
+  const events = scene(1, rng);
+  SetGameTables({
+    ...CHARS,
+    combat: {
+      blood_scale: { "1": 0.75, "2": 0.5, "3": 1.0 },
+      impact_sprite: { "3": [0x0e25, 0x0e33, 1.0] },
+      impact_sprite_default: [0x0904, 0x0904, 0.1],
+      ricochet: {},
+    },
+  } as unknown as CharactersJson);
+  const z0 = G.g_object_list[0]!;
+  z0.hp = 100;
+
+  let pick: ShotPick | null = null;
+  const host = {
+    ...NULL_HOST,
+    pickShot: () => pick,
+    viewPoint: (x: number, y: number, z: number,
+                out: { x: number; y: number; z: number }) => {
+      out.x = x; out.y = y; out.z = -z;
+    },
+    viewSpaceOfPoint: (p: { x: number; y: number; z: number },
+                       out: { x: number; y: number; z: number }) => {
+      out.x = p.x; out.y = p.y; out.z = -p.z;
+      return true;
+    },
+  };
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
+
+  // -- the muzzle, on a miss ------------------------------------------------
+  pick = null;
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  const flash = G.g_shot_flash_ring[0]!;
+  const tracer = G.g_shot_tracer_ring[0]!;
+  check("a shot that hits nothing still lights the muzzle", flash.live);
+  check("...and still throws a tracer", tracer.live);
+  check("the muzzle point is the crosshair at camera-space z = -1",
+        Math.abs(flash.pos.z + 1) < 1e-6, `${flash.pos.z}`);
+  check("the tracer flies twenty units a frame",
+        Math.abs(Math.hypot(tracer.vel.x, tracer.vel.y, tracer.vel.z) - 20)
+          < 1e-4, `${tracer.vel.z}`);
+  check("nothing was hit, so the tracer is not cut short",
+        G.g_shot_hit_something[0] === 0);
+  check("the ring cursor moved on", G.g_shot_effect_cursor[0] === 1);
+
+  // The flash is nine frames and the tracer sixty, counted the way the engine
+  // counts them: the frame steps whether or not the record is live.
+  for (let i = 0; i < FLASH_LAST_FRAME + 1; i++) ShotEffectsTick();
+  check("the muzzle flash is nine frames", !flash.live && tracer.live,
+        `flash ${flash.frame}, tracer ${tracer.frame}`);
+  for (let i = 0; i < TRACER_LAST_FRAME; i++) ShotEffectsTick();
+  check("...and the tracer sixty", !tracer.live, `${tracer.frame}`);
+
+  // -- a hit cuts the tracer on its second frame ---------------------------
+  pick = { kind: "actor", at: z0.at, bone: 1, point: vec3(0, 0, 10) };
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("a hit raises `g_shot_hit_something`", G.g_shot_hit_something[0] === 1);
+  const hitTracer = G.g_shot_tracer_ring[1]!;
+  check("the round is in the air on the frame it was fired", hitTracer.live);
+  ShotEffectsTick();
+  check("...and gone on the next, because it hit something",
+        !hitTracer.live, `frame ${hitTracer.frame}`);
+
+  // -- the ring wraps at six -----------------------------------------------
+  G.g_shot_effect_cursor[0] = SHOT_EFFECT_RING - 1;
+  pick = null;
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("the six-deep ring wraps rather than growing",
+        G.g_shot_effect_cursor[0] === 0, `${G.g_shot_effect_cursor[0]}`);
+  check("no weapon record without an Original Mode weapon",
+        G.g_shot_weapon_ring.every((w) => !w.live)
+        && G.g_original_weapon_kind[0] === OriginalWeaponKind.Standard);
+
+  // -- the blood is at the bone, and it is a flipbook -----------------------
+  G.g_blood_sprays = [];
+  G.g_sprite_effects = [];
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 4, vec3(1, 2, 3), host, events);
+  const spray = G.g_blood_sprays[0]!;
+  check("a plain hit bleeds", G.g_blood_sprays.length === 1);
+  check("...and the spray holds an actor and a bone, not a position",
+        spray.at === z0.at && spray.bone === 4);
+  check("...at the plain-damage severity", spray.severity === 0.5,
+        `${spray.severity}`);
+  check("...and it makes no sprite of its own",
+        G.g_sprite_effects.length === 0);
+
+  let cels = 0;
+  while (G.g_blood_sprays.length) { ShotEffectsTick(); cels++; }
+  check("the spray runs twenty-five models, one a frame",
+        cels === BLOOD_LAST_CEL + 1, `${cels}`);
+  check("...starting at the first of them", BLOOD_FIRST_SLOT === 0x3a);
+
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 4, vec3(), host, events);
+  check("a hit that swapped the part bleeds harder, not less",
+        G.g_blood_sprays[0]!.severity === 0.75);
+  G.g_blood_sprays = [];
+
+  // -- result 5 is a ricochet, and it is not blood --------------------------
+  G.g_hit_result = HitResultCode.NoEffect;
+  ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, events);
+  check("a result-5 hit draws no blood at all",
+        G.g_blood_sprays.length === 0);
+  const ric = G.g_sprite_effects[0]!;
+  check("...it ricochets instead", G.g_sprite_effects.length === 1
+        && ric.kind === SpriteEffectKind.Other);
+  check("...through the kind's own slot range, from the bundle",
+        ric.slot === 0x0e25 && ric.lastSlot === 0x0e33,
+        `${ric.slot.toString(16)}..${ric.lastSlot.toString(16)}`);
+
+  let frames = 0;
+  while (G.g_sprite_effects.length) { ShotEffectsTick(); frames++; }
+  check("a sprite effect is one model a frame and no more",
+        frames === 0x0e33 - 0x0e25 + 1, `${frames}`);
+
+  // -- the distance law replaces the base scale, it does not multiply -------
+  SpawnSpriteEffect(vec3(0, 0, 5), 0, 0, SpriteEffectKind.Other, 0, 0, host);
+  check("an impact five units away is scaled by its depth, not by 1.0",
+        Math.abs(G.g_sprite_effects[0]!.scale.x - 5 * 0.0667) < 1e-6,
+        `${G.g_sprite_effects[0]!.scale.x}`);
+  G.g_sprite_effects = [];
+  SpawnSpriteEffect(vec3(0, 0, 100), 0, 0, SpriteEffectKind.Other, 0, 0, host);
+  check("...and one a hundred units away keeps the kind's own",
+        G.g_sprite_effects[0]!.scale.x === 1.0,
+        `${G.g_sprite_effects[0]!.scale.x}`);
+  G.g_sprite_effects = [];
+
+  // The pools are plain data, which is the whole reason they are in `G`.
+  SpawnBloodSpray(z0.at, 2, 1);
+  const copy = JSON.parse(JSON.stringify(G.g_blood_sprays));
+  check("every effect pool survives a round trip through JSON",
+        copy[0].at === z0.at && copy[0].bone === 2);
+  G.g_blood_sprays = [];
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

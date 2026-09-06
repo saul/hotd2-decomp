@@ -71,6 +71,7 @@ const { AmbientLight, CanvasTexture, DirectionalLight, Group, Mesh,
 const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE }
   = await import("../src/render/lighting");
 const { SlotModelLayer } = await import("../src/render/slotmodels");
+const { EffectLayer } = await import("../src/render/effects");
 const { G, ResetGameGlobals } = await import("../src/game/globals");
 const { makeActor } = await import("../src/game/actor");
 const { SpawnClass } = await import("../src/game/spawn_class");
@@ -1028,6 +1029,111 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
   check("a dead actor loses its node", layer.describe().startsWith("0 drawn"),
         layer.describe());
   G.g_object_list.length = 0;
+}
+
+
+console.log("\nthe shot effects are models, one per frame:");
+{
+  // The `slots_effect` rig the exporter emits, built by hand: the blood strip
+  // and the two muzzle runs for player 0.
+  const root = new Obj3D();
+  const slots: number[] = [];
+  for (let n = 0x3a; n <= 0x52; n++) slots.push(n);
+  for (let n = 0x175; n <= 0x17d; n++) slots.push(n);
+  for (let n = 0xb76; n <= 0xb7e; n++) slots.push(n);
+  for (const slot of slots) {
+    const part = new Obj3D();
+    part.name =
+      `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(part);
+  }
+
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  check("the layer adopts one template per slot",
+        layer.describe().includes(`${slots.length} templates`),
+        layer.describe());
+  check("...and takes them out of the draw",
+        !root.children.some((c) => c.visible), "a template is still visible");
+
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  // The blood asks the character layer where the bone is, and that is the one
+  // thing this layer cannot answer itself.
+  let radius: number | null = 6;
+  layer.bones = {
+    boneSphere: (_at: number, _bone: number, out: InstanceType<typeof Vector3>)
+      : number | null => {
+      out.set(0, 10, -50);
+      return radius;
+    },
+  };
+
+  G.g_blood_sprays.push({ id: 1, at: 0x1234, bone: 4, cel: 0, severity: 1 });
+  layer.update(ctx);
+  check("a spray gets a node at the first of the twenty-five models",
+        layer.describe().startsWith("1 drawn"), layer.describe());
+  const node = layer.viewGroup.children[0]!;
+  check("...in the camera's own space, on the near face of the bone sphere",
+        Math.abs(node.position.z - (-50 + 6)) < 1e-4, `${node.position.z}`);
+
+  // The slot moves every frame, so the node is re-cloned every frame.
+  const first = layer.viewGroup.children[0];
+  G.g_blood_sprays[0]!.cel = 1;
+  layer.update(ctx);
+  check("...and a new model when the cel moves on",
+        layer.viewGroup.children[0] !== first);
+
+  // A bone that is not posed draws nothing rather than drawing at the origin.
+  radius = null;
+  layer.update(ctx);
+  check("an unposed bone bleeds nowhere",
+        layer.describe().startsWith("0 drawn"), layer.describe());
+  radius = 6;
+
+  // The muzzle flash rides the camera: its group carries the camera's matrix,
+  // so the record's own numbers stay camera-space and it stays on the gun.
+  G.g_blood_sprays.length = 0;
+  const f = G.g_shot_flash_ring[0]!;
+  f.live = true;
+  f.player = 0;
+  f.frame = 0;
+  f.pos = { x: 0.1, y: -0.2, z: -1 };
+  layer.update(ctx);
+  check("a live muzzle record draws its two slots in the camera's group",
+        layer.viewGroup.children.length === 2
+        && layer.group.children.length === 0,
+        `${layer.viewGroup.children.length}/${layer.group.children.length}`);
+  camera.position.set(100, 0, 0);
+  camera.updateMatrixWorld(true);
+  layer.update(ctx);
+  check("...and follows the camera without the record moving",
+        f.pos.x === 0.1
+        && Math.abs(layer.viewGroup.matrix.elements[12] - 100) < 1e-6,
+        `${layer.viewGroup.matrix.elements[12]}`);
+
+  // The tracer is the one that is left behind in the world.
+  const t = G.g_shot_tracer_ring[0]!;
+  t.live = true;
+  t.player = 0;
+  t.pos = { x: 1, y: 2, z: 3 };
+  layer.update(ctx);
+  check("the tracer is in the world group, not the camera's",
+        layer.group.children.length === 1,
+        `${layer.group.children.length}`);
+  check("...at the point the port put it",
+        layer.group.children[0]!.position.x === 1);
+
+  f.live = false;
+  t.live = false;
+  layer.update(ctx);
+  check("a record that has expired takes its node with it",
+        layer.describe().startsWith("0 drawn"), layer.describe());
+  ResetGameGlobals();
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

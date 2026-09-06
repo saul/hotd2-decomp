@@ -21,6 +21,7 @@ import { T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ProcessShotRequests } from "./combat/shot";
+import { ShotEffectsTick } from "./effects/tick";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { DescriptorFromPlacement } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
@@ -345,6 +346,11 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // the last frame are resolved before anything moves -- an enemy is shot
   // where it was standing when the crosshair was over it, not where this
   // frame is about to put it.
+  // **Before the trigger**, so an effect spawned by this frame's shot is drawn
+  // at its first slot rather than its second. The engine's task list has the
+  // same property for a different reason: `ActorAlloc` appends, and the walk
+  // that would step a new task has already gone past the end.
+  ShotEffectsTick();
   ProcessShotRequests(host, rng, events);
   // The heads the burst threw, stepped where the engine steps its tasks.
   SeveredHeadsTick(rng, events);

@@ -50,8 +50,13 @@ export interface EventMap {
       origin: { x: number; y: number; z: number };
       dir: { x: number; y: number; z: number };
     };
-    /** Where it landed. Absent on a miss: the port has no world geometry. */
+    /**
+     * Where it landed. On a miss this is the `coli/` hit, which the port
+     * finds itself now — see `ShotHitWorld` in `game/combat/shot.ts`.
+     */
     point?: { x: number; y: number; z: number };
+    /** `g_coli_hit_surface` on a miss: which material the shot met. */
+    surface?: number;
     /** The actor, for `actor` and `marked`. */
     at?: number;
     bone?: number;

@@ -667,18 +667,87 @@ set A, everything else set B.
 | 3, 4 severed | blood at the bone, scale **1.0** |
 | 5 no effect | `SpawnSpriteEffect` material 3 (0x51 for type 3) and `COMMON\BULLET_MET3_22.WAV` — the shot bounced off |
 
-The blood itself, `FUN_00407230`, is a 25-frame flipbook over asset slots
-`0x3A..0x52`, drawn in **view space** at the bone with an explicit scale:
+### The blood is glued to the bone, and it is twenty-five models
+
+`SpawnBloodSpray` (`FUN_00407310`) allocates an object holding **four** fields
+and no position at all: the actor, the bone index, a cel counter and the
+severity. `DrawBloodSpray` (`FUN_00407230`) then reads the bone's hit sphere
+out of the actor every frame it draws:
 
 ```c
-z     = rec[0x284] + rec[0x27C];               /* the bone's view-space depth */
+z     = rec[0x284] + rec[0x27C];      /* the sphere's radius plus its centre z */
 scale = (z < -20) ? 1.0 : (-z * 0.0375 + 0.25);
 scale *= (g_wCaptionMode == 1) ? 0.15 : 0.3;
 scale *= severity;                              /* the 0.5 / 0.75 / 1.0 above */
+MatrixLoadIdentity();
+MatrixTranslate(rec[0x274], rec[0x278], z);
+AssetDrawSlot(cel + 0x3A);
 ```
 
-so it is near-constant on screen out to twenty units and fixed in the world
-beyond that.
+Four things follow, and three of them were wrong in this document until
+2026-09-06.
+
+* **It is twenty-five different models, not one texture animated.** Slots
+  `0x3A..0x52` are `pol/common.bin` entries 0 to 24. There is no texture
+  animation anywhere in this engine; every flipbook in it is a run of models.
+* **The position is the hit bone's sphere, not the point the ray met the
+  model.** `ShotTestBoneSphere` (`FUN_004047D0`) proves the fields: it tests
+  `obj + bone * 0x90 + 0x274/+0x278/+0x27C` as a centre against the radius at
+  `+0x284`. Nothing in the engine ever computes a ray-versus-surface point,
+  for an actor or for a prop. **A shot that clips the edge of an arm bleeds
+  from the middle of the arm.**
+* **`+0x284` is added to `z`, which is the sphere's near face.** Camera space
+  has `-z` in front, so adding the radius pulls the sprite toward the viewer
+  onto the surface of the limb rather than leaving it inside. The **centre**,
+  without the radius, is what `MarkActorShot` (`FUN_00404DB0`) copies into the
+  candidate record and what the result-5 ricochet sprite is placed at.
+* **It tracks.** The bone is re-read on each of the twenty-five frames, so the
+  spray follows a running zombie's shoulder.
+
+`SpawnBoneHitSprite` (`FUN_00407200`) and `BoneHitSpriteDrawAndTick`
+(`FUN_00407120`) are a second copy of the same pair with the severity multiply
+left out. `ResolveHit` fires one beside the severed head, and
+`OneHitTargetUpdate` fires one per hit bone.
+
+### What leaves the gun — `PlayerShotEffectSpawn`
+
+Every trigger pull, hit or miss, fills one slot of **three** six-deep rings per
+player. `PlayerFireAndReloadUpdate` (`FUN_00414940`) calls
+`PlayerShotEffectSpawn` (`FUN_00416F70`) between `BuildShotRay` and the gunshot
+sound; `PlayerShotEffectsThink` (`FUN_00416B00`) draws and steps all eighteen
+records every frame.
+
+| Ring | Address | Space | Frames | Slots |
+|---|---|---|---|---|
+| muzzle flash | `g_shot_flash_ring` 0x009A2960 | camera | 9 | `g_muzzle_flash_slots[player] + frame`, at scale 0.1, and a second draw of `g_muzzle_smoke_slots[player] + frame` at 0.5 |
+| tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad |
+| Original Mode | `g_shot_weapon_ring` 0x009A2700 | camera | 24 | `0xA6F + frame` at scale 0.05, weapon kind 4 only |
+
+`g_muzzle_flash_slots` (0x00579F78) is `{0x175, 0x17F}` and
+`g_muzzle_smoke_slots` (0x00579F7C) is `{0xB76, 0xB84}`, both `pol/common.bin`.
+
+The muzzle point is the crosshair at camera-space `z = -1`:
+`(g_crosshair_x / g_projection_distance_px, g_crosshair_y / …, -1.0)`, with the
+flash's angles from `FUN_004016B0` and then `yaw += 0x8000` and the pitch
+negated. The tracer takes that point through the camera matrix into the world
+and flies `normalize(point - eye) * 20.0` a frame, spinning `0x1000` BAMS.
+
+**The tracer dies on its second frame when the shot hit something.**
+`ProcessPlayerShots` (`FUN_00404570`) writes `g_shot_hit_something`
+(0x009C9010) as "the candidate list is not empty", and that is its only reader.
+So a round that hit is a stub of streak leaving the barrel and a round that
+missed flies for a full second.
+
+Two smaller findings from the same routine:
+
+* the ring cursor `g_shot_effect_cursor` (0x009CA09C) advances **between** the
+  tracer and the Original Mode record, so that record lands in the next slot —
+  the one the previous shot used;
+* `g_original_weapon_kind` (0x009A2249) is `+0x09` of the per-player Original
+  Mode block at `g_original_item_slots`, and `+0x08` beside it is the magazine
+  size `PlayerRefillMagazine` (`FUN_00414B30`) refills to. `ResetOriginalModeLoadout`
+  (`FUN_0048A0D0`) seeds them with 0 and 6, and every arm behind the kind is
+  gated on `g_GameMode == 1`.
 
 ## 10. Approaching — the advance rings
 

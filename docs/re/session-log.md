@@ -11743,3 +11743,121 @@ three are stage 6's `[open]`.
    is unported, so two more routes stay shut.
 3. Stage 6's three branches have no writer among the eighteen. Either one was
    missed, or they are answered by something outside the cross-reference graph.
+
+## Session — the shot effects, and what was never leaving the gun
+
+*2026-09-06.* "Fully port and implement the shot effects... also when shooting
+a zombie the shot effect snaps to the bone centre rather than where the shot
+was... we're missing blood splatter/sprites, where are all these?"
+
+### Where they were: `pol/common.bin`, all along
+
+`ExeTables.asset_slots()` maps `0x3A..0x52` to `common.bin` entries 0 to 24.
+That is the blood. `0x175..0x17D` and `0xB76..0xB7E` are the muzzle flash and
+its second draw for player 0, `0x91A..0x92F` and four more runs are the
+collision-material impacts, and every one of them is in the same file the
+bundle was already opening for other reasons.
+
+**There is no texture animation in this engine.** Every flipbook is a run of
+models and `AssetDrawSlot(first + cel)` steps through them. So the answer to
+"where are the sprites" is that they are not sprites, and the bundle carried
+none of them because nothing had asked it to. `slots_effect` — a hidden rig
+with the same shape as `slots_actor` and `slots_breakable` — carries 162 of
+them now, and stage 2 grew from 69 MB to 71 MB.
+
+### Where the blood goes, which is neither of the two obvious answers
+
+`ShotTestBoneSphere` (`FUN_004047D0`) settles it: it tests
+`obj + bone * 0x90 + 0x274/+0x278/+0x27C` as a sphere centre against the radius
+at `+0x284`, and `DrawBloodSpray` (`FUN_00407230`) draws at those same fields
+with `z + radius`. So:
+
+* it is at the **bone**, not at the point the ray met the model — the engine
+  never computes that point for an actor or for a prop, and a shot that clips
+  the edge of an arm bleeds from the middle of the arm. The complaint is real
+  and the game does it too.
+* it is at the sphere's **near face**, not its centre. Camera space has `-z`
+  in front, so adding the radius pulls it toward the viewer onto the surface of
+  the limb. The port had the centre. That is the part that was wrong.
+* it **tracks**: `SpawnBloodSpray` (`FUN_00407310`) stores the actor, the bone,
+  a cel and a severity, and no position at all.
+
+`SpawnPropHitSpark` (`FUN_00465860`) is the one effect that *is* at the
+crosshair: the aim unprojected to the prop's own camera depth, with `z` then
+overwritten by `obj+0x1A4`. Two `MOV [ESI+0x3C]` in a row at `0046592B` and
+`00465936`, the second throwing the first away.
+
+**`obj+0x1A4` is the prop's world z, `[proved]`.** `FUN_0046F350` writes
+`0xC4044F9E` into it, which is `-529.244`, and that is the third component of
+the fixed world point the same prop type registers for its shot test — a
+number this project measured a session ago for a different reason. Six
+class-0x41 routines write world-scale negative literals there and nothing else
+does.
+
+### The two thirds that did not exist
+
+`PlayerShotEffectSpawn` (`FUN_00416F70`) fills three six-deep rings per player
+on **every** trigger pull, hit or miss, and none of the three was ported: the
+muzzle flash, the tracer, and an Original Mode record. The tracer's expiry is
+the nice one — `g_shot_hit_something` (0x009C9010) is written by
+`ProcessPlayerShots` as "the candidate list is not empty" and read by exactly
+one line, which kills the tracer on its second frame. A round that hit is a
+stub of streak; a round that missed flies for a full second.
+
+Three smaller things fell out of the same routine: the ring cursor advances
+*between* the tracer and the Original Mode record, so that record lands in the
+slot the previous shot used; `g_original_weapon_kind` is `+0x09` of the
+per-player block `g_original_item_slots` already names; and `+0x08` beside it
+is the magazine size, which is why `PlayerRefillMagazine` (`FUN_00414B30`)
+compares against a literal 6 in arcade.
+
+### A closed `[open]`
+
+`render/shooting.ts` had said a miss has no material, because it raycast the
+drawn geometry and there was no collision to ask. There is now:
+`game/coli.ts` has the game's own sets, so `ShotHitWorld` traces the shot
+segment far-end-first the way `FUN_00404B80` does and hands
+`SpawnWorldImpact` the engine's own point, normal and surface id.
+
+### Where it all lives
+
+In `game/`, as pools in `G` that go into a snapshot as plain records — the
+same shape `g_severed_heads` has and for the same reason. `render/effects.ts`
+owns only the nodes. The one thing it cannot rebuild is where a bone is, so
+the blood asks `CharacterLayer.boneSphere` for the centre and radius
+`pickShot` already tests with.
+
+One new seam: `GameHost.viewSpaceOfPoint`, the inverse of `viewPoint`. Two
+callers want it — the impact sprite's distance scale, which
+`SpawnSpriteEffectFromParams` fixes at spawn and never recomputes, and the
+muzzle point, which the engine reads out of `g_crosshair_x` in pixels and the
+port has only as a ray.
+
+### Wrong turns
+
+* I wrote the ring tick as *test, then step*, which is the engine's order
+  inside one routine — but the port's frame is *step, then draw*, so the test
+  was guarding the wrong value and every record lived one frame too long. The
+  flash drew ten frames of a nine-frame strip. `test/port.test.ts` caught it
+  on the first run; the fix is to step first and test the stepped value, and
+  that makes the two agree exactly on how many frames are seen.
+* I assumed `ActorShotFeedback`'s severity table went 0.5, 0.75, 1.0 in result
+  order. It does not: result 1 pays **0.75** and result 2 pays 0.5, which reads
+  backwards until you notice that 1 means the bone's model changed.
+
+### Not ported, and named
+
+* `ActorUpdateBodyCondition` (`FUN_00454270`) runs inside `ActorShotFeedback`
+  on results 1, 3 and 4 and derives `obj+0x130C` from which hands are armed
+  and which zones are gone. The port has the sibling
+  `ActorBodyConditionFromHands` (`FUN_00455920`) and not this one, so the
+  death picker reads a condition that a hit no longer updates.
+* `SpawnCivilianBloodPool` (`FUN_0048E080`) — the decal a shot civilian
+  leaves. A different object type again, and unported.
+* The Original Mode weapon kinds. Every arm is transcribed and none is
+  reachable: `g_original_weapon_kind` is seeded 0 and the port has no pickup
+  that changes it. Their artwork is in `eff_org9.bin`, `eff_org5b.bin` and
+  `etc_1.bin`, and the bundle does not carry it.
+* `ActorPlayHitVoice`'s fourth kind, the one the bursting head plays. The
+  other three voices stay in `render/shooting.ts` with the seeded pick and the
+  sound tables, so the burst is silent. `[open]`.

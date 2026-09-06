@@ -55,8 +55,9 @@
  *   reach it. The two gate bytes are `[open]`.
  * * `OneHitTargetBoneDrawHook` (`FUN_00449530`) — a per-bone draw callback
  *   that writes nothing to the actor. The renderer's.
- * * `SpawnBoneHitSprite` (`FUN_00407200`) and `SpawnGroundRingEffect`. Both
- *   allocate their own drawing tasks and neither touches this actor.
+ * * `SpawnGroundRingEffect`, which allocates its own drawing task and does
+ *   not touch this actor. `SpawnBoneHitSprite` (`FUN_00407200`) used to be
+ *   listed beside it and is ported now — see `game/effects/blood.ts`.
  * * The damaged-part swap `g_pBoneEffectSlots[type][bone][0]`. The port has
  *   `ActorSwapDamagedPart` for the combat classes; wiring class 0x20's
  *   single-index read of the same table to it is a renderer question and is
@@ -64,6 +65,7 @@
  */
 import { ActorFlag, type Actor, type OneHitTargetActor } from "../actor";
 import { ActorDespawn } from "../despawn";
+import { SpawnBoneHitSprite } from "../effects/blood";
 import { G } from "../globals";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
@@ -225,6 +227,10 @@ export function OneHitTargetShouldRemove(obj: OneHitTargetActor): boolean {
  */
 export function OneHitTargetTakeShot(obj: OneHitTargetActor, rng: Rng): void {
   const bone = obj.pendingHit?.bone ?? 0;
+  // `SpawnBoneHitSprite` (`FUN_00407200`), once per hit bone. The class has no
+  // hit points and no `ActorShotFeedback`, so this is the whole of what being
+  // shot looks like on one of these.
+  SpawnBoneHitSprite(obj.at, bone);
   // Who fired: `obj+0x34` bits 1 and 2, and `rand() & 1` when neither is set —
   // which happens for a debug kill, not for a shot.
   const p0 = (obj.flags & 0x2) !== 0;

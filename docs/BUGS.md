@@ -6,7 +6,8 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Thirty-three reports: **twenty-nine fixed, three half-done, one open.**
+Thirty-five reports: **thirty fixed, three half-done, one open, and one
+not-a-bug that carried a real defect underneath it.**
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -844,6 +845,88 @@ that fix looked like it had not worked.
   allowed, the muzzle dark and then lit, and the five states that write the
   word each asserted in the direction they write it. Without the fix, eight of
   its assertions fail.
+
+---
+
+## And two more about stage 3's opening
+
+- `[fixed]` **"the boat isn't moving with the characters"** — and it was two
+  boats, not one. The pair sail the canal on `op_st3` path 340; the boat that
+  stood still beside them was a *different* object, and the boat that should
+  have been under them was not in the bundle at all.
+
+  * **The one under them.** `ScriptedHumanoidDraw` (`FUN_00484FF0`) switches on
+    the descriptor word `desc + 0x2A` and draws a second model beside the
+    skeleton. Case 3 is
+    `CamEvalObjectPath6(obj+0x135C, g_cam_path_frame)` followed by
+    `AssetDrawSlot(0x1A37)` — the **same path slot and the same frame the
+    actor itself is riding**, so the boat is under its passenger by
+    construction and the engine needs no parenting of any kind. Stage 3's
+    spawn 4128 is the only variant-3 actor in the six stages that reaches a
+    shot; `rigs_data.ts` had already recorded the arm as *"the slot is
+    runtime, so nothing is exported for this part"*, which is exactly what the
+    scene was missing. The exporter now carries `drawVariant` on every
+    class-0x25 program and ships slot `0x1A37` in the hidden `slots_actor`
+    rig when a stage has a variant-3 descriptor; `render/slotmodels.ts` places
+    it. The model is a motorboat, which the render settles — `asset_slots()`
+    resolves `0x1A37` to `etc_1_05.bin` entry 0 and that name says nothing.
+  * **The one that stood still.** `Class26Subtype2Update` (`FUN_0048EAD0`,
+    class 0x26 subtype 2) draws the same model, and its `g_active_cam_path`
+    switch names 124, 125, 126, 127, 130, 133, 134 and 135 — not 121, 122 or
+    123, which is the whole opening. Its `default:` arm jumps past the pose
+    block to the draw, so the engine holds whatever `obj+0x40`..`obj+0x6C`
+    contain, which before the first named shot is the spawn descriptor's:
+    stage 3 block 0 step 2, script address 3244, `(0, 0, 0)`. `RigLayer`
+    placed it from `op_st3` 342 at frame 0 instead — about
+    `(−884, −17, −2136)`, in the canal and a hundred units off the shot. The
+    file's own `[diverges]` note had said it drew the baked root pose all
+    along; `Instance.posed` makes the code do what the note claimed.
+
+  `node web/tools/stage3.mjs` drives the page and compares the **boat node's
+  own world position** against the two passengers' — 8.1 units apart at every
+  mark, which is `g_class25_path_offsets` records 4 and 5 and nothing else —
+  and asserts the class-0x26 rig is still at its spawn pose. It fails on nine
+  of its thirty checks without the two fixes.
+
+- `[not-a-bug]`, with a real defect underneath it — **"is the fog definitely
+  using the cut scene camera location for its near/far?"** It is, and so is
+  the game. `FUN_0040AD90` and `FUN_0040C2E0` hand the scene light block's
+  `+0x30`/`+0x34` straight to `PushSceneFogFromLightBlock` (`FUN_0040C320`),
+  which is one `SetFogRange` (`FUN_004ABDF0`) call and nothing else — no
+  camera, no eye, no transform anywhere on the path. Under
+  `D3DRENDERSTATE_FOGTABLEMODE = D3DFOG_LINEAR` those are **eye-space depths**,
+  so they are relative to whichever view matrix draws the frame, which during
+  a cut scene is the cut-scene camera. The port has the same property for the
+  same reason, and the tick order puts `CameraDrawSystem` ahead of `SceneFog`.
+
+  What *is* wrong is one line of the port. `SetFogRange` doubles both values
+  and, when `near*2 >= far*2`, **swaps them**; it has no on/off test at all.
+  `render/fog.ts` had an invented one — `far > near` — and it cost two things
+  the shipped scripts do forty-odd times between them:
+
+  * **Every stage's opening and closing fade is fog.** 40 sites set or tween
+    `fog_near = fog_far = 1` against a black fog colour; a zero-width
+    `D3DFOG_LINEAR` ramp is a step, so everything past it is 100% fog. The
+    port switched fog **off** at exactly the frame the fade completed, so a
+    fade to black ended by snapping back to a fully lit scene.
+  * **Stage 5 blocks 7 and 9 set `near 1472, far 614`.** The engine fogs
+    1228..2944; the port fogged nothing for the whole span.
+
+  `test:render` asserts on `scene.fog` itself for the ordered, reversed,
+  zero-width, negative-near and never-set cases, and `web/tools/stage3.mjs`
+  watches stage 3 block 11's fade land on `planar 2..2 #000000` and stay
+  there.
+
+  As for "starting completely in fog": the first four frames of stage 3 really
+  are near-black, and that is the script's own fade-in — `fog_rgb (0,0,0)`,
+  `near 1`, `far 1`, then a 30-frame tween to `(101,147,164)`, `70`, `247`.
+  Measured over the opening the frame is back to a full 1,200 distinct colours
+  by frame 10. Nothing later in the opening is a wash: the canal runs at 900
+  distinct colours and a mean of `(32, 37, 34)`, which is night. If what was
+  being seen was a *longer* stretch of fog than that, it is not reproducible
+  at this commit and wants a fresh look with the two fixes above in place —
+  the missing boat left the pair sitting in open water, which is its own way
+  of reading as "nothing but haze out there".
 
 ---
 

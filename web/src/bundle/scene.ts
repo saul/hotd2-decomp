@@ -430,6 +430,13 @@ export interface HumanoidProgramJson {
   charType: number;
   removePath: number;
   removeFrame: number;
+  /**
+   * `desc + 0x2A` — which decoration `ScriptedHumanoidDraw` (`FUN_00484FF0`)
+   * draws beside the skeleton. Optional: a bundle written before format 5 has
+   * no such field and the renderer reads a missing one as 0, which is the
+   * "draws nothing" case 129 of the 137 spawns are in.
+   */
+  drawVariant?: number;
   flags2: number;
   motion: number;
   phase: number;

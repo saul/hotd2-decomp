@@ -949,11 +949,25 @@ arithmetic.
 Two worked examples, both `[proved]` in the code and then confirmed against the
 data:
 
-* **Class 0x25** — `FUN_00484FF0` switches on `*(int16*)(obj+0x1390 + 6)`, i.e.
-  descriptor `+0x2A`, as a prop-variant selector with cases 1–4 (0 and >4 draw
-  nothing). Reading there gives variants 1 and 2 in stage 2 and 3 and 4 in
-  stage 3 — and the variant-4 descriptor sits at `(-635.1, 43.0, -955.9)`,
-  which is where the routine hardcodes that prop's world position.
+* **Class 0x25** — `ScriptedHumanoidDraw` (`FUN_00484FF0`) switches on
+  `*(int16*)(obj+0x1390 + 6)`, i.e. descriptor `+0x2A`, as a prop-variant
+  selector with cases 1–4 (0 and >4 draw nothing). Reading there gives
+  variants 1 and 2 in stage 2 and 3 and 4 in stage 3 — and the variant-4
+  descriptor sits at `(-635.1, 43.0, -955.9)`, which is where the routine
+  hardcodes that prop's world position. Counted over all six evt files: 129
+  of the 137 spawns are variant 0, four are 1 and one is 2 (stage 2), two are
+  3 and one is 4 (stage 3).
+
+  **Variant 3 is the one that cannot be exported as a placement.** It is
+  `CamEvalObjectPath6(obj+0x135C, g_cam_path_frame)` — the object path the
+  actor is riding, at the camera's own frame — and then `AssetDrawSlot(0x1A37)`
+  at that pose, plus a mirrored pair of wake sprites at water level. `obj+0x135C`
+  is written by the VM's `op 11` at run time, so there is no point to bake. The
+  bundle carries the variant on the program record and the model as a bare slot
+  in `slots_actor`; the client places it. Stage 3's spawn 4128 is variant 3 on
+  `op_st3` 340, and the two passengers beside it ride the same path with offset
+  records 4 and 5 — which is how the engine keeps a rider on a vehicle without
+  any parent field.
 * **Class 0x33** — `FUN_00433860` reads its object path slot from
   `obj+0x1390 + 0x0C`, i.e. descriptor `+0x30`. That resolves to op_st2 336 and
   338 and op_st5 382, all inside the correct per-stage ranges. Its main asset

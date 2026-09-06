@@ -50,7 +50,10 @@
 import { Group, Object3D, Ray, Vector3 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
-import type { Actor } from "../game/actor";
+import type { Actor, HumanoidActor } from "../game/actor";
+import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
+  from "../game/class25/state";
+import type { CamPaths } from "../game/camera/curve";
 import { G } from "../game/globals";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
@@ -69,10 +72,86 @@ const SLOT_RIG = "slots_actor";
  * A class absent here is drawn by `render/characters.ts` or not at all.
  */
 function DrawSlotFor(a: Actor): number | null {
-  if (a.cls !== SpawnClass.Mouse) return null;
-  // `sub+0x20` — the frame of the ten-slot strip `mouse.bin` holds.
-  return a.mouse.frame || null;
+  switch (a.cls) {
+    case SpawnClass.Mouse:
+      // `sub+0x20` — the frame of the ten-slot strip `mouse.bin` holds.
+      return a.mouse.frame || null;
+    case SpawnClass.ScriptedHumanoid:
+      // Only the object-path arm. The three fixed-point arms draw at points
+      // the routine hardcodes, so the rig writer already exports them as
+      // parts of `obj_484ff0_props` and `RigLayer` places them.
+      //
+      // Off `a.hum`, not off the bundle: `ScriptedHumanoidInit` caches the
+      // descriptor word on the actor precisely so this is a field read.
+      // `tools/verify_layers.py`'s `render-drives-the-port` is what says a
+      // render layer may not call into `game/` for an answer, and it is right
+      // -- reaching for `HumanoidProgramOf` here is one refactor away from
+      // reaching for a decision.
+      return a.hum.drawVariant === HumanoidDrawVariant.OnObjectPath
+        ? HUMANOID_VARIANT3_SLOT : null;
+    default:
+      return null;
+  }
 }
+
+/**
+ * `ScriptedHumanoidDraw`'s (`FUN_00484FF0`) object-path arm, placed.
+ *
+ * ```c
+ * CamEvalObjectPath6(obj+0x135C, (float)g_cam_path_frame, &p);
+ * MatrixStackPush(0);
+ * MatrixTranslate(p.x, p.y, p.z);
+ * MatrixRotateZ(p.rz); MatrixRotateY(p.ry); MatrixRotateX(p.rx);
+ * AssetDrawSlot(0x1A37);
+ * MatrixStackPop(1);
+ * ```
+ *
+ * Three things it is easy to get wrong and this does not:
+ *
+ * * **The frame is `g_cam_path_frame`, raw.** No `min(frame, length)` clamp —
+ *   `Class26Subtype2Update` (`FUN_0048EAD0`) has one and this does not, so
+ *   the curve extrapolates off both ends exactly as the evaluator does.
+ * * **No `+2.0` in y.** That bias belongs to `Class26Subtype2Update`, which
+ *   writes `obj+0x44 = pose.y + 2.0` before it draws; this arm uses the raw
+ *   pose. (The passengers get their own `+2.0` on path slots `0x156`..`0x15C`
+ *   from `PATH_SLOT_LIFT`, which is a third, separate rule.)
+ * * **The composition is `T · Rz · Ry · Rx`**, which is a three.js `Euler` in
+ *   `"ZYX"` order — the same argument `render/rigs.ts`'s `bamsEuler` spells
+ *   out.
+ *
+ * [diverges] The arm also draws a **mirrored pair of wake sprites** —
+ * `AssetDrawSlot(0x24A + g_frame_counter % 22)` twice, under an anchor at
+ * `(p.x, -25.0, p.z)` turned by a heading `MatrixToEulerBams`
+ * (`FUN_00401AE0`) takes off the composed rotation, at `x = ±1.7, z = 20.0`
+ * with the second mirrored by a `(-1, 1, 1)` scale. They are not drawn here.
+ * Doing it faithfully needs `MatrixToEulerBams` and `FUN_00401800`
+ * transcribed — the heading is *not* `p.ry`, because the decomposition undoes
+ * `rz` and `rx` from the left and `op_st3` 340's `rot_x` runs to 15,758 BAMS
+ * — plus 22 more models (`char_adv06.bin` 0..21) in every bundle that carries
+ * a variant-3 spawn. Left out rather than guessed at; it is a separate piece
+ * of work and the user's call.
+ */
+function PlaceOnObjectPath(a: HumanoidActor, node: Object3D,
+                           paths: CamPaths | null): void {
+  const slot = a.hum.pathSlot;
+  const path = slot >= 0 ? paths?.objectPath(slot) : undefined;
+  if (!path) {
+    // Nothing to place it from. Hide rather than leave it at the origin: an
+    // object at (0,0,0) is a thing somebody has to go and explain.
+    node.visible = false;
+    return;
+  }
+  node.visible = true;
+  const t = G.g_cam_path_frame;
+  path.position(t, _pos);
+  node.position.set(_pos.x, _pos.y, _pos.z);
+  node.rotation.set(path.channel(3, t) * BAMS_TO_RAD,
+                    path.channel(4, t) * BAMS_TO_RAD,
+                    path.channel(5, t) * BAMS_TO_RAD, "ZYX");
+}
+
+/** Scratch for {@link PlaceOnObjectPath}; the layer is single-threaded. */
+const _pos = { x: 0, y: 0, z: 0 };
 
 /** One live actor's node. */
 interface Live {
@@ -149,7 +228,7 @@ export class SlotModelLayer implements System<RenderContext> {
    * `update` and `resync` are the same call: the layer owns nothing a snapshot
    * carries, so rebuilding from `G.g_object_list` is the whole of both.
    */
-  update(): void {
+  update(ctx: RenderContext): void {
     this.group.visible = this.enabled;
     if (!this.enabled) return;
     const seen = new Set<number>();
@@ -171,8 +250,17 @@ export class SlotModelLayer implements System<RenderContext> {
         live = { node, slot };
         this.nodes.set(a.at, live);
       }
-      live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
-      live.node.rotation.set(0, a.yaw * BAMS_TO_RAD, 0);
+      // Where a slot model goes is the drawing routine's, not the actor's:
+      // the mouse draws at `obj+0x40`/`obj+0x68`, and class 0x25's variant 3
+      // draws at an object-path pose the actor never stores. Same switch as
+      // {@link DrawSlotFor}, and it stays a switch for the same reason.
+      if (a.cls === SpawnClass.ScriptedHumanoid) {
+        PlaceOnObjectPath(a, live.node, ctx.paths);
+      } else {
+        live.node.visible = true;
+        live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
+        live.node.rotation.set(0, a.yaw * BAMS_TO_RAD, 0);
+      }
     }
 
     for (const [at, l] of this.nodes) {
@@ -182,8 +270,8 @@ export class SlotModelLayer implements System<RenderContext> {
     }
   }
 
-  resync(): void {
-    this.update();
+  resync(ctx: RenderContext): void {
+    this.update(ctx);
   }
 
   /**
@@ -218,9 +306,30 @@ export class SlotModelLayer implements System<RenderContext> {
   private readonly _c = new Vector3();
   private readonly _p = new Vector3();
 
-  /** What the panel says when nothing is drawn, and why. */
+  /**
+   * What the panel says when nothing is drawn, and why — **and where the
+   * drawn ones are.**
+   *
+   * The position is here rather than merely the count because this layer's
+   * whole job is to put a model somewhere the actor is not: class 0x25's
+   * object-path arm draws at a pose the actor never stores, and "is the boat
+   * under the passengers" is not a question any count can answer. `x, y, z`
+   * is the node's own translation, and the group this layer owns is added to
+   * the scene untransformed, so it is world space.
+   *
+   * `web/tools/stage3.mjs` reads this line back out of the sidebar and
+   * compares it against the passengers' own positions.
+   */
   describe(): string {
     if (!this.templates.size) return "no slot models in this bundle";
-    return `${this.nodes.size} drawn, ${this.templates.size} templates`;
+    const where = [...this.nodes].filter(([, l]) => l.node.visible)
+      .map(([at, l]) => {
+        const p = l.node.position;
+        return `${at.toString(16).padStart(4, "0")} `
+             + `slot 0x${l.slot.toString(16)} at `
+             + `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
+      });
+    return `${this.nodes.size} drawn, ${this.templates.size} templates`
+         + (where.length ? ` — ${where.join("; ")}` : "");
   }
 }

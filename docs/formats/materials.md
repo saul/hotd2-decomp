@@ -296,6 +296,23 @@ with the raw pair halves the ramp and the fog comes out roughly twice as
 thick. `FOGSTART`/`FOGEND` also fix the model as `D3DFOG_LINEAR` — a straight
 ramp `(end − d) / (end − start)`, not a curve.
 
+**The swap guard is not a sanity check; it is a feature the scripts use, and
+there is no on/off test anywhere in the routine.** Two consequences a reader
+has to have:
+
+* `near == far` is a **zero-width ramp**, which for a straight
+  `(end − d)/(end − start)` is a step: every fragment past `FOGSTART` is 100%
+  fog colour. That is how the game fades. Forty sites across the six stages
+  set or tween `fog_near` and `fog_far` both to 1 against a black fog colour,
+  at the head of a block or at the end of one, and every stage opens and
+  closes on it.
+* `near > far` is a **real band**, drawn between `far*2` and `near*2`. Stage 5
+  blocks 7 and 9 set `near 1472, far 614`, which is 1228 … 2944.
+
+A renderer that reads `far > near` as "fog is enabled" loses both. Nothing in
+the engine ever disables fog from these two channels — the per-mesh
+`D3DRENDERSTATE_FOGENABLE` from TSP bit 23 is the only switch there is.
+
 #### Fog colour is an sRGB D3DCOLOR, blended in sRGB — [proved]
 
 `PushSceneFogColour` (`0x0040D5B0`) runs every frame from the scene draw and

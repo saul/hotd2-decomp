@@ -330,7 +330,8 @@ ST1_VEHICLE = Rig(
 # longjmps and does not return).
 # ---------------------------------------------------------------------------
 
-#: `FUN_0048EAD0`, state 2 of the object family dispatched at 0x0048E290.
+#: `Class26Subtype2Update` (`FUN_0048EAD0`), subtype 2 of the class-0x26
+#: family `Class26InstallSubtypeUpdate` (`FUN_0048E290`) dispatches.
 #: Almost the whole routine is camera-path dispatch; it draws one slot.
 OBJ_48EAD0 = Rig(
     name="obj_48ead0",

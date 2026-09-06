@@ -26,6 +26,23 @@
  * `vFogDepth = -mvPosition.z`. So `PLANAR` **is** the game, and it is the
  * default here.
  *
+ * **Which camera the range is measured from: the one drawing the frame, and
+ * there is only ever one.** The near and far reach the device untouched.
+ * `PushSceneLightStateToDevice` (`FUN_0040AD90`), once a frame, and
+ * `SetupSceneProjection` (`FUN_004184C0`) through `FUN_0040C2E0` are the only
+ * two callers of `PushSceneFogFromLightBlock` (`FUN_0040C320`), and that
+ * routine is one `SetFogRange` call over the light block's `+0x30`/`+0x34`
+ * and nothing else — it does not even forward its first two arguments. No
+ * camera position, no eye, no transform: they are **eye-space depths**, so
+ * the view matrix in force when a triangle is drawn is what they are relative
+ * to. During a cut scene that
+ * is the cut-scene camera, in the engine and here alike, and that is the
+ * engine's design rather than a defect. The port has the same property for
+ * the same reason — `fogNear`/`fogFar` are compared against
+ * `-(camera.matrixWorldInverse * modelMatrix * v).z` — and the tick order in
+ * `app/main.ts` puts `CameraDrawSystem` (and free roam) ahead of this layer,
+ * so the camera a frame is fogged against is the camera it is drawn with.
+ *
  * `RADIAL` [diverges]: it patches that line to `length(mvPosition.xyz)` so the
  * factor is true distance from the eye. Planar fog fogs the screen corners
  * less than the centre at the same real distance, and the fog on a wall
@@ -168,6 +185,50 @@ vec3 hod2SrgbDecode( vec3 c ) {
 export const FOG_RANGE_SCALE = 2;
 
 /**
+ * The projection's far plane, from `docs/formats/cam.md`: 41.100° vertical,
+ * 4:3, near 0.8, **far 8000**.
+ *
+ * The port's own guard and not the engine's: `script/state/channels.ts`'s
+ * `defaultChannels()` stands in for the range `FUN_00460250` seeds before any
+ * script runs, and a 65000..65001 range must not paint the background with a
+ * fog colour nothing is ever near enough to see.
+ */
+const CAMERA_FAR_PLANE = 8000;
+
+/**
+ * `SetFogRange` (`FUN_004ABDF0`), as a pair.
+ *
+ * Both values are doubled, and **when `near*2 >= far*2` the two are swapped**
+ * — `FCOMP`/`JZ` at `0x004ABE04`–`0x004ABE14`, the swapped arm at
+ * `0x004ABE34` writing `FOGSTART = far*2` and `FOGEND = near*2`. So the pair
+ * is a range in either order, and there is no on/off test anywhere in it.
+ *
+ * That matters twice, and the port used to get both wrong by treating
+ * `far > near` as "fog is on":
+ *
+ * * **`near == far` is the fade every stage opens with.** 40 sites across the
+ *   six stages set `fog_near = fog_far = 1` with `fog_rgb = (0,0,0)` and then
+ *   tween out of it — stage 3 block 0 step 1 is one. Under `D3DFOG_LINEAR`
+ *   the factor is `(end - d)/(end - start)`, so a zero-width ramp is a step:
+ *   everything past it is 100% fog colour, which at that moment is black. The
+ *   port turned fog *off* there and showed the un-faded scene instead.
+ * * **`near > far` is a real band.** Stage 5 blocks 7 and 9 set
+ *   `near 1472, far 614`; the engine fogs 1228..2944 and the port fogged
+ *   nothing at all.
+ *
+ * `hi` is nudged off `lo` by a hair because the patched fragment divides by
+ * `fogFar - fogNear`: `0/0` at exactly `d == near` is a NaN GLSL's `clamp` is
+ * not required to do anything sensible with. The width is 1/10000 of a world
+ * unit, so the result is the step function the hardware produces.
+ */
+export function fogRangeFor(near: number, far: number):
+    { near: number; far: number } {
+  const lo = Math.min(near, far) * FOG_RANGE_SCALE;
+  const hi = Math.max(near, far) * FOG_RANGE_SCALE;
+  return { near: lo, far: hi > lo ? hi : lo + 1e-4 };
+}
+
+/**
  * three.js has no uniform hook for a custom fog term, so the mode travels as
  * a uniform injected into every fogged program. Simpler than it sounds: one
  * shared object, mutated in place.
@@ -256,15 +317,22 @@ export class SceneFog implements System {
     // near/far arrive as the script set them; the doubling happens below.
     if (key === this.last) return;
     this.last = key;
-    this.fog.near = near * FOG_RANGE_SCALE;
-    this.fog.far = far * FOG_RANGE_SCALE;
+    // The doubling *and* the swap guard: see {@link fogRangeFor}.
+    const range = fogRangeFor(near, far);
+    this.fog.near = range.near;
+    this.fog.far = range.far;
     // **`SRGBColorSpace` is load-bearing.** These are the bytes
     // `PushSceneFogColour` (`FUN_0040D5B0`) packs into a D3DCOLOR, so they are
     // sRGB; `setRGB`'s default is the linear-sRGB working space, which took
     // `RGB(10, 10, 20)` to the screen as `RGB(56, 56, 79)`.
     this.fog.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255,
                           SRGBColorSpace);
-    this.activeRange = active && far > near && near * FOG_RANGE_SCALE < 8000;
+    // `fogSet` is "the script has set a fog channel"; the far-plane test is
+    // the port's own guard on the pre-script default. **`far > near` is not
+    // here on purpose** -- it was an invented on/off test that `SetFogRange`
+    // does not have, and it disabled the opening fade of all six stages and
+    // stage 5's whole 1228..2944 band. See {@link fogRangeFor}.
+    this.activeRange = active && range.near < CAMERA_FAR_PLANE;
     this.apply();
   }
 

@@ -43,7 +43,7 @@ export enum SpawnClass {
   SetPieceProp = 0x24,
   /** `FUN_004840D0` — script-driven humanoid actor. Not an enemy. */
   ScriptedHumanoid = 0x25,
-  /** `FUN_0048E290` — the vehicle-and-scenery family. */
+  /** `Class26InstallSubtypeUpdate` (`FUN_0048E290`) — the vehicle-and-scenery family. */
   Vehicle = 0x26,
   /** `FUN_00432C80` — static scenery batch. */
   SceneryBatch = 0x29,

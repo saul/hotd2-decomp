@@ -12869,3 +12869,209 @@ it is a general fix: any `Init`-time bone slot was being dropped.
   attachment lists.
 * `UNK_0048D1F0` — what a civilian's node draw does that the default does not.
 * The vertex-blend deform, if a skirt ever looks wrong.
+
+## Two boats and a fade — stage 3's opening
+
+Reported together: *"is the fog definitely using the cut scene camera location
+for its near/far? at the stage of stage 3 we're starting completely in fog (and
+the boat isn't moving with the characters)"*. Two defects that share a scene,
+and the hypothesis in the first half turned out to describe the engine rather
+than a bug.
+
+### The fog is not measured from anywhere
+
+`FUN_0040AD90` and `FUN_0040C2E0` are the only callers of
+`PushSceneFogFromLightBlock` (`FUN_0040C320`), and that routine is one line:
+`SetFogRange(param_3, param_4)` over the scene light block's `+0x30` and
+`+0x34`, which is what evt channels 0 and 1 write. `SetFogRange`
+(`FUN_004ABDF0`) doubles both and hands them to `D3DRENDERSTATE_FOGSTART` and
+`FOGEND`. There is no camera anywhere on that path — no eye, no matrix, no
+transform. `[proved]`.
+
+Under `FOGTABLEMODE = D3DFOG_LINEAR`, which
+`InitD3DDeviceAndTextureStages` picks whenever `D3DPRASTERCAPS_FOGTABLE` is
+present, `FOGSTART`/`FOGEND` are **eye-space depths**. So the fog is relative
+to whatever view matrix draws the frame, and during a cut scene that is the
+cut-scene camera — in the engine and in the port alike. The port has the same
+property structurally: `vFogDepth` is `-mvPosition.z` of the rendering camera,
+and `app/main.ts`'s tick order puts `CameraDrawSystem` and free roam ahead of
+`SceneFog`. The user's hypothesis is a correct description of the engine and
+not a defect. Recorded in `render/fog.ts`'s header so the next person does not
+have to re-derive it.
+
+### ...but there was a defect in the same six lines
+
+`SetFogRange`'s disassembly, re-read rather than taken from the decompiler
+(L1 — the pseudocode passes `param_1` twice in both arms and it is wrong about
+that):
+
+```
+004abdf0  FLD [esp+4]; FADD ST0,ST0; FST [esp+4]      ; near*2
+004abdfa  FLD [esp+8]; FADD ST0,ST0; FSTP [esp+8]     ; far*2
+004abe04  FCOMP [esp+8]; FNSTSW AX; TEST AH,1
+004abe14  JZ 004abe34                                 ; near*2 >= far*2
+          ordered:  FOGSTART=[esp+4]  FOGEND=[esp+8]
+004abe34  swapped:  FOGSTART=[esp+8]  FOGEND=[esp+4]
+```
+
+A swap guard, and **no on/off test of any kind**. `render/fog.ts` had one:
+`activeRange = active && far > near && ...`. Scanning all twelve stage bundles
+for what the scripts actually set:
+
+* **40 sites put `fog_near` and `fog_far` both on 1** with a black fog colour,
+  either by `light0_set` at a block head or by a 30-frame `light0_tween_time`
+  that lands there and holds. That is how every stage in the game fades in and
+  out. A zero-width `D3DFOG_LINEAR` ramp is a step — everything past
+  `FOGSTART` is 100% fog colour — so the engine's screen goes black. The port
+  switched fog **off** at exactly the frame the fade completed, which snaps a
+  fade-to-black back to a fully lit scene.
+* **Stage 5 blocks 7 and 9 set `near 1472, far 614`.** The engine swaps them
+  and fogs 1228..2944. The port fogged nothing at all, through a 5-frame tween
+  in, a hold, and a 120-frame tween out.
+
+`fogRangeFor` is now the whole of `SetFogRange`: `min*2`, `max*2`. The one
+guard left is the port's own and is labelled as such — the pre-script default
+of 65000/65001 stands in for the range `FUN_00460250` seeds and must not paint
+the background. The zero-width case gets a 1e-4 nudge so the patched fragment's
+`(d - near) / (far - near)` cannot be `0/0`; the result is still the step the
+hardware produces.
+
+### The "completely in fog" half is not reproducible at this commit
+
+Measured rather than argued. Driving stage 3 from its entry on the driven clock
+and counting distinct colours in the viewport (L25): frame 0 is 883 colours,
+frame 5 drops to a mean of `(89, 87, 83)`, and by frame 10 it is back to 1,200
+colours and a mean of `(118, 111, 104)`. That dip is the script's own
+`fog_rgb (0,0,0) / near 1 / far 1` fading up to `(101,147,164) / 70 / 247` over
+30 frames — about four frames of near-black, which is a fade and not a fault.
+Nothing later is a wash either: the canal sits at ~900 colours and a mean of
+`(32, 37, 34)`, which is night.
+
+So either the report is about a build that is not this one, or — more likely —
+it is the *boat* below. With no boat drawn, the pair sail the canal sitting in
+open water with a hazy horizon behind them, and that reads as "there is nothing
+out there but fog".
+
+### The boat, which was two boats
+
+`web/src/hod2lib/rigs_data.ts` had the answer written down and nothing was reading
+it. `ScriptedHumanoidDraw` (`FUN_00484FF0`) — class 0x25's per-frame draw —
+switches on the descriptor word `*(int16*)(obj+0x1390 + 6)`, i.e. `desc+0x2A`,
+and draws a second model beside the skeleton:
+
+```c
+case 3:
+  CamEvalObjectPath6(obj+0x135C, (float)g_cam_path_frame, &p);
+  MatrixStackPush(0);
+  MatrixTranslate(p.x, p.y, p.z);
+  MatrixRotateZ(p.rz); MatrixRotateY(p.ry); MatrixRotateX(p.rx);
+  AssetDrawSlot(0x1A37);
+  MatrixStackPop(1);
+  /* ...then a mirrored pair of wake sprites; see below */
+```
+
+`obj+0x135C` is the object path the actor is riding, and the frame is
+`g_cam_path_frame` — **the same slot and the same clock the actor's own
+position comes from**. So the engine does not parent anything to anything: the
+boat is drawn from the same curve at the same time as its passengers, and they
+coincide by construction. That answers the question the task posed — there is
+no carrier field to find, and inventing one would have been a divergence.
+
+Reading all six evt files for `desc+0x2A` over every class-0x25 spawn:
+stage 2 has four variant-1 and one variant-2, stage 3 has two variant-3 and one
+variant-4, and the other 129 are variant 0. Exactly what `rigs_data.ts`'s note
+already claimed. Stage 3's variant-3 spawn is script address 4128, whose
+program is `op 11 mode 1 a=340 b=4` — object path 340, offset record 4 — and
+4252 beside it takes record 5. The two records are `(4.62, -8.0, 1.42)` and
+`(-4.78, -8.0, 0.86)`: two seats.
+
+Variants 1, 2 and 4 draw at points hardcoded in the routine, so the rig writer
+already exports them as fixed parts of `obj_484ff0_props`. Variant 3 cannot be
+placed statically, and the exporter had recorded that and shipped nothing:
+*"the slot is runtime, so nothing is exported for this part"*. So the model was
+not in the bundle. The exporter now carries `drawVariant` on every class-0x25
+program and adds slot `0x1A37` to the hidden `slots_actor` rig for a stage that
+has a variant-3 descriptor; `render/slotmodels.ts` gains the arm.
+
+**And the boat that *was* on screen was a different object.**
+`Class26Subtype2Update` (`FUN_0048EAD0`) draws the same asset slot, and its
+`switch (g_active_cam_path)` names 0x7C, 0x7D, 0x7E, 0x7F, 0x82, 0x85, 0x86,
+0x87 (124..135) and 0xF6..0xF8. Not 121, 122 or 123 — the entire opening. The
+`default:` arm jumps past the whole pose block straight to `MatrixStackPush`,
+so the object draws at whatever `obj+0x40`..`obj+0x6C` hold, which before the
+first named shot is the spawn descriptor's — stage 3 block 0 step 2, script
+address 3244, `(0, 0, 0)`, zero orientation. `RigLayer` placed it from `op_st3`
+342 at frame 0 instead, about `(−884, −17, −2136)`: in the canal, off the shot,
+parked. `Instance.posed` stops that; the root keeps the transform the exporter
+baked, which for every rig in the six stages *is* the descriptor's, and
+`resync` puts it back so a seek cannot carry a pose across.
+
+The file's `[diverges]` note had said all along that the port "draws the
+exporter's baked root pose". It did not. **A divergence note that describes the
+intent rather than the code is a bug with an alibi**, and this one had a
+visible object in the middle of a shot.
+
+### Wrong turns
+
+* **Named the wrong commit.** The task pointed at `8109636` as "fog is planar";
+  that is the ambient-channel commit and the planar one is `8663480` before it.
+  Reading both was necessary anyway.
+* **The worktree was 82 commits behind `main`** and had no `tools/verify_all.py`
+  at all, so the first baseline run failed on a missing file rather than on
+  anything real. Reset to `main` before doing anything else. Worth checking
+  first in any worktree.
+* **`annotate.py` was run with a `cd` to the shared checkout**, so the two new
+  rows landed in the user's tree instead of this one — invisible until
+  `verify_port` failed on a citation whose TSV row "did not exist". Removed
+  them from the shared file, confirmed it byte-identical to `HEAD` again, and
+  re-added them here. **A worktree agent has to check where a repo tool wrote.**
+* **The first screenshot was of a paused player**, and `#viewport.paused #view`
+  carries `filter: grayscale(1) brightness(0.75)`. Ten minutes went into
+  reading a washed-out grey room as a fog defect. `mode=play` in the URL is not
+  the transport running; Space is.
+* **Two collapsed sidebar groups render no rows**, so the first scrape of the
+  camera and scene readouts came back empty and looked like a layer with
+  nothing to say. Seeding `localStorage` before the first render is the fix;
+  clicking the summary is not, because it leaves the disclosure focused and the
+  next Space toggles it shut.
+* **`render-drives-the-port` caught the first shape of the fix.**
+  `render/slotmodels.ts` called `HumanoidProgramOf(a)`, which is a one-line
+  table lookup and still a call from `render/` into `game/`. The rule is right
+  — the mouse arm beside it reads `a.mouse.frame`, a field — so the descriptor
+  word is cached onto the actor by `ScriptedHumanoidInit` and the renderer
+  reads `a.hum.drawVariant`. The value is written once by the spawn and cannot
+  change, so the cache is exact. **The checker was not touched.**
+* **Exported the bundle before the last `gen_builder_hash.py` run**, so the
+  manifest carried a stale builder digest and the page lit its own staleness
+  warning. Caught by looking at the top bar in a screenshot, which is L24
+  working as designed.
+
+### What is left
+
+* **The wake sprites are not drawn.** `[diverges]`, declared in
+  `render/slotmodels.ts`. Variant 3's second half is
+  `AssetDrawSlot(0x24A + g_frame_counter % 22)` twice, under an anchor at
+  `(p.x, -25.0, p.z)` — water level — turned by a heading `MatrixToEulerBams`
+  (`FUN_00401AE0`) takes off the composed rotation, at `x = ±1.7, z = 20.0`
+  with the second mirrored by a `(-1, 1, 1)` scale. The heading is **not**
+  `p.ry`: the decomposition undoes `rz` and `rx` from the left, and `op_st3`
+  340's `rot_x` runs to 15,758 BAMS, so the two differ by a lot. Doing it
+  faithfully means transcribing `MatrixToEulerBams` and `FUN_00401800` and
+  carrying 22 more models (`char_adv06.bin` 0..21) in any bundle with a
+  variant-3 spawn. Left undone rather than guessed at.
+* **`Class26Subtype2Update` sets `g_carrier_object`.** `DAT_009A5C34 = obj` on
+  its first call, which is the rideable class 0x30 state 29 adds itself to.
+  Noticed, not chased.
+* **Its `case 0xF6/0xF7/0xF8 -> slot 0x199` route is not in any rig table.**
+  Camera paths 246..248 against object path 409; the exporter's transcription
+  stops at the eight routes 124..135. Not in stage 3's bundle, so [open] which
+  stage it belongs to.
+* **The `[open]` alternating-frame flip** on the boat's NPCs, from the earlier
+  report, is untouched by any of this.
+
+**Next actions**
+
+1. Ask the user about the wake pair — it is the only piece of a routine this
+   session ported that is knowingly missing.
+2. If "completely in fog" is still being seen, get the URL and the bundle age
+   from the top bar; nothing in this commit reproduces it.

@@ -82,6 +82,13 @@ export interface HudSource {
   readonly chars: Describes;
   readonly props: Describes;
   readonly rigs: Describes;
+  /**
+   * `render/slotmodels.ts` — the actors drawn as a bare asset slot rather
+   * than a skeleton, and **where each one is**. The boat class 0x25's
+   * object-path arm draws is one of them, and nothing in this panel could
+   * see it until this row existed.
+   */
+  readonly slotModels: { readonly describe: () => string };
   readonly breakables: Describes;
   readonly shooting: Describes;
   /** `render/effects.ts` — the blood, the muzzle flash and the tracer. */
@@ -121,6 +128,7 @@ export function hudInputs(p: HudSource): HudInputs | null {
       characters: p.chars.describe,
       props: p.props.describe,
       rigs: p.rigs.describe,
+      slotModels: p.slotModels.describe(),
       breakables: p.breakables.describe,
       shooting: p.shooting.describe,
       effects: p.effects.describe,
@@ -159,6 +167,7 @@ export interface HudInputs {
   yawBams: number;
   describe: {
     characters: string; props: string; rigs: string; breakables: string;
+    slotModels: string;
     shooting: string; effects: string; blood: string; coli: string;
     wedged: string; enemies: string;
     shutter: string; rain: string; fog: string; light: string; sky: string;
@@ -255,6 +264,7 @@ export function groupRows(w: Walker, x: HudInputs):
       ["props", d.props],
       ["breakables", d.breakables],
       ["rigs", d.rigs],
+      ["slot models", d.slotModels],
     ],
     collision: [
       ["coli", d.coli],

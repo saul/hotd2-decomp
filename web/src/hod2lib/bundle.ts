@@ -27,6 +27,13 @@
 
 import { BUILDER_FILES, BUILDER_HASH } from "../bundle/builder_hash";
 import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
+// The one fact the exporter and the renderer must not hold twice: which slot
+// `ScriptedHumanoidDraw`'s object-path arm draws. `class25/state.ts` is a
+// declarations-and-constants file with no module-scope side effect, which is
+// why it and not `class25/index.ts` -- that one registers a class handler,
+// and the exporter has no business acquiring one.
+import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
+  from "../game/class25/state";
 import { f32, i16, i32, u32 } from "./bytes";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
 import * as charmotion from "./charmotion";
@@ -477,6 +484,15 @@ export function scriptedHumanoidsJson(evt: evtlib.EvtFile,
       charType: (raw[tail] << 24) >> 24,
       removePath: i16(raw, tail + 2),
       removeFrame: i16(raw, tail + 4),
+      // `ScriptedHumanoidDraw` (`FUN_00484FF0`) opens
+      // `switch (*(int16*)(obj+0x1390 + 6))`, and `obj+0x1390` is
+      // `desc + 0x24` -- so this word is `desc + 0x2A`. It picks a decoration
+      // the actor draws beside its skeleton: 1 and 2 are fixed props at
+      // hardcoded points, 3 rides the `op_` path in `obj+0x135C`, 4 draws
+      // only while `g_active_cam_path == 0x93`. Zero draws nothing, which is
+      // 129 of the six stages' 137 spawns; 1 and 2 are stage 2's, 3 and 4
+      // stage 3's.
+      drawVariant: i16(raw, tail + 6),
       flags2: i16(raw, blk + 2),
       motion: i16(raw, blk + 4),
       phase: i16(raw, blk + 6),
@@ -606,6 +622,32 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
 };
 
 /**
+ * The extra asset slots a stage's class-0x25 **descriptors** ask for.
+ *
+ * Not in {@link ACTOR_SLOTS}, because this is not a property of the class:
+ * 129 of the 137 class-0x25 spawns are variant 0 and draw nothing beside
+ * their skeleton, so keying it on the class would put the model in all six
+ * bundles to be used by one.
+ *
+ * Variants 1, 2 and 4 draw at points the routine hardcodes, so the rig writer
+ * already exports them as fixed parts of `obj_484ff0_props`. Variant 3 takes
+ * its path slot from `obj+0x135C` at run time, which no static placement can
+ * express -- so its model has to travel as a bare slot the client places for
+ * itself. See {@link HUMANOID_VARIANT3_SLOT} for what it is and is not known
+ * to be.
+ */
+export function humanoidDrawSlots(
+    humanoids: Record<string, unknown>): number[] {
+  for (const h of Object.values(humanoids)) {
+    if ((h as { drawVariant?: number }).drawVariant
+        === HumanoidDrawVariant.OnObjectPath) {
+      return [HUMANOID_VARIANT3_SLOT];
+    }
+  }
+  return [];
+}
+
+/**
  * A hidden rig holding the models an **actor** class draws by asset slot.
  *
  * The counterpart of {@link breakableSlotEntry}, for the classes whose draw is
@@ -618,13 +660,17 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
  */
 export async function actorSlotEntry(
     stage: Stage, spawnClasses: readonly number[],
-    cache: AssetCache): Promise<RigInstance | null> {
+    extra: readonly number[], cache: AssetCache):
+    Promise<RigInstance | null> {
   const want: number[] = [];
   for (const cls of spawnClasses) {
     for (const slot of ACTOR_SLOTS[cls] ?? []) {
       if (!want.includes(slot)) want.push(slot);
     }
   }
+  // Slots a *descriptor* asks for rather than a class -- see
+  // {@link humanoidDrawSlots}.
+  for (const slot of extra) if (!want.includes(slot)) want.push(slot);
   if (!want.length) return null;
   const slots = stage.tables.assetSlots();
   const parts: RigInstance["parts"] = [];
@@ -646,7 +692,7 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor classes (class 0x52)",
+    routine: "asset-slot actor draws (class 0x52; class 0x25 variant 3)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
@@ -1074,8 +1120,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
   const effectDefs = await scriptFlagEffectsJson(stage, placements);
   const brk = await breakableSlotEntry(stage, placements, effectDefs, cache);
+  // Decoded here rather than beside the rest of the script json below,
+  // because the glTF needs to know whether any class-0x25 descriptor asks for
+  // the variant-3 model before it writes the hidden `slots_actor` rig.
+  const humanoids = evt ? scriptedHumanoidsJson(evt, spawnRecords) : {};
   const act = await actorSlotEntry(
-    stage, spawnRecords.map((r) => r.cls), cache);
+    stage, spawnRecords.map((r) => r.cls), humanoidDrawSlots(humanoids),
+    cache);
   const eff = await effectSlotEntry(stage, cache);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -1124,7 +1175,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.props = propslib.propsJson(tables, hinges, statics);
   scriptJson.breakables = breakablesJson(tables, placements, effectDefs);
   scriptJson.set_pieces = evt ? setPiecesJson(evt, spawnRecords) : {};
-  scriptJson.humanoids = evt ? scriptedHumanoidsJson(evt, spawnRecords) : {};
+  scriptJson.humanoids = humanoids;
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 

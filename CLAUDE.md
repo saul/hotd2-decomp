@@ -127,9 +127,11 @@ curated one now, but check an export's diff rather than trusting it.
 
 ## Things that have cost this project real time
 
-**Read [`docs/LESSONS.md`](docs/LESSONS.md) before your first edit.** Twenty
-entries, each one paid for, each with a stable id so a commit message or a code
-comment can cite `L7` rather than restating it.
+**Read [`docs/LESSONS.md`](docs/LESSONS.md) before your first edit.** Every
+entry is paid for, and each has a stable id so a commit message or a code
+comment can cite `L7` rather than restating it. (It said "twenty" for as long
+as there were twenty-five, which is L16 about its own front door: a count in
+prose rots. Nothing counts them, so nothing states a number.)
 
 It is one file because it used to be four — this one and three skills — with
 six entries duplicated across them in five wordings, already losing clauses.

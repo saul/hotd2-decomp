@@ -2,10 +2,11 @@
  * `#viewport`, and the two overlays that sit over the rendered frame.
  *
  * The element itself is here rather than in `App.tsx` for one reason: it
- * carries two classes read from the projection — `paused` and `shooting` —
- * and if the root read them, every change to either would re-render the whole
- * chrome to move one class on one element. This subscribes to exactly those
- * two fields, and the canvas and the overlays are passed through as
+ * carries two classes read from the projection — `paused` and `shooting`, the
+ * second of them off the firing gate — and if the root read them, every change
+ * to either would re-render the whole chrome to move one class on one element.
+ * This subscribes to exactly those fields, and the canvas and the overlays are
+ * passed through as
  * `children`, which React hands back untouched: they are the same elements
  * `App` built on its own render, so React bails on that subtree rather than
  * reconciling it.
@@ -87,11 +88,11 @@ export function Viewport(
   },
 ) {
   const paused = useSlice((p) => p?.paused);
-  // The `shooting` class hides the system cursor and the crosshair replaces
-  // it, and neither is conditional any more: shooting is what the game is,
-  // there is no switch for it, and `render/shooting.ts` says why there is not.
-  // Both still wait for a projection, because before one there is no game to
-  // aim at and the loading overlay is over the top of them anyway.
+  // There is no *switch* for shooting -- it is what the game is, and
+  // `render/shooting.ts` says why there is not. What there is, is the game's
+  // own condition: the firing gate, read below. Both classes still wait for a
+  // projection first, because before one there is no game to aim at and the
+  // loading overlay is over the top of them anyway.
   //
   // Read off `paused` rather than through a second subscription: a selector
   // must *name* a field, so `(p) => p !== null` is not one -- it builds a
@@ -100,9 +101,22 @@ export function Viewport(
   // `boolean` in every projection and `undefined` only when there is none.
   const ready = paused !== undefined;
   const hud = useSlice((p) => p?.toggles.hud);
+  // The crosshair follows the firing gate, because the engine's does:
+  // `HudDrawCrosshair` (0x004169C0) will not draw the reticle while
+  // `g_nFiringGate` is zero, and the same word is what makes the trigger dead.
+  // A cutscene therefore takes the crosshair with it.
+  //
+  // The `shooting` class goes with it, which is a *port* decision and not the
+  // engine's: the cabinet has a physical gun and nothing to hide, so hiding
+  // the system cursor is this player's stand-in for one. Take the crosshair
+  // away and leave `cursor: none` behind and the viewer has nothing at all to
+  // point with for the length of a cutscene. So the pointer comes back exactly
+  // while the game's own reticle is gone.
+  const firingGate = useSlice((p) => p?.firingGate);
+  const aiming = ready && firingGate === true;
   return (
     <div id="viewport" ref={refs.host}
-         className={[paused && "paused", ready && "shooting"]
+         className={[paused && "paused", aiming && "shooting"]
                     .filter(Boolean).join(" ")}>
       {children}
       {/* Before the first projection there are no toggles and both are
@@ -126,7 +140,7 @@ export function Viewport(
             nothing. */}
         <div className="screen-message" ref={refs.message} />
       </div>
-      <div className="crosshair" ref={refs.crosshair} hidden={!ready} />
+      <div className="crosshair" ref={refs.crosshair} hidden={!aiming} />
     </div>
   );
 }

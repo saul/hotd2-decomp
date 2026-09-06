@@ -210,7 +210,7 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] **The cutscene skip works, and every consumer of its flag is read out.**
       `set_skippable_region` (`0x2C`) opens the window; both player-update
       routines poll Start against `_DAT_009C9028` while the shutter's firing
-      gate `DAT_009C8E00` is down; and the standing task
+      gate `g_nFiringGate` is down; and the standing task
       `CheckCutsceneSkipRequest` (`0x00435F40`, installed from the table at
       `0x005934E4`) raises `DAT_009A2D74`, ends the current camera move where
       it stands, and drains the asset queue. With the flag up, `0x30` drops its

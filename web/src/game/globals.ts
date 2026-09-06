@@ -243,6 +243,40 @@ export const G = {
   /** `g_nPlayerFired` — 0x009A5C78. Shots taken, for the accuracy grade. */
   g_nPlayerFired: [0, 0],
   /**
+   * `g_nFiringGate` — `0x009C8E00`. Non-zero and the trigger works; zero and
+   * it does nothing at all.
+   *
+   * **It is not "the shutter is open".** `HudDrawShutterState`
+   * (`FUN_00413970`) is its only writer inside a stage, and it raises it in
+   * states 0, 1 and 6 and drops it in state 5 and at the end of a state-3
+   * close — so states 0 and 5 both draw a *closed* shutter and set it to 1 and
+   * 0 respectively. A boss intro can be letterboxed and still let you shoot.
+   * The state machine that drives it is `script/state/shutter.ts`, which is
+   * the only writer here too.
+   *
+   * The rule it enforces is `PlayerFireAndReloadUpdate`'s (`FUN_00414940`),
+   * where the whole fire block sits under `else if (g_nFiringGate != 0)` at
+   * `0x004149BE`: with the gate down there is no ammo decrement, no shot
+   * count, no `BuildShotRay`, no `PlayerShotEffectSpawn` and no gunshot — the
+   * routine returns before all of it. `combat/shot.ts` is where the port does
+   * the same.
+   *
+   * **In `G` rather than on the walker, because the exe has one word and the
+   * port must have one field.** The shutter's own three fields are script
+   * state and stay with the script; this one is read by the player's fire
+   * routine, so it lives where the rest of the data segment does and
+   * `script/state/shutter.ts` reaches it through an accessor. `Walker`'s save
+   * slice still carries it under the old name, but only as a copy taken from
+   * here at save time — the script slice is restored before the game slice, so
+   * this is what a load ends up holding either way.
+   *
+   * BSS, so it starts **down**, and `ResetSceneOnEnter` puts it back down on
+   * every scene: nothing raises it until the script's first `hud_shutter_state`
+   * of 0, 1 or 6. All eleven shipped `evt/` tables issue those — 87 ones and
+   * 104 sixes across the game — so gating on it does not lock the player out.
+   */
+  g_nFiringGate: 0,
+  /**
    * The trigger pulls this frame has not resolved yet.
    *
    * `[port-only]`, and it is the one piece of *input* the data segment holds.
@@ -838,7 +872,7 @@ export type Globals = typeof G;
  *   has no `obj+0x3C` slot index and never claims one. |
  * | `g_bHudShutterState` / `Prev` back to 5 | ❌ the walker owns the shutter |
  * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
- * | `g_nFiringGate = 0` | ❌ |
+ * | `g_nFiringGate = 0` | ✅ |
  * | the scene light block, via `FUN_0040E140` | ❌ |
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
  *   port loads collision and assets from the bundle, not from here |
@@ -846,7 +880,7 @@ export type Globals = typeof G;
  *   `DAT_009C6F20`, `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`,
  *   `DAT_009A34DC = 1` | `[open]` |
  *
- * Six of thirteen. The name is the engine's and the omissions are itemised on
+ * Seven of thirteen. The name is the engine's and the omissions are itemised on
  * purpose: a partial transcription that says which part is a work list, and
  * one that does not is a lie waiting to be believed.
  */
@@ -861,6 +895,12 @@ export function ResetSceneOnEnter(): void {
   // counterpart in `G`.
   G.g_head_combo_bonus = [0, 0];
   G.g_player_hit_count = [0, 0];
+  // `g_nFiringGate = 0` at 0x0045EEAC, the last write but one in the engine's
+  // body. A scene starts with the trigger dead and the script raises the gate;
+  // it is not a value the port may default to "on" for convenience, because a
+  // stage that never issues `hud_shutter_state 1` or `6` is a stage the engine
+  // would not let you shoot in either.
+  G.g_nFiringGate = 0;
 }
 
 /**

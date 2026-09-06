@@ -56,8 +56,19 @@ export const SHUTTER_STATES: Record<number, string> = {
 };
 
 /**
- * Which states drive DAT_009C8E00, the gate on firing and ammo decrement --
- * and, through it, on whether Start is polled for a cutscene skip.
+ * Which states drive g_nFiringGate (0x009C8E00), and which way.
+ *
+ * **`true` means firing is ENABLED.** `HudDrawShutterState` (0x00413970)
+ * writes the word 1 in states 0, 1 and 6 and 0 in state 5 and at the end of a
+ * state-3 close, and `PlayerFireAndReloadUpdate` (0x00414940) runs its whole
+ * fire block under `else if (g_nFiringGate != 0)`. State 0's label reads
+ * backwards on purpose: it draws the closed bars *and* raises the gate, which
+ * is how a letterboxed boss intro still lets you shoot. States 2, 4, 7 and 8
+ * are absent because they leave the word alone.
+ *
+ * The 3 row means "when the close finishes", not "at once": the state counts
+ * down 0x28 frames first, and the port keeps that countdown for exactly this
+ * reason. See `script/state/shutter.ts`.
  */
 export const SHUTTER_GATE: Record<number, boolean> =
   { 0: true, 1: true, 6: true, 3: false, 5: false };

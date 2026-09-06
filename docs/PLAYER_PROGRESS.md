@@ -1771,14 +1771,15 @@ Three blocks of it were `[open]` and are not any more:
   (`FUN_004092D0`) releases, with the slot index at `obj+0x3C` and `obj+0x38`
   bit 6 saying it holds one. `ActorDespawn` frees it on the way out.
 
-The port zeroes **six of the thirteen** things the engine's body does, and the
-doc comment on `ResetSceneOnEnter` lists all thirteen with a tick or a cross
-against each. That is deliberate: a partial transcription that says which part
+The port zeroes **seven of the thirteen** things the engine's body does, and
+the doc comment on `ResetSceneOnEnter` lists all thirteen with a tick or a
+cross against each. That is deliberate: a partial transcription that says which part
 is a work list, and one that does not is a lie waiting to be believed — which
-is exactly how `LEAP_LAND_MOTION` got its name. The seven crosses are the
-shutter, the backdrop and rain flags, the firing gate, the scene light block,
-the loader calls, `g_hit_slots`, and the two per-scene civilian tallies; none
-has a counterpart in `G` yet.
+is exactly how `LEAP_LAND_MOTION` got its name. The six crosses are the
+shutter, the backdrop and rain flags, the scene light block, the loader calls,
+`g_hit_slots`, and the two per-scene civilian tallies; none has a counterpart
+in `G` yet. The firing gate was the seventh until the trigger started honouring
+it — `g_nFiringGate` is in `G` now, and this is where it goes back down.
 
 `ResetGameGlobals` keeps its own name and its own job — emptying the object
 pools and the camera, which the engine never needs because its pool is a fixed
@@ -2010,6 +2011,21 @@ readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 * Score is `FUN_00409430`'s: **10** a hit, **120 + a combo** on the head where
   the combo grows by 10 per consecutive headshot and **any non-head hit resets
   it**, and **80** on the kill.
+* **The trigger is dead while the shutter's firing gate is down.**
+  `PlayerFireAndReloadUpdate` (`FUN_00414940`) runs its whole fire block under
+  `else if (g_nFiringGate != 0)`, which is one test above the ammo decrement,
+  the shot counter, `BuildShotRay` *and* `PlayerShotEffectSpawn` — so a pull
+  under a closed shutter is not a shot that misses, it is not a shot, and it
+  makes no muzzle flash and no tracer either. `ResolveShotRequest` asks the
+  same question in the same place and drops the request rather than holding it.
+  Non-zero means *allowed*: state 0 draws the closed bars **and** raises the
+  gate, so a letterboxed intro is playable, and state 5 draws the same bars and
+  drops it. The **crosshair** follows it, because `HudDrawCrosshair`
+  (`FUN_004169C0`) tests the same word before it draws, and so does the ammo
+  readout one level up in `PlayerUpdateInPlay` (`FUN_00413E90`). Reload is
+  **not** gated — only its sound is. Every shipped stage raises the gate inside
+  its first 150 instructions and holds it up for 99.9 % of the script, so this
+  costs the player nothing but the cutscenes.
 
 **Dying is directional.** `FUN_00409430` only drops HP; the actor's own machine
 moves it to **state 6** (`FUN_00454D20`), which calls `FUN_004560B0` →
@@ -2038,7 +2054,9 @@ cloned onto the bone when hit, rather than duplicated across all 108 instances.
 Not implemented, each for a stated reason: the per-bone **collision-mesh**
 refinement (the sphere alone picks the same bone except at grazing angles), the
 **difficulty modifier** at `PTR_DAT_004D0D84` (needs a rank), **ammo and
-reload**, **civilians**, and `FUN_004560B0`'s **special deaths** for a
+reload** — which is also why the firing gate above is asserted against
+`g_nPlayerFired` rather than a magazine — **civilians**, and `FUN_004560B0`'s
+**special deaths** for a
 particular destroyed part (`obj+0x1368` bits → motions 428, 421, 633, 553), so
 a character whose arm has come off still plays a directional death.
 

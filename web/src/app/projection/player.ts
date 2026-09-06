@@ -112,6 +112,10 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     status: v.status,
     bundleStale: v.bundleStale,
     paused: v.paused,
+    // The walker's accessor, which reads `G.g_nFiringGate`. Off before there
+    // is a walker at all, which is also what the engine's BSS says: the word
+    // is zero until a stage script raises it.
+    firingGate: w?.firingGate ?? false,
     toggles: v.toggles,
     transport: v.transport,
     sound: v.sound,

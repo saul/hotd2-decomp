@@ -420,11 +420,20 @@ engine runs the ring one action at a time, so a shot being replaced **is** the
 previous action completing. Splitting *those* is what would let the count and
 the flag be written down inconsistently, which is the bug that used to park a
 reload for ever. `shutter.ts` is the nine-state machine `HudDrawShutterState`
-runs *and* the firing gate it writes, for the same reason: `DAT_009C8E00` is
-written on four of that function's paths and nowhere else in the game, so a
-gate outside the shutter is a second owner of one word — which is what the
-port already had once, when the slide counter existed twice and a seek reset
-one copy while restoring the other.
+runs *and* the firing gate it drives, for the same reason: `g_nFiringGate` is
+written on five of that function's paths and by nothing else that runs inside a
+scene, so a second writer of it would be a second owner of one word — which is
+what the port already had once, when the slide counter existed twice and a seek
+reset one copy while restoring the other.
+
+The **word itself** is in `game/globals.ts`, not on the walker, and that is not
+a contradiction: `shutter.ts` remains its only writer and reaches it through an
+accessor. It moved there when the port started honouring it, because the
+routine that *reads* it — `PlayerFireAndReloadUpdate`, whose whole fire block
+sits under `else if (g_nFiringGate != 0)` — is in `game/`, and a copy pushed
+across from `script/` would have been exactly the second owner this paragraph
+is about. The shutter's own three fields stay in `script/`: nothing outside the
+script reads them.
 
 `camera_action.ts` is the one that was still a hidden switch. `queue_event`
 (0x30) dispatches on a selector, and the port had that as ~140 lines of

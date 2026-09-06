@@ -358,6 +358,17 @@ export interface UiProjection {
    * through with `PAUSED` would be worse than saying nothing.
    */
   paused: boolean;
+  /**
+   * The script is letting the player shoot.
+   *
+   * `g_nFiringGate` as `game/globals.ts` holds it. The UI's only use for it is
+   * the crosshair, which the engine draws under exactly this condition —
+   * `HudDrawCrosshair` (0x004169C0) tests the same word before it draws
+   * anything, and `PlayerUpdateInPlay` (0x00413E90) tests it again before the
+   * ammo readout. A dead trigger with a reticle still on it would be the port
+   * telling the viewer something the game does not.
+   */
+  firingGate: boolean;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
   sound: SoundProjection;

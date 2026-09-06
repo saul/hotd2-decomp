@@ -155,10 +155,47 @@ export function ProcessShotRequests(host: GameHost, rng: Rng,
   for (const req of due) ResolveShotRequest(req, host, rng, events);
 }
 
-/** One request, from segment to score. `[port-only]` — see above. */
+/**
+ * One request, from segment to score. `[port-only]` — see above.
+ *
+ * ## The firing gate is the first thing it asks
+ *
+ * `PlayerFireAndReloadUpdate` (`FUN_00414940`) is shaped
+ *
+ * ```c
+ * if (trigger_latch) {
+ *   if (magazine empty)          { auto-refill }
+ *   else if (g_nFiringGate != 0) { ammo--; shots++; BuildShotRay();
+ *                                  PlayerShotEffectSpawn(); gunshot(); }
+ * }
+ * ```
+ *
+ * so a trigger pulled while the gate is down does **nothing at all** — it
+ * returns before the ammo decrement, before the shot counter, before
+ * `BuildShotRay` and before `PlayerShotEffectSpawn`, which is why a shutter
+ * that is closed for a cutscene produces no muzzle flash and no tracer either.
+ * That distinction is the whole behaviour, so the test is here, above
+ * `g_nPlayerFired` and above the effect spawn, and not at the pointer.
+ *
+ * The request is **dropped**, not held: the engine polls the trigger once a
+ * frame and a blocked poll is simply a frame in which nothing happened. A
+ * queue that saved the click for later would fire it when the shutter opened,
+ * which the engine never does. `ProcessShotRequests` has already taken every
+ * due request off the queue by the time this runs, so returning is the drop.
+ *
+ * What is **not** gated, because the engine does not gate it: reloading. Both
+ * the auto-refill-when-empty path and the reload button run with the gate
+ * down, and only `PlayerRefillMagazine`'s sound is held back (`0x00414B75`).
+ * The port has no ammo and no magazine, so there is nothing here to exempt —
+ * see `docs/PLAYER_PROGRESS.md`.
+ */
 function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
                             events?: Events): void {
   const player = req.player;
+  // `g_nFiringGate` — `0x009C8E00`. The test is at 0x004149BE in the arcade
+  // routine and at 0x00414C2D in the Original Mode twin at 0x00414B90, which
+  // is the same shape with a per-weapon magazine and a recoil spread.
+  if (G.g_nFiringGate === 0) return;
   // `g_nPlayerFired` — the accuracy denominator. Counted here rather than
   // where the click landed, so it counts shots the *game* saw.
   G.g_nPlayerFired[player] = (G.g_nPlayerFired[player] ?? 0) + 1;

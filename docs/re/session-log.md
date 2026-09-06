@@ -12485,3 +12485,153 @@ single number that is right for all six; this one is right for more of them.
 `THUMB_FRAMES` is the whole of it, and 420 steps still take a fraction of a
 second.
 
+
+---
+
+## Session — the shutter was closed and the gun still worked
+
+Reported as "shouldn't be able to shoot while the shutter is closed. Check the
+game code to see how the real game handles this".
+
+The port already had almost all of this. `HudDrawShutterState` (`0x00413970`)
+was read, the nine states were transcribed in `script/state/shutter.ts`, the
+gate the machine drives was a field on it, the walker exposed it, the save
+slice carried it and `Walker.canSkip` read it. It had **two** readers in the
+whole tree and one of them was an assertion in `test/state.test.ts`. The shot
+path had never looked at it.
+
+### What the binary says, and where the doubt was
+
+The doubt worth naming first, because it was the thing I was told not to assume
+either way: `SHUTTER_GATE` names state 0 *"close, and enable firing"*, which
+reads backwards. It is not backwards. `HudDrawShutterState`'s case 0 draws the
+two bars at ±0.35 — a closed letterbox — and then writes `g_nFiringGate = 1`.
+Case 5 draws exactly the same two bars and writes 0. The gate is not "the
+shutter is open"; it is a separate permission, and a letterboxed boss intro is
+meant to be playable. The polarity in `hod2lib/script.ts` and in
+`docs/formats/evt.md` was right all along.
+
+The five writes inside the routine are states 0, 1 and 6 → 1, state 5 → 0, and
+the tail of a state-3 close → 0. Not four, as `shutter.ts`'s own comment
+claimed; and not "nowhere else in the whole game" either, which was the other
+half of the same sentence. `ResetSceneOnEnter` (`0x0045EDD0`) clears it at
+`0x0045EEAC`, and four more writers sit on the game's top-level screens
+(`FUN_00425E90`, `FUN_00497360`, `FUN_00497760` → 0, `FUN_00480D90` → 1). None
+of those is reachable from a stage script; `[likely]` menu and result screens,
+not chased.
+
+The rule, from `PlayerFireAndReloadUpdate` (`0x00414940`):
+
+```c
+if (trigger_latch) {
+  if (magazine empty)          { auto-refill }
+  else if (g_nFiringGate != 0) { ammo--; shots++; BuildShotRay();
+                                 PlayerShotEffectSpawn(); gunshot(); }
+}
+```
+
+`g_nFiringGate != 0` means **firing is allowed** (`0x004149BE`, and the same
+test at `0x00414C2D` in the Original Mode twin at `0x00414B90`). The answer to
+the question the task actually turned on — is it a gate on the trigger, on the
+ammo, or on the resolution? — is: on the trigger, above all three. A blocked
+pull returns before the ammo decrement, before `g_player_shot_count`, before
+`BuildShotRay` and before `PlayerShotEffectSpawn`. **The engine does not spawn
+the muzzle flash or the tracer for a blocked trigger.** That is the distinction
+a "fix" applied one line lower would have got wrong, and it is what the new
+assertions watch.
+
+Three more findings from the same read:
+
+* **Reload is not gated.** Both the auto-refill-when-empty path and the reload
+  button run with the gate down; only the reload *sound* is held back
+  (`0x00414B75`, `0x00414E88`, `0x0040E7B3`). So the gate is on shooting, not
+  on the weapon.
+* **The crosshair is gated.** `HudDrawCrosshair` (`0x004169C0`, previously
+  unnamed) tests the same word at `0x00416A65` before it draws anything. The
+  answer to "does the engine leave the crosshair up" is no.
+* **The ammo readout is gated too**, one level up: `PlayerUpdateInPlay`
+  (`0x00413E90`) calls `HudDrawAmmoAndReloadPrompt` (`0x004177D0`) only when
+  the word is non-zero, and the RELOAD prompt inside it is gated again at
+  `0x00418001`.
+
+`PlayerUpdateInPlay` had no function in Ghidra at all — `0x00413DDF..0x00413FAF`
+was orphaned instructions after `FUN_00413DB0`, so the `g_nFiringGate` read at
+`0x00413F63` showed up in the xref list with no owning function. Creating the
+function there is what made the ammo-HUD half readable.
+
+### The shape of the fix, and the one design call
+
+The engine has one word. The port had it as a field on `Shutter`, in `script/`,
+with a comment explaining that a gate living outside the shutter would be a
+second owner — which was good reasoning that had produced a value `game/` could
+not see.
+
+So `g_nFiringGate` is a field of `G` now, and `Shutter.firingGate` is an
+accessor onto it. That keeps the one-owner property the comment was defending
+(the shutter machine is still the only writer) and puts the word where the
+routine that reads it lives. The port's `ResetSceneOnEnter` clears it, which
+flips one more row of that function's transcription table from ❌ to ✅.
+
+The test goes at the top of `ResolveShotRequest`, above `g_nPlayerFired` and
+above `PlayerShotEffectSpawn`. The request is **dropped**, not held: the engine
+polls the trigger once a frame, and a queue that saved the click would fire it
+when the shutter opened, which the engine never does.
+
+### The safety question, and how it was answered
+
+Gating the trigger is only safe if the shipped scripts actually raise the gate.
+BSS starts at zero and `ResetSceneOnEnter` puts it back there, so a stage that
+never issues `hud_shutter_state` 0, 1 or 6 would be a stage you could not shoot
+in at all — and that would be a far worse bug than the one being fixed.
+
+Counting the opcode across all eleven `evt/` tables: 87 ones, 104 sixes, 79
+fives, 69 threes, and **no zeros anywhere in shipped data**. Then walking each
+of the six stages' scripts headlessly: the gate first comes up at instruction
+147, 131, 134, 105, 102 and 69 respectively, and is up for 99.9 % of the
+instruction stream. The 0.1 % is the reported bug.
+
+### Wrong turns
+
+* **I ran the whole first round of `tools/annotate.py` against the main
+  checkout instead of my worktree.** Every command in this session began
+  `cd /Users/llm-sandbox/hotd2-decomp && …` out of habit, and `annotate.py`
+  resolves its paths from `__file__`, so four annotations landed in a tree that
+  had a peer's uncommitted work in the same two files. Caught only because the
+  next command in the same shape was a `git` call and the sandbox refused it.
+  Reverting was surgical — three added rows removed, one row restored to its
+  two-column form — and the batch was then re-applied through the worktree's
+  own copy of the script, as `tools/annotate_firing_gate.sh` so it is
+  re-runnable. **A tool that resolves paths from its own location does not care
+  what your `cd` said**, and a worktree is not protection if you type the other
+  path.
+* **I tried to rename `FUN_00414B90` and `FUN_00414E40` and found them already
+  named** — `PlayerFireOriginalModeWeapon` and `PlayerReloadOriginalModeWeapon`,
+  by a peer working in the live database at the same time, and not yet in
+  either tree's TSV. My `rename_symbol` call did not fail; it created a *label*
+  beside the function, which is the sort of thing an export would later have to
+  explain. Deleted. The lesson is the mechanical one: `rename_function` refuses
+  a name it cannot find, `rename_symbol` obliges by making something new. And
+  it is L21 again — the thing you are reading moves while you read it. I cite
+  those two by address rather than by name, because a name that is only in
+  somebody else's live database is not a citation `verify_port` can check.
+* I first wrote the new test section with `new Walker()` and no script, which
+  throws; and with `NULL_HOST`, which has no `viewPoint`, so
+  `PlayerShotEffectSpawn` spawned nothing and *"the muzzle is lit"* failed on
+  the allowed shot. The second of those is the more interesting failure: the
+  assertion that a **blocked** trigger lights nothing would have passed for the
+  wrong reason if I had not also asserted that an allowed one lights something.
+
+### Left undone, deliberately
+
+`Shutter.reset()` puts the state to 2 (open, nothing drawn); the engine's
+`ResetSceneOnEnter` puts `g_bHudShutterState` and `g_bHudShutterPrev` to **5**
+(draw closed, then hand over to 4 with the gate down). That is a real
+difference at the first frame of a stage and it predates this session. It is
+now marked `[diverges]` on the spot rather than fixed, because the port's
+shutter machine also has no per-frame collapse of states 0, 5 and 6 into 4 and
+2 — the exe does that in the draw routine — so setting the initial state to 5
+without adding that would leave the bars shut for the rest of the session.
+
+The port has no ammo, no magazine and no reload. `g_nPlayerFired` is the only
+counter the gate can be shown to hold back, and the assertion uses it. When a
+magazine arrives it belongs under the same test.

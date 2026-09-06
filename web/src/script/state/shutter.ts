@@ -7,19 +7,31 @@
  * how far through its 40-frame slide it is, and the firing gate the machine
  * raises and drops on the way.
  *
- * **The gate is part of this and not next to it.** `DAT_009C8E00` is written
- * on four of `FUN_00413970`'s paths and nowhere else in the whole game, so a
- * gate that lived outside the shutter would be a second owner of one word —
- * the shape that already cost this port once, when the slide counter existed
- * twice (`gateCloseLeft` and the shutter's own) and a seek reset one of them.
- * There is one counter here doing both jobs, exactly as there is one in the
- * exe.
+ * **This machine is the gate's only writer, and the gate itself is in `G`.**
+ * `g_nFiringGate` (`0x009C8E00`) is written on five of `FUN_00413970`'s paths
+ * — states 0, 1 and 6 raise it, state 5 and a completed state-3 close drop it
+ * — and by nothing else that runs inside a scene. (`ResetSceneOnEnter`
+ * (`FUN_0045EDD0`) clears it on the way in, and four more writers exist on the
+ * game's top-level screens: `FUN_00425E90`, `FUN_00497360`, `FUN_00497760`
+ * and `FUN_00480D90`. None of them is reachable from a stage script, so the
+ * port models none of them.) An earlier version of this comment said the write
+ * happened "on four of `FUN_00413970`'s paths and nowhere else in the whole
+ * game", and both halves of that were wrong.
+ *
+ * The *storage* moved to `game/globals.ts` when the port started honouring the
+ * gate, because the routine that reads it — `PlayerFireAndReloadUpdate`
+ * (`FUN_00414940`) — is in `game/`, and a value written here and copied there
+ * would be exactly the second owner of one word this file was written to
+ * avoid. The three fields that stay are the shutter's own: the exe's
+ * `g_bHudShutterState`, `g_bHudShutterPrev` and the draw task's counter are
+ * script state and nothing outside the script reads them.
  *
  * Registered as state the way `channels.ts` and `queued.ts` are: the walker
  * owns one of these and exposes `shutterState`, `shutterPrev`,
  * `shutterCounter` and `firingGate` as accessors onto it, so the save slice,
  * `hud/hud.ts` and the HUD strip all go on speaking the same four names.
  */
+import { G } from "../../game/globals";
 
 /** The shutter's slide, in frames. `0x28` in `HudDrawShutterState`. */
 export const SHUTTER_FRAMES = 40;
@@ -51,19 +63,34 @@ export class Shutter {
    */
   counter = 0;
   /**
-   * `DAT_009C8E00` -- the firing gate: 1 in states 0, 1 and 6, and 0 in state 5
+   * `g_nFiringGate` — `0x009C8E00`: 1 in states 0, 1 and 6, and 0 in state 5
    * and when a state-3 close completes. It is not simply "the shutter is
    * open": states 0 and 5 both draw a closed shutter and set it to 1 and 0
    * respectively, so a boss intro can be letterboxed and still let you shoot.
+   *
+   * An accessor rather than a field: the word lives in `G`, where the fire
+   * routine that reads it can see it. See the note at the top of this file.
    */
-  firingGate = false;
+  get firingGate(): boolean { return G.g_nFiringGate !== 0; }
+  set firingGate(v: boolean) { G.g_nFiringGate = v ? 1 : 0; }
 
   /**
    * A stage from cold.
    *
-   * BSS, so the gate starts **down**: `FUN_0045EBC0` does not touch
-   * `DAT_009C8E00`, and nothing raises it until the shutter machine's first
-   * state 0, 1 or 6.
+   * The gate starts **down**, which is the engine's: `ResetSceneOnEnter`
+   * (`FUN_0045EDD0`) writes `g_nFiringGate = 0` at `0x0045EEAC`, and nothing
+   * raises it until the shutter machine's first state 0, 1 or 6. The port's
+   * `ResetSceneOnEnter` does the same write, so this line is a second statement
+   * of it rather than the only one — a stage load and a seek both go through
+   * that reset, and this is here for a `Shutter` built on its own.
+   *
+   * `[diverges]` The *state* is 2 here and 5 in the engine, which zeroes
+   * `g_bHudShutterState` and `g_bHudShutterPrev` to 5 in the same routine. A 5
+   * draws the closed bars and hands over to 4; a 2 draws nothing. That is a
+   * visible difference at the first frame of a stage and it predates this
+   * file, so it is named rather than changed here — the port's shutter machine
+   * also has no per-frame collapse of 0, 5 and 6 into 4 and 2, and putting the
+   * initial state right without that would leave the bars shut for good.
    */
   reset(): void {
     this.state = this.prev = 2;

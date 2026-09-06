@@ -72,6 +72,8 @@ const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE }
   = await import("../src/render/lighting");
 const { SlotModelLayer } = await import("../src/render/slotmodels");
 const { EffectLayer } = await import("../src/render/effects");
+const { FLASH_SMOKE_SCALE, FLASH_SMOKE_SCALE_KIND4 }
+  = await import("../src/game/effects/shot_effects");
 const { G, ResetGameGlobals } = await import("../src/game/globals");
 const { makeActor } = await import("../src/game/actor");
 const { SpawnClass } = await import("../src/game/spawn_class");
@@ -1104,6 +1106,10 @@ console.log("\nthe shot effects are models, one per frame:");
   f.frame = 0;
   f.pos = { x: 0.1, y: -0.2, z: -1 };
   layer.update(ctx);
+  check("the flash's second draw compounds onto the first, not over it",
+        Math.abs(FLASH_SMOKE_SCALE - 0.05) < 1e-9
+        && Math.abs(FLASH_SMOKE_SCALE_KIND4 - 0.075) < 1e-9,
+        `${FLASH_SMOKE_SCALE}`);
   check("a live muzzle record draws its two slots in the camera's group",
         layer.viewGroup.children.length === 2
         && layer.group.children.length === 0,

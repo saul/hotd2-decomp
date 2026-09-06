@@ -6,8 +6,9 @@
  * and steps all eighteen records every frame:
  *
  * * the **muzzle flash**, nine frames from `g_muzzle_flash_slots[player]`,
- *   drawn twice — once at a tenth scale and once from
- *   `g_muzzle_smoke_slots[player]` at a half;
+ *   drawn twice under one transform — a tenth scale, then
+ *   `g_muzzle_smoke_slots[player]` at half of that again, because
+ *   `MatrixScale` compounds;
  * * the **tracer**, the round itself, thrown from the muzzle along the aim at
  *   twenty units a frame and drawn as one spun billboard;
  * * a third ring that only Original Mode's weapon kind 4 ever arms.
@@ -54,11 +55,24 @@ export const TRACER_LAST_FRAME = 0x3b;
 /** ...and the Original Mode record past 0x17. */
 export const WEAPON_LAST_FRAME = 0x17;
 
-/** `FUN_004A9CC0(0.1, 0.1, 0.1)` on the first of the flash's two draws. */
+/** `MatrixScale(0.1, 0.1, 0.1)` on the first of the flash's two draws. */
 export const FLASH_SCALE = 0.1;
-/** The second draw's, by weapon kind: 0.75 for kind 4 and 0.5 for the rest. */
-export const FLASH_SMOKE_SCALE = 0.5;
-export const FLASH_SMOKE_SCALE_KIND4 = 0.75;
+/**
+ * The second draw's scale, and it is **not** the 0.5 the routine writes.
+ *
+ * `MatrixScale` (`FUN_004A9CC0`) multiplies the top of the matrix stack in
+ * place — twelve `x = k * x` and no assignment anywhere — and
+ * `PlayerShotEffectsThink` scales, draws, scales again and draws again inside
+ * **one** push. So the second scale compounds onto the first: 0.1 x 0.5, and
+ * 0.1 x 0.75 for Original Mode's weapon kind 4.
+ *
+ * Read as absolute, the second draw is a two-unit quad half a unit across at
+ * one unit from the eye, which is two and a half screen heights: every shot
+ * would white out the frame. Compounded it is a tenth of one, which is a
+ * muzzle flash.
+ */
+export const FLASH_SMOKE_SCALE = FLASH_SCALE * 0.5;
+export const FLASH_SMOKE_SCALE_KIND4 = FLASH_SCALE * 0.75;
 /** `FUN_004A9CC0(0.05, ...)` on the Original Mode record. */
 export const WEAPON_SCALE = 0.05;
 /** `AssetDrawSlot(frame + 0xA6F)` — `pol/eff_org9.bin`. */

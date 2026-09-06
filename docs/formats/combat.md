@@ -719,12 +719,20 @@ records every frame.
 
 | Ring | Address | Space | Frames | Slots |
 |---|---|---|---|---|
-| muzzle flash | `g_shot_flash_ring` 0x009A2960 | camera | 9 | `g_muzzle_flash_slots[player] + frame`, at scale 0.1, and a second draw of `g_muzzle_smoke_slots[player] + frame` at 0.5 |
+| muzzle flash | `g_shot_flash_ring` 0x009A2960 | camera | 9 | `g_muzzle_flash_slots[player] + frame` at scale 0.1, then `g_muzzle_smoke_slots[player] + frame` at **0.05** — see below |
 | tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad |
 | Original Mode | `g_shot_weapon_ring` 0x009A2700 | camera | 24 | `0xA6F + frame` at scale 0.05, weapon kind 4 only |
 
 `g_muzzle_flash_slots` (0x00579F78) is `{0x175, 0x17F}` and
 `g_muzzle_smoke_slots` (0x00579F7C) is `{0xB76, 0xB84}`, both `pol/common.bin`.
+
+**The flash's two scales compound, and reading them as absolute is a
+white-out.** `MatrixScale` (`FUN_004A9CC0`) multiplies the top of the matrix
+stack in place — twelve `x = k * x` and no assignment — and the routine scales,
+draws, scales again and draws again inside **one** `MatrixStackPush`. So the
+second draw is at `0.1 * 0.5`, or `0.1 * 0.75` for Original Mode's weapon kind
+4. Slot `0xB76` is a quad 3.84 units across; at an absolute 0.5, one unit from
+the eye, it covers two and a half screen heights.
 
 The muzzle point is the crosshair at camera-space `z = -1`:
 `(g_crosshair_x / g_projection_distance_px, g_crosshair_y / …, -1.0)`, with the

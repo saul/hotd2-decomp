@@ -11861,3 +11861,32 @@ port has only as a ray.
 * `ActorPlayHitVoice`'s fourth kind, the one the bursting head plays. The
   other three voices stay in `render/shooting.ts` with the seeded pick and the
   sound tables, so the burst is silent. `[open]`.
+
+### Follow-up — the muzzle flash was ten times too big
+
+The user pushed back on the answer above: *"There is 100% a muzzle flash or
+something animation when ANY shot is fired... don't invent something for this
+port."* They are right, it is the muzzle flash, and it lands **exactly** under
+the crosshair by construction — `PlayerShotEffectSpawn` places it at
+`(cx / proj, cy / proj, -1)` in camera space, which projects back to
+`proj * (cx / proj) / 1 = cx`, the same pixel, for any field of view.
+
+Checking that claim found a real bug in the commit above. `MatrixScale`
+(`FUN_004A9CC0`) multiplies the top of the stack **in place** — twelve
+`x = k * x` and no assignment — and `PlayerShotEffectsThink` scales, draws,
+scales again and draws again inside one `MatrixStackPush`. The two compound:
+the second draw is `0.1 * 0.5`, not 0.5. Slot `0xB76` is a quad 3.84 units
+across, so at an absolute 0.5 one unit from the eye it covers two and a half
+screen heights — every shot would have whited out the frame.
+
+The lesson generalises past this routine: **a second `MatrixScale` inside one
+push is a factor, not a value.** Every other draw in the effect path takes one
+scale each and is unaffected, and `SpriteEffectDrawAndTick`'s kind-'S' arm
+jumps over the second call rather than reaching it.
+
+Also confirmed, by reading every reader of `g_crosshair_x` in the image: the
+crosshair-aligned spark belongs to shootable **objects** — `SpawnPropHitSpark`
+(`FUN_00465860`) and two near-identical copies at `FUN_004666B0` and
+`FUN_0043E3D0`, each on its own object's update. `ActorShotFeedback` reads the
+crosshair nowhere, so a flesh hit gets blood at the bone and no spark. The
+remaining reader, `FUN_004169C0`, is the 2D reticle sprite itself.

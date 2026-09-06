@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 29020 | 128 | engine |
+| `game/` | 29022 | 128 | engine |
 | `hod2lib/` | 14229 | 34 | engine |
 | `render/` | 7711 | 29 | render |
 | `app/` | 7094 | 29 | app |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **67903** | **293** | |
+| **total** | **67905** | **293** | |
 
 The largest files, which is where the pressure to split next is:
 

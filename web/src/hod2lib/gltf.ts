@@ -22,7 +22,8 @@ import * as nl1 from "./nl1";
 import type { Mesh, Model } from "./nl1";
 import { encodeRgba } from "./png";
 import { dumpsIndented, dumpsTight } from "./pyjson";
-import type { PartModels, RigInstance, RigPart, Vec3 } from "./rigs";
+import type { PartModels, RigInstance, RigPart, RigSkin,
+              Vec3 } from "./rigs";
 import { pairKey } from "./stage";
 import { bankDecode } from "./texbank";
 import type { Bank } from "./texbank";
@@ -30,6 +31,7 @@ import type { Bank } from "./texbank";
 // glTF constants
 const FLOAT = 5126;
 const UNSIGNED_INT = 5125;
+const UNSIGNED_SHORT = 5123;
 const ARRAY_BUFFER = 34962;
 const ELEMENT_ARRAY_BUFFER = 34963;
 const TRIANGLES = 4;
@@ -122,6 +124,38 @@ class Buf {
     this.accessors.push({
       bufferView: view, componentType: FLOAT, count: vals.length,
       type: "SCALAR", min: [lo], max: [hi],
+    });
+    return this.accessors.length - 1;
+  }
+
+  /**
+   * `JOINTS_0` — one joint per vertex, the other three slots zero.
+   *
+   * `UNSIGNED_SHORT` rather than `UNSIGNED_BYTE`: a byte would do for every
+   * part the game ships, and glTF allows both, but a four-byte VEC4 needs
+   * padding to a four-byte stride anyway and the short costs nothing while
+   * removing a limit nobody would remember was there.
+   */
+  joints(js: readonly number[]): number {
+    const raw = new Writer(js.length * 8 + 16);
+    for (const j of js) { raw.u16(j); raw.u16(0); raw.u16(0); raw.u16(0); }
+    const view = this.add(raw.view(), ARRAY_BUFFER);
+    this.accessors.push({
+      bufferView: view, componentType: UNSIGNED_SHORT, count: js.length,
+      type: "VEC4",
+    });
+    return this.accessors.length - 1;
+  }
+
+  /** `WEIGHTS_0` — `(1, 0, 0, 0)`, *n* times. The engine has no weights. */
+  weights(n: number): number {
+    const raw = new Writer(n * 16 + 16);
+    for (let k = 0; k < n; k++) {
+      raw.f32(1.0); raw.f32(0.0); raw.f32(0.0); raw.f32(0.0);
+    }
+    const view = this.add(raw.view(), ARRAY_BUFFER);
+    this.accessors.push({
+      bufferView: view, componentType: FLOAT, count: n, type: "VEC4",
     });
     return this.accessors.length - 1;
   }
@@ -727,6 +761,7 @@ export async function exportLevel(
   const textures: Doc[] = [];
   const materials: Doc[] = [];
   const meshes: Doc[] = [];
+  const skins: Doc[] = [];
   const nodes: Doc[] = [];
   const sceneNodes: number[] = [];
 
@@ -1130,17 +1165,35 @@ export async function exportLevel(
       if (anchor !== null && !byName.has(anchor)) continue;
       const partNodes: number[] = [];
       const nodeByPart = new Map<string, number>();
+      /** `[node index, skin]` for every vertex-blended part in this rig. */
+      const skinned: [number, RigSkin][] = [];
       for (const [part, models] of entry.parts as PartModels[]) {
         let prims: Doc[] = [];
+        let meshIndex = 0;
         for (const [model, bank, label] of models) {
           for (const mesh of model.meshes) {
+            const mi = meshIndex++;
             if (!mesh.triangles.length || !mesh.vertices.length) continue;
+            // A vertex-blended part draws its **own** geometry, from the exe,
+            // not the pol model's: the model supplies the topology, the UVs
+            // and the material, and `DeformCharacterPartGroup` overwrites
+            // every position and normal every frame. See `charbuild.skinFor`.
+            const sk = part.skin;
+            const pos = sk ? sk.positions[mi] : mesh.vertices.map((v) => v.pos);
             const attrs: Doc = {
-              POSITION: buf.vec3(mesh.vertices.map((v) => v.pos)),
+              POSITION: buf.vec3(pos),
               TEXCOORD_0: buf.vec2(mesh.vertices.map((v) => v.uv)),
             };
-            const nrm = mesh.vertices.map((v) => v.normal);
+            const nrm = sk ? sk.normals[mi] : mesh.vertices.map((v) => v.normal);
             if (nrm.some((c) => c.some((x) => x))) attrs.NORMAL = buf.vec3(nrm);
+            if (sk) {
+              // One joint, weight 1. The engine has no weights at all: every
+              // vertex belongs to exactly one of the four groups, measured
+              // over the shipped parts with no row claimed twice and none
+              // claimed by nothing.
+              attrs.JOINTS_0 = buf.joints(sk.joints[mi]);
+              attrs.WEIGHTS_0 = buf.weights(sk.joints[mi].length);
+            }
             const idx: number[] = [];
             for (const tri of mesh.triangles) idx.push(tri[0], tri[1], tri[2]);
             prims.push({
@@ -1205,6 +1258,7 @@ export async function exportLevel(
         nodes.push(node);
         const idxNode = nodes.length - 1;
         nodeByPart.set(part.name, idxNode);
+        if (part.skin) skinned.push([idxNode, part.skin]);
         // A part is normally a sibling of the object root, because
         // MatrixStackPush(0) duplicates the top. A routine that nests a push
         // inside another without popping makes a real chain.
@@ -1215,6 +1269,36 @@ export async function exportLevel(
         } else {
           partNodes.push(idxNode);
         }
+      }
+
+      // **The joints are proxies, not the bone nodes themselves.**
+      // `GLTFLoader` turns any node a skin names into a `Bone` and re-parents
+      // its mesh underneath, which would change the class of every bone node
+      // in every character -- and the gore swap, the severed head and the
+      // attachments all key off whether a bone node is a `Mesh` or a `Group`.
+      // An empty child with no transform has the same `matrixWorld` as its
+      // parent, so the skin gets what it needs and nothing else moves.
+      for (const [meshNode, skin] of skinned) {
+        const joints: number[] = [];
+        for (let j = 0; j < skin.bones.length; j++) {
+          const host = nodeByPart.get(skin.jointParts[j]);
+          if (host === undefined) { joints.length = 0; break; }
+          nodes.push({
+            name: `${rig.name}_${tag}_joint${String(skin.bones[j])
+              .padStart(2, "0")}`,
+            extras: { hod2_kind: "rig_joint", hod2_rig: rig.name,
+                      hod2_bone: skin.bones[j] },
+          });
+          const jn = nodes.length - 1;
+          ((nodes[host].children ??= []) as number[]).push(jn);
+          joints.push(jn);
+        }
+        if (!joints.length) continue;
+        // No `inverseBindMatrices`: the exe's source vertices are already in
+        // their bone's local space, so the inverse bind is the identity, and
+        // glTF says an omitted accessor means exactly that.
+        skins.push({ joints });
+        nodes[meshNode].skin = skins.length - 1;
       }
 
       if (partNodes.length) {
@@ -1289,6 +1373,9 @@ export async function exportLevel(
     buffers: glb ? [{ byteLength: buf.length }]
                  : [{ uri: binName, byteLength: buf.length }],
   };
+  // Omitted when empty: `skins: []` is invalid glTF, and a stage with no
+  // vertex-blended character has none.
+  if (skins.length) doc.skins = skins;
   if (images.length) {
     doc.images = images;
     doc.textures = textures;

@@ -79,7 +79,15 @@ export async function run(stage: number, partPrefix: string,
     const ex = (o.userData ?? {}) as Record<string, string>;
     const rig = ex.hod2_rig ?? "";
     const part = ex.hod2_part ?? "";
-    if (!part.startsWith(partPrefix)) return;
+    // `--part whole` photographs the rig root instead of one of its parts.
+    // The exporter bakes a motion frame into the hierarchy, so a whole rig is
+    // an assembled, posed character and not the heap a bind pose would be --
+    // which is what a vertex-blended part has to be looked at inside.
+    if (partPrefix === "whole") {
+      if (ex.hod2_kind !== "rig" || !rig.startsWith("chr_")) return;
+    } else if (ex.hod2_kind !== "rig_part" || !part.startsWith(partPrefix)) {
+      return;
+    }
     if (rigMatch) {
       if (!rig.includes(rigMatch)) return;
     } else if (!(rig.startsWith("chr_hito") || rig.startsWith("chr_deka")
@@ -162,7 +170,8 @@ export async function run(stage: number, partPrefix: string,
       renderer.render(scene, cam);
       views.push(canvas.toDataURL("image/png"));
     }
-    out.push({ rig: ex.hod2_rig, part: ex.hod2_part, views, prims });
+    out.push({ rig: ex.hod2_rig, part: ex.hod2_part ?? "whole", views,
+               prims });
   }
   renderer.dispose();
   return out;

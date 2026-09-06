@@ -1619,5 +1619,226 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
   stage.dispose();
 }
 
+/**
+ * The vertex-blended parts: what three.js actually does with the skin the
+ * exporter writes, and the veto that stops the rigid twin being drawn too.
+ *
+ * `DeformCharacterPartGroup` (`FUN_00419980`) puts a vertex at
+ * `group_bone_matrix * source_vertex` and nothing else — the draw bone's
+ * matrix that `DrawCharacterPartSlot` (`FUN_00419B40`) sets is cancelled by
+ * the inverse the deform pre-multiplies. The exporter says that in glTF as one
+ * joint per vertex, weight 1, and **no inverse bind matrices**, which glTF
+ * defines as identity.
+ *
+ * That is a claim about three.js, not about the exe, and it is the risky half:
+ * a skinned mesh also carries a bind matrix and a bind-matrix inverse, and
+ * getting either wrong gives a result that is plausible and wrong. So the
+ * first block checks the premise directly, with the real `SkinnedMesh` —
+ * including from a mesh node that is **not** at the origin, because the
+ * exporter hangs these under a rig root the player moves every frame.
+ */
+console.log("\nvertex-blended parts: one joint, weight 1, identity binds");
+{
+  const { Bone, BufferAttribute, BufferGeometry, Matrix4, MeshBasicMaterial,
+          Object3D, Skeleton, SkinnedMesh, Vector3 } = await import("three");
+
+  const root = new Object3D();
+  root.position.set(100, 7, -40);
+  root.rotation.set(0, 1.1, 0);
+
+  // Two joints: the chest and the pelvis, as the waist's groups name them.
+  // `Bone`, because that is what `GLTFLoader` makes of a node a skin names --
+  // which is exactly why the exporter names *proxies* and not the bone nodes
+  // themselves.
+  const chest = new Bone();
+  chest.position.set(0, 5, 0);
+  const pelvis = new Bone();
+  pelvis.position.set(0, 1, 0);
+  root.add(chest);
+  root.add(pelvis);
+
+  const g = new BufferGeometry();
+  // Two vertices, one per joint, at the same place in their own bone's space.
+  g.setAttribute("position", new BufferAttribute(
+    new Float32Array([0, 0, 0, 0, 0, 0]), 3));
+  g.setAttribute("skinIndex", new BufferAttribute(
+    new Uint16Array([0, 0, 0, 0, 1, 0, 0, 0]), 4));
+  g.setAttribute("skinWeight", new BufferAttribute(
+    new Float32Array([1, 0, 0, 0, 1, 0, 0, 0]), 4));
+  const mesh = new SkinnedMesh(g, new MeshBasicMaterial());
+  // Where the exporter puts it: a child of the rig root, no transform of its
+  // own, bound with the identity exactly as `GLTFLoader` binds a glTF skin.
+  root.add(mesh);
+  mesh.bind(new Skeleton([chest, pelvis], [new Matrix4(), new Matrix4()]),
+            new Matrix4());
+  root.updateMatrixWorld(true);
+
+  const v0 = mesh.applyBoneTransform(0, new Vector3(0, 0, 0));
+  const v1 = mesh.applyBoneTransform(1, new Vector3(0, 0, 0));
+  mesh.localToWorld(v0);
+  mesh.localToWorld(v1);
+  const chestW = chest.getWorldPosition(new Vector3());
+  const pelvisW = pelvis.getWorldPosition(new Vector3());
+  check("a vertex lands on its own joint, in world space",
+        v0.distanceTo(chestW) < 1e-4 && v1.distanceTo(pelvisW) < 1e-4,
+        `${v0.toArray()} vs ${chestW.toArray()}`);
+  check("...and the two joints are not the same place, so that meant something",
+        chestW.distanceTo(pelvisW) > 1,
+        `${chestW.distanceTo(pelvisW)}`);
+
+  // The half that would silently double-apply: the mesh hangs under a moved,
+  // rotated root, and attached bind mode is what cancels it.
+  root.position.set(-3, 12, 900);
+  root.updateMatrixWorld(true);
+  const v2 = mesh.applyBoneTransform(0, new Vector3(0, 0, 0));
+  mesh.localToWorld(v2);
+  check("moving the rig moves the vertex exactly as far as the joint",
+        v2.distanceTo(chest.getWorldPosition(new Vector3())) < 1e-4,
+        `${v2.toArray()}`);
+
+  // And a bone rotating carries its own vertices and not the other joint's.
+  chest.rotation.set(0, 0, 0.9);
+  chest.position.set(2, 5, 3);
+  root.updateMatrixWorld(true);
+  const v3 = mesh.applyBoneTransform(0, new Vector3(1, 0, 0));
+  mesh.localToWorld(v3);
+  const want = new Vector3(1, 0, 0).applyMatrix4(chest.matrixWorld);
+  check("a source vertex is read in its bone's local space",
+        v3.distanceTo(want) < 1e-4, `${v3.toArray()} vs ${want.toArray()}`);
+
+  check("a SkinnedMesh is still a Mesh, so nothing that classifies nodes moves",
+        (mesh as unknown as { isMesh?: boolean }).isMesh === true);
+}
+
+/**
+ * The veto: `SkeletonNodeDrawSuppressed` (`FUN_004122E0`).
+ *
+ * Ten character types draw their pelvis model twice — once rigidly at bone 9
+ * and once as the vertex-blended skirt, whose asset slot *is* that model — and
+ * the engine's answer is to skip bone 9's own draw. The port decides it in
+ * `game/parts.ts` and the renderer only applies it.
+ *
+ * **What the scene has to hold is the awkward part.** Bone 9 carries both its
+ * own geometry and the two legs, so hiding the node hides the legs. The
+ * assertions are therefore about `layers` and `visible` separately, and about
+ * a child bone still being drawn.
+ */
+console.log("\nthe pelvis veto: bone 9's own draw, and not its legs");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { PELVIS_VETO_SLOTS } = await import("../src/game/parts");
+  const { BoxGeometry, Mesh, MeshBasicMaterial, Object3D } =
+    await import("three");
+
+  /** `hito_gal`: bone 9 draws 0x0EB6, and so does its part 1. */
+  const VETOED = 0x0eb6;
+  /** `hito_man`: two parts, but part 1's slot is not bone 9's. */
+  const PLAIN = 0x0f31;
+  check("the ten literals are the exe's, and the fixture uses one of them",
+        PELVIS_VETO_SLOTS.includes(VETOED)
+        && !PELVIS_VETO_SLOTS.includes(PLAIN),
+        PELVIS_VETO_SLOTS.map((s) => s.toString(16)).join(","));
+
+  const typeFor = (ct: number, pelvis: number) => ({
+    type: ct, name: `t${ct}`, file: "t.bin", bone_count: 2, actor_radius: 10,
+    bones: [
+      { bone: 9, part: `bone09_${pelvis.toString(16)}`, slot: pelvis,
+        offset: [0, 0, 0], parent: null, damage_rank: [], hit_radius: 2,
+        steps: [] },
+      { bone: 10, part: "bone10_1111", slot: 0x1111, offset: [0, 0, 0],
+        parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    head_bone: 2, reactions: {}, attacks: {},
+    motions: { "660": { bank: "b", frames: 1, fps: 30, root: [0, 0, 0],
+                        rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 } },
+  });
+  const place = (at: number, ct: number) => ({
+    at, class: 0x10, char_type: ct, motion: 660, hp: 0, yaw: 0,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+  });
+  const CHARS = {
+    types: { "38": typeFor(0x26, VETOED), "46": typeFor(0x2e, PLAIN) },
+    placements: [place(0x10, 0x26), place(0x20, 0x2e)],
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+
+  const root = new Object3D();
+  const legs = new Map<number, InstanceType<typeof Object3D>>();
+  const pelvises = new Map<number, InstanceType<typeof Object3D>>();
+  for (const [at, ct, slot] of [[0x10, 0x26, VETOED],
+                                [0x20, 0x2e, PLAIN]] as const) {
+    const rig = new Object3D();
+    rig.name = `chr_t${ct}_spawn000`;
+    rig.userData = { hod2_kind: "rig", hod2_rig: `chr_t${ct}`,
+                     hod2_spawn_at: at };
+    // Bone 9 is a Mesh with the leg as its child -- the exporter's own shape,
+    // and the one that makes `visible = false` the wrong tool.
+    const pelvis = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    pelvis.name = `chr_t${ct}_spawn000_bone09_${slot.toString(16)}`;
+    const leg = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    leg.name = `chr_t${ct}_spawn000_bone10_1111`;
+    pelvis.add(leg);
+    rig.add(pelvis);
+    root.add(rig);
+    pelvises.set(ct, pelvis);
+    legs.set(ct, leg);
+  }
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const made = SpawnScriptedCharacters(
+    chars.readySpawns([{ at: 0x10 }, { at: 0x20 }]));
+  check("both civilians are made", made.length === 2, `${made.length}`);
+  for (const a of made) a.visible = true;
+  chars.syncSpawns([{ at: 0x10 }, { at: 0x20 }], made);
+
+  const vetoed = made.find((a) => a.charType === 0x26)!;
+  const plain = made.find((a) => a.charType === 0x2e)!;
+  check("the port has not decided anything yet", vetoed.suppressedBones === 0);
+
+  // `GameUpdate` is what runs the predicate; drive the same call it makes.
+  const { ActorUpdateSuppressedBones } = await import("../src/game/parts");
+  ActorUpdateSuppressedBones(vetoed);
+  ActorUpdateSuppressedBones(plain);
+  check("the port vetoes bone 9 on the type whose skirt draws that slot",
+        vetoed.suppressedBones === (1 << 9), `${vetoed.suppressedBones}`);
+  check("...and vetoes nothing on the type whose part 1 is elsewhere",
+        plain.suppressedBones === 0, `${plain.suppressedBones}`);
+
+  chars.update({} as never);
+  const vp = pelvises.get(0x26)!;
+  const vl = legs.get(0x26)!;
+  const pp = pelvises.get(0x2e)!;
+  check("the vetoed pelvis is not drawn", !vp.layers.isEnabled(0));
+  check("...but it is still visible, or the legs would go with it",
+        vp.visible === true);
+  check("...and the leg hanging off it is still drawn",
+        vl.layers.isEnabled(0) && vl.visible);
+  check("the pelvis that is not vetoed is drawn",
+        pp.layers.isEnabled(0) && pp.visible);
+
+  // And it comes back: the input is `bone_records[9].slot`, which a swap
+  // changes, so the veto has to be able to lift.
+  vetoed.boneSlot["9"] = PLAIN;
+  ActorUpdateSuppressedBones(vetoed);
+  chars.update({} as never);
+  check("swapping bone 9's model to an unvetoed slot puts the draw back",
+        vetoed.suppressedBones === 0 && vp.layers.isEnabled(0),
+        `${vetoed.suppressedBones}`);
+
+  stage.dispose();
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

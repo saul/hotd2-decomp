@@ -141,6 +141,13 @@ CHECKS: list[Check] = [
           "the civilians having no hair, because a civilian's own head model "
           "is a shell open at the back and every count was right without it",
           NEEDS_GAME),
+    Check("verify_parts", ".",
+          ["python3", "tools/verify_parts.py", "--game-dir", "{game_dir}"],
+          "that every vertex-blended part in a bundle is skinned the way the "
+          "exe deforms it -- one bone per vertex, weight 1, the exe's source "
+          "geometry and no inverse binds -- which is the only check that can "
+          "see the waist riding the hips instead of stretching to the chest",
+          NEEDS_GAME),
     Check("verify_geometry", ".",
           ["python3", "tools/verify_geometry.py", "--game-dir", "{game_dir}"],
           "that every scenery part in a stage bundle holds every triangle its "

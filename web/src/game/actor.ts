@@ -1366,6 +1366,14 @@ export interface ActorBase {
   /** Per-bone asset slot overrides — the draw record at +0x20C + bone*0x90. */
   boneSlot: Record<string, number>;
   /**
+   * Bones whose own rigid draw is vetoed, one bit per bone.
+   *
+   * `SkeletonNodeDrawSuppressed` (`FUN_004122E0`) — see `game/parts.ts` for
+   * why this is a field the port computes once a frame where the engine asks
+   * a predicate per node.
+   */
+  suppressedBones: number;
+  /**
    * The attachment list — `model+0x1170`, ids into
    * `g_actor_attachment_records` (`0x004EC4C0`).
    *
@@ -1579,6 +1587,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     latched: [],
     removed: [],
     boneSlot: {},
+    suppressedBones: 0,
     attachments: [],
   };
   // One `return` per arm. TypeScript narrows `cls` inside each branch, so the

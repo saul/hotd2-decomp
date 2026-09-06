@@ -246,25 +246,129 @@ being torn down.
 Beside the attachment list there is a second set of parts the skeleton does not
 name: `g_pCharacterExtraParts` (`0x0052ED08`), one or two per character type,
 built by `BuildCharacterPart` (`FUN_00419520`) and drawn by
-`DrawCharacterPart` (`FUN_0041A300`) through
-`g_character_part_drawers` (`0x004EDAEC`). These are **vertex-blended**: the
-record holds four `{count, source verts, index list, bone matrix}` groups, and
-every frame the part's private copy of the model's vertex buffer is rewritten
-by transforming each group's vertices through a different bone's matrix. The
-five bone indices come from `g_character_part_bones` (`0x004ED1E0`), five `s32`
-per part — four to pull toward, then the one the whole part is drawn in.
+`DrawCharacterPart` (`FUN_0041A300`) through `g_character_part_drawers`
+(`0x004EDAEC`). **45 of the 54 character types a bundle poses have at least
+one**, so this is nearly every character in the game and not a civilian
+speciality.
 
-The default table's part 0 is `{1, 1, 9, 0}` drawn at 9: the upper body and the
-pelvis, which is the **waist**. Part 1 is `{9, 9, 10, 13}` drawn at 9: the
-pelvis and both thighs, which is a **skirt** — and its asset slot *is the
-pelvis model*, so the rigid draw would double it. `SkeletonNodeDrawSuppressed`
-(`FUN_004122E0`) is what stops that: for bone 9 it vetoes the draw on exactly
-ten slots — `0xE3C 0xE4D 0xEA2 0xEB6 0xEC6 0xED6 0xEF6 0xF06 0xF83 0x15B0` —
-which are exactly the ten characters that have a part 1. `[proved]`
+A descriptor is 14 dwords:
 
-`[open]` The port draws both parts rigidly off the pelvis root and does not
-apply the veto, so those ten characters draw their pelvis twice. Nothing has
-been seen to go wrong with it; the deform itself is unported.
+```
++0x00  u32  asset slot -- the model the whole part draws as
++0x04  u32  mesh info  -> the per-vertex map, below
++0x08  (u32 count, u32 src_verts, u32 assign) x4     the four VERTEX GROUPS
+```
+
+**It is skinning, and the assignment is hard.** `[proved]`
+`DeformCharacterPartGroup` (`FUN_00419980`) is called once per group. It
+composes `inverse(draw bone) * (group bone)`, walks the part's rows, and for
+every row whose **signed byte** in that group's assign array is `>= 0`
+transforms that group's source point and normal and writes them over every copy
+of the vertex in the loaded model. A negative byte means the row belongs to
+another group. There are no weights anywhere in the record and no accumulation
+in the writers -- `WriteCharacterPartVertexPos` (`FUN_0041A480`) stores, it does
+not add. Measured over `hito_gal`'s waist and skirt and `hito_baba`'s skirt:
+**no row is claimed by two groups and none by none.**
+
+So each vertex has one bone and weight 1 -- which is exactly what glTF
+skinning says, and is why the port emits a glTF `skin` rather than a per-frame
+transform of its own. It **cannot** be reduced to one rigid mesh per bone:
+every triangle straddles two groups (20 of 20, 24 of 24, 36 of 56 on those
+three parts), so splitting would tear all of them.
+
+The source vertices are in the **group bone's own local space**, and the draw
+bone's matrix that `DrawCharacterPartSlot` (`FUN_00419B40`) sets is exactly the
+one the deform pre-multiplied the inverse of. The two cancel, so a vertex ends
+up at `group_bone_matrix * source_vertex` and nothing else -- an inverse bind
+matrix of identity. Corroborated numerically: for `hito_gal`'s waist, the group
+whose bone *is* the draw bone has source vertices equal to the pol model's
+stored ones to 8e-4 (the low mantissa bit `WriteCharacterPartVertexPos` ORs into
+x to keep the PowerVR2 vertex control word set), while the group on bone 1
+differs from the stored version by 0.424 in y, which is the bind-pose offset
+between bone 1 and bone 9.
+
+`g_character_part_bones` (`0x004ED1E0`) is five `s32` per part: the four group
+bones, then **the bone the part is drawn in**. The default table's part 0 is
+`{1, 1, 9, 0}` drawn at 9 -- the upper body and the pelvis, which is the
+**waist**; part 1 is `{9, 9, 10, 13}` drawn at 9 -- the pelvis and both thighs,
+which is a **skirt**. Per-character-type tables replace it for types `0x0E`,
+`0x1F`/`0x46`/`0x4E`, `0x41`, `0x4C` and `0x53`.
+
+The **mesh info** block gives the per-vertex map, which
+`BuildCharacterPartVertexMap` (`FUN_0041A320`) copies and relocates:
+
+```
++0x04  u32  offset to blob 1        0x14 bytes per row. Read by nothing.
++0x08  u32  size of blob 1
++0x0C  u32  offset to blob 2        the rows
++0x10  u32  size of blob 2
++0x14  s16  head length, in u16s
++0x16  s16  pointers per row
+```
+
+A row of blob 2 is `{s16 head[]; s32 vertex_offset[]}`, the pointer list
+terminated by `-1` and the offsets relative to the model's own start. **A row is
+one logical vertex** and the pointers are every copy of it in the display list:
+`hito_gal`'s waist has 20 rows and 24 pointers onto 24 distinct vertex records,
+its skirt 24 rows onto 28. `[open]`: the head is six `s16` row indices and
+**nothing in this build reads it** -- the runtime record's `+0x08` is exactly
+its size and the deform and both writers start past it. Blob 1 is one 0x14-byte
+record per row and is likewise unread.
+
+Four drawers ship, and which one a part gets says which groups it deforms:
+
+| Drawer | Groups |
+|---|---|
+| `DrawCharacterPartGroup0` (`FUN_00419E90`) and its byte-identical twin `DrawCharacterPartGroup0Thunk` (`FUN_00419EA0`) | 0 |
+| `DrawCharacterPartGroup2` (`FUN_00419E40`) | 2 |
+| `DrawCharacterPartAllGroups` (`FUN_004198B0`) | 0, 1, 2, 3 |
+| `DrawCharacterPartSubparts` (`FUN_0041A020`) | character type `0x17`'s part 1 only -- a different mechanism, see below |
+
+A group the drawer does not touch keeps whatever the model stores, and that is
+correct rather than sloppy: such a group's bone *is* the draw bone, so its
+transform is the identity and the stored geometry already is the answer.
+
+### The rigid twin, and the veto
+
+Part 1's asset slot **is the pelvis model** -- the same slot bone 9 draws. So
+ten character types would draw it twice, once rigid and once soft.
+`SkeletonNodeDrawSuppressed` (`FUN_004122E0`) is what stops that:
+`SkeletonEmitNode` (`FUN_004114C0`) asks it before the node draw hook and takes
+the draw only on a zero. Read out of the disassembly rather than the
+decompiler's switch:
+
+```
+if (charType == 0x17) return node.bone >= 0x10;      /* SETGE */
+if (node.bone != 9)   return false;
+return bone_records[9].slot in { 0xE3C 0xE4D 0xEA2 0xEB6 0xEC6
+                                 0xED6 0xEF6 0xF06 0xF83 0x15B0 };
+```
+
+Those ten literals -- enumerated from the jump table at `0x00412360` and its
+byte map at `0x00412368`, not from the decompiler -- are exactly the bone-9
+slots of the ten types whose part 1 draws that slot: `0x21`, `0x22`, `0x26`,
+`0x28`, `0x29`, `0x2A`, `0x2C`, `0x2D`, `0x35`, `0x3B`. One for one, no stray
+either way. **It tests the slot bone 9 is *currently* drawing**, so a swap
+changes the answer and it cannot be baked into an export. `[proved]`
+
+The `0x17` arm is the same rule for a different replacement:
+`BuildCharacterPartSubparts` (`FUN_00419EB0`) builds **eight** sub-parts from
+`g_class17_subpart_records` (`0x0052EA38`, `{s32 bone; s32 slot; u32 mesh_info;
+u32 draw_info}` x8) with bones 16 and up, which is exactly the range the veto
+covers for that type.
+
+`[open]` and `[diverges]`, both about type `0x17` (`zskamere`, two bundles):
+the eight sub-parts are unported, so the port does **not** take the `0x17` arm
+of the veto -- suppressing eight bones without the replacement would delete
+them. Its part 1 is described in the bundle with `supported: false` and no
+geometry, because the descriptor's slot word `0x0009` is a real `komono_4.bin`
+model and is *not* what that drawer draws.
+
+`[open]` Character type `0x4C`'s parts write each deformed vertex a second time
+0x82C0 bytes further into the model, with the normal negated --
+`WriteCharacterPartVertexPosTwin` (`FUN_0041A520`) and
+`WriteCharacterPartVertexNormalTwin` (`FUN_0041A580`). A mirrored twin of the
+whole model at a fixed offset. Unported; `0x4C` reaches no bundle.
 
 ### Held items
 

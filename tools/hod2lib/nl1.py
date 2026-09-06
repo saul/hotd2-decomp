@@ -94,6 +94,14 @@ class Mesh:
     base_colour: tuple[float, float, float, float]      # A R G B
     offset_colour: tuple[float, float, float, float]
     vertices: list[Vertex] = field(default_factory=list)
+    #: The byte offset each vertex was read from, RELATIVE TO THE MODEL'S
+    #: own start, parallel to `vertices`.
+    #:
+    #: The vertex-blended parts address the model by these: the exe's per-part
+    #: vertex map is a list of *record offsets*, so mapping one of its rows
+    #: onto a parsed vertex needs the offset the vertex came from and nothing
+    #: else will do. A back-reference adds no entry, because it adds no vertex.
+    offsets: list[int] = field(default_factory=list)
     strips: list[Strip] = field(default_factory=list)
     triangles: list[tuple[int, int, int]] = field(default_factory=list)
 
@@ -505,6 +513,7 @@ def parse(b: bytes, off: int = 0, strict: bool = False) -> Model:
                     v, consumed = _read_vertex(b, pos, shading)
                     offset_to_index[pos] = len(mesh.vertices)
                     strip.vertex_slots.append(len(mesh.vertices))
+                    mesh.offsets.append(pos - off)
                     mesh.vertices.append(v)
                     pos += consumed
 

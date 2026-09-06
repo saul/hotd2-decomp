@@ -13075,3 +13075,130 @@ visible object in the middle of a shot.
    session ported that is knowingly missing.
 2. If "completely in fog" is still being seen, get the URL and the bundle age
    from the top bar; nothing in this commit reproduces it.
+
+---
+
+## Session — the deform is a partition, not a blend, and glTF says it exactly
+
+**Asked for:** the two things the last session left `[open]` — the
+vertex-blended parts and the pelvis veto — plus `g_pCharacterExtraParts` and
+`g_character_part_bones` carried into the bundle.
+
+**Outcome:** both ported. The parts are a glTF `skin`; the veto is a decision
+the port makes once a frame and the renderer applies with `layers`.
+
+### The question that decided the whole shape
+
+*Is a vertex blended across the four bones, or assigned to one of them?* The
+answer changes everything: a blend needs a per-frame transform, a hard
+assignment is ordinary skinning that glTF states directly.
+
+It is a hard assignment, and three independent things say so. `[proved]`
+
+1. **The writers do not accumulate.** `WriteCharacterPartVertexPos`
+   (`FUN_0041A480`) is `*p = *src`, not `+=`, and it walks a `-1`-terminated
+   list of *addresses* for one logical vertex.
+2. **The assign arrays partition.** Each group has one **signed byte** per row;
+   negative means "not mine". Over `hito_gal`'s waist and skirt and
+   `hito_baba`'s skirt: no row claimed by two groups, none claimed by none.
+3. **There are no weights in the record at all.** The descriptor is
+   `{slot, mesh_info, (count, src_verts, assign) x4}` and that is all of it.
+
+And it cannot be flattened to rigid sub-meshes, one per bone, because **every
+triangle straddles two groups** — 20 of 20, 24 of 24, 36 of 56 on those three
+parts. Splitting would tear all of them. So: skinning, one joint, weight 1.
+
+### The fifth field, and why the inverse binds are identity
+
+`g_character_part_bones` is five `s32`: four group bones, then **the bone the
+part is drawn in**. `DeformCharacterPartGroup` composes
+`inverse(draw bone) * (group bone)`; `DrawCharacterPartSlot` then sets the
+matrix to the draw bone. The two cancel, so a vertex lands at
+`group_bone_matrix * source` — the source vertices are in their own bone's
+local space and the inverse bind is the identity.
+
+Corroborated on the data rather than from the algebra alone: for `hito_gal`'s
+waist, the group whose bone *is* the draw bone has source vertices equal to the
+pol model's stored ones to 8e-4 — which is the low mantissa bit
+`WriteCharacterPartVertexPos` ORs into x to keep the PowerVR2 vertex control
+word set — while the group on bone 1 differs by 0.424 in y, the bind-pose gap
+between bone 1 and bone 9. That also explains why the commonest drawer deforms
+**one** group and leaves the other: the other is the draw bone's, so its
+transform is the identity and the model already holds the answer.
+
+### The veto, exactly
+
+Read out of the disassembly, not the decompiler's switch: character type `0x17`
+suppresses `bone >= 16`; otherwise it is bone 9 alone, and only when
+`bone_records[9].slot` — *what bone 9 is currently drawing* — is one of ten
+literals. Those ten come out of the jump table at `0x00412360` and its byte map
+at `0x00412368`, and they are exactly the bone-9 slots of the ten types whose
+part 1 draws that same slot, 1:1 with no stray either way. Because the input is
+live state a gore swap can change, it cannot be baked into an export.
+
+`0x17`'s arm is the same rule for a different replacement —
+`BuildCharacterPartSubparts` (`FUN_00419EB0`) puts eight sub-parts on bones 16
+and up. Those are unported, so the port **does not take that arm**: vetoing
+eight bones with nothing to draw in their place deletes them. Declared
+`[diverges]`.
+
+### Where the line between the layers fell
+
+The deform is skinning and the skeleton is three.js, so it could not go in
+`game/`. It did not need to: the *decision* is which parts exist and which
+draws are vetoed, and the *arithmetic* is what three.js already does. So
+
+* the geometry and the skin are the **exporter's**, and the renderer needs no
+  new code at all — `GLTFLoader` binds it;
+* the veto is `game/parts.ts`, computed once a frame into
+  `Actor.suppressedBones`, and `render/` only applies it. The first cut had the
+  renderer call a predicate in `game/` and `verify_layers.py`'s
+  `render-drives-the-port` rejected it, correctly.
+
+Two three.js details worth writing down. **The joints are proxies**: a node a
+skin names becomes a `Bone` and its mesh is re-parented under it, which would
+change the class of every bone node in every character — and the gore swap, the
+severed head and the attachments all classify on `Mesh` vs `Group`. An empty
+child with no transform has its parent's `matrixWorld`, so the skin gets what it
+needs and nothing else moves. And **the veto uses `layers`, not `visible`**:
+`WebGLRenderer.projectObject` returns early on `visible === false` but only
+skips the draw on a failed `layers.test`, recursing into children either way —
+and bone 9's children are both legs.
+
+### The wrong turns
+
+* **My first `verify_parts.py` passed a bundle I had deliberately corrupted.**
+  It indexed the skinned nodes by `(rig, part)` into a dict, so it only ever
+  examined the last spawn instance of each; the tamper hit `spawn000`. It walks
+  every instance now — 40,266 vertices instead of 7,384. A check that passes
+  a corrupted input is worse than no check, and the only reason I found out is
+  that I corrupted one on purpose.
+* **The same check's `break` was in the wrong place** and it reported 150
+  failures against a correct exporter: a group the drawer deforms may still not
+  claim a given row, so stopping at the first non-null group makes every vertex
+  look like it belongs to part 1's group 0. The exporter was right and the
+  check was wrong, which is the correct way round to find out.
+* **`git checkout main -- web/src` ate ten files of staged work.** See
+  [L29](../LESSONS.md). It writes the index as well as the tree, so `git
+  checkout -- <path>` afterwards restores *main's* content, and `git status`
+  goes clean. Recovered from `git fsck --unreachable`, matching each dangling
+  blob against a line only that file has.
+* **The veto's own before-and-after is 0 pixels**, and that is the honest
+  result rather than a failed picture. The rigid pelvis and the skinned one are
+  the same model; where they coincide the depth test rejects the second draw
+  entirely, so removing it changes nothing on screen. Ten frames across a block
+  with a `hito_gal` in it, veto on and off, all identical to within 8/255. The
+  veto is real and it fires — a probe in `applyBoneVeto` printed
+  `hito_gal type=38 mask=512` — it just has nothing to show while the thighs
+  are near bind. What *does* show is the deform, and that is the picture:
+  4,093 pixels over the hips and thighs, comparing `main`'s player and bundle
+  against this one at the same frame.
+
+### Next actions
+
+* Character type `0x17`'s eight sub-parts (`DrawCharacterPartSubparts`,
+  `FUN_0041A020`) — the last unported part mechanism, and the reason one arm of
+  the veto is a declared divergence.
+* Type `0x4C`'s mirrored twin at `+0x82C0`. It reaches no bundle.
+* The six `s16` at the head of each vertex-map row, which nothing in this build
+  reads.

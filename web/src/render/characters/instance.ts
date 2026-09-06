@@ -66,6 +66,15 @@ export interface Instance {
    */
   parentAt?: number;
   /**
+   * The bone-veto mask this instance's nodes are currently showing.
+   *
+   * Render bookkeeping: the mask itself is `a.suppressedBones`, and this is
+   * only how far the nodes have been caught up to it, so a frame that changes
+   * nothing costs one comparison. `undefined` means "unknown", which is what
+   * `restoreNodes` and a fresh instance both are.
+   */
+  veto?: number;
+  /**
    * The models an attachment list hung on a bone, by record id.
    *
    * Render bookkeeping and nothing else: the ids are on the actor, in

@@ -230,3 +230,21 @@ passed against the file it had just written, and the mistake only surfaced when
 tree then had two uncommitted rows in a file two workstreams write. Check the
 diff in *your* tree after any tool that writes one, and check that the shared
 one is unchanged.
+
+**L29 -- `git checkout <ref> -- <path>` writes the index too, so staging first
+protects nothing.** Wanting a before-and-after screenshot of a renderer change,
+I staged the whole change, checked `web/src` out from `main`, exported and shot
+the old bundle, and then ran `git checkout -- web/src` expecting the index to
+give my work back. It gave main's back: the first checkout had already replaced
+those paths *in the index*, and the second restored from that. Ten files of
+uncommitted work vanished, and `git status` was clean, which is the worst way
+for it to look.
+
+It is recoverable, because `git add` had written every blob: `git fsck
+--unreachable --dangling` lists them, and matching each against a line only
+that file has -- not against its size -- puts them back. Doing it by size would
+have been a coin flip between two 500-line files.
+
+**Commit before you swap the tree**, or use a second worktree of the old ref.
+A stash is not the answer either: a `stash pop` that conflicts leaves the same
+problem with more steps.

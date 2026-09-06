@@ -85,6 +85,16 @@ export function envMapped(s: Strip): boolean {
  */
 export class Mesh {
   vertices: Vertex[] = [];
+  /**
+   * The byte offset each vertex was read from, **relative to the model's own
+   * start**, parallel to {@link Mesh.vertices}.
+   *
+   * The vertex-blended parts address the model by these: the exe's per-part
+   * vertex map is a list of *record offsets*, so mapping one of its rows onto
+   * a parsed vertex needs the offset the vertex came from and nothing else
+   * will do. A back-reference adds no entry, because it adds no vertex.
+   */
+  offsets: number[] = [];
   strips: Strip[] = [];
   triangles: [number, number, number][] = [];
 
@@ -456,6 +466,7 @@ export function parse(b: Uint8Array, off = 0, strict = false): Model {
           const [v, consumed] = readVertex(b, pos, shading);
           offsetToIndex.set(pos, mesh.vertices.length);
           strip.vertexSlots.push(mesh.vertices.length);
+          mesh.offsets.push(pos - off);
           mesh.vertices.push(v);
           pos += consumed;
         }

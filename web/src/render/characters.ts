@@ -466,9 +466,38 @@ export class CharacterLayer implements System {
         }
         inst.hidden = inst.a.removed.length;
       }
+      this.applyBoneVeto(inst);
       this.syncAttachments(inst);
       if (inst.a.civ) this.syncHeldItems(inst);
     }
+  }
+
+  /**
+   * `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), applied.
+   *
+   * The port decides — `ActorUpdateSuppressedBones` writes `a.suppressedBones`
+   * once a frame — and this is only the drawing of it. A vetoed bone's own
+   * model is not drawn; **its child bones still are**, which is the whole
+   * difficulty. `visible = false` would take the subtree with it, and for the
+   * ten characters this fires on that subtree is both legs.
+   *
+   * `layers` is what separates the two. `WebGLRenderer.projectObject` returns
+   * early on `visible === false` but only *skips the draw* on a failed
+   * `layers.test`, and recurses into the children either way — so clearing
+   * layer 0 hides exactly this node's geometry and nothing below it. It is
+   * also reversible, which matters because a gore swap can change the slot
+   * bone 9 is showing and take the veto away again.
+   */
+  private applyBoneVeto(inst: Instance): void {
+    const mask = inst.a.suppressedBones;
+    if (mask === inst.veto) return;
+    for (const [bone, node] of inst.bones) {
+      const want = (mask & (1 << bone)) === 0;
+      if (node.layers.isEnabled(0) === want) continue;
+      if (want) node.layers.enable(0);
+      else node.layers.disable(0);
+    }
+    inst.veto = mask;
   }
 
   /**
@@ -899,6 +928,10 @@ export class CharacterLayer implements System {
       for (const [bone, slot] of Object.entries(inst.a.boneSlot)) {
         swapGore(this.goreParts, inst, Number(bone), slot);
       }
+      // The veto is derived from the restored actor like everything else
+      // here; clearing the cache is what makes the next apply do the work.
+      inst.veto = undefined;
+      this.applyBoneVeto(inst);
       inst.root.visible = this.enabled && inst.a.visible;
       inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
       inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);

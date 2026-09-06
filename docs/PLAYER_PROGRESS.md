@@ -452,6 +452,23 @@ The rest of the class's own render half came with it:
   `MarkActorShot`, not at `ResolveHit`. `ClassHandler.ownsShotResult` is that
   fork in the port, and `Shooting` takes it the same way it takes a breakable
   prop: mark it, and let the class score it.
+* **They have a waist and a skirt, and both bend.**
+  `g_pCharacterExtraParts` (`0x0052ED08`) gives a character up to two parts its
+  skeleton does not name, and they are **skinned**: `DeformCharacterPartGroup`
+  (`FUN_00419980`) gives every vertex exactly one bone and no weight, so the
+  waist stretches between the chest and the pelvis and the skirt between the
+  pelvis and both thighs. The port hung them off the pelvis as rigid children,
+  which is why a walking civilian's waist rode her hips. They are a glTF `skin`
+  now — one joint per vertex, weight 1, identity inverse binds, which is what
+  the exe does said exactly — and the geometry is the **exe's**, because the
+  deform overwrites every position and normal in the model every frame.
+  45 of the 54 character types a bundle poses have one, so this is nearly every
+  character in the game. Ten of them draw their pelvis model twice, once rigid
+  and once as the skirt, and `SkeletonNodeDrawSuppressed` (`FUN_004122E0`)
+  vetoes the rigid one; the port computes that once a frame from
+  `bone_records[9].slot`, which a gore swap can change, and the renderer clears
+  the node's render layer rather than its `visible` — hiding the node would
+  take both legs with it.
 * **They have faces and hair.** A civilian's head model is a shell open at the
   back — `hito_gal`'s bone 2 has four backward-facing vertex normals out of
   149, where every zombie head has fifteen to forty — so drawn on its own it is

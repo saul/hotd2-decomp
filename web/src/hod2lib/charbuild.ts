@@ -24,11 +24,12 @@ import { MOTION_ROW_BACKOFF, actorRadius, attackPicks, attackTables,
          damageRankRow, goreParts, hitReactions, hitSphere, hitSteps,
          motionRow, throwTables, torsoStageCount,
          zombieThrowTables } from "./combat";
-import type { ExeTables } from "./exetab";
+import type { CharacterPart, ExeTables } from "./exetab";
 import type { BakedMotion } from "./charmotion";
 import type { Model } from "./nl1";
 import { AssetCache } from "./rigs";
-import type { PartModels, Rig, RigInstance, RigPart, Vec3 } from "./rigs";
+import type { PartModels, Rig, RigInstance, RigPart, RigSkin,
+              Vec3 } from "./rigs";
 import type { Stage } from "./stage";
 import type { Bank } from "./texbank";
 
@@ -66,6 +67,15 @@ export class Character {
    * models against one per instance.
    */
   attachmentSlots = new Set<number>();
+  /**
+   * `g_pCharacterExtraParts`, resolved -- see `ExeTables.characterParts`.
+   *
+   * Set by {@link build} alongside {@link Character.extras}, which is the same
+   * table read for its slot list alone. A `null` entry is a part index whose
+   * descriptor pointer is null, kept so the index still lines up with
+   * `g_character_part_bones` and `g_character_part_drawers`.
+   */
+  parts: (CharacterPart | null)[] = [];
 
   constructor(
     readonly charType: number,
@@ -127,6 +137,21 @@ export class Character {
       bones: this.bones,
       extras: this.extras.map((s) =>
         `0x${s.toString(16).toUpperCase().padStart(4, "0")}`),
+      // `g_pCharacterExtraParts`, as much of it as the client needs: which
+      // bone each part is drawn in and which slot it draws. That is exactly
+      // `SkeletonNodeDrawSuppressed`'s input -- it vetoes bone 9's own draw
+      // when the slot bone 9 is showing is one of ten literals, and those ten
+      // are precisely the parts whose slot equals their draw bone's.
+      parts: this.parts.map((p) => p === null ? null : {
+        slot: p.slot, draw_bone: p.drawBone,
+        bones: p.groups.map((g) => g === null ? null : g.bone),
+        deformed: [...p.deformed],
+        rows: p.rows.length,
+        // False for character type 0x17's part 1 and nothing else in the
+        // shipped data: its drawer is `DrawCharacterPartSubparts`, which the
+        // port has not read, so the part is described and not drawn.
+        supported: p.supported,
+      }),
       gore: obj(this.gore),
       // Bone 2 is the head on every 15-bone humanoid, and the head is what the
       // score model keys on; carried rather than assumed by the client.
@@ -179,19 +204,6 @@ export function extraParts(tables: ExeTables, charType: number): number[] {
   return out;
 }
 
-/**
- * The pelvis root, which is what an extra part hangs off.
- *
- * Every character in the game has exactly two root nodes -- an upper body at
- * bone 1 and a lower body whose bone index is 9 for the 15-bone humanoids but
- * 4, 10, 12 or 20 for the wings, `curien` and the HOD1 bosses. So the rule is
- * structural, not the number 9.
- */
-function secondRoot(bones: CharacterBone[]): CharacterBone | null {
-  const roots = bones.filter((b) => b.parent === null);
-  if (roots.length > 1) return roots[1];
-  return roots.length ? roots[0] : null;
-}
 
 export function build(tables: ExeTables, charType: number,
                       assetFile: string): Character | null {
@@ -227,7 +239,7 @@ export function build(tables: ExeTables, charType: number,
     if (rank.some((v) => v)) b.damage_rank = rank;
     bones.push(b);
   }
-  return new Character(
+  const built = new Character(
     charType,
     assetFile.endsWith(".bin") ? assetFile.slice(0, -4) : assetFile,
     assetFile,
@@ -244,6 +256,90 @@ export function build(tables: ExeTables, charType: number,
     throwTables(tables, charType),
     zombieThrowTables(charType),
     motionRow(tables, charType));
+  built.parts = tables.characterParts(charType);
+  return built;
+}
+
+/**
+ * One vertex-blended part's skinning, or `null` when nothing can be skinned.
+ *
+ * Every vertex of the model is looked up in the part's row table -- the exe's
+ * own list of *which display-list records are this logical vertex* -- and then
+ * in the four groups' assign bytes. A row a group claims takes that group's
+ * bone and that group's source position and normal, which are authored in the
+ * bone's own local space.
+ *
+ * **A group the drawer does not deform keeps the model's stored geometry and
+ * takes the draw bone.** That is not a fallback: `DrawCharacterPartGroup0`
+ * (`FUN_00419E90`) really does leave the other groups alone, and it is right
+ * because such a group's bone *is* the draw bone, so its transform is the
+ * identity. Measured on `hito_gal`'s waist: the exe's group-2 source vertices
+ * equal the pol model's stored ones to 8e-4, which is the low mantissa bit
+ * `WriteCharacterPartVertexPos` (`FUN_0041A480`) sets on x.
+ *
+ * A vertex no row names -- there are none in the shipped data, and this says
+ * so rather than guessing -- also keeps the model's geometry on the draw bone.
+ *
+ * This replaced `_second_root`, which hung these parts off the pelvis as rigid
+ * children. That was the port's stand-in for a deform it did not have, and it
+ * is why a walking civilian's waist rode the hips instead of stretching to the
+ * chest.
+ */
+function skinFor(char: Character, cp: CharacterPart,
+                 model: Model): RigSkin | null {
+  const partOfBone = new Map<number, string>();
+  for (const b of char.bones) partOfBone.set(b.bone, b.part);
+  /** Model-relative vertex offset -> its row. */
+  const rowOf = new Map<number, number>();
+  cp.rows.forEach((offs, r) => { for (const o of offs) rowOf.set(o, r); });
+
+  const bones: number[] = [];
+  const jointParts: string[] = [];
+  const joint = (bone: number): number | null => {
+    const name = partOfBone.get(bone);
+    if (name === undefined) return null;
+    let k = bones.indexOf(bone);
+    if (k < 0) { k = bones.length; bones.push(bone); jointParts.push(name); }
+    return k;
+  };
+  const drawJoint = joint(cp.drawBone);
+  if (drawJoint === null) return null;
+
+  const joints: number[][] = [];
+  const positions: Vec3[][] = [];
+  const normals: Vec3[][] = [];
+  for (const mesh of model.meshes) {
+    const mj: number[] = [];
+    const mp: Vec3[] = [];
+    const mn: Vec3[] = [];
+    mesh.vertices.forEach((v, k) => {
+      const row = rowOf.get(mesh.offsets[k] ?? -1);
+      let jt: number | null = null;
+      let pos: Vec3 = [...v.pos] as Vec3;
+      let nrm: Vec3 = [...v.normal] as Vec3;
+      if (row !== undefined) {
+        for (const g of cp.deformed) {
+          const grp = cp.groups[g];
+          if (!grp) continue;
+          const a = grp.assign[row];
+          if (a === undefined || a < 0 || a >= grp.verts.length) continue;
+          jt = joint(grp.bone);
+          if (jt !== null) {
+            pos = [...grp.verts[a].pos] as Vec3;
+            nrm = [...grp.verts[a].normal] as Vec3;
+          }
+          break;
+        }
+      }
+      mj.push(jt ?? drawJoint);
+      mp.push(pos);
+      mn.push(nrm);
+    });
+    joints.push(mj);
+    positions.push(mp);
+    normals.push(mn);
+  }
+  return { bones, jointParts, joints, positions, normals };
 }
 
 /**
@@ -319,23 +415,40 @@ export async function rigEntry(stage: Stage, tables: ExeTables,
     parts.push([part, model ? [[model, bank as Bank | null, char.name]] : []]);
   }
 
-  // The parts the skeleton does not name, hung off the second root with no
-  // transform of their own. They are deliberately NOT added to
-  // `Character.bones`: the client poses by bone index, and an extra part has
-  // none -- it rides its parent, which is what rigid attachment means.
-  const host = secondRoot(char.bones);
-  char.extras.forEach((slot, i) => {
-    const rec = slots.get(slot);
+  // The parts the skeleton does not name, **skinned**.
+  //
+  // `DeformCharacterPartGroup` (`FUN_00419980`) gives every vertex of one of
+  // these exactly one bone and no weight, and `DrawCharacterPartSlot`
+  // (`FUN_00419B40`) then draws the whole model in a fifth bone's space --
+  // which the deform has already pre-cancelled, so a vertex ends up at
+  // `group_bone_matrix * source_vertex` and nothing else. That is glTF
+  // skinning, said exactly, so it is emitted as glTF skinning rather than as
+  // a per-frame transform of our own.
+  //
+  // They were hung off the pelvis as rigid children before this, which is why
+  // a walking civilian's waist did not move with the torso.
+  char.parts.forEach((cp, i) => {
+    // A drawer the port has not read draws something this table does not
+    // name; emitting the table's slot instead would be inventing geometry.
+    if (cp === null || !cp.supported) return;
+    const rec = slots.get(cp.slot);
     const idx = rec ? rec[1] : null;
     const model = idx !== null && idx < models.length ? models[idx] : null;
     if (model === null) return;
+    const skin = skinFor(char, cp, model);
+    if (skin === null) return;
     parts.push([{
-      name: `extra${i}_${slot.toString(16).padStart(4, "0")}`,
-      slots: [slot],
-      parent: host ? host.part : "",
+      name: `part${i}_${cp.slot.toString(16).padStart(4, "0")}`,
+      slots: [cp.slot],
+      // No parent and no transform: a skinned mesh is placed by its joints,
+      // and three.js cancels the node's own world matrix in attached bind
+      // mode. Hanging it off a bone would apply that bone twice.
+      parent: "",
+      skin,
       note: `part ${i} of character type `
-        + `0x${char.charType.toString(16).padStart(2, "0")}'s extra list; `
-        + "the skeleton does not name it",
+        + `0x${char.charType.toString(16).padStart(2, "0")}, drawn in bone `
+        + `${cp.drawBone}'s space across bones `
+        + `${skin.bones.join(", ")}`,
     }, [[model, bank as Bank | null, char.name]]]);
   });
 

@@ -230,3 +230,17 @@ passed against the file it had just written, and the mistake only surfaced when
 tree then had two uncommitted rows in a file two workstreams write. Check the
 diff in *your* tree after any tool that writes one, and check that the shared
 one is unchanged.
+
+**L29 -- Two headless browsers on one machine make a measurement read zero.**
+`npm run audio` taps every media element through an `AnalyserNode` and asserts
+on the peak sample, which is the right shape of check: it fails a file that
+200s and decodes to silence. Run while another agent's Playwright Chrome was
+open, it reported all sixteen sources playing, every one at *exactly* `0.000`,
+and failed three assertions. Nothing was wrong with the tree -- the audio path
+was byte-identical to the branch where the same tool had measured `0.512`, and
+it passed on a re-run once the other browser closed. **A whole population
+reading exactly zero is contention or a disconnected graph, not evidence about
+the thing under test**; a real regression takes some sources down, not all of
+them including the music. Before believing a silent measurement, check what
+else on the machine is holding the device, and re-run alone -- L20's "a
+negative result from one agent is not a fact" applies to your own tools too.

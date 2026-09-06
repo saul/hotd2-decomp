@@ -33,6 +33,7 @@
  */
 
 import { f32, i16, i32, latin1, u16, u32, u32s } from "./bytes";
+import type { Vec3 } from "./rigs";
 import { sha256Hex } from "./sha256";
 
 export const BANK_PTR_TABLE = 0x0055b9b8;
@@ -117,6 +118,45 @@ export interface CivItem {
   extra: number | null;
   rot: number[];
   sets: number[][];
+}
+
+/** One vertex group of a {@link CharacterPart}: a bone and its vertices. */
+export interface CharacterPartGroup {
+  /** The bone every vertex in this group is rigid to. */
+  bone: number;
+  /**
+   * The group's source vertices, in **that bone's local space** — which is
+   * what makes the whole thing skinning with one joint and weight 1:
+   * `DeformCharacterPartGroup` composes `inverse(drawBone) * bone`, and the
+   * draw re-applies `drawBone`, so a vertex lands at `bone * source`.
+   */
+  verts: { pos: Vec3; normal: Vec3 }[];
+  /**
+   * One signed byte per row of {@link CharacterPart.rows}: an index into
+   * {@link CharacterPartGroup.verts}, or negative for "this row is not mine".
+   */
+  assign: number[];
+}
+
+/** One entry of `g_pCharacterExtraParts` — see {@link ExeTables.characterParts}. */
+export interface CharacterPart {
+  /** The asset slot the whole part is drawn as. */
+  slot: number;
+  /** `g_character_part_bones[part][4]` — the bone the draw happens in. */
+  drawBone: number;
+  /** Four slots, `null` where the descriptor's count is zero. */
+  groups: (CharacterPartGroup | null)[];
+  /** Per logical vertex, the model-relative offsets of every copy of it. */
+  rows: number[][];
+  /** Which group indices this part's drawer actually deforms. */
+  deformed: number[];
+  /** The drawer's own address, so an unmapped one is visible rather than silent. */
+  drawer: number;
+  /**
+   * Whether that drawer is one the port has read. False means the part is
+   * not emitted: what it draws is not this table's slot.
+   */
+  supported: boolean;
 }
 
 /** One row of `g_actor_attachment_records` -- `0x004EC4C0`. */
@@ -703,6 +743,179 @@ export class ExeTables {
   static readonly BREAKABLE_LEVEL_HEIGHT = 7.540296;
 
   static readonly CAM_PATH_LENGTH = 0x00576d38;
+
+  // -- the vertex-blended parts ----------------------------------------
+
+  /**
+   * `g_pCharacterExtraParts` -- `0x0052ED08`, per character type
+   * `{u32 count; u32 *descriptors[]}`.
+   *
+   * A descriptor is 14 dwords: `{u32 slot; u32 mesh_info; (u32 count,
+   * u32 src_verts, u32 assign)[4]}`. The four triples are the **vertex
+   * groups**, and a group's `count` doubles as its present flag --
+   * `DeformCharacterPartGroup` (`FUN_00419980`) returns early on zero.
+   */
+  static readonly CHARACTER_PARTS = 0x0052ed08;
+
+  /** `g_character_part_bones` -- `0x004ED1E0`, five `s32` per part. */
+  static readonly CHARACTER_PART_BONES = 0x004ed1e0;
+
+  /**
+   * Character types whose part rows come from somewhere other than the
+   * default table, from `BuildCharacterPart`'s own switch.
+   */
+  static readonly CHARACTER_PART_BONES_BY_TYPE: Record<number, number> = {
+    0x0e: 0x004ed348,
+    0x1f: 0x004ed4b0, 0x46: 0x004ed4b0, 0x4e: 0x004ed4b0,
+    0x41: 0x004ed780,
+    0x4c: 0x004ed618,
+    0x53: 0x004ed8e8,
+  };
+
+  /** `g_character_part_drawers` -- `0x004EDAEC`, one routine per part. */
+  static readonly CHARACTER_PART_DRAWERS = 0x004edaec;
+
+  /**
+   * Which of the four groups a drawer actually deforms.
+   *
+   * `DeformAndDrawCharacterPart` (`FUN_00419E50`) takes a *which*: 1 is the
+   * group pair at record offsets 0x00 and 0x10, 0 the pair at 0x20 and 0x30.
+   * The four shipped drawers between them cover three sets, and a group the
+   * drawer does not touch keeps what the model stores -- which is right,
+   * because such a group's bone is the draw bone and its transform is the
+   * identity.
+   */
+  static readonly CHARACTER_PART_DEFORMED: Record<number, number[]> = {
+    /** `DrawCharacterPartGroup0` (`FUN_00419E90`). */
+    0x00419e90: [0],
+    /** `DrawCharacterPartGroup0Thunk` (`FUN_00419EA0`) -- the same code. */
+    0x00419ea0: [0],
+    /** `DrawCharacterPartGroup2` (`FUN_00419E40`). */
+    0x00419e40: [2],
+    /** `DrawCharacterPartAllGroups` (`FUN_004198B0`). */
+    0x004198b0: [0, 1, 2, 3],
+  };
+
+  /**
+   * Drawers the port has read. A part whose drawer is not here is **not
+   * emitted at all**, because the port would have to invent what it draws.
+   *
+   * The one that is missing is `DrawCharacterPartSubparts` (`FUN_0041A020`),
+   * character type 0x17's part 1: a different mechanism entirely, eight
+   * sub-parts from `g_class17_subpart_records` (`0x0052EA38`) with their own
+   * bones and slots. Its descriptor's slot word is `0x0009`, which is a real
+   * model in `komono_4.bin` and is **not** what the engine draws for it -- so
+   * emitting the part as a rigid mesh of that slot, which the port did before
+   * the parts were read, put a wrong model on a `zskamere`.
+   */
+  static readonly CHARACTER_PART_DRAWERS_READ: readonly number[] = [
+    0x00419e90, 0x00419ea0, 0x00419e40, 0x004198b0,
+  ];
+
+  /**
+   * The parts a character type draws that its skeleton does not name.
+   *
+   * Every field of {@link CharacterPart} is read straight out of the exe;
+   * nothing here is inferred. A part whose descriptor pointer is null -- 21
+   * of the types have one -- comes back as `null` so a part keeps its index,
+   * because the index is what `g_character_part_drawers` and
+   * `g_character_part_bones` are keyed on.
+   */
+  characterParts(charType: number): (CharacterPart | null)[] {
+    return this.cached(`parts:${charType}`, () => {
+      const out: (CharacterPart | null)[] = [];
+      const base = this.v2r(ExeTables.CHARACTER_PARTS);
+      if (base === null || !(charType >= 0 && charType < 0x100)) return out;
+      const blk = this.v2r(u32(this.data, base + charType * 4));
+      if (blk === null || blk + 8 > this.data.length) return out;
+      const count = u32(this.data, blk);
+      const ao = this.v2r(u32(this.data, blk + 4));
+      if (ao === null || !(count > 0 && count < 32)) return out;
+      const bonesVa = ExeTables.CHARACTER_PART_BONES_BY_TYPE[charType]
+        ?? ExeTables.CHARACTER_PART_BONES;
+      const bo = this.v2r(bonesVa);
+      const dp = this.v2r(ExeTables.CHARACTER_PART_DRAWERS);
+      const dt = dp === null
+        ? null : this.v2r(u32(this.data, dp + charType * 4));
+      for (let i = 0; i < count; i++) {
+        const d = this.v2r(u32(this.data, ao + i * 4));
+        if (d === null || bo === null || d + 0x38 > this.data.length) {
+          out.push(null);
+          continue;
+        }
+        const bones = [0, 1, 2, 3, 4].map((k) =>
+          i32(this.data, bo + i * 0x14 + k * 4));
+        const drawer = dt === null ? 0 : u32(this.data, dt + i * 4);
+        const groups: (CharacterPartGroup | null)[] = [];
+        const rows = this.partRows(u32(this.data, d + 4));
+        for (let g = 0; g < 4; g++) {
+          const n = u32(this.data, d + 8 + g * 12);
+          const sv = this.v2r(u32(this.data, d + 12 + g * 12));
+          const av = this.v2r(u32(this.data, d + 16 + g * 12));
+          if (!n || sv === null || av === null) { groups.push(null); continue; }
+          const verts: { pos: Vec3; normal: Vec3 }[] = [];
+          for (let k = 0; k < n; k++) {
+            const o = sv + k * 0x18;
+            const pos: Vec3 = [f32(this.data, o), f32(this.data, o + 4),
+                               f32(this.data, o + 8)];
+            const normal: Vec3 = [f32(this.data, o + 12),
+                                  f32(this.data, o + 16),
+                                  f32(this.data, o + 20)];
+            verts.push({ pos, normal });
+          }
+          const assign: number[] = [];
+          for (let r = 0; r < rows.length; r++) {
+            assign.push((this.data[av + r] << 24) >> 24);
+          }
+          groups.push({ bone: bones[g], verts, assign });
+        }
+        out.push({
+          slot: u32(this.data, d),
+          drawBone: bones[4],
+          groups,
+          rows,
+          deformed: ExeTables.CHARACTER_PART_DEFORMED[drawer] ?? [],
+          drawer,
+          supported: ExeTables.CHARACTER_PART_DRAWERS_READ.includes(drawer),
+        });
+      }
+      return out;
+    });
+  }
+
+  /**
+   * `BuildCharacterPartVertexMap` (`FUN_0041A320`)'s second blob: per logical
+   * vertex, the model-relative offset of every copy of it in the display
+   * list.
+   *
+   * A row is `{s16 head[headU16]; s32 vertex[ptrCount]}` with the pointer
+   * list terminated by `-1`. The head is skipped by every reader in the
+   * engine -- the record's `+0x08` is exactly its size, and the deform and
+   * both writers start past it -- so it is skipped here too.
+   */
+  private partRows(meshInfoVa: number): number[][] {
+    const m = this.v2r(meshInfoVa);
+    if (m === null || m + 0x18 > this.data.length) return [];
+    const off2 = u32(this.data, m + 0x0c);
+    const size2 = u32(this.data, m + 0x10);
+    const head = i16(this.data, m + 0x14) * 2;
+    const nptr = i16(this.data, m + 0x16);
+    const stride = head + nptr * 4;
+    if (stride <= 0 || nptr <= 0 || size2 % stride !== 0) return [];
+    const b2 = this.v2r(meshInfoVa + off2);
+    if (b2 === null || b2 + size2 > this.data.length) return [];
+    const out: number[][] = [];
+    for (let r = 0; r * stride < size2; r++) {
+      const row: number[] = [];
+      for (let k = 0; k < nptr; k++) {
+        const v = i32(this.data, b2 + r * stride + head + k * 4);
+        if (v === -1) break;
+        row.push(v);
+      }
+      out.push(row);
+    }
+    return out;
+  }
 
   // -- the attachment table --------------------------------------------
 

@@ -690,6 +690,143 @@ class ExeTables:
 
     CAM_PATH_LENGTH = 0x00576D38
 
+    # -- the vertex-blended parts ---------------------------------------
+
+    #: `g_pCharacterExtraParts` -- per character type
+    #: ``{u32 count; u32 *descriptors[]}``. A descriptor is 14 dwords:
+    #: ``{u32 slot; u32 mesh_info; (u32 count, u32 src_verts, u32 assign)[4]}``.
+    #: The four triples are the VERTEX GROUPS, and a group's count doubles as
+    #: its present flag -- `DeformCharacterPartGroup` returns early on zero.
+    CHARACTER_PARTS = 0x0052ED08
+    #: `g_character_part_bones` -- five s32 per part, four group bones then the
+    #: bone the part is drawn in.
+    CHARACTER_PART_BONES = 0x004ED1E0
+    #: Character types whose rows come from elsewhere, from
+    #: `BuildCharacterPart`'s own switch.
+    CHARACTER_PART_BONES_BY_TYPE = {
+        0x0E: 0x004ED348,
+        0x1F: 0x004ED4B0, 0x46: 0x004ED4B0, 0x4E: 0x004ED4B0,
+        0x41: 0x004ED780,
+        0x4C: 0x004ED618,
+        0x53: 0x004ED8E8,
+    }
+    #: `g_character_part_drawers` -- one routine per part.
+    CHARACTER_PART_DRAWERS = 0x004EDAEC
+    #: Which of the four groups each shipped drawer deforms. A group the
+    #: drawer does not touch keeps what the model stores, which is right
+    #: because such a group's bone IS the draw bone and its transform is the
+    #: identity. 0x0041A020 is character type 0x17's eight-sub-part mechanism
+    #: and is unported, so it deforms nothing here.
+    CHARACTER_PART_DEFORMED = {
+        0x00419E90: (0,),        # DrawCharacterPartGroup0
+        0x00419EA0: (0,),        # DrawCharacterPartGroup0Thunk
+        0x00419E40: (2,),        # DrawCharacterPartGroup2
+        0x004198B0: (0, 1, 2, 3),  # DrawCharacterPartAllGroups
+    }
+    #: Drawers the port has read. A part whose drawer is not here is not
+    #: emitted at all, because the port would have to invent what it draws.
+    #: The missing one is `DrawCharacterPartSubparts` (0x0041A020), character
+    #: type 0x17's part 1 -- eight sub-parts from g_class17_subpart_records,
+    #: whose descriptor slot word 0x0009 is a real komono_4.bin model and is
+    #: NOT what the engine draws for it.
+    CHARACTER_PART_DRAWERS_READ = (0x00419E90, 0x00419EA0, 0x00419E40,
+                                   0x004198B0)
+
+    def character_parts(self, char_type: int) -> list[dict | None]:
+        """The parts a character type draws that its skeleton does not name.
+
+        Each is ``{"slot", "draw_bone", "groups", "rows", "deformed",
+        "drawer"}``; a group is ``{"bone", "verts", "assign"}`` with *verts*
+        a list of ``{"pos", "normal"}`` in that bone's local space and
+        *assign* one signed byte per row. A part whose descriptor pointer is
+        null comes back as ``None`` so a part keeps its index, which is what
+        the bone and drawer tables are keyed on.
+        """
+        out: list[dict | None] = []
+        base = self._v2r(self.CHARACTER_PARTS)
+        if base is None or not (0 <= char_type < 0x100):
+            return out
+        blk = self._v2r(struct.unpack_from("<I", self.data, base + char_type * 4)[0])
+        if blk is None or blk + 8 > len(self.data):
+            return out
+        count, arr = struct.unpack_from("<2I", self.data, blk)
+        ao = self._v2r(arr)
+        if ao is None or not (0 < count < 32):
+            return out
+        bo = self._v2r(self.CHARACTER_PART_BONES_BY_TYPE.get(
+            char_type, self.CHARACTER_PART_BONES))
+        dp = self._v2r(self.CHARACTER_PART_DRAWERS)
+        dt = None
+        if dp is not None:
+            dt = self._v2r(struct.unpack_from("<I", self.data,
+                                              dp + char_type * 4)[0])
+        for i in range(count):
+            d = self._v2r(struct.unpack_from("<I", self.data, ao + i * 4)[0])
+            if d is None or bo is None or d + 0x38 > len(self.data):
+                out.append(None)
+                continue
+            bones = struct.unpack_from("<5i", self.data, bo + i * 0x14)
+            drawer = 0
+            if dt is not None:
+                drawer = struct.unpack_from("<I", self.data, dt + i * 4)[0]
+            slot, mesh_info = struct.unpack_from("<2I", self.data, d)
+            rows = self._part_rows(mesh_info)
+            groups: list[dict | None] = []
+            for g in range(4):
+                n, sv_va, av_va = struct.unpack_from("<3I", self.data,
+                                                     d + 8 + g * 12)
+                sv = self._v2r(sv_va)
+                av = self._v2r(av_va)
+                if not n or sv is None or av is None:
+                    groups.append(None)
+                    continue
+                verts = []
+                for k in range(n):
+                    f = struct.unpack_from("<6f", self.data, sv + k * 0x18)
+                    verts.append({"pos": list(f[:3]), "normal": list(f[3:])})
+                assign = list(struct.unpack_from(f"<{len(rows)}b", self.data,
+                                                 av)) if rows else []
+                groups.append({"bone": bones[g], "verts": verts,
+                               "assign": assign})
+            out.append({"slot": slot, "draw_bone": bones[4], "groups": groups,
+                        "rows": rows, "drawer": drawer,
+                        "deformed": list(
+                            self.CHARACTER_PART_DEFORMED.get(drawer, ())),
+                        "supported": drawer in self.CHARACTER_PART_DRAWERS_READ})
+        return out
+
+    def _part_rows(self, mesh_info_va: int) -> list[list[int]]:
+        """Per logical vertex, the model-relative offset of every copy of it.
+
+        A row is ``{s16 head[headU16]; s32 vertex[ptrCount]}`` with the
+        pointer list terminated by -1. The head is skipped by every reader in
+        the engine -- the runtime record's +0x08 is exactly its size and the
+        deform and both writers start past it -- so it is skipped here too.
+        """
+        m = self._v2r(mesh_info_va)
+        if m is None or m + 0x18 > len(self.data):
+            return []
+        off2, size2 = struct.unpack_from("<2I", self.data, m + 0x0C)
+        head, nptr = struct.unpack_from("<2h", self.data, m + 0x14)
+        head *= 2
+        stride = head + nptr * 4
+        if stride <= 0 or nptr <= 0 or size2 % stride:
+            return []
+        b2 = self._v2r(mesh_info_va + off2)
+        if b2 is None or b2 + size2 > len(self.data):
+            return []
+        out = []
+        for r in range(size2 // stride):
+            row = []
+            for k in range(nptr):
+                v = struct.unpack_from("<i", self.data,
+                                       b2 + r * stride + head + k * 4)[0]
+                if v == -1:
+                    break
+                row.append(v)
+            out.append(row)
+        return out
+
     #: `g_actor_attachment_table` -- 81 pointers into
     #: `g_actor_attachment_records`. The count is not stored: the record array
     #: runs 0x004EC4C0..0x004EC748 at eight bytes each and the pointer table

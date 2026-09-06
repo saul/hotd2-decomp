@@ -27,7 +27,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
   "characters.ts": "7882b631cdc49bfff4fc5430bb268c706a8e29b81101d11eb5f9806ea40dad6a",
-  "charbuild.ts": "a1bb42ee03f420cbea4fda39c55662ad12983c9c8965bcbaced12377ab8698e0",
+  "charbuild.ts": "d2e7412d0b90f6444980da1a2f38d64e13202e54b9f2c7be7e8b09c260c4cd76",
   "charmotion.ts": "e5b199f0e879d53c2c0e7bfe9ccd55f07524200526c5752c1d70c70eb513ab26",
   "class31.ts": "92eddede0017e448c05697810f1b3cd1112340d1ddae676bb682b940e0e22aea",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
@@ -35,17 +35,17 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "a91352d4357e641ceddbc7e344e84f76dd6bbb2da8d7910c77ce636af4c577df",
-  "exetab.ts": "097ae5cf619b7ed5c548976fc293b0e4728c86cf0e24fdb801b6b374ce8732cb",
-  "gltf.ts": "4a6172ae8f1637640c4c8eacd04957d031b1b290f5b94f95b1b9b24cf7f2e64c",
+  "exetab.ts": "492ca2e4926f7937697f0b13436e4d8cd1bd1f1765d7805e77755d3fa813f6d3",
+  "gltf.ts": "a627387e4c52fecb292eb8736d7fbee2818fd503ac20f23337d760091c0fb109",
   "io.ts": "e9e18d6a03619988a2506b77a28063c2885743d52c3f2e620a149b36a8e20170",
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "114f3ffa4e967dcdb69ea6919ec21b83d6ff9d1f6754d2a7f9e0fd1d3d1a3952",
-  "nl1.ts": "3e06f887a903bfbe0132304fffe4569d6abce06e577cac74e4df1102643e3126",
+  "nl1.ts": "317558dbf8e53791395e7dd24c85b18487576ee110545cc284b6ab65cdff82bd",
   "placement.ts": "6b508e31e5478c09d3b81e93b8aa99b81456e00100ba115bd9675b2600aec39c",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "7186ef2c37d5b64e8893cee5b51e1894f09972ce14c7f487f10e125e2e49bc30",
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
-  "rigs.ts": "82e6c32edaf45789a4d524e6693669edf8c2bd6d581e06aa2c346a12950908b9",
+  "rigs.ts": "7700568a93b03bf83d0a8e3f2be16acc96d6b8cf7369ff5659abd7b3819fe47a",
   "rigs_data.ts": "52f1116f7bb86b0dd16a0d21916356904c94ea5539da05a11e2c89fffd4e9b51",
   "script.ts": "577de572a5ca7ddd3ca14e8886e714c85e986a895f889b0bb06f5d772569c3b5",
   "sha256.ts": "7c01f5b843a50a7fc05e749c7a737c252482557ebc523eef7da0f46c7baa427c",
@@ -55,4 +55,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "957ff03812b1e4b5ca3e1e721e43e94fcf963d889b95349f07ee65ad13a0af52";
+export const BUILDER_HASH = "0be488a5104700f206c78b510a3ce1fca28d74f6f5cc5e43080798c41f37211b";

@@ -107,6 +107,32 @@ export interface PathRotation {
   note?: string;
 }
 
+/**
+ * A vertex-blended part's skinning — see `ExeTables.characterParts`.
+ *
+ * `DeformCharacterPartGroup` (`FUN_00419980`) assigns every vertex to exactly
+ * one of four bones and transforms it by that bone alone: measured across the
+ * shipped parts, no row is claimed by two groups and none by none, and there
+ * are no weights anywhere in the record. So this is skinning with one joint
+ * per vertex and weight 1, and glTF says it directly.
+ *
+ * It cannot be reduced to rigid sub-meshes, one per bone, because **every
+ * triangle straddles two groups** — 20 of 20 on `hito_gal`'s waist, 24 of 24
+ * on its skirt, 36 of 56 on `hito_baba`'s. Splitting would tear all of them.
+ */
+export interface RigSkin {
+  /** Bone numbers, in joint order. `JOINTS_0` indexes this array. */
+  bones: number[];
+  /** The rig part each joint hangs off, parallel to {@link RigSkin.bones}. */
+  jointParts: string[];
+  /** Per model mesh, per vertex: the index into {@link RigSkin.bones}. */
+  joints: number[][];
+  /** Per model mesh, per vertex: the position to write, in bone-local space. */
+  positions: Vec3[][];
+  /** Per model mesh, per vertex: the normal to write. */
+  normals: Vec3[][];
+}
+
 export interface RigPart {
   name: string;
   /** AssetDrawSlot ids, drawn in order. */
@@ -139,6 +165,12 @@ export interface RigPart {
    * another without popping. Empty means a child of the object root.
    */
   parent?: string;
+  /**
+   * Present on a vertex-blended part, and only on one: the mesh is drawn by
+   * its joints rather than by this node's transform, so the writer emits
+   * `JOINTS_0`/`WEIGHTS_0` and a `skin` instead of hanging it off a bone.
+   */
+  skin?: RigSkin;
   note?: string;
 }
 

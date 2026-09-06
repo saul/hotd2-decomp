@@ -8,8 +8,13 @@
  * class-0x10 character type in a stage, side by side, and the material state
  * three.js ended up with for each primitive it drew.
  *
- *   node tools/civ_faces.mjs [--stage 2] [--part bone02] [--rig hito_gal]
-                            [--out civ_heads]
+ * `--part whole` photographs the whole rig instead of one of its parts, which
+ * is what a vertex-blended part -- the waist, the skirt -- has to be looked at
+ * inside. The exporter bakes a motion frame into the hierarchy, so a whole rig
+ * is an assembled, posed character and not the heap a bind pose would be.
+ *
+ *   node tools/civ_faces.mjs [--stage 2] [--part bone02|whole]
+ *                            [--rig hito_gal] [--out civ_heads] [--bare]
  *
  * Output goes to `web/shots/`, which is gitignored -- a picture of a civilian
  * is derived game art and this repository commits none.

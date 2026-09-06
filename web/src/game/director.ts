@@ -26,6 +26,7 @@ import { SeveredHeadsTick } from "./effects/severed_head";
 import { DescriptorFromPlacement } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
 import { ActorByAt, G } from "./globals";
+import { ActorUpdateSuppressedBones } from "./parts";
 import type { GameHost } from "./host";
 import { ActorAdvanceMotion } from "./motion";
 import { DeadSweep, g_class_handlers } from "./registry";
@@ -394,6 +395,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
     // loops the motion the script gave it.
     if (obj.visible) {
       ActorAdvanceMotion(obj, dt);
+      // `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), which the engine asks
+      // per node inside `SkeletonEmitNode`. Its input is `bone_records[9].slot`
+      // -- what bone 9 is *currently* drawing -- so it cannot be baked into
+      // the export, and it is a decision, so it cannot live in `render/`.
+      // Once a frame here, read as state there.
+      ActorUpdateSuppressedBones(obj);
       // `ActorRegisterCameraPoint` (`FUN_00409B70`): the tracked bone, lifted,
       // is where the camera follows this actor. Off the pose the renderer last
       // drew, which is the frame the engine's own reader sees too.

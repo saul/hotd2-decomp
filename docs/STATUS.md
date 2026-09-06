@@ -19,25 +19,25 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 29378 | 128 | engine |
-| `hod2lib/` | 14291 | 34 | engine |
-| `render/` | 7961 | 29 | render |
+| `game/` | 29498 | 129 | engine |
+| `hod2lib/` | 14747 | 34 | engine |
+| `render/` | 8003 | 29 | render |
 | `app/` | 7108 | 29 | app |
 | `script/` | 3570 | 25 | engine |
 | `ui/` | 2969 | 26 | ui |
-| `bundle/` | 1868 | 11 | engine |
+| `bundle/` | 1902 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **68646** | **293** | |
+| **total** | **69298** | **294** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 1876
-* `game/actor.ts` — 1660
+* `hod2lib/exetab.ts` — 1718
+* `game/actor.ts` — 1669
 * `script/walker.ts` — 1563
-* `hod2lib/exetab.ts` — 1505
-* `hod2lib/gltf.ts` — 1329
+* `hod2lib/gltf.ts` — 1416
 
 ## The port
 
@@ -47,7 +47,7 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 67 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 224 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **11 of 35** read classes have a module, covering 1274 of 1546 placements |
-| Declared `[diverges]` | **113** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **114** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **99** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 39** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 666 in `ghidra/annotations/functions.tsv` |
-| Named globals | 353 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 27 under `tools/`, run together by `verify_all.py` |
+| Named functions | 682 in `ghidra/annotations/functions.tsv` |
+| Named globals | 354 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 28 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -114,10 +114,11 @@ nothing exits 3 and is never counted as green.
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
+| `verify_parts` | that every vertex-blended part in a bundle is skinned the way the exe deforms it -- one bone per vertex, weight 1, the exe's source geometry and no inverse binds -- which is the only check that can see the waist riding the hips instead of stretching to the chest | game-dir |
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-6 of them need the installed game and 3 need an exported
+7 of them need the installed game and 3 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

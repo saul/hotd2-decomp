@@ -425,8 +425,14 @@ report was chased:
   `ExeTables.attachment_records()` decodes it. See
   [civilians.md](civilians.md#the-face-and-the-hair-are-not-in-the-skeleton).
 * `g_pCharacterExtraParts` (`0x0052ED08`) — one or two **vertex-blended** parts
-  per character type, the waist and the skirt, deformed across four bones every
-  frame. `charbuild.extra_parts()` decodes it.
+  per character type, the waist and the skirt: one bone per vertex and weight
+  1, over up to four bones, re-transformed every frame. 45 of the 54 character
+  types a bundle poses have one. `ExeTables.character_parts()` decodes it, and
+  `g_character_part_bones` (`0x004ED1E0`) says which bones — four groups, then
+  the bone the part is drawn in. Part 1's slot is the pelvis model itself, and
+  `SkeletonNodeDrawSuppressed` (`FUN_004122E0`) is what stops bone 9 drawing it
+  a second time. See
+  [civilians.md](civilians.md#the-waist-and-the-skirt-are-not-in-the-skeleton-either).
 
 A civilian's own head model is a shell open at the back: `hito_gal`'s
 `0x0EAF` has four backward-facing vertex normals out of 149, where every zombie

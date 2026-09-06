@@ -45,6 +45,26 @@ export interface CharacterBone {
   parent: number | null;
 }
 
+/** One entry of {@link CharacterType.parts}. */
+export interface CharacterPartJson {
+  /** The asset slot the whole part draws as. */
+  slot: number;
+  /** `g_character_part_bones[part][4]` — the bone the draw happens in. */
+  draw_bone: number;
+  /** The four group bones, `null` where the group is absent. */
+  bones: (number | null)[];
+  /** Which group indices this part's drawer deforms. */
+  deformed: number[];
+  /** How many logical vertices the part has. */
+  rows: number;
+  /**
+   * Whether the exporter emitted geometry for it. False means the part's
+   * drawer is one the port has not read — character type `0x17`'s part 1, and
+   * nothing else — so the table is here and the mesh is not.
+   */
+  supported: boolean;
+}
+
 export interface CharacterType {
   type: number;
   name: string;
@@ -52,6 +72,20 @@ export interface CharacterType {
   /** Bones in a motion frame — the stride, from the EXE. */
   bone_count: number;
   bones: CharacterBone[];
+  /**
+   * `g_pCharacterExtraParts` (`0x0052ED08`) — the **vertex-blended** parts,
+   * which are not in {@link CharacterType.bones} because they are not rigid to
+   * one bone: the waist stretches between the chest and the pelvis, and the
+   * skirt between the pelvis and both thighs.
+   *
+   * The geometry itself is in the glTF, as a skinned primitive with a `skin`
+   * of its own; this is the description, and what the port needs out of it is
+   * `slot` against `draw_bone` — that pairing is what
+   * `SkeletonNodeDrawSuppressed` (`FUN_004122E0`) vetoes bone 9's rigid draw
+   * for. A `null` entry is a part index whose descriptor pointer is null,
+   * kept so the index still lines up with `g_character_part_bones`.
+   */
+  parts?: (CharacterPartJson | null)[];
   /** Bone the score model treats as the head — 2 on every humanoid. */
   head_bone: number;
   /**

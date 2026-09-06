@@ -10,7 +10,7 @@
  * mean anything, and its sounds, dialogue and score must not run, because
  * those are not conditions.
  */
-import type { Actor } from "../actor";
+import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
 import { G } from "../globals";
@@ -199,13 +199,25 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         break;
       // Unread. Named so the stream stays legible and so a later reading has
       // somewhere to land; deliberately no behaviour.
+      //
+      // **These four used to fall through into `SetScale`'s body** and write
+      // its operand into `obj.scale`, which is `model+0x116C` and the factor
+      // `SkeletonApplyRootMotion` (`FUN_00410C50`) multiplies the root delta
+      // by. Their operands are small integers -- 1, 2, 5, 200 -- and
+      // {@link AsFloat} reinterprets a dword's bits, so the scale came out a
+      // denormal around 1e-45 and every step the clip authored was multiplied
+      // to nothing. 125 commands in the shipped streams run one of them.
       case CivilianOp.SetGlobalB:
       case CivilianOp.SetAttachMode:
       case CivilianOp.SetAttachTarget:
       case CivilianOp.SetPairA:
+        break;
+      // `MOV dword ptr [g_cur_actor_model + 0x116c], param_2[1]` -- the
+      // operand is stored **verbatim** into a float field, so it is a float
+      // bit pattern and `AsFloat` is the store. One command in the whole game
+      // runs it, `0x42480000` = 50.0. It scales the root motion as well as the
+      // draw -- see `ActorModelScale` in `game/root_motion.ts`.
       case CivilianOp.SetScale:
-        // `model+0x116C`. It scales the root motion as well as the draw --
-        // see `ActorModelScale` in `game/root_motion.ts`.
         obj.scale = AsFloat(a[0]);
         break;
       case CivilianOp.InPlayOnly:
@@ -243,8 +255,13 @@ function CivilianApplyWaitWord(obj: Actor, word: number,
     sub.subFlags |= 1;
   }
   if (sub.wait & 0x4000) sub.frameLimit = 0;
-  if (sub.wait & 0x40000) obj.flags &= ~0x10000;
-  else obj.flags |= 0x10000;
+  // Inverted, and the engine's own inversion: the wait bit means *tracked*
+  // and `obj+0x34` bit `0x10000` means *not*.
+  if (sub.wait & CivilianWait.CameraTrack) {
+    obj.flags &= ~ActorFlag.NoCameraTrack;
+  } else {
+    obj.flags |= ActorFlag.NoCameraTrack;
+  }
   if (!(sub.wait & CivilianWait.Rescued)) return;
 
   // **The rescue.** `sub+0x6C` is the player whose shot killed the last
@@ -262,13 +279,34 @@ function CivilianApplyWaitWord(obj: Actor, word: number,
   });
 }
 
-/** Ops 0x00 and 0x01: change the clip, and reset its clock. */
+/**
+ * Ops 0x00 and 0x01: change the clip, reset its clock, **and set the clip's
+ * root-motion gate from the block's wait word.**
+ *
+ * All three are inside the engine's `if (model+0x20 != new clip)`, so a block
+ * that re-states the clip it is already playing changes none of them — the
+ * gate included. That is why the test comes first here and not inside the
+ * assignments.
+ *
+ * The gate is `model+0x64` bit 1, {@link Actor.motionFlags}, and its source is
+ * bit `0x00100000` of `sub.wait` — see {@link CivilianWait.RootMotion} for the
+ * decompiled arm. `obj.rootFrame = -1` is the engine's baseline reset that
+ * goes with it: `SkeletonApplyRootMotion` leaves `model+0x1160` alone while
+ * the gate is clear, so the delta taken on the frame it re-opens would span
+ * however long it was shut. Because the gate can only *change* here, and here
+ * always clears the baseline, that span is never taken.
+ */
 function CivilianSetMotion(obj: Actor, motion: number, frame: number): void {
   if (obj.motion === motion) return;
   obj.motion = motion;
   const m = MotionOf(obj, motion);
   obj.playTicks = FrameToTicks(frame, m);
   obj.rootFrame = -1;
+  if (obj.civ && (obj.civ.wait & CivilianWait.RootMotion) !== 0) {
+    obj.motionFlags |= MotionFlag.RootMotion;
+  } else {
+    obj.motionFlags &= ~MotionFlag.RootMotion;
+  }
 }
 
 /**

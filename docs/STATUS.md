@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 29218 | 128 | engine |
+| `game/` | 29378 | 128 | engine |
 | `hod2lib/` | 14291 | 34 | engine |
 | `render/` | 7961 | 29 | render |
 | `app/` | 7108 | 29 | app |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **68486** | **293** | |
+| **total** | **68646** | **293** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 1876
-* `game/actor.ts` — 1610
+* `game/actor.ts` — 1660
 * `script/walker.ts` — 1563
 * `hod2lib/exetab.ts` — 1505
 * `hod2lib/gltf.ts` — 1329
@@ -48,7 +48,7 @@ The largest files, which is where the pressure to split next is:
 | Citations checked | 224 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **11 of 35** read classes have a module, covering 1274 of 1546 placements |
 | Declared `[diverges]` | **113** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **98** — questions the port is honest about not having answered |
+| `[open]` markers in `game/` | **99** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 39** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 

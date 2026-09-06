@@ -30,6 +30,15 @@
  * no per-state or per-class switch, and nothing carries an actor but its
  * clips.
  *
+ * **One class does operate that switch, and this note used to say none did.**
+ * `CivilianRunScript` (`FUN_0048B9E0`) writes `model+0x64` bit 1 on every clip
+ * *change*, from bit `0x00100000` of the wait word that opened the block — see
+ * `CivilianWait.RootMotion` in `game/class10/ops.ts`. "Set once at build and
+ * never touched" was true of the two classes that had been read and false of
+ * the third: the port carried every civilian wherever her clip's root went —
+ * in the 297 of 596 shipped blocks whose wait word does not ask for it just as
+ * much as in the 289 that do. `[proved]`
+ *
  * **And the delta is scaled by the character's own size.**
  * `SkeletonApplyRootMotion` runs `MatrixScale(model+0x116C)` into the same
  * matrix it rotates the delta through, so a character drawn at 0.9 covers 0.9
@@ -51,7 +60,7 @@
  * stances play carry no root translation.
  */
 import type { BakedMotion } from "../bundle";
-import type { Actor } from "./actor";
+import { MotionFlag, type Actor } from "./actor";
 
 /**
  * The character's size, as `ActorBuildSkinnedModel` (`FUN_00410440`) sets it.
@@ -109,6 +118,14 @@ export function rootDelta(m: BakedMotion, prev: number, next: number):
  * own yaw. The clips walk along their local -Z, which is the actor's forward.
  */
 export function ApplyRootMotion(obj: Actor, dx: number, dz: number): void {
+  // `if ((*(byte *)(model + 100) & 2) != 0)`, which is the whole of
+  // `SkeletonApplyRootMotion`'s gate. `ActorBuildSkinnedModel` leaves it set
+  // on every skeletal actor, so classes 0x30 and 0x31 are unaffected by the
+  // test; **class 0x10's script turns it on and off per block** — see
+  // `CivilianWait.RootMotion`. Without this the port carried every civilian
+  // wherever her clip's root went, in the 297 of 596 shipped blocks whose wait
+  // word does not ask for it just as much as in the 289 that do.
+  if ((obj.motionFlags & MotionFlag.RootMotion) === 0) return;
   if (dx === 0 && dz === 0) return;
   // `MatrixScale(model+0x116C)`, in the same matrix as the rotation.
   dx *= obj.scale;

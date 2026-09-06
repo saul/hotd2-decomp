@@ -196,6 +196,49 @@ export enum CivilianWait {
   CameraSettled = 0x00001000,
   /** Wait until `g_script_flags[flagIndex]` is raised. */
   ScriptFlag = 0x00002000,
+  /**
+   * **Let the camera track her.** Bit `0x00040000`, and not a wait condition:
+   * op 0x2C writes `obj+0x34`'s `NoCameraTrack` bit from it, and inverted —
+   *
+   * ```c
+   * if ((*g_cur_civilian & 0x40000) == 0) obj+0x34 |=  0x10000;
+   * else                                  obj+0x34 &= ~0x10000;
+   * ```
+   *
+   * — so the bit set means *tracked* and the bit clear means *excluded from
+   * `RegisterForCameraTracking`*. 315 of the 596 shipped wait commands set it,
+   * more than any other bit in the word. `[proved]`
+   */
+  CameraTrack = 0x00040000,
+  /**
+   * **Does this block's clip carry the civilian?** Bit `0x00100000`, and not a
+   * wait condition at all — it is the per-block root-motion switch.
+   *
+   * `CivilianRunScript` (`FUN_0048B9E0`) op 0x00 and op 0x01 write it straight
+   * into the motion block's gate on every clip *change*:
+   *
+   * ```c
+   * if (*(int *)(g_cur_actor_model + 0x20) != param_2[1]) {   // a new clip
+   *   *(int *)(g_cur_actor_model + 0x20) = param_2[1];
+   *   if ((*g_cur_civilian & 0x100000) == 0)
+   *     uVar7 = *(uint *)(g_cur_actor_model + 100) & 0xfffffffd;   // clear
+   *   else
+   *     uVar7 = *(uint *)(g_cur_actor_model + 100) | 2;            // set
+   *   *(uint *)(g_cur_actor_model + 100) = uVar7;
+   * ```
+   *
+   * `model + 100` is `model+0x64`, which is {@link Actor.motionFlags}, and bit
+   * `2` is the one and only gate `SkeletonApplyRootMotion` (`FUN_00410C50`)
+   * tests before it moves the actor. So the answer to "do the engine's
+   * civilians use root motion" is **yes, and their script says so block by
+   * block**: 289 of the 596 shipped wait words carry this bit and 297 do not.
+   * `[proved]`
+   *
+   * It is read at the moment op 0x00 runs, which is *inside* the block its own
+   * leading `Wait` opened — so the word that governs the clip is the one that
+   * introduced it, exactly as {@link CivilianOp.Wait}'s note describes.
+   */
+  RootMotion = 0x00100000,
   /** Not counted in `g_civilians_alive`, and worth no score. */
   Uncounted = 0x08000000,
   /** Leave `g_civilians_alive` now rather than on removal. */

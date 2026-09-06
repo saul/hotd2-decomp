@@ -13075,3 +13075,126 @@ visible object in the middle of a shot.
    session ported that is knowingly missing.
 2. If "completely in fog" is still being seen, get the URL and the bundle age
    from the top bar; nothing in this commit reproduces it.
+
+---
+
+## Session — the civilians' root motion, and the switch the script owns
+
+**Report:** *"civilians seem to be missing their root motion."* Branch
+`fix/civilian-root-motion`.
+
+**Outcome:** two broken links, one in each direction, and they were cancelling
+each other out. `docs/BUGS.md` carries the full entry; `docs/formats/
+civilians.md` now has the wait word's high bits and the gate.
+
+### The answer to the question the report asks
+
+**Yes, the engine's civilians use root motion**, through the same
+`SkeletonApplyRootMotion` (`FUN_00410C50`) as class 0x30 and class 0x31. Its
+only gate is `if ((*(byte *)(model + 100) & 2) != 0)`, `model+0x64` =
+`obj+0x1F8`, and `ActorBuildSkinnedModel` (`FUN_00410440`) writes
+`MOV dword ptr [ESI + 0x64], 0x3` at `0x004104C5` unconditionally. `[proved]`
+
+**And class 0x10 is the one class that operates that switch.** Ops 0x00 and
+0x01 of `CivilianRunScript` (`FUN_0048B9E0`), inside their "is this a different
+clip" test, set or clear the bit from `*g_cur_civilian & 0x100000` — bit
+`0x00100000` of the wait word that opened the block. 289 of the 596 shipped
+wait commands carry it and 297 do not. `[proved]`
+
+`root_motion.ts` had said, in as many words, that there is *"no per-state or
+per-class switch, and nothing carries an actor but its clips"*. That was true
+of the two classes that had been read and false of the third, and it is the
+reason nobody went looking: the note read as settled. L26 again.
+
+### The link that was actually broken
+
+`class10/script.ts`'s opcode switch had `SetScale` (0x27) at the bottom of a
+fall-through group headed *"Unread. Named so the stream stays legible ...
+deliberately no behaviour"* — `SetGlobalB` (0x1B), `SetAttachMode` (0x23),
+`SetAttachTarget` (0x24), `SetPairA` (0x25). All four ran `obj.scale =
+AsFloat(a[0])`. Their operands are small integers; `AsFloat(2)` is `2.8e-45`;
+`SkeletonApplyRootMotion` multiplies the root delta by that field. **125
+commands across the shipped streams run one of those four, against one that
+runs op 0x27** — and that one passes `0x42480000` = 50.0.
+
+Eight of the six stages' 53 civilians carried a denormal scale. Stage 4's two
+type-36 civilians on motion 594 (net root `-10.8`) covered exactly `0.000`
+units over 30 s; with the case split out they cover `9.795`.
+
+### The measurement order, and what it cost
+
+Measure first, as asked. The order that worked:
+
+1. Count the wait-word bits across the 136 shipped streams from
+   `ExeTables.civilian_scripts()`. That is what put `0x00100000` (289) and
+   `0x00020000` (16) on the table as *unenumerated*, before any TypeScript.
+2. Bake every clip a civilian script can reach and look at the root track — 94
+   of 140 carry net horizontal translation, so the clips are not the problem.
+3. Drive all 53 shipped civilians headlessly for 30 s and print
+   `scale`/`net`/`maxstep` per actor. **The denormals were visible in that
+   first print** as `1.401298464324817e-45`, which is the bit pattern `1`.
+
+### Wrong turns, in order
+
+* **Read `CivilianApplyMotionPose` (`FUN_0048C310`) first**, because
+  `class10/index.ts` names it as the not-ported drawing routine and its
+  `0x20000` arm does translate the actor. It is a real second translation path
+  and it is still `[open]` — but it is *sixteen* wait commands, and the gate
+  that mattered was three lines inside `CivilianRunScript`'s op 0x00, which is
+  ported. Reading the class's *update* before its *draw* would have been
+  quicker.
+* **The browser harness measured a paused game for four runs.**
+  `?stage=1&block=1&step=8&mode=play&drive=1` picks the mode but does not start
+  the clock: the walker sat on `1/8/0`, every actor on clip frame `0/59`, the
+  camera path on frame 191 of 219, and `civ_walk.mjs` reported *"1 civilian,
+  root on, moved 0.00 over 1170 frames"* — which is the exact shape of the bug
+  under investigation. It took adding `frame f/len · loops n` to the civilian's
+  debug row to see that *nothing* was advancing, and `playthrough.mjs` has
+  `await page.keyboard.press("Space")` two lines after its load for this
+  reason. The note is now on the line in `civ_walk.mjs`.
+* **Deep-linked to block 1 step 7**, which is where the JSON says
+  `spawn_obj_c 6184` is. Step 7 spawns the scenery; the civilian arrives at
+  step 8. "No civilian rows" and "the civilians do not move" look the same from
+  outside a harness, so the tool now says which it found.
+* **Keyed the two panel samples by the row's first line**, which carries the
+  script cursor and therefore changes — every match came back `NaN`, and a NaN
+  compared with `>` is false, so it read as *moved*. Keyed on the actor address
+  now, and the comparison is `!(d > 0.5)`.
+
+### What the browser said, in the end
+
+Stage 1 block 1 step 8, real Chrome on the real GPU (ANGLE Metal, M1 Pro), 600
+driven frames: `0x1828 hito_fem` reads `root on · scale 0.9` and moves **20.87**
+units. With the fall-through put back she reads `scale 1.4e-45` and still moves
+**12.44** — because her captor is dragging her. **A position check alone would
+have passed the bug**; `civ_walk.mjs` fails on the denormal instead, which is
+a fact about the data rather than a threshold.
+
+### What is left
+
+* **`CivilianApplyMotionPose` (`FUN_0048C310`) is not ported**, and wait bits
+  `0x8000`, `0x10000`, `0x20000` and `0x200000` are its. `0x20000` is a second
+  way to translate the actor — from the frame's root plus the pol file's
+  root-bone offset, both scaled by `model+0x116C` — and 16 of the 596 wait
+  commands ask for it, six of them alongside `0x100000`. Those blocks stand
+  where the script put them. Porting it needs the bone hierarchy, which lives
+  in `render/`.
+* **`MotionFlag.RootMotionY` (`model+0x64` bit `0x10`) has no writer** in
+  anything read so far. `SkeletonApplyRootMotion`'s two arms differ only by
+  whether `obj+0x44` is written, so with the bit set the clip's root moves the
+  actor vertically too. `[open]`
+* **Bit `0x00040000` is in 315 of the 596 wait words**, more than any other,
+  and the draft of this entry called it unread. It is not: op 0x2C writes
+  `obj+0x34`'s `NoCameraTrack` from it, *inverted*, and the port already did —
+  as a bare `if (sub.wait & 0x40000) obj.flags &= ~0x10000`. Two raw literals
+  and no name, which is why the census read it as a gap. It is
+  `CivilianWait.CameraTrack` and `ActorFlag.NoCameraTrack` now. **A bit with no
+  name in the enum is indistinguishable from a bit nobody has read.**
+
+**Next actions**
+
+1. Ask the user whether `CivilianApplyMotionPose`'s `0x20000` arm is worth the
+   bone-hierarchy work for sixteen blocks, or whether naming it is enough.
+2. If the civilians are worked on again, `0x00008000` / `0x00010000` /
+   `0x00200000` are the remaining unread bits, and all three are
+   `CivilianApplyMotionPose`'s.

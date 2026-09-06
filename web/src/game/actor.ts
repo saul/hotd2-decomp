@@ -26,6 +26,48 @@ import { makeSetPiecePropTail, type SetPiecePropTail }
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 import { makeZombieTail, type ZombieTail } from "./class30/state";
 
+/**
+ * `model+0x64` — the **motion block's** flag word, which is `obj+0x1F8`.
+ *
+ * The skeletal model record is embedded in the object at `obj+0x194`, so every
+ * `model+n` in the decompiler is `obj+0x194+n`; `model+0x60` is
+ * {@link Actor.charType} at `obj+0x1F4` and this word sits next to it.
+ */
+export enum MotionFlag {
+  /**
+   * **Does this clip's root translation carry the actor?**
+   *
+   * `SkeletonApplyRootMotion` (`FUN_00410C50`) tests exactly this and nothing
+   * else before it touches the position — `if ((*(byte *)(model + 100) & 2) !=
+   * 0)` — and the same test at the end of the routine decides whether the draw
+   * keeps the clip's horizontal root translation or replaces it with
+   * `MatrixTranslate(0, root.y, 0)`. The two are one switch: the translation
+   * either moves the object or moves the pose, never both. `[proved]`
+   */
+  RootMotion = 0x02,
+  /**
+   * Bit `0x10` — take the root's **y** as well.
+   *
+   * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit
+   * clear it writes back `obj+0x40` and `obj+0x48` only, with it set it writes
+   * `obj+0x44` too. Nothing in the port sets it, and no routine read so far
+   * writes it. `[open]`
+   */
+  RootMotionY = 0x10,
+}
+
+/**
+ * What `ActorBuildSkinnedModel` (`FUN_00410440`) leaves in
+ * {@link Actor.motionFlags}: `MOV dword ptr [ESI + 0x64], 0x3` at 0x004104C5,
+ * bytes `c7466403000000`. `[proved]`
+ *
+ * It is unconditional, so **every skeletal actor in the game starts with root
+ * motion on** — class 0x30 and class 0x31 never change it, and class 0x10's
+ * script does, on every clip change. Bit `1` is not read by anything the port
+ * has looked at; it is kept so the field round-trips the engine's value.
+ */
+export const MOTION_FLAGS_INIT = 3;
+
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
   /**
@@ -788,6 +830,12 @@ export interface ActorBase {
    * See `ActorModelScale` in `game/root_motion.ts`.
    */
   scale: number;
+  /**
+   * `model+0x64` — `obj+0x1F8`, the motion block's flag word. See
+   * {@link MotionFlag}, and {@link MOTION_FLAGS_INIT} for the value every
+   * skeletal actor is built with.
+   */
+  motionFlags: number;      // +0x1F8
   /** Display name, for the feed. Copied from the type at spawn. */
   name: string;
 
@@ -1489,8 +1537,10 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // narrowing the union exists for.
   const head: Omit<ActorBase, "cls"> = {
     at, charType, name, flags38: 0,
-    // `ActorBuildSkinnedModel` writes this from the character type alone.
+    // `ActorBuildSkinnedModel` writes both of these while building the model:
+    // the scale from the character type alone, the flags unconditionally.
     scale: ActorModelScale(charType),
+    motionFlags: MOTION_FLAGS_INIT,
     flags: 0,
     pos: vec3(),
     yaw: 0,

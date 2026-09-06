@@ -75,16 +75,76 @@ reasons hold.
 | `0x00002000` | `g_script_flags[sub+0x1A]` is raised |
 | `0x40000000` | two players are in play |
 
-and four that are not waits at all:
+and the high bits, which are not waits at all:
 
-| Bit | Meaning |
-|---|---|
-| `0x00080000` | leave `g_civilians_alive` now rather than on removal |
-| `0x02000000` | may be removed when off camera |
-| `0x08000000` | uncounted: no `g_civilians_alive`, and worth no score |
-| `0x10000000` | **rescued** — pay 400 and clear the bit |
+| Bit | Meaning | of 596 |
+|---|---|---:|
+| `0x00008000` | `CivilianApplyMotionPose`: with `0x10000` it enters the bone-direction turn; on its own it selects the counter-rotation arm. Not ported. `[open]` | 28 |
+| `0x00010000` | `CivilianApplyMotionPose`: without `0x8000`, write the frame's rotation into `model+0x7C/0x80/0x84`. Not ported. `[open]` | 4 |
+| `0x00020000` | `CivilianApplyMotionPose`: **the other translation** — place the actor from the frame's root plus the pol file's root-bone offset, both scaled by `model+0x116C`. Not ported. `[open]` | 16 |
+| `0x00080000` | leave `g_civilians_alive` now rather than on removal | 125 |
+| `0x00100000` | **this block's clip carries her** — the root-motion gate, below | 289 |
+| `0x00200000` | `CivilianApplyMotionPose`: skip the whole rotation arm. `[open]` | 75 |
+| `0x02000000` | may be removed when off camera | 90 |
+| `0x08000000` | uncounted: no `g_civilians_alive`, and worth no score | 9 |
+| `0x10000000` | **rescued** — pay 400 and clear the bit | 37 |
 
 `0x04000000` is masked off as the word is loaded (`operand & 0xFBFFFFFF`).
+`0x00040000` (315), `0x00800000` (11), `0x01000000` (25), `0x04000000` (21)
+and `0x20000000` (3) also appear in the shipped words. `0x00040000` is the
+**camera-track** bit and it is written *inverted*: op 0x2C does
+`if ((word & 0x40000) == 0) obj+0x34 |= 0x10000; else obj+0x34 &= ~0x10000`,
+and `obj+0x34` bit `0x10000` is *excluded from `RegisterForCameraTracking`* —
+so the wait bit set means tracked. `0x01000000` is the world push and
+`0x20000000` gates op 0x1D's dialogue on `DAT_009A2230`. The counts are of the
+596 `Wait` commands in the 136 shipped streams.
+
+### The root-motion gate — `0x00100000`
+
+**The engine's civilians are carried by their clips, through the same routine
+everyone else's are.** `SkeletonApplyRootMotion` (`FUN_00410C50`) tests one
+thing before it touches a position — `if ((*(byte *)(model + 100) & 2) != 0)`
+— and `model + 100` is `model+0x64`, which is `obj+0x1F8`.
+`ActorBuildSkinnedModel` (`FUN_00410440`) writes
+`MOV dword ptr [ESI + 0x64], 0x3` at `0x004104C5`, unconditionally, so every
+skeletal actor in the game is *built* with it on. `[proved]`
+
+Class 0x10 is the only class that changes it afterwards, and it does so from
+the wait word, on every clip **change** — ops 0x00 and 0x01 of
+`CivilianRunScript` (`FUN_0048B9E0`):
+
+```c
+if (*(int *)(g_cur_actor_model + 0x20) != param_2[1]) {   // a different clip
+  *(int *)(g_cur_actor_model + 0x20) = param_2[1];
+  if ((*g_cur_civilian & 0x100000) == 0)
+    uVar7 = *(uint *)(g_cur_actor_model + 100) & 0xfffffffd;   // clear
+  else
+    uVar7 = *(uint *)(g_cur_actor_model + 100) | 2;            // set
+  *(uint *)(g_cur_actor_model + 100) = uVar7;
+  CivilianApplyMotionPose(param_1, uVar3, ...);
+}
+```
+
+`*g_cur_civilian` is the wait word that opened the block, so the answer to
+*"does this civilian walk or does she animate in place"* is per block and it is
+in the script. **289 of the 596 shipped wait commands set the bit and 297 do
+not.** `[proved]`
+
+The same bit decides the *draw* at the end of that routine: with it set the
+clip's horizontal root translation has already moved the object, so the pose is
+placed with `MatrixTranslate(0, root.y, 0)` instead of the full root. The
+translation either moves the object or moves the pose, never both.
+
+`CivilianReapplyWaitCommand` (`FUN_0048B760`) deliberately does **not** write
+either `model+0x20` or `model+0x64`, so a skipped block leaves the gate where
+the last real clip change put it.
+
+**The delta is scaled by `model+0x116C`**, which `SkeletonApplyRootMotion` runs
+`MatrixScale` with. `ActorBuildSkinnedModel` sets it from the character type
+alone — 0.6 for type 30, 0.7 for 31, 0.9 for 32..56, 1.0 otherwise — and
+**op 0x27 is the only command in the class that changes it**, storing its
+operand verbatim into that float field. One command in the whole game runs it,
+with `0x42480000` = 50.0.
 
 Two consequences worth knowing, both the engine's:
 

@@ -5,10 +5,10 @@
  * class for, and the whole argument for that hook is that the class answers in
  * its own vocabulary rather than the panel guessing from outside.
  */
-import type { Actor } from "../actor";
+import { MotionFlag, type Actor } from "../actor";
 import { G } from "../globals";
 import type { ActorDebug } from "../registry";
-import { MotionPlayFrame } from "../tables";
+import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import { CivilianTarget, CivilianWait } from "./ops";
 import { HeadingError } from "./turn";
 
@@ -34,6 +34,7 @@ const WAIT_BIT_NAMES: [number, string][] = [
   [0x400, "hook"], [CivilianWait.Free, "free"],
   [CivilianWait.CameraSettled, "camera-settled"],
   [CivilianWait.ScriptFlag, "script-flag"],
+  [CivilianWait.RootMotion, "root-motion"],
   [CivilianWait.LeaveCountNow, "leave-count"],
   [CivilianWait.PushOutOfWorld, "push-out"],
   [CivilianWait.RemoveOffCamera, "remove-off-camera"],
@@ -86,7 +87,18 @@ export function CivilianDebug(obj: Actor): ActorDebug {
 
   const detail = [
     `script ${sub.script} · pc ${sub.pc} · cursor ${sub.cursor}`
-      + ` · motion ${obj.motion}`,
+      + ` · motion ${obj.motion}`
+      + ` frame ${MotionPlayFrame(obj)}/${MotionPlayLength(obj)}`
+      + ` · loops ${sub.loops}`,
+    // **Where she is, and whether her clip is allowed to move her.** The gate
+    // is `model+0x64` bit 1, written from the wait word's `root-motion` on
+    // every clip change — see `CivilianWait.RootMotion`. A civilian animating
+    // a walk with `root off` is correct and a civilian animating a walk with
+    // `root on` and a position that never changes is the bug this line was
+    // added for, and neither can be told from the other without both numbers.
+    `at (${obj.pos.x.toFixed(1)},${obj.pos.z.toFixed(1)})`
+      + ` · root ${(obj.motionFlags & MotionFlag.RootMotion) ? "on" : "off"}`
+      + ` · scale ${obj.scale}`,
     `wait 0x${word.toString(16)}${bits.length ? " · " + bits.join(" ") : ""}`,
   ];
   // The turn-and-reach bits are the ones that read as "nothing is happening":

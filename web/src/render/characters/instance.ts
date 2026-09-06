@@ -66,6 +66,15 @@ export interface Instance {
    */
   parentAt?: number;
   /**
+   * The models an attachment list hung on a bone, by record id.
+   *
+   * Render bookkeeping and nothing else: the ids are on the actor, in
+   * `a.attachments`, and this is only which of them have nodes yet. A record
+   * whose model this stage's bundle does not carry gets an empty `Object3D`,
+   * so it is asked for once rather than every frame.
+   */
+  attached?: Map<number, Object3D>;
+  /**
    * Class 0x10's held items, by their index in `civilians.items`.
    *
    * `CivilianDrawHeldItems` (`FUN_0048CD10`) walks the actor's own list every

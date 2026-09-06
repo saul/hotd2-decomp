@@ -8,8 +8,62 @@
  * its own initial state. {@link Placement} is what comes out.
  */
 
-import type { Spawn } from "./evt";
+import { i16 } from "./bytes";
+import type { EvtFile, Spawn } from "./evt";
 import type { TargetScript } from "./actorscript";
+
+/**
+ * Where a class's `Init` reads its **attachment list** pointer from, inside
+ * the descriptor tail.
+ *
+ * The list is an `s16[]` of ids into `g_actor_attachment_records`, terminated
+ * by a negative. `ActorBindPartList` (`FUN_00412440`) binds it and
+ * `ActorDrawAttachedParts` (`FUN_004124F0`) draws it, and both are shared --
+ * but **where the pointer lives is not**, which is L3 in its usual form:
+ *
+ * * `CivilianInit` (`FUN_0048A3E0`) reads `tail+0x08`;
+ * * `ScriptedHumanoidInit` (`FUN_004840D0`) reads `tail+0x08`;
+ * * `SetPiecePropInit` (`FUN_00482CE0`) reads `tail+0x00`.
+ *
+ * Three more callers of `ActorBindPartList` -- `FUN_004613C0`, `FUN_004617F0`
+ * and `FUN_0049A760` -- are unread, so their classes are `[open]` and are not
+ * listed here. Reading the wrong offset for a class does not fail loudly: the
+ * bytes are some other field and the ids that come out are plausible, so this
+ * is deliberately a table of the three Inits that have been read rather than
+ * a default.
+ */
+export const ATTACHMENT_TAIL_OFFSET: Record<number, number> = {
+  0x10: 0x08, 0x24: 0x00, 0x25: 0x08,
+};
+
+/** Ids are indices into an 81-row table; nothing longer than this appears. */
+const ATTACHMENT_LIST_MAX = 32;
+
+/**
+ * One spawn's attachment list, as record ids.
+ *
+ * Empty for a class whose `Init` has not been read, for a tail whose pointer
+ * is not a pointer, and for a list carrying an id outside the record table --
+ * an out-of-range id means the bytes are not a list, and half a list is worse
+ * than none.
+ */
+export function attachmentList(evt: EvtFile, rec: Spawn, cls: number,
+                               recordCount: number): number[] {
+  const at = ATTACHMENT_TAIL_OFFSET[cls];
+  if (at === undefined || !rec.hasParams) return [];
+  const w = rec.param(at, "u32");
+  if (w === null) return [];
+  const off = evt.toOffset(w);
+  if (off === null || off < 0 || off + 2 > evt.raw.length) return [];
+  const out: number[] = [];
+  for (let o = off; o + 2 <= evt.raw.length; o += 2) {
+    const v = i16(evt.raw, o);
+    if (v < 0) return out;
+    if (v >= recordCount || out.length >= ATTACHMENT_LIST_MAX) return [];
+    out.push(v);
+  }
+  return [];
+}
 
 /**
  * Which state index means "ride a ballistic arc to a named point", per class.
@@ -325,6 +379,15 @@ export class Placement {
   class52: Record<string, unknown> | null = null;
   /** Class 0x53's tail -- `{anim_set, subtype}`. */
   class53: Record<string, unknown> | null = null;
+  /**
+   * The spawn's attachment list -- `obj+0x1170`, ids into
+   * `g_actor_attachment_records`.
+   *
+   * Faces below `0x24`, accessories at or above it. This is where a
+   * civilian's hair comes from: without it a civilian's head is the shell the
+   * skeleton names, which is open at the back.
+   */
+  attachments: number[] = [];
   /** The descriptor's `+0x22`, **before** difficulty scaling. */
   hp = 0;
 
@@ -376,6 +439,7 @@ export class Placement {
     if (this.class20) d.class20 = this.class20;
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;
+    if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }
 }

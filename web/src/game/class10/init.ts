@@ -9,6 +9,7 @@ import type { Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { CharacterTypeOf, T } from "../tables";
+import { ActorBindPartList } from "../attachments";
 import { CivilianRunScript } from "./script";
 import { makeCivilianState } from "./state";
 
@@ -46,6 +47,11 @@ export function CivilianInit(obj: Actor, rng?: Rng): void {
   obj.bodyRadius = CIVILIAN_BODY_RADIUS;
   sub.scaleTarget = CIVILIAN_BODY_RADIUS;
   sub.attachSet = CivilianAttachSet(obj.charType);
+
+  // `FUN_0045EBB0(*(u32 *)(tail + 8))` into `model+0x1170`, then
+  // `ActorBindPartList` -- the two instructions before the `CivilianUpdate`
+  // install. This is what puts the hair on a civilian.
+  ActorBindPartList(obj);
 
   const p = T.civilians?.spawns?.[String(obj.at)];
   if (!p) return;

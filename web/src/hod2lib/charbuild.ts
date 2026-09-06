@@ -54,6 +54,18 @@ export class Character {
    * client clones a held model from.
    */
   heldSlots = new Set<number>();
+  /**
+   * Asset slots this character type's spawns ask for through their
+   * **attachment lists** -- `g_actor_attachment_records`, bound by
+   * `ActorBindPartList` (`FUN_00412440`) and drawn by
+   * `ActorDrawAttachedParts` (`FUN_004124F0`).
+   *
+   * They ride the hidden gore template for the same reason the held items do:
+   * the client clones by asset slot, the models live in other `pol/` files
+   * (`hito_kao_*`, `etc_komono_*`), and the union over a stage is a handful of
+   * models against one per instance.
+   */
+  attachmentSlots = new Set<number>();
 
   constructor(
     readonly charType: number,
@@ -353,6 +365,10 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
   const want = new Set<number>(char.gore.keys());
   // Class 0x10's held items ride here too, for the same reason.
   for (const s of char.heldSlots) want.add(s);
+  // And the faces and accessories an attachment list names -- the
+  // `hito_kao_*` head a spawn wears instead of the skeleton's, and the
+  // `etc_komono_*` hair, hat, bag or shoes drawn on top of it.
+  for (const s of char.attachmentSlots) want.add(s);
   // **And the head's own undamaged model**, which the skeleton *does* name --
   // but names as a bone, not by slot, and the client clones by slot.
   //

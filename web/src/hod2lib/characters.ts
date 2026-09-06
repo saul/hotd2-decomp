@@ -49,11 +49,12 @@ import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
 import * as degraded from "./degraded";
 import * as evtlib from "./evt";
 import type { Spawn } from "./evt";
+import { ExeTables as ExeTablesClass } from "./exetab";
 import type { ExeTables } from "./exetab";
-import { BACK_AWAY_STATES, CUE_STATES, ENTRANCE_CLIP_STATES, entryTail,
-         GRAB_STATES, LEAP_STATES, LEAP_STRIKE_STATES, PATH_STATES,
-         Placement, POUNCE_STATES, WALK_DISTANCE_STATES,
-         WAYPOINT_BYTES } from "./placement";
+import { attachmentList, BACK_AWAY_STATES, CUE_STATES,
+         ENTRANCE_CLIP_STATES, entryTail, GRAB_STATES, LEAP_STATES,
+         LEAP_STRIKE_STATES, PATH_STATES, Placement, POUNCE_STATES,
+         WALK_DISTANCE_STATES, WAYPOINT_BYTES } from "./placement";
 import type { SpawnJson } from "./placement";
 import { AssetCache } from "./rigs";
 import type { RigInstance } from "./rigs";
@@ -218,6 +219,7 @@ export async function resolveForStage(
   }
   const perType = new Map<number, SpawnJson[]>();
   const dset = deathMotions(tables);
+  const attachRecords = tables.attachmentRecords();
 
   for (const at of [...byAt.keys()].sort((a, b) => a - b)) {
     const sp = byAt.get(at)!;
@@ -458,6 +460,11 @@ export async function resolveForStage(
     p.class20 = class20;
     p.class52 = class52;
     p.class53 = class53;
+    // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
+    // spawn wears. 97 of the game's spawns carry one and every list matches
+    // its character's own family, which is what says the tail offsets are
+    // right; see `ATTACHMENT_TAIL_OFFSET`.
+    p.attachments = attachmentList(evt, rec, cls, attachRecords.length);
     p.hp = (sp.hp as number) ?? 0;
     placements.push(p);
 
@@ -472,6 +479,12 @@ export async function resolveForStage(
       chars.set(res.charType, built);
     }
     const c = chars.get(res.charType)!;
+    // The models an attachment list names live in other `pol/` files, so the
+    // slots go on the character type and `goreEntry` pulls them in once.
+    for (const id of p.attachments) {
+      const arec = attachRecords[id];
+      if (arec && arec.slot) c.attachmentSlots.add(arec.slot);
+    }
     // The death set is authored against zom.bin's skeleton. `bake` drops it
     // for any character whose bone count differs, so the list is offered
     // unconditionally and filtered by the data rather than by a constant.
@@ -631,6 +644,10 @@ export function charactersJson(chars: Map<number, Character>,
     player: playerDamage(),
     bone_zones: tables !== null ? boneZones(tables) : [],
     class31: tables !== null ? class31Tables(tables) : {},
+    // `g_actor_attachment_records` -- one table for the whole game, indexed
+    // by the ids in a placement's `attachments`.
+    attachments: tables !== null ? tables.attachmentRecords() : [],
+    attachment_replaces_below: ExeTablesClass.ATTACHMENT_REPLACES_BELOW,
     types,
     placements: placements.map((p) => p.toJson()),
     note: "A character is assembled from the EXE skeleton and posed from a "

@@ -9,11 +9,64 @@ initial state. :class:`Placement` is what comes out.
 from __future__ import annotations
 
 import math
+import struct
 from dataclasses import dataclass
 
 
 #: Which state index means "ride a ballistic arc to a named point", per class.
 #: `ThrowerStateLeapToPoint` and `ZombieStateLeapToPoint` are the two read.
+#: Where a class's `Init` reads its **attachment list** pointer from, inside
+#: the descriptor tail.
+#:
+#: The list is an ``s16[]`` of ids into ``g_actor_attachment_records``,
+#: terminated by a negative. `ActorBindPartList` (`FUN_00412440`) binds it and
+#: `ActorDrawAttachedParts` (`FUN_004124F0`) draws it, and both are shared --
+#: but WHERE THE POINTER LIVES IS NOT, which is L3 in its usual form:
+#:
+#: * `CivilianInit` (`FUN_0048A3E0`) reads ``tail+0x08``;
+#: * `ScriptedHumanoidInit` (`FUN_004840D0`) reads ``tail+0x08``;
+#: * `SetPiecePropInit` (`FUN_00482CE0`) reads ``tail+0x00``.
+#:
+#: Three more callers -- `FUN_004613C0`, `FUN_004617F0`, `FUN_0049A760` -- are
+#: unread, so their classes are ``[open]`` and are not listed. Reading the
+#: wrong offset for a class does not fail loudly; this is deliberately a table
+#: of the three Inits that have been read rather than a default.
+ATTACHMENT_TAIL_OFFSET = {0x10: 0x08, 0x24: 0x00, 0x25: 0x08}
+
+#: Ids index an 81-row table; nothing longer than this appears.
+ATTACHMENT_LIST_MAX = 32
+
+
+def attachment_list(evt, rec, cls: int, record_count: int) -> list[int]:
+    """One spawn's attachment list, as record ids.
+
+    Empty for a class whose `Init` has not been read, for a tail whose pointer
+    is not a pointer, and for a list carrying an id outside the record table --
+    an out-of-range id means the bytes are not a list, and half a list is
+    worse than none.
+    """
+    at = ATTACHMENT_TAIL_OFFSET.get(cls)
+    if at is None or not rec.has_params:
+        return []
+    w = rec.param(at, "u32")
+    if w is None:
+        return []
+    off = evt.to_offset(w)
+    if off is None or off < 0 or off + 2 > len(evt.raw):
+        return []
+    out: list[int] = []
+    o = off
+    while o + 2 <= len(evt.raw):
+        v = struct.unpack_from("<h", evt.raw, o)[0]
+        if v < 0:
+            return out
+        if v >= record_count or len(out) >= ATTACHMENT_LIST_MAX:
+            return []
+        out.append(v)
+        o += 2
+    return []
+
+
 LEAP_STATES = {0x30: (24,), 0x31: (20,)}
 
 #: Which state index means "follow a list of waypoints" -- `ThrowerStatePathFollow`.

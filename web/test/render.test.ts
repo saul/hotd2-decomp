@@ -1264,5 +1264,159 @@ console.log("\nthe blood colour switch moves the map, not the shader:");
   (globalThis as unknown as { document: unknown }).document = doc;
 }
 
+/**
+ * "Civilians' hair doesn't render" — `docs/BUGS.md`.
+ *
+ * A civilian's head model is a shell open at the back: `hito_gal`'s bone 2 is
+ * 149 vertices spanning `z 0.18..1.38`, with four vertex normals in the whole
+ * model pointing backwards where every zombie head in the game has fifteen to
+ * forty. What closes it is an **attachment**: `CivilianInit` (`FUN_0048A3E0`)
+ * parks the spawn tail's `+0x08` pointer at `model+0x1170` and calls
+ * `ActorBindPartList` (`FUN_00412440`), and `ActorDrawAttachedParts`
+ * (`FUN_004124F0`) then draws an `etc_komono_*` model on bone 2 after every
+ * skeleton node. The port had neither, and drew a face on a neck.
+ *
+ * Two halves, and this drives both:
+ *
+ * * an id **below** `attachment_replaces_below` binds — the bone draws the
+ *   record's `hito_kao_*` model instead of its own;
+ * * an id **at or above** it draws — the record's model is added to the bone.
+ *
+ * **Every assertion is about what the scene graph holds**, not about what a
+ * layer says of itself. The failure this is written against is a layer that
+ * reports the right count with nothing under the bone.
+ */
+console.log("\ncivilian attachments: the face swaps, the hair is added");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { BoxGeometry, Mesh, MeshBasicMaterial, Object3D } =
+    await import("three");
+
+  /** The skeleton the exporter writes: bone 1 the torso, bone 2 the head. */
+  const TYPE = {
+    type: 0x26, name: "hito_gal", file: "hito_gal.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [
+      { bone: 1, part: "bone01_0eb9", slot: 0x0eb9, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 2, steps: [] },
+      { bone: 2, part: "bone02_0eaf", slot: 0x0eaf, offset: [0, 0, 0],
+        parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    head_bone: 2, reactions: {}, attacks: {},
+    // One authored frame, three bones' worth of BAMS: enough that `Poser`
+    // runs for real rather than being stepped round.
+    motions: {
+      "660": { bank: "people", frames: 1, fps: 30, root: [0, 0, 0],
+               rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 },
+    },
+  };
+  // Two records: a face below the split and an accessory at it. The real
+  // table is 81 rows and `g_actor_attachment_records`' own ids; these are the
+  // two shapes.
+  const RECORDS = [] as { bone: number; slot: number }[];
+  for (let i = 0; i < 0x40; i++) RECORDS.push({ bone: -1, slot: 0 });
+  RECORDS[0x04] = { bone: 2, slot: 0x0c7d };     // hito_kao_gal.bin[20]
+  RECORDS[0x33] = { bone: 2, slot: 0x11dd };     // etc_komono_gal.bin[6]
+  const PLACE = {
+    at: 0x8620, class: 0x10, char_type: 0x26, motion: 660, hp: 0, yaw: 0,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+    attachments: [0x04, 0x33],
+  };
+  const CHARS = {
+    types: { "38": TYPE }, placements: [PLACE],
+    attachments: RECORDS, attachment_replaces_below: 0x24,
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+
+  /** One template node per asset slot, exactly as `goreEntry` writes them. */
+  const template = (slot: number): InstanceType<typeof Object3D> => {
+    const n = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    n.name = `gore_hito_gal_fixed000_gore_${slot.toString(16).padStart(4, "0")}`;
+    n.userData = { hod2_kind: "rig_part", hod2_rig: "gore_hito_gal",
+                   hod2_part: `gore_${slot.toString(16).padStart(4, "0")}` };
+    return n;
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_hito_gal_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_hito_gal",
+                   hod2_spawn_at: 0x8620 };
+  const torso = new Object3D();
+  torso.name = "chr_hito_gal_spawn000_bone01_0eb9";
+  const head = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+  head.name = "chr_hito_gal_spawn000_bone02_0eaf";
+  torso.add(head);
+  rig.add(torso);
+  root.add(rig);
+
+  const gore = new Object3D();
+  gore.name = "gore_hito_gal_fixed000";
+  gore.userData = { hod2_kind: "rig", hod2_rig: "gore_hito_gal" };
+  gore.add(template(0x0c7d));
+  gore.add(template(0x11dd));
+  root.add(gore);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+
+  const headGeom = head.geometry;
+  const made = SpawnScriptedCharacters(chars.readySpawns([{ at: 0x8620 }]));
+  check("the civilian is made", made.length === 1, `${made.length}`);
+  const a = made[0];
+  // The bind is the port's, and it runs in `CivilianInit` -- so the actor
+  // knows which head it wears before anything has drawn it.
+  check("`ActorBindPartList` bound the face below the split",
+        a.boneSlot["2"] === 0x0c7d, JSON.stringify(a.boneSlot));
+  check("...and left the accessory for the draw",
+        Object.keys(a.boneSlot).length === 1, JSON.stringify(a.boneSlot));
+
+  a.visible = true;
+  chars.syncSpawns([{ at: 0x8620 }], made);
+  // **The scene, not the layer's opinion of it.** `adopt` replays
+  // `a.boneSlot`, so the head bone is already wearing the swapped model
+  // before a single frame has run.
+  check("adopting the hierarchy swapped the head's own geometry",
+        head.geometry !== headGeom, "head geometry unchanged");
+
+  const before = head.children.length;
+  chars.update({} as never);
+  const added = head.children.filter((c) => (c as { isMesh?: boolean }).isMesh);
+  check("a frame hangs exactly one model on the head bone",
+        head.children.length === before + 1 && added.length >= 1,
+        `${before} -> ${head.children.length}`);
+  check("...and it is the accessory's model, not the face's",
+        added.some((c) => c.name.includes("11dd"))
+        && !added.some((c) => c.name.includes("0c7d")),
+        added.map((c) => c.name).join(","));
+
+  // Idempotent: the second frame must not stack a second copy.
+  chars.update({} as never);
+  check("a second frame adds nothing", head.children.length === before + 1,
+        `${head.children.length}`);
+
+  // And a snapshot carries it: the ids are on the actor, the nodes are not.
+  chars.resync({} as never);
+  chars.update({} as never);
+  check("resync leaves the accessory in place",
+        head.children.filter((c) => (c as { isMesh?: boolean }).isMesh)
+          .length === added.length,
+        `${head.children.length}`);
+
+  stage.dispose();
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

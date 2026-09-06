@@ -55,6 +55,7 @@ import type {
 } from "../bundle";
 import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
 import type { Actor } from "../game/actor";
+import { ATTACHMENT_REPLACES_BELOW } from "../game/attachments";
 import type { Vec3 } from "../game/vec";
 import type { CharacterSpawnRequest } from "../game/director";
 import { Rng } from "../core/rng";
@@ -465,7 +466,56 @@ export class CharacterLayer implements System {
         }
         inst.hidden = inst.a.removed.length;
       }
+      this.syncAttachments(inst);
       if (inst.a.civ) this.syncHeldItems(inst);
+    }
+  }
+
+  /**
+   * `ActorDrawAttachedParts` — `FUN_004124F0`. The hair, the hat, the bag and
+   * the shoes.
+   *
+   * The engine walks `model+0x1170` after every skeleton node and, for each id
+   * at or above `ATTACHMENT_REPLACES_BELOW`, sets the matrix to that record's
+   * bone and calls `AssetDrawSlot` on its asset slot. The ids below the split
+   * are not here: `ActorBindPartList` folded them into `a.boneSlot` when the
+   * `Init` ran, and `adopt` and `resync` replay them.
+   *
+   * **This is what closes a civilian's head.** The model a civilian's skeleton
+   * names for bone 2 is a face shell open at the back — `hito_gal`'s spans
+   * `z 0.18..1.38` with four vertex normals in the whole 149 pointing
+   * backwards — and the `etc_komono_*` model on the same bone is the hair that
+   * covers it. Every one of the fifty-two class-0x10 spawns that carries a
+   * list names one.
+   *
+   * [diverges] The engine re-issues the draw every frame in the bone's own
+   * matrix; here the model is parented to the bone once, which is the same
+   * picture. It also applies an Original Mode scale — 1.5x in X and Z on
+   * bone 2, 2.0x on bones 5, 8, 12 and 15, gated on `DAT_009C88AC` — which is
+   * not ported: what that byte is has not been read.
+   */
+  private syncAttachments(inst: Instance): void {
+    const split = this.json?.attachment_replaces_below
+      ?? ATTACHMENT_REPLACES_BELOW;
+    const want = inst.a.attachments.filter((id) => id >= split);
+    const have = inst.attached ?? (inst.attached = new Map());
+    if (want.length === have.size && want.every((k) => have.has(k))) return;
+    const recs = this.json?.attachments ?? [];
+    for (const [k, node] of have) {
+      if (want.includes(k)) continue;
+      node.removeFromParent();
+      have.delete(k);
+    }
+    for (const id of want) {
+      if (have.has(id)) continue;
+      const rec = recs[id];
+      const bone = rec && rec.bone >= 0 ? inst.bones.get(rec.bone) : undefined;
+      const model = rec && rec.slot ? this.cloneSlot(rec.slot) : null;
+      // An empty `Object3D` rather than nothing, so a record with no model in
+      // this stage's bundle is asked for once instead of every frame.
+      if (!bone || !model) { have.set(id, new Object3D()); continue; }
+      bone.add(model);
+      have.set(id, model);
     }
   }
 
@@ -752,9 +802,19 @@ export class CharacterLayer implements System {
       if (!rec) continue;
       this.pending.delete(a.at);
       this.live.add(a.at);
-      this.instances.push({ at: a.at, a, type: rec.type, root: rec.root,
-                            pivot: rec.pivot, bones: rec.bones,
-                            gore: new Map(), parentAt: rec.parentAt });
+      const inst: Instance = { at: a.at, a, type: rec.type, root: rec.root,
+                               pivot: rec.pivot, bones: rec.bones,
+                               gore: new Map(), parentAt: rec.parentAt };
+      this.instances.push(inst);
+      // **A bone slot an `Init` already wrote.** `ActorBindPartList`
+      // (`FUN_00412440`) runs inside the class's `Init`, which is before this
+      // layer has an instance to write through — so the actor arrives already
+      // saying which model each bone draws, and this replays it exactly as
+      // `resync` does. Without it a civilian kept the default head its
+      // skeleton names instead of the `hito_kao_*` its spawn asked for.
+      for (const [bone, slot] of Object.entries(a.boneSlot)) {
+        swapGore(this.goreParts, inst, Number(bone), slot);
+      }
     }
   }
 

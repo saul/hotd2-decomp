@@ -1365,6 +1365,18 @@ export interface ActorBase {
   removed: number[];
   /** Per-bone asset slot overrides — the draw record at +0x20C + bone*0x90. */
   boneSlot: Record<string, number>;
+  /**
+   * The attachment list — `model+0x1170`, ids into
+   * `g_actor_attachment_records` (`0x004EC4C0`).
+   *
+   * `ActorBindPartList` (`FUN_00412440`) reads it once as the actor is built,
+   * and `ActorDrawAttachedParts` (`FUN_004124F0`) walks the same array every
+   * frame — so the engine keeps the list, not a resolved result, and so does
+   * this. The ids at or above `ATTACHMENT_REPLACES_BELOW` are the ones the
+   * renderer draws; the ones below it have already been folded into
+   * {@link ActorHead.boneSlot} by the bind.
+   */
+  attachments: number[];
 }
 
 /**
@@ -1567,6 +1579,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     latched: [],
     removed: [],
     boneSlot: {},
+    attachments: [],
   };
   // One `return` per arm. TypeScript narrows `cls` inside each branch, so the
   // arm's fields are required exactly where they belong and no cast is needed

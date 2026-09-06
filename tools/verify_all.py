@@ -133,6 +133,14 @@ CHECKS: list[Check] = [
           "check that reads a motion at the effect stride rather than a "
           "character's",
           NEEDS_GAME),
+    Check("verify_attachments", ".",
+          ["python3", "tools/verify_attachments.py",
+           "--game-dir", "{game_dir}"],
+          "that every face and accessory a spawn's attachment list names has "
+          "a model in the stage's glTF -- the check that would have caught "
+          "the civilians having no hair, because a civilian's own head model "
+          "is a shell open at the back and every count was right without it",
+          NEEDS_GAME),
     Check("verify_geometry", ".",
           ["python3", "tools/verify_geometry.py", "--game-dir", "{game_dir}"],
           "that every scenery part in a stage bundle holds every triangle its "

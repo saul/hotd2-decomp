@@ -68,7 +68,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 47 of the 59 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are hinges read by `props.md`; the rest are unread. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
-| `0x10` | `CivilianInit` | 51 | **Civilian / rescuable victim. Ported** (`game/class10/`) — a bytecode VM whose 136 command streams are compiled into the **exe**, not the evt. Each civilian is held by class-0x30 captors its own Init builds from descriptors nothing in the script points at; killing them all pays **+400**. Shooting the civilian costs a **life** and −100 twice. Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. See docs/formats/civilians.md. | `[proved]` |
+| `0x10` | `CivilianInit` | 51 | **Civilian / rescuable victim. Ported** (`game/class10/`) — a bytecode VM whose 136 command streams are compiled into the **exe**, not the evt. Each civilian is held by class-0x30 captors its own Init builds from descriptors nothing in the script points at; killing them all pays **+400**. Shooting the civilian costs a **life** and −100 twice. Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. Its face and its hair are an **attachment list** at the spawn tail's `+0x08`, not part of its skeleton — 52 of the 65 spawns carry one. See docs/formats/civilians.md. | `[proved]` |
 | `0x31` | `EnemyThrowerInit` (`0x00449620`) | 49 | **The wall-crawler**, four character types (`0x16`-`0x19`) over one 35-state machine and four **behaviour sets**, the set taken from the descriptor's byte +1 rather than from the model. Set 1 (`zsass`) stands out of reach and throws; set 0 (`zstin`) climbs the walls and the ceiling at 40-50 units and **arcs onto the camera with a knife** inside 30, connecting on a frame of the leap clip rather than on any range test, then leaps back out to one side. The whole repertoire is a pick table, `g_class31_action_picks`. **Ported.** See [`combat.md` §12](combat.md). Ricochet SFX by subtype: `BULLET_WOD1_16.WAV` (wood) for `0x17`, `BULLET_MET2_16.WAV` (metal) for `0x19`. | `[proved]` |
 | `0x24` | `SetPiecePropInit` (`FUN_00482CE0`) | 48 | **Scripted non-combat set-piece prop.** Not damageable, awards nothing, plays no sound at all (all 496 `PlaySoundId` xrefs checked). A skinned actor choreographed against the **camera**: six state selectors covering idle, a delayed motion change, freeze/unfreeze cues, two gravity drops and a slide, and every one of them is removed when the camera reaches a named path at a named frame. `obj+0x11C` is an animation phase seed. **Ported.** | `[proved]` |
 | `0x33` | `FUN_00432FF0` | 44 | **Generic scripted scenery**, eleven sub-handlers on `obj+0x11C`. Selector 1 is a path-driven vehicle (`STAGE5_SE\DRIVE_DEAD2_22.wav`), 8 the bridge collapse (`BRIDGE_CRASH1_22.wav`), 9 a car fire (`CAR_FIRE_22.wav`), 11 the **ending-branch selector** — it picks `ENDL.WAV` or `ENDS.WAV` from the player's score rank. Selector 4 is a *kickable* prop: shootable, but a hit only imparts an impulse. | `[proved]` |
@@ -412,6 +412,26 @@ never could:
 | `0x47`–`0x55` | the bosses — `boss2`–`boss6`, `b6boss1z`–`b6boss5` |
 
 `ExeTables.character_skeleton()` and `character_asset_file()` decode it.
+
+**The skeleton is not the whole character.** Two more tables add parts to it,
+and both were missing from the port until the "civilians' hair doesn't render"
+report was chased:
+
+* `g_actor_attachment_table` (`0x004EC748`) — 81 `{s32 bone; s32 slot}` records
+  named by a **per-spawn list** at `model+0x1170`. Ids below `0x24` replace a
+  bone's model with a `hito_kao_*` face; ids at or above it draw an
+  `etc_komono_*` accessory — hair, hats, bags, shoes — on top of it. 97 of the
+  game's spawns carry a list, across classes `0x10`, `0x24` and `0x25`.
+  `ExeTables.attachment_records()` decodes it. See
+  [civilians.md](civilians.md#the-face-and-the-hair-are-not-in-the-skeleton).
+* `g_pCharacterExtraParts` (`0x0052ED08`) — one or two **vertex-blended** parts
+  per character type, the waist and the skirt, deformed across four bones every
+  frame. `charbuild.extra_parts()` decodes it.
+
+A civilian's own head model is a shell open at the back: `hito_gal`'s
+`0x0EAF` has four backward-facing vertex normals out of 149, where every zombie
+head has fifteen to forty. Rendered without its attachment it is a face on a
+neck.
 
 **The cat is `[proved]`.** Class `0x53` stores character type `0x1A`, whose
 eighteen skeleton nodes all land in `cat.bin`. It spawns four times, in stage 2

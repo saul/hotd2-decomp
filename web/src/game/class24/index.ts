@@ -45,6 +45,7 @@
 import type { Rng } from "../../core/rng";
 import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import type { Actor, SetPiecePropActor } from "../actor";
+import { ActorBindPartList } from "../attachments";
 import { G } from "../globals";
 import {
   registerClass, type ClassFrame, type ClassHandler,
@@ -127,6 +128,12 @@ export function SetPieceParamsOf(a: Actor): SetPieceParams | null {
  * character type, which is what this class is.
  */
 export function SetPiecePropInit(obj: SetPiecePropActor, rng?: Rng): void {
+  // `FUN_0045EBB0(*tail)` into `model+0x1170`, then `ActorBindPartList`.
+  // Class 0x24 reads the list pointer at tail `+0x00`, not `+0x08`:
+  // `SetPiecePropInit` dereferences the descriptor directly where
+  // `CivilianInit` and `ScriptedHumanoidInit` index it by eight. Forty
+  // of the game's class-0x24 spawns carry one.
+  ActorBindPartList(obj);
   const p = SetPieceParamsOf(obj);
   obj.prop.selector = p?.selector ?? SetPieceState.Idle;
   obj.sub = 0;

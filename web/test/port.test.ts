@@ -4552,6 +4552,155 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
         `permit ${z.attackPermit}, pool ${G.g_attack_permits.join(",")}`);
 }
 
+// -- 13c. a body on the ground is not a target -------------------------------
+
+/**
+ * **`DispatchHit` (`FUN_004092F0`) is the only door into `ResolveHit`, and it
+ * is shut while `obj+0x34` bit `0x100` is up.**
+ *
+ * Reported against stage 2, block 14, step 8, op 2 — the `zsass` at descriptor
+ * `0x8094`: *"doesn't seem to die. shoot him enough, he makes a dead sound,
+ * but then he keeps on [the] player."*
+ *
+ * The port charged damage to an actor the engine refuses to resolve a hit on
+ * at all, and the window that refusal covers is exactly the window nothing is
+ * listening in: `ThrowerOnShot` (`FUN_004499A0`) returns on the same bit, so a
+ * `zsass` shot while it lay on the ground reached zero hit points with no
+ * reaction chosen. `ThrowerStateFallAndLand`'s sub 4 is a switch arm, not a
+ * fall-through from the survive test, so it then stood the corpse back up
+ * through `ThrowerStateGetUp` — dead, still inside `g_enemies_alive`, still
+ * throwing.
+ *
+ * The assertions are on the actor's own state and on the two counters, not on
+ * `dead`: a flag a layer sets about itself was true the whole time and said
+ * nothing about what the player could see.
+ */
+console.log("\na downed thrower, shot on the ground:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS31);
+  G.g_app_state = AppState.InPlay;
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_nFiringGate = 1;
+  G.g_camera_yaw_bams = 0;
+
+  const AT = 0x8094;
+  const z = ActorSpawn(AT, SpawnClass.Thrower, 0x16, "zsass", {
+    initialState: ThrowerState.StandAndDecide, condition: 0,
+  });
+  if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  z.visible = true;
+  // Deep enough that the knockdown cannot be the killing blow: what is under
+  // test is the shots that land *after* it is down.
+  z.hp = z.maxHp = 400;
+  z.pos = vec3(0, 0, 80);
+  z.yaw = 0;
+
+  const rng = new Rng(31);
+  const events = new Events();
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
+  // Bone 1, the torso: the one bone in this fixture with a damage row, so a
+  // shot that is *allowed* to resolve unmistakably moves the hit points.
+  const host = { ...NULL_HOST,
+    pickShot: () => ({ kind: "actor", at: z.at, bone: 1,
+                       point: vec3() }) as ShotPick };
+  const results: number[] = [];
+  events.on("shot.resolved", (r) => results.push(r.result ?? -1));
+
+  /** The four states class 0x31's death runs through, and nothing else. */
+  const DYING = new Set([ThrowerState.FallAndLand, ThrowerState.Death,
+                         ThrowerState.Corpse, ThrowerState.CorpseBlink]);
+  let actedWhileDead = 0;
+  let worstWhileDead = "";
+  const step = (fire: boolean): void => {
+    if (fire) QueueShotRequest(0, RAY);
+    GameUpdate(EYE, 1 / 60, host, rng, events);
+    const live = ActorByAt(AT);
+    if (live?.dead && !live.despawned && !DYING.has(live.state)) {
+      actedWhileDead += 1;
+      worstWhileDead = `${ThrowerState[live.state] ?? live.state}/${live.sub}`;
+    }
+  };
+
+  // Shoot until it is knocked off its feet and has settled: `obj+0x34` bit
+  // 0x100 goes up at the end of `ThrowerStateFallAndLand`'s sub 2.
+  let toDown = 0;
+  while (toDown < 900 && !(z.flags & ActorFlag.ShotImmune)) {
+    step(true);
+    toDown += 1;
+  }
+  check("a thrower shot enough goes down and settles",
+        (z.flags & ActorFlag.ShotImmune) !== 0 && !z.dead,
+        `${toDown} frames, state ${z.state}/${z.sub}, hp ${z.hp}`);
+
+  // Let it get as far as the get-up, sub 4, still shot-immune. **That is the
+  // sub the report lives in**: sub 4 is reached from the switch, not through
+  // sub 3's survive test, so nothing on that path ever re-reads `dead` —
+  // a thrower killed here is stood back up by its own death state.
+  let toGetUp = 0;
+  while (toGetUp < 600 && (z.flags & ActorFlag.ShotImmune)
+         && !(z.state === ThrowerState.FallAndLand && z.sub === 4)) {
+    step(false);
+    toGetUp += 1;
+  }
+  check("...lies there, and starts to get up while it is still immune",
+        z.state === ThrowerState.FallAndLand && z.sub === 4
+        && (z.flags & ActorFlag.ShotImmune) !== 0,
+        `${toGetUp} frames, state ${z.state}/${z.sub}, `
+        + `flags ${z.flags.toString(16)}`);
+
+  // ...and now the whole of it, one round from death. Standing the hit points
+  // at 1 by hand is what makes the two readings separable in one shot rather
+  // than in a hundred: the engine refuses the round outright, so it stays at
+  // 1, and the port charged it, so it went to -2 with nothing listening.
+  z.hp = 1;
+  const hpDown = z.hp;
+  const scoreDown = G.g_player_score[0];
+  results.length = 0;
+  let shotsWhileDown = 0;
+  let hpMovedWhileDown = 0;
+  for (let i = 0; i < 240 && (z.flags & ActorFlag.ShotImmune); i++) {
+    step(true);
+    shotsWhileDown += 1;
+    hpMovedWhileDown = Math.max(hpMovedWhileDown, hpDown - z.hp);
+  }
+  check("...and while it is down every round is refused by `DispatchHit`",
+        shotsWhileDown > 0 && hpMovedWhileDown === 0,
+        `${shotsWhileDown} rounds took ${hpMovedWhileDown} hp`);
+  check("...so a body on the ground cannot be killed where nothing is "
+        + "listening for the kill", !z.dead, `hp ${z.hp}, dead ${z.dead}`);
+  check("...they ricochet: result 5, and no score",
+        results.length > 0 && results.every((r) => r === HitResultCode.NoEffect)
+        && G.g_player_score[0] === scoreDown,
+        `results ${[...new Set(results)].join(",")}, `
+        + `score ${scoreDown} -> ${G.g_player_score[0]}`);
+
+  // Now stop, the way a player who has heard a death sound stops, and watch
+  // ten seconds of it. This is the whole of the report: what the viewer saw
+  // was a `zsass` that had made its noise and gone back to throwing.
+  const deadOnTheGround = z.dead;
+  for (let i = 0; i < 600; i++) step(false);
+  check("...and ten seconds later it is still not dead, because none of those "
+        + "rounds ever reached the damage tables",
+        !deadOnTheGround && !z.dead,
+        `dead ${deadOnTheGround} on the ground, ${z.dead} after`);
+
+  // Then finish it properly: on its feet, where its own on-shot routine is
+  // listening, the same rounds land and the death has somewhere to go.
+  for (let i = 0; i < 9000 && ActorByAt(AT); i++) step(true);
+
+  check("it never acts while dead — no standing, throwing or pouncing corpse",
+        actedWhileDead === 0,
+        `${actedWhileDead} frames, last in ${worstWhileDead}`);
+  check("...and it dies: gone from the pool", !ActorByAt(AT),
+        `state ${ThrowerState[z.state] ?? z.state}/${z.sub}, hp ${z.hp}`);
+  check("...out of `g_enemies_alive`", G.g_enemies_alive === 0,
+        `${G.g_enemies_alive}`);
+  check("...and out of `g_enemies_present`", G.g_enemies_present === 0,
+        `${G.g_enemies_present}`);
+}
+
 // -- 14. the collision, against real quads -----------------------------------
 
 console.log("coli/, the game's own collision:");

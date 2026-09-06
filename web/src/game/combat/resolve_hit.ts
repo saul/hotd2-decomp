@@ -379,6 +379,55 @@ const HEAD_LAUNCH_RISE = 11;
  */
 const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
 
+/**
+ * `DispatchHit` — `FUN_004092F0`. **The only caller of {@link ResolveHit} in
+ * the whole image**, and the gate on it.
+ *
+ * ```
+ * 00409336  8b4834      MOV  ECX, dword ptr [EAX + 0x34]
+ * 00409339  f6c501      TEST CH, 0x1                  ; obj+0x34 & 0x100
+ * 0040933c  750e        JNZ  0x0040934c               ; set -> past the call
+ * 0040933e  56          PUSH ESI
+ * 0040933f  e8ec000000  CALL 0x00409430               ; ResolveHit
+ * ```
+ *
+ * `[proved]`, and the "only caller" half is proved too: `ResolveHit` has
+ * exactly one xref in the image, the `CALL` above. So **an actor whose class
+ * has made it shot-immune takes no damage at all** — not reduced damage, and
+ * not a hit that is resolved and then discarded. A thrower lying on the ground
+ * or getting up, a zombie still under the water in
+ * `ZombieStateEmergeFromWater`, one frozen on a camera cue: every one of them
+ * is `obj+0x34` bit `0x100`, and the shot never reaches the damage tables.
+ *
+ * The port had the *reaction* half of this rule in three places and the damage
+ * half in none. `ThrowerOnShot` (`FUN_004499A0`) refuses to react while the
+ * bit is up, `ZombieOnShot` (`FUN_00453EB0`) likewise, and
+ * `ThrowerStateGetUp`'s doc comment said in so many words that "shots ricochet
+ * off a thrower that is getting up" — while `ResolveShotRequest` charged the
+ * damage anyway. A `zsass` knocked down and then shot on the ground therefore
+ * reached zero hit points inside the one window where nothing was listening
+ * for it: `dead` was set, the kill voice played, and its own `state 2` sub 4
+ * went on to stand it back up, because the get-up arm is reached from the
+ * switch and never re-reads `dead`. It then stood, threw and pounced as a
+ * corpse, still inside `g_enemies_alive`. See `docs/BUGS.md`.
+ *
+ * `null` is the refusal. What the engine does *instead* is still a hit — the
+ * shot marked the actor and the class's own feedback routine runs — so the
+ * caller draws the ricochet and scores nothing; see `ResolveShotRequest`.
+ *
+ * `[diverges]` The engine's routine is a loop over `g_hit_player_order` that
+ * also copies `obj+0x190+p` into `g_hit_bone[p]` and clears the per-player
+ * marks afterwards. The port's shot path is a queue resolved per request
+ * rather than per actor per frame — see `combat/shot.ts` — so the bone comes
+ * in as an argument and the marks are the request. This is the gate and the
+ * call, which is the part that decides anything.
+ */
+export function DispatchHit(obj: Actor, bone: number, cameraYawBams: number,
+                            host: GameHost, rng: Rng): HitResult | null {
+  if (obj.flags & ActorFlag.ShotImmune) return null;
+  return ResolveHit(obj, bone, cameraYawBams, host, rng);
+}
+
 export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
                            host: GameHost, rng: Rng): HitResult {
   // `00409495`: out of play, this hit does nothing visible. Raised on the

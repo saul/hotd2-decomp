@@ -82,6 +82,8 @@ export interface HudSource {
   readonly rigs: Describes;
   readonly breakables: Describes;
   readonly shooting: Describes;
+  /** `render/effects.ts` — the blood, the muzzle flash and the tracer. */
+  readonly effects: Describes;
   readonly coliDebug: Describes;
   readonly stuckDebug: Describes;
   /** `app/systems.ts`'s `GameSystem`: permits, tracking, live enemies. */
@@ -116,6 +118,7 @@ export function hudInputs(p: HudSource): HudInputs | null {
       rigs: p.rigs.describe,
       breakables: p.breakables.describe,
       shooting: p.shooting.describe,
+      effects: p.effects.describe,
       coli: p.coliDebug.describe,
       wedged: p.stuckDebug.describe,
       enemies: p.game.describe,
@@ -141,7 +144,8 @@ export interface HudInputs {
   yawBams: number;
   describe: {
     characters: string; props: string; rigs: string; breakables: string;
-    shooting: string; coli: string; wedged: string; enemies: string;
+    shooting: string; effects: string; coli: string; wedged: string;
+    enemies: string;
     shutter: string; rain: string; fog: string; light: string; sky: string;
   };
 }
@@ -235,6 +239,7 @@ export function groupRows(w: Walker, x: HudInputs):
     ],
     shooting: [
       ["shooting", d.shooting],
+      ["effects", d.effects],
     ],
   };
 }

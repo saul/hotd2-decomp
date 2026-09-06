@@ -1055,8 +1055,8 @@ console.log("\nthe shot effects are models, one per frame:");
   const layer = new EffectLayer();
   layer.adopt(root);
   check("the layer adopts one template per slot",
-        layer.describe().includes(`${slots.length} templates`),
-        layer.describe());
+        layer.describe.includes(`${slots.length} templates`),
+        layer.describe);
   check("...and takes them out of the draw",
         !root.children.some((c) => c.visible), "a template is still visible");
 
@@ -1078,7 +1078,7 @@ console.log("\nthe shot effects are models, one per frame:");
   G.g_blood_sprays.push({ id: 1, at: 0x1234, bone: 4, cel: 0, severity: 1 });
   layer.update(ctx);
   check("a spray gets a node at the first of the twenty-five models",
-        layer.describe().startsWith("1 drawn"), layer.describe());
+        layer.describe.startsWith("1 drawn"), layer.describe);
   const node = layer.viewGroup.children[0]!;
   check("...in the camera's own space, on the near face of the bone sphere",
         Math.abs(node.position.z - (-50 + 6)) < 1e-4, `${node.position.z}`);
@@ -1094,7 +1094,7 @@ console.log("\nthe shot effects are models, one per frame:");
   radius = null;
   layer.update(ctx);
   check("an unposed bone bleeds nowhere",
-        layer.describe().startsWith("0 drawn"), layer.describe());
+        layer.describe.startsWith("0 drawn"), layer.describe);
   radius = 6;
 
   // The muzzle flash rides the camera: its group carries the camera's matrix,
@@ -1138,7 +1138,7 @@ console.log("\nthe shot effects are models, one per frame:");
   t.live = false;
   layer.update(ctx);
   check("a record that has expired takes its node with it",
-        layer.describe().startsWith("0 drawn"), layer.describe());
+        layer.describe.startsWith("0 drawn"), layer.describe);
   ResetGameGlobals();
 }
 

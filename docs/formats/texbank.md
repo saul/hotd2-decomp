@@ -99,6 +99,32 @@ Measured across all 9,112 models — much narrower than the hardware allows:
 The open question from Phase 0 about where palettes live is therefore answered:
 there are none.
 
+## Two banks that overwrite a third: the blood colour
+
+`tex/scr_blood_red.bin` and `tex/scr_blood_green.bin` hold **39 textures each,
+at the same global slot ids** — 159, 160, 161 … — and `tex/common.bin` holds
+those ids too. They are not three sets of art; they are one set and two
+palettes, and the third is a copy of one of them.
+
+**[measured]** Slot 159 decodes to the same 64x64 shape in all three, with only
+the channel moved: `common` and `scr_blood_green` are alpha-weighted
+`(0, 119, 0)`, and `scr_blood_red` is `(119, 0, 0)`.
+
+So the shipped default in `common.bin` is **green**, and the red bank is the
+override the game's own **Blood Color** option loads over the same slots — the
+string is at `0x005971C4`, beside `"  Red"` and `"Green"` at `0x0056974C` and
+`0x00569752`, and the two filenames are ordinary entries in the `tex/` name
+table at `0x004D1410`.
+
+`G_ENABLE` in `Hod2.ini` is **not** this. `FUN_0049E4A0` reads it out of
+`[Flush Setting]` alongside `FLUSH_POWER`, `FLUSH_FRAME` and `SCREEN_LIGHT`, so
+it is the screen-flash setting and nothing to do with the blood.
+
+Consequence for anything that binds a bank by the owning `pol/` file: the blood
+flipbook is `pol/common.bin` slots `0x3A..0x52`, so binding `tex/common.bin`
+gives green. Red needs the override bank bound over it, which is a decision
+about which option to reproduce rather than a fact about the format.
+
 ## Non-texture entries
 
 - **Windows BMP.** 47 `tex/` files start `42 4D`; `tex/segalogor_00.bin` is

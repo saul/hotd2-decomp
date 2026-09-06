@@ -21,15 +21,15 @@ is in `tools/verify_all.py`, beside the command that runs it.
 |---|---:|---:|---|
 | `game/` | 28447 | 126 | engine |
 | `hod2lib/` | 13619 | 34 | engine |
-| `render/` | 7183 | 28 | render |
-| `app/` | 6123 | 28 | app |
+| `render/` | 7194 | 28 | render |
+| `app/` | 6128 | 28 | app |
 | `script/` | 3542 | 25 | engine |
 | `ui/` | 2861 | 26 | ui |
 | `bundle/` | 1647 | 10 | engine |
 | `core/` | 889 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **64908** | **288** | |
+| **total** | **64924** | **288** | |
 
 The largest files, which is where the pressure to split next is:
 

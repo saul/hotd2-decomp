@@ -690,6 +690,10 @@ Four things follow, and three of them were wrong in this document until
 * **It is twenty-five different models, not one texture animated.** Slots
   `0x3A..0x52` are `pol/common.bin` entries 0 to 24. There is no texture
   animation anywhere in this engine; every flipbook in it is a run of models.
+  Their **colour** is not in the models: they carry no vertex colours and a
+  white base, so it is entirely the texture's, and the game ships two banks
+  for it. See [`texbank.md`](texbank.md) — the default is green and
+  `tex/scr_blood_red.bin` is what the **Blood Color** option loads over it.
 * **The position is the hit bone's sphere, not the point the ray met the
   model.** `ShotTestBoneSphere` (`FUN_004047D0`) proves the fields: it tests
   `obj + bone * 0x90 + 0x274/+0x278/+0x27C` as a centre against the radius at

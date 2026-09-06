@@ -11890,3 +11890,48 @@ crosshair-aligned spark belongs to shootable **objects** — `SpawnPropHitSpark`
 `FUN_0043E3D0`, each on its own object's update. `ActorShotFeedback` reads the
 crosshair nowhere, so a flesh hit gets blood at the bone and no spark. The
 remaining reader, `FUN_004169C0`, is the 2D reticle sprite itself.
+
+### Follow-up — confirmed in the browser, and the blood is green on purpose
+
+*2026-09-06.* "There's still no effects showing — can you confirm in the
+browser that these are working?"
+
+They are. `web/tools/effects.mjs` loads the real page, fires real shots and
+reads the layer's own readout back: 162 templates adopted, the muzzle flash
+and the tracer on every shot, a surface impact where the script has selected
+collision, and blood on a hit that runs out on its own. Screenshots in
+`web/shots/`.
+
+Three things that cost a run each, all now handled in the harness and worth
+knowing for the next browser check:
+
+* the sidebar's groups start collapsed and a collapsed group renders no rows,
+  so there is nothing to read;
+* expanding one leaves a `<summary>` focused, and the player's shortcuts skip
+  a key when something focusable has it — so the Space meant to start playback
+  toggled the group shut instead. **The game never advanced, nothing spawned,
+  and every shot was a miss into an empty scene**, which reads exactly like
+  "the effects do not work";
+* `SpawnWorldImpact` legitimately spawns nothing where the script has selected
+  no collision. Stage 1 block 4 spends most of its time at `0 quads selected`,
+  so a volley there produces no impact at all, in the engine as here. The
+  harness reports that rather than failing on it.
+
+**The blood renders green, and that is the shipped default.**
+`tex/scr_blood_red.bin` and `tex/scr_blood_green.bin` hold 39 textures each at
+the **same global slot ids** as `tex/common.bin` — 159 upward. Slot 159
+decodes to the same 64x64 shape in all three with only the channel moved:
+`common` and `scr_blood_green` are alpha-weighted `(0, 119, 0)` and
+`scr_blood_red` is `(119, 0, 0)`. So they are one set of art and two palettes,
+and the **Blood Color** option (`0x005971C4`, beside `"  Red"` and `"Green"`)
+loads the override bank over the common one. The port binds `common.bin`,
+because that is the bank the models' own `pol/` file names, and therefore shows
+the default.
+
+`G_ENABLE` in `Hod2.ini` is not this: `FUN_0049E4A0` reads it out of
+`[Flush Setting]` beside `FLUSH_POWER` and `SCREEN_LIGHT`, so it is the screen
+flash.
+
+The layer's `describe` now names each pool separately — blood, sprites, flash,
+tracer — because "0 drawn" has three different causes with three different
+fixes, and one number could not tell them apart.

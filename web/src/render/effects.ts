@@ -305,9 +305,20 @@ export class EffectLayer implements System<RenderContext> {
     }
   }
 
-  /** What the panel says when nothing is drawn, and why. */
-  describe(): string {
+  /**
+   * What the panel says, and why it says the pool counts too.
+   *
+   * A layer that draws nothing has three possible reasons and they need
+   * different fixes: the bundle has no `slots_effect` rig (re-export), the
+   * port has spawned nothing (the effect is not wired), or records exist and
+   * no node came back (a slot outside the exported set). One line, all three.
+   */
+  get describe(): string {
     if (!this.templates.size) return "no effect models in this bundle";
-    return `${this.nodes.size} drawn, ${this.templates.size} templates`;
+    const flash = G.g_shot_flash_ring.filter((f) => f.live).length;
+    const tracer = G.g_shot_tracer_ring.filter((t) => t.live).length;
+    return `${this.nodes.size} drawn · blood ${G.g_blood_sprays.length}`
+      + `, sprites ${G.g_sprite_effects.length}, flash ${flash}`
+      + `, tracer ${tracer} · ${this.templates.size} templates`;
   }
 }

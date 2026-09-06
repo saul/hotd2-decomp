@@ -92,6 +92,7 @@ const { makeActor } = await import("../src/game/actor");
 const { SpawnClass } = await import("../src/game/spawn_class");
 const { MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS }
   = await import("../src/game/class52");
+const { T } = await import("../src/game/tables");
 const { Object3D: Obj3D, Ray, Vector3 } = await import("three");
 
 let failures = 0;
@@ -271,6 +272,70 @@ console.log("\nthe fog colour is the game's colour");
   check("the default mode is the game's planar falloff",
         new SceneFog(new Scene()).fogMode === "planar",
         new SceneFog(new Scene()).fogMode);
+}
+
+console.log("\nthe fog range is `SetFogRange`'s pair, in either order");
+
+{
+  // `SetFogRange` (`FUN_004ABDF0`) doubles both values and, when
+  // `near*2 >= far*2`, **swaps them** -- `FCOMP` / `JZ` at 0x004ABE04, the
+  // swapped arm at 0x004ABE34 writing `FOGSTART = far*2, FOGEND = near*2`.
+  // There is no on/off test anywhere in it.
+  //
+  // The port had one: `far > near`. Two things that costs, both of them
+  // things the six shipped scripts actually do:
+  //
+  //   * 40 sites set `fog_near = fog_far = 1` with a black fog colour and
+  //     then tween out of it, or tween *into* it. That is the fade every
+  //     stage opens and closes with, and a zero-width `D3DFOG_LINEAR` ramp is
+  //     a step -- everything past it is 100% fog. Fog off showed the scene.
+  //   * stage 5 blocks 7 and 9 set `near 1472, far 614`. The engine fogs
+  //     1228..2944; the port fogged nothing.
+  //
+  // Asserted on `scene.fog` -- what the renderer will actually hand the
+  // shader -- rather than on `describe`, which is a sentence about it.
+  const scene = new Scene();
+  const fog = new SceneFog(scene);
+  const drive = (near: number, far: number) => {
+    fog.update(({ walker: { fog: { near, far, rgb: [10, 10, 20] },
+                            fogSet: true } }) as unknown as
+      Parameters<InstanceType<typeof SceneFog>["update"]>[0]);
+    return scene.fog as { near: number; far: number } | null;
+  };
+
+  const ordered = drive(21, 507);
+  check("an ordered pair is doubled and kept in order",
+        ordered?.near === 42 && ordered?.far === 1014,
+        JSON.stringify(ordered));
+
+  // Stage 5 block 9 step 1, `light0_set fog_near 1472 / fog_far 614`.
+  const swapped = drive(1472, 614);
+  check("a reversed pair is swapped, not switched off",
+        swapped !== null && swapped.near === 1228 && swapped.far === 2944,
+        JSON.stringify(swapped));
+
+  // Stage 3 block 0 step 1, and 39 other sites: the fade.
+  const flat = drive(1, 1);
+  check("near == far leaves fog on, as a step at near*2",
+        flat !== null && flat.near === 2 && flat.far > 2 && flat.far < 2.001,
+        JSON.stringify(flat));
+  // `(d - near) / (far - near)` with `far == near` is `0/0` at `d == near`,
+  // and GLSL's `clamp` is not required to do anything sensible with a NaN.
+  // The hair of width is what avoids it; the result is still a step.
+  check("...and the width is a hair rather than zero, so the shader cannot NaN",
+        flat !== null && flat.far - flat.near > 0);
+
+  // A negative near is real -- six sites, down to -1306 -- and must not be
+  // mistaken for "off" either.
+  const behind = drive(-600, 1800);
+  check("a near behind the eye is a range like any other",
+        behind?.near === -1200 && behind?.far === 3600,
+        JSON.stringify(behind));
+
+  // The port's own guard, and the only one: the pre-script default stands in
+  // for the range `FUN_00460250` seeds, and must not paint the background.
+  check("the pre-script default is past the far plane and draws no fog",
+        drive(65000, 65001) === null);
 }
 
 console.log("\nthe fog blend happens in the space D3D blends in");
@@ -757,8 +822,14 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
   root.add(boatA, boatB, chrA, chrB, gore);
 
   const rigs = new RigLayer();
-  const curve = { channels: {}, file: "op_st3", index: 0, start: 0,
-                  duration: 2000 };
+  // A real position curve, because the whole question below is *whether* the
+  // layer wrote a pose: with an empty `channels` the evaluator answers
+  // `(0, 0, 0)`, which is also what a root that was never touched reads, and
+  // the two would be indistinguishable.
+  const key = (v: number) => [[0, v, 0, 0], [2000, v, 0, 0]];
+  const curve = { channels: { pos_x: key(-900), pos_y: key(-19),
+                              pos_z: key(-2190) },
+                  file: "op_st3", index: 0, start: 0, duration: 2000 };
   const paths = new CamPaths({
     fps: 60, paths: {}, object_paths: { "342": curve, "343": curve },
   } as never);
@@ -766,6 +837,20 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
 
   check("only the rigs the bundle names are claimed", rigs.count === 2,
         `${rigs.count} instances`);
+
+  // Where a rig is *before its first shot*, which is the thing the header's
+  // `[diverges]` claims and the code did not do.
+  //
+  // `Class26Subtype2Update` (`FUN_0048EAD0`) reaches its draw through
+  // `default:` on any camera path its switch does not name, and that arm
+  // writes no pose at all -- the object is wherever the spawn descriptor put
+  // it, which for every rig the six stages carry is a zero position with a
+  // zero orientation, i.e. the transform the exporter baked. The port used to
+  // place the fallback instance from its own path at frame 0 instead: stage
+  // 3's boat stood in the canal at about (-884, -17, -2136) through camera
+  // paths 121, 122 and 123, a second boat parked beside the moving one.
+  const bakedA = boatA.position.clone();
+  const bakedB = boatB.position.clone();
 
   const at = (slot: number | null) => ({
     walker: slot === null ? { cam: null } : { cam: { slot, frame: 10 } },
@@ -776,9 +861,21 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
   // each skin was forced visible -- with no game object, so no pose, so a
   // heap of parts on the origin -- and every other one was forced hidden
   // over the layer that owns it.
+  // 121 names none of this rig's routes, and nothing has selected one yet.
+  rigs.update(at(121));
+  check("before any shot selects it, a rig is drawn at its spawn pose",
+        boatA.visible && boatA.position.equals(bakedA),
+        `${boatA.position.x}, ${boatA.position.y}, ${boatA.position.z}`);
+  check("...and the un-drawn instance is not placed either",
+        boatB.position.equals(bakedB));
+
   rigs.update(at(124));
   check("...and the character hierarchies are left alone",
         !chrA.visible && !chrB.visible && !gore.visible);
+  check("the shot that does name a route places it on the path",
+        boatA.position.x === -900 && boatA.position.y === -19 + 2
+          && boatA.position.z === -2190,
+        `${boatA.position.x}, ${boatA.position.y}, ${boatA.position.z}`);
 
   check("the shot's own route is the one drawn",
         boatA.visible && !boatB.visible);
@@ -802,6 +899,12 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
   rigs.resync(at(null));
   check("with no shot at all it falls back to the first root",
         boatA.visible && !boatB.visible);
+  // ...at the spawn pose, not at whatever pose the run being rewound out of
+  // had written. `posed` is state about *how the object got here*, which is
+  // exactly what a seek must not carry across.
+  check("...and a seek puts the spawn pose back with it",
+        boatA.position.equals(bakedA),
+        `${boatA.position.x}, ${boatA.position.y}, ${boatA.position.z}`);
 }
 
 console.log("\nthe object-path seam carries six values");
@@ -1056,7 +1159,10 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
   a.hitRadius = MOUSE_HIT_RADIUS;
   a.pos = { x: 0, y: 0, z: -20 };
   G.g_object_list.push(a);
-  layer.update();
+  // The one field of `RenderContext` this layer reads, and only for class
+  // 0x25's object-path arm -- a mouse never reaches it.
+  const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
+  layer.update(ctx);
   check("a live mouse gets a node", layer.describe().startsWith("1 drawn"),
         layer.describe());
 
@@ -1086,9 +1192,104 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
   // The strip advances every frame, so the node is re-cloned; the actor
   // leaving takes its node with it.
   a.dead = true;
-  layer.update();
+  layer.update(ctx);
   check("a dead actor loses its node", layer.describe().startsWith("0 drawn"),
         layer.describe());
+  G.g_object_list.length = 0;
+}
+
+console.log("\nclass 0x25's object-path draw is under the actor, not at it:");
+{
+  // `ScriptedHumanoidDraw` (`FUN_00484FF0`) case 3: the actor draws asset slot
+  // 0x1A37 at `CamEvalObjectPath6(obj+0x135C, g_cam_path_frame)` -- the same
+  // path and the same frame it is riding itself. Stage 3's opening is two
+  // class-0x25 passengers on `op_st3` 340 and this, and with the arm missing
+  // the pair sailed the canal sitting on the water.
+  //
+  // The point of the assertion is the **placement**, not the count: the actor
+  // has `g_class25_path_offsets` record 4 added to its own position, so a
+  // model drawn at `a.pos` would be up in the passenger's seat and a model
+  // drawn at the path pose is under both of them. Those are eight units
+  // apart, which is the whole bug in miniature.
+  const { HUMANOID_VARIANT3_SLOT } = await import("../src/game/class25/state");
+  const { CamPaths } = await import("../src/game/camera/curve");
+  const { ScriptedHumanoidInit } = await import("../src/game/class25");
+
+  const root = new Obj3D();
+  const part = new Obj3D();
+  part.name = `slots_actor_fixed000_slot_${HUMANOID_VARIANT3_SLOT.toString(16)}`;
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+  root.add(part);
+
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+
+  const key = (v: number) => [[0, v, 0, 0], [200, v, 0, 0]];
+  const paths = new CamPaths({
+    fps: 60, paths: {},
+    object_paths: {
+      "340": {
+        file: "op_st3", index: 0, start: 0, duration: 200,
+        channels: { pos_x: key(-160), pos_y: key(-16), pos_z: key(-2172),
+                    rot_x: key(0), rot_y: key(0x4000), rot_z: key(0) },
+      },
+    },
+  } as never);
+  const ctx = { paths } as unknown as Parameters<typeof layer.update>[0];
+
+  // Stage 3's own variant-3 spawn, by script address.
+  const a = makeActor(4128, SpawnClass.ScriptedHumanoid, -1, "rider");
+  if (a.cls !== SpawnClass.ScriptedHumanoid) throw new Error("not class 0x25");
+  a.hum.pathSlot = 340;
+  // Where the *actor* is: the path pose plus offset record 4's
+  // `(4.62, -8.0, 1.42)`, which is the seat. Nothing may draw the boat here.
+  a.pos = { x: -155.4, y: -24, z: -2170.6 };
+  G.g_object_list.push(a);
+  G.g_cam_path_frame = 100;
+
+  // Variant 0 -- 129 of the 137 spawns -- draws nothing at all. The renderer
+  // reads it off the actor, where `ScriptedHumanoidInit` cached the
+  // descriptor word; the program is here because that is where the Init gets
+  // it from.
+  T.humanoids = { "4128": { charType: 59, removePath: 124, removeFrame: 0,
+                            flags2: 1, motion: 717, phase: 0, cmds: [] } };
+  ScriptedHumanoidInit(a);
+  a.hum.pathSlot = 340;
+  layer.update(ctx);
+  check("a class-0x25 actor with no draw variant draws nothing",
+        layer.describe().startsWith("0 drawn"), layer.describe());
+
+  // ...and a bundle written before the field existed reads as variant 0
+  // rather than as a missing model.
+  T.humanoids["4128"].drawVariant = 3;
+  ScriptedHumanoidInit(a);
+  a.hum.pathSlot = 340;
+  layer.update(ctx);
+  check("variant 3 draws the object-path model",
+        layer.describe().startsWith("1 drawn"), layer.describe());
+  check("...at the path pose and not at the actor",
+        layer.describe().includes("at -160.0, -16.0, -2172.0"),
+        layer.describe());
+
+  // The frame is `g_cam_path_frame`, raw: the same clock the passengers ride,
+  // which is what keeps the two together without either knowing about the
+  // other.
+  G.g_cam_path_frame = 150;
+  layer.update(ctx);
+  check("...and it follows the camera path frame",
+        layer.describe().includes("at -160.0, -16.0, -2172.0"),
+        layer.describe());
+
+  // A slot the bundle has no curve for is a model with nowhere to go. Hidden
+  // beats parked at the origin, which is a thing somebody has to explain.
+  a.hum.pathSlot = 999;
+  layer.update(ctx);
+  check("a path the bundle does not carry hides the model rather than "
+        + "dropping it at the origin",
+        !layer.describe().includes(" at "), layer.describe());
+
+  T.humanoids = null;
   G.g_object_list.length = 0;
 }
 

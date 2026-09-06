@@ -47,6 +47,7 @@ import {
   registerClass, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { HumanoidDrawVariant } from "./state";
 import { T } from "../tables";
 import { VecToAngles } from "../vec";
 
@@ -167,6 +168,19 @@ export interface HumanoidProgram {
   charType: number;
   removePath: number;
   removeFrame: number;
+  /**
+   * `desc + 0x2A` — the decoration selector `ScriptedHumanoidDraw`
+   * (`FUN_00484FF0`) switches on, `*(int16*)(obj+0x1390 + 6)`.
+   *
+   * No arm of the VM reads it — it is a draw-time field. `ScriptedHumanoidInit`
+   * copies it onto the actor as `HumanoidTail.drawVariant`, which is where the
+   * renderer reads it and where the reason for the copy is written down. Zero
+   * for 129 of the six stages' 137 spawns.
+   *
+   * Optional because a bundle written before it existed has no such field,
+   * and absent reads as the "draws nothing" case.
+   */
+  drawVariant?: number;
   flags2: number;
   motion: number;
   phase: number;
@@ -175,6 +189,7 @@ export interface HumanoidProgram {
 
 /** `obj+0x34` bit that swaps the removal trigger, as for class 0x24. */
 export const HUMANOID_FLAG_REMOVE_ON_SCRIPT_FLAG = 0x2000000;
+
 
 // -- exe `.rdata`, not the bundle ------------------------------------------
 //
@@ -277,6 +292,11 @@ export function ScriptedHumanoidInit(obj: HumanoidActor): void {
   obj.hum.pathSlot = -1;
   obj.hum.pathMode = 0;
   obj.hum.pathOffsetRecord = 0;
+  // [port-only] The descriptor word `desc + 0x2A`, cached on the actor. The
+  // engine re-reads it in `ScriptedHumanoidDraw` (`FUN_00484FF0`) every draw
+  // and it cannot change; see {@link HumanoidTail.drawVariant} for why the
+  // port keeps a copy instead.
+  obj.hum.drawVariant = p?.drawVariant ?? HumanoidDrawVariant.None;
   obj.hum.boneDecoration = 0;
   obj.hum.bonePropFrame = 0;
   // `MOVSX ECX, word ptr [EDI + 0x60]` (= `obj+0x1F4`), `CMP ECX,0x39 / JL /

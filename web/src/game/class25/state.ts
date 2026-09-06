@@ -31,6 +31,50 @@
 import type { Vec3 } from "../vec";
 import type { ListCursor } from "../actor";
 
+/**
+ * `ScriptedHumanoidDraw` (`FUN_00484FF0`)'s switch on the **descriptor** word
+ * `desc + 0x2A` — `*(int16*)(obj+0x1390 + 6)` — which picks a second model
+ * the actor draws in world space beside its own skeleton.
+ *
+ * The arms themselves are the renderer's — `render/slotmodels.ts` — and the
+ * set is here because the exe switches on it.
+ *
+ * This file is where it lives rather than `index.ts` because `index.ts`
+ * registers a class handler at module scope, and `hod2lib/bundle.ts` needs
+ * {@link HUMANOID_VARIANT3_SLOT} without acquiring that side effect.
+ */
+export enum HumanoidDrawVariant {
+  /** No second model. 129 of the six stages' 137 class-0x25 spawns. */
+  None = 0,
+  /** A point the routine hardcodes: `(-1367.0, -17.0, -1845.3)`, yaw `0x8000`. */
+  FixedPointA = 1,
+  /** A second hardcoded point: `(214.0, -17.0, -2172.0)`, yaw `0xAAAA`. */
+  FixedPointB = 2,
+  /**
+   * `CamEvalObjectPath6(obj+0x135C, g_cam_path_frame)` — the same object path
+   * and the same frame the actor itself rides, so the model is under it by
+   * construction. Two spawns, both stage 3.
+   */
+  OnObjectPath = 3,
+  /**
+   * `(-636.0, 43.35, -952.0)` with `rotX 0xC000`, and **only** while
+   * `g_active_cam_path == 0x93`. One spawn, stage 3.
+   */
+  FixedPointOnCamPath = 4,
+}
+
+/**
+ * The asset slot {@link HumanoidDrawVariant.OnObjectPath} draws —
+ * `AssetDrawSlot(0x1a37)`, the same slot variants 1 and 2 draw at their fixed
+ * points and the same slot `Class26Subtype2Update` (`FUN_0048EAD0`) draws.
+ *
+ * `asset_slots()` resolves it to `etc_1_05.bin` entry 0, a filename with no
+ * word in it, so **what the model is stays `[open]`**. What is `[proved]` is
+ * that stage 3's variant-3 spawn (script address 4128) and its two class-0x25
+ * passengers all ride `op_st3` path 340, so whatever it is, they are on it.
+ */
+export const HUMANOID_VARIANT3_SLOT = 0x1a37;
+
 /** `op 11`'s mode, `obj+0x1358`. Modes above 2 write nothing at all. */
 export enum HumanoidPath {
   /** Not riding a path. */
@@ -84,6 +128,23 @@ export interface HumanoidTail {
    * `0x00484B77`–`0x00484B89`.
    */
   pathOffsetRecord: number;   // +0x1360
+  /**
+   * {@link HumanoidDrawVariant}, from the descriptor word `desc + 0x2A`.
+   *
+   * **The engine has no such field.** `ScriptedHumanoidDraw` reads
+   * `*(int16*)(obj+0x1390 + 6)` fresh on every draw, and `obj+0x1390` is
+   * written once by the spawn — so the value cannot change and caching it is
+   * exact rather than an approximation. It is cached because the *renderer*
+   * is the half that needs it, and `tools/verify_layers.py`'s
+   * `render-drives-the-port` rule says a render layer may not call into
+   * `game/` to ask: `render/slotmodels.ts` reads `a.hum.drawVariant` the same
+   * way it reads `a.mouse.frame`, which is a field and not a decision.
+   *
+   * `ScriptedHumanoidInit` (`FUN_004840D0`) fills it from the bundle's
+   * program record. Zero — "draws nothing" — for 129 of the six stages' 137
+   * class-0x25 spawns, and for any actor whose program the bundle has lost.
+   */
+  drawVariant: HumanoidDrawVariant;
   /**
    * `obj+0x1330` — `op 14`, and it **is** a draw mode: which of the
    * character's hand props the per-bone hook draws.
@@ -164,6 +225,7 @@ export function makeHumanoidTail(): HumanoidTail {
     pathMode: HumanoidPath.None,
     pathSlot: 0,
     pathOffsetRecord: 0,
+    drawVariant: HumanoidDrawVariant.None,
     bonePropMode: 0,
     bonePropFrame: 0,
     boneDecoration: 0,

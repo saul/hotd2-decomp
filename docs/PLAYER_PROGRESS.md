@@ -827,10 +827,24 @@ that cycle their model every frame.
   `op_st1` 2's `rot_y` to eleven and a half turns and walked the car through the
   camera.
 
-`obj_484ff0_props` is transcribed but deliberately **not placed**: the variant
-that selects which prop is drawn comes from a pointer that is not the spawn
-descriptor, so there is nothing to place it against yet. The bundle carries
-the reason and the player shows it rather than guessing.
+`obj_484ff0_props` is transcribed but its **path-driven variant is not a rig
+at all.** The variant is `desc + 0x2A`, and `ScriptedHumanoidDraw`
+(`FUN_00484FF0`) draws four different things by it: three at points the
+routine hardcodes, which the rig writer exports as fixed parts, and one —
+variant 3 — at `CamEvalObjectPath6(obj+0x135C, g_cam_path_frame)`, the object
+path the class-0x25 actor is *itself* riding. No static placement can express
+that, so it goes through `slots_actor` and `render/slotmodels.ts` places it per
+live actor instead. Stage 3's opening is what it is for: the boat under the two
+passengers, on the same curve at the same frame as they are, which is how the
+engine keeps a rider on a vehicle without any parent field anywhere.
+
+**A rig no shot has selected yet is at its spawn pose, not at path frame 0.**
+`Class26Subtype2Update` (`FUN_0048EAD0`) reaches its draw through `default:`
+on every camera path its switch does not name, and that arm writes no pose —
+the object stays wherever the spawn descriptor put it, which for every rig the
+six stages carry is the origin. `RigLayer` used to evaluate the path at frame 0
+for the fallback instance, which put stage 3's boat in the canal, parked, for
+the whole opening while a second boat sailed past it.
 
 ## Which instructions the UI strikes through
 

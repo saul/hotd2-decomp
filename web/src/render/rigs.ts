@@ -42,7 +42,8 @@
  * matches the current camera path, or — when none does — the one that was
  * last active, held in the pose it last wrote.
  *
- * **A rig outside its table does not disappear.** `FUN_0048EAD0`'s
+ * **A rig outside its table does not disappear.**
+ * `Class26Subtype2Update` (`FUN_0048EAD0`)'s
  * `switch (g_active_cam_path)` has a `default:` that jumps *past* the whole
  * `CamEvalObjectPath6`/`obj+0x40` block straight to `MatrixStackPush(0)`, so
  * a camera path the routine does not name skips the pose and **still draws**
@@ -63,6 +64,17 @@
  * the bundle links a rig to its descriptor. For the rigs the six stages carry
  * the two agree on *where* — each is spawned at a zero position with a zero
  * orientation, which is the baked pose — so what diverges is the timing.
+ *
+ * **That paragraph described the intent and not the code**, and the gap was a
+ * visible object. `update` placed the fallback instance from its path at
+ * frame 0 whether or not a shot had ever selected it, so stage 3's boat
+ * (`Class26Subtype2Update` — `FUN_0048EAD0`, class 0x26 subtype 2) stood
+ * parked on `op_st3` 342 at frame 0, at about (−920, −19, −2191), for the
+ * whole canal opening. The engine's `default:` arm writes no pose at all, and
+ * that spawn's descriptor — stage 3 block 0 step 2, script address 3244 — is
+ * `(0, 0, 0)` with a zero orientation, so the engine has it at the origin,
+ * out of every one of those shots. `Instance.posed` is the fix: no `place`
+ * until a shot has selected the route.
  *
  * `FUN_004522A0`'s despawn is `g_script_flags[0] == 1`, i.e. evt
  * `set_script_flag 0`. That is this routine's rule and not a general one, so
@@ -107,6 +119,17 @@ interface Part {
 
 interface Instance {
   root: Object3D;
+  /**
+   * The root transform the exporter baked, kept so `resync` can put it back.
+   *
+   * A seek can land before the first shot that ever selects this instance's
+   * route, and at that point the object is back to its spawn pose. Without
+   * these the root would keep whatever pose the run being rewound out of had
+   * left on it, which is exactly the "how the object got here" state the
+   * `resync` note below is about.
+   */
+  bakedPos: Vector3;
+  bakedQuat: Quaternion;
   rig: string;
   /** `rig_part` descendants carrying a rule the player can act on. */
   parts: Part[];
@@ -127,6 +150,15 @@ interface Instance {
   frozen: boolean;
   /** The frame this instance is posed at. */
   frame: number;
+  /**
+   * Has a shot ever selected this instance's route?
+   *
+   * Until one has, the routine's `default:` arm is what runs and the object
+   * draws at the pose the **spawn** left in `obj+0x40`..`obj+0x6C` — so this
+   * layer must not write a pose at all. See the `[diverges]` at the top of
+   * the file for why the baked root pose is that pose.
+   */
+  posed: boolean;
 }
 
 /** All the roots belonging to one object, across its routes. */
@@ -150,6 +182,9 @@ function bamsEuler(rx: number, ry: number, rz: number, out: Euler): Euler {
 }
 
 const NO_RIGS: ReadonlySet<string> = new Set();
+
+/** How many showing instances {@link RigLayer.describe} names a pose for. */
+const DESCRIBE_POSES = 4;
 
 export class RigLayer implements System {
   readonly id = "render.rigs";
@@ -263,6 +298,8 @@ export class RigLayer implements System {
       });
       this.instances.push({
         root: o,
+        bakedPos: o.position.clone(),
+        bakedQuat: o.quaternion.clone(),
         rig: x.hod2_rig ?? "?",
         parts,
         routes,
@@ -273,6 +310,7 @@ export class RigLayer implements System {
           ? [] : routes.flatMap((r) => r.cam_paths),
         frozen: false,
         frame: 0,
+        posed: false,
       });
     });
 
@@ -323,6 +361,11 @@ export class RigLayer implements System {
       // it last wrote, so the instance that was showing keeps showing. Before
       // any shot has ever selected one, that is the first root, at the pose
       // the exporter baked -- see the `[diverges]` at the top of this file.
+      // `posed` is what keeps that true: without it the fallback root was
+      // placed from its *path* at frame 0, which is a pose the object never
+      // holds. Stage 3's boat sat parked at `op_st3` 342 frame 0 -- in the
+      // canal, a hundred units off the shot -- for the whole of the opening,
+      // while the engine had it at the origin where its descriptor put it.
       const show: Instance | null =
         selected ?? actor.showing ?? actor.instances[0] ?? null;
 
@@ -334,6 +377,7 @@ export class RigLayer implements System {
 
       // A selected route re-samples; a held one keeps the frame it stopped at.
       if (show === selected) {
+        show.posed = true;
         // Pick which of this slot's routes the current shot selects. An
         // ungated route is the fallback, then the first route at all, so a
         // slot with a single route behaves exactly as before.
@@ -362,7 +406,9 @@ export class RigLayer implements System {
           show.frame = Math.min(end, camFrame);
         }
       }
-      this.place(show, show.frame);
+      // Only once a shot has written a pose. Until then the root keeps the
+      // transform the exporter baked, which is the spawn descriptor's.
+      if (show.posed) this.place(show, show.frame);
       this.applyPartRules(show, camSlot, camFrame);
     }
     this.outline();
@@ -420,6 +466,12 @@ export class RigLayer implements System {
       inst.frozen = false;
       inst.frame = 0;
       inst.route = inst.routes[0] ?? null;
+      // `posed` is the third piece of that state, and the root transform is
+      // the visible half of it: back to the spawn pose, which is the baked
+      // one, until a shot writes over it again.
+      inst.posed = false;
+      inst.root.position.copy(inst.bakedPos);
+      inst.root.quaternion.copy(inst.bakedQuat);
     }
     for (const actor of this.actors) actor.showing = null;
     this.update(ctx);
@@ -487,14 +539,35 @@ export class RigLayer implements System {
                 this._e));
   }
 
+  /**
+   * The one-line readout, and it names **where** the showing instances are.
+   *
+   * A count and a list of names cannot answer the question this layer keeps
+   * getting wrong, which is not "is it drawn" but "is it drawn *there*":
+   * stage 3's boat was visible, on its own route, at a pose the object never
+   * holds. `posed` is in the line for the same reason — an instance the
+   * script has not selected yet is at its spawn pose, and that is a different
+   * statement from being at path frame 0.
+   *
+   * Capped, because stage 2 shows a dozen at once and this is one row of a
+   * sidebar.
+   */
   get describe(): string {
     if (!this.instances.length) return "—";
     const live = this.instances.filter((i) => i.root.visible);
     const names = [...new Set(live.map((i) => i.rig))].join(", ");
     const frozen = live.filter((i) => i.frozen).length;
+    const where = live.slice(0, DESCRIBE_POSES).map((i) => {
+      const p = i.root.position;
+      return `${i.rig} ${i.posed ? "at" : "unposed at"} `
+           + `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
+    });
     return `${live.length}/${this.instances.length}` +
       (names ? ` ${names}` : "") +
-      (frozen ? ` (${frozen} at path end, pose held)` : "");
+      (frozen ? ` (${frozen} at path end, pose held)` : "") +
+      (where.length ? ` — ${where.join("; ")}` : "") +
+      (live.length > DESCRIBE_POSES
+        ? `; +${live.length - DESCRIBE_POSES} more` : "");
   }
 
   /**

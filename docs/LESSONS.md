@@ -195,3 +195,38 @@ written to a file and looked at. When a check is about something visual, the
 first version of it should be your own eyes on the artifact; the automated one
 comes second, and has to be able to fail the thing you just saw.
 
+
+**L26 -- A `[diverges]` note describes what somebody meant, and only a check
+says what the code does.** `render/rigs.ts` carried a careful paragraph saying
+that before the first shot selects a route the port "draws the exporter's baked
+root pose", with the measurement showing that pose and the descriptor's agree
+for every rig in the six stages. The code placed the fallback instance from its
+`op_` path at frame 0 instead, which is a pose the object never holds: stage 3's
+boat stood parked in the canal, a hundred units off the shot, for the whole
+opening. The note was the *reason it was never looked at* -- it read as though
+the case had been thought about and settled. A divergence declared in prose and
+not pinned by an assertion is a claim with an alibi; the fix here was one line
+of code and three new checks, and the checks are the half that will still be
+true next year.
+
+**L27 -- An on/off test the engine does not have is a divergence nobody
+declared.** `SetFogRange` (`FUN_004ABDF0`) doubles its two arguments, swaps them
+when `near*2 >= far*2`, and pushes them. That is the whole routine: there is no
+"is fog enabled" anywhere in it. `render/fog.ts` had invented one -- `far >
+near` -- and it was invisible because the *ordinary* case passes it. What it
+broke was the two cases that look degenerate and are not: `near == far` is the
+zero-width ramp every stage's fade to black is made of (40 sites), and `near >
+far` is a real band drawn between `far*2` and `near*2` (stage 5, blocks 7 and
+9). **A guard added because a value pair "looks wrong" is a claim about the
+data**, and this one was wrong about 40 sites in the shipped scripts. Scan the
+shipped data for the values the guard would reject before writing it.
+
+**L28 -- A worktree agent has to check where a repo tool wrote.** Two
+`annotate.py` calls were made with a `cd` to the shared checkout in front of
+them, so the rows landed in the user's tree and not in the branch that cited
+them. Nothing said so: `annotate.py` printed `added`, `verify_annotations`
+passed against the file it had just written, and the mistake only surfaced when
+`verify_port` failed on a citation whose TSV row "did not exist". The shared
+tree then had two uncommitted rows in a file two workstreams write. Check the
+diff in *your* tree after any tool that writes one, and check that the shared
+one is unchanged.

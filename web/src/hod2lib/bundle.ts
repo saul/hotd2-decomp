@@ -960,6 +960,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const act = await actorSlotEntry(
     stage, spawnRecords.map((r) => r.cls), cache);
   const eff = await effectSlotEntry(stage, cache);
+  // Which materials draw blood, so the client can offer the colour the game's
+  // own option offers. See `bloodTexturePredicate`.
+  const isBloodTexture = bloodTexturePredicate(tables);
   const info = await gltf.exportLevel(name, parts, outDir, sink, deflate, {
     rigs: [...rigData, ...charEntries, ...propEntries,
            ...(brk ? [brk] : []), ...(act ? [act] : []),
@@ -969,6 +972,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     unlit: opts.unlit ?? true,
     modelRegions,
     glb,
+    isBloodTexture,
   });
 
   say(`  ${name}: camera paths`);
@@ -1103,3 +1107,40 @@ export async function writeManifest(
   await sink.write("manifest.json", dumpsIndented(doc));
   return "manifest.json";
 }
+
+/**
+ * Which `(pol stem, texture id)` pairs are **blood**.
+ *
+ * `tex/scr_blood_red.bin` and `tex/scr_blood_green.bin` hold 39 images each at
+ * the same **global** texture slots — 159 upward — as the ordinary banks that
+ * ship them, and the game's Blood Color option loads one bank over the other.
+ * So "is this blood" is a question about the global slot a bank entry carries
+ * at `+0x0C`, not about the file the model came from: 27 `pol/` files have
+ * some, and most of them are the gore parts a zombie swaps in when it is shot
+ * rather than the spray itself.
+ *
+ * Returns a predicate that answers false for everything when the exe tables
+ * have no blood bank, which is what a fixture without them needs.
+ */
+export function bloodTexturePredicate(tables: ExeTables):
+    (part: string, texId: number) => boolean {
+  const slots = new Set(tables.entries(BLOOD_BANK).map((e) => e.slot));
+  if (!slots.size) return () => false;
+  // Per bank, the per-bank texture id -> is its global slot a blood one. Built
+  // lazily: a stage touches a couple of dozen banks out of 494.
+  const byBank = new Map<string, Set<number>>();
+  return (part, texId) => {
+    let ids = byBank.get(part);
+    if (!ids) {
+      ids = new Set<number>();
+      for (const e of tables.entries(part)) {
+        if (slots.has(e.slot)) ids.add(e.index);
+      }
+      byBank.set(part, ids);
+    }
+    return ids.has(texId);
+  };
+}
+
+/** The bank whose global slots define what counts as blood. */
+export const BLOOD_BANK = "scr_blood_red";

@@ -1099,12 +1099,22 @@ console.log("\nthe shot effects are models, one per frame:");
 
   // The muzzle flash rides the camera: its group carries the camera's matrix,
   // so the record's own numbers stay camera-space and it stays on the gun.
+  //
+  // It is **off by default** -- it sits under the crosshair because a light
+  // gun wanted something bright at the aim point, and this player has a mouse
+  // -- so the toggle has to be on for any of this to draw. The port spawns the
+  // records either way, which is what the count below checks.
   G.g_blood_sprays.length = 0;
   const f = G.g_shot_flash_ring[0]!;
   f.live = true;
   f.player = 0;
   f.frame = 0;
   f.pos = { x: 0.1, y: -0.2, z: -1 };
+  layer.update(ctx);
+  check("a live muzzle record draws nothing while the toggle is off",
+        layer.viewGroup.children.length === 0
+        && /flash 0/.test(layer.describe), layer.describe);
+  layer.setMuzzle(true);
   layer.update(ctx);
   check("the flash's second draw compounds onto the first, not over it",
         Math.abs(FLASH_SMOKE_SCALE - 0.05) < 1e-9

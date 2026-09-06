@@ -111,6 +111,9 @@ export async function loadStageInto(p: Player): Promise<void> {
   // exist once the glTF is parsed, and the per-mesh sampler it carries is
   // what the `asset` mode puts back.
   p.texFilter.prepare(p.scene3d.root);
+  // The same moment and the same reason: the materials only exist once the
+  // glTF has been parsed, and this one walks them for the blood marking.
+  p.bloodColour.prepare(p.scene3d.root);
   // Adopt the dome models before lighting, so its material swap sees the
   // clones the backdrop made rather than the shared originals.
   p.backdrop.build(p.scene3d.root, p.ctx.scope,

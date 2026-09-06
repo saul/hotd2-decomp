@@ -655,6 +655,20 @@ export interface ExportOptions {
   modelRegions?: Map<string, ModelRegionInfo> | null;
   foldMirrorUv?: boolean;
   glb?: boolean;
+  /**
+   * Is this `(pol stem, texture id)` one of the game's **blood** textures?
+   *
+   * `tex/scr_blood_red.bin` and `tex/scr_blood_green.bin` hold the same 39
+   * images at the same global texture slots as the banks that ship them, and
+   * the game's own Blood Color option loads one over the other. A material
+   * that draws one of those slots is therefore recolourable, and is marked
+   * `extras.hod2_blood` so the client can offer the choice. See
+   * `docs/formats/texbank.md`.
+   *
+   * Absent means "mark nothing", which is what a caller with no exe tables
+   * has to do.
+   */
+  isBloodTexture?: (part: string, texId: number) => boolean;
 }
 
 export interface ExportInfo {
@@ -839,6 +853,10 @@ export async function exportLevel(
       pbrMetallicRoughness: pbr,
       doubleSided: mesh.doubleSided,
     };
+    // Blood, and therefore recolourable at run time -- the flipbook, the gore
+    // stumps every zombie swaps in, and the decals. 27 pol files carry some.
+    const blood = mesh.textured
+      && (opts.isBloodTexture?.(part, mesh.textureId) ?? false);
 
     // Alpha mode follows the PowerVR2 *list type*, which is what selects the
     // hardware's blending pass. It must not depend on the TSP UseAlpha bit:
@@ -859,6 +877,7 @@ export async function exportLevel(
       `0x${(v >>> 0).toString(16).toUpperCase().padStart(8, "0")}`;
     // Raw hardware state, so a target engine can be exact.
     mat.extras = {
+      ...(blood ? { hod2_blood: true } : {}),
       pvr2: {
         texture_id: mesh.textureId,
         parameter_control: hex8(mesh.parameterControl),

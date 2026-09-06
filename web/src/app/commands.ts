@@ -31,7 +31,9 @@ import type { Snapshot } from "../core/snapshot";
 import { ActorKillAll } from "../game/combat/resolve_hit";
 import type { Bgm } from "../audio/bgm";
 import type { Backdrop } from "../render/backdrop";
+import type { BloodColourLayer } from "../render/bloodcolour";
 import type { BreakableLayer } from "../render/breakables";
+import type { EffectLayer } from "../render/effects";
 import type { CameraRig } from "../render/camera";
 import type { CharacterLayer } from "../render/characters";
 import type { ColiDebugLayer } from "../render/coli_debug";
@@ -104,6 +106,10 @@ export interface PlayerCommands {
   readonly chars: CharacterLayer;
   readonly props: PropLayer;
   readonly breakables: BreakableLayer;
+  /** The shot effects, for the muzzle-flash toggle. */
+  readonly effects: EffectLayer;
+  /** Red or green blood — the game's own option. */
+  readonly bloodColour: BloodColourLayer;
   readonly spawns: SpawnLayer;
   readonly shooting: Shooting;
   readonly debug: DebugBoxLayer;
@@ -334,5 +340,10 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     case "shoot":
       p.shooting.setEnabled(on, p.camera, p.scene);
       return;
+    // Both of these are about what is *drawn*, not about what the game does:
+    // the port spawns the same records and marks the same materials either
+    // way, so neither changes a snapshot.
+    case "muzzle":       p.effects.setMuzzle(on); return;
+    case "redBlood":     p.bloodColour.setColour(on ? "red" : "green"); return;
   }
 }

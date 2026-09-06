@@ -93,6 +93,7 @@ import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
+import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { ResetPropContainers } from "../game/class41";
@@ -174,6 +175,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * whose matrix is the camera's.
    */
   readonly effects = new EffectLayer();
+  /**
+   * Red blood or green — the game's own Blood Color option, offered where the
+   * player can reach it. See `render/bloodcolour.ts`.
+   */
+  readonly bloodColour = new BloodColourLayer();
   readonly shooting: Shooting;
   /** The `coli/` overlay — see `render/coli_debug.ts`. */
   readonly coliDebug = new ColiDebugLayer();

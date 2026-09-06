@@ -11935,3 +11935,45 @@ flash.
 The layer's `describe` now names each pool separately — blood, sprites, flash,
 tracer — because "0 drawn" has three different causes with three different
 fixes, and one number could not tell them apart.
+
+### Follow-up — two settings the game already had
+
+*2026-09-06.* "We can disable the flashes by default... it's for the lightgun
+that we don't have here." And: "add a checkbox for blood colour too, and use
+the red blood everywhere where it can be used."
+
+Both are **display** choices, so both live in `render/` and neither touches
+the port: the same ring records are spawned and the same materials are marked
+whichever way they are set, and a snapshot is identical either way.
+
+**Muzzle flash, off by default.** `EffectLayer` gates the flash ring and the
+Original Mode weapon ring on a toggle. The observation behind it is right: the
+flash is drawn at `(crosshair / proj, -1)` in camera space, which projects
+back to the crosshair pixel exactly, so it sits *under the aim point* rather
+than at a gun. That is a cabinet affordance, and with a mouse it covers what
+you are shooting.
+
+**Red blood, everywhere.** The marking is per **material**, not per effect,
+which is what makes "everywhere" true: the blood banks' global texture slots
+appear in **27 `pol/` files**, and most of the 153 marked materials in stage 1
+are not the spray at all — they are the gore parts a zombie swaps in when a
+limb comes off, and the decals. A setting that recoloured only the flipbook
+would leave green stumps on a red corpse.
+
+`bloodTexturePredicate` in the exporter answers it from the global slot at a
+bank entry's `+0x0C`, so it needs no list of files, and `gltf.ts` writes
+`extras.hod2_blood` on the material. `render/bloodcolour.ts` swaps the two
+channels in the fragment shader for the marked materials.
+
+**[measured]** that swap is faithful: 27 of the 39 blood textures are an exact
+`R <-> G` transposition of each other byte for byte, and the other twelve
+differ only in a few units of blue on the green side — `(131, 0, 0)` against
+`(0, 131, 8)` on the worst texel of the worst one. Carrying both banks would
+be exact and would double the blood images; it is `[diverges]` in
+`render/bloodcolour.ts`, and the marking is already per-material if that ever
+becomes worth doing.
+
+One thing worth keeping: `customProgramCacheKey` has to change with the swap.
+three.js caches compiled programs across materials, and two materials that
+differ only in an `onBeforeCompile` string share a program without it — so the
+first blood material to compile decides the colour for all 153.

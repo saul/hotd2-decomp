@@ -81,6 +81,17 @@ export class EffectLayer implements System<RenderContext> {
   /** Set from `app/`, the way `CharacterLayer.breakables` is. */
   bones: BoneSphereSource | null = null;
 
+  /**
+   * Draw the muzzle flash?
+   *
+   * Off by default, and the reason is what the flash is **for**: it sits
+   * under the crosshair rather than at a gun, because the cabinet's light gun
+   * wanted something bright at the aim point. With a mouse it is a bright
+   * shape over the thing you are shooting and buys nothing. The port spawns
+   * the ring records either way -- this decides only whether they are drawn,
+   * so a snapshot is identical with it on or off.
+   */
+  private muzzle = false;
   private readonly templates = new Map<number, Object3D>();
   private readonly nodes = new Map<string, Live>();
   private enabled = true;
@@ -125,6 +136,12 @@ export class EffectLayer implements System<RenderContext> {
       this.nodes.clear();
     });
   }
+
+  setMuzzle(v: boolean): void {
+    this.muzzle = v;
+  }
+
+  get muzzleOn(): boolean { return this.muzzle; }
 
   setEnabled(v: boolean): void {
     this.enabled = v;
@@ -247,7 +264,7 @@ export class EffectLayer implements System<RenderContext> {
   private drawShotRings(seen: Set<string>): void {
     for (let i = 0; i < SHOT_EFFECT_RING * 2; i++) {
       const f = G.g_shot_flash_ring[i];
-      if (f?.live && f.kind !== OriginalWeaponKind.Silent) {
+      if (this.muzzle && f?.live && f.kind !== OriginalWeaponKind.Silent) {
         const base = MUZZLE_FLASH_SLOTS[f.player] ?? MUZZLE_FLASH_SLOTS[0];
         const key = `f${i}`;
         const node = this.node(key, base + f.frame, this.viewGroup);
@@ -290,7 +307,7 @@ export class EffectLayer implements System<RenderContext> {
       }
 
       const w = G.g_shot_weapon_ring[i];
-      if (w?.live && w.kind === OriginalWeaponKind.Heavy) {
+      if (this.muzzle && w?.live && w.kind === OriginalWeaponKind.Heavy) {
         const key = `w${i}`;
         const node = this.node(key, WEAPON_FIRST_SLOT + w.frame,
                                this.viewGroup);
@@ -315,7 +332,8 @@ export class EffectLayer implements System<RenderContext> {
    */
   get describe(): string {
     if (!this.templates.size) return "no effect models in this bundle";
-    const flash = G.g_shot_flash_ring.filter((f) => f.live).length;
+    const flash = this.muzzle
+      ? G.g_shot_flash_ring.filter((f) => f.live).length : 0;
     const tracer = G.g_shot_tracer_ring.filter((t) => t.live).length;
     return `${this.nodes.size} drawn · blood ${G.g_blood_sprays.length}`
       + `, sprites ${G.g_sprite_effects.length}, flash ${flash}`

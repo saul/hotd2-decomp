@@ -20,24 +20,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
 | `game/` | 28447 | 126 | engine |
-| `hod2lib/` | 13619 | 34 | engine |
-| `render/` | 7194 | 28 | render |
-| `app/` | 6128 | 28 | app |
+| `hod2lib/` | 13679 | 34 | engine |
+| `render/` | 7329 | 29 | render |
+| `app/` | 6152 | 28 | app |
 | `script/` | 3542 | 25 | engine |
-| `ui/` | 2861 | 26 | ui |
+| `ui/` | 2866 | 26 | ui |
 | `bundle/` | 1647 | 10 | engine |
 | `core/` | 889 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **64924** | **288** | |
+| **total** | **65148** | **289** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/actor.ts` — 1566
 * `script/walker.ts` — 1563
+* `app/main.ts` — 1445
 * `hod2lib/exetab.ts` — 1441
-* `app/main.ts` — 1439
-* `hod2lib/gltf.ts` — 1300
+* `hod2lib/gltf.ts` — 1319
 
 ## The port
 
@@ -50,7 +50,7 @@ The largest files, which is where the pressure to split next is:
 | Declared `[diverges]` | **112** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **96** — questions the port is honest about not having answered |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 49 members against `PlayerView`'s 38** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 51 members against `PlayerView`'s 38** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 

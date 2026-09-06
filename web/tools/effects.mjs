@@ -72,6 +72,41 @@ try {
   mkdirSync(SHOTS, { recursive: true });
   const box = await page.locator("#viewport").boundingBox();
 
+  // The two display choices, which are settings and not port state: the port
+  // spawns the same records and marks the same materials whichever way they
+  // are set.
+  check("the bundle marks its blood materials",
+        /materials/.test(await row("blood")), await row("blood"));
+  check("...and red is the default, because the bundle's own bank is green",
+        /^red/.test(await row("blood")), await row("blood"));
+  /**
+   * One view toggle, by its exact label.
+   *
+   * Exact, because "Red blood" is a substring of nothing but a loose match
+   * had already picked a different control once -- and a click that lands on
+   * the wrong checkbox reads as "the toggle does not work". The blur after it
+   * is the same trap the group headers have: a focused control eats the next
+   * key the harness sends.
+   */
+  const toggle = async (label) => {
+    // The label renders as `<input/>{" "}Red blood`, so its text content
+    // carries a leading space and an anchored match without `\\s*` finds
+    // nothing at all.
+    await page.locator("label")
+      .filter({ hasText: new RegExp(`^\\s*${label}\\s*$`) })
+      .first().locator("input").click();
+    await page.evaluate(() => document.activeElement?.blur?.());
+    // React re-renders and the layer re-applies on the next frame; reading the
+    // row in the same tick catches the value before either.
+    await page.waitForTimeout(120);
+  };
+  await toggle("Red blood");
+  check("...and it can be put back to green",
+        /^green/.test(await row("blood")), await row("blood"));
+  await toggle("Red blood");
+  check("...and back again", /^red/.test(await row("blood")),
+        await row("blood"));
+
   check("the bundle carries the effect models",
         /templates/.test(await row("effects"))
         && !/no effect models/.test(await row("effects")),
@@ -101,7 +136,7 @@ try {
     await page.waitForTimeout(120);
   }
   console.log(`  miss  ${miss || "(every shot in the volley hit flesh)"}`);
-  check("a shot lights the muzzle", /flash [1-9]/.test(miss), miss);
+  check("the muzzle flash is off by default", /flash 0/.test(miss), miss);
   check("...and throws a round", /tracer [1-9]/.test(miss), miss);
   // Only meaningful where the script has selected some collision.
   // `set_collision_set_full` is an opcode like any other, and between two of
@@ -117,6 +152,15 @@ try {
           marked || `no shot met a quad, with ${coli}`);
   }
   await page.screenshot({ path: resolve(SHOTS, "effects_miss.png") });
+
+  // ...and on, which is what the toggle is for.
+  await toggle("Muzzle flash");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.7);
+  await page.waitForTimeout(50);
+  const lit = await row("effects");
+  check("...and on when the toggle is", /flash [1-9]/.test(lit), lit);
+  await page.screenshot({ path: resolve(SHOTS, "effects_muzzle.png") });
+  await toggle("Muzzle flash");
 
   // ...and one into a zombie, which bleeds and does not spark.
   let bled = "";

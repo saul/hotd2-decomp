@@ -685,6 +685,13 @@ had. The one thing it cannot rebuild is where a bone is, so the blood asks
 `CharacterLayer.boneSphere` for the same centre and radius `pickShot` tests
 with.
 
+**Two of the game's own settings are now the player's.** The **muzzle flash**
+is off by default, because it is drawn at the crosshair rather than at a gun —
+a light-gun cabinet wanted something bright at the aim point and a mouse does
+not — and the **blood colour** is the game's own Blood Color option, red by
+default. Neither is port state: the same records are spawned and the same
+materials marked either way, so a snapshot does not carry them.
+
 
 ## Findings the player produced
 

@@ -661,6 +661,59 @@ for: `0x53` is rain and `0x5A` spawns two more effects beside itself. Worse,
 `SpawnImpactSprite` would have collided with the wrapper's own name one
 address up. See `docs/re/session-log.md`.
 
+### Firing — `g_gunshot_sound_ids`
+
+**[proved]** The gun is heard at the trigger, not at the hit.
+`PlayerFireAndReloadUpdate` (`FUN_00414940`) ends a shot with three calls in a
+row — `BuildShotRay` (`FUN_00406110`), `PlayerShotEffectSpawn`
+(`FUN_00416F70`), `PlaySoundId(g_gunshot_sound_ids[player])` — so a round that
+meets nothing is as loud as one that lands.
+
+`g_gunshot_sound_ids` (`0x004EC8BC`) is two dwords, `a9163400 a9163300`:
+
+| Player | Id | File |
+|---|---|---|
+| 0 | `0x003416A9` | `COMMON\GUN5_22.WAV` |
+| 1 | `0x003316A9` | `COMMON\GUN4_22.WAV` |
+
+Both are namespace 0, so they route through the SE list like any other effect.
+**A dry trigger is silent**: with `g_player_ammo` at zero the routine never
+reaches that line and goes to `PlayerRefillMagazine` (`FUN_00414B30`) instead,
+whose `0x3E16A9` `COMMON\RELOAD1_44.WAV` is itself gated on `g_nFiringGate`.
+
+`0x00413EE5` reads `g_GameMode`, decrements it, and dispatches: zero — Original
+Mode — goes to `PlayerFireOriginalModeWeapon` (`FUN_00414B90`) instead, which
+prefers `g_original_weapon_gunshot_ids` (`0x004EC9A0`) and falls back to the
+table above when that entry is 0.
+
+```
+0x004EC9A0  u32[8]  g_original_weapon_gunshot_ids
+  0 —                       4 DC_SE\MAGNUM_22.WAV
+  1 DC_SE\SHOT_GUN_22.wav   5 DC_SE\AIR_GUN_22.wav
+  2 DC_SE\MCHN_GUN_22.wav   6 DC_SE\TOY_GUN1_44.wav
+  3 DC_SE\GRENADE_22.wav    7 DC_SE\RULE3_22.wav
+
+0x004EC9C0  u32[8]  g_original_weapon_reload_ids
+  3 DC_SE\GR_REL_22.wav     5 DC_SE\AIR_G_REL_22.wav   — the other six are 0
+```
+
+**Eight entries, not sixteen.** Nothing terminates either table and the index
+is a signed `char`; what bounds the first is the second's own reader, and what
+bounds the second is the `u16` table at `0x004EC9E0`. Read either one long and
+it grows a plausible tail of the next.
+
+Their index is `g_original_weapon_sound_kind` (`0x009A224A`), `+0x0A` of the
+per-player Original Mode block — a *different* byte from `g_original_weapon_kind`
+at `+0x09`, though the two orders agree (kind 3 draws no muzzle flash and adds
+the `0x53` blast, which is the grenade; 4 arms `g_shot_weapon_ring`, the
+magnum; 5 halves the tracer, the air gun). `ResetOriginalModeLoadout`
+(`FUN_0048A0D0`) writes `+0x0A` to 0 as the second byte of the dword
+`0x03000006` it stores at `+0x08`, and no instruction in the image references
+`0x009A224A` other than the two reads above. So **[likely]** both weapon tables
+are dead in the shipped build and every gunshot in the game is one of the two
+arcade ids — `[likely]` and not `[proved]` because a write through a computed
+pointer into `+0x0A` need not show as a reference to that address.
+
 ### Hitting — `ActorShotFeedback` and `ActorPlayHitVoice`
 
 `ZombieOnShot` (`FUN_00453EB0`) runs the reaction once `ResolveHit` has set

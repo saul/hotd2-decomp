@@ -361,6 +361,15 @@ it is not in `verify_all`; run it when you touch `src/app/install/`,
 `tsc` and a green `vite build` are exactly what an unreachable export screen
 looks like.
 
+`npm run audio` asks whether the game makes any noise, and it is the only check
+that can answer. It loads the page in Chrome, clicks the sound button — which is
+both the unmute and the gesture that lifts the browser's autoplay block — fires
+a volley, and routes **every media element the page plays through an
+`AnalyserNode`**, asserting on the peak sample it decodes. A file that 404s
+fails it; so does one that 200s and decodes to silence; so does a sound the page
+never asked for, which is what the missing gunshot was. Like `bundle-flow` it
+needs a real browser and is not in `verify_all`.
+
 ---
 
 ## Not built yet

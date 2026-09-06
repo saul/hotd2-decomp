@@ -81,6 +81,28 @@ export interface ShotRequest {
   ray: ShotRay;
 }
 
+/**
+ * `g_gunshot_sound_ids` — `0x004EC8BC`. One u32 per player, read out of the
+ * data segment as `a9163400 a9163300`: `0x003416A9` is `COMMON\GUN5_22.WAV`
+ * and `0x003316A9` is `COMMON\GUN4_22.WAV`. Player 0 and player 1 fire
+ * different guns, and that is the only difference between them.
+ *
+ * `PlayerFireAndReloadUpdate` (`FUN_00414940`) plays
+ * `g_gunshot_sound_ids[player]` as the last thing it does on a shot, after
+ * `PlayerShotEffectSpawn` — so the gun is heard whatever the round goes on to
+ * hit, and a shot that hits nothing is as loud as one that does.
+ *
+ * Original Mode fires through `PlayerFireOriginalModeWeapon`
+ * (`FUN_00414B90`) instead, which prefers
+ * `g_original_weapon_gunshot_ids[g_original_weapon_sound_kind]` and falls back
+ * to this table when that entry is zero. `ResetOriginalModeLoadout`
+ * (`FUN_0048A0D0`) writes that index 0, entry 0 of the weapon table is 0, and
+ * no instruction in the image writes `0x009A224A` — so on the reading so far
+ * every gunshot in the shipped game is one of these two. The weapon table is
+ * therefore not ported.
+ */
+export const g_gunshot_sound_ids: readonly number[] = [0x003416a9, 0x003316a9];
+
 /** `ScoreAddForPlayer` constants, from `FUN_00409430`. */
 const SCORE_HIT = 10;
 const SCORE_HEAD = 120;
@@ -167,6 +189,21 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // between `BuildShotRay` and the gunshot sound, and `ProcessPlayerShots`
   // runs afterwards; so a shot that hits nothing still throws a tracer.
   PlayerShotEffectSpawn(player, req.ray, host, () => rng.int(0x10000));
+  // ...and the gunshot is the line after it, which is where this one is. The
+  // whole of `PlayerFireAndReloadUpdate`'s tail is `BuildShotRay`,
+  // `PlayerShotEffectSpawn`, `PlaySoundId(g_gunshot_sound_ids[player])`, in
+  // that order, and the port had the first two.
+  //
+  // [diverges] The engine reaches that line only with a round in the magazine
+  // and `g_nFiringGate` open, and plays nothing at all on a dry trigger — the
+  // empty magazine goes to `PlayerRefillMagazine` (`FUN_00414B30`) and its
+  // `0x3E16A9` `COMMON\RELOAD1_44.WAV` instead. The port has neither ammo nor
+  // the gate (`g_player_ammo` and `g_nFiringGate` are both listed as absent in
+  // `globals.ts`), so every request that reaches here fires. That is the same
+  // divergence `PlayerShotEffectSpawn` on the line above already carries, and
+  // not a second one: the reload sound has nowhere to be played from until the
+  // magazine is ported. [open]
+  events?.emit("sound.play", { id: g_gunshot_sound_ids[player] ?? 0 });
   const pick = host.pickShot?.(req.ray) ?? null;
   // `g_shot_hit_something` — 0x009C9010, written by `ProcessPlayerShots`
   // (`FUN_00404570`) as `count > 0`. Its one reader kills the tracer on its

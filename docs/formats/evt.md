@@ -342,7 +342,7 @@ inference; **[open]** = undetermined.
 | `1C` | `set_backdrop_mode` | **[proved]** 0 = off, 2 = drawn but frozen, else drawn and animating. The mode selector for `1B` |
 | `1D` | `enable_rain` | **[proved]** `FUN_004136A0`: 50 particles falling 2.0/frame in a camera-attached volume, drawn as asset `0x53` at alpha 0.5 in draw layer `0xE`. See below. Also swaps the impact effect to a wet variant. "rain" is still inference from the fall speed and the 3.5× vertical stretch |
 | `1E` | *(dead)* | **[proved]** `DAT_009C8A78` has **no readers anywhere in the binary**. Vestigial; its intent is unrecoverable |
-| `1F` | `set_hud_shutter_state` | **[proved]** 9 states. Draws asset `0x93E` at view-space `y = ±0.35, z = −1.0` — and that positions the quad's **origin**: `0x93E` is `common.bin` model 129, a four-vertex quad 1.03 × 0.10, so a closed bar spans 0.30–0.40 and its inner edge is at 80 % of the 0.3748 frustum half-height, a 10 % letterbox. Also drives `DAT_009C8E00`, the gate on firing and ammo decrement: 1 in states 0/1/6, 0 in state 5 and when a state-3 close completes. State 8 scales the bar `(1, 8, 1)` for a full blackout |
+| `1F` | `set_hud_shutter_state` | **[proved]** 9 states. Draws asset `0x93E` at view-space `y = ±0.35, z = −1.0` — and that positions the quad's **origin**: `0x93E` is `common.bin` model 129, a four-vertex quad 1.03 × 0.10, so a closed bar spans 0.30–0.40 and its inner edge is at 80 % of the 0.3748 frustum half-height, a 10 % letterbox. Also drives `g_nFiringGate`, the gate on firing and ammo decrement: 1 in states 0/1/6, 0 in state 5 and when a state-3 close completes. State 8 scales the bar `(1, 8, 1)` for a full blackout |
 | `20`–`27` | **fog / light tweens** | see the correction below |
 | `28` / `29` | `region_load` / `region_enter` | stage geometry streaming; see [`pipeline.md`](pipeline.md) |
 | `2B` | `award_accuracy_bonus` | **[proved]** `pct = hits*100/shots` (needs shots > 0x13), bonus = `g_accuracy_bonus_table[pct/10]` = `{0,0,0,0,500,1000,1500,2000,2500,3000,4000}` |
@@ -390,13 +390,13 @@ retail build.
    same block:
 
    ```c
-   if (DAT_009C8E00 == 0 && DAT_009A2D7C != 0) {   // gate down, region open
+   if (g_nFiringGate == 0 && DAT_009A2D7C != 0) {   // gate down, region open
        mask[0] = 0x2; mask[1] = 0x20000;           // Start, player 1 / player 2
        if (mask[player] & _DAT_009C9028) DAT_009A1A18 = 1;
    }
    ```
 
-   The gate `DAT_009C8E00` is the one `1F`'s shutter machine drives, so a skip
+   The gate `g_nFiringGate` is the one `1F`'s shutter machine drives, so a skip
    is only offered while the letterbox is closed — which is the definition of
    "not currently playable".
 3. `CheckCutsceneSkipRequest` (`0x00435F40`), a standing task installed from the
@@ -448,7 +448,7 @@ retail build.
 
 ### `1F` — the shutter's nine states
 
-| State | What it does | `DAT_009C8E00` |
+| State | What it does | `g_nFiringGate` |
 |---|---|---|
 | 0 | close, and enable firing | 1 |
 | 1 | open over 40 frames | 1 |

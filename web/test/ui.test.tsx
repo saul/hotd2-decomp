@@ -67,6 +67,9 @@ function projection(): UiProjection {
               noteTitle: "built" },
     bundleStale: false,
     paused: true,
+    // The gate is up: the fixture renders the chrome as it is in play, and
+    // `Viewport` hangs the crosshair off this.
+    firingGate: true,
     toggles: TOGGLE_DEFAULTS,
     transport: { playing: false, mode: "play", speed: 1, frozen: false,
                  hasPath: true, camFrame: 10, camFrameLo: 0, camFrameHi: 100,

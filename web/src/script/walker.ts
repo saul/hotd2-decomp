@@ -396,7 +396,7 @@ export class Walker {
    *
    * 1. `set_skippable_region(1)` opens the window (`DAT_009A2D7C`).
    * 2. Both player-update routines (`FUN_00414940`, `FUN_00414B90`) poll Start
-   *    while that is set and the firing gate `DAT_009C8E00` is down:
+   *    while that is set and the firing gate `g_nFiringGate` is down:
    *    `if (mask[player] & _DAT_009C9028) DAT_009A1A18 = 1;`
    * 3. A standing task, `SkipWatchTask` at `0x00435F40`, sees the request and
    *    raises this flag:
@@ -1060,7 +1060,7 @@ export class Walker {
 
   /**
    * True when the game would be offering a skip: inside a skippable region
-   * (`DAT_009A2D7C`) with the firing gate down (`DAT_009C8E00 == 0`).
+   * (`DAT_009A2D7C`) with the firing gate down (`g_nFiringGate == 0`).
    */
   get canSkip(): boolean {
     return this.skippable && !this.firingGate && !this.finished;

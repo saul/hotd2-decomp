@@ -58,8 +58,15 @@ SHUTTER_STATES = {
     8: "full blackout (the bar scaled 8x)",
 }
 
-#: Which states drive DAT_009C8E00, the gate on firing and ammo decrement --
-#: and, through it, on whether Start is polled for a cutscene skip.
+#: Which states drive g_nFiringGate (0x009C8E00), and which way.
+#:
+#: **True means firing is ENABLED.** HudDrawShutterState (0x00413970) writes
+#: the word 1 in states 0, 1 and 6 and 0 in state 5 and at the end of a state-3
+#: close, and PlayerFireAndReloadUpdate (0x00414940) runs its whole fire block
+#: under ``else if (g_nFiringGate != 0)``. State 0's label reads backwards on
+#: purpose: it draws the closed bars *and* raises the gate, which is how a
+#: letterboxed boss intro still lets you shoot. States 2, 4, 7 and 8 are absent
+#: because they leave the word alone.
 SHUTTER_GATE = {0: True, 1: True, 6: True, 3: False, 5: False}
 
 #: evt 0x1C. The dome draw at 0x004132D0 tests for 0 and 2 by name and

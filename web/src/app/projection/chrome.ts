@@ -16,7 +16,7 @@ import type {
 /**
  * The skip bar, shown under the game's own condition.
  *
- * `Walker.canSkip` is `DAT_009A2D7C != 0 && DAT_009C8E00 == 0` -- the exact
+ * `Walker.canSkip` is `DAT_009A2D7C != 0 && g_nFiringGate == 0` -- the exact
  * test both player-update routines make before looking at Start. So the bar
  * appears precisely where the game would have accepted a skip, which is
  * something the retail build never shows you, its skip being one assignment

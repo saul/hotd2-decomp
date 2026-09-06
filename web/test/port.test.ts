@@ -133,6 +133,7 @@ import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
 import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker } from "../src/script/walker";
+import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
@@ -401,6 +402,12 @@ function scene(n: number, rng: Rng): Events {
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  // `g_nFiringGate` — `0x009C8E00`. `ResetSceneOnEnter` leaves it **down** and
+  // the stage script raises it with `hud_shutter_state` 1 or 6; there is no
+  // script in this file, so this line stands in for one. Without it every shot
+  // here would be dropped by `ProcessShotRequests`, which is the behaviour the
+  // firing-gate section below exists to prove.
+  G.g_nFiringGate = 1;
   for (let i = 0; i < n; i++) {
     const a = spawnZombie(0x1000 + i, 1, `zombie ${i}`);
     a.visible = true;
@@ -9347,6 +9354,161 @@ console.log("\nthe shot effects:");
   check("every effect pool survives a round trip through JSON",
         copy[0].at === z0.at && copy[0].bone === 2);
   G.g_blood_sprays = [];
+}
+
+
+
+// -- 40. the firing gate: a shutter that is shut is a trigger that is dead ---
+
+/**
+ * **`g_nFiringGate` (`0x009C8E00`), and what a blocked trigger does not do.**
+ *
+ * Reported as "shouldn't be able to shoot while the shutter is closed", and
+ * the port had every piece of it but the one that mattered: the shutter
+ * machine drove the gate, the walker exposed it, the save state carried it and
+ * `canSkip` read it — and the shot path did not look at it at all.
+ *
+ * The engine's rule is `PlayerFireAndReloadUpdate`'s (`FUN_00414940`), whose
+ * fire block sits under `else if (g_nFiringGate != 0)` at 0x004149BE. That is
+ * one test above **everything**: the ammo decrement, the shot counter,
+ * `BuildShotRay`, `PlayerShotEffectSpawn` and the gunshot. So a blocked
+ * trigger is not "a shot that hits nothing" — it is not a shot. The muzzle
+ * flash and the tracer are the visible half of that and they are what these
+ * assertions watch, because a gate applied one line too late would still light
+ * them.
+ *
+ * The polarity is the other half, and the reason it is asserted rather than
+ * assumed: state 0 is *"close, and enable firing"*, which reads backwards. It
+ * is not backwards — `HudDrawShutterState` (`FUN_00413970`) draws the closed
+ * bars in state 0 and writes the word 1, so a letterboxed boss intro still
+ * lets you shoot, and state 5 draws exactly the same bars and writes 0.
+ *
+ * The port has no ammo, so the counter the engine keeps *inside* the gate and
+ * this file can watch is `g_nPlayerFired`. When a magazine arrives it belongs
+ * under the same test, above `PlayerShotEffectSpawn`.
+ */
+console.log("\nthe firing gate:");
+{
+  const rng = new Rng(40);
+  const events = scene(1, rng);
+  const z0 = G.g_object_list[0]!;
+  z0.hp = 100;
+  let pick: ShotPick | null = { kind: "actor", at: z0.at, bone: 1,
+                                point: vec3() };
+  // The camera stubs are `PlayerShotEffectSpawn`'s: the muzzle point and the
+  // tracer's aim are camera-space, so without them nothing leaves the gun and
+  // the assertion that a *blocked* trigger lights nothing would pass for the
+  // wrong reason. Same two lines as the shot-effects section above.
+  const host = {
+    ...NULL_HOST,
+    pickShot: () => pick,
+    viewPoint: (x: number, y: number, z: number,
+                out: { x: number; y: number; z: number }) => {
+      out.x = x; out.y = y; out.z = -z;
+    },
+    viewSpaceOfPoint: (p: { x: number; y: number; z: number },
+                       out: { x: number; y: number; z: number }) => {
+      out.x = p.x; out.y = p.y; out.z = -p.z;
+      return true;
+    },
+  };
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
+  const resolved: string[] = [];
+  events.on("shot.resolved", (r) => resolved.push(r.kind));
+
+  const shutter = new Shutter();
+
+  // -- the gate is down out of `ResetSceneOnEnter` --------------------------
+  ResetSceneOnEnter();
+  check("a scene starts with the gate down, as `ResetSceneOnEnter` leaves it",
+        G.g_nFiringGate === 0, `${G.g_nFiringGate}`);
+
+  // -- a trigger pull under a closed shutter --------------------------------
+  const scoreBefore = G.g_player_score[0];
+  QueueShotRequest(0, RAY);
+  check("the click is still recorded as input", G.g_shot_requests.length === 1);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("...and the frame takes it off the queue rather than holding it",
+        G.g_shot_requests.length === 0);
+  check("a trigger pulled with the gate down resolves nothing",
+        resolved.length === 0, resolved.join(","));
+  check("...it is not counted as a shot fired", G.g_nPlayerFired[0] === 0,
+        `${G.g_nPlayerFired[0]}`);
+  check("...it scores nothing", G.g_player_score[0] === scoreBefore);
+  check("...the actor it was aimed at is untouched", z0.hp === 100,
+        `${z0.hp}`);
+  // The distinguishing assertion. `PlayerShotEffectSpawn` (`FUN_00416F70`) is
+  // called from *inside* the gated block, so a blocked trigger makes no muzzle
+  // flash and no tracer -- which is what separates "the gate is on the trigger"
+  // from "the gate is on the hit test".
+  check("...and nothing left the gun: no muzzle flash, no tracer",
+        !G.g_shot_flash_ring.some((f) => f.live)
+        && !G.g_shot_tracer_ring.some((t) => t.live));
+
+  // -- and it does not fire late once the gate comes up ---------------------
+  shutter.set(6);        // `hud_shutter_state 6` -- open at once, gate on
+  check("state 6 raises the gate", G.g_nFiringGate === 1);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("the blocked pull does not fire late", resolved.length === 0,
+        resolved.join(","));
+
+  // -- the same pull with the gate up ---------------------------------------
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("with the gate up the same shot lands", resolved.at(-1) === "actor",
+        resolved.join(","));
+  check("...and now it is a shot fired", G.g_nPlayerFired[0] === 1,
+        `${G.g_nPlayerFired[0]}`);
+  check("...and the muzzle is lit",
+        G.g_shot_flash_ring.some((f) => f.live)
+        && G.g_shot_tracer_ring.some((t) => t.live));
+  check("...and the actor took the hit", z0.hp < 100, `${z0.hp}`);
+
+  // -- the polarity, state by state, from `HudDrawShutterState` -------------
+  // The five states that write the word, and only those five. 2, 4, 7 and 8
+  // leave it alone, which is why they are not in `SHUTTER_GATE`.
+  shutter.set(5);
+  check("state 5 drops the gate at once -- a closed shutter, firing off",
+        G.g_nFiringGate === 0);
+  shutter.set(0);
+  check("state 0 draws the same closed bars and RAISES it",
+        G.g_nFiringGate === 1);
+  shutter.set(2);
+  check("state 2 leaves it alone", G.g_nFiringGate === 1);
+  shutter.set(5);
+  shutter.set(1);
+  check("state 1 raises it on the way open", G.g_nFiringGate === 1);
+
+  // -- state 3 drops it only when the close finishes ------------------------
+  shutter.set(3);
+  check("a state-3 close keeps the gate up while it is still sliding",
+        G.g_nFiringGate === 1);
+  const before = G.g_nPlayerFired[0];
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("...so a shot in the middle of a close still fires",
+        G.g_nPlayerFired[0] === before + 1,
+        `${before} -> ${G.g_nPlayerFired[0]}`);
+  shutter.step(SHUTTER_FRAMES);
+  check("...and the gate drops the frame the bars meet",
+        G.g_nFiringGate === 0 && shutter.state === 4,
+        `gate ${G.g_nFiringGate}, state ${shutter.state}`);
+  const after = G.g_nPlayerFired[0];
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("...and the next pull is dead", G.g_nPlayerFired[0] === after,
+        `${G.g_nPlayerFired[0]}`);
+
+  // -- one word, not two ----------------------------------------------------
+  // The gate is in `G` and `Shutter.firingGate` -- which is what `Walker`
+  // exposes under that name -- is a view onto it, so the script's idea of the
+  // gate and the port's cannot disagree. Two owners of one word is how the
+  // shutter's slide counter went wrong once already.
+  shutter.firingGate = true;
+  check("the script's accessor and `G.g_nFiringGate` are the same word",
+        G.g_nFiringGate === 1 && shutter.firingGate);
+  G.g_nFiringGate = 0;
+  check("...in both directions", !shutter.firingGate);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -27,7 +27,6 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
   chain checks out and two theories are dead; it wants eyes on the render
   rather than another reading. Detail below.
 
-* Shouldn't be able to shoot while the shutter is closed. Check the game code to see how the real game handles this
 
 * Civilians hair doesn't render
 
@@ -759,6 +758,76 @@ that fix looked like it had not worked.
   decodes to silence fails it and so does one the page never asked for. Under
   it `COMMON/GUN5_22.WAV` reads 0.589. `test/port.test.ts` asserts the ids and
   their order in the frame; it fails on three lines with the emit removed.
+
+---
+
+## And one about the shutter
+
+- `[fixed]` **"Shouldn't be able to shoot while the shutter is closed. Check
+  the game code to see how the real game handles this"** — the port had every
+  piece of this except the one that mattered. `HudDrawShutterState`
+  (`0x00413970`) drove `g_nFiringGate` (`0x009C8E00`) in `script/state/
+  shutter.ts`; the walker exposed it; the save slice carried it; `Walker.canSkip`
+  read it. **Nothing on the shot path had ever looked at it.** It had exactly
+  two readers in the whole tree, and one of them was an assertion.
+
+  The engine's rule, and the polarity, from `PlayerFireAndReloadUpdate`
+  (`0x00414940`):
+
+  ```c
+  if (trigger_latch) {
+    if (magazine empty)          { auto-refill }
+    else if (g_nFiringGate != 0) { ammo--; shots++; BuildShotRay();
+                                   PlayerShotEffectSpawn(); gunshot(); }
+  }
+  ```
+
+  So **non-zero means firing is allowed**, and the test sits above
+  *everything*: a trigger pulled with the gate down is not a shot that misses,
+  it is not a shot. No ammo comes off, the accuracy denominator does not move,
+  no ray is built, and — the part that is visible — `PlayerShotEffectSpawn`
+  never runs, so there is no muzzle flash and no tracer either. `0x00414C2D` is
+  the same test in the Original Mode routine at `0x00414B90`.
+
+  The polarity was **already right** in `hod2lib/script.ts`'s `SHUTTER_GATE`
+  and in [`formats/evt.md`](formats/evt.md), and it reads backwards for a
+  reason worth keeping: state 0 is *"close, and enable firing"* because it
+  draws the closed bars **and** writes 1, so a letterboxed boss intro is still
+  playable. State 5 draws the same bars and writes 0.
+
+  What changed:
+
+  * `g_nFiringGate` is a field of `G` now, cleared by the port's
+    `ResetSceneOnEnter` the way the engine's clears it at `0x0045EEAC`.
+    `script/state/shutter.ts` is still its only writer and reaches it through
+    an accessor, so there is one word and not two — the thing that file was
+    written to avoid. It moved because the routine that reads it is in
+    `game/`, not `script/`.
+  * `ResolveShotRequest` returns at the top while the gate is down, above the
+    shot counter and above the effect spawn. The request is **dropped**, not
+    held: the engine polls the trigger once a frame, and a queue that saved the
+    click would fire it when the shutter opened.
+  * The crosshair follows it, because the engine's does — `HudDrawCrosshair`
+    (`0x004169C0`) will not draw the reticle while the word is zero, and
+    `PlayerUpdateInPlay` (`0x00413E90`) will not draw the ammo readout either.
+    The system cursor comes back while it is hidden, which is a port decision
+    and marked as one: the cabinet has a physical gun, and `cursor: none` with
+    no crosshair leaves the viewer nothing to point with.
+
+  Reload is deliberately **not** gated, because the engine does not gate it —
+  only the reload *sound* is (`0x00414B75`). The port has no ammo and no
+  magazine, so there is nothing there to exempt yet.
+
+  The safety question this raised, and the answer: gating the trigger is only
+  safe if the shipped scripts raise the gate, and raise it early. Walking all
+  six stages' scripts says they do — the first `hud_shutter_state` of 1 or 6
+  lands within the first 150 instructions of every stage, and the gate is up
+  for 99.9 % of the instruction stream. The 0.1 % is the bug.
+
+  `test:port`'s firing-gate section drives it: the same shot blocked and then
+  allowed, the muzzle dark and then lit, and the five states that write the
+  word each asserted in the direction they write it. Without the fix, eight of
+  its assertions fail.
 
 ---
 

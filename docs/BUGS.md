@@ -6,7 +6,11 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Thirty-one reports: **twenty-seven fixed, three half-done, one open.** Every fix
+Thirty-four reports: **twenty-eight fixed, three half-done, three open.** The
+count said thirty-one and one open until 2026-09-06, which was three reports
+behind: the last three to arrive were written straight into *What is left* as
+bare bullets and the line above them was not touched. It is one `[fixed]`
+marker per fixed report, so `grep -c '\[fixed\]'` is the arithmetic. Every fix
 carries its evidence in the port's doc comments; the reasoning is in
 `docs/re/session-log.md`.
 
@@ -24,8 +28,6 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
   rather than another reading. Detail below.
 
 * Shouldn't be able to shoot while the shutter is closed. Check the game code to see how the real game handles this
-
-* No gunshot sound, impact sound etc
 
 * Civilians hair doesn't render
 
@@ -704,6 +706,59 @@ that fix looked like it had not worked.
 
   `npm run bundle-flow` asserts the tile has its picture **without the screen
   being closed**, which is the reported bug stated as a check.
+
+---
+
+## And one about the gun making no noise
+
+- `[fixed]` **"No gunshot sound, impact sound etc"** — the gunshot, and only
+  the gunshot. Everything else in that sentence was already playing, and the
+  first thing this cost was the assumption that the audio chain was broken:
+  `web/tools/audio.mjs` was written to find out where, and found nothing wrong
+  with it. Unmuted, stage 1 block 4, a volley of shots: `ST1_AR`, five flesh
+  impacts and bone hits, three surface ricochets, three zombie voices, a
+  civilian cry and a prop breaking all reached the output. `COMMON\GUN5_22.WAV`
+  did not, because nothing in the port ever asked for it.
+
+  `PlayerFireAndReloadUpdate` (`FUN_00414940`) ends a shot with three calls in
+  a row — `BuildShotRay`, `PlayerShotEffectSpawn`,
+  `PlaySoundId(g_gunshot_sound_ids[player])` — and `ResolveShotRequest` had
+  transcribed the first two and stopped. `g_gunshot_sound_ids` (`0x004EC8BC`)
+  is two dwords, `a9163400 a9163300`: player 0 fires `COMMON\GUN5_22.WAV` and
+  player 1 `COMMON\GUN4_22.WAV`, which is the only difference between the two
+  guns. The port now emits it on the line after the muzzle flash, so a shot
+  that hits nothing is as loud as one that lands — which is what the engine
+  does, because the sound is at the trigger and the hit test comes after.
+
+  Three things deliberately *not* added, each because inventing them would be
+  a sound the engine does not play:
+
+  * **the dry trigger is silent.** With the magazine empty the engine never
+    reaches the gunshot; it goes to `PlayerRefillMagazine` (`FUN_00414B30`)
+    and its `0x3E16A9` `COMMON\RELOAD1_44.WAV` instead. The port has no ammo
+    and no `g_nFiringGate`, so it has nowhere to play a reload from. `[open]`
+    until the magazine is ported.
+  * **Original Mode's per-weapon gunshots are not ported.** `g_GameMode == 1`
+    fires through `PlayerFireOriginalModeWeapon` (`FUN_00414B90`), which
+    prefers `g_original_weapon_gunshot_ids` (`0x004EC9A0`) — eight entries,
+    `SHOT_GUN`, `MCHN_GUN`, `GRENADE`, `MAGNUM`, `AIR_GUN`, `TOY_GUN1`,
+    `RULE3` — indexed by `g_original_weapon_sound_kind` (`0x009A224A`).
+    `ResetOriginalModeLoadout` writes that index 0, entry 0 of the table is 0,
+    and no instruction in the image writes `0x009A224A`, so on the reading so
+    far every gunshot in the shipped game falls back to the two ids above.
+  * **`ActorPlayHitVoice` stays where it was.** The flesh impact and the hurt,
+    kill and headshot voices are `FUN_0040A6F0`, called from `ZombieOnShot`
+    (`FUN_00453EB0`) and *not* from `ActorShotFeedback` (`FUN_00454050`) —
+    which owns the blood, the result-5 impact sprite and its ricochet, and
+    nothing else. The port already plays them from `render/shooting.ts` off
+    `shot.resolved`, and they were audible before this change and after it.
+
+  `npm run audio` is the check, and it is the only one in the tree that can
+  see this: it routes every media element the page plays through an
+  `AnalyserNode` and asserts on the **peak sample**, so a file that 200s and
+  decodes to silence fails it and so does one the page never asked for. Under
+  it `COMMON/GUN5_22.WAV` reads 0.589. `test/port.test.ts` asserts the ids and
+  their order in the frame; it fails on three lines with the emit removed.
 
 ---
 

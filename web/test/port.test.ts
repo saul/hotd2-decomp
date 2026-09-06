@@ -52,7 +52,7 @@ import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
 import { ShotEffectsTick } from "../src/game/effects/tick";
 import { SpawnSpriteEffect, SpriteEffectKind }
   from "../src/game/effects/sprite";
-import { MarkActorShot, QueueShotRequest }
+import { MarkActorShot, QueueShotRequest, g_gunshot_sound_ids }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
          SetGameTables, T } from "../src/game/tables";
@@ -7567,6 +7567,12 @@ console.log("\nthe shot queue:");
   const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
   const seen: { kind: string; points: number }[] = [];
   events.on("shot.resolved", (r) => seen.push({ kind: r.kind, points: r.points }));
+  // Every `PlaySoundId` the frame makes, in order. The gunshot is the reason
+  // this is here: it was the one sound in the whole shot path that nothing
+  // emitted, so the page fired silently and every other noise -- the flesh
+  // impact, the ricochet, the surface -- played over the top of nothing.
+  const heard: number[] = [];
+  events.on("sound.play", (e) => heard.push(e.id));
 
   // A miss.
   pick = null;
@@ -7580,6 +7586,13 @@ console.log("\nthe shot queue:");
   check("a miss scores nothing", G.g_player_score[0] === 0
         && seen.at(-1)?.kind === "miss");
   check("but it is still a shot fired", G.g_nPlayerFired[0] === 1);
+  // `PlayerFireAndReloadUpdate` (`FUN_00414940`) plays the gunshot at the
+  // trigger, not at the hit, so a shot into nothing is as loud as one that
+  // lands. It is the FIRST sound of the frame because the engine's order is
+  // `BuildShotRay`, `PlayerShotEffectSpawn`, `PlaySoundId`, and everything the
+  // round meets is decided after that.
+  check("a miss still fires the gun", heard[0] === 0x003416a9,
+        heard.map((h) => h.toString(16)).join(" "));
 
   // Two headshots, then a body shot.
   pick = { kind: "actor", at: z0.at, bone: 1, point: vec3() };
@@ -7604,6 +7617,36 @@ console.log("\nthe shot queue:");
         `${G.g_player_score[0]} / ${G.g_head_combo_bonus[0]}`);
   check("and the hit reached `ResolveHit` -- hit points came off",
         z2.hp === 97, `hp ${z2.hp}`);
+
+  // The gun, on a shot that lands. `g_gunshot_sound_ids` (0x004EC8BC) is two
+  // entries and the players do not share one: 0x003416A9 is
+  // `COMMON\GUN5_22.WAV` and 0x003316A9 is `COMMON\GUN4_22.WAV`.
+  {
+    heard.length = 0;
+    pick = { kind: "actor", at: z2.at, bone: 4, point: vec3() };
+    QueueShotRequest(0, RAY);
+    GameUpdate(EYE, 1 / 60, host, rng, events);
+    check("a hit fires the gun too, and before whatever the round met",
+          heard[0] === g_gunshot_sound_ids[0],
+          heard.map((h) => h.toString(16)).join(" "));
+    heard.length = 0;
+    QueueShotRequest(1, RAY);
+    GameUpdate(EYE, 1 / 60, host, rng, events);
+    check("...and player 1 carries the other gun, not a copy of player 0's",
+          heard[0] === g_gunshot_sound_ids[1]
+          && g_gunshot_sound_ids[0] !== g_gunshot_sound_ids[1],
+          heard.map((h) => h.toString(16)).join(" "));
+    check("the two ids are the exe's own `a9163400 a9163300`",
+          g_gunshot_sound_ids[0] === 0x003416a9
+          && g_gunshot_sound_ids[1] === 0x003316a9,
+          g_gunshot_sound_ids.map((h) => h.toString(16)).join(" "));
+    // Both are namespace 0 -- SE -- which is what routes them to `/se/` rather
+    // than to the BGM element. A gunshot that came out as a BGM id would stop
+    // the music and loop for ever.
+    check("...and both are SE ids, not music",
+          g_gunshot_sound_ids.every((id) => id >>> 28 === 0));
+    heard.length = 0;
+  }
 
   // Two pulls between frames both land, in the order they were made.
   const before = G.g_player_score[0];

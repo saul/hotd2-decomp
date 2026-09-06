@@ -12485,3 +12485,119 @@ single number that is right for all six; this one is right for more of them.
 `THUMB_FRAMES` is the whole of it, and 420 steps still take a fraction of a
 second.
 
+
+---
+
+## 2026-09-06 — "No gunshot sound, impact sound etc"
+
+### The chain was not broken, and that is the finding
+
+The report reads as a dead audio system, and I started by assuming it was one.
+It is not. `web/tools/audio.mjs` was written to find where the chain was
+severed and found no break anywhere in it: it loads the real page, clicks the
+sound button (which is both the unmute and the gesture that lifts the browser's
+autoplay block), fires a volley into stage 1 block 4, and measures **decoded
+samples** — every media element the page plays is routed through an
+`AnalyserNode` and its peak amplitude read while it plays. Before any change:
+seventeen distinct sources, fifteen of them audible, `ST1_AR` at 0.574,
+`BLOOD01/04/06` and `BONE01` at ~0.52, `BULLET_MET1/MET3/OTH1` at ~0.51, three
+zombie voices, a civilian's `200_C`, a prop breaking. Every one of them 206 from
+the dev server, none silent.
+
+`COMMON/GUN5_22.WAV` was the one thing missing, and it was missing because
+nothing asked for it.
+
+The measurement is the point. Both halves of it had to be real: it is not
+enough to hook `play()` and count calls, because that is the page's own opinion
+of itself, and it is not enough to count 200s, because a file that decodes to
+silence answers 200. Peak sample on the graph is what tells one from the other,
+and it is what the check asserts. (The 206 is normal, not a failure — the dev
+server serves ranges. My first version of the check called every 206 a 404 and
+failed the run it had just passed.)
+
+### What the engine plays
+
+`PlayerFireAndReloadUpdate` (`FUN_00414940`) ends a shot with three calls in a
+row: `BuildShotRay` (`FUN_00406110`), `PlayerShotEffectSpawn` (`FUN_00416F70`),
+`PlaySoundId(g_gunshot_sound_ids[player])`. `ResolveShotRequest` in
+`game/combat/shot.ts` had transcribed the first two and stopped at the third —
+its own comment even said the flash is spawned "between `BuildShotRay` and the
+gunshot sound", which is as close as a port gets to writing down what it left
+out.
+
+`g_gunshot_sound_ids` (`0x004EC8BC`) is two dwords, `a9163400 a9163300`:
+`0x003416A9` = `COMMON\GUN5_22.WAV` for player 0 and `0x003316A9` =
+`COMMON\GUN4_22.WAV` for player 1. Top nibble 0, so both are SE and route to
+`/se/`. Both files are in the install.
+
+A dry trigger plays **nothing**: with the magazine empty the routine never
+reaches the gunshot, it goes to `PlayerRefillMagazine` (`FUN_00414B30`) and its
+`0x3E16A9` `COMMON\RELOAD1_44.WAV`, gated on `g_nFiringGate`. The port has
+neither ammo nor the gate, so the reload has nowhere to be played from and was
+not invented. `[open]`.
+
+### Per weapon, and a table that turns out to be dead
+
+`0x00413EE5` reads `g_GameMode`, decrements it, and calls
+`PlayerFireOriginalModeWeapon` (`FUN_00414B90`, newly named) on zero and the
+arcade routine otherwise — so Original Mode has its own trigger, with an
+auto-fire latch and a `rand()` recoil spread the arcade one has not. Its
+gunshot is `g_original_weapon_gunshot_ids[g_original_weapon_sound_kind]`, and
+it falls back to `g_gunshot_sound_ids[player]` when that entry is zero.
+
+The weapon table (`0x004EC9A0`) is eight dwords: 0, then `SHOT_GUN_22`,
+`MCHN_GUN_22`, `GRENADE_22`, `MAGNUM_22`, `AIR_GUN_22`, `TOY_GUN1_44`,
+`RULE3_22`. **Eight, not sixteen** — L6 nearly had me: the index is a signed
+`char` and the next thirty-two bytes read as more of the same shape, but they
+are `g_original_weapon_reload_ids` (`0x004EC9C0`), the reload sound for the
+same eight weapons, of which only the grenade and the air gun have one. The
+boundary is the second table's own reader, not a terminator, and 0x004EC9E0
+after it is a u16 table.
+
+The index, `g_original_weapon_sound_kind` (`0x009A224A`), is +0x0A of the
+per-player Original Mode block. `ResetOriginalModeLoadout` (`FUN_0048A0D0`)
+writes it 0 — it is the second byte of the dword `0x03000006` stored at +0x08 —
+and no instruction in the image references `0x009A224A` except the two reads in
+the two fire routines. So on the reading so far both weapon sound tables are
+dead in the shipped build and *every* gunshot in the game is one of the two
+arcade ids. `[likely]` rather than `[proved]`: a write through a computed
+pointer into +0x0A would not necessarily show as a reference to that address,
+and I did not read the item-pickup routines that write the rest of the block.
+
+The order also agrees with `g_original_weapon_kind` at +0x09, which is a
+different byte: kind 3 draws no muzzle flash and adds the `0x53` blast, which
+is the grenade; 4 arms `g_shot_weapon_ring`, which is the magnum; 5 sends the
+tracer down the object-path arm at half speed, which is the air gun. Two
+parallel per-weapon selectors, both seeded 0.
+
+### The impact sounds were already there, and `ActorShotFeedback` does not own them
+
+The report bundles "impact sound" with the gunshot and it is worth stating
+plainly where they live, because the obvious place is the wrong one.
+`ActorShotFeedback` (`FUN_00454050`) owns the blood, the result-5 impact
+sprite, and the result-5 ricochet — and nothing else. The **flesh impact and
+the hurt/kill/headshot voices are `ActorPlayHitVoice` (`FUN_0040A6F0`)**,
+called from `ZombieOnShot` (`FUN_00453EB0`), which is the class's own on-shot
+drain and not the feedback routine. The port plays them from
+`render/shooting.ts` off `shot.resolved`, with a seeded pick, and they were
+audible before this change. The surface ricochets are the last line of
+`SpawnSpriteEffectFromParams` (`FUN_004073B0`) —
+`PlayImpactSoundForMaterial` — and the breakables carry their own crack and
+break ids out on `prop.cracked`/`prop.broken`. Nothing of that was missing.
+
+### Wrong turns
+
+* **I assumed the disease and looked for it.** The brief said to establish
+  whether the chain was live before writing port code, and that was the right
+  order: an hour spent in `audio/bgm.ts` or the dev server's `/se/` mapping
+  would have found nothing wrong with either.
+* **The 206-is-a-failure check.** The first version of `audio.mjs` asserted
+  every audio response was 200 and reported fifteen failures on a run where
+  every file loaded and played. A check that fails a healthy run is worse than
+  no check.
+* **De-escaping the TSVs with a global replace.** `annotate.py` took my shell
+  heredoc's `\\` literally, so six new rows spelled `COMMON\\GUN5_22.WAV`. The
+  fix — replace `\\` with `\` across both files — also rewrote two rows I had
+  not touched, `LiftUpdate` and `CivilianPlayDeathVoice`, which legitimately
+  carry a double backslash. Restored from `HEAD` and only my own rows kept.
+  The diff is what caught it; the edit looked fine.

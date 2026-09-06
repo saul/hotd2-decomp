@@ -13075,3 +13075,112 @@ visible object in the middle of a shot.
    session ported that is knowingly missing.
 2. If "completely in fog" is still being seen, get the URL and the bundle age
    from the top bar; nothing in this commit reproduces it.
+
+---
+
+## A body on the ground is not a target — `DispatchHit`'s one gate
+
+**Report:** *"the 14/8/2 `0x8094` `zsass` doesn't seem to die. shoot him
+enough, he makes a dead sound, but then he keeps on player."*
+
+### What the three numbers were
+
+`14/8/2` is **block / step / op**, which is the triple the player writes into
+its own URL (`app/main.ts`'s `` `${w.block}/${w.step}/${w.opIndex}` ``) and
+into the drive trace's `a` field, on the default stage — 2. `0x8094` is the
+actor's `at`, printed as `a.at.toString(16)` by the actors panel, and `at` is
+the **evt address of the spawn descriptor**. Stage 2, block 14, step 8, op 2 is
+a `spawn_obj` of one placement: `at 32916`, class 49, char type 22 (`zsass`),
+`body_condition 1`, `hp 130`, `initial_state 20`, dropping from y 37.9 to
+y −14.9. Op 18 of the same step is `wait_enemies_alive <= 0`. All of it
+`[proved]` off the exported bundle rather than assumed.
+
+### The answer
+
+`DispatchHit` (`FUN_004092F0`) is the **only** caller of `ResolveHit`
+(`FUN_00409430`) in the image, and it jumps past the call while `obj+0x34` bit
+`0x100` is up (`00409339 f6c501 TEST CH,0x1` / `0040933c 750e JNZ 0040934c`).
+So shot-immune means **no damage at all**, and the port had never implemented
+that half — only the *reaction* half, which `ThrowerOnShot` (`FUN_004499A0`)
+and `ZombieOnShot` (`FUN_00453EB0`) both test the same bit for.
+
+That is the whole bug, and its shape is nastier than either half alone. The
+window the bit covers is exactly the window nothing is listening in: a `zsass`
+shot to death while lying on the ground or getting up reached zero hit points
+with no reaction chosen, and `ThrowerStateFallAndLand`'s **sub 4 is a switch
+arm**, reached from `obj+0x1312` rather than through sub 3's survive test — so
+nothing on that path ever re-reads `dead`, and its own death state stood the
+corpse back up. It then threw, pounced and leapt aside while dead, inside
+`g_enemies_alive`, holding the step's gate open behind it. The death sound was
+never wrong: `ResolveHit` really had killed it.
+
+Three doc comments already said the rule out loud — `ThrowerOnShot`'s
+*"Downed, so the shot only ricochets; the result was forced to 5"*,
+`ActorShotFeedback`'s note that class 0x31 *"has its own copy in
+`ThrowerShotFeedback` that forces result 5 while the thrower is down"*, and
+`ThrowerStateGetUp`'s *"a real invulnerability window — shots ricochet off a
+thrower that is getting up"*. **[L26](../LESSONS.md) three times in one class,
+and not one of them was a check.**
+
+### The wrong turns, in order
+
+1. **Spent a long time trying to reproduce it as a hang, and it is not one.**
+   Every route I tried first — the isolated state machine, the seeded sweep
+   over firing rates and bones, a 30-clicks-a-frame volley in real Chrome at
+   the spot, and the full stage-2 playthrough — killed the actor cleanly and
+   cleared the gate. The report says *"doesn't **seem** to die"*, and the
+   symptom is a **transient**: dead and acting until the next round happens to
+   land somewhere the reaction is not vetoed. My first success criterion,
+   "dead and still in the pool at the end of the run", could not see it. The
+   criterion that could was **frames spent dead in a state that is not one of
+   the four death states**, and it fired on 2,224 of 11,520 patterns
+   immediately.
+2. **Chased the survive-versus-die predicate first**, because it is the obvious
+   suspect and the brief named it. It is right in the port:
+   `if ((obj+0x34 & 0x4000000) == 0 && obj+0x1350 != 0x5a)` get up, else die.
+   Not wasted — it produced one finding worth keeping (below) — but two hours
+   of it were spent on a correct line.
+3. **Suspected `obj+0x1F1` of being the answer.** The die arm of case 3 carries
+   a second gate on that byte. It has **six reads and no writes anywhere in the
+   image**, so it is always zero and the whole arm is unreachable — dead code
+   of the same family as `obj+0x3B8` in `ResolveHit`. `[proved]`, and not
+   ported. That reading also went the *wrong way* for the bug: a port that
+   omits the gate dies more readily, not less.
+4. **Read `render/shooting.ts` for the death sound before believing it.** The
+   kill voice is played off `HitResult.killed`, which `ResolveHit` sets, so the
+   sound proved the hit points really had reached zero and eliminated the
+   "hurt voice mistaken for a kill" reading in one look.
+
+### What landed
+
+* `DispatchHit` named and documented in `functions.tsv` and renamed in the live
+  database. It had a row with an empty comment.
+* `DispatchHit` in `game/combat/resolve_hit.ts` — the gate and the call, which
+  is the part that decides anything; `[diverges]` on the per-player loop, which
+  the port's shot queue answers elsewhere.
+* `ResolveShotRequest` goes through it, and a refusal is a **ricochet, not a
+  miss**: `g_hit_result = 5`, `ActorShotFeedback` runs, no score and no head
+  combo, because `ResolveHit` is what does both and it did not run.
+* Ten assertions in `web/test/port.test.ts`. Five fail without the fix; the
+  loudest is **601 frames dead in `LeapAside`**.
+* `web/tools/downed.mjs` drives the page at `?stage=2&block=14&step=8` and
+  measures hit points lost while the actor was in the immune states: **1 round
+  and 35 hp at frame 353 in `FallAndLand` sub 4** before, **0** after.
+
+### What is left
+
+* **The port's `ThrowerStateFallAndLand` sub-4 tail omits two lines the engine
+  has for character type 0x16**: `obj+0x133C = 0x1e` and a re-raise of
+  `obj+0x34` bit `0x100` (`0044a7e8 80cc01` / `0044a7eb c7863c1300001e000000`),
+  which give a thrower thirty more frames of invulnerability after it stands
+  up. `EnemyThrowerUpdate` already has the countdown that would clear it. Seen
+  while reading case 3; not ported, because it is a second behaviour change and
+  this commit is one. `[open]` in the sense of unported, not undetermined.
+* **`ThrowerStateHitReaction` can be re-entered indefinitely.** Shooting a
+  `zsass` once every 45 frames held it in state 1 sub 1 for 400 frames in the
+  fixture without it ever reaching the hub. Noticed while building the
+  reproduction; not chased, and not obviously wrong — the engine may do the
+  same.
+* **The same gate covers class 0x30**, whose emerging and script-frozen
+  zombies the port also let you damage. No report has been filed against that
+  and no assertion was written for it; the fix is generic and covers it.

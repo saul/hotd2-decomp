@@ -64,7 +64,7 @@ import { ActorByAt, G } from "../globals";
 import type { GameHost, ShotRay } from "../host";
 import { g_class_handlers } from "../registry";
 import type { SpawnClass } from "../spawn_class";
-import { HitResultCode, ResolveHit } from "./resolve_hit";
+import { DispatchHit, HitResultCode } from "./resolve_hit";
 import { ScoreAddForPlayer } from "./score";
 
 /**
@@ -284,7 +284,37 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     return;
   }
 
-  const out = ResolveHit(obj, pick.bone, CameraBackYawBams(), host, rng);
+  // Through `DispatchHit` (`FUN_004092F0`) and never straight into
+  // `ResolveHit`: the engine has exactly one call to the damage tables and it
+  // is behind the shot-immune gate. `null` is that refusal, and it is a
+  // **ricochet**, not a miss — the shot marked the actor, so the feedback
+  // routine still runs, with the result the class's own copy forces.
+  const out = DispatchHit(obj, pick.bone, CameraBackYawBams(), host, rng);
+  if (!out) {
+    // `ThrowerShotFeedback` (`FUN_00449B20`) opens
+    // `if (obj+0x34 & 0x100) g_hit_result[p] = 5;` — class 0x31's own copy of
+    // `ActorShotFeedback`, and the only routine in the image that says what a
+    // refused hit reports.
+    //
+    // [diverges] `ZombieOnShot` (`FUN_00453EB0`) reaches the shared
+    // `ActorShotFeedback` with `g_hit_result` **left over from the last
+    // resolved hit**, because `DispatchHit` writes the bone and not the
+    // result. The port has one merged feedback call site (see
+    // `combat/feedback.ts`) and will not model an uninitialised read: every
+    // class gets class 0x31's answer, which is the ricochet the player
+    // already sees and hears off a downed body.
+    G.g_hit_result = HitResultCode.NoEffect;
+    ActorShotFeedback(obj, pick.bone, pick.point, host, events);
+    // No `ScoreAddForPlayer` and no `g_head_combo_bonus`: both of those are
+    // inside `ResolveHit`, which did not run.
+    events?.emit("shot.resolved", {
+      player, kind: "actor", ray: req.ray, point: pick.point,
+      at: obj.at, bone: pick.bone, who: obj.name, charType: obj.charType,
+      head: false, killed: false, damage: 0, hp: Math.max(0, obj.hp),
+      result: HitResultCode.NoEffect, severed: false, gore: false, points: 0,
+    });
+    return;
+  }
   // `ActorShotFeedback` (`FUN_00454050`) — the blood, the ricochet sprite and
   // the ricochet sound, all of which read `g_hit_result`, so it runs after
   // `ResolveHit` has written it. See `combat/feedback.ts` for why it is here

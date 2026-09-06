@@ -131,6 +131,48 @@ randomised, so simultaneous hits do not systematically favour player 1.
 `DispatchHit` (`FUN_004092F0`) copies `(s8)obj+0x190+player` into
 `g_shot_bone[player]` and calls `ResolveHit`.
 
+### `obj+0x34` bit `0x100` is a hole in the world, not a damage modifier
+
+`DispatchHit` is the **only** caller of `ResolveHit` in the image — one xref —
+and it jumps over the call when that bit is set:
+
+```
+00409336  8b4834      MOV  ECX, dword ptr [EAX + 0x34]
+00409339  f6c501      TEST CH, 0x1                  ; obj+0x34 & 0x100
+0040933c  750e        JNZ  0x0040934c               ; past everything below
+0040933e  56          PUSH ESI
+0040933f  e8ec000000  CALL 0x00409430               ; ResolveHit
+```
+
+**[proved]**, and it settles what "shot-immune" means: **no damage at all** —
+not reduced damage, and not a hit resolved and then discarded. Every window a
+class raises the bit in is a window in which the damage tables are never
+opened: `ThrowerStateFallAndLand` (`FUN_0044A450`) from the moment the body
+settles until the get-up ends, `ThrowerStateGetUp` (`FUN_0044C2E0`) for the
+length of its clip, `ZombieStateEmergeFromWater` for the submerged half, and
+the scripted freezes.
+
+The bone is still written and the actor is still marked, so **the shot still
+gets feedback** — which is where `ThrowerShotFeedback`'s (`FUN_00449B20`) own
+opening line comes from:
+
+```c
+if (obj+0x34 & 0x100) g_hit_result[player] = 5;
+```
+
+Result 5 is the ricochet: sprite 3 (or 0x51 for character type 0x18), one of
+the metal clinks, no blood, and `ResolveHit` never ran so there is no score and
+no head combo either. Class 0x30 reaches the shared `ActorShotFeedback`
+(`FUN_00454050`) with `g_hit_result` **left over from the last resolved hit**,
+because `DispatchHit` writes the bone and not the result; that is an
+uninitialised read and the port does not reproduce it.
+
+The two halves of this rule are easy to separate and expensive to separate:
+`ThrowerOnShot` (`FUN_004499A0`) and `ZombieOnShot` (`FUN_00453EB0`) test the
+same bit and refuse to pick a *reaction*, so a port that gates the reaction and
+not the damage kills actors in the one window where nothing is listening for a
+kill. See `docs/BUGS.md`, the `zsass` at stage 2 `0x8094`.
+
 `ResolveHit` (`FUN_00409430`) reads three tables, all indexed the same way:
 
 ```c

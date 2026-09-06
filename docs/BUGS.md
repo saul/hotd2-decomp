@@ -6,8 +6,8 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Thirty-five reports: **thirty fixed, three half-done, one open, and one
-not-a-bug that carried a real defect underneath it.**
+Thirty-six reports: **thirty fixed, three half-done, one open, and two
+not-a-bug, one of which carried a real defect underneath it.**
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -927,6 +927,76 @@ that fix looked like it had not worked.
   at this commit and wants a fresh look with the two fixes above in place —
   the missing boat left the pair sitting in open water, which is its own way
   of reading as "nothing but haze out there".
+
+## And one about a zombie that made its death sound and carried on
+
+- `[fixed]` **"the 14/8/2 `0x8094` `zsass` doesn't seem to die. shoot him
+  enough, he makes a dead sound, but then he keeps on [the] player"** — the
+  locator is the player's own: **stage 2, block 14, step 8, op 2**, the
+  `spawn_obj` whose descriptor sits at evt `0x8094` (32916), and the sidebar's
+  actor rows print that address in hex. It is `class 49` / character type 0x16
+  / behaviour set 1 with 130 hit points, entering on state 20, and its step
+  ends on `wait_enemies_alive <= 0` at op 18.
+
+  The death sound was real and so was the death: `ResolveHit` (`FUN_00409430`)
+  took the hit points below one and `render/shooting.ts` played the kill voice
+  off exactly that. What was wrong is that **the round should never have
+  reached the damage tables at all.**
+
+  `DispatchHit` (`FUN_004092F0`) is the **only** caller of `ResolveHit` in the
+  image — one xref — and it jumps past the call while `obj+0x34` bit `0x100`
+  is set:
+
+  ```
+  00409336  8b4834      MOV  ECX, dword ptr [EAX + 0x34]
+  00409339  f6c501      TEST CH, 0x1
+  0040933c  750e        JNZ  0x0040934c        ; past the CALL
+  0040933f  e8ec000000  CALL 0x00409430        ; ResolveHit
+  ```
+
+  So an actor whose class has made itself shot-immune takes **no damage**: not
+  reduced damage, and not a hit that is resolved and then thrown away. The port
+  had the *reaction* half of that rule in three places and the damage half in
+  none. `ThrowerOnShot` (`FUN_004499A0`) refuses to react on the same bit,
+  `ZombieOnShot` (`FUN_00453EB0`) likewise, and `ThrowerStateGetUp`'s own doc
+  comment said in so many words that *"shots ricochet off a thrower that is
+  getting up"* — while `ResolveShotRequest` charged the damage anyway. That is
+  [L26](LESSONS.md) twice over: three notes describing a rule, no check saying
+  the code obeyed it.
+
+  The window the bit covers is precisely the window nothing is listening in.
+  `ThrowerStateFallAndLand` (`FUN_0044A450`) raises `0x100` when the body
+  settles, and its **sub 4 is a switch arm** — reached from `obj+0x1312`, not
+  through sub 3's survive test — so nothing on that path re-reads the actor's
+  death. A `zsass` killed lying on the ground or mid-get-up was therefore stood
+  back up by its own death state, into `ThrowerStateGetUp` when the head-shot
+  latch was up and into the hub otherwise. It then stood, threw, pounced and
+  leapt aside as a corpse, still inside `g_enemies_alive`, holding
+  `wait_enemies_alive` open behind it.
+
+  **Measured, before and after.** A sweep of 11,520 firing patterns against
+  that spawn — both hosts, twelve rates, eight phases, sixty seeds, a random
+  bone per round — left it acting while dead in **2,224** of them, for up to
+  106 frames at a stretch; after the fix, in **none**. In real Chrome at
+  `?stage=2&block=14&step=8`, `web/tools/downed.mjs` counts one round charged
+  while the actor was shot-immune (35 hp, frame 353, `FallAndLand` sub 4)
+  before and **zero** after.
+
+  The survive-versus-die rule itself was never wrong, and is worth writing
+  down because it was the first suspect: `ThrowerStateFallAndLand`'s case 3 is
+  `if ((obj+0x34 & 0x4000000) == 0 && obj+0x1350 != 0x5a)` — alive and not
+  landed on the killing surface — get up; otherwise die. The port matches it.
+  Its `else` arm carries one further gate, `obj+0x1F1 != 0`, and that byte has
+  **six reads and no writes anywhere in the image**, so it is dead code of the
+  same family as `obj+0x3B8` in `ResolveHit`. `[proved]`, and not ported.
+
+  What a refused round still does is what the player sees: the shot marked the
+  actor, so the feedback runs. `ThrowerShotFeedback` (`FUN_00449B20`) opens
+  `if (obj+0x34 & 0x100) g_hit_result[p] = 5;`, which is the ricochet sprite
+  and clink and no blood, no score and no head combo. `web/test/port.test.ts`
+  asserts all of it on the actor's own state and on both enemy counters — five
+  of its ten checks fail without the fix, the loudest being 601 frames dead in
+  `LeapAside`.
 
 ---
 

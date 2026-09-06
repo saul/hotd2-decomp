@@ -6,8 +6,11 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Thirty-five reports: **thirty fixed, three half-done, one open, and one
-not-a-bug that carried a real defect underneath it.**
+Thirty-six reports: **thirty fixed, three half-done, one open, and two
+`[not-a-bug]`, each of which carried a real defect underneath it.**
+The prose used to say *thirty fixed and one not-a-bug* against a body of 29
+and 2 -- the total was right and the split was wrong in both directions, which
+is what the per-marker grep below is for.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -927,6 +930,109 @@ that fix looked like it had not worked.
   at this commit and wants a fresh look with the two fixes above in place —
   the missing boat left the pair sitting in open water, which is its own way
   of reading as "nothing but haze out there".
+
+---
+
+## And one about the civilians standing still
+
+- `[fixed]` **"civilians seem to be missing their root motion"** — two broken
+  links, one in each direction, and the second is the answer to the question
+  the report asks.
+
+  **Yes, the engine's civilians use root motion, and it is the same routine
+  everyone else's goes through.** `SkeletonApplyRootMotion` (`FUN_00410C50`)
+  tests one thing before it moves an actor —
+  `if ((*(byte *)(model + 100) & 2) != 0)` — and `model + 100` is `model+0x64`,
+  which is `obj+0x1F8`. `ActorBuildSkinnedModel` (`FUN_00410440`) writes
+  `MOV dword ptr [ESI + 0x64], 0x3` at `0x004104C5`, unconditionally, so every
+  skeletal actor in the game is built with it on. `[proved]`
+
+  ### The link that was broken: `obj.scale` was a denormal
+
+  `CivilianRunScript`'s (`FUN_0048B9E0`) op 0x27 writes the character size:
+  `*(int *)(g_cur_actor_model + 0x116c) = param_2[1]`, the operand stored
+  verbatim into a float field. `SkeletonApplyRootMotion` runs
+  `MatrixScale(model+0x116C)` into the same matrix it rotates the root delta
+  through, so that field scales the ground a clip covers.
+
+  The port's opcode switch had `SetScale` at the bottom of a fall-through group
+  with four opcodes the comment above it calls *"unread ... deliberately no
+  behaviour"* — `SetGlobalB` (0x1B), `SetAttachMode` (0x23), `SetAttachTarget`
+  (0x24) and `SetPairA` (0x25). All four therefore ran `SetScale`'s body. Their
+  operands are small integers, `AsFloat` reinterprets a dword's bits, and
+  `AsFloat(2)` is `2.8e-45`: the civilian's every authored step was multiplied
+  to nothing while her legs kept walking. **125 commands across the shipped
+  streams run one of those four**, against **one** that runs op 0x27 — and that
+  one passes `0x42480000`, which is 50.0.
+
+  Measured over all six stages' 53 civilians, 30 s each: eight carried a
+  denormal scale, and stage 4's two `char_adv`-type civilians on motion 594
+  (net root translation `-10.8`) covered exactly `0.000` units. With the case
+  split out they cover `9.795`.
+
+  ### The link that was missing: the script owns the gate, block by block
+
+  Ops 0x00 and 0x01 write that gate on every clip **change**:
+
+  ```c
+  if (*(int *)(g_cur_actor_model + 0x20) != param_2[1]) {   // a different clip
+    *(int *)(g_cur_actor_model + 0x20) = param_2[1];
+    if ((*g_cur_civilian & 0x100000) == 0)
+      uVar7 = *(uint *)(g_cur_actor_model + 100) & 0xfffffffd;   // clear
+    else
+      uVar7 = *(uint *)(g_cur_actor_model + 100) | 2;            // set
+    *(uint *)(g_cur_actor_model + 100) = uVar7;
+  ```
+
+  `*g_cur_civilian` is the wait word. So bit `0x00100000` of the word that
+  opened the block is *"this block's clip carries her"*, and **289 of the 596
+  shipped wait commands set it while 297 do not** — the second group animate in
+  place. The port had no gate at all and carried every civilian in every block,
+  which is the same defect as the first one with the sign reversed, and it was
+  invisible because the two cancel: an actor dragged by her captor still moves.
+
+  `CivilianReapplyWaitCommand` (`FUN_0048B760`) deliberately does **not** write
+  it — it touches neither `model+0x20` nor `model+0x64` — so a skipped block
+  leaves the gate where the last real clip change put it. The port's
+  `obj.rootFrame = -1` is the engine's baseline reset (`model+0x1160`) and sits
+  in the same place, which is why re-opening the gate cannot lurch: the only
+  thing that can change it is the only thing that clears the baseline.
+
+  ### What changed
+
+  * `Actor.motionFlags` (`obj+0x1F8`) and `MotionFlag`, built at
+    `MOTION_FLAGS_INIT = 3`. Classes 0x30 and 0x31 never write it, so nothing
+    about the zombies moves.
+  * `ApplyRootMotion` tests `MotionFlag.RootMotion` first, which is the whole
+    of `FUN_00410C50`'s `if`.
+  * `CivilianSetMotion` writes it from `sub.wait & CivilianWait.RootMotion`,
+    inside the same "is this a different clip" test the engine keeps it in.
+  * `CivilianWait.RootMotion = 0x00100000`, with the decompiled arm on it.
+  * `class10/script.ts`'s fall-through split: the four unread opcodes `break`,
+    and `SetScale` has its own case.
+
+  Four assertions in `test:port` drive it on the actor's own position across
+  frames: a block *with* the bit walks `-Z`, the same clip in a block *without*
+  it does not move at all, the four unread opcodes leave the scale at 1 and she
+  still walks, and op 0x27 does write it. Reverting the gate fails the second,
+  reverting the fall-through fails the third, and dropping the wait-word read
+  fails three of the four.
+
+  `web/tools/civ_walk.mjs` (`npm run civ-walk`) is the eyes half — L25, because
+  this is a report about something you can see. It deep-links to stage 1 block
+  1 step 8, drives whole game frames through `?drive=1`, and reads the position
+  and gate straight off the Actors panel. Stage 1's `0x1828 hito_fem` reads
+  `root on · scale 0.9` and moves **20.87** units over 590 frames; with the
+  fall-through put back she reads `scale 1.4e-45` and moves 12.44 — because her
+  captor is dragging her, which is exactly why a check on position alone would
+  have passed the bug and the tool fails on the denormal instead.
+
+  Still `[open]`: the **other** root-translation path. `CivilianApplyMotionPose`
+  (`FUN_0048C310`) has an arm under wait bit `0x20000` that walks the actor
+  from the pol file's root bone rather than from the clip, and bits `0x8000`,
+  `0x10000` and `0x200000` steer the rest of that routine. Sixteen of the 596
+  wait commands set `0x20000`, six of them alongside `0x100000`. It is not
+  ported and those blocks stand where the script put them.
 
 ---
 

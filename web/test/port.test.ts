@@ -35,6 +35,7 @@ import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
+import { MotionFlag } from "../src/game/actor";
 import { CameraPointRiseFor, UpdateCameraFreeFlag }
   from "../src/game/camera/track";
 import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
@@ -5185,6 +5186,94 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     ]]);
     check("...and sign-extended, so 0xFFFF is -1 and not 65535",
           G.g_script_branch_var === -1, String(G.g_script_branch_var));
+  }
+
+  // **Does a civilian's clip carry her?**
+  //
+  // The director gives every visible actor `ActorAdvanceMotion` and then its
+  // class handler, so that is the pair driven here — `cFrame` alone is the VM
+  // and the VM does not touch the position. Everything below asserts on
+  // `a.pos`, because "the port thinks root motion is on" is the question the
+  // last round of this got right while the civilians stood still.
+  const cWalk = (a: ReturnType<typeof ActorSpawn>, events: Events,
+                 frames: number) => {
+    const z0 = a.pos.z, x0 = a.pos.x;
+    for (let i = 0; i < frames; i++) {
+      ActorAdvanceMotion(a, 1 / 60);
+      cFrame(a, events);
+    }
+    return { dz: a.pos.z - z0, dx: a.pos.x - x0 };
+  };
+  // Motion 12 is `motion(16, 1.289)` — sixteen frames running along -Z, the
+  // clip the zombie's own root-motion test uses. A civilian playing it with
+  // `loops = -1` plays it for ever.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 12, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    const gate = a.motionFlags & MotionFlag.RootMotion;
+    const d = cWalk(a, events, 120);
+    check("a civilian's clip carries her: two seconds of motion 12 walks -Z",
+          gate !== 0 && d.dz < -10 && Math.abs(d.dx) < 0.01,
+          `gate ${gate} dz ${d.dz.toFixed(3)} dx ${d.dx.toFixed(3)}`);
+  }
+  // The other half of the same switch, and the reason the first assertion is
+  // not enough on its own: `CivilianRunScript` op 0x00 *clears* `model+0x64`
+  // bit 1 when the block's wait word has no `0x00100000`, and 297 of the 596
+  // shipped wait words do not. Those clips animate in place.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetMotion, 12, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    const gate = a.motionFlags & MotionFlag.RootMotion;
+    const d = cWalk(a, events, 120);
+    check("...and a block without the bit plays the same clip in place",
+          gate === 0 && d.dz === 0 && d.dx === 0,
+          `gate ${gate} dz ${d.dz.toFixed(3)} dx ${d.dx.toFixed(3)}`);
+  }
+  // **The bug this pair was written for.** `SetGlobalB`, `SetAttachMode`,
+  // `SetAttachTarget` and `SetPairA` are unread and do nothing, and all four
+  // used to fall through into `SetScale`'s body — so their operands, small
+  // integers, were reinterpreted as float bit patterns into `obj.scale`.
+  // `AsFloat(2)` is 2.8e-45, `SkeletonApplyRootMotion` multiplies the root
+  // delta by it, and the civilian stopped moving while her legs kept walking.
+  // 125 commands in the shipped streams run one of those four.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetPairA, 1, 2),
+      cmd(CivilianOp.SetAttachMode, 2),
+      cmd(CivilianOp.SetGlobalB, 1),
+      cmd(CivilianOp.SetMotion, 12, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    const d = cWalk(a, events, 120);
+    check("the unread opcodes leave `model+0x116C` alone, so she still walks",
+          a.scale === 1 && d.dz < -10,
+          `scale ${a.scale} dz ${d.dz.toFixed(3)}`);
+  }
+  // Op 0x27 is the one command that may write it, and its operand really is a
+  // float bit pattern: `MOV dword ptr [model + 0x116c], param_2[1]`. The one
+  // shipped instance passes `0x42480000`, which is 50.0.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetScale, 0x42480000 | 0),
+      cmd(CivilianOp.SetMotion, 12, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    const d = cWalk(a, events, 60);
+    check("...and op 0x27 does write it, scaling the ground she covers with it",
+          a.scale === 50 && d.dz < -300,
+          `scale ${a.scale} dz ${d.dz.toFixed(3)}`);
   }
 }
 

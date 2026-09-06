@@ -33,7 +33,8 @@
     "leaps": "node tools/run_test.mjs tools/leaps.mjs",
     "lifetime": "node tools/run_test.mjs tools/lifetime.mjs",
     "test:texfilter": "node tools/run_test.mjs test/texfilter.test.ts",
-    "lookat": "node tools/lookat_live.mjs"
+    "lookat": "node tools/lookat_live.mjs",
+    "civ-walk": "node tools/civ_walk.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

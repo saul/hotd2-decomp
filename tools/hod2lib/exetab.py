@@ -690,6 +690,48 @@ class ExeTables:
 
     CAM_PATH_LENGTH = 0x00576D38
 
+    #: `g_actor_attachment_table` -- 81 pointers into
+    #: `g_actor_attachment_records`. The count is not stored: the record array
+    #: runs 0x004EC4C0..0x004EC748 at eight bytes each and the pointer table
+    #: begins where it ends, so 81 is arithmetic and not a scan for plausible
+    #: rows, which is the adjacent-array trap (L6). The largest id the shipped
+    #: evts use is 0x50.
+    ATTACHMENT_TABLE = 0x004EC748
+    ATTACHMENT_RECORDS = 0x004EC4C0
+    ATTACHMENT_COUNT = (0x004EC748 - 0x004EC4C0) // 8
+    #: The id below which `ActorBindPartList` REPLACES the bone's own model
+    #: rather than `ActorDrawAttachedParts` drawing an extra one. Both
+    #: routines carry it as a literal.
+    ATTACHMENT_REPLACES_BELOW = 0x24
+
+    def attachment_records(self) -> list[dict]:
+        """`g_actor_attachment_records` -- what an attachment list names.
+
+        Ids ``0x00..0x23`` are all bone 2 and name one of the interchangeable
+        ``hito_kao_*`` / ``etc_*_kao`` heads (*kao*, face), which
+        `ActorBindPartList` (`FUN_00412440`) writes over the bone's own slot.
+        Ids ``0x24`` and above name an ``etc_komono_*`` accessory (*komono*,
+        small item) on bone 2 -- hair and hats -- on bone 1, or on bones 12
+        and 15, which `ActorDrawAttachedParts` (`FUN_004124F0`) draws **in
+        addition** to the skeleton.
+
+        A row whose pointer does not resolve is kept as ``bone = -1`` rather
+        than dropped, so an id stays its own index.
+        """
+        out: list[dict] = []
+        base = self._v2r(self.ATTACHMENT_TABLE)
+        if base is None:
+            return out
+        for i in range(self.ATTACHMENT_COUNT):
+            ptr = struct.unpack_from("<I", self.data, base + i * 4)[0]
+            o = self._v2r(ptr)
+            if o is None or o + 8 > len(self.data):
+                out.append({"bone": -1, "slot": 0})
+                continue
+            bone, slot = struct.unpack_from("<2i", self.data, o)
+            out.append({"bone": bone, "slot": slot})
+        return out
+
     def character_skeleton(self, char_type: int) -> list[dict]:
         """The node tree for a character type, flattened, parents first.
 

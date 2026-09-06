@@ -278,6 +278,21 @@ export interface CharacterPlacement {
    */
   desc_flags?: number;
   /**
+   * The spawn's **attachment list** — `obj+0x1170`, ids into
+   * {@link CharactersJson.attachments}.
+   *
+   * `ActorBindPartList` (`FUN_00412440`) binds it as the actor is built. An
+   * id below `0x24` names a `hito_kao_*` face the bone draws **instead of**
+   * the one the skeleton names; an id at or above it names an `etc_komono_*`
+   * accessory `ActorDrawAttachedParts` (`FUN_004124F0`) draws **as well**.
+   *
+   * A civilian's hair is here and nowhere else: the head model the skeleton
+   * names is a shell open at the back, and the accessory is what closes it.
+   * Absent when the spawn has no list, which is 97 of the game's spawns have
+   * one and the rest do not.
+   */
+  attachments?: number[];
+  /**
    * `ZombieStateStandAndThrow`'s tail. `exit_state` is the same `tail+0x03`
    * byte as {@link CharacterPlacement.attack_state}, and it is what says whether
    * `walk_distance` or `leap` is the reading of `tail+0x10`.
@@ -601,6 +616,17 @@ export interface Class31Json {
   note?: string;
 }
 
+/**
+ * One row of `g_actor_attachment_records` — `0x004EC4C0`, 81 of them.
+ *
+ * `bone` is `-1` for a row whose pointer does not resolve; the row is kept so
+ * that an id stays its own index.
+ */
+export interface AttachmentRecord {
+  bone: number;
+  slot: number;
+}
+
 export interface CharactersJson {
   deaths: DeathSet;
   difficulty: DifficultyJson;
@@ -614,6 +640,18 @@ export interface CharactersJson {
   player: PlayerDamageJson;
   /** Class 0x31's own tables — see {@link Class31Json}. */
   class31?: Class31Json;
+  /**
+   * `g_actor_attachment_records` — `0x004EC4C0`, indexed by the ids in a
+   * placement's {@link CharacterPlacement.attachments}.
+   */
+  attachments?: AttachmentRecord[];
+  /**
+   * `ATTACHMENT_REPLACES_BELOW` — the id below which the record replaces the
+   * bone's own model rather than adding to it. Carried rather than assumed,
+   * because it is a literal in two exe routines and not a property of the
+   * data.
+   */
+  attachment_replaces_below?: number;
   types: Record<string, CharacterType>;
   placements: CharacterPlacement[];
   note: string;

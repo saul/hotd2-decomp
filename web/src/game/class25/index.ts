@@ -39,6 +39,7 @@
  * condition is unmet.
  */
 import type { Actor, HumanoidActor } from "../actor";
+import { ActorBindPartList } from "../attachments";
 import { ScriptedHumanoidDebug } from "./debug";
 import { authoredFrameOfTicks, ticksOfAuthoredFrame }
   from "../../core/play_cursor";
@@ -261,6 +262,10 @@ export function HumanoidProgramOf(a: Actor): HumanoidProgram | null {
  * so the descriptor's own type stands.
  */
 export function ScriptedHumanoidInit(obj: HumanoidActor): void {
+  // `model+0x1170 = *(u32 *)(tail + 8)`, then `ActorBindPartList` --
+  // the same two instructions `CivilianInit` runs, at the same tail
+  // offset. Five of the game's class-0x25 spawns carry a list.
+  ActorBindPartList(obj);
   const p = HumanoidProgramOf(obj);
   obj.hum.pc = 0;
   obj.hum.stallFrames = 0;

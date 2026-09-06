@@ -119,6 +119,14 @@ export interface CivItem {
   sets: number[][];
 }
 
+/** One row of `g_actor_attachment_records` -- `0x004EC4C0`. */
+export interface AttachmentRecord {
+  /** The skeleton bone the model hangs off, or replaces. */
+  bone: number;
+  /** The asset slot drawn there. */
+  slot: number;
+}
+
 export interface SkeletonNode {
   slot: number;
   offset: [number, number, number];
@@ -695,6 +703,62 @@ export class ExeTables {
   static readonly BREAKABLE_LEVEL_HEIGHT = 7.540296;
 
   static readonly CAM_PATH_LENGTH = 0x00576d38;
+
+  // -- the attachment table --------------------------------------------
+
+  /**
+   * `g_actor_attachment_table` -- `0x004EC748`, 81 pointers into
+   * `g_actor_attachment_records` (`0x004EC4C0`).
+   *
+   * The count is not stored anywhere: the record array runs
+   * `0x004EC4C0..0x004EC748` at eight bytes each and the pointer table begins
+   * where it ends, so 81 is arithmetic rather than a scan for plausible rows
+   * -- which is the adjacent-array trap, L6. Every id the shipped evts use
+   * falls inside it, the largest being `0x50`.
+   */
+  static readonly ATTACHMENT_TABLE = 0x004ec748;
+  static readonly ATTACHMENT_RECORDS = 0x004ec4c0;
+  static readonly ATTACHMENT_COUNT =
+    (0x004ec748 - 0x004ec4c0) / 8;
+
+  /**
+   * The id below which `ActorBindPartList` (`FUN_00412440`) **replaces** the
+   * bone's own model, instead of `ActorDrawAttachedParts` (`FUN_004124F0`)
+   * drawing an extra one. Both routines carry the constant as a literal; it
+   * is not derivable from the data.
+   */
+  static readonly ATTACHMENT_REPLACES_BELOW = 0x24;
+
+  /**
+   * `g_actor_attachment_records` -- what an actor's attachment list names.
+   *
+   * Ids `0x00..0x23` are all bone 2 and name one of the interchangeable
+   * `hito_kao_*` / `etc_*_kao` heads (*kao*, face); `ActorBindPartList` writes
+   * the slot over the bone's own, so the head the skeleton names is only a
+   * default. Ids `0x24` and above name an `etc_komono_*` accessory (*komono*,
+   * small item) on bone 2 -- hair and hats -- on bone 1, or on bones 12 and
+   * 15, and `ActorDrawAttachedParts` draws them **in addition** to the
+   * skeleton.
+   *
+   * A row whose pointer does not resolve is kept as `bone: -1` rather than
+   * dropped, so an id is still its own index.
+   */
+  attachmentRecords(): AttachmentRecord[] {
+    return this.cached("attachmentRecords", () => {
+      const out: AttachmentRecord[] = [];
+      const base = this.v2r(ExeTables.ATTACHMENT_TABLE);
+      if (base === null) return out;
+      for (let i = 0; i < ExeTables.ATTACHMENT_COUNT; i++) {
+        const o = this.v2r(u32(this.data, base + i * 4));
+        if (o === null || o + 8 > this.data.length) {
+          out.push({ bone: -1, slot: 0 });
+          continue;
+        }
+        out.push({ bone: i32(this.data, o), slot: i32(this.data, o + 4) });
+      }
+      return out;
+    });
+  }
 
   /**
    * The node tree for a character type, flattened, parents first.

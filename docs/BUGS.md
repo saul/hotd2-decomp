@@ -6,7 +6,7 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Thirty-one reports: **twenty-seven fixed, three half-done, one open.** Every fix
+Thirty-one reports: **twenty-eight fixed, three half-done, one open.** Every fix
 carries its evidence in the port's doc comments; the reasoning is in
 `docs/re/session-log.md`.
 
@@ -26,8 +26,6 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 * Shouldn't be able to shoot while the shutter is closed. Check the game code to see how the real game handles this
 
 * No gunshot sound, impact sound etc
-
-* Civilians hair doesn't render
 
 ### Three reports are half-done, and each remaining half is named
 
@@ -72,6 +70,22 @@ two numbers that say how finished the transcription is — are generated into
 
 Seven agents, one per group. Two of the fifteen turned out not to
 be port bugs at all, and they are marked as such rather than "fixed".
+
+- `[fixed]` Civilians' hair doesn't render — **the hair is a separate model
+  the exporter never carried.** A civilian's head model is a shell open at the
+  back: `hito_gal`'s bone 2 is 149 vertices spanning `z 0.18..1.38`, with four
+  vertex normals pointing backwards where every zombie head in the game has
+  fifteen to forty, so on its own it renders as a face on a neck. What closes
+  it is `model+0x1170`, the **attachment list**: `CivilianInit`
+  (`FUN_0048A3E0`) takes it from the spawn tail's `+0x08`, `ActorBindPartList`
+  (`FUN_00412440`) binds it and `ActorDrawAttachedParts` (`FUN_004124F0`) draws
+  it after every skeleton node. Ids below `0x24` replace bone 2's model with one
+  of the sixty interchangeable `hito_kao_*` faces; ids at or above it draw an
+  `etc_komono_*` accessory — *komono*, small item: hair and hats on bone 2, bags
+  on bone 1, shoes on bones 12 and 15. 97 spawns across classes `0x10`, `0x24`
+  and `0x25` carry a list and the port had none of it; the divergence was
+  declared in `class10/init.ts` ("binds the part list … `[diverges]` here") and
+  what it cost was not. `docs/formats/civilians.md` has the table.
 
 - `[fixed]` Backdrop is in the wrong position/should not be visible in Stage 3
   — `DrawBackdropDome` (`0x004132D0`) draws **twice**: the preset's `slot_a`

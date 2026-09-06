@@ -185,6 +185,87 @@ The skins are what the class is: `hito_gal`, `hito_galjk` (a schoolgirl),
 `hito_oyajiaa` and `hito_oyajisagyo` (old men, one in work clothes),
 `deka_musume`, `hitoc`, `char_adv0*` and `player_gold`.
 
+### The face and the hair are not in the skeleton
+
+**A civilian's head model is a shell that is open at the back.** `hito_gal`'s
+bone 2 is slot `0x0EAF`, 149 vertices spanning `z 0.18..1.38`, and **four** of
+those 149 vertex normals point backwards (`n.z < -0.5`) against 89 pointing
+forwards. Every zombie head in the game has fifteen to forty. Rendered on its
+own it is a face bowl on a neck, and that is exactly what the port drew until
+the attachment list below was ported. `[proved]`
+
+What closes it is `model+0x1170`, the **attachment list**. `CivilianInit`
+parks the spawn tail's `+0x08` pointer there and calls `ActorBindPartList`
+(`FUN_00412440`); `SkeletonDrawWalk` then runs `ActorDrawAttachedParts`
+(`FUN_004124F0`) through the hook at `model+0x1174` after every skeleton node.
+The list is an `s16[]` of ids terminated by a negative, and the id indexes
+`g_actor_attachment_table` (`0x004EC748`) — 81 pointers into
+`g_actor_attachment_records` (`0x004EC4C0`), each `{s32 bone; s32 asset_slot}`.
+The count is arithmetic, not a scan: the record array runs
+`0x004EC4C0..0x004EC748` at eight bytes each and the pointer table begins where
+it ends.
+
+**The ids split at `0x24` and the two halves do opposite things.** `[proved]`
+
+| Ids | Files | What happens |
+|---|---|---|
+| `0x00`–`0x23` | `hito_kao_*`, `etc_*_kao` | `ActorBindPartList` writes the record's slot **over** `bone_records[bone].slot`. All 36 are bone 2. *Kao* (顔) is **face**: `hito_kao_gal.bin` alone holds 60 heads of the same 149 vertices and 234 triangles as `hito_gal`'s own, differing only in texture — three skins × twenty mouth positions. The skeleton's head is the default, not the character. |
+| `0x24`–`0x50` | `etc_komono_*` | `ActorDrawAttachedParts` draws the record's slot **as well**, in the matrix of the record's bone. *Komono* (小物) is **small item**: hair and hats on bone 2, bags and aprons on bone 1, shoes on bones 12 and 15. |
+
+`ActorDrawAttachedParts` also scales bone 2 by `1.5, 1.0, 1.5` and bones 5, 8,
+12 and 15 by `2.0, 1.0, 2.0` while `g_GameMode == 1` (Original Mode) and
+`DAT_009C88AC` is set. What that byte is is `[open]`, and the scale is not
+ported.
+
+**The list is not class 0x10's.** `ActorBindPartList` has six callers and the
+tail offset is polymorphic (L3):
+
+| Class | Init | Offset | Spawns with a list |
+|---|---|---|---|
+| `0x10` | `CivilianInit` (`FUN_0048A3E0`) | `tail+0x08` | 52 of 65 |
+| `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | `tail+0x08` | 5 of 169 |
+| `0x24` | `SetPiecePropInit` (`FUN_00482CE0`) | `tail+0x00` | 40 of 67 |
+
+`FUN_004613C0`, `FUN_004617F0` and `FUN_0049A760` are the other three callers
+and are unread, so their classes and offsets are `[open]`.
+
+Reading the wrong offset for a class would not fail loudly — the bytes are some
+other field and the ids that come out are small numbers. What says these three
+are right is that **every one of the 97 lists names its own character's
+family**, with no exceptions: type `0x2E` (`hito_man`) takes `etc_komono_man`,
+`0x31` (`hito_mario`) takes `etc_komono_mario`, `0x22` (`hito_babann`) takes
+`etc_komono_baba`, `0x26` (`hito_gal`) takes `hito_kao_gal` and
+`etc_komono_gal`, `0x36` takes `etc_oyaji_kao`. `[proved]`
+
+`ActorReleasePartList` (`FUN_004124B0`) is the undo, and it releases the loads
+only — the overwritten bone slots are not put back, because the object is
+being torn down.
+
+### The waist and the skirt are not in the skeleton either
+
+Beside the attachment list there is a second set of parts the skeleton does not
+name: `g_pCharacterExtraParts` (`0x0052ED08`), one or two per character type,
+built by `BuildCharacterPart` (`FUN_00419520`) and drawn by
+`DrawCharacterPart` (`FUN_0041A300`) through
+`g_character_part_drawers` (`0x004EDAEC`). These are **vertex-blended**: the
+record holds four `{count, source verts, index list, bone matrix}` groups, and
+every frame the part's private copy of the model's vertex buffer is rewritten
+by transforming each group's vertices through a different bone's matrix. The
+five bone indices come from `g_character_part_bones` (`0x004ED1E0`), five `s32`
+per part — four to pull toward, then the one the whole part is drawn in.
+
+The default table's part 0 is `{1, 1, 9, 0}` drawn at 9: the upper body and the
+pelvis, which is the **waist**. Part 1 is `{9, 9, 10, 13}` drawn at 9: the
+pelvis and both thighs, which is a **skirt** — and its asset slot *is the
+pelvis model*, so the rigid draw would double it. `SkeletonNodeDrawSuppressed`
+(`FUN_004122E0`) is what stops that: for bone 9 it vetoes the draw on exactly
+ten slots — `0xE3C 0xE4D 0xEA2 0xEB6 0xEC6 0xED6 0xEF6 0xF06 0xF83 0x15B0` —
+which are exactly the ten characters that have a part 1. `[proved]`
+
+`[open]` The port draws both parts rigidly off the pelvis root and does not
+apply the veto, so those ten characters draw their pelvis twice. Nothing has
+been seen to go wrong with it; the deform itself is unported.
+
 ### Held items
 
 Ops 0x13, 0x14 and 0x15 put a model in a civilian's hand, and

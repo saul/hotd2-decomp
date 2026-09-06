@@ -12485,3 +12485,125 @@ single number that is right for all six; this one is right for more of them.
 `THUMB_FRAMES` is the whole of it, and 420 steps still take a fraction of a
 second.
 
+
+---
+
+## Session — the hair is a separate model, and 97 spawns wear one
+
+**Report:** *"Civilians hair doesn't render."* — `docs/BUGS.md`.
+
+**Outcome:** the attachment list is ported. `g_actor_attachment_records`
+(`0x004EC4C0`) and the per-spawn `s16[]` at `model+0x1170` now reach the
+bundle, `ActorBindPartList` (`FUN_00412440`) runs in three classes' `Init`, and
+`ActorDrawAttachedParts` (`FUN_004124F0`) is `CharacterLayer.syncAttachments`.
+
+### The wrong turns, in order
+
+The four shapes I was given to consider were: a model the exporter never
+carried; a model carried but never attached; a model drawn but invisible; a
+per-character variant picked wrongly. I spent most of the session eliminating
+the wrong three, and two of the eliminations were wasted effort.
+
+1. **`g_pCharacterExtraParts` (`0x0052ED08`) looked like the answer and is
+   not.** It is the table the docs already called "the parts the skeleton does
+   not name", and every civilian has one or two. Reading it properly turned out
+   to be worth doing for its own sake — they are **vertex-blended** parts, not
+   rigid ones, `BuildCharacterPart` (`FUN_00419520`) deforms each across four
+   bone matrices every frame, and part 1's asset slot *is the pelvis model*,
+   which is why `SkeletonNodeDrawSuppressed` (`FUN_004122E0`) exists — but the
+   two parts are the waist and the skirt, and neither is on the head.
+2. **I decoded the eight-vertex translucent mesh on every civilian head as
+   hair.** Two quads, one on each side of the head, ARGB1555, alpha-blended,
+   present on every one of the 25 civilian types. It is the **ears**: decoding
+   `hito_gal` texture 6 and looking at it settles it in one second and I should
+   have looked before theorising for twenty minutes. *A texture is faster to
+   read than a table.*
+3. **I checked the winding, the alpha modes, the base colours and the parse
+   completeness, and all four were fine.** Worth recording as negatives: every
+   civilian mesh's triangles agree with their stored normals except a handful;
+   every material's `alphaMode` follows the PowerVR2 list type correctly; every
+   base colour alpha is 1; and all 2,802 meshes in every character model
+   consume exactly the bytes their header declares, with no silent short walk.
+   The exporter carries every vertex and triangle of every civilian part —
+   asserted against the `pol/` files, not against another export.
+
+**What actually found it was looking at the picture.** I built
+`web/tools/civ_faces.mjs`, which photographs one rig part of every civilian in
+a real browser through the player's own `GLTFLoader`, and the back view of
+`hito_gal`'s head was a hollow bowl. The zombie's head, rendered the same way,
+is closed. That asymmetry is the whole bug, and no amount of table-reading was
+going to produce it. L19 and L25, again.
+
+### What it is
+
+`hito_gal`'s head model has **four** vertex normals out of 149 pointing
+backwards (`n.z < -0.5`) against 89 pointing forwards; every zombie head has
+15 to 40. The civilians' heads are face shells. Three of the 25 types —
+`hito_baba`, `hito_fem`, `deka_musume` — have extra hair meshes *inside* their
+head model and those three are the only ones with a closed back.
+
+The rest is `SkeletonDrawWalk`'s last line, which the annotation already
+described and nothing had followed: *"then runs the actor's attachment list."*
+
+* `model+0x1170` is an `s16[]` of record ids terminated by a negative.
+* `g_actor_attachment_table` (`0x004EC748`) is 81 pointers into
+  `g_actor_attachment_records` (`0x004EC4C0`), each `{s32 bone; s32 slot}`.
+  81 is arithmetic — the record array ends where the pointer table begins — not
+  a scan, which is L6.
+* Ids `0x00..0x23` are all bone 2 and name a `hito_kao_*` or `etc_*_kao` head.
+  *Kao* is **face**. `ActorBindPartList` writes the slot over the bone's own,
+  so the head a civilian's skeleton names is a default and not the character:
+  `hito_kao_gal.bin` holds 60 heads of identical geometry, three skins by
+  twenty mouth positions.
+* Ids `0x24..0x50` name an `etc_komono_*` model — *komono*, **small item** —
+  and `ActorDrawAttachedParts` draws it in addition, on bone 2 (hair, hats),
+  bone 1 (bags, aprons) or bones 12 and 15 (shoes).
+
+**The tail offset is polymorphic and that is L3 in its usual form.**
+`CivilianInit` and `ScriptedHumanoidInit` read `tail+0x08`; `SetPiecePropInit`
+reads `tail+0x00`. Reading the wrong one does not fail loudly — small integers
+come out either way. What says all three are right is that **every one of the
+97 lists names its own character's family**, with no exceptions: `hito_man`
+takes `etc_komono_man`, `hito_mario` takes `etc_komono_mario`, `hito_gal` takes
+`hito_kao_gal` and `etc_komono_gal`. Three more callers of `ActorBindPartList`
+— `FUN_004613C0`, `FUN_004617F0`, `FUN_0049A760` — are unread and their
+offsets are `[open]`; they are deliberately not in `ATTACHMENT_TAIL_OFFSET`.
+
+### The split, and where the line between the layers falls
+
+`game/attachments.ts` holds `ActorBindPartList` and `obj.attachments`
+(`model+0x1170`); the draw is `render/characters.ts`, because it is a draw. The
+first cut put a `ActorDrawnAttachments(obj)` filter in `game/` and had the
+renderer call it, which `verify_layers.py`'s `render-drives-the-port` rejects,
+correctly: the renderer now reads the split constant off the bundle as data.
+
+`ActorBindPartList` makes no `GameHost` call, unlike every other `boneSlot`
+writer. It runs inside an `Init`, before `CharacterLayer.adopt` has an instance
+to write through, so `adopt` replays `a.boneSlot` — the same path `resync`
+already took. Adding that replay is what makes the face swap appear at all, and
+it is a general fix: any `Init`-time bone slot was being dropped.
+
+### `[open]`, left where they are
+
+* The port draws both `g_pCharacterExtraParts` parts rigidly off the pelvis and
+  does not apply `SkeletonNodeDrawSuppressed`, so the ten characters with a
+  skirt draw their pelvis model twice. Nothing has been seen to go wrong; the
+  vertex-blend deform is unported.
+* `ActorDrawAttachedParts`' Original Mode scale — bone 2 by 1.5 in X and Z,
+  bones 5/8/12/15 by 2.0, gated on `DAT_009C88AC` — is not ported. What that
+  byte is has not been read.
+* `obj+0x116C` is a per-actor scale `ActorBuildSkinnedModel` (`FUN_00410440`)
+  sets to **0.9 for every character type `0x20`–`0x38`**, and op 0x27 writes.
+  It reaches the draw only through `FUN_0041EBB0`, which is `ret`. So every
+  civilian is authored 10% smaller than it is drawn, in a build where the
+  scale does nothing. Not ported, deliberately.
+* `CivilianInit` installs `UNK_0048D1F0` as the per-node draw hook in place of
+  `SkeletonDrawNodeSlot`. Unread; it is a large switch and it is not what was
+  missing here.
+
+### Next actions
+
+* The three unread `ActorBindPartList` callers, if anyone wants the last of the
+  attachment lists.
+* `UNK_0048D1F0` — what a civilian's node draw does that the default does not.
+* The vertex-blend deform, if a skirt ever looks wrong.

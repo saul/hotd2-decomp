@@ -19,24 +19,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 28899 | 127 | engine |
-| `hod2lib/` | 14068 | 34 | engine |
-| `render/` | 7642 | 29 | render |
+| `game/` | 29020 | 128 | engine |
+| `hod2lib/` | 14229 | 34 | engine |
+| `render/` | 7711 | 29 | render |
 | `app/` | 7094 | 29 | app |
 | `script/` | 3543 | 25 | engine |
 | `ui/` | 2944 | 26 | ui |
-| `bundle/` | 1823 | 11 | engine |
+| `bundle/` | 1861 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **67514** | **292** | |
+| **total** | **67903** | **293** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 1876
-* `game/actor.ts` — 1597
+* `game/actor.ts` — 1610
 * `script/walker.ts` — 1563
-* `hod2lib/exetab.ts` — 1441
+* `hod2lib/exetab.ts` — 1505
 * `hod2lib/gltf.ts` — 1329
 
 ## The port
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 653 in `ghidra/annotations/functions.tsv` |
-| Named globals | 346 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 26 under `tools/`, run together by `verify_all.py` |
+| Named functions | 658 in `ghidra/annotations/functions.tsv` |
+| Named globals | 350 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 27 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -113,10 +113,11 @@ nothing exits 3 and is never counted as green.
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
+| `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-5 of them need the installed game and 3 need an exported
+6 of them need the installed game and 3 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

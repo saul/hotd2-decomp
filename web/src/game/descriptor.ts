@@ -71,6 +71,9 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // sub-type, where `EnemyZombieInit` reads the same two bytes as the body
     // condition and the initial state -- so this cannot ride on
     // `condition`/`initialState` above without one class reading the other's.
+    // `ActorBindPartList` (`FUN_00412440`) reads it out of the descriptor
+    // tail, at `+0x08` for classes 0x10 and 0x25 and `+0x00` for 0x24.
+    attachments: p?.attachments ? [...p.attachments] : [],
     oneHitTarget: p?.class20 ?? null,
     // Class 0x52's and 0x53's tails, under their own keys for the same reason
     // class 0x20's is: `tail+0x00` is class 0x30's body condition, and a

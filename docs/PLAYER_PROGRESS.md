@@ -452,6 +452,20 @@ The rest of the class's own render half came with it:
   `MarkActorShot`, not at `ResolveHit`. `ClassHandler.ownsShotResult` is that
   fork in the port, and `Shooting` takes it the same way it takes a breakable
   prop: mark it, and let the class score it.
+* **They have faces and hair.** A civilian's head model is a shell open at the
+  back — `hito_gal`'s bone 2 has four backward-facing vertex normals out of
+  149, where every zombie head has fifteen to forty — so drawn on its own it is
+  a face on a neck, which is what the player drew and what the "civilians' hair
+  doesn't render" report was. The rest is `model+0x1170`, the **attachment
+  list**: `CivilianInit` takes it from the spawn tail's `+0x08` and
+  `ActorBindPartList` (`FUN_00412440`) binds it. An id below `0x24` replaces
+  bone 2's model with one of the sixty interchangeable `hito_kao_*` faces — so
+  the head the skeleton names is a default, not the character — and an id at or
+  above it has `ActorDrawAttachedParts` (`FUN_004124F0`) draw an `etc_komono_*`
+  accessory on top: hair and hats on bone 2, bags on bone 1, shoes on bones 12
+  and 15. Classes 0x24 and 0x25 read the same list, at `tail+0x00` and
+  `tail+0x08`; 97 of the game's spawns carry one. The models ride the same
+  hidden template as the held items and the gore.
 * **They hold things.** Ops 0x13-0x15 hang an `etc_1.bin` model off bone 5 with
   a rotation and an offset picked by a six-way attach set the character type
   chooses, and op 0x15 draws its record from a weighted table — through

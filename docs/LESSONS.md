@@ -182,7 +182,7 @@ nothing if it is not the first thing consulted when a fix does not appear to
 land.
 
 **L25 -- A wrong picture passes a weak check three times in a row.** The
-thumbnail a stage is built with is meant to be the frame two seconds in. Three
+thumbnail a stage is built with is meant to be a frame some seconds in. Three
 separate faults each produced a flat fill of the fog colour -- a transport the
 loader had stopped, a capture taken off the frame callback, and a second
 request landing during the next stage's teardown -- and every one of them left

@@ -12474,3 +12474,14 @@ check:
   built" for as long as six image reads take. The labels are what the screen is
   unreadable without; they go in first now, and the pictures follow.
 
+### Two seconds became seven
+
+Asked for after looking at what the six frames actually held. Two seconds is
+still inside the opening swoop on half the stages. Seven puts stage 2 on the
+overturned car with the civilians round it and stage 3 on the two of them in
+the boat, and it costs stage 1, which at two seconds was the piazza from the
+rooftops and at seven is a close-up of a police car's roof light. There is no
+single number that is right for all six; this one is right for more of them.
+`THUMB_FRAMES` is the whole of it, and 420 steps still take a fraction of a
+second.
+

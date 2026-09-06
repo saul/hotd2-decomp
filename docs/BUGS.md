@@ -633,11 +633,17 @@ that fix looked like it had not worked.
 - `[fixed]` **"when building the stage, it should render a screenshot 2 secs of
   simulated wallclock time into the stage and use that as the screenshot"** —
   `Player.captureThumb`. Every stage the bundle screen builds is loaded,
-  stepped 120 frames through `stepOneFrame`, and photographed, before the
-  screen's own closing load puts the player back. Simulated rather than waited
-  out, so it costs a fraction of a second and lands on the same frame every
-  time: the port is deterministic given the stage and the seed, so the picture
-  is a property of the stage rather than of whoever was watching. Audio is
+  stepped through `stepOneFrame`, and photographed. Simulated rather than
+  waited out, so it costs a fraction of a second and lands on the same frame
+  every time: the port is deterministic given the stage and the seed, so the
+  picture is a property of the stage rather than of whoever was watching.
+
+  **Seven seconds, not the two first asked for**, on a second look at what the
+  frames hold: two is early enough that three of the six are still in the swoop
+  of an opening cutscene. Seven puts stage 2 on the overturned car with the
+  civilians round it and stage 3 on the two of them in the boat. It is not free
+  either way -- stage 1 at seven seconds is a close-up of a police car's roof
+  light, where at two it was the piazza from the rooftops. `THUMB_FRAMES`. Audio is
   muted across it, and the address bar is left alone.
 
   The load-time capture stays as a fallback for a stage that was only ever

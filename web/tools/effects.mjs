@@ -26,7 +26,7 @@
  *
  * Screenshots go to `web/shots/`, which is gitignored.
  */
-import { openPlayer, waitForLoad, enableShooting, SHOTS } from "./lib/player.mjs";
+import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -67,7 +67,6 @@ const check = (name, ok, detail = "") => {
 
 try {
   await waitForLoad(page);
-  await enableShooting(page);
   await openAll();
   mkdirSync(SHOTS, { recursive: true });
   const box = await page.locator("#viewport").boundingBox();
@@ -76,9 +75,14 @@ try {
   // spawns the same records and marks the same materials whichever way they
   // are set.
   check("the bundle marks its blood materials",
-        /materials/.test(await row("blood")), await row("blood"));
+        /[1-9]\d* swapped/.test(await row("blood")), await row("blood"));
   check("...and red is the default, because the bundle's own bank is green",
         /^red/.test(await row("blood")), await row("blood"));
+  // **What the materials hold, not what the mode says.** The first cut of the
+  // switch changed its mode and left every pixel alone, and a check on the
+  // mode passed the whole time.
+  check("...with every marked material actually holding the transpose",
+        /(\d+)\/\1 swapped/.test(await row("blood")), await row("blood"));
   /**
    * One view toggle, by its exact label.
    *
@@ -101,8 +105,9 @@ try {
     await page.waitForTimeout(120);
   };
   await toggle("Red blood");
-  check("...and it can be put back to green",
-        /^green/.test(await row("blood")), await row("blood"));
+  check("...and it can be put back to green, maps and all",
+        /^green/.test(await row("blood")) && /0\/\d+ swapped/
+          .test(await row("blood")), await row("blood"));
   await toggle("Red blood");
   check("...and back again", /^red/.test(await row("blood")),
         await row("blood"));

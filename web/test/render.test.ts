@@ -72,6 +72,7 @@ const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE }
   = await import("../src/render/lighting");
 const { SlotModelLayer } = await import("../src/render/slotmodels");
 const { EffectLayer } = await import("../src/render/effects");
+const { BloodColourLayer } = await import("../src/render/bloodcolour");
 const { FLASH_SMOKE_SCALE, FLASH_SMOKE_SCALE_KIND4 }
   = await import("../src/game/effects/shot_effects");
 const { G, ResetGameGlobals } = await import("../src/game/globals");
@@ -1150,6 +1151,64 @@ console.log("\nthe shot effects are models, one per frame:");
   check("a record that has expired takes its node with it",
         layer.describe.startsWith("0 drawn"), layer.describe);
   ResetGameGlobals();
+}
+
+
+console.log("\nthe blood colour switch moves the map, not the shader:");
+{
+  // A 2x1 image and just enough canvas to transpose it. The file's own stub is
+  // for text labels and has no pixel calls, so this one is local and put back.
+  const doc = globalThis.document;
+  const px = new Uint8ClampedArray([10, 200, 30, 255, 40, 50, 60, 255]);
+  const held = new Uint8ClampedArray(px);
+  (globalThis as unknown as { document: unknown }).document = {
+    createElement: () => ({
+      width: 0, height: 0,
+      getContext: () => ({
+        drawImage: () => undefined,
+        getImageData: () => ({ data: held }),
+        putImageData: () => undefined,
+      }),
+    }),
+  };
+
+  const map = new CanvasTexture({ width: 2, height: 1 } as never);
+  const mat = new MeshBasicMaterial({ map });
+  mat.userData = { hod2_blood: true };
+  const plain = new MeshBasicMaterial({ map: new CanvasTexture({ width: 2, height: 1 } as never) });
+  const root = new Obj3D();
+  const a = new Mesh(new PlaneGeometry(1, 1), mat);
+  const b = new Mesh(new PlaneGeometry(1, 1), plain);
+  root.add(a);
+  root.add(b);
+
+  const layer = new BloodColourLayer();
+  layer.prepare(root);
+  check("only the marked material is collected",
+        /1\/1 swapped/.test(layer.describe), layer.describe);
+  check("red is the default, and it is the transposed map",
+        mat.map !== map && layer.colour === "red", layer.describe);
+  check("...and the transpose really exchanges R and G",
+        held[0] === 200 && held[1] === 10 && held[2] === 30,
+        `${held[0]},${held[1]},${held[2]}`);
+
+  // **The regression this exists for.** The first cut did the swap in the
+  // fragment shader through `onBeforeCompile`; the material's mode changed and
+  // its pixels did not, because the program was never rebuilt. Asserting the
+  // mode would have passed. Asserting what the material *holds* does not.
+  const red = mat.map;
+  layer.setColour("green");
+  check("green puts the bundle's own map back",
+        mat.map === map && /0\/1 swapped/.test(layer.describe), layer.describe);
+  layer.setColour("red");
+  check("...and red puts the transpose back, the same object as before",
+        mat.map === red && /1\/1 swapped/.test(layer.describe), layer.describe);
+  check("the unmarked material is never touched", plain.map !== null);
+
+  layer.dispose();
+  check("disposing drops the transposes", /no blood materials/
+        .test(layer.describe), layer.describe);
+  (globalThis as unknown as { document: unknown }).document = doc;
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

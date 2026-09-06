@@ -11977,3 +11977,50 @@ One thing worth keeping: `customProgramCacheKey` has to change with the swap.
 three.js caches compiled programs across materials, and two materials that
 differ only in an `onBeforeCompile` string share a program without it — so the
 first blood material to compile decides the colour for all 153.
+
+### Follow-up — "the red blood switch doesn't work at all", and it did not
+
+*2026-09-06.* Reported, and true. The first cut swapped the two channels in
+the **fragment shader**, through `onBeforeCompile`, with `needsUpdate` and a
+varying `customProgramCacheKey` to force a rebuild. Measured in the page, the
+blood was red under *both* settings and green never appeared: the swap landed
+on whichever state a material first compiled in and never moved again.
+
+**What made the check pass while the feature did not work.** Every assertion
+was about the layer's `mode`, and the mode changed correctly every time. The
+browser harness read the same string back and agreed with itself. Nothing
+anywhere asked what the materials were actually **holding**.
+
+The fix is to stop depending on a shader rebuild: `render/bloodcolour.ts`
+builds one transposed `CanvasTexture` per distinct map at `prepare` and the
+toggle assigns `material.map`. Reassigning a map is a path three.js takes for
+every video texture in the world and it cannot be cached past. 153 materials
+in stage 1, 107 distinct maps.
+
+`describe` now reports `1/1 swapped` — the count of materials whose `map` is
+**identically** the transpose, walked fresh each time it is asked — so the row
+in the sidebar and the browser harness both assert the thing that was wrong
+rather than the thing that was right. `test/render.test.ts` asserts the same
+property headlessly, including that the transposed pixels really do exchange
+R and G.
+
+### Two wrong turns on the way to it, both about measuring
+
+* **Counting "strongly red" and "strongly green" pixels proved nothing.** The
+  thresholds are not symmetric against this game: blood composited over a warm
+  stone corridor passes `r > g + 55` easily and never passes `g > r + 55`, so
+  green blood scored zero whether or not it was there. It read as "the switch
+  does nothing" for a reason that had nothing to do with the switch.
+* **Reading the WebGL canvas back with `drawImage` gave an all-zero image.**
+  The context has no `preserveDrawingBuffer`, so the buffer is already cleared
+  by the time a copy runs. Playwright's own screenshot is composited properly;
+  decoding *that* back inside the page is what works.
+
+In the end the thing that settled it was a screenshot of each setting, looked
+at. `web/shots/bloodshot_green.png` is green blood on two zombies with the row
+reading `green, 0/153 swapped`.
+
+Also repaired here: `tools/lib/player.mjs` stopped exporting `enableShooting`
+midway through this — a peer removed the `shoot` toggle, which is now always
+on — and `tools/effects.mjs` imported it. That is a shared-harness breakage
+rather than a port one, and the tool is fixed to match.

@@ -21,7 +21,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 |---|---:|---:|---|
 | `game/` | 28447 | 126 | engine |
 | `hod2lib/` | 13679 | 34 | engine |
-| `render/` | 7329 | 29 | render |
+| `render/` | 7397 | 29 | render |
 | `app/` | 6152 | 28 | app |
 | `script/` | 3542 | 25 | engine |
 | `ui/` | 2866 | 26 | ui |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 889 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **65148** | **289** | |
+| **total** | **65216** | **289** | |
 
 The largest files, which is where the pressure to split next is:
 

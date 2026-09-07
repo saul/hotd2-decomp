@@ -257,6 +257,80 @@ for (const stage of STAGES) {
         + skipped.slice(0, 4).map(([k, o]) => `${k} at op ${o}`).join(", "));
 }
 
+// -- one stage hands the next its starting block ---------------------------
+
+/**
+ * Playing a stage to the end names the block the next stage opens at, and it
+ * is one the next stage says it can be entered at.
+ *
+ * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) ends a scene by walking onto a hole
+ * and then reads `g_evt_block_index` back out of the record it just left, at
+ * `+0x02` -- `next[0]` of the terminal record. `Walker.nextEntryBlock` is that
+ * value. Nothing in the engine's scene load touches the global again, so it is
+ * literally where the next stage starts.
+ *
+ * Driving it here rather than reading the tables is the point: the tables are
+ * what `tools/verify_scene_exits.py` checks, and this checks that **the walker
+ * actually gets there** -- that a stage played from each of its own entry
+ * blocks reaches a terminal record at all, and that both sides of the seam
+ * agree about which block comes next.
+ *
+ * Every branch is taken the way `takeBranch` with no argument takes it, which
+ * is `g_script_branch_var` as the run left it -- 0 with no gameplay. So this
+ * drives one route per entry, not every route; the exhaustive statement about
+ * routes is the exporter's `exits`, asserted against the exe by
+ * `verify_scene_exits.py`.
+ */
+console.log("\na finished stage names where the next one opens:");
+{
+  const scripts = new Map<number, ScriptJson>();
+  for (const stage of STAGES) {
+    const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+    if (existsSync(file)) {
+      scripts.set(stage, JSON.parse(readFileSync(file, "utf8")) as ScriptJson);
+    }
+  }
+  for (const [stage, script] of scripts) {
+    const entries = script.entries?.length ? script.entries
+                                           : [script.entry_block];
+    const reached: string[] = [];
+    let bad = "";
+    for (const entry of entries) {
+      const w = new Walker(script, mkHost());
+      w.reset(entry);
+      w.replaying = true;
+      for (let i = 0; i < 200_000 && !w.finished && !w.parked; i++) {
+        if (w.wait) { w.stepOverWait(); continue; }
+        if (w.branch) { w.takeBranch(); continue; }
+        if (!(w as unknown as Inner).executeOne(true)) break;
+      }
+      if (!w.finished) { bad ||= `entry ${entry} never ended`; continue; }
+      const next = w.nextEntryBlock;
+      if (next === null) { bad ||= `entry ${entry} ended naming nothing`; continue; }
+      reached.push(`${entry}->${next}`);
+      // The exporter's own answer for this stage, from the exe's route table.
+      const declared = (script.exits ?? []).map((e) => e.entry);
+      if (declared.length && !declared.includes(next)) {
+        bad ||= `entry ${entry} ended on block ${next}, which is not one of `
+              + `this stage's exits (${declared.join(", ")})`;
+      }
+      // And the next stage has to agree it can be entered there.
+      const nextScript = scripts.get(stage + 1);
+      if (nextScript) {
+        const theirs = nextScript.entries?.length
+          ? nextScript.entries : [nextScript.entry_block];
+        if (!theirs.includes(next)) {
+          bad ||= `hands stage ${stage + 1} block ${next}, which lists `
+                + `${theirs.join(", ")}`;
+        }
+      }
+    }
+    check(`stage ${stage}: each of its ${entries.length} entries plays to an `
+          + `ending that names the next stage's block (${reached.join(", ")})`,
+          !bad && reached.length === entries.length, bad);
+  }
+}
+
 // -- a deferred resume resumes ----------------------------------------------
 
 /**

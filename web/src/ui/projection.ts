@@ -345,6 +345,20 @@ export interface UiProjection {
    */
   bundleStale: boolean;
   stages: readonly number[];
+  /**
+   * The blocks the current stage can open at, ascending, and which one it did.
+   *
+   * A stage does not choose where it starts -- the stage before it does. Its
+   * last route record names the block it hands over, and stage 2 has two
+   * endings that name different ones. So **stage 3 opens at block 0 or block
+   * 7, and stage 4 at block 0 or block 4**; every other stage has one entry
+   * and the picker has nothing to offer.
+   *
+   * Empty before there is a stage. See `ScriptJson.entries`.
+   */
+  entries: readonly number[];
+  /** Which of {@link UiProjection.entries} this run opened at. */
+  entry: number;
   original: boolean;
   /** Null once the stage is up. */
   loading: LoadingProjection | null;

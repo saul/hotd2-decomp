@@ -265,6 +265,78 @@ class ExeTables:
     def scene_block_count(self, scene: int) -> int:
         return len(self.scene_routes(scene))
 
+    #: The last scene of the chain a stage run walks. Scenes 0..5 are stages
+    #: 1..6, and ``RunPhaseStepToNextScene`` leaves the chain at 6.
+    LAST_STAGE_SCENE = 5
+
+    def scene_exits(self, scene: int) -> list[tuple[int, int]]:
+        """Where this scene can end, and the block each ending hands the next.
+
+        **A terminal route record's ``next[0]`` is the next scene's starting
+        block.** ``EvtAdvanceStepOrRoute`` (``FUN_0045F000``) ends a scene by
+        walking onto a hole -- a ``kind == 2`` record does ``block += 1`` and
+        the record after it is a hole -- and then reads::
+
+            g_evt_block_index =
+                *(s16 *)(g_scene_routes[scene] + g_evt_block_index * 8 - 6);
+
+        at ``0x0045F0DA``. ``block * 8 - 6`` is record ``block - 1`` at
+        ``+0x02``, which is ``next[0]`` of the record the walk just left.
+        Nothing between there and ``FUN_0045EBC0`` writes the block index
+        again -- not ``AdvanceToNextScene``, not ``LoadSceneAndReset``, not
+        ``ResetSceneOnEnter`` -- so that value is what the next scene opens
+        on. **[proved]**
+
+        Only records this scene can actually reach are returned, from every
+        block :meth:`scene_entry_blocks` says it can be entered at. The
+        shipped tables carry unreachable ``kind == 2`` records too -- four in
+        stage 2 where two are live -- naming entries nothing arrives at.
+
+        Returned in block order as ``(terminal block, next entry block)``.
+        """
+        routes = self.scene_routes(scene)
+        seen: set[int] = set()
+        stack = list(self.scene_entry_blocks(scene))
+        out: dict[int, int] = {}
+        while stack:
+            b = stack.pop()
+            if b in seen or not 0 <= b < len(routes):
+                continue
+            seen.add(b)
+            kind, *nxt = routes[b]
+            if kind == self.ROUTE_GOTO:
+                stack.append(nxt[0])
+            elif kind == self.ROUTE_BRANCH:
+                # Every live slot, not only the two Arcade's writers can name:
+                # slot 2 is Original Mode's road. On the shipped tables both
+                # modes reach the same endings, so the union costs nothing.
+                stack.extend(n for n in nxt if n >= 0)
+            elif kind == self.ROUTE_END:
+                out[b] = nxt[0]
+        return sorted(out.items())
+
+    def scene_entry_blocks(self, scene: int) -> list[int]:
+        """Every block this scene can be entered at, ascending.
+
+        Scene 0 is ``ResetGameOnStart``'s block 0 and every later scene is the
+        set of the ``next[0]`` values the scene before it can reach -- see
+        :meth:`scene_exits`. So this is a forward walk down the chain and not
+        a property of the scene's own file.
+
+        The shipped answer: **stage 3 starts at block 0 or block 7, stage 4 at
+        block 0 or block 4**, and every other stage has one entry. Which one a
+        run gets is decided by the branches it took in the stage before.
+
+        A scene off the stage chain -- training, the attract screens, the
+        ending -- has no predecessor here and reports block 0. That is not a
+        claim about how those scenes are entered: ``RunAttractDemo`` names its
+        own block and ``ResetGameOnStart`` names ``g_training_lesson``'s.
+        """
+        if scene <= 0 or scene > self.LAST_STAGE_SCENE:
+            return [0]
+        found = sorted({entry for _, entry in self.scene_exits(scene - 1)})
+        return found or [0]
+
     # -- asset slots and streaming --------------------------------------
     #
     # A pol/ file is a bundle of numbered *asset slots*. The streaming loader

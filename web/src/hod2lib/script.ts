@@ -767,8 +767,30 @@ export class Program {
    * separate entry record.
    */
   entryBlock(): number {
-    for (const b of this.blocks) if (!b.isHole) return b.index;
-    return 0;
+    return this.entries()[0];
+  }
+
+  /**
+   * Every block this scene can be entered at, ascending.
+   *
+   * Which one a run gets is decided by the stage *before* this one: a
+   * terminal route record's `next[0]` is the block it hands the next scene,
+   * and `EvtAdvanceStepOrRoute` writes it into `g_evt_block_index` where it
+   * survives the whole scene load. See {@link ExeTables.sceneExits}.
+   *
+   * **Stage 3 can be entered at block 0 or block 7 and stage 4 at block 0 or
+   * block 4.** Every other stage has one entry, which is block 0 -- and that
+   * is why this used to be computed as "the first block that is not a hole"
+   * and looked right. It was right about the number and wrong about the
+   * reason, and it had no way to produce the second entry at all.
+   */
+  entries(): number[] {
+    return this.stage.entries;
+  }
+
+  /** `[terminal block, next scene's entry block]`, block order. */
+  exits(): [number, number][] {
+    return this.stage.exits;
   }
 
   /**
@@ -865,6 +887,8 @@ export class Program {
       evt_file: this.evtName,
       entry_block: this.entryBlock(),
       entry_step: this.entryStep(),
+      entries: this.entries(),
+      exits: this.exits().map(([block, entry]) => ({ block, entry })),
       routes: this.routes.map(([k, a, b, c]) =>
         ({ kind: ROUTE_KIND[k] ?? `?${k}`, next: [a, b, c] })),
       blocks: this.blocks.map((b) => b.toJson()),

@@ -89,7 +89,7 @@ async function waitForStage(what, budgetMs) {
 try {
   console.log("\nThe page opens on the bundle it was served:\n");
   await waitForLoad(page);
-  let opts = await page.locator("#stage-picker select option").allInnerTexts();
+  let opts = await page.locator("#stage-select option").allInnerTexts();
   check("only the served stages are offered before an install is known",
         opts.join(",") === "1,2", opts.join(","));
   check("and the way to the bundle screen is in the bar",
@@ -240,13 +240,13 @@ try {
 
   console.log("\nA stage in neither bundle, asked for from the top bar:\n");
   await page.waitForFunction(
-    () => document.querySelectorAll("#stage-picker select option").length === 6,
+    () => document.querySelectorAll("#stage-select option").length === 6,
     null, { timeout: 10_000 }).catch(() => {});
-  opts = await page.locator("#stage-picker select option").allInnerTexts();
+  opts = await page.locator("#stage-select option").allInnerTexts();
   check("with an install, every stage is offered",
         opts.join(",") === "1,2,3,4,5,6", opts.join(","));
 
-  await page.locator("#stage-picker select").selectOption("4");
+  await page.locator("#stage-select").selectOption("4");
   await page.waitForSelector("#loading", { state: "attached", timeout: 10_000 });
   await waitForStage("stage 4", 900_000);
   check("stage 4 built itself and loaded", true);
@@ -254,10 +254,10 @@ try {
   check("and it is what the status line says", status.includes("stage4"), status);
 
   console.log("\nAnd again, which must come out of the cache:\n");
-  await page.locator("#stage-picker select").selectOption("1");
+  await page.locator("#stage-select").selectOption("1");
   await waitForStage("stage 1", 120_000);
   const ms = await (async () => {
-    await page.locator("#stage-picker select").selectOption("4");
+    await page.locator("#stage-select").selectOption("4");
     await page.waitForSelector("#loading", { state: "attached", timeout: 10_000 });
     return waitForStage("stage 4 again", 120_000);
   })();
@@ -292,7 +292,7 @@ try {
   let status2 = await page.locator("#status").innerText();
   check("a current stage does not warn, even with stale ones beside it",
         !await warns(), status2);
-  await page.locator("#stage-picker select").selectOption("1");
+  await page.locator("#stage-select").selectOption("1");
   await waitForStage("stage 1", 120_000);
   status2 = await page.locator("#status").innerText();
   check("the Bundle button warns on the stage that is out of date",

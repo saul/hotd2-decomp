@@ -262,3 +262,24 @@ have been a coin flip between two 500-line files.
 **Commit before you swap the tree**, or use a second worktree of the old ref.
 A stash is not the answer either: a `stash pop` that conflicts leaves the same
 problem with more steps.
+
+**L31 -- A same-length edit undone within the same second leaves the mutant
+running.** Mutation-testing `tools/verify_scene_exits.py`, I changed `nxt[0]`
+to `nxt[1]` in `hod2lib/exetab.py`, ran the check, and wrote the original text
+back -- all inside one Python process and so inside one second. The check kept
+failing on the restored tree. `git diff` was empty and `grep` showed `nxt[0]`,
+which is the same shape as L30's clean `git status`: the file was right and the
+program was wrong.
+
+CPython validates a `__pycache__/*.pyc` against the source's **mtime truncated
+to the second and its size**. The mutation was the same length as the original
+and both writes landed in the same second, so the restored file matched the
+header the mutated bytecode was compiled with, and every later run imported the
+mutation. `find . -name '*.pyc' -newer <source>` finds nothing, because nothing
+is newer.
+
+So: **`find tools -name __pycache__ -type d -exec rm -rf {} +` after any
+scripted edit-run-restore cycle**, or run the mutants with
+`PYTHONDONTWRITEBYTECODE=1`. And when a tool disagrees with the file in front
+of you, suspect a cache before you suspect the reading -- this had me most of
+the way through rewriting a check that was already correct.

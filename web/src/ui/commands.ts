@@ -21,6 +21,12 @@ export type ToggleName =
 export type UiCommand =
   | { kind: "toggle"; name: ToggleName; on: boolean }
   | { kind: "setStage"; stage: number }
+  /**
+   * Open the current stage at one of its entry blocks.
+   *
+   * Only stages 3 and 4 have more than one; see {@link UiProjection.entries}.
+   */
+  | { kind: "setEntry"; entry: number }
   | { kind: "setOriginal"; on: boolean }
   | { kind: "setMode"; mode: "play" | "step" | "free" }
   | { kind: "setSpeed"; speed: number }

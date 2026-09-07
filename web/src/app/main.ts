@@ -71,7 +71,7 @@ import { SceneFog } from "../render/fog";
 import { TextureFilter } from "../render/texfilter";
 import { SceneLighting } from "../render/lighting";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
-import { loadStageInto } from "./stage_load";
+import { entryBlockFor, loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
 import { Rng } from "../core/rng";
 import type { Tick } from "../core/system";
@@ -156,6 +156,27 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get bundleStale(): boolean {
     return this.bundles.find(this.state.stage, this.state.original)?.stale
       === true;
+  }
+
+  /**
+   * The blocks the loaded stage can open at. See {@link UiProjection.entries}.
+   *
+   * Off the walker's script rather than off the manifest, because it is a fact
+   * about the stage that is loaded and not about the stage that is selected --
+   * during a load the two are different, and the picker offering the incoming
+   * stage's entries against the outgoing stage's number would be a control
+   * that lies for the length of a load.
+   */
+  get entries(): readonly number[] {
+    const script = this.walker?.script;
+    if (!script) return [];
+    return script.entries?.length ? script.entries : [script.entry_block];
+  }
+
+  /** Which of {@link Player.entries} this run opened at. */
+  get entry(): number {
+    const script = this.walker?.script;
+    return script ? entryBlockFor(this.state, script) : 0;
   }
   /** An install this browser can build from, so a missing stage is buildable. */
   canBuild = false;
@@ -1621,7 +1642,67 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // A finished stage is the one thing that stops the accumulator mid-drain:
     // the ticks it would have run are not owed, because there is nothing left
     // to run them.
+    if (w.finished) this.advanceScene();
     return !w.finished;
+  }
+
+  /**
+   * Whether a stage that has run out is currently being followed by the next.
+   *
+   * A load is minutes on a cold cache and one tick is nothing like that long,
+   * so the flag is what stops the frame loop asking again every 16 ms.
+   */
+  private advancing = false;
+
+  /**
+   * The stage-to-stage transition: the run's phase machine, as much of it as
+   * the port has.
+   *
+   * The engine spends two run phases and a scene load on this. When the route
+   * table walks off the end of a scene, `EvtAdvanceStepOrRoute`
+   * (`FUN_0045F000`) calls `MarkSceneOver` (`FUN_0045ED90`), which hands
+   * `g_nRunPhase` to 5; `RunPhaseArmSceneAdvance` (`FUN_00460390`) steps it to
+   * 6; `RunPhaseStepToNextScene` (`FUN_004603B0`) does `g_scene_index += 1`
+   * and hands it to 1; and phase 1 is `AdvanceToNextScene` (`FUN_0045FFF0`),
+   * which parks both players out of *in play* and calls `LoadSceneAndReset`.
+   *
+   * **The block the next stage opens at is decided before any of that**, by
+   * the scene-over path itself, and it travels in `g_evt_block_index` because
+   * nothing on the way touches that global. `Walker.nextEntryBlock` is the
+   * port's copy of the value; see it for the arithmetic and the proof.
+   *
+   * What the port does not have: the continue screen the engine reaches
+   * through phases 2, 3 and 4 when a player is out of *in play*, and the
+   * ending it reaches at phase 7 once the increment passes the last stage.
+   * The player stops on the last stage instead.
+   *
+   * `[diverges]` **The stage carries its transport and its mode across.** The
+   * engine has one run and one transport; the port has a Play button and a
+   * Step button and a stage picker, and a viewer who stepped into the end of a
+   * stage does not want the next one running away from them. So the advance
+   * only fires in `play` mode with the transport running, which is the only
+   * arrangement that corresponds to a run at all.
+   */
+  private advanceScene(): void {
+    if (this.advancing || this.capturing) return;
+    if (this.state.mode !== "play" || !this.playing) return;
+    const next = this.state.stage + 1;
+    const entry = this.walker?.nextEntryBlock;
+    if (entry === undefined || entry === null) return;
+    if (!this.stages.includes(next)) return;
+    this.advancing = true;
+    this.state.stage = next;
+    this.state.entry = entry;
+    this.state.block = this.state.step = this.state.op = undefined;
+    this.state.slot = this.state.frame = undefined;
+    this.pushUrl();
+    void this.loadStage().finally(() => {
+      this.advancing = false;
+      // `loadStageInto` stops the transport, and a run does not stop between
+      // stages. Restarted after the load for the same reason `captureThumb`
+      // does it there: the load is what cleared it.
+      if (this.state.mode === "play") this.playing = true;
+    });
   }
 
   /**

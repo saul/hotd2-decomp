@@ -13430,3 +13430,100 @@ and not one of them was a check.**
 * **The same gate covers class 0x30**, whose emerging and script-frozen
   zombies the port also let you damage. No report has been filed against that
   and no assertion was written for it; the fix is generic and covers it.
+
+## Where a stage ends, and where the next one starts (2026-09-07)
+
+Asked for two things: that choosing a stage offer the different starting points
+stages 3 and 4 have, and that the stage-to-stage transition be ported at all.
+Both turned out to be one reading.
+
+### The reading
+
+`EvtAdvanceStepOrRoute` (`FUN_0045F000`) was already transcribed, including the
+part where a `kind == 2` record does `block + 1` rather than ending anything.
+What had never been read is the arm below it, the one taken when the block it
+lands on is a hole. At `0x0045F0DA`:
+
+```
+MOV EDX, dword ptr [EAX*0x4 + 0x597890]     ; g_scene_routes[scene]
+MOV AX,  word ptr [EDX + ECX*0x8 + -0x6]    ; ECX = the hole's index
+MOV [0x009a2bc0], AX                        ; -> g_evt_block_index
+```
+
+`block * 8 - 6` is record `block - 1` at `+0x02`, which is `next[0]` of the
+record the walk just left. For a terminal record that is the record itself, and
+the hole after it is what made the scene end. So **a terminal route record's
+`next[0]` is the block the next scene opens at**, and every reachable terminal
+record in the shipped tables is followed by an all-`-1` record, which is the
+mechanism rather than a coincidence.
+
+Nothing between there and `FUN_0045EBC0` writes `g_evt_block_index` again. The
+chain is `MarkSceneOver` (`FUN_0045ED90`, newly named) hands `g_nRunPhase` to
+5; `RunPhaseArmSceneAdvance` (`FUN_00460390`) steps it to 6;
+`RunPhaseStepToNextScene` (`FUN_004603B0`) does `g_scene_index += 1` and hands
+it to 1; phase 1 is `AdvanceToNextScene`, which loads. The phase machine is a
+thirteen-entry table at `0x005679A8` with one caller, `RunPhaseDispatch`
+(`FUN_0045FEE0`) -- all newly named.
+
+The shipped answer, from a forward walk of the route graph: nineteen `kind == 2`
+records exist, **nine are reachable**, and two name a block other than 0.
+**Stage 3 opens at block 0 or block 7; stage 4 at block 0 or block 4.** Nothing
+else in the game has a choice, which is exactly what was reported. Following
+slot 2 -- Original Mode's road -- changes none of it: both modes reach the same
+nine endings.
+
+### What was wrong in the tree
+
+* `docs/formats/evt.md` said `AdvanceToNextScene` sets `g_scene_index`. It does
+  not; it only loads. Phase 6 had already incremented it a frame earlier.
+* `Program.entry_block` was "the first block that is not a hole", with a doc
+  comment saying the route table is "a forward graph with no separate entry
+  record". That gives 0 for every scene, which is right for four of the six by
+  accident and cannot express the other two at all.
+* The walker set `finished = true` and stopped. Nothing had read what happens
+  next, so the player had no transition.
+
+### What was built
+
+Bundle format 5: `entries` and `exits` on `<stage>.script.json`, from
+`ExeTables.scene_exits` / `scene_entry_blocks` in both exporter halves.
+`Walker.reset` takes the entry block, because in the engine it is an input --
+`FUN_0045EBC0` reads the global as it finds it. `Walker.nextEntryBlock` carries
+the handover. `Player.advanceScene` follows it in Play mode. `?entry=`
+addresses one, and the top bar grows an **Entry** select on exactly the two
+stages that have a choice.
+
+`tools/verify_scene_exits.py` is the check, and it discriminates: reading
+`next[1]` instead of `next[0]`, or the record after the hole instead of the one
+before it, both fail it. `web/test/port` was not the right home -- the
+assertion needs real scripts -- so it went in `test/seek.test.ts`, which drives
+each stage from each of its own entries to an ending and gets `0->0`, `7->4`
+for stage 3 and `0->0`, `4->0` for stage 4. `web/tools/transitions.mjs` drives
+the page: the picker appears on 3 and 4 and nowhere else, `?entry=7` really
+starts in block 7, and stage 1 played out of its terminal block reaches stage 2
+without a reload.
+
+### What I got wrong
+
+**I spent a while convinced a restored file was still broken.** Mutation-testing
+the new check, I flipped `nxt[0]` to `nxt[1]` in `exetab.py`, ran, and wrote the
+original back -- same length, same second. CPython validates a `.pyc` on the
+source's mtime-to-the-second and size, both of which now matched the mutant's,
+so every later run imported the mutation while `git diff` was empty and `grep`
+showed the right text. `find -name '*.pyc' -newer` finds nothing, because
+nothing is newer. Recorded as **L31**.
+
+**I also aimed the browser harness at the wrong button.** "Play" is a *mode*
+button; the transport's is `▶`. Clicking the label that reads Play left the
+page paused and the transition looked broken for one run.
+
+### Left open
+
+* `GameMode.ARCADE = 2` in the exporter looks like it should be 0, with 2 being
+  training -- four independent arms of `g_GameMode` say so. Filed in
+  `docs/BUGS.md`; not acted on, because the enum's value is in every shipped
+  bundle and `g_GameMode`'s three writers have not been read.
+* Run phases 2, 3 and 4 are the continue screen and phase 7 is the ending.
+  Neither is ported; the player stops after stage 6.
+* `FUN_00497440` and `FUN_004996C0` also write `g_scene_index` and have not
+  been read.

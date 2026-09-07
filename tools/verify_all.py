@@ -125,6 +125,15 @@ CHECKS: list[Check] = [
           "fills -- the one check that ties the gameplay half of branching to "
           "the route tables",
           NEEDS_GAME),
+    Check("verify_scene_exits", ".",
+          ["python3", "tools/verify_scene_exits.py", "--game-dir",
+           "{game_dir}"],
+          "that a terminal route record's `next[0]` is a live block of the "
+          "*next* scene, and that a hole follows every one of them -- the only "
+          "check that reads the handover from one stage to the next, and so "
+          "the only thing that can say stage 3 and stage 4 have two entry "
+          "points each",
+          NEEDS_GAME),
     Check("verify_effects", ".",
           ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],
           "that each of the 29 effect trees walks to exactly the node count "

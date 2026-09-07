@@ -61,6 +61,10 @@ function projection(): UiProjection {
   return {
     stage: 2,
     stages: [1, 2],
+    // Two, so the entry picker renders. Stage 2 has one in the shipped data;
+    // the fixture is for the control, not for the stage.
+    entries: [0, 7],
+    entry: 0,
     original: false,
     loading: null,
     status: { text: "stage2 · 12 models", note: " · bundle 1 min old",

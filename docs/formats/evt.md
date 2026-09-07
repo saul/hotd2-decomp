@@ -86,24 +86,36 @@ Everything is keyed by a small **scene id** in `DAT_009A1A08`:
 
 ### Which scenes are entered, and by what
 
-`g_scene_index` is set by exactly four routines, and `LoadSceneAndReset`
-(`FUN_00460030`) is what actually loads one — its last act is
-`ResetSceneOnEnter` (`FUN_0045EDD0`), the per-scene reset.
+`LoadSceneAndReset` (`FUN_00460030`) is what actually loads a scene — its last
+act is `ResetSceneOnEnter` (`FUN_0045EDD0`), the per-scene reset. These are the
+routines that choose the index it loads:
 
 | routine | scene |
 |---|---|
 | `ResetGameOnStart` (`FUN_0045FEF0`) | 6 for `g_GameMode` 2, else 0 |
-| `AdvanceToNextScene` (`FUN_0045FFF0`) | the next stage, at each transition |
+| `RunPhaseStepToNextScene` (`FUN_004603B0`) | **`g_scene_index + 1`**, at each stage transition |
 | `RunAttractDemo` (`FUN_00426800`) | whatever the playlist names |
 | `FUN_0041F9B0` / `FUN_0041FB00` | 10 and 11, the two attract screens |
+| `FUN_00425010` | the `{scene, block}` pair at `0x0055CBBC`, in game mode 3 |
 
-The last two call `ResetSceneOnEnter` **directly** rather than through the scene
-load, which is how they get a clean scene without a stage's worth of assets.
+**`AdvanceToNextScene` (`FUN_0045FFF0`) is not one of them**, and this table
+used to say it was. It is run phase 1 and it *loads*; the index was already
+incremented by phase 6 on the frame before. Three other routines write the
+global: `FUN_00413070` parks it at 10 while it loads `comevtbl.bin`, and
+`[open]` `FUN_00497440` and `FUN_004996C0` have not been read.
+
+The two attract screens call `ResetSceneOnEnter` **directly** rather than
+through the scene load, which is how they get a clean scene without a stage's
+worth of assets.
 
 `AdvanceToNextScene` is worth one line of its own: before it loads, it walks
 both players and puts any whose `g_player_state` is 5 — *in play* — back to 2.
 `IsPlayerAttackable` (`FUN_00409DC0`) demands 5, so **no enemy commits an
 attack across a scene change**.
+
+Which *block* the loaded scene opens at is a separate question with a separate
+answer, and it is the interesting one: see
+[Where a stage ends, and where the next one starts](#where-a-stage-ends-and-where-the-next-one-starts).
 
 ## The attract demo playlist — SOLVED
 
@@ -270,6 +282,79 @@ The **civilian** is the mechanism that matters. Eleven of the 136 command
 streams run op `0x19`, all eleven pass 1, and every one of them puts it after
 the `SetOnShot 0` that makes the civilian unshootable — that is, after she is
 safe. Rescue her and the stage takes the other route.
+
+### Where a stage ends, and where the next one starts
+
+**[proved]** A `kind == 2` record does not end a scene by itself. It does
+`block + 1`, and the scene ends because the record it lands on is a **hole** —
+`EvtGetBlock` returns -1. Every one of the nine reachable terminal records in
+the six stages is followed by an all-`-1` record, which is what makes that
+work; it is not a coincidence in the data, it is the mechanism.
+
+And on that path `EvtAdvanceStepOrRoute` does one more thing, at `0x0045F0DA`:
+
+```c
+MarkSceneOver();                                   /* FUN_0045ED90 */
+if (g_GameMode == 2) g_evt_block_index = g_training_lesson;
+else g_evt_block_index =
+    *(s16 *)(g_scene_routes[scene] + g_evt_block_index * 8 - 6);
+pc = EvtGetStep(7, 0, 0);       /* the inter-stage stub inside comevtbl */
+```
+
+`block * 8 - 6` is record `block - 1` at `+0x02` — `next[0]` of the record the
+walk just left, which for a terminal record is the record itself. So:
+
+> **A terminal route record's `next[0]` is the block the *next* scene starts
+> at.**
+
+Nothing between there and `FUN_0045EBC0` writes `g_evt_block_index` again.
+`MarkSceneOver` hands `g_nRunPhase` to 5; `RunPhaseArmSceneAdvance`
+(`FUN_00460390`) steps it to 6; `RunPhaseStepToNextScene` (`FUN_004603B0`) does
+`g_scene_index += 1` and hands it to 1; phase 1 is `AdvanceToNextScene`
+(`FUN_0045FFF0`), which calls `LoadSceneAndReset` and so `ResetSceneOnEnter`.
+None of the four touches the block index. `FUN_0045EBC0` — the scene task's
+setup at `0x00460710` — then reads it and seeds the program counter with it.
+
+**The scene index simply increments.** There is no next-stage table: stages run
+0, 1, 2, 3, 4, 5 in order and the *block* is the only thing an ending chooses.
+Reaching 6 sends the run phase to 7 instead of 1, which is the ending.
+
+#### The nine endings, and the two stages with a choice
+
+| stage | ends at block | hands the next stage |
+|---|---|---|
+| 1 | 14 | block 0 |
+| 2 | 35 | block 0 |
+| 2 | **37** | **block 7** |
+| 3 | 11 | block 0 |
+| 3 | **13** | **block 4** |
+| 4 | 23 | block 0 |
+| 4 | 25 | block 0 |
+| 5 | 7 | block 0 |
+| 6 | 12 | — (the run ends) |
+
+So **stage 3 opens at block 0 or block 7, and stage 4 at block 0 or block 4.**
+Every other stage has one entry. Stage 4 has two endings and they name the same
+block, which is worth stating because it is the case that looks like a choice
+and is not.
+
+Reachability is what makes this a short table. The shipped route tables hold
+**nineteen** `kind == 2` records and only nine can be reached — stage 2 has
+four and two are live. The unreachable ones name entry blocks nothing arrives
+at. Following slot 2, which is Original Mode's road, adds nothing: **Arcade and
+Original reach the same nine endings**, so both entries of stage 3 and of stage
+4 are open to both modes.
+
+`tools/verify_scene_exits.py` is the check. It walks the route graph from each
+scene's entry blocks, and asserts that a hole follows every reachable terminal
+record, that none of them sits at block 0 (which would send the `-6` read off
+the front of the table), and that every `next[0]` names a block the next
+scene's evt file actually supplies. Read `next[1]` instead and stage 2 hands
+stage 3 a `-1`.
+
+The browser player carries both halves in its bundle — `entries` and `exits` on
+`<stage>.script.json`, format 5 — offers the entry as a picker on the two
+stages that have one, and follows the handover when a stage runs out.
 
 ## Bytecode
 

@@ -248,6 +248,26 @@ export class Stage {
     return this.tables.sceneRoutes(this.scene);
   }
 
+  /**
+   * `[terminal block, next scene's entry block]` for every ending.
+   *
+   * See {@link ExeTables.sceneExits} -- the terminal route record's `next[0]`
+   * is where the next stage starts.
+   */
+  get exits(): [number, number][] {
+    return this.tables.sceneExits(this.scene);
+  }
+
+  /**
+   * Every block this scene can be entered at, ascending.
+   *
+   * See {@link ExeTables.sceneEntryBlocks}. Stage 3 and stage 4 have two;
+   * every other stage has one.
+   */
+  get entries(): number[] {
+    return this.tables.sceneEntryBlocks(this.scene);
+  }
+
   get blockCount(): number {
     return this.routes.length;
   }

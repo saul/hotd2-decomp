@@ -2,6 +2,7 @@
  * All player state is URL-addressable.
  *
  *     ?stage=2&block=3&step=1&op=14
+ *     ?stage=3&entry=7                which of a stage's entry blocks
  *     ?stage=2&slot=59&frame=170
  *     ?stage=1&drive=1&seed=1        the driven clock, for a harness
  *
@@ -17,6 +18,17 @@ export interface PlayerState {
   block?: number;
   step?: number;
   op?: number;
+  /**
+   * Which block the stage opens at, when it has more than one.
+   *
+   * A stage does not choose where it starts -- the stage before it does, and
+   * the answer travels in `g_evt_block_index`. Stage 3 opens at block 0 or
+   * block 7 and stage 4 at block 0 or block 4, depending which ending the
+   * previous stage reached. See `ScriptJson.entries`.
+   *
+   * Absent means the stage's first entry, which is what a fresh run gets.
+   */
+  entry?: number;
   /** Camera path slot to pose from, instead of running the script. */
   slot?: number;
   frame?: number;
@@ -57,6 +69,7 @@ export function readState(search = window.location.search): PlayerState {
     mode: mode === "play" || mode === "free" || mode === "step"
       ? mode
       : DEFAULTS.mode,
+    entry: num(q.get("entry")),
     block: num(q.get("block")),
     step: num(q.get("step")),
     op: num(q.get("op")),
@@ -74,6 +87,7 @@ export function writeState(s: PlayerState, replace = true): void {
   q.set("stage", String(s.stage));
   if (s.original) q.set("original", "1");
   if (s.mode !== DEFAULTS.mode) q.set("mode", s.mode);
+  if (s.entry !== undefined) q.set("entry", String(s.entry));
   if (s.block !== undefined) q.set("block", String(s.block));
   if (s.step !== undefined) q.set("step", String(s.step));
   if (s.op !== undefined) q.set("op", String(s.op));

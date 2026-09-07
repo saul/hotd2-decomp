@@ -285,7 +285,7 @@ export const WALKER_RESTORED_KEYS = [
   "lightSet", "checkpointBlock", "branchPreview", "camOverrideValid",
   "stashedCam", "spawns",
   "sceneState", "queuedEventsPending", "camPending",
-  "cam", "finished", "bgmTrack", "lastSound", "seq",
+  "cam", "finished", "nextEntryBlock", "bgmTrack", "lastSound", "seq",
 ] as const;
 
 /**
@@ -617,6 +617,31 @@ export class Walker {
   wait: PendingWait | null = null;
   branch: BranchChoice | null = null;
   finished = false;
+  /**
+   * The block the **next** stage opens at, once this one is over.
+   *
+   * `EvtAdvanceStepOrRoute` (`FUN_0045F000`), on the path where the route
+   * table has walked onto a hole, at `0x0045F0DA`:
+   *
+   * ```c
+   * g_evt_block_index =
+   *     *(s16 *)(g_scene_routes[scene] + g_evt_block_index * 8 - 6);
+   * ```
+   *
+   * `block * 8 - 6` is route record `block - 1` at `+0x02`, which is `next[0]`
+   * of the record the walk just left. A `kind == 2` record ends a scene by
+   * doing `block + 1` onto the hole that follows it, so **the terminal
+   * record's `next[0]` is where the next scene starts** -- and nothing between
+   * there and `FUN_0045EBC0` writes the block index again, so it survives the
+   * whole load. **[proved]**
+   *
+   * Null until the scene is over. `app/` reads it to open the next stage; see
+   * {@link ScriptJson.exits}, which is the same fact resolved ahead of time.
+   *
+   * The port does not model game mode 2, where the engine takes
+   * `g_training_lesson` here instead: no stage script is entered in that mode.
+   */
+  nextEntryBlock: number | null = null;
   bgmTrack: number | null = null;
   /** The most recent `se_play` operand, for the HUD. */
   lastSound: number | null = null;
@@ -665,14 +690,32 @@ export class Walker {
 
   // -- control -----------------------------------------------------------
 
-  reset(): void {
-    this.block = this.script.entry_block;
+  /**
+   * Start the scene over, at `entryBlock`.
+   *
+   * **The entry block is an argument because in the engine it is an input.**
+   * `FUN_0045EBC0` -- the scene task's setup, and the only thing that seeds
+   * the program counter on a scene load -- reads `g_evt_block_index` as it
+   * finds it. Four routines leave a value there for it: `ResetGameOnStart`
+   * (`FUN_0045FEF0`) writes 0, or 0x10 in game mode 3; `RunAttractDemo`
+   * (`FUN_00426800`) its playlist entry's; `RunPhaseStepToNextScene`
+   * (`FUN_004603B0`) game mode 3's `{scene, block}` table; and
+   * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) its scene-over path, which is the one that matters
+   * here: it writes **the terminal route record's `next[0]`**, and that is how
+   * one stage tells the next where to open.
+   *
+   * So a scene has no single start of its own. `script.entries` is the set the
+   * stage before it can hand over, and `script.entry_block` is only the first
+   * of them. Stage 3 and stage 4 each have two.
+   */
+  reset(entryBlock = this.script.entry_block): void {
+    this.block = entryBlock;
     // FUN_0045EBC0 picks the first step by game mode: 1 for normal Arcade
     // play, 5 for Original Mode on scene 0, 0 only on the continue and
     // checkpoint paths. The exporter resolves that rule; the walker just
     // honours it.
     const entry = this.script.entry_step ?? 1;
-    const n = this.blockAt(this.script.entry_block)?.steps?.length ?? 0;
+    const n = this.blockAt(entryBlock)?.steps?.length ?? 0;
     this.step = n > entry ? entry : 0;
     this.opIndex = 0;
     this.region = -1;
@@ -699,7 +742,7 @@ export class Walker {
     this.branchPreview = null;
     this.camOverrideValid = false;
     this.lightBlock.reset();
-    this.checkpointBlock = this.script.entry_block;
+    this.checkpointBlock = entryBlock;
     this.flags.clear();
     this.loadedSlots.clear();
     this.spawns = [];
@@ -707,6 +750,7 @@ export class Walker {
     this.wait = null;
     this.branch = null;
     this.finished = false;
+    this.nextEntryBlock = null;
     this.bgmTrack = null;
     this.lastSound = null;
     this.seq = 0;
@@ -750,7 +794,8 @@ export class Walker {
       // dropping it made the next tick re-execute the instruction that armed
       // it. The op is the script's own JSON, so it clones.
       wait: this.wait && { ...this.wait, policy: { ...this.wait.policy } },
-      finished: this.finished, bgmTrack: this.bgmTrack,
+      finished: this.finished, nextEntryBlock: this.nextEntryBlock,
+      bgmTrack: this.bgmTrack,
       lastSound: this.lastSound, seq: this.seq,
       // Sets are not JSON; the snapshot is a file the user can keep.
       flags: [...this.flags], loadedSlots: [...this.loadedSlots],
@@ -1480,6 +1525,18 @@ export class Walker {
     const blk = this.blockAt(index);
     if (index < 0 || !blk || blk.hole) {
       this.finished = true;
+      // The scene-over path's *other* half, and the one that outlives the
+      // scene: `MarkSceneOver` (`FUN_0045ED90`) hands the run phase over, and
+      // then `EvtAdvanceStepOrRoute` reads the block the next stage opens at
+      // out of the record the walk just left. See {@link nextEntryBlock}.
+      //
+      // Only for a real hole. A route slot of -1 is not one: the engine would
+      // index its block table at -1, which no shipped script does -- every
+      // branch write names a live slot, which is what `verify_branches.py`
+      // asserts -- so the port stops rather than inventing an answer.
+      this.nextEntryBlock = index > 0
+        ? this.script.routes[index - 1]?.next[0] ?? null
+        : null;
       this.branch = null;
       this.host.onBranch(null);
       return false;

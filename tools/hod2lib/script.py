@@ -693,15 +693,29 @@ class Program:
         return [b for b in self.blocks if b.route[0] == exetab.ExeTables.ROUTE_BRANCH]
 
     def entry_block(self) -> int:
-        """Where the scene starts.
+        """The block this scene starts at by default -- ``entries()[0]``."""
+        return self.entries()[0]
 
-        Block 0 in every shipped scene: the route table is a forward graph
-        with no separate entry record.
+    def entries(self) -> list[int]:
+        """Every block this scene can be entered at, ascending.
+
+        Which one a run gets is decided by the stage *before* this one: a
+        terminal route record's ``next[0]`` is the block it hands the next
+        scene, and ``EvtAdvanceStepOrRoute`` writes it into
+        ``g_evt_block_index`` where it survives the whole scene load. See
+        :meth:`exetab.ExeTables.scene_exits`.
+
+        **Stage 3 can be entered at block 0 or block 7 and stage 4 at block 0
+        or block 4.** Every other stage has one entry, which is block 0 -- and
+        that is why this used to be computed as "the first block that is not a
+        hole" and looked right. It was right about the number and wrong about
+        the reason, and it had no way to produce the second entry at all.
         """
-        for b in self.blocks:
-            if not b.is_hole:
-                return b.index
-        return 0
+        return self.stage.entries
+
+    def exits(self) -> list[tuple[int, int]]:
+        """``(terminal block, next scene's entry block)``, block order."""
+        return self.stage.exits
 
     def entry_step(self) -> int:
         """Which step of the entry block runs first.
@@ -801,6 +815,8 @@ class Program:
             "evt_file": self.evt_name,
             "entry_block": self.entry_block(),
             "entry_step": self.entry_step(),
+            "entries": self.entries(),
+            "exits": [{"block": b, "entry": e} for b, e in self.exits()],
             "routes": [{"kind": ROUTE_KIND.get(k, f"?{k}"), "next": [a, b, c]}
                        for k, a, b, c in self.routes],
             "blocks": [b.to_json() for b in self.blocks],

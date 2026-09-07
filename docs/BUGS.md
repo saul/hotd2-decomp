@@ -1137,6 +1137,50 @@ parameters and are reproducible as given.
   engine's own cutscenes, so this is a character the port is not building
   rather than one the script never places.
 
+## And one about a check that is not reliable
+
+- `[open]` **`bundle_flow.mjs`'s first thumbnail assertion fails about one run
+  in three, still.** "the stage that has been open has a picture" waits up to
+  ten seconds for `.export-tile img` and gives up. Measured over four runs on
+  2026-09-07 while re-exporting for bundle format 5: pass, fail, pass, fail --
+  and on one of the failing runs "and it has its picture without the screen
+  being closed" went with it. Nothing in that run's tree touches the thumbnail
+  path; the check already carries a comment saying it "lost about one run in
+  three" before the wait was raised to ten seconds, so the wait was not the
+  whole of it.
+
+  A check that fails a third of the time is worse than no check, because the
+  next person to see it red will assume it is red for them too. What it is
+  waiting on -- `requestThumb`'s eight-frame delay, the OPFS write, or the
+  screen's asynchronous read-back -- has not been established, and guessing at
+  a longer timeout is what produced the current one. Not touched here: it is a
+  peer check and this session had no business widening it.
+
+## And one about `GameMode`, found while reading the run phases
+
+- `[open]` **`GameMode.ARCADE = 2` in `web/src/hod2lib/stage.ts` looks like the
+  wrong number, and the port survives it by luck.** Reading
+  `RunPhaseStepToNextScene` and `FUN_0045EBC0` for the stage transition put
+  `g_GameMode`'s arms side by side, and they do not fit the enum the port
+  declares. `FUN_0045EBC0` gives mode 2 an entry **step of 0** and reaches the
+  ordinary step 1 only by falling through every arm, which is mode **0**;
+  `LoadSceneAndReset` takes the caption path at mode 0 and the Original-item
+  path at mode 1; `ResetGameOnStart` sends mode 2 to scene 6, which is
+  `trnevtbl.bin`; and `FUN_00412FD0` indexes `g_training_lesson` for mode 2. So
+  on this reading **0 is Arcade and 2 is training**, and the enum's
+  `ARCADE = 2` names the training mode.
+
+  Nothing is visibly wrong today: `entryStep()` tests `ORIGINAL && scene === 0`
+  first and returns 1 for everything else, so the wrong constant produces the
+  right step by falling out of the same clause the engine falls out of. But
+  every stage bundle carries `game_mode: 2` for Arcade, and `game/game_mode.ts`
+  is the other half of the same enumeration.
+
+  Not acted on: `g_GameMode`'s writers (`FUN_0049F380`, `FUN_00496200`,
+  `FUN_00496960`) have not been read, and correcting the enum would renumber a
+  field in every shipped bundle -- a format bump and a full re-export for a
+  change that alters no behaviour. It wants the reading first.
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

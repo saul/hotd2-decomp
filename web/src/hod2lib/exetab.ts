@@ -420,6 +420,87 @@ export class ExeTables {
     return this.sceneRoutes(scene).length;
   }
 
+  /**
+   * The last scene of the chain a stage run walks: scenes 0..5 are stages
+   * 1..6, and `RunPhaseStepToNextScene` (`FUN_004603B0`) leaves the chain when
+   * the increment reaches 6.
+   */
+  static readonly LAST_STAGE_SCENE = 5;
+
+  /**
+   * Where this scene can end, and the block each ending hands the next scene.
+   *
+   * **A terminal route record's `next[0]` is the next scene's starting block.**
+   * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) ends a scene by walking onto a
+   * hole -- a `kind == 2` record does `block += 1` and the record after it is
+   * a hole -- and then reads
+   *
+   * ```c
+   * g_evt_block_index = *(s16 *)(g_scene_routes[scene] + g_evt_block_index * 8 - 6);
+   * ```
+   *
+   * at `0x0045F0DA`. `block * 8 - 6` is record `block - 1` at `+0x02`, which
+   * is `next[0]` of the record the walk just left. Nothing between there and
+   * `FUN_0045EBC0` writes the block index again -- not `AdvanceToNextScene`,
+   * not `LoadSceneAndReset`, not `ResetSceneOnEnter` -- so that value is what
+   * the next scene opens on. **[proved]**
+   *
+   * Only the records this scene can actually reach are returned, from every
+   * block {@link sceneEntryBlocks} says it can be entered at. The shipped
+   * tables carry unreachable `kind == 2` records too -- four in stage 2 where
+   * two are live -- and they name entry blocks nothing can arrive at.
+   *
+   * Returned in block order as `[terminal block, next scene's entry block]`.
+   */
+  sceneExits(scene: number): [number, number][] {
+    return this.cached(`exits:${scene}`, () => {
+      const routes = this.sceneRoutes(scene);
+      const seen = new Set<number>();
+      const stack = [...this.sceneEntryBlocks(scene)];
+      const out = new Map<number, number>();
+      while (stack.length) {
+        const b = stack.pop() as number;
+        if (seen.has(b) || b < 0 || b >= routes.length) continue;
+        seen.add(b);
+        const [kind, ...next] = routes[b];
+        if (kind === ExeTables.ROUTE_GOTO) stack.push(next[0]);
+        // Every live slot, not only the two Arcade's writers can name: slot 2
+        // is Original Mode's road. On the shipped tables the two modes reach
+        // the same endings anyway, so the union costs nothing and states less.
+        else if (kind === ExeTables.ROUTE_BRANCH) {
+          for (const n of next) if (n >= 0) stack.push(n);
+        } else if (kind === ExeTables.ROUTE_END) out.set(b, next[0]);
+      }
+      return [...out.entries()].sort((a, b) => a[0] - b[0]);
+    });
+  }
+
+  /**
+   * Every block this scene can be entered at, ascending.
+   *
+   * Scene 0 is `ResetGameOnStart`'s block 0 and every later scene is the set
+   * of `next[0]`s the scene before it can reach -- see {@link sceneExits}. So
+   * this is a forward walk down the chain and not a property of the scene's
+   * own file.
+   *
+   * The shipped answer: **stage 3 starts at block 0 or block 7, stage 4 at
+   * block 0 or block 4**, and every other stage has one entry. Which one a
+   * run gets is decided by the branches it took in the stage before.
+   *
+   * A scene off the stage chain -- training, the attract screens, the ending
+   * -- has no predecessor here and reports block 0. That is not a claim about
+   * how those scenes are entered: `RunAttractDemo` names its own block and
+   * `ResetGameOnStart` names `g_training_lesson`'s.
+   */
+  sceneEntryBlocks(scene: number): number[] {
+    return this.cached(`entries:${scene}`, () => {
+      if (scene <= 0 || scene > ExeTables.LAST_STAGE_SCENE) return [0];
+      const from = this.sceneExits(scene - 1).map(([, entry]) => entry);
+      const uniq = [...new Set(from)].sort((a, b) => a - b);
+      return uniq.length ? uniq : [0];
+    });
+  }
+
   // -- asset slots and streaming --------------------------------------
 
   static readonly POL_NAME_TABLE = 0x004d0ef4;

@@ -22,7 +22,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "082f1622fe3fa7a327f5477354198ebd3c1f8d5a879a6044eebf4c22968cbd58",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "fac5aea23f20f2bd4d77efa347578a16276eefc4fa6b62a7cc9c2e11eb9e586b",
+  "bundle.ts": "c1dd632002888ab8b368d9600530729f57599f41e5d36daf05fbce2f85c5b11d",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -35,7 +35,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "a91352d4357e641ceddbc7e344e84f76dd6bbb2da8d7910c77ce636af4c577df",
-  "exetab.ts": "492ca2e4926f7937697f0b13436e4d8cd1bd1f1765d7805e77755d3fa813f6d3",
+  "exetab.ts": "45e0e06d67faaf26411848708a18a4747766b101c92b60b60026d88df302b92d",
   "gltf.ts": "a627387e4c52fecb292eb8736d7fbee2818fd503ac20f23337d760091c0fb109",
   "io.ts": "e9e18d6a03619988a2506b77a28063c2885743d52c3f2e620a149b36a8e20170",
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
@@ -47,12 +47,12 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
   "rigs.ts": "7700568a93b03bf83d0a8e3f2be16acc96d6b8cf7369ff5659abd7b3819fe47a",
   "rigs_data.ts": "52f1116f7bb86b0dd16a0d21916356904c94ea5539da05a11e2c89fffd4e9b51",
-  "script.ts": "577de572a5ca7ddd3ca14e8886e714c85e986a895f889b0bb06f5d772569c3b5",
+  "script.ts": "dc795abca7a79db26f0bb55a210a4d4a41e5afe2d970df13c3e79755695218fa",
   "sha256.ts": "7c01f5b843a50a7fc05e749c7a737c252482557ebc523eef7da0f46c7baa427c",
   "spawnres.ts": "6e5dff0b9008aacbe4b958dc7585cce893fe23ee2753b4605b4c1c644eb75daf",
-  "stage.ts": "3bd8232f78002c8537ae4decd6b1e07d659e67da452346002db81b93198ab30c",
+  "stage.ts": "4f2667ff2391e25e0f22c7e6473394dfc683b87ec1c7969ae0115302ea8498e6",
   "texbank.ts": "40786961f0e540180ebf8b56622bcd155e5b6a4e39bac81b8e787c4c1078cdc5",
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "0be488a5104700f206c78b510a3ce1fca28d74f6f5cc5e43080798c41f37211b";
+export const BUILDER_HASH = "0eaf045be2979397b3bfc0c7a9b62e16bc90935d4de375f49bc82b9a2ecebd1b";

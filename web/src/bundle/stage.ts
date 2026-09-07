@@ -29,9 +29,30 @@ export interface ScriptJson {
   /** `g_GameMode` as the exe numbers it — see `game/game_mode.ts`. */
   game_mode: number;
   evt_file: string;
+  /** {@link ScriptJson.entries}`[0]` -- the entry a fresh run gets. */
   entry_block: number;
   /** Which step of the entry block runs first; the game picks it by mode. */
   entry_step: number;
+  /**
+   * Every block this scene can be entered at, ascending.
+   *
+   * A stage does not choose where it starts; the stage *before* it does. A
+   * terminal route record's `next[0]` is the block it hands the next scene,
+   * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) writes that into
+   * `g_evt_block_index`, and nothing in the scene load touches it again.
+   *
+   * **Stage 3 can be entered at block 0 or block 7, and stage 4 at block 0 or
+   * block 4.** Every other stage has exactly one. See {@link ScriptJson.exits}
+   * for the other end of the same fact.
+   */
+  entries: number[];
+  /**
+   * Where this scene can end, and the block each ending hands the next scene.
+   *
+   * Only the terminal records this scene can actually reach: the shipped
+   * tables carry unreachable ones too, four in stage 2 where two are live.
+   */
+  exits: { block: number; entry: number }[];
   routes: { kind: string; next: number[] }[];
   blocks: BlockJson[];
   regions: RegionEntryJson[][];

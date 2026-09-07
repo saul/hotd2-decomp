@@ -49,6 +49,16 @@ const MODES: { mode: "step" | "play" | "free"; label: string }[] = [
   { mode: "free", label: "Free roam" },
 ];
 
+/**
+ * Both selects carry an **id**, and it is not decoration.
+ *
+ * `tools/bundle_flow.mjs` addressed the stage select as
+ * `#stage-picker select` — the only select in the container — and adding the
+ * entry select beside it broke that driver with a strict-mode violation rather
+ * than a wrong answer, which was the lucky version. A harness that picks a
+ * control by its position among its siblings is a harness that fails the next
+ * time a control is added.
+ */
 export function StagePicker() {
   const dispatch = useDispatch();
   const stage = useSlice((p) => p?.stage);
@@ -62,12 +72,13 @@ export function StagePicker() {
     <>
       <label>
         Stage{" "}
-        <select value={stage}
+        <select id="stage-select" value={stage}
                 onChange={(e) => dispatch({ kind: "setStage",
                                             stage: Number(e.target.value) })}>
           {stages.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
       </label>
+      <EntryPicker />
       <label title="Game mode 1. Same regions; a few slots resolve to the st_org* models Arcade never draws.">
         <input type="checkbox" checked={!!original}
                onChange={(e) => dispatch({ kind: "setOriginal",
@@ -75,6 +86,38 @@ export function StagePicker() {
         {" "}Original
       </label>
     </>
+  );
+}
+
+/**
+ * Which block the stage opens at, when it has a choice.
+ *
+ * **A stage does not decide where it starts; the stage before it does.** A
+ * scene ends by walking off the end of its route table, and the record it
+ * walks off names the block it hands the next scene -- so stage 2's two
+ * endings open stage 3 at block 0 or at block 7, and stage 3's two open stage
+ * 4 at block 0 or at block 4. Nothing else in the game has more than one.
+ *
+ * Which is why this renders nothing at all for four stages out of six: a
+ * select with one option is a control that cannot be used, and it would sit
+ * next to the stage picker on every stage implying a choice that is not there.
+ */
+function EntryPicker() {
+  const dispatch = useDispatch();
+  const entries = useSlice((p) => p?.entries);
+  const entry = useSlice((p) => p?.entry);
+  if (!entries || entries.length < 2 || entry === undefined) return null;
+  return (
+    <label title="Where this stage opens. The stage before it decides: its last route record names the block it hands over, and two of its endings name different ones.">
+      Entry{" "}
+      <select id="entry-select" value={entry}
+              onChange={(e) => dispatch({ kind: "setEntry",
+                                          entry: Number(e.target.value) })}>
+        {entries.map((n) => (
+          <option key={n} value={n}>block {n}</option>
+        ))}
+      </select>
+    </label>
   );
 }
 

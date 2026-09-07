@@ -166,6 +166,19 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       return;
     case "setStage":
       p.state.stage = c.stage;
+      // The entry belongs to the stage that is leaving. Stage 4's block 4 is
+      // not stage 5's anything, and carrying it over would open the next
+      // stage in the middle of itself.
+      p.state.entry = undefined;
+      p.state.block = p.state.step = p.state.op = undefined;
+      p.state.slot = p.state.frame = undefined;
+      p.pushUrl();
+      void p.loadStage();
+      return;
+    case "setEntry":
+      p.state.entry = c.entry;
+      // An address inside the stage is an address on one route through it, and
+      // the other entry may not reach it. Drop it and open at the entry.
       p.state.block = p.state.step = p.state.op = undefined;
       p.state.slot = p.state.frame = undefined;
       p.pushUrl();

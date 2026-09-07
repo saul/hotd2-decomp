@@ -207,6 +207,24 @@ class Stage:
         return self.tables.scene_routes(self.scene)
 
     @property
+    def exits(self) -> list[tuple[int, int]]:
+        """``(terminal block, next scene's entry block)`` for every ending.
+
+        See :meth:`exetab.ExeTables.scene_exits` -- the terminal route
+        record's ``next[0]`` is where the next stage starts.
+        """
+        return self.tables.scene_exits(self.scene)
+
+    @property
+    def entries(self) -> list[int]:
+        """Every block this scene can be entered at, ascending.
+
+        See :meth:`exetab.ExeTables.scene_entry_blocks`. Stage 3 and stage 4
+        have two; every other stage has one.
+        """
+        return self.tables.scene_entry_blocks(self.scene)
+
+    @property
     def block_count(self) -> int:
         return len(self.routes)
 

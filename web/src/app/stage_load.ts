@@ -32,6 +32,8 @@ import { minimapGraph, treeProjection } from "./projection/script";
 import { screenMessage } from "./projection/message";
 import { makeWalkerHost } from "./walker_host";
 import type { Player } from "./main";
+import type { PlayerState } from "./urlstate";
+import type { ScriptJson } from "../bundle/stage";
 import type { StatusProjection } from "../ui/projection";
 
 /**
@@ -301,15 +303,39 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.status = status;
 }
 
-/** Honour the deep link: either an op address, or a raw camera pose. */
+/**
+ * Which block a stage opens at.
+ *
+ * `state.entry` when it names one of the stage's own entries, and the stage's
+ * first entry otherwise -- which is what a fresh run gets, and what every
+ * stage but 3 and 4 has only one of. A link carrying an entry the stage does
+ * not have is a stale link, and honouring it would replay a route the game
+ * cannot enter on.
+ */
+export function entryBlockFor(state: PlayerState, script: ScriptJson): number {
+  const entries = script.entries?.length ? script.entries
+                                         : [script.entry_block];
+  return state.entry !== undefined && entries.includes(state.entry)
+    ? state.entry
+    : entries[0];
+}
+
+/**
+ * Honour the deep link: either an op address, or a raw camera pose.
+ *
+ * Everything here starts from {@link entryBlockFor}'s answer rather than from
+ * the script's first block, because a stage's opening block is not a property
+ * of the stage. See `PlayerState.entry`.
+ */
 function applyIncomingState(p: Player): void {
   const w = p.walker;
   if (!w) return;
+  const entry = entryBlockFor(p.state, w.script);
   if (p.state.slot !== undefined) {
     p.poseFromSlot(p.state.slot, p.state.frame ?? 0);
   } else if (p.state.block !== undefined) {
     const arrived = seekWalkerTo(w, p.state.block, p.state.step ?? 1,
-                           p.state.op ?? 0);
+                           p.state.op ?? 0, undefined, entry);
     if (!arrived) {
       // The address is not on any route the script can take from the entry
       // block -- a stale link, or a branch this run did not take. Say so
@@ -325,10 +351,10 @@ function applyIncomingState(p: Player): void {
     p.syncCameraToWalker(true);
     p.syncBgmToWalker();
   } else {
-    w.reset();
-    // Instruction 0 of block 0 has entered no region and issued no camera
-    // command, so opening there is a truthful black screen. Prime to where
-    // the stage actually starts instead.
+    w.reset(entry);
+    // Instruction 0 of the entry block has entered no region and issued no
+    // camera command, so opening there is a truthful black screen. Prime to
+    // where the stage actually starts instead.
     w.primeToFirstWait();
     p.syncCameraToWalker(true);
   }

@@ -41,6 +41,10 @@ export interface PlayerView {
   readonly walker: Walker | null;
   readonly stage: number;
   readonly stages: readonly number[];
+  /** See {@link UiProjection.entries}. */
+  readonly entries: readonly number[];
+  /** See {@link UiProjection.entry}. */
+  readonly entry: number;
   readonly original: boolean;
   readonly loading: LoadingProjection | null;
   readonly status: StatusProjection;
@@ -107,6 +111,8 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     // Held by reference and replaced rather than mutated, all three of them,
     // so `Object.is` settles them without a walk.
     stages: v.stages,
+    entries: v.entries,
+    entry: v.entry,
     original: v.original,
     loading: v.loading,
     status: v.status,

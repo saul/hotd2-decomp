@@ -32,8 +32,11 @@ import type { Walker } from "./walker";
  * unreachable address can say so instead of silently showing another one.
  */
 export function seekTo(w: Walker, block: number, step = 0, opIndex = 0,
-                       maxOps = 500000): boolean {
-  w.reset();
+                       maxOps = 500000, entryBlock?: number): boolean {
+  // From the entry the run actually opened at, not the stage's first one.
+  // Stage 3 entered at block 7 cannot reach block 1, and a replay that starts
+  // at 0 regardless would land somewhere the run never was.
+  w.reset(entryBlock);
   const wasReplaying = w.replaying;
   w.replaying = true;
   try {

@@ -735,6 +735,30 @@ with.
 
 Things established while building it, now folded back into the format docs.
 
+- **A stage does not choose where it starts; the stage before it does.**
+  `[proved]` — a `kind == 2` route record ends a scene by doing `block + 1`
+  onto the hole that follows it, and on that path `EvtAdvanceStepOrRoute`
+  (`FUN_0045F000`) reads at `0x0045F0DA`
+  `g_evt_block_index = *(s16 *)(g_scene_routes[scene] + block * 8 - 6)`, which
+  is `next[0]` of the terminal record. Nothing between there and `FUN_0045EBC0`
+  writes the global again, so **the terminal record's `next[0]` is the block
+  the next scene opens at**. The scene index itself merely increments, in
+  `RunPhaseStepToNextScene` (`FUN_004603B0`).
+
+  Nine endings are reachable across the six stages and two of them name a
+  block other than 0: **stage 3 opens at block 0 or block 7, and stage 4 at
+  block 0 or block 4.** The player had none of this — `entry_block` was
+  computed as "the first block that is not a hole", which gives 0 for every
+  scene and so was right about the number, wrong about the reason, and unable
+  to produce the second entry at all. Stages also simply stopped when they ran
+  out, because nothing had read what happens next.
+
+  The bundle carries `entries` and `exits` on `<stage>.script.json` at format
+  5, the top bar offers an **Entry** picker on exactly the two stages that have
+  a choice, `?entry=` addresses one, and a stage that runs out in Play mode
+  loads the next at the block its ending named.
+  `tools/verify_scene_exits.py` and `npm run transitions` are the two checks.
+
 - **`g_evt_step_index` (`0x009A2BB0`) is the step index, not a block count.**
   `[proved]` — `EvtAdvanceStepOrRoute` increments it at the top and assigns it
   `1` in the route branch, and `FUN_0045EBC0` seeds it with 0, 1 or 5 by game

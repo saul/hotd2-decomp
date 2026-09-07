@@ -6,11 +6,11 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Forty-two reports: **thirty-two fixed, three half-done, six open, and two
+Forty-two reports: **thirty-seven fixed, three half-done, one open, and two
 `[not-a-bug]`, each of which carried a real defect underneath it** (one of
-those two is counted in the thirty-two, its bullet carrying both markers).
-Five of the six open arrived together on 2026-09-07, all from stage 3's
-block 2; they are the last section before the divergences.
+those two is counted in the thirty-seven, its bullet carrying both markers).
+The five reported on 2026-09-07 from stage 3's block 2 are all fixed, and
+four of the five were far wider than the place they were seen from.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -1106,36 +1106,89 @@ that fix looked like it had not worked.
 
 ---
 
-## And four from stage 3's block 2
+## And five from stage 3's block 2
 
-Reported together on 2026-09-07, all four at the same place in the script, all
-four `[open]` at the time of writing. The locators are the player's own URL
-parameters and are reproducible as given.
+Reported together on 2026-09-07, all five at the same place in the script.
+**Four of the five were much wider than the place they were seen from**, and
+none of the five was the thing the report named.
 
-- `[open]` **"the civilian/enemy are jumped over"** at
-  `?stage=3&mode=play&block=2&step=4&op=0`. Reported exactly that way; whether
-  *jumped over* means the script passes the spawn without placing it, the
-  actors are placed and never run, or the camera passes them, is the first
-  thing to establish and none of the three has been ruled out.
+- `[fixed]` **"the civilian/enemy are jumped over"** at
+  `?stage=3&mode=play&block=2&step=4&op=0`. Literally that: the script never
+  stopped for them. `g_script_flags` (`0x009C7200`) is **one** array in the
+  engine -- `EvtOpSetScriptFlag48` (`FUN_0045FD70`) is the script's only write
+  and six actor routines write the same array -- and the port kept two,
+  rebuilding the shared one from the walker's copy once a frame. Every flag an
+  actor raised was wiped on the next tick, so `wait_script_flag` could only
+  ever open on a flag the script itself set. **Across all six shipped scripts
+  every one of the forty-odd such gates names a flag that stage's own script
+  never sets**: the opcode only ever means *hold until an actor is finished*,
+  and the port was walking past every rescue in the game. The gate now holds
+  230 frames while the hostage is alive, and she raises it whether she is
+  rescued or killed, so it cannot hang.
 
-- `[open]` **The axe thrower retreats into the wall.** Class 0x31, behaviour
-  set 1. **In the real game, when there is nowhere for the thrower to retreat
-  to, it simply carries on** -- the retreat is conditional in a way the port's
-  is not. The port walks it into geometry instead.
+- `[fixed]` **The axe thrower retreats into the wall.**
 
-- `[open]` **The axe thrower throws no axes.** The same actor. The throw is the
-  whole of what behaviour set 1 exists to do (`docs/formats/spawns.md` calls
-  set 1 the one that "stands out of reach and throws"), so a thrower that never
-  throws is the set not running rather than a missing animation.
+  **The actor is not what this file said it was.** `[proved]` stage 3 contains
+  no class-0x31 spawn at all; the axe man is **class 0x30, character type
+  0x13**, body condition 7, initial state 33. This file had it as "class 0x31,
+  behaviour set 1" and that was wrong for both halves -- the same mistake
+  recorded once already above, where `0x6784` is class 0x30 and not 0x31.
 
-- `[open]` **The camera jumps** shortly after
-  `?stage=3&mode=play&block=2&step=4&op=24&frame=1551`.
+  The engine's ending is a two-way switch on a **spawn-record
+  bit**, not a query about the room: set, and the actor releases its counts and
+  its slot and never moves again; clear, and it walks or leaps.
+  `EnemyZombieInitByCharType` (`FUN_00452FD0`) *moves* that bit out of
+  `obj+0x34` bit 1, because bits 1 and 2 there are what `MarkActorShot` writes
+  to name the player who fired. **Exactly two records in the shipped game set
+  it, and both are these axe men.** The port had no `EnemyZombieInitByCharType`
+  at all, so both took the walk arm. The retreat itself was faithful, which is
+  what made this slow: the walk has no test of any kind, and the collision the
+  script selects there is 31 quads of flat water 24 units below the actor's
+  feet, so nothing pushed back. The wall is scenery, six units behind him.
 
-- `[open]` **James does not render in the third-person cutscenes.** The
-  player-controlled character is absent at
-  `?stage=3&mode=play&block=2&step=5&op=22&frame=30`. He is drawn in the
-  engine's own cutscenes, so this is a character the port is not building
-  rather than one the script never places.
+- `[fixed]` **The axe thrower throws no axes.** A second, independent defect on
+  the same actor, in a different layer -- the two only look like one report's
+  two halves because they share a spawn.
+
+  The simulation always threw, on time, for damage. **Nothing was drawn.** The exporter's gore rig walked class 0x31's hand table rather than
+  the one `ZombieThrowHandWeapon` (`FUN_0045A240`) switches on, so the axe and
+  both hands' models were in no rig: the projectile cloned to null and the hand
+  swap failed, which leaves the axe in a fist that has just thrown it. The same
+  shape as the civilians' hair, one table over.
+
+- `[fixed]` **The camera jumps** shortly after
+  `?stage=3&mode=play&block=2&step=4&op=24&frame=1551` -- at camera frame
+  **1660**, 3.62 world units of eye in a frame where the shot travels 1.25,
+  with a 9.58 degree aim swing out and 9.46 back.
+
+  `CamAdvancePathFrame` (`FUN_004035E0`) publishes the frame, evaluates the
+  path and sets the angles **before** the test that retires the action, so the
+  camera block holds the pose of every frame from start to end inclusive. The
+  port seated on *done*, one tick short, and so **every non-static `cam_play`
+  in the game lost its last frame.** Two neighbours were checked and left
+  alone: the engine does not draw frame 1661 either, and the ~10 degree snap
+  back onto the rail when the last enemy deregisters mid-shot is structural
+  (`[not-a-bug]`, both `[proved]`). Neither was smoothed -- see L27.
+
+- `[fixed]` **James does not render in the third-person cutscenes** at
+  `?stage=3&mode=play&block=2&step=5&op=22&frame=30`. Nothing in the data calls
+  him James; he is class 0x25, character type `0x39`, identified through
+  `gameover_player.bin`, the only asset filename in the game that says *player*.
+
+  He was killing himself on spawn, and so were 109 others.
+  `ScriptedHumanoidUpdate` (`FUN_004842A0`) case 10 is `if (g_active_player ==
+  mode)`, else scan forward for the marker that ends the branch. Three
+  readings were wrong: `0x009C7000` is `g_active_player` and not a player
+  count, mode `-2` is the `endif` marker and not a fourth comparison, and the
+  skip stride is a literal 8 taking no notice of the 16-byte commands. The port
+  always fell through, justified by *one player is the port's only
+  configuration* -- and the arm an `op 10` guards is very often the kill. The
+  exporter followed only the fall-through edge, stopped at that kill, and
+  shipped a four-command program whose every path ended in death: the arm the
+  actor really runs was never in the bundle. **110 of the twelve bundles' 274
+  class-0x25 spawns ran a kill on the frame they were made; it is 42 now, and
+  those 42 are the twins that are meant to go.** Not stage-3-specific: stage 1's
+  opening has its over-shoulder shot back.
 
 ## Divergences awaiting a call
 

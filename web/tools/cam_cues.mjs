@@ -74,6 +74,7 @@ const mkHost = () => ({
   aliveEnemies: () => null,
   presentEnemies: () => null,
   aliveCivilians: () => null,
+  scriptFlagRaised: () => null,
   cameraFree: () => null,
   showMessage: () => null,
   endDialogue: () => undefined,

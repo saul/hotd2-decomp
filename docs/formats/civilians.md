@@ -192,7 +192,7 @@ Two consequences worth knowing, both the engine's:
 | `0x19` | `SetRouteBranch` | **[proved]** `g_script_branch_var = (s16)cmd[1]` — the selector `EvtAdvanceStepOrRoute` indexes a route record's `next[]` with, so **this is how the game decides which way a branching stage goes**. Eleven streams run it, all eleven pass 1, and all eleven put it after the `SetOnShot 0` that makes the civilian safe. See [evt.md](evt.md#how-a-branch-is-decided) |
 | `0x1A` | `SetChildCue` | applied only while children survive |
 | `0x1B` | `SetGlobalB` | `DAT_009CA0F4`. `[open]` |
-| `0x1C` | `SetScriptFlag` | index |
+| `0x1C` | `SetScriptFlag` | **[proved]** `g_script_flags[cmd[1]] = 1` (`0x0048BF2A`) — the *same* 0x100-byte array at `0x009C7200` that the evt's `set_script_flag` (0x48) writes and `wait_script_flag` (0x45) reads. **This is how a hostage tells the stage script she is done**, and it is the only way most of them can: across the six shipped scripts every `wait_script_flag` gate but two names a flag no `set_script_flag` in that stage ever raises. Twenty-eight commands in the 136 streams, on flags 0..7, 18, 29, 30, 35, 36, 53 and 54. See *The rescue* below |
 | `0x1D` | `PlayDialogue` | group — `EvtOpPlayDialogue2D` |
 | `0x1E` | `SetResume` | script pointer |
 | `0x1F` | `SetResumeByMode` | two script pointers |
@@ -496,6 +496,34 @@ remembers that child's `obj+0x131C`, the player who killed it. Wait bit `0x04`
 blocks until the list is shorter than `sub+0x20`, and the block it unblocks
 ends with a wait word carrying `0x10000000` — which is where
 `ScoreAddForPlayer` pays **400**, to that player or, when it is `-1`, to both.
+
+### …and how the stage script finds out
+
+**[proved]** A civilian's stream ends by raising a `g_script_flags` byte with
+op `0x1C`, and the evt waits on that byte with `wait_script_flag` (0x45).
+That is the whole handshake, and it is the reason the two halves have to share
+one array.
+
+Stage 3's boat hostage is the clean case. Her spawn is
+`spawn_obj_c 0x0097A608` — script address 12808 — at block 2 step 3 op 27, and
+step 3's **last blocking instruction, op 35, is `wait_script_flag 0x1E`**:
+flag 30. Nothing in stage 3's script sets flag 30. She does:
+
+* her tail's script selector is `27`, and that indexes
+  **`g_civilian_scripts` (0x005702A8)**, not the stream table —
+  `entries[27] = 64`;
+* **stream 64 command 17** is `SetScriptFlag 30`, in the block behind the wait
+  word `0x00080000` (*leave `g_civilians_alive` now*), so it fires once she has
+  been **rescued**;
+* **stream 63 command 12** is the same command, and 63 is stream 64's
+  `SetOnShot` target — which `CivilianCheckShot`'s killed branch also runs when
+  a captor mauls her.
+
+So the gate opens whichever way the encounter ends, and the stage cannot hang
+on it. Reading the selector as a direct index into `scripts` instead of
+through `entries` gives stream 27, which carries no `0x1C` at all and makes
+the flag look unraisable; the indirection is `CiviliansJson.entries` in
+`bundle/scene.ts`.
 
 ### Letting the captors go
 

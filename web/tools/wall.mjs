@@ -47,6 +47,7 @@ const w = new Walker(script, {
   startCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
   playSound: NOOP, aliveEnemies: () => null, presentEnemies: () => null,
   aliveCivilians: () => null, cameraFree: () => null, setShutter: NOOP,
+  scriptFlagRaised: () => null,
   showMessage: NOOP, endDialogue: NOOP,
 });
 if (!seekTo(w, Number(block), Number(step), Number(op))) {

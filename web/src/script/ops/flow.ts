@@ -6,6 +6,7 @@
  * `verify_player_ops.py` checks against docs/PLAYER_PROGRESS.md.
  */
 import type { OpImpl } from "../walker";
+import { G } from "../../game/globals";
 
 export const OPS: Record<number, OpImpl> = {
 
@@ -93,10 +94,23 @@ export const OPS: Record<number, OpImpl> = {
     },
 
     // -- flow --------------------------------------------------------------
+    /**
+     * `EvtOpSetScriptFlag48` (`FUN_0045FD70`), and the whole handler is
+     * `g_script_flags[operand] = 1`. No yield, no test, and there is no
+     * clear-flag opcode anywhere in the dispatch table: a flag stays up until
+     * `ResetSceneOnEnter` (`FUN_0045EDD0`) zeroes all 0x100 bytes.
+     *
+     * It writes `G.g_script_flags` — 0x009C7200 — because that is the array
+     * the engine writes, and the same one `CivilianRunScript`'s op 0x1C and
+     * `ZombieStateTargetScriptWithFlag` write. It used to go into a `Set` on
+     * the walker, which `app/systems.ts` copied into `G` once a frame,
+     * clobbering everything gameplay had raised.
+     */
     0x48: {                                     // set_script_flag
-      status: "tracked",
+      status: "done",
       run: (w, op) => {
-        if (op.flag !== undefined) w.flags.add(op.flag);
+        void w;
+        if (op.flag !== undefined) G.g_script_flags[op.flag] = 1;
         return undefined;
       },
     },

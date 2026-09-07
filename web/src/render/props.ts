@@ -79,6 +79,7 @@ import { attachTo } from "./scope3d";
 import { LabelCache } from "./overlays";
 import { BAMS_TO_RAD } from "../core/bams";
 import { HingePose } from "./hinge";
+import { G } from "../game/globals";
 
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Y = new Vector3(0, 1, 0);
@@ -256,14 +257,17 @@ export class PropLayer implements System {
   }
 
   /**
-   * `flags` is the walker's script-flag set, written by `set_script_flag`
-   * (0x48). `frames` is elapsed 60 Hz frames the walker advanced — the swing
-   * counter is game frames, so a paused player holds a half-open door open.
+   * The flags are `G.g_script_flags` — 0x009C7200 — which is what
+   * `set_script_flag` (0x48) writes and what `HingeUpdate` reads. They used to
+   * come off a `Set` the walker kept beside it; there is one array now, and
+   * gameplay writes it too. `frames` is elapsed 60 Hz frames the walker
+   * advanced — the swing counter is game frames, so a paused player holds a
+   * half-open door open.
    */
   update(ctx: Context, t: Tick): void {
     const w = ctx.walker;
     if (!w) return;
-    const flags = w.flags;
+    const raised = (i: number) => (G.g_script_flags[i] ?? 0) !== 0;
     const frames = ticksOfSeconds(t.dt);
     if (!this.live.length) return;
     for (const l of this.live) {
@@ -271,11 +275,11 @@ export class PropLayer implements System {
       const p = l.hinge ?? l.stat!;
       // Both kinds vanish on their remove flag; a static one has no other
       // state, so this is all it does.
-      const gone = p.remove_flag >= 0 && flags.has(p.remove_flag);
+      const gone = p.remove_flag >= 0 && raised(p.remove_flag);
       l.node.visible = this.enabled && !gone;
       if (!l.hinge || gone || !l.curve.length) continue;
 
-      if (flags.has(l.hinge.open_flag)) {
+      if (raised(l.hinge.open_flag)) {
         // `CMP EDI,0x3C; JL` -- or `CMP EDI,0x82; JGE` on curve 4. Past the
         // end the exe stops writing the angles at all, so the prop holds the
         // last frame it posed; clamping the cursor is the same pose.

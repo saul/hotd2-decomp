@@ -71,6 +71,10 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // path drop it -- so this is the engine's own counter, not a restatement
     // of it.
     aliveCivilians: () => G.g_civilians_alive,
+    // `g_script_flags` (0x009C7200) -- the same array `set_script_flag` (0x48)
+    // writes and the class-0x10 civilians' op 0x1C and the captors' state 36
+    // write. One array, both halves.
+    scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
     // `g_camera_free` -- the room-clear waits need the camera back on its
     // rail, not just the count at zero.
     cameraFree: () => G.g_camera_free !== 0,

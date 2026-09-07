@@ -312,7 +312,7 @@
 009c71ec	g_camera_pitch_bams
 009c71f0	g_camera_yaw_bams
 009c71f4	g_camera_roll_bams
-009c7200	g_script_flags	byte array the evt script sets and waits on
+009c7200	g_script_flags	byte array the evt script sets and waits on -- 0x100 bytes, zeroed by ResetSceneOnEnter (FUN_0045EDD0) and by nothing else. ONE array with seven writers and many readers: the evt's EvtOpSetScriptFlag48 (0x0045FD70), CivilianRunScript's op 0x1C (0x0048BF2A), ZombieStateTargetScriptWithFlag (0x0045B1DF, class 0x30 state 36), FUN_00433f40 (0x00433FC1, a class-0x33 cue prop), FUN_00473cf0 (0x00473D76) and the class-0x44 constructor at 0x0047314A/0x00473156. Readers include EvtOpWaitScriptFlag45, ZombieStateWaitScriptFlagThenBranch/ThenEnter, ScriptedHumanoidUpdate, the class-0x24 set-piece states, CivilianStepScript's wait bit 0x2000, MouseBranchTriggerUpdate and StoryModeSwitchUpdate. Script and gameplay share it in both directions, which is the point of it.
 009c72e0	g_actor_kill_all	1 makes every class handler self-destruct
 009c7300	g_screen_offset_x
 009c7304	g_screen_offset_y

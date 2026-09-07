@@ -70,6 +70,7 @@ const walker = new Walker(script, {
   startCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
   playSound: NOOP, aliveEnemies: () => liveEnemies(),
   presentEnemies: () => G.g_enemies_present, aliveCivilians: () => null,
+  scriptFlagRaised: () => null,
   cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
   endDialogue: NOOP,
 });

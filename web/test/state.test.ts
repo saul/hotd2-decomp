@@ -102,6 +102,7 @@ const mkHost = (): WalkerHost => ({
   aliveEnemies: () => null,
   presentEnemies: () => null,
   aliveCivilians: () => null,
+  scriptFlagRaised: () => null,
   cameraFree: () => null,
   showMessage: () => null,
   endDialogue: () => undefined,

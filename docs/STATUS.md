@@ -21,22 +21,22 @@ is in `tools/verify_all.py`, beside the command that runs it.
 |---|---:|---:|---|
 | `game/` | 29614 | 129 | engine |
 | `hod2lib/` | 14807 | 34 | engine |
-| `render/` | 8003 | 29 | render |
-| `app/` | 7128 | 29 | app |
-| `script/` | 3619 | 25 | engine |
+| `render/` | 8007 | 29 | render |
+| `app/` | 7137 | 29 | app |
+| `script/` | 3856 | 25 | engine |
 | `ui/` | 2969 | 26 | ui |
 | `bundle/` | 1910 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **69551** | **294** | |
+| **total** | **69801** | **294** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 1876
 * `hod2lib/exetab.ts` — 1718
 * `game/actor.ts` — 1669
-* `script/walker.ts` — 1601
+* `script/walker.ts` — 1643
 * `hod2lib/gltf.ts` — 1416
 
 ## The port
@@ -56,7 +56,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 683 in `ghidra/annotations/functions.tsv` |
+| Named functions | 684 in `ghidra/annotations/functions.tsv` |
 | Named globals | 354 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 28 under `tools/`, run together by `verify_all.py` |
 

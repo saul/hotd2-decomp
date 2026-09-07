@@ -114,7 +114,7 @@ import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
-import { GameSystem } from "../src/app/systems";
+import { GameSystem, syncPortGlobals } from "../src/app/systems";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
@@ -136,6 +136,8 @@ import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker } from "../src/script/walker";
 import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
+import { ScriptFlagsThisBundleCanRaise }
+  from "../src/script/waits/flag";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -9192,6 +9194,7 @@ console.log("\nthe camera path publishes every frame, ends included:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
     showMessage: () => null, endDialogue: () => undefined,
   });
   // No `primeToFirstWait`: it steps *over* waits to get a scene on screen, and
@@ -9277,6 +9280,7 @@ console.log("\na stashed path is played by a hook that steps first:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
     showMessage: () => null, endDialogue: () => undefined,
   };
 
@@ -9819,6 +9823,194 @@ console.log("\nthe firing gate:");
         G.g_nFiringGate === 1 && shutter.firingGate);
   G.g_nFiringGate = 0;
   check("...in both directions", !shutter.firingGate);
+}
+
+/**
+ * `wait_script_flag` (0x45) is a **gameplay** gate, and `g_script_flags` is
+ * one array.
+ *
+ * `EvtOpWaitScriptFlag45` (`FUN_0045FC80`) tests `g_script_flags[operand]` and
+ * `EvtOpSetScriptFlag48` (`FUN_0045FD70`) is the single line that sets one —
+ * on the same 0x100-byte array at `0x009C7200` that `CivilianRunScript`'s op
+ * 0x1C (`0x0048BF2A`) and `ZombieStateTargetScriptWithFlag` (`0x0045B1DF`)
+ * also write. Across the six shipped scripts **every one of the forty-odd
+ * gates names a flag that script's own `set_script_flag` never sets**, so the
+ * opcode is only ever "hold until an actor is finished".
+ *
+ * The port had two stores: a `Set` on the walker that `set_script_flag` wrote
+ * and `wait_script_flag` read, and `G.g_script_flags` that gameplay wrote —
+ * and `syncPortGlobals` rebuilt the second from the first once a frame, so a
+ * flag an actor raised lasted until the next tick and no gate could ever see
+ * it. Stage 3 block 2 step 3's `wait_script_flag 0x1E` is what that cost: the
+ * hostage raises flag 30 from her own stream (rescued, command 17; shot or
+ * mauled, command 12 of the on-shot stream), the wait passed on the frame it
+ * was reached, and step 4's boat shot sailed past her and her captor while
+ * the maul was still running. `docs/BUGS.md`, "the civilian/enemy are jumped
+ * over".
+ *
+ * Asserted here on the world rather than on a layer's opinion of itself: a
+ * real class-0x10 actor in `G.g_object_list` with a real captor, driven by
+ * `CivilianUpdate`, against the walker's own address — and with
+ * `syncPortGlobals` running every frame, because that is the call that used to
+ * wipe the evidence.
+ */
+console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
+{
+  /** The flag stage 3 block 2 step 3 waits on. */
+  const RESCUE_FLAG = 30;
+  const flagOp = (i: number, op: number, arg: number) => ({
+    i, at: i, op, arg, flag: arg,
+    name: op === 0x45 ? "wait_script_flag" : "set_script_flag",
+    cat: op === 0x45 ? "wait" : "flow",
+    blocks_on: `script flag ${arg} set`,
+  });
+  const script = {
+    scene: 0, stage: 3, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        flagOp(0, 0x45, RESCUE_FLAG),
+        // Somewhere past the gate, and a second flag so "did it advance" is a
+        // fact about the array rather than about the cursor alone.
+        flagOp(1, 0x48, 7),
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+
+  ResetGameGlobals();
+  SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+    entries: [0],
+    // The shape of the shipped stream 64, which is the one the hostage at
+    // script address 12808 runs: a wait word leads its block and governs the
+    // wait at the **end** of it, so `ChildrenAlive` here parks the VM on
+    // command 2 until the captor is down, and the flag is raised by the block
+    // that release runs.
+    scripts: [[
+      { op: CivilianOp.Wait, args: [CivilianWait.ChildrenAlive] },
+      { op: CivilianOp.SetChildrenGoal, args: [0] },
+      // A word of 0 is "park here": it is what stops the step loop walking
+      // straight past this block, which would run the reapply walk and skip
+      // the flag. Every one of the 136 shipped streams ends on one.
+      { op: CivilianOp.Wait, args: [0] },
+      { op: CivilianOp.SetScriptFlag, args: [RESCUE_FLAG] },
+      { op: CivilianOp.Wait, args: [0] },
+      { op: CivilianOp.End, args: [] },
+    ]],
+    items: [],
+    spawns: {
+      "16384": {
+        charType: 1, script: 0, removePath: -1, removeFrame: 0,
+        removeDelay: 0,
+        children: [{ at: 0x4100, class: 0x30, charType: 1,
+                     pos: [0, 0, 0] as [number, number, number],
+                     yaw: 0, hp: 1 }],
+      },
+    },
+  });
+
+  const rng = new Rng(11);
+  const events = new Events();
+  const captor = spawnZombie(0x4100, 1, "captor");
+  captor.visible = true;
+  const civ = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "hostage",
+                         undefined, rng);
+  civ.visible = true;
+  civ.pos = vec3(0, 0, 0);
+
+  const host = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null, aliveCivilians: () => null,
+    // The player's host, which is the one under test: it answers out of the
+    // same array the civilian writes.
+    scriptFlagRaised: (i: number) => (G.g_script_flags[i] ?? 0) !== 0,
+    cameraFree: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+  const w = new Walker(script, host);
+
+  /** One whole frame of the player: walker, globals sync, then the port. */
+  const frame = () => {
+    w.tick(1 / 60);
+    syncPortGlobals(w, false, EYE);
+    CivilianUpdate(civ, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST, events });
+  };
+
+  for (let i = 0; i < 30; i++) frame();
+  check("the hostage and her captor are both in the pool",
+        ActorByAt(0x4000)?.cls === SpawnClass.Civilian
+        && ActorByAt(0x4100)?.cls === SpawnClass.Zombie
+        && !ActorByAt(0x4100)?.dead,
+        `civ ${ActorByAt(0x4000)?.cls} captor ${ActorByAt(0x4100)?.cls}`);
+  check("...and the script is still parked on the gate 30 frames in",
+        w.opIndex === 0 && w.wait?.op.op === 0x45,
+        `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
+  check("...with the flag it names still down",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 0,
+        `${G.g_script_flags[RESCUE_FLAG]}`);
+
+  // The rescue: the captor dies, the civilian's own stream runs on and raises
+  // the flag. Nothing else in the fixture can raise it.
+  captor.dead = true;
+  frame();
+  check("killing the captor lets her stream raise the flag",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
+        `${G.g_script_flags[RESCUE_FLAG]} children ${civ.civ?.childCount}`);
+  for (let i = 0; i < 5; i++) frame();
+  check("...and it is still raised five `syncPortGlobals` calls later",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
+        `${G.g_script_flags[RESCUE_FLAG]}`);
+  // Past the gate the block has no more steps, so the walker has routed on —
+  // `0/1/0` is the address it ends at, not the gate it was parked on.
+  check("...and the script is off the gate",
+        w.wait === null && !(w.step === 0 && w.opIndex === 0),
+        `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
+  check("...having run the instruction behind it into the same array",
+        (G.g_script_flags[7] ?? 0) === 1, `${G.g_script_flags[7]}`);
+
+  // The escape hatch, pinned. **`[diverges]`**: a gate on a flag nothing this
+  // port runs can raise passes, because a faithful one would park the stage on
+  // it for ever — the chapter card's flag 248 and the result screen's 254 are
+  // twelve such gates in the shipped scripts, both raised by actors
+  // `spawn_simple` (0x0A) places and 0x0A is not ported. The boundary is
+  // *derived from the bundle*, so this is a check on the derivation and not on
+  // a list of numbers: the same fixture, one flag no stream names.
+  const canRaise = ScriptFlagsThisBundleCanRaise(script);
+  check("the coverage set is the civilian's own flag and the script's own",
+        canRaise.has(RESCUE_FLAG) && canRaise.has(7) && !canRaise.has(248),
+        `${[...canRaise].sort((a, b) => a - b).join(",")}`);
+  {
+    ResetGameGlobals();
+    const unraisable = {
+      ...script,
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [flagOp(0, 0x45, 248)] }],
+      }],
+    } as unknown as ScriptJson;
+    const w3 = new Walker(unraisable, host);
+    for (let i = 0; i < 10; i++) w3.tick(1 / 60);
+    check("...and a gate on a flag nothing in the bundle raises does not park",
+          w3.wait === null && !(w3.step === 0 && w3.opIndex === 0),
+          `at ${w3.block}/${w3.step}/${w3.opIndex} wait ${w3.wait?.op.op}`);
+  }
+
+  // A seek observes no waits, so the gate's postcondition has to be applied
+  // by hand — the same argument as `retires` and `skipRunsCameraOn`. Without
+  // it a reload lands past a gate whose flag is still 0, and everything that
+  // reads the array (class 0x24's removal cue, 0x30's states 20 and 31,
+  // 0x31's cue conditions, 0x52's despawn) sees a world the address does not
+  // describe.
+  ResetGameGlobals();
+  const w2 = new Walker(script, host);
+  seekTo(w2, 0, 0, 1);
+  check("a seek over the gate leaves the flag it was waiting for raised",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
+        `${G.g_script_flags[RESCUE_FLAG]}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

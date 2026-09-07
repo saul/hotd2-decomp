@@ -51,6 +51,7 @@ const mkHost = (): WalkerHost => ({
   aliveEnemies: () => null,
   presentEnemies: () => null,
   aliveCivilians: () => null,
+  scriptFlagRaised: () => null,
   cameraFree: () => null,
   showMessage: () => null,
   endDialogue: () => undefined,
@@ -67,7 +68,11 @@ function shot(w: Walker): string {
     region: w.region,
     cam: w.cam && [w.cam.slot, w.cam.startFrame, w.cam.endFrame],
     slots: [...w.loadedSlots].sort((a, b) => a - b),
-    flags: [...w.flags].sort((a, b) => a - b),
+    // The script flags are `G.g_script_flags` now, not a set on the walker.
+    // A seek has to reproduce them exactly, `set_script_flag`'s writes and
+    // the postcondition of every `wait_script_flag` it stepped over alike.
+    flags: G.g_script_flags
+      .map((v, i) => (v ? i : -1)).filter((i) => i >= 0),
     shutter: w.shutterState,
     bgm: w.bgmTrack,
     backdrop: w.backdropPreset,
@@ -580,6 +585,7 @@ for (const stage of STAGES) {
     const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
                                    presentEnemies: () => 0,
                                    aliveCivilians: () => 0,
+                                   scriptFlagRaised: () => null,
                                    cameraFree: () => free });
     w.applyWait(gate);
     w.tick(1 / 60);

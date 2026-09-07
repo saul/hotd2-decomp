@@ -127,6 +127,8 @@ export type WaitPolicy =
   | { kind: "civilians" }
   /** `wait_queued_events_done`: blocks while the action ring owes work. */
   | { kind: "queued" }
+  /** `wait_script_flag`: blocks until `g_script_flags[index]` is raised. */
+  | { kind: "flag"; index: number }
   | { kind: "passed"; why: string };
 
 export interface PendingWait {
@@ -226,6 +228,22 @@ export interface WalkerHost {
    */
   aliveCivilians(): number | null;
   /**
+   * `g_script_flags[index] != 0` (0x009C7200), or `null` when the gate is not
+   * a condition this client can evaluate.
+   *
+   * The fourth question, and the same contract as the three counters above:
+   * `null` is "this host has no gameplay", not "the flag is down".
+   *
+   * It has to be asked rather than read out of `G` directly, because
+   * **every one of the forty-odd `wait_script_flag` gates in the six shipped
+   * scripts names a flag that script's own `set_script_flag` never sets.**
+   * They are raised by actors — the class-0x10 civilians' streams (op 0x1C)
+   * and their captors' state 36 — so a host with no object pool cannot
+   * satisfy one, ever. `test/seek.ts` and the walker-only harnesses in
+   * `web/tools/` are exactly that host.
+   */
+  scriptFlagRaised(index: number): boolean | null;
+  /**
    * `g_camera_free` (0x009C6F2D), or `null` when this client cannot evaluate
    * it.
    *
@@ -324,11 +342,10 @@ export const WALKER_RESTORED_KEYS = [
 /**
  * Saved keys `loadState` handles by hand rather than by copy, each for a
  * reason stated where it happens: `wait` must be cleared when absent rather
- * than left standing, and `flags` and `loadedSlots` are `Set`s where a
- * snapshot is JSON.
+ * than left standing, and `loadedSlots` is a `Set` where a snapshot is JSON.
  */
 export const WALKER_RESTORED_BY_HAND = [
-  "wait", "flags", "loadedSlots",
+  "wait", "loadedSlots",
 ] as const;
 
 export class Walker {
@@ -625,7 +642,17 @@ export class Walker {
    */
   camOverrideValid = false;
   checkpointBlock = 0;
-  readonly flags = new Set<number>();
+  /**
+   * There is no `flags` set here any more.
+   *
+   * The script flags are `G.g_script_flags` (0x009C7200) and always were one
+   * array: `EvtOpSetScriptFlag48` (`FUN_0045FD70`) writes it and six actor
+   * routines write it too. The walker kept a `Set` of the ones *it* had set,
+   * `app/systems.ts` rebuilt `G.g_script_flags` from that set once a frame —
+   * so every flag an actor raised was wiped on the next tick — and
+   * `wait_script_flag` read the set rather than the array. One store, in
+   * `game/globals.ts`, is the whole of the fix.
+   */
   readonly loadedSlots = new Set<number>();
   spawns: ActiveSpawn[] = [];
   cam: CamCommand | null = null;
@@ -733,7 +760,11 @@ export class Walker {
     this.camOverrideValid = false;
     this.lightBlock.reset();
     this.checkpointBlock = this.script.entry_block;
-    this.flags.clear();
+    // `ResetSceneOnEnter` (`FUN_0045EDD0`) zeroes all 0x100 bytes of
+    // `g_script_flags` and nothing else in the image clears one. Starting the
+    // script over is the port's scene entry, so it clears them here — which is
+    // exactly the state `this.flags.clear()` used to clear on this line.
+    G.g_script_flags = [];
     this.loadedSlots.clear();
     this.spawns = [];
     this.cam = null;
@@ -785,8 +816,10 @@ export class Walker {
       wait: this.wait && { ...this.wait, policy: { ...this.wait.policy } },
       finished: this.finished, bgmTrack: this.bgmTrack,
       lastSound: this.lastSound, seq: this.seq,
-      // Sets are not JSON; the snapshot is a file the user can keep.
-      flags: [...this.flags], loadedSlots: [...this.loadedSlots],
+      // Sets are not JSON; the snapshot is a file the user can keep. The
+      // script flags are not here: they live in `G.g_script_flags`, which the
+      // game slice of the same snapshot carries.
+      loadedSlots: [...this.loadedSlots],
     };
   }
 
@@ -811,8 +844,6 @@ export class Walker {
     // has no `wait` key at all, and leaving the live one standing would be
     // worse than clearing it.
     this.wait = (s["wait"] as unknown as PendingWait | null) ?? null;
-    this.flags.clear();
-    for (const f of (s["flags"] as unknown as number[]) ?? []) this.flags.add(f);
     this.loadedSlots.clear();
     for (const n of (s["loadedSlots"] as unknown as number[]) ?? []) {
       this.loadedSlots.add(n);
@@ -889,6 +920,13 @@ export class Walker {
     if (retires) this.retireGated(retires === "civilians"
       ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
     if (rule?.skipRunsCameraOn) this.runCameraOnPast(this.wait.op);
+    // The third postcondition: a `wait_script_flag` is only ever passed in
+    // play with the byte already a 1, so a replay that steps over one has to
+    // raise it. Without this a seek lands past a gate whose flag is still 0,
+    // and the classes that read the same array — 0x24's removal cue, 0x30's
+    // states 20 and 31, 0x31's cue conditions, 0x52's despawn — see a world
+    // the address does not describe.
+    if (rule?.raisesScriptFlag) G.g_script_flags[this.wait.op.arg ?? 0] = 1;
     this.wait = null;
     this.opIndex++;
   }
@@ -1408,6 +1446,10 @@ export class Walker {
       // is the answer -- retire exactly what it counts.
       if (rule?.retires) this.retireGated(rule.retires === "civilians"
         ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
+      // Not `raisesScriptFlag` here: `0x45` only reaches this arm with the
+      // flag *already* raised, so there is nothing to reproduce. The
+      // postcondition belongs to `stepOverWait`, which is the path that walks
+      // past a gate whose condition is false.
       return `${blocksOn} -- ${policy.why}`;
     }
     this.wait = { op, blocksOn, policy };

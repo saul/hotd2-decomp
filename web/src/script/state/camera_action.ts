@@ -103,6 +103,10 @@ const CAM_PLAY: Record<string, ActionImpl> = {
       // `CamStartPathPlayback` publishes `from` itself; the tick's own advance
       // must not step over it. See `CamCommand.started`.
       started: true,
+      // A static pose is written once and its action retires on the spot, so
+      // there is nothing left to publish; a playing shot still owes every
+      // frame up to and including its last. See `CamCommand.retired`.
+      retired: !!op.static,
     };
     w.host.startCamera(w.cam);
     if (w.cam.isStatic) {
@@ -189,6 +193,9 @@ const SCENE: Record<string, ActionImpl> = {
         // the player, the two `znebi2` were never ordered up out of the
         // water, and `wait_enemies_alive 0` held block 16 for ever.
         started: false,
+        // As above: a stashed range whose start equals its end is the static
+        // case and owes nothing; anything else owes its frames.
+        retired: st.start === st.end,
       };
       w.stashedCam = null;
       w.host.startCamera(w.cam);
@@ -198,6 +205,10 @@ const SCENE: Record<string, ActionImpl> = {
       // CameraSnapToPathEye: hold where the path is now.
       w.cam.done = true;
       w.cam.isStatic = true;
+      // Nothing more is published: `advanceCameraPath` skips a static
+      // command outright, so the retirement has to be recorded here or the
+      // seat would keep re-writing the block from the rail for ever.
+      w.cam.retired = true;
       w.host.startCamera(w.cam);
       return "snap to path eye";
     }

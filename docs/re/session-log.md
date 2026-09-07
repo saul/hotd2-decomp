@@ -13430,3 +13430,171 @@ and not one of them was a check.**
 * **The same gate covers class 0x30**, whose emerging and script-frozen
   zombies the port also let you damage. No report has been filed against that
   and no assertion was written for it; the fix is generic and covers it.
+
+## `op 10` is an `if`, and the player was on the wrong side of it
+
+**The report.** *"James (the player controlled character) doesn't seem to
+render in 3rd person in the cutscenes, e.g. at
+`?stage=3&mode=play&block=2&step=5&op=22&frame=30`"*, `docs/BUGS.md` B21.
+
+### What the data calls him
+
+Not "James" — the shipped data has no name table for characters, so the
+identification runs through the asset filenames, which is the closest thing to
+one. Stage 3's block 2 step 5 places four class-0x25 humanoids in two
+`spawn_obj` opcodes:
+
+| descriptor | char type | skeleton resolves to | nodes |
+|---|---|---|---|
+| `0x3378` | `0x39` | `gameover_player.bin` | 15 |
+| `0x345C` | `0x3A` | `char_adv05.bin` | 15 |
+| `0x3508` | `0x3B` | `char_adv05.bin` | 15 |
+| `0x3594` | `0x3C` | `char_adv05.bin` | 15 |
+
+`gameover_player.bin` is the only asset file in the game whose name says
+*player*, and step 4 of the same block loads `player1.bin`…`player4.bin` and
+step 6 frees them again around this cut scene. The two spawns at the *same*
+point — `0x3378` and `0x345C` — are the pair, and which of them stands there is
+decided at run time. That is as far as the evidence goes: the model is
+`[proved]` to be the one the game calls the player's; *James* is the user's
+name for it and is not in the data.
+
+Class **0x25**, character type **0x39**. Not class 0x10, not an attachment
+list, not type 0x17's sub-part mechanism — three of the four shapes the brief
+named, and none of them was it.
+
+### He was placed. He was killed.
+
+The sidebar answered the first question in one look, which is what it is for:
+the **Actors** panel listed all four at `?stage=3&block=2&step=5&op=22`, so
+nothing was unplaced and nothing was an unported class. Two of the four drew
+and two did not, and the two that did not were the two at `d=16` — the pair.
+
+`ScriptedHumanoidUpdate` (`FUN_004842A0`) case 10, at `0x0048478C`:
+
+```
+0048478C  MOV EAX,ESI                    ; the command
+0048478E  MOV [EDI+0x1320],EBX           ; stallFrames = 0
+00484794  ADD ESI,0x8                    ; and step one command by default
+00484797  MOVSX EAX,word ptr [EAX+0x2]   ; the mode
+0048479B  SUB EAX,EBX / JZ 00484809      ; 0
+0048479F  DEC EAX     / JZ 004847D9      ; 1
+004847A2  DEC EAX     / JNZ 0048435D     ; anything else -- nothing to do
+004847A9  CMP dword ptr [0x009c7000],0x2 ; 2
+004847B0  JZ 0048435D                    ; matches: fall into the arm
+004847B6  MOV CX,word ptr [ESI+0x2]      ; else scan for the -2 marker,
+004847BA  ADD ESI,0x8                    ;   eight bytes at a time,
+004847BD  CMP CX,-0x2 / JZ 0048435D      ;   and resume after it
+```
+
+`0x009c7000` is **`g_active_player`**, not `g_players_in_play` (`0x009C8E80`).
+`SelectAttackablePlayer` (`FUN_00414F40`) writes -1 for nobody, 0 or 1 for that
+player alone, 2 for both — and for one player in play it picks 1 unless
+`g_player_state` is 5 or 7, so an ordinary single-player game on slot 0 sits at
+0. `[proved]`
+
+The two programs, at `st3evtbl.bin` `0x33B4` and `0x3498`, are one shape:
+
+```
+op 0  mode -1        wait then play
+op 9  mode 1 a 0|1   the hand model, one per character
+op 10 mode 1|0       if the active player is the *other* one:
+op 18                    ActorKill
+op 10 mode -2        endif
+op 10 mode 0|2       if it is this one:
+  ...                    the performance
+op -1                    end
+op 10 mode -2        endif
+  ...                the two-player arm
+```
+
+The port's `IfPlayerCount` — the name was the reading, and the reading was
+wrong — always stepped one command, with a comment saying that one player is
+the port's only configuration so "taking the matching arm is the same
+decision". It is not the same decision when the arm is `ActorKill`: **both**
+player characters ran the kill on the frame they spawned, and
+`render/characters.ts` will not draw an actor whose `visible` is false. The
+other two humanoids in the shot have no `op 10` and drew perfectly, which is
+what made it look like a missing model rather than a missing branch.
+
+It is not a stage-3 defect. Walking every exported program to its first
+blocking wait, **110 of the twelve bundles' 274 class-0x25 spawns** reached an
+`ActorKill` on the frame they were made; with the branch it is 42, and those 42
+are the twins that are supposed to go. Per stage set: 4→2, 16→7, 16→8, 13→4,
+3→0, 3→0.
+
+### The exporter had the same hole one level down
+
+`humanoidCommandOffsets` followed fall-through and `op 15`'s jump. `op 10` has
+a second successor and it followed neither, so the walk stopped at the `op 18`
+inside the first arm: the bundle carried a **four-command** program every path
+of which ended in a kill, and the arm the actor actually runs — six more
+commands, two more clips — was not in the file at all. Following the skip takes
+the six stages' decoded stream from 2,770 commands to 4,940 and adds motion 845
+and 883 to character type `0x39`'s bake.
+
+The skip is emitted as an **index**, the way `op 15`'s pointer already is. The
+scan that produces it is transcribed literally, stride 8 and all: it reads the
+second `s16` of each eight-byte window and takes no notice of the sixteen-byte
+commands, which is the engine's own arithmetic and would desync on an arm
+containing an `op 7`, `op 8` or `op 4` mode 4. None does, and
+`verify_scripted_clips.py` is what says so rather than a comment.
+
+### What landed
+
+* `web/src/hod2lib/charmotion.ts` + `tools/hod2lib/charmotion.py` —
+  `humanoidSkipTarget`, and the walk follows it. Both halves, one commit.
+* `web/src/hod2lib/bundle.ts` — `skip` on every `op 10` mode 0/1/2 command;
+  `web/src/bundle/scene.ts` declares it.
+* `web/src/game/class25/index.ts` — `IfPlayerCount` → **`IfActivePlayer`**, and
+  it branches. A command with no `skip` (a bundle written before this) leaves
+  the VM rather than running the arm, because on screen and wrong beats deleted.
+* `tools/verify_scripted_clips.py` — the two structural properties the port's
+  `pc += 1` depends on. Reverting the exporter half makes it report 74 faults.
+* Four assertions in `port.test.ts` and seven in `render.test.ts`, the latter on
+  the **scene graph**: the rig node is there, its bone is a `Mesh`, it is
+  visible, and it is at `(-522.7, -14.9, -3883.2)`, which is what the descriptor
+  says. Reverting the port half fails 2 of those and 4 of the port ones.
+
+### Wrong turns
+
+1. **Started from the brief's strongest hypothesis and it was wrong.** The
+   brief pointed at `drawVariant`, at the three unread `ActorBindPartList`
+   callers and at type `0x17`'s sub-part divergence, in that order. All four
+   spawns have `drawVariant` 0; class 0x25's Init calls `ActorBindPartList`
+   itself, so none of the three unread callers is involved; the character type
+   is `0x39` and not `0x17`. Checking the bundle first — the placement is
+   there, the type is there, the motion is baked, the `chr_gameover_player`
+   rig is in the glTF with eight instances — closed all three in about ten
+   minutes and pointed at the runtime instead. **The bundle was never the
+   thing that was missing**, which is the opposite of the last two stage-3
+   bugs and is why the assumption in the brief was so plausible.
+2. **Assumed `g_active_player` was 0 for a single player before reading
+   `SelectAttackablePlayer`.** It happens to be right, but only through
+   `g_player_state == 5`; the routine's *other* arm writes 1 for one player in
+   play, which reads backwards until you notice the state test is on player 0.
+   Had the guess gone the other way the fix would have killed the wrong twin
+   and looked correct in the screenshot, because there is exactly one character
+   on screen either way.
+3. **Read the decompiler's `pfVar10 + 4` and `+ 10` as a command shape.**
+   Ghidra types the command cursor `float *`, so every offset in case 10 comes
+   out in units of four bytes and the `-2` looked as though it lived in a
+   command's second field for no reason. It does live there — the marker is an
+   `op 10` whose *mode* is `-2` — but that only became legible from the
+   disassembly. L1's cousin: the pseudocode was not wrong, it was unreadable.
+
+### What is left `[open]`
+
+* **`op 9`, `op 16` and `op 17` are still stepped over**, with the existing
+  `[diverges]`. `op 9` is the hand model, and both player-character programs
+  carry one (`a 0` and `a 1`, the two entries of `DAT_004EC9E0`'s row) — so the
+  character is drawn without whatever it is meant to be holding. Reading
+  `0x004EC9E0` and `PTR_DAT_004C7160` is its own job.
+* **Boss Mode remaps character types `0x39` and `0x3A`** through the two
+  selected-player bytes at `0x009A2242`/`0x009A2256`, per the existing
+  `[diverges]` on `ScriptedHumanoidInit`. Nothing in the port chooses a player
+  character, so the descriptor's own type stands; with `g_active_player` fixed
+  at 0 the port always shows type `0x39`.
+* **`g_active_player` is a constant in the port.** Nothing calls
+  `SelectAttackablePlayer`, so it is 0 for ever. That is the right value for
+  the one configuration the port has, and it is not the routine.

@@ -262,3 +262,24 @@ have been a coin flip between two 500-line files.
 **Commit before you swap the tree**, or use a second worktree of the old ref.
 A stash is not the answer either: a `stash pop` that conflicts leaves the same
 problem with more steps.
+
+**L31 -- "Only one arm can be taken" is a claim about the data, and it does not
+tell you *which* arm.** Class 0x25's `op 10` is `if (g_active_player == mode)`,
+and the port implemented it as an unconditional step with a comment saying that
+one player is the port's only configuration, so "taking the matching arm is the
+same decision". It is the same decision only if the arms are interchangeable,
+and they are not: the arm an `op 10` guards is very often `op 18`, `ActorKill`.
+The two spawns at one point in stage 3's block 2 are the player's own character
+and the second player's, each with a kill behind the test that says *the active
+player is the other one* -- so falling through killed both, and every
+third-person cut scene in the game lost its foreground. Across the twelve
+bundles, 110 of 274 class-0x25 spawns ran a kill on the frame they were made.
+
+It is L27's shape one step further on. L27 is a test the engine does not have;
+this is a test the engine **does** have, deleted because its outcome looked
+predetermined. Neither survives contact with the shipped data, and the way to
+find out is the same in both cases: enumerate what the branch actually guards
+across every stage before collapsing it. A collapse also hides upstream --
+nothing had followed `op 10`'s second edge in the exporter either, so the arm
+the actor really runs was not in the bundle at all and no amount of reading the
+port would have shown it.

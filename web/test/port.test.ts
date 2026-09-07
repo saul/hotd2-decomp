@@ -1986,6 +1986,78 @@ console.log("\nclass 0x25, jumps and the stall guard:");
         !a.dead && a.hum.pc === 0, `pc ${a.hum.pc}`);
 }
 
+console.log("\nclass 0x25, op 10 picks an arm by g_active_player:");
+{
+  const rng = new Rng(4);
+  // Stage 3's block 2, spawn 0x3378 -- character type 0x39, `gameover_player`
+  // -- transcribed from `st3evtbl.bin` at 0x33B4 with the indices the exporter
+  // resolves. Two arms and a marker between them: kill me if the active player
+  // is 1, otherwise stand and play.
+  const player = (): Parameters<typeof humanoidScene>[0] => [
+    { op: HumanoidOp.WaitThenPlay, mode: -1, a: 0, b: 0 },
+    { op: HumanoidOp.IfActivePlayer, mode: 1, a: 0, b: 0, skip: 3 },
+    { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.IfActivePlayer, mode: 0, a: 0, b: 0, skip: 6 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 99, f1: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ];
+
+  {
+    // One player on slot 0 — `SelectAttackablePlayer` (`FUN_00414F40`) writes
+    // 0 — is the port's configuration, and it is the one the player character
+    // has to survive.
+    const { a, events } = humanoidScene(player());
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("a mismatched op 10 skips its arm instead of running it",
+          !a.dead && a.visible, `dead ${a.dead} visible ${a.visible}`);
+    check("...and lands on the command after the -2 marker, not on the marker",
+          a.hum.pc === 4, `pc ${a.hum.pc}`);
+    for (let i = 0; i < 60; i++) hFrame(a, events, rng);
+    check("...so the arm the active player names is the one that runs",
+          a.hum.pc === 4 && a.pos.y !== 99, `pc ${a.hum.pc} y ${a.pos.y}`);
+  }
+  {
+    // The same program with the other player active: now the kill is the arm
+    // that matches, and the actor goes. Both halves matter — an op 10 that
+    // always skipped would leave two player characters standing in the shot.
+    const { a, events } = humanoidScene(player());
+    G.g_active_player = 1;
+    hFrame(a, events, rng);
+    check("a matching op 10 falls into its arm", a.dead && !a.visible,
+          `dead ${a.dead} pc ${a.hum.pc}`);
+  }
+  {
+    // Mode -2 is the marker, not a fourth comparison: `0x0048478C` tests 0, 1
+    // and 2 and steps the cursor for anything else.
+    const { a, events } = humanoidScene([
+      { op: HumanoidOp.IfActivePlayer, mode: -2, a: 0, b: 0 },
+      { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 3, f1: 0 },
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    ]);
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("an op 10 in a mode it does not test steps over and does not skip",
+          a.pos.y === 3 && a.hum.pc === 2, `pc ${a.hum.pc} y ${a.pos.y}`);
+  }
+  {
+    // A bundle written before `skip` was carried. Leaving the VM keeps the
+    // actor on screen; running the arm regardless is what deleted it.
+    const { a, events } = humanoidScene([
+      { op: HumanoidOp.IfActivePlayer, mode: 1, a: 0, b: 0 },
+      { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+    ]);
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("a mismatched op 10 with no skip leaves the VM rather than killing",
+          !a.dead && a.visible && a.hum.pc === -1,
+          `dead ${a.dead} pc ${a.hum.pc}`);
+  }
+  G.g_active_player = 0;
+}
+
 console.log("\nclass 0x25, the removal trigger:");
 {
   const rng = new Rng(4);

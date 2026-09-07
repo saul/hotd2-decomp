@@ -540,8 +540,30 @@ why the rescue count in that harness went down.
 second-largest class in the game and a **bytecode VM**. The spawn's tail points
 at a command block; the Init installs the interpreter and it walks 8-byte
 commands until one blocks, so a run of setup commands all take effect in one
-frame and only a wait costs one. 137 blocks and 1,385 commands are decoded into
-the bundle. This is the game's cutscene system, not an enemy.
+frame and only a wait costs one. 137 blocks are decoded into the bundle. This
+is the game's cutscene system, not an enemy.
+
+**And it is where the player's own character comes from.** `op 10` is the VM's
+only branch that is not a jump — `if (g_active_player == mode)`, else skip past
+the `mode == -2` marker that closes the arm — and it is how a cut scene puts
+*one* of the two player characters on screen. The port read the opcode as a
+player *count*, decided that one player was its only configuration, and always
+fell through; the arm an `op 10` guards is very often `op 18` (`ActorKill`), so
+it killed the character it exists to keep. Stage 3's block 2 spawns character
+types `0x39` (`gameover_player.bin`) and `0x3A` (`char_adv05.bin`) at one point
+and the port deleted both, which is why the third-person cut scenes had no
+foreground. Across the twelve bundles it was **110 of the 274 class-0x25
+programs** that ran an `ActorKill` before reaching their first blocking wait;
+it is 42 now, and those 42 are the twins that are meant to go.
+
+The exporter had the same hole one level down: its command walk followed
+fall-through and `op 15`'s jump and nothing else, so it stopped at the first
+`op 18` and emitted a four-command program every path of which ended in a kill.
+Following the skip roughly doubles the decoded stream — 4,940 commands across
+the twelve bundles against 2,770 — and brings the clips those arms name into
+the bake with it. `verify_scripted_clips.py` checks both edges: that every
+command's fall-through is the next one emitted, and that every `op 10`'s
+`-2` scan lands on a command boundary.
 
 **Class 0x24, the set-pieces, is ported** (`game/class24/`) — a skinned actor
 choreographed against the camera rather than the clock: all six state routines,

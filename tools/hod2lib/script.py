@@ -396,6 +396,8 @@ class Program:
             d.update(self._decode_queue(ins, campaths))
         elif ins.opcode in evt.SPAWN_OPCODES:
             d["spawns"] = self._decode_spawns(ins)
+        elif ins.opcode in evt.SIMPLE_SPAWN_OPCODES:
+            d["simple"] = self._decode_simple_spawns(ins)
         elif ins.opcode in WAIT_CONDITIONS:
             if len(ins.raw) >= 1:
                 d["arg"] = ins.raw[0]
@@ -581,6 +583,25 @@ class Program:
                 }
                 for i in range(0, 6, 2)
             ]
+        return out
+
+    def _decode_simple_spawns(self, ins: evt.Instr) -> list[dict]:
+        """Resolve ``spawn_simple``'s pointer list to ``{class, hp}`` records.
+
+        Separate from :meth:`_decode_spawns` because these are not placement
+        descriptors: two words, no position, and six of the game's seven
+        distinct operands point into the shared ``comevtbl`` buffer rather
+        than into this stage's table. Duplicates are **not** collapsed -- the
+        engine allocates one object per operand, and stage 3's block 11 lists
+        the same record twice on purpose.
+        """
+        out: list[dict] = []
+        for w in ins.raw:
+            if w == 0xFFFFFFFF:
+                break
+            rec = evt.read_simple_spawn(self.evt, w)
+            if rec is not None:
+                out.append(rec.to_json())
         return out
 
     def _decode_spawns(self, ins: evt.Instr) -> list[dict]:

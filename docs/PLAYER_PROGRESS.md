@@ -947,7 +947,7 @@ struck through:
 | `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip bar; the feature is live in the retail game |
 | `33` | `set_action_drain_mode` | 125 | **Done** — the `pending` half; the ring's dequeue *mode* is still not modelled |
 | `10`/`11` | collision sets | 113 | Only with collision |
-| `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
+| `0A` | `spawn_simple` | 98 | No — its records carry no position, so there is nothing to mark. See the opcode table |
 | `49`/`4A`/`4B` | `variant_*` | — | **Worth checking** — a global picks which operand list runs, so some spawns may never appear |
 
 With rain in, the remaining struck-through opcodes are all either moot in a
@@ -2325,16 +2325,16 @@ missed. Meanings and confidence marks live in
 | Op | Name | Category | Status | Notes |
 |---|---|---|---|---|
 | `00` | `nop_stub` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
-| `01` | `spawn_placed_if_1p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it |
-| `02` | `spawn_simple_if_1p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0A`. No shipped script encodes it |
+| `01` | `spawn_placed_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it, but the forward is the engine's and is wired rather than declared dead |
+| `02` | `spawn_simple_if_1p` | spawn | **done** | as `01`, forwarding to `0A` instead |
 | `03` | `spawn_obj_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0B` — 12 sites. Stage 1's first zombies are here |
 | `04` | `spawn_obj_c_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0C` — 3 sites |
-| `05` | `spawn_placed_if_2p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it |
-| `06` | `spawn_simple_if_2p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0A`. No shipped script encodes it |
+| `05` | `spawn_placed_if_2p` | spawn | **done** | as `01`, on `g_max_attackers == 2` |
+| `06` | `spawn_simple_if_2p` | spawn | **done** | as `02`, on `g_max_attackers == 2` |
 | `07` | `spawn_obj_if_2p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0B` — 45 sites; the extra enemies a second player brings |
 | `08` | `spawn_obj_c_if_2p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0C` — 3 sites |
 | `09` | `spawn_placed` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
-| `0A` | `spawn_simple` | spawn | shown | same descriptor family; not resolved to markers |
+| `0A` | `spawn_simple` | spawn | **done** | **not** the descriptor family: `EvtOpSpawnSimple0A` (`FUN_00408990`) takes a two-word `{class, hp}` record and the object places itself. All four the shipped scripts name live in `comevtbl.bin` — classes 0x60, 0x61, 0x62, 0x63 — and two of them raise a `g_script_flags` byte the script then waits on, which is why twelve `wait_script_flag` gates could not be honoured until this landed. The exporter resolves the records through `EvtFile.resolve`, which follows a stage pointer below its own base into the com buffer |
 | `0B` | `spawn_obj` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0C` | `spawn_obj_c` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |

@@ -274,6 +274,51 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
   }
 }
 
+/**
+ * The fields of a `spawn_simple` record this needs. `script/walker`'s
+ * `ActiveSimpleSpawn` satisfies it structurally, the same way
+ * {@link ScriptSpawn} does — `game/` does not import the walker.
+ */
+export interface SimpleScriptSpawn {
+  at: number;
+  class: number;
+  hp: number;
+}
+
+/**
+ * Put `spawn_simple`'s objects into the pool.
+ *
+ * `EvtOpSpawnSimple0A` (`FUN_00408990`) allocates
+ * `g_class_handlers[record[0]]` at 0x13F4 bytes, runs `ActorInitFlags`
+ * (`FUN_00408970`) and writes `(short)record[1]` into **both** `obj+0x11C` and
+ * `obj+0x11E`. There is no position, no orientation and no descriptor tail —
+ * these classes are screen furniture and place themselves.
+ *
+ * `[port-only]` as a *loop*, for the same reason {@link SpawnScriptedCharacters}
+ * is: the engine makes one object per operand as the instruction runs and
+ * keeps no list, and the walker's list is the port's answer to a replay. The
+ * body is the engine's, and it runs when the **instruction** does — a card
+ * that waited for a frame would never be built during a seek, and the gate
+ * behind it would have nothing to open it.
+ *
+ * Idempotent on `at`, which for these is the walker's own negative key.
+ */
+export function SpawnSimpleActors(spawns: readonly SimpleScriptSpawn[]): void {
+  for (const s of spawns) {
+    if (ActorByAt(s.at)) continue;
+    // `-1` for the character type: these have no skeleton and no row in
+    // `characters.types`, and 0 is a real type.
+    const a = ActorSpawn(s.at, s.class as SpawnClass, -1,
+                         `simple 0x${s.class.toString(16)}`,
+                         { hp: s.hp, maxHp: s.hp });
+    // The same line, and the same reason, as {@link SpawnSlotActors}: `visible`
+    // is this port's "the character layer has built it", and `GameUpdate` skips
+    // an actor without it. These have no character type to build, so nothing
+    // draws them either way — but they still have to run.
+    a.visible = true;
+  }
+}
+
 export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
   const placements = T.breakables?.placements;
   if (!placements?.length) return;

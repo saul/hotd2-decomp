@@ -62,6 +62,21 @@ export interface SpawnJson {
 }
 
 /**
+ * `spawn_simple` (0x0A) and its two gated forms: the whole operand.
+ *
+ * `EvtOpSpawnSimple0A` (`FUN_00408990`) takes a two-word `{class, hp}` record
+ * rather than a 0x24-byte placement descriptor, so there is no position, no
+ * orientation and no tail — the object places itself. The four the shipped
+ * scripts name live in `comevtbl.bin` and are the screen furniture: the
+ * chapter card (class 0x60), the result card (0x61) and its two companions.
+ */
+export interface SimpleSpawnJson {
+  class: number;
+  /** `(short)record[1]`, into both `obj+0x11C` and `obj+0x11E`. */
+  hp: number;
+}
+
+/**
  * One decoded instruction. The fields beyond the first five vary by opcode --
  * they are whatever `hod2lib.script` could resolve. An opcode whose meaning is
  * still only "the global it writes" carries `raw` and nothing else, and the
@@ -92,6 +107,8 @@ export interface OpJson {
   cam?: { file: string; path: number; duration: number } | null;
 
   spawns?: SpawnJson[];
+  /** `spawn_simple` (0x02/0x06/0x0A) — see {@link SimpleSpawnJson}. */
+  simple?: SimpleSpawnJson[];
   scene_state?: { major: number | string; minor: number };
   camera_state?: string | null;
   /** `goto_scene_state` / `goto_scene_state_when_alive` (0x31/0x32). */

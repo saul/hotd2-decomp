@@ -34,7 +34,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "combat.ts": "f87078545c6f35c1b6761466ea34c36122dedfefce3d753023871cea8baaa8a7",
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
-  "evt.ts": "a91352d4357e641ceddbc7e344e84f76dd6bbb2da8d7910c77ce636af4c577df",
+  "evt.ts": "4004cb37faed0192ad4c09044c9a5af6162b8ed874a28b0a47e2397fe0349228",
   "exetab.ts": "492ca2e4926f7937697f0b13436e4d8cd1bd1f1765d7805e77755d3fa813f6d3",
   "gltf.ts": "a627387e4c52fecb292eb8736d7fbee2818fd503ac20f23337d760091c0fb109",
   "io.ts": "e9e18d6a03619988a2506b77a28063c2885743d52c3f2e620a149b36a8e20170",
@@ -47,12 +47,12 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
   "rigs.ts": "7700568a93b03bf83d0a8e3f2be16acc96d6b8cf7369ff5659abd7b3819fe47a",
   "rigs_data.ts": "52f1116f7bb86b0dd16a0d21916356904c94ea5539da05a11e2c89fffd4e9b51",
-  "script.ts": "577de572a5ca7ddd3ca14e8886e714c85e986a895f889b0bb06f5d772569c3b5",
+  "script.ts": "8bc73b2ef56e180617be29478a86a786486550657fe513c05d4bdb3db3f1f149",
   "sha256.ts": "7c01f5b843a50a7fc05e749c7a737c252482557ebc523eef7da0f46c7baa427c",
   "spawnres.ts": "6e5dff0b9008aacbe4b958dc7585cce893fe23ee2753b4605b4c1c644eb75daf",
-  "stage.ts": "3bd8232f78002c8537ae4decd6b1e07d659e67da452346002db81b93198ab30c",
+  "stage.ts": "8cb0997be17652396d48317c0769d6f68d205b7d79dc64147b2fe0e1679462b2",
   "texbank.ts": "40786961f0e540180ebf8b56622bcd155e5b6a4e39bac81b8e787c4c1078cdc5",
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "1c4a6f19a17e86a66f721959d24901a571b2dfe122bcae8b40f1555c8641f694";
+export const BUILDER_HASH = "7e878571d366f0daefa8df3f7ec657c3e75cf6e13500223922c1bb97303f1aa1";

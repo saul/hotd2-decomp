@@ -83,4 +83,38 @@ export enum SpawnClass {
    * and up is a shootable route-branch trigger, in Original Mode only.
    */
   SkinnedNpc = 0x53,
+
+  // -- the screen furniture ------------------------------------------------
+  //
+  // The four classes `spawn_simple` (0x0A) places, and the only four whose
+  // records live in `comevtbl.bin` rather than in a stage table. They have no
+  // position and no descriptor tail: two words, `{class, hp}`, and the object
+  // places itself in screen space. Two of them raise a `g_script_flags` byte
+  // the evt script then waits on, which is the whole reason the port has them.
+
+  /**
+   * `ChapterCardInstall` (`FUN_004342E0`) — the chapter card. Holds for 180
+   * frames, raises `g_script_flags[0xF8]` and kills itself; every stage's
+   * block 0 step 1 waits on that flag. **Ported** (`game/class60/`).
+   */
+  ChapterCard = 0x60,
+  /**
+   * `ResultCardInstall` (`FUN_00434EF0`) — the stage-clear card. Holds for 420
+   * frames, drops `g_nFiringGate`, raises `g_script_flags[0xFE]` and kills
+   * itself. **The only writer of flag 254 in the whole image.** **Ported**
+   * (`game/class61/`).
+   */
+  ResultCard = 0x61,
+  /**
+   * `ResultCardTally` (`FUN_00435930`) — the result card's companion, placed
+   * immediately before it. Draws the rescue list; writes no script flag, so
+   * the port names it and gives it no module.
+   */
+  ResultCardTally = 0x62,
+  /**
+   * `InitCutsceneSkipWatcher` (`FUN_00435F20`) — the commonest `spawn_simple`
+   * record, at the top of most steps in every stage. Installs the skip
+   * watcher; writes no script flag.
+   */
+  CutsceneSkipWatcher = 0x63,
 }

@@ -1840,5 +1840,141 @@ console.log("\nthe pelvis veto: bone 9's own draw, and not its legs");
   stage.dispose();
 }
 
+/**
+ * The player's own character, in the scene, in the cut scene that spawns it.
+ *
+ * Stage 3's block 2 step 5 puts two class-0x25 humanoids at one point --
+ * character type 0x39 (`gameover_player.bin`) and 0x3A (`char_adv05.bin`) --
+ * and each one's program opens with an `op 10` guarding an `ActorKill`, so
+ * that the one the active player is *not* takes itself out. The port ran
+ * neither test and killed both, and `?stage=3&block=2&step=5&op=22` had no
+ * foreground at all.
+ *
+ * This is the assertion on the **scene graph** rather than on the port's
+ * opinion of itself: the rig node is there, the bone under it is a `Mesh`, it
+ * is `visible`, and it is at the position the spawn descriptor names.
+ */
+console.log("\nthe player's character survives its own op 10:");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { ScriptedHumanoidUpdate, HumanoidOp, HumanoidCond } =
+    await import("../src/game/class25");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { Rng } = await import("../src/core/rng");
+  const { Events } = await import("../src/core/events");
+  const { NULL_HOST } = await import("../src/game/host");
+  const { BoxGeometry, Mesh, MeshBasicMaterial, Object3D } =
+    await import("three");
+
+  /** Stage 3's descriptor, `st3evtbl.bin` 0x3378. */
+  const AT = 13176;
+  const POS = { x: -522.7, y: -14.9, z: -3883.2 };
+  const TYPE = {
+    type: 0x39, name: "gameover_player", file: "gameover_player.bin",
+    bone_count: 1, actor_radius: 10,
+    bones: [{ bone: 1, part: "bone01_158c", slot: 0x158c, offset: [0, 0, 0],
+              parent: null, damage_rank: [], hit_radius: 2, steps: [] }],
+    head_bone: 2, reactions: {}, attacks: {},
+    motions: { "890": { bank: "people", frames: 1, fps: 30, root: [0, 0, 0],
+                        rot: [0, 0, 0, 0, 0, 0], play: 0 } },
+  };
+  const PLACE = {
+    at: AT, class: 0x25, char_type: 0x39, motion: 890, hp: 0, yaw: 21845,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+  };
+  const CHARS = {
+    types: { "57": TYPE }, placements: [PLACE],
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+  /** The program at 0x33B4, with the indices the exporter resolves. */
+  const HUMANOIDS = {
+    [String(AT)]: {
+      charType: 0x39, removePath: 129, removeFrame: 0, drawVariant: 0,
+      flags2: 2, motion: 890, phase: -1,
+      cmds: [
+        { op: HumanoidOp.WaitThenPlay, mode: -1, a: 0, b: 0 },
+        { op: HumanoidOp.SetHandModel, mode: 1, a: 0, b: 0 },
+        { op: HumanoidOp.IfActivePlayer, mode: 1, a: 0, b: 0, skip: 4 },
+        { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+        { op: HumanoidOp.IfActivePlayer, mode: 0, a: 0, b: 0, skip: 11 },
+        { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt,
+          a: 128, b: 270 },
+        { op: HumanoidOp.SetMotionBlended, mode: 20, a: 845, b: 0 },
+        { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame,
+          a: -1, b: 0 },
+        { op: HumanoidOp.SetMotionBlended, mode: 20, a: 890, b: -1 },
+        { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 129, b: 0 },
+        { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+        { op: HumanoidOp.SetPos, mode: 0, a: 0, b: 0, f0: -520.9, f1: -3873.8 },
+      ],
+    },
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_gameover_player_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_gameover_player",
+                   hod2_spawn_at: AT };
+  rig.position.set(POS.x, POS.y, POS.z);
+  const torso = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+  torso.name = "chr_gameover_player_spawn000_bone01_158c";
+  rig.add(torso);
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never, undefined, undefined, HUMANOIDS as never);
+  G.g_difficulty = 2;
+  // `SelectAttackablePlayer` (`FUN_00414F40`) writes 0 for one player on
+  // slot 0, which is the port's configuration and the case the character has
+  // to survive.
+  G.g_active_player = 0;
+  G.g_active_cam_path = 128;
+  G.g_cam_path_frame = 209;
+
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  check("the exporter's hierarchy starts hidden", rig.visible === false);
+
+  const listed = [{ at: AT }];
+  const made = SpawnScriptedCharacters(chars.readySpawns(listed));
+  check("the script's spawn makes the character", made.length === 1,
+        `${made.length}`);
+  const a = made[0];
+  if (a.cls !== SpawnClass.ScriptedHumanoid) throw new Error("not class 0x25");
+  chars.syncSpawns(listed, made);
+
+  const rng = new Rng(1);
+  const events = new Events();
+  for (let i = 0; i < 4; i++) {
+    ScriptedHumanoidUpdate(a, { eye: { x: 0, y: 6, z: 0 }, dt: 1 / 60, rng,
+                                host: NULL_HOST, events });
+  }
+  chars.update({} as never);
+
+  check("the player's character is in the scene graph",
+        rig.parent === root && root.children.includes(rig));
+  check("...it is drawn", rig.visible === true,
+        `dead ${a.dead} visible ${a.visible} pc ${a.hum.pc}`);
+  check("...its bone is a mesh", (torso as { isMesh?: boolean }).isMesh === true
+        && torso.visible && torso.layers.isEnabled(0));
+  check("...and it is where the spawn descriptor puts it",
+        Math.abs(rig.position.x - POS.x) < 1e-3
+        && Math.abs(rig.position.y - POS.y) < 1e-3
+        && Math.abs(rig.position.z - POS.z) < 1e-3,
+        `${rig.position.x}, ${rig.position.y}, ${rig.position.z}`);
+  check("...held on the wait its own arm names, not run off the end",
+        a.hum.pc === 5, `pc ${a.hum.pc}`);
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

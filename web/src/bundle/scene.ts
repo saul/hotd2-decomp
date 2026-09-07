@@ -349,6 +349,14 @@ export interface HumanoidCmdJson {
   f1?: number;
   /** `op 15` only: the index it jumps to. */
   next?: number;
+  /**
+   * `op 10` modes 0, 1 and 2 only: the index the test skips to when
+   * `g_active_player` does not match — the command after the `op 10 mode -2`
+   * that closes the arm. Absent on a bundle written before this was carried,
+   * and `game/class25` reads a missing one as "leave the VM" rather than
+   * running the arm the engine would have jumped over.
+   */
+  skip?: number;
 }
 
 /** One class-0x25 spawn's program. */

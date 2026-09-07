@@ -13430,3 +13430,185 @@ and not one of them was a check.**
 * **The same gate covers class 0x30**, whose emerging and script-frozen
   zombies the port also let you damage. No report has been filed against that
   and no assertion was written for it; the fix is generic and covers it.
+
+---
+
+## The frame a shot ends on — stage 3's camera jump
+
+**Report:** *"the camera seems to jump quite a bit just shortly after
+`?stage=3&mode=play&block=2&step=4&op=24&frame=1551`"*. One of the five filed
+against stage 3 block 2 on 2026-09-07.
+
+**Outcome:** `[fixed]`, and it was **the port's own advance** — not the
+authored path, not the tracking layer, and not a region or slot change. The
+engine does not do it.
+
+### The measurement, before any of the reading
+
+The report's "shortly after" was an estimate; the jump is at **camera frame
+1660**, 109 driven frames after the address in the URL. Measured in real
+Chrome off the Camera panel's own `eye` and `block target` rows — the pair the
+draw writes, so it is the transform on screen and not a layer's account of
+itself — one driven frame at a time:
+
+```
+i108  cf 1659   eye -495.5, -10.1, -3480.0   move 1.21   turn 0.00
+i109  cf 1660   eye -495.5, -10.1, -3480.0   move 0.00   turn 9.58
+i110  cf 1662   eye -493.8, -10.1, -3483.2   move 3.62   turn 9.46
+i111  cf 1663   eye -493.2, -10.1, -3484.3   move 1.25   turn 0.17
+```
+
+**The eye holds still for the frame that says 1660 and then moves 3.62 units,
+where the shot travels 1.25 a frame; the aim swings 9.58 degrees off and 9.46
+back.** `eye(i109)` is `pose(1659)`, exactly — the block was never written for
+1660.
+
+Two things were ruled out before the binary was opened:
+
+* **The authored `cam/` path is smooth.** Evaluating `cp_st3` slot 127 through
+  the port's own `CamPath.pose` over 1430..2040 gives a largest per-frame eye
+  step of 1.28 units and a largest turn of 4.0 degrees (at 1943, a deliberate
+  sweep). There is no discontinuity in the data anywhere near 1660. `[proved]`
+* **No region, slot or shot change lands on 1660.** Slot 127 plays 1320..2035
+  across the whole of block 2 step 4; the shot boundaries are inside one path.
+
+### The wrong turn, and it is worth knowing about
+
+The brief's first experiment was the sidebar's **Track** toggle: *"if the jump
+vanishes with tracking off, it is the tracking layer."* It vanishes with
+tracking off. **It is not the tracking layer.**
+
+`trackEnemies` has exactly one consumer in the tree — `seatCamera`'s
+`|| !rig.trackEnabled` — and that term is in the same disjunction as the
+condition that was wrong, so turning it off forces the block to be seated and
+masks the defect. It does not stop `CameraTrackEnemiesTick`: with Track off the
+aim is still eased and still sits about 10 degrees off the rail, at
+`LOOKAT_RADIUS` from the eye. So the toggle's tooltip — *"Off restores the
+authored cam/ path exactly"* — overclaims, and the experiment it invites is a
+false positive. It was still useful: it produced the same numbers the fix
+later did (1.17 then 2.46, no flick), which is what identified the missing
+block write rather than the ease.
+
+### `CamAdvancePathFrame` (`FUN_004035E0`), off the instruction stream
+
+```
+00403605  MOV  EAX,[ESI + 0x9a6144]   ; cur = g_cam_path_cursor
+00403615  MOV  [ESI + 0x9a6110],EAX   ; g_cam_path_frame = cur      PUBLISH
+00403632  CALL 0x004041e0             ; CamEvalPath7 -> block eye + target
+0040363e  CALL 0x00403ac0             ; CamBlockSetAnglesFromLookAt
+00403658  MOV  [0x009c6f28],EDX       ; g_cam_path_frames_left = end - cur
+0040365e  JL   0x00403698             ; cur >= end ?
+00403664  ...                         ; g_queued_events_pending--   (slot 0)
+```
+
+**The publish, the curve evaluation and the block write all happen before the
+end test.** So the block holds the pose of every frame from `start` to `end`
+**inclusive**, and it is the frame *after* the end that is never written.
+`[proved]` — `globals.tsv`'s `g_cam_path_cursor` row already said this about
+the publish; what had not been carried across is that the *pose* is on the same
+side of the test.
+
+The port seated the block on `!cam.done`, and `done` is set on the tick the
+path reaches its end. One tick short, on every non-static `cam_play` in the
+game. What made it visible here rather than everywhere is the compounding:
+
+1. the eye keeps `pose(1659)` for the frame that reads 1660;
+2. the shot's aim is **not** reseated to the path's own target that frame, so
+   `CameraTrackEnemiesTick`'s ease takes one unopposed step towards the enemy
+   — 9.58 degrees — and snaps back the next frame when the reseat resumes;
+3. the shot that follows is a deferred one, `queue_event cam_play 1661..1754
+   flags 2` then `finish_sequence 7`, and `CameraPlayStashedPath`
+   (`FUN_0040C8A0`) increments before it evaluates, so its first drawn frame is
+   **1662**. Eye 1659 to eye 1662 in one frame is the 3.62 units.
+
+### What was changed
+
+`CamCommand` gains **`retired`** — the action handler has been dequeued and
+nothing writes the block from this shot again — which is `done` plus one tick,
+and that tick is the shot's last frame. `advanceCameraPath` sets it on the
+first tick that finds `done`; `seatCamera` seats on `!retired` instead of
+`!done`. The branch-override arm keeps `advance` false, as its own comment
+requires. Static poses and `finish_sequence 4` are `retired` from the start,
+because nothing publishes for them.
+
+### `[not-a-bug]`, and stated so the next reader does not chase them
+
+* **Frame 1661 is never drawn, by the engine too.** The stash holds 1661 and
+  `CameraPlayStashedPath` increments first, so 1662 is the first frame it
+  evaluates. The residual 2.46-unit step at the boundary — 1.9x the shot's own
+  1.25 — is the engine's own and is one sixtieth of a second. `[proved]` from
+  `FUN_0040C8A0` against `FUN_004035E0`.
+* **The aim snaps about 10 degrees back onto the rail on the frame the last
+  enemy deregisters**, mid-shot (measured: 9.97 degrees at camera frame 1692,
+  and it is there before and after this fix). That is structural:
+  `CamAdvancePathFrame` rewrites `g_camera_block_target` from the path every
+  frame, so when `SelectCameraLookAtTarget` falls back to the path's own target
+  the ease has nowhere to go and the aim is the path's within one frame.
+  `select_target.ts`'s "swings back over about thirty frames" describes the
+  *other* case — a shot that has already retired and left the block frozen.
+  `[proved]` structurally; not smoothed, per L27.
+* The 35.7 and 18.3 degree turns on the **first three frames** of the run are
+  the deep link settling: arriving at `frame=1551` draws one frame from an
+  unplaced camera before the tracking layer has an actor.
+
+### The checks
+
+* `web/test/camera.test.ts` grew a second stage. **Stage 1's opening could not
+  carry this**: it reaches exactly one shot boundary in six hundred frames and
+  slot 32's curve is flat there — frames 229 and 230 are the same point — so
+  the assertion passes on it whatever the seat does. That is how the first cut
+  of the check came back green against the unfixed code, which is L14 in a new
+  costume: a check that cannot fail is not a check. Stage 3 block 2 step 4
+  plays five `cam_play`s back to back with the eye moving 1.25 units a frame,
+  so it crosses five boundaries in seven hundred frames.
+  * *every drawn eye is its shot's own pose, last frame included* — the drawn
+    `camera.position` against `CamPath.pose` recomputed from the bundle, an
+    equality rather than a tolerance. **5 of 700 frames fail without the fix,
+    worst 1.242 units.**
+  * *no shot boundary swings the aim out and straight back* — **1 flick
+    without the fix, 10.23 degrees.**
+  * a coverage assertion beside each, stated without reference to `retired`.
+* `web/tools/cam_jump.mjs`, a sibling of `stage3.mjs` — `stage3.mjs` itself is
+  untouched, three other agents are in it. It drives the reported URL in real
+  Chrome a frame at a time and asserts on the Camera panel's own readouts: no
+  bracketed stall, and no aim flick. **2 of its 3 checks fail before the fix**
+  (`i109 cf=1660 (0.00 between 1.21 and 3.62)`, and 9.46 degrees at frame 110);
+  0 after. `npm run cam-jump`.
+
+### Named in `functions.tsv`
+
+* `CamBlockSetAnglesFromLookAt` (`0x00403AC0`) — was `FUN_`. Writes the camera
+  block's pitch/yaw/roll from `eye - target` through `VecToAngles`, immediately
+  after `CamEvalPath7` and before the end test.
+* A body comment on `CamAdvancePathFrame` (`0x004035E0`), which had a bare row.
+
+`VecToAngles` (`0x004016B0`) is named in the TSV and **not** in the live
+database — the decompiler still calls it `FUN_004016b0`. Expected, per the
+merge behaviour of `export-annotations`, but worth knowing when grepping.
+
+### Next actions
+
+* The **Track** toggle's tooltip is wrong and its one consumer is a term in
+  `seatCamera`'s disjunction. Either make it mean what it says — skip
+  `CameraTrackEnemiesTick` — or reword it. `[open]`, `ui/panels/Toggles.tsx`
+  and `render/camera.ts`; not touched here because it is a behaviour question
+  and the report was not about it.
+* `web/tools/lookat_live.mjs` is **stale and silently measures nothing**: its
+  regex wants a `look at` row and a `slot N frame X / Y` line, and the Camera
+  panel has had `slot`, `frame`, `eye`, `facing` and `block target` for some
+  time. `npm run lookat` therefore reports 0 frames with a camera. Not fixed
+  here; `cam_jump.mjs` covers the same ground on the driven clock.
+* **One decision for the user.** `seatCamera`'s branch-override arm is
+  gated on `cam.done`, and its own `[diverges]` note says the engine tests
+  `g_cam_path_frames_left < 0` — strictly past the end. `retired` is now
+  exactly that test, so closing the divergence is one token. Not taken:
+  it moves the frame a branch's preview shot arms on, at every
+  `store_six` in the game, and nothing has reported that. The cost of
+  leaving it is that a shot whose end lands while `camOverrideValid` is
+  up still loses its last frame — the same one-tick error, in the one
+  place this commit does not fix it. Named on the spot in
+  `app/systems.ts`.
+* `FUN_00402EF0`, the ease of the block **eye** toward the deferred-rail pose
+  at 0x009C70C0, is still unported and still `[open]` — noted in
+  `game/camera/track.ts`. It is the remaining reason a port eye can differ
+  from an engine eye while a shot is retired.

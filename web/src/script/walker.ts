@@ -84,6 +84,39 @@ export interface CamCommand {
    * and every shot would be a frame ahead of the engine's.
    */
   started: boolean;
+  /**
+   * The action handler has been dequeued: nothing writes the camera block
+   * from this shot again.
+   *
+   * **This is one tick later than {@link done}, and the tick between them is
+   * the shot's last frame.** `CamAdvancePathFrame` (`FUN_004035E0`) is the
+   * handler `EvtRunQueuedActions` calls once a frame while the play is
+   * queued, and read off the instruction stream at `0x00403605` it goes:
+   *
+   * ```
+   * MOV  EAX,[ESI + 0x9a6144]      ; cur = g_cam_path_cursor
+   * MOV  [ESI + 0x9a6110],EAX      ; g_cam_path_frame = cur
+   * CALL 0x004041e0                ; CamEvalPath7 -> block eye and target
+   * CALL 0x00403ac0                ; CamBlockSetAnglesFromLookAt
+   * MOV  [0x009c6f28],EDX          ; g_cam_path_frames_left = end - cur
+   * CMP  ECX,EAX / JL              ; cur >= end ?
+   * ...                            ; g_queued_events_pending--   (slot 0)
+   * ```
+   *
+   * The publish, the curve evaluation and the block write all happen **before**
+   * the end test, so the block holds the pose of every frame from `start` to
+   * `end` **inclusive**; it is the frame *after* the end that is never
+   * written. `[proved]`
+   *
+   * The port used to seat the block on `!done`, which is one tick short: on
+   * the frame a shot ended the block kept the previous frame's pose, and the
+   * next shot then moved the eye by two frames' travel at once. With the
+   * gameplay camera live it also cost the aim its per-frame reseat, so
+   * `CameraTrackEnemiesTick`'s ease took one unopposed step towards the enemy
+   * and snapped back the frame after -- a one-frame flick of 9.6 degrees at
+   * stage 3 block 2 step 4's `cam_play 1430..1660`.
+   */
+  retired: boolean;
 }
 
 export type WaitPolicy =
@@ -996,11 +1029,16 @@ export class Walker {
    */
   private advanceCameraPath(frames: number): void {
     const cam = this.cam;
-    if (cam && !cam.done && !cam.isStatic) {
-      // A shot that started during this tick's instructions has already
-      // published its first frame — `CamStartPathPlayback` calls
-      // `CamAdvancePathFrame` itself and the ring calls the handler once.
-      if (cam.started) {
+    if (cam && !cam.isStatic) {
+      if (cam.done) {
+        // The handler published the shot's last frame on the tick `done` was
+        // set and was dequeued in the same call, so this is the first tick on
+        // which nothing writes the camera block. See {@link CamCommand.retired}.
+        cam.retired = true;
+      } else if (cam.started) {
+        // A shot that started during this tick's instructions has already
+        // published its first frame — `CamStartPathPlayback` calls
+        // `CamAdvancePathFrame` itself and the ring calls the handler once.
         cam.started = false;
       } else {
         const remaining = cam.endFrame - cam.frame;

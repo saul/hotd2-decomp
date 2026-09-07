@@ -376,6 +376,17 @@ export function seatCamera(rig: CameraRig, ctx: RenderContext,
   // `g_cam_path_frames_left < 0`, strictly past the end; `cam.done` is true at
   // the end, so the re-seat happens one frame earlier here. Both spend the
   // whole wait at the same frame, which is what is on screen.
+  //
+  // **`CamCommand.retired` is now exactly that test**, and closing this
+  // divergence is one token — `cam.retired` here. It is deliberately not
+  // taken: `CamAdvancePathFrame` writes `g_cam_path_frames_left = end - cur`
+  // *before* `cur++`, so on the end frame it is 0 and only the tick after is
+  // it negative, which is `retired` and not `done`. What that would change is
+  // which frame a branch's preview shot arms on, at every `store_six` in the
+  // game — a second behaviour change, and one nothing has reported. The cost
+  // of leaving it is that a shot whose end lands while `camOverrideValid` is
+  // up still loses its last frame to the override, which is the same one-tick
+  // error `retired` was added to fix, in the one place it is not fixed.
   const over = cam.done && w.camOverrideValid
     ? w.branchPreview?.[w.branchChoice] ?? null : null;
   const slot = over?.slot ?? cam.slot;
@@ -389,8 +400,17 @@ export function seatCamera(rig: CameraRig, ctx: RenderContext,
   // eases the eye and `TurnLookAtToward` eases the aim, both inside the same
   // hook, one frame at a time. So `advance` stays false here; forcing it
   // hard-wrote the block and simply moved the 27-degree cut one frame earlier.
+  //
+  // **`retired`, not `done`.** `CamAdvancePathFrame` (`FUN_004035E0`)
+  // evaluates the curve into the camera block *before* it tests the end and
+  // retires, so the frame a shot ends on is written like any other and only
+  // the frame after it is not -- the two flags differ by exactly that tick.
+  // Seating on `!done` dropped it: the block held frame `end - 1`'s pose while
+  // everything else read `end`, and the next shot then moved the eye by two or
+  // three frames' travel in one. See `CamCommand.retired`.
   const pose = CamSeatPathFrame(p, at, w.rollEnabled,
-                                force || !cam.done || !rig.trackEnabled);
+                                force || (!over && !cam.retired)
+                                      || !rig.trackEnabled);
   // Roll is the one channel the camera block has no word for, so the draw
   // takes it off the pose the seat evaluated. See `CamSeatPathFrame`.
   rig.pose.roll = pose.roll;

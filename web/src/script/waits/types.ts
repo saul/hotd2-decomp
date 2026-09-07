@@ -11,7 +11,7 @@
  * that has been read is a module, and one that has not is absent rather than
  * quietly falling through to a default that pretends it passed.
  */
-import type { OpJson } from "../../bundle";
+import type { OpJson, ScriptJson } from "../../bundle";
 import type { CamCommand, WaitPolicy, WalkerHost } from "../walker";
 
 /**
@@ -22,8 +22,16 @@ import type { CamCommand, WaitPolicy, WalkerHost } from "../walker";
  */
 export interface WaitContext {
   readonly cam: CamCommand | null;
-  readonly flags: ReadonlySet<number>;
   readonly queuedEventsPending: number;
+  /**
+   * The decoded stage script.
+   *
+   * `wait_script_flag` is the one rule that asks: the flags a gate can wait on
+   * are raised by the actors *this bundle* holds, so which of them the port
+   * can evaluate is a fact about the bundle rather than about the frame. See
+   * `waits/flag.ts`.
+   */
+  readonly script: ScriptJson;
   readonly host: WalkerHost;
   /** Retire the action the current shot installed, if it has finished. */
   settleCameraAction(): void;
@@ -76,6 +84,19 @@ export interface WaitRule {
    */
   readonly skipRunsCameraOn?: boolean;
   /**
+   * True if stepping past it means the flag it names is now raised.
+   *
+   * The third of the postconditions, and the same argument as {@link retires}
+   * and {@link skipRunsCameraOn}. `wait_script_flag` is only reached past in
+   * play once `g_script_flags[operand]` is a 1, so a seek that steps over one
+   * and leaves the byte at 0 lands in a state the game cannot be in — and
+   * every later reader of that byte, in the script *and* in the classes that
+   * read the same array, is looking at a world the address does not describe.
+   *
+   * Only `0x45` carries it.
+   */
+  readonly raisesScriptFlag?: boolean;
+  /**
    * Decide what this wait is waiting for, on the frame the instruction runs.
    *
    * **The engine's first visit, and it does not read the condition.** Every
@@ -122,7 +143,8 @@ export const WAIT_NOTES: Record<number, string> = {
       + "bodies have finished dying",
   0x44: "the live-enemy gate (`g_enemies_alive`): real — it ends when you "
       + "have killed them",
-  0x45: "passed: the script flag array is written by gameplay",
+  0x45: "the script-flag gate (`g_script_flags`): real — the array is one "
+      + "array, and gameplay writes it too",
   0x46: "the civilian gate: real — it ends when the captors are dead",
   0x47: "passed: 'camera settled and no live target' needs the runtime",
 };

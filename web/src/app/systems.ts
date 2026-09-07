@@ -328,8 +328,13 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // removal cue never fired, so a civilian never left `g_civilians_alive` and
   // `wait_scripted_actors` waited for ever.
   G.g_cam_path_frame = w.cam ? Math.trunc(w.cam.frame) : 0;
-  G.g_script_flags = [];
-  for (const flag of w.flags) G.g_script_flags[flag] = 1;
+  // `g_script_flags` is **not** copied here any more, and that is the point.
+  // The walker used to keep its own `Set` of the flags `set_script_flag` had
+  // raised and this line rebuilt `G.g_script_flags` from it once a frame — so
+  // every flag an actor raised (`CivilianRunScript` op 0x1C,
+  // `ZombieStateTargetScriptWithFlag`) lasted until the next tick and no
+  // longer, and `wait_script_flag` could only ever see the script's own.
+  // There is one array, in `game/globals.ts`, and both halves write it.
   // The spawn opcode places a group the moment it runs, so this is only the
   // safety net for a spawn list restored by a snapshot load rather than by
   // an instruction. It is idempotent — `ActorByAt` refuses a second one.

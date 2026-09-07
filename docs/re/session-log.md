@@ -13430,3 +13430,164 @@ and not one of them was a check.**
 * **The same gate covers class 0x30**, whose emerging and script-frozen
   zombies the port also let you damage. No report has been filed against that
   and no assertion was written for it; the fix is generic and covers it.
+
+## `wait_script_flag` is a gameplay gate — the hostage the boat sailed past
+
+*2026-09-07. Report: "the civilian/enemy are jumped over" at
+`?stage=3&mode=play&block=2&step=4&op=0".*
+
+### What "jumped over" turned out to mean
+
+None of the three readings offered. The actors were **placed and running**;
+the camera did pass them; but the reason it passed them is that **the script
+never stopped**. Stage 3 block 2 step 3 ends
+
+```
+27  0C spawn_obj_c        0097A608     the hostage, class 0x10 at 12808
+...
+35  45 wait_script_flag   0000001E     flag 30
+36  31 goto_scene_state   00000003
+```
+
+and in the port that wait passed on the frame it was reached. Measured from
+`?stage=3&mode=play&block=2&step=3&op=27&drive=1`, driven clock, `now().o`
+read every frame: the hostage and her captor enter the pool at f≈4, the walker
+reaches op 28 and then **op 31, and is in step 4 by f56** — 52 frames after the
+spawn, with `v1` and `e1` still live and the captor's maul (class 0x30 states
+34 → 35) still running. Step 4's `cam_play 1320..1389` then sails down the
+canal and leaves them behind the camera, which is what a viewer sees.
+
+### The defect: one array kept in two places, one of them clobbered
+
+`g_script_flags` — 0x009C7200, 0x100 bytes, cleared only by
+`ResetSceneOnEnter` (`FUN_0045EDD0`). `EvtOpSetScriptFlag48` (`FUN_0045FD70`)
+is the whole of the script's write, `EvtOpWaitScriptFlag45` (`FUN_0045FC80`)
+is the whole of the read, and **six actor routines write the same array**:
+`CivilianRunScript`'s op 0x1C (`0x0048BF2A`),
+`ZombieStateTargetScriptWithFlag` (`0x0045B1DF`, class 0x30 state 36),
+`FUN_00433f40` (`0x00433FC1`, a class-0x33 cue prop), `FUN_00473cf0`
+(`0x00473D76`) and the class-0x44 constructor at `0x0047314A`/`0x00473156`.
+
+The port had **two** stores:
+
+* `Walker.flags`, a `Set<number>` written by opcode 0x48 and read by 0x45;
+* `G.g_script_flags`, written and read by the classes.
+
+…and `app/systems.ts`'s `syncPortGlobals` did
+
+```ts
+G.g_script_flags = [];
+for (const flag of w.flags) G.g_script_flags[flag] = 1;
+```
+
+**once a frame**. So a flag an actor raised survived until the next tick and no
+further, and `wait_script_flag` could only ever see the script's own writes.
+
+The kicker, and the thing that says how big this is: across all six shipped
+scripts, **every one of the forty-odd `wait_script_flag` gates names a flag
+that script's own `set_script_flag` never sets.**
+
+```
+stage 1  waits 3, 35, 36, 248, 254      none of them set by the script
+stage 2  waits 3..7, 10..17, 248, 254   none
+stage 3  waits 21, 30, 248, 254         21 is set (block 1); 30, 248, 254 not
+stage 4  waits 19, 20, 29, 31, 32, ...  19 is set; the rest not
+stage 5  waits 0, 30, 31, 248           none
+stage 6  waits 248                      none
+```
+
+The opcode is *only* ever "hold until an actor is finished". The port was
+walking past every rescue in the game, not just this one.
+
+### Who raises flag 30
+
+The hostage herself. `civilians.spawns["12808"].script` is **27**, and that is
+an index into `g_civilian_scripts` (`entries`), not into `scripts`:
+`entries[27] = 64`. Stream 64 command 17 is `SetScriptFlag 30`, reached after
+the block whose wait word is `0x00080000` (leave `g_civilians_alive` now) —
+i.e. **once she has been rescued**. Her on-shot stream 63, which the killed
+branch of `CivilianCheckShot` also runs when the captor mauls her, raises the
+same flag at command 12. So the gate opens whichever way the encounter ends,
+which is why the real game never hangs on it.
+
+### The fix
+
+One array. `set_script_flag` writes `G.g_script_flags`; `wait_script_flag`
+reads it through a new `WalkerHost.scriptFlagRaised`, the fourth of the
+"questions about the world" beside `aliveEnemies`, `presentEnemies` and
+`aliveCivilians` and with the same `null` contract for hosts that have no
+object pool. `Walker.flags` is gone, `syncPortGlobals` no longer rebuilds the
+array, `Walker.reset()` clears it (which is `ResetSceneOnEnter`'s job and was
+what `this.flags.clear()` stood for), and `render/props.ts`'s hinge flags read
+the same array.
+
+New: `WaitRule.raisesScriptFlag`, the third wait postcondition beside
+`retires` and `skipRunsCameraOn` — a seek that steps over a `wait_script_flag`
+raises the flag, because in play the gate is only ever passed with the byte
+already up.
+
+### The wrong turns, in order
+
+1. **Read `civilians.scripts[27]` instead of `scripts[entries[27]]`** and
+   concluded the hostage's stream had no `SetScriptFlag` at all. That sent an
+   hour into the binary looking for another writer, which is how
+   `FUN_00480470` (class 0x32 state 4, `g_class32_states[4]`) got read and
+   named — it raises flag 30 too, at `0x00480590`, but class 0x32 has two
+   spawns in the whole game and neither is in stage 3. The annotation is worth
+   keeping; the detour was not. **The indirection is documented in
+   `bundle/scene.ts` and I did not read it.**
+2. **Assumed the reported URL was where the bug was.** It is a *seek*, and a
+   seek observes no waits by construction, so the step-3 encounter is left
+   half-run there whatever this opcode does. The bug is only visible as a bug
+   when the script is *played* from step 3. The URL is where the user was
+   watching, not where the defect lives.
+3. **Hand-listed the exception as `{248, 254}` and only then checked.** The
+   list came from tracing the two flags every stage waits on; the sweep written
+   to back it up found eleven more gates with no writer the port has, four of
+   them in stages a player reaches long before the results screen. **The check
+   that would have caught the first list is the one that was written to defend
+   it** — L27 in its own words, one step later than it should have been.
+4. **Built the test fixture's civilian stream with the flag in a block whose
+   wait word was `Free`.** `CivilianStepScript` walks past a block whose own
+   word is already satisfied and runs only `CivilianReapplyWaitCommand` over
+   it, so the flag command was skipped and the assertion failed for a reason
+   that had nothing to do with the fix. A word of `0` is what parks the VM on
+   a block so its actions run.
+
+### What is left
+
+* **`[diverges]`, and it wants a call.** A gate whose flag *nothing this port
+  runs can raise* passes instead of parking. The boundary is **derived from the
+  bundle**, not listed: the stage's own `set_script_flag` ops, every civilian
+  stream reachable from a class-0x10 spawn, and every captor script entry's
+  fifth short. It was hand-listed as `{248, 254}` first, and the static sweep
+  that was written to justify the list is what showed the list was wrong —
+  honouring every gate unconditionally parks **stage 5 at block 1**, **stage 1
+  at blocks 14 and 16**, stage 2 at blocks 35–41, stage 4 at 23–29, and all six
+  on the chapter card. Fourteen of the forty-odd gates have a writer the port
+  runs; the rest belong to `FUN_00433f40` (a class-0x33 cue prop, `[likely]`
+  stage 5's 0/30/31 and stage 1's 3), the class-0x44 prop family
+  (`FUN_00473cf0` / `0x0047314A`, `[open]` which owns which), and the banner
+  actors `EvtOpSpawnSimple0A` places — flag 248 `[proved]`
+  (`MOV byte ptr [0x009C72F8], 0x1` at `0x004348C1`) and 254 `[likely]`, since
+  nothing in the image names `0x009C72FE`. Porting opcode `0x0A` and the two
+  class-0x33/0x44 cue props is what deletes the escape.
+* **`g_evt_gameplay_live` (`0x007DCCA4`) is still not modelled.** Every wait
+  opcode but 0x41 requires it, and it is the engine's "a player is in state 5
+  with lives left" — the script freezes on the continue screen. The port has
+  no continue screen. `[open]`.
+* **`verify_port.py`'s divergence list covers `web/src/game/` only.**
+  `check_divergences` walks `game_files()`, so the **ten** `[diverges]` tags in
+  `web/src/script/` — seven of them older than this session — are declared and
+  never counted, and STATUS's "116 declared" is short by that much.
+  `game_and_script_files()` is already in the file, three lines up, and is what
+  the citation checks use. Not changed here: it moves a generated number three
+  concurrent workstreams also regenerate. The one added by this commit is
+  pinned by an assertion in `port.test.ts` instead, which is what L26 asks for;
+  the count is the part that is still wrong.
+* **A seek still lands with the previous step's actors alive.** `retires`
+  answers that for the two enemy gates because their condition *is* a statement
+  about actors; a flag gate's condition is a statement about a byte, and
+  raising the byte is the whole of its postcondition. Which actors a flag gate
+  was holding is not something the walker can know. `[open]`, and general to
+  the seek rather than to this opcode.

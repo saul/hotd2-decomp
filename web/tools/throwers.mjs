@@ -70,6 +70,7 @@ for (let stage = 1; stage <= 6; stage++) {
     startCamera: NOOP, onFeed: NOOP, onBranch: NOOP,
     playSound: NOOP, aliveEnemies: () => null, presentEnemies: () => null,
     aliveCivilians: () => null,
+    scriptFlagRaised: () => null,
     cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
     endDialogue: NOOP,
   });

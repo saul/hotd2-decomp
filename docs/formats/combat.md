@@ -1593,6 +1593,23 @@ hand's live **draw slot** — `0x20C + bone * 0x90` — against the one the
 skeleton gave it, so shooting a weapon out of a hand, or severing the arm,
 disarms it.
 
+`ZombieThrowHandWeapon` writes **two** fields of that same bone record as the
+weapon goes: the draw slot at `+0x00`, and `+0x78` to zero — `899f54050000` at
+`0x0045A2B2` for bone 5 and `899f04070000` at `0x0045A2DB` for bone 8, with
+`EBX` zeroed. `0x554` is `0x20C + 5*0x90 + 0x78`, **inside bone 5's own
+record**, not the base of another one, and `+0x78` is what `SkeletonWalkNode`
+(`FUN_004107E0`) fills each frame with `obj+0x1300 * hit_sphere.radius` — so
+the hand that has just been emptied stops being shootable.
+`SpawnThrownWeapon` (`0x00450540`) does the identical write for class 0x31,
+where Ghidra renders the same address as `bone * 0x90 + 0x284`. **[proved]**
+
+`SkeletonWalkNode` only copies the sphere in when the table entry's own slot
+equals the slot it has just written, and writes four zeroes otherwise — so the
+general rule is that **a bone drawing anything but the model
+`PTR_DAT_004D032C` names for it has no hit sphere**, which covers every gore
+variant as well as a bare hand. `render/characters.ts` tests the static table
+instead; that is `[diverges]`, declared in `game/class30/throw.ts`.
+
 The sub-states are `Arm → Wait → Claim → Release → Recover → Leave`, and the
 first three are a fallthrough: with zero delays a spawn arms, waits and claims
 on one frame, and three of the seven have exactly that. The permit is
@@ -1603,13 +1620,49 @@ Body condition 7 is **sticky**: `ActorBodyConditionFromHands` (`FUN_00455920`)
 recomputes the condition from the hands for every type in 0x13..0x14 *except*
 when it is already 7 or 5, and the state itself sets 5 as it leaves.
 
-The way out is the descriptor's `tail+0x03` — the same byte the port carries as
-`attack_state`. **0** walks away through state 15 with the distance at
-`tail+0x10`; **26** leaps through state 26 to the point at `tail+0x10`..`+0x18`
-with the gravity at `tail+0x20`. Both are entered at **sub 1**, which is why
-those two states have a sub-1 arm that skips their own descriptor read. The
-walk arm raises `obj+0x34` bit `0x20000000`, and this is the one place in the
-game that reaches `ZombieStateWalkDistance`'s retire-instead-of-attack branch.
+#### The way out is chosen twice, and the first choice is a spawn bit
+
+**`obj+0x38` bit `0x10` decides whether the actor leaves at all.** At
+`0045945C` — `TEST byte ptr [ESI + 0x38], 0x10`, `f6463810` — the state splits:
+
+* **bit clear** — it walks or leaps away, on the descriptor's `tail+0x03`;
+* **bit set** — **it never moves again.** `ReleaseEnemyAliveCount`,
+  `ReleaseEnemyPresentCount` and `ReleaseAttackSlot` run on the spot,
+  `g_enemy_slots[obj+0x120 * 8]` and the hit slot are cleared, `obj+0x1330`
+  takes `tail+0x1C`, `obj+0x34` gets `0x10100` (`NoCameraTrack | ShotImmune`)
+  and the sub becomes **6**, which the arm falls into on the same frame. Sub 6
+  (`LAB_00459562`) plays `row[0]` and despawns once
+  `g_enemies_present < 1 && g_players_in_play != 0 && --obj+0x1330 < 1`.
+
+That bit is not a fact about the room. `EnemyZombieInitByCharType`
+(`FUN_00452FD0`) **moves** it there out of the spawn record's `obj+0x34` bit 1
+at `0045300B`, clearing it at the source — it has to, because bits 1 and 2 of
+`obj+0x34` are the two `MarkActorShot` later uses to name the player who fired.
+`ZombieStateStandAndThrow` is its only reader in the whole image, and **exactly
+two records in the shipped game set the source bit**: stage 3 block 2 step 4's
+two axe men, evt offsets `0x3078` and `0x30BC`, `init_flags 0x20002`. They
+stand on a walkway with a building at their backs — a diagonal wall running
+`(-643.3, -3340.4)` to `(-626.2, -3357.4)` in `st3_08`, six units behind them —
+and there is nothing in `ZombieStateWalkDistance` or in the world push that
+could have stopped a retreat: the collision the script has selected there is
+`coli3.bin+0x2EA0`, thirty-one quads of flat water at `y = -25`, twenty-four
+units below their feet. The bit is how the game says *this one does not back
+away*, and both counters going back at once is why the block it was holding
+carries on rather than waiting out a walk. `[proved]`
+
+With the bit clear, the descriptor's `tail+0x03` — the same byte the port
+carries as `attack_state` — chooses between the two moving endings. **0** walks
+away through state 15 with the distance at `tail+0x10`; **26** leaps through
+state 26 to the point at `tail+0x10`..`+0x18` with the gravity at `tail+0x20`.
+Both are entered at **sub 1**, which is why those two states have a sub-1 arm
+that skips their own descriptor read. The walk arm raises `obj+0x34` bit
+`0x20000000`, and this is the one place in the game that reaches
+`ZombieStateWalkDistance`'s retire-instead-of-attack branch.
+
+> ⚠️ `obj+0x34` bit `0x1000000`, which sub 0 tests and the walk arm clears, is
+> written by **nothing in the image** — an exhaustive scan of every `OR`
+> encoding that can raise it finds no site. The test is always true and the
+> clear is a no-op.
 
 A second path reaches the same state: `ZombieShouldStandAndThrow`
 (`FUN_00458E10`) lets a **condition 8** walker stop and throw when the camera

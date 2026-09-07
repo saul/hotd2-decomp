@@ -67,10 +67,33 @@ export function ZombieThrownWeaponAimAtCamera(obj: ZombieActor, host: GameHost,
 /**
  * `ZombieThrowHandWeapon` — `FUN_0045A240`. The weapon leaves the hand.
  *
- * The hand's draw slot becomes the bare variant **and the bone the weapon
- * hangs off is cleared** — leaving that one drawn leaves an axe floating in an
- * empty fist. The projectile inherits the thrower's attack permit and the
- * thrower's is cleared, so the weapon holds the slot until it lands.
+ * The hand's draw slot becomes the bare variant and the projectile inherits
+ * the thrower's attack permit, the thrower's being cleared, so the weapon
+ * holds the slot until it lands.
+ *
+ * **The second write is not another bone.** The routine also does
+ * `*(bone * 0x90 + 0x284 + obj) = 0` — `899f54050000` for bone 5 at
+ * 0x0045A2B2 and `899f04070000` for bone 8 at 0x0045A2DB, with `EBX` zeroed —
+ * and `0x284` is the bone record's own `+0x78`, not the base of another
+ * record. `SkeletonWalkNode` (`FUN_004107E0`) writes that field every frame as
+ * `obj+0x1300 * PTR_DAT_004D032C[type][bone].radius`, so it is **the bone's
+ * hit-sphere radius**, and zeroing it makes the hand it just emptied
+ * unshootable. `SpawnThrownWeapon` (`FUN_004504E0`) does the identical write
+ * for class 0x31 at 0x00450540.
+ *
+ * The bundle's `weapon_bone` is that address read as `0x20C + bone * 0x90`
+ * and rounded — `0x554` is bone **5.83**, not bone 6 — and this file used to
+ * clear `boneSlot[weapon_bone]`, which named the *left upper arm* while the
+ * *right* hand threw. It was inert, because `swapGore` returns false for a
+ * zero slot, and it is gone rather than left as a wrong claim.
+ *
+ * `[diverges]` The hit sphere is **not** cleared here. `render/characters.ts`
+ * tests `type.bones[].hit_radius` from the static table, so the port has no
+ * per-bone radius on the actor to zero — the same gap makes a bone whose
+ * model has been swapped for a damaged one keep the sphere the engine drops
+ * (`SkeletonWalkNode` zeroes it whenever the record's slot stops matching the
+ * table's). Both want the same one field, and adding it is a change to the
+ * shot path rather than to this routine.
  */
 export function SpawnZombieThrownWeapon(obj: ZombieActor, bone: number, eye: Vec3,
                                         host: GameHost, rng: Rng,
@@ -81,8 +104,6 @@ export function SpawnZombieThrownWeapon(obj: ZombieActor, bone: number, eye: Vec
 
   obj.boneSlot[String(hand.bone)] = hand.bare;
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
-  obj.boneSlot[String(hand.weapon_bone)] = 0;
-  host.setBoneSlot(obj.at, hand.weapon_bone, 0);
 
   const from = vec3();
   if (!host.boneWorld(obj.at, hand.bone, from)) {

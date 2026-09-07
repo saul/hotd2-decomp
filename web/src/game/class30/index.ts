@@ -31,6 +31,7 @@ import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieReleaseAndDespawn, ZombieStateWalkDistance }
   from "./walk_distance";
 import { ZombieStateStandAndThrow } from "./stand_throw";
+import { EnemyZombieInitByCharType } from "./init_char";
 import {
   ZombieStateArcScriptedEntrance, ZombieStateHoldClipThenBranch,
   ZombieStateRideCarrier, ZombieStateRunInPlaceTimed,
@@ -243,6 +244,12 @@ export function EnemyZombieInit(obj: ZombieActor): void {
   // `EnemyZombieInit`: `obj+0x136C |= 0x60000000` — take part in both pushes.
   obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
   obj.zom.shoveTimer = 0;
+  // `00452F0F  CALL EnemyZombieInitByCharType` — the engine's own position for
+  // it, after the hit points and the aim angles and before `obj+0x121 = 0xFF`.
+  // Three of the spawn record's flag bits move into `obj+0x38` in there, and
+  // one of them is the whole of what makes stage 3's two axe men stand still
+  // instead of walking away.
+  EnemyZombieInitByCharType(obj);
   obj.state = ZombieEntryState(obj.initialState);
   // ...and the actor counts itself in, which is the engine's own last act
   // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.

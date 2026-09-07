@@ -353,6 +353,17 @@ def gore_entry(stage, tables, char: Character) -> dict | None:
         for h in hands:
             want.update(v for v in (h["held"], h["bare"], h["projectile"])
                         if v)
+    # **And class 0x30's own throw kit, which is a different table.**
+    # ``ZOMBIE_THROW_SLOTS`` is what ``ZombieThrowHandWeapon``
+    # (``FUN_0045A240``) switches on -- character types 1, 0x13 and 0x14 --
+    # and the loop above reads only ``THROWER_SLOTS``, class 0x31's. Neither
+    # the axe in flight (``znonoo.bin`` part 0, slot ``0x249``) nor either
+    # hand's held or bare model was in any rig, so the client's
+    # ``cloneSlot`` answered null for all three: nothing was drawn for the
+    # weapon and the swap to the bare hand was a no-op, which leaves the axe
+    # in the fist. The throw itself happened all along.
+    for h in (char.zombie_throw or {}).get("hands", []):
+        want.update(v for v in (h["held"], h["bare"], h["projectile"]) if v)
     for slot in sorted(want):
         rec = slots.get(slot)
         if not rec:

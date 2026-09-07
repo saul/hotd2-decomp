@@ -73,6 +73,7 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
+import { ThrownWeaponUpdate } from "../src/game/class31/projectile";
 import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
@@ -6879,6 +6880,177 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
           + `despawned ${z.despawned}`);
     check("...backwards, on `row[4]`",
           (z.flags & ActorFlag.BackingOff) !== 0);
+  }
+
+  // **The other way out, and the one the level cannot see.**
+  //
+  // `ZombieStateStandAndThrow`'s ending is a two-way switch on `obj+0x38` bit
+  // 0x10 (`0045945C  TEST byte ptr [ESI + 0x38], 0x10` — `f6463810`), and that
+  // bit is not a fact about the room: `EnemyZombieInitByCharType`
+  // (`FUN_00452FD0`) **moves** it there out of the spawn record's `obj+0x34`
+  // bit 1 at `0045300B`, clearing it at the source. Exactly two records in the
+  // shipped game set it — stage 3 block 2 step 4's two axe men, who stand
+  // against a building.
+  //
+  // With the bit unmodelled both of them took the *other* arm and walked their
+  // descriptor's twenty-five units backwards through that building, holding
+  // `wait_enemies_alive` for the hundred frames it took. `FUN_00457220` has no
+  // test that could have stopped them, and the world push at that point in
+  // stage 3 is thirty-one quads of flat water twenty-four units below their
+  // feet, so nothing in the level was ever going to.
+  {
+    /** `obj+0x34` bit 1 — the descriptor's "do not walk away". */
+    const STAND_THROW_RETIRE = 0x2;
+    /** `obj+0x38` bit 4 — what `EnemyZombieInitByCharType` turns it into. */
+    const AUX_STAND_THROW_RETIRE = 0x10;
+
+    const axeMan = (flags: number) => {
+      ResetGameGlobals();
+      SetGameTables(CHARS);
+      G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+      G.g_camera_fixed_eye_y = 0;
+      const z = spawnZombie(0x7700, 1, "axe man", {
+        initialState: ZombieState.StandAndThrow, condition: 7, flags,
+        standThrow: { delay_two_hands: 0, delay_one_hand: 0,
+                      delay_after_throw: 2, exit_state: 0, walk_distance: 25,
+                      leave_delay: 4 },
+      });
+      z.visible = true;
+      z.hp = z.maxHp = 100;
+      z.pos = vec3(0, 0, 60);
+      return z;
+    };
+
+    {
+      const z = axeMan(STAND_THROW_RETIRE);
+      check("`EnemyZombieInitByCharType` moves the record's bit to obj+0x38",
+            (z.flags38 & AUX_STAND_THROW_RETIRE) !== 0
+            && (z.flags & STAND_THROW_RETIRE) === 0,
+            `0x34 0x${(z.flags >>> 0).toString(16)} `
+            + `0x38 0x${(z.flags38 >>> 0).toString(16)}`);
+      const plain = axeMan(0);
+      check("...and leaves an ordinary record without it",
+            (plain.flags38 & AUX_STAND_THROW_RETIRE) === 0,
+            `0x${(plain.flags38 >>> 0).toString(16)}`);
+    }
+
+    // Both hands already thrown, sitting on the recover's last frame, so the
+    // next few calls are the leave delay and then the ending.
+    const atTheEnding = (flags: number) => {
+      const z = axeMan(flags);
+      z.boneSlot["5"] = 0;
+      z.boneSlot["8"] = 0;
+      z.sub = 4;
+      z.motion = 102;
+      z.playTicks = 45;                  // play length 46, so frame 45 of it
+      return z;
+    };
+
+    /**
+     * One frame of whichever of the two states the actor is in, so the two
+     * endings are driven by the *same* loop and only the descriptor bit is
+     * different. Driving state 33 alone would leave a walking actor stepping
+     * through a routine that is no longer its own.
+     */
+    const runFrame = (z: ZombieActor): boolean => {
+      if (z.state === ZombieState.StandAndThrow) {
+        ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
+      } else if (z.state === ZombieState.WalkDistance) {
+        ZombieStateWalkDistance(z, new Rng(1));
+      } else {
+        return false;
+      }
+      ActorAdvanceMotion(z, 1 / 60);
+      return true;
+    };
+
+    {
+      const z = atTheEnding(STAND_THROW_RETIRE);
+      const start = { ...z.pos };
+      const aliveAtStart = G.g_enemies_alive;
+      let moved = 0;
+      let goneAt = -1;
+      for (let i = 0; i < 600 && goneAt < 0; i++) {
+        if (!runFrame(z)) break;
+        moved = Math.max(moved, Math.hypot(z.pos.x - start.x,
+                                           z.pos.z - start.z));
+        if (z.despawned) goneAt = i;
+      }
+      // **The assertion is where the actor is**, not what state it says it is
+      // in. The fixture's throw clips carry root motion, so "did not move"
+      // here is the retreat's twenty-five units being absent rather than a
+      // clip that happens to stand perfectly still.
+      check("a retiring thrower never leaves the spot the script put it on",
+            moved < 1, `${moved.toFixed(3)}u from ${JSON.stringify(start)}`);
+      check("...it gives the enemy count back where it stands",
+            G.g_enemies_alive === aliveAtStart - 1,
+            `${G.g_enemies_alive} was ${aliveAtStart}`);
+      check("...and the block it was holding can advance",
+            G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+            `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
+      check("...then it despawns after the descriptor's own delay",
+            goneAt >= 0, `despawned at frame ${goneAt}`);
+      check("...having stayed in state 33 the whole time",
+            z.state === ZombieState.StandAndThrow, ZombieState[z.state]);
+    }
+
+    {
+      // The seven records that do *not* set the bit still walk away, and the
+      // distance they cover is the descriptor's own. Same fixture, one bit
+      // different: the two endings have to be told apart by that bit alone.
+      const z = atTheEnding(0);
+      const start = { ...z.pos };
+      let moved = 0;
+      for (let i = 0; i < 600 && !z.despawned; i++) {
+        if (!runFrame(z)) break;
+        moved = Math.max(moved, Math.hypot(z.pos.x - start.x,
+                                           z.pos.z - start.z));
+      }
+      check("a thrower without the bit walks its descriptor's distance",
+            moved > 20, `${moved.toFixed(2)}u`);
+      check("...and despawns at the end of it", z.despawned);
+    }
+  }
+
+  // **The weapon that flies.** `ZombieThrowHandWeapon` (`FUN_0045A240`) puts
+  // the projectile at the throwing bone's own world position, leaves the hand
+  // bare and hands the permit over. The assertion is on the world: a record in
+  // `g_thrown_weapons` carrying the kit's projectile slot, closing on the eye
+  // frame after frame, and a hand whose recorded draw slot is now the bare
+  // one. What that slot *draws* is the exporter's half — see the
+  // throwing-hand rows in `tools/verify_attachments.py`.
+  {
+    const z = thrower();
+    const host = {
+      ...NULL_HOST,
+      boneWorld: (_at: number, _bone: number, out: Vec3) => {
+        out.x = 0; out.y = 5; out.z = 60;
+        return true;
+      },
+      aimPoint: (_ahead: number, out: Vec3) => {
+        out.x = EYE.x; out.y = EYE.y; out.z = EYE.z;
+      },
+    };
+    const kit = CHARS.types["1"].zombie_throw!;
+    for (let i = 0; i < 12 && !G.g_thrown_weapons.length; i++) {
+      ZombieStateStandAndThrow(z, EYE, new Rng(1), host);
+      ActorAdvanceMotion(z, 1 / 60);
+    }
+    check("the throw puts a weapon in the world",
+          G.g_thrown_weapons.length === 1,
+          String(G.g_thrown_weapons.length));
+    const w = G.g_thrown_weapons[0];
+    check("...drawing the kit's own projectile slot",
+          !!w && w.slot === kit.hands[0].projectile, `slot ${w?.slot}`);
+    check("...and the hand it left is recorded bare",
+          z.boneSlot["5"] === kit.hands[0].bare
+          || z.boneSlot["8"] === kit.hands[1].bare,
+          JSON.stringify(z.boneSlot));
+    const before = Math.hypot(w.pos.x - EYE.x, w.pos.z - EYE.z);
+    for (let i = 0; i < 10; i++) ThrownWeaponUpdate(1);
+    const after = Math.hypot(w.pos.x - EYE.x, w.pos.z - EYE.z);
+    check("...and it closes on the camera rather than hanging there",
+          after < before - 1, `${before.toFixed(1)} -> ${after.toFixed(1)}`);
   }
 
   // The other way in: a condition-8 walker already facing the camera.

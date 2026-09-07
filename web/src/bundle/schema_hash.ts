@@ -22,10 +22,10 @@ export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "characters.ts": "01ea1cce3d2b940266cb94cd570a8c71d3548b9dc706c744e63d5c56e166c119",
   "manifest.ts": "1db24d27ee911990bc86d7cc976dd471d58e051f545ebd41647cc6b9a110b9dd",
   "scene.ts": "b5206c65d414930ca2d372825423ae87eb96e2ac922c033a5c664ef4cead2338",
-  "script.ts": "b0b5aaa5b2e8ea8b5c2943fcd1081cec7fae3a2de6c51b3ba1f58c4d39481458",
+  "script.ts": "e722a9cea5fcbadeb60f47f3a3db46da0c4edc91267ba80919cd17d301f3b750",
   "sound.ts": "619754539df917eb5781c8139a92dcdacee537822db328373929ef5d0a527ae2",
   "stage.ts": "50ef64059779fb6e1cd7ae0ef2d1a88abbf5df362c931624eec8308c08000a4d",
 };
 
 /** One digest over {@link SCHEMA_FILES}, in filename order. */
-export const SCHEMA_HASH = "21c06bdca70f452deffa61c416740eb51d9e2143ec848018cf4c6f8a93207d68";
+export const SCHEMA_HASH = "25035e6ed78aa18010c7f814155b9e9ddf390b4a1288a30824527a0ddc34d2dc";

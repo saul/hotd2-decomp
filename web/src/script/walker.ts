@@ -44,6 +44,24 @@ export {
 } from "./state/channels";
 
 
+/**
+ * One object `spawn_simple` (0x0A) has placed, and where the instruction was.
+ *
+ * `at` is **the port's own identity**, not the engine's: `EvtOpSpawnSimple0A`
+ * allocates a fresh object per operand and has no descriptor address to name
+ * it by, while the port's pool is keyed by `at`. The key is derived from the
+ * instruction's own byte address — negative, so it can never collide with a
+ * real descriptor offset, which is what a positive one could do.
+ */
+export interface ActiveSimpleSpawn {
+  at: number;
+  class: number;
+  hp: number;
+  block: number;
+  step: number;
+  opIndex: number;
+}
+
 export interface ActiveSpawn extends SpawnJson {
   /** Where it came from, so the marker can be traced back to an instruction. */
   block: number;
@@ -334,7 +352,7 @@ export const WALKER_RESTORED_KEYS = [
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
   "lightSet", "checkpointBlock", "branchPreview", "camOverrideValid",
-  "stashedCam", "spawns",
+  "stashedCam", "spawns", "simpleSpawns",
   "sceneState", "queuedEventsPending", "camPending",
   "cam", "finished", "bgmTrack", "lastSound", "seq",
 ] as const;
@@ -655,6 +673,17 @@ export class Walker {
    */
   readonly loadedSlots = new Set<number>();
   spawns: ActiveSpawn[] = [];
+  /**
+   * What `spawn_simple` (0x0A) has placed — see {@link ActiveSimpleSpawn}.
+   *
+   * A second list rather than a second kind of entry in {@link spawns},
+   * because the two carry different things: a placement descriptor has a
+   * position, an `at` and a tail, and `EvtOpSpawnSimple0A`'s record has a
+   * class and a hit-point word and nothing else. Everything that walks
+   * `spawns` — the character layer, `SpawnPropContainers`, the spawn markers —
+   * would have to test for the difference otherwise.
+   */
+  simpleSpawns: ActiveSimpleSpawn[] = [];
   cam: CamCommand | null = null;
   /**
    * True while a **replay** is walking the script rather than playback.
@@ -767,6 +796,7 @@ export class Walker {
     G.g_script_flags = [];
     this.loadedSlots.clear();
     this.spawns = [];
+    this.simpleSpawns = [];
     this.cam = null;
     this.wait = null;
     this.branch = null;
@@ -807,6 +837,7 @@ export class Walker {
       branchPreview: this.branchPreview,
       camOverrideValid: this.camOverrideValid, stashedCam: this.stashedCam,
       spawns: this.spawns.map((s) => ({ ...s })),
+      simpleSpawns: this.simpleSpawns.map((s) => ({ ...s })),
       cam: this.cam && { ...this.cam },
       // The wait, countdown and all. `web/test/state.test.ts` is what caught
       // this missing: a save taken three seconds into a five-second
@@ -1313,6 +1344,30 @@ export class Walker {
     return quiet || !op.sound ? undefined : w.host.playSound(op.sound);
   }
 
+  /**
+   * `EvtOpSpawnSimple0A`'s operand list, onto {@link simpleSpawns}.
+   *
+   * The engine allocates one object per operand and **does not** collapse
+   * duplicates, so neither does this: stage 3's block 11 lists the same record
+   * twice on purpose.
+   */
+  static pushSimpleSpawns(w: Walker, op: OpJson): string | undefined {
+    if (!op.simple?.length) return undefined;
+    op.simple.forEach((s, i) => {
+      w.simpleSpawns.push({
+        // `-(instruction address * 8 + slot) - 1` — negative so it can never
+        // be read as a descriptor offset, and per-operand so two records on
+        // one instruction are two objects. See {@link ActiveSimpleSpawn}.
+        at: -(op.at * 8 + i) - 1,
+        class: s.class,
+        hp: s.hp,
+        block: w.block, step: w.step, opIndex: w.opIndex,
+      });
+    });
+    const n = op.simple.length;
+    return `${n} simple spawn${n === 1 ? "" : "s"}`;
+  }
+
   static pushSpawns(w: Walker, op: OpJson): string | undefined {
     if (!op.spawns?.length) return undefined;
     for (const s of op.spawns) {
@@ -1570,7 +1625,10 @@ export class Walker {
     // at most one block rather than deadlocking the stage.
     if (this.queuedEventsPending !== 0) this.ringResidue += 1;
     this.ring.reset();
-    if (this.options.clearSpawnsOnBlock) this.spawns = [];
+    if (this.options.clearSpawnsOnBlock) {
+      this.spawns = [];
+      this.simpleSpawns = [];
+    }
     // The preview shots belong to the branch in the block that stored them --
     // every `store_six` in the game sits in a branch block. Carrying one
     // across a block change offers an unrelated shot for the next branch,

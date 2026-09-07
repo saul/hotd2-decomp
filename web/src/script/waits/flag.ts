@@ -37,6 +37,8 @@
  * `[diverges]` on `0x41`/`0x42`/`0x45` described in {@link WaitRule.enter}.
  */
 import type { OpJson, ScriptJson } from "../../bundle";
+import { g_class_handlers } from "../../game/registry";
+import type { SpawnClass } from "../../game/spawn_class";
 import { T } from "../../game/tables";
 import type { WaitPolicy } from "../walker";
 import { passedBecause, type WaitContext, type WaitRule } from "./types";
@@ -66,18 +68,13 @@ let cache: {
  * running. This port runs some of them and not others, and that difference is
  * the whole of this divergence — a gate on a flag whose writer is not ported
  * is a gate nothing can ever open, and a faithful `0x45` parks the stage on it
- * for good. Measured over the six shipped scripts, honouring every gate
- * unconditionally parks **stage 5 at block 1**, **stage 1 at blocks 14 and
- * 16**, stage 2 at blocks 35–41, stage 4 at blocks 23–29, and all six on
- * their opening chapter card.
+ * for good. So this is the rule `WAIT_NOTES` already states for every other
+ * opcode — *a wait this client cannot evaluate does not block* — made precise
+ * instead of blanket. It is **derived**, not hand-listed, so it shrinks by
+ * itself as writers are ported and there is not a single flag number in this
+ * file.
  *
- * So this is the rule `WAIT_NOTES` already states for every other opcode —
- * *a wait this client cannot evaluate does not block* — made precise instead
- * of blanket. It is **derived from the bundle**, not hand-listed, so it
- * shrinks by itself as writers are ported and there is not a single flag
- * number in this file.
- *
- * The three writers the port has:
+ * ## What it is derived from
  *
  * * `EvtOpSetScriptFlag48` — any `set_script_flag` in this stage's script.
  * * `CivilianRunScript` op 0x1C — every stream reachable from a class-0x10
@@ -85,23 +82,29 @@ let cache: {
  *   the rescued and the killed paths of one encounter raise the flag from
  *   different streams.
  * * `ZombieStateTargetScriptWithFlag` — a captor script entry's fifth short.
+ * * {@link ClassHandler.raisesScriptFlag} — a class whose flag is a **literal
+ *   in its own routine**, for every spawn of that class in this stage.
  *
- * The ones it has not, and what each costs today:
+ * ## What is still excused, and what each one needs
  *
- * * `FUN_00433f40`, a class-0x33 cue prop that plays a sound, raises a flag
- *   from its descriptor and despawns — `[likely]` stage 5's flags 0, 30 and 31
- *   and stage 1's flag 3.
- * * `FUN_00473cf0` and the class-0x44 constructor at `0x0047314A` — the prop
- *   family; `[open]` which owns which flag. Stage 2's flags 10–17 and stage
- *   4's 20, 31 and 32 are theirs or the banner's.
- * * whatever places the **banner** actors, which is `EvtOpSpawnSimple0A` —
- *   opcode `0x0A`, whose operand is a two-word `{class, hp}` record rather
- *   than a placement descriptor and which this port does not implement at all.
- *   Flag **248** is the chapter card (`[proved]`:
- *   `MOV byte ptr [0x009C72F8], 0x1` at `0x004348C1`) and **254** the
- *   stage-clear card (`[likely]`, from the data: each of its five waits sits
- *   in a step that opens with a pair of `spawn_simple` calls). Twelve gates
- *   between them, one per stage opening and one per result screen.
+ * **35 of the game's 61 gates**, down from 50 when class 0x60 and class 0x61
+ * were unreachable. Stages 3 and 6 have none left; the rest are four unported
+ * classes, and every one of them is an enemy or a boss rather than a prop:
+ *
+ * | gates | flag(s) | writer |
+ * |---|---|---|
+ * | 20 | 10..17, 31 | **class 0x14** (`FUN_00475E90`), stage 2's blocks 35-41 and stage 4's 23-29. Its writes are spread over `0x00478350`..`0x0047BA6E`; flag 10's two are `0x0047835B` and `0x004785E4` |
+ * | 8 | 31, 32 | **class 0x19** (`FUN_004917E0`), `0x0049390C` and `0x004958C7` |
+ * | 3 | 0, 3 | **class 0x22** (`FUN_0049B0D0`) — the stage-1 and stage-5 boss, `0x0049CC85` and `0x0049CC95` |
+ * | 2 | 30 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
+ * | 1 | 20 | a class-0x41 prop update, `FUN_004710C0` at `0x004710D7` — the one small one left, and the only remaining gate that is not an enemy class |
+ *
+ * The five reports that opened this line of work asked for "one spawn opcode
+ * and two cue props"; the sweep that was written to check it says otherwise,
+ * and that estimate is recorded as wrong in `docs/re/session-log.md`. The two
+ * cue props — `FUN_00433F40` (class 0x33) and `FUN_00473CF0` (`HingeUpdate`) —
+ * turn out to open **no gate in any shipped script**: every flag they write
+ * comes off a descriptor, and no `wait_script_flag` in the game names one.
  */
 export function ScriptFlagsThisBundleCanRaise(
     script: ScriptJson): ReadonlySet<number> {
@@ -148,6 +151,26 @@ export function ScriptFlagsThisBundleCanRaise(
     }
   }
 
+  // ...and the classes whose flag is a **literal in their own routine** rather
+  // than a field of a descriptor, declared by the class module that ports it
+  // — `ClassHandler.raisesScriptFlag`. Both spawn opcodes are walked, because
+  // the two the port has are `spawn_simple`'s and the four it has not are
+  // ordinary placements.
+  for (const b of script.blocks ?? []) {
+    for (const st of b.steps ?? []) {
+      for (const op of st.ops ?? []) {
+        for (const r of op.simple ?? []) {
+          const f = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
+          if (f !== undefined) flags.add(f);
+        }
+        for (const r of op.spawns ?? []) {
+          const f = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
+          if (f !== undefined) flags.add(f);
+        }
+      }
+    }
+  }
+
   cache = { script, civ, chars, flags };
   return flags;
 }
@@ -165,9 +188,16 @@ export const waitScriptFlag: WaitRule = {
       return { kind: "passed",
                why: `g_script_flags[${index}] is already raised` };
     }
+    // The engine blocks here until the byte comes up, and it always does,
+    // because every writer of `g_script_flags` is code the engine is running.
+    // This port runs some of those writers and not others, so a gate whose
+    // writer has no module is one it could only park on for ever; it passes
+    // instead, and says so in the feed. See
+    // {@link ScriptFlagsThisBundleCanRaise} for the derivation and for the
+    // five classes that would retire it. [diverges]
     if (!ScriptFlagsThisBundleCanRaise(ctx.script).has(index)) {
       return { kind: "passed",
-               why: "[diverges] nothing this port runs raises "
+               why: "nothing this port runs raises "
                   + `g_script_flags[${index}]` };
     }
     return { kind: "flag", index };

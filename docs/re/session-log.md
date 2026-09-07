@@ -14073,3 +14073,118 @@ showing a gore variant has no hit sphere either. Not chased, not ported,
 4. **Ran `npm run export` from the shared checkout** on the first try, because
    the command carried an absolute `cd`. It wrote 40 MB into the user's
    `extract/player`. L28, and the fix is the same: check where the tool wrote.
+
+## The chapter card is an actor — `spawn_simple`, and the gates it opens
+
+*2026-09-07, the follow-up to "`wait_script_flag` is a gameplay gate". The
+call was: port the missing writers and delete the escape entirely.*
+
+### It is not deleted. It is 50 gates down to 35, and the reason is worth more
+
+The previous session's report said the escape needed "one spawn opcode and two
+cue props". **That estimate was wrong**, and the sweep written to justify it is
+what said so — the same shape of mistake as its own wrong turn 3, one level up.
+What it had actually enumerated was the *register-indexed* writers of
+`g_script_flags`; the flags that matter are written with **literal addresses**,
+which `MOV byte ptr [ECX + 0x9c7200]` does not match. A whole-image search for
+the string `9c72` in any operand finds 155 references and settles it.
+
+The 61 `wait_script_flag` gates in the six shipped scripts, by what raises them:
+
+| | before | after |
+|---|---:|---:|
+| honoured | 11 | **26** |
+| excused `[diverges]` | 50 | **35** |
+| stages with none excused | 0 | **2** (3 and 6) |
+
+The fifteen newly honoured are every stage's opening chapter card (flag 248,
+7 gates) and every result screen (flag 254, 5 gates), plus three more that were
+only excused because those two were.
+
+### What was ported
+
+* **`EvtOpSpawnSimple0A`** (`FUN_00408990`), opcode `0x0A` — and 0x02/0x06,
+  its player-count-gated forms, which the same `g_evt_spawn_gated_handlers`
+  forward reaches. Its operands are **not** placement descriptors: each points
+  at a two-word `{class, hp}` record, and the object places itself.
+* **Class 0x60**, `ChapterCardInstall` (`FUN_004342E0`) — 180 frames, then
+  `g_script_flags[0xF8] = 1` at `0x004348C1`, then `ActorKill`.
+* **Class 0x61**, `ResultCardInstall` (`FUN_00434EF0`) — drops `g_nFiringGate`,
+  420 frames, then `g_script_flags[0xFE] = 1` at `0x0043567C`, then
+  `ActorKill`. That instruction is **the only reference to `0x009C72FE` in the
+  image**: a byte search for the address finds one match.
+* Classes **0x62** (`ResultCardTally`) and **0x63**
+  (`InitCutsceneSkipWatcher`, already named) get a `SpawnClass` member and no
+  module — they raise no flag, and a class with no module gets no behaviour.
+
+The cards themselves are screen furniture — eight text slots at `0x007DCBA0`,
+a light block, a score tally, two texbanks — and **none of that is ported**.
+What is ported is the lifetime, which is the whole of the gate.
+
+### The exporter had to change, in both halves
+
+`spawn_simple`'s operands point into **`comevtbl.bin`**, the 0x200-byte buffer
+loaded at `0x00977200` immediately below the stage table — offsets `0x34`,
+`0x3C`, `0x44`, `0x4C`, the same four addresses in every stage. A stage
+`EvtFile` resolved them to a negative offset and dropped them. `EvtFile.resolve`
+now follows a below-base pointer into a com companion the stage loader attaches,
+`read_simple_spawn` / `readSimpleSpawn` decode the record with the engine's own
+**signed 16-bit** truncation of the second word (the shipped `0xFFFF0000` is a
+zero, not four billion hit points), and `OpJson.simple` carries them.
+`builder_hash` and `schema_hash` moved with it; all twelve bundles re-exported.
+
+### What is still excused, and exactly what each one needs
+
+Not props. **Four unported enemy classes and one prop update**, and the list is
+in `script/waits/flag.ts` beside the code:
+
+| gates | flag(s) | writer |
+|---:|---|---|
+| 20 | 10–17, 31 | class **0x14** (`FUN_00475E90`) — stage 2's blocks 35–41, stage 4's 23–29, stage 5's block 3. Writes spread over `0x00478350`..`0x0047BA6E` |
+| 8 | 31, 32 | class **0x19** (`FUN_004917E0`) — `0x0049390C`, `0x004958C7` |
+| 3 | 0, 3 | class **0x22** (`FUN_0049B0D0`), the stage-1 and stage-5 boss — `0x0049CC85`/`95` |
+| 2 | 30 | class **0x32** (`FUN_0047F5F0`) state 4 — `0x00480590` |
+| 1 | 20 | `FUN_004710C0` at `0x004710D7`, a class-0x41 prop that raises the flag and despawns on its first frame outside Original Mode. **The only remaining gate that is not an enemy class**, and the cheapest thing left |
+
+### The two "cue props" open no gate at all
+
+`FUN_00433F40` (a class-0x33 timer prop) and `FUN_00473CF0` (`HingeUpdate`)
+both write `g_script_flags`, and both take the index from a **descriptor
+field**. Cross-referenced against every `wait_script_flag` operand in the six
+scripts: **neither opens one**. The previous session named them as the thing to
+port; porting them would have changed nothing measurable. `[proved]` by the
+sweep, which is in `tools/`-adjacent form in the session scratch and reproduced
+by `docs/formats/evt.md`'s writer list.
+
+### Wrong turns
+
+1. **Estimating the remaining work from an instruction search that could not
+   see half the writers.** `search_instructions` with the operand pattern
+   `0x9c7200` matches the register-indexed form and misses `[0x009c72f8]`
+   entirely, because that operand renders as `0x009c72f8` and does not contain
+   the substring. Every literal writer — including both banner cards, the boss
+   and class 0x14 — was invisible. Searching for the bare `9c72` found 155
+   references where the first search found 15.
+2. **Regenerating `schema_hash.ts` after exporting.** The bundle then carries
+   the old stamp and the page refuses to load with *"this bundle was exported
+   against a different `web/src/bundle/` schema"* — a blank loading overlay in
+   every headless run, with no console error, which reads exactly like a hang.
+   The order is: change the exporter, regenerate the hashes, **then** export.
+3. **Setting `visible = false` on the cards, because they are screen space and
+   nothing draws them.** `GameUpdate`'s loop is
+   `if (obj.dead || !obj.visible) { … continue; }` — `visible` is this port's
+   stand-in for "the character layer has built its hierarchy", not a statement
+   about drawing — so both cards sat in the pool at sub 0 with their dwell
+   never counted, and all six stages parked on the gate the port had just made
+   real. `SpawnSlotActors` had the answer already: class 0x52's mouse has no
+   character type either and is `visible = true`. The engine has no such test
+   at all.
+
+### Also in this commit
+
+`verify_port.py`'s divergence list walked `web/src/game/` only, so the ten
+`[diverges]` in `web/src/script/` — the whole of this escape among them — were
+declared and never counted. It walks `cited_files()` now, which is the set its
+citation checks already use, and STATUS's count goes 116 → 127. Recorded here
+because the number is a measurement and the change to what it measures should
+be findable from the number.

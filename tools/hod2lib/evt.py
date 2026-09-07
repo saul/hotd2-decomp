@@ -402,6 +402,9 @@ class EvtFile:
         self.words: list[int] = list(struct.unpack_from("<%dI" % n, data, 0))
         self.blocks: list[Block] = []
         self.warnings: list[str] = []
+        #: The shared ``comevtbl`` buffer, when this is a stage table. Set by
+        #: :func:`load`; see :meth:`resolve`.
+        self.com: "EvtFile | None" = None
 
     # -- pointer helpers ---------------------------------------------------
 
@@ -410,6 +413,26 @@ class EvtFile:
         if not is_pointer(word):
             return None
         return word - self.dc_base
+
+    def resolve(self, word: int) -> "tuple[EvtFile, int] | None":
+        """(file, offset) for *word*, following into the shared com buffer.
+
+        ``comevtbl`` is loaded at 0x00977200 and the stage table immediately
+        behind it at 0x00977400, so a stage pointer below its own base is a
+        pointer into the com buffer rather than a bad one. Six of the seven
+        distinct ``spawn_simple`` operands in the game are exactly that: the
+        four screen-furniture records live in ``comevtbl.bin`` and every stage
+        names them at the same address. See :data:`COM_RESERVED`.
+        """
+        off = self.to_offset(word)
+        if off is None:
+            return None
+        if off >= 0:
+            return (self, off) if self.readable(off) else None
+        if self.com is None:
+            return None
+        com_off = word - self.com.dc_base
+        return (self.com, com_off) if self.com.readable(com_off) else None
 
     def readable(self, off: int | None) -> bool:
         return off is not None and 0 <= off < len(self.raw) - 3
@@ -646,6 +669,20 @@ def effective_spawn_opcode(opcode: int) -> int:
 SPAWN_OPCODES = (0x01, 0x03, 0x04, 0x05, 0x07, 0x08,
                  0x09, 0x0B, 0x0C, 0x0D)
 
+#: Opcodes whose operands are the two-word ``{class, hp}`` record instead.
+#:
+#: ``EvtOpSpawnSimple0A`` (``FUN_00408990``) walks its -1-terminated operand
+#: list, and for each pointer allocates ``g_class_handlers[record[0]]`` at
+#: 0x13F4 bytes and copies ``(short)record[1]`` into **both** ``obj+0x11C`` and
+#: ``obj+0x11E``. Nothing writes a position: this is the opcode for objects
+#: that place themselves, which in the shipped scripts is the screen furniture
+#: -- the chapter card (class 0x60), the result card (0x61) and its two
+#: companions (0x62, 0x63).
+#:
+#: 0x02 and 0x06 are the one- and two-player gated forms, through
+#: ``g_evt_spawn_gated_handlers``; neither is encoded by a shipped script.
+SIMPLE_SPAWN_OPCODES = (0x02, 0x06, 0x0A)
+
 #: Opcodes that attach the descriptor's tail to the object as a per-class
 #: parameter block. There are **three** allocators, not two:
 #:
@@ -675,6 +712,20 @@ SPAWN_OPCODES = (0x01, 0x03, 0x04, 0x05, 0x07, 0x08,
 #: and 0x07/0x08 reach them through ``effective_spawn_opcode``, so they are
 #: not listed here and must not be tested against this tuple directly.
 PARAM_OPCODES = (0x0B, 0x0C, 0x0D)
+
+
+@dataclass
+class SimpleSpawn:
+    """``EvtOpSpawnSimple0A``'s whole operand: a class and a hit-point word.
+
+    No position, no orientation and no tail -- the object places itself.
+    """
+
+    cls: int
+    hp: int
+
+    def to_json(self) -> dict:
+        return {"class": self.cls, "hp": self.hp}
 
 
 @dataclass
@@ -780,8 +831,27 @@ def spawns(evt: EvtFile, opcodes: tuple[int, ...] = SPAWN_OPCODES) -> list[Spawn
     return out
 
 
-def load(path: str, n_blocks: int | None = None) -> EvtFile:
+def read_simple_spawn(evt: EvtFile, word: int) -> "SimpleSpawn | None":
+    """One ``{class, hp}`` record, as ``EvtOpSpawnSimple0A`` reads it."""
+    at = evt.resolve(word)
+    if at is None:
+        return None
+    src, off = at
+    if off + 8 > len(src.raw):
+        return None
+    cls = src.w(off)
+    hp = src.w(off + 4)
+    # ``*(short *)(obj + 0x11e) = (short)record[1]`` -- a 16-bit store, so the
+    # shipped 0xFFFF0000 is a zero and not a 4-billion hit-point count.
+    hp = ((hp & 0xFFFF) ^ 0x8000) - 0x8000
+    return SimpleSpawn(cls=cls, hp=hp)
+
+
+def load(path: str, n_blocks: int | None = None,
+         com: EvtFile | None = None) -> EvtFile:
     import os
 
     with open(path, "rb") as fh:
-        return EvtFile(fh.read(), os.path.basename(path)).parse(n_blocks)
+        f = EvtFile(fh.read(), os.path.basename(path))
+    f.com = com
+    return f.parse(n_blocks)

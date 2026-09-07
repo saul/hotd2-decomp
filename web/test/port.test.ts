@@ -139,6 +139,10 @@ import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
 import { ScriptFlagsThisBundleCanRaise }
   from "../src/script/waits/flag";
+import { CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES }
+  from "../src/game/class60";
+import { RESULT_CARD_FLAG, RESULT_CARD_FRAMES }
+  from "../src/game/class61";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -7891,6 +7895,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropPlacer, "0x44 prop placer"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
     [SpawnClass.SkinnedNpc, "0x53 cat / branch trigger"],
+    [SpawnClass.ChapterCard, "0x60 chapter card"],
+    [SpawnClass.ResultCard, "0x61 result card"],
   ];
   for (const [cls, name] of want) {
     check(`${name} registered itself`,
@@ -10148,12 +10154,14 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   // port runs can raise passes, because a faithful one would park the stage on
   // it for ever — the chapter card's flag 248 and the result screen's 254 are
   // twelve such gates in the shipped scripts, both raised by actors
-  // `spawn_simple` (0x0A) places and 0x0A is not ported. The boundary is
-  // *derived from the bundle*, so this is a check on the derivation and not on
-  // a list of numbers: the same fixture, one flag no stream names.
+  // an enemy class this port does not run. The boundary is *derived*, so this
+  // is a check on the derivation and not on a list of numbers: the same
+  // fixture, one flag nothing in it can raise. Flag 20 is class 0x41's
+  // `FUN_004710C0`, which has no module — 248 is no longer a valid example,
+  // because `game/class60/` raises it now.
   const canRaise = ScriptFlagsThisBundleCanRaise(script);
   check("the coverage set is the civilian's own flag and the script's own",
-        canRaise.has(RESCUE_FLAG) && canRaise.has(7) && !canRaise.has(248),
+        canRaise.has(RESCUE_FLAG) && canRaise.has(7) && !canRaise.has(20),
         `${[...canRaise].sort((a, b) => a - b).join(",")}`);
   {
     ResetGameGlobals();
@@ -10161,7 +10169,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
       ...script,
       blocks: [{
         index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
-        steps: [{ index: 0, at: 0, ops: [flagOp(0, 0x45, 248)] }],
+        steps: [{ index: 0, at: 0, ops: [flagOp(0, 0x45, 20)] }],
       }],
     } as unknown as ScriptJson;
     const w3 = new Walker(unraisable, host);
@@ -10183,6 +10191,193 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   check("a seek over the gate leaves the flag it was waiting for raised",
         (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
         `${G.g_script_flags[RESCUE_FLAG]}`);
+}
+
+/**
+ * `spawn_simple` (0x0A), and the two cards it places that open a gate.
+ *
+ * Twelve of the game's sixty-one `wait_script_flag` gates name flag 248 or
+ * flag 254, and both are raised by an actor `EvtOpSpawnSimple0A`
+ * (`FUN_00408990`) places — the chapter card (class 0x60, `FUN_004342E0`) and
+ * the stage-clear card (class 0x61, `FUN_00434EF0`). Neither existed in this
+ * port: opcode 0x0A had no handler, so the actor was never built, so the flag
+ * was never raised, and `wait_script_flag` had to be excused from evaluating
+ * those gates rather than park every stage on its title card.
+ *
+ * Asserted on the world, not on the opcode's opinion of itself: a real actor
+ * in `G.g_object_list` with the class the record names, driven frame by frame,
+ * against the walker's own address on the gate behind it.
+ */
+console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
+{
+  const simpleOp = (i: number, cls: number) => ({
+    i, at: 0x100 + i * 8, op: 0x0a, name: "spawn_simple", cat: "spawn",
+    simple: [{ class: cls, hp: 0 }],
+  });
+  const waitOp = (i: number, flag: number) => ({
+    i, at: 0x100 + i * 8, op: 0x45, name: "wait_script_flag", cat: "wait",
+    arg: flag, blocks_on: `script flag ${flag} set`,
+  });
+  const cardScript = (cls: number, flag: number) => ({
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        simpleOp(0, cls),
+        waitOp(1, flag),
+        { i: 2, at: 0x120, op: 0x48, name: "set_script_flag", cat: "flow",
+          flag: 9 },
+      ] }],
+    }],
+  } as unknown as ScriptJson);
+
+  const cardHost = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null, aliveCivilians: () => null,
+    scriptFlagRaised: (i: number) => (G.g_script_flags[i] ?? 0) !== 0,
+    cameraFree: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+
+  /** Drive one card to its flag and report how many frames it took. */
+  const runCard = (cls: SpawnClass, flag: number, expect: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    const script = cardScript(cls, flag);
+    const w = new Walker(script, cardHost);
+    // The instruction, and nothing else: `SpawnSimpleActors` runs from the
+    // opcode rather than from a later frame, which is what makes a seek build
+    // the card at all.
+    w.tick(1 / 60);
+    const live = G.g_object_list.filter((o) => !o.despawned && !o.dead);
+    const card = live.find((o) => o.cls === cls);
+    check(`0x${cls.toString(16)}: the record puts one actor of its own class `
+          + "in the pool",
+          live.length === 1 && card !== undefined
+          && w.simpleSpawns.length === 1,
+          `${live.map((o) => `c${o.cls}`).join(",")} `
+          + `list ${w.simpleSpawns.length}`);
+    check("...at a key no placement descriptor could collide with",
+          (card?.at ?? 0) < 0, `at ${card?.at}`);
+    check("...and the walker is parked on the gate it raises",
+          w.wait?.op.op === 0x45 && w.opIndex === 1
+          && (G.g_script_flags[flag] ?? 0) === 0,
+          `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
+
+    // Counted in **updates**, because that is what the countdown counts: the
+    // card is built by the instruction and its first decrement is on its first
+    // update, not on the frame the walker placed it.
+    //
+    // Bails when there is no card rather than dereferencing one: with opcode
+    // 0x0A unwired there is nothing to drive, and a suite that throws reports
+    // one crash where it should report which assertions the work is holding up.
+    if (!card) return { frames: -1, card: null };
+    let updates = 0;
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    while (updates < expect + 60 && (G.g_script_flags[flag] ?? 0) === 0) {
+      g_class_handlers[cls]?.update(card, f);
+      updates += 1;
+      w.tick(1 / 60);
+    }
+    return { frames: updates, card };
+  };
+
+  // The chapter card: `MOV word ptr [ESI+0x11c], 0xb4` at `0x004345AB`, then
+  // one decrement a frame and the flag on the frame it reads zero.
+  {
+    const { frames, card } = runCard(SpawnClass.ChapterCard,
+                                     CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES);
+    check(`the chapter card holds ${CHAPTER_CARD_FRAMES} frames, then raises `
+          + `g_script_flags[${CHAPTER_CARD_FLAG}]`,
+          frames === CHAPTER_CARD_FRAMES
+          && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
+          `${frames} frames, flag ${G.g_script_flags[CHAPTER_CARD_FLAG]}`);
+    check("...and kills itself on the same frame",
+          card?.dead === true, `dead ${card?.dead}`);
+  }
+
+  // The result card: 420 frames, and it drops the trigger on its first.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_nFiringGate = 1;
+    const w = new Walker(cardScript(SpawnClass.ResultCard, RESULT_CARD_FLAG),
+                         cardHost);
+    w.tick(1 / 60);
+    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ResultCard);
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    if (card) g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
+    check("the result card drops `g_nFiringGate` on its first frame",
+          card !== undefined && G.g_nFiringGate === 0,
+          `card ${card !== undefined} gate ${G.g_nFiringGate}`);
+    let frames = 1;
+    while (card && frames < RESULT_CARD_FRAMES + 60
+           && (G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0) {
+      g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
+      frames += 1;
+      w.tick(1 / 60);
+    }
+    check(`...holds ${RESULT_CARD_FRAMES} frames, then raises `
+          + `g_script_flags[${RESULT_CARD_FLAG}]`,
+          frames === RESULT_CARD_FRAMES
+          && G.g_script_flags[RESULT_CARD_FLAG] === 1,
+          `${frames} frames, flag ${G.g_script_flags[RESULT_CARD_FLAG]}`);
+    check("...and the gate behind it opens, so the script runs on",
+          w.wait === null && !(w.step === 0 && w.opIndex === 1)
+          && (G.g_script_flags[9] ?? 0) === 1,
+          `at ${w.block}/${w.step}/${w.opIndex} `
+          + `wait ${w.wait?.op.op} flag9 ${G.g_script_flags[9]}`);
+  }
+
+  // ...and the coverage set now says so, which is the half that decides
+  // whether the gate is evaluated at all. Both directions: a stage that
+  // spawns the card can open its flag, one that does not, cannot.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    const withCard = ScriptFlagsThisBundleCanRaise(
+      cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG));
+    check("a stage that spawns the chapter card can raise its flag",
+          withCard.has(CHAPTER_CARD_FLAG) && !withCard.has(RESULT_CARD_FLAG),
+          `${[...withCard].sort((a, b) => a - b).join(",")}`);
+    const withTally = ScriptFlagsThisBundleCanRaise(
+      cardScript(SpawnClass.ResultCardTally, CHAPTER_CARD_FLAG));
+    check("...and one that spawns only class 0x62, which raises nothing, "
+          + "cannot",
+          !withTally.has(CHAPTER_CARD_FLAG),
+          `${[...withTally].sort((a, b) => a - b).join(",")}`);
+  }
+
+  // Two records on one instruction are two objects. `EvtOpSpawnSimple0A`
+  // walks its list to the -1 and allocates per operand; the exporter does not
+  // collapse duplicates, because stage 3's block 11 lists one twice.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    const two = {
+      ...cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [{
+          i: 0, at: 0x200, op: 0x0a, name: "spawn_simple", cat: "spawn",
+          simple: [{ class: SpawnClass.ResultCardTally, hp: 0 },
+                   { class: SpawnClass.ResultCardTally, hp: 0 }],
+        }] }],
+      }],
+    } as unknown as ScriptJson;
+    const w = new Walker(two, cardHost);
+    w.tick(1 / 60);
+    const made = G.g_object_list.filter(
+      (o) => o.cls === SpawnClass.ResultCardTally);
+    check("one instruction with two records makes two objects",
+          made.length === 2 && made[0].at !== made[1].at,
+          `${made.map((o) => o.at).join(",")}`);
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

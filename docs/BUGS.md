@@ -6,10 +6,11 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Thirty-seven reports: **thirty-two fixed, three half-done, one open, and two
+Forty-two reports: **thirty-two fixed, three half-done, six open, and two
 `[not-a-bug]`, each of which carried a real defect underneath it** (one of
 those two is counted in the thirty-two, its bullet carrying both markers).
-The prose has drifted twice; the per-marker grep below is what settles it.
+Five of the six open arrived together on 2026-09-07, all from stage 3's
+block 2; they are the last section before the divergences.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -1104,6 +1105,37 @@ that fix looked like it had not worked.
   ported and those blocks stand where the script put them.
 
 ---
+
+## And four from stage 3's block 2
+
+Reported together on 2026-09-07, all four at the same place in the script, all
+four `[open]` at the time of writing. The locators are the player's own URL
+parameters and are reproducible as given.
+
+- `[open]` **"the civilian/enemy are jumped over"** at
+  `?stage=3&mode=play&block=2&step=4&op=0`. Reported exactly that way; whether
+  *jumped over* means the script passes the spawn without placing it, the
+  actors are placed and never run, or the camera passes them, is the first
+  thing to establish and none of the three has been ruled out.
+
+- `[open]` **The axe thrower retreats into the wall.** Class 0x31, behaviour
+  set 1. **In the real game, when there is nowhere for the thrower to retreat
+  to, it simply carries on** -- the retreat is conditional in a way the port's
+  is not. The port walks it into geometry instead.
+
+- `[open]` **The axe thrower throws no axes.** The same actor. The throw is the
+  whole of what behaviour set 1 exists to do (`docs/formats/spawns.md` calls
+  set 1 the one that "stands out of reach and throws"), so a thrower that never
+  throws is the set not running rather than a missing animation.
+
+- `[open]` **The camera jumps** shortly after
+  `?stage=3&mode=play&block=2&step=4&op=24&frame=1551`.
+
+- `[open]` **James does not render in the third-person cutscenes.** The
+  player-controlled character is absent at
+  `?stage=3&mode=play&block=2&step=5&op=22&frame=30`. He is drawn in the
+  engine's own cutscenes, so this is a character the port is not building
+  rather than one the script never places.
 
 ## Divergences awaiting a call
 

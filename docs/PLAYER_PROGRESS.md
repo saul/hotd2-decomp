@@ -136,6 +136,32 @@ armed exactly while its bone's **draw slot** is still the one the skeleton gave
 it, so shooting the axe out of a hand disarms it and the pick falls to the
 other.
 
+**And what it throws is now drawn.** The whole visual half of that was missing
+for as long as the state has been ported: `charbuild.goreEntry` builds the
+hidden per-type rig the client clones models out of, and it walked class
+0x31's hand table rather than class 0x30's — so the axe (`0x249`), and both
+hands in both their held and bare forms, were in no rig at all.
+`cloneSlot` answered null for the projectile and `swapGore` returned false for
+the hand, which leaves the axe in a fist that has just thrown it. The weapon
+flew on time and dealt its damage the whole while; nothing on screen said so,
+which reads exactly as *"he doesn't throw any axes"*. This is the civilians'
+hair one table over, and the check that catches it is beside that one:
+`verify_attachments.py` now resolves every held, bare and projectile slot a
+throwing zombie's kit names against the stage's glTF — 72 of them.
+
+**The ending is chosen by a spawn bit, not by the room.**
+`EnemyZombieInitByCharType` (`FUN_00452FD0`) moves `obj+0x34` bit 1 into
+`obj+0x38` bit `0x10` and clears it at the source, and that bit is the whole of
+`ZombieStateStandAndThrow`'s two-way ending: with it set the actor gives both
+enemy counters and its permit back **where it stands**, goes shot-immune and
+untracked, and waits out `tail+0x1C` before despawning. Two spawn records in
+the shipped game set it — stage 3 block 2's two axe men — and without it both
+took the *other* arm and walked their descriptor's twenty-five units backwards
+through the building they are standing against, holding `wait_enemies_alive`
+for the hundred frames it took. `ZombieStateWalkDistance` has no test that
+could have stopped them and the collision selected there is thirty-one quads of
+water twenty-four units below their feet, so nothing in the level was going to.
+
 The flight reuses the pool class 0x31's projectile already lives in, extended
 with the acceleration the arc needs and the damage kind (4 flat, 6 arced).
 `ZombieShouldStandAndThrow` is wired in too: a body-condition-8 walker already

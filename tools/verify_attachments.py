@@ -27,7 +27,15 @@ Four assertions, and each is a different way it can go wrong:
    glTF**, under the `gore_<slot>` name the client clones by. This is the one
    that fails when the models are left behind;
 4. every id below the replace threshold resolves the same way, because a face
-   swap with nothing to swap in leaves the default head.
+   swap with nothing to swap in leaves the default head;
+5. **and every model a throwing zombie's hands name resolves the same way** --
+   the held hand, the bare hand it drops to, and the weapon that flies. That
+   is not an attachment list, but it is the identical failure: a table in the
+   exe names an asset slot, the exporter's hidden rig did not carry it, and
+   the client's `cloneSlot` answered null. The axe men of stage 3 block 2
+   threw on time, dealt their damage, and drew nothing at all -- the weapon
+   was invisible in flight and stayed in the fist, because `swapGore` returns
+   false for a slot it has no template for.
 
     python3 tools/verify_attachments.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 """
@@ -44,6 +52,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from hod2lib import evt as evtlib  # noqa: E402
+from hod2lib.combat import ZOMBIE_THROW_SLOTS  # noqa: E402
 from hod2lib.exetab import ExeTables  # noqa: E402
 from hod2lib.placement import (ATTACHMENT_TAIL_OFFSET,  # noqa: E402
                                attachment_list)
@@ -117,6 +126,7 @@ def main() -> int:
 
     lists = 0
     ids_checked = 0
+    hand_slots_checked = 0
     stages = 0
     for entry in json.loads(manifest.read_text())["stages"]:
         stem = EVT_OF_STAGE.get(entry["stage"])
@@ -191,8 +201,33 @@ def main() -> int:
                         f"slot 0x{rec['slot']:04X}) has no model in the glTF "
                         f"-- the client has nothing to clone")
 
+        # 5. the throwing zombies' hands and their weapon.
+        #
+        # `ZombieThrowHandWeapon` (`FUN_0045A240`) switches on the character
+        # type -- 1, 0x13 and 0x14 -- and there is no table for it; the three
+        # kits are the whole list. Each names a *held* model the skeleton
+        # starts the hand with, the *bare* model it swaps to as the weapon
+        # leaves, and the *projectile* that flies. All three are cloned by
+        # asset slot, so all three have to be in the glTF.
+        for sp in evtlib.spawns(e):
+            if sp.cls != 0x30 or sp.offset not in have:
+                continue
+            kit = ZOMBIE_THROW_SLOTS.get(sp.param(0, "i8"))
+            if kit is None:
+                continue
+            for bone in (5, 8):
+                for what in ("held", "bare", "projectile"):
+                    slot = kit[bone][what]
+                    hand_slots_checked += 1
+                    if slot not in clones:
+                        bad.append(
+                            f"{name}: spawn {sp.offset:#x}'s bone {bone} "
+                            f"{what} model (slot 0x{slot:04X}) has no model "
+                            f"in the glTF -- the client has nothing to clone")
+
     print(f"{stages} stage bundles, {lists} spawn lists, "
-          f"{ids_checked} attachment ids resolved to a model in the glTF")
+          f"{ids_checked} attachment ids and {hand_slots_checked} throwing-hand "
+          f"slots resolved to a model in the glTF")
     if bad:
         print()
         for line in bad[:40]:

@@ -36,8 +36,22 @@ const EYE = vec3(0, 10, 0);
 const SECONDS = 40;
 
 let total = 0, stood = 0, threw = 0, left = 0, held = 0, pinned = 0;
+let retirers = 0, retired = 0;
 /** `obj+0x34` bit 0x20000 -- see `ActorInitFlags` and `ground.ts`. */
 const GROUND_SNAP_EXEMPT = 0x20000;
+/**
+ * `obj+0x34` bit 1 -- the spawn record's own "do not walk away" bit.
+ *
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) moves it to `obj+0x38` bit
+ * 0x10, and `ZombieStateStandAndThrow`'s ending is the only reader in the
+ * image: with it set the actor gives both enemy counters and its permit back
+ * where it stands and waits to be despawned, instead of walking its
+ * descriptor's distance through state 15. **Two spawn records in the whole
+ * game set it**, both stage 3 block 2's axe men -- who stand against a
+ * building with nothing behind them, which is what "when there is nowhere to
+ * retreat to, the game just carries on" means.
+ */
+const STAND_THROW_RETIRE = 0x2;
 const rows = [];
 for (let stage = 1; stage <= 6; stage++) {
   let script;
@@ -123,6 +137,7 @@ for (let stage = 1; stage <= 6; stage++) {
     // How far it covered *after* leaving the state -- the backing away.
     let walked = 0;
     let leftAt = null;
+    let goneBy = null;
     for (let i = 0; i < SECONDS * 60; i++) {
       GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
       if (process.env.TRACE && String(p.at) === process.env.TRACE && i % 30 === 0) {
@@ -130,6 +145,7 @@ for (let stage = 1; stage <= 6; stage++) {
           + `pos ${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)} motion=${a.motion} `
           + `ticks=${a.playTicks} rootFrame=${a.rootFrame}`);
       }
+      if (a.despawned && goneBy === null) goneBy = i;
       if (a.state === ZombieState.StandAndThrow) {
         peak = Math.max(peak, Math.hypot(a.pos.x - start.x, a.pos.z - start.z));
         lastIn = { ...a.pos };
@@ -146,6 +162,7 @@ for (let stage = 1; stage <= 6; stage++) {
       }
     }
     total += 1;
+    const retires = (p.init_flags & STAND_THROW_RETIRE) !== 0;
     // "Stood still" is the whole point: while it is in the state, it must not
     // have moved. Anything above a unit is the clip's root motion carrying it.
     if (leftBy === null) drift = Math.hypot(lastIn.x - start.x, lastIn.z - start.z);
@@ -165,30 +182,45 @@ for (let stage = 1; stage <= 6; stage++) {
       if (Math.abs(lastIn.y - start.y) < 1) held += 1;
     }
     if (thrown >= 1) threw += 1;
-    if (leftBy !== null) left += 1;
+    // The two endings are counted apart. A walker must leave state 33; a
+    // retirer must *not* -- it stands in sub 6 until it despawns, and the
+    // despawn is the thing to assert, because the enemy counters have already
+    // gone back and the block it was holding has already advanced.
+    if (retires) {
+      retirers += 1;
+      if (goneBy !== null && leftBy === null) retired += 1;
+    } else if (leftBy !== null) {
+      left += 1;
+    }
     rows.push(`  stage ${stage} ${p.at} (ct ${p.char_type}, `
       + `${chars.types[String(p.char_type)]?.file}): net `
       + `${drift.toFixed(2)}u (clip swing ${peak.toFixed(2)}u), fell `
-      + `${(lastIn.y - start.y).toFixed(1)}u, threw ${thrown}, left by `
-      + `${leftBy ?? "—"} after ${walked.toFixed(1)}u`);
+      + `${(lastIn.y - start.y).toFixed(1)}u, threw ${thrown}, `
+      + (retires
+          ? `retired in place${goneBy === null ? " -- NEVER DESPAWNED"
+                                               : ` at f${goneBy}`}`
+          : `left by ${leftBy ?? "—"} after ${walked.toFixed(1)}u`));
   }
 }
 
 for (const r of rows) console.log(r);
 console.log(`\n${total} stationary throwers: ${stood} never moved in the `
-          + `plane, ${threw} threw both hands, ${left} left when they were `
-          + `done, and ${held} of the ${pinned} the spawn flags exempt from `
-          + `the ground snap held their height`);
+          + `plane, ${threw} threw both hands, ${left} of the `
+          + `${total - retirers} that walk away left when they were done, `
+          + `${retired} of the ${retirers} the spawn record retires in place `
+          + `despawned without moving, and ${held} of the ${pinned} the spawn `
+          + `flags exempt from the ground snap held their height`);
 if (!total) {
   console.log("\nFAIL  no state-33 spawn in the bundle -- re-export it");
   process.exit(1);
 }
-if (stood !== total || threw !== total || left !== total
-    || held !== pinned || !pinned) {
+if (stood !== total || threw !== total || left !== total - retirers
+    || retired !== retirers || held !== pinned || !pinned) {
   console.log("\nFAIL  a stationary thrower must hold its height, stand still, "
-              + "throw, and back away when it is done");
+              + "throw, and then take its own descriptor's ending -- back away, "
+              + "or retire on the spot and despawn");
   process.exit(1);
 }
 console.log("\nclean -- every one stands where the script put it, throws both "
-            + "hands and leaves, and the one the spawn flags pin stays on its "
-            + "ledge");
+            + "hands and takes its own ending, and the one the spawn flags pin "
+            + "stays on its ledge");

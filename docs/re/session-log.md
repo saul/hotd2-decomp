@@ -13430,3 +13430,135 @@ and not one of them was a check.**
 * **The same gate covers class 0x30**, whose emerging and script-frozen
   zombies the port also let you damage. No report has been filed against that
   and no assertion was written for it; the fix is generic and covers it.
+
+---
+
+## The axe thrower is class 0x30, and his retreat is a spawn bit
+
+Two reports from stage 3 block 2, `?stage=3&mode=play&block=2&step=4&op=0`:
+*"the axe throwing zombie retreats into the wall — in the real game if there's
+nowhere for the axe thrower to retreat to, the game just continues"*, and
+*"he doesn't throw any axes"*. They looked like one bug and they are two, in
+two different halves of the tree.
+
+### The premise was wrong, and checking it took one query
+
+Both reports, and `BUGS.md`'s write-up of them, name the actor **class 0x31,
+behaviour set 1 (`zsass`)** — the set `spawns.md` describes as the one that
+"stands out of reach and throws". It is not.
+
+```
+st3evtbl.bin  {16, 19, 24, 32, 37, 38, 48, 65, 67, 68, 69, 70, 81}
+```
+
+**Stage 3 contains no class-0x31 spawn at all.** The actor at step 4 op 8 is
+class **0x30**, character type `0x13` — asset file `tutorial.bin` — body
+condition 7, initial state **33**, `ZombieStateStandAndThrow`. Its 2P twin at
+op 9 is the same. The axe is `znonoo.bin` part 0, slot `0x249`, which is
+exactly the polfile step 4 op 2 loads and op 28 frees. That is the same
+mistake `BUGS.md` already records once — *"`0x6784` is class 0x30, not
+0x31"* — and the same fix: read the descriptor rather than the description.
+Half an hour went into class 0x31's router and pick tables before that query
+was run, and none of it was needed.
+
+### The retreat: `obj+0x38` bit 0x10, and two spawn records in the game
+
+`ZombieStateWalkDistance` (`FUN_00457220`) was the obvious suspect and it is
+**verbatim in the port**: it latches a distance, remembers a start point,
+plays `row[4]`, and measures. There is no test in it of any kind, so the "is
+there room behind me" the report describes cannot live there. Nor in the push:
+the collision the script has selected at that point is `coli3.bin+0x2EA0`,
+thirty-one quads of flat water at `y = -25`, twenty-four units below the
+actor's feet, so `ZombiePushOutOfWorldAndActors` has nothing to push against.
+Read that way, the engine walks into the building too — which is where this
+sat for a while, and it was wrong.
+
+The answer is one branch earlier. `ZombieStateStandAndThrow`'s ending is a
+two-way switch at `0045945C` on **`obj+0x38` bit 0x10**, and the bit is put
+there by `EnemyZombieInitByCharType` (`FUN_00452FD0`), which the port did not
+have at all:
+
+```
+0045300B  if (obj+0x34 & 2) { obj+0x34 &= ~2; obj+0x38 |= 0x10; }
+```
+
+It **moves** the bit and clears it at the source, and it has to: bits 1 and 2
+of `obj+0x34` are the two `MarkActorShot` writes to name the player who fired.
+`ZombieStateStandAndThrow` is the only reader of `obj+0x38` bit 0x10 in the
+image, and **exactly two spawn records in the shipped game set the `obj+0x34`
+bit it comes from** — `st3evtbl.bin` `0x3078` and `0x30BC`, `init_flags
+0x20002`, the two axe men. With it set the actor gives both enemy counters and
+its permit back where it stands, goes shot-immune and camera-untracked, and
+waits out `tail+0x1C` before despawning. It never moves.
+
+So "if there's nowhere to retreat to, the game just continues" is exactly
+right about what happens and not about why: it is not a query about the level,
+it is a byte in the descriptor, and the level design is downstream of it.
+
+Measured in Chrome at the reported URL, on the driven clock:
+
+| | before | after |
+|---|---|---|
+| the actor at f430..f520 | `WalkDistance/2`, `z −3339.3 → −3361.7` | `StandAndThrow/6`, `z −3337.66`, unmoved |
+| `g_enemies_alive` reaches 0 | f530 | **f430** |
+| walker address at f440 | still `2/4/13` on `wait_enemies_alive` | `2/4/18` |
+| despawn | f530, twenty-five units inside `st3_08` | f550, where it stood |
+
+The wall is real, and it is not collision: `st3_08` runs a diagonal from
+`(-643.3, -3340.4)` to `(-626.2, -3357.4)`, six units behind the actor, and
+the old retreat ended about eleven units the far side of it.
+
+### The axes: the throw was never the problem
+
+The simulation threw all along — `throwers.mjs` reported "threw 2" for every
+one of stage 3's six state-33 spawns before any change. What was missing was
+every model involved. `charbuild.goreEntry` builds the hidden per-type rig the
+client clones from, and it walks `char.throw_` — **class 0x31's** hand table —
+and not `char.zombieThrow`, which is the one `ZombieThrowHandWeapon`
+(`FUN_0045A240`) actually switches on. So slot `0x249` (the axe), `0x1ECE` /
+`0x1ECB` and `0x1ECA` / `0x1EC7` (the two hands, held and bare) were in no rig
+at all, `CharacterLayer.cloneSlot` answered null for the projectile, and
+`swapGore` returned false for the hand — which leaves the axe in the fist.
+The weapon flew, on time, and hit; there was nothing on screen to see it.
+
+This is the civilians' hair again, one table over: *a model an exe table names
+and no rig carries*. The assertion that catches it now lives beside that one,
+in `verify_attachments.py` — 72 throwing-hand slots across the six stages, all
+of which fail without the exporter fix.
+
+### One wrong reading corrected on the way past
+
+`ZombieThrowHandWeapon` also writes `*(bone * 0x90 + 0x284 + obj) = 0`. That
+address was read as `0x20C + bone * 0x90` and **rounded** — `0x554` is bone
+5.83 — giving the bundle a `weapon_bone` of 6 for the *right* hand, which is
+the left upper arm. It is the same bone's record at `+0x78`, and
+`SkeletonWalkNode` (`FUN_004107E0`) fills that field each frame with the hit
+sphere's radius: emptying a hand makes it unshootable. The wrong write is gone
+and the reading is in `combat.md`; the port does not clear the sphere, because
+it tests the static table, and that is now a declared `[diverges]`.
+
+`SkeletonWalkNode` turned out to say something wider while it was open: it
+copies the sphere in **only when the table entry's own slot equals the slot it
+has just written**, and writes zeroes otherwise. So in the engine a bone
+showing a gore variant has no hit sphere either. Not chased, not ported,
+`[open]`.
+
+### Wrong turns, in order
+
+1. **Believed the report's class.** See above.
+2. **Reproduced the retreat and concluded the port was faithful**, because
+   `ZombieStateWalkDistance` is verbatim and the collision is water. Both
+   halves of that were true and the conclusion was still wrong; the test was
+   in the routine that *hands over* to it, which I had read and skimmed —
+   `case 6 is the despawn arm, reached only when obj+0x38 bit 0x10 is set.
+   [open] Nothing read so far sets that bit`. That comment was in the port,
+   in the file I was editing, and it was L17 in miniature: "nothing read so
+   far sets it" had hardened into "nothing sets it".
+3. **Went looking for the wall in `coli3.bin` and in the glTF** before looking
+   for the branch. The geometry was worth having in the end — it is what says
+   how far inside the building the old retreat ended — but it was an answer to
+   the wrong question, and it cost more than the spawn-flag histogram that
+   settled it in one line.
+4. **Ran `npm run export` from the shared checkout** on the first try, because
+   the command carried an absolute `cd`. It wrote 40 MB into the user's
+   `extract/player`. L28, and the fix is the same: check where the tool wrote.

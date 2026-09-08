@@ -41,7 +41,8 @@ import { approachTables, cameraTracking, RING_SET_FOR_CHAR0 } from "./approach";
 import { build, goreEntry, rigEntry } from "./charbuild";
 import type { Character } from "./charbuild";
 import { CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, bake,
-         humanoidMotionIds, introFor, motionFor } from "./charmotion";
+         humanoidMotionIds, introFor, motionFor,
+         BOSS4_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
          difficultyTables, playerDamage, reactionGroups,
@@ -249,9 +250,17 @@ export async function resolveForStage(
     // `EnemyThrowerInit` (class 0x31) read it: byte +1 is the body condition,
     // +2 the state the actor starts in, +3 the state a permit-winner enters.
     // Every other class gets zeroes rather than a guess.
+    // Class 0x19 reads the **same byte** as something else entirely.
+    // `Boss4Init` (`FUN_004917E0`) does `MOV byte ptr [EAX + 0x4], DL` with
+    // `DL` the tail's byte +1, and that is the index into `g_class19_states`
+    // the boss starts in -- one of four entrances, and the four shipped spawns
+    // carry one each. It is not a body condition, so it is emitted as
+    // `initial_state` and `body_condition` stays 0: the same offset, named for
+    // what the class using it uses it as.
     const tail: [number, number, number] = (cls === 0x30 || cls === 0x31)
       ? [rec.param(1, "i8") || 0, rec.param(2, "i8") || 0,
          rec.param(3, "i8") || 0]
+      : cls === 0x19 ? [0, rec.param(1, "u8") || 0, 0]
       : [0, 0, 0];
     const inStates = (m: Record<number, number[]>) =>
       (m[cls] ?? []).includes(tail[1]);
@@ -528,6 +537,7 @@ export async function resolveForStage(
       if (q.at === at && q.cue) entryClips.push(q.cue.motion as number);
     }
     if (cls === 0x31) entryClips.push(...class31MotionIds(class31));
+    if (cls === 0x19) entryClips.push(...BOSS4_CLIPS);
     // The emerge clip, the submerged pose it holds first, and the two clips
     // the delayed leap plays. An unbaked entrance is an actor standing in the
     // water.

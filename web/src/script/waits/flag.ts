@@ -87,14 +87,13 @@ let cache: {
  *
  * ## What is still excused, and what each one needs
  *
- * **35 of the game's 61 gates**, down from 50 when class 0x60 and class 0x61
- * were unreachable. Stages 3 and 6 have none left; the rest are four unported
- * classes, and every one of them is an enemy or a boss rather than a prop:
+ * Stages 3 and 6 have none left; the rest are four unported classes and one
+ * prop, and every one of the four is an enemy or a boss:
  *
  * | gates | flag(s) | writer |
  * |---|---|---|
  * | 20 | 10..17, 31 | **class 0x14** (`FUN_00475E90`), stage 2's blocks 35-41 and stage 4's 23-29. Its writes are spread over `0x00478350`..`0x0047BA6E`; flag 10's two are `0x0047835B` and `0x004785E4` |
- * | 8 | 31, 32 | **class 0x19** (`FUN_004917E0`), `0x0049390C` and `0x004958C7` |
+ * | 4 | 32 | **class 0x19**'s death, `Boss4StateDeath` (`FUN_00495770`) at `0x004958C7`. The class **is** ported — see below |
  * | 3 | 0, 3 | **class 0x22** (`FUN_0049B0D0`) — the stage-1 and stage-5 boss, `0x0049CC85` and `0x0049CC95` |
  * | 2 | 30 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
  * | 1 | 20 | a class-0x41 prop update, `FUN_004710C0` at `0x004710D7` — the one small one left, and the only remaining gate that is not an enemy class |
@@ -105,6 +104,25 @@ let cache: {
  * cue props — `FUN_00433F40` (class 0x33) and `FUN_00473CF0` (`HingeUpdate`) —
  * turn out to open **no gate in any shipped script**: every flag they write
  * comes off a descriptor, and no `wait_script_flag` in the game names one.
+ *
+ * ## Class 0x19 is half in and half out, on purpose
+ *
+ * The stage-4 boss (`game/class19/`) declares `raisesScriptFlag` for **31** and
+ * not for 32, so stage 4's four `wait_script_flag 31` gates are honoured and
+ * its four `wait_script_flag 32` gates are still excused. That is not a gap
+ * left by accident: the port runs the whole of the first chain —
+ * `set_script_flag 30` -> the boss's intro banner -> `g_bHudShutterState = 1`
+ * -> `g_script_flags[31]` — and cannot yet reach the second, because
+ * `Boss4ResolveShot` refuses every shot once the hit points reach the phase
+ * floor and only the unported arena progression lifts it. A class that raises
+ * two flags and can reach one of them declares one.
+ *
+ * The survey this file used to carry named `0x0049390C` and `0x004958C7` as
+ * class 0x19's two writes. There are **three**: `0x00493B99` is the second
+ * entrance routine's own copy of the flag-31 write, and without it blocks 25
+ * and 29 would have had no writer at all. Same flag, so the count above does
+ * not move; found by searching the bare `9c72` over the class's range (L32),
+ * which is the same search that produced this table in the first place.
  */
 export function ScriptFlagsThisBundleCanRaise(
     script: ScriptJson): ReadonlySet<number> {

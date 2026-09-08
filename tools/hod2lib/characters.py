@@ -80,7 +80,7 @@ from .arcscript import (  # noqa: F401
                         CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES,
                         arc_script)
 from .charmotion import (  # noqa: F401
-    CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, humanoid_motion_ids,
+    BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
 from .combat import (  # noqa: F401
@@ -485,9 +485,20 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # permit-winner enters. Both inits do
         # `obj[0x130C] = d[1]; obj[0x1310] = d[2]`, so both classes get it;
         # every other class gets zeroes rather than a guess.
-        tail = ((rec.param(1, "i8") or 0, rec.param(2, "i8") or 0,
-                 rec.param(3, "i8") or 0)
-                if sp["class"] in (0x30, 0x31) else (0, 0, 0))
+        # Class 0x19 reads the **same byte** as something else entirely.
+        # `Boss4Init` (`FUN_004917E0`) does `MOV byte ptr [EAX + 0x4], DL`
+        # with `DL` the tail's byte +1, and that is the index into
+        # `g_class19_states` the boss starts in -- one of four entrances, and
+        # the four shipped spawns carry one each. It is not a body condition,
+        # so it is emitted as `initial_state` and `body_condition` stays 0:
+        # the same offset, named for what the class using it uses it as.
+        if sp["class"] in (0x30, 0x31):
+            tail = (rec.param(1, "i8") or 0, rec.param(2, "i8") or 0,
+                    rec.param(3, "i8") or 0)
+        elif sp["class"] == 0x19:
+            tail = (0, rec.param(1, "u8") or 0, 0)
+        else:
+            tail = (0, 0, 0)
         # The leap states read a destination and a duration out of the same
         # descriptor; every other state uses those bytes for something else,
         # so this is gated on the state rather than emitted blind.
@@ -739,6 +750,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                        if p.at == at and p.cue]
         if sp["class"] == 0x31:
             entry_clips += class31_motion_ids(class31)
+        if sp["class"] == 0x19:
+            entry_clips += list(BOSS4_CLIPS)
         # Class 0x10 chooses its clips from the **exe's** command streams, and
         # from every stream those can branch to: ops 0x0E/0x0F/0x1E/0x1F carry
         # pointers to further streams, and a civilian that is shot spends the

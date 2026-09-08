@@ -13,6 +13,15 @@
 export enum SpawnClass {
   /** `FUN_0048A3E0` — civilian / rescuable victim. Shooting one costs a life. */
   Civilian = 0x10,
+  /**
+   * `Boss4Init` (`FUN_004917E0`) — **the stage-4 boss**, character type `0x4A`
+   * (`boss4.bin`, 15 nodes), 300 hit points, four spawns and no others in the
+   * game. Its descriptor tail carries fifteen per-bone model pointers, one per
+   * node, and its entrance index picks one of four states. It increments both
+   * enemy counters, and it is the only writer of `g_script_flags[31]` in
+   * stage 4 and the only writer of `g_script_flags[32]` in the game.
+   */
+  Boss4 = 0x19,
   /** `FUN_00441750` — row spawner for floating props. */
   FloatingPropRow = 0x15,
   /** `FUN_00442290` — creates the water-wave field and records its plane Y. */

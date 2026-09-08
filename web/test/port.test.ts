@@ -143,6 +143,15 @@ import { CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES }
   from "../src/game/class60";
 import { RESULT_CARD_FLAG, RESULT_CARD_FRAMES }
   from "../src/game/class61";
+import { BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG }
+  from "../src/game/class19/entrance";
+import { BOSS4_DEAD_FLAG, BOSS4_DEATH_DWELL }
+  from "../src/game/class19/death";
+import { Boss4ResolveShot } from "../src/game/class19/shot";
+import {
+  BOSS4_HEAD_DAMAGE, BOSS4_PHASE_HP_FRACTION, BOSS4_SOFT_SURFACE,
+  BOSS4_WEAK_BONE, Boss4State,
+} from "../src/game/class19/state";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -7885,6 +7894,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
   // produced three times.
   const want: [SpawnClass, string][] = [
     [SpawnClass.Civilian, "0x10 civilian"],
+    [SpawnClass.Boss4, "0x19 stage-4 boss"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
@@ -10377,6 +10387,252 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
     check("one instruction with two records makes two objects",
           made.length === 2 && made[0].at !== made[1].at,
           `${made.map((o) => o.at).join(",")}`);
+  }
+}
+
+console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:");
+{
+  /**
+   * `boss4.bin`'s clips, as `charmotion.BOSS4_CLIPS` bakes them. Only the ones
+   * the ported states name need real lengths; the death clip matters most,
+   * because `Boss4StateDeath` writes `g_script_flags[32]` on its frame 0x46
+   * and a clip shorter than that could never reach it.
+   */
+  const BOSS4_TYPE = {
+    ...TYPE,
+    motions: {
+      "105": motion(120),   // 0x69, the death fall
+      "107": motion(20),    // 0x6B, the fighting idle
+      "111": motion(20),    // 0x6F, the flinch out of state 7
+      "115": motion(20),    // 0x73, the ordinary flinch
+      "116": motion(30),    // 0x74, the settle
+      "117": motion(60),    // 0x75, the landing
+      "124": motion(40),    // 0x7C, the entrance
+    },
+  } as unknown as CharacterType;
+  const BOSS_CHARS = {
+    ...CHARS, types: { "1": TYPE, "74": BOSS4_TYPE },
+  } as unknown as CharactersJson;
+
+  /** One boss, straight out of `Boss4Init`, with the entrance `entrance`. */
+  const spawnBoss = (entrance: number): Actor => {
+    ResetGameGlobals();
+    SetGameTables(BOSS_CHARS);
+    // `ActorSpawn` runs the class's `Init` itself, the way
+    // `SpawnFromDescriptor` does; calling it again here would count the boss
+    // into both enemy counters twice.
+    return ActorSpawn(35976, SpawnClass.Boss4, 74, "boss4",
+                      { hp: 300, maxHp: 300, initialState: entrance,
+                        visible: true });
+  };
+  const bossFrame = { eye: EYE, dt: 1 / 60, rng: new Rng(5), host: NULL_HOST };
+  const tickBoss = (obj: Actor, n: number): void => {
+    for (let i = 0; i < n; i++) {
+      g_class_handlers[SpawnClass.Boss4]?.update(obj, bossFrame);
+      // `ActorAdvanceMotion` is the engine's `obj+0x194` step and it is what
+      // moves the play cursor these states test against; without it every clip
+      // test in this class is frozen on frame 0.
+      ActorAdvanceMotion(obj, 1 / 60);
+    }
+  };
+
+  {
+    const obj = spawnBoss(0);
+    check("Boss4Init counts the boss in both enemy counters",
+          G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+          `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
+    check("...hangs its 0xA4 block off obj+0x1310 and takes the entrance "
+          + "state from the descriptor tail",
+          obj.boss4?.state === 0 && obj.boss4?.sub === 0,
+          `state ${obj.boss4?.state} sub ${obj.boss4?.sub}`);
+    check("...and rides the transport for entrances 0 and 1 only",
+          (obj.boss4!.flags & 1) === 1
+          && (spawnBoss(2).boss4!.flags & 1) === 0,
+          `flags ${obj.boss4!.flags}`);
+  }
+
+  // The gate chain, one link at a time. Entrance 0 must wait for the script's
+  // own `set_script_flag 30` before it will even leave the transport.
+  {
+    const obj = spawnBoss(0);
+    tickBoss(obj, 400);
+    check("without g_script_flags[30] the entrance never leaves sub 1, and "
+          + "flag 31 stays down",
+          obj.boss4?.sub === 1
+          && (G.g_script_flags[BOSS4_FIGHT_READY_FLAG] ?? 0) === 0,
+          `sub ${obj.boss4?.sub} flag `
+          + `${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
+
+    G.g_script_flags[BOSS4_DROP_FLAG] = 1;
+    tickBoss(obj, 2);
+    check("...the flag drops it off, and it stands to wait for the shutter",
+          obj.boss4?.sub === 2 && (obj.boss4!.flags & 1) === 0,
+          `sub ${obj.boss4?.sub} flags ${obj.boss4!.flags}`);
+
+    // The banner is the middle link, and it is the one a reader of the two
+    // addresses this work was scheduled from would have missed entirely.
+    tickBoss(obj, 200);
+    check("...and 200 frames later the shutter is still shut, because the "
+          + "banner has not finished",
+          G.g_bHudShutterState !== 1
+          && (G.g_script_flags[BOSS4_FIGHT_READY_FLAG] ?? 0) === 0,
+          `shutter ${G.g_bHudShutterState}`);
+    tickBoss(obj, 200);
+    check("...the banner reaches frame 300, sets the shutter to 1, and the "
+          + `entrance raises g_script_flags[${BOSS4_FIGHT_READY_FLAG}]`,
+          G.g_bHudShutterState === 1
+          && G.g_script_flags[BOSS4_FIGHT_READY_FLAG] === 1,
+          `shutter ${G.g_bHudShutterState} flag `
+          + `${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
+    check("...and hands over to state 7, which is where every flinch returns",
+          obj.boss4?.state === Boss4State.WaitForCameraInRange,
+          `state ${obj.boss4?.state}`);
+  }
+
+  // Entrances 2 and 3 are already standing: no transport, no flag-30 wait.
+  {
+    const obj = spawnBoss(2);
+    tickBoss(obj, 1);
+    check("entrance 2 goes straight to the shutter wait, with no flag 30",
+          obj.boss4?.sub === 2
+          && (G.g_script_flags[BOSS4_DROP_FLAG] ?? 0) === 0,
+          `sub ${obj.boss4?.sub}`);
+    // The banner still waits on flag 30 -- its record names it -- so the fight
+    // does not start until the script says so even here.
+    tickBoss(obj, 400);
+    check("...but its banner still waits on flag 30, so flag 31 stays down",
+          (G.g_script_flags[BOSS4_FIGHT_READY_FLAG] ?? 0) === 0,
+          `flag ${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
+  }
+
+  // The damage model: one weak bone, and a floor the arena has to lift.
+  {
+    const obj = spawnBoss(2);
+    obj.boss4!.phaseHpFloor = 0;
+    const hit = (bone: number, result = 0) => {
+      obj.pendingHit = { bone, result };
+      Boss4ResolveShot(obj, obj.boss4!);
+    };
+    const before = obj.hp;
+    hit(4);
+    check("a shot anywhere but bone 2 costs the boss nothing",
+          obj.hp === before, `${before} -> ${obj.hp}`);
+    hit(BOSS4_WEAK_BONE);
+    check(`a shot on bone ${BOSS4_WEAK_BONE} costs `
+          + "g_boss4_head_damage[players + rank*2]",
+          obj.hp === before - BOSS4_HEAD_DAMAGE[G.g_players_in_play],
+          `${before} -> ${obj.hp}, table `
+          + `${BOSS4_HEAD_DAMAGE[G.g_players_in_play]}`);
+    check("...and it is counted for the head bonus",
+          obj.boss4?.headHits === 1, `${obj.boss4?.headHits}`);
+    hit(4, BOSS4_SOFT_SURFACE);
+    check("...while a soft-surface hit anywhere costs exactly one",
+          obj.hp === before - BOSS4_HEAD_DAMAGE[G.g_players_in_play] - 1,
+          `${obj.hp}`);
+  }
+
+  {
+    const obj = spawnBoss(2);
+    tickBoss(obj, 1);
+    check("the entrance seats the phase floor from "
+          + "g_boss4_phase_hp_fraction[0], 8/9 of the bar",
+          Math.abs(obj.boss4!.phaseHpFloor
+                   - 300 * BOSS4_PHASE_HP_FRACTION[0]) < 0.01,
+          `${obj.boss4!.phaseHpFloor}`);
+    let shots = 0;
+    while (shots < 40 && !(obj.flags & ActorFlag.ShotImmune)) {
+      obj.pendingHit = { bone: BOSS4_WEAK_BONE, result: 0 };
+      Boss4ResolveShot(obj, obj.boss4!);
+      shots += 1;
+    }
+    check("...and the boss stops taking damage the moment it is reached, "
+          + "which is why the arena phases are the next piece of work",
+          (obj.flags & ActorFlag.ShotImmune) !== 0 && obj.hp > 0
+          && obj.hp <= obj.boss4!.phaseHpFloor,
+          `${shots} shots, hp ${obj.hp}, floor ${obj.boss4!.phaseHpFloor}`);
+  }
+
+  // The death, and the second gate.
+  {
+    const obj = spawnBoss(2);
+    tickBoss(obj, 1);
+    obj.boss4!.phaseHpFloor = 0;
+    let shots = 0;
+    while (shots < 40 && obj.hp > 0) {
+      obj.pendingHit = { bone: BOSS4_WEAK_BONE, result: 0 };
+      Boss4ResolveShot(obj, obj.boss4!);
+      shots += 1;
+    }
+    check("the hit points running out sends the boss to state 0x16",
+          obj.boss4?.state === Boss4State.Death
+          && (obj.flags & ActorFlag.Dead) !== 0
+          && G.g_enemies_alive === 0,
+          `state ${obj.boss4?.state} alive ${G.g_enemies_alive}`);
+    check("...and nothing has raised flag 32 yet: it is on a clip frame, not "
+          + "on the frame the bar empties",
+          (G.g_script_flags[BOSS4_DEAD_FLAG] ?? 0) === 0);
+    tickBoss(obj, 40);
+    check("...still down forty frames into the fall",
+          (G.g_script_flags[BOSS4_DEAD_FLAG] ?? 0) === 0,
+          `cursor ${MotionPlayFrame(obj)}`);
+    tickBoss(obj, 60);
+    check("...and up once the death clip reaches frame 0x46, which is "
+          + `g_script_flags[${BOSS4_DEAD_FLAG}]`,
+          G.g_script_flags[BOSS4_DEAD_FLAG] === 1,
+          `cursor ${MotionPlayFrame(obj)} flag `
+          + `${G.g_script_flags[BOSS4_DEAD_FLAG]}`);
+    check("...and g_enemies_present is not given back until the 240-frame "
+          + "dwell runs out",
+          G.g_enemies_present === 1, `${G.g_enemies_present}`);
+    tickBoss(obj, BOSS4_DEATH_DWELL + 240);
+    check("...and then it is, exactly once",
+          G.g_enemies_present === 0, `${G.g_enemies_present}`);
+  }
+
+  // The half that decides whether the gate is evaluated at all.
+  {
+    ResetGameGlobals();
+    SetGameTables(BOSS_CHARS);
+    const bossScript = {
+      scene: 0, stage: 4, game_mode: 0, evt_file: "test", entry_block: 0,
+      entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+      regions: [], cam_slots_used: [], warnings: [],
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [{
+          i: 0, at: 0x100, op: 0x0c, name: "spawn_obj_c", cat: "spawn",
+          spawns: [{ at: 35976, class: SpawnClass.Boss4, flags: 0,
+                     pos: [0, 0, 0], yaw_deg: 0, orient: [0, 0, 0], hp: 300,
+                     desc_flags: 0 }],
+        }] }],
+      }],
+    } as unknown as ScriptJson;
+    const can = ScriptFlagsThisBundleCanRaise(bossScript);
+    check("a stage that spawns class 0x19 can raise flag 31",
+          can.has(BOSS4_FIGHT_READY_FLAG),
+          `${[...can].sort((a, b) => a - b).join(",")}`);
+    check("...and cannot yet raise flag 32, because the arena phases that let "
+          + "the boss die are not ported",
+          !can.has(BOSS4_DEAD_FLAG));
+  }
+
+  // The shutter byte lives in `G` because `game/` writes it, and the machine
+  // has to notice a write that did not come through evt 0x1F.
+  {
+    ResetGameGlobals();
+    const sh = new Shutter();
+    sh.reset();
+    sh.set(5);
+    G.g_nFiringGate = 0;
+    G.g_bHudShutterState = 1;          // as `BossIntroBannerUpdate` writes it
+    sh.step(1);
+    check("a shutter state written from game/ seeds the slide and raises the "
+          + "firing gate",
+          sh.counter === 1 && G.g_nFiringGate === 1,
+          `counter ${sh.counter} gate ${G.g_nFiringGate}`);
+    sh.step(SHUTTER_FRAMES);
+    check("...and the slide still finishes into state 2",
+          sh.state === 2, `state ${sh.state}`);
   }
 }
 

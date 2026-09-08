@@ -1181,6 +1181,24 @@ having its handler read.
 |---|---|---|
 | `0x30` the zombie | motion **956** (`zom.bin`) | `FUN_00452DA0` stores `0x3BC`, or `0x41E` on a branch not taken here |
 | `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail | `FUN_00431250`; the table is a five-entry playlist, all inside `nya.bin`'s 762–773 |
+| `0x19` the stage-4 boss | motion **124** (`0x7C`), `boss4.bin` | `Boss4Init` (`FUN_004917E0`) stores it as a literal: `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E` |
+
+**And a character-type rule that was wrong for as long as it existed.** Class
+0x19's row read `("literal", 0x7C)` — the right instruction from the wrong pair.
+`Boss4Init` writes the **type** two instructions earlier, from the descriptor
+tail, and `0x7C` is the clip:
+
+```
+0049182e  MOVZX DX, byte ptr [EDI]          ; EDI = obj+0x130C, the tail
+00491832  MOV word ptr [EAX + 0x60], DX     ; char+0x60 == obj+0x1F4, the type
+0049183e  MOV dword ptr [ECX + 0x20], 0x7C  ; char+0x20 == obj+0x1B4, the clip
+```
+
+Type `0x7C` has no skeleton, so all four class-0x19 spawns resolved to "no
+skeleton", never became placements, and **the stage-4 boss had never appeared in
+a bundle**. The tail carries `0x4A` — `boss4.bin`, fifteen nodes — and with the
+rule fixed the four placements arrive with entrance states 0, 1, 2 and 3, the
+nineteen clips the class names, and a rig the ordinary writer builds.
 
 A tempting general rule was tried and rejected: deriving the bank from the
 character's bone count. The stride `(bones*6+15) & ~3` must divide every block

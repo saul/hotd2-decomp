@@ -76,6 +76,29 @@
  * clear refuses that actor now, which means the room is not clear when it
  * returns, and the shots that follow are what finish it.
  *
+ * ## `--shoot-for` counts frames in which **nothing took damage**
+ *
+ * It used to count frames on the instruction, and that cannot tell a room the
+ * shots are failing to touch from a room they are slowly winning. Stage 6's
+ * three rooms are `zslman` — class 0x31 character type 0x18, whose whole shot
+ * response is `ThrowerStateKnockedTumbling` (`FUN_00450E40`). That state holds
+ * `ActorFlag.ShotImmune` from its landing (`0x004512E2`) through the get-up
+ * and hands out `obj+0x133C = 0x14` on the way to state 7, and `DispatchHit`
+ * (`FUN_004092F0`) refuses `ResolveHit` outright while the bit is up. **So one
+ * shot lands per knockdown, and firing faster does not help**: measured at
+ * 130 hit points and 35 a hit, one of them takes four cycles of about 120
+ * frames, and the three rooms cleared in 420, 435 and 285 frames of shooting
+ * with the hit points falling 130 → 95 → 60 → 15 → dead all the way. All three
+ * were being reported as unclearable by a 300-frame window.
+ *
+ * Stage 1's block 1, measured the same way, holds `140/140` for 3,000 frames
+ * across a hundred volleys, because the script has `g_nFiringGate` down —
+ * `HudDrawShutterState` (`FUN_00413970`) drops it at `0x00413B06` when a
+ * state-3 close finishes — so `ResolveShotRequest` returns before the ray.
+ * Elapsed time cannot separate those two; **damage can**, and that is the only
+ * thing this now measures. Raising the window instead would have hidden stage
+ * 1 as well as excusing stage 6.
+ *
  *   node tools/playthrough.mjs --stage 2
  *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
  *
@@ -98,7 +121,10 @@ const seed = opt("seed", "1");
 const PATIENCE = Number(opt("patience", "180"));
 /** Game frames on one instruction before it is a hang. 15s, and see above. */
 const HANG = Number(opt("hang", "900"));
-/** Game frames of shooting at one gate before falling back to the clear. 8s. */
+/**
+ * Game frames of shooting **that did nothing** before falling back to the
+ * clear. 8s. See the header: it is a no-damage clock, not a wall clock.
+ */
 const SHOOT_FOR = Number(opt("shoot-for", "480"));
 /** Game frames for the whole run. Ten minutes of game time. */
 const BUDGET = Number(opt("budget", "36000"));
@@ -191,6 +217,31 @@ async function volley(page, box) {
   }
 }
 
+/**
+ * The room's remaining work, as one string — `alive/total hit points`.
+ *
+ * Read off the drive seam's own row, which is game state and nothing else:
+ * `c` carries `e<g_enemies_alive>` and each `o` entry `c<class> ... h<hp>`.
+ * Only classes 0x30 and 0x31 are counted, because they are the two that have
+ * hit points: `obj+0x11C` is a **sub-type selector** on class 0x20 and an
+ * asset slot on class 0x65 (`L3`), so summing every actor's would move for
+ * reasons that are not damage.
+ *
+ * It changes when a shot lands, when an actor dies, and when a wave arrives —
+ * all three mean the room is still going somewhere. It does **not** change
+ * when actors merely move, which is what a room the shots cannot touch does.
+ */
+async function roomPressure(page) {
+  const row = await page.evaluate(() => globalThis.__hotd2Drive.now());
+  const alive = /\be(-?\d+)/.exec(row.c)?.[1] ?? "?";
+  let hp = 0;
+  for (const o of row.o) {
+    if (!/ c(48|49) /.test(o)) continue;
+    hp += Math.max(0, Number(/ h(-?\d+)/.exec(o)?.[1] ?? 0));
+  }
+  return `${alive}/${hp}`;
+}
+
 const started = Date.now();
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
@@ -219,6 +270,9 @@ try {
   let addr = null;
   /** The frame the current address was first seen on. */
   let addrAt = 0;
+  /** The last {@link roomPressure} reading, and the frame it last changed on. */
+  let pressure = null;
+  let pressureAt = 0;
   let frames = 0;
   let volleys = 0;
   let killedHere = false;
@@ -233,6 +287,8 @@ try {
     if (here !== addr) {
       addr = here;
       addrAt = frames;
+      pressure = null;
+      pressureAt = frames;
       volleys = 0;
       killedHere = false;
       steps += 1;
@@ -274,7 +330,15 @@ try {
     }
 
     const stalled = frames - addrAt;
-    if (stalled > HANG) {
+    /**
+     * Frames since anything in the room last took damage. Equal to `stalled`
+     * until the first volley, and on a gate nothing is shooting at.
+     */
+    const fruitless = frames - pressureAt;
+    // **Both clocks**, because a room being cleared slowly is not a hang and a
+    // fight is not an authored sequence. `stalled > HANG` alone would call
+    // stage 6's rooms hung while their hit points were visibly falling.
+    if (stalled > HANG && fruitless > HANG) {
       console.log(`\nHUNG at block ${s.block} step/op ${s.step}`);
       if (s.policy === "civilians") {
         console.log("  a civilian gate, which nothing here touches on purpose:"
@@ -326,7 +390,13 @@ try {
       // this tool chose to run.
       volleys += 1;
       await volley(page, box);
-      if (stalled >= SHOOT_FOR && !killedHere) {
+      // After the volley, so a hit that landed on this exact frame counts.
+      const p = await roomPressure(page);
+      if (p !== pressure) {
+        pressure = p;
+        pressureAt = frames;
+      }
+      if (fruitless >= SHOOT_FOR && !killedHere) {
         // The report, and it is only a report: the shooting above carries on.
         killedHere = true;
         unclearable.push(`${s.block.split(" ")[0]} step/op ${s.step}`
@@ -340,9 +410,10 @@ try {
           `unclear-stage${stage}-b${s.block.split(" ")[0]}`
           + `-${s.step.replace(/\D+/g, "_")}.png`) });
         console.log(`      the ${s.policy} gate at block ${s.block} ${s.step} `
-                    + `did not clear in ${volleys} volleys over `
-                    + `${SHOOT_FOR - PATIENCE} frames. Using the debug clear, `
-                    + `and still shooting.`);
+                    + `took ${volleys} volleys over ${fruitless} frames `
+                    + `without one point of damage landing anywhere in the `
+                    + `room (${pressure} alive/hp). Using the debug clear, and `
+                    + `still shooting.`);
         // **Who, and how far** — not "the enemies are somewhere the shots
         // cannot reach", which is what this line used to say and which is an
         // inference, not a measurement. The rows say it: stage 5 block 2 is

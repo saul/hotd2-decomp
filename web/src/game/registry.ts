@@ -182,8 +182,14 @@ export interface ClassHandler {
    * `ZombieStateTargetScriptWithFlag`'s is not — that one comes off the
    * captor's script entry and the bundle carries it, so it is read from the
    * data instead.
+   *
+   * A **list** because one class can name several: class 0x14 writes nine —
+   * 10 through 17 and 31 — out of twelve instructions spread over its state
+   * machine, and which one an actor reaches depends on the phase its
+   * descriptor put it in. This is a declaration about the class and not about
+   * a spawn, so it names all of them.
    */
-  raisesScriptFlag?: number;
+  raisesScriptFlag?: number | readonly number[];
   /**
    * Describe one of this class's actors for the debug sidebar.
    *

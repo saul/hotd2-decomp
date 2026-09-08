@@ -590,6 +590,57 @@ port runs her script — but stage 2's block 0 is not: its trigger is class
 
 ---
 
+## 17. A boss gate is a room clear the harness will not shoot at
+
+**Open, and it is a decision rather than a bug.**
+
+Class 0x14 -- the stage-2 boss -- is ported, so stage 5 block 3's
+`wait_script_flag 31` is now a gate the port can evaluate and therefore one it
+honours. The only thing that opens it is the boss **dying**:
+`Class14ApplyBoneDamage` (`FUN_004763E0`) takes the last of its 200 hit points,
+puts it into `Class14StateCuedMotion`, and that state's own frame cue reads the
+phase and raises 31.
+
+`tools/playthrough.mjs` fires only when the walker is parked on a
+`wait_enemies_alive`/`wait_enemies_present` gate -- `policy === "enemies"`. A
+boss's gate is `0x45`, so the tool sits and watches:
+
+```
+node tools/playthrough.mjs --stage 5 --headless
+  ...
+  f  4845  block 3  (goto -> 4)
+  HUNG at block 3 step/op 1 / 22   0x45 wait_script_flag   policy: flag
+```
+
+That is **further from the end than the same stage was** when the gate was
+excused, and it is not a fault in the port: the boss is on the field, posed,
+swimming its route and running its state machine (the hang screenshot shows it
+filling the frame), and the shots simply never come.
+
+`--shoot-flag-gates` is the opt-in, and with it the stage plays through:
+
+```
+node tools/playthrough.mjs --stage 5 --headless --shoot-flag-gates
+  reached an end block after 7995 game frames, 79 instructions
+```
+
+**Why it is not the default.** The grid spray cannot aim. Stage 3 block 2's
+`wait_script_flag 0x1E` is the hostage's, and flag 30 comes off *either* of her
+streams -- `entries[27]` -> stream 64 when she is rescued, stream 63 when she is
+shot. A tool that sprayed that gate would open it by killing her, which is the
+one thing the civilian rule exists to refuse, and would then report the stage as
+playable. Narrowing the rule -- "shoot a flag gate only when the actors holding
+it are enemies" -- needs a seam that says which they are, and the port has none.
+
+Two changes went in beside the flag: a volley at a flag gate is 13x10 rather
+than 5x4, because a boss is one actor with a handful of bone spheres eighty
+units out and the coarse grid walked straight past it; and the **debug clear is
+now run only for an enemy gate**, since it takes actors out of the counts a
+`wait_enemies_alive` reads and killing one from outside its own death states
+opens no flag at all.
+
+---
+
 ## Rules for whoever picks this up
 
 These are not style preferences; each one was paid for.

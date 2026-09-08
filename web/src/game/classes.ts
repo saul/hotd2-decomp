@@ -23,6 +23,7 @@ import { g_class_handlers } from "./registry";
 import type { SpawnClass } from "./spawn_class";
 
 import "./class10";
+import "./class14";
 import "./class20";
 import "./class21";
 import "./class24";

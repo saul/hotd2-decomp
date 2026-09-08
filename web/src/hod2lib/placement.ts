@@ -379,6 +379,8 @@ export class Placement {
   class52: Record<string, unknown> | null = null;
   /** Class 0x53's tail -- `{anim_set, subtype}`. */
   class53: Record<string, unknown> | null = null;
+  /** Class 0x14's tail -- the stage-2 boss's state, route quad and cue. */
+  class14: Record<string, unknown> | null = null;
   /**
    * The spawn's attachment list -- `obj+0x1170`, ids into
    * `g_actor_attachment_records`.
@@ -439,6 +441,7 @@ export class Placement {
     if (this.class20) d.class20 = this.class20;
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;
+    if (this.class14) d.class14 = this.class14;
     if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }

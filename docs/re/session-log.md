@@ -14285,3 +14285,125 @@ declared and never counted. It walks `cited_files()` now, which is the set its
 citation checks already use, and STATUS's count goes 116 → 127. Recorded here
 because the number is a measurement and the change to what it measures should
 be findable from the number.
+
+
+## Class 0x14 is the stage-2 boss, and the harness cannot shoot a flag gate
+
+The `wait_script_flag` escape in `script/waits/flag.ts` named class 0x14 as its
+largest remaining hole -- "20 gates, stage 2's blocks 35-41 and stage 4's
+23-29". Half of that was wrong and the count was low.
+
+**What the class is.** `Class14Init` (`FUN_00475E90`) is the **stage-2 boss**:
+character type `0x47`, `boss2.bin`, spawned in a block that loads `sanbasi.bin`
+(the pier), `komono_boss2.bin`, `fish.bin` and `water_hamon.bin`. It allocates
+a 0xBC-byte behaviour block, increments both enemy counters and installs
+`Class14Update` (`FUN_00476150`), which dispatches a **21-entry** state table
+at `g_class14_states` (`0x00596218`) and steers the boss inside a quad of water
+the descriptor gives it.
+
+**Where the gates really are.** Five spawns, and `tail+0x01` -- the state the
+boss starts in -- is the only thing that tells them apart:
+
+| stage | block | `tail+0x01` | the block then waits on |
+|---|---|---|---|
+| 2 | 35 | 0 | 10, 17 |
+| 2 | 37 | 1 | 10, 11, 12, 13, 14, 15, 16, 17 |
+| 2 | 39 | 3 | 10, 17 |
+| 2 | 41 | 4 | 10, 11, 12, 13, 14, 15, 16, 17 |
+| 5 | 3 | 2 | 31 |
+
+That is **21 gates and two stages**, not 20 and three. **Stage 4 has no
+class-0x14 spawn anywhere**; its blocks 23, 25, 27 and 29 gate on flags 31 and
+32, and flag 31 has a second writer -- class 0x19, `0x0049390C`. A flag with
+two writers does not tell you which one is in the room, and the row in
+`flag.ts` that said otherwise had been carried forward unchecked. The four
+stage-2 blocks are **alternative endings**, one per route, so only one of them
+runs and the flags never need clearing between them.
+
+**How a flag is raised.** Three things in sequence:
+
+1. an entrance runs until `g_bHudShutterState == 1` -- entrances 0, 1, 3 and 4
+   raise flag 10 on the way through and entrance 2 does not, which is exactly
+   why stage 5 waits on 31 alone;
+2. `Class14AdvancePhase` (`FUN_00477E60`) walks `state+0x08` each time the hit
+   points fall past `g_class14_phase_hp_frac` (`0x00596670`), and flags 11..16
+   come off `Class14StateSummonRoundB` and `Class14StateScriptedBreak` along
+   the long ladder;
+3. the **death**. `Class14ApplyBoneDamage` (`FUN_004763E0`) puts the boss into
+   `Class14StateCuedMotion` or `Class14StateKnockedDown` on every hit, and
+   those two carry the fork that reads the phase and raises 17 or 31.
+
+Three ladders start from the three entrances and none of them meet: `0->1->2`,
+`3->4->5->6->7`, `8->9`.
+
+### What went wrong on the way
+
+**Ghidra had `MatrixStackPop` (`0x004A9840`) flagged as non-returning.** It is
+sixteen instructions with two `RET`s. The flag truncated the body of every
+routine in this class that pops the matrix stack, and the decompiler simply
+stopped there -- so `Class14ResolveShotBone` read as "finds a bone, transforms
+a point, ends", and the call at `0x00476391` to the routine that **does the
+damage, kills the boss and starts the reaction** was past the cut. Without it
+there is no route into states 0x10 and 0x11, therefore none into the three
+deaths, therefore no flag: the class read as one that raises nothing at its own
+death. Clearing the flag and re-decompiling is what found it. This is the same
+shape as L1 and L2 -- the decompiler's own model of the program, wrong in a way
+that produces something readable.
+
+**`obj+0x124` is the shot sphere, not the camera rise.** `Class14Init` writes
+`30.0` there and `Class14Update` passes `state+0x0C` to
+`ActorRegisterCameraPoint`; the port had the first written into the second.
+Nothing failed -- the boss simply could not be broad-phased by a shot.
+
+**The route quad is eight floats, not four vec3s.** `Class14Init` copies
+`tail+0x10` and `tail+0x14` into `state+0x28` and `state+0x30` -- the x and the
+z of one corner with the y between them left alone -- and repeats that at a
+stride of 8. Read as vec3s the first exported quad came out as
+`[660, -4900, 660]`, a corner carrying the next corner's x in its y, and the
+fourth read past the record into the despawn cue.
+
+**One point of damage is not the damage.** The FPU expression the decompiler
+drops (L1) is `g_class14_bone_damage[rank][g_players_in_play - 1]`, doubled in
+Arcade Mode and then capped at `g_class14_damage_cap` = 33.0. At rank 0 that is
+33 a shot against 200 hit points; the port's placeholder of 1 made the boss
+take two hundred separate frames to kill, and the harness gets one hit an actor
+per frame.
+
+### The exporter
+
+Two changes, both in `web/src/hod2lib/` and `tools/hod2lib/`:
+
+* `MOTION_RULES[0x14] = ("literal", 33)`. Without a motion rule `resolveForStage`
+  builds no `Character` at all, so **stage 5 had no character type 71 in its
+  bundle** -- the boss had no skeleton, no hit spheres and no clips. 33 is
+  `g_class14_anim_slots[0xB]`, which is what `Class14Init` seats.
+* The class's motion set, `boss2.bin`'s own bank **21..58**, offered whole to
+  `bake`. Every one of the 21 states measures its exit on the play clock of a
+  clip it names, so an unbaked clip is not cosmetic: `MotionPlayLength` is 0,
+  the cursor never reaches the last frame, and the boss stands in the water for
+  ever with its gate shut.
+
+...and `g_bHudShutterState` moved from `script/state/shutter.ts` into `G`, on
+the same argument that file already makes for `g_nFiringGate`: the routine that
+reads it is now in `game/`, and one word in the exe must be one field here.
+
+### The harness cannot clear a boss gate, and that is the honest result
+
+`tools/playthrough.mjs` shoots only when the walker is parked on an **enemy**
+gate. A boss's gate is `0x45`, not `0x44`, so with the class ported and the
+gate honoured stage 5 stops at block 3 under the default policy -- further from
+an end block than it was when the gate was excused.
+
+`--shoot-flag-gates` is the opt-in, and with it stage 5 reaches its end block in
+7995 frames and 79 instructions against 7875 and 78 with the gate excused, this
+time having actually killed the boss. It is **not** the default because the
+grid spray cannot aim: stage 3 block 2's `wait_script_flag 0x1E` is the
+hostage's, flag 30 comes off *either* of her streams, and a tool that sprayed
+that gate would open it by shooting her -- which is the exact thing the
+civilian rule refuses -- and then report the stage as playable. Whether that
+rule should be narrowed instead is a decision for the user.
+
+Two smaller things went with it: a volley at a flag gate is 13x10 rather than
+5x4, because a boss is one actor with a handful of bone spheres eighty units
+out; and the debug clear is now run only for an enemy gate, since killing an
+actor from outside its own death states opens no flag.

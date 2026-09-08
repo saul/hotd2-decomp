@@ -56,8 +56,25 @@
  * not clear the enemies are somewhere the shots cannot reach, which is worth
  * knowing on its own, so it is **reported** rather than silently papered over.
  *
+ * **`--shoot-flag-gates` is the boss's answer, and it is off by default.**
+ * A `wait_script_flag` gate is usually a timer -- the chapter card counts 180
+ * frames and opens its own -- but nine of the game's flags are raised by class
+ * 0x14, the stage-2 boss, and the last of each of its three ladders is raised
+ * by the boss *dying*. There is no way to clear one but to shoot it, and the
+ * enemy-gate rule above cannot see it: the script is parked on `0x45`, not on
+ * `0x44`.
+ *
+ * It is opt-in rather than folded into the rule because the grid spray cannot
+ * aim. Stage 3 block 2's `wait_script_flag 0x1E` is the hostage's, and flag 30
+ * comes off *either* of her streams -- the rescue's and the one she runs when
+ * she is shot. A tool that sprayed that gate would open it by killing her,
+ * which is the exact thing the civilian rule exists to refuse, and it would
+ * report the stage as playable. So: pass the flag when you know the gate in
+ * front of you is a boss, and read the "could NOT be cleared" list when you do.
+ *
  *   node tools/playthrough.mjs --stage 2
  *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
+ *   node tools/playthrough.mjs --stage 5 --shoot-flag-gates
  *
  * Exit status is 0 only if the stage reached an end block.
  */
@@ -127,9 +144,16 @@ async function readState(page) {
   });
 }
 
-/** One volley: pointer events across the frame, through the real shot path. */
-async function volley(page, box) {
-  const COLS = 5, ROWS = 4;
+/**
+ * One volley: pointer events across the frame, through the real shot path.
+ *
+ * The grid is coarse because a room full of zombies is a big target. A **boss**
+ * is one actor with a handful of bone spheres eighty units out, and a 5x4 grid
+ * walks straight past it -- so a gate that is one actor's death gets a denser
+ * sweep. Same events, same ray, same spheres; more of them.
+ */
+async function volley(page, box, cols = 5, rows = 4) {
+  const COLS = cols, ROWS = rows;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const x = box.x + (box.width * (c + 0.5)) / COLS;
@@ -256,6 +280,21 @@ try {
           for (const l of lines.slice(i, i + 6)) console.log(`    ${l.trim()}`);
         }
       }
+      if (!holders.length) {
+        // A `wait_script_flag` names no holder, so nothing above opened the
+        // actors panel -- and "is the actor that should raise this even on the
+        // field" is the first question about one. Ten lines of it is enough to
+        // answer that.
+        await page.click("#panel-actors summary").catch(() => {});
+        await sleep(400);
+        const actors = await page.locator("#panel-actors").innerText()
+          .catch(() => "");
+        const lines = actors.split("\n").filter((l) => l.trim()).slice(0, 10);
+        if (lines.length) {
+          console.log("");
+          for (const l of lines) console.log(`    ${l.trim()}`);
+        }
+      }
       console.log("");
       mkdirSync(SHOTS, { recursive: true });
       const path = resolve(SHOTS, `hang-stage${stage}.png`);
@@ -264,7 +303,9 @@ try {
       break;
     }
 
-    if (stalled > PATIENCE && s.policy === "enemies") {
+    const shootable = s.policy === "enemies"
+      || (s.policy === "flag" && flag("shoot-flag-gates"));
+    if (stalled > PATIENCE && shootable) {
       // Frames, not volley count and not wall time. A volley is twenty round
       // trips to the browser, which used to take about a second and made the
       // fallback land after the hang deadline rather than before it; under the
@@ -274,7 +315,8 @@ try {
       // this tool chose to run.
       if (stalled < SHOOT_FOR) {
         volleys += 1;
-        await volley(page, box);
+        await volley(page, box,
+                     s.policy === "flag" ? 13 : 5, s.policy === "flag" ? 10 : 4);
       } else if (!killedHere) {
         killedHere = true;
         unclearable.push(`${s.block.split(" ")[0]} step/op ${s.step}`
@@ -287,11 +329,19 @@ try {
         await page.screenshot({ path: resolve(SHOTS,
           `unclear-stage${stage}-b${s.block.split(" ")[0]}`
           + `-${s.step.replace(/\D+/g, "_")}.png`) });
-        console.log(`      enemy gate at block ${s.block} ${s.step} did `
+        console.log(`      ${s.policy} gate at block ${s.block} ${s.step} did `
                     + `not clear in ${volleys} volleys over `
                     + `${SHOOT_FOR - PATIENCE} frames — the enemies are `
-                    + `somewhere the shots cannot reach. Using the debug clear.`);
-        await page.click('button[title^="Kill every live actor"]');
+                    + `somewhere the shots cannot reach.`
+                    + (s.policy === "enemies" ? " Using the debug clear." : ""));
+        // **Only an enemy gate.** The debug clear takes actors out of the
+        // counts `wait_enemies_alive` reads, which is what makes it a way past
+        // that gate; a `wait_script_flag` is waiting for an actor to *do*
+        // something, and killing it from outside its own death states opens
+        // nothing. Leaving the hang deadline to report it is the honest end.
+        if (s.policy === "enemies") {
+          await page.click('button[title^="Kill every live actor"]');
+        }
       }
     }
 

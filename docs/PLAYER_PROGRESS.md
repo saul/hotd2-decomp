@@ -1181,6 +1181,7 @@ having its handler read.
 |---|---|---|
 | `0x30` the zombie | motion **956** (`zom.bin`) | `FUN_00452DA0` stores `0x3BC`, or `0x41E` on a branch not taken here |
 | `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail | `FUN_00431250`; the table is a five-entry playlist, all inside `nya.bin`'s 762–773 |
+| `0x14` the stage-2 boss | motion **33** (`boss2.bin`), and the whole of that bank's **21–58** offered to `bake` | `Class14Init` (`FUN_00475E90`) seats anim slot `0xB`, and `g_class14_anim_slots[0xB]` names 33. The bank goes in whole because each of the 21 states measures its exit on the **play clock** of a clip it names, so an unbaked one is an actor that waits for ever rather than one that is posed wrongly. Before this rule existed **stage 5 had no character type 71 at all** — the boss it spawns had no skeleton, no hit spheres and no clips |
 
 A tempting general rule was tried and rejected: deriving the bank from the
 character's bone count. The stride `(bones*6+15) & ~3` must divide every block

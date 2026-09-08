@@ -20,6 +20,7 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
   from "./class20/state";
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
+import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
   from "./class24/state";
@@ -1164,6 +1165,16 @@ export interface ActorBase {
    */
   class52: CharacterPlacement["class52"];
   /**
+   * Class 0x14's descriptor tail — the state the boss starts in, the route
+   * quad it swims inside, and the camera cue that despawns it.
+   *
+   * Its own field for the reason class 0x20's and class 0x52's are: `tail+0x00`
+   * is class 0x30's body condition and `tail+0x01` its initial state, and
+   * `Class14Init` (`FUN_00475E90`) reads those two bytes as a character type
+   * and a `Class14State`.
+   */
+  class14: CharacterPlacement["class14"];
+  /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
    *
@@ -1555,13 +1566,14 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Thrower; thr: ThrowerTail })
   | (ActorBase & { cls: SpawnClass.Zombie; zom: ZombieTail })
   | (ActorBase & { cls: SpawnClass.OneHitTarget; tgt: OneHitTargetTail })
+  | (ActorBase & { cls: SpawnClass.Boss2; boss2: Boss2Tail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
-      | SpawnClass.Mouse> });
+      | SpawnClass.Boss2 | SpawnClass.Mouse> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1576,6 +1588,9 @@ export type ThrowerActor = Extract<Actor, { cls: SpawnClass.Thrower }>;
 
 /** An actor already narrowed to class 0x30, for that class's own routines. */
 export type ZombieActor = Extract<Actor, { cls: SpawnClass.Zombie }>;
+
+/** An actor already narrowed to class 0x14, the stage-2 boss. */
+export type Boss2Actor = Extract<Actor, { cls: SpawnClass.Boss2 }>;
 
 /** An actor already narrowed to class 0x20, for that class's own routines. */
 export type OneHitTargetActor = Extract<Actor,
@@ -1663,6 +1678,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     standThrow: undefined,
     oneHitTarget: null,
     class52: null,
+    class14: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,
@@ -1731,6 +1747,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.RankScaledEnemy) {
     return { ...head, cls, rescue: makeRescueTargetTail() };
+  }
+  if (cls === SpawnClass.Boss2) {
+    return { ...head, cls, boss2: makeBoss2Tail() };
   }
   if (cls === SpawnClass.Mouse) {
     return { ...head, cls, mouse: makeMouseTail() };

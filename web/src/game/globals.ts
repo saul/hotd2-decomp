@@ -277,6 +277,24 @@ export const G = {
    */
   g_nFiringGate: 0,
   /**
+   * `g_bHudShutterState` — `0x009CA0F4`. evt `0x1F` picks it, 0..8.
+   *
+   * **Here for the same reason `g_nFiringGate` is here, one class later.**
+   * `script/state/shutter.ts` used to hold this as a field of its own, on the
+   * grounds — written into that file — that "nothing outside the script reads
+   * them". Class 0x14 does: all three of the boss's entrances hand over to the
+   * fight on `g_bHudShutterState == 1` and nothing else
+   * (`Class14StateEntranceA` (`FUN_00478160`) at `0x0047834E`), and that
+   * routine is in `game/`. One word in the exe, one field here, and the
+   * shutter machine reaches it through an accessor exactly as it does the
+   * firing gate.
+   *
+   * The initial 2 is `Shutter.reset`'s, not the engine's 5 — see the standing
+   * `[diverges]` on `Shutter.reset` — so this is that value written where the
+   * storage now is rather than a second opinion about it.
+   */
+  g_bHudShutterState: 2,
+  /**
    * The trigger pulls this frame has not resolved yet.
    *
    * `[port-only]`, and it is the one piece of *input* the data segment holds.

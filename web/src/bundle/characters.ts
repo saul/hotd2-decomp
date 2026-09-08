@@ -408,6 +408,22 @@ export interface CharacterPlacement {
    * that answers only in event block 8, in Original Mode only.
    */
   class53?: { anim_set: number; subtype: number } | null;
+  /**
+   * Class 0x14's tail — the stage-2 boss. `state` is `tail+0x01`, the index
+   * into `g_class14_states` the boss starts in and the only thing that tells
+   * the four stage-2 spawns apart; `dir` and `route` are the direction and the
+   * four corners of the patch of water `Class14Update` (`FUN_00476150`) keeps
+   * it inside; `despawn_path`/`despawn_frame` are `tail+0x30`/`+0x32`, the
+   * camera cue that takes it off the field.
+   */
+  class14?: {
+    char_type: number;
+    state: number;
+    dir: [number, number, number];
+    route: [number, number, number][];
+    despawn_path: number;
+    despawn_frame: number;
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

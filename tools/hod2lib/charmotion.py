@@ -90,6 +90,12 @@ MOTION_RULES: dict[int, tuple] = {
     # resolved to a character with no motion and the client drew none of them,
     # so the whole class was invisible even once it was ported.
     0x10: ("literal", 0x294),
+    # `Class14Init` (`FUN_00475E90`) writes `state->animSlot = 0xB` and then
+    # `char->motion = *(s16 *)g_class14_anim_slots[0xB]`, which is 33. Without
+    # a rule here the stage-2 boss resolves to a character with no motion and
+    # no skeleton is built for it at all -- stage 5, whose only class-0x14
+    # spawn is its own, had no character type 71 in its bundle.
+    0x14: ("literal", 33),
     0x30: ("literal", 0x3BC),
     0x31: ("by_char", {0x17: 0x1BA}, 0x3A8),
     0x53: ("table", 0x00589A64, 10, 0x00, "i16"),

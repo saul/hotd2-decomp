@@ -87,17 +87,23 @@ let cache: {
  *
  * ## What is still excused, and what each one needs
  *
- * **35 of the game's 61 gates**, down from 50 when class 0x60 and class 0x61
- * were unreachable. Stages 3 and 6 have none left; the rest are four unported
- * classes, and every one of them is an enemy or a boss rather than a prop:
+ * **14 of the game's 61 gates**, down from 50 when class 0x60 and class 0x61
+ * were unreachable and from 35 when class 0x14 was. Stages 2, 3 and 6 have
+ * none left; the rest are three unported classes, and every one of them is an
+ * enemy or a boss rather than a prop:
  *
  * | gates | flag(s) | writer |
  * |---|---|---|
- * | 20 | 10..17, 31 | **class 0x14** (`FUN_00475E90`), stage 2's blocks 35-41 and stage 4's 23-29. Its writes are spread over `0x00478350`..`0x0047BA6E`; flag 10's two are `0x0047835B` and `0x004785E4` |
- * | 8 | 31, 32 | **class 0x19** (`FUN_004917E0`), `0x0049390C` and `0x004958C7` |
+ * | 8 | 31, 32 | **class 0x19** (`FUN_004917E0`), `0x0049390C` and `0x004958C7` — stage 4's blocks 23, 25, 27 and 29 |
  * | 3 | 0, 3 | **class 0x22** (`FUN_0049B0D0`) — the stage-1 and stage-5 boss, `0x0049CC85` and `0x0049CC95` |
  * | 2 | 30 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
  * | 1 | 20 | a class-0x41 prop update, `FUN_004710C0` at `0x004710D7` — the one small one left, and the only remaining gate that is not an enemy class |
+ *
+ * The row this table used to carry for class 0x14 said "stage 2's blocks 35-41
+ * **and stage 4's 23-29**", and the second half was wrong: stage 4 has no
+ * class-0x14 spawn at all, and its four blocks gate on 31 and 32, both of
+ * which class 0x19 writes. Flag 31 has two writers and the stage decides which
+ * one is in the room.
  *
  * The five reports that opened this line of work asked for "one spawn opcode
  * and two cue props"; the sweep that was written to check it says otherwise,
@@ -156,17 +162,17 @@ export function ScriptFlagsThisBundleCanRaise(
   // — `ClassHandler.raisesScriptFlag`. Both spawn opcodes are walked, because
   // the two the port has are `spawn_simple`'s and the four it has not are
   // ordinary placements.
+  const addClassFlags = (cls: number): void => {
+    const f = g_class_handlers[cls as SpawnClass]?.raisesScriptFlag;
+    if (f === undefined) return;
+    if (typeof f === "number") flags.add(f);
+    else for (const one of f) flags.add(one);
+  };
   for (const b of script.blocks ?? []) {
     for (const st of b.steps ?? []) {
       for (const op of st.ops ?? []) {
-        for (const r of op.simple ?? []) {
-          const f = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
-          if (f !== undefined) flags.add(f);
-        }
-        for (const r of op.spawns ?? []) {
-          const f = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
-          if (f !== undefined) flags.add(f);
-        }
+        for (const r of op.simple ?? []) addClassFlags(r.class);
+        for (const r of op.spawns ?? []) addClassFlags(r.class);
       }
     }
   }

@@ -39,9 +39,27 @@ const opt = (n, d = null) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : d;
 };
 
-/** Frames of stage 3 to look at. 400..1200 is the canal, on `cp_st3` 122. */
-const MARKS = (opt("at", "1,15,30,120,400,700,1000,1200"))
-  .split(",").map(Number);
+/**
+ * Frames of stage 3's *opening* to look at, for the fog checks.
+ *
+ * The canal marks used to be absolute too -- `400,700,1000,1200` -- and that
+ * was a latent trap rather than a shortcut. Honouring `wait_script_flag`
+ * moved every one of stage 3's shots later on the wall clock, and four checks
+ * failed reporting a missing boat when what had actually happened is that
+ * frame 400 was still inside the flashback interior, where there is no boat
+ * and no canal. **A check pinned to a frame number is a check pinned to the
+ * pacing of the build it was written against.** The canal is found by its
+ * camera slot now and sampled relative to where it starts.
+ */
+const MARKS = (opt("at", "1,15,30,120")).split(",").map(Number);
+
+/** `cp_st3` 122 is the canal; 121 is the flashback interior before it. */
+const CANAL_SLOT = "122";
+/** Frames past the canal's first frame to sample at. */
+const CANAL_OFFSETS = [0, 250, 500, 750];
+/** How far to look for the canal before giving up. */
+const CANAL_SEARCH_FRAMES = 4000;
+const CANAL_SEARCH_STEP = 20;
 
 /** The two class-0x25 passengers, by script address, and the boat's spawn. */
 const RIDERS = [4128, 4252];
@@ -145,6 +163,44 @@ try {
     seen.push({ f, fog, eye, slot, camFrame, slotModels, rigs, now });
   }
 
+  // Advance until the canal shot is actually on, then sample relative to it.
+  let canalStart = null;
+  for (let n = 0; n < CANAL_SEARCH_FRAMES && canalStart === null;
+       n += CANAL_SEARCH_STEP) {
+    await page.evaluate((k) => window.__hotd2Drive.advance(k),
+                        CANAL_SEARCH_STEP);
+    at += CANAL_SEARCH_STEP;
+    if (await row("panel-camera", "slot") === CANAL_SLOT) canalStart = at;
+  }
+  check("the canal shot is reached at all",
+        canalStart !== null,
+        canalStart === null
+          ? `no cp_st3 ${CANAL_SLOT} within ${CANAL_SEARCH_FRAMES} frames`
+          : `cp_st3 ${CANAL_SLOT} from frame ${canalStart}`);
+
+  for (const off of canalStart === null ? [] : CANAL_OFFSETS) {
+    const want = canalStart + off;
+    if (want > at) {
+      await page.evaluate((n) => window.__hotd2Drive.advance(n), want - at);
+      at = want;
+    }
+    const [fog, eye, slot, camFrame, slotModels, rigs] = await Promise.all([
+      row("panel-scene", "fog"),
+      row("panel-camera", "eye"),
+      row("panel-camera", "slot"),
+      row("panel-camera", "frame"),
+      row("panel-props", "slot models"),
+      row("panel-props", "rigs"),
+    ]);
+    // The shot's own length is data, not a constant: stop sampling the moment
+    // the camera leaves the canal rather than asserting a boat on a frame the
+    // boat is not in. This is the same trap as the absolute marks, one level in.
+    if (slot !== CANAL_SLOT) break;
+    const now = await page.evaluate(() => window.__hotd2Drive.now());
+    seen.push({ f: at, canal: true, fog, eye, slot, camFrame, slotModels,
+                rigs, now });
+  }
+
   // ---- the fog -----------------------------------------------------------
 
   console.log("\nthe fog range, and the camera it is measured from:");
@@ -173,7 +229,7 @@ try {
   // ...and it is the shot's own camera, not a stale one. `cp_st3` 121 is the
   // flashback interior and 122 the canal; they are 2,200 units apart, so a
   // frame drawn from the wrong one of the two cannot pass this.
-  const canal = seen.filter((s) => s.f >= 400);
+  const canal = seen.filter((s) => s.canal);
   check("the canal frames are drawn from the canal shot",
         canal.every((s) => s.slot === "122"),
         canal.map((s) => `f${s.f} slot ${s.slot}`).join(" | "));
@@ -264,18 +320,51 @@ try {
   await page.keyboard.press("Space");
   await page.evaluate(() => document.activeElement?.blur?.());
 
-  let faded = null;
-  for (let n = 0; n < 40 && !faded; n++) {
-    await page.evaluate(() => window.__hotd2Drive.advance(30));
+  // **Sample inside the block's own lifetime.** This used to advance 30
+  // frames at a time and take whatever it found; once `wait_script_flag`
+  // started holding, block 11 ran out and the walker *restarted the stage*
+  // and parked on an enemy gate that a harness which never shoots can never
+  // open -- so the loop was reading a different part of the game entirely and
+  // reported "never reached". A 30-frame stride can also step straight over a
+  // fade. 10 frames, and stop at the block boundary.
+  // **The assertion is the property, not one frame's value.** It used to
+  // require the literal `planar 2..2`, which is the range on one particular
+  // frame of the tween: a stride that steps over that frame, or any change to
+  // the pacing, fails it while the fade is perfectly correct. Honouring
+  // `wait_script_flag` changed the pacing and it failed exactly that way,
+  // having watched the range narrow 2584 -> 18 and the colour reach #000001.
+  //
+  // What the bug was about is the *other* half of this line: `render/fog.ts`
+  // had an invented `far > near` on/off test the engine does not have (L27),
+  // so the port switched fog **off** on the frame the fade completed and
+  // snapped a black screen back to a lit one. So: the range must converge
+  // toward zero, and fog must never go off while it does.
+  const fogsSeen = [];
+  for (let n = 0; n < 180; n++) {
+    await page.evaluate(() => window.__hotd2Drive.advance(5));
     const [fog, addr] = await Promise.all([
       row("panel-scene", "fog"),
       page.evaluate(() => window.__hotd2Drive.now().a),
     ]);
-    if (/^planar 2\.\.2 /.test(fog ?? "")) faded = { fog, addr };
+    if (fog && fogsSeen[fogsSeen.length - 1] !== fog) fogsSeen.push(fog);
+    // The block is over; anything past here is the next scene, or a restart.
+    if (!/^11\//.test(addr ?? "")) break;
   }
-  check("the fade lands on a zero-width range and fog stays on",
-        !!faded, faded ? `${faded.fog} at ${faded.addr}`
-                       : "never reached `planar 2..2`");
+  const width = (f) => {
+    const m = /^planar (-?[\d.]+)\.\.(-?[\d.]+)/.exec(f ?? "");
+    return m ? Math.abs(Number(m[2]) - Number(m[1])) : null;
+  };
+  const widths = fogsSeen.map(width).filter((w) => w !== null);
+  const last = widths[widths.length - 1];
+  check("the fade narrows the fog range toward zero",
+        widths.length >= 3 && last !== undefined && last <= 25
+          && last < widths[0] / 10,
+        widths.length ? `${widths[0]} -> ${last} over ${widths.length} steps`
+                      : "no planar fog rows at all");
+  check("...and fog is never switched off while it fades",
+        fogsSeen.length > 0 && fogsSeen.every((f) => /^planar /.test(f)),
+        fogsSeen.filter((f) => !/^planar /.test(f)).join(" | ")
+          || `all ${fogsSeen.length} samples planar`);
 
   if (flag("shot")) {
     mkdirSync(SHOTS, { recursive: true });

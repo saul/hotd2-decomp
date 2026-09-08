@@ -670,13 +670,42 @@ export interface KillAllResult {
  * death script do. Without the flag the button killed the enemies and left
  * every civilian standing in the count, holding `wait_scripted_actors` open
  * with nothing on screen to shoot.
+ *
+ * **And it stands in for a shot, so it is refused wherever a shot is.**
+ * {@link DispatchHit} (`FUN_004092F0`) returns before `ResolveHit` on
+ * `ActorFlag.ShotImmune`, so in the engine an actor can never reach zero hit
+ * points inside that window — which is exactly what both enemy classes rely
+ * on. `ThrowerOnShot` (`FUN_004499A0`) gates its **whole** response on
+ * `(obj+0x34 & 0x100) == 0` — `004499f5 f6c401 TEST AH,0x1` then
+ * `004499f8 0f85f8000000 JNZ 0x00449af6`, the routine's own tail, so the dead
+ * arm at `00449a3e TEST EAX,0x4000000` is past it — and `ZombieOnShot`
+ * (`FUN_00453EB0`) is the same pair at `00453ec7`/`00453eca`, jumping to
+ * `0x0045404e`. `[proved]`
+ *
+ * So an actor killed from outside while shot-immune is dead and *never told*:
+ * its class's death chain never opens, and the chain is what runs
+ * `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) and
+ * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) — the two routines that
+ * take it out of `g_enemies_alive` and out of `g_enemy_slots`. It then stands
+ * up and goes back to its ordinary states as a corpse, holding the room-clear
+ * gate open for ever.
+ *
+ * That is stage 6 block 0's hang: a `zslman` caught in the tail of
+ * `ThrowerStateKnockedTumbling` (`FUN_00450E40`), which raises the bit as the
+ * body settles and holds it through the get-up clip (`obj+0x133C = 0x14` on
+ * the way out is the same window again). The window is transient — the clip
+ * ends, the bit goes, and the next shot or the next clear takes the actor in
+ * the ordinary way — so refusing here is not "this actor can never be
+ * cleared", it is "not this frame", which is what a shot would have been told.
  */
 export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
   const out: KillAllResult = { enemies: 0, civilians: 0 };
   for (const obj of G.g_object_list) {
     if (!obj.visible || obj.dead) continue;
     // What a shot could not touch, this must not touch either — see
-    // `ClassHandler.invulnerable`.
+    // `ClassHandler.invulnerable` for the class's own answer, and
+    // `DispatchHit` for the one every class shares.
+    if (obj.flags & ActorFlag.ShotImmune) continue;
     if (g_class_handlers[obj.cls]?.invulnerable?.(obj)) continue;
     obj.hp = 0;
     obj.dead = true;

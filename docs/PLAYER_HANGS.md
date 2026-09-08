@@ -47,23 +47,64 @@ frame, the walker's address, `ctx.rng`'s whole state, `g_frame`, the gate
 counters and one digest per live actor. It exits non-zero on the first frame
 that differs and prints both sides.
 
-It shoots at **enemy** gates through the real path — pointer events on
+It shoots at room-clear gates through the real path — pointer events on
 `#viewport`, `Shooting.fire`, the ray, the per-bone spheres, `ResolveHit` — and
-falls back to the Kill button after 480 frames, saying so. Under the driven
-clock the game is stopped between two `advance` calls, so a whole volley lands
-on one exact frame instead of smeared across however many the browser ran. It never shoots at
-or clears a **civilian** gate: you are not meant to shoot civilians in this
-game, so a `wait_scripted_actors` that does not come down on its own is a bug by
-definition and clearing it would hide the thing the tool exists to find.
+reaches for the Kill button after 480 frames, saying so and naming who was
+left. Under the driven clock the game is stopped between two `advance` calls,
+so a whole volley lands on one exact frame instead of smeared across however
+many the browser ran.
+
+**It shoots at a civilian gate too, and that changed** — see item 17. It used
+to refuse, on the reasoning that you are not meant to shoot civilians and so a
+`wait_scripted_actors` that does not come down on its own is a bug by
+definition. The engine says otherwise: `EvtOpWaitScriptedActors46`
+(`FUN_0045FCD0`) is `g_civilians_alive <= arg && g_evt_gameplay_live &&
+g_camera_free`, and `g_camera_free` comes from the enemies in
+`g_enemy_slots` — so a 0x46 gate standing in a room with live zombies is held
+by the **zombies**, and shooting them is not shooting civilians. The one case
+it still refuses is a gate whose named blocker is a civilian who is **alive**;
+that one is the bug this tool exists to find, and killing her would hide it.
+
+**And the shooting does not stop when the Kill button is pressed.** Stopping
+there is how stage 6 came to be read as a hang: the clear killed a thrower
+inside `ActorFlag.ShotImmune`, where a shot would have been refused, and an
+actor killed without being told never runs its death chain. See item 18.
 
 **Reaching an end block is not the same as the stage being playable.** The tool
-is allowed to cheat — it falls back to the Kill button on an enemy gate the
-shots cannot clear — so it prints, at the end, every room it had to cheat past.
+is allowed to cheat — it falls back to the Kill button on a gate the shots
+cannot clear — so it prints, at the end, every room it had to cheat past.
 Those rooms are the ones a player is stuck in. It exits non-zero if there are
 any.
 
 The branch countdown answers itself with the **lowest block number** so that one
 run takes the same route as the next; see item 9.
+
+### All six stages, as of items 17 and 18
+
+`node tools/playthrough.mjs --stage N --headless`, one after another on an
+otherwise idle machine. **All six reach an end block.** The two sections
+below this one predate the branch rule and describe routes the tree no longer
+takes — see item 16.
+
+| stage | end block | frames | instr | rooms the shots did not clear |
+|---|---|---:|---:|---|
+| 1 | 14 `(end → 0)` | 7965 | 94 | block 1 `8 / 6` |
+| 2 | 35 `(end → 0)` | 12120 | 146 | — |
+| 3 | 13 `(end → 4)` | 6210 | 59 | — |
+| 4 | 25 `(end → 0)` | 7125 | 83 | — |
+| 5 | 7 `(end → 0)` | 7875 | 78 | block 2 `2 / 50` |
+| 6 | 12 `(end → 0)` | 7110 | 63 | blocks 0 `4 / 8`, 1 `3 / 17`, 3 `2 / 13` |
+
+Before this branch, on the same tree and the same seeds: stages **2, 3 and 6
+hung** — block 14 `9 / 20`, block 6 `1 / 13` and block 0 `4 / 8` — and 1 and 5
+reached an end block with one cheated room each. Item 19 names who is left in
+the five rooms above.
+
+**Every stage still exits non-zero**, and for two reasons. The cheated rooms
+above are one. The other is one console error in every stage, on `main` as
+well, and it is a **missing music file**, not the gameplay: stage 4 says
+`404 /bgm/ST4_AR.WAV`, `net::ERR_ABORTED`. Every stage has its own. Nothing to
+do with the walker; recorded so the next reader does not chase it. `[open]`
 
 ### Stage 2 — reaches block 37 `(end → 7)`, 13860 frames, 156 instructions
 
@@ -587,6 +628,130 @@ reachable the other way today — its trigger is a class 0x10 civilian and the
 port runs her script — but stage 2's block 0 is not: its trigger is class
 0x21, which is unported. Any recorded route in this file or in
 `docs/PLAYER_PROGRESS.md` from before this change describes the old rule.
+
+## 17. Stage 2 block 14 and stage 3 block 6 — **not hangs**, the harness would not shoot
+
+Both were reported as hangs on `wait_scripted_actors` and neither is one.
+
+```
+stage 2  block 14  step/op 9 / 20   g_civilians_alive 0 · need <= 0
+                                    "Nothing alive is holding it —
+                                     the camera gate (g_camera_free 0) is."
+stage 3  block 6   step/op 1 / 13   g_civilians_alive 1 · need <= 0
+                                    0x5294 hito_mario2 · dead · enemies-present
+```
+
+**What was actually there.** Stage 2: two live class-0x30 zombies,
+`char_adv02` at 220 hit points in `BackOff` and `char_adv00` at 100 in
+`HoldAtRange`, plus two civilians already out of the count (`sub+0x04` bit 0
+set). Stage 3: `hito_mario2` dead but still counted, her killed script parked
+on wait bit 0 (`enemies-present`), and her two `znkage` captors alive at 90 hit
+points each. In both, the blocker is **live enemies**, and the harness's rule
+was *never shoot at a civilian gate*.
+
+**The opcode says so.** `EvtOpWaitScriptedActors46` (`FUN_0045FCD0`) is
+`[proved]`:
+
+```c
+if (g_evt_yield == 0) { g_evt_yield = 1; return; }
+if (g_civilians_alive <= operand && g_evt_gameplay_live && g_camera_free) {
+    g_evt_yield = 0; pc += 8; return;
+}
+```
+
+and `g_camera_free` (`0x009C6F2D`) is recomputed every frame by
+`CameraDriverFromDeferredPose` (`FUN_00402E00`) from the **four** slots at
+`0x009A5EC0..0x009A5EE0`. Those are filled by `UpdateCameraEnemySlots`
+(`FUN_00408DD0`) from the candidate list, and the candidates are the actors
+whose class called `ActorRegisterCameraPoint` (`FUN_00409B70`) — which ends
+`PUSH ESI / CALL 0x00408ec0` at `0x00409bec`–`0x00409c03`, past the tail call
+Ghidra's decompiler stops at, so the xref list at `RegisterForCameraTracking`
+does not show it. `EnemyZombieUpdate` (`FUN_004533F0`) makes that call with a
+4.0 lift on every frame of every live zombie.
+
+So a 0x46 gate in a room with live zombies is held by the **zombies**. The
+civilian's own VM says it twice over: `CivilianStepScript` (`FUN_0048B1E0`)
+has wait bits for `g_enemies_present` and `g_enemies_alive`, and stage 3's
+blocker is parked on the first of them.
+
+**Fixed in the tool.** `playthrough.mjs` fires at a civilian gate too, and
+refuses only when the gate's named blocker is a civilian who is still **alive**
+— which is the case the old rule was written for and the only one where
+shooting would hide something. Both stages reach an end block with no room
+needing the debug clear.
+
+The port needed no change for either. Recorded because "the tool will not do
+the thing the engine requires" looked exactly like two count leaks, and two
+sessions could easily be spent on `combat/counts.ts` before anyone measured the
+hit points of the actors standing in the room.
+
+## 18. `ActorKillAll` killed what a shot could not — **fixed**, and it was stage 6
+
+Stage 6 block 0 `4 / 8`, `0x44 wait_enemies_alive`: `g_enemies_alive 1`,
+`g_enemies_present 1`, `g_camera_free 1`, and the sidebar naming nobody.
+
+The holder was `0x099C` — a class-0x31 `zslman`, `dead` with 0 hit points and
+`ActorFlag.Dead` up, cycling `RestoreBothHands` → `Throw` → `WaitForPermit` →
+`Pounce` as a corpse, with `ThrowerFlag.LeftAlive` and `LeftPresent` both
+clear. It had never been shot: `hits` and `latched` were empty. It was killed
+by the harness's **debug clear** while it sat in `ThrowerStateKnockedTumbling`
+(`FUN_00450E40`) sub 4, where `ActorFlag.ShotImmune` is up.
+
+`DispatchHit` (`FUN_004092F0`) refuses `ResolveHit` outright on that bit, so in
+the engine an actor cannot reach zero hit points inside the window — and both
+enemy classes lean on that. `ThrowerOnShot` (`FUN_004499A0`) gates its whole
+response on it (`004499f5 f6c401 TEST AH,0x1` / `004499f8 JNZ 0x00449af6`, the
+routine's tail, so the dead arm at `00449a3e` is past it); `ZombieOnShot`
+(`FUN_00453EB0`) is the same pair at `00453ec7`/`00453eca`. An actor killed
+from outside while shot-immune is therefore **dead and never told**: its death
+chain never opens, and the chain is the only thing that runs
+`ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) or
+`ZombieReleasePermitAndUntrack` (`FUN_004565A0`) — the two routines that take
+it out of `g_enemies_alive` and out of `g_enemy_slots`.
+
+One line in `ActorKillAll`, beside the `ClassHandler.invulnerable` test that
+already carried the rule: refuse `ActorFlag.ShotImmune`. Nine assertions in
+`web/test/port.test.ts`, six of which fail with the line backed out.
+
+**Two diagnostics that were wrong, and cost time — both fixed.** The sidebar
+printed *"Nothing alive is holding it — the camera gate (g_camera_free N) is"*
+whenever `waitBlockers` was empty, **including when the camera was free** and
+the counter was what held the gate: it named the camera as the blocker while
+showing `1`, the free value. It now says which of the two is above the line,
+and on the third case — counter satisfied, camera free — says the gate should
+pass next frame. And the tool's *"the enemies are somewhere the shots cannot
+reach"* was an inference, not a measurement; it prints the blocker rows now,
+and they say who and how far. See item 19 for what they say.
+
+## 19. Rooms the shots do not clear, with the actor named
+
+The tool no longer guesses about these — it prints the wait panel's own
+blocker rows beside the report. `[open]`, all of them, and each is a
+measurement rather than a theory:
+
+| stage | block | step/op | who is left |
+|---|---|---|---|
+| 1 | 1 | 8 / 6 | `0x1868 tutorial · Strike/2 · permit · d=9` |
+| 5 | 2 | 2 / 50 | `0x1D44 znnick · DelayedStrikeInPlace/4 · d=2886`, and three more of the same at `d=2865`, `2877`, `2898` |
+| 6 | 0 | 4 / 8 | `0x0970 zslman · Throw/2 · d=49`, `0x099C zslman · KnockedTumbling/4 · d=55` |
+| 6 | 1 | 3 / 17 | `0x1604 zslman · Throw/1 · permit · d=38`, `0x1630 zslman · KnockedTumbling/4 · d=44` |
+| 6 | 3 | 2 / 13 | `0x2654 zslman · KnockedTumbling/1 · d=56` |
+
+Three different things, and the distances are what separate them.
+
+* **Stage 5** is nearly **three thousand units** from the camera. No blind
+  spray was ever going to reach that, and it is worth reading on its own:
+  `ZombieStateDelayedStrikeInPlace` is class 0x30 state 32.
+* **Stage 6** is *not* out of reach — 38 to 56 units — and four of the five
+  rows are `KnockedTumbling`, which is the state that holds
+  `ActorFlag.ShotImmune` through its landing and its get-up (item 18). Shots
+  during that window are refused by `DispatchHit`, correctly, so a `zslman`
+  that keeps being knocked down absorbs a long stretch of a 20-volley window
+  and the room is merely **slow** for a tool that sprays a grid. That may be
+  the whole of it; the reading has not been done. `[open]`
+* **Stage 1** is the odd one and the most interesting: a zombie at `d=9`,
+  mid-`Strike`, holding the attack permit, that 20 volleys across the whole
+  frame did not kill. `[open]`
 
 ---
 

@@ -19,17 +19,17 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 30258 | 132 | engine |
+| `game/` | 30292 | 132 | engine |
 | `hod2lib/` | 15041 | 34 | engine |
 | `render/` | 8007 | 29 | render |
-| `app/` | 7277 | 29 | app |
+| `app/` | 7297 | 29 | app |
 | `script/` | 4040 | 25 | engine |
 | `ui/` | 3032 | 26 | ui |
 | `bundle/` | 1952 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **71108** | **297** | |
+| **total** | **71162** | **297** | |
 
 The largest files, which is where the pressure to split next is:
 

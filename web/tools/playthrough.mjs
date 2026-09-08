@@ -76,8 +76,25 @@
  * clear refuses that actor now, which means the room is not clear when it
  * returns, and the shots that follow are what finish it.
  *
+ * **`--shoot-flag-gates` is the boss's answer, and it is off by default.**
+ * A `wait_script_flag` gate is usually a timer -- the chapter card counts 180
+ * frames and opens its own -- but nine of the game's flags are raised by class
+ * 0x14, the stage-2 boss, and the last of each of its three ladders is raised
+ * by the boss *dying*. There is no way to clear one but to shoot it, and the
+ * enemy-gate rule above cannot see it: the script is parked on `0x45`, not on
+ * `0x44`.
+ *
+ * It is opt-in rather than folded into the rule because the grid spray cannot
+ * aim. Stage 3 block 2's `wait_script_flag 0x1E` is the hostage's, and flag 30
+ * comes off *either* of her streams -- the rescue's and the one she runs when
+ * she is shot. A tool that sprayed that gate would open it by killing her,
+ * which is the exact thing the civilian rule exists to refuse, and it would
+ * report the stage as playable. So: pass the flag when you know the gate in
+ * front of you is a boss, and read the "could NOT be cleared" list when you do.
+ *
  *   node tools/playthrough.mjs --stage 2
  *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
+ *   node tools/playthrough.mjs --stage 5 --shoot-flag-gates
  *
  * Exit status is 0 only if the stage reached an end block.
  */
@@ -175,13 +192,26 @@ function blockerRows(s) {
  */
 function shootable(s) {
   if (s.policy === "enemies") return true;
-  if (s.policy !== "civilians") return false;
+  // A **boss's** flag gate is shot at for the same reason an enemy gate is:
+  // the gate is waiting for an actor to die and the player's job is to kill
+  // it. It goes through the same civilian guard, because stage 3's
+  // `wait_script_flag 0x1E` is the hostage's and flag 30 comes off either of
+  // her streams -- so a sprayed gate could open by shooting her and report
+  // the stage playable. That is the one thing this tool must never do.
+  if (s.policy !== "civilians" && s.policy !== "flag") return false;
   return blockerRows(s).every((l) => l.includes(" · dead"));
 }
 
-/** One volley: pointer events across the frame, through the real shot path. */
-async function volley(page, box) {
-  const COLS = 5, ROWS = 4;
+/**
+ * One volley: pointer events across the frame, through the real shot path.
+ *
+ * The grid is coarse because a room full of zombies is a big target. A **boss**
+ * is one actor with a handful of bone spheres eighty units out, and a 5x4 grid
+ * walks straight past it -- so a gate that is one actor's death gets a denser
+ * sweep. Same events, same ray, same spheres; more of them.
+ */
+async function volley(page, box, cols = 5, rows = 4) {
+  const COLS = cols, ROWS = rows;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const x = box.x + (box.width * (c + 0.5)) / COLS;
@@ -308,6 +338,21 @@ try {
           for (const l of lines.slice(i, i + 6)) console.log(`    ${l.trim()}`);
         }
       }
+      if (!holders.length) {
+        // A `wait_script_flag` names no holder, so nothing above opened the
+        // actors panel -- and "is the actor that should raise this even on the
+        // field" is the first question about one. Ten lines of it is enough to
+        // answer that.
+        await page.click("#panel-actors summary").catch(() => {});
+        await sleep(400);
+        const actors = await page.locator("#panel-actors").innerText()
+          .catch(() => "");
+        const lines = actors.split("\n").filter((l) => l.trim()).slice(0, 10);
+        if (lines.length) {
+          console.log("");
+          for (const l of lines) console.log(`    ${l.trim()}`);
+        }
+      }
       console.log("");
       mkdirSync(SHOTS, { recursive: true });
       const path = resolve(SHOTS, `hang-stage${stage}.png`);
@@ -325,7 +370,10 @@ try {
       // frame, and the deadline it is measured against is a count of frames
       // this tool chose to run.
       volleys += 1;
-      await volley(page, box);
+      // A room full of zombies is a big target; a boss is one actor with a
+      // handful of bone spheres, and a 5x4 grid walks straight past it.
+      await volley(page, box,
+                   s.policy === "flag" ? 13 : 5, s.policy === "flag" ? 10 : 4);
       if (stalled >= SHOOT_FOR && !killedHere) {
         // The report, and it is only a report: the shooting above carries on.
         killedHere = true;
@@ -351,7 +399,14 @@ try {
         // summary — an actor inside its own `ActorFlag.ShotImmune` window,
         // which is a room that is slow rather than one that is unreachable.
         for (const l of blockerRows(s)) console.log(`        ${l}`);
-        await page.click('button[title^="Kill every live actor"]');
+        // **Only an enemy gate.** The debug clear takes actors out of the
+        // counts `wait_enemies_alive` reads, which is what makes it a way
+        // past that gate; a `wait_script_flag` is waiting for an actor to
+        // *do* something, and killing it from outside its own death states
+        // opens nothing.
+        if (s.policy === "enemies") {
+          await page.click('button[title^="Kill every live actor"]');
+        }
       }
     }
 

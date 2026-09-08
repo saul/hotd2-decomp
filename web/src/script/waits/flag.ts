@@ -99,15 +99,16 @@ let cache: {
  *
  * ## What is still excused, and what each one needs
  *
- * Stages 3 and 6 have nothing left to excuse. The rest are three unported
- * classes, and **every one of them is an enemy or a boss** -- the last prop
- * went with `class41/flag_prop.ts`, which raises flag 20 and lets stage 4's
- * block-2 gate be honoured:
+ * **14 of the game's 61 gates** are still excused, down from 50 when the two
+ * cards were unreachable and from 35 before class 0x14. Stages 2, 3 and 6
+ * have nothing left to excuse. The rest are three unported classes, and
+ * **every one is an enemy or a boss** -- the last prop went with
+ * `class41/flag_prop.ts`, which raises flag 20 and lets stage 4's block-2
+ * gate be honoured:
  *
  * | flag(s) | stages | writer |
  * |---|---|---|
- * | 20 | 10..17, 31 | **class 0x14** (`FUN_00475E90`), stage 2's blocks 35-41 and stage 4's 23-29. Its writes are spread over `0x00478350`..`0x0047BA6E`; flag 10's two are `0x0047835B` and `0x004785E4` |
- * | 4 | 32 | **class 0x19**'s death, `Boss4StateDeath` (`FUN_00495770`) at `0x004958C7`. The class **is** ported — see below |
+ * | 4 | 32 | **class 0x19**'s death, `Boss4StateDeath` (`FUN_00495770`) at `0x004958C7`. The class **is** ported; only its arena progression is not, and only that lifts the shot refusal that reaches the death |
  * | 3 | 0, 3 | **class 0x22** (`FUN_0049B0D0`) — the stage-1 and stage-5 boss, `0x0049CC85` and `0x0049CC95` |
  * | 2 | 30 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
  *
@@ -116,6 +117,12 @@ let cache: {
  * Class 0x32 is not small either: it is an enemy with thirteen states,
  * and declaring its flag without the actor would turn a stage that
  * completes into one that hangs.
+ *
+ * The row this table used to carry for class 0x14 said "stage 2's blocks 35-41
+ * **and stage 4's 23-29**", and the second half was wrong: stage 4 has no
+ * class-0x14 spawn at all, and its four blocks gate on 31 and 32, both of
+ * which class 0x19 writes. Flag 31 has two writers and the stage decides which
+ * one is in the room.
  *
  * The five reports that opened this line of work asked for "one spawn opcode
  * and two cue props"; the sweep that was written to check it says otherwise,
@@ -192,15 +199,18 @@ export function ScriptFlagsThisBundleCanRaise(
   // ...and the classes whose flag is a **literal in their own routine** rather
   // than a field of a descriptor, declared by the class module that ports it
   // — `ClassHandler.raisesScriptFlag`. Both spawn opcodes are walked, because
-  // the two the port has from `spawn_simple` are the cards and the one it has
-  // from `spawn_placed` is a class-0x41 prop.
+  // the two the port has from `spawn_simple` are the cards, and the placed
+  // ones are the bosses and a class-0x41 prop.
   const declared = (r: SpawnRecord): void => {
     const decl = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
     // A class may answer per record rather than per class: class 0x41's flag
-    // belongs to one of its 79 constructors and not to the class. See
+    // belongs to one of its 79 constructors and not to the class. And it may
+    // answer with several: class 0x14 writes nine. See
     // `ClassHandler.raisesScriptFlag`.
     const f = typeof decl === "function" ? decl(r) : decl;
-    if (f !== undefined) flags.add(f);
+    if (f === undefined) return;
+    if (typeof f === "number") flags.add(f);
+    else for (const one of f) flags.add(one);
   };
   for (const b of script.blocks ?? []) {
     for (const st of b.steps ?? []) {

@@ -1240,6 +1240,7 @@ skeleton", never became placements, and **the stage-4 boss had never appeared in
 a bundle**. The tail carries `0x4A` — `boss4.bin`, fifteen nodes — and with the
 rule fixed the four placements arrive with entrance states 0, 1, 2 and 3, the
 nineteen clips the class names, and a rig the ordinary writer builds.
+| `0x14` the stage-2 boss | motion **33** (`boss2.bin`), and the whole of that bank's **21–58** offered to `bake` | `Class14Init` (`FUN_00475E90`) seats anim slot `0xB`, and `g_class14_anim_slots[0xB]` names 33. The bank goes in whole because each of the 21 states measures its exit on the **play clock** of a clip it names, so an unbaked one is an actor that waits for ever rather than one that is posed wrongly. Before this rule existed **stage 5 had no character type 71 at all** — the boss it spawns had no skeleton, no hit spheres and no clips |
 
 A tempting general rule was tried and rejected: deriving the bank from the
 character's bone count. The stride `(bones*6+15) & ~3` must divide every block

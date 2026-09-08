@@ -280,13 +280,15 @@ export const G = {
    * `g_bHudShutterState` — `0x009CA0F4`. The HUD letterbox, states 0..8.
    *
    * **Here for exactly the reason `g_nFiringGate` above is here**, and it is
-   * the same argument one step on: a routine in `game/` now *reads* it and
-   * another one *writes* it, so a copy kept on the walker and mirrored across
-   * would be the second owner of one byte. `BossIntroBannerUpdate`
-   * (`FUN_00437AC0`) sets it to 1 at `0x00437F1E` — the only instruction in
-   * the image that puts the shutter into state 1 from inside a stage — and
-   * `Boss4StateEntranceCarried` (`FUN_004938B0`) reads it at `0x004938F6` to
-   * decide whether the fight has started. Neither is script code.
+   * the same argument one step on: routines in `game/` now read and write it,
+   * so a copy kept on the walker and mirrored across would be the second
+   * owner of one byte. `BossIntroBannerUpdate` (`FUN_00437AC0`) sets it to 1
+   * at `0x00437F1E` — the only instruction in the image that puts the shutter
+   * into state 1 from inside a stage — and **both bosses read it to decide
+   * that their fight has started**: `Boss4StateEntranceCarried`
+   * (`FUN_004938B0`) at `0x004938F6`, and every one of class 0x14's
+   * entrances, `Class14StateEntranceA` (`FUN_00478160`) at `0x0047834E`.
+   * None of the three is script code.
    *
    * `script/state/shutter.ts` remains the machine: `evt 0x1F` and the
    * 40-frame slide are its, and it reaches this byte through an accessor. The

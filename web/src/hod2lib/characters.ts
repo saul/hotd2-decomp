@@ -126,6 +126,57 @@ export function class53Tail(rec: Spawn): Record<string, unknown> {
            subtype: rec.param(0x02, "i16") || 0 };
 }
 
+/**
+ * Class 0x14's descriptor tail, as `Class14Init` (`FUN_00475E90`) reads it.
+ *
+ * `+0x00` the character type -- 0x47, `boss2.bin`, on all five shipped spawns
+ * -- and `+0x01` the state the stage-2 boss starts in, which is the only thing
+ * that tells stage 2's four alternative endings apart: 0, 1, 3 and 4 there and
+ * 2 in stage 5. `+0x04`..`+0x0C` is the route's forward direction, `+0x10`..
+ * `+0x2C` are four x/z corners of the patch of water it swims inside, and
+ * `+0x30`/`+0x32` are the camera path and frame that despawn it.
+ *
+ * Emitted under a class-named key for the reason class 0x20's and 0x52's are:
+ * the same two bytes are class 0x30's body condition and initial state.
+ */
+export function class14Tail(rec: Spawn): Record<string, unknown> {
+  const f = (at: number): number => rec.param(at, "f32") ?? 0;
+  return {
+    char_type: rec.param(0x00, "u8") || 0,
+    state: rec.param(0x01, "u8") || 0,
+    dir: [f(0x04), f(0x08), f(0x0c)],
+    // **Eight floats, not four vec3s.** `Class14Init` copies `tail+0x10` and
+    // `tail+0x14` to `state+0x28` and `state+0x30` -- the x and the z of the
+    // first corner, with the y between them left alone -- and repeats that
+    // four times at a stride of 8. Read as vec3s the quad comes out as
+    // `[660, -4900, 660]`, which is a corner with the next corner's x in its
+    // y, and the fourth reads past the record into the despawn cue.
+    route: [
+      [f(0x10), 0, f(0x14)],
+      [f(0x18), 0, f(0x1c)],
+      [f(0x20), 0, f(0x24)],
+      [f(0x28), 0, f(0x2c)],
+    ],
+    despawn_path: rec.param(0x30, "i16") || 0,
+    despawn_frame: rec.param(0x32, "i16") || 0,
+  };
+}
+
+/**
+ * Class 0x14's motion set: `boss2.bin`'s own bank, 21..58.
+ *
+ * Every clip the class names comes either from a literal in one of its 21
+ * states or from the first short of a `g_class14_anim_cues` record that
+ * `g_class14_anim_slots` (`0x00596408`) points at, and every one of those ids
+ * is in that range. **Every state measures its exit on the play clock of the
+ * clip it names**, so an unbaked clip is not cosmetic: `MotionPlayLength` is
+ * 0, the cursor never reaches the last frame, and the boss stands in the water
+ * for ever with its gate shut. The range is offered whole and `bake` refuses
+ * the ids that are authored for another skeleton.
+ */
+export const CLASS14_MOTIONS: number[] =
+  Array.from({ length: 58 - 21 + 1 }, (_unused, i) => 21 + i);
+
 export interface ResolvedCharacters {
   chars: Map<number, Character>;
   placements: Placement[];
@@ -391,6 +442,7 @@ export async function resolveForStage(
     const class20 = cls === 0x20 ? class20Tail(rec) : null;
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
+    const class14 = cls === 0x14 ? class14Tail(rec) : null;
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
@@ -469,6 +521,7 @@ export async function resolveForStage(
     p.class20 = class20;
     p.class52 = class52;
     p.class53 = class53;
+    p.class14 = class14;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
     // spawn wears. 97 of the game's spawns carry one and every list matches
     // its character's own family, which is what says the tail offsets are
@@ -538,6 +591,8 @@ export async function resolveForStage(
     }
     if (cls === 0x31) entryClips.push(...class31MotionIds(class31));
     if (cls === 0x19) entryClips.push(...BOSS4_CLIPS);
+    // The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
+    if (cls === 0x14) entryClips.push(...CLASS14_MOTIONS);
     // The emerge clip, the submerged pose it holds first, and the two clips
     // the delayed leap plays. An unbaked entrance is an actor standing in the
     // water.

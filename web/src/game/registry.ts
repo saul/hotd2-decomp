@@ -199,20 +199,32 @@ export interface ClassHandler {
    * captor's script entry and the bundle carries it, so it is read from the
    * data instead.
    *
-   * ## Why a class may answer with a function
+   * ## Why a class may answer with a number, a list, or a function
    *
-   * A plain number says *every* actor of this class raises that flag, which is
-   * true of the cards and false of class 0x41. `PropContainerPlacerUpdate`
-   * (`FUN_00461CD0`) dispatches on the record's own `+0x130C` to one of 79
-   * constructors, and only the object one of them builds —
-   * `PropUpdateType75` (`FUN_004710C0`) — writes `g_script_flags[20]`. There
-   * are 441 class-0x41 spawns across the six stages and exactly **one** of
-   * them is that object, so a class-wide number would tell every stage with
-   * any prop in it that flag 20 was coming. The function is handed the spawn
-   * record and answers for that record, which is the same question the
-   * engine's own dispatch asks.
+   * All three shapes are here because three different classes need them.
+   *
+   * A plain **number** says *every* actor of this class raises that flag,
+   * which is true of the cards.
+   *
+   * A **list** because one class can name several: class 0x14 writes nine —
+   * 10 through 17 and 31 — out of twelve instructions spread over its state
+   * machine, and which one an actor reaches depends on the phase its
+   * descriptor put it in. That is a declaration about the class, so it names
+   * all of them.
+   *
+   * A **function** because for class 0x41 it is not a property of the class
+   * at all. `PropContainerPlacerUpdate` (`FUN_00461CD0`) dispatches on the
+   * record's own `+0x130C` to one of 79 constructors, and only the object one
+   * of them builds — `PropUpdateType75` (`FUN_004710C0`) — writes
+   * `g_script_flags[20]`. There are 441 class-0x41 spawns across the six
+   * stages and exactly **one** of them is that object, so a class-wide answer
+   * would tell every stage with any prop in it that flag 20 was coming. The
+   * function is handed the spawn record and answers for that record, which is
+   * the same question the engine's own dispatch asks.
    */
-  raisesScriptFlag?: number | ((rec: SpawnRecord) => number | undefined);
+  raisesScriptFlag?: number | readonly number[]
+                   | ((rec: SpawnRecord) => number | readonly number[]
+                                          | undefined);
   /**
    * Describe one of this class's actors for the debug sidebar.
    *

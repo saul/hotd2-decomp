@@ -35,7 +35,7 @@ import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { MotionFlag } from "../src/game/actor";
+import { MotionFlag, type Boss2Actor } from "../src/game/actor";
 import { CameraPointRiseFor, UpdateCameraFreeFlag }
   from "../src/game/camera/track";
 import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
@@ -137,6 +137,11 @@ import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker } from "../src/script/walker";
 import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
+import {
+  Boss2Handler, CLASS14_FLAG_DEAD, CLASS14_FLAG_DEAD_STAGE5,
+  CLASS14_FLAG_INTRO_DONE, CLASS14_FLAG_ROUND_B_OPEN, Class14AdvancePhase,
+  Class14Phase, Class14State,
+} from "../src/game/class14";
 import { ScriptFlagsThisBundleCanRaise }
   from "../src/script/waits/flag";
 import { CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES }
@@ -8072,6 +8077,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
   const want: [SpawnClass, string][] = [
     [SpawnClass.Civilian, "0x10 civilian"],
     [SpawnClass.Boss4, "0x19 stage-4 boss"],
+    [SpawnClass.Boss2, "0x14 stage-2 boss"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
@@ -10908,6 +10914,262 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
     sh.step(SHUTTER_FRAMES);
     check("...and the slide still finishes into state 2",
           sh.state === 2, `state ${sh.state}`);
+  }
+}
+
+/**
+ * Class 0x14 — the stage-2 boss, and the twenty-one `wait_script_flag` gates
+ * it is the only writer of.
+ *
+ * Every assertion here fails without `game/class14/`: the flags come off the
+ * boss's own phase ladder and its own death, and with no module the actor has
+ * no update at all.
+ */
+{
+
+  /**
+   * `boss2.bin`, with the clips the states name. Play lengths are the real
+   * ones out of the exported bundle, because **every state measures its exit
+   * on the play clock**: deriving them from the frame count would be a second
+   * implementation of the thing the bundle carries.
+   */
+  const TYPE14: CharacterType = {
+    ...TYPE,
+    type: 0x47, name: "boss2", file: "boss2.bin",
+    motions: {
+      ...TYPE.motions,
+      "21": motion(50, 0, 98), "23": motion(55, 0, 108),
+      "24": motion(50, 0, 98), "25": motion(25, 0, 48),
+      "26": motion(33, 0, 64), "29": motion(25, 0, 48),
+      "31": motion(35, 0, 68), "32": motion(65, 0, 128),
+      "33": motion(60, 0, 118), "34": motion(56, 0, 109),
+      "35": motion(30, 0, 58), "36": motion(31, 0, 59),
+      "37": motion(41, 0, 79), "38": motion(76, 0, 149),
+      "39": motion(20, 0, 38), "40": motion(26, 0, 50),
+      "41": motion(35, 0, 68), "42": motion(30, 0, 58),
+      "45": motion(61, 0, 119), "46": motion(25, 0, 48),
+      "47": motion(25, 0, 48), "48": motion(51, 0, 99),
+      "49": motion(101, 0, 199), "51": motion(86, 0, 169),
+      "53": motion(15, 0, 28), "54": motion(25, 0, 48),
+      "55": motion(61, 0, 119), "56": motion(66, 0, 129),
+      "57": motion(66, 0, 129), "58": motion(40, 0, 78),
+    },
+  };
+  const CHARS14 = {
+    ...CHARS, types: { "1": TYPE, "71": TYPE14 },
+  } as unknown as CharactersJson;
+
+  /** Stage 5 block 3's descriptor tail, as the bundle now carries it. */
+  const desc14 = (state: number) => ({
+    char_type: 0x47, state,
+    dir: [0, 0, 1] as [number, number, number],
+    route: [[660, 0, -4900], [660, 0, -5000],
+            [510, 0, -5000], [510, 0, -4900]] as [number, number, number][],
+    despawn_path: 209, despawn_frame: 0,
+  });
+
+  /**
+   * Narrowing, not a cast — the same proof `spawnZombie` makes: `makeActor`
+   * picks the union arm from `cls`, so a fixture that wants to read the boss's
+   * tail has to establish the class rather than assert it.
+   */
+  const spawnBoss = (state: number, hp: number): Boss2Actor => {
+    ResetGameGlobals();
+    SetGameTables(CHARS14);
+    const a = ActorSpawn(0x2400, SpawnClass.Boss2, 0x47, "boss2",
+                         { class14: desc14(state) }, new Rng(7));
+    if (a.cls !== SpawnClass.Boss2) throw new Error("not class 0x14");
+    a.pos = vec3(580, 0, -5010);
+    a.hp = hp;
+    a.maxHp = hp;
+    a.visible = true;
+    return a;
+  };
+
+  const boss14Frame = () =>
+    ({ eye: vec3(580, 0, -4880), dt: 1 / 60, rng: new Rng(11),
+       host: NULL_HOST });
+
+  /**
+   * The entrance's one hand-over: `g_bHudShutterState == 1` and nothing else.
+   * Entrances 0/1/3/4 raise flag 10 on the way through and entrance 2 does not
+   * -- which is exactly why stage 5's block 3 gates on 31 alone.
+   */
+  {
+    const a = spawnBoss(Class14State.Entrance0, 300);
+    const f = boss14Frame();
+    G.g_bHudShutterState = 2;
+    for (let i = 0; i < 4000 && a.boss2.state !== Class14State.Hunt; i++) {
+      // The shutter opens well into the entrance, as the script's own
+      // `hud_shutter_state 1` does.
+      if (i === 600) G.g_bHudShutterState = 1;
+      Boss2Handler.update(a, f);
+      ActorAdvanceMotion(a, 1 / 60);
+    }
+    check("entrance 0 hands over to Hunt when the shutter opens",
+          a.boss2.state === Class14State.Hunt,
+          `state ${Class14State[a.boss2.state]} sub ${a.boss2.sub}`);
+    check("...and raises g_script_flags[10] doing it",
+          G.g_script_flags[CLASS14_FLAG_INTRO_DONE] === 1,
+          `flag10 ${G.g_script_flags[CLASS14_FLAG_INTRO_DONE]}`);
+    check("...leaving the phase at ShortOpen",
+          a.boss2.phase === Class14Phase.ShortOpen,
+          `phase ${Class14Phase[a.boss2.phase]}`);
+  }
+  {
+    const a = spawnBoss(Class14State.Entrance2, 200);
+    const f = boss14Frame();
+    G.g_bHudShutterState = 2;
+    // Entrance 2's sub 1 waits on `g_script_flags[11]`, which stage 5's script
+    // raises four instructions before the spawn.
+    G.g_script_flags[CLASS14_FLAG_ROUND_B_OPEN] = 1;
+    for (let i = 0; i < 4000 && a.boss2.state !== Class14State.Hunt; i++) {
+      if (i === 600) G.g_bHudShutterState = 1;
+      Boss2Handler.update(a, f);
+      ActorAdvanceMotion(a, 1 / 60);
+    }
+    check("entrance 2 hands over on the same shutter",
+          a.boss2.state === Class14State.Hunt,
+          `state ${Class14State[a.boss2.state]}`);
+    check("...and raises no flag 10, which is why stage 5 waits on 31 alone",
+          (G.g_script_flags[CLASS14_FLAG_INTRO_DONE] ?? 0) === 0,
+          `flag10 ${G.g_script_flags[CLASS14_FLAG_INTRO_DONE]}`);
+    check("...leaving the phase at Stage5Open",
+          a.boss2.phase === Class14Phase.Stage5Open,
+          `phase ${Class14Phase[a.boss2.phase]}`);
+  }
+
+  // `Class14AdvancePhase` -- the ladder, walked by the hit points and by
+  // nothing else. Stage 5's half of it is one step: 0.5 of full health.
+  {
+    const a = spawnBoss(Class14State.Entrance2, 200);
+    a.boss2.state = Class14State.Hunt;
+    a.boss2.phase = Class14Phase.Stage5Open;
+    a.hp = 101;
+    Class14AdvancePhase(a);
+    const held: number = a.boss2.phase;
+    check("the phase holds above g_class14_phase_hp_frac[8]",
+          held === Class14Phase.Stage5Open, `${Class14Phase[held]}`);
+    a.hp = 100;
+    Class14AdvancePhase(a);
+    const stepped: number = a.boss2.phase;
+    const steppedState: number = a.boss2.state;
+    check("...and steps to Stage5Final at exactly half",
+          stepped === Class14Phase.Stage5Final
+          && steppedState === Class14State.Close,
+          `phase ${Class14Phase[stepped]} state ${Class14State[steppedState]}`);
+    // The gate every arm carries: a boss mid-leap finishes it first.
+    const b = spawnBoss(Class14State.Entrance2, 200);
+    b.boss2.state = Class14State.LeapAttack;
+    b.boss2.phase = Class14Phase.Stage5Open;
+    b.hp = 1;
+    Class14AdvancePhase(b);
+    const mid: number = b.boss2.phase;
+    check("...and no arm is taken while the boss is not in state 5, 6 or 7",
+          mid === Class14Phase.Stage5Open, `${Class14Phase[mid]}`);
+  }
+
+  // The death fork, which is where all twenty-one gates are finally opened.
+  // Phase alone picks the flag.
+  for (const [phase, flag, state] of [
+    [Class14Phase.ShortFinal, CLASS14_FLAG_DEAD, Class14State.DeathA],
+    [Class14Phase.LongFinal, CLASS14_FLAG_DEAD, Class14State.DeathB],
+    [Class14Phase.Stage5Final, CLASS14_FLAG_DEAD_STAGE5, Class14State.DeathC],
+  ] as [Class14Phase, number, Class14State][]) {
+    const a = spawnBoss(Class14State.Entrance2, 200);
+    const f = boss14Frame();
+    a.boss2.phase = phase;
+    a.boss2.state = Class14State.CuedMotion;
+    a.boss2.sub = 0;
+    a.boss2.nextState = Class14State.Hunt;
+    a.hp = 0;
+    a.flags |= ActorFlag.Dead;
+    for (let i = 0; i < 400 && a.boss2.state === Class14State.CuedMotion; i++) {
+      Boss2Handler.update(a, f);
+      ActorAdvanceMotion(a, 1 / 60);
+    }
+    check(`a death in ${Class14Phase[phase]} raises `
+          + `g_script_flags[${flag}] and enters ${Class14State[state]}`,
+          G.g_script_flags[flag] === 1 && a.boss2.state === state,
+          `flag ${G.g_script_flags[flag]} `
+          + `state ${Class14State[a.boss2.state]}`);
+    check("...and raises nothing else",
+          [10, 11, 12, 13, 14, 15, 16, 17, 31]
+            .filter((n) => n !== flag)
+            .every((n) => (G.g_script_flags[n] ?? 0) === 0),
+          `${G.g_script_flags.map((v, i) => (v ? i : -1))
+              .filter((i) => i >= 0).join(",")}`);
+  }
+
+  /**
+   * End to end, on stage 5 block 3's own descriptor: the entrance, the
+   * shutter, the fight, two hundred hit points of shooting, and
+   * `g_script_flags[31]`.
+   *
+   * The shots go through `MarkActorShot`, which is what the real shot path
+   * does for a class that owns its own result -- `Class14ResolveShotBone`
+   * reads `obj+0x34` bit 3 and runs `Class14ApplyBoneDamage` itself, and
+   * nothing here goes near `ResolveHit`.
+   */
+  {
+    const a = spawnBoss(Class14State.Entrance2, 200);
+    const f = boss14Frame();
+    G.g_bHudShutterState = 2;
+    G.g_script_flags[CLASS14_FLAG_ROUND_B_OPEN] = 1;
+    let shots = 0;
+    let frames = 0;
+    for (; frames < 60000
+           && (G.g_script_flags[CLASS14_FLAG_DEAD_STAGE5] ?? 0) === 0;
+         frames++) {
+      if (frames === 300) G.g_bHudShutterState = 1;
+      if (frames > 400 && frames % 12 === 0) {
+        MarkActorShot(a, 0, 1);
+        shots += 1;
+      }
+      Boss2Handler.update(a, f);
+      ActorAdvanceMotion(a, 1 / 60);
+    }
+    check("shot to death from stage 5's descriptor, the boss raises "
+          + "g_script_flags[31]",
+          G.g_script_flags[CLASS14_FLAG_DEAD_STAGE5] === 1,
+          `after ${frames} frames and ${shots} shots, `
+          + `hp ${a.hp} phase ${Class14Phase[a.boss2.phase]} `
+          + `state ${Class14State[a.boss2.state]}`);
+    check("...having walked the phase ladder to Stage5Final on the way",
+          a.boss2.phase === Class14Phase.Stage5Final,
+          `phase ${Class14Phase[a.boss2.phase]}`);
+    check("...and raised flag 17 nowhere, which is stage 2's flag",
+          (G.g_script_flags[CLASS14_FLAG_DEAD] ?? 0) === 0,
+          `flag17 ${G.g_script_flags[CLASS14_FLAG_DEAD]}`);
+  }
+
+  // ...and the coverage set, which decides whether `wait_script_flag` even
+  // evaluates the gate. Both directions.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS14);
+    const spawnScript = (cls: number) => ({
+      scene: 0, stage: 5, game_mode: 0, evt_file: "test", entry_block: 0,
+      entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+      regions: [], cam_slots_used: [], warnings: [],
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [
+          { i: 0, at: 0x100, op: 0x0c, name: "spawn_obj_c", cat: "spawn",
+            spawns: [{ at: 0x2400, class: cls, flags: 0, pos: [0, 0, 0],
+                       yaw_deg: 0, orient: [0, 0, 0], hp: 200,
+                       desc_flags: 0 }] },
+        ] }],
+      }],
+    } as unknown as ScriptJson);
+    const withBoss = ScriptFlagsThisBundleCanRaise(spawnScript(0x14));
+    check("a stage that spawns class 0x14 can raise all nine of its flags",
+          [10, 11, 12, 13, 14, 15, 16, 17, 31].every((n) => withBoss.has(n)),
+          `${[...withBoss].sort((x, y) => x - y).join(",")}`);
+    const without = ScriptFlagsThisBundleCanRaise(spawnScript(0x30));
+    check("...and one that does not, cannot",
+          ![10, 17, 31].some((n) => without.has(n)),
+          `${[...without].sort((x, y) => x - y).join(",")}`);
   }
 }
 

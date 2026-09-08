@@ -192,6 +192,8 @@ __all__ = [
     "SLOT_DRAWN_CLASSES",
     "class52_tail",
     "class53_tail",
+    "class14_tail",
+    "CLASS14_MOTIONS",
     "DEATH_BACK",
     "DEATH_FRONT",
     "DEATH_LEFT",
@@ -364,6 +366,58 @@ def class53_tail(rec) -> dict:
     """
     return {"anim_set": rec.param(0x00, "i16") or 0,
             "subtype": rec.param(0x02, "i16") or 0}
+
+
+def class14_tail(rec) -> dict:
+    """Class 0x14's descriptor tail, as `Class14Init` (`FUN_00475E90`) reads it.
+
+    ``+0x00`` the character type -- 0x47, `boss2.bin`, on all five shipped
+    spawns -- and ``+0x01`` the state the stage-2 boss starts in, which is the
+    only thing that tells stage 2's four alternative endings apart: 0, 1, 3 and
+    4 there and 2 in stage 5. ``+0x04``..``+0x0C`` is the route's forward
+    direction, ``+0x10``..``+0x2C`` are four x/z corners of the patch of water
+    it swims inside, and ``+0x30``/``+0x32`` are the camera path and frame that
+    despawn it.
+
+    Emitted under a class-named key for the reason class 0x20's and 0x52's are:
+    the same two bytes are class 0x30's body condition and initial state.
+    """
+    def f(at: int) -> float:
+        v = rec.param(at, "f32")
+        return 0.0 if v is None else v
+    return {
+        "char_type": rec.param(0x00, "u8") or 0,
+        "state": rec.param(0x01, "u8") or 0,
+        "dir": [f(0x04), f(0x08), f(0x0C)],
+        # **Eight floats, not four vec3s.** `Class14Init` copies ``tail+0x10``
+        # and ``tail+0x14`` to ``state+0x28`` and ``state+0x30`` -- the x and
+        # the z of the first corner, with the y between them left alone -- and
+        # repeats that four times at a stride of 8. Read as vec3s the quad
+        # comes out as ``[660, -4900, 660]``, a corner carrying the next
+        # corner's x in its y, and the fourth reads past the record into the
+        # despawn cue.
+        "route": [
+            [f(0x10), 0.0, f(0x14)],
+            [f(0x18), 0.0, f(0x1C)],
+            [f(0x20), 0.0, f(0x24)],
+            [f(0x28), 0.0, f(0x2C)],
+        ],
+        "despawn_path": rec.param(0x30, "i16") or 0,
+        "despawn_frame": rec.param(0x32, "i16") or 0,
+    }
+
+
+#: Class 0x14's motion set: `boss2.bin`'s own bank, 21..58.
+#:
+#: Every clip the class names comes either from a literal in one of its 21
+#: states or from the first short of a `g_class14_anim_cues` record that
+#: `g_class14_anim_slots` (0x00596408) points at, and every one of those ids is
+#: in that range. **Every state measures its exit on the play clock of the clip
+#: it names**, so an unbaked clip is not cosmetic: `MotionPlayLength` is 0, the
+#: cursor never reaches the last frame, and the boss stands in the water for
+#: ever with its gate shut. The range is offered whole and `bake` refuses the
+#: ids authored for another skeleton.
+CLASS14_MOTIONS: tuple[int, ...] = tuple(range(21, 59))
 
 
 def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
@@ -624,6 +678,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         class20 = class20_tail(rec) if sp["class"] == 0x20 else None
         class52 = class52_tail(rec) if sp["class"] == 0x52 else None
         class53 = class53_tail(rec) if sp["class"] == 0x53 else None
+        class14 = class14_tail(rec) if sp["class"] == 0x14 else None
         tscript = ascript = None
         camera_cue = None
         if sp["class"] == 0x30:
@@ -697,6 +752,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class20=class20,
             class52=class52,
             class53=class53,
+            class14=class14,
             hp=sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note
@@ -752,6 +808,9 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             entry_clips += class31_motion_ids(class31)
         if sp["class"] == 0x19:
             entry_clips += list(BOSS4_CLIPS)
+        # The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
+        if sp["class"] == 0x14:
+            entry_clips += list(CLASS14_MOTIONS)
         # Class 0x10 chooses its clips from the **exe's** command streams, and
         # from every stream those can branch to: ops 0x0E/0x0F/0x1E/0x1F carry
         # pointers to further streams, and a civilian that is shot spends the

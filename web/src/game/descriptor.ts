@@ -80,6 +80,10 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // shared field would have one class read the other's.
     class52: p?.class52 ?? null,
     class53: p?.class53 ?? null,
+    // Class 0x14's, on the same terms: `Class14Init` (`FUN_00475E90`) reads
+    // `tail+0x00` as a character type and `tail+0x01` as the state the boss
+    // starts in, which are class 0x30's body condition and initial state.
+    class14: p?.class14 ?? null,
     // The spawn record's own flags word — `ActorInitFlags` (`FUN_00408970`)
     // makes it `obj+0x34` before the class's `Init` ORs its own bits on.
     flags: p?.init_flags ?? 0,

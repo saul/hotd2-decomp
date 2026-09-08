@@ -392,6 +392,9 @@ class Placement:
     #: Class 0x53's tail -- ``{anim_set, subtype}``. Subtype 2 and up is a
     #: shootable route-branch trigger; see :func:`characters.class53_tail`.
     class53: dict | None = None
+    #: Class 0x14's tail -- the stage-2 boss's state, route quad and despawn
+    #: cue; see :func:`characters.class14_tail`.
+    class14: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -466,4 +469,6 @@ class Placement:
             d["class52"] = self.class52
         if self.class53:
             d["class53"] = self.class53
+        if self.class14:
+            d["class14"] = self.class14
         return d

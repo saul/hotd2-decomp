@@ -26,9 +26,9 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "9e1cb2f284df4472003881acca513f498c311dc4994b0f060937f894d83ae37d",
+  "characters.ts": "4742ca9e0cdd5ca02974e5a7130a8a151b0d9b2ec55c27979a158b101cefed7c",
   "charbuild.ts": "66092406316023adedd80ae81732b891601105731e1de469348c08ceb1051528",
-  "charmotion.ts": "2dd4c40735e4c634967b2e821cbe3d8c348f9fb3827bca0e98a1a93cfed1064d",
+  "charmotion.ts": "f8f98ee08cf5c041088d7437aa2d48a74317179760ad6f987473072927be4a7a",
   "class31.ts": "92eddede0017e448c05697810f1b3cd1112340d1ddae676bb682b940e0e22aea",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
   "combat.ts": "f87078545c6f35c1b6761466ea34c36122dedfefce3d753023871cea8baaa8a7",
@@ -41,7 +41,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "114f3ffa4e967dcdb69ea6919ec21b83d6ff9d1f6754d2a7f9e0fd1d3d1a3952",
   "nl1.ts": "317558dbf8e53791395e7dd24c85b18487576ee110545cc284b6ab65cdff82bd",
-  "placement.ts": "6b508e31e5478c09d3b81e93b8aa99b81456e00100ba115bd9675b2600aec39c",
+  "placement.ts": "7c2ca5aa6aa76611be662a8b7ee245b3364503e4fff2fed4d180d9ac7773a94f",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "7186ef2c37d5b64e8893cee5b51e1894f09972ce14c7f487f10e125e2e49bc30",
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
@@ -55,4 +55,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "a60cabafb97bad7f57b471a617302b6994f765a30372f98099643b965fff2b79";
+export const BUILDER_HASH = "c972b7eb24c1fae3c023fdc4e5d40184c7744d75a510ea38938a5a8151cc2131";

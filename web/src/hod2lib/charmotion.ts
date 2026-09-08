@@ -98,6 +98,12 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // `CivilianInit` writes `model+0x20 = 0x294` -- motion 660, from
   // `people.bin` -- before it runs a line of script.
   0x10: ["literal", 0x294],
+  // `Class14Init` (`FUN_00475E90`) writes `state->animSlot = 0xB` and then
+  // `char->motion = *(s16 *)g_class14_anim_slots[0xB]`, which is 33. Without a
+  // rule here the stage-2 boss resolves to a character with no motion and the
+  // exporter builds no skeleton for it at all -- stage 5, whose only class-0x14
+  // spawn is its own, had no character type 71 in its bundle.
+  0x14: ["literal", 33],
   0x30: ["literal", 0x3bc],
   0x31: ["by_char", { 0x17: 0x1ba }, 0x3a8],
   0x53: ["table", 0x00589a64, 10, 0x00, "i16"],

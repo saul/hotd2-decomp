@@ -14,6 +14,14 @@ export enum SpawnClass {
   /** `FUN_0048A3E0` — civilian / rescuable victim. Shooting one costs a life. */
   Civilian = 0x10,
   /**
+   * `Class14Init` (`FUN_00475E90`) — **the stage-2 boss**, character type
+   * `0x47` = `boss2.bin`, and the only class in the game with twelve
+   * `g_script_flags` writers of its own. Five spawns: stage 2 blocks 35, 37,
+   * 39 and 41 (four alternative endings, one per route) and stage 5 block 3.
+   * Ported (`game/class14/`).
+   */
+  Boss2 = 0x14,
+  /**
    * `Boss4Init` (`FUN_004917E0`) — **the stage-4 boss**, character type `0x4A`
    * (`boss4.bin`, 15 nodes), 300 hit points, four spawns and no others in the
    * game. Its descriptor tail carries fifteen per-bone model pointers, one per

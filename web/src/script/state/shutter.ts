@@ -22,9 +22,11 @@
  * gate, because the routine that reads it — `PlayerFireAndReloadUpdate`
  * (`FUN_00414940`) — is in `game/`, and a value written here and copied there
  * would be exactly the second owner of one word this file was written to
- * avoid. The three fields that stay are the shutter's own: the exe's
- * `g_bHudShutterState`, `g_bHudShutterPrev` and the draw task's counter are
- * script state and nothing outside the script reads them.
+ * avoid. **`g_bHudShutterState` went the same way, and for the same reason:**
+ * class 0x14's three entrances hand the stage-2 boss over to its fight on
+ * `g_bHudShutterState == 1` and on nothing else, and they are in `game/`. The
+ * two that stay are `g_bHudShutterPrev` and the draw task's counter, which no
+ * gameplay routine reads.
  *
  * Registered as state the way `channels.ts` and `queued.ts` are: the walker
  * owns one of these and exposes `shutterState`, `shutterPrev`,

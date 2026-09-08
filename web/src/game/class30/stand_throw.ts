@@ -22,8 +22,12 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, type Actor, type ZombieActor } from "../actor";
+import { ActorFlag, ZombieAux, type Actor, type ZombieActor } from "../actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
+import {
+  ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
+} from "../combat/counts";
+import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
 import { AttackListOf, CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
@@ -218,23 +222,74 @@ export function ZombieStateStandAndThrow(obj: ZombieActor, eye: Vec3, rng: Rng,
     obj.zom.throwDelay -= 1;
     if (obj.zom.throwDelay >= 1) return;
     ZombieStandAndThrowLeave(obj, tail);
+    // `case 5` falls **into** the sub-6 tail on the same frame — the retire
+    // arm ends at `LAB_00459562` rather than returning — so an actor that has
+    // just entered sub 6 runs its first idle-and-count frame now. The other
+    // two arms have left state 33 entirely and the test below is false.
   }
-  // Sub 6 is the despawn arm, reached only when `obj+0x38` bit 0x10 is set.
-  // [open] Nothing read so far sets that bit and `ActorInitFlags` zeroes the
-  // word, so no shipped spawn takes it.
+
+  // `case 6:` — the arm every later frame takes.
+  if ((obj.sub as number) === Sub.Gone) {
+    ZombieStandAndThrowWaitToVanish(obj, idle, rng);
+  }
 }
 
 /**
- * The way out: state 15 with a distance, or state 26 with a point.
+ * Sub 6 — `LAB_00459562`, the tail the retire arm falls into and the one
+ * `case 6` jumps to on every later frame.
  *
- * Both are entered at **sub 1**, which is why those two states have a sub-1
- * arm that skips their own descriptor read — the fields are already on the
- * actor. And the walk arm raises `obj+0x34` bit `0x20000000`, which is the
- * arm of `ZombieStateWalkDistance` that retires the actor instead of sending
- * it at the camera: this is the one place in the game that reaches it.
+ * It plays the idle and does one thing: counts the descriptor's `+0x1C` delay
+ * down **only while the room is otherwise clear**, and despawns at the end of
+ * it. The actor has already given both enemy counters back, so the block it is
+ * in has already advanced; this is the body standing there afterwards.
+ */
+function ZombieStandAndThrowWaitToVanish(obj: ZombieActor, idle: number,
+                                         rng: Rng): void {
+  ZombieSetMotionIfIdle(obj, idle, rng, "clip", MotionFade.Quick);
+  // `if (g_enemies_present < 1 && g_players_in_play != 0 &&
+  //     --obj+0x1330 < 1 && (obj+0x38 & 0x10)) ActorDespawn(obj)`
+  // — a short-circuit chain, so the delay does not tick at all until the
+  // present count has reached zero.
+  if (G.g_enemies_present >= 1 || G.g_players_in_play === 0) return;
+  obj.zom.throwDelay -= 1;
+  if (obj.zom.throwDelay >= 1) return;
+  if (!(obj.flags38 & ZombieAux.StandThrowRetire)) return;
+  ActorDespawn(obj);
+}
+
+/**
+ * The way out: **stand still and be retired**, or state 15 with a distance, or
+ * state 26 with a point.
+ *
+ * `obj+0x38` bit 0x10 chooses, and it is the whole of the first branch —
+ * `0045945C  TEST byte ptr [ESI + 0x38], 0x10` (`f6463810`). It is not a test
+ * of the level: {@link ZombieAux.StandThrowRetire} is a **spawn-record bit**,
+ * moved out of `obj+0x34` by `EnemyZombieInitByCharType` (`FUN_00452FD0`), and
+ * exactly two records in the shipped game set it — stage 3 block 2 step 4's
+ * two axe men, who stand against a building with nowhere behind them.
+ *
+ * `ZombieStateWalkDistance` itself has no such test — `FUN_00457220` measures
+ * a distance travelled and nothing else, and the world push at that point in
+ * stage 3 is `coli3.bin+0x2EA0`, thirty-one quads of flat water at `y = -25`
+ * — so with the bit unmodelled the port walked both of them twenty-five units
+ * backwards through the wall and held `wait_enemies_alive` for the hundred
+ * frames it took.
+ *
+ * The other two arms are entered at **sub 1**, which is why those two states
+ * have a sub-1 arm that skips their own descriptor read — the fields are
+ * already on the actor. And the walk arm raises `obj+0x34` bit `0x20000000`,
+ * which is the arm of `ZombieStateWalkDistance` that retires the actor instead
+ * of sending it at the camera: this is the one place in the game that reaches
+ * it.
  */
 function ZombieStandAndThrowLeave(obj: ZombieActor,
                                   tail: Actor["standThrow"]): void {
+  if (obj.flags38 & ZombieAux.StandThrowRetire) {
+    ZombieStandAndThrowRetire(obj, tail);
+    return;
+  }
+  // `uVar6 = obj+0x34 & 0xfeffffff` — inside this branch only, so the retire
+  // arm above leaves the bit up.
   obj.flags &= ~ActorFlag.HoldingWeapon;
   if (tail?.leap) {
     obj.state = ZombieState.DelayedLeap;
@@ -252,4 +307,34 @@ function ZombieStandAndThrowLeave(obj: ZombieActor,
   obj.walkDistance = obj.zom.targetArrive;
   obj.state = ZombieState.WalkDistance;
   obj.sub = 1;
+}
+
+/**
+ * The retire arm — `0045946A`..`00459560`, the `else` of that same test.
+ *
+ * It gives everything back **on the spot**: both enemy counters, the attack
+ * permit, the camera slot, then raises `NoCameraTrack` and `ShotImmune` so the
+ * body is neither looked at nor shootable, latches the descriptor's `+0x1C`
+ * delay and drops into sub 6. The actor never moves and never changes state
+ * again.
+ *
+ * The two counters going at once is what "the game just carries on" is: the
+ * `wait_enemies_alive` this actor was holding opens on this frame, a hundred
+ * frames before the walk-away arm would have reached its twenty-five units.
+ */
+function ZombieStandAndThrowRetire(obj: ZombieActor,
+                                   tail: Actor["standThrow"]): void {
+  ReleaseEnemyAliveCount(obj);
+  ReleaseEnemyPresentCount(obj);
+  ReleaseAttackSlot(obj);
+  // `if (obj+0x120 != -1) g_enemy_slots[obj+0x120 * 8] = 0` — inlined here
+  // rather than reached through `ZombieReleasePermitAndUntrack`. The port
+  // keeps `g_enemy_slots` as the list of spawn addresses the fill rebuilds
+  // each frame, so dropping this actor from it is the same statement.
+  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  // `if ((obj+0x38 & 0x40) && obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0` — the
+  // hit-slot system is not ported at all; see `Actor.flags38`.
+  obj.zom.throwDelay = tail?.leave_delay ?? 0;
+  obj.sub = Sub.Gone;
+  obj.flags |= ActorFlag.NoCameraTrack | ActorFlag.ShotImmune;
 }

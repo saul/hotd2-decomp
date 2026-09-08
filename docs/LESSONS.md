@@ -283,3 +283,50 @@ scripted edit-run-restore cycle**, or run the mutants with
 `PYTHONDONTWRITEBYTECODE=1`. And when a tool disagrees with the file in front
 of you, suspect a cache before you suspect the reading -- this had me most of
 the way through rewriting a check that was already correct.
+
+**L32 -- A search over decoded operands is a search over one addressing mode.**
+Estimating what was left to port before `wait_script_flag` could be honoured, I
+swept the image for writers of `g_script_flags` with an operand pattern of
+`0x9c7200` and got fifteen hits, all of the `MOV byte ptr [ECX + 0x9c7200]`
+form. The literal form is rendered `[0x009c72f8]`, which **does not contain the
+substring `0x9c7200`**, so every writer that names a flag by its own address
+was invisible: both banner cards, the boss, class 0x14's eight, class 0x32's
+two. The estimate that went into the last report -- "one spawn opcode and two
+cue props" -- was built on that, and the two cue props turned out to open no
+gate at all while four unported enemy classes did. Searching for the bare
+`9c72` found 155. **Search for the address without the `0x`, and cross-check
+with a byte-pattern search for the little-endian bytes** (`fe729c00` found the
+one instruction in the image that names `g_script_flags[254]`, which the
+operand search and `get_xrefs_to` had both missed as a *write*).
+
+**L33 -- Regenerate the bundle hashes before you export, not after.**
+`schema_hash.ts` and `builder_hash.ts` are baked into each bundle as it is
+written, and the loader refuses a bundle whose stamp does not match the tree.
+Change the exporter, export, *then* regenerate, and every bundle on disk
+carries the old stamp: the page stops at the loading overlay with the message
+inside it and **nothing on the console but a 404**, which under a headless
+harness is indistinguishable from a hang -- six stages timing out on
+`waitForSelector('#loading')`. The order is exporter, hashes, export. L24's
+"a version stamp has to cover whatever decides the bytes" is the same rule
+seen from the other side.
+
+**L34 -- "Only one arm can be taken" is a claim about the data, and it does not
+tell you *which* arm.** Class 0x25's `op 10` is `if (g_active_player == mode)`,
+and the port implemented it as an unconditional step with a comment saying that
+one player is the port's only configuration, so "taking the matching arm is the
+same decision". It is the same decision only if the arms are interchangeable,
+and they are not: the arm an `op 10` guards is very often `op 18`, `ActorKill`.
+The two spawns at one point in stage 3's block 2 are the player's own character
+and the second player's, each with a kill behind the test that says *the active
+player is the other one* -- so falling through killed both, and every
+third-person cut scene in the game lost its foreground. Across the twelve
+bundles, 110 of 274 class-0x25 spawns ran a kill on the frame they were made.
+
+It is L27's shape one step further on. L27 is a test the engine does not have;
+this is a test the engine **does** have, deleted because its outcome looked
+predetermined. Neither survives contact with the shipped data, and the way to
+find out is the same in both cases: enumerate what the branch actually guards
+across every stage before collapsing it. A collapse also hides upstream --
+nothing had followed `op 10`'s second edge in the exporter either, so the arm
+the actor really runs was not in the bundle at all and no amount of reading the
+port would have shown it.

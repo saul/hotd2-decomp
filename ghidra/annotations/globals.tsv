@@ -257,6 +257,7 @@
 009a3794	g_damage_rank_pending	Accumulates rank adjustments -- PlayerTakeDamage subtracts 2 -- and UpdateDamageRank adds it in and clears it on its next pass.
 009a37e0	g_motion_slots	motion id -> {u32 base; u32 state}, state 2 = resident
 009a58f8	g_hit_result	int[2], per player, written by ResolveHit: 0 = nothing, 1 = damaged and part swapped, 2 = damaged only, 3 = severed, 5 = no effect (the effect table's `2` sentinel). Result 5 scores nothing.
+009a5900	g_screen_furniture_flags	A bit set the screen-furniture classes own. ChapterCardInstall ORs 0x20 in on its first frame and clears it as it raises g_script_flags[0xF8]; ResultCardInstall does the same with 0x10 against g_script_flags[0xFE]. Read by the HUD/draw side, which the port does not have.
 009a5920	g_route_history
 009a59e0	g_scene_light_block1
 009a5c34	g_carrier_object	the current rideable object. ZombieStateRideCarrier (class 0x30 state 29) adds this object's +0x40/44/48 to its own recorded spawn position every frame and leaves when the carrier raises its obj+0x34 bit 0x10000000; ZombieStateDelayedStrikeInPlace (state 32) gives up to state 10 0x14 frames after the same object raises bit 0x40000000. Distinct from g_civilian_carrier (0x009A2C88), which is class 0x10's own.
@@ -296,7 +297,7 @@
 009c6f38	g_camera_turn_curve	Index into g_camera_turn_rate_curves; the scene reset sets 1.
 009c6fa8	g_camera_lookat_target	The point the camera *wants* to look at, chosen by SelectCameraLookAtTarget: a single attacking enemy, the midpoint of two, or the cam/ path's own target when no enemies are registered.
 009c6fd8	g_evt_cam_override_valid	Set to 1 by queue_event selector 0x60 (EvtActionStoreSixOperands60) together with three (frame, path) pairs at 0x009C6FDC..0x009C6FF0. The row-5 camera hooks FUN_00402890 and FUN_00402740 test it and call FUN_00403DB0, which re-seats g_active_cam_path and DAT_009C70BC from pair index DAT_009C88A4. Cleared by FUN_004021D0, ResetSceneCombatState and evt opcode 0x31 -- but NOT 0x32.
-009c7000	g_active_player	Which player may be targeted, computed by SelectAttackablePlayer from g_players_in_play: -1 nobody, 0 player 0 only, 1 player 1 only, 2 both. TryClaimAttackSlot offers a permit accordingly when g_max_attackers is 1, and class 0x31 state 22 uses it to force a target when the claim fails.
+009c7000	g_active_player	Which player may be targeted, computed by SelectAttackablePlayer from g_players_in_play: -1 nobody, 0 player 0 only, 1 player 1 only, 2 both. TryClaimAttackSlot offers a permit accordingly when g_max_attackers is 1, and class 0x31 state 22 uses it to force a target when the claim fails. It is ALSO class 0x25's op 10 (ScriptedHumanoidUpdate 0x0048478C): the VM compares its mode against this word and, on a mismatch, scans forward eight bytes at a time for a command whose mode is -2 and resumes after it -- so an op 10 is an if/endif and its arms are which of the two player characters stands in a cut scene. Not g_players_in_play (0x009C8E80); reading it as a player count is what made the port kill both of stage 3's.
 009c7006	g_enemies_present
 009c7010	g_item_set_countdown	Per item-set: how many more props of that set must be destroyed before its hidden item drops. PlaceBreakableGroup seeds it with rand()%n + 1, so which break releases the item is random. Groups 6 and 7 both use set 2, so the later placement overwrites the earlier one's countdown.
 009c701c	g_coli_active_set_task
@@ -314,7 +315,7 @@
 009c71ec	g_camera_pitch_bams
 009c71f0	g_camera_yaw_bams
 009c71f4	g_camera_roll_bams
-009c7200	g_script_flags	byte array the evt script sets and waits on
+009c7200	g_script_flags	byte array the evt script sets and waits on -- 0x100 bytes, zeroed by ResetSceneOnEnter (FUN_0045EDD0) and by nothing else. ONE array with seven writers and many readers: the evt's EvtOpSetScriptFlag48 (0x0045FD70), CivilianRunScript's op 0x1C (0x0048BF2A), ZombieStateTargetScriptWithFlag (0x0045B1DF, class 0x30 state 36), FUN_00433f40 (0x00433FC1, a class-0x33 cue prop), FUN_00473cf0 (0x00473D76) and the class-0x44 constructor at 0x0047314A/0x00473156. Readers include EvtOpWaitScriptFlag45, ZombieStateWaitScriptFlagThenBranch/ThenEnter, ScriptedHumanoidUpdate, the class-0x24 set-piece states, CivilianStepScript's wait bit 0x2000, MouseBranchTriggerUpdate and StoryModeSwitchUpdate. Script and gameplay share it in both directions, which is the point of it.
 009c72e0	g_actor_kill_all	1 makes every class handler self-destruct
 009c7300	g_screen_offset_x
 009c7304	g_screen_offset_y
@@ -346,6 +347,7 @@
 009c8ea0	g_evt_yield	The evt VM's yield flag, and the whole of its frame pacing. EvtInterpreterLoop runs 'do { dispatch[*pc](); } while (g_evt_yield == 0)' and does NOT clear it at entry, so: a wait handler reached with it clear sets it and returns WITHOUT testing its condition (every wait therefore costs at least one frame); on later frames it tests, and a satisfied wait clears it and advances pc, whereupon the loop keeps dispatching in the SAME frame until the next wait. Opcode 0x4E halt is nothing but 'g_evt_yield = 1' with pc unchanged (FUN_0045EFF0). The unused dispatch slots 0x00/0x2A/0x34/0x3C/0x4C point at a bare RET, which leaves the flag clear and spins the loop forever -- reaching one hangs the game.
 009c8fb8	g_current_bgm_id
 009c9010	g_shot_hit_something	int per player, written by ProcessPlayerShots: 1 when this frame's shot found any candidate, 0 when it found none. Its one reader is PlayerShotEffectsThink, which kills the tracer on its second frame so a bullet that hit does not fly on past what it hit.
+009c9028	g_pad_state	The pad/gun button word the screen furniture reads. ChapterCardInstall's countdown (0x00434802) tests bit 0x2 -- but only once its dwell has fallen below 0xA0, so the first 20 frames of a chapter card are unskippable -- and bit 0x20000 with no such guard; either forces the dwell to 1. Not modelled in the port, which has no pad input for the cards.
 009c904a	g_enemies_alive
 009c90a4	g_nRunPhase	Index into g_pfnRunPhaseHandlers; RunPhaseDispatch (0x0045FEE0) calls handlers[this]() and is the only reader. 0 ResetGameOnStart, 1 AdvanceToNextScene, 2-4 the continue screen, 5 RunPhaseArmSceneAdvance, 6 RunPhaseStepToNextScene, 7 the ending. Formerly DAT_009C90A4.
 009c90c0	g_original_items_taken	One byte per Original Mode item id, incremented on pickup and capped at 99.

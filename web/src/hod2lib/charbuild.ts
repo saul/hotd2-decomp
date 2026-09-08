@@ -500,6 +500,22 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
       }
     }
   }
+  // **And class 0x30's own throw kit, which is a different table.**
+  // `ZOMBIE_THROW_SLOTS` is what `ZombieThrowHandWeapon` (`FUN_0045A240`)
+  // switches on -- character types 1, 0x13 and 0x14 -- and the loop above
+  // reads only `THROWER_SLOTS`, class 0x31's. Neither the axe in flight
+  // (`znonoo.bin` part 0, slot `0x249`) nor either hand's held or bare model
+  // was in any rig, so `CharacterLayer.cloneSlot` answered null for all three:
+  // the projectile was never drawn and `swapGore` returned false on the hand,
+  // which leaves the axe in the fist. The whole throw happened -- the weapon
+  // flew, on time, and hit -- and there was nothing on screen to see. That is
+  // stage 3 block 2's "he doesn't throw any axes".
+  const zhands = (char.zombieThrow?.hands ?? []) as Record<string, unknown>[];
+  for (const h of zhands) {
+    for (const v of [h.held, h.bare, h.projectile]) {
+      if (v) want.add(v as number);
+    }
+  }
   for (const slot of [...want].sort((a, b) => a - b)) {
     const rec = slots.get(slot);
     if (!rec) continue;

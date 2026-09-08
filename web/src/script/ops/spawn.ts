@@ -8,7 +8,7 @@ import type { OpImpl } from "../walker";
 import type { OpJson } from "../../bundle";
 import { Walker } from "../walker";
 import { G } from "../../game/globals";
-import { SpawnPropContainers } from "../../game/director";
+import { SpawnPropContainers, SpawnSimpleActors } from "../../game/director";
 
 /** The `-1`-terminated operand list these three opcodes share. */
 function approachOperands(op: { raw?: string[] }): number[] {
@@ -34,6 +34,32 @@ function approachOperands(op: { raw?: string[] }): number[] {
 function pushAndPlace(w: Walker, op: OpJson): string | undefined {
   const note = Walker.pushSpawns(w, op);
   SpawnPropContainers(w.spawns);
+  return note;
+}
+
+/**
+ * `EvtOpSpawnSimple0A` — `FUN_00408990`. The opcode for objects that place
+ * themselves.
+ *
+ * Its operands are **not** the 0x24-byte placement descriptor the other spawn
+ * opcodes take: each points at a two-word `{class, hp}` record, and the
+ * handler allocates `g_class_handlers[record[0]]` at 0x13F4 bytes, runs
+ * `ActorInitFlags` (`FUN_00408970`) and copies `(short)record[1]` into both
+ * `obj+0x11C` and `obj+0x11E`. Nothing writes a position.
+ *
+ * All four records the shipped scripts name live in `comevtbl.bin`, which is
+ * why every stage points at the same four addresses: classes 0x60 (the chapter
+ * card), 0x61 (the stage-clear card), 0x62 (its tally) and 0x63 (the cutscene
+ * skip watcher). **Two of them raise a `g_script_flags` byte the script then
+ * waits on**, and until this opcode was ported those twelve
+ * `wait_script_flag` gates were gates nothing could open.
+ *
+ * The list is `-1`-terminated the same way the other spawn opcodes' are, and
+ * the exporter has already resolved it — `op.simple`.
+ */
+export function EvtOpSpawnSimple0A(w: Walker, op: OpJson): string | undefined {
+  const note = Walker.pushSimpleSpawns(w, op);
+  SpawnSimpleActors(w.simpleSpawns);
   return note;
 }
 
@@ -66,7 +92,12 @@ function spawnIfPlayerCount(w: Walker, op: OpJson, want: number): string | undef
   if (G.g_max_attackers !== want) {
     return `not spawned — ${want} player${want === 1 ? "" : "s"} only`;
   }
-  return pushAndPlace(w, op);
+  // `g_evt_spawn_gated_handlers` is indexed by the *opcode*, so 0x02 and 0x06
+  // forward to `EvtOpSpawnSimple0A` and the other six to a descriptor opcode.
+  // No shipped script encodes 0x02 or 0x06, but the forward is the engine's
+  // and folding it away would make the gate mean something it does not.
+  return op.simple !== undefined
+    ? EvtOpSpawnSimple0A(w, op) : pushAndPlace(w, op);
 }
 
 /** `EvtOpSpawnIfOnePlayer` — `FUN_00408820`. Opcodes 0x01-0x04. */
@@ -85,6 +116,7 @@ export const OPS: Record<number, OpImpl> = {
     // The ungated four. Measured over all six stage scripts, no opcode
     // outside 0x01-0x0D carries a resolved spawn descriptor.
     0x09: { status: "done", run: (w, op) => pushAndPlace(w, op) },
+    0x0a: { status: "done", run: EvtOpSpawnSimple0A },
     0x0b: { status: "done", run: (w, op) => pushAndPlace(w, op) },
     0x0c: { status: "done", run: (w, op) => pushAndPlace(w, op) },
     // -- the same four, gated on the live player count ----------------------
@@ -93,13 +125,15 @@ export const OPS: Record<number, OpImpl> = {
     0x07: { status: "done", run: EvtOpSpawnIfTwoPlayers },
     0x08: { status: "done", run: EvtOpSpawnIfTwoPlayers },
     // The other four gated slots are dispatch entries no shipped file
-    // encodes. 0x01/0x05 forward to `EvtOpSpawnPlaced09` and 0x02/0x06 to
-    // `EvtOpSpawnSimple0A` -- whose operands are a two-word {class, hp}
-    // record rather than a placement descriptor, which is why 0x0A itself is
-    // still unresolved. Declared so the feed does not present them as work
-    // outstanding.
-    0x01: { status: "none" }, 0x02: { status: "none" },
-    0x05: { status: "none" }, 0x06: { status: "none" },
+    // encodes: 0x01/0x05 forward to `EvtOpSpawnPlaced09` and 0x02/0x06 to
+    // `EvtOpSpawnSimple0A`. They run the same handlers behind the same
+    // `g_max_attackers` test as their siblings above, so they are wired
+    // rather than declared dead -- an opcode the engine dispatches is not a
+    // hole just because no shipped file reaches it.
+    0x01: { status: "done", run: EvtOpSpawnIfOnePlayer },
+    0x02: { status: "done", run: EvtOpSpawnIfOnePlayer },
+    0x05: { status: "done", run: EvtOpSpawnIfTwoPlayers },
+    0x06: { status: "done", run: EvtOpSpawnIfTwoPlayers },
     // -- the approach throttle ---------------------------------------------
     /**
      * `EvtOpSetApproachSteps0F` (`FUN_00408C80`): walk the operand list until

@@ -44,6 +44,24 @@ export {
 } from "./state/channels";
 
 
+/**
+ * One object `spawn_simple` (0x0A) has placed, and where the instruction was.
+ *
+ * `at` is **the port's own identity**, not the engine's: `EvtOpSpawnSimple0A`
+ * allocates a fresh object per operand and has no descriptor address to name
+ * it by, while the port's pool is keyed by `at`. The key is derived from the
+ * instruction's own byte address — negative, so it can never collide with a
+ * real descriptor offset, which is what a positive one could do.
+ */
+export interface ActiveSimpleSpawn {
+  at: number;
+  class: number;
+  hp: number;
+  block: number;
+  step: number;
+  opIndex: number;
+}
+
 export interface ActiveSpawn extends SpawnJson {
   /** Where it came from, so the marker can be traced back to an instruction. */
   block: number;
@@ -84,6 +102,39 @@ export interface CamCommand {
    * and every shot would be a frame ahead of the engine's.
    */
   started: boolean;
+  /**
+   * The action handler has been dequeued: nothing writes the camera block
+   * from this shot again.
+   *
+   * **This is one tick later than {@link done}, and the tick between them is
+   * the shot's last frame.** `CamAdvancePathFrame` (`FUN_004035E0`) is the
+   * handler `EvtRunQueuedActions` calls once a frame while the play is
+   * queued, and read off the instruction stream at `0x00403605` it goes:
+   *
+   * ```
+   * MOV  EAX,[ESI + 0x9a6144]      ; cur = g_cam_path_cursor
+   * MOV  [ESI + 0x9a6110],EAX      ; g_cam_path_frame = cur
+   * CALL 0x004041e0                ; CamEvalPath7 -> block eye and target
+   * CALL 0x00403ac0                ; CamBlockSetAnglesFromLookAt
+   * MOV  [0x009c6f28],EDX          ; g_cam_path_frames_left = end - cur
+   * CMP  ECX,EAX / JL              ; cur >= end ?
+   * ...                            ; g_queued_events_pending--   (slot 0)
+   * ```
+   *
+   * The publish, the curve evaluation and the block write all happen **before**
+   * the end test, so the block holds the pose of every frame from `start` to
+   * `end` **inclusive**; it is the frame *after* the end that is never
+   * written. `[proved]`
+   *
+   * The port used to seat the block on `!done`, which is one tick short: on
+   * the frame a shot ended the block kept the previous frame's pose, and the
+   * next shot then moved the eye by two frames' travel at once. With the
+   * gameplay camera live it also cost the aim its per-frame reseat, so
+   * `CameraTrackEnemiesTick`'s ease took one unopposed step towards the enemy
+   * and snapped back the frame after -- a one-frame flick of 9.6 degrees at
+   * stage 3 block 2 step 4's `cam_play 1430..1660`.
+   */
+  retired: boolean;
 }
 
 export type WaitPolicy =
@@ -94,6 +145,8 @@ export type WaitPolicy =
   | { kind: "civilians" }
   /** `wait_queued_events_done`: blocks while the action ring owes work. */
   | { kind: "queued" }
+  /** `wait_script_flag`: blocks until `g_script_flags[index]` is raised. */
+  | { kind: "flag"; index: number }
   | { kind: "passed"; why: string };
 
 export interface PendingWait {
@@ -193,6 +246,22 @@ export interface WalkerHost {
    */
   aliveCivilians(): number | null;
   /**
+   * `g_script_flags[index] != 0` (0x009C7200), or `null` when the gate is not
+   * a condition this client can evaluate.
+   *
+   * The fourth question, and the same contract as the three counters above:
+   * `null` is "this host has no gameplay", not "the flag is down".
+   *
+   * It has to be asked rather than read out of `G` directly, because
+   * **every one of the forty-odd `wait_script_flag` gates in the six shipped
+   * scripts names a flag that script's own `set_script_flag` never sets.**
+   * They are raised by actors — the class-0x10 civilians' streams (op 0x1C)
+   * and their captors' state 36 — so a host with no object pool cannot
+   * satisfy one, ever. `test/seek.ts` and the walker-only harnesses in
+   * `web/tools/` are exactly that host.
+   */
+  scriptFlagRaised(index: number): boolean | null;
+  /**
    * `g_camera_free` (0x009C6F2D), or `null` when this client cannot evaluate
    * it.
    *
@@ -283,7 +352,7 @@ export const WALKER_RESTORED_KEYS = [
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
   "lightSet", "checkpointBlock", "branchPreview", "camOverrideValid",
-  "stashedCam", "spawns",
+  "stashedCam", "spawns", "simpleSpawns",
   "sceneState", "queuedEventsPending", "camPending",
   "cam", "finished", "nextEntryBlock", "bgmTrack", "lastSound", "seq",
 ] as const;
@@ -291,11 +360,10 @@ export const WALKER_RESTORED_KEYS = [
 /**
  * Saved keys `loadState` handles by hand rather than by copy, each for a
  * reason stated where it happens: `wait` must be cleared when absent rather
- * than left standing, and `flags` and `loadedSlots` are `Set`s where a
- * snapshot is JSON.
+ * than left standing, and `loadedSlots` is a `Set` where a snapshot is JSON.
  */
 export const WALKER_RESTORED_BY_HAND = [
-  "wait", "flags", "loadedSlots",
+  "wait", "loadedSlots",
 ] as const;
 
 export class Walker {
@@ -592,9 +660,30 @@ export class Walker {
    */
   camOverrideValid = false;
   checkpointBlock = 0;
-  readonly flags = new Set<number>();
+  /**
+   * There is no `flags` set here any more.
+   *
+   * The script flags are `G.g_script_flags` (0x009C7200) and always were one
+   * array: `EvtOpSetScriptFlag48` (`FUN_0045FD70`) writes it and six actor
+   * routines write it too. The walker kept a `Set` of the ones *it* had set,
+   * `app/systems.ts` rebuilt `G.g_script_flags` from that set once a frame —
+   * so every flag an actor raised was wiped on the next tick — and
+   * `wait_script_flag` read the set rather than the array. One store, in
+   * `game/globals.ts`, is the whole of the fix.
+   */
   readonly loadedSlots = new Set<number>();
   spawns: ActiveSpawn[] = [];
+  /**
+   * What `spawn_simple` (0x0A) has placed — see {@link ActiveSimpleSpawn}.
+   *
+   * A second list rather than a second kind of entry in {@link spawns},
+   * because the two carry different things: a placement descriptor has a
+   * position, an `at` and a tail, and `EvtOpSpawnSimple0A`'s record has a
+   * class and a hit-point word and nothing else. Everything that walks
+   * `spawns` — the character layer, `SpawnPropContainers`, the spawn markers —
+   * would have to test for the difference otherwise.
+   */
+  simpleSpawns: ActiveSimpleSpawn[] = [];
   cam: CamCommand | null = null;
   /**
    * True while a **replay** is walking the script rather than playback.
@@ -742,10 +831,17 @@ export class Walker {
     this.branchPreview = null;
     this.camOverrideValid = false;
     this.lightBlock.reset();
+    // `entryBlock` rather than `this.script.entry_block`: a stage no longer
+    // chooses where it starts.
     this.checkpointBlock = entryBlock;
-    this.flags.clear();
+    // `ResetSceneOnEnter` (`FUN_0045EDD0`) zeroes all 0x100 bytes of
+    // `g_script_flags` and nothing else in the image clears one. Starting the
+    // script over is the port's scene entry, so it clears them here — which is
+    // exactly the state `this.flags.clear()` used to clear on this line.
+    G.g_script_flags = [];
     this.loadedSlots.clear();
     this.spawns = [];
+    this.simpleSpawns = [];
     this.cam = null;
     this.wait = null;
     this.branch = null;
@@ -787,6 +883,7 @@ export class Walker {
       branchPreview: this.branchPreview,
       camOverrideValid: this.camOverrideValid, stashedCam: this.stashedCam,
       spawns: this.spawns.map((s) => ({ ...s })),
+      simpleSpawns: this.simpleSpawns.map((s) => ({ ...s })),
       cam: this.cam && { ...this.cam },
       // The wait, countdown and all. `web/test/state.test.ts` is what caught
       // this missing: a save taken three seconds into a five-second
@@ -797,8 +894,10 @@ export class Walker {
       finished: this.finished, nextEntryBlock: this.nextEntryBlock,
       bgmTrack: this.bgmTrack,
       lastSound: this.lastSound, seq: this.seq,
-      // Sets are not JSON; the snapshot is a file the user can keep.
-      flags: [...this.flags], loadedSlots: [...this.loadedSlots],
+      // Sets are not JSON; the snapshot is a file the user can keep. The
+      // script flags are not here: they live in `G.g_script_flags`, which the
+      // game slice of the same snapshot carries.
+      loadedSlots: [...this.loadedSlots],
     };
   }
 
@@ -823,8 +922,6 @@ export class Walker {
     // has no `wait` key at all, and leaving the live one standing would be
     // worse than clearing it.
     this.wait = (s["wait"] as unknown as PendingWait | null) ?? null;
-    this.flags.clear();
-    for (const f of (s["flags"] as unknown as number[]) ?? []) this.flags.add(f);
     this.loadedSlots.clear();
     for (const n of (s["loadedSlots"] as unknown as number[]) ?? []) {
       this.loadedSlots.add(n);
@@ -901,6 +998,13 @@ export class Walker {
     if (retires) this.retireGated(retires === "civilians"
       ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
     if (rule?.skipRunsCameraOn) this.runCameraOnPast(this.wait.op);
+    // The third postcondition: a `wait_script_flag` is only ever passed in
+    // play with the byte already a 1, so a replay that steps over one has to
+    // raise it. Without this a seek lands past a gate whose flag is still 0,
+    // and the classes that read the same array — 0x24's removal cue, 0x30's
+    // states 20 and 31, 0x31's cue conditions, 0x52's despawn — see a world
+    // the address does not describe.
+    if (rule?.raisesScriptFlag) G.g_script_flags[this.wait.op.arg ?? 0] = 1;
     this.wait = null;
     this.opIndex++;
   }
@@ -1041,11 +1145,16 @@ export class Walker {
    */
   private advanceCameraPath(frames: number): void {
     const cam = this.cam;
-    if (cam && !cam.done && !cam.isStatic) {
-      // A shot that started during this tick's instructions has already
-      // published its first frame — `CamStartPathPlayback` calls
-      // `CamAdvancePathFrame` itself and the ring calls the handler once.
-      if (cam.started) {
+    if (cam && !cam.isStatic) {
+      if (cam.done) {
+        // The handler published the shot's last frame on the tick `done` was
+        // set and was dequeued in the same call, so this is the first tick on
+        // which nothing writes the camera block. See {@link CamCommand.retired}.
+        cam.retired = true;
+      } else if (cam.started) {
+        // A shot that started during this tick's instructions has already
+        // published its first frame — `CamStartPathPlayback` calls
+        // `CamAdvancePathFrame` itself and the ring calls the handler once.
         cam.started = false;
       } else {
         const remaining = cam.endFrame - cam.frame;
@@ -1282,6 +1391,30 @@ export class Walker {
     return quiet || !op.sound ? undefined : w.host.playSound(op.sound);
   }
 
+  /**
+   * `EvtOpSpawnSimple0A`'s operand list, onto {@link simpleSpawns}.
+   *
+   * The engine allocates one object per operand and **does not** collapse
+   * duplicates, so neither does this: stage 3's block 11 lists the same record
+   * twice on purpose.
+   */
+  static pushSimpleSpawns(w: Walker, op: OpJson): string | undefined {
+    if (!op.simple?.length) return undefined;
+    op.simple.forEach((s, i) => {
+      w.simpleSpawns.push({
+        // `-(instruction address * 8 + slot) - 1` — negative so it can never
+        // be read as a descriptor offset, and per-operand so two records on
+        // one instruction are two objects. See {@link ActiveSimpleSpawn}.
+        at: -(op.at * 8 + i) - 1,
+        class: s.class,
+        hp: s.hp,
+        block: w.block, step: w.step, opIndex: w.opIndex,
+      });
+    });
+    const n = op.simple.length;
+    return `${n} simple spawn${n === 1 ? "" : "s"}`;
+  }
+
   static pushSpawns(w: Walker, op: OpJson): string | undefined {
     if (!op.spawns?.length) return undefined;
     for (const s of op.spawns) {
@@ -1415,6 +1548,10 @@ export class Walker {
       // is the answer -- retire exactly what it counts.
       if (rule?.retires) this.retireGated(rule.retires === "civilians"
         ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
+      // Not `raisesScriptFlag` here: `0x45` only reaches this arm with the
+      // flag *already* raised, so there is nothing to reproduce. The
+      // postcondition belongs to `stepOverWait`, which is the path that walks
+      // past a gate whose condition is false.
       return `${blocksOn} -- ${policy.why}`;
     }
     this.wait = { op, blocksOn, policy };
@@ -1547,7 +1684,10 @@ export class Walker {
     // at most one block rather than deadlocking the stage.
     if (this.queuedEventsPending !== 0) this.ringResidue += 1;
     this.ring.reset();
-    if (this.options.clearSpawnsOnBlock) this.spawns = [];
+    if (this.options.clearSpawnsOnBlock) {
+      this.spawns = [];
+      this.simpleSpawns = [];
+    }
     // The preview shots belong to the branch in the block that stored them --
     // every `store_six` in the game sits in a branch block. Carrying one
     // across a block change offers an unrelated shot for the next branch,

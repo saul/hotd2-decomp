@@ -73,6 +73,7 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
+import { ThrownWeaponUpdate } from "../src/game/class31/projectile";
 import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
@@ -114,7 +115,7 @@ import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
-import { GameSystem } from "../src/app/systems";
+import { GameSystem, syncPortGlobals } from "../src/app/systems";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
@@ -136,6 +137,12 @@ import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker } from "../src/script/walker";
 import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
+import { ScriptFlagsThisBundleCanRaise }
+  from "../src/script/waits/flag";
+import { CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES }
+  from "../src/game/class60";
+import { RESULT_CARD_FLAG, RESULT_CARD_FRAMES }
+  from "../src/game/class61";
 import {
   BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -1984,6 +1991,78 @@ console.log("\nclass 0x25, jumps and the stall guard:");
   for (let i = 0; i < 200; i++) hFrame(a, events, rng);
   check("a loop of wait-and-jump runs for ever without hanging a frame",
         !a.dead && a.hum.pc === 0, `pc ${a.hum.pc}`);
+}
+
+console.log("\nclass 0x25, op 10 picks an arm by g_active_player:");
+{
+  const rng = new Rng(4);
+  // Stage 3's block 2, spawn 0x3378 -- character type 0x39, `gameover_player`
+  // -- transcribed from `st3evtbl.bin` at 0x33B4 with the indices the exporter
+  // resolves. Two arms and a marker between them: kill me if the active player
+  // is 1, otherwise stand and play.
+  const player = (): Parameters<typeof humanoidScene>[0] => [
+    { op: HumanoidOp.WaitThenPlay, mode: -1, a: 0, b: 0 },
+    { op: HumanoidOp.IfActivePlayer, mode: 1, a: 0, b: 0, skip: 3 },
+    { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.IfActivePlayer, mode: 0, a: 0, b: 0, skip: 6 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 99, f1: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ];
+
+  {
+    // One player on slot 0 — `SelectAttackablePlayer` (`FUN_00414F40`) writes
+    // 0 — is the port's configuration, and it is the one the player character
+    // has to survive.
+    const { a, events } = humanoidScene(player());
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("a mismatched op 10 skips its arm instead of running it",
+          !a.dead && a.visible, `dead ${a.dead} visible ${a.visible}`);
+    check("...and lands on the command after the -2 marker, not on the marker",
+          a.hum.pc === 4, `pc ${a.hum.pc}`);
+    for (let i = 0; i < 60; i++) hFrame(a, events, rng);
+    check("...so the arm the active player names is the one that runs",
+          a.hum.pc === 4 && a.pos.y !== 99, `pc ${a.hum.pc} y ${a.pos.y}`);
+  }
+  {
+    // The same program with the other player active: now the kill is the arm
+    // that matches, and the actor goes. Both halves matter — an op 10 that
+    // always skipped would leave two player characters standing in the shot.
+    const { a, events } = humanoidScene(player());
+    G.g_active_player = 1;
+    hFrame(a, events, rng);
+    check("a matching op 10 falls into its arm", a.dead && !a.visible,
+          `dead ${a.dead} pc ${a.hum.pc}`);
+  }
+  {
+    // Mode -2 is the marker, not a fourth comparison: `0x0048478C` tests 0, 1
+    // and 2 and steps the cursor for anything else.
+    const { a, events } = humanoidScene([
+      { op: HumanoidOp.IfActivePlayer, mode: -2, a: 0, b: 0 },
+      { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 3, f1: 0 },
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    ]);
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("an op 10 in a mode it does not test steps over and does not skip",
+          a.pos.y === 3 && a.hum.pc === 2, `pc ${a.hum.pc} y ${a.pos.y}`);
+  }
+  {
+    // A bundle written before `skip` was carried. Leaving the VM keeps the
+    // actor on screen; running the arm regardless is what deleted it.
+    const { a, events } = humanoidScene([
+      { op: HumanoidOp.IfActivePlayer, mode: 1, a: 0, b: 0 },
+      { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+    ]);
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("a mismatched op 10 with no skip leaves the VM rather than killing",
+          !a.dead && a.visible && a.hum.pc === -1,
+          `dead ${a.dead} pc ${a.hum.pc}`);
+  }
+  G.g_active_player = 0;
 }
 
 console.log("\nclass 0x25, the removal trigger:");
@@ -6807,6 +6886,177 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
           (z.flags & ActorFlag.BackingOff) !== 0);
   }
 
+  // **The other way out, and the one the level cannot see.**
+  //
+  // `ZombieStateStandAndThrow`'s ending is a two-way switch on `obj+0x38` bit
+  // 0x10 (`0045945C  TEST byte ptr [ESI + 0x38], 0x10` — `f6463810`), and that
+  // bit is not a fact about the room: `EnemyZombieInitByCharType`
+  // (`FUN_00452FD0`) **moves** it there out of the spawn record's `obj+0x34`
+  // bit 1 at `0045300B`, clearing it at the source. Exactly two records in the
+  // shipped game set it — stage 3 block 2 step 4's two axe men, who stand
+  // against a building.
+  //
+  // With the bit unmodelled both of them took the *other* arm and walked their
+  // descriptor's twenty-five units backwards through that building, holding
+  // `wait_enemies_alive` for the hundred frames it took. `FUN_00457220` has no
+  // test that could have stopped them, and the world push at that point in
+  // stage 3 is thirty-one quads of flat water twenty-four units below their
+  // feet, so nothing in the level was ever going to.
+  {
+    /** `obj+0x34` bit 1 — the descriptor's "do not walk away". */
+    const STAND_THROW_RETIRE = 0x2;
+    /** `obj+0x38` bit 4 — what `EnemyZombieInitByCharType` turns it into. */
+    const AUX_STAND_THROW_RETIRE = 0x10;
+
+    const axeMan = (flags: number) => {
+      ResetGameGlobals();
+      SetGameTables(CHARS);
+      G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+      G.g_camera_fixed_eye_y = 0;
+      const z = spawnZombie(0x7700, 1, "axe man", {
+        initialState: ZombieState.StandAndThrow, condition: 7, flags,
+        standThrow: { delay_two_hands: 0, delay_one_hand: 0,
+                      delay_after_throw: 2, exit_state: 0, walk_distance: 25,
+                      leave_delay: 4 },
+      });
+      z.visible = true;
+      z.hp = z.maxHp = 100;
+      z.pos = vec3(0, 0, 60);
+      return z;
+    };
+
+    {
+      const z = axeMan(STAND_THROW_RETIRE);
+      check("`EnemyZombieInitByCharType` moves the record's bit to obj+0x38",
+            (z.flags38 & AUX_STAND_THROW_RETIRE) !== 0
+            && (z.flags & STAND_THROW_RETIRE) === 0,
+            `0x34 0x${(z.flags >>> 0).toString(16)} `
+            + `0x38 0x${(z.flags38 >>> 0).toString(16)}`);
+      const plain = axeMan(0);
+      check("...and leaves an ordinary record without it",
+            (plain.flags38 & AUX_STAND_THROW_RETIRE) === 0,
+            `0x${(plain.flags38 >>> 0).toString(16)}`);
+    }
+
+    // Both hands already thrown, sitting on the recover's last frame, so the
+    // next few calls are the leave delay and then the ending.
+    const atTheEnding = (flags: number) => {
+      const z = axeMan(flags);
+      z.boneSlot["5"] = 0;
+      z.boneSlot["8"] = 0;
+      z.sub = 4;
+      z.motion = 102;
+      z.playTicks = 45;                  // play length 46, so frame 45 of it
+      return z;
+    };
+
+    /**
+     * One frame of whichever of the two states the actor is in, so the two
+     * endings are driven by the *same* loop and only the descriptor bit is
+     * different. Driving state 33 alone would leave a walking actor stepping
+     * through a routine that is no longer its own.
+     */
+    const runFrame = (z: ZombieActor): boolean => {
+      if (z.state === ZombieState.StandAndThrow) {
+        ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
+      } else if (z.state === ZombieState.WalkDistance) {
+        ZombieStateWalkDistance(z, new Rng(1));
+      } else {
+        return false;
+      }
+      ActorAdvanceMotion(z, 1 / 60);
+      return true;
+    };
+
+    {
+      const z = atTheEnding(STAND_THROW_RETIRE);
+      const start = { ...z.pos };
+      const aliveAtStart = G.g_enemies_alive;
+      let moved = 0;
+      let goneAt = -1;
+      for (let i = 0; i < 600 && goneAt < 0; i++) {
+        if (!runFrame(z)) break;
+        moved = Math.max(moved, Math.hypot(z.pos.x - start.x,
+                                           z.pos.z - start.z));
+        if (z.despawned) goneAt = i;
+      }
+      // **The assertion is where the actor is**, not what state it says it is
+      // in. The fixture's throw clips carry root motion, so "did not move"
+      // here is the retreat's twenty-five units being absent rather than a
+      // clip that happens to stand perfectly still.
+      check("a retiring thrower never leaves the spot the script put it on",
+            moved < 1, `${moved.toFixed(3)}u from ${JSON.stringify(start)}`);
+      check("...it gives the enemy count back where it stands",
+            G.g_enemies_alive === aliveAtStart - 1,
+            `${G.g_enemies_alive} was ${aliveAtStart}`);
+      check("...and the block it was holding can advance",
+            G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+            `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
+      check("...then it despawns after the descriptor's own delay",
+            goneAt >= 0, `despawned at frame ${goneAt}`);
+      check("...having stayed in state 33 the whole time",
+            z.state === ZombieState.StandAndThrow, ZombieState[z.state]);
+    }
+
+    {
+      // The seven records that do *not* set the bit still walk away, and the
+      // distance they cover is the descriptor's own. Same fixture, one bit
+      // different: the two endings have to be told apart by that bit alone.
+      const z = atTheEnding(0);
+      const start = { ...z.pos };
+      let moved = 0;
+      for (let i = 0; i < 600 && !z.despawned; i++) {
+        if (!runFrame(z)) break;
+        moved = Math.max(moved, Math.hypot(z.pos.x - start.x,
+                                           z.pos.z - start.z));
+      }
+      check("a thrower without the bit walks its descriptor's distance",
+            moved > 20, `${moved.toFixed(2)}u`);
+      check("...and despawns at the end of it", z.despawned);
+    }
+  }
+
+  // **The weapon that flies.** `ZombieThrowHandWeapon` (`FUN_0045A240`) puts
+  // the projectile at the throwing bone's own world position, leaves the hand
+  // bare and hands the permit over. The assertion is on the world: a record in
+  // `g_thrown_weapons` carrying the kit's projectile slot, closing on the eye
+  // frame after frame, and a hand whose recorded draw slot is now the bare
+  // one. What that slot *draws* is the exporter's half — see the
+  // throwing-hand rows in `tools/verify_attachments.py`.
+  {
+    const z = thrower();
+    const host = {
+      ...NULL_HOST,
+      boneWorld: (_at: number, _bone: number, out: Vec3) => {
+        out.x = 0; out.y = 5; out.z = 60;
+        return true;
+      },
+      aimPoint: (_ahead: number, out: Vec3) => {
+        out.x = EYE.x; out.y = EYE.y; out.z = EYE.z;
+      },
+    };
+    const kit = CHARS.types["1"].zombie_throw!;
+    for (let i = 0; i < 12 && !G.g_thrown_weapons.length; i++) {
+      ZombieStateStandAndThrow(z, EYE, new Rng(1), host);
+      ActorAdvanceMotion(z, 1 / 60);
+    }
+    check("the throw puts a weapon in the world",
+          G.g_thrown_weapons.length === 1,
+          String(G.g_thrown_weapons.length));
+    const w = G.g_thrown_weapons[0];
+    check("...drawing the kit's own projectile slot",
+          !!w && w.slot === kit.hands[0].projectile, `slot ${w?.slot}`);
+    check("...and the hand it left is recorded bare",
+          z.boneSlot["5"] === kit.hands[0].bare
+          || z.boneSlot["8"] === kit.hands[1].bare,
+          JSON.stringify(z.boneSlot));
+    const before = Math.hypot(w.pos.x - EYE.x, w.pos.z - EYE.z);
+    for (let i = 0; i < 10; i++) ThrownWeaponUpdate(1);
+    const after = Math.hypot(w.pos.x - EYE.x, w.pos.z - EYE.z);
+    check("...and it closes on the camera rather than hanging there",
+          after < before - 1, `${before.toFixed(1)} -> ${after.toFixed(1)}`);
+  }
+
   // The other way in: a condition-8 walker already facing the camera.
   {
     const z = thrower(8);
@@ -7645,6 +7895,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropPlacer, "0x44 prop placer"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
     [SpawnClass.SkinnedNpc, "0x53 cat / branch trigger"],
+    [SpawnClass.ChapterCard, "0x60 chapter card"],
+    [SpawnClass.ResultCard, "0x61 result card"],
   ];
   for (const [cls, name] of want) {
     check(`${name} registered itself`,
@@ -9120,6 +9372,7 @@ console.log("\nthe camera path publishes every frame, ends included:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
     showMessage: () => null, endDialogue: () => undefined,
   });
   // No `primeToFirstWait`: it steps *over* waits to get a scene on screen, and
@@ -9205,6 +9458,7 @@ console.log("\na stashed path is played by a hook that steps first:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
     showMessage: () => null, endDialogue: () => undefined,
   };
 
@@ -9747,6 +10001,383 @@ console.log("\nthe firing gate:");
         G.g_nFiringGate === 1 && shutter.firingGate);
   G.g_nFiringGate = 0;
   check("...in both directions", !shutter.firingGate);
+}
+
+/**
+ * `wait_script_flag` (0x45) is a **gameplay** gate, and `g_script_flags` is
+ * one array.
+ *
+ * `EvtOpWaitScriptFlag45` (`FUN_0045FC80`) tests `g_script_flags[operand]` and
+ * `EvtOpSetScriptFlag48` (`FUN_0045FD70`) is the single line that sets one —
+ * on the same 0x100-byte array at `0x009C7200` that `CivilianRunScript`'s op
+ * 0x1C (`0x0048BF2A`) and `ZombieStateTargetScriptWithFlag` (`0x0045B1DF`)
+ * also write. Across the six shipped scripts **every one of the forty-odd
+ * gates names a flag that script's own `set_script_flag` never sets**, so the
+ * opcode is only ever "hold until an actor is finished".
+ *
+ * The port had two stores: a `Set` on the walker that `set_script_flag` wrote
+ * and `wait_script_flag` read, and `G.g_script_flags` that gameplay wrote —
+ * and `syncPortGlobals` rebuilt the second from the first once a frame, so a
+ * flag an actor raised lasted until the next tick and no gate could ever see
+ * it. Stage 3 block 2 step 3's `wait_script_flag 0x1E` is what that cost: the
+ * hostage raises flag 30 from her own stream (rescued, command 17; shot or
+ * mauled, command 12 of the on-shot stream), the wait passed on the frame it
+ * was reached, and step 4's boat shot sailed past her and her captor while
+ * the maul was still running. `docs/BUGS.md`, "the civilian/enemy are jumped
+ * over".
+ *
+ * Asserted here on the world rather than on a layer's opinion of itself: a
+ * real class-0x10 actor in `G.g_object_list` with a real captor, driven by
+ * `CivilianUpdate`, against the walker's own address — and with
+ * `syncPortGlobals` running every frame, because that is the call that used to
+ * wipe the evidence.
+ */
+console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
+{
+  /** The flag stage 3 block 2 step 3 waits on. */
+  const RESCUE_FLAG = 30;
+  const flagOp = (i: number, op: number, arg: number) => ({
+    i, at: i, op, arg, flag: arg,
+    name: op === 0x45 ? "wait_script_flag" : "set_script_flag",
+    cat: op === 0x45 ? "wait" : "flow",
+    blocks_on: `script flag ${arg} set`,
+  });
+  const script = {
+    scene: 0, stage: 3, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        flagOp(0, 0x45, RESCUE_FLAG),
+        // Somewhere past the gate, and a second flag so "did it advance" is a
+        // fact about the array rather than about the cursor alone.
+        flagOp(1, 0x48, 7),
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+
+  ResetGameGlobals();
+  SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+    entries: [0],
+    // The shape of the shipped stream 64, which is the one the hostage at
+    // script address 12808 runs: a wait word leads its block and governs the
+    // wait at the **end** of it, so `ChildrenAlive` here parks the VM on
+    // command 2 until the captor is down, and the flag is raised by the block
+    // that release runs.
+    scripts: [[
+      { op: CivilianOp.Wait, args: [CivilianWait.ChildrenAlive] },
+      { op: CivilianOp.SetChildrenGoal, args: [0] },
+      // A word of 0 is "park here": it is what stops the step loop walking
+      // straight past this block, which would run the reapply walk and skip
+      // the flag. Every one of the 136 shipped streams ends on one.
+      { op: CivilianOp.Wait, args: [0] },
+      { op: CivilianOp.SetScriptFlag, args: [RESCUE_FLAG] },
+      { op: CivilianOp.Wait, args: [0] },
+      { op: CivilianOp.End, args: [] },
+    ]],
+    items: [],
+    spawns: {
+      "16384": {
+        charType: 1, script: 0, removePath: -1, removeFrame: 0,
+        removeDelay: 0,
+        children: [{ at: 0x4100, class: 0x30, charType: 1,
+                     pos: [0, 0, 0] as [number, number, number],
+                     yaw: 0, hp: 1 }],
+      },
+    },
+  });
+
+  const rng = new Rng(11);
+  const events = new Events();
+  const captor = spawnZombie(0x4100, 1, "captor");
+  captor.visible = true;
+  const civ = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "hostage",
+                         undefined, rng);
+  civ.visible = true;
+  civ.pos = vec3(0, 0, 0);
+
+  const host = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null, aliveCivilians: () => null,
+    // The player's host, which is the one under test: it answers out of the
+    // same array the civilian writes.
+    scriptFlagRaised: (i: number) => (G.g_script_flags[i] ?? 0) !== 0,
+    cameraFree: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+  const w = new Walker(script, host);
+
+  /** One whole frame of the player: walker, globals sync, then the port. */
+  const frame = () => {
+    w.tick(1 / 60);
+    syncPortGlobals(w, false, EYE);
+    CivilianUpdate(civ, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST, events });
+  };
+
+  for (let i = 0; i < 30; i++) frame();
+  check("the hostage and her captor are both in the pool",
+        ActorByAt(0x4000)?.cls === SpawnClass.Civilian
+        && ActorByAt(0x4100)?.cls === SpawnClass.Zombie
+        && !ActorByAt(0x4100)?.dead,
+        `civ ${ActorByAt(0x4000)?.cls} captor ${ActorByAt(0x4100)?.cls}`);
+  check("...and the script is still parked on the gate 30 frames in",
+        w.opIndex === 0 && w.wait?.op.op === 0x45,
+        `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
+  check("...with the flag it names still down",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 0,
+        `${G.g_script_flags[RESCUE_FLAG]}`);
+
+  // The rescue: the captor dies, the civilian's own stream runs on and raises
+  // the flag. Nothing else in the fixture can raise it.
+  captor.dead = true;
+  frame();
+  check("killing the captor lets her stream raise the flag",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
+        `${G.g_script_flags[RESCUE_FLAG]} children ${civ.civ?.childCount}`);
+  for (let i = 0; i < 5; i++) frame();
+  check("...and it is still raised five `syncPortGlobals` calls later",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
+        `${G.g_script_flags[RESCUE_FLAG]}`);
+  // Past the gate the block has no more steps, so the walker has routed on —
+  // `0/1/0` is the address it ends at, not the gate it was parked on.
+  check("...and the script is off the gate",
+        w.wait === null && !(w.step === 0 && w.opIndex === 0),
+        `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
+  check("...having run the instruction behind it into the same array",
+        (G.g_script_flags[7] ?? 0) === 1, `${G.g_script_flags[7]}`);
+
+  // The escape hatch, pinned. **`[diverges]`**: a gate on a flag nothing this
+  // port runs can raise passes, because a faithful one would park the stage on
+  // it for ever — the chapter card's flag 248 and the result screen's 254 are
+  // twelve such gates in the shipped scripts, both raised by actors
+  // an enemy class this port does not run. The boundary is *derived*, so this
+  // is a check on the derivation and not on a list of numbers: the same
+  // fixture, one flag nothing in it can raise. Flag 20 is class 0x41's
+  // `FUN_004710C0`, which has no module — 248 is no longer a valid example,
+  // because `game/class60/` raises it now.
+  const canRaise = ScriptFlagsThisBundleCanRaise(script);
+  check("the coverage set is the civilian's own flag and the script's own",
+        canRaise.has(RESCUE_FLAG) && canRaise.has(7) && !canRaise.has(20),
+        `${[...canRaise].sort((a, b) => a - b).join(",")}`);
+  {
+    ResetGameGlobals();
+    const unraisable = {
+      ...script,
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [flagOp(0, 0x45, 20)] }],
+      }],
+    } as unknown as ScriptJson;
+    const w3 = new Walker(unraisable, host);
+    for (let i = 0; i < 10; i++) w3.tick(1 / 60);
+    check("...and a gate on a flag nothing in the bundle raises does not park",
+          w3.wait === null && !(w3.step === 0 && w3.opIndex === 0),
+          `at ${w3.block}/${w3.step}/${w3.opIndex} wait ${w3.wait?.op.op}`);
+  }
+
+  // A seek observes no waits, so the gate's postcondition has to be applied
+  // by hand — the same argument as `retires` and `skipRunsCameraOn`. Without
+  // it a reload lands past a gate whose flag is still 0, and everything that
+  // reads the array (class 0x24's removal cue, 0x30's states 20 and 31,
+  // 0x31's cue conditions, 0x52's despawn) sees a world the address does not
+  // describe.
+  ResetGameGlobals();
+  const w2 = new Walker(script, host);
+  seekTo(w2, 0, 0, 1);
+  check("a seek over the gate leaves the flag it was waiting for raised",
+        (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
+        `${G.g_script_flags[RESCUE_FLAG]}`);
+}
+
+/**
+ * `spawn_simple` (0x0A), and the two cards it places that open a gate.
+ *
+ * Twelve of the game's sixty-one `wait_script_flag` gates name flag 248 or
+ * flag 254, and both are raised by an actor `EvtOpSpawnSimple0A`
+ * (`FUN_00408990`) places — the chapter card (class 0x60, `FUN_004342E0`) and
+ * the stage-clear card (class 0x61, `FUN_00434EF0`). Neither existed in this
+ * port: opcode 0x0A had no handler, so the actor was never built, so the flag
+ * was never raised, and `wait_script_flag` had to be excused from evaluating
+ * those gates rather than park every stage on its title card.
+ *
+ * Asserted on the world, not on the opcode's opinion of itself: a real actor
+ * in `G.g_object_list` with the class the record names, driven frame by frame,
+ * against the walker's own address on the gate behind it.
+ */
+console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
+{
+  const simpleOp = (i: number, cls: number) => ({
+    i, at: 0x100 + i * 8, op: 0x0a, name: "spawn_simple", cat: "spawn",
+    simple: [{ class: cls, hp: 0 }],
+  });
+  const waitOp = (i: number, flag: number) => ({
+    i, at: 0x100 + i * 8, op: 0x45, name: "wait_script_flag", cat: "wait",
+    arg: flag, blocks_on: `script flag ${flag} set`,
+  });
+  const cardScript = (cls: number, flag: number) => ({
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        simpleOp(0, cls),
+        waitOp(1, flag),
+        { i: 2, at: 0x120, op: 0x48, name: "set_script_flag", cat: "flow",
+          flag: 9 },
+      ] }],
+    }],
+  } as unknown as ScriptJson);
+
+  const cardHost = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null, aliveCivilians: () => null,
+    scriptFlagRaised: (i: number) => (G.g_script_flags[i] ?? 0) !== 0,
+    cameraFree: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+
+  /** Drive one card to its flag and report how many frames it took. */
+  const runCard = (cls: SpawnClass, flag: number, expect: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    const script = cardScript(cls, flag);
+    const w = new Walker(script, cardHost);
+    // The instruction, and nothing else: `SpawnSimpleActors` runs from the
+    // opcode rather than from a later frame, which is what makes a seek build
+    // the card at all.
+    w.tick(1 / 60);
+    const live = G.g_object_list.filter((o) => !o.despawned && !o.dead);
+    const card = live.find((o) => o.cls === cls);
+    check(`0x${cls.toString(16)}: the record puts one actor of its own class `
+          + "in the pool",
+          live.length === 1 && card !== undefined
+          && w.simpleSpawns.length === 1,
+          `${live.map((o) => `c${o.cls}`).join(",")} `
+          + `list ${w.simpleSpawns.length}`);
+    check("...at a key no placement descriptor could collide with",
+          (card?.at ?? 0) < 0, `at ${card?.at}`);
+    check("...and the walker is parked on the gate it raises",
+          w.wait?.op.op === 0x45 && w.opIndex === 1
+          && (G.g_script_flags[flag] ?? 0) === 0,
+          `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
+
+    // Counted in **updates**, because that is what the countdown counts: the
+    // card is built by the instruction and its first decrement is on its first
+    // update, not on the frame the walker placed it.
+    //
+    // Bails when there is no card rather than dereferencing one: with opcode
+    // 0x0A unwired there is nothing to drive, and a suite that throws reports
+    // one crash where it should report which assertions the work is holding up.
+    if (!card) return { frames: -1, card: null };
+    let updates = 0;
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    while (updates < expect + 60 && (G.g_script_flags[flag] ?? 0) === 0) {
+      g_class_handlers[cls]?.update(card, f);
+      updates += 1;
+      w.tick(1 / 60);
+    }
+    return { frames: updates, card };
+  };
+
+  // The chapter card: `MOV word ptr [ESI+0x11c], 0xb4` at `0x004345AB`, then
+  // one decrement a frame and the flag on the frame it reads zero.
+  {
+    const { frames, card } = runCard(SpawnClass.ChapterCard,
+                                     CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES);
+    check(`the chapter card holds ${CHAPTER_CARD_FRAMES} frames, then raises `
+          + `g_script_flags[${CHAPTER_CARD_FLAG}]`,
+          frames === CHAPTER_CARD_FRAMES
+          && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
+          `${frames} frames, flag ${G.g_script_flags[CHAPTER_CARD_FLAG]}`);
+    check("...and kills itself on the same frame",
+          card?.dead === true, `dead ${card?.dead}`);
+  }
+
+  // The result card: 420 frames, and it drops the trigger on its first.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_nFiringGate = 1;
+    const w = new Walker(cardScript(SpawnClass.ResultCard, RESULT_CARD_FLAG),
+                         cardHost);
+    w.tick(1 / 60);
+    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ResultCard);
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    if (card) g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
+    check("the result card drops `g_nFiringGate` on its first frame",
+          card !== undefined && G.g_nFiringGate === 0,
+          `card ${card !== undefined} gate ${G.g_nFiringGate}`);
+    let frames = 1;
+    while (card && frames < RESULT_CARD_FRAMES + 60
+           && (G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0) {
+      g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
+      frames += 1;
+      w.tick(1 / 60);
+    }
+    check(`...holds ${RESULT_CARD_FRAMES} frames, then raises `
+          + `g_script_flags[${RESULT_CARD_FLAG}]`,
+          frames === RESULT_CARD_FRAMES
+          && G.g_script_flags[RESULT_CARD_FLAG] === 1,
+          `${frames} frames, flag ${G.g_script_flags[RESULT_CARD_FLAG]}`);
+    check("...and the gate behind it opens, so the script runs on",
+          w.wait === null && !(w.step === 0 && w.opIndex === 1)
+          && (G.g_script_flags[9] ?? 0) === 1,
+          `at ${w.block}/${w.step}/${w.opIndex} `
+          + `wait ${w.wait?.op.op} flag9 ${G.g_script_flags[9]}`);
+  }
+
+  // ...and the coverage set now says so, which is the half that decides
+  // whether the gate is evaluated at all. Both directions: a stage that
+  // spawns the card can open its flag, one that does not, cannot.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    const withCard = ScriptFlagsThisBundleCanRaise(
+      cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG));
+    check("a stage that spawns the chapter card can raise its flag",
+          withCard.has(CHAPTER_CARD_FLAG) && !withCard.has(RESULT_CARD_FLAG),
+          `${[...withCard].sort((a, b) => a - b).join(",")}`);
+    const withTally = ScriptFlagsThisBundleCanRaise(
+      cardScript(SpawnClass.ResultCardTally, CHAPTER_CARD_FLAG));
+    check("...and one that spawns only class 0x62, which raises nothing, "
+          + "cannot",
+          !withTally.has(CHAPTER_CARD_FLAG),
+          `${[...withTally].sort((a, b) => a - b).join(",")}`);
+  }
+
+  // Two records on one instruction are two objects. `EvtOpSpawnSimple0A`
+  // walks its list to the -1 and allocates per operand; the exporter does not
+  // collapse duplicates, because stage 3's block 11 lists one twice.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    const two = {
+      ...cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [{
+          i: 0, at: 0x200, op: 0x0a, name: "spawn_simple", cat: "spawn",
+          simple: [{ class: SpawnClass.ResultCardTally, hp: 0 },
+                   { class: SpawnClass.ResultCardTally, hp: 0 }],
+        }] }],
+      }],
+    } as unknown as ScriptJson;
+    const w = new Walker(two, cardHost);
+    w.tick(1 / 60);
+    const made = G.g_object_list.filter(
+      (o) => o.cls === SpawnClass.ResultCardTally);
+    check("one instruction with two records makes two objects",
+          made.length === 2 && made[0].at !== made[1].at,
+          `${made.map((o) => o.at).join(",")}`);
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

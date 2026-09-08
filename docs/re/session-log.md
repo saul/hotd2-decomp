@@ -13527,3 +13527,761 @@ page paused and the transition looked broken for one run.
   Neither is ported; the player stops after stage 6.
 * `FUN_00497440` and `FUN_004996C0` also write `g_scene_index` and have not
   been read.
+
+## `op 10` is an `if`, and the player was on the wrong side of it
+
+**The report.** *"James (the player controlled character) doesn't seem to
+render in 3rd person in the cutscenes, e.g. at
+`?stage=3&mode=play&block=2&step=5&op=22&frame=30`"*, `docs/BUGS.md` B21.
+
+### What the data calls him
+
+Not "James" — the shipped data has no name table for characters, so the
+identification runs through the asset filenames, which is the closest thing to
+one. Stage 3's block 2 step 5 places four class-0x25 humanoids in two
+`spawn_obj` opcodes:
+
+| descriptor | char type | skeleton resolves to | nodes |
+|---|---|---|---|
+| `0x3378` | `0x39` | `gameover_player.bin` | 15 |
+| `0x345C` | `0x3A` | `char_adv05.bin` | 15 |
+| `0x3508` | `0x3B` | `char_adv05.bin` | 15 |
+| `0x3594` | `0x3C` | `char_adv05.bin` | 15 |
+
+`gameover_player.bin` is the only asset file in the game whose name says
+*player*, and step 4 of the same block loads `player1.bin`…`player4.bin` and
+step 6 frees them again around this cut scene. The two spawns at the *same*
+point — `0x3378` and `0x345C` — are the pair, and which of them stands there is
+decided at run time. That is as far as the evidence goes: the model is
+`[proved]` to be the one the game calls the player's; *James* is the user's
+name for it and is not in the data.
+
+Class **0x25**, character type **0x39**. Not class 0x10, not an attachment
+list, not type 0x17's sub-part mechanism — three of the four shapes the brief
+named, and none of them was it.
+
+### He was placed. He was killed.
+
+The sidebar answered the first question in one look, which is what it is for:
+the **Actors** panel listed all four at `?stage=3&block=2&step=5&op=22`, so
+nothing was unplaced and nothing was an unported class. Two of the four drew
+and two did not, and the two that did not were the two at `d=16` — the pair.
+
+`ScriptedHumanoidUpdate` (`FUN_004842A0`) case 10, at `0x0048478C`:
+
+```
+0048478C  MOV EAX,ESI                    ; the command
+0048478E  MOV [EDI+0x1320],EBX           ; stallFrames = 0
+00484794  ADD ESI,0x8                    ; and step one command by default
+00484797  MOVSX EAX,word ptr [EAX+0x2]   ; the mode
+0048479B  SUB EAX,EBX / JZ 00484809      ; 0
+0048479F  DEC EAX     / JZ 004847D9      ; 1
+004847A2  DEC EAX     / JNZ 0048435D     ; anything else -- nothing to do
+004847A9  CMP dword ptr [0x009c7000],0x2 ; 2
+004847B0  JZ 0048435D                    ; matches: fall into the arm
+004847B6  MOV CX,word ptr [ESI+0x2]      ; else scan for the -2 marker,
+004847BA  ADD ESI,0x8                    ;   eight bytes at a time,
+004847BD  CMP CX,-0x2 / JZ 0048435D      ;   and resume after it
+```
+
+`0x009c7000` is **`g_active_player`**, not `g_players_in_play` (`0x009C8E80`).
+`SelectAttackablePlayer` (`FUN_00414F40`) writes -1 for nobody, 0 or 1 for that
+player alone, 2 for both — and for one player in play it picks 1 unless
+`g_player_state` is 5 or 7, so an ordinary single-player game on slot 0 sits at
+0. `[proved]`
+
+The two programs, at `st3evtbl.bin` `0x33B4` and `0x3498`, are one shape:
+
+```
+op 0  mode -1        wait then play
+op 9  mode 1 a 0|1   the hand model, one per character
+op 10 mode 1|0       if the active player is the *other* one:
+op 18                    ActorKill
+op 10 mode -2        endif
+op 10 mode 0|2       if it is this one:
+  ...                    the performance
+op -1                    end
+op 10 mode -2        endif
+  ...                the two-player arm
+```
+
+The port's `IfPlayerCount` — the name was the reading, and the reading was
+wrong — always stepped one command, with a comment saying that one player is
+the port's only configuration so "taking the matching arm is the same
+decision". It is not the same decision when the arm is `ActorKill`: **both**
+player characters ran the kill on the frame they spawned, and
+`render/characters.ts` will not draw an actor whose `visible` is false. The
+other two humanoids in the shot have no `op 10` and drew perfectly, which is
+what made it look like a missing model rather than a missing branch.
+
+It is not a stage-3 defect. Walking every exported program to its first
+blocking wait, **110 of the twelve bundles' 274 class-0x25 spawns** reached an
+`ActorKill` on the frame they were made; with the branch it is 42, and those 42
+are the twins that are supposed to go. Per stage set: 4→2, 16→7, 16→8, 13→4,
+3→0, 3→0.
+
+### The exporter had the same hole one level down
+
+`humanoidCommandOffsets` followed fall-through and `op 15`'s jump. `op 10` has
+a second successor and it followed neither, so the walk stopped at the `op 18`
+inside the first arm: the bundle carried a **four-command** program every path
+of which ended in a kill, and the arm the actor actually runs — six more
+commands, two more clips — was not in the file at all. Following the skip takes
+the six stages' decoded stream from 2,770 commands to 4,940 and adds motion 845
+and 883 to character type `0x39`'s bake.
+
+The skip is emitted as an **index**, the way `op 15`'s pointer already is. The
+scan that produces it is transcribed literally, stride 8 and all: it reads the
+second `s16` of each eight-byte window and takes no notice of the sixteen-byte
+commands, which is the engine's own arithmetic and would desync on an arm
+containing an `op 7`, `op 8` or `op 4` mode 4. None does, and
+`verify_scripted_clips.py` is what says so rather than a comment.
+
+### What landed
+
+* `web/src/hod2lib/charmotion.ts` + `tools/hod2lib/charmotion.py` —
+  `humanoidSkipTarget`, and the walk follows it. Both halves, one commit.
+* `web/src/hod2lib/bundle.ts` — `skip` on every `op 10` mode 0/1/2 command;
+  `web/src/bundle/scene.ts` declares it.
+* `web/src/game/class25/index.ts` — `IfPlayerCount` → **`IfActivePlayer`**, and
+  it branches. A command with no `skip` (a bundle written before this) leaves
+  the VM rather than running the arm, because on screen and wrong beats deleted.
+* `tools/verify_scripted_clips.py` — the two structural properties the port's
+  `pc += 1` depends on. Reverting the exporter half makes it report 74 faults.
+* Four assertions in `port.test.ts` and seven in `render.test.ts`, the latter on
+  the **scene graph**: the rig node is there, its bone is a `Mesh`, it is
+  visible, and it is at `(-522.7, -14.9, -3883.2)`, which is what the descriptor
+  says. Reverting the port half fails 2 of those and 4 of the port ones.
+
+### Wrong turns
+
+1. **Started from the brief's strongest hypothesis and it was wrong.** The
+   brief pointed at `drawVariant`, at the three unread `ActorBindPartList`
+   callers and at type `0x17`'s sub-part divergence, in that order. All four
+   spawns have `drawVariant` 0; class 0x25's Init calls `ActorBindPartList`
+   itself, so none of the three unread callers is involved; the character type
+   is `0x39` and not `0x17`. Checking the bundle first — the placement is
+   there, the type is there, the motion is baked, the `chr_gameover_player`
+   rig is in the glTF with eight instances — closed all three in about ten
+   minutes and pointed at the runtime instead. **The bundle was never the
+   thing that was missing**, which is the opposite of the last two stage-3
+   bugs and is why the assumption in the brief was so plausible.
+2. **Assumed `g_active_player` was 0 for a single player before reading
+   `SelectAttackablePlayer`.** It happens to be right, but only through
+   `g_player_state == 5`; the routine's *other* arm writes 1 for one player in
+   play, which reads backwards until you notice the state test is on player 0.
+   Had the guess gone the other way the fix would have killed the wrong twin
+   and looked correct in the screenshot, because there is exactly one character
+   on screen either way.
+3. **Read the decompiler's `pfVar10 + 4` and `+ 10` as a command shape.**
+   Ghidra types the command cursor `float *`, so every offset in case 10 comes
+   out in units of four bytes and the `-2` looked as though it lived in a
+   command's second field for no reason. It does live there — the marker is an
+   `op 10` whose *mode* is `-2` — but that only became legible from the
+   disassembly. L1's cousin: the pseudocode was not wrong, it was unreadable.
+
+### What is left `[open]`
+
+* **`op 9`, `op 16` and `op 17` are still stepped over**, with the existing
+  `[diverges]`. `op 9` is the hand model, and both player-character programs
+  carry one (`a 0` and `a 1`, the two entries of `DAT_004EC9E0`'s row) — so the
+  character is drawn without whatever it is meant to be holding. Reading
+  `0x004EC9E0` and `PTR_DAT_004C7160` is its own job.
+* **Boss Mode remaps character types `0x39` and `0x3A`** through the two
+  selected-player bytes at `0x009A2242`/`0x009A2256`, per the existing
+  `[diverges]` on `ScriptedHumanoidInit`. Nothing in the port chooses a player
+  character, so the descriptor's own type stands; with `g_active_player` fixed
+  at 0 the port always shows type `0x39`.
+* **`g_active_player` is a constant in the port.** Nothing calls
+  `SelectAttackablePlayer`, so it is 0 for ever. That is the right value for
+  the one configuration the port has, and it is not the routine.
+
+---
+
+## The frame a shot ends on — stage 3's camera jump
+
+**Report:** *"the camera seems to jump quite a bit just shortly after
+`?stage=3&mode=play&block=2&step=4&op=24&frame=1551`"*. One of the five filed
+against stage 3 block 2 on 2026-09-07.
+
+**Outcome:** `[fixed]`, and it was **the port's own advance** — not the
+authored path, not the tracking layer, and not a region or slot change. The
+engine does not do it.
+
+### The measurement, before any of the reading
+
+The report's "shortly after" was an estimate; the jump is at **camera frame
+1660**, 109 driven frames after the address in the URL. Measured in real
+Chrome off the Camera panel's own `eye` and `block target` rows — the pair the
+draw writes, so it is the transform on screen and not a layer's account of
+itself — one driven frame at a time:
+
+```
+i108  cf 1659   eye -495.5, -10.1, -3480.0   move 1.21   turn 0.00
+i109  cf 1660   eye -495.5, -10.1, -3480.0   move 0.00   turn 9.58
+i110  cf 1662   eye -493.8, -10.1, -3483.2   move 3.62   turn 9.46
+i111  cf 1663   eye -493.2, -10.1, -3484.3   move 1.25   turn 0.17
+```
+
+**The eye holds still for the frame that says 1660 and then moves 3.62 units,
+where the shot travels 1.25 a frame; the aim swings 9.58 degrees off and 9.46
+back.** `eye(i109)` is `pose(1659)`, exactly — the block was never written for
+1660.
+
+Two things were ruled out before the binary was opened:
+
+* **The authored `cam/` path is smooth.** Evaluating `cp_st3` slot 127 through
+  the port's own `CamPath.pose` over 1430..2040 gives a largest per-frame eye
+  step of 1.28 units and a largest turn of 4.0 degrees (at 1943, a deliberate
+  sweep). There is no discontinuity in the data anywhere near 1660. `[proved]`
+* **No region, slot or shot change lands on 1660.** Slot 127 plays 1320..2035
+  across the whole of block 2 step 4; the shot boundaries are inside one path.
+
+### The wrong turn, and it is worth knowing about
+
+The brief's first experiment was the sidebar's **Track** toggle: *"if the jump
+vanishes with tracking off, it is the tracking layer."* It vanishes with
+tracking off. **It is not the tracking layer.**
+
+`trackEnemies` has exactly one consumer in the tree — `seatCamera`'s
+`|| !rig.trackEnabled` — and that term is in the same disjunction as the
+condition that was wrong, so turning it off forces the block to be seated and
+masks the defect. It does not stop `CameraTrackEnemiesTick`: with Track off the
+aim is still eased and still sits about 10 degrees off the rail, at
+`LOOKAT_RADIUS` from the eye. So the toggle's tooltip — *"Off restores the
+authored cam/ path exactly"* — overclaims, and the experiment it invites is a
+false positive. It was still useful: it produced the same numbers the fix
+later did (1.17 then 2.46, no flick), which is what identified the missing
+block write rather than the ease.
+
+### `CamAdvancePathFrame` (`FUN_004035E0`), off the instruction stream
+
+```
+00403605  MOV  EAX,[ESI + 0x9a6144]   ; cur = g_cam_path_cursor
+00403615  MOV  [ESI + 0x9a6110],EAX   ; g_cam_path_frame = cur      PUBLISH
+00403632  CALL 0x004041e0             ; CamEvalPath7 -> block eye + target
+0040363e  CALL 0x00403ac0             ; CamBlockSetAnglesFromLookAt
+00403658  MOV  [0x009c6f28],EDX       ; g_cam_path_frames_left = end - cur
+0040365e  JL   0x00403698             ; cur >= end ?
+00403664  ...                         ; g_queued_events_pending--   (slot 0)
+```
+
+**The publish, the curve evaluation and the block write all happen before the
+end test.** So the block holds the pose of every frame from `start` to `end`
+**inclusive**, and it is the frame *after* the end that is never written.
+`[proved]` — `globals.tsv`'s `g_cam_path_cursor` row already said this about
+the publish; what had not been carried across is that the *pose* is on the same
+side of the test.
+
+The port seated the block on `!cam.done`, and `done` is set on the tick the
+path reaches its end. One tick short, on every non-static `cam_play` in the
+game. What made it visible here rather than everywhere is the compounding:
+
+1. the eye keeps `pose(1659)` for the frame that reads 1660;
+2. the shot's aim is **not** reseated to the path's own target that frame, so
+   `CameraTrackEnemiesTick`'s ease takes one unopposed step towards the enemy
+   — 9.58 degrees — and snaps back the next frame when the reseat resumes;
+3. the shot that follows is a deferred one, `queue_event cam_play 1661..1754
+   flags 2` then `finish_sequence 7`, and `CameraPlayStashedPath`
+   (`FUN_0040C8A0`) increments before it evaluates, so its first drawn frame is
+   **1662**. Eye 1659 to eye 1662 in one frame is the 3.62 units.
+
+### What was changed
+
+`CamCommand` gains **`retired`** — the action handler has been dequeued and
+nothing writes the block from this shot again — which is `done` plus one tick,
+and that tick is the shot's last frame. `advanceCameraPath` sets it on the
+first tick that finds `done`; `seatCamera` seats on `!retired` instead of
+`!done`. The branch-override arm keeps `advance` false, as its own comment
+requires. Static poses and `finish_sequence 4` are `retired` from the start,
+because nothing publishes for them.
+
+### `[not-a-bug]`, and stated so the next reader does not chase them
+
+* **Frame 1661 is never drawn, by the engine too.** The stash holds 1661 and
+  `CameraPlayStashedPath` increments first, so 1662 is the first frame it
+  evaluates. The residual 2.46-unit step at the boundary — 1.9x the shot's own
+  1.25 — is the engine's own and is one sixtieth of a second. `[proved]` from
+  `FUN_0040C8A0` against `FUN_004035E0`.
+* **The aim snaps about 10 degrees back onto the rail on the frame the last
+  enemy deregisters**, mid-shot (measured: 9.97 degrees at camera frame 1692,
+  and it is there before and after this fix). That is structural:
+  `CamAdvancePathFrame` rewrites `g_camera_block_target` from the path every
+  frame, so when `SelectCameraLookAtTarget` falls back to the path's own target
+  the ease has nowhere to go and the aim is the path's within one frame.
+  `select_target.ts`'s "swings back over about thirty frames" describes the
+  *other* case — a shot that has already retired and left the block frozen.
+  `[proved]` structurally; not smoothed, per L27.
+* The 35.7 and 18.3 degree turns on the **first three frames** of the run are
+  the deep link settling: arriving at `frame=1551` draws one frame from an
+  unplaced camera before the tracking layer has an actor.
+
+### The checks
+
+* `web/test/camera.test.ts` grew a second stage. **Stage 1's opening could not
+  carry this**: it reaches exactly one shot boundary in six hundred frames and
+  slot 32's curve is flat there — frames 229 and 230 are the same point — so
+  the assertion passes on it whatever the seat does. That is how the first cut
+  of the check came back green against the unfixed code, which is L14 in a new
+  costume: a check that cannot fail is not a check. Stage 3 block 2 step 4
+  plays five `cam_play`s back to back with the eye moving 1.25 units a frame,
+  so it crosses five boundaries in seven hundred frames.
+  * *every drawn eye is its shot's own pose, last frame included* — the drawn
+    `camera.position` against `CamPath.pose` recomputed from the bundle, an
+    equality rather than a tolerance. **5 of 700 frames fail without the fix,
+    worst 1.242 units.**
+  * *no shot boundary swings the aim out and straight back* — **1 flick
+    without the fix, 10.23 degrees.**
+  * a coverage assertion beside each, stated without reference to `retired`.
+* `web/tools/cam_jump.mjs`, a sibling of `stage3.mjs` — `stage3.mjs` itself is
+  untouched, three other agents are in it. It drives the reported URL in real
+  Chrome a frame at a time and asserts on the Camera panel's own readouts: no
+  bracketed stall, and no aim flick. **2 of its 3 checks fail before the fix**
+  (`i109 cf=1660 (0.00 between 1.21 and 3.62)`, and 9.46 degrees at frame 110);
+  0 after. `npm run cam-jump`.
+
+### Named in `functions.tsv`
+
+* `CamBlockSetAnglesFromLookAt` (`0x00403AC0`) — was `FUN_`. Writes the camera
+  block's pitch/yaw/roll from `eye - target` through `VecToAngles`, immediately
+  after `CamEvalPath7` and before the end test.
+* A body comment on `CamAdvancePathFrame` (`0x004035E0`), which had a bare row.
+
+`VecToAngles` (`0x004016B0`) is named in the TSV and **not** in the live
+database — the decompiler still calls it `FUN_004016b0`. Expected, per the
+merge behaviour of `export-annotations`, but worth knowing when grepping.
+
+### Next actions
+
+* The **Track** toggle's tooltip is wrong and its one consumer is a term in
+  `seatCamera`'s disjunction. Either make it mean what it says — skip
+  `CameraTrackEnemiesTick` — or reword it. `[open]`, `ui/panels/Toggles.tsx`
+  and `render/camera.ts`; not touched here because it is a behaviour question
+  and the report was not about it.
+* `web/tools/lookat_live.mjs` is **stale and silently measures nothing**: its
+  regex wants a `look at` row and a `slot N frame X / Y` line, and the Camera
+  panel has had `slot`, `frame`, `eye`, `facing` and `block target` for some
+  time. `npm run lookat` therefore reports 0 frames with a camera. Not fixed
+  here; `cam_jump.mjs` covers the same ground on the driven clock.
+* **One decision for the user.** `seatCamera`'s branch-override arm is
+  gated on `cam.done`, and its own `[diverges]` note says the engine tests
+  `g_cam_path_frames_left < 0` — strictly past the end. `retired` is now
+  exactly that test, so closing the divergence is one token. Not taken:
+  it moves the frame a branch's preview shot arms on, at every
+  `store_six` in the game, and nothing has reported that. The cost of
+  leaving it is that a shot whose end lands while `camOverrideValid` is
+  up still loses its last frame — the same one-tick error, in the one
+  place this commit does not fix it. Named on the spot in
+  `app/systems.ts`.
+* `FUN_00402EF0`, the ease of the block **eye** toward the deferred-rail pose
+  at 0x009C70C0, is still unported and still `[open]` — noted in
+  `game/camera/track.ts`. It is the remaining reason a port eye can differ
+  from an engine eye while a shot is retired.
+
+## `wait_script_flag` is a gameplay gate — the hostage the boat sailed past
+
+*2026-09-07. Report: "the civilian/enemy are jumped over" at
+`?stage=3&mode=play&block=2&step=4&op=0".*
+
+### What "jumped over" turned out to mean
+
+None of the three readings offered. The actors were **placed and running**;
+the camera did pass them; but the reason it passed them is that **the script
+never stopped**. Stage 3 block 2 step 3 ends
+
+```
+27  0C spawn_obj_c        0097A608     the hostage, class 0x10 at 12808
+...
+35  45 wait_script_flag   0000001E     flag 30
+36  31 goto_scene_state   00000003
+```
+
+and in the port that wait passed on the frame it was reached. Measured from
+`?stage=3&mode=play&block=2&step=3&op=27&drive=1`, driven clock, `now().o`
+read every frame: the hostage and her captor enter the pool at f≈4, the walker
+reaches op 28 and then **op 31, and is in step 4 by f56** — 52 frames after the
+spawn, with `v1` and `e1` still live and the captor's maul (class 0x30 states
+34 → 35) still running. Step 4's `cam_play 1320..1389` then sails down the
+canal and leaves them behind the camera, which is what a viewer sees.
+
+### The defect: one array kept in two places, one of them clobbered
+
+`g_script_flags` — 0x009C7200, 0x100 bytes, cleared only by
+`ResetSceneOnEnter` (`FUN_0045EDD0`). `EvtOpSetScriptFlag48` (`FUN_0045FD70`)
+is the whole of the script's write, `EvtOpWaitScriptFlag45` (`FUN_0045FC80`)
+is the whole of the read, and **six actor routines write the same array**:
+`CivilianRunScript`'s op 0x1C (`0x0048BF2A`),
+`ZombieStateTargetScriptWithFlag` (`0x0045B1DF`, class 0x30 state 36),
+`FUN_00433f40` (`0x00433FC1`, a class-0x33 cue prop), `FUN_00473cf0`
+(`0x00473D76`) and the class-0x44 constructor at `0x0047314A`/`0x00473156`.
+
+The port had **two** stores:
+
+* `Walker.flags`, a `Set<number>` written by opcode 0x48 and read by 0x45;
+* `G.g_script_flags`, written and read by the classes.
+
+…and `app/systems.ts`'s `syncPortGlobals` did
+
+```ts
+G.g_script_flags = [];
+for (const flag of w.flags) G.g_script_flags[flag] = 1;
+```
+
+**once a frame**. So a flag an actor raised survived until the next tick and no
+further, and `wait_script_flag` could only ever see the script's own writes.
+
+The kicker, and the thing that says how big this is: across all six shipped
+scripts, **every one of the forty-odd `wait_script_flag` gates names a flag
+that script's own `set_script_flag` never sets.**
+
+```
+stage 1  waits 3, 35, 36, 248, 254      none of them set by the script
+stage 2  waits 3..7, 10..17, 248, 254   none
+stage 3  waits 21, 30, 248, 254         21 is set (block 1); 30, 248, 254 not
+stage 4  waits 19, 20, 29, 31, 32, ...  19 is set; the rest not
+stage 5  waits 0, 30, 31, 248           none
+stage 6  waits 248                      none
+```
+
+The opcode is *only* ever "hold until an actor is finished". The port was
+walking past every rescue in the game, not just this one.
+
+### Who raises flag 30
+
+The hostage herself. `civilians.spawns["12808"].script` is **27**, and that is
+an index into `g_civilian_scripts` (`entries`), not into `scripts`:
+`entries[27] = 64`. Stream 64 command 17 is `SetScriptFlag 30`, reached after
+the block whose wait word is `0x00080000` (leave `g_civilians_alive` now) —
+i.e. **once she has been rescued**. Her on-shot stream 63, which the killed
+branch of `CivilianCheckShot` also runs when the captor mauls her, raises the
+same flag at command 12. So the gate opens whichever way the encounter ends,
+which is why the real game never hangs on it.
+
+### The fix
+
+One array. `set_script_flag` writes `G.g_script_flags`; `wait_script_flag`
+reads it through a new `WalkerHost.scriptFlagRaised`, the fourth of the
+"questions about the world" beside `aliveEnemies`, `presentEnemies` and
+`aliveCivilians` and with the same `null` contract for hosts that have no
+object pool. `Walker.flags` is gone, `syncPortGlobals` no longer rebuilds the
+array, `Walker.reset()` clears it (which is `ResetSceneOnEnter`'s job and was
+what `this.flags.clear()` stood for), and `render/props.ts`'s hinge flags read
+the same array.
+
+New: `WaitRule.raisesScriptFlag`, the third wait postcondition beside
+`retires` and `skipRunsCameraOn` — a seek that steps over a `wait_script_flag`
+raises the flag, because in play the gate is only ever passed with the byte
+already up.
+
+### The wrong turns, in order
+
+1. **Read `civilians.scripts[27]` instead of `scripts[entries[27]]`** and
+   concluded the hostage's stream had no `SetScriptFlag` at all. That sent an
+   hour into the binary looking for another writer, which is how
+   `FUN_00480470` (class 0x32 state 4, `g_class32_states[4]`) got read and
+   named — it raises flag 30 too, at `0x00480590`, but class 0x32 has two
+   spawns in the whole game and neither is in stage 3. The annotation is worth
+   keeping; the detour was not. **The indirection is documented in
+   `bundle/scene.ts` and I did not read it.**
+2. **Assumed the reported URL was where the bug was.** It is a *seek*, and a
+   seek observes no waits by construction, so the step-3 encounter is left
+   half-run there whatever this opcode does. The bug is only visible as a bug
+   when the script is *played* from step 3. The URL is where the user was
+   watching, not where the defect lives.
+3. **Hand-listed the exception as `{248, 254}` and only then checked.** The
+   list came from tracing the two flags every stage waits on; the sweep written
+   to back it up found eleven more gates with no writer the port has, four of
+   them in stages a player reaches long before the results screen. **The check
+   that would have caught the first list is the one that was written to defend
+   it** — L27 in its own words, one step later than it should have been.
+4. **Built the test fixture's civilian stream with the flag in a block whose
+   wait word was `Free`.** `CivilianStepScript` walks past a block whose own
+   word is already satisfied and runs only `CivilianReapplyWaitCommand` over
+   it, so the flag command was skipped and the assertion failed for a reason
+   that had nothing to do with the fix. A word of `0` is what parks the VM on
+   a block so its actions run.
+
+### What is left
+
+* **`[diverges]`, and it wants a call.** A gate whose flag *nothing this port
+  runs can raise* passes instead of parking. The boundary is **derived from the
+  bundle**, not listed: the stage's own `set_script_flag` ops, every civilian
+  stream reachable from a class-0x10 spawn, and every captor script entry's
+  fifth short. It was hand-listed as `{248, 254}` first, and the static sweep
+  that was written to justify the list is what showed the list was wrong —
+  honouring every gate unconditionally parks **stage 5 at block 1**, **stage 1
+  at blocks 14 and 16**, stage 2 at blocks 35–41, stage 4 at 23–29, and all six
+  on the chapter card. Fourteen of the forty-odd gates have a writer the port
+  runs; the rest belong to `FUN_00433f40` (a class-0x33 cue prop, `[likely]`
+  stage 5's 0/30/31 and stage 1's 3), the class-0x44 prop family
+  (`FUN_00473cf0` / `0x0047314A`, `[open]` which owns which), and the banner
+  actors `EvtOpSpawnSimple0A` places — flag 248 `[proved]`
+  (`MOV byte ptr [0x009C72F8], 0x1` at `0x004348C1`) and 254 `[likely]`, since
+  nothing in the image names `0x009C72FE`. Porting opcode `0x0A` and the two
+  class-0x33/0x44 cue props is what deletes the escape.
+* **`g_evt_gameplay_live` (`0x007DCCA4`) is still not modelled.** Every wait
+  opcode but 0x41 requires it, and it is the engine's "a player is in state 5
+  with lives left" — the script freezes on the continue screen. The port has
+  no continue screen. `[open]`.
+* **`verify_port.py`'s divergence list covers `web/src/game/` only.**
+  `check_divergences` walks `game_files()`, so the **ten** `[diverges]` tags in
+  `web/src/script/` — seven of them older than this session — are declared and
+  never counted, and STATUS's "116 declared" is short by that much.
+  `game_and_script_files()` is already in the file, three lines up, and is what
+  the citation checks use. Not changed here: it moves a generated number three
+  concurrent workstreams also regenerate. The one added by this commit is
+  pinned by an assertion in `port.test.ts` instead, which is what L26 asks for;
+  the count is the part that is still wrong.
+* **A seek still lands with the previous step's actors alive.** `retires`
+  answers that for the two enemy gates because their condition *is* a statement
+  about actors; a flag gate's condition is a statement about a byte, and
+  raising the byte is the whole of its postcondition. Which actors a flag gate
+  was holding is not something the walker can know. `[open]`, and general to
+  the seek rather than to this opcode.
+
+---
+
+## The axe thrower is class 0x30, and his retreat is a spawn bit
+
+Two reports from stage 3 block 2, `?stage=3&mode=play&block=2&step=4&op=0`:
+*"the axe throwing zombie retreats into the wall — in the real game if there's
+nowhere for the axe thrower to retreat to, the game just continues"*, and
+*"he doesn't throw any axes"*. They looked like one bug and they are two, in
+two different halves of the tree.
+
+### The premise was wrong, and checking it took one query
+
+Both reports, and `BUGS.md`'s write-up of them, name the actor **class 0x31,
+behaviour set 1 (`zsass`)** — the set `spawns.md` describes as the one that
+"stands out of reach and throws". It is not.
+
+```
+st3evtbl.bin  {16, 19, 24, 32, 37, 38, 48, 65, 67, 68, 69, 70, 81}
+```
+
+**Stage 3 contains no class-0x31 spawn at all.** The actor at step 4 op 8 is
+class **0x30**, character type `0x13` — asset file `tutorial.bin` — body
+condition 7, initial state **33**, `ZombieStateStandAndThrow`. Its 2P twin at
+op 9 is the same. The axe is `znonoo.bin` part 0, slot `0x249`, which is
+exactly the polfile step 4 op 2 loads and op 28 frees. That is the same
+mistake `BUGS.md` already records once — *"`0x6784` is class 0x30, not
+0x31"* — and the same fix: read the descriptor rather than the description.
+Half an hour went into class 0x31's router and pick tables before that query
+was run, and none of it was needed.
+
+### The retreat: `obj+0x38` bit 0x10, and two spawn records in the game
+
+`ZombieStateWalkDistance` (`FUN_00457220`) was the obvious suspect and it is
+**verbatim in the port**: it latches a distance, remembers a start point,
+plays `row[4]`, and measures. There is no test in it of any kind, so the "is
+there room behind me" the report describes cannot live there. Nor in the push:
+the collision the script has selected at that point is `coli3.bin+0x2EA0`,
+thirty-one quads of flat water at `y = -25`, twenty-four units below the
+actor's feet, so `ZombiePushOutOfWorldAndActors` has nothing to push against.
+Read that way, the engine walks into the building too — which is where this
+sat for a while, and it was wrong.
+
+The answer is one branch earlier. `ZombieStateStandAndThrow`'s ending is a
+two-way switch at `0045945C` on **`obj+0x38` bit 0x10**, and the bit is put
+there by `EnemyZombieInitByCharType` (`FUN_00452FD0`), which the port did not
+have at all:
+
+```
+0045300B  if (obj+0x34 & 2) { obj+0x34 &= ~2; obj+0x38 |= 0x10; }
+```
+
+It **moves** the bit and clears it at the source, and it has to: bits 1 and 2
+of `obj+0x34` are the two `MarkActorShot` writes to name the player who fired.
+`ZombieStateStandAndThrow` is the only reader of `obj+0x38` bit 0x10 in the
+image, and **exactly two spawn records in the shipped game set the `obj+0x34`
+bit it comes from** — `st3evtbl.bin` `0x3078` and `0x30BC`, `init_flags
+0x20002`, the two axe men. With it set the actor gives both enemy counters and
+its permit back where it stands, goes shot-immune and camera-untracked, and
+waits out `tail+0x1C` before despawning. It never moves.
+
+So "if there's nowhere to retreat to, the game just continues" is exactly
+right about what happens and not about why: it is not a query about the level,
+it is a byte in the descriptor, and the level design is downstream of it.
+
+Measured in Chrome at the reported URL, on the driven clock:
+
+| | before | after |
+|---|---|---|
+| the actor at f430..f520 | `WalkDistance/2`, `z −3339.3 → −3361.7` | `StandAndThrow/6`, `z −3337.66`, unmoved |
+| `g_enemies_alive` reaches 0 | f530 | **f430** |
+| walker address at f440 | still `2/4/13` on `wait_enemies_alive` | `2/4/18` |
+| despawn | f530, twenty-five units inside `st3_08` | f550, where it stood |
+
+The wall is real, and it is not collision: `st3_08` runs a diagonal from
+`(-643.3, -3340.4)` to `(-626.2, -3357.4)`, six units behind the actor, and
+the old retreat ended about eleven units the far side of it.
+
+### The axes: the throw was never the problem
+
+The simulation threw all along — `throwers.mjs` reported "threw 2" for every
+one of stage 3's six state-33 spawns before any change. What was missing was
+every model involved. `charbuild.goreEntry` builds the hidden per-type rig the
+client clones from, and it walks `char.throw_` — **class 0x31's** hand table —
+and not `char.zombieThrow`, which is the one `ZombieThrowHandWeapon`
+(`FUN_0045A240`) actually switches on. So slot `0x249` (the axe), `0x1ECE` /
+`0x1ECB` and `0x1ECA` / `0x1EC7` (the two hands, held and bare) were in no rig
+at all, `CharacterLayer.cloneSlot` answered null for the projectile, and
+`swapGore` returned false for the hand — which leaves the axe in the fist.
+The weapon flew, on time, and hit; there was nothing on screen to see it.
+
+This is the civilians' hair again, one table over: *a model an exe table names
+and no rig carries*. The assertion that catches it now lives beside that one,
+in `verify_attachments.py` — 72 throwing-hand slots across the six stages, all
+of which fail without the exporter fix.
+
+### One wrong reading corrected on the way past
+
+`ZombieThrowHandWeapon` also writes `*(bone * 0x90 + 0x284 + obj) = 0`. That
+address was read as `0x20C + bone * 0x90` and **rounded** — `0x554` is bone
+5.83 — giving the bundle a `weapon_bone` of 6 for the *right* hand, which is
+the left upper arm. It is the same bone's record at `+0x78`, and
+`SkeletonWalkNode` (`FUN_004107E0`) fills that field each frame with the hit
+sphere's radius: emptying a hand makes it unshootable. The wrong write is gone
+and the reading is in `combat.md`; the port does not clear the sphere, because
+it tests the static table, and that is now a declared `[diverges]`.
+
+`SkeletonWalkNode` turned out to say something wider while it was open: it
+copies the sphere in **only when the table entry's own slot equals the slot it
+has just written**, and writes zeroes otherwise. So in the engine a bone
+showing a gore variant has no hit sphere either. Not chased, not ported,
+`[open]`.
+
+### Wrong turns, in order
+
+1. **Believed the report's class.** See above.
+2. **Reproduced the retreat and concluded the port was faithful**, because
+   `ZombieStateWalkDistance` is verbatim and the collision is water. Both
+   halves of that were true and the conclusion was still wrong; the test was
+   in the routine that *hands over* to it, which I had read and skimmed —
+   `case 6 is the despawn arm, reached only when obj+0x38 bit 0x10 is set.
+   [open] Nothing read so far sets that bit`. That comment was in the port,
+   in the file I was editing, and it was L17 in miniature: "nothing read so
+   far sets it" had hardened into "nothing sets it".
+3. **Went looking for the wall in `coli3.bin` and in the glTF** before looking
+   for the branch. The geometry was worth having in the end — it is what says
+   how far inside the building the old retreat ended — but it was an answer to
+   the wrong question, and it cost more than the spawn-flag histogram that
+   settled it in one line.
+4. **Ran `npm run export` from the shared checkout** on the first try, because
+   the command carried an absolute `cd`. It wrote 40 MB into the user's
+   `extract/player`. L28, and the fix is the same: check where the tool wrote.
+
+## The chapter card is an actor — `spawn_simple`, and the gates it opens
+
+*2026-09-07, the follow-up to "`wait_script_flag` is a gameplay gate". The
+call was: port the missing writers and delete the escape entirely.*
+
+### It is not deleted. It is 50 gates down to 35, and the reason is worth more
+
+The previous session's report said the escape needed "one spawn opcode and two
+cue props". **That estimate was wrong**, and the sweep written to justify it is
+what said so — the same shape of mistake as its own wrong turn 3, one level up.
+What it had actually enumerated was the *register-indexed* writers of
+`g_script_flags`; the flags that matter are written with **literal addresses**,
+which `MOV byte ptr [ECX + 0x9c7200]` does not match. A whole-image search for
+the string `9c72` in any operand finds 155 references and settles it.
+
+The 61 `wait_script_flag` gates in the six shipped scripts, by what raises them:
+
+| | before | after |
+|---|---:|---:|
+| honoured | 11 | **26** |
+| excused `[diverges]` | 50 | **35** |
+| stages with none excused | 0 | **2** (3 and 6) |
+
+The fifteen newly honoured are every stage's opening chapter card (flag 248,
+7 gates) and every result screen (flag 254, 5 gates), plus three more that were
+only excused because those two were.
+
+### What was ported
+
+* **`EvtOpSpawnSimple0A`** (`FUN_00408990`), opcode `0x0A` — and 0x02/0x06,
+  its player-count-gated forms, which the same `g_evt_spawn_gated_handlers`
+  forward reaches. Its operands are **not** placement descriptors: each points
+  at a two-word `{class, hp}` record, and the object places itself.
+* **Class 0x60**, `ChapterCardInstall` (`FUN_004342E0`) — 180 frames, then
+  `g_script_flags[0xF8] = 1` at `0x004348C1`, then `ActorKill`.
+* **Class 0x61**, `ResultCardInstall` (`FUN_00434EF0`) — drops `g_nFiringGate`,
+  420 frames, then `g_script_flags[0xFE] = 1` at `0x0043567C`, then
+  `ActorKill`. That instruction is **the only reference to `0x009C72FE` in the
+  image**: a byte search for the address finds one match.
+* Classes **0x62** (`ResultCardTally`) and **0x63**
+  (`InitCutsceneSkipWatcher`, already named) get a `SpawnClass` member and no
+  module — they raise no flag, and a class with no module gets no behaviour.
+
+The cards themselves are screen furniture — eight text slots at `0x007DCBA0`,
+a light block, a score tally, two texbanks — and **none of that is ported**.
+What is ported is the lifetime, which is the whole of the gate.
+
+### The exporter had to change, in both halves
+
+`spawn_simple`'s operands point into **`comevtbl.bin`**, the 0x200-byte buffer
+loaded at `0x00977200` immediately below the stage table — offsets `0x34`,
+`0x3C`, `0x44`, `0x4C`, the same four addresses in every stage. A stage
+`EvtFile` resolved them to a negative offset and dropped them. `EvtFile.resolve`
+now follows a below-base pointer into a com companion the stage loader attaches,
+`read_simple_spawn` / `readSimpleSpawn` decode the record with the engine's own
+**signed 16-bit** truncation of the second word (the shipped `0xFFFF0000` is a
+zero, not four billion hit points), and `OpJson.simple` carries them.
+`builder_hash` and `schema_hash` moved with it; all twelve bundles re-exported.
+
+### What is still excused, and exactly what each one needs
+
+Not props. **Four unported enemy classes and one prop update**, and the list is
+in `script/waits/flag.ts` beside the code:
+
+| gates | flag(s) | writer |
+|---:|---|---|
+| 20 | 10–17, 31 | class **0x14** (`FUN_00475E90`) — stage 2's blocks 35–41, stage 4's 23–29, stage 5's block 3. Writes spread over `0x00478350`..`0x0047BA6E` |
+| 8 | 31, 32 | class **0x19** (`FUN_004917E0`) — `0x0049390C`, `0x004958C7` |
+| 3 | 0, 3 | class **0x22** (`FUN_0049B0D0`), the stage-1 and stage-5 boss — `0x0049CC85`/`95` |
+| 2 | 30 | class **0x32** (`FUN_0047F5F0`) state 4 — `0x00480590` |
+| 1 | 20 | `FUN_004710C0` at `0x004710D7`, a class-0x41 prop that raises the flag and despawns on its first frame outside Original Mode. **The only remaining gate that is not an enemy class**, and the cheapest thing left |
+
+### The two "cue props" open no gate at all
+
+`FUN_00433F40` (a class-0x33 timer prop) and `FUN_00473CF0` (`HingeUpdate`)
+both write `g_script_flags`, and both take the index from a **descriptor
+field**. Cross-referenced against every `wait_script_flag` operand in the six
+scripts: **neither opens one**. The previous session named them as the thing to
+port; porting them would have changed nothing measurable. `[proved]` by the
+sweep, which is in `tools/`-adjacent form in the session scratch and reproduced
+by `docs/formats/evt.md`'s writer list.
+
+### Wrong turns
+
+1. **Estimating the remaining work from an instruction search that could not
+   see half the writers.** `search_instructions` with the operand pattern
+   `0x9c7200` matches the register-indexed form and misses `[0x009c72f8]`
+   entirely, because that operand renders as `0x009c72f8` and does not contain
+   the substring. Every literal writer — including both banner cards, the boss
+   and class 0x14 — was invisible. Searching for the bare `9c72` found 155
+   references where the first search found 15.
+2. **Regenerating `schema_hash.ts` after exporting.** The bundle then carries
+   the old stamp and the page refuses to load with *"this bundle was exported
+   against a different `web/src/bundle/` schema"* — a blank loading overlay in
+   every headless run, with no console error, which reads exactly like a hang.
+   The order is: change the exporter, regenerate the hashes, **then** export.
+3. **Setting `visible = false` on the cards, because they are screen space and
+   nothing draws them.** `GameUpdate`'s loop is
+   `if (obj.dead || !obj.visible) { … continue; }` — `visible` is this port's
+   stand-in for "the character layer has built its hierarchy", not a statement
+   about drawing — so both cards sat in the pool at sub 0 with their dwell
+   never counted, and all six stages parked on the gate the port had just made
+   real. `SpawnSlotActors` had the answer already: class 0x52's mouse has no
+   character type either and is `visible = true`. The engine has no such test
+   at all.
+
+### Also in this commit
+
+`verify_port.py`'s divergence list walked `web/src/game/` only, so the ten
+`[diverges]` in `web/src/script/` — the whole of this escape among them — were
+declared and never counted. It walks `cited_files()` now, which is the set its
+citation checks already use, and STATUS's count goes 116 → 127. Recorded here
+because the number is a measurement and the change to what it measures should
+be findable from the number.

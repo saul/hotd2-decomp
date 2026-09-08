@@ -451,6 +451,8 @@ export class Program {
       Object.assign(d, this.decodeQueue(ins, campaths));
     } else if (evt.SPAWN_OPCODES.includes(o)) {
       d.spawns = this.decodeSpawns(ins);
+    } else if (evt.SIMPLE_SPAWN_OPCODES.includes(o)) {
+      d.simple = this.decodeSimpleSpawns(ins);
     } else if (WAIT_CONDITIONS[o] !== undefined) {
       if (ins.raw.length >= 1) d.arg = ins.raw[0];
       d.blocks_on = WAIT_CONDITIONS[o];
@@ -638,6 +640,26 @@ export class Program {
         });
       }
       out.branch_preview = preview;
+    }
+    return out;
+  }
+
+  /**
+   * Resolve `spawn_simple`'s pointer list to `{class, hp}` records.
+   *
+   * Separate from {@link decodeSpawns} because these are not placement
+   * descriptors: two words, no position, and six of the game's seven distinct
+   * operands point into the shared `comevtbl` buffer rather than into this
+   * stage's table. Duplicates are **not** collapsed — the engine allocates one
+   * object per operand, and stage 3's block 11 lists the same record twice on
+   * purpose.
+   */
+  private decodeSimpleSpawns(ins: evt.Instr): Record<string, unknown>[] {
+    const out: Record<string, unknown>[] = [];
+    for (const w of ins.raw) {
+      if (w === 0xffffffff) break;
+      const rec = evt.readSimpleSpawn(this.evt!, w);
+      if (rec) out.push({ class: rec.cls, hp: rec.hp });
     }
     return out;
   }

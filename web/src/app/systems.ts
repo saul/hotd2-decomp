@@ -328,8 +328,13 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // removal cue never fired, so a civilian never left `g_civilians_alive` and
   // `wait_scripted_actors` waited for ever.
   G.g_cam_path_frame = w.cam ? Math.trunc(w.cam.frame) : 0;
-  G.g_script_flags = [];
-  for (const flag of w.flags) G.g_script_flags[flag] = 1;
+  // `g_script_flags` is **not** copied here any more, and that is the point.
+  // The walker used to keep its own `Set` of the flags `set_script_flag` had
+  // raised and this line rebuilt `G.g_script_flags` from it once a frame — so
+  // every flag an actor raised (`CivilianRunScript` op 0x1C,
+  // `ZombieStateTargetScriptWithFlag`) lasted until the next tick and no
+  // longer, and `wait_script_flag` could only ever see the script's own.
+  // There is one array, in `game/globals.ts`, and both halves write it.
   // The spawn opcode places a group the moment it runs, so this is only the
   // safety net for a spawn list restored by a snapshot load rather than by
   // an instruction. It is idempotent — `ActorByAt` refuses a second one.
@@ -376,6 +381,17 @@ export function seatCamera(rig: CameraRig, ctx: RenderContext,
   // `g_cam_path_frames_left < 0`, strictly past the end; `cam.done` is true at
   // the end, so the re-seat happens one frame earlier here. Both spend the
   // whole wait at the same frame, which is what is on screen.
+  //
+  // **`CamCommand.retired` is now exactly that test**, and closing this
+  // divergence is one token — `cam.retired` here. It is deliberately not
+  // taken: `CamAdvancePathFrame` writes `g_cam_path_frames_left = end - cur`
+  // *before* `cur++`, so on the end frame it is 0 and only the tick after is
+  // it negative, which is `retired` and not `done`. What that would change is
+  // which frame a branch's preview shot arms on, at every `store_six` in the
+  // game — a second behaviour change, and one nothing has reported. The cost
+  // of leaving it is that a shot whose end lands while `camOverrideValid` is
+  // up still loses its last frame to the override, which is the same one-tick
+  // error `retired` was added to fix, in the one place it is not fixed.
   const over = cam.done && w.camOverrideValid
     ? w.branchPreview?.[w.branchChoice] ?? null : null;
   const slot = over?.slot ?? cam.slot;
@@ -389,8 +405,17 @@ export function seatCamera(rig: CameraRig, ctx: RenderContext,
   // eases the eye and `TurnLookAtToward` eases the aim, both inside the same
   // hook, one frame at a time. So `advance` stays false here; forcing it
   // hard-wrote the block and simply moved the 27-degree cut one frame earlier.
+  //
+  // **`retired`, not `done`.** `CamAdvancePathFrame` (`FUN_004035E0`)
+  // evaluates the curve into the camera block *before* it tests the end and
+  // retires, so the frame a shot ends on is written like any other and only
+  // the frame after it is not -- the two flags differ by exactly that tick.
+  // Seating on `!done` dropped it: the block held frame `end - 1`'s pose while
+  // everything else read `end`, and the next shot then moved the eye by two or
+  // three frames' travel in one. See `CamCommand.retired`.
   const pose = CamSeatPathFrame(p, at, w.rollEnabled,
-                                force || !cam.done || !rig.trackEnabled);
+                                force || (!over && !cam.retired)
+                                      || !rig.trackEnabled);
   // Roll is the one channel the camera block has no word for, so the draw
   // takes it off the pose the seat evaluated. See `CamSeatPathFrame`.
   rig.pose.roll = pose.roll;

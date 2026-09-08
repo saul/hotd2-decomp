@@ -307,9 +307,19 @@ def comment_block(lines: list[str], i: int) -> str:
 
 
 def check_divergences() -> None:
-    """Rule 4: the places the port is knowingly wrong, in one list."""
+    """Rule 4: the places the port is knowingly wrong, in one list.
+
+    Over :func:`cited_files`, not :func:`game_files`: ``web/src/script/`` is
+    the same engine layer and it ports the event VM, so a divergence declared
+    there is a divergence in the transcription exactly as one under ``game/``
+    is. It walked ``game/`` alone until 2026-09-07, and the ten tags in
+    ``script/`` -- including the whole of ``wait_script_flag``'s coverage
+    escape, which is the largest single one in the port -- were declared and
+    never counted. STATUS's number is "how finished the transcription is"; a
+    number that cannot see a third of the engine is not that.
+    """
     found: list[str] = []
-    for path in game_files():
+    for path in cited_files():
         lines = path.read_text().splitlines()
         for n, line in enumerate(lines, 1):
             if not DIVERGES.search(line):

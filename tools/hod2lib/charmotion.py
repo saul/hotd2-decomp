@@ -166,6 +166,44 @@ def humanoid_block_offset(evt, spawn_rec) -> int | None:
     return blk
 
 
+#: The ``op 10`` modes that are a **test**, rather than the marker that ends
+#: one. `ScriptedHumanoidUpdate` (`FUN_004842A0`) at ``0x0048478C`` compares
+#: the mode against 0, 1 and 2 and falls straight through for anything else --
+#: ``SUB EAX,EBX; JZ; DEC EAX; JZ; DEC EAX; JNZ <next command>`` (``2bc3``,
+#: ``746a``, ``48``, ``7437``, ``48``, ``0f85b4fbffff``). Mode ``-2`` is
+#: therefore not a fourth comparison: it is the ``endif`` marker the skip below
+#: scans for, and running one costs a cursor step and nothing else.
+HUMANOID_IF_MODES = frozenset((0, 1, 2))
+
+
+def humanoid_skip_target(raw, off: int) -> int | None:
+    """Where ``op 10`` resumes when ``g_active_player`` does not match.
+
+    `ScriptedHumanoidUpdate` (`FUN_004842A0`) walks **eight bytes at a time**
+    from the command after the ``op 10`` until it reads ``-2`` where a mode
+    goes, and carries on after that one: ``MOV CX, word ptr [ESI + 0x2]; ADD
+    ESI, 0x8; CMP CX, -0x2`` (``668b4e02``, ``83c608``, ``6683f9fe``) at
+    ``0x004847B6``, then the same three instructions in a loop at
+    ``0x004847C7``.
+
+    The stride is a literal 8 and **not** :func:`humanoid_cmd_len`: a 16-byte
+    command inside a skipped arm would be read by the engine as two 8-byte
+    ones. That is the engine's own arithmetic and it is transcribed rather than
+    corrected -- ``tools/verify_scripted_clips.py`` checks that every target it
+    lands on is a real command boundary in the shipped scripts.
+
+    Returns ``None`` only if the scan runs off the end of the file, which no
+    shipped program does.
+    """
+    p = off + 8
+    while p + 8 <= len(raw):
+        mode = struct.unpack_from("<h", raw, p + 2)[0]
+        p += 8
+        if mode == -2:
+            return p
+    return None
+
+
 def humanoid_command_offsets(evt, spawn_rec) -> list[int]:
     """Every command offset the block reaches, sorted, jumps followed.
 
@@ -178,6 +216,13 @@ def humanoid_command_offsets(evt, spawn_rec) -> list[int]:
     gap here: `MotionPlayLength` is 0, so `op 1` mode 2 -- *hold when the clip
     reaches its last frame* -- can never fire and the VM parks on it for ever
     with the skeleton stuck on whatever pose it last had.
+
+    **``op 10`` has two successors and only one of them is the next command.**
+    It is the engine's ``if (g_active_player == mode)``, and the arm it skips
+    to is reached by no other edge -- so a walk that only fell through stopped
+    at the ``op 18`` inside the *first* arm and emitted a four-command program
+    whose every path ended in `ActorKill`. Stage 3's block 2 places the two
+    player characters that way.
     """
     blk = humanoid_block_offset(evt, spawn_rec)
     if blk is None:
@@ -199,6 +244,10 @@ def humanoid_command_offsets(evt, spawn_rec) -> list[int]:
                 if t is not None:
                     pending.append(t)
                 break
+            if op == 10 and mode in HUMANOID_IF_MODES:
+                t = humanoid_skip_target(raw, p)
+                if t is not None:
+                    pending.append(t)
             p += humanoid_cmd_len(op, mode)
     order.sort()
     return order

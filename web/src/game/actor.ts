@@ -522,6 +522,69 @@ export enum CountFlag {
   KeepCounted = 0x1,
 }
 
+/**
+ * `obj+0x38`'s upper bits, which are **spawn-record bits moved out of
+ * `obj+0x34`** by `EnemyZombieInitByCharType` (`FUN_00452FD0`).
+ *
+ * The move is the thing worth knowing: the routine reads a bit of the flags
+ * word `ActorInitFlags` built from the descriptor, **clears it there** and sets
+ * a different bit here, so nothing downstream can find it at `obj+0x34` any
+ * more. Reading the descriptor's word and stopping is why the port never saw
+ * these at all.
+ *
+ * ```
+ * 00453000  if (obj+0x136C & 0x20)  obj+0x38 |= 0x8
+ * 0045300b  if (obj+0x34  & 0x2) { obj+0x34 &= ~0x2;  obj+0x38 |= 0x10 }
+ * 00453045  if (obj+0x34  & 0x4) { obj+0x34 &= ~0x4;  obj+0x38 |= 0x20 }
+ * ```
+ *
+ * `[proved]`, and they are separate from {@link CountFlag}'s three latches in
+ * the same word.
+ */
+export enum ZombieAux {
+  /**
+   * Bit 3 — a draw-path selector, raised from `obj+0x136C` bit `0x20`, which
+   * is the descriptor's own `+0x20` word. `DrawCharacterPartSlot`
+   * (`FUN_00419B40`) is the only reader, in eight places, and it takes it
+   * together with the word at `0x009A2BB4`. Fifty-five shipped class-0x30
+   * spawns set the source bit — 20 in stage 2 and 35 in stage 4.
+   *
+   * [open] What it selects has not been read. It is set here because the
+   * routine sets it, and because `EnemyThrowerInit` (`0x00449802`) and
+   * `CivilianInit` (`0x0048A642`) raise the same bit — so it is class-agnostic
+   * and not a zombie fact.
+   */
+  DrawVariant = 0x8,
+  /**
+   * Bit 4 — **a stationary thrower that never walks away.**
+   *
+   * `ZombieStateStandAndThrow` (`FUN_00459080`) is the only reader in the
+   * whole image (`0045945C` and `004595B4`, both `TEST byte [ESI+0x38], 0x10`
+   * — `f6463810`), and it is the switch between that state's two endings: with
+   * the bit clear it walks its descriptor's distance through state 15 or leaps
+   * through state 26, and with it set it stands where it is, gives both enemy
+   * counters and its permit back at once, and waits to be despawned.
+   *
+   * **Two spawn records in the whole game set the `obj+0x34` bit it comes
+   * from**, and they are the two axe men of stage 3 block 2 step 4 — script
+   * addresses `0x3078` and `0x30BC`, both `init_flags 0x20002`. That is what
+   * "when there is nowhere for the thrower to retreat to, the game just
+   * carries on" is: not a collision test, a descriptor bit. `[proved]`
+   */
+  StandThrowRetire = 0x10,
+  /**
+   * Bit 5 — `ZombieStateRideCarrier` (`0x004589F5`) and
+   * `ZombieStateDelayedStrikeInPlace` (`0x0045EAEA`) read it; the first uses
+   * it to choose whether the actor's position is the carrier's plus its own
+   * offset.
+   *
+   * [open] Not read in full. Three shipped class-0x30 records set the
+   * `obj+0x34` bit it comes from, all in stage 2, against the two that set
+   * {@link StandThrowRetire}'s.
+   */
+  CarrierOffset = 0x20,
+}
+
 /** `obj+0x136C` for class 0x30, where the bits differ from the thrower's. */
 export enum ZombieFlag2 {
   /**
@@ -531,6 +594,13 @@ export enum ZombieFlag2 {
    * `ZombieStateFallToGround`.
    */
   MayFall = 0x4000000,
+  /**
+   * Bit `0x20` — the descriptor's own `+0x20` word asking for
+   * {@link ZombieAux.DrawVariant}. `EnemyZombieInitByCharType`
+   * (`FUN_00452FD0`) reads it at `0x00453000` and raises `obj+0x38` bit 3 from
+   * it; nothing else in the image looks at it.
+   */
+  DrawVariantSource = 0x20,
   /** Bit `0x20000000` — take part in the world push. Off while emerging. */
   CollideWorld = 0x20000000,
   /** Bit `0x40000000` — take part in the actor-versus-actor push. */

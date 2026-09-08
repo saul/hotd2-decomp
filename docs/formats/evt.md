@@ -46,6 +46,15 @@ So a pointer maps to a file offset by subtracting the DC base of its buffer.
 **do** point back into it (offsets as low as −460), which answers the old
 question about whether the two link: they do.
 
+**What points back, concretely:** `spawn_simple` (`0A`). Six of the seven
+distinct operands that opcode carries in the whole game are `0x00977234`,
+`0x0097723C`, `0x00977244` and `0x0097724C` — offsets `0x34`, `0x3C`, `0x44`
+and `0x4C` into `comevtbl.bin`, which is 296 bytes long — and they are the same
+four addresses in every stage. `EvtFile.resolve` is the exporter's half of
+this: a pointer whose offset comes out **negative** against the stage base is
+resolved against the com buffer instead, and a stage table with no com
+companion resolves them to nothing.
+
 ### The "span problem" was an artefact
 
 The old note recorded pointer spans of 4× and 160× the file size. Those were
@@ -410,7 +419,8 @@ inference; **[open]** = undetermined.
 |---|---|---|
 | `01`–`08` | `spawn_*_if_1p` / `_if_2p` | **[proved]** the four spawn opcodes behind a player-count gate and nothing else. `EvtOpSpawnIfOnePlayer` (`0x00408820`) and `EvtOpSpawnIfTwoPlayers` (`0x00408860`) test `g_max_attackers` against 1 or 2 and either tail-jump into `g_evt_spawn_gated_handlers` (`0x00577650`) — indexed by the opcode, holding `09`/`0A`/`0B`/`0C` twice — or walk the operand list to its `-1` and skip it. Same descriptors, same allocators. The two lists **overlap** rather than replace: stage 1 block 0 step 2 gives `07` three class-0x30 zombies and `03` the last two of that same three, so the second player adds one. Only `03`/`04` and `07`/`08` are ever encoded. ⚠️ the old name `spawn_if_mode*` guessed at a difficulty or game mode; the gate is the live player count |
 | `09` | `spawn_placed` | the main enemy placement opcode |
-| `0A`–`0D` | `spawn_*` | same descriptor, different object base class |
+| `0B`–`0D` | `spawn_*` | same descriptor, different object base class |
+| `0A` | `spawn_simple` | **[proved]** *not* the same descriptor. `EvtOpSpawnSimple0A` (`FUN_00408990`) walks a `-1`-terminated list of pointers to **two-word `{class, hp}` records** — no position, no orientation, no tail — allocating `g_class_handlers[class]` at 0x13F4 bytes and storing `(short)hp` into both `obj+0x11C` and `obj+0x11E`. The four records the shipped scripts name live in **`comevtbl.bin`**, the 0x200-byte buffer loaded at `0x00977200` immediately below the stage table, which is why every stage points at the same four addresses `0x00977234/3C/44/4C`; stage 6 adds three stage-local ones. They are classes 0x60, 0x61, 0x62 and 0x63 — the screen furniture — and two of them raise the `g_script_flags` byte a `45` two instructions later waits on |
 | `0E` | `set_approach_rings` | **[proved]** `g_enemy_approach_rings[op0][0..2] = op1..op3` as **floats** — three XZ distances from the camera. 6 dwords; a 4th ring operand is read and discarded. ROM defaults `{25,38,51}` ×3 and `{37,48,51}` |
 | `0F` | `set_approach_steps` | **[proved]** `-1`-terminated list of small ints into `g_enemy_approach_steps`; defaults `{2,3,4}` |
 | `10` | `set_collision_set_full` | **[proved]** `-1`-terminated list of **relocated absolute pointers** to collision-mesh blobs. Consulted by both the ray and the sphere queries |
@@ -450,10 +460,10 @@ inference; **[open]** = undetermined.
 | `42` | `wait_frames` | **[proved]** countdown; only decrements while the gate is open, and `FUN_00499530` can clamp it downward to shorten a wait in progress |
 | `43` | `wait_enemies_present` | **[proved]** `g_enemies_present <= op` **and `g_camera_free`** (`0x009C6F2D`) — so the room does not hand over on the frame the last enemy dies, but once no enemy holds a camera slot and the aim has swung back onto the rail |
 | `44` | `wait_enemies_alive` | **[likely]** `g_enemies_alive <= op`, `g_camera_free`, plus **one frame of hysteresis** (`g_evt_wait_alive_hysteresis`, `0x007DCCA8` — the condition must hold two frames running; no other wait has it). The two counters differ because `alive` drops at kill time and `present` at death-animation end, so `present >= alive` |
-| `45` | `wait_script_flag` | **[proved]** `g_script_flags[op]` — a 256-byte array at `0x009C7200` |
+| `45` | `wait_script_flag` | **[proved]** `g_script_flags[op] != 0` **and `g_evt_gameplay_live`** (`0x007DCCA4`) — a 256-byte array at `0x009C7200`. It is a **gameplay** gate and nothing else: across all six shipped scripts *every one* of its **61** sites names a flag that stage's own `48` never sets. A whole-image sweep of the array puts every writer in an actor: `CivilianRunScript` op 0x1C (`0x0048BF2A`), `ZombieStateTargetScriptWithFlag` (`0x0045B1DF`, class 0x30 state 36), the chapter card (class 0x60, `0x004348C1`, flag 248) and the stage-clear card (class 0x61, `0x0043567C`, flag 254 — **the only instruction in the image that names `0x009C72FE`**), class 0x14 (`0x00478350`..`0x0047BA6E`, flags 10-17 and 31), class 0x19 (`0x0049390C`, `0x004958C7`), class 0x22 (`0x0049CC85`/`95`, flags 0 and 3), class 0x32 (`0x00480590`, flag 30), class 0x2D (`0x00426BE4`), class 0x33 (`0x00433FC1`) and the class-0x41/0x44 prop family (`0x0046F0F2`, `0x004710D7`, `0x0047314A`, `0x00473D76`, `0x00474FA6`). So this opcode is *the* way the script waits on one actor finishing. See [civilians.md](civilians.md#and-how-the-stage-script-finds-out) and [spawns.md](spawns.md) for classes 0x60-0x63 |
 | `46` | `wait_scripted_actors` | **[proved]** `g_civilians_alive <= op` — the **class-0x10 civilians**. Byte for byte the `43` handler on a different counter — `g_camera_free` included — and all 68 sites in the game pass operand 0, so it is always "wait for the last civilian to leave play" |
 | `47` | `wait_targets_clear` | **[likely]** camera settled and no live targetable entity registered. Depends on intra-frame task ordering that was not resolved |
-| `48` | `set_script_flag` | **[proved]** the writer half of `45` |
+| `48` | `set_script_flag` | **[proved]** `g_script_flags[op] = 1`, and that is the entire handler — no yield, no test. There is **no clear-flag opcode** in the dispatch table, so a flag stays up until `ResetSceneOnEnter` (`FUN_0045EDD0`) zeroes all 0x100 bytes on the next scene |
 | `49`–`4B` | `variant_*` | pick an operand list by a global |
 | `4D` | `checkpoint` | **[proved]** appends the current room id to the per-stage route history consumed by the stage-clear route map; reseeds the CRT RNG with **0** during gameplay (so runs are deterministic); restores the default per-class enemy approach rings |
 | `4E` / `4F` | `halt` / `advance_step` | **[proved]** `4F` is `EvtAdvanceStepOrRoute` (`0x0045F000`): `step += 1`, and only when that step does not exist does it read the route record and reset `step` to 1. It touches **no actors** — a block's steps are one continuous room and this fires between them; 71 step boundaries and 19 block boundaries in the shipped scripts are crossed by live enemy-class spawns with no intervening enemy gate. The only wholesale sweep is the scene change, which rebases the object arena (`FUN_004A7310`). ⚠️ formerly `end_block`, which reads as a block terminator — it is not one |

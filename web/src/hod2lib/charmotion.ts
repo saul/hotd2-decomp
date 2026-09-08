@@ -125,6 +125,47 @@ export function humanoidBlockOffset(evt: EvtFile | null,
 }
 
 /**
+ * The `op 10` modes that are a **test**, rather than the marker that ends one.
+ *
+ * `ScriptedHumanoidUpdate` (`FUN_004842A0`) at `0x0048478C` compares the mode
+ * against 0, 1 and 2 and falls straight through for anything else --
+ * `SUB EAX,EBX; JZ; DEC EAX; JZ; DEC EAX; JNZ <next command>` (`2bc3`, `746a`,
+ * `48`, `7437`, `48`, `0f85b4fbffff`). Mode `-2` is therefore not a fourth
+ * comparison: it is the `endif` marker the skip below scans for, and running
+ * one costs a cursor step and nothing else.
+ */
+const HUMANOID_IF_MODES = new Set([0, 1, 2]);
+
+/**
+ * Where `op 10` resumes when `g_active_player` does not match its mode.
+ *
+ * `ScriptedHumanoidUpdate` (`FUN_004842A0`) walks **eight bytes at a time**
+ * from the command after the `op 10` until it reads `-2` where a mode goes,
+ * and carries on after that one: `MOV CX, word ptr [ESI + 0x2]; ADD ESI, 0x8;
+ * CMP CX, -0x2` (`668b4e02`, `83c608`, `6683f9fe`) at `0x004847B6`, then the
+ * same three instructions in a loop at `0x004847C7`.
+ *
+ * The stride is a literal 8 and **not** {@link humanoidCmdLen}: a 16-byte
+ * command inside a skipped arm would be read by the engine as two 8-byte ones,
+ * and the second half of its point would have to miss `-2` for the scan to
+ * survive. That is the engine's own arithmetic and it is transcribed rather
+ * than corrected -- `tools/verify_scripted_clips.py` checks that every target
+ * it lands on is a real command boundary in the shipped scripts.
+ *
+ * Returns null only if the scan runs off the end of the file, which no shipped
+ * program does.
+ */
+export function humanoidSkipTarget(raw: Uint8Array, off: number): number | null {
+  let p = off + 8;
+  while (p + 8 <= raw.length) {
+    const mode = i16(raw, p + 2);
+    p += 8;
+    if (mode === -2) return p;
+  }
+  return null;
+}
+
+/**
  * Every command offset the block reaches, sorted, jumps followed.
  *
  * One walk, shared by the two things that need it: `bundle` emits the commands
@@ -132,6 +173,14 @@ export function humanoidBlockOffset(evt: EvtFile | null,
  * did not exist -- `op 2` and `op 3` name a motion the actor plays for the
  * rest of its program, and nothing added those to the bake list, so 118 of the
  * 263 (program, clip) pairs the six stages carry had no frames at all.
+ *
+ * **`op 10` has two successors and only one of them is the next command.**
+ * It is the engine's `if (g_active_player == mode)`, and the arm it skips to
+ * is reached by no other edge -- so a walk that only fell through stopped at
+ * the `op 18` inside the *first* arm and emitted a four-command program whose
+ * every path ended in `ActorKill`. Stage 3's block 2 placed the two player
+ * characters that way and the port killed both of them on the frame they
+ * spawned.
  */
 export function humanoidCommandOffsets(evt: EvtFile | null,
                                        spawnRec: Spawn): number[] {
@@ -153,6 +202,10 @@ export function humanoidCommandOffsets(evt: EvtFile | null,
         const t = evt!.toOffset(u32(raw, p + 4));
         if (t !== null) pending.push(t);
         break;
+      }
+      if (op === 10 && HUMANOID_IF_MODES.has(mode)) {
+        const t = humanoidSkipTarget(raw, p);
+        if (t !== null) pending.push(t);
       }
       p += humanoidCmdLen(op, mode);
     }

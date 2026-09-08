@@ -331,7 +331,16 @@ export class Stage {
         if (!name) return null;
         const path = `evt/${name}`;
         if (!await this.source.exists(path)) return null;
-        return evt.parse(await this.source.read(path), name, this.blockCount);
+        // The shared 0x200-byte buffer that sits immediately below the stage
+        // table in memory. `spawn_simple` points into it, so a stage table
+        // that cannot see it resolves six of the game's seven screen-furniture
+        // records to nothing. See `EvtFile.resolve`.
+        const comPath = "evt/comevtbl.bin";
+        const com = await this.source.exists(comPath)
+          ? new evt.EvtFile(await this.source.read(comPath), "comevtbl.bin")
+          : null;
+        return evt.parse(await this.source.read(path), name, this.blockCount,
+                         com);
       })();
     }
     return this.evtP;

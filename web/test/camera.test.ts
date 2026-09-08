@@ -32,6 +32,7 @@ import { PerspectiveCamera, Scene, Vector3 } from "three";
 import { Walker, type WalkerHost } from "../src/script/walker";
 import { CamPaths } from "../src/game/camera/curve";
 import { CameraDrawSystem, CameraRig } from "../src/render/camera";
+import type { CameraPose } from "../src/render/campath";
 import { CameraSeatSystem } from "../src/app/systems";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { SetGameTables } from "../src/game/tables";
@@ -55,12 +56,41 @@ function check(name: string, ok: boolean, detail = ""): void {
   else { failures++; console.log(`  FAIL  ${name}${detail ? ` -- ${detail}` : ""}`); }
 }
 
-const dir = join(ROOT, "stage1");
-const scriptPath = join(dir, "stage1.script.json");
-if (!existsSync(scriptPath)) skipNoBundle("camera");
-const script = JSON.parse(readFileSync(scriptPath, "utf8")) as ScriptJson;
-const camJson = JSON.parse(
-  readFileSync(join(dir, "stage1.cam.json"), "utf8")) as CamJson;
+/**
+ * One stage's two files, and where in it to start.
+ *
+ * Two stages are driven here and they are not interchangeable. Stage 1's
+ * opening is what the refresh-rate flicker was measured on. Stage 3 block 2
+ * step 4 is where the shots **move**: it plays five `cam_play`s back to back
+ * on one path, so five shot boundaries land inside seven hundred frames, and
+ * the eye is travelling at about 1.25 units a frame through all of them.
+ * Stage 1's opening reaches exactly one boundary in six hundred frames and its
+ * curve is flat there -- `cam_play`'s frames 229 and 230 of slot 32 are the
+ * same point -- so the off-the-rail check below passes on it whatever the
+ * seat does. A check that cannot fail is not a check, which is why the second
+ * stage is loaded rather than the first one driven for longer.
+ */
+interface Bundle {
+  script: ScriptJson;
+  paths: CamPaths;
+  /** `[block, step]` to enter at, or null for the script's own entry. */
+  at: readonly [number, number] | null;
+}
+
+function load(stage: string, at: Bundle["at"] = null): Bundle {
+  const dir = join(ROOT, stage);
+  const scriptPath = join(dir, `${stage}.script.json`);
+  if (!existsSync(scriptPath)) skipNoBundle("camera");
+  return {
+    script: JSON.parse(readFileSync(scriptPath, "utf8")) as ScriptJson,
+    paths: new CamPaths(JSON.parse(
+      readFileSync(join(dir, `${stage}.cam.json`), "utf8")) as CamJson),
+    at,
+  };
+}
+
+const STAGE1 = load("stage1");
+const STAGE3 = load("stage3", [2, 4]);
 
 /** Records nothing: the drawn camera is what is compared. */
 const mkHost = (): WalkerHost => ({
@@ -71,6 +101,7 @@ const mkHost = (): WalkerHost => ({
   playSound: () => undefined, aliveEnemies: () => null,
   presentEnemies: () => null,
   aliveCivilians: () => null, cameraFree: () => null,
+  scriptFlagRaised: () => null,
   showMessage: () => null, endDialogue: () => undefined,
 });
 
@@ -82,6 +113,23 @@ type Fwd = [number, number, number];
 interface Run {
   /** One entry per *drawn* frame. */
   drawn: Fwd[];
+  /** The drawn eye, per drawn frame — `camera.position` as the draw left it. */
+  eyes: Fwd[];
+  /**
+   * What the port says the camera was on when that eye was drawn: the shot's
+   * slot and its published frame, or null on a frame the rail does not
+   * determine the eye — no shot, a static pose, a branch override in play, or
+   * a slot this stage's cam file has no path for.
+   */
+  shot: (readonly [number, number] | null)[];
+  /**
+   * Drawn frames on which the shot was sitting on its own end frame.
+   *
+   * The coverage counter for {@link offRail}: that check is about the last
+   * frame of a shot, so a run that never reaches one asserts nothing. Stated
+   * without reference to `CamCommand.retired`, which is the field under test.
+   */
+  ends: number;
   /** Ticks that frame owed. Zero is the `tickStopped` path. */
   ran: number[];
   ticks: number;
@@ -98,16 +146,19 @@ interface Run {
  * bug survived: the flicker only shows once the camera *wants* to look
  * somewhere the rail does not.
  */
-function play(hz: number, rafs: number, spawnAt: number): Run {
+function play(hz: number, rafs: number, spawnAt: number,
+              bundle: Bundle = STAGE1): Run {
+  const { script, paths } = bundle;
   ResetGameGlobals();
   SetGameTables(script.characters, script.breakables, script.set_pieces,
                 script.humanoids, script.coli, script.civilians);
   const w = new Walker(script, mkHost());
+  if (bundle.at) w.goToBlock(bundle.at[0], bundle.at[1]);
   const rig = new CameraRig();
   const camera = new PerspectiveCamera(60, 16 / 9, 0.1, 10000);
   const ctx = {
     scene: new Scene(), camera, view: new CameraFrame(), events: new Events(),
-    rng: new Rng(1), walker: w, paths: new CamPaths(camJson),
+    rng: new Rng(1), walker: w, paths,
     scope: null, session: null, stage: 1, frame: 0,
   } as unknown as Parameters<CameraRig["draw"]>[0];
 
@@ -129,7 +180,8 @@ function play(hz: number, rafs: number, spawnAt: number): Run {
   loop.running = true;
   loop.start(0);
   const wall = 1 / hz;
-  const out: Run = { drawn: [], ran: [], ticks: 0, idles: 0, at: "" };
+  const out: Run = { drawn: [], eyes: [], shot: [], ends: 0, ran: [],
+                     ticks: 0, idles: 0, at: "" };
   const fwd = new Vector3();
 
   for (let i = 0; i < rafs; i++) {
@@ -162,6 +214,14 @@ function play(hz: number, rafs: number, spawnAt: number): Run {
     if (w.finished) break;
     camera.getWorldDirection(fwd);
     out.drawn.push([fwd.x, fwd.y, fwd.z]);
+    const e = camera.position;
+    out.eyes.push([e.x, e.y, e.z]);
+    // The same four exclusions `seatCamera` makes, read off the state it read.
+    const c = w.cam;
+    const over = !!(c?.done && w.camOverrideValid);
+    const rail = c && !c.isStatic && !over && paths.paths.has(c.slot);
+    out.shot.push(rail ? [c.slot, c.frame] as const : null);
+    if (rail && c.frame >= c.endFrame) out.ends += 1;
     out.ran.push(ran);
   }
   out.at = `${w.block}/${w.step}/${w.opIndex}`;
@@ -190,6 +250,56 @@ function flickers(drawn: Fwd[]): { n: number; worst: number; at: number } {
     }
   }
   return { n, worst, at };
+}
+
+/**
+ * How far the drawn eye is from the rail it says it is on.
+ *
+ * The whole of `CamAdvancePathFrame` (`FUN_004035E0`) as far as the eye is
+ * concerned: it publishes `g_cam_path_frame = cursor`, evaluates the curve
+ * into `g_camera_block_eye` at that cursor, and only **then** tests
+ * `cursor >= end`. So on every frame a shot is queued — its last one included
+ * — the block holds the pose of the frame the port itself says the camera is
+ * on, and the draw copies the block straight into `camera.position`
+ * (`APPLY_EYE_Y_RULE` is off, so `cameraEyeY` is the identity).
+ *
+ * That makes this an equality rather than a tolerance, and it is the one
+ * measurement that is on the **drawn camera** rather than on some layer's
+ * account of itself: recompute the pose from the bundle and compare.
+ *
+ * Seating on `!done` instead of `!retired` broke it by exactly one frame per
+ * shot — the block kept frame `end - 1`'s pose while everything else read
+ * `end` — and what that looked like was the camera stalling for a frame and
+ * then moving two or three frames' worth in one. Reported against stage 3
+ * block 2 step 4 as *"the camera jumps"*.
+ */
+function offRail(run: Run, paths: CamPaths):
+    { n: number; worst: number; at: number; checked: number } {
+  const pose: CameraPose = {
+    eye: new Vector3(), target: new Vector3(), roll: 0,
+  };
+  let n = 0, worst = 0, at = -1, checked = 0;
+  for (let i = 0; i < run.eyes.length; i++) {
+    const s = run.shot[i];
+    if (!s) continue;
+    const p = paths.paths.get(s[0]);
+    if (!p) continue;
+    checked++;
+    p.pose(s[1], false, pose);
+    const e = run.eyes[i];
+    const d = Math.hypot(e[0] - pose.eye.x, e[1] - pose.eye.y,
+                         e[2] - pose.eye.z);
+    // A thousandth of a world unit. The curve is evaluated in double
+    // precision on both sides of this comparison and the two calls are the
+    // same code, so the honest tolerance is float noise; the defect this
+    // catches was 1.2 units at stage 3's `cam_play 1430..1660` and is a whole
+    // frame of travel on any shot that moves.
+    if (d > 1e-3) {
+      n++;
+      if (d > worst) { worst = d; at = i; }
+    }
+  }
+  return { n, worst, at, checked };
 }
 
 console.log("\ncamera: one drawn pose per game frame, whatever the display");
@@ -253,6 +363,35 @@ const slow = play(60, 600, 100);
     travel += deg(slow.drawn[i - 1], slow.drawn[i]);
   }
   check("the camera still moves", travel > 90, `${travel.toFixed(1)} deg`);
+}
+
+console.log("\nthe drawn eye is the pose of the frame the port says it is on");
+
+{
+  // Stage 3 block 2 step 4: five consecutive `cam_play`s on slot 127, running
+  // 1320..2035 with the eye moving about 1.25 units a frame throughout. The
+  // enemy probe goes in before the third of them ends, so the tracking layer
+  // is live across a shot boundary -- which is the half of the reported
+  // symptom that is a turn rather than a step. Frame 300 is 39 frames before
+  // `cam_play 1430..1660` reaches its end.
+  const s3 = play(60, 700, 300, STAGE3);
+  const r = offRail(s3, STAGE3.paths);
+  check("every drawn eye is its shot's own pose, last frame included",
+        r.n === 0,
+        `${r.n} of ${r.checked} frames off the rail, worst`
+        + ` ${r.worst.toFixed(3)} units at drawn frame ${r.at}`);
+  // A skip is not a pass, and neither is a check that never met its case:
+  // this one is entirely about the frame a shot ends on, and it needs the
+  // camera to have been moving when it got there.
+  check("...and the run drew several shots' final frames, on a moving camera",
+        s3.ends >= 4 && r.checked > 400,
+        `${s3.ends} end frames of ${r.checked} checked`);
+
+  const f = flickers(s3.drawn);
+  check("...and no shot boundary swings the aim out and straight back",
+        f.n === 0,
+        `${f.n} of ${s3.drawn.length}, worst ${f.worst.toFixed(2)} deg`
+        + ` at frame ${f.at}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

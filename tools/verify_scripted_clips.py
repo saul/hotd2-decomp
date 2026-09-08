@@ -34,6 +34,7 @@ for, so that list is what this measures.
 from __future__ import annotations
 
 import argparse
+import struct
 import sys
 from pathlib import Path
 
@@ -70,6 +71,55 @@ def clips_for(rec, cls: int) -> list[int]:
     return []
 
 
+def check_op10(prog, n: int, faults: list[str]) -> tuple[int, int]:
+    """`op 10`'s two edges, against the walk that has to carry both.
+
+    The port steps the cursor with a plain ``pc += 1`` and jumps with an index,
+    so two properties of the emitted command list are load-bearing and neither
+    is visible from the TypeScript:
+
+    * **Fall-through is the next entry.** Every command but `op 15`, `op 18`
+      and `op -1` continues at ``off + humanoid_cmd_len``, so that offset has
+      to be the next one in the sorted list. A command reachable only through
+      an edge the walk does not follow leaves a hole, and `pc += 1` then steps
+      over whatever is on the far side of it.
+    * **`op 10`'s skip lands on a command.** The engine scans forward eight
+      bytes at a time for a `-2` in a mode field (`0x004847B6`), a stride that
+      takes no notice of the 16-byte commands -- so a point-carrying command
+      inside a skipped arm could in principle desync it. None does; this is
+      what says so, rather than the docstring that used to.
+    """
+    checked = skips = 0
+    for rec in evtlib.spawns(prog.evt):
+        if rec.cls != 0x25:
+            continue
+        raw = prog.evt.raw
+        offs = charmotion.humanoid_command_offsets(prog.evt, rec)
+        seen = set(offs)
+        for i, off in enumerate(offs):
+            op, mode, _a, _b = struct.unpack_from("<4h", raw, off)
+            checked += 1
+            if op not in (18, -1, 15):
+                want = off + charmotion.humanoid_cmd_len(op, mode)
+                got = offs[i + 1] if i + 1 < len(offs) else None
+                if got != want:
+                    faults.append(
+                        f"stage{n} 0x{rec.offset:04X} cmd {i} (op {op} mode "
+                        f"{mode}): falls through to 0x{want:04X}, but the next "
+                        f"emitted command is "
+                        + (f"0x{got:04X}" if got is not None else "the end"))
+            if op == 10 and mode in charmotion.HUMANOID_IF_MODES:
+                skips += 1
+                t = charmotion.humanoid_skip_target(raw, off)
+                if t is None or t not in seen:
+                    faults.append(
+                        f"stage{n} 0x{rec.offset:04X} cmd {i} (op 10 mode "
+                        f"{mode}): the -2 scan lands on "
+                        + (f"0x{t:04X}, which is not a command boundary"
+                           if t is not None else "the end of the file"))
+    return checked, skips
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", required=True)
@@ -80,6 +130,8 @@ def main() -> int:
     checked = 0
     missing: list[str] = []
     per_class = {0x20: 0, 0x25: 0}
+    flow: list[str] = []
+    flow_cmds = flow_skips = 0
 
     for n in STAGES:
         try:
@@ -89,6 +141,9 @@ def main() -> int:
         except Exception as exc:                       # noqa: BLE001
             print(f"  stage{n}: unreadable -- {exc}")
             return 1
+        c1, c2 = check_op10(prog, n, flow)
+        flow_cmds += c1
+        flow_skips += c2
         for rec in evtlib.spawns(prog.evt):
             if rec.cls not in SCRIPTED_CLASSES:
                 continue
@@ -113,12 +168,14 @@ def main() -> int:
     print(f"  {checked - len(missing)} of {checked} (spawn, clip) pairs are "
           f"baked -- {per_class[0x25]} from class 0x25 command blocks, "
           f"{per_class[0x20]} from class 0x20 descriptors")
-    if missing:
-        for m in missing[:40]:
-            print(f"  MISSING  {m}")
-        if len(missing) > 40:
-            print(f"  ... and {len(missing) - 40} more")
-        print(f"\n{len(missing)} failed")
+    print(f"  {flow_cmds} class-0x25 commands decoded, {flow_skips} of them an "
+          f"`op 10` test whose skip target is a command boundary")
+    if missing or flow:
+        for m in (missing + flow)[:40]:
+            print(f"  FAULT  {m}")
+        if len(missing) + len(flow) > 40:
+            print(f"  ... and {len(missing) + len(flow) - 40} more")
+        print(f"\n{len(missing) + len(flow)} failed")
         return 1
     print("\nclean")
     return 0

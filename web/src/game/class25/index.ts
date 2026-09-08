@@ -74,8 +74,20 @@ export enum HumanoidOp {
   SetPos = 8,
   /** Swap the model in a hand, from a per-character weapon table. */
   SetHandModel = 9,
-  /** Skip the following commands unless the player count matches. */
-  IfPlayerCount = 10,
+  /**
+   * `if (g_active_player == mode)` — run the following commands, or skip past
+   * the `mode == -2` marker that closes the arm.
+   *
+   * **It is not a player *count*.** `0x004847A9`, `0x004847D9` and
+   * `0x00484809` all compare `dword ptr [0x009c7000]`, which is
+   * `g_active_player` — `SelectAttackablePlayer` (`FUN_00414F40`) writes -1
+   * for nobody, 0 or 1 for that player alone and 2 for both — and not
+   * `g_players_in_play` (`0x009C8E80`). The two are different questions and
+   * they differ in exactly the case this opcode exists for: one player is in
+   * play, and the arms select *which* of the two player characters stands in
+   * the cut scene.
+   */
+  IfActivePlayer = 10,
   /** Ride an object path. */
   FollowPath = 11,
   /**
@@ -162,6 +174,11 @@ export interface HumanoidCmd {
   f1?: number;
   /** `Jump` only: the index this jumps to, or -1. */
   next?: number;
+  /**
+   * {@link HumanoidOp.IfActivePlayer} modes 0, 1 and 2 only: the index the
+   * test skips to when `g_active_player` does not match it.
+   */
+  skip?: number;
 }
 
 /** One spawn's program and the fields the Init reads. */
@@ -524,12 +541,32 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
       obj.hum.stallFrames = 0;
       return true;
 
-    case HumanoidOp.IfPlayerCount:
-      // The engine skips forward to a `-2` terminator when the count does not
-      // match. One player is the port's only configuration, so the arms for
-      // two never run; taking the matching arm is the same decision.
+    case HumanoidOp.IfActivePlayer:
+      // `0x0048478C`-`0x00484833`. Only modes 0, 1 and 2 test anything; every
+      // other mode -- `-2`, which is the marker closing an arm -- steps the
+      // cursor and does nothing else. On a match the cursor also just steps,
+      // into the arm; on a mismatch it goes to `skip`, which the exporter
+      // resolved from the engine's forward scan for that marker.
+      //
+      // **This used to always fall through**, on the reasoning that one
+      // player is the port's only configuration so "taking the matching arm is
+      // the same decision". It is not the same decision: the arm an `op 10`
+      // guards is frequently `op 18` (`ActorKill`), and falling into it killed
+      // the actor the test exists to keep. Stage 3's block 2 spawns both
+      // player characters and kills the one the active player is not; the port
+      // killed both, and the whole of the cut scene's foreground was missing.
       obj.hum.stallFrames = 0;
-      obj.hum.pc += 1;
+      if (c.mode === 0 || c.mode === 1 || c.mode === 2) {
+        if (G.g_active_player === c.mode) obj.hum.pc += 1;
+        else if (c.skip !== undefined && c.skip >= 0) obj.hum.pc = c.skip;
+        // [port-only] A bundle written before `skip` was carried, or a scan
+        // that ran off the end of the file. The engine cannot be in this
+        // position — its skip is a scan it makes on the spot. Leaving the VM
+        // is what `op -1` does: the actor stays drawn on its current clip,
+        // which is wrong but visible, where running the arm regardless is how
+        // it came to be deleted.
+        else { obj.hum.pc = -1; return false; }
+      } else obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.Kill:

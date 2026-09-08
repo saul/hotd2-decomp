@@ -33,6 +33,8 @@ import "./class41";
 import "./class44";
 import "./class52";
 import "./class53";
+import "./class60";
+import "./class61";
 
 /**
  * The classes with a ported behaviour, for the UI and `verify_port.py`.

@@ -168,6 +168,23 @@ export interface ClassHandler {
    */
   ownsShotResult?: boolean;
   /**
+   * The `g_script_flags` byte an actor of this class raises, if it raises one.
+   *
+   * **Not a mechanism — a declaration.** The class raises the flag itself, in
+   * its own update, exactly where the engine does; this says *that it can*, so
+   * that `script/waits/flag.ts` can tell a `wait_script_flag` gate this port
+   * is able to open from one it is not. Fourteen of the game's forty-odd gates
+   * are opened by an actor rather than by `set_script_flag`, and a gate whose
+   * writer has no module is a gate that would park the stage for ever.
+   *
+   * Only for classes whose flag is a **literal in the routine** rather than a
+   * field of the descriptor: class 0x60's 248 and class 0x61's 254 are, and
+   * `ZombieStateTargetScriptWithFlag`'s is not — that one comes off the
+   * captor's script entry and the bundle carries it, so it is read from the
+   * data instead.
+   */
+  raisesScriptFlag?: number;
+  /**
    * Describe one of this class's actors for the debug sidebar.
    *
    * Optional, and read-only by contract: it runs every frame the panel is

@@ -477,6 +477,13 @@ export function scriptedHumanoidsJson(evt: evtlib.EvtFile,
         const t = evt.toOffset(u32(raw, off + 4));
         c.next = t !== null ? (index.get(t) ?? -1) : -1;
       }
+      // `op 10`'s other edge. The engine finds it by scanning forward for the
+      // `-2` marker every time the test fails; an index is the same edge
+      // without the scan, for the same reason `op 15`'s pointer becomes one.
+      if (op === 10 && (mode === 0 || mode === 1 || mode === 2)) {
+        const t = charmotion.humanoidSkipTarget(raw, off);
+        c.skip = t !== null ? (index.get(t) ?? -1) : -1;
+      }
       cmds.push(c);
     }
 

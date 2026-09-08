@@ -281,7 +281,16 @@ class Stage:
             path = self.game / "evt" / name
             if not path.exists():
                 return None
-            self._evt = evt.load(str(path), self.block_count)
+            # The shared 0x200-byte buffer that sits immediately below the
+            # stage table in memory. `spawn_simple` points into it, so a stage
+            # table that cannot see it resolves six of the game's seven
+            # screen-furniture records to nothing. See `EvtFile.resolve`.
+            com_path = self.game / "evt" / "comevtbl.bin"
+            com = None
+            if com_path.exists():
+                with open(com_path, "rb") as fh:
+                    com = evt.EvtFile(fh.read(), "comevtbl.bin")
+            self._evt = evt.load(str(path), self.block_count, com)
         return self._evt
 
     # -- geometry ----------------------------------------------------------

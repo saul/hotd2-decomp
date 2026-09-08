@@ -67,7 +67,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) reads `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 47 of the 59 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are hinges read by `props.md`; the rest are unread. | `[proved]` |
-| `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. | `[proved]` |
+| `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
 | `0x10` | `CivilianInit` | 51 | **Civilian / rescuable victim. Ported** (`game/class10/`) — a bytecode VM whose 136 command streams are compiled into the **exe**, not the evt. Each civilian is held by class-0x30 captors its own Init builds from descriptors nothing in the script points at; killing them all pays **+400**. Shooting the civilian costs a **life** and −100 twice. Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. Its face and its hair are an **attachment list** at the spawn tail's `+0x08`, not part of its skeleton — 52 of the 65 spawns carry one. See docs/formats/civilians.md. | `[proved]` |
 | `0x31` | `EnemyThrowerInit` (`0x00449620`) | 49 | **The wall-crawler**, four character types (`0x16`-`0x19`) over one 35-state machine and four **behaviour sets**, the set taken from the descriptor's byte +1 rather than from the model. Set 1 (`zsass`) stands out of reach and throws; set 0 (`zstin`) climbs the walls and the ceiling at 40-50 units and **arcs onto the camera with a knife** inside 30, connecting on a frame of the leap clip rather than on any range test, then leaps back out to one side. The whole repertoire is a pick table, `g_class31_action_picks`. **Ported.** See [`combat.md` §12](combat.md). Ricochet SFX by subtype: `BULLET_WOD1_16.WAV` (wood) for `0x17`, `BULLET_MET2_16.WAV` (metal) for `0x19`. | `[proved]` |
 | `0x24` | `SetPiecePropInit` (`FUN_00482CE0`) | 48 | **Scripted non-combat set-piece prop.** Not damageable, awards nothing, plays no sound at all (all 496 `PlaySoundId` xrefs checked). A skinned actor choreographed against the **camera**: six state selectors covering idle, a delayed motion change, freeze/unfreeze cues, two gravity drops and a slide, and every one of them is removed when the camera reaches a named path at a named frame. `obj+0x11C` is an animation phase seed. **Ported.** | `[proved]` |
@@ -91,6 +91,10 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x27`, `0x28` | `004329D0`/`00432610` | 2/6 | **Path-riding vehicles/props**; `0x27` swaps model and lights a flame at path frame `0xBE`. | `[proved]` |
 | `0x20` | `OneHitTargetInit` (`FUN_00448ED0`) | 36 | **The one-hit target.** A skinned actor — all 36 are character type 7, `char_adv00.bin` — that **dies to any single hit**: nothing in the class subtracts from `obj+0x11C`, so the branch on `obj+0x34` bit 3 is the whole damage model. Scores like the combat classes — 10 a bone, 120 + `g_head_combo_bonus` on bone 2, 80 for the kill — then plays motion 988, holds its last frame and sinks 0.04 a frame for 120 frames before despawning. Not an enemy: the Init increments no counter, so no `wait_enemies_alive` gate sees one. Un-shot it is removed when the camera reaches `tail+0x02` at frame `tail+0x04`. `obj+0x130C` is a sub-type: 0 stands (7 spawns), 1 spins ±0x40 BAMS a frame with `obj+0x11C` as the direction (5), 2 is clamped into an x/z box at `tail+0x08`..`+0x14` and turns 0x100 away at each wall (24). Motion comes from `tail+0x06`, and **0 there means `g_class20_idle_motions[rand() & 3]`**. **Ported** (`game/class20/`). | `[proved]` |
 | `0x2A` | `FUN_00432D40` | 4 | **Dead class** — the whole handler is `JMP ActorKill`. | `[proved]` |
+| `0x60` | `ChapterCardInstall` (`FUN_004342E0`) | 8 | **The chapter card**, and the actor `wait_script_flag 0xF8` waits for. Placed by `spawn_simple` (0x0A), not by a placement descriptor: its whole record is `{class 0x60, hp 0}` in `comevtbl.bin` at `0x00977234`, so it has no position at all. An installer first — `g_GameMode == 3` and `g_app_state == 0x0B` each swap in a different update — then a two-sub card: sub 0 seats the lights and the eight text slots at `0x007DCBA0` and latches `obj+0x11C = 0xB4`, sub 1 draws and counts it down, and at zero it raises **`g_script_flags[0xF8]`** at `0x004348C1` and `ActorKill`s. That one instruction is the only literal writer of flag 248 in the image. A pad press (`g_pad_state` bit 2) cuts the dwell short once it is below `0xA0`. **Ported** (`game/class60/`) — the lifetime and the flag; the card itself is screen furniture the player does not draw. | `[proved]` |
+| `0x61` | `ResultCardInstall` (`FUN_00434EF0`) | 5 | **The stage-clear card**, and `wait_script_flag 0xFE`'s only opener: a whole-image byte search for `0x009C72FE` finds exactly one instruction, `MOV byte ptr [0x009C72FE], 0x1` at `0x0043567C`, and it is this actor's last act. Sub 0 drops `g_nFiringGate`, latches `obj+0x11C = 0x1A4` (420 frames) and falls into the tally; sub 1 hands over to the score count-up once the dwell is at or below `0x78`; every arm ends on the same decrement. **Ported** (`game/class61/`), on the same terms as 0x60. | `[proved]` |
+| `0x62` | `ResultCardTally` (`FUN_00435930`) | 5 | The result card's companion, placed by `spawn_simple 0x00977244` immediately before it. Loads texbank `0x16A` and sound `0x7C`, then walks the per-scene rescue list at `0x0055DF50` against `g_civilians_rescued_by_scene`. **Writes no script flag** — every writer in the image falls outside its range — so the port names it and gives it no module. | `[proved]` |
+| `0x63` | `InitCutsceneSkipWatcher` (`FUN_00435F20`) | 45 | The commonest `spawn_simple` record (`0x0097724C`), at the top of most steps in every stage. Installs `CheckCutsceneSkipRequest` from the task table at `0x005934E4`; the installed update `ActorKill`s outright while `DAT_009A2D7C` is zero. **Writes no script flag.** | `[proved]` |
 | `0x45`, `0x46` | — | 37/27 | Not reached. | `[open]` |
 
 The row above used to read *"`0x20`, `0x45`, `0x46` … Not reached. `0x20`
@@ -103,6 +107,71 @@ form: the handler was found by looking near where it ought to be rather than
 by reading `g_class_handler_pairs`, which names it outright. Class 0x20 is
 reached in four of the six stages, has no hit points at all, and is written
 out in full below.
+
+### Class 0x25's `op 10` is an `if`, and it is not a player *count*
+
+**[proved]** `ScriptedHumanoidUpdate` (`FUN_004842A0`) case 10 at `0x0048478C`
+is the VM's only branch that is not a jump, and it is the mechanism by which
+**the player's own character stands in a third-person cut scene**.
+
+```
+0048478C  MOV EAX,ESI                    ; the command
+0048478E  MOV [EDI+0x1320],EBX           ; stallFrames = 0
+00484794  ADD ESI,0x8                    ; and, by default, step one command
+00484797  MOVSX EAX,word ptr [EAX+0x2]   ; the mode
+0048479B  SUB EAX,EBX  / JZ 00484809     ; mode 0
+0048479F  DEC EAX      / JZ 004847D9     ; mode 1
+004847A2  DEC EAX      / JNZ 0048435D    ; anything else: nothing more to do
+004847A9  CMP dword ptr [0x009c7000],0x2 ; mode 2
+004847B0  JZ 0048435D                    ; it matches -- fall into the arm
+004847B6  MOV CX,word ptr [ESI+0x2]      ; ...it does not: scan for the marker
+004847BA  ADD ESI,0x8
+004847BD  CMP CX,-0x2 / JZ 0048435D
+004847C7  MOV DX,word ptr [ESI+0x2]      ; ...and again, eight bytes at a time
+004847CB  ADD ESI,0x8
+004847CE  CMP DX,-0x2 / JNZ 004847C7
+```
+
+Three facts, each of which the port had wrong:
+
+* **`0x009c7000` is `g_active_player`, not `g_players_in_play`.**
+  `SelectAttackablePlayer` (`FUN_00414F40`) writes -1 for nobody, 0 or 1 for
+  that player alone and 2 for both — and for one player in play it picks 1
+  unless `g_player_state` is 5 or 7, so an ordinary single-player game on slot
+  0 sits at **0**. The opcode is `if (g_active_player == mode)`, and the
+  distinction matters in exactly the case it exists for: which of the two
+  player characters is standing there.
+* **Mode `-2` is the `endif` marker**, not a fourth comparison. The chain above
+  tests 0, 1 and 2 and steps the cursor for everything else, so an `op 10 mode
+  -2` reached by falling through the taken arm costs one step and nothing else.
+* **The skip's stride is a literal 8.** It reads the second `s16` of each
+  eight-byte window, taking no notice of the sixteen-byte commands `op 7`,
+  `op 8` and `op 4` mode 4 are; no shipped arm contains one, and
+  `tools/verify_scripted_clips.py` is what says so.
+
+Stage 3's block 2 step 5 is the clean case. It spawns four class-0x25
+humanoids, and two of them share one point: character type `0x39`
+(`gameover_player.bin`) and `0x3A` (`char_adv05.bin`), whose programs at
+`st3evtbl.bin` `0x33B4` and `0x3498` are the same shape —
+
+```
+op 0  mode -1            wait, then play
+op 9  mode 1  a 0|1      the hand model, one per character
+op 10 mode 1|0           if the active player is the *other* one:
+op 18                        ActorKill
+op 10 mode -2            endif
+op 10 mode 0|2           if the active player is this one (or both):
+  ... the performance ...
+op -1                        end
+op 10 mode -2            endif
+  ... the two-player arm ...
+```
+
+So the pair is *one* character on screen, chosen at run time, and each stage-3
+cut scene that shows the player has a pair of its own — `0x3378`/`0x345C`,
+`0x54F0`/`0x55A4`, `0x69C8`/`0x6A5C` and `0x6C98`/`0x6D14`.
+`tools/verify_scripted_clips.py` prints how many `op 10` tests the six stages
+carry, and follows every one of them.
 
 ### The generic props' `+0x11C`: a lifetime that is *sometimes also* a slot
 

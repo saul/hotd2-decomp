@@ -136,6 +136,32 @@ armed exactly while its bone's **draw slot** is still the one the skeleton gave
 it, so shooting the axe out of a hand disarms it and the pick falls to the
 other.
 
+**And what it throws is now drawn.** The whole visual half of that was missing
+for as long as the state has been ported: `charbuild.goreEntry` builds the
+hidden per-type rig the client clones models out of, and it walked class
+0x31's hand table rather than class 0x30's — so the axe (`0x249`), and both
+hands in both their held and bare forms, were in no rig at all.
+`cloneSlot` answered null for the projectile and `swapGore` returned false for
+the hand, which leaves the axe in a fist that has just thrown it. The weapon
+flew on time and dealt its damage the whole while; nothing on screen said so,
+which reads exactly as *"he doesn't throw any axes"*. This is the civilians'
+hair one table over, and the check that catches it is beside that one:
+`verify_attachments.py` now resolves every held, bare and projectile slot a
+throwing zombie's kit names against the stage's glTF — 72 of them.
+
+**The ending is chosen by a spawn bit, not by the room.**
+`EnemyZombieInitByCharType` (`FUN_00452FD0`) moves `obj+0x34` bit 1 into
+`obj+0x38` bit `0x10` and clears it at the source, and that bit is the whole of
+`ZombieStateStandAndThrow`'s two-way ending: with it set the actor gives both
+enemy counters and its permit back **where it stands**, goes shot-immune and
+untracked, and waits out `tail+0x1C` before despawning. Two spawn records in
+the shipped game set it — stage 3 block 2's two axe men — and without it both
+took the *other* arm and walked their descriptor's twenty-five units backwards
+through the building they are standing against, holding `wait_enemies_alive`
+for the hundred frames it took. `ZombieStateWalkDistance` has no test that
+could have stopped them and the collision selected there is thirty-one quads of
+water twenty-four units below their feet, so nothing in the level was going to.
+
 The flight reuses the pool class 0x31's projectile already lives in, extended
 with the acceleration the arc needs and the damage kind (4 flat, 6 arced).
 `ZombieShouldStandAndThrow` is wired in too: a body-condition-8 walker already
@@ -540,8 +566,30 @@ why the rescue count in that harness went down.
 second-largest class in the game and a **bytecode VM**. The spawn's tail points
 at a command block; the Init installs the interpreter and it walks 8-byte
 commands until one blocks, so a run of setup commands all take effect in one
-frame and only a wait costs one. 137 blocks and 1,385 commands are decoded into
-the bundle. This is the game's cutscene system, not an enemy.
+frame and only a wait costs one. 137 blocks are decoded into the bundle. This
+is the game's cutscene system, not an enemy.
+
+**And it is where the player's own character comes from.** `op 10` is the VM's
+only branch that is not a jump — `if (g_active_player == mode)`, else skip past
+the `mode == -2` marker that closes the arm — and it is how a cut scene puts
+*one* of the two player characters on screen. The port read the opcode as a
+player *count*, decided that one player was its only configuration, and always
+fell through; the arm an `op 10` guards is very often `op 18` (`ActorKill`), so
+it killed the character it exists to keep. Stage 3's block 2 spawns character
+types `0x39` (`gameover_player.bin`) and `0x3A` (`char_adv05.bin`) at one point
+and the port deleted both, which is why the third-person cut scenes had no
+foreground. Across the twelve bundles it was **110 of the 274 class-0x25
+programs** that ran an `ActorKill` before reaching their first blocking wait;
+it is 42 now, and those 42 are the twins that are meant to go.
+
+The exporter had the same hole one level down: its command walk followed
+fall-through and `op 15`'s jump and nothing else, so it stopped at the first
+`op 18` and emitted a four-command program every path of which ended in a kill.
+Following the skip roughly doubles the decoded stream — 4,940 commands across
+the twelve bundles against 2,770 — and brings the clips those arms name into
+the bake with it. `verify_scripted_clips.py` checks both edges: that every
+command's fall-through is the next one emitted, and that every `op 10`'s
+`-2` scan lands on a command boundary.
 
 **Class 0x24, the set-pieces, is ported** (`game/class24/`) — a skinned actor
 choreographed against the camera rather than the clock: all six state routines,
@@ -716,6 +764,7 @@ each one.
 | Op 0 of every step never ran — a region entered a step late, a `cam_play` skipped, the camera's position jumping 41 units in stage 2's block 17 doorway | `advance_step` (0x4F) moves the program counter itself, and `executeOne` then incremented it again. `EvtAdvanceStepOrRoute` assigns `DAT_009C7108` the address of the new step's *first* instruction; this VM has no shared post-increment | increment only when the handler left the pc alone; `test/seek.test.ts` asserts every step entered runs its op 0 |
 | The camera rewound to before the start of its path once, then carried on (stage 1 block 8 step 4) | `start == -1` means **resume** in the deferred branch too: `FUN_00403490` stashes `g_cam_path_frame + 1`, not the literal -1. The port stashed -1, so `finish_sequence 7` set the clock to frame -1 and replayed all 686 frames | transcribe `FUN_00403490`; `test/seek.test.ts` asserts no play starts before frame 0 |
 | The camera's aim jerked 20 degrees the frame the last enemy died | `SelectCameraLookAtTarget`'s "nothing registered" case is a **fallback to the path's own target**, not an exit, and `CameraTrackEnemiesTick` eases onto it unconditionally — `g_camera_is_tracking` picks only the *rate* | `game/camera/track.ts`, with `g_camera_block_target` as real state in `G` |
+| The camera stalled a frame and then jumped, at the end of every shot (reported on stage 3 block 2 step 4, camera frame 1660: the eye held still, then moved 3.62 units where the shot travels 1.25, and the aim flicked 9.6 degrees out and back) | `CamAdvancePathFrame` (`FUN_004035E0`) publishes the cursor, evaluates the curve into the camera block **and** writes the block's angles, all before the `cur >= end` test that retires the action — so the frame a shot ends on is drawn like any other. The port seated on `!cam.done`, which is one tick short: the block kept frame `end - 1`'s pose, and losing the reseat also let `CameraTrackEnemiesTick`'s ease take one unopposed step towards the enemy | `CamCommand.retired` — `done` plus one tick — and `seatCamera` on `!retired`; `test:camera` compares the drawn eye against the rail recomputed from the bundle, five frames of seven hundred failing without it |
 | Nothing left the gun | Two thirds of what a shot looks like was never ported. `PlayerShotEffectSpawn` (`FUN_00416F70`) fills **three** six-deep rings per player on every trigger pull, hit or miss: a nine-frame muzzle flash and a second draw beside it, a tracer thrown down the aim at twenty units a frame, and an Original Mode record. The tracer dies on its second frame when the shot hit something, which is the only reader of `g_shot_hit_something` | `game/effects/shot_effects.ts`; `render/effects.ts` draws the two camera-space rings under the camera's own matrix |
 | The blood was a fading circle | The engine's spray is **twenty-five models**, `pol/common.bin` 0 to 24, one a frame — there is no texture animation anywhere in this engine. The bundle carried none of the artwork, so a canvas gradient stood in for all of it | `slots_effect`, a hidden rig of 162 asset slots, and `game/effects/blood.ts` |
 | The blood sat inside the limb, at its middle | Half right and half not. `DrawBloodSpray` (`FUN_00407230`) does put it at the hit **bone**, and re-reads the bone every one of its twenty-five frames so it tracks — but at the sphere's centre **plus its radius on camera-space z**, which is the near face, the side the shot came from. The port had the centre and left it there | `render/effects.ts` works in camera space, which is what the routine does |
@@ -922,7 +971,7 @@ struck through:
 | `2C` | `set_skippable_region` | 126 | **Done** — drives the Skip bar; the feature is live in the retail game |
 | `33` | `set_action_drain_mode` | 125 | **Done** — the `pending` half; the ring's dequeue *mode* is still not modelled |
 | `10`/`11` | collision sets | 113 | Only with collision |
-| `0A` | `spawn_simple` | 98 | Maybe — its descriptors are not resolved to markers |
+| `0A` | `spawn_simple` | 98 | No — its records carry no position, so there is nothing to mark. See the opcode table |
 | `49`/`4A`/`4B` | `variant_*` | — | **Worth checking** — a global picks which operand list runs, so some spawns may never appear |
 
 With rain in, the remaining struck-through opcodes are all either moot in a
@@ -2300,16 +2349,16 @@ missed. Meanings and confidence marks live in
 | Op | Name | Category | Status | Notes |
 |---|---|---|---|---|
 | `00` | `nop_stub` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
-| `01` | `spawn_placed_if_1p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it |
-| `02` | `spawn_simple_if_1p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0A`. No shipped script encodes it |
+| `01` | `spawn_placed_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it, but the forward is the engine's and is wired rather than declared dead |
+| `02` | `spawn_simple_if_1p` | spawn | **done** | as `01`, forwarding to `0A` instead |
 | `03` | `spawn_obj_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0B` — 12 sites. Stage 1's first zombies are here |
 | `04` | `spawn_obj_c_if_1p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0C` — 3 sites |
-| `05` | `spawn_placed_if_2p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `09`. No shipped script encodes it |
-| `06` | `spawn_simple_if_2p` | spawn | n/a | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0A`. No shipped script encodes it |
+| `05` | `spawn_placed_if_2p` | spawn | **done** | as `01`, on `g_max_attackers == 2` |
+| `06` | `spawn_simple_if_2p` | spawn | **done** | as `02`, on `g_max_attackers == 2` |
 | `07` | `spawn_obj_if_2p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0B` — 45 sites; the extra enemies a second player brings |
 | `08` | `spawn_obj_c_if_2p` | spawn | **done** | spawn lists gated on the live player count (`g_max_attackers`), forwarding through `g_evt_spawn_gated_handlers` to `0C` — 3 sites |
 | `09` | `spawn_placed` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
-| `0A` | `spawn_simple` | spawn | shown | same descriptor family; not resolved to markers |
+| `0A` | `spawn_simple` | spawn | **done** | **not** the descriptor family: `EvtOpSpawnSimple0A` (`FUN_00408990`) takes a two-word `{class, hp}` record and the object places itself. All four the shipped scripts name live in `comevtbl.bin` — classes 0x60, 0x61, 0x62, 0x63 — and two of them raise a `g_script_flags` byte the script then waits on, which is why twelve `wait_script_flag` gates could not be honoured until this landed. The exporter resolves the records through `EvtFile.resolve`, which follows a stage pointer below its own base into the com buffer |
 | `0B` | `spawn_obj` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0C` | `spawn_obj_c` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawn markers: position, BAMS yaw, class, hit points |
@@ -2369,10 +2418,10 @@ missed. Meanings and confidence marks live in
 | `42` | `wait_frames` | wait | **done** | **exact** frame countdown — of `operand` frames. `EvtOpWaitFrames42` loads the counter on its `g_evt_yield` frame and decrements *before* testing, so the engine's is `operand + 2` [diverges]: retiming it moves every camera cue in six stages and wants its own change |
 | `43` | `wait_enemies_present` | wait | ~approx~ | the **corpse-clear** gate, on `g_enemies_present` — not a synonym for `0x44`, and answered with the alive count until B4/B8. **Real** — the script holds until they are dead **and the camera has swung back** (`g_camera_free`). Yields the frame it is reached, as `g_evt_yield` makes it |
 | `44` | `wait_enemies_alive` | wait | ~approx~ | the **live-enemy** gate, on `g_enemies_alive`, and 434 of the 488 enemy gates. Same side conditions as `0x43` plus `g_evt_wait_alive_hysteresis`, so it costs one frame more — both are now ported |
-| `45` | `wait_script_flag` | wait | ~approx~ | honoured when the script itself set the flag; otherwise passed |
+| `45` | `wait_script_flag` | wait | ~approx~ | the **script-flag gate**, on `g_script_flags` (0x009C7200) — and that array is one array: every one of the forty-odd gates in the six shipped scripts names a flag that script's own `set_script_flag` never sets, so this opcode is *only* ever a wait on an actor. **Real** now; it used to read a `Set` beside `G` that held the script's own writes only, and passed on sight. **`[diverges]`**: a gate whose flag *nothing this port runs can raise* passes instead of parking, and the boundary is derived from the bundle rather than listed — the stage's own `set_script_flag` ops, the civilians' streams and the captors' state 36. Honouring every gate unconditionally parks stage 5 at block 1, stage 1 at blocks 14 and 16, stage 2 at 35-41, stage 4 at 23-29 and all six on the chapter card |
 | `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real**: it holds until the captors are dead. All 68 sites pass operand 0 |
 | `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |
-| `48` | `set_script_flag` | flow | *tracked* | writes the script flag array 0x45 reads |
+| `48` | `set_script_flag` | flow | **done** | `g_script_flags[operand] = 1` and nothing else — the whole of `EvtOpSetScriptFlag48`. It writes `G.g_script_flags`, the same array the civilians' op 0x1C and the captors' state 36 write |
 | `49` | `variant_call_a` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
 | `4A` | `variant_call_b` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
 | `4B` | `variant_spawn` | spawn | shown | a global picks which operand list runs; the client does not evaluate it |

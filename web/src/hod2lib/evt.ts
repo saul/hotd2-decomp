@@ -334,6 +334,11 @@ export class EvtFile {
   readonly words: Uint32Array;
   blocks: Block[] = [];
   warnings: string[] = [];
+  /**
+   * The shared `comevtbl` buffer, when this is a stage table. Set by
+   * {@link parse}; see {@link EvtFile.resolve}.
+   */
+  com: EvtFile | null = null;
 
   constructor(readonly raw: Uint8Array, readonly name = "") {
     this.isCom = name.startsWith("com");
@@ -347,6 +352,25 @@ export class EvtFile {
   toOffset(word: number): number | null {
     if (!isPointer(word)) return null;
     return word - this.dcBase;
+  }
+
+  /**
+   * `[file, offset]` for `word`, following into the shared com buffer.
+   *
+   * `comevtbl` is loaded at 0x00977200 and the stage table immediately behind
+   * it at 0x00977400, so a stage pointer *below* its own base is a pointer
+   * into the com buffer rather than a bad one. Six of the seven distinct
+   * `spawn_simple` operands in the game are exactly that: the four
+   * screen-furniture records live in `comevtbl.bin` and every stage names them
+   * at the same address. See {@link COM_RESERVED}.
+   */
+  resolve(word: number): [EvtFile, number] | null {
+    const off = this.toOffset(word);
+    if (off === null) return null;
+    if (off >= 0) return this.readable(off) ? [this, off] : null;
+    if (this.com === null) return null;
+    const comOff = word - this.com.dcBase;
+    return this.com.readable(comOff) ? [this.com, comOff] : null;
   }
 
   readable(off: number | null): boolean {
@@ -576,6 +600,41 @@ export const SPAWN_OPCODES = [0x01, 0x03, 0x04, 0x05, 0x07, 0x08,
                               0x09, 0x0b, 0x0c, 0x0d];
 
 /**
+ * Opcodes whose operands are the two-word `{class, hp}` record instead.
+ *
+ * `EvtOpSpawnSimple0A` (`FUN_00408990`) walks its -1-terminated operand list,
+ * and for each pointer allocates `g_class_handlers[record[0]]` at 0x13F4 bytes
+ * and copies `(short)record[1]` into **both** `obj+0x11C` and `obj+0x11E`.
+ * Nothing writes a position: this is the opcode for objects that place
+ * themselves, which in the shipped scripts is the screen furniture — the
+ * chapter card (class 0x60), the result card (0x61) and its two companions
+ * (0x62, 0x63).
+ *
+ * 0x02 and 0x06 are the one- and two-player gated forms, through
+ * `g_evt_spawn_gated_handlers`; neither is encoded by a shipped script.
+ */
+export const SIMPLE_SPAWN_OPCODES = [0x02, 0x06, 0x0a];
+
+/** `EvtOpSpawnSimple0A`'s whole operand: a class and a hit-point word. */
+export interface SimpleSpawn {
+  cls: number;
+  hp: number;
+}
+
+/** One `{class, hp}` record, as `EvtOpSpawnSimple0A` reads it. */
+export function readSimpleSpawn(evt: EvtFile, word: number): SimpleSpawn | null {
+  const at = evt.resolve(word);
+  if (at === null) return null;
+  const [src, off] = at;
+  if (off + 8 > src.raw.length) return null;
+  const cls = src.w(off);
+  // `*(short *)(obj + 0x11e) = (short)record[1]` — a 16-bit store, so the
+  // shipped 0xFFFF0000 is a zero and not a 4-billion hit-point count.
+  const hp = ((src.w(off + 4) & 0xffff) ^ 0x8000) - 0x8000;
+  return { cls, hp };
+}
+
+/**
  * Opcodes that attach the descriptor's tail to the object as a per-class
  * parameter block. There are **three** allocators, not two, and all three end
  * with `= descriptor + 9` on an `int *`, so the tail is at `descriptor + 0x24`
@@ -702,6 +761,9 @@ export function spawns(evt: EvtFile,
 
 /** Parse *data* as the `evt/` file called *name*. */
 export function parse(data: Uint8Array, name: string,
-                      nBlocks: number | null = null): EvtFile {
-  return new EvtFile(data, name).parse(nBlocks);
+                      nBlocks: number | null = null,
+                      com: EvtFile | null = null): EvtFile {
+  const f = new EvtFile(data, name);
+  f.com = com;
+  return f.parse(nBlocks);
 }

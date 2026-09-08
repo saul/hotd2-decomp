@@ -14285,3 +14285,101 @@ declared and never counted. It walks `cited_files()` now, which is the set its
 citation checks already use, and STATUS's count goes 116 → 127. Recorded here
 because the number is a measurement and the change to what it measures should
 be findable from the number.
+
+## Two of the three hangs were the harness, and the third was the Kill button
+
+Three stages did not reach an end block: 2 at block 14 `9 / 20`, 3 at block 6
+`1 / 13`, 6 at block 0 `4 / 8`. They were handed over as one family — "a count
+or a slot that an actor did not release when it went" — and two of the three
+turned out not to be in `web/src/game/` at all.
+
+### What was actually standing in each room
+
+Measured, not inferred: the page was driven to the hang under `?drive=1` and
+`G` plus the whole actor pool dumped through a throwaway `probe()` on the drive
+seam (removed again — the seam is a metronome and a tap, and `probe` was
+neither).
+
+* **Stage 2 block 14.** `g_civilians_alive` was already 0. Standing in the
+  room: `char_adv02` at **220** hit points in `BackOff` and `char_adv00` at
+  **100** in `HoldAtRange`, both class 0x30, both alive, both in
+  `g_enemy_slots`, so `g_camera_free` was 0.
+* **Stage 3 block 6.** `hito_mario2` dead and still counted, her killed script
+  parked on wait bit 0 — `enemies-present` — and her two `znkage` captors alive
+  at 90 hit points each.
+* **Stage 6 block 0.** One class-0x31 `zslman`, `dead`, 0 hit points,
+  `ActorFlag.Dead` up, `ThrowerFlag.LeftAlive` and `LeftPresent` both **clear**,
+  cycling `RestoreBothHands` → `Throw` → `WaitForPermit` → `Pounce` as a
+  corpse. `hits` and `latched` empty: it had never been shot.
+
+### Stages 2 and 3: `wait_scripted_actors` needs the room clear
+
+`EvtOpWaitScriptedActors46` (`FUN_0045FCD0`) is
+`g_civilians_alive <= arg && g_evt_gameplay_live && g_camera_free`, and
+`g_camera_free` (`0x009C6F2D`) is recomputed by `CameraDriverFromDeferredPose`
+(`FUN_00402E00`) from the four slots at `0x009A5EC0..0x009A5EE0`. `[proved]`
+So a 0x46 gate in a room with live zombies is held by the zombies, and the
+civilian VM's own wait bits (`CivilianStepScript`, `FUN_0048B1E0`) read
+`g_enemies_present` and `g_enemies_alive` besides.
+
+`playthrough.mjs` refused to fire at a civilian gate on the reasoning that "you
+do not shoot civilians, so a `wait_scripted_actors` that does not come down on
+its own is a bug by definition". The premise is about *civilians*; the
+conclusion is about the *gate*, and the gate is mostly about zombies. Letting
+the tool fire at a civilian gate — unless the gate's own named blocker is a
+civilian who is still alive, which is the one case the rule was written for —
+takes both stages to an end block with the port untouched.
+
+**Confirmed before writing anything:** a `--shoot-civ` flag on a throwaway copy
+of the tool, on the unmodified port, and both stages reached an end. That
+experiment is the whole reason this is a two-line policy change and not a week
+in `combat/counts.ts`.
+
+### Stage 6: the debug clear killed what a shot could not
+
+`DispatchHit` (`FUN_004092F0`) refuses `ResolveHit` outright on `obj+0x34` bit
+`0x100`, so **no actor can reach zero hit points inside `ActorFlag.ShotImmune`**
+— and both enemy classes lean on that. `ThrowerOnShot` (`FUN_004499A0`) gates
+its whole response on the bit at `004499f5 f6c401 TEST AH,0x1` /
+`004499f8 0f85f8000000 JNZ 0x00449af6`, which is the routine's own tail, so the
+dead arm at `00449a3e TEST EAX,0x4000000` is past it; `ZombieOnShot`
+(`FUN_00453EB0`) is the same pair at `00453ec7`/`00453eca`. `[proved]`
+
+`ActorKillAll` — the port's Kill button, which has no engine counterpart —
+ignored that. The harness pressed it at 480 stalled frames, it caught a
+`zslman` inside `ThrowerStateKnockedTumbling` (`FUN_00450E40`) sub 4, and the
+actor was left dead and never told: its death chain never opened, so neither
+`ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) nor
+`ZombieReleasePermitAndUntrack` (`FUN_004565A0`) ever ran and `g_enemies_alive`
+sat at 1 for ever. One line, beside the `ClassHandler.invulnerable` test that
+already carried the rule.
+
+The tool also stops giving up: it keeps shooting after the clear, because the
+clear now legitimately leaves that actor standing and the shots a second later
+kill it in the ordinary way.
+
+### What went wrong on the way
+
+1. **`ActorRegisterCameraPoint` looked like it did not register anything.**
+   `get_xrefs_to 0x00408ec0` returns eleven callers and not one of them is an
+   enemy class, which for half an hour looked like proof that the port's whole
+   camera-slot model was invented. It is not: `FUN_00409B70` ends
+   `PUSH ESI / CALL 0x00408ec0` at `0x00409bec`–`0x00409c03`, and Ghidra has
+   `MatrixStackPop` marked no-return, so the function body — and the xref —
+   stop at the tail call. `disassemble_bytes` past the end found it. A close
+   cousin of **L32**: a search over Ghidra's own view is a search over what
+   Ghidra has disassembled.
+2. **Believing the sidebar.** It printed *"Nothing alive is holding it — the
+   camera gate (g_camera_free 1) is"* — naming the camera while showing the
+   *free* value. `waitBlockers` filters `!a.dead`, so the dead-but-counted
+   thrower was invisible to it and the empty list was reported as "the camera".
+   Fixed to say which of the counter and the flag is above the line.
+3. **Editing `web/src/` while a playthrough was running.** Three stages died
+   with *"Execution context was destroyed, most likely because of a
+   navigation"* and one with `__hotd2Drive` undefined, which reads exactly like
+   a page that cannot start. It was Vite's HMR reloading the page under the
+   driver. The runs were fine when re-run alone — **L29 again, and the other
+   agent holding the device was me.**
+4. **Deleting the debug clear.** With the tool shooting for the whole stall it
+   looked redundant, and stage 5 promptly hung: four `znnick` at `d≈2880`,
+   which nothing was ever going to hit. Put back, with the report kept.

@@ -46,15 +46,35 @@
  * would be a seam that only this tool uses. Spraying the frame is cruder than a
  * player and hits the same spheres.
  *
- * **It never shoots at a civilian gate, and never clears one.** You are not
- * meant to shoot civilians in this game — they are mauled by the zombies or
- * you move past them — so a `wait_scripted_actors` that does not come down on
- * its own is a bug by definition, and a tool that killed its way through would
- * be hiding the thing it exists to find.
+ * **A civilian gate is cleared by shooting the zombies, not the civilians.**
+ * This used to refuse to fire at one at all, on the reasoning that you are not
+ * meant to shoot civilians and so a `wait_scripted_actors` that does not come
+ * down on its own is a bug by definition. The second half of that does not
+ * follow, and the engine says so: `EvtOpWaitScriptedActors46` (`FUN_0045FCD0`)
+ * is `g_civilians_alive <= arg && g_evt_gameplay_live && g_camera_free`, and
+ * `g_camera_free` is recomputed by `CameraDriverFromDeferredPose`
+ * (`FUN_00402E00`) from the four `g_enemy_slots` entries — so a 0x46 gate
+ * standing in a room with live enemies is held by the **enemies**, and the
+ * civilian's own killed script waits on `g_enemies_present` besides. Stage 2's
+ * block 14 and stage 3's block 6 were each read as a hang for exactly this
+ * reason and each is two live zombies, hit points intact, that nothing was
+ * ever going to shoot.
  *
- * `--shoot-for` is the honest fallback, and only for enemies. If a room will
- * not clear the enemies are somewhere the shots cannot reach, which is worth
- * knowing on its own, so it is **reported** rather than silently papered over.
+ * So it fires at a civilian gate too — **unless the wait panel names a living
+ * civilian as the blocker**, which is the one case the old rule was protecting
+ * and the one this tool exists to find. A dead one, or none at all, means the
+ * room is what is left.
+ *
+ * `--shoot-for` is the honest fallback. If a room has not cleared by then the
+ * gate is **reported** rather than silently papered over, and the debug clear
+ * runs — but **the shooting carries on afterwards** rather than stopping, and
+ * that is not a detail. Stopping at `SHOOT_FOR` and leaning on the clear is
+ * how stage 6 came to be reported as a hang: `ActorKillAll` used to kill a
+ * thrower inside `ActorFlag.ShotImmune`, where `DispatchHit` (`FUN_004092F0`)
+ * would have refused a shot, and an actor killed without being told never runs
+ * its class's death chain — so it stayed in `g_enemies_alive` for ever. The
+ * clear refuses that actor now, which means the room is not clear when it
+ * returns, and the shots that follow are what finish it.
  *
  *   node tools/playthrough.mjs --stage 2
  *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
@@ -125,6 +145,38 @@ async function readState(page) {
       policy, sub, waitText,
     };
   });
+}
+
+/**
+ * The wait panel's own blocker rows, as text.
+ *
+ * They come from `app/projection/sidebar.ts` and read
+ * `0x5294 hito_mario2 · dead · enemies-present · d=23` — the actor, the
+ * class's own summary, and the ground distance to the camera. The trailing
+ * ` · d=` is what tells one from the panel's `<summary>`, which is
+ * `0x46 wait_scripted_actors` and matches the address shape on its own.
+ */
+function blockerRows(s) {
+  return s.waitText.split("\n").map((l) => l.trim())
+    .filter((l) => /^0x[0-9A-F]+ /.test(l) && l.includes(" · d="));
+}
+
+/**
+ * May this gate be shot at?
+ *
+ * An enemy gate always. A civilian gate too — see the header — **unless the
+ * panel names a civilian who is still alive.** That one case, and only that
+ * one, is the thing this tool exists to find: a `wait_scripted_actors` held by
+ * a living civilian who will not leave `g_civilians_alive` is a bug in the
+ * port, and killing her would hide it. A dead blocker, or none at all, leaves
+ * the room's enemies as what is holding `g_camera_free` down, and those are
+ * what an arcade player is shooting. `dead · ` comes from `CivilianDebug`'s
+ * summary and from nowhere else.
+ */
+function shootable(s) {
+  if (s.policy === "enemies") return true;
+  if (s.policy !== "civilians") return false;
+  return blockerRows(s).every((l) => l.includes(" · dead"));
 }
 
 /** One volley: pointer events across the frame, through the real shot path. */
@@ -264,7 +316,7 @@ try {
       break;
     }
 
-    if (stalled > PATIENCE && s.policy === "enemies") {
+    if (stalled > PATIENCE && shootable(s)) {
       // Frames, not volley count and not wall time. A volley is twenty round
       // trips to the browser, which used to take about a second and made the
       // fallback land after the hang deadline rather than before it; under the
@@ -272,25 +324,33 @@ try {
       // stopped between two `advance` calls. So the whole volley lands on one
       // frame, and the deadline it is measured against is a count of frames
       // this tool chose to run.
-      if (stalled < SHOOT_FOR) {
-        volleys += 1;
-        await volley(page, box);
-      } else if (!killedHere) {
+      volleys += 1;
+      await volley(page, box);
+      if (stalled >= SHOOT_FOR && !killedHere) {
+        // The report, and it is only a report: the shooting above carries on.
         killedHere = true;
         unclearable.push(`${s.block.split(" ")[0]} step/op ${s.step}`
                          + `  ${s.sub.split("\n").find((l) => l.startsWith("0x"))
                                  ?? s.policy}`);
-        // A picture of the moment the shots gave up. Every one of these so
-        // far has been the same thing — the camera parked somewhere the
-        // enemies are not — and that is only visible in the frame.
+        // A picture of the moment the room should have been clear. Worth
+        // having whatever the rows below say: they give the state and the
+        // distance, and the frame gives where the camera was pointing.
         mkdirSync(SHOTS, { recursive: true });
         await page.screenshot({ path: resolve(SHOTS,
           `unclear-stage${stage}-b${s.block.split(" ")[0]}`
           + `-${s.step.replace(/\D+/g, "_")}.png`) });
-        console.log(`      enemy gate at block ${s.block} ${s.step} did `
-                    + `not clear in ${volleys} volleys over `
-                    + `${SHOOT_FOR - PATIENCE} frames — the enemies are `
-                    + `somewhere the shots cannot reach. Using the debug clear.`);
+        console.log(`      the ${s.policy} gate at block ${s.block} ${s.step} `
+                    + `did not clear in ${volleys} volleys over `
+                    + `${SHOOT_FOR - PATIENCE} frames. Using the debug clear, `
+                    + `and still shooting.`);
+        // **Who, and how far** — not "the enemies are somewhere the shots
+        // cannot reach", which is what this line used to say and which is an
+        // inference, not a measurement. The rows say it: stage 5 block 2 is
+        // four zombies at `d≈2880`, nearly three thousand units out, and
+        // stage 6's are `zslman` at 38 to 56 with `KnockedTumbling` in the
+        // summary — an actor inside its own `ActorFlag.ShotImmune` window,
+        // which is a room that is slow rather than one that is unreachable.
+        for (const l of blockerRows(s)) console.log(`        ${l}`);
         await page.click('button[title^="Kill every live actor"]');
       }
     }

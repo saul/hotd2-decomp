@@ -9137,6 +9137,94 @@ console.log("`ActorKillAll` routes class 0x30 through its death chain:");
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
 }
 
+/**
+ * **`ActorKillAll` is refused wherever a shot is refused.**
+ *
+ * `DispatchHit` (`FUN_004092F0`) returns before `ResolveHit` on `obj+0x34` bit
+ * `0x100`, so in the engine no actor can reach zero hit points inside that
+ * window — and both enemy classes lean on it. `ThrowerOnShot` (`FUN_004499A0`)
+ * gates its whole response on the bit at `004499f5`/`004499f8`, `ZombieOnShot`
+ * (`FUN_00453EB0`) at `00453ec7`/`00453eca`, the dead arm of each included. So
+ * a debug clear that killed a shot-immune actor left it dead and never told:
+ * its class's death chain never opened, and that chain is the only thing that
+ * runs `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) and
+ * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) — the two routines that
+ * take it out of `g_enemies_alive` and out of `g_enemy_slots`.
+ *
+ * That was stage 6 block 0: `g_enemies_alive` stuck at 1 with the sidebar
+ * naming nobody, because the holder was a `zslman` cycling its ordinary states
+ * as a corpse. Every assertion here fails without the one-line refusal in
+ * `ActorKillAll`, and it is the **counters and the slot array** that fail, not
+ * a layer's opinion of itself.
+ */
+console.log("\n`ActorKillAll` will not kill what a shot could not touch:");
+{
+  const rng = new Rng(24);
+  const events = scene(0, rng);
+
+  const immuneZombie = spawnZombie(0x2700, 1, "immune zombie");
+  immuneZombie.visible = true;
+  immuneZombie.hp = 10;
+  immuneZombie.pos = vec3(0, 0, 40);
+  immuneZombie.flags |= ActorFlag.ShotImmune;
+
+  const plainZombie = spawnZombie(0x2701, 1, "plain zombie");
+  plainZombie.visible = true;
+  plainZombie.hp = 10;
+  plainZombie.pos = vec3(20, 0, 40);
+
+  const immuneThrower = ActorSpawn(0x2702, SpawnClass.Thrower, 0x18,
+                                   "immune thrower");
+  immuneThrower.visible = true;
+  immuneThrower.hp = 130;
+  immuneThrower.pos = vec3(-20, 0, 40);
+  immuneThrower.flags |= ActorFlag.ShotImmune;
+
+  G.g_enemies_alive = 3;
+  G.g_enemies_present = 3;
+  G.g_enemy_slots = [immuneZombie.at, plainZombie.at, immuneThrower.at];
+
+  const n = ActorKillAll(0, rng);
+  check("the clear takes the one actor a shot could have reached",
+        n.enemies === 1, `${n.enemies}`);
+  check("...and leaves the shot-immune zombie its hit points",
+        !immuneZombie.dead && immuneZombie.hp === 10
+        && (immuneZombie.flags & ActorFlag.Dead) === 0,
+        `hp ${immuneZombie.hp} flags ${immuneZombie.flags.toString(16)}`);
+  check("...and the shot-immune thrower its own",
+        !immuneThrower.dead && immuneThrower.hp === 130
+        && (immuneThrower.flags & ActorFlag.Dead) === 0,
+        `hp ${immuneThrower.hp} flags ${immuneThrower.flags.toString(16)}`);
+
+  // The counters, which is the half the hang was made of. One kill, so one
+  // actor may leave; the two refused ones must still be in both.
+  run(900, rng, events);
+  check("the killed one leaves both counters",
+        G.g_enemies_alive === 2 && G.g_enemies_present === 2,
+        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  check("...and its slot with them",
+        !G.g_enemy_slots.includes(plainZombie.at), G.g_enemy_slots.join());
+  check("...while the two refused ones are still alive and still counted",
+        !immuneZombie.dead && !immuneThrower.dead
+        && !immuneZombie.despawned && !immuneThrower.despawned,
+        `${immuneZombie.dead}/${immuneThrower.dead}`);
+
+  // The window is transient, and that is the whole argument for refusing
+  // rather than special-casing: the clip ends, the bit goes, and the next
+  // clear -- or the next shot -- takes them in the ordinary way.
+  immuneZombie.flags &= ~ActorFlag.ShotImmune;
+  immuneThrower.flags &= ~ActorFlag.ShotImmune;
+  const m = ActorKillAll(0, rng);
+  check("with the bit down the same clear takes both",
+        m.enemies === 2 && immuneZombie.dead && immuneThrower.dead,
+        `${m.enemies}`);
+  run(900, rng, events);
+  check("...and `g_enemies_alive` reaches zero, which is the gate",
+        G.g_enemies_alive === 0, `${G.g_enemies_alive}`);
+  check("...with nothing left holding a camera slot",
+        G.g_enemy_slots.length === 0, G.g_enemy_slots.join());
+}
+
 // -- D1: where `NoCameraTrack` is raised, and the guard on it ---------------
 
 /**

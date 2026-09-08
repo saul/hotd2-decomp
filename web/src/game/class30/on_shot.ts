@@ -77,7 +77,12 @@ export function ZombieOnShot(obj: ZombieActor): void {
   const hit = obj.pendingHit;
   if (!hit) return;
   obj.pendingHit = null;
-  // `TEST EAX, 0x100` at 0x00453EFB -- a downed actor only ricochets.
+  // `00453ec7 f6c401 TEST AH,0x1` on `obj+0x34` (loaded at 0x00453ec4), then
+  // `00453eca 0f857e010000 JNZ 0x0045404e` -- the routine's own tail, so a
+  // downed actor only ricochets and reaches none of the arms below. The
+  // citation here used to read `TEST EAX, 0x100` at 0x00453EFB; that address
+  // holds `MOV EDX, [ESI+0x136c]`, inside the per-player loop, and the
+  // encoding is the byte form. `[proved]`
   if (obj.flags & ActorFlag.ShotImmune) return;
   // A survivable hit stops here. The engine would call `ActorShotFeedback`
   // and then `ActorReactToHit` (`FUN_004543F0`) for the stagger; the port's

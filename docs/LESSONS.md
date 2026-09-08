@@ -330,3 +330,23 @@ across every stage before collapsing it. A collapse also hides upstream --
 nothing had followed `op 10`'s second edge in the exporter either, so the arm
 the actor really runs was not in the bundle at all and no amount of reading the
 port would have shown it.
+
+**L35 — A Ghidra xref list stops at a no-return tail call, and so does the
+decompilation.** `get_xrefs_to 0x00408ec0` returns eleven callers of
+`RegisterForCameraTracking` and not one of them is an enemy class, which reads
+as proof that class 0x30 and 0x31 never become camera candidates — and that
+would make the port's whole `g_enemy_slots` model invented. They do.
+`ActorRegisterCameraPoint` (`FUN_00409B70`) ends `PUSH ESI / CALL 0x00408ec0`
+at `0x00409bec`–`0x00409c03`, **after** the `JMP` to `MatrixStackPop` that
+Ghidra has marked no-return: the function body ends there, the pseudocode ends
+there with a `WARNING: Subroutine does not return`, and the call past it is in
+no xref list. `disassemble_bytes` from the last address the body claims is what
+finds it.
+
+It is **L32** one level down — that lesson is about a search over decoded
+operands seeing one addressing mode; this is about a search over Ghidra's
+graph seeing only what Ghidra has decided is code. Both have the same tell: a
+negative result that would make a large, working piece of the port impossible.
+When a cross-reference search says a routine nothing could work without is
+never called, disassemble past the end of every function that ought to call it
+before believing the search.

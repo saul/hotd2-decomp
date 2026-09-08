@@ -111,8 +111,28 @@ export function waitProjection(w: Walker,
         + `${d ? ` · ${d.summary}` : ""} · d=${dist(a, eye).toFixed(0)}` });
     }
     if (!blockers.length) {
-      lines.push({ note: true, text: "Nothing alive is holding it — the camera "
-        + `gate (g_camera_free ${G.g_camera_free}) is.` });
+      // **A gate with no named blocker has two quite different causes, and
+      // this line used to give the first one every time.** It said "the camera
+      // gate is" while printing `g_camera_free 1`, which is the *free* value —
+      // so on stage 6 it pointed at the camera when the camera was the one
+      // thing that had already handed back, and the actual holder was a
+      // thrower that was dead, still inside `g_enemies_alive`, and therefore
+      // filtered out of `waitBlockers` by its own `!a.dead`.
+      //
+      // The counter and the flag are both right here; say which of them is
+      // above the line rather than guessing.
+      const need = wait.op.arg ?? 0;
+      const count = kind === "enemies" ? G.g_enemies_alive
+                                       : G.g_civilians_alive;
+      lines.push({ note: true, text: G.g_camera_free === 0
+        ? "Nothing this panel can name is alive — the camera gate "
+          + "(g_camera_free 0) is holding it."
+        : count > need
+        ? `The camera has handed back (g_camera_free 1) and the counter is `
+          + `${count}: something is counted that is not in the list above — a `
+          + `dead actor that never retired, or a class this panel does not `
+          + `walk.`
+        : "Nothing is holding it — it should pass on the next frame." });
     }
   } else if (kind === "queued") {
     lines.push({ note: true, text: `cam path ${G.g_active_cam_path} frame `

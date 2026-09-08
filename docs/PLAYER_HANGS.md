@@ -728,35 +728,31 @@ pass next frame. And the tool's *"the enemies are somewhere the shots cannot
 reach"* was an inference, not a measurement; it prints the blocker rows now,
 and they say who and how far. See item 19 for what they say.
 
-## 19. Rooms the shots do not clear, with the actor named
+## 19. Rooms the shots do not clear — **all five read**, three retired
 
-The tool no longer guesses about these — it prints the wait panel's own
-blocker rows beside the report. `[open]`, all of them, and each is a
-measurement rather than a theory:
+The five gates the playthrough tool had to use its debug clear on. Item 19 left
+all of them `[open]` with a measurement and no reading; every one has now been
+read in the exe, and they are **three different faults**, not one.
 
-| stage | block | step/op | who is left |
-|---|---|---|---|
-| 1 | 1 | 8 / 6 | `0x1868 tutorial · Strike/2 · permit · d=9` |
-| 5 | 2 | 2 / 50 | `0x1D44 znnick · DelayedStrikeInPlace/4 · d=2886`, and three more of the same at `d=2865`, `2877`, `2898` |
-| 6 | 0 | 4 / 8 | `0x0970 zslman · Throw/2 · d=49`, `0x099C zslman · KnockedTumbling/4 · d=55` |
-| 6 | 1 | 3 / 17 | `0x1604 zslman · Throw/1 · permit · d=38`, `0x1630 zslman · KnockedTumbling/4 · d=44` |
-| 6 | 3 | 2 / 13 | `0x2654 zslman · KnockedTumbling/1 · d=56` |
+| stage | block | step/op | who is left | verdict |
+|---|---|---|---|---|
+| 6 | 0 | 4 / 8 | 3 × `zslman` at `d=49..101` | **slow** — `[not-a-bug]`, the tool |
+| 6 | 1 | 3 / 17 | 2 × `zslman` at `d=56..90` | **slow** — `[not-a-bug]`, the tool |
+| 6 | 3 | 2 / 13 | 3 × `zslman` at `d=74..101` | **slow** — `[not-a-bug]`, the tool |
+| 5 | 2 | 2 / 50 | 3 × `znnick` in `DelayedStrikeInPlace` at `d≈2870` | **unkillable** — an undeclared consequence of a declared `[diverges]` |
+| 1 | 1 | 8 / 6 | `0x1868`, a class-0x10 captor, `140/140` | **unkillable** — the script has firing off. Cause `[open]` |
 
-Three different things, and the distances are what separate them.
+### Stage 6, three rooms — slow, and the tool was measuring the wrong thing
 
-* **Stage 5** is nearly **three thousand units** from the camera. No blind
-  spray was ever going to reach that, and it is worth reading on its own:
-  `ZombieStateDelayedStrikeInPlace` is class 0x30 state 32.
-* **Stage 6** is *not* out of reach — 38 to 56 units — and four of the five
-  rows are `KnockedTumbling`, which is the state that holds
-  `ActorFlag.ShotImmune` through its landing and its get-up (item 18). Shots
-  during that window are refused by `DispatchHit`, correctly, so a `zslman`
-  that keeps being knocked down absorbs a long stretch of a 20-volley window
-  and the room is merely **slow** for a tool that sprays a grid. That may be
-  the whole of it; the reading has not been done. `[open]`
-* **Stage 1** is the odd one and the most interesting: a zombie at `d=9`,
-  mid-`Strike`, holding the attack permit, that 20 volleys across the whole
-  frame did not kill. `[open]`
+`[proved]`, and it is not "probably just slow for a grid spray" as the previous
+note guessed. `zslman` is class 0x31 character type 0x18, and `ThrowerOnShot`
+(`FUN_004499A0`) sends it to `ThrowerStateKnockedTumbling` (`FUN_00450E40`) for
+every hit. That state raises `ActorFlag.ShotImmune` at its landing
+(`LAB_004512E2`) and again on the way out, where it also writes
+`obj+0x133C = 0x14`; `DispatchHit` (`FUN_004092F0`) refuses `ResolveHit` while
+the bit is up, and `EnemyThrowerUpdate` (`FUN_00449910`) is the only thing that
+takes it down. **One shot lands per knockdown cycle**, so the clear time is set
+by elapsed frames and not by rate of fire.
 
 ## 20. Stage 5's two flag-30 gates cost a whole enemy, not a flag write
 
@@ -906,6 +902,131 @@ now run only for an enemy gate**, since it takes actors out of the counts a
 opens no flag at all.
 
 ---
+
+Measured on the driven clock, hit points falling all the way:
+
+```
+f+ 60  2372 c49 s33.3 h95      ← 130 - 35, then straight into KnockedTumbling
+f+210  2372 c49 s33.3 h60
+f+330  2372 c49 s33.3 h15
+f+720  e0 p0                   ← all three dead, the gate opens
+```
+
+420, 435 and 285 frames of shooting for the three rooms. The tool gave up at
+**300**. It was not cheating harder that was wanted, and raising the window
+would have excused stage 1 as well — so `--shoot-for` now counts frames in
+which **nothing in the room took damage**, read off the drive seam's own row
+(`g_enemies_alive` plus the hit points of every live class-0x30 and class-0x31
+actor). A room being won slowly no longer looks like a room that cannot be won.
+The same clock guards the hang deadline, so a long fight is not reported as
+fifteen seconds on one instruction. See `docs/formats/combat.md`.
+
+The port needed no change for these three. **Three of the five cheated rooms
+were a measurement fault in the harness.**
+
+### Stage 5 block 2 — unkillable, and the distance is not the bug
+
+`[proved]`. The previous note asked why four `znnick` are at `d=2843..2898`
+"and not where the script put them". They are exactly where the script put
+them: block 2 step 2 op 38 spawns them at `(±4.6, 0..10, -16.5..7)`,
+`FUN_00408a20` copies a descriptor's position verbatim with no transform, and
+`ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) **never moves an actor** —
+it is a stationary swing loop that never approaches and never leaves. Three of
+the four have `initial_state 32`; the fourth is `initial_state 18` with
+`attack_state 10` and retires on camera path frame 590 on its own.
+
+The state has exactly one way out, at `0x0045EAFE`: `g_carrier_object`
+(`0x009A5C34`) raising `obj+0x34` bit `0x40000000`, after which `obj+0x1334`
+counts to `0x14` and the actor takes state 10, `ActorAbortAttackAndLeave`. The
+object that raises it is `ScriptedCarrierUpdate33` (`0x004331D0`) — class 0x33
+selector 1, which stage 5 block 2 step 2 op 37 spawns at evt `7396` — at
+`0x00433280`. **Class 0x33 is unported**, so `g_carrier_object` is `-1` and
+nothing can ever end the ride.
+
+That divergence was already declared in `class30/scripted.ts` and in
+`globals.ts`. What was not declared is that it makes a shipped room
+unclearable, which is L26 exactly: a `[diverges]` note is what somebody meant,
+and only a check says what the code does. Two things landed for it:
+
+* the give-up tested `obj+0x136C` bit `0x40000000` — the right bit in the
+  wrong word, where `ZombieFlag2.CollideActors` lives and where
+  `EnemyZombieInit` seeds `0x60000000` on **every** class-0x30 spawn. It would
+  have fired for any zombie that became the carrier and never for the class-
+  0x33 one that is. Now `obj+0x34`, with both halves asserted.
+* the sub machine returned early on its waits, so the give-up did not run on
+  any frame the actor was counting a timer down — the exe's arms all reach
+  `switchD_0045e899_default`. The state is split in two now: the switch may
+  return, the frame may not.
+
+**Still unclearable** until class 0x33 selector 1 is ported. That is the whole
+remaining work for this room, and it is a vehicle: `0x004331D0` runs to at
+least `0x00433830`, reads `tail+0x14/0x18/0x1C/0x20/0x21/0x24`, and would need
+the descriptor tail in both halves of `hod2lib`.
+
+### Stage 1 block 1 — unkillable, because the script has switched the gun off
+
+`[proved]` for the mechanism, `[open]` for the cause.
+
+The blocker is `0x1868`, a class-0x30 **captor** of the class-0x10 civilian
+`0x1828 hito_fem`, built by `CivilianInit` (`FUN_0048A3E0`) from a descriptor
+nothing in the evt points at. It sits at `140/140` for 3,000 frames across a
+hundred volleys, with `flags 0x8040001` — **`ActorFlag.ShotImmune` is not
+set**. The shots are not being refused by the actor. They are not being fired.
+
+`g_nFiringGate` (`0x009C8E00`) is down. Block 1 step 6 op 3 issues
+`hud_shutter_state 3`, and `HudDrawShutterState` (`FUN_00413970`) drops the
+gate at `0x00413B06` when that close finishes counting; nothing raises it again
+until step 9 op 1. The gate at **step 8 op 6** is inside that window, and
+`ResolveShotRequest` returns before the ray exactly as
+`PlayerFireAndReloadUpdate` does at `0x004149BE`. The screenshot says
+`shutter closed` and the sidebar says `hp 140/140`; those two facts are the
+whole of it.
+
+Everything else about the room checks out against the exe:
+
+* the captor **is** alive-counted — `FUN_00452DA0` increments both counters for
+  any class-0x30 spawn whose character type is not 9 and whose initial state is
+  not `0x1F`; this one is type 19, state 35.
+* it **is** meant to turn on the player once its civilian dies.
+  `ZombieTargetIsDead` (`FUN_0045C8A0`) itself calls `ZombieScriptEnded`
+  (`FUN_0045C8D0`), which takes the descriptor's attack state — `1`,
+  `AttackRun`, which is the commonest of the 114 captors in the game (54 of
+  them). `ZombieStateTargetLostPause` (state 45) is a 10–20 frame pause that
+  restores the stashed state, not a retirement.
+* the gate itself is only `g_enemies_alive <= 0 && g_evt_gameplay_live &&
+  g_camera_free && hysteresis > 0` — `EvtOpWaitEnemiesAlive44` (`FUN_0045FC10`).
+  Every extra term makes it harder, never easier.
+* it is not the cutscene skip. Measured with `Enter` suppressed: identical
+  state, identical hit points.
+
+So the engine reaches the same instruction with the same live enemy and the
+same gate down, and the shipped game plainly does not stop there. **What
+removes that captor from `g_enemies_alive` before step 8 op 6 is `[open]`.**
+Leads not yet followed, in the order they look worth following:
+
+1. the class-0x25 actor at evt `7340` (step 6 op 0) and the class-0x20 at
+   `8088` (step 7 op 8), either of which may kill it — class 0x25's `op 18` is
+   `ActorKill` and L34 is about exactly that arm being collapsed;
+2. the civilian's own script, which is parked at pc 4 on
+   `wait 0x8100080` — `CameraCue`, path 39 frame 60, a path the walker does not
+   queue until step 8 op 9, *after* the gate;
+3. `CivilianInit`'s child count for this spawn (tail `+0x0C`), against the exe
+   rather than against the exporter — L6.
+
+## 20. What the five rooms cost, and the two traps in measuring them
+
+Written down because both cost time in the session that read items 17–19.
+
+**A room's clear time is not a number of shots.** Under the driven clock a
+volley of twenty clicks lands on one game frame, and against an enemy whose
+shot response raises `ActorFlag.ShotImmune` exactly one of the twenty resolves.
+Every measurement of "how hard is this room" has to be in frames of *damage*,
+and the tool now is.
+
+**A `[diverges]` can be true and still be the bug.** Stage 5's carrier note was
+accurate, careful, and in two files. What nobody had done was ask which shipped
+rooms depend on the thing it declares missing; the answer was one, and it had
+been showing up as an unexplained `d≈2880` for two sessions.
 
 ## Rules for whoever picks this up
 

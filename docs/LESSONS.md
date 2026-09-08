@@ -374,3 +374,26 @@ loudly instead of succeeding quietly. The same goes for invoking a repo tool by
 absolute path — `python3 /repo/tools/annotate.py` resolves its data files
 relative to *itself*, not to your cwd, which is how two annotation rows went to
 the wrong tree in the same session.
+
+**L37 — The decompiler folds arms that look alike and drops the tails that
+make them different.** `HudDrawShutterState` (`FUN_00413970`) is a nine-arm
+switch that drives `g_nFiringGate`, and Ghidra's pseudocode for it contains
+**no write to that global at all** in three of the arms: cases 0, 3-at-zero and
+5 each draw an identical closed shutter and `return`. Read literally that says
+the engine never lowers the firing gate, which would make a shipped room the
+player cannot shoot in a port bug rather than the script's own doing — and that
+is exactly the conclusion it was about to be used for.
+
+The three arms are not identical. Their tails sit in bytes the listing walks
+past: `00413A0B` writes `1`, `00413A74` and `00413B06` write `0`, and each also
+sets the state to 4. `disassemble_bytes` over the gaps between the arms is what
+finds them, and the jump table — here `0x00413C80` — is what says which arm
+belongs to which case, because the pseudocode's `case N:` labels are the one
+part you can still trust.
+
+It is **L35** one step over: that lesson is a cross-reference list stopping at a
+no-return tail call, this is a *decompilation* stopping at the end of the block
+it chose to show. Same tell in both, and it is the useful one: a negative result
+that would make a working piece of the shipped game impossible. When the
+pseudocode of a state machine has no writer for the global the state machine
+exists to drive, disassemble every arm before believing it.

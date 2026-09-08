@@ -1992,3 +1992,57 @@ all bank 47, and row B's are `0x1BD`–`0x1BF`, all bank 20.
 One consequence is an engine bug, left as it is: `ThrowerStateGetUp` plays
 motion `0x127` with no character-type branch, and `0x127` is a `szom.bin` clip.
 `zskamere` can reach that state and has no such clip on its rig.
+
+### `zslman`'s damage rate is bounded by its stagger, not by your trigger
+
+A room of class-0x31 character type 0x18 cannot be cleared faster than its
+knockdowns allow, and the reason is one bit.
+
+`ThrowerOnShot` (`FUN_004499A0`) sends character type 0x18 to
+`ThrowerStateKnockedTumbling` (`FUN_00450E40`) rather than to the stumble.
+Inside that state `ActorFlag.ShotImmune` — `obj+0x34` bit `0x100` — goes up at
+the landing (`LAB_004512E2`, `OR DH, 0x1` on `obj+0x34` in the same breath as
+the velocity clear) and again on the way out at `switchD_00450e59_caseD_4`,
+which also writes `obj+0x133C = 0x14` and enters state 7. `EnemyThrowerUpdate`
+(`FUN_00449910`) is what takes the bit down, and only when that cooldown
+reaches zero.
+
+While it is up, `DispatchHit` (`FUN_004092F0`) refuses `ResolveHit`
+(`FUN_00409430`) outright, and both enemy classes gate their whole shot
+response on the same bit besides — `ThrowerOnShot` at `0x004499F5`
+(`f6c401 TEST AH,0x1` / `JNZ 0x00449AF6`, the routine's tail) and
+`ZombieOnShot` (`FUN_00453EB0`) at `0x00453EC7`.
+
+**So one shot lands per knockdown cycle.** The cycle is the knockback arc, the
+bounce down to `0.15` on the gravity axis or `obj+0x1338` reaching `0x78`, a
+settle of `(rand() % 10 + 1) * 3` frames, the get-up clip, and then the twenty
+frames of `obj+0x133C`. Measured in the port on stage 6's three rooms: 130 hit
+points, 35 a hit, so `130 → 95 → 60 → 15 → dead`, with about 120 frames between
+one landed hit and the next whatever the rate of fire. Three of them together
+cleared in 420, 435 and 285 frames.
+
+This is the designed behaviour and not a bug in either the engine or the port,
+but it is a **trap for any harness that measures a room in shots**: firing
+twenty rounds into one frame lands exactly one of them. `tools/playthrough.mjs`
+therefore gives up on frames in which nothing took damage rather than on frames
+elapsed — see its header.
+
+### The carrier's two bits, and which word they are in
+
+`ScriptedCarrierUpdate33` (`0x004331D0`) is the update
+`ScriptedSceneryDispatch33` (`FUN_00432FF0`) installs for class 0x33 **selector
+1**, where `obj+0x11C` is the sub-type selector rather than hit points — L3, and
+the evt's `hp` field is what picks it. It writes itself into `g_carrier_object`
+(`0x009A5C34`) every frame at `0x004331E1`, and raises two bits on its **own
+`obj+0x34`**:
+
+| bit | raised at | read by |
+|---|---|---|
+| `0x10000000` | `0x00433203`, when `g_script_flags[tail+0x20] == 1` or `(s32)tail+0x18 == obj+0x1370` | `ZombieStateRideCarrier` (class 0x30 state 29) — the ride is over |
+| `0x40000000` | `0x00433280`, once `tail+0x14` is not `-1.0f` and `obj+0x1370` has passed it | `ZombieStateDelayedStrikeInPlace` (state 32) at `0x0045EAFE` — give up to state 10 after `0x14` frames |
+
+Both reads are `[EAX + 0x34]`. **Not `obj+0x136C`**: `0x40000000` there is
+`ZombieFlag2.CollideActors`, half of the `|= 0x60000000` that `EnemyZombieInit`
+(`FUN_00452DA0`) seeds on every class-0x30 spawn, so a test against that word
+answers yes for every zombie in the game and no for the carrier. The port had
+exactly that mistake in `ZombieDelayedStrikeGiveUp`; see `class30/scripted.ts`.

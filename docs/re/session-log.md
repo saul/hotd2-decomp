@@ -14802,3 +14802,133 @@ Two smaller things went with it: a volley at a flag gate is 13x10 rather than
 5x4, because a boss is one actor with a handful of bone spheres eighty units
 out; and the debug clear is now run only for an enemy gate, since killing an
 actor from outside its own death states opens no flag.
+
+## The five rooms the debug clear was walking past
+
+All six stages reached an end block already; five rooms only got there because
+`playthrough.mjs` gave up and used its debug clear. For a player those five are
+hangs. This session read all five in the exe. They are **three different
+faults**, and the previous session's three `[open]` notes each guessed a
+different one of them wrongly.
+
+Before: stage 1 block 1, stage 5 block 2, stage 6 blocks 0, 1 and 3 — five
+cheated rooms. After: stage 1 block 1 and stage 5 block 2 — two, both with a
+proved mechanism and one with a named remaining port job.
+
+### Stage 6, three rooms — the harness was measuring shots, not damage
+
+`zslman` is class 0x31 character type 0x18, and its whole shot response is
+`ThrowerStateKnockedTumbling` (`FUN_00450E40`), which holds
+`ActorFlag.ShotImmune` from its landing through its get-up and hands out twenty
+more frames of it in `obj+0x133C` on the way to state 7. `DispatchHit`
+(`FUN_004092F0`) refuses `ResolveHit` for all of it. **One shot lands per
+knockdown**, so a room of them is bounded by elapsed frames and not by rate of
+fire — 130 hit points at 35 a hit is four cycles of about 120 frames.
+
+Measured under the driven clock, the three rooms clear in 420, 435 and 285
+frames of shooting with the hit points falling `130 → 95 → 60 → 15 → dead`. The
+tool gave up at 300. The port is right and always was; the previous note's
+guess — "probably just slow for a grid spray" — was the right shape and had not
+been checked, and the brief was explicit that it should not be accepted on
+that basis.
+
+The fix is in the tool and it is **not** a longer window. `--shoot-for` now
+counts frames in which nothing in the room took damage, read off the drive
+seam's own row: `g_enemies_alive`, plus the hit points of every live class-0x30
+and class-0x31 actor. Elapsed time cannot tell a room being won slowly from a
+room that cannot be won; damage can. Raising the window would have excused
+stage 6 *and* hidden stage 1, which is the reason it was refused.
+
+### Stage 5 block 2 — a declared divergence that nobody had costed
+
+The previous note asked why four `znnick` sit at `d=2843..2898`, "nearly three
+thousand units from the camera… and not where the script put them". They are
+where the script put them: block 2 step 2 op 38 spawns them at `(±4.6, 0..10,
+-16.5..7)`, `FUN_00408a20` copies a descriptor position verbatim, and
+`ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) never moves an actor. The
+distance is not a bug and the position is not the question.
+
+The question is the way out, and there is exactly one: `g_carrier_object`
+(`0x009A5C34`) raising `obj+0x34` bit `0x40000000`, read at `0x0045EAFE`, after
+which `obj+0x1334` counts to `0x14` and the actor takes state 10. The writer is
+class 0x33 selector 1 — named `ScriptedCarrierUpdate33` (`0x004331D0`) this
+session, `obj+0x11C` being a sub-type selector there rather than hit points
+(L3), and spawned by this very step at op 37. Class 0x33 is unported, so the
+global stays `-1`.
+
+That divergence was already written down twice, in `class30/scripted.ts` and in
+`globals.ts`, carefully and accurately. **What nobody had done was ask which
+shipped rooms depend on it**, and the answer is one, and it had been surfacing
+as an unexplained `d≈2880` for two sessions. L26 with the polarity reversed: a
+note can be perfectly true and still be the reason nothing was looked at.
+
+Two real port bugs fell out of reading it, both in the give-up:
+
+* it tested `obj+0x136C` bit `0x40000000` instead of `obj+0x34`'s — the right
+  bit in the wrong word. `0x40000000` in `obj+0x136C` is
+  `ZombieFlag2.CollideActors`, half of the `|= 0x60000000` `EnemyZombieInit`
+  seeds on **every** class-0x30 spawn, so the test answered yes for every
+  zombie in the game and no for the carrier.
+* the sub machine returned early on each of its waits, so the give-up did not
+  run on any frame the actor was counting a timer down. In the exe every arm of
+  the switch reaches `switchD_0045e899_default`, by `break` or by `goto`, and
+  the idle and the carrier watch are what sits there. The state is two
+  functions now: the switch may return, the frame may not. It cost four frames
+  of the twenty in the test, which is how it was found.
+
+Both are fixed and asserted. The room is **still unclearable** until class 0x33
+selector 1 is ported, which is a vehicle — `0x004331D0` runs to at least
+`0x00433830` and would need `tail+0x14/0x18/0x1C/0x20/0x21/0x24` in both halves
+of `hod2lib`. Not attempted.
+
+### Stage 1 block 1 — the gun is switched off, and why is `[open]`
+
+The odd one, and it stayed odd. The blocker is `0x1868`, a class-0x30 captor of
+the class-0x10 civilian `0x1828 hito_fem`. It sits at `140/140` for 3,000
+frames across a hundred volleys with `flags 0x8040001` — **`ShotImmune` is not
+set**. Nothing is refusing the shots. Nothing is firing them:
+`g_nFiringGate` (`0x009C8E00`) is down, because block 1 step 6 op 3 issues
+`hud_shutter_state 3` and `HudDrawShutterState` (`FUN_00413970`) drops the gate
+at `0x00413B06` when that close finishes, and nothing raises it again until
+step 9 op 1. The gate at step 8 op 6 is inside that window.
+
+Four things were checked against the exe and all four say the port is faithful:
+the captor is alive-counted (`FUN_00452DA0` counts every class-0x30 spawn whose
+character type is not 9 and whose initial state is not `0x1F`); it is meant to
+turn on the player when its civilian dies (`ZombieTargetIsDead`,
+`FUN_0045C8A0`, itself calls `ZombieScriptEnded`, and `attack_state 1` is the
+commonest of the 114 captors in the game); the gate's own handler
+`EvtOpWaitEnemiesAlive44` (`FUN_0045FC10`) has only terms that make it harder;
+and it is not the cutscene skip, measured with `Enter` suppressed.
+
+So the engine reaches the same instruction, with the same live enemy, with the
+gun off — and the shipped game does not stop there. **What removes that captor
+from `g_enemies_alive` is `[open]`**, with three leads listed in
+`PLAYER_HANGS.md` item 19.
+
+### What went wrong on the way
+
+1. **`HudDrawShutterState`'s decompilation has no `g_nFiringGate = 0` in it.**
+   Ghidra's pseudocode for `FUN_00413970` shows cases 0, 3 and 5 drawing a
+   closed shutter and returning, with no gate write anywhere in the function —
+   which read as proof that the port had invented the closed-shutter gate and
+   that stage 1 was a port bug. It had not. The three arms' tails are in gaps
+   the listing skips: `0x00413A0B` writes `1`, `0x00413A74` and `0x00413B06`
+   write `0`, all of them after the block Ghidra shows. **L1's sibling** — the
+   decompiler drops the tail, not just the FPU arguments — and the jump table
+   at `0x00413C80` is what says which arm is which state.
+2. **Reading a room by watching the wrong gate.** The first probe of stage 6
+   block 0 stopped at the first stalled gate in the block and reported three
+   healthy class-0x30 zombies cycling their attack loop — nothing like the
+   `zslman` the playthrough had named. Two different rooms, one block. A probe
+   that targets a block has to target the step too.
+3. **Reading "the gate opened" off the block number.** The probe broke when the
+   *block* changed, which for stage 6 block 0 is three rooms later; the first
+   clear times measured were 750, 1200 and 555 frames and none of them was the
+   room under test. The real figures are 420, 435 and 285, and the tool
+   threshold was set from those.
+4. **Assuming the exe's `ZombieTargetIsDead` is a predicate.** The port calls
+   `ZombieScriptEnded` from inside a function named "is dead", which looks
+   exactly like L11 — a test moved across a function boundary — and half an
+   hour went into it before `FUN_0045C8A0` turned out to do precisely the same
+   thing. A negative result about the port is not a fact either.

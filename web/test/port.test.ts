@@ -6712,6 +6712,84 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     check("state 29 hands over at once when there is no carrier to ride",
           z.state === ZombieState.AttackRun, String(z.state));
   }
+
+  // -- state 32: the give-up, and which word carries the bit ---------------
+  //
+  // `ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) is a permanent swing
+  // loop -- it never approaches and never leaves -- with exactly one way out:
+  // `0045eafe TEST dword ptr [EAX + 0x34], 0x40000000` on the object
+  // `g_carrier_object` (0x009A5C34) names, then `obj+0x1334` counts up and at
+  // 0x14 the actor takes state 10. `ScriptedCarrierUpdate33` (`0x004331D0`)
+  // raises that bit at `00433280 OR EAX, 0x40000000`, `EAX = [EBP + 0x34]`.
+  //
+  // This read `obj+0x136C` instead -- the right bit in the wrong word, where
+  // `ZombieFlag2.CollideActors` lives and where `EnemyZombieInit`
+  // (`FUN_00452DA0`) seeds `0x60000000` on **every** class-0x30 spawn. Both
+  // halves are asserted, because only the pair pins the word: the wrong read
+  // fires on a carrier that has not ended its ride and never fires on one
+  // that has.
+  {
+    const holdsFor = (z: ZombieActor, frames: number) => {
+      for (let f = 0; f < frames; f++) {
+        if (z.state !== ZombieState.DelayedStrikeInPlace) return f;
+        run(z, 1);
+      }
+      return -1;
+    };
+
+    const z = spawn(ZombieState.DelayedStrikeInPlace,
+                    { delay: 2, rearm: 4, player: 0 });
+    // Spawned after `z`, because `spawn` resets the pool.
+    const carrier = spawnZombie(0x7EE0, 1, "carrier stand-in");
+    G.g_carrier_object = carrier.at;
+    carrier.flags = 0;
+    carrier.flags2 = 0;
+
+    let left = holdsFor(z, 120);
+    check("state 32 keeps swinging while its carrier's ride is still running",
+          left === -1, `left after ${left} frames`);
+
+    // The old read. `0x40000000` in `obj+0x136C` is a collision bit every
+    // class-0x30 actor carries, so this must mean nothing here.
+    carrier.flags2 |= ZombieFlag2.CollideActors;
+    left = holdsFor(z, 120);
+    check("...and `obj+0x136C` bit 0x40000000 is not the bit — it is the "
+          + "collision word every class-0x30 spawn is seeded with",
+          left === -1, `left after ${left} frames`);
+    carrier.flags2 = 0;
+
+    // The engine's read.
+    carrier.flags |= ActorFlag.Reacting;
+    left = holdsFor(z, 120);
+    check("...but `obj+0x34` bit 0x40000000 retires it, and only after the "
+          + "0x14 frames `obj+0x1334` counts",
+          left > 0x14 && left <= 0x14 + 3, `left after ${left} frames`);
+    check("...into state 10, `ActorAbortAttackAndLeave`",
+          z.state === ZombieState.Leave || z.despawned,
+          `state ${z.state}${z.despawned ? " despawned" : ""}`);
+  }
+  {
+    // `if ((carrier+0x34 & 0x40000000) == 0) obj+0x1334 = 0;` — the counter is
+    // held at zero rather than paused, so a ride that ends, un-ends and ends
+    // again costs the full 0x14 from the second raise.
+    const z = spawn(ZombieState.DelayedStrikeInPlace,
+                    { delay: 2, rearm: 4, player: 0 });
+    const carrier = spawnZombie(0x7EE0, 1, "carrier stand-in");
+    G.g_carrier_object = carrier.at;
+    carrier.flags = ActorFlag.Reacting;
+    run(z, 0x10);
+    carrier.flags = 0;
+    run(z, 4);
+    carrier.flags = ActorFlag.Reacting;
+    let since = 0;
+    while (z.state === ZombieState.DelayedStrikeInPlace && since < 120) {
+      run(z, 1);
+      since += 1;
+    }
+    check("the give-up counter is zeroed while the bit is down, not paused — "
+          + "the second raise costs the full 0x14 again",
+          since > 0x14 && since <= 0x14 + 3, `left ${since} frames after it`);
+  }
 }
 
 console.log("\nIsPlayerAttackable: the scene has to be running:");

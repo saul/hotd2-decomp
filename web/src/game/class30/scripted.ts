@@ -349,10 +349,30 @@ function ZombieLeapPin(obj: ZombieActor): void {
  * `g_class30_attack_picks`, so the swing is one of the character's own and
  * `ActorStrikeConnect` decides whether it lands — which means shooting the arm
  * off stops it, exactly as it does in the ordinary loop.
+ *
+ * **The tail runs on every frame, whichever sub the switch took.** In the exe
+ * every arm ends at `switchD_0045e899_default` — `case 0` and `case 1` by
+ * `break`, `case 3` and `case 4` by an explicit `goto` on their wait, and the
+ * `obj+0x121 == -1` arm by falling out of its `if` — and the idle and the
+ * carrier watch below are what sits there. The sub machine was written here
+ * with `return` on those waits, so on any frame the actor was **counting a
+ * timer down** the give-up did not run: `ZombieDelayedStrikeGiveUp`'s counter
+ * only advanced on the frames the swing happened to be past its wait, and the
+ * actor left `0x14` frames late by however many it had spent waiting. Hence
+ * the split: the switch may return, the frame may not.
  */
 export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
                                                 dt: number, rng: Rng,
                                                 events?: Events): void {
+  ZombieDelayedStrikeStep(obj, eye, dt, rng, events);
+  // `switchD_0045e899_default`, in order: the idle re-blend, then the watch.
+  ZombieDelayedStrikeIdle(obj, rng);
+  ZombieDelayedStrikeGiveUp(obj, dt);
+}
+
+/** The switch itself — `0045e899`'s nine arms. May return; see the caller. */
+function ZombieDelayedStrikeStep(obj: ZombieActor, eye: Vec3, dt: number,
+                                 rng: Rng, events?: Events): void {
   const t = obj.entry;
   const frames = SecondsToTicks(dt);
 
@@ -361,7 +381,7 @@ export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
     obj.sub = 1;
   } else if (obj.sub === 1) {
     obj.zom.holdFrames -= frames;
-    if (obj.zom.holdFrames > 0) { ZombieDelayedStrikeIdle(obj, rng); return; }
+    if (obj.zom.holdFrames > 0) return;
     obj.sub = 2;
   }
 
@@ -371,19 +391,16 @@ export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
   }
 
   if (obj.sub === 3) {
-    if (G.g_players_in_play === 0) { ZombieDelayedStrikeIdle(obj, rng); return; }
+    if (G.g_players_in_play === 0) return;
     obj.sub = 4;
   }
 
   if (obj.sub === 4) {
     obj.zom.holdFrames -= frames;
-    if (obj.zom.holdFrames > 0 || G.g_players_in_play === 0) {
-      ZombieDelayedStrikeIdle(obj, rng);
-      return;
-    }
+    if (obj.zom.holdFrames > 0 || G.g_players_in_play === 0) return;
     const p = ZombieScriptedPickPlayer(t?.player ?? -1, rng);
     obj.attackPermit = p;
-    if (p === -1) { ZombieDelayedStrikeIdle(obj, rng); return; }
+    if (p === -1) return;
     G.g_attack_permits[p] = 1;
     ActorFacePlayerTarget(obj, eye);
     // `obj+0x34 |= 0x10000000` — mid-attack, and the idle below stops.
@@ -408,9 +425,6 @@ export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
       obj.flags &= ~ActorFlag.Committed;
     }
   }
-
-  ZombieDelayedStrikeIdle(obj, rng);
-  ZombieDelayedStrikeGiveUp(obj, dt);
 }
 
 /**
@@ -438,15 +452,40 @@ function ZombieDelayedStrikeIdle(obj: ZombieActor, rng: Rng): void {
  * state 10 — `ActorAbortAttackAndLeave`, which releases the permit. It is how
  * a scripted attacker gets out of the way when the ride it belongs to ends.
  *
- * [diverges] The port has no rideable object, so `g_carrier_object` is -1, the
- * counter never starts and these three spawns keep swinging rather than
- * retiring. See `entrance.ts`'s note on `ZombieStateRideCarrier` — the same
- * missing piece, and the same fix would clear both.
+ * **`obj+0x34`, not `obj+0x136C`.** The read is
+ * `0045eafe TEST dword ptr [EAX + 0x34], 0x40000000` on the object
+ * `g_carrier_object` names, and the writer is
+ * `ScriptedCarrierUpdate33` (`0x004331D0`) at `00433280 OR EAX, 0x40000000`
+ * with `EAX = [EBP + 0x34]`. This tested `obj+0x136C` — the right bit in the
+ * wrong word, where {@link ZombieFlag2.CollideActors} lives, which
+ * `EnemyZombieInit` (`FUN_00452DA0`) seeds on **every** class-0x30 spawn as
+ * half of `|= 0x60000000`. So the old read would have retired these three the
+ * instant any class-0x30 actor became the carrier, and never retired them for
+ * the class-0x33 one that really is. Same shape as `L3`: the word decides the
+ * meaning, and 0x40000000 means two unrelated things in the two words.
+ *
+ * On the carrier the bit is not "a reaction is in progress" — class 0x33
+ * selector 1 raises it once its own `obj+0x1370` passes the threshold at its
+ * descriptor tail's `+0x14`, i.e. **the ride has reached the end of its run**.
+ * {@link ActorFlag.Reacting} is the port's name for `obj+0x34` bit 0x40000000
+ * and is used here for the bit, exactly as `ZombieStateRideCarrier` uses
+ * {@link ActorFlag.Committed} for the carrier's 0x10000000.
+ *
+ * [diverges] Nothing in the port writes `g_carrier_object`: class 0x33 is
+ * unported, so it stays -1, the counter never starts and these three spawns
+ * keep swinging rather than retiring. **That is stage 5 block 2's unclearable
+ * room** — `wait_enemies_alive <= 0` at step 2 op 50 with three state-32
+ * `znnick` alive at `d≈2870`, which is where the descriptor puts them and
+ * where this state leaves them: `ZombieStateDelayedStrikeInPlace`
+ * (`FUN_0045E830`) never moves an actor and `FUN_00408a20` copies the spawn
+ * position verbatim, so the distance is not a placement bug. See
+ * `entrance.ts`'s note on `ZombieStateRideCarrier` — the same missing piece,
+ * and the same port would clear both.
  */
 function ZombieDelayedStrikeGiveUp(obj: ZombieActor, dt: number): void {
   const carrier = G.g_carrier_object >= 0
     ? ActorByAt(G.g_carrier_object) : undefined;
-  if (!carrier || !(carrier.flags2 & ZombieFlag2.CollideActors)) {
+  if (!carrier || !(carrier.flags & ActorFlag.Reacting)) {
     obj.zom.backoffFrames = 0;
     return;
   }

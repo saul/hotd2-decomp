@@ -152,7 +152,7 @@ export const BOSS4_HEAD_DAMAGE: readonly number[] = [
 ];
 
 /**
- * `g_boss4_shot_damage_cap` — `0x0055E1B4`, 33.0f
+ * `g_boss_shot_damage_cap` — `0x0055E1B4`, 33.0f
  * (`FCOM float ptr [0x0055e1b4]` at `0x00491E5B`).
  */
 export const BOSS4_SHOT_DAMAGE_CAP = 33;

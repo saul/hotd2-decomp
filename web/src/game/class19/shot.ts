@@ -117,7 +117,7 @@ export function Boss4ResolveShot(obj: Actor, b: Blk): void {
  * if (g_ca08c == 1)                           ; Original Mode
  *     if ([0x009A224C + p*0x14] == -1.0) FADD ST0,ST0     ; doubled
  *     else                               FMUL [0x009A2240 + p*0x14 + 0xC]
- * FCOM g_boss4_shot_damage_cap; if (!(d <= 33.0)) d = 33.0
+ * FCOM g_boss_shot_damage_cap; if (!(d <= 33.0)) d = 33.0
  * hp = ftol((float)hp - d)
  * ```
  */

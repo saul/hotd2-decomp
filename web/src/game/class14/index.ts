@@ -426,7 +426,7 @@ export function Class14TrackAdaptiveRank(obj: Actor): void {
  * FILD  ECX
  * if (g_GameMode == 1 && weapon[player].factor != -1.0f) FMUL weapon factor
  * else                                                   FADD ST0, ST0
- * if (f > g_class14_damage_cap) f = g_class14_damage_cap
+ * if (f > g_boss_shot_damage_cap) f = g_boss_shot_damage_cap
  * obj->hp = ftol(obj->hp - f)
  * ```
  */
@@ -444,7 +444,7 @@ export const CLASS14_BONE_DAMAGE = [
   [18, 15], [16, 13],
 ];
 
-/** `g_class14_damage_cap` — `0x0055E1B4`, 33.0. */
+/** `g_boss_shot_damage_cap` — `0x0055E1B4`, 33.0. */
 export const CLASS14_DAMAGE_CAP = 33;
 
 /**

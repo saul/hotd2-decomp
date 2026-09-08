@@ -19,17 +19,17 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 30258 | 132 | engine |
+| `game/` | 30602 | 133 | engine |
 | `hod2lib/` | 15041 | 34 | engine |
 | `render/` | 8007 | 29 | render |
 | `app/` | 7277 | 29 | app |
-| `script/` | 4040 | 25 | engine |
+| `script/` | 4062 | 25 | engine |
 | `ui/` | 3032 | 26 | ui |
 | `bundle/` | 1952 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **71108** | **297** | |
+| **total** | **71474** | **298** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -48,7 +48,7 @@ The largest files, which is where the pressure to split next is:
 | Citations checked | 229 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **13 of 39** read classes have a module, covering 1287 of 1609 placements |
 | Declared `[diverges]` | **117** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **103** — questions the port is honest about not having answered |
+| `[open]` markers in `game/` | **105** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,8 +56,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 691 in `ghidra/annotations/functions.tsv` |
-| Named globals | 359 in `ghidra/annotations/globals.tsv` |
+| Named functions | 697 in `ghidra/annotations/functions.tsv` |
+| Named globals | 360 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 29 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

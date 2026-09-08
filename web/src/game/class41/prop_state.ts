@@ -48,6 +48,40 @@ export enum PropFamily {
    * script flag. Stage 1's two window halves, and nothing else.
    */
   ScriptFlagEffect = 7,
+  /**
+   * `PropUpdateType75` (`FUN_004710C0`) — class 0x41 type 75, and the one
+   * object in the game whose routine opens a `wait_script_flag` gate.
+   *
+   * Its own family and not `Generic` for the same reason
+   * {@link PropFamily.StoryModeSwitch} is: it does **not** call
+   * `PropExpireByStepLifetime`. It inlines a variant of that routine with the
+   * scene-1 sweep left out and its own flag tick folded into the middle, and
+   * its Arcade-Mode head raises `g_script_flags[20]` before despawning rather
+   * than just despawning. See `class41/flag_prop.ts`.
+   *
+   * Named for the type number because that is all the engine identifies it
+   * by: what the object at `AssetDrawSlot(0xA6B)` actually is, is `[open]`.
+   */
+  Type75 = 8,
+}
+
+/**
+ * `obj+0x192` as `PropUpdateType75` (`FUN_004710C0`) reads it.
+ *
+ * A **third** reading of the same word {@link BreakableProp.state} holds as a
+ * {@link BreakableState} and {@link BreakableProp.branchLatched} holds as a
+ * one-way latch, and a separate enum rather than a fourth meaning bolted onto
+ * `BreakableState` — whose `1` is *falling* where this one's is *riding* —
+ * because a shared name that means two things is exactly the trap `L3` is
+ * about. {@link BreakableProp.cuePhase} carries it.
+ */
+export enum PropCuePhase {
+  /** Never shot. The step-tick arm can still raise the flag. */
+  Untouched = 0,
+  /** Shot: `obj+0x2C0` is running up object path 0x178. */
+  Riding = 1,
+  /** The ride reached 290 and the flag is up. Nothing reads it again. */
+  Done = 2,
 }
 
 /** `obj+0x192` — where a prop is in its life. */
@@ -186,7 +220,15 @@ export interface BreakableProp {
   restX: number;          // +0x1A8
   restY: number;          // +0x1AC
   restZ: number;          // +0x1B0
-  /** `obj+0x2C0` — the shake a crack imparts; decays by 0.85 a frame. */
+  /**
+   * `obj+0x2C0` — the shake a crack imparts; decays by 0.85 a frame.
+   *
+   * **{@link PropFamily.Type75} reads it as a cursor**, not a displacement:
+   * `PropUpdateType75` (`FUN_004710C0`) adds 1.0 to it every frame after the
+   * prop is shot and hands it to `CamEvalObjectPath6` as the frame of object
+   * path 0x178, and at 290.0 it raises `g_script_flags[20]`. Another of the
+   * offsets `L3` is about — check the family.
+   */
   shake: number;          // +0x2C0
   /** `obj+0x34` — the flag word. */
   flags: number;          // +0x34
@@ -317,6 +359,13 @@ export interface BreakableProp {
    * **`ScriptFlagEffect` reads the same word as a cue cursor** — its index
    * into `g_script_flag_effect_cues_a` — so this is another of the offsets
    * L3 is about. Check the family.
+   *
+   * And a third reading: for {@link PropFamily.Type75} it is a count of how
+   * many times `g_evt_step_index` has *changed* since the prop was placed,
+   * which `PropUpdateType75` tests for equality with 2. That is a different
+   * count from {@link BreakableProp.stepsElapsed} (`+0x197`) even though both
+   * are incremented on the same frames: the engine keeps two, one a `char`
+   * charged against the lifetime and one an `int` that is not.
    */
   removeFlag: number;     // +0x2A4
   /**
@@ -347,6 +396,16 @@ export interface BreakableProp {
    * splits.
    */
   branchLatched: boolean;
+  /**
+   * `obj+0x192` for {@link PropFamily.Type75}. See {@link PropCuePhase}.
+   *
+   * The fourth port field standing for that one engine word, and the second
+   * that is not {@link BreakableProp.state}. It is separate rather than shared
+   * because this family is transcribed whole — all three of its values are
+   * live, where `branchLatched` only ever had to answer "again or not".
+   * **Check the family before reading either.**
+   */
+  cuePhase: PropCuePhase;   // +0x192
   /** Dead, and due to leave the pool. Not an exe field; the pool is a list. */
   dead: boolean;
 }
@@ -413,6 +472,7 @@ export function makeBreakableProp(id: number, group: number,
     chainIndex: 0,
     subKind: 0,
     removeFlag: -1,
+    cuePhase: PropCuePhase.Untouched,
     key0: -1, key1: -1, key2: -1, key3: -1,
     branchLatched: false,
     dead: false,

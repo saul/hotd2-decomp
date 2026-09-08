@@ -153,6 +153,8 @@ import {
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
   PropExpireByStepLifetime, GENERIC_DRAW_SLOT,
   GENERIC_ORIGINAL_MODE_ONLY, makeBreakableProp, type BreakableProp,
+  PropCuePhase, PropContainerRaisesScriptFlag, PROP75_DROP_AT,
+  PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
@@ -1300,6 +1302,12 @@ const BREAKABLES: BreakablesJson = {
     { at: 0xa300, container: "script_flag_effect", effect: 2,
       capture_bone: 2, motion: 471, slot: 0x13f5, lifetime_evt_steps: 0,
       pos: [-13.7748, 0, -362.302], yaw: 0 },
+    // Class 0x41 type 75, shaped like the game's only one: stage 4 block 2's
+    // spawn at script address 9580, whose `+0x11C` is 2 and therefore both a
+    // two-step lifetime and asset slot 2.
+    { at: 0xa400, container: "generic", type: 75, slot: 2,
+      lifetime_evt_steps: 2, pos: [121.8, -57, -818.6],
+      pitch: 0, yaw: 0, roll: 0 },
   ],
   // One effect, shaped like the real thing but four keys long: a root that
   // draws nothing, a bone-1 node that draws nothing, and the bone-2 node that
@@ -2942,6 +2950,175 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
     tick(b);
     check("...but it will not overwrite a route already chosen",
           G.g_script_branch_var === 1, String(G.g_script_branch_var));
+  }
+}
+
+console.log("\nclass 0x41 type 75: the writer of stage 4's flag 20:");
+{
+  const rng = new Rng(75);
+  /** The fixture's type-75 placement, which is stage 4's shape. */
+  const PLACEMENT_75 = 0xa400;
+
+  const place75 = () => {
+    const pl = T.breakables?.placements?.find((q) => q.at === PLACEMENT_75);
+    if (!pl) throw new Error("the type-75 placement is missing");
+    const p = PlaceGenericProp(pl, rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const flag20 = () => G.g_script_flags[PROP75_SCRIPT_FLAG] ?? 0;
+
+  // --- the Arcade head, `0x004710D7` -------------------------------------
+  //
+  // This is the arm the player actually runs, and it is the one a reading
+  // that lumped type 75 in with the other Original-Mode-only types would get
+  // wrong: those despawn silently, and this one raises the flag first.
+  {
+    propScene(rng, GameMode.Arcade);
+    const p = place75();
+    check("type 75 gets its own family, not `Generic`",
+          p.family === PropFamily.Type75, PropFamily[p.family]);
+    check("...and `PlaceGenericProp` seeds its `+0x2A4` at 0 and not -1",
+          p.removeFlag === 0, String(p.removeFlag));
+    check("...with flag 20 down before its first frame", flag20() === 0);
+    BreakablePropPoolUpdate(rng);
+    check("in Arcade it raises g_script_flags[20] on its first frame",
+          flag20() === 1, String(flag20()));
+    check("...and leaves the pool on that same frame",
+          !G.g_breakable_props.some((q) => q.id === p.id),
+          `${G.g_breakable_props.length} props left`);
+  }
+
+  // --- the unshot step tick, `0x00471120` --------------------------------
+  {
+    propScene(rng, GameMode.Original);
+    G.g_evt_step_index = 1;
+    const p = place75();
+    BreakablePropPoolUpdate(rng);
+    check("in Original Mode its first frame raises nothing",
+          flag20() === 0 && G.g_breakable_props.length === 1,
+          `${flag20()} / ${G.g_breakable_props.length}`);
+
+    G.g_evt_step_index = 2;
+    BreakablePropPoolUpdate(rng);
+    check("...nor does the FIRST change of g_evt_step_index",
+          flag20() === 0 && G.g_breakable_props.some((q) => q.id === p.id),
+          `${flag20()}`);
+
+    // `INC` then `CMP EAX, 0x2` -- an equality on the counter, so it is this
+    // one change and no other. A prop that lived longer would not raise it
+    // again, which is why the test walks the index rather than the frames.
+    G.g_evt_step_index = 3;
+    BreakablePropPoolUpdate(rng);
+    check("...the SECOND change is the one that raises flag 20",
+          flag20() === 1, String(flag20()));
+    check("...on the last step its `lifetime_evt_steps` of 2 buys it",
+          G.g_breakable_props.some((q) => q.id === p.id),
+          "already gone");
+
+    G.g_evt_step_index = 4;
+    BreakablePropPoolUpdate(rng);
+    check("...and the third change expires it",
+          !G.g_breakable_props.some((q) => q.id === p.id),
+          `${G.g_breakable_props.length} props left`);
+  }
+
+  // --- the shot ride, `0x00471263` ---------------------------------------
+  {
+    const events = propScene(rng, GameMode.Original);
+    let dropX = NaN, dropY = NaN, dropZ = NaN;
+    events.on("item.released", (e) => {
+      dropX = e.x; dropY = e.y; dropZ = e.z;
+    });
+    G.g_evt_step_index = 1;
+    const p = place75();
+    const live = () => G.g_breakable_props.find((q) => q.id === p.id);
+
+    const l = live();
+    if (l) BreakablePropTakeShot(l, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("a shot puts it on the ride",
+          live()?.cuePhase === PropCuePhase.Riding,
+          String(live()?.cuePhase));
+    check("...and drops its story item at the routine's own literal point",
+          Math.abs(dropX - PROP75_DROP_AT[0]) < 1e-3
+          && Math.abs(dropY - PROP75_DROP_AT[1]) < 1e-3
+          && Math.abs(dropZ - PROP75_DROP_AT[2]) < 1e-3,
+          `${dropX},${dropY},${dropZ}`);
+    check("...having put its own position straight back afterwards",
+          Math.abs((live()?.x ?? 0) - 121.8) < 1e-3,
+          `${live()?.x}`);
+    check("...with the flag still down on the frame of the shot",
+          flag20() === 0, String(flag20()));
+
+    // The cursor was stepped once on the frame of the shot, so 289 more
+    // reach 290.0 and the arm fires on the last of them.
+    for (let i = 0; i < PROP75_RIDE_LENGTH - 2; i++) {
+      BreakablePropPoolUpdate(rng, events);
+    }
+    check(`...still down ${PROP75_RIDE_LENGTH - 1} frames into the ride`,
+          flag20() === 0, `${flag20()} at ${live()?.shake}`);
+    BreakablePropPoolUpdate(rng, events);
+    check("...and raised on the frame the cursor reaches "
+          + `${PROP75_RIDE_LENGTH}`,
+          flag20() === 1 && live()?.cuePhase === PropCuePhase.Done,
+          `${flag20()} phase ${live()?.cuePhase}`);
+  }
+
+  // --- the declaration, and why it is per record --------------------------
+  //
+  // The gate is only honoured because the class says it can open it. A
+  // class-wide number would say that of every one of the six stages' 441
+  // class-0x41 spawns; this asks the record.
+  {
+    propScene(rng, GameMode.Original);
+    check("the placer declares flag 20 for the record that places a type 75",
+          PropContainerRaisesScriptFlag(
+            { class: 0x41, hp: 0, at: PLACEMENT_75 }) === PROP75_SCRIPT_FLAG,
+          String(PropContainerRaisesScriptFlag(
+            { class: 0x41, hp: 0, at: PLACEMENT_75 })));
+    check("...and nothing for a record that places a group",
+          PropContainerRaisesScriptFlag(
+            { class: 0x41, hp: 0, at: 0xa100 }) === undefined);
+    check("...and nothing for a `spawn_simple` record, which has no address",
+          PropContainerRaisesScriptFlag({ class: 0x41, hp: 0 }) === undefined);
+    check("...and the type it keys on is the engine's own 75",
+          PROP75_TYPE === 75 && GENERIC_DRAW_SLOT[PROP75_TYPE] === 0xa6b,
+          String(GENERIC_DRAW_SLOT[PROP75_TYPE]));
+  }
+
+  // --- and therefore: the gate stops being excused -------------------------
+  {
+    propScene(rng, GameMode.Original);
+    const spawnOp = (at: number) => ({
+      i: 0, at: 0, op: 0x09, name: "spawn_placed", cat: "spawn",
+      spawns: [{ at, class: 0x41, flags: 0, pos: [0, 0, 0],
+                 yaw_deg: 0, orient: [0, 0, 0], hp: 2, desc_flags: 0 }],
+    });
+    const gateScript = (at: number) => ({
+      scene: 0, stage: 4, game_mode: 0, evt_file: "test", entry_block: 0,
+      entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+      regions: [], cam_slots_used: [], warnings: [],
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [
+          spawnOp(at),
+          { i: 1, at: 8, op: 0x45, arg: PROP75_SCRIPT_FLAG,
+            flag: PROP75_SCRIPT_FLAG, name: "wait_script_flag", cat: "wait",
+            blocks_on: "script flag 20 set" },
+        ] }],
+      }],
+    } as unknown as ScriptJson);
+
+    check("a bundle that places the type-75 prop CAN raise flag 20",
+          ScriptFlagsThisBundleCanRaise(gateScript(PLACEMENT_75))
+            .has(PROP75_SCRIPT_FLAG),
+          [...ScriptFlagsThisBundleCanRaise(gateScript(PLACEMENT_75))]
+            .join(","));
+    check("...and one whose class-0x41 spawn is a group cannot",
+          !ScriptFlagsThisBundleCanRaise(gateScript(0xa100))
+            .has(PROP75_SCRIPT_FLAG),
+          [...ScriptFlagsThisBundleCanRaise(gateScript(0xa100))].join(","));
   }
 }
 
@@ -10152,13 +10329,23 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
 
   // The escape hatch, pinned. **`[diverges]`**: a gate on a flag nothing this
   // port runs can raise passes, because a faithful one would park the stage on
-  // it for ever — the chapter card's flag 248 and the result screen's 254 are
-  // twelve such gates in the shipped scripts, both raised by actors
-  // an enemy class this port does not run. The boundary is *derived*, so this
-  // is a check on the derivation and not on a list of numbers: the same
-  // fixture, one flag nothing in it can raise. Flag 20 is class 0x41's
-  // `FUN_004710C0`, which has no module — 248 is no longer a valid example,
-  // because `game/class60/` raises it now.
+  // it for ever. The boundary is *derived*, so this is a check on the
+  // derivation and not on a list of numbers: the same fixture, one flag
+  // nothing in it can raise.
+  //
+  // The example is still **flag 20**, but the reason it is unraisable here has
+  // changed and is now a sharper one. It used to be that class 0x41's
+  // `FUN_004710C0` had no module at all; `class41/flag_prop.ts` ports it, and
+  // the block above watches it raise the flag three different ways. What
+  // makes it unraisable *in this bundle* is that this script places no
+  // class-0x41 record at the type-75 placement — which is exactly the
+  // per-record declaration `ClassHandler.raisesScriptFlag` was widened for. A
+  // class-wide number would have put 20 in this set the moment any prop
+  // appeared, and this assertion is what would have caught that.
+  //
+  // (248 expired as an example when `game/class60/` was written. The flags
+  // with no port left are class 0x14's, 0x19's and 0x22's, and class 0x32's
+  // 30 — which is `RESCUE_FLAG` in this fixture, so it cannot stand in here.)
   const canRaise = ScriptFlagsThisBundleCanRaise(script);
   check("the coverage set is the civilian's own flag and the script's own",
         canRaise.has(RESCUE_FLAG) && canRaise.has(7) && !canRaise.has(20),

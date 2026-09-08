@@ -34,6 +34,21 @@ import type { GameHost } from "./host";
 import { SpawnClass } from "./spawn_class";
 import type { Vec3 } from "./vec";
 
+/**
+ * The half of a spawn record {@link ClassHandler.raisesScriptFlag} is given.
+ *
+ * Both spawn opcodes' records satisfy it. `spawn_placed`'s carries a script
+ * address; `spawn_simple`'s (`EvtOpSpawnSimple0A`) does not, and that is not a
+ * gap in this type — a two-word `{class, hp}` record has no address for a
+ * placement table to be keyed on, so a class placed that way can only ever
+ * answer from its class.
+ */
+export interface SpawnRecord {
+  class: number;
+  hp: number;
+  at?: number;
+}
+
 export interface ClassFrame {
   eye: Vec3;
   dt: number;
@@ -168,7 +183,8 @@ export interface ClassHandler {
    */
   ownsShotResult?: boolean;
   /**
-   * The `g_script_flags` byte an actor of this class raises, if it raises one.
+   * The `g_script_flags` byte an actor made from one spawn record raises, if
+   * it raises one.
    *
    * **Not a mechanism — a declaration.** The class raises the flag itself, in
    * its own update, exactly where the engine does; this says *that it can*, so
@@ -182,8 +198,21 @@ export interface ClassHandler {
    * `ZombieStateTargetScriptWithFlag`'s is not — that one comes off the
    * captor's script entry and the bundle carries it, so it is read from the
    * data instead.
+   *
+   * ## Why a class may answer with a function
+   *
+   * A plain number says *every* actor of this class raises that flag, which is
+   * true of the cards and false of class 0x41. `PropContainerPlacerUpdate`
+   * (`FUN_00461CD0`) dispatches on the record's own `+0x130C` to one of 79
+   * constructors, and only the object one of them builds —
+   * `PropUpdateType75` (`FUN_004710C0`) — writes `g_script_flags[20]`. There
+   * are 441 class-0x41 spawns across the six stages and exactly **one** of
+   * them is that object, so a class-wide number would tell every stage with
+   * any prop in it that flag 20 was coming. The function is handed the spawn
+   * record and answers for that record, which is the same question the
+   * engine's own dispatch asks.
    */
-  raisesScriptFlag?: number;
+  raisesScriptFlag?: number | ((rec: SpawnRecord) => number | undefined);
   /**
    * Describe one of this class's actors for the debug sidebar.
    *

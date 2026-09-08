@@ -626,6 +626,47 @@ a prop the script placed for one block no longer stands there all stage, and
 Original Mode's collectibles (types 70–72, 77) leave on their first Arcade
 frame the way the engine sends them.
 
+**Class 0x41 type 75 is ported** (`game/class41/flag_prop.ts`), and it is the
+one class-0x41 object whose routine opens a `wait_script_flag` gate.
+`PropUpdateType75` (`FUN_004710C0`) raises `g_script_flags[20]` from **three**
+instructions — `0x004710D7`, `0x00471120` and `0x00471263` — and stage 4's
+block 2 step 7 is the only gate on flag 20 in the game. Nothing in stage 4's
+script sets it.
+
+It gets its own `PropFamily` rather than a `GENERIC_UPDATE` row, because it
+does not call `PropExpireByStepLifetime` at all: it inlines a variant of that
+routine with the scene-1 sweep left out and its own step tick folded into the
+middle, and it never clears the hit bits the other thirty routines clear. The
+one that mattered most was the head. Types 70, 71, 72 and 77 open with a plain
+`if (g_GameMode != 1) { ActorDespawn(obj); return; }` and `generic.ts` had an
+`[open]` note guessing that 74, 75 and 76 were the same family — 75 is not: its
+Arcade arm **raises the flag and then** despawns, and treating it as one of the
+others would have held stage 4's gate shut for the whole of the mode the player
+runs in.
+
+The three arms are all one prop's life. In Arcade the gate opens on the frame
+the prop is placed. In Original Mode it opens on the second change of
+`g_evt_step_index` if nothing shoots the prop, and 290 frames after the shot if
+something does — the shot also drops a story-mode item at the routine's own
+literal `(142.0, -59.8, -888.7)`, which it reaches by overwriting its own
+position for the duration of the call and putting it straight back.
+
+**`ClassHandler.raisesScriptFlag` can now answer per spawn record.** The
+declaration used to be one number per class, which is true of the two banner
+cards and false of this one: class 0x41 has 441 spawns across the six stages,
+`PropContainerPlacerUpdate` dispatches each through one of 79 constructors, and
+exactly one of them builds this object. A class-wide answer would have told
+every stage with any prop in it that flag 20 was coming — the same failure as
+the blanket escape it replaced, one level down. `node tools/run_ts.mjs
+tools/flag_gates.ts` reads the twelve shipped bundles and asserts it: stage 4
+can raise flag 20, stage 5 — 44 class-0x41 props and no type 75 — cannot.
+
+The flags `wait_script_flag` still has to excuse now belong to **four enemy
+classes and nothing else**: 0x14, 0x19, 0x22 and 0x32. Stage 4's held set went
+`{19,29,248,254}` to `{19,20,29,248,254}` and stages 3 and 6 have nothing left
+to excuse at all. Class 0x32's flag 30 was picked up as a small writer and is
+not one — see `PLAYER_HANGS.md` item 17.
+
 Seven of the eleven **kinded** object kinds still show nothing, and that is the
 engine's own behaviour: `PlaceKindedProp` leaves `obj+0x28C` at `0xFFFF` for
 every kind but 2, 3, 8 and 9, and the update draws an animated effect

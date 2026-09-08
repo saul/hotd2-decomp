@@ -23,7 +23,7 @@
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import {
-  registerClass, type ClassFrame, type ClassHandler,
+  registerClass, type ClassFrame, type ClassHandler, type SpawnRecord,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
@@ -32,6 +32,7 @@ import { PlaceKindedProp } from "./kinded";
 import { PlaceGenericProp } from "./generic";
 import { PlaceFallingContainer } from "../class44/container";
 import { PlaceChainSegments, PlaceFragmentProps } from "./triggers";
+import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -169,9 +170,35 @@ export function PropContainerPlacerInit(obj: Actor): void {
   obj.visible = true;
 }
 
+/**
+ * `PropUpdateType75` (`FUN_004710C0`) raises `g_script_flags[20]` — but only
+ * the objects **one** of the 79 constructors builds do, so the answer is per
+ * spawn record and not per class.
+ *
+ * The lookup is the same one `PlaceGenericPropFor` makes: the exporter has
+ * already decided which container a placement is, so a `generic` placement of
+ * type 75 at this record's address *is* the dispatch through
+ * `g_class41_constructors` and `g_class41_updates`, done ahead of time. A
+ * class-wide number here would have told every stage with a prop in it that
+ * flag 20 was on its way; 441 of the six stages' spawns go through this class
+ * and exactly one of them is this object.
+ *
+ * [port-only] There is no such routine in the engine, and there could not be:
+ * it answers a question only a partial port has, which is *whether this client
+ * is able to open a gate at all*. See `script/waits/flag.ts`.
+ */
+export function PropContainerRaisesScriptFlag(
+    rec: SpawnRecord): number | undefined {
+  if (rec.at === undefined) return undefined;
+  const pl = T.breakables?.placements?.find(
+    (q) => q.at === rec.at && q.container === "generic");
+  return pl?.type === PROP75_TYPE ? PROP75_SCRIPT_FLAG : undefined;
+}
+
 export const PropContainerPlacerHandler: ClassHandler = {
   init: PropContainerPlacerInit,
   update: PropContainerPlacerUpdate,
+  raisesScriptFlag: PropContainerRaisesScriptFlag,
 };
 
 /**
@@ -202,6 +229,7 @@ export * from "./prop";
 export * from "./items";
 export * from "./lift";
 export * from "./lifetime";
+export * from "./flag_prop";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

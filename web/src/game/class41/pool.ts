@@ -20,6 +20,7 @@ import {
   PropUpdateType19, PropUpdateType25, PropUpdateType40, PropUpdateType56,
   PropUpdateType69, PropUpdateType73, PropUpdateType76,
 } from "./branch";
+import { PropUpdateType75 } from "./flag_prop";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
@@ -58,6 +59,11 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
       case PropFamily.ScriptFlagEffect:
         ScriptFlagEffectUpdate(p, events); break;
+      // No `p.flags &= ~HIT_FLAG_MASK` and no `PropExpireByStepLifetime`
+      // around this one: `PropUpdateType75` inlines its own variant of the
+      // prologue and has no `AND` on `obj+0x34` anywhere in it. Adding either
+      // here would be two lines the engine does not run.
+      case PropFamily.Type75: PropUpdateType75(p, rng, events); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }

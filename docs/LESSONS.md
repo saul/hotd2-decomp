@@ -350,3 +350,27 @@ negative result that would make a large, working piece of the port impossible.
 When a cross-reference search says a routine nothing could work without is
 never called, disassemble past the end of every function that ought to call it
 before believing the search.
+
+**L36 — A `cd` out of your own worktree is L28 with your own hands on it.**
+L28 is about a *repo tool* writing somewhere else. This is the same failure
+one step earlier: six `python3 - <<'PY'` edit scripts were written with
+relative paths and prefixed with `cd <the shared checkout>` so those paths
+would resolve, and every one of them edited the shared tree that three peers
+were live in. **Nothing failed.** Each script printed `ok`, because the anchor
+text it was matching exists in both copies of the file, and `git status` in the
+worktree was clean because nothing had happened there. The tell arrived from
+`tsc`, on a symbol that had "just been added" and was not there — the same
+shape as L30's clean `git status` and L31's `grep` that agrees with you while
+the program does not.
+
+Repairing it is not `git checkout`: the shared tree had uncommitted peer work
+in other files and possibly in the same ones. Reverse-apply each replacement
+you made, then prove it with `git archive HEAD <paths> | tar -x -C /tmp/x` and
+`diff`, which is the only thing that says the tree is back where it was.
+
+**Never `cd` out of your worktree. Put the absolute path of the file you are
+writing in the script**, so that a script which lands in the wrong tree fails
+loudly instead of succeeding quietly. The same goes for invoking a repo tool by
+absolute path — `python3 /repo/tools/annotate.py` resolves its data files
+relative to *itself*, not to your cwd, which is how two annotation rows went to
+the wrong tree in the same session.

@@ -10,14 +10,19 @@
  * }
  * ```
  *
- * **One array, and gameplay writes it too.** `g_script_flags` (0x009C7200) has
- * seven writers in the image and only one of them is the script's own
- * `EvtOpSetScriptFlag48` (`FUN_0045FD70`). The others are actors:
+ * **One array, and gameplay writes it too.** `g_script_flags` (0x009C7200) is
+ * written from all over the image, and only one of those writers is the
+ * script's own `EvtOpSetScriptFlag48` (`FUN_0045FD70`). The rest are actors:
  * `CivilianRunScript`'s op 0x1C, `ZombieStateTargetScriptWithFlag` (class 0x30
- * state 36), `FUN_00433f40` (a class-0x33 cue prop), `FUN_00473cf0` and the
- * class-0x44 constructor at `0x0047314A`. So this opcode is the script's one
- * way to **wait on an actor finishing**, and a rule that can only see the
- * script's own writes cannot evaluate it at all.
+ * state 36), `FUN_00433f40` (a class-0x33 cue prop), `FUN_00473cf0`, the
+ * class-0x44 constructor at `0x0047314A`, the two banner cards, classes 0x14,
+ * 0x19, 0x22 and 0x32, and `PropUpdateType75` (`FUN_004710C0`) — which alone
+ * writes flag 20 from three different instructions. So this opcode is the
+ * script's one way to **wait on an actor finishing**, and a rule that can only
+ * see the script's own writes cannot evaluate it at all.
+ *
+ * That count was quoted here as "seven" for a while, from a search over one
+ * addressing mode. It is not seven; see `L32`.
  *
  * That is what this file used to be. It read a `Set<number>` the walker kept
  * beside `G`, so a flag no `set_script_flag` in the stage ever names — and
@@ -37,7 +42,7 @@
  * `[diverges]` on `0x41`/`0x42`/`0x45` described in {@link WaitRule.enter}.
  */
 import type { OpJson, ScriptJson } from "../../bundle";
-import { g_class_handlers } from "../../game/registry";
+import { g_class_handlers, type SpawnRecord } from "../../game/registry";
 import type { SpawnClass } from "../../game/spawn_class";
 import { T } from "../../game/tables";
 import type { WaitPolicy } from "../walker";
@@ -57,6 +62,10 @@ let cache: {
   script: ScriptJson;
   civ: typeof T.civilians;
   chars: typeof T.chars;
+  // `T.breakables` is in the key because a class may answer
+  // `raisesScriptFlag` out of it — class 0x41 does — so a bundle swapped
+  // under a cached answer would keep the previous stage's props' verdict.
+  breakables: typeof T.breakables;
   flags: ReadonlySet<number>;
 } | null = null;
 
@@ -83,35 +92,46 @@ let cache: {
  *   different streams.
  * * `ZombieStateTargetScriptWithFlag` — a captor script entry's fifth short.
  * * {@link ClassHandler.raisesScriptFlag} — a class whose flag is a **literal
- *   in its own routine**, for every spawn of that class in this stage.
+ *   in its own routine**, for every spawn of that class in this stage. A class
+ *   may answer per **record** rather than per class, and class 0x41 does: its
+ *   flag belongs to one of its 79 constructors, so a class-wide answer would
+ *   claim it for all 441 of the six stages' class-0x41 spawns.
  *
  * ## What is still excused, and what each one needs
  *
- * **35 of the game's 61 gates**, down from 50 when class 0x60 and class 0x61
- * were unreachable. Stages 3 and 6 have none left; the rest are four unported
- * classes, and every one of them is an enemy or a boss rather than a prop:
+ * Stages 3 and 6 have nothing left to excuse. Of the four writers that remain,
+ * **every one is an enemy class** — the last prop went with
+ * `class41/flag_prop.ts`:
  *
- * | gates | flag(s) | writer |
+ * | flag(s) | stages | writer |
  * |---|---|---|
- * | 20 | 10..17, 31 | **class 0x14** (`FUN_00475E90`), stage 2's blocks 35-41 and stage 4's 23-29. Its writes are spread over `0x00478350`..`0x0047BA6E`; flag 10's two are `0x0047835B` and `0x004785E4` |
- * | 8 | 31, 32 | **class 0x19** (`FUN_004917E0`), `0x0049390C` and `0x004958C7` |
- * | 3 | 0, 3 | **class 0x22** (`FUN_0049B0D0`) — the stage-1 and stage-5 boss, `0x0049CC85` and `0x0049CC95` |
- * | 2 | 30 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
- * | 1 | 20 | a class-0x41 prop update, `FUN_004710C0` at `0x004710D7` — the one small one left, and the only remaining gate that is not an enemy class |
+ * | 10..17, 31 | 2, 4 | **class 0x14** (`FUN_00475E90`), stage 2's blocks 35-41 and stage 4's 23-29. Its writes are spread over `0x00478350`..`0x0047BA6E`; flag 10's two are `0x0047835B` and `0x004785E4` |
+ * | 31, 32 | 4, 5 | **class 0x19** (`FUN_004917E0`), `0x0049390C` and `0x004958C7` |
+ * | 0, 3 | 1, 5 | **class 0x22** (`FUN_0049B0D0`) — the stage-1 and stage-5 boss, `0x0049CC85` and `0x0049CC95` |
+ * | 30 | 5 | **class 0x32**, `Class32StateRaiseFlagAndLeave` (`FUN_00480470`) at `0x00480590`. Reached only from `Class32OnShot` (`FUN_0047CC20`) on the frame the actor's 450 hit points run out, through states 2 and 3, so it costs the whole enemy and not a flag write. See `docs/PLAYER_HANGS.md` |
  *
- * The five reports that opened this line of work asked for "one spawn opcode
- * and two cue props"; the sweep that was written to check it says otherwise,
- * and that estimate is recorded as wrong in `docs/re/session-log.md`. The two
- * cue props — `FUN_00433F40` (class 0x33) and `FUN_00473CF0` (`HingeUpdate`) —
- * turn out to open **no gate in any shipped script**: every flag they write
- * comes off a descriptor, and no `wait_script_flag` in the game names one.
+ * `node tools/run_ts.mjs tools/flag_gates.ts` prints what is held and what is
+ * excused for each of the twelve bundles, and asserts the one thing that would
+ * make this derivation a lie rather than merely incomplete — a stage claiming
+ * a flag nothing it places can raise. Today: stage 1 excuses flag 3, stage 2
+ * excuses 10..17, stage 4 excuses 31 and 32, stage 5 excuses 0, 30 and 31, and
+ * stages 3 and 6 excuse nothing.
+ *
+ * Two estimates have been recorded as wrong in `docs/re/session-log.md`. The
+ * first asked for "one spawn opcode and two cue props": the two cue props,
+ * `FUN_00433F40` (class 0x33) and `FUN_00473CF0` (`HingeUpdate`), open **no
+ * gate in any shipped script**, because every flag they write comes off a
+ * descriptor and no `wait_script_flag` in the game names one. The second
+ * called class 0x32 one of "the two smallest remaining writers"; it is an
+ * enemy with a state machine of thirteen states.
  */
 export function ScriptFlagsThisBundleCanRaise(
     script: ScriptJson): ReadonlySet<number> {
   const civ = T.civilians;
   const chars = T.chars;
+  const breakables = T.breakables;
   if (cache && cache.script === script && cache.civ === civ
-      && cache.chars === chars) {
+      && cache.chars === chars && cache.breakables === breakables) {
     return cache.flags;
   }
   const flags = new Set<number>();
@@ -154,24 +174,26 @@ export function ScriptFlagsThisBundleCanRaise(
   // ...and the classes whose flag is a **literal in their own routine** rather
   // than a field of a descriptor, declared by the class module that ports it
   // — `ClassHandler.raisesScriptFlag`. Both spawn opcodes are walked, because
-  // the two the port has are `spawn_simple`'s and the four it has not are
-  // ordinary placements.
+  // the two the port has from `spawn_simple` are the cards and the one it has
+  // from `spawn_placed` is a class-0x41 prop.
+  const declared = (r: SpawnRecord): void => {
+    const decl = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
+    // A class may answer per record rather than per class: class 0x41's flag
+    // belongs to one of its 79 constructors and not to the class. See
+    // `ClassHandler.raisesScriptFlag`.
+    const f = typeof decl === "function" ? decl(r) : decl;
+    if (f !== undefined) flags.add(f);
+  };
   for (const b of script.blocks ?? []) {
     for (const st of b.steps ?? []) {
       for (const op of st.ops ?? []) {
-        for (const r of op.simple ?? []) {
-          const f = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
-          if (f !== undefined) flags.add(f);
-        }
-        for (const r of op.spawns ?? []) {
-          const f = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
-          if (f !== undefined) flags.add(f);
-        }
+        for (const r of op.simple ?? []) declared(r);
+        for (const r of op.spawns ?? []) declared(r);
       }
     }
   }
 
-  cache = { script, civ, chars, flags };
+  cache = { script, civ, chars, breakables, flags };
   return flags;
 }
 

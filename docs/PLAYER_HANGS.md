@@ -512,11 +512,16 @@ where the engine keeps it — `ZombieStateDeath6` (`FUN_00454D20`) sub 1 calling
 `ZombieReleasePermitAndUntrack` (`FUN_004565A0`). It is correct as it stands;
 porting state 6 would move it home. `[open]`
 
-## 11. Stages 3 to 6 have never been swept
+## 11. Stages 3 to 6 have never been swept — **done**, and three stages hang
 
-Stages 1 and 2 are above. `--stage 3` through `--stage 6` have not been run at
-all. Expect more of the same shape. Stage 1's opening is nearly a minute of
-cathedral, so the tool takes every skip the script offers.
+All six are in **All six stages, in one sweep** at the top of this file, with
+the route, the instruction and the wait for each. Three of the six do not
+finish: stage 2 at block 14, stage 3 at block 6 and stage 6 at its very first
+gate. Two more need the debug clear on a room shots cannot reach.
+
+None of the three is a `wait_script_flag`. Two are a counter at or below its
+bound with the camera still holding, and one is a civilian counted alive after
+it is dead.
 
 ## 12. The rain draws from the **shared gameplay RNG**, a variable number of times
 
@@ -752,6 +757,64 @@ Three different things, and the distances are what separate them.
 * **Stage 1** is the odd one and the most interesting: a zombie at `d=9`,
   mid-`Strike`, holding the attack permit, that 20 volleys across the whole
   frame did not kill. `[open]`
+
+## 20. Stage 5's two flag-30 gates cost a whole enemy, not a flag write
+
+`script/waits/flag.ts` excuses four flags now, and every one of them belongs to
+an unported **enemy** class. The last prop went with `class41/flag_prop.ts`,
+which raises flag 20 and lets stage 4's block-2 gate be honoured.
+
+Class 0x32 was picked up as one of "the two smallest remaining writers" because
+`Class32StateRaiseFlagAndLeave` (`FUN_00480470`) is short and was already
+named. Reading how an actor *reaches* it says otherwise:
+
+```
+Class32StateWaitCamAndFlags   [0]  g_cam_path_frame > 0x256, then flags 22 and 23
+Class32StateMoveToFixedPoint  [1]  145 frames of interpolation to (579, -65, -8832)
+                              [5..11]  the combat loop -- 0x0047CA50, 0x0047D220,
+                                       0x0047D410, 0x0047D5E0, 0x0047D890,
+                                       0x0047DD50.  None of them read.
+Class32OnShot (FUN_0047CC20)       obj+0x34 bit 26 up      ->  state 2
+Class32StateDeathSequence     [2]  the death clip           ->  state 3
+Class32StateDeathRetire       [3]  give back the counters   ->  state 4
+Class32StateRaiseFlagAndLeave [4]  five subs, ~300 frames   ->  g_script_flags[30]
+```
+
+`0x0047CC61` is the **only** write of state 2 in the image and bit 26 is the
+dead bit, so the chain starts on the frame the actor's hit points run out.
+Stage 5's two spawns carry **450** of them. Class 0x32's code runs from
+`0x0047C960` to about `0x00480800` and its state table has thirteen entries.
+That is a full enemy port on the scale of class 0x30 or 0x31. `[proved]`
+
+**It is deliberately not started, and declaring the flag without it would make
+things worse.** Stage 5 reaches an end block today *because* the two gates are
+excused; an honest `raisesScriptFlag: 30` with no actor behind it turns a
+completing stage into a hang at block 7 step 4. That is the choice, and it is
+the user's:
+
+1. port class 0x32 as an enemy, on the class-0x30 pattern, and the two gates
+   become real; or
+2. leave the escape in place and let stage 5 keep finishing on it.
+
+Everything read on the way is named in `ghidra/annotations/functions.tsv`
+(`Class32Update`, `Class32OnShot`, `Class32StateWaitCamAndFlags`,
+`Class32StateMoveToFixedPoint`, `Class32StateDeathSequence`,
+`Class32StateDeathRetire`) so whoever takes option 1 starts from the state
+machine rather than from the table.
+
+### Stage 4's gate is on a route the playthrough has never taken
+
+Worth knowing before anyone measures the flag-20 work by running stage 4: the
+gate is in **block 2**, and block 1's branch record is `{3, 2, -1}` with the
+port answering 0. The playthrough goes 0 → 1 → 3 → 10 → … and block 2 is not
+on it. The port change is pinned by `web/test/port.test.ts` — nine assertions
+fail with it backed out — and by
+`node tools/run_ts.mjs tools/flag_gates.ts`, which reads the shipped bundles
+and says stage 4's held set goes `{19,29,248,254}` → `{19,20,29,248,254}`.
+What answers block 1's branch is `[open]`; no class-0x41 branch trigger is
+placed in it.
+
+---
 
 ---
 

@@ -14383,3 +14383,175 @@ kill it in the ordinary way.
 4. **Deleting the debug clear.** With the tool shooting for the whole stall it
    looked redundant, and stage 5 promptly hung: four `znnick` at `d≈2880`,
    which nothing was ever going to hit. Put back, with the report kept.
+
+## Class 0x41 type 75 opens stage 4's gate — and class 0x32 is not a flag writer
+
+Picked up as "the two smallest remaining writers, 3 gates between them" out of
+`ScriptFlagsThisBundleCanRaise`'s table. One of the two was small. The other is
+a whole enemy, and saying so is most of what this session produced.
+
+### Where the three gates actually are
+
+Decoded all six shipped scripts (`tools/dump_stage_script.py --json`) and
+cross-referenced every `wait_script_flag` operand against every
+`set_script_flag` in the same stage:
+
+| flag | gate | raised by `set_script_flag` in that stage? |
+|---|---|---|
+| 20 | **stage 4**, block 2 step 7 op 0 (`at` 7484) | no — stage 4 sets 0,1,3,7,9,10,11,17,18,19,21,30,33,34,224 |
+| 30 | **stage 5**, block 7 step 4 op 23 and block 9 step 4 op 21 | no — stage 5 sets 1..13,16,21,22,23,224 |
+
+Stage 3's block 2 step 3 also gates on 30 and is **not** one of these two: that
+one is the hostage's own class-0x10 stream, which the port already runs.
+`[proved]`
+
+### `PropUpdateType75` — `FUN_004710C0`, `g_class41_updates[75]`
+
+`0x005936BC + 75*4 = 0x005937E8`, which is the routine's only xref. Ghidra had
+no function here at all; created one, and the decompilation then agreed with
+the hand reading instruction for instruction.
+
+Stage 4 block 2 step 5 spawns it at script address 9580, a `generic` container
+of type 75 with `+0x11C` = 2 — both a two-step lifetime and asset slot 2. The
+gate is two steps later in the same block.
+
+**It raises flag 20 on three instructions, not the one the table named.** L32
+again, from the other side: the previous session's sweep found `0x004710D7`
+because it was looking for writers, not for *this routine's* writers. Reading
+the whole routine found `0x00471120` and `0x00471263` as well:
+
+* `0x004710D7` — the head, `if (g_GameMode != 1)`. Arcade Mode raises the flag
+  **and then** despawns.
+* `0x00471120` — on the **second** change of `g_evt_step_index`, if the prop
+  has not been shot. `INC` then `CMP EAX, 0x2`: an equality, so it is that one
+  change and no other.
+* `0x00471263` — 290 frames after it is shot, when `obj+0x2C0` reaches
+  `[0x0056914C]` = 290.0 at 1.0 a frame.
+
+So the gate opens on its own in every configuration; shooting the prop only
+changes how long it takes and what it drops.
+
+The head matters more than it looks. Types 70, 71, 72 and 77 open with a bare
+`if (g_GameMode != 1) { ActorDespawn(obj); return; }` and `generic.ts` gathers
+them into `GENERIC_ORIGINAL_MODE_ONLY` — with an `[open]` note guessing that
+74, 75 and 76 "are probably the same family". They are not. Adding 75 to that
+set would have compiled, passed every existing test, and held stage 4's block-2
+gate shut for the whole of Arcade Mode, which is the mode the player runs in.
+The note is now answered for 75 and left `[open]` for 74 and 76.
+
+Two more things the routine does that the shared prologue does not:
+
+* It **does not call `PropExpireByStepLifetime`** (`FUN_00466640`). It inlines
+  a variant of it with the `g_scene_index == 1 && g_script_flags[0x77]` sweep
+  left out and the `obj+0x2A4` tick folded into the middle of the step-change
+  arm. So it gets its own `PropFamily`, the way the lift and the story-mode
+  switch do, rather than a `GENERIC_UPDATE` row.
+* It **never clears `obj+0x34` bits 1..3**. There is no `AND` on that word
+  anywhere in its 617 bytes, unlike the thirty routines that share the
+  prologue. `pool.ts`'s arm for it therefore does not clear them either.
+
+`CMP g_GameMode, EDI / JNZ` at `0x00471161` is dead — the head has already
+returned for every mode but 1 — and is transcribed as the fall-through it is.
+
+Named and annotated: `PropUpdateType75`, and `g_original_item_pickup_blocked`
+(`0x007DCD14`), the byte this routine clears on the shot and sets again at the
+end of the ride. Twelve writers across classes 0x41 and 0x44 and exactly one
+reader — `OriginalItemPropUpdate` at `0x0046769E` jumps past its whole pick-up
+arm while it is non-zero. Not modelled: the port transcribes nothing that reads
+it.
+
+### The escape's shape had to change, and here is why
+
+`ScriptFlagsThisBundleCanRaise` asked `g_class_handlers[rec.class].
+raisesScriptFlag`, a number per **class**. Class 0x41 has 441 spawns across the
+six stages and `PropContainerPlacerUpdate` (`FUN_00461CD0`) dispatches each of
+them through `g_class41_constructors[obj+0x130C]` to one of 79 constructors.
+Exactly **one** shipped spawn builds the object that writes flag 20. A
+class-wide number would have told every stage with any prop in it that flag 20
+was coming, which is the same failure as the blanket escape it replaced, one
+level down.
+
+So `raisesScriptFlag` now accepts `number | ((rec: SpawnRecord) => number |
+undefined)`. The cards keep their number; class 0x41 answers from the record's
+own script address against `T.breakables`, which is the same lookup
+`PlaceGenericPropFor` makes — the exporter has already resolved which
+constructor a placement is, so that lookup *is* the engine's dispatch done
+ahead of time. `flag.ts` grew four lines and a cache key.
+
+### Class 0x32 is not a flag writer; it is stage 5's enemy
+
+`Class32StateRaiseFlagAndLeave` (`FUN_00480470`, `g_class32_states[4]`) was
+already named. What was not read is **how an actor gets there**, and that is
+the whole of the estimate:
+
+```
+Class32OnShot (FUN_0047CC20)      obj+0x34 bit 26 up  ->  state 2
+Class32StateDeathSequence (2)     death clip, 60 + n frames  ->  state 3
+Class32StateDeathRetire (3)       give back the counters      ->  state 4
+Class32StateRaiseFlagAndLeave (4) five subs, ~300 frames      ->  flag 30
+```
+
+`0x0047CC61` is the **only** write of state 2 in the image. Bit 26 is the dead
+bit. So the chain begins on the frame the actor's hit points run out, and stage
+5's two spawns carry 450 of them. Before that it has to have got through state
+0 (waits for `g_cam_path_frame` past 0x256 **and** `g_script_flags[22]` **and**
+`[23]`), state 1 (145 frames of interpolation to a fixed point), and the combat
+loop at states 5..11 — six more routines, `0x0047CA50` through `0x0047DD50`,
+none of them read. Class 0x32's code runs from `0x0047C960` to about
+`0x00480800`.
+
+That is a full enemy port on the scale of class 0x30 or 0x31, not a flag write,
+and **it is not in this commit**. Declaring `raisesScriptFlag: 30` without it
+would be strictly worse than the status quo: stage 5 currently reaches an end
+block *because* the gate is excused, and an honest declaration with no actor
+behind it would turn a completing stage into a hang at block 7 step 4. Put to
+the user in `docs/PLAYER_HANGS.md` rather than decided here.
+
+Corrected while reading: `g_class32_states` (`0x00596738`) had **thirteen**
+entries, not eleven, and the row's list started at index 2 — the base address
+was right and the entries were off by two, which is why
+`Class32StateRaiseFlagAndLeave`'s own row cites `0x00596748`, the entry, rather
+than the base. Named `Class32Update`, `Class32OnShot`,
+`Class32StateWaitCamAndFlags`, `Class32StateMoveToFixedPoint`,
+`Class32StateDeathSequence` and `Class32StateDeathRetire`; Ghidra had defined
+functions for only two of the six.
+
+`Class32Init`'s `DAT_009C7216 = 1` — `g_script_flags[22]` — is inside
+`if (g_GameMode == 3)`, boss rush, which no shipped stage script is entered in.
+Not reachable in play. `[proved]`
+
+### Wrong turns
+
+1. **`cd <the shared checkout> && <edit>` from inside a worktree.** L28 says a
+   worktree agent has to check where a *repo tool* wrote. This is the same
+   mistake with my own hands: I prefixed six `python3 - <<'PY'` edit scripts
+   with a `cd` to the shared tree so their relative paths would resolve, and
+   every one of them resolved against the wrong tree. Nothing failed — each
+   script printed `ok`, because the anchor text it was replacing exists in both
+   copies. The tell came from `tsc`, on a symbol I had "just added" and which
+   was not there. Two `annotate.py` calls went the same way for the same
+   reason, one address argument earlier: an absolute path to the script.
+
+   The shared tree had six source files and both TSVs modified out from under
+   three live peers. Repaired by reverse-applying each replacement rather than
+   by `git checkout`, so that any concurrent peer edit elsewhere in those files
+   would have survived, and verified byte-identical against `git archive HEAD`
+   afterwards. **The rule that would have caught it: never `cd` out of your own
+   worktree, pin the absolute path of the file you are writing instead.**
+
+2. **Picking flag 30 as the escape hatch's "nothing can raise this" example.**
+   The existing assertion used flag 20 and its comment said flag 20 was
+   unraisable because `FUN_004710C0` had no module. Porting it made the comment
+   wrong, so I swapped the example to class 0x32's flag 30 — which is
+   `RESCUE_FLAG` in that same fixture, and the civilian raises it two
+   assertions earlier. Flag 20 is still the right example and the reason is now
+   a better one: this bundle places no type-75 prop, which is exactly what the
+   per-record declaration exists to say.
+
+3. **Assuming "playthrough gets further" was a measurable outcome here.** It is
+   not, for either stage. Stage 4's flag-20 gate is in **block 2**, and the
+   default route is 0 → 1 → 3 → 10 → …, so the playthrough has never visited
+   the block the gate is in. Stage 5 already reaches an end block. Recorded in
+   `PLAYER_HANGS.md` with the before-and-after runs; the port change is pinned
+   by `port.test.ts` instead, nine of whose twenty-two new assertions fail with
+   the work backed out.

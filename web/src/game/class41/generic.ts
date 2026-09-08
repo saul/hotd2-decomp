@@ -72,6 +72,7 @@
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { GENERIC_BRANCH_SEED } from "./branch";
+import { PROP75_TYPE } from "./flag_prop";
 import type { BreakablePlacement } from "../../bundle";
 import {
   BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
@@ -151,6 +152,7 @@ export const GENERIC_DRAW_SLOT: Partial<Record<number, number | null>> = {
   58: 0x01d1,       // `FUN_0046F580`
   60: 0x01d8,       // `FUN_0046F840`
   64: 0x1a39,       // `FUN_0046FBE0`
+  75: 0x0a6b,       // `PropUpdateType75`, riding object path 0x178
   77: 0x10ab,       // `FUN_004717A0`, Original Mode only
 };
 
@@ -159,6 +161,21 @@ export const GENERIC_DRAW_SLOT: Partial<Record<number, number | null>> = {
  * have their *own* constructor; this one shares `PlaceGenericProp`.
  */
 const PropContainerType32 = 32;
+
+/**
+ * The generic types whose object runs a routine of its own rather than the
+ * shared prologue, and so gets its own {@link PropFamily}.
+ *
+ * A table and not two `if`s because the difference between these and the
+ * other forty-two is *which routine `ActorAlloc` was handed* — the same fact
+ * `g_class41_updates` holds — and a table is what that looks like. Every type
+ * absent from it is `Generic`, which is the pool arm that supplies the
+ * prologue those routines really do open with.
+ */
+export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
+  [PropContainerType32]: PropFamily.Lift,
+  [PROP75_TYPE]: PropFamily.Type75,
+};
 
 /**
  * The types whose update routine's **first line** is
@@ -172,8 +189,12 @@ const PropContainerType32 = 32;
  * whatever `obj+0x28C` happens to hold, which for these is a lifetime rather
  * than a slot and draws `eff_3.bin`.
  *
- * [open] `FUN_00470E20` (74), `FUN_004710C0` (75) and `FUN_00471330` (76) are
- * probably the same family and are not read, so they are not in here.
+ * `PropUpdateType75` (`FUN_004710C0`, type 75) **is** gated on the same test
+ * and is deliberately *not* in here: its arm raises `g_script_flags[20]`
+ * before it despawns, and a plain despawn would hold stage 4's block-2 gate
+ * shut for the whole of Arcade Mode. It has its own family — see
+ * `class41/flag_prop.ts`. `FUN_00470E20` (74) and `PropUpdateType76`
+ * (`FUN_00471330`, 76) are still `[open]`.
  */
 export const GENERIC_ORIGINAL_MODE_ONLY: ReadonlySet<number> =
   new Set([70, 71, 72, 77]);
@@ -192,8 +213,7 @@ export function PlaceGenericProp(pl: BreakablePlacement,
                                  rng: Rng): BreakableProp {
   const type = pl.type ?? 0;
   const p = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
-  p.family = type === PropContainerType32 ? PropFamily.Lift
-                                          : PropFamily.Generic;
+  p.family = GENERIC_FAMILY[type] ?? PropFamily.Generic;
   p.at = pl.at;
   p.kind = type;
   p.state = BreakableState.Standing;
@@ -208,6 +228,9 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // `+0x2A0` — which for the lift is its panel's frame counter and so
   // has to start at zero rather than at the group props' -1.
   p.storyItem = 0;
+  // Same argument for `+0x2A4`: `PropUpdateType75` counts step changes up
+  // from zero in it, and the struct's default is the story switch's -1.
+  if (p.family === PropFamily.Type75) p.removeFlag = 0;
 
   p.x = pl.pos?.[0] ?? 0;
   p.y = pl.pos?.[1] ?? 0;

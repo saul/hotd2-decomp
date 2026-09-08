@@ -818,6 +818,45 @@ placed in it.
 
 ---
 
+## 17. `playthrough.mjs` stops on **entering** an end block, so stage 4's boss fight has never been run
+
+The success test is one line, `web/tools/playthrough.mjs`:
+
+```js
+if (/\(end/.test(s.block)) { ...  "reached an end block"; break; }
+```
+
+`s.block` is the *route* of the block the walker is standing in, and stage 4's
+boss blocks — 23, 25, 27 and 29 — **are** its end blocks. So the tool declares
+stage 4 complete on the first poll after the walker steps into block 25, which
+is step 1 op 8, and stops. The boss's own gates are at ops 53 and 61 of that
+same step:
+
+```
+      @7095 6  (goto → 25) step 2 / 25 :: wait_queued_events_done
+      @7125 25 (end → 0)   step 1 / 8  :: wait_camera_path_frame — 77 left
+reached an end block after 7125 game frames
+```
+
+Consequences, all measured on 2026-09-08:
+
+* Stage 4 reports the **same 7125 frames** before and after class 0x19 was
+  ported, and the same 7125 with the port's `g_script_flags[31]` write deleted.
+  Three runs that should have differed and could not.
+* Every instruction of stage 4's boss fight — 147 ops of block 25's step 1,
+  including both of the gates this tool exists to catch — has never been
+  executed under it. The same is true of block 23, 27 and 29, and of any other
+  stage whose last block is also a fight.
+
+This is not a hang. It is the opposite: **a stage the tool cannot fail.** The
+fix is a decision about the tool's contract rather than a bug to patch — "the
+stage reached an end block" and "the stage ran to the end of its script" are
+different claims, and only the second is what a playthrough is for — so it is
+recorded here rather than changed under three concurrent workstreams.
+
+Until it is, the evidence for anything inside a terminal block has to come from
+`web/test/port.test.ts`, which is where class 0x19's gate chain is asserted.
+
 ## Rules for whoever picks this up
 
 These are not style preferences; each one was paid for.

@@ -31,7 +31,20 @@ export const CHAR_TYPE_RULES: Record<number, CharTypeRule> = {
   0x10: ["tail", 0x00, "i8"],    // civilian; the type char picks the model
   0x11: ["tail", 0x00, "u16"],   // plain script-spawned enemy
   0x14: ["tail", 0x00, "u8"],    // multi-part enemy
-  0x19: ["literal", 0x7c],       // FUN_004917E0 stores 0x7C
+  // **The character type is the tail's first byte, not 0x7C.** This row read
+  // `["literal", 0x7c]` with the comment "FUN_004917E0 stores 0x7C", and it
+  // does -- into `char+0x20`, which is `obj+0x1B4`, the **clip**:
+  //
+  //     0049182e  MOVZX DX, byte ptr [EDI]          ; EDI = obj+0x130C, the tail
+  //     00491832  MOV word ptr [EAX + 0x60], DX     ; char+0x60 == obj+0x1F4
+  //     0049183e  MOV dword ptr [ECX + 0x20], 0x7C  ; char+0x20 == obj+0x1B4
+  //
+  // Two instructions apart, and the wrong one was taken. Type 0x7C has no
+  // skeleton at all, so every class-0x19 spawn resolved to "no skeleton",
+  // never became a placement and never reached a bundle; the four shipped
+  // tails all carry 0x4A, which is `boss4.bin` with fifteen nodes -- one per
+  // per-bone model pointer in the same tail. See `game/class19/`.
+  0x19: ["tail", 0x00, "u8"],    // the stage-4 boss
   0x20: ["tail", 0x00, "i8"],    // one-hit target; OneHitTargetInit's tail+0
   // The rescue target. It spawns through opcode 0x09, which copies
   // `(s8)desc+0x24` straight to `obj+0x1F4`, and `RescueTargetInit` reads that

@@ -14555,3 +14555,129 @@ Not reachable in play. `[proved]`
    `PLAYER_HANGS.md` with the before-and-after runs; the port change is pinned
    by `port.test.ts` instead, nine of whose twenty-two new assertions fail with
    the work backed out.
+
+
+## Class 0x19 is the stage-4 boss, and its gate has three links, not one
+
+*2026-09-08. The brief: port class 0x19, eight `wait_script_flag` gates, flags
+31 and 32 written at `0x0049390C` and `0x004958C7`.*
+
+### What it is
+
+`Boss4Init` (`FUN_004917E0`), character type **`0x4A` = `boss4.bin`**, fifteen
+nodes, 300 hit points. **Four spawns in the game**, all in stage 4 — blocks 23,
+25, 27 and 29, one `spawn_obj_c` each — and the descriptor tail's byte `+0x01`
+is 0, 1, 2 and 3 respectively, so every one of the four is a different
+entrance. The tail after that is fifteen model pointers written into
+`char + i*0x90 + 0x100` for `i = 1..15`, which is `spawns.md`'s "~15 per-bone
+model slots straight from its tail" read exactly.
+
+The class is a **24-state machine** (`g_class19_states`, `0x00597298`, dispatched
+on the byte at `state+0x04` of a 0xA4-byte block at `obj+0x1310`) over a
+**nine-phase arena**. All twenty-four states, ten per-frame helpers and the two
+tables behind them were read and named this session; thirty-two rows went into
+`functions.tsv` and seven into `globals.tsv`.
+
+### Three writes of `g_script_flags`, and the brief named two
+
+The sweep for the bare `9c72` over `0x00491000`..`0x00496000` (L32, again)
+finds **three** writes and two reads:
+
+| | |
+|---|---|
+| `0x0049390C` | `Boss4StateEntranceCarried`, `g_script_flags[31] = BL` |
+| `0x00493B99` | `Boss4StateEntranceDropped`, `g_script_flags[31] = 1` |
+| `0x004958C7` | `Boss4StateDeath`, `g_script_flags[32] = 1` |
+| `0x0049397B`, `0x00493C09` | both entrances **read** `g_script_flags[30]` |
+
+The third write is the same flag, so the gate count does not move — but a sweep
+that had missed it would have concluded that blocks 25 and 29 (entrances 1 and
+3) had no writer at all, because those two blocks run the *other* routine.
+
+### The gate is three links long and the middle one is not a spawn
+
+```
+set_script_flag 30                    evt 0x48, block 23 step 1 op 51
+  -> BossIntroBannerUpdate            300 frames, then g_bHudShutterState = 1
+     -> the boss's entrance sub 2     which raises g_script_flags[31]
+wait_script_flag 31                   evt 0x45, block 23 step 1 op 53
+```
+
+`BossIntroBannerUpdate` (`FUN_00437AC0`) is the boss-name banner. It is **not a
+spawn class**: the boss's own entrance allocates it with `BossIntroBannerSpawn`
+(`FUN_00437A70`), which hands `FUN_004A6FA0` the update function directly. Its
+`MOV byte ptr [0x009ca0f4], 0x1` at `0x00437F1E` is **the only instruction in
+the image that puts the shutter into state 1 from inside a stage** — 77 of the
+shipped scripts' `hud_shutter_state 1`s exist and not one is in a class-0x19
+block — and the boss's `CMP AL, BL` at `0x004938FD` is waiting for exactly
+that. Miss the banner and the fight can never start.
+
+### The exporter had the character type wrong, and had had it wrong all along
+
+`CHAR_TYPE_RULES[0x19]` read `("literal", 0x7C)`, "FUN_004917E0 stores 0x7C".
+It does — two instructions after the one that matters:
+
+```
+0049182e  MOVZX DX, byte ptr [EDI]          ; EDI = obj+0x130C, the tail
+00491832  MOV word ptr [EAX + 0x60], DX     ; char+0x60 == obj+0x1F4, the type
+0049183e  MOV dword ptr [ECX + 0x20], 0x7C  ; char+0x20 == obj+0x1B4, the CLIP
+```
+
+Type `0x7C` has no skeleton, so every class-0x19 spawn resolved to "no
+skeleton", never became a placement, and **no bundle in the project's history
+has contained the stage-4 boss**. Three more exporter changes followed from
+reading the routine: a motion rule (the clip is the literal `0x7C`), the
+entrance byte (`tail+0x01`, emitted as `initial_state` — for this class that
+byte is a state index and not the body condition class 0x30 reads there), and
+`BOSS4_CLIPS`, the nineteen clips the class names as literals. That last one is
+not cosmetic: `Boss4StateDeath` writes flag 32 on frame `0x46` of clip `0x69`,
+and an unbaked clip has `MotionPlayLength` 0, so the cursor never reaches any
+frame at all. All four landed in **both** halves of `hod2lib`.
+
+### What was ported, and what was not
+
+Init, the update's dispatch and despawn test, the four entrance states, the
+banner, `Boss4ResolveShot`, the flinch, `Boss4ResumeAfterHit` and the death —
+the spine of the two gates. **Seventeen of the twenty-four states are not
+ported**, and the dispatch table routes them to an inert `Boss4StateNotPorted`
+rather than to a hole.
+
+So the module declares `raisesScriptFlag` for **31 and not 32**, which is the
+honest half. The reason is one test in `Boss4ResolveShot`: `state+0x24` is this
+phase's share of `g_boss4_phase_hp_fraction`, and the frame the hit points
+reach it `obj+0x34` bit `0x100` goes up and **every later shot is refused**.
+Only `Boss4AdvanceArenaWaypoint` (`FUN_004928D0`) and
+`Boss4AdvancePhaseWhenWalkDone` (`FUN_00492350`) lift it, and those two are the
+arena — seventeen `g_cam_path_frame` thresholds and a teleport per phase. With
+them unported the boss cannot be taken below 8/9 of its bar, so it cannot die,
+so flag 32 cannot be claimed. Stage 4's four flag-31 gates are honoured and its
+four flag-32 gates stay excused: 35 excused gates become 31.
+
+### `g_bHudShutterState` moved into `G`
+
+`0x009CA0F4` was a field on `script/state/shutter.ts`'s machine. `game/` now
+both writes it (the banner) and reads it (the entrance), so it is in `G` and
+`Shutter.state` is an accessor — exactly the argument that put `g_nFiringGate`
+there, and that file already stated it. `Shutter.step` picked up
+`HudDrawShutterState`'s own head at the same time: the *draw* routine is where
+the engine seeds the slide on a state change and copies the state into
+`g_bHudShutterPrev`, and the port had both only in `set`, so a state written by
+anything but evt 0x1F would have reset its own counter every frame for ever.
+
+### Wrong turns
+
+1. **Believed the playthrough.** `node tools/playthrough.mjs --stage 4` reported
+   the identical 7125 frames before the port, after the port, and with the
+   port's flag-31 write deleted. That is not three passes; it is the tool
+   stopping the instant the walker steps into a block whose route is `end`, and
+   stage 4's boss blocks **are** its end blocks. It has never executed one
+   instruction of that fight. `docs/PLAYER_HANGS.md` item 17.
+2. **Read `char+0x18` as the character type** from the decompiler's
+   `*(ushort *)(DAT_007dd0a8 + 0x18)`, which with Ghidra's `undefined4 *` on
+   that global is byte offset **0x60**. The disassembly says `MOV word ptr [EAX
+   + 0x60], DX`. Ghidra retypes that same global differently in nearly every
+   routine of this class — `byte *` in one, `undefined4 *` in the next — so
+   every offset in this session was taken from the instruction stream.
+3. **Wrote a scratch file into the shared scratchpad** twice under a name a
+   sibling agent was also using, and had it overwritten mid-read. Session
+   scratch is shared; prefix it.

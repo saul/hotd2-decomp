@@ -277,6 +277,27 @@ export const G = {
    */
   g_nFiringGate: 0,
   /**
+   * `g_bHudShutterState` — `0x009CA0F4`. The HUD letterbox, states 0..8.
+   *
+   * **Here for exactly the reason `g_nFiringGate` above is here**, and it is
+   * the same argument one step on: a routine in `game/` now *reads* it and
+   * another one *writes* it, so a copy kept on the walker and mirrored across
+   * would be the second owner of one byte. `BossIntroBannerUpdate`
+   * (`FUN_00437AC0`) sets it to 1 at `0x00437F1E` — the only instruction in
+   * the image that puts the shutter into state 1 from inside a stage — and
+   * `Boss4StateEntranceCarried` (`FUN_004938B0`) reads it at `0x004938F6` to
+   * decide whether the fight has started. Neither is script code.
+   *
+   * `script/state/shutter.ts` remains the machine: `evt 0x1F` and the
+   * 40-frame slide are its, and it reaches this byte through an accessor. The
+   * two fields that stay with it, `g_bHudShutterPrev` and the draw task's
+   * counter, nothing outside the script reads.
+   *
+   * 2 rather than the engine's 5 at reset, which is the standing `[diverges]`
+   * that file already carries and names.
+   */
+  g_bHudShutterState: 2,
+  /**
    * The trigger pulls this frame has not resolved yet.
    *
    * `[port-only]`, and it is the one piece of *input* the data segment holds.
@@ -870,7 +891,8 @@ export type Globals = typeof G;
  *   tally exists; the port raises a `civilian.rescued` event instead. |
  * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ❌ the port
  *   has no `obj+0x3C` slot index and never claims one. |
- * | `g_bHudShutterState` / `Prev` back to 5 | ❌ the walker owns the shutter |
+ * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
+ * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
  * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
  * | `g_nFiringGate = 0` | ✅ |
  * | the scene light block, via `FUN_0040E140` | ❌ |
@@ -901,6 +923,17 @@ export function ResetSceneOnEnter(): void {
   // stage that never issues `hud_shutter_state 1` or `6` is a stage the engine
   // would not let you shoot in either.
   G.g_nFiringGate = 0;
+  // `MOV [0x009ca0f4], AL` at `0x0045EE5F`, with `AL` 5 -- and `g_bHudShutterPrev`
+  // beside it, which is `script/state/shutter.ts`'s and stays there.
+  //
+  // The port writes **2**, not 5, and that is `Shutter.reset`'s standing
+  // `[diverges]` seen from the other side rather than a second one: a 5 draws
+  // the closed bars and hands over to 4, and the port's shutter machine has no
+  // per-frame collapse of 0, 5 and 6 into 4 and 2, so a 5 here would leave the
+  // bars shut for good. It is written at all only because the byte moved into
+  // `G` for class 0x19 -- until then the walker owned it and this routine
+  // could not reach it.
+  G.g_bHudShutterState = 2;
 }
 
 /**

@@ -13,6 +13,7 @@ import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
 import { ActorModelScale } from "./root_motion";
 import type { CivilianState } from "./class10/state";
+import type { Boss4Block } from "./class19/state";
 import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
@@ -1313,6 +1314,14 @@ export interface ActorBase {
    */
   civ: CivilianState | null;                             // +0x1310
   /**
+   * Class 0x19's `FUN_004A74E0(0xA4)` block at `obj+0x1310`.
+   *
+   * The third thing this one offset holds — `state` for a combat class,
+   * {@link Actor.civ} for a civilian, and this for the stage-4 boss — and the
+   * reason L3 is L3. See `class19/state.ts`.
+   */
+  boss4: Boss4Block | null;                              // +0x1310
+  /**
    * `obj+0x1394` — **the object this actor was built for**, by spawn address.
    *
    * An {@link ActorRef}, and the *other* kind of thing this offset holds.
@@ -1681,6 +1690,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pushNormal: vec3(),
     sphereCentre: vec3(),
     civ: null,
+    boss4: null,
     targetAt: -1,
     script: null,
     alpha: 1,

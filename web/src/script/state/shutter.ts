@@ -43,8 +43,18 @@ export class Shutter {
    * The state is the script's; a snapshot load used to put it back without the
    * slide phase behind it, so a save taken mid-close came back as a shutter
    * frozen half shut.
+   *
+   * **An accessor onto `G`, for the same reason `firingGate` is one**, and by
+   * the same argument one step on: `game/` both reads and writes this byte
+   * now. `BossIntroBannerUpdate` (`FUN_00437AC0`) stores 1 into it at
+   * `0x00437F1E` — the only instruction in the image that puts the shutter
+   * into state 1 from inside a stage — and class 0x19's entrance reads it at
+   * `0x004938F6` to decide whether its fight has started. Neither of those is
+   * script code, and a copy kept here and mirrored into `G` would be the
+   * second owner of one byte. See the note at the top of this file.
    */
-  state = 2;
+  get state(): number { return G.g_bHudShutterState; }
+  set state(v: number) { G.g_bHudShutterState = v; }
   /**
    * `g_bHudShutterPrev` — `0x009C8E9C`. What state 7 restores.
    *
@@ -128,6 +138,28 @@ export class Shutter {
    */
   step(frames: number): void {
     if (frames <= 0) return;
+    // `HudDrawShutterState`'s own head, `0x00413975`: the *draw* routine is
+    // where the engine notices a change and seeds the slide, so a state
+    // written by anything other than evt 0x1F is picked up here rather than in
+    // {@link Shutter.set}. Class 0x19's intro banner is such a writer, and
+    // without this its state 1 would neither seed the counter nor raise the
+    // firing gate — the boss would be unshootable for the whole fight.
+    if (this.prev !== this.state) {
+      if (this.state === 3) this.counter = SHUTTER_FRAMES;
+      else if (this.state === 1) this.counter = 0;
+      this.applyFiringGate(this.state);
+      // `if (g_bHudShutterState != 8) g_bHudShutterPrev = g_bHudShutterState`
+      // at the bottom of `FUN_00413970` — a blackout does not become the state
+      // a later 7 restores. Without it the seeding above would re-fire every
+      // frame and a state 1 would reset its own slide counter for ever.
+      //
+      // It also makes a `7` restore the state as of the previous *frame*
+      // rather than the state before the previous `0x1F`, which is what the
+      // engine does and what this machine did not: `g_bHudShutterPrev` is
+      // written every frame there and only by `set` here. Two `7`s in the six
+      // shipped scripts.
+      if (this.state !== 8) this.prev = this.state;
+    }
     if (this.state === 1) {
       this.counter = Math.min(SHUTTER_FRAMES, this.counter + frames);
       if (this.counter >= SHUTTER_FRAMES) this.prev = this.state = 2;

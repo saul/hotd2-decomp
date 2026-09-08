@@ -53,7 +53,34 @@ export type MotionRule =
  * differently per spawn opcode and is **not** taken here: 956 is the common
  * path, and guessing the rarer one wrong would be worse.
  */
+/**
+ * Every clip class 0x19's twenty-four states name as a literal, read out of
+ * `g_class19_states`' routines: 0x65 and 0x7A/0x7B are the three strikes, 0x69
+ * the death, 0x6B the fighting idle, 0x6C..0x6E the walks, 0x6F and 0x73 the
+ * two flinches, 0x70 the charge, 0x71 the knock-down, 0x72 the rise, 0x74 and
+ * 0x75 the landing pair, 0x76 the look, 0x78 the stand, and 0x7C/0x7D the
+ * entrance and the roar.
+ *
+ * They are baked because **an unbaked clip is an actor that waits for ever**:
+ * half of this class's states leave on
+ * `obj+0x19C == g_motion_play_length[obj+0x1B4] - 1`, and with no clip that
+ * length is 0 and the cursor never reaches it. `Boss4StateDeath` writes
+ * `g_script_flags[32]` on frame 0x46 of clip 0x69, so without 0x69 in the
+ * bundle the gate behind the stage-4 boss cannot open at all.
+ */
+export const BOSS4_CLIPS: readonly number[] = [
+  0x65, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72,
+  0x73, 0x74, 0x75, 0x76, 0x78, 0x7a, 0x7b, 0x7c, 0x7d,
+];
+
 export const MOTION_RULES: Record<number, MotionRule> = {
+  // `Boss4Init` (`FUN_004917E0`) seats the clip as a literal:
+  // `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E`, where `ECX` is
+  // `obj+0x194` and `+0x20` is `obj+0x1B4`. Clip 124 is in motion bank 7,
+  // which is `boss4.bin`'s. Without this rule the four class-0x19 spawns
+  // resolve to a character with no motion and the exporter emits them as
+  // markers, so the boss is placed and never built.
+  0x19: ["literal", 0x7c],
   // `SetPiecePropInit` reads the motion straight out of the parameter tail
   // with no variant table in between. Without this rule the 48 set-piece
   // props resolve to a character with no motion, and the client skips

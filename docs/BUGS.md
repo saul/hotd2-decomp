@@ -6,11 +6,13 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Forty-two reports: **thirty-seven fixed, three half-done, one open, and two
+Fifty-two reports: **thirty-seven fixed, three half-done, eleven open, and two
 `[not-a-bug]`, each of which carried a real defect underneath it** (one of
 those two is counted in the thirty-seven, its bullet carrying both markers).
 The five reported on 2026-09-07 from stage 3's block 2 are all fixed, and
-four of the five were far wider than the place they were seen from.
+four of the five were far wider than the place they were seen from. **Eight
+arrived on 2026-09-09 and none has been looked at**, which is most of the open
+column and the reason it grew.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -28,6 +30,15 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ## What is left
 
+* **Eight reports arrived on 2026-09-09 and none is started.** The axe's spin
+  axis, a missing shutter in stage 3, silent zombies, sound settings that do
+  not survive a reload, an undrawn van and a lift that rises too early in
+  stages 5 and 6, `znjoe`'s missing chest worm, and three zombies that should
+  be riding a car. They are one section of their own below, with the
+  reporter's locators. Two of them come with a lead already in the tree: the
+  axe has been changed once for this and is still wrong, and the car's three
+  zombies are the three spawns `ZombieStateDelayedStrikeInPlace` is annotated
+  as having.
 * `[open]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — it
   hangs from a ledge where it should push a chair aside. Every link of the data
   chain checks out and two theories are dead; it wants eyes on the render
@@ -1189,6 +1200,94 @@ none of the five was the thing the report named.
   class-0x25 spawns ran a kill on the frame they were made; it is 42 now, and
   those 42 are the twins that are meant to go.** Not stage-3-specific: stage 1's
   opening has its over-shoulder shot back.
+
+## Eight reported on 2026-09-09
+
+All `[open]` at the time of writing, all with the reporter's own locators,
+which are the player's URL parameters and are reproducible as given. Four of
+them are `?stage=5` and `?stage=6`, which no report had reached before.
+
+- `[open]` **The thrown axe spins about the wrong axis.** Worth reading with
+  the code in front of you, because **this has been changed once already**:
+  `render/projectiles.ts` carries a comment saying the span used to rotate
+  about Z, that Z "cartwheels the weapon sideways", and that the tumble is the
+  Y term of `ThrownWeaponUpdate`'s `Rz(obj+0x6C) * Ry(obj+0x68) *
+  Rx(obj+0x1364 + obj+0x64)`. It rotates about Y today and the report says it
+  is still wrong. So either the reading of which term carries the tumble is
+  wrong, or `Rx` is not zero in flight the way that comment assumes, or the
+  axe model's own axes are not the ones the matrix is written in. The first
+  thing to establish is which, and none of the three is ruled out.
+
+- `[open]` **The zombies at
+  `?stage=3&mode=play&entry=7&block=8&step=2&op=23` should come out from
+  behind a shutter that opens, and there is no shutter.** Whether the prop is
+  never placed, placed and never drawn, or placed and never animated is the
+  first thing to establish. Note for whoever takes it: the port's `shutter`
+  in `script/state/shutter.ts` is the **HUD letterbox**, `g_bHudShutterState`,
+  and has nothing to do with a door — a search for the word will find the
+  wrong thing first.
+
+- `[open]` **Zombies are silent, both idle and attacking.** Consistent with the
+  tree rather than surprising in it: `game/class30/` emits one `sound.play` in
+  the whole directory, from `target.ts`, and `entrance.ts` already carries a
+  declared `[diverges]` saying the engine's landing plays `0x2A16A9` (or
+  `0x1C16A9`) and the port plays nothing. So this is not one missing call, it
+  is the class's sound arm never having been ported. `docs/formats/sound.md`
+  and `PlaySoundId` are where it starts.
+
+- `[open]` **Sound settings do not survive a reload, and the two controls are
+  in the wrong places.** A change request rather than a defect, recorded here
+  because it was reported here. Three parts: (1) whether sound is on should be
+  stored state like everything else in `PlayerState` — it is neither in the URL
+  nor in `localStorage` today, so every reload comes back with audio in its
+  default state; (2) the volume slider, `#volume` in `ui/panels/Transport.tsx`,
+  belongs in the debug sidebar; (3) the mute button, the `.sound` button beside
+  it, belongs in the top bar. Both are singletons in the transport bar today
+  and the stylesheet holds them by id, which is the thing to be careful of when
+  moving them.
+
+- `[open]` **The van at `?stage=5&mode=play&block=0&step=4&op=9&frame=352` is
+  not drawn — only its rear doors are.** A prop whose parts are drawn in part
+  is the shape of a missing model rather than a missing placement: something is
+  building the hierarchy and finding one child of it. `verify_attachments.py`
+  is the check that covers the equivalent failure on characters and would be
+  the model for one here.
+
+- `[open]` **`0x0A68 znjoe` and the rest of its character type should have a
+  worm that bursts from the chest, and do not.** `znjoe` is one of the class
+  0x30 character variants, `0x01`–`0x14` in `docs/formats/spawns.md`. One piece
+  of corroboration already in the tree: the sound records name a **worm**,
+  `WORM_TUBU`, and the sound table is how several of this game's objects were
+  identified in the first place. The reporter asked for the whole of the
+  class's missing behaviour, not only the worm, so this wants the character
+  type's arms read end to end rather than one effect added.
+
+- `[open]` **The three zombies that should travel with the car at
+  `?stage=5&mode=play&block=2&step=2&op=50&frame=599` stand far away instead.**
+  The reporter's dump is the useful part:
+
+      0x1D44 znnick  · d=2890 · DelayedStrikeInPlace/4 · hp 130/130 · motion 696
+      0x1D74 znnickb · d=2808 · DelayedStrikeInPlace/4 · hp 150/150 · motion 696
+      0x1DA4 znnickb · d=2824 · DelayedStrikeInPlace/5 · hp 150/150 · motion 690 · permit
+
+  Three actors, and `ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) is
+  annotated as having exactly **three spawns, all in stage 5** — so these are
+  those three, in the state the data puts them in, and the port is running that
+  state faithfully. The annotation also says the state "never approaches and
+  never leaves", which is why they are standing at d≈2850.
+
+  So the question is not why they do not walk. It is whether these three are
+  the actors meant to ride the car at all. The engine has a ride:
+  `ZombieStateRideCarrier` is class 0x30 state **29**, `g_carrier_object`
+  (`0x009A5C34`) points at what is being ridden, and `ScriptedCarrierUpdate33`
+  (`FUN_004331D0`) raises `0x10000000` on itself when a rider leaves state 29
+  on it. Either something should move these into state 29, or the riders are
+  different spawns the port is not placing. Both are open.
+
+- `[open]` **The stage 6 lift rises immediately; it should wait for the player
+  to be on it.** At `?stage=6&mode=play&entry=0&block=0&step=2&op=20&frame=0`.
+  The port starts the animation as soon as the prop is placed, so whatever gate
+  the engine has between placing the lift and driving it is not ported.
 
 ## And one about a check that is not reliable
 

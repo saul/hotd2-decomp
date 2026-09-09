@@ -98,6 +98,23 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
+    // **State 10 is terminal, and the table says so.** `g_class30_states`
+    // (`0x00592AE8`) holds `0x00455490` at index 10 -- the dwords at
+    // `+0x28` are `90 54 45 00` -- and that is `ZombieReleaseAndDespawn`
+    // (`FUN_00455490`), which is `ReleaseEnemyAliveCount`,
+    // `ReleaseEnemyPresentCount`, `ReleaseAttackSlot`, the permit-array clear
+    // and `ActorDespawn`. `[proved]` by reading the table, which is the only
+    // thing that can settle it.
+    //
+    // It used to fall through to the `default` arm and `ZombieGiveUpAttack`,
+    // on a citation of `ActorAbortAttackAndLeave` (`FUN_0045D9F0`) that is
+    // not this address at all -- see `class30/leave.ts` and
+    // `ZombieState.Leave`. Everything the port sends to state 10 therefore
+    // went to `WaitTurn` and stayed alive: stage 5 block 2's four `znnick`,
+    // whose `ZombieStateDelayedStrikeInPlace` exit is `obj+0x1310 = 10`
+    // (`0x0045EB20`), and the one spawn per bundle whose descriptor names 10
+    // as its attack state (stage 5's `0x1DD4`, through state 18).
+    case ZombieState.Leave:       return ZombieReleaseAndDespawn(obj);
 
     // The death chain. `updatesWhenDead` on the handler below is what lets
     // these run at all -- see `class30/death.ts` for the whole graph.

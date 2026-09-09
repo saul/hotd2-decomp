@@ -190,6 +190,9 @@ __all__ = [
     "Character",
     "class20_tail",
     "SLOT_DRAWN_CLASSES",
+    "CLASS33_CARRIER",
+    "slot_drawn_spawn",
+    "class33_tail",
     "class52_tail",
     "class53_tail",
     "class14_tail",
@@ -337,7 +340,29 @@ def class20_tail(rec) -> dict:
 #: Classes whose actors are drawn by `AssetDrawSlot` rather than by a
 #: skeleton, so `spawnres` can never identify one and the placement has to
 #: survive that anyway. See the note in :func:`resolve_for_stage`.
-SLOT_DRAWN_CLASSES = frozenset({0x52})
+SLOT_DRAWN_CLASSES = frozenset({0x33, 0x52})
+
+#: The one class-0x33 sub-handler the player runs: ``obj+0x11C == 1``.
+#:
+#: `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches that word into eleven
+#: different objects, so :func:`class33_tail` is **one** handler's reading of
+#: the bytes and not the class's. ``MOVSX ECX, word ptr [EAX + 0x11c]`` at
+#: 0x00432FF4 is the switch, and the descriptor's ``+0x22`` is what reaches it.
+CLASS33_CARRIER = 1
+
+
+def slot_drawn_spawn(cls: int, rec) -> bool:
+    """Which spawns of a :data:`SLOT_DRAWN_CLASSES` class carry a placement.
+
+    Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
+    eleven, and only selector 1's tail is decoded -- selector 2's props already
+    reach the player through `props`, and the other nine are unread. Emitting
+    them would be a placement whose ``class33`` block is a different handler's
+    bytes read under this one's names, which is `L3` written into the bundle.
+    """
+    if cls == 0x33:
+        return rec.hp == CLASS33_CARRIER
+    return True
 
 
 def class52_tail(rec) -> dict:
@@ -366,6 +391,64 @@ def class53_tail(rec) -> dict:
     """
     return {"anim_set": rec.param(0x00, "i16") or 0,
             "subtype": rec.param(0x02, "i16") or 0}
+
+
+def class33_tail(rec) -> dict:
+    """Class 0x33 selector 1's tail, as `ScriptedCarrierUpdate33`
+    (`FUN_004331D0`) and `ScriptedCarrierStepPath33` (`FUN_00433860`) read it.
+
+    ::
+
+        tail+0x00  i32  draw slot                    -> obj+0x13F0
+        tail+0x04  i32  shot mesh, -1 for none       -> obj+0x14C, obj+0x34 |= 0x50
+        tail+0x08  f32  shot sphere, when it is -1   -> obj+0x124 and obj+0x128
+        tail+0x0C  i32  the `op_` path slot          -> obj+0x1350
+        tail+0x10  f32  the last frame of the run    -> obj+0x1374
+        tail+0x14  f32  the frame the effect fires, -1.0 for never
+        tail+0x18  i32  the frame that raises bit 0x10000000
+        tail+0x1C  i32  the camera frame that despawns it
+        tail+0x20  u8   a script flag that raises bit 0x10000000
+        tail+0x21  u8   a script flag that despawns it
+        tail+0x24  f32[6]  where the effect is spawned: x, y, z and three rotations
+
+    The two frame fields are **not** camera frames even though one is seeded
+    from ``g_cam_path_frame``: `ScriptedCarrierStepPath33` starts ``obj+0x1370``
+    at ``g_cam_path_frame - 1`` on its first frame and then steps it by one
+    itself, so after that the object is on its own clock. ``tail+0x1C`` *is* a
+    camera frame -- `ScriptedCarrierUpdate33` compares it against
+    ``g_cam_path_frame`` and ``g_cam_path_frame_2`` directly.
+
+    Emitted under a class-named key for the reason class 0x20's and 0x52's are:
+    ``tail+0x00`` is class 0x30's body condition.
+
+    Three shipped spawns, all `spawn_obj` (opcode 0x0B): stage 2's 0x4FD0 and
+    0x12590, and stage 5's 0x1CE4.
+    """
+    def f(at: int, dflt: float = 0.0) -> float:
+        v = rec.param(at, "f32")
+        return dflt if v is None else v
+
+    def i(at: int, dflt: int = -1) -> int:
+        v = rec.param(at, "i32")
+        return dflt if v is None else v
+
+    def u8(at: int) -> int:
+        v = rec.param(at, "u8")
+        return 0xFF if v is None else v
+
+    return {
+        "slot": i(0x00, 0),
+        "shot_mesh": i(0x04),
+        "shot_radius": f(0x08),
+        "path": i(0x0C),
+        "path_end": f(0x10),
+        "effect_frame": f(0x14, -1.0),
+        "commit_frame": i(0x18),
+        "despawn_frame": i(0x1C),
+        "commit_flag": u8(0x20),
+        "despawn_flag": u8(0x21),
+        "effect": [f(0x24 + 4 * k) for k in range(6)],
+    }
 
 
 def class14_tail(rec) -> dict:
@@ -531,6 +614,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             # of 0 is character type 0.
             if sp["class"] not in SLOT_DRAWN_CLASSES:
                 continue
+            # ...and, for a class that is several objects behind one id, only
+            # the spawns whose sub-handler this library has read. See
+            # :func:`slot_drawn_spawn`.
+            if not slot_drawn_spawn(sp["class"], rec):
+                continue
         motion = motion_for(tables, rec, sp["class"])
         intro = intro_for(tables, rec, sp["class"])
         # The descriptor tail, as `EnemyZombieInit` (class 0x30) and
@@ -679,6 +767,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         class52 = class52_tail(rec) if sp["class"] == 0x52 else None
         class53 = class53_tail(rec) if sp["class"] == 0x53 else None
         class14 = class14_tail(rec) if sp["class"] == 0x14 else None
+        class33 = class33_tail(rec) if sp["class"] == 0x33 else None
         tscript = ascript = None
         camera_cue = None
         if sp["class"] == 0x30:
@@ -753,6 +842,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class52=class52,
             class53=class53,
             class14=class14,
+            class33=class33,
             hp=sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note

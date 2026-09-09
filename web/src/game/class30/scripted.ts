@@ -471,16 +471,23 @@ function ZombieDelayedStrikeIdle(obj: ZombieActor, rng: Rng): void {
  * and is used here for the bit, exactly as `ZombieStateRideCarrier` uses
  * {@link ActorFlag.Committed} for the carrier's 0x10000000.
  *
- * [diverges] Nothing in the port writes `g_carrier_object`: class 0x33 is
- * unported, so it stays -1, the counter never starts and these three spawns
- * keep swinging rather than retiring. **That is stage 5 block 2's unclearable
- * room** — `wait_enemies_alive <= 0` at step 2 op 50 with three state-32
- * `znnick` alive at `d≈2870`, which is where the descriptor puts them and
- * where this state leaves them: `ZombieStateDelayedStrikeInPlace`
- * (`FUN_0045E830`) never moves an actor and `FUN_00408a20` copies the spawn
- * position verbatim, so the distance is not a placement bug. See
- * `entrance.ts`'s note on `ZombieStateRideCarrier` — the same missing piece,
- * and the same port would clear both.
+ * **The carrier exists now.** `ScriptedCarrierUpdate33` (`FUN_004331D0`) is
+ * ported (`game/class33/`) and writes `g_carrier_object`; stage 5 block 2's is
+ * evt `0x1CE4`, whose descriptor fires its effect — and this bit — at path
+ * cursor frame 580. That was the whole of the room a player could not clear:
+ * `wait_enemies_alive <= 0` at step 2 op 50 with four state-32 `znnick` alive
+ * at `d≈2870`, which is where the descriptor puts them and where this state
+ * leaves them (`ZombieStateDelayedStrikeInPlace`, `FUN_0045E830`, never moves
+ * an actor and `SpawnFromDescriptor`, `FUN_00408A20`, copies the spawn
+ * position verbatim — the distance was never the bug).
+ *
+ * The bit was only half of it. {@link ZombieState.Leave} is `10`, and
+ * `g_class30_states[10]` is `ZombieReleaseAndDespawn` (`FUN_00455490`); the
+ * port had no `case` for it and sent every actor that got here to
+ * `WaitTurn` instead, where it stayed alive. See `class30/index.ts`.
+ *
+ * The port still guards `g_carrier_object` before dereferencing it, which the
+ * engine does not — see `entrance.ts`'s note on `ZombieStateRideCarrier`.
  */
 function ZombieDelayedStrikeGiveUp(obj: ZombieActor, dt: number): void {
   const carrier = G.g_carrier_object >= 0

@@ -23,6 +23,8 @@ import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
+import { makeScriptedSceneryTail, type ScriptedSceneryTail }
+  from "./class33/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
   from "./class24/state";
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
@@ -120,6 +122,26 @@ export enum ActorFlag {
   PoseFrozen = 0x4000,
   /** A reaction is in progress. */
   Reacting = 0x40000000,
+  /**
+   * Bit `0x200000` — **class 0x33 selector 1's fire.**
+   *
+   * `ScriptedCarrierUpdate33` (`FUN_004331D0`) raises it `0x14` frames after
+   * its effect fires, and from that frame the routine returns before its own
+   * ride and its own despawn: the object stops moving and stays on the field
+   * drawing the `0x1AAB`..`0x1AD2` loop. `[proved] fire` from the sounds —
+   * raising it plays `0x723A9`, `STAGE5_SE\CAR_FIRE_22.wav`, and the despawn
+   * arm plays `0x823A9`, `CAR_FIRE_22_OFF.wav`, which is what says the bit
+   * stands for a *loop that has to be stopped* rather than a one-shot.
+   *
+   * `[proved]` its only two readers on `obj+0x34` are `0x004332DA` and
+   * `0x00433830`, both inside that routine — a sweep for `TEST` against a
+   * `0x200000` mask returns 39 sites and no other names `+0x34`. Whether any
+   * of the six that test a bare register hold `obj+0x34` there is `[open]`;
+   * this name describes the one class that provably writes it. The same bit
+   * number in `obj+0x136C` is {@link ThrowerFlag.DeathLatched}, which is a
+   * different word and a different fact.
+   */
+  FireLoop = 0x200000,
   /** `ResolveHit` sets it when the hit points reach zero. */
   Dead = 0x4000000,
   /**
@@ -1176,6 +1198,18 @@ export interface ActorBase {
    */
   class14: CharacterPlacement["class14"];
   /**
+   * Class 0x33 **selector 1's** descriptor tail — the draw slot, the `op_`
+   * path it rides, and the four cues that raise its two `obj+0x34` bits and
+   * take it off the field.
+   *
+   * Its own field for the reason class 0x14's, 0x20's and 0x52's are:
+   * `tail+0x00` is class 0x30's body condition. Null on the other ten
+   * sub-handlers, which the bundle carries no tail for at all — so its
+   * presence *is* the selector, and `ScriptedSceneryDispatch33`
+   * (`FUN_00432FF0`) reads `obj+0x11C` for the same answer.
+   */
+  class33: CharacterPlacement["class33"];
+  /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
    *
@@ -1578,11 +1612,14 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Boss2; boss2: Boss2Tail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
+  | (ActorBase & { cls: SpawnClass.ScriptedScenery;
+                   scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
-      | SpawnClass.Boss2 | SpawnClass.Mouse> });
+      | SpawnClass.Boss2 | SpawnClass.Mouse
+      | SpawnClass.ScriptedScenery> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1604,6 +1641,10 @@ export type Boss2Actor = Extract<Actor, { cls: SpawnClass.Boss2 }>;
 /** An actor already narrowed to class 0x20, for that class's own routines. */
 export type OneHitTargetActor = Extract<Actor,
   { cls: SpawnClass.OneHitTarget }>;
+
+/** An actor already narrowed to class 0x33, for that class's own routines. */
+export type ScriptedSceneryActor = Extract<Actor,
+  { cls: SpawnClass.ScriptedScenery }>;
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
@@ -1688,6 +1729,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     oneHitTarget: null,
     class52: null,
     class14: null,
+    class33: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,
@@ -1763,6 +1805,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Mouse) {
     return { ...head, cls, mouse: makeMouseTail() };
+  }
+  if (cls === SpawnClass.ScriptedScenery) {
+    return { ...head, cls, scenery: makeScriptedSceneryTail() };
   }
   return { ...head, cls };
 }

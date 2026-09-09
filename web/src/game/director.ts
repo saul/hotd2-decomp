@@ -252,6 +252,10 @@ export function SpawnScriptedCharacters(
  * Same shape as {@link SpawnPropContainers} beside it, and same reason for
  * living here: `class52 -> director -> registry -> class52` would be a cycle.
  *
+ * **Two classes now.** Class 0x33 selector 1 is here for the same reason and
+ * with one extra: its class id covers eleven different objects, so the test is
+ * on the descriptor tail the bundle carries rather than on the class alone.
+ *
  * The position and yaw come from the **spawn record**, because that is where
  * they are for every class; the descriptor tail comes from
  * `characters.placements`, which carries it for these classes even though the
@@ -262,15 +266,35 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
   const placements = T.chars?.placements;
   if (!placements?.length) return;
   for (const s of spawns) {
-    if (s.class !== SpawnClassValue.Mouse) continue;
     if (ActorByAt(s.at)) continue;
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
-    const a = ActorSpawn(s.at, SpawnClassValue.Mouse, -1, "mouse",
-                         { class52: pl.class52 ?? null, yaw: pl.yaw ?? 0 },
-                         rng);
-    a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
-    a.visible = true;
+    if (s.class === SpawnClassValue.Mouse) {
+      const a = ActorSpawn(s.at, SpawnClassValue.Mouse, -1, "mouse",
+                           { class52: pl.class52 ?? null, yaw: pl.yaw ?? 0 },
+                           rng);
+      a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
+      a.visible = true;
+      continue;
+    }
+    // Class 0x33 selector 1 -- the carrier. `hp` is the **selector**, not hit
+    // points: `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
+    // `desc+0x22` into `obj+0x11C`, and `ScriptedSceneryDispatch33`
+    // (`FUN_00432FF0`) switches on it. The bundle carries a `class33` block
+    // for selector 1 and for nothing else, so a placement without one is a
+    // sub-handler this port has not read and gets no object -- the same
+    // refusal `SpawnPropContainers` makes for an unnamed class-0x44 kind,
+    // rather than a default arm that would run the wrong handler.
+    if (s.class === SpawnClassValue.ScriptedScenery) {
+      if (!pl.class33) continue;
+      const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
+                           `scenery ${pl.hp}`,
+                           { class33: pl.class33, hp: pl.hp, maxHp: pl.hp,
+                             yaw: pl.yaw ?? 0 });
+      a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
+      a.visible = true;
+      continue;
+    }
   }
 }
 

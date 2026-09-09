@@ -397,3 +397,26 @@ it chose to show. Same tell in both, and it is the useful one: a negative result
 that would make a working piece of the shipped game impossible. When the
 pseudocode of a state machine has no writer for the global the state machine
 exists to drive, disassemble every arm before believing it.
+
+**L38 — A dispatch table entry is settled by reading the table, and a name in
+a doc comment is not a reading.** `ZombieState.Leave = 10` carried
+`ActorAbortAttackAndLeave` (`FUN_0045D9F0`) as its citation in `states.ts`, in
+`leave.ts` and in `PLAYER_HANGS.md`. `g_class30_states[10]` is `0x00455490`,
+`ZombieReleaseAndDespawn` — a **despawn**, not a rejoin. `FUN_0045D9F0` is not
+in the table at all: it takes no argument and assigns no state, and
+`leave.ts` had already said so in prose while the port went on relying on the
+name.
+
+The cost was not the wrong comment. It was that the port had **no `case` for
+state 10**, so every actor that reached it fell to the dispatch's `default` and
+went to `WaitTurn` alive — and `wait_enemies_alive` in stage 5's block 2 could
+then never come down, whatever else was fixed. The tell was in the
+playthrough's own dump for two sessions (`0x1DD4 znnick · WaitTurn/1`) and read
+as noise, because a state the port does not implement looks the same as a state
+it implements wrongly.
+
+The table is four bytes and a multiply: `read_memory(0x00592AE8, 4*n)`, then
+check the entries **either side** against what the port already believes, which
+is what says the indexing is not adrift. Do that before writing a `case`, and
+before believing one that is missing. It is `L20` pointed at the port rather
+than at the binary: a citation is a claim, and the address is the evidence.

@@ -108,10 +108,83 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * so `spawnres` can never identify one and the placement has to survive that
  * anyway. See the note in `resolveForStage`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x33, 0x52]);
 
 export function class52Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: rec.param(0x00, "i16") || 0 };
+}
+
+/**
+ * The one class-0x33 sub-handler the player runs: `obj+0x11C == 1`.
+ *
+ * `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches that word into eleven
+ * different objects, so the tail below is **one** handler's reading of the
+ * bytes and not the class's. `MOVSX ECX, word ptr [EAX + 0x11c]` at
+ * `0x00432FF4` is the switch, and the descriptor's `+0x22` is what reaches it.
+ */
+export const CLASS33_CARRIER = 1;
+
+/**
+ * Which spawns of a {@link SLOT_DRAWN_CLASSES} class the bundle carries a
+ * placement for.
+ *
+ * Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
+ * eleven, and only selector 1's tail is decoded below -- selector 2's props
+ * already reach the player through `props`, and the other nine are unread.
+ * Emitting them would be a placement whose `class33` block is a different
+ * handler's bytes read under this one's names, which is `L3` written into the
+ * bundle.
+ */
+export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
+  if (cls === 0x33) return rec.hp === CLASS33_CARRIER;
+  return true;
+}
+
+/**
+ * Class 0x33 selector 1's descriptor tail, as `ScriptedCarrierUpdate33`
+ * (`FUN_004331D0`) and `ScriptedCarrierStepPath33` (`FUN_00433860`) read it.
+ *
+ * ```
+ * tail+0x00  i32  draw slot                     -> obj+0x13F0
+ * tail+0x04  i32  shot mesh, -1 for none        -> obj+0x14C, and obj+0x34 |= 0x50
+ * tail+0x08  f32  shot sphere, when it is -1    -> obj+0x124 and obj+0x128
+ * tail+0x0C  i32  the `op_` path slot           -> obj+0x1350
+ * tail+0x10  f32  the last frame of the run     -> obj+0x1374
+ * tail+0x14  f32  the frame the effect fires, -1.0 for never
+ * tail+0x18  i32  the frame that raises bit 0x10000000
+ * tail+0x1C  i32  the camera frame that despawns it
+ * tail+0x20  u8   a script flag that raises bit 0x10000000
+ * tail+0x21  u8   a script flag that despawns it
+ * tail+0x24  f32[6]  where the effect is spawned: x, y, z and three rotations
+ * ```
+ *
+ * The two frame fields are **not** camera frames even though one is seeded
+ * from `g_cam_path_frame`: `ScriptedCarrierStepPath33` starts `obj+0x1370` at
+ * `g_cam_path_frame - 1` on its first frame and then steps it by one itself,
+ * so after that the object is on its own clock. `tail+0x1C` *is* a camera
+ * frame -- `ScriptedCarrierUpdate33` compares it against `g_cam_path_frame`
+ * and `g_cam_path_frame_2` directly.
+ *
+ * Its own block, and not the shared placement fields, for the reason class
+ * 0x20's and class 0x52's are: `tail+0x00` is class 0x30's body condition.
+ *
+ * Three shipped spawns, all `spawn_obj` (opcode 0x0B): stage 2's `0x4FD0` and
+ * `0x12590`, and stage 5's `0x1CE4`.
+ */
+export function class33Tail(rec: Spawn): Record<string, unknown> {
+  return {
+    slot: rec.param(0x00, "i32") ?? 0,
+    shot_mesh: rec.param(0x04, "i32") ?? -1,
+    shot_radius: rec.param(0x08, "f32") ?? 0,
+    path: rec.param(0x0c, "i32") ?? -1,
+    path_end: rec.param(0x10, "f32") ?? 0,
+    effect_frame: rec.param(0x14, "f32") ?? -1,
+    commit_frame: rec.param(0x18, "i32") ?? -1,
+    despawn_frame: rec.param(0x1c, "i32") ?? -1,
+    commit_flag: rec.param(0x20, "u8") ?? 0xff,
+    despawn_flag: rec.param(0x21, "u8") ?? 0xff,
+    effect: [0, 1, 2, 3, 4, 5].map((k) => rec.param(0x24 + 4 * k, "f32") ?? 0),
+  };
 }
 
 /**
@@ -294,6 +367,9 @@ export async function resolveForStage(
       // 1225 spawns, most of them as `char_adv02` because a lifetime of 0 is
       // character type 0.
       if (!SLOT_DRAWN_CLASSES.has(cls)) continue;
+      // ...and, for a class that is several objects behind one id, only the
+      // spawns whose sub-handler this library has read. See `slotDrawnSpawn`.
+      if (!slotDrawnSpawn(cls, rec)) continue;
     }
     const motion = motionFor(tables, rec, cls);
     const intro = introFor(tables, rec, cls);
@@ -443,6 +519,7 @@ export async function resolveForStage(
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
     const class14 = cls === 0x14 ? class14Tail(rec) : null;
+    const class33 = cls === 0x33 ? class33Tail(rec) : null;
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
@@ -522,6 +599,7 @@ export async function resolveForStage(
     p.class52 = class52;
     p.class53 = class53;
     p.class14 = class14;
+    p.class33 = class33;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
     // spawn wears. 97 of the game's spawns carry one and every list matches
     // its character's own family, which is what says the tail offsets are

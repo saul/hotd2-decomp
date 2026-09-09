@@ -14932,3 +14932,103 @@ from `g_enemies_alive` is `[open]`**, with three leads listed in
    exactly like L11 — a test moved across a function boundary — and half an
    hour went into it before `FUN_0045C8A0` turned out to do precisely the same
    thing. A negative result about the port is not a fact either.
+
+## 2026-09-08 — class 0x33 selector 1, and the state 10 that was never a state 10
+
+Task: make stage 5 block 2 clearable by shooting. It was `[proved]` going in
+that the room is held by `ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`)
+waiting on a bit only class 0x33 writes. That turned out to be half the story.
+
+### What class 0x33 selector 1 is
+
+`ScriptedSceneryDispatch33` (`FUN_00432FF0`) is a switch on `obj+0x11C` —
+`MOVSX ECX, word ptr [EAX + 0x11C]` / `DEC ECX` / `CMP ECX, 0x62` at
+`0x00432FF4`, through the byte table at `0x004330F8` and the jump table at
+`0x004330C4` — with twelve reachable arms: selectors 1 to 11 and 99. It
+installs one update pointer and calls `ActorClaimHitSlot` (`FUN_00409270`).
+`obj+0x11C` is the raw `s16` at `desc+0x22`, so it is `L3` again: the field the
+exporter calls `hp`.
+
+Selector 1 is `ScriptedCarrierUpdate33` (`FUN_004331D0`), which was already
+named, plus a mover that was not: `FUN_00433860`, named here
+**`ScriptedCarrierStepPath33`**.
+
+`[proved] it is a vehicle that drives in and burns`, and not from the model.
+The four sound ids it plays resolve through `g_se_name_list` to
+`STAGE5_SE\DRIVE_DEAD2_22.wav` (seated), `DRIVE_DEAD2_22_OFF.wav` (the effect
+frame), `CAR_FIRE_22.wav` (twenty frames later) and `CAR_FIRE_22_OFF.wav` (as
+it leaves). Two looped sounds, each with its off half, the second starting
+where the first stops. That is also what settles `tools/hod2lib/rigs.py`'s
+`[likely] fire or smoke` on the `0x1AAB`..`0x1AD2` strip: it is fire, and
+`obj+0x34` bit `0x200000` is the latch that says the fire is running.
+
+Its clock is the part worth writing down. `obj+0x1370` is seeded to
+`(float)(g_cam_path_frame - 1)` on the object's **first** frame — `FILD` at
+`0x004338F7` off a `DEC EDX` — and then gains a literal `1.0` (`0x004C4380`)
+every frame. So it agrees with the camera only by coincidence, and the two
+cues that read it (`tail+0x14` and `tail+0x18`) are **not** camera cues, while
+`tail+0x1C` is: that one is compared against `g_cam_path_frame` and
+`g_cam_path_frame_2` directly. Three shipped spawns, all `spawn_obj`: stage 2's
+`0x4FD0` (slot `0x1A36`, path 336) and `0x12590` (`0x1A35`, path 338), stage
+5's `0x1CE4` (`0x1B0E`, path 382, effect at cursor 580, spawned at camera frame
+231).
+
+### The half nobody had looked at
+
+Porting the carrier alone would not have cleared the room, and the reason is a
+citation that was wrong in three places.
+
+`ZombieState.Leave` is 10. `class30/states.ts` cited
+`ActorAbortAttackAndLeave` (`FUN_0045D9F0`) for it, `class30/leave.ts` had
+already noticed that address "does not do this — it is three calls that take no
+actor and assign no state", and `PLAYER_HANGS.md` repeated the name. Nobody
+read the table. `g_class30_states` (`0x00592AE8`) index 10 is the dword
+`90 54 45 00` — `ZombieReleaseAndDespawn` (`FUN_00455490`), which releases both
+enemy counters, releases the attack slot, clears `g_attack_permits[obj+0x120]`
+and `ActorDespawn`s. Indices 11 and 12 are `0x00454B90` and `0x00456DF0`, which
+match the port's enum either side, so the indexing is not adrift.
+
+The port had no `case` for state 10, so it fell to the dispatch's `default` and
+`ZombieGiveUpAttack`, which routes to `WaitTurn` and keeps the actor alive.
+Everything the port sent to state 10 stayed in `g_enemies_alive`: the four
+`znnick` once the carrier released them, and — already, before any of this —
+the fourth of them, `0x1DD4`, whose descriptor names `attack_state 10` behind a
+state-18 camera cue. It was in the playthrough's own dump as
+`0x1DD4 znnick · WaitTurn/1 · d=2898` and had been read as noise.
+
+Census across the twelve bundles: `attack_state == 10` is **one** spawn per
+stage-5 bundle and nothing else in the game, so the blast radius of the fix is
+that spawn plus whatever a state routes there.
+
+### What was wrong on the way
+
+1. **The decompiler's `return` was not in the code.** Ghidra's pseudocode for
+   `ScriptedCarrierUpdate33` ends at `0x0043345E` with `MatrixStackPop(1);
+   return;`. The function does not return there: `0x00433463` is another
+   `MatrixStackPush(0)` and the body runs to `0x00433854`. Nine hundred and
+   seventy bytes — the camera-space position write, `RegisterForShotTest`, the
+   two sprite loops and the five sub-models — are invisible in the
+   decompilation. That is `L37` in its own right, and the only reason it cost
+   nothing here is that `tools/hod2lib/rigs.py` had read the same bytes by
+   hand for `obj_4331d0` and its notes agreed instruction for instruction.
+2. **Two off-by-ones in the test, both from the read/step order.** The update
+   tests its cues at the top of the frame against the cursor the *previous*
+   frame's ride left, and the frame that raises `0x40000000` also runs
+   `obj+0x1334` once. Neither is a port bug — the assertions were wrong and the
+   code was right — but both are the kind of thing that would have been written
+   into a comment as fact if the test had not been made to fail first.
+3. **`tail+0x18` is an int and `tail+0x14` is a float**, in adjacent dwords of
+   the same descriptor. `FILD dword ptr [EBX + 0x18]` against `FCOMP float ptr
+   [EBX + 0x14]`; reading either as the other's type gives a plausible number.
+
+### What is not ported, named
+
+The other ten sub-handlers (their addresses are in `class33/state.ts`);
+`ActorClaimHitSlot` (`FUN_00409270`), because `g_hit_slots` is not ported at
+all; `RegisterForShotTest` (`FUN_00405160`) at `0x004334D0`, which is what
+makes the carrier shootable — stage 2's two are on the **mesh** test
+(`obj+0x34 |= 0x50`, `tail+0x04 != -1`) which the port has not got; and the
+drawing from `0x00433463` to `0x0043382F`, which the renderer already does from
+the exported rig. `obj+0x6C` (roll) and `obj+0x118` (uniform scale) are written
+by the engine and read only by its own draw, so the port leaves them out rather
+than adding two head fields nothing in `game/` reads.

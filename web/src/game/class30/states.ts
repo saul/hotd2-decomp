@@ -58,7 +58,23 @@ export enum ZombieState {
    * See `class30/knockback.ts`.
    */
   DeathKnockbackArc = 9,
-  /** `ActorAbortAttackAndLeave` (`FUN_0045D9F0`). */
+  /**
+   * `ZombieReleaseAndDespawn` (`FUN_00455490`) — **and it is terminal.**
+   *
+   * `[proved]` from the table and not from a name: `g_class30_states`
+   * (`0x00592AE8`) index 10 is the dword `90 54 45 00`. The entry either side
+   * of it agrees with this enum — 11 is `0x00454B90`
+   * ({@link ZombieState.FallToGround}) and 12 `0x00456DF0`
+   * ({@link ZombieState.DeathFallAndBounce}) — so the indexing is not adrift.
+   *
+   * This used to cite `ActorAbortAttackAndLeave` (`FUN_0045D9F0`), which is a
+   * different address and takes no actor at all: it is three no-argument calls
+   * (`0x0045DB70`, `0x0045DA60`, `0x0045DD30(9)`) and assigns no state. The
+   * wrong citation is why state 10 had no `case` in the dispatch and every
+   * actor that reached it went to {@link ZombieState.WaitTurn} and lived —
+   * which is what held stage 5 block 2's room shut even once class 0x33 was
+   * writing the bit that sends them here.
+   */
   Leave = 10,
   /**
    * `ZombieStateDeathFallAndBounce` (`FUN_00456DF0`). Where {@link Death}

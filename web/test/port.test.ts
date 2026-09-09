@@ -76,8 +76,11 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
 import { ThrownWeaponUpdate } from "../src/game/class31/projectile";
 import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
+         type ScriptedSceneryActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
   from "../src/game/actor";
+import { ScriptedCarrierUpdate33, ScriptedScenerySelector }
+  from "../src/game/class33";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
@@ -6766,7 +6769,9 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     check("...but `obj+0x34` bit 0x40000000 retires it, and only after the "
           + "0x14 frames `obj+0x1334` counts",
           left > 0x14 && left <= 0x14 + 3, `left after ${left} frames`);
-    check("...into state 10, `ActorAbortAttackAndLeave`",
+    check("...into state 10, which `g_class30_states` says is "
+          + "`ZombieReleaseAndDespawn` (`FUN_00455490`) and not the "
+          + "`ActorAbortAttackAndLeave` this used to name",
           z.state === ZombieState.Leave || z.despawned,
           `state ${z.state}${z.despawned ? " despawned" : ""}`);
   }
@@ -8164,6 +8169,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
     [SpawnClass.Thrower, "0x31 thrower"],
+    [SpawnClass.ScriptedScenery, "0x33 scripted scenery / the carrier"],
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
@@ -11250,6 +11256,255 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
     check("...and one that does not, cannot",
           ![10, 17, 31].some((n) => without.has(n)),
           `${[...without].sort((x, y) => x - y).join(",")}`);
+  }
+}
+
+// -- class 0x33 selector 1: the carrier -------------------------------------
+
+console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
+{
+  // Stage 5's own descriptor, evt `0x1CE4`, as the bundle carries it. The
+  // numbers are the shipped ones on purpose: the room this class was ported
+  // for is held by *these* cues and not by a shape.
+  const STAGE5 = () => ({
+    slot: 0x1b0e, shot_mesh: -1, shot_radius: 0.1,
+    path: 382, path_end: 590, effect_frame: 580,
+    commit_frame: 230, despawn_frame: 650,
+    commit_flag: 0xff, despawn_flag: 0xff,
+    effect: [678.8, -70, -2616.5, 0, 0, 0],
+  });
+  // Stage 2's `0x12590`: no effect frame at all, and a commit that fires.
+  const STAGE2 = () => ({
+    slot: 0x1a35, shot_mesh: 0x0cec69a8, shot_radius: 0,
+    path: 338, path_end: 420, effect_frame: -1,
+    commit_frame: 360, despawn_frame: -1,
+    commit_flag: 0xff, despawn_flag: 128,
+    effect: [0, 0, -0.9, 4.8, 2.5, 0],
+  });
+
+  const CARRIER_AT = 0x1ce4;
+  const CAM_AT_SPAWN = 231;
+
+  const makeCarrier = (tail: ReturnType<typeof STAGE5>,
+                       camFrame = CAM_AT_SPAWN): ScriptedSceneryActor => {
+    G.g_cam_path_frame = camFrame;
+    const a = ActorSpawn(CARRIER_AT, SpawnClass.ScriptedScenery, -1, "carrier",
+                         { class33: tail as Actor["class33"],
+                           hp: ScriptedScenerySelector.Carrier,
+                           maxHp: ScriptedScenerySelector.Carrier });
+    if (a.cls !== SpawnClass.ScriptedScenery) throw new Error("not class 0x33");
+    a.visible = true;
+    return a;
+  };
+  const reset = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+    G.g_camera_fixed_eye_y = 0;
+  };
+  const carrierFrame = () => ({ eye: EYE, dt: 1 / 60, rng: new Rng(5),
+                                host: NULL_HOST });
+  const tick = (c: ScriptedSceneryActor, n: number) => {
+    for (let i = 0; i < n; i++) {
+      if (c.despawned) return;
+      ScriptedCarrierUpdate33(c, carrierFrame());
+    }
+  };
+
+  // -- the cursor ----------------------------------------------------------
+  {
+    reset();
+    const c = makeCarrier(STAGE5());
+    check("the Init publishes `g_carrier_object` before a frame has run",
+          G.g_carrier_object === CARRIER_AT, String(G.g_carrier_object));
+    tick(c, 1);
+    check("`obj+0x1370` opens on `g_cam_path_frame`, which is "
+          + "`g_cam_path_frame - 1` seeded and then stepped once",
+          c.scenery.pathFrame === CAM_AT_SPAWN, String(c.scenery.pathFrame));
+    // The seed is the camera's; the counter after it is not. Move the camera
+    // by a hundred frames and the cursor must not notice.
+    G.g_cam_path_frame += 100;
+    tick(c, 10);
+    check("...and then it is the object's own clock, not the camera's",
+          c.scenery.pathFrame === CAM_AT_SPAWN + 10,
+          String(c.scenery.pathFrame));
+    check("...and the shot sphere is `tail+0x08` in both radii",
+          c.hitRadius === 0.1 && c.bodyRadius === 0.1,
+          `${c.hitRadius}/${c.bodyRadius}`);
+  }
+
+  // -- the two bits --------------------------------------------------------
+  {
+    reset();
+    const c = makeCarrier(STAGE5());
+    // The cues are read at the **top** of the frame, against the cursor the
+    // previous frame's ride left, so the first tick puts the cursor on
+    // `CAM_AT_SPAWN` and `n` ticks put it on `CAM_AT_SPAWN + n - 1`.
+    tick(c, 580 - CAM_AT_SPAWN + 1);
+    check("nothing is up while the ride is still running",
+          (c.flags & (ActorFlag.Reacting | ActorFlag.Committed)) === 0,
+          `flags 0x${(c.flags >>> 0).toString(16)} cursor ${c.scenery.pathFrame}`);
+    check("...and the cursor has reached the descriptor's effect frame",
+          c.scenery.pathFrame === 580, String(c.scenery.pathFrame));
+    tick(c, 1);
+    check("`obj+0x34` bit 0x40000000 goes up on the frame the cursor equals "
+          + "`tail+0x14` — the bit state 32 is waiting for",
+          (c.flags & ActorFlag.Reacting) !== 0,
+          `flags 0x${(c.flags >>> 0).toString(16)}`);
+    check("...and stage 5's carrier never raises 0x10000000, because its "
+          + "commit frame (230) is behind where the script spawns it (231)",
+          (c.flags & ActorFlag.Committed) === 0,
+          `flags 0x${(c.flags >>> 0).toString(16)}`);
+    check("...and the fire is not up yet", (c.flags & ActorFlag.FireLoop) === 0);
+    // The frame that raises the bit also runs the counter, so it is already at
+    // 1 here and the fire is `0x13` frames away.
+    check("...and `obj+0x1334` is counting from that same frame",
+          c.scenery.effectFrames === 1, String(c.scenery.effectFrames));
+    tick(c, 0x12);
+    check("...the fire waits the 0x14 frames `obj+0x1334` counts",
+          (c.flags & ActorFlag.FireLoop) === 0,
+          `after ${c.scenery.effectFrames}`);
+    tick(c, 1);
+    check("...and then it is up", (c.flags & ActorFlag.FireLoop) !== 0,
+          `after ${c.scenery.effectFrames}`);
+    const frozen = c.scenery.pathFrame;
+    tick(c, 60);
+    check("...after which the routine returns before its own ride, so the "
+          + "object stops where it burned",
+          c.scenery.pathFrame === frozen, String(c.scenery.pathFrame));
+    G.g_cam_path_frame = 650;
+    tick(c, 5);
+    check("...and it does not reach its despawn either, camera cue or not",
+          !c.despawned);
+  }
+  {
+    reset();
+    const c = makeCarrier(STAGE2());
+    tick(c, 360 - CAM_AT_SPAWN + 1);
+    check("...and nothing is up on the frame the cursor *reaches* the commit "
+          + "frame, because the cue is read before the ride steps",
+          (c.flags & ActorFlag.Committed) === 0,
+          `cursor ${c.scenery.pathFrame}`);
+    tick(c, 1);
+    check("stage 2's carrier raises 0x10000000 on its own commit frame — the "
+          + "bit `ZombieStateRideCarrier` leaves on",
+          (c.flags & ActorFlag.Committed) !== 0,
+          `cursor ${c.scenery.pathFrame}`);
+    check("...and never 0x40000000, because its `tail+0x14` is -1.0",
+          (c.flags & ActorFlag.Reacting) === 0,
+          `flags 0x${(c.flags >>> 0).toString(16)}`);
+    check("...and `tail+0x04 != -1` puts it on the mesh test, bit 0x10",
+          (c.flags & 0x10) !== 0, `flags 0x${(c.flags >>> 0).toString(16)}`);
+    // `tail+0x10` is 420: past it the cursor freezes rather than running on.
+    tick(c, 200);
+    check("...and the cursor stops at `tail+0x10` rather than running past it",
+          c.scenery.pathFrame === 420, String(c.scenery.pathFrame));
+  }
+
+  // -- the two ways off the field -----------------------------------------
+  {
+    reset();
+    const c = makeCarrier(STAGE5());
+    tick(c, 10);
+    G.g_cam_path_frame = 650;
+    tick(c, 1);
+    check("the camera reaching `tail+0x1C` despawns it", c.despawned);
+  }
+  {
+    reset();
+    const c = makeCarrier({ ...STAGE5(), despawn_flag: 0x80 });
+    tick(c, 10);
+    check("a carrier whose despawn flag is down stays", !c.despawned);
+    G.g_script_flags[0x80] = 1;
+    tick(c, 1);
+    check("...and goes when the script raises it", c.despawned);
+  }
+
+  // -- stage 5 block 2's room, end to end ---------------------------------
+  //
+  // Four class-0x30 spawns in state 32 and the class-0x33 object the script
+  // puts beside them. `ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) has
+  // exactly one exit and it is this carrier's bit; state 10 is
+  // `ZombieReleaseAndDespawn` (`FUN_00455490`), which is what actually takes
+  // them out of `g_enemies_alive`. Both halves have to be right for the gate
+  // at step 2 op 50 to come down, and neither was.
+  const room = (tail: ReturnType<typeof STAGE5>) => {
+    reset();
+    for (let i = 0; i < 4; i++) {
+      const z = spawnZombie(0x1d44 + i * 0x30, 1, `znnick ${i}`, {
+        initialState: ZombieState.DelayedStrikeInPlace,
+        attackState: ZombieState.AttackRun,
+        entry: { delay: 2, rearm: 4, player: 0 } as Actor["entry"],
+      });
+      z.visible = true;
+      z.hp = z.maxHp = 130;
+      // Where the script puts them, and where this state leaves them.
+      z.pos = vec3(-10 + i * 7, 0, 2870);
+    }
+    makeCarrier(tail);
+    const rng = new Rng(11);
+    const events = new Events();
+    let clearedAt = -1;
+    for (let f = 0; f < 900; f++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      if (clearedAt < 0 && G.g_enemies_alive === 0) clearedAt = f;
+    }
+    return clearedAt;
+  };
+  {
+    check("four state-32 zombies count themselves in",
+          (() => { reset();
+                   const z = spawnZombie(0x1d44, 1, "znnick", {
+                     initialState: ZombieState.DelayedStrikeInPlace,
+                     attackState: ZombieState.AttackRun,
+                     entry: { delay: 2, rearm: 4, player: 0 } as Actor["entry"],
+                   });
+                   z.visible = true;
+                   return G.g_enemies_alive === 1; })(),
+          String(G.g_enemies_alive));
+    const at = room(STAGE5());
+    // 580 - 231 to the bit, then the 0x14 + 1 frames `obj+0x1334` counts.
+    check("stage 5 block 2's room empties itself, and on the frame the "
+          + "descriptor says: `wait_enemies_alive <= 0` can come down",
+          at > 0 && Math.abs(at - ((580 - CAM_AT_SPAWN) + 0x15)) <= 3,
+          `cleared at frame ${at}`);
+    check("...and every one of the four left the pool rather than parking in "
+          + "a state, which is what the counter is measuring",
+          G.g_object_list.filter((o) => o.cls === SpawnClass.Zombie).length === 0,
+          `${G.g_object_list.length} objects left`);
+  }
+  {
+    // The counterfactual, and it is the shape of the bug that was here: a
+    // carrier that never raises the bit is four zombies that never leave.
+    const at = room({ ...STAGE5(), effect_frame: -1 });
+    check("...and a carrier whose `tail+0x14` is -1.0 never releases them, "
+          + "which is what the room looked like with no class 0x33 at all",
+          at === -1 && G.g_enemies_alive === 4,
+          `cleared at ${at}, ${G.g_enemies_alive} alive`);
+  }
+
+  // -- state 10 is a despawn, not a rejoin ---------------------------------
+  {
+    reset();
+    const z = spawnZombie(0x1dd4, 1, "state 10", {
+      initialState: ZombieState.AttackRun, attackState: ZombieState.AttackRun,
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 130;
+    z.pos = vec3(0, 0, 2870);
+    const before = G.g_enemies_alive;
+    z.state = ZombieState.Leave;
+    z.sub = 0;
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng: new Rng(2),
+                           host: NULL_HOST });
+    check("`g_class30_states[10]` is `ZombieReleaseAndDespawn`, so state 10 "
+          + "removes the actor rather than sending it to WaitTurn",
+          z.despawned && z.state === ZombieState.Leave,
+          `state ${z.state} despawned ${z.despawned}`);
+    check("...and both counters come back with it",
+          before === 1 && G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${before} -> ${G.g_enemies_alive}/${G.g_enemies_present}`);
   }
 }
 

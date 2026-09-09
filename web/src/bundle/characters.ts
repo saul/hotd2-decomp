@@ -424,6 +424,37 @@ export interface CharacterPlacement {
     despawn_path: number;
     despawn_frame: number;
   } | null;
+  /**
+   * Class 0x33 **selector 1's** tail — the object `g_carrier_object` points
+   * at while one exists.
+   *
+   * Selector 1 and no other: `ScriptedSceneryDispatch33` (`FUN_00432FF0`)
+   * switches `obj+0x11C` into eleven sub-handlers and this block is
+   * `ScriptedCarrierUpdate33`'s (`FUN_004331D0`) reading of the bytes. The
+   * bundle carries no `class33` at all for the other ten, which is why the
+   * port may take its presence as the selector.
+   *
+   * `slot` is `obj+0x13F0`, the `AssetDrawSlot` id; `path` the `op_` slot it
+   * rides and `path_end` the cursor value that stops the ride;
+   * `effect_frame` the cursor value that spawns the effect at `effect` and
+   * raises `obj+0x34` bit `0x40000000`, `-1` for never;
+   * `commit_frame`/`commit_flag` the two ways bit `0x10000000` goes up, and
+   * `despawn_frame`/`despawn_flag` the two ways the object leaves. A flag of
+   * `0xFF` is the descriptor's "none" — no shipped script raises 255.
+   */
+  class33?: {
+    slot: number;
+    shot_mesh: number;
+    shot_radius: number;
+    path: number;
+    path_end: number;
+    effect_frame: number;
+    commit_frame: number;
+    despawn_frame: number;
+    commit_flag: number;
+    despawn_flag: number;
+    effect: number[];
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

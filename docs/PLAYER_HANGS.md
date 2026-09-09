@@ -88,12 +88,16 @@ takes — see item 16.
 
 | stage | end block | frames | instr | rooms the shots did not clear |
 |---|---|---:|---:|---|
-| 1 | 14 `(end → 0)` | 7965 | 94 | block 1 `8 / 6` |
+| 1 | 14 `(end → 0)` | 8280 | 94 | block 1 `8 / 6` |
 | 2 | 35 `(end → 0)` | 12120 | 146 | — |
 | 3 | 13 `(end → 4)` | 6210 | 59 | — |
 | 4 | 25 `(end → 0)` | 7125 | 83 | — |
-| 5 | 7 `(end → 0)` | 7875 | 78 | block 2 `2 / 50` |
-| 6 | 12 `(end → 0)` | 7110 | 63 | blocks 0 `4 / 8`, 1 `3 / 17`, 3 `2 / 13` |
+| 5 | 7 `(end → 0)` | 7500 | 79 | — |
+| 6 | 12 `(end → 0)` | 7245 | 63 | — |
+
+Stage 5's row was `7875 / 78 / block 2 2 / 50` until class 0x33 was ported;
+that room is the second section below. **Stage 1 block 1 is the one left**, and
+it is the only room in the game a player cannot clear by shooting.
 
 Before this branch, on the same tree and the same seeds: stages **2, 3 and 6
 hung** — block 14 `9 / 20`, block 6 `1 / 13` and block 0 `4 / 8` — and 1 and 5
@@ -924,7 +928,7 @@ fifteen seconds on one instruction. See `docs/formats/combat.md`.
 The port needed no change for these three. **Three of the five cheated rooms
 were a measurement fault in the harness.**
 
-### Stage 5 block 2 — unkillable, and the distance is not the bug
+### Stage 5 block 2 — **fixed**: the carrier exists, and state 10 is a despawn
 
 `[proved]`. The previous note asked why four `znnick` are at `d=2843..2898`
 "and not where the script put them". They are exactly where the script put
@@ -937,7 +941,8 @@ the four have `initial_state 32`; the fourth is `initial_state 18` with
 
 The state has exactly one way out, at `0x0045EAFE`: `g_carrier_object`
 (`0x009A5C34`) raising `obj+0x34` bit `0x40000000`, after which `obj+0x1334`
-counts to `0x14` and the actor takes state 10, `ActorAbortAttackAndLeave`. The
+counts to `0x14` and the actor takes state 10 (`0x0045EB20` writes
+`obj+0x1310 = 10`). The
 object that raises it is `ScriptedCarrierUpdate33` (`0x004331D0`) — class 0x33
 selector 1, which stage 5 block 2 step 2 op 37 spawns at evt `7396` — at
 `0x00433280`. **Class 0x33 is unported**, so `g_carrier_object` is `-1` and
@@ -958,10 +963,58 @@ and only a check says what the code does. Two things landed for it:
   `switchD_0045e899_default`. The state is split in two now: the switch may
   return, the frame may not.
 
-**Still unclearable** until class 0x33 selector 1 is ported. That is the whole
-remaining work for this room, and it is a vehicle: `0x004331D0` runs to at
-least `0x00433830`, reads `tail+0x14/0x18/0x1C/0x20/0x21/0x24`, and would need
-the descriptor tail in both halves of `hod2lib`.
+**It clears now.** Two things had to be true and only one of them was known.
+
+**One — class 0x33 selector 1 is ported** (`game/class33/`), which is
+`ScriptedSceneryDispatch33` (`FUN_00432FF0`), `ScriptedCarrierUpdate33`
+(`FUN_004331D0`) and `ScriptedCarrierStepPath33` (`FUN_00433860`), the last of
+which had no name until this session. `[proved]` it is a **vehicle that drives
+in and burns**, from the four sounds resolved through `g_se_name_list`:
+`DRIVE_DEAD2_22.wav` when it is seated, `DRIVE_DEAD2_22_OFF.wav` at its effect
+frame, `CAR_FIRE_22.wav` twenty frames after that and `CAR_FIRE_22_OFF.wav` as
+it leaves. Two loops with their off halves. That also settles `rigs.py`'s
+`[likely] fire or smoke` on the `0x1AAB`..`0x1AD2` strip it swaps to.
+
+Its clock is the piece worth writing down: `obj+0x1370` is seeded to
+`g_cam_path_frame - 1` on the object's **first** frame and stepped by a literal
+`1.0` per frame after that, so it is not the camera's frame and the two cues
+that read it are not camera cues. Stage 5's descriptor (evt `0x1CE4`) fires the
+effect — and bit `0x40000000` — at cursor 580, having been spawned at camera
+frame 231. Three hundred and forty-nine frames of ride, then twenty-one of
+counting.
+
+**Two — `g_class30_states[10]` is `ZombieReleaseAndDespawn` (`FUN_00455490`)**,
+which releases both counters, releases the permit and despawns. The port had no
+`case` for state 10 and sent it through the dispatch's `default` to
+`ZombieGiveUpAttack`, which routes to `WaitTurn` and keeps the actor alive.
+`class30/states.ts` cited `ActorAbortAttackAndLeave` (`FUN_0045D9F0`) for that
+index, and that address is not in the table at all — it takes no argument and
+assigns no state. The dword at `0x00592AE8 + 0x28` is `90 54 45 00`, and its
+neighbours agree with the enum either side, so the indexing is not adrift.
+
+Without the second half the first would have released nothing: all four
+`znnick` would have gone to state 10 and stood in `WaitTurn` for ever, which
+is what the fourth (`0x1DD4`, `attack_state 10`) was already doing before any
+of this. **Two causes, one symptom** — reverting either half leaves the room
+shut, and `web/test/port.test.ts` has both counterfactuals.
+
+Measured, `node tools/playthrough.mjs --stage 5 --headless`:
+
+```
+before   f 3435 block 2 ... 2 / 50 took 66 volleys over 480 frames without one
+                            point of damage landing anywhere in the room
+         1 rooms could NOT be cleared by shooting
+after    f 3435 block 2 (goto → 3)   f 4365 block 3 ...
+         reached an end block after 7500 game frames, no room reported
+```
+
+Not ported, and named rather than left implicit: the other ten class-0x33
+sub-handlers; `RegisterForShotTest` (`FUN_00405160`) at `0x004334D0`, which is
+what makes the carrier shootable; and the whole draw from `0x00433463` to
+`0x0043382F`. That draw is `L37` in the raw — Ghidra's pseudocode for
+`ScriptedCarrierUpdate33` **ends at `0x0043345E` with a `return` the code does
+not have**, and nine hundred and seventy bytes of the routine are invisible in
+it. `tools/hod2lib/rigs.py` had already read them by hand as `obj_4331d0`.
 
 ### Stage 1 block 1 — unkillable, because the script has switched the gun off
 

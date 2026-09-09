@@ -7,6 +7,11 @@
  * is the port's gap: a state index the port has not read, reached because the
  * descriptor named it. The engine has no such case.
  *
+ * **It no longer covers state 10.** That index was reaching this through the
+ * dispatch's `default` on the strength of the same wrong citation, and
+ * `g_class30_states[10]` is `ZombieReleaseAndDespawn` (`FUN_00455490`), which
+ * despawns. `class30/index.ts` has the case now; see {@link ZombieState.Leave}.
+ *
  * It routes to `ZombieStateWaitTurn` rather than anywhere terminal, because
  * that state has a way back into the loop, and it releases the permit first:
  * there are only `g_max_attackers` of them and one held by an actor nothing

@@ -357,14 +357,21 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: ZombieActor, dt: number,
  * `ZombieStateDelayedLeap` tail and the three whose byte 3 is 30 carry a
  * `ZombieStateArcScriptedEntrance` one.
  *
- * [diverges] **The port has no rideable object**, so `g_carrier_object` is -1
- * and there is nothing to add. Two consequences, both taken deliberately:
- * the actor holds at its spawn position rather than riding, and — since the
- * ride ends when the carrier raises `obj+0x34` bit 0x10000000 and no carrier
- * ever will — the state hands over **immediately** when there is no carrier at
- * all, rather than parking six spawns for ever. Riding properly needs the
- * vehicle classes (`St1VehicleUpdate`, `FUN_0048E5B0` and its peers), which is
- * a separate port and not a line edit here.
+ * **These six now have a carrier.** `ScriptedCarrierUpdate33`
+ * (`FUN_004331D0`) is ported (`game/class33/`) and writes `g_carrier_object`,
+ * and stage 2's two class-0x33 selector-1 spawns — `0x4FD0` and `0x12590` —
+ * are the objects these ride: the first raises `obj+0x34` bit `0x10000000` on
+ * its own path cursor frame 260, the second on 360.
+ *
+ * [diverges] The no-carrier arm below is kept, and it is the port's: with
+ * `g_carrier_object` at -1 the state hands over **immediately** rather than
+ * parking six spawns for ever. The engine has no such case — it dereferences
+ * the global with no null test at all (`ZombieStateDelayedStrikeInPlace` does
+ * the same at `0x0045EAFE`) — so it can only ever be reached in the port,
+ * where a stage may reach one of these spawns without the class-0x33 object
+ * that belongs to it. `Class26Subtype2Update` (`FUN_0048EAD0`) is the game's
+ * **other** writer of `g_carrier_object`, stage 3's boat, and that class is
+ * still unported.
  */
 export function ZombieStateRideCarrier(obj: ZombieActor, rng: Rng): void {
   if (obj.sub === 0) {

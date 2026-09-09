@@ -31,6 +31,7 @@ import "./class24";
 import "./class25";
 import "./class30";
 import "./class31/thrower";
+import "./class33";
 import "./class41";
 import "./class44";
 import "./class52";

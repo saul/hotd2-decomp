@@ -80,6 +80,11 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // shared field would have one class read the other's.
     class52: p?.class52 ?? null,
     class53: p?.class53 ?? null,
+    // Class 0x33 selector 1's, on the same terms, and the bundle carries it
+    // for no other selector: `ScriptedSceneryDispatch33` (`FUN_00432FF0`)
+    // switches `obj+0x11C` into eleven sub-handlers that read these bytes
+    // eleven ways, and `tail+0x00` is class 0x30's body condition again.
+    class33: p?.class33 ?? null,
     // Class 0x14's, on the same terms: `Class14Init` (`FUN_00475E90`) reads
     // `tail+0x00` as a character type and `tail+0x01` as the state the boss
     // starts in, which are class 0x30's body condition and initial state.

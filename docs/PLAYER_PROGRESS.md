@@ -2241,6 +2241,42 @@ a character whose arm has come off still plays a directional death.
 
 ## Scripted scenery: doors, shutters and vans
 
+### Class 0x33 selector 1 — the carrier, and the two states it ends
+
+**Ported** (`game/class33/`). `ScriptedSceneryDispatch33` (`FUN_00432FF0`) is
+eleven objects behind one class id — a switch on `obj+0x11C`, which for this
+class is a sub-handler selector and not hit points — and selector 1 is the one
+that matters to the gameplay loop, because it is **the** `g_carrier_object`
+(`0x009A5C34`). Three spawns in the whole game: stage 2's `0x4FD0` and
+`0x12590`, stage 5's `0x1CE4`.
+
+`[proved]` it is a vehicle that drives in on an `op_` path and burns, from its
+four sounds: `DRIVE_DEAD2_22.wav`, `DRIVE_DEAD2_22_OFF.wav`,
+`CAR_FIRE_22.wav`, `CAR_FIRE_22_OFF.wav` — two loops with their off halves.
+
+The whole of what other classes read is two bits on its own `obj+0x34`:
+
+* `0x10000000` ends `ZombieStateRideCarrier` (class 0x30 state 29), on the
+  descriptor's `commit_flag` or `commit_frame`. Stage 2's six passengers ride
+  on this, and they now ride rather than handing over on their first frame.
+* `0x40000000` ends `ZombieStateDelayedStrikeInPlace` (state 32) `0x14` frames
+  later. Stage 5 block 2's four `znnick` leave on this, and that room is the
+  one a player could not clear by shooting.
+
+`ScriptedCarrierStepPath33` (`FUN_00433860`) is the ride: `obj+0x1370` is
+seeded to `g_cam_path_frame - 1` on the object's first frame and then stepped
+by `1.0` per frame, so **it is the object's clock and not the camera's**, and
+the two frame cues above are read against it. The pose comes back through
+`GameHost.objectPath`, the same seam class 0x25's riders use; a host with no
+`op_` paths leaves the object where it is and the counter still runs, which is
+what lets a headless run reach the release.
+
+The drawing is not ported and does not need to be — `tools/hod2lib/rigs.py`
+already carries it as `obj_4331d0` and the renderer places it. Nor is
+`RegisterForShotTest` at `0x004334D0`: stage 2's two are on the mesh shot test
+the port has not got, and stage 5's sphere is 0.1 units.
+
+
 **Done for the hinge family.** The zombies that lunge out of a van in stage 2
 are not standing in the open — they are inside it, and the doors swing apart on
 a script cue. Two spawn classes make that set piece, and they sit at the same

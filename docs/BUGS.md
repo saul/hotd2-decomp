@@ -6,11 +6,11 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Fifty-two reports: **thirty-seven fixed, three half-done, eleven open, and two
-`[not-a-bug]`, each of which carried a real defect underneath it** (one of
+Fifty-three reports: **thirty-seven fixed, three half-done, twelve open, and
+two `[not-a-bug]`, each of which carried a real defect underneath it** (one of
 those two is counted in the thirty-seven, its bullet carrying both markers).
 The five reported on 2026-09-07 from stage 3's block 2 are all fixed, and
-four of the five were far wider than the place they were seen from. **Eight
+four of the five were far wider than the place they were seen from. **Nine
 arrived on 2026-09-09 and none has been looked at**, which is most of the open
 column and the reason it grew.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
@@ -30,15 +30,17 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ## What is left
 
-* **Eight reports arrived on 2026-09-09 and none is started.** The axe's spin
-  axis, a missing shutter in stage 3, silent zombies, sound settings that do
-  not survive a reload, an undrawn van and a lift that rises too early in
-  stages 5 and 6, `znjoe`'s missing chest worm, and three zombies that should
-  be riding a car. They are one section of their own below, with the
-  reporter's locators. Two of them come with a lead already in the tree: the
-  axe has been changed once for this and is still wrong, and the car's three
-  zombies are the three spawns `ZombieStateDelayedStrikeInPlace` is annotated
-  as having.
+* **Nine reports arrived on 2026-09-09 and none is started.** The axe's spin
+  axis, a missing roller shutter in stage 3, silent zombies, sound settings
+  that do not survive a reload, an undrawn van and a lift that rises too early
+  in stages 5 and 6, `znjoe`'s missing chest worm, and two cars whose zombies
+  are not on them. They are one section of their own below, with the
+  reporter's locators. **The stage 2 one is reported as making a branch
+  unplayable** and is the first of the nine to take. Three carry a lead
+  already in the tree: the axe has been changed once for this exact symptom
+  and is still wrong, the two car reports both land on the port's declared
+  guard around `g_carrier_object`, and the stage 5 one **contradicts a doc
+  comment written from the same URL** that says the distance is correct.
 * `[open]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — it
   hangs from a ledge where it should push a chair aside. Every link of the data
   chain checks out and two theories are dead; it wants eyes on the render
@@ -1201,31 +1203,57 @@ none of the five was the thing the report named.
   those 42 are the twins that are meant to go.** Not stage-3-specific: stage 1's
   opening has its over-shoulder shot back.
 
-## Eight reported on 2026-09-09
+## Nine reported on 2026-09-09
 
 All `[open]` at the time of writing, all with the reporter's own locators,
 which are the player's URL parameters and are reproducible as given. Four of
 them are `?stage=5` and `?stage=6`, which no report had reached before.
 
-- `[open]` **The thrown axe spins about the wrong axis.** Worth reading with
-  the code in front of you, because **this has been changed once already**:
-  `render/projectiles.ts` carries a comment saying the span used to rotate
-  about Z, that Z "cartwheels the weapon sideways", and that the tumble is the
-  Y term of `ThrownWeaponUpdate`'s `Rz(obj+0x6C) * Ry(obj+0x68) *
-  Rx(obj+0x1364 + obj+0x64)`. It rotates about Y today and the report says it
-  is still wrong. So either the reading of which term carries the tumble is
-  wrong, or `Rx` is not zero in flight the way that comment assumes, or the
-  axe model's own axes are not the ones the matrix is written in. The first
-  thing to establish is which, and none of the three is ruled out.
+**Two of the nine may be one defect**, and both are cars carrying zombies: the
+stage 2 rider that never appears and the stage 5 zombies that stand too far
+away. `g_carrier_object` and the port's guard on it are on both leads.
 
-- `[open]` **The zombies at
-  `?stage=3&mode=play&entry=7&block=8&step=2&op=23` should come out from
-  behind a shutter that opens, and there is no shutter.** Whether the prop is
-  never placed, placed and never drawn, or placed and never animated is the
-  first thing to establish. Note for whoever takes it: the port's `shutter`
-  in `script/state/shutter.ts` is the **HUD letterbox**, `g_bHudShutterState`,
-  and has nothing to do with a door — a search for the word will find the
-  wrong thing first.
+- `[open]` **The thrown axe spins about the wrong axis, and *which* zombie
+  threw it decides whether it is wrong.** That last part is the reporter's,
+  added after the first write-up, and it is the useful half: it rules out the
+  render being uniformly wrong and points at the per-thrower data.
+
+  Two things in the tree to weigh it against. **The spin is already per
+  character type and per hand.** `hod2lib/combat.ts` gives `THROWER_SLOTS`
+  two class-0x31 types — `0x16` (`zsass`) with `spin: 0x600` and `0x18` with
+  `spin: 0`, which does not tumble at all — and `class31/thrower.ts` negates it
+  for one of the two hands (`hand.bone === 5 ? cfg.spin : -cfg.spin`, commented
+  "which hand it left decides which way it tumbles"). Class 0x30's throwers are
+  a **separate family** with no spin table at all: `class30/throw.ts` makes one
+  up, `(hand.bone === 5 ? 1 : -1) * (0x100 + rng.int(0x200))`, over three
+  character types `0x01`, `0x13` and `0x14`. A randomised spin the engine may
+  not have is the first thing to check against the binary.
+
+  **And the axis has been changed once already for this exact symptom.**
+  `render/projectiles.ts` says the span used to rotate about Z, that Z
+  "cartwheels the weapon sideways", and that the tumble is the Y term of
+  `ThrownWeaponUpdate`'s `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 +
+  obj+0x64)`. It is on Y today and is still reported wrong.
+
+  So: establish which thrower was throwing. If it is a class 0x30 one, the
+  invented spin is the lead; if class 0x31, the axis reading or `Rx` being
+  non-zero in flight is. Naming the zombie narrows this to one of two files.
+
+- `[open]` **A roller shutter is missing from stage 3**, at
+  `?stage=3&mode=play&entry=7&block=8&step=2&op=23`. **A physical door**: a
+  real roller shutter over a doorway, which should roll up, after which the
+  zombies come out through it. At the moment there is no shutter there at all.
+
+  **This is not the port's `shutter`, and the two must not be confused.**
+  `script/state/shutter.ts` is the **HUD letterbox** — `g_bHudShutterState`,
+  the two black bars that close over the frame — and has nothing whatever to do
+  with a door. A search for the word finds it first and it is the wrong thing
+  every time. The door is scenery: a prop or a class-0x33 scripted hinge, and
+  `docs/formats/spawns.md` is where its class is named.
+
+  Whether it is never placed, placed and never drawn, or placed and never
+  animated is the first thing to establish, and the answer decides which half
+  of the tree it lives in.
 
 - `[open]` **Zombies are silent, both idle and attacking.** Consistent with the
   tree rather than surprising in it: `game/class30/` emits one `sound.play` in
@@ -1270,19 +1298,61 @@ them are `?stage=5` and `?stage=6`, which no report had reached before.
       0x1D74 znnickb · d=2808 · DelayedStrikeInPlace/4 · hp 150/150 · motion 696
       0x1DA4 znnickb · d=2824 · DelayedStrikeInPlace/5 · hp 150/150 · motion 690 · permit
 
-  Three actors, and `ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) is
-  annotated as having exactly **three spawns, all in stage 5** — so these are
-  those three, in the state the data puts them in, and the port is running that
-  state faithfully. The annotation also says the state "never approaches and
-  never leaves", which is why they are standing at d≈2850.
+  `ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) is annotated as having
+  exactly **three spawns, all in stage 5**, and as never approaching and never
+  leaving — so these are those three, in the state the data puts them in.
 
-  So the question is not why they do not walk. It is whether these three are
-  the actors meant to ride the car at all. The engine has a ride:
-  `ZombieStateRideCarrier` is class 0x30 state **29**, `g_carrier_object`
-  (`0x009A5C34`) points at what is being ridden, and `ScriptedCarrierUpdate33`
-  (`FUN_004331D0`) raises `0x10000000` on itself when a rider leaves state 29
-  on it. Either something should move these into state 29, or the riders are
-  different spawns the port is not placing. Both are open.
+  **The sharp part: the port already claims this distance is correct.**
+  `class30/scripted.ts` carries a doc comment naming *this exact locator* —
+  "`wait_enemies_alive <= 0` at step 2 op 50 with four state-32 `znnick` alive
+  at `d≈2870`, which is where the descriptor puts them and where this state
+  leaves them" — and concludes **"the distance was never the bug"**. The bug
+  chased from that locator before was a despawn: `ZombieState.Leave` had no
+  `case` and the actors stayed alive.
+
+  The reporter says they should be riding the car. That comment says standing
+  at d≈2870 is right. **One of the two is wrong, and settling which is the
+  whole of this report.** Do not read past the comment on the way in; it was
+  written from the same URL.
+
+  The lead if the reporter is right: state 32 **reads the carrier**. The engine
+  dereferences `g_carrier_object` (`0x009A5C34`) in it with no null test, at
+  `0x0045EAFE`, and the port guards that dereference instead — a declared
+  divergence, written up on `ZombieStateRideCarrier` in `class30/entrance.ts`.
+  With no carrier live, the port's guard takes the no-carrier arm and the
+  actors never get a carrier offset. That is the same guard the stage 2 car
+  rider below trips, which is why the two reports may be one.
+
+- `[open]` **The zombie that should ride the front of the stage 2 car never
+  appears, and it makes a branch of the game unplayable.** At
+  `?stage=2&original=1&mode=play&entry=0&block=0&step=3&op=31&frame=150`. Two
+  other zombies are flung off the car and **that part works**; the one riding
+  the front is simply absent. Reported as unplayable, so it is the most
+  expensive of these nine.
+
+  The state is named and ported. `ZombieStateRideCarrier` (`FUN_00458960`,
+  class 0x30 state **29**) is a passenger: it records its spawn position once
+  and every frame sets its position to that offset plus `g_carrier_object`'s.
+  `class30/entrance.ts` says it has **six spawns, all in stage 2**, split by
+  descriptor tail byte 3 — three carrying a `ZombieStateDelayedLeap` tail and
+  three a `ZombieStateArcScriptedEntrance` one. **That split looks like the
+  reporter's two behaviours**: the ones that get flung off, and the one that
+  should stay on.
+
+  And the port has a **declared divergence sitting exactly here**. The engine
+  dereferences `g_carrier_object` with no null test; the port guards it, and
+  with the global at `-1` the state "hands over **immediately** rather than
+  parking six spawns for ever". The reason given is that a stage may reach one
+  of these spawns without the class-0x33 object that belongs to it. Stage 2's
+  carriers are the two class-0x33 selector-1 spawns `0x4FD0` and `0x12590`,
+  which raise `obj+0x34` bit `0x10000000` at path cursor frames 260 and 360.
+
+  So the first thing to establish is whether a carrier is live at frame 150 of
+  this block **in Original Mode** — the reporter's locator is `original=1`, and
+  the divergence's own stated trigger is a spawn reached without its carrier.
+  If it is not, the port takes the no-carrier arm, the rider hands over at once
+  and is never seen on the car. The same guard is the lead on the stage 5 car
+  zombies above; treat the two together before treating either alone.
 
 - `[open]` **The stage 6 lift rises immediately; it should wait for the player
   to be on it.** At `?stage=6&mode=play&entry=0&block=0&step=2&op=20&frame=0`.

@@ -95,19 +95,67 @@ export interface ThrownWeapon {
   vel: Vec3;
   /** Frames of flight left. */
   ttl: number;
-  /** BAMS per frame, signed by which hand threw it. */
+  /**
+   * BAMS per frame. `[diverges]` — see {@link ThrownWeapon.spinAngle}, which
+   * carries the whole of why this number is the port's own.
+   */
   spin: number;
   /**
-   * The accumulated tumble, `obj+0x68`.
+   * Which axis the tumble turns about, and it is **not the same for both
+   * throwing families**.
    *
-   * `ThrownWeaponFlyToTarget` does `obj+0x68 += obj+0x135C` every frame in
-   * flight — negated for the other hand — and `ThrownWeaponUpdate` draws the
-   * weapon as `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)`. So
-   * the tumble is the **Y** term: the weapon turns about its own vertical.
-   * The X and Z terms are zero in flight; they are only set on landing, when
-   * `AimThrownWeapon` points the stuck weapon back at the camera.
+   * Both draw the weapon the same way — `ThrownWeaponUpdate` (`FUN_00450780`)
+   * and `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) each emit
+   * `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — but they
+   * accumulate the tumble into **different terms**:
+   *
+   * | family | flight step | term | axis |
+   * |---|---|---|---|
+   * | class 0x31 | `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), `0x0044FDE9` | `obj+0x68` | **Y** |
+   * | class 0x30 | `ZombieThrownWeaponStateStraight` (`FUN_00459690`), `0x00459731` | `obj+0x64` | **X** |
+   *
+   * `[proved]`. Class 0x31 also negates the step unless the throwing hand
+   * `obj+0x1358` is bone 5; class 0x30 has no such test and adds it plainly.
+   * The port turned **everything** about Y, so a class-0x30 thrower's axe
+   * cartwheeled while a class-0x31 thrower's looked right — which is exactly
+   * how it was reported: *the spin depends on which zombie is throwing*.
+   *
+   * `axis` is the port's way of carrying the difference to the renderer
+   * without giving the record two nearly-identical angle fields.
+   */
+  axis: "x" | "y";
+  /**
+   * The accumulated tumble — `obj+0x68` for class 0x31, `obj+0x64` for class
+   * 0x30. See {@link ThrownWeapon.axis}.
+   *
+   * `[diverges]` **The rate is the port's invention, because the engine's is
+   * uninitialised memory.** Neither launcher writes the projectile's
+   * `obj+0x135C`: `SpawnThrownWeapon` (`FUN_004504E0`) writes only the model
+   * and `obj+0x1364`, and `ZombieThrowHandWeapon` (`FUN_0045A240`) only the
+   * model and the position. `ThrowerReleaseAttackPermit`'s sibling writes on
+   * `+0x135C` are all onto the *thrower*, where the field holds the hand bone.
+   * And the allocator does not clear it: `FUN_004A6FA0` zeroes exactly the
+   * first 0xD dwords — the task header — and `FUN_004A7400` is a free-list
+   * split that hands back the block as it stands. So every field from
+   * `obj+0x34` up is whatever the previous occupant of that arena block left,
+   * and the tumble rate with it. `[proved]` for the two zeroing bounds; the
+   * consequence is stated as a reading, not measured against a running game.
+   *
+   * The port has no arena to recycle, so there is no faithful value to copy.
+   * It picks a stable one instead and says so here.
    */
   spinAngle: number;
+  /**
+   * `obj+0x1364` — a **constant** added to the X term at draw time, per
+   * character type: `0x600` for `zsass` (0x16) and 0 for 0x18, both written by
+   * `SpawnThrownWeapon` (`FUN_004504E0`). Class 0x30's launcher never writes
+   * it at all, so it is 0 there.
+   *
+   * It is a fixed tilt and **not** a rate, which is what the port had been
+   * using it as: `THROWER_SLOTS[0x16].spin = 0x600` drove the Y tumble with a
+   * number the engine adds once, to X.
+   */
+  tilt: number;
   /** Frames spent in the stick-and-blink tail once the flight is done. */
   after: number;
   hit: boolean;

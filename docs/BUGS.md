@@ -6,13 +6,13 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Fifty-three reports: **thirty-seven fixed, three half-done, twelve open, and
+Fifty-three reports: **thirty-eight fixed, three half-done, eleven open, and
 two `[not-a-bug]`, each of which carried a real defect underneath it** (one of
-those two is counted in the thirty-seven, its bullet carrying both markers).
+those two is counted in the thirty-eight, its bullet carrying both markers).
 The five reported on 2026-09-07 from stage 3's block 2 are all fixed, and
 four of the five were far wider than the place they were seen from. **Nine
-arrived on 2026-09-09 and none has been looked at**, which is most of the open
-column and the reason it grew.
+arrived on 2026-09-09**; the axe's spin axis is fixed and the other eight are
+open, which is most of the open column and the reason it grew.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -30,17 +30,18 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ## What is left
 
-* **Nine reports arrived on 2026-09-09 and none is started.** The axe's spin
-  axis, a missing roller shutter in stage 3, silent zombies, sound settings
+* **Nine reports arrived on 2026-09-09; one is fixed.** The axe's spin axis
+  is done — the two throwing families tumble about different axes and the port
+  turned both about Y. Still open: a missing roller shutter in stage 3, silent zombies, sound settings
   that do not survive a reload, an undrawn van and a lift that rises too early
   in stages 5 and 6, `znjoe`'s missing chest worm, and two cars whose zombies
   are not on them. They are one section of their own below, with the
   reporter's locators. **The stage 2 one is reported as making a branch
-  unplayable** and is the first of the nine to take. Three carry a lead
-  already in the tree: the axe has been changed once for this exact symptom
-  and is still wrong, the two car reports both land on the port's declared
-  guard around `g_carrier_object`, and the stage 5 one **contradicts a doc
-  comment written from the same URL** that says the distance is correct.
+  unplayable** and is the next to take; a session's worth of driving narrowed
+  it a long way without naming the actor, and what was ruled out is recorded on
+  the entry. The stage 5 car report **contradicts a doc comment written from
+  the same URL** that says the distance is correct, and settling which is right
+  is the whole of it.
 * `[open]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — it
   hangs from a ledge where it should push a chair aside. Every link of the data
   chain checks out and two theories are dead; it wants eyes on the render
@@ -1209,35 +1210,56 @@ All `[open]` at the time of writing, all with the reporter's own locators,
 which are the player's URL parameters and are reproducible as given. Four of
 them are `?stage=5` and `?stage=6`, which no report had reached before.
 
-**Two of the nine may be one defect**, and both are cars carrying zombies: the
-stage 2 rider that never appears and the stage 5 zombies that stand too far
-away. `g_carrier_object` and the port's guard on it are on both leads.
+Two of the nine are cars carrying zombies — the stage 2 rider that never
+appears and the stage 5 zombies that stand too far away — and they looked at
+first like one defect around `g_carrier_object`. They are not: the stage 2
+locator never touches that global. Each entry records what its own
+investigation ruled out.
 
-- `[open]` **The thrown axe spins about the wrong axis, and *which* zombie
-  threw it decides whether it is wrong.** That last part is the reporter's,
-  added after the first write-up, and it is the useful half: it rules out the
-  render being uniformly wrong and points at the per-thrower data.
+- `[fixed]` **The thrown axe span about the wrong axis, and *which* zombie
+  threw it decided whether it was wrong.** That last part was the reporter's,
+  added after the first write-up, and it was the whole key: it ruled out the
+  render being uniformly wrong and pointed at the two throwing families being
+  different.
 
-  Two things in the tree to weigh it against. **The spin is already per
-  character type and per hand.** `hod2lib/combat.ts` gives `THROWER_SLOTS`
-  two class-0x31 types — `0x16` (`zsass`) with `spin: 0x600` and `0x18` with
-  `spin: 0`, which does not tumble at all — and `class31/thrower.ts` negates it
-  for one of the two hands (`hand.bone === 5 ? cfg.spin : -cfg.spin`, commented
-  "which hand it left decides which way it tumbles"). Class 0x30's throwers are
-  a **separate family** with no spin table at all: `class30/throw.ts` makes one
-  up, `(hand.bone === 5 ? 1 : -1) * (0x100 + rng.int(0x200))`, over three
-  character types `0x01`, `0x13` and `0x14`. A randomised spin the engine may
-  not have is the first thing to check against the binary.
+  **They are, in one instruction each.** Both draw routines emit the same
+  product — `ThrownWeaponUpdate` (`FUN_00450780`) and
+  `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) each do
+  `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — but they
+  accumulate the tumble into different terms of it:
 
-  **And the axis has been changed once already for this exact symptom.**
-  `render/projectiles.ts` says the span used to rotate about Z, that Z
-  "cartwheels the weapon sideways", and that the tumble is the Y term of
-  `ThrownWeaponUpdate`'s `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 +
-  obj+0x64)`. It is on Y today and is still reported wrong.
+  | family | flight step | term | axis |
+  |---|---|---|---|
+  | class 0x31 | `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) at `0x0044FDE9` | `obj+0x68` | **Y** |
+  | class 0x30 | `ZombieThrownWeaponStateStraight` (`FUN_00459690`) at `0x00459731` | `obj+0x64` | **X** |
 
-  So: establish which thrower was throwing. If it is a class 0x30 one, the
-  invented spin is the lead; if class 0x31, the axis reading or `Rx` being
-  non-zero in flight is. Naming the zombie narrows this to one of two files.
+  `[proved]`. Class 0x31 also negates the step unless the throwing hand
+  `obj+0x1358` is bone 5; class 0x30 has no such test. The port turned
+  **everything** about Y, so a class-0x31 thrower looked right and a
+  class-0x30 one cartwheeled — exactly the reported shape. The axis was
+  changed from Z to Y once before for this same report, which fixed one half
+  of it and left the other.
+
+  **Two more readings fell out.** `0x600` — which the port used as the Y spin
+  *rate*, out of `THROWER_SLOTS` — is `obj+0x1364`, a **constant** the draw
+  adds to the X term, written per character type by `SpawnThrownWeapon`
+  (`FUN_004504E0`): `0x600` for `zsass` and 0 for type 0x18. It is a fixed
+  tilt, added once, to a different axis than it was being used on.
+
+  And the actual rate, `obj+0x135C`, **is never written on the projectile by
+  anything.** Neither launcher writes it, and the allocator does not clear it:
+  `ActorAlloc` (`FUN_004A6FA0`) zeroes exactly the first 0xD dwords — the task
+  header — over `FUN_004A7400`, a free-list split that returns the block as it
+  stands. So in the engine the tumble rate is whatever the previous occupant of
+  that arena block left, which is a second and more literal reason the spin
+  depends on which zombie threw. A port with no arena cannot reproduce that;
+  `THROWN_SPIN_RATE` is a declared `[diverges]` in `game/class31/projectile.ts`
+  saying so.
+
+  Fixed with four assertions in `web/test/port.test.ts`, one of which replaced
+  an old assertion that had encoded the `0x600`-as-rate misreading.
+  `SpawnZombieThrownWeapon` lost its `Rng` parameter with the invented rate;
+  `ZombieThrowHandWeapon` never had one.
 
 - `[open]` **A roller shutter is missing from stage 3**, at
   `?stage=3&mode=play&entry=7&block=8&step=2&op=23`. **A physical door**: a
@@ -1347,12 +1369,38 @@ away. `g_carrier_object` and the port's guard on it are on both leads.
   carriers are the two class-0x33 selector-1 spawns `0x4FD0` and `0x12590`,
   which raise `obj+0x34` bit `0x10000000` at path cursor frames 260 and 360.
 
-  So the first thing to establish is whether a carrier is live at frame 150 of
-  this block **in Original Mode** — the reporter's locator is `original=1`, and
-  the divergence's own stated trigger is a spawn reached without its carrier.
-  If it is not, the port takes the no-carrier arm, the rider hands over at once
-  and is never seen on the car. The same guard is the lead on the stage 5 car
-  zombies above; treat the two together before treating either alone.
+  **A session was spent on this and it is still open, but a great deal is now
+  ruled out.** Recorded so the next attempt does not repeat it:
+
+  * **It is not the carrier.** `ZombieStateRideCarrier`'s six spawns are in
+    blocks 9 and 27, not block 0. Nothing at this locator touches
+    `g_carrier_object`, which stays -1 throughout.
+  * **The port places everything the script asks for.** Twelve actors in five
+    classes at the locator, no unported class among them, and no spawn opcode
+    in block 0 goes unhonoured.
+  * **The three actors that ride the car all work**, driven from the stage
+    start: `0x07F8` rides object path 331, `0x0854` path 332 and `0x08B0` path
+    328 and then 334, all during camera path 56, at 40–90 units. `0x08B0` is
+    the **driver** and is drawn in the car; a screenshot at camera 57 frame
+    ~268 shows him at the wheel.
+  * **`0x07F8` and `0x0854` are removed the moment camera path 57 begins,
+    and that is correct.** Their programs carry `removePath 57, removeFrame 0`,
+    and the engine's test — the top of `ScriptedHumanoidUpdate`
+    (`FUN_004842A0`) — is `g_active_cam_path == removePath && frame >=
+    removeFrame`, with a script-flag variant behind `obj+0x34 & 0x2000000`.
+    The port's `HumanoidShouldRemove` is that, both arms. So no class-0x25
+    actor is scheduled to be on the car during the shot the reporter is
+    looking at.
+  * **Do not reproduce this with a deep link.** `?block=0&step=3` seeks, and a
+    seek lands with camera path 57 already running, which removes both riders
+    before they are ever placed — they then read as "stuck at the origin at
+    `pc 0/4`", which is a seek artefact and not the bug. Play from the stage
+    entry.
+
+  So the actor that should be on the front is **not a class-0x25 humanoid**,
+  and the remaining candidates are the car's own rig, a class 0x24 set piece,
+  or something the exporter is not emitting at all. The stage 5 car report
+  above is a separate lead and the two are no longer thought to be one bug.
 
 - `[open]` **The stage 6 lift rises immediately; it should wait for the player
   to be on it.** At `?stage=6&mode=play&entry=0&block=0&step=2&op=20&frame=0`.

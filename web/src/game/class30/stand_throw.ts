@@ -197,7 +197,7 @@ export function ZombieStateStandAndThrow(obj: ZombieActor, eye: Vec3, rng: Rng,
     // `obj+0x19C == entry+0x08`, the hit frame, in the play clock.
     if (!a || MotionPlayFrame(obj) !== a.hit_frame) return;
     if (obj.zom.throwHand) {
-      SpawnZombieThrownWeapon(obj, obj.zom.throwHand, eye, host, rng, events);
+      SpawnZombieThrownWeapon(obj, obj.zom.throwHand, eye, host, events);
     }
     obj.sub = Sub.Recover;
     return;

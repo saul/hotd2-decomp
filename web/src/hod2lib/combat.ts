@@ -140,6 +140,18 @@ export interface HandKit {
  * drops to once thrown, and *projectile* the model that flies.
  */
 export const THROWER_SLOTS: Record<number, {
+  /**
+   * `obj+0x1364` — and it is a **constant tilt, not a rate**, whatever the
+   * field is called.
+   *
+   * `SpawnThrownWeapon` (`FUN_004504E0`) writes it onto the projectile per
+   * character type, and `ThrownWeaponUpdate` (`FUN_00450780`) draws
+   * `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — so it is
+   * added once, to the **X** term. The tumble is `obj+0x135C` accumulating
+   * into `obj+0x68`, which is a different field on a different axis, and the
+   * port drove the tumble with this number until that was read properly. The
+   * name is older than the reading and stays until the next format bump.
+   */
   5: HandKit; 8: HandKit; spin: number;
 }> = {
   0x16: {                                    // zsass.bin

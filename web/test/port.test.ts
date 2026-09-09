@@ -73,7 +73,8 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
-import { ThrownWeaponUpdate } from "../src/game/class31/projectile";
+import { ThrownWeaponUpdate, THROWN_SPIN_RATE }
+  from "../src/game/class31/projectile";
 import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type ScriptedSceneryActor,
@@ -4510,8 +4511,21 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
   if (seen) {
     check("...at the hand's own height, not at the actor's feet",
           seen.pos.y > z.pos.y, `${seen.pos.y} vs ${z.pos.y}`);
-    check("...carrying the character type's own tumble",
-          seen.spin === 0x600 || seen.spin === -0x600, String(seen.spin));
+    // **`0x600` is a tilt, not a rate**, and this used to assert the opposite.
+    // `SpawnThrownWeapon` (`FUN_004504E0`) writes it to the projectile's
+    // `obj+0x1364`, and `ThrownWeaponUpdate` (`FUN_00450780`) draws
+    // `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — so it is
+    // added once, to X, and the *rate* is `obj+0x135C`, which no launcher
+    // writes at all. The port had been driving the Y tumble with it.
+    check("...carrying the character type's own X tilt",
+          seen.tilt === 0x600, String(seen.tilt));
+    // Class 0x31 tumbles about Y and negates for the other hand —
+    // `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) at `0x0044FDE9`, which tests
+    // the throwing hand `obj+0x1358` against bone 5. Class 0x30 does neither.
+    check("...tumbling about Y, which is class 0x31's term",
+          seen.axis === "y", `axis ${seen.axis}`);
+    check("...at the rate the port declares, signed by the hand",
+          Math.abs(seen.spin) === THROWN_SPIN_RATE, String(seen.spin));
 
     // ...and it is a thing that moves. `ThrownWeaponFlyToTarget` sets the
     // velocity once, at launch, and the flight is a straight line at a
@@ -7331,6 +7345,23 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     const after = Math.hypot(w.pos.x - EYE.x, w.pos.z - EYE.z);
     check("...and it closes on the camera rather than hanging there",
           after < before - 1, `${before.toFixed(1)} -> ${after.toFixed(1)}`);
+    // **Class 0x30's tumble is the X term, and it has no sign test on the
+    // hand.** `ZombieThrownWeaponStateStraight` (`FUN_00459690`) at
+    // `0x00459731` does `obj+0x64 += obj+0x135C`; class 0x31's
+    // `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) at `0x0044FDE9` does
+    // `obj+0x68 +=` and negates for the other hand. Both draw the same
+    // `Rz * Ry * Rx` product, so the axis is the whole of the difference —
+    // and the port turned everything about Y, which cartwheeled exactly one
+    // of the two families. It was reported as the spin depending on which
+    // zombie threw.
+    check("...tumbling about X, which is class 0x30's term",
+          w.axis === "x", `axis ${w.axis}`);
+    check("...and unsigned by the hand, unlike class 0x31's",
+          w.spin > 0, String(w.spin));
+    check("...with no `obj+0x1364` tilt, which only class 0x31's launcher writes",
+          w.tilt === 0, String(w.tilt));
+    check("...and it is actually turning", w.spinAngle !== 0,
+          String(w.spinAngle));
   }
 
   // The other way in: a condition-8 walker already facing the camera.

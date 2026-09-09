@@ -25,6 +25,7 @@
     "verify:ui": "node tools/verify_ui.mjs",
     "bundle-flow": "node tools/bundle_flow.mjs",
     "transitions": "node tools/transitions.mjs",
+    "sound-prefs": "node tools/sound_prefs.mjs",
     "shot": "node tools/shot.mjs",
     "pacing": "node tools/pacing.mjs",
     "freeroam": "node tools/freeroam.mjs",

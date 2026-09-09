@@ -9,7 +9,7 @@
  *
  * What does not survive is the handful of controls that are pure viewing
  * preference: whether the rails are drawn, whether the dome is on, whether to
- * pillarbox. Those are not part of "where playback is", so putting them in the
+ * pillarbox, and whether there is any sound. Those are not part of "where playback is", so putting them in the
  * URL would make every shared link carry someone else's overlay choices. They
  * belong in `localStorage`, per browser, and that is all this module does.
  *
@@ -37,6 +37,21 @@ export interface ViewPrefs {
   filterMode?: string;
   pillarbox?: boolean;
   speed?: number;
+  /**
+   * Whether sound is off, and how loud it is when it is not.
+   *
+   * These belong here rather than in the URL for the reason the note above
+   * gives: a shared link should not carry someone else's volume. But they were
+   * in *neither*, so every reload came back silent at the default level and
+   * the viewer had to click the speaker again — which is the one control you
+   * notice being reset, because the page is quiet until you do.
+   *
+   * `muted` is stored rather than derived from `volume === 0`: the two are
+   * different states in `Bgm`, and a viewer who muted at 80% expects 80% back.
+   */
+  muted?: boolean;
+  /** 0..1, as `Bgm` holds it — the slider is the one that works in percent. */
+  volume?: number;
 }
 
 export function readViewPrefs(): ViewPrefs {

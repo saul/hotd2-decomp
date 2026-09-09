@@ -31,6 +31,35 @@ import { DebugGroup } from "./DebugGroup";
 import { Rigs, RigsSub } from "./Rigs";
 import { Scopes } from "./Scopes";
 
+/**
+ * The volume slider, and nothing else.
+ *
+ * It was in the transport bar next to the frame scrubber, which is a row of
+ * things you touch while watching a shot; volume is not one of those. The
+ * `#volume` id travels with it because the stylesheet holds it by that.
+ */
+function SoundPanel() {
+  // Open by default, unlike its neighbours: it is one row tall, and the
+  // stylesheet hangs off `#volume`, which a folded panel does not emit —
+  // `verify:ui` checks exactly that and would not see it otherwise.
+  const dispatch = useDispatch();
+  const sound = useSlice((p) => p?.sound);
+  if (!sound) return null;
+  return (
+    <div className="dbg">
+      <label>
+        Volume{" "}
+        <input type="range" id="volume" min="0" max="100" step="1"
+               value={sound.volume}
+               title="BGM volume"
+               onChange={(e) => dispatch({ kind: "setVolume",
+                                           volume: Number(e.target.value) })} />
+        {" "}<span className="dim">{sound.volume}%</span>
+      </label>
+    </div>
+  );
+}
+
 export function Sidebar() {
   return (
     <>
@@ -88,6 +117,14 @@ export function Sidebar() {
              subTitle={"Click to shoot: the ray, the per-bone hit spheres, "
                + "the damage escalation and the score, all the game's own."}>
         <DebugGroup group="shooting" />
+      </Panel>
+
+      <Panel id="panel-sound" title="Sound" defaultOpen
+             subTitle={"How loud the game is. The speaker that turns it on "
+               + "and off is in the top bar, because that is the one you "
+               + "press; this is the one you set once. Browsers block audio "
+               + "until the page is clicked, and the transport bar says so."}>
+        <SoundPanel />
       </Panel>
 
       <Panel id="panel-route" title="Route graph">

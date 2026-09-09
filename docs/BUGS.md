@@ -6,13 +6,14 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Fifty-three reports: **thirty-eight fixed, three half-done, eleven open, and
+Fifty-three reports: **thirty-nine fixed, three half-done, ten open, and
 two `[not-a-bug]`, each of which carried a real defect underneath it** (one of
-those two is counted in the thirty-eight, its bullet carrying both markers).
+those two is counted in the thirty-nine, its bullet carrying both markers).
 The five reported on 2026-09-07 from stage 3's block 2 are all fixed, and
 four of the five were far wider than the place they were seen from. **Nine
-arrived on 2026-09-09**; the axe's spin axis is fixed and the other eight are
-open, which is most of the open column and the reason it grew.
+arrived on 2026-09-09**; the axe's spin axis and the sound settings are fixed
+and the other seven are open, which is most of the open column and the reason
+it grew.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -30,12 +31,13 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ## What is left
 
-* **Nine reports arrived on 2026-09-09; one is fixed.** The axe's spin axis
-  is done — the two throwing families tumble about different axes and the port
-  turned both about Y. Still open: a missing roller shutter in stage 3, silent zombies, sound settings
-  that do not survive a reload, an undrawn van and a lift that rises too early
-  in stages 5 and 6, `znjoe`'s missing chest worm, and two cars whose zombies
-  are not on them. They are one section of their own below, with the
+* **Nine reports arrived on 2026-09-09; two are fixed.** The axe's spin axis
+  — the two throwing families tumble about different axes and the port turned
+  both about Y — and the sound settings, which are stored state now with the
+  speaker in the top bar and the slider in the sidebar. Still open: a missing
+  roller shutter in stage 3, silent zombies, an undrawn van and a lift that
+  rises too early in stages 5 and 6, `znjoe`'s missing chest worm, and two
+  cars whose zombies are not on them. They are one section of their own below, with the
   reporter's locators. **The stage 2 one is reported as making a branch
   unplayable** and is the next to take; a session's worth of driving narrowed
   it a long way without naming the actor, and what was ruled out is recorded on
@@ -1285,16 +1287,31 @@ investigation ruled out.
   is the class's sound arm never having been ported. `docs/formats/sound.md`
   and `PlaySoundId` are where it starts.
 
-- `[open]` **Sound settings do not survive a reload, and the two controls are
-  in the wrong places.** A change request rather than a defect, recorded here
-  because it was reported here. Three parts: (1) whether sound is on should be
-  stored state like everything else in `PlayerState` — it is neither in the URL
-  nor in `localStorage` today, so every reload comes back with audio in its
-  default state; (2) the volume slider, `#volume` in `ui/panels/Transport.tsx`,
-  belongs in the debug sidebar; (3) the mute button, the `.sound` button beside
-  it, belongs in the top bar. Both are singletons in the transport bar today
-  and the stylesheet holds them by id, which is the thing to be careful of when
-  moving them.
+- `[fixed]` **Sound settings did not survive a reload, and the two controls
+  were in the wrong places.** A change request rather than a defect, recorded
+  here because it was reported here. All three parts are done.
+
+  Whether sound is on, and how loud, are `viewPrefs` now — `localStorage`, per
+  browser — rather than the URL. That is the same reasoning the module's own
+  header already gave for the overlay toggles: a shared deep link should carry
+  where playback *is*, not someone else's volume. `muted` is stored rather than
+  derived from `volume === 0`, because they are separate states in `Bgm` and a
+  viewer who muted at 80% expects 80% back. The restore sends `setVolume`
+  first, since `setVolume` does not unmute, and sends `toggleMute` only when
+  the saved value differs from where `Bgm` starts — a flip sent unconditionally
+  would unmute someone who left it muted.
+
+  The speaker is in the top bar and the volume slider is in the sidebar's new
+  **Sound** panel. What stays in the transport bar is `#bgm-label`, the
+  *status*: which track is playing and whether the browser is still blocking
+  audio. The Sound panel is `defaultOpen` on purpose — it is one row, and the
+  stylesheet hangs off `#volume`, which a folded panel does not emit and
+  `verify:ui` would then miss.
+
+  `npm run sound-prefs` is the check, and it reloads rather than reading back
+  what it just clicked: `localStorage` is per origin, so a check that only
+  clicked would pass with nothing persisted. It covers both directions,
+  including that a viewer who muted is not given noise by the restore.
 
 - `[open]` **The van at `?stage=5&mode=play&block=0&step=4&op=9&frame=352` is
   not drawn — only its rear doors are.** A prop whose parts are drawn in part

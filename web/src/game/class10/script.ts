@@ -25,6 +25,14 @@ import { AsFloat, CivilianHook, CivilianOp, CivilianWait, CmdAt } from "./ops";
 const RESCUE_AWARD = 400;
 
 /**
+ * The one `g_app_state` (`0x009C8E98`) value that refuses
+ * {@link CivilianOp.SetHudShutterState} — `CMP dword ptr [0x009c8e98], 0xA`
+ * at `0x0048BF0A`. A scalar, not a member of a set the exe switches on: 10 is
+ * one of the shell's unnamed screens and nothing else in the routine tests it.
+ */
+const CIV_SHUTTER_BLOCKED_APP_STATE = 10;
+
+/**
  * `CivilianRunScript` — `FUN_0048B9E0`.
  *
  * Walks the stream from `pc`, applying each command, and stops **before** the
@@ -197,17 +205,34 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.SetRouteBranch:
         G.g_script_branch_var = (a[0] << 16) >> 16;
         break;
+      // **The shutter, and with it the trigger.** `MOV DL, byte ptr [ESI+4]`
+      // / `MOV byte ptr [0x009ca0f4], DL` at `0x0048BF13`, behind
+      // `CMP dword ptr [0x009c8e98], 0xA` / `JZ`. A byte store, so the low
+      // byte of the dword and nothing else; the guard is
+      // `g_app_state != 10` and not "in play", so it holds in every state the
+      // port ever runs a stage in.
+      //
+      // Nothing more is needed here: `script/state/shutter.ts` notices a state
+      // written from outside evt `0x1F` on its next step -- it was taught to
+      // for `BossIntroBannerUpdate` -- and that is where `g_nFiringGate`
+      // comes back up. See {@link CivilianOp.SetHudShutterState} for why a
+      // shipped room depends on it.
+      case CivilianOp.SetHudShutterState:
+        if (G.g_app_state !== CIV_SHUTTER_BLOCKED_APP_STATE) {
+          G.g_bHudShutterState = a[0] & 0xff;
+        }
+        break;
       // Unread. Named so the stream stays legible and so a later reading has
       // somewhere to land; deliberately no behaviour.
       //
-      // **These four used to fall through into `SetScale`'s body** and write
+      // **These three used to fall through into `SetScale`'s body** and write
       // its operand into `obj.scale`, which is `model+0x116C` and the factor
       // `SkeletonApplyRootMotion` (`FUN_00410C50`) multiplies the root delta
       // by. Their operands are small integers -- 1, 2, 5, 200 -- and
       // {@link AsFloat} reinterprets a dword's bits, so the scale came out a
       // denormal around 1e-45 and every step the clip authored was multiplied
-      // to nothing. 125 commands in the shipped streams run one of them.
-      case CivilianOp.SetGlobalB:
+      // to nothing. 125 commands in the shipped streams run one of the four
+      // this case used to hold.
       case CivilianOp.SetAttachMode:
       case CivilianOp.SetAttachTarget:
       case CivilianOp.SetPairA:

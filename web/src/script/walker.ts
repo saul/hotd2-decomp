@@ -191,13 +191,10 @@ export interface WalkerOptions {
    * branch bar freezes it, so this is the unattended pace, not a deadline.
    */
   branchCountdown: number;
-  /** Clear spawn markers when the block changes. */
-  clearSpawnsOnBlock: boolean;
 }
 
 export const DEFAULT_OPTIONS: WalkerOptions = {
   branchCountdown: 1.5,
-  clearSpawnsOnBlock: true,
 };
 
 export interface WalkerHost {
@@ -1684,10 +1681,33 @@ export class Walker {
     // at most one block rather than deadlocking the stage.
     if (this.queuedEventsPending !== 0) this.ringResidue += 1;
     this.ring.reset();
-    if (this.options.clearSpawnsOnBlock) {
-      this.spawns = [];
-      this.simpleSpawns = [];
-    }
+    // **The spawn markers do not clear here, and they used to.**
+    //
+    // `FUN_0045EBC0` is the whole of the engine's block change: it picks the
+    // first step by game mode, zeroes `g_script_branch_var`, loads the block's
+    // program, clears `g_queued_events_pending` and the two skip words, and
+    // calls `FUN_00408D60`, which writes three approach constants. **It
+    // touches no object.** An actor built by `SpawnFromDescriptor`
+    // (`FUN_00408A20`) leaves through its own state machine and through
+    // nothing else — see `docs/PLAYER_HANGS.md` item 2, which wrote that down
+    // and then left this line in place. `[proved]`
+    //
+    // Clearing them retired every live actor on the frame a block changed,
+    // because `syncCharacterSpawns` hands `app/` everything the walker has
+    // stopped listing. Stage 3's civilian `3008` is the proof that the engine
+    // cannot be doing that: `spawn_obj_c` places her in **block 0** step 6,
+    // her script's camera cue is `(130, 145)` and her removal cue `(130, 165)`,
+    // and camera slot 130 is played only in **blocks 3 and 4**. A civilian
+    // retired at the boundary can meet neither, so her stream never reaches
+    // the `SetHudShutterState 1` that gives the player the gun back for block
+    // 3's four rooms.
+    //
+    // What still removes an actor: its own class — `ActorDespawn`,
+    // `CivilianLeaveField`, `ZombieRetireAndCredit` — and `Walker.reset`,
+    // which is the rebuild path a seek and a stage load take. `spent` in
+    // `render/characters.ts` is what stops a self-despawned actor being built
+    // again while its marker stands, and it says the same thing this comment
+    // does.
     // The preview shots belong to the branch in the block that stored them --
     // every `store_six` in the game sits in a branch block. Carrying one
     // across a block change offers an unrelated shot for the next branch,

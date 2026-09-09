@@ -5656,19 +5656,21 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           gate === 0 && d.dz === 0 && d.dx === 0,
           `gate ${gate} dz ${d.dz.toFixed(3)} dx ${d.dx.toFixed(3)}`);
   }
-  // **The bug this pair was written for.** `SetGlobalB`, `SetAttachMode`,
-  // `SetAttachTarget` and `SetPairA` are unread and do nothing, and all four
-  // used to fall through into `SetScale`'s body — so their operands, small
-  // integers, were reinterpreted as float bit patterns into `obj.scale`.
+  // **The bug this pair was written for.** `SetHudShutterState`,
+  // `SetAttachMode`, `SetAttachTarget` and `SetPairA` all used to fall through
+  // into `SetScale`'s body — so their operands, small integers, were
+  // reinterpreted as float bit patterns into `obj.scale`.
   // `AsFloat(2)` is 2.8e-45, `SkeletonApplyRootMotion` multiplies the root
   // delta by it, and the civilian stopped moving while her legs kept walking.
-  // 125 commands in the shipped streams run one of those four.
+  // 125 commands in the shipped streams run one of those four. The first has
+  // a body of its own now — see the shutter block below — and the other three
+  // are still unread; neither writes `model+0x116C`.
   {
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.RootMotion),
       cmd(CivilianOp.SetPairA, 1, 2),
       cmd(CivilianOp.SetAttachMode, 2),
-      cmd(CivilianOp.SetGlobalB, 1),
+      cmd(CivilianOp.SetHudShutterState, 1),
       cmd(CivilianOp.SetMotion, 12, -1),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),

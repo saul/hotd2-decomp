@@ -93,8 +93,31 @@ export enum CivilianOp {
   SetRouteBranch = 0x19,
   /** `(a, b)` applied only when this civilian still has children. */
   SetChildCue = 0x1A,
-  /** `DAT_009CA0F4`, unless the app state is 10. `[open]`. */
-  SetGlobalB = 0x1B,
+  /**
+   * **Set the HUD shutter, and with it the firing gate.**
+   * `g_bHudShutterState` — `0x009CA0F4` — takes the **low byte** of the
+   * operand, unless `g_app_state` (`0x009C8E98`) is 10:
+   *
+   * ```
+   * 0048BF0A  833d988e9c000a  CMP dword ptr [0x009c8e98], 0xA
+   * 0048BF11  7409            JZ  0x0048bf1c
+   * 0048BF13  8a5604          MOV DL, byte ptr [ESI + 0x4]
+   * 0048BF16  8815f4a09c00    MOV byte ptr [0x009ca0f4], DL
+   * ```
+   *
+   * `HudDrawShutterState` (`FUN_00413970`) picks the change up on its next
+   * pass and raises `g_nFiringGate` for a 1 or drops it at the end of a 3 —
+   * so **a civilian's script can hand the player the gun back inside a
+   * letterboxed scene the evt script never reopens.** Stage 1 block 1 is
+   * exactly that: step 6 closes the shutter, step 8's `wait_enemies_alive`
+   * stands with the tutorial captor alive and the gun dead, and the man it
+   * has just killed runs a killed script whose fourth command is this one.
+   *
+   * 60 commands in the shared 136-block table run it, 30 with 1 and 30 with 3.
+   * It was `SetGlobalB` and `[open]` on the grounds that the target global had
+   * not been read; it had been named for two sessions.
+   */
+  SetHudShutterState = 0x1B,
   /** Raise one `g_script_flags` byte. */
   SetScriptFlag = 0x1C,
   /** `EvtOpPlayDialogue2D` — the civilian's voice line. */

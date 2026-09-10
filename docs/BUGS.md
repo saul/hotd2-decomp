@@ -6,7 +6,7 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Fifty-three reports: **thirty-nine fixed, four half-done, eight open, and
+Fifty-three reports: **thirty-nine fixed, five half-done, seven open, and
 two `[not-a-bug]`, each of which carried a real defect underneath it** (one of
 those two is counted as fixed as well, its bullet carrying both markers, so
 forty are done).
@@ -1373,43 +1373,41 @@ investigation ruled out.
   Stage 3's missing roller shutter above is the same gap with nothing left
   over, which is why they should be taken together.
 
-- `[open]` **`0x0A68 znjoe` and the rest of its character type should have a
-  worm that bursts from the chest, and do not.** `znjoe` is one of the class
-  0x30 character variants and it is character type **0x0A** — `0x0A68` is the
-  spawn address, one of stage 5's seven. One piece of corroboration already in
-  the tree: the sound records name a **worm**, `WORM_TUBU`, and the sound table
-  is how several of this game's objects were identified in the first place.
+- `[part]` **`znjoe` releases a creature from its body when you shoot it, and
+  the port has none of it.** The whole chain is read and named now; none of it
+  is ported. `0x0A68` is a spawn address — `znjoe` is character type **0x0A**,
+  one of stage 5's seven.
 
-  **The engine does have a creature that comes out of another creature, and it
-  is not this character type.** `EnemyZombieInitByCharType` (`FUN_00452FD0`)
-  has an arm for type **0x12** that, unless `obj+0x34` bit `0x10000000` is
-  already set, calls `ActorAlloc(FUN_00452DA0, 0x13F4)`, copies the parent's
-  0x18-dword transform block into it, points its `+0x13A4` back at the parent,
-  gives it the parent's behaviour set, and stamps it **character type 9** with
-  `obj+0x11C = 999`. `case 9` in the same switch is that child's own init. A
-  child actor parented to its host is the shape of the report.
+  **`ActorReactToHit` (`FUN_004543F0`) is the one place in the image that tests
+  a character type against 0x0A**, and the port already has that routine, in
+  `game/combat/resolve_hit.ts`, without this arm. Hit result 1, zone 1, and
+  `obj+0x34` bit `0x400` still clear: it raises `0x4000400` as a once-only
+  latch, pays the shooter 0x50, records who fired at `obj+0x131C`, and drops
+  the actor into **class 0x30 state 0x19** instead of staggering.
 
-  But the switch has **no arm for 0x0A**, so whatever `znjoe` does is elsewhere
-  — a death state, `ZombieOnShot`, or the gore path — and that is where this
-  report goes next.
+  **State 0x19 is `ZombieStateReleaseBodyCreature` (`FUN_00457FB0`)** and no
+  spawn record reaches it. It walks the zombie in to its outer approach ring,
+  plays motion `0x1DF`, waits `rand() % 10 + 0x5F` — 95 to 104 frames — and
+  then, on one frame, swaps a bone's draw slot to the u16 at
+  `g_character_parts[type] + 0x0E` and calls `SpawnBodyCreature`
+  (`FUN_0043E720`). It hands over to state 6.
 
-  **The 0x12 arm was read out to the end anyway, and it is a whole unported
-  enemy.** Type 0x12 is `znele`, thirteen spawns, all in stage 6. The actor it
-  makes is character type **9**, which is `znjikken1.bin` — *experiment 1* —
-  and has **no spawn record anywhere in the game**: it exists only because that
-  arm creates it. `EnemyZombieInit` gives it `ZombieTwinFollowHost`
-  (`FUN_00453290`) rather than the ordinary update and does **not** count it in
-  `g_enemies_alive`, so it is not a room-clear blocker. That routine copies the
-  host's whole transform block, clip pair and motion every frame unless the
-  host is mid-attack, so the twin wears the host's pose exactly, and it
-  despawns when its own `obj+0x138C` runs out or the host raises `0x4000000`.
+  **The creature is a countable enemy.** `BodyCreatureInit` (`FUN_0043E790`)
+  raises **both** `g_enemies_present` and `g_enemies_alive`, so every one the
+  port fails to spawn is one a room gate never has to account for.
+  `BodyCreatureUpdate` (`FUN_0043E880`) rides the host's bone matrix, then arcs
+  at the player along a stored start/end pair with a sine in y, easing by a
+  step that decays 0.925 a frame. Shoot it and it plays `COMMON\MEET02_22.WAV`,
+  pays 0x50 and falls; miss it and thirty frames after it arrives it **damages
+  the player** through `FUN_00415300(player, 1, 9)`. Either way it falls at
+  0.010888 a frame, drops both counters below `y = -3`, and despawns. It draws
+  as a **forty-slot sprite loop from `0x1D31`**.
 
-  Porting it is two halves and neither is a line edit: the exporter emits only
-  character types that have **placements**, so type 9's model and motions reach
-  no bundle and would need a rule for types created at runtime; and the arm and
-  the update are new `game/class30/` code. It is not this report — a twin
-  wearing the host's pose is not a worm leaving a chest — but it is a real gap
-  and it was found looking for one.
+  Named and annotated; not ported. Porting it is a new actor with no class id
+  — the thrown weapon is the precedent — plus the state, the arm in
+  `ActorReactToHit`, the bone swap, and forty sprite slots the exporter does
+  not carry. `[open]` The 0x504-byte tail `BodyCreatureInit` allocates holds
+  the flight's start and end and has not been read.
 
 - `[open]` **The three zombies that should travel with the car at
   `?stage=5&mode=play&block=2&step=2&op=50&frame=599` stand far away instead.**

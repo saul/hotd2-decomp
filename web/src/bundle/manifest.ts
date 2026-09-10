@@ -22,6 +22,12 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 6: the placements carry `class11`, `class43` and `class51` — the frog's
+ * command list, the owl's two descriptor bytes and the fish's speeds, bob and
+ * timings. Three enemy classes that had no module, and the fish's group header
+ * is in there too: a record whose `subtype` is 6 is not a fish at all, it is
+ * the water level.
+ *
  * 5: `<stage>.script.json` carries `entries` and `exits` -- where a stage can
  * be entered, and where each of its endings sends the next one. Two stages have
  * more than one entry and no bundle before this could say so.
@@ -33,7 +39,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 5;
+export const SUPPORTED_FORMAT = 6;
 
 /**
  * The exporter's digest of the declarations in this directory.

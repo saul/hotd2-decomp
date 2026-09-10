@@ -55,6 +55,7 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 import type { CamPaths } from "../game/camera/curve";
 import { G } from "../game/globals";
+import { OwlState } from "../game/class43/state";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 
@@ -76,6 +77,18 @@ function DrawSlotFor(a: Actor): number | null {
     case SpawnClass.Mouse:
       // `sub+0x20` — the frame of the ten-slot strip `mouse.bin` holds.
       return a.mouse.frame || null;
+    case SpawnClass.FlyingEnemy:
+      // The body alone. `OwlDrawBodyChain` (`FUN_00447C20`) draws sixteen
+      // slots in one chain — a body, a thirty-frame wing beat, a head strip
+      // and four limb chains — and this layer clones one node per actor, so
+      // the rest of the owl is a renderer job. See `game/class43/`.
+      return a.owl.state === OwlState.Dead ? 0xbc0 : 0xbbf;
+    case SpawnClass.WaterEnemy:
+      // `sub+0x6E` — `fish.bin`'s twenty-frame swim strip while it is alive,
+      // and entry 0 or 1 once it is a corpse. `FishDraw` (`FUN_00439860`)
+      // also draws a **flattened silhouette** on the water when the fish is
+      // below it and `sub+0x6A` bit 2 is set; that second draw is not here.
+      return a.fish.frame || null;
     case SpawnClass.ScriptedHumanoid:
       // Only the object-path arm. The three fixed-point arms draw at points
       // the routine hardcodes, so the rig writer already exports them as

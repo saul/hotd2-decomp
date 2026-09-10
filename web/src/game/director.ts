@@ -8,7 +8,9 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
-import { makeActor, type Actor } from "./actor";
+import type { Actor } from "./actor";
+import { ActorSpawn } from "./spawn";
+export { ActorInitFlags, ActorSpawn } from "./spawn";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { ActorRegisterCameraPoint, CameraPointRiseFor, CameraTrackEnemiesTick,
@@ -38,41 +40,6 @@ import { vec3, type Vec3 } from "./vec";
 
 const GAME_HZ = 60;
 
-/** Put one actor in the pool and run its class's `Init`. */
-export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
-                           name: string,
-                           descriptor?: Partial<Actor>,
-                           rng?: Rng): Actor {
-  const obj = makeActor(at, cls, charType, name);
-  // The descriptor tail is what the class's own Init reads, so it goes on
-  // before Init runs -- `EnemyZombieInit` starts the actor in `initialState`.
-  if (descriptor) Object.assign(obj, descriptor);
-  ActorInitFlags(obj, obj.flags);
-  g_class_handlers[cls]?.init(obj, rng);
-  G.g_object_list.push(obj);
-  return obj;
-}
-
-/**
- * `ActorInitFlags` — `FUN_00408970`. The spawn record's flags word becomes the
- * actor's.
- *
- * `obj+0x34 = flags | 1` and `obj+0x38 = 0`, run by `SpawnFromDescriptor`
- * **before** the class's own `Init`, which then ORs its bits on top. The port
- * carried none of that word for a long time, and the bit that showed was
- * `0x20000`: `ZombiePushOutOfWorldAndActors` skips the per-frame ground snap
- * while it is set, so a spawn placed on a ledge stays on it. Ninety-five
- * shipped spawns set it, and without it every one of them was dropped to the
- * script's ground plane on its first frame — stage 1's axe man fell sixty-two
- * units off his platform and threw from behind the wall he had been standing
- * on.
- *
- * The other bits the shipped records use, for the same reason they are carried
- * whole rather than picked over: `0x8000` takes the actor out of the shot test
- * and the crowd push, `0x8000000` picks between `row[2]` and `row[3]`,
- * `0x40000` tells `EnemyZombieInit` not to compute the aim angles, and
- * `0x4000` freezes the pose.
- */
 /**
  * Take an actor out of the world because the **script stopped listing it**.
  *
@@ -99,9 +66,6 @@ export function RetireUnlistedActor(obj: Actor): void {
   else ActorDespawn(obj);
 }
 
-export function ActorInitFlags(obj: Actor, spawnFlags: number): void {
-  obj.flags = spawnFlags | 1;
-}
 
 /**
  * The fields of a script spawn this needs. `script/walker`'s `ActiveSpawn`
@@ -274,6 +238,36 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                            { class52: pl.class52 ?? null, yaw: pl.yaw ?? 0 },
                            rng);
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
+      a.visible = true;
+      continue;
+    }
+    // Class 0x43 -- the owl. Its handler is a placer that builds a 0x2A0-byte
+    // object with no character type, so nothing in the character path can make
+    // one either.
+    if (s.class === SpawnClassValue.FlyingEnemy) {
+      if (!pl.class43) continue;
+      const a = ActorSpawn(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
+                           { class43: pl.class43, yaw: pl.yaw ?? 0,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      continue;
+    }
+    // Class 0x51 -- the fish. Drawn by asset slot from `fish.bin`, so it has
+    // no character type and never reaches `render/characters.ts` either.
+    // A **group header** goes through here as well: its `FishInit` sets
+    // `g_water_level` and kills the actor, and skipping it would leave the
+    // water where the previous scene left it.
+    if (s.class === SpawnClassValue.WaterEnemy) {
+      if (!pl.class51) continue;
+      // The position goes in the **descriptor**, not after the spawn: it is
+      // the one class here whose `Init` reads it, into `sub+0x00..0x08`.
+      const a = ActorSpawn(s.at, SpawnClassValue.WaterEnemy, -1, "fish",
+                           { class51: pl.class51, yaw: pl.yaw ?? 0,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
       a.visible = true;
       continue;
     }

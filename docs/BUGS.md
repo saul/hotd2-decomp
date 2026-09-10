@@ -1375,12 +1375,24 @@ investigation ruled out.
 
 - `[open]` **`0x0A68 znjoe` and the rest of its character type should have a
   worm that bursts from the chest, and do not.** `znjoe` is one of the class
-  0x30 character variants, `0x01`–`0x14` in `docs/formats/spawns.md`. One piece
-  of corroboration already in the tree: the sound records name a **worm**,
-  `WORM_TUBU`, and the sound table is how several of this game's objects were
-  identified in the first place. The reporter asked for the whole of the
-  class's missing behaviour, not only the worm, so this wants the character
-  type's arms read end to end rather than one effect added.
+  0x30 character variants and it is character type **0x0A** — `0x0A68` is the
+  spawn address, one of stage 5's seven. One piece of corroboration already in
+  the tree: the sound records name a **worm**, `WORM_TUBU`, and the sound table
+  is how several of this game's objects were identified in the first place.
+
+  **The engine does have a creature that comes out of another creature, and it
+  is not this character type.** `EnemyZombieInitByCharType` (`FUN_00452FD0`)
+  has an arm for type **0x12** that, unless `obj+0x34` bit `0x10000000` is
+  already set, calls `ActorAlloc(FUN_00452DA0, 0x13F4)`, copies the parent's
+  0x18-dword transform block into it, points its `+0x13A4` back at the parent,
+  gives it the parent's behaviour set, and stamps it **character type 9** with
+  `obj+0x11C = 999`. `case 9` in the same switch is that child's own init. A
+  child actor parented to its host is the shape of the report.
+
+  But the switch has **no arm for 0x0A**, so whatever `znjoe` does is elsewhere
+  — a death state, `ZombieOnShot`, or the gore path. The next step is class
+  0x30's hit and death arms read for this character type, and `FUN_00452DA0`
+  read in any case, since it is an unported creature either way.
 
 - `[open]` **The three zombies that should travel with the car at
   `?stage=5&mode=play&block=2&step=2&op=50&frame=599` stand far away instead.**

@@ -114,6 +114,12 @@ CHECKS: list[Check] = [
     Check("test:camera", "web", ["npm", "run", "--silent", "test:camera"],
           "that a camera path seats where the exe's own evaluation puts it",
           NEEDS_BUNDLE),
+    Check("animals", "web", ["npm", "run", "--silent", "animals"],
+          "that the frog, the owl and the fish are placed from a real bundle "
+          "and leave their opening state -- none of the three is a skinned "
+          "enemy the character layer can build, and two have no character "
+          "type at all",
+          NEEDS_BUNDLE),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",

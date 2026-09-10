@@ -42,7 +42,7 @@ import { build, goreEntry, rigEntry } from "./charbuild";
 import type { Character } from "./charbuild";
 import { CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, bake,
          humanoidMotionIds, introFor, motionFor,
-         BOSS4_CLIPS } from "./charmotion";
+         BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
          difficultyTables, playerDamage, reactionGroups,
@@ -785,6 +785,8 @@ export async function resolveForStage(
     }
     if (cls === 0x31) entryClips.push(...class31MotionIds(class31));
     if (cls === 0x19) entryClips.push(...BOSS4_CLIPS);
+    // The frog's whole bank -- see `FROG_CLIPS`.
+    if (cls === 0x11) entryClips.push(...FROG_CLIPS);
     // The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
     if (cls === 0x14) entryClips.push(...CLASS14_MOTIONS);
     // The emerge clip, the submerged pose it holds first, and the two clips

@@ -560,6 +560,17 @@ export const G = {
    * `ActorByAt` still answers.
    */
   g_summoned_actor_at: -1,
+  /**
+   * `[port-only]` — the spawn addresses `SpawnSlotActors` has already built.
+   *
+   * There is no such list in the engine, and there cannot be: the spawn opcode
+   * builds an object once, in the step that holds it, and never looks again.
+   * The port materialises slot-drawn actors from the walker's live spawn list
+   * every frame, so it needs to remember which of them it has made — otherwise
+   * an actor that despawns under its own state machine comes straight back.
+   * An entry is dropped when the script stops listing that spawn.
+   */
+  g_slot_actors_built: [] as number[],
 
   // -- the owls, class 0x43 ----------------------------------------------
   /**
@@ -1108,6 +1119,7 @@ export function ResetGameGlobals(): void {
   G.g_water_level = -24.9;
   G.g_water_attack_slots = [0, 0, 0, 0];
   G.g_summoned_actor_at = -1;
+  G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;
   G.g_thrown_weapons = [];
   G.g_rain_particles = [];

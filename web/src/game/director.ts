@@ -229,11 +229,28 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                                 rng: Rng): void {
   const placements = T.chars?.placements;
   if (!placements?.length) return;
+  // `[port-only]` — **build each listed spawn once**, and forget it when the
+  // script stops listing it. This routine runs every frame over the walker's
+  // list, and `GameUpdate` prunes a despawned actor from the pool at the end of
+  // the frame, so without this an actor that leaves under its own state machine
+  // is rebuilt on the next one. Class 0x52's mouse and class 0x33's carrier
+  // never despawn while they are still listed, which is why it did not show
+  // until class 0x43 and class 0x51 arrived: a fish that falls back and goes
+  // was rebuilt for ever, and a class-0x51 group header — an actor that exists
+  // only to set the water level and die — was rebuilt sixty times a second.
+  //
+  // The engine has no such bookkeeping because it has no such routine: the
+  // spawn opcode runs once, in the step that holds it.
+  const listed = new Set(spawns.map((s) => s.at));
+  G.g_slot_actors_built = G.g_slot_actors_built.filter((at) => listed.has(at));
+  const built = new Set(G.g_slot_actors_built);
   for (const s of spawns) {
+    if (built.has(s.at)) continue;
     if (ActorByAt(s.at)) continue;
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
     if (s.class === SpawnClassValue.Mouse) {
+      G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.Mouse, -1, "mouse",
                            { class52: pl.class52 ?? null, yaw: pl.yaw ?? 0 },
                            rng);
@@ -246,6 +263,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
     // one either.
     if (s.class === SpawnClassValue.FlyingEnemy) {
       if (!pl.class43) continue;
+      G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
                            { class43: pl.class43, yaw: pl.yaw ?? 0,
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
@@ -263,6 +281,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
       if (!pl.class51) continue;
       // The position goes in the **descriptor**, not after the spawn: it is
       // the one class here whose `Init` reads it, into `sub+0x00..0x08`.
+      G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.WaterEnemy, -1, "fish",
                            { class51: pl.class51, yaw: pl.yaw ?? 0,
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
@@ -281,6 +300,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
     // rather than a default arm that would run the wrong handler.
     if (s.class === SpawnClassValue.ScriptedScenery) {
       if (!pl.class33) continue;
+      G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
                            `scenery ${pl.hp}`,
                            { class33: pl.class33, hp: pl.hp, maxHp: pl.hp,

@@ -65,7 +65,7 @@
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, CountFlag, type Actor } from "../actor";
 import { QueryGroundHeightAt } from "../coli";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount } from "../combat/counts";
 import { PlayerTakeDamage } from "../combat/player";
@@ -468,6 +468,12 @@ export function FishInit(obj: Actor, _rng?: Rng): void {
   if (p.subtype === FISH_GROUP_HEADER) {
     for (let i = 0; i < FISH_ATTACK_SLOTS; i += 1) G.g_water_attack_slots[i] = 0;
     G.g_water_level = p.water_level;
+    // `[port-only]` — a header never joins either counter, so it is marked as
+    // having already left them. Without it the port's dead sweep, which cannot
+    // know the difference, gives back two counts the actor never took, and a
+    // header that is rebuilt while its spawn is still listed takes the scene's
+    // enemy count negative one pair a frame.
+    obj.flags38 |= CountFlag.LeftAlive | CountFlag.LeftPresent;
     ActorDespawn(obj);
     return;
   }

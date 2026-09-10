@@ -647,6 +647,14 @@ export function combatTables(tables: ExeTables): Record<string, unknown> {
       hurt: named([v[5], v[6]]),
       kill: named([v[7], v[8]]),
       head: named([v[9], v[10]]),
+      // **Kind 3, the attack cry**, and the table's shape changes here: kinds
+      // 0-2 are one id per voice set, and this is a *pair* per set that the
+      // routine tosses a coin within (`rand() & 1` at `0x0040A7B8` and
+      // `0x0040A7E0`). So it is `[set A pair, set B pair]` rather than
+      // `[set A, set B]`. The exporter has always read all fifteen dwords and
+      // emitted eleven of them; these four were the ones nothing carried, and
+      // without them a zombie swung silently.
+      attack: [named([v[11], v[12]]), named([v[13], v[14]])],
     },
     voice_set_a_types: [...VOICE_SET_A_TYPES],
     // `FUN_00407950` and `FUN_004073B0`, keyed by collision material.

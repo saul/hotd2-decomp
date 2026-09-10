@@ -6,14 +6,15 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Fifty-three reports: **thirty-nine fixed, three half-done, ten open, and
+Fifty-three reports: **thirty-eight fixed, four half-done, nine open, and
 two `[not-a-bug]`, each of which carried a real defect underneath it** (one of
-those two is counted in the thirty-nine, its bullet carrying both markers).
+those two is counted as fixed as well, its bullet carrying both markers, so
+thirty-nine are done).
 The five reported on 2026-09-07 from stage 3's block 2 are all fixed, and
 four of the five were far wider than the place they were seen from. **Nine
-arrived on 2026-09-09**; the axe's spin axis and the sound settings are fixed
-and the other seven are open, which is most of the open column and the reason
-it grew.
+arrived on 2026-09-09**; the axe's spin axis and the sound settings are fixed,
+the zombies' attack cry is fixed and their idle noise is not, and the other six
+are open — which is most of the open column and the reason it grew.
 The arithmetic is the report bullets themselves -- one `- ` bullet per
 report, opening with its marker -- so `grep -cE '^- +.\[' BUGS.md` is the
 total and the same grep per marker is the split. It used to be quoted as
@@ -31,13 +32,15 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ## What is left
 
-* **Nine reports arrived on 2026-09-09; two are fixed.** The axe's spin axis
-  — the two throwing families tumble about different axes and the port turned
-  both about Y — and the sound settings, which are stored state now with the
-  speaker in the top bar and the slider in the sidebar. Still open: a missing
-  roller shutter in stage 3, silent zombies, an undrawn van and a lift that
-  rises too early in stages 5 and 6, `znjoe`'s missing chest worm, and two
-  cars whose zombies are not on them. They are one section of their own below, with the
+* **Nine reports arrived on 2026-09-09; three are done or half-done.** The
+  axe's spin axis — the two throwing families tumble about different axes and
+  the port turned both about Y. The sound settings, which are stored state now
+  with the speaker in the top bar and the slider in the sidebar. And the
+  zombies' **attack** cry, which is `ActorPlayHitVoice` kind 3 and was neither
+  exported nor raised; their **idle** noise is still open and is a different
+  mechanism. Still open: a missing roller shutter in stage 3, an undrawn van
+  and a lift that rises too early in stages 5 and 6, `znjoe`'s missing chest
+  worm, and two cars whose zombies are not on them. They are one section of their own below, with the
   reporter's locators. **The stage 2 one is reported as making a branch
   unplayable** and is the next to take; a session's worth of driving narrowed
   it a long way without naming the actor, and what was ruled out is recorded on
@@ -1279,13 +1282,38 @@ investigation ruled out.
   animated is the first thing to establish, and the answer decides which half
   of the tree it lives in.
 
-- `[open]` **Zombies are silent, both idle and attacking.** Consistent with the
-  tree rather than surprising in it: `game/class30/` emits one `sound.play` in
-  the whole directory, from `target.ts`, and `entrance.ts` already carries a
-  declared `[diverges]` saying the engine's landing plays `0x2A16A9` (or
-  `0x1C16A9`) and the port plays nothing. So this is not one missing call, it
-  is the class's sound arm never having been ported. `docs/formats/sound.md`
-  and `PlaySoundId` are where it starts.
+- `[part]` **Zombies were silent when they attacked; the idle half is still
+  open.** The attacking half is fixed and the reason it was missing is worth
+  keeping.
+
+  `ActorPlayHitVoice` (`FUN_0040A6F0`) is the game's **one** voice routine —
+  five kinds, twenty-three call sites — and the port had three of its kinds,
+  in `render/shooting.ts`, because the shot path needed them. **Kind 3 is the
+  attack cry**, and nothing anywhere raised it: `ZombieStateStrike`
+  (`FUN_00455A40`) calls it at `0x00455B8A` on the frame the strike clip
+  starts, and `ZombieStateStandAndThrow` (`FUN_00459080`) at `0x004592B0` on
+  the throw.
+
+  It is also the kind the exporter dropped. `g_hit_voice_table` is fifteen
+  dwords and the exporter read all fifteen and emitted eleven; the four it left
+  are kind 3's, and their shape is why they stood out once looked at — kinds
+  0-2 are one id per voice set and kind 3 is a **pair** per set that the
+  routine coin-flips within. The four resolve to `ZOMBIE_030_16`,
+  `ZOMBIE_28_5_16`, `ZOMBIE_035_16` and `ZOMBIE_003_16`.
+
+  `game/combat/voice.ts` is the transcription, wired into the strike and the
+  throw, with five assertions in `web/test/port.test.ts`. `[diverges]` The
+  routine is still implemented twice: `verify_layers.py`'s
+  `render-drives-the-port` refuses `render/` to call an engine function, and it
+  is right — the engine plays kinds 0-2 from `ActorShotFeedback`
+  (`FUN_00454050`) and `FUN_00453EB0`, both `game/` code — so consolidating
+  means moving the shot voice into `combat/feedback.ts`, which puts its pick on
+  the world generator and into the snapshot. Both copies say so.
+
+  **Still open: the idle noise.** None of the five kinds is one — all five fire
+  on an event — so whatever a standing zombie groans is a different mechanism
+  and has not been found. `[open]` kind 4 is unported for the same reason:
+  nothing here has read what calls it.
 
 - `[fixed]` **Sound settings did not survive a reload, and the two controls
   were in the wrong places.** A change request rather than a defect, recorded

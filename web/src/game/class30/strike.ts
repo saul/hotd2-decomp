@@ -29,6 +29,7 @@ import { ZombieGiveUpAttack } from "./leave";
 import { ActorFacePlayerTarget } from "../actor_turn";
 import { ActorStartFade } from "./motion_cue";
 import { MotionFade, StrikeSub, ZombieState } from "./states";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 
 /**
  * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
@@ -144,6 +145,12 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
     }
     obj.action = { motion: atk.strike, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
+    // `FUN_0040A6F0(obj, 3)` at `0x00455B8A`, on the same frame the strike
+    // clip starts and immediately after `FUN_004119A0` sets it. This is what
+    // made zombies swing in silence: the routine was ported for the shot
+    // voices only, and nothing anywhere raised kind 3.
+    ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                      (id) => events?.emit("sound.play", { id }));
     // Where the clip finishes, not where it peaks: the attack's own distance
     // less the clip's net travel.
     const m0 = MotionOf(obj, atk.strike);

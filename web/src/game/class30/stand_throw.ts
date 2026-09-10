@@ -37,6 +37,7 @@ import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorSetMotionBlended, ZombieSetMotionIfIdle } from "./motion_cue";
 import { SpawnZombieThrownWeapon } from "./throw";
 import { MotionFade, ZombieState } from "./states";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 
 /**
  * The body condition that means "this one stands and throws".
@@ -188,6 +189,11 @@ export function ZombieStateStandAndThrow(obj: ZombieActor, eye: Vec3, rng: Rng,
     obj.zom.throwHand = ZombiePickThrowingHand(obj, rng);
     const a = AttackListOf(obj)[String(obj.attack)];
     if (a) ActorSetMotionBlended(obj, a.strike, 0, 4);
+    // `FUN_0040A6F0(obj, 3)` at `0x004592B0`, right after the throw clip is
+    // set and before the sub advances -- the same cry `ZombieStateStrike`
+    // opens a swing with.
+    ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                      (id) => events?.emit("sound.play", { id }));
     obj.sub = Sub.Release;
     return;
   }

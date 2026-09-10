@@ -75,6 +75,8 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
   from "../src/game/class30/stand_throw";
 import { ThrownWeaponUpdate, THROWN_SPIN_RATE }
   from "../src/game/class31/projectile";
+import { ActorPlayHitVoice, ActorVoice }
+  from "../src/game/combat/voice";
 import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type ScriptedSceneryActor,
@@ -8784,10 +8786,34 @@ console.log("\nthe strike anchor and the cooldown it gates:");
                      { state: ZombieState.Strike, sub: StrikeSub.Lunge,
                        attack: 1, pos: vec3(0, 0, atk.distance + 20) });
     z.zom.hasCooldown = true;
-    ZombieStateStrike(z, EYE, new Rng(4));
+    // The end of the attack cry: `ZombieStateStrike` (`FUN_00455A40`) calls
+    // `ActorPlayHitVoice(obj, 3)` at `0x00455B8A`, on the frame the strike
+    // clip is set. The routine itself is checked above; this is the wiring,
+    // and it is the half that was missing -- the port had the routine for the
+    // shot voices and nothing anywhere raised kind 3.
+    const cried: number[] = [];
+    const bus = new Events();
+    bus.on("sound.play", (d) => cried.push(d.id));
+    // This fixture's `CHARS.combat` is undefined, and `ActorPlayHitVoice`
+    // reads the table off it -- so without this the check would pass on a
+    // silent build and fail on a working one. Put a table in for the call.
+    const noCombat = T.chars;
+    SetGameTables({
+      ...CHARS,
+      combat: {
+        impact: [], head_impact: [],
+        voice: { hurt: [], kill: [], head: [],
+                 attack: [[{ id: 40, file: "" }], [{ id: 50, file: "" }]] },
+        voice_set_a_types: [], ricochet: {},
+      },
+    } as unknown as CharactersJson);
+    ZombieStateStrike(z, EYE, new Rng(4), bus);
     check("a cooldown-armed attacker starts the swing where it stands",
           z.sub === StrikeSub.Swinging && z.action?.motion === atk.strike,
           `${z.sub}/${z.action?.motion}`);
+    check("...and cries out as the swing starts",
+          cried.length === 1, `${cried.length} sounds: ${cried.join(",")}`);
+    if (noCombat) SetGameTables(noCombat);
   }
   {
     clear();
@@ -10104,6 +10130,76 @@ console.log("\na stashed path is played by a hook that steps first:");
  * direction `RAY` points in every other section of this file, so `viewPoint`
  * and `viewSpaceOfPoint` are one sign flip each.
  */
+/**
+ * **`ActorPlayHitVoice` kind 3 is the attack cry**, and nothing raised it.
+ *
+ * `FUN_0040A6F0` has five kinds. The port had three of them, in
+ * `render/shooting.ts`, because the shot path needed them -- so a zombie made
+ * a noise when you shot it and none at all when it swung at you, which is how
+ * it was reported. Kind 3 is also the only kind whose table entry is a *pair
+ * per voice set* rather than one id per set, and the exporter had been reading
+ * all fifteen dwords of `g_hit_voice_table` and emitting eleven.
+ *
+ * The two ends are checked here: that the set split is the engine's, and that
+ * a pick comes out of the right pair. `ZombieStateStrike` raising it is
+ * checked by the sound reaching the event bus during a real strike.
+ */
+console.log("\nthe attack cry:");
+{
+  const heard: number[] = [];
+  const rng = new Rng(7);
+  SetGameTables({
+    ...CHARS,
+    combat: {
+      impact: [{ id: 1, file: "" }],
+      head_impact: [{ id: 2, file: "" }],
+      voice: {
+        hurt: [{ id: 10, file: "" }, { id: 11, file: "" }],
+        kill: [{ id: 20, file: "" }, { id: 21, file: "" }],
+        head: [{ id: 30, file: "" }, { id: 31, file: "" }],
+        attack: [[{ id: 40, file: "" }, { id: 41, file: "" }],
+                 [{ id: 50, file: "" }, { id: 51, file: "" }]],
+      },
+      // The engine's own list, at `0x0040A6F5`.
+      voice_set_a_types: [0, 2, 5, 6, 9, 0x0e, 0x0f, 0x10, 0x11],
+      ricochet: {},
+    },
+  } as unknown as CharactersJson);
+  const say = (id: number) => heard.push(id);
+
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 2 }, ActorVoice.Attack, rng, say);
+  check("a set-A character cries out of set A's pair",
+        heard.length === 1 && (heard[0] === 40 || heard[0] === 41),
+        JSON.stringify(heard));
+
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 1 }, ActorVoice.Attack, rng, say);
+  check("...and a set-B character out of set B's",
+        heard.length === 1 && (heard[0] === 50 || heard[0] === 51),
+        JSON.stringify(heard));
+
+  // Kind 3 is the only one that plays a *single* sound: the other three open
+  // with an impact and the routine's tail plays no second id for this one.
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 1 }, ActorVoice.Hurt, rng, say);
+  check("a hurt voice is an impact and a voice, which the cry is not",
+        heard.length === 2 && heard[0] === 1 && heard[1] === 11,
+        JSON.stringify(heard));
+
+  // A bundle written before the four ids were read carries no `attack`, and
+  // then the swing has to stay silent rather than throw.
+  heard.length = 0;
+  SetGameTables({
+    ...CHARS,
+    combat: { impact: [], head_impact: [], voice: { hurt: [], kill: [], head: [] },
+              voice_set_a_types: [], ricochet: {} },
+  } as unknown as CharactersJson);
+  ActorPlayHitVoice({ charType: 1 }, ActorVoice.Attack, rng, say);
+  check("an older bundle with no `attack` is silent, not broken",
+        heard.length === 0, JSON.stringify(heard));
+}
+
 console.log("\nthe shot effects:");
 {
   const rng = new Rng(26);

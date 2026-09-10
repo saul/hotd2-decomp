@@ -472,8 +472,19 @@ export interface CombatJson {
   impact: NamedSound[];
   /** ...replaced by one of these two on a headshot kill. */
   head_impact: NamedSound[];
-  /** `[set A, set B]` per event; `voice_set_a_types` says which a type takes. */
-  voice: { hurt: NamedSound[]; kill: NamedSound[]; head: NamedSound[] };
+  /**
+   * `[set A, set B]` per event; `voice_set_a_types` says which a type takes.
+   *
+   * `attack` is the exception and is `[set A pair, set B pair]`:
+   * `ActorPlayHitVoice` (`FUN_0040A6F0`) kind 3 tosses a coin **within** the
+   * set rather than playing one id, so each set carries two.
+   */
+  voice: {
+    hurt: NamedSound[]; kill: NamedSound[]; head: NamedSound[];
+    /** Kind 3 — the cry a strike or a throw starts with. Absent before it was
+     * read; a bundle without it leaves the swing silent. */
+    attack?: NamedSound[][];
+  };
   voice_set_a_types: number[];
   /** `FUN_00407950`: collision material → the ricochet it plays. */
   ricochet: Record<string, NamedSound>;

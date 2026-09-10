@@ -46,12 +46,39 @@ export type Vec3 = [number, number, number];
  * camera is on one of `camPaths`. Those are `cp_` slots in the same 418-slot
  * space as `slot` itself, which is what makes them usable as a per-stage gate.
  */
+/**
+ * The evaluation time a route is parked at, or null for the clamped frame.
+ *
+ * `frame: "zero"` and `holdFrame: 0` are **one fact** stated two ways, and
+ * only the second is a field anything read — see {@link Route.frame}. A
+ * function rather than an expression inline in the emit loop so that
+ * `test/export.test.ts` can hold it to that, which is the thing that was
+ * missing when the two disagreed.
+ */
+export function holdFrameOf(route: Route): number | null {
+  return route.holdFrame ?? (route.frame === "zero" ? 0 : null);
+}
+
 export interface Route {
   /** `op_` slot passed to CamEvalObjectPath6. */
   slot: number;
   /** `cp_` slots that select this route. */
   camPaths?: number[];
-  /** "clamped", "zero", or a rule. */
+  /**
+   * How the routine picks the evaluation time: `"clamped"`, `"zero"`, or a
+   * rule in prose.
+   *
+   * **`"zero"` is not prose, and it used to be treated as if it were.** It
+   * says the routine passes a literal `0.0f`, which is the same statement
+   * {@link Route.holdFrame} makes in the field the exporter actually reads —
+   * and both rigs that carried it, `obj_48f050` and `obj_48f560`, set this and
+   * not that. So the reading was recorded and the mechanism was not wired, and
+   * both rode the camera frame up a path the engine parks them on. That is
+   * what made stage 6's lift ascend the moment its shot began.
+   *
+   * `holdFrame` is derived from it now when it is absent, so the two cannot
+   * disagree again. Everything else here stays prose.
+   */
   frame?: string;
   /**
    * Evaluation time when the routine passes a **literal** rather than the
@@ -417,7 +444,7 @@ export async function resolveForStage(
     for (const slot of rig.pathSlots ?? []) take(slot, []);   // no cam gate
     for (const route of rig.routes ?? []) {
       take(route.slot, route.camPaths ?? [], route.bias ?? [0, 0, 0],
-           route.holdFrame ?? null, route.note ?? "", route.stopFrame ?? null);
+           holdFrameOf(route), route.note ?? "", route.stopFrame ?? null);
     }
 
     const fixed: RigFixed[] = (rig.fixedPoses ?? [])

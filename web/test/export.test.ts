@@ -37,6 +37,8 @@ import { resolveCase, segments } from "../src/hod2lib/io";
 import { dumps, dumpsIndented, dumpsStrict, dumpsTight } from "../src/hod2lib/pyjson";
 import { crc32 } from "../src/hod2lib/png";
 import { zipBlob } from "../src/app/install/zip";
+import { RIGS } from "../src/hod2lib/rigs_data";
+import { holdFrameOf } from "../src/hod2lib/rigs";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -281,6 +283,45 @@ console.log("\nzip: an archive the platform can open");
   check("crc32 matches the known value for 'hello'",
         crc32(new TextEncoder().encode("hello")) === 0x3610a686,
         crc32(new TextEncoder().encode("hello")).toString(16));
+}
+
+// -- a rig route parked on its path stays parked ---------------------------
+
+/**
+ * **A `Route` that says `frame: "zero"` must emit `hold_frame: 0`.**
+ *
+ * Those are two spellings of one fact — the routine passes a literal `0.0f` to
+ * `CamEvalObjectPath6`, so the object sits at one point on the path — and only
+ * the second is a field the exporter reads. Both routes that carried it,
+ * `obj_48f050` on `op_st4` 371 and `obj_48f560` on `op_st6` 386, set the prose
+ * one and not the mechanism, so `render/rigs.ts` drove them with the camera
+ * frame instead and walked them along a curve the engine parks them on. That
+ * is what made stage 6's lift ascend the moment its shot began, and `rigs.ts`
+ * already carried a comment warning about exactly this failure for the stage-1
+ * vehicle.
+ *
+ * `hold_frame` is derived from `frame` now, and this is what says it stayed
+ * derived. It reads the source table rather than a bundle, so it runs without
+ * a game directory and cannot be satisfied by a stale export.
+ */
+console.log("\na rig route parked on its path:");
+{
+  const parked = RIGS.flatMap((r) => (r.routes ?? [])
+    .filter((x) => x.frame === "zero")
+    .map((x) => ({ rig: r.name, slot: x.slot, hold: holdFrameOf(x) })));
+  check("the two routes that name a literal frame are still there",
+        parked.length === 2, `${parked.length}: ${JSON.stringify(parked)}`);
+  // **Through the derivation, not around it.** Reading `holdFrame` off the
+  // source and defaulting an absent one to 0 would pass whether or not
+  // anything derived it, which is the whole bug wearing a green tick.
+  check("...and each one emits a hold frame, not a ride along the path",
+        parked.every((p) => p.hold === 0), JSON.stringify(parked));
+  // The other side of it: an ordinary route must still ride the camera frame.
+  check("a route with no `frame` rule is not parked",
+        holdFrameOf({ slot: 1 }) === null, String(holdFrameOf({ slot: 1 })));
+  check("...and a prose rule is not a literal frame",
+        holdFrameOf({ slot: 1, frame: "(age % 24), a 24-frame loop" }) === null,
+        String(holdFrameOf({ slot: 1, frame: "(age % 24)" })));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -6,10 +6,10 @@ driving the player end to end are in [`PLAYER_HANGS.md`](PLAYER_HANGS.md).
 The divergence count is generated into [`STATUS.md`](STATUS.md); do not
 restate it here.
 
-Fifty-three reports: **thirty-eight fixed, four half-done, nine open, and
+Fifty-three reports: **thirty-nine fixed, four half-done, eight open, and
 two `[not-a-bug]`, each of which carried a real defect underneath it** (one of
 those two is counted as fixed as well, its bullet carrying both markers, so
-thirty-nine are done).
+forty are done).
 The five reported on 2026-09-07 from stage 3's block 2 are all fixed, and
 four of the five were far wider than the place they were seen from. **Nine
 arrived on 2026-09-09**; the axe's spin axis and the sound settings are fixed,
@@ -32,15 +32,16 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ## What is left
 
-* **Nine reports arrived on 2026-09-09; three are done or half-done.** The
+* **Nine reports arrived on 2026-09-09; four are done or half-done.** The
   axe's spin axis — the two throwing families tumble about different axes and
   the port turned both about Y. The sound settings, which are stored state now
   with the speaker in the top bar and the slider in the sidebar. And the
   zombies' **attack** cry, which is `ActorPlayHitVoice` kind 3 and was neither
   exported nor raised; their **idle** noise is still open and is a different
-  mechanism. Still open: a missing roller shutter in stage 3, an undrawn van
-  and a lift that rises too early in stages 5 and 6, `znjoe`'s missing chest
-  worm, and two cars whose zombies are not on them. They are one section of their own below, with the
+  mechanism. And stage 6's lift, which rode the camera frame up a path the
+  engine parks it on. Still open: a missing roller shutter in stage 3, stage
+  5's undrawn van, `znjoe`'s missing chest worm, and two cars whose zombies are
+  not on them. They are one section of their own below, with the
   reporter's locators. **The stage 2 one is reported as making a branch
   unplayable** and is the next to take; a session's worth of driving narrowed
   it a long way without naming the actor, and what was ruled out is recorded on
@@ -1471,10 +1472,29 @@ investigation ruled out.
   or something the exporter is not emitting at all. The stage 5 car report
   above is a separate lead and the two are no longer thought to be one bug.
 
-- `[open]` **The stage 6 lift rises immediately; it should wait for the player
-  to be on it.** At `?stage=6&mode=play&entry=0&block=0&step=2&op=20&frame=0`.
-  The port starts the animation as soon as the prop is placed, so whatever gate
-  the engine has between placing the lift and driving it is not ported.
+- `[fixed]` **The stage 6 lift rose the moment its shot began.** At
+  `?stage=6&mode=play&entry=0&block=0&step=2&op=20&frame=0`.
+
+  **The reading was already in the tree; the mechanism was not wired to it.**
+  The lift is the rig `obj_48f560` (`FUN_0048F560`), and on camera path 218 the
+  routine passes a **literal `0.0f`** to `CamEvalObjectPath6` rather than the
+  clamped camera frame — so the engine parks it at one point on `op_st6` 386.
+  The rig data said exactly that, in `frame: "zero"` with a note spelling out
+  the `6A 00` that pushes it. But the exporter reads `holdFrame`, a different
+  field, and that was absent — so `hold_frame` came out null, `render/rigs.ts`
+  took its `else` branch, and the lift walked up the path as the shot ran.
+
+  Two spellings of one fact, one of them inert. `rigs.ts` already carried a
+  comment warning about this precise failure for the stage-1 vehicle, whose
+  `rot_y` it had extrapolated to eleven full turns.
+
+  `holdFrameOf` derives one from the other now, in both exporter halves, and
+  `test/export.test.ts` holds it there **through the derivation** rather than
+  by reading the source field — the first version of that check defaulted an
+  absent value to 0 and would have passed on the bug. Verified by mutation.
+
+  It fixed a second rig with it: `obj_48f050` on `op_st4` 371, camera paths
+  174, 175 and 178, which carried the same pair.
 
 ## And one about a check that is not reliable
 

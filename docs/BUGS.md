@@ -1215,6 +1215,12 @@ All `[open]` at the time of writing, all with the reporter's own locators,
 which are the player's URL parameters and are reproducible as given. Four of
 them are `?stage=5` and `?stage=6`, which no report had reached before.
 
+**Two more are the same gap seen twice**: stage 3's missing roller shutter and
+stage 5's van, of which only the rear doors are drawn. Neither object is a
+hinge, a static, a class-0x24 set piece or a rig in its stage's bundle, so
+neither reaches the placement path at all — the van's doors are drawn only
+because they happen to be a class that is exported.
+
 Two of the nine are cars carrying zombies — the stage 2 rider that never
 appears and the stage 5 zombies that stand too far away — and they looked at
 first like one defect around `g_carrier_object`. They are not: the stage 2
@@ -1278,9 +1284,17 @@ investigation ruled out.
   every time. The door is scenery: a prop or a class-0x33 scripted hinge, and
   `docs/formats/spawns.md` is where its class is named.
 
-  Whether it is never placed, placed and never drawn, or placed and never
-  animated is the first thing to establish, and the answer decides which half
-  of the tree it lives in.
+  **It is none of the things the port models, and that is now measured.**
+  Stage 3's bundle carries **no hinged props, no statics, no class-0x24 set
+  pieces and no shutter rig** — its whole placement list is classes 0x10, 0x20,
+  0x25 and 0x30, none of which is scenery, and its two rigs are the boat
+  (`FUN_0048EAD0`) and the scripted-humanoid prop draw. So there is nothing to
+  fix in the placement path: the shutter never reaches it.
+
+  That leaves it as level geometry the script is meant to load and animate, or
+  a class the exporter emits nothing for. The `asset_load_slot` ops around
+  block 8 are where to look next, and stage 5's undrawn van below is very
+  likely the same gap seen from the other side.
 
 - `[part]` **Zombies were silent when they attacked; the idle half is still
   open.** The attacking half is fixed and the reason it was missing is worth
@@ -1342,11 +1356,21 @@ investigation ruled out.
   including that a viewer who muted is not given noise by the restore.
 
 - `[open]` **The van at `?stage=5&mode=play&block=0&step=4&op=9&frame=352` is
-  not drawn — only its rear doors are.** A prop whose parts are drawn in part
-  is the shape of a missing model rather than a missing placement: something is
-  building the hierarchy and finding one child of it. `verify_attachments.py`
-  is the check that covers the equivalent failure on characters and would be
-  the model for one here.
+  not drawn — only its rear doors are.**
+
+  **The rear doors are found and the body is not, and the data says why.**
+  Stage 5's props carry five hinges and **zero statics**, and two of those
+  hinges are a matched pair — `prop_0d8c_0` and `prop_0d8c_1`, slots `0x1794`
+  and `0x1795`, `side` −1 and +1, one `open_flag`. A pair of doors hinged
+  opposite ways is exactly what a van's rear is, and they are the only part of
+  it the bundle holds. The body is not a hinge, not a static, not a class-0x24
+  set piece and not one of stage 5's two rigs (the jump-table object
+  `FUN_0048F190` and the burning car `SUB_004331D0`).
+
+  So this is not a hierarchy losing children: **the body is not exported at
+  all**, and the doors are drawn because they happen to be a class that is.
+  Stage 3's missing roller shutter above is the same gap with nothing left
+  over, which is why they should be taken together.
 
 - `[open]` **`0x0A68 znjoe` and the rest of its character type should have a
   worm that bursts from the chest, and do not.** `znjoe` is one of the class

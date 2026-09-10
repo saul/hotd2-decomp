@@ -68,17 +68,39 @@ export async function openPlayer({ url = "", size = "1600x1000",
   if (!quiet) console.log(`vite on :${port}`);
   const vite = await serve(port);
   const browser = await chromium.launch({ channel: "chrome", headless });
-  const state = { faults: 0 };
+  // `faults` stays a **number**, and `faultLines` is what it counted. An
+  // array alone would not do: every caller writes `if (state.faults)`, and an
+  // empty array is truthy, so a clean run would report itself as dirty.
+  const state = { faults: 0, faultLines: [] };
+  // Always recorded and always printed, `quiet` or not. A counted fault with
+  // no text is unactionable: every stage's playthrough reported "1 console
+  // errors on the way" for as long as the text was behind `--loud`, and
+  // naming it took a bespoke script and a measurement. Whatever a check
+  // counts, it says.
+  const fault = (line) => {
+    state.faults++;
+    state.faultLines.push(line);
+    console.log(`  ${line}`);
+  };
 
   const page = await browser.newPage({ viewport: { width, height } });
   page.on("console", (m) => {
     if (m.type() !== "error") return;
-    state.faults++;
-    if (!quiet) console.log(`  console: ${m.text()}`);
+    // **The one excused URL, named.** Chrome asks for `/favicon.ico` by
+    // itself, the dev server has none, and the 404 is the browser's noise
+    // rather than the player's. It is excused by exact URL and by nothing
+    // else -- an exclusion that matched a pattern would be how a real 404
+    // came to be hidden behind this one. Note the message itself carries no
+    // URL at all; only `location()` says which resource it was, which is why
+    // the location is what is tested and what is printed.
+    const where = m.location().url;
+    if (where.endsWith("/favicon.ico")) return;
+    // A `console.error` the page called itself has no location, so the
+    // parenthetical is only added when there is a resource to name.
+    fault(`console: ${m.text()}${where ? ` (${where})` : ""}`);
   });
   page.on("pageerror", (e) => {
-    state.faults++;
-    console.log(`  threw: ${e.message}`);
+    fault(`threw: ${e.message}`);
   });
   // A 404 is worth naming rather than counting: the bundle is served out of
   // `extract/player/` by a vite middleware, so a missing file is either a
@@ -89,9 +111,20 @@ export async function openPlayer({ url = "", size = "1600x1000",
   // Both events are needed. An `<audio>` element that cannot fetch its source
   // never produces a response at all -- Chrome aborts the request -- so a
   // missing BGM track shows up here and nowhere else.
+  //
+  // **But an aborted `media` request is not a missing track**, and reading it
+  // as one sent a session looking for a BGM file that was being served
+  // correctly the whole time. Every stage logs one:
+  // `bgm/ST<n>_AR.WAV (net::ERR_ABORTED) type=media`, with **no** 4xx
+  // response beside it, while `tools/audio.mjs` measures the track playing at
+  // a peak of 0.5. Chrome abandons a media request it no longer needs; the
+  // 404 that was being blamed on it was `/favicon.ico`, which the console
+  // handler above now excuses by name. So this is printed and deliberately
+  // **not counted** -- the resource type is what separates the two cases.
   page.on("requestfailed", (r) => {
     if (!quiet) {
-      console.log(`  failed ${r.url()} (${r.failure()?.errorText ?? "?"})`);
+      console.log(`  failed ${r.url()} (${r.failure()?.errorText ?? "?"}) `
+                  + `type=${r.resourceType()}`);
     }
   });
 

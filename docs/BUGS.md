@@ -1390,9 +1390,26 @@ investigation ruled out.
   child actor parented to its host is the shape of the report.
 
   But the switch has **no arm for 0x0A**, so whatever `znjoe` does is elsewhere
-  — a death state, `ZombieOnShot`, or the gore path. The next step is class
-  0x30's hit and death arms read for this character type, and `FUN_00452DA0`
-  read in any case, since it is an unported creature either way.
+  — a death state, `ZombieOnShot`, or the gore path — and that is where this
+  report goes next.
+
+  **The 0x12 arm was read out to the end anyway, and it is a whole unported
+  enemy.** Type 0x12 is `znele`, thirteen spawns, all in stage 6. The actor it
+  makes is character type **9**, which is `znjikken1.bin` — *experiment 1* —
+  and has **no spawn record anywhere in the game**: it exists only because that
+  arm creates it. `EnemyZombieInit` gives it `ZombieTwinFollowHost`
+  (`FUN_00453290`) rather than the ordinary update and does **not** count it in
+  `g_enemies_alive`, so it is not a room-clear blocker. That routine copies the
+  host's whole transform block, clip pair and motion every frame unless the
+  host is mid-attack, so the twin wears the host's pose exactly, and it
+  despawns when its own `obj+0x138C` runs out or the host raises `0x4000000`.
+
+  Porting it is two halves and neither is a line edit: the exporter emits only
+  character types that have **placements**, so type 9's model and motions reach
+  no bundle and would need a rule for types created at runtime; and the arm and
+  the update are new `game/class30/` code. It is not this report — a twin
+  wearing the host's pose is not a worm leaving a chest — but it is a real gap
+  and it was found looking for one.
 
 - `[open]` **The three zombies that should travel with the car at
   `?stage=5&mode=play&block=2&step=2&op=50&frame=599` stand far away instead.**

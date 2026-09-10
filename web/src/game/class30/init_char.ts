@@ -19,6 +19,7 @@
  * do.
  */
 import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
+import { ZombieSeatOnCarrierFromDescriptor } from "./carrier";
 
 /**
  * The two bits this routine consumes out of the spawn record's flags word.
@@ -30,17 +31,24 @@ import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
  * drain. One word, two meanings, separated by when they are written.
  */
 const SPAWN_STAND_THROW_RETIRE = 0x2;
-const SPAWN_CARRIER_OFFSET = 0x4;
+const SPAWN_TURN_TOWARD_CAMERA = 0x4;
 
 /**
  * `EnemyZombieInitByCharType` — `FUN_00452FD0`.
  *
- * **The head only.** After these three moves the engine branches on the
- * character type: 2 and 3 load a held prop and play a spawn cry, 9 becomes a
- * corpse, 0xC branches on the body condition, 0xE loads a prop, and 0x12
- * allocates a *second* class-0x30 actor beside itself. None of that is ported.
- * `obj+0x34` bit 3 — spawned in the air — is the fourth thing the routine
- * looks at, and {@link ActorFlag.SpawnedInAir} already carries it.
+ * **The head only.** After the four arms the engine branches on the character
+ * type: 2 and 3 load a held prop and play a spawn cry, 9 becomes a corpse,
+ * 0xC branches on the body condition, 0xE loads a prop, and 0x12 allocates a
+ * *second* class-0x30 actor beside itself. None of that is ported.
+ *
+ * The fourth arm — `obj+0x34` bit 3 — **is** ported now, and it is not a flag
+ * move at all: it re-reads the descriptor's position and yaw as an offset on
+ * `g_carrier_object` and seats the actor there. It lives in
+ * `class30/carrier.ts` with the seat it calls, because the two are one
+ * mechanism. This comment used to say the bit meant "spawned in the air" and
+ * that {@link ZombieFlag2.AttachedToCarrier} "already carries it"; nothing
+ * set that flag, nothing read it, and stage 5 block 2's four passengers stood
+ * at the world origin for it.
  */
 export function EnemyZombieInitByCharType(obj: ZombieActor): void {
   // `00453000  if (obj+0x136C & 0x20) obj+0x38 |= 8`. Raised, not moved: the
@@ -61,8 +69,11 @@ export function EnemyZombieInitByCharType(obj: ZombieActor): void {
     obj.flags38 |= ZombieAux.StandThrowRetire;
   }
   // `00453045  if (obj+0x34 & 4) { obj+0x34 &= ~4; obj+0x38 |= 0x20 }`
-  if (obj.flags & SPAWN_CARRIER_OFFSET) {
-    obj.flags &= ~SPAWN_CARRIER_OFFSET;
-    obj.flags38 |= ZombieAux.CarrierOffset;
+  if (obj.flags & SPAWN_TURN_TOWARD_CAMERA) {
+    obj.flags &= ~SPAWN_TURN_TOWARD_CAMERA;
+    obj.flags38 |= ZombieAux.TurnTowardCameraEye;
   }
+  // `0045301D  if (obj+0x34 & 8) { ...seat on the carrier... }` — the fourth
+  // arm, and the only one that moves the actor. See `class30/carrier.ts`.
+  ZombieSeatOnCarrierFromDescriptor(obj);
 }

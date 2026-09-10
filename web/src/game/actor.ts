@@ -597,16 +597,28 @@ export enum ZombieAux {
    */
   StandThrowRetire = 0x10,
   /**
-   * Bit 5 — `ZombieStateRideCarrier` (`0x004589F5`) and
-   * `ZombieStateDelayedStrikeInPlace` (`0x0045EAEA`) read it; the first uses
-   * it to choose whether the actor's position is the carrier's plus its own
-   * offset.
+   * Bit 5 — **turn toward the camera eye every frame**, at a rate of `0x1A0`
+   * BAMS.
    *
-   * [open] Not read in full. Three shipped class-0x30 records set the
-   * `obj+0x34` bit it comes from, all in stage 2, against the two that set
-   * {@link StandThrowRetire}'s.
+   * Two readers, and they are the two carrier states:
+   * `ZombieStateRideCarrier` at `0x004589F5` and
+   * `ZombieStateDelayedStrikeInPlace` at `0x0045EAEA`, both
+   * `TEST byte ptr [ESI + 0x38], 0x20` then
+   * `TurnActorTowardCameraEye(obj, 0x1A0)` (`FUN_00409E80`). `[proved]`
+   *
+   * It used to be called `CarrierOffset`, on a note saying the first reader
+   * "uses it to choose whether the actor's position is the carrier's plus its
+   * own offset". It does not: the offset add at `0x00458A0E` is
+   * unconditional, and this bit gates the call two instructions later and
+   * nothing else. The name came from where the bit sits — `L20` — and it was
+   * the wrong half of the routine.
+   *
+   * Three shipped class-0x30 records set the `obj+0x34` bit it comes from,
+   * and they are exactly stage 2's first three state-29 riders (evt `0x5030`,
+   * `0x506C`, `0x50A8`, `init_flags 0x60004`); none of the four spawns that
+   * ride through {@link ZombieFlag2.AttachedToCarrier} sets it.
    */
-  CarrierOffset = 0x20,
+  TurnTowardCameraEye = 0x20,
 }
 
 /** `obj+0x136C` for class 0x30, where the bits differ from the thrower's. */
@@ -792,13 +804,23 @@ export enum ZombieFlag2 {
    */
   HitReactionAlt = 0x100,
   /**
-   * Bit `0x10000000` — this actor was spawned in the air.
+   * Bit `0x10000000` — **this actor's position and yaw are an offset on
+   * `g_carrier_object`**, and something re-seats it there every frame.
    *
-   * `EnemyZombieInitByCharType` sets it (0x00453023) when the spawn record's
-   * `obj+0x34 & 8` says so, and `EnemyZombieUpdate` gates part of its frame on
-   * it (`0045341c`). `[proved]`
+   * `EnemyZombieInitByCharType` raises it at `0x00453028` when the spawn
+   * record's `obj+0x34 & 8` says so, in the same arm that stashes the
+   * descriptor's position at `obj+0x13D8` and its yaw at `obj+0x135C`; and
+   * `EnemyZombieUpdate` tests it at `0x0045341C` and calls
+   * `ZombieAttachToCarrier` (`FUN_0045E770`) at `0x00453424` — **before** the
+   * state dispatch at `0x00453434`. `[proved]`
+   *
+   * It used to be called `SpawnedInAir`, which is what an offset with `y = 5`
+   * looks like from outside and is not what the code does — `L20`. Nothing
+   * set it and nothing read it, and the four spawns that carry it were left
+   * standing at the world origin while the car they belong to drove off. See
+   * `class30/carrier.ts`.
    */
-  SpawnedInAir = 0x10000000,
+  AttachedToCarrier = 0x10000000,
 }
 
 /**

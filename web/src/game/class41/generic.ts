@@ -63,7 +63,7 @@
  * model on a script flag, swings, falls, or animates through a strip of slots
  * shows its first frame and holds it. The largest are `FUN_00467E50`
  * (type 12, 36 spawns), `FUN_004717A0` (77, 24), `FUN_004675A0` (70/71, 20),
- * `PropDrawOnlyType51` (51, 11) and `FUN_0046CEA0` (43, 7).
+ * `PropDrawOnlyType51` (51, 11) and `PropUpdateType43` (43, 7).
  *
  * Type 51 is the one of those five that needs nothing else: the routine's
  * whole body is the lifetime prologue and one `AssetDrawSlot`, both of which
@@ -219,7 +219,42 @@ export const GENERIC_HP: Partial<Record<number, number>> = {
  *   for exactly the reason the van's body was.
  *
  * `tools/verify_prop_slots.py` holds whatever this set says, and
- * `tools/verify_prop_pose.py` holds the order each of them is drawn in.
+ * `tools/verify_prop_pose.py` **derives the set itself** out of the EXE and
+ * the shipped scripts, and fails either copy of it — the port's here and the
+ * exporter's in `hod2lib/bundle.ts`. Fourteen of the fifty routines pass
+ * `obj+0x28C` to their first draw, and four clauses cut that down to seven:
+ *
+ * 1. the routine's first draw takes `obj+0x28C`;
+ * 2. its arm of `PlaceGenericProp`'s switch does not overwrite that field with
+ *    a **literal** — nine such writes across seven arms, and they are what
+ *    rule out **13** (`0x1A4A`), **34** (`0x0A50`) and **67** (`0x1A36`,
+ *    `0x1A35`, `0x1A0F`). A `MOV word ptr [ESI+0x28C], r16` is *not* an
+ *    overwrite: those arms re-write the value the prologue already put there,
+ *    out of the placer's own `+0x11C`;
+ * 3. the descriptor's `+0x11C` is not *also* being charged as this type's
+ *    lifetime — either the arm replaces `obj+0x11C` with the placer's `+0x1F4`
+ *    ({@link GENERIC_LIFETIME_FROM_1F4}) or the routine never ages that field
+ *    at all. This is what rules out **43** and the Original Mode collectibles
+ *    **70** and **71**: all three inline a variant of
+ *    `PropExpireByStepLifetime` that tests `obj+0x11C`, so the word in it is a
+ *    lifetime and the model they hand `AssetDrawSlot` is that lifetime;
+ * 4. and the shipped data agrees. Across all twelve scenes a class-0x41
+ *    generic descriptor's `+0x11C` is one of **0, 1, 2, 3, 4, 5, 7** or one of
+ *    **0x2B..0x18BF**, with nothing in the band between — 54 words below and
+ *    43 above. Below the band it is a lifetime in event steps; above it, an
+ *    asset slot. The check asserts the band is still empty, because the rule
+ *    is unsound the moment it is not.
+ *
+ * `[open]` **Type 72 passes all three code clauses and fails the fourth.**
+ * `FUN_00470750` takes `obj+0x28C` into the draw it makes for its first 25
+ * frames (`obj+0x2A0 < 0x19`), posed `Rz·Ry·Rx` and scaled by `obj+0x2C4`; its
+ * arm writes no literal over that field and it never ages `obj+0x11C`. And its
+ * one shipped spawn — stage 2 block 16, Original Mode only — carries
+ * `+0x11C == 1`, so the engine really does hand `AssetDrawSlot` a 1. Whether
+ * anything is resident at slot 1 in that region has not been read, so whether
+ * that draw shows a model or nothing is undetermined. It is **not** in this
+ * set: carrying `bg_adv10.bin[0]` for it would be the same mistake that put
+ * characters and effects where stage 2's scenery should be.
  */
 export const GENERIC_DESCRIPTOR_SLOT: ReadonlySet<number> =
   new Set([5, 12, 31, 33, 51, 53, 54]);

@@ -3091,14 +3091,69 @@ checking; and that `render/breakables.ts` composes a pose in exactly one place.
 The code the bug was in fails all four: two `rotateZ(p.roll)` sites, two
 `rotateY(p.yaw)`, two `rotateX(p.pitch)`, and no table.
 
-`[open]` **Five more types take `obj+0x28C` into a draw and are in neither
-table**: 43 (seven spawns, all in stage 3, which is the stage reported as
-carrying no scenery at all), 67 (three, training only) and the Original Mode
-collectibles 70, 71 and 72. Whether the descriptor names their model depends on
-whether their arm of `PlaceGenericProp`'s switch overwrites that field, and
-four of the seventeen literal writes to `obj+0x28C` in that routine have not
-been mapped to a type. The check lists them every run rather than asserting
-either way.
+### Fourteen routines draw `obj+0x28C` and seven of them mean the descriptor
+
+`verify_prop_pose.py` asserts the set now instead of listing candidates, and
+what closed it was **`PlaceGenericProp`'s switch, read as a table**:
+
+```
+00461da2  MOV EAX,[EBP+0x130c]              ; the descriptor's type
+00461da8  ADD EAX,-6                        ; index = type - 6
+00461dab  CMP EAX,0x47 / JA default
+00461db6  MOV DL, byte ptr [EAX + 0x462978] ; g_place_generic_prop_arm_index
+00461dbc  JMP dword ptr [EDX*4 + 0x4628d4]  ; g_place_generic_prop_arms
+```
+
+Types 6..77 have an arm and types 5 and 78 fall to the default — which is why
+`PropDrawOnlyType5` has no per-type setup at all. 72 index entries select 41
+distinct arms, so most arms serve several types, and with the mapping in hand
+every write to `obj+0x28C` in that routine belongs to a named type. Four
+clauses then cut fourteen down to seven, and each excluded type is excluded for
+a reason rather than for want of reading:
+
+* **13, 34 and 67** — their arm writes an immediate over `obj+0x28C`
+  (`0x1A4A`, `0x0A50`, and `0x1A36`/`0x1A35`/`0x1A0F`).
+* **43** — its arm takes the field away too, and **not with an immediate**,
+  which is why a detector looking only for one had called it a descriptor
+  slot: `SBB EDX,EDX / AND EDX,0xFFFFE617 / ADD EDX,0x19E8` leaves either
+  `0x19E8`, the ordinary breakable model, or `0xFFFF`, the engine's
+  draw-nothing. It also ages `obj+0x11C` as a lifetime, and its seven spawns
+  carry 1, 2 or 3 there. And it turns out to be **the third object built from
+  `g_prop_kind_params`** — `PropUpdateType43` (`FUN_0046CEA0`) takes the kind
+  from the descriptor's third orientation word, the radius, effect and variant
+  from the kind's row, plays that row's sound on the first hit, pays for it,
+  swaps `0x19E8` to `0x19E6` and turns the broken model to face the camera.
+  So stage 3's seven "undrawn props" are **breakables the port does not place
+  as breakables**, not scenery with a missing model; the stage still carries no
+  hinges, no statics and no set pieces. That is the other side of the
+  no-scenery measurement, and it is a bigger job than a table row: the type
+  wants `PropFamily.Kinded`'s neighbour rather than an entry in this set.
+* **70 and 71** — `OriginalItemPropUpdate` ages `obj+0x11C` too, so the word in
+  it is a lifetime and the model comes from `g_original_item_records` through
+  `PickOriginalModeItem`.
+
+`[open]` **Type 72 passes every code clause and fails the data one.**
+`PropUpdateType72` (`FUN_00470750`) is an Original Mode collectible with its
+own routine, and for its first 25 frames it draws `AssetDrawSlot((s16)
+obj+0x28C)` at the spawn's pose scaled by `obj+0x2C4`. Its arm never overwrites
+that field and it never ages `obj+0x11C` — and its one shipped spawn, stage 2
+block 16, carries `+0x11C == 1`. So the engine really does hand
+`AssetDrawSlot` a 1. Whether anything is resident at slot 1 in that region has
+not been read, so whether that draw shows `bg_adv10.bin[0]` or nothing is
+undetermined, and it stays out: carrying that model would be the same mistake
+that once put characters and effects where stage 2's scenery should be.
+
+**The fourth clause is the shipped data, and the gap it rests on is measured.**
+Across the class-0x41 spawns of all twelve scenes a generic descriptor's
+`+0x11C` is one of **0, 1, 2, 3, 4, 5, 7** — 54 words — or one of
+**`0x2B`..`0x18BF`** — 43 words — with **nothing in between**. Below the band it
+is a lifetime in event steps; above it, an asset slot. The check asserts the
+band is still empty every run, because the rule is unsound the moment it is
+not, and it measures the band against the routines rather than against either
+table: deriving the threshold from the set being checked makes a removed type
+read as the gap closing instead of as a missing prop, which is
+`verify_prop_slots.py`'s own circularity one layer in and was caught here by
+the mutation test twice.
 
 ## Every opcode, and what the player does with it
 

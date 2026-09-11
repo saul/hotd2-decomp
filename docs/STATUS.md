@@ -19,23 +19,23 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 40262 | 154 | engine |
-| `hod2lib/` | 15680 | 34 | engine |
-| `render/` | 8095 | 29 | render |
+| `game/` | 40561 | 155 | engine |
+| `hod2lib/` | 15817 | 34 | engine |
+| `render/` | 8116 | 29 | render |
 | `app/` | 7396 | 29 | app |
 | `script/` | 4144 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
-| `bundle/` | 2116 | 11 | engine |
+| `bundle/` | 2142 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `audio/` | 363 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **82403** | **319** | |
+| **total** | **82886** | **320** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
 * `app/main.ts` — 1979
-* `game/actor.ts` — 1899
+* `game/actor.ts` — 1910
 * `hod2lib/exetab.ts` — 1839
 * `script/walker.ts` — 1780
 
@@ -44,11 +44,11 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **161 of 262** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 150 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 311 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 153 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 314 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
 | Declared `[diverges]` | **157** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **146** — questions the port is honest about not having answered |
+| `[open]` markers in `game/` | **147** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 

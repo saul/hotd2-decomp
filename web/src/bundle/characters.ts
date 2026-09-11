@@ -496,6 +496,32 @@ export interface CharacterPlacement {
     despawn_flag: number;
     effect: number[];
   } | null;
+  /**
+   * Class 0x33 **selector 4's** tail — a piece of scenery an actor shoves out
+   * of its way.
+   *
+   * `ScriptedPushableUpdate33` (`FUN_00433B70`)'s reading of the same bytes
+   * {@link class33} is selector 1's reading of, so the two are **mutually
+   * exclusive**: the exporter sets exactly one, keyed on the descriptor's
+   * `+0x22`, and the port takes which one is present as the selector. That
+   * gate is the whole of `L3` on this class.
+   *
+   * `slot` is `obj+0x13F0`, the `AssetDrawSlot` id; `shot_mesh` is `-1` on
+   * both shipped spawns, which is what sends `shot_radius` to `obj+0x124`
+   * **and** `obj+0x128` and so makes the object pushable rather than
+   * mesh-shot. `push_flag` is the script flag that clears `obj+0x34` bit
+   * `0x8000` — the bit that both holds the object still and keeps it out of
+   * `ColiTestSphereAgainstActors`' list — and `despawn_flag` the one that
+   * takes it off the field. Neither index has a "none" test in front of it,
+   * as selector 1's two do not.
+   */
+  class33_push?: {
+    slot: number;
+    shot_mesh: number;
+    shot_radius: number;
+    push_flag: number;
+    despawn_flag: number;
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

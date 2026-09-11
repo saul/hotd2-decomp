@@ -88,6 +88,10 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // switches `obj+0x11C` into eleven sub-handlers that read these bytes
     // eleven ways, and `tail+0x00` is class 0x30's body condition again.
     class33: p?.class33 ?? null,
+    // ...and selector 4's, which is the same bytes read by the other
+    // sub-handler the port has: the exporter emits exactly one of the
+    // two per spawn, so whichever arrives is the selector.
+    class33Push: p?.class33_push ?? null,
     // Class 0x14's, on the same terms: `Class14Init` (`FUN_00475E90`) reads
     // `tail+0x00` as a character type and `tail+0x01` as the state the boss
     // starts in, which are class 0x30's body condition and initial state.

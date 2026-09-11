@@ -562,6 +562,126 @@ def check_class31_literal_clips() -> None:
                  f"exporter's bake list and {len(stages)} exported stages")
 
 
+def check_class33_selectors() -> None:
+    """Class 0x33's two decoded sub-handlers, producer against consumer.
+
+    `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches ``obj+0x11C`` into
+    eleven objects that read the same descriptor bytes eleven ways, and the
+    port has two of them: selector 1 through the ``class33`` block and
+    selector 4 through ``class33_push``. The port **takes which block arrived
+    as the selector** -- `director.ts` spawns on either being present and
+    `ScriptedSceneryUpdate33` picks the routine off ``obj.hp`` -- so two things
+    have to hold in the bundle and nothing else was checking either:
+
+    1. **exactly one block per placement.** Both would be `L3` written into
+       the bundle: selector 1's ``tail+0x0C`` is an ``op_`` path slot and
+       selector 4's is a script flag index, so a spawn carrying both would
+       have one handler's names over the other's bytes.
+    2. **the draw slot travels.** Selector 4's model is named by the
+       *descriptor*, not by the class, so it reaches the glTF only through
+       `sceneryDrawSlots`. Without that the placement exists, the actor is
+       made, the push works and the client has nothing to clone -- class
+       0x52's old bug from the other side, and invisible from the port alone.
+
+    This is the second half of what the stage-1 chair report needed. The first
+    half is `port.test.ts`'s selector-4 block, which drives the routines; this
+    is the half that says the numbers they drive on are in the file.
+    """
+    stages = sorted((ROOT / "extract" / "player").glob("stage*/stage*.script.json"))
+    if not stages:
+        notes.append("class 0x33's two tail blocks unchecked (no bundle)")
+        return
+    import json
+    from struct import unpack_from
+    n_carrier = n_push = 0
+    for path in stages:
+        doc = json.loads(path.read_text())
+        places = (doc.get("characters") or {}).get("placements") or []
+        # **The script's own spawn records are the producer's input**, and they
+        # are in the same file -- so the count comes from the data rather than
+        # from a number written here, and narrowing `slot_drawn_spawn` back
+        # fails this rather than quietly reporting a smaller total. `hp` is the
+        # selector; 1 and 4 are the two the port runs.
+        want: dict[int, int] = {}
+        for blk in doc.get("blocks") or []:
+            for step in blk.get("steps") or []:
+                for op in step.get("ops") or []:
+                    for sp in op.get("spawns") or []:
+                        if sp.get("class") == 0x33 and sp.get("hp") in (1, 4):
+                            want[sp["at"]] = sp["hp"]
+        have = {p["at"] for p in places if p.get("class") == 0x33}
+        for at, hp in sorted(want.items()):
+            if at not in have:
+                failures.append(
+                    f"{path.parent.name} spawn {at:#06x}: selector {hp} is "
+                    f"spawned by the script and has no placement, so "
+                    f"`SpawnSlotActors` can never make it -- widen "
+                    f"`slotDrawnSpawn` and `slot_drawn_spawn` together")
+        push_slots: set[int] = set()
+        for p in places:
+            if p.get("class") != 0x33:
+                continue
+            carrier, push = p.get("class33"), p.get("class33_push")
+            at, hp = p.get("at", 0), p.get("hp")
+            if carrier and push:
+                failures.append(
+                    f"{path.parent.name} spawn {at:#06x}: carries both "
+                    f"`class33` and `class33_push` -- two sub-handlers' "
+                    f"readings of the same bytes, which is `L3` in the bundle")
+            if not carrier and not push:
+                failures.append(
+                    f"{path.parent.name} spawn {at:#06x}: selector {hp} has a "
+                    f"placement and no tail block, so `SpawnSlotActors` will "
+                    f"refuse it and the placement is dead weight")
+            if carrier:
+                n_carrier += 1
+                if hp != 1:
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: `class33` on "
+                        f"selector {hp}, but only selector 1 reads those bytes")
+            if push:
+                n_push += 1
+                if hp != 4:
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: `class33_push` "
+                        f"on selector {hp}, but only selector 4 reads those "
+                        f"bytes")
+                slot = push.get("slot")
+                if isinstance(slot, int) and slot > 0:
+                    push_slots.add(slot)
+                else:
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: selector 4 with "
+                        f"no draw slot -- nothing can be cloned for it")
+        if not push_slots:
+            continue
+        # ...and the model itself, out of the glb's own node names. The hidden
+        # `slots_actor` rig is where `render/slotmodels.ts` finds a template,
+        # and a missing part there is an actor that pushes and is not drawn.
+        glb = path.parent / f"{path.parent.name}.glb"
+        if not glb.exists():
+            continue
+        raw = glb.read_bytes()
+        off, names = 12, []
+        while off + 8 <= len(raw):
+            ln, typ = unpack_from("<I4s", raw, off)
+            if typ == b"JSON":
+                names = [n.get("name", "")
+                         for n in json.loads(raw[off + 8:off + 8 + ln])["nodes"]]
+                break
+            off += 8 + ln
+        for slot in sorted(push_slots):
+            want = f"slots_actor_fixed000_slot_{slot:04x}"
+            if want not in names:
+                failures.append(
+                    f"{path.parent.name}: selector-4 draw slot {slot:#06x} is "
+                    f"in a placement but has no `{want}` part in the glTF -- "
+                    f"the object is pushable and invisible")
+    notes.append(f"class 0x33: {n_carrier} selector-1 and {n_push} selector-4 "
+                 f"tails across {len(stages)} bundles, each with exactly one "
+                 f"block and a model to draw")
+
+
 def check_docs_citations(named: dict[str, str]) -> None:
     """`docs/` cites the binary too, and nothing was checking those.
 
@@ -618,6 +738,7 @@ def main() -> int:
     check_snapshot_rules()
     check_frame_math()
     check_class31_literal_clips()
+    check_class33_selectors()
     check_docs_citations(named)
 
     for n in notes:

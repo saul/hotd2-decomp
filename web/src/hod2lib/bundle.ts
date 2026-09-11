@@ -671,6 +671,34 @@ export function humanoidDrawSlots(
 }
 
 /**
+ * The asset slots a stage's class-0x33 **selector-4 descriptors** ask for.
+ *
+ * Not in {@link ACTOR_SLOTS}, for the same reason {@link humanoidDrawSlots} is
+ * not: the slot is a property of the descriptor and not of the class.
+ * `ScriptedPushableUpdate33` (`FUN_00433B70`) writes `tail+0x00` to
+ * `obj+0x13F0` and draws it, and the two shipped spawns both name 4196 --
+ * `komono_7.bin` part 0, a chair. Keying it on the class would put a chair in
+ * all six bundles for the benefit of one room.
+ *
+ * Without this the placement travels, the actor is made, the push works and
+ * the client has **no geometry to clone**, which is class 0x52's old bug from
+ * the other side: there it was a model nothing could hit, here it would be a
+ * chair nothing could see.
+ */
+export function sceneryDrawSlots(
+    placements: readonly { class33_push?: { slot?: number } | null }[],
+): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    const slot = p.class33_push?.slot;
+    if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
+      out.push(slot);
+    }
+  }
+  return out;
+}
+
+/**
  * A hidden rig holding the models an **actor** class draws by asset slot.
  *
  * The counterpart of {@link breakableSlotEntry}, for the classes whose draw is
@@ -715,7 +743,8 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x43, 0x51, 0x52; class 0x25 variant 3)",
+    routine: "asset-slot actor draws (classes 0x43, 0x51, 0x52; class 0x25 "
+      + "variant 3; class 0x33 selector 4)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
@@ -1148,7 +1177,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // the variant-3 model before it writes the hidden `slots_actor` rig.
   const humanoids = evt ? scriptedHumanoidsJson(evt, spawnRecords) : {};
   const act = await actorSlotEntry(
-    stage, spawnRecords.map((r) => r.cls), humanoidDrawSlots(humanoids),
+    stage, spawnRecords.map((r) => r.cls),
+    [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces)],
     cache);
   const eff = await effectSlotEntry(stage, cache);
   // Which materials draw blood, so the client can offer the colour the game's

@@ -2362,6 +2362,87 @@ a character whose arm has come off still plays a directional death.
 
 ## Scripted scenery: doors, shutters and vans
 
+### Class 0x33 selector 4 — the scenery an actor shoves aside
+
+**Ported** (`game/class33/pushable.ts`), and it is the answer to a bug report
+that looked like an animation fault.
+
+Stage 1's `0x16D8` `char_adv00` was reported as "playing the wrong entrance — a
+ledge hang where a chair push belongs". The clip id was right and so was every
+link of the data chain: `ZombieStateWaitCameraFrameThenBranch` plays `tail+0x04`
+and waits on `tail+0x08`, which for that spawn is motion 1048 and camera frame
+150, and 1048 is a sixty-frame clip in `char_adv00`'s own table whose root
+translation wanders at most 0.45 and returns to zero and whose bones sway at
+most 27 degrees. It is a **hold**: the pose the state stands in while it waits.
+What it was authored to depict is `[open]`.
+
+The chair push was a different class, and the port had three of its four
+pieces already. `ColiTestSphereAgainstActors` (`FUN_00405B10`) does not move
+the object it finds — it writes the pusher into `obj+0x138`, the penetration
+into `+0x13C` and the reversed normal into `+0x140`, and the object applies
+that on its own next frame. `game/coli.ts` has written those three since the
+crowd separation landed, and `ZombiePushOutOfWorldAndActors` was the only
+reader.
+
+```
+ScriptedPushableUpdate33      FUN_00433B70   the two flags, the seed, the gate
+ScriptedPushableApplyPush33   FUN_00433CE0   the move
+ScriptedPushableSyncSphere33  FUN_00433E00   the sphere, re-seated each move
+```
+
+`[proved]` Two spawns in the whole game, both stage 1 block 1 step 2: `0x1A40`
+at `(22.83, 6.5, -16.74)` and `0x1A74` at `(16.83, 6.5, -20.74)`, each drawing
+asset slot 4196 — `komono_7.bin` part 0, which renders as **a chair**. `0x16D8`
+stands at `(24, 6.5, -20)` facing `-x`, 7.2 units from the second of them, and
+block 1 step 3's `set_script_flag 32` is one instruction before the `spawn_obj`
+that makes him.
+
+Script flag 32 is the arming flag. `obj+0x34` bit `0x8000` arrives on the
+descriptor and `AND AH, 0x7f` at `0x00433C00` is the only thing in the image
+that clears it — and that is also the bit `ColiTestSphereAgainstActors` skips a
+candidate on, so **one bit both holds the chair still and keeps it out of the
+list the push is found from**. Flag 33 despawns it, and its test is the first
+instruction of the routine: a raised flag leaves before the seed, so a chair
+that goes never publishes a draw slot.
+
+The move is class 0x30's own arithmetic on furniture — a tenth of the
+penetration along the reversed normal, times 1.8 when the **pusher** carries
+either airborne bit — followed by a re-resolve against the actors in x and z
+and one against the full collision set at the full depth, with the sphere
+re-seated after every move. The sphere convention is this class's own:
+`obj+0x130 = obj+0x44 + obj+0x128`, the position plus exactly the body radius,
+where `ActorUpdateBoundingSphere` adds the radius plus one.
+
+Measured in the running player at `?stage=1&mode=play&block=1&step=3&op=16`,
+camera path 36 frame 159: `0x1A40` has moved from its descriptor position to
+`(21.66, 6.72, -16.94)` and `0x1A74` to `(16.31, 6.55, -21.14)`. Both are
+drawn, both are armed, and the zombie shoves the near one out of its way as it
+charges.
+
+Four things were missing and none of them was the clip id: the exporter emitted
+a class-0x33 placement only for selector 1, so the bundle had the two spawn
+descriptors and no placement, no props entry and no geometry; `SpawnSlotActors`
+then refused them; nothing drew them; and nothing read the three push fields
+for anything but a zombie. The bundle carries `class33_push` now, mutually
+exclusive with `class33` because the two are two sub-handlers' readings of the
+same bytes — `verify_port.py` asserts the exclusivity, that every selector the
+script spawns has a placement, and that the draw slot reached the glTF.
+
+**`L35`, and it was load-bearing.** Ghidra ends `FUN_00433B70`'s body at
+`0x00433C5C`, on the `MatrixStackPop` call, and the pseudocode ends there too.
+The real tail runs to `0x00433CD3` and holds `CALL 0x00405160` at `0x00433CC6`
+— `RegisterForShotTest`, the call that puts the object in the per-frame dynamic
+list the push is found from. `get_function_callers` on that routine does not
+name this function, so the reading available from the decompiler alone is
+"nothing can ever find the chair", which would have made the whole set piece
+impossible.
+
+Not ported: the mesh shot test on the `tail+0x04 != -1` arm (`obj+0x34 |= 0x50`
+and a mesh id on `obj+0x14C`; neither shipped spawn takes it),
+`ActorClaimHitSlot`, and the draw itself, which is `render/slotmodels.ts`' —
+the same arrangement class 0x52's mouse has, and it is `T · Rz · Ry · Rx` there
+rather than the mouse's yaw alone.
+
 ### Class 0x33 selector 1 — the carrier, and the two states it ends
 
 **Ported** (`game/class33/`). `ScriptedSceneryDispatch33` (`FUN_00432FF0`) is

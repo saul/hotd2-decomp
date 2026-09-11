@@ -83,6 +83,24 @@
  * small numbers is not small** — 1.6x — so the grab landed 244 ticks after the
  * spawn instead of 158, long after its camera shot had cut away.
  *
+ * **It scales the pose offset too, and the port scales neither that nor the
+ * model.** `SkeletonApplyRootMotion`'s pose translate is pushed *after*
+ * `MatrixScale(model+0x116C)`, so a character drawn at 0.9 offsets by 0.9 of
+ * what its clip authored. `render/characters/pose.ts` applies the offset
+ * unscaled -- deliberately, because nothing in this port scales a drawn
+ * character at all: neither `hod2lib.characters` nor `render/characters.ts`
+ * writes that field to a node, so every skinned actor is drawn at 1.0.
+ * Scaling the offset alone would be worse than leaving it, because the offset
+ * would shrink while the model it offsets did not.
+ *
+ * The honest size of it, from `tools/verify_root_pose.py`: of the four actors
+ * whose clip root reaches the pose at all, the three `people.bin` clips 596,
+ * 598 and 600 belong to `scale 0.9` types, so the engine's offset is **2.594
+ * units and the port's is 2.882**. The fourth is class 0x21 at character type
+ * 7, scale 1.0, where the two agree exactly. Making it faithful means scaling
+ * every skinned actor's drawn size, which is a change to how the whole game
+ * looks and not to this arithmetic. [diverges]
+ *
  * [diverges] The engine rotates the delta by the full `Rz · Ry · Rx`; this
  * rotates by yaw alone. That is exact for anything standing upright and wrong
  * for a class-0x31 actor on a wall or a ceiling, whose pitch and roll are not

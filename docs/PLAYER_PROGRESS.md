@@ -1495,21 +1495,49 @@ move: `civ_walk.mjs` reports the stage-1 rescue civilian walking the identical
 `20.87 over 590 frames (56,-194) -> (37,-186)` either side of the change,
 because the second arm is a pose and moves no world position at all.
 
-One thing is deliberately not gate-driven: the **death** clip, which
-`ActorAdvanceMotion` does not run root motion through, so `pose.ts` keeps its
-whole root at that one call site. The two models agree wherever the clip's
-frame-0 horizontal root is zero — the pose offset is `root[f]` where the
-accumulated deltas would be `root[f] - root[0]`, both inside the actor's own
-rotation — which is 992 blocks of 1058. Making it faithful means giving the
-death clip root motion in `game/`, and that is a separate change.
+**Two things about it are `[diverges]`, not `[open]`**, and both are declared
+in `game/` rather than in `render/` so that `verify_port.py` counts them — the
+divergence count went 167 to 169 and that is the point of it. A departure
+described only in prose reads as settled, which is how a doc comment with no
+assertion behind it kept a hang alive for two sessions.
 
-`[open]` The engine's pose translate sits **inside** `MatrixScale(model+0x116C)`,
-so a character drawn at 0.9 offsets by 0.9 of what its clip authored. This port
-draws every character at 1.0 — neither `hod2lib.characters` nor
-`render/characters.ts` applies that field to the model — so the offset is
-unscaled, consistently with the model it offsets. Two of the three civilian
-clips above belong to `scale 0.9` types, so the honest correction there is
-2.594 rather than 2.882, and fixing it means scaling the drawn character too.
+1. **The death clip keeps its whole root whatever the gate says.**
+   `ActorAdvanceMotion` returns early on `obj.death`, so nothing steps the
+   actor, and `pose.ts` overrides the gate at that one call site because
+   otherwise a falling body's travel would come from nowhere. The engine has no
+   death track at all: a death clip is the ordinary motion and the gate decides
+   it like any other. The two land in the same place wherever the clip's frame-0
+   horizontal root is zero — the pose offset is `root[f]` where the accumulated
+   deltas would be `root[f] - root[0]`, both inside the actor's own rotation —
+   which is 992 blocks of 1058. **That is why it is invisible, not why it is
+   right.** Faithful means running root motion through a death in `game/`, for
+   the classes with no death machine. Tagged on the `obj.death` branch in
+   `game/motion.ts`.
+2. **The pose offset is unscaled, because the model is.** The engine's translate
+   sits *inside* `MatrixScale(model+0x116C)`, so a character drawn at 0.9
+   offsets by 0.9 of what its clip authored. This port draws every character at
+   1.0 — neither `hod2lib.characters` nor `render/characters.ts` writes that
+   field to a node — so scaling the offset alone would be worse than leaving it,
+   since the offset would shrink while the model it offsets did not. The honest
+   size of the gap: three of the four clips that reach the pose at all belong to
+   `scale 0.9` types, where the engine's offset is **2.594 units and the port's
+   is 2.882**; the fourth is class 0x21 at character type 7, scale 1.0, where
+   they agree exactly. Faithful means scaling every skinned actor's drawn size,
+   which changes how the whole game looks. Tagged on `ActorModelScale` in
+   `game/root_motion.ts`.
+
+Still `[open]`, and deliberately left so: `MotionFlag.RootMotionY`, bit `0x10`
+of the same word, has no writer anywhere that has been read — nine other classes
+write `model+0x64` and none of their values were read here. And the engine's
+wrap damper makes the applied delta `(baseline_old - root)/play_length` where
+`rootDelta` computes `(root - root[0])/frames`; both are small, neither was
+touched, they are not the same number and nothing asserts either.
+
+**15 further `[diverges]` tags live outside `game/` and `script/`** — eight
+files under `render/` — and `verify_port.py` does not count them, because
+`cited_files()` is `game/` plus `script/` by an explicit earlier decision.
+Recorded here rather than acted on: widening the count is a change to what the
+honest measure measures, and it would move it by fifteen at once.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any

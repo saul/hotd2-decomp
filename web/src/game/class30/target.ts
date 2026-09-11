@@ -51,13 +51,15 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { TargetScriptEntry, TargetScriptJson }
   from "../../bundle/characters";
-import { ActorFlag, type Actor, type ZombieActor } from "../actor";
+import { ActorFlag, MotionFlag, type Actor, type ZombieActor } from "../actor";
 import type { GameHost } from "../host";
-import { TurnActorAwayFromPoint } from "../actor_turn";
+import { TurnActorAwayFromPoint, TurnAngleToward } from "../actor_turn";
 import { CivilianWait } from "../class10/ops";
 import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
+import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
+  from "../combat/counts";
 import { ActorDespawn } from "../despawn";
-import { ActorByAt, G } from "../globals";
+import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
@@ -74,13 +76,43 @@ const LOST_PAUSE_SPREAD = 11;
 const DRAG_MOTION = 0x1a4;
 const DRAG_KILL_MOTION = 0x1a8;
 const DRAG_LATE_MOTION = 0x1aa;
+/**
+ * `ZombieStateDragTarget` sub 2's cue and clip: at cursor `0x2D` it blends to
+ * `0x1B0` over ten frames (`0x0045C242`, `0x0045C24C`, `0x0045C262`).
+ *
+ * The cue is read off **whichever kill clip sub 1 started**, not off `0x1B0`:
+ * the compare at `0x0045C23F` is against the track's live cursor and the clip
+ * is only written after it fires.
+ */
+const DRAG_SETTLE_CUE = 0x2d;
+const DRAG_SETTLE_MOTION = 0x1b0;
+/** Sub 3 turns `obj+0x68` toward this and never leaves — `0x0045C281`. */
+const DRAG_SETTLE_YAW = 0x2000;
+/**
+ * `g_script_flags[0x1D]` — the byte the tail at `0x0045C1AD` reads, and the
+ * state's only exit. `0x0045C1AE` is the one instruction in the image that
+ * names `0x009C721D`, so every writer of flag 29 is an indexed one; in stage 4
+ * that is the dragged civilian's own `CivilianRunScript` op `0x1C`.
+ */
+export const DRAG_RELEASE_FLAG = 0x1d;
 /** `ZombieStatePounceOnTarget`'s clips and its gravity. */
 const POUNCE_WAIT_MOTION = 0x41f;
 const POUNCE_LAUNCH_MOTION = 0x41c;
 const POUNCE_HIT_MOTION = 0x41d;
 const POUNCE_RISE_MOTION = 0x41a;
-const POUNCE_LAND_MOTION = 0x1b0;
 const POUNCE_GRAVITY = -0.0408;
+// There was a `POUNCE_LAND_MOTION = 0x1b0` here, and `0x1B0` is not one of the
+// pounce's clips. State 44's routine at `0x0045C2E0` plays `0x41F`, `0x41C`,
+// `0x41D` and `0x41A` and nothing else — four `PUSH`/`MOV` immediates into the
+// four `CALL 0x004119A0` between `0x0045C3E2` and `0x0045C671`, and no `0x1b0`
+// anywhere in the routine's 0x4F0 bytes. The only reader of the clip is the
+// drag's sub 2, which is where it comes from; it is `DRAG_SETTLE_MOTION`
+// above. `L20` — the constant was named for the state next to it rather than
+// for the code that plays it. `[proved]`
+//
+// The address is written bare rather than as a `FUN_` citation on purpose:
+// this file *ports* state 44, and a reference-form citation of a function the
+// same file defines takes it out of `verify_port`'s ported set. See `L41`.
 /** The three clips that are already the "target is dead" reaction. */
 const DEAD_REACTION_MOTIONS = [0x1ab, 0x1a3, 0x1a7];
 
@@ -703,47 +735,148 @@ function PointLocalZ(dx: number, dz: number, yaw: number): number {
 }
 
 /**
+ * The zombie and the civilian are **one animation**, and this is the copy:
+ * `obj+0x40/44/48` and **all three** of `obj+0x64/68/6C` off the target, in
+ * both of the arms that do it (`0x0045C123`..`0x0045C13D` in sub 1 and
+ * `0x0045C22B`..`0x0045C23C` in sub 2). The rotation used to be `yaw` alone,
+ * which is two thirds of it. `[proved]`
+ */
+function DragTargetCopyPose(obj: ZombieActor, t: Actor | null): void {
+  if (!t) return;
+  obj.pos = { ...t.pos };
+  obj.pitch = t.pitch;
+  obj.yaw = t.yaw;
+  obj.roll = t.roll;
+}
+
+/**
  * `ZombieStateDragTarget` — `FUN_0045C080`. Class 0x30 state 43.
  *
- * The zombie and the civilian are **one animation**: this copies the
- * civilian's position *and* rotation onto the zombie every frame. On the
- * header's cue frame it kills the civilian and switches to the kill clip; if
- * the civilian is already dead it plays the aftermath instead.
+ * `g_class30_states[43]` is `0x0045C080`, with `[42]` `0x0045BFD0` and `[44]`
+ * `0x0045C2E0` either side and both agreeing with {@link ZombieState} (`L38`).
+ * Five sub-states off the jump table at `0x0045C2C0`, and the `JA` at
+ * `0x0045C0A4` sends anything above 4 straight to the tail.
+ *
+ * The captor drags the civilian, kills her on the header's cue frame, settles,
+ * and then turns on the spot — and **the only way out of the state is the
+ * tail**, which every sub but 4 falls into:
+ *
+ * ```c
+ * 0045c1ad  if (g_script_flags[0x1D] && g_players_in_play) {
+ *               obj+0x34 |= 0x4000000;     // Dead
+ *               ReleaseEnemyAliveCount(obj);
+ *               ReleaseEnemyPresentCount(obj);
+ *               obj+0x1312 = 4;            // -> the despawn arm
+ *           }
+ * ```
+ *
+ * That is the whole exit. Sub 3 never increments the sub-state, so a captor
+ * whose flag never comes up stands in `g_enemies_alive` for the rest of the
+ * stage — and because sub 1 raised `0x10100` on itself it is
+ * {@link ActorFlag.ShotImmune} while it does, so `DispatchHit`
+ * (`FUN_004092F0`) never reaches `ResolveHit` and nothing can shoot it out of
+ * the count either. **This port had no tail at all**: it had the sub-4 arm and
+ * nothing that could ever assign sub 4. That is `PLAYER_HANGS` item 23 —
+ * stage 4's entry-4 route, block 9's `wait_enemies_alive 0` held for ever by
+ * one `znkage` at `0x35B4`.
+ *
+ * `0x0045C1AE` is the **only** instruction in the image that names
+ * `0x009C721D`: a byte-pattern sweep of `.text` for `1d729c00` finds exactly
+ * one hit (`L32`), so nothing raises flag 29 by literal address and every
+ * writer of it is an indexed one. In stage 4 the writer is the civilian this
+ * captor is dragging — `CivilianRunScript` op `0x1C` in stream 85 and in both
+ * of its branches, 83 and 84, all three reachable from the class-0x10 spawn
+ * `0x3578` whose only child **is** `0x35B4`. Rescued, shot or resumed, she
+ * raises 29; the script's own `wait_script_flag 29` in block 4 step 7 comes
+ * down off the same write.
+ *
+ * Two things the engine does here that this still does not, both recorded
+ * rather than half-done:
+ *
+ * * sub 2 calls `ActorShiftToHoldBone1Position` (`FUN_0045CE70`) before it
+ *   blends, which differences bone 1's drawn world position against the pose
+ *   the new clip would put it in. `game/` has no skeleton — that is the
+ *   `GameHost` seam — so the actor lands a bone-offset away from where the
+ *   engine puts it. `[open]`
+ * * sub 0's `obj+0x1368 |= 0x10` (`0x0045C0ED`) is a kill-move death-clip
+ *   selector, and the port models only bit 0 of that word. See
+ *   `ZombieSubState.hasCooldown`.
  */
-export function ZombieStateDragTarget(obj: ZombieActor): void {
-  const s = ZombieScriptForState(obj);
+export function ZombieStateDragTarget(obj: ZombieActor, dt: number): void {
   const t = targetOf(obj);
-  if (obj.sub === 4) { ActorDespawn(obj); return; }
-  if (obj.sub === 0) {
+
+  // `0x0045C29C`. The only arm that does **not** fall into the tail: it ends
+  // in `RET` at `0x0045C2BC`. Note what it does and does not test — the slot
+  // index against -1, and *not* `obj+0x38` bit `0x40`, which is the guard
+  // `ActorReleaseHitSlot` carries for `ActorDespawn`'s own copy of this. It
+  // also leaves `obj+0x3C` pointing at the slot it just gave back, so the
+  // release inside `ActorDespawn` is what clears the index.
+  if (obj.sub === 4) {
+    if (obj.hitSlot !== HIT_SLOT_NONE) {
+      G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+    }
+    ActorDespawn(obj);
+    return;
+  }
+
+  if (obj.sub === 0) {                                      // 0x0045C0B1
+    const s = ZombieScriptForState(obj);
     obj.flags |= 0x2400;
     ActorSetMotionBlended(obj, DRAG_MOTION, 0, 0);
+    // `0045c0d2 8b4764 / 0045c0d8 24fd` — `obj+0x1F8 &= ~2`. The position is
+    // being written from the civilian every frame, so the clip's root must
+    // not also carry the actor. Sub 2 puts it back.
+    obj.motionFlags &= ~MotionFlag.RootMotion;
     obj.zom.targetLoops = s?.head.loops ?? 0;
     obj.zom.targetCue = s?.head.cue ?? 0;
-    obj.sub += 1;
     obj.flags |= 0x10000000;
-  } else if (obj.sub === 2) {
-    if (t) { obj.pos = { ...t.pos }; obj.yaw = t.yaw; }
-    if (frameOf(obj) === 0x2d) {
-      ActorSetMotionBlended(obj, POUNCE_LAND_MOTION, 0, 10);
-      obj.sub += 1;
-      return;
-    }
+    obj.sub += 1;
+    // ...and falls into sub 1 on the same frame: `case 0` is a `break` out of
+    // the switch straight into `switchD_0045c0aa_caseD_1`.
   }
-  if (obj.sub === 1 || obj.sub === 2) {
-    if (t) { obj.pos = { ...t.pos }; obj.yaw = t.yaw; }
+
+  if (obj.sub === 1) {                                      // 0x0045C113
+    DragTargetCopyPose(obj, t);
     if (atLastFrame(obj)) obj.zom.targetLoops -= 1;
     if (obj.zom.targetLoops === 0 && frameOf(obj) === obj.zom.targetCue) {
+      // `0045c17e`: a target already dead on the cue frame goes to the tail
+      // and does **not** advance — the `JNE 0x45c1ad` is past the bump.
       if (t && !(t.flags & ActorFlag.Dead)) {
         ActorSetMotionBlended(obj, DRAG_KILL_MOTION, 0, 2);
         obj.flags |= 0x10100;
         t.flags |= ActorFlag.Dead;
         obj.sub += 1;
       }
-    } else if (t && (t.flags & ActorFlag.Dead)) {
+    } else if (t && (t.flags & ActorFlag.Dead)) {            // 0x0045C1E9
       ActorSetMotionBlended(obj, DRAG_LATE_MOTION, 0, 2);
       obj.flags |= 0x10100;
       obj.sub += 1;
     }
+  } else if (obj.sub === 2) {                               // 0x0045C212
+    // **A separate arm, not a second pass over sub 1's.** This used to fall
+    // through into the loop-and-cue block above, which the engine's `case 2`
+    // never reaches: with the civilian dead and the loop count spent, that
+    // block's second arm fired on the first frame of sub 2 and bumped
+    // straight to sub 3, so the settle never ran at all.
+    DragTargetCopyPose(obj, t);
+    if (frameOf(obj) === DRAG_SETTLE_CUE) {
+      ActorSetMotionBlended(obj, DRAG_SETTLE_MOTION, 0, 10);
+      // `0045c273 83c902` — `obj+0x1F8 |= 2`, root motion back on.
+      obj.motionFlags |= MotionFlag.RootMotion;
+      obj.sub += 1;
+    }
+  } else if (obj.sub === 3) {                               // 0x0045C27E
+    // The whole arm: turn and fall to the tail. It never advances the sub.
+    obj.yaw = TurnAngleToward(obj.yaw, DRAG_SETTLE_YAW, TARGET_TURN_RATE, dt);
+  }
+
+  // The tail — `0x0045C1AD`, reached from sub 0, 1, 2 and 3 alike, and on the
+  // same frame as a bump. See the header: this is the state's only exit.
+  if (G.g_script_flags[DRAG_RELEASE_FLAG] && G.g_players_in_play !== 0) {
+    obj.flags |= ActorFlag.Dead;
+    ReleaseEnemyAliveCount(obj);
+    ReleaseEnemyPresentCount(obj);
+    obj.sub = 4;
   }
 }
 

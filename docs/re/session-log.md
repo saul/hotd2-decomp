@@ -16386,3 +16386,69 @@ Two hangs, both `[open]` and both on routes that had never run:
    tools/flag_gates.ts`. Every `0xF8`/`0xFE` gate, stage 4's `0x1F` and `0x20`
    and stage 5's `0x00` and `0x1E` are gates an actor holds, and each is a
    routine the port must run for that stage to advance.
+
+## Item 23 — stage 4's second entry: state 43 had no exit in the port
+
+`node tools/playthrough.mjs --stage 4 --entry 4 --headless` hung at block 9
+step 1 op 50 on `wait_enemies_alive 0`, **5/5**, with one `znkage` (`0x35B4`)
+in `ZombieStateDragTarget` sub 3 at 90 hit points and the debug clear refusing
+it. It now reaches block 25 `(end → 0)` in 6015 frames, 5/5, identical every
+run. Full write-up in `docs/PLAYER_HANGS.md` item 23.
+
+Both leads in the old note were right and they were **one** fault.
+`ZombieStateDragTarget` (`FUN_0045C080`) raises `obj+0x34 |= 0x10100` on
+itself in sub 1 — bit `0x100` is the `ShotImmune` `DispatchHit`
+(`FUN_004092F0`) jumps past `ResolveHit` on — and the *only* way out of the
+state is the tail at `0x0045C1AD`, which tests `g_script_flags[0x1D]` and
+`g_players_in_play`, releases both enemy counts and goes to sub 4. Sub 3 never
+increments the sub-state. The port had the sub-4 despawn arm and nothing that
+could ever assign sub 4, so the immunity and the count were both permanent.
+
+The partner **does** exist and is exactly what releases it: block 4 step 7 op 5
+`spawn_obj_c` places class-0x10 record `0x3578`, whose one child is `0x35B4`,
+and all three of her reachable streams (85 and its branches 83 and 84) carry
+`CivilianRunScript` op `0x1C` with argument 29. The script's own
+`wait_script_flag 29` in the same step comes down off that write, which is why
+the run got as far as block 9 with the flag already up.
+
+### Wrong turns, and what they cost
+
+* **The Ghidra MCP was offline for the whole session** — `list_instances`
+  returned nothing. Two substitutes worked and are worth keeping in mind: the
+  project backup at `~/hotd2-ghidra-backups/hotd2-ghidra-20260904-105959.tar.gz`
+  extracted into a scratch directory and driven by `analyzeHeadless` with a
+  one-file `GhidraScript` that decompiles addresses named in an env var; and
+  capstone straight over `Hod2.exe`'s own PE section table, which is the raw
+  instruction stream and settled every offset the pseudocode had folded.
+  `L37` earned its keep again: the decompiler rendered sub 4's
+  `g_hit_slots` write as a byte-array index when the instruction is
+  `MOV dword ptr [EAX*4 + 0x9C88C0], 0`.
+* **`POUNCE_LAND_MOTION = 0x1b0` in `class30/target.ts` was misattributed.**
+  State 44 (`0x0045C2E0`) plays `0x41F`, `0x41C`, `0x41D` and `0x41A` and no
+  `0x1B0` anywhere in its 0x4F0 bytes; the clip belongs to state 43's sub 2,
+  which was the only thing reading the constant. `L20`, in the port rather
+  than in the binary.
+* **Twenty minutes lost to a citation that was never missing.** Adding a
+  comment mentioning `` `ZombieStatePounceOnTarget` (`FUN_0045C2E0`) `` to the
+  file that *defines* that function took it out of `verify_port`'s ported set —
+  coverage 163 → 162, nothing failed, and `git diff | grep '— `FUN_00'` was
+  empty. The checker skips a dash-form definition whose `(name, fun)` pair it
+  has already seen in reference form. Written up as **`L41`**; the recipe that
+  found it was dumping `check_names`'s dict and diffing it against the same
+  dict built from `git archive HEAD`.
+* **A second, quieter port bug fell out of reading the arms properly.** The
+  port's sub 2 fell through into sub 1's loop-and-cue block, which the engine's
+  `case 2` never reaches — and with the civilian dead and the loops spent that
+  block's second arm fires immediately, so sub 2 bumped to sub 3 in one frame
+  and the settle never ran. It would have survived the tail fix unnoticed.
+
+### Next actions
+
+1. Decide stage 3 item 22: bake clip `0x3F9`, or declare the divergence. It is
+   now the **only** hanging route in the corpus.
+2. `ActorShiftToHoldBone1Position` (`FUN_0045CE70`) is newly named and not
+   ported — four callers, and whether its two positions share a frame of
+   reference is `[open]`. It needs the `GameHost` skeleton seam.
+3. `obj+0x1368` is still one bit of a flags word in the port. `ChooseDeathMotion`
+   reads four of its bits, and `ZombieStateDragTarget` sets one of them, so a
+   captor killed mid-drag plays the wrong death.

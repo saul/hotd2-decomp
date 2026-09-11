@@ -214,7 +214,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.WalkToPoint:
       return ZombieStateWalkToPoint(obj);
     case ZombieState.DragTarget:
-      return ZombieStateDragTarget(obj);
+      return ZombieStateDragTarget(obj, dt);
     case ZombieState.PounceOnTarget:
       return ZombieStatePounceOnTarget(obj, dt);
     case ZombieState.TargetLostPause:

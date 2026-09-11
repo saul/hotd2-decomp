@@ -114,11 +114,13 @@ node tools/playthrough.mjs --stage 3 --entry 7 --headless
 |---|---|---|
 | stage 3 entry 0 | block 13 `(end → 4)`, 6480 frames | 0 → 3 → 4 → 5 → 6 → 13 |
 | stage 3 entry 7 | **hangs** at block 2 `6 / 8` | 7 → 8 → 2. Items 21 and 22 |
-| stage 4 entry 4 | **hangs** at block 9 `1 / 50` | 4 → 9. Item 23 |
+| stage 4 entry 4 | block 25 `(end → 0)`, 6015 frames, 72 instr | 4 → 9 → 11 → 10 → 12 → 13 → 6 → 25. Item 23, **fixed** |
 
-Two of the two second entries hang. Every stage has exactly one entry except
-these, so there are no more routes hiding — but the four entry-0 rows above
-have never been re-run per *branch*, and a branch is not an entry.
+**One of the two second entries still hangs**, and it is stage 3's — item 22,
+the death clip no bundle bakes. Stage 4's was item 23: state 43's tail, which
+the port did not have. Every stage has exactly one entry except these two, so
+there are no more routes hiding — but the four entry-0 rows above have never
+been re-run per *branch*, and a branch is not an entry.
 
 Before this branch, on the same tree and the same seeds: stages **2, 3 and 6
 hung** — block 14 `9 / 20`, block 6 `1 / 13` and block 0 `4 / 8` — and 1 and 5
@@ -1266,13 +1268,14 @@ rather than into something visible.** It is the port's own fallback and nothing
 declares it. The `docs/PLAYER_HANGS.md` shape it produces is the same as a
 state transcribed wrongly, and that is how item 21 hid this one for a session.
 
-## 23. Stage 4's second entry: one `znkage` in `DragTarget` that shots cannot touch — `[open]`
+## 23. Stage 4's second entry: one `znkage` in `DragTarget` that shots cannot touch — **fixed**, and the state had no exit at all
 
 ```sh
 cd web && node tools/playthrough.mjs --stage 4 --entry 4 --headless
 ```
 
-The other route `--entry` made addressable, and it hangs on its second block:
+The other route `--entry` made addressable, and it hung on its second block,
+**5/5**:
 
 ```
 HUNG at block 9  (branch → 11,17) step/op 1 / 50
@@ -1281,16 +1284,115 @@ HUNG at block 9  (branch → 11,17) step/op 1 / 50
 ```
 
 70 volleys over 480 frames, 90 hit points before and after, and the debug clear
-did not take it either. `ZombieStateDragTarget` is class 0x30 state
-**43** (`FUN_0045C080`) — the captor state that copies the civilian's position
-and rotation onto the zombie every frame. `d=4` says it is right on top of the
-camera.
+did not take it either.
 
-**Nothing has been read for this one.** Filed so that the route is on the list
-rather than in someone's head. The two things worth measuring first are whether
-the actor is holding `ActorFlag.ShotImmune` (item 18's shape — the clear
-refuses such an actor now, which is why it is still standing) and whether the
-civilian it is dragging is the thing that would release it.
+Now **5/5 reaching an end block**, 6015 game frames and 72 instructions to
+block 25 `(end → 0)`, identical every run.
+
+### What the screenshot and the panel said
+
+`web/shots/hang-stage4.png`: the room renders correctly — stage 4's stone
+corridor, the arch, the paving, nothing flat and nothing black. Camera
+`cp_st4[11] slot 174 frame 100 / 100 (static pose)`, actors panel `characters
+2 of 7 up, 5 types` and `enemies 0 attacking · 1 live`. So this was never the
+fourth fault class: a player standing here can see the room. The captor is at
+`d=4`, on top of the camera, and invisible because of it — but the reason the
+shots did nothing is the flag bit, not the framing.
+
+### The mechanism, `[proved]`
+
+`ZombieStateDragTarget` is class 0x30 state **43** — `g_class30_states[43]` is
+`0x0045C080`, with `[42]` `0x0045BFD0` and `[44]` `0x0045C2E0` either side and
+both agreeing with the port's enum (`L38`). Five sub-states off the jump table
+at `0x0045C2C0`, and `JA` at `0x0045C0A4` sends anything above 4 to the tail:
+
+| sub | at | what it does |
+|---|---|---|
+| 0 | `0x0045C0B1` | clip `0x1A4`, `obj+0x34 \|= 0x2400` and `0x10000000`, `obj+0x1F8 &= ~2`, loops/cue off the script head — then **falls into sub 1 on the same frame** |
+| 1 | `0x0045C113` | copies the civilian's position **and all three rotations** every frame; on `loops == 0 && cursor == cue` plays `0x1A8`, raises `0x4000000` on the *civilian* and `0x10100` on **itself**; if she is already dead, plays `0x1AA` instead |
+| 2 | `0x0045C212` | keeps copying; at cursor `0x2D` calls `ActorShiftToHoldBone1Position` (`FUN_0045CE70`), clip `0x1B0`, `obj+0x1F8 \|= 2` |
+| 3 | `0x0045C27E` | `obj+0x68 = TurnAngleToward(obj+0x68, 0x2000, 0x1A0)`, and **never increments the sub-state** |
+| 4 | `0x0045C29C` | `g_hit_slots[obj+0x3C] = 0`, `ActorDespawn` — the only arm that does not run the tail |
+
+**The tail at `0x0045C1AD` is the state's only exit**, and every sub but 4
+falls into it:
+
+```c
+if (g_script_flags[0x1D] != 0 && g_players_in_play != 0) {
+    obj+0x34 |= 0x4000000;                 // Dead
+    ReleaseEnemyAliveCount(obj);           // FUN_00456560
+    ReleaseEnemyPresentCount(obj);         // FUN_00456580
+    obj+0x1312 = 4;
+}
+```
+
+**The port had no tail at all.** It had the sub-4 arm and nothing that could
+ever assign sub 4, and no sub-3 arm either. So the captor sat in sub 3 for
+ever holding `g_enemies_alive` at 1 — and the `0x10100` sub 1 raised on itself
+is `ActorFlag.ShotImmune` (`0x100`), which `DispatchHit` (`FUN_004092F0`) jumps
+past `ResolveHit` on, so no volley could take it out of the count either. Both
+of the two leads in the old note were right, and they were one fault: the
+immunity is the state's own doing and the flag is what lifts it.
+
+**The debug clear refusing it was a true signal and stays true.** `ActorKillAll`
+declines an actor a shot could not touch, exactly as before; nothing about the
+fix goes near it.
+
+### The partner, which does exist
+
+Flag 29 is **not** in stage 4's script. `0x0045C1AE` is the only instruction in
+the whole image that names `0x009C721D` — a byte-pattern sweep of `.text` for
+`1d729c00` returns one hit (`L32`) — so every writer of flag 29 is an indexed
+one, and in stage 4 it is the dragged civilian:
+
+* block 4 step 7 op 5 is `spawn_obj_c` on the class-0x10 record `0x3578`
+  (charType 48, script entry 36);
+* that record's **one child** is `at 13748 = 0x35B4`, class 0x30, charType 11,
+  **hp 90** — the actor in the hang report;
+* her entry resolves to stream 85, and stream 85 op 11, plus both of its
+  branches (op 14 → stream 83, op 15 → stream 84) at their op 5, are
+  `CivilianRunScript` op `0x1C` with argument **29**.
+
+So all three of rescued, shot and resumed raise it. The script's own
+`wait_script_flag 29` at block 4 step 7 op 8 comes down off the same write,
+which is how the run reached block 9 in the first place — the flag was up and
+the captor ignored it.
+
+### The second bug behind it
+
+The port's sub 2 fell through into sub 1's loop-and-cue block, which the
+engine's `case 2` never reaches. With the civilian dead and the loop count
+spent, that block's second arm fired on the first frame of sub 2 and bumped
+straight to sub 3, so the settle never ran at all. Sub 2 is its own arm now.
+And the pose copy was `yaw` alone where the engine copies `obj+0x64`, `0x68`
+**and** `0x6C` in both arms that do it.
+
+### The checks
+
+* `web/test/port.test.ts` — seven assertions on state 43. Mutation-tested
+  three ways: the tail removed fails three of them, the sub-2 fall-through
+  restored fails one, and the yaw-only copy fails one.
+* `web/tools/flag_gates.ts` — a second pass over all twelve bundles: every
+  state-43 captor must be named as a child of a class-0x10 spawn, and that
+  civilian's reachable streams must raise flag 29. Two placements across the
+  corpus (stage 4 in each mode) and a guard against the population being
+  empty, because a vacuous loop reads as green (`L14`). Fails on a dropped
+  `children` link and on the wrong flag index.
+
+### Left `[open]` here
+
+* `ActorShiftToHoldBone1Position` (`FUN_0045CE70`) is **not** ported. Sub 2
+  calls it to difference bone 1's drawn world position against the pose the
+  new clip would put it in, and `game/` has no skeleton — that is the
+  `GameHost` seam. The captor lands a bone-offset from where the engine puts
+  it. Its four callers are `0x0045C25A`, `0x0047BD95`, `0x0047C3A9` and
+  `0x004955E7`, and whether its two positions are in the same frame of
+  reference is itself `[open]`: one goes through a camera-block matrix and the
+  other starts from identity.
+* Sub 0's `obj+0x1368 |= 0x10` at `0x0045C0ED` is a kill-move death-clip
+  selector and the port models only bit 0 of that word — the standing gap in
+  `ZombieSubState.hasCooldown`. `ChooseDeathMotion` reads bit `0x10` for
+  motion `0x1A5`, so a captor killed while dragging plays the wrong death.
 
 ## Rules for whoever picks this up
 

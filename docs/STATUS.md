@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 42193 | 159 | engine |
+| `game/` | 42330 | 159 | engine |
 | `hod2lib/` | 15921 | 34 | engine |
 | `render/` | 8475 | 30 | render |
 | `app/` | 7405 | 29 | app |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 904 | 9 | engine |
 | `audio/` | 363 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **84990** | **325** | |
+| **total** | **85127** | **325** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -43,12 +43,12 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **163 of 266** annotated functions in the gameplay address ranges have a port (61%) |
+| Gameplay coverage | **163 of 267** annotated functions in the gameplay address ranges have a port (61%) |
 | Ported outside those ranges | 154 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 317 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
 | Declared `[diverges]` | **157** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **159** — questions the port is honest about not having answered |
+| `[open]` markers in `game/` | **160** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,7 +56,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 866 in `ghidra/annotations/functions.tsv` |
+| Named functions | 867 in `ghidra/annotations/functions.tsv` |
 | Named globals | 396 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 32 under `tools/`, run together by `verify_all.py` |
 
@@ -110,7 +110,7 @@ nothing exits 3 and is never counted as green.
 | `test:seek` | that a seek reaches the address it was asked for | bundle |
 | `test:state` | that a save/load and a seek reach the *same world* play did -- the only check that compares two histories rather than one | bundle |
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
-| `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one | bundle |
+| `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one -- and the only check that asks the same question of an ACTOR, for the one class-0x30 state whose sole exit is a script flag a civilian's own stream raises | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |

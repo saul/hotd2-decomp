@@ -477,3 +477,33 @@ parents survived** (`comm -23` on the two `grep "^## "` outputs is enough for
 prose) and run the type checker before staging for code. A resolution that
 loses a line is indistinguishable from a resolution that was correct, right up
 until something parses it.
+
+**L41 — A cross-reference to a function in the file that ports it silently
+deletes the port.** `verify_port.py` reads two citation forms: the em-dash
+`` `Name` — `FUN_00…` `` asserts *this file ports it*, and the parenthesised
+`` `Name` (`FUN_00…`) `` is a mere reference. Because the reference pattern
+also matches inside the dash form, `check_names` skips any `(name, fun)` pair
+it has already seen as a reference:
+
+```python
+refs = {(n, f) for n, f in REF.findall(text)}
+for name, fun in DEF.findall(text):
+    if (name, fun) in refs:
+        continue        # the reference form also matches the dash one
+```
+
+So writing `` `ZombieStatePounceOnTarget` (`FUN_0045C2E0`) `` in a comment in
+`class30/target.ts` — the file that *defines* `ZombieStatePounceOnTarget` —
+took that function out of the ported set. Coverage went 163 → 162 and
+"citations checked" 317 → 316, nothing failed, and the only visible trace was
+two numbers moving in a generated doc while the diff showed no citation had
+changed at all. `git diff | grep '— `FUN_00'` came back empty, which is L31's
+tell again: the file is right and the program disagrees.
+
+**Inside a file that ports something, refer to that same routine by its bare
+address** — "state 44's routine at `0x0045C2E0`" — or by name with no address
+beside it. The parenthesised form is for functions ported *somewhere else*. And
+when a generated count moves in a direction your change does not explain, diff
+the checker's own answer rather than the source: dumping `check_names`'s dict
+against the same dict from `git archive HEAD` named the one lost address in a
+second, after twenty minutes of grepping for a citation that was never missing.

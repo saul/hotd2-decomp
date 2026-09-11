@@ -1409,7 +1409,7 @@ investigation ruled out.
   not carry. `[open]` The 0x504-byte tail `BodyCreatureInit` allocates holds
   the flight's start and end and has not been read.
 
-- `[open]` **The three zombies that should travel with the car at
+- `[fixed]` **The three zombies that should travel with the car at
   `?stage=5&mode=play&block=2&step=2&op=50&frame=599` stand far away instead.**
   The reporter's dump is the useful part:
 
@@ -1441,6 +1441,45 @@ investigation ruled out.
   With no carrier live, the port's guard takes the no-carrier arm and the
   actors never get a carrier offset. That is the same guard the stage 2 car
   rider below trips, which is why the two reports may be one.
+
+  **Resolved 2026-09-11: the reporter was right and the comment was wrong.**
+  Both of the comment's premises are true and the conclusion does not follow
+  from them, which is why it survived two sessions. `[proved]`
+  `EnemyZombieInitByCharType` (`FUN_00452FD0`) has a **fourth arm** nobody had
+  read, at `0045301D`, on descriptor bit 3: it treats the descriptor's position
+  and yaw as **carrier-local**, stashes them, and calls `ZombieAttachToCarrier`
+  (`FUN_0045E770`, unnamed until now), which seats the actor rigidly on
+  `g_carrier_object` using the carrier's yaw only. `EnemyZombieUpdate`
+  (`FUN_004533F0`) re-runs that seat **every frame at `0x00453424`, before the
+  state dispatch at `0x00453434`** — so a state that moves nothing is not the
+  same as an actor that does not move. That inference is the whole of what went
+  wrong here, twice.
+
+  Whole-corpus, which makes it a fact rather than a reading: exactly **four**
+  descriptors in the twelve shipped scripts set the bit, all class 0x30, all
+  `st5evtbl` block 2 step 2 **op 38**, at `x = -4.6` in a line up the bed of a
+  vehicle. The carrier is the class-0x33 car spawned by **op 37 of the same
+  step**, which publishes itself in its own `Init` at `0x00433014` — so the
+  engine's null-test-free dereference is safe by construction. **The `d≈2870`
+  that both the report and the comment quoted was the distance to the world
+  origin**, not to anything the actors were standing on.
+
+  Two port names were guesses from where a bit sat (`L20`) and are corrected:
+  `ZombieFlag2.SpawnedInAir` was this carrier bit, named for what an offset
+  with `y = 5` looks like from outside, and nothing set or read it;
+  `ZombieAux.CarrierOffset` is `TurnTowardCameraEye`, which gates
+  `TurnActorTowardCameraEye` in both carrier states and nothing else, where the
+  offset add it was named for is unconditional. The second has a **visible
+  consequence, reviewed and accepted**: stage 2's three state-29 riders, the
+  only records carrying the bit, now turn toward the camera where they did not.
+
+  Ten assertions in `web/test/port.test.ts`, mutation-tested — dropping the
+  update gate fails two, dropping the init seat fails nine. Two traps recorded
+  with it: the locator itself is a **seek to the end of the camera path**,
+  where the car has not run its ride and sits at the origin, so the fixed port
+  still reports `d≈2890` there and only playing from the spawn shows it; and
+  `tools/enemy_gate.mjs` assigns `a.pos` *after* `ActorSpawn`, clobbering the
+  seat, so it reported all four at `y0` with the fix in.
 
 - `[open]` **The zombie that should ride the front of the stage 2 car never
   appears, and it makes a branch of the game unplayable.** At

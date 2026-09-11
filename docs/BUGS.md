@@ -209,7 +209,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   actor was stuck in state 18 sub 0 with its clip's root motion carrying it
   forward for ever.
 
-- `[part]` `[decide]` The crawling zombies have a few bugs — three findings,
+- `[fixed]` The crawling zombies have a few bugs — three findings,
   one fixed. `ActorPlayHitReaction` read `reactions["0"]` for every actor; the
   engine indexes by body condition (`obj+0x130C`), and 21 character types carry
   a second row nothing could reach. Fixed. **The stand-up is the engine's own**
@@ -218,6 +218,36 @@ be port bugs at all, and they are marked as such rather than "fixed".
   the undamaged crawler's attack is clip 997 at hit frame 40, and clip 997 is
   20 frames long. The port falls back to an attack that connects, so it is
   currently **more dangerous than the original**. See `[decide] 2`.
+
+  **Closed 2026-09-11 on your decision to make it faithful.** `[proved]` The
+  strike test in `ZombieStateStrike` (`FUN_00455A40`) is an **exact equality**
+  against a play cursor that is reset to 0 when the clip starts and only ever
+  takes `0 .. length-1`, so a hit frame past the end is unreachable: the strike
+  never fires, nothing is aborted, nothing retried, no other entry consulted,
+  and the state is not left early. The clip runs to its end and the actor hands
+  over having swung and missed.
+
+  The exporter's hit-frame bound is replaced by a field carrying that reading.
+  Measured before touching it: across all 64 character types the bound rejected
+  **exactly those three entries and nothing else**.
+
+  Two readings came with it. The row is shared by **three** character types,
+  not one, and their condition-4 pick row means **every zone combination with
+  the head bit clear misses** — so shooting the head off is what makes a
+  crawler dangerous. And the connect guard whiffs unconditionally on a zero
+  cancel mask, which is what the ten zeroed entries in the shipped tables do.
+
+  Measured against the real stage-2 bundle, sixty seconds, one `znkager`:
+  **29 damage before, 0 after**, and 29 again once the head is shot off. More
+  strikes after, because the faithful clip is 20 ticks against the
+  substitute's 35. Divergence count 158 → 157.
+
+  A wrong claim caught before it shipped, in the session log: three character
+  types were first said to reach their zeroed entries in 3-4 draws out of 10,
+  from the pick rows alone. No shipped spawn of those types is born at that
+  body condition. **A pick row says what the table can draw, not what the game
+  spawns** — exactly one of the ten zeroed entries is reachable in shipped
+  data.
 
 - `[fixed]` Some scripted humanoids seem to be missing their animations
   — **an exporter gap, not the VM.** `characters.py` baked only a command
@@ -1321,7 +1351,7 @@ investigation ruled out.
   `SpawnZombieThrownWeapon` lost its `Rng` parameter with the invented rate;
   `ZombieThrowHandWeapon` never had one.
 
-- `[open]` **A roller shutter is missing from stage 3**, at
+- `[fixed]` **A roller shutter is missing from stage 3**, at
   `?stage=3&mode=play&entry=7&block=8&step=2&op=23`. **A physical door**: a
   real roller shutter over a doorway, which should roll up, after which the
   zombies come out through it. At the moment there is no shutter there at all.
@@ -1442,7 +1472,7 @@ investigation ruled out.
   clicked would pass with nothing persisted. It covers both directions,
   including that a viewer who muted is not given noise by the restore.
 
-- `[open]` **The van at `?stage=5&mode=play&block=0&step=4&op=9&frame=352` is
+- `[fixed]` **The van at `?stage=5&mode=play&block=0&step=4&op=9&frame=352` is
   not drawn — only its rear doors are.**
 
   **The rear doors are found and the body is not, and the data says why.**
@@ -1458,6 +1488,51 @@ investigation ruled out.
   all**, and the doors are drawn because they happen to be a class that is.
   Stage 3's missing roller shutter above is the same gap with nothing left
   over, which is why they should be taken together.
+
+  **Both resolved 2026-09-11, and neither half was in the placement path both
+  entries had been searching.**
+
+  `[proved]` **The shutter is class 0x44 selector 11**, which was in no table
+  in the tree. `PropBuildRisingDoor` (`FUN_00473410`) and `RisingDoorUpdate`
+  (`FUN_004753F0`) are a door that translates **upward** on a script flag,
+  seeded at 0.5 and gaining a step a frame until it passes a ceiling, after
+  which the routine simply *stops writing* `y` rather than clamping. Both
+  numbers come from a comparison against an **asset slot**, not from anything
+  about the model — which is why the entry's own lead was right for a reason
+  nobody had stated: the `asset_load_slot` in block 8 step 1 loads slot 2648,
+  and 2648 is the one literal that routine names. Two spawns in the game, one
+  per stage; stage 3's clears 36.1 units in 22 frames and rattles in bursts
+  while shut.
+
+  `[proved]` **The van's body was never a missing placement.** It is a
+  class-0x41 generic prop drawing the doors' own pose at the slot three models
+  before the hinge pair, and its **type was missing from the list deciding
+  which descriptor slots' geometry travels** — so the placement was built and
+  asked for a model every frame, and there was nothing to clone. **A placement
+  with no model and a placement never exported look identical from the level**,
+  which is the whole reason two sessions read this as scenery that never
+  reached the placement path at all.
+
+  Found while there: four prop types write the placer's byte over the object's
+  lifetime field, so **slot and lifetime are two fields the port read as one**,
+  giving 55 spawns a lifetime of their own asset slot.
+
+  The wrong turn is `L26` exactly and is in the session log: the van was first
+  built as a **new exporter prop kind**, which worked, and would have drawn a
+  *second* van — the module comment listed the routine among those "read for
+  what they draw" while the table two layers away disagreed.
+
+  `tools/verify_prop_slots.py` asks the question the old checks could not:
+  every slot a placed prop passes to the draw call has a model in its own
+  bundle. Mutation-tested against both doors.
+
+  `[open]` Two decisions left. **The descriptor-slot set is seven types, not
+  four** — three more also draw that field, which is ten more spawns of missing
+  scenery, not added because making a type's model travel also makes it draw
+  and one of the three has authored drift that would read as visibly static.
+  And **the renderer poses all 44 generic props in one rotation order**, which
+  is only one type's; six types compose theirs differently and **15 shipped
+  spawns with two or more non-zero angles are posed wrongly today**.
 
 - `[part]` **`znjoe` releases a creature from its body when you shoot it, and
   the port has none of it.** The whole chain is read and named now; none of it
@@ -1567,7 +1642,7 @@ investigation ruled out.
   `tools/enemy_gate.mjs` assigns `a.pos` *after* `ActorSpawn`, clobbering the
   seat, so it reported all four at `y0` with the fix in.
 
-- `[open]` **The zombie that should ride the front of the stage 2 car never
+- `[fixed]` **The zombie that should ride the front of the stage 2 car never
   appears, and it makes a branch of the game unplayable.** At
   `?stage=2&original=1&mode=play&entry=0&block=0&step=3&op=31&frame=150`. Two
   other zombies are flung off the car and **that part works**; the one riding
@@ -1623,6 +1698,49 @@ investigation ruled out.
   and the remaining candidates are the car's own rig, a class 0x24 set piece,
   or something the exporter is not emitting at all. The stage 5 car report
   above is a separate lead and the two are no longer thought to be one bug.
+
+  **Resolved 2026-09-11, and it is not a zombie at all.** `[proved]` The actor
+  is class **0x21**, the rescue target — `RescueTargetInit` (`FUN_00451720`),
+  one spawn in the whole game, stage 2 block 0 step 2 at `0x07D0`, wearing the
+  same `char_adv00` skin as the two class-0x25 actors on the car's flank,
+  which is why it read as one of them. **It had no row in the exporter's
+  `MOTION_RULES`**, so no skeleton was emitted, no clip baked, no hierarchy
+  reached the glb, and `SpawnScriptedCharacters` never made the object. Block 0
+  step 2 asks for 15 spawns and the pool held **6**.
+
+  **This is the third time that one table row has been the bug**, after class
+  0x19 (the stage-4 boss) and class 0x14 (the stage-2 boss).
+
+  Why it made a branch unplayable: `RescueTargetHeldState` (`FUN_00451980`) is
+  the **only** thing in the game that can write `g_script_branch_var = 1`, so
+  block 0 took its other arm on every run and **blocks 1-10 and 21-32 had
+  never been enterable**. Measured after: shoot the rider and the fork goes to
+  1; leave it and the fork goes to 11.
+
+  And it does ride the car. `RescueTargetPoseFromRoute` (`FUN_00451E50`) and
+  `RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`) set position *and*
+  angles from the **car's own** route table, and both had been recorded as
+  "draw and pose helpers, the renderer's" and left out — so the ported ride-in
+  built an absolute position from the spawn yaw and parked the actor 1,600
+  units away. The clip is seated as a literal, not from the descriptor.
+
+  **The car's rig is innocent, and proving that needed disassembly past what
+  Ghidra shows** (`L4`, `L37`): it draws **four** slots, not the two the
+  pseudocode ends at, with one `MatrixStackPop` against two pushes. None is a
+  character. Also corrected: class 0x21's hit points were a five-entry table
+  read as difficulty; it is **sixteen** rows indexed by the damage rank —
+  wrong index source and wrong extent, `L6` twice over.
+
+  `[open]` Three things left, each its own decision. The clip's root carries a
+  constant 11.94 forward that nothing ever takes, because the pose builder
+  applies only a root's `y` on the rule that the horizontal part is already
+  world movement — and for a clip whose root never changes the per-frame delta
+  is zero. Fixing it changes the root-motion model for **every skinned actor**
+  and wants `SkeletonPoseRootFrame` (`FUN_00410C50`) read first.
+  `RescueTargetFreedState` never ends, so a rescued target stays in the pool,
+  harmless today. And **nothing counts the spawns a block asks for against the
+  actors it gets** — that one comparison would have found this and both bosses
+  in seconds, and is the obvious next check.
 
 - `[fixed]` **The stage 6 lift rose the moment its shot began.** At
   `?stage=6&mode=play&entry=0&block=0&step=2&op=20&frame=0`.
@@ -1695,8 +1813,8 @@ investigation ruled out.
 
 ## And one about a check that is not reliable
 
-- `[open]` **`bundle_flow.mjs`'s first thumbnail assertion fails about one run
-  in three, still.** "the stage that has been open has a picture" waits up to
+- `[fixed]` **`bundle_flow.mjs`'s first thumbnail assertion fails about one run
+  in three.** "the stage that has been open has a picture" waits up to
   ten seconds for `.export-tile img` and gives up. Measured over four runs on
   2026-09-07 while re-exporting for bundle format 5: pass, fail, pass, fail --
   and on one of the failing runs "and it has its picture without the screen
@@ -1712,9 +1830,43 @@ investigation ruled out.
   a longer timeout is what produced the current one. Not touched here: it is a
   peer check and this session had no business widening it.
 
+  **Resolved 2026-09-11, and it was neither of the three suspects.** `[proved]`
+  Not the eight-frame delay and not the OPFS write: **the screen read the
+  thumbnail store once, in its mount effect, and nothing read it again** — so
+  the check was waiting for an event that had already happened, and no budget
+  could ever have fixed it. Losing the race was permanent.
+
+  Measured rather than guessed. In **six of seven** failing runs the PNG was
+  already in storage when the ten-second wait expired. Held open, the file
+  landed **11 ms** after the screen opened and the tile was still empty **20
+  seconds** later. Counting the page's own animation-frame calls from outside:
+  eight frames elapse between the loading overlay going and the screen opening,
+  against the nine the thumbnail request needs — a photo finish, which is why
+  it failed about a third of the time rather than always.
+
+  Two fixes, because there were two faults. The write now announces itself and
+  the screen re-reads on every write, each rescan carrying its own counter so
+  a write mid-rescan cannot cancel that rescan's labels — **that is a
+  user-visible bug in its own right**, not just a test artefact. And the check
+  is two assertions waited separately: the PNG reaching storage, polled as real
+  state, then the tile showing it on a short budget. A picture never taken and
+  a picture never shown are different bugs.
+
+  Pass rates, one run at a time, with the browser contention of `L29` recorded
+  per run: **1/7** with the old check against the unfixed page, **8/8** with
+  the old check once the page was fixed, **7/7** with the new check, and **2/3**
+  with the new check against the *unfixed* page — so it has not been weakened
+  into always-green. Four full runs of the suite it belongs to, all green.
+
+  A wrong turn worth keeping: the storage wait was first written with a
+  browser-side wait on an `async` predicate, which resolves on the **promise
+  object** and is therefore truthy before it settles. It handed back a handle
+  reading as null on a run where the file appeared 100 ms later — a silent
+  false negative, in a check written to remove one.
+
 ## And one about `GameMode`, found while reading the run phases
 
-- `[open]` **`GameMode.ARCADE = 2` in `web/src/hod2lib/stage.ts` looks like the
+- `[fixed]` **`GameMode.ARCADE = 2` in `web/src/hod2lib/stage.ts` looks like the
   wrong number, and the port survives it by luck.** Reading
   `RunPhaseStepToNextScene` and `FUN_0045EBC0` for the stage transition put
   `g_GameMode`'s arms side by side, and they do not fit the enum the port

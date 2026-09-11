@@ -101,11 +101,11 @@ routines that choose the index it loads:
 
 | routine | scene |
 |---|---|
-| `ResetGameOnStart` (`FUN_0045FEF0`) | 6 for `g_GameMode` 2, else 0 |
+| `ResetGameOnStart` (`FUN_0045FEF0`) | 6 for `g_GameMode` 2 (Training), else 0 — and block 0x10 rather than 0 for mode 3 (Boss) |
 | `RunPhaseStepToNextScene` (`FUN_004603B0`) | **`g_scene_index + 1`**, at each stage transition |
 | `RunAttractDemo` (`FUN_00426800`) | whatever the playlist names |
 | `FUN_0041F9B0` / `FUN_0041FB00` | 10 and 11, the two attract screens |
-| `FUN_00425010` | the `{scene, block}` pair at `0x0055CBBC`, in game mode 3 |
+| `FUN_00425010` | the `{scene, block}` pair at `0x0055CBBC`, in game mode 3 (Boss) |
 
 **`AdvanceToNextScene` (`FUN_0045FFF0`) is not one of them**, and this table
 used to say it was. It is run phase 1 and it *loads*; the index was already

@@ -86,6 +86,35 @@ async function waitForStage(what, budgetMs) {
   }
 }
 
+/**
+ * What is in the OPFS thumbnail store, poll until something is.
+ *
+ * Polled from here rather than with `page.waitForFunction`, and that is not a
+ * style choice: the predicate has to `await` two file-system handles, and
+ * `waitForFunction` with an `async` predicate **resolves on the promise
+ * object** -- truthy before it settles -- and hands back a handle that reads
+ * as `null`. Measured: it returned `null` on a run where the file was in the
+ * store 100 ms later. `page.evaluate` does await, so the loop lives here,
+ * exactly like {@link waitForStage}.
+ */
+async function waitForThumb(budgetMs) {
+  const t0 = Date.now();
+  for (;;) {
+    const names = await page.evaluate(async () => {
+      try {
+        const dir = await (await navigator.storage.getDirectory())
+          .getDirectoryHandle("thumbs");
+        const out = [];
+        for await (const n of dir.keys()) if (n.endsWith(".png")) out.push(n);
+        return out;
+      } catch { return []; }
+    });
+    if (names.length) return { names, ms: Date.now() - t0 };
+    if (Date.now() - t0 > budgetMs) return null;
+    await page.waitForTimeout(100);
+  }
+}
+
 try {
   console.log("\nThe page opens on the bundle it was served:\n");
   await waitForLoad(page);
@@ -104,15 +133,36 @@ try {
         notes.filter((t) => t.trim() === "served").length === 2
         && notes.filter((t) => t.trim() === "not built").length === 4,
         notes.join(" | "));
-  // Waited for rather than sampled. The thumbnail is grabbed eight frames
-  // after the stage loads and then written to OPFS, and the screen reads it
-  // back asynchronously, so counting `img` the instant the card appears is a
-  // race this check lost about one run in three.
+  // **Two signals, waited on separately.** This was one
+  // `waitForSelector(".export-tile img")` with a ten-second budget, and it
+  // lost about one run in three -- the budget had already been raised from
+  // whatever it was before, which did not help and could not have. The
+  // picture is owed nine frames after the stage loads, then PNG-encoded, then
+  // written to OPFS; the screen reads the store on mount. Measured: eight
+  // frames elapse between `#loading` going away and this click, against the
+  // nine the countdown needs, so the two orders are a photo finish. And
+  // **losing it was permanent**: in six of seven failing runs the PNG was in
+  // OPFS by the time the wait expired, so the thing being waited for had
+  // already happened and no timeout could reach it.
+  //
+  // So: wait for the file, which is real state and arrives; then for the
+  // tile, which now re-reads on every write (`onThumbWritten`). Separately,
+  // because they break for different reasons -- a picture never taken and a
+  // picture never shown are different bugs and the old check called both
+  // "no picture".
+  const wrote = await waitForThumb(30_000);
+  check("the player writes a picture of the stage it opened on", !!wrote,
+        "nothing under OPFS thumbs/ after 30s");
+  if (wrote) console.log(`    ${wrote.names.join(", ")} after ${wrote.ms}ms`);
+  // Short on purpose. The write has landed; if the tile is still empty the
+  // screen is not noticing writes, and waiting longer would only hide that.
   let shot = true;
   try {
-    await page.waitForSelector(".export-tile img", { timeout: 10_000 });
+    await page.waitForSelector(".export-tile img", { timeout: 5_000 });
   } catch { shot = false; }
-  check("the stage that has been open has a picture", shot);
+  check("the stage that has been open has a picture", shot,
+        `${wrote ? wrote.names.join(", ") : "nothing"} in the store and `
+        + `no tile shows it`);
 
   const chooser = page.waitForEvent("filechooser", { timeout: 30_000 });
   await card().locator("button", { hasText: "Choose folder" }).click();

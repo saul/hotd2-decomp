@@ -107,6 +107,20 @@ CONTROL_MAX = 2
 #: Boss with a non-standard part table; see the module docstring.
 NONSTANDARD_PART_TABLE = {21}
 
+#: The one attack entry in the whole table whose hit frame its own strike clip
+#: never reaches, shared by three character types: the row at `0x00566E70`,
+#: ``{997, 1051, 26.0f, 40, 9, 1}`` against ``g_motion_play_length[997] ==
+#: 20``. `combat.attack_hit_lands` is why that is the engine's own miss rather
+#: than a misread row, and check 8 asserts this exact set instead of the bound
+#: it used to impose -- so a genuinely misread row still fails, while the
+#: crawlers keep the swing they are meant to whiff.
+ATTACK_MISS_TYPES = (0x07, 0x0B, 0x0C)
+ATTACK_MISS_COND = 4
+ATTACK_MISS_INDEX = 2
+ATTACK_MISS_CLIP = 997
+ATTACK_MISS_HIT_FRAME = 40
+ATTACK_MISS_PLAY = 20
+
 
 def _flat(tables, base: int, ct: int, count: int) -> list[int]:
     """A raw, independent read of a per-character u16 table."""
@@ -272,16 +286,20 @@ def main() -> int:
     # 8 ------------------------------------------------------------------
     n_atk = n_pick = 0
     no_attack = []
+    unreachable = []
     for ct in types:
         atk = ch.attack_tables(tables, ct)
         picks = ch.attack_picks(tables, ct)
         for cond, row in atk.items():
             for i, e in row.items():
                 n_atk += 1
-                if not (0 <= e["hit_frame"] < play(e["strike"])):
-                    fails.append(f"type {ct} cond {cond} attack {i} hits on "
-                                 f"frame {e['hit_frame']} of a "
-                                 f"{play(e['strike'])}-frame clip")
+                # **Not** a bound any more -- see `combat.attack_hit_lands`.
+                # An entry whose hit frame is at or past its own strike clip
+                # can never fire, and three shipped entries are like that on
+                # purpose. The bound is replaced by naming that set, below.
+                if not ch.attack_hit_lands(e["hit_frame"], play(e["strike"])):
+                    unreachable.append((ct, cond, i, e["strike"],
+                                        e["hit_frame"], play(e["strike"])))
                 if not (0 < play(e["lunge"]) <= 400):
                     fails.append(f"type {ct} cond {cond} attack {i} lunge "
                                  f"{e['lunge']} has length {play(e['lunge'])}")
@@ -296,6 +314,24 @@ def main() -> int:
     if no_attack:
         fails.append(f"types with a pick table but no usable attack: "
                      f"{no_attack[:6]}")
+    # The exact set, because "some entries cannot land" is not a reading and
+    # the whole hazard here is a misread row looking like one of these. Every
+    # unreachable entry the pick tables name is the crawlers' condition-4
+    # swing, three character types sharing one row at `0x00566E70`.
+    want_unreachable = sorted((ct, ATTACK_MISS_COND, ATTACK_MISS_INDEX,
+                               ATTACK_MISS_CLIP, ATTACK_MISS_HIT_FRAME,
+                               ATTACK_MISS_PLAY)
+                              for ct in ATTACK_MISS_TYPES if ct in types)
+    if sorted(unreachable) != want_unreachable:
+        fails.append(f"the entries whose hit frame their own clip never "
+                     f"reaches are {sorted(unreachable)}, not "
+                     f"{want_unreachable}")
+    else:
+        print(f"  {len(unreachable)} of them can never fire their hit, and "
+              f"they are the crawlers' condition-4 swing -- clip "
+              f"{ATTACK_MISS_CLIP} at frame {ATTACK_MISS_HIT_FRAME} of "
+              f"{ATTACK_MISS_PLAY}, for types "
+              f"{', '.join(hex(c) for c in ATTACK_MISS_TYPES)}")
 
     # 9 ------------------------------------------------------------------
     n_throw = n_armed = 0

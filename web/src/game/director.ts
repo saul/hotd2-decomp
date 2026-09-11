@@ -162,7 +162,8 @@ export function ActorInitHitPoints(p: CharacterPlacement | undefined,
  * the game.
  */
 export function SpawnScriptedCharacters(
-    reqs: readonly CharacterSpawnRequest[], rng?: Rng): Actor[] {
+    reqs: readonly CharacterSpawnRequest[], rng?: Rng,
+    events?: Events): Actor[] {
   const made: Actor[] = [];
   const placements = T.chars?.placements ?? [];
   for (const req of reqs) {
@@ -177,7 +178,7 @@ export function SpawnScriptedCharacters(
                            hp, maxHp: hp,
                            yaw: p?.yaw ?? 0, pos: { ...req.pos },
                            visible: true },
-                         rng));
+                         rng, events));
   }
   return made;
 }
@@ -380,6 +381,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       falling: Class44Selector.FallingContainer,
       story_switch: Class44Selector.StoryModeSwitch,
       script_flag_effect: Class44Selector.ScriptFlagEffect,
+      rising_door: Class44Selector.RisingDoor,
     };
     const sel = CLASS44_SELECTOR[pl.container];
     if (s.class === SpawnClassValue.PropPlacer && sel !== undefined) {
@@ -388,7 +390,9 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                              ? "story-mode switch"
                              : pl.container === "script_flag_effect"
                                ? `effect ${pl.effect}`
-                               : `container kind ${pl.kind}`,
+                               : pl.container === "rising_door"
+                                 ? `rising door, flag ${pl.open_flag}`
+                                 : `container kind ${pl.kind}`,
                            { hp: sel });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;

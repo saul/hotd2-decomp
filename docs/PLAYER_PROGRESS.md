@@ -191,6 +191,31 @@ the nineteen-unit melee at your face. The engine's own operand bug at
 armed, so it always lands on condition 1 with the left-arm zone bit set, which
 pins its pick to the right-arm swing.
 
+**And the crawler's swing misses now, because the engine's does.** Character
+types `0x07`, `0x0B` and `0x0C` share a body-condition-4 attack entry at
+`0x00566E70` — `{997, 1051, 26.0f, 40, 9, 1}` — whose hit frame is 40 against
+`g_motion_play_length[997]` of 20. `ZombieStateStrike` fires the hit on
+`obj+0x19C == entry+0x08` *exactly* (`00455bdf CMP ECX,EAX` / `JNZ`) and leaves
+the state at `play_length - 1` (`00455c02..0d`), so the equality is never
+reached: the strike never fires, nothing is aborted and nothing is retried, the
+clip plays out and the actor retreats. The condition-4 pick row is ten 2s then
+ten 3s per zone combo, so an **undamaged** crawler always draws that entry and
+always misses; one with its head shot off draws entry 3 — clip 1018, hit frame
+3 — and connects. `[proved]`
+
+The port had it the other way round, and this was divergence 2. The exporter
+dropped the entry as an impossible row, which left the draw naming an index the
+bundle had no attack for, and `ZombiePickAttack` reached for another one — so
+the crawlers landed the swing the engine whiffs, and **the port was more
+dangerous than the game**. The bundle carries the entry and bakes clip 997 now,
+the draw is blind again as the engine's is, and measured against the real
+stage-2 bundle over one minute against a live player: **29 hits landed before,
+0 after**, with the head-shot arm still landing its 29. `verify_port.py` asks
+the bundle for the entry and the clip; `verify_combat.py` asserts the *exact
+set* of three entries the engine can never land, rather than the bound it used
+to impose, because a row misread out of the next character's attacks looks the
+same from the outside and that is what the bound was really for.
+
 `web/tools/throwers.mjs` measures it: nine throwers, all nine net under 0.2
 units of movement against the 4.2-unit swing their throw clips carry and
 return, all nine throw both hands, all nine leave — seven by state 15 and two
@@ -825,6 +850,40 @@ with.
 
 Things established while building it, now folded back into the format docs.
 
+- **Arcade is `g_GameMode` 0 and 2 is Training, which the bundle had the wrong
+  way round for as long as it carried the field.** `[proved]` — the values are
+  the title menu's row order, and the menu names its own rows:
+  `TitleMenuRegisterSprites` (`FUN_004962C0`) registers each label by texture
+  (`tex\arcade00`, `tex\original_00`, `tex\traning_00`, `tex\boss_00`) into
+  consecutive `ScreenSpriteRegister` slots and `TitleMenuUpdateAndSelect`
+  (`FUN_00496960`) writes the highlighted row into the global. The other five
+  writers all store 0.
+
+  Nothing was visibly wrong, which is the interesting part: `entryStep()`
+  tested `ORIGINAL && scene === 0` first and returned 1 for everything else,
+  so a bundle labelled Training got the Arcade step by falling out of the same
+  clause the engine falls out of. What the wrong number *was* doing: it put
+  `g_prop_target_set`'s four member sets — Training's four lessons — under the
+  name "arcade", and it made `PlaySoundId`'s plain BGM table look unreachable,
+  which is how the exporter came to emit a `default_table: "ar"` that made
+  every stage play the `_AR` mix. **Arcade plays `ST<n>.wav` now** and Original
+  plays `ST<n>_AR.wav`, which is what the routine does.
+
+  Bundle format **6**, because no declaration moved and so no digest could see
+  it: a format-5 bundle says `game_mode: 2` for Arcade and this client would
+  read that as Training. `verify_exporters.check_game_mode` holds all three
+  enums to one table.
+
+- **The bundle screen showed no picture of the stage you had just been
+  looking at, about one time in three.** `Player.requestThumb` takes the
+  fallback picture nine frames after a load and writes it to OPFS;
+  `ExportScreen` read the store once, when it mounted. Measured eight frames
+  between `#loading` going away and the screen opening, so the two orders were
+  a photo finish — and losing it was permanent, because nothing read the store
+  again. `writeThumb` announces itself now (`onThumbWritten`) and the screen
+  re-reads on every write. `bundle_flow.mjs` had been failing on this and
+  reading as a flaky check.
+
 - **A stage does not choose where it starts; the stage before it does.**
   `[proved]` — a `kind == 2` route record ends a scene by doing `block + 1`
   onto the hole that follows it, and on that path `EvtAdvanceStepOrRoute`
@@ -1223,6 +1282,7 @@ having its handler read.
 | `0x30` the zombie | motion **956** (`zom.bin`) | `FUN_00452DA0` stores `0x3BC`, or `0x41E` on a branch not taken here |
 | `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail | `FUN_00431250`; the table is a five-entry playlist, all inside `nya.bin`'s 762–773 |
 | `0x19` the stage-4 boss | motion **124** (`0x7C`), `boss4.bin` | `Boss4Init` (`FUN_004917E0`) stores it as a literal: `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E` |
+| `0x21` the rescue target | motion **998** (`0x3E6`), `zom.bin`, plus the freed clip **972** (`0x3CC`) | `RescueTargetInit` (`FUN_00451720`) stores it as a literal: `MOV dword ptr [EDI + 0x20], 0x3E6` (`c74720e6030000`) at `0x00451747`. See below — the missing row cost half of stage 2 |
 
 **And a character-type rule that was wrong for as long as it existed.** Class
 0x19's row read `("literal", 0x7C)` — the right instruction from the wrong pair.
@@ -1319,6 +1379,59 @@ them was mine and one of them was a fair reading of the data:
   per-vertex skinning against several bones. The part is attached **rigidly**
   here, which matches the game at rest; a deforming waist would show up in
   extreme poses.
+
+### A missing motion rule made half of stage 2 unreachable
+
+Class `0x21` is the **rescue target**, and there is one spawn of it in the whole
+game: stage 2, block 0, step 2, script address `0x07D0`. Block 0's route record
+is `{branch, next = 11, 1}`; `RescueTargetHeldState` (`FUN_00451980`) writes
+`g_script_branch_var = 1` when the last of its sixteen parts is hit, and only
+then does the stage take block 1. The class had been read, named and ported —
+and the actor had never once existed in the player.
+
+The whole of it was the absent `MOTION_RULES` row above. `motionFor` answered
+null, so `resolveForStage` recorded the placement as a *marker* and `continue`d
+before building a character; no skeleton was built, no clip was baked, no `chr_`
+hierarchy reached the glTF, and `render/characters.ts` had nothing to adopt. The
+port's own spawn path is gated on that adoption — `readySpawns` lists only an
+`at` that `pending` holds — so `SpawnScriptedCharacters` never made the object,
+`RescueTargetInit` never ran, and the branch could only ever answer 0. Measured
+from the stage entry under the driven clock: block 0 forks to **block 11** on
+every run, and blocks 1 through 10 and 21 through 32 — the whole rescued branch
+— are unreachable.
+
+It is the third time this exact row has been the bug: class `0x19` (the stage-4
+boss, "never appeared in a bundle"), class `0x14` (the stage-2 boss, "stage 5
+had no character type 71") and now class `0x21`. The failure is silent by
+construction, because "placed as a marker" is what the exporter does for every
+class whose handler has not been read, and a class that *has* been read looks
+exactly the same from the outside.
+
+**And the actor is on the car.** `RescueTargetPoseFromRoute` (`FUN_00451E50`)
+and `RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`) set its position
+*and* its orientation from
+`CamEvalObjectPath6(g_st2car_path_table[obj+0x1350], g_cam_path_frame)` — the
+same table, row and frame the stage-2 car's own poser reads, `op_st2` `0x148`
+under camera `0x38` and `0x14E` under `0x39`. Those two were recorded as "draw
+and pose helpers, the renderer's" and left out, so the ported ride-in built an
+absolute position out of the spawn yaw alone and parked the actor 40 units from
+the world origin, 1,600 from the car. Sub-state 0's `(0, 50 − frame, 50 −
+frame)` is a **drop-in on top of that pose**, not a position: it is rotated by
+the route's own yaw, added to the route point, and reaches zero exactly as the
+camera frame reaches 50.
+
+**Still open: the model sits 11.94 units behind where the engine draws it,**
+along the car's own forward axis. Clip 998's root translation is a constant
+`(0, 15.692, 11.943)` — it is what puts the body over the bonnet — and
+`render/characters/pose.ts` applies only the **y** of a clip root, on the rule
+that the port has already taken the horizontal part as world movement through
+`ApplyRootMotion`. For a clip whose root never changes the per-frame delta is
+zero, so nothing ever takes it and the offset is simply dropped. Correcting it
+is a change to the port's root-motion model for every skinned actor in the game,
+not to this class, and it wants `SkeletonPoseRootFrame` read first: the engine
+both places the root bone at the frame's translation *and* applies the
+frame-to-frame delta to the object, and which of those is relative to which is
+`[open]`.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any
@@ -1504,6 +1617,67 @@ pair**: `PlaySoundId` walks two parallel tables — the looping ids at
 `LASER_SWORD_22_OFF` kills it before the strike. The off cue fires on *every*
 non-blinking frame of the hold, not once; the engine has no edge test there and
 `PlaySoundId` does not de-duplicate.
+
+### The noise a standing zombie makes, and the chainsaw
+
+Both were silent, and both had been looked for in the wrong routine. There is
+exactly **one** voice routine in this game — `ActorPlayHitVoice`
+(`FUN_0040A6F0`), five kinds across twenty-three call sites — and **none of the
+five is an idle**: they are the three shot reactions, the attack cry, and one
+that turns out to be dead. So no amount of reading it could have found either
+of these.
+
+**The groan is a bare `PlaySoundId` in the hub state.**
+`ZombieStateHoldAtRange` (`FUN_00455720`) plays `0x1917A9`,
+`COMMON2\ZOMBIE_041_16.wav`, at `0x004558D6` — inside the same one-instruction
+gate (`CMP EAX, EDI` at `0x004558B0`) that starts the in-range idle clip. So it
+is one shot per *entry* into the idle: on arrival at the ring, and again after
+every swing and retreat. Not periodic, not random, not on a timer. A byte
+search for the id over the whole image finds that one `PUSH` and the SE name
+record, and nothing else.
+
+It is **rarer in play than "whenever a zombie stands still"**, and the same
+`CMP` is why: `ZombieStateApproach` plays `row[(obj+0x136C >> 0x15) & 1]`, so
+for the `row[0]` half of that pair the walk in *is* the clip the hub wants and
+the hub changes nothing. Measured in the page on stage 1 block 4, where the
+walkers reach the ring silently and only the attack cries sound. What does
+groan is an actor that comes back on a clip the hub does not want — `row[4]`
+after the retreat, `row[2]`/`row[3]` after an attack run, or the strike clip
+itself — which is every zombie that has swung at you once. Both arrivals are
+asserted in `web/test/port.test.ts`.
+
+**The chainsaw and the laser sword are a refcounted loop, not a voice.** For
+character types 2 and 3, `EnemyZombieInitByCharType` (`FUN_00452FD0`) plays
+`CHAIN_SAW_22` or `LASER_SWORD_22` — but only while `g_weapon_loop_holders`
+(`0x009C8A74`) is zero — then increments it and latches `obj+0x131B`.
+`FUN_00456600` plays the paired `_OFF` id only from the *last* holder. Both
+play ids are in `g_looping_se_ids` and both stop ids in
+`g_looping_se_stop_ids`, so the engine plays the first looped and turns the
+second into a `SoundStopAllLoopingSe`. One shared loop per scene, opened by the
+first such actor and closed by the last to die — or the moment a type-2 actor
+loses both hand props, which `ActorUpdateBodyCondition` (`FUN_00454270`) is
+what does. Shoot the chainsaw out of its hands and the noise stops while the
+actor is still alive, which is the second thing that proves it is the weapon
+rather than the actor.
+
+Two annotations were wrong and are fixed: `0x009C8A74` was recorded as a count
+of "groan voices" and `FUN_00456600` as the death scream. The filenames settle
+both.
+
+**And nothing in the player looped anything.** `audio/bgm.ts` played every SE
+as a one-shot, so class 0x31's laser sword — ported earlier, and correctly —
+had been igniting for 0.4 seconds and never sustaining, and its `_OFF` cue was
+a 404 for a file the game does not ship. The loop branch is transcribed now,
+and the bundle carries `sound.looping`, the 44 pairs out of the EXE.
+
+`[proved]` **Kind 4 of the voice routine is dead.** No call site in the image
+passes 4 — all twenty-three pass 0, 1, 2 or 3, and the census is in
+`combat/voice.ts` — and its two ids at `g_actor_voice_kind4` (`0x005A4EA8`) are
+zero in the shipped `.data` with nothing in the image writing them. The nearest
+thing that could is the 14-entry radix-sort scratch at `0x005A4E38`, which ends
+one dword short of them and whose two feeders are both capped at 14. So the arm
+reaches `PlaySoundId(0)`, the dispatcher's own "no sound" early-out. Porting it
+is porting silence, and the enum member stays only to say so.
 
 **The player runs the game's own collision.** The bundle carries every `coli/`
 blob a scene loads and `game/coli.ts` is a transcription of
@@ -2519,6 +2693,81 @@ behaviours, and `HingeUpdate`'s impact wobble (one damped sine over 16 frames
 when a prop is shot) has nothing to drive it here. A *general* effect-tree
 renderer is also still missing — the two trees this class places are flat, so
 the port draws one prop per drawable node and never has to compose a chain.
+
+### Selector 11 slides straight up, and it is stage 3's roller shutter
+
+**Done.** Two reports found one gap from opposite ends: a roller shutter
+missing from stage 3, and a stage 5 van drawn as two rear doors in mid-air.
+Neither was the placement path, which is why the first report's own
+measurement — stage 3 carries no hinges, no statics, no class-0x24 set pieces
+and no shutter rig — was right and pointed nowhere.
+
+**The shutter is class 0x44 selector 11**, `PropBuildRisingDoor`
+(`FUN_00473410`) and `RisingDoorUpdate` (`FUN_004753F0`), and it was in no
+table anywhere: not the `props` block, not `containerPlacements`, not
+`g_class44_subtypes`. It is not a hinge — one `MatrixRotateY` and no curve —
+and it is emphatically not the port's `shutter`, which is the HUD letterbox.
+It translates **Y upward** while a script flag is up: `speed` is seeded 0.5 on
+the frame the flag is first seen and gains `step` a frame until `y` passes a
+ceiling, at which point the routine stops writing `y` and the door holds one
+frame's worth above it rather than clamping.
+
+Both numbers come from a **slot test**, `CMP word ptr [ESI+0x28C], 0xA58`, not
+from anything measured about the model. Stage 3's door is that slot
+(`etc_door.bin[2]`): it climbs 36.1 at a tenth a frame and is clear on frame
+22, and while it waits it **rattles**, `(rand() % 0x191 - 200) * amp * 0.01` in
+X and `(rand() % 0x65 - 50) * amp * 0.01` in Z with the amplitude decaying 0.95
+a frame and reseeding itself whenever it falls below 0.001 — so it judders in
+~135-frame bursts rather than once. Stage 5's door is `st5.bin[9]`, takes the
+35.0 / 0.01 arm, and never rattles at all. Two spawns in the game and that is
+both of them.
+
+It lives in the **container pool** (`PropFamily.RisingDoor`) for the same
+reason selector 0 does: the engine `ActorAlloc`s a 0x378 object, the rise is
+real per-frame state that has to go in a snapshot, and `render/breakables.ts`
+already draws a model per asset slot at `p.x/p.y/p.z`. The amplitude decays in
+`game/`; the displacement it produces is a draw offset the engine recomputes
+every frame and never writes back, so that half is the renderer's — the same
+split `BreakablePropUpdate` already had. The rattle needed its own arm there:
+the two axes have different moduli, and reusing the square 0x97/75 draw would
+have been a guess.
+
+**The van's body was never a missing placement.** It is a class-0x41 **type
+51** generic prop at the doors' own position and yaw, drawing slot `0x1793` =
+`char_adv04.bin[94]` — three models before the `[95]`/`[96]` pair
+`PropBuildVanDoors` hands its hinges. `PlaceGenericProp` built it all along and
+`DrawSlotFor` asked for `0x1793` every frame; type 51 was missing from
+`GENERIC_DESCRIPTOR_SLOT`, the one list that decides which descriptor slots'
+geometry travels in a bundle, so there was nothing to clone. **A placement with
+no model and a placement that was never exported look exactly the same from the
+level**, which is the whole reason both of these lasted. Eleven type-51 spawns,
+all in stage 5: four vans, two ground quads and five other pieces of street
+furniture from the same file.
+
+**And four types take their lifetime from a different field.** Types 12, 31, 51
+and 53 have a switch arm that writes the placer's `+0x1F4` — the signed byte at
+`desc+0x24` — over `obj+0x11C`, so for those the slot and the lifetime are two
+separate descriptor fields and both are real. The port read the slot as both,
+which gave all 55 of those spawns a lifetime of their own asset slot: 6035
+event steps for the van in a nine-block stage, so `PropExpireByStepLifetime`
+never retired one. All 55 carry 0..7 in `desc+0x24`. That was invisible for
+exactly as long as the props were.
+
+`tools/verify_prop_slots.py` is the check, and it is `verify_attachments.py`'s
+shape for the same failure one class over: every slot a placed prop will pass
+to `AssetDrawSlot` has a model in its own bundle. Mutating the fix away makes
+it fail on both rising doors.
+
+`[open]` **The descriptor-slot set is seven types and three are still out.**
+`PropDrawOnlyType31` (`FUN_0046A1C0`, 6 spawns), `PropDrawOnlyType53`
+(`FUN_0046EBD0`, 2) and `PropDrawOnlyType54` (`FUN_0046EDC0`, 2) all draw
+`obj+0x28C` too — ten more spawns of scenery missing for the reason the van
+was. All three are read and annotated; they are not carried because adding a
+type makes its model travel *and* draw, and 54's authored drift would be
+visibly static. `[open]` **The renderer poses all forty-four generic props
+`Ry · Rz · Rx`**, which is type 51's order and not the family's: 5, 12, 31, 33,
+53 and 54 all compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or
+more non-zero angles and so are posed wrongly today.
 
 ## Every opcode, and what the player does with it
 

@@ -18,8 +18,10 @@
  * stand against, because the walk is what the *other* seven state-33 spawns
  * do.
  */
+import type { Events } from "../../core/events";
 import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
 import { SPAWN_RIDE_CARRIER, ZombieAttachToCarrier } from "./carrier";
+import { EnemyZombieTakeWeaponLoopSe } from "./weapon_loop";
 
 /**
  * The two bits this routine consumes out of the spawn record's flags word.
@@ -36,21 +38,28 @@ const SPAWN_TURN_TOWARD_CAMERA = 0x4;
 /**
  * `EnemyZombieInitByCharType` — `FUN_00452FD0`.
  *
- * **The head only.** After the four arms the engine branches on the character
- * type: 2 and 3 load a held prop and play a spawn cry, 9 becomes a corpse,
- * 0xC branches on the body condition, 0xE loads a prop, and 0x12 allocates a
- * *second* class-0x30 actor beside itself. None of that is ported.
+ * **The head, and two arms.** After the flag moves the engine branches on
+ * the character type: 9 becomes a corpse, 0xC branches on the body condition,
+ * 0xE loads a prop, and 0x12 allocates a *second* class-0x30 actor beside
+ * itself. None of that is ported.
  *
- * The fourth arm — `obj+0x34` bit 3 — **is** ported now, and it is not a flag
+ * The fourth arm — `obj+0x34` bit 3 — **is** ported, and it is not a flag
  * move at all: it re-reads the descriptor's position and yaw as an offset on
  * `g_carrier_object` and seats the actor there. It lives in
  * `class30/carrier.ts` with the seat it calls, because the two are one
  * mechanism. This comment used to say the bit meant "spawned in the air" and
- * that {@link ZombieFlag2.AttachedToCarrier} "already carries it"; nothing
- * set that flag, nothing read it, and stage 5 block 2's four passengers stood
- * at the world origin for it.
+ * that `ZombieFlag2.AttachedToCarrier` "already carries it"; nothing set that
+ * flag, nothing read it, and stage 5 block 2's four passengers stood at the
+ * world origin for it.
+ *
+ * The other arm that **is** here is types 2 and 3, which this file used to
+ * describe as *"load a held prop and play a spawn cry"*. It is not a cry: it
+ * takes a share in the scene's one looping held-weapon SE, and the sound runs
+ * until an actor dies. See {@link EnemyZombieTakeWeaponLoopSe} — the prop load
+ * beside it is still unported and says so there.
  */
-export function EnemyZombieInitByCharType(obj: ZombieActor): void {
+export function EnemyZombieInitByCharType(obj: ZombieActor,
+                                          events?: Events): void {
   // `00453000  if (obj+0x136C & 0x20) obj+0x38 |= 8`. Raised, not moved: the
   // source bit stays where it is.
   //
@@ -95,4 +104,6 @@ export function EnemyZombieInitByCharType(obj: ZombieActor): void {
     // `OR EAX, 0x100000` on the word re-read at `00453058` — after the call.
     obj.flags2 |= ZombieFlag2.Carried;
   }
+  // `00453133`, the switch's types-2-and-3 arm, sound only.
+  EnemyZombieTakeWeaponLoopSe(obj, events);
 }

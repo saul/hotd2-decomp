@@ -1369,6 +1369,28 @@ The entry is 0x10 bytes:
 | `+0x0A` | s16 the motion the **player** plays when hit |
 | `+0x0C` | u16 cancel mask |
 
+Both operators in sub 2 are load-bearing, and together they make some attacks
+**miss by construction**. The strike is an exact equality —
+`00455bdf CMP ECX,EAX` / `00455be1 JNZ` over the `CALL 0x00456490` — and the
+exit is `00455c02 MOVSX EDX,[ECX*2 + 0x4e07d0]` / `DEC` / `CMP EAX,EDX` / `JL`,
+so the cursor only ever takes the values `0 .. g_motion_play_length[clip] - 1`
+before the state hands over. `+0x08` is **not** bounded by the clip it names,
+and three shipped entries sit outside it: character types `0x07`, `0x0B` and
+`0x0C` share a body-condition-4 entry 2 at `0x00566E70`,
+`{997, 1051, 26.0f, 40, 9, 1}`, against `g_motion_play_length[997]` = 20. Those
+are the crawlers, their condition-4 pick row is ten 2s then ten 3s per zone
+combo, and so **an undamaged crawler swings and misses every time** while one
+with its head shot off draws entry 3 (clip 1018, hit frame 3) and connects.
+Nothing is aborted and nothing is retried: the strike simply never fires, the
+clip plays out and the actor retreats. `[proved]`
+
+The exporter therefore keeps such an entry rather than rejecting it —
+`hod2lib.combat.attack_hit_lands` carries the reading, and `verify_combat.py`
+asserts that exact set of three instead of imposing the bound, because a row
+misread out of the *next* character's attacks looks the same from the outside.
+The bound was right for as long as the reader scanned a fixed number of
+entries; it has been indexed by the pick table for longer than that.
+
 ### Shooting a limb off changes the attack, twice over
 
 The **cancel mask** names destroyed zones — 1 head, 2 right arm, 4 left arm —

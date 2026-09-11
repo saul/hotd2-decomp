@@ -2421,15 +2421,21 @@ ever goes negative, and killing every enemy in a block drives the alive count
 to zero and lets the walker advance. Across 115 block starts in the six stages,
 both hold; the room clears in one frame every time.
 
-`[diverges]` **The corpse window is zero-length for class 0x30.** The port has
-no class-0x30 death state, so both of its releases land on the same frame
-instead of a death clip apart. Class 0x31 keeps the window, because it has its
-death states and calls the two retires where the exe does. Porting
-`ZombieStateDeath6` (`FUN_00454D20`) — three subs, and the motion choice is
-already ported — is what closes it, and it would also change how every zombie
-death looks in the player, which is why it is called out here rather than done
-quietly. The old derived behaviour had that window at *infinity*: a shot zombie
-stayed `present` for ever, so none of the 54 present gates could ever open.
+**The corpse window is a death clip long again, and this divergence is
+closed.** It said the port had no class-0x30 death state and that both of its
+releases therefore landed on the same frame. That stopped being true when
+`ZombieStateDeath6` (`FUN_00454D20`) was ported: it and
+`ZombieEnterCorpseState` (`FUN_00456740`) are both in `class30/death.ts`, so
+`ZombieReleasePermitAndUntrack` drops the alive count as the death state opens
+and the present count comes back when the clip ends, which is a clip apart and
+is what the exe does.
+
+The tag outlived the work it described, which is the failure mode of a
+divergence recorded in prose: nothing checks that a declared departure is
+still a departure. It was found by a session reading this file for something
+else. The old derived behaviour had that window at *infinity* — a shot zombie
+stayed `present` for ever, so none of the 54 present gates could ever open —
+and that history is why the entry is rewritten rather than deleted.
 
 ### The room-clear gate answered on the frame the spawn ran
 

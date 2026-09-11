@@ -2055,7 +2055,7 @@ investigation ruled out.
   named on the way: `g_scene_tick_counter`, which closed a separate `[open]`
   about what distinguishes the blink counter.
 
-- `[open]` **Nothing in the port can leave class 0x30 state 12 anywhere in the
+- `[fixed]` **Nothing in the port can leave class 0x30 state 12 anywhere in the
   game**, and it hangs stage 3's entry-7 route at block 2 step 6 op 8. Filed as
   `PLAYER_HANGS.md` 22. A dead civilian's script sits on
   `CivilianWait.EnemiesPresent` because `g_enemies_present` is 2 with nothing
@@ -2070,6 +2070,52 @@ investigation ruled out.
   `bake()` refuses a clip whose implied bone count is not the character's.
   `[open]` whether 1017's stride matches these rigs is exactly what that
   refusal would answer.
+
+  **Fixed 2026-09-11, and the clip was simply left out.** `bake()`'s refusal is
+  the measurement the decision was waiting on, and it refuses nothing: motion
+  1017 implies **16 bones**, and **all nineteen** class-0x30 character types in
+  the twelve bundles are 16-bone. Rendered to be certain — frame 0 is an axe
+  man standing with an axe in each hand, frame 40 has him doubled forward with
+  both still held.
+
+  The bake set is a **hand-enumerated list**, and its death half covered one of
+  the two routines that choose a death clip. `ChooseDeathMotion`
+  (`FUN_004560B0`) has ten arms and the port takes six. A docstring had said
+  for months that the others were "not implemented" — **true of the port's
+  branches and never true of the bake list**, which is `L26` once more. Six
+  clips are baked now, in both `hod2lib` halves.
+
+  **A second bug came from the new check rather than from a report.** Body
+  condition 4's death pair was in no bundle either, and because that wait
+  measures against the clip's own length rather than a constant, **stage 2's
+  twenty `znkager` crawlers had no death animation at all** and snapped
+  straight to a corpse. Same omission, opposite symptom.
+
+  **The leak is not game-wide, and the measurement is the interesting part.**
+  The flag that sends an actor into this state is **seeded from the spawn
+  record**, by `ActorInitFlags` (`FUN_00408970`), which nothing had read: **22
+  placements carry it across the twelve bundles, every one class 0x30, in
+  stages 1 and 3 only** — which is why four stages completed with the clip
+  missing. That every setter is an actor *carrying* something corroborates what
+  the bit means.
+
+  It nearly came out backwards. A sweep for every encoding of the immediate
+  finds **no instruction anywhere that raises the bit**, which would have made
+  the state unreachable and the report wrong. The data raises it, not the code.
+  `L32`.
+
+  Before: five runs of five hung. After: five of five reach block 11 and the
+  end, which I confirmed myself. `tools/verify_death_clips.py` checks 14,472
+  spawn-and-death-clip pairs read out of the **real bundles** rather than the
+  exporter, and mutating the guard turns 672 of one stage's pairs red.
+
+  `[open]` A separate finding, filed as `PLAYER_HANGS.md` 24 and deliberately
+  not acted on: `ZombieStateStandAndThrow` writes a different flag word from
+  the one the engine writes, and the faithful write would reroute deaths in two
+  rooms. Its cause was an annotation saying the bit "is written by nothing in
+  the image", now corrected. **Held because the reading has no Ghidra
+  corroboration** — the bridge was down for that whole session and every
+  address came from a linear sweep.
 
 - `[open]` **Stage 4 hangs from entry 4**, at block 9 with one `znkage` in
   `ZombieStateDragTarget` (state 43, `FUN_0045C080`) at 90 hit points after 70

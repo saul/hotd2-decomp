@@ -4845,6 +4845,32 @@ console.log("class 0x31, ThrowerStateLeapToPoint:");
   // The footfall, once: `PlaySoundId(0x2916A9)` at `0x0044E58E`.
   check("...having thumped exactly once on the way down",
         thumps === 1, `${thumps}`);
+
+  // **And the hub replaces the landing clip rather than deferring to it.**
+  //
+  // `ThrowerStateLeapToPoint` clears nothing on its way out: `0x0044E5A6` to
+  // `0x0044E5BE` writes state 7, sub 0 and drops `obj+0x34` bit 0x100, and
+  // touches no motion field at all. The landing clip is *meant* to still be
+  // running, because `0x0044B29E` is `SetCurrentActorMotionBlended`, which is
+  // unconditional -- the engine's one track means writing the idle is what
+  // ends the leap's clip.
+  //
+  // The port called class 0x30's `ZombieSetMotionIfIdle` here instead, which
+  // returns early while a one-shot is on `obj.action`. State 7 runs sub 0 on
+  // exactly one frame, that frame arrived with the leap's landing clip live,
+  // and so the idle was never set at all: stage 4's nine state-20 `zskamere`
+  // held the pose they were spawned in -- their set's `IdleAlt`, the hang --
+  // while standing on the floor.
+  const oneShotAtHandover = z.action?.motion ?? -1;
+  check("the landing clip is still running when it hands over",
+        oneShotAtHandover === 300 && z.sub === 0,
+        `action ${oneShotAtHandover} sub ${z.sub}`);
+  GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+  // 313 is `g_class31_motion_sets[0][2]`, the set's walk -- the clip state 7
+  // names on the ground.
+  check("...and the first frame of the hub overwrites it with the set's walk",
+        z.motion === 313 && z.action === null,
+        `motion ${z.motion} action ${z.action?.motion ?? "null"}`);
 }
 
 console.log("class 0x31, ThrowerStateWalkDistance:");

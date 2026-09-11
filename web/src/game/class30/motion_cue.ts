@@ -138,6 +138,43 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
 }
 
 /**
+ * `SetCurrentActorMotionBlended` — `FUN_0044D230`. The **unconditional** one.
+ *
+ * A thunk: the engine's body reads its first argument, the motion block, and
+ * never uses it — it always drives `DAT_009A26A0 + 0x194`, the actor the sweep
+ * is on, and every caller passes `obj+0x194` anyway. Then it calls
+ * `ActorSetMotionBlended` (`FUN_004119A0`) with the other three. There is no
+ * "already playing" test, no reaction latch, nothing.
+ *
+ * **It is the only way class 0x31 ever sets a motion**, and that is the point
+ * of naming it here rather than inlining the call. Nine call sites go through
+ * it — `ThrowerStateFallAndLand` at `0x0044A78E`, `ThrowerStateStandAndDecide`
+ * at `0x0044B29E`, `ThrowerStateWaitForPermit` at `0x0044B4E0`,
+ * `ThrowerStateLeapAside` at `0x0044BB84`, `ThrowerStateGetUp` at
+ * `0x0044C30F`, `ThrowerStateWalkDistance` at `0x0044E358`,
+ * `ThrowerStateWithdraw` at `0x0044ECDF`, `ThrowerStateRestoreBothHands` at
+ * `0x0044F98E`, and `ZombieStateStrike`'s lunge at `0x00455B49` — while
+ * {@link ZombieSetMotionIfIdle}, which *does* test, has six callers and all
+ * six are class 0x30.
+ *
+ * Class 0x31 calling class 0x30's conditional routine is what parked stage 4's
+ * nine state-20 `zskamere` in the pose they were spawned holding: the hub's
+ * one frame of sub 0 arrived while a one-shot was still on
+ * {@link Actor.action}, the guard returned, and nothing set the walk ever
+ * again. `L11` — do not move a test across a function boundary — with the
+ * whole function being the wrong one.
+ *
+ * `frame` is a start frame inside the clip, not a blend length, and it is in
+ * the port's authored-frame unit like every other caller of
+ * {@link ActorSetMotionBlended}.
+ */
+export function SetCurrentActorMotionBlended(obj: Actor, motion: number,
+                                             frame: number,
+                                             fade: number): void {
+  ActorSetMotionBlended(obj, motion, frame, fade);
+}
+
+/**
  * Begin a cross-fade out of whatever is showing.
  *
  * The engine holds two motions on one track and fades between them;

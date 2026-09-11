@@ -9,23 +9,50 @@
  * range.
  */
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
+import { ActorFlag, ThrowerFlag, ThrowerStance, type ThrowerActor }
+  from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { QueryGroundSurfaceAt } from "../coli";
 import { MotionOf } from "../tables";
 import { bamsDelta, dist2d, type Vec3 } from "../vec";
-import { ZombieSetMotionIfIdle } from "../class30/motion_cue";
+import { SetCurrentActorMotionBlended } from "../class30/motion_cue";
 import { MotionFade } from "../class30/states";
 import { ThrowerPickNextState, ThrowerTryEnterState } from "./router";
 import {
   STAND_TURN_RATE, ThrowerMotion, ThrowerState,
 } from "./states";
-import { ThrowerMotionOf, ThrowerStanceOf } from "./tables";
+import { ThrowerMotionOf } from "./tables";
 
 /** Character type 0x18 has its own clip for everything. */
 const CHAR_ZSLMAN = 0x18;
+
+/**
+ * The character type whose ground arm stores its position instead of drawing a
+ * new start frame — `CMP word ptr [ESI + 0x1F4], 0x16` at `0x0044B202`.
+ * Named for what the arm does, because nothing in the image says more.
+ */
+const CHAR_TYPE_STANDS_ON_ITS_MARK = 0x16;
+
+/**
+ * `[port-only]` — the stance these two states compute **for themselves**.
+ *
+ * `bit6 + 2*bit7 + 3*bit8`, and no `Pouncing` term: the engine spells it
+ * inline twice, at `0x0044B1CC` and again at `0x0044B418`, and both then test
+ * the sum against the length of their own table rather than masking it.
+ *
+ * `ThrowerStanceOf` is the *other* one — `ThrowerLoadAttackArcScript`'s,
+ * which adds `4*bit17` — and the two are not interchangeable here. Masking
+ * that one with `& 3` is how a sum of 4 read as ground and 6 as a wall, rows
+ * neither of these routines ever selects.
+ */
+function ThrowerSurfaceStance(obj: ThrowerActor): number {
+  const f = obj.flags2;
+  return (f & ThrowerFlag.WallA ? ThrowerStance.WallA : 0)
+       + (f & ThrowerFlag.WallB ? ThrowerStance.WallB : 0)
+       + (f & ThrowerFlag.Ceiling ? ThrowerStance.Ceiling : 0);
+}
 
 /**
  * The idle each stance plays, for every character but 0x18.
@@ -55,19 +82,45 @@ const WAIT_DEFAULT = 0x127;
 export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
                                            dt: number,
                                            rng: Rng, host: GameHost): void {
-  const stance = ThrowerStanceOf(obj) & 3;
+  const stance = ThrowerSurfaceStance(obj);
   if (obj.sub === 0) {
     let motion = ThrowerMotionOf(obj, ThrowerMotion.Walk);
-    let start: number | "clip" = rng.int(10);
-    if (stance === 0) {
-      // On the ground the start frame is drawn from the clip's own length,
-      // which is what keeps a pair of them out of lockstep.
-      start = "clip";
+    // `rand() % 10`, the default start frame, drawn before the stance arm.
+    let start = rng.int(10);
+    if (stance > ThrowerStance.Ceiling) {
+      // `cmp eax, 3; ja 0x0044B293` — two surface bits at once sums past the
+      // table, and the arm that skips it plays the set's own walk at the
+      // frame already drawn. It is not `stance & 3`: that reads 4 as ground
+      // and 6 as a wall, which are rows this routine never selects.
+    } else if (stance === ThrowerStance.Ground) {
+      if (obj.charType === CHAR_TYPE_STANDS_ON_ITS_MARK) {
+        // `0x0044B21E` — character type 0x16 keeps the drawn frame and stores
+        // where it is standing instead.
+        obj.target.x = obj.pos.x;
+        obj.target.y = obj.pos.y;
+        obj.target.z = obj.pos.z;
+      } else {
+        // `rand() % g_motion_play_length[motion]` at `0x0044B211`: on the
+        // ground the start frame is drawn from the clip's own length, which is
+        // what keeps a pair of them out of lockstep.
+        //
+        // [port-only] in the clip's authored frames rather than the engine's
+        // cursor ticks, which is the unit every caller of
+        // `ActorSetMotionBlended` in this port passes — see `FrameToTicks`.
+        start = rng.int(Math.max(1, MotionOf(obj, motion ?? -1)?.frames ?? 1));
+      }
     } else {
       motion = (obj.charType === CHAR_ZSLMAN
         ? STAND_BY_STANCE_ZSLMAN : STAND_BY_STANCE)[stance];
     }
-    ZombieSetMotionIfIdle(obj, motion, rng, start, MotionFade.Quick);
+    // **Unconditional**, as `0x0044B29E` is. This used to be class 0x30's
+    // `ZombieSetMotionIfIdle`, which returns early while a one-shot is on
+    // `obj.action` — so an actor that reached the hub with the leap's landing
+    // clip or the fall's still running never got its idle at all, and held
+    // whatever pose it was spawned in for the rest of its life.
+    if (motion !== undefined && MotionOf(obj, motion)) {
+      SetCurrentActorMotionBlended(obj, motion, start, MotionFade.Quick);
+    }
     obj.sub = 1;
   }
 
@@ -119,18 +172,22 @@ export function ThrowerStateWaitForPermit(obj: ThrowerActor, eye: Vec3,
       // reaction holds whatever clip that reaction is playing rather than
       // dropping into the wait's idle.
       if (obj.flags & ActorFlag.Reacting) return;
-      const stance = ThrowerStanceOf(obj) & 3;
+      const stance = ThrowerSurfaceStance(obj);
       let motion: number | undefined;
       if (obj.charType === CHAR_ZSLMAN) {
         motion = WAIT_BY_STANCE_ZSLMAN[stance] ?? WAIT_DEFAULT;
-      } else if (stance === 0) {
+      } else if (stance === ThrowerStance.Ground) {
         motion = ThrowerMotionOf(obj, rng.int(2) === 0
           ? ThrowerMotion.Idle : ThrowerMotion.IdleAlt);
       } else {
         motion = WAIT_BY_STANCE[stance] ?? WAIT_DEFAULT;
       }
+      // `cmp [ESI + 0x1B4], EAX; je` at `0x0044B4C8` — the same-motion test is
+      // this routine's own, and it is the only test around the set. What
+      // follows it at `0x0044B4E0` is again the unconditional setter, at
+      // frame 0 over a ten-frame fade.
       if (motion !== undefined && obj.motion !== motion && MotionOf(obj, motion)) {
-        ZombieSetMotionIfIdle(obj, motion, rng, 0, MotionFade.Normal);
+        SetCurrentActorMotionBlended(obj, motion, 0, MotionFade.Normal);
       }
       return;
     }

@@ -106,8 +106,15 @@ def tsv_rows(path: Path) -> int:
 
 
 def count_diverges() -> int:
+    """Every declared departure, over `verify_port.divergence_files()`.
+
+    This counted `game_files()` alone while `verify_port` already counted
+    `game/` **plus** `script/`, so the table published one number and the check
+    printed a larger one for the same concept. Both are the wider set now, and
+    the wider set includes `render/` -- see `verify_port.divergence_files`.
+    """
     return sum(len(verify_port.DIVERGES.findall(p.read_text()))
-               for p in verify_port.game_files())
+               for p in verify_port.divergence_files())
 
 
 def count_open() -> int:

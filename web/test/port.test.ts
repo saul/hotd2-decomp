@@ -35,7 +35,8 @@ import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { MotionFlag, type Boss2Actor } from "../src/game/actor";
+import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
+  from "../src/game/actor";
 import { CameraPointRiseFor, UpdateCameraFreeFlag }
   from "../src/game/camera/track";
 import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
@@ -186,6 +187,7 @@ import {
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
   PlaceBreakableGroup, PropContainerPlacerUpdate, PlaceKindedProp,
   KindedPropUpdate, PropFamily, KIND_SLOT, SLOT_NONE, PlaceGenericProp,
+  GENERIC_POSE_ORDER, GENERIC_SLOT_STRIP, PoseOrder,
   LiftUpdate, LiftFlag, LIFT_NEAR_CLOSED, LIFT_NEAR_OPEN,
   LIFT_FAR_CLOSED, LIFT_PANEL_CLOSED, LIFT_PANEL_OPEN, LIFT_PANEL_DELAY,
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
@@ -196,6 +198,10 @@ import {
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
+import {
+  SCRIPT_FLAG_TYPE54_DRIFT, TYPE31_DESPAWN_CAM_FRAME,
+  TYPE31_DESPAWN_CAM_PATH, TYPE54_DRIFT_FRAMES,
+} from "../src/game/class41/draw_only";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
 import {
   CLASS21_HP_BY_RANK, CLASS21_MOTION_FREED, g_st2car_path_table,
@@ -1808,6 +1814,178 @@ console.log("\nclass 0x41, the generic props:");
         door.slot === 0x1032 && door.hp === 1, door.slot.toString(16));
 }
 
+console.log("\nclass 0x41's three draw-only types:");
+{
+  // ---- type 54: the drift is authored, and it is the only exit ----------
+  const rng = new Rng(54);
+  propScene(rng);
+  const p = PlaceGenericProp({
+    at: 0xb000, container: "generic", type: 54, slot: 0x18a1,
+    lifetime_evt_steps: 0x18a1, field_1f4: 5, pos: [583, -67, -7773.4],
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("a type-54 prop is its own family, not the inert Generic arm",
+        p.family === PropFamily.DrawOnlyType54, `${PropFamily[p.family]}`);
+  check("...and PlaceGenericProp case 0x36 seeds all five drift rates",
+        p.vx === 5 && p.vy === 1.5 && p.vz === -4
+        && p.spin === 0x300 && p.yawSpin === -0x400,
+        `${p.vx}/${p.vy}/${p.vz} ${p.spin}/${p.yawSpin}`);
+  // Flag 12 down: it stands exactly where the script put it, for ever. There
+  // is no lifetime prologue on this routine at all.
+  G.g_script_flags[SCRIPT_FLAG_TYPE54_DRIFT] = 0;
+  for (let i = 0; i < 400; i += 1) BreakablePropPoolUpdate(rng);
+  check("with g_script_flags[12] down it does not move and does not retire",
+        G.g_breakable_props.length === 1 && p.x === 583 && p.storyItem === 0,
+        `${G.g_breakable_props.length} @ ${p.x} f${p.storyItem}`);
+  // Raised: five units of X a frame, and dead on the frame after 300.
+  G.g_script_flags[SCRIPT_FLAG_TYPE54_DRIFT] = 1;
+  BreakablePropPoolUpdate(rng);
+  check("...raised, it drifts five units of X and one frame",
+        p.x === 588 && p.storyItem === 1 && p.spin === 0x300
+        && p.pitch === 0x300, `${p.x} f${p.storyItem} p${p.pitch}`);
+  // `CMP EAX,0x12C` is on the count BEFORE the increment, so the frames that
+  // read 0..300 all draw -- 301 of them -- and the 302nd is the one that dies.
+  for (let i = 0; i < TYPE54_DRIFT_FRAMES; i += 1) {
+    BreakablePropPoolUpdate(rng);
+  }
+  check("...and it is still alive after 301 frames of drift",
+        G.g_breakable_props.length === 1 && p.storyItem === 301,
+        `${G.g_breakable_props.length} f${p.storyItem}`);
+  BreakablePropPoolUpdate(rng);
+  check("...and dies on the 302nd, because the compare is pre-increment",
+        G.g_breakable_props.length === 0, `${G.g_breakable_props.length}`);
+}
+
+{
+  // ---- type 31: an effect strip that wraps, and a camera cue ------------
+  const rng = new Rng(31);
+  propScene(rng);
+  // Stage 3's three, whose roll word 9 is a ten-frame strip of eff_taki.bin.
+  const p = PlaceGenericProp({
+    at: 0xb100, container: "generic", type: 31, slot: 0x0d01,
+    lifetime_evt_steps: 0x0d01, field_1f4: 4,
+    pos: [-1139, -12.9, -3962.5], pitch: 0, yaw: -0x2edc, roll: 9,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("a type-31 prop takes its strip length from the roll word",
+        p.removeFlag === 9 && p.slot === 0x0d01 && p.storyItem === 0,
+        `len ${p.removeFlag} slot ${p.slot.toString(16)}`);
+  check("...and the same word is still its roll, because both are the engine's",
+        p.roll === 9);
+  check("...with its lifetime from desc+0x24 and not from its own slot",
+        p.lifetime === 4, `${p.lifetime}`);
+  BreakablePropPoolUpdate(rng);
+  check("...it steps one frame of the strip a tick", p.storyItem === 1,
+        `${p.storyItem}`);
+  for (let i = 0; i < 8; i += 1) BreakablePropPoolUpdate(rng);
+  check("...and shows the last frame of a ten-frame loop, which is 9",
+        p.storyItem === 9, `${p.storyItem}`);
+  BreakablePropPoolUpdate(rng);
+  // The reset is in the same frame as the increment, so 10 is never held: a
+  // roll word of 9 is ten frames, 0..9, and `slot + 10` is never asked for.
+  check("...then back to 0 -- the cursor never reaches the strip length",
+        p.storyItem === 0, `${p.storyItem}`);
+  // The camera cue: exact path AND exact frame, or nothing happens.
+  G.g_active_cam_path = TYPE31_DESPAWN_CAM_PATH;
+  G.g_cam_path_frame = TYPE31_DESPAWN_CAM_FRAME - 1;
+  BreakablePropPoolUpdate(rng);
+  check("its camera cue is an equality: one frame early removes nothing",
+        G.g_breakable_props.length === 1, `${G.g_breakable_props.length}`);
+  G.g_cam_path_frame = TYPE31_DESPAWN_CAM_FRAME;
+  BreakablePropPoolUpdate(rng);
+  check("...and on the frame itself it goes",
+        G.g_breakable_props.length === 0, `${G.g_breakable_props.length}`);
+}
+
+{
+  // ---- type 53: its own inline lifetime, with no scene-1 sweep ----------
+  const rng = new Rng(53);
+  propScene(rng);
+  const p = PlaceGenericProp({
+    at: 0xb200, container: "generic", type: 53, slot: 0x002b,
+    lifetime_evt_steps: 0x002b, field_1f4: 6,
+    pos: [626.9, -71.1, -6422.6], yaw: -0x5555,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("a type-53 prop is its own family and its lifetime is desc+0x24",
+        p.family === PropFamily.DrawOnlyType53 && p.lifetime === 6,
+        `${PropFamily[p.family]} ${p.lifetime}`);
+  // Six step changes are survivable; the seventh is not.
+  for (let i = 1; i <= 6; i += 1) {
+    G.g_evt_step_index = i;
+    BreakablePropPoolUpdate(rng);
+  }
+  check("...it survives exactly as many step changes as its lifetime",
+        G.g_breakable_props.length === 1 && p.stepsElapsed === 6,
+        `${G.g_breakable_props.length} after ${p.stepsElapsed}`);
+  G.g_evt_step_index = 7;
+  BreakablePropPoolUpdate(rng);
+  check("...and dies on the one after", G.g_breakable_props.length === 0,
+        `${G.g_breakable_props.length}`);
+}
+
+{
+  // The sweep the shared prologue has and this routine does not. Scene 1 with
+  // flag 0x77 raised clears every prop that runs `PropExpireByStepLifetime`;
+  // a type-53 prop is not one of them, and folding it into the shared arm
+  // because its two shipped spawns are in scene 4 is the mistake `L27` names.
+  const rng = new Rng(153);
+  propScene(rng);
+  G.g_scene_index = 1;
+  const p = PlaceGenericProp({
+    at: 0xb300, container: "generic", type: 53, slot: 0x002b,
+    lifetime_evt_steps: 0x002b, field_1f4: 6, pos: [0, 0, 0],
+  }, rng);
+  const q = PlaceGenericProp({
+    at: 0xb301, container: "generic", type: 5, slot: 0x0fd2,
+    lifetime_evt_steps: 6, pos: [0, 0, 0],
+  }, rng);
+  G.g_breakable_props.push(p, q);
+  G.g_script_flags[0x77] = 1;
+  BreakablePropPoolUpdate(rng);
+  check("the scene-1 sweep clears a prologue prop and leaves a type-53 alone",
+        G.g_breakable_props.length === 1
+        && G.g_breakable_props[0].family === PropFamily.DrawOnlyType53,
+        `${G.g_breakable_props.map((r) => PropFamily[r.family]).join()}`);
+}
+
+console.log("\nclass 0x41's pose orders come from the routines:");
+{
+  // The table the renderer reads. `tools/verify_prop_pose.py` is what says
+  // the values match the EXE; this is what says the port's own three types
+  // are in it and that the set the fix was about did not drift.
+  check("type 51 is the only descriptor-slot type that composes Ry.Rz.Rx",
+        GENERIC_POSE_ORDER[51] === PoseOrder.YawRollPitch
+        && [5, 12, 31, 33, 53, 54].every(
+          (ty) => GENERIC_POSE_ORDER[ty] === PoseOrder.RollYawPitch),
+        `${[5, 12, 31, 33, 51, 53, 54].map((ty) => GENERIC_POSE_ORDER[ty])
+          .join()}`);
+  check("the descriptor-slot set is the seven types that draw obj+0x28C",
+        [5, 12, 31, 33, 51, 53, 54].every(
+          (ty) => GENERIC_DESCRIPTOR_SLOT.has(ty))
+        && GENERIC_DESCRIPTOR_SLOT.size === 7,
+        `${[...GENERIC_DESCRIPTOR_SLOT].join()}`);
+  check("and the two strip types are the two whose roll is a count",
+        GENERIC_SLOT_STRIP.has(31) && GENERIC_SLOT_STRIP.has(33)
+        && GENERIC_SLOT_STRIP.size === 2, `${[...GENERIC_SLOT_STRIP].join()}`);
+  // Fourteen routines pass `obj+0x28C` to their first draw and only seven of
+  // them are descriptor-slot types. These four are the ones that look like
+  // they belong and do not, so a well-meaning addition trips here as well as
+  // in `tools/verify_prop_pose.py`:
+  //
+  // * 43 -- its arm computes the field (`0x19E8` or `0xFFFF`) rather than
+  //   leaving the prologue's, and it ages `obj+0x11C` as a lifetime. All seven
+  //   of its stage-3 spawns carry 1, 2 or 3 there.
+  // * 70 and 71 -- `OriginalItemPropUpdate` ages `obj+0x11C` too, so the word
+  //   is a lifetime and the model comes from `g_original_item_records`.
+  // * 72 -- every code clause passes and the data one does not: its one
+  //   shipped spawn carries `+0x11C == 1`, so the engine hands
+  //   `AssetDrawSlot` a 1. `[open]`, and out until it is settled.
+  check("the four types that draw obj+0x28C and are not descriptor slots",
+        [43, 70, 71, 72].every((ty) => !GENERIC_DESCRIPTOR_SLOT.has(ty)),
+        `${[43, 70, 71, 72].filter((ty) => GENERIC_DESCRIPTOR_SLOT.has(ty))}`);
+}
+
 console.log("\nclass 0x41 type 34 is a falling container:");
 {
   const rng = new Rng(9);
@@ -2870,6 +3048,26 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
     check("...and it starts on row 0 of g_st2car_path_table",
           a.rescue.route === 0 && g_st2car_path_table[0] === 0x148,
           `route ${a.rescue.route}`);
+
+    // **And it turns root motion off**, one instruction after
+    // `ActorBuildSkinnedModel` turned it on: `MOV EDX,[EDI+0x64];
+    // AND EDX,0xFFFFFFFD; MOV [EDI+0x64],EDX` at `0x00451753`-`0x00451760`.
+    // Class 0x21 is one of exactly two things in the game that clear the bit.
+    //
+    // It is not bookkeeping. With the bit clear `SkeletonApplyRootMotion`
+    // (`FUN_00410C50`) poses the clip root's **whole** translation instead of
+    // only its y, and motion 0x3E6's root is the constant
+    // `(0, 15.692, 11.943)` on all sixteen frames -- so the missing line put
+    // the rider 11.943 units along its own +Z, out over the car's bonnet.
+    // `render/characters/pose.ts` reads this bit and `test/pose.test.ts`
+    // asserts the two arms; this is the half that says the bit is right.
+    check("...and it clears model+0x64 bit 1 -- root motion OFF",
+          (a.motionFlags & MotionFlag.RootMotion) === 0,
+          `motionFlags ${a.motionFlags}`);
+    check("...which is a departure from what the build leaves",
+          (MOTION_FLAGS_INIT & MotionFlag.RootMotion) !== 0
+          && a.motionFlags === (MOTION_FLAGS_INIT & ~MotionFlag.RootMotion),
+          `${MOTION_FLAGS_INIT} -> ${a.motionFlags}`);
 
     // **It is on the car.** `RescueTargetPoseFromRoute` (`FUN_00451E50`) puts
     // it at `g_st2car_path_table[obj+0x1350]`'s pose, and sub 0 then adds a
@@ -10753,20 +10951,23 @@ console.log("\na stashed path is played by a hook that steps first:");
  * and `viewSpaceOfPoint` are one sign flip each.
  */
 /**
- * **`ActorPlayHitVoice` kind 3 is the attack cry**, and nothing raised it.
+ * **All five of `ActorPlayHitVoice`'s kinds**, from the one copy of it.
  *
- * `FUN_0040A6F0` has five kinds. The port had three of them, in
- * `render/shooting.ts`, because the shot path needed them -- so a zombie made
- * a noise when you shot it and none at all when it swung at you, which is how
- * it was reported. Kind 3 is also the only kind whose table entry is a *pair
- * per voice set* rather than one id per set, and the exporter had been reading
- * all fifteen dwords of `g_hit_voice_table` and emitting eleven.
+ * `FUN_0040A6F0` has five kinds and the port used to have it twice: kinds 0, 1
+ * and 2 in `render/shooting.ts` because the shot path needed them, kind 3
+ * nowhere at all -- so a zombie made a noise when you shot it and none when it
+ * swung at you, which is how it was reported. Kind 3 is also the only kind
+ * whose table entry is a *pair per voice set* rather than one id per set, and
+ * the exporter had been reading all fifteen dwords of `g_hit_voice_table` and
+ * emitting eleven.
  *
- * The two ends are checked here: that the set split is the engine's, and that
- * a pick comes out of the right pair. `ZombieStateStrike` raising it is
- * checked by the sound reaching the event bus during a real strike.
+ * There is one copy now, in `game/combat/voice.ts`, so every kind is reachable
+ * from here: the set split, the pair, the impact-plus-voice shape of 0, 1 and
+ * 2, and kind 4's proved silence. Which kind a *shot* passes is the next
+ * section; `ZombieStateStrike` raising kind 3 is checked by the sound reaching
+ * the event bus during a real strike.
  */
-console.log("\nthe attack cry:");
+console.log("\nthe five voice kinds:");
 {
   const heard: number[] = [];
   const rng = new Rng(7);
@@ -10809,6 +11010,31 @@ console.log("\nthe attack cry:");
         heard.length === 2 && heard[0] === 1 && heard[1] === 11,
         JSON.stringify(heard));
 
+  // Kinds 1 and 2 are the other two halves of the shot voice, and they differ
+  // in their *impact* rather than in their line: kind 1 draws one of five body
+  // impacts, kind 2 coin-flips two head ones. In the shipped table their two
+  // voice ids are the same pair, which is why the correction this port made to
+  // which kind plays is nearly inaudible -- the fixture gives them distinct
+  // ids so that the wiring is still assertable.
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 1 }, ActorVoice.Killed, rng, say);
+  check("a kill voice is a body impact and set B's kill line",
+        heard.length === 2 && heard[0] === 1 && heard[1] === 21,
+        JSON.stringify(heard));
+
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 2 }, ActorVoice.HeadKilled, rng, say);
+  check("a head voice takes the *head* impact table, and set A's line",
+        heard.length === 2 && heard[0] === 2 && heard[1] === 30,
+        JSON.stringify(heard));
+
+  // `[proved]` in `functions.tsv`: no site in the image passes 4 and both of
+  // its ids are zero, so the engine's own arm reaches `PlaySoundId(0)`.
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 2 }, ActorVoice.Kind4, rng, say);
+  check("kind 4 is silence, because the engine's ids for it are zero",
+        heard.length === 0, JSON.stringify(heard));
+
   // A bundle written before the four ids were read carries no `attack`, and
   // then the swing has to stay silent rather than throw.
   heard.length = 0;
@@ -10833,6 +11059,18 @@ console.log("\nthe shot effects:");
       impact_sprite: { "3": [0x0e25, 0x0e33, 1.0] },
       impact_sprite_default: [0x0904, 0x0904, 0.1],
       ricochet: {},
+      // The shot voice is raised from `ActorShotFeedback` now, so this fixture
+      // needs the table it reads. One id per row, so which row fired is the
+      // number that comes out.
+      impact: [{ id: 1, file: "" }],
+      head_impact: [{ id: 2, file: "" }],
+      voice: {
+        hurt: [{ id: 10, file: "" }, { id: 11, file: "" }],
+        kill: [{ id: 20, file: "" }, { id: 21, file: "" }],
+        head: [{ id: 30, file: "" }, { id: 31, file: "" }],
+        attack: [[{ id: 40, file: "" }], [{ id: 50, file: "" }]],
+      },
+      voice_set_a_types: [0],
     },
   } as unknown as CharactersJson);
   const z0 = G.g_object_list[0]!;
@@ -10905,7 +11143,7 @@ console.log("\nthe shot effects:");
   G.g_blood_sprays = [];
   G.g_sprite_effects = [];
   G.g_hit_result = HitResultCode.Plain;
-  ActorShotFeedback(z0, 4, vec3(1, 2, 3), host, events);
+  ActorShotFeedback(z0, 4, vec3(1, 2, 3), host, rng, events);
   const spray = G.g_blood_sprays[0]!;
   check("a plain hit bleeds", G.g_blood_sprays.length === 1);
   check("...and the spray holds an actor and a bone, not a position",
@@ -10922,14 +11160,104 @@ console.log("\nthe shot effects:");
   check("...starting at the first of them", BLOOD_FIRST_SLOT === 0x3a);
 
   G.g_hit_result = HitResultCode.Damaged;
-  ActorShotFeedback(z0, 4, vec3(), host, events);
+  ActorShotFeedback(z0, 4, vec3(), host, rng, events);
   check("a hit that swapped the part bleeds harder, not less",
         G.g_blood_sprays[0]!.severity === 0.75);
   G.g_blood_sprays = [];
 
+  // -- the voice kind is the hit-result code, and nothing else --------------
+  //
+  // `[proved]` from two routines that agree, which is what makes this a rule
+  // and not one function's habit. `ZombieOnShot` (`FUN_00453EB0`):
+  //
+  //   00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+  //   00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
+  //   00453f77  PUSH 0x1           ; dead and anything else -> kind 1
+  //   00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+  //
+  // and `ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the
+  // same two constants at 0x00449A76, 0x00449A7B and 0x00449A88. **Neither
+  // tests the bone and neither tests whether the actor died of this shot** --
+  // which is what `render/shooting.ts`'s copy keyed on, so these five checks
+  // are the behaviour change the move carried. Every one of them fails on the
+  // old `killed ? (head ? "head" : "kill") : "hurt"` mapping.
+  const voiced: number[] = [];
+  const ear = new Events();
+  ear.on("sound.play", (d) => voiced.push(d.id));
+  // Named explicitly rather than by a range: the ricochet this routine also
+  // emits is `0x1116A9`, and a `>= 10` filter swallowed it and turned the
+  // result-5 check green on a sound that is not a voice at all.
+  const VOICE_IDS = [10, 11, 20, 21, 30, 31, 40, 50];
+  const impactOf = (xs: number[]) => xs.filter((id) => id === 1 || id === 2);
+  const lineOf = (xs: number[]) => xs.filter((id) => VOICE_IDS.includes(id));
+  z0.charType = 0;                      // set A, per `voice_set_a_types`
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+
+  // Alive: kind 0, whatever the bone was. Bone 2 is the head.
+  voiced.length = 0;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a live actor shot in the head still says hurt",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 10,
+        JSON.stringify(voiced));
+  check("...with a body impact, not a head one",
+        impactOf(voiced).length === 1 && impactOf(voiced)[0] === 1,
+        JSON.stringify(voiced));
+
+  // Dead and result 2: kind 2 -- and it is the *result*, not the bone.
+  voiced.length = 0;
+  z0.flags |= ActorFlag.Dead;
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 4, vec3(), host, rng, ear);
+  check("result 2 on a dead actor is kind 2, off a shot to the leg",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 30,
+        JSON.stringify(voiced));
+  check("...and kind 2's tell is the head impact table",
+        impactOf(voiced).length === 1 && impactOf(voiced)[0] === 2,
+        JSON.stringify(voiced));
+
+  // Dead and anything else: kind 1 -- including a shot to the head.
+  voiced.length = 0;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a head shot that kills is kind 1, because the result is 1",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 20
+        && impactOf(voiced)[0] === 1, JSON.stringify(voiced));
+
+  // The two gates that silence it: `obj+0x34` bit 0x100 jumps the whole
+  // routine (0x00453ec7), and the live arm refuses result 5 (0x00454025).
+  voiced.length = 0;
+  z0.flags &= ~ActorFlag.Dead;
+  G.g_hit_result = HitResultCode.NoEffect;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a result-5 hit on a live actor has no voice, only the ricochet",
+        lineOf(voiced).length === 0, JSON.stringify(voiced));
+
+  voiced.length = 0;
+  z0.flags |= ActorFlag.Dead | ActorFlag.ShotImmune;
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a shot-immune body is silent even on the dead arm",
+        lineOf(voiced).length === 0, JSON.stringify(voiced));
+
+  // The bursting head shouts, which it did not while the voice tables were in
+  // `render/`: `00454133 PUSH 0x3` / `00454136 CALL 0x0040a6f0`, inside
+  // `ActorShotFeedback` itself rather than in its caller.
+  voiced.length = 0;
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+  z0.boneSlot["2"] = 0x1dc2;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("the head that bursts cries out, out of set A's attack pair",
+        voiced.includes(40), JSON.stringify(voiced));
+  delete z0.boneSlot["2"];
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+  G.g_blood_sprays = [];
+  G.g_sprite_effects = [];
+
   // -- result 5 is a ricochet, and it is not blood --------------------------
   G.g_hit_result = HitResultCode.NoEffect;
-  ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, events);
+  ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, rng, events);
   check("a result-5 hit draws no blood at all",
         G.g_blood_sprays.length === 0);
   const ric = G.g_sprite_effects[0]!;

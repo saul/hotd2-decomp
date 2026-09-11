@@ -112,7 +112,7 @@ const POUNCE_GRAVITY = -0.0408;
 //
 // The address is written bare rather than as a `FUN_` citation on purpose:
 // this file *ports* state 44, and a reference-form citation of a function the
-// same file defines takes it out of `verify_port`'s ported set. See `L41`.
+// same file defines takes it out of `verify_port`'s ported set. See `L42`.
 /** The three clips that are already the "target is dead" reaction. */
 const DEAD_REACTION_MOTIONS = [0x1ab, 0x1a3, 0x1a7];
 

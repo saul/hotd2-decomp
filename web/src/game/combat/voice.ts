@@ -1,21 +1,23 @@
 /**
  * `ActorPlayHitVoice` — `FUN_0040A6F0`. Every voice an actor has.
  *
- * One routine, five kinds, twenty-three call sites, and it was living in two
- * halves: `render/shooting.ts` had kinds 0, 1 and 2 because the shot path
- * needed them, and nothing had kind 3 at all — which is why a zombie swung
+ * One routine, five kinds, twenty-three call sites — and for a while it was
+ * implemented twice: `render/shooting.ts` had kinds 0, 1 and 2 because the shot
+ * path needed them, and nothing had kind 3 at all, which is why a zombie swung
  * without a sound.
  *
- * `[diverges]` **It is still in two halves, and the renderer's copy says so
- * too.** Consolidating it here is not a matter of calling this from there:
- * `verify_layers.py`'s `render-drives-the-port` refuses `render/` to call an
- * engine function, and it is right — the engine plays those three kinds from
- * `ActorShotFeedback` (`FUN_00454050`) and `FUN_00453EB0`, both `game/` code,
- * and `combat/feedback.ts` is already the port of the first. The move belongs
- * there, it needs the kind each of those three call sites passes, and it puts
- * the pick on the world generator and so into the snapshot. That is its own
- * commit. This module is what the *engine's* callers use, and today that is
- * the attack cry.
+ * **There is one copy, and it is this one.** The renderer's went when the shot
+ * kinds moved to `combat/feedback.ts`, which is where the engine plays them
+ * from — `ZombieOnShot` (`FUN_00453EB0`) and `ThrowerOnShot` (`FUN_004499A0`)
+ * are `game/` code, and `verify_layers.py`'s `render-drives-the-port` refuses
+ * `render/` to call an engine function, rightly. Three things came with that
+ * move and each is written up where it landed: the kind is the **hit-result
+ * code** and not `killed`/`head` (`feedback.ts`), the pick is the world's
+ * seeded `rand()` and so is in the snapshot (`L10`), and the bursting head's
+ * kind 3 at `0x00454136` stopped being silent.
+ *
+ * Every caller is now `game/`: `combat/feedback.ts` for kinds 0, 1, 2 and the
+ * burst's 3, `class30/strike.ts` and `class30/stand_throw.ts` for the cry.
  *
  * ## The two voice sets
  *
@@ -98,10 +100,12 @@ import type { Rng } from "../../core/rng";
  * Where the sound goes — `PlaySoundId` (`FUN_0041CFD0`), by whatever route the
  * caller has to it.
  *
- * A callback rather than an `Events`, because the two callers reach the mixer
- * differently and neither should have to grow the other's seam: `game/` raises
- * a `sound.play` event, and `render/shooting.ts` already holds a `playSound`
- * of its own for the shot path.
+ * A callback rather than an `Events`, which was originally because the two
+ * callers reached the mixer differently. Every caller is `game/` now and every
+ * one of them passes the same `sound.play` emit, so the indirection has one
+ * job left and it is a real one: it keeps the routine callable from
+ * `test/port.test.ts` with a list to push into, which is how the five kinds
+ * are asserted.
  */
 export type PlaySound = (id: number) => void;
 import { T } from "../tables";
@@ -146,7 +150,11 @@ function voiceSetOf(charType: number): 0 | 1 {
 export function ActorPlayHitVoice(obj: VoiceActor, kind: ActorVoice, rng: Rng,
                                   emit: PlaySound): void {
   const c = T.chars?.combat;
-  if (!c) return;
+  // A table this routine has nothing to read is silence, not a throw — the
+  // same terms as the missing `attack` pair below, and for the same reason:
+  // every id here comes out of the bundle, and a bundle older than the read
+  // that put it there has no row to offer.
+  if (!c?.voice) return;
   const set = voiceSetOf(obj.charType);
   const play = (id: number | undefined) => { if (id) emit(id); };
   const pick = <U>(xs: readonly U[] | undefined): U | undefined =>

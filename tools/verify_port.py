@@ -30,6 +30,7 @@ GAME = ROOT / "web" / "src" / "game"
 FUNCS = ROOT / "ghidra" / "annotations" / "functions.tsv"
 GLOBALS = ROOT / "ghidra" / "annotations" / "globals.tsv"
 SCRIPT = ROOT / "web" / "src" / "script"
+RENDER = ROOT / "web" / "src" / "render"
 SPAWNS = ROOT / "docs" / "formats" / "spawns.md"
 DOCS = ROOT / "docs"
 #: The session log is a record of what was believed **when**, so it is full of
@@ -84,6 +85,25 @@ def cited_files() -> list[Path]:
     opcode handlers are not the gameplay call graph coverage is measuring.
     """
     return game_files() + sorted(p for p in SCRIPT.rglob("*.ts"))
+
+
+def divergence_files() -> list[Path]:
+    """Everywhere a `[diverges]` counts, which is wider than `cited_files()`.
+
+    `render/` is added because that is where transcribed exe behaviour drifts
+    to when it will not fit the engine layer, and this project has already paid
+    for that once: the stage-1 vehicle's spin lived as long as it did precisely
+    because ported behaviour had moved into `render/` where no check reached
+    it. Fifteen tags across eight files under `render/` were declared and
+    counted by nothing, which is the same failure `check_divergences` was
+    widened to fix in the first place.
+
+    Citations are deliberately **not** checked there. `render/` is a different
+    layer with different rules, and putting it under the one-function-one-name
+    rule would be a separate decision about what that rule is for. This says
+    only that a declared departure is a departure wherever it is written.
+    """
+    return cited_files() + sorted(p for p in RENDER.rglob("*.ts"))
 
 
 def check_names(named: dict[str, str]) -> dict[str, tuple[str, str]]:
@@ -317,9 +337,15 @@ def check_divergences() -> None:
     escape, which is the largest single one in the port -- were declared and
     never counted. STATUS's number is "how finished the transcription is"; a
     number that cannot see a third of the engine is not that.
+
+    Widened again on 2026-09-11, to :func:`divergence_files`, for the same
+    reason one layer over: fifteen tags across eight files under ``render/``
+    were declared and counted by nothing. ``render/`` is exactly where ported
+    behaviour goes when it will not fit the engine layer, so it is the *last*
+    place a departure should be invisible.
     """
     found: list[str] = []
-    for path in cited_files():
+    for path in divergence_files():
         lines = path.read_text().splitlines()
         for n, line in enumerate(lines, 1):
             if not DIVERGES.search(line):

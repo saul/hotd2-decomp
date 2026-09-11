@@ -17,6 +17,7 @@ import type { BakedMotion } from "../../bundle";
 import { BAMS_TO_RAD } from "../../core/bams";
 import { authoredFrameHeld, authoredFrameOfTicks }
   from "../../core/play_cursor";
+import { MotionFlag } from "../../game/actor";
 import type { Instance } from "./instance";
 
 /** The port's clock. `mot/` authors at 30; the engine's frames are 60 Hz. */
@@ -38,8 +39,16 @@ pose(inst: Instance): void {
     if (dm) {
       const f = authoredFrameHeld(inst.a.death.ticks, dm.fps, dm.frames);
       // The death clip is not consumed by `ActorAdvanceMotion` -- a falling
-      // body's travel is the clip's, and nothing else moves it.
-      this.apply(inst, dm, f, false);
+      // body's travel is the clip's, and nothing else moves it -- so this one
+      // call site overrides the gate and takes the whole root.
+      //
+      // **That is a declared divergence, and it is declared in `game/`**, on
+      // the `obj.death` branch of `ActorAdvanceMotion` in `game/motion.ts`
+      // that causes it: the engine has no death track, so the gate decides a
+      // death clip like any other and the port's early return is what makes
+      // this override necessary. The reason lives there rather than here so
+      // that `verify_port.py` counts it.
+      this.apply(inst, dm, f, true);
       return;
     }
   }
@@ -138,10 +147,16 @@ private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
                    mB: BakedMotion, fB: number, w: number): void {
   const ra = fA * 3;
   const rb = fB * 3;
-  // Height only: the horizontal root is world movement the port has already
-  // applied. See `apply`.
+  // The same two arms as `apply`, and the engine reaches them through the same
+  // `if`: `SkeletonPoseRootFrame` (`FUN_00410920`) lerps the two tracks' root
+  // translations into one triple at `model+0x6C..0x74` *before*
+  // `SkeletonApplyRootMotion` sees it, so a blend is one root, not two.
+  const full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0;
+  const lerp = (a: number, b: number): number => a + (b - a) * w;
   inst.pivot.position.set(
-    0, mA.root[ra + 1] + (mB.root[rb + 1] - mA.root[ra + 1]) * w, 0);
+    full ? lerp(mA.root[ra], mB.root[rb]) : 0,
+    lerp(mA.root[ra + 1], mB.root[rb + 1]),
+    full ? lerp(mA.root[ra + 2], mB.root[rb + 2]) : 0);
 
   const n = inst.type.bone_count;
   const ba = fA * n * 3;
@@ -163,23 +178,44 @@ private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
 /**
  * Pose from one motion.
  *
- * `consumed` says the port has already taken this clip's **horizontal** root
- * translation as world movement, so the pivot must not apply it again. The
- * root track is the root *bone's* position within the model — its y sits
+ * `full` says the pivot takes the clip root's **horizontal** part as well as
+ * its y. That is not a choice this file makes: it is
+ * `SkeletonApplyRootMotion`'s (`FUN_00410C50`) second arm, and the gate is
+ * `model+0x64` bit 1, {@link MotionFlag.RootMotion}. With root motion
+ * **on** the delta has already walked the actor, so the pose takes only the
+ * height; with it **off** nothing has moved the actor and the pose takes the
+ * whole translation, in the actor's own rotated frame.
+ *
+ * The root track is the root *bone's* position within the model — its y sits
  * around 11, standing height — and its x/z carry the character's travel:
  * `char_adv00`'s run runs to -30 over a cycle and its bite to -18 and back.
- * Applying that to the pivot as well as to the actor slid the model
- * backwards out of its own footprint and snapped it on the loop.
+ * Applying that to the pivot as well as to the actor slid the model backwards
+ * out of its own footprint and snapped it on the loop, which is why the y-only
+ * arm was written first — and then written for everything, which is the bug
+ * this replaces. 992 of the game's 1058 motion blocks have an **exactly zero**
+ * horizontal root on frame 0, so the missing arm was invisible for all but 64
+ * of them; `zom.bin` 998, the rescue target's clip, is `(0, 15.692, 11.943)`
+ * on every one of its sixteen frames, and 11.943 is where it sat off its seat.
  *
- * The vertical stays: that is the walk's bob, and nothing else provides it.
+ * The vertical stays either way: that is the walk's bob, and nothing else
+ * provides it.
+ *
+ * The engine's translate sits **inside** `MatrixScale(model+0x116C)`, so a
+ * character drawn at 0.9 offsets by 0.9 of what its clip authored, and the
+ * offset is written unscaled here because nothing in this port scales a drawn
+ * character either. That is a **declared divergence**, and like the death
+ * clip's it is declared in `game/` so that it is counted -- on
+ * `ActorModelScale` in `game/root_motion.ts`, which owns the field and
+ * carries the measured size of it.
  */
 private apply(inst: Instance, m: BakedMotion, f: number,
-              consumed = true): void {
+              full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0):
+    void {
 
   // Root translation: three floats per frame.
   const r = f * 3;
-  inst.pivot.position.set(consumed ? 0 : m.root[r], m.root[r + 1],
-                          consumed ? 0 : m.root[r + 2]);
+  inst.pivot.position.set(full ? m.root[r] : 0, m.root[r + 1],
+                          full ? m.root[r + 2] : 0);
 
   // Per-bone BAMS triples: bone_count * 3 shorts per frame, bone 0 first.
   const base = f * inst.type.bone_count * 3;

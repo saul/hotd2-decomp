@@ -425,7 +425,7 @@ Supporting routines identified along the way:
 
 | Address | Name | Notes |
 |---|---|---|
-| `0x009CA08C` | `g_game_mode` | mode-select index; **1 = Original Mode** |
+| `0x009CA08C` | `g_GameMode` | the title menu's row index: **0 = Arcade, 1 = Original, 2 = Training, 3 = Boss**. `TitleMenuRegisterSprites` (`0x004962C0`) names the rows by texture (`tex\arcade00`, `original_00`, `traning_00`, `boss_00`) and `TitleMenuUpdateAndSelect` (`0x00496960`) writes the cursor into it; every other writer stores 0 |
 | `0x007E7994` | `g_matrix_mode` | 3 = PROJECTION, 1 = WORLD |
 | `0x007E7948` | `g_projection_matrix_cache` | the installed projection |
 | `0x00571210` | `g_identity_matrix` | |
@@ -502,4 +502,4 @@ in [`../formats/sound.md`](../formats/sound.md).
 | `0x0058044A` | `g_voice_records` | `0x24`-byte records; `s16 == -1` marks an empty slot |
 | `0x00588B58` | `s_sound_bgm_prefix` | the `Sound\BGM\` path prefix |
 | `0x009C8FB8` | `g_current_bgm_id` | id currently playing; cleared by the stop control |
-| `0x009C8E98` | `g_app_state` | the top-level screen. **6 is in play**, 5 the attract demo, 7 the game-over arm, 0x10 boot; 3, 4, 9, 0x0A, 0x0B, 0x0C and 0x0F are the shell's other screens and stay **open**. `PlaySoundId` picks the plain BGM table over `_AR` when it is 6 and `g_GameMode == 0`; `ResolveHit` suppresses gore when it is not 6 |
+| `0x009C8E98` | `g_app_state` | the top-level screen. **6 is in play**, 5 the attract demo, 7 the game-over arm, 0x10 boot, **4 the title and mode-select screen**, 0x0A and 0x0B the two attract screens, **0x0C OPTION and 0x0F NETWORK**; 3 and 9 stay **open**. `AppStateDispatch` (`0x004608A0`) is the table. `PlaySoundId` picks the plain BGM table over `_AR` when it is 6 and `g_GameMode == 0`; `ResolveHit` suppresses gore when it is not 6 |

@@ -54,7 +54,8 @@ export enum OneHitTargetState {
   /**
    * `OneHitTargetHoldDrawn` (`FUN_004494D0`). Drawn and nothing else.
    *
-   * Reached only in `g_GameMode` 2 (arcade) event block 0x0D, gated on
+   * Reached only in `g_GameMode` 2 (**Training**, not Arcade) event block
+   * 0x0D, gated on
    * `DAT_009C72F2` / `DAT_009C72F1` — a pair of bytes `ZombieAdvanceMotion`,
    * `CivilianUpdate` and class 0x31 also read, and which are `[open]`.
    * **Not ported**, so nothing reaches this member; it exists because the

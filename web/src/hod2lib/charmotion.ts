@@ -28,6 +28,16 @@ export const CLASS20_IDLE_MOTIONS = [1021, 1023, 1024, 1025];
  */
 export const CLASS20_DEATH_MOTION = 988;
 
+/**
+ * The clip the rescue swaps to — `RescueTargetHeldState` (`FUN_00451980`)
+ * writes `obj+0x1B4 = 0x3CC` on its way into `RescueTargetFreedState`
+ * (`FUN_00451D80`), which plays it out.
+ *
+ * Baked beside the idle because the freed state measures nothing but the
+ * clip's own play clock, and a clip with no frames is a pose that never ends.
+ */
+export const CLASS21_FREED_MOTION = 0x3cc;
+
 export type MotionRule =
   | ["literal", number]
   | ["param", number, ParamKind]
@@ -123,6 +133,21 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // exporter builds no skeleton for it at all -- stage 5, whose only class-0x14
   // spawn is its own, had no character type 71 in its bundle.
   0x14: ["literal", 33],
+  // `RescueTargetInit` (`FUN_00451720`) seats the clip as a literal, the same
+  // shape as class 0x19's: `MOV dword ptr [EDI + 0x20], 0x3E6`
+  // (`c74720e6030000`) at `0x00451747` with `EDI = obj+0x194`, so
+  // `obj+0x1B4 = 0x3E6`. Clip **998** is one character type 7
+  // (`char_adv00.bin`) carries, which is the corroboration.
+  //
+  // There is one class-0x21 spawn in the whole game -- stage 2 block 0 step 2
+  // -- and it is the actor that answers that block's branch. Without this row
+  // `motionFor` answers null, `resolveForStage` records the placement as a
+  // marker and `continue`s, no skeleton is built, no `chr_` instance reaches
+  // the glTF, and `render/characters.ts` has nothing to adopt: the object is
+  // never made, `RescueTargetHeldState` never runs and `g_script_branch_var`
+  // can never become 1. Block 0 then always takes block 11 and block 1 --
+  // half of stage 2 -- is unreachable. See `game/class21/`.
+  0x21: ["literal", 0x3e6],
   // `FrogInit` (`FUN_0043A080`) writes `obj+0x1B4 = (s16)tail+0x02`, which is
   // `0x141` in all four shipped spawns. Without a rule the frog resolves to a
   // character with no motion, the exporter emits it as a marker, and none of

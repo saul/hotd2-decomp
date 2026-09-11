@@ -818,14 +818,34 @@ export class Program {
   /**
    * Which step of the entry block runs first.
    *
-   * Not 0. `FUN_0045EBC0` picks it by game mode and scene state: game mode 1
-   * (Original) **and scene 0** gives 5, everything else -- normal Arcade play
-   * -- gives 1. This is the same rule `EvtAdvanceStepOrRoute` follows on every
-   * later block change. Step 0 is reached only through the checkpoint path.
+   * Not 0. `EvtLoadBlockProgram` (`FUN_0045EBC0`) picks it by **app** state
+   * and game mode, and every arm is here rather than only the two a bundle
+   * can reach -- the enum was renumbered once already and a rule written as
+   * "everything else" survived it by luck:
+   *
+   * | condition                              | step |
+   * | -------------------------------------- | ---- |
+   * | `g_app_state` 5 or 9                   | 0    |
+   * | mode 1 (Original) **and scene 0**      | 5    |
+   * | mode 1 (Original), any other scene     | 1    |
+   * | mode 2 (Training)                      | 0    |
+   * | mode 3 (Boss)                          | 0    |
+   * | mode 0 (Arcade) -- the fall-through    | 1    |
+   *
+   * A bundle is only ever exported in mode 0 or 1, so the Training and Boss
+   * rows cannot be reached from here; they are transcribed because the arm
+   * `FUN_0045EBC0` falls through to is the *Arcade* one, and that is the fact
+   * the old `return 1` was resting on without saying so. This is also the
+   * rule `EvtAdvanceStepOrRoute` follows on every later block change. Step 0
+   * is reached only through the checkpoint path.
    */
   entryStep(): number {
-    if (this.stageGameMode === GameMode.ORIGINAL && this.scene === 0) return 5;
-    return 1;
+    switch (this.stageGameMode) {
+      case GameMode.ORIGINAL: return this.scene === 0 ? 5 : 1;
+      case GameMode.TRAINING: return 0;
+      case GameMode.BOSS:     return 0;
+      default:                return 1;   // mode 0, Arcade
+    }
   }
 
   /** `g_GameMode` as the EXE numbers it -- see `stage.GameMode`. */

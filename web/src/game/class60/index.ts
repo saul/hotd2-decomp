@@ -77,7 +77,7 @@ enum Sub {
  * `ChapterCardInstall` — `FUN_004342E0`. One actor, one 60 Hz frame.
  *
  * The engine's head is an **installer**, and both of its arms are unreachable
- * here: `g_GameMode == 3` is boss rush, which no shipped stage script is
+ * here: `g_GameMode == 3` is Boss Mode, which no shipped stage script is
  * entered in, and `g_app_state == 0x0B` is a screen the port never reaches —
  * in play the state is 6. The tests are transcribed rather than dropped, so
  * that the day either exists the routine says what the engine does; the two
@@ -87,7 +87,7 @@ enum Sub {
  */
 export function ChapterCardInstall(obj: Actor, f: ClassFrame): void {
   void f;
-  if (G.g_GameMode === GameMode.BossRush) return;
+  if (G.g_GameMode === GameMode.Boss) return;
   if (G.g_app_state === APP_STATE_INSTALLS_VARIANT) return;
 
   if (obj.sub === Sub.Setup) {

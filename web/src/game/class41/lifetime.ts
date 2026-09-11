@@ -42,6 +42,14 @@ export const SCRIPT_FLAG_CLEAR_PROPS = 0x77;
  * the 21 that carry 0x1D8 and up are carrying a slot. See
  * `GENERIC_DRAW_SLOT` in `generic.ts` for which types read which.
  *
+ * **And for four types they are not the same word at all.** Types 12, 31, 51
+ * and 53 have a switch arm that writes the placer's `+0x1F4` — the s8 at
+ * `desc+0x24` — over `obj+0x11C`, so those 55 spawns carry a real slot *and* a
+ * real lifetime in two separate fields. See `GENERIC_LIFETIME_FROM_1F4`. The
+ * paragraph above is right about the other forty types and was wrong about
+ * these: the port gave all 55 of them their own asset slot as a lifetime, and
+ * an unretirable prop is invisible for exactly as long as the prop is.
+ *
  * [diverges] The engine counts in a `char`, so `obj+0x197` wraps at 128 and
  * the comparison is signed 16-bit. A prop carrying a real asset slot as its
  * lifetime — 5949, say — therefore *does* eventually expire in the engine,

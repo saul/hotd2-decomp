@@ -9,7 +9,8 @@
 
 import type { BundleSource } from "../../bundle/load";
 import { FileListAssetSource, HandleAssetSource, canPickDirectory, clearCache,
-         hasThumb, listCached, openCached, readThumb, requestPersist,
+         hasThumb, listCached, onThumbWritten, openCached, readThumb,
+         requestPersist,
          storageEstimate, writeThumb } from "./browser_io";
 import { forgetHandle, hasReadPermission, loadHandle, requestReadPermission,
          saveHandle } from "./handle_store";
@@ -17,7 +18,8 @@ import type { ExportRequest, InstallRef, WorkerOut } from "./protocol";
 import { zipBlob, zipStream } from "./zip";
 import type { ZipFile } from "./zip";
 
-export { canPickDirectory, clearCache, hasThumb, readThumb, requestPersist,
+export { canPickDirectory, clearCache, hasThumb, onThumbWritten,
+         readThumb, requestPersist,
          storageEstimate, writeThumb };
 export type { InstallRef, WorkerOut };
 

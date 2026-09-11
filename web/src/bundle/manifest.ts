@@ -22,6 +22,16 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 7: **`game_mode` is renumbered.** Arcade is 0, not 2 -- 2 is Training. The
+ * value is `g_GameMode`'s, and nothing in the *layout* moved, so this is the
+ * one bump that exists because a **value** changed meaning: a format-6 bundle
+ * says `game_mode: 2` for Arcade, which a format-7 client would read as
+ * Training and would then pay no score for a prop hit and pick the wrong BGM
+ * mix. The digest cannot see it -- no declaration moved -- and the builder
+ * hash only warns, so refusing is the only thing that catches it.
+ * `bgm.default_table` went in the same change: it stated the table choice a
+ * second time, and wrongly.
+ *
  * 6: the placements carry `class11`, `class43` and `class51` — the frog's
  * command list, the owl's two descriptor bytes and the fish's speeds, bob and
  * timings. Three enemy classes that had no module, and the fish's group header
@@ -39,7 +49,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 6;
+export const SUPPORTED_FORMAT = 7;
 
 /**
  * The exporter's digest of the declarations in this directory.

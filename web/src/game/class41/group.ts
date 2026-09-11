@@ -9,6 +9,7 @@
 import type { Rng } from "../../core/rng";
 import type { BreakableMember } from "../../bundle";
 import { G } from "../globals";
+import { GameMode } from "../game_mode";
 import { BREAKABLE_GROUP_RADIUS } from "./shot_test";
 import { T } from "../tables";
 import {
@@ -52,8 +53,8 @@ export function MsvcRand(rng: Rng): number {
 }
 
 /**
- * The members `g_prop_target_set` turns into one-shot targets while
- * `g_GameMode` is 2.
+ * The members `g_training_lesson` turns into one-shot targets while
+ * `g_GameMode` is 2, which is Training.
  *
  * The engine spells this as a chain of comparisons against the *byte offset*
  * into the member records — `iVar8 != 0x14 && iVar8 != 0x1E && …` — which is
@@ -143,10 +144,10 @@ export function PlaceBreakableGroup(group: number, lifetime: number,
     p.yaw = r;
     p.topple = r;
 
-    // In mode 2 the selected members become one-shot targets with their own
-    // model. Everything else keeps two shots and the default slot.
-    if (G.g_GameMode === 2
-        && (PROP_TARGET_SETS[G.g_prop_target_set] ?? []).includes(m.index)) {
+    // In Training the lesson's members become one-shot targets with their
+    // own model. Every other mode keeps two shots and the default slot.
+    if (G.g_GameMode === GameMode.Training
+        && (PROP_TARGET_SETS[G.g_training_lesson] ?? []).includes(m.index)) {
       p.effect = 6;
       p.hp = 1;
       p.slot = BreakableSlot.OneShotTarget;

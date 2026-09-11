@@ -15455,6 +15455,478 @@ zombie behind them — in `extract/compare/clip1048/setpiece_g.png`.
    two trios three abreast at `(-7/-1/6, 3.2, -370)` in stage 1's two route
    branches, and stage 2's pair at `0x2194`/`0x21C4`.
 
+## Divergence 2 closed — the crawlers' swing is meant to miss
+
+`docs/BUGS.md`'s second "divergence awaiting a call", made faithful on the
+user's decision.
+
+### What the engine does with a hit frame past the end of the clip
+
+The question the fix had to answer first, because "it misses" is not the same
+claim as "it is a no-op", and the port had only ever assumed the weaker one.
+`ZombieStateStrike` (`FUN_00455A40`) sub 2 is two independent tests in one
+pass, and **both operators are load-bearing**:
+
+```
+00455bd2  0fbf4708        MOVSX EAX, word ptr [EDI + 0x8]        ; entry.hit_frame
+00455bd6  8b8e9c010000    MOV   ECX, dword ptr [ESI + 0x19c]     ; the play cursor
+00455bdf  3bc8            CMP   ECX, EAX
+00455be1  7509            JNZ   0x00455bec                       ; -> no hit, at all
+00455be4  e8a7080000      CALL  0x00456490                       ; ActorStrikeConnect
+...
+00455c02  0fbf144dd0074e00 MOVSX EDX, word ptr [ECX*0x2 + 0x4e07d0]
+00455c0a  4a              DEC   EDX                              ; play_length - 1
+00455c0b  3bc2            CMP   EAX, EDX
+00455c0d  7c12            JL    0x00455c21
+00455c0f  ...             MOV   word ptr [ESI + 0x1310], 0x4      ; -> ZombieStateBackOff
+```
+
+The strike is an **exact equality**, and the cursor is reset to 0 when the clip
+starts — `ActorSetMotionBlended` (`FUN_004119A0`) is `param_1[2] = param_3` and
+sub 1 passes 0 — so `obj+0x19C` only ever takes the values
+`0 .. g_motion_play_length[obj+0x1B4] - 1`. A hit frame outside that range is
+unreachable. Nothing is aborted, nothing is retried, no other entry is
+consulted and the state is not left early: **the clip runs to its end and the
+actor retreats having swung and missed.** `[proved]`
+
+Three shipped entries are like that, and they are one row shared by three
+character types — `0x07` (`char_adv00`), `0x0B` (`znkage`) and `0x0C`
+(`znkager`), body condition 4, index 2, `{997, 1051, 26.0f, 40, 9, 1}` at
+`0x00566E70` against `g_motion_play_length[997]` = 20. Their condition-4 pick
+row is ten 2s then ten 3s per zone combo, so the **even** zone combinations —
+every one with the head bit clear — always draw entry 2 and always miss, while
+the odd ones draw entry 3 (clip 1018, hit frame 3) and connect. Shooting the
+crawler's head off is what makes its swing dangerous.
+
+Read on the way, and worth keeping: `ActorStrikeConnect` (`FUN_00456490`) is
+one guard, `((zones & 7) & mask) != mask`, so a cancel mask of **zero** whiffs
+unconditionally. That matters because the ten zeroed attack entries the shipped
+tables carry — types `0x00` cond 0/1, `0x01` and `0x13`/`0x14` cond 4, `0x07`
+cond 6, `0x09`/`0x0F`/`0x10`/`0x11` cond 3, all `{0, 0, 0.0f, 0, 0, 0}` — are
+reachable by real pick rows, and the engine deals no damage on one either.
+
+### What changed
+
+The exporter's hit-frame bound is gone from both halves in the same commit
+(`tools/hod2lib/combat.py`, `web/src/hod2lib/combat.ts`), replaced by
+`attack_hit_lands` / `attackHitLands` carrying the reading. The bound was right
+when the reader **scanned** a fixed number of entries — the rows are adjacent
+with no count, and "hits on frame 40 of a 20-frame clip" is literally what
+reading the next character's attacks produced — but it has been indexed by the
+pick table for longer than that, so its only remaining effect was to delete
+three entries the game really carries. Measured before touching it: across all
+64 character types the bound rejects exactly those three and nothing else, and
+the lunge-length half of the same condition rejects nothing at all.
+
+`ZombiePickAttack` indexes blind now, as sub 0 does. The substitute it used to
+fall back on was the other half of the bug: with entry 2 missing, every draw
+became entry 3.
+
+### The measurement
+
+One `znkager` at body condition 4, sixty seconds against a live player, driven
+off the real stage-2 bundle:
+
+| | strikes | entry drawn | damage landed |
+|---|---:|---|---:|
+| before — entry 2 dropped, entry 3 substituted | 87 | 3 | **29** |
+| after — entry 2 as the table has it | 139 | 2 | **0** |
+| after, head shot off | 87 | 3 | 29 |
+
+More strikes after, because clip 997 is 20 ticks against 1018's 35.
+
+### Two checks, both watched failing
+
+`verify_port.py`'s `check_crawler_whiff` asks the **bundle** for the entry and
+the clip, in the same shape as `check_class31_literal_clips`: there is nothing
+left in `game/` to get wrong, so the way this regresses is the export. All
+three of its arms were mutation-tested against the real bundle — entry 2
+dropped, clip 997 unbaked, and clip 997 given a play length that reaches frame
+40 — and each fails with its own message.
+
+`verify_combat.py`'s check 8 no longer imposes the bound; it asserts the exact
+set of unreachable entries, `[(7, 4, 2, 997, 40, 20), (11, ...), (12, ...)]`.
+That is the half a misread row still has to get past. Both a permissive
+`attack_hit_lands` and a wrong expected set fail it.
+
+And `verify_combat` is in `tools/verify_all.py`'s `CHECKS` now, because it was
+not: the file existed, was green, and **nothing ran it**. It costs 118 seconds,
+which is most of the game-dir suite's new wall time. Seventeen other
+`tools/verify_*.py` are still missing from that list and were not touched here.
+
+### What was nearly got wrong
+
+The first plan was to keep the port's `list[String(v)]` guard and let the
+crawler's entry simply satisfy it, which would have "closed the divergence"
+without removing the substitute — and the substitute is wrong on its own terms
+for the zeroed entries too. Removing it routes those to the `!atk` arm and so
+to `ZombieGiveUpAttack`, which is an existing declared divergence rather than a
+new one; the engine plays motion 0 there, for 69 ticks, and connects nothing.
+No new `[diverges]` was added.
+
+**And I nearly wrote a wrong claim about which of those ten are reachable.** The
+first draft of this entry said `znebi2`/`znebi3`/`znebi4` reach their zeroed
+condition-3 entries in three or four draws out of every ten, on the strength of
+the pick rows alone. They do not: no shipped class-0x30 spawn of types
+`0x0F`–`0x11` is born at condition 3, and `ActorBodyConditionFromHands` returns
+before touching any type outside `0x01` and `0x13`–`0x14`, so their condition
+never moves off what the descriptor gave it. Counted against the twelve
+bundles, exactly **one** of the ten zeroed entries is reachable in shipped
+data: `char_adv02` (type `0x00`) at condition 0, 36 spawns, whose index 0 is
+zeroed and is named ten times by zone combo **7** — head *and* both arms shot
+off. A pick row is a claim about what the table can draw, not about what the
+game ever spawns; the spawn records are the other half and I had not read them.
+`L34` and `L27` are the same shape one level up.
+---
+
+## Session — the zombie on the stage-2 car is class 0x21, and it had no motion rule
+
+**Outcome:** stage 2's first fork is reachable. `docs/BUGS.md`'s "the zombie
+that should ride the front of the stage 2 car never appears" was a missing
+`MOTION_RULES` row, and the whole rescued branch of the stage — blocks 1..10 and
+21..32 — had never been enterable in the player.
+
+### What it was
+
+`RescueTargetInit` (`FUN_00451720`), class **0x21**, the rescue target. One
+spawn in the game: stage 2 block 0 step 2, script address `0x07D0`, character
+type 7 = `char_adv00` — the same zombie skin as the two class-0x25 actors that
+cling to the car's flank. Block 0's route record is `{branch, next = 11, 1}` and
+`RescueTargetHeldState` (`FUN_00451980`) is the only thing in the game that can
+write the 1.
+
+`motionFor` had no rule for the class, because `RescueTargetInit` seats the clip
+as a **literal** rather than reading it out of the descriptor:
+`MOV dword ptr [EDI + 0x20], 0x3E6` (`c74720e6030000`) at `0x00451747`, with
+`EDI = obj+0x194`, so `obj+0x1B4 = 0x3E6` — clip 998 in `zom.bin`. With no rule
+the placement was recorded as a marker and `resolve_for_stage` `continue`d
+before building a character: no skeleton, no baked clip, no `chr_` hierarchy in
+the glTF, nothing for `render/characters.ts` to adopt, and therefore — since
+`readySpawns` only lists an `at` that `pending` holds — no object at all.
+`RescueTargetInit` never ran and `g_script_branch_var` could only ever be 0.
+
+Measured from the stage entry under `?drive=1`: block 0 forks to **11** on every
+run without the fix, and to **1** with it once the rider is shot.
+
+Third time this row has been the bug. Class 0x19 (the stage-4 boss "had never
+appeared in a bundle") and class 0x14 (stage 5 "had no character type 71") were
+the first two, and each was written up as a one-off. It is not a one-off: the
+exporter's marker path is what every unread class gets, so a class that *has*
+been read and ported is indistinguishable from one that has not until somebody
+counts the actors the script asked for against the actors the pool holds.
+
+### And it rides the car, provably
+
+`RescueTargetPoseFromRoute` (`FUN_00451E50`) and
+`RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`) — the pair differs only
+in that the second writes the frame's pose delta to `obj+0x13CC` first — set the
+actor's position **and** its `{pitch, yaw, roll}` from
+
+```c
+CamEvalObjectPath6(g_st2car_path_table[obj+0x1350], g_cam_path_frame, &p)
+```
+
+`g_st2car_path_table` is `0x00565EF4`, eleven `s16` bounded by abutment against
+`g_class21_hp_by_rank` at `0x00565F0C`. Rows 0..2 are `op_st2` `0x148`, `0x14E`,
+`0x14D` — the same three routes `FUN_004521B0` gives the stage-2 **car** on
+camera paths `0x38`/`0x39`/`0x3A` — and rows 3..10 are the eight `op_train`
+paths its traffic instances ride. Same table, same row, same frame: the rescue
+target is *on* the car by construction, and `RescueTargetInit`'s own
+`FUN_00452120(0)` is what spawns the car object in the first place.
+
+Sub-state 0's `(0, 50 − frame, 50 − frame)` is a **drop-in on top of that
+pose**, rotated by the route's own yaw and added to the route point, reaching
+zero as the camera frame reaches 50. The `INC word ptr [ESI + 0x1312]` at
+`0x00451943` is *after* the transform, so the frame that steps the sub-state
+still applies the offset with `50 − frame` gone negative; transcribed in that
+order and asserted.
+
+### What was got wrong, by me and before me
+
+* **Both pose routines were recorded as "draw and pose helpers, the
+  renderer's", and left out.** They are not drawing: they write `obj+0x40`
+  through `obj+0x6C`, which is where the actor *is*. The ported ride-in built an
+  absolute position from the spawn yaw alone — `pos = Ry(yaw)·(0, d, d)` with
+  the y term dropped — and parked the actor 40 units from the world origin,
+  1,600 from the car. So even after the exporter fix the first run put it
+  nowhere near the shot; the screenshot is what said so.
+* **`CLASS21_HP_BY_RANK` was `[1, 1, 2, 2, 2]` "by difficulty".** It is sixteen
+  rows indexed by `g_damage_rank` (`FUN_0040A8A0` is a one-line
+  `return g_damage_rank`): `1 1 1 1 2 2 2 2 2 2 3 3 3 3 4 4`, bounded by
+  `g_st2car_asset_variants` at `0x00565F2C` beginning exactly sixteen `s16`
+  later. L6 with the wrong index source as well as the wrong extent. The port
+  test asserted the old value and had to be corrected with it.
+* **The car's own rig was the first suspect and is innocent.** `FUN_00452320`
+  draws **four** slots, not the two Ghidra shows — the pseudocode stops after
+  the second `AssetDrawSlot` and shows one `MatrixStackPop` against two pushes,
+  which is L4 and L37 together. Disassembling `0x00452320`–`0x0045253F` gives
+  body `0x2D`, a 52-triangle part at `(9.06, 6.37, 8.94)`, and two 56-triangle
+  wheels at `(0, 3.17, ±13.65/−9.48)` hanging off a roll-limited copy of the
+  body frame. All four are in every stage-2 bundle with geometry. Nothing in the
+  rig is a character.
+* **Twenty minutes went on a harness that would not advance.** `?drive=1` with
+  `mode=play` sat on block 0 step 1's `wait_frames 30` for four thousand driven
+  frames with "30 left" unchanged. The game had not started: `playthrough.mjs`
+  presses **Space** after `waitForLoad` and nothing else does. A harness that
+  advances frames and never advances the script looks exactly like a hang.
+* **And the branch then would not resolve.** After the volley the walker sat at
+  block 0 "step 4 / op 0" for ever. The branch bar's countdown is **frozen while
+  the pointer hovers it**, and Playwright leaves the mouse wherever the last
+  click of a volley put it — inside the viewport, under the bar that appears a
+  couple of seconds later. `page.mouse.move(2, 2)` after the volley, and it
+  forks.
+
+### Named this session
+
+`RescueTargetPoseFromRoute` (`0x00451E50`),
+`RescueTargetPoseFromRouteWithVelocity` (`0x00451EB0`),
+`RescueTargetDraw` (`0x00451FF0`), `MatrixGetAngles` (`0x004018E0`);
+`g_st2car_path_table` and `g_class21_hp_by_rank` re-described with their real
+extents.
+
+### Next actions
+
+1. **The clip root translation is dropped, and it is the last 11.94 units.**
+   Clip 998's root is a constant `(0, 15.692, 11.943)` — that forward 11.94 is
+   what puts the body over the bonnet rather than through the roof — and
+   `render/characters/pose.ts` applies only the **y** of a clip root, on the
+   rule that `ApplyRootMotion` has already taken the horizontal part as world
+   movement. For a clip whose root never changes the per-frame delta is zero, so
+   nothing ever takes it. Fixing it is a change to the port's root-motion model
+   for every skinned actor in the game and wants `SkeletonPoseRootFrame` /
+   `FUN_00410C50` read first: the engine both places the root bone at the
+   frame's translation and applies the frame-to-frame delta to the object, and
+   which is relative to which is `[open]`.
+2. **`RescueTargetFreedState` never ends.** The engine hands off at
+   `0x00451DF0` once `obj+0x1F1` rises, with a `0x78`-frame countdown and a
+   ground-ring effect; neither is ported, so a rescued target stays in the pool
+   for the rest of the stage. Harmless today — both enemy counters are already
+   given back — but it is a live actor nothing will remove.
+3. **`tools/hod2lib/charmotion.py` is missing class 0x11's rule and
+   `FROG_CLIPS`,** which `web/src/hod2lib/charmotion.ts` has. Left alone: it is
+   a peer's in-flight work from the frog/owl/fish session, not this one's.
+   `verify_exporters.py` compares the module lists and the version, not the
+   table contents, so nothing catches it.
+4. **Nothing counts the actors a block asks for against the actors it gets.**
+   That single comparison would have found this in a second and would have found
+   classes 0x19 and 0x14 too. Block 0 of stage 2 asks for fifteen spawns and the
+   pool held six: five class-0x33, two class-0x27, one class-0x41 and this one
+   were all absent, and only this one has a module. A check that reports the
+   difference per block, per bundle, with the class of each missing spawn, is
+   the obvious next verifier.
+## 2026-09-11 — `g_GameMode` is the title menu's row order, and the thumbnail check was waiting for something that had already happened
+
+Two unrelated jobs.
+
+### One: `g_GameMode` — 0 is Arcade, 2 is Training
+
+`GameMode.ARCADE = 2` had been in `hod2lib/stage.ts` since the bundle stopped
+carrying a `1 if original else 0` flag under that name, and `BUGS.md` had it
+down as `[open]` on the strength of four indirect readings. It is settled now,
+and not by any of them: it is settled by the **title menu**.
+
+`TitleMenuRegisterSprites` (`FUN_004962C0`) is the title screen's frame
+callback. It registers six background sprites through `ScreenSpriteRegister`
+(`FUN_0049E950`) — slots 0..5 — and then **eight menu rows of three sprites
+each, by texture name**:
+
+```
+6..8    tex\arcade00.bin  01  02
+9..11   tex\original_00.bin  01  02
+12..14  tex\traning_00.bin   01  02      (the game's own spelling)
+15..17  tex\boss_00.bin      01  02
+18..20  ranking_    21..23  option_
+24..26  network_    27..29  exit_
+```
+
+`ScreenSpriteRegister` appends at the pre-increment of
+`g_screen_sprite_count`, so **registration order is the index**
+`ScreenSpriteSetVisible` (`FUN_0049EB30`) takes, and
+`TitleMenuUpdateAndSelect` (`FUN_00496960`) hides slots 6..0x1F and shows the
+triple at `(g_title_menu_cursor + 2) * 3`. Its confirm arm is
+`case 0: case 1: case 2: case 3: g_GameMode = g_title_menu_cursor`. Rows 4, 5
+and 6 `RequestAppState(8 / 0x0C / 0x0F)` instead, which is what fixes those
+three app states as RANKING, OPTION and NETWORK.
+
+**Every other writer of `g_GameMode` stores 0** — `TitleMenuRunPhase`
+(`FUN_00496200`) on entry, `RunAttractScene10`/`11`, `RunAttractDemo`
+(`XOR ESI,ESI` at `0x0042682B`) and `NetworkModeRunPhase` (`FUN_0049F380`).
+So 1, 2 and 3 can only come from that menu, 0 is both Arcade and the default,
+and the enumeration is `0 Arcade, 1 Original, 2 Training, 3 Boss`. `[proved]`
+
+163 references, and an operand search for the bare `9ca08c` returns the same
+163 — no addressing mode hidden (`L32`).
+
+Three independent corroborations, each of which had been read before and
+misassigned: `ResetGameOnStart` sends mode 2 to scene 6 (`trnevtbl.bin`);
+`PreloadScreenAssetList` (`FUN_00412FD0`) gives mode 2 a per-block list and a
+per-lesson list and mode 3 a table exactly six entries wide, while 0 and 1
+share the ordinary per-scene one; `EvtLoadBlockProgram` (`FUN_0045EBC0`) gives
+2 and 3 an entry step of 0 and lets mode 0 fall through to 1.
+
+**What the wrong number was hiding.** `0x009C9118` was `g_prop_target_set`,
+"which of four member sets `PlaceBreakableGroup` turns into one-shot targets
+while `g_GameMode == 2`", with an `[open]` on what the four sets *are*. Mode 2
+is Training and the byte is read in exactly two places, both behind that test
+— the other is the per-lesson preload list — so **the four sets are the four
+training lessons**. Renamed `g_training_lesson`, which is what the live Ghidra
+database had already called it and what `evt.md` was already citing; the TSV
+was the stale copy. Target practice in a training lesson is a much better
+account of a one-shot target that pays no score than "arcade" ever was.
+
+And the `sound.md` BGM rule, which had been `[open]` because
+`g_app_state == 6 && g_GameMode == 0` looked unreachable: it is the **ordinary
+Arcade case**. The plain table is the arcade mix (`ST1.wav`) and `_AR` is what
+Original, Training and Boss get (`ST1_AR.wav`); both sets are in the install's
+`Sound/bgm/`. The port had `useArTable = (default_table ?? "ar") === "ar" ||
+gameMode !== 0`, which is `true` for every bundle ever written — a dead mode
+test behind a bundle field that always said `"ar"`, and the field said that
+*because* mode 0 was believed unreachable. `default_table` is gone: it stated a
+line of `.text` twice and stated it wrongly, and the client decides from
+`game_mode` now.
+
+`BUNDLE_FORMAT` and `SUPPORTED_FORMAT` go to **6**. This is the one bump that
+exists because a *value* changed meaning rather than a layout: a format-5
+bundle says `game_mode: 2` for Arcade, which this client would read as
+Training and would then pay no score for a prop hit and pick the wrong BGM
+mix. No declaration moved, so the schema digest cannot see it, and the builder
+hash only warns — refusing is the only thing that catches it. All twelve
+bundles re-exported; hashes regenerated **before** the export (`L33`).
+
+The check that would have caught the original bug is in
+`verify_exporters.py`: `check_game_mode` reads all three `GameMode` enums —
+`tools/hod2lib/stage.py`, `web/src/hod2lib/stage.ts`, `web/src/game/game_mode.ts`
+— against one table. Mutation-tested three ways (`ARCADE = 2` in either
+`stage` half, `Training = 3` in the player's) and each mutant fails with the
+member named.
+
+The port test `class 0x41, Training's one-shot targets` is the place where an
+uncorrected call site would have shown: it asked for `GameMode.Arcade`, and
+with `ARCADE = 0` `PlaceBreakableGroup` takes the ordinary path and all five
+of its assertions fall over.
+
+### Two: `bundle_flow.mjs`'s first thumbnail assertion
+
+"the stage that has been open has a picture" was one
+`waitForSelector(".export-tile img", { timeout: 10_000 })` and lost about one
+run in three. The ten seconds was itself a previous attempt at the same fix.
+
+**It was the screen's read-back, and the loss was permanent.** Measured with a
+probe that replays lines 89–115 of the harness verbatim: in **six of seven**
+failing runs the PNG was in OPFS by the moment the ten-second wait expired,
+and in the one held-open experiment the file landed 11 ms after the screen
+opened and the tile was *still* empty twenty seconds later. `ExportScreen`
+read the thumbnail store once, in its mount effect; nothing read it again
+while it was up. The wait could not have succeeded at any budget.
+
+The race it lost is a photo finish. Counting the page's own
+`requestAnimationFrame` calls from outside: 23 by the time `#loading` went
+away, 31 by the time the bundle screen opened — **eight frames**, against the
+nine `Player.requestThumb`'s countdown needs before `grabThumb` runs. Whether
+the PNG encode and the OPFS write beat the screen's single read is then a
+coin toss, and a machine with other browsers on it loses more often: under
+today's contention the before-rate was **1 of 7**, not the 2 of 3 recorded.
+
+Two fixes, because there were two faults:
+
+* **The page.** `writeThumb` announces itself (`onThumbWritten`) and the
+  screen re-reads the pictures on every write, with its own scan counter so a
+  write arriving mid-rescan cannot cancel that rescan's labels. This is a
+  user-visible bug in its own right: open the page, go straight to the bundle
+  screen, and the stage you were just looking at had no picture.
+* **The check.** Two assertions now, waited on separately — the PNG reaching
+  OPFS (real state, polled), then the tile showing it on a deliberately short
+  budget. A picture never taken and a picture never shown are different bugs
+  and the old check called both "no picture".
+
+Measured, one run at a time, `chrome` main processes recorded per run:
+
+| | pass |
+|---|---|
+| old check, page unfixed | **1 / 7** |
+| old check, page fixed | **8 / 8** (worst `img` wait 145 ms of 10 s) |
+| new check, page fixed | **7 / 7** (worst OPFS wait 148 ms of 30 s, worst `img` wait 46 ms of 5 s) |
+| new check, page **un**fixed | 2 of 3 — so it has not been weakened into always-green |
+
+**A wrong turn worth writing down:** the first version of the OPFS wait was
+`page.waitForFunction` with an `async` predicate. It returns `null` when the
+file is not there on the first poll and then resolves on the *promise object*,
+which is truthy — so it handed back a handle that reads as `null` on a run
+where the file appeared 100 ms later, and the assertion it fed would have been
+a silent false negative. `page.evaluate` does await. The poll lives in node,
+the same shape as `waitForStage` two functions above it.
+
+### Next actions
+
+1. `docs/BUGS.md` is the user's; both entries can be closed from this — the
+   `GameMode` one and the `bundle_flow` one — and the `sound.md` `[open]` it
+   cross-references goes with them.
+2. The BGM change is **audible**: every Arcade stage now plays `ST<n>.wav`
+   instead of `ST<n>_AR.wav`. That is what `PlaySoundId` does; it has never
+   been heard in this player before, so it is worth listening to once.
+3. `ModeStartCounterValue` (`FUN_00496B70`) feeds `SetBothPlayerCounters`
+   (`FUN_00406F60`) — 6 for Original, 1 for Training and Boss, an option byte
+   plus one for Arcade. **What is counted is `[open]`**: the derived 0/1/2
+   tier beside each count comes off a threshold table, which fits credits or
+   continues better than lives. One function (`FUN_00406E10`) away.
+4. `g_boss_mode_grades` has **ten** entries against six scenes. `[open]`.
+## One gap from two sides: stage 3's roller shutter and stage 5's van
+
+Two reports, and the useful part of each was the ground it ruled out. The
+shutter report had already measured that stage 3 carries no hinged props, no
+statics, no class-0x24 set pieces and no shutter rig, and concluded the
+shutter never reaches the placement path. Correct, and the reason it pointed
+nowhere: stage 3's placement *list* is classes 0x10/0x20/0x25/0x30, but its
+**script** spawns classes 0x41, 0x43, 0x44, 0x45, 0x46 and 0x51 as well. The
+measurement was of the wrong list, and nothing in either report said which.
+
+The lead handed over was `asset_load_slot` around block 8, and it was the right
+one for a reason nobody had stated: `asset_load_slot slot 2648 =
+etc_door.bin[2]` in block 8 step 1 is the shutter's model, 2648 is `0xA58`, and
+`0xA58` is the one literal `RisingDoorUpdate` (`FUN_004753F0`) compares its own
+draw slot against. The op did not *load level geometry the script animates*; it
+loaded the model a class-0x44 selector-11 object draws, and that selector was
+in no table in the tree. `etc_door.bin[2]` and `st5.bin[9]` both render as
+corrugated ribbed metal panels, which with the filename and the vertical rise
+is what makes "roller shutter" `[likely]` rather than a guess.
+
+### The wrong turn, and it was a whole implementation
+
+I built the van as a **new exporter prop kind** first — a `SlotProp` dataclass
+in both halves of `hod2lib`, a `slot_props` block in `props.json`, `type_index`
+and `type_lifetime` accessors on `Spawn`, rig entries, the lot — and it worked:
+eleven placements in stage 5, the right poses, the right slots. Then I read
+`web/src/game/class41/generic.ts` and found `PlaceGenericProp` already ported,
+already building all eleven, already asking the renderer for slot `0x1793`
+every frame. The exporter kind would have drawn a **second** van beside the
+first, with no lifetime and no pool.
+
+What the module comment said is the part worth keeping. It lists
+`FUN_0046EB20 (51, 11)` among the routines "read for what they draw", and
+`GENERIC_DESCRIPTOR_SLOT` — the set of types whose `+0x11C` really is a model —
+is `[5, 12, 33]`. The note and the table disagreed, and the table is what
+`breakableSlotEntry` reads to decide which slots' geometry travels. That is
+`L26` exactly: the prose described what somebody meant and only the table said
+what the code did. **Read the port before adding to the exporter**; the
+question "is this placed already" is one grep and I spent an afternoon not
+asking it.
+
+The reverted work is not all waste: it is why the `+0x1F4` lifetime was found.
+Writing `SlotProp` meant reading `FUN_004088A0` to learn where a class-0x41
+placer's type byte comes from, which is what showed that `obj+0x1F4` and
+`obj+0x11C` are two different descriptor fields and that four of the types
+swap one for the other.
+
+### Two more things the data said and no one had asked
+
+Types **31**, **53** and **54** draw `obj+0x28C` as well, so the
+descriptor-slot set is seven and not four; ten more spawns of scenery are
+missing for the van's reason. And the renderer poses the whole generic family
+`Ry · Rz · Rx`, which is type 51's order alone — 5, 12, 31, 33, 53 and 54 all
+compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or more non-zero
+angles. Both are written up where the code is, and neither is fixed here.
+
+
 ## 2026-09-11 — the chair is a class 0x33 selector 4, and the port had three of its four pieces
 
 Follow-on from the entry above, and authorised after it: build the fix that

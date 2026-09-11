@@ -70,7 +70,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 6;
+export const BUNDLE_FORMAT = 7;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -96,16 +96,42 @@ export const BREAKABLE_SLOTS = [
 ];
 
 /**
- * The three `PlaceGenericProp` types that read `obj+0x28C`, i.e. whose
- * descriptor `+0x11C` really is an asset slot.
+ * The `PlaceGenericProp` types that read `obj+0x28C`, i.e. whose descriptor
+ * `+0x11C` really is an asset slot.
  *
  * `PlaceGenericProp` writes that field into *both* `obj+0x11C` (the lifetime
  * `PropExpireByStepLifetime` counts down) and `obj+0x28C` (the asset slot),
- * and only three types ever draw the latter. Exporting `+0x11C` as a slot
+ * and only a few types ever draw the latter. Exporting `+0x11C` as a slot
  * resolved 46 of stage 2's 67 generic props to `char_adv03.bin` and other
  * characters -- which is what "the props are not rendering" looked like.
+ *
+ * Each entry is a routine whose body was read and found to pass
+ * `(s16)obj+0x28C` to `AssetDrawSlot`:
+ *
+ * * 5 -- `PropDrawOnlyType5` (`FUN_00466820`)
+ * * 12 -- `FUN_00467E50`
+ * * 33 -- `FUN_00472950`, which draws `+0x28C + obj+0x2A0`
+ * * **51 -- `PropDrawOnlyType51` (`FUN_0046EB20`)**
+ *
+ * **51 was missing, and that is the whole of why the stage 5 van had only its
+ * rear doors.** The body is a type-51 placement at the doors' own position and
+ * yaw, drawing slot `0x1793` = `char_adv04.bin[94]` -- three models before the
+ * `[95]`/`[96]` pair `PropBuildVanDoors` hands its two hinges. The port placed
+ * it all along and `DrawSlotFor` asked for `0x1793`; nothing put that slot in
+ * the bundle, so there was no model to clone and the prop drew nothing, which
+ * from outside is indistinguishable from a placement that was never exported.
+ * Eleven type-51 spawns, all in stage 5: four vans, two flat quads at the same
+ * pose as two of them, and five other pieces of street furniture from the same
+ * file.
+ *
+ * `[open]` Types **53** (`FUN_0046EBD0`) and **54** (`FUN_0046EDC0`) draw
+ * `obj+0x28C` too -- three more spawns, all stage 5 -- and are deliberately
+ * not here: 53's lifetime is an inline variant of `PropExpireByStepLifetime`
+ * and 54 drifts its whole pose while `DAT_009C720C` is 1, and neither is
+ * ported, so adding their slots would put a model in the level with the wrong
+ * behaviour rather than none. Same for the rest of the family.
  */
-export const GENERIC_DESCRIPTOR_SLOT = [5, 12, 33];
+export const GENERIC_DESCRIPTOR_SLOT = [5, 12, 33, 51];
 
 /**
  * The literal slots each read routine passes to `AssetDrawSlot`, in the order
@@ -150,9 +176,13 @@ export const STAGE_BGM_INDEX: Record<number, number> =
  * The BGM mapping a stage needs: ids to filenames, plus its own track.
  *
  * Both tables travel, because which one the game picks depends on runtime
- * state (`DAT_009C8E98 == 6 && g_GameMode == 0` selects the plain names). Note
- * the `0` there: it is a mode no stage is entered in, so neither ORIGINAL nor
- * ARCADE can reach the plain table.
+ * state: `PlaySoundId` takes the plain names when `DAT_009C8E98 == 6 &&
+ * g_GameMode == 0` and the `_AR` names otherwise. That `0` is **Arcade** --
+ * it used to be read as a mode no stage is entered in, on an enumeration
+ * where `ARCADE` was 2, and the plain table was therefore declared
+ * unreachable. It is the ordinary Arcade case, and the `_AR` mix is what
+ * Original, Training and Boss get. The client decides, from `game_mode`; this
+ * function no longer states the answer a second time.
  */
 export function bgmJson(tables: ExeTables, stageNumber: number | null,
                         gameMode: number): Record<string, unknown> {
@@ -160,7 +190,6 @@ export function bgmJson(tables: ExeTables, stageNumber: number | null,
   const idx = STAGE_BGM_INDEX[stageNumber ?? -1];
   return {
     names,
-    default_table: "ar",
     stage_track: idx === undefined ? null : {
       index: idx,
       id: (0x10000000 | idx) >>> 0,
@@ -298,14 +327,23 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           pos: [...rec.pos], yaw: rec.orient[1],
         });
       } else if (generic.has(ctor)) {
-        // Everything else `PlaceGenericProp` builds. `+0x11C` goes to **both**
-        // `obj+0x11C` and `obj+0x28C`, so it is the lifetime in event blocks
-        // *and* the asset slot -- and only the three types in
-        // `GENERIC_DESCRIPTOR_SLOT` ever draw the slot.
+        // Everything else `PlaceGenericProp` builds. The prologue writes
+        // `+0x11C` to **both** `obj+0x11C` and `obj+0x28C`, so by default it
+        // is the lifetime in event steps *and* the asset slot -- and only the
+        // types in `GENERIC_DESCRIPTOR_SLOT` ever draw the slot.
+        //
+        // `field_1f4` is the OTHER number: the s8 at `desc+0x24`, which
+        // `FUN_004088A0` widens into `obj+0x1F4`. Four of the switch's arms --
+        // types 12, 31, 51 and 53 -- then copy it over `obj+0x11C`, so for
+        // those the two meanings do not share a word at all and the lifetime
+        // is this byte. See `GENERIC_LIFETIME_FROM_1F4` in
+        // `game/class41/generic.ts`; the port applies the switch, this only
+        // carries what the descriptor holds.
         out.push({
           at: rec.offset, container: "generic",
           type: ctor, slot: rec.hp,
           lifetime_evt_steps: rec.hp,
+          field_1f4: s8(rec.offset + 0x24),
           pos: [...rec.pos],
           pitch: rec.orient[0], yaw: rec.orient[1], roll: rec.orient[2],
         });
@@ -363,6 +401,28 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         // shot. -1 in the first means the switch has no key at all.
         keys: [0, 1, 2, 3].map((k) => rec.param(0x20 + k, "i8")),
         lifetime_evt_steps: 1,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 11) {              // class 0x44 selector 11
+      // `PropBuildRisingDoor` -- a door that slides straight up on a script
+      // flag. Everything the object holds is in the parameter tail: the u16 at
+      // `+0x04` is the asset slot `RisingDoorUpdate` draws, and the two signed
+      // bytes at `+0x20`/`+0x21` are the flag that starts the rise and the
+      // flag that deletes it. `lifetime_evt_steps` is 0 because there is no
+      // `PropExpireByStepLifetime` in the routine at all -- the remove flag is
+      // its whole lifetime, and a lifetime of 0 would otherwise retire it at
+      // the first step boundary.
+      //
+      // The rise itself is not carried: it is `speed += step; y += speed` from
+      // a literal, with the two literals picked by comparing the slot against
+      // 0xA58, so the port computes it the way the engine does rather than
+      // reading a baked curve. See `game/class44/rising_door.ts`.
+      out.push({
+        at: rec.offset, container: "rising_door",
+        slot: rec.param(0x04, "u16") || 0,
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
         pos: [...rec.pos], yaw: rec.orient[1],
       });
     } else if (rec.hp === 16) {              // class 0x44 selector 16
@@ -879,6 +939,16 @@ export async function breakableSlotEntry(
         && !want.includes(pl.slot as number)) {
       want.push(pl.slot as number);
     }
+  }
+  // Class 0x44 selector 11 draws its descriptor's slot and nothing else, so
+  // the slot travels the same way the three descriptor-slot generic types' do.
+  // Without this the prop is placed, `DrawSlotFor` asks for `0xA58`, and the
+  // renderer has nothing to clone -- which is exactly how stage 3's roller
+  // shutter came to be missing from a level that placed it.
+  for (const pl of placements) {
+    if (pl.container !== "rising_door") continue;
+    const slot = pl.slot as number;
+    if (slot && !want.includes(slot)) want.push(slot);
   }
   // Class 0x44 selector 0 draws an effect tree, so the slots it needs are the
   // tree's nodes and **not** the descriptor's `obj+0x28C`, which that family

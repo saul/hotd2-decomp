@@ -9,6 +9,8 @@
  * only thing routing a thrower into its fall since it was written.
  */
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
+import { ActorReleaseBodyCreatureOnHit } from "../combat/resolve_hit";
+import { CharacterTypeOf } from "../tables";
 import { ZombieState } from "./states";
 
 /** `FCOMP [0x0055d178]` — `00009041` = 18.0f. */
@@ -84,11 +86,23 @@ export function ZombieOnShot(obj: ZombieActor): void {
   // holds `MOV EDX, [ESI+0x136c]`, inside the per-player loop, and the
   // encoding is the byte form. `[proved]`
   if (obj.flags & ActorFlag.ShotImmune) return;
-  // A survivable hit stops here. The engine would call `ActorShotFeedback`
-  // and then `ActorReactToHit` (`FUN_004543F0`) for the stagger; the port's
-  // shared `ResolveHit` has already run both, so there is nothing left for
-  // this routine to do on an actor that is still alive. [diverges]
-  if (!(obj.flags & ActorFlag.Dead)) return;
+  // `00453F46 TEST dword ptr [ESI + 0x34], 0x4000000` / `JZ 0045401A` -- the
+  // live arm, and the engine's **one** call site for `ActorReactToHit`
+  // (`FUN_004543F0`): `0045401A PUSH EDI / CALL 0x004543F0`.
+  //
+  // The stagger half of that routine has already run, inside the port's
+  // shared `ResolveHit`. [diverges] What has *not*, and cannot, is its
+  // `znjoe` arm: that arm raises {@link ActorFlag.Dead}, and the test five
+  // instructions above is the one thing that reads it -- so the arm only
+  // works from a point the test has already passed. Called from `ResolveHit`
+  // instead, at the head of the frame, it set state 25 and this routine
+  // overwrote it with {@link ZombieState.Death} on the very same frame.
+  // `L11`, and see `ActorReleaseBodyCreatureOnHit` for the measurement.
+  if (!(obj.flags & ActorFlag.Dead)) {
+    ActorReleaseBodyCreatureOnHit(obj, hit.bone, CharacterTypeOf(obj)?.type
+                                  ?? -1, hit.result, hit.player ?? 0);
+    return;
+  }
   // `if ((obj+0x136C & 0x80000000) == 0)` at 0x00453F2A, then the raise at
   // 0x00453F4E: this death is dispatched once.
   if (obj.flags2 & ZombieFlag2.DiedInFlight) return;

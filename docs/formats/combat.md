@@ -173,6 +173,47 @@ same bit and refuse to pick a *reaction*, so a port that gates the reaction and
 not the damage kills actors in the one window where nothing is listening for a
 kill. See `docs/BUGS.md`, the `zsass` at stage 2 `0x8094`.
 
+### The bone records those indices address
+
+`obj + 0x20C + bone * 0x90` is bone *bone*'s record and `obj + 0x298 +
+bone * 0x90` its hit count -- the `n` above -- so for **bone 1** the record's
+draw slot is `obj+0x29C` and its count `obj+0x328`. `[proved]` from
+`ActorSwapDamagedPart` (`FUN_004098E0`), which takes the record's address as
+its first argument and reads `param_1[0x23]` (`+0x8C`, the count) to index the
+effect table.
+
+One routine writes that pair **without** going through the swap:
+`ZombieStateReleaseBodyCreature` (`FUN_00457FB0`) sets `obj+0x328 = 1` and
+`obj+0x29C = g_pBoneEffectSlots[type][7]` directly, which is the torso's first
+damage step at the index a first hit would have used. Because it skips
+`ActorSwapDamagedPart` it sets no `obj+0x1318` zone bit and severs nothing, so
+the body condition `ActorUpdateBodyCondition` derives is untouched and the
+actor still dies its ordinary death.
+
+### `ActorReactToHit`'s first arm, and where it has to be called from
+
+`ActorReactToHit` (`FUN_004543F0`) is **the one place in the image that tests
+a character type against `0x0A`** -- `znjoe`, seven spawns, all in stage 5.
+Result 1 on bone 1 of such an actor, with `obj+0x34` bit `0x400` still clear,
+raises `0x4000400`, scores `0x50`, records the shooter at `obj+0x131C` and
+sets state `0x19` sub 0 **instead of** playing a reaction.
+
+`0x4000000` is the same bit `ZombieOnShot` (`FUN_00453EB0`) tests to decide an
+actor is dead:
+
+```
+00453F46  f7463400000004  TEST dword ptr [ESI + 0x34], 0x4000000
+00453F4D  0f84c7000000    JZ   0045401A          ; alive -> the reaction
+0045401A  57              PUSH EDI
+0045401B  e8d0030000      CALL 0x004543F0        ; ActorReactToHit(player)
+```
+
+The call site is five instructions past the test, which is the only reason the
+arm can raise that bit at all: by the next frame state `0x19`'s sub 0 has
+latched `obj+0x136C` bit `0x80000000` and `ZombieOnShot` returns at `00453F40`
+before reaching the test. Anything that calls `ActorReactToHit` earlier in the
+frame sets the state and then has it overwritten with a death state. `L11`.
+
 `ResolveHit` (`FUN_00409430`) reads three tables, all indexed the same way:
 
 ```c

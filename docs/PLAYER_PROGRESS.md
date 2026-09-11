@@ -2203,6 +2203,55 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+### The creature `znjoe` releases, and the frame the arm has to fire on
+
+Shoot a `znjoe` in the chest and something comes out of it. Seven spawns in the
+whole game have character type `0x0A` and every one of them is in stage 5 —
+evt `0x0A68`, `0x0AF8`, `0x0B24`, `0x2E20`, `0x2E50`, `0x2F58`, `0x2F8C` — and
+`ActorReactToHit` (`FUN_004543F0`) is the one place in the image that tests for
+it. A **first** hit on bone 1 with result 1 does not stagger the actor: it
+scores `0x50`, marks it dead, and drops it into class 0x30 state **25**,
+`ZombieStateReleaseBodyCreature` (`FUN_00457FB0`), which no spawn record
+reaches.
+
+That state backs the zombie out to its **inner** approach ring, plays clip
+`0x1DF` for `rand() % 10 + 0x5F` frames — 95 to 104 — and then, on one frame,
+applies the torso's first damage step by hand and calls `SpawnBodyCreature`
+(`FUN_0043E720`). What comes out is an object with **no class id**, like the
+thrown weapon and the severed head, and it is a **countable enemy**:
+`BodyCreatureInit` raises `g_enemies_present` *and* `g_enemies_alive`, so a
+room gate has to account for it. It rides the host's bone for a frame, then
+flies at the eye along a one-unit half-sine in about twenty-four frames. Shoot
+it for `0x50` and it falls one way; miss it and thirty frames after it arrives
+it **takes a life**, then falls the other. Either way it drops both counters
+below `y = -3` and leaves.
+
+**Its position is in camera space**, which is the whole shape of the routine —
+the flight's end is the origin of that space, and in a two-player game it is
+`x = ∓0.6`, one gun each. `render/effects.ts` draws it in the same view group
+the blood and the muzzle flash hang off.
+
+**The arm fires from `ZombieOnShot`, not from `ResolveHit`, and that is not a
+detail.** The bit the arm raises is the one `ZombieOnShot` tests to decide the
+actor is dead, and the engine's call site is five instructions *past* that
+test. Called at the head of the frame instead, the arm set state 25 and
+`ZombieOnShot` overwrote it with the death state on the same frame — every
+znjoe died with its chest shut. `L11`.
+
+The exporter had to learn two things for any of it to be visible: the forty
+sprite slots `0x1D31..0x1D58`, which are `znjoe.bin`'s own entries 176..215 and
+which no skeleton node names, and clips `0x1DF` and `0x1E3`, which reached no
+bundle because nothing had named them.
+
+`[open]` A live creature is a **camera candidate** in the engine —
+`BodyCreatureUpdate` ends in `RegisterForCameraTracking` — and the port's
+candidate list is over `Actor`s, so a record in `g_body_creatures` cannot enter
+it and `g_camera_free` does not see one. The point the engine registers,
+`obj+0x100`, is written as `g_camera_blocks[cur]+0x00 · obj+0x40` with
+`obj+0x40` already in camera space, and that matrix is the world-to-camera one
+everywhere else in the image — so what space the registered point is in is
+itself `[open]`, and the port writes none rather than guessing.
+
 ## Shooting
 
 **Done, for the parts that are exact.** Full account in

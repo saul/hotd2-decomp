@@ -77,6 +77,24 @@ CLASS20_DEATH_MOTION: int = 988
 #: length is 0 and the cursor never reaches it. `Boss4StateDeath` writes
 #: `g_script_flags[32]` on frame 0x46 of clip 0x69, so without 0x69 in the
 #: bundle the gate behind the stage-4 boss cannot open at all.
+#: The two clips `ZombieStateReleaseBodyCreature` (`FUN_00457FB0`) names, per
+#: character type.
+#:
+#: `0x1E3` is the walk it backs out to its inner approach ring on and `0x1DF`
+#: the clip it opens the torso during, and both are literals in that state.
+#: They are baked for the reason ``BOSS4_CLIPS`` is: **an unbaked clip is an
+#: actor that waits for ever.** Sub 1 holds on `0x1E3`'s root motion to leave
+#: the ring, and sub 3 leaves on
+#: ``obj+0x19C >= g_motion_play_length[0x1DF] - 1``, which is 0 for a clip the
+#: bundle does not carry.
+#:
+#: Keyed by character type because the state is: `ActorReactToHit`
+#: (`FUN_004543F0`) is the only way in and it tests ``obj+0x1F4`` against
+#: ``0x0A``.
+BODY_CREATURE_HOST_CLIPS: dict[int, tuple[int, ...]] = {
+    0x0A: (0x1DF, 0x1E3),
+}
+
 BOSS4_CLIPS: tuple[int, ...] = (
     0x65, 0x69, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72,
     0x73, 0x74, 0x75, 0x76, 0x78, 0x7A, 0x7B, 0x7C, 0x7D,

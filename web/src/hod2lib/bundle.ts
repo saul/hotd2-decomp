@@ -35,6 +35,7 @@ import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 import { f32, i16, i32, u32 } from "./bytes";
+import { BODY_CREATURE_SLOTS } from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
 import * as charmotion from "./charmotion";
 import * as degraded from "./degraded";
@@ -665,6 +666,30 @@ export function humanoidDrawSlots(
 }
 
 /**
+ * The extra asset slots a stage's **character types** ask for.
+ *
+ * One entry today: character type `0x0A`, `znjoe`, whose creature draws forty
+ * frames of `znjoe.bin` that no skeleton node and no damaged variant names.
+ * See {@link BODY_CREATURE_SLOTS} for why the key is a character type and not
+ * a spawn class, and `game/body_creature.ts` for what draws them.
+ *
+ * They ride `slots_effect` rather than `slots_actor` because of the **space**
+ * they are drawn in: `BodyCreatureUpdate` ends `MatrixLoadIdentity` +
+ * `MatrixTranslate`, which is the camera's own space, and `render/effects.ts`
+ * is the layer that already holds a group there — the muzzle flash and the
+ * blood hang off the same one. `render/slotmodels.ts` places its clones in
+ * the world.
+ */
+export function bodyCreatureDrawSlots(
+    charTypes: Iterable<number>): number[] {
+  const out: number[] = [];
+  for (const t of charTypes) {
+    for (const slot of BODY_CREATURE_SLOTS[t] ?? []) out.push(slot);
+  }
+  return out;
+}
+
+/**
  * A hidden rig holding the models an **actor** class draws by asset slot.
  *
  * The counterpart of {@link breakableSlotEntry}, for the classes whose draw is
@@ -772,13 +797,17 @@ export const EFFECT_SLOT_RANGES: ReadonlyArray<readonly [number, number]> = [
  * slot, hidden, cloned by the client. `render/effects.ts` is what clones them.
  */
 export async function effectSlotEntry(
-    stage: Stage, cache: AssetCache): Promise<RigInstance | null> {
+    stage: Stage, cache: AssetCache,
+    extra: readonly number[] = []): Promise<RigInstance | null> {
   const want: number[] = [];
   for (const [lo, hi] of EFFECT_SLOT_RANGES) {
     for (let slot = lo; slot <= hi; slot++) {
       if (!want.includes(slot)) want.push(slot);
     }
   }
+  // Slots a **character type** in this stage asks for rather than the shot
+  // path -- see {@link bodyCreatureDrawSlots}.
+  for (const slot of extra) if (!want.includes(slot)) want.push(slot);
   const slots = stage.tables.assetSlots();
   const parts: RigInstance["parts"] = [];
   for (const slot of want) {
@@ -799,7 +828,8 @@ export async function effectSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_effect",
-    routine: "the shot effects: blood, muzzle flash, tracer, impacts",
+    routine: "the shot effects: blood, muzzle flash, tracer, impacts; and "
+      + "the creature znjoe releases",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "one model per animation frame; hidden, cloned per live effect",
@@ -1144,7 +1174,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const act = await actorSlotEntry(
     stage, spawnRecords.map((r) => r.cls), humanoidDrawSlots(humanoids),
     cache);
-  const eff = await effectSlotEntry(stage, cache);
+  const eff = await effectSlotEntry(stage, cache,
+                                   bodyCreatureDrawSlots(charDefs.keys()));
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
   const isBloodTexture = bloodTexturePredicate(tables);

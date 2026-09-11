@@ -55,6 +55,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
+import { MarkBodyCreatureShot } from "../body_creature";
 import { BreakablePropTakeShot } from "../class41/prop";
 import { ColiTraceSegmentAllSets } from "../coli";
 import { PlayerShotEffectSpawn } from "../effects/shot_effects";
@@ -261,6 +262,23 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     return;
   }
   if (pick.kind === "prop") return ResolveShotOnProp(req, pick, host, events);
+  if (pick.kind === "creature") {
+    // `MarkActorShot` and nothing else: the score, the sound and the blood
+    // are `BodyCreatureUpdate`'s, on the next frame, which is where the
+    // engine puts them. See `game/body_creature.ts`.
+    const c = G.g_body_creatures.find((x) => x.id === pick.creatureId);
+    if (!c) {
+      events?.emit("shot.resolved", { player, kind: "miss", ray: req.ray,
+                                      points: 0 });
+      return;
+    }
+    MarkBodyCreatureShot(c, player);
+    G.g_head_combo_bonus[player] = 0;
+    events?.emit("shot.resolved", {
+      player, kind: "marked", ray: req.ray, point: pick.point, points: 0,
+    });
+    return;
+  }
 
   const obj = ActorByAt(pick.at);
   if (!obj) {
@@ -289,7 +307,8 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // is behind the shot-immune gate. `null` is that refusal, and it is a
   // **ricochet**, not a miss — the shot marked the actor, so the feedback
   // routine still runs, with the result the class's own copy forces.
-  const out = DispatchHit(obj, pick.bone, CameraBackYawBams(), host, rng);
+  const out = DispatchHit(obj, pick.bone, CameraBackYawBams(), host, rng,
+                          player);
   if (!out) {
     // `ThrowerShotFeedback` (`FUN_00449B20`) opens
     // `if (obj+0x34 & 0x100) g_hit_result[p] = 5;` — class 0x31's own copy of

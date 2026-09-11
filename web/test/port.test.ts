@@ -56,6 +56,10 @@ import { OwlDiveKind, OwlState, type OwlTail }
 import { ActorShotFeedback } from "../src/game/combat/feedback";
 import { BLOOD_FIRST_SLOT, BLOOD_LAST_CEL, SpawnBloodSpray }
   from "../src/game/effects/blood";
+import {
+  BodyCreatureState, BodyCreatureUpdate, MarkBodyCreatureShot,
+  SpawnBodyCreature,
+} from "../src/game/body_creature";
 import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
          FLASH_LAST_FRAME } from "../src/game/effects/shot_effects";
 import { ShotEffectsTick } from "../src/game/effects/tick";
@@ -12143,6 +12147,378 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
     check("...then peels off and releases the token",
           t().state === OwlState.OrbitAway && G.g_class43_attack_token === -1,
           `${OwlState[t().state]} ${G.g_class43_attack_token}`);
+  }
+}
+
+
+// -- the creature `znjoe` releases ------------------------------------------
+
+/**
+ * `ActorReactToHit`'s `znjoe` arm, the state it leads to, and the thing that
+ * comes out of the chest.
+ *
+ * All of it was read and named and none of it was ported, which is why the
+ * assertions here are mostly about *edges that did not exist*: state 25 had
+ * no `case`, `g_body_creatures` had no entries, and the two enemy counters
+ * never saw an object that in the engine has to be shot before a room can
+ * clear.
+ */
+console.log("\nznjoe's creature:");
+{
+  /** `znjoe`. The one character type `ActorReactToHit` tests for. */
+  const JOE = 0x0a;
+  const joeType = {
+    ...CHARS.types["1"], type: JOE, name: "znjoe", file: "znjoe.bin",
+    bones: [
+      // The torso, with an **escalating** first step so a hit on it resolves
+      // as result 1. `0x1CF1` stands in for `g_pBoneEffectSlots[0x0A][7]`,
+      // the slot the release swaps bone 1 to.
+      { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 3,
+        steps: [[0x1cf0, EffectCode.Escalate, 3],
+                [0x1cf1, EffectCode.Escalate, 3],
+                [0x1cf2, EffectCode.Last, 3]] },
+      { bone: 4, part: "r_upperarm", slot: 4, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 2,
+        steps: [[0x11, EffectCode.Escalate, 3]] },
+      { bone: 2, part: "head", slot: 0x30, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    motions: {
+      ...CHARS.types["1"].motions,
+      // 0x1E3 the walk it backs out on and 0x1DF the clip it opens on, both
+      // with the play length the shipped table gives them:
+      // `g_motion_play_length` (0x004E07D0) is **155** at index 479 and 79 at
+      // 483. The 155 is the reason the release can happen at all -- the
+      // countdown the state arms is 95 to 104 frames and the clip ending is
+      // what hands over to the death state, so a clip shorter than the
+      // countdown would leave every znjoe dying with its chest closed. A
+      // fixture with 40 frames does exactly that, which is how this line
+      // came to be pinned.
+      "483": motion(40, 0, 79), "479": motion(78, 0, 155),
+    },
+  } as unknown as CharacterType;
+  const joeChars = {
+    ...CHARS, types: { "1": CHARS.types["1"], "10": joeType },
+  } as unknown as CharactersJson;
+
+  /** A host that can pose bone 1 and has a camera at the origin. */
+  const JOE_HOST: GameHost = {
+    boneWorld: (_at, bone, out) => {
+      if (bone !== 1) return false;
+      out.x = 0; out.y = 5; out.z = 40;
+      return true;
+    },
+    aimPoint: (_ahead, out) => { out.x = 0; out.y = 0; out.z = 0; },
+    viewPoint: () => undefined,
+    viewSpaceOf: () => false,
+    // A camera at the origin looking down `-Z`, so camera space is the world
+    // with `z` negated -- enough to prove which space the flight is in.
+    viewSpaceOfPoint: (pt, out) => {
+      out.x = pt.x; out.y = pt.y; out.z = -pt.z;
+      return true;
+    },
+    setBoneSlot: () => undefined,
+  };
+
+  function joeScene(rng: Rng): { joe: ZombieActor; events: Events } {
+    ResetGameGlobals();
+    SetGameTables(joeChars);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_player_state = [5, 5];
+    G.g_app_state = AppState.InPlay;
+    G.g_nFiringGate = 1;
+    const joe = spawnZombie(0x0a68, JOE, "znjoe", {}, rng);
+    joe.visible = true;
+    joe.attackState = 1;
+    joe.hp = 100;
+    joe.pos = vec3(0, 0, 40);
+    joe.motion = 10;
+    return { joe, events: new Events() };
+  }
+
+  // -- 1. the arm, and the frame it has to happen on -----------------------
+  //
+  // `ResolveHit` charges the damage and withholds the stagger; the arm itself
+  // runs in `ZombieOnShot`, which is where the engine calls
+  // `ActorReactToHit` -- at `0x0045401A`, **after** the death test at
+  // `0x00453F46` that reads the very bit the arm raises. Called any earlier
+  // than that, the arm sets state 25 and `ZombieOnShot` overwrites it with
+  // {@link ZombieState.Death} on the same frame, which is what it did.
+  {
+    const rng = new Rng(11);
+    const { joe, events } = joeScene(rng);
+    const score = G.g_player_score[0];
+    const out = ResolveHit(joe, 1, 0, JOE_HOST, rng, 0);
+    check("a torso hit on znjoe plays no stagger and leaves it alive",
+          out.react === undefined && out.result === 1 && joe.hp > 0
+          && !joe.dead,
+          `react ${out.react} result ${out.result} hp ${joe.hp}`);
+    check("...and the hit carries the player who fired it, per `obj+0x190`",
+          joe.pendingHit?.player === 0,
+          `${JSON.stringify(joe.pendingHit)}`);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("...and `ZombieOnShot` puts it in state 25, not a death state",
+          joe.state === ZombieState.ReleaseBodyCreature,
+          `state ${joe.state} sub ${joe.sub}`);
+    check("...the same OR marks it dead and undismemberable",
+          (joe.flags & ActorFlag.Dead) !== 0
+          && (joe.flags & ActorFlag.NoDismember) !== 0,
+          `flags ${joe.flags.toString(16)}`);
+    check("...pays the shooter 0x50 and records who fired",
+          G.g_player_score[0] === score + 0x50 && joe.killedBy === 0,
+          `score ${G.g_player_score[0]} killedBy ${joe.killedBy}`);
+
+    // Once-only, and the latch is `NoDismember` -- which the same OR raised.
+    joe.state = ZombieState.HoldAtRange;
+    joe.sub = 0;
+    joe.hp = 100;
+    joe.flags &= ~(ActorFlag.ShotImmune as number);
+    joe.flags2 &= ~(ZombieFlag2.DiedInFlight as number);
+    ResolveHit(joe, 1, 0, JOE_HOST, rng, 0);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("a second torso hit does not open it again",
+          joe.state !== ZombieState.ReleaseBodyCreature, `state ${joe.state}`);
+  }
+
+  // Neither of the other two conditions may be dropped.
+  {
+    const rng = new Rng(12);
+    const { events } = joeScene(rng);
+    const other = spawnZombie(0x2000, 1, "not a znjoe", {}, rng);
+    other.hp = 100;
+    other.visible = true;
+    ResolveHit(other, 1, 0, JOE_HOST, rng, 0);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("another character type's torso hit is an ordinary hit",
+          other.state !== ZombieState.ReleaseBodyCreature,
+          `state ${other.state}`);
+  }
+  {
+    const rng = new Rng(13);
+    const { joe, events } = joeScene(rng);
+    ResolveHit(joe, 4, 0, JOE_HOST, rng, 0);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("and a znjoe shot in the arm is too -- the bone is bone 1",
+          joe.state !== ZombieState.ReleaseBodyCreature, `state ${joe.state}`);
+  }
+
+  // -- 2. the state --------------------------------------------------------
+  {
+    const rng = new Rng(14);
+    const { joe, events } = joeScene(rng);
+    joe.state = ZombieState.ReleaseBodyCreature;
+    joe.sub = 0;
+    // Inside the inner ring (25), which is where a zombie shot at close range
+    // is. The engine walks it back out before the chest opens.
+    joe.pos = vec3(0, 0, 10);
+    joe.attackPermit = 0;
+    G.g_attack_permits[0] = joe.at;
+    for (let i = 0; i < 5; i++) {
+      GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    }
+    check("inside the inner ring it plays the walk and stays in sub 1",
+          joe.motion === 0x1e3 && joe.sub === 1,
+          `motion ${joe.motion} sub ${joe.sub}`);
+    check("...and it is dead already: sub 0 zeroed the hit points",
+          joe.hp === 0, `hp ${joe.hp}`);
+    check("...and is immune to a second shot while it finishes",
+          (joe.flags & ActorFlag.ShotImmune) !== 0,
+          `flags ${joe.flags.toString(16)}`);
+
+    // Out past the ring, and the clip starts.
+    joe.pos = vec3(0, 0, 40);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("outside it, the release clip starts and a countdown is armed",
+          joe.motion === 0x1df && joe.sub === 3
+          && joe.arcTotal >= 0x5f && joe.arcTotal <= 0x5f + 9,
+          `motion ${joe.motion} sub ${joe.sub} delay ${joe.arcTotal}`);
+
+    const before = G.g_enemies_alive;
+    const want = joe.arcTotal;
+    for (let i = joe.arcFrames; i < want + 1; i++) {
+      GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    }
+    check("on the frame it lands, the torso opens",
+          joe.boneSlot["1"] === 0x1cf1 && joe.hits[1] === 1,
+          `slot ${joe.boneSlot["1"]} hits ${joe.hits[1]}`);
+    check("...the creature is released",
+          G.g_body_creatures.length === 1,
+          `${G.g_body_creatures.length} creatures`);
+    check("...and it is a countable enemy: both counts go up",
+          G.g_enemies_alive === before + 1,
+          `${before} -> ${G.g_enemies_alive}`);
+    check("...the permit goes back, because a corpse must not hold one",
+          joe.attackPermit === -1 && G.g_attack_permits[0] === -1,
+          `permit ${joe.attackPermit}`);
+    check("...and the death-motion bit goes up, which is the same latch",
+          (joe.flags2 & ZombieFlag2.DeathMotionVariant) !== 0,
+          `flags2 ${joe.flags2.toString(16)}`);
+    // ...and only once, however long the clip runs. The clip's play length is
+    // 155 and the countdown spent 95 to 104 of it, so the last fifty frames
+    // are the zombie standing with its chest open -- and the latch has to
+    // hold for every one of them. Counted on the sequence rather than on the
+    // live list, because the one creature flies off, hits the player and
+    // falls out of the world inside that window.
+    const n = G.g_body_creature_seq;
+    for (let i = 0; i < 80; i++) {
+      GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    }
+    check("...exactly once, however long the clip runs",
+          G.g_body_creature_seq === n, `${n} -> ${G.g_body_creature_seq}`);
+    check("...and when the clip ends the zombie dies its own death",
+          joe.state === ZombieState.Death
+          || joe.state === ZombieState.CorpseSink
+          || joe.state === ZombieState.CorpseBlink,
+          `state ${joe.state}`);
+  }
+
+  // -- 3. the flight -------------------------------------------------------
+  {
+    const rng = new Rng(15);
+    const { joe, events } = joeScene(rng);
+    const c = SpawnBodyCreature(joe);
+    check("a new creature rides the host's bone",
+          c.state === BodyCreatureState.RideHostBone);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    // The host's bone is at world (0, 5, 40) and the stub's camera space
+    // negates z, so the launch point is (0, 6.5, -40): the 1.5 lift is added
+    // in *world* and z comes back negative, which is in front of the eye.
+    check("...and launches into camera space, lifted by 1.5",
+          c.state === BodyCreatureState.Fly
+          && Math.abs(c.flight.start.y - 6.5) < 1e-6
+          && c.flight.start.z === -40,
+          `start ${JSON.stringify(c.flight.start)}`);
+    check("...with the launch range measured to the eye",
+          Math.abs(c.flight.range - 40) < 1e-6, `range ${c.flight.range}`);
+    check("...and plays COMMON\\MEET01_22.WAV", sounds.includes(0x3a16a9),
+          `sounds ${sounds.map((x) => x.toString(16)).join(",")}`);
+    // One player, so the end point is the origin of camera space: the eye.
+    check("...aimed at the eye, because there is one player",
+          c.flight.endX === 0 && c.flight.endZ === 0);
+
+    // The arc: a one-unit half-sine over the descent, and it is **zero at
+    // both ends** -- `t * 65536 * 5/9` BAMS passes through exactly pi at
+    // `t = 0.9`, which is the same `t` the arrival latches on. `c.t` is
+    // already the *next* step by the time the call returns, so the t that
+    // produced this frame's position is the one read before it.
+    let peak = 0;
+    let frames = 0;
+    let last = 0;
+    while (c.arrived === 0 && frames < 240) {
+      const t = c.t;
+      BodyCreatureUpdate(c, rng, JOE_HOST, events);
+      last = c.pos.y - c.flight.start.y * (1 - t);
+      peak = Math.max(peak, last);
+      frames++;
+    }
+    check("the flight arrives in about twenty-four frames",
+          frames >= 20 && frames <= 30, `${frames} frames`);
+    check("...having humped a unit above the straight line",
+          peak > 0.95 && peak <= 1.0, `peak ${peak}`);
+    check("...and come back down onto it by the time it arrives",
+          Math.abs(last) < 0.1, `arc ${last}`);
+    check("...which leaves it a tenth of the way above the eye it left from",
+          c.pos.y > 0 && c.pos.y < c.flight.start.y * 0.2,
+          `y ${c.pos.y} of ${c.flight.start.y}`);
+    check("...and the sprite cursor has walked the forty-slot loop",
+          c.slot >= 0x1d31 && c.slot <= 0x1d31 + 0x27, `slot ${c.slot}`);
+
+    // Thirty frames later it takes a life -- and only then. The arrival frame
+    // steps the counter twice, once to latch and once as the delay's own
+    // increment, so twenty-eight more frames is the last one that is safe.
+    const lives = G.g_player_lives[0];
+    for (let i = 0; i < 0x1e - 2; i++) {
+      BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    }
+    check("it does not hit the player the moment it arrives",
+          G.g_player_lives[0] === lives, `lives ${G.g_player_lives[0]}`);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("...it hits thirty frames later",
+          G.g_player_lives[0] === lives - 1 && G.g_player_was_hit[0] === 1,
+          `lives ${G.g_player_lives[0]}`);
+    check("...and starts falling",
+          c.state === BodyCreatureState.FallAfterHit,
+          `state ${BodyCreatureState[c.state]}`);
+
+    // The fall's tumble **accelerates**: `tail+0x24` starts at -0x200 and is
+    // multiplied by 1.01 every frame, so a creature that has fallen for ten
+    // frames is turning faster than one that has fallen for one. The clamp at
+    // -0x4000 exists but is not reached from here -- 0.010888 a frame takes
+    // the body below `y = -3` in about forty frames and the accumulated spin
+    // needs about fifty -- so it is the growth that is asserted and not the
+    // clamp.
+    const spin0 = c.flight.fallSpin;
+    for (let i = 0; i < 10; i++) BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("the fall's tumble accelerates, and the wrong way for a miss",
+          c.flight.fallSpin < spin0 && c.pitch < 0,
+          `spin ${spin0} -> ${c.flight.fallSpin} pitch ${c.pitch}`);
+
+    const alive = G.g_enemies_alive;
+    const present = G.g_enemies_present;
+    let live = true;
+    for (let i = 0; i < 600 && live; i++) {
+      live = BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    }
+    check("it falls out of the world and drops both counters",
+          !live && G.g_enemies_alive === alive - 1
+          && G.g_enemies_present === present - 1,
+          `alive ${alive} -> ${G.g_enemies_alive}`);
+  }
+
+  // -- 4. shooting it ------------------------------------------------------
+  {
+    const rng = new Rng(16);
+    const { joe, events } = joeScene(rng);
+    const c = SpawnBodyCreature(joe);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);   // launch
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const score = G.g_player_score[0];
+    MarkBodyCreatureShot(c, 0);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("a shot creature pays 0x50",
+          G.g_player_score[0] === score + 0x50,
+          `${score} -> ${G.g_player_score[0]}`);
+    check("...plays COMMON\\MEET02_22.WAV", sounds.includes(0x3b16a9),
+          `sounds ${sounds.map((x) => x.toString(16)).join(",")}`);
+    check("...leaves blood at the point it was hit",
+          G.g_point_blood_sprays.length === 1,
+          `${G.g_point_blood_sprays.length} sprays`);
+    check("...and falls the other way",
+          c.state === BodyCreatureState.FallShot && c.flight.fallSpin > 0,
+          `state ${BodyCreatureState[c.state]} spin ${c.flight.fallSpin}`);
+    const lives = G.g_player_lives[0];
+    const spin0 = c.flight.fallSpin;
+    for (let i = 0; i < 10; i++) BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("...and tumbles the other way, accelerating",
+          c.flight.fallSpin > spin0 && c.pitch > 0,
+          `spin ${spin0} -> ${c.flight.fallSpin} pitch ${c.pitch}`);
+    let live = true;
+    for (let i = 0; i < 600 && live; i++) {
+      live = BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    }
+    check("...and never reaches the player", G.g_player_lives[0] === lives,
+          `lives ${G.g_player_lives[0]}`);
+    check("...and leaves on its own", !live);
+  }
+
+  // -- 5. the pool ---------------------------------------------------------
+  {
+    const rng = new Rng(17);
+    const { joe, events } = joeScene(rng);
+    SpawnBodyCreature(joe);
+    check("the pool is stepped by `GameUpdate`, like the thrown weapons",
+          G.g_body_creatures.length === 1);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("...so a creature launches without anybody calling it directly",
+          G.g_body_creatures[0].state === BodyCreatureState.Fly,
+          `state ${BodyCreatureState[G.g_body_creatures[0].state]}`);
+    check("...and a reset empties it",
+          (ResetGameGlobals(), G.g_body_creatures.length === 0));
   }
 }
 

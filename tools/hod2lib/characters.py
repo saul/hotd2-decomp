@@ -80,6 +80,7 @@ from .arcscript import (  # noqa: F401
                         CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES,
                         arc_script)
 from .charmotion import (  # noqa: F401
+    BODY_CREATURE_HOST_CLIPS,
     BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
@@ -939,6 +940,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 for a30 in CLASS30_ARC_SCRIPTS.values():
                     entry_clips += [st["motion"]
                                     for st in (arc_script(tables, a30) or [])]
+        # The two clips the `znjoe` release state names -- keyed by
+        # character type, because that state is. See
+        # ``BODY_CREATURE_HOST_CLIPS``.
+        entry_clips += list(BODY_CREATURE_HOST_CLIPS.get(res.char_type, ()))
         # `ActorSnapToGroundHeight` routes an actor over a drop into state 11,
         # whose landing clip is 0x3BA -- and every class-0x30 actor can now
         # reach it, so it is baked for all of them.

@@ -29,7 +29,7 @@
  * a running zombie's shoulder and sits on the face of the limb turned toward
  * the camera. {@link EffectLayer.bones} is what answers that here.
  */
-import { Group, Matrix4, Object3D, Vector3 } from "three";
+import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import {
@@ -41,6 +41,7 @@ import {
   OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_SLOT_OFFSET, WEAPON_FIRST_SLOT,
   WEAPON_SCALE,
 } from "../game/effects/shot_effects";
+import { POINT_BLOOD_SCALE } from "../game/effects/blood";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 
@@ -56,6 +57,18 @@ const MUZZLE_FLASH_SLOTS = [0x0175, 0x017f];
 const MUZZLE_SMOKE_SLOTS = [0x0b76, 0x0b84];
 
 /** What the layer needs from the character layer, and nothing more. */
+/**
+ * The narrow face `render/characters.ts` needs of this layer, so the
+ * dependency is a method and not the class.
+ */
+export interface CreatureSphereSource {
+  /**
+   * The nearest creature the ray meets, its `id` and the along-ray `t`, or
+   * null. See `EffectLayer.pickCreature`.
+   */
+  pickCreature(ray: Ray): { id: number; t: number; point: Vector3 } | null;
+}
+
 export interface BoneSphereSource {
   /**
    * The world centre and radius of one bone's hit sphere — `obj + bone * 0x90
@@ -178,6 +191,8 @@ export class EffectLayer implements System<RenderContext> {
 
     this.drawSpriteEffects(seen);
     this.drawBlood(ctx, seen);
+    this.drawPointBlood(seen);
+    this.drawBodyCreatures(seen);
     this.drawShotRings(seen);
 
     for (const [key, l] of this.nodes) {
@@ -258,6 +273,88 @@ export class EffectLayer implements System<RenderContext> {
       node.quaternion.identity();
       node.scale.setScalar(depth * BLOOD_SCALE * b.severity);
     }
+  }
+
+  /**
+   * `BloodSprayAtPointDrawAndTick` (`FUN_00430BD0`) — the same flipbook at a
+   * fixed point rather than on a bone.
+   *
+   * The point is in camera space, so it hangs off the same group as the
+   * bone-stuck spray; the scale is the routine's own literal and not the
+   * depth law, which this one does not have.
+   */
+  private drawPointBlood(seen: Set<string>): void {
+    for (const b of G.g_point_blood_sprays) {
+      const key = `pb${b.id}`;
+      const node = this.node(key, b.slot, this.viewGroup);
+      if (!node) continue;
+      seen.add(key);
+      node.position.set(b.pos.x, b.pos.y, b.pos.z);
+      node.quaternion.identity();
+      // `g_wCaptionMode` (0x009C911E) halves it in the captioned build and
+      // the port carries no such global — the same gap
+      // {@link BLOOD_SCALE_CAPTIONED} sits in beside the bone spray, and the
+      // uncaptioned value is the one every shipped configuration here uses.
+      node.scale.setScalar(POINT_BLOOD_SCALE);
+    }
+  }
+
+  /**
+   * `BodyCreatureUpdate` (`FUN_0043E880`)'s draw, which is the whole of what
+   * the renderer owes it:
+   *
+   * ```
+   * MatrixStackPush(0); MatrixLoadIdentity()
+   * MatrixTranslate(obj+0x40, obj+0x44, obj+0x48)
+   * MatrixRotateX(obj+0x64)
+   * AssetDrawSlot(obj+0x1330 % 0x28 + 0x1D31)
+   * MatrixStackPop(1)
+   * ```
+   *
+   * Identity, a translation and **one** rotation — no yaw and no roll, which
+   * is why a creature flying at the eye never turns to face it. The position
+   * is already in camera space (see `game/body_creature.ts`), so this is the
+   * view group without a transform of its own.
+   */
+  private drawBodyCreatures(seen: Set<string>): void {
+    for (const c of G.g_body_creatures) {
+      const key = `bc${c.id}`;
+      const node = this.node(key, c.slot, this.viewGroup);
+      if (!node) continue;
+      seen.add(key);
+      node.position.set(c.pos.x, c.pos.y, c.pos.z);
+      node.rotation.set(c.pitch * BAMS_TO_RAD, 0, 0);
+      node.scale.setScalar(1);
+    }
+  }
+
+  /**
+   * `ShotTestSphere` (`FUN_00404630`) for the creatures — the sphere at
+   * `obj+0x70..0x78`, which for this object is its own position, with radius
+   * `obj+0x124`.
+   *
+   * The ray is in world space and the creature is in the camera's, so the
+   * centre goes out through the view group's matrix rather than the other way
+   * round: this layer already holds that matrix, which is the reason the test
+   * is here and not in `render/characters.ts` beside the bone spheres.
+   *
+   * `t` is the along-ray parameter, the same number `CharacterLayer.pickShot`
+   * sorts on, so a creature in front of a zombie takes the bullet.
+   */
+  pickCreature(ray: Ray): { id: number; t: number; point: Vector3 } | null {
+    let best: { id: number; t: number; point: Vector3 } | null = null;
+    for (const c of G.g_body_creatures) {
+      this._c.set(c.pos.x, c.pos.y, c.pos.z)
+        .applyMatrix4(this.viewGroup.matrix);
+      ray.closestPointToPoint(this._c, this._v);
+      const t = this._v.sub(ray.origin).dot(ray.direction);
+      if (t <= 0) continue;
+      if (ray.distanceSqToPoint(this._c) > c.radius * c.radius) continue;
+      if (!best || t < best.t) {
+        best = { id: c.id, t, point: this._c.clone() };
+      }
+    }
+    return best;
   }
 
   /** The three per-shot rings — `PlayerShotEffectsThink` (`FUN_00416B00`). */

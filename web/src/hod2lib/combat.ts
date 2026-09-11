@@ -193,6 +193,30 @@ export const ZOMBIE_THROW_SLOTS: Record<number, { 5: HandKit; 8: HandKit }> = {
 /** `znonoo.bin` part 0 -- the axe, the only projectile that flies straight. */
 export const ZOMBIE_AXE_SLOT = 0x249;
 
+/**
+ * The forty frames the creature `znjoe` releases is drawn with, per character
+ * type — `BODY_CREATURE_SLOTS` in `game/body_creature.ts`.
+ *
+ * `BodyCreatureUpdate` (`FUN_0043E880`) ends
+ * `AssetDrawSlot(obj+0x1330 % 0x28 + 0x1D31)`, and `ExeTables.assetSlots`
+ * resolves `0x1D31..0x1D58` to **`znjoe.bin` entries 176..215** — the host
+ * character's own model bank, past the last entry any skeleton node names.
+ * That is why no exporter that walks skeletons carried them: the character
+ * path emits one part per bone and per damaged variant, and these are
+ * neither.
+ *
+ * Keyed on the character type rather than on a spawn class because the
+ * creature **has** no class id, and because the run only exists in the file
+ * that type loads: shipping it unconditionally would ask five stages for a
+ * `znjoe.bin` they do not have. Only character type `0x0A` releases one —
+ * `ActorReactToHit` (`FUN_004543F0`) is the one place in the image that tests
+ * for it, and exactly seven spawns in the twelve shipped scripts resolve to
+ * it, all in stage 5.
+ */
+export const BODY_CREATURE_SLOTS: Record<number, readonly number[]> = {
+  0x0a: Array.from({ length: 0x28 }, (_, i) => 0x1d31 + i),
+};
+
 export const ZOMBIE_THROW_SPEED_STANDING = 1.5;
 export const ZOMBIE_THROW_SPEED = 1.0;
 export const ZOMBIE_THROW_AIM_DROP = 1.5;

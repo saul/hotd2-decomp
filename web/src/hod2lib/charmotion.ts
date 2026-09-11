@@ -92,6 +92,32 @@ export const FROG_CLIPS: readonly number[] = [
   0x13d, 0x13e, 0x13f, 0x140, 0x141, 0x142, 0x143, 0x144, 0x145,
 ];
 
+/**
+ * The two clips `ZombieStateReleaseBodyCreature` (`FUN_00457FB0`) names, per
+ * character type.
+ *
+ * `0x1E3` is the walk it backs out to its inner approach ring on and `0x1DF`
+ * the clip it opens the torso during, and both are literals in that state.
+ * They are baked for the reason {@link BOSS4_CLIPS} and {@link FROG_CLIPS}
+ * are: **an unbaked clip is an actor that waits for ever.** Sub 1 holds on
+ * `0x1E3`'s root motion to leave the ring, and sub 3 leaves on
+ * `obj+0x19C >= g_motion_play_length[0x1DF] - 1` -- which is 0 for a clip the
+ * bundle does not carry, so the cursor never reaches it.
+ *
+ * Measured, and this is why it is a rule and not a guess: `znjoe.bin`'s bank
+ * reaches the bundle with 477, 478, 480, 481, 482 and 484 in it and **not**
+ * 479 or 483, because nothing that named a clip named those two. A first
+ * torso shot then put the actor in state 25, where it stood in sub 1 for the
+ * rest of the stage and released nothing.
+ *
+ * Keyed by character type because the state is: `ActorReactToHit`
+ * (`FUN_004543F0`) is the only way in and it tests `obj+0x1F4` against
+ * `0x0A`.
+ */
+export const BODY_CREATURE_HOST_CLIPS: Record<number, readonly number[]> = {
+  0x0a: [0x1df, 0x1e3],
+};
+
 export const MOTION_RULES: Record<number, MotionRule> = {
   // `Boss4Init` (`FUN_004917E0`) seats the clip as a literal:
   // `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E`, where `ECX` is

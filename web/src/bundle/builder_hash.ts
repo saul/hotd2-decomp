@@ -22,16 +22,16 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "082f1622fe3fa7a327f5477354198ebd3c1f8d5a879a6044eebf4c22968cbd58",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "f7b0437e566e0d3324712d50e1df15e4e251af3516deea48041cd0919b66ac8b",
+  "bundle.ts": "80cb98a555478fdec6379106a1adefcb50ed7e880794dc40b4959a957a5f9c5d",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "5e8b50f85b7c3e90b86f1fd3e4649fc58d50fdfdb27a3d186c5b0e862cf99cd4",
+  "characters.ts": "b6aa80abb28386a0accdcb46b034765e19c919c4c9f63d4eab279d63ef388606",
   "charbuild.ts": "66092406316023adedd80ae81732b891601105731e1de469348c08ceb1051528",
-  "charmotion.ts": "c235d2d0d8f364b61609b776e2103eaf8f9607ace2a0d683c1491b1d669dffdf",
+  "charmotion.ts": "c31c69d3710195e3801dbcf5d7320d5b7e7ded85d75f5504f430fa7bdea256a7",
   "class31.ts": "92eddede0017e448c05697810f1b3cd1112340d1ddae676bb682b940e0e22aea",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
-  "combat.ts": "83e353c6b5efdcc83745c9b899777466c79197b29f0785fbd33f5d55f708edf2",
+  "combat.ts": "6794055353b4ea0c3b81b7bb2b0d0fdf0eaa51b2d230fed7b6add3b46e3fe431",
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "4004cb37faed0192ad4c09044c9a5af6162b8ed874a28b0a47e2397fe0349228",
@@ -55,4 +55,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "8c3ff32bbe978855948cb6a52c9e46a45e0f9856ee275904d6102a5a2f6059a9";
+export const BUILDER_HASH = "463c710c4eb907a2f8da60287f6d39513321a13d4476854c58ae6defdaae9b77";

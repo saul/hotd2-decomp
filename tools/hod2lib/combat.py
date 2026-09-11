@@ -205,6 +205,25 @@ ZOMBIE_THROW_SLOTS = {
 #: the arc.
 ZOMBIE_AXE_SLOT = 0x249
 
+#: The forty frames the creature `znjoe` releases is drawn with, per character
+#: type.
+#:
+#: `BodyCreatureUpdate` (`FUN_0043E880`) ends
+#: `AssetDrawSlot(obj+0x1330 % 0x28 + 0x1D31)`, and `ExeTables.asset_slots`
+#: resolves `0x1D31..0x1D58` to **`znjoe.bin` entries 176..215** -- the host
+#: character's own model bank, past the last entry any skeleton node names, so
+#: nothing that walks a skeleton carries them.
+#:
+#: Keyed on the character type rather than on a spawn class because the
+#: creature has no class id, and because the run only exists in the file that
+#: type loads. Only character type `0x0A` releases one: `ActorReactToHit`
+#: (`FUN_004543F0`) is the one place in the image that tests for it, and
+#: exactly seven spawns in the twelve shipped scripts resolve to it, all in
+#: stage 5.
+BODY_CREATURE_SLOTS: dict[int, tuple[int, ...]] = {
+    0x0A: tuple(range(0x1D31, 0x1D31 + 0x28)),
+}
+
 #: `ZombieThrowHandWeapon`'s two speeds for `obj+0x1370`: the stationary
 #: thrower's axe is faster than an ordinary one's.
 ZOMBIE_THROW_SPEED_STANDING = 1.5

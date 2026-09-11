@@ -193,6 +193,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   // blood is glued to one for its whole life -- see `render/effects.ts`.
   p.effects.adopt(p.scene3d.root);
   p.effects.bones = p.chars;
+  // ...and back the other way, because the creatures `znjoe` releases are
+  // drawn in this layer's camera-space group and are shot through the same
+  // one candidate list the bones and the props are in.
+  p.chars.effects = p.effects;
   p.shooting.reset();
   p.shooting.setTables(bundle.script.characters?.combat);
   p.dialogue = bundle.script.sound ?? null;

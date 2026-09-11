@@ -134,6 +134,21 @@ export enum ZombieState {
   /** `ZombieStateLeapToPoint` (`FUN_00457CE0`). */
   LeapToPoint = 24,
   /**
+   * `ZombieStateReleaseBodyCreature` (`FUN_00457FB0`) — **no spawn record
+   * reaches it.**
+   *
+   * `[proved]` from the table: `g_class30_states[0x19]` is `0x00457FB0`, and
+   * the entries either side agree with this enum — `0x18` is `0x00457CE0`
+   * ({@link ZombieState.LeapToPoint}) and `0x1A` is `0x004581A0`
+   * ({@link ZombieState.DelayedLeap}). `L38`.
+   *
+   * The only way in is `ActorReactToHit` (`FUN_004543F0`), which tests
+   * character type `0x0A` — `znjoe`, stage 5's seven spawns and nothing else
+   * in the game — and sends a torso hit here instead of to a stagger. See
+   * `class30/release_creature.ts`.
+   */
+  ReleaseBodyCreature = 25,
+  /**
    * `ZombieStateDelayedLeap` (`FUN_004581A0`). Wait, then ride a ballistic arc
    * to a point the descriptor names — the burst-out entrances. Eleven spawns.
    */

@@ -1297,8 +1297,7 @@ investigation ruled out.
   block 8 are where to look next, and stage 5's undrawn van below is very
   likely the same gap seen from the other side.
 
-- `[part]` **Zombies were silent when they attacked; the idle half is still
-  open.** The attacking half is fixed and the reason it was missing is worth
+- `[fixed]` **Zombies were silent when they attacked, and when they stood.** The attacking half is fixed and the reason it was missing is worth
   keeping.
 
   `ActorPlayHitVoice` (`FUN_0040A6F0`) is the game's **one** voice routine —
@@ -1329,6 +1328,45 @@ investigation ruled out.
   on an event — so whatever a standing zombie groans is a different mechanism
   and has not been found. `[open]` kind 4 is unported for the same reason:
   nothing here has read what calls it.
+
+  **The idle half, resolved 2026-09-11: it exists, and it is two things.**
+  `[proved]` The standing groan is one `PlaySoundId` at `0x004558D6` inside
+  `ZombieStateHoldAtRange` (`FUN_00455720`), the hub state, sitting behind the
+  **same one-instruction gate** that starts the in-range idle clip. So it is
+  one shot per *entry* into that clip — not a timer, not periodic, not random,
+  and not an ambience list, which is why looking for those found nothing. A
+  byte search for the id over the whole image finds that one push and the name
+  record. Nothing in the voice routine could have led there; it was found by
+  narrowing `PlaySoundId`'s 500 xrefs to class 0x30's address range.
+
+  It is **rarer in play than "whenever a zombie stands still"**, and the same
+  compare is why: `ZombieStateApproach` plays one of a pair, and for half the
+  spawns the walk in *is* the hub's clip, so the hub says nothing. What groans
+  is an actor arriving from a retreat or an attack run — every zombie that has
+  swung at you once. Measured in the page: the walkers reach the ring silently.
+
+  **The chainsaw and the laser sword are a refcounted looping SE**, one per
+  scene, because the engine has no handle for a playing loop at all. Two
+  annotations were wrong in a way that reads exactly like an idle groan, and
+  were believed for a while: `0x009C8A74` was recorded as counting actors
+  holding a *groan voice* and `FUN_00456600` as the *death scream*. The
+  clincher is the release's other caller, `ActorUpdateBodyCondition`
+  (`FUN_00454270`) — shoot the chainsaw out of a zombie's hands and the loop
+  stops while the zombie lives. Renamed `g_weapon_loop_holders` and
+  `ZombieReleaseWeaponLoopSe`. `tools/verify_looping_se.py` proves the pairing
+  rather than observing it: all 44 pairs are `X.wav` against `X_OFF.wav` and
+  no `_OFF` file ships.
+
+  Fixed alongside, and never reported: **class 0x31's laser sword had never
+  sustained** — ported correctly, but played as a 0.4-second one-shot whose
+  `_OFF` cue asked for a file the game does not ship.
+
+  `[proved]` **Kind 4 of the voice routine is dead.** A census of all 23 call
+  sites, including the two that pass the kind in a register, passes only 0 to
+  3; its ids are zero in `.data` with no writer, and the arm reaches
+  `PlaySoundId(0)`, which early-outs. Porting it is porting silence. The
+  adjacent-array near-miss (`L6`) is closed with it: the address *is* 14
+  entries past the shared scratch, and both feeders are capped at 14.
 
 - `[fixed]` **Sound settings did not survive a reload, and the two controls
   were in the wrong places.** A change request rather than a defect, recorded

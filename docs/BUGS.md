@@ -1913,7 +1913,7 @@ investigation ruled out.
 
 ## And one nobody could have reported, in a route nothing had played
 
-- `[open]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
+- `[part]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
   step 3 op 4. Reproduce with
   `cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless`: it
   reaches block 7, then 8, then 2, and stops for 1,110 game frames on one
@@ -1938,6 +1938,61 @@ investigation ruled out.
   set for stage 3: if it is, the port believes something can raise it and that
   something is failing; if it is not, the escape should have passed the gate
   and did not, which is a different bug in a different file.
+
+  **The flag gate is fixed; a different hang is four instructions later.**
+
+  **My own framing above was wrong, and the agent checked it instead of
+  inheriting it.** Stage 3 *does* `set_script_flag 0x15` — block 1 step 5 — but
+  **block 1 is on the entry-0 route only**, so on the entry-7 route the flag
+  has to come from an actor. Flag 21 was already in
+  `ScriptFlagsThisBundleCanRaise` for stage 3, which is what said the raiser
+  was failing rather than the escape being wrong.
+
+  `[proved]` The raiser is `StoryModeSwitchUpdate` (`FUN_00474F30`), class 0x44
+  selector 17, and **its write to the flag sits seven bytes above the
+  `g_GameMode` test** — so it fires in Arcade as well as Original. The port had
+  that mode test as the routine's **first line**, and a doc comment that listed
+  "the `g_script_flags[0x15]` it raises there" among the untranscribed. **A
+  divergence recorded in prose with no assertion behind it reads as settled**,
+  which is `L26`. The step that opens the gate is also the step that ends the
+  switch: its removal flag is raised at the end of the very block it unblocks.
+
+  Class 0x44 is deliberately **not** declared to `ScriptFlagsThisBundleCanRaise`,
+  because which flag it raises depends on `g_scene_index` and the declaration
+  is handed a spawn record — declaring it would claim the flag for stages 1, 2
+  and 5's switches, which cannot raise it. Unobservable either way, and the
+  reason is on the spot.
+
+  `[open]` The switch's **second** write of flag 21, in Original Mode after an
+  item is taken, is still unported. Unreachable for the harness, reachable for
+  a player.
+
+  Before: five runs of five hung. After: five of five past it. Backing the
+  write out fails two new assertions by name, and `tools/flag_gates.ts` grew a
+  **route pass** that names every gate no `set_script_flag` on the route can
+  open — asserting stage 3's is one on entry 7 and is *not* on entry 0.
+
+- `[open]` **Nothing in the port can leave class 0x30 state 12 anywhere in the
+  game**, and it hangs stage 3's entry-7 route at block 2 step 6 op 8. Filed as
+  `PLAYER_HANGS.md` 22. A dead civilian's script sits on
+  `CivilianWait.EnemiesPresent` because `g_enemies_present` is 2 with nothing
+  alive; the two still counted are parked in `ZombieStateDeathFallAndBounce`
+  (`FUN_00456DF0`) sub 1, whose wait is `obj+0x19C >= 0x3C`. The exe reaches 60
+  because that clip's play length is **85**. The port never moves, because
+  `MotionPlayFrame` answers 0 for a clip the character type has not got, and
+  **no character type in any of the twelve bundles has motion 1017 baked**.
+
+  So the faithful fix is an exporter change — bake the clip, in both `hod2lib`
+  halves in one commit — and it is testable rather than a guess, because
+  `bake()` refuses a clip whose implied bone count is not the character's.
+  `[open]` whether 1017's stride matches these rigs is exactly what that
+  refusal would answer.
+
+- `[open]` **Stage 4 hangs from entry 4**, at block 9 with one `znkage` in
+  `ZombieStateDragTarget` (state 43, `FUN_0045C080`) at 90 hit points after 70
+  volleys with no damage landing, and the debug clear refusing it. Filed as
+  `PLAYER_HANGS.md` 23. Nothing read yet. Found by the same `--entry` flag, on
+  the other stage that has more than one entry.
 
 - `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
   defect in itself, and recorded because it is now live code with no coverage.

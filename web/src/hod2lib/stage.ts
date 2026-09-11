@@ -40,14 +40,35 @@ import * as texbank from "./texbank";
  * `1 if original else 0` -- so a bundle's 0 meant the EXE's 2 and every reader
  * had to know which side of the seam it was on. There is one enumeration now;
  * `web/src/game/game_mode.ts` is its other half.
+ *
+ * **`ARCADE` was 2 until bundle format 7, and 2 is Training.** The values are
+ * the title menu's own row order, which `TitleMenuRegisterSprites`
+ * (`FUN_004962C0`) registers by name -- `tex\arcade00`, `tex\original_00`,
+ * `tex\traning_00`, `tex\boss_00` -- and `TitleMenuUpdateAndSelect`
+ * (`FUN_00496960`) writes the highlighted row straight into the global. Every
+ * other writer in the program stores 0, so 1, 2 and 3 can only come from that
+ * menu.
  */
 export enum GameMode {
-  /** The story campaign. */
+  /**
+   * Arcade -- the coin-op game. Menu row 0, and the value every non-menu
+   * writer of `g_GameMode` stores, so it is also the default.
+   */
+  ARCADE = 0,
+  /** The story campaign. Menu row 1. */
   ORIGINAL = 1,
-  /** Arcade. */
-  ARCADE = 2,
-  /** Boss Rush. No shipped stage script is entered in this mode. */
-  BOSS_RUSH = 3,
+  /**
+   * Training. Menu row 2. `ResetGameOnStart` sends it to scene 6, which is
+   * `trnevtbl.bin`, and `g_training_lesson` (`0x009C9118`) selects the lesson.
+   * No stage bundle is exported in this mode.
+   */
+  TRAINING = 2,
+  /**
+   * Boss. Menu row 3. `ResetGameOnStart` sends it to scene 0 block 0x10 and
+   * `PreloadScreenAssetList` gives it a six-entry per-scene table of its own.
+   * No shipped stage script is entered in this mode.
+   */
+  BOSS = 3,
 }
 
 /** stage number -> scene id, the event system's own index. */

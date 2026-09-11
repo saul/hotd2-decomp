@@ -41,14 +41,42 @@
  * strike clip, and `ZombieStateStandAndThrow` (`FUN_00459080`) on the frame it
  * throws.
  *
- * `[open]` **Kind 4 is not ported**, because nothing here has read what calls
- * it with 4 or what `g_actor_voice_kind4` (`0x005A4EA8`) names. Anything but
- * 0..4 reaches the routine's shared tail with the id still 0 and plays
- * nothing, which is what an unported kind does here too.
+ * ## Kind 4 is dead, and that is now settled
  *
- * `[open]` The reporter also asked for an **idle** voice, and this routine has
- * no kind that is one: all five fire on an event. Whatever groans a standing
- * zombie makes is a different mechanism and has not been found.
+ * `[proved]` **Nothing in the image calls this routine with 4, and kind 4's
+ * ids are zero.** Both halves were `[open]` and both have been read:
+ *
+ * * the census. All twenty-three call sites push a literal: kind 0 at
+ *   `0x0045402D`, `0x00449D11`, `0x00452608` and `0x00451A03`; kind 1 at
+ *   `0x0045264E`, `0x00449A8B` and `0x00451AF0`; kind 2 at `0x00449A7E`;
+ *   `0x00453F7A` is 2 on hit result 2 and 1 otherwise; and thirteen kind-3
+ *   sites. (Two of them pass it in a register — `0x00451A03` and `0x00451AF0`,
+ *   inside `RescueTargetHeldState` — and the decompilation of that function is
+ *   what says which constant each holds.) **No site passes 4.**
+ * * the ids. `g_actor_voice_kind4` (`0x005A4EA8`) and the dword after it are
+ *   zero in the shipped `.data`, and the only two references to either
+ *   anywhere are the reads at `0x0040A849` and `0x0040A852` in this routine.
+ *   The nearest thing that *could* write them is the `{key, actor}` scratch
+ *   buffer `SortCameraCandidates` (`FUN_00408F30`) and
+ *   `SortEnemiesByDistance` (`FUN_00409190`) share at `0x005A4E38`, whose 14
+ *   entries end at `0x005A4EA7` — one dword short — and both feeders are
+ *   capped at 14. So it cannot overflow into them either. **(L6: that check
+ *   is the adjacent-array trap asked the other way round.)**
+ *
+ * So kind 4 reaches `PlaySoundId(0)`, which is the dispatcher's "no sound"
+ * early-out. Porting it is porting silence, and the enum member below stays
+ * only to say so.
+ *
+ * ## The idle noise is not here, and it has been found
+ *
+ * `[proved]` This routine has no idle kind — all five fire on an event — and
+ * the standing zombie's groan is a different mechanism entirely: a bare
+ * `PlaySoundId(0x1917A9)` (`COMMON2\ZOMBIE_041_16.wav`) in
+ * `ZombieStateHoldAtRange` (`FUN_00455720`) at `0x004558D6`, on the frame the
+ * in-range idle clip starts. There is a second, genuinely ambient one as well
+ * — the looping chainsaw and laser sword that character types 2 and 3 take a
+ * share in at init. `class30/hold.ts` and `class30/weapon_loop.ts` are the
+ * two transcriptions.
  */
 /**
  * What the routine actually reads off the object: the character type at
@@ -94,7 +122,12 @@ export enum ActorVoice {
   HeadKilled = 2,
   /** The cry that opens a strike or a throw. */
   Attack = 3,
-  /** `[open]` — unported; see the note on this module. */
+  /**
+   * `[proved]` **Dead.** No call site in the image passes 4 and both of its
+   * ids are zero, so the engine's own arm plays `PlaySoundId(0)` — nothing.
+   * Kept as a member because the engine's `switch` names the case, and
+   * deleting it would leave the next reader to work the proof out again.
+   */
   Kind4 = 4,
 }
 
@@ -142,8 +175,9 @@ export function ActorPlayHitVoice(obj: VoiceActor, kind: ActorVoice, rng: Rng,
       play(pick(c.voice.attack?.[set])?.id);
       return;
     default:
-      // `[open]` kind 4, and every value the engine's switch does not name:
-      // both reach its tail with the id still zero.
+      // Kind 4, and every value the engine's switch does not name, reach its
+      // tail with the id still zero -- and `PlaySoundId(0)` early-outs. The
+      // engine does make the call; not making it here is the same silence.
       return;
   }
 }

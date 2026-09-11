@@ -475,6 +475,47 @@ export function hitReactions(tables: ExeTables,
   return out;
 }
 
+/**
+ * Whether `ZombieStateStrike` can ever fire this entry's hit.
+ *
+ * It cannot when the hit frame is at or past the strike clip's play length,
+ * and that is the engine's own behaviour rather than a misread row.
+ * `ZombieStateStrike` (`FUN_00455A40`) sub 2 is two independent tests in one
+ * pass, and both the operators matter:
+ *
+ * * the strike is an **exact equality** -- `00455bdf CMP ECX,EAX` /
+ *   `00455be1 JNZ` over the `CALL 0x00456490`, so `obj+0x19C == entry+0x08`
+ *   or nothing happens;
+ * * the exit is `00455c02 MOVSX EDX,[ECX*2 + 0x4e07d0]` / `DEC` /
+ *   `CMP EAX,EDX` / `JL`, so the state hands to `ZombieStateBackOff` as soon
+ *   as `obj+0x19C >= g_motion_play_length[obj+0x1B4] - 1`.
+ *
+ * The cursor is reset to 0 when the clip starts (`ActorSetMotionBlended`
+ * (`FUN_004119A0`), `param_1[2] = param_3`), so it only ever takes the values
+ * `0 .. play_length - 1`. A hit frame outside that range is unreachable: the
+ * strike **never fires**, the state is not aborted and nothing is retried,
+ * the clip runs to its end and the actor retreats having swung and missed.
+ *
+ * **Why dropping these entries was right until now.** The rows of
+ * {@link ATTACK_TABLE} are adjacent with no count, so an early version of this
+ * reader scanned a fixed number of them and read the next row's attacks as
+ * this one's -- and "hits on frame 40 of a 20-frame clip" is precisely what
+ * that produced. Keeping only the entries the pick table names fixed the
+ * row-length problem at its source; the hit-frame bound stayed on afterwards
+ * as a second line of defence, and in doing so it deleted the three entries
+ * the game really does carry with an unreachable hit frame. Across every
+ * character type those three are the *only* picked entries it rejects --
+ * types 0x07, 0x0B and 0x0C, body condition 4, index 2, all of them
+ * `{997, 1051, 26.0f, 40, 9, 1}` against `g_motion_play_length[997] == 20` --
+ * and they are the crawlers' undamaged attack, which is meant to miss.
+ * `tools/verify_combat.py` asserts that set rather than the bound, so a
+ * genuine misread still fails a check.
+ */
+export function attackHitLands(hitFrame: number,
+                               strikePlayLength: number): boolean {
+  return hitFrame >= 0 && hitFrame < strikePlayLength;
+}
+
 export interface AttackEntry {
   strike: number;
   lunge: number;
@@ -491,10 +532,12 @@ export interface AttackEntry {
  * the only ones the game ever reads: `ZombieStateStrike` indexes with
  * `obj+0x131A`, which {@link attackPicks} supplies, and never scans. That also
  * sidesteps the row-length problem -- the rows are adjacent with no count, so
- * a fixed scan reads the next row's attacks as this one's, which is what
- * produced entries "hitting on frame 40 of a 20-frame clip".
+ * a fixed scan reads the next row's attacks as this one's, and an entry whose
+ * hit frame lands outside its own clip is what that looked like from here.
  *
- * Each entry is checked against its own strike clip before being kept.
+ * Each entry is checked against its own strike clip before being kept, but
+ * **a hit frame past the end of that clip is not a reason to drop it** -- see
+ * {@link attackHitLands}.
  */
 export function attackTables(tables: ExeTables,
                              charType: number): Map<number, Map<number, AttackEntry>> {
@@ -520,7 +563,7 @@ export function attackTables(tables: ExeTables,
       const dmot = i16(tables.data, a + 10);
       const mask = i16(tables.data, a + 12);
       if (strike <= 0 || lunge <= 0) continue;
-      if (!(hit >= 0 && hit < play(strike))) continue;
+      if (hit < 0 || play(strike) <= 0) continue;
       if (!(play(lunge) > 0 && play(lunge) <= 400)) continue;
       got.set(i, { strike, lunge, distance: dist, hit_frame: hit,
                    player_motion: dmot, cancel_mask: mask & 0xffff });

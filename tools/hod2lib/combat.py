@@ -544,6 +544,46 @@ def hit_reactions(tables, char_type: int) -> dict[int, list[int]]:
     return out
 
 
+def attack_hit_lands(hit_frame: int, strike_play_length: int) -> bool:
+    """Whether `ZombieStateStrike` can ever fire this entry's hit.
+
+    It cannot when the hit frame is at or past the strike clip's play length,
+    and that is the engine's own behaviour rather than a misread row.
+    `ZombieStateStrike` (`FUN_00455A40`) sub 2 is two independent tests in one
+    pass, and both the operators matter:
+
+    * the strike is an **exact equality** --
+      ``00455bdf CMP ECX,EAX`` / ``00455be1 JNZ`` over the
+      ``CALL 0x00456490``, so ``obj+0x19C == entry+0x08`` or nothing happens;
+    * the exit is ``00455c02 MOVSX EDX,[ECX*2 + 0x4e07d0]`` / ``DEC`` /
+      ``CMP EAX,EDX`` / ``JL``, so the state hands to `ZombieStateBackOff` as
+      soon as ``obj+0x19C >= g_motion_play_length[obj+0x1B4] - 1``.
+
+    The cursor is reset to 0 when the clip starts (`ActorSetMotionBlended`,
+    ``param_1[2] = param_3``), so it only ever takes the values
+    ``0 .. play_length - 1``. A hit frame outside that range is unreachable:
+    the strike **never fires**, the state is not aborted and nothing is
+    retried, the clip runs to its end and the actor retreats having swung and
+    missed.
+
+    **Why dropping these entries was right until now.** The rows of
+    :data:`ATTACK_TABLE` are adjacent with no count, so an early version of
+    this reader scanned a fixed number of them and read the next row's attacks
+    as this one's -- and "hits on frame 40 of a 20-frame clip" is precisely
+    what that produced. Keeping only the entries the pick table names fixed the
+    row-length problem at its source; the hit-frame bound stayed on afterwards
+    as a second line of defence, and in doing so it deleted the three entries
+    the game really does carry with an unreachable hit frame. Across every
+    character type those three are the *only* picked entries it rejects --
+    types 0x07, 0x0B and 0x0C, body condition 4, index 2, all of them
+    ``{997, 1051, 26.0f, 40, 9, 1}`` against ``g_motion_play_length[997] ==
+    20`` -- and they are the crawlers' undamaged attack, which is meant to
+    miss. `tools/verify_combat.py` asserts that set rather than the bound, so
+    a genuine misread still fails a check.
+    """
+    return 0 <= hit_frame < strike_play_length
+
+
 def attack_tables(tables, char_type: int) -> dict:
     """``{body_condition: {index: attack}}`` -- see :data:`ATTACK_TABLE`.
 
@@ -551,11 +591,12 @@ def attack_tables(tables, char_type: int) -> dict:
     the only ones the game ever reads: `ZombieStateStrike` indexes with
     ``obj+0x131A``, which `attack_picks` supplies, and never scans. That also
     sidesteps the row-length problem -- the rows are adjacent with no count, so
-    a fixed scan reads the next row's attacks as this one's, which is what
-    produced entries "hitting on frame 40 of a 20-frame clip".
+    a fixed scan reads the next row's attacks as this one's, and an entry whose
+    hit frame lands outside its own clip is what that looked like from here.
 
-    Each entry is checked against its own strike clip before being kept: a hit
-    frame at or past the clip's length means the entry was not really there.
+    Each entry is checked against its own strike clip before being kept, but
+    **a hit frame past the end of that clip is not a reason to drop it** -- see
+    :func:`attack_hit_lands`.
     """
     o = tables._v2r(0x004E07D0)
     play = lambda m: struct.unpack_from("<h", tables.data, o + m * 2)[0]
@@ -577,7 +618,7 @@ def attack_tables(tables, char_type: int) -> dict:
             hit, dmot, mask = struct.unpack_from("<3h", tables.data, a + 8)
             if strike <= 0 or lunge <= 0:
                 continue
-            if not (0 <= hit < play(strike)) or not (0 < play(lunge) <= 400):
+            if hit < 0 or play(strike) <= 0 or not (0 < play(lunge) <= 400):
                 continue
             got[i] = {"strike": strike, "lunge": lunge, "distance": dist,
                       "hit_frame": hit, "player_motion": dmot,

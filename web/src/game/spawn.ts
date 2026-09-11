@@ -8,23 +8,32 @@
  * class 0x14's summoning rounds, class 0x41's and 0x44's children — would
  * close an ESM cycle and get `undefined` back. Nothing here imports a class.
  */
+import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import { makeActor, type Actor } from "./actor";
 import { G } from "./globals";
 import { g_class_handlers } from "./registry";
 import type { SpawnClass } from "./spawn_class";
 
-/** Put one actor in the pool and run its class's `Init`. */
+/**
+ * Put one actor in the pool and run its class's `Init`.
+ *
+ * `events` is here because **one class's `Init` makes a sound**:
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) starts the looping chainsaw or
+ * laser sword for character types 2 and 3. See
+ * `class30/weapon_loop.ts` — the engine has no handle for a playing loop, so
+ * the noise has to begin at the moment the object that makes it does.
+ */
 export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
                            name: string,
                            descriptor?: Partial<Actor>,
-                           rng?: Rng): Actor {
+                           rng?: Rng, events?: Events): Actor {
   const obj = makeActor(at, cls, charType, name);
   // The descriptor tail is what the class's own Init reads, so it goes on
   // before Init runs -- `EnemyZombieInit` starts the actor in `initialState`.
   if (descriptor) Object.assign(obj, descriptor);
   ActorInitFlags(obj, obj.flags);
-  g_class_handlers[cls]?.init(obj, rng);
+  g_class_handlers[cls]?.init(obj, rng, events);
   G.g_object_list.push(obj);
   return obj;
 }

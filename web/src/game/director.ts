@@ -163,7 +163,8 @@ export function ActorInitHitPoints(p: CharacterPlacement | undefined,
  * the game.
  */
 export function SpawnScriptedCharacters(
-    reqs: readonly CharacterSpawnRequest[], rng?: Rng): Actor[] {
+    reqs: readonly CharacterSpawnRequest[], rng?: Rng,
+    events?: Events): Actor[] {
   const made: Actor[] = [];
   const placements = T.chars?.placements ?? [];
   for (const req of reqs) {
@@ -178,7 +179,7 @@ export function SpawnScriptedCharacters(
                            hp, maxHp: hp,
                            yaw: p?.yaw ?? 0, pos: { ...req.pos },
                            visible: true },
-                         rng));
+                         rng, events));
   }
   return made;
 }
@@ -291,21 +292,30 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
       a.visible = true;
       continue;
     }
-    // Class 0x33 selector 1 -- the carrier. `hp` is the **selector**, not hit
-    // points: `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
+    // Class 0x33 -- `hp` is the **selector**, not hit points:
+    // `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
     // `desc+0x22` into `obj+0x11C`, and `ScriptedSceneryDispatch33`
-    // (`FUN_00432FF0`) switches on it. The bundle carries a `class33` block
-    // for selector 1 and for nothing else, so a placement without one is a
-    // sub-handler this port has not read and gets no object -- the same
-    // refusal `SpawnPropContainers` makes for an unnamed class-0x44 kind,
-    // rather than a default arm that would run the wrong handler.
+    // (`FUN_00432FF0`) switches on it. The bundle carries a tail block for the
+    // two sub-handlers this port has read and for no other -- `class33` for
+    // selector 1, `class33_push` for selector 4 -- and never both on one
+    // spawn, so a placement with neither is a sub-handler nothing here can run
+    // and gets no object. That is the same refusal `SpawnPropContainers` makes
+    // for an unnamed class-0x44 kind, rather than a default arm that would run
+    // the wrong handler.
     if (s.class === SpawnClassValue.ScriptedScenery) {
-      if (!pl.class33) continue;
+      if (!pl.class33 && !pl.class33_push) continue;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
                            `scenery ${pl.hp}`,
-                           { class33: pl.class33, hp: pl.hp, maxHp: pl.hp,
-                             yaw: pl.yaw ?? 0 });
+                           { class33: pl.class33, class33Push: pl.class33_push,
+                             hp: pl.hp, maxHp: pl.hp, yaw: pl.yaw ?? 0,
+                             // `ActorInitFlags` (`FUN_00408970`) makes the
+                             // descriptor's own flags word `obj+0x34` before
+                             // any `Init` runs, and selector 4's two spawns
+                             // carry `0x8000` there -- which is the very bit
+                             // their `push_flag` clears. Dropping it would
+                             // hand the port a chair pushable from frame one.
+                             flags: pl.init_flags ?? 0 });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.visible = true;
       continue;
@@ -381,6 +391,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       falling: Class44Selector.FallingContainer,
       story_switch: Class44Selector.StoryModeSwitch,
       script_flag_effect: Class44Selector.ScriptFlagEffect,
+      rising_door: Class44Selector.RisingDoor,
     };
     const sel = CLASS44_SELECTOR[pl.container];
     if (s.class === SpawnClassValue.PropPlacer && sel !== undefined) {
@@ -389,7 +400,9 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                              ? "story-mode switch"
                              : pl.container === "script_flag_effect"
                                ? `effect ${pl.effect}`
-                               : `container kind ${pl.kind}`,
+                               : pl.container === "rising_door"
+                                 ? `rising door, flag ${pl.open_flag}`
+                                 : `container kind ${pl.kind}`,
                            { hp: sel });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;

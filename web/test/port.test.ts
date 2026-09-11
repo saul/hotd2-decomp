@@ -79,7 +79,8 @@ import { MotionRow, StrikeSub, ZombieState }
 import { ZombieAttackRefusal, ZombieStateHoldAtRange }
   from "../src/game/class30/hold";
 import { ZombieStateBackOff } from "../src/game/class30/backoff";
-import { ZombieStateStrike } from "../src/game/class30/strike";
+import { ZombiePickAttack, ZombieStateStrike }
+  from "../src/game/class30/strike";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
@@ -89,13 +90,15 @@ import { ThrownWeaponUpdate, THROWN_SPIN_RATE }
   from "../src/game/class31/projectile";
 import { ActorPlayHitVoice, ActorVoice }
   from "../src/game/combat/voice";
+import { ZombieReleaseWeaponLoopSe } from "../src/game/class30/weapon_loop";
 import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type ScriptedSceneryActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
   from "../src/game/actor";
-import { ScriptedCarrierUpdate33, ScriptedScenerySelector }
-  from "../src/game/class33";
+import { ScriptedCarrierUpdate33, ScriptedPushableUpdate33,
+         ScriptedScenerySelector } from "../src/game/class33";
+import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
@@ -183,7 +186,8 @@ import {
   LiftUpdate, LiftFlag, LIFT_NEAR_CLOSED, LIFT_NEAR_OPEN,
   LIFT_FAR_CLOSED, LIFT_PANEL_CLOSED, LIFT_PANEL_OPEN, LIFT_PANEL_DELAY,
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
-  PropExpireByStepLifetime, GENERIC_DRAW_SLOT,
+  PropExpireByStepLifetime, GENERIC_DRAW_SLOT, GENERIC_DESCRIPTOR_SLOT,
+  GENERIC_LIFETIME_FROM_1F4,
   GENERIC_ORIGINAL_MODE_ONLY, makeBreakableProp, type BreakableProp,
   PropCuePhase, PropContainerRaisesScriptFlag, PROP75_DROP_AT,
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
@@ -191,7 +195,8 @@ import {
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
 import {
-  CLASS21_MOTION_FREED, RescueTargetState, RescueTargetUpdate,
+  CLASS21_HP_BY_RANK, CLASS21_MOTION_FREED, g_st2car_path_table,
+  RescueTargetState, RescueTargetUpdate,
 } from "../src/game/class21";
 import {
   MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS, MOUSE_LAST_SLOT,
@@ -204,8 +209,12 @@ import {
   BamsHalfway, FallingContainerUpdate, PlaceFallingContainer,
   PropBuildScriptFlagEffect, ScriptFlagEffectFlag, ScriptFlagEffectUpdate,
   SFX_SCRIPT_FLAG_EFFECT, FALLING_SLOT_LOOSE, FALLING_SLOT_WHOLE,
+  PropBuildRisingDoor, RisingDoorUpdate, RisingDoorRise, RisingDoorRattles,
+  RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
+  RISING_DOOR_STEP_OTHER,
 } from "../src/game/class44";
-import { SpawnPropContainers } from "../src/game/director";
+import { SpawnPropContainers, SpawnSlotActors }
+  from "../src/game/director";
 import {
   SetPieceState, SetPiecePropUpdate,
   DROP_GRAVITY, SLIDE_FRAMES, SLIDE_VX, SLIDE_VZ,
@@ -435,6 +444,24 @@ const EYE = vec3(0, 0, 0);
 function spawnZombie(at: number, charType: number, name: string,
                      desc?: Partial<Actor>, rng?: Rng): ZombieActor {
   const a = ActorSpawn(at, SpawnClass.Zombie, charType, name, desc, rng);
+  if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
+  return a;
+}
+
+/**
+ * `spawnZombie` with an events bus, for the one `Init` in the game that makes
+ * a sound.
+ *
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) starts the looping chainsaw for
+ * character types 2 and 3, so `ActorSpawn` carries `events` through to
+ * `ClassHandler.init`. Going through `ActorSpawn` rather than calling the
+ * weapon-loop functions directly is the point of the fixture: it is the wiring
+ * from the spawn opcode down to the sound that was missing, not the arithmetic.
+ */
+function spawnZombieWithEvents(at: number, charType: number, name: string,
+                               events: Events): ZombieActor {
+  const a = ActorSpawn(at, SpawnClass.Zombie, charType, name, undefined,
+                       new Rng(1), events);
   if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
   return a;
 }
@@ -1380,11 +1407,14 @@ const BREAKABLES: BreakablesJson = {
  * A scene for the container tests.
  *
  * The mode defaults to **Original** because that is the one in which an
- * ordinary breakable is an ordinary breakable. In Arcade,
- * `PlaceBreakableGroup` turns the members named by `g_prop_target_set` into
+ * ordinary breakable is an ordinary breakable. In **Training**,
+ * `PlaceBreakableGroup` turns the members named by `g_training_lesson` into
  * one-shot targets that pay no score, and every group has at least one of
  * them — so "a prop takes two shots" is a statement about Original Mode and
- * always was. Arcade's rule gets its own case below.
+ * always was. Training's rule gets its own case below.
+ *
+ * It said *Arcade* here while `GameMode.ARCADE` was 2, which is Training's
+ * number; the case below passed for the right reason under the wrong name.
  */
 function propScene(rng: Rng, mode: GameMode = GameMode.Original): Events {
   ResetGameGlobals();
@@ -2773,12 +2803,32 @@ console.log("\nclass 0x41, the props are in the save state:");
 }
 console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
 {
+  /**
+   * A host that answers `CamEvalObjectPath6` for the two rows of
+   * `g_st2car_path_table` class 0x21 reaches, and for nothing else. The pose
+   * is a made-up point per slot, which is all the assertions need: what is
+   * being checked is *which* curve the actor is on, not the curve.
+   */
+  const CAR_PATH_POSE: Record<number, { x: number; y: number; z: number;
+                                        yaw: number }> = {
+    0x148: { x: -100, y: -8, z: -200, yaw: 0x4000 },
+    0x14e: { x: -300, y: -8, z: -400, yaw: 0x4000 },
+  };
+  const carHost: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, _frame) => CAR_PATH_POSE[slot] ?? null,
+  };
+
   const rescueScene = (rng = new Rng(21)) => {
     ResetGameGlobals();
     SetGameTables(CHARS, undefined, undefined, undefined);
     G.g_active_cam_path = 0x39;
     G.g_cam_path_frame = 0;
-    G.g_damage_rank = 2;
+    // Rank 4 is the first row of `g_class21_hp_by_rank` that gives two, and
+    // two is what the "one shot is not a rescue" pair below needs. The table
+    // is sixteen rows indexed by `g_damage_rank`; rank 2 gives **one**, which
+    // is what this used to assert as two.
+    G.g_damage_rank = 4;
     // `ActorSpawn` runs the class's own Init, exactly as
     // `SpawnFromDescriptor` does; calling it again here would count the actor
     // in twice.
@@ -2789,9 +2839,9 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
     a.pos = vec3(0, 0, 0);
     return { a, events: new Events(), rng };
   };
-  const rFrame = (a: Actor, events: Events, rng: Rng) =>
-    RescueTargetUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
-                            events });
+  const rFrame = (a: Actor, events: Events, rng: Rng,
+                  host: GameHost = carHost) =>
+    RescueTargetUpdate(a, { eye: EYE, dt: 1 / 60, rng, host, events });
 
   {
     const { a, events, rng } = rescueScene();
@@ -2800,20 +2850,73 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
     check("...with hit points from g_class21_hp_by_rank", a.hp === 2,
           String(a.hp));
+    check("...and the table is sixteen rows, not five",
+          CLASS21_HP_BY_RANK.length === 16
+          && CLASS21_HP_BY_RANK[2] === 1 && CLASS21_HP_BY_RANK[15] === 4,
+          `${CLASS21_HP_BY_RANK.length} rows, [2]=${CLASS21_HP_BY_RANK[2]}`);
+    check("...and it starts on row 0 of g_st2car_path_table",
+          a.rescue.route === 0 && g_st2car_path_table[0] === 0x148,
+          `route ${a.rescue.route}`);
 
-    // The ride-in is driven by the camera frame, not by a clock: its position
-    // is rebuilt from `50 - g_cam_path_frame` every frame.
+    // **It is on the car.** `RescueTargetPoseFromRoute` (`FUN_00451E50`) puts
+    // it at `g_st2car_path_table[obj+0x1350]`'s pose, and sub 0 then adds a
+    // drop-in of `(0, 50 - frame, 50 - frame)` rotated by that pose's own yaw.
+    // At yaw 0x4000 -- a quarter turn -- the engine's Ry sends the point's z
+    // into x, so the whole offset is in x and y and none of it in z.
     G.g_cam_path_frame = 0x20;
     rFrame(a, events, rng);
-    check("it rides in on the camera path",
-          Math.abs(a.pos.z - -(50 - 0x20)) < 1e-4, String(a.pos.z));
+    const d = 50 - 0x20;
+    check("it rides the car's own object path, not a place of its own",
+          Math.abs(a.pos.x - (-100 + d)) < 1e-3
+          && Math.abs(a.pos.y - (-8 + d)) < 1e-3
+          && Math.abs(a.pos.z - -200) < 1e-3,
+          `${a.pos.x.toFixed(2)},${a.pos.y.toFixed(2)},${a.pos.z.toFixed(2)}`);
+    check("...taking the path's yaw with it", a.yaw === 0x4000,
+          String(a.yaw));
+
+    // The `INC word ptr [ESI + 0x1312]` is at `0x00451943`, **after** the
+    // transform — so the frame that steps the sub-state still applies the
+    // offset, and by then `50 - frame` has gone negative. Transcribed in that
+    // order, and this is the assertion that holds it there.
     G.g_cam_path_frame = 0x40;
     rFrame(a, events, rng);
+    check("...the frame that steps sub 0 -> 1 still applies the offset",
+          a.rescue.sub === 1 && Math.abs(a.pos.x - (-100 + (50 - 0x40))) < 1e-3,
+          `sub ${a.rescue.sub} x ${a.pos.x.toFixed(2)}`);
+    rFrame(a, events, rng);
+    check("...and from then on it is on the pose, with no offset at all",
+          Math.abs(a.pos.x - -100) < 1e-3
+          && Math.abs(a.pos.y - -8) < 1e-3
+          && Math.abs(a.pos.z - -200) < 1e-3,
+          `${a.pos.x.toFixed(2)},${a.pos.y.toFixed(2)},${a.pos.z.toFixed(2)}`);
+
     G.g_cam_path_frame = 0xc0;
     rFrame(a, events, rng);
     check("...and hands over to the held state past frame 0xBD",
           a.rescue.state === RescueTargetState.Held,
           String(a.rescue.state));
+    check("...stepping to row 1, the car's route for camera path 0x39",
+          a.rescue.route === 1 && g_st2car_path_table[1] === 0x14e,
+          `route ${a.rescue.route}`);
+
+    // The held state poses through `RescueTargetPoseFromRouteWithVelocity`,
+    // so the actor moves onto the second route and records the jump.
+    rFrame(a, events, rng);
+    check("...and the held state rides that second route",
+          Math.abs(a.pos.x - -300) < 1e-3 && Math.abs(a.pos.z - -400) < 1e-3,
+          `${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)}`);
+    check("...writing the frame's pose delta at obj+0x13CC",
+          Math.abs(a.rescue.delta.x - -200) < 1e-3
+          && Math.abs(a.rescue.delta.z - -200) < 1e-3,
+          `${a.rescue.delta.x.toFixed(2)},${a.rescue.delta.z.toFixed(2)}`);
+
+    // A host with no object paths is a valid host, and the actor then stays
+    // where it was rather than being flung to the origin.
+    const before = { ...a.pos };
+    rFrame(a, events, rng, NULL_HOST);
+    check("...and a host with no paths leaves it where it stands",
+          a.pos.x === before.x && a.pos.z === before.z,
+          `${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)}`);
 
     // Two hit points, so the first shot does not free it.
     G.g_player_score = [0, 0];
@@ -3674,6 +3777,146 @@ console.log("\nclass 0x41 type 32, the lift:");
   void LIFT_PANEL_DELAY;
 }
 
+console.log("\nclass 0x44 selector 11, the door that slides up:");
+{
+  const rng = new Rng(61);
+  propScene(rng);
+  // Stage 3's descriptor, exactly: evt 0x23F4, slot 0xA58 = etc_door.bin[2],
+  // open flag 6, remove flag 11, at the mouth block 8's zombies come out of.
+  const door = PropBuildRisingDoor(
+    { at: 0x23f4, container: "rising_door", slot: RISING_DOOR_RATTLE_SLOT,
+      open_flag: 6, remove_flag: 11, lifetime_evt_steps: 0,
+      pos: [-356.6, -16.1, -3047.8], yaw: 0 });
+  G.g_breakable_props.push(door);
+
+  check("it is its own family, not a hinge and not a generic prop",
+        door.family === PropFamily.RisingDoor);
+  check("the descriptor's tail names the model, the open flag and the "
+        + "remove flag",
+        door.slot === 0xa58 && door.storyItem === 6 && door.removeFlag === 11);
+
+  // No flag: it holds its placed Y for ever. `wait_enemies_alive` at stage 3
+  // block 8 step 2 op 23 is 600-odd frames after the block starts, so a door
+  // that crept would be visibly wrong by then.
+  for (let i = 0; i < 600; i++) RisingDoorUpdate(door);
+  check("with neither flag raised it never moves",
+        door.y === -16.1 && door.vy === 0 && !door.dead);
+  check("but it rattles while it waits, and reseeds its own amplitude",
+        door.shake > 0);
+
+  // Flag 6, which is what op 16 of that step sets. Speed starts at 0.5 and
+  // gains 0.1 a frame, so the first frame moves it 0.6.
+  G.g_script_flags[6] = 1;
+  RisingDoorUpdate(door);
+  check("the first frame of the rise seeds the speed at 0.5 and then steps it",
+        Math.abs(door.vy - 0.6) < 1e-6 && Math.abs(door.y - -15.5) < 1e-6,
+        `${door.vy} ${door.y}`);
+  check("and the latch means the speed is seeded once, not every frame",
+        door.cueCursorB === 1);
+
+  let frames = 1;
+  while (door.y < RISING_DOOR_CEILING && frames < 1000) {
+    RisingDoorUpdate(door);
+    frames++;
+  }
+  // v = 0.5 + 0.1k, y = -16.1 + 0.05k^2 + 0.55k: k = 22 is the first that
+  // reaches 20.0 (36.3 of the 36.1 it has to climb), k = 21 falls short.
+  check("slot 0xA58's arm clears its 20.0 ceiling from y = -16.1 in 22 "
+        + "frames", frames === 22, String(frames));
+  const held = door.y;
+  for (let i = 0; i < 300; i++) RisingDoorUpdate(door);
+  check("past the ceiling it stops writing Y rather than clamping to it -- "
+        + "so it holds one frame's worth ABOVE 20, not 20",
+        door.y === held && held > RISING_DOOR_CEILING, String(held));
+
+  // Flag 11 is the last op of that step, and it is `ActorKill` and not a hide.
+  G.g_script_flags[11] = 1;
+  RisingDoorUpdate(door);
+  check("the remove flag kills it outright", door.dead);
+}
+
+console.log("\nclass 0x44 selector 11, stage 5's door takes the other arm:");
+{
+  const rng = new Rng(62);
+  propScene(rng);
+  // Stage 5's descriptor: evt 0x0C2C, slot 0x189A = st5.bin[9], flags 2 and 7.
+  const door = PropBuildRisingDoor(
+    { at: 0x0c2c, container: "rising_door", slot: 0x189a,
+      open_flag: 2, remove_flag: 7, lifetime_evt_steps: 0,
+      pos: [275.4, 12.0, -89.6], yaw: 0 });
+  G.g_breakable_props.push(door);
+
+  // `CMP word ptr [ESI+0x28C], 0xA58` decides both the rattle and the pair.
+  check("a slot that is not 0xA58 does not rattle at all",
+        !RisingDoorRattles(door.slot));
+  for (let i = 0; i < 200; i++) RisingDoorUpdate(door);
+  check("...and its amplitude is never seeded", door.shake === 0);
+  check("it takes the 35.0 / 0.01 arm",
+        RisingDoorRise(door.slot)[0] === RISING_DOOR_CEILING_OTHER
+        && RisingDoorRise(door.slot)[1] === RISING_DOOR_STEP_OTHER);
+
+  G.g_script_flags[2] = 1;
+  let frames = 0;
+  while (door.y < RISING_DOOR_CEILING_OTHER && frames < 1000) {
+    RisingDoorUpdate(door);
+    frames++;
+  }
+  // A hundredth a frame rather than a tenth. It has less to climb -- 23
+  // against 36.1 -- and still takes half again as long, because the engine
+  // names one slot and not a speed.
+  check("the slower arm takes 35 frames to clear 35.0 from y = 12",
+        frames === 35, String(frames));
+  check("and there is no lifetime on this family -- step changes do not "
+        + "retire it", (() => {
+          for (let b = 1; b <= 20; b++) {
+            G.g_evt_step_index = b;
+            RisingDoorUpdate(door);
+          }
+          return !door.dead;
+        })());
+}
+
+console.log("\nclass 0x41, four types take their lifetime from +0x1F4:");
+{
+  const rng = new Rng(63);
+  propScene(rng);
+  // The stage 5 van body, exactly: type 51, `+0x11C` = 0x1793 (the model) and
+  // `desc+0x24` = 4 (the lifetime). Reading the first as both is what gave it
+  // 6035 event steps in a nine-block stage.
+  const van = PlaceGenericProp(
+    { at: 0x0d3c, container: "generic", type: 51, slot: 0x1793,
+      lifetime_evt_steps: 0x1793, field_1f4: 4,
+      pos: [280.0, 2.0, -222.3], pitch: 0, yaw: 4915, roll: 0 }, rng);
+  G.g_breakable_props.push(van);
+
+  check("type 51 is a descriptor-slot type, so +0x11C really is the model",
+        GENERIC_DESCRIPTOR_SLOT.has(51) && van.slot === 0x1793);
+  check("and its lifetime is the OTHER field, not that slot",
+        GENERIC_LIFETIME_FROM_1F4.has(51) && van.lifetime === 4,
+        String(van.lifetime));
+  check("the model it draws is the slot and not a literal -- 51 is absent "
+        + "from GENERIC_DRAW_SLOT on purpose",
+        GENERIC_DRAW_SLOT[51] === undefined);
+
+  for (let b = 1; b <= 4; b++) {
+    G.g_evt_step_index = b;
+    PropExpireByStepLifetime(van);
+  }
+  check("four step changes leave it standing", !van.dead);
+  G.g_evt_step_index = 5;
+  PropExpireByStepLifetime(van);
+  check("the fifth retires it -- with the slot as the lifetime it would have "
+        + "stood there for the rest of the stage", van.dead);
+
+  // A type NOT in the set still reads the word it always did.
+  const other = PlaceGenericProp(
+    { at: 0x0e00, container: "generic", type: 20, slot: 1,
+      lifetime_evt_steps: 1, field_1f4: 7, pos: [0, 0, 0],
+      pitch: 0, yaw: 0, roll: 0 }, rng);
+  check("a type outside the set is untouched by this and still reads +0x11C",
+        !GENERIC_LIFETIME_FROM_1F4.has(20) && other.lifetime === 1);
+}
+
 console.log("\nclass 0x41, a generic prop's +0x11C is a lifetime:");
 {
   const rng = new Rng(43);
@@ -3773,11 +4016,15 @@ console.log("\nclass 0x41 type 4, seven of the eleven kinds are effects:");
                                             === SLOT_NONE));
 }
 
-console.log("\nclass 0x41, Arcade's one-shot targets:");
+console.log("\nclass 0x41, Training's one-shot targets:");
 {
   const rng = new Rng(53);
-  const events = propScene(rng, GameMode.Arcade);
-  G.g_prop_target_set = 0;      // members 2, 3, 4 and 6
+  // `g_GameMode == 2`, and 2 is Training. This block is the reason the enum
+  // had to be corrected everywhere at once: with `ARCADE = 0` and this case
+  // still asking for Arcade, `PlaceBreakableGroup` would take the ordinary
+  // path and every assertion below would fail.
+  const events = propScene(rng, GameMode.Training);
+  G.g_training_lesson = 0;      // members 2, 3, 4 and 6
   const props = PlaceBreakableGroup(1, 4, rng);
   const target = props.find((p) => p.member === 2);
   const plain = props.find((p) => p.member === 0);
@@ -7548,6 +7795,154 @@ console.log("\nActorBodyConditionFromHands:");
     ActorBodyConditionFromHands(znassb);
     check("...and only falls to zero when both are empty",
           znassb.condition === 0, String(znassb.condition));
+  }
+}
+
+// -- 33c. the crawler's attack is meant to miss ------------------------------
+
+console.log("\nthe crawler's undamaged swing:");
+{
+  /**
+   * `znkager` cut down to the row that matters: character type 12, body
+   * condition 4 on every one of its 20 shipped spawns, whose condition-4
+   * attack list is two real entries at `0x00566E70`:
+   *
+   * ```
+   *  entry 2  e5 03  1b 04  00 00 d0 41  28 00  09 00  01 00   997 / 1051 / 26.0 / hit 40
+   *  entry 3  fa 03  1b 04  00 00 d0 41  03 00  07 00  08 00  1018 / 1051 / 26.0 / hit  3
+   * ```
+   *
+   * and whose condition-4 pick row is ten 2s then ten 3s per zone combo, so an
+   * **undamaged** crawler always draws entry 2 and a crawler with its head
+   * shot off always draws entry 3.
+   *
+   * Entry 2's hit frame is 40 against `g_motion_play_length[997]` = 20, and
+   * `ZombieStateStrike` fires the hit on `obj+0x19C == entry+0x08` *exactly*
+   * (`00455bdf`) while leaving the state at `play_length - 1` (`00455c0b`), so
+   * the equality is never reached: the engine's undamaged crawler swings and
+   * misses, every time. The frame counts and play lengths below are the real
+   * bake — 997 is 11 authored frames with a play length of 20, 1018 is 19 with
+   * 35, 1051 is 17 with 31.
+   *
+   * This is divergence 2, closed. The exporter used to drop entry 2 as an
+   * impossible row and `ZombiePickAttack` used to substitute another entry
+   * when the draw named one the bundle had no row for, which between them
+   * handed the crawler entry 3 — a swing that connects. Measured against the
+   * real stage-2 bundle: 29 hits landed in a minute before, 0 after.
+   */
+  const CRAWL = {
+    "2": { strike: 997, lunge: 1051, distance: 26, hit_frame: 40,
+           player_motion: 9, cancel_mask: 1 },
+    "3": { strike: 1018, lunge: 1051, distance: 26, hit_frame: 3,
+           player_motion: 7, cancel_mask: 8 },
+  };
+  const CRAWL_PICKS = Array.from({ length: 80 },
+                                 (_, i) => (i % 20 < 10 ? 2 : 3));
+  const TYPE_CRAWLER = {
+    ...TYPE,
+    type: 12, name: "znkager", file: "znkager.bin",
+    attacks: { ...TYPE.attacks, "4": CRAWL },
+    attack_picks: { ...TYPE.attack_picks, "4": CRAWL_PICKS },
+    motion_row: { ...TYPE.motion_row, "4": [10, 10, 12, 12, 14] },
+    reactions: { ...TYPE.reactions, "4": TYPE.reactions["0"] },
+    motions: { ...TYPE.motions, "997": motion(11, 0.2, 20),
+               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31) },
+  } as unknown as CharacterType;
+  const CHARS_CRAWLER = {
+    ...CHARS, types: { "1": TYPE, "12": TYPE_CRAWLER },
+  } as unknown as CharactersJson;
+
+  const crawler = (zones: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_CRAWLER);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(0x4048, SpawnClass.Zombie, 12, "znkager", {
+      initialState: ZombieState.AttackRun, condition: 4,
+    });
+    if (z.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
+    z.visible = true;
+    z.attackState = 1;
+    z.hp = z.maxHp = 10000;         // it must survive the whole measurement
+    z.zones = zones;
+    z.pos = vec3(0, 0, 60);
+    z.motion = 12;
+    return z;
+  };
+
+  // The draw, on its own. `ZombiePickAttack` indexes blind, as the engine
+  // does: the substitute that used to sit behind this is what made the
+  // crawlers dangerous.
+  {
+    const z = crawler(0);
+    const rng = new Rng(3);
+    const drawn = new Set<number>();
+    for (let i = 0; i < 200; i++) drawn.add(ZombiePickAttack(z, rng));
+    check("an undamaged crawler draws entry 2, every time",
+          drawn.size === 1 && drawn.has(2), `drew {${[...drawn].join(",")}}`);
+    z.zones = DamageZone.Head;
+    drawn.clear();
+    for (let i = 0; i < 200; i++) drawn.add(ZombiePickAttack(z, rng));
+    check("...and with its head shot off, entry 3",
+          drawn.size === 1 && drawn.has(3), `drew {${[...drawn].join(",")}}`);
+  }
+
+  // The draw must not be second-guessed against the list. A pick naming an
+  // index the bundle has no row for is the ten **zeroed** entries the shipped
+  // tables carry, and the engine deals no damage on one of those either.
+  {
+    const z = crawler(0);
+    const rng = new Rng(3);
+    const bare = {
+      ...TYPE_CRAWLER,
+      attacks: { ...TYPE.attacks, "4": { "3": CRAWL["3"] } },
+    } as unknown as CharacterType;
+    const bareChars = {
+      ...CHARS, types: { "1": TYPE, "12": bare },
+    } as unknown as CharactersJson;
+    SetGameTables(bareChars);
+    check("a draw the list cannot satisfy is still the draw",
+          ZombiePickAttack(z, rng) === 2, String(ZombiePickAttack(z, rng)));
+  }
+
+  // And the whole thing running: sixty seconds of one crawler with a live
+  // player in front of it.
+  const minute = (zones: number) => {
+    const z = crawler(zones);
+    const rng = new Rng(5);
+    const events = new Events();
+    let damaged = 0;
+    events.on("player.damaged", () => { damaged += 1; });
+    let strikes = 0;
+    let was = false;
+    const drawn = new Set<number>();
+    for (let i = 0; i < 3600; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      const now = z.state === ZombieState.Strike;
+      if (now && !was) strikes += 1;
+      if (now && z.attack >= 0) drawn.add(z.attack);
+      was = now;
+    }
+    return { strikes, damaged, drawn: [...drawn].sort() };
+  };
+
+  {
+    const m = minute(0);
+    check("it gets its swing in", m.strikes > 10, `${m.strikes} strikes`);
+    check("...on entry 2", m.drawn.length === 1 && m.drawn[0] === 2,
+          `drew {${m.drawn.join(",")}}`);
+    // The point of the whole change.
+    check("...and lands no damage at all, because clip 997 never reaches "
+          + "frame 40", m.damaged === 0, `${m.damaged} hits landed`);
+  }
+  {
+    // The other arm, so that "no damage" is a property of the entry and not
+    // of the fixture: shoot the head off and the same crawler connects.
+    const m = minute(DamageZone.Head);
+    check("a crawler with its head shot off draws entry 3 and does connect",
+          m.damaged > 0 && m.drawn.length === 1 && m.drawn[0] === 3,
+          `${m.damaged} hits on {${m.drawn.join(",")}}`);
   }
 }
 
@@ -11802,6 +12197,566 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
           (z.flags2 & ZombieFlag2.AttachedToCarrier) !== 0
           && z.pos.x === -4.6 && z.pos.z === -16.5,
           `(${z.pos.x},${z.pos.z})`);
+  }
+}
+
+
+/**
+ * The two sounds a zombie makes that are not shot feedback, and the one kind
+ * of `ActorPlayHitVoice` that turns out to be dead.
+ *
+ * `ActorPlayHitVoice` (`FUN_0040A6F0`) is the game's only voice routine and
+ * every one of its five kinds fires on an event, so for a long time the answer
+ * to "what does a standing zombie sound like" was `[open]`. It is two bare
+ * `PlaySoundId` calls, in two different places, and neither goes through that
+ * routine:
+ *
+ * * `ZombieStateHoldAtRange` (`FUN_00455720`) plays `0x1917A9` --
+ *   `COMMON2\ZOMBIE_041_16.wav` -- at `0x004558D6`, inside the same
+ *   `obj+0x1B4 != row[0]` test that starts the idle clip;
+ * * `EnemyZombieInitByCharType` (`FUN_00452FD0`) plays `0x4D17A9` at
+ *   `0x0045314F` for character types 2 and 3, which `g_looping_se_ids` makes a
+ *   **loop**, and `ZombieReleaseWeaponLoopSe` (`FUN_00456600`) stops it.
+ *
+ * Both were silent in the port. These assertions fail on the code before this
+ * commit, which is the only thing that makes them worth having.
+ */
+console.log("\nthe idle groan, the weapon loop, and kind 4:");
+{
+  const GROAN = 0x1917a9;
+  const CHAIN_SAW_LOOP = 0x4d17a9;
+  const CHAIN_SAW_STOP = 0x4e17a9;
+  const LASER_SWORD_LOOP = 0x1f25a9;
+
+  /** Every `sound.play` id an events bus saw, in order. */
+  const listen = (events: Events): number[] => {
+    const ids: number[] = [];
+    events.on("sound.play", (d) => { ids.push(d.id); });
+    return ids;
+  };
+  const clear = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+
+  // -- C1. the groan fires on the frame the idle starts, and only then ------
+  //
+  // `004558b0 3bc7` / `004558b2 742a` is the whole gate. A zombie arriving at
+  // the ring is not yet playing `row[0]`, so the first update starts the clip
+  // and groans; the second finds the clip already running and does neither.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a00, 1, "arriving at the ring");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+    z.pos = vec3(0, 0, 40);
+    z.target = vec3(0, 0, 0);
+    // Something other than the idle -- the run clip, which is what an actor
+    // that has just arrived is still playing.
+    z.motion = TYPE.motion_row["0"][MotionRow.Run];
+    ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    check("a zombie that reaches the ring groans once -- `PlaySoundId(0x1917A9)`"
+          + " at 0x004558D6",
+          heard.length === 1 && heard[0] === GROAN,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+    check("...and the clip it groans on is the idle, `row[0]`",
+          z.motion === TYPE.motion_row["0"][MotionRow.Walk],
+          String(z.motion));
+    const after = heard.length;
+    for (let i = 0; i < 30; i++) {
+      ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    }
+    check("...and does not groan again while the same idle clip runs -- it is "
+          + "one shot per entry, not a per-frame chance or a timer",
+          heard.length === after, `${heard.length - after} more`);
+  }
+
+
+  // -- C1b. ...and it is silent when the actor arrives already idling --------
+  //
+  // The same `CMP` read the other way, and it is why the groan is rarer in
+  // play than "every time a zombie stands still": `ZombieStateApproach` plays
+  // `row[(obj+0x136C >> 0x15) & 1]`, and for the `row[0]` half of that pair
+  // the walk in **is** the clip the hub wants, so the hub changes nothing and
+  // says nothing. A zombie that arrives from the retreat (`row[4]`) or from an
+  // attack run (`row[2]`/`row[3]`) or off the back of a swing does groan --
+  // measured on stage 1 block 4, where the walkers reach the ring silently.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a02, 1, "arriving already on row[0]");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+    z.pos = vec3(0, 0, 40);
+    z.target = vec3(0, 0, 0);
+    z.motion = TYPE.motion_row["0"][MotionRow.Walk];
+    ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    check("an actor that walks in already playing `row[0]` does not groan -- "
+          + "the approach's own clip is the idle, so the hub changes nothing",
+          heard.length === 0,
+          heard.map((i) => `0x${i.toString(16)}`).join(","));
+  }
+
+  // -- C1c. ...and it does when the actor comes back from the retreat -------
+  //
+  // `ZombieStateBackOff` plays `row[4]`, so an actor returning to the hub
+  // after a swing is on a clip the hub does not want and gets both the idle
+  // and the groan. This is the path that makes the noise in play.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a03, 1, "back from the retreat");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+    z.pos = vec3(0, 0, 40);
+    z.target = vec3(0, 0, 0);
+    z.motion = TYPE.motion_row["0"][MotionRow.BackAway];
+    // The strike anchor, because that is what a returning actor carries -- and
+    // without it the hub would send it back into the retreat before the idle.
+    z.flags2 |= ZombieFlag2.StrikeAnchor;
+    ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    check("...and one coming back on `row[4]` groans again, which is the path "
+          + "that actually sounds in play",
+          heard.length === 1 && heard[0] === GROAN,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+  }
+
+  // -- C2. ...and it is not `ActorPlayHitVoice` -----------------------------
+  //
+  // The distinction is the whole reason the idle was never found: the voice
+  // routine has a kind for the attack cry and none for an idle, so reading it
+  // more carefully could never have turned this up. Kind 4 is the other half
+  // of that reading, and it is dead.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a01, 1, "proving kind 4 is silent");
+    ActorPlayHitVoice(z, ActorVoice.Kind4, new Rng(1),
+                      (id) => events.emit("sound.play", { id }));
+    check("kind 4 plays nothing: no call site in the image passes 4, and both "
+          + "ids at `g_actor_voice_kind4` (0x005A4EA8) are zero and unwritten",
+          heard.length === 0, heard.map((i) => i.toString(16)).join(","));
+  }
+
+  // -- C3. the weapon loop is refcounted, and shared -----------------------
+  //
+  // `00453133` gates the *sound* on `g_weapon_loop_holders == 0` while the
+  // increment and the `obj+0x131B` latch at `00453164` run for every holder.
+  // So two chainsaw zombies make one chainsaw noise.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const a = spawnZombieWithEvents(0x7b00, 2, "chainsaw one", events);
+    check("the first character-type-2 actor starts the looping chainsaw",
+          heard.length === 1 && heard[0] === CHAIN_SAW_LOOP,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+    check("...and latches `obj+0x131B` with the count at one",
+          a.weaponLoopHeld === 1 && G.g_weapon_loop_holders === 1,
+          `${a.weaponLoopHeld} / ${G.g_weapon_loop_holders}`);
+    const b = spawnZombieWithEvents(0x7b01, 2, "chainsaw two", events);
+    check("the second one takes a share and starts nothing -- one loop per "
+          + "scene, not one per actor",
+          heard.length === 1 && b.weaponLoopHeld === 1
+          && G.g_weapon_loop_holders === 2,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+
+    // ...and the release is the mirror: the first death is silent, the last
+    // plays the stop id, which `PlaySoundId` turns into a stop-all.
+    ZombieReleaseWeaponLoopSe(a, events);
+    check("the first holder to go plays no stop id",
+          heard.length === 1 && G.g_weapon_loop_holders === 1
+          && a.weaponLoopHeld === 0,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+    ZombieReleaseWeaponLoopSe(b, events);
+    check("the last one stops it, with the `_OFF` id out of "
+          + "`g_looping_se_stop_ids`",
+          heard.length === 2 && heard[1] === CHAIN_SAW_STOP
+          && G.g_weapon_loop_holders === 0,
+          heard.map((i) => `0x${i.toString(16)}`).join(","));
+    // Releasing twice must not take the count below zero: the engine's own
+    // guard is the latch, not the count.
+    ZombieReleaseWeaponLoopSe(b, events);
+    check("...and a second release from the same actor does nothing, because "
+          + "the latch is what guards it",
+          heard.length === 2 && G.g_weapon_loop_holders === 0,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+  }
+
+  // -- C4. character type 3 is the same arm with the other pair ------------
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    spawnZombieWithEvents(0x7b02, 3, "laser sword", events);
+    check("character type 3 starts the laser sword instead -- `0x1F25A9`, "
+          + "the other entry of the same table",
+          heard.length === 1 && heard[0] === LASER_SWORD_LOOP,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+  }
+
+  // -- C5. every other character type takes no share ----------------------
+  //
+  // The engine's `switch` has one arm for 2 and 3 and nothing for the rest, so
+  // an ordinary zombie must leave both the count and the latch alone -- or the
+  // *next* chainsaw zombie would find a non-zero count and never sound.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombieWithEvents(0x7b03, 1, "ordinary", events);
+    check("an ordinary zombie takes no share of the weapon loop",
+          heard.length === 0 && z.weaponLoopHeld === 0
+          && G.g_weapon_loop_holders === 0,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+  }
+
+  // -- C6. the scene reset zeroes the count -------------------------------
+  //
+  // `MOV [0x009c8a74], 0` at `0x0045EF3D`. Without it a second stage's first
+  // chainsaw zombie inherits a non-zero count and the chainsaw never starts.
+  {
+    clear();
+    G.g_weapon_loop_holders = 3;
+    ResetSceneOnEnter();
+    check("`ResetSceneOnEnter` zeroes `g_weapon_loop_holders`, so a stage does "
+          + "not inherit the last one's holders",
+          G.g_weapon_loop_holders === 0, String(G.g_weapon_loop_holders));
+  }
+}
+
+// -- class 0x33 selector 4: the scenery an actor shoves aside -----------------
+//
+// Reported as stage 1 `0x16D8` `char_adv00` "playing the wrong entrance -- a
+// ledge hang where a chair push belongs". The clip id was right: 1048 is a
+// sixty-frame hold. The chair push is **this class**, and the port had the
+// three fields `ColiTestSphereAgainstActors` writes -- `obj+0x138`, `+0x13C`,
+// `+0x140` -- with `ZombiePushOutOfWorldAndActors` as their only reader.
+//
+// Every number below is stage 1's own descriptor, `0x1A40` and `0x1A74`: slot
+// 4196 (`komono_7.bin` part 0, a chair), no shot mesh, a 3.5 sphere, armed by
+// script flag 32 and despawned by 33. The set piece is held by *these* values
+// and not by a shape.
+
+console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
+{
+  const CHAIR_AT = 0x1a40;
+  const CHAIR_SLOT = 0x1064;             // 4196
+  const CHAIR_SPHERE = 3.5;
+  const PUSH_FLAG = 32;
+  const DESPAWN_FLAG = 33;
+  /** `ActorInitFlags` puts the descriptor's word on `obj+0x34`; both carry it. */
+  const SPAWN_FLAGS = 0x8000;
+
+  const STAGE1 = () => ({
+    slot: CHAIR_SLOT, shot_mesh: -1, shot_radius: CHAIR_SPHERE,
+    push_flag: PUSH_FLAG, despawn_flag: DESPAWN_FLAG,
+  });
+
+  const reset = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+  const makeChair = (tail = STAGE1(),
+                     flags = SPAWN_FLAGS): ScriptedSceneryActor => {
+    const a = ActorSpawn(CHAIR_AT, SpawnClass.ScriptedScenery, -1, "chair",
+                         { class33Push: tail as Actor["class33Push"],
+                           hp: ScriptedScenerySelector.Pushable,
+                           maxHp: ScriptedScenerySelector.Pushable,
+                           flags });
+    if (a.cls !== SpawnClass.ScriptedScenery) throw new Error("not class 0x33");
+    a.pos = vec3(22.83, 6.5, -16.74);
+    a.visible = true;
+    return a;
+  };
+  const chairFrame = () => ({ eye: EYE, dt: 1 / 60, rng: new Rng(9),
+                              host: NULL_HOST });
+  const tick = (c: ScriptedSceneryActor, n: number) => {
+    for (let i = 0; i < n; i++) {
+      if (c.despawned) return;
+      ScriptedPushableUpdate33(c, chairFrame());
+    }
+  };
+
+  // -- C1. the seed, and the radius that makes it a push target -------------
+  //
+  // `tail+0x04 == -1` writes `tail+0x08` to `obj+0x124` **and** `obj+0x128`.
+  // The second is the one that matters: `ColiTestSphereAgainstActors` measures
+  // against the *body* radius, so a chair that only got the shot radius is a
+  // chair nothing can touch.
+  {
+    reset();
+    const c = makeChair();
+    check("before its first frame the chair has no sphere at all",
+          c.bodyRadius === 0 && c.hitRadius === 0,
+          `${c.bodyRadius}/${c.hitRadius}`);
+    tick(c, 1);
+    check("the seed writes `tail+0x08` to the body radius as well as the "
+          + "shot radius -- both port names for `obj+0x124`, and `obj+0x128`",
+          c.bodyRadius === CHAIR_SPHERE && c.hitRadius === CHAIR_SPHERE
+          && c.radius === CHAIR_SPHERE,
+          `${c.bodyRadius}/${c.hitRadius}/${c.radius}`);
+    check("...and the draw slot, which is the whole of what the renderer "
+          + "needs to clone a model for it",
+          c.scenery.slot === CHAIR_SLOT, String(c.scenery.slot));
+    check("`obj+0x1312` is incremented, so the seed runs once",
+          c.sub === 1, String(c.sub));
+  }
+
+  // -- C2. the freeze, and the one flag that lifts it -----------------------
+  //
+  // `obj+0x34` bit `0x8000` arrives on the descriptor and `AND AH, 0x7f` at
+  // `0x00433C00` is the only thing that clears it. While it is up the object
+  // does not move, and `ColiTestSphereAgainstActors` skips it as a candidate
+  // -- one bit, both halves.
+  {
+    reset();
+    const c = makeChair();
+    tick(c, 1);
+    check("the descriptor's `0x8000` survives `ActorInitFlags`, so the chair "
+          + "starts held",
+          (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `0x${c.flags.toString(16)}`);
+    // A push recorded while it is held must not move it.
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    tick(c, 1);
+    check("a push recorded on a held chair moves it nowhere, and is not even "
+          + "consumed",
+          c.pos.x === x0 && c.pushedBy === 0x7ee0, `${c.pos.x} vs ${x0}`);
+    G.g_script_flags[PUSH_FLAG] = 1;
+    tick(c, 1);
+    check("script flag 32 clears the bit and the chair moves on that same "
+          + "frame -- a tenth of the penetration along the recorded normal",
+          Math.abs(c.pos.x - (x0 + 0.2)) < 1e-6
+          && !(c.flags & SCENERY_SKIP_COLLISION), String(c.pos.x));
+    check("...and the recorded push is consumed, so one record is one move",
+          c.pushedBy === -1, String(c.pushedBy));
+    // The clear is a clear and not a copy of the flag: a flag that goes back
+    // down does not re-freeze the object.
+    G.g_script_flags[PUSH_FLAG] = 0;
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x1 = c.pos.x;
+    tick(c, 1);
+    check("the flag dropping again does not put the bit back -- the routine "
+          + "only ever clears",
+          Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
+  }
+
+  // -- C3. the pusher's airborne bits, not the chair's ----------------------
+  //
+  // `if ((*(uint *)(obj+0x138) + 0x34) & 0x18000000) f *= 1.8` -- the test is
+  // on the actor that did the pushing. Reading the chair's own flags there
+  // would be `L11` with the object the other way round, and it would be
+  // silent: 1.8 times nothing is still nothing until an airborne zombie
+  // arrives.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const pusher = spawnZombie(0x7ee0, 1, "pusher");
+    pusher.flags |= 0x18000000;
+    const c = makeChair();
+    tick(c, 1);
+    c.pushedBy = pusher.at;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    tick(c, 1);
+    check("an airborne pusher shoves 1.8x as far, and the bit read is the "
+          + "**pusher's**",
+          Math.abs(c.pos.x - (x0 + 0.36)) < 1e-6, String(c.pos.x));
+
+    // ...and the chair's own copy of the same bits changes nothing.
+    pusher.flags &= ~0x18000000;
+    c.flags |= 0x18000000;
+    c.pushedBy = pusher.at;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x1 = c.pos.x;
+    tick(c, 1);
+    check("the chair's own airborne bits are not the ones that scale it",
+          Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
+  }
+
+  // -- C4. all three axes, and the sphere that follows ----------------------
+  //
+  // The recorded push is applied in x, y **and** z -- unlike the re-resolve
+  // under it, which is x and z only. And `ScriptedPushableSyncSphere33` rises
+  // by exactly the body radius, where `ActorUpdateBoundingSphere` rises by the
+  // radius plus one: two conventions for `obj+0x12C`, and this class writes
+  // its own.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    const p0 = { x: c.pos.x, y: c.pos.y, z: c.pos.z };
+    c.pushedBy = -1;
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 3;
+    c.pushNormal = vec3(0, 1, -1);
+    tick(c, 1);
+    check("the recorded push moves all three axes, y included",
+          Math.abs(c.pos.y - (p0.y + 0.3)) < 1e-6
+          && Math.abs(c.pos.z - (p0.z - 0.3)) < 1e-6
+          && c.pos.x === p0.x,
+          `${c.pos.x}/${c.pos.y}/${c.pos.z}`);
+    check("the collision sphere is re-seated at the position plus exactly "
+          + "the body radius -- not the radius plus one",
+          c.sphereCentre.y === c.pos.y + CHAIR_SPHERE
+          && c.sphereCentre.x === c.pos.x && c.sphereCentre.z === c.pos.z,
+          String(c.sphereCentre.y));
+  }
+
+  // -- C5. a zombie walking into it is the whole set piece ------------------
+  //
+  // The two halves meeting: `ZombiePushOutOfWorldAndActors` runs
+  // `ColiTestSphereAgainstActors`, which records the opposite push on whatever
+  // it finds, and this class applies it next frame. Nothing here calls the
+  // push directly -- if the chair moves, the wiring is real.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    const z = spawnZombie(0x16d8, 7, "char_adv00");
+    z.pos = vec3(c.pos.x + 4, 6.2, c.pos.z);
+    z.bodyRadius = 3.5;
+    z.flags2 |= ZombieFlag2.CollideActors;
+    const x0 = c.pos.x;
+    ZombiePushOutOfWorldAndActors(z, 1);
+    check("the zombie's own collision pass records the push on the chair "
+          + "rather than moving it",
+          c.pushedBy === z.at && c.pushDepth > 0,
+          `${c.pushedBy}/${c.pushDepth}`);
+    tick(c, 1);
+    check("...and the chair shoves itself away from the zombie on the next "
+          + "frame, which is the chair push the report was asking for",
+          c.pos.x < x0 - 1e-6 && c.pushedBy === -1,
+          `${x0} -> ${c.pos.x}`);
+  }
+
+  // -- C6. the despawn flag is tested first, and it returns -----------------
+  //
+  // `MOV AL, byte ptr [ECX + 0xd]` at `0x00433B80` is the first thing in the
+  // routine: a raised flag despawns and returns before the seed, the push and
+  // the draw. A chair that seeded itself on the frame it left would leave the
+  // renderer a slot to clone for one frame.
+  {
+    reset();
+    G.g_script_flags[DESPAWN_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    check("script flag 33 despawns the chair on its first frame",
+          c.despawned, String(c.despawned));
+    check("...before the seed, so it never publishes a draw slot",
+          c.scenery.slot === 0 && c.sub === 0,
+          `${c.scenery.slot}/${c.sub}`);
+  }
+
+  // -- C8. the wiring, from the bundle's placement to the object moving -----
+  //
+  // Everything above calls `ScriptedPushableUpdate33` by hand, and that is
+  // exactly the shape `L38` warns about: a dispatch arm that is missing looks
+  // the same as one that is wrong, and a test that drives past it sees
+  // neither. Two links, neither of which the assertions above can reach:
+  //
+  // * `SpawnSlotActors` gates on a tail block being present, and it used to
+  //   accept `class33` alone -- so a selector-4 placement made no object at
+  //   all, which was one of the four reasons the port drew no chair;
+  // * `ScriptedSceneryUpdate33` picks the routine off `obj.hp`, because the
+  //   port has one table entry per class where the engine writes one of twelve
+  //   pointers into `*obj`.
+  //
+  // So this one goes in through the front: the placement the exporter emits,
+  // then `GameUpdate`, and nothing else.
+  {
+    reset();
+    SetGameTables({
+      ...CHARS,
+      placements: [{
+        at: CHAIR_AT, class: 0x33, char_type: -1, motion: null,
+        hp: ScriptedScenerySelector.Pushable, init_flags: SPAWN_FLAGS,
+        yaw: 4096, class33_push: STAGE1(),
+      }],
+    } as unknown as CharactersJson);
+    const rng = new Rng(33);
+    const events = new Events();
+    const listed = [{ at: CHAIR_AT, class: SpawnClass.ScriptedScenery,
+                      pos: [22.83, 6.5, -16.74] as [number, number, number] }];
+    SpawnSlotActors(listed, rng);
+    const c = G.g_object_list.find((o) => o.at === CHAIR_AT);
+    check("a placement carrying only `class33_push` is spawned -- the gate "
+          + "takes either block, not just the carrier's",
+          !!c && c.cls === SpawnClass.ScriptedScenery,
+          c ? `class ${c.cls}` : "no actor");
+    if (!c || c.cls !== SpawnClass.ScriptedScenery) throw new Error("no chair");
+    check("...and it arrives held, because the spawn arm carries the "
+          + "descriptor's flags word through",
+          (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `0x${c.flags.toString(16)}`);
+    G.g_script_flags[PUSH_FLAG] = 1;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    check("one `GameUpdate` reaches the selector-4 routine through the class "
+          + "table, seeds the sphere and lifts the freeze",
+          c.bodyRadius === CHAIR_SPHERE && c.scenery.slot === CHAIR_SLOT
+          && !(c.flags & SCENERY_SKIP_COLLISION),
+          `${c.bodyRadius}/${c.scenery.slot}/0x${c.flags.toString(16)}`);
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    check("...and a second one moves it, with nothing but the class table "
+          + "between the frame and the push",
+          Math.abs(c.pos.x - (x0 + 0.2)) < 1e-6, `${x0} -> ${c.pos.x}`);
+    // Put the fixture back: everything after this file's class-0x33 section
+    // expects `CHARS` with no placements in it.
+    SetGameTables(CHARS);
+  }
+
+  // -- C7. the other selectors get nothing ----------------------------------
+  //
+  // The bundle carries `class33_push` for selector 4 and `class33` for
+  // selector 1, never both, and the port takes which one arrived as the
+  // selector. An actor with neither is one of the eight sub-handlers nothing
+  // here can run, and the update must be a no-op rather than a default arm.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    c.class33Push = null;
+    const p0 = { x: c.pos.x, sub: c.sub };
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 9;
+    c.pushNormal = vec3(1, 0, 0);
+    tick(c, 4);
+    check("a class-0x33 actor with no tail block seeds nothing and moves "
+          + "nowhere, however hard something pushes it",
+          c.pos.x === p0.x && c.sub === p0.sub && !c.despawned,
+          `${c.pos.x}/${c.sub}`);
   }
 }
 

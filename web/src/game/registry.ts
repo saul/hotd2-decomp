@@ -104,8 +104,15 @@ export interface ClassHandler {
    * 0x24's phase seed, class 0x10's weighted pick of what a civilian is
    * holding — call `rand()` in the engine too, and a draw that is not from
    * `ctx.rng` is a save state that does not restore.
+   *
+   * `events` is optional for the same reason and is here because one `Init` in
+   * the engine makes a **sound**: `EnemyZombieInitByCharType` (`FUN_00452FD0`)
+   * starts the looping chainsaw or laser sword for character types 2 and 3.
+   * An `Init` that draws or plays declares it by taking the parameter; the
+   * eight that do neither still satisfy this type, because a function of fewer
+   * arguments is assignable to one of more.
    */
-  init(obj: Actor, rng?: Rng): void;
+  init(obj: Actor, rng?: Rng, events?: Events): void;
   /**
    * The class's `Update` — one call per 60 Hz frame.
    *

@@ -19,35 +19,35 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 40483 | 154 | engine |
-| `hod2lib/` | 15536 | 34 | engine |
-| `render/` | 8168 | 29 | render |
-| `app/` | 7341 | 29 | app |
+| `game/` | 41674 | 157 | engine |
+| `hod2lib/` | 15902 | 34 | engine |
+| `render/` | 8237 | 29 | render |
+| `app/` | 7405 | 29 | app |
 | `script/` | 4144 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
-| `bundle/` | 2057 | 11 | engine |
+| `bundle/` | 2142 | 11 | engine |
 | `core/` | 904 | 9 | engine |
+| `audio/` | 363 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| `audio/` | 248 | 1 | render |
-| **total** | **82324** | **319** | |
+| **total** | **84214** | **322** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
-* `app/main.ts` — 1977
-* `game/actor.ts` — 1899
-* `hod2lib/exetab.ts` — 1799
+* `app/main.ts` — 1979
+* `game/actor.ts` — 1923
+* `hod2lib/exetab.ts` — 1839
 * `script/walker.ts` — 1780
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **161 of 262** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 148 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 309 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **162 of 262** annotated functions in the gameplay address ranges have a port (61%) |
+| Ported outside those ranges | 154 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 316 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
-| Declared `[diverges]` | **159** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **157** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **155** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 832 in `ghidra/annotations/functions.tsv` |
-| Named globals | 387 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 29 under `tools/`, run together by `verify_all.py` |
+| Named functions | 862 in `ghidra/annotations/functions.tsv` |
+| Named globals | 396 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 31 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -111,16 +111,19 @@ nothing exits 3 and is never counted as green.
 | `test:state` | that a save/load and a seek reach the *same world* play did -- the only check that compares two histories rather than one | bundle |
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
+| `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
+| `verify_looping_se` | that `PlaySoundId`'s two loop tables really do pair index for index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, which is the only thing that says a stop id is a control word rather than a sound, and so the only thing that makes the chainsaw a loop rather than a one-shot | game-dir |
+| `verify_combat` | that the shot and damage tables hold together across every character type -- and the only place the *exact* set of attacks the engine can never land is asserted, which is what stops the crawlers' condition-4 swing being filtered out again as an impossible row | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_parts` | that every vertex-blended part in a bundle is skinned the way the exe deforms it -- one bone per vertex, weight 1, the exe's source geometry and no inverse binds -- which is the only check that can see the waist riding the hips instead of stretching to the chest | game-dir |
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-8 of them need the installed game and 4 need an exported
+10 of them need the installed game and 5 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

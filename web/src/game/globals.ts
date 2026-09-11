@@ -218,6 +218,22 @@ export const G = {
    * `g_max_attackers`, which is what the thrown weapon latches.
    */
   g_players_in_play: 1,
+  /**
+   * `g_weapon_loop_holders` — 0x009C8A74. **A refcount on one looping sound.**
+   *
+   * The chainsaw and the laser sword are not per-actor noises: they are two
+   * entries of `g_looping_se_ids` (`0x005887FC`), and the engine has no handle
+   * for a playing loop at all. So `EnemyZombieInitByCharType` starts the loop
+   * only while this is **zero** and `ZombieReleaseWeaponLoopSe` stops it only
+   * while it is **one** — the first character-type-2-or-3 actor in the scene
+   * opens it and the last one to die or lose its weapon closes it. Every
+   * holder in between latches {@link Actor.weaponLoopHeld} and does
+   * nothing else with the sound.
+   *
+   * `ResetSceneCombatState` (`0x0045EF3D`) zeroes it, which is the whole of its
+   * lifetime; nothing outside those three sites reads it.
+   */
+  g_weapon_loop_holders: 0,
 
   // -- attack permits ----------------------------------------------------
   /**
@@ -817,19 +833,29 @@ export const G = {
   /**
    * `g_GameMode` — 0x009CA08C. See {@link GameMode}.
    *
-   * Class 0x41 branches on it both ways: Original releases the member's own
-   * `storyItem` and can drop an extra life from every prop, Arcade turns
-   * selected members into one-shot targets and pays no score for them.
+   * Class 0x41 branches on it three ways: Original releases the member's own
+   * `storyItem` and can drop an extra life from every prop, **Training**
+   * turns selected members into one-shot targets and pays no score for them,
+   * and Arcade does neither.
    *
    * The bundle carries the same numbers — `script.game_mode` *is* this field,
-   * and `main.ts` copies it straight across.
+   * and `main.ts` copies it straight across. Arcade is **0**, not 2; the two
+   * one-shot-target arms below are Training's and unreachable in a shipped
+   * stage. See {@link GameMode} for what proves the values.
    */
   g_GameMode: GameMode.Arcade as GameMode,
   /**
-   * `g_prop_target_set` — 0x009C9118. Which of four member sets
-   * `PlaceBreakableGroup` turns into one-shot targets while `g_GameMode` is 2.
+   * `g_training_lesson` — 0x009C9118. Which training lesson is being played.
+   *
+   * It was `g_prop_target_set` here and in the TSV, named from the one use
+   * the port has for it: `PlaceBreakableGroup` turns the members it selects
+   * into one-shot targets while `g_GameMode` is 2. Mode 2 is **Training**,
+   * and the byte is read in exactly two places, both behind that test — the
+   * other is `PreloadScreenAssetList` (`FUN_00412FD0`), which indexes a
+   * per-lesson asset list with it at training block 3. So the four "member
+   * sets" are the four lessons, which is what the old name could not say.
    */
-  g_prop_target_set: 0,
+  g_training_lesson: 0,
   /**
    * `g_scene_index` — 0x009A1A08. Which scene is loaded, zero-based:
    * `ColiLoadForScene` indexes its file list with it, so scene 1 is stage 2.
@@ -1011,6 +1037,7 @@ export type Globals = typeof G;
  * |---|---|
  * | `g_enemies_alive = 0`, `g_enemies_present = 0` | ✅ |
  * | `g_civilians_alive = 0` | ✅ |
+ * | `g_weapon_loop_holders = 0` (`0x0045EF3D`) | ✅ |
  * | the whole 0x100-byte `g_script_flags` | ✅ |
  * | per player: `g_head_combo_bonus`, `g_player_hit_count` | ✅ |
  * | per player: `g_player_shot_count` (0x009A5C84) | ❌ not in `G` — nothing
@@ -1031,7 +1058,7 @@ export type Globals = typeof G;
  *   `DAT_009C6F20`, `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`,
  *   `DAT_009A34DC = 1` | `[open]` |
  *
- * Seven of thirteen. The name is the engine's and the omissions are itemised on
+ * Eight of fourteen. The name is the engine's and the omissions are itemised on
  * purpose: a partial transcription that says which part is a work list, and
  * one that does not is a lie waiting to be believed.
  */
@@ -1039,6 +1066,12 @@ export function ResetSceneOnEnter(): void {
   G.g_enemies_alive = 0;
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
+  // `MOV [0x009c8a74], 0` at `0x0045EF3D` — the looping held-weapon SE's
+  // refcount. It has to be zeroed here or the *next* scene's first chainsaw
+  // zombie finds a non-zero count, never starts the loop, and the chainsaw is
+  // silent for the rest of the stage; `audio/bgm.ts` stops the loop itself
+  // when the sound tables are swapped, which is the other half.
+  G.g_weapon_loop_holders = 0;
   // `for (i = 0x40; i--;) *p++ = 0` over `g_script_flags` — all 0x100 bytes.
   G.g_script_flags = [];
   // The per-player shot statistics, so the accuracy grade is per scene rather

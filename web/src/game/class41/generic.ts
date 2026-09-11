@@ -63,7 +63,22 @@
  * model on a script flag, swings, falls, or animates through a strip of slots
  * shows its first frame and holds it. The largest are `FUN_00467E50`
  * (type 12, 36 spawns), `FUN_004717A0` (77, 24), `FUN_004675A0` (70/71, 20),
- * `FUN_0046EB20` (51, 11) and `FUN_0046CEA0` (43, 7).
+ * `PropDrawOnlyType51` (51, 11) and `FUN_0046CEA0` (43, 7).
+ *
+ * Type 51 is the one of those five that needs nothing else: the routine's
+ * whole body is the lifetime prologue and one `AssetDrawSlot`, both of which
+ * this file already has. It drew nothing for as long as it did because it was
+ * missing from {@link GENERIC_DESCRIPTOR_SLOT} — a table about the exporter,
+ * two layers away from the placement — and that is the shape to watch for in
+ * the other four.
+ *
+ * `[open]` **The renderer poses all forty-four of these as `Ry·Rz·Rx`**, which
+ * is `PropDrawOnlyType51`'s order and not the family's: types 5, 12, 31, 33,
+ * 53 and 54 compose `Rz·Ry·Rx`. Fifteen shipped spawns have two or more
+ * non-zero angles and so are posed wrongly — four type-5s and five type-12s in
+ * stage 2, five type-12s in stage 4, one type-33 in stage 2 — plus stage 3's
+ * three type-31s once those are carried. Not fixed here; it wants its own arm
+ * in `render/breakables.ts` and its own render check.
  *
  * Some of them are not props at all: cases 0x13 and 0x19 increment
  * `g_enemies_present` and case 0x0E `g_enemies_alive`, so a few of these are
@@ -103,19 +118,45 @@ export const GENERIC_HP: Partial<Record<number, number>> = {
 };
 
 /**
- * The three types whose update routine draws `obj+0x28C`, so that the spawn
+ * The types whose update routine draws `obj+0x28C`, so that the spawn
  * descriptor's `+0x11C` really is the model.
  *
- * * 5 — `FUN_00466820`, a static prop the script can clear with flag 0x13.
+ * * 5 — `PropDrawOnlyType5` (`FUN_00466820`), a static prop the script can
+ *   clear with flag 0x13.
  * * 12 — `FUN_00467E50`, scaled and z-offset, removed at cam path 0x2F
  *   frame 0x96.
  * * 33 — `FUN_00472950`, which draws `+0x28C + n` and dies when `n` passes
  *   `+0x2A4`: a strip of slots played as an animation.
+ * * 51 — `PropDrawOnlyType51` (`FUN_0046EB20`): `PropExpireByStepLifetime`,
+ *   then `Translate(x, y, z + obj+0x1C8); RotY; RotZ; RotX;
+ *   AssetDrawSlot((s16)obj+0x28C)` and nothing else at all.
  *
  * Every other type's `+0x11C` is a lifetime. See the module comment.
+ *
+ * **51 is here because the stage 5 van was drawn with only its rear doors.**
+ * The doors are a class-0x44 selector-2 hinge pair at slots `0x1794`/`0x1795`;
+ * the body is a type-51 placement at the same position and yaw drawing
+ * `0x1793`, the model immediately before them in `char_adv04.bin`. This set is
+ * read by `hod2lib/bundle.ts`'s `breakableSlotEntry` to decide which slots'
+ * geometry travels in the bundle, so leaving 51 out meant `DrawSlotFor`
+ * returned `0x1793` every frame and the renderer had nothing to clone for it.
+ * A placement with no model and a placement that was never exported look
+ * exactly the same from the level.
+ *
+ * `[open]` **The set is seven types, not four.** The routines that pass
+ * `obj+0x28C` to `AssetDrawSlot` are 5, 12, **31**, 33, 51, **53** and **54**
+ * — all seven read and annotated: `PropDrawOnlyType31` (`FUN_0046A1C0`, 6
+ * spawns, slots `0xB3F`/`0xD01`/`0x1874`), `PropDrawOnlyType53`
+ * (`FUN_0046EBD0`, 2 spawns, slot `0x2B`) and `PropDrawOnlyType54`
+ * (`FUN_0046EDC0`, 2 spawns, slot `0x18A1`). They are not here because adding
+ * a type makes its model travel *and* draw, and these three's own arms are
+ * unported — 54's drift is authored, identical for every spawn, and would be
+ * visibly static. **Ten more spawns of scenery are missing for the reason the
+ * van was.** `tools/verify_prop_slots.py` holds whatever this set says, so the
+ * way to close it is one type at a time with its retirement rule read.
  */
-export const GENERIC_DESCRIPTOR_SLOT: ReadonlySet<number> = new Set([5, 12,
-                                                                     33]);
+export const GENERIC_DESCRIPTOR_SLOT: ReadonlySet<number> =
+  new Set([5, 12, 33, 51]);
 
 /**
  * What each read type actually draws — the first `AssetDrawSlot` literal in
@@ -155,6 +196,38 @@ export const GENERIC_DRAW_SLOT: Partial<Record<number, number | null>> = {
   75: 0x0a6b,       // `PropUpdateType75`, riding object path 0x178
   77: 0x10ab,       // `FUN_004717A0`, Original Mode only
 };
+
+/**
+ * The types whose switch arm writes the placer's `+0x1F4` over `obj+0x11C`,
+ * so their lifetime is **not** the word their asset slot came from.
+ *
+ * ```
+ * case 0xC: case 0x1F: case 0x33: case 0x35:
+ *     *(u16 *)(obj + 0x11C) = *(u16 *)(placer + 0x1F4);
+ * ```
+ *
+ * `obj+0x1F4` is the **signed byte at `desc+0x24`**, widened by
+ * `FUN_004088A0`; the bundle carries it as `field_1f4`. Without this the four
+ * types that both draw `obj+0x28C` and overwrite `obj+0x11C` are given their
+ * own asset slot as a lifetime, which is 6057 event steps for stage 2's crates
+ * and 6035 for the stage 5 van — no shipped stage has that many step changes,
+ * so `PropExpireByStepLifetime` never retires them and every one of them
+ * stands in the level until the stage ends.
+ *
+ * **[proved] across the shipped data.** All 55 spawns of these four types
+ * carry 0..7 in `desc+0x24` and a real asset slot in `+0x11C`: type 12's 36
+ * run 0-7, type 31's six are 1 and 4, type 51's eleven are 4 and 6, type 53's
+ * two are 6. A reading with these the other way round would have to explain a
+ * prop with a 6057-step life in a 42-block stage.
+ *
+ * `[open]` Types **6**, **10** and **34** also overwrite `obj+0x11C`, with the
+ * literals 1, 2 and 2. {@link GENERIC_HP} reads those as a shot count and this
+ * port keeps that reading; which of the two `FUN_004668A0` and
+ * `FallingContainerUpdate` mean by the field has not been read here, and the
+ * two meanings would give 6 and 10 a one- and two-step life.
+ */
+export const GENERIC_LIFETIME_FROM_1F4: ReadonlySet<number> =
+  new Set([12, 31, 51, 53]);
 
 /**
  * Class 0x41 type 32. Not in `PropContainerType`, which names the types that
@@ -220,10 +293,14 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   p.flags = 0x80000000 | BreakableFlag.Live;
   p.lastStepIndex = G.g_evt_step_index;
   p.stepsElapsed = 0;
-  // `obj+0x11C` — the lifetime `PropExpireByStepLifetime` counts down. The
-  // same word the slot came from, and for most types the *only* meaning it
-  // has. `+0x199` is not involved: this family measures against `+0x11C`.
-  p.lifetime = pl.lifetime_evt_steps ?? 0;
+  // `obj+0x11C` — the lifetime `PropExpireByStepLifetime` counts down. For
+  // most types it is the same word the slot came from and the *only* meaning
+  // that word has; for the four in {@link GENERIC_LIFETIME_FROM_1F4} the
+  // switch arm replaces it with the placer's `+0x1F4`. `+0x199` is not
+  // involved: this family measures against `+0x11C`.
+  p.lifetime = GENERIC_LIFETIME_FROM_1F4.has(type)
+    ? (pl.field_1f4 ?? 0)
+    : (pl.lifetime_evt_steps ?? 0);
   // `ActorAlloc` zeroes the object, and no arm the port covers writes
   // `+0x2A0` — which for the lift is its panel's frame counter and so
   // has to start at zero rather than at the group props' -1.

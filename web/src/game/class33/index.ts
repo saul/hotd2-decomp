@@ -9,8 +9,9 @@
  * update and never runs again. See {@link ScriptedScenerySelector} for the
  * jump table.
  *
- * **Only selector 1 is ported.** It is the object stage 5 block 2's room is
- * held by, and stage 2's two riders leave on:
+ * **Two of the twelve are ported.** Selector 4 is the pushable scenery in
+ * `class33/pushable.ts` — stage 1's two chairs. Selector 1 is here: the object
+ * stage 5 block 2's room is held by, and stage 2's two riders leave on:
  *
  * ```
  * ScriptedSceneryDispatch33   FUN_00432FF0   the switch, and g_carrier_object
@@ -55,7 +56,7 @@
  *
  * ## What is not ported, by name
  *
- * * **The other ten sub-handlers.** Selector 2's ten spawns already reach the
+ * * **The other nine sub-handlers.** Selector 2's ten spawns already reach the
  *   player through the bundle's `props`; the rest are unread and the bundle
  *   carries no tail for them, so they keep the nothing they had.
  * * `ActorClaimHitSlot` (`FUN_00409270`), which every arm of the dispatch
@@ -85,9 +86,12 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { vec3 } from "../vec";
+import { ScriptedPushableUpdate33, SCENERY_SKIP_COLLISION }
+  from "./pushable";
 import { ScriptedScenerySelector } from "./state";
 
 export { ScriptedScenerySelector };
+export { ScriptedPushableUpdate33 } from "./pushable";
 
 /**
  * The draw slot whose arms the two routines special-case.
@@ -328,8 +332,13 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
  */
 export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.ScriptedScenery) return;
-  if (obj.hp !== ScriptedScenerySelector.Carrier) return;
-  ScriptedCarrierUpdate33(obj, f);
+  if (obj.hp === ScriptedScenerySelector.Carrier) {
+    ScriptedCarrierUpdate33(obj, f);
+    return;
+  }
+  if (obj.hp === ScriptedScenerySelector.Pushable) {
+    ScriptedPushableUpdate33(obj, f);
+  }
 }
 
 function ScriptedSceneryInit33(obj: Actor, _rng?: Rng): void {
@@ -338,6 +347,24 @@ function ScriptedSceneryInit33(obj: Actor, _rng?: Rng): void {
 
 function ScriptedSceneryDebug33(obj: Actor): ActorDebug {
   if (obj.cls !== SpawnClass.ScriptedScenery) return { summary: "not 0x33" };
+  if (obj.hp === ScriptedScenerySelector.Pushable) {
+    const t = obj.class33Push;
+    const armed = !(obj.flags & SCENERY_SKIP_COLLISION);
+    return {
+      summary: `pushable · slot 0x${(t?.slot ?? 0).toString(16)}`
+        + ` · ${armed ? "armed" : `held (flag ${t?.push_flag ?? -1})`}`,
+      detail: [
+        `sphere ${obj.bodyRadius} · at`
+        + ` (${obj.pos.x.toFixed(2)}, ${obj.pos.y.toFixed(2)},`
+        + ` ${obj.pos.z.toFixed(2)})`,
+        `pushed by ${obj.pushedBy < 0 ? "nothing"
+          : `0x${obj.pushedBy.toString(16).toUpperCase()}`}`
+        + ` · depth ${obj.pushDepth.toFixed(2)}`
+        + ` · despawn flag ${t?.despawn_flag ?? -1}`,
+      ],
+      hot: obj.pushedBy >= 0,
+    };
+  }
   if (obj.hp !== ScriptedScenerySelector.Carrier) {
     return { summary: `selector ${obj.hp} · unported`, hot: false };
   }

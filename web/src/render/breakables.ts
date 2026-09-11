@@ -55,6 +55,17 @@ const SHADOW_SCALE = 10;
 const SHAKE_SPREAD = 0x97;
 const SHAKE_CENTRE = 75;
 const SHAKE_SCALE = 0.01;
+/**
+ * `RisingDoorUpdate`'s (`FUN_004753F0`) own rattle, which is **not** the same
+ * draw as `BreakablePropUpdate`'s: the two axes have different moduli, so a
+ * waiting shutter judders four times as far across as it does in depth.
+ *
+ * `(rand() % 0x191 - 200) * amp * 0.01` in X and `(rand() % 0x65 - 50) * amp *
+ * 0.01` in Z, and the same `0.01`. Reusing the square 0x97/75 draw here would
+ * have been the one-shape-fits-all guess `L27` is about.
+ */
+const DOOR_SHAKE_X: readonly [number, number] = [0x191, 200];
+const DOOR_SHAKE_Z: readonly [number, number] = [0x65, 50];
 /** Where the rattle starts on every stage load. Any constant; one constant. */
 const SHAKE_SEED = 0x52415454;
 
@@ -142,6 +153,11 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // neither does this.
   if (p.family === PropFamily.Falling) return null;
   if (p.family === PropFamily.Generic) return null;
+  // `RisingDoorUpdate` (`FUN_004753F0`) is one `AssetDrawSlot` and no second
+  // draw of any kind, so a shutter casts nothing. Without this arm the default
+  // below gave it the group props' 0x10D0 — a ten-unit disc on the floor under
+  // a door, which is not in the routine.
+  if (p.family === PropFamily.RisingDoor) return null;
   // `ScriptFlagEffectUpdate` (`FUN_00473B90`) draws the effect tree and
   // nothing else -- no second `AssetDrawSlot`, so no shadow.
   if (p.family === PropFamily.ScriptFlagEffect) return null;
@@ -397,10 +413,19 @@ export class BreakableLayer implements System<RenderContext> {
    * the engine's `rand()` is seeded is that the arcade run is reproducible.
    */
   private shake(p: BreakableProp): [number, number] {
+    const draw = ([mod, centre]: readonly [number, number]) =>
+      (this.rng.int(mod) - centre) * p.shake * SHAKE_SCALE;
+    if (p.family === PropFamily.RisingDoor) {
+      // No `> 0.01` floor on this one: the engine reseeds the amplitude at
+      // 0.001 and multiplies unconditionally in between, so a floor an order
+      // of magnitude higher would stop the judder a second early every burst.
+      // X first, then Z, which is the order the two `rand()` calls are in.
+      if (p.shake <= 0) return [0, 0];
+      return [draw(DOOR_SHAKE_X), draw(DOOR_SHAKE_Z)];
+    }
     if (p.shake <= 0.01) return [0, 0];
-    const draw = () =>
-      (this.rng.int(SHAKE_SPREAD) - SHAKE_CENTRE) * p.shake * SHAKE_SCALE;
-    return [draw(), draw()];
+    const sq = [SHAKE_SPREAD, SHAKE_CENTRE] as const;
+    return [draw(sq), draw(sq)];
   }
 
   /**

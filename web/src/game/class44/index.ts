@@ -14,10 +14,11 @@
  * that is hit points for a combat actor and the *group id* for a class-0x41
  * placer. Three classes, three meanings, one offset.
  *
- * Eighteen builders. Three are read and ported: selector 16, which hands out
+ * Eighteen builders. Four are read and ported: selector 16, which hands out
  * items and is the only one that shares `g_item_set_countdown` with class
- * 0x41; selector 17, the branch writer; and selector 0, the animated effect
- * tree stage 1's window is made of. The rest keep their slot and do nothing,
+ * 0x41; selector 17, the branch writer; selector 0, the animated effect tree
+ * stage 1's window is made of; and selector 11, the door that slides up out of
+ * the way of the zombies behind it. The rest keep their slot and do nothing,
  * for the same reason class 0x41's other 78 do — an unimplemented selector
  * running the wrong builder is the bug that had the cat walking at the player.
  */
@@ -29,6 +30,7 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { PlaceFallingContainer } from "./container";
+import { PropBuildRisingDoor } from "./rising_door";
 import { PropBuildScriptFlagEffect } from "./script_flag_effect";
 import { PlaceStoryModeSwitch } from "../class41/triggers";
 
@@ -45,6 +47,15 @@ export enum Class44Selector {
    * that plays on a script flag. Two spawns, both stage 1's window halves.
    */
   ScriptFlagEffect = 0,
+  /**
+   * `PropBuildRisingDoor` (`FUN_00473410`) — a door that slides straight up on
+   * a script flag. Two spawns: stage 3's roller shutter and stage 5's.
+   *
+   * **Not a hinge and not the HUD shutter.** Selectors 1, 2 and 4 are the
+   * hinges, and `script/state/shutter.ts` is the letterbox. This one is
+   * scenery that translates. See `class44/rising_door.ts`.
+   */
+  RisingDoor = 11,
   /** `PlaceFallingContainer` (`FUN_00473940`) — the item container. */
   FallingContainer = 16,
   /**
@@ -86,6 +97,13 @@ export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
     if (!pl) return;
     G.g_breakable_props.push(PlaceStoryModeSwitch(pl));
   },
+  [Class44Selector.RisingDoor]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "rising_door");
+    if (!pl) return;
+    G.g_breakable_props.push(PropBuildRisingDoor(pl));
+  },
   [Class44Selector.FallingContainer]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
       (q) => q.at === obj.at && q.container === "falling");
@@ -126,10 +144,12 @@ export const Class44PlacerHandler: ClassHandler = {
 };
 
 export * from "./container";
+export * from "./rising_door";
 export * from "./script_flag_effect";
 
 /**
- * The same shape: a placer that builds and dies. Only selector 16 is
- * ported.
+ * The same shape: a placer that builds and dies. Four of the eighteen
+ * selectors have a builder — see {@link g_class44_subtypes}; the rest run
+ * nothing, which is what the sparse table is for.
  */
 registerClass(SpawnClass.PropPlacer, Class44PlacerHandler);

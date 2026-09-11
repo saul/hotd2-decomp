@@ -562,6 +562,219 @@ def check_class31_literal_clips() -> None:
                  f"exporter's bake list and {len(stages)} exported stages")
 
 
+def check_class33_selectors() -> None:
+    """Class 0x33's two decoded sub-handlers, producer against consumer.
+
+    `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches ``obj+0x11C`` into
+    eleven objects that read the same descriptor bytes eleven ways, and the
+    port has two of them: selector 1 through the ``class33`` block and
+    selector 4 through ``class33_push``. The port **takes which block arrived
+    as the selector** -- `director.ts` spawns on either being present and
+    `ScriptedSceneryUpdate33` picks the routine off ``obj.hp`` -- so two things
+    have to hold in the bundle and nothing else was checking either:
+
+    1. **exactly one block per placement.** Both would be `L3` written into
+       the bundle: selector 1's ``tail+0x0C`` is an ``op_`` path slot and
+       selector 4's is a script flag index, so a spawn carrying both would
+       have one handler's names over the other's bytes.
+    2. **the draw slot travels.** Selector 4's model is named by the
+       *descriptor*, not by the class, so it reaches the glTF only through
+       `sceneryDrawSlots`. Without that the placement exists, the actor is
+       made, the push works and the client has nothing to clone -- class
+       0x52's old bug from the other side, and invisible from the port alone.
+
+    This is the second half of what the stage-1 chair report needed. The first
+    half is `port.test.ts`'s selector-4 block, which drives the routines; this
+    is the half that says the numbers they drive on are in the file.
+    """
+    stages = sorted((ROOT / "extract" / "player").glob("stage*/stage*.script.json"))
+    if not stages:
+        notes.append("class 0x33's two tail blocks unchecked (no bundle)")
+        return
+    import json
+    from struct import unpack_from
+    n_carrier = n_push = 0
+    for path in stages:
+        doc = json.loads(path.read_text())
+        places = (doc.get("characters") or {}).get("placements") or []
+        # **The script's own spawn records are the producer's input**, and they
+        # are in the same file -- so the count comes from the data rather than
+        # from a number written here, and narrowing `slot_drawn_spawn` back
+        # fails this rather than quietly reporting a smaller total. `hp` is the
+        # selector; 1 and 4 are the two the port runs.
+        want: dict[int, int] = {}
+        for blk in doc.get("blocks") or []:
+            for step in blk.get("steps") or []:
+                for op in step.get("ops") or []:
+                    for sp in op.get("spawns") or []:
+                        if sp.get("class") == 0x33 and sp.get("hp") in (1, 4):
+                            want[sp["at"]] = sp["hp"]
+        have = {p["at"] for p in places if p.get("class") == 0x33}
+        for at, hp in sorted(want.items()):
+            if at not in have:
+                failures.append(
+                    f"{path.parent.name} spawn {at:#06x}: selector {hp} is "
+                    f"spawned by the script and has no placement, so "
+                    f"`SpawnSlotActors` can never make it -- widen "
+                    f"`slotDrawnSpawn` and `slot_drawn_spawn` together")
+        push_slots: set[int] = set()
+        for p in places:
+            if p.get("class") != 0x33:
+                continue
+            carrier, push = p.get("class33"), p.get("class33_push")
+            at, hp = p.get("at", 0), p.get("hp")
+            if carrier and push:
+                failures.append(
+                    f"{path.parent.name} spawn {at:#06x}: carries both "
+                    f"`class33` and `class33_push` -- two sub-handlers' "
+                    f"readings of the same bytes, which is `L3` in the bundle")
+            if not carrier and not push:
+                failures.append(
+                    f"{path.parent.name} spawn {at:#06x}: selector {hp} has a "
+                    f"placement and no tail block, so `SpawnSlotActors` will "
+                    f"refuse it and the placement is dead weight")
+            if carrier:
+                n_carrier += 1
+                if hp != 1:
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: `class33` on "
+                        f"selector {hp}, but only selector 1 reads those bytes")
+            if push:
+                n_push += 1
+                if hp != 4:
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: `class33_push` "
+                        f"on selector {hp}, but only selector 4 reads those "
+                        f"bytes")
+                slot = push.get("slot")
+                if isinstance(slot, int) and slot > 0:
+                    push_slots.add(slot)
+                else:
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: selector 4 with "
+                        f"no draw slot -- nothing can be cloned for it")
+        if not push_slots:
+            continue
+        # ...and the model itself, out of the glb's own node names. The hidden
+        # `slots_actor` rig is where `render/slotmodels.ts` finds a template,
+        # and a missing part there is an actor that pushes and is not drawn.
+        glb = path.parent / f"{path.parent.name}.glb"
+        if not glb.exists():
+            continue
+        raw = glb.read_bytes()
+        off, names = 12, []
+        while off + 8 <= len(raw):
+            ln, typ = unpack_from("<I4s", raw, off)
+            if typ == b"JSON":
+                names = [n.get("name", "")
+                         for n in json.loads(raw[off + 8:off + 8 + ln])["nodes"]]
+                break
+            off += 8 + ln
+        for slot in sorted(push_slots):
+            want = f"slots_actor_fixed000_slot_{slot:04x}"
+            if want not in names:
+                failures.append(
+                    f"{path.parent.name}: selector-4 draw slot {slot:#06x} is "
+                    f"in a placement but has no `{want}` part in the glTF -- "
+                    f"the object is pushable and invisible")
+    notes.append(f"class 0x33: {n_carrier} selector-1 and {n_push} selector-4 "
+                 f"tails across {len(stages)} bundles, each with exactly one "
+                 f"block and a model to draw")
+
+
+#: The crawlers' undamaged attack, as the EXE holds it at `0x00566E70`:
+#: ``(character types, body condition, index, strike clip, hit frame)``.
+#: Types 0x07, 0x0B and 0x0C share the row; `hod2lib.combat.attack_hit_lands`
+#: is the long form and `tools/verify_combat.py` checks the numbers against
+#: the EXE. Here they are only the join key into the bundle.
+CRAWLER_TYPES = (0x07, 0x0B, 0x0C)
+CRAWLER_CONDITION = 4
+CRAWLER_INDEX = 2
+CRAWLER_CLIP = 997
+CRAWLER_HIT_FRAME = 40
+
+
+def check_crawler_whiff() -> None:
+    """The attack that is meant to miss has to be **in** the bundle to miss.
+
+    `ZombieStateStrike` (`FUN_00455A40`) fires its hit on
+    ``obj+0x19C == entry+0x08`` exactly (``00455bdf``) and leaves the state at
+    ``g_motion_play_length[obj+0x1B4] - 1`` (``00455c0b``), so the shipped
+    condition-4 entry of clip 997 at hit frame 40 -- against a play length of
+    20 -- can never land. That is the engine's undamaged crawler, and it swings
+    and misses every time.
+
+    The exporter used to drop the entry as an impossible row, which left the
+    port drawing an index the bundle had no attack for; the substitute behind
+    that draw then handed the actor entry 3, a different clip at hit frame 3
+    that connects, and **the crawlers hurt the player where the engine's do
+    not**. There is nothing in `game/` left to check -- `ZombiePickAttack`
+    indexes blind now, the same as the engine -- so the only thing that can go
+    wrong again is the *bundle*, in either of two ways: the entry dropped
+    again, or the entry kept and clip 997 not baked, which is
+    `MotionPlayLength` 0 and a strike that ends on its first frame.
+
+    Both are asked of every exported stage that places one of these character
+    types. With no bundle this is a note, exactly as
+    {@func:`check_class31_literal_clips`} does it -- a check that cannot run
+    must not read as one that passed.
+    """
+    stages = sorted((ROOT / "extract" / "player").glob("stage*/stage*.script.json"))
+    if not stages:
+        notes.append("the crawler's unreachable hit frame is unchecked "
+                     "(no bundle to look in)")
+        return
+    import json
+    seen = 0
+    for path in stages:
+        doc = json.loads(path.read_text())
+        chars = doc.get("characters") or {}
+        placed = {p.get("char_type") for p in (chars.get("placements") or [])
+                  if p.get("class") == 0x30}
+        for key, t in (chars.get("types") or {}).items():
+            ct = int(key)
+            if ct not in CRAWLER_TYPES or ct not in placed:
+                continue
+            rel = f"{path.parent.name}/{path.name} type {ct:#04x}"
+            row = (t.get("attacks") or {}).get(str(CRAWLER_CONDITION)) or {}
+            entry = row.get(str(CRAWLER_INDEX))
+            if entry is None:
+                failures.append(
+                    f"{rel}: body condition {CRAWLER_CONDITION} carries no "
+                    f"attack {CRAWLER_INDEX}, so an undamaged crawler draws an "
+                    f"index the bundle cannot satisfy -- the engine's own swing "
+                    f"is missing and whatever the port does instead is not it")
+                continue
+            seen += 1
+            if entry.get("strike") != CRAWLER_CLIP \
+                    or entry.get("hit_frame") != CRAWLER_HIT_FRAME:
+                failures.append(
+                    f"{rel}: attack {CRAWLER_INDEX} is clip "
+                    f"{entry.get('strike')} at hit frame "
+                    f"{entry.get('hit_frame')}, not {CRAWLER_CLIP} at "
+                    f"{CRAWLER_HIT_FRAME}")
+                continue
+            clip = (t.get("motions") or {}).get(str(CRAWLER_CLIP))
+            if not clip:
+                failures.append(
+                    f"{rel}: attack {CRAWLER_INDEX} names clip "
+                    f"{CRAWLER_CLIP} and the bundle does not bake it, so the "
+                    f"swing has no length and ends on its first frame")
+                continue
+            play = clip.get("play") or 0
+            if play <= 0 or entry["hit_frame"] < play:
+                failures.append(
+                    f"{rel}: clip {CRAWLER_CLIP} has play length {play}, "
+                    f"which puts hit frame {entry['hit_frame']} back inside "
+                    f"the clip -- the swing would connect")
+    if not seen:
+        failures.append("no exported stage places a crawler with its "
+                        "condition-4 attack, so nothing was checked")
+        return
+    notes.append(f"the crawler's unreachable hit frame checks out in {seen} "
+                 f"exported (stage, character type) pairs")
+
+
 def check_docs_citations(named: dict[str, str]) -> None:
     """`docs/` cites the binary too, and nothing was checking those.
 
@@ -618,6 +831,8 @@ def main() -> int:
     check_snapshot_rules()
     check_frame_math()
     check_class31_literal_clips()
+    check_class33_selectors()
+    check_crawler_whiff()
     check_docs_citations(named)
 
     for n in notes:

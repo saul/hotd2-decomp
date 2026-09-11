@@ -41,7 +41,8 @@ import { approachTables, cameraTracking, RING_SET_FOR_CHAR0 } from "./approach";
 import { build, goreEntry, rigEntry } from "./charbuild";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
-         CLASS20_IDLE_MOTIONS, bake, humanoidMotionIds, introFor, motionFor,
+         CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION,
+         bake, humanoidMotionIds, introFor, motionFor,
          BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
@@ -235,18 +236,38 @@ export function class51Tail(rec: Spawn): Record<string, unknown> {
 export const CLASS33_CARRIER = 1;
 
 /**
+ * The second class-0x33 sub-handler the player runs: `obj+0x11C == 4`.
+ *
+ * `ScriptedPushableUpdate33` (`FUN_00433B70`), off the same switch. A piece of
+ * scenery an actor shoves out of its way: it draws `tail+0x00` and, while
+ * `obj+0x34` bit `0x8000` is clear, applies whatever
+ * `ColiTestSphereAgainstActors` recorded at `obj+0x138`/`+0x13C`/`+0x140` --
+ * a tenth of the penetration along the reversed normal, which is
+ * `ZombiePushOutOfWorldAndActors`' own arithmetic. Two shipped spawns, both
+ * stage 1: `0x1A40` and `0x1A74`, asset slot 4196 = `komono_7.bin` part 0.
+ */
+export const CLASS33_PUSHABLE = 4;
+
+/**
  * Which spawns of a {@link SLOT_DRAWN_CLASSES} class the bundle carries a
  * placement for.
  *
  * Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
- * eleven, and only selector 1's tail is decoded below -- selector 2's props
- * already reach the player through `props`, and the other nine are unread.
- * Emitting them would be a placement whose `class33` block is a different
- * handler's bytes read under this one's names, which is `L3` written into the
- * bundle.
+ * eleven, and only **two** sub-handlers are decoded below -- selector 1 by
+ * {@link class33Tail} and selector 4 by {@link class33PushTail}. Selector 2's
+ * props already reach the player through `props`, and the other eight are
+ * unread. Emitting one of those would be a placement whose tail block is a
+ * different handler's bytes read under one of these two's names, which is `L3`
+ * written into the bundle.
+ *
+ * **The two blocks are mutually exclusive and the port reads their presence as
+ * the selector**, so widening this is only half the change: see the gate on
+ * `class33`/`class33_push` in {@link resolveCharacters}.
  */
 export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
-  if (cls === 0x33) return rec.hp === CLASS33_CARRIER;
+  if (cls === 0x33) {
+    return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE;
+  }
   return true;
 }
 
@@ -294,6 +315,72 @@ export function class33Tail(rec: Spawn): Record<string, unknown> {
     commit_flag: rec.param(0x20, "u8") ?? 0xff,
     despawn_flag: rec.param(0x21, "u8") ?? 0xff,
     effect: [0, 1, 2, 3, 4, 5].map((k) => rec.param(0x24 + 4 * k, "f32") ?? 0),
+  };
+}
+
+/**
+ * Class 0x33 **selector 4's** tail, as `ScriptedPushableUpdate33`
+ * (`FUN_00433B70`) reads it.
+ *
+ * Every offset below is from `disassemble_bytes` over
+ * `0x00433B70`..`0x00433C31` rather than from the pseudocode, because the
+ * function is one the decompiler truncates -- see the `L35` note at the end.
+ *
+ * ```
+ * tail+0x00  i32  draw slot                       -> obj+0x13F0
+ * tail+0x04  i32  shot mesh, -1 for none          -> obj+0x14C
+ * tail+0x08  f32  the sphere, only when +0x04 is -1
+ * tail+0x0C  u8   script flag that clears obj+0x34 bit 0x8000
+ * tail+0x0D  u8   script flag that despawns it
+ * ```
+ *
+ * The seed runs once, gated on `obj+0x1312` being zero
+ * (`MOV DX, word ptr [ESI + 0x1312]` / `TEST DX, DX` at `0x00433B9A`), and
+ * ends by **incrementing** that word rather than storing 1 (`INC EDX` at
+ * `0x00433BE6`). It ORs `obj+0x34` with `0x1` unconditionally, then splits on
+ * `tail+0x04`:
+ *
+ * * `-1` writes the `f32` at `tail+0x08` to `obj+0x124` **and** `obj+0x128`
+ *   -- two separate loads of `[ECX + 8]` at `0x00433BD4` and `0x00433BDD`, so
+ *   the object gets a *body* sphere and is pushable;
+ * * anything else ORs `0x40` then `0x10` and puts the mesh id on `obj+0x14C`,
+ *   which is the mesh shot test the port has not got.
+ *
+ * Both shipped spawns carry `-1`, so both are body spheres of 3.5.
+ *
+ * `push_flag` is the flag whose byte is at `tail+0x0C`
+ * (`MOV DL, byte ptr [ECX + 0xc]` at `0x00433BF1`); when it reads 1,
+ * `AND AH, 0x7f` at `0x00433C00` clears `obj+0x34` bit `0x8000` and the object
+ * becomes pushable from that frame on. That is also the bit
+ * `ColiTestSphereAgainstActors` skips an object on (`0x80008000`), so one bit
+ * both holds the object still and keeps it out of the collision list -- which
+ * is why the arming flag is named for the push and not for the bit.
+ *
+ * `despawn_flag` is the byte at `tail+0x0D`
+ * (`MOV AL, byte ptr [ECX + 0xd]` at `0x00433B80`) and its test is the **first
+ * thing in the routine**: a raised flag calls `ActorDespawn` and returns
+ * before the seed, the push and the draw. Neither flag index has a "none" test
+ * in front of it, exactly as selector 1's two do not.
+ *
+ * `L35`: Ghidra ends this function's body at `0x00433C5C`, on the
+ * `MatrixStackPop` call, and the pseudocode ends there too. The real tail runs
+ * to `0x00433CD3` and holds `PUSH ESI` / `CALL 0x00405160` at `0x00433CC6` --
+ * `RegisterForShotTest`, which is what puts the object in the per-frame
+ * dynamic list `ColiTestSphereAgainstActors` walks, and so the reason an actor
+ * can find it at all.
+ *
+ * Its own block and **not** {@link class33Tail}'s: these are two handlers'
+ * readings of the same bytes, and `tail+0x0C` is selector 1's `op_` path slot.
+ * Two shipped spawns, both `spawn_obj` (opcode 0x0B) and both stage 1:
+ * `0x1A40` and `0x1A74`.
+ */
+export function class33PushTail(rec: Spawn): Record<string, unknown> {
+  return {
+    slot: rec.param(0x00, "i32") ?? 0,
+    shot_mesh: rec.param(0x04, "i32") ?? -1,
+    shot_radius: rec.param(0x08, "f32") ?? 0,
+    push_flag: rec.param(0x0c, "u8") ?? 0xff,
+    despawn_flag: rec.param(0x0d, "u8") ?? 0xff,
   };
 }
 
@@ -632,7 +719,17 @@ export async function resolveForStage(
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
     const class14 = cls === 0x14 ? class14Tail(rec) : null;
-    const class33 = cls === 0x33 ? class33Tail(rec) : null;
+    // **Gated on the selector, not on the class.** Class 0x33 is eleven
+    // objects behind one id and these two blocks are two of them reading
+    // the same bytes; emitting both for one spawn, or either for a
+    // sub-handler that is neither, is `L3` written into the bundle. The
+    // port reads which key is present as the selector, so exactly one of
+    // them is ever set.
+    const is33 = cls === 0x33;
+    const class33 = is33 && rec.hp === CLASS33_CARRIER
+      ? class33Tail(rec) : null;
+    const class33Push = is33 && rec.hp === CLASS33_PUSHABLE
+      ? class33PushTail(rec) : null;
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
@@ -716,6 +813,7 @@ export async function resolveForStage(
     p.class53 = class53;
     p.class14 = class14;
     p.class33 = class33;
+    p.class33_push = class33Push;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
     // spawn wears. 97 of the game's spawns carry one and every list matches
     // its character's own family, which is what says the tail offsets are
@@ -839,6 +937,9 @@ export async function resolveForStage(
     if (cls === 0x20) {
       entryClips.push(...CLASS20_IDLE_MOTIONS, CLASS20_DEATH_MOTION);
     }
+    // Class 0x21's freed clip. The idle comes from `MOTION_RULES`; this is the
+    // one `RescueTargetHeldState` swaps to when the target is rescued.
+    if (cls === 0x21) entryClips.push(CLASS21_FREED_MOTION);
     entryClips.push(...targetScriptMotions(tscript));
     entryClips.push(...targetScriptMotions(ascript));
     if (cls === 0x10) {

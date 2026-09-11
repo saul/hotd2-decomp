@@ -120,6 +120,15 @@ CHECKS: list[Check] = [
           "enemy the character layer can build, and two have no character "
           "type at all",
           NEEDS_BUNDLE),
+    Check("verify_prop_slots", ".",
+          ["python3", "tools/verify_prop_slots.py"],
+          "that every asset slot a placed class-0x41 or class-0x44 prop will "
+          "pass to `AssetDrawSlot` has a model in its own bundle -- the check "
+          "that would have caught stage 3's roller shutter and the stage 5 "
+          "van's body, both of which were placed, updated and invisible "
+          "because nothing carried their geometry, which from the level looks "
+          "exactly like a placement that was never exported",
+          NEEDS_BUNDLE),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",
@@ -139,6 +148,23 @@ CHECKS: list[Check] = [
           "check that reads the handover from one stage to the next, and so "
           "the only thing that can say stage 3 and stage 4 have two entry "
           "points each",
+          NEEDS_GAME),
+    Check("verify_looping_se", ".",
+          ["python3", "tools/verify_looping_se.py", "--game-dir",
+           "{game_dir}"],
+          "that `PlaySoundId`'s two loop tables really do pair index for "
+          "index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` "
+          "file ships, which is the only thing that says a stop id is a "
+          "control word rather than a sound, and so the only thing that makes "
+          "the chainsaw a loop rather than a one-shot",
+          NEEDS_GAME),
+    Check("verify_combat", ".",
+          ["python3", "tools/verify_combat.py", "--game-dir", "{game_dir}"],
+          "that the shot and damage tables hold together across every "
+          "character type -- and the only place the *exact* set of attacks "
+          "the engine can never land is asserted, which is what stops the "
+          "crawlers' condition-4 swing being filtered out again as an "
+          "impossible row",
           NEEDS_GAME),
     Check("verify_effects", ".",
           ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],

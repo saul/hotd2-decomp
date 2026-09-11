@@ -398,6 +398,15 @@ export class Placement {
    */
   class33: Record<string, unknown> | null = null;
   /**
+   * Class 0x33 **selector 4's** tail -- the draw slot, the sphere, and the two
+   * script flags that arm the push and take the object off the field.
+   *
+   * Selector 4 only, and never set on the same placement as {@link class33}:
+   * they are two sub-handlers' readings of the same bytes, and the port takes
+   * which key is present as the selector.
+   */
+  class33_push: Record<string, unknown> | null = null;
+  /**
    * The spawn's attachment list -- `obj+0x1170`, ids into
    * `g_actor_attachment_records`.
    *
@@ -462,6 +471,7 @@ export class Placement {
     if (this.class53) d.class53 = this.class53;
     if (this.class14) d.class14 = this.class14;
     if (this.class33) d.class33 = this.class33;
+    if (this.class33_push) d.class33_push = this.class33_push;
     if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }

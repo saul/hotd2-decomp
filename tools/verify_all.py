@@ -114,6 +114,14 @@ CHECKS: list[Check] = [
     Check("test:camera", "web", ["npm", "run", "--silent", "test:camera"],
           "that a camera path seats where the exe's own evaluation puts it",
           NEEDS_BUNDLE),
+    Check("flag_gates", "web",
+          ["node", "tools/run_ts.mjs", "tools/flag_gates.ts"],
+          "that every `wait_script_flag` gate no `set_script_flag` on the "
+          "*route* to it can open has the actor that opens it placed on that "
+          "same route -- the only check that reads a gate per entry block "
+          "rather than per bundle, which is the difference between stage 3's "
+          "block 2 on the entry-0 route and on the entry-7 one",
+          NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "
@@ -129,6 +137,15 @@ CHECKS: list[Check] = [
           "because nothing carried their geometry, which from the level looks "
           "exactly like a placement that was never exported",
           NEEDS_BUNDLE),
+    Check("verify_prop_pose", ".",
+          ["python3", "tools/verify_prop_pose.py", "--game-dir", "{game_dir}"],
+          "that every class-0x41 generic prop is posed in the order its own "
+          "update routine poses it -- read out of the EXE per type, matched to "
+          "the field each `MatrixRotate*` is handed. `render/breakables.ts` "
+          "composed one order for all fifty, and it was type 51's alone: "
+          "twenty shipped spawns came out somewhere else, four of them by more "
+          "than a degree and the worst by 19.65",
+          NEEDS_GAME),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",

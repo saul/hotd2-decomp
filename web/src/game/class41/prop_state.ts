@@ -73,6 +73,27 @@ export enum PropFamily {
    * `PropExpireByStepLifetime` — the remove flag is its whole lifetime.
    */
   RisingDoor = 9,
+  /**
+   * `PropDrawOnlyType53` (`FUN_0046EBD0`) — class 0x41 type 53, two spawns in
+   * stage 5.
+   *
+   * Its own family and not {@link Generic} for the reason
+   * {@link StoryModeSwitch} is: it does **not** call
+   * `PropExpireByStepLifetime`. It inlines a variant with the scene-1 sweep
+   * left out, and a shared arm would run a sweep the routine does not have.
+   * Both its spawns are in scene 4, where that sweep could never fire — which
+   * is exactly the argument `L27` is about, so it is not made.
+   */
+  DrawOnlyType53 = 10,
+  /**
+   * `PropDrawOnlyType54` (`FUN_0046EDC0`) — class 0x41 type 54, one spawn in
+   * stage 5 and one in the training scene.
+   *
+   * No lifetime prologue either, and no lifetime of any kind while its script
+   * flag is down: the 300-frame drift is its only exit. See
+   * `class41/draw_only.ts`.
+   */
+  DrawOnlyType54 = 11,
 }
 
 /**
@@ -177,6 +198,12 @@ export interface BreakableProp {
    * script flag that starts the rise, and
    * several other generic routines use it as a state timer. Check the family
    * before reading it, exactly as for `kind`/`member` at `+0x290`.
+   *
+   * And for generic types **31** and **33** it is the cursor into a **slot
+   * strip**: their routines draw `obj+0x28C + obj+0x2A0` and step it one
+   * frame at a time, 31 wrapping at {@link BreakableProp.removeFlag} and 33
+   * dying there. `PropDrawOnlyType54` uses the same word as the frame count
+   * of its drift.
    */
   storyItem: number;      // +0x2A0
   /** `obj+0x196` — the value of `g_evt_step_index` it last saw. */
@@ -208,6 +235,14 @@ export interface BreakableProp {
   roll: number;           // +0x1D4
   /** `obj+0x1D8` — BAMS added to `pitch` each frame while it falls. */
   spin: number;           // +0x1D8
+  /**
+   * `obj+0x1DC` — BAMS added to `yaw` each frame.
+   *
+   * Only {@link PropFamily.DrawOnlyType54} has one, and `PlaceGenericProp`
+   * case 0x36 seeds it `-0x400` against {@link BreakableProp.spin}'s `0x300`,
+   * so the drift tumbles on two axes at once. Zero for every other family.
+   */
+  yawSpin: number;        // +0x1DC
   /**
    * `obj+0x1E0` — BAMS added to `roll` each frame. Only the falling container
    * tumbles on two axes; the group props keep `roll` at zero.
@@ -378,6 +413,12 @@ export interface BreakableProp {
    * count from {@link BreakableProp.stepsElapsed} (`+0x197`) even though both
    * are incremented on the same frames: the engine keeps two, one a `char`
    * charged against the lifetime and one an `int` that is not.
+   *
+   * And a fourth: for generic types **31** and **33** it is the **length of
+   * the slot strip** their routine plays, which `PlaceGenericProp` copies
+   * from the placer's `+0x6C` — the spawn descriptor's third orientation
+   * word. So that word is a count and a Z rotation at the same time, and both
+   * readings are real. See `GENERIC_SLOT_STRIP` in `class41/generic.ts`.
    */
   removeFlag: number;     // +0x2A4
   /**
@@ -459,6 +500,7 @@ export function makeBreakableProp(id: number, group: number,
     vx: 0, vy: 0, vz: 0,
     pitch: 0, yaw: 0, roll: 0,
     spin: 0,
+    yawSpin: 0,
     rollSpin: 0,
     restPitch: 0,
     hingeB: 0,

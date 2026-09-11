@@ -39,7 +39,9 @@ import {
   BreakableState, PropFamily, type BreakableProp,
 } from "../game/class41/prop_state";
 import { KIND_SHADOW } from "../game/class41/kinded";
-import { GENERIC_DRAW_SLOT } from "../game/class41/generic";
+import {
+  GENERIC_DRAW_SLOT, GENERIC_POSE_ORDER, GENERIC_SLOT_STRIP, PoseOrder,
+} from "../game/class41/generic";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
 
@@ -121,6 +123,70 @@ const LIFT_PANEL_RISE = 1.0;
 const LIFT_NEAR_FOLD_BIAS = -0x4000;
 
 /**
+ * `Ry.Rz.Rx`, which is what this renderer composed for every prop in every
+ * family until `GENERIC_POSE_ORDER` was read out of the EXE.
+ *
+ * `[open]` It stays the default for the families whose own routine has **not**
+ * been read for its rotation order — the group props, the kinded props, the
+ * break puff, the story-mode switch and `PropUpdateType75`. Keeping the
+ * behaviour those four had is deliberate: changing it would be a guess in the
+ * other direction. `RisingDoorUpdate` (`FUN_004753F0`) is the one that is
+ * read, and it is one `MatrixRotateY` and nothing else, so it gets a row.
+ */
+const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
+
+/**
+ * The order each non-generic family composes, where its routine has been read.
+ *
+ * * {@link PropFamily.Falling} — `FallingContainerUpdate` draws `Rz.Ry.Rx`,
+ *   the same order `BreakablePropGroundContact`'s hull test uses, so box and
+ *   model agree.
+ * * {@link PropFamily.ScriptFlagEffect} — `EffectPoseNode` (`FUN_0040D9D0`)
+ *   is `RotZ; RotY; RotX` after its translate, and the port has already
+ *   resolved its three angles into `pitch`/`yaw`/`roll`, so the effect tree's
+ *   nodes ride this rather than a fourth arm.
+ * * {@link PropFamily.RisingDoor} — `RisingDoorUpdate` (`FUN_004753F0`) is
+ *   `MatrixTranslate` then **one** `MatrixRotateY` and then its draw. Both
+ *   shipped shutters carry a zero pitch and roll, because
+ *   `PropBuildRisingDoor` (`FUN_00473410`) writes only `obj+0x1D0`, so this
+ *   row changes no pixel today and is the routine written out rather than
+ *   three rotations it does not make.
+ * * The two draw-only types are `Rz.Ry.Rx`, from their own rows in
+ *   {@link GENERIC_POSE_ORDER}.
+ */
+const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
+  [PropFamily.Falling]: PoseOrder.RollYawPitch,
+  [PropFamily.ScriptFlagEffect]: PoseOrder.RollYawPitch,
+  [PropFamily.RisingDoor]: PoseOrder.YawOnly,
+  [PropFamily.DrawOnlyType53]: PoseOrder.RollYawPitch,
+  [PropFamily.DrawOnlyType54]: PoseOrder.RollYawPitch,
+};
+
+/**
+ * The order this prop's own routine applies pitch, yaw and roll in.
+ *
+ * A table of one per family and one per generic type, because that is what
+ * the engine has: fifty class-0x41 routines each with their own sequence of
+ * `MatrixRotate*` calls. A generic type with no row, or one whose source the
+ * read could not attribute ({@link PoseOrder.Unread}), falls back to the
+ * family default rather than guessing — see `tools/verify_prop_pose.py`, which
+ * is what says the rows are right.
+ */
+function PoseOrderFor(p: BreakableProp): string {
+  if (p.family === PropFamily.Generic) {
+    const order = GENERIC_POSE_ORDER[p.kind];
+    if (order !== undefined && order !== PoseOrder.Unread) return order;
+    return GENERIC_FAMILY_DEFAULT;
+  }
+  // The two draw-only families have rows in `GENERIC_POSE_ORDER` as well --
+  // they are class-0x41 types 53 and 54 -- but they are their own families
+  // here, so they are read from the table by number rather than by `p.kind`,
+  // which for them is the type and would work, but only by coincidence.
+  const own = FAMILY_POSE_ORDER[p.family];
+  return own ?? GENERIC_FAMILY_DEFAULT;
+}
+
+/**
  * Which model a prop draws.
  *
  * For everything but the generic family this is `obj+0x28C` and nothing else.
@@ -131,10 +197,17 @@ const LIFT_NEAR_FOLD_BIAS = -0x4000;
  */
 function DrawSlotFor(p: BreakableProp): number | null {
   if (p.family === PropFamily.Lift) return LIFT_CAR_SLOT;
+  // The two draw-only families each draw `obj+0x28C` and nothing else.
+  if (p.family === PropFamily.DrawOnlyType53
+      || p.family === PropFamily.DrawOnlyType54) return p.slot;
   // `-1` as a `u16`: the engine's "draw nothing", which `KindedPropUpdate`
   // writes over a prop it has hidden.
   if (p.slot === SLOT_NONE && p.family !== PropFamily.Generic) return null;
   if (p.family !== PropFamily.Generic) return p.slot;
+  // `AssetDrawSlot((s16)obj+0x28C + (s32)obj+0x2A0)` — types 31 and 33 play a
+  // strip, and `storyItem` is the cursor their routine steps. Everything else
+  // in the family passes `obj+0x2A0` to nothing.
+  if (GENERIC_SLOT_STRIP.has(p.kind)) return p.slot + p.storyItem;
   const drawn = GENERIC_DRAW_SLOT[p.kind];
   return drawn === undefined ? p.slot : drawn;
 }
@@ -302,27 +375,28 @@ export class BreakableLayer implements System<RenderContext> {
 
       const [sx, sz] = this.shake(p);
       l.node.position.set(p.x + sx, p.y, p.z + sz);
-      // Ry * Rz * Rx, the engine's order — the same composition the hull test
-      // in `BreakablePropGroundContact` uses, so the box and the model agree.
       l.node.rotation.set(0, 0, 0);
       if (l.lift) {
         this.poseLift(l.lift, p);
-      } else if (p.family === PropFamily.Falling
-                 || p.family === PropFamily.ScriptFlagEffect) {
-        // `FallingContainerUpdate` draws Rz * Ry * Rx; the others Ry * Rz * Rx.
-        // The same order its hull test uses, so box and model agree.
-        //
-        // `EffectPoseNode` (`FUN_0040D9D0`) is the same order for the same
-        // reason -- `RotZ; RotY; RotX` after its translate -- and the port has
-        // already resolved its three angles into `pitch`/`yaw`/`roll`, so the
-        // effect tree's nodes ride this arm rather than a fourth one.
-        l.node.rotateZ(p.roll * BAMS_TO_RAD);
-        l.node.rotateY(p.yaw * BAMS_TO_RAD);
-        l.node.rotateX(p.pitch * BAMS_TO_RAD);
       } else {
-        l.node.rotateY(p.yaw * BAMS_TO_RAD);
-        l.node.rotateZ(p.roll * BAMS_TO_RAD);
-        l.node.rotateX(p.pitch * BAMS_TO_RAD);
+        // Each routine's own order, read out of the EXE. `PoseOrder`'s value
+        // *is* the sequence of `MatrixRotate*` calls, left to right as the
+        // engine makes them, so this loop is the routine's draw block.
+        //
+        // For the generic family that comes per type from
+        // `GENERIC_POSE_ORDER` -- eighteen of them compose `Rz.Ry.Rx` and only
+        // `PropDrawOnlyType51` composes `Ry.Rz.Rx`, which is the one this
+        // renderer used for all fifty until `tools/verify_prop_pose.py` was
+        // written. For every other family it is the family's single order:
+        // `FallingContainerUpdate` and `ScriptFlagEffectUpdate` -- whose
+        // nodes are posed by `EffectPoseNode` (`FUN_0040D9D0`) -- draw
+        // `Rz.Ry.Rx`, which is also the order `BreakablePropGroundContact`'s
+        // hull test uses, so box and model agree.
+        for (const axis of PoseOrderFor(p)) {
+          if (axis === "Z") l.node.rotateZ(p.roll * BAMS_TO_RAD);
+          else if (axis === "Y") l.node.rotateY(p.yaw * BAMS_TO_RAD);
+          else l.node.rotateX(p.pitch * BAMS_TO_RAD);
+        }
       }
 
       if (l.shadow) {

@@ -5909,6 +5909,50 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
   }
 
+  // Wait bit 0x1000 is **three** conditions (`0x0048B2F8`): the arm only
+  // applies while `g_scene_state_major_entered` is 2, and it then releases on
+  // `g_camera_settled` **or** `g_camera_free`. The port read the middle one
+  // alone, which is wrong in both directions — and the direction that cost a
+  // stage is the missing `g_camera_free`, because
+  // `CameraTrackEnemiesTick` only ever raises `settled` while nothing is
+  // tracked. Stage 2 block 9's `wait_script_flag 3` is raised by such a
+  // civilian and could never come down.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.CameraSettled),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    G.g_scene_state_major_entered = 2;
+    G.g_camera_settled = 0;
+    G.g_camera_free = 0;
+    for (let i = 0; i < 5; i++) cFrame(a, events);
+    check("bit 0x1000 holds while the camera is neither settled nor free",
+          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+    G.g_camera_free = 1;
+    cFrame(a, events);
+    check("...and `g_camera_free` alone releases it",
+          a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
+  }
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.CameraSettled),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    // Row 1 minor 3 is `CameraFromViewAngles`, the scripted view-angle turn.
+    G.g_scene_state_major_entered = 1;
+    G.g_camera_settled = 1;
+    G.g_camera_free = 1;
+    for (let i = 0; i < 5; i++) cFrame(a, events);
+    check("...and off the path-camera row the arm releases nothing at all",
+          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+  }
+
   // The timer, op 0x09. It does **not** delay its own block: `CivilianStep-
   // Script` clears the timer on every resume, and the value that survives is
   // the one `CivilianReapplyWaitCommand` reads out of the block ahead. So a
@@ -10896,7 +10940,14 @@ console.log("\nthe camera path publishes every frame, ends included:");
  * state (2,6) and `CameraPlayStashedPath` (`FUN_0040C8A0`) for (2,7) —
  * **increment the frame before they evaluate it**, where `CamAdvancePathFrame`
  * publishes the cursor and then increments. So a stashed `0..10` draws
- * `1..10`: the start frame is stepped past, and the end frame is reached.
+ * `1..10` under state (2,6): the start frame is stepped past, and the end
+ * frame is reached.
+ *
+ * **And (2,7) draws `1..11`.** The two hooks differ in one byte of guard —
+ * `JGE` at `0x0040C7A0` against `JG` at `0x0040C8C0` — so state 7 lets the
+ * last comparison through and the increment carries it one frame past the
+ * range's end. See `CamCommand.pastEnd`: the port gave (2,6)'s answer to
+ * both, and stage 2's block 9 is what that cost.
  *
  * The port had `started: true` on both, copied from the non-deferred branch
  * where it is right, and the deferred shot lost its last frame. Stage 2 block
@@ -10964,6 +11015,59 @@ console.log("\na stashed path is played by a hook that steps first:");
   check("...and every frame between is published",
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every((n) => published.includes(n)),
         head);
+  // `JG` at `0x0040C8C0`, and the increment before the publish: state 7's
+  // last comparison passes at `cur == end` and carries the frame one past it.
+  // Stage 2's block 9 stashes `351..384` and its civilian's cue is **385**.
+  check("...and state 7 publishes one frame PAST the end",
+        published.includes(11), head);
+  check("...and not two",
+        !published.includes(12), head);
+}
+
+/** The same stash under state **(2,6)**, whose guard stops on the end frame. */
+{
+  const stashOp = (i: number, start: number, end: number) => ({
+    i, at: i, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 7, 2],
+    start, end, slot: 7, flags: 2, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [7], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        stashOp(0, 0, 10),
+        { i: 1, at: 1, op: 0x30, name: "queue_event", cat: "camera",
+          sel: 0x21, action: "finish_sequence", args: [6],
+          scene_state: { major: 2, minor: 6 },
+          camera_state: "play_stashed_path" },
+        { i: 2, at: 2, op: 0x41, name: "wait_camera_path_frame", cat: "wait",
+          arg: 0, blocks_on: "camera path frame past arg" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const host = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+  const w = new Walker(script, host);
+  const published: number[] = [];
+  for (let f = 0; f < 40; f++) {
+    w.tick(1 / 60);
+    published.push(w.cam ? Math.trunc(w.cam.frame) : -1);
+  }
+  const head = published.slice(0, 14).join(",");
+  check("state 6 reaches the end frame", published.includes(10), head);
+  check("...and stops on it", !published.includes(11), head);
 
   // And the seek's half: `seekTo` observes no waits, so an address behind
   // `wait_camera_path_frame` is reached with the shot still in the middle of

@@ -56,18 +56,45 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ### Three reports are half-done, and each remaining half is named
 
-* `[open]` **the stage-3 alternating-frame flip** on the boat's NPCs — the
-  last third of the "boat is invisible" report. The camera was disproved as the
-  cause over 3000 frames and four runs; the remaining lead is
-  `ActorAdvanceMotion` applying root motion to `obj.pos` for class 0x25 once
-  its VM parks.
-* `[open]` **`char_adv02`'s midriff gap.** ~1.75 units are drawn by nothing
-  between the damaged torso `0x1B70` and the pelvis. `harold.bin` carries five
-  lower-torso models of exactly that extent that **no table in the EXE
-  references**, so the join is not guessable from the binary and was not
-  guessed at.
-* `[decide]` **the crawlers hit where the engine whiffs** — a decision rather
-  than a mystery. It is divergence 2 below.
+All three are closed as of 2026-09-11, and two of them were closed by being
+disproved rather than fixed.
+
+* `[fixed]` **the stage-3 alternating-frame flip** on the boat's NPCs. The
+  recorded lead was wrong twice over. `ActorAdvanceMotion` **cannot** move a
+  path-riding class-0x25 actor: the motion advance runs *before* the class
+  handler and `HumanoidFrameTail` re-seats the position absolutely from the
+  object path every frame the VM lives — measured, both riders moving exactly
+  -1.116 in x per frame and 0 in y and z over 24 consecutive frames. And the
+  flip was **already gone**: two writers share `obj+0x68`, an absolute
+  `yaw = path.yaw` and a relative `yaw += seat.dyaw`, and while the host seam
+  published no yaw at all the absolute write was skipped and the relative one
+  accumulated `0x8000` — half a turn — every frame. Every stage-3 seat record
+  carries that value. Proved by **putting the bug back**: the mutant's pixel
+  difference from the fixed tree alternates 4,980 / 2,776 / 4,976 / 2,824 for
+  twelve consecutive frames.
+* `[fixed]` **`char_adv02`'s midriff gap — there is no table, and there never
+  was.** `[proved]` A class-0x30 actor's bones do not go through
+  `SkeletonDrawNodeSlot` at all: `SkeletonEmitNode` (`FUN_004114C0`) calls the
+  per-bone hook at `model+0x1158`, which `EnemyZombieInit` (`FUN_00452DA0`)
+  fills with `ZombieDrawBonePart` (`FUN_004534A0`), and **nine of its sixteen
+  arms draw a cel out of a run, four of them on top of the bone's own model**.
+  So the undamaged torso never draws itself either, and the two chest damage
+  stages draw themselves plus a **thirty-cel** lower torso at
+  `0x1B52..0x1B6F`. The five models "no table references" are simply the last
+  five of that run. The index is
+  `(g_blink_frame_counter + obj+0x3C * 10) % 0x1E + 0x1B52`.
+
+  **What stalled the search was a true premise with a false inference.**
+  `AssetDrawSlot` really does draw one model per slot — so a bone cannot draw
+  two, which does not follow, because the hook calls the draw as many times as
+  it likes. That is now `L39`. Three independent checks on the reading: the
+  three stages that are *not* triggers are exactly the three whose own geometry
+  already reaches the pelvis split; every cel in a run shares mesh count,
+  vertex count and texture ids with its neighbours while most vertices move,
+  which is a flipbook and not a set of variants; and each trigger slot belongs
+  to one character type whose own file holds the run.
+* `[fixed]` **the crawlers hit where the engine whiffs** — closed on your
+  decision. It was divergence 2 and the divergence is gone.
 
 ### One `[open]` that no report raised
 
@@ -122,7 +149,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   stage. `docs/formats/evt.md` had stopped reading at the first
   `AssetDrawSlot`, and the player believed the doc.
 
-- `[part]` Start of Stage 3 the boat is not visible for a while. While the boat
+- `[fixed]` Start of Stage 3 the boat is not visible for a while. While the boat
   is invisible the NPCs in the front seats of the boat are in the wrong
   orientation and flipping between two positions on alternating frames
   — three causes, all fixed: `FUN_0048EAD0`'s `default:` arm draws at the held
@@ -190,7 +217,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   (`distance 99.0`), so the lunge test passed at 24 units, `strikeFloor` became
   99, and root motion shoved the body out to exactly 99 the next frame.
 
-- `[part]` char_adv02 zombies seem to lose their midriff on one shot
+- `[fixed]` char_adv02 zombies seem to lose their midriff on one shot
   — `swapGore`'s single-primitive fast path took only the *first* mesh of a
   chain, and all 57 of `char_adv02`'s damaged variants are multi-primitive, so
   every arm and leg swap drew a fraction of the part. Fixed. **`[open]`: the

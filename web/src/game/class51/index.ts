@@ -11,7 +11,7 @@
  * file name is what names it.
  *
  * Twenty-eight spawns, all in stages 2 and 3, plus however many the stage-2
- * boss summons through `SpawnFishAt` (`FUN_00438640`).
+ * boss summons through `SpawnWaterEnemyAt` (`FUN_00438640`).
  *
  * ## The descriptors come in groups, and the first of each is not a fish
  *
@@ -36,7 +36,7 @@
  *
  * ## Three sub-types, and only one of them is placed by a script
  *
- * `sub+0x6C` comes from `tail+0x0E` for a placed fish and from `SpawnFishAt`'s
+ * `sub+0x6C` comes from `tail+0x0E` for a placed fish and from `SpawnWaterEnemyAt`'s
  * argument for a summoned one. **Every shipped descriptor says 0**; 1 and 2
  * exist only because `Class14StateSummonRoundA` and `Class14StateSummonRoundB`
  * pass them. Sub-type 1 is the one that can land on solid ground — it is the
@@ -166,7 +166,7 @@ export const FISH_SINK_YAW_STEP = 0x40;
 export const FISH_SINK_FRAMES = 300;
 /** `FishStateFlung`'s own patience, for a sub-type that never meets ground. */
 export const FISH_FLUNG_FRAMES = 0x1900;
-/** `SpawnFishAt`'s own two: the water it sets, and the lifetime it defaults to. */
+/** `SpawnWaterEnemyAt`'s own two: the water it sets, and the lifetime it defaults to. */
 export const FISH_SUMMON_WATER_LEVEL = -24.9;
 export const FISH_SUMMON_LIFETIME = 0x50;
 /** `FishBeginSwimAway`'s two literals. */
@@ -392,7 +392,7 @@ export function FishClaimSlotAndLunge(obj: Actor, rng: Rng,
  * only ever moves in z.
  *
  * `sub+0x78 = 1` here is overwritten by the Init a line later; it is the
- * default for the caller that does not set one, and `SpawnFishAt` is not that
+ * default for the caller that does not set one, and `SpawnWaterEnemyAt` is not that
  * caller — it skips this routine entirely.
  */
 export function FishBeginRise(obj: Actor): void {
@@ -976,7 +976,7 @@ export function FishUpdate(obj: Actor, f: ClassFrame): void {
 }
 
 /**
- * `SpawnFishAt` — `FUN_00438640`. The stage-2 boss's two summoning rounds.
+ * `SpawnWaterEnemyAt` — `FUN_00438640`. The stage-2 boss's two summoning rounds.
  *
  * A fish with no descriptor: the caller gives it a point, a lifetime for
  * `sub+0x7E` and a sub-type, and it goes **straight into a lunge** —
@@ -1006,7 +1006,7 @@ export function FishUpdate(obj: Actor, f: ClassFrame): void {
  * a group header would, so the boss arena's surface does not depend on which
  * descriptors ran before it.
  */
-export function SpawnFishAt(x: number, y: number, z: number, lifetime: number,
+export function SpawnWaterEnemyAt(x: number, y: number, z: number, lifetime: number,
                             subtype: number, rng: Rng, host?: GameHost):
                             Actor | null {
   if (G.g_players_in_play === 0) return null;

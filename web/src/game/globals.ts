@@ -598,7 +598,7 @@ export const G = {
    * reason four of them can be in the air at once and no more.
    * `FishClaimSlotAndLunge` (`FUN_00438850`) claims one and the index is also
    * *where* the fish leaps to — the four are points in the camera's own space.
-   * `SpawnFishAt` (`FUN_00438640`) refuses to place one at all while any slot
+   * `SpawnWaterEnemyAt` (`FUN_00438640`) refuses to place one at all while any slot
    * is taken, which is what paces the stage-2 boss's summoning rounds.
    */
   g_water_attack_slots: [0, 0, 0, 0],
@@ -606,7 +606,7 @@ export const G = {
    * `[port-only]` — the next spawn address to give an actor **nothing placed**.
    *
    * The port identifies an actor by the evt offset of the descriptor it came
-   * from, and `SpawnFishAt` (`FUN_00438640`) has no descriptor at all: the
+   * from, and `SpawnWaterEnemyAt` (`FUN_00438640`) has no descriptor at all: the
    * stage-2 boss calls it with three floats. Negative, and counting down, so
    * such an actor can never collide with a real descriptor offset and
    * `ActorByAt` still answers.

@@ -56,8 +56,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 874 in `ghidra/annotations/functions.tsv` |
-| Named globals | 403 in `ghidra/annotations/globals.tsv` |
+| Named functions | 893 in `ghidra/annotations/functions.tsv` |
+| Named globals | 397 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 36 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

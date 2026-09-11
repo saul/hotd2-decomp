@@ -63,6 +63,10 @@ def main() -> int:
     for name, lo, hi in sections:
         print(f"  {name:<10} {lo:#010x}..{hi:#010x}")
 
+    # Filled by the loop below, so the cross-file rule after it can compare.
+    func_names: dict[int, str] = {}
+    global_names: dict[int, str] = {}
+
     for fname, want_exec in (("functions.tsv", True), ("globals.tsv", False)):
         path = ANNOT / fname
         if not path.is_file():
@@ -100,12 +104,37 @@ def main() -> int:
                 problems.append(f"{fname}:{lineno}: name {name!r} already used "
                                 f"at {seen_name[name]:#010x}")
             seen_name[name] = va
+        (func_names if want_exec else global_names).update(seen_va)
         print(f"\n{fname}: {count} rows, {len(seen_va)} distinct addresses")
         if inline_tables:
             print(f"  {len(inline_tables)} inline jump tables inside .text "
                   f"(expected -- MSVC emits them in the function body):")
             for t in inline_tables:
                 print(f"    {t}")
+
+    # **No address may be in both files.** The executable-section rule above
+    # cannot catch a function wrongly filed as a global, because some globals
+    # legitimately live in `.text` -- the class state tables and MSVC's inline
+    # jump tables -- so that rule has to tolerate an executable address and a
+    # misfiled function slips straight through it. Being in both files cannot
+    # be legitimate for anything, so this is the rule that bites.
+    #
+    # It was written after `export-annotations` appended seven rows to
+    # `globals.tsv` that were already in `functions.tsv` -- among them
+    # `RescueTargetFreedState` and `SpawnCivilianBloodPool`, which are plainly
+    # routines. That matters beyond tidiness: `verify_port` checks a global
+    # citation against `globals.tsv` and a function citation against
+    # `functions.tsv`, so a name in both makes a wrong citation pass.
+    both = {va: (n, both_n) for va, n in func_names.items()
+            if (both_n := global_names.get(va)) is not None}
+    for va, (fn, gn) in sorted(both.items()):
+        problems.append(f"{va:#010x} is in functions.tsv as {fn!r} and in "
+                        f"globals.tsv as {gn!r} -- an address belongs to "
+                        f"exactly one of the two, and `verify_port` checks "
+                        f"citations against the file the kind implies")
+    if not both:
+        print(f"no address is in both files "
+              f"({len(func_names)} functions, {len(global_names)} globals)")
 
     print()
     if problems:

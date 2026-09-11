@@ -131,7 +131,7 @@ export interface FishTail {
   bobPhase: number;         // +0x68
   /** `sub+0x6A` — {@link FishFlag}. */
   flags: number;            // +0x6A
-  /** `sub+0x6C` — `tail+0x0E`, or `SpawnFishAt`'s argument. */
+  /** `sub+0x6C` — `tail+0x0E`, or `SpawnWaterEnemyAt`'s argument. */
   subtype: number;          // +0x6C
   /** `sub+0x6E`, `+0x70`, `+0x72` — the strip frame, its last and its first. */
   frame: number;            // +0x6E

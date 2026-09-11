@@ -2117,11 +2117,56 @@ investigation ruled out.
   corroboration** — the bridge was down for that whole session and every
   address came from a linear sweep.
 
-- `[open]` **Stage 4 hangs from entry 4**, at block 9 with one `znkage` in
+- `[fixed]` **Stage 4 hangs from entry 4**, at block 9 with one `znkage` in
   `ZombieStateDragTarget` (state 43, `FUN_0045C080`) at 90 hit points after 70
   volleys with no damage landing, and the debug clear refusing it. Filed as
   `PLAYER_HANGS.md` 23. Nothing read yet. Found by the same `--entry` flag, on
   the other stage that has more than one entry.
+
+  **Fixed 2026-09-11. The state has no exit of its own, and the port had
+  transcribed it without the one thing that ends it.** `[proved]`
+  `ZombieStateDragTarget` has five sub-states, and the tail every sub but one
+  falls into is the whole way out: it tests script flag 29, marks the actor
+  dead, gives back **both** enemy counters and sets the sub-state that
+  despawns. The port had that despawn arm and **nothing that could ever assign
+  it**, and no arm at all for the sub-state that turns on the spot. So the
+  captor held `g_enemies_alive` at 1 for ever.
+
+  **Both leads in the report were right and they were one fault.** One of the
+  state's own sub-states raises `ActorFlag.ShotImmune` on itself, and
+  `DispatchHit` (`FUN_004092F0`) jumps past `ResolveHit` while that bit is up —
+  so no volley could take the actor out of the count either. The immunity is
+  the state's own doing and the flag is what lifts it. **The debug clear
+  refusing the actor was correct** and is untouched.
+
+  The partner exists and it *is* the release. Flag 29 has **no
+  literal-address writer anywhere in the image** — one instruction names that
+  byte, `L32` — and in stage 4 the writer is the dragged civilian herself. The
+  captor is her one child, and all three of her reachable streams raise it. The
+  script's own `wait_script_flag 29` in the same step comes down off that
+  write, which is why the run reached block 9 with the flag already up and the
+  captor ignoring it.
+
+  **Two more bugs fell out of reading the arms properly**, and one of them
+  would have survived the fix unnoticed: a sub-state **fell through** into
+  another's loop-and-cue block, which the engine's own `case` never reaches, so
+  with the civilian dead and the loops spent it bumped straight past the
+  settle. And the pose copy took **yaw alone** where the engine copies all
+  three angles. A third correction is `L20` inside the port: a landing-motion
+  constant was attributed to a state that plays four different clips and not
+  that one.
+
+  Before: five runs of five hung. After: five of five reach the end, which I
+  confirmed at 6,090 frames over 72 instructions. The decompiler had folded a
+  dword-indexed write into a byte index, which a linear sweep caught; Ghidra
+  was offline for the whole session and left nothing unanswered.
+
+  `[open]` Two residuals, neither a declared divergence. `ActorShiftToHoldBone1Position`
+  (`FUN_0045CE70`, four callers) is unported, so the captor settles a bone
+  offset from where the engine puts it — porting it needs the host seam,
+  because `game/` has no skeleton. And a flags word is still modelled as one
+  bit, so **a captor killed mid-drag plays the wrong death clip**; that is a
+  pre-existing gap the reading merely exposed.
 
 - `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
   defect in itself, and recorded because it is now live code with no coverage.

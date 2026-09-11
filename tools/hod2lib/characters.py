@@ -97,7 +97,7 @@ from .arcscript import (  # noqa: F401
 from .charmotion import (  # noqa: F401
     BODY_CREATURE_HOST_CLIPS,
     BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS,
-    CLASS21_FREED_MOTION, humanoid_motion_ids,
+    CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS, humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
 from .combat import (  # noqa: F401
@@ -188,6 +188,7 @@ __all__ = [
     "CLASS20_IDLE_MOTIONS",
     "CLASS21_FREED_MOTION",
     "CLASS30_ARC_SCRIPTS",
+    "CLASS30_DEATH_CLIPS",
     "CLASS31_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPT_BYTES",
     "CLASS31_ATTACKS_PER_STANCE",
@@ -1075,6 +1076,12 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # whose landing clip is 0x3BA -- and every class-0x30 actor can now
         # reach it, so it is baked for all of them.
         entry_clips += [0x3BA]
+        # The six death clips `ChooseDeathMotion` (`FUN_004560B0`) can reach
+        # above the directional pick -- see `CLASS30_DEATH_CLIPS` for which,
+        # why they are offered per character type rather than per spawn, and
+        # which four arms are deliberately still out.
+        if sp["class"] == 0x30:
+            entry_clips += list(CLASS30_DEATH_CLIPS)
         # Class 0x25's own clips: the ones its command block names with `op 2`
         # and `op 3`, which is every clip the program can put on the actor
         # after the opening one. Baking only the header's motion left 118 of

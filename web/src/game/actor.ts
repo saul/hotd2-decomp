@@ -200,9 +200,39 @@ export enum ActorFlag {
    */
   Committed = 0x10000000,
   /**
-   * `obj+0x34` bit `0x1000000` — set while a stationary thrower still has a
-   * weapon, and cleared as it leaves. `ZombieStateStandAndThrow` is the only
-   * reader and writer.
+   * `obj+0x34` bit `0x1000000` — this actor still has hold of something, and
+   * so dies its own way: `ChooseDeathMotion` (`FUN_004560B0`) takes clip
+   * `0x3F9` on it ahead of every other arm and `ZombieStateDeath6`
+   * (`FUN_00454D20`) sends it to {@link ZombieState.DeathFallAndBounce}
+   * instead of to a corpse.
+   *
+   * **It comes from the spawn record**, not from a state. `ActorInitFlags`
+   * ORs the record's `+0x04` word with 1 into `obj+0x34`, and shipped
+   * class-0x30 records set this bit — `tools/verify_death_clips.py` counts
+   * them, and `CLASS30_DEATH_CLIPS` in `hod2lib/charmotion` says which clips
+   * they therefore need baked.
+   *
+   * `[likely]` **no routine in the image raises it**, and the method is the
+   * claim's limit. A sweep of `.text` for every encoding that names the
+   * constant — `81 /1` and `0D` imm32 `OR`s, the byte and word forms at
+   * `+0x37`/`+0x36`, `bts`, and `B8+r` `MOV`s — finds four `OR` sites and none
+   * of them is class 0x30's. What it finds instead is three readers,
+   * `ChooseDeathMotion` at `0x004560DD`, `ZombieStateDeath6` at `0x00454DB8`
+   * and `ZombieStateStandAndThrow`'s sub 0 at `0x004590E6`, and two clears,
+   * `ZombieStateDelayedLeap` at `0x004582B0` and state 33's walk arm at
+   * `0x00459469`. Two of those were themselves nearly missed — the
+   * `ZombieStateDeath6` test takes its mask from `MOV EAX, 0x1000000` at
+   * `0x00454DA0`, and `CivilianReleaseCaptors` clears the bit on every
+   * surviving child of a dead civilian through `MOV EDX, 0xfeffffff` and an
+   * `AND` on the register — so a raise built the same way, out of a register
+   * or a memory word, would be invisible to this sweep too (`L32`).
+   *
+   * The docstring this replaced said the state was "the only reader and
+   * writer". See `PLAYER_HANGS.md` 22 for what that cost and for the `[open]`
+   * item it leaves: `class30/stand_throw.ts` still **raises** this bit where
+   * the engine's own sub 0 writes `obj+0x136C` bits `1` and `0x100000`
+   * instead, which is what put two character-type-19 axe men — whose records
+   * do not carry it — into state 12.
    */
   HoldingWeapon = 0x1000000,
   /**

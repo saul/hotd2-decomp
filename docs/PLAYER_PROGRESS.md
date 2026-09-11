@@ -2394,6 +2394,19 @@ one the engine keeps, and the differences are the whole point of the counters:
 * **A corpse is present but not alive.** The alive count falls at death, in
   `ZombieReleasePermitAndUntrack` (`FUN_004565A0`); the present count falls
   when the death clip ends, in `ZombieEnterCorpseState` (`FUN_00456740`).
+* **...so a death clip the bundle does not carry holds the present count for
+  ever.** `ZombieStateDeathFallAndBounce` (`FUN_00456DF0`) — state 12, where an
+  actor that dies still holding something goes instead of straight to the
+  corpse — waits out `obj+0x19C >= 0x3C` on clip `0x3F9`, whose real play
+  length is 85. `0x3F9` was baked for no character type in any of the twelve
+  bundles, so *nothing in the port could leave state 12 anywhere in the game*.
+  All six of the clips `ChooseDeathMotion` (`FUN_004560B0`) can reach above the
+  directional pick now travel — `CLASS30_DEATH_CLIPS` — and
+  `tools/verify_death_clips.py` reads them back out of the real bundles, 14,472
+  of 14,472 (spawn, death clip) pairs. The condition-4 pair in that set,
+  `0x404` and `0x41A`, is why stage 2's twenty `znkager` crawlers had no death
+  animation at all: a clip with no frames has play length 0, and
+  `cursor >= play - 1` is true on the actor's first dead frame.
 * **Each release is latched, once per actor.** `ReleaseEnemyAliveCount`
   (`FUN_00456560`) tests `obj+0x38` bit 1, `ReleaseEnemyPresentCount`
   (`FUN_00456580`) bit 2 — and class 0x31 latches the same two facts in

@@ -16844,3 +16844,148 @@ anyone has to rediscover it.
   came back, so `ThrowerShotFeedback`'s second call site at `0x00449C19` is
   read out of the annotations rather than out of the image. It is `[open]` from
   this session's own evidence, and it is the one thing here that is.
+
+## Session — motion 1017 was baked for nobody, and the bit that names it comes from the spawn record
+
+`PLAYER_HANGS.md` 22, taken off the list. `cd web && node tools/playthrough.mjs
+--stage 3 --entry 7 --headless` hung 5/5 at block 2 step 6 op 8 before and
+reaches block 11 `(end → 0)` 5/5 after, over 66 instructions and at the same
+frame count every time — 6,300 on the branch, 6,390 once `main`'s hit voice
+and prop poses were merged in. Same lesson as `0953161`: the frame count
+belongs to the tree, so re-measure it rather than quoting it.
+
+### The question that was asked, and the answer
+
+*Why is clip `0x3F9` not baked — deliberately, by omission, or because it does
+not decode on these skeletons?* **By omission, and it decodes 19 of 19.** The
+refusal in `charmotion.bake` is the measurement and it refuses nothing: motion
+1017 is in `zom.bin`, its block implies **16 bones** and declares **44
+frames**, `g_motion_play_length[0x3F9]` is **85**, and every one of the
+nineteen class-0x30 character types in the twelve bundles is 16-bone. So is
+`0x3F8`, and so are the four other arms of `ChooseDeathMotion`
+(`FUN_004560B0`) that nothing carried.
+
+The bake set is a hand-enumerated list per class and per state in
+`hod2lib/characters`'s `entry_clips`, and its death half was
+`death_motions(tables)` plus the immediates 991 and 992 — which is
+`ChooseDeathMotionDirectional` (`FUN_00456220`) and nothing else.
+`combat.py`'s docstring had said for months that the other arms were "**not**
+implemented", and that sentence was true of the port's branches and had never
+been true of the bake list, because the port takes four of them. `L26` in the
+shape it keeps coming back in: a note describing what somebody meant, standing
+in for a check about what the code does. `CLASS30_DEATH_CLIPS` is now in both
+halves of `hod2lib/charmotion` and `tools/verify_death_clips.py` reads the six
+back out of the **real bundles** — 14,472 of 14,472 (spawn, death clip) pairs
+over 804 class-0x30 spawns. Mutating the guard to `&& false` and re-exporting
+stage 3 turns 672 of that one bundle's pairs red.
+
+Rendered, because the reading is geometric: character type 19 posed from
+motion 1017 at frames 0, 12, 24 and 40 —
+`extract/compare/death12/t19_1017_f0.png` and its three siblings. Frame 0 is
+the axe man standing with an axe in each hand and frame 40 has him doubled
+forward with both still held. Fifteen bones, fifteen meshes, nothing exploded.
+
+### A second bug the check found rather than a report
+
+`0x404` and `0x41A` are body condition 4's coin toss at `0x004561EA`, and
+neither was in any bundle. A clip with no frames has play length 0, so
+`cursor >= play - 1` is true on the actor's **first** dead frame: stage 2's
+twenty `znkager` crawlers snapped to a corpse with no death animation at all.
+Same omission, opposite symptom, because the wait is `>= play - 1` and state
+12's is `>= 0x3C`. That table is now in `docs/formats/mot.md`, because
+"`MotionPlayFrame` answers 0" means *instant* or *eternal* depending only on
+which shape of wait is asking, and both read as a transcription bug.
+
+### What I got wrong on the way, and it was the interesting part
+
+1. **I concluded the bit had no writer, from a sweep, and it was seeded from
+   the spawn record all along.** `obj+0x34` bit `0x1000000` — the bit
+   `ChooseDeathMotion` takes `0x3F9` on and `ZombieStateDeath6` routes to state
+   12 on. I swept `.text` for every encoding of the immediate (`81 /1` and
+   `0D` `OR`s, byte and word forms at `+0x37`/`+0x36`, `bts`, `B8+r` `MOV`s),
+   found no raise anywhere, and was one step from reporting that state 12 is
+   unreachable in the shipped game. `ActorInitFlags` (`FUN_00408970`) ORs the
+   spawn record's `+0x04` word with 1 into `obj+0x34`, and **22 placements
+   across the twelve bundles carry it, every one class 0x30**. The
+   corroboration is what the records *are*: three of stage 1's are state 26
+   (`DelayedLeap`), two of stage 3's are state 33 (the stand-and-throw axe
+   men), and twelve are state **37**, `ZombieStateCarryProp` — every record
+   that sets the bit is an actor carrying, leaping with, or standing holding a
+   thing. The bit means *this actor has hold of something*, exactly as the
+   clip's behaviour implies.
+
+   The sweep was not wrong, it was answering a narrower question than I asked
+   of it: there is no *instruction* that raises the bit. The data does. `L32`
+   again, and the tell was there — a negative result that would have made a
+   shipped state and a shipped clip pointless.
+
+2. **The same sweep nearly missed two references it did find.**
+   `ZombieStateDeath6`'s test takes its mask from `MOV EAX, 0x1000000` at
+   `0x00454DA0`, which no `test`-with-immediate search sees, and
+   `CivilianReleaseCaptors` clears the bit through `MOV EDX, 0xfeffffff` and a
+   register `AND`. So a raise built either of those ways is invisible to the
+   sweep that concluded there is none — which is why item 24's reading is
+   `[likely]` and not `[proved]`.
+
+3. **The stale annotation was the cause of the second bug, not a symptom.**
+   `functions.tsv`'s row for `ZombieStateStandAndThrow` (`0x00459080`) ended
+   "obj+0x34 bit 0x1000000 ... is written by NOTHING in the image — the test is
+   always true and the clear is a no-op". Both halves wrong, and
+   `class30/stand_throw.ts` had been written to make that "always true" test
+   true: it raises the bit where the engine's own sub 0 writes `obj+0x136C`
+   bits `1` and `0x100000`. **That, and not the missing clip, is why *these*
+   two zombies were in state 12** — records `0x3078` and `0x6544` are character
+   type 19 and their flag words are `0x00020002` and `0x00020000`, with the bit
+   clear. Filed as item 24 and deliberately **not fixed**: `0x100000` is
+   `ZombieFlag2.Carried`, which `ZombieOnShot` reads to take state 9 instead of
+   state 6, so the faithful write is a real behaviour change in two rooms, and
+   the reading behind it has no Ghidra corroboration. The row is corrected;
+   `ActorFlag.HoldingWeapon`'s doc comment and the stale "nothing ported sets
+   that bit" in `class30/emerge.ts` with it.
+
+4. **I asked whether the leak was game-wide and the answer is no, twice
+   over.** The 22 bit-carrying placements are in stage 1 and stage 3 only —
+   which is why four stages completed with the clip missing. The port's own
+   extra leak, from item 24, is the nine body-condition-7 spawns per mode set,
+   in stages 1, 2 and 3. Stages 4, 5 and 6 have neither, so no route in them
+   can leak this way at all.
+
+5. **The port test could never have caught this, and now says so.**
+   `port.test.ts`'s fixture carries `1017` and `1016`, so its state-12 block
+   passed throughout. It also left `play` to be derived from the frame count;
+   it now pins `play: 85`, and setting that to 40 reproduces the shipped bug
+   inside the test. A new block gives a character type every clip *except*
+   `0x3F9` and asserts the actor is still in sub 1 after 600 frames with
+   `g_enemies_present` leaked — so short-circuiting the wait, special-casing a
+   missing clip, or making `MotionPlayFrame` answer for a clip it has not got
+   fails there rather than looking like a fix.
+
+### Ghidra was down for all of it
+
+The MCP connection was offline the whole session (`list_instances` empty), so
+nothing was renamed in the live database and every address above came from
+`capstone` over `Hod2.exe` at `_v2r`-resolved offsets. Unanswered as a result:
+`get_xrefs_to 0x00459080` and `0x004560B0`, a proper writer search for
+`obj+0x34` bit `0x1000000`, and the identity of the four `OR` sites the sweep
+did find (`0x0042FDFD` in `FUN_0042FC00`, called once from `0x004305A8`;
+`0x0043D297`, `0x004461D6` and `0x00462CDF`/`0x00462D21`/`0x00462D6C`, which
+fall inside the spans of `HordeMemberUpdate`, `OwlUpdateAndResolveShot` and
+`PlaceBreakableGroup` but with unnamed functions between, so the attribution is
+nearest-preceding-name and not a reading). Two annotation rows were corrected
+in the TSV and are **not** in the database.
+
+### Next actions
+
+1. Item 24: re-run the xrefs when Ghidra is back, then decide the
+   `stand_throw.ts` write. It is the last thing keeping character type 19 out
+   of its own directional death.
+2. Item 23, stage 4 entry 4: nothing read yet.
+3. `docs/PLAYER_PROGRESS.md` still carries a `[diverges]` saying "The port has
+   no class-0x30 death state, so both of its releases land on the same frame" —
+   `class30/death.ts` has all four states and the window is real. Stale, and
+   left alone here only because it is not this session's to rewrite.
+4. `FROG_CLIPS` is in `web/src/hod2lib/charmotion.ts` and in no Python module,
+   and `verify_exporters.py` compares module sets and versions rather than
+   contents, so it cannot see that. Not a bundle defect — the TypeScript half
+   is the writer — but it is drift, and it is the reason
+   `verify_death_clips.py` reads a bundle instead of asking Python.

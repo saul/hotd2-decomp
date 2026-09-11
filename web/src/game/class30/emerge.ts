@@ -186,9 +186,16 @@ export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): 
     if (obj.zom.backoffFrames >= 0) return;
     ActorArcBeginFalling(obj, p.dest, p.gravity);
     // The two jump clips and their two fades: 0x399 at fade 5 when `obj+0x34`
-    // bit 0x1000000 is set, else 0x3BB at fade 1. Nothing ported sets that
-    // bit, so this always takes 0x3BB — the arm is transcribed and
-    // unexercised, and `LEAP_MOTION_ALT`'s own wind-up below with it.
+    // bit 0x1000000 is set, else 0x3BB at fade 1.
+    //
+    // This said "nothing ported sets that bit, so this always takes 0x3BB --
+    // the arm is transcribed and unexercised". It is exercised: the bit is
+    // seeded from the spawn record by `ActorInitFlags` (`FUN_00408970`) and
+    // stage 1's three state-26 spawns are the shipped records that carry it,
+    // so 0x399 and its wind-up below are the arm those three actually run.
+    // `tools/verify_death_clips.py` counts the records; `CLASS30_DEATH_CLIPS`
+    // in `hod2lib/charmotion` is the same discovery on the death side, where
+    // the clip was missing rather than merely believed unused.
     const alt = (obj.flags & ActorFlag.HoldingWeapon) !== 0;
     ActorSetMotionBlended(obj, alt ? LEAP_MOTION_ALT : LEAP_MOTION, 0,
                           alt ? 5 : 1);

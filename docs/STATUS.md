@@ -47,7 +47,7 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 157 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 320 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
-| Declared `[diverges]` | **159** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **180** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **163** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.

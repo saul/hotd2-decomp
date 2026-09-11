@@ -20,6 +20,7 @@ import {
   PropUpdateType14,
   PropUpdateType19, PropUpdateType25, PropUpdateType40, PropUpdateType56,
   PropUpdateType69, PropUpdateType73, PropUpdateType76,
+  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
 import { PropUpdateType75 } from "./flag_prop";
 import {
@@ -149,15 +150,20 @@ function GenericPropUpdate(p: BreakableProp): void {
 }
 
 /**
- * `StoryModeSwitchUpdate`'s own frame — its removal flag, then its route.
+ * `StoryModeSwitchUpdate`'s own frame — its removal flag, the script flag its
+ * head raises, then its route.
  *
  * It does **not** run `PropExpireByStepLifetime`: `PlaceStoryModeSwitch`
  * writes `obj+0x11C` as a literal 1, so that word is not a lifetime here and
  * counting against it would retire every switch in the game one step boundary
  * after it was placed.
  *
- * [port-only] as a *function*: the head of `StoryModeSwitchUpdate`, split from
- * the branch arm so the pool has one call to make.
+ * [port-only] as a *function*: the head of `StoryModeSwitchUpdate`
+ * (`FUN_00474F30`), split from the branch arm so the pool has one call to
+ * make. **The split is between the two despawn tests and the mode gate**, at
+ * `0x00474FB4`, which is exactly where the engine's `CMP g_GameMode, 1` is —
+ * so everything in here runs in Arcade and everything in
+ * {@link StoryModeSwitchUpdate} does not.
  */
 function StoryModeSwitchPoolUpdate(p: BreakableProp): void {
   // `if (obj->+0x2A4 >= 0 && g_script_flags[obj->+0x2A4] == 1) ActorDespawn;`
@@ -165,11 +171,33 @@ function StoryModeSwitchPoolUpdate(p: BreakableProp): void {
     ActorDespawnProp(p);
     return;
   }
-  // `if (g_scene_index == 1 && g_script_flags[0x77]) ActorDespawn;` — the
-  // scene-1 sweep every prop family answers.
-  if (G.g_scene_index === 1 && (G.g_script_flags[0x77] ?? 0) !== 0) {
-    ActorDespawnProp(p);
-    return;
+  // ```c
+  // if (g_scene_index == 1) {
+  //     if (g_script_flags[0x77] != 0) { ActorDespawn(obj); return; }
+  // } else if (g_scene_index == 2 && g_evt_block_index == 2
+  //            && obj->+0x192 == 0) {
+  //     g_script_flags[0x15] = 1;                       // 0x00474FA6
+  // }
+  // ```
+  //
+  // An `if`/`else if`, and the `else` is load-bearing: the second arm is not a
+  // separate test the engine also makes. The scene-1 arm is the sweep every
+  // prop family answers; the scene-2 arm is the flag stage 3's block 2 waits
+  // on, raised **every frame** while the switch is unthrown and with no
+  // reference to `g_GameMode` — see `STORY_SWITCH_SCRIPT_FLAG`.
+  if (G.g_scene_index === 1) {
+    if ((G.g_script_flags[0x77] ?? 0) !== 0) {
+      ActorDespawnProp(p);
+      return;
+    }
+  } else if (G.g_scene_index === STORY_SWITCH_FLAG_AT[0]
+             && G.g_evt_block_index === STORY_SWITCH_FLAG_AT[1]
+             // `obj+0x192`, and for this family that word is the branch latch
+             // — `L3`. Unthrown is what the write is gated on: once the switch
+             // has been shot it is the *second* write, behind the mode gate
+             // and the item spawn, that raises the flag instead.
+             && !p.branchLatched) {
+    G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] = 1;
   }
   StoryModeSwitchUpdate(p);
   p.flags &= ~HIT_FLAG_MASK;

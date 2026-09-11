@@ -118,6 +118,7 @@
  *
  *   node tools/playthrough.mjs --stage 2
  *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
+ *   node tools/playthrough.mjs --stage 3 --entry 7 --headless
  *
  * Exit status is 0 only if the stage reached an end block.
  */
@@ -273,10 +274,35 @@ async function roomPressure(page) {
 }
 
 const started = Date.now();
+// `--entry` picks which of a stage's entry points to start from. Only stages
+// 3 and 4 have more than one, so it changes nothing on the other four --
+// `resolveEntry` falls back to the first entry when the number names none,
+// silently, which is why passing it on stage 2 produces a byte-identical run.
+//
+// **It is NOT a way to choose a branch arm, and this tool still has no way to
+// choose one.** A driven run takes one arm of every branch, so "the stage
+// reached an end block" means one path through it was played and no others.
+// Stage 2 is the case that makes that matter: the rescue target its branch
+// variable depends on had no skeleton, so blocks 1-10 and 21-32 were
+// unreachable and **nothing had ever executed them**; exporting the actor
+// turned them into live code that no run has visited. Reaching them needs the
+// driver to shoot that actor during block 0, which {@link shootable} declines
+// because the gate there is neither an enemy nor a civilian one. That is a
+// real coverage gap and it is open.
+//
+// It is also **not a deep link**: the run starts at a real entry block and
+// plays forward, so it exercises the stage's own rebuild path and not the
+// seek's. And it is not cosmetic coverage -- stage 3's block 2 is on neither
+// entry-0 route, so until this existed a seven-step block of shipped script
+// had never been executed by anything, and it held two hangs. See
+// `docs/PLAYER_HANGS.md` items 21 to 23.
+const entry = opt("entry", null);
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
   // is the other half, and it was already a URL flag.
-  url: `?stage=${stage}&drive=1&seed=${seed}`, size: opt("size", "1280x800"),
+  url: `?stage=${stage}&drive=1&seed=${seed}`
+       + (entry === null ? "" : `&entry=${entry}`),
+  size: opt("size", "1280x800"),
   headless: flag("headless"), quiet: !flag("loud"),
 });
 

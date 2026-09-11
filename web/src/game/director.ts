@@ -19,12 +19,13 @@ import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
 import { Class44Selector } from "./class44";
-import { T } from "./tables";
+import { SecondsToTicks, T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ProcessShotRequests } from "./combat/shot";
 import { ShotEffectsTick } from "./effects/tick";
 import { SeveredHeadsTick } from "./effects/severed_head";
+import { BodyCreaturePoolUpdate } from "./body_creature";
 import { DescriptorFromPlacement } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
 import { ActorByAt, G } from "./globals";
@@ -291,21 +292,30 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
       a.visible = true;
       continue;
     }
-    // Class 0x33 selector 1 -- the carrier. `hp` is the **selector**, not hit
-    // points: `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
+    // Class 0x33 -- `hp` is the **selector**, not hit points:
+    // `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
     // `desc+0x22` into `obj+0x11C`, and `ScriptedSceneryDispatch33`
-    // (`FUN_00432FF0`) switches on it. The bundle carries a `class33` block
-    // for selector 1 and for nothing else, so a placement without one is a
-    // sub-handler this port has not read and gets no object -- the same
-    // refusal `SpawnPropContainers` makes for an unnamed class-0x44 kind,
-    // rather than a default arm that would run the wrong handler.
+    // (`FUN_00432FF0`) switches on it. The bundle carries a tail block for the
+    // two sub-handlers this port has read and for no other -- `class33` for
+    // selector 1, `class33_push` for selector 4 -- and never both on one
+    // spawn, so a placement with neither is a sub-handler nothing here can run
+    // and gets no object. That is the same refusal `SpawnPropContainers` makes
+    // for an unnamed class-0x44 kind, rather than a default arm that would run
+    // the wrong handler.
     if (s.class === SpawnClassValue.ScriptedScenery) {
-      if (!pl.class33) continue;
+      if (!pl.class33 && !pl.class33_push) continue;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
                            `scenery ${pl.hp}`,
-                           { class33: pl.class33, hp: pl.hp, maxHp: pl.hp,
-                             yaw: pl.yaw ?? 0 });
+                           { class33: pl.class33, class33Push: pl.class33_push,
+                             hp: pl.hp, maxHp: pl.hp, yaw: pl.yaw ?? 0,
+                             // `ActorInitFlags` (`FUN_00408970`) makes the
+                             // descriptor's own flags word `obj+0x34` before
+                             // any `Init` runs, and selector 4's two spawns
+                             // carry `0x8000` there -- which is the very bit
+                             // their `push_flag` clears. Dropping it would
+                             // hand the port a chair pushable from frame one.
+                             flags: pl.init_flags ?? 0 });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.visible = true;
       continue;
@@ -440,6 +450,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
                            events?: Events): FrameResult {
   const frames = dt * GAME_HZ;
   G.g_frame += frames;
+  // `FUN_0040E730` steps three free-running counters once a game tick, and
+  // this is the one two per-bone draw hooks index their model runs with --
+  // `ZombieDrawBonePart` (`FUN_004534A0`) and `ThrowerDrawBonePart`. Whole
+  // ticks, not `frames`: `g_frame` is fractional and a cel index taken from a
+  // fraction repeats and skips (L12).
+  G.g_blink_frame_counter += SecondsToTicks(dt);
   // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
   // record and the frame reads it, so the trigger pulls the viewer made since
   // the last frame are resolved before anything moves -- an enemy is shot
@@ -539,6 +555,10 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   }
 
   ThrownWeaponUpdate(frames, events);
+  // ...and so are the creatures `znjoe` releases: `SpawnBodyCreature`
+  // (`FUN_0043E720`) allocates a task with no class id, so it is stepped here
+  // beside the other non-actor pools rather than inside the actor walk.
+  BodyCreaturePoolUpdate(rng, host, events);
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
   BreakablePropPoolUpdate(rng, events);

@@ -420,3 +420,60 @@ check the entries **either side** against what the port already believes, which
 is what says the indexing is not adrift. Do that before writing a `case`, and
 before believing one that is missing. It is `L20` pointed at the port rather
 than at the binary: a citation is a claim, and the address is the evidence.
+
+**L39 — An exhaustive scan that finds no table is a fact about tables, and the
+engine is not obliged to use one.** `char_adv02` loses the band between a
+damaged chest and its pelvis, and the hunt for what fills it got as far as
+"`harold.bin` carries five lower-torso models of exactly the missing extent
+that **no table in the EXE references** — an exhaustive scan finds the run only
+in the `pol/` slot lists themselves", and stopped, correctly refusing to guess
+which of the five. Every word of that is true. The join was not guessable from
+a table because there is no table: `ZombieDrawBonePart` (`FUN_004534A0`) forms
+the slot with `MOV ECX,0x1E; CDQ; IDIV ECX; ADD EDX,0x1B52` and the run is
+**thirty** models, of which those five are the last five. A count that looked
+meaningful — "exactly as many as bone 1 has damage stages" — was an artefact of
+reading the tail of a longer run.
+
+What let the search settle there was a true premise carrying a false
+inference. `AssetDrawSlot` (`FUN_00418560`) does draw exactly one model per
+slot, and a bone's draw record does name exactly one; the note concluded "so a
+bone cannot draw two". It does not follow, because `SkeletonEmitNode`
+(`FUN_004114C0`) does not call the one-slot draw for a class-0x30 actor at all
+— it calls the **per-bone hook** at `model+0x1158`, and a hook calls the draw
+as many times as it likes. Three of the four classes that install one were
+already named in `functions.tsv`; nobody had read class 0x30's.
+
+So: when a scan for the data comes back empty on something the shipped game
+visibly does, the next question is not "which of these candidates is it" but
+**"what computes it"** — and the place to look is the indirect call the walk
+makes instead of the draw you were reading. `L17`'s "a negative result is not a
+fact" has a sibling: a negative result can be a fact *and* be about the wrong
+question.
+
+**L40 — A `git stash` during an unresolved merge throws the merge away, and a
+scripted "keep both sides" resolution drops the code on the conflict
+boundary.** Two mistakes in one merge, both mechanical, both silent, and the
+tell arrived from a compiler rather than from git.
+
+`git stash -u` mid-merge clears `MERGE_HEAD`. The pop put the *content* back,
+so `git status` and `git diff` looked right and every file held the merged
+text — but the merge's second parent was gone, and committing there would have
+recorded main's work as if this branch had authored it. Recoverable only
+because the branch's own work was already committed: `git reset --hard HEAD`
+and merge again. This is `L30`'s rule — **commit before you swap the tree** —
+with the tree being swapped by a command that does not look like a checkout.
+
+Then the resolution itself. Where both branches append a block before one
+shared anchor, "keep both sides, main's first" is the right call and a regex
+that concatenates the two halves of the hunk is the wrong way to make it: the
+closing `}` of main's block sat *inside* main's side of the hunk in one file
+and *after* the hunk in another, so one file came out with a brace missing.
+`docs/re/session-log.md` and `docs/PLAYER_PROGRESS.md` survived it and
+`web/test/port.test.ts` did not, and nothing about the diff said so —
+`tsc` did, 380 lines later, as `'}' expected` at the end of the file.
+
+So: after any scripted conflict resolution, **check that every heading of both
+parents survived** (`comm -23` on the two `grep "^## "` outputs is enough for
+prose) and run the type checker before staging for code. A resolution that
+loses a line is indistinguishable from a resolution that was correct, right up
+until something parses it.

@@ -99,6 +99,27 @@ Stage 5's row was `7875 / 78 / block 2 2 / 50` until class 0x33 was ported;
 that room is the second section below. **Stage 1 block 1 is the one left**, and
 it is the only room in the game a player cannot clear by shooting.
 
+**That table is one route per stage, not one stage per row.** Stage 3 has two
+entry blocks and stage 4 has two, and until item 21 the harness had no way to
+name the second: `--entry` did not exist. Ten of the twelve routes above were
+never played. Stage 3's block 2 is not on the entry-0 route at all — block 0
+branches to block 3 under the lowest-block rule — so a whole block of shipped
+script had never been executed by anything, and it held two hangs:
+
+```sh
+node tools/playthrough.mjs --stage 3 --entry 7 --headless
+```
+
+| route | reaches | note |
+|---|---|---|
+| stage 3 entry 0 | block 13 `(end → 4)`, 6480 frames | 0 → 3 → 4 → 5 → 6 → 13 |
+| stage 3 entry 7 | **hangs** at block 2 `6 / 8` | 7 → 8 → 2. Items 21 and 22 |
+| stage 4 entry 4 | **hangs** at block 9 `1 / 50` | 4 → 9. Item 23 |
+
+Two of the two second entries hang. Every stage has exactly one entry except
+these, so there are no more routes hiding — but the four entry-0 rows above
+have never been re-run per *branch*, and a branch is not an entry.
+
 Before this branch, on the same tree and the same seeds: stages **2, 3 and 6
 hung** — block 14 `9 / 20`, block 6 `1 / 13` and block 0 `4 / 8` — and 1 and 5
 reached an end block with one cheated room each. Item 19 names who is left in
@@ -1080,6 +1101,196 @@ and the tool now is.
 accurate, careful, and in two files. What nobody had done was ask which shipped
 rooms depend on the thing it declares missing; the answer was one, and it had
 been showing up as an unexplained `d≈2880` for two sessions.
+
+## 21. Stage 3's block 2 waits on an actor the port did not run — **fixed**
+
+```sh
+cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless
+```
+
+`--entry` is new, and that is half the item: the harness could only ever run a
+stage's **first** entry block, so of stage 3's two routes and stage 4's two it
+had played one each. Stage 3's block 2 is on both of stage 3's routes and
+**neither entry-0 run ever reached it** — block 0 branches to block 3 under the
+lowest-block rule — so this block had never been executed by anything.
+
+```
+HUNG at block 2  (goto → 11) step/op 3 / 4
+  1110 game frames (18.5s) on one instruction
+    0x45 wait_script_flag        script flag arg set      policy: flag
+```
+
+5/5 before, 5/5 after — deterministic under the driven clock.
+
+**What holds it.** The instruction is `45 wait_script_flag 0x15` at evt
+`0x0029E8`: flag **21**. Step 3's op 1 is `48 set_script_flag 0x18`, flag 24,
+which is a different flag and a red herring — it belongs to the *other* writer
+of flag 21, below.
+
+The room is empty when it parks: 0 enemies alive, 0 hit points, 66 volleys over
+480 frames with no damage anywhere. The screenshot
+(`web/shots/hang-stage3.png`) renders correctly — the canal, the boat's prow,
+the steps, the camera parked at `cp_st3[5] 590/590` — so this is not item 1's
+fault class. Nothing in the room was ever going to open it.
+
+**Where flag 21 comes from.** The premise this was reported under — *every one
+of the ~40 gates names a flag that stage's own script never sets* — is not true
+here. Stage 3 **does** set flag 21, in **block 1 step 5** (evt `0x001D00`), and
+block 1 is on the entry-0 route only. On the entry-7 route (7 → 8 → 2) the
+script never sets it, and the flag comes from an **actor**:
+`StoryModeSwitchUpdate` (`FUN_00474F30`), the class-0x44 selector-17 object
+`PlaceStoryModeSwitch` (`FUN_00473A70`) builds. `[proved]`
+
+```c
+if (obj->+0x2A4 >= 0 && g_script_flags[obj->+0x2A4] == 1) { ActorDespawn; return; }
+if (g_scene_index == 1) {
+    if (g_script_flags[0x77] != 0) { ActorDespawn; return; }
+} else if (g_scene_index == 2 && g_evt_block_index == 2
+           && obj->+0x192 == 0) {
+    g_script_flags[0x15] = 1;                      // 0x00474FA6
+}
+if (g_GameMode != 1) goto draw;                    // 0x00474FB4
+```
+
+**The write is above the mode gate.** `0x00474FA6` writes the flag and the
+`CMP dword [0x009CA08C], 1 / JNZ` that gates everything else is at
+`0x00474FB4`, seven bytes later — confirmed by disassembling the head, not
+only by the pseudocode. So the switch raises flag 21 every frame in Arcade as
+well as Original, while it stands in scene 2 block 2 and has not been thrown.
+Stage 3's switch is the one **block 7 step 8** spawns (evt `0x3630`); its
+`obj+0x2A4` removal flag is 22, which block 2 step 3 raises at its own end, so
+the same step that the switch opens also takes it away.
+
+**Why the port did not.** `class41/branch.ts`'s `StoryModeSwitchUpdate` opens
+with `if (G.g_GameMode !== GameMode.Original) return;` — correct for the
+routine's body and wrong for its head — and its doc comment listed *"the
+`g_script_flags[0x15]` it raises there"* among the things not transcribed. That
+is **L26** exactly: a divergence described in prose, never pinned by an
+assertion, and therefore never looked at. The whole of the head that sits above
+the mode gate now lives in `StoryModeSwitchPoolUpdate`, where the two despawn
+tests already were, and the scene-2 arm is written as the `else` of the scene-1
+one because in the engine it is.
+
+**The checks, and there are two halves.**
+
+* `web/test/port.test.ts` — the switch raises `g_script_flags[0x15]` in scene 2
+  block 2, **in Arcade and in Original**, does nothing in another block, does
+  nothing in scene 1, stops once thrown, and loses to its own removal flag.
+  Backed the write out and watched two of them go red.
+* `web/tools/flag_gates.ts` grew a **route pass**: `entries` → `route.next`,
+  and every gate no `set_script_flag` on the route to it can open. It asserts
+  that stage 3's block-2 flag-21 gate is one of those on entry 7 and **not** on
+  entry 0, and that the switch which raises it is placed in a block that entry
+  can reach and which can reach block 2 (`{7}` of the stage's `{3,7,9}`). It is
+  now a row in `verify_all.py`. The work-list it prints for the other eleven
+  bundles is worth reading: every `0xF8`, every `0xFE`, stage 4's `0x1F`/`0x20`
+  and stage 5's `0x00`/`0x1E` are gates an actor holds.
+
+**What is still out.** The *second* write of flag 21, at `0x004751B1`: in
+Original Mode, once the switch has been thrown and `SpawnStoryModeItem`
+(`FUN_00467B90`) has run, the routine waits for `g_script_flags[0x18]` — which
+is what block 2 step 3 op 1 sets — and then counts `obj+0x2B0` past `0x4C`
+before raising the flag. Not ported, because the item spawn is not. It is
+reachable only by a player who throws that switch, which for stage 3's needs
+`PlayerHoldsOriginalItem` of item 0 or 6 (`obj+0x1FC` is 0, not -1), so the
+harness cannot reach it — but a player in Original Mode carrying one can, and
+they would hang. `[open]`
+
+**And the class does not declare the flag** to
+`ScriptFlagsThisBundleCanRaise`. It could not honestly: the answer depends on
+`g_scene_index`, and `ClassHandler.raisesScriptFlag` is handed a spawn record,
+so a class-wide or per-record `0x15` would claim it for stage 1's, 2's and 5's
+switches too, which cannot raise it. Nothing observable turns on it — stage 3
+is the only stage that gates on 21 and its script sets it — so the honest
+answer is to leave it undeclared and say why. `[open]`
+
+## 22. Stage 3 block 2 step 6: two zombies parked in state 12, and `g_enemies_present` never falls — `[open]`
+
+Found **behind item 21**: with the flag gate open, the entry-7 route advances
+four instructions and stops again, 5/5.
+
+```
+HUNG at block 2  (goto → 11) step/op 6 / 8
+  0x46 wait_scripted_actors    scripted actor count <= arg   policy: civilians
+  g_civilians_alive 1 · need <= 0
+  0x32A4 hito_mario2 · dead · enemies-present · d=22
+```
+
+It looks exactly like item 17, and it is not item 17. The counters at the hang,
+off the drive seam: **`e0 p2 v1`** — `g_enemies_alive` 0, `g_enemies_present`
+**2**, `g_civilians_alive` 1.
+
+The chain, all of it measured:
+
+1. The dead civilian's killed script is parked on `CivilianWait.EnemiesPresent`,
+   which holds while `enemiesGoal < g_enemies_present`. With two present it
+   holds for ever, so she never leaves `g_civilians_alive`, so
+   `wait_scripted_actors 0` never comes down.
+2. `g_enemies_present` only falls in `ZombieEnterCorpseState` (`FUN_00456740`),
+   when the death clip finishes — `ReleaseEnemyPresentCount` (`FUN_00456580`).
+   The two enemies still counted are `0x3078` and `0x6544`, class 0x30, dead
+   with negative hit points, both parked in **state 12 sub 1**.
+3. State 12 is `ZombieStateDeathFallAndBounce` (`FUN_00456DF0`) — `[proved]`
+   from `g_class30_states` (`0x00592AE8`) index 12 being `0x00456DF0`, with 11
+   and 13 either side agreeing with the port's enum. Its sub 1 is
+   `if (obj->+0x19C < 0x3C) return;`, and `obj+0x19C` is the play cursor.
+4. In the exe that cursor reaches 60 on the first pass, because
+   `g_motion_play_length[0x3F9]` is **85** (read at
+   `0x004E07D0 + 0x3F9*2 = 0x004E0FC2`, value `0x0055`).
+5. In the port it never moves. `MotionPlayFrame` returns `0` when
+   `MotionOf(actor, clip)` is null, and **no character type in any of the
+   twelve shipped bundles has motion 1017 baked** — checked across all six
+   stages and both modes. `ChooseDeathMotion` (`FUN_004560B0`) gives clip
+   `0x3F9` to any class-0x30 actor with `obj+0x34` bit `0x1000000`, with no
+   character-type guard, so the port is right to send them there and then has
+   no clip for them when they arrive.
+
+So no actor in the port can ever leave state 12, anywhere, and every one that
+enters it holds `g_enemies_present` for the rest of the stage. Stage 3's
+block 2 is the first room where that blocks a gate, because it is the first
+room where a `wait_scripted_actors` sits behind two stand-and-throw zombies.
+
+**Two possible fixes and they are not equivalent**, which is why this is
+`[open]` rather than done:
+
+* **Bake clip `0x3F9`.** If the exe plays it on these skeletons, the exporter
+  should carry it, and that is a format change landing in both halves of
+  `hod2lib` in one commit. Whether motion 1017's stride matches these rigs'
+  bone counts is **`[open]`** — nothing here has read the motion loading.
+* **Declare a `[diverges]`.** Let the state leave when it has no clip to wait
+  on. That is the user's decision and it was not taken.
+
+Either way there is a third thing worth separating out: **`MotionPlayFrame`
+answering `0` for a clip that is not there turns a missing asset into a hang
+rather than into something visible.** It is the port's own fallback and nothing
+declares it. The `docs/PLAYER_HANGS.md` shape it produces is the same as a
+state transcribed wrongly, and that is how item 21 hid this one for a session.
+
+## 23. Stage 4's second entry: one `znkage` in `DragTarget` that shots cannot touch — `[open]`
+
+```sh
+cd web && node tools/playthrough.mjs --stage 4 --entry 4 --headless
+```
+
+The other route `--entry` made addressable, and it hangs on its second block:
+
+```
+HUNG at block 9  (branch → 11,17) step/op 1 / 50
+  0x44 wait_enemies_alive      g_enemies_alive 1 · g_enemies_present 1 · need <= 0
+    0x35B4 znkage · DragTarget/3 · d=4
+```
+
+70 volleys over 480 frames, 90 hit points before and after, and the debug clear
+did not take it either. `ZombieStateDragTarget` is class 0x30 state
+**43** (`FUN_0045C080`) — the captor state that copies the civilian's position
+and rotation onto the zombie every frame. `d=4` says it is right on top of the
+camera.
+
+**Nothing has been read for this one.** Filed so that the route is on the list
+rather than in someone's head. The two things worth measuring first are whether
+the actor is holding `ActorFlag.ShotImmune` (item 18's shape — the clear
+refuses such an actor now, which is why it is still standing) and whether the
+civilian it is dragging is the thing that would release it.
 
 ## Rules for whoever picks this up
 

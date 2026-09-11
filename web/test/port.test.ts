@@ -56,6 +56,10 @@ import { OwlDiveKind, OwlState, type OwlTail }
 import { ActorShotFeedback } from "../src/game/combat/feedback";
 import { BLOOD_FIRST_SLOT, BLOOD_LAST_CEL, SpawnBloodSpray }
   from "../src/game/effects/blood";
+import {
+  BodyCreatureState, BodyCreatureUpdate, MarkBodyCreatureShot,
+  SpawnBodyCreature,
+} from "../src/game/body_creature";
 import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
          FLASH_LAST_FRAME } from "../src/game/effects/shot_effects";
 import { ShotEffectsTick } from "../src/game/effects/tick";
@@ -92,8 +96,9 @@ import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type ScriptedSceneryActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
   from "../src/game/actor";
-import { ScriptedCarrierUpdate33, ScriptedScenerySelector }
-  from "../src/game/class33";
+import { ScriptedCarrierUpdate33, ScriptedPushableUpdate33,
+         ScriptedScenerySelector } from "../src/game/class33";
+import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
@@ -111,6 +116,9 @@ import {
   UNCOUNTED_CHAR_TYPE, UNCOUNTED_INITIAL_STATE,
 } from "../src/game/combat/counts";
 import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
+import { g_class30_bone_cels, ZombieBoneCelSlots }
+  from "../src/game/class30/bonecels";
+import { HIT_SLOT_CLAIMED } from "../src/game/hit_slots";
 import { ActorIsEnemy, type ClassFrame, DeadSweep, ENEMY_CLASSES, g_class_handlers, registerClass }
   from "../src/game/registry";
 import { PORTED_CLASSES } from "../src/game/classes";
@@ -206,6 +214,9 @@ import {
   PlaceChainSegments, PlaceFragmentProps, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
 import {
+  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
+} from "../src/game/class41/branch";
+import {
   BamsHalfway, FallingContainerUpdate, PlaceFallingContainer,
   PropBuildScriptFlagEffect, ScriptFlagEffectFlag, ScriptFlagEffectUpdate,
   SFX_SCRIPT_FLAG_EFFECT, FALLING_SLOT_LOOSE, FALLING_SLOT_WHOLE,
@@ -213,7 +224,8 @@ import {
   RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
   RISING_DOOR_STEP_OTHER,
 } from "../src/game/class44";
-import { SpawnPropContainers } from "../src/game/director";
+import { SpawnPropContainers, SpawnSlotActors }
+  from "../src/game/director";
 import {
   SetPieceState, SetPiecePropUpdate,
   DROP_GRAVITY, SLIDE_FRAMES, SLIDE_VX, SLIDE_VZ,
@@ -3598,6 +3610,88 @@ console.log("\nthe branch writers: every route the game can choose:");
     G.g_script_flags[62] = 1;
     BreakablePropPoolUpdate(rng);
     check("...its own removal flag does", sw.dead);
+  }
+
+  // `g_script_flags[0x15]`, which the switch's HEAD raises -- `0x00474FA6`,
+  // before the `CMP g_GameMode, 1` at `0x00474FB4`. Stage 3's block 2 step 3
+  // is `wait_script_flag 0x15` and on the block-7 -> block-8 route nothing
+  // else in the stage sets it, so with this write missing the stage parked on
+  // that instruction for ever. Every arm of the engine's `if`/`else if` is
+  // here, because the one that made the bug invisible is the `else`.
+  {
+    const [SCENE, BLOCK] = STORY_SWITCH_FLAG_AT;
+    const flag = () => G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] ?? 0;
+    /** Stage 3's own switch: evt `0x3630`, removal flag 22, keyed on 0 and 6. */
+    const place = () => {
+      const p = PlaceStoryModeSwitch({
+        at: 0x4004, container: "story_switch", lifetime_evt_steps: 1,
+        branch_flag: -1, remove_flag: 22, keys: [0, 0, 6, 6],
+        pos: [0, 0, 0] });
+      G.g_breakable_props.push(p);
+      return p;
+    };
+
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const sw = place();
+    check("the switch's flag is down before its first frame", flag() === 0);
+    BreakablePropPoolUpdate(rng);
+    check("in scene 2 block 2 the switch raises g_script_flags[0x15] "
+          + "IN ARCADE -- the write is before the mode gate",
+          flag() === 1, String(flag()));
+    check("...and it is still standing: this is the head, not a despawn",
+          !sw.dead);
+
+    // The mode gate is below the write, so Original Mode raises it too.
+    propScene(rng, GameMode.Original);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("...and in Original Mode as well", flag() === 1, String(flag()));
+
+    // `g_evt_block_index == 2` is the whole of the block test; the switch
+    // stands in stage 3's blocks 7 and 8 first and must write nothing there.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = 8;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("a block the head does not name raises nothing", flag() === 0,
+          String(flag()));
+
+    // The `else`: scene 1 takes the despawn arm and never reaches the write,
+    // which is why five of the twelve switches in the game are in blocks that
+    // would otherwise match.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = BLOCK;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("scene 1 is the OTHER arm of the same `if` and raises nothing",
+          flag() === 0, String(flag()));
+
+    // `obj+0x192 == 0` -- unthrown. A thrown switch hands the flag to the
+    // second write, behind the mode gate and the item spawn, which is not
+    // ported: see `StoryModeSwitchUpdate`.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const thrown = place();
+    thrown.branchLatched = true;
+    BreakablePropPoolUpdate(rng);
+    check("a thrown switch stops raising it", flag() === 0, String(flag()));
+
+    // ...and the removal flag still wins, because it is tested first.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const gone = place();
+    G.g_script_flags[22] = 1;
+    BreakablePropPoolUpdate(rng);
+    check("its removal flag is tested BEFORE the write, and takes it away",
+          gone.dead && flag() === 0, `${gone.dead} / ${flag()}`);
   }
 
   // Original Mode only, every one of them. Arcade reaches types 14, 19 and 25
@@ -12596,6 +12690,325 @@ console.log("\nthe idle groan, the weapon loop, and kind 4:");
   }
 }
 
+// -- class 0x33 selector 4: the scenery an actor shoves aside -----------------
+//
+// Reported as stage 1 `0x16D8` `char_adv00` "playing the wrong entrance -- a
+// ledge hang where a chair push belongs". The clip id was right: 1048 is a
+// sixty-frame hold. The chair push is **this class**, and the port had the
+// three fields `ColiTestSphereAgainstActors` writes -- `obj+0x138`, `+0x13C`,
+// `+0x140` -- with `ZombiePushOutOfWorldAndActors` as their only reader.
+//
+// Every number below is stage 1's own descriptor, `0x1A40` and `0x1A74`: slot
+// 4196 (`komono_7.bin` part 0, a chair), no shot mesh, a 3.5 sphere, armed by
+// script flag 32 and despawned by 33. The set piece is held by *these* values
+// and not by a shape.
+
+console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
+{
+  const CHAIR_AT = 0x1a40;
+  const CHAIR_SLOT = 0x1064;             // 4196
+  const CHAIR_SPHERE = 3.5;
+  const PUSH_FLAG = 32;
+  const DESPAWN_FLAG = 33;
+  /** `ActorInitFlags` puts the descriptor's word on `obj+0x34`; both carry it. */
+  const SPAWN_FLAGS = 0x8000;
+
+  const STAGE1 = () => ({
+    slot: CHAIR_SLOT, shot_mesh: -1, shot_radius: CHAIR_SPHERE,
+    push_flag: PUSH_FLAG, despawn_flag: DESPAWN_FLAG,
+  });
+
+  const reset = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+  const makeChair = (tail = STAGE1(),
+                     flags = SPAWN_FLAGS): ScriptedSceneryActor => {
+    const a = ActorSpawn(CHAIR_AT, SpawnClass.ScriptedScenery, -1, "chair",
+                         { class33Push: tail as Actor["class33Push"],
+                           hp: ScriptedScenerySelector.Pushable,
+                           maxHp: ScriptedScenerySelector.Pushable,
+                           flags });
+    if (a.cls !== SpawnClass.ScriptedScenery) throw new Error("not class 0x33");
+    a.pos = vec3(22.83, 6.5, -16.74);
+    a.visible = true;
+    return a;
+  };
+  const chairFrame = () => ({ eye: EYE, dt: 1 / 60, rng: new Rng(9),
+                              host: NULL_HOST });
+  const tick = (c: ScriptedSceneryActor, n: number) => {
+    for (let i = 0; i < n; i++) {
+      if (c.despawned) return;
+      ScriptedPushableUpdate33(c, chairFrame());
+    }
+  };
+
+  // -- C1. the seed, and the radius that makes it a push target -------------
+  //
+  // `tail+0x04 == -1` writes `tail+0x08` to `obj+0x124` **and** `obj+0x128`.
+  // The second is the one that matters: `ColiTestSphereAgainstActors` measures
+  // against the *body* radius, so a chair that only got the shot radius is a
+  // chair nothing can touch.
+  {
+    reset();
+    const c = makeChair();
+    check("before its first frame the chair has no sphere at all",
+          c.bodyRadius === 0 && c.hitRadius === 0,
+          `${c.bodyRadius}/${c.hitRadius}`);
+    tick(c, 1);
+    check("the seed writes `tail+0x08` to the body radius as well as the "
+          + "shot radius -- both port names for `obj+0x124`, and `obj+0x128`",
+          c.bodyRadius === CHAIR_SPHERE && c.hitRadius === CHAIR_SPHERE
+          && c.radius === CHAIR_SPHERE,
+          `${c.bodyRadius}/${c.hitRadius}/${c.radius}`);
+    check("...and the draw slot, which is the whole of what the renderer "
+          + "needs to clone a model for it",
+          c.scenery.slot === CHAIR_SLOT, String(c.scenery.slot));
+    check("`obj+0x1312` is incremented, so the seed runs once",
+          c.sub === 1, String(c.sub));
+  }
+
+  // -- C2. the freeze, and the one flag that lifts it -----------------------
+  //
+  // `obj+0x34` bit `0x8000` arrives on the descriptor and `AND AH, 0x7f` at
+  // `0x00433C00` is the only thing that clears it. While it is up the object
+  // does not move, and `ColiTestSphereAgainstActors` skips it as a candidate
+  // -- one bit, both halves.
+  {
+    reset();
+    const c = makeChair();
+    tick(c, 1);
+    check("the descriptor's `0x8000` survives `ActorInitFlags`, so the chair "
+          + "starts held",
+          (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `0x${c.flags.toString(16)}`);
+    // A push recorded while it is held must not move it.
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    tick(c, 1);
+    check("a push recorded on a held chair moves it nowhere, and is not even "
+          + "consumed",
+          c.pos.x === x0 && c.pushedBy === 0x7ee0, `${c.pos.x} vs ${x0}`);
+    G.g_script_flags[PUSH_FLAG] = 1;
+    tick(c, 1);
+    check("script flag 32 clears the bit and the chair moves on that same "
+          + "frame -- a tenth of the penetration along the recorded normal",
+          Math.abs(c.pos.x - (x0 + 0.2)) < 1e-6
+          && !(c.flags & SCENERY_SKIP_COLLISION), String(c.pos.x));
+    check("...and the recorded push is consumed, so one record is one move",
+          c.pushedBy === -1, String(c.pushedBy));
+    // The clear is a clear and not a copy of the flag: a flag that goes back
+    // down does not re-freeze the object.
+    G.g_script_flags[PUSH_FLAG] = 0;
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x1 = c.pos.x;
+    tick(c, 1);
+    check("the flag dropping again does not put the bit back -- the routine "
+          + "only ever clears",
+          Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
+  }
+
+  // -- C3. the pusher's airborne bits, not the chair's ----------------------
+  //
+  // `if ((*(uint *)(obj+0x138) + 0x34) & 0x18000000) f *= 1.8` -- the test is
+  // on the actor that did the pushing. Reading the chair's own flags there
+  // would be `L11` with the object the other way round, and it would be
+  // silent: 1.8 times nothing is still nothing until an airborne zombie
+  // arrives.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const pusher = spawnZombie(0x7ee0, 1, "pusher");
+    pusher.flags |= 0x18000000;
+    const c = makeChair();
+    tick(c, 1);
+    c.pushedBy = pusher.at;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    tick(c, 1);
+    check("an airborne pusher shoves 1.8x as far, and the bit read is the "
+          + "**pusher's**",
+          Math.abs(c.pos.x - (x0 + 0.36)) < 1e-6, String(c.pos.x));
+
+    // ...and the chair's own copy of the same bits changes nothing.
+    pusher.flags &= ~0x18000000;
+    c.flags |= 0x18000000;
+    c.pushedBy = pusher.at;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x1 = c.pos.x;
+    tick(c, 1);
+    check("the chair's own airborne bits are not the ones that scale it",
+          Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
+  }
+
+  // -- C4. all three axes, and the sphere that follows ----------------------
+  //
+  // The recorded push is applied in x, y **and** z -- unlike the re-resolve
+  // under it, which is x and z only. And `ScriptedPushableSyncSphere33` rises
+  // by exactly the body radius, where `ActorUpdateBoundingSphere` rises by the
+  // radius plus one: two conventions for `obj+0x12C`, and this class writes
+  // its own.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    const p0 = { x: c.pos.x, y: c.pos.y, z: c.pos.z };
+    c.pushedBy = -1;
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 3;
+    c.pushNormal = vec3(0, 1, -1);
+    tick(c, 1);
+    check("the recorded push moves all three axes, y included",
+          Math.abs(c.pos.y - (p0.y + 0.3)) < 1e-6
+          && Math.abs(c.pos.z - (p0.z - 0.3)) < 1e-6
+          && c.pos.x === p0.x,
+          `${c.pos.x}/${c.pos.y}/${c.pos.z}`);
+    check("the collision sphere is re-seated at the position plus exactly "
+          + "the body radius -- not the radius plus one",
+          c.sphereCentre.y === c.pos.y + CHAIR_SPHERE
+          && c.sphereCentre.x === c.pos.x && c.sphereCentre.z === c.pos.z,
+          String(c.sphereCentre.y));
+  }
+
+  // -- C5. a zombie walking into it is the whole set piece ------------------
+  //
+  // The two halves meeting: `ZombiePushOutOfWorldAndActors` runs
+  // `ColiTestSphereAgainstActors`, which records the opposite push on whatever
+  // it finds, and this class applies it next frame. Nothing here calls the
+  // push directly -- if the chair moves, the wiring is real.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    const z = spawnZombie(0x16d8, 7, "char_adv00");
+    z.pos = vec3(c.pos.x + 4, 6.2, c.pos.z);
+    z.bodyRadius = 3.5;
+    z.flags2 |= ZombieFlag2.CollideActors;
+    const x0 = c.pos.x;
+    ZombiePushOutOfWorldAndActors(z, 1);
+    check("the zombie's own collision pass records the push on the chair "
+          + "rather than moving it",
+          c.pushedBy === z.at && c.pushDepth > 0,
+          `${c.pushedBy}/${c.pushDepth}`);
+    tick(c, 1);
+    check("...and the chair shoves itself away from the zombie on the next "
+          + "frame, which is the chair push the report was asking for",
+          c.pos.x < x0 - 1e-6 && c.pushedBy === -1,
+          `${x0} -> ${c.pos.x}`);
+  }
+
+  // -- C6. the despawn flag is tested first, and it returns -----------------
+  //
+  // `MOV AL, byte ptr [ECX + 0xd]` at `0x00433B80` is the first thing in the
+  // routine: a raised flag despawns and returns before the seed, the push and
+  // the draw. A chair that seeded itself on the frame it left would leave the
+  // renderer a slot to clone for one frame.
+  {
+    reset();
+    G.g_script_flags[DESPAWN_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    check("script flag 33 despawns the chair on its first frame",
+          c.despawned, String(c.despawned));
+    check("...before the seed, so it never publishes a draw slot",
+          c.scenery.slot === 0 && c.sub === 0,
+          `${c.scenery.slot}/${c.sub}`);
+  }
+
+  // -- C8. the wiring, from the bundle's placement to the object moving -----
+  //
+  // Everything above calls `ScriptedPushableUpdate33` by hand, and that is
+  // exactly the shape `L38` warns about: a dispatch arm that is missing looks
+  // the same as one that is wrong, and a test that drives past it sees
+  // neither. Two links, neither of which the assertions above can reach:
+  //
+  // * `SpawnSlotActors` gates on a tail block being present, and it used to
+  //   accept `class33` alone -- so a selector-4 placement made no object at
+  //   all, which was one of the four reasons the port drew no chair;
+  // * `ScriptedSceneryUpdate33` picks the routine off `obj.hp`, because the
+  //   port has one table entry per class where the engine writes one of twelve
+  //   pointers into `*obj`.
+  //
+  // So this one goes in through the front: the placement the exporter emits,
+  // then `GameUpdate`, and nothing else.
+  {
+    reset();
+    SetGameTables({
+      ...CHARS,
+      placements: [{
+        at: CHAIR_AT, class: 0x33, char_type: -1, motion: null,
+        hp: ScriptedScenerySelector.Pushable, init_flags: SPAWN_FLAGS,
+        yaw: 4096, class33_push: STAGE1(),
+      }],
+    } as unknown as CharactersJson);
+    const rng = new Rng(33);
+    const events = new Events();
+    const listed = [{ at: CHAIR_AT, class: SpawnClass.ScriptedScenery,
+                      pos: [22.83, 6.5, -16.74] as [number, number, number] }];
+    SpawnSlotActors(listed, rng);
+    const c = G.g_object_list.find((o) => o.at === CHAIR_AT);
+    check("a placement carrying only `class33_push` is spawned -- the gate "
+          + "takes either block, not just the carrier's",
+          !!c && c.cls === SpawnClass.ScriptedScenery,
+          c ? `class ${c.cls}` : "no actor");
+    if (!c || c.cls !== SpawnClass.ScriptedScenery) throw new Error("no chair");
+    check("...and it arrives held, because the spawn arm carries the "
+          + "descriptor's flags word through",
+          (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `0x${c.flags.toString(16)}`);
+    G.g_script_flags[PUSH_FLAG] = 1;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    check("one `GameUpdate` reaches the selector-4 routine through the class "
+          + "table, seeds the sphere and lifts the freeze",
+          c.bodyRadius === CHAIR_SPHERE && c.scenery.slot === CHAIR_SLOT
+          && !(c.flags & SCENERY_SKIP_COLLISION),
+          `${c.bodyRadius}/${c.scenery.slot}/0x${c.flags.toString(16)}`);
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    check("...and a second one moves it, with nothing but the class table "
+          + "between the frame and the push",
+          Math.abs(c.pos.x - (x0 + 0.2)) < 1e-6, `${x0} -> ${c.pos.x}`);
+    // Put the fixture back: everything after this file's class-0x33 section
+    // expects `CHARS` with no placements in it.
+    SetGameTables(CHARS);
+  }
+
+  // -- C7. the other selectors get nothing ----------------------------------
+  //
+  // The bundle carries `class33_push` for selector 4 and `class33` for
+  // selector 1, never both, and the port takes which one arrived as the
+  // selector. An actor with neither is one of the eight sub-handlers nothing
+  // here can run, and the update must be a no-op rather than a default arm.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    c.class33Push = null;
+    const p0 = { x: c.pos.x, sub: c.sub };
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 9;
+    c.pushNormal = vec3(1, 0, 0);
+    tick(c, 4);
+    check("a class-0x33 actor with no tail block seeds nothing and moves "
+          + "nowhere, however hard something pushes it",
+          c.pos.x === p0.x && c.sub === p0.sub && !c.despawned,
+          `${c.pos.x}/${c.sub}`);
+  }
+}
+
 // -- 30. the three flying and swimming enemies -------------------------------
 //
 // Class 0x11, 0x43 and 0x51, each of which had no module until now. Every
@@ -12938,6 +13351,462 @@ console.log("\nthe idle groan, the weapon loop, and kind 4:");
     check("...then peels off and releases the token",
           t().state === OwlState.OrbitAway && G.g_class43_attack_token === -1,
           `${OwlState[t().state]} ${G.g_class43_attack_token}`);
+  }
+}
+
+// -- the bone cel runs, and the hit slot that phases them ------------------
+//
+// `ZombieDrawBonePart` (`FUN_004534A0`) is a *draw* hook, so what it draws is
+// the renderer's; what is asserted here is the two halves of it that are game
+// state -- the table's own shape against the measured models, and the
+// `g_hit_slots` claim that gives each actor its phase.
+{
+  // The arm the bug report is about. `0x1B3D` draws *neither* itself nor one
+  // model: a 20-cel chest and a 30-cel lower torso, which is why reading only
+  // the last five of the lower run made five look like a meaningful count.
+  const torso = g_class30_bone_cels[0x1b3d];
+  check("the undamaged char_adv02 torso draws two runs and not itself",
+        !!torso && !torso.self && torso.runs.length === 2,
+        `${torso?.self} ${torso?.runs.length}`);
+  check("...a 20-cel chest at 0x1B3E and a 30-cel lower torso at 0x1B52",
+        torso.runs[0].base === 0x1b3e && torso.runs[0].count === 20
+        && torso.runs[1].base === 0x1b52 && torso.runs[1].count === 30,
+        torso.runs.map((r) => `${r.base.toString(16)}+${r.count}`).join(" "));
+
+  // The check on the whole reading: the two chest-only damage stages take the
+  // lower run and the three that carry their own abdomen are not in the table
+  // at all. `0x1B72`, `0x1B73` and `0x1B74` reach y -2.02 in their own
+  // geometry; `0x1B70` and `0x1B71` stop at y 1.35.
+  for (const slot of [0x1b70, 0x1b71]) {
+    const arm = g_class30_bone_cels[slot];
+    check(`0x${slot.toString(16).toUpperCase()} draws itself and the lower torso`,
+          !!arm && arm.self && arm.runs.length === 1
+          && arm.runs[0].base === 0x1b52,
+          `${arm?.self} ${arm?.runs.length}`);
+  }
+  for (const slot of [0x1b72, 0x1b73, 0x1b74]) {
+    check(`0x${slot.toString(16).toUpperCase()} is not a trigger at all`,
+          g_class30_bone_cels[slot] === undefined,
+          `${g_class30_bone_cels[slot] !== undefined}`);
+  }
+  // Every cel the table can ask for has to be in the bundle, or the draw finds
+  // nothing -- which is the hole this fixes, one level down.
+  const cels = ZombieBoneCelSlots();
+  // 20 + 30 + 5 + 5 + 120 + 18 + 50 + 50: the lower-torso run is named by
+  // three arms and counted once, which is the point of asking for the set.
+  check("the table names 298 distinct cels across its nine arms",
+        cels.length === 298, `${cels.length}`);
+
+  // The phase. `obj+0x3C` is claimed by `ActorBuildSkinnedModel`, which every
+  // skinned `Init` calls, and the port claims it in `ActorSpawn` for the
+  // classes whose `Init` is a proved caller.
+  const rng = new Rng(97);
+  scene(0, rng);
+  const a = ActorSpawn(0x9800, SpawnClass.Zombie, 0, "znA", {}, rng);
+  const b = ActorSpawn(0x9804, SpawnClass.Zombie, 0, "znB", {}, rng);
+  check("two zombies take different hit slots, so different cel phases",
+        a.hitSlot === 0 && b.hitSlot === 1, `${a.hitSlot} ${b.hitSlot}`);
+  check("...and the claim raises obj+0x38 bit 0x40",
+        (a.flags38 & HIT_SLOT_CLAIMED) !== 0,
+        `0x${a.flags38.toString(16)}`);
+  // A class whose `Init` the engine is not proved to build a skinned model in
+  // does not claim, rather than a guess that would shift every index.
+  const mouse = ActorSpawn(0x9808, SpawnClass.Mouse, -1, "mouse", {}, rng);
+  check("a class with no proved model build claims nothing",
+        mouse.hitSlot === -1, `${mouse.hitSlot}`);
+  // `ActorDespawn` hands the slot back, and the next claim takes it.
+  ActorDespawn(a);
+  check("a despawn hands the slot back",
+        a.hitSlot === -1 && G.g_hit_slots[0] === -1,
+        `${a.hitSlot} ${G.g_hit_slots[0]}`);
+  const c = ActorSpawn(0x980c, SpawnClass.Zombie, 0, "znC", {}, rng);
+  check("...and the next zombie takes the freed one, not the next index",
+        c.hitSlot === 0, `${c.hitSlot}`);
+  // Fourteen deep, and the engine does not guard the overflow either: the
+  // fifteenth claimant keeps -1, which `render/characters/cels.ts` reads as a
+  // negative cel index and therefore as no cel.
+  const many: number[] = [];
+  for (let i = 0; i < 14; i += 1) {
+    many.push(ActorSpawn(0x9900 + i * 4, SpawnClass.Zombie, 0, "zn", {},
+                         rng).hitSlot);
+  }
+  // Two are already held, so twelve of the fourteen claims land and the last
+  // two find the table full.
+  check("the table is fourteen deep and the overflow claimants get -1",
+        many.filter((n) => n >= 0).length === 12
+        && many.slice(-2).every((n) => n === -1)
+        && new Set(many.filter((n) => n >= 0)).size === 12,
+        many.join(","));
+}
+
+// -- the creature `znjoe` releases ------------------------------------------
+
+/**
+ * `ActorReactToHit`'s `znjoe` arm, the state it leads to, and the thing that
+ * comes out of the chest.
+ *
+ * All of it was read and named and none of it was ported, which is why the
+ * assertions here are mostly about *edges that did not exist*: state 25 had
+ * no `case`, `g_body_creatures` had no entries, and the two enemy counters
+ * never saw an object that in the engine has to be shot before a room can
+ * clear.
+ */
+console.log("\nznjoe's creature:");
+{
+  /** `znjoe`. The one character type `ActorReactToHit` tests for. */
+  const JOE = 0x0a;
+  const joeType = {
+    ...CHARS.types["1"], type: JOE, name: "znjoe", file: "znjoe.bin",
+    bones: [
+      // The torso, with an **escalating** first step so a hit on it resolves
+      // as result 1. `0x1CF1` stands in for `g_pBoneEffectSlots[0x0A][7]`,
+      // the slot the release swaps bone 1 to.
+      { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 3,
+        steps: [[0x1cf0, EffectCode.Escalate, 3],
+                [0x1cf1, EffectCode.Escalate, 3],
+                [0x1cf2, EffectCode.Last, 3]] },
+      { bone: 4, part: "r_upperarm", slot: 4, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 2,
+        steps: [[0x11, EffectCode.Escalate, 3]] },
+      { bone: 2, part: "head", slot: 0x30, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    motions: {
+      ...CHARS.types["1"].motions,
+      // 0x1E3 the walk it backs out on and 0x1DF the clip it opens on, both
+      // with the play length the shipped table gives them:
+      // `g_motion_play_length` (0x004E07D0) is **155** at index 479 and 79 at
+      // 483. The 155 is the reason the release can happen at all -- the
+      // countdown the state arms is 95 to 104 frames and the clip ending is
+      // what hands over to the death state, so a clip shorter than the
+      // countdown would leave every znjoe dying with its chest closed. A
+      // fixture with 40 frames does exactly that, which is how this line
+      // came to be pinned.
+      "483": motion(40, 0, 79), "479": motion(78, 0, 155),
+    },
+  } as unknown as CharacterType;
+  const joeChars = {
+    ...CHARS, types: { "1": CHARS.types["1"], "10": joeType },
+  } as unknown as CharactersJson;
+
+  /** A host that can pose bone 1 and has a camera at the origin. */
+  const JOE_HOST: GameHost = {
+    boneWorld: (_at, bone, out) => {
+      if (bone !== 1) return false;
+      out.x = 0; out.y = 5; out.z = 40;
+      return true;
+    },
+    aimPoint: (_ahead, out) => { out.x = 0; out.y = 0; out.z = 0; },
+    viewPoint: () => undefined,
+    viewSpaceOf: () => false,
+    // A camera at the origin looking down `-Z`, so camera space is the world
+    // with `z` negated -- enough to prove which space the flight is in.
+    viewSpaceOfPoint: (pt, out) => {
+      out.x = pt.x; out.y = pt.y; out.z = -pt.z;
+      return true;
+    },
+    setBoneSlot: () => undefined,
+  };
+
+  function joeScene(rng: Rng): { joe: ZombieActor; events: Events } {
+    ResetGameGlobals();
+    SetGameTables(joeChars);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_player_state = [5, 5];
+    G.g_app_state = AppState.InPlay;
+    G.g_nFiringGate = 1;
+    const joe = spawnZombie(0x0a68, JOE, "znjoe", {}, rng);
+    joe.visible = true;
+    joe.attackState = 1;
+    joe.hp = 100;
+    joe.pos = vec3(0, 0, 40);
+    joe.motion = 10;
+    return { joe, events: new Events() };
+  }
+
+  // -- 1. the arm, and the frame it has to happen on -----------------------
+  //
+  // `ResolveHit` charges the damage and withholds the stagger; the arm itself
+  // runs in `ZombieOnShot`, which is where the engine calls
+  // `ActorReactToHit` -- at `0x0045401A`, **after** the death test at
+  // `0x00453F46` that reads the very bit the arm raises. Called any earlier
+  // than that, the arm sets state 25 and `ZombieOnShot` overwrites it with
+  // {@link ZombieState.Death} on the same frame, which is what it did.
+  {
+    const rng = new Rng(11);
+    const { joe, events } = joeScene(rng);
+    const score = G.g_player_score[0];
+    const out = ResolveHit(joe, 1, 0, JOE_HOST, rng, 0);
+    check("a torso hit on znjoe plays no stagger and leaves it alive",
+          out.react === undefined && out.result === 1 && joe.hp > 0
+          && !joe.dead,
+          `react ${out.react} result ${out.result} hp ${joe.hp}`);
+    check("...and the hit carries the player who fired it, per `obj+0x190`",
+          joe.pendingHit?.player === 0,
+          `${JSON.stringify(joe.pendingHit)}`);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("...and `ZombieOnShot` puts it in state 25, not a death state",
+          joe.state === ZombieState.ReleaseBodyCreature,
+          `state ${joe.state} sub ${joe.sub}`);
+    check("...the same OR marks it dead and undismemberable",
+          (joe.flags & ActorFlag.Dead) !== 0
+          && (joe.flags & ActorFlag.NoDismember) !== 0,
+          `flags ${joe.flags.toString(16)}`);
+    check("...pays the shooter 0x50 and records who fired",
+          G.g_player_score[0] === score + 0x50 && joe.killedBy === 0,
+          `score ${G.g_player_score[0]} killedBy ${joe.killedBy}`);
+
+    // Once-only, and the latch is `NoDismember` -- which the same OR raised.
+    joe.state = ZombieState.HoldAtRange;
+    joe.sub = 0;
+    joe.hp = 100;
+    joe.flags &= ~(ActorFlag.ShotImmune as number);
+    joe.flags2 &= ~(ZombieFlag2.DiedInFlight as number);
+    ResolveHit(joe, 1, 0, JOE_HOST, rng, 0);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("a second torso hit does not open it again",
+          joe.state !== ZombieState.ReleaseBodyCreature, `state ${joe.state}`);
+  }
+
+  // Neither of the other two conditions may be dropped.
+  {
+    const rng = new Rng(12);
+    const { events } = joeScene(rng);
+    const other = spawnZombie(0x2000, 1, "not a znjoe", {}, rng);
+    other.hp = 100;
+    other.visible = true;
+    ResolveHit(other, 1, 0, JOE_HOST, rng, 0);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("another character type's torso hit is an ordinary hit",
+          other.state !== ZombieState.ReleaseBodyCreature,
+          `state ${other.state}`);
+  }
+  {
+    const rng = new Rng(13);
+    const { joe, events } = joeScene(rng);
+    ResolveHit(joe, 4, 0, JOE_HOST, rng, 0);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("and a znjoe shot in the arm is too -- the bone is bone 1",
+          joe.state !== ZombieState.ReleaseBodyCreature, `state ${joe.state}`);
+  }
+
+  // -- 2. the state --------------------------------------------------------
+  {
+    const rng = new Rng(14);
+    const { joe, events } = joeScene(rng);
+    joe.state = ZombieState.ReleaseBodyCreature;
+    joe.sub = 0;
+    // Inside the inner ring (25), which is where a zombie shot at close range
+    // is. The engine walks it back out before the chest opens.
+    joe.pos = vec3(0, 0, 10);
+    joe.attackPermit = 0;
+    G.g_attack_permits[0] = joe.at;
+    for (let i = 0; i < 5; i++) {
+      GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    }
+    check("inside the inner ring it plays the walk and stays in sub 1",
+          joe.motion === 0x1e3 && joe.sub === 1,
+          `motion ${joe.motion} sub ${joe.sub}`);
+    check("...and it is dead already: sub 0 zeroed the hit points",
+          joe.hp === 0, `hp ${joe.hp}`);
+    check("...and is immune to a second shot while it finishes",
+          (joe.flags & ActorFlag.ShotImmune) !== 0,
+          `flags ${joe.flags.toString(16)}`);
+
+    // Out past the ring, and the clip starts.
+    joe.pos = vec3(0, 0, 40);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("outside it, the release clip starts and a countdown is armed",
+          joe.motion === 0x1df && joe.sub === 3
+          && joe.arcTotal >= 0x5f && joe.arcTotal <= 0x5f + 9,
+          `motion ${joe.motion} sub ${joe.sub} delay ${joe.arcTotal}`);
+
+    const before = G.g_enemies_alive;
+    const want = joe.arcTotal;
+    for (let i = joe.arcFrames; i < want + 1; i++) {
+      GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    }
+    check("on the frame it lands, the torso opens",
+          joe.boneSlot["1"] === 0x1cf1 && joe.hits[1] === 1,
+          `slot ${joe.boneSlot["1"]} hits ${joe.hits[1]}`);
+    check("...the creature is released",
+          G.g_body_creatures.length === 1,
+          `${G.g_body_creatures.length} creatures`);
+    check("...and it is a countable enemy: both counts go up",
+          G.g_enemies_alive === before + 1,
+          `${before} -> ${G.g_enemies_alive}`);
+    check("...the permit goes back, because a corpse must not hold one",
+          joe.attackPermit === -1 && G.g_attack_permits[0] === -1,
+          `permit ${joe.attackPermit}`);
+    check("...and the death-motion bit goes up, which is the same latch",
+          (joe.flags2 & ZombieFlag2.DeathMotionVariant) !== 0,
+          `flags2 ${joe.flags2.toString(16)}`);
+    // ...and only once, however long the clip runs. The clip's play length is
+    // 155 and the countdown spent 95 to 104 of it, so the last fifty frames
+    // are the zombie standing with its chest open -- and the latch has to
+    // hold for every one of them. Counted on the sequence rather than on the
+    // live list, because the one creature flies off, hits the player and
+    // falls out of the world inside that window.
+    const n = G.g_body_creature_seq;
+    for (let i = 0; i < 80; i++) {
+      GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    }
+    check("...exactly once, however long the clip runs",
+          G.g_body_creature_seq === n, `${n} -> ${G.g_body_creature_seq}`);
+    check("...and when the clip ends the zombie dies its own death",
+          joe.state === ZombieState.Death
+          || joe.state === ZombieState.CorpseSink
+          || joe.state === ZombieState.CorpseBlink,
+          `state ${joe.state}`);
+  }
+
+  // -- 3. the flight -------------------------------------------------------
+  {
+    const rng = new Rng(15);
+    const { joe, events } = joeScene(rng);
+    const c = SpawnBodyCreature(joe);
+    check("a new creature rides the host's bone",
+          c.state === BodyCreatureState.RideHostBone);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    // The host's bone is at world (0, 5, 40) and the stub's camera space
+    // negates z, so the launch point is (0, 6.5, -40): the 1.5 lift is added
+    // in *world* and z comes back negative, which is in front of the eye.
+    check("...and launches into camera space, lifted by 1.5",
+          c.state === BodyCreatureState.Fly
+          && Math.abs(c.flight.start.y - 6.5) < 1e-6
+          && c.flight.start.z === -40,
+          `start ${JSON.stringify(c.flight.start)}`);
+    check("...with the launch range measured to the eye",
+          Math.abs(c.flight.range - 40) < 1e-6, `range ${c.flight.range}`);
+    check("...and plays COMMON\\MEET01_22.WAV", sounds.includes(0x3a16a9),
+          `sounds ${sounds.map((x) => x.toString(16)).join(",")}`);
+    // One player, so the end point is the origin of camera space: the eye.
+    check("...aimed at the eye, because there is one player",
+          c.flight.endX === 0 && c.flight.endZ === 0);
+
+    // The arc: a one-unit half-sine over the descent, and it is **zero at
+    // both ends** -- `t * 65536 * 5/9` BAMS passes through exactly pi at
+    // `t = 0.9`, which is the same `t` the arrival latches on. `c.t` is
+    // already the *next* step by the time the call returns, so the t that
+    // produced this frame's position is the one read before it.
+    let peak = 0;
+    let frames = 0;
+    let last = 0;
+    while (c.arrived === 0 && frames < 240) {
+      const t = c.t;
+      BodyCreatureUpdate(c, rng, JOE_HOST, events);
+      last = c.pos.y - c.flight.start.y * (1 - t);
+      peak = Math.max(peak, last);
+      frames++;
+    }
+    check("the flight arrives in about twenty-four frames",
+          frames >= 20 && frames <= 30, `${frames} frames`);
+    check("...having humped a unit above the straight line",
+          peak > 0.95 && peak <= 1.0, `peak ${peak}`);
+    check("...and come back down onto it by the time it arrives",
+          Math.abs(last) < 0.1, `arc ${last}`);
+    check("...which leaves it a tenth of the way above the eye it left from",
+          c.pos.y > 0 && c.pos.y < c.flight.start.y * 0.2,
+          `y ${c.pos.y} of ${c.flight.start.y}`);
+    check("...and the sprite cursor has walked the forty-slot loop",
+          c.slot >= 0x1d31 && c.slot <= 0x1d31 + 0x27, `slot ${c.slot}`);
+
+    // Thirty frames later it takes a life -- and only then. The arrival frame
+    // steps the counter twice, once to latch and once as the delay's own
+    // increment, so twenty-eight more frames is the last one that is safe.
+    const lives = G.g_player_lives[0];
+    for (let i = 0; i < 0x1e - 2; i++) {
+      BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    }
+    check("it does not hit the player the moment it arrives",
+          G.g_player_lives[0] === lives, `lives ${G.g_player_lives[0]}`);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("...it hits thirty frames later",
+          G.g_player_lives[0] === lives - 1 && G.g_player_was_hit[0] === 1,
+          `lives ${G.g_player_lives[0]}`);
+    check("...and starts falling",
+          c.state === BodyCreatureState.FallAfterHit,
+          `state ${BodyCreatureState[c.state]}`);
+
+    // The fall's tumble **accelerates**: `tail+0x24` starts at -0x200 and is
+    // multiplied by 1.01 every frame, so a creature that has fallen for ten
+    // frames is turning faster than one that has fallen for one. The clamp at
+    // -0x4000 exists but is not reached from here -- 0.010888 a frame takes
+    // the body below `y = -3` in about forty frames and the accumulated spin
+    // needs about fifty -- so it is the growth that is asserted and not the
+    // clamp.
+    const spin0 = c.flight.fallSpin;
+    for (let i = 0; i < 10; i++) BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("the fall's tumble accelerates, and the wrong way for a miss",
+          c.flight.fallSpin < spin0 && c.pitch < 0,
+          `spin ${spin0} -> ${c.flight.fallSpin} pitch ${c.pitch}`);
+
+    const alive = G.g_enemies_alive;
+    const present = G.g_enemies_present;
+    let live = true;
+    for (let i = 0; i < 600 && live; i++) {
+      live = BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    }
+    check("it falls out of the world and drops both counters",
+          !live && G.g_enemies_alive === alive - 1
+          && G.g_enemies_present === present - 1,
+          `alive ${alive} -> ${G.g_enemies_alive}`);
+  }
+
+  // -- 4. shooting it ------------------------------------------------------
+  {
+    const rng = new Rng(16);
+    const { joe, events } = joeScene(rng);
+    const c = SpawnBodyCreature(joe);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);   // launch
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const score = G.g_player_score[0];
+    MarkBodyCreatureShot(c, 0);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("a shot creature pays 0x50",
+          G.g_player_score[0] === score + 0x50,
+          `${score} -> ${G.g_player_score[0]}`);
+    check("...plays COMMON\\MEET02_22.WAV", sounds.includes(0x3b16a9),
+          `sounds ${sounds.map((x) => x.toString(16)).join(",")}`);
+    check("...leaves blood at the point it was hit",
+          G.g_point_blood_sprays.length === 1,
+          `${G.g_point_blood_sprays.length} sprays`);
+    check("...and falls the other way",
+          c.state === BodyCreatureState.FallShot && c.flight.fallSpin > 0,
+          `state ${BodyCreatureState[c.state]} spin ${c.flight.fallSpin}`);
+    const lives = G.g_player_lives[0];
+    const spin0 = c.flight.fallSpin;
+    for (let i = 0; i < 10; i++) BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("...and tumbles the other way, accelerating",
+          c.flight.fallSpin > spin0 && c.pitch > 0,
+          `spin ${spin0} -> ${c.flight.fallSpin} pitch ${c.pitch}`);
+    let live = true;
+    for (let i = 0; i < 600 && live; i++) {
+      live = BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    }
+    check("...and never reaches the player", G.g_player_lives[0] === lives,
+          `lives ${G.g_player_lives[0]}`);
+    check("...and leaves on its own", !live);
+  }
+
+  // -- 5. the pool ---------------------------------------------------------
+  {
+    const rng = new Rng(17);
+    const { joe, events } = joeScene(rng);
+    SpawnBodyCreature(joe);
+    check("the pool is stepped by `GameUpdate`, like the thrown weapons",
+          G.g_body_creatures.length === 1);
+    GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
+    check("...so a creature launches without anybody calling it directly",
+          G.g_body_creatures[0].state === BodyCreatureState.Fly,
+          `state ${BodyCreatureState[G.g_body_creatures[0].state]}`);
+    check("...and a reset empties it",
+          (ResetGameGlobals(), G.g_body_creatures.length === 0));
   }
 }
 

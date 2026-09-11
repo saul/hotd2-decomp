@@ -56,18 +56,45 @@ named · `[not-a-bug]` the port already matches the engine · `[open]` unsolved 
 
 ### Three reports are half-done, and each remaining half is named
 
-* `[open]` **the stage-3 alternating-frame flip** on the boat's NPCs — the
-  last third of the "boat is invisible" report. The camera was disproved as the
-  cause over 3000 frames and four runs; the remaining lead is
-  `ActorAdvanceMotion` applying root motion to `obj.pos` for class 0x25 once
-  its VM parks.
-* `[open]` **`char_adv02`'s midriff gap.** ~1.75 units are drawn by nothing
-  between the damaged torso `0x1B70` and the pelvis. `harold.bin` carries five
-  lower-torso models of exactly that extent that **no table in the EXE
-  references**, so the join is not guessable from the binary and was not
-  guessed at.
-* `[decide]` **the crawlers hit where the engine whiffs** — a decision rather
-  than a mystery. It is divergence 2 below.
+All three are closed as of 2026-09-11, and two of them were closed by being
+disproved rather than fixed.
+
+* `[fixed]` **the stage-3 alternating-frame flip** on the boat's NPCs. The
+  recorded lead was wrong twice over. `ActorAdvanceMotion` **cannot** move a
+  path-riding class-0x25 actor: the motion advance runs *before* the class
+  handler and `HumanoidFrameTail` re-seats the position absolutely from the
+  object path every frame the VM lives — measured, both riders moving exactly
+  -1.116 in x per frame and 0 in y and z over 24 consecutive frames. And the
+  flip was **already gone**: two writers share `obj+0x68`, an absolute
+  `yaw = path.yaw` and a relative `yaw += seat.dyaw`, and while the host seam
+  published no yaw at all the absolute write was skipped and the relative one
+  accumulated `0x8000` — half a turn — every frame. Every stage-3 seat record
+  carries that value. Proved by **putting the bug back**: the mutant's pixel
+  difference from the fixed tree alternates 4,980 / 2,776 / 4,976 / 2,824 for
+  twelve consecutive frames.
+* `[fixed]` **`char_adv02`'s midriff gap — there is no table, and there never
+  was.** `[proved]` A class-0x30 actor's bones do not go through
+  `SkeletonDrawNodeSlot` at all: `SkeletonEmitNode` (`FUN_004114C0`) calls the
+  per-bone hook at `model+0x1158`, which `EnemyZombieInit` (`FUN_00452DA0`)
+  fills with `ZombieDrawBonePart` (`FUN_004534A0`), and **nine of its sixteen
+  arms draw a cel out of a run, four of them on top of the bone's own model**.
+  So the undamaged torso never draws itself either, and the two chest damage
+  stages draw themselves plus a **thirty-cel** lower torso at
+  `0x1B52..0x1B6F`. The five models "no table references" are simply the last
+  five of that run. The index is
+  `(g_blink_frame_counter + obj+0x3C * 10) % 0x1E + 0x1B52`.
+
+  **What stalled the search was a true premise with a false inference.**
+  `AssetDrawSlot` really does draw one model per slot — so a bone cannot draw
+  two, which does not follow, because the hook calls the draw as many times as
+  it likes. That is now `L39`. Three independent checks on the reading: the
+  three stages that are *not* triggers are exactly the three whose own geometry
+  already reaches the pelvis split; every cel in a run shares mesh count,
+  vertex count and texture ids with its neighbours while most vertices move,
+  which is a flipbook and not a set of variants; and each trigger slot belongs
+  to one character type whose own file holds the run.
+* `[fixed]` **the crawlers hit where the engine whiffs** — closed on your
+  decision. It was divergence 2 and the divergence is gone.
 
 ### One `[open]` that no report raised
 
@@ -122,7 +149,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   stage. `docs/formats/evt.md` had stopped reading at the first
   `AssetDrawSlot`, and the player believed the doc.
 
-- `[part]` Start of Stage 3 the boat is not visible for a while. While the boat
+- `[fixed]` Start of Stage 3 the boat is not visible for a while. While the boat
   is invisible the NPCs in the front seats of the boat are in the wrong
   orientation and flipping between two positions on alternating frames
   — three causes, all fixed: `FUN_0048EAD0`'s `default:` arm draws at the held
@@ -190,7 +217,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   (`distance 99.0`), so the lunge test passed at 24 units, `strikeFloor` became
   99, and root motion shoved the body out to exactly 99 the next frame.
 
-- `[part]` char_adv02 zombies seem to lose their midriff on one shot
+- `[fixed]` char_adv02 zombies seem to lose their midriff on one shot
   — `swapGore`'s single-primitive fast path took only the *first* mesh of a
   chain, and all 57 of `char_adv02`'s damaged variants are multi-primitive, so
   every arm and leg swap drew a fraction of the part. Fixed. **`[open]`: the
@@ -334,7 +361,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   `[port-only]` note claimed the port could not hold the counter and that the
   visible result was the same; both halves were wrong.
 
-- `[part]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — hangs
+- `[fixed]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — hangs
   from a ledge, should be pushing a chair aside. **The whole data chain checks
   out and the lead is elsewhere.** The descriptor's state is 18, and
   `ZombieStateWaitCameraFrameThenBranch` (`FUN_004575A0`) plays `tail+0x04` and
@@ -402,9 +429,39 @@ be port bugs at all, and they are marked as such rather than "fixed".
   **The port was already saying so.** The exporter emits a class 0x33 placement
   only at `hp == 1`, so there is no placement, no actor and no geometry; the
   Actors panel lists no class 0x33 at all, and two `c51 hp4` overlay markers
-  sit in front of the zombie with nothing drawn. `[part]` The fix is specified
-  and authorised — widen the placement to selector 4 with a `class33_push`
-  block in both exporter halves, and add the push consumer the port lacks.
+  sit in front of the zombie with nothing drawn.
+
+  **Built and verified 2026-09-11.** The placement is widened to selector 4
+  with a `class33_push` tail block in both exporter halves, and
+  `game/class33/pushable.ts` is the push consumer the port lacked.
+
+  **Two traps in the wiring, either of which would have looked like success.**
+  The existing tail block was keyed on the *class*, so widening the placement
+  alone would have laid selector 1's field names over selector 4's bytes — the
+  same offset is an object-path slot in one and a flag index in the other. Both
+  blocks are keyed on the selector now and are mutually exclusive. And the
+  spawn path had to carry the descriptor's flags word through, because both
+  chairs set the very bit their arming flag clears; dropping it gives a chair
+  pushable from frame one, **which is a bug that looks exactly like the fix
+  working**.
+
+  Measured in the running player: `0x1A40` moves from its descriptor position
+  `(22.83, 6.5, -16.74)` to `(21.65, 6.73, -16.94)`, and `0x1A74` from
+  `(16.83, 6.5, -20.74)` to `(16.31, 6.55, -21.14)`. Both drawn, both armed,
+  both pushed; the actors panel goes from 19 in 8 classes to 21 in 9. The
+  after-shot at camera frame 159/165 has the near chair shoved out of line with
+  the zombie's arms over it and the far one still square to the desk.
+
+  Fourteen mutants, fourteen caught. **Two were missed on the first pass and
+  both were the wiring rather than the arithmetic** — the dispatch arm and the
+  spawn gate — because every assertion called the update routine directly,
+  which is `L38`. The check that catches them goes in through the spawn path
+  and the game update and nothing else. A third had to be rewritten rather than
+  believed: doubling one value crashes the export before the check sees it.
+
+  `[open]` What clip 1048 was authored to depict is still not named, and
+  deliberately so. The lead is the six other spawns that use 1047 and 1048:
+  two trios three abreast in stage 1's two route branches, and two in stage 2.
 
 - `[fixed]` **`zsass` walks through the camera and never attacks** —
   `?stage=2&mode=play&block=17&step=7&op=0`, `0xBA90`. **An exporter bug, and
@@ -1534,7 +1591,7 @@ investigation ruled out.
   is only one type's; six types compose theirs differently and **15 shipped
   spawns with two or more non-zero angles are posed wrongly today**.
 
-- `[part]` **`znjoe` releases a creature from its body when you shoot it, and
+- `[fixed]` **`znjoe` releases a creature from its body when you shoot it, and
   the port has none of it.** The whole chain is read and named now; none of it
   is ported. `0x0A68` is a spawn address — `znjoe` is character type **0x0A**,
   one of stage 5's seven.
@@ -1569,6 +1626,44 @@ investigation ruled out.
   `ActorReactToHit`, the bone swap, and forty sprite slots the exporter does
   not carry. `[open]` The 0x504-byte tail `BodyCreatureInit` allocates holds
   the flight's start and end and has not been read.
+
+  **Ported 2026-09-11, the whole chain.** The arm in `ActorReactToHit`
+  (`FUN_004543F0`), state 25 `ZombieStateReleaseBodyCreature` (`FUN_00457FB0`),
+  and the creature's `SpawnBodyCreature` / `BodyCreatureInit` /
+  `BodyCreatureUpdate` (`FUN_0043E720` / `FUN_0043E790` / `FUN_0043E880`) as a
+  plain-record pool on the severed head's shape, plus the bone swap, the permit
+  release, both enemy counters, the two sounds, the blood and the player
+  damage. `[proved]` exactly **seven** spawns in the twelve shipped scripts are
+  `znjoe`, all class 0x30, all stage 5.
+
+  **The `0x504` tail is read, and it is not a struct type.** Three routines
+  allocate that size and their layouts disagree — the same offset is an actor's
+  `y` in one and the flight's start `y` in another. `L3` inside one allocation
+  size. The creature's position is in **camera space**, proved three ways, and
+  the arc constant puts the sine through exactly pi at the arrival latch.
+
+  **The bug that ate the feature, and it is `L11`.** Everything was written and
+  **no `znjoe` released anything** across 18,480 shots and six of the seven
+  spawns. `ActorReactToHit`'s one caller is `ZombieOnShot` at `0x0045401A`,
+  **five instructions past its death test** at `0x00453F46` — and that test
+  reads the very bit the arm raises. The port called it from `ResolveHit` at
+  the head of the frame instead, so the arm set state 25 and the shot drain
+  overwrote it with the death state on the same frame. Measured: a first torso
+  hit took the actor 100 → 35 hit points, alive, and left it in state 6.
+
+  Two exporter gaps that **only playing it could find**: the forty sprite slots
+  sit past any skeleton node, and the bank shipped six clips but neither of the
+  two this needs — so the play length was 0 and the state had no root motion to
+  leave the ring with.
+
+  `[open]` Five things, one a decision for the user. **A live creature is a
+  camera candidate in the engine and cannot be one here**: its update ends in
+  the camera registration, and the port's slot array is over `Actor`s, so the
+  camera never sees the creature although the enemy count does. Fixing that
+  needs either the slot array taking non-actor objects or an invented spawn
+  class, so no divergence was declared and it waits on a call. Also open: what
+  space the registered point is in, and three writes with no reader anywhere in
+  the image, left unported and unnamed rather than named for where they sit.
 
 - `[fixed]` **The three zombies that should travel with the car at
   `?stage=5&mode=play&block=2&step=2&op=50&frame=599` stand far away instead.**
@@ -1736,7 +1831,12 @@ investigation ruled out.
   applies only a root's `y` on the rule that the horizontal part is already
   world movement — and for a clip whose root never changes the per-frame delta
   is zero. Fixing it changes the root-motion model for **every skinned actor**
-  and wants `SkeletonPoseRootFrame` (`FUN_00410C50`) read first.
+  and wants **both** halves read first: `SkeletonPoseRootFrame`
+  (`FUN_00410920`), which places the root bone at the frame's translation,
+  and `SkeletonApplyRootMotion` (`FUN_00410C50`), which turns the
+  frame-to-frame delta into world movement. Which is relative to which is
+  the `[open]`. This entry first paired the first name with the second
+  address, which `verify_port` caught.
   `RescueTargetFreedState` never ends, so a rescued target stays in the pool,
   harmless today. And **nothing counts the spawns a block asks for against the
   actors it gets** — that one comparison would have found this and both bosses
@@ -1810,6 +1910,46 @@ investigation ruled out.
   clearing in 420, 435 and 285 frames against a 300-frame window; stage 1's
   block 1 has `g_nFiringGate` legitimately down; and stage 5's block 2 clears
   now that class 0x33 and `ZombieState.Leave` are ported.
+
+## And one nobody could have reported, in a route nothing had played
+
+- `[open]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
+  step 3 op 4. Reproduce with
+  `cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless`: it
+  reaches block 7, then 8, then 2, and stops for 1,110 game frames on one
+  instruction.
+
+  **Found by giving the driver something it never had.** `entry` was already a
+  URL flag the player honoured and only the playthrough tool could not reach,
+  and **only stages 3 and 4 have more than one entry** — so those stages carry
+  routes no automated run had ever played. The entry-0 route never visits
+  block 2 at all.
+
+  What is localised: the room holds **0 enemies alive and 0 hit points** at
+  that moment, and 66 volleys over 480 frames landed no damage anywhere, so
+  whatever should raise flag 21 is not on the field, not ported, or not
+  reaching its raising state. Step 3's op 1 sets flag **24**, a different one,
+  which is consistent with the standing fact that every gate in all six
+  scripts names a flag that stage's own script never sets.
+
+  **Do not fix this by widening `ScriptFlagsThisBundleCanRaise`** in
+  `web/src/script/waits/flag.ts` unless the engine provably cannot raise the
+  flag on this route. The first question is whether flag 21 is already in that
+  set for stage 3: if it is, the port believes something can raise it and that
+  something is failing; if it is not, the escape should have passed the gate
+  and did not, which is a different bug in a different file.
+
+- `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
+  defect in itself, and recorded because it is now live code with no coverage.
+  The rescue target its branch variable depends on had no skeleton until
+  2026-09-11, so those blocks were unreachable; exporting the actor turned them
+  into code no run has visited. Reaching them needs the driver to **shoot that
+  actor during block 0**, which `shootable` in `playthrough.mjs` declines
+  because the gate there is neither an enemy nor a civilian one. `--entry` does
+  not help: stage 2 has one entry and the flag falls back to it silently,
+  producing a byte-identical run. **A driven run takes one arm of every
+  branch**, so "the stage reached an end block" has always meant one path
+  through it was played and no others.
 
 ## And one about a check that is not reliable
 

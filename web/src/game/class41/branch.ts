@@ -495,6 +495,33 @@ export const STORY_SWITCH_ROUTES: ReadonlyArray<readonly [number, number]> = [
 ];
 
 /**
+ * `g_script_flags[0x15]` — the flag `StoryModeSwitchUpdate`'s **head** raises,
+ * and the only writes of that byte by literal address in the image:
+ * `0x00474FA6` and `0x004751B1`.
+ *
+ * Stage 3's block 2 step 3 is `wait_script_flag 0x15`, and on the
+ * block-7 -> block-8 route nothing else in the stage sets it: the script's own
+ * `set_script_flag 0x15` is in block 1 step 5 (evt `0x001D00`), and block 1 is
+ * only on the entry-0 route. The switch that carries it there is the one
+ * block 7 step 8 spawns (evt `0x3630`), whose `obj+0x2A4` removal flag is 22 —
+ * which block 2 step 3 raises at its own end, so the object is taken away one
+ * gate later by the same step it opened.
+ */
+export const STORY_SWITCH_SCRIPT_FLAG = 0x15;
+
+/**
+ * The one `(scene, block)` the head raises {@link STORY_SWITCH_SCRIPT_FLAG}
+ * in — the `else` arm of the scene-1 despawn test, not a member of
+ * {@link STORY_SWITCH_ROUTES}.
+ *
+ * Two pairs, one effect each, in one routine: this pair raises a flag before
+ * the mode gate; those five write `g_script_branch_var` behind it. Keeping
+ * them as separate tables is what stops a reader assuming the routine has one
+ * scene table.
+ */
+export const STORY_SWITCH_FLAG_AT: readonly [number, number] = [2, 2];
+
+/**
  * `StoryModeSwitchUpdate` — `FUN_00474F30`. `g_class44_subtypes[17]`'s
  * object, and the branch writer with the widest reach: twelve spawns over
  * four stages.
@@ -524,10 +551,29 @@ export const STORY_SWITCH_ROUTES: ReadonlyArray<readonly [number, number]> = [
  * a shot alone throws those. `+0x2A0` and `+0x2A4` are the two script flags,
  * and the exporter carries all six now.
  *
+ * **The flag this routine raises is not in here.** `g_script_flags[0x15]` is
+ * written twice, and the first of the two (`0x00474FA6`) is in the routine's
+ * head, *before* the `CMP g_GameMode, 1` at `0x00474FB4` — so it runs in
+ * Arcade as well as Original. That is
+ * {@link STORY_SWITCH_SCRIPT_FLAG}, and it is transcribed in
+ * `StoryModeSwitchPoolUpdate` with the two despawn tests it sits between,
+ * because that is where the engine puts it. Reading this function as "the
+ * whole of the switch" is what hid it: stage 3's block 2 parked on
+ * `wait_script_flag 0x15` for ever on the entry-7 route.
+ *
  * Not transcribed: the hinge curve, the story-mode item spawns in scene 2
- * blocks 2 and 4, the `g_script_flags[0x15]` it raises there, and
- * `DAT_009A26EC`, the once-a-scene latch that also throws the switch and whose
- * other reader is unread.
+ * blocks 2 and 4, and `DAT_009A26EC`, the once-a-scene latch that also throws
+ * the switch and whose other reader is unread.
+ *
+ * The item spawn carries the **second** write of `g_script_flags[0x15]`, at
+ * `0x004751B1`: in Original Mode, once `obj+0x192` has latched and the item
+ * has been handed out, the routine waits for `g_script_flags[0x18]` and then
+ * counts `obj+0x2B0` past `0x4C` before raising the flag. It is out only
+ * because `SpawnStoryModeItem` (`FUN_00467B90`) is, and it is reachable only
+ * once the switch is thrown — which for stage 3's switch needs
+ * `PlayerHoldsOriginalItem` of item 0 or 6, since its `obj+0x1FC` is 0 and not
+ * -1. A player who has one of those in Original Mode still hangs on that gate.
+ * `[open]`
  */
 export function StoryModeSwitchUpdate(p: BreakableProp): void {
   if (G.g_GameMode !== GameMode.Original) return;

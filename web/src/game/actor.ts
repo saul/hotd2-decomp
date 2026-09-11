@@ -11,6 +11,7 @@
  */
 import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
+import { HIT_SLOT_NONE } from "./globals";
 import { ActorModelScale } from "./root_motion";
 import type { CivilianState } from "./class10/state";
 import type { Boss4Block } from "./class19/state";
@@ -979,6 +980,16 @@ export interface ActorBase {
    * own and until it happens this word carries only class 0x30's three bits.
    */
   flags38: number;          // +0x38
+  /**
+   * `obj+0x3C` — the index this actor holds in `g_hit_slots`, or `-1`.
+   *
+   * `ActorClaimHitSlot` (`FUN_00409270`) writes it and `ActorDespawn`
+   * (`FUN_00409CC0`) gives it back; see `game/hit_slots.ts`. It is here rather
+   * than absent because `ZombieDrawBonePart` (`FUN_004534A0`) uses it as the
+   * **phase** of every cel animation a class-0x30 bone plays —
+   * `g_blink_frame_counter + obj+0x3C * 10`.
+   */
+  hitSlot: number;          // +0x3C
   pos: Vec3;                // +0x40
   /**
    * Yaw in BAMS, the middle word of the engine's rotation triple at
@@ -1269,6 +1280,16 @@ export interface ActorBase {
    */
   class33: CharacterPlacement["class33"];
   /**
+   * Class 0x33 **selector 4's** tail — the draw slot, the sphere, and the two
+   * script flags that arm the push and take the object off the field.
+   *
+   * Never non-null on the same actor as {@link class33}: the exporter sets
+   * exactly one of the two, keyed on the descriptor's `+0x22`, because they
+   * are two sub-handlers' readings of the same bytes. So this field's presence
+   * *is* the selector, the same way that one's is. See `class33/pushable.ts`.
+   */
+  class33Push: CharacterPlacement["class33_push"];
+  /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
    *
@@ -1333,7 +1354,20 @@ export interface ActorBase {
    * at shot time and the class picks its reaction on its next tick — the same
    * frame boundary the engine has.
    */
-  pendingHit: { bone: number; result: number } | null;   // +0x190, +0x34 bit 3
+  /**
+   * ...and **which player fired**, because the engine's record is per player:
+   * `DispatchHit` (`FUN_004092F0`) reads the bone from `obj+0x190 + player`,
+   * and `ZombieOnShot` (`FUN_00453EB0`) walks `g_hit_player_order` around the
+   * whole of its body. Optional, because only the shot path knows it: the
+   * routines that fabricate a hit -- `ActorKillAll`, the debug clear -- have
+   * no shooter to name.
+   *
+   * `ZombieOnShot`'s live arm is the one reader. `ActorReactToHit`
+   * (`FUN_004543F0`) is called there, at `0x0045401A`, with the player as its
+   * only argument.
+   */
+  pendingHit:
+    { bone: number; result: number; player?: number } | null;  // +0x190
   /**
    * `obj+0x131C` — which player's shot killed this actor.
    *
@@ -1751,7 +1785,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // assigning `cls` here would widen it back to `SpawnClass` and defeat the
   // narrowing the union exists for.
   const head: Omit<ActorBase, "cls"> = {
-    at, charType, name, flags38: 0,
+    at, charType, name, flags38: 0, hitSlot: HIT_SLOT_NONE,
     // `ActorBuildSkinnedModel` writes both of these while building the model:
     // the scale from the character type alone, the flags unconditionally.
     scale: ActorModelScale(charType),
@@ -1807,6 +1841,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class52: null,
     class14: null,
     class33: null,
+    class33Push: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,

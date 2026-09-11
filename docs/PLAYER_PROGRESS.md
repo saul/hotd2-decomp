@@ -850,6 +850,26 @@ with.
 
 Things established while building it, now folded back into the format docs.
 
+- **A `wait_script_flag` gate is held per *route*, not per stage.** `[proved]`
+  — `StoryModeSwitchUpdate` (`FUN_00474F30`), the class-0x44 selector-17
+  object, raises `g_script_flags[0x15]` at `0x00474FA6` while it stands in
+  scene 2 block 2 unthrown, and that write is **above** the routine's
+  `CMP g_GameMode, 1` at `0x00474FB4` — so it happens in Arcade as well as in
+  Original Mode, which is the opposite of what the rest of the routine does.
+
+  Stage 3's block 2 step 3 is `wait_script_flag 0x15`, and the stage's own
+  `set_script_flag 0x15` is in block 1 step 5 — a block only the entry-0 route
+  reaches. On the entry-7 route (7 → 8 → 2) the switch spawned by block 7 step
+  8 is the only thing that opens it, and with that write unported the stage
+  parked on the instruction for good. The port now runs the whole head of the
+  routine, above the mode gate, in `StoryModeSwitchPoolUpdate`.
+
+  The player learned this because `tools/playthrough.mjs` grew `--entry`:
+  before that it could only run each stage's first entry block, and stage 3's
+  block 2 had never been executed by anything. `tools/flag_gates.ts` now walks
+  `entries` → `route.next` and names every gate no `set_script_flag` on the
+  route to it can open — the gates an actor holds, one routine each.
+
 - **Arcade is `g_GameMode` 0 and 2 is Training, which the bundle had the wrong
   way round for as long as it carried the field.** `[proved]` — the values are
   the title menu's row order, and the menu names its own rows:
@@ -2377,6 +2397,95 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+## What a bone draws, which is not its draw slot
+
+**Done for nine of sixteen arms**, and the reason a shot `char_adv02` had a
+hole where its midriff should be. A bone's draw record names one slot and
+`AssetDrawSlot` draws one model for it — and for class 0x30 neither of those
+decides what appears, because `SkeletonEmitNode` (`FUN_004114C0`) calls the
+per-bone hook at `model+0x1158` instead of the one-slot draw, and
+`EnemyZombieInit` (`FUN_00452DA0`) puts `ZombieDrawBonePart` (`FUN_004534A0`)
+there. That routine switches on the slot the bone is *currently* drawing and,
+for sixteen of its arms, draws something else or something more.
+
+* `game/class30/bonecels.ts` carries the nine arms that are nothing but a
+  **phase** — `g_blink_frame_counter + obj+0x3C * 10`, indexed into runs of 5,
+  18, 20, 30, 50 and 120 models — with the instruction address of every base
+  and count, and lists the seven that are not with what each needs.
+* `render/characters/cels.ts` draws them: one node per run per bone, refilled
+  from the cel's template each frame rather than re-cloned, since every cel in
+  a run is the same topology with the same materials.
+* `hod2lib/charbuild.ts` exports the runs a character's own trigger slots
+  reach, so a bundle carries no cel it cannot draw.
+* `game/hit_slots.ts` is `obj+0x3C`, which had been recorded as not ported:
+  `ActorClaimHitSlot` (`FUN_00409270`) and `ActorDespawn`'s release, for the
+  eleven classes whose `Init` is a proved caller of `ActorBuildSkinnedModel`
+  (`FUN_00410440`). Without it every zombie in a crowd animates in lockstep.
+
+`char_adv02`'s bone 1 is the visible case: the undamaged `0x1B3D` draws a
+20-cel chest and a 30-cel lower torso and **never itself**, the two chest-only
+damage stages draw themselves plus the lower run, and the three later stages
+draw alone because their own geometry already reaches the pelvis.
+
+`tools/verify_bone_cels.py` is the check, and it is the only thing that can
+see any of it — no table in the image names these models.
+
+**`[open]`** The seven stateful and extra-matrix arms: `zndina`'s scaled
+25-cel run, `znkager`'s fixed second model, the `obj+0x1328` latch three types
+share, `char_adv00`'s 60-cel ping-pong, `znjikken1`'s `FUN_00418660` prepass,
+and `znele`'s sound transition. `znjoe`'s 120-cel run at `0x1C96` is ported and
+is very likely the "missing chest worm" of a separate report. Class 0x31's
+`ThrowerDrawBonePart` has arms of the same shape and none of them is read.
+
+### The creature `znjoe` releases, and the frame the arm has to fire on
+
+Shoot a `znjoe` in the chest and something comes out of it. Seven spawns in the
+whole game have character type `0x0A` and every one of them is in stage 5 —
+evt `0x0A68`, `0x0AF8`, `0x0B24`, `0x2E20`, `0x2E50`, `0x2F58`, `0x2F8C` — and
+`ActorReactToHit` (`FUN_004543F0`) is the one place in the image that tests for
+it. A **first** hit on bone 1 with result 1 does not stagger the actor: it
+scores `0x50`, marks it dead, and drops it into class 0x30 state **25**,
+`ZombieStateReleaseBodyCreature` (`FUN_00457FB0`), which no spawn record
+reaches.
+
+That state backs the zombie out to its **inner** approach ring, plays clip
+`0x1DF` for `rand() % 10 + 0x5F` frames — 95 to 104 — and then, on one frame,
+applies the torso's first damage step by hand and calls `SpawnBodyCreature`
+(`FUN_0043E720`). What comes out is an object with **no class id**, like the
+thrown weapon and the severed head, and it is a **countable enemy**:
+`BodyCreatureInit` raises `g_enemies_present` *and* `g_enemies_alive`, so a
+room gate has to account for it. It rides the host's bone for a frame, then
+flies at the eye along a one-unit half-sine in about twenty-four frames. Shoot
+it for `0x50` and it falls one way; miss it and thirty frames after it arrives
+it **takes a life**, then falls the other. Either way it drops both counters
+below `y = -3` and leaves.
+
+**Its position is in camera space**, which is the whole shape of the routine —
+the flight's end is the origin of that space, and in a two-player game it is
+`x = ∓0.6`, one gun each. `render/effects.ts` draws it in the same view group
+the blood and the muzzle flash hang off.
+
+**The arm fires from `ZombieOnShot`, not from `ResolveHit`, and that is not a
+detail.** The bit the arm raises is the one `ZombieOnShot` tests to decide the
+actor is dead, and the engine's call site is five instructions *past* that
+test. Called at the head of the frame instead, the arm set state 25 and
+`ZombieOnShot` overwrote it with the death state on the same frame — every
+znjoe died with its chest shut. `L11`.
+
+The exporter had to learn two things for any of it to be visible: the forty
+sprite slots `0x1D31..0x1D58`, which are `znjoe.bin`'s own entries 176..215 and
+which no skeleton node names, and clips `0x1DF` and `0x1E3`, which reached no
+bundle because nothing had named them.
+
+`[open]` A live creature is a **camera candidate** in the engine —
+`BodyCreatureUpdate` ends in `RegisterForCameraTracking` — and the port's
+candidate list is over `Actor`s, so a record in `g_body_creatures` cannot enter
+it and `g_camera_free` does not see one. The point the engine registers,
+`obj+0x100`, is written as `g_camera_blocks[cur]+0x00 · obj+0x40` with
+`obj+0x40` already in camera space, and that matrix is the world-to-camera one
+everywhere else in the image — so what space the registered point is in is
+itself `[open]`, and the port writes none rather than guessing.
+
 ## Shooting
 
 **Done, for the parts that are exact.** Full account in
@@ -2474,6 +2583,87 @@ particular destroyed part (`obj+0x1368` bits → motions 428, 421, 633, 553), so
 a character whose arm has come off still plays a directional death.
 
 ## Scripted scenery: doors, shutters and vans
+
+### Class 0x33 selector 4 — the scenery an actor shoves aside
+
+**Ported** (`game/class33/pushable.ts`), and it is the answer to a bug report
+that looked like an animation fault.
+
+Stage 1's `0x16D8` `char_adv00` was reported as "playing the wrong entrance — a
+ledge hang where a chair push belongs". The clip id was right and so was every
+link of the data chain: `ZombieStateWaitCameraFrameThenBranch` plays `tail+0x04`
+and waits on `tail+0x08`, which for that spawn is motion 1048 and camera frame
+150, and 1048 is a sixty-frame clip in `char_adv00`'s own table whose root
+translation wanders at most 0.45 and returns to zero and whose bones sway at
+most 27 degrees. It is a **hold**: the pose the state stands in while it waits.
+What it was authored to depict is `[open]`.
+
+The chair push was a different class, and the port had three of its four
+pieces already. `ColiTestSphereAgainstActors` (`FUN_00405B10`) does not move
+the object it finds — it writes the pusher into `obj+0x138`, the penetration
+into `+0x13C` and the reversed normal into `+0x140`, and the object applies
+that on its own next frame. `game/coli.ts` has written those three since the
+crowd separation landed, and `ZombiePushOutOfWorldAndActors` was the only
+reader.
+
+```
+ScriptedPushableUpdate33      FUN_00433B70   the two flags, the seed, the gate
+ScriptedPushableApplyPush33   FUN_00433CE0   the move
+ScriptedPushableSyncSphere33  FUN_00433E00   the sphere, re-seated each move
+```
+
+`[proved]` Two spawns in the whole game, both stage 1 block 1 step 2: `0x1A40`
+at `(22.83, 6.5, -16.74)` and `0x1A74` at `(16.83, 6.5, -20.74)`, each drawing
+asset slot 4196 — `komono_7.bin` part 0, which renders as **a chair**. `0x16D8`
+stands at `(24, 6.5, -20)` facing `-x`, 7.2 units from the second of them, and
+block 1 step 3's `set_script_flag 32` is one instruction before the `spawn_obj`
+that makes him.
+
+Script flag 32 is the arming flag. `obj+0x34` bit `0x8000` arrives on the
+descriptor and `AND AH, 0x7f` at `0x00433C00` is the only thing in the image
+that clears it — and that is also the bit `ColiTestSphereAgainstActors` skips a
+candidate on, so **one bit both holds the chair still and keeps it out of the
+list the push is found from**. Flag 33 despawns it, and its test is the first
+instruction of the routine: a raised flag leaves before the seed, so a chair
+that goes never publishes a draw slot.
+
+The move is class 0x30's own arithmetic on furniture — a tenth of the
+penetration along the reversed normal, times 1.8 when the **pusher** carries
+either airborne bit — followed by a re-resolve against the actors in x and z
+and one against the full collision set at the full depth, with the sphere
+re-seated after every move. The sphere convention is this class's own:
+`obj+0x130 = obj+0x44 + obj+0x128`, the position plus exactly the body radius,
+where `ActorUpdateBoundingSphere` adds the radius plus one.
+
+Measured in the running player at `?stage=1&mode=play&block=1&step=3&op=16`,
+camera path 36 frame 159: `0x1A40` has moved from its descriptor position to
+`(21.66, 6.72, -16.94)` and `0x1A74` to `(16.31, 6.55, -21.14)`. Both are
+drawn, both are armed, and the zombie shoves the near one out of its way as it
+charges.
+
+Four things were missing and none of them was the clip id: the exporter emitted
+a class-0x33 placement only for selector 1, so the bundle had the two spawn
+descriptors and no placement, no props entry and no geometry; `SpawnSlotActors`
+then refused them; nothing drew them; and nothing read the three push fields
+for anything but a zombie. The bundle carries `class33_push` now, mutually
+exclusive with `class33` because the two are two sub-handlers' readings of the
+same bytes — `verify_port.py` asserts the exclusivity, that every selector the
+script spawns has a placement, and that the draw slot reached the glTF.
+
+**`L35`, and it was load-bearing.** Ghidra ends `FUN_00433B70`'s body at
+`0x00433C5C`, on the `MatrixStackPop` call, and the pseudocode ends there too.
+The real tail runs to `0x00433CD3` and holds `CALL 0x00405160` at `0x00433CC6`
+— `RegisterForShotTest`, the call that puts the object in the per-frame dynamic
+list the push is found from. `get_function_callers` on that routine does not
+name this function, so the reading available from the decompiler alone is
+"nothing can ever find the chair", which would have made the whole set piece
+impossible.
+
+Not ported: the mesh shot test on the `tail+0x04 != -1` arm (`obj+0x34 |= 0x50`
+and a mesh id on `obj+0x14C`; neither shipped spawn takes it),
+`ActorClaimHitSlot`, and the draw itself, which is `render/slotmodels.ts`' —
+the same arrangement class 0x52's mouse has, and it is `T · Rz · Ry · Rx` there
+rather than the mouse's yaw alone.
 
 ### Class 0x33 selector 1 — the carrier, and the two states it ends
 

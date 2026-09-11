@@ -48,7 +48,19 @@ export type ShotPick =
       /** Where the ray met it, in world space — for the impact effect. */
       point: Vec3;
     }
-  | { kind: "prop"; propId: number; point: Vec3 };
+  | { kind: "prop"; propId: number; point: Vec3 }
+  /**
+   * One of `znjoe`'s released creatures — `G.g_body_creatures`, identified by
+   * its `id`.
+   *
+   * Its own kind for the same reason `prop` is one: it is a separate pool in
+   * the port, not an actor, so there is no `at` to look it up by. The engine
+   * makes no such distinction — `ShotTestSphere` (`FUN_00404630`) tests the
+   * creature's `obj+0x70..0x78` sphere in exactly the list it tests every
+   * other registered object in — and the split here is the port's object pool
+   * showing, not a difference in what a bullet does.
+   */
+  | { kind: "creature"; creatureId: number; point: Vec3 };
 
 export interface GameHost {
   /**

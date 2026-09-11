@@ -334,7 +334,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   `[port-only]` note claimed the port could not hold the counter and that the
   visible result was the same; both halves were wrong.
 
-- `[part]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — hangs
+- `[fixed]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — hangs
   from a ledge, should be pushing a chair aside. **The whole data chain checks
   out and the lead is elsewhere.** The descriptor's state is 18, and
   `ZombieStateWaitCameraFrameThenBranch` (`FUN_004575A0`) plays `tail+0x04` and
@@ -402,9 +402,39 @@ be port bugs at all, and they are marked as such rather than "fixed".
   **The port was already saying so.** The exporter emits a class 0x33 placement
   only at `hp == 1`, so there is no placement, no actor and no geometry; the
   Actors panel lists no class 0x33 at all, and two `c51 hp4` overlay markers
-  sit in front of the zombie with nothing drawn. `[part]` The fix is specified
-  and authorised — widen the placement to selector 4 with a `class33_push`
-  block in both exporter halves, and add the push consumer the port lacks.
+  sit in front of the zombie with nothing drawn.
+
+  **Built and verified 2026-09-11.** The placement is widened to selector 4
+  with a `class33_push` tail block in both exporter halves, and
+  `game/class33/pushable.ts` is the push consumer the port lacked.
+
+  **Two traps in the wiring, either of which would have looked like success.**
+  The existing tail block was keyed on the *class*, so widening the placement
+  alone would have laid selector 1's field names over selector 4's bytes — the
+  same offset is an object-path slot in one and a flag index in the other. Both
+  blocks are keyed on the selector now and are mutually exclusive. And the
+  spawn path had to carry the descriptor's flags word through, because both
+  chairs set the very bit their arming flag clears; dropping it gives a chair
+  pushable from frame one, **which is a bug that looks exactly like the fix
+  working**.
+
+  Measured in the running player: `0x1A40` moves from its descriptor position
+  `(22.83, 6.5, -16.74)` to `(21.65, 6.73, -16.94)`, and `0x1A74` from
+  `(16.83, 6.5, -20.74)` to `(16.31, 6.55, -21.14)`. Both drawn, both armed,
+  both pushed; the actors panel goes from 19 in 8 classes to 21 in 9. The
+  after-shot at camera frame 159/165 has the near chair shoved out of line with
+  the zombie's arms over it and the far one still square to the desk.
+
+  Fourteen mutants, fourteen caught. **Two were missed on the first pass and
+  both were the wiring rather than the arithmetic** — the dispatch arm and the
+  spawn gate — because every assertion called the update routine directly,
+  which is `L38`. The check that catches them goes in through the spawn path
+  and the game update and nothing else. A third had to be rewritten rather than
+  believed: doubling one value crashes the export before the check sees it.
+
+  `[open]` What clip 1048 was authored to depict is still not named, and
+  deliberately so. The lead is the six other spawns that use 1047 and 1048:
+  two trios three abreast in stage 1's two route branches, and two in stage 2.
 
 - `[fixed]` **`zsass` walks through the camera and never attacks** —
   `?stage=2&mode=play&block=17&step=7&op=0`, `0xBA90`. **An exporter bug, and

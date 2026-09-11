@@ -112,7 +112,7 @@ node tools/playthrough.mjs --stage 3 --entry 7 --headless
 
 | route | reaches | note |
 |---|---|---|
-| stage 3 entry 0 | block 13 `(end → 4)`, 6315 frames | 0 → 3 → 4 → 5 → 6 → 13 |
+| stage 3 entry 0 | block 13 `(end → 4)`, 6480 frames | 0 → 3 → 4 → 5 → 6 → 13 |
 | stage 3 entry 7 | **hangs** at block 2 `6 / 8` | 7 → 8 → 2. Items 21 and 22 |
 | stage 4 entry 4 | **hangs** at block 9 `1 / 50` | 4 → 9. Item 23 |
 

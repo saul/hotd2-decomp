@@ -114,7 +114,7 @@ node tools/playthrough.mjs --stage 3 --entry 7 --headless
 |---|---|---|
 | stage 3 entry 0 | block 13 `(end → 4)`, 6480 frames | 0 → 3 → 4 → 5 → 6 → 13 |
 | stage 3 entry 7 | **hangs** at block 2 `6 / 8` | 7 → 8 → 2. Items 21 and 22 |
-| stage 4 entry 4 | block 25 `(end → 0)`, 6015 frames, 72 instr | 4 → 9 → 11 → 10 → 12 → 13 → 6 → 25. Item 23, **fixed** |
+| stage 4 entry 4 | block 25 `(end → 0)`, 6090 frames, 72 instr | 4 → 9 → 11 → 10 → 12 → 13 → 6 → 25. Item 23, **fixed** |
 
 **One of the two second entries still hangs**, and it is stage 3's — item 22,
 the death clip no bundle bakes. Stage 4's was item 23: state 43's tail, which
@@ -1286,8 +1286,10 @@ HUNG at block 9  (branch → 11,17) step/op 1 / 50
 70 volleys over 480 frames, 90 hit points before and after, and the debug clear
 did not take it either.
 
-Now **5/5 reaching an end block**, 6015 game frames and 72 instructions to
-block 25 `(end → 0)`, identical every run.
+Now **5/5 reaching an end block**, 6090 game frames and 72 instructions to
+block 25 `(end → 0)`, identical every run — measured after merging `main` and
+re-exporting; it was 6015 on the tree the fix was written on, and every other
+route's frame count moved by a similar amount over the same merge.
 
 ### What the screenshot and the panel said
 
@@ -1369,9 +1371,11 @@ And the pose copy was `yaw` alone where the engine copies `obj+0x64`, `0x68`
 
 ### The checks
 
-* `web/test/port.test.ts` — seven assertions on state 43. Mutation-tested
-  three ways: the tail removed fails three of them, the sub-2 fall-through
-  restored fails one, and the yaw-only copy fails one.
+* `web/test/port.test.ts` — a block of assertions driving state 43 from sub 0
+  to the despawn. Mutation-tested three ways, each watched failing: the tail
+  removed fails three of them, the sub-2 fall-through restored fails one, and
+  the yaw-only pose copy fails one. (The commit message that landed this says
+  "seven"; the block has eleven. `L16` — do not put a count in prose.)
 * `web/tools/flag_gates.ts` — a second pass over all twelve bundles: every
   state-43 captor must be named as a child of a class-0x10 spawn, and that
   civilian's reachable streams must raise flag 29. Two placements across the

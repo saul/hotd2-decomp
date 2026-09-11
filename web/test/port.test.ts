@@ -186,6 +186,9 @@ import {
   PlaceChainSegments, PlaceFragmentProps, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
 import {
+  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
+} from "../src/game/class41/branch";
+import {
   BamsHalfway, FallingContainerUpdate, PlaceFallingContainer,
   PropBuildScriptFlagEffect, ScriptFlagEffectFlag, ScriptFlagEffectUpdate,
   SFX_SCRIPT_FLAG_EFFECT, FALLING_SLOT_LOOSE, FALLING_SLOT_WHOLE,
@@ -3325,6 +3328,88 @@ console.log("\nthe branch writers: every route the game can choose:");
     G.g_script_flags[62] = 1;
     BreakablePropPoolUpdate(rng);
     check("...its own removal flag does", sw.dead);
+  }
+
+  // `g_script_flags[0x15]`, which the switch's HEAD raises -- `0x00474FA6`,
+  // before the `CMP g_GameMode, 1` at `0x00474FB4`. Stage 3's block 2 step 3
+  // is `wait_script_flag 0x15` and on the block-7 -> block-8 route nothing
+  // else in the stage sets it, so with this write missing the stage parked on
+  // that instruction for ever. Every arm of the engine's `if`/`else if` is
+  // here, because the one that made the bug invisible is the `else`.
+  {
+    const [SCENE, BLOCK] = STORY_SWITCH_FLAG_AT;
+    const flag = () => G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] ?? 0;
+    /** Stage 3's own switch: evt `0x3630`, removal flag 22, keyed on 0 and 6. */
+    const place = () => {
+      const p = PlaceStoryModeSwitch({
+        at: 0x4004, container: "story_switch", lifetime_evt_steps: 1,
+        branch_flag: -1, remove_flag: 22, keys: [0, 0, 6, 6],
+        pos: [0, 0, 0] });
+      G.g_breakable_props.push(p);
+      return p;
+    };
+
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const sw = place();
+    check("the switch's flag is down before its first frame", flag() === 0);
+    BreakablePropPoolUpdate(rng);
+    check("in scene 2 block 2 the switch raises g_script_flags[0x15] "
+          + "IN ARCADE -- the write is before the mode gate",
+          flag() === 1, String(flag()));
+    check("...and it is still standing: this is the head, not a despawn",
+          !sw.dead);
+
+    // The mode gate is below the write, so Original Mode raises it too.
+    propScene(rng, GameMode.Original);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("...and in Original Mode as well", flag() === 1, String(flag()));
+
+    // `g_evt_block_index == 2` is the whole of the block test; the switch
+    // stands in stage 3's blocks 7 and 8 first and must write nothing there.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = 8;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("a block the head does not name raises nothing", flag() === 0,
+          String(flag()));
+
+    // The `else`: scene 1 takes the despawn arm and never reaches the write,
+    // which is why five of the twelve switches in the game are in blocks that
+    // would otherwise match.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = BLOCK;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("scene 1 is the OTHER arm of the same `if` and raises nothing",
+          flag() === 0, String(flag()));
+
+    // `obj+0x192 == 0` -- unthrown. A thrown switch hands the flag to the
+    // second write, behind the mode gate and the item spawn, which is not
+    // ported: see `StoryModeSwitchUpdate`.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const thrown = place();
+    thrown.branchLatched = true;
+    BreakablePropPoolUpdate(rng);
+    check("a thrown switch stops raising it", flag() === 0, String(flag()));
+
+    // ...and the removal flag still wins, because it is tested first.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const gone = place();
+    G.g_script_flags[22] = 1;
+    BreakablePropPoolUpdate(rng);
+    check("its removal flag is tested BEFORE the write, and takes it away",
+          gone.dead && flag() === 0, `${gone.dead} / ${flag()}`);
   }
 
   // Original Mode only, every one of them. Arcade reaches types 14, 19 and 25

@@ -15032,3 +15032,111 @@ drawing from `0x00433463` to `0x0043382F`, which the renderer already does from
 the exported rig. `obj+0x6C` (roll) and `obj+0x118` (uniform scale) are written
 by the engine and read only by its own draw, so the port leaves them out rather
 than adding two head fields nothing in `game/` reads.
+
+---
+
+## Session — a gate held by an actor, on a route nothing had ever played
+
+**Outcome:** stage 3's block 2 step 3 op 4 no longer parks. Two more hangs
+found behind it and filed as `[open]` (`PLAYER_HANGS.md` items 22 and 23).
+
+### The reproduction, and why it had never been seen
+
+    cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless
+
+`--entry` did not exist. `playthrough.mjs` built its URL as
+`?stage=N&drive=1&seed=S` and the player's `entry=` parameter — which has been
+there since format 5 — was unreachable from it, so of the fourteen entry routes
+in the six stages the harness had played six. Stage 3's **block 2 is on neither
+entry-0 route**: block 0 branches to 1 or 3 and the lowest-block rule takes 3.
+So a seven-step block of shipped script had never been executed by anything,
+and it held two hangs one behind the other.
+
+1110 frames on `45 wait_script_flag 0x15` at evt `0x0029E8`, 5/5.
+
+### The mechanism
+
+The report came with the established fact that every one of the ~40 gates names
+a flag its own stage never sets. **That is not true of this one.** Stage 3 sets
+flag 21 in block 1 step 5 (evt `0x001D00`) and block 1 is only on the entry-0
+route. The route that hangs gets the flag from an actor:
+
+`StoryModeSwitchUpdate` (`FUN_00474F30`), class 0x44 selector 17. Its head is
+a despawn test on `obj+0x2A4`, then `if (g_scene_index == 1) {...} else if
+(scene == 2 && g_evt_block_index == 2 && obj+0x192 == 0) g_script_flags[0x15]
+= 1;` at `0x00474FA6` — and the `CMP dword [0x009CA08C], 1 / JNZ` that gates
+the rest of the routine is at `0x00474FB4`, **seven bytes later**. So the flag
+write runs in Arcade too. `[proved]` by disassembling `0x00474F30`–`0x00474FCF`
+rather than by reading the pseudocode, which presents the arms in an order that
+does not make the position of the mode gate obvious.
+
+Stage 3's switch is the one **block 7 step 8** spawns (evt `0x3630`). Its
+removal flag is 22, which block 2 step 3 raises at its own end — so the step
+the switch opens is also the step that takes it away.
+
+The port's `class41/branch.ts` opened `StoryModeSwitchUpdate` with
+`if (G.g_GameMode !== GameMode.Original) return;` and its doc comment listed
+"the `g_script_flags[0x15]` it raises there" among the things not transcribed.
+`L26` exactly: a divergence in prose with no assertion behind it, which reads
+as settled and therefore never gets looked at. The whole head above the mode
+gate now lives in `StoryModeSwitchPoolUpdate`, next to the two despawn tests
+that were already there.
+
+### What was wrong on the way
+
+1. **The `--entry 7` in the reported command was silently ignored.** The first
+   thing I did was run it verbatim; it started at entry 0 and the hang did not
+   reproduce, which for a few minutes looked like a non-deterministic bug. It
+   is not: `opt()` in `playthrough.mjs` reads any `--name value` pair, but
+   nothing read `entry`, so the flag parsed and did nothing. A harness that
+   accepts an option it ignores is worse than one that rejects it.
+2. **The bundle in `extract/player` was stale and the page hung on the loading
+   overlay** — `L33`, and indistinguishable from a hang under a headless
+   harness. `gen_schema_hash.py` and `gen_builder_hash.py` both said "already
+   current", so the mismatch was on the *bundle* side, not the tree's. A
+   re-export fixed it, and because this is a worktree it wrote to the
+   worktree's own `extract/player` rather than the shared one.
+3. **`blocksReachableFrom` had its `queue.shift()` inside a `find` predicate.**
+   `Array.find` calls the predicate once per element, so the first comparison
+   consumed the queue and the other seventeen compared against `undefined`.
+   The route walk returned `{entry}` and nothing else, and the assertion it
+   fed failed with a message that read like a data problem
+   (`on-route blocks {} of {3,7,9}`). Caught only because the expected answer
+   was known.
+4. **I nearly wrote `ZombieStateDragTarget` into item 23 as
+   `FUN_0045BF60`-ish** from memory of the neighbourhood. It is `FUN_0045C080`,
+   class 0x30 state **43**, and the annotation says so. `L20`: a citation is a
+   claim.
+
+### What is behind it
+
+Two hangs, both `[open]` and both on routes that had never run:
+
+* **Stage 3 block 2 step 6 op 8.** `g_enemies_present` is 2 with
+  `g_enemies_alive` 0, so a dead civilian's killed script sits on
+  `CivilianWait.EnemiesPresent` for ever and `wait_scripted_actors 0` never
+  comes down. The two enemies still counted are parked in class 0x30 **state
+  12 sub 1** (`ZombieStateDeathFallAndBounce`, `FUN_00456DF0`), whose wait is
+  `obj+0x19C >= 0x3C`. In the exe that cursor reaches 60 because
+  `g_motion_play_length[0x3F9]` is 85 (`0x004E0FC2` = `0x0055`). In the port it
+  never moves: `MotionPlayFrame` answers `0` for a clip the character type has
+  not got, and **no character type in any of the twelve bundles has motion 1017
+  baked**. So nothing in the port can leave state 12 anywhere, and every actor
+  that enters it holds the present count for the rest of the stage. The fix is
+  either an exporter change (bake the clip — a format change in both halves of
+  `hod2lib`, and whether motion 1017's stride matches these rigs is `[open]`)
+  or a declared `[diverges]`, which is the user's call.
+* **Stage 4 entry 4, block 9 step 1 op 50.** One `znkage` in
+  `ZombieStateDragTarget` (state 43, `FUN_0045C080`) at 90 hit points, `d=4`,
+  70 volleys and no damage, and the debug clear did not take it either.
+  Nothing read.
+
+### Next actions
+
+1. Decide stage 3 item 22: bake clip `0x3F9`, or declare the divergence.
+2. Read `ZombieStateDragTarget` for item 23 before touching anything — start
+   with whether the actor holds `ActorFlag.ShotImmune`.
+3. Read the route pass's work-list in `node tools/run_ts.mjs
+   tools/flag_gates.ts`. Every `0xF8`/`0xFE` gate, stage 4's `0x1F` and `0x20`
+   and stage 5's `0x00` and `0x1E` are gates an actor holds, and each is a
+   routine the port must run for that stage to advance.

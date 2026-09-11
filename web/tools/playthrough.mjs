@@ -118,6 +118,7 @@
  *
  *   node tools/playthrough.mjs --stage 2
  *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
+ *   node tools/playthrough.mjs --stage 3 --entry 7 --headless
  *
  * Exit status is 0 only if the stage reached an end block.
  */
@@ -134,6 +135,22 @@ const flag = (n) => args.includes(`--${n}`);
 
 const stage = opt("stage", "2");
 const seed = opt("seed", "1");
+/**
+ * Which of the stage's entry blocks to open at — `PlayerState.entry`.
+ *
+ * A stage does not choose where it starts; the stage before it does, and the
+ * answer arrives in `g_evt_block_index`. Stage 3 opens at block 0 or block 7
+ * and stage 4 at block 0 or block 4, so a tool that can only run the first
+ * entry has never played half of the shipped script. Stage 3's block 2 hangs
+ * on `wait_script_flag 0x15` from entry 7 and not from entry 0, and that is
+ * the whole reason this option exists: **the default entry is one route, not
+ * the stage.**
+ *
+ * This is still not a deep link — the run starts at a real entry block and
+ * plays forward from there, so it exercises the stage's own rebuild path and
+ * not the seek's.
+ */
+const entry = opt("entry", null);
 /** Game frames on one instruction before the tool starts shooting. 3s. */
 const PATIENCE = Number(opt("patience", "180"));
 /** Game frames on one instruction before it is a hang. 15s, and see above. */
@@ -276,7 +293,9 @@ const started = Date.now();
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
   // is the other half, and it was already a URL flag.
-  url: `?stage=${stage}&drive=1&seed=${seed}`, size: opt("size", "1280x800"),
+  url: `?stage=${stage}&drive=1&seed=${seed}`
+     + (entry === null ? "" : `&entry=${entry}`),
+  size: opt("size", "1280x800"),
   headless: flag("headless"), quiet: !flag("loud"),
 });
 

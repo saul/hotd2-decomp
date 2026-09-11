@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 35131 | 143 | engine |
+| `game/` | 35205 | 143 | engine |
 | `hod2lib/` | 15241 | 34 | engine |
 | `render/` | 8007 | 29 | render |
 | `app/` | 7297 | 29 | app |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **76352** | **308** | |
+| **total** | **76426** | **308** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -48,7 +48,7 @@ The largest files, which is where the pressure to split next is:
 | Citations checked | 261 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **16 of 43** read classes have a module, covering 1349 of 1624 placements |
 | Declared `[diverges]` | **141** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **135** — questions the port is honest about not having answered |
+| `[open]` markers in `game/` | **136** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -110,6 +110,7 @@ nothing exits 3 and is never counted as green.
 | `test:seek` | that a seek reaches the address it was asked for | bundle |
 | `test:state` | that a save/load and a seek reach the *same world* play did -- the only check that compares two histories rather than one | bundle |
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
+| `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one | bundle |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
@@ -119,7 +120,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-8 of them need the installed game and 3 need an exported
+8 of them need the installed game and 4 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

@@ -27,6 +27,7 @@
 import { Group, Object3D, Quaternion, Vector3 } from "three";
 import type { BakedMotion, CharacterType } from "../src/bundle";
 import type { Actor } from "../src/game/actor";
+import { MOTION_FLAGS_INIT, MotionFlag } from "../src/game/actor";
 import type { Instance } from "../src/render/characters/instance";
 import { Poser } from "../src/render/characters/pose";
 
@@ -61,6 +62,9 @@ function instance(motions: Record<string, BakedMotion>,
     at: 0x1e00,
     a: { motion: 1022, clock: 0, death: null, intro: null, action: null,
          react: null, fadeFrom: null, fade: 0, fadeLen: 0,
+         // What `ActorBuildSkinnedModel` (`FUN_00410440`) leaves on every
+         // skeletal actor in the game: `model+0x64 = 3`, root motion on.
+         motionFlags: MOTION_FLAGS_INIT,
          ...a } as unknown as Actor,
     type: { bone_count: BONES, motions } as unknown as CharacterType,
     root: new Object3D(),
@@ -170,6 +174,88 @@ console.log("\nthe descriptor's cue clip is not a second channel\n");
   check("...and the entrance itself is still drawn, through `obj.motion`",
         finite(during)
         && during.bones.get(1)!.quaternion.equals(cue.bones.get(1)!.quaternion));
+}
+
+
+console.log("\nthe clip root goes to the object or to the pose, never both\n");
+
+// `SkeletonApplyRootMotion` (`FUN_00410C50`) asks `model+0x64` bit 1 twice in
+// one routine: once to decide whether the frame-to-frame delta moves the
+// object, and once, in the tail Ghidra does not show, to decide whether the
+// draw matrix gets `MatrixTranslate(0, root.y, 0)` or the whole
+// `MatrixTranslate(root.x, root.y, root.z)`. The port's two halves are
+// `ApplyRootMotion` in `game/` and `Poser` here, and **exactly one of them
+// must take the horizontal part**. For eleven months this file's half took
+// none of it, on a comment that said the other half already had -- which is
+// true only when the bit is set.
+//
+// `motion()` above builds frame f's root as `(f, 10 + f * 0.1, -f)`, so frame
+// 0 is `(0, 10, 0)` and the horizontal part is only visible away from it.
+// Frame 6 of a 24-frame clip is 12 ticks at 30 fps against a 60 Hz cursor.
+{
+  const poser = new Poser();
+  const AT = { motion: 1022, playTicks: 12 };
+  const ON = instance(CLIPS, { ...AT, motionFlags: MOTION_FLAGS_INIT });
+  const OFF = instance(CLIPS, { ...AT, motionFlags: MOTION_FLAGS_INIT
+                                       & ~MotionFlag.RootMotion });
+  poser.pose(ON);
+  poser.pose(OFF);
+  check("root motion on: the pose takes the height and nothing else",
+        ON.pivot.position.x === 0 && ON.pivot.position.z === 0,
+        `(${ON.pivot.position.x}, ${ON.pivot.position.z})`);
+  check("...and the height is still there",
+        ON.pivot.position.y === 10.6, `${ON.pivot.position.y}`);
+  check("root motion off: the pose takes the whole translation",
+        OFF.pivot.position.x === 6 && OFF.pivot.position.z === -6
+        && OFF.pivot.position.y === 10.6,
+        `(${OFF.pivot.position.x}, ${OFF.pivot.position.y}, `
+        + `${OFF.pivot.position.z})`);
+
+  // The blend path reaches the same two arms, and it used to hard-code the
+  // y-only one in its own separate line -- so a civilian cross-fading into a
+  // clip in a root-motion-off block would have snapped by the horizontal part
+  // for the length of the fade and then not.
+  const mid = { motion: 1022, playTicks: 12, fade: 5, fadeLen: 10,
+                fadeFrom: { motion: 1022, ticks: 12 } as Actor["fadeFrom"] };
+  const bON = instance(CLIPS, { ...mid, motionFlags: MOTION_FLAGS_INIT });
+  const bOFF = instance(CLIPS, { ...mid, motionFlags: MOTION_FLAGS_INIT
+                                         & ~MotionFlag.RootMotion });
+  poser.pose(bON);
+  poser.pose(bOFF);
+  check("a cross-fade obeys the same gate: on",
+        bON.pivot.position.x === 0 && bON.pivot.position.z === 0);
+  check("...and off -- two frames of one clip blend to that clip's own root",
+        bOFF.pivot.position.x === 6 && bOFF.pivot.position.z === -6,
+        `(${bOFF.pivot.position.x}, ${bOFF.pivot.position.z})`);
+
+  // A hit reaction blends two *different* clips, and the engine lerps the two
+  // tracks' roots into one triple at `model+0x6C..0x74` before
+  // `SkeletonApplyRootMotion` sees it. Half way between clip 1022's frame 6
+  // and clip 975's frame 6 is still frame 6's root, because `motion()` gives
+  // every clip the same root track -- what this asserts is that the blend
+  // does not silently drop the horizontal half of it.
+  const rOFF = instance(CLIPS, {
+    motion: 1022, playTicks: 12,
+    motionFlags: MOTION_FLAGS_INIT & ~MotionFlag.RootMotion,
+    react: { motion: 975, ticks: 12, blend: 10,
+             hard: false } as Actor["react"] });
+  poser.pose(rOFF);
+  check("a hit reaction blends the root rather than dropping it",
+        rOFF.pivot.position.x !== 0 || rOFF.pivot.position.z !== 0,
+        `(${rOFF.pivot.position.x}, ${rOFF.pivot.position.z})`);
+
+  // And the death clip keeps the whole root whatever the gate says. It is the
+  // one declared override in the file: `ActorAdvanceMotion` does not run root
+  // motion through a death, so nothing else would provide a falling body's
+  // travel. If that ever changes, this is the assertion that says so.
+  const dON = instance(CLIPS, { motion: 1022, playTicks: 0,
+                                motionFlags: MOTION_FLAGS_INIT,
+                                death: { motion: 975,
+                                         ticks: 12 } as Actor["death"] });
+  poser.pose(dON);
+  check("the death clip keeps its own travel even with the gate set",
+        dON.pivot.position.x === 6 && dON.pivot.position.z === -6,
+        `(${dON.pivot.position.x}, ${dON.pivot.position.z})`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

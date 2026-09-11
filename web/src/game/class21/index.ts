@@ -56,7 +56,7 @@
  */
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
-import { ActorFlag } from "../actor";
+import { ActorFlag, MotionFlag } from "../actor";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
@@ -153,6 +153,8 @@ function Tail(obj: Actor): RescueTargetTail | null {
  * ```c
  * obj->+0x3C = -1;  obj->+0x120 = -1;
  * ActorBuildSkinnedModel(obj+0x194, obj+0x40, obj+0x20C);
+ * obj->+0x1F8 &= ~2;                      // root motion OFF
+ * obj->+0x1FC = 5;                        // the rotation order
  * obj->+0x1B4 = 0x3E6;                    // the idle clip
  * obj->+0x194 = rand() % 10;              // its start frame
  * g_enemies_present += 1;  g_enemies_alive += 1;
@@ -167,12 +169,29 @@ function Tail(obj: Actor): RescueTargetTail | null {
  * The rank table is `g_class21_hp_by_rank` (`0x00565F0C`) and gives 1 to 4 —
  * see {@link CLASS21_HP_BY_RANK} — so the target dies to that many part hits
  * and never to a damage row.
+ *
+ * **And it turns root motion off, one instruction after the build turned it
+ * on.** `ActorBuildSkinnedModel` writes `model+0x64 = 3` unconditionally;
+ * `MOV EDX,[EDI+0x64]; AND EDX,0xFFFFFFFD; MOV [EDI+0x64],EDX` at
+ * `0x00451753`–`0x00451760` (bytes `8b5764 83e2fd 895764`) takes bit 1 straight
+ * back out. Class 0x21 is one of exactly two things in the game that clear it,
+ * the other being class 0x10's script. `[proved]`
+ *
+ * That is not bookkeeping: it is how the actor gets posed at all. With the bit
+ * clear, `SkeletonApplyRootMotion` (`FUN_00410C50`) puts the clip root's
+ * **whole** translation on the draw matrix instead of only its y — see
+ * `RootHorizontalGoesToPose` in `game/root_motion.ts` — and motion `0x3E6`'s
+ * root is the constant `(0, 15.692, 11.943)`. Without this line the port took
+ * the y-only arm and the rider sat 11.943 units along its own `+Z`, out over
+ * the car's bonnet. It is also why the route's absolute pose is safe to write
+ * every frame: nothing is stepping the object underneath it.
  */
 export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   const t = Tail(obj);
   if (!t) return;
   t.state = RescueTargetState.RideIn;
   t.sub = 0;
+  obj.motionFlags &= ~MotionFlag.RootMotion;
   obj.motion = CLASS21_MOTION_IDLE;
   obj.playTicks = 0;
   // `IDIV 10` on the `rand()` return — a start frame, so a row of these would

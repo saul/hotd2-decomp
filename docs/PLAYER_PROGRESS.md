@@ -2377,6 +2377,46 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+## What a bone draws, which is not its draw slot
+
+**Done for nine of sixteen arms**, and the reason a shot `char_adv02` had a
+hole where its midriff should be. A bone's draw record names one slot and
+`AssetDrawSlot` draws one model for it — and for class 0x30 neither of those
+decides what appears, because `SkeletonEmitNode` (`FUN_004114C0`) calls the
+per-bone hook at `model+0x1158` instead of the one-slot draw, and
+`EnemyZombieInit` (`FUN_00452DA0`) puts `ZombieDrawBonePart` (`FUN_004534A0`)
+there. That routine switches on the slot the bone is *currently* drawing and,
+for sixteen of its arms, draws something else or something more.
+
+* `game/class30/bonecels.ts` carries the nine arms that are nothing but a
+  **phase** — `g_blink_frame_counter + obj+0x3C * 10`, indexed into runs of 5,
+  18, 20, 30, 50 and 120 models — with the instruction address of every base
+  and count, and lists the seven that are not with what each needs.
+* `render/characters/cels.ts` draws them: one node per run per bone, refilled
+  from the cel's template each frame rather than re-cloned, since every cel in
+  a run is the same topology with the same materials.
+* `hod2lib/charbuild.ts` exports the runs a character's own trigger slots
+  reach, so a bundle carries no cel it cannot draw.
+* `game/hit_slots.ts` is `obj+0x3C`, which had been recorded as not ported:
+  `ActorClaimHitSlot` (`FUN_00409270`) and `ActorDespawn`'s release, for the
+  eleven classes whose `Init` is a proved caller of `ActorBuildSkinnedModel`
+  (`FUN_00410440`). Without it every zombie in a crowd animates in lockstep.
+
+`char_adv02`'s bone 1 is the visible case: the undamaged `0x1B3D` draws a
+20-cel chest and a 30-cel lower torso and **never itself**, the two chest-only
+damage stages draw themselves plus the lower run, and the three later stages
+draw alone because their own geometry already reaches the pelvis.
+
+`tools/verify_bone_cels.py` is the check, and it is the only thing that can
+see any of it — no table in the image names these models.
+
+**`[open]`** The seven stateful and extra-matrix arms: `zndina`'s scaled
+25-cel run, `znkager`'s fixed second model, the `obj+0x1328` latch three types
+share, `char_adv00`'s 60-cel ping-pong, `znjikken1`'s `FUN_00418660` prepass,
+and `znele`'s sound transition. `znjoe`'s 120-cel run at `0x1C96` is ported and
+is very likely the "missing chest worm" of a separate report. Class 0x31's
+`ThrowerDrawBonePart` has arms of the same shape and none of them is read.
+
 ## Shooting
 
 **Done, for the parts that are exact.** Full account in

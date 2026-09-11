@@ -1068,8 +1068,10 @@ export type Globals = typeof G;
  *   `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`) is what reads the pair. |
  * | `g_civilians_seen_by_scene`, `g_civilians_rescued_by_scene` | ❌ neither
  *   tally exists; the port raises a `civilian.rescued` event instead. |
- * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ❌ the port
- *   has no `obj+0x3C` slot index and never claims one. |
+ * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ✅ claimed,
+ *   released and cleared. `obj+0x3C` is the phase of every cel a class-0x30
+ *   bone draws, so the port needed it; `game/hit_slots.ts` says which parts of
+ *   the hit-slot system are ported and which are not. |
  * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
  * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
  * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
@@ -1089,6 +1091,12 @@ export function ResetSceneOnEnter(): void {
   G.g_enemies_alive = 0;
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
+  // `for (i = 0xE; i != 0; i--) *p++ = 0` over `&DAT_009C88C0` at
+  // `0x0045EE70` -- and the **0xE is a second, independent proof that
+  // `g_hit_slots` is fourteen deep**, the first being the pointer bound in
+  // `ActorClaimHitSlot` (`FUN_00409270`). `HIT_SLOT_NONE` rather than the
+  // engine's 0 because the port stores an actor's `at` and 0 is a real `at`.
+  G.g_hit_slots = new Array<number>(HIT_SLOT_COUNT).fill(HIT_SLOT_NONE);
   // `MOV [0x009c8a74], 0` at `0x0045EF3D` — the looping held-weapon SE's
   // refcount. It has to be zeroed here or the *next* scene's first chainsaw
   // zombie finds a non-zero count, never starts the loop, and the chainsaw is
@@ -1223,12 +1231,9 @@ export function ResetGameGlobals(): void {
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
   G.g_carrier_object = -1;
-  // `ResetSceneOnEnter` (`FUN_0045EE30`) clears the slot table at
-  // `0x0045EE70`; `LoadSceneAndReset` zeroes the counter at `0x00460030` and
-  // `ResetSceneCombatState` again at `0x0045EF1E`. `HIT_SLOT_NONE` rather
-  // than the engine's 0, because the port stores an actor's `at` and 0 is a
-  // real `at`.
-  G.g_hit_slots = new Array<number>(HIT_SLOT_COUNT).fill(HIT_SLOT_NONE);
+  // `LoadSceneAndReset` zeroes the counter at `0x00460030`, and
+  // `ResetSceneCombatState` does it again at `0x0045EF1E`. The slot table is
+  // `ResetSceneOnEnter`'s and is cleared there.
   G.g_blink_frame_counter = 0;
   G.g_frame = 0;
 }

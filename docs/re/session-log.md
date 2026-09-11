@@ -15926,3 +15926,103 @@ missing for the van's reason. And the renderer poses the whole generic family
 compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or more non-zero
 angles. Both are written up where the code is, and neither is fixed here.
 
+
+## 2026-09-11 — the midriff is a flipbook, and the boat's flip was the yaw
+
+Two half-fixed render reports, taken together because both turned out to be
+about something the port was not calling at all.
+
+### `char_adv02`'s midriff: `ZombieDrawBonePart` (`FUN_004534A0`)
+
+The open half of the report was a 1.75-unit band with nothing drawing it
+between the damaged torso `0x1B70` and the pelvis. The record said
+`harold.bin` carries five lower-torso models of exactly that extent that **no
+table in the EXE references**, and that the join was therefore not guessed at.
+
+That was the right refusal and the wrong shape of question. There is no table:
+`SkeletonEmitNode` (`FUN_004114C0`) calls the per-bone hook at `model+0x1158`
+*instead of* `SkeletonDrawNodeSlot`, `EnemyZombieInit` (`FUN_00452DA0`) puts
+`ZombieDrawBonePart` there at `0x00452E40`, and that routine switches on the
+slot the bone is drawing and forms a **cel index** with
+`MOV ECX,0x1E; CDQ; IDIV ECX; ADD EDX,0x1B52`. The run is thirty models and
+the five were its last five; the coincidence that five is also the number of
+torso damage stages is what made the tail of a longer run look like a table.
+
+What let it settle: "`AssetDrawSlot` draws one model per slot, so a bone
+cannot draw two" — true premise, false inference. That is now `L39`.
+
+Three arms of the reading check each other, and I would not have believed it
+without them. The undamaged `0x1B3D` draws **neither itself nor one model** (a
+20-cel chest plus the 30-cel lower torso); the two damaged stages that are
+chest-only draw themselves plus the lower run; and `0x1B72`, `0x1B73` and
+`0x1B74` — the three the switch does not name — are exactly the three whose own
+geometry already reaches `y -2.02`. Separately, every cel in a run has the
+same mesh count, vertex count and texture ids as its neighbours with 70% and
+50% of the vertices moving, which is a flipbook and not a variant set; and
+every trigger slot belongs to exactly one character type whose own `pol/` file
+holds the run.
+
+**What I got wrong on the way.** The first type-to-trigger table I built had
+`0x08 char_adv01.bin | 0x1C97, 0x1CA9`, and `char_adv01` reaches no arm at
+all: the scan walked `HIT_EFFECT` rows for bones 1..39 on characters with
+sixteen bones and read `znjoe`'s rows off the end of `char_adv01`'s table.
+That is `L6`, and the only reason it surfaced is that
+`tools/verify_bone_cels.py` then demanded eighteen `znjoe` cels from a
+`char_adv01` bundle and failed. A checker written the same afternoon as the
+reading caught the reading.
+
+I also nearly wrote down that `ScriptedHumanoidDraw` (`FUN_00484FF0`) does not
+advance the play cursor on the four arms that draw a second model, which would
+have made eight of the game's class-0x25 spawns frozen on frame 0 for ever.
+The pseudocode really does `return` in each arm. `0x0048522B`'s `AssetDrawSlot`
+falls through `MatrixStackPop` and `ADD ESP,0x1C` straight into `0x0048523A`,
+which is the `INC dword ptr [EBX]`. `L37`, caught before it cost anything.
+
+`obj+0x3C` had to be ported for the cel **phase** — `g_blink_frame_counter +
+obj+0x3C * 10`, so a crowd animates ten frames apart. `globals.ts` had recorded
+`g_hit_slots` as "❌ the port has no `obj+0x3C` slot index and never claims
+one"; `ActorClaimHitSlot` (`FUN_00409270`) is fourteen lines and
+`ActorDespawn`'s release is three, so porting them was cheaper than a
+divergence. The table's extent is proved twice over — the pointer bound
+`(int)piVar1 < 0x9c88f8` in the claim, and `for (i = 0xE; i != 0; i--)` in
+`ResetSceneOnEnter` at `0x0045EE70`.
+
+### The stage-3 boat's alternating-frame flip: it was the third cause
+
+The record's remaining lead was "`ActorAdvanceMotion` applying root motion to
+`obj.pos` for class 0x25 once its VM parks". **Disproved**, by reading and by
+measurement. `director.ts` runs `ActorAdvanceMotion` *before* the class
+handler, and `HumanoidFrameTail` re-seats `obj.pos` absolutely from the object
+path on every frame the VM is alive, so root motion applied earlier in the
+same tick is discarded before anything draws it: both front-seat riders move
+exactly -1.116 in x per frame with zero y and z over 24 consecutive frames,
+which is the path's own speed. The parked case does then drift, but a drift is
+not a flip.
+
+Nothing in game state alternates at all — 1800 driven frames from the start of
+stage 3, 13 actors, no field with a sign-alternating delta — and nothing in the
+rendered image does either: 30 bursts of 5 consecutive frames across the first
+2400, with `d(i,i+2) > d(i,i+1)` at every one of the 30.
+
+The flip was the **third of the three causes already fixed**, not a fourth.
+`GameHost.objectPath` used to return only `{x,y,z}`, so `p.yaw` was always
+`undefined`; `HumanoidFrameTail` skipped `obj.yaw = p.yaw` and
+`HumanoidApplyPathOffset` then ran `obj.yaw += r.dyaw` unmasked every frame.
+Every stage-3 seat record carries `dyaw = 0x8000`, so the yaw gained exactly
+half a turn per frame and `BAMS_TO_RAD` mapped the sum to π, 2π, 3π… — forward,
+backward, forward. Two writers to `obj+0x68`: the path's absolute write and the
+seat's relative one, with the absolute write the only thing bounding the other.
+Proved by putting it back: the mutant's departure from the fixed tree
+alternates 4,980 / 2,776 / 4,976 / 2,824 … changed pixels for twelve
+consecutive frames, and the even frames show a third NPC standing out of the
+hull facing backwards. So the report's `[open]` was stale — the fix that landed
+for "the wrong orientation" had taken the flip with it.
+
+**And a real stale divergence beside it.** `class25/index.ts` still declared
+`[diverges]` that "`rx` and `rz` arrive as zero, because `GameHost.objectPath`
+publishes only the path's position and yaw", while `host.ts` had carried
+`pitch` and `roll` for some time with its own comment saying they were there
+"so the attachment-offset rotation in `class25` can stop passing zeros for
+them". It went on passing zeros. `op_st3` 340's `rot_x` runs to 15,758 BAMS, so
+they were not harmless on the one path the riders use. That is `L26` again, and
+it is fixed rather than re-declared.

@@ -196,7 +196,13 @@ export const ZOMBIE_BONE_CEL_UNPORTED: readonly number[] = [
  */
 export const BONE_CEL_PHASE_PER_SLOT = 10;
 
-/** Every slot any arm in {@link g_class30_bone_cels} can draw. */
+/**
+ * Every slot any arm in {@link g_class30_bone_cels} can draw.
+ *
+ * [port-only] The engine needs no such list: it computes one slot per draw and
+ * the asset is either resident or it is not. The exporter needs the whole set,
+ * because a cel the bundle does not carry is a hole.
+ */
 export function ZombieBoneCelSlots(): number[] {
   const out: number[] = [];
   for (const arm of Object.values(g_class30_bone_cels)) {

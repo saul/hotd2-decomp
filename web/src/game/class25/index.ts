@@ -632,8 +632,20 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
       obj.pos.y = p.y;
       obj.pos.z = p.z;
       // Mode 2 takes the position only; mode 1 takes the orientation too.
+      //
+      // **The engine writes all three angles here**, not just the yaw:
+      // `MOV [EDI+0x64],EAX; MOV [EDI+0x68],ECX; MOV [EDI+0x6c],EDX` at
+      // `0x00484B6E`-`0x00484B74`, out of `CamEvalObjectPath6`'s second half,
+      // and `CMP [EDI+0x1358],0x2 / JZ` at `0x00484B5D` is the mode-2 skip.
+      // `[open]` The port writes the yaw alone because the yaw is the only one
+      // `render/characters.ts` draws -- `inst.root.rotation.set(0, yaw, 0)` --
+      // so writing the other two would put a value on the actor that nothing
+      // reads. Giving a rider the path's pitch and roll is a renderer change
+      // and its own piece of work.
       if (obj.hum.pathMode !== 2 && p.yaw !== undefined) obj.yaw = p.yaw;
-      HumanoidApplyPathOffset(obj, 0, p.yaw ?? 0, 0);
+      // The offset vector, though, **is** rotated by all three, and that is
+      // this file's own arithmetic rather than the renderer's.
+      HumanoidApplyPathOffset(obj, p.pitch ?? 0, p.yaw ?? 0, p.roll ?? 0);
     }
   }
 
@@ -659,13 +671,16 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
  * and the stack post-multiplies, so **X applies to the vector first and Z
  * last** — the same composition `class41/prop.ts` spells out for `Ry·Rz·Rx`.
  *
- * [diverges] `rx` and `rz` arrive as zero, because `GameHost.objectPath`
- * publishes only the path's position and yaw while `CamEvalObjectPath6`
- * (`FUN_004042D0`) returns all six values. Applying the offset with the yaw
- * alone is strictly closer to the engine than not applying it, but a path with
- * pitch or roll will place the attachment wrong until the host seam carries
- * the other two angles — that is a change to `game/host.ts` and to the
- * renderer that fills it, not to this file.
+ * All three angles come from the path. This note used to declare a
+ * `[diverges]` saying that `rx` and `rz` "arrive as zero, because
+ * `GameHost.objectPath` publishes only the path's position and yaw" — and by
+ * the time anyone read it the seam published all six, with `host.ts`'s own
+ * comment saying the pitch and roll were added "so the attachment-offset
+ * rotation in `class25` can stop passing zeros for them". It went on passing
+ * zeros. That is `L26`: a divergence declared in prose is a claim with an
+ * alibi, and it read as though the case had been thought about and settled.
+ * `op_st3` 340's `rot_x` runs to 15,758 BAMS, so the zeros were not harmless
+ * on the one path the boat riders use.
  *
  * Private, and deliberately: the engine has this inline in
  * `ScriptedHumanoidUpdate`'s tail and there is no exe function here to name.

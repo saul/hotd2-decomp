@@ -304,7 +304,7 @@ be port bugs at all, and they are marked as such rather than "fixed".
   `[port-only]` note claimed the port could not hold the counter and that the
   visible result was the same; both halves were wrong.
 
-- `[open]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — hangs
+- `[part]` **Stage 1 `0x16D8` `char_adv00` plays the wrong entrance** — hangs
   from a ledge, should be pushing a chair aside. **The whole data chain checks
   out and the lead is elsewhere.** The descriptor's state is 18, and
   `ZombieStateWaitCameraFrameThenBranch` (`FUN_004575A0`) plays `tail+0x04` and
@@ -327,6 +327,54 @@ be port bugs at all, and they are marked as such rather than "fixed".
   What is left is what the clip *looks like*, which is not checkable from here
   and wants eyes on the render. The next thing to try is `export_character.py`
   on `char_adv00` clip 1048 and simply watching it.
+
+  **Resolved 2026-09-11: the report's premise was false, which is why two
+  theories died against it.** `[proved]` Clip 1048 is **neither** a ledge hang
+  nor a chair push. Rendered at six frames and checked by forward kinematics
+  over the type-7 skeleton: sixty frames whose root translation wanders at
+  most 0.45 and returns to about zero, every bone rotation varying by at most
+  27 degrees, both feet planted 1.18 above where the walk clip plants them. It
+  is a held pose with a sway — the idle `ZombieStateWaitCameraFrameThenBranch`
+  waits in. **The port was playing the right clip the whole time.** What the
+  pose was authored to depict is `[open]` and was not guessed at. The walk clip
+  was rendered as a control first, which is what says the poser, the stride and
+  the bone indexing are right before any of that is believed.
+
+  **The chair is real and it is a class 0x33 selector 4 set piece.** Block 1
+  step 2 spawns two, at 3.5 and 7.2 units from `0x16D8`, which faces straight
+  at the second; both are asset slot 4196, which resolves to `komono_7.bin`
+  part 0 and renders as a chair. Their freeze bit `obj+0x34 & 0x8000` is
+  cleared by the script flag at `tail+0x0C`, which is **32**, and block 1 step
+  3 sets flag 32 one instruction before it spawns the zombie. That one bit both
+  freezes the chair and keeps it out of the collision list.
+
+  **The push is not a shot.** `ColiTestSphereAgainstActors`, called every frame
+  by `ZombiePushOutOfWorldAndActors`, writes the pusher, the depth and the
+  reversed normal into `obj+0x138/13C/140`, and the chair moves itself by a
+  tenth of that, times 1.8 if the pusher is airborne. It is class 0x30's own
+  push arithmetic applied to furniture — emergent physics, not a clip on the
+  zombie. Three routines read end to end and named:
+  `ScriptedPushableUpdate33` (`FUN_00433B70`), `ScriptedPushableApplyPush33`
+  (`FUN_00433CE0`), `ScriptedPushableSyncSphere33` (`FUN_00433E00`).
+
+  **`spawns.md` was wrong in both halves and that is most of why the set piece
+  was never looked for.** It called selector 4 "a kickable prop: shootable, but
+  a hit only imparts an impulse". These two have `tail+0x04 == -1`, so they get
+  a body sphere and are **not** shootable, and the impulse comes from an actor
+  walking into them. Corrected.
+
+  **`L35`, load-bearing.** Ghidra ends `FUN_00433B70`'s body early, and the
+  real tail contains the `RegisterForShotTest` call that puts the chair in the
+  list a push can find — `get_function_callers` does not name it. Stopping at
+  the body end would have produced the confident and wrong conclusion that
+  nothing can ever find the chair.
+
+  **The port was already saying so.** The exporter emits a class 0x33 placement
+  only at `hp == 1`, so there is no placement, no actor and no geometry; the
+  Actors panel lists no class 0x33 at all, and two `c51 hp4` overlay markers
+  sit in front of the zombie with nothing drawn. `[part]` The fix is specified
+  and authorised — widen the placement to selector 4 with a `class33_push`
+  block in both exporter halves, and add the push consumer the port lacks.
 
 - `[fixed]` **`zsass` walks through the camera and never attacks** —
   `?stage=2&mode=play&block=17&step=7&op=0`, `0xBA90`. **An exporter bug, and

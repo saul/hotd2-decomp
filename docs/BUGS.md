@@ -1832,11 +1832,49 @@ investigation ruled out.
   world movement — and for a clip whose root never changes the per-frame delta
   is zero. Fixing it changes the root-motion model for **every skinned actor**
   and wants **both** halves read first: `SkeletonPoseRootFrame`
-  (`FUN_00410920`), which places the root bone at the frame's translation,
-  and `SkeletonApplyRootMotion` (`FUN_00410C50`), which turns the
-  frame-to-frame delta into world movement. Which is relative to which is
-  the `[open]`. This entry first paired the first name with the second
-  address, which `verify_port` caught.
+  (`FUN_00410920`) and `SkeletonApplyRootMotion` (`FUN_00410C50`). This entry
+  first paired the first name with the second address, which `verify_port`
+  caught.
+
+  **`[fixed]` 2026-09-11, and the answer to "which is relative to which" is
+  neither.** `[proved]` The pose routine emits **no translate at all**,
+  contrary to its own annotation: it caches each track's frame, takes track 0's
+  **absolute** root, and hands a *pointer* to it to the motion routine, which
+  tests one flag bit **twice** — once to decide whether that root walks the
+  object, and once to choose between translating the pose by only its `y` or by
+  all three axes. So they are two consumers of one absolute track and the bit
+  picks exactly one: **a clip's root either moves the object or offsets the
+  pose, never both and never neither.** The port's frame-to-frame delta was
+  already correct; the missing half was the pose, which is why a clip whose
+  root never changes moved nothing.
+
+  **`L37` is why this stayed open.** Ghidra ends the gated arm at its stack pop
+  and shows a `return`; the real bytes write the baseline and **fall through**
+  into the shared tail that does the pose translate. From the pseudocode alone
+  the second gate test is dead code and the routine has no second arm. The MCP
+  bridge died mid-session and a linear sweep over the PE with `capstone` is
+  what found it — because a linear sweep does not stop where a decompiler does.
+
+  **Blast radius measured before the change rather than tuned after**, which is
+  the part worth keeping: **992 of 1058 motion blocks have an exactly zero
+  horizontal root on frame 0**, so for all but 64 the two arms draw in the same
+  place, and that is how the collapsed arm survived. Four actors in six stages
+  are affected and **no world position moves** — the walking civilian covers an
+  identical 20.87 units over 590 frames either side, and the playthrough is
+  unchanged. The rider sat **11.94 behind** where the engine draws it, not in
+  front, and now lies along the bonnet with its hands on the far wing.
+
+  One line was missing from `RescueTargetInit`: it clears the gate bit one
+  instruction after the skinned model is built. Class 0x21 and the civilian VM
+  are the only two things in the game that clear it.
+
+  `[open]` Two departures are tagged `[diverges]` rather than implemented, both
+  invisible and both knowing. The engine **scales** the pose offset and the
+  port scales nothing, so leaving the offset unscaled matches the unscaled
+  model it offsets but departs from the engine either way; the honest figure
+  for the two `scale 0.9` clips is 2.594, not 2.882. And the death clip keeps
+  its whole root regardless of the gate, at one call site, because nothing else
+  would give a falling body its travel.
   `RescueTargetFreedState` never ends, so a rescued target stays in the pool,
   harmless today. And **nothing counts the spawns a block asks for against the
   actors it gets** — that one comparison would have found this and both bosses

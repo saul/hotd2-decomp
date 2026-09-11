@@ -256,6 +256,32 @@ export async function writeThumb(stage: number, png: Blob): Promise<void> {
   const w = await fh.createWritable();
   await w.write(png);
   await w.close();
+  for (const fn of [...thumbWatchers]) fn(stage);
+}
+
+/**
+ * Who to tell when a picture lands.
+ *
+ * The bundle screen reads the pictures when it mounts, and a picture is
+ * written **nine frames plus a PNG encode plus an OPFS write** after a stage
+ * loads. Those two orders are a photo finish -- measured at eight frames
+ * elapsed against the nine the countdown needs, on a page opened and then
+ * asked for the bundle screen straight away -- and the screen lost it about
+ * one time in three. Losing it is permanent: nothing read the store again, so
+ * the tile stayed empty with its PNG sitting beside the cache, for as long as
+ * the screen was up. `bundle_flow.mjs` is what saw it, and it read as a flaky
+ * check because the wait it gave up on was a wait for an event that had
+ * already happened.
+ *
+ * A write is the real signal, so it is the one that travels. `[open]` is not
+ * a state a picker needs to be in.
+ */
+const thumbWatchers = new Set<(stage: number) => void>();
+
+/** Subscribe to {@link writeThumb}. Returns the unsubscribe. */
+export function onThumbWritten(fn: (stage: number) => void): () => void {
+  thumbWatchers.add(fn);
+  return () => { thumbWatchers.delete(fn); };
 }
 
 /** A stage's picture as a `blob:` URL, or null. The caller revokes it. */

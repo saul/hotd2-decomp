@@ -874,6 +874,16 @@ Things established while building it, now folded back into the format docs.
   read that as Training. `verify_exporters.check_game_mode` holds all three
   enums to one table.
 
+- **The bundle screen showed no picture of the stage you had just been
+  looking at, about one time in three.** `Player.requestThumb` takes the
+  fallback picture nine frames after a load and writes it to OPFS;
+  `ExportScreen` read the store once, when it mounted. Measured eight frames
+  between `#loading` going away and the screen opening, so the two orders were
+  a photo finish — and losing it was permanent, because nothing read the store
+  again. `writeThumb` announces itself now (`onThumbWritten`) and the screen
+  re-reads on every write. `bundle_flow.mjs` had been failing on this and
+  reading as a flaky check.
+
 - **A stage does not choose where it starts; the stage before it does.**
   `[proved]` — a `kind == 2` route record ends a scene by doing `block + 1`
   onto the hole that follows it, and on that path `EvtAdvanceStepOrRoute`

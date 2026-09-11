@@ -15668,6 +15668,57 @@ uncorrected call site would have shown: it asked for `GameMode.Arcade`, and
 with `ARCADE = 0` `PlaceBreakableGroup` takes the ordinary path and all five
 of its assertions fall over.
 
+### Two: `bundle_flow.mjs`'s first thumbnail assertion
+
+"the stage that has been open has a picture" was one
+`waitForSelector(".export-tile img", { timeout: 10_000 })` and lost about one
+run in three. The ten seconds was itself a previous attempt at the same fix.
+
+**It was the screen's read-back, and the loss was permanent.** Measured with a
+probe that replays lines 89–115 of the harness verbatim: in **six of seven**
+failing runs the PNG was in OPFS by the moment the ten-second wait expired,
+and in the one held-open experiment the file landed 11 ms after the screen
+opened and the tile was *still* empty twenty seconds later. `ExportScreen`
+read the thumbnail store once, in its mount effect; nothing read it again
+while it was up. The wait could not have succeeded at any budget.
+
+The race it lost is a photo finish. Counting the page's own
+`requestAnimationFrame` calls from outside: 23 by the time `#loading` went
+away, 31 by the time the bundle screen opened — **eight frames**, against the
+nine `Player.requestThumb`'s countdown needs before `grabThumb` runs. Whether
+the PNG encode and the OPFS write beat the screen's single read is then a
+coin toss, and a machine with other browsers on it loses more often: under
+today's contention the before-rate was **1 of 7**, not the 2 of 3 recorded.
+
+Two fixes, because there were two faults:
+
+* **The page.** `writeThumb` announces itself (`onThumbWritten`) and the
+  screen re-reads the pictures on every write, with its own scan counter so a
+  write arriving mid-rescan cannot cancel that rescan's labels. This is a
+  user-visible bug in its own right: open the page, go straight to the bundle
+  screen, and the stage you were just looking at had no picture.
+* **The check.** Two assertions now, waited on separately — the PNG reaching
+  OPFS (real state, polled), then the tile showing it on a deliberately short
+  budget. A picture never taken and a picture never shown are different bugs
+  and the old check called both "no picture".
+
+Measured, one run at a time, `chrome` main processes recorded per run:
+
+| | pass |
+|---|---|
+| old check, page unfixed | **1 / 7** |
+| old check, page fixed | **8 / 8** (worst `img` wait 145 ms of 10 s) |
+| new check, page fixed | **7 / 7** (worst OPFS wait 148 ms of 30 s, worst `img` wait 46 ms of 5 s) |
+| new check, page **un**fixed | 2 of 3 — so it has not been weakened into always-green |
+
+**A wrong turn worth writing down:** the first version of the OPFS wait was
+`page.waitForFunction` with an `async` predicate. It returns `null` when the
+file is not there on the first poll and then resolves on the *promise object*,
+which is truthy — so it handed back a handle that reads as `null` on a run
+where the file appeared 100 ms later, and the assertion it fed would have been
+a silent false negative. `page.evaluate` does await. The poll lives in node,
+the same shape as `waitForStage` two functions above it.
+
 ### Next actions
 
 1. `docs/BUGS.md` is the user's; both entries can be closed from this — the

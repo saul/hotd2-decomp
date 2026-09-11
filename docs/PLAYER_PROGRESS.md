@@ -850,6 +850,30 @@ with.
 
 Things established while building it, now folded back into the format docs.
 
+- **Arcade is `g_GameMode` 0 and 2 is Training, which the bundle had the wrong
+  way round for as long as it carried the field.** `[proved]` — the values are
+  the title menu's row order, and the menu names its own rows:
+  `TitleMenuRegisterSprites` (`FUN_004962C0`) registers each label by texture
+  (`tex\arcade00`, `tex\original_00`, `tex\traning_00`, `tex\boss_00`) into
+  consecutive `ScreenSpriteRegister` slots and `TitleMenuUpdateAndSelect`
+  (`FUN_00496960`) writes the highlighted row into the global. The other five
+  writers all store 0.
+
+  Nothing was visibly wrong, which is the interesting part: `entryStep()`
+  tested `ORIGINAL && scene === 0` first and returned 1 for everything else,
+  so a bundle labelled Training got the Arcade step by falling out of the same
+  clause the engine falls out of. What the wrong number *was* doing: it put
+  `g_prop_target_set`'s four member sets — Training's four lessons — under the
+  name "arcade", and it made `PlaySoundId`'s plain BGM table look unreachable,
+  which is how the exporter came to emit a `default_table: "ar"` that made
+  every stage play the `_AR` mix. **Arcade plays `ST<n>.wav` now** and Original
+  plays `ST<n>_AR.wav`, which is what the routine does.
+
+  Bundle format **6**, because no declaration moved and so no digest could see
+  it: a format-5 bundle says `game_mode: 2` for Arcade and this client would
+  read that as Training. `verify_exporters.check_game_mode` holds all three
+  enums to one table.
+
 - **A stage does not choose where it starts; the stage before it does.**
   `[proved]` — a `kind == 2` route record ends a scene by doing `block + 1`
   onto the hole that follows it, and on that path `EvtAdvanceStepOrRoute`

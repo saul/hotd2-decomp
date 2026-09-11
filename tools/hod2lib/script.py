@@ -741,24 +741,36 @@ class Program:
     def entry_step(self) -> int:
         """Which step of the entry block runs first.
 
-        Not 0. ``FUN_0045EBC0`` picks it by game mode and scene state:
+        Not 0. ``EvtLoadBlockProgram`` (``FUN_0045EBC0``) picks it by **app**
+        state and game mode, and every arm is here rather than only the two a
+        bundle can reach -- the enum was renumbered once already and a rule
+        written as "everything else" survived it by luck:
 
         ===========================================  ====
-        scene state 5 or 9 (continue / checkpoint)     0
-        game mode 3 (a training or demo mode)          0
-        game mode 2                                    0
-        game mode 1 (Original) **and scene 0**         5
-        everything else -- normal Arcade play          1
+        ``g_app_state`` 5 or 9 (continue/checkpoint)   0
+        mode 1 (Original) **and scene 0**              5
+        mode 1 (Original), any other scene             1
+        mode 2 (Training)                              0
+        mode 3 (Boss)                                  0
+        mode 0 (Arcade) -- the fall-through            1
         ===========================================  ====
+
+        A bundle is only ever built in mode 0 or 1, so the Training and Boss
+        rows cannot be reached from here; they are transcribed because the arm
+        ``FUN_0045EBC0`` falls through to is the *Arcade* one, and that is the
+        fact the old ``return 1`` was resting on without saying so.
 
         This is the same rule ``EvtAdvanceStepOrRoute`` follows on every
         later block change, where it sets the step index to 1 outright. Step 0
         is reached only through the checkpoint path, which is why it is
         presented as checkpoint state rather than run inline.
         """
-        if self.stage_game_mode == GameMode.ORIGINAL and self.scene == 0:
-            return 5
-        return 1
+        mode = self.stage_game_mode
+        if mode == GameMode.ORIGINAL:
+            return 5 if self.scene == 0 else 1
+        if mode in (GameMode.TRAINING, GameMode.BOSS):
+            return 0
+        return 1                          # mode 0, Arcade
 
     @property
     def stage_game_mode(self) -> int:

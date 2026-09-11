@@ -33,6 +33,7 @@
  */
 
 import type { BgmJson, SoundJson } from "../bundle";
+import { GameMode } from "../game/game_mode";
 
 /** `id >> 28`. */
 export const NS_SE = 0;
@@ -96,12 +97,23 @@ export class Bgm {
     this.sound = sound ?? null;
   }
 
+  /**
+   * Bind the tables and pick between them the way `PlaySoundId` does.
+   *
+   * `if (g_app_state == 6 && g_GameMode == 0) plain else ar`, at
+   * `0x0041D16B`. The port is always in play when a stage is loaded, so the
+   * app-state half is constant and the mode decides: **Arcade gets the plain
+   * mix** (`ST1.wav`) and Original, Training and Boss get the `_AR` one
+   * (`ST1_AR.wav`). Both sets ship in `Sound/bgm/`.
+   *
+   * It used to be `(default_table ?? "ar") === "ar" || gameMode !== 0`, which
+   * is `true` for every bundle ever written: the mode test was dead behind a
+   * bundle field that always said `"ar"`, and the field said that because
+   * `GameMode.ARCADE` was 2 and mode 0 was believed unreachable.
+   */
   setTable(bgm: BgmJson | undefined, gameMode: number): void {
     this.table = bgm ?? null;
-    // `DAT_009C8E98 == 6 && g_GameMode == 0` selects the plain names and
-    // everything else the `_AR` mix. Every stage scene fails that test, so
-    // `_AR` is what the six stages actually resolve to.
-    this.useArTable = (bgm?.default_table ?? "ar") === "ar" || gameMode !== 0;
+    this.useArTable = gameMode !== GameMode.Arcade;
   }
 
   /** Filename for a sound id, or null if it is not a playable BGM id. */

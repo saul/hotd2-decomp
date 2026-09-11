@@ -223,6 +223,85 @@ def check_two_libraries() -> list[str]:
     elif m.group(1) != pyversion:
         out.append(f"hod2lib.__version__ is {pyversion!r} and "
                    f"TOOL_VERSION is {m.group(1)!r}")
+
+    # `GameMode` is declared in both halves, and its *values* go into every
+    # bundle as `game_mode`. This is the one enumeration where a half that
+    # drifts produces a bundle that reads perfectly and means something else:
+    # `ARCADE` was 2 for as long as the bundle carried a `1 if original else 0`
+    # flag under the same name, and 2 is Training. Nothing could see that,
+    # because a renumbering moves no declaration and so no digest.
+    out += check_game_mode(src)
+    return out
+
+
+#: `g_GameMode` (0x009CA08C), from the title menu's own row order -- see
+#: `TitleMenuRegisterSprites` (FUN_004962C0) and the note on either enum.
+GAME_MODE = {"ARCADE": 0, "ORIGINAL": 1, "TRAINING": 2, "BOSS": 3}
+
+
+def check_game_mode(ts_stage_src: str | None = None) -> list[str]:
+    """Both `GameMode` enums against the exe's numbering.
+
+    Reads the TypeScript as text rather than importing it, for the same
+    reason the rest of this file does: there is no TS runtime here.
+    """
+    out: list[str] = []
+    from hod2lib.stage import GameMode as PyMode
+
+    for name, want in GAME_MODE.items():
+        member = getattr(PyMode, name, None)
+        if member is None:
+            out.append(f"tools/hod2lib/stage.py GameMode has no {name}")
+        elif int(member) != want:
+            out.append(f"tools/hod2lib/stage.py GameMode.{name} is "
+                       f"{int(member)}, and g_GameMode's {name} is {want}")
+    extra = {m.name for m in PyMode} - set(GAME_MODE)
+    if extra:
+        out.append(f"tools/hod2lib/stage.py GameMode has members g_GameMode "
+                   f"does not: {', '.join(sorted(extra))}")
+
+    src = (TS_LIB / "stage.ts").read_text(encoding="utf-8")
+    body = re.search(r"export enum GameMode \{(.*?)\n\}", src, re.S)
+    if not body:
+        out.append("web/src/hod2lib/stage.ts declares no GameMode enum")
+        return out
+    found = dict((n, int(v)) for n, v in
+                 re.findall(r"^\s*([A-Z_]+)\s*=\s*(\d+)\s*,",
+                            body.group(1), re.M))
+    for name, want in GAME_MODE.items():
+        if name not in found:
+            out.append(f"web/src/hod2lib/stage.ts GameMode has no {name}")
+        elif found[name] != want:
+            out.append(f"web/src/hod2lib/stage.ts GameMode.{name} is "
+                       f"{found[name]}, and g_GameMode's {name} is {want}")
+    for name in sorted(set(found) - set(GAME_MODE)):
+        out.append(f"web/src/hod2lib/stage.ts GameMode has member {name}, "
+                   f"which g_GameMode does not")
+
+    # The player's half spells the same four in TitleCase, and `game_mode`
+    # crosses from one to the other untranslated.
+    game = ROOT / "web" / "src" / "game" / "game_mode.ts"
+    body = re.search(r"export enum GameMode \{(.*?)\n\}",
+                     game.read_text(encoding="utf-8"), re.S)
+    if not body:
+        out.append("web/src/game/game_mode.ts declares no GameMode enum")
+        return out
+    found = dict((n, int(v)) for n, v in
+                 re.findall(r"^\s*([A-Za-z_]+)\s*=\s*(\d+)\s*,",
+                            body.group(1), re.M))
+    for name, want in GAME_MODE.items():
+        title = name.title().replace("_", "")
+        if name == "ORIGINAL":
+            title = "Original"
+        if title not in found:
+            out.append(f"web/src/game/game_mode.ts GameMode has no {title}")
+        elif found[title] != want:
+            out.append(f"web/src/game/game_mode.ts GameMode.{title} is "
+                       f"{found[title]}, and g_GameMode's {title} is {want}")
+    for name in sorted(set(found)
+                       - {n.title() for n in GAME_MODE}):
+        out.append(f"web/src/game/game_mode.ts GameMode has member {name}, "
+                   f"which g_GameMode does not")
     return out
 
 
@@ -351,7 +430,8 @@ def main() -> int:
     n_ts = len(list(TS_LIB.glob("*.ts")))
     print(f"  {n_py} python modules, {n_ts} typescript, same set either way "
           f"less {len(LIBRARY_ONLY)} declared; tool_version agrees; "
-          f"rigs_data.ts is current\n")
+          f"rigs_data.ts is current; all three GameMode enums are "
+          f"{', '.join(f'{k}={v}' for k, v in GAME_MODE.items())}\n")
     print("clean")
     return 0
 

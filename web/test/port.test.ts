@@ -92,8 +92,9 @@ import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type ScriptedSceneryActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
   from "../src/game/actor";
-import { ScriptedCarrierUpdate33, ScriptedScenerySelector }
-  from "../src/game/class33";
+import { ScriptedCarrierUpdate33, ScriptedPushableUpdate33,
+         ScriptedScenerySelector } from "../src/game/class33";
+import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
@@ -211,7 +212,8 @@ import {
   RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
   RISING_DOOR_STEP_OTHER,
 } from "../src/game/class44";
-import { SpawnPropContainers } from "../src/game/director";
+import { SpawnPropContainers, SpawnSlotActors }
+  from "../src/game/director";
 import {
   SetPieceState, SetPiecePropUpdate,
   DROP_GRAVITY, SLIDE_FRAMES, SLIDE_VX, SLIDE_VZ,
@@ -12435,6 +12437,325 @@ console.log("\nthe idle groan, the weapon loop, and kind 4:");
     check("`ResetSceneOnEnter` zeroes `g_weapon_loop_holders`, so a stage does "
           + "not inherit the last one's holders",
           G.g_weapon_loop_holders === 0, String(G.g_weapon_loop_holders));
+  }
+}
+
+// -- class 0x33 selector 4: the scenery an actor shoves aside -----------------
+//
+// Reported as stage 1 `0x16D8` `char_adv00` "playing the wrong entrance -- a
+// ledge hang where a chair push belongs". The clip id was right: 1048 is a
+// sixty-frame hold. The chair push is **this class**, and the port had the
+// three fields `ColiTestSphereAgainstActors` writes -- `obj+0x138`, `+0x13C`,
+// `+0x140` -- with `ZombiePushOutOfWorldAndActors` as their only reader.
+//
+// Every number below is stage 1's own descriptor, `0x1A40` and `0x1A74`: slot
+// 4196 (`komono_7.bin` part 0, a chair), no shot mesh, a 3.5 sphere, armed by
+// script flag 32 and despawned by 33. The set piece is held by *these* values
+// and not by a shape.
+
+console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
+{
+  const CHAIR_AT = 0x1a40;
+  const CHAIR_SLOT = 0x1064;             // 4196
+  const CHAIR_SPHERE = 3.5;
+  const PUSH_FLAG = 32;
+  const DESPAWN_FLAG = 33;
+  /** `ActorInitFlags` puts the descriptor's word on `obj+0x34`; both carry it. */
+  const SPAWN_FLAGS = 0x8000;
+
+  const STAGE1 = () => ({
+    slot: CHAIR_SLOT, shot_mesh: -1, shot_radius: CHAIR_SPHERE,
+    push_flag: PUSH_FLAG, despawn_flag: DESPAWN_FLAG,
+  });
+
+  const reset = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+  const makeChair = (tail = STAGE1(),
+                     flags = SPAWN_FLAGS): ScriptedSceneryActor => {
+    const a = ActorSpawn(CHAIR_AT, SpawnClass.ScriptedScenery, -1, "chair",
+                         { class33Push: tail as Actor["class33Push"],
+                           hp: ScriptedScenerySelector.Pushable,
+                           maxHp: ScriptedScenerySelector.Pushable,
+                           flags });
+    if (a.cls !== SpawnClass.ScriptedScenery) throw new Error("not class 0x33");
+    a.pos = vec3(22.83, 6.5, -16.74);
+    a.visible = true;
+    return a;
+  };
+  const chairFrame = () => ({ eye: EYE, dt: 1 / 60, rng: new Rng(9),
+                              host: NULL_HOST });
+  const tick = (c: ScriptedSceneryActor, n: number) => {
+    for (let i = 0; i < n; i++) {
+      if (c.despawned) return;
+      ScriptedPushableUpdate33(c, chairFrame());
+    }
+  };
+
+  // -- C1. the seed, and the radius that makes it a push target -------------
+  //
+  // `tail+0x04 == -1` writes `tail+0x08` to `obj+0x124` **and** `obj+0x128`.
+  // The second is the one that matters: `ColiTestSphereAgainstActors` measures
+  // against the *body* radius, so a chair that only got the shot radius is a
+  // chair nothing can touch.
+  {
+    reset();
+    const c = makeChair();
+    check("before its first frame the chair has no sphere at all",
+          c.bodyRadius === 0 && c.hitRadius === 0,
+          `${c.bodyRadius}/${c.hitRadius}`);
+    tick(c, 1);
+    check("the seed writes `tail+0x08` to the body radius as well as the "
+          + "shot radius -- both port names for `obj+0x124`, and `obj+0x128`",
+          c.bodyRadius === CHAIR_SPHERE && c.hitRadius === CHAIR_SPHERE
+          && c.radius === CHAIR_SPHERE,
+          `${c.bodyRadius}/${c.hitRadius}/${c.radius}`);
+    check("...and the draw slot, which is the whole of what the renderer "
+          + "needs to clone a model for it",
+          c.scenery.slot === CHAIR_SLOT, String(c.scenery.slot));
+    check("`obj+0x1312` is incremented, so the seed runs once",
+          c.sub === 1, String(c.sub));
+  }
+
+  // -- C2. the freeze, and the one flag that lifts it -----------------------
+  //
+  // `obj+0x34` bit `0x8000` arrives on the descriptor and `AND AH, 0x7f` at
+  // `0x00433C00` is the only thing that clears it. While it is up the object
+  // does not move, and `ColiTestSphereAgainstActors` skips it as a candidate
+  // -- one bit, both halves.
+  {
+    reset();
+    const c = makeChair();
+    tick(c, 1);
+    check("the descriptor's `0x8000` survives `ActorInitFlags`, so the chair "
+          + "starts held",
+          (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `0x${c.flags.toString(16)}`);
+    // A push recorded while it is held must not move it.
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    tick(c, 1);
+    check("a push recorded on a held chair moves it nowhere, and is not even "
+          + "consumed",
+          c.pos.x === x0 && c.pushedBy === 0x7ee0, `${c.pos.x} vs ${x0}`);
+    G.g_script_flags[PUSH_FLAG] = 1;
+    tick(c, 1);
+    check("script flag 32 clears the bit and the chair moves on that same "
+          + "frame -- a tenth of the penetration along the recorded normal",
+          Math.abs(c.pos.x - (x0 + 0.2)) < 1e-6
+          && !(c.flags & SCENERY_SKIP_COLLISION), String(c.pos.x));
+    check("...and the recorded push is consumed, so one record is one move",
+          c.pushedBy === -1, String(c.pushedBy));
+    // The clear is a clear and not a copy of the flag: a flag that goes back
+    // down does not re-freeze the object.
+    G.g_script_flags[PUSH_FLAG] = 0;
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x1 = c.pos.x;
+    tick(c, 1);
+    check("the flag dropping again does not put the bit back -- the routine "
+          + "only ever clears",
+          Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
+  }
+
+  // -- C3. the pusher's airborne bits, not the chair's ----------------------
+  //
+  // `if ((*(uint *)(obj+0x138) + 0x34) & 0x18000000) f *= 1.8` -- the test is
+  // on the actor that did the pushing. Reading the chair's own flags there
+  // would be `L11` with the object the other way round, and it would be
+  // silent: 1.8 times nothing is still nothing until an airborne zombie
+  // arrives.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const pusher = spawnZombie(0x7ee0, 1, "pusher");
+    pusher.flags |= 0x18000000;
+    const c = makeChair();
+    tick(c, 1);
+    c.pushedBy = pusher.at;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    tick(c, 1);
+    check("an airborne pusher shoves 1.8x as far, and the bit read is the "
+          + "**pusher's**",
+          Math.abs(c.pos.x - (x0 + 0.36)) < 1e-6, String(c.pos.x));
+
+    // ...and the chair's own copy of the same bits changes nothing.
+    pusher.flags &= ~0x18000000;
+    c.flags |= 0x18000000;
+    c.pushedBy = pusher.at;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x1 = c.pos.x;
+    tick(c, 1);
+    check("the chair's own airborne bits are not the ones that scale it",
+          Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
+  }
+
+  // -- C4. all three axes, and the sphere that follows ----------------------
+  //
+  // The recorded push is applied in x, y **and** z -- unlike the re-resolve
+  // under it, which is x and z only. And `ScriptedPushableSyncSphere33` rises
+  // by exactly the body radius, where `ActorUpdateBoundingSphere` rises by the
+  // radius plus one: two conventions for `obj+0x12C`, and this class writes
+  // its own.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    const p0 = { x: c.pos.x, y: c.pos.y, z: c.pos.z };
+    c.pushedBy = -1;
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 3;
+    c.pushNormal = vec3(0, 1, -1);
+    tick(c, 1);
+    check("the recorded push moves all three axes, y included",
+          Math.abs(c.pos.y - (p0.y + 0.3)) < 1e-6
+          && Math.abs(c.pos.z - (p0.z - 0.3)) < 1e-6
+          && c.pos.x === p0.x,
+          `${c.pos.x}/${c.pos.y}/${c.pos.z}`);
+    check("the collision sphere is re-seated at the position plus exactly "
+          + "the body radius -- not the radius plus one",
+          c.sphereCentre.y === c.pos.y + CHAIR_SPHERE
+          && c.sphereCentre.x === c.pos.x && c.sphereCentre.z === c.pos.z,
+          String(c.sphereCentre.y));
+  }
+
+  // -- C5. a zombie walking into it is the whole set piece ------------------
+  //
+  // The two halves meeting: `ZombiePushOutOfWorldAndActors` runs
+  // `ColiTestSphereAgainstActors`, which records the opposite push on whatever
+  // it finds, and this class applies it next frame. Nothing here calls the
+  // push directly -- if the chair moves, the wiring is real.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    const z = spawnZombie(0x16d8, 7, "char_adv00");
+    z.pos = vec3(c.pos.x + 4, 6.2, c.pos.z);
+    z.bodyRadius = 3.5;
+    z.flags2 |= ZombieFlag2.CollideActors;
+    const x0 = c.pos.x;
+    ZombiePushOutOfWorldAndActors(z, 1);
+    check("the zombie's own collision pass records the push on the chair "
+          + "rather than moving it",
+          c.pushedBy === z.at && c.pushDepth > 0,
+          `${c.pushedBy}/${c.pushDepth}`);
+    tick(c, 1);
+    check("...and the chair shoves itself away from the zombie on the next "
+          + "frame, which is the chair push the report was asking for",
+          c.pos.x < x0 - 1e-6 && c.pushedBy === -1,
+          `${x0} -> ${c.pos.x}`);
+  }
+
+  // -- C6. the despawn flag is tested first, and it returns -----------------
+  //
+  // `MOV AL, byte ptr [ECX + 0xd]` at `0x00433B80` is the first thing in the
+  // routine: a raised flag despawns and returns before the seed, the push and
+  // the draw. A chair that seeded itself on the frame it left would leave the
+  // renderer a slot to clone for one frame.
+  {
+    reset();
+    G.g_script_flags[DESPAWN_FLAG] = 1;
+    const c = makeChair();
+    tick(c, 1);
+    check("script flag 33 despawns the chair on its first frame",
+          c.despawned, String(c.despawned));
+    check("...before the seed, so it never publishes a draw slot",
+          c.scenery.slot === 0 && c.sub === 0,
+          `${c.scenery.slot}/${c.sub}`);
+  }
+
+  // -- C8. the wiring, from the bundle's placement to the object moving -----
+  //
+  // Everything above calls `ScriptedPushableUpdate33` by hand, and that is
+  // exactly the shape `L38` warns about: a dispatch arm that is missing looks
+  // the same as one that is wrong, and a test that drives past it sees
+  // neither. Two links, neither of which the assertions above can reach:
+  //
+  // * `SpawnSlotActors` gates on a tail block being present, and it used to
+  //   accept `class33` alone -- so a selector-4 placement made no object at
+  //   all, which was one of the four reasons the port drew no chair;
+  // * `ScriptedSceneryUpdate33` picks the routine off `obj.hp`, because the
+  //   port has one table entry per class where the engine writes one of twelve
+  //   pointers into `*obj`.
+  //
+  // So this one goes in through the front: the placement the exporter emits,
+  // then `GameUpdate`, and nothing else.
+  {
+    reset();
+    SetGameTables({
+      ...CHARS,
+      placements: [{
+        at: CHAIR_AT, class: 0x33, char_type: -1, motion: null,
+        hp: ScriptedScenerySelector.Pushable, init_flags: SPAWN_FLAGS,
+        yaw: 4096, class33_push: STAGE1(),
+      }],
+    } as unknown as CharactersJson);
+    const rng = new Rng(33);
+    const events = new Events();
+    const listed = [{ at: CHAIR_AT, class: SpawnClass.ScriptedScenery,
+                      pos: [22.83, 6.5, -16.74] as [number, number, number] }];
+    SpawnSlotActors(listed, rng);
+    const c = G.g_object_list.find((o) => o.at === CHAIR_AT);
+    check("a placement carrying only `class33_push` is spawned -- the gate "
+          + "takes either block, not just the carrier's",
+          !!c && c.cls === SpawnClass.ScriptedScenery,
+          c ? `class ${c.cls}` : "no actor");
+    if (!c || c.cls !== SpawnClass.ScriptedScenery) throw new Error("no chair");
+    check("...and it arrives held, because the spawn arm carries the "
+          + "descriptor's flags word through",
+          (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `0x${c.flags.toString(16)}`);
+    G.g_script_flags[PUSH_FLAG] = 1;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    check("one `GameUpdate` reaches the selector-4 routine through the class "
+          + "table, seeds the sphere and lifts the freeze",
+          c.bodyRadius === CHAIR_SPHERE && c.scenery.slot === CHAIR_SLOT
+          && !(c.flags & SCENERY_SKIP_COLLISION),
+          `${c.bodyRadius}/${c.scenery.slot}/0x${c.flags.toString(16)}`);
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 2;
+    c.pushNormal = vec3(1, 0, 0);
+    const x0 = c.pos.x;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    check("...and a second one moves it, with nothing but the class table "
+          + "between the frame and the push",
+          Math.abs(c.pos.x - (x0 + 0.2)) < 1e-6, `${x0} -> ${c.pos.x}`);
+    // Put the fixture back: everything after this file's class-0x33 section
+    // expects `CHARS` with no placements in it.
+    SetGameTables(CHARS);
+  }
+
+  // -- C7. the other selectors get nothing ----------------------------------
+  //
+  // The bundle carries `class33_push` for selector 4 and `class33` for
+  // selector 1, never both, and the port takes which one arrived as the
+  // selector. An actor with neither is one of the eight sub-handlers nothing
+  // here can run, and the update must be a no-op rather than a default arm.
+  {
+    reset();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    const c = makeChair();
+    c.class33Push = null;
+    const p0 = { x: c.pos.x, sub: c.sub };
+    c.pushedBy = 0x7ee0;
+    c.pushDepth = 9;
+    c.pushNormal = vec3(1, 0, 0);
+    tick(c, 4);
+    check("a class-0x33 actor with no tail block seeds nothing and moves "
+          + "nowhere, however hard something pushes it",
+          c.pos.x === p0.x && c.sub === p0.sub && !c.despawned,
+          `${c.pos.x}/${c.sub}`);
   }
 }
 

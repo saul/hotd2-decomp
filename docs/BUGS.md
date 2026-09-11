@@ -1736,7 +1736,12 @@ investigation ruled out.
   applies only a root's `y` on the rule that the horizontal part is already
   world movement — and for a clip whose root never changes the per-frame delta
   is zero. Fixing it changes the root-motion model for **every skinned actor**
-  and wants `SkeletonPoseRootFrame` (`FUN_00410C50`) read first.
+  and wants **both** halves read first: `SkeletonPoseRootFrame`
+  (`FUN_00410920`), which places the root bone at the frame's translation,
+  and `SkeletonApplyRootMotion` (`FUN_00410C50`), which turns the
+  frame-to-frame delta into world movement. Which is relative to which is
+  the `[open]`. This entry first paired the first name with the second
+  address, which `verify_port` caught.
   `RescueTargetFreedState` never ends, so a rescued target stays in the pool,
   harmless today. And **nothing counts the spawns a block asks for against the
   actors it gets** — that one comparison would have found this and both bosses
@@ -1810,6 +1815,46 @@ investigation ruled out.
   clearing in 420, 435 and 285 frames against a 300-frame window; stage 1's
   block 1 has `g_nFiringGate` legitimately down; and stage 5's block 2 clears
   now that class 0x33 and `ZombieState.Leave` are ported.
+
+## And one nobody could have reported, in a route nothing had played
+
+- `[open]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
+  step 3 op 4. Reproduce with
+  `cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless`: it
+  reaches block 7, then 8, then 2, and stops for 1,110 game frames on one
+  instruction.
+
+  **Found by giving the driver something it never had.** `entry` was already a
+  URL flag the player honoured and only the playthrough tool could not reach,
+  and **only stages 3 and 4 have more than one entry** — so those stages carry
+  routes no automated run had ever played. The entry-0 route never visits
+  block 2 at all.
+
+  What is localised: the room holds **0 enemies alive and 0 hit points** at
+  that moment, and 66 volleys over 480 frames landed no damage anywhere, so
+  whatever should raise flag 21 is not on the field, not ported, or not
+  reaching its raising state. Step 3's op 1 sets flag **24**, a different one,
+  which is consistent with the standing fact that every gate in all six
+  scripts names a flag that stage's own script never sets.
+
+  **Do not fix this by widening `ScriptFlagsThisBundleCanRaise`** in
+  `web/src/script/waits/flag.ts` unless the engine provably cannot raise the
+  flag on this route. The first question is whether flag 21 is already in that
+  set for stage 3: if it is, the port believes something can raise it and that
+  something is failing; if it is not, the escape should have passed the gate
+  and did not, which is a different bug in a different file.
+
+- `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
+  defect in itself, and recorded because it is now live code with no coverage.
+  The rescue target its branch variable depends on had no skeleton until
+  2026-09-11, so those blocks were unreachable; exporting the actor turned them
+  into code no run has visited. Reaching them needs the driver to **shoot that
+  actor during block 0**, which `shootable` in `playthrough.mjs` declines
+  because the gate there is neither an enemy nor a civilian one. `--entry` does
+  not help: stage 2 has one entry and the flag falls back to it silently,
+  producing a byte-identical run. **A driven run takes one arm of every
+  branch**, so "the stage reached an end block" has always meant one path
+  through it was played and no others.
 
 ## And one about a check that is not reliable
 

@@ -1280,6 +1280,16 @@ export interface ActorBase {
    */
   class33: CharacterPlacement["class33"];
   /**
+   * Class 0x33 **selector 4's** tail — the draw slot, the sphere, and the two
+   * script flags that arm the push and take the object off the field.
+   *
+   * Never non-null on the same actor as {@link class33}: the exporter sets
+   * exactly one of the two, keyed on the descriptor's `+0x22`, because they
+   * are two sub-handlers' readings of the same bytes. So this field's presence
+   * *is* the selector, the same way that one's is. See `class33/pushable.ts`.
+   */
+  class33Push: CharacterPlacement["class33_push"];
+  /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
    *
@@ -1818,6 +1828,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class52: null,
     class14: null,
     class33: null,
+    class33Push: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,

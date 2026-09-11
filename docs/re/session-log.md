@@ -15927,6 +15927,126 @@ compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or more non-zero
 angles. Both are written up where the code is, and neither is fixed here.
 
 
+## 2026-09-11 — the chair is a class 0x33 selector 4, and the port had three of its four pieces
+
+Follow-on from the entry above, and authorised after it: build the fix that
+reading found. Two halves, one commit.
+
+### The format change, in both libraries
+
+`slot_drawn_spawn` / `slotDrawnSpawn` now emits a class-0x33 placement for
+selector **4** as well as selector 1, and a new `class33_push_tail` /
+`class33PushTail` decodes selector 4's own reading of the bytes:
+
+```
+tail+0x00  i32  draw slot                       -> obj+0x13F0
+tail+0x04  i32  shot mesh, -1 for none          -> obj+0x14C
+tail+0x08  f32  the sphere, only when +0x04 is -1
+tail+0x0C  u8   script flag that clears obj+0x34 bit 0x8000
+tail+0x0D  u8   script flag that despawns it
+```
+
+Every offset came from `disassemble_bytes` over `0x00433B70`..`0x00433C31`
+rather than from the pseudocode, because this is a function the decompiler
+truncates.
+
+**The gate that mattered is the one that is easy to miss.** Widening
+`slot_drawn_spawn` alone would have handed a selector-4 spawn a `class33`
+block, because that block was keyed on the *class*: selector 1's `tail+0x0C`
+is an `op_` path slot and selector 4's is a flag index, so one spawn carrying
+both is `L3` written into the bundle. The two are keyed on `rec.hp` now and are
+mutually exclusive, and the port takes which one arrived as the selector, which
+is the arrangement that was already documented for `class33` alone.
+
+The draw slot travels through a new `sceneryDrawSlots`, beside
+`humanoidDrawSlots` and for the same reason: the slot is a property of the
+*descriptor*, not of the class, so keying it on the class would put a chair in
+all six bundles for one room. Without it the placement would exist, the actor
+would be made, the push would work and the client would have nothing to clone
+— class 0x52's old bug from the other side.
+
+### The port
+
+`game/class33/pushable.ts`, three routines under their own names, and
+`ScriptedSceneryUpdate33` grew a second arm. The consumer for
+`pushedBy`/`pushDepth`/`pushNormal` is the whole of what was missing from
+`game/`: `coli.ts` has written those three at `obj+0x138`/`+0x13C`/`+0x140`
+since the crowd separation landed, with `ZombiePushOutOfWorldAndActors` as
+their only reader.
+
+`SpawnSlotActors` also had to learn to carry the descriptor's **flags word**
+through. Both chairs set `0x8000` there, which is the very bit their arming
+flag clears, so a spawn arm that dropped it would have produced a chair that
+was pushable from frame one — a fault that would have looked like the push
+working.
+
+### Counts, before and after
+
+`verify_port.py` divergences: **168 before, 168 after** — the transcription
+needed none. `[open]` markers in `game/`: **143 before, 144 after**; the one
+added is what clip 1048 was authored to depict, which is still not known and is
+marked rather than guessed. Ported functions: 308 → 311.
+
+### Measured
+
+`?stage=1&mode=play&block=1&step=3&op=16`, run 700 ms, camera path 36 frame
+159 of 165 — the same two frames the before-shots were taken at:
+
+```
+0x1A40 scenery 4 · pushable · slot 0x1064 · armed
+  descriptor (22.83, 6.5, -16.74)  ->  at (21.66, 6.72, -16.94)
+0x1A74 scenery 4 · pushable · slot 0x1064 · armed
+  descriptor (16.83, 6.5, -20.74)  ->  at (16.31, 6.55, -21.14)
+```
+
+`web/shots/entrance_hold_after.png` is camera frame 149/149, the last frame
+before the cue, with chairs under both `c51 hp4` markers where the before-shot
+had bare floor; `entrance_swing_after.png` is 159/165, with the near chair
+shoved out of line as the zombie comes through it.
+
+### The assertions, and every one of them watched failing
+
+`port.test.ts` gained a selector-4 section of 22 checks, and
+`verify_port.py` a `check_class33_selectors` that reads the bundle. **Fourteen
+mutants, fourteen caught**, run one per process with `__pycache__` cleared
+after each restore (`L31`):
+
+* exporter — `slot_drawn_spawn` narrowed back to selector 1; `sceneryDrawSlots`
+  returning nothing; `class33_push` emitted for selector 1 as well;
+* port — the seed writing only the shot radius; the arming flag copied instead
+  of clearing the bit; the freeze bit ignored; the airborne test reading the
+  chair's flags instead of the pusher's; the recorded push not consumed; `y`
+  dropped from it; the sphere raised by the radius plus one; the despawn flag
+  tested after the seed; the draw slot never published; selector 4 not
+  dispatched; the spawn gate still refusing a `class33_push`-only placement.
+
+Two of those were **missed on the first pass**, and both were the wiring: the
+dispatch arm in `index.ts` and the spawn gate in `director.ts`. Everything in
+the test block called `ScriptedPushableUpdate33` directly, which is `L38`
+exactly — a dispatch arm that is missing looks the same as one that is wrong,
+and a test that drives past it sees neither. The fix was a check that goes in
+through the front: the placement the exporter emits, `SpawnSlotActors`, then
+`GameUpdate`, and nothing else. It catches both.
+
+A third mutant had to be **rewritten rather than believed**: doubling the
+*carrier* block onto selector 4 crashes the export outright, because selector
+1's `tail+0x0C` sends the rig writer down an `op_` path that does not exist —
+a real signal and a useless mutant, since it never reaches the check. Doubling
+the *push* block onto selector 1 is the same collision from the survivable end,
+and the check catches it.
+
+### Next actions
+
+1. The remaining eight class-0x33 sub-handlers are still unread. Selector 3 has
+   five shipped spawns and selector 2's ten already reach the player through
+   `props`; the rest are one spawn or none.
+2. `./ghidra/run.sh export-annotations` still wants running **from `main`** for
+   the three renames in the entry above; the analyzer refuses a `.claude`
+   worktree path.
+3. `char_adv00` clip 1048's authored intent stays `[open]`. The lead, if it
+   ever matters, is the six other spawns that use 1047/1048 — two trios three
+   abreast at `(-7/-1/6, 3.2, -370)` in stage 1's two route branches, and stage
+   2's pair at `0x2194`/`0x21C4`.
 ## 2026-09-11 — the midriff is a flipbook, and the boat's flip was the yaw
 
 Two half-fixed render reports, taken together because both turned out to be

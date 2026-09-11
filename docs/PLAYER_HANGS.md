@@ -1331,9 +1331,12 @@ is what a death clip for an actor that has hold of something should look like.
 Fifteen bones, fifteen meshes, no exploded parts and no denormals: the clip
 belongs on this rig.
 
-**5/5 before, 5/5 after.** All five runs now reach block 11 `(end → 0)` at
-exactly 6,300 game frames over 66 instructions — the same number every time,
-so this route is deterministic under the driven clock.
+**5/5 before, 5/5 after.** All five runs now reach block 11 `(end → 0)` over
+66 instructions, at the same frame count every time, so this route is
+deterministic under the driven clock. It was **6,300** game frames on the
+branch and **6,390** after merging `main`, which moved the hit voice and three
+prop poses: the count is a property of the tree and not of the route, exactly
+as it was for entry 0 at `0953161`. Re-measure it rather than quoting it.
 
 **Is the leak game-wide? No, and here is the measurement.** The clip is needed
 only by an actor that enters state 12, and state 12 is reached only from

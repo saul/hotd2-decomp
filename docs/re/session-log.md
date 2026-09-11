@@ -16849,8 +16849,10 @@ anyone has to rediscover it.
 
 `PLAYER_HANGS.md` 22, taken off the list. `cd web && node tools/playthrough.mjs
 --stage 3 --entry 7 --headless` hung 5/5 at block 2 step 6 op 8 before and
-reaches block 11 `(end → 0)` 5/5 after, at exactly 6,300 game frames over 66
-instructions every time.
+reaches block 11 `(end → 0)` 5/5 after, over 66 instructions and at the same
+frame count every time — 6,300 on the branch, 6,390 once `main`'s hit voice
+and prop poses were merged in. Same lesson as `0953161`: the frame count
+belongs to the tree, so re-measure it rather than quoting it.
 
 ### The question that was asked, and the answer
 

@@ -11740,6 +11740,64 @@ console.log("\nthe idle groan, the weapon loop, and kind 4:");
           heard.length === after, `${heard.length - after} more`);
   }
 
+
+  // -- C1b. ...and it is silent when the actor arrives already idling --------
+  //
+  // The same `CMP` read the other way, and it is why the groan is rarer in
+  // play than "every time a zombie stands still": `ZombieStateApproach` plays
+  // `row[(obj+0x136C >> 0x15) & 1]`, and for the `row[0]` half of that pair
+  // the walk in **is** the clip the hub wants, so the hub changes nothing and
+  // says nothing. A zombie that arrives from the retreat (`row[4]`) or from an
+  // attack run (`row[2]`/`row[3]`) or off the back of a swing does groan --
+  // measured on stage 1 block 4, where the walkers reach the ring silently.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a02, 1, "arriving already on row[0]");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+    z.pos = vec3(0, 0, 40);
+    z.target = vec3(0, 0, 0);
+    z.motion = TYPE.motion_row["0"][MotionRow.Walk];
+    ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    check("an actor that walks in already playing `row[0]` does not groan -- "
+          + "the approach's own clip is the idle, so the hub changes nothing",
+          heard.length === 0,
+          heard.map((i) => `0x${i.toString(16)}`).join(","));
+  }
+
+  // -- C1c. ...and it does when the actor comes back from the retreat -------
+  //
+  // `ZombieStateBackOff` plays `row[4]`, so an actor returning to the hub
+  // after a swing is on a clip the hub does not want and gets both the idle
+  // and the groan. This is the path that makes the noise in play.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a03, 1, "back from the retreat");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+    z.pos = vec3(0, 0, 40);
+    z.target = vec3(0, 0, 0);
+    z.motion = TYPE.motion_row["0"][MotionRow.BackAway];
+    // The strike anchor, because that is what a returning actor carries -- and
+    // without it the hub would send it back into the retreat before the idle.
+    z.flags2 |= ZombieFlag2.StrikeAnchor;
+    ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    check("...and one coming back on `row[4]` groans again, which is the path "
+          + "that actually sounds in play",
+          heard.length === 1 && heard[0] === GROAN,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+  }
+
   // -- C2. ...and it is not `ActorPlayHitVoice` -----------------------------
   //
   // The distinction is the whole reason the idle was never found: the voice

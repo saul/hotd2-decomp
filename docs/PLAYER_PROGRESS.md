@@ -1523,6 +1523,16 @@ every swing and retreat. Not periodic, not random, not on a timer. A byte
 search for the id over the whole image finds that one `PUSH` and the SE name
 record, and nothing else.
 
+It is **rarer in play than "whenever a zombie stands still"**, and the same
+`CMP` is why: `ZombieStateApproach` plays `row[(obj+0x136C >> 0x15) & 1]`, so
+for the `row[0]` half of that pair the walk in *is* the clip the hub wants and
+the hub changes nothing. Measured in the page on stage 1 block 4, where the
+walkers reach the ring silently and only the attack cries sound. What does
+groan is an actor that comes back on a clip the hub does not want — `row[4]`
+after the retreat, `row[2]`/`row[3]` after an attack run, or the strike clip
+itself — which is every zombie that has swung at you once. Both arrivals are
+asserted in `web/test/port.test.ts`.
+
 **The chainsaw and the laser sword are a refcounted loop, not a voice.** For
 character types 2 and 3, `EnemyZombieInitByCharType` (`FUN_00452FD0`) plays
 `CHAIN_SAW_22` or `LASER_SWORD_22` — but only while `g_weapon_loop_holders`

@@ -32,6 +32,7 @@
     "audio": "node tools/audio.mjs",
     "entrances": "node tools/run_test.mjs tools/entrances.mjs",
     "animals": "node tools/run_test.mjs tools/animals.mjs",
+    "dives": "node tools/run_test.mjs tools/dives.mjs",
     "loops": "node tools/loops.mjs",
     "cam-cues": "node tools/run_test.mjs tools/cam_cues.mjs",
     "leaps": "node tools/run_test.mjs tools/leaps.mjs",

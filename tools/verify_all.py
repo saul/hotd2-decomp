@@ -137,6 +137,13 @@ CHECKS: list[Check] = [
           "enemy the character layer can build, and two have no character "
           "type at all",
           NEEDS_BUNDLE),
+    Check("dives", "web", ["npm", "run", "--silent", "dives"],
+          "that a class-0x43 dive reaches the camera it is aimed at, strikes "
+          "and comes round again -- the only check that drives a class "
+          "against the stage's own `cam_play` rather than an eye the harness "
+          "made up, which is what every other owl check does and why none of "
+          "them could see a run-in parked five units under the eye",
+          NEEDS_BUNDLE),
     Check("props43", "web", ["npm", "run", "--silent", "props43"],
           "where in a real script a class-0x41 prop is actually placed, and "
           "that it takes a frame of `GameUpdate` to appear -- the only check "

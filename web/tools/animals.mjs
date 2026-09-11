@@ -43,6 +43,11 @@ const CASES = [
   ["frog", 1, 3, 1, 0x11, ["HopToHeading", "IdleAndCroak"]],
   ["owl st2", 2, 5, 1, 0x43, ["FlyToCircle", "Circle", "Approach", "Dive",
                               "OrbitAway"]],
+  // The sub-type-0 pair, which is placed already diving and so never touches
+  // the spline. Its whole behaviour is the strike and the retreat, and an owl
+  // that misses its strike leaves the state machine for good -- nothing
+  // clamps the dive's parameter, so it flies on in a straight line.
+  ["owl st2 b5s4", 2, 5, 4, 0x43, ["Dive", "OrbitAway"]],
   // Stage 3 has two entries and block 7 is reachable only from the
   // second, so the seek is told which -- see `seekTo`.
   ["owl st3", 3, 7, 6, 0x43, ["Approach"], 7],

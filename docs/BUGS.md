@@ -2511,6 +2511,46 @@ investigation ruled out.
   `class30/scripted.ts` now goes through it rather than carrying its own
   undeclared copy.
 
+## And two more about the owls, both about the same approach
+
+- `[fixed]` **The owls tumbled forwards as they came in.** Every angle class
+  0x43 eases runs through one shape — `v -= (int)((target - v) * k)`, with `k`
+  the engine's own literal, and the literal is **negative**:
+  `[0x005646E0]` is `-0.05`, `[0x00564700]` is `-0.2`. The port's helper
+  negated `k` a second time, so all seven call sites computed
+  `v -= (target - v) * 0.025` and every eased angle ran *away* from its target.
+  `obj+0x64` is the pitch and nothing wraps it, so an owl on its run-in
+  tumbled forwards for as long as the state lasted.
+
+- `[fixed]` **The owls flew straight through the camera instead of striking.**
+  Reported from `?stage=2&mode=play&block=5&step=4&op=14&frame=707`, which is
+  the sub-type-0 pair — the ones `PlaceOwlFlockMember` places already diving.
+
+  `OwlStateDiveAtCamera` (`FUN_00446F30`) opens on
+  `obj+0x240 = (obj+0x240 + 1) % 30` at `0x00446F42`, before it branches on
+  which kind of dive this is. The port had the beat advancing in the approach,
+  the circle and the retreat, and not here. Held still, the sway dive's height
+  term `sin((beat + 8) % 30) * 0.2` stops being a bob and becomes a constant
+  added every frame, so the run-in settles at `eye.y + c / k` — **five units
+  off the eye at the extreme, which is exactly `OWL_STRIKE_RANGE`**. The strike
+  is a distance and nothing else, so the owl passed the camera just outside its
+  own reach; and because nothing clamps `obj+0x270` in that branch it then flew
+  on in a straight line for the rest of the stage. Driven on the real script
+  with the real camera, the owl reached `d = 6.45` and never came back.
+
+  The frozen beat is also what the wings were drawn from: `render/owl.ts` takes
+  the beat slot as `0xBC1 + obj+0x240`, so a diving owl held one frame of its
+  flap for the whole attack run.
+
+  **Nothing in the tree could see this, and that is the more useful half of the
+  report.** Every owl check invents an eye — `tools/animals.mjs` seats one
+  thirty units behind the first owl it finds, the unit tests put it at the
+  origin — and each invented eye happened to sit somewhere the owl still
+  connected. `tools/dives.mjs` plays the stage's own `cam_play` frame by frame
+  the way `app/systems.ts` does and watches all four sub-types make their pass;
+  with the beat frozen it reports the reporter's own case, one dive and no
+  strike.
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

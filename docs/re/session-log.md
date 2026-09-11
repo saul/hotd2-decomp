@@ -17506,3 +17506,54 @@ and the port builds from the same list on the same frame. The one known gap is
 that the engine accepts either camera block's frame where the port has one, and
 that divergence was declared in `CamCueHit` and written out a second time,
 undeclared, in `class30/scripted.ts`. There is one copy now.
+
+## The owls tumbled in, then flew through the camera — and no check had a camera
+
+Two reports, one approach. Both are in `OwlStateDiveAtCamera` and its run-in.
+
+**The tumble was a sign applied twice.** Class 0x43 eases every angle it owns
+through one shape, `v -= (int)((target - v) * k)`, and `k` is always the
+engine's own literal, which is negative: `[0x005646E0]` is `-0.05`,
+`[0x00564700]` is `-0.2`, `[0x004C4CB0]` is `+0.025` where it is used as a
+gain rather than an ease. The port's helper negated `k` again, and all seven
+call sites therefore ran their angle away from its target instead of toward
+it. `obj+0x64` is the pitch and nothing wraps it, so the owl rotated forwards
+without bound for the length of its approach.
+
+**The fly-through was one missing instruction, and it cost five units.**
+`FUN_00446F30`'s first act, at `0x00446F42`, is
+`obj+0x240 = (obj+0x240 + 1) % 30` — the wing beat, stepped before either kind
+of dive branches. The port stepped it in the approach, the circle and the
+retreat and not in the dive. Frozen, `sin((beat + 8) % 30) * 0.2` in the sway
+branch stops being a bob and becomes a constant added to the height every
+frame, and the run-in settles where the height ease balances it:
+`eye.y + 0.2/0.04`, five units, which is exactly the strike radius at
+`[0x0055D2B4]`. The strike is a distance to `g_camera_block_eye` and nothing
+else — `obj+0x24C` is never written in this state, so there is no timeout — so
+the owl passed the camera just outside its own reach. And nothing clamps
+`obj+0x270` in the sway branch the way the homing branch clamps it at
+`0x00447059`, so once past, the lerp extrapolates: the owl carried on in a
+straight line for the rest of the stage. Measured on the real script it
+reached `d = 6.45` and left the level.
+
+The same counter is the wing model slot — `render/owl.ts` reads
+`0xBC1 + obj+0x240` — so the flap that had just been given to the owls was
+frozen for the whole attack run as well.
+
+**The part worth keeping is why nothing caught it.** Every owl check in the
+tree invents an eye. `tools/animals.mjs` seats one thirty units behind the
+first owl it finds and leaves it there; `port.test.ts` puts it at the origin.
+Each of those geometries happens to be somewhere a five-unit error still
+connects, so all of them passed with the bug in place — including a case added
+today on the reporter's own spawn, which is the sharpest way to learn that the
+spawn was never the variable. `tools/dives.mjs` plays the stage's own
+`cam_play` frame by frame, the way `app/systems.ts` does, and drives all four
+sub-types; with the beat frozen it reproduces the report exactly, one dive and
+no strike, and it is how both fixes were measured.
+
+The unit assertions had to be built the same way round. A fixture at the origin
+could not be made to fail — the owl climbs through the eye's height on its way
+past, so it strikes regardless. Reproducing it needed the arrival the report
+shows: the owl below and to one side, and the beat seated in the half of its
+cycle whose height term is negative, so a frozen owl stalls *under* the camera
+rather than swinging through it.

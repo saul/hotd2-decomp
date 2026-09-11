@@ -246,9 +246,20 @@ function BamsOf(x: number, z: number): number {
   return Math.trunc(Math.atan2(x, z) * TO_BAMS);
 }
 
-/** `x -= (int)((target - x) * -k)` — the ease every angle in the class uses. */
+/**
+ * `v -= (int)((target - v) * k)` — the ease every angle in this class uses,
+ * with **`k` the engine's own literal**, which is negative.
+ *
+ * The sign is the whole of it. `OwlStateRideApproachSpline` is
+ * `obj+0x64 -= (int)((0x3000 - obj+0x64) * -0.025)`, which is
+ * `v += (target - v) * 0.025` and converges; this used to negate `k` a second
+ * time, so every call site — every angle the class eases — computed
+ * `v -= (target - v) * 0.025` and **ran away from its target** instead of
+ * toward it. `obj+0x64` is the pitch and nothing wraps it, so an
+ * owl on its approach tumbled forwards for ever.
+ */
 function Ease(v: number, target: number, k: number): number {
-  return v - Math.trunc((target - v) * -k);
+  return v - Math.trunc((target - v) * k);
 }
 
 /**
@@ -703,6 +714,15 @@ export function OwlStateRideApproachSpline(obj: Actor, f: ClassFrame): void {
 export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
+  // **The wing beat advances here too**, at `0x00446F42`, before either
+  // branch — it is the routine's first instruction and it is not optional.
+  // Frozen, `sin((beat + 8) % 30)` below stops being a bob and becomes a
+  // constant added to the height every frame, so the sway dive settles at
+  // `eye.y + c / k` — five units under the eye at the extreme, which is
+  // exactly {@link OWL_STRIKE_RANGE}. The owl then flies through the camera
+  // half a body out of reach, never strikes, and since nothing clamps
+  // `obj+0x270` in this branch it keeps going in a straight line for ever.
+  sub.beat = (sub.beat + 1) % OWL_BEAT_FRAMES;
   if (sub.dive === OwlDiveKind.Home) {
     sub.tx = sub.fromX + ((f.eye.x + sub.aimX) - sub.fromX) * sub.t;
     sub.ty = sub.fromY + (f.eye.y - sub.fromY) * sub.t;

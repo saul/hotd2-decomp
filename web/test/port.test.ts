@@ -50,8 +50,8 @@ import { FishUpdate } from "../src/game/class51";
 import { FishFlag, FishState, type FishTail } from "../src/game/class51/state";
 import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
-import { OwlStateDiveAtCamera, OwlUpdateAndResolveShot }
-  from "../src/game/class43";
+import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
+  OwlUpdateAndResolveShot } from "../src/game/class43";
 import { OwlDiveKind, OwlState, type OwlTail }
   from "../src/game/class43/state";
 import { ActorShotFeedback } from "../src/game/combat/feedback";
@@ -14191,6 +14191,81 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...then peels off and releases the token",
           t().state === OwlState.OrbitAway && G.g_class43_attack_token === -1,
           `${OwlState[t().state]} ${G.g_class43_attack_token}`);
+  }
+
+  {
+    // **The wing beat is the dive's clock as well as its animation.**
+    // `OwlStateDiveAtCamera` opens on `obj+0x240 = (obj+0x240 + 1) % 30`
+    // (`0x00446F42`), before either branch. Held still, the height term
+    // `sin((beat + 8) % 30) * 0.2` stops being a bob and becomes a constant
+    // bias, and the run-in settles `0.2 / k` off the eye -- five units at the
+    // extreme, which is exactly `OWL_STRIKE_RANGE`. The sway dive then passes
+    // through the camera just outside its own strike, and because nothing
+    // clamps `obj+0x270` in that branch it carries on in a straight line for
+    // the rest of the stage. Reported as owls flying straight through the
+    // camera on stage 2's block 5.
+    const rng = new Rng(47);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    // Stage 2's own arrival, measured off the block that reported it: the owl
+    // starts 88 units out, 15 below the eye and 7 to one side.
+    const o = ActorSpawn(0x9900, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(-88, -15, -7), class43: { subtype: 0, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    // The Init's own launch, with its two rng draws pinned so the run-in is
+    // the same one every time. The beat is seated where its height term is
+    // negative, which is the half of the cycle that puts a frozen owl *under*
+    // the eye rather than through it.
+    t().rate = 0.0138;
+    t().swayRate = Math.trunc(t().rate * 72817.78);
+    t().swayPhase = 0;
+    t().beat = 15;
+    o.attackPermit = 0;
+    const lives = G.g_player_lives[0];
+    const beats = new Set<number>();
+    let struck = -1;
+    for (let i = 0; i < 200 && struck < 0; i += 1) {
+      OwlStateDiveAtCamera(o, frame(rng));
+      beats.add(t().beat);
+      if (t().state === OwlState.OrbitAway) struck = i;
+    }
+    check("the wing beat runs through a dive, all thirty frames of it",
+          beats.size === 30, `${beats.size}`);
+    check("...so the run-in arrives at the eye's height, not five under it",
+          Math.abs(o.pos.y - EYE.y) < 3, `${o.pos.y.toFixed(2)}`);
+    check("a sway dive strikes the camera instead of flying through it",
+          struck >= 0 && G.g_player_lives[0] === lives - 1,
+          `struck at ${struck}, lives ${lives} -> ${G.g_player_lives[0]}`);
+  }
+
+  {
+    // **Every angle in the class eases toward a target, and the sign of the
+    // engine's literal is the whole of it.** The run-in's pitch is
+    // `obj+0x64 -= (int)((0x3000 - obj+0x64) * -0.025)` (`0x004464..`, and the
+    // same shape at six other call sites), which converges. Negating the
+    // literal a second time makes it run away instead, and nothing wraps
+    // `obj+0x64`, so the owl tumbled forwards for the length of its approach.
+    const rng = new Rng(43);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    const o = ActorSpawn(0x9a00, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(-644, 128, -943), class43: { subtype: 1, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    t().state = OwlState.Approach;
+    o.pitch = 0;
+    let held = 0;
+    let rising = true;
+    for (let i = 0; i < 200 && t().state === OwlState.Approach; i += 1) {
+      OwlStateRideApproachSpline(o, frame(rng));
+      if (t().state !== OwlState.Approach) break;
+      if (o.pitch < held) rising = false;
+      held = o.pitch;
+    }
+    check("the run-in's pitch closes on 0x3000 rather than running away",
+          rising && held > 0 && held <= 0x3000, `${held}`);
   }
 }
 

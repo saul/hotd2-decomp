@@ -17062,7 +17062,10 @@ the run got as far as block 9 with the flag already up.
 exporter and so required a re-export, `L24`/`L33` — the builder hash was
 already current) the entry-4 route reaches block 25 in **6090** frames rather
 than 6015, 5/5, and the six entry-0 routes all still reach an end block.
-Stage 3's entry-7 route is the only hanging route left in the corpus. Full
+Stage 3's entry-7 route was the only hanging route left at that point;
+merging `main` a second time brought the death-clip bake that closes item 22,
+and after re-exporting it reaches block 13 in 6390 frames, so **every route in
+the `entries` tables now plays through**. Full
 suite on the merged tree: **36 passed, 0 failed, 0 skipped**, and `HEAD`
 typechecks from a bare `git archive` with nothing of this worktree in it but
 `node_modules`.

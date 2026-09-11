@@ -113,14 +113,15 @@ node tools/playthrough.mjs --stage 3 --entry 7 --headless
 | route | reaches | note |
 |---|---|---|
 | stage 3 entry 0 | block 13 `(end → 4)`, 6480 frames | 0 → 3 → 4 → 5 → 6 → 13 |
-| stage 3 entry 7 | **hangs** at block 2 `6 / 8` | 7 → 8 → 2. Items 21 and 22 |
+| stage 3 entry 7 | block 13 `(end → 4)`, 6390 frames, 66 instr | 7 → 8 → 2 → 11 → ... Items 21 and 22, **both fixed** |
 | stage 4 entry 4 | block 25 `(end → 0)`, 6090 frames, 72 instr | 4 → 9 → 11 → 10 → 12 → 13 → 6 → 25. Item 23, **fixed** |
 
-**One of the two second entries still hangs**, and it is stage 3's — item 22,
-the death clip no bundle bakes. Stage 4's was item 23: state 43's tail, which
-the port did not have. Every stage has exactly one entry except these two, so
-there are no more routes hiding — but the four entry-0 rows above have never
-been re-run per *branch*, and a branch is not an entry.
+**Both second entries reach an end block now.** Stage 3's was items 21 and
+22 — the flag-21 switch, then the death clip no bundle baked. Stage 4's was
+item 23: state 43's tail, which the port did not have. So every route the
+`entries` tables name plays through, and every stage has exactly one entry
+except these two, so there are no more routes hiding — but the four entry-0
+rows above have never been re-run per *branch*, and a branch is not an entry.
 
 Before this branch, on the same tree and the same seeds: stages **2, 3 and 6
 hung** — block 14 `9 / 20`, block 6 `1 / 13` and block 0 `4 / 8` — and 1 and 5

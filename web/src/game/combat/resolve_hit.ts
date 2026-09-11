@@ -17,6 +17,8 @@ import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
 import { AppState, G } from "../globals";
 import { SpawnClass } from "../spawn_class";
+import { ZombieState } from "../class30/states";
+import { ScoreAddForPlayer } from "./score";
 import { ActorIsEnemy, g_class_handlers } from "../registry";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, T } from "../tables";
@@ -280,17 +282,143 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
  * Results 1 (damaged and swapped) and 3 (severed) always react; results 2 and
  * 5 react only for character types 3 and 0x12. So a shot that merely takes hit
  * points off a zombie's pelvis does not interrupt its walk.
+ *
+ * **And one hit in the whole game does something else entirely.** The
+ * result-1 arm asks whether this is a `znjoe` shot in the chest, and that arm
+ * is {@link ActorReleaseBodyCreatureOnHit} — which is **not** called from
+ * here, and cannot be. See the ordering note on that function.
  */
 export function ActorReactToHit(obj: Actor, bone: number,
                                 result: HitResultCode): number | undefined {
   if (bone <= 0) return undefined;
   const ct = CharacterTypeOf(obj)?.type ?? -1;
+  // The `znjoe` arm `return`s before the stagger, so a hit that will take it
+  // plays no reaction at all. The arm itself runs later in the same frame —
+  // see {@link ActorWouldReleaseBodyCreature}.
+  if (ActorWouldReleaseBodyCreature(obj, bone, ct, result)) return undefined;
   const reacts = result === HitResultCode.Damaged
     || result === HitResultCode.Severed
     || ((result === HitResultCode.Plain || result === HitResultCode.NoEffect)
         && (ct === 3 || ct === 0x12));
   return reacts ? ActorPlayHitReaction(obj, bone, result) : undefined;
 }
+
+/**
+ * `[port-only]` as a function — it is `ActorReactToHit`'s first arm, inline in
+ * the engine — and **the one place in the image that tests a character type
+ * against `0x0A`.**
+ *
+ * ## It is called from `ZombieOnShot`, and that is not a detail
+ *
+ * `L11`, and it cost this feature a whole session. `ActorReactToHit`'s one
+ * caller in the engine is `ZombieOnShot` (`FUN_00453EB0`), at
+ * `0x0045401A PUSH EDI / CALL 0x004543F0` — and that call site is **after**
+ * `ZombieOnShot`'s own death test:
+ *
+ * ```
+ * 00453F3B  a900000080    TEST EAX, 0x80000000      ; obj+0x136C, dispatched
+ * 00453F40  0f85ef000000  JNZ  00454035             ; ...already: nothing
+ * 00453F46  f7463400000004 TEST dword [ESI+0x34], 0x4000000   ; Dead
+ * 00453F4D  0f84c7000000  JZ   0045401A             ; alive -> the reaction
+ * ```
+ *
+ * So the arm raises {@link ActorFlag.Dead} at a moment when the test that
+ * reads it has already been taken for this frame, and by the next frame
+ * state 25's own sub 0 has latched `obj+0x136C` bit `0x80000000` and
+ * `ZombieOnShot` returns before the test. The bit is never acted on.
+ *
+ * The port had moved the reaction up into `ResolveHit`, which runs in
+ * `ProcessShotRequests` at the **head** of the frame — so `Dead` went up,
+ * state 25 went in, and `ZombieOnShot` then ran in the same frame, saw `Dead`
+ * with the latch still clear, and overwrote state 25 with
+ * {@link ZombieState.Death}. Every znjoe died with its chest shut. Measured:
+ * a first torso hit at stage 5 block 0 took the actor from 100 hit points to
+ * 35 -- alive, result 1, bone 1 -- and left it in state 6.
+ *
+ * So this lives here, next to the routine it is an arm of, and is **called
+ * from `class30/on_shot.ts`** at the engine's own call site.
+ *
+ * `ZombieOnShot` reaches it only for an actor that is neither shot-immune nor
+ * dead, which is why those two conditions are not repeated below.
+ *
+ * ```
+ * 00454425  CMP word ptr [EAX + 0x1F4], 0xA   ; znjoe
+ * 0045442f  CMP dword ptr [g_shot_bone + p*4], 0x1
+ * 00454439  TEST dword ptr [EAX + 0x34], 0x400
+ * ...       OR   dword ptr [EAX + 0x34], 0x4000400
+ *           ScoreAddForPlayer(p, 0x50)
+ *           obj+0x131C = p
+ *           obj+0x1310 = 0x19;  obj+0x1312 = 0;  return
+ * ```
+ *
+ * Four conditions and all four matter: hit **result 1**, the bone the shot
+ * hit is **1** (the torso — `g_shot_bone` is a bone index and not a zone, and
+ * this is the same bone the release then reskins), and
+ * {@link ActorFlag.NoDismember} still **clear**, which is what makes it
+ * once-only: the same `OR` raises that bit, so a second torso hit falls
+ * through to an ordinary reaction. The `0x4000000` half of it is
+ * {@link ActorFlag.Dead}, which `ResolveHit` otherwise raises only when the
+ * hit points reach zero — so the shot that opens a `znjoe` is the shot that
+ * kills it, whatever its hit points say, and the state's own sub 0 then
+ * zeroes those too.
+ *
+ * `[proved]` and a whole-corpus fact: exactly **seven** spawns in the twelve
+ * shipped scripts resolve to character type `0x0A`, all class 0x30 and all in
+ * stage 5 — evt `0x0A68`, `0x0AF8`, `0x0B24`, `0x2E20`, `0x2E50`, `0x2F58`
+ * and `0x2F8C` — and none of the seven carries `0x400` in its `init_flags`,
+ * so every one of them can do this once.
+ *
+ * Returns true when the actor was sent to
+ * {@link ZombieState.ReleaseBodyCreature}, because the engine **returns**
+ * there: no stumble, and nothing below it runs.
+ */
+export function ActorReleaseBodyCreatureOnHit(obj: Actor, bone: number,
+                                              charType: number,
+                                              result: HitResultCode,
+                                              player: number): boolean {
+  if (!ActorWouldReleaseBodyCreature(obj, bone, charType, result)) return false;
+  obj.flags |= ActorFlag.Dead | ActorFlag.NoDismember;
+  ScoreAddForPlayer(player, RELEASE_CREATURE_SCORE);
+  // `obj+0x131C = (char)player` — {@link Actor.killedBy}, whose own note
+  // says the port's shot path carried no player and so never wrote it. This
+  // arm has one, and the engine writes it here for the same reason it does on
+  // a kill: the actor is dead from this instruction.
+  obj.killedBy = player;
+  obj.state = ZombieState.ReleaseBodyCreature;
+  obj.sub = 0;
+  return true;
+}
+
+/**
+ * The arm's four conditions, on their own.
+ *
+ * `[port-only]` as a *split*: the engine has one `if` whose body both decides
+ * and acts. The port has to ask the question in two places, because the two
+ * halves of `ActorReactToHit` ended up on different sides of a frame — the
+ * stagger in `ResolveHit`, at the head of the frame, and the arm in
+ * `ZombieOnShot`, where the engine calls it. The stagger must be withheld on
+ * the frame the arm will fire, because the engine's arm `return`s before
+ * reaching it, and this is what lets both be true without the arm running
+ * early.
+ */
+export function ActorWouldReleaseBodyCreature(obj: Actor, bone: number,
+                                              charType: number,
+                                              result: HitResultCode): boolean {
+  // `if (g_hit_result[p] == 1)` is the outermost of the four: result 2 or 3
+  // on the same bone of the same actor does nothing.
+  if (result !== HitResultCode.Damaged) return false;
+  if (charType !== RELEASE_CREATURE_CHAR_TYPE) return false;
+  if (bone !== RELEASE_CREATURE_BONE) return false;
+  if (obj.flags & ActorFlag.NoDismember) return false;
+  return obj.cls === SpawnClass.Zombie;
+}
+
+/** `CMP word ptr [EAX + 0x1F4], 0xA` — `znjoe`, and nothing else. */
+const RELEASE_CREATURE_CHAR_TYPE = 0x0a;
+/** `CMP dword ptr [...], 0x1` on `g_shot_bone` — the torso. */
+const RELEASE_CREATURE_BONE = 1;
+/** `ScoreAddForPlayer(player, 0x50)` — paid for opening it, not for the kill. */
+const RELEASE_CREATURE_SCORE = 0x50;
 
 /**
  * `ChooseDeathMotionDirectional` — `FUN_00456220`: `camera_yaw - actor_yaw`
@@ -423,13 +551,23 @@ const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
  * call, which is the part that decides anything.
  */
 export function DispatchHit(obj: Actor, bone: number, cameraYawBams: number,
-                            host: GameHost, rng: Rng): HitResult | null {
+                            host: GameHost, rng: Rng,
+                            player = 0): HitResult | null {
   if (obj.flags & ActorFlag.ShotImmune) return null;
-  return ResolveHit(obj, bone, cameraYawBams, host, rng);
+  return ResolveHit(obj, bone, cameraYawBams, host, rng, player);
 }
 
+/**
+ * `player` is the engine's **only** argument: `FUN_00409430` takes the player
+ * index and reads the bone out of `g_shot_bone[player]`, which `DispatchHit`
+ * (`FUN_004092F0`) has just filled from `obj+0x190 + player`. The port
+ * resolves one queued request at a time and so passes the bone directly — but
+ * the player is still needed, because `ActorReactToHit`'s `znjoe` arm pays a
+ * score to whoever fired.
+ */
 export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
-                           host: GameHost, rng: Rng): HitResult {
+                           host: GameHost, rng: Rng,
+                           player = 0): HitResult {
   // `00409495`: out of play, this hit does nothing visible. Raised on the
   // actor, not scoped to the shot -- the engine ORs into `obj+0x34` and never
   // clears it, so an actor shot once in the attract demo stays inert.
@@ -571,7 +709,7 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   // would change when a civilian's on-shot script runs. Two named classes,
   // because two engine routines read the field.
   if (obj.cls === SpawnClass.Thrower || obj.cls === SpawnClass.Zombie) {
-    obj.pendingHit = { bone, result };
+    obj.pendingHit = { bone, result, player };
   }
   const react = survived && !ownReaction
     ? ActorReactToHit(obj, bone, result) : undefined;

@@ -1354,7 +1354,20 @@ export interface ActorBase {
    * at shot time and the class picks its reaction on its next tick — the same
    * frame boundary the engine has.
    */
-  pendingHit: { bone: number; result: number } | null;   // +0x190, +0x34 bit 3
+  /**
+   * ...and **which player fired**, because the engine's record is per player:
+   * `DispatchHit` (`FUN_004092F0`) reads the bone from `obj+0x190 + player`,
+   * and `ZombieOnShot` (`FUN_00453EB0`) walks `g_hit_player_order` around the
+   * whole of its body. Optional, because only the shot path knows it: the
+   * routines that fabricate a hit -- `ActorKillAll`, the debug clear -- have
+   * no shooter to name.
+   *
+   * `ZombieOnShot`'s live arm is the one reader. `ActorReactToHit`
+   * (`FUN_004543F0`) is called there, at `0x0045401A`, with the player as its
+   * only argument.
+   */
+  pendingHit:
+    { bone: number; result: number; player?: number } | null;  // +0x190
   /**
    * `obj+0x131C` — which player's shot killed this actor.
    *

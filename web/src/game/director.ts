@@ -25,6 +25,7 @@ import { RankEnemiesByDistance } from "./combat/rank";
 import { ProcessShotRequests } from "./combat/shot";
 import { ShotEffectsTick } from "./effects/tick";
 import { SeveredHeadsTick } from "./effects/severed_head";
+import { BodyCreaturePoolUpdate } from "./body_creature";
 import { DescriptorFromPlacement } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
 import { ActorByAt, G } from "./globals";
@@ -554,6 +555,10 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   }
 
   ThrownWeaponUpdate(frames, events);
+  // ...and so are the creatures `znjoe` releases: `SpawnBodyCreature`
+  // (`FUN_0043E720`) allocates a task with no class id, so it is stepped here
+  // beside the other non-actor pools rather than inside the actor walk.
+  BodyCreaturePoolUpdate(rng, host, events);
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
   BreakablePropPoolUpdate(rng, events);

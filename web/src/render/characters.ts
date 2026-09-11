@@ -64,6 +64,7 @@ import type { Context, System } from "../core/system";
 import type { ShotPick, ShotRay } from "../game/host";
 import type { BreakableLayer } from "./breakables";
 import type { SlotModelLayer } from "./slotmodels";
+import type { CreatureSphereSource } from "./effects";
 import { BAMS_TO_RAD } from "../core/bams";
 
 /**
@@ -667,8 +668,23 @@ export class CharacterLayer implements System {
     // test for class 0x52. See `render/slotmodels.ts`.
     const slot = this.slotModels?.pickSphere(this._ray) ?? null;
     if (slot && slot.t < bestT) {
+      bestT = slot.t;
       best = { kind: "actor", at: slot.at, bone: 0,
                point: { x: slot.point.x, y: slot.point.y, z: slot.point.z } };
+    }
+    // ...and the creatures `znjoe` releases, which are the third pool in this
+    // one candidate list. The engine walks **one** list for all of them —
+    // `RegisterForShotTest` (`FUN_00405160`) appends every registered object
+    // to the same array — so the sort has to see them together: a creature in
+    // front of the zombie that released it takes the bullet.
+    //
+    // Their sphere is tested in `render/effects.ts`, because the position is
+    // in camera space and that layer owns the matrix.
+    const creature = this.effects?.pickCreature(this._ray) ?? null;
+    if (creature && creature.t < bestT) {
+      best = { kind: "creature", creatureId: creature.id,
+               point: { x: creature.point.x, y: creature.point.y,
+                        z: creature.point.z } };
     }
     // Say so rather than doing nothing quietly: a bundle exported before the
     // reaction tables were added has no `reaction_groups`, and a silent no-op
@@ -715,6 +731,14 @@ export class CharacterLayer implements System {
    * ray and that one owns the spheres.
    */
   slotModels: SlotModelLayer | null = null;
+  /**
+   * The effect layer, so a creature `znjoe` released can take a bullet.
+   *
+   * Set from `app/` like the two above, and for the same reason: this layer
+   * owns the ray, and the creature's sphere is in a space the effect layer
+   * holds the matrix for.
+   */
+  effects: CreatureSphereSource | null = null;
   private readonly _ray = new Ray();
 
   /**

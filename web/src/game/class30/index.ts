@@ -42,6 +42,7 @@ import {
   ZombieStateDelayedStrikeInPlace, ZombieStateLeapToPoint,
   ZombieStateScriptedGrabAndDespawn, ZombieStateWaitForCameraFrame,
 } from "./scripted";
+import { ZombieStateReleaseBodyCreature } from "./release_creature";
 import { ZombieState } from "./states";
 import { ZombieOnShot } from "./on_shot";
 import {
@@ -167,6 +168,8 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
       return ZombieStateWaitScriptFlagThenBranch(obj);
     case ZombieState.ScriptedGrabAndDespawn:
       return ZombieStateScriptedGrabAndDespawn(obj, eye, events);
+    case ZombieState.ReleaseBodyCreature:
+      return ZombieStateReleaseBodyCreature(obj, eye, rng, host);
     case ZombieState.LeapToPoint:
       return ZombieStateLeapToPoint(obj, eye, dt, rng, events);
     case ZombieState.RideCarrier:

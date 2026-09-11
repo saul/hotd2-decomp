@@ -40,7 +40,8 @@ import type { CivBlock, TargetScript } from "./actorscript";
 import { approachTables, cameraTracking, RING_SET_FOR_CHAR0 } from "./approach";
 import { build, goreEntry, rigEntry } from "./charbuild";
 import type { Character } from "./charbuild";
-import { CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION,
+import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
+         CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION,
          bake, humanoidMotionIds, introFor, motionFor,
          BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
@@ -917,6 +918,9 @@ export async function resolveForStage(
         }
       }
     }
+    // The two clips the `znjoe` release state names -- keyed by character
+    // type, because that state is. See {@link BODY_CREATURE_HOST_CLIPS}.
+    entryClips.push(...(BODY_CREATURE_HOST_CLIPS[res.charType] ?? []));
     // `ActorSnapToGroundHeight` routes an actor over a drop into state 11,
     // whose landing clip is 0x3BA -- and every class-0x30 actor can now reach
     // it, so it is baked for all of them.

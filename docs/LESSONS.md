@@ -449,3 +449,31 @@ visibly does, the next question is not "which of these candidates is it" but
 makes instead of the draw you were reading. `L17`'s "a negative result is not a
 fact" has a sibling: a negative result can be a fact *and* be about the wrong
 question.
+
+**L40 — A `git stash` during an unresolved merge throws the merge away, and a
+scripted "keep both sides" resolution drops the code on the conflict
+boundary.** Two mistakes in one merge, both mechanical, both silent, and the
+tell arrived from a compiler rather than from git.
+
+`git stash -u` mid-merge clears `MERGE_HEAD`. The pop put the *content* back,
+so `git status` and `git diff` looked right and every file held the merged
+text — but the merge's second parent was gone, and committing there would have
+recorded main's work as if this branch had authored it. Recoverable only
+because the branch's own work was already committed: `git reset --hard HEAD`
+and merge again. This is `L30`'s rule — **commit before you swap the tree** —
+with the tree being swapped by a command that does not look like a checkout.
+
+Then the resolution itself. Where both branches append a block before one
+shared anchor, "keep both sides, main's first" is the right call and a regex
+that concatenates the two halves of the hunk is the wrong way to make it: the
+closing `}` of main's block sat *inside* main's side of the hunk in one file
+and *after* the hunk in another, so one file came out with a brace missing.
+`docs/re/session-log.md` and `docs/PLAYER_PROGRESS.md` survived it and
+`web/test/port.test.ts` did not, and nothing about the diff said so —
+`tsc` did, 380 lines later, as `'}' expected` at the end of the file.
+
+So: after any scripted conflict resolution, **check that every heading of both
+parents survived** (`comm -23` on the two `grep "^## "` outputs is enough for
+prose) and run the type checker before staging for code. A resolution that
+loses a line is indistinguishable from a resolution that was correct, right up
+until something parses it.

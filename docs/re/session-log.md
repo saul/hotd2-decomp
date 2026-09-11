@@ -16146,3 +16146,135 @@ publishes only the path's position and yaw", while `host.ts` had carried
 them". It went on passing zeros. `op_st3` 340's `rot_x` runs to 15,758 BAMS, so
 they were not harmless on the one path the riders use. That is `L26` again, and
 it is fixed rather than re-declared.
+
+## 2026-09-11 — the creature `znjoe` releases, ported, and the frame it has to happen on
+
+`docs/BUGS.md` had the whole chain read and named and none of it ported. It is
+ported now: the arm in `ActorReactToHit`, class 0x30 state **25**, the creature
+itself, its forty sprite slots and the two clips the state names.
+
+### What was read for the first time
+
+**The `0x504`-byte tail `BodyCreatureInit` allocates.** It was the one piece
+the earlier session marked `[open]`, and it is not a struct type: three
+routines in the image allocate `0x504` — `HordeMemberInit` (`FUN_0043BEF0`),
+`FUN_0043D6E0` and `BodyCreatureInit` — and their layouts **disagree**. The
+horde member's `+0x1C` is the actor's own `y` and its `+0x60` a speed; the
+creature's `+0x1C` is the flight's start `y` and its `+0x64` the launch range.
+The only field all three agree on is `+0x00..0x08`, a position. So it is one
+size reused, `L3` applies within it, and the creature's own layout is:
+
+| offset | what the creature uses it as |
+|---|---|
+| `+0x00/04/08` | the position, rewritten on the last line of every frame. **Nothing in the image reads it back** — `[open]` |
+| `+0x18/1C/20` | the launch point, in camera space |
+| `+0x24` | the falling tumble rate, BAMS a frame, grown by 1.01 |
+| `+0x38/3C` | the flight's end `x` and `z`. There is no end `y`: the target height is zero |
+| `+0x64` | `sqrt(x₀² + z₀²)`, the launch range, which the pitch bob normalises against |
+
+**Its position is in camera space.** `obj+0x40..0x48` is a world position for
+every other object in the port and is not one here — which is why the flight's
+end is `(0, 0, 0)` in a one-player game and `(±0.6, 0, 0)` in a two-player one,
+one gun each. Proved three ways: the draw is `MatrixLoadIdentity` +
+`MatrixTranslate` (the idiom the blood and the muzzle flash already use, and
+`render/effects.ts` already draws both in its view group); `obj+0x70..0x78`,
+the sphere `ShotTestSphere` tests, is assigned **straight from** `obj+0x40`
+with no transform where every other class needs one; and `tail+0x64` is then
+the range to the eye.
+
+**The arc is exact.** `y = start.y · (1 − t) + sin(t · 36408.887 BAMS)`, and
+`36408.887` is `65536 × 5/9` — so the sine's argument passes through **π** at
+`t = 0.9`, which is the frame the arrival latches. A one-unit half-sine that is
+level with the line it descends at both ends.
+
+**The decompiler drops the routine's tail** (`L37`): past the draw at
+`0x0043EAA3` the listing runs for another `0x470` bytes that no pseudocode arm
+shows. It restores the scene lights, publishes `obj+0x100` and calls
+`RegisterForCameraTracking` — so a live creature is a **camera candidate** —
+and writes the tail's `+0x00..0x08`.
+
+**The "bone swap" is the torso's first damage step, applied by hand.**
+`obj+0x328 = 1` and `obj+0x29C = g_pBoneEffectSlots[type][7]` are bone record
+1's hit count and draw slot — `obj + 0x20C + bone*0x90` and
+`obj + 0x298 + bone*0x90`, which for bone 1 are exactly those two addresses.
+Not through `ActorSwapDamagedPart`, so no zone bit and nothing severed.
+
+**The state backs out to the *inner* ring, not the outer.** `0045802D FCOMP
+[EAX*4 + 0x9A2BE0]` with `EAX = ringSet*3`: `g_enemy_approach_rings` is the
+inner radius of each set, 25 units for most characters against the outer's 51.
+The annotation said outer; corrected.
+
+Also newly named: `MatrixGetTranslation` (`0x004A8CC0`),
+`SpawnBloodSprayAtPoint` (`0x00430C50`) and
+`BloodSprayAtPointDrawAndTick` (`0x00430BD0`) — the same twenty-five cels of
+`pol/common.bin` the bone-stuck spray uses, at a fixed point instead of a bone,
+which is what says it is blood — and `g_body_creature_hosts` (`0x007DCBD8`),
+whose three xrefs in the whole image are all in this mechanism.
+
+### The bug that ate the feature, and it was `L11`
+
+The port had everything written and **no znjoe ever released anything**. An
+18,480-shot hunt across six of the seven spawns found nothing, and the reason
+was a test moved across a function boundary.
+
+`ActorReactToHit`'s one caller in the engine is `ZombieOnShot`
+(`FUN_00453EB0`), at `0x0045401A PUSH EDI / CALL 0x004543F0` — and that call
+site is **after** `ZombieOnShot`'s own death test:
+
+```
+00453F3B  a900000080     TEST EAX, 0x80000000      ; obj+0x136C, dispatched
+00453F40  0f85ef000000   JNZ  00454035             ; ...already: nothing
+00453F46  f7463400000004 TEST dword [ESI+0x34], 0x4000000    ; Dead
+00453F4D  0f84c7000000   JZ   0045401A             ; alive -> the reaction
+```
+
+So the arm can raise `0x4000400` — which includes `Dead` — at a moment when the
+one test that reads that bit has already been taken for the frame; by the next
+frame state 25's sub 0 has latched `obj+0x136C` bit `0x80000000` and
+`ZombieOnShot` returns before reaching it.
+
+The port calls `ActorReactToHit` from `ResolveHit`, which runs in
+`ProcessShotRequests` at the **head** of the frame. So `Dead` went up, state 25
+went in, and `ZombieOnShot` ran later in the same frame, saw `Dead` with the
+latch still clear, and overwrote state 25 with `ZombieState.Death`. Measured at
+stage 5 block 0: a first torso hit took the actor from 100 hit points to 35 —
+alive, result 1, bone 1 — and left it in **state 6**.
+
+The fix is the engine's own shape: the arm is called from
+`class30/on_shot.ts` at `ZombieOnShot`'s live arm, `pendingHit` carries the
+player the way `obj+0x190 + player` does, and `ActorReactToHit` withholds the
+stagger on a frame the arm will take — because the engine's arm `return`s
+before reaching it.
+
+### Two things the exporter was not carrying
+
+Both found by playing it, not by reading it, and both the same shape as each
+other: the exporter emits what something it knows about *names*, and nothing
+named these because the state was unported.
+
+* **The forty sprite slots**, `0x1D31..0x1D58`, which `ExeTables.assetSlots`
+  resolves to **`znjoe.bin` entries 176..215** — the host character's own model
+  bank, past the last entry any skeleton node names. They ride `slots_effect`
+  rather than `slots_actor` because of the space they are drawn in.
+* **The two clips the state names**, `0x1DF` and `0x1E3`. `znjoe.bin`'s bank
+  reached the bundle with 477, 478, 480, 481, 482 and 484 in it and **not** 479
+  or 483. With no clip, `MotionPlayLength` is 0, sub 3's exit can never fire
+  and sub 1 has no root motion to leave the ring with — so the first fix put
+  the actor in state 25 and it stood there in sub 1 for the rest of the stage.
+  An unbaked clip is an actor that waits for ever, for the third time.
+
+### Wrong turns
+
+* Two hours went into a coarse shooting volley, which cannot work: the arm
+  needs the **first** hit on bone 1 and the head's first step is 100 damage
+  against 100 hit points, so any sweep that finds the head kills the actor
+  first and `ResolveHit` only calls the reaction for a survivor. What worked
+  was measuring the aim point — `(0.354, 0.682)` of the viewport at driven
+  frame 100 — and firing one click at a time. Damage is **not** diagnostic of
+  the bone, because `DamageRankModifier` moves every figure: the torso's 50
+  reads as 65 at rank 1 and 20 at rank 15.
+* The first screenshot harness read the walker parked at `0/4/5` with `g_frame`
+  stuck at 0 through 1,800 driven frames and concluded the locator was wrong.
+  A seek lands the transport **paused**; a driven frame of a paused transport
+  advances the counter and nothing else. `tools/shot.mjs --press Space` says so
+  and had been in front of me the whole time.

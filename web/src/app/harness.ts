@@ -230,7 +230,12 @@ export class Harness {
       g: Math.round(G.g_frame),
       c: `e${G.g_enemies_alive} p${G.g_enemies_present} `
        + `v${G.g_civilians_alive} s${G.g_player_score[0]} `
-       + `k${G.g_attack_permits.join(",")} t${G.g_attack_committed}`,
+       + `k${G.g_attack_permits.join(",")} t${G.g_attack_committed}`
+       // `b` is the creatures `znjoe` has released. They are not actors and
+       // so are in none of `o` below, while `e` and `p` above **count them**
+       // -- so without this a driven run reads a live enemy it cannot see and
+       // a room that will not clear for a reason nothing in the row explains.
+       + ` b${G.g_body_creatures.length}`,
       o: live.map((o) =>
         `${o.at} c${o.cls} s${o.state}.${o.sub} h${o.hp}`
         + ` @${q(o.pos.x)},${q(o.pos.y)},${q(o.pos.z)}`

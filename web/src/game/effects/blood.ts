@@ -36,6 +36,7 @@
  * functions here as well, over one record with a severity of 1.
  */
 import { G } from "../globals";
+import { vec3, type Vec3 } from "../vec";
 
 /** `+0x44` dies past this, so the flipbook is twenty-five frames. */
 export const BLOOD_LAST_CEL = 0x18;
@@ -115,4 +116,70 @@ export function BloodSpraysTick(): void {
   const live = G.g_blood_sprays;
   if (!live.length) return;
   G.g_blood_sprays = live.filter((b) => BloodSprayTick(b));
+}
+
+/**
+ * ...and the third of them: the same flipbook at a **point** rather than on a
+ * bone.
+ *
+ * `SpawnBloodSprayAtPoint` (`FUN_00430C50`) allocates a 0x98-byte object
+ * running `BloodSprayAtPointDrawAndTick` (`FUN_00430BD0`), which draws
+ * `AssetDrawSlot(eff+0x54)` under `MatrixLoadIdentity` and frees itself once
+ * that cursor passes `0x52`. `eff+0x54` starts at `0x3A` — **the same
+ * twenty-five cels of `pol/common.bin` the bone-stuck spray uses**, which is
+ * what says this is blood and not some other sprite: it is
+ * {@link SpawnBloodSpray} with a fixed point instead of a bone.
+ *
+ * Five routines call it, and the ones the port already has are
+ * `OwlUpdateAndResolveShot` (`FUN_004460C0`) — class 0x43's death, which does
+ * not spawn one today — and `BodyCreatureUpdate` (`FUN_0043E880`).
+ *
+ * The point is whatever the caller's `obj+0x70..0x78` holds, which is the
+ * shot-test sphere's centre, and that is **camera space** — the same space
+ * `MatrixLoadIdentity` draws in and the same one `render/effects.ts` already
+ * puts the bone spray's sprite in.
+ */
+export interface PointBloodSpray {
+  /** `[port-only]` — a stable key for the renderer. */
+  id: number;
+  /** `eff+0x38/0x3C/0x40`, in camera space. */
+  pos: Vec3;
+  /** `eff+0x54` — the asset slot, which **is** the cursor. */
+  slot: number;
+}
+
+/** `eff+0x54 = 0x3A` — the first cel, and `0x52` is the last. */
+export const POINT_BLOOD_LAST_SLOT = 0x52;
+/**
+ * `MOV dword ptr [ESP], 0x3E99999A`, or `0x3E19999A` when `g_wCaptionMode`
+ * is 1 — the scale, which halves with captions on exactly as
+ * {@link BLOOD_SCALE} does.
+ */
+export const POINT_BLOOD_SCALE = 0.3;
+export const POINT_BLOOD_SCALE_CAPTIONED = 0.15;
+
+/** `SpawnBloodSprayAtPoint` — `FUN_00430C50`. */
+export function SpawnBloodSprayAtPoint(at: Vec3): void {
+  G.g_point_blood_sprays.push({
+    id: G.g_point_blood_spray_seq++,
+    pos: vec3(at.x, at.y, at.z),
+    slot: BLOOD_FIRST_SLOT,
+  });
+}
+
+/**
+ * `[port-only]` — the state half of `BloodSprayAtPointDrawAndTick`
+ * (`FUN_00430BD0`), for the same reason {@link BloodSprayTick} is one: a task
+ * is its own renderer and `game/` may not draw.
+ *
+ * The engine draws the slot it is **about** to step, and frees only once the
+ * stepped value passes the last one, so the last cel is drawn.
+ */
+export function PointBloodSpraysTick(): void {
+  const live = G.g_point_blood_sprays;
+  if (!live.length) return;
+  G.g_point_blood_sprays = live.filter((b) => {
+    b.slot += 1;
+    return b.slot <= POINT_BLOOD_LAST_SLOT;
+  });
 }

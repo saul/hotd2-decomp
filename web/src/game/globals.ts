@@ -15,7 +15,8 @@
  * something survives a frame and is not reachable from here, the snapshot is
  * wrong and so is the port.
  */
-import type { BloodSpray } from "./effects/blood";
+import type { BloodSpray, PointBloodSpray } from "./effects/blood";
+import type { BodyCreature } from "./body_creature";
 import type { SeveredHead } from "./effects/severed_head";
 import type { ShotFlash, ShotTracer, ShotWeaponEffect }
   from "./effects/shot_effects";
@@ -409,6 +410,27 @@ export const G = {
   g_severed_heads: [] as SeveredHead[],
   /** `[port-only]` — see {@link SeveredHead.id}. */
   g_severed_head_seq: 0,
+  /**
+   * `[port-only]` — the creatures `znjoe` has released.
+   *
+   * `SpawnBodyCreature` (`FUN_0043E720`) allocates each one as a task running
+   * `BodyCreatureUpdate` (`FUN_0043E880`), with no class id at all, so the
+   * same reasoning as `g_severed_heads` above applies and for the same two
+   * reasons: a fixed object pool, and a snapshot that goes through
+   * `clonePlain`. Unlike the heads these are **countable enemies** —
+   * `BodyCreatureInit` raises both enemy counts — so an emptied list is not a
+   * cosmetic difference. See `game/body_creature.ts`.
+   */
+  g_body_creatures: [] as BodyCreature[],
+  /** `[port-only]` — see {@link BodyCreature.id}. */
+  g_body_creature_seq: 0,
+  /**
+   * `[port-only]` — the blood `SpawnBloodSprayAtPoint` (`FUN_00430C50`) has
+   * put at a point rather than on a bone. `game/effects/blood.ts`.
+   */
+  g_point_blood_sprays: [] as PointBloodSpray[],
+  /** `[port-only]` — see {@link PointBloodSpray.id}. */
+  g_point_blood_spray_seq: 0,
   /**
    * `[port-only]` — the sprite-effect objects `SpawnSpriteEffectFromParams`
    * (`FUN_004073B0`) has allocated: impacts, ricochets, splashes and the
@@ -1181,6 +1203,10 @@ export function ResetGameGlobals(): void {
   G.g_sprite_effect_seq = 0;
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
+  G.g_point_blood_sprays = [];
+  G.g_point_blood_spray_seq = 0;
+  G.g_body_creatures = [];
+  G.g_body_creature_seq = 0;
   G.g_shot_flash_ring = makeShotFlashRing();
   G.g_shot_tracer_ring = makeShotTracerRing();
   G.g_shot_weapon_ring = makeShotWeaponRing();

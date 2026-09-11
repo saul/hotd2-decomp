@@ -162,7 +162,8 @@ export function ActorInitHitPoints(p: CharacterPlacement | undefined,
  * the game.
  */
 export function SpawnScriptedCharacters(
-    reqs: readonly CharacterSpawnRequest[], rng?: Rng): Actor[] {
+    reqs: readonly CharacterSpawnRequest[], rng?: Rng,
+    events?: Events): Actor[] {
   const made: Actor[] = [];
   const placements = T.chars?.placements ?? [];
   for (const req of reqs) {
@@ -177,7 +178,7 @@ export function SpawnScriptedCharacters(
                            hp, maxHp: hp,
                            yaw: p?.yaw ?? 0, pos: { ...req.pos },
                            visible: true },
-                         rng));
+                         rng, events));
   }
   return made;
 }

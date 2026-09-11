@@ -1505,6 +1505,67 @@ pair**: `PlaySoundId` walks two parallel tables — the looping ids at
 non-blinking frame of the hold, not once; the engine has no edge test there and
 `PlaySoundId` does not de-duplicate.
 
+### The noise a standing zombie makes, and the chainsaw
+
+Both were silent, and both had been looked for in the wrong routine. There is
+exactly **one** voice routine in this game — `ActorPlayHitVoice`
+(`FUN_0040A6F0`), five kinds across twenty-three call sites — and **none of the
+five is an idle**: they are the three shot reactions, the attack cry, and one
+that turns out to be dead. So no amount of reading it could have found either
+of these.
+
+**The groan is a bare `PlaySoundId` in the hub state.**
+`ZombieStateHoldAtRange` (`FUN_00455720`) plays `0x1917A9`,
+`COMMON2\ZOMBIE_041_16.wav`, at `0x004558D6` — inside the same one-instruction
+gate (`CMP EAX, EDI` at `0x004558B0`) that starts the in-range idle clip. So it
+is one shot per *entry* into the idle: on arrival at the ring, and again after
+every swing and retreat. Not periodic, not random, not on a timer. A byte
+search for the id over the whole image finds that one `PUSH` and the SE name
+record, and nothing else.
+
+It is **rarer in play than "whenever a zombie stands still"**, and the same
+`CMP` is why: `ZombieStateApproach` plays `row[(obj+0x136C >> 0x15) & 1]`, so
+for the `row[0]` half of that pair the walk in *is* the clip the hub wants and
+the hub changes nothing. Measured in the page on stage 1 block 4, where the
+walkers reach the ring silently and only the attack cries sound. What does
+groan is an actor that comes back on a clip the hub does not want — `row[4]`
+after the retreat, `row[2]`/`row[3]` after an attack run, or the strike clip
+itself — which is every zombie that has swung at you once. Both arrivals are
+asserted in `web/test/port.test.ts`.
+
+**The chainsaw and the laser sword are a refcounted loop, not a voice.** For
+character types 2 and 3, `EnemyZombieInitByCharType` (`FUN_00452FD0`) plays
+`CHAIN_SAW_22` or `LASER_SWORD_22` — but only while `g_weapon_loop_holders`
+(`0x009C8A74`) is zero — then increments it and latches `obj+0x131B`.
+`FUN_00456600` plays the paired `_OFF` id only from the *last* holder. Both
+play ids are in `g_looping_se_ids` and both stop ids in
+`g_looping_se_stop_ids`, so the engine plays the first looped and turns the
+second into a `SoundStopAllLoopingSe`. One shared loop per scene, opened by the
+first such actor and closed by the last to die — or the moment a type-2 actor
+loses both hand props, which `ActorUpdateBodyCondition` (`FUN_00454270`) is
+what does. Shoot the chainsaw out of its hands and the noise stops while the
+actor is still alive, which is the second thing that proves it is the weapon
+rather than the actor.
+
+Two annotations were wrong and are fixed: `0x009C8A74` was recorded as a count
+of "groan voices" and `FUN_00456600` as the death scream. The filenames settle
+both.
+
+**And nothing in the player looped anything.** `audio/bgm.ts` played every SE
+as a one-shot, so class 0x31's laser sword — ported earlier, and correctly —
+had been igniting for 0.4 seconds and never sustaining, and its `_OFF` cue was
+a 404 for a file the game does not ship. The loop branch is transcribed now,
+and the bundle carries `sound.looping`, the 44 pairs out of the EXE.
+
+`[proved]` **Kind 4 of the voice routine is dead.** No call site in the image
+passes 4 — all twenty-three pass 0, 1, 2 or 3, and the census is in
+`combat/voice.ts` — and its two ids at `g_actor_voice_kind4` (`0x005A4EA8`) are
+zero in the shipped `.data` with nothing in the image writing them. The nearest
+thing that could is the 14-entry radix-sort scratch at `0x005A4E38`, which ends
+one dword short of them and whose two feeders are both capped at 14. So the arm
+reaches `PlaySoundId(0)`, the dispatcher's own "no sound" early-out. Porting it
+is porting silence, and the enum member stays only to say so.
+
 **The player runs the game's own collision.** The bundle carries every `coli/`
 blob a scene loads and `game/coli.ts` is a transcription of
 `ColiSegmentVsMesh` and its callers, so the wall search, the ground height and

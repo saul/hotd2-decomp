@@ -140,6 +140,15 @@ CHECKS: list[Check] = [
           "the only thing that can say stage 3 and stage 4 have two entry "
           "points each",
           NEEDS_GAME),
+    Check("verify_looping_se", ".",
+          ["python3", "tools/verify_looping_se.py", "--game-dir",
+           "{game_dir}"],
+          "that `PlaySoundId`'s two loop tables really do pair index for "
+          "index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` "
+          "file ships, which is the only thing that says a stop id is a "
+          "control word rather than a sound, and so the only thing that makes "
+          "the chainsaw a loop rather than a one-shot",
+          NEEDS_GAME),
     Check("verify_effects", ".",
           ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],
           "that each of the 29 effect trees walks to exactly the node count "

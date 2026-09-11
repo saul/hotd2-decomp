@@ -15033,6 +15033,88 @@ the exported rig. `obj+0x6C` (roll) and `obj+0x118` (uniform scale) are written
 by the engine and read only by its own draw, so the port leaves them out rather
 than adding two head fields nothing in `game/` reads.
 
+
+## The noise a standing zombie makes
+
+The brief was two `[open]` items left over from the attack-cry work: what calls
+`ActorPlayHitVoice` (`FUN_0040A6F0`) with kind 4, and what a standing zombie
+groans. Both are answered, and neither answer was where the question pointed.
+
+**Kind 4 is dead.** Disassembling the window before each of the twenty-three
+call sites gives the complete census: kinds 0, 1, 2 and 3 only, thirteen of
+them kind 3. Two sites push the kind in a register rather than as an immediate
+— `0x00451A03` and `0x00451AF0`, both inside `RescueTargetHeldState` — and the
+decompilation of that function is what says they are 0 and 1. Its two ids at
+`0x005A4EA8` are zero in the shipped `.data` and nothing in the image writes
+them; the only two references anywhere are the reads inside the routine itself.
+
+The interesting part of that was the near-miss. A byte search for the
+little-endian address finds one instruction, but `search_instructions` for the
+bare `5a4e` turns up `MOV [EAX*8 + 0x5A4E38]` in two functions — and
+`0x5A4E38 + 14*8 = 0x5A4EA8` exactly, so a fifteenth entry in that radix-sort
+scratch would land on kind 4's first id. That had to be closed rather than
+waved away: `FUN_00408D90`'s clear loop bounds `g_camera_candidates` at 14
+pairs, `RegisterForDistanceRank` refuses its fifteenth caller with `CMP ESI,
+0xE`, and the scratch is the same 14. **L6 asked from the other side** — not
+"is my table longer than I think" but "is the thing one past the end of a
+table, and can that table overflow into it".
+
+**The groan is not a voice at all.** It is `PlaySoundId(0x1917A9)` —
+`COMMON2\ZOMBIE_041_16.wav` — at `0x004558D6` in `ZombieStateHoldAtRange`
+(`FUN_00455720`), inside the same `CMP EAX, EDI` that starts the in-range idle
+clip, so it fires once per entry into that clip and not again while it runs.
+The `PUSH` at `0x004558D2` is the only occurrence of the id in `.text`.
+
+What found it was taking `get_xrefs_to PlaySoundId` — 500 references — and
+reading only the ones inside class 0x30's address range. That is about twenty
+functions and half an hour. Nothing about the voice routine could have led
+there, which is the lesson the brief already stated and which turned out to be
+exactly right.
+
+### The wrong turn: `g_zombie_voice_holders`
+
+The first lead looked like the answer and was not. `globals.tsv` already had
+`0x009C8A74` as *"how many class-0x30 actors currently hold a groan voice"* and
+`FUN_00456600` as `ZombiePlayDeathVoice`, *"the death scream"*. A refcounted
+per-scene voice with an init and a release is exactly the shape an idle groan
+would have, and I spent a while convinced that was it.
+
+It is the **chainsaw**. `EnemyZombieInitByCharType` plays `0x4D17A9` for
+character type 2 and `0x1F25A9` for type 3, and `g_se_name_list` resolves those
+to `COMMON2\CHAIN_SAW_22.wav` and `STAGE6_SE\LASER_SWORD_22.wav`; the release
+plays their `_OFF` twins. Both are entries of `g_looping_se_ids`, so
+`PlaySoundId` plays the first looped and turns the second into a
+`SoundStopAllLoopingSe`. The refcount exists because the engine has **no handle
+for a playing loop** — `SoundStopAllLoopingSe` takes no argument — so a loop
+two objects can want has to be opened by the first and closed by the last.
+
+The confirmation came from the other caller of the release:
+`ActorUpdateBodyCondition` (`FUN_00454270`) calls it for a type-2 actor the
+moment neither hand still holds its prop. Shoot the chainsaw out of its hands
+and the noise stops while the zombie is still alive. A voice would not do that.
+
+Both rows are corrected — `g_weapon_loop_holders` and
+`ZombieReleaseWeaponLoopSe` — and the correction is the reason to write this
+down: **the old name was not a guess, it was an inference that had hardened
+into a fact**, and the thing that dissolved it was reading the four ids through
+the name table, which costs one command.
+
+### Two things that fell out
+
+`ZombiePlayMotionFrameSe` (`FUN_00452A10`) is now named: a per-frame switch over
+the actor's current motion, each arm naming exact frames of that clip and one
+of `ENE_WALK3`, `ENE_WALK6` or `SWORD11`, latched against repeats by
+`obj+0x1314`. That is the footstep hook, and it is the noise a *walking* zombie
+makes.
+
+And `PlaySoundId`'s looping branch had never been written into
+[`formats/sound.md`](../formats/sound.md), though the class-0x31 work had found
+the two tables. `tools/verify_looping_se.py` now proves the pairing rather than
+observing it: every one of the 44 pairs is `X.wav` against `X_OFF.wav`, and no
+`_OFF` file is shipped, which is what makes a stop id a control word. It also
+catches the eight duplicated play ids and asserts that each repeat names the
+same stopper, so the first-match walk order is not load-bearing.
+
 ---
 
 ## Three enemies that had no module: the frog, the owl and the fish

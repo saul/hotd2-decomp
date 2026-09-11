@@ -24,6 +24,7 @@ import {
 } from "../game/director";
 import type { Actor } from "../game/actor";
 import type { Rng } from "../core/rng";
+import type { Events } from "../core/events";
 
 /** What the renderer answers for the port. See `game/host.ts`. */
 export interface HostBackend {
@@ -263,8 +264,10 @@ export class CharacterBindSystem implements System {
  * `SpawnFromDescriptor`'s decisions in a layer no headless test can reach.
  */
 export function syncCharacterSpawns(chars: CharacterPool,
-                                    spawns: readonly ScriptSpawn[]): void {
-  const made = SpawnScriptedCharacters(chars.readySpawns(spawns), chars.rng);
+                                    spawns: readonly ScriptSpawn[],
+                                    events?: Events): void {
+  const made = SpawnScriptedCharacters(chars.readySpawns(spawns), chars.rng,
+                                       events);
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
   // ...and the ones the character pool can never make, because their model is
   // an asset slot and they have no character type to resolve. See

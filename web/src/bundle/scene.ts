@@ -47,9 +47,27 @@ export interface PropsJson {
   note: string;
 }
 
+/** One row of `g_looping_se_ids` / `g_looping_se_stop_ids`, paired by index. */
+export interface LoopingSe {
+  /** The id that starts the loop — `g_looping_se_ids` (`0x005887FC`). */
+  play: number;
+  /**
+   * The id that stops **every** loop — `g_looping_se_stop_ids` (`0x005888B0`).
+   *
+   * `PlaySoundId` calls `SoundStopAllLoopingSe()` when it sees one of these,
+   * so the pairing names which loop a stop id belongs to and not what it
+   * stops: it stops the lot.
+   */
+  stop: number;
+}
+
 export interface SoundJson {
   se: Record<string, string>;
   voice: Record<string, string>;
+  /** `PlaySoundId`'s loop branch, 44 pairs. Absent in bundles built before it
+   * was read; a reader with no table plays every SE as a one-shot, which is
+   * what the player did. */
+  looping?: LoopingSe[];
   /** evt 0x2D groups; each holds three variants, one per player config. */
   messages?: Record<string, (MessageVariant | null)[]>;
   screen?: { width: number; height: number; note: string };

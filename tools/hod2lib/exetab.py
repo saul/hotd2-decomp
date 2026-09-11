@@ -1477,6 +1477,10 @@ class ExeTables:
     SE_RECORD_STRIDE = 0x34
     SE_TERMINATOR = 0xFFFF
 
+    LOOPING_SE_IDS = 0x005887FC
+    LOOPING_SE_STOP_IDS = 0x005888B0
+    LOOPING_SE_TERMINATOR = 0xFFFFFFFF
+
     BGM_NAMES_AR = 0x00580354
     BGM_NAMES_PLAIN = 0x005803F8
     BGM_AR_COUNT = 41
@@ -1536,6 +1540,38 @@ class ExeTables:
                 # not-a-loss: as above -- the decode is the test for whether
                 # this slot holds a string, and No is an answer.
                 continue
+        return out
+
+    def looping_se(self) -> list[dict[str, int]]:
+        """The looping SE, and what stops each one.
+
+        ``PlaySoundId`` (0x0041CFD0) walks these two tables in step before it
+        plays: an id found in the first is played **looped**, and an id found
+        in the second makes it call ``SoundStopAllLoopingSe()`` first. There is
+        no handle and no channel id -- one call starts a chainsaw and another
+        stops every loop in the mix.
+
+        Neither table stores a count and neither bounds the other: both walk to
+        a ``0xFFFFFFFF`` terminator, 44 entries, paired index for index. Eight
+        of the rows repeat a play id already listed -- the tail of the table is
+        a duplicate block -- which is harmless because the walk stops at the
+        first match. Every pair is ``X.wav`` against ``X_OFF.wav``,
+        which is what proves the pairing rather than the tables merely being
+        adjacent.
+        """
+        a = self._v2r(self.LOOPING_SE_IDS)
+        b = self._v2r(self.LOOPING_SE_STOP_IDS)
+        out: list[dict[str, int]] = []
+        if a is None or b is None:
+            return out
+        for i in range(256):
+            if a + i * 4 + 4 > len(self.data) or b + i * 4 + 4 > len(self.data):
+                break
+            play = struct.unpack_from("<I", self.data, a + i * 4)[0]
+            if play == self.LOOPING_SE_TERMINATOR:
+                break
+            stop = struct.unpack_from("<I", self.data, b + i * 4)[0]
+            out.append({"play": play, "stop": stop})
         return out
 
     def screen_messages(self, max_groups: int = 512) -> list[dict]:

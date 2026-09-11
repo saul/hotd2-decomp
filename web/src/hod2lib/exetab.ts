@@ -1512,6 +1512,10 @@ export class ExeTables {
   static readonly SE_RECORD_STRIDE = 0x34;
   static readonly SE_TERMINATOR = 0xffff;
 
+  static readonly LOOPING_SE_IDS = 0x005887fc;
+  static readonly LOOPING_SE_STOP_IDS = 0x005888b0;
+  static readonly LOOPING_SE_TERMINATOR = 0xffffffff;
+
   static readonly BGM_NAMES_AR = 0x00580354;
   static readonly BGM_NAMES_PLAIN = 0x005803f8;
   static readonly BGM_AR_COUNT = 41;
@@ -1566,6 +1570,42 @@ export class ExeTables {
         const name = asciiField(this.data, o + 4,
                                 ExeTables.SE_RECORD_STRIDE - 4);
         if (name !== null) out.set(sid, name);
+      }
+      return out;
+    });
+  }
+
+  /**
+   * The looping SE, and what stops each one.
+   *
+   * `PlaySoundId` (`0x0041CFD0`) has a branch nothing in this player had read:
+   * before it hands the file to `SoundPlayOnFreeChannel` it walks these two
+   * tables in step, and an id found in the first is played **looped** while an
+   * id found in the second makes it call `SoundStopAllLoopingSe()` first. That
+   * is the whole of the game's looping ambience — there is no handle, no
+   * channel id and no per-actor state; one call starts a chainsaw and another
+   * stops every loop in the mix.
+   *
+   * Neither table stores a count and neither is bounded by the other: both are
+   * walked to a `0xFFFFFFFF` terminator, 44 entries, paired index for index.
+   * Seven ids appear twice in the play table, which is harmless because the
+   * engine's walk stops at the first match — and so does the player's.
+   *
+   * Every one of the 44 pairs is `X.wav` against `X_OFF.wav`, which is what
+   * proves the pairing rather than the two tables merely being adjacent.
+   */
+  loopingSe(): { play: number; stop: number }[] {
+    return this.cached("loopingSe", () => {
+      const a = this.v2r(ExeTables.LOOPING_SE_IDS);
+      const b = this.v2r(ExeTables.LOOPING_SE_STOP_IDS);
+      const out: { play: number; stop: number }[] = [];
+      if (a === null || b === null) return out;
+      for (let i = 0; i < 256; i++) {
+        if (a + i * 4 + 4 > this.data.length) break;
+        if (b + i * 4 + 4 > this.data.length) break;
+        const play = u32(this.data, a + i * 4);
+        if (play === ExeTables.LOOPING_SE_TERMINATOR) break;
+        out.push({ play, stop: u32(this.data, b + i * 4) });
       }
       return out;
     });

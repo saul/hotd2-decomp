@@ -18,7 +18,14 @@
  * All three tables are read out of the EXE by `hod2lib.exetab`, so this file
  * routes ids and never guesses a filename.
  *
- * Music loops on one element; SE and voice are one-shots over a small pool.
+ * Music loops on one element; SE and voice are one-shots over a small pool --
+ * **except the 44 SE ids `PlaySoundId` loops.** That branch is not a property
+ * of the file, it is two tables in the EXE: `g_looping_se_ids` (`0x005887FC`)
+ * and `g_looping_se_stop_ids` (`0x005888B0`), 44 entries each, paired index
+ * for index. An id in the first plays looped; an id in the second calls
+ * `SoundStopAllLoopingSe()` and then plays unlooped. There is no handle and no
+ * channel id anywhere in the engine, which is why a chainsaw is started by one
+ * call from an actor's init and stopped by another from its death.
  * Everything streams from `/bgm/`, `/se/` and `/voice/` — the dev server
  * serves them out of the user's own install (see `vite.config.ts`), because
  * the audio is 300 MB of uncompressed PCM and copying it into the bundle
@@ -67,7 +74,25 @@ export class Bgm {
   private readonly pool: HTMLAudioElement[] = [];
   private poolNext = 0;
 
+  /**
+   * The looping SE currently sounding, by the id that started each.
+   *
+   * A map rather than the one-shot pool because a loop has to outlive the
+   * frame that started it and be findable again to stop -- and keyed by id
+   * because the engine's own bookkeeping is the id too: `SoundStopAllLoopingSe`
+   * takes no argument and stops every one of them.
+   */
+  private readonly loops = new Map<number, HTMLAudioElement>();
+
   setSoundTables(sound: SoundJson | undefined): void {
+    // A new scene's tables replace the old ones, and a loop started under the
+    // old ones has nothing left to stop it: `ResetSceneCombatState` zeroes
+    // `g_weapon_loop_holders` (`0x009C8A74`) at exactly this point, so the
+    // refcount that would have released the chainsaw is gone. `[likely]` the
+    // engine's own scene teardown silences the mixer -- that path has not been
+    // read -- but leaving a chainsaw running into the next stage is not a
+    // behaviour anything in the binary asks for.
+    this.stopAllLoopingSe();
     this.sound = sound ?? null;
   }
 
@@ -104,6 +129,7 @@ export class Bgm {
   setMuted(m: boolean): void {
     this._muted = m;
     if (this.el) this.el.muted = m;
+    for (const el of this.loops.values()) el.muted = m;
     if (!m) void this.resume();
     this.emit();
   }
@@ -111,6 +137,9 @@ export class Bgm {
   setVolume(v: number): void {
     this._volume = Math.max(0, Math.min(1, v));
     if (this.el) this.el.volume = this._volume;
+    for (const el of this.loops.values()) {
+      el.volume = Math.min(1, this._volume * SFX_GAIN);
+    }
     this.emit();
   }
 
@@ -137,6 +166,23 @@ export class Bgm {
     if (id >>> 28 === NS_SE) {
       const file = this.sound?.se[String(id)];
       if (!file) return `se 0x${id.toString(16)} is not in the table`;
+      // `PlaySoundId`'s own order: walk the pair tables **before** playing,
+      // and stop first if this id is a stopper. The engine breaks out of the
+      // walk on the first match either way, so an id that is in both tables
+      // (none ship, but the walk allows it) takes whichever comes first.
+      const loop = this.loopingRole(id);
+      if (loop === "stop") {
+        this.stopAllLoopingSe();
+        // ...and then plays the stop id itself, unlooped. 36 of the 324 SE
+        // names end in `_OFF` and none of those files ship, so this is a 404
+        // by design and `oneShot` swallowing it is correct.
+        this.oneShot("se", file);
+        return `se stop-all + ${file}`;
+      }
+      if (loop === "play") {
+        this.startLoopingSe(id, file);
+        return `se loop ${file}`;
+      }
       this.oneShot("se", file);
       return `se ${file}`;
     }
@@ -147,6 +193,63 @@ export class Bgm {
       return `voice ${file}`;
     }
     return `sound id 0x${id.toString(16)}: unknown namespace`;
+  }
+
+  /**
+   * Which of `PlaySoundId`'s two tables holds this id, if either.
+   *
+   * The walk is the engine's: index in step through both, first match wins,
+   * and a `play` hit is tested before the `stop` hit at the same index.
+   */
+  private loopingRole(id: number): "play" | "stop" | null {
+    for (const pair of this.sound?.looping ?? []) {
+      if (pair.play === id) return "play";
+      if (pair.stop === id) return "stop";
+    }
+    return null;
+  }
+
+  /** The loop ids sounding right now — for the sound projection and the tests. */
+  get loopingSe(): number[] {
+    return [...this.loops.keys()];
+  }
+
+  /**
+   * Start one looping SE, or leave it alone if it is already sounding.
+   *
+   * The engine has no such check and does not need one: every caller of a
+   * looping id in the shipped code guards it. `EnemyZombieInitByCharType`
+   * plays the chainsaw only while `g_weapon_loop_holders` is 0, which is the
+   * refcount that makes the loop one per scene. The guard is here as well
+   * because a second element on the same file is audible and the engine's
+   * channel allocator is not modelled.
+   */
+  private startLoopingSe(id: number, file: string): void {
+    // Unlike `oneShot`, this does **not** refuse while muted: a one-shot missed
+    // is gone, and a loop missed would stay missing for the rest of the scene
+    // because the only thing that would start it again is another actor's init.
+    // The element is created muted and `setMuted` lifts it.
+    if (this.loops.has(id)) return;
+    const el = new Audio();
+    el.loop = true;
+    el.src = `se/${file.replace(/\\/g, "/")
+      .split("/").map(encodeURIComponent).join("/")}`;
+    el.volume = Math.min(1, this._volume * SFX_GAIN);
+    el.muted = this._muted;
+    this.loops.set(id, el);
+    void el.play().catch(() => {});
+  }
+
+  /**
+   * `SoundStopAllLoopingSe`. It takes no argument in the engine either — a
+   * stop id names which loop it was authored for and stops every one of them.
+   */
+  stopAllLoopingSe(): void {
+    for (const el of this.loops.values()) {
+      el.pause();
+      el.currentTime = 0;
+    }
+    this.loops.clear();
   }
 
   /**

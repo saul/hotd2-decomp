@@ -477,3 +477,26 @@ parents survived** (`comm -23` on the two `grep "^## "` outputs is enough for
 prose) and run the type checker before staging for code. A resolution that
 loses a line is indistinguishable from a resolution that was correct, right up
 until something parses it.
+
+**L41 — A backup taken before a merge is a copy of the pre-merge file, and
+restoring it reverts the merge.** Mutation-testing the class-0x41 exporter
+meant editing `web/src/hod2lib/bundle.ts`, so I copied it aside first, mutated
+it, and copied the backup back. Between those two steps I merged `main`. The
+restore put the pre-merge file back and silently deleted main's
+`bodyCreatureDrawSlots` — a whole exported function, three call sites, another
+session's work — and both halves of that were invisible: the mutation test
+passed, `tsc` passed, the check under test passed, and `git status` showed one
+modified file that was *supposed* to be modified.
+
+**`git checkout -- <path>` is the restore that cannot do this**, because it
+restores from the index and HEAD, which already have both sides of the merge. A
+file copy has no idea a merge happened.
+
+What caught it was reading `git diff` on the file before staging and seeing 66
+deletions where the edit was five lines. No check would have: the deleted
+function had no test of its own, and a check that asserts what the exporter
+*writes* cannot see a slot list that is no longer asked for. So this is L30's
+family — `git checkout <ref> -- <path>` writing the index, a stash that
+conflicts — with the same moral one step further out: **inspect the diff of
+every file you restored, not just of every file you edited.** A restore is an
+edit whose content you did not choose.

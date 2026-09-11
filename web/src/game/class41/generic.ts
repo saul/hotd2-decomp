@@ -106,6 +106,7 @@ import {
 import {
   LIFT_FAR_CLOSED, LIFT_NEAR_CLOSED, LIFT_PANEL_CLOSED,
 } from "./lift";
+import { PlaceGenericPropType43 } from "./type43";
 
 /**
  * The composition a class-0x41 generic type's routine applies the spawn
@@ -447,7 +448,8 @@ export const GENERIC_LIFETIME_FROM_1F4: ReadonlySet<number> =
  */
 const PropContainerType32 = 32;
 
-/** Class 0x41 types 53 and 54, which have update routines of their own. */
+/** Class 0x41 types 43, 53 and 54, which have update routines of their own. */
+const TYPE43 = 43;
 const TYPE53 = 53;
 const TYPE54 = 54;
 
@@ -497,6 +499,9 @@ export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
   // dispatches, and neither routine has it. See `class41/draw_only.ts`.
   [TYPE53]: PropFamily.DrawOnlyType53,
   [TYPE54]: PropFamily.DrawOnlyType54,
+  // Its own routine, its own lifetime, and its own everything: the third
+  // object built from `g_prop_kind_params`. See `class41/type43.ts`.
+  [TYPE43]: PropFamily.Type43,
 };
 
 /**
@@ -614,11 +619,16 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // are its three hinge angles at rest, and `LiftUpdate` swings each one
   // from exactly this value — which is how its sound cues, written as
   // equalities, fire once and only on the first frame of a swing.
+  // Case 0x2B's arm, last because it overwrites four of the fields above it:
+  // the kind and the item set off the descriptor, the kind table's radius,
+  // effect and variant, the bob's centre and its rand()-seeded motion, and
+  // the two-case kind switch on the slot. All of it in `class41/type43.ts`.
+  if (type === TYPE43) PlaceGenericPropType43(p, pl, rng);
+
   if (type === PropContainerType32) {
     p.yaw = LIFT_NEAR_CLOSED;
     p.hingeB = LIFT_FAR_CLOSED;
     p.pitch = LIFT_PANEL_CLOSED;
   }
-  void rng;
   return p;
 }

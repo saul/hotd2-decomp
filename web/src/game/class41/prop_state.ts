@@ -94,6 +94,18 @@ export enum PropFamily {
    * `class41/draw_only.ts`.
    */
   DrawOnlyType54 = 11,
+  /**
+   * `PropUpdateType43` (`FUN_0046CEA0`) — class 0x41 type 43, seven spawns and
+   * all of them in stage 3.
+   *
+   * The **third** object built from `g_prop_kind_params`, and its own family
+   * rather than {@link Kinded} because the routine is not
+   * `KindedPropUpdate`: it swaps the crate's model instead of hiding it,
+   * releases its item on a second shot instead of at the break, stays in the
+   * shot test after it is destroyed, and bobs and tumbles. See
+   * `class41/type43.ts`.
+   */
+  Type43 = 12,
 }
 
 /**

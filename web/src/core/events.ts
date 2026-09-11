@@ -104,6 +104,12 @@ export interface EventMap {
   /** A toppled prop reached the floor. */
   "prop.settled": { id: number; sound: number };
   /**
+   * A prop handed a player a life or an Original Mode item. Only
+   * `PropUpdateType43` (`FUN_0046CEA0`) emits it, and only on the **second**
+   * shot into wreckage it was still holding something behind.
+   */
+  "prop.pickup": { id: number; player: number; sound: number };
+  /**
    * The item a set of props was hiding came out. `set` is the item-set id, or
    * -1 for the `g_GameMode == 1` substitute, whose kind is in `kind`.
    */

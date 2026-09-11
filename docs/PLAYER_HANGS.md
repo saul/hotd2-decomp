@@ -1672,8 +1672,11 @@ three slots, and every write of `2` into `g_script_branch_var` in the image is
 behind `g_GameMode == 1`. Stage 2's slot-2 targets are blocks **29, 30, 31,
 32, 33 and 34** — off blocks 1, 3, 12, 8, 18 and 22 — so no arcade run,
 driven or played, can reach one. `--original` plays the Original Mode bundle,
-where the actors that write a 2 live; the rows above reach them by override in
-arcade, which is coverage and not a road the mode has.
+where the actors that write a 2 live — measured, the flag loads
+`stage2_original` (`118 models · 106,973 tris`) against arcade's `stage2`
+(`106,949`), and a run under it plays. The rows above reach those six blocks by
+override in **arcade**, which is coverage and not a road that mode has; playing
+them the way the game does is an Original Mode run and is not done here.
 
 **Nothing was rescued in the old runs because nothing had to be.** Once the
 rooms are cleared the game itself takes arm 1 at every fork that has a

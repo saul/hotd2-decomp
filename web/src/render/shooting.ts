@@ -303,8 +303,25 @@ export class Shooting implements System {
   }
 
   /**
-   * `ActorPlayHitVoice` (`FUN_0040A6F0`): a flesh impact plus a voice, with
-   * the voice taken from set A or set B by character type.
+   * `ActorPlayHitVoice` (`FUN_0040A6F0`) kinds 0, 1 and 2: a flesh impact plus
+   * a voice, with the voice taken from set A or set B by character type.
+   *
+   * `[diverges]` **This is the same engine routine `game/combat/voice.ts`
+   * holds, implemented twice, and the second copy is here because the layer
+   * rule is right and the port is not finished.** The engine plays these three
+   * kinds from `ActorShotFeedback` (`FUN_00454050`) and its sibling
+   * `FUN_00453EB0`, which are `game/` code — `feedback.ts` is already the port
+   * of the first — so the faithful home is there, and
+   * `verify_layers.py`'s `render-drives-the-port` refuses this layer to call
+   * into the engine for exactly that reason.
+   *
+   * Clearing it means reading the kind each of those two call sites passes
+   * (`0x00453F7A`, `0x0045402D`, `0x00454136`) and raising the voice from
+   * `feedback.ts`, which also moves the pick onto the **world** generator —
+   * the engine's `rand()` — and so into the snapshot. That is a change to the
+   * shot path's determinism and wants its own commit, not a ride along with
+   * the attack cry. Until then the two copies must be kept in step by hand,
+   * and this comment is the only thing saying so.
    */
   private voice(charType: number, kind: "hurt" | "kill" | "head"): void {
     const c = this.combat;

@@ -1333,6 +1333,57 @@ spawn that has a real character so the two never draw on top of each other.
 | 5 | 4 | 25 |
 | 6 | 2 | 20 |
 
+## Three enemies that had no module: the frog, the owl and the fish
+
+Classes `0x11`, `0x43` and `0x51`. All three increment **both** enemy counters,
+so every `wait_enemies_alive` behind one used to be a gate the port opened for
+the wrong reason. All three are now in `game/class11/`, `game/class43/` and
+`game/class51/`.
+
+**Each species is settled by a name table, not by shape.** Class 0x11's
+descriptor tail carries character type `0x1B`, which `g_character_skeletons`
+resolves to `frog.bin`, and its one voice is `COMMON\KAERU4_22.WAV` — *kaeru*.
+Class 0x43 draws sixteen slots and every one lies in `owl.bin`, and it dies
+playing `COMMON2\FUKUROU1_22.wav` — *fukurō*. Class 0x51's twenty-frame swim
+strip is `fish.bin` entries 3 to 22. The bat records (`KOUMORI`) exist and the
+owl does not play them, which is what rules out the other reading.
+
+**None of the three has hit points.** `obj+0x11C` is written once in each and
+never compared: `obj+0x34` bit 3 is the whole damage model, and one bullet kills.
+Each pays 80.
+
+| | frog `0x11` | owl `0x43` | fish `0x51` |
+|---|---|---|---|
+| spawns | 4, stage 1 block 3 | 14, stages 2 and 3 | 28, stages 2 and 3 |
+| drawn as | a skeleton, `frog.bin` | a hand-built slot chain | one slot of `fish.bin` |
+| how it attacks | a 30-frame ballistic leap; the hit is **timed**, on motion frame 60 | a dive; the hit is a **distance**, five units from the eye | a lunge to one of four points in camera space |
+| what limits it | `g_attack_permits`, the same array class 0x30 uses | `g_class43_attack_token`, one per flock | `g_water_attack_slots`, four |
+| when it leaves | despawns after a landed leap, **without dying** | never: dive and orbit for ever | falls back and despawns |
+
+Three readings from these that are worth keeping:
+
+* **The engine's free value for `g_attack_permits` is zero, not -1.**
+  `ReleaseAttackSlot` (`FUN_00456520`) opens with `XOR EDX, EDX` and writes
+  that, and the frog tests `!= 0` for "taken". The port's array holds `-1` for
+  free and the holder's `at` otherwise, which is a `[port-only]` choice made
+  because a pointer is not an `at`; `game/class11/` spells its tests in the
+  port's sentinel and says so on the spot.
+* **A class-0x51 descriptor whose sub-type is 6 is not a fish.** It is the
+  water: `FishInit` clears the four attack slots, copies the tail's first float
+  into `g_water_level` and kills the actor. Seven of the twenty-eight shipped
+  records are these, which is why they sit at the world origin with no
+  orientation.
+* **A sub-type-0 owl cannot be shot until the camera's path frame passes 682**,
+  and no other sub-type has that guard.
+
+**What is not ported**, and each is declared where it lives: the owl's body
+chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
+per actor) and the four per-sub-type landings its corpse has; the frog's
+head-look fix-up and its actor-versus-actor push, whose transformed point is
+`[open]` between view and world space; and the fish's three cosmetic tasks,
+whose sounds are ported and whose sprites are not because none of the three
+engine routines has a termination to copy.
+
 ## The gameplay loop
 
 **Done.** Enemies advance by the game's own **advance rings**, compete for an
@@ -1749,7 +1800,7 @@ wants it* before the attack run starts. Twelve of those 37 have shipped spawns,
 | 29 | `ZombieStateRideCarrier` | 6 | rides `g_carrier_object` |
 | 30 | `ZombieStateArcScriptedEntrance` | 3 | a scripted ballistic arc |
 | 31 | `ZombieStateWaitScriptFlagThenEnter` | 4 | a script flag — and counts itself in |
-| 32 | `ZombieStateDelayedStrikeInPlace` | 3 | a timer, then swings for ever |
+| 32 | `ZombieStateDelayedStrikeInPlace` | 3 | a timer, then swings for ever — **on the car**, see below |
 
 Four things worth carrying forward from reading them:
 
@@ -2113,12 +2164,21 @@ the fall runs about `0x23` frames longer than the solution. That is the
 engine's arithmetic, not a port bug, and the harness checks that arm for
 landing at all rather than for landing on the point.
 
-`[diverges]` **The port has no rideable object.** Every class that writes
-`g_carrier_object` is unported, so it stays -1, and two states take their
-no-carrier arms: state 29 hands over immediately rather than parking six spawns
-for ever, and state 32 never takes its give-up branch. Riding properly needs
-the vehicle classes (`St1VehicleUpdate`, `FUN_0048E600`, and its peers) — a
-separate port, not a line edit.
+`[diverges]` **The port guards `g_carrier_object` where the engine does not.**
+This used to say the port had no rideable object at all; class 0x33 selector 1
+is ported now and `g_carrier_object` is live in the three stages that have one.
+What is left is the guard itself: the engine dereferences the global with no
+null test — `0x0045E781` in `ZombieAttachToCarrier` and `0x0045EAFE` in
+`ZombieStateDelayedStrikeInPlace` — and the port cannot, because `ActorByAt`
+returns `undefined` and there is no pointer to follow. Three sites take a
+no-carrier arm: state 29 hands over immediately rather than parking six spawns
+for ever, state 32 never takes its give-up branch, and the seat below is
+skipped so the actor keeps its descriptor offset. All three are unreachable in
+the shipped data, because every spawn that reads the global is in a step that
+has already made the carrier; each is pinned by an assertion in
+`web/test/port.test.ts` rather than only by this paragraph (`L26`).
+`Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's boat, is the one remaining
+unported writer.
 
 ### The entrance a shot may not interrupt
 
@@ -2275,6 +2335,46 @@ The drawing is not ported and does not need to be — `tools/hod2lib/rigs.py`
 already carries it as `obj_4331d0` and the renderer places it. Nor is
 `RegisterForShotTest` at `0x004334D0`: stage 2's two are on the mesh shot test
 the port has not got, and stage 5's sphere is 0.1 units.
+
+#### The other way of riding it, which is not a state at all
+
+**Three bits of that section were not the whole story.** Class 0x30 has a
+*second* carrier mechanism and it sits one level above the state machine:
+`ZombieAttachToCarrier` (`FUN_0045E770`), called from
+`EnemyZombieInitByCharType` (`FUN_00452FD0`) at `0x00453053` and from
+`EnemyZombieUpdate` (`FUN_004533F0`) at `0x00453424` — **before** the state
+dispatch, every frame. A spawn whose descriptor sets `obj+0x34` bit 3 has its
+position and yaw re-read as **carrier-local**, stashed at `obj+0x13D8` and
+`obj+0x135C`, and the seat puts the actor back on the carrier through the
+carrier's translate, its yaw and a half turn. It is rigid, where state 29 adds
+only the translation, and it applies in whatever state the actor is in.
+
+`[proved]` Exactly four shipped descriptors set that bit, all class 0x30, all
+in stage 5 block 2 step 2 op 38 — one op after the car itself:
+
+| evt | descriptor position | state |
+|---|---|---|
+| `0x1D44` | `(-4.6, 10.0, -16.5)` | 32 |
+| `0x1D74` | `(-4.6, 5.0, -2.6)` | 32 |
+| `0x1DA4` | `(-4.6, 5.0, 7.0)` | 32 |
+| `0x1DD4` | `(4.6, 0.0, 0.0)` | 18 |
+
+Those are offsets up the bed of the car, not world positions, and they are why
+this took two reports to find: `ZombieStateDelayedStrikeInPlace` really does
+never move an actor, and `SpawnFromDescriptor` really does copy the position
+verbatim, so a note in `class30/scripted.ts` concluded from both that standing
+at `d≈2870` was correct and "the distance was never the bug". Both premises are
+true; the conclusion is not, and `d≈2870` was the distance from the player to
+the world origin. **A state that moves nothing is not the same thing as an
+actor that does not move.**
+
+Two port names went with it, both `L20`: `ZombieFlag2.SpawnedInAir` was this
+bit's flag named for what an offset with `y = 5` looks like from outside and is
+`AttachedToCarrier`; `ZombieAux.CarrierOffset` was `obj+0x38` bit `0x20`, which
+gates `TurnActorTowardCameraEye(obj, 0x1A0)` in both carrier states and has
+nothing to do with the offset, and is `TurnTowardCameraEye`. Neither was
+written or read by the port, which is the tell worth keeping: a named flag with
+no writer and no reader is a reading nobody finished.
 
 
 **Done for the hinge family.** The zombies that lunge out of a van in stage 2

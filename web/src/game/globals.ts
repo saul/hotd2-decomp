@@ -95,19 +95,67 @@ export interface ThrownWeapon {
   vel: Vec3;
   /** Frames of flight left. */
   ttl: number;
-  /** BAMS per frame, signed by which hand threw it. */
+  /**
+   * BAMS per frame. `[diverges]` — see {@link ThrownWeapon.spinAngle}, which
+   * carries the whole of why this number is the port's own.
+   */
   spin: number;
   /**
-   * The accumulated tumble, `obj+0x68`.
+   * Which axis the tumble turns about, and it is **not the same for both
+   * throwing families**.
    *
-   * `ThrownWeaponFlyToTarget` does `obj+0x68 += obj+0x135C` every frame in
-   * flight — negated for the other hand — and `ThrownWeaponUpdate` draws the
-   * weapon as `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)`. So
-   * the tumble is the **Y** term: the weapon turns about its own vertical.
-   * The X and Z terms are zero in flight; they are only set on landing, when
-   * `AimThrownWeapon` points the stuck weapon back at the camera.
+   * Both draw the weapon the same way — `ThrownWeaponUpdate` (`FUN_00450780`)
+   * and `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) each emit
+   * `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — but they
+   * accumulate the tumble into **different terms**:
+   *
+   * | family | flight step | term | axis |
+   * |---|---|---|---|
+   * | class 0x31 | `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), `0x0044FDE9` | `obj+0x68` | **Y** |
+   * | class 0x30 | `ZombieThrownWeaponStateStraight` (`FUN_00459690`), `0x00459731` | `obj+0x64` | **X** |
+   *
+   * `[proved]`. Class 0x31 also negates the step unless the throwing hand
+   * `obj+0x1358` is bone 5; class 0x30 has no such test and adds it plainly.
+   * The port turned **everything** about Y, so a class-0x30 thrower's axe
+   * cartwheeled while a class-0x31 thrower's looked right — which is exactly
+   * how it was reported: *the spin depends on which zombie is throwing*.
+   *
+   * `axis` is the port's way of carrying the difference to the renderer
+   * without giving the record two nearly-identical angle fields.
+   */
+  axis: "x" | "y";
+  /**
+   * The accumulated tumble — `obj+0x68` for class 0x31, `obj+0x64` for class
+   * 0x30. See {@link ThrownWeapon.axis}.
+   *
+   * `[diverges]` **The rate is the port's invention, because the engine's is
+   * uninitialised memory.** Neither launcher writes the projectile's
+   * `obj+0x135C`: `SpawnThrownWeapon` (`FUN_004504E0`) writes only the model
+   * and `obj+0x1364`, and `ZombieThrowHandWeapon` (`FUN_0045A240`) only the
+   * model and the position. `ThrowerReleaseAttackPermit`'s sibling writes on
+   * `+0x135C` are all onto the *thrower*, where the field holds the hand bone.
+   * And the allocator does not clear it: `FUN_004A6FA0` zeroes exactly the
+   * first 0xD dwords — the task header — and `FUN_004A7400` is a free-list
+   * split that hands back the block as it stands. So every field from
+   * `obj+0x34` up is whatever the previous occupant of that arena block left,
+   * and the tumble rate with it. `[proved]` for the two zeroing bounds; the
+   * consequence is stated as a reading, not measured against a running game.
+   *
+   * The port has no arena to recycle, so there is no faithful value to copy.
+   * It picks a stable one instead and says so here.
    */
   spinAngle: number;
+  /**
+   * `obj+0x1364` — a **constant** added to the X term at draw time, per
+   * character type: `0x600` for `zsass` (0x16) and 0 for 0x18, both written by
+   * `SpawnThrownWeapon` (`FUN_004504E0`). Class 0x30's launcher never writes
+   * it at all, so it is 0 there.
+   *
+   * It is a fixed tilt and **not** a rate, which is what the port had been
+   * using it as: `THROWER_SLOTS[0x16].spin = 0x600` drove the Y tumble with a
+   * number the engine adds once, to X.
+   */
+  tilt: number;
   /** Frames spent in the stick-and-blink tail once the flight is done. */
   after: number;
   hit: boolean;
@@ -479,6 +527,63 @@ export const G = {
    * first; slots 0 and 1 are the permit holders. Holds `at`, not pointers.
    */
   g_enemy_slots: [] as number[],
+
+  // -- the water, class 0x16/0x17's plane and class 0x51's four slots -----
+  /**
+   * `g_water_level` — 0x007DCBB0. The height of the water plane.
+   *
+   * A data initialiser puts -24.90 there, and it is **rewritten by every
+   * class-0x51 group header**: a descriptor whose `tail+0x0E` is 6 is not a
+   * fish at all, it is the surface, and `FishInit` (`FUN_00438540`) copies its
+   * `tail+0x00` float here before killing itself. Class 0x16 records the same
+   * plane for the wave field.
+   */
+  g_water_level: -24.9,
+  /**
+   * `g_water_attack_slots` — 0x009A2C20, four dwords.
+   *
+   * The only thing that lets a class-0x51 fish leave the surface, and the
+   * reason four of them can be in the air at once and no more.
+   * `FishClaimSlotAndLunge` (`FUN_00438850`) claims one and the index is also
+   * *where* the fish leaps to — the four are points in the camera's own space.
+   * `SpawnFishAt` (`FUN_00438640`) refuses to place one at all while any slot
+   * is taken, which is what paces the stage-2 boss's summoning rounds.
+   */
+  g_water_attack_slots: [0, 0, 0, 0],
+  /**
+   * `[port-only]` — the next spawn address to give an actor **nothing placed**.
+   *
+   * The port identifies an actor by the evt offset of the descriptor it came
+   * from, and `SpawnFishAt` (`FUN_00438640`) has no descriptor at all: the
+   * stage-2 boss calls it with three floats. Negative, and counting down, so
+   * such an actor can never collide with a real descriptor offset and
+   * `ActorByAt` still answers.
+   */
+  g_summoned_actor_at: -1,
+  /**
+   * `[port-only]` — the spawn addresses `SpawnSlotActors` has already built.
+   *
+   * There is no such list in the engine, and there cannot be: the spawn opcode
+   * builds an object once, in the step that holds it, and never looks again.
+   * The port materialises slot-drawn actors from the walker's live spawn list
+   * every frame, so it needs to remember which of them it has made — otherwise
+   * an actor that despawns under its own state machine comes straight back.
+   * An entry is dropped when the script stops listing that spawn.
+   */
+  g_slot_actors_built: [] as number[],
+
+  // -- the owls, class 0x43 ----------------------------------------------
+  /**
+   * `g_class43_attack_token` — 0x008111E0. **-1 means nobody is attacking.**
+   *
+   * One permit for a whole flock, and the reason owls come at you in turn
+   * rather than all at once: `OwlStateWaitLaunchDelay` and
+   * `OwlStateCircleHoldingPoint` refuse to begin a run-in unless they read -1,
+   * the launch stamps the owl's own member index into it, and the pull-out and
+   * the death give it back. It is **not** `g_attack_permits`: class 0x43 never
+   * touches that array at all.
+   */
+  g_class43_attack_token: -1,
 
   // -- breakable props, class 0x41 ---------------------------------------
   /**
@@ -1011,6 +1116,11 @@ export function ResetGameGlobals(): void {
   // first gate of the new one.
   G.g_evt_wait_alive_hysteresis = 0;
   G.g_enemy_slots = [];
+  G.g_water_level = -24.9;
+  G.g_water_attack_slots = [0, 0, 0, 0];
+  G.g_summoned_actor_at = -1;
+  G.g_slot_actors_built = [];
+  G.g_class43_attack_token = -1;
   G.g_thrown_weapons = [];
   G.g_rain_particles = [];
   G.g_thrown_next_id = 1;

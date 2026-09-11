@@ -19,23 +19,23 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 35131 | 143 | engine |
-| `hod2lib/` | 15241 | 34 | engine |
-| `render/` | 8007 | 29 | render |
-| `app/` | 7297 | 29 | app |
+| `game/` | 39370 | 152 | engine |
+| `hod2lib/` | 15452 | 34 | engine |
+| `render/` | 8047 | 29 | render |
+| `app/` | 7332 | 29 | app |
 | `script/` | 4144 | 25 | engine |
-| `ui/` | 3032 | 26 | ui |
-| `bundle/` | 1999 | 11 | engine |
+| `ui/` | 3094 | 26 | ui |
+| `bundle/` | 2057 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `hud/` | 349 | 1 | ui |
 | `audio/` | 248 | 1 | render |
-| **total** | **76352** | **308** | |
+| **total** | **80997** | **317** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/class14/index.ts` — 2108
-* `app/main.ts` — 1957
-* `game/actor.ts` — 1813
+* `game/class14/index.ts` — 2106
+* `app/main.ts` — 1977
+* `game/actor.ts` — 1886
 * `hod2lib/exetab.ts` — 1799
 * `script/walker.ts` — 1780
 
@@ -43,12 +43,12 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **159 of 260** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 102 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 261 ported functions match `functions.tsv` under the same name |
-| Spawn classes | **16 of 43** read classes have a module, covering 1349 of 1624 placements |
-| Declared `[diverges]` | **141** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **135** — questions the port is honest about not having answered |
+| Gameplay coverage | **160 of 262** annotated functions in the gameplay address ranges have a port (61%) |
+| Ported outside those ranges | 147 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 307 ported functions match `functions.tsv` under the same name |
+| Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
+| Declared `[diverges]` | **159** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **147** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,8 +56,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 762 in `ghidra/annotations/functions.tsv` |
-| Named globals | 378 in `ghidra/annotations/globals.tsv` |
+| Named functions | 829 in `ghidra/annotations/functions.tsv` |
+| Named globals | 386 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 29 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
@@ -110,6 +110,7 @@ nothing exits 3 and is never counted as green.
 | `test:seek` | that a seek reaches the address it was asked for | bundle |
 | `test:state` | that a save/load and a seek reach the *same world* play did -- the only check that compares two histories rather than one | bundle |
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
+| `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
@@ -119,7 +120,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-8 of them need the installed game and 3 need an exported
+8 of them need the installed game and 4 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

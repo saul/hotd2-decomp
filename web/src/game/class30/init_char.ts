@@ -19,7 +19,7 @@
  * do.
  */
 import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
-import { ZombieSeatOnCarrierFromDescriptor } from "./carrier";
+import { SPAWN_RIDE_CARRIER, ZombieAttachToCarrier } from "./carrier";
 
 /**
  * The two bits this routine consumes out of the spawn record's flags word.
@@ -73,7 +73,26 @@ export function EnemyZombieInitByCharType(obj: ZombieActor): void {
     obj.flags &= ~SPAWN_TURN_TOWARD_CAMERA;
     obj.flags38 |= ZombieAux.TurnTowardCameraEye;
   }
-  // `0045301D  if (obj+0x34 & 8) { ...seat on the carrier... }` — the fourth
-  // arm, and the only one that moves the actor. See `class30/carrier.ts`.
-  ZombieSeatOnCarrierFromDescriptor(obj);
+  // `0045301D  TEST byte ptr [EBP + 0x34], DL` with `DL = 8` — the fourth
+  // arm, and the only one that moves the actor rather than moving a bit.
+  //
+  // It re-reads the descriptor's position and yaw as **carrier-local**: the
+  // position goes to `obj+0x13D8` and the yaw to `obj+0x135C`, the flag that
+  // makes `EnemyZombieUpdate` re-seat the actor every frame goes up, the seat
+  // runs once here so the actor is on the carrier from frame one, and the
+  // carried bit goes up **after** the call and not before. See
+  // `class30/carrier.ts` for `ZombieAttachToCarrier` and for what settled it.
+  if (obj.flags & SPAWN_RIDE_CARRIER) {
+    // `00453022/00453025/0045303D  obj+0x13D8/E0/DC = obj+0x40/48/44`, and
+    // `00453034  obj+0x135C = obj+0x68`.
+    obj.strikeStart.x = obj.pos.x;
+    obj.strikeStart.y = obj.pos.y;
+    obj.strikeStart.z = obj.pos.z;
+    obj.zom.throwHand = obj.yaw;
+    // `00453028  OR ECX, 0x10000000`, stored to `obj+0x136C` at `00453037`.
+    obj.flags2 |= ZombieFlag2.AttachedToCarrier;
+    ZombieAttachToCarrier(obj);
+    // `OR EAX, 0x100000` on the word re-read at `00453058` — after the call.
+    obj.flags2 |= ZombieFlag2.Carried;
+  }
 }

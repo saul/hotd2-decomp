@@ -375,6 +375,15 @@ export class Placement {
    * fields**, because class 0x20 reads those same bytes as something else.
    */
   class20: Record<string, unknown> | null = null;
+  /** Class 0x11's tail -- the frog's cue, wedge and command list. */
+  class11: Record<string, unknown> | null = null;
+  /** Class 0x43's two bytes -- the owl's member index and sub-type. */
+  class43: Record<string, unknown> | null = null;
+  /**
+   * Class 0x51's tail -- the fish's speeds, bob and timings, **or** the water
+   * level, when `subtype` is 6 and the record is a group header.
+   */
+  class51: Record<string, unknown> | null = null;
   /** Class 0x52's tail -- `{subtype}`. */
   class52: Record<string, unknown> | null = null;
   /** Class 0x53's tail -- `{anim_set, subtype}`. */
@@ -446,6 +455,9 @@ export class Placement {
     }
     if (this.intro) d.intro = { motion: this.intro[0], delay: this.intro[1] };
     if (this.class20) d.class20 = this.class20;
+    if (this.class11) d.class11 = this.class11;
+    if (this.class43) d.class43 = this.class43;
+    if (this.class51) d.class51 = this.class51;
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;
     if (this.class14) d.class14 = this.class14;

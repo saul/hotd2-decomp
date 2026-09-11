@@ -14,6 +14,13 @@ export enum SpawnClass {
   /** `FUN_0048A3E0` — civilian / rescuable victim. Shooting one costs a life. */
   Civilian = 0x10,
   /**
+   * `FrogInit` (`FUN_0043A080`) — **the frog**, character type `0x1B` =
+   * `frog.bin`, fifteen bones. One shot kills it and it pays 80. Four spawns,
+   * all in stage 1 block 3, driven by a command list in the descriptor tail.
+   * Ported (`game/class11/`).
+   */
+  Frog = 0x11,
+  /**
    * `Class14Init` (`FUN_00475E90`) — **the stage-2 boss**, character type
    * `0x47` = `boss2.bin`, and the only class in the game with twelve
    * `g_script_flags` writers of its own. Five spawns: stage 2 blocks 35, 37,
@@ -82,7 +89,12 @@ export enum SpawnClass {
   PropContainerPlacer = 0x41,
   /** `FUN_0042F9B0` — a batch of falling shootable breakables. */
   FallingBreakables = 0x42,
-  /** `FUN_00445DB0` — flying enemy. */
+  /**
+   * `PlaceOwlFlockMember` (`FUN_00445DB0`) — **the owl**, settled by
+   * `owl.bin` and by `COMMON2\FUKUROU1_22.wav`. A placer: it builds a
+   * 0x2A0-byte object of its own and dies. Fourteen spawns in two stages, in
+   * four groups of four sharing one attack token. Ported (`game/class43/`).
+   */
   FlyingEnemy = 0x43,
   /** `FUN_00472B10` — prop placer. */
   PropPlacer = 0x44,

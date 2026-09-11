@@ -107,7 +107,7 @@ const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
 /** The commands that change something worth remembering across a reload. */
 const PREF_COMMANDS: ReadonlySet<string> = new Set([
   "toggle", "setLightMode", "setFogMode", "setFilterMode", "setPillarbox",
-  "setSpeed",
+  "setSpeed", "toggleMute", "setVolume",
 ]);
 
 /**
@@ -951,6 +951,24 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       this.runCommand({ kind: "setPillarbox", on: prefs.pillarbox });
     }
     if (prefs.speed) this.runCommand({ kind: "setSpeed", speed: prefs.speed });
+    // Volume before mute, because `setVolume` does not unmute and the restored
+    // pair has to land in the same state it was saved in.
+    if (prefs.volume !== undefined) {
+      this.runCommand({ kind: "setVolume",
+                        volume: Math.round(prefs.volume * 100) });
+    }
+    // `toggleMute` flips, so it is only sent when the saved value differs from
+    // where `Bgm` starts. A restore that is a no-op has to *be* a no-op:
+    // sending it unconditionally would unmute a viewer who left it muted.
+    //
+    // **Browsers block audio until the page is clicked**, so restoring
+    // *unmuted* does not make sound come out on its own — the first click
+    // does, which is the same gesture that unblocks it either way. That is why
+    // this is safe to restore rather than something that would surprise a
+    // viewer with noise.
+    if (prefs.muted !== undefined && prefs.muted !== this.bgm.muted) {
+      this.runCommand({ kind: "toggleMute" });
+    }
   }
 
   /** Every setting worth remembering, as it stands now. */
@@ -965,6 +983,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       filterMode: this.texFilter.filterMode,
       pillarbox: this.pillarbox,
       speed: this.speed,
+      muted: this.bgm.muted,
+      volume: this.bgm.volume,
     });
   }
 

@@ -23,6 +23,7 @@ import { g_class_handlers } from "./registry";
 import type { SpawnClass } from "./spawn_class";
 
 import "./class10";
+import "./class11";
 import "./class19";
 import "./class14";
 import "./class20";
@@ -33,7 +34,9 @@ import "./class30";
 import "./class31/thrower";
 import "./class33";
 import "./class41";
+import "./class43";
 import "./class44";
+import "./class51";
 import "./class52";
 import "./class53";
 import "./class60";

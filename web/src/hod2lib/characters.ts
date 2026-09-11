@@ -42,7 +42,7 @@ import { build, goreEntry, rigEntry } from "./charbuild";
 import type { Character } from "./charbuild";
 import { CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, bake,
          humanoidMotionIds, introFor, motionFor,
-         BOSS4_CLIPS } from "./charmotion";
+         BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
          difficultyTables, playerDamage, reactionGroups,
@@ -108,10 +108,120 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * so `spawnres` can never identify one and the placement has to survive that
  * anyway. See the note in `resolveForStage`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x33, 0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x33, 0x43, 0x51, 0x52]);
 
 export function class52Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: rec.param(0x00, "i16") || 0 };
+}
+
+/**
+ * Class 0x51's descriptor tail, as `FishInit` (`FUN_00438540`) reads it.
+ *
+ * ```
+ * tail+0x00  f32  the x speed toward the camera -- or, on a group header,
+ *                 the water level itself
+ * tail+0x04  f32  the z speed
+ * tail+0x08  f32  how far the surface bob swings
+ * tail+0x0C  i16  0 draws solid and casts a surface shadow, 1 fades in
+ * tail+0x0E  i16  the sub-type -- and **6 means this record is not a fish**
+ * tail+0x10  i16  frames spent rising
+ * tail+0x12  i16  bob cycles to sit through before it may lunge
+ * tail+0x14  i16  frames the lunge lasts
+ * ```
+ *
+ * The header is the reason `water_level` is carried beside `speed_x` rather
+ * than instead of it: they are the same four bytes, read as different things
+ * by the two arms of the Init, and which arm runs is decided by `subtype`.
+ * Seven of the twenty-eight shipped class-0x51 descriptors are headers.
+ *
+ * Its own block for the reason class 0x20's and class 0x52's are: `tail+0x00`
+ * is class 0x30's body condition.
+ */
+/**
+ * Class 0x11's descriptor tail, as `FrogInit` (`FUN_0043A080`) and
+ * `FrogArmScriptFromDescriptorTail` (`FUN_0043A670`) read it.
+ *
+ * ```
+ * tail+0x00  u16  character type -- 0x1B, frog.bin, in all four
+ * tail+0x02  s16  the motion it starts in -- 0x141 in all four
+ * tail+0x04  s16  the camera path state 0 waits for
+ * tail+0x06  s16  ...and the frame
+ * tail+0x08  u16  the heading wedge; 0 means "the half-FOV less 0x200"
+ * tail+0x0A  ...  the command list: s16 opcodes, 0xFFFF terminated
+ * ```
+ *
+ * **The opcode is the state.** Its low byte goes straight into `sub+0x04`, and
+ * only two of the eight carry operands: 0 takes a camera path, a frame and a
+ * motion, and 3 takes one absolute heading. There is no jump and no loop -- at
+ * the terminator the cursor stops for good and the class's own chooser takes
+ * over, so the list is a prologue rather than a program.
+ *
+ * The list is decoded here rather than carried raw because its length is not
+ * self-describing and the operand count is per opcode: a client reading the
+ * bytes would have to know the grammar to know where the next opcode is.
+ */
+/**
+ * Class 0x43's descriptor "tail", which is two bytes.
+ *
+ * All fourteen shipped spawns use `spawn_placed` (0x09), so there is no
+ * parameter block at all: `EvtOpSpawnPlaced09` (`FUN_004088A0`) reads
+ * `desc+0x24` into `obj+0x1F4` and `desc+0x25` into `obj+0x130C` inline. The
+ * first is 0 in every record and the second is the **sub-type**, 0 to 3.
+ *
+ * The **member index** is `desc+0x22 - 1`, which the allocator has already put
+ * in `hp`. It selects the launch delay, the retreat climb and the row of
+ * `g_class43_approach_curves` the owl flies. Stage 2 block 5's two sub-type-0
+ * records reuse indices 0 and 1, which the port copies rather than tidies --
+ * see `game/class43/`.
+ */
+export function class43Tail(rec: Spawn): Record<string, unknown> {
+  const b = rec.evt?.raw;
+  const at = rec.offset + 0x24;
+  const s8 = (v: number | undefined) => ((v ?? 0) << 24) >> 24;
+  return {
+    subtype: b ? s8(b[at + 1]) : 0,
+    member: Math.max(0, (rec.hp ?? 1) - 1),
+  };
+}
+
+export function class11Tail(rec: Spawn): Record<string, unknown> {
+  const args: Record<number, number> = { 0: 3, 3: 1 };
+  const commands: { op: number; args: number[] }[] = [];
+  let at = 0x0a;
+  for (let guard = 0; guard < 64; guard += 1) {
+    const op = rec.param(at, "i16");
+    if (op === null || op === -1) break;
+    at += 2;
+    const n = args[op & 0xff] ?? 0;
+    const list: number[] = [];
+    for (let k = 0; k < n; k += 1) {
+      list.push(rec.param(at, "i16") ?? 0);
+      at += 2;
+    }
+    commands.push({ op, args: list });
+  }
+  return {
+    char_type: rec.param(0x00, "u16") ?? 0,
+    motion: rec.param(0x02, "i16") ?? 0,
+    cam_path: rec.param(0x04, "i16") ?? 0,
+    cam_frame: rec.param(0x06, "i16") ?? 0,
+    wedge: rec.param(0x08, "i16") ?? 0,
+    commands,
+  };
+}
+
+export function class51Tail(rec: Spawn): Record<string, unknown> {
+  return {
+    water_level: rec.param(0x00, "f32") ?? 0,
+    speed_x: rec.param(0x00, "f32") ?? 0,
+    speed_z: rec.param(0x04, "f32") ?? 0,
+    bob_amplitude: rec.param(0x08, "f32") ?? 0,
+    entry_mode: rec.param(0x0c, "i16") ?? 0,
+    subtype: rec.param(0x0e, "i16") ?? 0,
+    rise_frames: rec.param(0x10, "i16") ?? 0,
+    bob_cycles: rec.param(0x12, "i16") ?? 0,
+    lunge_frames: rec.param(0x14, "i16") ?? 0,
+  };
 }
 
 /**
@@ -516,6 +626,9 @@ export async function resolveForStage(
       }
     }
     const class20 = cls === 0x20 ? class20Tail(rec) : null;
+    const class11 = cls === 0x11 ? class11Tail(rec) : null;
+    const class43 = cls === 0x43 ? class43Tail(rec) : null;
+    const class51 = cls === 0x51 ? class51Tail(rec) : null;
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
     const class14 = cls === 0x14 ? class14Tail(rec) : null;
@@ -596,6 +709,9 @@ export async function resolveForStage(
     p.leap_strike_frames = leapStrikeFrames;
     p.ring_set = res.charType === 0 ? RING_SET_FOR_CHAR0 : 0;
     p.class20 = class20;
+    p.class11 = class11;
+    p.class43 = class43;
+    p.class51 = class51;
     p.class52 = class52;
     p.class53 = class53;
     p.class14 = class14;
@@ -669,6 +785,8 @@ export async function resolveForStage(
     }
     if (cls === 0x31) entryClips.push(...class31MotionIds(class31));
     if (cls === 0x19) entryClips.push(...BOSS4_CLIPS);
+    // The frog's whole bank -- see `FROG_CLIPS`.
+    if (cls === 0x11) entryClips.push(...FROG_CLIPS);
     // The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
     if (cls === 0x14) entryClips.push(...CLASS14_MOTIONS);
     // The emerge clip, the submerged pose it holds first, and the two clips

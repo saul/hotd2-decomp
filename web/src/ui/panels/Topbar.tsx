@@ -79,6 +79,7 @@ export function StagePicker() {
         </select>
       </label>
       <EntryPicker />
+      <MuteButton />
       <label title="Game mode 1. Same regions; a few slots resolve to the st_org* models Arcade never draws.">
         <input type="checkbox" checked={!!original}
                onChange={(e) => dispatch({ kind: "setOriginal",
@@ -86,6 +87,33 @@ export function StagePicker() {
         {" "}Original
       </label>
     </>
+  );
+}
+
+/**
+ * Sound on or off, and the gesture that unblocks it.
+ *
+ * In the top bar rather than the transport because it is the one audio control
+ * a viewer reaches for repeatedly, and it belongs with the other one-click
+ * switches rather than beside the frame scrubber. The volume slider went the
+ * other way, into the sidebar's Sound panel: it is set once.
+ *
+ * The button is deliberately not disabled while the browser is blocking audio.
+ * **A click here is what lifts the block**, so a disabled control would be a
+ * control that cannot do the one thing it exists for. `#bgm-label` in the
+ * transport bar is where the blocked state is announced.
+ */
+function MuteButton() {
+  const dispatch = useDispatch();
+  const sound = useSlice((p) => p?.sound);
+  if (!sound) return null;
+  return (
+    <button className="sound" aria-pressed={!sound.muted}
+            title="Sound on / off. Browsers block audio until the page is clicked, so this is also the gesture that unblocks it."
+            onClick={() => dispatch({ kind: "toggleMute" })}>
+      <span>{sound.muted ? "\u{1F507}" : "\u{1F50A}"}</span>
+      {" "}<span>{sound.text}</span>
+    </button>
   );
 }
 

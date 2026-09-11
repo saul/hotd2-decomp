@@ -57,12 +57,22 @@ export class ProjectileLayer implements System<RenderContext> {
       node.position.set(w.pos.x, w.pos.y, w.pos.z);
       node.visible = w.visible;
       if (w.ttl > 0) {
-        // `ThrownWeaponFlyToTarget` accumulates the spin into `obj+0x68`, and
-        // `ThrownWeaponUpdate` draws `Rz(obj+0x6C) * Ry(obj+0x68) *
-        // Rx(obj+0x1364 + obj+0x64)` — so the tumble is the **Y** term, and
-        // the other two are zero until it lands. This span was on Z, which
-        // cartwheels the weapon sideways.
-        node.rotation.set(0, w.spinAngle * BAMS_TO_RAD, 0);
+        // Both draw routines emit the same product — `ThrownWeaponUpdate`
+        // (`FUN_00450780`) and `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`)
+        // each do `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` —
+        // so the order here is `ZYX`, and the X term carries the constant
+        // `obj+0x1364` tilt whether or not anything is tumbling.
+        //
+        // **The two families tumble about different axes**, which is why this
+        // reads `w.axis` rather than always filling in Y. Class 0x31
+        // accumulates into `obj+0x68` and class 0x30 into `obj+0x64`; see
+        // `ThrownWeapon.axis` for the two instructions. This span was on Z
+        // once and then on Y for everything, and Y is right for only half of
+        // the throwers — a class-0x30 axe cartwheeled.
+        const turn = w.spinAngle * BAMS_TO_RAD;
+        node.rotation.order = "ZYX";
+        node.rotation.set(w.tilt * BAMS_TO_RAD + (w.axis === "x" ? turn : 0),
+                          w.axis === "y" ? turn : 0, 0);
       } else {
         // Landed: `AimThrownWeapon` points it back at the camera.
         node.lookAt(this._eye);

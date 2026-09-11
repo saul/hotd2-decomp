@@ -15032,3 +15032,203 @@ drawing from `0x00433463` to `0x0043382F`, which the renderer already does from
 the exported rig. `obj+0x6C` (roll) and `obj+0x118` (uniform scale) are written
 by the engine and read only by its own draw, so the port leaves them out rather
 than adding two head fields nothing in `game/` reads.
+
+---
+
+## Three enemies that had no module: the frog, the owl and the fish
+
+Classes `0x11`, `0x43` and `0x51`, read end to end and ported in one pass.
+Between them they are 46 of the game's spawns and every one of them counts into
+both enemy counters, so every `wait_enemies_alive` behind one used to be a gate
+the port opened for the wrong reason.
+
+### What settled each species
+
+Not shape, in any of the three cases — a name table each time, which is the
+lesson `docs/formats/sound.md`'s "On animals" section already had and this is
+the third and fourth and fifth time it has paid.
+
+* **`0x11` is a frog.** Its descriptor tail's first word is a character type,
+  `0x1B` in all four spawns, and `g_character_skeletons` (`0x004E0430`)
+  resolves that to `frog.bin`, 15 bones. Every draw slot it writes is a
+  `frog.bin` entry. And `FrogStateIdleAndCroak` plays `COMMON\KAERU4_22.WAV`.
+* **`0x43` is an owl.** `OwlDrawBodyChain` draws sixteen slots, all in
+  `0x0BBD..0x0C26`, which is `owl.bin` 0..105 — and nothing else in the image
+  draws from that run. The death sound is `COMMON2\FUKUROU1_22.wav`. The
+  `KOUMORI` (bat) records are adjacent in the table and the class never plays
+  them, which is what rules out the reading `spawns.md` left `[open]`.
+* **`0x51` is a fish.** Slots `0x1156`..`0x1169` are `fish.bin` 3..22 and the
+  death models `0xB6F`/`0xB70` are entries 0 and 1.
+
+### Four readings worth keeping
+
+1. **The free value of `g_attack_permits` is zero, not -1.**
+   `ReleaseAttackSlot` (`FUN_00456520`) is `XOR EDX, EDX` and then
+   `MOV [EAX*4 + 0x9A2BA0], EDX`, and class 0x11 tests `!= 0` for "taken" and
+   writes a literal 1 to claim. The port has held `-1` for free since the
+   permit was first ported, because it stores the holder's `at` rather than a
+   pointer and 0 is a legal `at`. That is a `[port-only]` sentinel, now said so
+   in `game/class11/index.ts` where the two conventions meet. The first draft
+   of the frog transcribed `!= 0` literally and the frog never attacked — the
+   test caught it, which is what the test is for.
+2. **A class-0x51 descriptor whose `tail+0x0E` is 6 is not a fish.** It is the
+   water surface: `FishInit` clears the four attack slots, copies `tail+0x00`
+   into `g_water_level` and kills the actor. Seven of the twenty-eight shipped
+   records are these, and that is why they sit at the world origin with no
+   orientation and no sensible speeds.
+3. **A sub-type-0 owl is invulnerable until `g_cam_path_frame` reaches 682.**
+   `FILD` / `FCOMP 682.0` at `0x004460EA`, and no other sub-type has the guard.
+4. **`FrogReadGroundPlaneY` (`FUN_0043A990`) ignores all three of its
+   arguments.** Two instructions: `FLD float ptr [g_camera_fixed_eye_y]` and
+   `RET`. Its four callers all push the actor's position, and the decompiler
+   shows a three-float signature. Implementing it as a terrain query would have
+   been a plausible, wrong port — `L1` exactly.
+
+### What the decompiler hid, three times
+
+`L37` bit in all three classes and it was load-bearing every time.
+
+* `FrogStateHopWithinScreenWedge` — **687 bytes** dropped at
+  `0x0043AAC8`..`0x0043AD76` plus 42 more. Read literally, the pseudocode says
+  substate 0 never picks a heading. The missing bytes are the whole wedge
+  clamp.
+* `FrogStateLeapAtPlayer` — 288 bytes at `0x0043B3F2`..`0x0043B50E` and 75
+  more; substate 0 appears never to advance, i.e. the frog can never attack.
+* `OwlStateDiveAtCamera` — 395 bytes: the listing jumps `0x004470EC` to
+  `0x0044727C` past a `MatrixStackPop` Ghidra has marked no-return, and those
+  bytes are the **entire** sway trajectory, which is the arm every relaunch
+  after the first uses. `OwlDrawBodyChain` loses 640 the same way.
+
+Anyone porting from the pseudocode alone would have produced a frog that stands
+still for ever and an owl with one dive instead of two.
+
+### What moved in the port
+
+`ActorSpawn` and `ActorInitFlags` are out of `director.ts` and into
+`game/spawn.ts`. `director.ts` imports `classes.ts` for its side effects, so
+every class module is downstream of it and a class that needs to *make* an
+actor — the stage-2 boss's summoning rounds through `SpawnFishAt` — would close
+an ESM cycle and get `undefined` back, which is the failure `registry.ts`
+already has three hours of history about. `director.ts` re-exports both, so
+nothing else moved.
+
+`Actor` gained `roll` (`obj+0x6C`). The class-0x33 entry above left it out on
+the grounds that only the engine's own draw reads it; class 0x43 writes it from
+four different states and a snapshot has to carry the pose, so it is a head
+field now.
+
+### What is not ported, named
+
+The owl's `OwlDrawBodyChain` — sixteen slots in one hand-built matrix chain
+against `render/slotmodels.ts`'s one node per actor — and the four per-sub-type
+landings its corpse has, which are a stairwell with two reflecting rails, a
+plane, a box with a stepped floor and a water line. The frog's head-look
+fix-up, which works on per-bone Euler angles the port has no field for, and
+`FrogPushOutOfActorCollision`, whose transformed point is `[open]` between view
+and world space — porting it under the wrong reading would push frogs the wrong
+way, which is worse than not pushing them. And the fish's three cosmetic tasks:
+their sounds are ported and their sprites are not, because none of the three
+engine routines has a termination to copy.
+
+`Class14StateSummonRoundA`'s `[diverges]` is narrower than it was but still
+there: class 0x51 has a module now, so `SpawnFishAt` would build a real fish,
+but **where** the boss puts one is not read — the call takes a height from
+`FUN_00442390`, the class-0x16 wave field, at an x and z built from a camera
+block and two of the boss's own floats, and neither has been read.
+
+## 2026-09-11 — the three zombies were on a car, and the port's own note said they were not
+
+One report, one URL — `?stage=5&mode=play&block=2&step=2&op=50&frame=599` —
+and two accounts of it that could not both be true. The reporter said three
+`znnick` should be travelling with the car and were standing 2890 away.
+`class30/scripted.ts` carried a doc comment naming that same URL and concluding
+**"the distance was never the bug"**, on the reasoning that
+`ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) never moves an actor and
+`SpawnFromDescriptor` (`FUN_00408A20`) copies the spawn position verbatim.
+
+**The reporter was right.** Both halves of the comment are true statements about
+the binary and the conclusion does not follow from them, which is what made it
+so hard to look past: it reads as a settled case. `L26` is exactly this shape
+one level down — a divergence declared in prose that stopped anyone looking —
+and this is the same failure with a *conclusion* instead of a divergence.
+
+### What was actually there
+
+Reading `EnemyZombieInit` (`FUN_00452DA0`) downward rather than reading the
+state again:
+
+* `ActorInitFlags` (`FUN_00408970`) puts the descriptor's `+0x04` flags word on
+  `obj+0x34` before any `Init` runs.
+* `EnemyZombieInitByCharType` (`FUN_00452FD0`) has a **fourth arm** at
+  `0x0045301D` that nothing in this repo had read. The three before it move
+  single bits into `obj+0x38`; this one tests `obj+0x34 & 8` and, when it is
+  set, treats the descriptor's position and yaw as **carrier-local**: position
+  to `obj+0x13D8/DC/E0`, yaw to `obj+0x135C`, `obj+0x136C |= 0x10000000`, then
+  `ZombieAttachToCarrier` (`FUN_0045E770`, unnamed until now) and finally
+  `obj+0x136C |= 0x100000`.
+* `ZombieAttachToCarrier` seats the actor rigidly on `g_carrier_object`:
+  `MatrixTranslate(carrier+0x40/44/48)`, `MatrixRotateY(carrier+0x68)`,
+  `MatrixRotateY(0x8000)`, transform the stashed offset into `obj+0x40/44/48`,
+  and `MatrixToEulerBams` plus `obj+0x135C` into `obj+0x68`. Only the carrier's
+  yaw is read — its pitch and roll are ignored.
+* `EnemyZombieUpdate` (`FUN_004533F0`) re-runs that seat **every frame, at
+  `0x00453424`, before the state dispatch at `0x00453434`**. So a passenger
+  rides whatever state it is in, and a state that moves nothing is not the same
+  thing as an actor that does not move.
+
+Whole-corpus, and this is the part that makes it a fact rather than a reading:
+**exactly four descriptors in the twelve shipped scripts set `obj+0x34` bit
+3**, all class 0x30, all in `st5evtbl` block 2 step 2 op 38 —
+`0x1D44 (-4.6, 10, -16.5)`, `0x1D74 (-4.6, 5, -2.6)`, `0x1DA4 (-4.6, 5, 7)` in
+state 32 and `0x1DD4 (4.6, 0, 0)` in state 18. Those are not world positions;
+they are a line up the bed of a vehicle at `x = -4.6`, two of them five units
+off its floor. The carrier is the class-0x33 selector-1 car at evt `0x1CE4`,
+spawned by **op 37 of the same step**, which publishes itself into
+`g_carrier_object` in its own `Init` (`ScriptedSceneryDispatch33`,
+`0x00433014`) — so the global is live on the frame the four passengers are
+made, and the engine's null-test-free dereference is safe by construction.
+
+`d≈2870` was the distance from the player to the **world origin**. The port was
+leaving them at their offset, and their offset is near zero.
+
+### Two names that were guesses, and one arm that was the wrong half
+
+* `ZombieFlag2.SpawnedInAir` was `obj+0x136C` bit `0x10000000` named for what
+  an offset with `y = 5` looks like from outside. Nothing in the port set it and
+  nothing read it. It is `AttachedToCarrier`.
+* `ZombieAux.CarrierOffset` was `obj+0x38` bit `0x20`, on a note saying
+  `ZombieStateRideCarrier` "uses it to choose whether the actor's position is
+  the carrier's plus its own offset". It does not: that add at `0x00458A0E` is
+  unconditional, and the bit gates `TurnActorTowardCameraEye(obj, 0x1A0)` two
+  instructions later and nothing else. It is `TurnTowardCameraEye`, and both
+  readers — `0x004589F5` and `0x0045EAEA` — are transcribed now. Its three
+  source records are stage 2's first three state-29 riders, so stage 2's riders
+  turn toward the camera at 0x1A0 BAMS a frame where before they did not.
+
+Both are `L20` on the port side of the line, and both had the same tell: a flag
+that is *named* but neither written nor read.
+
+### Wrong turns
+
+* The first hour went into re-reading `FUN_0045E830` for a position write,
+  because the lead in the report pointed at `0x0045EAFE` — state 32's own
+  `g_carrier_object` read. There is no position write in that function: the
+  full disassembly, all 212 instructions of it, contains no FPU instruction at
+  all. `get_xrefs_to 0x009A5C34` is what found the answer, and the useful row
+  was the one nobody was looking for — two READs from `FUN_0045E770`, an
+  unnamed function sitting **immediately before** state 32 in the image. Start
+  at the global, not at the state that reads it.
+* `tools/enemy_gate.mjs` assigns `a.pos` *after* `ActorSpawn` returns, so it
+  overwrites whatever the class's `Init` computed and reported all four
+  passengers at `y0` with the fix in place. `SpawnScriptedCharacters`
+  (the real path) passes `pos` inside the descriptor, before `ActorInitFlags`
+  and the `Init`, which is why the page was right and the harness was not.
+  Twenty minutes on a harness shortcut; `L24`'s shape, two live copies of one
+  behaviour.
+* The locator itself is a **seek to the end of the camera path**: at
+  `frame=599` the carrier has not run its own ride (`path -1 frame 0/0`) and
+  sits at the origin, so the fixed port still reports `d≈2890` there. Played
+  from the spawn instead — `op=39&frame=240`, Space, four seconds — the car is
+  at `path 382 frame 480/590` and the four passengers are at `d=21..30` with
+  one of them swinging. A locator that reproduces a symptom is not always a
+  locator that can show the fix.

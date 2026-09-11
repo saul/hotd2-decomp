@@ -200,7 +200,8 @@ const WARM_IDS = ["topbar", "stage-picker", "modes", "view-settings",
                   "status", "stagearea", "left", "tree-filter", "tree",
                   "left-resize", "viewport", "view", "paused-overlay",
                   "skipbar", "branchbar", "right", "hud", "panel-wait",
-                  "panel-actors", "panel-route", "panel-feed", "feed",
+                  "panel-actors", "panel-sound", "panel-route",
+                  "panel-feed", "feed",
                   "inspector-panel", "scope-panel", "globals-panel",
                   "transport", "volume", "bgm-label", "frame-label"];
 

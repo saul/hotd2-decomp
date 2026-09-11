@@ -394,6 +394,47 @@ export interface CharacterPlacement {
     box: [number, number, number, number] | null;
   } | null;
   /**
+   * Class 0x11's tail — the frog.
+   *
+   * `cam_path` and `cam_frame` are the cue {@link FrogState.WaitForCamera}
+   * waits for, `wedge` the half-width of the part of the screen it may hop
+   * into (0 means the horizontal half-FOV less `0x200`), and `commands` the
+   * decoded list at `tail+0x0A`. **The opcode is the state**, and only 0 and 3
+   * carry operands. Past the end of the list the frog chooses for itself.
+   */
+  class11?: {
+    char_type: number; motion: number; cam_path: number; cam_frame: number;
+    wedge: number; commands: { op: number; args: number[] }[];
+  } | null;
+  /**
+   * Class 0x43's two descriptor bytes — the owl.
+   *
+   * `subtype` is `desc+0x25`, 0 to 3, and picks the group's whole behaviour;
+   * `member` is `desc+0x22 - 1`, 0 to 3, and picks the launch delay, the
+   * retreat climb and the approach spline's row.
+   */
+  class43?: { subtype: number; member: number } | null;
+  /**
+   * Class 0x51's tail — the fish.
+   *
+   * `speed_x` and `speed_z` are the per-axis closing speeds, scaled by the
+   * unit direction to the camera, so `0.0, 0.3` closes only in z.
+   * `bob_amplitude` is how far the surface ride swings, `entry_mode` picks
+   * between a solid draw with a surface shadow and a fade-in, `rise_frames`
+   * and `bob_cycles` say how long it waits before it may leap, and
+   * `lunge_frames` how long the leap takes.
+   *
+   * **`subtype` of 6 means the record is not a fish.** `FishInit`
+   * (`FUN_00438540`) then reads `water_level` — the same four bytes as
+   * `speed_x` — into `g_water_level`, clears the four attack slots and kills
+   * the actor. Seven of the twenty-eight shipped descriptors are these.
+   */
+  class51?: {
+    water_level: number; speed_x: number; speed_z: number;
+    bob_amplitude: number; entry_mode: number; subtype: number;
+    rise_frames: number; bob_cycles: number; lunge_frames: number;
+  } | null;
+  /**
    * Class 0x52's tail — one s16, the sub-type. 0 and 1 wander and leave;
    * **2, 3 and 4 are shootable route-branch triggers** and write
    * `g_script_branch_var` from a per-subtype byte, in Original Mode only.
@@ -472,8 +513,19 @@ export interface CombatJson {
   impact: NamedSound[];
   /** ...replaced by one of these two on a headshot kill. */
   head_impact: NamedSound[];
-  /** `[set A, set B]` per event; `voice_set_a_types` says which a type takes. */
-  voice: { hurt: NamedSound[]; kill: NamedSound[]; head: NamedSound[] };
+  /**
+   * `[set A, set B]` per event; `voice_set_a_types` says which a type takes.
+   *
+   * `attack` is the exception and is `[set A pair, set B pair]`:
+   * `ActorPlayHitVoice` (`FUN_0040A6F0`) kind 3 tosses a coin **within** the
+   * set rather than playing one id, so each set carries two.
+   */
+  voice: {
+    hurt: NamedSound[]; kill: NamedSound[]; head: NamedSound[];
+    /** Kind 3 — the cry a strike or a throw starts with. Absent before it was
+     * read; a bundle without it leaves the swing silent. */
+    attack?: NamedSound[][];
+  };
   voice_set_a_types: number[];
   /** `FUN_00407950`: collision material → the ricochet it plays. */
   ricochet: Record<string, NamedSound>;

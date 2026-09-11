@@ -35,7 +35,7 @@
  * the frame these four are made.
  */
 import { ActorByAt, G } from "../globals";
-import { ZombieFlag2, type ZombieActor } from "../actor";
+import { type ZombieActor } from "../actor";
 import { ActorLocalPoint } from "../class31/arc";
 import { vec3 } from "../vec";
 
@@ -120,31 +120,4 @@ export function ZombieAttachToCarrier(obj: ZombieActor): void {
   // `__ftol` of `fpatan` into a signed short, then `obj+0x68 += obj+0x135C`.
   const ry = ((carrier.yaw + CARRIER_YAW_BIAS) << 16) >> 16;
   obj.yaw = ry + obj.zom.throwHand;
-}
-
-/**
- * `EnemyZombieInitByCharType`'s fourth arm — `0x0045301D` to `0x0045305E`.
- *
- * Split out of `init_char.ts` only because the seat above belongs with it: the
- * arm is what turns the descriptor's position and yaw into the local offset
- * and local yaw the seat reads, and nothing else ever writes them for a
- * passenger.
- *
- * The order is the engine's, and the last line is not decoration:
- * `ZombieFlag2.AttachedToCarrier` is what `EnemyZombieUpdate` tests every
- * frame, and `ZombieFlag2.Carried` is raised **after** the first seat, the
- * same bit `ZombieStateRideCarrier` holds while it rides.
- */
-export function ZombieSeatOnCarrierFromDescriptor(obj: ZombieActor): void {
-  if (!(obj.flags & SPAWN_RIDE_CARRIER)) return;
-  // `obj+0x13D8/DC/E0 = obj+0x40/44/48` and `obj+0x135C = obj+0x68`.
-  obj.strikeStart.x = obj.pos.x;
-  obj.strikeStart.y = obj.pos.y;
-  obj.strikeStart.z = obj.pos.z;
-  obj.zom.throwHand = obj.yaw;
-  // `OR ECX, 0x10000000` at `0x00453028`, stored to `obj+0x136C`.
-  obj.flags2 |= ZombieFlag2.AttachedToCarrier;
-  ZombieAttachToCarrier(obj);
-  // `OR EAX, 0x100000` — after the call, not before.
-  obj.flags2 |= ZombieFlag2.Carried;
 }

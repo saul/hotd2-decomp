@@ -1523,6 +1523,51 @@ investigation ruled out.
   It fixed a second rig with it: `obj_48f050` on `op_st4` 371, camera paths
   174, 175 and 178, which carried the same pair.
 
+## And one nobody reported, because nothing named it
+
+- `[fixed]` **Every stage's playthrough counted one console error and would
+  not say what it was.** Found by reading the tail of a clean run rather than
+  from a report: `node tools/playthrough.mjs --stage 3 --headless` ended with
+  "1 console errors on the way" on all six stages.
+
+  **It is `/favicon.ico`** — the browser asks for it by itself and the dev
+  server has none. Three things had to be wrong at once for that to cost a
+  measurement: the text was behind `--loud`, the message Chrome sends carries
+  **no URL at all**, and `location()` — the only thing that names the resource
+  — was never read. So naming a one-line 404 took a bespoke playwright script.
+
+  Excused by exact URL and by nothing else. A pattern match would be how a
+  real 404 came to be hidden behind this one, and the `no such bgm` 404 the
+  middleware can still return arrives with the `.wav` in its location, so that
+  one is still counted. Whatever a fault counts it now prints, `quiet` or not.
+  `faults` stays a number with `faultLines` beside it: an array alone would
+  not do, because every caller writes `if (state.faults)` and an empty array
+  is truthy, so a clean run would have reported itself dirty.
+
+  **The BGM abort beside it is not a bug either, and the comment saying it
+  might be has been corrected.** Every stage logs
+  `bgm/ST<n>_AR.WAV (net::ERR_ABORTED) type=media` with **no** 4xx response
+  beside it, while `tools/audio.mjs` measures the track at a peak of 0.5:
+  Chrome abandons a media request it no longer needs. Reading it as a missing
+  track sent this session looking for a file that was being served correctly
+  the whole time — `ST3_AR.wav` is one of 38 in the install and the
+  middleware's case-insensitive resolve finds it. The resource type is what
+  separates the two cases.
+
+  Verified by mutation: an injected `console.error` is still counted.
+
+- `[not-a-bug]` **The three rooms reported as unclearable by shooting were a
+  stale harness.** Re-measured on 2026-09-11: stages 1, 3 and 5 each reach an
+  end block with nothing reported unclearable, and the wording in the runs
+  that raised it does not match the tool in the tree — those outputs predate
+  the change that made `--shoot-for` count **frames in which nothing took
+  damage** rather than frames elapsed. `playthrough.mjs`'s own header already
+  carried the three measurements: stage 6's `zslman` rooms are slow rather
+  than unreachable, one shot landing per `ShotImmune` knockdown cycle and
+  clearing in 420, 435 and 285 frames against a 300-frame window; stage 1's
+  block 1 has `g_nFiringGate` legitimately down; and stage 5's block 2 clears
+  now that class 0x33 and `ZombieState.Leave` are ported.
+
 ## And one about a check that is not reliable
 
 - `[open]` **`bundle_flow.mjs`'s first thumbnail assertion fails about one run

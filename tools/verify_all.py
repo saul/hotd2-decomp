@@ -158,6 +158,16 @@ CHECKS: list[Check] = [
           "state's exit is an exact `obj+0x19C >= 0x3C` against a play clock "
           "that is 0 for a clip nothing carried",
           NEEDS_BUNDLE),
+    Check("verify_cam_waits", ".",
+          ["python3", "tools/verify_cam_waits.py"],
+          "that every `wait_camera_path_frame <n>` asks for a frame the play "
+          "in force actually publishes -- the only check that holds the three "
+          "routines that publish a camera frame against the scripts that wait "
+          "on them, and the one that says the strict `frame > operand` of "
+          "`EvtOpWaitCameraPathFrame41` is safe to transcribe. Model scene "
+          "state 7 as stopping on its range's end rather than one past it and "
+          "twenty of the sites it checks become gates nothing can open",
+          NEEDS_BUNDLE),
     Check("verify_prop_pose", ".",
           ["python3", "tools/verify_prop_pose.py", "--game-dir", "{game_dir}"],
           "that every class-0x41 generic prop is posed in the order its own "

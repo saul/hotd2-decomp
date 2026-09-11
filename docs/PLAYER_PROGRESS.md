@@ -1577,6 +1577,42 @@ spawn that has a real character so the two never draw on top of each other.
 | 5 | 4 | 25 |
 | 6 | 2 | 20 |
 
+### ...and then they were played, which took a branch chooser and found four bugs
+
+Exporting the actor turned those twenty-two blocks from unreachable into
+**live code no run had visited**, which is a different problem: a driven run
+takes one arm of every branch, and with nobody rescued `g_script_branch_var`
+stays 0 for the whole stage. `tools/playthrough.mjs --route <block>:<target>`
+is the answer and it **plays for the arm before it clicks one** — every writer
+of that global in the image is actor code, so the tool fires the same volley
+the gates get while the walker is inside a rule's block, and on block 0 that
+kills the rescue target and the game takes block 1 itself. The override on the
+branch bar is the fallback, reported as one, because it can leave the world in
+a state the engine cannot be in: clicked rather than played, block 0's arm 1
+leaves the rescue target in `RescueTargetHeldState` holding both enemy
+counters for ever, and blocks 3 and 5 then report as unclearable rooms.
+
+Six routes cover the twenty-two. **All of them now play, and three of the six
+reach an end block** — `docs/PLAYER_HANGS.md` item 25 has the table. What it
+found, items 26 to 30:
+
+* `CivilianStepScript`'s wait bit `0x1000` is **three** conditions and the port
+  had one: the arm only applies while `g_scene_state_major_entered == 2` and it
+  releases on `g_camera_settled` **or** `g_camera_free`. Fixed — and it was
+  *not* what stopped block 9, which is why it is its own item.
+* A stashed camera range played by scene state **7** publishes one frame *past*
+  its end — `JG` where state 6 has `JGE`, both incrementing before they
+  publish. The port gave state 6's answer to both, and stage 2's block 9 waited
+  for ever on a civilian whose cue was that frame. Fixed.
+* Class **0x42** has no module, and each of the 6 to 15 objects
+  `PlaceFallingBreakableBatch` (`FUN_0042F9B0`) builds increments *both* enemy
+  counters — so blocks 21 and 26 open their `wait_enemies_alive 0` early.
+  `[open]`.
+* Class 0x30 **state 19** waits on a camera frame the port overwrites with the
+  stashed range's own, and the engine accepts the cue from either of two camera
+  blocks where the port models one. Block 24 stops on it; `[open]`, because the
+  faithful fix is a second camera cursor.
+
 ## Three enemies that had no module: the frog, the owl and the fish
 
 Classes `0x11`, `0x43` and `0x51`. All three increment **both** enemy counters,

@@ -76,8 +76,34 @@ cannot clear — so it prints, at the end, every room it had to cheat past.
 Those rooms are the ones a player is stuck in. It exits non-zero if there are
 any.
 
-The branch countdown answers itself with the **lowest block number** so that one
-run takes the same route as the next; see item 9.
+**A driven run takes one arm of every branch**, and which arm is the game's own
+answer: `g_script_branch_var` as `advanceStepOrRoute` latched it, which with
+nobody rescued is 0. (It used to be the lowest block number, a stand-in from
+before the selector was read; see items 9 and 16.) So "the stage reached an end
+block" means *one* road through it was played.
+
+`--route` names the arm to take at a branch, and it is how stage 2's blocks
+1-10 and 21-32 came to be executed for the first time — see item 25:
+
+```sh
+node tools/playthrough.mjs --stage 2 --route 0:1,1:2,3:4,5:6,6:7,7:8,8:10
+```
+
+Each rule is `<block>:<target>`. For each one the tool **plays for the arm
+first**: while the walker is inside that block it fires the same volley the
+gates get, because every writer of `g_script_branch_var` in the image is actor
+code and shooting is how an arcade player writes it. On stage 2's block 0 that
+kills the class-0x21 rescue target and the branch bar comes up with the other
+route already marked as the game's own. The volley is refused while
+`g_civilians_alive` is anything but zero — the same refusal `shootable` makes,
+read from the counter because inside a block there is no gate to read.
+
+Only if the game still has not written the arm does it **click** the player's
+own override on the branch bar, and then it says so: an override can leave the
+world in a state the engine cannot reach, and a hang behind one is not evidence
+about the port until that state has been checked. Item 25 has the case that
+proves it. Every branch prints the arms, the arm the game chose, and the arm
+taken; the run ends with one `route:` line for the whole road.
 
 ### All six stages, as of items 17 and 18
 
@@ -98,6 +124,22 @@ takes — see item 16.
 Stage 5's row was `7875 / 78 / block 2 2 / 50` until class 0x33 was ported;
 that room is the second section below. **Stage 1 block 1 is the one left**, and
 it is the only room in the game a player cannot clear by shooting.
+
+**Re-measured after items 26 to 30**, because the strict camera wait of item 30
+costs a frame at every `wait_camera_path_frame <n>` in the game and so moves
+every stage's count. All six still reach an end block, and none reports a room
+the shots could not clear. Stage 1's block 1 is no longer among them — its room
+clears and the block branches to 10 — but that is somebody else's commit and
+not this measurement's to explain:
+
+| stage | frames | instr | against the row above |
+|---|---:|---:|---|
+| 1 | 8190 | 97 | −90 |
+| 2 | 12495 | 148 | +375 |
+| 3 | 6615 | 61 | +405 |
+| 4 | 7065 | 84 | −60 |
+| 5 | 7560 | 79 | +60 |
+| 6 | 7260 | 63 | +15 |
 
 **That table is one route per stage, not one stage per row.** Stage 3 has two
 entry blocks and stage 4 has two, and until item 21 the harness had no way to
@@ -1566,6 +1608,326 @@ that ice is: `ZombieStateDeath6`'s test takes its mask from
 invisible to the sweep that concluded there is none** (`L32`). Re-run
 `get_xrefs_to 0x00459080` and a proper writer search when Ghidra is back,
 before changing the write.
+
+## 25. Stage 2's blocks 1-10 and 21-32 have now been played — and two of them stop
+
+Twenty-two blocks of a shipped stage that no automated run and no session had
+ever entered. They were unreachable until the class-0x21 rescue target was
+exported, and then merely unvisited: a driven run takes **one** arm of every
+branch, and with nobody rescued `g_script_branch_var` stays 0 for the whole
+stage, so every run went `0 → 11 → 12 → 13 → 14 → 15 → 16 → 35`.
+
+### How the driver reaches them
+
+`--route <block>:<target>`, in `tools/playthrough.mjs`, and it **plays for the
+arm before it clicks one** — see that file's header for the whole of it. Every
+writer of `g_script_branch_var` in the image is actor code, so the tool fires
+the same volley the gates get while the walker is inside a rule's block, under
+the same refusal `shootable` makes (read from `g_civilians_alive`, because
+inside a block there is no gate to read). On block 0 that kills the rescue
+target, and the branch bar comes up with `→ 1` already marked as the game's
+own route. The override is the fallback and is reported as one.
+
+**Why playing for it matters, measured.** The first cut of this only clicked
+the bar. That reaches block 1 with the rescue target still in
+`RescueTargetHeldState`, holding `g_enemies_alive` and `g_enemies_present` —
+its only ways out are the rescue and camera path `0x39` frame `0x121`, and
+neither can happen again once block 1 is running. Measured: `e1 p1` with the
+actor frozen at one hit point for the rest of the run, and **blocks 3 and 5
+both reported as unclearable rooms**. The engine cannot be in that state: the
+only writer of arm 1 here *is* the rescue. Both "hangs" evaporated when the
+run played for the arm instead. A hang behind an override is not evidence about
+the port.
+
+### What the six runs played
+
+Same seed, same driven clock, one at a time (two browsers at once lose the
+renderer — `L29`). Route A gave the same frame numbers on three separate runs.
+The counts are **sampled every `--poll` frames**, 15 by default, so a shift of
+a frame or two rounds away and only a shift that crosses a poll boundary shows
+at all — which is why two of the routes read identically before and after.
+
+| route | blocks first executed | before items 26-30 | after |
+|---|---|---|---|
+| `0:1,1:2,3:4,5:6,6:7,7:8,8:10` | 1 2 3 4 5 6 7 8 10 9 | hung, block 9 | **end 37**, 10860 |
+| `0:1,1:29,3:30,5:21` | 29 30 21 | end 35, 11145 | **end 35**, 11145 |
+| `14:22,22:23,23:24` | 22 23 24 | hung, block 24 | **hangs, block 24** |
+| `12:31,14:22,22:34,23:26` | 31 34 26 27 28 | end 37, 12060 | **end 37**, 12270 |
+| `0:1,1:2,3:4,5:6,6:7,7:25` | 25 | end 37, 9045 | **end 37**, 9045 |
+| `0:1,1:2,3:4,5:6,6:7,7:8,8:32` | 32 | hung, block 9 | **end 37**, 11025 |
+
+So **all twenty-two play, and five of the six routes reach an end block**. One
+block stops: **24**, item 29, which is `[open]`. Block 9's two roads — `8→10→9`
+and `8→32→9` — both play now; it hung on both before item 30, which is what
+says that stop was not the branch mechanism either.
+
+The unrouted run is unchanged in outcome and 90 frames longer (12495 against
+12405), which is the strict camera wait of item 30 costing a frame at each of
+the sites it corrects. No route reports a room the shots could not clear.
+
+### Two structural facts that came out of it
+
+**Six of stage 2's blocks are not on any arcade road.** A route record has
+three slots, and every write of `2` into `g_script_branch_var` in the image is
+behind `g_GameMode == 1`. Stage 2's slot-2 targets are blocks **29, 30, 31,
+32, 33 and 34** — off blocks 1, 3, 12, 8, 18 and 22 — so no arcade run,
+driven or played, can reach one. `--original` plays the Original Mode bundle,
+where the actors that write a 2 live — measured, the flag loads
+`stage2_original` (`118 models · 106,973 tris`) against arcade's `stage2`
+(`106,949`), and a run under it plays. The rows above reach those six blocks by
+override in **arcade**, which is coverage and not a road that mode has; playing
+them the way the game does is an Original Mode run and is not done here.
+
+**Nothing was rescued in the old runs because nothing had to be.** Once the
+rooms are cleared the game itself takes arm 1 at every fork that has a
+civilian in it: blocks 5, 6, 7 and 23 each wrote `g_script_branch_var = 1`
+off their own civilians' rescues, unprompted. Blocks 7 to 10 are the road for a player who **fails** a
+rescue, which is why they need an override from a driven run that kills
+everything.
+
+## 26. `CivilianStepScript`'s camera bit read one of three conditions — **fixed**
+
+Found while reading why stage 2's block 9 stopped, and **it was not the
+reason** — item 30 is. Recorded as its own item because it is its own defect:
+the fix is proved by the disassembly and by two assertions, and it changed
+nothing measurable in the six stages. The first reading of block 9 got this far
+and stopped here, which is the wrong turn worth keeping: `replay.mjs 2 9 2`
+shows the civilian who raises flag 3 parked in state 0 on motion 413 for ten
+seconds, and the wait word she is parked on *there* is `0x04109000`. In the
+real run she is dead and on a different stream with a different word, so this
+bit was never what held her.
+
+`0x04000000` is masked off as op 0x2C loads the word (`operand & 0xFBFFFFFF`),
+`0x00100000` is the root-motion switch and `0x00008000` is read nowhere in the
+routine, so the one live condition in `0x04109000` is **`0x00001000`** — and
+the port had a third of it. `[proved]`, from `0x0048B2F8`:
+
+```
+0048b2f8  f6c710          TEST BH,0x10                   ; bit 0x1000
+0048b2fb  7423            JZ  0048b320                   ; clear: no arm
+0048b2fd  833d086f9c0002  CMP dword ptr [0x009c6f08],0x2  ; ..._major_entered
+0048b304  751a            JNZ 0048b320                   ; not row 2: no hold
+0048b306  a02f6f9c00      MOV AL,byte ptr [0x009c6f2f]    ; g_camera_settled
+0048b30b  84c0            TEST AL,AL
+0048b30d  0f850e030000    JNZ 0048b621                    ; -> resume
+0048b313  a02d6f9c00      MOV AL,byte ptr [0x009c6f2d]    ; g_camera_free
+0048b318  84c0            TEST AL,AL
+0048b31a  0f8501030000    JNZ 0048b621                    ; -> resume
+```
+
+So the bit releases the script on `g_camera_settled` **or** `g_camera_free` —
+the same pair `EvtOpWaitTargetsClear47` accepts, which is what makes it a rule
+rather than one routine's habit — and the whole arm only applies while
+`g_scene_state_major_entered` is 2. `game/class10/step.ts` tested
+`g_camera_settled` alone, which is wrong twice over: it released a civilian
+during a scripted view-angle turn (major 1), and it could not release one whose
+room was clear but whose camera had not finished easing.
+`CameraTrackEnemiesTick` only ever raises `settled` while nothing is tracked,
+so one enemy still holding a `g_enemy_slots` entry made the port's single test
+unsatisfiable.
+
+Fixed as the three conditions the disassembly has. Two new assertions in
+`test/port.test.ts` — `g_camera_free` alone releases the wait, and off row 2
+the arm releases nothing — and both were **watched failing** with the fix
+backed out (`rate 10` and `rate 77`, the two directions).
+
+## 27. Class 0x42 is unported, and each of its objects is counted as an enemy — `[open]`
+
+Found while reading what blocks 21 and 26 hold.
+`PlaceFallingBreakableBatch` (`FUN_0042F9B0`) builds 6 to 15 objects in one
+loop — how many is `obj+0x130C` and the player count — and inside that
+loop, at `0x0042FBBF` and `0x0042FBC6`:
+
+```
+0042fbb2  e8c992fdff      CALL 0x00408e80
+0042fbbf  66ff0506709c00  INC  word ptr [0x009c7006]   ; g_enemies_present
+0042fbc6  66ff054a909c00  INC  word ptr [0x009c904a]   ; g_enemies_alive
+```
+
+`[proved]`. The port has no module for class 0x42, so `ActorSpawn` makes an
+inert actor and **nothing increments either counter** — the gate that waits for
+them comes down before they have been shot. Where, exactly:
+
+| block | step | the batch | the gate in the same step |
+|---|---|---|---|
+| 21 | 4 | two class-0x42 spawns at op 29 | `wait_enemies_alive 0` at op 34 |
+| 26 | 2 | one class-0x42 spawn at op 12 | `wait_enemies_alive 0` at op 19 |
+
+This is the opposite fault to a hang and the more dangerous one to leave: the
+room opens early, so nothing looks wrong. It is a port of `FUN_0042F9B0` and
+its update, not an adjustment; `docs/formats/spawns.md` already has the
+mechanism.
+
+## 28. No hang report has ever carried an actor row for a gate with no named blocker — **fixed**, in the harness
+
+Not a bug in the game, and it is why item 26 took three runs to read. **Two
+faults, stacked**, and the first one hid the second.
+
+**The gate's own opcode was read as a holder.** The report gathers holders with
+`/0x[0-9A-F]+/` over the wait panel's text — and every gate's `<summary>` is
+`0x45 wait_script_flag` or `0x44 wait_enemies_alive`, so `holders` was
+**never** empty. The arm for "no holder was named, so dump the field" was
+unreachable, and the arm that ran went looking for an actor row containing
+`0x45` and printed nothing. `blockerRows` is the reader that can tell a
+blocker (`0x5294 hito_mario2 · dead · … · d=23`) from the summary, it already
+existed, and the holders list is built from it now.
+
+**And the panel could not have answered anyway.** A panel is a `<details>`
+whose effect *demands* its projection slice when it opens, and a demanded slice
+is built by the next publish — which under `?drive=1` is a driven frame. Click
+and `sleep` and no frame ever runs; click and `advance` at once and the frame
+runs before React has committed the open state, so the publish has no claim on
+the slice and nothing publishes again. Either way the panel's switches and
+readouts **are** there — `4 of 5 up, 3 types`, `0 attacking · 0 live · 6
+scripted` — so it read as a panel with nothing to say rather than one that had
+not been asked. The order that works is click, let React commit, run one frame,
+let React commit; measured, it then prints `0x21 RankScaledEnemy · 1` and
+eleven actors in six classes.
+
+Two more things went with it, both for the same reason — a report has to be
+readable by the person who did not run it. The panel lists by class in document
+order, so the first ten lines on stage 2's block 9 are three civilians and the
+question was which *enemy* was alive: it takes twenty now. And the report
+prints the drive row's counters with every actor still standing, which is game
+state, needs no React, and cannot come back empty.
+
+## 29. Stage 2 block 24: a state-19 `znkage` waits for a camera frame the port overwrites — `[open]`
+
+```
+HUNG at block 24  (goto → 9) step/op 3 / 18
+  0x44 wait_enemies_alive · g_enemies_alive 1 · g_enemies_present 1 · need <= 0
+  0x10948 znkage · WaitForCameraFrame/1 · d=23
+    hp 90/90 · motion 431 · flags 0x8090101
+  e1 p1 ...  67912 c48 s19.1 h90 @-1747353,-20398,-5275648 y32768
+```
+
+The screenshot shows it filling the middle of the frame, twenty-three units
+out, and the shots do nothing because state 19's freeze arm holds
+`ActorFlag.ShotImmune`. Its placement is `initial_state 19`,
+`entry { motion 431, cue_frame 430, freeze true, claim true, delay 0,
+cooldown 30 }`, and the transport reads `cp_st2[39] slot 94 frame 470/470`.
+
+**What the script does**, block 24 step 3, in order:
+
+```
+queue_event 0x40  336  430  path 0x5E  flags 0      ; play 336..430
+wait_queued_events_done                             ; ...to the end of it
+set_script_flag 0x2F
+spawn_obj 0x00987D48                                ; the znkage, cue 430
+queue_event 0x40  431  470  path 0x5E  flags 2      ; STASH 431..470
+queue_event 0x21  7                                 ; scene state (2,7)
+wait_camera_path_frame 448
+```
+
+**Three readings, all `[proved]` from the disassembly:**
+
+1. Class 0x30 state 19's cue test is **two** globals, at `0x004576A2`:
+   `CMP dword ptr [0x009a6110], EAX` / `JE`, then
+   `CMP dword ptr [0x009a6458], EAX` / `JNE` — `g_cam_path_frame` **or**
+   `g_cam_path_frame_2`, camera blocks 0 and 2. The port tests the first only,
+   which is the `[diverges]` `CamCueHit` already declares for states 18 and
+   23; state 19 does not even go through that helper.
+2. `CamAdvancePathFrame` (`FUN_004035E0`) publishes the cursor to
+   `g_cam_path_frame` **before** the end test and increments the cursor
+   afterwards, so a play that ends at 430 leaves `g_cam_path_frame == 430`
+   standing and the *cursor* at 431. Nothing else writes that global.
+3. `CameraPlayStashedPath` (`FUN_0040C8A0`), which is what scene state (2,7)
+   installs, steps `g_stashed_path_frame` (`0x009C70AC`), publishes its float
+   copy to `0x009C70BC`, writes the camera pose and
+   `g_cam_path_frames_left` (`0x009C6F28`) — and **never touches
+   `0x009A6110`**. A stashed range does not move `g_cam_path_frame`.
+
+So in the engine the cue frame 430 is *standing* when the actor spawns and for
+the whole of the stashed 431..470 play, and the actor fires on its first
+update. The port has one `w.cam` for both kinds of play and publishes its frame
+to `g_cam_path_frame`, so `finish_sequence 7` replaces 430 with 431 — in the
+**same** `runInstructions` pass as the spawn, because nothing between them
+blocks. 430 is never a value the port holds while the actor exists.
+
+**Not fixed here, and it is a `[diverges]` decision.** The faithful model is a
+second camera cursor: `g_cam_path_frame` written only by the rail play, the
+stashed play writing its own globals, and `wait_camera_path_frame 0` reading
+whichever is playing. That is a change to `script/state/camera_action.ts`,
+`walker.ts` and `syncPortGlobals` that moves the frame every camera cue in the
+corpus sees. And it contradicts a fix already in the tree: the note on
+`finish_sequence`'s `started: false` records stage 2 block 16's stashed
+`581..660` being needed to publish **660**, because `0xA030`'s captor cue is
+that frame — which on reading 3 the engine cannot meet from block 0 either. So
+something else carries a stashed range's frame to a cue-waiting actor, and
+what that is is **`[open]`**: `g_cam_path_frame_2` is read at seven sites and
+written only by `CamAdvancePathFrame` with block index 2, and what drives block
+2 is unread.
+
+`tools/cam_cues.mjs` reports this spawn as `ok ... left after 551 frames`,
+which is worth knowing about the check: leaving 551 frames late, when a later
+unrelated path happens to pass through frame 430, is not the cue being
+honoured. The harness measures "does it ever leave", and for an equality cue
+that is a weaker question than it looks.
+
+## 30. Stage 2 block 9: a stashed shot was one frame short, and a dead civilian's flag went with it — **fixed**
+
+```
+HUNG at block 9  (goto → 28) step/op 2 / 14
+  0x45 wait_script_flag        (flag 3)
+  0x51AC hito_galjk · d=17 · dead · camera-cue push-out
+    script 18 · pc 7 · cursor 7 · motion 370 frame 80/80
+    wait 0x1000080 · camera-cue push-out
+    on cue (66,385) now (66,384)
+  e1 p1 v1 ...  21164 c48 s39.1 h100
+```
+
+Reached on two different roads (`8→10→9` and `8→32→9`) and hung on both, so
+it is not the branch mechanism. The gate is `wait_script_flag 3`; flag 3 is
+raised by the class-0x10 civilian block 9 step 2 places at op 7 — spawn
+`20908`, character type 42, entry 8 — and **both** of her streams raise it:
+stream 19 (rescued) at its op 0x1C, and stream 18, the one she runs when she
+is killed, at its own. Her captors mauled her, which is a thing the game
+allows; the flag should still have come.
+
+**One frame short.** She is parked on wait word `0x01000080` — `PushOutOfWorld
+| CameraCue` — with the cue her stream's op 0x0D set: **path 66, frame 385**.
+The script stashes `351..384` on path 66 (`queue_event 0x40 351 384 66
+flags 2`) and hands it to scene state **7**. The port played `352..384`; the
+engine plays `352..385`, because the two rail hooks increment *before* they
+publish and their guards differ by one byte:
+
+```
+CameraStepRailTick    (FUN_0040C790) state (2,6):  0040c79e CMP ECX,EAX
+                                                   0040c7a0 JGE  -> stops at end
+CameraPlayStashedPath (FUN_0040C8A0) state (2,7):  0040c8be CMP ECX,EAX
+                                                   0040c8c0 JG   -> one past end
+```
+
+`[proved]`. `functions.tsv` has said "this one runs one frame past the end and
+that one stops on it" since `CameraPlayStashedPath` was read; the port modelled
+both as the `JGE` twin, and the annotation's own worked example (`581..660`
+draws `582..660`) was the `JGE` answer too. **A note is not a check** (`L26`).
+
+Fixed as `CamCommand.pastEnd`, one frame, set for minor 7 and for nothing
+else, and deliberately not folded into `endFrame` — the range's own end is
+what `wait_camera_path_frame 0` and `g_cam_path_frames_left` read. Two new
+assertions in `test/port.test.ts`: state 7 publishes `1..11` for a stashed
+`0..10`, state 6 publishes `1..10`. The first was **watched failing**
+(`1,2,...,10,10,10,10`) with the fix backed out; the second passes either way
+and is there so the pair cannot be "fixed" by making both go one further.
+
+The `21164 c48 s39.1` row beside her is the same story one step on: a captor in
+`ZombieStateAwaitCivilianOrder` (state 39) waits for an order her stream issues
+with op 0x1A, four commands past the cue that was out of reach.
+
+**And it needed both halves.** Either fix alone leaves the block shut, from
+opposite sides: with only the strict wait the walker parks on
+`wait_camera_path_frame 384` for ever, because nothing publishes 385; with only
+`pastEnd` the wait releases *on* 384 and the `finish_sequence 4` behind it
+freezes the camera before 385 is ever drawn. Measured both ways. Together,
+block 9 plays in 3,510 frames and the two routes that reach it — `8→10→9` and
+`8→32→9` — both reach block 37.
+
+`tools/verify_cam_waits.py` is the corpus guard, and it discriminates: model
+scene state 7 as stopping on its range's end and **eighteen**
+`wait_camera_path_frame` sites in stage 2 alone become gates nothing can open.
+That count is also the strongest evidence for the reading — the shipped scripts
+require the `JG`.
 
 ## Rules for whoever picks this up
 

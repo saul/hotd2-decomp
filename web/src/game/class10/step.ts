@@ -82,6 +82,14 @@ export function CivilianStepScript(obj: Actor, f: ClassFrame): boolean {
   return ran;
 }
 
+/**
+ * `CMP dword ptr [0x009C6F08], 0x2` at `0x0048B2FD` — the scene-state major
+ * the camera arm of the wait is gated on, row 2 of `g_scene_state_table` and
+ * the `cam/` path cameras. The same row `IsPlayerAttackable` (`FUN_00409DC0`)
+ * and `BodyCreatureUpdate`'s damage arm each demand with their own immediate.
+ */
+const SCENE_STATE_PATH_CAMERA = 2;
+
 /** True while the wait word's counters and gates still hold the script. */
 function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
   const sub = obj.civ;
@@ -101,8 +109,43 @@ function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
       && MotionPlayFrame(obj) === sub.motionCompare) return false;
   if ((word & CivilianWait.Hook) && sub.hookBusy !== 0) return false;
   if (word & CivilianWait.Free) return false;
+  // **Three conditions, not one**, and the port had only the middle one.
+  // `0x0048B2F8`:
+  //
+  // ```
+  // 0048b2f8  f6c710          TEST BH,0x10                  ; bit 0x1000
+  // 0048b2fb  7423            JZ 0x0048b320                 ; clear: no arm
+  // 0048b2fd  833d086f9c0002  CMP dword ptr [0x009c6f08],0x2 ; ..._major_entered
+  // 0048b304  751a            JNZ 0x0048b320                ; not 2: no hold
+  // 0048b306  a02f6f9c00      MOV AL,byte ptr [0x009c6f2f]  ; g_camera_settled
+  // 0048b30b  84c0            TEST AL,AL
+  // 0048b30d  0f850e030000    JNZ 0x0048b621                ; -> resume
+  // 0048b313  a02d6f9c00      MOV AL,byte ptr [0x009c6f2d]  ; g_camera_free
+  // 0048b318  84c0            TEST AL,AL
+  // 0048b31a  0f8501030000    JNZ 0x0048b621                ; -> resume
+  // ```
+  //
+  // So the bit releases the script on `g_camera_settled` **or**
+  // `g_camera_free` — the same pair `EvtOpWaitTargetsClear47` accepts, which
+  // is what says it is one rule and not this function's habit — and the whole
+  // arm is gated on `g_scene_state_major_entered == 2`, the `cam/` path camera
+  // row, exactly as `IsPlayerAttackable` is. `[proved]`
+  //
+  // The port read `g_camera_settled` alone, which is wrong in both
+  // directions: it released a civilian while a scripted view-angle turn was
+  // driving (major 1), and it would not release one whose room was clear but
+  // whose camera had not finished easing. `CameraTrackEnemiesTick` only ever
+  // raises `settled` while nothing is being tracked, so with one enemy still
+  // holding a `g_enemy_slots` entry the port's single test can never come
+  // true.
+  //
+  // **Found looking for stage 2's block 9 and not the cause of it** — that was
+  // a camera frame, `docs/PLAYER_HANGS.md` item 30. This changed nothing
+  // measurable in the six stages and is here because the disassembly says so;
+  // `test/port.test.ts` is what holds it.
   if ((word & CivilianWait.CameraSettled)
-      && !(G.g_camera_settled === 0)) return false;
+      && G.g_scene_state_major_entered === SCENE_STATE_PATH_CAMERA
+      && (G.g_camera_settled !== 0 || G.g_camera_free !== 0)) return false;
   // `?? 0` and not a bare read: a flag the script has never set is absent from
   // the array, and `undefined !== 0` would have ended the wait on frame one.
   if ((word & CivilianWait.ScriptFlag)

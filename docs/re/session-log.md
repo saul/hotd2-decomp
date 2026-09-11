@@ -17150,3 +17150,123 @@ And the harness that contradicted all of it was wrong twice:
    walker-only harness in `web/tools/`. `props43` now says so in its own
    output, and `cam_cues.mjs` shows the shape of the fix, but nothing checks
    that a harness which crosses one has stood in for the character layer.
+
+## Stage 2's other twenty-two blocks, and the three off-by-ones between them
+
+Blocks 1-10 and 21-32 had never been executed by anything. `docs/BUGS.md` had
+recorded why: block 0's arm 1 is written only by `RescueTargetHeldState`
+(`FUN_00451980`), the class-0x21 rescue target had no skeleton until it was
+given a `MOTION_RULES` row, and with nobody rescued `g_script_branch_var` is 0
+for the whole stage. `--entry` cannot help — stage 2 has one entry and
+`resolveEntry` falls back to it silently.
+
+### The driver, and the wrong first answer
+
+The first cut of `--route <block>:<target>` clicked the branch bar's override,
+which is the player's own feature and exactly the wrong mechanism here. It
+reached block 1 and reported **two unclearable rooms**, blocks 3 and 5, with
+`g_enemies_alive 1` and no actor the panel could name. Both were the tool's
+own fault: the rescue target was still in `Held`, holding both enemy counters,
+and its two exits (the rescue, and camera path `0x39` frame `0x121`) are behind
+it once block 1 runs. **The engine has no path to that state** — arm 1 *is* the
+rescue. Written up as `L45`.
+
+So the flag plays for the arm first: while the walker is inside a rule's block
+it fires the same volley the gates get, guarded by `g_civilians_alive` rather
+than by the wait panel, because inside a block there is no gate to read. On
+block 0 that kills the target, the bar comes up with `→ 1` marked as the game's
+own, and the two phantom rooms are gone. An arm that still has to be clicked is
+printed as an override and quarantined in the output.
+
+Measured, and worth keeping: the roads the game itself takes once the rooms are
+cleared go through **arm 1** at blocks 5, 6, 7 and 23, because a driven run
+kills everything and every civilian is rescued. Blocks 7 to 10 are the road for
+a player who *fails* a rescue. And six blocks — 29, 30, 31, 32, 33, 34 — are
+slot-2 targets, and every write of 2 into `g_script_branch_var` in the image is
+behind `g_GameMode == 1`, so no arcade run can reach one; `--original` is the
+other half of that and is now a flag.
+
+### What the blocks held: three off-by-ones and an unported class
+
+1. **`CivilianStepScript`'s wait bit `0x1000` is three conditions.**
+   `0x0048B2F8`: the arm only applies while `g_scene_state_major_entered == 2`,
+   and it then releases on `g_camera_settled` **or** `g_camera_free` — the same
+   pair `EvtOpWaitTargetsClear47` accepts. The port read `g_camera_settled`
+   alone, which `CameraTrackEnemiesTick` only raises while nothing is tracked,
+   so one enemy holding a camera slot made it unsatisfiable.
+2. **A stashed range played by scene state 7 publishes one frame past its end.**
+   `CameraStepRailTick` (`FUN_0040C790`) guards with `JGE` at `0x0040C7A0` and
+   `CameraPlayStashedPath` (`FUN_0040C8A0`) with `JG` at `0x0040C8C0`, and both
+   increment before they publish. `functions.tsv` had said "this one runs one
+   frame past the end and that one stops on it" since the routine was first
+   read; the port modelled both as the `JGE` twin, and the annotation's own
+   worked example was the `JGE` answer too (`L26`).
+3. **`wait_camera_path_frame <n>` releases on `n + 1`.** `0x0045FAE7`:
+   `CMP [0x009a6110],EAX / JLE` keeps waiting while `frame <= operand`.
+   `runCameraOnPast` — the seek's half of the same rule — already used
+   `arg + 1`, so the live wait and the seek's postcondition disagreed about
+   where the camera was.
+4. **Class 0x42 is unported and its members are counted as enemies.**
+   `PlaceFallingBreakableBatch` (`FUN_0042F9B0`) increments `g_enemies_present`
+   and `g_enemies_alive` *inside* its 6-to-15 loop, so stage 2's block 21 step
+   4 and block 26 step 2 open their `wait_enemies_alive 0` without them. Filed
+   `[open]` — it is a port, not an adjustment.
+
+2 and 3 are a pair: either alone leaves block 9's `wait_script_flag 3` shut.
+The step stashes `351..384` on path 66 and waits on frame 384; the civilian
+whose killed stream raises flag 3 has her cue on **385**. With only the strict
+wait the walker parks on 384 for ever; with only `pastEnd` the wait releases at
+384 and `finish_sequence 4` freezes the camera before 385 is ever published.
+Together, route A plays block 9 in 3,510 frames and reaches block 37.
+
+`tools/verify_cam_waits.py` is the corpus check for the arithmetic, and it
+discriminates: model state 7 as stopping on its range's end and **eighteen**
+sites in stage 2 alone become gates nothing can open. Which is also the
+strongest evidence for the reading — the shipped scripts require the `JG`.
+
+### Left `[open]`
+
+**Block 24 stops.** A class-0x30 state-19 `znkage`, frozen and `ShotImmune`,
+waiting for camera frame 430 while the port's `g_cam_path_frame` holds the
+stashed 431..470 range's own frame. Three readings are `[proved]` and they do
+not compose into a fix: state 19 accepts the cue from `g_cam_path_frame`
+**or** `g_cam_path_frame_2` (`0x004576A2`) and the port models one camera
+block; `CamAdvancePathFrame` leaves its last frame standing in
+`g_cam_path_frame`; and `CameraPlayStashedPath` never writes that global at
+all, so in the engine 430 is still standing while the stash plays. The port
+uses one `w.cam` for both and so overwrites it. The faithful model is a second
+cursor, which moves the frame every camera cue in the corpus sees — a
+`[diverges]` decision, and what drives camera block 2 is unread.
+
+### Wrong turns
+
+* **The Ghidra MCP was down for the whole session.** Everything above was read
+  with capstone over `Hod2.exe`'s own PE section table. Nothing was blocked by
+  it; the one thing it would have settled cheaply is what calls
+  `CamAdvancePathFrame` with block index 2.
+* **Three harness faults, and the first two hid the other findings for three
+  runs.** The hang report gathered its holders with `/0x[0-9A-F]+/` over the
+  wait panel's text, which matches the gate's own opcode (`0x45
+  wait_script_flag`) — so `holders` was never empty, the arm that dumps the
+  field was unreachable, and the arm that ran looked for an actor row
+  containing `0x45`. No hang report in `PLAYER_HANGS.md` has ever carried an
+  actor row for a gate with no named blocker. Then: a panel opened under
+  `?drive=1` is populated by the next *driven frame*, so the order has to be
+  click, let React commit, run a frame, let React commit. And a volley leaves
+  the pointer on the bottom row of the frame, which is where `#branchbar`
+  draws — `pointerenter` fires on an element that appears under a stationary
+  cursor, so a volley followed by a branch froze the override window
+  (`window paused`, measured for 315 frames and counting).
+* **Two runs wasted by editing the tool mid-batch.** Six routes were queued as
+  one script and the source was fixed while it ran, so the later runs measured
+  a different tree from the earlier ones. Re-run as one batch afterwards.
+* **`cam_cues.mjs` reports this block-24 spawn as `ok ... left after 551
+  frames`.** Leaving 551 frames late, because a later unrelated path happens to
+  pass through the cue frame, is not the cue being honoured. The harness asks
+  "does it ever leave", which for an equality cue is weaker than it looks.
+
+**One more number that was wrong twice over.** The playthrough's unclearable
+report counted `volleys += 1` **twice** per volley, so every "took N volleys"
+in `PLAYER_HANGS.md` written before today is double the truth. Fixed in
+passing while the shooting block was restructured; the counts recorded in
+items 25 and 30 are from the fixed code.

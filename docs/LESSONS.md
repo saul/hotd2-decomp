@@ -607,3 +607,35 @@ here" and for "the placers are in the pool and the transport is paused, so
 the constructor that makes the prop is a class handler that needs a frame of
 `GameUpdate`. **One sentence for two situations is a readout that cannot be
 acted on**, and it is what made a correct page read as a broken one.
+
+**L45 — A tool that overrides a decision the game makes puts the world in a
+state the game cannot be in, and then every hang behind it is a lie.**
+`playthrough.mjs` gained `--route`, which takes a chosen arm at a branch by
+clicking the branch bar's override — the player's own feature, built for a
+viewer who wants to see the other road. Driven with `--route 0:1` on stage 2 it
+reached block 1 and reported **two unclearable rooms**, at blocks 3 and 5, with
+`g_enemies_alive 1` and no actor the panel could name.
+
+Neither was real. The only writer of that branch's arm 1 is
+`RescueTargetHeldState` (`FUN_00451980`), the class-0x21 actor's own rescue,
+which returns both enemy counters as it writes it. Clicking the arm instead
+left that actor alive in `Held`, holding `g_enemies_present` and
+`g_enemies_alive`, and its two ways out — the rescue, and camera path `0x39`
+frame `0x121` — are both behind it once block 1 is running. So the run carried
+a permanent `+1` on the counter every room gate in the stage reads. **The
+engine has no path to that state**: arm 1 *is* the rescue.
+
+The fix was not to the port. It was to make the tool **play for the arm before
+it takes one** — fire at the block the way a player would, and let gameplay
+write the variable — and to report an arm it had to click as an override, so
+that a hang behind one is quarantined until the state it leaves has been shown
+to be reachable. Both hangs evaporated.
+
+It is `L34` from the other end. That lesson is about deleting a branch because
+its outcome looked predetermined; this is about *forcing* one because the
+outcome was inconvenient. In both cases the arm is a fact about the world and
+not a free parameter, and the way to find out what it costs is to enumerate
+what writes it before overriding it. A coverage tool may cheat — this one also
+kills rooms with a debug button — but every cheat has to be printed in the run,
+because the next person to read the output will otherwise spend a session
+reading the port for a bug the harness invented.

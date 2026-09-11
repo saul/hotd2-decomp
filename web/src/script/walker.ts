@@ -135,6 +135,45 @@ export interface CamCommand {
    * stage 3 block 2 step 4's `cam_play 1430..1660`.
    */
   retired: boolean;
+  /**
+   * **This play publishes one frame past {@link endFrame}.**
+   *
+   * True for a stashed range taken over by scene state **(2,7)** and for
+   * nothing else. The two routines that play a stashed range differ by one
+   * byte of guard, and they both increment *before* they publish:
+   *
+   * ```
+   * CameraStepRailTick    (FUN_0040C790), state (2,6):
+   *   0040c79e  CMP ECX,EAX     ; cur, end
+   *   0040c7a0  JGE 0040c889    ; cur >= end -> stop
+   *   0040c7cb  INC [0x9c70ac]  ; cur += 1
+   *   0040c7d1  FILD [0x9c70ac] ; ...then publish
+   *
+   * CameraPlayStashedPath (FUN_0040C8A0), state (2,7):
+   *   0040c8be  CMP ECX,EAX
+   *   0040c8c0  JG  0040c9a9    ; cur >  end -> stop
+   *   0040c8eb  INC [0x9c70ac]
+   *   0040c8f1  FILD [0x9c70ac]
+   * ```
+   *
+   * So a stashed `351..384` publishes `352..384` under (2,6) and
+   * `352..385` under (2,7): the `JG` lets the last step through and the
+   * increment carries it one past. `[proved]`
+   *
+   * The port published `352..384` for both, which is (2,6)'s answer, and that
+   * one frame is exactly what the data times the *end* of a stashed shot to.
+   * Stage 2's block 9 is the case: the civilian whose stream raises
+   * `g_script_flags[3]` waits on camera path 66 frame **385** — `on cue
+   * (66,385) now (66,384)` in her own debug row — while the script stashes
+   * `351..384` and hands it to state 7. She never raised the flag, and
+   * `wait_script_flag 3` held the block for ever.
+   *
+   * It is deliberately **not** folded into {@link endFrame}: the range's own
+   * end is what `wait_camera_path_frame 0` reads (`waits/frames.ts`) and what
+   * `g_cam_path_frames_left` is measured against, and both of those are the
+   * engine's `end`.
+   */
+  pastEnd: boolean;
 }
 
 export type WaitPolicy =
@@ -1154,10 +1193,13 @@ export class Walker {
         // `CamAdvancePathFrame` itself and the ring calls the handler once.
         cam.started = false;
       } else {
-        const remaining = cam.endFrame - cam.frame;
+        // The last frame this play publishes. One past the range's end for a
+        // stashed play under scene state 7 — see {@link CamCommand.pastEnd}.
+        const last = cam.endFrame + (cam.pastEnd ? 1 : 0);
+        const remaining = last - cam.frame;
         const used = Math.min(frames, Math.max(0, remaining));
         cam.frame += used;
-        if (cam.frame >= cam.endFrame) cam.done = true;
+        if (cam.frame >= last) cam.done = true;
       }
     }
     // `CamAdvancePathFrame` retires its action on the frame the path ends.

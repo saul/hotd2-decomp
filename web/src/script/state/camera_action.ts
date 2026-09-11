@@ -107,6 +107,9 @@ const CAM_PLAY: Record<string, ActionImpl> = {
       // there is nothing left to publish; a playing shot still owes every
       // frame up to and including its last. See `CamCommand.retired`.
       retired: !!op.static,
+      // `CamAdvancePathFrame` publishes and *then* tests, so the rail play
+      // holds `start..end` inclusive and never one more.
+      pastEnd: false,
     };
     w.host.startCamera(w.cam);
     if (w.cam.isStatic) {
@@ -153,7 +156,6 @@ const SCENE: Record<string, ActionImpl> = {
         endFrame: st.end,
         frame: st.start,
         flags: 0,
-        // State 7 uses `<` rather than `<=` on the end frame; one frame.
         isStatic: st.start === st.end,
         deferred: true,
         file: op.cam?.file ?? null,
@@ -180,9 +182,13 @@ const SCENE: Record<string, ActionImpl> = {
         // ```
         //
         // `CameraPlayStashedPath` (`FUN_0040C8A0`), state (2,7), is the same
-        // routine with `<` in place of `<=`. So a stashed `581..660` draws
-        // **582..660**, not 581..659: the start frame is stepped past and the
-        // end frame is reached.
+        // routine with its guard one byte different — `JG` at `0x0040C8C0`
+        // where the rail has `JGE` at `0x0040C7A0`. So a stashed `581..660`
+        // draws **582..660** under state 6 and **582..661** under state 7:
+        // the start frame is stepped past either way, and state 7's last
+        // comparison lets the increment carry one frame beyond the end. That
+        // extra frame is {@link CamCommand.pastEnd}, and this comment said
+        // `582..660` for both until stage 2's block 9 was played.
         //
         // Carrying `started` over from the other branch cost the shot its
         // last frame, and the last frame is exactly what the data times
@@ -196,10 +202,16 @@ const SCENE: Record<string, ActionImpl> = {
         // As above: a stashed range whose start equals its end is the static
         // case and owes nothing; anything else owes its frames.
         retired: st.start === st.end,
+        // **And minor 7 goes one frame further than minor 6**, because its
+        // guard is `JG` where the rail's is `JGE` and both increment before
+        // they publish. See `CamCommand.pastEnd` for both listings and for
+        // the stage 2 block 9 gate that one frame holds shut.
+        pastEnd: minor === 7,
       };
       w.stashedCam = null;
       w.host.startCamera(w.cam);
-      return `plays the stashed range ${st.start}..${st.end}`;
+      return `plays the stashed range ${st.start}..${st.end}`
+             + (minor === 7 ? " (and one frame past it)" : "");
     }
     if (minor === 4 && w.cam) {
       // CameraSnapToPathEye: hold where the path is now.

@@ -206,7 +206,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   // off the character the shot killed.
   p.heads.source = p.chars;
   p.scene.add(p.heads.group);
-  p.shooting.playSound = (id) => { p.bgm.play(id); };
   const rainCfg = bundle.script.rain;
   p.rain.build(p.ctx, p.scene3d.root, rainCfg);
   p.rainSim.configure(

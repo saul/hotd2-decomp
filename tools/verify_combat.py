@@ -80,6 +80,13 @@ byte. The readings under test are the ones docs/formats/combat.md states:
    read as `g_se_name_list` ids; a table read at the wrong address would give
    ids that resolve to nothing, so this fails loudly if the address is wrong.
 
+15. **`ActorPlayHitVoice` kinds 1 and 2 share one voice pair**, their impact
+   tables are five body ids and two head ids with nothing in common, and kind
+   3's entry is a *pair per set* where the others are one id per set. The first
+   of those is why the port's correction from `bone == 2` to
+   `g_hit_result == 2` is nearly inaudible, and a claim that small deserves a
+   check rather than a sentence in a doc comment (`L26`).
+
 Known exception, reported rather than hidden: character type 21 (`samson`, a
 boss) has a `PTR_DAT_004D032C` entry that is not the ``{slot, centre, radius}``
 layout the others use -- its first word is a float. Its damaged-part spheres
@@ -531,6 +538,42 @@ def main() -> int:
         fails.append(f"class-0x31 arc scripts with no motion: {bad_clips[:6]}")
     if no_attack31:
         print(f"    attack indices with no entry: {sorted(set(map(str, no_attack31)))}")
+
+    # 15 -----------------------------------------------------------------
+    # `ActorPlayHitVoice` kinds 1 and 2 carry the SAME voice pair.
+    #
+    # This is load-bearing rather than trivia. `ZombieOnShot` (`FUN_00453EB0`)
+    # and `ThrowerOnShot` (`FUN_004499A0`) choose between those two kinds on
+    # `g_hit_result == 2` and on nothing else -- no test of the bone, and none
+    # of whether the actor died of this shot. `combat.md` said `bone == 2` for
+    # a long time and the browser player's shot path was written from it; the
+    # reason that correction is nearly inaudible is exactly this equality, so
+    # it wants a check and not a sentence. Both pairs come out of
+    # `g_hit_voice_table` (0x00577674), five dwords apart.
+    kill_ids = [s["id"] for s in combat["voice"]["kill"]]
+    head_ids = [s["id"] for s in combat["voice"]["head"]]
+    if kill_ids != head_ids:
+        fails.append(f"kinds 1 and 2 read different voice pairs: "
+                     f"{[hex(i) for i in kill_ids]} vs "
+                     f"{[hex(i) for i in head_ids]}")
+    # ...and the *impact* tables are what differ: five body, two head, and no
+    # id in common between them. That is the whole of what a player hears
+    # change between the two kinds.
+    body = {s["id"] for s in combat["impact"]}
+    headi = {s["id"] for s in combat["head_impact"]}
+    if len(body) != 5 or len(headi) != 2 or (body & headi):
+        fails.append(f"the two impact tables are not 5 body and 2 head, "
+                     f"disjoint: {len(body)}/{len(headi)}, "
+                     f"shared {[hex(i) for i in body & headi]}")
+    # Kind 3's entry is a PAIR PER SET where every other kind is one id per
+    # set, which is the shape the routine's `rand() & 1` inside the set needs.
+    atk = combat["voice"].get("attack")
+    if not atk or len(atk) != 2 or any(len(pair) != 2 for pair in atk):
+        fails.append(f"kind 3 is not two pairs: {atk!r}")
+    print(f"  kinds 1 and 2 share one voice pair "
+          f"({[hex(i) for i in kill_ids]}); their impacts are "
+          f"{len(body)} body and {len(headi)} head, disjoint; kind 3 is "
+          f"{len(atk or [])} pairs of {len((atk or [[]])[0])}")
 
     if fails:
         print("\nFAIL")

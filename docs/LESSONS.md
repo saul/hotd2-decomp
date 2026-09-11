@@ -478,7 +478,60 @@ prose) and run the type checker before staging for code. A resolution that
 loses a line is indistinguishable from a resolution that was correct, right up
 until something parses it.
 
-**L41 — A backup taken before a merge is a copy of the pre-merge file, and
+
+**L41 — A marker something counts is not a word you may also use in prose.**
+Consolidating `ActorPlayHitVoice` into one copy closed a real open question in
+`combat/feedback.ts` — the bursting head had been silent because the voice
+tables were on the other side of the layer line — and `STATUS.md`'s
+`[open]` markers went **158 to 159**. Two narrative sentences saying *"that
+used to be an `[open]`"* and *"it had been an `[open]`"* each put the literal
+token back, and the counter counts tokens. So the number moved the wrong way
+across a change that answered one of the things it counts, and it would have
+gone into a report as evidence of the opposite.
+
+The same hazard is on `[diverges]`: a cross-reference reading *"see the
+`[diverges]` above"* is counted as a second declaration, which is what kept
+the divergence total flat over a commit that removed one. Both are cheap to
+hit, because writing about closing a marker is the natural thing to do in the
+comment where the marker was.
+
+**Write about a marker without spelling it** — "an open question", "this
+routine's declared divergence" — and check the generated count *after* the
+edit rather than assuming the direction. It is `L16` from the other side:
+that lesson is a number in prose rotting against a checker, this is prose
+*creating* the number the checker reports.
+
+**L42 — A cross-reference to a function in the file that ports it silently
+deletes the port.** `verify_port.py` reads two citation forms: the em-dash
+`` `Name` — `FUN_00…` `` asserts *this file ports it*, and the parenthesised
+`` `Name` (`FUN_00…`) `` is a mere reference. Because the reference pattern
+also matches inside the dash form, `check_names` skips any `(name, fun)` pair
+it has already seen as a reference:
+
+```python
+refs = {(n, f) for n, f in REF.findall(text)}
+for name, fun in DEF.findall(text):
+    if (name, fun) in refs:
+        continue        # the reference form also matches the dash one
+```
+
+So writing `` `ZombieStatePounceOnTarget` (`FUN_0045C2E0`) `` in a comment in
+`class30/target.ts` — the file that *defines* `ZombieStatePounceOnTarget` —
+took that function out of the ported set. Coverage went 163 → 162 and
+"citations checked" 317 → 316, nothing failed, and the only visible trace was
+two numbers moving in a generated doc while the diff showed no citation had
+changed at all. `git diff | grep '— `FUN_00'` came back empty, which is L31's
+tell again: the file is right and the program disagrees.
+
+**Inside a file that ports something, refer to that same routine by its bare
+address** — "state 44's routine at `0x0045C2E0`" — or by name with no address
+beside it. The parenthesised form is for functions ported *somewhere else*. And
+when a generated count moves in a direction your change does not explain, diff
+the checker's own answer rather than the source: dumping `check_names`'s dict
+against the same dict from `git archive HEAD` named the one lost address in a
+second, after twenty minutes of grepping for a citation that was never missing.
+
+**L43 — A backup taken before a merge is a copy of the pre-merge file, and
 restoring it reverts the merge.** Mutation-testing the class-0x41 exporter
 meant editing `web/src/hod2lib/bundle.ts`, so I copied it aside first, mutated
 it, and copied the backup back. Between those two steps I merged `main`. The

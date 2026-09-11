@@ -128,6 +128,69 @@ export const BODY_CREATURE_HOST_CLIPS: Record<number, readonly number[]> = {
   0x0a: [0x1df, 0x1e3],
 };
 
+/**
+ * The clips `ChooseDeathMotion` (`FUN_004560B0`) can put on a class-0x30 actor
+ * that the **directional** set does not carry.
+ *
+ * The directional pick — `ChooseDeathMotionDirectional` (`FUN_00456220`), the
+ * four ±45° arcs — travels already: two of its arms are tables in the EXE and
+ * the other two are the literals 991 and 992. These six are the arms *above*
+ * it, and they were baked for nobody:
+ *
+ * * `0x3F9` — `obj+0x34` bit `0x1000000`, tested at `0x004560DD`
+ *   (`f7463400000001`) with **no character-type guard**. The bit is seeded
+ *   from the spawn record's `+0x04` init flags, which `ActorInitFlags`
+ *   (`FUN_00408970`) ORs with 1 into `obj+0x34`, and **every shipped record
+ *   that sets it is class 0x30**: stage 1's state-26 leapers, stage 3's two
+ *   state-33 axe men, and twelve `ZombieStateCarryProp` spawns — which is the
+ *   corroboration that the bit means *this actor has hold of something*.
+ *   `tools/verify_death_clips.py` counts them, so this does not (`L16`).
+ * * `0x3F8` — the landing clip `ZombieStateDeathFallAndBounce`
+ *   (`FUN_00456DF0`) cuts to when the body hits the ground. It travels with
+ *   `0x3F9` because `ZombieStateDeath6` (`FUN_00454D20`) reads that same bit
+ *   to send the actor to state 12 rather than to the corpse, so the two are
+ *   one path and not two.
+ * * `0x404` / `0x41A` — body condition 4's coin toss, the `NEG`/`SBB` idiom at
+ *   `0x004561EA`: `rand()`, normalised, `AND EAX, 0x16`, `ADD EAX, 0x404`.
+ *   Stage 2's `znkager` crawlers are condition 4, and neither clip was in any
+ *   bundle, so every one of them snapped to a corpse with no death animation
+ *   at all.
+ * * `0x3DA` / `0x3DB` — condition 4's special arm and the conditions-5/6 arm.
+ *   Already in most bundles through the directional tables; offered here so
+ *   the set is what the routine can reach rather than what happens to be
+ *   there for another reason.
+ *
+ * **Baked for every class-0x30 character type, not for the spawns that carry
+ * the bit.** The exporter bakes per character *type*, and the two zombies that
+ * hung stage 3's block 2 were character type 19 (`tutorial`), whose spawn
+ * records do **not** set bit `0x1000000` — so a set gated on the records would
+ * have missed the reproduced hang. Body condition is recomputed at runtime by
+ * `ActorBodyConditionFromHands` (`FUN_00455920`) as parts come off, so a
+ * condition gate would be wrong in the same way. `bake` refuses a clip whose
+ * own block size implies another skeleton, so the list is offered whole and
+ * filtered by the data: all six decode at 16 bones, and all nineteen
+ * class-0x30 character types in the twelve bundles are 16-bone.
+ *
+ * **What is deliberately out**, so the gap is written down rather than
+ * implicit: the four destroyed-part arms, `obj+0x1368` bits `0x8`, `0x10`,
+ * `0x40` and `0x80` giving `0x1AC`, `0x1A5`, `0x279` and `0x229`. All four
+ * decode at 16 bones, and nothing in the ported call graph raises any of those
+ * bits — `ZombieStateTargetMotionScript` and `ZombieStateDragTarget` set them
+ * from a kill-move clip id the port does not model. When one of those bits
+ * gets a writer, its clip belongs in this list on the same day.
+ *
+ * Baked for the reason {@link BOSS4_CLIPS} and {@link BODY_CREATURE_HOST_CLIPS}
+ * are, and this one cost a hang rather than a pose: state 12 sub 1 is
+ * `if (obj+0x19C < 0x3C) return;` against `g_motion_play_length[0x3F9]`, which
+ * is **85**. With no clip the play cursor stays at 0, the actor never leaves
+ * state 12, `ZombieEnterCorpseState` never runs, and `g_enemies_present` never
+ * falls — so a `wait_scripted_actors` behind a dead civilian who is herself
+ * waiting on `g_enemies_present` can never come down.
+ */
+export const CLASS30_DEATH_CLIPS: readonly number[] = [
+  0x3da, 0x3db, 0x3f8, 0x3f9, 0x404, 0x41a,
+];
+
 export const MOTION_RULES: Record<number, MotionRule> = {
   // `Boss4Init` (`FUN_004917E0`) seats the clip as a literal:
   // `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E`, where `ECX` is

@@ -113,12 +113,15 @@ node tools/playthrough.mjs --stage 3 --entry 7 --headless
 | route | reaches | note |
 |---|---|---|
 | stage 3 entry 0 | block 13 `(end → 4)`, 6480 frames | 0 → 3 → 4 → 5 → 6 → 13 |
-| stage 3 entry 7 | **hangs** at block 2 `6 / 8` | 7 → 8 → 2. Items 21 and 22 |
-| stage 4 entry 4 | **hangs** at block 9 `1 / 50` | 4 → 9. Item 23 |
+| stage 3 entry 7 | block 13 `(end → 4)`, 6390 frames, 66 instr | 7 → 8 → 2 → 11 → ... Items 21 and 22, **both fixed** |
+| stage 4 entry 4 | block 25 `(end → 0)`, 6090 frames, 72 instr | 4 → 9 → 11 → 10 → 12 → 13 → 6 → 25. Item 23, **fixed** |
 
-Two of the two second entries hang. Every stage has exactly one entry except
-these, so there are no more routes hiding — but the four entry-0 rows above
-have never been re-run per *branch*, and a branch is not an entry.
+**Both second entries reach an end block now.** Stage 3's was items 21 and
+22 — the flag-21 switch, then the death clip no bundle baked. Stage 4's was
+item 23: state 43's tail, which the port did not have. So every route the
+`entries` tables name plays through, and every stage has exactly one entry
+except these two, so there are no more routes hiding — but the four entry-0
+rows above have never been re-run per *branch*, and a branch is not an entry.
 
 Before this branch, on the same tree and the same seeds: stages **2, 3 and 6
 hung** — block 14 `9 / 20`, block 6 `1 / 13` and block 0 `4 / 8` — and 1 and 5
@@ -1204,7 +1207,7 @@ switches too, which cannot raise it. Nothing observable turns on it — stage 3
 is the only stage that gates on 21 and its script sets it — so the honest
 answer is to leave it undeclared and say why. `[open]`
 
-## 22. Stage 3 block 2 step 6: two zombies parked in state 12, and `g_enemies_present` never falls — `[open]`
+## 22. Stage 3 block 2 step 6: two zombies parked in state 12, and `g_enemies_present` never falls — **fixed**, by baking the clip
 
 Found **behind item 21**: with the flag gate open, the entry-7 route advances
 four instructions and stops again, 5/5.
@@ -1250,29 +1253,121 @@ enters it holds `g_enemies_present` for the rest of the stage. Stage 3's
 block 2 is the first room where that blocks a gate, because it is the first
 room where a `wait_scripted_actors` sits behind two stand-and-throw zombies.
 
-**Two possible fixes and they are not equivalent**, which is why this is
-`[open]` rather than done:
+### The fix: bake the clip, and it did not need a divergence
 
-* **Bake clip `0x3F9`.** If the exe plays it on these skeletons, the exporter
-  should carry it, and that is a format change landing in both halves of
-  `hod2lib` in one commit. Whether motion 1017's stride matches these rigs'
-  bone counts is **`[open]`** — nothing here has read the motion loading.
-* **Declare a `[diverges]`.** Let the state leave when it has no clip to wait
-  on. That is the user's decision and it was not taken.
+**It decodes, 19 of 19.** The refusal in `bake()` is the measurement, and it
+refuses nothing: motion 1017 lives in `zom.bin`, its block implies **16 bones**
+and declares **44 frames**, and `g_motion_play_length[0x3F9]` is **85**. Every
+one of the nineteen class-0x30 character types in the twelve bundles is
+16-bone, so `bake` accepts 1017 for all nineteen — and the same is true of
+`0x3F8`, the landing clip state 12 cuts to, and of the four other arms below.
 
-Either way there is a third thing worth separating out: **`MotionPlayFrame`
-answering `0` for a clip that is not there turns a missing asset into a hang
-rather than into something visible.** It is the port's own fallback and nothing
-declares it. The `docs/PLAYER_HANGS.md` shape it produces is the same as a
-state transcribed wrongly, and that is how item 21 hid this one for a session.
+**Why it was not baked: by omission, and the omission has a name.** The bake
+set is a hand-enumerated list per class and per state in
+`hod2lib/characters`'s `entry_clips`, and the death half of it was
+`death_motions(tables)` — the two directional tables — plus the two `.text`
+immediates 991 and 992. That is `ChooseDeathMotionDirectional`
+(`FUN_00456220`) and nothing else. `ChooseDeathMotion` (`FUN_004560B0`) has
+**ten** arms, and `combat.py`'s own docstring had said for months that the
+other six were "**not** implemented" — which was true of the port's *branches*
+and had never been true of the exporter's *bake list*, because the port does
+take four of them.
 
-## 23. Stage 4's second entry: one `znkage` in `DragTarget` that shots cannot touch — `[open]`
+`CLASS30_DEATH_CLIPS` in both halves of `hod2lib/charmotion` is now the six:
+
+| clip | the arm that names it | what it was costing |
+|---|---|---|
+| `0x3F9` | `obj+0x34` bit `0x1000000`, tested at `0x004560DD`, no character-type guard | the hang |
+| `0x3F8` | `ZombieStateDeathFallAndBounce`'s landing cut | the pose after it |
+| `0x404` / `0x41A` | body condition 4's coin toss, `0x004561EA` | stage 2's `znkager` crawlers had **no death animation at all** — `play_length` 0 makes `cursor >= play - 1` true on the first frame, so they snapped to a corpse. A second bug, found by the check rather than by a report. |
+| `0x3DA` / `0x3DB` | condition 4's special arm, conditions 5–6 | already there through the directional tables; offered so the set is what the routine can reach |
+
+**Baked per character type, not per spawn**, and that distinction is the whole
+of why the reproduced hang would have survived a narrower fix — see the next
+item.
+
+**The four destroyed-part arms are deliberately still out** — `obj+0x1368`
+bits `0x8`/`0x10`/`0x40`/`0x80` giving `0x1AC`, `0x1A5`, `0x279`, `0x229`. All
+four decode at 16 bones; nothing in the ported call graph raises any of those
+bits. Written down in `verify_death_clips.py` as the check's blind spot rather
+than left implicit, because that is the shape of gap that hid stage 5's van
+from `verify_prop_slots.py`.
+
+**Where the bit actually comes from, which nothing had read.** `obj+0x34` bit
+`0x1000000` is **seeded from the spawn record**: `ActorInitFlags`
+(`FUN_00408970`) ORs the record's `+0x04` word with 1 into `obj+0x34`, and
+**22 placements across the twelve bundles carry it, every one of them class
+0x30** — stage 1's three state-26 leapers plus one state-37, and stage 3's two
+state-33 axe men plus five state-37. State 37 is `ZombieStateCarryProp`
+(`FUN_0045B380`), which is the corroboration that the bit means *this actor has
+hold of something*: every record that sets it is an actor carrying, leaping
+with, or standing holding a thing. So the engine's route into state 12 is real
+and shipped, and the clip belongs in the bundle whatever else is true.
+
+**The checks, and both halves failed without the fix.**
+
+* `tools/verify_death_clips.py`, new and a row in `verify_all.py`: **14,472 of
+  14,472 (spawn, death clip) pairs baked** over 804 class-0x30 spawns and 68
+  (bundle, character type) pairs, read out of the **real bundles** rather than
+  out of the exporter — `verify_scripted_clips.py` asks the Python half and
+  that is right there; here it would be `L24`, since the TypeScript half is the
+  only writer of a bundle and the two have drifted before (`FROG_CLIPS` is in
+  one and not the other). Mutated the `cls === 0x30` guard to `&& false`,
+  re-exported stage 3 and watched **672** pairs go red in that one bundle.
+* `web/test/port.test.ts` gained the other half. The existing state-12 block
+  now also asserts that `g_enemies_present` is **held for the whole fall** and
+  given back at the corpse; a new block gives a character type every clip
+  *except* `0x3F9` and asserts that its actor is still in sub 1 after 600
+  frames with the count leaked — so a future attempt to clear this by
+  short-circuiting the wait, by special-casing a missing clip, or by making
+  `MotionPlayFrame` answer for a clip it has not got, fails there rather than
+  looking like a fix. And the fixture's `0x3F9` now pins `play: 85` rather
+  than deriving it: setting it to 40 reproduces the shipped bug inside the
+  test, three assertions red.
+
+**And it renders.** Character type 19 posed from motion 1017 at frames 0, 12,
+24 and 40 — `extract/compare/death12/t19_1017_f*.png`, by
+`tools/export_character.py 19 --motion 1017 --frame N` through
+`tools/blender_nodeview.py`. Frame 0 is the axe man standing with an axe in
+each hand; frame 40 has him doubled forward with both weapons still held, which
+is what a death clip for an actor that has hold of something should look like.
+Fifteen bones, fifteen meshes, no exploded parts and no denormals: the clip
+belongs on this rig.
+
+**5/5 before, 5/5 after.** All five runs now reach block 11 `(end → 0)` over
+66 instructions, at the same frame count every time, so this route is
+deterministic under the driven clock. It was **6,300** game frames on the
+branch and **6,390** after merging `main`, which moved the hit voice and three
+prop poses: the count is a property of the tree and not of the route, exactly
+as it was for entry 0 at `0953161`. Re-measure it rather than quoting it.
+
+**Is the leak game-wide? No, and here is the measurement.** The clip is needed
+only by an actor that enters state 12, and state 12 is reached only from
+`ZombieStateDeath6` on that bit. The 22 records that carry it are in **stage 1
+and stage 3 only**; stages 2, 4, 5 and 6 have none, which is why four stages
+completed with the clip missing. The port widens that population by one bug and
+not by six — see the next item — and stages 4, 5 and 6 have neither a
+bit-carrying record nor a body-condition-7 spawn, so no route in them can leak
+this way at all. `verify_death_clips.py` prints the count, so nothing here
+states it twice (`L16`).
+
+**One thing to keep from this even though it is fixed.**
+`MotionPlayFrame` answering `0` for a clip that is not there turns a missing
+asset into either an instant state or an eternal one, depending only on whether
+the wait is `>= play - 1` or `>= <literal>`. It is the port's own fallback,
+nothing declares it, and the hang it produces looks exactly like a state
+transcribed wrongly — which is how item 21 hid this one for a session. The
+table in `docs/formats/mot.md` under *"a clip nothing names is a clip nothing
+carries"* is that fallback written down.
+
+## 23. Stage 4's second entry: one `znkage` in `DragTarget` that shots cannot touch — **fixed**, and the state had no exit at all
 
 ```sh
 cd web && node tools/playthrough.mjs --stage 4 --entry 4 --headless
 ```
 
-The other route `--entry` made addressable, and it hangs on its second block:
+The other route `--entry` made addressable, and it hung on its second block,
+**5/5**:
 
 ```
 HUNG at block 9  (branch → 11,17) step/op 1 / 50
@@ -1281,16 +1376,196 @@ HUNG at block 9  (branch → 11,17) step/op 1 / 50
 ```
 
 70 volleys over 480 frames, 90 hit points before and after, and the debug clear
-did not take it either. `ZombieStateDragTarget` is class 0x30 state
-**43** (`FUN_0045C080`) — the captor state that copies the civilian's position
-and rotation onto the zombie every frame. `d=4` says it is right on top of the
-camera.
+did not take it either.
 
-**Nothing has been read for this one.** Filed so that the route is on the list
-rather than in someone's head. The two things worth measuring first are whether
-the actor is holding `ActorFlag.ShotImmune` (item 18's shape — the clear
-refuses such an actor now, which is why it is still standing) and whether the
-civilian it is dragging is the thing that would release it.
+Now **5/5 reaching an end block**, 6090 game frames and 72 instructions to
+block 25 `(end → 0)`, identical every run — measured after merging `main` and
+re-exporting; it was 6015 on the tree the fix was written on, and every other
+route's frame count moved by a similar amount over the same merge.
+
+### What the screenshot and the panel said
+
+`web/shots/hang-stage4.png`: the room renders correctly — stage 4's stone
+corridor, the arch, the paving, nothing flat and nothing black. Camera
+`cp_st4[11] slot 174 frame 100 / 100 (static pose)`, actors panel `characters
+2 of 7 up, 5 types` and `enemies 0 attacking · 1 live`. So this was never the
+fourth fault class: a player standing here can see the room. The captor is at
+`d=4`, on top of the camera, and invisible because of it — but the reason the
+shots did nothing is the flag bit, not the framing.
+
+### The mechanism, `[proved]`
+
+`ZombieStateDragTarget` is class 0x30 state **43** — `g_class30_states[43]` is
+`0x0045C080`, with `[42]` `0x0045BFD0` and `[44]` `0x0045C2E0` either side and
+both agreeing with the port's enum (`L38`). Five sub-states off the jump table
+at `0x0045C2C0`, and `JA` at `0x0045C0A4` sends anything above 4 to the tail:
+
+| sub | at | what it does |
+|---|---|---|
+| 0 | `0x0045C0B1` | clip `0x1A4`, `obj+0x34 \|= 0x2400` and `0x10000000`, `obj+0x1F8 &= ~2`, loops/cue off the script head — then **falls into sub 1 on the same frame** |
+| 1 | `0x0045C113` | copies the civilian's position **and all three rotations** every frame; on `loops == 0 && cursor == cue` plays `0x1A8`, raises `0x4000000` on the *civilian* and `0x10100` on **itself**; if she is already dead, plays `0x1AA` instead |
+| 2 | `0x0045C212` | keeps copying; at cursor `0x2D` calls `ActorShiftToHoldBone1Position` (`FUN_0045CE70`), clip `0x1B0`, `obj+0x1F8 \|= 2` |
+| 3 | `0x0045C27E` | `obj+0x68 = TurnAngleToward(obj+0x68, 0x2000, 0x1A0)`, and **never increments the sub-state** |
+| 4 | `0x0045C29C` | `g_hit_slots[obj+0x3C] = 0`, `ActorDespawn` — the only arm that does not run the tail |
+
+**The tail at `0x0045C1AD` is the state's only exit**, and every sub but 4
+falls into it:
+
+```c
+if (g_script_flags[0x1D] != 0 && g_players_in_play != 0) {
+    obj+0x34 |= 0x4000000;                 // Dead
+    ReleaseEnemyAliveCount(obj);           // FUN_00456560
+    ReleaseEnemyPresentCount(obj);         // FUN_00456580
+    obj+0x1312 = 4;
+}
+```
+
+**The port had no tail at all.** It had the sub-4 arm and nothing that could
+ever assign sub 4, and no sub-3 arm either. So the captor sat in sub 3 for
+ever holding `g_enemies_alive` at 1 — and the `0x10100` sub 1 raised on itself
+is `ActorFlag.ShotImmune` (`0x100`), which `DispatchHit` (`FUN_004092F0`) jumps
+past `ResolveHit` on, so no volley could take it out of the count either. Both
+of the two leads in the old note were right, and they were one fault: the
+immunity is the state's own doing and the flag is what lifts it.
+
+**The debug clear refusing it was a true signal and stays true.** `ActorKillAll`
+declines an actor a shot could not touch, exactly as before; nothing about the
+fix goes near it.
+
+### The partner, which does exist
+
+Flag 29 is **not** in stage 4's script. `0x0045C1AE` is the only instruction in
+the whole image that names `0x009C721D` — a byte-pattern sweep of `.text` for
+`1d729c00` returns one hit (`L32`) — so every writer of flag 29 is an indexed
+one, and in stage 4 it is the dragged civilian:
+
+* block 4 step 7 op 5 is `spawn_obj_c` on the class-0x10 record `0x3578`
+  (charType 48, script entry 36);
+* that record's **one child** is `at 13748 = 0x35B4`, class 0x30, charType 11,
+  **hp 90** — the actor in the hang report;
+* her entry resolves to stream 85, and stream 85 op 11, plus both of its
+  branches (op 14 → stream 83, op 15 → stream 84) at their op 5, are
+  `CivilianRunScript` op `0x1C` with argument **29**.
+
+So all three of rescued, shot and resumed raise it. The script's own
+`wait_script_flag 29` at block 4 step 7 op 8 comes down off the same write,
+which is how the run reached block 9 in the first place — the flag was up and
+the captor ignored it.
+
+### The second bug behind it
+
+The port's sub 2 fell through into sub 1's loop-and-cue block, which the
+engine's `case 2` never reaches. With the civilian dead and the loop count
+spent, that block's second arm fired on the first frame of sub 2 and bumped
+straight to sub 3, so the settle never ran at all. Sub 2 is its own arm now.
+And the pose copy was `yaw` alone where the engine copies `obj+0x64`, `0x68`
+**and** `0x6C` in both arms that do it.
+
+### The checks
+
+* `web/test/port.test.ts` — a block of assertions driving state 43 from sub 0
+  to the despawn. Mutation-tested three ways, each watched failing: the tail
+  removed fails three of them, the sub-2 fall-through restored fails one, and
+  the yaw-only pose copy fails one. (The commit message that landed this says
+  "seven"; the block has eleven. `L16` — do not put a count in prose.)
+* `web/tools/flag_gates.ts` — a second pass over all twelve bundles: every
+  state-43 captor must be named as a child of a class-0x10 spawn, and that
+  civilian's reachable streams must raise flag 29. Two placements across the
+  corpus (stage 4 in each mode) and a guard against the population being
+  empty, because a vacuous loop reads as green (`L14`). Fails on a dropped
+  `children` link and on the wrong flag index.
+
+### Left `[open]` here
+
+* `ActorShiftToHoldBone1Position` (`FUN_0045CE70`) is **not** ported. Sub 2
+  calls it to difference bone 1's drawn world position against the pose the
+  new clip would put it in, and `game/` has no skeleton — that is the
+  `GameHost` seam. The captor lands a bone-offset from where the engine puts
+  it. Its four callers are `0x0045C25A`, `0x0047BD95`, `0x0047C3A9` and
+  `0x004955E7`, and whether its two positions are in the same frame of
+  reference is itself `[open]`: one goes through a camera-block matrix and the
+  other starts from identity.
+* Sub 0's `obj+0x1368 |= 0x10` at `0x0045C0ED` is a kill-move death-clip
+  selector and the port models only bit 0 of that word — the standing gap in
+  `ZombieSubState.hasCooldown`. `ChooseDeathMotion` reads bit `0x10` for
+  motion `0x1A5`, so a captor killed while dragging plays the wrong death.
+
+## 24. `ZombieStateStandAndThrow` raises a bit the engine only tests — `[open]`, and it is the reason *these* two zombies were in state 12
+
+Found while fixing item 22, and **it is a second defect with the same
+symptom**, so it is filed separately rather than folded in. Nothing is changed
+for it yet: the reading is not corroborated (see the last paragraph) and the
+fix is a behaviour change the user should take.
+
+**The two zombies that hung block 2 should never have been in state 12.**
+They are evt records `0x3078` and `0x6544`, both character type 19
+(`tutorial`), body condition 7, initial state 33 — and their spawn flag words
+are `0x00020002` and `0x00020000`. **Bit `0x1000000` is not set in either.**
+In the engine `ChooseDeathMotion` gives them a directional death and
+`ZombieStateDeath6` hands straight to `ZombieEnterCorpseState`. The two records
+in stage 3 that *do* carry the bit are `0x3DE8` and `0x3E30`, character type 20
+(`znonoopa`) — a different pair, in the same room.
+
+**What the engine writes there.** `ZombieStateStandAndThrow`'s sub-0 arm, from
+the jump table at `0x004595C8`:
+
+```
+004590da  83f907           CMP  ECX, 7              ; ECX = obj+0x130C
+004590dd  0f85ba000000     JNE  0045919d
+004590e3  8b4e34           MOV  ECX, [ESI + 0x34]
+004590e6  f7c100000001     TEST ECX, 0x1000000
+004590ec  7521             JNE  0045910f            ; already holding: skip
+004590ee  8b866c130000     MOV  EAX, [ESI + 0x136c]
+004590f4  0c01             OR   AL, 1               ; obj+0x136C |= 1
+004590f6  f7c100000200     TEST ECX, 0x20000        ; ActorFlag.Airborne
+004590fc  89866c130000     MOV  [ESI + 0x136c], EAX
+00459102  740b             JE   0045910f
+00459104  0d00001000       OR   EAX, 0x100000       ; obj+0x136C |= 0x100000
+00459109  89866c130000     MOV  [ESI + 0x136c], EAX
+0045910f  4a               DEC  EDX                 ; ...then the armed-hands count
+```
+
+So the arm **tests** `obj+0x34` bit `0x1000000` and, when it is clear, writes
+`obj+0x136C` bits `1` and `0x100000`. `class30/stand_throw.ts` has
+`obj.flags |= ActorFlag.HoldingWeapon` there instead, and neither `obj+0x136C`
+write at all. That is the port's only writer of the bit, and it is what routed
+character type 19 into state 12.
+
+**Where the wrong write came from**, because it was not careless: the
+`functions.tsv` comment for `0x00459080` ended *"obj+0x34 bit 0x1000000, which
+sub 0 tests and the walk arm clears, is written by NOTHING in the image — the
+test is always true and the clear is a no-op."* Both halves of that were wrong
+— the bit is seeded from the spawn record, and the test is therefore usually
+**false** — and a port written to make a "always true" test true is the
+predictable consequence. The row is corrected.
+
+**What fixing it would cost, which is why it is a decision and not a tidy-up.**
+`obj+0x136C` bit `0x100000` is `ZombieFlag2.Carried`, and the port **reads**
+it: `ZombieOnShot` takes `ZombieState.DeathKnockbackArc` instead of
+`ZombieState.Death` for a carried actor, and `ChooseDeathMotion` gives clip
+`0x3DB` to character types `0xF`..`0x11` while it is set. All four of stage 3's
+condition-7 records have `obj+0x34` bit `0x20000` set, so all four would take
+the `0x100000` write — the two that do not carry `0x1000000` would start dying
+through state 9. Faithful, and a real change to two rooms.
+
+**The population.** Nine body-condition-7 spawns per mode set — stage 1's one,
+stage 2's two, stage 3's six — of which two carry the bit honestly. So the
+port's own leak is **seven spawns per mode set, in stages 1, 2 and 3**, on top
+of the 22 bundle placements that reach state 12 legitimately. Stages 4, 5 and 6
+have no condition-7 spawn and no bit-carrying record, which is the other half
+of item 22's answer to "is it game-wide".
+
+**`[open]`, and this is the limit on the reading.** The Ghidra MCP connection
+was down for this whole session, so every address above is from a `capstone`
+disassembly of `Hod2.exe` at `_v2r`-resolved offsets and from byte-pattern
+sweeps of `.text` — not from the database, and not corroborated by
+`get_xrefs_to`. Two of the references the sweeps nearly missed say how thin
+that ice is: `ZombieStateDeath6`'s test takes its mask from
+`MOV EAX, 0x1000000` and `CivilianReleaseCaptors` clears the bit through
+`MOV EDX, 0xfeffffff` and a register `AND`, so **a raise built the same way is
+invisible to the sweep that concluded there is none** (`L32`). Re-run
+`get_xrefs_to 0x00459080` and a proper writer search when Ghidra is back,
+before changing the write.
 
 ## Rules for whoever picks this up
 

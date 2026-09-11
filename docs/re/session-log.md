@@ -16601,11 +16601,8 @@ with its hands on the far wing. `web/shots/rider_{before,after}_440.png`.
   none, so the two routines were finished with `capstone` over the PE directly
   (`pip install --break-system-packages capstone`, a 30-line section walker).
   That is what found the fall-through, because a linear sweep does not stop
-  where a decompiler stops. The consequence is that **nothing was renamed in
-  the live database**: `SkeletonResolveTrackFrames`, `g_skeleton_model`,
-  `g_motion_frame` and `g_motion_fade_weight` exist in
-  `ghidra/annotations/*.tsv` and not yet in the project, so the next session to
-  open it should apply them before `export-annotations` can be trusted.
+  where a decompiler stops. What it left undone is below, under *The Ghidra
+  round trip did not happen*.
 * **A scan for writes of `model+0x64` through `obj+0x1F8` missed both the
   civilian and the rescue target**, because both hold the model base in a
   register and write `[reg+0x64]`. `L32`'s lesson one struct along: the offset a
@@ -16620,22 +16617,52 @@ with its hands on the far wing. `web/shots/rider_{before,after}_440.png`.
   taken, by `0x007DD09C` — a different scratch pointer for class 0x10.
   `g_skeleton_model` instead.
 
+### Two departures, tagged rather than described
+
+Ruled on by the coordinator after the first pass, and it is one ruling twice:
+**tag both, implement neither.** The count went **167 to 169**. The reason it
+had to be a tag and not a careful paragraph is the convention itself — the
+divergence count is the honest measure of how finished the transcription is,
+and an invisible departure that exists only in prose reads as settled to the
+next person. That cost this project a real bug the same day: a doc comment
+listed a script flag among the untranscribed with no assertion behind it, and a
+hang lived behind the comment for as long as the comment did.
+
+* **The pose offset is unscaled, because the model is.** The engine's translate
+  sits inside `MatrixScale(model+0x116C)`, so a 0.9 character offsets by 0.9 of
+  what its clip authored; neither `hod2lib.characters` nor
+  `render/characters.ts` scales a drawn character at all, so the offset is left
+  unscaled to match the model it offsets — applying the scale to the offset
+  alone would be *worse*, because the offset would shrink while the model it
+  offsets did not. Three of the four clips that reach the pose belong to
+  `scale 0.9` types, so the engine's offset is **2.594** where the port's is
+  **2.882**; the fourth is class 0x21 at character type 7, scale 1.0, where
+  they agree. Faithful means scaling every skinned actor's drawn size.
+* **The death clip keeps the whole root whatever the gate says.** The engine has
+  no death track — a death clip is the ordinary motion and the gate decides it
+  like any other — but `ActorAdvanceMotion` returns early on `obj.death`, so
+  `pose.ts` overrides the gate at that one call site or a falling body's travel
+  comes from nowhere. The two land in the same place wherever the clip's frame-0
+  horizontal root is zero, which is 992 blocks of 1058: that is why it is
+  invisible and not an argument that it is faithful. Faithful means running root
+  motion through a death in `game/`.
+
+**Both tags are in `game/`, not in `render/`, and that was not a convenience.**
+`verify_port.py`'s `cited_files()` is `game/` plus `script/` by an explicit
+earlier decision, so a `[diverges]` in `render/characters/pose.ts` would not be
+counted at all — the tag would have been exactly the invisible prose the ruling
+was about. Each also belongs there on the merits: the death override exists
+*because* of `ActorAdvanceMotion`'s early return, and the scale field's whole
+story is already on `ActorModelScale`. `pose.ts` cross-references both at their
+call sites rather than carrying a second description of either.
+
+Which turned up a finding worth its own decision: **15 `[diverges]` tags live
+outside `game/` and `script/`**, across eight files under `render/`, and none of
+them is counted. Not acted on — widening the measure moves it by fifteen at
+once and that is a call about what the number means, not a line edit.
+
 ### Left open
 
-* **`model+0x116C` scales the pose offset in the engine and nothing in the port
-  applies it.** The translate sits inside `MatrixScale`, so a 0.9 character
-  offsets by 0.9 of what its clip authored; neither `hod2lib.characters` nor
-  `render/characters.ts` scales a drawn character at all, so the offset is left
-  unscaled to match the model it offsets. Two of the three civilian clips
-  belong to `scale 0.9` types, so the honest correction there is 2.594 and not
-  2.882 — and fixing it means scaling the drawn character, which is a change to
-  every skinned actor's size.
-* **The death clip is the one declared override**, and it is not a second
-  reading: the engine has no death track, and `ActorAdvanceMotion` does not run
-  root motion through a death, so `pose.ts` keeps the whole root there. The two
-  models agree wherever the clip's frame-0 horizontal root is zero, which is
-  992 blocks of 1058. Making it gate-driven means giving the death clip root
-  motion in `game/`.
 * **`MotionFlag.RootMotionY`, bit `0x10`**, still has no writer. Nine other
   classes write `model+0x64` and none of the values were read here.
 * The engine's wrap damper is `baseline = root + (root - baseline)/play_length`,
@@ -16692,3 +16719,353 @@ inert generic, which is a module and not a table row.
 Type 72 is the one genuine `[open]` left, and it is the honest shape: every
 code clause says the descriptor names its model and the data says the
 descriptor names a 1.
+### The Ghidra round trip did not happen
+
+`SkeletonResolveTrackFrames` (`FUN_00410BD0`), `g_skeleton_model`
+(`0x009CA0A0`), `g_motion_frame` (`0x007C1C30`) and `g_motion_fade_weight`
+(`0x007C1C24`) are in `ghidra/annotations/*.tsv` and **not in the live
+database**. The bridge was down when they were read and it was still down at
+the end of the session: `list_instances` returns none and `connect_instance`
+gets `Connection refused` on `127.0.0.1:8089` with zero UDS instances. The
+round trip also cannot be done from here — the analyzer refuses a `.claude`
+worktree path — so it wants a session on `main` with the project open. **This
+is a known gap, not drift**: the next `export-annotations` diff will show those
+four rows as unmatched until someone applies them.
+---
+
+## The hit voice, consolidated into one copy in the engine
+
+`ActorPlayHitVoice` (`FUN_0040A6F0`) had two implementations in the port —
+kinds 0, 1 and 2 in `render/shooting.ts` off `shot.resolved`, kind 3 in
+`game/combat/voice.ts` — and the renderer's carried a `[diverges]` saying that
+clearing it was four decisions rather than a move. This session made all four
+and found a fifth cost on the way. Declared divergences 167 → 166 in
+`verify_port`, 157 → 156 in `STATUS.md`; open markers 158 → 157.
+
+### What was read, and confirmed rather than taken from the annotations
+
+The result-code rule was already written into `functions.tsv` by the previous
+session, so the first thing was to disassemble both addresses again rather than
+trust a row — `disassemble_bytes` at `0x00453F40`–`0x00453F90` and
+`0x00454015`–`0x00454050` for `ZombieOnShot`, and `0x00449A60`–`0x00449A98` for
+`ThrowerOnShot`. They agree, and the shape is small enough to quote whole:
+
+```
+00453f46  f7463400000004   TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+00453f4d  0f84c7000000     JZ   0x0045401a                          ; ...alive
+00453f6e  83f802           CMP  EAX, 0x2      ; g_hit_result, read back
+00453f73  6a02             PUSH 0x2           ; dead, result 2 -> kind 2
+00453f77  6a01             PUSH 0x1           ; dead, otherwise -> kind 1
+00454025  83f805           CMP  EAX, 0x5
+0045402a  6a00             PUSH 0x0           ; alive, result != 5 -> kind 0
+```
+
+**No test of the bone, and no test of whether the actor died of this shot.**
+`docs/formats/combat.md` had said `ActorPlayHitVoice(obj, bone == 2 ? 2 : 1)`
+since the routine was first read, in two places, and the player's shot path was
+written from that line. Both are corrected, with the disassembly on the spot.
+
+`ActorShotFeedback` (`FUN_00454050`) turned out **not** to be one of the three
+kinds' call sites, which the task had assumed and which the previous session's
+own `[diverges]` had also assumed. Its site at `0x00454136` is `PUSH 0x3` — the
+attack cry — gated on `g_shot_bone == 2` and bone 2's draw slot being `0x1DC2`,
+immediately before the `0x1DC1` stump swap. So the bursting head **shouts**,
+and porting the move closed an open question in `combat/feedback.ts` that had
+said it was silent. Its annotation row now carries that, which it did not.
+
+### What a player hears differently
+
+Almost nothing, and for a reason worth writing down rather than asserting:
+kinds 1 and 2 carry the **same voice pair** in `g_hit_voice_table` —
+`ZOMBIE_019` for set A, `ZOMBIE_018` for set B — so the only audible difference
+between them is the impact, five body ids against two head ones. A killing head
+shot now plays a body impact (its result is usually 1, not 2) and a killing body
+shot with result 2 now plays the head pair. That is the whole of it, plus a
+corpse now saying the kill line rather than the hurt line, because the test is
+the `Dead` flag and not this shot's kill.
+
+That equality was exactly the kind of claim `L26` is about — a sentence in a
+doc comment standing in for a check — so it is `verify_combat.py` check 15 now,
+against the EXE, and four mutations of the parser fail it.
+
+### The drift it uncovered
+
+Writing that check failed on its own third clause, and the reason was a real
+gap: `web/src/hod2lib/combat.ts` had been given kind 3's two pairs when the
+silent swing was reported, and `tools/hod2lib/combat.py` had not. The Python
+half read all fifteen dwords of the table and emitted eleven for as long as the
+TS half had. `tools/verify_exporters.py` cannot see that class of gap — it
+compares the two halves' modules and their `tool_version`, not the fields they
+emit — and nothing else was looking. Both halves carry the pairs now.
+
+### Where the voice went, and the divergence it rides
+
+Not per-class. The faithful home for kinds 0–2 is `class30/on_shot.ts` and
+`class31/on_shot.ts`, because those are the two routines the engine plays them
+from — but the port has one merged `ActorShotFeedback` call site for every
+shootable class, under a divergence declared long before this session, and
+splitting the voice per-class would have *narrowed* it: only classes 0x30 and
+0x31 have an on-shot routine, so seventeen other ported classes would have gone
+silent. That is a behaviour change nobody asked for, so the voice rides the
+existing merge and that bullet was extended to say so. No new `[diverges]`.
+
+The kind selection is a module-private `PlayShotVoice` rather than an export,
+deliberately: it is the *tail* of two exe routines and not a routine of its
+own, and `verify_port`'s uncited-exports baseline is right to refuse an export
+that claims to port a function no address holds. The doc comment says the name
+is the port's and that no exe function bears it, which is `L38` applied before
+anyone has to rediscover it.
+
+### Wrong turns
+
+* **The task's description of the tree was one merge behind, and I read the
+  tree before merging.** `web/src/game/combat/voice.ts` did not exist at my
+  worktree's HEAD and I went looking for a second copy that was not there,
+  then for a `BUGS.md` entry beginning "Zombies were silent when they attacked"
+  that also did not exist. Both had landed on `main` in the fourteen commits my
+  branch was behind. `L21` says re-diff the source against `HEAD` before
+  calling a transcription finished; the corollary is to **merge before reading
+  it**, because a file that is absent looks identical to a file that was never
+  written.
+* **Two of my own `[open]` markers were prose.** The narrative in
+  `combat/feedback.ts` saying the burst "had been an `[open]`" put the literal
+  token back twice, and `STATUS.md` went 158 → 159 while I was closing one.
+  The counter counts the token, which is `L16` from the other side: a marker
+  that means "unanswered" cannot also be a word you use to say something is
+  answered. Both reworded.
+* **A range filter in a new assertion swallowed the thing it was testing.**
+  `lineOf = xs.filter(id => id >= 10)` was meant to pick the fixture's voice
+  ids out of what reached the bus, and `ActorShotFeedback` also emits the
+  ricochet at `0x1116A9`. The result-5 check passed on a sound that is not a
+  voice at all until the filter was written as an explicit list. It only showed
+  because the *other* four checks in that group failed first.
+* **`disassemble_bytes` mutates.** The Ghidra MCP server dropped mid-session on
+  a `disassemble_bytes` call — "the write may have been applied" — and never
+  came back, so `ThrowerShotFeedback`'s second call site at `0x00449C19` is
+  read out of the annotations rather than out of the image. It is `[open]` from
+  this session's own evidence, and it is the one thing here that is.
+
+## Session — motion 1017 was baked for nobody, and the bit that names it comes from the spawn record
+
+`PLAYER_HANGS.md` 22, taken off the list. `cd web && node tools/playthrough.mjs
+--stage 3 --entry 7 --headless` hung 5/5 at block 2 step 6 op 8 before and
+reaches block 11 `(end → 0)` 5/5 after, over 66 instructions and at the same
+frame count every time — 6,300 on the branch, 6,390 once `main`'s hit voice
+and prop poses were merged in. Same lesson as `0953161`: the frame count
+belongs to the tree, so re-measure it rather than quoting it.
+
+### The question that was asked, and the answer
+
+*Why is clip `0x3F9` not baked — deliberately, by omission, or because it does
+not decode on these skeletons?* **By omission, and it decodes 19 of 19.** The
+refusal in `charmotion.bake` is the measurement and it refuses nothing: motion
+1017 is in `zom.bin`, its block implies **16 bones** and declares **44
+frames**, `g_motion_play_length[0x3F9]` is **85**, and every one of the
+nineteen class-0x30 character types in the twelve bundles is 16-bone. So is
+`0x3F8`, and so are the four other arms of `ChooseDeathMotion`
+(`FUN_004560B0`) that nothing carried.
+
+The bake set is a hand-enumerated list per class and per state in
+`hod2lib/characters`'s `entry_clips`, and its death half was
+`death_motions(tables)` plus the immediates 991 and 992 — which is
+`ChooseDeathMotionDirectional` (`FUN_00456220`) and nothing else.
+`combat.py`'s docstring had said for months that the other arms were "**not**
+implemented", and that sentence was true of the port's branches and had never
+been true of the bake list, because the port takes four of them. `L26` in the
+shape it keeps coming back in: a note describing what somebody meant, standing
+in for a check about what the code does. `CLASS30_DEATH_CLIPS` is now in both
+halves of `hod2lib/charmotion` and `tools/verify_death_clips.py` reads the six
+back out of the **real bundles** — 14,472 of 14,472 (spawn, death clip) pairs
+over 804 class-0x30 spawns. Mutating the guard to `&& false` and re-exporting
+stage 3 turns 672 of that one bundle's pairs red.
+
+Rendered, because the reading is geometric: character type 19 posed from
+motion 1017 at frames 0, 12, 24 and 40 —
+`extract/compare/death12/t19_1017_f0.png` and its three siblings. Frame 0 is
+the axe man standing with an axe in each hand and frame 40 has him doubled
+forward with both still held. Fifteen bones, fifteen meshes, nothing exploded.
+
+### A second bug the check found rather than a report
+
+`0x404` and `0x41A` are body condition 4's coin toss at `0x004561EA`, and
+neither was in any bundle. A clip with no frames has play length 0, so
+`cursor >= play - 1` is true on the actor's **first** dead frame: stage 2's
+twenty `znkager` crawlers snapped to a corpse with no death animation at all.
+Same omission, opposite symptom, because the wait is `>= play - 1` and state
+12's is `>= 0x3C`. That table is now in `docs/formats/mot.md`, because
+"`MotionPlayFrame` answers 0" means *instant* or *eternal* depending only on
+which shape of wait is asking, and both read as a transcription bug.
+
+### What I got wrong on the way, and it was the interesting part
+
+1. **I concluded the bit had no writer, from a sweep, and it was seeded from
+   the spawn record all along.** `obj+0x34` bit `0x1000000` — the bit
+   `ChooseDeathMotion` takes `0x3F9` on and `ZombieStateDeath6` routes to state
+   12 on. I swept `.text` for every encoding of the immediate (`81 /1` and
+   `0D` `OR`s, byte and word forms at `+0x37`/`+0x36`, `bts`, `B8+r` `MOV`s),
+   found no raise anywhere, and was one step from reporting that state 12 is
+   unreachable in the shipped game. `ActorInitFlags` (`FUN_00408970`) ORs the
+   spawn record's `+0x04` word with 1 into `obj+0x34`, and **22 placements
+   across the twelve bundles carry it, every one class 0x30**. The
+   corroboration is what the records *are*: three of stage 1's are state 26
+   (`DelayedLeap`), two of stage 3's are state 33 (the stand-and-throw axe
+   men), and twelve are state **37**, `ZombieStateCarryProp` — every record
+   that sets the bit is an actor carrying, leaping with, or standing holding a
+   thing. The bit means *this actor has hold of something*, exactly as the
+   clip's behaviour implies.
+
+   The sweep was not wrong, it was answering a narrower question than I asked
+   of it: there is no *instruction* that raises the bit. The data does. `L32`
+   again, and the tell was there — a negative result that would have made a
+   shipped state and a shipped clip pointless.
+
+2. **The same sweep nearly missed two references it did find.**
+   `ZombieStateDeath6`'s test takes its mask from `MOV EAX, 0x1000000` at
+   `0x00454DA0`, which no `test`-with-immediate search sees, and
+   `CivilianReleaseCaptors` clears the bit through `MOV EDX, 0xfeffffff` and a
+   register `AND`. So a raise built either of those ways is invisible to the
+   sweep that concluded there is none — which is why item 24's reading is
+   `[likely]` and not `[proved]`.
+
+3. **The stale annotation was the cause of the second bug, not a symptom.**
+   `functions.tsv`'s row for `ZombieStateStandAndThrow` (`0x00459080`) ended
+   "obj+0x34 bit 0x1000000 ... is written by NOTHING in the image — the test is
+   always true and the clear is a no-op". Both halves wrong, and
+   `class30/stand_throw.ts` had been written to make that "always true" test
+   true: it raises the bit where the engine's own sub 0 writes `obj+0x136C`
+   bits `1` and `0x100000`. **That, and not the missing clip, is why *these*
+   two zombies were in state 12** — records `0x3078` and `0x6544` are character
+   type 19 and their flag words are `0x00020002` and `0x00020000`, with the bit
+   clear. Filed as item 24 and deliberately **not fixed**: `0x100000` is
+   `ZombieFlag2.Carried`, which `ZombieOnShot` reads to take state 9 instead of
+   state 6, so the faithful write is a real behaviour change in two rooms, and
+   the reading behind it has no Ghidra corroboration. The row is corrected;
+   `ActorFlag.HoldingWeapon`'s doc comment and the stale "nothing ported sets
+   that bit" in `class30/emerge.ts` with it.
+
+4. **I asked whether the leak was game-wide and the answer is no, twice
+   over.** The 22 bit-carrying placements are in stage 1 and stage 3 only —
+   which is why four stages completed with the clip missing. The port's own
+   extra leak, from item 24, is the nine body-condition-7 spawns per mode set,
+   in stages 1, 2 and 3. Stages 4, 5 and 6 have neither, so no route in them
+   can leak this way at all.
+
+5. **The port test could never have caught this, and now says so.**
+   `port.test.ts`'s fixture carries `1017` and `1016`, so its state-12 block
+   passed throughout. It also left `play` to be derived from the frame count;
+   it now pins `play: 85`, and setting that to 40 reproduces the shipped bug
+   inside the test. A new block gives a character type every clip *except*
+   `0x3F9` and asserts the actor is still in sub 1 after 600 frames with
+   `g_enemies_present` leaked — so short-circuiting the wait, special-casing a
+   missing clip, or making `MotionPlayFrame` answer for a clip it has not got
+   fails there rather than looking like a fix.
+
+### Ghidra was down for all of it
+
+The MCP connection was offline the whole session (`list_instances` empty), so
+nothing was renamed in the live database and every address above came from
+`capstone` over `Hod2.exe` at `_v2r`-resolved offsets. Unanswered as a result:
+`get_xrefs_to 0x00459080` and `0x004560B0`, a proper writer search for
+`obj+0x34` bit `0x1000000`, and the identity of the four `OR` sites the sweep
+did find (`0x0042FDFD` in `FUN_0042FC00`, called once from `0x004305A8`;
+`0x0043D297`, `0x004461D6` and `0x00462CDF`/`0x00462D21`/`0x00462D6C`, which
+fall inside the spans of `HordeMemberUpdate`, `OwlUpdateAndResolveShot` and
+`PlaceBreakableGroup` but with unnamed functions between, so the attribution is
+nearest-preceding-name and not a reading). Two annotation rows were corrected
+in the TSV and are **not** in the database.
+
+### Next actions
+
+1. Item 24: re-run the xrefs when Ghidra is back, then decide the
+   `stand_throw.ts` write. It is the last thing keeping character type 19 out
+   of its own directional death.
+2. Item 23, stage 4 entry 4: nothing read yet.
+3. `docs/PLAYER_PROGRESS.md` still carries a `[diverges]` saying "The port has
+   no class-0x30 death state, so both of its releases land on the same frame" —
+   `class30/death.ts` has all four states and the window is real. Stale, and
+   left alone here only because it is not this session's to rewrite.
+4. `FROG_CLIPS` is in `web/src/hod2lib/charmotion.ts` and in no Python module,
+   and `verify_exporters.py` compares module sets and versions rather than
+   contents, so it cannot see that. Not a bundle defect — the TypeScript half
+   is the writer — but it is drift, and it is the reason
+   `verify_death_clips.py` reads a bundle instead of asking Python.
+
+## Item 23 — stage 4's second entry: state 43 had no exit in the port
+
+`node tools/playthrough.mjs --stage 4 --entry 4 --headless` hung at block 9
+step 1 op 50 on `wait_enemies_alive 0`, **5/5**, with one `znkage` (`0x35B4`)
+in `ZombieStateDragTarget` sub 3 at 90 hit points and the debug clear refusing
+it. It now reaches block 25 `(end → 0)` in 6015 frames, 5/5, identical every
+run. Full write-up in `docs/PLAYER_HANGS.md` item 23.
+
+Both leads in the old note were right and they were **one** fault.
+`ZombieStateDragTarget` (`FUN_0045C080`) raises `obj+0x34 |= 0x10100` on
+itself in sub 1 — bit `0x100` is the `ShotImmune` `DispatchHit`
+(`FUN_004092F0`) jumps past `ResolveHit` on — and the *only* way out of the
+state is the tail at `0x0045C1AD`, which tests `g_script_flags[0x1D]` and
+`g_players_in_play`, releases both enemy counts and goes to sub 4. Sub 3 never
+increments the sub-state. The port had the sub-4 despawn arm and nothing that
+could ever assign sub 4, so the immunity and the count were both permanent.
+
+The partner **does** exist and is exactly what releases it: block 4 step 7 op 5
+`spawn_obj_c` places class-0x10 record `0x3578`, whose one child is `0x35B4`,
+and all three of her reachable streams (85 and its branches 83 and 84) carry
+`CivilianRunScript` op `0x1C` with argument 29. The script's own
+`wait_script_flag 29` in the same step comes down off that write, which is why
+the run got as far as block 9 with the flag already up.
+
+### Wrong turns, and what they cost
+
+* **The Ghidra MCP was offline for the whole session** — `list_instances`
+  returned nothing. Two substitutes worked and are worth keeping in mind: the
+  project backup at `~/hotd2-ghidra-backups/hotd2-ghidra-20260904-105959.tar.gz`
+  extracted into a scratch directory and driven by `analyzeHeadless` with a
+  one-file `GhidraScript` that decompiles addresses named in an env var; and
+  capstone straight over `Hod2.exe`'s own PE section table, which is the raw
+  instruction stream and settled every offset the pseudocode had folded.
+  `L37` earned its keep again: the decompiler rendered sub 4's
+  `g_hit_slots` write as a byte-array index when the instruction is
+  `MOV dword ptr [EAX*4 + 0x9C88C0], 0`.
+* **`POUNCE_LAND_MOTION = 0x1b0` in `class30/target.ts` was misattributed.**
+  State 44 (`0x0045C2E0`) plays `0x41F`, `0x41C`, `0x41D` and `0x41A` and no
+  `0x1B0` anywhere in its 0x4F0 bytes; the clip belongs to state 43's sub 2,
+  which was the only thing reading the constant. `L20`, in the port rather
+  than in the binary.
+* **Twenty minutes lost to a citation that was never missing.** Adding a
+  comment mentioning `` `ZombieStatePounceOnTarget` (`FUN_0045C2E0`) `` to the
+  file that *defines* that function took it out of `verify_port`'s ported set —
+  coverage 163 → 162, nothing failed, and `git diff | grep '— `FUN_00'` was
+  empty. The checker skips a dash-form definition whose `(name, fun)` pair it
+  has already seen in reference form. Written up as **`L42`** -- it was
+  written as L41 and renumbered on merging `main`, which had appended an L41
+  of its own in the same window; the recipe that
+  found it was dumping `check_names`'s dict and diffing it against the same
+  dict built from `git archive HEAD`.
+* **A second, quieter port bug fell out of reading the arms properly.** The
+  port's sub 2 fell through into sub 1's loop-and-cue block, which the engine's
+  `case 2` never reaches — and with the civilian dead and the loops spent that
+  block's second arm fires immediately, so sub 2 bumped to sub 3 in one frame
+  and the settle never ran. It would have survived the tail fix unnoticed.
+
+### Next actions
+
+1. Decide stage 3 item 22: bake clip `0x3F9`, or declare the divergence. It is
+   now the **only** hanging route in the corpus.
+2. `ActorShiftToHoldBone1Position` (`FUN_0045CE70`) is newly named and not
+   ported — four callers, and whether its two positions share a frame of
+   reference is `[open]`. It needs the `GameHost` skeleton seam.
+3. `obj+0x1368` is still one bit of a flags word in the port. `ChooseDeathMotion`
+   reads four of its bits, and `ZombieStateDragTarget` sets one of them, so a
+   captor killed mid-drag plays the wrong death.
+
+**Post-merge re-measurement.** After merging `main` (which changed the
+exporter and so required a re-export, `L24`/`L33` — the builder hash was
+already current) the entry-4 route reaches block 25 in **6090** frames rather
+than 6015, 5/5, and the six entry-0 routes all still reach an end block.
+Stage 3's entry-7 route was the only hanging route left at that point;
+merging `main` a second time brought the death-clip bake that closes item 22,
+and after re-exporting it reaches block 13 in 6390 frames, so **every route in
+the `entries` tables now plays through**. Full
+suite on the merged tree: **36 passed, 0 failed, 0 skipped**, and `HEAD`
+typechecks from a bare `git archive` with nothing of this worktree in it but
+`node_modules`.

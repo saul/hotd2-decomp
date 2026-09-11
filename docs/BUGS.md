@@ -1951,7 +1951,7 @@ investigation ruled out.
 
 ## And one nobody could have reported, in a route nothing had played
 
-- `[part]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
+- `[fixed]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
   step 3 op 4. Reproduce with
   `cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless`: it
   reaches block 7, then 8, then 2, and stops for 1,110 game frames on one
@@ -1977,7 +1977,10 @@ investigation ruled out.
   something is failing; if it is not, the escape should have passed the gate
   and did not, which is a different bug in a different file.
 
-  **The flag gate is fixed; a different hang is four instructions later.**
+  **Fixed in two parts. The flag gate went first; the hang four instructions
+  later was the unbaked death clip, and that is fixed too — the route now
+  reaches block 11 and the end at 6,390 frames over 66 instructions,
+  measured here.**
 
   **My own framing above was wrong, and the agent checked it instead of
   inheriting it.** Stage 3 *does* `set_script_flag 0x15` — block 1 step 5 — but
@@ -2055,7 +2058,7 @@ investigation ruled out.
   named on the way: `g_scene_tick_counter`, which closed a separate `[open]`
   about what distinguishes the blink counter.
 
-- `[open]` **Nothing in the port can leave class 0x30 state 12 anywhere in the
+- `[fixed]` **Nothing in the port can leave class 0x30 state 12 anywhere in the
   game**, and it hangs stage 3's entry-7 route at block 2 step 6 op 8. Filed as
   `PLAYER_HANGS.md` 22. A dead civilian's script sits on
   `CivilianWait.EnemiesPresent` because `g_enemies_present` is 2 with nothing
@@ -2071,11 +2074,102 @@ investigation ruled out.
   `[open]` whether 1017's stride matches these rigs is exactly what that
   refusal would answer.
 
-- `[open]` **Stage 4 hangs from entry 4**, at block 9 with one `znkage` in
+  **Fixed 2026-09-11, and the clip was simply left out.** `bake()`'s refusal is
+  the measurement the decision was waiting on, and it refuses nothing: motion
+  1017 implies **16 bones**, and **all nineteen** class-0x30 character types in
+  the twelve bundles are 16-bone. Rendered to be certain — frame 0 is an axe
+  man standing with an axe in each hand, frame 40 has him doubled forward with
+  both still held.
+
+  The bake set is a **hand-enumerated list**, and its death half covered one of
+  the two routines that choose a death clip. `ChooseDeathMotion`
+  (`FUN_004560B0`) has ten arms and the port takes six. A docstring had said
+  for months that the others were "not implemented" — **true of the port's
+  branches and never true of the bake list**, which is `L26` once more. Six
+  clips are baked now, in both `hod2lib` halves.
+
+  **A second bug came from the new check rather than from a report.** Body
+  condition 4's death pair was in no bundle either, and because that wait
+  measures against the clip's own length rather than a constant, **stage 2's
+  twenty `znkager` crawlers had no death animation at all** and snapped
+  straight to a corpse. Same omission, opposite symptom.
+
+  **The leak is not game-wide, and the measurement is the interesting part.**
+  The flag that sends an actor into this state is **seeded from the spawn
+  record**, by `ActorInitFlags` (`FUN_00408970`), which nothing had read: **22
+  placements carry it across the twelve bundles, every one class 0x30, in
+  stages 1 and 3 only** — which is why four stages completed with the clip
+  missing. That every setter is an actor *carrying* something corroborates what
+  the bit means.
+
+  It nearly came out backwards. A sweep for every encoding of the immediate
+  finds **no instruction anywhere that raises the bit**, which would have made
+  the state unreachable and the report wrong. The data raises it, not the code.
+  `L32`.
+
+  Before: five runs of five hung. After: five of five reach block 11 and the
+  end, which I confirmed myself. `tools/verify_death_clips.py` checks 14,472
+  spawn-and-death-clip pairs read out of the **real bundles** rather than the
+  exporter, and mutating the guard turns 672 of one stage's pairs red.
+
+  `[open]` A separate finding, filed as `PLAYER_HANGS.md` 24 and deliberately
+  not acted on: `ZombieStateStandAndThrow` writes a different flag word from
+  the one the engine writes, and the faithful write would reroute deaths in two
+  rooms. Its cause was an annotation saying the bit "is written by nothing in
+  the image", now corrected. **Held because the reading has no Ghidra
+  corroboration** — the bridge was down for that whole session and every
+  address came from a linear sweep.
+
+- `[fixed]` **Stage 4 hangs from entry 4**, at block 9 with one `znkage` in
   `ZombieStateDragTarget` (state 43, `FUN_0045C080`) at 90 hit points after 70
   volleys with no damage landing, and the debug clear refusing it. Filed as
   `PLAYER_HANGS.md` 23. Nothing read yet. Found by the same `--entry` flag, on
   the other stage that has more than one entry.
+
+  **Fixed 2026-09-11. The state has no exit of its own, and the port had
+  transcribed it without the one thing that ends it.** `[proved]`
+  `ZombieStateDragTarget` has five sub-states, and the tail every sub but one
+  falls into is the whole way out: it tests script flag 29, marks the actor
+  dead, gives back **both** enemy counters and sets the sub-state that
+  despawns. The port had that despawn arm and **nothing that could ever assign
+  it**, and no arm at all for the sub-state that turns on the spot. So the
+  captor held `g_enemies_alive` at 1 for ever.
+
+  **Both leads in the report were right and they were one fault.** One of the
+  state's own sub-states raises `ActorFlag.ShotImmune` on itself, and
+  `DispatchHit` (`FUN_004092F0`) jumps past `ResolveHit` while that bit is up —
+  so no volley could take the actor out of the count either. The immunity is
+  the state's own doing and the flag is what lifts it. **The debug clear
+  refusing the actor was correct** and is untouched.
+
+  The partner exists and it *is* the release. Flag 29 has **no
+  literal-address writer anywhere in the image** — one instruction names that
+  byte, `L32` — and in stage 4 the writer is the dragged civilian herself. The
+  captor is her one child, and all three of her reachable streams raise it. The
+  script's own `wait_script_flag 29` in the same step comes down off that
+  write, which is why the run reached block 9 with the flag already up and the
+  captor ignoring it.
+
+  **Two more bugs fell out of reading the arms properly**, and one of them
+  would have survived the fix unnoticed: a sub-state **fell through** into
+  another's loop-and-cue block, which the engine's own `case` never reaches, so
+  with the civilian dead and the loops spent it bumped straight past the
+  settle. And the pose copy took **yaw alone** where the engine copies all
+  three angles. A third correction is `L20` inside the port: a landing-motion
+  constant was attributed to a state that plays four different clips and not
+  that one.
+
+  Before: five runs of five hung. After: five of five reach the end, which I
+  confirmed at 6,090 frames over 72 instructions. The decompiler had folded a
+  dword-indexed write into a byte index, which a linear sweep caught; Ghidra
+  was offline for the whole session and left nothing unanswered.
+
+  `[open]` Two residuals, neither a declared divergence. `ActorShiftToHoldBone1Position`
+  (`FUN_0045CE70`, four callers) is unported, so the captor settles a bone
+  offset from where the engine puts it — porting it needs the host seam,
+  because `game/` has no skeleton. And a flags word is still modelled as one
+  bit, so **a captor killed mid-drag plays the wrong death clip**; that is a
+  pre-existing gap the reading merely exposed.
 
 - `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
   defect in itself, and recorded because it is now live code with no coverage.

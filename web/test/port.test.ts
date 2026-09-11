@@ -395,10 +395,24 @@ const TYPE: CharacterType = {
     // The death of an actor still holding something: 1017 (0x3F9) is what
     // `ChooseDeathMotion` gives it and 1016 (0x3F8) the clip
     // `ZombieStateDeathFallAndBounce` cuts to when the body lands.
-    "1017": motion(40), "1016": motion(20),
+    //
+    // Both carry their **real** shape from `zom.bin` and their real
+    // `g_motion_play_length`, and 1017's 85 is the load-bearing half: state 12
+    // sub 1 is `if (obj+0x19C < 0x3C) return;`, a literal 60 measured against
+    // that play clock. A fixture that left `play` to be derived from the frame
+    // count would pass on a bundle that got it wrong, and the whole of
+    // `PLAYER_HANGS.md` 22 is an actor that never reached 60.
+    "1017": motion(44, 0, 85), "1016": motion(36, 0, 69),
     // 987 (0x3DB) is the clip `ChooseDeathMotion` gives body conditions 5 and
     // 6 — the two that die through state 9 rather than state 6.
     "987": motion(24),
+    // `ZombieStateDragTarget`'s four: 420 (0x1A4) the drag, 424 (0x1A8) the
+    // kill, 426 (0x1AA) the aftermath when the civilian is already dead, and
+    // 432 (0x1B0) the settle. Sub 2 waits for play cursor 0x2D on **whichever
+    // of the two kill clips sub 1 started**, not on 432 — so it is 424 and 426
+    // whose play lengths have to reach past 45.
+    "420": motion(20, 0, 30), "424": motion(32, 0, 60),
+    "426": motion(32, 0, 60), "432": motion(30, 0, 60),
   },
 };
 
@@ -6718,6 +6732,126 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
           (civ.flags & ActorFlag.Dead) !== 0, `flags 0x${civ.flags.toString(16)}`);
   }
 
+  // **State 43's tail, which is its only exit** — `PLAYER_HANGS` item 23.
+  //
+  // `ZombieStateDragTarget` (`FUN_0045C080`) raises `0x10100` on itself when
+  // it kills, so from that frame `DispatchHit` skips `ResolveHit` and nothing
+  // can shoot the captor out of `g_enemies_alive`. Sub 3 never increments the
+  // sub-state. The one thing that ends it is the tail at `0x0045C1AD`:
+  // `g_script_flags[0x1D]` plus `g_players_in_play`, releasing both enemy
+  // counts and going to sub 4, which despawns. The port had the sub-4 arm and
+  // nothing that could ever assign sub 4, so stage 4's entry-4 route stopped
+  // at block 9 with one `znkage` alive at 90 hit points for ever.
+  {
+    const drag: TargetScriptJson = {
+      state: ZombieState.DragTarget,
+      // One loop, and a cue at play cursor 4 so the kill lands early.
+      head: { loops: 1, cue: 4 },
+      entries: [],
+    };
+    const step = (z: ZombieActor, events: Events, n: number) => {
+      for (let i = 0; i < n; i++) {
+        ActorAdvanceMotion(z, 1 / 60);
+        zFrame(z, events);
+      }
+    };
+
+    {
+      const { civ, z, events } = captorScene(ZombieState.DragTarget, 1, drag);
+      // The room the gate is reading, as `EnemyZombieInit` leaves it.
+      G.g_enemies_alive = 1;
+      G.g_enemies_present = 1;
+      G.g_players_in_play = 1;
+
+      step(z, events, 1);
+      check("state 43 sub 0 falls into the drag on its own frame",
+            z.sub === 1 && z.motion === 0x1a4, `sub ${z.sub} motion ${z.motion}`);
+
+      // The drag glues the captor to the civilian -- all three rotations, not
+      // just the yaw.
+      civ.pos = vec3(7, 8, 9);
+      civ.pitch = 0x111; civ.yaw = 0x222; civ.roll = 0x333;
+      step(z, events, 1);
+      // x and z only: this fixture has no collision set, so the ground snap
+      // that runs after the state puts y at the no-floor floor. The rotations
+      // are the half that was missing -- the port copied `yaw` alone and the
+      // engine copies `obj+0x64`, `0x68` and `0x6C`.
+      check("...and the pose it copies is the position and all three rotations",
+            z.pos.x === 7 && z.pos.z === 9
+            && z.pitch === 0x111 && z.yaw === 0x222 && z.roll === 0x333,
+            `pos ${z.pos.x},${z.pos.y},${z.pos.z} `
+            + `rot ${z.pitch},${z.yaw},${z.roll}`);
+
+      // The cue kills her and makes the captor shot-immune.
+      step(z, events, 40);
+      check("...the cue frame kills the civilian and raises `0x10100` on itself",
+            (civ.flags & ActorFlag.Dead) !== 0
+            && (z.flags & ActorFlag.ShotImmune) !== 0,
+            `civ 0x${civ.flags.toString(16)} z 0x${z.flags.toString(16)}`);
+
+      // Sub 2 is its own arm. It used to fall through into sub 1's loop-and-cue
+      // block, whose second half fires the moment the civilian is dead -- so
+      // the settle was skipped in a single frame and the state went straight
+      // to the turn.
+      check("...and it settles in sub 2 rather than skipping to the turn",
+            z.sub === 2, `sub ${z.sub}`);
+      step(z, events, 400);
+      check("...then reaches sub 3, which never advances again",
+            z.sub === 3 && z.state === ZombieState.DragTarget,
+            `sub ${z.sub} state ${z.state}`);
+
+      // **This is the hang.** Nothing has raised flag 29, so the captor is
+      // still in the room and still cannot be shot out of it.
+      check("with `g_script_flags[0x1D]` down it holds both enemy counts open",
+            G.g_enemies_alive === 1 && G.g_enemies_present === 1
+            && !z.dead && z.visible,
+            `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
+
+      // ...and the flag is what ends it, on the very next frame.
+      G.g_script_flags[0x1d] = 1;
+      step(z, events, 1);
+      check("...and the flag releases both counts and sends it to sub 4",
+            G.g_enemies_alive === 0 && G.g_enemies_present === 0
+            && z.sub === 4 && (z.flags & ActorFlag.Dead) !== 0,
+            `alive ${G.g_enemies_alive} present ${G.g_enemies_present} `
+            + `sub ${z.sub} flags 0x${z.flags.toString(16)}`);
+      step(z, events, 1);
+      check("...and sub 4 despawns it", !z.visible, `visible ${z.visible}`);
+    }
+
+    // `g_players_in_play` is the second half of the test, and it is an
+    // `AND`: the tail does nothing before anyone has started.
+    {
+      const { z, events } = captorScene(ZombieState.DragTarget, 1, drag);
+      G.g_enemies_alive = 1;
+      G.g_enemies_present = 1;
+      G.g_players_in_play = 0;
+      G.g_script_flags[0x1d] = 1;
+      step(z, events, 4);
+      check("the tail is an AND: flag 29 up with no player in play holds",
+            G.g_enemies_alive === 1 && z.sub !== 4,
+            `alive ${G.g_enemies_alive} sub ${z.sub}`);
+    }
+
+    // The tail is reached from **every** sub, not only from the turn: the
+    // `goto switchD_0045c0aa_default` out of sub 1's "nothing to do" arm is
+    // the same block.
+    {
+      const { z, events } = captorScene(ZombieState.DragTarget, 1, drag);
+      G.g_enemies_alive = 1;
+      G.g_enemies_present = 1;
+      G.g_players_in_play = 1;
+      step(z, events, 1);
+      check("a captor still in sub 1 is where the flag can catch it",
+            z.sub === 1, `sub ${z.sub}`);
+      G.g_script_flags[0x1d] = 1;
+      step(z, events, 1);
+      check("...and the tail runs from sub 1 as well as from sub 3",
+            z.sub === 4 && G.g_enemies_alive === 0,
+            `sub ${z.sub} alive ${G.g_enemies_alive}`);
+    }
+  }
+
 }
 
 console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
@@ -10294,12 +10428,83 @@ console.log("class 0x30, dying with a weapon still in hand:");
   for (let i = 0; i < 40; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   check("...then falls under gravity", z.sub === 2 && z.pos.y < y0,
         `sub ${z.sub}, ${y0} -> ${z.pos.y}`);
+  // The present count is what the scripts wait on, and state 12 is the one
+  // death path that holds it past the death clip: `ReleaseEnemyPresentCount`
+  // (`FUN_00456580`) runs in `ZombieEnterCorpseState` and nowhere else, so
+  // every frame of the fall is a frame `wait_enemies_present` and
+  // `wait_scripted_actors` cannot come down.
+  check("...holding `g_enemies_present` for the whole fall",
+        G.g_enemies_present === 1, `present ${G.g_enemies_present}`);
   for (let i = 0; i < 400; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     if (z.state === ZombieState.CorpseSink) break;
   }
   check("...and settles into the corpse", z.state === ZombieState.CorpseSink,
         `state ${z.state} sub ${z.sub} y ${z.pos.y}`);
+  check("...which is where it gives the present count back",
+        G.g_enemies_present === 0, `present ${G.g_enemies_present}`);
+}
+
+/**
+ * **What state 12 costs when its clip is not in the bundle**, pinned as a test
+ * rather than left as a sentence.
+ *
+ * `PLAYER_HANGS.md` 22 and the shape of it: sub 1 is
+ * `if (obj+0x19C < 0x3C) return;`, an exact literal against the play clock of
+ * clip `0x3F9`, and `MotionPlayFrame` answers **0** for a clip the character
+ * type has not got. No character type in any of the twelve shipped bundles had
+ * `0x3F9` baked, so no actor in the port could leave state 12 anywhere in the
+ * game, `ZombieEnterCorpseState` never ran, and `g_enemies_present` never
+ * fell. Stage 3's block 2 hung on a `wait_scripted_actors` behind a dead
+ * civilian who was herself parked on `CivilianWait.EnemiesPresent`.
+ *
+ * The fix is in the exporter -- `CLASS30_DEATH_CLIPS`, checked over the real
+ * bundles by `tools/verify_death_clips.py`, because a hand-written fixture that
+ * carries the clip is exactly what cannot see an exporter that does not. This
+ * block is the other half: it says out loud that state 12's exit **is** the
+ * clip's play clock, so a future attempt to clear the hang by short-circuiting
+ * the wait, by special-casing a missing clip, or by making `MotionPlayFrame`
+ * answer for a clip it has not got, fails here rather than looking like a fix.
+ */
+console.log("class 0x30 state 12, with no clip to wait on:");
+{
+  const rng = new Rng(14);
+  // Same fixture, one clip poorer. Everything else is `TYPE`, so the only
+  // difference between this block and the one above is the bundle.
+  const noFall = { ...TYPE.motions } as Record<string, unknown>;
+  delete noFall["1017"];
+  const TYPE_NO_FALL = { ...TYPE, motions: noFall } as unknown as CharacterType;
+  const CHARS_NO_FALL = {
+    ...CHARS, types: { "1": TYPE_NO_FALL },
+  } as unknown as CharactersJson;
+
+  ResetGameGlobals();
+  SetGameTables(CHARS_NO_FALL);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_nFiringGate = 1;
+  const events = new Events();
+  const z = spawnZombie(0x3520, 1, "axe man, no fall clip");
+  z.visible = true;
+  z.hp = 1;
+  z.pos = vec3(0, 40, 0);
+  z.flags |= ActorFlag.HoldingWeapon;
+  z.dead = true;
+  z.flags |= ActorFlag.Dead;
+  z.pendingHit = { bone: 1, result: 1 };
+
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("state 6 still sends it to state 12 -- the bit decides, not the clip",
+        z.state === ZombieState.DeathFallAndBounce, `state ${z.state}`);
+  // Ten times the sixty ticks the state is waiting for.
+  for (let i = 0; i < 600; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("...and with no 0x3F9 the play cursor never reaches 0x3C",
+        MotionPlayFrame(z) === 0, `cursor ${MotionPlayFrame(z)}`);
+  check("...so it is still in sub 1 after 600 frames",
+        z.state === ZombieState.DeathFallAndBounce && z.sub === 1,
+        `state ${z.state} sub ${z.sub}`);
+  check("...and `g_enemies_present` is leaked for the rest of the stage",
+        G.g_enemies_present === 1, `present ${G.g_enemies_present}`);
 }
 
 console.log("`ActorKillAll` routes class 0x30 through its death chain:");
@@ -10988,20 +11193,23 @@ console.log("\na stashed path is played by a hook that steps first:");
  * and `viewSpaceOfPoint` are one sign flip each.
  */
 /**
- * **`ActorPlayHitVoice` kind 3 is the attack cry**, and nothing raised it.
+ * **All five of `ActorPlayHitVoice`'s kinds**, from the one copy of it.
  *
- * `FUN_0040A6F0` has five kinds. The port had three of them, in
- * `render/shooting.ts`, because the shot path needed them -- so a zombie made
- * a noise when you shot it and none at all when it swung at you, which is how
- * it was reported. Kind 3 is also the only kind whose table entry is a *pair
- * per voice set* rather than one id per set, and the exporter had been reading
- * all fifteen dwords of `g_hit_voice_table` and emitting eleven.
+ * `FUN_0040A6F0` has five kinds and the port used to have it twice: kinds 0, 1
+ * and 2 in `render/shooting.ts` because the shot path needed them, kind 3
+ * nowhere at all -- so a zombie made a noise when you shot it and none when it
+ * swung at you, which is how it was reported. Kind 3 is also the only kind
+ * whose table entry is a *pair per voice set* rather than one id per set, and
+ * the exporter had been reading all fifteen dwords of `g_hit_voice_table` and
+ * emitting eleven.
  *
- * The two ends are checked here: that the set split is the engine's, and that
- * a pick comes out of the right pair. `ZombieStateStrike` raising it is
- * checked by the sound reaching the event bus during a real strike.
+ * There is one copy now, in `game/combat/voice.ts`, so every kind is reachable
+ * from here: the set split, the pair, the impact-plus-voice shape of 0, 1 and
+ * 2, and kind 4's proved silence. Which kind a *shot* passes is the next
+ * section; `ZombieStateStrike` raising kind 3 is checked by the sound reaching
+ * the event bus during a real strike.
  */
-console.log("\nthe attack cry:");
+console.log("\nthe five voice kinds:");
 {
   const heard: number[] = [];
   const rng = new Rng(7);
@@ -11044,6 +11252,31 @@ console.log("\nthe attack cry:");
         heard.length === 2 && heard[0] === 1 && heard[1] === 11,
         JSON.stringify(heard));
 
+  // Kinds 1 and 2 are the other two halves of the shot voice, and they differ
+  // in their *impact* rather than in their line: kind 1 draws one of five body
+  // impacts, kind 2 coin-flips two head ones. In the shipped table their two
+  // voice ids are the same pair, which is why the correction this port made to
+  // which kind plays is nearly inaudible -- the fixture gives them distinct
+  // ids so that the wiring is still assertable.
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 1 }, ActorVoice.Killed, rng, say);
+  check("a kill voice is a body impact and set B's kill line",
+        heard.length === 2 && heard[0] === 1 && heard[1] === 21,
+        JSON.stringify(heard));
+
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 2 }, ActorVoice.HeadKilled, rng, say);
+  check("a head voice takes the *head* impact table, and set A's line",
+        heard.length === 2 && heard[0] === 2 && heard[1] === 30,
+        JSON.stringify(heard));
+
+  // `[proved]` in `functions.tsv`: no site in the image passes 4 and both of
+  // its ids are zero, so the engine's own arm reaches `PlaySoundId(0)`.
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 2 }, ActorVoice.Kind4, rng, say);
+  check("kind 4 is silence, because the engine's ids for it are zero",
+        heard.length === 0, JSON.stringify(heard));
+
   // A bundle written before the four ids were read carries no `attack`, and
   // then the swing has to stay silent rather than throw.
   heard.length = 0;
@@ -11068,6 +11301,18 @@ console.log("\nthe shot effects:");
       impact_sprite: { "3": [0x0e25, 0x0e33, 1.0] },
       impact_sprite_default: [0x0904, 0x0904, 0.1],
       ricochet: {},
+      // The shot voice is raised from `ActorShotFeedback` now, so this fixture
+      // needs the table it reads. One id per row, so which row fired is the
+      // number that comes out.
+      impact: [{ id: 1, file: "" }],
+      head_impact: [{ id: 2, file: "" }],
+      voice: {
+        hurt: [{ id: 10, file: "" }, { id: 11, file: "" }],
+        kill: [{ id: 20, file: "" }, { id: 21, file: "" }],
+        head: [{ id: 30, file: "" }, { id: 31, file: "" }],
+        attack: [[{ id: 40, file: "" }], [{ id: 50, file: "" }]],
+      },
+      voice_set_a_types: [0],
     },
   } as unknown as CharactersJson);
   const z0 = G.g_object_list[0]!;
@@ -11140,7 +11385,7 @@ console.log("\nthe shot effects:");
   G.g_blood_sprays = [];
   G.g_sprite_effects = [];
   G.g_hit_result = HitResultCode.Plain;
-  ActorShotFeedback(z0, 4, vec3(1, 2, 3), host, events);
+  ActorShotFeedback(z0, 4, vec3(1, 2, 3), host, rng, events);
   const spray = G.g_blood_sprays[0]!;
   check("a plain hit bleeds", G.g_blood_sprays.length === 1);
   check("...and the spray holds an actor and a bone, not a position",
@@ -11157,14 +11402,104 @@ console.log("\nthe shot effects:");
   check("...starting at the first of them", BLOOD_FIRST_SLOT === 0x3a);
 
   G.g_hit_result = HitResultCode.Damaged;
-  ActorShotFeedback(z0, 4, vec3(), host, events);
+  ActorShotFeedback(z0, 4, vec3(), host, rng, events);
   check("a hit that swapped the part bleeds harder, not less",
         G.g_blood_sprays[0]!.severity === 0.75);
   G.g_blood_sprays = [];
 
+  // -- the voice kind is the hit-result code, and nothing else --------------
+  //
+  // `[proved]` from two routines that agree, which is what makes this a rule
+  // and not one function's habit. `ZombieOnShot` (`FUN_00453EB0`):
+  //
+  //   00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+  //   00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
+  //   00453f77  PUSH 0x1           ; dead and anything else -> kind 1
+  //   00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+  //
+  // and `ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the
+  // same two constants at 0x00449A76, 0x00449A7B and 0x00449A88. **Neither
+  // tests the bone and neither tests whether the actor died of this shot** --
+  // which is what `render/shooting.ts`'s copy keyed on, so these five checks
+  // are the behaviour change the move carried. Every one of them fails on the
+  // old `killed ? (head ? "head" : "kill") : "hurt"` mapping.
+  const voiced: number[] = [];
+  const ear = new Events();
+  ear.on("sound.play", (d) => voiced.push(d.id));
+  // Named explicitly rather than by a range: the ricochet this routine also
+  // emits is `0x1116A9`, and a `>= 10` filter swallowed it and turned the
+  // result-5 check green on a sound that is not a voice at all.
+  const VOICE_IDS = [10, 11, 20, 21, 30, 31, 40, 50];
+  const impactOf = (xs: number[]) => xs.filter((id) => id === 1 || id === 2);
+  const lineOf = (xs: number[]) => xs.filter((id) => VOICE_IDS.includes(id));
+  z0.charType = 0;                      // set A, per `voice_set_a_types`
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+
+  // Alive: kind 0, whatever the bone was. Bone 2 is the head.
+  voiced.length = 0;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a live actor shot in the head still says hurt",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 10,
+        JSON.stringify(voiced));
+  check("...with a body impact, not a head one",
+        impactOf(voiced).length === 1 && impactOf(voiced)[0] === 1,
+        JSON.stringify(voiced));
+
+  // Dead and result 2: kind 2 -- and it is the *result*, not the bone.
+  voiced.length = 0;
+  z0.flags |= ActorFlag.Dead;
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 4, vec3(), host, rng, ear);
+  check("result 2 on a dead actor is kind 2, off a shot to the leg",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 30,
+        JSON.stringify(voiced));
+  check("...and kind 2's tell is the head impact table",
+        impactOf(voiced).length === 1 && impactOf(voiced)[0] === 2,
+        JSON.stringify(voiced));
+
+  // Dead and anything else: kind 1 -- including a shot to the head.
+  voiced.length = 0;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a head shot that kills is kind 1, because the result is 1",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 20
+        && impactOf(voiced)[0] === 1, JSON.stringify(voiced));
+
+  // The two gates that silence it: `obj+0x34` bit 0x100 jumps the whole
+  // routine (0x00453ec7), and the live arm refuses result 5 (0x00454025).
+  voiced.length = 0;
+  z0.flags &= ~ActorFlag.Dead;
+  G.g_hit_result = HitResultCode.NoEffect;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a result-5 hit on a live actor has no voice, only the ricochet",
+        lineOf(voiced).length === 0, JSON.stringify(voiced));
+
+  voiced.length = 0;
+  z0.flags |= ActorFlag.Dead | ActorFlag.ShotImmune;
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a shot-immune body is silent even on the dead arm",
+        lineOf(voiced).length === 0, JSON.stringify(voiced));
+
+  // The bursting head shouts, which it did not while the voice tables were in
+  // `render/`: `00454133 PUSH 0x3` / `00454136 CALL 0x0040a6f0`, inside
+  // `ActorShotFeedback` itself rather than in its caller.
+  voiced.length = 0;
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+  z0.boneSlot["2"] = 0x1dc2;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("the head that bursts cries out, out of set A's attack pair",
+        voiced.includes(40), JSON.stringify(voiced));
+  delete z0.boneSlot["2"];
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+  G.g_blood_sprays = [];
+  G.g_sprite_effects = [];
+
   // -- result 5 is a ricochet, and it is not blood --------------------------
   G.g_hit_result = HitResultCode.NoEffect;
-  ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, events);
+  ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, rng, events);
   check("a result-5 hit draws no blood at all",
         G.g_blood_sprays.length === 0);
   const ric = G.g_sprite_effects[0]!;

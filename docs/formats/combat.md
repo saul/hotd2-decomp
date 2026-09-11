@@ -549,7 +549,10 @@ if (obj->flags & 8) {                       /* was shot this frame */
             ActorReactToHit(player);        /* <- the stumble */
             if (g_hit_result[player] != 5) ActorPlayHitVoice(obj, 0);
         } else {
-            ActorPlayHitVoice(obj, bone == 2 ? 2 : 1);
+            /* The kind is the RESULT CODE. Nothing here tests the bone --
+               this line read `bone == 2 ? 2 : 1` until 0x00453F6E was
+               disassembled; see the voice section below. */
+            ActorPlayHitVoice(obj, g_hit_result[player] == 2 ? 2 : 1);
             state = 6;                      /* the death */
         }
 }
@@ -914,8 +917,28 @@ pointer into `+0x0A` need not show as a reference to that address.
 ```c
 ActorShotFeedback(player);                      /* FUN_00454050 -- blood or ricochet */
 if (still alive)  { hit reaction motion; if (result != 5) voice(obj, 0); }
-else              { voice(obj, bone == 2 ? 2 : 1); state = 6; }
+else              { voice(obj, result == 2 ? 2 : 1); state = 6; }
 ```
+
+**The kind is the hit-result code and nothing else.** `[proved]`, from the
+instruction stream and from a second routine that agrees:
+
+```
+00453f46  f7463400000004   TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+00453f4d  0f84c7000000     JZ   0x0045401a                         ; ...alive
+00453f6e  83f802           CMP  EAX, 0x2       ; g_hit_result, read back
+00453f73  6a02             PUSH 0x2            ; dead, result 2 -> kind 2
+00453f77  6a01             PUSH 0x1            ; dead, otherwise -> kind 1
+00454025  83f805           CMP  EAX, 0x5
+0045402a  6a00             PUSH 0x0            ; alive, result != 5 -> kind 0
+```
+
+`ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the same two
+constants at `0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither tests the
+bone and neither tests whether the actor died of *this* shot.** This page said
+`bone == 2 ? 2 : 1` for a long time, the browser player's shot path was written
+from it, and the correction is small only because of the table below: kind 2's
+voice pair *is* kind 1's, so what changes is the impact and not the line.
 
 `ActorPlayHitVoice` (`FUN_0040A6F0`) plays **two** sounds — a flesh impact and
 a voice:
@@ -923,8 +946,16 @@ a voice:
 | Event | Impact, one at random | Voice |
 |---|---|---|
 | hurt (kind 0) | `BLOOD02`, `BLOOD03`, `BLOOD04`, `BLOOD06`, `BONE01` | `ZOMBIE_010` / `ZOMBIE_012` |
-| killed (kind 1) | the same five | `ZOMBIE_019` / `ZOMBIE_018` |
-| headshot kill (kind 2) | `BLOOD01` or `BLOOD05` | `ZOMBIE_019` / `ZOMBIE_018` |
+| dead, result != 2 (kind 1) | the same five | `ZOMBIE_019` / `ZOMBIE_018` |
+| dead, result == 2 (kind 2) | `BLOOD01` or `BLOOD05` | `ZOMBIE_019` / `ZOMBIE_018` |
+| attack cry (kind 3) | *none* | a coin flip **within** the set's own pair |
+
+Kinds 1 and 2 carry the **same voice pair**, which is checked against every
+shipped bundle rather than taken on trust: the exporter writes `voice.kill` and
+`voice.head` and they come out identical. So the only audible difference
+between them is the impact table — five body impacts against two head ones —
+and *that* is what a headshot kill sounds like in this game, not a different
+cry.
 
 The two voice columns are **set A** and **set B**. `ActorPlayHitVoice` switches
 on `obj+0x1F4`: character types 0, 2, 5, 6, 9, 0x0E, 0x0F, 0x10 and 0x11 take

@@ -266,8 +266,10 @@ THROW_BLINK_FRAMES = 60
 
 #: `DAT_00577674`: the sound ids `ActorPlayHitVoice` (`FUN_0040A6F0`) picks
 #: from. Fifteen dwords -- five flesh impacts, then six voice ids in
-#: ``(set A, set B)`` pairs, then two two-entry pools. Read as ids and resolved
-#: through `g_se_name_list`, so the names below are the game's own filenames.
+#: ``(set A, set B)`` pairs, then two two-entry pools, which are **kind 3's**:
+#: the attack cry is a pair per set rather than one id per set, because the
+#: routine coin-flips inside the set. Read as ids and resolved through
+#: `g_se_name_list`, so the names below are the game's own filenames.
 HIT_VOICE_TABLE = 0x00577674
 
 #: Character types that take **voice set A**. `ActorPlayHitVoice` switches on
@@ -741,14 +743,32 @@ def combat_tables(tables) -> dict:
     name = lambda i: se.get(i, "")
     named = lambda ids: [{"id": i, "file": name(i)} for i in ids]
     return {
-        # `ActorPlayHitVoice`. `impact` plays on every hurt and every body
-        # kill; `head` replaces it on a headshot kill.
+        # `ActorPlayHitVoice`. `impact` plays on kinds 0 and 1; `head_impact`
+        # replaces it on kind 2 -- which is the **hit result being 2**, not a
+        # headshot: `ZombieOnShot` (`FUN_00453EB0`) picks between kinds 1 and 2
+        # at `0x00453F6E CMP EAX,0x2` on `g_hit_result` and tests no bone at
+        # all, and `ThrowerOnShot` (`FUN_004499A0`) agrees at `0x00449A76`.
+        # The two kinds share one voice pair, so the impact is the only
+        # audible difference; `tools/verify_combat.py` check 15 asserts both.
         "impact": named(v[0:5]),
         "head_impact": named([0x0116A9, 0x0516A9]),
         "voice": {
             "hurt": named([v[5], v[6]]),
             "kill": named([v[7], v[8]]),
             "head": named([v[9], v[10]]),
+            # **Kind 3, the attack cry**, and the table's shape changes here:
+            # kinds 0-2 are one id per voice set, and this is a *pair* per set
+            # that the routine tosses a coin within (`rand() & 1` at
+            # `0x0040A7B8` and `0x0040A7E0`). So it is
+            # ``[set A pair, set B pair]`` rather than ``[set A, set B]``.
+            #
+            # This parser read all fifteen dwords and emitted eleven for as
+            # long as `web/src/hod2lib/combat.ts` did. The TS half was fixed
+            # when the silent swing was reported and this one was not, which is
+            # the drift `tools/verify_exporters.py` is meant to catch and
+            # cannot: it compares the two halves' *modules and version*, not
+            # the fields they emit.
+            "attack": [named([v[11], v[12]]), named([v[13], v[14]])],
         },
         "voice_set_a_types": list(VOICE_SET_A_TYPES),
         # `FUN_00407950` and `FUN_004073B0`, keyed by collision material.

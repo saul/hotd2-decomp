@@ -850,6 +850,30 @@ with.
 
 Things established while building it, now folded back into the format docs.
 
+- **An actor can park on a script flag too, and then the gate in front of it
+  is a gate the walker cannot see.** `[proved]` —
+  `ZombieStateDragTarget` (`FUN_0045C080`, class 0x30 state 43) has no exit of
+  its own. Its sub 3 turns on the spot and never advances, and the tail at
+  `0x0045C1AD` that every other sub falls into is the whole way out:
+  `g_script_flags[0x1D]` and `g_players_in_play`, then
+  `ReleaseEnemyAliveCount`, `ReleaseEnemyPresentCount` and the despawn arm. Sub
+  1 has already raised `obj+0x34 |= 0x10100` on itself, and `0x100` is the
+  `ShotImmune` `DispatchHit` (`FUN_004092F0`) jumps past `ResolveHit` on — so
+  the actor cannot be shot out of the count either.
+
+  `0x0045C1AE` is the only instruction in the image that names `0x009C721D`,
+  so flag 29 has no literal-address writer anywhere: in stage 4 the release is
+  the dragged **civilian's** own `CivilianRunScript` op `0x1C`, off all three
+  of her reachable streams. The captor is her spawn record's only child. So
+  `wait_enemies_alive` in a later block is held by a class-0x30 actor waiting
+  on a class-0x10 actor's script, with nothing in the walker's own view of
+  either. `tools/flag_gates.ts` asserts that link over all twelve bundles —
+  the same file's route pass, asked of an actor instead of the walker.
+
+  Found because `--entry` made stage 4's second route runnable; it was
+  `PLAYER_HANGS` item 23, and the port had transcribed the state without its
+  tail.
+
 - **A `wait_script_flag` gate is held per *route*, not per stage.** `[proved]`
   — `StoryModeSwitchUpdate` (`FUN_00474F30`), the class-0x44 selector-17
   object, raises `g_script_flags[0x15]` at `0x00474FA6` while it stands in
@@ -1495,21 +1519,49 @@ move: `civ_walk.mjs` reports the stage-1 rescue civilian walking the identical
 `20.87 over 590 frames (56,-194) -> (37,-186)` either side of the change,
 because the second arm is a pose and moves no world position at all.
 
-One thing is deliberately not gate-driven: the **death** clip, which
-`ActorAdvanceMotion` does not run root motion through, so `pose.ts` keeps its
-whole root at that one call site. The two models agree wherever the clip's
-frame-0 horizontal root is zero — the pose offset is `root[f]` where the
-accumulated deltas would be `root[f] - root[0]`, both inside the actor's own
-rotation — which is 992 blocks of 1058. Making it faithful means giving the
-death clip root motion in `game/`, and that is a separate change.
+**Two things about it are `[diverges]`, not `[open]`**, and both are declared
+in `game/` rather than in `render/` so that `verify_port.py` counts them — the
+divergence count went 167 to 169 and that is the point of it. A departure
+described only in prose reads as settled, which is how a doc comment with no
+assertion behind it kept a hang alive for two sessions.
 
-`[open]` The engine's pose translate sits **inside** `MatrixScale(model+0x116C)`,
-so a character drawn at 0.9 offsets by 0.9 of what its clip authored. This port
-draws every character at 1.0 — neither `hod2lib.characters` nor
-`render/characters.ts` applies that field to the model — so the offset is
-unscaled, consistently with the model it offsets. Two of the three civilian
-clips above belong to `scale 0.9` types, so the honest correction there is
-2.594 rather than 2.882, and fixing it means scaling the drawn character too.
+1. **The death clip keeps its whole root whatever the gate says.**
+   `ActorAdvanceMotion` returns early on `obj.death`, so nothing steps the
+   actor, and `pose.ts` overrides the gate at that one call site because
+   otherwise a falling body's travel would come from nowhere. The engine has no
+   death track at all: a death clip is the ordinary motion and the gate decides
+   it like any other. The two land in the same place wherever the clip's frame-0
+   horizontal root is zero — the pose offset is `root[f]` where the accumulated
+   deltas would be `root[f] - root[0]`, both inside the actor's own rotation —
+   which is 992 blocks of 1058. **That is why it is invisible, not why it is
+   right.** Faithful means running root motion through a death in `game/`, for
+   the classes with no death machine. Tagged on the `obj.death` branch in
+   `game/motion.ts`.
+2. **The pose offset is unscaled, because the model is.** The engine's translate
+   sits *inside* `MatrixScale(model+0x116C)`, so a character drawn at 0.9
+   offsets by 0.9 of what its clip authored. This port draws every character at
+   1.0 — neither `hod2lib.characters` nor `render/characters.ts` writes that
+   field to a node — so scaling the offset alone would be worse than leaving it,
+   since the offset would shrink while the model it offsets did not. The honest
+   size of the gap: three of the four clips that reach the pose at all belong to
+   `scale 0.9` types, where the engine's offset is **2.594 units and the port's
+   is 2.882**; the fourth is class 0x21 at character type 7, scale 1.0, where
+   they agree exactly. Faithful means scaling every skinned actor's drawn size,
+   which changes how the whole game looks. Tagged on `ActorModelScale` in
+   `game/root_motion.ts`.
+
+Still `[open]`, and deliberately left so: `MotionFlag.RootMotionY`, bit `0x10`
+of the same word, has no writer anywhere that has been read — nine other classes
+write `model+0x64` and none of their values were read here. And the engine's
+wrap damper makes the applied delta `(baseline_old - root)/play_length` where
+`rootDelta` computes `(root - root[0])/frames`; both are small, neither was
+touched, they are not the same number and nothing asserts either.
+
+**15 further `[diverges]` tags live outside `game/` and `script/`** — eight
+files under `render/` — and `verify_port.py` does not count them, because
+`cited_files()` is `game/` plus `script/` by an explicit earlier decision.
+Recorded here rather than acted on: widening the count is a change to what the
+honest measure measures, and it would move it by fifteen at once.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any
@@ -1747,6 +1799,87 @@ as a one-shot, so class 0x31's laser sword — ported earlier, and correctly —
 had been igniting for 0.4 seconds and never sustaining, and its `_OFF` cue was
 a 404 for a file the game does not ship. The loop branch is transcribed now,
 and the bundle carries `sound.looping`, the 44 pairs out of the EXE.
+
+### The hit voice exists once, and the kind is the hit-result code
+
+`ActorPlayHitVoice` (`FUN_0040A6F0`) was implemented **twice**: kinds 0, 1 and
+2 in `render/shooting.ts`, because the shot path needed them before there was
+anywhere else to put them, and kind 3 in `game/combat/voice.ts`. Both copies
+carried a comment saying so, and the renderer's carried the standing
+`[diverges]` that said consolidating it was four decisions rather than a move.
+All four are made.
+
+**The layer.** `verify_layers.py`'s `render-drives-the-port` refuses `render/`
+to call an engine function, and it is right: the engine plays the three shot
+kinds from `ZombieOnShot` (`FUN_00453EB0`) and `ThrowerOnShot`
+(`FUN_004499A0`), which are `game/` code. They are raised from
+`game/combat/feedback.ts` now — beside the blood, and in the engine's order,
+which is the blood first. The renderer has no `playSound` and no sound of its
+own left at all; `app/stage_load.ts` lost the wiring with it.
+
+**The determinism.** The pick was a generator private to `render/`, reseeded
+per stage, on the argument that which grunt plays is feedback rather than
+state. It is the world's seeded `rand()` now, like every other draw in the
+port, and therefore in the snapshot — which is what a save has to be able to
+reproduce (`L10`).
+
+`[proved]` **And the kind is the hit-result code and nothing else.** Two
+routines agree, which is what makes it a rule and not one function's habit:
+
+```
+00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
+00453f77  PUSH 0x1           ;                  dead otherwise -> kind 1
+00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+```
+
+and `ThrowerOnShot` is the same two instructions with the same two constants at
+`0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither tests the bone and
+neither tests whether the actor died of *this* shot**, which is exactly what
+the render-side copy keyed on — `killed ? (head ? "head" : "kill") : "hurt"`.
+`docs/formats/combat.md` had said `bone == 2 ? 2 : 1` since the routine was
+first read, and the port was written from that line.
+
+**What a player actually hears change is the impact, and almost nothing else.**
+Kind 2's two voice ids in `g_hit_voice_table` are the *same pair* as kind 1's —
+`ZOMBIE_019` for set A, `ZOMBIE_018` for set B — so the difference between
+those two kinds is two head impacts (`BLOOD01`, `BLOOD05`) against the five
+body ones (`BLOOD02/03/04/06`, `BONE01`). So:
+
+* a **killing head shot** now plays a body impact, because its result is
+  usually 1 (the head model swapped) and not 2;
+* a **killing body shot whose result is 2** — plain damage, no swap — now plays
+  the head impact pair;
+* the **voice line is identical** in both of those, which is why this is a
+  correction worth making and not one worth being nervous about;
+* a shot that finds an actor **already dead** says the kill line rather than
+  the hurt line, because the test is the `Dead` flag and not this shot's kill.
+  `[likely]` audible: nothing in the port's candidate pick excludes a corpse,
+  but whether the engine's death states raise `ShotImmune` — which would
+  silence it there — is `[open]`.
+
+That equality is a claim small enough to be tempting to leave in a doc comment,
+which is how `L26` happens, so it is a check: `verify_combat.py`'s check 15
+reads `g_hit_voice_table` out of the EXE and asserts that kinds 1 and 2 share
+one pair, that the two impact tables are five and two ids with nothing in
+common, and that kind 3's entry is a *pair per set* where the others are one id
+per set. Four mutations of the parser fail it. The five kinds and the whole
+result-code mapping are asserted in `web/test/port.test.ts`; restoring the old
+`killed`/`head` rule fails three of them.
+
+**And the bursting head shouts.** `ActorShotFeedback` holds one of the routine's
+twenty-three call sites and it is **kind 3**, not a shot kind: `0x00454133 PUSH
+0x3` on the one head model (`0x1DC2`) that comes off on a damaging hit, before
+the `0x1DC1` stump is swapped in. That had been an open question in
+`combat/feedback.ts` saying the burst was silent because the voice tables lived
+in `render/`. It is the same cry a strike plays.
+
+One drift was found on the way. `web/src/hod2lib/combat.ts` had been given the
+attack pair when the silent swing was reported; `tools/hod2lib/combat.py` had
+not, so the Python half read all fifteen dwords of the table and emitted eleven
+of them for longer than the rule allows. `tools/verify_exporters.py` cannot see
+that class of gap — it compares the two halves' **modules and version**, not
+the fields they emit — and the new check 15 is what caught it.
 
 `[proved]` **Kind 4 of the voice routine is dead.** No call site in the image
 passes 4 — all twenty-three pass 0, 1, 2 or 3, and the census is in
@@ -2285,6 +2418,19 @@ one the engine keeps, and the differences are the whole point of the counters:
 * **A corpse is present but not alive.** The alive count falls at death, in
   `ZombieReleasePermitAndUntrack` (`FUN_004565A0`); the present count falls
   when the death clip ends, in `ZombieEnterCorpseState` (`FUN_00456740`).
+* **...so a death clip the bundle does not carry holds the present count for
+  ever.** `ZombieStateDeathFallAndBounce` (`FUN_00456DF0`) — state 12, where an
+  actor that dies still holding something goes instead of straight to the
+  corpse — waits out `obj+0x19C >= 0x3C` on clip `0x3F9`, whose real play
+  length is 85. `0x3F9` was baked for no character type in any of the twelve
+  bundles, so *nothing in the port could leave state 12 anywhere in the game*.
+  All six of the clips `ChooseDeathMotion` (`FUN_004560B0`) can reach above the
+  directional pick now travel — `CLASS30_DEATH_CLIPS` — and
+  `tools/verify_death_clips.py` reads them back out of the real bundles, 14,472
+  of 14,472 (spawn, death clip) pairs. The condition-4 pair in that set,
+  `0x404` and `0x41A`, is why stage 2's twenty `znkager` crawlers had no death
+  animation at all: a clip with no frames has play length 0, and
+  `cursor >= play - 1` is true on the actor's first dead frame.
 * **Each release is latched, once per actor.** `ReleaseEnemyAliveCount`
   (`FUN_00456560`) tests `obj+0x38` bit 1, `ReleaseEnemyPresentCount`
   (`FUN_00456580`) bit 2 — and class 0x31 latches the same two facts in
@@ -2299,15 +2445,21 @@ ever goes negative, and killing every enemy in a block drives the alive count
 to zero and lets the walker advance. Across 115 block starts in the six stages,
 both hold; the room clears in one frame every time.
 
-`[diverges]` **The corpse window is zero-length for class 0x30.** The port has
-no class-0x30 death state, so both of its releases land on the same frame
-instead of a death clip apart. Class 0x31 keeps the window, because it has its
-death states and calls the two retires where the exe does. Porting
-`ZombieStateDeath6` (`FUN_00454D20`) — three subs, and the motion choice is
-already ported — is what closes it, and it would also change how every zombie
-death looks in the player, which is why it is called out here rather than done
-quietly. The old derived behaviour had that window at *infinity*: a shot zombie
-stayed `present` for ever, so none of the 54 present gates could ever open.
+**The corpse window is a death clip long again, and this divergence is
+closed.** It said the port had no class-0x30 death state and that both of its
+releases therefore landed on the same frame. That stopped being true when
+`ZombieStateDeath6` (`FUN_00454D20`) was ported: it and
+`ZombieEnterCorpseState` (`FUN_00456740`) are both in `class30/death.ts`, so
+`ZombieReleasePermitAndUntrack` drops the alive count as the death state opens
+and the present count comes back when the clip ends, which is a clip apart and
+is what the exe does.
+
+The tag outlived the work it described, which is the failure mode of a
+divergence recorded in prose: nothing checks that a declared departure is
+still a departure. It was found by a session reading this file for something
+else. The old derived behaviour had that window at *infinity* — a shot zombie
+stayed `present` for ever, so none of the 54 present gates could ever open —
+and that history is why the entry is rewritten rather than deleted.
 
 ### The room-clear gate answered on the frame the spawn ran
 

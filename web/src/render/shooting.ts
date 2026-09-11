@@ -59,15 +59,21 @@
  * exporter carries both, with the filenames `g_se_name_list` resolves:
  *
  * ```
- * hit, actor alive   one of BLOOD02/03/04/06, BONE01   + the hurt voice
- * hit, actor killed  the same five                     + the kill voice
- * headshot kill      BLOOD01 or BLOOD05                + the head voice
- * hit, no effect     BULLET_MET3 — it bounced off
- * miss               the surface's BULLET_SND/MET/OTH/WAT/WOD
+ * alive, result != 5   one of BLOOD02/03/04/06, BONE01   + the hurt voice
+ * dead, result != 2    the same five                     + the kill voice
+ * dead, result == 2    BLOOD01 or BLOOD05                + the kill voice again
+ * result 5             BULLET_MET3 — it bounced off
+ * miss                 the surface's BULLET_SND/MET/OTH/WAT/WOD
  * ```
  *
- * The voice comes in two sets and `combat.voice_set_a_types` says which set a
- * character type takes; that split is `ActorPlayHitVoice`'s own switch.
+ * That table used to be written here as *alive / killed / headshot kill*, and
+ * it was wrong about the engine on both of the last two rows: the kind is the
+ * hit-result code, nothing tests the bone, and kind 2's voice pair is kind 1's
+ * pair. `game/combat/feedback.ts` carries the disassembly and the checks. The
+ * split into two voice sets is `ActorPlayHitVoice`'s own switch over the
+ * character type, and `combat.voice_set_a_types` is the exporter's copy of it.
+ *
+ * None of it is raised from this file any more.
  *
  * The **sprites are not here any more.** `ActorShotFeedback` (`FUN_00454050`),
  * `SpawnWorldImpact` (`FUN_00405260`), `SpawnBloodSpray` (`FUN_00407310`) and
@@ -77,8 +83,12 @@
  * be here was a canvas gradient standing in for twenty-five models, no muzzle
  * flash and no tracer at all.
  *
- * The **voices** stay, because the pick is seeded here and the tables the ids
- * come from are the bundle's.
+ * The **voices have gone too.** They were here on the argument that the pick
+ * was seeded in this layer and the tables came from the bundle, and both
+ * halves of that were reasons to move rather than reasons to stay: the pick is
+ * the engine's `rand()` and belongs in the snapshot, and `game/tables.ts`
+ * reads the same bundle. `ActorPlayHitVoice` (`FUN_0040A6F0`) exists once, in
+ * `game/combat/voice.ts`.
  *
  * ## What this does not do
  *
@@ -100,18 +110,9 @@ import type { Events, EventMap } from "../core/events";
 import type { System } from "../core/system";
 import { G } from "../game/globals";
 import { HitResultCode } from "../game/combat/resolve_hit";
-import { Rng } from "../core/rng";
 import type { Scope } from "../core/scope";
 
 /** `FUN_00404AD0` builds its segment as origin + direction * 1000. */
-/**
- * The seed the voice picker starts every stage from.
- *
- * Any constant would do; what matters is that it is one, and that `reset`
- * puts it back. A stage played twice sounds the same.
- */
-const SOUND_PICK_SEED = 0x50554e43;
-
 const SHOT_RANGE = 1000;
 
 const BAMS = 65536 / (Math.PI * 2);
@@ -164,12 +165,8 @@ export class Shooting implements System {
    * "Input intent".
    */
   onFire: (ray: { origin: Vector3; dir: Vector3 }) => void = () => {};
-  /** Wired to the bundle's sound player; ids are `g_se_name_list` ids. */
-  playSound: (id: number) => void = () => {};
 
   private combat: CombatJson | null = null;
-  /** Draw-time noise only — see `pickOne`. Reseeded by `reset`. */
-  private readonly rng = new Rng(SOUND_PICK_SEED);
   /**
    * The viewport and the crosshair are React's, and arrive through `UiHost`.
    *
@@ -287,76 +284,6 @@ export class Shooting implements System {
       || G.g_shot_flash_ring.some((f) => f.live);
   }
 
-  /**
-   * One of a table's entries, from the layer's **own** seeded generator.
-   *
-   * Not `ctx.rng`: which impact grunt plays is feedback, not state, and drawing
-   * from the world generator would make the port's next draw depend on how many
-   * shots the viewer had fired — two loads of one snapshot would then diverge
-   * on the first swing, which is the exact failure `core/rng.ts` exists to
-   * prevent. Not `Math.random()` either: a driven run has to replay, and an
-   * ambient draw is the one thing a replay cannot reproduce. Seeded per stage,
-   * carried by nothing.
-   */
-  private pickOne<T>(xs: T[] | undefined): T | undefined {
-    return xs?.length ? xs[this.rng.int(xs.length)] : undefined;
-  }
-
-  /**
-   * `ActorPlayHitVoice` (`FUN_0040A6F0`) kinds 0, 1 and 2: a flesh impact plus
-   * a voice, with the voice taken from set A or set B by character type.
-   *
-   * `[diverges]` **This is the same engine routine `game/combat/voice.ts`
-   * holds, implemented twice, and the second copy is here because the layer
-   * rule is right and the port is not finished.** The engine plays these three
-   * kinds from `ActorShotFeedback` (`FUN_00454050`) and its sibling
-   * `FUN_00453EB0`, which are `game/` code — `feedback.ts` is already the port
-   * of the first — so the faithful home is there, and
-   * `verify_layers.py`'s `render-drives-the-port` refuses this layer to call
-   * into the engine for exactly that reason.
-   *
-   * **The kinds those call sites pass have now been read**, and they are not
-   * what this function computes. `[proved]`, from `ZombieOnShot`
-   * (`FUN_00453EB0`) and its class-0x31 twin `ThrowerOnShot` (`FUN_004499A0`),
-   * which agree:
-   *
-   * ```
-   * 00453f6e  83f802   CMP EAX, 0x2     ; the hit result, read back
-   * 00453f73  6a02     PUSH 0x2         ; dead and result == 2 -> kind 2
-   * 00453f77  6a01     PUSH 0x1         ; dead otherwise        -> kind 1
-   * 00454025  83f805   CMP EAX, 0x5
-   * 0045402a  6a00     PUSH 0x0         ; alive and result != 5 -> kind 0
-   * ```
-   *
-   * — **the kind is the hit-result code and nothing else.** There is no test
-   * anywhere of whether the bone was the head or whether the actor died of it,
-   * which is what the `killed`/`head` mapping below uses. What that costs is
-   * small but real: kind 2's two voice ids in `g_hit_voice_table` are the
-   * *same pair* as kind 1's, so the only audible difference is the impact —
-   * two head impacts against the five body ones — and this copy plays the head
-   * pair on any headshot kill where the engine plays it on
-   * `HitResultCode.Plain`.
-   *
-   * So clearing this is four decisions, not a move: the layer, the
-   * determinism (the pick goes onto the **world** generator, the engine's own
-   * `rand()`, and so into the snapshot), that behavioural correction, and the
-   * standing `[diverges]` in `feedback.ts` that the port raises shot feedback
-   * once for every class where the engine raises it from each class's own
-   * on-shot routine. It wants its own commit and the user's decision, not a
-   * ride along with the attack cry. Until then the two copies must be kept in
-   * step by hand, and this comment is the only thing saying so.
-   */
-  private voice(charType: number, kind: "hurt" | "kill" | "head"): void {
-    const c = this.combat;
-    if (!c) return;
-    const impact = kind === "head"
-      ? this.pickOne(c.head_impact) : this.pickOne(c.impact);
-    if (impact) this.playSound(impact.id);
-    const set = c.voice_set_a_types.includes(charType) ? 0 : 1;
-    const v = c.voice[kind]?.[set];
-    if (v) this.playSound(v.id);
-  }
-
   private readonly _back = new Vector3();
   private _camera: Camera | null = null;
 
@@ -367,10 +294,9 @@ export class Shooting implements System {
     // No `ScoreResetAll` here any more. The score is engine state and this is
     // a renderer; both callers of `reset` (the seek and the stage load) run
     // `ResetGameGlobals` around it, which zeroes `g_player_score` and
-    // `g_head_combo_bonus` the way `ResetSceneOnEnter` does.
-    // A stage always starts from the same voice line, so two runs of the same
-    // stage sound the same.
-    this.rng.reseed(SOUND_PICK_SEED);
+    // `g_head_combo_bonus` the way `ResetSceneOnEnter` does. There is no voice
+    // generator to reseed either: the pick is the world's `rand()`, and
+    // `World.reset` is what puts that back.
   }
 
   /**
@@ -397,10 +323,11 @@ export class Shooting implements System {
   /**
    * What the port did with a shot, in the feed and in the voice.
    *
-   * **Every sprite this used to draw is the port's now.** What is left is the
-   * half that is genuinely the renderer's: `ActorPlayHitVoice`
-   * (`FUN_0040A6F0`) picks from a table with a seeded generator this layer
-   * owns, and the event feed is the player's, not the game's.
+   * **Every sprite this used to draw is the port's now, and so is every
+   * sound.** What is left is the half that is genuinely nobody's but the
+   * player's: the event feed. `ActorPlayHitVoice` (`FUN_0040A6F0`) is raised
+   * from `game/combat/feedback.ts`, on the engine's own hit-result rule, which
+   * is not the `killed`/`head` rule this method used to apply.
    */
   private onResolved(r: EventMap["shot.resolved"]): void {
     if (r.kind === "miss") return this.noteMiss(r);
@@ -420,11 +347,6 @@ export class Shooting implements System {
       this.onShot({ hit: true, bone: r.bone, points: 0 },
                   `${r.who} · marked, its own class scores it`);
       return;
-    }
-
-    if (r.result !== HitResultCode.NoEffect) {
-      this.voice(r.charType ?? 0,
-                 r.killed ? (r.head ? "head" : "kill") : "hurt");
     }
 
     const note = `${r.who} bone ${r.bone}${r.head ? " (head)" : ""}` +

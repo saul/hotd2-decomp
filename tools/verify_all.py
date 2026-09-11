@@ -120,7 +120,10 @@ CHECKS: list[Check] = [
           "*route* to it can open has the actor that opens it placed on that "
           "same route -- the only check that reads a gate per entry block "
           "rather than per bundle, which is the difference between stage 3's "
-          "block 2 on the entry-0 route and on the entry-7 one",
+          "block 2 on the entry-0 route and on the entry-7 one -- and the "
+          "only check that asks the same question of an ACTOR, for the one "
+          "class-0x30 state whose sole exit is a script flag a civilian's own "
+          "stream raises",
           NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
@@ -136,6 +139,15 @@ CHECKS: list[Check] = [
           "van's body, both of which were placed, updated and invisible "
           "because nothing carried their geometry, which from the level looks "
           "exactly like a placement that was never exported",
+          NEEDS_BUNDLE),
+    Check("verify_death_clips", ".",
+          ["python3", "tools/verify_death_clips.py"],
+          "that every clip `ChooseDeathMotion` can put on a dying class-0x30 "
+          "actor is baked for that spawn's own character type -- the only "
+          "check that reads a death clip out of a real bundle, and the one "
+          "that says whether an actor can leave state 12 at all, since that "
+          "state's exit is an exact `obj+0x19C >= 0x3C` against a play clock "
+          "that is 0 for a clip nothing carried",
           NEEDS_BUNDLE),
     Check("verify_prop_pose", ".",
           ["python3", "tools/verify_prop_pose.py", "--game-dir", "{game_dir}"],

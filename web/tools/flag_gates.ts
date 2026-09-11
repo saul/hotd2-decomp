@@ -37,6 +37,18 @@
  * `web/test/port.test.ts`: this says the shipped data puts the switch on the
  * route, and that says the port's switch raises the flag when it is there.
  *
+ * ## The captor pass
+ *
+ * Both passes above ask the question for the **walker**. A third asks it for
+ * an **actor**, because a class-0x30 state can park on a script flag too and
+ * then the `wait_enemies_alive` in front of it is a gate neither pass can see.
+ * `ZombieStateDragTarget` (state 43) is the one that does: its tail is the
+ * state's only exit and it reads `g_script_flags[0x1D]`. Its writer is not in
+ * the script at all — it is the dragged civilian's own `CivilianRunScript` op
+ * `0x1C`, reached through the class-0x10 spawn's `children` list, so the check
+ * is that every state-43 placement has such a parent and that the parent's
+ * reachable streams raise the flag. See `docs/PLAYER_HANGS.md` item 23.
+ *
  * `[port-only]`. The engine needs none of this; every writer of
  * `g_script_flags` is code it is running.
  */
@@ -48,6 +60,8 @@ import { SetGameTables } from "../src/game/tables";
 import { ScriptFlagsThisBundleCanRaise } from "../src/script/waits/flag";
 import { PROP75_SCRIPT_FLAG } from "../src/game/class41";
 import { STORY_SWITCH_SCRIPT_FLAG } from "../src/game/class41/branch";
+import { DRAG_RELEASE_FLAG } from "../src/game/class30/target";
+import { ZombieState } from "../src/game/class30/states";
 import "../src/game/classes";
 
 /** The stage whose class-0x41 spawns include the one type-75 placement. */
@@ -190,6 +204,39 @@ function actorHeldGates(script: ScriptJson, entry: number): ActorHeldGate[] {
   return out;
 }
 
+/**
+ * A class-0x30 placement whose state parks on a script flag — and where in
+ * the bundle the writer of that flag is.
+ *
+ * The `wait_script_flag` pass above asks the question for the **walker**.
+ * This asks it for an **actor**: `ZombieStateDragTarget` (`FUN_0045C080`,
+ * state 43) has no exit of its own at all. Its tail at `0x0045C1AD` is the
+ * only way out of the state, it tests `g_script_flags[0x1D]`, and sub 3 never
+ * advances — so a captor whose stage cannot raise flag 29 stands in
+ * `g_enemies_alive` for the rest of the stage, shot-immune, and every
+ * `wait_enemies_alive` behind it is a room a player cannot clear. That is
+ * `PLAYER_HANGS` item 23.
+ *
+ * Its writer is not in the script: flag 29 comes off the **dragged
+ * civilian's own** `CivilianRunScript` op `0x1C`, so the two records have to
+ * be linked through the class-0x10 spawn's `children` list for the release to
+ * exist at all. A rescue target losing its link to its captor is a shape this
+ * project has already shipped once, and nothing but a read of the bundle can
+ * see it.
+ */
+interface FlagHeldCaptor {
+  /** The placement's `at`, which is the spawn descriptor's address. */
+  at: number;
+  /** Where state 43 came from — the descriptor's own field. */
+  via: string;
+  /** The class-0x10 spawn whose `children` name it, if any. */
+  parent: number | null;
+  /** Whether the parent's reachable streams raise {@link DRAG_RELEASE_FLAG}. */
+  parentRaises: boolean;
+}
+
+const flagHeldCaptors = new Map<string, FlagHeldCaptor[]>();
+
 const actorHeld = new Map<string, ActorHeldGate[]>();
 /** Which blocks each bundle spawns a class-0x44 selector-17 switch in. */
 const switchBlocks = new Map<string, number[]>();
@@ -255,6 +302,50 @@ for (const name of names) {
   }
   switchBlocks.set(name, [...new Set(blocksWithSwitch)].sort((a, b) => a - b));
   reach.set(name, script);
+
+  // ...and the captor pass. See {@link FlagHeldCaptor}: this reads the
+  // *descriptor tables*, not the script, because the state comes off the
+  // spawn's own tail and the flag comes off the civilian who built it.
+  const CIVILIAN_OP_SET_SCRIPT_FLAG = 0x1c;
+  const streams: { op: number; args: number[]; scripts?: number[] }[][] =
+    raw.civilians?.scripts ?? [];
+  /** Whether any stream reachable from `id` raises `DRAG_RELEASE_FLAG`. */
+  const raisesFrom = (id: number, seen = new Set<number>()): boolean => {
+    if (id < 0 || id >= streams.length || seen.has(id)) return false;
+    seen.add(id);
+    for (const c of streams[id]) {
+      if (c.op === CIVILIAN_OP_SET_SCRIPT_FLAG
+          && c.args?.[0] === DRAG_RELEASE_FLAG) return true;
+      for (const n of c.scripts ?? []) if (raisesFrom(n, seen)) return true;
+    }
+    return false;
+  };
+  const captors: FlagHeldCaptor[] = [];
+  for (const p of (raw.characters?.placements ?? []) as
+       { at: number; initial_state?: number; attack_state?: number }[]) {
+    const via = p.initial_state === ZombieState.DragTarget ? "initial_state"
+      : p.attack_state === ZombieState.DragTarget ? "attack_state" : "";
+    if (!via) continue;
+    let parent: number | null = null;
+    let parentRaises = false;
+    for (const [key, sp] of Object.entries(raw.civilians?.spawns ?? {}) as
+         [string, { script: number; children?: { at: number }[] }][]) {
+      if (!(sp.children ?? []).some((c) => c.at === p.at)) continue;
+      parent = Number(key);
+      parentRaises = raisesFrom(raw.civilians?.entries?.[sp.script] ?? -1);
+    }
+    captors.push({ at: p.at, via, parent, parentRaises });
+  }
+  flagHeldCaptors.set(name, captors);
+  for (const c of captors) {
+    console.log(`  ${" ".repeat(15)} 0x${c.at.toString(16)} enters state `
+      + `${ZombieState.DragTarget} by ${c.via}; its only exit is `
+      + `g_script_flags[0x${DRAG_RELEASE_FLAG.toString(16)}], raised by `
+      + (c.parent === null
+        ? "NO class-0x10 parent -- nothing in the bundle can release it"
+        : `class-0x10 spawn 0x${c.parent.toString(16)}: `
+          + (c.parentRaises ? "yes" : "NO")));
+  }
 }
 
 const check = (what: string, ok: boolean, detail = ""): void => {
@@ -312,6 +403,38 @@ for (const suffix of ["", "_original"]) {
   check("...and only on ONE of the stage's two entries, which is why the "
     + "entry-0 route never showed it", other.length === 1,
     other.map((q) => `entry ${q.entry}`).join(" "));
+}
+
+// The captor pass's assertion, and it is the same shape as the one above:
+// a state whose only exit is a flag must have that flag's writer present in
+// the *same bundle*, linked to the actor that is waiting on it.
+//
+// **Every** state-43 captor in every bundle, not one address — that is what
+// makes it a check rather than a spot test, and the population happens to be
+// one placement per bundle in stage 4 alone. A future exporter that dropped
+// the `children` link, or a stage that gained a state-43 spawn with no
+// civilian behind it, fails here rather than as a stage that plays to block 9
+// and stops.
+{
+  let captorsSeen = 0;
+  for (const [name, captors] of flagHeldCaptors) {
+    for (const c of captors) {
+      captorsSeen++;
+      check(`${name} 0x${c.at.toString(16)} is a state-`
+        + `${ZombieState.DragTarget} captor, so a class-0x10 spawn must name `
+        + "it as a child -- nothing else in the bundle can release it",
+        c.parent !== null, `parent ${c.parent === null ? "none"
+          : `0x${c.parent.toString(16)}`}`);
+      check("...and that civilian's reachable streams must raise "
+        + `g_script_flags[0x${DRAG_RELEASE_FLAG.toString(16)}], which is the `
+        + "state's only exit", c.parentRaises, `via ${c.via}`);
+    }
+  }
+  // A population of zero would make both assertions above vacuous, and a
+  // vacuous check reads as green — `L14` pointed at a loop bound rather than
+  // at an exit code. Stage 4 ships one in each mode.
+  check("...and the corpus has state-43 captors to assert about at all",
+        captorsSeen > 0, `${captorsSeen} across ${names.length} bundles`);
 }
 
 process.exit(failed === 0 ? 0 : 1);

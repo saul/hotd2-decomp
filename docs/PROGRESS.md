@@ -442,7 +442,11 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     music. The tables and the dispatcher are solved
     ([`formats/sound.md`](formats/sound.md)); the scene-entry path that plays
     `ST1_AR`..`ST6_AR` is not. `PlaySoundId` has 496 callers, so this wants the
-    scene-entry path, not an xref sweep.
+    scene-entry path, not an xref sweep. **Which of the two tables it plays
+    from is closed**: `g_app_state == 6 && g_GameMode == 0` is not the
+    unreachable state it was written up as — mode 0 is **Arcade** — so the
+    plain names are the arcade mix and `_AR` is Original, Training and Boss.
+    All twenty plain tracks play.
 20. ~~What is `DAT_009C8E98`?~~ **Closed.** It is `g_app_state`, the game's
     top-level screen: **6 is in play**, 5 is the attract demo, 7 is the
     game-over arm and 0x10 is boot. `CommitAppState` (`FUN_0040E860`) applies
@@ -455,8 +459,11 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     (`c705988e9c0006000000` at `0x0049F546`), and that `CommitAppState` ends with
     `if (pending < 6 || pending > 7) g_player_state = 9`, so 6 and 7 are the
     only two states it leaves a live player in. Neither of the old readings
-    ("scene id", "scene state") was right. What each of 3, 4, 9, 0x0A, 0x0B,
-    0x0C and 0x0F *is* is still `[open]`.
+    ("scene id", "scene state") was right. **Five of the seven unnamed states
+    are named now**, by `AppStateDispatch` (`FUN_004608A0`), which is the
+    table: 4 is `TitleMenuRunPhase`, the title and mode-select screen; 0x0A
+    and 0x0B are the two attract screens; 0x0C is the OPTION row and 0x0F is
+    `NetworkModeRunPhase`, the NETWORK row. 3 and 9 are still `[open]`.
 21. What sets `obj+0x1368` bits 3, 4, 6 and 7? `ChooseDeathMotion` overrides
     the directional death with motions 428, 421, 633 and 553 for them. It is
     **not** the destroyed-zone mask -- that is `obj+0x1318`, 0x50 bytes
@@ -466,3 +473,21 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
     Its entry's first word is a float rather than an asset slot, so the
     damaged-part sphere scan finds nothing for it. Its effect *slots* resolve
     normally. (low priority)
+23. ~~What are `g_GameMode`'s four values?~~ **SOLVED — 0 Arcade, 1 Original,
+    2 Training, 3 Boss.** The title menu's own row order:
+    `TitleMenuRegisterSprites` (`FUN_004962C0`) registers each row's label by
+    texture name (`tex\arcade00`, `original_00`, `traning_00`, `boss_00`) into
+    consecutive `ScreenSpriteRegister` slots, and `TitleMenuUpdateAndSelect`
+    (`FUN_00496960`) writes the highlighted row straight into the global. The
+    other five writers all store 0. It had been read as `1 = Original,
+    2 = arcade, 3 = boss rush` with no arm for 0, which made Training's
+    one-shot targets and its no-score rule read as arcade behaviour and left
+    `g_training_lesson` (`0x009C9118`) named `g_prop_target_set` with its four
+    "member sets" unexplained — they are the four lessons.
+24. What does `SetBothPlayerCounters` (`FUN_00406F60`) count? Six for
+    Original, one for Training and Boss, an option byte plus one for Arcade,
+    and `-1` means unlimited — with a derived 0/1/2 tier off a threshold table
+    beside each count. Credits, continues and lives all fit. `[open]`
+25. Why does `g_boss_mode_grades` have ten entries when there are six scenes?
+    `BossModeRecordGrade` (`FUN_00425F40`) saturates each at 5 and treats
+    index 8 specially for the second player. `[open]`

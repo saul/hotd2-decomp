@@ -51,8 +51,8 @@
  *
  * ## What is not ported, by name
  *
- * * `OneHitTargetHoldDrawn` and the `g_GameMode` 2 / block 0x0D arms that
- *   reach it. The two gate bytes are `[open]`.
+ * * `OneHitTargetHoldDrawn` and the `g_GameMode` 2 (Training) / block 0x0D
+ *   arms that reach it. The two gate bytes are `[open]`.
  * * `OneHitTargetBoneDrawHook` (`FUN_00449530`) — a per-bone draw callback
  *   that writes nothing to the actor. The renderer's.
  * * `SpawnGroundRingEffect`, which allocates its own drawing task and does
@@ -314,6 +314,8 @@ export function OneHitTargetStepIdle(obj: OneHitTargetActor): void {
  * — the one that leads to `OneHitTargetHoldDrawn` (`FUN_004494D0`) — is not
  * ported: its two gate bytes are `[open]`, and reading them wrong would freeze
  * an actor that should be alive. The port always takes the ordinary path.
+ * Mode 2 is **Training**, whose stage is scene 6 (`trnevtbl.bin`), so nothing
+ * a stage bundle can carry reaches this arm at all.
  *
  * [diverges] `RegisterForShotTest` (`FUN_00405160`), which the engine calls at
  * the bottom of every frame `obj+0x34` bit 0 is set, is not called: the port's

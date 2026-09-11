@@ -42,16 +42,29 @@ class GameMode(IntEnum):
     ``1 if original else 0`` -- so a bundle's 0 meant the EXE's 2 and every
     reader had to know which side of the seam it was on. There is one
     enumeration now; `web/src/game/game_mode.ts` is its other half.
+
+    **``ARCADE`` was 2 until bundle format 7, and 2 is Training.** The values
+    are the title menu's own row order, which ``TitleMenuRegisterSprites``
+    (``FUN_004962C0``) registers by name -- ``tex\\arcade00``,
+    ``tex\\original_00``, ``tex\\traning_00``, ``tex\\boss_00`` -- and
+    ``TitleMenuUpdateAndSelect`` (``FUN_00496960``) writes the highlighted row
+    straight into the global. Every other writer in the program stores 0, so
+    1, 2 and 3 can only come from that menu.
     """
 
-    #: The story campaign. Class 0x41 releases the member's own story item
-    #: here, and `PlaceGenericProp`'s types 70-72 and 77 exist only in it.
+    #: Arcade -- the coin-op game. Menu row 0, and the value every non-menu
+    #: writer of ``g_GameMode`` stores, so it is also the default.
+    ARCADE = 0
+    #: The story campaign. Menu row 1. Class 0x41 releases the member's own
+    #: story item here, and `PlaceGenericProp`'s types 70-72 and 77 exist
+    #: only in it.
     ORIGINAL = 1
-    #: Arcade. `PlaceBreakableGroup` turns the members `g_prop_target_set`
-    #: names into one-shot targets that pay no score.
-    ARCADE = 2
-    #: Boss Rush. No shipped stage script is entered in this mode.
-    BOSS_RUSH = 3
+    #: Training. Menu row 2. ``PlaceBreakableGroup`` turns the members
+    #: ``g_training_lesson`` names into one-shot targets that pay no score.
+    #: No stage bundle is exported in this mode.
+    TRAINING = 2
+    #: Boss. Menu row 3. No shipped stage script is entered in this mode.
+    BOSS = 3
 
 
 #: stage number -> scene id, the event system's own index.

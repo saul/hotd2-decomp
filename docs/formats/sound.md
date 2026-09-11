@@ -111,14 +111,24 @@ if (g_app_state == 6 && g_GameMode == 0) name = plain[id & 0xFFF];   /* 6 == in 
 else                                     name = ar   [id & 0xFFF];
 ```
 
-`g_app_state == 6` is **in play** — see `docs/re/addresses.md`. What is not
-settled is the other half: the only writers of `g_GameMode` (`0x009CA08C`) that
-write **0** are `RunAttractDemo` and the two attract screens `FUN_0041F9B0` and
-`FUN_0041FB00`, and the attract demo runs at `g_app_state` 5, not 6. So on the
-reading above the plain table would never be selected at all. Either
-`g_GameMode` is left at 0 on some path into play that has not been read, or the
-plain table is dead in the shipped build. **[open]**, and worth an hour: it
-decides whether twenty tracks ever play.
+`g_app_state == 6` is **in play** — see `docs/re/addresses.md`. The other half
+is settled now, and it was an enumeration error rather than a missing path:
+**`g_GameMode == 0` is Arcade Mode.** So the plain table is the *arcade* mix
+and the `_AR` one is what Original, Training and Boss get — which is the way
+round the filenames do not suggest and the code does.
+
+This used to read as `[open]` here, on the grounds that the only writers of
+**0** were `RunAttractDemo` and the two attract screens, and that the attract
+demo runs at state 5. Two things were missing from that list. The first is
+`TitleMenuRunPhase` (`FUN_00496200`) at app state 4, which sets `g_GameMode =
+0` on entry and is the screen the mode is *chosen* on:
+`TitleMenuUpdateAndSelect` (`FUN_00496960`) writes rows 1, 2 and 3 over it and
+row **0 — `tex\arcade00.bin` — leaves it there**, after which
+`ResetGameOnStart` runs and the app state becomes 6. The second is
+`NetworkModeRunPhase` (`FUN_0049F380`) state 7, which sets `g_app_state = 6`
+and `g_GameMode = 0` in the same block. Both are ordinary in-play Arcade, and
+all twenty plain tracks play. See the note on `GameMode` in
+`web/src/game/game_mode.ts` for what fixes the four values.
 
 **The two tables are contiguous, and that is what fixes their lengths.**
 Neither is terminated and neither count is stored anywhere:

@@ -649,13 +649,18 @@ gives a flat floor of `level * 7.540296 - 14.9` off its own pointer at
 Per prop: `+0x11C` = 2, i.e. **two shots** — the first plays
 `PlaySoundId(0x1D16A9)`, swaps the model to `0x19E6` and shakes every member
 that names this one as a support; the second plays `0x1A16A9` and destroys it.
-In `g_GameMode == 2` the members `g_prop_target_set` (`0x009C9118`) selects
-instead get `+0x11C = 1` and asset `0x1A0F`.
+In `g_GameMode == 2` -- **Training**, not Arcade -- the members
+`g_training_lesson` (`0x009C9118`) selects instead get `+0x11C = 1` and asset
+`0x1A0F`. The four "sets" that byte chooses between are the four training
+lessons: `PreloadScreenAssetList` (`FUN_00412FD0`) indexes a per-lesson asset
+list with the same byte at training block 3, and both readers sit behind the
+same `g_GameMode == 2`.
 
 **Only the destroying shot pays.** `BreakablePropAwardHit` (`FUN_004650F0`)
 takes an `award` flag: the crack passes 0 and the destroy passes 1, so
 cracking a prop is worth nothing and breaking it is worth 10. Both count
-toward `g_player_hit_count`, and neither pays in `g_GameMode == 2`.
+toward `g_player_hit_count`, and neither pays in `g_GameMode == 2`
+(Training).
 
 **Destroying and toppling are different things**, and it is easy to conflate
 them:

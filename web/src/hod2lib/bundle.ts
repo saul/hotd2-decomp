@@ -70,7 +70,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 6;
+export const BUNDLE_FORMAT = 7;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -150,9 +150,13 @@ export const STAGE_BGM_INDEX: Record<number, number> =
  * The BGM mapping a stage needs: ids to filenames, plus its own track.
  *
  * Both tables travel, because which one the game picks depends on runtime
- * state (`DAT_009C8E98 == 6 && g_GameMode == 0` selects the plain names). Note
- * the `0` there: it is a mode no stage is entered in, so neither ORIGINAL nor
- * ARCADE can reach the plain table.
+ * state: `PlaySoundId` takes the plain names when `DAT_009C8E98 == 6 &&
+ * g_GameMode == 0` and the `_AR` names otherwise. That `0` is **Arcade** --
+ * it used to be read as a mode no stage is entered in, on an enumeration
+ * where `ARCADE` was 2, and the plain table was therefore declared
+ * unreachable. It is the ordinary Arcade case, and the `_AR` mix is what
+ * Original, Training and Boss get. The client decides, from `game_mode`; this
+ * function no longer states the answer a second time.
  */
 export function bgmJson(tables: ExeTables, stageNumber: number | null,
                         gameMode: number): Record<string, unknown> {
@@ -160,7 +164,6 @@ export function bgmJson(tables: ExeTables, stageNumber: number | null,
   const idx = STAGE_BGM_INDEX[stageNumber ?? -1];
   return {
     names,
-    default_table: "ar",
     stage_track: idx === undefined ? null : {
       index: idx,
       id: (0x10000000 | idx) >>> 0,

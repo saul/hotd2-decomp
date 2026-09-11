@@ -1397,11 +1397,14 @@ const BREAKABLES: BreakablesJson = {
  * A scene for the container tests.
  *
  * The mode defaults to **Original** because that is the one in which an
- * ordinary breakable is an ordinary breakable. In Arcade,
- * `PlaceBreakableGroup` turns the members named by `g_prop_target_set` into
+ * ordinary breakable is an ordinary breakable. In **Training**,
+ * `PlaceBreakableGroup` turns the members named by `g_training_lesson` into
  * one-shot targets that pay no score, and every group has at least one of
  * them — so "a prop takes two shots" is a statement about Original Mode and
- * always was. Arcade's rule gets its own case below.
+ * always was. Training's rule gets its own case below.
+ *
+ * It said *Arcade* here while `GameMode.ARCADE` was 2, which is Training's
+ * number; the case below passed for the right reason under the wrong name.
  */
 function propScene(rng: Rng, mode: GameMode = GameMode.Original): Events {
   ResetGameGlobals();
@@ -3863,11 +3866,15 @@ console.log("\nclass 0x41 type 4, seven of the eleven kinds are effects:");
                                             === SLOT_NONE));
 }
 
-console.log("\nclass 0x41, Arcade's one-shot targets:");
+console.log("\nclass 0x41, Training's one-shot targets:");
 {
   const rng = new Rng(53);
-  const events = propScene(rng, GameMode.Arcade);
-  G.g_prop_target_set = 0;      // members 2, 3, 4 and 6
+  // `g_GameMode == 2`, and 2 is Training. This block is the reason the enum
+  // had to be corrected everywhere at once: with `ARCADE = 0` and this case
+  // still asking for Arcade, `PlaceBreakableGroup` would take the ordinary
+  // path and every assertion below would fail.
+  const events = propScene(rng, GameMode.Training);
+  G.g_training_lesson = 0;      // members 2, 3, 4 and 6
   const props = PlaceBreakableGroup(1, 4, rng);
   const target = props.find((p) => p.member === 2);
   const plain = props.find((p) => p.member === 0);

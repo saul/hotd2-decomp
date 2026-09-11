@@ -15714,3 +15714,159 @@ extents.
    were all absent, and only this one has a module. A check that reports the
    difference per block, per bundle, with the class of each missing spawn, is
    the obvious next verifier.
+## 2026-09-11 — `g_GameMode` is the title menu's row order, and the thumbnail check was waiting for something that had already happened
+
+Two unrelated jobs.
+
+### One: `g_GameMode` — 0 is Arcade, 2 is Training
+
+`GameMode.ARCADE = 2` had been in `hod2lib/stage.ts` since the bundle stopped
+carrying a `1 if original else 0` flag under that name, and `BUGS.md` had it
+down as `[open]` on the strength of four indirect readings. It is settled now,
+and not by any of them: it is settled by the **title menu**.
+
+`TitleMenuRegisterSprites` (`FUN_004962C0`) is the title screen's frame
+callback. It registers six background sprites through `ScreenSpriteRegister`
+(`FUN_0049E950`) — slots 0..5 — and then **eight menu rows of three sprites
+each, by texture name**:
+
+```
+6..8    tex\arcade00.bin  01  02
+9..11   tex\original_00.bin  01  02
+12..14  tex\traning_00.bin   01  02      (the game's own spelling)
+15..17  tex\boss_00.bin      01  02
+18..20  ranking_    21..23  option_
+24..26  network_    27..29  exit_
+```
+
+`ScreenSpriteRegister` appends at the pre-increment of
+`g_screen_sprite_count`, so **registration order is the index**
+`ScreenSpriteSetVisible` (`FUN_0049EB30`) takes, and
+`TitleMenuUpdateAndSelect` (`FUN_00496960`) hides slots 6..0x1F and shows the
+triple at `(g_title_menu_cursor + 2) * 3`. Its confirm arm is
+`case 0: case 1: case 2: case 3: g_GameMode = g_title_menu_cursor`. Rows 4, 5
+and 6 `RequestAppState(8 / 0x0C / 0x0F)` instead, which is what fixes those
+three app states as RANKING, OPTION and NETWORK.
+
+**Every other writer of `g_GameMode` stores 0** — `TitleMenuRunPhase`
+(`FUN_00496200`) on entry, `RunAttractScene10`/`11`, `RunAttractDemo`
+(`XOR ESI,ESI` at `0x0042682B`) and `NetworkModeRunPhase` (`FUN_0049F380`).
+So 1, 2 and 3 can only come from that menu, 0 is both Arcade and the default,
+and the enumeration is `0 Arcade, 1 Original, 2 Training, 3 Boss`. `[proved]`
+
+163 references, and an operand search for the bare `9ca08c` returns the same
+163 — no addressing mode hidden (`L32`).
+
+Three independent corroborations, each of which had been read before and
+misassigned: `ResetGameOnStart` sends mode 2 to scene 6 (`trnevtbl.bin`);
+`PreloadScreenAssetList` (`FUN_00412FD0`) gives mode 2 a per-block list and a
+per-lesson list and mode 3 a table exactly six entries wide, while 0 and 1
+share the ordinary per-scene one; `EvtLoadBlockProgram` (`FUN_0045EBC0`) gives
+2 and 3 an entry step of 0 and lets mode 0 fall through to 1.
+
+**What the wrong number was hiding.** `0x009C9118` was `g_prop_target_set`,
+"which of four member sets `PlaceBreakableGroup` turns into one-shot targets
+while `g_GameMode == 2`", with an `[open]` on what the four sets *are*. Mode 2
+is Training and the byte is read in exactly two places, both behind that test
+— the other is the per-lesson preload list — so **the four sets are the four
+training lessons**. Renamed `g_training_lesson`, which is what the live Ghidra
+database had already called it and what `evt.md` was already citing; the TSV
+was the stale copy. Target practice in a training lesson is a much better
+account of a one-shot target that pays no score than "arcade" ever was.
+
+And the `sound.md` BGM rule, which had been `[open]` because
+`g_app_state == 6 && g_GameMode == 0` looked unreachable: it is the **ordinary
+Arcade case**. The plain table is the arcade mix (`ST1.wav`) and `_AR` is what
+Original, Training and Boss get (`ST1_AR.wav`); both sets are in the install's
+`Sound/bgm/`. The port had `useArTable = (default_table ?? "ar") === "ar" ||
+gameMode !== 0`, which is `true` for every bundle ever written — a dead mode
+test behind a bundle field that always said `"ar"`, and the field said that
+*because* mode 0 was believed unreachable. `default_table` is gone: it stated a
+line of `.text` twice and stated it wrongly, and the client decides from
+`game_mode` now.
+
+`BUNDLE_FORMAT` and `SUPPORTED_FORMAT` go to **6**. This is the one bump that
+exists because a *value* changed meaning rather than a layout: a format-5
+bundle says `game_mode: 2` for Arcade, which this client would read as
+Training and would then pay no score for a prop hit and pick the wrong BGM
+mix. No declaration moved, so the schema digest cannot see it, and the builder
+hash only warns — refusing is the only thing that catches it. All twelve
+bundles re-exported; hashes regenerated **before** the export (`L33`).
+
+The check that would have caught the original bug is in
+`verify_exporters.py`: `check_game_mode` reads all three `GameMode` enums —
+`tools/hod2lib/stage.py`, `web/src/hod2lib/stage.ts`, `web/src/game/game_mode.ts`
+— against one table. Mutation-tested three ways (`ARCADE = 2` in either
+`stage` half, `Training = 3` in the player's) and each mutant fails with the
+member named.
+
+The port test `class 0x41, Training's one-shot targets` is the place where an
+uncorrected call site would have shown: it asked for `GameMode.Arcade`, and
+with `ARCADE = 0` `PlaceBreakableGroup` takes the ordinary path and all five
+of its assertions fall over.
+
+### Two: `bundle_flow.mjs`'s first thumbnail assertion
+
+"the stage that has been open has a picture" was one
+`waitForSelector(".export-tile img", { timeout: 10_000 })` and lost about one
+run in three. The ten seconds was itself a previous attempt at the same fix.
+
+**It was the screen's read-back, and the loss was permanent.** Measured with a
+probe that replays lines 89–115 of the harness verbatim: in **six of seven**
+failing runs the PNG was in OPFS by the moment the ten-second wait expired,
+and in the one held-open experiment the file landed 11 ms after the screen
+opened and the tile was *still* empty twenty seconds later. `ExportScreen`
+read the thumbnail store once, in its mount effect; nothing read it again
+while it was up. The wait could not have succeeded at any budget.
+
+The race it lost is a photo finish. Counting the page's own
+`requestAnimationFrame` calls from outside: 23 by the time `#loading` went
+away, 31 by the time the bundle screen opened — **eight frames**, against the
+nine `Player.requestThumb`'s countdown needs before `grabThumb` runs. Whether
+the PNG encode and the OPFS write beat the screen's single read is then a
+coin toss, and a machine with other browsers on it loses more often: under
+today's contention the before-rate was **1 of 7**, not the 2 of 3 recorded.
+
+Two fixes, because there were two faults:
+
+* **The page.** `writeThumb` announces itself (`onThumbWritten`) and the
+  screen re-reads the pictures on every write, with its own scan counter so a
+  write arriving mid-rescan cannot cancel that rescan's labels. This is a
+  user-visible bug in its own right: open the page, go straight to the bundle
+  screen, and the stage you were just looking at had no picture.
+* **The check.** Two assertions now, waited on separately — the PNG reaching
+  OPFS (real state, polled), then the tile showing it on a deliberately short
+  budget. A picture never taken and a picture never shown are different bugs
+  and the old check called both "no picture".
+
+Measured, one run at a time, `chrome` main processes recorded per run:
+
+| | pass |
+|---|---|
+| old check, page unfixed | **1 / 7** |
+| old check, page fixed | **8 / 8** (worst `img` wait 145 ms of 10 s) |
+| new check, page fixed | **7 / 7** (worst OPFS wait 148 ms of 30 s, worst `img` wait 46 ms of 5 s) |
+| new check, page **un**fixed | 2 of 3 — so it has not been weakened into always-green |
+
+**A wrong turn worth writing down:** the first version of the OPFS wait was
+`page.waitForFunction` with an `async` predicate. It returns `null` when the
+file is not there on the first poll and then resolves on the *promise object*,
+which is truthy — so it handed back a handle that reads as `null` on a run
+where the file appeared 100 ms later, and the assertion it fed would have been
+a silent false negative. `page.evaluate` does await. The poll lives in node,
+the same shape as `waitForStage` two functions above it.
+
+### Next actions
+
+1. `docs/BUGS.md` is the user's; both entries can be closed from this — the
+   `GameMode` one and the `bundle_flow` one — and the `sound.md` `[open]` it
+   cross-references goes with them.
+2. The BGM change is **audible**: every Arcade stage now plays `ST<n>.wav`
+   instead of `ST<n>_AR.wav`. That is what `PlaySoundId` does; it has never
+   been heard in this player before, so it is worth listening to once.
+3. `ModeStartCounterValue` (`FUN_00496B70`) feeds `SetBothPlayerCounters`
+   (`FUN_00406F60`) — 6 for Original, 1 for Training and Boss, an option byte
+   plus one for Arcade. **What is counted is `[open]`**: the derived 0/1/2
+   tier beside each count comes off a threshold table, which fits credits or
+   continues better than lives. One function (`FUN_00406E10`) away.
+4. `g_boss_mode_grades` has **ten** entries against six scenes. `[open]`.

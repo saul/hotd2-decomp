@@ -20,6 +20,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { GameMode } from "../game_mode";
 import { BREAKABLE_STANDING_RISE, PropRegisterForShotTest }
   from "./shot_test";
 import { T } from "../tables";
@@ -84,7 +85,8 @@ export function BreakablePropAwardHit(flags: number, award: boolean,
   // Both players landed on the same frame: the engine picks one at random.
   const player = (!noP0 && !noP1) ? MsvcRand(rng) & 1 : (noP0 ? 1 : 0);
 
-  if (award && G.g_GameMode !== 2) {
+  // Training pays nothing for a prop hit; Arcade and Original both do.
+  if (award && G.g_GameMode !== GameMode.Training) {
     G.g_player_score[player] = (G.g_player_score[player] ?? 0) + PROP_HIT_SCORE;
   }
   G.g_player_hit_count[player] = (G.g_player_hit_count[player] ?? 0) + 1;
@@ -311,7 +313,9 @@ function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
 /** The first shot. No score at all — only the hit count and the crack. */
 function BreakCrack(p: BreakableProp, level: number, rng: Rng,
                     events?: Events): void {
-  if (G.g_GameMode !== 2) BreakablePropAwardHit(p.flags, false, rng);
+  if (G.g_GameMode !== GameMode.Training) {
+    BreakablePropAwardHit(p.flags, false, rng);
+  }
   p.slot = BreakableSlot.Broken;
   // [diverges] A prop cracked while still standing is turned to face the
   // camera — `obj+0x1D0 = g_camera_angles[g_camera_index].y`. The port has no

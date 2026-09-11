@@ -811,19 +811,29 @@ export const G = {
   /**
    * `g_GameMode` — 0x009CA08C. See {@link GameMode}.
    *
-   * Class 0x41 branches on it both ways: Original releases the member's own
-   * `storyItem` and can drop an extra life from every prop, Arcade turns
-   * selected members into one-shot targets and pays no score for them.
+   * Class 0x41 branches on it three ways: Original releases the member's own
+   * `storyItem` and can drop an extra life from every prop, **Training**
+   * turns selected members into one-shot targets and pays no score for them,
+   * and Arcade does neither.
    *
    * The bundle carries the same numbers — `script.game_mode` *is* this field,
-   * and `main.ts` copies it straight across.
+   * and `main.ts` copies it straight across. Arcade is **0**, not 2; the two
+   * one-shot-target arms below are Training's and unreachable in a shipped
+   * stage. See {@link GameMode} for what proves the values.
    */
   g_GameMode: GameMode.Arcade as GameMode,
   /**
-   * `g_prop_target_set` — 0x009C9118. Which of four member sets
-   * `PlaceBreakableGroup` turns into one-shot targets while `g_GameMode` is 2.
+   * `g_training_lesson` — 0x009C9118. Which training lesson is being played.
+   *
+   * It was `g_prop_target_set` here and in the TSV, named from the one use
+   * the port has for it: `PlaceBreakableGroup` turns the members it selects
+   * into one-shot targets while `g_GameMode` is 2. Mode 2 is **Training**,
+   * and the byte is read in exactly two places, both behind that test — the
+   * other is `PreloadScreenAssetList` (`FUN_00412FD0`), which indexes a
+   * per-lesson asset list with it at training block 3. So the four "member
+   * sets" are the four lessons, which is what the old name could not say.
    */
-  g_prop_target_set: 0,
+  g_training_lesson: 0,
   /**
    * `g_scene_index` — 0x009A1A08. Which scene is loaded, zero-based:
    * `ColiLoadForScene` indexes its file list with it, so scene 1 is stage 2.

@@ -156,7 +156,7 @@ function Tail(obj: Actor): RescueTargetTail | null {
  * obj->+0x1B4 = 0x3E6;                    // the idle clip
  * obj->+0x194 = rand() % 10;              // its start frame
  * g_enemies_present += 1;  g_enemies_alive += 1;
- * if (g_GameMode != 2) obj->+0x11C = g_class21_hp_by_rank[rank];
+ * if (g_GameMode != 2) obj->+0x11C = g_class21_hp_by_rank[rank];  // not Training
  * *obj = RescueTargetRideInState;
  * ```
  *

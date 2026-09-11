@@ -1222,6 +1222,56 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
           && Math.abs(node.scale.y - 0.3) < 1e-6,
           node ? `${node.scale.x}` : "no node");
 
+    // **The owl is a chain, not a slot.** `OwlDrawBodyChain` (`FUN_00447C20`)
+    // draws sixteen models under one root, so the layer builds a group with a
+    // child per entry rather than one node. Drawn as a single slot it is a
+    // body that does not flap, which is what it looked like.
+    const owlRoot = new Obj3D();
+    const owlSlots = [0xbbf, 0xbc0, 0xbf1, 0xbf2, 0xbf4, 0xbf5, 0xbf6,
+                      0xbbd, 0xbbe];
+    for (let i = 0; i < 30; i++) owlSlots.push(0xbc1 + i);   // the beat
+    for (let i = 0; i < 16; i++) owlSlots.push(0xbf8 + i);   // the head
+    for (let i = 0; i < 15; i++) owlSlots.push(0xc08 + i, 0xc18 + i);
+    for (const sl of owlSlots) {
+      const part = new Obj3D();
+      part.name = `slots_actor_fixed000_slot_${sl.toString(16).padStart(4, "0")}`;
+      part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+      owlRoot.add(part);
+    }
+    const owlLayer = new SlotModelLayer();
+    owlLayer.adopt(owlRoot);
+    G.g_frame_counter = 0;
+    const o = makeActor(0x4323, SpawnClass.FlyingEnemy, -1, "owl");
+    if (o.cls !== SpawnClass.FlyingEnemy) throw new Error("not class 0x43");
+    o.pos = { x: 0, y: 0, z: -20 };
+    G.g_object_list.push(o);
+    owlLayer.update(ctx);
+    const og = owlLayer.nodeFor(0x4323);
+    check("an owl is drawn as a chain of models, not one",
+          !!og && og.children.length === 12,
+          og ? `${og.children.length} children` : "no group");
+    // The thirty-frame beat is `0xBC1 + obj+0x240`, so the second child's
+    // model changes with it and the body's does not.
+    const beatAt = (n: number) => {
+      o.owl.beat = n;
+      owlLayer.update(ctx);
+      const g = owlLayer.nodeFor(0x4323);
+      return g?.children[1]?.name ?? "";
+    };
+    check("...whose second model is the wing beat and follows `obj+0x240`",
+          beatAt(0) !== beatAt(3) && beatAt(0).endsWith("_slot_0bc1"),
+          `${beatAt(0)} vs ${beatAt(3)}`);
+    // The inner chain is skipped for a corpse -- `if (obj+0x34 & 0x1000000)
+    // goto tail` -- and the body model swaps.
+    o.flags |= 0x4000000;      // `ActorFlag.Dead`
+    owlLayer.update(ctx);
+    const dg = owlLayer.nodeFor(0x4323);
+    check("...and a dead one loses its inner chain and swaps its body",
+          !!dg && dg.children.length === 9
+          && dg.children[0].name.endsWith("_slot_0bc0"),
+          dg ? `${dg.children.length} ${dg.children[0].name}` : "no group");
+    G.g_object_list.length = 0;
+
     const m = makeActor(0x4322, SpawnClass.Mouse, -1, "mouse");
     if (m.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
     m.mouse.frame = MOUSE_FIRST_SLOT;

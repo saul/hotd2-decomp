@@ -17442,3 +17442,67 @@ Two things that are *not* scaled with it, both deliberate:
 
 Caught by a render assertion that reads the node's scale, mutation-tested by
 putting the 1 back.
+
+---
+
+## The owls were a blob, and a zombie that would not stick when driven
+
+### Sixteen slots, one node
+
+`OwlDrawBodyChain` (`FUN_00447C20`) is the whole of class 0x43's renderer and
+it is sixteen `AssetDrawSlot` calls under one matrix stack.
+`render/slotmodels.ts` clones **one** model per actor — which was a complete
+description of every routine it served until class 0x43 arrived, the same way
+`DrawScaleFor` was — so the port drew the body and nothing else. Reported as
+*"the owls don't seem to have their flapping animations, they're just a blob"*,
+which is exactly right.
+
+`render/owl.ts` composes the chain and the layer places one model per entry
+under a group at the actor. Two things the drawing makes obvious that the
+decompilation does not:
+
+* **The two outer chains are siblings of the body, not children.** The body's
+  pop happens at `0x00447E39`, before their pushes at `0x00447E40` and
+  `0x00447EED`, so they hang off the root and do not inherit the body's fixed
+  `Rz(0x4007) Ry(0xDEC8) Rx(0x3FF9)` correction.
+* **The dead path skips the inner chain alone.**
+  `if (obj+0x34 & 0x1000000) goto tail` jumps past one push, so a corpse keeps
+  its beat slot, its head — frozen at ping 0 — and both outer limbs.
+
+All of it read with `disassemble_bytes`: Ghidra's body ends at `0x00447D40` on
+a no-return `MatrixStackPop` and three of the four limb chains are in no
+decompilation (`L35`). The push/pop depth balances fifteen against fifteen on
+both paths, which is the check that says the reading is whole.
+
+The root's rotation order is `Ry · Rz · Rx`, a three.js `Euler` in `"YZX"` —
+the other two arms in that layer are `"ZYX"`, because **the order belongs to
+the routine rather than to the engine**. `g_frame_counter` (0x009A32A0) is in
+`G` now: the head's strip runs on the world's clock, so a flock moves its heads
+in step.
+
+### The zombie that would not stick
+
+Reported as *"`0x6654 znebi3 · ScriptedGrabAndDespawn/1 · d=255` seems to be
+stuck"*. It is stage 3's, not stage 2's — the same offset exists in both and
+only stage 3's is a `znebi3` — and sub 1 is waiting for **camera path frame
+1155**, which block 7 step 8's second queued segment plays.
+
+Driven headlessly from that address, with the two globals `app/systems.ts`
+publishes each frame supplied by hand, it does not stick: cue at 1155, grab at
+1185, despawn at 1246. So the state machine is not the fault.
+
+**The harness told one lie on the way and it is worth recording.** Without
+`CharacterPool`'s `spent` set the actor was rebuilt the frame after it
+despawned and lived its whole life over and over, which looks exactly like a
+hang from outside and would have been reported as one. `render/characters.ts`
+has that set and my harness did not — `L14` again, from the other end: a
+negative result from a harness that is not the app is not a fact about the app.
+
+What is left `[open]` is why the reporter's run differed. The cue is an
+**equality on a frame that passes once**, so an actor absent while its frame
+goes by waits for the rest of the scene; the engine cannot be in that position
+because `SpawnFromDescriptor` builds the object in the opcode that lists it,
+and the port builds from the same list on the same frame. The one known gap is
+that the engine accepts either camera block's frame where the port has one, and
+that divergence was declared in `CamCueHit` and written out a second time,
+undeclared, in `class30/scripted.ts`. There is one copy now.

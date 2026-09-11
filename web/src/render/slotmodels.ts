@@ -55,10 +55,17 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 import type { CamPaths } from "../game/camera/curve";
 import { G } from "../game/globals";
-import { OwlState } from "../game/class43/state";
 import { ScriptedScenerySelector } from "../game/class33/state";
+import { OwlBodyChain, type OwlPart } from "./owl";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
+
+/**
+ * `DrawSlotFor`'s answer for a class whose draw is a **chain** of slots rather
+ * than one: the placement arm builds a group instead. Class 0x43 is the only
+ * one, and `render/owl.ts` is its chain.
+ */
+const CHAIN = -1;
 
 /** Templates come from the hidden `slots_actor` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
@@ -79,11 +86,10 @@ function DrawSlotFor(a: Actor): number | null {
       // `sub+0x20` — the frame of the ten-slot strip `mouse.bin` holds.
       return a.mouse.frame || null;
     case SpawnClass.FlyingEnemy:
-      // The body alone. `OwlDrawBodyChain` (`FUN_00447C20`) draws sixteen
-      // slots in one chain — a body, a thirty-frame wing beat, a head strip
-      // and four limb chains — and this layer clones one node per actor, so
-      // the rest of the owl is a renderer job. See `game/class43/`.
-      return a.owl.state === OwlState.Dead ? 0xbc0 : 0xbbf;
+      // **A chain, not a slot.** `OwlDrawBodyChain` (`FUN_00447C20`) draws
+      // sixteen of them under one root; `render/owl.ts` composes the matrices
+      // and the arm below places one model per entry. `-1` says so.
+      return -1;
     case SpawnClass.WaterEnemy:
       // `sub+0x6E` — `fish.bin`'s twenty-frame swim strip while it is alive,
       // and entry 0 or 1 once it is a corpse. `FishDraw` (`FUN_00439860`)
@@ -210,8 +216,15 @@ const _pos = { x: 0, y: 0, z: 0 };
 /** One live actor's node. */
 interface Live {
   node: Object3D;
-  /** The slot the node was cloned for; a change re-clones it. */
+  /**
+   * The slot the node was cloned for; a change re-clones it.
+   *
+   * `-1` for a **chain**: class 0x43's owl is sixteen slots under one group,
+   * so the group is the node and {@link Live.parts} is what re-clones.
+   */
   slot: number;
+  /** For a chain: the slot each child was cloned for, in order. */
+  parts?: number[];
 }
 
 export class SlotModelLayer implements System<RenderContext> {
@@ -219,6 +232,8 @@ export class SlotModelLayer implements System<RenderContext> {
   readonly group = new Group();
   private readonly templates = new Map<number, Object3D>();
   private readonly nodes = new Map<number, Live>();
+  /** Scratch for {@link SlotModelLayer.chain}; the layer is single-threaded. */
+  private readonly _parts: OwlPart[] = [];
   private enabled = true;
 
   constructor() {
@@ -293,10 +308,14 @@ export class SlotModelLayer implements System<RenderContext> {
       if (slot === null) continue;
       seen.add(a.at);
       let live = this.nodes.get(a.at);
-      // The strip advances every frame, so the node is re-cloned whenever the
-      // slot changes -- which for a running mouse is every frame, and for a
-      // waiting one is never.
-      if (!live || live.slot !== slot) {
+      if (slot === CHAIN) {
+        const chained = this.chain(a, live);
+        if (!chained) continue;
+        live = chained;
+      } else if (!live || live.slot !== slot) {
+        // The strip advances every frame, so the node is re-cloned whenever
+        // the slot changes -- which for a running mouse is every frame, and
+        // for a waiting one is never.
         live?.node.removeFromParent();
         const node = this.clone(slot);
         if (!node) continue;
@@ -324,6 +343,16 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "ZYX");
+      } else if (a.cls === SpawnClass.FlyingEnemy) {
+        // `MatrixTranslate(pos)` then `RotY(obj+0x68) RotZ(obj+0x6C)
+        // RotX(obj+0x64)` at `0x00447C49`..`0x00447C64` — the product is
+        // `Ry · Rz · Rx`, which is a three.js `Euler` in `"YZX"`. The arm
+        // above is `"ZYX"` because its routine rotates in the other order:
+        // the order belongs to the routine, not to the engine.
+        live.node.visible = true;
+        live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
+        live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
+                               a.roll * BAMS_TO_RAD, "YZX");
       } else {
         live.node.visible = true;
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
@@ -340,6 +369,54 @@ export class SlotModelLayer implements System<RenderContext> {
 
   resync(ctx: RenderContext): void {
     this.update(ctx);
+  }
+
+  /**
+   * One group holding every model in a **chain** class's draw, placed.
+   *
+   * The group is the actor root; each child carries the matrix
+   * `OwlBodyChain` composed for it, which is the product the engine's matrix
+   * stack has when that `AssetDrawSlot` runs. A child is re-cloned only when
+   * its slot changes -- the beat's does every frame, the body's never -- and
+   * the matrices are rewritten every frame either way, because the angles do.
+   */
+  private chain(a: Actor, live: Live | undefined): Live | null {
+    const parts = OwlBodyChain(a, this._parts);
+    if (!parts.length) return null;
+    if (!live || live.slot !== CHAIN) {
+      live?.node.removeFromParent();
+      const g = new Object3D();
+      this.group.add(g);
+      live = { node: g, slot: CHAIN, parts: [] };
+      this.nodes.set(a.at, live);
+    }
+    const have = live.parts ?? (live.parts = []);
+    for (let i = 0; i < parts.length; i++) {
+      if (have[i] !== parts[i].slot || !live.node.children[i]) {
+        const c = this.clone(parts[i].slot);
+        // A slot with no model in the bundle: keep whatever is at this index
+        // and carry on, rather than truncating the chain from here. Every one
+        // of the sixteen ships, so this is the shape of a stale export.
+        if (!c) { if (!live.node.children[i]) break; continue; }
+        if (live.node.children[i]) {
+          live.node.remove(live.node.children[i]);
+          live.node.children.splice(i, 0, c);
+          c.parent = live.node;
+        } else {
+          live.node.add(c);
+        }
+        have[i] = parts[i].slot;
+      }
+      const c = live.node.children[i];
+      c.matrixAutoUpdate = false;
+      c.matrix.copy(parts[i].m);
+      c.visible = true;
+    }
+    while (live.node.children.length > parts.length) {
+      live.node.children.pop();
+      have.pop();
+    }
+    return live;
   }
 
   /**

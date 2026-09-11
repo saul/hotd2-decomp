@@ -23,7 +23,7 @@ import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor }
   from "../actor";
 import { ActorFacePlayerTarget, TurnActorTowardCameraEye }
   from "../actor_turn";
-import { CARRIER_TURN_RATE } from "./entrance";
+import { CARRIER_TURN_RATE, CamCueHit } from "./entrance";
 import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
 import { ActorByAt, G } from "../globals";
@@ -205,8 +205,9 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
   }
 
   if (obj.sub === 1) {
-    // `-1` fires at once; otherwise the camera path frame must equal it.
-    if (obj.zom.holdFrames !== -1 && G.g_cam_path_frame !== obj.zom.holdFrames) return;
+    // `-1` fires at once; otherwise the camera path frame must equal it —
+    // **either camera block's**, which is `CamCueHit` and its divergence.
+    if (obj.zom.holdFrames !== -1 && !CamCueHit(obj.zom.holdFrames)) return;
     if (t.motion === GRAB_MOTION_PAIRED) {
       ActorSetMotionBlended(obj, GRAB_MOTION_PAIRED, 0, 1);
     }

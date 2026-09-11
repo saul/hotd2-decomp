@@ -43,12 +43,11 @@
  *
  * ## What is not ported
  *
- * `[diverges]` **The body chain.** `OwlDrawBodyChain` is a hand-built matrix
- * chain of sixteen `AssetDrawSlot` calls — a body, a thirty-frame wing beat, a
- * head on a sixteen-frame ping-pong and four limb chains — and
- * `render/slotmodels.ts` clones **one** slot per actor. The port draws the body
- * and carries the five limb angles the states write, so the pose is in the
- * snapshot; the chain itself is a renderer job. `[open]` what the limbs
+ * The **body chain** is `render/owl.ts`, which is where it belongs: sixteen
+ * `AssetDrawSlot` calls under one matrix stack, a body, a thirty-frame wing
+ * beat, a head on a sixteen-frame ping-pong and four limb chains. The five
+ * limb angles the states write are carried here so the pose is in the
+ * snapshot, and the renderer composes them. `[open]` what the limbs
  * anatomically are: the mirrored pair is `[likely]` the wings and the chain
  * under the body `[likely]` the talons, and the slot table names files, not
  * parts.

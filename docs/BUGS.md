@@ -2472,6 +2472,45 @@ investigation ruled out.
   That is a **second draw of the same model at a different place** and the
   layer has no way to express one; it stays declared in `game/class51/`.
 
+- `[fixed]` **The owls had no flapping animation — they were a blob.**
+  `OwlDrawBodyChain` (`FUN_00447C20`) is sixteen `AssetDrawSlot` calls under
+  one matrix stack: a body, a **thirty-frame wing beat** at `0xBC1 + obj+0x240`,
+  a head on a sixteen-frame ping-pong of `g_frame_counter`, an inner chain and
+  a mirrored outer pair whose tips run a fifteen-frame strip during the dive.
+  `render/slotmodels.ts` clones **one** model per actor, so the port drew the
+  body and nothing else.
+
+  `render/owl.ts` composes the chain — the exe's own translations and the five
+  limb angles the states already carried — and the layer places one model per
+  entry under a group at the actor. Ghidra's body for that routine ends at
+  `0x00447D40` on a no-return `MatrixStackPop` and three of the four limb
+  chains are in no decompilation, so all of it was read with
+  `disassemble_bytes`; the push/pop depth balances at fifteen against fifteen
+  on both the live and the dead path.
+
+  Two readings that only show once it is drawn: the two outer chains are
+  **siblings of the body, not children** — the body's pop happens before their
+  pushes — and the dead path skips the **inner** chain alone, so a corpse keeps
+  its beat slot, its head and both outer limbs. `g_frame_counter` (0x009A32A0)
+  is in `G` now, the second of the three counters `FUN_0040E730` steps.
+
+- `[open]` **A `znebi3` reported stuck in `ScriptedGrabAndDespawn/1`.** That
+  actor is stage 3's `0x6654`, and sub 1 is waiting for **camera path frame
+  1155**, which the segment queued at block 7 step 8 op 19 plays. Driving the
+  walker and the port together from that address it does not stick: the cue
+  fires at 1155, the grab connects at 1185 and the actor despawns at 1246.
+
+  What is `[open]` is why the reporter's run did not. The test is an
+  **equality on a frame that passes once**, so an actor that is not there while
+  its cue goes by waits for the rest of the scene — the engine cannot be in
+  that position, because `SpawnFromDescriptor` builds the object in the opcode
+  that lists it. The port builds from the same list on the same frame, so it
+  should not be either. The one known gap is that the engine accepts
+  **either** camera block's frame and the port models one; that is
+  `CamCueHit`'s declared divergence, and the duplicate of the test in
+  `class30/scripted.ts` now goes through it rather than carrying its own
+  undeclared copy.
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

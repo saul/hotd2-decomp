@@ -793,6 +793,21 @@ export const G = {
    * repeats. This is an integer stepped by whole ticks, as `obj+0x19C` is.
    */
   g_blink_frame_counter: 0,
+  /**
+   * `g_frame_counter` — 0x009A32A0. The second of the three free-running
+   * counters `FUN_0040E730` steps once a tick, beside
+   * {@link g_blink_frame_counter} and `g_scene_tick_counter`.
+   *
+   * `OwlDrawBodyChain` (`FUN_00447C20`) takes `% 30` of it and folds that into
+   * a sixteen-frame ping-pong for the head's model run — so an owl's head
+   * animates on the **world's** clock rather than on its own, and a flock
+   * moves its heads in step.
+   *
+   * A separate field rather than an alias: the two are zeroed by different
+   * routines in the engine, and a port that shared one would be asserting they
+   * can never drift.
+   */
+  g_frame_counter: 0,
 
   // -- the ground plane --------------------------------------------------
   /**
@@ -1261,6 +1276,7 @@ export function ResetGameGlobals(): void {
   // `ResetSceneCombatState` does it again at `0x0045EF1E`. The slot table is
   // `ResetSceneOnEnter`'s and is cleared there.
   G.g_blink_frame_counter = 0;
+  G.g_frame_counter = 0;
   G.g_frame = 0;
 }
 

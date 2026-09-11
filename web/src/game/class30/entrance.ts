@@ -90,19 +90,31 @@ const ARC_CROUCH_TYPE0 = { motion: 0x10c, hold: 0x21 };
 const ARC_CROUCH_OTHER = { motion: 0x39f, hold: 0x2c };
 
 /**
- * The camera cue these states wait on.
+ * `[port-only]` — the camera cue the scripted entrances wait on.
  *
  * The engine accepts **either** `g_cam_path_frame` (camera block 0) or
  * `g_cam_path_frame_2` (block 2) — the same `+0xD0` field of two different
- * blocks.
+ * blocks. `ZombieStateScriptedGrabAndDespawn` (`FUN_00457B50`) does it at
+ * `0x00457BE2` and `0x00457BEA`.
+ *
+ * **The test is an equality on a frame that passes once**, which is the thing
+ * to know about it: an actor that exists while its cue frame goes by fires,
+ * and one that misses it waits for the rest of the scene. The engine cannot
+ * miss, because `SpawnFromDescriptor` builds the object in the opcode that
+ * lists it; the port builds it from the same list on the same frame, which is
+ * what keeps that true here.
  *
  * [diverges] The port models one camera block, so this tests the one it has.
  * A spawn whose cue is authored against block 2 waits on block 0's frame
  * instead; none of the 47 spawns across states 18, 19 and 23 was observed to
  * need the second, because a stage that is running block 2 is running a
  * cutscene camera the port does not drive either.
+ *
+ * One function rather than the test written out, because it **was** written
+ * out twice — here and in `class30/scripted.ts` — and only one copy carried
+ * the divergence.
  */
-function CamCueHit(frame: number): boolean {
+export function CamCueHit(frame: number): boolean {
   return G.g_cam_path_frame === frame;
 }
 

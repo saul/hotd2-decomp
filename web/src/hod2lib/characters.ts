@@ -40,8 +40,8 @@ import type { CivBlock, TargetScript } from "./actorscript";
 import { approachTables, cameraTracking, RING_SET_FOR_CHAR0 } from "./approach";
 import { build, goreEntry, rigEntry } from "./charbuild";
 import type { Character } from "./charbuild";
-import { CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, bake,
-         humanoidMotionIds, introFor, motionFor,
+import { CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION,
+         bake, humanoidMotionIds, introFor, motionFor,
          BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
@@ -836,6 +836,9 @@ export async function resolveForStage(
     if (cls === 0x20) {
       entryClips.push(...CLASS20_IDLE_MOTIONS, CLASS20_DEATH_MOTION);
     }
+    // Class 0x21's freed clip. The idle comes from `MOTION_RULES`; this is the
+    // one `RescueTargetHeldState` swaps to when the target is rescued.
+    if (cls === 0x21) entryClips.push(CLASS21_FREED_MOTION);
     entryClips.push(...targetScriptMotions(tscript));
     entryClips.push(...targetScriptMotions(ascript));
     if (cls === 0x10) {

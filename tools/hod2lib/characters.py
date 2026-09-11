@@ -80,7 +80,8 @@ from .arcscript import (  # noqa: F401
                         CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES,
                         arc_script)
 from .charmotion import (  # noqa: F401
-    BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, humanoid_motion_ids,
+    BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS,
+    CLASS21_FREED_MOTION, humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
 from .combat import (  # noqa: F401
@@ -169,6 +170,7 @@ __all__ = [
     "BONE_ZONE",
     "CLASS20_DEATH_MOTION",
     "CLASS20_IDLE_MOTIONS",
+    "CLASS21_FREED_MOTION",
     "CLASS30_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPT_BYTES",
@@ -959,6 +961,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # and the clip `OneHitTargetUpdate` cues the frame the actor is shot.
         if sp["class"] == 0x20:
             entry_clips += list(CLASS20_IDLE_MOTIONS) + [CLASS20_DEATH_MOTION]
+        # Class 0x21's freed clip. The idle comes from `MOTION_RULES`; this is
+        # the one `RescueTargetHeldState` swaps to when the target is rescued.
+        if sp["class"] == 0x21:
+            entry_clips += [CLASS21_FREED_MOTION]
         entry_clips += target_script_motions(tscript)
         entry_clips += target_script_motions(ascript)
         if sp["class"] == 0x10:

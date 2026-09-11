@@ -74,8 +74,8 @@
 00565e58	g_class31_arc_path_style1	State 26's arc motion script when the waypoint's style word is 1: {0x12D,12,1,12} three times.
 00565e88	g_class31_arc_path_style2	State 26's arc motion script when the waypoint's style word is 2: {0x12D,7,0,11}{0x12C,48,1,65}{0x12D,17,1,22}.
 00565eb8	g_class31_arc_path_style0	State 26's arc motion script for any other waypoint style: {0x12D,0,0,8}{0x12D,9,0,17}{0x12D,18,0,23}.
-00565ef4	g_st2car_path_table	object path per instance index
-00565f0c	g_class21_hp_by_rank	1 or 2 hit points by difficulty rank
+00565ef4	g_st2car_path_table	s16[11]: 0x148 0x14E 0x14D then op_train 0x19A..0x1A1. The op_ object path an instance takes its pose from, by instance index (obj+0x1350). Rows 0-2 are the three opening shots, the same paths FUN_004521B0 picks by camera path 0x38/0x39/0x3A; rows 3-10 are the eight traffic instances. Read by the car's poser FUN_00452930 and FUN_004525C0 AND by class 0x21's RescueTargetPoseFromRoute/WithVelocity -- which is what proves the rescue target rides the car rather than a route of its own. Bounded by abutment: g_class21_hp_by_rank (0x00565F0C) is one zero word past the last entry.
+00565f0c	g_class21_hp_by_rank	s16[16], indexed by g_damage_rank (0x009C8E96, 0..15): 1 1 1 1 2 2 2 2 2 2 3 3 3 3 4 4. RescueTargetInit writes it straight into obj+0x11C, so it is the number of part hits the rescue takes. SIXTEEN rows, not five -- the extent is bounded by abutment, g_st2car_asset_variants (0x00565F2C) beginning exactly sixteen s16 later. It was recorded as '1 or 2 by difficulty', which is the wrong index source and the wrong extent (L6).
 00565f2c	g_st2car_asset_variants	int[2][4]; row 1 is the post-crash set
 00566124	g_wait_turn_variant	s32[10] of 0 and 1. ZombieStateAttackRun picks one with (rand() >> 4) %% 10 and ORs it into obj+0x136C at bit 21, which is the bit ZombieStateWaitTurn indexes the motion row with -- so which idle a waiting zombie plays is a coin flip from a table, not a duration.
 00567990	g_accuracy_bonus_table

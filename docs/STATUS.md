@@ -19,8 +19,8 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 39689 | 153 | engine |
-| `hod2lib/` | 15541 | 34 | engine |
+| `game/` | 39861 | 153 | engine |
+| `hod2lib/` | 15569 | 34 | engine |
 | `render/` | 8070 | 29 | render |
 | `app/` | 7337 | 29 | app |
 | `script/` | 4144 | 25 | engine |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 904 | 9 | engine |
 | `audio/` | 351 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **81554** | **318** | |
+| **total** | **81754** | **318** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -44,8 +44,8 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **161 of 262** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 147 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 308 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 149 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 310 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
 | Declared `[diverges]` | **157** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **143** — questions the port is honest about not having answered |
@@ -56,7 +56,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 833 in `ghidra/annotations/functions.tsv` |
+| Named functions | 837 in `ghidra/annotations/functions.tsv` |
 | Named globals | 387 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 30 under `tools/`, run together by `verify_all.py` |
 

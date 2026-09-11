@@ -1591,7 +1591,7 @@ investigation ruled out.
   is only one type's; six types compose theirs differently and **15 shipped
   spawns with two or more non-zero angles are posed wrongly today**.
 
-- `[part]` **`znjoe` releases a creature from its body when you shoot it, and
+- `[fixed]` **`znjoe` releases a creature from its body when you shoot it, and
   the port has none of it.** The whole chain is read and named now; none of it
   is ported. `0x0A68` is a spawn address — `znjoe` is character type **0x0A**,
   one of stage 5's seven.
@@ -1626,6 +1626,44 @@ investigation ruled out.
   `ActorReactToHit`, the bone swap, and forty sprite slots the exporter does
   not carry. `[open]` The 0x504-byte tail `BodyCreatureInit` allocates holds
   the flight's start and end and has not been read.
+
+  **Ported 2026-09-11, the whole chain.** The arm in `ActorReactToHit`
+  (`FUN_004543F0`), state 25 `ZombieStateReleaseBodyCreature` (`FUN_00457FB0`),
+  and the creature's `SpawnBodyCreature` / `BodyCreatureInit` /
+  `BodyCreatureUpdate` (`FUN_0043E720` / `FUN_0043E790` / `FUN_0043E880`) as a
+  plain-record pool on the severed head's shape, plus the bone swap, the permit
+  release, both enemy counters, the two sounds, the blood and the player
+  damage. `[proved]` exactly **seven** spawns in the twelve shipped scripts are
+  `znjoe`, all class 0x30, all stage 5.
+
+  **The `0x504` tail is read, and it is not a struct type.** Three routines
+  allocate that size and their layouts disagree — the same offset is an actor's
+  `y` in one and the flight's start `y` in another. `L3` inside one allocation
+  size. The creature's position is in **camera space**, proved three ways, and
+  the arc constant puts the sine through exactly pi at the arrival latch.
+
+  **The bug that ate the feature, and it is `L11`.** Everything was written and
+  **no `znjoe` released anything** across 18,480 shots and six of the seven
+  spawns. `ActorReactToHit`'s one caller is `ZombieOnShot` at `0x0045401A`,
+  **five instructions past its death test** at `0x00453F46` — and that test
+  reads the very bit the arm raises. The port called it from `ResolveHit` at
+  the head of the frame instead, so the arm set state 25 and the shot drain
+  overwrote it with the death state on the same frame. Measured: a first torso
+  hit took the actor 100 → 35 hit points, alive, and left it in state 6.
+
+  Two exporter gaps that **only playing it could find**: the forty sprite slots
+  sit past any skeleton node, and the bank shipped six clips but neither of the
+  two this needs — so the play length was 0 and the state had no root motion to
+  leave the ring with.
+
+  `[open]` Five things, one a decision for the user. **A live creature is a
+  camera candidate in the engine and cannot be one here**: its update ends in
+  the camera registration, and the port's slot array is over `Actor`s, so the
+  camera never sees the creature although the enemy count does. Fixing that
+  needs either the slot array taking non-actor objects or an invented spawn
+  class, so no divergence was declared and it waits on a call. Also open: what
+  space the registered point is in, and three writes with no reader anywhere in
+  the image, left unported and unnamed rather than named for where they sit.
 
 - `[fixed]` **The three zombies that should travel with the car at
   `?stage=5&mode=play&block=2&step=2&op=50&frame=599` stand far away instead.**

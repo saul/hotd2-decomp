@@ -16601,11 +16601,8 @@ with its hands on the far wing. `web/shots/rider_{before,after}_440.png`.
   none, so the two routines were finished with `capstone` over the PE directly
   (`pip install --break-system-packages capstone`, a 30-line section walker).
   That is what found the fall-through, because a linear sweep does not stop
-  where a decompiler stops. The consequence is that **nothing was renamed in
-  the live database**: `SkeletonResolveTrackFrames`, `g_skeleton_model`,
-  `g_motion_frame` and `g_motion_fade_weight` exist in
-  `ghidra/annotations/*.tsv` and not yet in the project, so the next session to
-  open it should apply them before `export-annotations` can be trusted.
+  where a decompiler stops. What it left undone is below, under *The Ghidra
+  round trip did not happen*.
 * **A scan for writes of `model+0x64` through `obj+0x1F8` missed both the
   civilian and the rescue target**, because both hold the model base in a
   register and write `[reg+0x64]`. `L32`'s lesson one struct along: the offset a
@@ -16620,22 +16617,52 @@ with its hands on the far wing. `web/shots/rider_{before,after}_440.png`.
   taken, by `0x007DD09C` — a different scratch pointer for class 0x10.
   `g_skeleton_model` instead.
 
+### Two departures, tagged rather than described
+
+Ruled on by the coordinator after the first pass, and it is one ruling twice:
+**tag both, implement neither.** The count went **167 to 169**. The reason it
+had to be a tag and not a careful paragraph is the convention itself — the
+divergence count is the honest measure of how finished the transcription is,
+and an invisible departure that exists only in prose reads as settled to the
+next person. That cost this project a real bug the same day: a doc comment
+listed a script flag among the untranscribed with no assertion behind it, and a
+hang lived behind the comment for as long as the comment did.
+
+* **The pose offset is unscaled, because the model is.** The engine's translate
+  sits inside `MatrixScale(model+0x116C)`, so a 0.9 character offsets by 0.9 of
+  what its clip authored; neither `hod2lib.characters` nor
+  `render/characters.ts` scales a drawn character at all, so the offset is left
+  unscaled to match the model it offsets — applying the scale to the offset
+  alone would be *worse*, because the offset would shrink while the model it
+  offsets did not. Three of the four clips that reach the pose belong to
+  `scale 0.9` types, so the engine's offset is **2.594** where the port's is
+  **2.882**; the fourth is class 0x21 at character type 7, scale 1.0, where
+  they agree. Faithful means scaling every skinned actor's drawn size.
+* **The death clip keeps the whole root whatever the gate says.** The engine has
+  no death track — a death clip is the ordinary motion and the gate decides it
+  like any other — but `ActorAdvanceMotion` returns early on `obj.death`, so
+  `pose.ts` overrides the gate at that one call site or a falling body's travel
+  comes from nowhere. The two land in the same place wherever the clip's frame-0
+  horizontal root is zero, which is 992 blocks of 1058: that is why it is
+  invisible and not an argument that it is faithful. Faithful means running root
+  motion through a death in `game/`.
+
+**Both tags are in `game/`, not in `render/`, and that was not a convenience.**
+`verify_port.py`'s `cited_files()` is `game/` plus `script/` by an explicit
+earlier decision, so a `[diverges]` in `render/characters/pose.ts` would not be
+counted at all — the tag would have been exactly the invisible prose the ruling
+was about. Each also belongs there on the merits: the death override exists
+*because* of `ActorAdvanceMotion`'s early return, and the scale field's whole
+story is already on `ActorModelScale`. `pose.ts` cross-references both at their
+call sites rather than carrying a second description of either.
+
+Which turned up a finding worth its own decision: **15 `[diverges]` tags live
+outside `game/` and `script/`**, across eight files under `render/`, and none of
+them is counted. Not acted on — widening the measure moves it by fifteen at
+once and that is a call about what the number means, not a line edit.
+
 ### Left open
 
-* **`model+0x116C` scales the pose offset in the engine and nothing in the port
-  applies it.** The translate sits inside `MatrixScale`, so a 0.9 character
-  offsets by 0.9 of what its clip authored; neither `hod2lib.characters` nor
-  `render/characters.ts` scales a drawn character at all, so the offset is left
-  unscaled to match the model it offsets. Two of the three civilian clips
-  belong to `scale 0.9` types, so the honest correction there is 2.594 and not
-  2.882 — and fixing it means scaling the drawn character, which is a change to
-  every skinned actor's size.
-* **The death clip is the one declared override**, and it is not a second
-  reading: the engine has no death track, and `ActorAdvanceMotion` does not run
-  root motion through a death, so `pose.ts` keeps the whole root there. The two
-  models agree wherever the clip's frame-0 horizontal root is zero, which is
-  992 blocks of 1058. Making it gate-driven means giving the death clip root
-  motion in `game/`.
 * **`MotionFlag.RootMotionY`, bit `0x10`**, still has no writer. Nine other
   classes write `model+0x64` and none of the values were read here.
 * The engine's wrap damper is `baseline = root + (root - baseline)/play_length`,
@@ -16643,3 +16670,16 @@ with its hands on the far wing. `web/shots/rider_{before,after}_440.png`.
   `rootDelta` in `game/root_motion.ts` computes `(root - root[0])/frames`
   instead. Both are small and neither was touched, but they are not the same
   number and nothing asserts either.
+
+### The Ghidra round trip did not happen
+
+`SkeletonResolveTrackFrames` (`FUN_00410BD0`), `g_skeleton_model`
+(`0x009CA0A0`), `g_motion_frame` (`0x007C1C30`) and `g_motion_fade_weight`
+(`0x007C1C24`) are in `ghidra/annotations/*.tsv` and **not in the live
+database**. The bridge was down when they were read and it was still down at
+the end of the session: `list_instances` returns none and `connect_instance`
+gets `Connection refused` on `127.0.0.1:8089` with zero UDS instances. The
+round trip also cannot be done from here — the analyzer refuses a `.claude`
+worktree path — so it wants a session on `main` with the project open. **This
+is a known gap, not drift**: the next `export-annotations` diff will show those
+four rows as unmatched until someone applies them.

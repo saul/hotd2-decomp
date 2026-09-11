@@ -42,15 +42,12 @@ pose(inst: Instance): void {
       // body's travel is the clip's, and nothing else moves it -- so this one
       // call site overrides the gate and takes the whole root.
       //
-      // It is **not** a second reading of the engine, which has no death
-      // track at all: the clip is the ordinary motion and the gate decides as
-      // usual. The two come out in the same place while the clip's frame-0
-      // horizontal root is zero, which is 992 of 1058 blocks: the pose offset
-      // is `root[f]` where the accumulated deltas would be `root[f] - root[0]`,
-      // both inside the actor's own rotation. Making this obey the gate means
-      // making `ActorAdvanceMotion` run root motion through a death as well,
-      // and that is a change to `game/` for the classes with no death machine.
-      // Left alone here on purpose; see `docs/BUGS.md`.
+      // **That is a declared divergence, and it is declared in `game/`**, on
+      // the `obj.death` branch of `ActorAdvanceMotion` in `game/motion.ts`
+      // that causes it: the engine has no death track, so the gate decides a
+      // death clip like any other and the port's early return is what makes
+      // this override necessary. The reason lives there rather than here so
+      // that `verify_port.py` counts it.
       this.apply(inst, dm, f, true);
       return;
     }
@@ -203,12 +200,13 @@ private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
  * The vertical stays either way: that is the walk's bob, and nothing else
  * provides it.
  *
- * [open] The engine's translate sits **inside** `MatrixScale(model+0x116C)`,
- * so a character drawn at 0.9 offsets by 0.9 of what its clip authored. This
- * port draws every character at 1.0 — the exporter bakes no scale into the
- * instance root and `render/characters.ts` sets none — so the offset is
- * unscaled here, consistently with the model it offsets. Scaling one without
- * the other would be worse than either.
+ * The engine's translate sits **inside** `MatrixScale(model+0x116C)`, so a
+ * character drawn at 0.9 offsets by 0.9 of what its clip authored, and the
+ * offset is written unscaled here because nothing in this port scales a drawn
+ * character either. That is a **declared divergence**, and like the death
+ * clip's it is declared in `game/` so that it is counted -- on
+ * `ActorModelScale` in `game/root_motion.ts`, which owns the field and
+ * carries the measured size of it.
  */
 private apply(inst: Instance, m: BakedMotion, f: number,
               full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0):

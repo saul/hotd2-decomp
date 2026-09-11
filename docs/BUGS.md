@@ -1951,7 +1951,7 @@ investigation ruled out.
 
 ## And one nobody could have reported, in a route nothing had played
 
-- `[part]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
+- `[fixed]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
   step 3 op 4. Reproduce with
   `cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless`: it
   reaches block 7, then 8, then 2, and stops for 1,110 game frames on one
@@ -1977,7 +1977,10 @@ investigation ruled out.
   something is failing; if it is not, the escape should have passed the gate
   and did not, which is a different bug in a different file.
 
-  **The flag gate is fixed; a different hang is four instructions later.**
+  **Fixed in two parts. The flag gate went first; the hang four instructions
+  later was the unbaked death clip, and that is fixed too — the route now
+  reaches block 11 and the end at 6,390 frames over 66 instructions,
+  measured here.**
 
   **My own framing above was wrong, and the agent checked it instead of
   inheriting it.** Stage 3 *does* `set_script_flag 0x15` — block 1 step 5 — but

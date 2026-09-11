@@ -1949,6 +1949,54 @@ investigation ruled out.
   block 1 has `g_nFiringGate` legitimately down; and stage 5's block 2 clears
   now that class 0x33 and `ZombieState.Leave` are ported.
 
+## Playing those blocks found four more, and three are fixed
+
+- `[part]` **All twenty-two of stage 2's unvisited blocks have now been
+  played**, and five of the six routes through them reach an end block.
+
+  The driver takes a chosen branch arm now, and **the design decision is that
+  it plays for the arm rather than clicking one.** Every writer of
+  `g_script_branch_var` in the image is actor code, so while the walker is
+  inside the named block the tool fires the same volley the gates get; on block
+  0 that kills the rescue target and the branch bar comes up with the game's
+  own route already marked. Nothing is overridden.
+
+  The guard is the existing one read from the other side: the refusal is for a
+  gate whose panel names a **living civilian**, and inside a block there is no
+  panel, so the volley is refused while any civilian is alive. Stricter than
+  before, and it fires no shot at a civilian gate ever.
+
+  **The first version was the override alone, and it was wrong.** It reached
+  block 1 and reported two blocks as unclearable rooms, both phantoms: clicked
+  rather than played, the rescue target sits in its held state holding both
+  enemy counters for ever, and the engine has no path to that state because
+  that arm *is* the rescue. The override survives as a **reported** fallback,
+  printed and quarantined, because a hang behind one is not evidence about the
+  port. That is `L45`.
+
+  **Three port defects fixed, each read in the exe first.** A civilian script
+  bit is **three** conditions and not one. A stashed camera range publishes one
+  frame **past** its end where the rail hook does not — a `JG` against a `JGE`,
+  both incrementing before they publish. And `EvtOpWaitCameraPathFrame41` is
+  **strict**, while the live wait released on the operand. The last two are a
+  pair: either alone leaves block 9 shut, from opposite sides. The new
+  `tools/verify_cam_waits.py` passes 1,048 sites over twelve bundles, and
+  modelling the stashed state as stopping on its end turns **twenty** of them
+  into gates nothing can open.
+
+  **Three harness faults had hidden all of it**, and one deserves its own
+  line: the hang report's blocker regex matched **the gate's own opcode**, so
+  **no hang report in `PLAYER_HANGS.md` has ever carried an actor row for a
+  gate with no named blocker** — which is the one line those reports exist to
+  print.
+
+  `[open]` Two defects filed rather than fixed. Class 0x42 is unported, and
+  `PlaceFallingBreakableBatch` (`FUN_0042F9B0`) increments **both** enemy
+  counters inside its 6-to-15 loop, so blocks 21 and 26 open their room gates
+  early. And block 24's state-19 zombie waits on a frame the port overwrites
+  with the stashed range's own, which needs a second camera cursor to compose —
+  the one route that does not reach an end block.
+
 ## And one nobody could have reported, in a route nothing had played
 
 - `[fixed]` **Stage 3 hangs from entry 7**, on `wait_script_flag 21` at block 2
@@ -2247,7 +2295,7 @@ investigation ruled out.
   has stood in for the character layer — **434 of the 488 shipped enemy gates
   read that counter**, and every such harness sails through all of them.
 
-- `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
+- `[fixed]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
   defect in itself, and recorded because it is now live code with no coverage.
   The rescue target its branch variable depends on had no skeleton until
   2026-09-11, so those blocks were unreachable; exporting the actor turned them

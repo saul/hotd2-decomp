@@ -15577,3 +15577,59 @@ zeroed and is named ten times by zone combo **7** — head *and* both arms shot
 off. A pick row is a claim about what the table can draw, not about what the
 game ever spawns; the spawn records are the other half and I had not read them.
 `L34` and `L27` are the same shape one level up.
+## One gap from two sides: stage 3's roller shutter and stage 5's van
+
+Two reports, and the useful part of each was the ground it ruled out. The
+shutter report had already measured that stage 3 carries no hinged props, no
+statics, no class-0x24 set pieces and no shutter rig, and concluded the
+shutter never reaches the placement path. Correct, and the reason it pointed
+nowhere: stage 3's placement *list* is classes 0x10/0x20/0x25/0x30, but its
+**script** spawns classes 0x41, 0x43, 0x44, 0x45, 0x46 and 0x51 as well. The
+measurement was of the wrong list, and nothing in either report said which.
+
+The lead handed over was `asset_load_slot` around block 8, and it was the right
+one for a reason nobody had stated: `asset_load_slot slot 2648 =
+etc_door.bin[2]` in block 8 step 1 is the shutter's model, 2648 is `0xA58`, and
+`0xA58` is the one literal `RisingDoorUpdate` (`FUN_004753F0`) compares its own
+draw slot against. The op did not *load level geometry the script animates*; it
+loaded the model a class-0x44 selector-11 object draws, and that selector was
+in no table in the tree. `etc_door.bin[2]` and `st5.bin[9]` both render as
+corrugated ribbed metal panels, which with the filename and the vertical rise
+is what makes "roller shutter" `[likely]` rather than a guess.
+
+### The wrong turn, and it was a whole implementation
+
+I built the van as a **new exporter prop kind** first — a `SlotProp` dataclass
+in both halves of `hod2lib`, a `slot_props` block in `props.json`, `type_index`
+and `type_lifetime` accessors on `Spawn`, rig entries, the lot — and it worked:
+eleven placements in stage 5, the right poses, the right slots. Then I read
+`web/src/game/class41/generic.ts` and found `PlaceGenericProp` already ported,
+already building all eleven, already asking the renderer for slot `0x1793`
+every frame. The exporter kind would have drawn a **second** van beside the
+first, with no lifetime and no pool.
+
+What the module comment said is the part worth keeping. It lists
+`FUN_0046EB20 (51, 11)` among the routines "read for what they draw", and
+`GENERIC_DESCRIPTOR_SLOT` — the set of types whose `+0x11C` really is a model —
+is `[5, 12, 33]`. The note and the table disagreed, and the table is what
+`breakableSlotEntry` reads to decide which slots' geometry travels. That is
+`L26` exactly: the prose described what somebody meant and only the table said
+what the code did. **Read the port before adding to the exporter**; the
+question "is this placed already" is one grep and I spent an afternoon not
+asking it.
+
+The reverted work is not all waste: it is why the `+0x1F4` lifetime was found.
+Writing `SlotProp` meant reading `FUN_004088A0` to learn where a class-0x41
+placer's type byte comes from, which is what showed that `obj+0x1F4` and
+`obj+0x11C` are two different descriptor fields and that four of the types
+swap one for the other.
+
+### Two more things the data said and no one had asked
+
+Types **31**, **53** and **54** draw `obj+0x28C` as well, so the
+descriptor-slot set is seven and not four; ten more spawns of scenery are
+missing for the van's reason. And the renderer poses the whole generic family
+`Ry · Rz · Rx`, which is type 51's order alone — 5, 12, 31, 33, 53 and 54 all
+compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or more non-zero
+angles. Both are written up where the code is, and neither is fixed here.
+

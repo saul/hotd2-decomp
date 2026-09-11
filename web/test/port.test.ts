@@ -188,7 +188,8 @@ import {
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
 import {
-  CLASS21_MOTION_FREED, RescueTargetState, RescueTargetUpdate,
+  CLASS21_HP_BY_RANK, CLASS21_MOTION_FREED, g_st2car_path_table,
+  RescueTargetState, RescueTargetUpdate,
 } from "../src/game/class21";
 import {
   MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS, MOUSE_LAST_SLOT,
@@ -2788,12 +2789,32 @@ console.log("\nclass 0x41, the props are in the save state:");
 }
 console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
 {
+  /**
+   * A host that answers `CamEvalObjectPath6` for the two rows of
+   * `g_st2car_path_table` class 0x21 reaches, and for nothing else. The pose
+   * is a made-up point per slot, which is all the assertions need: what is
+   * being checked is *which* curve the actor is on, not the curve.
+   */
+  const CAR_PATH_POSE: Record<number, { x: number; y: number; z: number;
+                                        yaw: number }> = {
+    0x148: { x: -100, y: -8, z: -200, yaw: 0x4000 },
+    0x14e: { x: -300, y: -8, z: -400, yaw: 0x4000 },
+  };
+  const carHost: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, _frame) => CAR_PATH_POSE[slot] ?? null,
+  };
+
   const rescueScene = (rng = new Rng(21)) => {
     ResetGameGlobals();
     SetGameTables(CHARS, undefined, undefined, undefined);
     G.g_active_cam_path = 0x39;
     G.g_cam_path_frame = 0;
-    G.g_damage_rank = 2;
+    // Rank 4 is the first row of `g_class21_hp_by_rank` that gives two, and
+    // two is what the "one shot is not a rescue" pair below needs. The table
+    // is sixteen rows indexed by `g_damage_rank`; rank 2 gives **one**, which
+    // is what this used to assert as two.
+    G.g_damage_rank = 4;
     // `ActorSpawn` runs the class's own Init, exactly as
     // `SpawnFromDescriptor` does; calling it again here would count the actor
     // in twice.
@@ -2804,9 +2825,9 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
     a.pos = vec3(0, 0, 0);
     return { a, events: new Events(), rng };
   };
-  const rFrame = (a: Actor, events: Events, rng: Rng) =>
-    RescueTargetUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
-                            events });
+  const rFrame = (a: Actor, events: Events, rng: Rng,
+                  host: GameHost = carHost) =>
+    RescueTargetUpdate(a, { eye: EYE, dt: 1 / 60, rng, host, events });
 
   {
     const { a, events, rng } = rescueScene();
@@ -2815,20 +2836,73 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
     check("...with hit points from g_class21_hp_by_rank", a.hp === 2,
           String(a.hp));
+    check("...and the table is sixteen rows, not five",
+          CLASS21_HP_BY_RANK.length === 16
+          && CLASS21_HP_BY_RANK[2] === 1 && CLASS21_HP_BY_RANK[15] === 4,
+          `${CLASS21_HP_BY_RANK.length} rows, [2]=${CLASS21_HP_BY_RANK[2]}`);
+    check("...and it starts on row 0 of g_st2car_path_table",
+          a.rescue.route === 0 && g_st2car_path_table[0] === 0x148,
+          `route ${a.rescue.route}`);
 
-    // The ride-in is driven by the camera frame, not by a clock: its position
-    // is rebuilt from `50 - g_cam_path_frame` every frame.
+    // **It is on the car.** `RescueTargetPoseFromRoute` (`FUN_00451E50`) puts
+    // it at `g_st2car_path_table[obj+0x1350]`'s pose, and sub 0 then adds a
+    // drop-in of `(0, 50 - frame, 50 - frame)` rotated by that pose's own yaw.
+    // At yaw 0x4000 -- a quarter turn -- the engine's Ry sends the point's z
+    // into x, so the whole offset is in x and y and none of it in z.
     G.g_cam_path_frame = 0x20;
     rFrame(a, events, rng);
-    check("it rides in on the camera path",
-          Math.abs(a.pos.z - -(50 - 0x20)) < 1e-4, String(a.pos.z));
+    const d = 50 - 0x20;
+    check("it rides the car's own object path, not a place of its own",
+          Math.abs(a.pos.x - (-100 + d)) < 1e-3
+          && Math.abs(a.pos.y - (-8 + d)) < 1e-3
+          && Math.abs(a.pos.z - -200) < 1e-3,
+          `${a.pos.x.toFixed(2)},${a.pos.y.toFixed(2)},${a.pos.z.toFixed(2)}`);
+    check("...taking the path's yaw with it", a.yaw === 0x4000,
+          String(a.yaw));
+
+    // The `INC word ptr [ESI + 0x1312]` is at `0x00451943`, **after** the
+    // transform — so the frame that steps the sub-state still applies the
+    // offset, and by then `50 - frame` has gone negative. Transcribed in that
+    // order, and this is the assertion that holds it there.
     G.g_cam_path_frame = 0x40;
     rFrame(a, events, rng);
+    check("...the frame that steps sub 0 -> 1 still applies the offset",
+          a.rescue.sub === 1 && Math.abs(a.pos.x - (-100 + (50 - 0x40))) < 1e-3,
+          `sub ${a.rescue.sub} x ${a.pos.x.toFixed(2)}`);
+    rFrame(a, events, rng);
+    check("...and from then on it is on the pose, with no offset at all",
+          Math.abs(a.pos.x - -100) < 1e-3
+          && Math.abs(a.pos.y - -8) < 1e-3
+          && Math.abs(a.pos.z - -200) < 1e-3,
+          `${a.pos.x.toFixed(2)},${a.pos.y.toFixed(2)},${a.pos.z.toFixed(2)}`);
+
     G.g_cam_path_frame = 0xc0;
     rFrame(a, events, rng);
     check("...and hands over to the held state past frame 0xBD",
           a.rescue.state === RescueTargetState.Held,
           String(a.rescue.state));
+    check("...stepping to row 1, the car's route for camera path 0x39",
+          a.rescue.route === 1 && g_st2car_path_table[1] === 0x14e,
+          `route ${a.rescue.route}`);
+
+    // The held state poses through `RescueTargetPoseFromRouteWithVelocity`,
+    // so the actor moves onto the second route and records the jump.
+    rFrame(a, events, rng);
+    check("...and the held state rides that second route",
+          Math.abs(a.pos.x - -300) < 1e-3 && Math.abs(a.pos.z - -400) < 1e-3,
+          `${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)}`);
+    check("...writing the frame's pose delta at obj+0x13CC",
+          Math.abs(a.rescue.delta.x - -200) < 1e-3
+          && Math.abs(a.rescue.delta.z - -200) < 1e-3,
+          `${a.rescue.delta.x.toFixed(2)},${a.rescue.delta.z.toFixed(2)}`);
+
+    // A host with no object paths is a valid host, and the actor then stays
+    // where it was rather than being flung to the origin.
+    const before = { ...a.pos };
+    rFrame(a, events, rng, NULL_HOST);
+    check("...and a host with no paths leaves it where it stands",
+          a.pos.x === before.x && a.pos.z === before.z,
+          `${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)}`);
 
     // Two hit points, so the first shot does not free it.
     G.g_player_score = [0, 0];

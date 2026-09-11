@@ -1223,6 +1223,7 @@ having its handler read.
 | `0x30` the zombie | motion **956** (`zom.bin`) | `FUN_00452DA0` stores `0x3BC`, or `0x41E` on a branch not taken here |
 | `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail | `FUN_00431250`; the table is a five-entry playlist, all inside `nya.bin`'s 762–773 |
 | `0x19` the stage-4 boss | motion **124** (`0x7C`), `boss4.bin` | `Boss4Init` (`FUN_004917E0`) stores it as a literal: `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E` |
+| `0x21` the rescue target | motion **998** (`0x3E6`), `zom.bin`, plus the freed clip **972** (`0x3CC`) | `RescueTargetInit` (`FUN_00451720`) stores it as a literal: `MOV dword ptr [EDI + 0x20], 0x3E6` (`c74720e6030000`) at `0x00451747`. See below — the missing row cost half of stage 2 |
 
 **And a character-type rule that was wrong for as long as it existed.** Class
 0x19's row read `("literal", 0x7C)` — the right instruction from the wrong pair.
@@ -1319,6 +1320,59 @@ them was mine and one of them was a fair reading of the data:
   per-vertex skinning against several bones. The part is attached **rigidly**
   here, which matches the game at rest; a deforming waist would show up in
   extreme poses.
+
+### A missing motion rule made half of stage 2 unreachable
+
+Class `0x21` is the **rescue target**, and there is one spawn of it in the whole
+game: stage 2, block 0, step 2, script address `0x07D0`. Block 0's route record
+is `{branch, next = 11, 1}`; `RescueTargetHeldState` (`FUN_00451980`) writes
+`g_script_branch_var = 1` when the last of its sixteen parts is hit, and only
+then does the stage take block 1. The class had been read, named and ported —
+and the actor had never once existed in the player.
+
+The whole of it was the absent `MOTION_RULES` row above. `motionFor` answered
+null, so `resolveForStage` recorded the placement as a *marker* and `continue`d
+before building a character; no skeleton was built, no clip was baked, no `chr_`
+hierarchy reached the glTF, and `render/characters.ts` had nothing to adopt. The
+port's own spawn path is gated on that adoption — `readySpawns` lists only an
+`at` that `pending` holds — so `SpawnScriptedCharacters` never made the object,
+`RescueTargetInit` never ran, and the branch could only ever answer 0. Measured
+from the stage entry under the driven clock: block 0 forks to **block 11** on
+every run, and blocks 1 through 10 and 21 through 32 — the whole rescued branch
+— are unreachable.
+
+It is the third time this exact row has been the bug: class `0x19` (the stage-4
+boss, "never appeared in a bundle"), class `0x14` (the stage-2 boss, "stage 5
+had no character type 71") and now class `0x21`. The failure is silent by
+construction, because "placed as a marker" is what the exporter does for every
+class whose handler has not been read, and a class that *has* been read looks
+exactly the same from the outside.
+
+**And the actor is on the car.** `RescueTargetPoseFromRoute` (`FUN_00451E50`)
+and `RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`) set its position
+*and* its orientation from
+`CamEvalObjectPath6(g_st2car_path_table[obj+0x1350], g_cam_path_frame)` — the
+same table, row and frame the stage-2 car's own poser reads, `op_st2` `0x148`
+under camera `0x38` and `0x14E` under `0x39`. Those two were recorded as "draw
+and pose helpers, the renderer's" and left out, so the ported ride-in built an
+absolute position out of the spawn yaw alone and parked the actor 40 units from
+the world origin, 1,600 from the car. Sub-state 0's `(0, 50 − frame, 50 −
+frame)` is a **drop-in on top of that pose**, not a position: it is rotated by
+the route's own yaw, added to the route point, and reaches zero exactly as the
+camera frame reaches 50.
+
+**Still open: the model sits 11.94 units behind where the engine draws it,**
+along the car's own forward axis. Clip 998's root translation is a constant
+`(0, 15.692, 11.943)` — it is what puts the body over the bonnet — and
+`render/characters/pose.ts` applies only the **y** of a clip root, on the rule
+that the port has already taken the horizontal part as world movement through
+`ApplyRootMotion`. For a clip whose root never changes the per-frame delta is
+zero, so nothing ever takes it and the offset is simply dropped. Correcting it
+is a change to the port's root-motion model for every skinned actor in the game,
+not to this class, and it wants `SkeletonPoseRootFrame` read first: the engine
+both places the root bone at the frame's translation *and* applies the
+frame-to-frame delta to the object, and which of those is relative to which is
+`[open]`.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any

@@ -15454,3 +15454,140 @@ zombie behind them — in `extract/compare/clip1048/setpiece_g.png`.
    thing that would settle it is the other six spawns that use 1047/1048 —
    two trios three abreast at `(-7/-1/6, 3.2, -370)` in stage 1's two route
    branches, and stage 2's pair at `0x2194`/`0x21C4`.
+---
+
+## Session — the zombie on the stage-2 car is class 0x21, and it had no motion rule
+
+**Outcome:** stage 2's first fork is reachable. `docs/BUGS.md`'s "the zombie
+that should ride the front of the stage 2 car never appears" was a missing
+`MOTION_RULES` row, and the whole rescued branch of the stage — blocks 1..10 and
+21..32 — had never been enterable in the player.
+
+### What it was
+
+`RescueTargetInit` (`FUN_00451720`), class **0x21**, the rescue target. One
+spawn in the game: stage 2 block 0 step 2, script address `0x07D0`, character
+type 7 = `char_adv00` — the same zombie skin as the two class-0x25 actors that
+cling to the car's flank. Block 0's route record is `{branch, next = 11, 1}` and
+`RescueTargetHeldState` (`FUN_00451980`) is the only thing in the game that can
+write the 1.
+
+`motionFor` had no rule for the class, because `RescueTargetInit` seats the clip
+as a **literal** rather than reading it out of the descriptor:
+`MOV dword ptr [EDI + 0x20], 0x3E6` (`c74720e6030000`) at `0x00451747`, with
+`EDI = obj+0x194`, so `obj+0x1B4 = 0x3E6` — clip 998 in `zom.bin`. With no rule
+the placement was recorded as a marker and `resolve_for_stage` `continue`d
+before building a character: no skeleton, no baked clip, no `chr_` hierarchy in
+the glTF, nothing for `render/characters.ts` to adopt, and therefore — since
+`readySpawns` only lists an `at` that `pending` holds — no object at all.
+`RescueTargetInit` never ran and `g_script_branch_var` could only ever be 0.
+
+Measured from the stage entry under `?drive=1`: block 0 forks to **11** on every
+run without the fix, and to **1** with it once the rider is shot.
+
+Third time this row has been the bug. Class 0x19 (the stage-4 boss "had never
+appeared in a bundle") and class 0x14 (stage 5 "had no character type 71") were
+the first two, and each was written up as a one-off. It is not a one-off: the
+exporter's marker path is what every unread class gets, so a class that *has*
+been read and ported is indistinguishable from one that has not until somebody
+counts the actors the script asked for against the actors the pool holds.
+
+### And it rides the car, provably
+
+`RescueTargetPoseFromRoute` (`FUN_00451E50`) and
+`RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`) — the pair differs only
+in that the second writes the frame's pose delta to `obj+0x13CC` first — set the
+actor's position **and** its `{pitch, yaw, roll}` from
+
+```c
+CamEvalObjectPath6(g_st2car_path_table[obj+0x1350], g_cam_path_frame, &p)
+```
+
+`g_st2car_path_table` is `0x00565EF4`, eleven `s16` bounded by abutment against
+`g_class21_hp_by_rank` at `0x00565F0C`. Rows 0..2 are `op_st2` `0x148`, `0x14E`,
+`0x14D` — the same three routes `FUN_004521B0` gives the stage-2 **car** on
+camera paths `0x38`/`0x39`/`0x3A` — and rows 3..10 are the eight `op_train`
+paths its traffic instances ride. Same table, same row, same frame: the rescue
+target is *on* the car by construction, and `RescueTargetInit`'s own
+`FUN_00452120(0)` is what spawns the car object in the first place.
+
+Sub-state 0's `(0, 50 − frame, 50 − frame)` is a **drop-in on top of that
+pose**, rotated by the route's own yaw and added to the route point, reaching
+zero as the camera frame reaches 50. The `INC word ptr [ESI + 0x1312]` at
+`0x00451943` is *after* the transform, so the frame that steps the sub-state
+still applies the offset with `50 − frame` gone negative; transcribed in that
+order and asserted.
+
+### What was got wrong, by me and before me
+
+* **Both pose routines were recorded as "draw and pose helpers, the
+  renderer's", and left out.** They are not drawing: they write `obj+0x40`
+  through `obj+0x6C`, which is where the actor *is*. The ported ride-in built an
+  absolute position from the spawn yaw alone — `pos = Ry(yaw)·(0, d, d)` with
+  the y term dropped — and parked the actor 40 units from the world origin,
+  1,600 from the car. So even after the exporter fix the first run put it
+  nowhere near the shot; the screenshot is what said so.
+* **`CLASS21_HP_BY_RANK` was `[1, 1, 2, 2, 2]` "by difficulty".** It is sixteen
+  rows indexed by `g_damage_rank` (`FUN_0040A8A0` is a one-line
+  `return g_damage_rank`): `1 1 1 1 2 2 2 2 2 2 3 3 3 3 4 4`, bounded by
+  `g_st2car_asset_variants` at `0x00565F2C` beginning exactly sixteen `s16`
+  later. L6 with the wrong index source as well as the wrong extent. The port
+  test asserted the old value and had to be corrected with it.
+* **The car's own rig was the first suspect and is innocent.** `FUN_00452320`
+  draws **four** slots, not the two Ghidra shows — the pseudocode stops after
+  the second `AssetDrawSlot` and shows one `MatrixStackPop` against two pushes,
+  which is L4 and L37 together. Disassembling `0x00452320`–`0x0045253F` gives
+  body `0x2D`, a 52-triangle part at `(9.06, 6.37, 8.94)`, and two 56-triangle
+  wheels at `(0, 3.17, ±13.65/−9.48)` hanging off a roll-limited copy of the
+  body frame. All four are in every stage-2 bundle with geometry. Nothing in the
+  rig is a character.
+* **Twenty minutes went on a harness that would not advance.** `?drive=1` with
+  `mode=play` sat on block 0 step 1's `wait_frames 30` for four thousand driven
+  frames with "30 left" unchanged. The game had not started: `playthrough.mjs`
+  presses **Space** after `waitForLoad` and nothing else does. A harness that
+  advances frames and never advances the script looks exactly like a hang.
+* **And the branch then would not resolve.** After the volley the walker sat at
+  block 0 "step 4 / op 0" for ever. The branch bar's countdown is **frozen while
+  the pointer hovers it**, and Playwright leaves the mouse wherever the last
+  click of a volley put it — inside the viewport, under the bar that appears a
+  couple of seconds later. `page.mouse.move(2, 2)` after the volley, and it
+  forks.
+
+### Named this session
+
+`RescueTargetPoseFromRoute` (`0x00451E50`),
+`RescueTargetPoseFromRouteWithVelocity` (`0x00451EB0`),
+`RescueTargetDraw` (`0x00451FF0`), `MatrixGetAngles` (`0x004018E0`);
+`g_st2car_path_table` and `g_class21_hp_by_rank` re-described with their real
+extents.
+
+### Next actions
+
+1. **The clip root translation is dropped, and it is the last 11.94 units.**
+   Clip 998's root is a constant `(0, 15.692, 11.943)` — that forward 11.94 is
+   what puts the body over the bonnet rather than through the roof — and
+   `render/characters/pose.ts` applies only the **y** of a clip root, on the
+   rule that `ApplyRootMotion` has already taken the horizontal part as world
+   movement. For a clip whose root never changes the per-frame delta is zero, so
+   nothing ever takes it. Fixing it is a change to the port's root-motion model
+   for every skinned actor in the game and wants `SkeletonPoseRootFrame` /
+   `FUN_00410C50` read first: the engine both places the root bone at the
+   frame's translation and applies the frame-to-frame delta to the object, and
+   which is relative to which is `[open]`.
+2. **`RescueTargetFreedState` never ends.** The engine hands off at
+   `0x00451DF0` once `obj+0x1F1` rises, with a `0x78`-frame countdown and a
+   ground-ring effect; neither is ported, so a rescued target stays in the pool
+   for the rest of the stage. Harmless today — both enemy counters are already
+   given back — but it is a live actor nothing will remove.
+3. **`tools/hod2lib/charmotion.py` is missing class 0x11's rule and
+   `FROG_CLIPS`,** which `web/src/hod2lib/charmotion.ts` has. Left alone: it is
+   a peer's in-flight work from the frog/owl/fish session, not this one's.
+   `verify_exporters.py` compares the module lists and the version, not the
+   table contents, so nothing catches it.
+4. **Nothing counts the actors a block asks for against the actors it gets.**
+   That single comparison would have found this in a second and would have found
+   classes 0x19 and 0x14 too. Block 0 of stage 2 asks for fifteen spawns and the
+   pool held six: five class-0x33, two class-0x27, one class-0x41 and this one
+   were all absent, and only this one has a module. A check that reports the
+   difference per block, per bundle, with the class of each missing spawn, is
+   the obvious next verifier.

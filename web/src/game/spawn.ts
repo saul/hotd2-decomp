@@ -11,6 +11,8 @@
 import type { Rng } from "../core/rng";
 import { makeActor, type Actor } from "./actor";
 import { G } from "./globals";
+import { ActorClaimHitSlot, HIT_SLOT_CLAIMING_CLASSES }
+  from "./hit_slots";
 import { g_class_handlers } from "./registry";
 import type { SpawnClass } from "./spawn_class";
 
@@ -24,6 +26,12 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
   // before Init runs -- `EnemyZombieInit` starts the actor in `initialState`.
   if (descriptor) Object.assign(obj, descriptor);
   ActorInitFlags(obj, obj.flags);
+  // `ActorBuildSkinnedModel` (`FUN_00410440`) claims the actor's `g_hit_slots`
+  // entry, and 35 class `Init`s call it -- every one that builds a skinned
+  // character. The port has no model build, so the claim runs here, for the
+  // classes whose `Init` is a proved caller and no others. `obj+0x3C` is the
+  // phase of every cel a class-0x30 bone draws; see `class30/bonecels.ts`.
+  if (HIT_SLOT_CLAIMING_CLASSES.has(cls)) ActorClaimHitSlot(obj);
   g_class_handlers[cls]?.init(obj, rng);
   G.g_object_list.push(obj);
   return obj;

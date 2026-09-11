@@ -156,6 +156,15 @@ CHECKS: list[Check] = [
           "the civilians having no hair, because a civilian's own head model "
           "is a shell open at the back and every count was right without it",
           NEEDS_GAME),
+    Check("verify_bone_cels", ".",
+          ["python3", "tools/verify_bone_cels.py", "--game-dir",
+           "{game_dir}"],
+          "that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is "
+          "still the arithmetic in the EXE and is still in the bundle -- no "
+          "table in the image names those models, so this is the only thing "
+          "standing between a hand-written run and `char_adv02` losing its "
+          "midriff again",
+          NEEDS_GAME),
     Check("verify_parts", ".",
           ["python3", "tools/verify_parts.py", "--game-dir", "{game_dir}"],
           "that every vertex-blended part in a bundle is skinned the way the "

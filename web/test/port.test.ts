@@ -109,6 +109,9 @@ import {
   UNCOUNTED_CHAR_TYPE, UNCOUNTED_INITIAL_STATE,
 } from "../src/game/combat/counts";
 import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
+import { g_class30_bone_cels, ZombieBoneCelSlots }
+  from "../src/game/class30/bonecels";
+import { HIT_SLOT_CLAIMED } from "../src/game/hit_slots";
 import { ActorIsEnemy, type ClassFrame, DeadSweep, ENEMY_CLASSES, g_class_handlers, registerClass }
   from "../src/game/registry";
 import { PORTED_CLASSES } from "../src/game/classes";
@@ -12144,6 +12147,91 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
           t().state === OwlState.OrbitAway && G.g_class43_attack_token === -1,
           `${OwlState[t().state]} ${G.g_class43_attack_token}`);
   }
+}
+
+// -- the bone cel runs, and the hit slot that phases them ------------------
+//
+// `ZombieDrawBonePart` (`FUN_004534A0`) is a *draw* hook, so what it draws is
+// the renderer's; what is asserted here is the two halves of it that are game
+// state -- the table's own shape against the measured models, and the
+// `g_hit_slots` claim that gives each actor its phase.
+{
+  // The arm the bug report is about. `0x1B3D` draws *neither* itself nor one
+  // model: a 20-cel chest and a 30-cel lower torso, which is why reading only
+  // the last five of the lower run made five look like a meaningful count.
+  const torso = g_class30_bone_cels[0x1b3d];
+  check("the undamaged char_adv02 torso draws two runs and not itself",
+        !!torso && !torso.self && torso.runs.length === 2,
+        `${torso?.self} ${torso?.runs.length}`);
+  check("...a 20-cel chest at 0x1B3E and a 30-cel lower torso at 0x1B52",
+        torso.runs[0].base === 0x1b3e && torso.runs[0].count === 20
+        && torso.runs[1].base === 0x1b52 && torso.runs[1].count === 30,
+        torso.runs.map((r) => `${r.base.toString(16)}+${r.count}`).join(" "));
+
+  // The check on the whole reading: the two chest-only damage stages take the
+  // lower run and the three that carry their own abdomen are not in the table
+  // at all. `0x1B72`, `0x1B73` and `0x1B74` reach y -2.02 in their own
+  // geometry; `0x1B70` and `0x1B71` stop at y 1.35.
+  for (const slot of [0x1b70, 0x1b71]) {
+    const arm = g_class30_bone_cels[slot];
+    check(`0x${slot.toString(16).toUpperCase()} draws itself and the lower torso`,
+          !!arm && arm.self && arm.runs.length === 1
+          && arm.runs[0].base === 0x1b52,
+          `${arm?.self} ${arm?.runs.length}`);
+  }
+  for (const slot of [0x1b72, 0x1b73, 0x1b74]) {
+    check(`0x${slot.toString(16).toUpperCase()} is not a trigger at all`,
+          g_class30_bone_cels[slot] === undefined,
+          `${g_class30_bone_cels[slot] !== undefined}`);
+  }
+  // Every cel the table can ask for has to be in the bundle, or the draw finds
+  // nothing -- which is the hole this fixes, one level down.
+  const cels = ZombieBoneCelSlots();
+  // 20 + 30 + 5 + 5 + 120 + 18 + 50 + 50: the lower-torso run is named by
+  // three arms and counted once, which is the point of asking for the set.
+  check("the table names 298 distinct cels across its nine arms",
+        cels.length === 298, `${cels.length}`);
+
+  // The phase. `obj+0x3C` is claimed by `ActorBuildSkinnedModel`, which every
+  // skinned `Init` calls, and the port claims it in `ActorSpawn` for the
+  // classes whose `Init` is a proved caller.
+  const rng = new Rng(97);
+  scene(0, rng);
+  const a = ActorSpawn(0x9800, SpawnClass.Zombie, 0, "znA", {}, rng);
+  const b = ActorSpawn(0x9804, SpawnClass.Zombie, 0, "znB", {}, rng);
+  check("two zombies take different hit slots, so different cel phases",
+        a.hitSlot === 0 && b.hitSlot === 1, `${a.hitSlot} ${b.hitSlot}`);
+  check("...and the claim raises obj+0x38 bit 0x40",
+        (a.flags38 & HIT_SLOT_CLAIMED) !== 0,
+        `0x${a.flags38.toString(16)}`);
+  // A class whose `Init` the engine is not proved to build a skinned model in
+  // does not claim, rather than a guess that would shift every index.
+  const mouse = ActorSpawn(0x9808, SpawnClass.Mouse, -1, "mouse", {}, rng);
+  check("a class with no proved model build claims nothing",
+        mouse.hitSlot === -1, `${mouse.hitSlot}`);
+  // `ActorDespawn` hands the slot back, and the next claim takes it.
+  ActorDespawn(a);
+  check("a despawn hands the slot back",
+        a.hitSlot === -1 && G.g_hit_slots[0] === -1,
+        `${a.hitSlot} ${G.g_hit_slots[0]}`);
+  const c = ActorSpawn(0x980c, SpawnClass.Zombie, 0, "znC", {}, rng);
+  check("...and the next zombie takes the freed one, not the next index",
+        c.hitSlot === 0, `${c.hitSlot}`);
+  // Fourteen deep, and the engine does not guard the overflow either: the
+  // fifteenth claimant keeps -1, which `render/characters/cels.ts` reads as a
+  // negative cel index and therefore as no cel.
+  const many: number[] = [];
+  for (let i = 0; i < 14; i += 1) {
+    many.push(ActorSpawn(0x9900 + i * 4, SpawnClass.Zombie, 0, "zn", {},
+                         rng).hitSlot);
+  }
+  // Two are already held, so twelve of the fourteen claims land and the last
+  // two find the table full.
+  check("the table is fourteen deep and the overflow claimants get -1",
+        many.filter((n) => n >= 0).length === 12
+        && many.slice(-2).every((n) => n === -1)
+        && new Set(many.filter((n) => n >= 0)).size === 12,
+        many.join(","));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

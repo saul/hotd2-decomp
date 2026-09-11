@@ -34,19 +34,22 @@
  * only the first primitive of the damaged part takes most of the part with it
  * — which is what "big missing render section" looks like.
  *
- * ## `[open]` The abdomen a shot `char_adv02` has nothing to draw with
+ * ## The abdomen a shot `char_adv02` draws somewhere else
  *
- * A second, separate hole with the same symptom, and this one is **not** in
- * this file. Char type 0's bone 1 escalates to slot `0x1B70` on the first
- * torso hit, and that model is chest-only — `y 1.3..5.5` against the
- * undamaged `y -2.0..5.5` — while the pelvis tops out at `y -0.45`. The type
- * is one of the 21 with a null `EXTRA_PARTS` entry, so it has no abdomen part
- * to keep the band filled the way `char_adv00`'s `0x1F02` does. Every step of
- * the port's draw is the exe's — one slot per bone, one model per slot — so
- * nothing here can fill it without inventing geometry. The evidence, and what
- * has been ruled out, is in `tools/hod2lib/characters.py`'s module docstring.
+ * A second hole with the same symptom, and it was **not** in this file and not
+ * a swap at all. Char type 0's bone 1 escalates to slot `0x1B70` on the first
+ * torso hit and that model is chest-only — `y 1.35..5.53` against the
+ * undamaged `y -2.02..5.53` — while the pelvis tops out at `y -0.45`. What
+ * fills the band is a **second draw** in class 0x30's per-bone draw hook,
+ * `ZombieDrawBonePart` (`FUN_004534A0`): the slot, and then a cel out of a
+ * thirty-model run at `0x1B52`. Every step of the port's draw here is still
+ * the exe's — one slot per bone, one model per slot — and the extra draw is
+ * `render/characters/cels.ts`, because the extra draw is the hook's and not
+ * `AssetDrawSlot`'s. See `game/class30/bonecels.ts` for the reading, and for
+ * what the old `[open]` note here got wrong.
  */
 import { Mesh, type Object3D } from "three";
+import { CEL_HOLDER } from "./cels";
 import type { GoreSwap, Instance } from "./instance";
 
 /** The primitives of a template node, in the order the chain drew them. */
@@ -117,7 +120,13 @@ export function swapGore(parts: ReadonlyMap<number, Object3D>,
   // hang a clone of the whole damaged part off the same node.
   if (!prev) {
     const bones = new Set(inst.bones.values());
-    for (const c of node.children) if (!bones.has(c)) c.visible = false;
+    for (const c of node.children) {
+      // Not the cel holders `render/characters/cels.ts` parks here: those are
+      // a *second draw* the engine's own hook makes, and `char_adv02`'s bone 1
+      // has one before it is ever hit.
+      if (bones.has(c) || c.name === CEL_HOLDER) continue;
+      c.visible = false;
+    }
   }
   const copy = seated(tmpl);
   node.add(copy);

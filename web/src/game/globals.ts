@@ -71,6 +71,20 @@ export enum AppState {
 }
 
 /**
+ * `g_hit_slots` holds fourteen entries, and the extent is the loop bound
+ * rather than a stored count: `ActorClaimHitSlot` (`FUN_00409270`) walks
+ * `&DAT_009c88c0` while the pointer is below `0x009C88F8`, and the span is
+ * `0x38` bytes. `[proved]`
+ *
+ * Here rather than in `game/hit_slots.ts` because that module needs `G` and
+ * this one must not need it back.
+ */
+export const HIT_SLOT_COUNT = 14;
+
+/** No slot: what a claim writes first, and what a full table leaves behind. */
+export const HIT_SLOT_NONE = -1;
+
+/**
  * One rain drop, in the camera's own space.
  *
  * Three floats, which is exactly what the exe's array holds: 12 bytes a
@@ -711,6 +725,37 @@ export const G = {
    */
   g_carrier_object: -1,
 
+  /**
+   * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`.
+   *
+   * `ActorClaimHitSlot` (`FUN_00409270`) hands out the indices and
+   * `ActorDespawn` (`FUN_00409CC0`) gives them back; `game/hit_slots.ts` is
+   * both halves and says what is and is not ported. The reason the port holds
+   * it at all is that `obj+0x3C` is the **phase** of every cel animation
+   * `ZombieDrawBonePart` (`FUN_004534A0`) plays — see
+   * `class30/bonecels.ts`.
+   *
+   * [port-only] The engine stores pointers and zero means free; the port
+   * stores `at` and `-1` means free, because a snapshot carries an index.
+   */
+  g_hit_slots: [] as number[],
+
+  /**
+   * `g_blink_frame_counter` — `0x009A5C50`. Whole game ticks, from the scene
+   * reset.
+   *
+   * One of three free-running counters `FUN_0040E730` steps once a tick.
+   * `LoadSceneAndReset` (`0x00460030`) and `ResetSceneCombatState`
+   * (`0x0045EF1E`) both zero it. It is the cel phase two per-bone draw hooks
+   * index their model runs with — `ZombieDrawBonePart` (`FUN_004534A0`) and
+   * `ThrowerDrawBonePart` — and the parity class 0x31's blink states read.
+   *
+   * Not {@link g_frame}: that one is the port's own clock and is **fractional**
+   * (`G.g_frame += dt * 60`), and a cel index taken from a fraction skips and
+   * repeats. This is an integer stepped by whole ticks, as `obj+0x19C` is.
+   */
+  g_blink_frame_counter: 0,
+
   // -- the ground plane --------------------------------------------------
   /**
    * `g_camera_fixed_eye_y` — 0x009C8E58, also labelled `g_ground_plane_y`.
@@ -1145,6 +1190,13 @@ export function ResetGameGlobals(): void {
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
   G.g_carrier_object = -1;
+  // `ResetSceneOnEnter` (`FUN_0045EE30`) clears the slot table at
+  // `0x0045EE70`; `LoadSceneAndReset` zeroes the counter at `0x00460030` and
+  // `ResetSceneCombatState` again at `0x0045EF1E`. `HIT_SLOT_NONE` rather
+  // than the engine's 0, because the port stores an actor's `at` and 0 is a
+  // real `at`.
+  G.g_hit_slots = new Array<number>(HIT_SLOT_COUNT).fill(HIT_SLOT_NONE);
+  G.g_blink_frame_counter = 0;
   G.g_frame = 0;
 }
 

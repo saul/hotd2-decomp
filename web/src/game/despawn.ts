@@ -13,6 +13,7 @@ import { ReleaseAttackSlot } from "./combat/permits";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "./combat/counts";
+import { ActorReleaseHitSlot } from "./hit_slots";
 import { ActorIsEnemy, DeadSweep, g_class_handlers } from "./registry";
 
 /**
@@ -27,6 +28,9 @@ export function ActorDespawn(obj: Actor): void {
   obj.despawned = true;
   obj.visible = false;
   obj.action = null;
+  // Three lines of the engine's own `ActorDespawn`, at `0x00409CEA`: the
+  // `g_hit_slots` entry goes back before `ActorKill`. See `game/hit_slots.ts`.
+  ActorReleaseHitSlot(obj);
 }
 
 /**

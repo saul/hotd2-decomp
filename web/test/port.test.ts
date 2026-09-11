@@ -10541,20 +10541,23 @@ console.log("\na stashed path is played by a hook that steps first:");
  * and `viewSpaceOfPoint` are one sign flip each.
  */
 /**
- * **`ActorPlayHitVoice` kind 3 is the attack cry**, and nothing raised it.
+ * **All five of `ActorPlayHitVoice`'s kinds**, from the one copy of it.
  *
- * `FUN_0040A6F0` has five kinds. The port had three of them, in
- * `render/shooting.ts`, because the shot path needed them -- so a zombie made
- * a noise when you shot it and none at all when it swung at you, which is how
- * it was reported. Kind 3 is also the only kind whose table entry is a *pair
- * per voice set* rather than one id per set, and the exporter had been reading
- * all fifteen dwords of `g_hit_voice_table` and emitting eleven.
+ * `FUN_0040A6F0` has five kinds and the port used to have it twice: kinds 0, 1
+ * and 2 in `render/shooting.ts` because the shot path needed them, kind 3
+ * nowhere at all -- so a zombie made a noise when you shot it and none when it
+ * swung at you, which is how it was reported. Kind 3 is also the only kind
+ * whose table entry is a *pair per voice set* rather than one id per set, and
+ * the exporter had been reading all fifteen dwords of `g_hit_voice_table` and
+ * emitting eleven.
  *
- * The two ends are checked here: that the set split is the engine's, and that
- * a pick comes out of the right pair. `ZombieStateStrike` raising it is
- * checked by the sound reaching the event bus during a real strike.
+ * There is one copy now, in `game/combat/voice.ts`, so every kind is reachable
+ * from here: the set split, the pair, the impact-plus-voice shape of 0, 1 and
+ * 2, and kind 4's proved silence. Which kind a *shot* passes is the next
+ * section; `ZombieStateStrike` raising kind 3 is checked by the sound reaching
+ * the event bus during a real strike.
  */
-console.log("\nthe attack cry:");
+console.log("\nthe five voice kinds:");
 {
   const heard: number[] = [];
   const rng = new Rng(7);
@@ -10597,6 +10600,31 @@ console.log("\nthe attack cry:");
         heard.length === 2 && heard[0] === 1 && heard[1] === 11,
         JSON.stringify(heard));
 
+  // Kinds 1 and 2 are the other two halves of the shot voice, and they differ
+  // in their *impact* rather than in their line: kind 1 draws one of five body
+  // impacts, kind 2 coin-flips two head ones. In the shipped table their two
+  // voice ids are the same pair, which is why the correction this port made to
+  // which kind plays is nearly inaudible -- the fixture gives them distinct
+  // ids so that the wiring is still assertable.
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 1 }, ActorVoice.Killed, rng, say);
+  check("a kill voice is a body impact and set B's kill line",
+        heard.length === 2 && heard[0] === 1 && heard[1] === 21,
+        JSON.stringify(heard));
+
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 2 }, ActorVoice.HeadKilled, rng, say);
+  check("a head voice takes the *head* impact table, and set A's line",
+        heard.length === 2 && heard[0] === 2 && heard[1] === 30,
+        JSON.stringify(heard));
+
+  // `[proved]` in `functions.tsv`: no site in the image passes 4 and both of
+  // its ids are zero, so the engine's own arm reaches `PlaySoundId(0)`.
+  heard.length = 0;
+  ActorPlayHitVoice({ charType: 2 }, ActorVoice.Kind4, rng, say);
+  check("kind 4 is silence, because the engine's ids for it are zero",
+        heard.length === 0, JSON.stringify(heard));
+
   // A bundle written before the four ids were read carries no `attack`, and
   // then the swing has to stay silent rather than throw.
   heard.length = 0;
@@ -10621,6 +10649,18 @@ console.log("\nthe shot effects:");
       impact_sprite: { "3": [0x0e25, 0x0e33, 1.0] },
       impact_sprite_default: [0x0904, 0x0904, 0.1],
       ricochet: {},
+      // The shot voice is raised from `ActorShotFeedback` now, so this fixture
+      // needs the table it reads. One id per row, so which row fired is the
+      // number that comes out.
+      impact: [{ id: 1, file: "" }],
+      head_impact: [{ id: 2, file: "" }],
+      voice: {
+        hurt: [{ id: 10, file: "" }, { id: 11, file: "" }],
+        kill: [{ id: 20, file: "" }, { id: 21, file: "" }],
+        head: [{ id: 30, file: "" }, { id: 31, file: "" }],
+        attack: [[{ id: 40, file: "" }], [{ id: 50, file: "" }]],
+      },
+      voice_set_a_types: [0],
     },
   } as unknown as CharactersJson);
   const z0 = G.g_object_list[0]!;
@@ -10693,7 +10733,7 @@ console.log("\nthe shot effects:");
   G.g_blood_sprays = [];
   G.g_sprite_effects = [];
   G.g_hit_result = HitResultCode.Plain;
-  ActorShotFeedback(z0, 4, vec3(1, 2, 3), host, events);
+  ActorShotFeedback(z0, 4, vec3(1, 2, 3), host, rng, events);
   const spray = G.g_blood_sprays[0]!;
   check("a plain hit bleeds", G.g_blood_sprays.length === 1);
   check("...and the spray holds an actor and a bone, not a position",
@@ -10710,14 +10750,104 @@ console.log("\nthe shot effects:");
   check("...starting at the first of them", BLOOD_FIRST_SLOT === 0x3a);
 
   G.g_hit_result = HitResultCode.Damaged;
-  ActorShotFeedback(z0, 4, vec3(), host, events);
+  ActorShotFeedback(z0, 4, vec3(), host, rng, events);
   check("a hit that swapped the part bleeds harder, not less",
         G.g_blood_sprays[0]!.severity === 0.75);
   G.g_blood_sprays = [];
 
+  // -- the voice kind is the hit-result code, and nothing else --------------
+  //
+  // `[proved]` from two routines that agree, which is what makes this a rule
+  // and not one function's habit. `ZombieOnShot` (`FUN_00453EB0`):
+  //
+  //   00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+  //   00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
+  //   00453f77  PUSH 0x1           ; dead and anything else -> kind 1
+  //   00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+  //
+  // and `ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the
+  // same two constants at 0x00449A76, 0x00449A7B and 0x00449A88. **Neither
+  // tests the bone and neither tests whether the actor died of this shot** --
+  // which is what `render/shooting.ts`'s copy keyed on, so these five checks
+  // are the behaviour change the move carried. Every one of them fails on the
+  // old `killed ? (head ? "head" : "kill") : "hurt"` mapping.
+  const voiced: number[] = [];
+  const ear = new Events();
+  ear.on("sound.play", (d) => voiced.push(d.id));
+  // Named explicitly rather than by a range: the ricochet this routine also
+  // emits is `0x1116A9`, and a `>= 10` filter swallowed it and turned the
+  // result-5 check green on a sound that is not a voice at all.
+  const VOICE_IDS = [10, 11, 20, 21, 30, 31, 40, 50];
+  const impactOf = (xs: number[]) => xs.filter((id) => id === 1 || id === 2);
+  const lineOf = (xs: number[]) => xs.filter((id) => VOICE_IDS.includes(id));
+  z0.charType = 0;                      // set A, per `voice_set_a_types`
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+
+  // Alive: kind 0, whatever the bone was. Bone 2 is the head.
+  voiced.length = 0;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a live actor shot in the head still says hurt",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 10,
+        JSON.stringify(voiced));
+  check("...with a body impact, not a head one",
+        impactOf(voiced).length === 1 && impactOf(voiced)[0] === 1,
+        JSON.stringify(voiced));
+
+  // Dead and result 2: kind 2 -- and it is the *result*, not the bone.
+  voiced.length = 0;
+  z0.flags |= ActorFlag.Dead;
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 4, vec3(), host, rng, ear);
+  check("result 2 on a dead actor is kind 2, off a shot to the leg",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 30,
+        JSON.stringify(voiced));
+  check("...and kind 2's tell is the head impact table",
+        impactOf(voiced).length === 1 && impactOf(voiced)[0] === 2,
+        JSON.stringify(voiced));
+
+  // Dead and anything else: kind 1 -- including a shot to the head.
+  voiced.length = 0;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a head shot that kills is kind 1, because the result is 1",
+        lineOf(voiced).length === 1 && lineOf(voiced)[0] === 20
+        && impactOf(voiced)[0] === 1, JSON.stringify(voiced));
+
+  // The two gates that silence it: `obj+0x34` bit 0x100 jumps the whole
+  // routine (0x00453ec7), and the live arm refuses result 5 (0x00454025).
+  voiced.length = 0;
+  z0.flags &= ~ActorFlag.Dead;
+  G.g_hit_result = HitResultCode.NoEffect;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a result-5 hit on a live actor has no voice, only the ricochet",
+        lineOf(voiced).length === 0, JSON.stringify(voiced));
+
+  voiced.length = 0;
+  z0.flags |= ActorFlag.Dead | ActorFlag.ShotImmune;
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a shot-immune body is silent even on the dead arm",
+        lineOf(voiced).length === 0, JSON.stringify(voiced));
+
+  // The bursting head shouts, which it did not while the voice tables were in
+  // `render/`: `00454133 PUSH 0x3` / `00454136 CALL 0x0040a6f0`, inside
+  // `ActorShotFeedback` itself rather than in its caller.
+  voiced.length = 0;
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+  z0.boneSlot["2"] = 0x1dc2;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("the head that bursts cries out, out of set A's attack pair",
+        voiced.includes(40), JSON.stringify(voiced));
+  delete z0.boneSlot["2"];
+  z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+  G.g_blood_sprays = [];
+  G.g_sprite_effects = [];
+
   // -- result 5 is a ricochet, and it is not blood --------------------------
   G.g_hit_result = HitResultCode.NoEffect;
-  ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, events);
+  ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, rng, events);
   check("a result-5 hit draws no blood at all",
         G.g_blood_sprays.length === 0);
   const ric = G.g_sprite_effects[0]!;

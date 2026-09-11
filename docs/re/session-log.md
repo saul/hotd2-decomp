@@ -16278,3 +16278,116 @@ named these because the state was unported.
   A seek lands the transport **paused**; a driven frame of a paused transport
   advances the counter and nothing else. `tools/shot.mjs --press Space` says so
   and had been in front of me the whole time.
+
+
+## The hit voice, consolidated into one copy in the engine
+
+`ActorPlayHitVoice` (`FUN_0040A6F0`) had two implementations in the port —
+kinds 0, 1 and 2 in `render/shooting.ts` off `shot.resolved`, kind 3 in
+`game/combat/voice.ts` — and the renderer's carried a `[diverges]` saying that
+clearing it was four decisions rather than a move. This session made all four
+and found a fifth cost on the way. Declared divergences 167 → 166 in
+`verify_port`, 157 → 156 in `STATUS.md`; open markers 158 → 157.
+
+### What was read, and confirmed rather than taken from the annotations
+
+The result-code rule was already written into `functions.tsv` by the previous
+session, so the first thing was to disassemble both addresses again rather than
+trust a row — `disassemble_bytes` at `0x00453F40`–`0x00453F90` and
+`0x00454015`–`0x00454050` for `ZombieOnShot`, and `0x00449A60`–`0x00449A98` for
+`ThrowerOnShot`. They agree, and the shape is small enough to quote whole:
+
+```
+00453f46  f7463400000004   TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+00453f4d  0f84c7000000     JZ   0x0045401a                          ; ...alive
+00453f6e  83f802           CMP  EAX, 0x2      ; g_hit_result, read back
+00453f73  6a02             PUSH 0x2           ; dead, result 2 -> kind 2
+00453f77  6a01             PUSH 0x1           ; dead, otherwise -> kind 1
+00454025  83f805           CMP  EAX, 0x5
+0045402a  6a00             PUSH 0x0           ; alive, result != 5 -> kind 0
+```
+
+**No test of the bone, and no test of whether the actor died of this shot.**
+`docs/formats/combat.md` had said `ActorPlayHitVoice(obj, bone == 2 ? 2 : 1)`
+since the routine was first read, in two places, and the player's shot path was
+written from that line. Both are corrected, with the disassembly on the spot.
+
+`ActorShotFeedback` (`FUN_00454050`) turned out **not** to be one of the three
+kinds' call sites, which the task had assumed and which the previous session's
+own `[diverges]` had also assumed. Its site at `0x00454136` is `PUSH 0x3` — the
+attack cry — gated on `g_shot_bone == 2` and bone 2's draw slot being `0x1DC2`,
+immediately before the `0x1DC1` stump swap. So the bursting head **shouts**,
+and porting the move closed an open question in `combat/feedback.ts` that had
+said it was silent. Its annotation row now carries that, which it did not.
+
+### What a player hears differently
+
+Almost nothing, and for a reason worth writing down rather than asserting:
+kinds 1 and 2 carry the **same voice pair** in `g_hit_voice_table` —
+`ZOMBIE_019` for set A, `ZOMBIE_018` for set B — so the only audible difference
+between them is the impact, five body ids against two head ones. A killing head
+shot now plays a body impact (its result is usually 1, not 2) and a killing body
+shot with result 2 now plays the head pair. That is the whole of it, plus a
+corpse now saying the kill line rather than the hurt line, because the test is
+the `Dead` flag and not this shot's kill.
+
+That equality was exactly the kind of claim `L26` is about — a sentence in a
+doc comment standing in for a check — so it is `verify_combat.py` check 15 now,
+against the EXE, and four mutations of the parser fail it.
+
+### The drift it uncovered
+
+Writing that check failed on its own third clause, and the reason was a real
+gap: `web/src/hod2lib/combat.ts` had been given kind 3's two pairs when the
+silent swing was reported, and `tools/hod2lib/combat.py` had not. The Python
+half read all fifteen dwords of the table and emitted eleven for as long as the
+TS half had. `tools/verify_exporters.py` cannot see that class of gap — it
+compares the two halves' modules and their `tool_version`, not the fields they
+emit — and nothing else was looking. Both halves carry the pairs now.
+
+### Where the voice went, and the divergence it rides
+
+Not per-class. The faithful home for kinds 0–2 is `class30/on_shot.ts` and
+`class31/on_shot.ts`, because those are the two routines the engine plays them
+from — but the port has one merged `ActorShotFeedback` call site for every
+shootable class, under a divergence declared long before this session, and
+splitting the voice per-class would have *narrowed* it: only classes 0x30 and
+0x31 have an on-shot routine, so seventeen other ported classes would have gone
+silent. That is a behaviour change nobody asked for, so the voice rides the
+existing merge and that bullet was extended to say so. No new `[diverges]`.
+
+The kind selection is a module-private `PlayShotVoice` rather than an export,
+deliberately: it is the *tail* of two exe routines and not a routine of its
+own, and `verify_port`'s uncited-exports baseline is right to refuse an export
+that claims to port a function no address holds. The doc comment says the name
+is the port's and that no exe function bears it, which is `L38` applied before
+anyone has to rediscover it.
+
+### Wrong turns
+
+* **The task's description of the tree was one merge behind, and I read the
+  tree before merging.** `web/src/game/combat/voice.ts` did not exist at my
+  worktree's HEAD and I went looking for a second copy that was not there,
+  then for a `BUGS.md` entry beginning "Zombies were silent when they attacked"
+  that also did not exist. Both had landed on `main` in the fourteen commits my
+  branch was behind. `L21` says re-diff the source against `HEAD` before
+  calling a transcription finished; the corollary is to **merge before reading
+  it**, because a file that is absent looks identical to a file that was never
+  written.
+* **Two of my own `[open]` markers were prose.** The narrative in
+  `combat/feedback.ts` saying the burst "had been an `[open]`" put the literal
+  token back twice, and `STATUS.md` went 158 → 159 while I was closing one.
+  The counter counts the token, which is `L16` from the other side: a marker
+  that means "unanswered" cannot also be a word you use to say something is
+  answered. Both reworded.
+* **A range filter in a new assertion swallowed the thing it was testing.**
+  `lineOf = xs.filter(id => id >= 10)` was meant to pick the fixture's voice
+  ids out of what reached the bus, and `ActorShotFeedback` also emits the
+  ricochet at `0x1116A9`. The result-5 check passed on a sound that is not a
+  voice at all until the filter was written as an explicit list. It only showed
+  because the *other* four checks in that group failed first.
+* **`disassemble_bytes` mutates.** The Ghidra MCP server dropped mid-session on
+  a `disassemble_bytes` call — "the write may have been applied" — and never
+  came back, so `ThrowerShotFeedback`'s second call site at `0x00449C19` is
+  read out of the annotations rather than out of the image. It is `[open]` from
+  this session's own evidence, and it is the one thing here that is.

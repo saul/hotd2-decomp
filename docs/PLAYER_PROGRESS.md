@@ -1670,6 +1670,87 @@ had been igniting for 0.4 seconds and never sustaining, and its `_OFF` cue was
 a 404 for a file the game does not ship. The loop branch is transcribed now,
 and the bundle carries `sound.looping`, the 44 pairs out of the EXE.
 
+### The hit voice exists once, and the kind is the hit-result code
+
+`ActorPlayHitVoice` (`FUN_0040A6F0`) was implemented **twice**: kinds 0, 1 and
+2 in `render/shooting.ts`, because the shot path needed them before there was
+anywhere else to put them, and kind 3 in `game/combat/voice.ts`. Both copies
+carried a comment saying so, and the renderer's carried the standing
+`[diverges]` that said consolidating it was four decisions rather than a move.
+All four are made.
+
+**The layer.** `verify_layers.py`'s `render-drives-the-port` refuses `render/`
+to call an engine function, and it is right: the engine plays the three shot
+kinds from `ZombieOnShot` (`FUN_00453EB0`) and `ThrowerOnShot`
+(`FUN_004499A0`), which are `game/` code. They are raised from
+`game/combat/feedback.ts` now — beside the blood, and in the engine's order,
+which is the blood first. The renderer has no `playSound` and no sound of its
+own left at all; `app/stage_load.ts` lost the wiring with it.
+
+**The determinism.** The pick was a generator private to `render/`, reseeded
+per stage, on the argument that which grunt plays is feedback rather than
+state. It is the world's seeded `rand()` now, like every other draw in the
+port, and therefore in the snapshot — which is what a save has to be able to
+reproduce (`L10`).
+
+`[proved]` **And the kind is the hit-result code and nothing else.** Two
+routines agree, which is what makes it a rule and not one function's habit:
+
+```
+00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
+00453f77  PUSH 0x1           ;                  dead otherwise -> kind 1
+00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+```
+
+and `ThrowerOnShot` is the same two instructions with the same two constants at
+`0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither tests the bone and
+neither tests whether the actor died of *this* shot**, which is exactly what
+the render-side copy keyed on — `killed ? (head ? "head" : "kill") : "hurt"`.
+`docs/formats/combat.md` had said `bone == 2 ? 2 : 1` since the routine was
+first read, and the port was written from that line.
+
+**What a player actually hears change is the impact, and almost nothing else.**
+Kind 2's two voice ids in `g_hit_voice_table` are the *same pair* as kind 1's —
+`ZOMBIE_019` for set A, `ZOMBIE_018` for set B — so the difference between
+those two kinds is two head impacts (`BLOOD01`, `BLOOD05`) against the five
+body ones (`BLOOD02/03/04/06`, `BONE01`). So:
+
+* a **killing head shot** now plays a body impact, because its result is
+  usually 1 (the head model swapped) and not 2;
+* a **killing body shot whose result is 2** — plain damage, no swap — now plays
+  the head impact pair;
+* the **voice line is identical** in both of those, which is why this is a
+  correction worth making and not one worth being nervous about;
+* a shot that finds an actor **already dead** says the kill line rather than
+  the hurt line, because the test is the `Dead` flag and not this shot's kill.
+  `[likely]` audible: nothing in the port's candidate pick excludes a corpse,
+  but whether the engine's death states raise `ShotImmune` — which would
+  silence it there — is `[open]`.
+
+That equality is a claim small enough to be tempting to leave in a doc comment,
+which is how `L26` happens, so it is a check: `verify_combat.py`'s check 15
+reads `g_hit_voice_table` out of the EXE and asserts that kinds 1 and 2 share
+one pair, that the two impact tables are five and two ids with nothing in
+common, and that kind 3's entry is a *pair per set* where the others are one id
+per set. Four mutations of the parser fail it. The five kinds and the whole
+result-code mapping are asserted in `web/test/port.test.ts`; restoring the old
+`killed`/`head` rule fails three of them.
+
+**And the bursting head shouts.** `ActorShotFeedback` holds one of the routine's
+twenty-three call sites and it is **kind 3**, not a shot kind: `0x00454133 PUSH
+0x3` on the one head model (`0x1DC2`) that comes off on a damaging hit, before
+the `0x1DC1` stump is swapped in. That had been an open question in
+`combat/feedback.ts` saying the burst was silent because the voice tables lived
+in `render/`. It is the same cry a strike plays.
+
+One drift was found on the way. `web/src/hod2lib/combat.ts` had been given the
+attack pair when the silent swing was reported; `tools/hod2lib/combat.py` had
+not, so the Python half read all fifteen dwords of the table and emitted eleven
+of them for longer than the rule allows. `tools/verify_exporters.py` cannot see
+that class of gap — it compares the two halves' **modules and version**, not
+the fields they emit — and the new check 15 is what caught it.
+
 `[proved]` **Kind 4 of the voice routine is dead.** No call site in the image
 passes 4 — all twenty-three pass 0, 1, 2 or 3, and the census is in
 `combat/voice.ts` — and its two ids at `g_actor_voice_kind4` (`0x005A4EA8`) are

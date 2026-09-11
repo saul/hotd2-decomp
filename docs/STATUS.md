@@ -19,17 +19,17 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 42119 | 159 | engine |
-| `hod2lib/` | 15921 | 34 | engine |
-| `render/` | 8475 | 30 | render |
-| `app/` | 7405 | 29 | app |
+| `game/` | 42244 | 159 | engine |
+| `hod2lib/` | 15926 | 34 | engine |
+| `render/` | 8397 | 30 | render |
+| `app/` | 7404 | 29 | app |
 | `script/` | 4144 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
-| `bundle/` | 2142 | 11 | engine |
+| `bundle/` | 2146 | 11 | engine |
 | `core/` | 904 | 9 | engine |
 | `audio/` | 363 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **84916** | **325** | |
+| **total** | **84971** | **325** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -47,8 +47,8 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 154 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 317 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
-| Declared `[diverges]` | **157** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **158** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **156** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **157** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 

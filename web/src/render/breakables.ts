@@ -384,10 +384,21 @@ export class BreakableLayer implements System<RenderContext> {
         // engine makes them, so this loop is the routine's draw block.
         //
         // For the generic family that comes per type from
-        // `GENERIC_POSE_ORDER` -- eighteen of them compose `Rz.Ry.Rx` and only
-        // `PropDrawOnlyType51` composes `Ry.Rz.Rx`, which is the one this
-        // renderer used for all fifty until `tools/verify_prop_pose.py` was
-        // written. For every other family it is the family's single order:
+        // `GENERIC_POSE_ORDER` -- twenty-two of them compose `Rz.Ry.Rx` and
+        // `PropDrawOnlyType51` is the only descriptor-slot type that composes
+        // `Ry.Rz.Rx`, which is the one this renderer used for all fifty until
+        // `tools/verify_prop_pose.py` was written.
+        //
+        // **The order only matters when yaw and roll are both non-zero.** `Rx`
+        // is last in every one of these compositions, so all an order can
+        // disagree about is whether `Ry` or `Rz` comes first, and with either
+        // of those angles at zero the two are the same matrix. Anyone counting
+        // how many props this moved should count that way: counting spawns
+        // with two or more non-zero angles gives fifteen and the answer is
+        // twenty, of which four move by more than a degree -- the rest carry a
+        // "roll" that is really a slot-strip length. The check prints both.
+        //
+        // For every other family it is the family's single order:
         // `FallingContainerUpdate` and `ScriptFlagEffectUpdate` -- whose
         // nodes are posed by `EffectPoseNode` (`FUN_0040D9D0`) -- draw
         // `Rz.Ry.Rx`, which is also the order `BreakablePropGroundContact`'s

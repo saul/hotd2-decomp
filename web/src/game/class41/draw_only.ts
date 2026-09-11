@@ -74,15 +74,15 @@ export const TYPE54_DRIFT_FRAMES = 300;
  * The despawn ahead of the draw is a camera cue, not a lifetime;
  * `PropExpireByStepLifetime` runs before it, in `GenericPropUpdate`.
  *
- * **One frame of phase**, and it is the port's shape rather than a reading:
- * the engine draws with `obj+0x2A0` and steps it *after* the draw, where the
- * port's pool update runs before the renderer reads the field. So the engine
- * shows `0, 1, … n` from its first frame and the port shows `1, … n, 0` — the
- * same loop, one frame along. Compensating for it in `render/breakables.ts`
+ * [diverges] **The cursor leads the engine's by one frame.** The engine draws
+ * with `obj+0x2A0` and steps it *after* the draw; the port's pool update runs
+ * before the renderer reads the field. So the engine shows `0, 1, … n` from
+ * its first frame and the port shows `1, … n, 0` — the same loop, one frame
+ * along. Not compensated for on purpose: doing it in `render/breakables.ts`
  * would put arithmetic in the draw that the engine's draw does not have, and
- * the one-frame lead is the same approximation every routine in this family
- * that mutates after drawing already gets. `PropDrawOnlyType54`, which
- * mutates *before* it draws, has no lead at all.
+ * the lead is the same approximation every routine in this family that mutates
+ * after drawing already gets. `PropDrawOnlyType54`, which mutates *before* it
+ * draws, has no lead at all.
  *
  * `[open]` In **scene 2 block 11 only** the routine draws two more copies of
  * `AssetDrawSlot(g_scene_tick_counter % 7 + 0x1797)`, one 55.0 lower and one

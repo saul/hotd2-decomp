@@ -16504,3 +16504,53 @@ The pose check also counts the renderer's own rotate sites, one per angle. The
 code this was written for had two of each, and chose between them on the prop's
 *family* — which is how all fifty generic types got type 51's order without
 anything being able to disagree.
+
+### Closing the descriptor-slot set: read the switch as a table
+
+The follow-up from the same session. Five types took `obj+0x28C` into a draw
+and were in neither table, and the check could only list them because four of
+the seventeen writes to that field in `PlaceGenericProp` had not been mapped to
+a type. Mapping them is one jump table:
+
+```
+00461da8  ADD EAX,-6
+00461db6  MOV DL, byte ptr [EAX + 0x462978]
+00461dbc  JMP dword ptr [EDX*4 + 0x4628d4]
+```
+
+72 index entries, 41 arms, and every write accounted for. With that, the rule
+became assertable and the check asserts. Three things I had wrong on the way:
+
+**A `MOV word ptr [ESI+0x28C], r16` is not automatically the descriptor's.**
+I assumed the register forms were re-writes of the prologue's value out of the
+placer's `+0x11C`, and for five arms they are. Type 43's is not: it *computes*
+the value — `SBB EDX,EDX / AND EDX,0xFFFFE617 / ADD EDX,0x19E8`, so `0x19E8` or
+`0xFFFF`. A detector looking only for an immediate called type 43 a
+descriptor-slot type. The fix is to check where the register came from, which
+is one short backward scan for `MOV r16, word ptr [EBP+0x11C]`.
+
+**A threshold derived from the set being checked is not a check.** The fourth
+clause is the shipped data: a `+0x11C` below the slot/lifetime gap is a
+lifetime. I wrote the gap's ceiling first as "the maximum among types not in
+the port's table" and then as "the maximum among types not in the code-derived
+set", and both are circular in the same way — remove a type from the table and
+its slot becomes the ceiling, so the check reports the gap closing rather than
+the missing prop. Its own mutation test caught both. The gap is a constant with
+the measurement beside it, and what is asserted is that the band is still
+empty: 54 words at or below 7, 43 at or above 0x2B, nothing between.
+
+**And the striking lead was not what it looked like.** Type 43's seven spawns
+are all in stage 3 — the stage a previous report measured as carrying no
+scenery at all — which read as seven undrawn props in exactly the place the
+measurement said there were none. They are not scenery with a missing model.
+`PropUpdateType43` (`FUN_0046CEA0`) is a **third object built from
+`g_prop_kind_params`**, with the kind in the descriptor's third orientation
+word, the hit radius and effect from the kind's row, a sound on the first hit,
+and the `0x19E8` -> `0x19E6` swap the ordinary breakable makes. The stage-3
+measurement stands; what is missing there is a breakable the port places as an
+inert generic, which is a module and not a table row.
+
+Type 72 is the one genuine `[open]` left, and it is the honest shape: every
+code clause says the descriptor names its model and the data says the
+descriptor names a 1.
+

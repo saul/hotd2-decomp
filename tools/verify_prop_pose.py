@@ -274,6 +274,156 @@ def draws_a_strip(tables, va: int, limit: int = 0x800) -> bool:
 
 #: `obj+0x28C`, the asset slot `PlaceGenericProp`'s prologue fills in.
 SLOT_FIELD = 0x28C
+#: `obj+0x11C`, the word the prologue copies into it -- and the lifetime.
+LIFETIME_FIELD = 0x11C
+#: `desc+0x24` widened into `obj+0x1F4`: the OTHER lifetime, for the arms that
+#: take it, which is what frees `obj+0x11C` to be a slot and nothing else.
+F1F4_FIELD = 0x1F4
+#: `PropExpireByStepLifetime` (`FUN_00466640`), the shared prologue.
+EXPIRE_BY_STEP = 0x00466640
+
+#: The empty band between a `+0x11C` that is a **lifetime in event steps** and
+#: one that is an **asset slot**, and the fourth clause of the descriptor-slot
+#: rule rests on it. `[measured]` over the class-0x41 spawns of all twelve
+#: scenes: the words shipped are 0, 1, 2, 3, 4, 5, 7 and then 0x2B upwards to
+#: 0x18BF, with **nothing at all** in between. `generic.ts` has said this since
+#: it was written, for stage 2 and by eye; the check asserts it every run,
+#: because the moment something lands in the band the rule is unsound and the
+#: sets have to be settled another way.
+SLOT_LIFETIME_GAP = (0x07, 0x2B)
+
+#: `PlaceGenericProp`'s switch, read out of the image rather than assumed.
+#:
+#: ```
+#: 00461da2  MOV EAX,[EBP+0x130c]              ; the descriptor's type
+#: 00461da8  ADD EAX,-6                        ; index = type - 6
+#: 00461dab  CMP EAX,0x47 / JA default
+#: 00461db6  MOV DL, byte ptr [EAX + 0x462978] ; the byte index table
+#: 00461dbc  JMP dword ptr [EDX*4 + 0x4628d4]  ; the arm table
+#: ```
+#:
+#: So types 6..77 have an arm and types 5 and 78 fall to the default, which is
+#: why type 5 has no switch arm at all and its `obj+0x28C` is the prologue's.
+SWITCH_INDEX_TABLE = 0x00462978
+SWITCH_ARM_TABLE = 0x004628D4
+SWITCH_FIRST_TYPE = 6
+SWITCH_TYPE_COUNT = 0x48
+
+
+def switch_arms(tables) -> dict[int, int]:
+    """type -> the address of its arm of `PlaceGenericProp`'s switch."""
+    bt = tables._v2r(SWITCH_INDEX_TABLE)
+    jt = tables._v2r(SWITCH_ARM_TABLE)
+    idx = [tables.data[bt + i] for i in range(SWITCH_TYPE_COUNT)]
+    arms = [struct.unpack_from("<I", tables.data, jt + 4 * k)[0]
+            for k in range(max(idx) + 1)]
+    return {SWITCH_FIRST_TYPE + i: arms[idx[i]]
+            for i in range(SWITCH_TYPE_COUNT)}
+
+
+def arm_facts(tables, va: int | None, limit: int = 0x180) -> tuple[bool, bool]:
+    """`(takes obj+0x28C away from the descriptor, replaces obj+0x11C with +0x1F4)`.
+
+    Two forms of write, and only one of them is an overwrite:
+
+    * `MOV word ptr [ESI+0x28C], imm16` always is — nine writes across seven
+      arms, which is what rules out types 13, 34 and 67.
+    * `MOV word ptr [ESI+0x28C], r16` is an overwrite **unless** that register
+      was loaded from `[EBP+0x11C]`, the placer's own copy: those arms are
+      re-writing the value the prologue already put there. Type **43**'s is the
+      one that is not. Its arm computes the value:
+
+      ```
+      00462330  SBB EDX,EDX          ; 0 or -1 from the compare above
+      00462332  AND EDX,0xffffe617   ; -0x19E9
+      00462338  ADD EDX,0x19E8
+      0046233e  MOV word ptr [ESI+0x28C],DX
+      ```
+
+      so the field ends up `0x19E8` — the ordinary breakable model — or
+      `0xFFFF`, the engine's draw-nothing. A detector that only looked for an
+      immediate called that the descriptor's slot, which it is not.
+    """
+    if va is None:
+        return (False, False)
+    d = tables.data
+    off = tables._v2r(va)
+    if off is None:
+        return (False, False)
+    lit = life = False
+    i = 0
+    while i < limit and off + i + 9 <= len(d):
+        o = off + i
+        if (d[o] == 0x66 and d[o + 1] == 0xC7 and (d[o + 2] & 0xC0) == 0x80
+                and struct.unpack_from("<I", d, o + 3)[0] == SLOT_FIELD):
+            lit = True
+            i += 9
+            continue
+        if (d[o] == 0x66 and d[o + 1] == 0x89 and (d[o + 2] & 0xC0) == 0x80
+                and struct.unpack_from("<I", d, o + 3)[0] == SLOT_FIELD):
+            reg = (d[o + 2] >> 3) & 7
+            if not _loaded_from_placer_slot(d, off, i, reg):
+                lit = True
+            i += 7
+            continue
+        if (d[o] == 0x66 and d[o + 1] == 0x8B and (d[o + 2] & 0xC0) == 0x80
+                and struct.unpack_from("<I", d, o + 3)[0] == F1F4_FIELD):
+            life = True
+            i += 7
+            continue
+        if d[o] == 0xC3:
+            break
+        if d[o] == 0xE9:
+            tgt = va + i + 5 + struct.unpack_from("<i", d, o + 1)[0]
+            a, b = arm_facts(tables, tgt, limit - i)
+            return (lit or a, life or b)
+        i += 1
+    return (lit, life)
+
+
+def _loaded_from_placer_slot(d: bytes, off: int, i: int, reg: int) -> bool:
+    """Was `reg` loaded from `[EBP+0x11C]` just before the write at `off+i`?
+
+    `MOV r16, word ptr [EBP+0x11C]` is `66 8B /r` with a disp32, and the arms
+    that use it put it within a few instructions of the store.
+    """
+    for k in range(2, 40):
+        o = off + i - k
+        if o < 0:
+            break
+        if (d[o] == 0x66 and d[o + 1] == 0x8B and (d[o + 2] & 0xC0) == 0x80
+                and ((d[o + 2] >> 3) & 7) == reg
+                and struct.unpack_from("<I", d, o + 3)[0] == LIFETIME_FIELD):
+            return True
+    return False
+
+
+def charges_lifetime(tables, va: int, limit: int = 0x800) -> bool:
+    """Does the routine age `obj+0x11C` -- shared prologue, or inlined?
+
+    `PropDrawOnlyType53` and `PropUpdateType43` both inline a variant of
+    `PropExpireByStepLifetime`, so a check for the `CALL` alone misses them.
+    The inline form's tell is `CMP r16, word ptr [reg + 0x11C]`.
+    """
+    d = tables.data
+    off = tables._v2r(va)
+    i = 0
+    while i < limit and off + i + 7 <= len(d):
+        o = off + i
+        if d[o] == 0xE8:
+            tgt = (va + i + 5
+                   + struct.unpack_from("<i", d, o + 1)[0]) & 0xFFFFFFFF
+            if tgt == EXPIRE_BY_STEP:
+                return True
+            if tgt in DRAW_ENTRIES:
+                return False
+            i += 5
+            continue
+        if (d[o] == 0x66 and d[o + 1] == 0x3B and (d[o + 2] & 0xC0) == 0x80
+                and struct.unpack_from("<I", d, o + 3)[0] == LIFETIME_FIELD):
+            return True
+        i += 1
+    return False
 
 
 def draws_its_slot(tables, va: int, limit: int = 0x800) -> bool:
@@ -413,30 +563,33 @@ def main() -> int:
                        f"(PoseOrder.{spelled}) and the port says PoseOrder.{have}")
         del extra
 
-    # -- the descriptor-slot set, against the EXE ---------------------------
-    #
-    # One direction is an assertion and the other is a work list, and the
-    # difference is what has been read. A type in either table that does NOT
-    # take `obj+0x28C` into its draw is geometry the exporter carries and
-    # nothing shows -- that fails. A type that takes it and is in neither is
-    # only a *candidate*, because `PlaceGenericProp`'s switch overwrites that
-    # field for some of them with a literal of its own (`GENERIC_SLOT`, and
-    # `0x0A50` for the falling container) and for the Original Mode
-    # collectibles the model comes from `g_original_item_records` by way of
-    # `PickOriginalModeItem`. Those are listed, not failed.
+    # -- the descriptor-slot set, derived and asserted ----------------------
+    arms = switch_arms(tables)
     drawn = {ty for ty, va in generic.items() if draws_its_slot(tables, va)}
-    override = port_set_keys("GENERIC_SLOT", GENERIC_TS) | {34}
+    facts = {ty: arm_facts(tables, arms.get(ty)) for ty in generic}
+    ages = {ty: charges_lifetime(tables, va) for ty, va in generic.items()}
     print(f"types whose first draw takes obj+0x28C: {sorted(drawn)}")
+    for ty in sorted(drawn):
+        lit, from1f4 = facts[ty]
+        note = []
+        if lit:
+            note.append("its arm takes obj+0x28C away from the descriptor")
+        if from1f4:
+            note.append("its arm takes the lifetime from +0x1F4")
+        if ages[ty]:
+            note.append("it ages obj+0x11C")
+        print(f"   type {ty:3d} {generic[ty]:#08x}: "
+              + ("; ".join(note) if note else "no arm write, no lifetime"))
+
+    # Three clauses from the code, and the fourth from the shipped scripts,
+    # because the code alone does not settle it -- see `slot_shaped` below.
+    code_says = {ty for ty in drawn
+                 if not facts[ty][0] and (facts[ty][1] or not ages[ty])}
+
     both = {}
     for where, path in (("game/class41/generic.ts", GENERIC_TS),
                         ("hod2lib/bundle.ts", BUNDLE_TS)):
-        have = port_set("GENERIC_DESCRIPTOR_SLOT", path)
-        both[where] = have
-        for ty in sorted(have - drawn):
-            bad.append(f"GENERIC_DESCRIPTOR_SLOT in {where} has type {ty}, "
-                       f"whose routine ({generic.get(ty, 0):#08x}) never takes "
-                       f"obj+0x28C into a draw -- its model would travel and "
-                       f"nothing would show it")
+        both[where] = port_set("GENERIC_DESCRIPTOR_SLOT", path)
     if both["game/class41/generic.ts"] != both["hod2lib/bundle.ts"]:
         bad.append(
             f"the two copies of GENERIC_DESCRIPTOR_SLOT disagree: the port has "
@@ -444,14 +597,6 @@ def main() -> int:
             f"{sorted(both['hod2lib/bundle.ts'])}. The port decides what draws "
             f"and the exporter decides what travels, so a prop in one and not "
             f"the other is invisible either way")
-    candidates = sorted(drawn - both["game/class41/generic.ts"] - override)
-    if candidates:
-        print(f"[open] {len(candidates)} more types take obj+0x28C into a draw "
-              f"and are in neither table: {candidates}")
-        print("      their arms have not been read for whether the switch "
-              "overwrites that field, so whether the descriptor names their "
-              "model is undetermined -- see the module comment in "
-              "game/class41/generic.ts")
 
     # -- the strip set, out of the EXE rather than out of either table ------
     strips = {ty for ty, va in generic.items() if draws_a_strip(tables, va)}
@@ -493,6 +638,9 @@ def main() -> int:
     moved: list[tuple[float, int, int, int]] = []
     invented = 0
     scenes = 0
+    #: type -> the set of `+0x11C` words the shipped scripts give it. The
+    #: fourth clause of the descriptor-slot rule is measured from this.
+    shipped: dict[int, set[int]] = defaultdict(set)
     for scene in range(tables.SCENE_COUNT):
         try:
             st = stagelib.Stage(game, scene=scene)
@@ -517,6 +665,8 @@ def main() -> int:
                         ty = (raw[off + 0x25] << 24) >> 24
                         if ty not in derived:
                             continue
+                        shipped[ty].add(evtlib.read_spawn(
+                            prog.evt, off, op.opcode).hp)
                         order = derived[ty][0]
                         if order == "?":
                             continue
@@ -543,6 +693,69 @@ def main() -> int:
     # which is what the engine does with them.
     print(f"{invented} spawns carry a non-zero angle on an axis their own "
           f"routine never rotates, so nothing draws it")
+
+    # -- the fourth clause, and the assertion -------------------------------
+    #
+    # `code_says` is the three code clauses. It is not enough on its own, and
+    # type 72 is why: `FUN_00470750` takes `obj+0x28C` into the draw it makes
+    # for its first 25 frames, its arm writes no literal over that field and it
+    # never ages `obj+0x11C` -- every code clause passes -- and its one shipped
+    # spawn carries `+0x11C == 1`. The engine hands `AssetDrawSlot` a 1.
+    #
+    # So the fourth clause is the shipped data, and the gap it rests on is
+    # enormous and worth printing every run: across all twelve scenes the seven
+    # descriptor-slot types' words run 0x2B..0x18BF and **every other type's
+    # are 0, 1, 2, 3, 4, 5 and 7**. Nothing in between. A word below the gap is
+    # a lifetime in event steps; a word above it is an asset slot.
+    # The threshold is a constant inside the gap, and the gap is asserted over
+    # the WHOLE shipped population -- not against either set. Deriving it from
+    # one of the sets would make the threshold come from the thing being
+    # checked: remove a type from the table and its slot becomes the gap's
+    # ceiling, so the check would report the gap closing rather than the
+    # missing type. That is `verify_prop_slots.py`'s circularity one layer in,
+    # and both wrong versions of this were caught by its own mutation test.
+    port = both["game/class41/generic.ts"]
+    below = sorted(v for vs in shipped.values() for v in vs
+                   if v <= SLOT_LIFETIME_GAP[0])
+    inside = sorted(v for vs in shipped.values() for v in vs
+                    if SLOT_LIFETIME_GAP[0] < v < SLOT_LIFETIME_GAP[1])
+    above = sorted(v for vs in shipped.values() for v in vs
+                   if v >= SLOT_LIFETIME_GAP[1])
+    print(f"shipped +0x11C: {len(below)} words at or below "
+          f"{SLOT_LIFETIME_GAP[0]:#04x} (lifetimes, max "
+          f"{max(below, default=0):#04x}), {len(above)} at or above "
+          f"{SLOT_LIFETIME_GAP[1]:#06x} (asset slots, min "
+          f"{min(above, default=0):#06x}), {len(inside)} in between")
+    if inside:
+        bad.append(
+            f"the slot/lifetime gap has closed: "
+            f"{[hex(v) for v in sorted(set(inside))[:8]]} fall between "
+            f"{SLOT_LIFETIME_GAP[0]:#04x} and {SLOT_LIFETIME_GAP[1]:#06x}, so "
+            f"`+0x11C` can no longer be told apart by its value and this "
+            f"check's fourth clause is unsound")
+    slot_shaped = {ty for ty in code_says
+                   if shipped.get(ty)
+                   and min(shipped[ty]) >= SLOT_LIFETIME_GAP[1]}
+    if slot_shaped != port:
+        missing = sorted(slot_shaped - port)
+        extra = sorted(port - slot_shaped)
+        bad.append(
+            f"GENERIC_DESCRIPTOR_SLOT is {sorted(port)} and the routines plus "
+            f"the shipped data say {sorted(slot_shaped)}"
+            + (f"; {missing} pass obj+0x28C to a draw, are not overwritten by "
+               f"their own arm, do not charge obj+0x11C as a lifetime unless "
+               f"the arm has replaced it with +0x1F4, and carry slot-shaped "
+               f"words -- so their models do not travel and nothing draws them"
+               if missing else "")
+            + (f"; {extra} do not qualify" if extra else ""))
+    open_types = sorted(code_says - slot_shaped)
+    if open_types:
+        print(f"[open] {len(open_types)} type(s) pass every code clause and "
+              f"fail the data one: {open_types}")
+        for ty in open_types:
+            print(f"      type {ty} carries "
+                  f"{sorted(hex(v) for v in shipped.get(ty, ()))} -- a "
+                  f"lifetime by value, a slot by its routine")
 
     if bad:
         for line in bad[:40]:

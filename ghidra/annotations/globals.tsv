@@ -18,6 +18,8 @@
 
 004330c4	g_class33_selector_targets	jump targets for spawn class 0x33
 004330f8	g_class33_selector_index	byte index into the targets; valid selectors 1-11 and 99
+004628d4	g_place_generic_prop_arms	u32[41], the arm addresses PlaceGenericProp's switch jumps to, indexed by g_place_generic_prop_arm_index[type - 6]. Nine of the arms write obj+0x28C with an immediate (types 6, 10, 13, 19, 34, 56 and 67), one computes it (type 43's 0x19E8-or-0xFFFF at 0x00462330) and five re-write it from the placer's own +0x11C, which is the prologue's value again and not an overwrite. That distinction is the second clause of the descriptor-slot rule in tools/verify_prop_pose.py: a type whose arm takes the field away from the descriptor cannot have the descriptor naming its model.
+00462978	g_place_generic_prop_arm_index	u8[0x48], the byte index table of PlaceGenericProp's type switch: 0x00461DA2 loads the descriptor's type from placer+0x130C, subtracts 6, refuses anything above 0x47, indexes this, and jumps through g_place_generic_prop_arms. So types 6..77 have an arm and types 5 and 78 fall to the default at 0x004628CE -- which is why PropDrawOnlyType5's obj+0x28C is the prologue's untouched and it has no per-type setup at all. 72 entries selecting 41 distinct arms, so most arms serve more than one type. tools/verify_prop_pose.py walks it to decide which arm a type's slot and lifetime writes belong to.
 0048d9f0	CivilianHookStartFall
 0048da20	CivilianHookFallStep
 0048da90	CivilianHookRideChildren

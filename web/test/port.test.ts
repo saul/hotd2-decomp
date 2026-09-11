@@ -1960,6 +1960,22 @@ console.log("\nclass 0x41's pose orders come from the routines:");
   check("and the two strip types are the two whose roll is a count",
         GENERIC_SLOT_STRIP.has(31) && GENERIC_SLOT_STRIP.has(33)
         && GENERIC_SLOT_STRIP.size === 2, `${[...GENERIC_SLOT_STRIP].join()}`);
+  // Fourteen routines pass `obj+0x28C` to their first draw and only seven of
+  // them are descriptor-slot types. These four are the ones that look like
+  // they belong and do not, so a well-meaning addition trips here as well as
+  // in `tools/verify_prop_pose.py`:
+  //
+  // * 43 -- its arm computes the field (`0x19E8` or `0xFFFF`) rather than
+  //   leaving the prologue's, and it ages `obj+0x11C` as a lifetime. All seven
+  //   of its stage-3 spawns carry 1, 2 or 3 there.
+  // * 70 and 71 -- `OriginalItemPropUpdate` ages `obj+0x11C` too, so the word
+  //   is a lifetime and the model comes from `g_original_item_records`.
+  // * 72 -- every code clause passes and the data one does not: its one
+  //   shipped spawn carries `+0x11C == 1`, so the engine hands
+  //   `AssetDrawSlot` a 1. `[open]`, and out until it is settled.
+  check("the four types that draw obj+0x28C and are not descriptor slots",
+        [43, 70, 71, 72].every((ty) => !GENERIC_DESCRIPTOR_SLOT.has(ty)),
+        `${[43, 70, 71, 72].filter((ty) => GENERIC_DESCRIPTOR_SLOT.has(ty))}`);
 }
 
 console.log("\nclass 0x41 type 34 is a falling container:");
